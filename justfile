@@ -4,7 +4,7 @@ build:
     nix build --show-trace
 
 test:
-    nix develop --command tap-dancer go-test ./...
+    nix develop --command tap-dancer go-test -skip-empty ./...
 
 fmt:
     nix develop --command gofumpt -w .
