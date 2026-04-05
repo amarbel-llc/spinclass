@@ -201,7 +201,8 @@ func applyWorktreeConfig(
 	issue *prompt.IssueData,
 	pr *prompt.PRData,
 ) error {
-	if err := applyGitExcludes(repoPath, sweetfile.Merged.GitExcludes()); err != nil {
+	merged := sweetfile.Merged.MergeWith(sweatfile.GetDefault())
+	if err := applyGitExcludes(repoPath, merged.GitExcludes()); err != nil {
 		return fmt.Errorf("applying git excludes: %w", err)
 	}
 
