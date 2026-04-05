@@ -1,0 +1,98 @@
+{
+  description = "Spinclass: shell-agnostic git worktree session manager";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/4590696c8693fea477850fe379a01544293ca4e2";
+    nixpkgs-master.url = "github:NixOS/nixpkgs/e2dde111aea2c0699531dc616112a96cd55ab8b5";
+    utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
+    gomod2nix = {
+      url = "github:nix-community/gomod2nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-utils.follows = "utils";
+    };
+    bob = {
+      url = "github:amarbel-llc/bob";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs-master.follows = "nixpkgs-master";
+      inputs.utils.follows = "utils";
+    };
+  };
+
+  outputs =
+    {
+      self,
+      nixpkgs,
+      nixpkgs-master,
+      utils,
+      gomod2nix,
+      bob,
+    }:
+    utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs-master = import nixpkgs-master { inherit system; };
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [
+            gomod2nix.overlays.default
+            (_: _: { go = pkgs-master.go; })
+          ];
+        };
+
+        spinclass = pkgs.buildGoApplication {
+          pname = "spinclass";
+          version = "0.1.0";
+          src = ./.;
+          modules = ./gomod2nix.toml;
+          subPackages = [ "cmd/spinclass" ];
+
+          meta = {
+            description = "Shell-agnostic git worktree session manager";
+            homepage = "https://github.com/amarbel-llc/spinclass";
+            license = pkgs.lib.licenses.mit;
+          };
+        };
+
+        shellCompletions = pkgs.runCommand "spinclass-completions" { } ''
+          install -Dm644 ${./completions/spinclass.bash-completion} \
+            $out/share/bash-completion/completions/spinclass
+          install -Dm644 ${./completions/spinclass.fish} \
+            $out/share/fish/vendor_completions.d/spinclass.fish
+          install -Dm644 ${./completions/sc.bash-completion} \
+            $out/share/bash-completion/completions/sc
+          install -Dm644 ${./completions/sc.fish} \
+            $out/share/fish/vendor_completions.d/sc.fish
+        '';
+      in
+      {
+        packages = {
+          default = pkgs.symlinkJoin {
+            name = "spinclass";
+            paths = [
+              spinclass
+              shellCompletions
+            ];
+            postBuild = ''
+              ln -s spinclass $out/bin/sc
+            '';
+          };
+        };
+
+        devShells.default = pkgs.mkShell {
+          packages = [
+            pkgs-master.go
+            pkgs-master.gopls
+            pkgs-master.gotools
+            pkgs-master.golangci-lint
+            pkgs-master.delve
+            pkgs-master.gofumpt
+            gomod2nix.packages.${system}.default
+            pkgs.just
+            pkgs.bats
+            bob.packages.${system}.batman
+            bob.packages.${system}.tap-dancer
+          ];
+        };
+      }
+    );
+}
