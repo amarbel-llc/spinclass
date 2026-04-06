@@ -3,6 +3,7 @@ package perms
 import (
 	"bufio"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 )
@@ -98,11 +99,12 @@ func FormatEditorContentAll(rules []string) string {
 
 func writeRuleLines(b *strings.Builder, sorted []string) {
 	for _, rule := range sorted {
+		encoded := url.PathEscape(rule)
 		friendly := FriendlyName(rule)
 		if friendly != "" {
-			fmt.Fprintf(b, "discard %s  # %s\n", rule, friendly)
+			fmt.Fprintf(b, "discard %s  # %s\n", encoded, friendly)
 		} else {
-			fmt.Fprintf(b, "discard %s\n", rule)
+			fmt.Fprintf(b, "discard %s\n", encoded)
 		}
 	}
 }
@@ -143,8 +145,13 @@ func ParseEditorContent(content string) ([]ReviewDecision, error) {
 			return nil, fmt.Errorf("line %d: %w", lineNum, err)
 		}
 
+		decoded, err := url.PathUnescape(rest)
+		if err != nil {
+			return nil, fmt.Errorf("line %d: invalid percent-encoding: %w", lineNum, err)
+		}
+
 		decisions = append(decisions, ReviewDecision{
-			Rule:   rest,
+			Rule:   decoded,
 			Action: action,
 		})
 	}
