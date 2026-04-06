@@ -133,7 +133,7 @@ func RunEdit(global bool, repo string) error {
 
 // RunReview resolves the worktree path and repo name, then delegates to
 // RunReviewEditor for the interactive review loop.
-func RunReview(worktreePath string, dryRun bool) error {
+func RunReview(worktreePath string, dryRun, includeBuiltin bool) error {
 	if !filepath.IsAbs(worktreePath) {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -148,12 +148,12 @@ func RunReview(worktreePath string, dryRun bool) error {
 	}
 	repoName := filepath.Base(repoPath)
 
-	return RunReviewEditor(worktreePath, repoName, dryRun)
+	return RunReviewEditor(worktreePath, repoName, dryRun, includeBuiltin)
 }
 
 // RunReviewEditor opens $EDITOR with reviewable rules and loops until the user
 // accepts, edits again, or aborts.
-func RunReviewEditor(worktreePath, repoName string, dryRun bool) error {
+func RunReviewEditor(worktreePath, repoName string, dryRun, includeBuiltin bool) error {
 	branch, err := git.BranchCurrent(worktreePath)
 	if err != nil {
 		return fmt.Errorf("could not detect branch: %w", err)
@@ -164,6 +164,7 @@ func RunReviewEditor(worktreePath, repoName string, dryRun bool) error {
 
 	rules, err := ComputeReviewableRules(
 		logPath, globalSettingsPath, tiersDir, repoName, worktreePath,
+		includeBuiltin,
 	)
 	if err != nil {
 		return err
@@ -253,11 +254,11 @@ func RunReviewEditor(worktreePath, repoName string, dryRun bool) error {
 // RunReviewEditorAll opens $EDITOR with reviewable rules merged across every
 // session's tool-use log. The 'repo' action is rejected because there is no
 // single repo context; rules can only be promoted to the global tier.
-func RunReviewEditorAll(dryRun bool) error {
+func RunReviewEditorAll(dryRun, includeBuiltin bool) error {
 	tiersDir := TiersDir()
 	globalSettingsPath := GlobalClaudeSettingsPath()
 
-	rules, err := ComputeReviewableRulesAll(tiersDir, globalSettingsPath)
+	rules, err := ComputeReviewableRulesAll(tiersDir, globalSettingsPath, includeBuiltin)
 	if err != nil {
 		return err
 	}

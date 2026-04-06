@@ -159,6 +159,7 @@ func LoadRulesFromLog(logPath string) ([]string, error) {
 // auto-injected worktree-scoped rules.
 func ComputeReviewableRules(
 	logPath, globalSettingsPath, tiersDir, repo, worktreePath string,
+	includeBuiltin bool,
 ) ([]string, error) {
 	worktreeRules, err := LoadRulesFromLog(logPath)
 	if err != nil {
@@ -196,9 +197,13 @@ func ComputeReviewableRules(
 		// against exclude rules using pattern matching.
 		ruleTool, ruleArg := parseRule(r)
 		toolInput := rebuildToolInput(ruleTool, ruleArg)
-		if !MatchesAnyRule(excludeRules, ruleTool, toolInput) {
-			result = append(result, r)
+		if MatchesAnyRule(excludeRules, ruleTool, toolInput) {
+			continue
 		}
+		if !includeBuiltin && FriendlyName(r) == "" {
+			continue
+		}
+		result = append(result, r)
 	}
 
 	if result == nil {
@@ -306,6 +311,7 @@ func DiscoverToolUseLogs() ([]string, error) {
 // repo B's log.
 func ComputeReviewableRulesAll(
 	tiersDir, globalSettingsPath string,
+	includeBuiltin bool,
 ) ([]string, error) {
 	logs, err := DiscoverToolUseLogs()
 	if err != nil {
@@ -350,9 +356,13 @@ func ComputeReviewableRulesAll(
 	for _, r := range allRules {
 		ruleTool, ruleArg := parseRule(r)
 		toolInput := rebuildToolInput(ruleTool, ruleArg)
-		if !MatchesAnyRule(excludeRules, ruleTool, toolInput) {
-			result = append(result, r)
+		if MatchesAnyRule(excludeRules, ruleTool, toolInput) {
+			continue
 		}
+		if !includeBuiltin && FriendlyName(r) == "" {
+			continue
+		}
+		result = append(result, r)
 	}
 
 	if result == nil {

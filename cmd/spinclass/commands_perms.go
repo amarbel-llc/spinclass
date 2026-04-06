@@ -34,13 +34,15 @@ func registerPermsCommands(app *command.App) {
 			{Name: "worktree-dir", Type: command.String, Description: "Override worktree path (legacy alias)"},
 			{Name: "dry-run", Type: command.Bool, Description: "Show what would change without writing"},
 			{Name: "all", Type: command.Bool, Description: "Review across every session's tool-use log; only global promotion is allowed"},
+			{Name: "include-builtin", Type: command.Bool, Description: "Include built-in tool rules (Bash, Read, etc.) in addition to MCP rules"},
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
 			var p struct {
-				WorktreePath string `json:"worktree-path"`
-				WorktreeDir  string `json:"worktree-dir"`
-				DryRun       bool   `json:"dry-run"`
-				All          bool   `json:"all"`
+				WorktreePath   string `json:"worktree-path"`
+				WorktreeDir    string `json:"worktree-dir"`
+				DryRun         bool   `json:"dry-run"`
+				All            bool   `json:"all"`
+				IncludeBuiltin bool   `json:"include-builtin"`
 			}
 			_ = json.Unmarshal(args, &p)
 
@@ -48,7 +50,7 @@ func registerPermsCommands(app *command.App) {
 				if p.WorktreePath != "" || p.WorktreeDir != "" {
 					return fmt.Errorf("--all cannot be combined with worktree-path or --worktree-dir")
 				}
-				return perms.RunReviewEditorAll(p.DryRun)
+				return perms.RunReviewEditorAll(p.DryRun, p.IncludeBuiltin)
 			}
 
 			worktreePath := p.WorktreeDir
@@ -63,7 +65,7 @@ func registerPermsCommands(app *command.App) {
 				worktreePath = cwd
 			}
 
-			return perms.RunReview(worktreePath, p.DryRun)
+			return perms.RunReview(worktreePath, p.DryRun, p.IncludeBuiltin)
 		},
 	})
 
