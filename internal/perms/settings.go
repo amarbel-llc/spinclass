@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -249,4 +250,114 @@ func ToolUseLogPath(repoName, branch string) string {
 	}
 	filename := strings.ReplaceAll(repoName+"/"+branch, "/", "--") + ".jsonl"
 	return filepath.Join(base, "spinclass", "tool-uses", filename)
+}
+
+// ToolUseLogDir returns the XDG directory containing per-session tool-use
+// logs.
+func ToolUseLogDir() string {
+	base := os.Getenv("XDG_LOG_HOME")
+	if base == "" {
+		home, _ := os.UserHomeDir()
+		if home == "" {
+			return ""
+		}
+		base = filepath.Join(home, ".local", "log")
+	}
+	return filepath.Join(base, "spinclass", "tool-uses")
+}
+
+// DiscoverToolUseLogs walks the tool-use log directory and returns the absolute
+// path of every *.jsonl file found, sorted for stable iteration. Returns an
+// empty slice if the directory does not exist.
+func DiscoverToolUseLogs() ([]string, error) {
+	dir := ToolUseLogDir()
+	if dir == "" {
+		return nil, nil
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var paths []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if !strings.HasSuffix(entry.Name(), ".jsonl") {
+			continue
+		}
+		paths = append(paths, filepath.Join(dir, entry.Name()))
+	}
+
+	sort.Strings(paths)
+	return paths, nil
+}
+
+// ComputeReviewableRulesAll returns rules derived from every session's
+// tool-use log that are not already covered by global Claude settings or the
+// global curated tier file. Used by `sc perms review --all`. Per-repo tier
+// rules are intentionally NOT excluded — a rule already in repos/A.json may
+// still be a legitimate candidate for global promotion when it appears in
+// repo B's log.
+func ComputeReviewableRulesAll(
+	tiersDir, globalSettingsPath string,
+) ([]string, error) {
+	logs, err := DiscoverToolUseLogs()
+	if err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]bool)
+	var allRules []string
+	for _, logPath := range logs {
+		rules, err := LoadRulesFromLog(logPath)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rules {
+			if !seen[r] {
+				seen[r] = true
+				allRules = append(allRules, r)
+			}
+		}
+	}
+
+	globalRules, err := LoadClaudeSettings(globalSettingsPath)
+	if err != nil {
+		return nil, err
+	}
+
+	globalTier, err := LoadTierFile(filepath.Join(tiersDir, "global.json"))
+	if err != nil {
+		return nil, err
+	}
+
+	var excludeRules []string
+	excludeRules = append(excludeRules, globalRules...)
+	excludeRules = append(excludeRules, globalTier.Allow...)
+
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		excludeRules = append(excludeRules, fmt.Sprintf("Read(%s/.claude/*)", home))
+	}
+
+	var result []string
+	for _, r := range allRules {
+		ruleTool, ruleArg := parseRule(r)
+		toolInput := rebuildToolInput(ruleTool, ruleArg)
+		if !MatchesAnyRule(excludeRules, ruleTool, toolInput) {
+			result = append(result, r)
+		}
+	}
+
+	if result == nil {
+		result = []string{}
+	}
+
+	return result, nil
 }

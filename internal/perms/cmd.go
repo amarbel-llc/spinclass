@@ -42,12 +42,20 @@ func newCheckCmd() *cobra.Command {
 func newReviewCmd() *cobra.Command {
 	var worktreeDir string
 	var dryRun bool
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:   "review [worktree-path]",
 		Short: "Interactively review new permissions from a session",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if all {
+				if len(args) > 0 || worktreeDir != "" {
+					return fmt.Errorf("--all cannot be combined with [worktree-path] or --worktree-dir")
+				}
+				return RunReviewEditorAll(dryRun)
+			}
+
 			var worktreePath string
 
 			switch {
@@ -83,6 +91,7 @@ func newReviewCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&worktreeDir, "worktree-dir", "", "override worktree path")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing")
+	cmd.Flags().BoolVar(&all, "all", false, "review across every session's tool-use log; only global promotion is allowed")
 
 	return cmd
 }
@@ -312,6 +321,115 @@ func RunReviewEditor(worktreePath, repoName string, dryRun bool) error {
 			return nil
 		}
 	}
+}
+
+// RunReviewEditorAll opens $EDITOR with reviewable rules merged across every
+// session's tool-use log. The 'repo' action is rejected because there is no
+// single repo context; rules can only be promoted to the global tier.
+func RunReviewEditorAll(dryRun bool) error {
+	tiersDir := TiersDir()
+	globalSettingsPath := GlobalClaudeSettingsPath()
+
+	rules, err := ComputeReviewableRulesAll(tiersDir, globalSettingsPath)
+	if err != nil {
+		return err
+	}
+
+	if len(rules) == 0 {
+		fmt.Println("no new permissions to review across any session")
+		return nil
+	}
+
+	content := FormatEditorContentAll(rules)
+
+	tmpFile, err := os.CreateTemp("", "spinclass-perms-review-all-*.txt")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.WriteString(content); err != nil {
+		tmpFile.Close()
+		return err
+	}
+	tmpFile.Close()
+
+	for {
+		if err := openEditor(tmpFile.Name()); err != nil {
+			return fmt.Errorf("editor failed: %w", err)
+		}
+
+		edited, err := os.ReadFile(tmpFile.Name())
+		if err != nil {
+			return err
+		}
+
+		decisions, err := ParseEditorContent(string(edited))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Parse error: %v\nRe-opening editor.\n", err)
+			continue
+		}
+
+		if invalid := firstRepoDecision(decisions); invalid != "" {
+			fmt.Fprintf(os.Stderr, "'repo' action is not valid in --all mode (rule: %s)\nRe-opening editor.\n", invalid)
+			continue
+		}
+
+		if len(decisions) == 0 {
+			fmt.Println("no decisions — aborting")
+			return nil
+		}
+
+		fmt.Println()
+		for _, d := range decisions {
+			friendly := FriendlyName(d.Rule)
+			if friendly != "" {
+				fmt.Printf("  %-8s %s  # %s\n", d.Action, d.Rule, friendly)
+			} else {
+				fmt.Printf("  %-8s %s\n", d.Action, d.Rule)
+			}
+		}
+		fmt.Println()
+
+		var choice string
+		prompt := huh.NewSelect[string]().
+			Title("Review complete").
+			Options(
+				huh.NewOption("Accept", "accept"),
+				huh.NewOption("Edit again", "edit"),
+				huh.NewOption("Abort", "abort"),
+			).
+			Value(&choice)
+
+		if err := prompt.Run(); err != nil {
+			return err
+		}
+
+		switch choice {
+		case "accept":
+			if dryRun {
+				DryRunDecisions(os.Stdout, tiersDir, "", decisions)
+				return nil
+			}
+			return RouteDecisions(tiersDir, "", decisions)
+		case "edit":
+			continue
+		case "abort":
+			fmt.Println("aborted")
+			return nil
+		}
+	}
+}
+
+// firstRepoDecision returns the first rule whose action is ReviewPromoteRepo,
+// or "" if none. Used to reject 'repo' decisions in --all mode.
+func firstRepoDecision(decisions []ReviewDecision) string {
+	for _, d := range decisions {
+		if d.Action == ReviewPromoteRepo {
+			return d.Rule
+		}
+	}
+	return ""
 }
 
 func openEditor(path string) error {

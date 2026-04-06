@@ -72,16 +72,39 @@ func FormatEditorContent(rules []string, repoName string) string {
 	fmt.Fprintf(&b, "# Repo: %s\n", repoName)
 	b.WriteString("\n")
 
+	writeRuleLines(&b, sorted)
+	return b.String()
+}
+
+// FormatEditorContentAll generates the editor buffer content for `sc perms
+// review --all`. The header notes that 'repo' is not a valid action because
+// there is no single repo context.
+func FormatEditorContentAll(rules []string) string {
+	sorted := make([]string, len(rules))
+	copy(sorted, rules)
+	sort.Strings(sorted)
+
+	var b strings.Builder
+
+	b.WriteString("# spinclass perms review (all sessions) — change the action word for each permission\n")
+	b.WriteString("# Actions: global | keep | discard (unique prefixes OK: g/k/d)\n")
+	b.WriteString("# 'repo' is NOT valid in --all mode (no single repo context).\n")
+	b.WriteString("# Lines starting with # are ignored. Empty lines are ignored.\n")
+	b.WriteString("\n")
+
+	writeRuleLines(&b, sorted)
+	return b.String()
+}
+
+func writeRuleLines(b *strings.Builder, sorted []string) {
 	for _, rule := range sorted {
 		friendly := FriendlyName(rule)
 		if friendly != "" {
-			fmt.Fprintf(&b, "discard %s  # %s\n", rule, friendly)
+			fmt.Fprintf(b, "discard %s  # %s\n", rule, friendly)
 		} else {
-			fmt.Fprintf(&b, "discard %s\n", rule)
+			fmt.Fprintf(b, "discard %s\n", rule)
 		}
 	}
-
-	return b.String()
 }
 
 // ParseEditorContent parses the editor buffer back into ReviewDecisions.
