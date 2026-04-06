@@ -46,36 +46,30 @@
           modules = ./gomod2nix.toml;
           subPackages = [ "cmd/spinclass" ];
 
+          # Generate manpages, shell completions, and the purse-first
+          # plugin manifest from the command.App definitions.
+          postInstall = ''
+            $out/bin/spinclass generate-artifacts $out
+            ln -s spinclass $out/bin/sc
+
+            # Mirror completions under the `sc` alias.
+            ln -s spinclass $out/share/bash-completion/completions/sc
+            ln -s spinclass.fish $out/share/fish/vendor_completions.d/sc.fish
+            if [ -d $out/share/zsh/site-functions ]; then
+              ln -s _spinclass $out/share/zsh/site-functions/_sc
+            fi
+          '';
+
           meta = {
             description = "Shell-agnostic git worktree session manager";
             homepage = "https://github.com/amarbel-llc/spinclass";
             license = pkgs.lib.licenses.mit;
           };
         };
-
-        shellCompletions = pkgs.runCommand "spinclass-completions" { } ''
-          install -Dm644 ${./completions/spinclass.bash-completion} \
-            $out/share/bash-completion/completions/spinclass
-          install -Dm644 ${./completions/spinclass.fish} \
-            $out/share/fish/vendor_completions.d/spinclass.fish
-          install -Dm644 ${./completions/sc.bash-completion} \
-            $out/share/bash-completion/completions/sc
-          install -Dm644 ${./completions/sc.fish} \
-            $out/share/fish/vendor_completions.d/sc.fish
-        '';
       in
       {
         packages = {
-          default = pkgs.symlinkJoin {
-            name = "spinclass";
-            paths = [
-              spinclass
-              shellCompletions
-            ];
-            postBuild = ''
-              ln -s spinclass $out/bin/sc
-            '';
-          };
+          default = spinclass;
         };
 
         devShells.default = pkgs.mkShell {

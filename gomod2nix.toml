@@ -9,6 +9,10 @@ schema = 3
     version = 'v0.0.5'
     hash = 'sha256-M8TkhFZsfQSiLbz+Ml4L/zQ/diGptX19IUiGjSv0Vh4='
 
+  [mod.'github.com/amarbel-llc/purse-first/libs/go-mcp/command/huh']
+    version = 'v0.0.4'
+    hash = 'sha256-JbqwWV87R2fQge+4BWZQysOpkgMpGCNYFoOR3VkVSK8='
+
   [mod.'github.com/amarbel-llc/tommy']
     version = 'v0.0.0-20260326195616-1e3aa70b25d0'
     hash = 'sha256-7ZAcS56xS6VXOly1wWcGjN9IrGuzkzYO4cQhR0iD08k='
@@ -93,10 +97,6 @@ schema = 3
     version = 'v0.0.0-20191202100458-e7afc7fbc510'
     hash = 'sha256-1f392pCmS7AXVKXIC1SvKlYtK/rvW47F5CCkGT2G6JM='
 
-  [mod.'github.com/inconshreveable/mousetrap']
-    version = 'v1.1.0'
-    hash = 'sha256-XWlYH0c8IcxAwQTnIi6WYqq44nOKUylSWxWO/vi+8pE='
-
   [mod.'github.com/lucasb-eyer/go-colorful']
     version = 'v1.3.0'
     hash = 'sha256-6BKrJsfmxie+YFAWzTYVPQfrwjQEXRo+J8LY+50C1BU='
@@ -132,14 +132,6 @@ schema = 3
   [mod.'github.com/rivo/uniseg']
     version = 'v0.4.7'
     hash = 'sha256-rDcdNYH6ZD8KouyyiZCUEy8JrjOQoAkxHBhugrfHjFo='
-
-  [mod.'github.com/spf13/cobra']
-    version = 'v1.10.2'
-    hash = 'sha256-nbRCTFiDCC2jKK7AHi79n7urYCMP5yDZnWtNVJrDi+k='
-
-  [mod.'github.com/spf13/pflag']
-    version = 'v1.0.9'
-    hash = 'sha256-YAjyYpq5BXCosVJtvYLWFG1t4gma2ylzc7ILLoj/hD8='
 
   [mod.'github.com/xo/terminfo']
     version = 'v0.0.0-20220910002029-abceb7e1c41e'
