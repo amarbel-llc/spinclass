@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	tap "github.com/amarbel-llc/bob/packages/tap-dancer/go"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
-	tap "github.com/amarbel-llc/bob/packages/tap-dancer/go"
 )
 
 func TestStatusDescription(t *testing.T) {
@@ -412,7 +412,6 @@ func TestForkAutoName(t *testing.T) {
 
 	var buf bytes.Buffer
 	err := Fork(&buf, rp, "", "tap")
-
 	if err != nil {
 		t.Fatalf("Fork() error: %v", err)
 	}

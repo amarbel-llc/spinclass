@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/amarbel-llc/spinclass/internal/git"
 	tap "github.com/amarbel-llc/bob/packages/tap-dancer/go"
+	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 )
 

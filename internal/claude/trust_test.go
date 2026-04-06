@@ -42,7 +42,7 @@ func TestTrustWorkspacePreservesExisting(t *testing.T) {
 		"projects": map[string]any{
 			"/other/path": map[string]any{
 				"hasTrustDialogAccepted": true,
-				"customKey":             "value",
+				"customKey":              "value",
 			},
 		},
 	}
