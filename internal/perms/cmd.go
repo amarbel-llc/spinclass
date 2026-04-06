@@ -1,226 +1,154 @@
 package perms
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/huh"
-	"github.com/spf13/cobra"
 
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 )
 
-func NewPermsCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "perms",
-		Short: "Manage Claude Code permission tiers",
+// RunListWriter writes the global tier and either a single repo's tier (if
+// repo != "") or every non-empty repo tier under TiersDir() to w.
+func RunListWriter(w io.Writer, repo string) error {
+	tiersDir := TiersDir()
+
+	globalPath := filepath.Join(tiersDir, "global.json")
+	globalTier, err := LoadTierFile(globalPath)
+	if err != nil {
+		return fmt.Errorf("loading global tier: %w", err)
 	}
 
-	cmd.AddCommand(newCheckCmd())
-	cmd.AddCommand(newReviewCmd())
-	cmd.AddCommand(newListCmd())
-	cmd.AddCommand(newEditCmd())
-
-	return cmd
-}
-
-func newCheckCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:    "check",
-		Short:  "Handle a PermissionRequest hook",
-		Hidden: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return RunCheck(os.Stdin, os.Stdout, TiersDir())
-		},
-	}
-}
-
-func newReviewCmd() *cobra.Command {
-	var worktreeDir string
-	var dryRun bool
-	var all bool
-
-	cmd := &cobra.Command{
-		Use:   "review [worktree-path]",
-		Short: "Interactively review new permissions from a session",
-		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if all {
-				if len(args) > 0 || worktreeDir != "" {
-					return fmt.Errorf("--all cannot be combined with [worktree-path] or --worktree-dir")
-				}
-				return RunReviewEditorAll(dryRun)
-			}
-
-			var worktreePath string
-
-			switch {
-			case worktreeDir != "":
-				worktreePath = worktreeDir
-			case len(args) > 0:
-				worktreePath = args[0]
-			default:
-				cwd, err := os.Getwd()
-				if err != nil {
-					return err
-				}
-				worktreePath = cwd
-			}
-
-			if !filepath.IsAbs(worktreePath) {
-				cwd, err := os.Getwd()
-				if err != nil {
-					return err
-				}
-				worktreePath = filepath.Join(cwd, worktreePath)
-			}
-
-			repoPath, err := worktree.DetectRepo(worktreePath)
-			if err != nil {
-				return fmt.Errorf("could not detect repo: %w", err)
-			}
-			repoName := filepath.Base(repoPath)
-
-			return RunReviewEditor(worktreePath, repoName, dryRun)
-		},
+	fmt.Fprintln(w, "Global tier:")
+	if len(globalTier.Allow) == 0 {
+		fmt.Fprintln(w, "  (empty)")
+	} else {
+		for _, rule := range globalTier.Allow {
+			fmt.Fprintf(w, "  %s\n", rule)
+		}
 	}
 
-	cmd.Flags().StringVar(&worktreeDir, "worktree-dir", "", "override worktree path")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without writing")
-	cmd.Flags().BoolVar(&all, "all", false, "review across every session's tool-use log; only global promotion is allowed")
+	if repo != "" {
+		repoPath := filepath.Join(tiersDir, "repos", repo+".json")
+		repoTier, err := LoadTierFile(repoPath)
+		if err != nil {
+			return fmt.Errorf("loading repo tier %s: %w", repo, err)
+		}
 
-	return cmd
-}
-
-func newListCmd() *cobra.Command {
-	var repo string
-
-	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List permission tier rules",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			tiersDir := TiersDir()
-
-			globalPath := filepath.Join(tiersDir, "global.json")
-			globalTier, err := LoadTierFile(globalPath)
-			if err != nil {
-				return fmt.Errorf("loading global tier: %w", err)
+		fmt.Fprintf(w, "\nRepo tier (%s):\n", repo)
+		if len(repoTier.Allow) == 0 {
+			fmt.Fprintln(w, "  (empty)")
+		} else {
+			for _, rule := range repoTier.Allow {
+				fmt.Fprintf(w, "  %s\n", rule)
 			}
+		}
 
-			fmt.Println("Global tier:")
-			if len(globalTier.Allow) == 0 {
-				fmt.Println("  (empty)")
-			} else {
-				for _, rule := range globalTier.Allow {
-					fmt.Printf("  %s\n", rule)
-				}
-			}
+		return nil
+	}
 
-			if repo != "" {
-				repoPath := filepath.Join(tiersDir, "repos", repo+".json")
-				repoTier, err := LoadTierFile(repoPath)
-				if err != nil {
-					return fmt.Errorf("loading repo tier %s: %w", repo, err)
-				}
-
-				fmt.Printf("\nRepo tier (%s):\n", repo)
-				if len(repoTier.Allow) == 0 {
-					fmt.Println("  (empty)")
-				} else {
-					for _, rule := range repoTier.Allow {
-						fmt.Printf("  %s\n", rule)
-					}
-				}
-
-				return nil
-			}
-
-			reposDir := filepath.Join(tiersDir, "repos")
-			entries, err := os.ReadDir(reposDir)
-			if err != nil {
-				if os.IsNotExist(err) {
-					return nil
-				}
-				return err
-			}
-
-			for _, entry := range entries {
-				if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
-					continue
-				}
-
-				repoName := strings.TrimSuffix(entry.Name(), ".json")
-				repoTier, err := LoadTierFile(filepath.Join(reposDir, entry.Name()))
-				if err != nil {
-					continue
-				}
-
-				if len(repoTier.Allow) == 0 {
-					continue
-				}
-
-				fmt.Printf("\nRepo tier (%s):\n", repoName)
-				for _, rule := range repoTier.Allow {
-					fmt.Printf("  %s\n", rule)
-				}
-			}
-
+	reposDir := filepath.Join(tiersDir, "repos")
+	entries, err := os.ReadDir(reposDir)
+	if err != nil {
+		if os.IsNotExist(err) {
 			return nil
-		},
+		}
+		return err
 	}
 
-	cmd.Flags().StringVar(&repo, "repo", "", "show rules for a specific repo only")
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
 
-	return cmd
+		repoName := strings.TrimSuffix(entry.Name(), ".json")
+		repoTier, err := LoadTierFile(filepath.Join(reposDir, entry.Name()))
+		if err != nil {
+			continue
+		}
+
+		if len(repoTier.Allow) == 0 {
+			continue
+		}
+
+		fmt.Fprintf(w, "\nRepo tier (%s):\n", repoName)
+		for _, rule := range repoTier.Allow {
+			fmt.Fprintf(w, "  %s\n", rule)
+		}
+	}
+
+	return nil
 }
 
-func newEditCmd() *cobra.Command {
-	var global bool
-	var repo string
+// RunListString runs RunListWriter into a buffer and returns the output.
+func RunListString(repo string) (string, error) {
+	var buf bytes.Buffer
+	if err := RunListWriter(&buf, repo); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
 
-	cmd := &cobra.Command{
-		Use:   "edit",
-		Short: "Edit a permission tier file in $EDITOR",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			tiersDir := TiersDir()
+// RunEdit opens the appropriate tier file in $EDITOR. If global is true,
+// edits the global tier. If repo is non-empty, edits that repo's tier.
+// Otherwise edits global.
+func RunEdit(global bool, repo string) error {
+	tiersDir := TiersDir()
 
-			var tierPath string
-			if global {
-				tierPath = filepath.Join(tiersDir, "global.json")
-			} else if repo != "" {
-				tierPath = filepath.Join(tiersDir, "repos", repo+".json")
-			} else {
-				tierPath = filepath.Join(tiersDir, "global.json")
-			}
-
-			if _, err := os.Stat(tierPath); os.IsNotExist(err) {
-				if err := SaveTierFile(tierPath, Tier{Allow: []string{}}); err != nil {
-					return fmt.Errorf("creating tier file: %w", err)
-				}
-			}
-
-			editor := os.Getenv("EDITOR")
-			if editor == "" {
-				editor = "vi"
-			}
-
-			editorCmd := exec.Command(editor, tierPath)
-			editorCmd.Stdin = os.Stdin
-			editorCmd.Stdout = os.Stdout
-			editorCmd.Stderr = os.Stderr
-
-			return editorCmd.Run()
-		},
+	var tierPath string
+	switch {
+	case global:
+		tierPath = filepath.Join(tiersDir, "global.json")
+	case repo != "":
+		tierPath = filepath.Join(tiersDir, "repos", repo+".json")
+	default:
+		tierPath = filepath.Join(tiersDir, "global.json")
 	}
 
-	cmd.Flags().BoolVar(&global, "global", false, "edit the global tier file")
-	cmd.Flags().StringVar(&repo, "repo", "", "edit a repo-specific tier file")
+	if _, err := os.Stat(tierPath); os.IsNotExist(err) {
+		if err := SaveTierFile(tierPath, Tier{Allow: []string{}}); err != nil {
+			return fmt.Errorf("creating tier file: %w", err)
+		}
+	}
 
-	return cmd
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = "vi"
+	}
+
+	editorCmd := exec.Command(editor, tierPath)
+	editorCmd.Stdin = os.Stdin
+	editorCmd.Stdout = os.Stdout
+	editorCmd.Stderr = os.Stderr
+
+	return editorCmd.Run()
+}
+
+// RunReview resolves the worktree path and repo name, then delegates to
+// RunReviewEditor for the interactive review loop.
+func RunReview(worktreePath string, dryRun bool) error {
+	if !filepath.IsAbs(worktreePath) {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		worktreePath = filepath.Join(cwd, worktreePath)
+	}
+
+	repoPath, err := worktree.DetectRepo(worktreePath)
+	if err != nil {
+		return fmt.Errorf("could not detect repo: %w", err)
+	}
+	repoName := filepath.Base(repoPath)
+
+	return RunReviewEditor(worktreePath, repoName, dryRun)
 }
 
 // RunReviewEditor opens $EDITOR with reviewable rules and loops until the user
@@ -281,7 +209,6 @@ func RunReviewEditor(worktreePath, repoName string, dryRun bool) error {
 			return nil
 		}
 
-		// Print the parsed decisions for review
 		fmt.Println()
 		for _, d := range decisions {
 			friendly := FriendlyName(d.Rule)

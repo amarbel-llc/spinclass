@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,15 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/tap"
 )
+
+// RunString executes the same logic as Run but captures output into a string,
+// returning (output, exitCode). Used by handlers that need to return output as
+// a single value (e.g. MCP tool results) rather than streaming to a writer.
+func RunString(home, repoDir string) (string, int) {
+	var buf bytes.Buffer
+	exitCode := Run(&buf, home, repoDir)
+	return buf.String(), exitCode
+}
 
 const (
 	SeverityError   = "error"

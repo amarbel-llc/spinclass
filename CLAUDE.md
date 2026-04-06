@@ -21,8 +21,20 @@ just deps     # Regenerate gomod2nix.toml after dependency changes
 
 ## Architecture
 
-**CLI layer** (`cmd/spinclass/main.go`): Cobra commands mapping to internal
-packages. Global flags: `--format` (tap/table), `--verbose`.
+**CLI layer** (`cmd/spinclass/`): Built on the purse-first
+`go-mcp/command.App` framework, not cobra. `main.go` is a thin bootstrap that
+calls `buildApp()` (in `commands.go`) and dispatches via `app.RunCLI()`.
+Commands are split across `commands_query.go`, `commands_session.go`,
+`commands_perms.go`, `commands_hooks.go`, `commands_mcp.go`, and
+`commands_mcp_only.go`. Global flags: `--format` (tap/table), `--verbose`.
+
+The same `command.App` registers both CLI subcommands and MCP tools. Commands
+with `Run` are exposed as MCP tools via `serve`; commands with `RunCLI` are
+CLI-only. The `serve` subcommand starts the stdio MCP server.
+
+Manpages, shell completions, and the purse-first plugin manifest are
+generated at build time by the hidden `generate-artifacts` subcommand,
+invoked from `flake.nix` `postInstall`.
 
 **Core workflow** (`internal/shop/`): Orchestrates create, attach, and fork.
 `Create()` sets up worktree + sweatfile + Claude trust. `Attach()` calls Create,
@@ -84,18 +96,24 @@ worktree paths. Applies `claude-allow` rules from sweatfile to
 
 ## CLI Commands
 
-  Command                   Description
-  ------------------------- --------------------------------------------------------------
-  `sc start [desc...]`      Create and start a new worktree session (--pr N or --pr URL)
-  `sc resume [id]`          Resume an existing session (auto-detects from cwd)
-  `sc update-description`   Update session description (--id or auto-detect)
-  `sc list`                 List all tracked sessions from state directory
-  `sc merge [target]`       Merge worktree into main, remove session state
-  `sc clean`                Remove merged worktrees and abandoned sessions
-  `sc fork [branch]`        Fork current worktree (supports `--from <dir>`)
-  `sc pull`                 Pull repos and rebase worktrees
-  `sc validate`             Validate sweatfile hierarchy
-  `sc exec-claude`          Run claude with sweatfile settings
+  Command                          Description
+  -------------------------------- ---------------------------------------------------------
+  `sc start "<desc>"`              Create and start a new worktree session (--pr N or --pr URL)
+  `sc resume [id]`                 Resume an existing session (auto-detects from cwd)
+  `sc update-description "<desc>"` Update session description (--id or auto-detect)
+  `sc list`                        List all tracked sessions from state directory
+  `sc merge [target]`              Merge worktree into main, remove session state
+  `sc clean`                       Remove merged worktrees and abandoned sessions
+  `sc fork [branch]`               Fork current worktree (supports `--from <dir>`)
+  `sc pull`                        Pull repos and rebase worktrees
+  `sc validate`                    Validate sweatfile hierarchy
+  `sc perms list|review|edit`      Inspect or edit permission tier rules
+
+`start` and `update-description` take their description as a single
+positional argument. Multi-word descriptions must be quoted, e.g.
+`sc start "fix login bug"`. Note that the underlying registered subcommands
+use hyphenated names (`perms-list`, `perms-review`, `perms-edit`), but the
+space-separated form (`sc perms list`) is also accepted.
 
 ## Nix Build
 
