@@ -213,6 +213,141 @@ func TestLoadRulesFromLogMissing(t *testing.T) {
 	}
 }
 
+func TestDiscoverToolUseLogs(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_LOG_HOME", tmpDir)
+
+	// Empty / missing directory
+	logs, err := DiscoverToolUseLogs()
+	if err != nil {
+		t.Fatalf("expected no error for missing dir, got %v", err)
+	}
+	if len(logs) != 0 {
+		t.Errorf("expected no logs for missing dir, got %v", logs)
+	}
+
+	// Populate dir with mixed file types
+	logDir := filepath.Join(tmpDir, "spinclass", "tool-uses")
+	os.MkdirAll(logDir, 0o755)
+	os.WriteFile(filepath.Join(logDir, "repoA--branch1.jsonl"), []byte("{}\n"), 0o644)
+	os.WriteFile(filepath.Join(logDir, "repoB--branch2.jsonl"), []byte("{}\n"), 0o644)
+	os.WriteFile(filepath.Join(logDir, "ignored.txt"), []byte("noise\n"), 0o644)
+	os.MkdirAll(filepath.Join(logDir, "subdir"), 0o755)
+
+	logs, err = DiscoverToolUseLogs()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(logs) != 2 {
+		t.Fatalf("expected 2 logs, got %d: %v", len(logs), logs)
+	}
+	// Sorted order
+	if !strings.HasSuffix(logs[0], "repoA--branch1.jsonl") {
+		t.Errorf("expected repoA log first, got %q", logs[0])
+	}
+	if !strings.HasSuffix(logs[1], "repoB--branch2.jsonl") {
+		t.Errorf("expected repoB log second, got %q", logs[1])
+	}
+}
+
+func TestComputeReviewableRulesAll(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", "/Users/me")
+	t.Setenv("XDG_LOG_HOME", tmpDir)
+
+	logDir := filepath.Join(tmpDir, "spinclass", "tool-uses")
+	os.MkdirAll(logDir, 0o755)
+
+	// Two sessions with overlapping rules
+	os.WriteFile(filepath.Join(logDir, "repoA--main.jsonl"), []byte(strings.Join([]string{
+		`{"tool_name":"Bash","tool_input":{"command":"go test ./..."}}`,
+		`{"tool_name":"Bash","tool_input":{"command":"nix build"}}`,
+		`{"tool_name":"Edit","tool_input":{"file_path":"/Users/me/repos/A/main.go"}}`,
+		`{"tool_name":"Glob","tool_input":{}}`,
+		`{"tool_name":"Read","tool_input":{"file_path":"/Users/me/.claude/CLAUDE.md"}}`,
+		`{"tool_name":"mcp__plugin_grit_grit__add","tool_input":{}}`,
+	}, "\n")+"\n"), 0o644)
+	os.WriteFile(filepath.Join(logDir, "repoB--feat.jsonl"), []byte(strings.Join([]string{
+		`{"tool_name":"Bash","tool_input":{"command":"go test ./..."}}`, // dup
+		`{"tool_name":"Bash","tool_input":{"command":"cargo test"}}`,
+		`{"tool_name":"WebSearch","tool_input":{}}`,
+	}, "\n")+"\n"), 0o644)
+
+	// Global Claude settings cover Glob and WebSearch
+	globalSettingsPath := filepath.Join(tmpDir, "global-settings.json")
+	if err := SaveClaudeSettings(globalSettingsPath, []string{
+		"Glob",
+		"WebSearch",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Tier files: global tier excludes Edit; per-repo tier includes
+	// Bash(go test ./...) — should NOT be excluded in --all mode.
+	tiersDir := filepath.Join(tmpDir, "tiers")
+	os.MkdirAll(filepath.Join(tiersDir, "repos"), 0o755)
+	if err := SaveTierFile(filepath.Join(tiersDir, "global.json"), Tier{Allow: []string{"Edit"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveTierFile(filepath.Join(tiersDir, "repos", "repoA.json"), Tier{Allow: []string{"Bash(go test ./...)"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ComputeReviewableRulesAll(tiersDir, globalSettingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should contain (deduped across logs):
+	// - Bash(go test ./...) — repo tier rule does NOT exclude it in --all
+	// - Bash(nix build)
+	// - Bash(cargo test)
+	// - mcp__plugin_grit_grit__add
+	// Should NOT contain:
+	// - Edit(/Users/me/repos/A/main.go)  — bare Edit in global tier matches
+	// - Glob, WebSearch                  — in global Claude settings
+	// - Read(/Users/me/.claude/CLAUDE.md) — auto-injected ~/.claude exclusion
+	wantSet := map[string]bool{
+		"Bash(go test ./...)":        true,
+		"Bash(nix build)":            true,
+		"Bash(cargo test)":           true,
+		"mcp__plugin_grit_grit__add": true,
+	}
+
+	gotSet := map[string]bool{}
+	for _, r := range got {
+		gotSet[r] = true
+	}
+
+	for want := range wantSet {
+		if !gotSet[want] {
+			t.Errorf("expected %q in reviewable rules, got %v", want, got)
+		}
+	}
+	for _, r := range got {
+		if !wantSet[r] {
+			t.Errorf("unexpected rule %q in reviewable rules", r)
+		}
+	}
+}
+
+func TestComputeReviewableRulesAllEmpty(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", "/Users/me")
+	t.Setenv("XDG_LOG_HOME", tmpDir)
+
+	got, err := ComputeReviewableRulesAll(
+		filepath.Join(tmpDir, "tiers"),
+		filepath.Join(tmpDir, "global-settings.json"),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected no rules for empty log dir, got %v", got)
+	}
+}
+
 func TestComputeReviewableRules(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -267,9 +402,9 @@ func TestComputeReviewableRules(t *testing.T) {
 	// Should NOT contain: Edit (bare, in tier), Glob (global), WebSearch (global),
 	// Read/Edit/Write worktree paths, Read(~/.claude/*)
 	wantSet := map[string]bool{
-		"Bash(go test ./...)":          true,
-		"Bash(nix build)":              true,
-		"mcp__plugin_grit_grit__add":   true,
+		"Bash(go test ./...)":        true,
+		"Bash(nix build)":            true,
+		"mcp__plugin_grit_grit__add": true,
 	}
 
 	gotSet := map[string]bool{}
