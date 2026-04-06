@@ -3,10 +3,10 @@ name: Build and publish to FlakeHub
 on:
   push:
     branches:
-      - main
+      - master
   pull_request:
     branches:
-      - main
+      - master
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -36,7 +36,7 @@ jobs:
       - run: nix build
 
   flakehub-publish:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/master'
     needs: build
     runs-on: ubuntu-latest
     permissions:
