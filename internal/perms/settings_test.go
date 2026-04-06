@@ -293,7 +293,7 @@ func TestComputeReviewableRulesAll(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := ComputeReviewableRulesAll(tiersDir, globalSettingsPath)
+	got, err := ComputeReviewableRulesAll(tiersDir, globalSettingsPath, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,6 +339,7 @@ func TestComputeReviewableRulesAllEmpty(t *testing.T) {
 	got, err := ComputeReviewableRulesAll(
 		filepath.Join(tmpDir, "tiers"),
 		filepath.Join(tmpDir, "global-settings.json"),
+		true,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -393,6 +394,7 @@ func TestComputeReviewableRules(t *testing.T) {
 		tiersDir,
 		"myrepo",
 		"/Users/me/repos/bob/.worktrees/wt",
+		true,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -422,5 +424,68 @@ func TestComputeReviewableRules(t *testing.T) {
 		if !wantSet[r] {
 			t.Errorf("unexpected rule %q in reviewable rules", r)
 		}
+	}
+}
+
+func TestComputeReviewableRules_FilterNonMCP(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", "/Users/me")
+
+	// Write a log with mixed MCP and non-MCP rules.
+	logDir := filepath.Join(tmpDir, "spinclass", "tool-uses")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(logDir, "myrepo--main.jsonl")
+	logEntries := strings.Join([]string{
+		`{"tool_name":"Bash","tool_input":{"command":"go test ./..."}}`,
+		`{"tool_name":"Bash","tool_input":{"command":"git status"}}`,
+		`{"tool_name":"Read","tool_input":{"file_path":"/tmp/foo.go"}}`,
+		`{"tool_name":"mcp__plugin_grit_grit__add","tool_input":{}}`,
+		`{"tool_name":"mcp__plugin_chix_chix__build","tool_input":{}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(logPath, []byte(logEntries), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Empty global settings and tiers — nothing excluded by those.
+	globalSettingsPath := filepath.Join(tmpDir, "settings.json")
+	if err := os.WriteFile(globalSettingsPath, []byte(`{"permissions":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tiersDir := filepath.Join(tmpDir, "tiers")
+	if err := os.MkdirAll(tiersDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// With includeBuiltin=false, only MCP rules should be returned.
+	got, err := ComputeReviewableRules(
+		logPath, globalSettingsPath, tiersDir, "myrepo", "/Users/me/repos/myrepo/.worktrees/wt",
+		false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, r := range got {
+		if FriendlyName(r) == "" {
+			t.Errorf("non-MCP rule %q should have been filtered out", r)
+		}
+	}
+	if len(got) != 2 {
+		t.Errorf("expected 2 MCP rules, got %d: %v", len(got), got)
+	}
+
+	// With includeBuiltin=true, all non-excluded rules should be returned.
+	gotAll, err := ComputeReviewableRules(
+		logPath, globalSettingsPath, tiersDir, "myrepo", "/Users/me/repos/myrepo/.worktrees/wt",
+		true,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(gotAll) < len(got) {
+		t.Errorf("includeBuiltin=true returned fewer rules (%d) than false (%d)", len(gotAll), len(got))
 	}
 }
