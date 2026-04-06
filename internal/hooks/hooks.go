@@ -291,4 +291,3 @@ func runPostToolUseLog(input hookInput) error {
 
 	return nil
 }
-

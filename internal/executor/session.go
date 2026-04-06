@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/session"
 	tap "github.com/amarbel-llc/bob/packages/tap-dancer/go"
+	"github.com/amarbel-llc/spinclass/internal/session"
 )
 
 type SessionExecutor struct {
