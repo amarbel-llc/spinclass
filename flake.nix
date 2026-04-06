@@ -51,13 +51,6 @@
           postInstall = ''
             $out/bin/spinclass generate-artifacts $out
             ln -s spinclass $out/bin/sc
-
-            # Mirror completions under the `sc` alias.
-            ln -s spinclass $out/share/bash-completion/completions/sc
-            ln -s spinclass.fish $out/share/fish/vendor_completions.d/sc.fish
-            if [ -d $out/share/zsh/site-functions ]; then
-              ln -s _spinclass $out/share/zsh/site-functions/_sc
-            fi
           '';
 
           meta = {

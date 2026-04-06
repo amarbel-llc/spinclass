@@ -16,6 +16,7 @@ var version = "dev"
 func buildApp() *command.App {
 	app := command.NewApp("spinclass", "Shell-agnostic git worktree session manager")
 	app.Version = version
+	app.Aliases = []string{"sc"}
 	app.Description.Long = "Manages git worktree session lifecycles: create, attach via configurable session entrypoints, rebase/merge back to main, and clean up. Aliased as `sc`."
 	app.PluginAuthor = "amarbel-llc"
 	app.PluginDescription = "Git worktree session manager with sweatfile-driven configuration"
