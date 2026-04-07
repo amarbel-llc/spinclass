@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/charmbracelet/huh"
@@ -34,10 +35,38 @@ func registerSessionCommands(app *command.App) {
 			{Name: "description", Type: command.String, Description: "Freeform session description (quote multi-word strings)"},
 			{Name: "merge-on-close", Type: command.Bool, Description: "Auto-merge worktree into default branch on session close"},
 			{Name: "no-attach", Type: command.Bool, Description: "Create worktree but skip attaching"},
-			{Name: "pr", Type: command.String, Description: "Start session from a PR (number or GitHub URL)"},
-			{Name: "issue", Type: command.String, Description: "Start session with GitHub issue context (number)"},
 		},
 		RunCLI: runStart,
+	})
+
+	app.AddCommand(&command.Command{
+		Name: "start-gh_pr",
+		Description: command.Description{
+			Short: "Start a session from a GitHub pull request",
+			Long:  "Create a new worktree session from an existing GitHub PR. Fetches the PR branch and sets up session context with PR metadata.",
+		},
+		Params: []command.Param{
+			{Name: "pr", Type: command.String, Description: "PR number or GitHub URL", Required: true, Completer: completeGHPRs},
+			{Name: "description", Type: command.String, Description: "Override the PR title as session description"},
+			{Name: "merge-on-close", Type: command.Bool, Description: "Auto-merge worktree into default branch on session close"},
+			{Name: "no-attach", Type: command.Bool, Description: "Create worktree but skip attaching"},
+		},
+		RunCLI: runStartGHPR,
+	})
+
+	app.AddCommand(&command.Command{
+		Name: "start-gh_issue",
+		Description: command.Description{
+			Short: "Start a session with a GitHub issue",
+			Long:  "Create a new worktree session with GitHub issue context. The issue metadata is included in the session's system prompt.",
+		},
+		Params: []command.Param{
+			{Name: "issue", Type: command.String, Description: "Issue number", Required: true, Completer: completeGHIssues},
+			{Name: "description", Type: command.String, Description: "Freeform session description (quote multi-word strings)"},
+			{Name: "merge-on-close", Type: command.Bool, Description: "Auto-merge worktree into default branch on session close"},
+			{Name: "no-attach", Type: command.Bool, Description: "Create worktree but skip attaching"},
+		},
+		RunCLI: runStartGHIssue,
 	})
 
 	app.AddCommand(&command.Command{
@@ -119,85 +148,61 @@ func registerSessionCommands(app *command.App) {
 	})
 }
 
-func runStart(_ context.Context, args json.RawMessage) error {
-	var p struct {
-		globalArgs
-		Description  string `json:"description"`
-		MergeOnClose bool   `json:"merge-on-close"`
-		NoAttach     bool   `json:"no-attach"`
-		PR           string `json:"pr"`
-		Issue        string `json:"issue"`
-	}
-	_ = json.Unmarshal(args, &p)
-
-	if p.PR != "" && p.Issue != "" {
-		return fmt.Errorf("--pr and --issue are mutually exclusive")
-	}
-
-	cwd, err := os.Getwd()
+func completeGHPRs() map[string]string {
+	out, err := exec.Command(
+		"gh", "pr", "list", "--json", "number,title", "--limit", "20",
+	).Output()
 	if err != nil {
-		return err
+		return nil
 	}
 
-	repoPath, err := worktree.DetectRepo(cwd)
+	var prs []struct {
+		Number int    `json:"number"`
+		Title  string `json:"title"`
+	}
+	if json.Unmarshal(out, &prs) != nil {
+		return nil
+	}
+
+	result := make(map[string]string, len(prs))
+	for _, p := range prs {
+		result[fmt.Sprintf("%d", p.Number)] = p.Title
+	}
+	return result
+}
+
+func completeGHIssues() map[string]string {
+	out, err := exec.Command(
+		"gh", "issue", "list", "--json", "number,title", "--limit", "20",
+	).Output()
 	if err != nil {
-		return err
+		return nil
 	}
 
-	var resolvedPath worktree.ResolvedPath
-
-	if p.PR != "" {
-		prInfo, err := pr.Resolve(p.PR, repoPath)
-		if err != nil {
-			return err
-		}
-
-		branch := prInfo.HeadRefName
-
-		if !git.BranchExists(repoPath, branch) {
-			if _, err := git.Run(repoPath, "fetch", "origin", branch); err != nil {
-				return fmt.Errorf("fetching PR branch %q: %w", branch, err)
-			}
-		}
-
-		absPath := filepath.Join(repoPath, worktree.WorktreesDir, branch)
-		repoDirname := filepath.Base(repoPath)
-
-		description := fmt.Sprintf("%s (#%d)", prInfo.Title, prInfo.Number)
-		if p.Description != "" {
-			description = p.Description
-		}
-
-		resolvedPath = worktree.ResolvedPath{
-			AbsPath:        absPath,
-			RepoPath:       repoPath,
-			SessionKey:     repoDirname + "/" + branch,
-			Branch:         branch,
-			Description:    description,
-			ExistingBranch: branch,
-		}
-
-		if prData, prErr := prompt.FetchPR(p.PR, repoPath); prErr == nil {
-			resolvedPath.PR = &prData
-		}
-	} else {
-		var descArgs []string
-		if p.Description != "" {
-			descArgs = []string{p.Description}
-		}
-		resolvedPath, err = worktree.ResolvePath(repoPath, descArgs)
-		if err != nil {
-			return err
-		}
+	var issues []struct {
+		Number int    `json:"number"`
+		Title  string `json:"title"`
+	}
+	if json.Unmarshal(out, &issues) != nil {
+		return nil
 	}
 
-	if p.Issue != "" {
-		issueData, err := prompt.FetchIssue(p.Issue, repoPath)
-		if err != nil {
-			return fmt.Errorf("fetching issue: %w", err)
-		}
-		resolvedPath.Issue = &issueData
+	result := make(map[string]string, len(issues))
+	for _, i := range issues {
+		result[fmt.Sprintf("%d", i.Number)] = i.Title
 	}
+	return result
+}
+
+type startArgs struct {
+	globalArgs
+	Description  string `json:"description"`
+	MergeOnClose bool   `json:"merge-on-close"`
+	NoAttach     bool   `json:"no-attach"`
+}
+
+func attachSession(resolvedPath worktree.ResolvedPath, args startArgs) error {
+	repoPath := resolvedPath.RepoPath
 
 	hierarchy, err := sweatfile.LoadWorktreeHierarchy(
 		os.Getenv("HOME"), repoPath, resolvedPath.AbsPath,
@@ -218,11 +223,128 @@ func runStart(_ context.Context, args json.RawMessage) error {
 		os.Stdout,
 		exec,
 		resolvedPath,
-		p.FormatOrDefault(),
-		p.MergeOnClose,
-		p.NoAttach,
-		p.Verbose,
+		args.FormatOrDefault(),
+		args.MergeOnClose,
+		args.NoAttach,
+		args.Verbose,
 	)
+}
+
+func runStart(_ context.Context, args json.RawMessage) error {
+	var p startArgs
+	_ = json.Unmarshal(args, &p)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	repoPath, err := worktree.DetectRepo(cwd)
+	if err != nil {
+		return err
+	}
+
+	var descArgs []string
+	if p.Description != "" {
+		descArgs = []string{p.Description}
+	}
+
+	resolvedPath, err := worktree.ResolvePath(repoPath, descArgs)
+	if err != nil {
+		return err
+	}
+
+	return attachSession(resolvedPath, p)
+}
+
+func runStartGHPR(_ context.Context, args json.RawMessage) error {
+	var p struct {
+		startArgs
+		PR string `json:"pr"`
+	}
+	_ = json.Unmarshal(args, &p)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	repoPath, err := worktree.DetectRepo(cwd)
+	if err != nil {
+		return err
+	}
+
+	prInfo, err := pr.Resolve(p.PR, repoPath)
+	if err != nil {
+		return err
+	}
+
+	branch := prInfo.HeadRefName
+
+	if !git.BranchExists(repoPath, branch) {
+		if _, err := git.Run(repoPath, "fetch", "origin", branch); err != nil {
+			return fmt.Errorf("fetching PR branch %q: %w", branch, err)
+		}
+	}
+
+	absPath := filepath.Join(repoPath, worktree.WorktreesDir, branch)
+	repoDirname := filepath.Base(repoPath)
+
+	description := fmt.Sprintf("%s (#%d)", prInfo.Title, prInfo.Number)
+	if p.Description != "" {
+		description = p.Description
+	}
+
+	resolvedPath := worktree.ResolvedPath{
+		AbsPath:        absPath,
+		RepoPath:       repoPath,
+		SessionKey:     repoDirname + "/" + branch,
+		Branch:         branch,
+		Description:    description,
+		ExistingBranch: branch,
+	}
+
+	if prData, prErr := prompt.FetchPR(p.PR, repoPath); prErr == nil {
+		resolvedPath.PR = &prData
+	}
+
+	return attachSession(resolvedPath, p.startArgs)
+}
+
+func runStartGHIssue(_ context.Context, args json.RawMessage) error {
+	var p struct {
+		startArgs
+		Issue string `json:"issue"`
+	}
+	_ = json.Unmarshal(args, &p)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	repoPath, err := worktree.DetectRepo(cwd)
+	if err != nil {
+		return err
+	}
+
+	var descArgs []string
+	if p.Description != "" {
+		descArgs = []string{p.Description}
+	}
+
+	resolvedPath, err := worktree.ResolvePath(repoPath, descArgs)
+	if err != nil {
+		return err
+	}
+
+	issueData, err := prompt.FetchIssue(p.Issue, repoPath)
+	if err != nil {
+		return fmt.Errorf("fetching issue: %w", err)
+	}
+	resolvedPath.Issue = &issueData
+
+	return attachSession(resolvedPath, p.startArgs)
 }
 
 func runResume(_ context.Context, args json.RawMessage) error {

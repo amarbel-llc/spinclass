@@ -98,7 +98,9 @@ worktree paths. Applies `claude-allow` rules from sweatfile to
 
   Command                          Description
   -------------------------------- ---------------------------------------------------------
-  `sc start "<desc>"`              Create and start a new worktree session (--pr N or --pr URL)
+  `sc start "<desc>"`              Create and start a new worktree session
+  `sc start-gh_pr <N|URL>`         Start a session from a GitHub pull request
+  `sc start-gh_issue <N>`          Start a session with GitHub issue context
   `sc resume [id]`                 Resume an existing session (auto-detects from cwd)
   `sc update-description "<desc>"` Update session description (--id or auto-detect)
   `sc list`                        List all tracked sessions from state directory
@@ -109,9 +111,11 @@ worktree paths. Applies `claude-allow` rules from sweatfile to
   `sc validate`                    Validate sweatfile hierarchy
   `sc perms list|review|edit`      Inspect or edit permission tier rules
 
-`start` and `update-description` take their description as a single
-positional argument. Multi-word descriptions must be quoted, e.g.
-`sc start "fix login bug"`. Note that the underlying registered subcommands
+`start`, `start-gh_pr`, `start-gh_issue`, and `update-description` take
+their primary argument as a single positional value. Multi-word descriptions
+must be quoted, e.g. `sc start "fix login bug"`. `start-gh_pr` and
+`start-gh_issue` offer tab completion for open PRs and issues respectively.
+Note that the underlying registered subcommands
 use hyphenated names (`perms-list`, `perms-review`, `perms-edit`), but the
 space-separated form (`sc perms list`) is also accepted.
 
