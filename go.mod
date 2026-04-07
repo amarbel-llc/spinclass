@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/amarbel-llc/bob/packages/tap-dancer/go v0.1.0
-	github.com/amarbel-llc/purse-first/libs/go-mcp v0.0.6
+	github.com/amarbel-llc/purse-first/libs/go-mcp v0.0.7
 	github.com/amarbel-llc/purse-first/libs/go-mcp/command/huh v0.0.4
 	github.com/amarbel-llc/tommy v0.0.0-20260326195616-1e3aa70b25d0
 	github.com/charmbracelet/huh v1.0.0
