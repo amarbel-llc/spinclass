@@ -2,8 +2,8 @@ github.com/MakeNowJust/heredoc v1.0.0 h1:cXCdzVdstXyiTqTvfqk9SDHpKNjxuom+DOlyEeQ
 github.com/MakeNowJust/heredoc v1.0.0/go.mod h1:mG5amYoWBHf8vpLOuehzbGGw0EHxpZZ6lCpQ4fNJ8LE=
 github.com/amarbel-llc/bob/packages/tap-dancer/go v0.1.0 h1:+8QbL84Q9IVcKUPm0DJ4emTwXndujB86ATqyNCem+KQ=
 github.com/amarbel-llc/bob/packages/tap-dancer/go v0.1.0/go.mod h1:f/eBRNyz3TVY+bB5bnNmYioJEgNrmwbvscFq29VFyXc=
-github.com/amarbel-llc/purse-first/libs/go-mcp v0.0.7 h1:jUmtBk7zbDG1L5APsvRr5ccB7hg3LwhfM+UwZLRZeAM=
-github.com/amarbel-llc/purse-first/libs/go-mcp v0.0.7/go.mod h1:4QNwpEtQWg+aF++9BpxQq93cnj6puQfsARZ0Z4fHIHk=
+github.com/amarbel-llc/purse-first/libs/go-mcp v0.0.8 h1:2+OT3AXo5YW0lCWKRfr+LmumeYvzIPZnu8ol/Bxy8iY=
+github.com/amarbel-llc/purse-first/libs/go-mcp v0.0.8/go.mod h1:4QNwpEtQWg+aF++9BpxQq93cnj6puQfsARZ0Z4fHIHk=
 github.com/amarbel-llc/purse-first/libs/go-mcp/command/huh v0.0.4 h1:3rKd2loQXbUwxihvfHn0twqAbUf/qoo+6rhU7pNE4Lc=
 github.com/amarbel-llc/purse-first/libs/go-mcp/command/huh v0.0.4/go.mod h1:TLptCeakiRrMP/nm5B3KA98/PCldo9KZdauzRNzC5Yc=
 github.com/amarbel-llc/tommy v0.0.0-20260326195616-1e3aa70b25d0 h1:8LPijZ6RcsaJTqU2jmB9MHcJxaO6bLd5QymjHsvUieQ=

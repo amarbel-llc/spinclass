@@ -89,7 +89,7 @@ func registerSessionCommands(app *command.App) {
 			Long:  "Merge a worktree branch into the main repo with --ff-only and remove the worktree. When run from inside a worktree, merges that worktree. When run from the main repo, specify a target or choose interactively.",
 		},
 		Params: []command.Param{
-			{Name: "target", Type: command.String, Description: "Target worktree to merge (interactive selection if omitted)"},
+			{Name: "target", Type: command.String, Description: "Target worktree to merge (interactive selection if omitted)", Completer: completeWorktreeTargets},
 			{Name: "git-sync", Type: command.Bool, Description: "Pull and push after merge"},
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
@@ -111,7 +111,7 @@ func registerSessionCommands(app *command.App) {
 			Long:  "Remove a worktree and its branch without merging into main. Prompts for confirmation if the branch has not been pushed upstream. Use --force to skip.",
 		},
 		Params: []command.Param{
-			{Name: "target", Type: command.String, Description: "Target worktree to close"},
+			{Name: "target", Type: command.String, Description: "Target worktree to close", Completer: completeWorktreeTargets},
 			{Name: "force", Short: 'f', Type: command.Bool, Description: "Skip confirmation for unpushed branches"},
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
@@ -167,6 +167,31 @@ func completeGHPRs() map[string]string {
 	result := make(map[string]string, len(prs))
 	for _, p := range prs {
 		result[fmt.Sprintf("%d", p.Number)] = p.Title
+	}
+	return result
+}
+
+func completeWorktreeTargets() map[string]string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+	repoPath, err := worktree.DetectRepo(cwd)
+	if err != nil {
+		return nil
+	}
+	sessions, err := session.ListForRepo(repoPath)
+	if err != nil {
+		return nil
+	}
+	result := make(map[string]string, len(sessions))
+	for _, s := range sessions {
+		id := filepath.Base(s.WorktreePath)
+		label := s.Branch
+		if s.Description != "" {
+			label = fmt.Sprintf("%s — %s", s.Branch, s.Description)
+		}
+		result[id] = label
 	}
 	return result
 }
