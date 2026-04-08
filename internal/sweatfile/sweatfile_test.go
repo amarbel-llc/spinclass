@@ -1225,3 +1225,134 @@ func TestMergeSessionNilInherit(t *testing.T) {
 		t.Errorf("expected SessionEntry.Start to be inherited, got %v", merged.SessionEntry)
 	}
 }
+
+func TestParseStartCommands(t *testing.T) {
+	input := `
+[[start-commands]]
+name = "jira"
+description = "Start for a JIRA ticket"
+arg-name = "ticket"
+arg-help = "JIRA ticket ID"
+arg-regex = "^[A-Z]+-[0-9]+$"
+completion = ["jira", "list"]
+prompt = ["jira", "show", "{arg}"]
+`
+	doc, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sf := doc.Data()
+	if len(sf.StartCommands) != 1 {
+		t.Fatalf("expected 1 start-command, got %d", len(sf.StartCommands))
+	}
+	sc := sf.StartCommands[0]
+	if sc.Name != "jira" {
+		t.Errorf("Name = %q, want jira", sc.Name)
+	}
+	if sc.ArgName != "ticket" {
+		t.Errorf("ArgName = %q, want ticket", sc.ArgName)
+	}
+	if sc.ArgRegex == nil || *sc.ArgRegex != "^[A-Z]+-[0-9]+$" {
+		t.Errorf("ArgRegex = %v, want ^[A-Z]+-[0-9]+$", sc.ArgRegex)
+	}
+	if len(sc.Completion) != 2 || sc.Completion[0] != "jira" {
+		t.Errorf("Completion = %v", sc.Completion)
+	}
+	if len(sc.Prompt) != 3 || sc.Prompt[2] != "{arg}" {
+		t.Errorf("Prompt = %v", sc.Prompt)
+	}
+}
+
+func TestParseStartCommandsMultiple(t *testing.T) {
+	input := `
+[[start-commands]]
+name = "jira"
+prompt = ["echo", "jira"]
+
+[[start-commands]]
+name = "linear"
+prompt = ["echo", "linear"]
+`
+	doc, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sf := doc.Data()
+	if len(sf.StartCommands) != 2 {
+		t.Fatalf("expected 2 start-commands, got %d", len(sf.StartCommands))
+	}
+	if sf.StartCommands[0].Name != "jira" || sf.StartCommands[1].Name != "linear" {
+		t.Errorf("order = %q, %q", sf.StartCommands[0].Name, sf.StartCommands[1].Name)
+	}
+}
+
+func TestMergeStartCommandsAppend(t *testing.T) {
+	base := Sweatfile{
+		StartCommands: []StartCommand{
+			{Name: "jira", Prompt: []string{"echo", "base"}},
+		},
+	}
+	repo := Sweatfile{
+		StartCommands: []StartCommand{
+			{Name: "linear", Prompt: []string{"echo", "linear"}},
+		},
+	}
+	merged := base.MergeWith(repo)
+	if len(merged.StartCommands) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(merged.StartCommands))
+	}
+	if merged.StartCommands[0].Name != "jira" || merged.StartCommands[1].Name != "linear" {
+		t.Errorf("order broken: %v", merged.StartCommands)
+	}
+}
+
+func TestMergeStartCommandsOverrideByName(t *testing.T) {
+	base := Sweatfile{
+		StartCommands: []StartCommand{
+			{Name: "jira", Prompt: []string{"echo", "base"}},
+			{Name: "linear", Prompt: []string{"echo", "linear"}},
+		},
+	}
+	repo := Sweatfile{
+		StartCommands: []StartCommand{
+			{Name: "jira", Prompt: []string{"echo", "override"}},
+		},
+	}
+	merged := base.MergeWith(repo)
+	if len(merged.StartCommands) != 2 {
+		t.Fatalf("expected 2 entries after override, got %d", len(merged.StartCommands))
+	}
+	// Override keeps the slot position.
+	if merged.StartCommands[0].Name != "jira" {
+		t.Errorf("expected jira to stay at slot 0, got %v", merged.StartCommands)
+	}
+	if got := merged.StartCommands[0].Prompt; len(got) != 2 || got[1] != "override" {
+		t.Errorf("expected override prompt, got %v", got)
+	}
+}
+
+func TestGetDefaultShipsGhIssueStartCommand(t *testing.T) {
+	def := GetDefault()
+	var found *StartCommand
+	for i := range def.StartCommands {
+		if def.StartCommands[i].Name == "gh_issue" {
+			found = &def.StartCommands[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("expected gh_issue entry in GetDefault().StartCommands")
+	}
+	if found.ArgName != "issue" {
+		t.Errorf("ArgName = %q, want issue", found.ArgName)
+	}
+	if found.ArgRegex == nil || *found.ArgRegex != "^[0-9]+$" {
+		t.Errorf("ArgRegex = %v, want ^[0-9]+$", found.ArgRegex)
+	}
+	if len(found.Prompt) == 0 {
+		t.Error("Prompt must be non-empty")
+	}
+	if len(found.Completion) == 0 {
+		t.Error("Completion must be non-empty")
+	}
+}

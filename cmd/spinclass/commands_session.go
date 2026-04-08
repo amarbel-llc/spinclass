@@ -54,20 +54,10 @@ func registerSessionCommands(app *command.App) {
 		RunCLI: runStartGHPR,
 	})
 
-	app.AddCommand(&command.Command{
-		Name: "start-gh_issue",
-		Description: command.Description{
-			Short: "Start a session with a GitHub issue",
-			Long:  "Create a new worktree session with GitHub issue context. The issue metadata is included in the session's system prompt.",
-		},
-		Params: []command.Param{
-			{Name: "issue", Type: command.String, Description: "Issue number", Required: true, Completer: completeGHIssues},
-			{Name: "description", Type: command.String, Description: "Freeform session description (quote multi-word strings)"},
-			{Name: "merge-on-close", Type: command.Bool, Description: "Auto-merge worktree into default branch on session close"},
-			{Name: "no-attach", Type: command.Bool, Description: "Create worktree but skip attaching"},
-		},
-		RunCLI: runStartGHIssue,
-	})
+	// `start-gh_issue` is registered dynamically from
+	// sweatfile.GetDefault()'s baked-in [[start-commands]] entry via
+	// registerPluginStartCommands(). See internal/sweatfile/sweatfile.go
+	// defaultStartCommands().
 
 	app.AddCommand(&command.Command{
 		Name: "resume",
@@ -196,29 +186,6 @@ func completeWorktreeTargets() map[string]string {
 	return result
 }
 
-func completeGHIssues() map[string]string {
-	out, err := exec.Command(
-		"gh", "issue", "list", "--json", "number,title", "--limit", "20",
-	).Output()
-	if err != nil {
-		return nil
-	}
-
-	var issues []struct {
-		Number int    `json:"number"`
-		Title  string `json:"title"`
-	}
-	if json.Unmarshal(out, &issues) != nil {
-		return nil
-	}
-
-	result := make(map[string]string, len(issues))
-	for _, i := range issues {
-		result[fmt.Sprintf("%d", i.Number)] = i.Title
-	}
-	return result
-}
-
 type startArgs struct {
 	globalArgs
 	Description  string `json:"description"`
@@ -332,42 +299,6 @@ func runStartGHPR(_ context.Context, args json.RawMessage) error {
 	if prData, prErr := prompt.FetchPR(p.PR, repoPath); prErr == nil {
 		resolvedPath.PR = &prData
 	}
-
-	return attachSession(resolvedPath, p.startArgs)
-}
-
-func runStartGHIssue(_ context.Context, args json.RawMessage) error {
-	var p struct {
-		startArgs
-		Issue string `json:"issue"`
-	}
-	_ = json.Unmarshal(args, &p)
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-
-	repoPath, err := worktree.DetectRepo(cwd)
-	if err != nil {
-		return err
-	}
-
-	var descArgs []string
-	if p.Description != "" {
-		descArgs = []string{p.Description}
-	}
-
-	resolvedPath, err := worktree.ResolvePath(repoPath, descArgs)
-	if err != nil {
-		return err
-	}
-
-	issueData, err := prompt.FetchIssue(p.Issue, repoPath)
-	if err != nil {
-		return fmt.Errorf("fetching issue: %w", err)
-	}
-	resolvedPath.Issue = &issueData
 
 	return attachSession(resolvedPath, p.startArgs)
 }

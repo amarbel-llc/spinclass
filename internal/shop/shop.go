@@ -55,7 +55,7 @@ func createWorktree(worktreePath worktree.ResolvedPath, verbose bool) (bool, err
 
 	if _, err := os.Stat(worktreePath.AbsPath); os.IsNotExist(err) {
 		existed = false
-		result, err := worktree.Create(worktreePath.RepoPath, worktreePath.AbsPath, worktreePath.ExistingBranch, worktreePath.Issue, worktreePath.PR)
+		result, err := worktree.Create(worktreePath.RepoPath, worktreePath.AbsPath, worktreePath.ExistingBranch, worktreePath.Issue, worktreePath.PR, worktreePath.PluginFragments)
 		if err != nil {
 			return false, err
 		}

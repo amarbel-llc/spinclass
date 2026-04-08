@@ -6,11 +6,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/tap"
 )
+
+var startCommandNameRE = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
 // RunString executes the same logic as Run but captures output into a string,
 // returning (output, exitCode). Used by handlers that need to return output as
@@ -95,6 +98,63 @@ func CheckClaudeAllow(sf sweatfile.Sweatfile) []Issue {
 				Field:    "claude-allow",
 				Value:    rule,
 			})
+		}
+	}
+	return issues
+}
+
+func CheckStartCommands(sf sweatfile.Sweatfile) []Issue {
+	var issues []Issue
+	seen := make(map[string]bool, len(sf.StartCommands))
+	for _, sc := range sf.StartCommands {
+		if sc.Name == "" {
+			issues = append(issues, Issue{
+				Message:  "start-command entry missing `name`",
+				Severity: SeverityError,
+				Field:    "start-commands.name",
+			})
+			continue
+		}
+		if !startCommandNameRE.MatchString(sc.Name) {
+			issues = append(issues, Issue{
+				Message: fmt.Sprintf(
+					"invalid start-command name %q (must match %s)",
+					sc.Name, startCommandNameRE.String(),
+				),
+				Severity: SeverityError,
+				Field:    "start-commands.name",
+				Value:    sc.Name,
+			})
+		}
+		if seen[sc.Name] {
+			issues = append(issues, Issue{
+				Message:  fmt.Sprintf("duplicate start-command %q in this file", sc.Name),
+				Severity: SeverityError,
+				Field:    "start-commands.name",
+				Value:    sc.Name,
+			})
+		}
+		seen[sc.Name] = true
+		if len(sc.Prompt) == 0 {
+			issues = append(issues, Issue{
+				Message:  fmt.Sprintf("start-command %q requires a non-empty `prompt`", sc.Name),
+				Severity: SeverityError,
+				Field:    "start-commands.prompt",
+				Value:    sc.Name,
+			})
+		}
+		if sc.ArgRegex != nil && *sc.ArgRegex != "" {
+			if _, err := regexp.Compile(*sc.ArgRegex); err != nil {
+				issues = append(issues, Issue{
+					Message: fmt.Sprintf(
+						"start-command %q has invalid arg-regex: %s",
+						sc.Name, err,
+					),
+					Severity: SeverityError,
+					Field:    "start-commands.arg-regex",
+					Value:    *sc.ArgRegex,
+				})
+			}
 		}
 	}
 	return issues
@@ -276,6 +336,23 @@ func Run(w io.Writer, home, repoDir string) int {
 				}
 			} else {
 				sub.Ok("git-excludes valid")
+			}
+		}
+
+		if len(src.File.StartCommands) > 0 {
+			if issues := CheckStartCommands(src.File); len(issues) > 0 {
+				for _, iss := range issues {
+					diag := map[string]string{
+						"severity": iss.Severity,
+						"message":  iss.Message,
+					}
+					if iss.Value != "" {
+						diag["value"] = iss.Value
+					}
+					sub.NotOk("start-commands valid", diag)
+				}
+			} else {
+				sub.Ok("start-commands valid")
 			}
 		}
 

@@ -142,3 +142,65 @@ stop = "just build test"
 		t.Errorf("expected no issues for [hooks] table, got %v", issues)
 	}
 }
+
+func TestCheckStartCommandsValid(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		StartCommands: []sweatfile.StartCommand{
+			{
+				Name:   "jira",
+				Prompt: []string{"echo", "hi"},
+			},
+		},
+	}
+	if issues := CheckStartCommands(sf); len(issues) != 0 {
+		t.Errorf("expected no issues, got %v", issues)
+	}
+}
+
+func TestCheckStartCommandsMissingPrompt(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		StartCommands: []sweatfile.StartCommand{{Name: "jira"}},
+	}
+	issues := CheckStartCommands(sf)
+	if len(issues) != 1 || issues[0].Field != "start-commands.prompt" {
+		t.Fatalf("expected 1 prompt issue, got %v", issues)
+	}
+}
+
+func TestCheckStartCommandsBadName(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		StartCommands: []sweatfile.StartCommand{
+			{Name: "Bad Name", Prompt: []string{"echo"}},
+		},
+	}
+	issues := CheckStartCommands(sf)
+	if len(issues) != 1 || issues[0].Field != "start-commands.name" {
+		t.Fatalf("expected 1 name issue, got %v", issues)
+	}
+}
+
+func TestCheckStartCommandsDuplicateName(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		StartCommands: []sweatfile.StartCommand{
+			{Name: "jira", Prompt: []string{"echo"}},
+			{Name: "jira", Prompt: []string{"echo"}},
+		},
+	}
+	issues := CheckStartCommands(sf)
+	if len(issues) != 1 || issues[0].Field != "start-commands.name" {
+		t.Fatalf("expected 1 duplicate issue, got %v", issues)
+	}
+}
+
+func TestCheckStartCommandsBadRegex(t *testing.T) {
+	bad := "["
+	sf := sweatfile.Sweatfile{
+		StartCommands: []sweatfile.StartCommand{
+			{Name: "jira", Prompt: []string{"echo"}, ArgRegex: &bad},
+		},
+	}
+	issues := CheckStartCommands(sf)
+	if len(issues) != 1 || issues[0].Field != "start-commands.arg-regex" {
+		t.Fatalf("expected 1 regex issue, got %v", issues)
+	}
+}

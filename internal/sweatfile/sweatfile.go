@@ -38,13 +38,26 @@ type Hooks struct {
 	ToolUseLog           *bool   `toml:"tool-use-log"`
 }
 
+// StartCommand declares a user-defined `sc start-<name>` subcommand.
+// See CLAUDE.md "Custom start commands" for the full schema.
+type StartCommand struct {
+	Name        string   `toml:"name"`
+	Description string   `toml:"description"`
+	ArgName     string   `toml:"arg-name"`
+	ArgHelp     string   `toml:"arg-help"`
+	ArgRegex    *string  `toml:"arg-regex"`
+	Completion  []string `toml:"completion"`
+	Prompt      []string `toml:"prompt"`
+}
+
 //go:generate tommy generate
 type Sweatfile struct {
-	Claude       *Claude       `toml:"claude"`
-	Git          *Git          `toml:"git"`
-	Direnv       *Direnv       `toml:"direnv"`
-	Hooks        *Hooks        `toml:"hooks"`
-	SessionEntry *SessionEntry `toml:"session-entry"`
+	Claude        *Claude        `toml:"claude"`
+	Git           *Git           `toml:"git"`
+	Direnv        *Direnv        `toml:"direnv"`
+	Hooks         *Hooks         `toml:"hooks"`
+	SessionEntry  *SessionEntry  `toml:"session-entry"`
+	StartCommands []StartCommand `toml:"start-commands"`
 }
 
 func (sf Sweatfile) StopHookCommand() *string {
@@ -110,7 +123,8 @@ func (sf Sweatfile) SessionResume() []string {
 // sweatfile config.
 func GetDefault() Sweatfile {
 	sf := Sweatfile{
-		Git: &Git{Excludes: []string{".worktrees/", ".spinclass/", ".mcp.json"}},
+		Git:           &Git{Excludes: []string{".worktrees/", ".spinclass/", ".mcp.json"}},
+		StartCommands: defaultStartCommands(),
 	}
 
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
@@ -119,6 +133,46 @@ func GetDefault() Sweatfile {
 	}
 
 	return sf
+}
+
+// defaultStartCommands returns the baked-in `[[start-commands]]` entries
+// that ship with every spinclass install. These exist as tracer bullets:
+// commands that used to be hard-coded Go handlers are now declared via the
+// same config mechanism users have for custom start-* commands.
+func defaultStartCommands() []StartCommand {
+	issueRegex := `^[0-9]+$`
+	return []StartCommand{
+		{
+			Name:        "gh_issue",
+			Description: "Start a session with a GitHub issue",
+			ArgName:     "issue",
+			ArgHelp:     "Issue number",
+			ArgRegex:    &issueRegex,
+			Completion: []string{
+				"sh", "-c",
+				`gh issue list --json number,title --limit 20 2>/dev/null | ` +
+					`jq -r '.[] | "\(.number)\t\(.title)"' 2>/dev/null`,
+			},
+			Prompt: []string{
+				"sh", "-c",
+				`gh issue view {arg} --template '# GitHub Issue Context
+
+This session is working on the following GitHub issue.
+
+## Issue #{{.number}}: {{.title}}
+- **State:** {{.state}}
+{{- if .labels}}
+- **Labels:** {{range $i, $l := .labels}}{{if $i}}, {{end}}{{$l.name}}{{end}}
+{{- end}}
+- **URL:** {{.url}}
+
+## Description
+
+{{.body}}
+'`,
+			},
+		},
+	}
 }
 
 func collectSystemPromptAppend(cwd string) (string, error) {

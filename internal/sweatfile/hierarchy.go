@@ -230,5 +230,24 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		}
 	}
 
+	// [[start-commands]] — append across levels, then dedupe by Name with
+	// the most-specific (last) definition winning. Entries within a single
+	// level preserve their relative order; cross-level overrides keep the
+	// position of the first occurrence so iteration order stays stable.
+	if len(other.StartCommands) > 0 {
+		index := make(map[string]int, len(merged.StartCommands))
+		for i, sc := range merged.StartCommands {
+			index[sc.Name] = i
+		}
+		for _, sc := range other.StartCommands {
+			if i, ok := index[sc.Name]; ok {
+				merged.StartCommands[i] = sc
+				continue
+			}
+			index[sc.Name] = len(merged.StartCommands)
+			merged.StartCommands = append(merged.StartCommands, sc)
+		}
+	}
+
 	return merged
 }

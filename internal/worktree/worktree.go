@@ -15,14 +15,15 @@ import (
 const WorktreesDir = ".worktrees"
 
 type ResolvedPath struct {
-	AbsPath        string            // absolute filesystem path to the worktree
-	RepoPath       string            // absolute path to the parent git repo
-	SessionKey     string            // key for zmx/executor sessions (<repo-dirname>/<branch>)
-	Branch         string            // branch name
-	Description    string            // freeform session description
-	ExistingBranch string            // non-empty when an existing branch was detected
-	Issue          *prompt.IssueData // optional issue context for session prompt
-	PR             *prompt.PRData    // optional PR context for session prompt
+	AbsPath         string                  // absolute filesystem path to the worktree
+	RepoPath        string                  // absolute path to the parent git repo
+	SessionKey      string                  // key for zmx/executor sessions (<repo-dirname>/<branch>)
+	Branch          string                  // branch name
+	Description     string                  // freeform session description
+	ExistingBranch  string                  // non-empty when an existing branch was detected
+	Issue           *prompt.IssueData       // optional issue context for session prompt
+	PR              *prompt.PRData          // optional PR context for session prompt
+	PluginFragments []prompt.PluginFragment // optional user-defined start-command fragments
 }
 
 // ResolvePath resolves a worktree target relative to a git repo.
@@ -127,6 +128,7 @@ func isCeiling(dir string, ceilings []string) bool {
 func Create(
 	repoPath, worktreePath, existingBranch string,
 	issue *prompt.IssueData, pr *prompt.PRData,
+	pluginFragments []prompt.PluginFragment,
 ) (sweatfile.Hierarchy, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -161,6 +163,7 @@ func Create(
 		worktreePath,
 		issue,
 		pr,
+		pluginFragments,
 	)
 }
 
@@ -187,7 +190,7 @@ func CreateFrom(
 		return sweetfile, fmt.Errorf("loading sweatfile: %w", err)
 	}
 
-	return sweetfile, applyWorktreeConfig(home, sweetfile, repoPath, newPath, nil, nil)
+	return sweetfile, applyWorktreeConfig(home, sweetfile, repoPath, newPath, nil, nil, nil)
 }
 
 // applyWorktreeConfig excludes .worktrees from git, loads and applies
@@ -200,6 +203,7 @@ func applyWorktreeConfig(
 	worktreePath string,
 	issue *prompt.IssueData,
 	pr *prompt.PRData,
+	pluginFragments []prompt.PluginFragment,
 ) error {
 	merged := sweetfile.Merged.MergeWith(sweatfile.GetDefault())
 	if err := applyGitExcludes(repoPath, merged.GitExcludes()); err != nil {
@@ -225,16 +229,17 @@ func applyWorktreeConfig(
 	repoDirname := filepath.Base(repoPath)
 
 	writeOpts := prompt.WriteOptions{
-		WorktreePath: worktreePath,
-		RepoPath:     repoPath,
-		RemoteURL:    remoteURL,
-		Branch:       branch,
-		SessionID:    repoDirname + "/" + branch,
-		IsFork:       isFork,
-		OwnerType:    ownerType,
-		OwnerLogin:   ownerLogin,
-		Issue:        issue,
-		PR:           pr,
+		WorktreePath:    worktreePath,
+		RepoPath:        repoPath,
+		RemoteURL:       remoteURL,
+		Branch:          branch,
+		SessionID:       repoDirname + "/" + branch,
+		IsFork:          isFork,
+		OwnerType:       ownerType,
+		OwnerLogin:      ownerLogin,
+		Issue:           issue,
+		PR:              pr,
+		PluginFragments: pluginFragments,
 	}
 
 	if err := prompt.WriteSessionContext(writeOpts); err != nil {

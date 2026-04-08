@@ -6,17 +6,25 @@ import (
 	"path/filepath"
 )
 
+// PluginFragment is a user-defined `start-<name>` command's markdown
+// contribution to the session's system_prompt_append.d/ directory.
+type PluginFragment struct {
+	Name    string // becomes the filename stem: 3-start-<Name>.md
+	Content string // written verbatim
+}
+
 type WriteOptions struct {
-	WorktreePath string
-	RepoPath     string
-	RemoteURL    string
-	Branch       string
-	SessionID    string
-	IsFork       bool
-	OwnerType    string
-	OwnerLogin   string
-	Issue        *IssueData
-	PR           *PRData
+	WorktreePath    string
+	RepoPath        string
+	RemoteURL       string
+	Branch          string
+	SessionID       string
+	IsFork          bool
+	OwnerType       string
+	OwnerLogin      string
+	Issue           *IssueData
+	PR              *PRData
+	PluginFragments []PluginFragment
 }
 
 func WriteSessionContext(opts WriteOptions) error {
@@ -62,6 +70,16 @@ func WriteSessionContext(opts WriteOptions) error {
 		}
 		filename := fmt.Sprintf("1-pr-%d.md", opts.PR.Number)
 		if err := os.WriteFile(filepath.Join(dir, filename), []byte(content), 0o644); err != nil {
+			return fmt.Errorf("writing %s: %w", filename, err)
+		}
+	}
+
+	for _, frag := range opts.PluginFragments {
+		if frag.Name == "" || frag.Content == "" {
+			continue
+		}
+		filename := fmt.Sprintf("3-start-%s.md", frag.Name)
+		if err := os.WriteFile(filepath.Join(dir, filename), []byte(frag.Content), 0o644); err != nil {
 			return fmt.Errorf("writing %s: %w", filename, err)
 		}
 	}

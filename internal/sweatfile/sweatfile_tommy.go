@@ -172,8 +172,97 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			d.data.SessionEntry = sessionEntryVal
 		}
 	}
+	decodeStartCommands(d.cstDoc, &d.data, d.consumed, "")
 
 	return d, nil
+}
+
+// decodeStartCommands reads all [[start-commands]] entries from the document
+// and populates data.StartCommands. Mirrors the per-field GetFromContainer
+// pattern tommy generates for regular tables.
+func decodeStartCommands(
+	doc *document.Document,
+	data *Sweatfile,
+	consumed map[string]bool,
+	keyPrefix string,
+) {
+	nodes := doc.FindArrayTableNodes("start-commands")
+	if len(nodes) == 0 {
+		return
+	}
+	consumed[keyPrefix+"start-commands"] = true
+	data.StartCommands = make([]StartCommand, len(nodes))
+	for i, node := range nodes {
+		if v, err := document.GetFromContainer[string](doc, node, "name"); err == nil {
+			data.StartCommands[i].Name = v
+			consumed[keyPrefix+"start-commands.name"] = true
+		}
+		if v, err := document.GetFromContainer[string](doc, node, "description"); err == nil {
+			data.StartCommands[i].Description = v
+			consumed[keyPrefix+"start-commands.description"] = true
+		}
+		if v, err := document.GetFromContainer[string](doc, node, "arg-name"); err == nil {
+			data.StartCommands[i].ArgName = v
+			consumed[keyPrefix+"start-commands.arg-name"] = true
+		}
+		if v, err := document.GetFromContainer[string](doc, node, "arg-help"); err == nil {
+			data.StartCommands[i].ArgHelp = v
+			consumed[keyPrefix+"start-commands.arg-help"] = true
+		}
+		if v, err := document.GetFromContainer[string](doc, node, "arg-regex"); err == nil {
+			data.StartCommands[i].ArgRegex = &v
+			consumed[keyPrefix+"start-commands.arg-regex"] = true
+		}
+		if v, err := document.GetFromContainer[[]string](doc, node, "completion"); err == nil {
+			data.StartCommands[i].Completion = v
+			consumed[keyPrefix+"start-commands.completion"] = true
+		}
+		if v, err := document.GetFromContainer[[]string](doc, node, "prompt"); err == nil {
+			data.StartCommands[i].Prompt = v
+			consumed[keyPrefix+"start-commands.prompt"] = true
+		}
+	}
+}
+
+func encodeStartCommands(doc *document.Document, data *Sweatfile) error {
+	for i := range data.StartCommands {
+		entry := doc.AppendArrayTableEntry("start-commands")
+		sc := &data.StartCommands[i]
+		if err := doc.SetInContainer(entry, "name", sc.Name); err != nil {
+			return err
+		}
+		if sc.Description != "" {
+			if err := doc.SetInContainer(entry, "description", sc.Description); err != nil {
+				return err
+			}
+		}
+		if sc.ArgName != "" {
+			if err := doc.SetInContainer(entry, "arg-name", sc.ArgName); err != nil {
+				return err
+			}
+		}
+		if sc.ArgHelp != "" {
+			if err := doc.SetInContainer(entry, "arg-help", sc.ArgHelp); err != nil {
+				return err
+			}
+		}
+		if sc.ArgRegex != nil {
+			if err := doc.SetInContainer(entry, "arg-regex", *sc.ArgRegex); err != nil {
+				return err
+			}
+		}
+		if sc.Completion != nil {
+			if err := doc.SetInContainer(entry, "completion", sc.Completion); err != nil {
+				return err
+			}
+		}
+		if sc.Prompt != nil {
+			if err := doc.SetInContainer(entry, "prompt", sc.Prompt); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (d *SweatfileDocument) Data() *Sweatfile { return &d.data }
@@ -252,6 +341,9 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 		if err := d.cstDoc.SetInContainer(tableNode, "resume", d.data.SessionEntry.Resume); err != nil {
 			return nil, err
 		}
+	}
+	if err := encodeStartCommands(d.cstDoc, &d.data); err != nil {
+		return nil, err
 	}
 
 	return d.cstDoc.Bytes(), nil
@@ -421,6 +513,9 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 			data.SessionEntry = sessionEntryVal
 		}
 	}
+	// `[[start-commands]]` is only meaningful at document root, not nested
+	// inside an arbitrary container, so DecodeSweatfileInto does not emit it.
+	_ = container
 
 	return nil
 }
@@ -499,6 +594,9 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		if err := doc.SetInContainer(tableNode, "resume", data.SessionEntry.Resume); err != nil {
 			return err
 		}
+	}
+	if err := encodeStartCommands(doc, data); err != nil {
+		return err
 	}
 
 	return nil

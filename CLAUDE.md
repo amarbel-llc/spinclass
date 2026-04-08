@@ -100,7 +100,8 @@ worktree paths. Applies `claude-allow` rules from sweatfile to
   -------------------------------- ---------------------------------------------------------
   `sc start "<desc>"`              Create and start a new worktree session
   `sc start-gh_pr <N|URL>`         Start a session from a GitHub pull request
-  `sc start-gh_issue <N>`          Start a session with GitHub issue context
+  `sc start-gh_issue <N>`          Start a session with GitHub issue context (config-driven, see below)
+  `sc start-<custom> <arg>`        User-defined start commands declared in sweatfile
   `sc resume [id]`                 Resume an existing session (auto-detects from cwd)
   `sc update-description "<desc>"` Update session description (--id or auto-detect)
   `sc list`                        List all tracked sessions from state directory
@@ -118,6 +119,41 @@ must be quoted, e.g. `sc start "fix login bug"`. `start-gh_pr` and
 Note that the underlying registered subcommands
 use hyphenated names (`perms-list`, `perms-review`, `perms-edit`), but the
 space-separated form (`sc perms list`) is also accepted.
+
+## Custom start commands
+
+`sc start-<name>` subcommands can be declared in a sweatfile via the
+`[[start-commands]]` array of tables. At CLI startup spinclass loads the
+sweatfile hierarchy for the current directory and dynamically registers one
+command per entry. Each command validates its single positional argument,
+offers tab completion, and injects a markdown fragment into the session's
+`.spinclass/system_prompt_append.d/3-start-<name>.md` which is picked up
+automatically by the `--append-system-prompt` flow.
+
+```toml
+[[start-commands]]
+name         = "jira"               # registers `sc start-jira`
+description  = "Start session for a JIRA ticket"
+arg-name     = "ticket"             # positional parameter name
+arg-help     = "JIRA ticket ID"
+arg-regex    = "^[A-Z]+-[0-9]+$"    # optional RE2 validator
+completion   = ["sh", "-c", "jira list --format '{{.Key}}\t{{.Summary}}'"]
+prompt       = ["jira", "show", "{arg}", "--markdown"]
+```
+
+- `completion` is exec'd at tab-completion time. Stdout is parsed as
+  `value\tdescription` lines into the completion map. Failures are silent.
+- `prompt` is exec'd when the command runs, with `{arg}` literally replaced
+  by the positional value in every argv element. Stdout is written verbatim
+  to `3-start-<name>.md`. The command is exec'd directly (no shell); wrap
+  in `sh -c` for shell features.
+- Entries merge across the sweatfile hierarchy (`global → parent → repo`)
+  and later definitions override earlier ones by `name`. The built-in
+  `gh_issue` entry ships via `sweatfile.GetDefault()` as a tracer bullet —
+  it is the same plugin mechanism users get, just baked in.
+- Built-in subcommands (e.g. `start` itself or `start-gh_pr`) always win
+  over a sweatfile entry with the same name; `sc validate` flags obviously
+  broken entries (missing `prompt`, bad name, non-compiling regex).
 
 ## Nix Build
 
