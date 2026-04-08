@@ -11,8 +11,9 @@ import (
 
 func registerHookCommand(app *command.App) {
 	app.AddCommand(&command.Command{
-		Name:   "hook",
-		Hidden: true,
+		Name:    "hook",
+		Aliases: []string{"hooks"},
+		Hidden:  true,
 		Description: command.Description{
 			Short: "Handle PreToolUse hook for worktree boundary enforcement",
 		},
