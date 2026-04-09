@@ -9,7 +9,7 @@ setup() {
 }
 
 function start_command_creates_worktree_and_writes_fragment { # @test
-  cat > "$TEST_REPO/sweatfile" <<'EOF'
+  cat >"$TEST_REPO/sweatfile" <<'EOF'
 [session-entry]
 start = ["true"]
 resume = ["true"]
@@ -36,12 +36,12 @@ EOF
 function start_command_branch_checkout { # @test
   # Create a branch with a commit in the test repo
   git -C "$TEST_REPO" checkout -b feature-x
-  echo "feature content" > "$TEST_REPO/feature.txt"
+  echo "feature content" >"$TEST_REPO/feature.txt"
   git -C "$TEST_REPO" add feature.txt
   git -C "$TEST_REPO" commit -m "feature commit"
   git -C "$TEST_REPO" checkout main
 
-  cat > "$TEST_REPO/sweatfile" <<'EOF'
+  cat >"$TEST_REPO/sweatfile" <<'EOF'
 [session-entry]
 start = ["true"]
 resume = ["true"]
@@ -65,7 +65,7 @@ EOF
 }
 
 function start_command_description_from_json { # @test
-  cat > "$TEST_REPO/sweatfile" <<'EOF'
+  cat >"$TEST_REPO/sweatfile" <<'EOF'
 [session-entry]
 start = ["true"]
 resume = ["true"]
@@ -94,7 +94,7 @@ EOF
 }
 
 function start_command_arg_regex_rejects_bad_input { # @test
-  cat > "$TEST_REPO/sweatfile" <<'EOF'
+  cat >"$TEST_REPO/sweatfile" <<'EOF'
 [session-entry]
 start = ["true"]
 resume = ["true"]
@@ -112,7 +112,7 @@ EOF
 }
 
 function start_command_user_overrides_builtin { # @test
-  cat > "$TEST_REPO/sweatfile" <<'EOF'
+  cat >"$TEST_REPO/sweatfile" <<'EOF'
 [session-entry]
 start = ["true"]
 resume = ["true"]
@@ -136,7 +136,7 @@ EOF
 }
 
 function validate_warns_shell_without_regex { # @test
-  cat > "$TEST_REPO/sweatfile" <<'EOF'
+  cat >"$TEST_REPO/sweatfile" <<'EOF'
 [[start-commands]]
 name = "risky"
 exec-start = ["sh", "-c", "echo {arg}"]

@@ -41,11 +41,11 @@ type Hooks struct {
 // StartCommand declares a user-defined `sc start-<name>` subcommand.
 // See CLAUDE.md "Custom start commands" for the full schema.
 type StartCommand struct {
-	Name        string   `toml:"name"`
-	Description string   `toml:"description"`
-	ArgName     string   `toml:"arg-name"`
-	ArgHelp     string   `toml:"arg-help"`
-	ArgRegex    *string  `toml:"arg-regex"`
+	Name            string   `toml:"name"`
+	Description     string   `toml:"description"`
+	ArgName         string   `toml:"arg-name"`
+	ArgHelp         string   `toml:"arg-help"`
+	ArgRegex        *string  `toml:"arg-regex"`
 	ExecCompletions []string `toml:"exec-completions"`
 	ExecStart       []string `toml:"exec-start"`
 }

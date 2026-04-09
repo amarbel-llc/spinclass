@@ -147,7 +147,7 @@ func TestCheckStartCommandsValid(t *testing.T) {
 	sf := sweatfile.Sweatfile{
 		StartCommands: []sweatfile.StartCommand{
 			{
-				Name:   "jira",
+				Name:      "jira",
 				ExecStart: []string{"echo", "hi"},
 			},
 		},

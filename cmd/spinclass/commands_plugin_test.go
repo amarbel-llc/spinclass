@@ -10,13 +10,13 @@ import (
 func TestBuildPluginCommandParams(t *testing.T) {
 	regex := "^[A-Z]+-[0-9]+$"
 	sc := sweatfile.StartCommand{
-		Name:        "jira",
-		Description: "Start a JIRA session",
-		ArgName:     "ticket",
-		ArgHelp:     "JIRA ticket ID",
-		ArgRegex:    &regex,
-		ExecCompletions:  []string{"printf", `[{"arg":"FOO-1","description":"first"},{"arg":"FOO-2","description":"second"}]`},
-		ExecStart:      []string{"printf", "%s", `{"context":"# hi {arg}"}`},
+		Name:            "jira",
+		Description:     "Start a JIRA session",
+		ArgName:         "ticket",
+		ArgHelp:         "JIRA ticket ID",
+		ArgRegex:        &regex,
+		ExecCompletions: []string{"printf", `[{"arg":"FOO-1","description":"first"},{"arg":"FOO-2","description":"second"}]`},
+		ExecStart:       []string{"printf", "%s", `{"context":"# hi {arg}"}`},
 	}
 
 	cmd := buildPluginCommand("start-jira", sc)
