@@ -8,7 +8,7 @@ setup() {
 }
 
 function validate_valid_sweatfile { # @test
-  cat > "$TEST_REPO/sweatfile" <<'EOF'
+  cat >"$TEST_REPO/sweatfile" <<'EOF'
 [claude]
 allow = ["Bash(git *)"]
 
@@ -22,7 +22,7 @@ EOF
 }
 
 function validate_invalid_syntax { # @test
-  cat > "$TEST_REPO/sweatfile" <<'EOF'
+  cat >"$TEST_REPO/sweatfile" <<'EOF'
 this is not valid toml [[[
 EOF
 
@@ -32,7 +32,7 @@ EOF
 }
 
 function validate_invalid_claude_allow { # @test
-  cat > "$TEST_REPO/sweatfile" <<'EOF'
+  cat >"$TEST_REPO/sweatfile" <<'EOF'
 [claude]
 allow = ["(unclosed"]
 EOF
@@ -44,7 +44,7 @@ EOF
 }
 
 function validate_unknown_field { # @test
-  cat > "$TEST_REPO/sweatfile" <<'EOF'
+  cat >"$TEST_REPO/sweatfile" <<'EOF'
 bogus_field = "should fail"
 EOF
 
@@ -52,4 +52,49 @@ EOF
   run_sc validate
   assert_failure
   assert_output --partial "unknown field"
+}
+
+function validate_valid_mcps { # @test
+  cat >"$TEST_REPO/sweatfile" <<'EOF'
+allowed-mcps = ["external-server"]
+
+[[mcps]]
+name = "my-linter"
+command = "my-linter"
+args = ["serve"]
+EOF
+
+  cd "$TEST_REPO"
+  run_sc validate
+  assert_success
+}
+
+function validate_mcps_missing_name { # @test
+  cat >"$TEST_REPO/sweatfile" <<'EOF'
+[[mcps]]
+command = "my-linter"
+EOF
+
+  cd "$TEST_REPO"
+  run_sc validate
+  assert_failure
+  assert_output --partial "missing"
+}
+
+function validate_mcps_duplicate_name { # @test
+  cat >"$TEST_REPO/sweatfile" <<'EOF'
+[[mcps]]
+name = "linter"
+command = "lint"
+
+[[mcps]]
+name = "linter"
+command = "lint2"
+EOF
+
+  cd "$TEST_REPO"
+  run_sc validate
+  assert_success
+  # Should warn about duplicate but not fail
+  assert_output --partial "duplicate"
 }

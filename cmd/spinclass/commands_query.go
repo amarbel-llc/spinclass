@@ -74,6 +74,21 @@ func registerQueryCommands(app *command.App) {
 			}
 			return command.TextResult(out), nil
 		},
+		RunCLI: func(_ context.Context, _ json.RawMessage) error {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			exitCode := validate.Run(os.Stdout, home, cwd)
+			if exitCode != 0 {
+				return fmt.Errorf("validation failed")
+			}
+			return nil
+		},
 	})
 
 	app.AddCommand(&command.Command{

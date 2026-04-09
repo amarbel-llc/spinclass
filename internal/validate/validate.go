@@ -406,14 +406,18 @@ func Run(w io.Writer, home, repoDir string) int {
 		if len(src.File.MCPs) > 0 {
 			if issues := CheckMCPs(src.File); len(issues) > 0 {
 				for _, iss := range issues {
-					diag := map[string]string{
-						"severity": iss.Severity,
-						"message":  iss.Message,
+					if iss.Severity == SeverityError {
+						diag := map[string]string{
+							"severity": iss.Severity,
+							"message":  iss.Message,
+						}
+						if iss.Value != "" {
+							diag["value"] = iss.Value
+						}
+						sub.NotOk("mcps valid", diag)
+					} else {
+						sub.Ok(fmt.Sprintf("mcps valid # warning: %s", iss.Message))
 					}
-					if iss.Value != "" {
-						diag["value"] = iss.Value
-					}
-					sub.NotOk("mcps valid", diag)
 				}
 			} else {
 				sub.Ok("mcps valid")
