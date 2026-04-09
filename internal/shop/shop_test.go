@@ -481,6 +481,7 @@ func TestAttachCallsExecutorWithCorrectArgs(t *testing.T) {
 
 func TestNewMergeOnCloseCleanWorktree(t *testing.T) {
 	parentDir := t.TempDir()
+	t.Setenv("HOME", parentDir)
 	repoDir := filepath.Join(parentDir, "repo")
 	if err := os.MkdirAll(repoDir, 0o755); err != nil {
 		t.Fatal(err)
