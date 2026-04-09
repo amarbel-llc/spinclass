@@ -173,6 +173,31 @@ func CheckStartCommands(sf sweatfile.Sweatfile) []Issue {
 	return issues
 }
 
+func CheckMCPs(sf sweatfile.Sweatfile) []Issue {
+	var issues []Issue
+	seen := make(map[string]bool, len(sf.MCPs))
+	for _, mcp := range sf.MCPs {
+		if mcp.Name == "" {
+			issues = append(issues, Issue{
+				Message:  "mcps entry missing `name`",
+				Severity: SeverityError,
+				Field:    "mcps.name",
+			})
+			continue
+		}
+		if seen[mcp.Name] {
+			issues = append(issues, Issue{
+				Message:  fmt.Sprintf("duplicate mcps entry %q in this file", mcp.Name),
+				Severity: SeverityWarning,
+				Field:    "mcps.name",
+				Value:    mcp.Name,
+			})
+		}
+		seen[mcp.Name] = true
+	}
+	return issues
+}
+
 func isShellInterpreter(cmd string) bool {
 	base := filepath.Base(cmd)
 	switch base {
@@ -375,6 +400,23 @@ func Run(w io.Writer, home, repoDir string) int {
 				}
 			} else {
 				sub.Ok("start-commands valid")
+			}
+		}
+
+		if len(src.File.MCPs) > 0 {
+			if issues := CheckMCPs(src.File); len(issues) > 0 {
+				for _, iss := range issues {
+					diag := map[string]string{
+						"severity": iss.Severity,
+						"message":  iss.Message,
+					}
+					if iss.Value != "" {
+						diag["value"] = iss.Value
+					}
+					sub.NotOk("mcps valid", diag)
+				}
+			} else {
+				sub.Ok("mcps valid")
 			}
 		}
 

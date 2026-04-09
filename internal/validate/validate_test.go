@@ -244,3 +244,46 @@ func TestCheckStartCommandsNonShellNoWarning(t *testing.T) {
 		t.Errorf("expected no issues for non-shell exec-start, got %v", issues)
 	}
 }
+
+func TestCheckMCPsValid(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		MCPs: []sweatfile.MCPServerDef{
+			{Name: "linter", Command: "lint", Args: []string{"serve"}},
+		},
+	}
+	issues := CheckMCPs(sf)
+	if len(issues) != 0 {
+		t.Errorf("expected no issues, got %v", issues)
+	}
+}
+
+func TestCheckMCPsMissingName(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		MCPs: []sweatfile.MCPServerDef{
+			{Command: "lint"},
+		},
+	}
+	issues := CheckMCPs(sf)
+	if len(issues) != 1 || issues[0].Severity != SeverityError {
+		t.Errorf("expected 1 error for missing name, got %v", issues)
+	}
+}
+
+func TestCheckMCPsDuplicateName(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		MCPs: []sweatfile.MCPServerDef{
+			{Name: "linter", Command: "lint"},
+			{Name: "linter", Command: "lint2"},
+		},
+	}
+	issues := CheckMCPs(sf)
+	hasWarn := false
+	for _, iss := range issues {
+		if iss.Severity == SeverityWarning && iss.Field == "mcps.name" {
+			hasWarn = true
+		}
+	}
+	if !hasWarn {
+		t.Errorf("expected warning for duplicate name, got %v", issues)
+	}
+}

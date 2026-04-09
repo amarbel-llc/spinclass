@@ -251,7 +251,18 @@ func applyWorktreeConfig(
 		return fmt.Errorf("trusting workspace in claude: %w", err)
 	}
 
-	if err := claude.WriteMCPConfig(worktreePath); err != nil {
+	// Build MCP server entries from sweatfile
+	var mcpEntries []claude.MCPServerEntry
+	for _, mcp := range sweetfile.Merged.ActiveMCPs() {
+		mcpEntries = append(mcpEntries, claude.MCPServerEntry{
+			Name:    mcp.Name,
+			Command: mcp.Command,
+			Args:    mcp.Args,
+			Env:     mcp.Env,
+		})
+	}
+
+	if err := claude.WriteMCPConfig(worktreePath, mcpEntries); err != nil {
 		return fmt.Errorf("writing .mcp.json: %w", err)
 	}
 
