@@ -174,6 +174,13 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 	}
 	decodeStartCommands(d.cstDoc, &d.data, d.consumed, "")
 
+	// allowed-mcps (top-level array)
+	if v, err := document.GetFromContainer[[]string](d.cstDoc, d.cstDoc.Root(), "allowed-mcps"); err == nil {
+		d.data.AllowedMCPs = v
+		d.consumed["allowed-mcps"] = true
+	}
+	decodeMCPs(d.cstDoc, &d.data, d.consumed, "")
+
 	return d, nil
 }
 
@@ -265,6 +272,68 @@ func encodeStartCommands(doc *document.Document, data *Sweatfile) error {
 	return nil
 }
 
+func decodeMCPs(
+	doc *document.Document,
+	data *Sweatfile,
+	consumed map[string]bool,
+	keyPrefix string,
+) {
+	nodes := doc.FindArrayTableNodes("mcps")
+	if len(nodes) == 0 {
+		return
+	}
+	consumed[keyPrefix+"mcps"] = true
+	data.MCPs = make([]MCPServerDef, len(nodes))
+	for i, node := range nodes {
+		if v, err := document.GetFromContainer[string](doc, node, "name"); err == nil {
+			data.MCPs[i].Name = v
+			consumed[keyPrefix+"mcps.name"] = true
+		}
+		if v, err := document.GetFromContainer[string](doc, node, "command"); err == nil {
+			data.MCPs[i].Command = v
+			consumed[keyPrefix+"mcps.command"] = true
+		}
+		if v, err := document.GetFromContainer[[]string](doc, node, "args"); err == nil {
+			data.MCPs[i].Args = v
+			consumed[keyPrefix+"mcps.args"] = true
+		}
+		if envNode := doc.FindTableInContainer(node, "env"); envNode != nil {
+			data.MCPs[i].Env = document.GetStringMapFromTable(envNode)
+			consumed[keyPrefix+"mcps.env"] = true
+			document.MarkAllConsumed(envNode, keyPrefix+"mcps.env", consumed)
+		}
+	}
+}
+
+func encodeMCPs(doc *document.Document, data *Sweatfile) error {
+	for i := range data.MCPs {
+		entry := doc.AppendArrayTableEntry("mcps")
+		mcp := &data.MCPs[i]
+		if err := doc.SetInContainer(entry, "name", mcp.Name); err != nil {
+			return err
+		}
+		if mcp.Command != "" {
+			if err := doc.SetInContainer(entry, "command", mcp.Command); err != nil {
+				return err
+			}
+		}
+		if mcp.Args != nil {
+			if err := doc.SetInContainer(entry, "args", mcp.Args); err != nil {
+				return err
+			}
+		}
+		if len(mcp.Env) > 0 {
+			envNode := doc.EnsureTableInContainer(entry, "env")
+			for k, v := range mcp.Env {
+				if err := doc.SetInContainer(envNode, k, v); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func (d *SweatfileDocument) Data() *Sweatfile { return &d.data }
 
 func (d *SweatfileDocument) Encode() ([]byte, error) {
@@ -343,6 +412,14 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 		}
 	}
 	if err := encodeStartCommands(d.cstDoc, &d.data); err != nil {
+		return nil, err
+	}
+	if d.data.AllowedMCPs != nil {
+		if err := d.cstDoc.SetInContainer(d.cstDoc.Root(), "allowed-mcps", d.data.AllowedMCPs); err != nil {
+			return nil, err
+		}
+	}
+	if err := encodeMCPs(d.cstDoc, &d.data); err != nil {
 		return nil, err
 	}
 

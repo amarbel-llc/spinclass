@@ -25,6 +25,9 @@ func Parse(data []byte) (*SweatfileDocument, error) {
 	if doc.consumed["direnv.envrc"] && doc.data.Direnv != nil && doc.data.Direnv.Envrc == nil {
 		doc.data.Direnv.Envrc = []string{}
 	}
+	if doc.consumed["allowed-mcps"] && doc.data.AllowedMCPs == nil {
+		doc.data.AllowedMCPs = []string{}
+	}
 	return doc, nil
 }
 

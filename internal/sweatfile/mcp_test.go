@@ -178,3 +178,99 @@ func TestMergeMCPsFullReplace(t *testing.T) {
 		t.Errorf("expected lint-v2, got %s", merged.MCPs[0].Command)
 	}
 }
+
+func TestParseMCPsFromTOML(t *testing.T) {
+	input := []byte(`
+allowed-mcps = ["external-server"]
+
+[[mcps]]
+name = "my-linter"
+command = "my-linter"
+args = ["serve"]
+
+[mcps.env]
+DEBUG = "1"
+
+[[mcps]]
+name = "formatter"
+command = "fmt"
+`)
+	doc, err := Parse(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	sf := *doc.Data()
+
+	if len(sf.AllowedMCPs) != 1 || sf.AllowedMCPs[0] != "external-server" {
+		t.Errorf("AllowedMCPs: got %v", sf.AllowedMCPs)
+	}
+	if len(sf.MCPs) != 2 {
+		t.Fatalf("MCPs: expected 2, got %d", len(sf.MCPs))
+	}
+	if sf.MCPs[0].Name != "my-linter" || sf.MCPs[0].Command != "my-linter" {
+		t.Errorf("MCPs[0]: got %+v", sf.MCPs[0])
+	}
+	if sf.MCPs[0].Env["DEBUG"] != "1" {
+		t.Errorf("MCPs[0].Env: got %v", sf.MCPs[0].Env)
+	}
+	if sf.MCPs[1].Name != "formatter" || sf.MCPs[1].Command != "fmt" {
+		t.Errorf("MCPs[1]: got %+v", sf.MCPs[1])
+	}
+}
+
+func TestParseMCPsEmptyAllowedMCPs(t *testing.T) {
+	input := []byte(`allowed-mcps = []`)
+	doc, err := Parse(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	sf := *doc.Data()
+
+	if sf.AllowedMCPs == nil {
+		t.Error("expected non-nil empty slice for AllowedMCPs")
+	}
+	if len(sf.AllowedMCPs) != 0 {
+		t.Errorf("expected empty, got %v", sf.AllowedMCPs)
+	}
+}
+
+func TestParseMCPsNoUndecodedKeys(t *testing.T) {
+	input := []byte(`
+allowed-mcps = ["ext"]
+
+[[mcps]]
+name = "linter"
+command = "lint"
+args = ["serve"]
+
+[mcps.env]
+KEY = "val"
+`)
+	doc, err := Parse(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	undecoded := doc.Undecoded()
+	if len(undecoded) != 0 {
+		t.Errorf("expected no undecoded keys, got %v", undecoded)
+	}
+}
+
+func TestParseMCPsRemovalSentinel(t *testing.T) {
+	input := []byte(`
+[[mcps]]
+name = "linter"
+`)
+	doc, err := Parse(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	sf := *doc.Data()
+
+	if len(sf.MCPs) != 1 {
+		t.Fatalf("expected 1, got %d", len(sf.MCPs))
+	}
+	if sf.MCPs[0].Name != "linter" || sf.MCPs[0].Command != "" {
+		t.Errorf("expected removal sentinel, got %+v", sf.MCPs[0])
+	}
+}
