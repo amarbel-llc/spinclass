@@ -41,10 +41,11 @@ type Hooks struct {
 // MCPServerDef declares an MCP server to register and auto-approve
 // in Claude Code sessions. See CLAUDE.md "MCP Sweatfile Config" design.
 type MCPServerDef struct {
-	Name    string            `toml:"name"`
-	Command string            `toml:"command"`
-	Args    []string          `toml:"args"`
-	Env     map[string]string `toml:"env"`
+	Name      string            `toml:"name"`
+	Command   string            `toml:"command"`
+	Args      []string          `toml:"args"`
+	Env       map[string]string `toml:"env"`
+	AutoAllow []string          `toml:"auto-allow"`
 }
 
 // StartCommand declares a user-defined `sc start-<name>` subcommand.

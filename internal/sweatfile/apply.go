@@ -265,6 +265,21 @@ func ApplyClaudeSettings(worktreePath string, sweatfile Sweatfile) error {
 	}
 	doc["enabledMcpjsonServers"] = enabledMCPs
 
+	// Execute auto-allow commands from [[mcps]] entries and collect
+	// tool-level permission rules. Failures are reported to stderr
+	// rather than blocking session creation.
+	for _, mcp := range sweatfile.ActiveMCPs() {
+		tools, err := ExecAutoAllow(mcp)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: auto-allow for %q: %s\n", mcp.Name, err)
+			continue
+		}
+		allRules = append(allRules, tools...)
+	}
+
+	// Re-apply allRules after auto-allow additions.
+	permsMap["allow"] = allRules
+
 	if git.IsWorktree(worktreePath) {
 		hooksMap := map[string]any{
 			"PreToolUse": []any{

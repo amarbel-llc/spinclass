@@ -189,6 +189,22 @@ DEBUG = "1"
 - `[[mcps]]` uses dedup-by-name merge (same as `[[start-commands]]`).
   Name-only entry (empty command) removes an inherited server.
 - Every `[[mcps]]` entry with a command implicitly adds to the allow-list.
+- `auto-allow` optionally declares a command that spinclass execs at session
+  start to discover tool-level permissions. The command's stdout must be JSON:
+  `{"tools": ["tool_name_1", "tool_name_2"]}`. Tool names must be bare
+  (no `mcp__` prefix); spinclass constructs the fully-qualified
+  `mcp__<server>__<tool>` form and appends them to `permissions.allow` in
+  `.claude/settings.local.json`. A `servers` field in the response is an
+  error (MCP servers cannot auto-allow other servers). Command failures are
+  reported to stderr but do not block session creation.
+
+```toml
+[[mcps]]
+name = "moxy"
+command = "moxy"
+args = ["serve"]
+auto-allow = ["moxy", "auto-allow"]
+```
 
 ## Nix Build
 

@@ -287,3 +287,33 @@ func TestCheckMCPsDuplicateName(t *testing.T) {
 		t.Errorf("expected warning for duplicate name, got %v", issues)
 	}
 }
+
+func TestCheckMCPsAutoAllowOnRemovalSentinel(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		MCPs: []sweatfile.MCPServerDef{
+			{Name: "linter", AutoAllow: []string{"linter", "auto-allow"}},
+		},
+	}
+	issues := CheckMCPs(sf)
+	hasWarn := false
+	for _, iss := range issues {
+		if iss.Severity == SeverityWarning && iss.Field == "mcps.auto-allow" {
+			hasWarn = true
+		}
+	}
+	if !hasWarn {
+		t.Errorf("expected warning for auto-allow on removal sentinel, got %v", issues)
+	}
+}
+
+func TestCheckMCPsAutoAllowWithCommandValid(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		MCPs: []sweatfile.MCPServerDef{
+			{Name: "moxy", Command: "moxy", AutoAllow: []string{"moxy", "auto-allow"}},
+		},
+	}
+	issues := CheckMCPs(sf)
+	if len(issues) != 0 {
+		t.Errorf("expected no issues, got %v", issues)
+	}
+}
