@@ -156,8 +156,30 @@ func CheckStartCommands(sf sweatfile.Sweatfile) []Issue {
 				})
 			}
 		}
+		if len(sc.ExecStart) > 0 && isShellInterpreter(sc.ExecStart[0]) &&
+			(sc.ArgRegex == nil || *sc.ArgRegex == "") {
+			issues = append(issues, Issue{
+				Message: fmt.Sprintf(
+					"start-command %q uses a shell interpreter without arg-regex; "+
+						"consider adding arg-regex to validate input",
+					sc.Name,
+				),
+				Severity: SeverityWarning,
+				Field:    "start-commands.exec-start",
+				Value:    sc.Name,
+			})
+		}
 	}
 	return issues
+}
+
+func isShellInterpreter(cmd string) bool {
+	base := filepath.Base(cmd)
+	switch base {
+	case "sh", "bash", "zsh", "fish", "dash", "ksh":
+		return true
+	}
+	return false
 }
 
 func CheckGitExcludes(sf sweatfile.Sweatfile) []Issue {

@@ -1356,3 +1356,64 @@ func TestGetDefaultShipsGhIssueStartCommand(t *testing.T) {
 		t.Error("ExecCompletions must be non-empty")
 	}
 }
+
+func TestMergePrecedenceUserOverridesDefault(t *testing.T) {
+	userConfig := Sweatfile{
+		StartCommands: []StartCommand{
+			{
+				Name:      "gh_issue",
+				ExecStart: []string{"echo", "user override"},
+			},
+		},
+	}
+	merged := GetDefault().MergeWith(userConfig)
+	var found *StartCommand
+	for i := range merged.StartCommands {
+		if merged.StartCommands[i].Name == "gh_issue" {
+			found = &merged.StartCommands[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("expected gh_issue entry in merged result")
+	}
+	if len(found.ExecStart) != 2 || found.ExecStart[1] != "user override" {
+		t.Errorf("user config should override default, got ExecStart = %v", found.ExecStart)
+	}
+}
+
+func TestMergeWithDoesNotMutateBaseSlice(t *testing.T) {
+	base := Sweatfile{
+		StartCommands: []StartCommand{
+			{Name: "a", ExecStart: []string{"echo", "a"}},
+			{Name: "b", ExecStart: []string{"echo", "b"}},
+		},
+	}
+	origLen := len(base.StartCommands)
+	origFirst := base.StartCommands[0].ExecStart[1]
+
+	other := Sweatfile{
+		StartCommands: []StartCommand{
+			{Name: "a", ExecStart: []string{"echo", "overridden"}},
+			{Name: "c", ExecStart: []string{"echo", "c"}},
+		},
+	}
+	merged := base.MergeWith(other)
+
+	// base should be untouched
+	if len(base.StartCommands) != origLen {
+		t.Errorf("base.StartCommands length changed from %d to %d", origLen, len(base.StartCommands))
+	}
+	if base.StartCommands[0].ExecStart[1] != origFirst {
+		t.Errorf("base.StartCommands[0] mutated: ExecStart[1] = %q, want %q",
+			base.StartCommands[0].ExecStart[1], origFirst)
+	}
+
+	// merged should have 3 entries: a (overridden), b, c
+	if len(merged.StartCommands) != 3 {
+		t.Fatalf("expected 3 merged entries, got %d", len(merged.StartCommands))
+	}
+	if merged.StartCommands[0].ExecStart[1] != "overridden" {
+		t.Errorf("merged[0] should be overridden, got %q", merged.StartCommands[0].ExecStart[1])
+	}
+}

@@ -204,3 +204,43 @@ func TestCheckStartCommandsBadRegex(t *testing.T) {
 		t.Fatalf("expected 1 regex issue, got %v", issues)
 	}
 }
+
+func TestCheckStartCommandsShellWithoutRegexWarns(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		StartCommands: []sweatfile.StartCommand{
+			{Name: "custom", ExecStart: []string{"sh", "-c", "echo {arg}"}},
+		},
+	}
+	issues := CheckStartCommands(sf)
+	if len(issues) != 1 {
+		t.Fatalf("expected 1 warning, got %v", issues)
+	}
+	if issues[0].Severity != SeverityWarning {
+		t.Errorf("expected warning severity, got %s", issues[0].Severity)
+	}
+}
+
+func TestCheckStartCommandsShellWithRegexNoWarning(t *testing.T) {
+	regex := "^[0-9]+$"
+	sf := sweatfile.Sweatfile{
+		StartCommands: []sweatfile.StartCommand{
+			{Name: "custom", ExecStart: []string{"bash", "-c", "echo {arg}"}, ArgRegex: &regex},
+		},
+	}
+	issues := CheckStartCommands(sf)
+	if len(issues) != 0 {
+		t.Errorf("expected no issues when shell has arg-regex, got %v", issues)
+	}
+}
+
+func TestCheckStartCommandsNonShellNoWarning(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		StartCommands: []sweatfile.StartCommand{
+			{Name: "custom", ExecStart: []string{"jira", "show", "{arg}"}},
+		},
+	}
+	issues := CheckStartCommands(sf)
+	if len(issues) != 0 {
+		t.Errorf("expected no issues for non-shell exec-start, got %v", issues)
+	}
+}
