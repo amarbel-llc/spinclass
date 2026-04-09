@@ -889,3 +889,72 @@ func TestRunPreMergeHookEmptyStringIsNoop(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestApplyClaudeSettingsEnabledMCPs(t *testing.T) {
+	dir := t.TempDir()
+
+	sf := Sweatfile{
+		AllowedMCPs: []string{"external-server"},
+		MCPs: []MCPServerDef{
+			{Name: "my-linter", Command: "lint"},
+		},
+	}
+
+	err := ApplyClaudeSettings(dir, sf)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, ".claude", "settings.local.json"))
+	var doc map[string]any
+	json.Unmarshal(data, &doc)
+
+	enabledRaw, _ := doc["enabledMcpjsonServers"].([]any)
+	enabled := make(map[string]bool)
+	for _, v := range enabledRaw {
+		enabled[v.(string)] = true
+	}
+
+	if !enabled["spinclass"] {
+		t.Error("expected spinclass in enabledMcpjsonServers")
+	}
+	if !enabled["external-server"] {
+		t.Error("expected external-server in enabledMcpjsonServers")
+	}
+	if !enabled["my-linter"] {
+		t.Error("expected my-linter in enabledMcpjsonServers")
+	}
+}
+
+func TestApplyClaudeSettingsEnabledMCPsDedup(t *testing.T) {
+	dir := t.TempDir()
+
+	sf := Sweatfile{
+		AllowedMCPs: []string{"spinclass", "my-linter"},
+		MCPs: []MCPServerDef{
+			{Name: "my-linter", Command: "lint"},
+		},
+	}
+
+	err := ApplyClaudeSettings(dir, sf)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, ".claude", "settings.local.json"))
+	var doc map[string]any
+	json.Unmarshal(data, &doc)
+
+	enabledRaw, _ := doc["enabledMcpjsonServers"].([]any)
+	// Should have spinclass and my-linter, no duplicates
+	names := make(map[string]int)
+	for _, v := range enabledRaw {
+		names[v.(string)]++
+	}
+	if names["spinclass"] != 1 {
+		t.Errorf("expected spinclass once, got %d", names["spinclass"])
+	}
+	if names["my-linter"] != 1 {
+		t.Errorf("expected my-linter once, got %d", names["my-linter"])
+	}
+}
