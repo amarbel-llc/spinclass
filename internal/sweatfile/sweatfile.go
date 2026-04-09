@@ -38,6 +38,15 @@ type Hooks struct {
 	ToolUseLog           *bool   `toml:"tool-use-log"`
 }
 
+// MCPServerDef declares an MCP server to register and auto-approve
+// in Claude Code sessions. See CLAUDE.md "MCP Sweatfile Config" design.
+type MCPServerDef struct {
+	Name    string            `toml:"name"`
+	Command string            `toml:"command"`
+	Args    []string          `toml:"args"`
+	Env     map[string]string `toml:"env"`
+}
+
 // StartCommand declares a user-defined `sc start-<name>` subcommand.
 // See CLAUDE.md "Custom start commands" for the full schema.
 type StartCommand struct {
@@ -58,6 +67,8 @@ type Sweatfile struct {
 	Hooks         *Hooks         `toml:"hooks"`
 	SessionEntry  *SessionEntry  `toml:"session-entry"`
 	StartCommands []StartCommand `toml:"start-commands"`
+	AllowedMCPs   []string       `toml:"allowed-mcps"`
+	MCPs          []MCPServerDef `toml:"mcps"`
 }
 
 func (sf Sweatfile) StopHookCommand() *string {
@@ -93,6 +104,42 @@ func (sf Sweatfile) GitExcludes() []string {
 		return nil
 	}
 	return sf.Git.Excludes
+}
+
+// EffectiveAllowedMCPs returns the deduplicated list of MCP server names
+// that should be auto-approved. Combines explicit allowed-mcps entries
+// with implicit names from [[mcps]] entries that have a non-empty command.
+func (sf Sweatfile) EffectiveAllowedMCPs() []string {
+	seen := make(map[string]bool)
+	var result []string
+
+	for _, name := range sf.AllowedMCPs {
+		if !seen[name] {
+			seen[name] = true
+			result = append(result, name)
+		}
+	}
+
+	for _, mcp := range sf.MCPs {
+		if mcp.Command != "" && !seen[mcp.Name] {
+			seen[mcp.Name] = true
+			result = append(result, mcp.Name)
+		}
+	}
+
+	return result
+}
+
+// ActiveMCPs returns only [[mcps]] entries with a non-empty command
+// (i.e., excluding removal sentinels).
+func (sf Sweatfile) ActiveMCPs() []MCPServerDef {
+	var active []MCPServerDef
+	for _, mcp := range sf.MCPs {
+		if mcp.Command != "" {
+			active = append(active, mcp)
+		}
+	}
+	return active
 }
 
 func (sf Sweatfile) ToolUseLogEnabled() bool {
