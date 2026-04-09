@@ -132,28 +132,37 @@ automatically by the `--append-system-prompt` flow.
 
 ```toml
 [[start-commands]]
-name         = "jira"               # registers `sc start-jira`
-description  = "Start session for a JIRA ticket"
-arg-name     = "ticket"             # positional parameter name
-arg-help     = "JIRA ticket ID"
-arg-regex    = "^[A-Z]+-[0-9]+$"    # optional RE2 validator
-completion   = ["sh", "-c", "jira list --format '{{.Key}}\t{{.Summary}}'"]
-prompt       = ["jira", "show", "{arg}", "--markdown"]
+name             = "jira"               # registers `sc start-jira`
+description      = "Start session for a JIRA ticket"
+arg-name         = "ticket"             # positional parameter name
+arg-help         = "JIRA ticket ID"
+arg-regex        = "^[A-Z]+-[0-9]+$"    # optional RE2 validator
+exec-completions = ["sh", "-c", "jira list --json | jq '[.[] | {arg: .key, description: .summary}]'"]
+exec-start       = ["sh", "-c", "jira show {arg} --json | jq '{context: .body}'"]
 ```
 
-- `completion` is exec'd at tab-completion time. Stdout is parsed as
-  `value\tdescription` lines into the completion map. Failures are silent.
-- `prompt` is exec'd when the command runs, with `{arg}` literally replaced
-  by the positional value in every argv element. Stdout is written verbatim
-  to `3-start-<name>.md`. The command is exec'd directly (no shell); wrap
-  in `sh -c` for shell features.
+- `exec-completions` is exec'd at tab-completion time. Stdout must be JSON:
+  `[{"arg": "...", "description": "..."}, ...]`. Failures are silent.
+- `exec-start` is exec'd when the command runs, with `{arg}` literally
+  replaced by the positional value in every argv element. Stdout must be
+  JSON with the schema: `{"branch"?: string, "description"?: string,
+  "context": string}`. The command is exec'd directly (no shell); wrap in
+  `sh -c` for shell features.
+  - `context` — written to `3-start-<name>.md` as the session's system
+    prompt fragment.
+  - `description` — used as the session description if the user didn't
+    pass `--description`.
+  - `branch` — when present, checks out an existing local or remote
+    branch (mirroring `start-gh_pr` behaviour) instead of creating a
+    new one. The branch must already exist.
 - Entries merge across the sweatfile hierarchy (`global → parent → repo`)
   and later definitions override earlier ones by `name`. The built-in
   `gh_issue` entry ships via `sweatfile.GetDefault()` as a tracer bullet —
   it is the same plugin mechanism users get, just baked in.
 - Built-in subcommands (e.g. `start` itself or `start-gh_pr`) always win
   over a sweatfile entry with the same name; `sc validate` flags obviously
-  broken entries (missing `prompt`, bad name, non-compiling regex).
+  broken entries (missing `exec-start`, bad name, non-compiling regex,
+  shell interpreter without `arg-regex`).
 
 ## Nix Build
 
