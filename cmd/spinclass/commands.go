@@ -1,10 +1,14 @@
 package main
 
 import (
+	"embed"
 	"encoding/json"
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 )
+
+//go:embed doc/spinclass-start-commands.7
+var extraManpages embed.FS
 
 // version is set at link time via -ldflags "-X main.version=...".
 var version = "dev"
@@ -21,6 +25,14 @@ func buildApp() *command.App {
 	app.PluginAuthor = "amarbel-llc"
 	app.PluginDescription = "Git worktree session manager with sweatfile-driven configuration"
 	app.MCPArgs = []string{"serve"}
+	app.ExtraManpages = []command.ManpageFile{
+		{
+			Source:  extraManpages,
+			Path:    "doc/spinclass-start-commands.7",
+			Section: 7,
+			Name:    "spinclass-start-commands.7",
+		},
+	}
 
 	app.Params = []command.Param{
 		{

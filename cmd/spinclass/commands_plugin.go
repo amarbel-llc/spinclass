@@ -89,10 +89,27 @@ func buildPluginCommand(cmdName string, sc sweatfile.StartCommand) *command.Comm
 	if shortDesc == "" {
 		shortDesc = "Start a session via the " + sc.Name + " plugin"
 	}
-	return &command.Command{
+
+	longDesc := fmt.Sprintf(
+		"Config-driven start command declared via [[start-commands]] in the sweatfile. "+
+			"Runs the exec-start command with {arg} replaced by the positional argument, "+
+			"parses the JSON output, creates a worktree session, and writes the context "+
+			"fragment to .spinclass/system_prompt_append.d/3-start-%s.md.\n\n"+
+			"The exec-start command must produce JSON on stdout with the schema:\n\n"+
+			"  {\"branch\": \"<optional>\", \"description\": \"<optional>\", \"context\": \"<string>\"}\n\n"+
+			"When branch is set, an existing local or remote branch is checked out "+
+			"(like start-gh_pr) instead of creating a new one. When description is set, "+
+			"it becomes the session description unless --description is passed. The context "+
+			"value is written as the session's system prompt fragment.\n\n"+
+			"See spinclass-start-commands(7) for the full plugin authoring guide.",
+		sc.Name,
+	)
+
+	cmd := &command.Command{
 		Name: cmdName,
 		Description: command.Description{
 			Short: shortDesc,
+			Long:  longDesc,
 		},
 		Params: []command.Param{
 			{
@@ -106,8 +123,27 @@ func buildPluginCommand(cmdName string, sc sweatfile.StartCommand) *command.Comm
 			{Name: "merge-on-close", Type: command.Bool, Description: "Auto-merge worktree into default branch on session close"},
 			{Name: "no-attach", Type: command.Bool, Description: "Create worktree but skip attaching"},
 		},
+		Files: []command.FilePath{
+			{
+				Path:        fmt.Sprintf(".spinclass/system_prompt_append.d/3-start-%s.md", sc.Name),
+				Description: "System prompt fragment written from the exec-start context field.",
+			},
+		},
 		RunCLI: makePluginRunCLI(sc, argName),
 	}
+
+	cmd.Examples = []command.Example{
+		{
+			Description: fmt.Sprintf("Start a session with %s", sc.Name),
+			Command:     fmt.Sprintf("sc %s <value>", cmdName),
+		},
+		{
+			Description: "Create worktree without attaching",
+			Command:     fmt.Sprintf("sc %s --no-attach <value>", cmdName),
+		},
+	}
+
+	return cmd
 }
 
 // execCompletionEntry is the JSON schema for a single completion item

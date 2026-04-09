@@ -1,0 +1,245 @@
+.TH SPINCLASS-START-COMMANDS 7 "" "spinclass" "Spinclass Reference"
+.SH NAME
+spinclass-start-commands \- authoring guide for custom start-* plugins
+.SH DESCRIPTION
+Spinclass supports config-driven
+.B start-*
+subcommands declared via
+.B [[start-commands]]
+entries in the sweatfile hierarchy.
+Each entry registers a
+.BI sc\ start- name
+subcommand that validates a positional argument, offers tab completion,
+and creates a worktree session with a system prompt fragment.
+.PP
+This page documents the sweatfile schema, the JSON protocols for
+.B exec-start
+and
+.BR exec-completions ,
+and the runtime behaviour so that agents and users can author new
+plugins without reading Go source.
+.SH SWEATFILE SCHEMA
+Each plugin is declared as a TOML array-of-tables entry:
+.PP
+.RS 4
+.nf
+[[start-commands]]
+name             = "jira"
+description      = "Start session for a JIRA ticket"
+arg-name         = "ticket"
+arg-help         = "JIRA ticket ID"
+arg-regex        = "^[A-Z]+\-[0-9]+$"
+exec-completions = ["sh", "\-c", "jira list \-\-json | jq '[.[] | {arg: .key, description: .summary}]'"]
+exec-start       = ["sh", "\-c", "jira show {arg} \-\-json | jq '{context: .body}'"]
+.fi
+.RE
+.SS Fields
+.TP
+.B name
+(required) Lowercase identifier matching
+.IR ^[a\-z][a\-z0\-9_\-]*$ .
+Registers the subcommand as
+.BI sc\ start- name .
+Duplicate names within a single file are rejected by
+.BR "sc validate" .
+.TP
+.B description
+Short description shown in
+.B \-\-help
+and manpages.
+Defaults to \(lqStart a session via the
+.I name
+plugin\(rq.
+.TP
+.B arg-name
+Name of the positional parameter (e.g. \(lqticket\(rq, \(lqissue\(rq).
+Defaults to \(lqarg\(rq.
+.TP
+.B arg-help
+One-line help text for the positional parameter.
+.TP
+.B arg-regex
+Optional RE2 regular expression.
+The positional argument is validated against this before
+.B exec-start
+runs.
+.B sc validate
+warns when
+.B exec-start
+uses a shell interpreter (sh, bash, zsh, fish, dash, ksh) and
+.B arg-regex
+is not set.
+.TP
+.B exec-completions
+Argv array exec'd at tab-completion time.
+Stdout must be JSON; see
+.BR "EXEC-COMPLETIONS PROTOCOL" .
+Failures are silent.
+May be omitted if no completions are needed.
+.TP
+.B exec-start
+(required) Argv array exec'd when the command runs.
+Every element undergoes literal
+.B {arg}
+substitution with the positional value.
+Stdout must be JSON; see
+.BR "EXEC-START PROTOCOL" .
+The command is exec'd directly (no shell); wrap in
+.B sh \-c
+for shell features like pipes and redirects.
+.SH EXEC-START PROTOCOL
+.B exec-start
+must produce a single JSON object on stdout:
+.PP
+.RS 4
+.nf
+{
+  "branch":      "<optional string>",
+  "description": "<optional string>",
+  "context":     "<required string>"
+}
+.fi
+.RE
+.TP
+.B context
+(required) Written verbatim to
+.IR .spinclass/system_prompt_append.d/3-start- name .md
+as the session's system prompt fragment.
+This is the primary output \(em it provides context to the AI agent
+about what the session is working on.
+.TP
+.B description
+Used as the session description if the user did not pass
+.BR \-\-description .
+Falls back to
+.RI \(lq name ": " arg \(rq.
+.TP
+.B branch
+When present, checks out an existing local or remote branch instead of
+creating a new one.
+The branch must already exist; if it exists only on
+.BR origin ,
+it is fetched automatically.
+This mirrors the behaviour of
+.BR "sc start\-gh_pr" .
+When absent, a new branch is created with an auto-generated name
+derived from the description.
+.PP
+Invalid JSON causes the command to fail with a diagnostic.
+An empty
+.B context
+value (after trimming whitespace) skips fragment creation.
+.SH EXEC-COMPLETIONS PROTOCOL
+.B exec-completions
+must produce a JSON array on stdout:
+.PP
+.RS 4
+.nf
+[
+  {"arg": "FOO-1", "description": "First ticket"},
+  {"arg": "FOO-2", "description": "Second ticket"}
+]
+.fi
+.RE
+.PP
+Each object has:
+.TP
+.B arg
+The completion value inserted at the command line.
+.TP
+.B description
+Human-readable description shown alongside the completion.
+.PP
+An empty array or invalid JSON silently produces no completions.
+.SH MERGE BEHAVIOUR
+Entries merge across the sweatfile hierarchy
+(global \(-> intermediate parent dirs \(-> repo-level).
+Later definitions override earlier ones by
+.BR name ,
+preserving the position of the first occurrence.
+.PP
+The built-in
+.B gh_issue
+entry ships via
+.B sweatfile.GetDefault()
+and can be overridden by declaring a
+.B name = "gh_issue"
+entry in any user sweatfile.
+Built-in subcommands (e.g.\&
+.B start
+or
+.BR start-gh_pr )
+always win over a sweatfile entry with the same name.
+.SH VALIDATION
+.B sc validate
+checks each
+.B [[start-commands]]
+entry for:
+.IP \(bu 2
+Missing or invalid
+.BR name .
+.IP \(bu 2
+Missing
+.BR exec-start .
+.IP \(bu 2
+Duplicate names within a single file.
+.IP \(bu 2
+Non-compiling
+.BR arg-regex .
+.IP \(bu 2
+Shell interpreter in
+.B exec-start[0]
+without
+.B arg-regex
+(warning).
+.SH EXAMPLES
+A minimal plugin that adds ticket context from a hypothetical CLI:
+.PP
+.RS 4
+.nf
+[[start-commands]]
+name       = "ticket"
+arg-name   = "id"
+arg-regex  = "^[0-9]+$"
+exec-start = ["sh", "\-c", "ticket show {arg} \-\-json | jq '{context: .body}'"]
+.fi
+.RE
+.PP
+A plugin that checks out a feature branch and provides context:
+.PP
+.RS 4
+.nf
+[[start-commands]]
+name             = "feature"
+arg-name         = "branch"
+exec-completions = ["sh", "\-c", "git branch \-\-format '%(refname:short)' | jq \-Rs '[split(\"\\n\") | .[] | select(. != \"\") | {arg: ., description: \"\"}]'"]
+exec-start       = ["sh", "\-c", "echo '{\"branch\": \"{arg}\", \"context\": \"# Working on branch {arg}\"}'"]
+.fi
+.RE
+.PP
+Override the built-in gh_issue with a custom implementation:
+.PP
+.RS 4
+.nf
+[[start-commands]]
+name             = "gh_issue"
+arg-regex        = "^[0-9]+$"
+exec-completions = ["sh", "\-c", "gh issue list \-\-json number,title \-\-limit 20 | jq '[.[] | {arg: (.number | tostring), description: .title}]'"]
+exec-start       = ["sh", "\-c", "gh issue view {arg} \-\-json number,title,body | jq '{context: (\"# Issue \" + (.number|tostring) + \": \" + .title + \"\\n\\n\" + .body)}'"]
+.fi
+.RE
+.SH FILES
+.TP
+.I ~/.config/spinclass/sweatfile
+Global sweatfile (lowest precedence).
+.TP
+.I <repo>/sweatfile
+Repository-level sweatfile (highest precedence).
+.TP
+.IR .spinclass/system_prompt_append.d/3-start- name .md
+System prompt fragment written by the plugin.
+.SH SEE ALSO
+.BR spinclass (1),
+.BR spinclass-start (1),
+.BR spinclass-start\-gh_pr (1),
+.BR spinclass-validate (1)
