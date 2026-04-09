@@ -34,8 +34,8 @@ func TestWriteMCPConfigCreatesFile(t *testing.T) {
 	}
 
 	args, ok := sc["args"].([]any)
-	if !ok || len(args) != 1 || args[0] != "serve-mcp" {
-		t.Errorf("expected args=[serve-mcp], got %v", sc["args"])
+	if !ok || len(args) != 1 || args[0] != "serve" {
+		t.Errorf("expected args=[serve], got %v", sc["args"])
 	}
 }
 

@@ -16,7 +16,7 @@ type MCPServerEntry struct {
 }
 
 // WriteMCPConfig writes a .mcp.json in worktreePath that configures
-// spinclass serve-mcp as a stdio MCP server plus any additional servers.
+// spinclass serve as a stdio MCP server plus any additional servers.
 // If .mcp.json already exists, entries are merged in without clobbering
 // other servers.
 func WriteMCPConfig(worktreePath string, extraServers []MCPServerEntry) error {
@@ -38,7 +38,7 @@ func WriteMCPConfig(worktreePath string, extraServers []MCPServerEntry) error {
 	servers["spinclass"] = map[string]any{
 		"type":    "stdio",
 		"command": "spinclass",
-		"args":    []string{"serve-mcp"},
+		"args":    []string{"serve"},
 	}
 
 	for _, entry := range extraServers {
