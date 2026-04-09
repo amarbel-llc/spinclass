@@ -62,8 +62,9 @@ to console.
 
 **Sweatfile config** (`internal/sweatfile/`): TOML-based hierarchical
 configuration. Merges global (`~/.config/spinclass/sweatfile`) → intermediate
-parent dirs → repo-level. Supports `git-excludes`, `claude-allow`, and
-`envrc-directives` arrays (nil = inherit, empty = clear, non-empty = append),
+parent dirs → repo-level. Supports `git-excludes`, `claude-allow`, `envrc-directives`, and
+`allowed-mcps` arrays (nil = inherit, empty = clear, non-empty = append),
+`[[mcps]]` and `[[start-commands]]` arrays of tables (dedup-by-name merge),
 `[env]` table (map merge), `[hooks]` table (create/stop lifecycle hooks, scalar
 override), and `[session]` table (start/resume entrypoint commands, override
 semantics).
@@ -163,6 +164,31 @@ exec-start       = ["sh", "-c", "jira show {arg} --json | jq '{context: .body}'"
   over a sweatfile entry with the same name; `sc validate` flags obviously
   broken entries (missing `exec-start`, bad name, non-compiling regex,
   shell interpreter without `arg-regex`).
+
+## MCP Server Configuration
+
+`allowed-mcps` and `[[mcps]]` control which MCP servers are registered
+and auto-approved in Claude Code sessions.
+
+```toml
+# Auto-approve externally-registered MCP servers by name
+allowed-mcps = ["some-external-server"]
+
+# Register and auto-approve MCP servers
+[[mcps]]
+name = "my-linter"
+command = "my-linter"
+args = ["serve"]
+
+[mcps.env]
+DEBUG = "1"
+```
+
+- `allowed-mcps` uses array-append merge (nil = inherit, `[]` = clear,
+  non-empty = append).
+- `[[mcps]]` uses dedup-by-name merge (same as `[[start-commands]]`).
+  Name-only entry (empty command) removes an inherited server.
+- Every `[[mcps]]` entry with a command implicitly adds to the allow-list.
 
 ## Nix Build
 
