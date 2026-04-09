@@ -1,0 +1,320 @@
+.TH SPINCLASS-SWEATFILE 5 "" "spinclass" "Spinclass Reference"
+.SH NAME
+spinclass-sweatfile \- sweatfile configuration format
+.SH DESCRIPTION
+Spinclass sessions are configured via TOML files called
+.IR sweatfiles .
+These control git excludes, Claude Code permissions, direnv setup,
+session entrypoints, lifecycle hooks, MCP server registration, and
+custom start-* plugins.
+.PP
+Sweatfiles are loaded as a hierarchy that merges
+.I global
+.RI ( ~/.config/spinclass/sweatfile )
+\(-> intermediate parent directories \(-> repository-level
+.RI ( <repo>/sweatfile )
+\(-> worktree-level
+.RI ( <worktree>/sweatfile ).
+Later definitions override earlier ones according to per-field merge
+semantics described below.
+.SH TABLES
+.SS [claude]
+Controls Claude Code session behaviour.
+.TP
+.B system-prompt
+String or file path.
+Passed to
+.B claude \-\-system\-prompt
+at session start.
+If the value is a readable file path, its contents are used.
+.TP
+.B system-prompt-append
+String or file path.
+Written to
+.I .spinclass/system_prompt_append.d/2\-user.md
+and passed via
+.BR claude\ \-\-append\-system\-prompt .
+.TP
+.B allow
+Array of Claude Code permission rules (e.g.\&
+.BR Read ", " Edit ", " "Bash(git *)" ", " "mcp__server__tool" ).
+.B Merge:
+nil = inherit, empty array = clear, non-empty = append.
+.SS [git]
+.TP
+.B excludes
+Array of patterns appended to
+.IR .git/info/exclude .
+.B Merge:
+nil = inherit, empty = clear, non-empty = append.
+.SS [direnv]
+.TP
+.B envrc
+Array of direnv directive lines written to
+.IR .envrc .
+When nil, defaults to
+.B source_up
+(plus
+.B use flake
+if a
+.I flake.nix
+exists).
+.B Merge:
+nil = inherit, empty = clear, non-empty = replace.
+.TP
+.B dotenv
+Table of key-value pairs written to
+.IR .spinclass.env .
+Values support
+.B $VAR
+expansion; the special variable
+.B $WORKTREE
+expands to the worktree path.
+.B Merge:
+map merge (child keys override parent keys).
+.SS [hooks]
+Lifecycle hooks executed as shell scripts.
+.TP
+.B create
+Script run after worktree creation (before session attach).
+.B Merge:
+scalar override.
+.TP
+.B stop
+Script run when the Claude Code session ends (via Stop hook).
+.B Merge:
+scalar override.
+.TP
+.B pre-merge
+Script run before
+.BR "sc merge" .
+.B Merge:
+scalar override.
+.TP
+.B disallow-main-worktree
+Boolean.
+When true,
+.B sc resume
+refuses to attach to the main worktree.
+.B Merge:
+scalar override.
+.TP
+.B tool-use-log
+Boolean.
+When true, a PostToolUse hook logs tool invocations.
+.B Merge:
+scalar override.
+.SS [session\-entry]
+Controls what command is exec'd when attaching to a session.
+.TP
+.B start
+Argv array for new sessions.
+Defaults to
+.BR $SHELL .
+.TP
+.B resume
+Argv array for resumed sessions.
+When nil, falls back to
+.BR start .
+.B Merge:
+scalar override.
+.SS [[start\-commands]]
+Array of tables declaring custom
+.BI sc\ start\- name
+subcommands.
+See
+.BR spinclass\-start\-commands (7)
+for the full schema and JSON protocols.
+.B Merge:
+dedup-by-name (later definition replaces earlier one in-place).
+.SS allowed\-mcps
+Top-level array of MCP server names to auto-approve in
+.IR .claude/settings.local.json .
+These servers must be registered externally (e.g.\& in the user's
+.IR ~/.claude.json ).
+.B Merge:
+nil = inherit, empty = clear, non-empty = append.
+.SS [[mcps]]
+Array of tables declaring MCP servers to register in
+.I .mcp.json
+and auto-approve.
+.TP
+.B name
+(required) Server name.
+Used as the key in
+.I .mcp.json
+and in
+.IR enabledMcpjsonServers .
+.TP
+.B command
+Executable to run.
+A name-only entry (empty command) acts as a removal sentinel,
+removing an inherited server.
+.TP
+.B args
+Argv passed to
+.BR command .
+.TP
+.B env
+Table of environment variables set on the server process.
+.TP
+.B auto-allow
+Argv array.
+When present, spinclass execs this command at session start to
+discover tool-level permissions.
+See
+.BR "AUTO-ALLOW PROTOCOL" .
+.PP
+.B Merge:
+dedup-by-name (full entry replacement, same as
+.BR [[start\-commands]] ).
+Every entry with a non-empty
+.B command
+implicitly adds to the allow-list.
+.SH AUTO-ALLOW PROTOCOL
+The
+.B auto-allow
+field on a
+.B [[mcps]]
+entry declares a command that spinclass executes at session creation
+time.
+The command must print a single JSON object to stdout describing which
+of its tools should be added to
+.B permissions.allow
+in
+.IR .claude/settings.local.json .
+.SS JSON Schema
+.PP
+.RS 4
+.nf
+{
+  "tools": ["tool_name_1", "tool_name_2"]
+}
+.fi
+.RE
+.TP
+.B tools
+(required) Array of bare tool names.
+Names must
+.B not
+include the
+.B mcp__
+prefix; spinclass constructs the fully-qualified form
+.BI mcp__ name __ tool
+using the server's
+.B name
+field.
+.SS Error Handling
+.IP \(bu 2
+If the command exits non-zero, the error is reported to stderr and the
+session is still created.
+.IP \(bu 2
+If stdout is not valid JSON or does not match the schema, a warning is
+printed to stderr.
+.IP \(bu 2
+If any tool name contains the
+.B mcp__
+prefix, it is rejected.
+.IP \(bu 2
+If the response contains a
+.B servers
+field, it is rejected.
+MCP servers cannot auto-allow other servers.
+.SS Example
+.PP
+.RS 4
+.nf
+[[mcps]]
+name = "moxy"
+command = "moxy"
+args = ["serve"]
+auto-allow = ["moxy", "auto-allow"]
+.fi
+.RE
+.PP
+Running
+.B moxy auto-allow
+might produce:
+.PP
+.RS 4
+.nf
+{
+  "tools": [
+    "lsp_execute-command",
+    "grit_commit",
+    "grit_diff",
+    "rg_search"
+  ]
+}
+.fi
+.RE
+.PP
+Spinclass would then add to
+.BR permissions.allow :
+.PP
+.RS 4
+.nf
+mcp__moxy__lsp_execute-command
+mcp__moxy__grit_commit
+mcp__moxy__grit_diff
+mcp__moxy__rg_search
+.fi
+.RE
+.SH MERGE SEMANTICS
+Each field uses one of these merge strategies when combining files in
+the hierarchy:
+.TP
+.B "nil = inherit, empty = clear, non-empty = append"
+Used by array fields:
+.BR claude.allow ", " git.excludes ", " direnv.envrc ", " allowed-mcps .
+A nil value (key absent) inherits the parent's value.
+An explicitly empty array clears inherited values.
+A non-empty array is appended to the parent's list.
+.TP
+.B "scalar override"
+Used by single-value fields:
+.BR hooks.create ", " hooks.stop ", " session-entry.start ", etc."
+The child's value replaces the parent's entirely.
+.TP
+.B "dedup-by-name"
+Used by array-of-tables:
+.BR [[start-commands]] ", " [[mcps]] .
+Entries are matched by
+.BR name ;
+a later entry replaces the entire earlier entry in-place (not a
+field-level merge).
+New names are appended.
+.TP
+.B "map merge"
+Used by
+.BR direnv.dotenv " and " mcps.env .
+Child keys override parent keys; parent keys not present in the child
+are preserved.
+.SH FILES
+.TP
+.I ~/.config/spinclass/sweatfile
+Global sweatfile (lowest precedence).
+.TP
+.I <parent-dir>/sweatfile
+Intermediate parent directory sweatfiles.
+.TP
+.I <repo>/sweatfile
+Repository-level sweatfile.
+.TP
+.I <worktree>/sweatfile
+Worktree-level sweatfile (highest precedence).
+.TP
+.I .claude/settings.local.json
+Generated by spinclass from sweatfile config.
+Contains
+.BR permissions.allow ", " enabledMcpjsonServers ", and " hooks .
+.TP
+.I .mcp.json
+Generated by spinclass.
+Contains MCP server registrations from
+.B [[mcps]]
+entries.
+.SH SEE ALSO
+.BR spinclass (1),
+.BR spinclass\-start\-commands (7),
+.BR spinclass\-validate (1)

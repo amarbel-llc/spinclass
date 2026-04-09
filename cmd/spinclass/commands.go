@@ -7,7 +7,7 @@ import (
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 )
 
-//go:embed doc/spinclass-start-commands.7
+//go:embed doc/*
 var extraManpages embed.FS
 
 // version is set at link time via -ldflags "-X main.version=...".
@@ -31,6 +31,12 @@ func buildApp() *command.App {
 			Path:    "doc/spinclass-start-commands.7",
 			Section: 7,
 			Name:    "spinclass-start-commands.7",
+		},
+		{
+			Source:  extraManpages,
+			Path:    "doc/spinclass-sweatfile.5",
+			Section: 5,
+			Name:    "spinclass-sweatfile.5",
 		},
 	}
 
