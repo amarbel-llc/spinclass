@@ -117,7 +117,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 
 	home, _ := os.UserHomeDir()
 	if home != "" {
-		hierarchy, err := sweatfile.LoadHierarchy(home, repoPath)
+		hierarchy, err := sweatfile.LoadWorktreeHierarchy(home, repoPath, wtPath)
 		if err == nil {
 			preMergeCmd := hierarchy.Merged.PreMergeHookCommand()
 			if preMergeCmd != nil && *preMergeCmd != "" {
