@@ -1234,8 +1234,8 @@ description = "Start for a JIRA ticket"
 arg-name = "ticket"
 arg-help = "JIRA ticket ID"
 arg-regex = "^[A-Z]+-[0-9]+$"
-completion = ["jira", "list"]
-prompt = ["jira", "show", "{arg}"]
+exec-completions = ["jira", "list"]
+exec-start = ["jira", "show", "{arg}"]
 `
 	doc, err := Parse([]byte(input))
 	if err != nil {
@@ -1255,11 +1255,11 @@ prompt = ["jira", "show", "{arg}"]
 	if sc.ArgRegex == nil || *sc.ArgRegex != "^[A-Z]+-[0-9]+$" {
 		t.Errorf("ArgRegex = %v, want ^[A-Z]+-[0-9]+$", sc.ArgRegex)
 	}
-	if len(sc.Completion) != 2 || sc.Completion[0] != "jira" {
-		t.Errorf("Completion = %v", sc.Completion)
+	if len(sc.ExecCompletions) != 2 || sc.ExecCompletions[0] != "jira" {
+		t.Errorf("ExecCompletions = %v", sc.ExecCompletions)
 	}
-	if len(sc.Prompt) != 3 || sc.Prompt[2] != "{arg}" {
-		t.Errorf("Prompt = %v", sc.Prompt)
+	if len(sc.ExecStart) != 3 || sc.ExecStart[2] != "{arg}" {
+		t.Errorf("ExecStart = %v", sc.ExecStart)
 	}
 }
 
@@ -1267,11 +1267,11 @@ func TestParseStartCommandsMultiple(t *testing.T) {
 	input := `
 [[start-commands]]
 name = "jira"
-prompt = ["echo", "jira"]
+exec-start = ["echo", "jira"]
 
 [[start-commands]]
 name = "linear"
-prompt = ["echo", "linear"]
+exec-start = ["echo", "linear"]
 `
 	doc, err := Parse([]byte(input))
 	if err != nil {
@@ -1289,12 +1289,12 @@ prompt = ["echo", "linear"]
 func TestMergeStartCommandsAppend(t *testing.T) {
 	base := Sweatfile{
 		StartCommands: []StartCommand{
-			{Name: "jira", Prompt: []string{"echo", "base"}},
+			{Name: "jira", ExecStart: []string{"echo", "base"}},
 		},
 	}
 	repo := Sweatfile{
 		StartCommands: []StartCommand{
-			{Name: "linear", Prompt: []string{"echo", "linear"}},
+			{Name: "linear", ExecStart: []string{"echo", "linear"}},
 		},
 	}
 	merged := base.MergeWith(repo)
@@ -1309,13 +1309,13 @@ func TestMergeStartCommandsAppend(t *testing.T) {
 func TestMergeStartCommandsOverrideByName(t *testing.T) {
 	base := Sweatfile{
 		StartCommands: []StartCommand{
-			{Name: "jira", Prompt: []string{"echo", "base"}},
-			{Name: "linear", Prompt: []string{"echo", "linear"}},
+			{Name: "jira", ExecStart: []string{"echo", "base"}},
+			{Name: "linear", ExecStart: []string{"echo", "linear"}},
 		},
 	}
 	repo := Sweatfile{
 		StartCommands: []StartCommand{
-			{Name: "jira", Prompt: []string{"echo", "override"}},
+			{Name: "jira", ExecStart: []string{"echo", "override"}},
 		},
 	}
 	merged := base.MergeWith(repo)
@@ -1326,7 +1326,7 @@ func TestMergeStartCommandsOverrideByName(t *testing.T) {
 	if merged.StartCommands[0].Name != "jira" {
 		t.Errorf("expected jira to stay at slot 0, got %v", merged.StartCommands)
 	}
-	if got := merged.StartCommands[0].Prompt; len(got) != 2 || got[1] != "override" {
+	if got := merged.StartCommands[0].ExecStart; len(got) != 2 || got[1] != "override" {
 		t.Errorf("expected override prompt, got %v", got)
 	}
 }
@@ -1349,10 +1349,10 @@ func TestGetDefaultShipsGhIssueStartCommand(t *testing.T) {
 	if found.ArgRegex == nil || *found.ArgRegex != "^[0-9]+$" {
 		t.Errorf("ArgRegex = %v, want ^[0-9]+$", found.ArgRegex)
 	}
-	if len(found.Prompt) == 0 {
-		t.Error("Prompt must be non-empty")
+	if len(found.ExecStart) == 0 {
+		t.Error("ExecStart must be non-empty")
 	}
-	if len(found.Completion) == 0 {
-		t.Error("Completion must be non-empty")
+	if len(found.ExecCompletions) == 0 {
+		t.Error("ExecCompletions must be non-empty")
 	}
 }

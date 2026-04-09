@@ -78,7 +78,7 @@ func WriteSessionContext(opts WriteOptions) error {
 		if frag.Name == "" || frag.Content == "" {
 			continue
 		}
-		filename := fmt.Sprintf("3-start-%s.md", frag.Name)
+		filename := fmt.Sprintf("3-start-%s.md", filepath.Base(frag.Name))
 		if err := os.WriteFile(filepath.Join(dir, filename), []byte(frag.Content), 0o644); err != nil {
 			return fmt.Errorf("writing %s: %w", filename, err)
 		}

@@ -148,7 +148,7 @@ func TestCheckStartCommandsValid(t *testing.T) {
 		StartCommands: []sweatfile.StartCommand{
 			{
 				Name:   "jira",
-				Prompt: []string{"echo", "hi"},
+				ExecStart: []string{"echo", "hi"},
 			},
 		},
 	}
@@ -162,7 +162,7 @@ func TestCheckStartCommandsMissingPrompt(t *testing.T) {
 		StartCommands: []sweatfile.StartCommand{{Name: "jira"}},
 	}
 	issues := CheckStartCommands(sf)
-	if len(issues) != 1 || issues[0].Field != "start-commands.prompt" {
+	if len(issues) != 1 || issues[0].Field != "start-commands.exec-start" {
 		t.Fatalf("expected 1 prompt issue, got %v", issues)
 	}
 }
@@ -170,7 +170,7 @@ func TestCheckStartCommandsMissingPrompt(t *testing.T) {
 func TestCheckStartCommandsBadName(t *testing.T) {
 	sf := sweatfile.Sweatfile{
 		StartCommands: []sweatfile.StartCommand{
-			{Name: "Bad Name", Prompt: []string{"echo"}},
+			{Name: "Bad Name", ExecStart: []string{"echo"}},
 		},
 	}
 	issues := CheckStartCommands(sf)
@@ -182,8 +182,8 @@ func TestCheckStartCommandsBadName(t *testing.T) {
 func TestCheckStartCommandsDuplicateName(t *testing.T) {
 	sf := sweatfile.Sweatfile{
 		StartCommands: []sweatfile.StartCommand{
-			{Name: "jira", Prompt: []string{"echo"}},
-			{Name: "jira", Prompt: []string{"echo"}},
+			{Name: "jira", ExecStart: []string{"echo"}},
+			{Name: "jira", ExecStart: []string{"echo"}},
 		},
 	}
 	issues := CheckStartCommands(sf)
@@ -196,7 +196,7 @@ func TestCheckStartCommandsBadRegex(t *testing.T) {
 	bad := "["
 	sf := sweatfile.Sweatfile{
 		StartCommands: []sweatfile.StartCommand{
-			{Name: "jira", Prompt: []string{"echo"}, ArgRegex: &bad},
+			{Name: "jira", ExecStart: []string{"echo"}, ArgRegex: &bad},
 		},
 	}
 	issues := CheckStartCommands(sf)

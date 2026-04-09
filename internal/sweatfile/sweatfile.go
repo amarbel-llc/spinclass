@@ -46,8 +46,8 @@ type StartCommand struct {
 	ArgName     string   `toml:"arg-name"`
 	ArgHelp     string   `toml:"arg-help"`
 	ArgRegex    *string  `toml:"arg-regex"`
-	Completion  []string `toml:"completion"`
-	Prompt      []string `toml:"prompt"`
+	ExecCompletions []string `toml:"exec-completions"`
+	ExecStart       []string `toml:"exec-start"`
 }
 
 //go:generate tommy generate
@@ -148,28 +148,15 @@ func defaultStartCommands() []StartCommand {
 			ArgName:     "issue",
 			ArgHelp:     "Issue number",
 			ArgRegex:    &issueRegex,
-			Completion: []string{
+			ExecCompletions: []string{
 				"sh", "-c",
 				`gh issue list --json number,title --limit 20 2>/dev/null | ` +
-					`jq -r '.[] | "\(.number)\t\(.title)"' 2>/dev/null`,
+					`jq '[.[] | {arg: (.number | tostring), description: .title}]' 2>/dev/null`,
 			},
-			Prompt: []string{
+			ExecStart: []string{
 				"sh", "-c",
-				`gh issue view {arg} --template '# GitHub Issue Context
-
-This session is working on the following GitHub issue.
-
-## Issue #{{.number}}: {{.title}}
-- **State:** {{.state}}
-{{- if .labels}}
-- **Labels:** {{range $i, $l := .labels}}{{if $i}}, {{end}}{{$l.name}}{{end}}
-{{- end}}
-- **URL:** {{.url}}
-
-## Description
-
-{{.body}}
-'`,
+				`gh issue view {arg} --json number,title,state,labels,url,body | ` +
+					`jq '{context: ("# GitHub Issue Context\n\nThis session is working on the following GitHub issue.\n\n## Issue #" + (.number | tostring) + ": " + .title + "\n- **State:** " + .state + (if (.labels | length) > 0 then "\n- **Labels:** " + ([.labels[].name] | join(", ")) else "" end) + "\n- **URL:** " + .url + "\n\n## Description\n\n" + .body)}'`,
 			},
 		},
 	}

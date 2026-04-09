@@ -135,11 +135,11 @@ func CheckStartCommands(sf sweatfile.Sweatfile) []Issue {
 			})
 		}
 		seen[sc.Name] = true
-		if len(sc.Prompt) == 0 {
+		if len(sc.ExecStart) == 0 {
 			issues = append(issues, Issue{
-				Message:  fmt.Sprintf("start-command %q requires a non-empty `prompt`", sc.Name),
+				Message:  fmt.Sprintf("start-command %q requires a non-empty `exec-start`", sc.Name),
 				Severity: SeverityError,
-				Field:    "start-commands.prompt",
+				Field:    "start-commands.exec-start",
 				Value:    sc.Name,
 			})
 		}
@@ -379,7 +379,7 @@ func Run(w io.Writer, home, repoDir string) int {
 	tw.EndSubtest("merged result", sub)
 
 	applySub := tw.Subtest("apply (dry-run)")
-	merged := result.Merged.MergeWith(sweatfile.GetDefault())
+	merged := sweatfile.GetDefault().MergeWith(result.Merged)
 	if issues := CheckGitExcludes(sweatfile.Sweatfile{Git: merged.Git}); len(
 		issues,
 	) > 0 {

@@ -235,6 +235,9 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 	// level preserve their relative order; cross-level overrides keep the
 	// position of the first occurrence so iteration order stays stable.
 	if len(other.StartCommands) > 0 {
+		cp := make([]StartCommand, len(merged.StartCommands))
+		copy(cp, merged.StartCommands)
+		merged.StartCommands = cp
 		index := make(map[string]int, len(merged.StartCommands))
 		for i, sc := range merged.StartCommands {
 			index[sc.Name] = i
