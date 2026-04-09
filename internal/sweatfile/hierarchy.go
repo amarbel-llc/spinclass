@@ -252,5 +252,33 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		}
 	}
 
+	// allowed-mcps: nil=inherit, empty=clear, non-empty=append
+	if other.AllowedMCPs != nil {
+		if len(other.AllowedMCPs) == 0 {
+			merged.AllowedMCPs = []string{}
+		} else {
+			merged.AllowedMCPs = append(merged.AllowedMCPs, other.AllowedMCPs...)
+		}
+	}
+
+	// [[mcps]] — dedup-by-name, same pattern as [[start-commands]]
+	if len(other.MCPs) > 0 {
+		cp := make([]MCPServerDef, len(merged.MCPs))
+		copy(cp, merged.MCPs)
+		merged.MCPs = cp
+		index := make(map[string]int, len(merged.MCPs))
+		for i, mcp := range merged.MCPs {
+			index[mcp.Name] = i
+		}
+		for _, mcp := range other.MCPs {
+			if i, ok := index[mcp.Name]; ok {
+				merged.MCPs[i] = mcp
+				continue
+			}
+			index[mcp.Name] = len(merged.MCPs)
+			merged.MCPs = append(merged.MCPs, mcp)
+		}
+	}
+
 	return merged
 }

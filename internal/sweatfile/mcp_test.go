@@ -62,3 +62,119 @@ func TestActiveMCPs(t *testing.T) {
 		t.Errorf("ActiveMCPs: got %v", active)
 	}
 }
+
+func TestMergeAllowedMCPsInherit(t *testing.T) {
+	parent := Sweatfile{AllowedMCPs: []string{"server-a"}}
+	child := Sweatfile{} // nil AllowedMCPs = inherit
+	merged := parent.MergeWith(child)
+
+	if len(merged.AllowedMCPs) != 1 || merged.AllowedMCPs[0] != "server-a" {
+		t.Errorf("expected inherit, got %v", merged.AllowedMCPs)
+	}
+}
+
+func TestMergeAllowedMCPsClear(t *testing.T) {
+	parent := Sweatfile{AllowedMCPs: []string{"server-a"}}
+	child := Sweatfile{AllowedMCPs: []string{}} // empty = clear
+	merged := parent.MergeWith(child)
+
+	if merged.AllowedMCPs == nil || len(merged.AllowedMCPs) != 0 {
+		t.Errorf("expected clear, got %v", merged.AllowedMCPs)
+	}
+}
+
+func TestMergeAllowedMCPsAppend(t *testing.T) {
+	parent := Sweatfile{AllowedMCPs: []string{"server-a"}}
+	child := Sweatfile{AllowedMCPs: []string{"server-b"}}
+	merged := parent.MergeWith(child)
+
+	if len(merged.AllowedMCPs) != 2 {
+		t.Fatalf("expected 2, got %v", merged.AllowedMCPs)
+	}
+	if merged.AllowedMCPs[0] != "server-a" || merged.AllowedMCPs[1] != "server-b" {
+		t.Errorf("got %v", merged.AllowedMCPs)
+	}
+}
+
+func TestMergeMCPsDedupByName(t *testing.T) {
+	parent := Sweatfile{MCPs: []MCPServerDef{
+		{Name: "linter", Command: "lint-v1", Args: []string{"serve"}},
+		{Name: "formatter", Command: "fmt", Args: []string{"serve"}},
+	}}
+	child := Sweatfile{MCPs: []MCPServerDef{
+		{Name: "linter", Command: "lint-v2", Args: []string{"serve", "--new"}},
+	}}
+	merged := parent.MergeWith(child)
+
+	if len(merged.MCPs) != 2 {
+		t.Fatalf("expected 2, got %d: %v", len(merged.MCPs), merged.MCPs)
+	}
+	// linter should be replaced in-place (position 0)
+	if merged.MCPs[0].Name != "linter" || merged.MCPs[0].Command != "lint-v2" {
+		t.Errorf("expected linter replaced, got %+v", merged.MCPs[0])
+	}
+	// formatter preserved
+	if merged.MCPs[1].Name != "formatter" {
+		t.Errorf("expected formatter, got %+v", merged.MCPs[1])
+	}
+}
+
+func TestMergeMCPsAppendNew(t *testing.T) {
+	parent := Sweatfile{MCPs: []MCPServerDef{
+		{Name: "linter", Command: "lint"},
+	}}
+	child := Sweatfile{MCPs: []MCPServerDef{
+		{Name: "formatter", Command: "fmt"},
+	}}
+	merged := parent.MergeWith(child)
+
+	if len(merged.MCPs) != 2 {
+		t.Fatalf("expected 2, got %d", len(merged.MCPs))
+	}
+}
+
+func TestMergeMCPsRemoveSentinel(t *testing.T) {
+	parent := Sweatfile{MCPs: []MCPServerDef{
+		{Name: "linter", Command: "lint"},
+		{Name: "formatter", Command: "fmt"},
+	}}
+	child := Sweatfile{MCPs: []MCPServerDef{
+		{Name: "linter"}, // empty command = remove
+	}}
+	merged := parent.MergeWith(child)
+
+	// After merge, linter should be gone (sentinel pruned), only formatter remains
+	active := merged.ActiveMCPs()
+	if len(active) != 1 || active[0].Name != "formatter" {
+		t.Errorf("expected only formatter, got %v", active)
+	}
+}
+
+func TestMergeMCPsInheritWhenNil(t *testing.T) {
+	parent := Sweatfile{MCPs: []MCPServerDef{
+		{Name: "linter", Command: "lint"},
+	}}
+	child := Sweatfile{} // nil MCPs = inherit
+	merged := parent.MergeWith(child)
+
+	if len(merged.MCPs) != 1 || merged.MCPs[0].Name != "linter" {
+		t.Errorf("expected inherit, got %v", merged.MCPs)
+	}
+}
+
+func TestMergeMCPsFullReplace(t *testing.T) {
+	parent := Sweatfile{MCPs: []MCPServerDef{
+		{Name: "linter", Command: "lint", Env: map[string]string{"DEBUG": "1"}},
+	}}
+	child := Sweatfile{MCPs: []MCPServerDef{
+		{Name: "linter", Command: "lint-v2", Args: []string{"--new"}},
+	}}
+	merged := parent.MergeWith(child)
+
+	if merged.MCPs[0].Env != nil {
+		t.Errorf("expected env to be nil after full replace, got %v", merged.MCPs[0].Env)
+	}
+	if merged.MCPs[0].Command != "lint-v2" {
+		t.Errorf("expected lint-v2, got %s", merged.MCPs[0].Command)
+	}
+}
