@@ -487,6 +487,7 @@ func TestResolvePathRandomNameWhenNoArgs(t *testing.T) {
 
 func TestCreateFrom(t *testing.T) {
 	parentDir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", parentDir)
 	repoDir := filepath.Join(parentDir, "repo")
 	if err := os.MkdirAll(repoDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -503,6 +504,7 @@ func TestCreateFrom(t *testing.T) {
 	runGit(repoDir, "init")
 	runGit(repoDir, "config", "user.email", "test@test.com")
 	runGit(repoDir, "config", "user.name", "Test")
+	runGit(repoDir, "config", "commit.gpgsign", "false")
 	runGit(repoDir, "commit", "--allow-empty", "-m", "initial")
 
 	// Create a source worktree to fork from
