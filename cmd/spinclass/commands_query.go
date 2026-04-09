@@ -142,7 +142,7 @@ func registerQueryCommands(app *command.App) {
 		},
 		Params: []command.Param{
 			{Name: "new-branch", Type: command.String, Description: "Name for the forked branch (auto-generated if omitted)"},
-			{Name: "from", Type: command.String, Description: "Source worktree directory to fork from"},
+			{Name: "from", Type: command.String, Description: "Source worktree directory to fork from", Completer: completeWorktreeTargets},
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
 			var p struct {
@@ -198,7 +198,7 @@ func registerQueryCommands(app *command.App) {
 		},
 		Params: []command.Param{
 			{Name: "description", Type: command.String, Description: "New description (quote multi-word strings)", Required: true},
-			{Name: "id", Type: command.String, Description: "Worktree ID to update (auto-detects from cwd if omitted)"},
+			{Name: "id", Type: command.String, Description: "Worktree ID to update (auto-detects from cwd if omitted)", Completer: completeWorktreeTargets},
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
 			var p struct {

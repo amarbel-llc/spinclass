@@ -66,7 +66,7 @@ func registerSessionCommands(app *command.App) {
 			Long:  "Resume an existing worktree session. With no arguments, auto-detects the session from the current working directory. With one argument, resumes the session identified by the worktree directory name.",
 		},
 		Params: []command.Param{
-			{Name: "id", Type: command.String, Description: "Session ID (worktree directory name); auto-detects from cwd if omitted"},
+			{Name: "id", Type: command.String, Description: "Session ID (worktree directory name); auto-detects from cwd if omitted", Completer: completeWorktreeTargets},
 			{Name: "no-attach", Type: command.Bool, Description: "Find session but skip attaching"},
 		},
 		RunCLI: runResume,
