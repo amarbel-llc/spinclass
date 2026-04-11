@@ -166,14 +166,24 @@ func completeWorktreeTargets() map[string]string {
 	if err != nil {
 		return nil
 	}
+
+	var sessions []session.State
 	repoPath, err := worktree.DetectRepo(cwd)
-	if err != nil {
-		return nil
+	if err == nil {
+		sessions, _ = session.ListForRepo(repoPath)
+	} else {
+		// Outside a git repo: show all non-abandoned sessions.
+		all, err := session.ListAll()
+		if err != nil {
+			return nil
+		}
+		for _, s := range all {
+			if s.ResolveState() != session.StateAbandoned {
+				sessions = append(sessions, s)
+			}
+		}
 	}
-	sessions, err := session.ListForRepo(repoPath)
-	if err != nil {
-		return nil
-	}
+
 	result := make(map[string]string, len(sessions))
 	for _, s := range sessions {
 		id := filepath.Base(s.WorktreePath)
