@@ -44,8 +44,7 @@ type MCPServerDef struct {
 	Name      string            `toml:"name"`
 	Command   string            `toml:"command"`
 	Args      []string          `toml:"args"`
-	Env       map[string]string `toml:"env"`
-	AutoAllow []string          `toml:"auto-allow"`
+	Env map[string]string `toml:"env"`
 }
 
 // StartCommand declares a user-defined `sc start-<name>` subcommand.

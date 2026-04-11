@@ -157,13 +157,6 @@ Argv passed to
 .TP
 .B env
 Table of environment variables set on the server process.
-.TP
-.B auto-allow
-Argv array.
-When present, spinclass execs this command at session start to
-discover tool-level permissions.
-See
-.BR "AUTO-ALLOW PROTOCOL" .
 .PP
 .B Merge:
 dedup-by-name (full entry replacement, same as
@@ -171,95 +164,6 @@ dedup-by-name (full entry replacement, same as
 Every entry with a non-empty
 .B command
 implicitly adds to the allow-list.
-.SH AUTO-ALLOW PROTOCOL
-The
-.B auto-allow
-field on a
-.B [[mcps]]
-entry declares a command that spinclass executes at session creation
-time.
-The command must print a single JSON object to stdout describing which
-of its tools should be added to
-.B permissions.allow
-in
-.IR .claude/settings.local.json .
-.SS JSON Schema
-.PP
-.RS 4
-.nf
-{
-  "tools": ["tool_name_1", "tool_name_2"]
-}
-.fi
-.RE
-.TP
-.B tools
-(required) Array of bare tool names.
-Names must
-.B not
-include the
-.B mcp__
-prefix; spinclass constructs the fully-qualified form
-.BI mcp__ name __ tool
-using the server's
-.B name
-field.
-.SS Error Handling
-.IP \(bu 2
-If the command exits non-zero, the error is reported to stderr and the
-session is still created.
-.IP \(bu 2
-If stdout is not valid JSON or does not match the schema, a warning is
-printed to stderr.
-.IP \(bu 2
-If any tool name contains the
-.B mcp__
-prefix, it is rejected.
-.IP \(bu 2
-If the response contains a
-.B servers
-field, it is rejected.
-MCP servers cannot auto-allow other servers.
-.SS Example
-.PP
-.RS 4
-.nf
-[[mcps]]
-name = "moxy"
-command = "moxy"
-args = ["serve"]
-auto-allow = ["moxy", "auto-allow"]
-.fi
-.RE
-.PP
-Running
-.B moxy auto-allow
-might produce:
-.PP
-.RS 4
-.nf
-{
-  "tools": [
-    "lsp_execute-command",
-    "grit_commit",
-    "grit_diff",
-    "rg_search"
-  ]
-}
-.fi
-.RE
-.PP
-Spinclass would then add to
-.BR permissions.allow :
-.PP
-.RS 4
-.nf
-mcp__moxy__lsp_execute-command
-mcp__moxy__grit_commit
-mcp__moxy__grit_diff
-mcp__moxy__rg_search
-.fi
-.RE
 .SH MERGE SEMANTICS
 Each field uses one of these merge strategies when combining files in
 the hierarchy:

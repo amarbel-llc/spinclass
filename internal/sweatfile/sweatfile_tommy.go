@@ -302,10 +302,6 @@ func decodeMCPs(
 			consumed[keyPrefix+"mcps.env"] = true
 			document.MarkAllConsumed(envNode, keyPrefix+"mcps.env", consumed)
 		}
-		if v, err := document.GetFromContainer[[]string](doc, node, "auto-allow"); err == nil {
-			data.MCPs[i].AutoAllow = v
-			consumed[keyPrefix+"mcps.auto-allow"] = true
-		}
 	}
 }
 
@@ -332,11 +328,6 @@ func encodeMCPs(doc *document.Document, data *Sweatfile) error {
 				if err := doc.SetInContainer(envNode, k, v); err != nil {
 					return err
 				}
-			}
-		}
-		if mcp.AutoAllow != nil {
-			if err := doc.SetInContainer(entry, "auto-allow", mcp.AutoAllow); err != nil {
-				return err
 			}
 		}
 	}

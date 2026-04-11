@@ -195,14 +195,6 @@ func CheckMCPs(sf sweatfile.Sweatfile) []Issue {
 		}
 		seen[mcp.Name] = true
 
-		if len(mcp.AutoAllow) > 0 && mcp.Command == "" {
-			issues = append(issues, Issue{
-				Message:  fmt.Sprintf("mcps entry %q has auto-allow but no command (removal sentinel)", mcp.Name),
-				Severity: SeverityWarning,
-				Field:    "mcps.auto-allow",
-				Value:    mcp.Name,
-			})
-		}
 	}
 	return issues
 }
