@@ -737,3 +737,61 @@ func TestReadSweatfileAllowed(t *testing.T) {
 		t.Errorf("expected no output for sweatfile read, got %q", stdout.String())
 	}
 }
+
+func TestReadSpinclassDirDenied(t *testing.T) {
+	worktree := t.TempDir()
+	target := filepath.Join(worktree, ".spinclass", "system_prompt_append.d", "1-base.md")
+	input := makeInput("Read", map[string]any{"file_path": target}, worktree)
+	var stdout bytes.Buffer
+	err := Run(bytes.NewReader(input), &stdout, "", worktree, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() == 0 {
+		t.Fatal("expected deny output for .spinclass dir read")
+	}
+	decision, reason := parseHookDecision(t, stdout.Bytes())
+	if decision != "deny" {
+		t.Errorf("expected permissionDecision deny, got %q", decision)
+	}
+	if !strings.Contains(reason, ".spinclass") {
+		t.Errorf("expected reason to mention .spinclass, got %q", reason)
+	}
+}
+
+func TestWriteSpinclassDirDenied(t *testing.T) {
+	worktree := t.TempDir()
+	target := filepath.Join(worktree, ".spinclass", "env")
+	input := makeInput("Write", map[string]any{"file_path": target}, worktree)
+	var stdout bytes.Buffer
+	err := Run(bytes.NewReader(input), &stdout, "", worktree, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() == 0 {
+		t.Fatal("expected deny output for .spinclass dir write")
+	}
+	decision, _ := parseHookDecision(t, stdout.Bytes())
+	if decision != "deny" {
+		t.Errorf("expected permissionDecision deny, got %q", decision)
+	}
+}
+
+func TestEditSpinclassDirDenied(t *testing.T) {
+	mainRepo := t.TempDir()
+	worktree := t.TempDir()
+	target := filepath.Join(mainRepo, ".spinclass", "config.json")
+	input := makeInput("Edit", map[string]any{"file_path": target}, worktree)
+	var stdout bytes.Buffer
+	err := Run(bytes.NewReader(input), &stdout, mainRepo, worktree, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() == 0 {
+		t.Fatal("expected deny output for .spinclass dir edit")
+	}
+	decision, _ := parseHookDecision(t, stdout.Bytes())
+	if decision != "deny" {
+		t.Errorf("expected permissionDecision deny, got %q", decision)
+	}
+}

@@ -87,10 +87,15 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 	resolvedMain := resolvePath(mainRepoRoot)
 	resolvedWorktree := resolvePath(sessionWorktree)
 
-	// Always guard sweatfile writes, even when disallow-main-worktree is off.
-	if input.ToolName == "Write" || input.ToolName == "Edit" {
+	// Always guard session-config paths, even when disallow-main-worktree is off.
+	if input.ToolName == "Read" || input.ToolName == "Write" || input.ToolName == "Edit" {
 		if fp, ok := input.ToolInput["file_path"].(string); ok && fp != "" {
-			if isSweatfile(fp, resolvedMain, resolvedWorktree) {
+			if isInsideSpinclassDir(fp, resolvedMain, resolvedWorktree) {
+				return writeDeny(w, fmt.Sprintf(
+					"Path %s is inside the .spinclass directory, which is managed by spinclass.", fp,
+				))
+			}
+			if (input.ToolName == "Write" || input.ToolName == "Edit") && isSweatfile(fp, resolvedMain, resolvedWorktree) {
 				return writeAsk(w, fmt.Sprintf(
 					"This modifies the sweatfile at %s, which controls session configuration.", fp,
 				))
@@ -135,6 +140,20 @@ func writeAsk(w io.Writer, reason string) error {
 		},
 	}
 	return json.NewEncoder(w).Encode(output)
+}
+
+func isInsideSpinclassDir(path, mainRepoRoot, sessionWorktree string) bool {
+	resolved := resolvePath(path)
+	for _, root := range []string{mainRepoRoot, sessionWorktree} {
+		if root == "" {
+			continue
+		}
+		dir := filepath.Join(root, ".spinclass") + string(filepath.Separator)
+		if strings.HasPrefix(resolved, dir) || resolved == filepath.Join(root, ".spinclass") {
+			return true
+		}
+	}
+	return false
 }
 
 func isSweatfile(path, mainRepoRoot, sessionWorktree string) bool {
