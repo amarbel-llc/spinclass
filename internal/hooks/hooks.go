@@ -84,16 +84,27 @@ func runStopHook(input hookInput, w io.Writer) error {
 }
 
 func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree bool) error {
+	resolvedMain := resolvePath(mainRepoRoot)
+	resolvedWorktree := resolvePath(sessionWorktree)
+
+	// Always guard sweatfile writes, even when disallow-main-worktree is off.
+	if input.ToolName == "Write" || input.ToolName == "Edit" {
+		if fp, ok := input.ToolInput["file_path"].(string); ok && fp != "" {
+			if isSweatfile(fp, resolvedMain, resolvedWorktree) {
+				return writeAsk(w, fmt.Sprintf(
+					"This modifies the sweatfile at %s, which controls session configuration.", fp,
+				))
+			}
+		}
+	}
+
 	if !disallowMainWorktree || mainRepoRoot == "" {
 		return nil
 	}
 
-	mainRepoRoot = resolvePath(mainRepoRoot)
-	sessionWorktree = resolvePath(sessionWorktree)
-
 	// Check for "cd <main-worktree> && <cmd>" pattern in Bash commands.
 	if input.ToolName == "Bash" {
-		if reason := checkBashCdToMainWorktree(input, mainRepoRoot, sessionWorktree); reason != "" {
+		if reason := checkBashCdToMainWorktree(input, resolvedMain, resolvedWorktree); reason != "" {
 			return writeDeny(w, reason)
 		}
 	}
@@ -104,15 +115,37 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 	}
 
 	for _, p := range paths {
-		if isInsideMainWorktree(p, mainRepoRoot, sessionWorktree) {
+		if isInsideMainWorktree(p, resolvedMain, resolvedWorktree) {
 			return writeDeny(w, fmt.Sprintf(
 				"Path %s is in the main worktree (%s). Restrict operations to the session worktree (%s).",
-				p, mainRepoRoot, sessionWorktree,
+				p, resolvedMain, resolvedWorktree,
 			))
 		}
 	}
 
 	return nil
+}
+
+func writeAsk(w io.Writer, reason string) error {
+	output := map[string]any{
+		"hookSpecificOutput": map[string]any{
+			"hookEventName":            "PreToolUse",
+			"permissionDecision":       "ask",
+			"permissionDecisionReason": reason,
+		},
+	}
+	return json.NewEncoder(w).Encode(output)
+}
+
+func isSweatfile(path, mainRepoRoot, sessionWorktree string) bool {
+	resolved := resolvePath(path)
+	if mainRepoRoot != "" && resolved == filepath.Join(mainRepoRoot, "sweatfile") {
+		return true
+	}
+	if sessionWorktree != "" && resolved == filepath.Join(sessionWorktree, "sweatfile") {
+		return true
+	}
+	return false
 }
 
 func writeDeny(w io.Writer, reason string) error {

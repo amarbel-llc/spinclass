@@ -654,3 +654,86 @@ func TestStopHookApprovesOnSuccess(t *testing.T) {
 		t.Error("expected no sentinel file for successful stop-hook")
 	}
 }
+
+func parseHookDecision(t *testing.T, output []byte) (decision, reason string) {
+	t.Helper()
+	var result map[string]any
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("expected valid JSON, got %q: %v", string(output), err)
+	}
+	hso, ok := result["hookSpecificOutput"].(map[string]any)
+	if !ok {
+		t.Fatal("expected hookSpecificOutput in output")
+	}
+	d, _ := hso["permissionDecision"].(string)
+	r, _ := hso["permissionDecisionReason"].(string)
+	return d, r
+}
+
+func TestWriteSweatfileAsksConfirmation(t *testing.T) {
+	worktree := t.TempDir()
+	target := filepath.Join(worktree, "sweatfile")
+	input := makeInput("Write", map[string]any{"file_path": target}, worktree)
+	var stdout bytes.Buffer
+	err := Run(bytes.NewReader(input), &stdout, "", worktree, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() == 0 {
+		t.Fatal("expected ask output for sweatfile write")
+	}
+	decision, reason := parseHookDecision(t, stdout.Bytes())
+	if decision != "ask" {
+		t.Errorf("expected permissionDecision ask, got %q", decision)
+	}
+	if !strings.Contains(reason, "sweatfile") {
+		t.Errorf("expected reason to mention sweatfile, got %q", reason)
+	}
+}
+
+func TestEditSweatfileAsksConfirmation(t *testing.T) {
+	mainRepo := t.TempDir()
+	worktree := t.TempDir()
+	target := filepath.Join(mainRepo, "sweatfile")
+	input := makeInput("Edit", map[string]any{"file_path": target}, worktree)
+	var stdout bytes.Buffer
+	err := Run(bytes.NewReader(input), &stdout, mainRepo, worktree, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() == 0 {
+		t.Fatal("expected ask output for sweatfile edit")
+	}
+	decision, _ := parseHookDecision(t, stdout.Bytes())
+	if decision != "ask" {
+		t.Errorf("expected permissionDecision ask, got %q", decision)
+	}
+}
+
+func TestWriteNonSweatfileAllowed(t *testing.T) {
+	worktree := t.TempDir()
+	target := filepath.Join(worktree, "main.go")
+	input := makeInput("Write", map[string]any{"file_path": target}, worktree)
+	var stdout bytes.Buffer
+	err := Run(bytes.NewReader(input), &stdout, "", worktree, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("expected no output for non-sweatfile write, got %q", stdout.String())
+	}
+}
+
+func TestReadSweatfileAllowed(t *testing.T) {
+	worktree := t.TempDir()
+	target := filepath.Join(worktree, "sweatfile")
+	input := makeInput("Read", map[string]any{"file_path": target}, worktree)
+	var stdout bytes.Buffer
+	err := Run(bytes.NewReader(input), &stdout, "", worktree, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("expected no output for sweatfile read, got %q", stdout.String())
+	}
+}
