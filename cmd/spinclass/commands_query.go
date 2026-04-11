@@ -104,11 +104,25 @@ func registerQueryCommands(app *command.App) {
 				Type:        command.Bool,
 				Description: "Interactively discard changes in dirty merged worktrees",
 			},
+			{
+				Name:        "dry-run",
+				Short:       'n',
+				Type:        command.Bool,
+				Description: "Show what would be cleaned without removing anything",
+			},
+			{
+				Name:        "yes",
+				Short:       'y',
+				Type:        command.Bool,
+				Description: "Skip confirmation prompt",
+			},
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
 			var p struct {
 				globalArgs
 				Interactive bool `json:"interactive"`
+				DryRun      bool `json:"dry-run"`
+				Yes         bool `json:"yes"`
 			}
 			_ = json.Unmarshal(args, &p)
 
@@ -116,7 +130,7 @@ func registerQueryCommands(app *command.App) {
 			if err != nil {
 				return err
 			}
-			return clean.Run(cwd, p.Interactive, p.FormatOrDefault())
+			return clean.Run(cwd, p.Interactive, p.DryRun, p.Yes, p.FormatOrDefault())
 		},
 	})
 

@@ -107,20 +107,6 @@ func removeWorktree(wt worktreeInfo) error {
 	return nil
 }
 
-func cleanAbandonedSessions() int {
-	states, err := session.ListAll()
-	if err != nil {
-		return 0
-	}
-	cleaned := 0
-	for _, s := range states {
-		if s.ResolveState() == session.StateAbandoned {
-			session.Remove(s.RepoPath, s.Branch)
-			cleaned++
-		}
-	}
-	return cleaned
-}
 
 func discardFile(wtPath string, fc FileChange) error {
 	if fc.Code == "??" {
@@ -166,14 +152,194 @@ func handleDirtyWorktree(wt worktreeInfo) (removed bool, err error) {
 	return true, nil
 }
 
-func Run(startDir string, interactive bool, format string) error {
+func countAbandonedSessions() (int, []session.State) {
+	states, err := session.ListAll()
+	if err != nil {
+		return 0, nil
+	}
+	var abandoned []session.State
+	for _, s := range states {
+		if s.ResolveState() == session.StateAbandoned {
+			abandoned = append(abandoned, s)
+		}
+	}
+	return len(abandoned), abandoned
+}
+
+func removeAbandonedSessions(abandoned []session.State) int {
+	removed := 0
+	for _, s := range abandoned {
+		session.Remove(s.RepoPath, s.Branch)
+		removed++
+	}
+	return removed
+}
+
+type cleanAction struct {
+	wt     worktreeInfo
+	label  string
+	action string // "remove", "skip-dirty", "interactive"
+}
+
+func planClean(worktrees []worktreeInfo, interactive bool) []cleanAction {
+	var actions []cleanAction
+	for _, wt := range worktrees {
+		if !wt.merged {
+			continue
+		}
+		label := filepath.Join(wt.repo, worktree.WorktreesDir) + "/" + styleCode.Render(wt.branch)
+		if !wt.dirty {
+			actions = append(actions, cleanAction{wt: wt, label: label, action: "remove"})
+		} else if interactive {
+			actions = append(actions, cleanAction{wt: wt, label: label, action: "interactive"})
+		} else {
+			actions = append(actions, cleanAction{wt: wt, label: label, action: "skip-dirty"})
+		}
+	}
+	return actions
+}
+
+func emitPlan(tw *tap.Writer, actions []cleanAction, abandonedCount int, dryRun bool) {
+	reason := "dry-run"
+	for _, a := range actions {
+		switch a.action {
+		case "remove":
+			if dryRun {
+				if tw != nil {
+					tw.Skip("remove "+a.label, reason)
+				} else {
+					log.Info("would remove", "worktree", a.label)
+				}
+			} else {
+				if tw != nil {
+					tw.Skip("remove "+a.label, "pending confirmation")
+				} else {
+					log.Info("will remove", "worktree", a.label)
+				}
+			}
+		case "interactive":
+			if tw != nil {
+				tw.Skip("remove "+a.label, "dirty, will prompt")
+			} else {
+				log.Info("dirty, will prompt", "worktree", a.label)
+			}
+		case "skip-dirty":
+			if tw != nil {
+				tw.Skip("remove "+a.label, "dirty worktree")
+			} else {
+				log.Warn("skipping dirty worktree", "worktree", a.label)
+			}
+		}
+	}
+	if abandonedCount > 0 {
+		msg := fmt.Sprintf("clean %d abandoned session(s)", abandonedCount)
+		if dryRun {
+			if tw != nil {
+				tw.Skip(msg, reason)
+			} else {
+				log.Info("would " + msg)
+			}
+		} else {
+			if tw != nil {
+				tw.Skip(msg, "pending confirmation")
+			} else {
+				log.Info("will " + msg)
+			}
+		}
+	}
+}
+
+func confirmClean(removeCount, abandonedCount int) (bool, error) {
+	parts := []string{}
+	if removeCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d worktree(s)", removeCount))
+	}
+	if abandonedCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d abandoned session(s)", abandonedCount))
+	}
+	prompt := fmt.Sprintf("Remove %s?", strings.Join(parts, " and "))
+	var confirmed bool
+	err := huh.NewConfirm().
+		Title(prompt).
+		Value(&confirmed).
+		Run()
+	if err != nil {
+		return false, err
+	}
+	return confirmed, nil
+}
+
+func executeClean(tw *tap.Writer, actions []cleanAction, abandoned []session.State, interactive bool) {
+	for _, a := range actions {
+		switch a.action {
+		case "remove":
+			if err := removeWorktree(a.wt); err != nil {
+				if tw != nil {
+					tw.NotOk("remove "+a.label, map[string]string{
+						"error": err.Error(),
+					})
+				} else {
+					log.Error("failed to remove worktree", "branch", a.wt.branch, "error", err)
+				}
+				continue
+			}
+			if tw != nil {
+				tw.Ok("remove " + a.label)
+			} else {
+				log.Info("removed merged worktree", "branch", a.wt.branch)
+			}
+		case "interactive":
+			wasRemoved, err := handleDirtyWorktree(a.wt)
+			if err != nil {
+				if tw != nil {
+					tw.NotOk("remove "+a.label, map[string]string{
+						"error": err.Error(),
+					})
+				} else {
+					log.Error("failed to remove worktree", "branch", a.wt.branch, "error", err)
+				}
+				continue
+			}
+			if wasRemoved {
+				if tw != nil {
+					tw.Ok("remove " + a.label)
+				} else {
+					log.Info("removed merged worktree", "branch", a.wt.branch)
+				}
+			} else {
+				if tw != nil {
+					tw.Skip("remove "+a.label, "kept after interactive review")
+				} else {
+					log.Info("kept worktree after interactive review", "branch", a.wt.branch)
+				}
+			}
+		case "skip-dirty":
+			if tw != nil {
+				tw.Skip("remove "+a.label, "dirty worktree")
+			} else {
+				log.Warn("skipping dirty worktree", "branch", a.wt.branch)
+			}
+		}
+	}
+
+	if len(abandoned) > 0 {
+		removed := removeAbandonedSessions(abandoned)
+		if tw != nil {
+			tw.Ok(fmt.Sprintf("cleaned %d abandoned session(s)", removed))
+		}
+	}
+}
+
+func Run(startDir string, interactive bool, dryRun bool, yes bool, format string) error {
 	var tw *tap.Writer
 	if format == "tap" {
 		tw = tap.NewWriter(os.Stdout)
 	}
 
 	worktrees := scanWorktrees(startDir)
-	if len(worktrees) == 0 {
+	abandonedCount, abandonedSessions := countAbandonedSessions()
+
+	if len(worktrees) == 0 && abandonedCount == 0 {
 		if tw != nil {
 			tw.Skip("clean", "no worktrees found")
 			tw.Plan()
@@ -183,73 +349,53 @@ func Run(startDir string, interactive bool, format string) error {
 		return nil
 	}
 
-	for _, wt := range worktrees {
-		if !wt.merged {
-			continue
-		}
+	actions := planClean(worktrees, interactive)
 
-		label := filepath.Join(wt.repo, worktree.WorktreesDir) + "/" + styleCode.Render(wt.branch)
-
-		if !wt.dirty {
-			if err := removeWorktree(wt); err != nil {
-				if tw != nil {
-					tw.NotOk("remove "+label, map[string]string{
-						"error": err.Error(),
-					})
-				} else {
-					log.Error("failed to remove worktree", "branch", wt.branch, "error", err)
-				}
-				continue
-			}
-			if tw != nil {
-				tw.Ok("remove " + label)
-			} else {
-				log.Info("removed merged worktree", "branch", wt.branch)
-			}
-			continue
-		}
-
-		if interactive {
-			wasRemoved, err := handleDirtyWorktree(wt)
-			if err != nil {
-				if tw != nil {
-					tw.NotOk("remove "+label, map[string]string{
-						"error": err.Error(),
-					})
-				} else {
-					log.Error("failed to remove worktree", "branch", wt.branch, "error", err)
-				}
-				continue
-			}
-			if wasRemoved {
-				if tw != nil {
-					tw.Ok("remove " + label)
-				} else {
-					log.Info("removed merged worktree", "branch", wt.branch)
-				}
-			} else {
-				if tw != nil {
-					tw.Skip("remove "+label, "kept after interactive review")
-				} else {
-					log.Info("kept worktree after interactive review", "branch", wt.branch)
-				}
-			}
-		} else {
-			if tw != nil {
-				tw.Skip("remove "+label, "dirty worktree")
-			} else {
-				log.Warn("skipping dirty worktree", "branch", wt.branch)
-			}
+	// Count how many worktrees will actually be removed (not skipped).
+	removeCount := 0
+	for _, a := range actions {
+		if a.action == "remove" || a.action == "interactive" {
+			removeCount++
 		}
 	}
 
-	// Auto-clean abandoned session state files
-	abandoned := cleanAbandonedSessions()
-	if abandoned > 0 {
+	// Nothing actionable — just report skips and return.
+	if removeCount == 0 && abandonedCount == 0 {
+		emitPlan(tw, actions, abandonedCount, dryRun)
 		if tw != nil {
-			tw.Ok(fmt.Sprintf("cleaned %d abandoned session(s)", abandoned))
+			tw.Plan()
+		}
+		return nil
+	}
+
+	// Show what will happen.
+	emitPlan(tw, actions, abandonedCount, dryRun)
+
+	if dryRun {
+		if tw != nil {
+			tw.Plan()
+		}
+		return nil
+	}
+
+	// Confirm unless --yes.
+	if !yes {
+		confirmed, err := confirmClean(removeCount, abandonedCount)
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			if tw != nil {
+				tw.Skip("clean", "cancelled by user")
+				tw.Plan()
+			} else {
+				log.Info("clean cancelled")
+			}
+			return nil
 		}
 	}
+
+	executeClean(tw, actions, abandonedSessions, interactive)
 
 	if tw != nil {
 		tw.Plan()
