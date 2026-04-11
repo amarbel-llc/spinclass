@@ -35,11 +35,15 @@ func Run(w io.Writer, target string, force bool, format string) error {
 	// Request graceful close if session is active.
 	executor.RequestClose(repoPath, branch)
 
-	pushed := git.RemoteBranchExists(repoPath, branch)
-	if !pushed && !force {
+	defaultBranch, dbErr := git.DefaultBranch(repoPath)
+	unintegrated := dbErr == nil && git.CommitsAhead(wtPath, defaultBranch, branch) > 0
+	dirty := git.StatusPorcelain(wtPath) != ""
+
+	if (unintegrated || dirty) && !force {
+		reason := describeUnintegrated(branch, unintegrated, dirty)
 		var proceed bool
 		err := huh.NewConfirm().
-			Title(fmt.Sprintf("Branch %q has not been pushed upstream. Close anyway?", branch)).
+			Title(reason + " Close anyway?").
 			Value(&proceed).
 			Run()
 		if err != nil {
@@ -80,6 +84,17 @@ func Run(w io.Writer, target string, force bool, format string) error {
 	}
 
 	return nil
+}
+
+func describeUnintegrated(branch string, unintegrated, dirty bool) string {
+	switch {
+	case unintegrated && dirty:
+		return fmt.Sprintf("Branch %q has unintegrated commits and uncommitted changes.", branch)
+	case unintegrated:
+		return fmt.Sprintf("Branch %q has commits not yet integrated into the default branch.", branch)
+	default:
+		return fmt.Sprintf("Branch %q has uncommitted changes.", branch)
+	}
 }
 
 func resolveTarget(cwd, target string) (repoPath, wtPath, branch string, err error) {
