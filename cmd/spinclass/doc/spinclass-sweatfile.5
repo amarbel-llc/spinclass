@@ -86,8 +86,19 @@ Script run when the Claude Code session ends (via Stop hook).
 scalar override.
 .TP
 .B pre-merge
-Script run before
-.BR "sc merge" .
+Shell script run by
+.B sc merge
+after the worktree branch has been rebased onto the default branch but
+before the fast-forward merge into it.
+The script is executed via
+.B sh \-c
+with the working directory set to the worktree path.
+The environment variable
+.B WORKTREE
+is set to the absolute worktree path.
+If the script exits non-zero, the merge is aborted and the worktree is
+left in its rebased state so the user can fix the issue and retry.
+Typical use: run tests or linters as a pre-merge gate.
 .B Merge:
 scalar override.
 .TP

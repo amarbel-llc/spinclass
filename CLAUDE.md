@@ -65,7 +65,7 @@ configuration. Merges global (`~/.config/spinclass/sweatfile`) → intermediate
 parent dirs → repo-level. Supports `git-excludes`, `claude-allow`, `envrc-directives`, and
 `allowed-mcps` arrays (nil = inherit, empty = clear, non-empty = append),
 `[[mcps]]` and `[[start-commands]]` arrays of tables (dedup-by-name merge),
-`[env]` table (map merge), `[hooks]` table (create/stop lifecycle hooks, scalar
+`[env]` table (map merge), `[hooks]` table (create/stop/pre-merge lifecycle hooks, scalar
 override), and `[session]` table (start/resume entrypoint commands, override
 semantics).
 
