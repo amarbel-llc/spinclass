@@ -121,6 +121,8 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 		if err == nil {
 			preMergeCmd := hierarchy.Merged.PreMergeHookCommand()
 			if preMergeCmd != nil && *preMergeCmd != "" {
+				hookDesc := "pre-merge hook for " + branch + ": `" + *preMergeCmd + "`"
+
 				if tw == nil {
 					log.Info("running pre-merge hook", "worktree", branch)
 				}
@@ -128,7 +130,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 				if err := hierarchy.Merged.RunPreMergeHook(wtPath); err != nil {
 					if tw != nil {
 						diag := map[string]string{"severity": "fail", "message": err.Error()}
-						tw.NotOk("pre-merge hook "+branch, diag)
+						tw.NotOk(hookDesc, diag)
 						if ownWriter {
 							tw.Plan()
 						}
@@ -139,7 +141,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 				}
 
 				if tw != nil {
-					tw.Ok("pre-merge hook " + branch)
+					tw.Ok(hookDesc)
 				}
 			}
 		}
