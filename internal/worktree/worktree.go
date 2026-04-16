@@ -8,22 +8,18 @@ import (
 
 	"github.com/amarbel-llc/spinclass/internal/claude"
 	"github.com/amarbel-llc/spinclass/internal/git"
-	"github.com/amarbel-llc/spinclass/internal/prompt"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 )
 
 const WorktreesDir = ".worktrees"
 
 type ResolvedPath struct {
-	AbsPath         string                  // absolute filesystem path to the worktree
-	RepoPath        string                  // absolute path to the parent git repo
-	SessionKey      string                  // key for zmx/executor sessions (<repo-dirname>/<branch>)
-	Branch          string                  // branch name
-	Description     string                  // freeform session description
-	ExistingBranch  string                  // non-empty when an existing branch was detected
-	Issue           *prompt.IssueData       // optional issue context for session prompt
-	PR              *prompt.PRData          // optional PR context for session prompt
-	PluginFragments []prompt.PluginFragment // optional user-defined start-command fragments
+	AbsPath        string // absolute filesystem path to the worktree
+	RepoPath       string // absolute path to the parent git repo
+	SessionKey     string // key for zmx/executor sessions (<repo-dirname>/<branch>)
+	Branch         string // branch name
+	Description    string // freeform session description
+	ExistingBranch string // non-empty when an existing branch was detected
 }
 
 // ResolvePath resolves a worktree target relative to a git repo.
@@ -127,8 +123,6 @@ func isCeiling(dir string, ceilings []string) bool {
 // instead of creating a new one from the directory name.
 func Create(
 	repoPath, worktreePath, existingBranch string,
-	issue *prompt.IssueData, pr *prompt.PRData,
-	pluginFragments []prompt.PluginFragment,
 ) (sweatfile.Hierarchy, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -161,9 +155,6 @@ func Create(
 		sweetfile,
 		repoPath,
 		worktreePath,
-		issue,
-		pr,
-		pluginFragments,
 	)
 }
 
@@ -190,20 +181,16 @@ func CreateFrom(
 		return sweetfile, fmt.Errorf("loading sweatfile: %w", err)
 	}
 
-	return sweetfile, applyWorktreeConfig(home, sweetfile, repoPath, newPath, nil, nil, nil)
+	return sweetfile, applyWorktreeConfig(home, sweetfile, repoPath, newPath)
 }
 
 // applyWorktreeConfig excludes .worktrees from git, loads and applies
-// sweatfile,
-// and trusts worktreePath in Claude.
+// sweatfile, and trusts worktreePath in Claude.
 func applyWorktreeConfig(
 	home string,
 	sweetfile sweatfile.Hierarchy,
 	repoPath string,
 	worktreePath string,
-	issue *prompt.IssueData,
-	pr *prompt.PRData,
-	pluginFragments []prompt.PluginFragment,
 ) error {
 	merged := sweatfile.GetDefault().MergeWith(sweetfile.Merged)
 	if err := applyGitExcludes(repoPath, merged.GitExcludes()); err != nil {
@@ -217,33 +204,6 @@ func applyWorktreeConfig(
 
 	if err := sweetfile.Merged.Apply(worktreePath); err != nil {
 		return fmt.Errorf("applying sweatfile: %w", err)
-	}
-
-	remoteURL := ""
-	if out, err := git.Run(repoPath, "remote", "get-url", "origin"); err == nil {
-		remoteURL = strings.TrimSpace(out)
-	}
-
-	isFork, ownerType, ownerLogin := prompt.FetchRepoMetadata(repoPath)
-	branch := filepath.Base(worktreePath)
-	repoDirname := filepath.Base(repoPath)
-
-	writeOpts := prompt.WriteOptions{
-		WorktreePath:    worktreePath,
-		RepoPath:        repoPath,
-		RemoteURL:       remoteURL,
-		Branch:          branch,
-		SessionID:       repoDirname + "/" + branch,
-		IsFork:          isFork,
-		OwnerType:       ownerType,
-		OwnerLogin:      ownerLogin,
-		Issue:           issue,
-		PR:              pr,
-		PluginFragments: pluginFragments,
-	}
-
-	if err := prompt.WriteSessionContext(writeOpts); err != nil {
-		return fmt.Errorf("writing session context: %w", err)
 	}
 
 	claudeJSONPath := filepath.Join(home, ".claude.json")

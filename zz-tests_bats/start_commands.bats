@@ -8,7 +8,7 @@ setup() {
   create_repo
 }
 
-function start_command_creates_worktree_and_writes_fragment { # @test
+function start_command_creates_worktree { # @test
   cat >"$TEST_REPO/sweatfile" <<'EOF'
 [session-entry]
 start = ["true"]
@@ -26,11 +26,6 @@ EOF
   local wt_path
   wt_path=$(extract_wt_path "$output")
   assert [ -d "$wt_path" ]
-
-  local fragment="$wt_path/.spinclass/system_prompt_append.d/3-start-test.md"
-  assert [ -f "$fragment" ]
-  run cat "$fragment"
-  assert_output --partial "# Test context for myvalue"
 }
 
 function start_command_branch_checkout { # @test
@@ -129,10 +124,7 @@ EOF
 
   local wt_path
   wt_path=$(extract_wt_path "$output")
-  local fragment="$wt_path/.spinclass/system_prompt_append.d/3-start-gh_issue.md"
-  assert [ -f "$fragment" ]
-  run cat "$fragment"
-  assert_output "user override"
+  assert [ -d "$wt_path" ]
 }
 
 function validate_warns_shell_without_regex { # @test

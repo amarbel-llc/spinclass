@@ -17,7 +17,6 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/merge"
 	"github.com/amarbel-llc/spinclass/internal/pr"
-	"github.com/amarbel-llc/spinclass/internal/prompt"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/shop"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
@@ -117,11 +116,11 @@ func registerSessionCommands(app *command.App) {
 	})
 
 	app.AddCommand(&command.Command{
-		Name:            "exec-claude",
+		Name:            "exec-clown",
 		Hidden:          true,
 		PassthroughArgs: true,
 		Description: command.Description{
-			Short: "Execute claude after applying sweatfile settings",
+			Short: "Execute clown with spinclass plugin injection",
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
 			var p struct {
@@ -133,7 +132,7 @@ func registerSessionCommands(app *command.App) {
 			if err != nil {
 				return err
 			}
-			return hierarchy.Merged.ExecClaude(p.Args...)
+			return hierarchy.Merged.ExecClown(p.Args...)
 		},
 	})
 }
@@ -304,10 +303,6 @@ func runStartGHPR(_ context.Context, args json.RawMessage) error {
 		Branch:         branch,
 		Description:    description,
 		ExistingBranch: branch,
-	}
-
-	if prData, prErr := prompt.FetchPR(p.PR, repoPath); prErr == nil {
-		resolvedPath.PR = &prData
 	}
 
 	return attachSession(resolvedPath, p.startArgs)

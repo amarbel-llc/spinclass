@@ -6,14 +6,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 )
 
 type Claude struct {
-	SystemPrompt       *string  `toml:"system-prompt"`
-	SystemPromptAppend *string  `toml:"system-prompt-append"`
-	Allow              []string `toml:"allow"`
+	Allow []string `toml:"allow"`
 }
 
 type Git struct {
@@ -209,30 +206,7 @@ func defaultStartCommands() []StartCommand {
 	}
 }
 
-func collectSystemPromptAppend(cwd string) (string, error) {
-	pattern := filepath.Join(cwd, ".spinclass", "system_prompt_append.d", "*.md")
-	matches, err := filepath.Glob(pattern)
-	if err != nil {
-		return "", fmt.Errorf("globbing system_prompt_append.d: %w", err)
-	}
-
-	sort.Strings(matches)
-
-	var parts []string
-	for _, path := range matches {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return "", fmt.Errorf("reading %s: %w", filepath.Base(path), err)
-		}
-		if content := strings.TrimSpace(string(data)); content != "" {
-			parts = append(parts, content)
-		}
-	}
-
-	return strings.Join(parts, "\n\n"), nil
-}
-
-func (sweatfile Sweatfile) ExecClaude(
+func (sweatfile Sweatfile) ExecClown(
 	args ...string,
 ) error {
 	cwd, err := os.Getwd()
@@ -242,44 +216,19 @@ func (sweatfile Sweatfile) ExecClaude(
 
 	scDir := filepath.Join(cwd, ".spinclass")
 	if _, err := os.Stat(scDir); os.IsNotExist(err) {
-		return fmt.Errorf(".spinclass directory not found in %s; exec-claude requires a spinclass session", cwd)
+		return fmt.Errorf(".spinclass directory not found in %s; exec-clown requires a spinclass session", cwd)
 	}
 
-	// Write user sweatfile system-prompt-append into the .d/ directory
-	if sweatfile.Claude != nil && sweatfile.Claude.SystemPromptAppend != nil {
-		userContent := resolvePathOrString(*sweatfile.Claude.SystemPromptAppend)
-		userPath := filepath.Join(scDir, "system_prompt_append.d", "2-user.md")
-		if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
-			return fmt.Errorf("creating system_prompt_append.d: %w", err)
-		}
-		if err := os.WriteFile(userPath, []byte(userContent), 0o644); err != nil {
-			return fmt.Errorf("writing user system prompt append: %w", err)
-		}
-	}
-
-	// Collect all system prompt append fragments
-	appendContent, err := collectSystemPromptAppend(cwd)
+	// Resolve the spinclass plugin directory relative to our own binary.
+	// The Nix symlinkJoin places both the binary and share/ tree in the
+	// same output, so ../share/purse-first/spinclass is always valid.
+	exePath, err := os.Executable()
 	if err != nil {
-		return err
+		return fmt.Errorf("resolving executable path: %w", err)
 	}
+	pluginDir := filepath.Join(filepath.Dir(exePath), "..", "share", "purse-first", "spinclass")
 
-	if appendContent != "" {
-		args = append(
-			[]string{"--append-system-prompt", appendContent},
-			args...,
-		)
-	}
-
-	// system-prompt (non-append) still works as before
-	if sweatfile.Claude != nil && sweatfile.Claude.SystemPrompt != nil {
-		args = append(
-			[]string{
-				"--system-prompt",
-				resolvePathOrString(*sweatfile.Claude.SystemPrompt),
-			},
-			args...,
-		)
-	}
+	args = append([]string{"--plugin-dir", pluginDir}, args...)
 
 	pathGitDirCommon, err := getGitDirCommon()
 	if err != nil {
@@ -294,14 +243,10 @@ func (sweatfile Sweatfile) ExecClaude(
 	})
 	os.Setenv("PATH", strings.Join(envVarPath, string(filepath.ListSeparator)))
 
-	cmdClaude := exec.Command("claude", args...)
-	cmdClaude.Stdout = os.Stdout
-	cmdClaude.Stderr = os.Stderr
-	cmdClaude.Stdin = os.Stdin
+	cmdClown := exec.Command("clown", args...)
+	cmdClown.Stdout = os.Stdout
+	cmdClown.Stderr = os.Stderr
+	cmdClown.Stdin = os.Stdin
 
-	if err := cmdClaude.Run(); err != nil {
-		return err
-	}
-
-	return nil
+	return cmdClown.Run()
 }

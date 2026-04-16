@@ -21,20 +21,6 @@ semantics described below.
 .SS [claude]
 Controls Claude Code session behaviour.
 .TP
-.B system-prompt
-String or file path.
-Passed to
-.B claude \-\-system\-prompt
-at session start.
-If the value is a readable file path, its contents are used.
-.TP
-.B system-prompt-append
-String or file path.
-Written to
-.I .spinclass/system_prompt_append.d/2\-user.md
-and passed via
-.BR claude\ \-\-append\-system\-prompt .
-.TP
 .B allow
 Array of Claude Code permission rules (e.g.\&
 .BR Read ", " Edit ", " "Bash(git *)" ", " "mcp__server__tool" ).

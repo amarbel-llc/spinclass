@@ -10,7 +10,7 @@ entries in the sweatfile hierarchy.
 Each entry registers a
 .BI sc\ start- name
 subcommand that validates a positional argument, offers tab completion,
-and creates a worktree session with a system prompt fragment.
+and creates a worktree session.
 .PP
 This page documents the sweatfile schema, the JSON protocols for
 .B exec-start
@@ -102,9 +102,7 @@ must produce a single JSON object on stdout:
 .RE
 .TP
 .B context
-(required) Written verbatim to
-.IR .spinclass/system_prompt_append.d/3-start- name .md
-as the session's system prompt fragment.
+(required) Session context string.
 This is the primary output \(em it provides context to the AI agent
 about what the session is working on.
 .TP
@@ -128,7 +126,7 @@ derived from the description.
 Invalid JSON causes the command to fail with a diagnostic.
 An empty
 .B context
-value (after trimming whitespace) skips fragment creation.
+value is allowed.
 .SH EXEC-COMPLETIONS PROTOCOL
 .B exec-completions
 must produce a JSON array on stdout:
@@ -235,9 +233,6 @@ Global sweatfile (lowest precedence).
 .TP
 .I <repo>/sweatfile
 Repository-level sweatfile (highest precedence).
-.TP
-.IR .spinclass/system_prompt_append.d/3-start- name .md
-System prompt fragment written by the plugin.
 .SH SEE ALSO
 .BR spinclass (1),
 .BR spinclass\-sweatfile (5),

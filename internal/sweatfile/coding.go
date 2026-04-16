@@ -5,7 +5,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 func Parse(data []byte) (*SweatfileDocument, error) {
@@ -40,24 +39,6 @@ func Load(path string) (*SweatfileDocument, error) {
 		return nil, err
 	}
 	return Parse(data)
-}
-
-// resolvePathOrString expands environment variables and ~ in value, then
-// tries to read it as a file path. If the file exists, its contents are
-// returned (trimmed). Otherwise value is returned as a literal string.
-func resolvePathOrString(value string) string {
-	expanded := os.ExpandEnv(value)
-	if strings.HasPrefix(expanded, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			expanded = filepath.Join(home, expanded[2:])
-		}
-	}
-
-	data, err := os.ReadFile(expanded)
-	if err != nil {
-		return value
-	}
-	return strings.TrimSpace(string(data))
 }
 
 func (doc *SweatfileDocument) Save(path string) error {

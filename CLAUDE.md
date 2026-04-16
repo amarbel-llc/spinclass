@@ -126,10 +126,8 @@ space-separated form (`sc perms list`) is also accepted.
 `sc start-<name>` subcommands can be declared in a sweatfile via the
 `[[start-commands]]` array of tables. At CLI startup spinclass loads the
 sweatfile hierarchy for the current directory and dynamically registers one
-command per entry. Each command validates its single positional argument,
-offers tab completion, and injects a markdown fragment into the session's
-`.spinclass/system_prompt_append.d/3-start-<name>.md` which is picked up
-automatically by the `--append-system-prompt` flow.
+command per entry. Each command validates its single positional argument
+and offers tab completion.
 
 ```toml
 [[start-commands]]
@@ -149,8 +147,7 @@ exec-start       = ["sh", "-c", "jira show {arg} --json | jq '{context: .body}'"
   JSON with the schema: `{"branch"?: string, "description"?: string,
   "context": string}`. The command is exec'd directly (no shell); wrap in
   `sh -c` for shell features.
-  - `context` — written to `3-start-<name>.md` as the session's system
-    prompt fragment.
+  - `context` — session context string.
   - `description` — used as the session description if the user didn't
     pass `--description`.
   - `branch` — when present, checks out an existing local or remote

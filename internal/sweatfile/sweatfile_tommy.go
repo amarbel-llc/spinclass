@@ -32,35 +32,11 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 	if tableNode := d.cstDoc.FindTableInContainer(d.cstDoc.Root(), "claude"); tableNode != nil {
 		d.consumed["claude"] = true
 		claudeVal := &Claude{}
-		if v, err := document.GetFromContainer[string](d.cstDoc, tableNode, "system-prompt"); err == nil {
-			claudeVal.SystemPrompt = &v
-			d.consumed["claude.system-prompt"] = true
-		}
-		if v, err := document.GetFromContainer[string](d.cstDoc, tableNode, "system-prompt-append"); err == nil {
-			claudeVal.SystemPromptAppend = &v
-			d.consumed["claude.system-prompt-append"] = true
-		}
 		if v, err := document.GetFromContainer[[]string](d.cstDoc, tableNode, "allow"); err == nil {
 			claudeVal.Allow = v
 			d.consumed["claude.allow"] = true
 		}
 		d.data.Claude = claudeVal
-	} else {
-		claudeVal := &Claude{}
-		found := false
-		if v, err := document.GetFromContainer[string](d.cstDoc, d.cstDoc.Root(), "system-prompt"); err == nil {
-			claudeVal.SystemPrompt = &v
-			found = true
-			d.consumed["system-prompt"] = true
-		}
-		if v, err := document.GetFromContainer[string](d.cstDoc, d.cstDoc.Root(), "system-prompt-append"); err == nil {
-			claudeVal.SystemPromptAppend = &v
-			found = true
-			d.consumed["system-prompt-append"] = true
-		}
-		if found {
-			d.data.Claude = claudeVal
-		}
 	}
 	if tableNode := d.cstDoc.FindTableInContainer(d.cstDoc.Root(), "git"); tableNode != nil {
 		d.consumed["git"] = true
@@ -339,16 +315,6 @@ func (d *SweatfileDocument) Data() *Sweatfile { return &d.data }
 func (d *SweatfileDocument) Encode() ([]byte, error) {
 	if d.data.Claude != nil {
 		tableNode := d.cstDoc.EnsureTableInContainer(d.cstDoc.Root(), "claude")
-		if d.data.Claude.SystemPrompt != nil {
-			if err := d.cstDoc.SetInContainer(tableNode, "system-prompt", *d.data.Claude.SystemPrompt); err != nil {
-				return nil, err
-			}
-		}
-		if d.data.Claude.SystemPromptAppend != nil {
-			if err := d.cstDoc.SetInContainer(tableNode, "system-prompt-append", *d.data.Claude.SystemPromptAppend); err != nil {
-				return nil, err
-			}
-		}
 		if err := d.cstDoc.SetInContainer(tableNode, "allow", d.data.Claude.Allow); err != nil {
 			return nil, err
 		}
@@ -450,35 +416,11 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 	if tableNode := doc.FindTableInContainer(container, "claude"); tableNode != nil {
 		consumed[keyPrefix+"claude"] = true
 		claudeVal := &Claude{}
-		if v, err := document.GetFromContainer[string](doc, tableNode, "system-prompt"); err == nil {
-			claudeVal.SystemPrompt = &v
-			consumed[keyPrefix+"claude.system-prompt"] = true
-		}
-		if v, err := document.GetFromContainer[string](doc, tableNode, "system-prompt-append"); err == nil {
-			claudeVal.SystemPromptAppend = &v
-			consumed[keyPrefix+"claude.system-prompt-append"] = true
-		}
 		if v, err := document.GetFromContainer[[]string](doc, tableNode, "allow"); err == nil {
 			claudeVal.Allow = v
 			consumed[keyPrefix+"claude.allow"] = true
 		}
 		data.Claude = claudeVal
-	} else {
-		claudeVal := &Claude{}
-		found := false
-		if v, err := document.GetFromContainer[string](doc, container, "system-prompt"); err == nil {
-			claudeVal.SystemPrompt = &v
-			found = true
-			consumed[keyPrefix+"system-prompt"] = true
-		}
-		if v, err := document.GetFromContainer[string](doc, container, "system-prompt-append"); err == nil {
-			claudeVal.SystemPromptAppend = &v
-			found = true
-			consumed[keyPrefix+"system-prompt-append"] = true
-		}
-		if found {
-			data.Claude = claudeVal
-		}
 	}
 	if tableNode := doc.FindTableInContainer(container, "git"); tableNode != nil {
 		consumed[keyPrefix+"git"] = true
@@ -600,16 +542,6 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst.Node) error {
 	if data.Claude != nil {
 		tableNode := doc.EnsureTableInContainer(container, "claude")
-		if data.Claude.SystemPrompt != nil {
-			if err := doc.SetInContainer(tableNode, "system-prompt", *data.Claude.SystemPrompt); err != nil {
-				return err
-			}
-		}
-		if data.Claude.SystemPromptAppend != nil {
-			if err := doc.SetInContainer(tableNode, "system-prompt-append", *data.Claude.SystemPromptAppend); err != nil {
-				return err
-			}
-		}
 		if err := doc.SetInContainer(tableNode, "allow", data.Claude.Allow); err != nil {
 			return err
 		}

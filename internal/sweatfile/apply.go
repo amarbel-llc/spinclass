@@ -58,7 +58,7 @@ func (sweatfile Sweatfile) prepareLocalBin() error {
 		return err
 	}
 
-	script := fmt.Sprintf("#! /usr/bin/env -S bash -e\nexec %s exec-claude \"$@\"", binaryName())
+	script := fmt.Sprintf("#! /usr/bin/env -S bash -e\nexec %s exec-clown \"$@\"", binaryName())
 	if err := os.WriteFile(
 		filepath.Join(dirSpinclassBin, "claude"),
 		[]byte(script),

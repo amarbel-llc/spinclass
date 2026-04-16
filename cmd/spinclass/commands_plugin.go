@@ -12,7 +12,6 @@ import (
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/amarbel-llc/spinclass/internal/git"
-	"github.com/amarbel-llc/spinclass/internal/prompt"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 )
@@ -90,20 +89,15 @@ func buildPluginCommand(cmdName string, sc sweatfile.StartCommand) *command.Comm
 		shortDesc = "Start a session via the " + sc.Name + " plugin"
 	}
 
-	longDesc := fmt.Sprintf(
-		"Config-driven start command declared via [[start-commands]] in the sweatfile. "+
-			"Runs the exec-start command with {arg} replaced by the positional argument, "+
-			"parses the JSON output, creates a worktree session, and writes the context "+
-			"fragment to .spinclass/system_prompt_append.d/3-start-%s.md.\n\n"+
-			"The exec-start command must produce JSON on stdout with the schema:\n\n"+
-			"  {\"branch\": \"<optional>\", \"description\": \"<optional>\", \"context\": \"<string>\"}\n\n"+
-			"When branch is set, an existing local or remote branch is checked out "+
-			"(like start-gh_pr) instead of creating a new one. When description is set, "+
-			"it becomes the session description unless --description is passed. The context "+
-			"value is written as the session's system prompt fragment.\n\n"+
-			"See spinclass-start-commands(7) for the full plugin authoring guide.",
-		sc.Name,
-	)
+	longDesc := "Config-driven start command declared via [[start-commands]] in the sweatfile. " +
+		"Runs the exec-start command with {arg} replaced by the positional argument, " +
+		"parses the JSON output, and creates a worktree session.\n\n" +
+		"The exec-start command must produce JSON on stdout with the schema:\n\n" +
+		"  {\"branch\": \"<optional>\", \"description\": \"<optional>\", \"context\": \"<string>\"}\n\n" +
+		"When branch is set, an existing local or remote branch is checked out " +
+		"(like start-gh_pr) instead of creating a new one. When description is set, " +
+		"it becomes the session description unless --description is passed.\n\n" +
+		"See spinclass-start-commands(7) for the full plugin authoring guide."
 
 	cmd := &command.Command{
 		Name: cmdName,
@@ -122,12 +116,6 @@ func buildPluginCommand(cmdName string, sc sweatfile.StartCommand) *command.Comm
 			{Name: "description", Type: command.String, Description: "Override the default session description"},
 			{Name: "merge-on-close", Type: command.Bool, Description: "Auto-merge worktree into default branch on session close"},
 			{Name: "no-attach", Type: command.Bool, Description: "Create worktree but skip attaching"},
-		},
-		Files: []command.FilePath{
-			{
-				Path:        fmt.Sprintf(".spinclass/system_prompt_append.d/3-start-%s.md", sc.Name),
-				Description: "System prompt fragment written from the exec-start context field.",
-			},
 		},
 		RunCLI: makePluginRunCLI(sc, argName),
 	}
@@ -283,13 +271,6 @@ func makePluginRunCLI(
 			if err != nil {
 				return err
 			}
-		}
-
-		if strings.TrimSpace(execOut.Context) != "" {
-			resolvedPath.PluginFragments = []prompt.PluginFragment{{
-				Name:    sc.Name,
-				Content: execOut.Context,
-			}}
 		}
 
 		return attachSession(resolvedPath, p)

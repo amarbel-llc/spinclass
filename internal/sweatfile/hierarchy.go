@@ -129,26 +129,6 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if merged.Claude == nil {
 			merged.Claude = &Claude{}
 		}
-		if other.Claude.SystemPrompt != nil {
-			if *other.Claude.SystemPrompt == "" {
-				merged.Claude.SystemPrompt = other.Claude.SystemPrompt
-			} else if merged.Claude.SystemPrompt != nil && *merged.Claude.SystemPrompt != "" {
-				joined := *merged.Claude.SystemPrompt + " " + *other.Claude.SystemPrompt
-				merged.Claude.SystemPrompt = &joined
-			} else {
-				merged.Claude.SystemPrompt = other.Claude.SystemPrompt
-			}
-		}
-		if other.Claude.SystemPromptAppend != nil {
-			if *other.Claude.SystemPromptAppend == "" {
-				merged.Claude.SystemPromptAppend = other.Claude.SystemPromptAppend
-			} else if merged.Claude.SystemPromptAppend != nil && *merged.Claude.SystemPromptAppend != "" {
-				joined := *merged.Claude.SystemPromptAppend + " " + *other.Claude.SystemPromptAppend
-				merged.Claude.SystemPromptAppend = &joined
-			} else {
-				merged.Claude.SystemPromptAppend = other.Claude.SystemPromptAppend
-			}
-		}
 		// allow: nil=inherit, empty=clear, non-empty=append
 		if other.Claude.Allow != nil {
 			if len(other.Claude.Allow) == 0 {
