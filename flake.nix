@@ -16,13 +16,7 @@
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
-    clown = {
-      url = "github:amarbel-llc/clown";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.nixpkgs-master.follows = "nixpkgs-master";
-      inputs.utils.follows = "utils";
-    };
-  };
+};
 
   outputs =
     {
@@ -32,7 +26,6 @@
       utils,
       gomod2nix,
       bob,
-      clown,
     }:
     utils.lib.eachDefaultSystem (
       system:
@@ -45,10 +38,6 @@
             (_: _: { go = pkgs-master.go; })
           ];
         };
-
-        clown-wrapper = pkgs.writeShellScriptBin "clown" ''
-          exec ${clown.packages.${system}.default}/bin/clown "$@"
-        '';
 
         spinclass = pkgs.buildGoApplication {
           pname = "spinclass";
@@ -73,13 +62,7 @@
       in
       {
         packages = {
-          default = pkgs.symlinkJoin {
-            name = "spinclass";
-            paths = [
-              spinclass
-              clown-wrapper
-            ];
-          };
+          default = spinclass;
         };
 
         devShells.default = pkgs.mkShell {

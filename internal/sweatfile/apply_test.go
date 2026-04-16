@@ -21,65 +21,6 @@ func gitDir(t *testing.T) string {
 	return filepath.Dir(gitPath)
 }
 
-func TestPrepareLocalBinWorksInsideWorktree(t *testing.T) {
-	// Proves #65: prepareLocalBin uses relative ".git/spinclass/bin/" which
-	// fails inside a worktree where .git is a file, not a directory.
-	repoDir := t.TempDir()
-
-	// Create a real git repo + worktree so git rev-parse works
-	run := func(dir string, args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		cmd.Env = append(os.Environ(),
-			"GIT_CONFIG_GLOBAL=/dev/null",
-			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test",
-			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test",
-		)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v: %s (%v)", args, out, err)
-		}
-	}
-
-	run(repoDir, "init")
-	os.WriteFile(filepath.Join(repoDir, "f.txt"), []byte("x"), 0o644)
-	run(repoDir, "add", "f.txt")
-	run(repoDir, "commit", "-m", "init")
-
-	wtDir := filepath.Join(repoDir, ".worktrees", "test-wt")
-	os.MkdirAll(filepath.Dir(wtDir), 0o755)
-	run(repoDir, "worktree", "add", "-b", "test-wt", wtDir)
-
-	// Verify .git in worktree is a file (precondition)
-	info, err := os.Lstat(filepath.Join(wtDir, ".git"))
-	if err != nil {
-		t.Fatalf("stat .git: %v", err)
-	}
-	if info.IsDir() {
-		t.Fatal("expected .git to be a file in worktree, got directory")
-	}
-
-	// cd into the worktree — this is the scenario that triggers #65
-	origDir, _ := os.Getwd()
-	if err := os.Chdir(wtDir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-	t.Cleanup(func() { os.Chdir(origDir) })
-
-	sf := Sweatfile{}
-	err = sf.prepareLocalBin()
-	if err != nil {
-		t.Fatalf("prepareLocalBin failed inside worktree: %v", err)
-	}
-
-	// The bin dir should have been created inside the main repo's .git,
-	// not as a relative ".git/spinclass/bin" from the worktree
-	binPath := filepath.Join(repoDir, ".git", "spinclass", "bin")
-	if _, err := os.Stat(binPath); os.IsNotExist(err) {
-		t.Errorf("expected bin dir at %s", binPath)
-	}
-}
-
 func TestHardcodedDefaultsGitExcludes(t *testing.T) {
 	defaults := GetDefault()
 

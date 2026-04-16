@@ -115,26 +115,6 @@ func registerSessionCommands(app *command.App) {
 		},
 	})
 
-	app.AddCommand(&command.Command{
-		Name:            "exec-clown",
-		Hidden:          true,
-		PassthroughArgs: true,
-		Description: command.Description{
-			Short: "Execute clown with spinclass plugin injection",
-		},
-		RunCLI: func(_ context.Context, args json.RawMessage) error {
-			var p struct {
-				Args []string `json:"args"`
-			}
-			_ = json.Unmarshal(args, &p)
-
-			hierarchy, err := sweatfile.LoadDefaultHierarchy()
-			if err != nil {
-				return err
-			}
-			return hierarchy.Merged.ExecClown(p.Args...)
-		},
-	})
 }
 
 func completeGHPRs() map[string]string {

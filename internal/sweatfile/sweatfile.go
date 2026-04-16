@@ -3,10 +3,7 @@ package sweatfile
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"slices"
-	"strings"
 )
 
 type Claude struct {
@@ -206,47 +203,3 @@ func defaultStartCommands() []StartCommand {
 	}
 }
 
-func (sweatfile Sweatfile) ExecClown(
-	args ...string,
-) error {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-
-	scDir := filepath.Join(cwd, ".spinclass")
-	if _, err := os.Stat(scDir); os.IsNotExist(err) {
-		return fmt.Errorf(".spinclass directory not found in %s; exec-clown requires a spinclass session", cwd)
-	}
-
-	// Resolve the spinclass plugin directory relative to our own binary.
-	// The Nix symlinkJoin places both the binary and share/ tree in the
-	// same output, so ../share/purse-first/spinclass is always valid.
-	exePath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("resolving executable path: %w", err)
-	}
-	pluginDir := filepath.Join(filepath.Dir(exePath), "..", "share", "purse-first", "spinclass")
-
-	args = append([]string{"--plugin-dir", pluginDir}, args...)
-
-	pathGitDirCommon, err := getGitDirCommon()
-	if err != nil {
-		return err
-	}
-
-	pathSweatfileBin := filepath.Join(pathGitDirCommon, "spinclass/bin/")
-
-	envVarPath := filepath.SplitList(os.Getenv("PATH"))
-	envVarPath = slices.DeleteFunc(envVarPath, func(value string) bool {
-		return filepath.Clean(value) == pathSweatfileBin
-	})
-	os.Setenv("PATH", strings.Join(envVarPath, string(filepath.ListSeparator)))
-
-	cmdClown := exec.Command("clown", args...)
-	cmdClown.Stdout = os.Stdout
-	cmdClown.Stderr = os.Stderr
-	cmdClown.Stdin = os.Stdin
-
-	return cmdClown.Run()
-}

@@ -21,10 +21,6 @@ func (sweatfile Sweatfile) Apply(worktreePath string) error {
 		return fmt.Errorf("applying claude settings: %w", err)
 	}
 
-	if err := sweatfile.prepareLocalBin(); err != nil {
-		return err
-	}
-
 	if err := sweatfile.writeSpinclassEnv(worktreePath); err != nil {
 		return fmt.Errorf("writing .spinclass.env: %w", err)
 	}
@@ -46,28 +42,6 @@ func resolveSpinclassBinDir() (string, error) {
 
 func binaryName() string {
 	return filepath.Base(os.Args[0])
-}
-
-func (sweatfile Sweatfile) prepareLocalBin() error {
-	dirSpinclassBin, err := resolveSpinclassBinDir()
-	if err != nil {
-		return err
-	}
-
-	if err := os.MkdirAll(dirSpinclassBin, 0o755); err != nil {
-		return err
-	}
-
-	script := fmt.Sprintf("#! /usr/bin/env -S bash -e\nexec %s exec-clown \"$@\"", binaryName())
-	if err := os.WriteFile(
-		filepath.Join(dirSpinclassBin, "claude"),
-		[]byte(script),
-		0o644,
-	); err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func (sf Sweatfile) writeEnvrc(worktreePath string) error {
