@@ -19,7 +19,7 @@ func TestBuildPluginCommandParams(t *testing.T) {
 		ExecStart:       []string{"printf", "%s", `{"context":"# hi {arg}"}`},
 	}
 
-	cmd := buildPluginCommand("start-jira", sc)
+	cmd := buildPluginCommand("start-jira", sc, "")
 
 	if cmd.Name != "start-jira" {
 		t.Errorf("Name = %q, want start-jira", cmd.Name)
@@ -50,7 +50,7 @@ func TestBuildPluginCommandParams(t *testing.T) {
 
 func TestBuildPluginCommandDefaultsArgName(t *testing.T) {
 	sc := sweatfile.StartCommand{Name: "foo", ExecStart: []string{"echo"}}
-	cmd := buildPluginCommand("start-foo", sc)
+	cmd := buildPluginCommand("start-foo", sc, "")
 	if cmd.Params[0].Name != "arg" {
 		t.Errorf("expected default arg name 'arg', got %q", cmd.Params[0].Name)
 	}
@@ -63,7 +63,7 @@ func TestPluginCompleterParsesJSON(t *testing.T) {
 	sc := sweatfile.StartCommand{
 		ExecCompletions: []string{"printf", "%s", `[{"arg":"FOO-1","description":"first issue"},{"arg":"FOO-2","description":"second issue"},{"arg":"FOO-3","description":""}]`},
 	}
-	completer := pluginCompleter(sc)
+	completer := pluginCompleter(sc, "")
 	if completer == nil {
 		t.Fatal("expected non-nil completer")
 	}
@@ -80,14 +80,14 @@ func TestPluginCompleterParsesJSON(t *testing.T) {
 }
 
 func TestPluginCompleterNilWhenUnset(t *testing.T) {
-	if pluginCompleter(sweatfile.StartCommand{}) != nil {
+	if pluginCompleter(sweatfile.StartCommand{}, "") != nil {
 		t.Error("expected nil completer when sc.ExecCompletions is empty")
 	}
 }
 
 func TestPluginCompleterReturnsNilOnFailure(t *testing.T) {
 	sc := sweatfile.StartCommand{ExecCompletions: []string{"false"}}
-	completer := pluginCompleter(sc)
+	completer := pluginCompleter(sc, "")
 	if completer == nil {
 		t.Fatal("expected non-nil completer")
 	}
@@ -100,7 +100,7 @@ func TestRunPluginExecStartSubstitutesArg(t *testing.T) {
 	sc := sweatfile.StartCommand{
 		ExecStart: []string{"printf", "%s", `{"context":"# Hello {arg}"}`},
 	}
-	out, err := runPluginExecStart(sc, "world")
+	out, err := runPluginExecStart(sc, "world", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -111,14 +111,14 @@ func TestRunPluginExecStartSubstitutesArg(t *testing.T) {
 
 func TestRunPluginExecStartPropagatesError(t *testing.T) {
 	sc := sweatfile.StartCommand{ExecStart: []string{"false"}}
-	_, err := runPluginExecStart(sc, "x")
+	_, err := runPluginExecStart(sc, "x", "")
 	if err == nil {
 		t.Error("expected error from failing exec-start command")
 	}
 }
 
 func TestRunPluginExecStartEmpty(t *testing.T) {
-	out, err := runPluginExecStart(sweatfile.StartCommand{}, "x")
+	out, err := runPluginExecStart(sweatfile.StartCommand{}, "x", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

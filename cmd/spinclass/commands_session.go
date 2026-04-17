@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/charmbracelet/huh"
@@ -14,9 +13,7 @@ import (
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	spinclose "github.com/amarbel-llc/spinclass/internal/close"
 	"github.com/amarbel-llc/spinclass/internal/executor"
-	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/merge"
-	"github.com/amarbel-llc/spinclass/internal/pr"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/shop"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
@@ -38,23 +35,8 @@ func registerSessionCommands(app *command.App) {
 		RunCLI: runStart,
 	})
 
-	app.AddCommand(&command.Command{
-		Name: "start-gh_pr",
-		Description: command.Description{
-			Short: "Start a session from a GitHub pull request",
-			Long:  "Create a new worktree session from an existing GitHub PR. Fetches the PR branch and sets up session context with PR metadata.",
-		},
-		Params: []command.Param{
-			{Name: "pr", Type: command.String, Description: "PR number or GitHub URL", Required: true, Completer: completeGHPRs},
-			{Name: "description", Type: command.String, Description: "Override the PR title as session description"},
-			{Name: "merge-on-close", Type: command.Bool, Description: "Auto-merge worktree into default branch on session close"},
-			{Name: "no-attach", Type: command.Bool, Description: "Create worktree but skip attaching"},
-		},
-		RunCLI: runStartGHPR,
-	})
-
-	// `start-gh_issue` is registered dynamically from
-	// sweatfile.GetDefault()'s baked-in [[start-commands]] entry via
+	// `start-gh_pr` and `start-gh_issue` are registered dynamically from
+	// sweatfile.GetDefault()'s baked-in [[start-commands]] entries via
 	// registerPluginStartCommands(). See internal/sweatfile/sweatfile.go
 	// defaultStartCommands().
 
@@ -115,29 +97,6 @@ func registerSessionCommands(app *command.App) {
 		},
 	})
 
-}
-
-func completeGHPRs() map[string]string {
-	out, err := exec.Command(
-		"gh", "pr", "list", "--json", "number,title", "--limit", "20",
-	).Output()
-	if err != nil {
-		return nil
-	}
-
-	var prs []struct {
-		Number int    `json:"number"`
-		Title  string `json:"title"`
-	}
-	if json.Unmarshal(out, &prs) != nil {
-		return nil
-	}
-
-	result := make(map[string]string, len(prs))
-	for _, p := range prs {
-		result[fmt.Sprintf("%d", p.Number)] = p.Title
-	}
-	return result
 }
 
 func completeWorktreeTargets() map[string]string {
@@ -236,56 +195,6 @@ func runStart(_ context.Context, args json.RawMessage) error {
 	}
 
 	return attachSession(resolvedPath, p)
-}
-
-func runStartGHPR(_ context.Context, args json.RawMessage) error {
-	var p struct {
-		startArgs
-		PR string `json:"pr"`
-	}
-	_ = json.Unmarshal(args, &p)
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-
-	repoPath, err := worktree.DetectRepo(cwd)
-	if err != nil {
-		return err
-	}
-
-	prInfo, err := pr.Resolve(p.PR, repoPath)
-	if err != nil {
-		return err
-	}
-
-	branch := prInfo.HeadRefName
-
-	if !git.BranchExists(repoPath, branch) {
-		if _, err := git.Run(repoPath, "fetch", "origin", branch); err != nil {
-			return fmt.Errorf("fetching PR branch %q: %w", branch, err)
-		}
-	}
-
-	absPath := filepath.Join(repoPath, worktree.WorktreesDir, branch)
-	repoDirname := filepath.Base(repoPath)
-
-	description := fmt.Sprintf("%s (#%d)", prInfo.Title, prInfo.Number)
-	if p.Description != "" {
-		description = p.Description
-	}
-
-	resolvedPath := worktree.ResolvedPath{
-		AbsPath:        absPath,
-		RepoPath:       repoPath,
-		SessionKey:     repoDirname + "/" + branch,
-		Branch:         branch,
-		Description:    description,
-		ExistingBranch: branch,
-	}
-
-	return attachSession(resolvedPath, p.startArgs)
 }
 
 func runResume(_ context.Context, args json.RawMessage) error {

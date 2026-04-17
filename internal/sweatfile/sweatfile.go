@@ -200,6 +200,27 @@ func defaultStartCommands() []StartCommand {
 					`jq '{context: ("# GitHub Issue Context\n\nThis session is working on the following GitHub issue.\n\n## Issue #" + (.number | tostring) + ": " + .title + "\n- **State:** " + .state + (if (.labels | length) > 0 then "\n- **Labels:** " + ([.labels[].name] | join(", ")) else "" end) + "\n- **URL:** " + .url + "\n\n## Description\n\n" + .body)}'`,
 			},
 		},
+		{
+			Name:        "gh_pr",
+			Description: "Start a session from a GitHub pull request",
+			ArgName:     "pr",
+			ArgHelp:     "PR number or GitHub URL",
+			ExecCompletions: []string{
+				"sh", "-c",
+				`gh pr list --json number,title --limit 20 2>/dev/null | ` +
+					`jq '[.[] | {arg: (.number | tostring), description: .title}]' 2>/dev/null`,
+			},
+			ExecStart: []string{
+				"sh", "-c",
+				`gh pr view {arg} --json headRefName,isCrossRepository,title,number,url,body,state,labels | ` +
+					`jq 'if .isCrossRepository then error("fork PRs are not supported (PR #\(.number) is from a fork)") else ` +
+					`{branch: .headRefName, description: ("\(.title) (#\(.number))"), context: ` +
+					`("# Pull Request Context\n\nThis session is working on the following pull request.\n\n## PR #" + (.number | tostring) + ": " + .title + ` +
+					`"\n- **State:** " + .state + ` +
+					`(if (.labels | length) > 0 then "\n- **Labels:** " + ([.labels[].name] | join(", ")) else "" end) + ` +
+					`"\n- **URL:** " + .url + "\n\n## Description\n\n" + .body)} end'`,
+			},
+		},
 	}
 }
 

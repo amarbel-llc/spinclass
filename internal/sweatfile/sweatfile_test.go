@@ -1166,6 +1166,32 @@ func TestGetDefaultShipsGhIssueStartCommand(t *testing.T) {
 	}
 }
 
+func TestGetDefaultShipsGhPrStartCommand(t *testing.T) {
+	def := GetDefault()
+	var found *StartCommand
+	for i := range def.StartCommands {
+		if def.StartCommands[i].Name == "gh_pr" {
+			found = &def.StartCommands[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("expected gh_pr entry in GetDefault().StartCommands")
+	}
+	if found.ArgName != "pr" {
+		t.Errorf("ArgName = %q, want pr", found.ArgName)
+	}
+	if found.ArgRegex != nil {
+		t.Errorf("ArgRegex should be nil (gh pr view handles validation), got %v", *found.ArgRegex)
+	}
+	if len(found.ExecStart) == 0 {
+		t.Error("ExecStart must be non-empty")
+	}
+	if len(found.ExecCompletions) == 0 {
+		t.Error("ExecCompletions must be non-empty")
+	}
+}
+
 func TestMergePrecedenceUserOverridesDefault(t *testing.T) {
 	userConfig := Sweatfile{
 		StartCommands: []StartCommand{

@@ -30,7 +30,7 @@ type execStartOutput struct {
 // commands and skips names that are already registered to preserve built-in
 // behaviour.
 func registerPluginStartCommands(app *command.App) {
-	merged, ok := loadMergedSweatfile()
+	merged, repoPath, ok := loadMergedSweatfile()
 	if !ok {
 		return
 	}
@@ -42,27 +42,31 @@ func registerPluginStartCommands(app *command.App) {
 		if _, exists := app.GetCommand(cmdName); exists {
 			continue
 		}
-		app.AddCommand(buildPluginCommand(cmdName, sc))
+		app.AddCommand(buildPluginCommand(cmdName, sc, repoPath))
 	}
 }
 
 // loadMergedSweatfile loads the sweatfile hierarchy from cwd with the
 // baseline (`GetDefault()`) merged on top, so built-in entries surface even
 // when the user has no repo/global sweatfile.
-func loadMergedSweatfile() (sweatfile.Sweatfile, bool) {
+// loadMergedSweatfile returns the merged sweatfile and the detected repo path
+// (empty when outside a repo).
+func loadMergedSweatfile() (sweatfile.Sweatfile, string, bool) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return sweatfile.Sweatfile{}, false
+		return sweatfile.Sweatfile{}, "", false
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return sweatfile.Sweatfile{}, false
+		return sweatfile.Sweatfile{}, "", false
 	}
 	var merged sweatfile.Sweatfile
-	if repoPath, err := worktree.DetectRepo(cwd); err == nil {
+	var repoPath string
+	if rp, err := worktree.DetectRepo(cwd); err == nil {
+		repoPath = rp
 		hierarchy, err := sweatfile.LoadHierarchy(home, repoPath)
 		if err != nil {
-			return sweatfile.Sweatfile{}, false
+			return sweatfile.Sweatfile{}, "", false
 		}
 		merged = hierarchy.Merged
 	} else {
@@ -71,15 +75,15 @@ func loadMergedSweatfile() (sweatfile.Sweatfile, bool) {
 		// reads ~/.config/spinclass/sweatfile).
 		hierarchy, err := sweatfile.LoadHierarchy(home, home)
 		if err != nil {
-			return sweatfile.Sweatfile{}, false
+			return sweatfile.Sweatfile{}, "", false
 		}
 		merged = hierarchy.Merged
 	}
 	merged = sweatfile.GetDefault().MergeWith(merged)
-	return merged, true
+	return merged, repoPath, true
 }
 
-func buildPluginCommand(cmdName string, sc sweatfile.StartCommand) *command.Command {
+func buildPluginCommand(cmdName string, sc sweatfile.StartCommand, repoPath string) *command.Command {
 	argName := sc.ArgName
 	if argName == "" {
 		argName = "arg"
@@ -111,7 +115,7 @@ func buildPluginCommand(cmdName string, sc sweatfile.StartCommand) *command.Comm
 				Type:        command.String,
 				Description: sc.ArgHelp,
 				Required:    true,
-				Completer:   pluginCompleter(sc),
+				Completer:   pluginCompleter(sc, repoPath),
 			},
 			{Name: "description", Type: command.String, Description: "Override the default session description"},
 			{Name: "merge-on-close", Type: command.Bool, Description: "Auto-merge worktree into default branch on session close"},
@@ -143,13 +147,17 @@ type execCompletionEntry struct {
 
 // pluginCompleter returns a Completer that execs the user's `exec-completions`
 // command and parses stdout as JSON: [{"arg": "...", "description": "..."}].
-// Any error returns nil to match the defensive style of completeGHPRs.
-func pluginCompleter(sc sweatfile.StartCommand) func() map[string]string {
+// repoPath sets the working directory so completions work from nested repos.
+// Any error returns nil defensively.
+func pluginCompleter(sc sweatfile.StartCommand, repoPath string) func() map[string]string {
 	if len(sc.ExecCompletions) == 0 {
 		return nil
 	}
 	return func() map[string]string {
 		cmd := exec.Command(sc.ExecCompletions[0], sc.ExecCompletions[1:]...)
+		if repoPath != "" {
+			cmd.Dir = repoPath
+		}
 		out, err := cmd.Output()
 		if err != nil {
 			return nil
@@ -214,7 +222,16 @@ func makePluginRunCLI(
 			}
 		}
 
-		rawOutput, err := runPluginExecStart(sc, argValue)
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		repoPath, err := worktree.DetectRepo(cwd)
+		if err != nil {
+			return err
+		}
+
+		rawOutput, err := runPluginExecStart(sc, argValue, repoPath)
 		if err != nil {
 			return fmt.Errorf("start-%s exec-start: %w", sc.Name, err)
 		}
@@ -224,15 +241,6 @@ func makePluginRunCLI(
 			if err := json.Unmarshal([]byte(rawOutput), &execOut); err != nil {
 				return fmt.Errorf("start-%s: exec-start produced invalid JSON: %w", sc.Name, err)
 			}
-		}
-
-		cwd, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-		repoPath, err := worktree.DetectRepo(cwd)
-		if err != nil {
-			return err
 		}
 
 		description := p.Description
@@ -282,8 +290,8 @@ func makePluginRunCLI(
 // literal string replace on each argv element — the command is exec'd directly
 // (no shell), so there is no injection surface beyond what the user's own argv
 // expressed. Users who want shell expansion must wrap in `sh -c`.
-// The caller is responsible for parsing the returned stdout as JSON.
-func runPluginExecStart(sc sweatfile.StartCommand, argValue string) (string, error) {
+// repoPath sets the working directory; the caller parses stdout as JSON.
+func runPluginExecStart(sc sweatfile.StartCommand, argValue, repoPath string) (string, error) {
 	if len(sc.ExecStart) == 0 {
 		return "", nil
 	}
@@ -292,6 +300,9 @@ func runPluginExecStart(sc sweatfile.StartCommand, argValue string) (string, err
 		argv[i] = strings.ReplaceAll(token, "{arg}", argValue)
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
+	if repoPath != "" {
+		cmd.Dir = repoPath
+	}
 	cmd.Stderr = os.Stderr
 	out, err := cmd.Output()
 	if err != nil {
