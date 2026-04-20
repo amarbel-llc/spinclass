@@ -6,15 +6,49 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime/debug"
+	"time"
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/protocol"
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/merge"
+	"github.com/amarbel-llc/spinclass/internal/servelog"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 )
+
+// wrapMCPHandler adds entry/exit logging and panic recovery around an MCP
+// tool handler. A panic becomes a TextErrorResult instead of a dead server
+// (which in stdio mode means the MCP client sees the connection close and
+// every subsequent tool call fails with `No such tool available: …`).
+func wrapMCPHandler(
+	name string,
+	fn func(ctx context.Context, args json.RawMessage, p command.Prompter) (*command.Result, error),
+) func(ctx context.Context, args json.RawMessage, p command.Prompter) (*command.Result, error) {
+	return func(ctx context.Context, args json.RawMessage, p command.Prompter) (res *command.Result, err error) {
+		start := time.Now()
+		servelog.Infof("mcp.handler.enter name=%s args_size=%d", name, len(args))
+
+		defer func() {
+			if r := recover(); r != nil {
+				stack := debug.Stack()
+				servelog.Errorf("mcp.handler.panic name=%s recovered=%v\n%s", name, r, stack)
+				logPath := servelog.Path()
+				msg := fmt.Sprintf("spinclass handler %q panicked: %v", name, r)
+				if logPath != "" {
+					msg += fmt.Sprintf(" (see %s)", logPath)
+				}
+				res = command.TextErrorResult(msg)
+				err = nil
+			}
+			servelog.Infof("mcp.handler.exit name=%s dur=%s", name, time.Since(start))
+		}()
+
+		return fn(ctx, args, p)
+	}
+}
 
 // registerMCPOnlyCommands registers commands that only make sense as MCP
 // tools (not user-facing CLI commands). They are Hidden so they don't show
@@ -41,7 +75,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		Params: []command.Param{
 			{Name: "git_sync", Type: command.Bool, Description: "Pull and push after merge (default false)"},
 		},
-		Run: handleMergeThisSession,
+		Run: wrapMCPHandler("merge-this-session", handleMergeThisSession),
 	})
 
 	app.AddCommand(&command.Command{
@@ -59,7 +93,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		Params: []command.Param{
 			{Name: "description", Type: command.String, Description: "New description for the session", Required: true},
 		},
-		Run: handleUpdateDescription,
+		Run: wrapMCPHandler("update-this-session-description", handleUpdateDescription),
 	})
 }
 
