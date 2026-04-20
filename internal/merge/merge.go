@@ -151,51 +151,8 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 		}
 	}
 
-	home, _ := os.UserHomeDir()
-	if home != "" {
-		hierarchy, err := sweatfile.LoadWorktreeHierarchy(home, repoPath, wtPath)
-		if err == nil {
-			preMergeCmd := hierarchy.Merged.PreMergeHookCommand()
-			if preMergeCmd != nil && *preMergeCmd != "" {
-				hookDesc := "pre-merge hook for " + branch + ": `" + *preMergeCmd + "`"
-
-				if tw == nil {
-					log.Info("running pre-merge hook", "worktree", branch)
-				}
-
-				var hookOut bytes.Buffer
-				var hookWriter io.Writer
-				if tw != nil {
-					hookWriter = &hookOut
-				} else {
-					hookWriter = w
-				}
-
-				if err := hierarchy.Merged.RunPreMergeHook(wtPath, hookWriter); err != nil {
-					if tw != nil {
-						diag := map[string]string{"severity": "fail", "message": err.Error()}
-						if hookOut.Len() > 0 {
-							diag["output"] = hookOut.String()
-						}
-						tw.NotOk(hookDesc, diag)
-						if ownWriter {
-							tw.Plan()
-						}
-					} else {
-						log.Error("pre-merge hook failed, not merging")
-					}
-					return err
-				}
-
-				if tw != nil {
-					if verbose && hookOut.Len() > 0 {
-						tw.OkDiag(hookDesc, &tap.Diagnostics{Extras: map[string]any{"output": hookOut.String()}})
-					} else {
-						tw.Ok(hookDesc)
-					}
-				}
-			}
-		}
+	if err := runPreMergeHook(tw, w, repoPath, wtPath, branch, ownWriter); err != nil {
+		return err
 	}
 
 	if tw == nil {
@@ -430,4 +387,80 @@ func promptDefaultBranch() (string, error) {
 		return "", fmt.Errorf("branch selection cancelled: %w", err)
 	}
 	return selected, nil
+}
+
+// runPreMergeHook loads the sweatfile hierarchy, runs the configured
+// pre-merge hook (if any), and reports the outcome.
+//
+// When emitting TAP (tw != nil), the hook runs inside a tap-dancer
+// OutputBlock so the `# Output:` header prints immediately and hook
+// stdout/stderr streams as indented body lines in real time instead of
+// being buffered until the hook exits.
+func runPreMergeHook(tw *tap.Writer, w io.Writer, repoPath, wtPath, branch string, ownWriter bool) error {
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		return nil
+	}
+	hierarchy, err := sweatfile.LoadWorktreeHierarchy(home, repoPath, wtPath)
+	if err != nil {
+		return nil
+	}
+	cmd := hierarchy.Merged.PreMergeHookCommand()
+	if cmd == nil || *cmd == "" {
+		return nil
+	}
+	desc := "pre-merge hook for " + branch + ": `" + *cmd + "`"
+
+	if tw == nil {
+		log.Info("running pre-merge hook", "worktree", branch)
+		if err := hierarchy.Merged.RunPreMergeHook(wtPath, w); err != nil {
+			log.Error("pre-merge hook failed, not merging")
+			return err
+		}
+		return nil
+	}
+
+	var hookErr error
+	tw.OutputBlock(desc, func(ob *tap.OutputBlockWriter) *tap.Diagnostics {
+		lw := &lineWriter{ob: ob}
+		hookErr = hierarchy.Merged.RunPreMergeHook(wtPath, lw)
+		lw.Flush()
+		if hookErr != nil {
+			return &tap.Diagnostics{Severity: "fail", Message: hookErr.Error()}
+		}
+		return nil
+	})
+	if hookErr != nil && ownWriter {
+		tw.Plan()
+	}
+	return hookErr
+}
+
+// lineWriter splits incoming bytes on '\n' and forwards each complete
+// line to an OutputBlockWriter. Partial trailing content is buffered
+// until a newline arrives or Flush() is called.
+type lineWriter struct {
+	ob  *tap.OutputBlockWriter
+	buf []byte
+}
+
+func (lw *lineWriter) Write(p []byte) (int, error) {
+	lw.buf = append(lw.buf, p...)
+	for {
+		i := bytes.IndexByte(lw.buf, '\n')
+		if i < 0 {
+			break
+		}
+		lw.ob.Line(string(lw.buf[:i]))
+		lw.buf = lw.buf[i+1:]
+	}
+	return len(p), nil
+}
+
+func (lw *lineWriter) Flush() {
+	if len(lw.buf) == 0 {
+		return
+	}
+	lw.ob.Line(string(lw.buf))
+	lw.buf = nil
 }
