@@ -107,7 +107,6 @@ func removeWorktree(wt worktreeInfo) error {
 	return nil
 }
 
-
 func discardFile(wtPath string, fc FileChange) error {
 	if fc.Code == "??" {
 		return os.Remove(filepath.Join(wtPath, fc.Path))

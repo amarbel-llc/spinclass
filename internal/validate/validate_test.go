@@ -287,4 +287,3 @@ func TestCheckMCPsDuplicateName(t *testing.T) {
 		t.Errorf("expected warning for duplicate name, got %v", issues)
 	}
 }
-

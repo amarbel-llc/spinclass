@@ -96,7 +96,6 @@ func registerSessionCommands(app *command.App) {
 			return spinclose.Run(os.Stdout, p.Target, p.Force, p.FormatOrDefault())
 		},
 	})
-
 }
 
 func completeWorktreeTargets() map[string]string {
