@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -127,9 +128,20 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 					log.Info("running pre-merge hook", "worktree", branch)
 				}
 
-				if err := hierarchy.Merged.RunPreMergeHook(wtPath); err != nil {
+				var hookOut bytes.Buffer
+				var hookWriter io.Writer
+				if tw != nil {
+					hookWriter = &hookOut
+				} else {
+					hookWriter = w
+				}
+
+				if err := hierarchy.Merged.RunPreMergeHook(wtPath, hookWriter); err != nil {
 					if tw != nil {
 						diag := map[string]string{"severity": "fail", "message": err.Error()}
+						if hookOut.Len() > 0 {
+							diag["output"] = hookOut.String()
+						}
 						tw.NotOk(hookDesc, diag)
 						if ownWriter {
 							tw.Plan()
@@ -141,7 +153,11 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 				}
 
 				if tw != nil {
-					tw.Ok(hookDesc)
+					if verbose && hookOut.Len() > 0 {
+						tw.OkDiag(hookDesc, &tap.Diagnostics{Extras: map[string]any{"output": hookOut.String()}})
+					} else {
+						tw.Ok(hookDesc)
+					}
 				}
 			}
 		}

@@ -1,8 +1,10 @@
 package sweatfile
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -679,7 +681,7 @@ func TestRunCreateHookExecutes(t *testing.T) {
 	cmd := fmt.Sprintf("touch %s", marker)
 	sf := Sweatfile{Hooks: &Hooks{Create: &cmd}}
 
-	err := sf.RunCreateHook(dir)
+	err := sf.RunCreateHook(dir, io.Discard)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -696,7 +698,7 @@ func TestRunCreateHookReceivesWorktreeEnv(t *testing.T) {
 	cmd := fmt.Sprintf("echo $WORKTREE > %s", output)
 	sf := Sweatfile{Hooks: &Hooks{Create: &cmd}}
 
-	err := sf.RunCreateHook(dir)
+	err := sf.RunCreateHook(dir, io.Discard)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -714,7 +716,7 @@ func TestRunCreateHookFailureReturnsError(t *testing.T) {
 	cmd := "exit 1"
 	sf := Sweatfile{Hooks: &Hooks{Create: &cmd}}
 
-	err := sf.RunCreateHook(dir)
+	err := sf.RunCreateHook(dir, io.Discard)
 	if err == nil {
 		t.Error("expected error from failing create hook")
 	}
@@ -724,7 +726,7 @@ func TestRunCreateHookNilIsNoop(t *testing.T) {
 	dir := t.TempDir()
 	sf := Sweatfile{}
 
-	err := sf.RunCreateHook(dir)
+	err := sf.RunCreateHook(dir, io.Discard)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -735,7 +737,7 @@ func TestRunCreateHookEmptyStringIsNoop(t *testing.T) {
 	empty := ""
 	sf := Sweatfile{Hooks: &Hooks{Create: &empty}}
 
-	err := sf.RunCreateHook(dir)
+	err := sf.RunCreateHook(dir, io.Discard)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -751,7 +753,7 @@ func TestRunCreateHookMultilineWithEmptyLines(t *testing.T) {
 	cmd := fmt.Sprintf("echo first\n\ntouch %s\n", marker)
 	sf := Sweatfile{Hooks: &Hooks{Create: &cmd}}
 
-	err := sf.RunCreateHook(dir)
+	err := sf.RunCreateHook(dir, io.Discard)
 	if err != nil {
 		t.Fatalf("multiline create hook with empty lines should not error: %v", err)
 	}
@@ -768,7 +770,7 @@ func TestRunPreMergeHookExecutes(t *testing.T) {
 	cmd := "touch " + marker
 	sf := Sweatfile{Hooks: &Hooks{PreMerge: &cmd}}
 
-	err := sf.RunPreMergeHook(dir)
+	err := sf.RunPreMergeHook(dir, io.Discard)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -784,7 +786,7 @@ func TestRunPreMergeHookReceivesWorktreeEnv(t *testing.T) {
 	cmd := "printenv WORKTREE > " + marker
 	sf := Sweatfile{Hooks: &Hooks{PreMerge: &cmd}}
 
-	err := sf.RunPreMergeHook(dir)
+	err := sf.RunPreMergeHook(dir, io.Discard)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -804,7 +806,7 @@ func TestRunPreMergeHookFailureReturnsError(t *testing.T) {
 	cmd := "exit 1"
 	sf := Sweatfile{Hooks: &Hooks{PreMerge: &cmd}}
 
-	err := sf.RunPreMergeHook(dir)
+	err := sf.RunPreMergeHook(dir, io.Discard)
 	if err == nil {
 		t.Error("expected error from failing pre-merge hook")
 	}
@@ -814,7 +816,7 @@ func TestRunPreMergeHookNilIsNoop(t *testing.T) {
 	dir := t.TempDir()
 	sf := Sweatfile{}
 
-	err := sf.RunPreMergeHook(dir)
+	err := sf.RunPreMergeHook(dir, io.Discard)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -825,9 +827,54 @@ func TestRunPreMergeHookEmptyStringIsNoop(t *testing.T) {
 	empty := ""
 	sf := Sweatfile{Hooks: &Hooks{PreMerge: &empty}}
 
-	err := sf.RunPreMergeHook(dir)
+	err := sf.RunPreMergeHook(dir, io.Discard)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// Regression test for spinclass#27: the hook MUST NOT write to os.Stdout.
+// In `spinclass serve` mode, os.Stdout is the JSON-RPC transport; any byte
+// the hook emits there corrupts the protocol and the MCP client closes the
+// connection. The hook must write to the caller-provided writer instead.
+func TestRunHookWritesToWriterNotStdout(t *testing.T) {
+	dir := t.TempDir()
+
+	// Swap os.Stdout for a pipe so we can observe whether anything is
+	// written to it during the hook.
+	origStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = origStdout })
+
+	var hookOut bytes.Buffer
+	cmd := "echo STDOUT_LINE; echo STDERR_LINE 1>&2"
+	sf := Sweatfile{Hooks: &Hooks{PreMerge: &cmd}}
+
+	if err := sf.RunPreMergeHook(dir, &hookOut); err != nil {
+		t.Fatalf("hook: %v", err)
+	}
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close pipe writer: %v", err)
+	}
+	leaked, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read pipe: %v", err)
+	}
+	if len(leaked) != 0 {
+		t.Errorf("hook leaked %d bytes to os.Stdout: %q", len(leaked), string(leaked))
+	}
+
+	got := hookOut.String()
+	if !strings.Contains(got, "STDOUT_LINE") {
+		t.Errorf("writer missing STDOUT_LINE; got %q", got)
+	}
+	if !strings.Contains(got, "STDERR_LINE") {
+		t.Errorf("writer missing STDERR_LINE; got %q", got)
 	}
 }
 

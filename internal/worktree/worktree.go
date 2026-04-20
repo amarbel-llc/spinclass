@@ -226,7 +226,7 @@ func applyWorktreeConfig(
 		return fmt.Errorf("writing .mcp.json: %w", err)
 	}
 
-	if err := sweetfile.Merged.RunCreateHook(worktreePath); err != nil {
+	if err := sweetfile.Merged.RunCreateHook(worktreePath, os.Stdout); err != nil {
 		git.RunPassthrough(
 			repoPath,
 			"worktree",

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -156,17 +157,17 @@ func (sf Sweatfile) prepareDirenv(worktreePath string) error {
 	return cmd.Run()
 }
 
-func (sf Sweatfile) RunCreateHook(worktreePath string) error {
+func (sf Sweatfile) RunCreateHook(worktreePath string, w io.Writer) error {
 	cmd := sf.CreateHookCommand()
-	return runHook(cmd, worktreePath)
+	return runHook(cmd, worktreePath, w)
 }
 
-func (sf Sweatfile) RunPreMergeHook(worktreePath string) error {
+func (sf Sweatfile) RunPreMergeHook(worktreePath string, w io.Writer) error {
 	cmd := sf.PreMergeHookCommand()
-	return runHook(cmd, worktreePath)
+	return runHook(cmd, worktreePath, w)
 }
 
-func runHook(cmd *string, worktreePath string) error {
+func runHook(cmd *string, worktreePath string, w io.Writer) error {
 	if cmd == nil || *cmd == "" {
 		return nil
 	}
@@ -176,11 +177,15 @@ func runHook(cmd *string, worktreePath string) error {
 		return nil
 	}
 
+	if w == nil {
+		w = io.Discard
+	}
+
 	c := exec.Command("sh", "-c", script)
 	c.Dir = worktreePath
 	c.Env = append(os.Environ(), "WORKTREE="+worktreePath)
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
+	c.Stdout = w
+	c.Stderr = w
 
 	return c.Run()
 }
