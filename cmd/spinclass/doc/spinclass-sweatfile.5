@@ -85,6 +85,10 @@ is set to the absolute worktree path.
 If the script exits non-zero, the merge is aborted and the worktree is
 left in its rebased state so the user can fix the issue and retry.
 Typical use: run tests or linters as a pre-merge gate.
+When this hook is set, the spinclass PreToolUse hook auto-approves the
+.B mcp__spinclass__merge-this-session
+tool so Claude Code does not prompt: the pre-merge hook acts as the gate
+instead.
 .B Merge:
 scalar override.
 .TP

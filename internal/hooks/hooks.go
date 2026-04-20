@@ -83,7 +83,15 @@ func runStopHook(input hookInput, w io.Writer) error {
 	return json.NewEncoder(w).Encode(decision)
 }
 
+// The spinclass MCP server registers under the name "spinclass", so its
+// tools appear to Claude Code as mcp__spinclass__<tool>.
+const mergeThisSessionToolName = "mcp__spinclass__merge-this-session"
+
 func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree bool) error {
+	if input.ToolName == mergeThisSessionToolName && hasPreMergeHook(input.CWD) {
+		return writeAllow(w, "sweatfile [hooks].pre-merge gates this merge")
+	}
+
 	resolvedMain := resolvePath(mainRepoRoot)
 	resolvedWorktree := resolvePath(sessionWorktree)
 
@@ -140,6 +148,30 @@ func writeAsk(w io.Writer, reason string) error {
 		},
 	}
 	return json.NewEncoder(w).Encode(output)
+}
+
+func writeAllow(w io.Writer, reason string) error {
+	output := map[string]any{
+		"hookSpecificOutput": map[string]any{
+			"hookEventName":            "PreToolUse",
+			"permissionDecision":       "allow",
+			"permissionDecisionReason": reason,
+		},
+	}
+	return json.NewEncoder(w).Encode(output)
+}
+
+func hasPreMergeHook(cwd string) bool {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	result, err := sweatfile.LoadHierarchy(home, cwd)
+	if err != nil {
+		return false
+	}
+	cmd := result.Merged.PreMergeHookCommand()
+	return cmd != nil && *cmd != ""
 }
 
 func isInsideSpinclassDir(path, mainRepoRoot, sessionWorktree string) bool {
