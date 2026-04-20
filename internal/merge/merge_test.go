@@ -207,26 +207,116 @@ func TestResolvedGitSyncTapOutput(t *testing.T) {
 
 	got := buf.String()
 
-	if !strings.Contains(got, "ok 1 - rebase feature-sync") {
+	if !strings.Contains(got, "ok 1 - pull main") {
+		t.Errorf("expected pull test point first (so rebase target is fresh), got: %q", got)
+	}
+	if !strings.Contains(got, "ok 2 - rebase feature-sync") {
 		t.Errorf("expected rebase test point, got: %q", got)
 	}
-	if !strings.Contains(got, "ok 2 - merge feature-sync") {
+	if !strings.Contains(got, "ok 3 - merge feature-sync") {
 		t.Errorf("expected merge test point, got: %q", got)
 	}
-	if !strings.Contains(got, "ok 3 - remove worktree feature-sync") {
+	if !strings.Contains(got, "ok 4 - remove worktree feature-sync") {
 		t.Errorf("expected remove worktree test point, got: %q", got)
 	}
-	if !strings.Contains(got, "ok 4 - delete branch feature-sync") {
+	if !strings.Contains(got, "ok 5 - delete branch feature-sync") {
 		t.Errorf("expected delete branch test point, got: %q", got)
-	}
-	if !strings.Contains(got, "ok 5 - pull") {
-		t.Errorf("expected pull test point, got: %q", got)
 	}
 	if !strings.Contains(got, "ok 6 - push") {
 		t.Errorf("expected push test point, got: %q", got)
 	}
 	if !strings.Contains(got, "1..6") {
 		t.Errorf("expected plan 1..6, got: %q", got)
+	}
+}
+
+// TestResolvedGitSyncPullsBeforeRebase is the #29 regression test.
+//
+// Scenario: origin has moved since the session was started. The session
+// branch is rebased onto local master, which is behind origin. Before
+// this fix, `git merge --ff-only` in the final merge step fails because
+// local master couldn't fast-forward to the post-rebase session branch
+// tip. After this fix, the upfront pull brings local master up to the
+// origin tip, the rebase targets the current ref, and the merge succeeds.
+func TestResolvedGitSyncPullsBeforeRebase(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", root)
+
+	gitConfigDir := filepath.Join(root, "gitconfig")
+	if err := os.MkdirAll(gitConfigDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(gitConfigDir, "config"))
+	t.Setenv("HOME", root)
+
+	// Bare "origin"
+	bareDir := filepath.Join(root, "bare.git")
+	runGit(t, root, "init", "--bare", "-b", "main", bareDir)
+
+	// First clone — where the "session" starts
+	repoDir := filepath.Join(root, "repo")
+	runGit(t, root, "clone", bareDir, repoDir)
+	runGit(t, repoDir, "config", "user.email", "test@test.com")
+	runGit(t, repoDir, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("initial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", "file.txt")
+	runGit(t, repoDir, "commit", "-m", "initial")
+	runGit(t, repoDir, "push")
+
+	// Session worktree + commit
+	wtDir := filepath.Join(repoDir, ".worktrees")
+	if err := os.MkdirAll(wtDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wtPath := filepath.Join(wtDir, "feature-stale")
+	runGit(t, repoDir, "worktree", "add", "-b", "feature-stale", wtPath)
+	if err := os.WriteFile(filepath.Join(wtPath, "feature.txt"), []byte("feature"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "feature.txt")
+	runGit(t, wtPath, "commit", "-m", "feature commit")
+
+	// Simulate a concurrent commit landing on origin from a second clone.
+	otherDir := filepath.Join(root, "other")
+	runGit(t, root, "clone", bareDir, otherDir)
+	runGit(t, otherDir, "config", "user.email", "other@test.com")
+	runGit(t, otherDir, "config", "user.name", "Other")
+	if err := os.WriteFile(filepath.Join(otherDir, "origin-new.txt"), []byte("origin-new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, otherDir, "add", "origin-new.txt")
+	runGit(t, otherDir, "commit", "-m", "concurrent commit on origin")
+	runGit(t, otherDir, "push")
+
+	// At this point repoDir's local main is behind origin/main by one commit.
+	// Without the fix, Resolved() would rebase feature-stale onto local main
+	// (stale) and then `git merge --ff-only` on main would fail.
+
+	mock := &mockExecutor{}
+	var buf bytes.Buffer
+
+	err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-stale", "main", true, false, false)
+	if err != nil {
+		t.Fatalf("Resolved() error (stale local master should not cause failure): %v\n\nTAP output:\n%s", err, buf.String())
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "ok 1 - pull main") {
+		t.Errorf("expected upfront pull as step 1, got: %q", got)
+	}
+	if !strings.Contains(got, "ok 3 - merge feature-stale") {
+		t.Errorf("expected merge to succeed after upfront pull, got: %q", got)
+	}
+
+	// And the concurrent origin commit should be present in local main now.
+	mainLog := runGit(t, repoDir, "log", "--oneline", "main")
+	if !strings.Contains(mainLog, "concurrent commit on origin") {
+		t.Errorf("expected concurrent origin commit on local main after pull, got log:\n%s", mainLog)
+	}
+	if !strings.Contains(mainLog, "feature commit") {
+		t.Errorf("expected feature commit on local main after merge, got log:\n%s", mainLog)
 	}
 }
 

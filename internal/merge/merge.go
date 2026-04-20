@@ -87,6 +87,41 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 		ownWriter = true
 	}
 
+	// Pull the default branch BEFORE rebasing, so the session branch is
+	// rebased onto the current origin tip rather than a stale local ref.
+	// Otherwise a concurrent commit on origin/<default> arriving between
+	// session start and merge leaves `git merge --ff-only` unable to
+	// fast-forward. See #29.
+	if gitSync {
+		if tw == nil {
+			log.Info("pulling "+defaultBranch, "repo", repoPath)
+		}
+
+		if tw != nil {
+			out, err := git.Pull(repoPath)
+			if err != nil {
+				diag := map[string]string{"severity": "fail", "message": err.Error()}
+				if out != "" {
+					diag["output"] = out
+				}
+				tw.NotOk("pull "+defaultBranch, diag)
+				if ownWriter {
+					tw.Plan()
+				}
+				return err
+			}
+			if verbose && out != "" {
+				tw.OkDiag("pull "+defaultBranch, &tap.Diagnostics{Extras: map[string]any{"output": out}})
+			} else {
+				tw.Ok("pull " + defaultBranch)
+			}
+		} else {
+			if err := git.RunPassthrough(repoPath, "pull"); err != nil {
+				return err
+			}
+		}
+	}
+
 	if tw == nil {
 		log.Info("rebasing onto "+defaultBranch, "worktree", branch)
 	}
@@ -258,34 +293,6 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 	}
 
 	if gitSync {
-		if tw == nil {
-			log.Info("pulling", "repo", repoPath)
-		}
-
-		if tw != nil {
-			out, err := git.Pull(repoPath)
-			if err != nil {
-				diag := map[string]string{"severity": "fail", "message": err.Error()}
-				if out != "" {
-					diag["output"] = out
-				}
-				tw.NotOk("pull", diag)
-				if ownWriter {
-					tw.Plan()
-				}
-				return err
-			}
-			if verbose && out != "" {
-				tw.OkDiag("pull", &tap.Diagnostics{Extras: map[string]any{"output": out}})
-			} else {
-				tw.Ok("pull")
-			}
-		} else {
-			if err := git.RunPassthrough(repoPath, "pull"); err != nil {
-				return err
-			}
-		}
-
 		if tw == nil {
 			log.Info("pushing", "repo", repoPath)
 		}
