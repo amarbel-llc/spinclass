@@ -7,14 +7,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/charmbracelet/huh"
-	"github.com/mattn/go-isatty"
-
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	spinclose "github.com/amarbel-llc/spinclass/internal/close"
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/merge"
 	"github.com/amarbel-llc/spinclass/internal/session"
+	"github.com/amarbel-llc/spinclass/internal/sessionpick"
 	"github.com/amarbel-llc/spinclass/internal/shop"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
@@ -44,7 +42,7 @@ func registerSessionCommands(app *command.App) {
 		Name: "resume",
 		Description: command.Description{
 			Short: "Resume an existing worktree session",
-			Long:  "Resume an existing worktree session. With no arguments, auto-detects the session from the current working directory. With one argument, resumes the session identified by the worktree directory name.",
+			Long:  "Resume an existing worktree session. With no argument, auto-detects from the current working directory; if cwd isn't inside a tracked session, prompts interactively when stdin is a TTY or errors with the list of available session IDs otherwise. With one argument, resumes the session whose worktree directory name matches. Tab completion offers session IDs scoped to the current repo when run inside one, or all non-abandoned sessions otherwise (labels include the repo basename to disambiguate).",
 		},
 		Params: []command.Param{
 			{Name: "id", Type: command.String, Description: "Session ID (worktree directory name); auto-detects from cwd if omitted", Completer: completeWorktreeTargets},
@@ -79,10 +77,10 @@ func registerSessionCommands(app *command.App) {
 		Name: "close",
 		Description: command.Description{
 			Short: "Close a session without merging",
-			Long:  "Remove a worktree and its branch without merging into main. Prompts for confirmation if the branch has not been pushed upstream. Use --force to skip.",
+			Long:  "Remove a worktree and its branch without merging into main. With no argument, closes the current worktree if cwd is inside one, otherwise prompts interactively when stdin is a TTY (or errors with the list of session IDs). With one argument, closes the named session; orphaned git worktrees without a spinclass state file are rejected with a hint to run `git worktree remove`. Prompts for confirmation if the branch has unintegrated commits or uncommitted changes; use --force to skip.",
 		},
 		Params: []command.Param{
-			{Name: "target", Type: command.String, Description: "Target worktree to close", Completer: completeWorktreeTargets},
+			{Name: "target", Type: command.String, Description: "Target session ID (worktree directory name); auto-detects from cwd if omitted", Completer: completeWorktreeTargets},
 			{Name: "force", Short: 'f', Type: command.Bool, Description: "Skip confirmation for unpushed branches"},
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
@@ -98,6 +96,12 @@ func registerSessionCommands(app *command.App) {
 	})
 }
 
+// completeWorktreeTargets returns session IDs (worktree directory
+// names) keyed to descriptive labels for tab completion. Inside a repo
+// the list is scoped to that repo; outside any repo it includes every
+// non-abandoned session and tags each label with its repo basename so
+// duplicates across repos disambiguate. Output is sorted via
+// session.SortStates so the active session shows up first.
 func completeWorktreeTargets() map[string]string {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -109,7 +113,6 @@ func completeWorktreeTargets() map[string]string {
 	if err == nil {
 		sessions, _ = session.ListForRepo(repoPath)
 	} else {
-		// Outside a git repo: show all non-abandoned sessions.
 		all, err := session.ListAll()
 		if err != nil {
 			return nil
@@ -120,6 +123,7 @@ func completeWorktreeTargets() map[string]string {
 			}
 		}
 	}
+	session.SortStates(sessions)
 
 	result := make(map[string]string, len(sessions))
 	for _, s := range sessions {
@@ -127,6 +131,9 @@ func completeWorktreeTargets() map[string]string {
 		label := s.Branch
 		if s.Description != "" {
 			label = fmt.Sprintf("%s — %s", s.Branch, s.Description)
+		}
+		if repoPath == "" {
+			label = fmt.Sprintf("%s (%s)", label, filepath.Base(s.RepoPath))
 		}
 		result[id] = label
 	}
@@ -220,7 +227,7 @@ func runResume(_ context.Context, args json.RawMessage) error {
 			if repoErr != nil {
 				return err
 			}
-			state, err = chooseSession(repoPath)
+			state, err = sessionpick.Choose(repoPath, "resume")
 		}
 	}
 	if err != nil {
@@ -264,58 +271,4 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		p.NoAttach,
 		p.Verbose,
 	)
-}
-
-func chooseSession(repoPath string) (*session.State, error) {
-	sessions, err := session.ListForRepo(repoPath)
-	if err != nil {
-		return nil, err
-	}
-	if len(sessions) == 0 {
-		return nil, fmt.Errorf("no sessions found for %s", filepath.Base(repoPath))
-	}
-
-	interactive := isatty.IsTerminal(os.Stdin.Fd()) || isatty.IsCygwinTerminal(os.Stdin.Fd())
-	if !interactive {
-		var ids []string
-		for _, s := range sessions {
-			ids = append(ids, filepath.Base(s.WorktreePath))
-		}
-		return nil, fmt.Errorf(
-			"no session found for current directory; available sessions: %s\nUse: spinclass resume <id>",
-			joinIDs(ids),
-		)
-	}
-
-	options := make([]huh.Option[int], len(sessions))
-	for i, s := range sessions {
-		label := fmt.Sprintf("%s [%s]", s.Branch, s.ResolveState())
-		if s.Description != "" {
-			label = fmt.Sprintf("%s — %s [%s]", s.Branch, s.Description, s.ResolveState())
-		}
-		options[i] = huh.NewOption(label, i)
-	}
-
-	var selected int
-	err = huh.NewSelect[int]().
-		Title("Select session to resume").
-		Options(options...).
-		Value(&selected).
-		Run()
-	if err != nil {
-		return nil, fmt.Errorf("session selection cancelled")
-	}
-
-	return &sessions[selected], nil
-}
-
-func joinIDs(ids []string) string {
-	out := ""
-	for i, id := range ids {
-		if i > 0 {
-			out += ", "
-		}
-		out += id
-	}
-	return out
 }

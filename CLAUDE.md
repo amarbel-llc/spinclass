@@ -93,6 +93,7 @@ worktree paths. Applies `claude-allow` rules from sweatfile to
   merging at each level.
 - **Session entrypoint**: `[session].start` and `[session].resume` in sweatfile
   control what command is exec'd. Defaults to `$SHELL`.
+- **Session picking**: both `sc resume` and `sc close` source from `session.ListForRepo` via `internal/sessionpick.Choose` — tab completion (`completeWorktreeTargets`) and the huh menu use the same list, sorted active-first by `session.SortStates`. Non-TTY callers get an error listing IDs instead of a hung huh prompt. Orphaned git worktrees without a state file are not valid `sc close` targets; remove them with `git worktree remove`.
 - **External tool deps**: `git`, `gum` (interactive selection in merge).
 
 ## CLI Commands

@@ -1,6 +1,8 @@
 package session
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -184,6 +186,106 @@ func TestFindByID(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for non-matching ID")
 	}
+}
+
+// TestFindByWorktreePathRejectsSiblingWithSamePrefix guards against the
+// pre-2026-04 bug where strings.HasPrefix matched /foo/bar against
+// /foo/bar-baz. Component-aware matching must reject the sibling.
+func TestFindByWorktreePathRejectsSiblingWithSamePrefix(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+
+	s := State{
+		PID:          12345,
+		SessionState: StateActive,
+		RepoPath:     "/tmp/repo",
+		WorktreePath: "/tmp/repo/.worktrees/feature",
+		Branch:       "feature",
+		SessionKey:   "repo/feature",
+		Entrypoint:   []string{"/bin/sh"},
+		StartedAt:    time.Now().UTC(),
+	}
+	if err := Write(s); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := FindByWorktreePath("/tmp/repo/.worktrees/feature-bar/src"); err == nil {
+		t.Error("FindByWorktreePath matched /tmp/repo/.worktrees/feature against /tmp/repo/.worktrees/feature-bar/src")
+	}
+}
+
+// TestFindByWorktreePathThroughSymlink confirms a symlinked cwd matches
+// the real worktree path stored in state. EvalSymlinks runs on both
+// sides so /tmp/link → /tmp/repo/.worktrees/feature is found via either
+// /tmp/link or /tmp/link/sub.
+func TestFindByWorktreePathThroughSymlink(t *testing.T) {
+	root := t.TempDir()
+	stateRoot := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+
+	real := filepath.Join(root, "repo", ".worktrees", "feature")
+	if err := os.MkdirAll(filepath.Join(real, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+
+	s := State{
+		PID:          12345,
+		SessionState: StateActive,
+		RepoPath:     filepath.Join(root, "repo"),
+		WorktreePath: real,
+		Branch:       "feature",
+		SessionKey:   "repo/feature",
+		Entrypoint:   []string{"/bin/sh"},
+		StartedAt:    time.Now().UTC(),
+	}
+	if err := Write(s); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := FindByWorktreePath(link); err != nil {
+		t.Errorf("symlink lookup of root: %v", err)
+	}
+	if _, err := FindByWorktreePath(filepath.Join(link, "sub")); err != nil {
+		t.Errorf("symlink lookup of subdir: %v", err)
+	}
+}
+
+// TestSortStatesActiveFirst confirms active sessions sort before
+// inactive ones; ties break alphabetically by branch.
+func TestSortStatesActiveFirst(t *testing.T) {
+	root := t.TempDir()
+	live := filepath.Join(root, "live")
+	if err := os.MkdirAll(live, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	states := []State{
+		{Branch: "zeta", WorktreePath: live, SessionState: StateInactive},
+		{Branch: "alpha", WorktreePath: live, SessionState: StateActive, PID: os.Getpid()},
+		{Branch: "beta", WorktreePath: live, SessionState: StateActive, PID: os.Getpid()},
+		{Branch: "gamma", WorktreePath: live, SessionState: StateInactive},
+	}
+	SortStates(states)
+
+	want := []string{"alpha", "beta", "gamma", "zeta"}
+	for i, b := range want {
+		if states[i].Branch != b {
+			t.Errorf("[%d] = %q, want %q (got order: %v)", i, states[i].Branch, b, branches(states))
+			return
+		}
+	}
+}
+
+func branches(states []State) []string {
+	out := make([]string, len(states))
+	for i, s := range states {
+		out[i] = s.Branch
+	}
+	return out
 }
 
 func TestListAllWithEntries(t *testing.T) {

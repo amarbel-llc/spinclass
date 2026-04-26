@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/charmbracelet/huh"
 
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/session"
+	"github.com/amarbel-llc/spinclass/internal/sessionpick"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 
 	tap "github.com/amarbel-llc/bob/packages/tap-dancer/go"
@@ -120,52 +120,19 @@ func resolveTarget(cwd, target string) (repoPath, wtPath, branch string, err err
 	}
 
 	if target != "" {
-		paths := worktree.ListWorktrees(repoPath)
-		for _, p := range paths {
-			if filepath.Base(p) == target {
-				return repoPath, p, target, nil
-			}
+		s, ferr := session.FindByID(target)
+		if ferr != nil {
+			return "", "", "", fmt.Errorf(
+				"no spinclass session for ID %q; if this is a bare git worktree, remove it with `git worktree remove`",
+				target,
+			)
 		}
-		return "", "", "", fmt.Errorf("worktree not found: %s", target)
+		return s.RepoPath, s.WorktreePath, s.Branch, nil
 	}
 
-	wtPath, branch, err = chooseWorktree(repoPath)
+	picked, err := sessionpick.Choose(repoPath, "close")
 	if err != nil {
 		return "", "", "", err
 	}
-	return repoPath, wtPath, branch, nil
-}
-
-func chooseWorktree(repoPath string) (wtPath, branch string, err error) {
-	paths := worktree.ListWorktrees(repoPath)
-	if len(paths) == 0 {
-		return "", "", fmt.Errorf("no worktrees found in %s", repoPath)
-	}
-
-	branches := make([]string, len(paths))
-	for i, p := range paths {
-		branches[i] = filepath.Base(p)
-	}
-
-	var selected string
-	options := make([]huh.Option[string], len(branches))
-	for i, b := range branches {
-		options[i] = huh.NewOption(b, b)
-	}
-
-	err = huh.NewSelect[string]().
-		Title("Select worktree to close").
-		Options(options...).
-		Value(&selected).
-		Run()
-	if err != nil {
-		return "", "", fmt.Errorf("worktree selection cancelled")
-	}
-
-	for i, b := range branches {
-		if b == selected {
-			return paths[i], selected, nil
-		}
-	}
-	return "", "", fmt.Errorf("worktree not found: %s", selected)
+	return picked.RepoPath, picked.WorktreePath, picked.Branch, nil
 }

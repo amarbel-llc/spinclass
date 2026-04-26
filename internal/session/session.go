@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -98,20 +99,46 @@ func (s *State) ResolveState() string {
 	return s.SessionState
 }
 
-// FindByWorktreePath scans all session state files and returns the one
-// whose WorktreePath is a prefix of path. Returns an error if no match.
+// FindByWorktreePath scans all session state files and returns the
+// session whose WorktreePath is path or contains it. Symlinks on either
+// side are resolved before comparison so a symlink-backed cwd matches a
+// real worktree, and component-aware matching prevents `/foo/bar` from
+// matching the unrelated `/foo/bar-baz`.
 func FindByWorktreePath(path string) (*State, error) {
 	states, err := ListAll()
 	if err != nil {
 		return nil, err
 	}
+	resolvedPath := evalOrClean(path)
 	for i := range states {
 		s := &states[i]
-		if strings.HasPrefix(path, s.WorktreePath) {
+		if pathInsideResolved(resolvedPath, evalOrClean(s.WorktreePath)) {
 			return s, nil
 		}
 	}
 	return nil, fmt.Errorf("no session found for path %s", path)
+}
+
+// pathInsideResolved reports whether path is exactly root or sits
+// beneath it as a path-component prefix. Both arguments must already be
+// canonicalised by evalOrClean so symlinks compare correctly and
+// `/foo/bar` does not match `/foo/bar-baz`.
+func pathInsideResolved(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || !strings.HasPrefix(rel, "..")
+}
+
+// evalOrClean resolves symlinks where possible, falling back to lexical
+// Clean for paths that no longer exist (e.g. a worktree that was just
+// removed but whose state file is still on disk).
+func evalOrClean(p string) string {
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	return filepath.Clean(p)
 }
 
 // FindByID scans all session state files and returns the one whose
@@ -130,6 +157,21 @@ func FindByID(id string) (*State, error) {
 		}
 	}
 	return nil, fmt.Errorf("no session found for worktree ID %q", id)
+}
+
+// SortStates orders sessions in place so active sessions come first
+// and otherwise sorts alphabetically by branch. Both completer output
+// and the interactive picker share this so callers get the same
+// ordering everywhere.
+func SortStates(states []State) {
+	sort.SliceStable(states, func(i, j int) bool {
+		ai := states[i].ResolveState() == StateActive
+		aj := states[j].ResolveState() == StateActive
+		if ai != aj {
+			return ai
+		}
+		return states[i].Branch < states[j].Branch
+	})
 }
 
 // ListForRepo returns sessions whose RepoPath matches and whose resolved
