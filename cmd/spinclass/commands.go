@@ -10,8 +10,14 @@ import (
 //go:embed doc/*
 var extraManpages embed.FS
 
-// version is set at link time via -ldflags "-X main.version=...".
-var version = "dev"
+// version and commit are set at link time via -ldflags
+// "-X main.version=... -X main.commit=...", auto-injected by
+// amarbel-llc/nixpkgs's buildGoApplication overlay from the derivation's
+// `version` and `commit` attrs.
+var (
+	version = "dev"
+	commit  = "unknown"
+)
 
 // buildApp constructs the spinclass command.App with global flags and all
 // registered subcommands. It is called from main and from the serve
@@ -19,7 +25,7 @@ var version = "dev"
 // surfaces.
 func buildApp() *command.App {
 	app := command.NewApp("spinclass", "Shell-agnostic git worktree session manager")
-	app.Version = version
+	app.Version = version + "+" + commit
 	app.Aliases = []string{"sc"}
 	app.Description.Long = "Manages git worktree session lifecycles: create, attach via configurable session entrypoints, rebase/merge back to main, and clean up. Aliased as `sc`."
 	app.PluginAuthor = "amarbel-llc"
@@ -58,6 +64,7 @@ func buildApp() *command.App {
 	registerSessionCommands(app)
 	registerPermsCommands(app)
 	registerHookCommand(app)
+	registerVersionCommand(app)
 	registerServeCommand(app)
 	registerMCPOnlyCommands(app)
 	registerGenerateArtifactsCommand(app)

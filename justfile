@@ -18,6 +18,22 @@ clean:
 deps:
     nix develop --command gomod2nix
 
+# Verify that the nix-built binary has version+commit burnt in via the
+# fork's buildGoApplication ldflags, and that the prefix matches the
+# spinclassVersion literal in flake.nix.
+verify-version-burnin: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    got="$(./result/bin/spinclass version)"
+    echo "spinclass version: $got"
+    [[ "$got" =~ ^[^+]+\+[^+]+$ ]] || { echo "bad shape: $got" >&2; exit 1; }
+    [[ "$got" != "dev+unknown" ]]   || { echo "ldflags did not fire" >&2; exit 1; }
+    flake_version="$(grep 'spinclassVersion = ' flake.nix | sed 's/.*"\(.*\)".*/\1/')"
+    prefix="${got%%+*}"
+    [[ "$prefix" == "$flake_version" ]] || \
+        { echo "version prefix '$prefix' != flake.nix '$flake_version'" >&2; exit 1; }
+    echo "OK: shape, non-default, prefix match"
+
 dev-repo:
     #!/usr/bin/env bash
     set -euo pipefail

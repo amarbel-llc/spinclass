@@ -189,8 +189,12 @@ DEBUG = "1"
 
 ## Nix Build
 
-Standalone flake using `gomod2nix` / `buildGoApplication`. Binary installs as
-`spinclass` with `sc` symlink. Shell completions for bash and fish included.
+Standalone flake against `amarbel-llc/nixpkgs` (the fork's
+`buildGoApplication` overlay auto-injects `-X main.version` and
+`-X main.commit` ldflags from the derivation's `version` and `commit`
+attrs — `spinclassVersion` and `spinclassCommit` in `flake.nix`). Binary
+installs as `spinclass` with `sc` symlink. Shell completions for bash
+and fish included.
 
 ## Dependencies
 

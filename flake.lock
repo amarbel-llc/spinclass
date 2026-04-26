@@ -242,29 +242,6 @@
         "type": "github"
       }
     },
-    "gomod2nix_3": {
-      "inputs": {
-        "flake-utils": [
-          "utils"
-        ],
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1775655738,
-        "narHash": "sha256-fK9KNU9oNugFyGu8uqv1OM4anYFVcIeYVntuaUFx4Y0=",
-        "owner": "amarbel-llc",
-        "repo": "gomod2nix",
-        "rev": "c721288259a04d29966f38d5baa3d3b30bf8fe08",
-        "type": "github"
-      },
-      "original": {
-        "owner": "amarbel-llc",
-        "repo": "gomod2nix",
-        "type": "github"
-      }
-    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1761468971,
@@ -343,17 +320,16 @@
     },
     "nixpkgs_4": {
       "locked": {
-        "lastModified": 1774244481,
-        "narHash": "sha256-4XfMXU0DjN83o6HWZoKG9PegCvKvIhNUnRUI19vzTcQ=",
-        "owner": "NixOS",
+        "lastModified": 1777042677,
+        "narHash": "sha256-PkHa8cSqjNVD/ug5VNyC0ebwAVRJxvw92FFLWinbdQs=",
+        "owner": "amarbel-llc",
         "repo": "nixpkgs",
-        "rev": "4590696c8693fea477850fe379a01544293ca4e2",
+        "rev": "9bad1e489bd4c713da002618bd825372d35430af",
         "type": "github"
       },
       "original": {
-        "owner": "NixOS",
+        "owner": "amarbel-llc",
         "repo": "nixpkgs",
-        "rev": "4590696c8693fea477850fe379a01544293ca4e2",
         "type": "github"
       }
     },
@@ -384,7 +360,6 @@
     "root": {
       "inputs": {
         "bob": "bob",
-        "gomod2nix": "gomod2nix_3",
         "nixpkgs": "nixpkgs_4",
         "nixpkgs-master": "nixpkgs-master_2",
         "utils": "utils_2"
