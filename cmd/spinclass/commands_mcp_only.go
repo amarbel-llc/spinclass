@@ -64,7 +64,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		Name:  "merge-this-session",
 		Title: "Merge This Session",
 		Description: command.Description{
-			Short: "Merge the current session's worktree into the default branch and clean up",
+			Short: "Merge the current session's worktree into the default branch and clean up. A non-error return means the merge (and push, if git_sync) succeeded; the output payload is informational and does not need to be read or parsed to confirm success. Only inspect output on error.",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			ReadOnlyHint:    protocol.BoolPtr(false),
