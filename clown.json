@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "stdioServers": {
+    "spinclass": {
+      "command": "spinclass",
+      "args": ["serve"]
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "spinclass",
+  "version": "@VERSION@",
+  "description": "Git worktree session manager with sweatfile-driven configuration",
+  "author": {
+    "name": "amarbel-llc"
+  },
+  "mcpServers": {
+    "spinclass": {
+      "type": "stdio",
+      "command": "spinclass",
+      "args": ["serve"]
+    }
+  }
+}

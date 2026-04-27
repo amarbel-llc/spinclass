@@ -47,11 +47,29 @@
           modules = ./gomod2nix.toml;
           subPackages = [ "cmd/spinclass" ];
 
-          # Generate manpages, shell completions, and the purse-first
-          # plugin manifest from the command.App definitions.
+          # Generate manpages, mappings, hooks, and shell completions from
+          # the command.App definitions. The plugin manifest (and clown
+          # plugin metadata) is owned by spinclass directly, not the
+          # command.App framework, so we copy and substitute the source
+          # templates here.
           postInstall = ''
             $out/bin/spinclass generate-artifacts $out
             ln -s spinclass $out/bin/sc
+
+            pluginShare="$out/share/purse-first/spinclass"
+            mkdir -p "$pluginShare/.claude-plugin" \
+                     "$pluginShare/.clown-plugin/system-prompt-append.d"
+
+            install -m 0644 ${./.claude-plugin/plugin.json} \
+              "$pluginShare/.claude-plugin/plugin.json"
+            substituteInPlace "$pluginShare/.claude-plugin/plugin.json" \
+              --replace-fail '@VERSION@' '${spinclassVersion}+${spinclassCommit}'
+
+            install -m 0644 ${./clown.json} "$pluginShare/clown.json"
+            install -m 0644 ${./.clown-plugin/clown.json} \
+              "$pluginShare/.clown-plugin/clown.json"
+            install -m 0644 ${./.clown-plugin/system-prompt-append.d/00-worktree.md} \
+              "$pluginShare/.clown-plugin/system-prompt-append.d/00-worktree.md"
           '';
 
           meta = {
