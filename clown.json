@@ -3,7 +3,8 @@
   "stdioServers": {
     "spinclass": {
       "command": "@SPINCLASS@",
-      "args": ["serve"]
+      "args": ["serve"],
+      "timeout": 600000
     }
   }
 }
