@@ -98,6 +98,15 @@
             bob.packages.${system}.batman
             bob.packages.${system}.tap-dancer
           ];
+
+          # Quick fix: pkgs.bats resolves before batman in PATH, so the bats
+          # binary that runs is the raw one without BATS_LIB_PATH. Export
+          # the path here so common.bash's `bats_load_library` calls find
+          # bats-support / bats-assert / etc. See #44 for the broader
+          # untangling of bats infrastructure across repos.
+          shellHook = ''
+            export BATS_LIB_PATH="${bob.packages.${system}.batman}/share/bats"
+          '';
         };
       }
     );
