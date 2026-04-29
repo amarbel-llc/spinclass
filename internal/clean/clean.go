@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
@@ -13,6 +14,7 @@ import (
 	tap "github.com/amarbel-llc/bob/packages/tap-dancer/go"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/session"
+	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 )
 
@@ -174,6 +176,50 @@ func removeAbandonedSessions(abandoned []session.State) int {
 	return removed
 }
 
+// countStaleTombstones returns how many tombstone files at the central
+// index path have an `exited_at` older than `cutoff`. retention <= 0
+// disables GC and returns 0. Walks via session.ListAll which already
+// classifies entries (live vs tombstone vs dangling).
+func countStaleTombstones(retention time.Duration) int {
+	if retention <= 0 {
+		return 0
+	}
+	states, err := session.ListAll()
+	if err != nil {
+		return 0
+	}
+	cutoff := time.Now().Add(-retention)
+	count := 0
+	for _, s := range states {
+		if !s.IsTombstone() {
+			continue
+		}
+		if s.ExitedAt == nil || s.ExitedAt.After(cutoff) {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+// resolveTombstoneRetention loads the merged sweatfile from PWD and
+// returns the configured retention, falling back to the package
+// default if unset or unparseable.
+func resolveTombstoneRetention(startDir string) time.Duration {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return session.DefaultTombstoneRetention()
+	}
+	hierarchy, err := sweatfile.LoadHierarchy(home, startDir)
+	if err != nil {
+		return session.DefaultTombstoneRetention()
+	}
+	if d, ok := hierarchy.Merged.TombstoneRetention(); ok {
+		return d
+	}
+	return session.DefaultTombstoneRetention()
+}
+
 type cleanAction struct {
 	wt     worktreeInfo
 	label  string
@@ -198,7 +244,7 @@ func planClean(worktrees []worktreeInfo, interactive bool) []cleanAction {
 	return actions
 }
 
-func emitPlan(tw *tap.Writer, actions []cleanAction, abandonedCount int, dryRun bool) {
+func emitPlan(tw *tap.Writer, actions []cleanAction, abandonedCount int, tombstoneCount int, dryRun bool) {
 	reason := "dry-run"
 	for _, a := range actions {
 		switch a.action {
@@ -246,15 +292,34 @@ func emitPlan(tw *tap.Writer, actions []cleanAction, abandonedCount int, dryRun 
 			}
 		}
 	}
+	if tombstoneCount > 0 {
+		msg := fmt.Sprintf("GC %d stale tombstone(s)", tombstoneCount)
+		if dryRun {
+			if tw != nil {
+				tw.Skip(msg, reason)
+			} else {
+				log.Info("would " + msg)
+			}
+		} else {
+			if tw != nil {
+				tw.Skip(msg, "pending confirmation")
+			} else {
+				log.Info("will " + msg)
+			}
+		}
+	}
 }
 
-func confirmClean(removeCount, abandonedCount int) (bool, error) {
+func confirmClean(removeCount, abandonedCount, tombstoneCount int) (bool, error) {
 	parts := []string{}
 	if removeCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d worktree(s)", removeCount))
 	}
 	if abandonedCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d abandoned session(s)", abandonedCount))
+	}
+	if tombstoneCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d stale tombstone(s)", tombstoneCount))
 	}
 	prompt := fmt.Sprintf("Remove %s?", strings.Join(parts, " and "))
 	var confirmed bool
@@ -268,7 +333,7 @@ func confirmClean(removeCount, abandonedCount int) (bool, error) {
 	return confirmed, nil
 }
 
-func executeClean(tw *tap.Writer, actions []cleanAction, abandoned []session.State, interactive bool) {
+func executeClean(tw *tap.Writer, actions []cleanAction, abandoned []session.State, retention time.Duration, interactive bool) {
 	for _, a := range actions {
 		switch a.action {
 		case "remove":
@@ -327,6 +392,23 @@ func executeClean(tw *tap.Writer, actions []cleanAction, abandoned []session.Sta
 			tw.Ok(fmt.Sprintf("cleaned %d abandoned session(s)", removed))
 		}
 	}
+
+	if retention > 0 {
+		gcCount, err := session.GCTombstones(retention)
+		if err != nil {
+			if tw != nil {
+				tw.NotOk("GC tombstones", map[string]string{"error": err.Error()})
+			} else {
+				log.Error("failed to GC tombstones", "error", err)
+			}
+		} else if gcCount > 0 {
+			if tw != nil {
+				tw.Ok(fmt.Sprintf("GC'd %d stale tombstone(s)", gcCount))
+			} else {
+				log.Info("GC'd stale tombstones", "count", gcCount)
+			}
+		}
+	}
 }
 
 func Run(startDir string, interactive bool, dryRun bool, yes bool, format string) error {
@@ -337,8 +419,10 @@ func Run(startDir string, interactive bool, dryRun bool, yes bool, format string
 
 	worktrees := scanWorktrees(startDir)
 	abandonedCount, abandonedSessions := countAbandonedSessions()
+	retention := resolveTombstoneRetention(startDir)
+	tombstoneCount := countStaleTombstones(retention)
 
-	if len(worktrees) == 0 && abandonedCount == 0 {
+	if len(worktrees) == 0 && abandonedCount == 0 && tombstoneCount == 0 {
 		if tw != nil {
 			tw.Skip("clean", "no worktrees found")
 			tw.Plan()
@@ -359,8 +443,8 @@ func Run(startDir string, interactive bool, dryRun bool, yes bool, format string
 	}
 
 	// Nothing actionable — just report skips and return.
-	if removeCount == 0 && abandonedCount == 0 {
-		emitPlan(tw, actions, abandonedCount, dryRun)
+	if removeCount == 0 && abandonedCount == 0 && tombstoneCount == 0 {
+		emitPlan(tw, actions, abandonedCount, tombstoneCount, dryRun)
 		if tw != nil {
 			tw.Plan()
 		}
@@ -368,7 +452,7 @@ func Run(startDir string, interactive bool, dryRun bool, yes bool, format string
 	}
 
 	// Show what will happen.
-	emitPlan(tw, actions, abandonedCount, dryRun)
+	emitPlan(tw, actions, abandonedCount, tombstoneCount, dryRun)
 
 	if dryRun {
 		if tw != nil {
@@ -379,7 +463,7 @@ func Run(startDir string, interactive bool, dryRun bool, yes bool, format string
 
 	// Confirm unless --yes.
 	if !yes {
-		confirmed, err := confirmClean(removeCount, abandonedCount)
+		confirmed, err := confirmClean(removeCount, abandonedCount, tombstoneCount)
 		if err != nil {
 			return err
 		}
@@ -394,7 +478,7 @@ func Run(startDir string, interactive bool, dryRun bool, yes bool, format string
 		}
 	}
 
-	executeClean(tw, actions, abandonedSessions, interactive)
+	executeClean(tw, actions, abandonedSessions, retention, interactive)
 
 	if tw != nil {
 		tw.Plan()

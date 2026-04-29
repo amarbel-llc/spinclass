@@ -217,6 +217,96 @@ func TestResolveStateRunningDetachedReturnsAsIs(t *testing.T) {
 	}
 }
 
+func TestGCTombstones(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", filepath.Join(base, "xdg-state"))
+	repo := filepath.Join(base, "repo")
+
+	mk := func(branch string, exited time.Time) State {
+		t.Helper()
+		wt := filepath.Join(repo, ".worktrees", branch)
+		if err := os.MkdirAll(wt, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		s := State{
+			PID:          12345,
+			SessionState: StateActive,
+			RepoPath:     repo,
+			WorktreePath: wt,
+			Branch:       branch,
+			SessionKey:   "repo/" + branch,
+			Entrypoint:   []string{"/bin/sh"},
+			StartedAt:    exited.Add(-time.Hour),
+			ExitedAt:     &exited,
+		}
+		return s
+	}
+
+	// Three sessions: one stale tombstone, one fresh tombstone, one live.
+	stale := mk("stale", time.Now().Add(-48*time.Hour))
+	fresh := mk("fresh", time.Now().Add(-1*time.Hour))
+	live := mk("live", time.Now())
+	live.ExitedAt = nil
+
+	for _, s := range []State{stale, fresh, live} {
+		if err := Write(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := Tombstone(stale.RepoPath, stale.Branch); err != nil {
+		t.Fatal(err)
+	}
+	if err := Tombstone(fresh.RepoPath, fresh.Branch); err != nil {
+		t.Fatal(err)
+	}
+
+	// 24h retention → stale (48h ago) gets reaped, fresh (1h ago) stays.
+	removed, err := GCTombstones(24 * time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 1 {
+		t.Errorf("GCTombstones removed %d, want 1", removed)
+	}
+
+	// Stale entry's index file should be gone.
+	if _, err := os.Lstat(indexPath(stale.WorktreePath)); err == nil {
+		t.Error("stale tombstone should have been removed")
+	}
+	// Fresh entry's tombstone should still be present.
+	if _, err := os.Lstat(indexPath(fresh.WorktreePath)); err != nil {
+		t.Errorf("fresh tombstone should still exist: %v", err)
+	}
+	// Live session's symlink should be untouched.
+	info, err := os.Lstat(indexPath(live.WorktreePath))
+	if err != nil {
+		t.Fatalf("live session index entry missing: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Error("live session entry should still be a symlink")
+	}
+}
+
+func TestGCTombstonesZeroRetentionIsNoOp(t *testing.T) {
+	s := setupTestSession(t, "noop")
+	if err := Write(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := Tombstone(s.RepoPath, s.Branch); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := GCTombstones(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 0 {
+		t.Errorf("GCTombstones(0) removed %d, want 0", removed)
+	}
+	if _, err := os.Lstat(indexPath(s.WorktreePath)); err != nil {
+		t.Error("tombstone should still exist after retention=0 GC")
+	}
+}
+
 func TestSortStatesPlacesDetachedBetweenActiveAndInactive(t *testing.T) {
 	live := t.TempDir()
 	states := []State{

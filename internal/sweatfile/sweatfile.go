@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type Claude struct {
@@ -20,10 +21,11 @@ type Direnv struct {
 }
 
 type SessionEntry struct {
-	Start         []string `toml:"start"`
-	Resume        []string `toml:"resume"`
-	Group         string   `toml:"group"`
-	LivenessProbe []string `toml:"liveness-probe"`
+	Start              []string `toml:"start"`
+	Resume             []string `toml:"resume"`
+	Group              string   `toml:"group"`
+	LivenessProbe      []string `toml:"liveness-probe"`
+	TombstoneRetention string   `toml:"tombstone-retention"`
 }
 
 type Hooks struct {
@@ -197,6 +199,22 @@ func (sf Sweatfile) SessionLivenessProbe() []string {
 		return nil
 	}
 	return sf.SessionEntry.LivenessProbe
+}
+
+// TombstoneRetention parses `[session-entry].tombstone-retention` into a
+// duration. Returns (d, true) when the value is set and parses cleanly,
+// (0, false) when unset, and (0, true) when set to "0" (explicit
+// "tombstones never expire"). Parse errors return (0, false) — callers
+// should fall back to session.DefaultTombstoneRetention().
+func (sf Sweatfile) TombstoneRetention() (time.Duration, bool) {
+	if sf.SessionEntry == nil || sf.SessionEntry.TombstoneRetention == "" {
+		return 0, false
+	}
+	d, err := time.ParseDuration(sf.SessionEntry.TombstoneRetention)
+	if err != nil {
+		return 0, false
+	}
+	return d, true
 }
 
 // baseline excludes and allow rules that are always applied regardless of user

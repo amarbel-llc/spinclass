@@ -291,6 +291,80 @@ func IsAlive(pid int) bool {
 	return err == nil
 }
 
+// IsTombstone reports whether this State was loaded from a tombstone
+// (a regular file at the central index path) rather than from a live
+// worktree-local state.json. Used by display layers that want to mark
+// closed sessions specially.
+func (s *State) IsTombstone() bool {
+	return s.isTombstone
+}
+
+// DefaultTombstoneRetention is the fallback retention window used by
+// `sc clean` when `[session-entry].tombstone-retention` is unset.
+func DefaultTombstoneRetention() time.Duration {
+	return 30 * 24 * time.Hour
+}
+
+// GCTombstones removes tombstone files from the central index whose
+// exited_at timestamp is older than retention. retention == 0 is a
+// no-op (tombstones never expire). Returns the count of files removed.
+//
+// Live symlinks (resolving), dangling symlinks, and tombstones with
+// undecodable JSON are left alone — this function only acts on entries
+// it can confidently classify and read.
+func GCTombstones(retention time.Duration) (int, error) {
+	if retention <= 0 {
+		return 0, nil
+	}
+	migrateOnce()
+
+	dir := indexDir()
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+
+	cutoff := time.Now().Add(-retention)
+	removed := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		full := filepath.Join(dir, e.Name())
+		info, lerr := os.Lstat(full)
+		if lerr != nil {
+			continue
+		}
+		// Only operate on regular files (tombstones). Symlinks (live or
+		// dangling) are out of scope.
+		if info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+
+		data, rerr := os.ReadFile(full)
+		if rerr != nil {
+			continue
+		}
+		var s State
+		if jerr := json.Unmarshal(data, &s); jerr != nil {
+			continue
+		}
+		if s.ExitedAt == nil || s.ExitedAt.After(cutoff) {
+			continue
+		}
+		if rmErr := os.Remove(full); rmErr == nil {
+			removed++
+		}
+	}
+	return removed, nil
+}
+
 // ResolveState checks the actual state, handling crash recovery.
 // If the session was loaded from a tombstone, returns StateAbandoned.
 // If the worktree dir doesn't exist, returns StateAbandoned.

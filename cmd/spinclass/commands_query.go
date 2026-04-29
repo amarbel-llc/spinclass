@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/protocol"
@@ -25,7 +26,10 @@ func registerQueryCommands(app *command.App) {
 		Title: "List Spinclass Sessions",
 		Description: command.Description{
 			Short: "List tracked sessions",
-			Long:  "List all tracked sessions from the state directory.",
+			Long: "List tracked sessions from the central index. By default " +
+				"only live entries (active or running-detached) are shown. " +
+				"Use --closed to also include tombstones (cleanly-closed " +
+				"sessions) and dangling symlinks (externally-closed).",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			ReadOnlyHint:    protocol.BoolPtr(true),
@@ -33,16 +37,15 @@ func registerQueryCommands(app *command.App) {
 			IdempotentHint:  protocol.BoolPtr(true),
 			OpenWorldHint:   protocol.BoolPtr(false),
 		},
-		Run: func(_ context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
-			states, err := session.ListAll()
-			if err != nil {
-				return command.TextErrorResult(err.Error()), nil
+		Params: []command.Param{
+			{Name: "closed", Type: command.Bool, Description: "Include closed sessions (tombstones and dangling symlinks)"},
+		},
+		Run: func(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+			var p struct {
+				Closed bool `json:"closed"`
 			}
-			var b strings.Builder
-			for _, s := range states {
-				fmt.Fprintf(&b, "%s\t%s\t%s\t%s\n", s.SessionKey, s.ResolveState(), s.WorktreePath, s.Description)
-			}
-			return command.TextResult(b.String()), nil
+			_ = json.Unmarshal(args, &p)
+			return runListResult(p.Closed)
 		},
 	})
 
@@ -256,4 +259,35 @@ func registerQueryCommands(app *command.App) {
 			return session.Write(*state)
 		},
 	})
+}
+
+// runListResult builds the `sc list` text output. When closed is true,
+// tombstones and dangling-symlink entries are included. Live entries
+// always appear; abandoned/closed entries are filtered unless closed.
+func runListResult(closed bool) (*command.Result, error) {
+	states, err := session.ListAll()
+	if err != nil {
+		return command.TextErrorResult(err.Error()), nil
+	}
+	var b strings.Builder
+	for _, s := range states {
+		resolved := s.ResolveState()
+		isClosed := resolved == session.StateAbandoned
+		if isClosed && !closed {
+			continue
+		}
+		marker := ""
+		if s.IsTombstone() {
+			marker = "tombstone"
+		} else if isClosed {
+			marker = "dangling"
+		}
+		exited := ""
+		if s.ExitedAt != nil {
+			exited = s.ExitedAt.UTC().Format(time.RFC3339)
+		}
+		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			s.SessionKey, resolved, marker, exited, s.WorktreePath, s.Description)
+	}
+	return command.TextResult(b.String()), nil
 }

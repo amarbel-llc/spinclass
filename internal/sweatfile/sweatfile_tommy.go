@@ -166,6 +166,10 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			sessionEntryVal.LivenessProbe = v
 			d.consumed["session-entry.liveness-probe"] = true
 		}
+		if v, err := document.GetFromContainer[string](d.cstDoc, tableNode, "tombstone-retention"); err == nil {
+			sessionEntryVal.TombstoneRetention = v
+			d.consumed["session-entry.tombstone-retention"] = true
+		}
 		d.data.SessionEntry = sessionEntryVal
 	} else {
 		sessionEntryVal := &SessionEntry{}
@@ -422,6 +426,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				return nil, err
 			}
 		}
+		if d.data.SessionEntry.TombstoneRetention != "" {
+			if err := d.cstDoc.SetInContainer(tableNode, "tombstone-retention", d.data.SessionEntry.TombstoneRetention); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if err := encodeStartCommands(d.cstDoc, &d.data); err != nil {
 		return nil, err
@@ -596,6 +605,10 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 			sessionEntryVal.LivenessProbe = v
 			consumed[keyPrefix+"session-entry.liveness-probe"] = true
 		}
+		if v, err := document.GetFromContainer[string](doc, tableNode, "tombstone-retention"); err == nil {
+			sessionEntryVal.TombstoneRetention = v
+			consumed[keyPrefix+"session-entry.tombstone-retention"] = true
+		}
 		data.SessionEntry = sessionEntryVal
 	} else {
 		sessionEntryVal := &SessionEntry{}
@@ -692,6 +705,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if len(data.SessionEntry.LivenessProbe) > 0 {
 			if err := doc.SetInContainer(tableNode, "liveness-probe", data.SessionEntry.LivenessProbe); err != nil {
+				return err
+			}
+		}
+		if data.SessionEntry.TombstoneRetention != "" {
+			if err := doc.SetInContainer(tableNode, "tombstone-retention", data.SessionEntry.TombstoneRetention); err != nil {
 				return err
 			}
 		}
