@@ -18,6 +18,11 @@ const (
 	StateActive    = "active"
 	StateInactive  = "inactive"
 	StateAbandoned = "abandoned"
+	// StateRunningDetached means the spinclass-spawned entrypoint has
+	// exited, but a configured liveness probe reported the underlying
+	// multiplexer group (or equivalent) is still attachable. Set by
+	// shop.Attach after cmd.Wait returns when the probe exits 0.
+	StateRunningDetached = "running-detached"
 )
 
 type State struct {
@@ -290,6 +295,9 @@ func IsAlive(pid int) bool {
 // If the session was loaded from a tombstone, returns StateAbandoned.
 // If the worktree dir doesn't exist, returns StateAbandoned.
 // If state file says "active" but PID is dead, returns StateInactive.
+// StateRunningDetached is returned as-is — the spinclass PID is
+// expected to be dead, but the multiplexer group is alive (the post-
+// Attach liveness probe verified that before the state was written).
 func (s *State) ResolveState() string {
 	if s.isTombstone {
 		return StateAbandoned
@@ -409,16 +417,26 @@ func FindByID(id string) (*State, error) {
 	return nil, fmt.Errorf("no session found for worktree ID %q", id)
 }
 
-// SortStates orders sessions in place so active sessions come first
-// and otherwise sorts alphabetically by branch. Both completer output
-// and the interactive picker share this so callers get the same
+// SortStates orders sessions in place: active first, then
+// running-detached, then everything else (inactive, abandoned), with
+// alphabetical-by-branch tie-breaking inside each tier. Both completer
+// output and the interactive picker share this so callers get the same
 // ordering everywhere.
 func SortStates(states []State) {
+	tier := func(s *State) int {
+		switch s.ResolveState() {
+		case StateActive:
+			return 0
+		case StateRunningDetached:
+			return 1
+		default:
+			return 2
+		}
+	}
 	sort.SliceStable(states, func(i, j int) bool {
-		ai := states[i].ResolveState() == StateActive
-		aj := states[j].ResolveState() == StateActive
-		if ai != aj {
-			return ai
+		ti, tj := tier(&states[i]), tier(&states[j])
+		if ti != tj {
+			return ti < tj
 		}
 		return states[i].Branch < states[j].Branch
 	})

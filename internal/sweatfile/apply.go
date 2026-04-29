@@ -167,6 +167,16 @@ func (sf Sweatfile) RunPreMergeHook(worktreePath string, w io.Writer) error {
 	return runHook(cmd, worktreePath, w)
 }
 
+func (sf Sweatfile) RunOnAttachHook(worktreePath string, w io.Writer) error {
+	cmd := sf.OnAttachHookCommand()
+	return runHook(cmd, worktreePath, w)
+}
+
+func (sf Sweatfile) RunOnDetachHook(worktreePath string, w io.Writer) error {
+	cmd := sf.OnDetachHookCommand()
+	return runHook(cmd, worktreePath, w)
+}
+
 func runHook(cmd *string, worktreePath string, w io.Writer) error {
 	if cmd == nil || *cmd == "" {
 		return nil
@@ -183,6 +193,9 @@ func runHook(cmd *string, worktreePath string, w io.Writer) error {
 
 	c := exec.Command("sh", "-c", script)
 	c.Dir = worktreePath
+	// Inherit os.Environ so SPINCLASS_* variables set by callers (or by
+	// the running session) propagate into the hook. Always append WORKTREE
+	// for backwards compatibility with existing hook scripts.
 	c.Env = append(os.Environ(), "WORKTREE="+worktreePath)
 	c.Stdout = w
 	c.Stderr = w

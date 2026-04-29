@@ -16,6 +16,10 @@ import (
 type SessionExecutor struct {
 	Entrypoint  []string
 	Description string
+	// Group is exposed to the entrypoint and any hooks as
+	// $SPINCLASS_GROUP. Empty when the sweatfile doesn't configure
+	// `[session-entry].group`.
+	Group string
 }
 
 func (s SessionExecutor) Attach(dir string, key string, command []string, dryRun bool, tp *tap.TestPoint) error {
@@ -46,6 +50,7 @@ func (s SessionExecutor) Attach(dir string, key string, command []string, dryRun
 		"SPINCLASS_BRANCH":      branch,
 		"SPINCLASS_WORKTREE":    dir,
 		"SPINCLASS_DESCRIPTION": s.Description,
+		"SPINCLASS_GROUP":       s.Group,
 		"TMPDIR":                tmpDir,
 		"CLAUDE_CODE_TMPDIR":    tmpDir,
 	}

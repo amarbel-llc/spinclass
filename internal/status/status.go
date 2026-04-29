@@ -24,6 +24,10 @@ type BranchStatus struct {
 	LastModified string
 	IsWorktree   bool
 	Session      bool
+	// SessionState is the resolved session state for display (e.g.
+	// session.StateActive, session.StateRunningDetached). Empty when
+	// Session is false.
+	SessionState string
 }
 
 type RepoStatus struct {
@@ -116,36 +120,51 @@ func parseDirtyStatus(porcelain string) string {
 	return strings.Join(parts, " ")
 }
 
-func CollectRepoStatus(repoPath string, sessions map[string]bool) RepoStatus {
+// CollectRepoStatus is exported for tests; callers normally go through
+// CollectStatus. The sessions map is keyed by SessionKey
+// ("<repo>/<branch>") with the resolved state as value (empty string =
+// no session).
+func CollectRepoStatus(repoPath string, sessions map[string]string) RepoStatus {
 	repoLabel := filepath.Base(repoPath)
 	var rs RepoStatus
 
 	mainBranch, err := git.BranchCurrent(repoPath)
 	if err == nil && mainBranch != "" {
 		rs.Main = CollectBranchStatus(repoLabel, repoPath, mainBranch)
-		rs.Main.Session = sessions[repoLabel+"/"+mainBranch]
+		if state := sessions[repoLabel+"/"+mainBranch]; state != "" {
+			rs.Main.Session = true
+			rs.Main.SessionState = state
+		}
 	}
 
 	for _, wtPath := range worktree.ListWorktrees(repoPath) {
 		branch := filepath.Base(wtPath)
 		bs := CollectBranchStatus(repoLabel, wtPath, branch)
 		bs.IsWorktree = true
-		bs.Session = sessions[repoLabel+"/"+branch]
+		if state := sessions[repoLabel+"/"+branch]; state != "" {
+			bs.Session = true
+			bs.SessionState = state
+		}
 		rs.Worktrees = append(rs.Worktrees, bs)
 	}
 
 	return rs
 }
 
-func collectSessionMap() map[string]bool {
-	sessions := make(map[string]bool)
+// collectSessionMap returns SessionKey → resolved state for every
+// session that's still considered live (active or running-detached).
+// Inactive and abandoned sessions are omitted (callers don't display
+// them as "running").
+func collectSessionMap() map[string]string {
+	sessions := make(map[string]string)
 	states, err := session.ListAll()
 	if err != nil {
 		return sessions
 	}
 	for _, s := range states {
-		if s.ResolveState() == session.StateActive {
-			sessions[s.SessionKey] = true
+		resolved := s.ResolveState()
+		if resolved == session.StateActive || resolved == session.StateRunningDetached {
+			sessions[s.SessionKey] = resolved
 		}
 	}
 	return sessions
@@ -162,6 +181,19 @@ func CollectStatus(startDir string) []RepoStatus {
 	}
 
 	return all
+}
+
+// sessionGlyph maps a resolved session state to the indicator string
+// shown in the status table. Empty input → "" (no glyph).
+func sessionGlyph(state string) string {
+	switch state {
+	case session.StateActive:
+		return "● live"
+	case session.StateRunningDetached:
+		return "● live (detached)"
+	default:
+		return ""
+	}
 }
 
 var (
@@ -189,7 +221,7 @@ func collectRenderRows(repos []RepoStatus) []renderRow {
 	for _, rs := range repos {
 		mainSession := ""
 		if rs.Main.Session {
-			mainSession = "● live"
+			mainSession = sessionGlyph(rs.Main.SessionState)
 		}
 		rows = append(rows, renderRow{
 			prefix:   rs.Main.Repo,
@@ -208,7 +240,7 @@ func collectRenderRows(repos []RepoStatus) []renderRow {
 			}
 			session := ""
 			if wt.Session {
-				session = "● live"
+				session = sessionGlyph(wt.SessionState)
 			}
 			rows = append(rows, renderRow{
 				prefix:   "  " + connector + " ",

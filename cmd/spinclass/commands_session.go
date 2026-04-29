@@ -160,15 +160,18 @@ func attachSession(resolvedPath worktree.ResolvedPath, args startArgs) error {
 		}
 	}
 
+	merged := hierarchy.Merged
 	exec := executor.SessionExecutor{
-		Entrypoint:  hierarchy.Merged.SessionStart(),
+		Entrypoint:  merged.SessionStart(),
 		Description: resolvedPath.Description,
+		Group:       merged.SessionGroup(),
 	}
 
 	return shop.Attach(
 		os.Stdout,
 		exec,
 		resolvedPath,
+		merged,
 		args.FormatOrDefault(),
 		args.MergeOnClose,
 		args.NoAttach,
@@ -259,13 +262,16 @@ func runResume(_ context.Context, args json.RawMessage) error {
 	}
 
 	exec := executor.SessionExecutor{
-		Entrypoint: entrypoint,
+		Entrypoint:  entrypoint,
+		Description: state.Description,
+		Group:       merged.SessionGroup(),
 	}
 
 	return shop.Attach(
 		os.Stdout,
 		exec,
 		rp,
+		merged,
 		p.FormatOrDefault(),
 		false,
 		p.NoAttach,

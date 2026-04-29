@@ -189,6 +189,12 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if other.Hooks.PreMerge != nil {
 			merged.Hooks.PreMerge = other.Hooks.PreMerge
 		}
+		if other.Hooks.OnAttach != nil {
+			merged.Hooks.OnAttach = other.Hooks.OnAttach
+		}
+		if other.Hooks.OnDetach != nil {
+			merged.Hooks.OnDetach = other.Hooks.OnDetach
+		}
 		if other.Hooks.DisallowMainWorktree != nil {
 			merged.Hooks.DisallowMainWorktree = other.Hooks.DisallowMainWorktree
 		}
@@ -207,6 +213,12 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		}
 		if len(other.SessionEntry.Resume) > 0 {
 			merged.SessionEntry.Resume = other.SessionEntry.Resume
+		}
+		if other.SessionEntry.Group != "" {
+			merged.SessionEntry.Group = other.SessionEntry.Group
+		}
+		if len(other.SessionEntry.LivenessProbe) > 0 {
+			merged.SessionEntry.LivenessProbe = other.SessionEntry.LivenessProbe
 		}
 	}
 

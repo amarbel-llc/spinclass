@@ -3,6 +3,8 @@ package status
 import (
 	"strings"
 	"testing"
+
+	"github.com/amarbel-llc/spinclass/internal/session"
 )
 
 func TestParseDirtyStatusClean(t *testing.T) {
@@ -40,6 +42,18 @@ func TestParseDirtyStatusMixed(t *testing.T) {
 	}
 }
 
+func TestSessionGlyphRunningDetached(t *testing.T) {
+	if got := sessionGlyph(session.StateRunningDetached); got != "● live (detached)" {
+		t.Errorf("sessionGlyph(running-detached) = %q, want %q", got, "● live (detached)")
+	}
+	if got := sessionGlyph(session.StateActive); got != "● live" {
+		t.Errorf("sessionGlyph(active) = %q, want %q", got, "● live")
+	}
+	if got := sessionGlyph(session.StateInactive); got != "" {
+		t.Errorf("sessionGlyph(inactive) = %q, want empty", got)
+	}
+}
+
 func TestRenderTreeStructure(t *testing.T) {
 	repos := []RepoStatus{
 		{
@@ -53,6 +67,7 @@ func TestRenderTreeStructure(t *testing.T) {
 					Repo: "myrepo", Branch: "feature-x", Dirty: "2M 1?",
 					Remote: "↑3 origin/feature-x", LastCommit: "2025-01-02",
 					LastModified: "2025-01-02", IsWorktree: true, Session: true,
+					SessionState: session.StateActive,
 				},
 			},
 		},

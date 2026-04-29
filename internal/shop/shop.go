@@ -132,7 +132,7 @@ func pullMainWorktree(rp worktree.ResolvedPath, tw *tap.Writer) error {
 	return nil
 }
 
-func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, format string, mergeOnClose bool, noAttach bool, verbose bool) error {
+func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sweatfile.Sweatfile, format string, mergeOnClose bool, noAttach bool, verbose bool) error {
 	var tw *tap.Writer
 	if format == "tap" {
 		tw = tap.NewWriter(w)
@@ -172,6 +172,13 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, forma
 		if err := session.Write(st); err != nil {
 			log.Warn("failed to write session state", "err", err)
 		}
+
+		// Fire on-attach hook after state is committed but before
+		// handing off to the entrypoint. Errors are warnings, not
+		// fatal — a failing hook should never block session start.
+		if hookErr := sf.RunOnAttachHook(rp.AbsPath, w); hookErr != nil {
+			log.Warn("on-attach hook failed", "err", hookErr)
+		}
 	}
 
 	if err := exec.Attach(rp.AbsPath, rp.SessionKey, nil, noAttach, &tp); err != nil {
@@ -186,15 +193,29 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, forma
 		return nil
 	}
 
-	// Update session state to inactive after entrypoint exits
+	// Post-Attach state update. The spinclass-spawned entrypoint has
+	// exited; run the configured liveness probe to distinguish
+	// "user detached but multiplexer still alive" (running-detached)
+	// from "process truly gone" (inactive). When no probe is set, the
+	// conservative answer is inactive — same as pre-slice-2 behaviour.
 	now := time.Now().UTC()
 	if existing, err := session.Read(rp.RepoPath, rp.Branch); err == nil {
-		existing.SessionState = session.StateInactive
 		existing.PID = 0
 		existing.ExitedAt = &now
+		if probeAlive(sf.SessionLivenessProbe(), 2*time.Second) {
+			existing.SessionState = session.StateRunningDetached
+		} else {
+			existing.SessionState = session.StateInactive
+		}
 		if writeErr := session.Write(*existing); writeErr != nil {
 			log.Warn("failed to update session state", "err", writeErr)
 		}
+	}
+
+	// Fire on-detach hook AFTER state is committed so the hook can
+	// observe the final state via $SPINCLASS_SESSION_ID + spinclass list.
+	if hookErr := sf.RunOnDetachHook(rp.AbsPath, w); hookErr != nil {
+		log.Warn("on-detach hook failed", "err", hookErr)
 	}
 
 	interactive := isatty.IsTerminal(os.Stdin.Fd()) || isatty.IsCygwinTerminal(os.Stdin.Fd())

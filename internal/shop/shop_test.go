@@ -10,6 +10,7 @@ import (
 
 	tap "github.com/amarbel-llc/bob/packages/tap-dancer/go"
 	"github.com/amarbel-llc/spinclass/internal/git"
+	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 )
 
@@ -271,7 +272,7 @@ func TestNewTapExistingWorktree(t *testing.T) {
 
 	mock := &mockExecutor{}
 	var buf bytes.Buffer
-	err := Attach(&buf, mock, rp, "tap", false, false, false)
+	err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", false, false, false)
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
@@ -343,7 +344,7 @@ func TestNewNoAttach(t *testing.T) {
 
 	mock := &mockExecutor{}
 	var buf bytes.Buffer
-	err := Attach(&buf, mock, rp, "tap", true, true, false)
+	err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", true, true, false)
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
@@ -463,7 +464,7 @@ func TestAttachCallsExecutorWithCorrectArgs(t *testing.T) {
 
 	mock := &mockExecutor{}
 	var buf bytes.Buffer
-	err := Attach(&buf, mock, rp, "tap", false, true, false)
+	err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", false, true, false)
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
@@ -528,7 +529,7 @@ func TestNewMergeOnCloseCleanWorktree(t *testing.T) {
 	var buf bytes.Buffer
 
 	// mergeOnClose=true, noAttach=false (Attach returns immediately from mock)
-	err := Attach(&buf, mock, rp, "tap", true, false, false)
+	err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", true, false, false)
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}

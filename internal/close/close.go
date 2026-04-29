@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/charmbracelet/huh"
 
@@ -32,6 +33,14 @@ func Run(w io.Writer, target string, force bool, format string) error {
 		tw = tap.NewWriter(w)
 	}
 
+	// Snapshot the state's PID before any teardown so we can wait on
+	// the active spinclass process to exit before tombstoning. If the
+	// state file is missing, PID stays 0 and WaitForExit is a no-op.
+	var activePID int
+	if st, rerr := session.Read(repoPath, branch); rerr == nil {
+		activePID = st.PID
+	}
+
 	// Request graceful close if session is active.
 	executor.RequestClose(repoPath, branch)
 
@@ -58,6 +67,23 @@ func Run(w io.Writer, target string, force bool, format string) error {
 		}
 	}
 
+	// Wait briefly for the spinclass session to wind down so its final
+	// state write lands before we tombstone (and then for the worktree
+	// dir to be free for git to remove). Best-effort: WaitForExit
+	// returns when the PID is gone or the deadline passes.
+	executor.WaitForExit(activePID, 2*time.Second)
+
+	// Promote the index symlink to a tombstone (regular file) and
+	// remove the worktree-local state.json + .spinclass/ before the
+	// worktree directory is itself force-removed by git. Best effort:
+	// if the state file is gone (legacy session that never wrote one,
+	// or an external worktree removal), skip the tombstone.
+	if tombErr := session.Tombstone(repoPath, branch); tombErr != nil {
+		// Fall through to Remove for cleanup; tombstone failures don't
+		// block close.
+		_ = session.Remove(repoPath, branch)
+	}
+
 	if err := git.WorktreeForceRemove(repoPath, wtPath); err != nil {
 		diag := map[string]string{"error": err.Error()}
 		if tw != nil {
@@ -75,8 +101,6 @@ func Run(w io.Writer, target string, force bool, format string) error {
 		}
 		return fmt.Errorf("deleting branch %s: %w", branch, err)
 	}
-
-	session.Remove(repoPath, branch)
 
 	if tw != nil {
 		tw.Ok("close " + branch)

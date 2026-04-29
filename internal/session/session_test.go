@@ -202,6 +202,40 @@ func TestResolveStateAbandoned(t *testing.T) {
 	}
 }
 
+func TestResolveStateRunningDetachedReturnsAsIs(t *testing.T) {
+	wt := t.TempDir()
+	s := &State{
+		// PID 0 — running-detached implies the spinclass entrypoint
+		// already exited; the multiplexer group's liveness was verified
+		// separately by the probe.
+		PID:          0,
+		SessionState: StateRunningDetached,
+		WorktreePath: wt,
+	}
+	if got := s.ResolveState(); got != StateRunningDetached {
+		t.Errorf("ResolveState() = %s, want running-detached", got)
+	}
+}
+
+func TestSortStatesPlacesDetachedBetweenActiveAndInactive(t *testing.T) {
+	live := t.TempDir()
+	states := []State{
+		{Branch: "z-inactive", WorktreePath: live, SessionState: StateInactive},
+		{Branch: "a-detached", WorktreePath: live, SessionState: StateRunningDetached},
+		{Branch: "b-active", WorktreePath: live, SessionState: StateActive, PID: os.Getpid()},
+		{Branch: "c-detached", WorktreePath: live, SessionState: StateRunningDetached},
+	}
+	SortStates(states)
+
+	want := []string{"b-active", "a-detached", "c-detached", "z-inactive"}
+	for i, b := range want {
+		if states[i].Branch != b {
+			t.Errorf("[%d] = %q, want %q (got order: %v)", i, states[i].Branch, b, branches(states))
+			return
+		}
+	}
+}
+
 func TestListAllEmpty(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 

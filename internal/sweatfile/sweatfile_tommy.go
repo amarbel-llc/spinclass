@@ -88,6 +88,14 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			hooksVal.PreMerge = &v
 			d.consumed["hooks.pre-merge"] = true
 		}
+		if v, err := document.GetFromContainer[string](d.cstDoc, tableNode, "on-attach"); err == nil {
+			hooksVal.OnAttach = &v
+			d.consumed["hooks.on-attach"] = true
+		}
+		if v, err := document.GetFromContainer[string](d.cstDoc, tableNode, "on-detach"); err == nil {
+			hooksVal.OnDetach = &v
+			d.consumed["hooks.on-detach"] = true
+		}
 		if v, err := document.GetFromContainer[bool](d.cstDoc, tableNode, "disallow-main-worktree"); err == nil {
 			hooksVal.DisallowMainWorktree = &v
 			d.consumed["hooks.disallow-main-worktree"] = true
@@ -115,6 +123,16 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			found = true
 			d.consumed["pre-merge"] = true
 		}
+		if v, err := document.GetFromContainer[string](d.cstDoc, d.cstDoc.Root(), "on-attach"); err == nil {
+			hooksVal.OnAttach = &v
+			found = true
+			d.consumed["on-attach"] = true
+		}
+		if v, err := document.GetFromContainer[string](d.cstDoc, d.cstDoc.Root(), "on-detach"); err == nil {
+			hooksVal.OnDetach = &v
+			found = true
+			d.consumed["on-detach"] = true
+		}
 		if v, err := document.GetFromContainer[bool](d.cstDoc, d.cstDoc.Root(), "disallow-main-worktree"); err == nil {
 			hooksVal.DisallowMainWorktree = &v
 			found = true
@@ -139,6 +157,14 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 		if v, err := document.GetFromContainer[[]string](d.cstDoc, tableNode, "resume"); err == nil {
 			sessionEntryVal.Resume = v
 			d.consumed["session-entry.resume"] = true
+		}
+		if v, err := document.GetFromContainer[string](d.cstDoc, tableNode, "group"); err == nil {
+			sessionEntryVal.Group = v
+			d.consumed["session-entry.group"] = true
+		}
+		if v, err := document.GetFromContainer[[]string](d.cstDoc, tableNode, "liveness-probe"); err == nil {
+			sessionEntryVal.LivenessProbe = v
+			d.consumed["session-entry.liveness-probe"] = true
 		}
 		d.data.SessionEntry = sessionEntryVal
 	} else {
@@ -357,6 +383,16 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				return nil, err
 			}
 		}
+		if d.data.Hooks.OnAttach != nil {
+			if err := d.cstDoc.SetInContainer(tableNode, "on-attach", *d.data.Hooks.OnAttach); err != nil {
+				return nil, err
+			}
+		}
+		if d.data.Hooks.OnDetach != nil {
+			if err := d.cstDoc.SetInContainer(tableNode, "on-detach", *d.data.Hooks.OnDetach); err != nil {
+				return nil, err
+			}
+		}
 		if d.data.Hooks.DisallowMainWorktree != nil {
 			if err := d.cstDoc.SetInContainer(tableNode, "disallow-main-worktree", *d.data.Hooks.DisallowMainWorktree); err != nil {
 				return nil, err
@@ -375,6 +411,16 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 		}
 		if err := d.cstDoc.SetInContainer(tableNode, "resume", d.data.SessionEntry.Resume); err != nil {
 			return nil, err
+		}
+		if d.data.SessionEntry.Group != "" {
+			if err := d.cstDoc.SetInContainer(tableNode, "group", d.data.SessionEntry.Group); err != nil {
+				return nil, err
+			}
+		}
+		if len(d.data.SessionEntry.LivenessProbe) > 0 {
+			if err := d.cstDoc.SetInContainer(tableNode, "liveness-probe", d.data.SessionEntry.LivenessProbe); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if err := encodeStartCommands(d.cstDoc, &d.data); err != nil {
@@ -472,6 +518,14 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 			hooksVal.PreMerge = &v
 			consumed[keyPrefix+"hooks.pre-merge"] = true
 		}
+		if v, err := document.GetFromContainer[string](doc, tableNode, "on-attach"); err == nil {
+			hooksVal.OnAttach = &v
+			consumed[keyPrefix+"hooks.on-attach"] = true
+		}
+		if v, err := document.GetFromContainer[string](doc, tableNode, "on-detach"); err == nil {
+			hooksVal.OnDetach = &v
+			consumed[keyPrefix+"hooks.on-detach"] = true
+		}
 		if v, err := document.GetFromContainer[bool](doc, tableNode, "disallow-main-worktree"); err == nil {
 			hooksVal.DisallowMainWorktree = &v
 			consumed[keyPrefix+"hooks.disallow-main-worktree"] = true
@@ -499,6 +553,16 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 			found = true
 			consumed[keyPrefix+"pre-merge"] = true
 		}
+		if v, err := document.GetFromContainer[string](doc, container, "on-attach"); err == nil {
+			hooksVal.OnAttach = &v
+			found = true
+			consumed[keyPrefix+"on-attach"] = true
+		}
+		if v, err := document.GetFromContainer[string](doc, container, "on-detach"); err == nil {
+			hooksVal.OnDetach = &v
+			found = true
+			consumed[keyPrefix+"on-detach"] = true
+		}
 		if v, err := document.GetFromContainer[bool](doc, container, "disallow-main-worktree"); err == nil {
 			hooksVal.DisallowMainWorktree = &v
 			found = true
@@ -523,6 +587,14 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 		if v, err := document.GetFromContainer[[]string](doc, tableNode, "resume"); err == nil {
 			sessionEntryVal.Resume = v
 			consumed[keyPrefix+"session-entry.resume"] = true
+		}
+		if v, err := document.GetFromContainer[string](doc, tableNode, "group"); err == nil {
+			sessionEntryVal.Group = v
+			consumed[keyPrefix+"session-entry.group"] = true
+		}
+		if v, err := document.GetFromContainer[[]string](doc, tableNode, "liveness-probe"); err == nil {
+			sessionEntryVal.LivenessProbe = v
+			consumed[keyPrefix+"session-entry.liveness-probe"] = true
 		}
 		data.SessionEntry = sessionEntryVal
 	} else {
@@ -584,6 +656,16 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 				return err
 			}
 		}
+		if data.Hooks.OnAttach != nil {
+			if err := doc.SetInContainer(tableNode, "on-attach", *data.Hooks.OnAttach); err != nil {
+				return err
+			}
+		}
+		if data.Hooks.OnDetach != nil {
+			if err := doc.SetInContainer(tableNode, "on-detach", *data.Hooks.OnDetach); err != nil {
+				return err
+			}
+		}
 		if data.Hooks.DisallowMainWorktree != nil {
 			if err := doc.SetInContainer(tableNode, "disallow-main-worktree", *data.Hooks.DisallowMainWorktree); err != nil {
 				return err
@@ -602,6 +684,16 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if err := doc.SetInContainer(tableNode, "resume", data.SessionEntry.Resume); err != nil {
 			return err
+		}
+		if data.SessionEntry.Group != "" {
+			if err := doc.SetInContainer(tableNode, "group", data.SessionEntry.Group); err != nil {
+				return err
+			}
+		}
+		if len(data.SessionEntry.LivenessProbe) > 0 {
+			if err := doc.SetInContainer(tableNode, "liveness-probe", data.SessionEntry.LivenessProbe); err != nil {
+				return err
+			}
 		}
 	}
 	if err := encodeStartCommands(doc, data); err != nil {

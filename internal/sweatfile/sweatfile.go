@@ -20,14 +20,18 @@ type Direnv struct {
 }
 
 type SessionEntry struct {
-	Start  []string `toml:"start"`
-	Resume []string `toml:"resume"`
+	Start         []string `toml:"start"`
+	Resume        []string `toml:"resume"`
+	Group         string   `toml:"group"`
+	LivenessProbe []string `toml:"liveness-probe"`
 }
 
 type Hooks struct {
 	Create               *string `toml:"create"`
 	Stop                 *string `toml:"stop"`
 	PreMerge             *string `toml:"pre-merge"`
+	OnAttach             *string `toml:"on-attach"`
+	OnDetach             *string `toml:"on-detach"`
 	DisallowMainWorktree *bool   `toml:"disallow-main-worktree"`
 	ToolUseLog           *bool   `toml:"tool-use-log"`
 }
@@ -84,6 +88,20 @@ func (sf Sweatfile) PreMergeHookCommand() *string {
 		return nil
 	}
 	return sf.Hooks.PreMerge
+}
+
+func (sf Sweatfile) OnAttachHookCommand() *string {
+	if sf.Hooks == nil {
+		return nil
+	}
+	return sf.Hooks.OnAttach
+}
+
+func (sf Sweatfile) OnDetachHookCommand() *string {
+	if sf.Hooks == nil {
+		return nil
+	}
+	return sf.Hooks.OnDetach
 }
 
 func (sf Sweatfile) DisallowMainWorktreeEnabled() bool {
@@ -158,6 +176,27 @@ func (sf Sweatfile) SessionResume() []string {
 		return sf.SessionEntry.Resume
 	}
 	return nil
+}
+
+// SessionGroup returns the multiplexer group name configured for this
+// session, or "" if unset. Exported into the session env as
+// $SPINCLASS_GROUP for entrypoints, hooks, and the liveness probe.
+func (sf Sweatfile) SessionGroup() string {
+	if sf.SessionEntry == nil {
+		return ""
+	}
+	return sf.SessionEntry.Group
+}
+
+// SessionLivenessProbe returns the argv list used to determine whether
+// a multiplexer-managed session is still attachable after the entrypoint
+// returns. Empty argv means no probe is configured — callers should treat
+// the absence of a probe as "session is dead" (the conservative answer).
+func (sf Sweatfile) SessionLivenessProbe() []string {
+	if sf.SessionEntry == nil {
+		return nil
+	}
+	return sf.SessionEntry.LivenessProbe
 }
 
 // baseline excludes and allow rules that are always applied regardless of user
