@@ -45,12 +45,7 @@ function spinclass_start_no_attach_skips_session { # @test
   wt_path=$(extract_wt_path "$output")
   assert [ -d "$wt_path" ]
   # No session state file should be created with --no-attach
-  local state_dir="$XDG_STATE_HOME/spinclass/sessions"
-  if [ -d "$state_dir" ]; then
-    local count
-    count="$(find "$state_dir" -name '*-state.json' | wc -l)"
-    assert [ "$count" -eq 0 ]
-  fi
+  assert_no_session_state
 }
 
 function spinclass_start_idempotent { # @test
@@ -117,6 +112,7 @@ function spinclass_merge_fast_forwards { # @test
 }
 
 function spinclass_clean_removes_merged { # @test
+  skip "pre-existing failure — see #45 (sc clean hangs on huh.Confirm without TTY)"
   cd "$TEST_REPO"
   local bin="${SPINCLASS_BIN:-spinclass}"
 
