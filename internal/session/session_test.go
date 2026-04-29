@@ -1,28 +1,42 @@
 package session
 
 import (
+	"crypto/sha256"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
 
-func TestSessionStateRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", dir)
-
-	s := State{
+// setupTestSession creates a tempdir-rooted "repo" with a worktree and
+// returns a State pointing at the (real, on-disk) paths. The XDG_STATE_HOME
+// is also rooted under tempdir so the central index is isolated per test.
+func setupTestSession(t *testing.T, branch string) State {
+	t.Helper()
+	base := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", filepath.Join(base, "xdg-state"))
+	repo := filepath.Join(base, "repo")
+	worktree := filepath.Join(repo, ".worktrees", branch)
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return State{
 		PID:          12345,
 		SessionState: StateActive,
-		RepoPath:     "/home/user/repos/bob",
-		WorktreePath: "/home/user/repos/bob/.worktrees/my-branch",
-		Branch:       "my-branch",
-		SessionKey:   "bob/my-branch",
-		Entrypoint:   []string{"zellij"},
-		Env:          map[string]string{"SPINCLASS_SESSION_ID": "bob/my-branch"},
+		RepoPath:     repo,
+		WorktreePath: worktree,
+		Branch:       branch,
+		SessionKey:   filepath.Base(repo) + "/" + branch,
+		Entrypoint:   []string{"/bin/sh"},
 		StartedAt:    time.Now().UTC().Truncate(time.Second),
 	}
+}
+
+func TestSessionStateRoundTrip(t *testing.T) {
+	s := setupTestSession(t, "my-branch")
 
 	if err := Write(s); err != nil {
 		t.Fatal(err)
@@ -47,31 +61,46 @@ func TestSessionStateRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSessionStateHash(t *testing.T) {
-	h1 := stateFilename("/home/user/repos/bob", "my-branch")
-	h2 := stateFilename("/home/user/repos/bob", "other-branch")
-	if h1 == h2 {
-		t.Error("different branches should produce different hashes")
+func TestWriteCreatesIndexSymlink(t *testing.T) {
+	s := setupTestSession(t, "feature-x")
+	if err := Write(s); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.HasSuffix(h1, "-state.json") {
-		t.Errorf("expected -state.json suffix, got %s", h1)
+
+	idx := indexPath(s.WorktreePath)
+	info, err := os.Lstat(idx)
+	if err != nil {
+		t.Fatalf("index entry not created: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected symlink at %s, got mode %v", idx, info.Mode())
+	}
+
+	target, err := os.Readlink(idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := worktreeStatePath(s.WorktreePath)
+	if target != want {
+		t.Errorf("symlink target = %s, want %s", target, want)
+	}
+}
+
+func TestWriteRequiresWorktreeOnDisk(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	s := State{
+		RepoPath:     "/tmp/no-such-repo",
+		WorktreePath: "/tmp/no-such-repo/.worktrees/missing",
+		Branch:       "missing",
+	}
+	err := Write(s)
+	if err == nil {
+		t.Fatal("expected error writing state for missing worktree")
 	}
 }
 
 func TestSessionStateRemove(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", dir)
-
-	s := State{
-		PID:          99999,
-		SessionState: StateActive,
-		RepoPath:     "/tmp/test-repo",
-		WorktreePath: "/tmp/test-repo/.worktrees/test",
-		Branch:       "test",
-		SessionKey:   "test-repo/test",
-		Entrypoint:   []string{"/bin/sh"},
-		StartedAt:    time.Now().UTC(),
-	}
+	s := setupTestSession(t, "test")
 
 	if err := Write(s); err != nil {
 		t.Fatal(err)
@@ -81,9 +110,84 @@ func TestSessionStateRemove(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := Read(s.RepoPath, s.Branch)
-	if err == nil {
-		t.Error("expected error reading removed state file")
+	if _, err := Read(s.RepoPath, s.Branch); err == nil {
+		t.Error("expected error reading removed state")
+	}
+	if _, err := os.Lstat(indexPath(s.WorktreePath)); err == nil {
+		t.Error("index entry still present after Remove")
+	}
+}
+
+func TestRemoveToleratesMissingFiles(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if err := Remove("/tmp/no-such-repo", "no-such-branch"); err != nil {
+		t.Errorf("Remove on missing files should not error, got %v", err)
+	}
+}
+
+func TestTombstonePromotesSymlinkToRegularFile(t *testing.T) {
+	s := setupTestSession(t, "to-be-closed")
+	if err := Write(s); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Tombstone(s.RepoPath, s.Branch); err != nil {
+		t.Fatal(err)
+	}
+
+	idx := indexPath(s.WorktreePath)
+	info, err := os.Lstat(idx)
+	if err != nil {
+		t.Fatalf("tombstone missing: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("expected regular file at %s, still a symlink", idx)
+	}
+	if !info.Mode().IsRegular() {
+		t.Errorf("tombstone is not a regular file: %v", info.Mode())
+	}
+
+	// Worktree-local state.json should be gone.
+	if _, err := os.Stat(worktreeStatePath(s.WorktreePath)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("worktree state.json should be gone, stat err = %v", err)
+	}
+	// .spinclass/ dir should be gone too.
+	if _, err := os.Stat(filepath.Join(s.WorktreePath, ".spinclass")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf(".spinclass dir should be gone, stat err = %v", err)
+	}
+
+	// Tombstone JSON content should match the original state.
+	data, err := os.ReadFile(idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tomb State
+	if err := json.Unmarshal(data, &tomb); err != nil {
+		t.Fatal(err)
+	}
+	if tomb.SessionKey != s.SessionKey {
+		t.Errorf("tombstone SessionKey = %s, want %s", tomb.SessionKey, s.SessionKey)
+	}
+}
+
+func TestReadFallsBackToTombstone(t *testing.T) {
+	s := setupTestSession(t, "tomb-readback")
+	if err := Write(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := Tombstone(s.RepoPath, s.Branch); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := Read(s.RepoPath, s.Branch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.isTombstone {
+		t.Error("expected isTombstone to be true on read-back")
+	}
+	if loaded.ResolveState() != StateAbandoned {
+		t.Errorf("tombstone ResolveState = %s, want abandoned", loaded.ResolveState())
 	}
 }
 
@@ -99,8 +203,7 @@ func TestResolveStateAbandoned(t *testing.T) {
 }
 
 func TestListAllEmpty(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", dir)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 
 	states, err := ListAll()
 	if err != nil {
@@ -111,20 +214,78 @@ func TestListAllEmpty(t *testing.T) {
 	}
 }
 
-func TestFindByWorktreePath(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", dir)
+func TestListAllClassifiesEntryShapes(t *testing.T) {
+	// Build three states under the same XDG_STATE_HOME: one live, one
+	// tombstoned, one with a dangling symlink (worktree gone).
+	base := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", filepath.Join(base, "xdg-state"))
+	repo := filepath.Join(base, "repo")
 
-	s := State{
-		PID:          12345,
-		SessionState: StateActive,
-		RepoPath:     "/home/user/repos/bob",
-		WorktreePath: "/home/user/repos/bob/.worktrees/plain-spruce",
-		Branch:       "plain-spruce",
-		SessionKey:   "bob/plain-spruce",
-		Entrypoint:   []string{"/bin/sh"},
-		StartedAt:    time.Now().UTC(),
+	mkSession := func(branch string) State {
+		t.Helper()
+		wt := filepath.Join(repo, ".worktrees", branch)
+		if err := os.MkdirAll(wt, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return State{
+			PID:          12345,
+			SessionState: StateActive,
+			RepoPath:     repo,
+			WorktreePath: wt,
+			Branch:       branch,
+			SessionKey:   "repo/" + branch,
+			Entrypoint:   []string{"/bin/sh"},
+			StartedAt:    time.Now().UTC().Truncate(time.Second),
+		}
 	}
+
+	live := mkSession("alive")
+	if err := Write(live); err != nil {
+		t.Fatal(err)
+	}
+
+	tomb := mkSession("closed")
+	if err := Write(tomb); err != nil {
+		t.Fatal(err)
+	}
+	if err := Tombstone(tomb.RepoPath, tomb.Branch); err != nil {
+		t.Fatal(err)
+	}
+
+	dangling := mkSession("ghost")
+	if err := Write(dangling); err != nil {
+		t.Fatal(err)
+	}
+	// Externally remove the worktree without going through Remove.
+	if err := os.RemoveAll(dangling.WorktreePath); err != nil {
+		t.Fatal(err)
+	}
+
+	states, err := ListAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(states) != 3 {
+		t.Fatalf("expected 3 entries, got %d: %v", len(states), branches(states))
+	}
+
+	got := map[string]string{}
+	for _, s := range states {
+		got[s.Branch] = s.ResolveState()
+	}
+	if got["alive"] != StateActive && got["alive"] != StateInactive {
+		t.Errorf("live entry resolved to %q, want active/inactive", got["alive"])
+	}
+	if got["closed"] != StateAbandoned {
+		t.Errorf("tombstone entry resolved to %q, want abandoned", got["closed"])
+	}
+	if got["ghost"] != StateAbandoned {
+		t.Errorf("dangling entry resolved to %q, want abandoned", got["ghost"])
+	}
+}
+
+func TestFindByWorktreePath(t *testing.T) {
+	s := setupTestSession(t, "plain-spruce")
 	if err := Write(s); err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +300,11 @@ func TestFindByWorktreePath(t *testing.T) {
 	}
 
 	// Subdirectory match
-	found, err = FindByWorktreePath(s.WorktreePath + "/src/main.go")
+	subdir := filepath.Join(s.WorktreePath, "src")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	found, err = FindByWorktreePath(subdir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,31 +313,20 @@ func TestFindByWorktreePath(t *testing.T) {
 	}
 
 	// No match
-	_, err = FindByWorktreePath("/completely/different/path")
-	if err == nil {
+	if _, err = FindByWorktreePath("/completely/different/path"); err == nil {
 		t.Error("expected error for non-matching path")
 	}
 }
 
 func TestFindByID(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", dir)
-
-	s := State{
-		PID:          12345,
-		SessionState: StateActive,
-		RepoPath:     "/home/user/repos/bob",
-		WorktreePath: "/home/user/repos/bob/.worktrees/plain-spruce",
-		Branch:       "different-branch",
-		SessionKey:   "bob/different-branch",
-		Entrypoint:   []string{"/bin/sh"},
-		StartedAt:    time.Now().UTC(),
-	}
+	s := setupTestSession(t, "plain-spruce")
+	s.Branch = "different-branch"
+	s.SessionKey = "repo/different-branch"
 	if err := Write(s); err != nil {
 		t.Fatal(err)
 	}
 
-	// Match by worktree directory name, not branch
+	// Match by worktree directory name, not branch.
 	found, err := FindByID("plain-spruce")
 	if err != nil {
 		t.Fatal(err)
@@ -181,9 +335,7 @@ func TestFindByID(t *testing.T) {
 		t.Errorf("WorktreePath = %s, want %s", found.WorktreePath, s.WorktreePath)
 	}
 
-	// No match
-	_, err = FindByID("nonexistent")
-	if err == nil {
+	if _, err = FindByID("nonexistent"); err == nil {
 		t.Error("expected error for non-matching ID")
 	}
 }
@@ -192,55 +344,30 @@ func TestFindByID(t *testing.T) {
 // pre-2026-04 bug where strings.HasPrefix matched /foo/bar against
 // /foo/bar-baz. Component-aware matching must reject the sibling.
 func TestFindByWorktreePathRejectsSiblingWithSamePrefix(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", dir)
-
-	s := State{
-		PID:          12345,
-		SessionState: StateActive,
-		RepoPath:     "/tmp/repo",
-		WorktreePath: "/tmp/repo/.worktrees/feature",
-		Branch:       "feature",
-		SessionKey:   "repo/feature",
-		Entrypoint:   []string{"/bin/sh"},
-		StartedAt:    time.Now().UTC(),
-	}
+	s := setupTestSession(t, "feature")
 	if err := Write(s); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := FindByWorktreePath("/tmp/repo/.worktrees/feature-bar/src"); err == nil {
-		t.Error("FindByWorktreePath matched /tmp/repo/.worktrees/feature against /tmp/repo/.worktrees/feature-bar/src")
+	sibling := filepath.Join(filepath.Dir(s.WorktreePath), "feature-bar", "src")
+	if err := os.MkdirAll(sibling, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FindByWorktreePath(sibling); err == nil {
+		t.Error("FindByWorktreePath matched feature against feature-bar")
 	}
 }
 
 // TestFindByWorktreePathThroughSymlink confirms a symlinked cwd matches
-// the real worktree path stored in state. EvalSymlinks runs on both
-// sides so /tmp/link → /tmp/repo/.worktrees/feature is found via either
-// /tmp/link or /tmp/link/sub.
+// the real worktree path stored in state.
 func TestFindByWorktreePathThroughSymlink(t *testing.T) {
-	root := t.TempDir()
-	stateRoot := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", stateRoot)
-
-	real := filepath.Join(root, "repo", ".worktrees", "feature")
-	if err := os.MkdirAll(filepath.Join(real, "sub"), 0o755); err != nil {
+	s := setupTestSession(t, "feature")
+	if err := os.MkdirAll(filepath.Join(s.WorktreePath, "sub"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	link := filepath.Join(root, "link")
-	if err := os.Symlink(real, link); err != nil {
+	link := filepath.Join(filepath.Dir(s.RepoPath), "link")
+	if err := os.Symlink(s.WorktreePath, link); err != nil {
 		t.Fatal(err)
-	}
-
-	s := State{
-		PID:          12345,
-		SessionState: StateActive,
-		RepoPath:     filepath.Join(root, "repo"),
-		WorktreePath: real,
-		Branch:       "feature",
-		SessionKey:   "repo/feature",
-		Entrypoint:   []string{"/bin/sh"},
-		StartedAt:    time.Now().UTC(),
 	}
 	if err := Write(s); err != nil {
 		t.Fatal(err)
@@ -289,15 +416,20 @@ func branches(states []State) []string {
 }
 
 func TestListAllWithEntries(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", dir)
+	base := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", filepath.Join(base, "xdg-state"))
+	repo := filepath.Join(base, "repo")
 
 	for _, branch := range []string{"feature-a", "feature-b"} {
+		wt := filepath.Join(repo, ".worktrees", branch)
+		if err := os.MkdirAll(wt, 0o755); err != nil {
+			t.Fatal(err)
+		}
 		s := State{
 			PID:          12345,
 			SessionState: StateActive,
-			RepoPath:     "/tmp/repo",
-			WorktreePath: "/tmp/repo/.worktrees/" + branch,
+			RepoPath:     repo,
+			WorktreePath: wt,
 			Branch:       branch,
 			SessionKey:   "repo/" + branch,
 			Entrypoint:   []string{"/bin/sh"},
@@ -314,5 +446,127 @@ func TestListAllWithEntries(t *testing.T) {
 	}
 	if len(states) != 2 {
 		t.Errorf("expected 2 states, got %d", len(states))
+	}
+}
+
+// ============================================================================
+// Migration tests
+// ============================================================================
+
+// writeLegacy dumps a state JSON in the pre-slice-1 layout for migration tests.
+func writeLegacy(t *testing.T, s State) {
+	t.Helper()
+	dir := legacyStateDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := sha256.Sum256([]byte(s.RepoPath + "/" + s.Branch))
+	name := fmt.Sprintf("%x-state.json", h[:8])
+	if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMigrateMovesLegacyEntries(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", filepath.Join(base, "xdg-state"))
+	repo := filepath.Join(base, "repo")
+	wt := filepath.Join(repo, ".worktrees", "old-feature")
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	s := State{
+		PID:          7777,
+		SessionState: StateActive,
+		RepoPath:     repo,
+		WorktreePath: wt,
+		Branch:       "old-feature",
+		SessionKey:   "repo/old-feature",
+		Entrypoint:   []string{"/bin/sh"},
+		StartedAt:    time.Now().UTC().Truncate(time.Second),
+	}
+	writeLegacy(t, s)
+
+	if err := MigrateNow(); err != nil {
+		t.Fatal(err)
+	}
+
+	// New layout artifacts present.
+	if _, err := os.Stat(worktreeStatePath(wt)); err != nil {
+		t.Errorf("worktree state.json missing post-migration: %v", err)
+	}
+	info, err := os.Lstat(indexPath(wt))
+	if err != nil {
+		t.Errorf("index symlink missing: %v", err)
+	} else if info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("index entry is not a symlink: %v", info.Mode())
+	}
+
+	// Legacy artifacts gone.
+	if _, err := os.Stat(legacyStateDir()); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("legacy dir should be removed when empty, stat err = %v", err)
+	}
+}
+
+func TestMigrateDropsAbandonedEntries(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", filepath.Join(base, "xdg-state"))
+
+	// Worktree path that doesn't exist on disk.
+	s := State{
+		PID:          1,
+		SessionState: StateActive,
+		RepoPath:     "/no/such/repo",
+		WorktreePath: "/no/such/repo/.worktrees/ghost",
+		Branch:       "ghost",
+		SessionKey:   "repo/ghost",
+		StartedAt:    time.Now().UTC(),
+	}
+	writeLegacy(t, s)
+
+	if err := MigrateNow(); err != nil {
+		t.Fatal(err)
+	}
+
+	// No index entry should exist for the abandoned session.
+	if _, err := os.Lstat(indexPath(s.WorktreePath)); err == nil {
+		t.Error("abandoned session should not get an index entry")
+	}
+	// Legacy file should be gone.
+	if _, err := os.Stat(legacyStatePath(s.RepoPath, s.Branch)); !errors.Is(err, os.ErrNotExist) {
+		t.Error("abandoned legacy file should be removed")
+	}
+}
+
+func TestMigrateIsIdempotent(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", filepath.Join(base, "xdg-state"))
+	repo := filepath.Join(base, "repo")
+	wt := filepath.Join(repo, ".worktrees", "f")
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeLegacy(t, State{
+		PID: 1, SessionState: StateActive,
+		RepoPath: repo, WorktreePath: wt, Branch: "f", SessionKey: "repo/f",
+		StartedAt: time.Now().UTC(),
+	})
+
+	if err := MigrateNow(); err != nil {
+		t.Fatal(err)
+	}
+	// Second run should be a no-op (legacy dir is now gone).
+	if err := MigrateNow(); err != nil {
+		t.Errorf("second migration errored: %v", err)
+	}
+
+	// Verify the new artifacts are still intact.
+	if _, err := os.Stat(worktreeStatePath(wt)); err != nil {
+		t.Errorf("worktree state.json gone after second migration: %v", err)
 	}
 }

@@ -189,7 +189,7 @@ func collectRenderRows(repos []RepoStatus) []renderRow {
 	for _, rs := range repos {
 		mainSession := ""
 		if rs.Main.Session {
-			mainSession = "● zmx"
+			mainSession = "● live"
 		}
 		rows = append(rows, renderRow{
 			prefix:   rs.Main.Repo,
@@ -208,7 +208,7 @@ func collectRenderRows(repos []RepoStatus) []renderRow {
 			}
 			session := ""
 			if wt.Session {
-				session = "● zmx"
+				session = "● live"
 			}
 			rows = append(rows, renderRow{
 				prefix:   "  " + connector + " ",

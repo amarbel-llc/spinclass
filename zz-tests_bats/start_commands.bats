@@ -78,10 +78,9 @@ EOF
   local wt_path
   wt_path=$(extract_wt_path "$start_output")
 
-  # Find the session state file and check description
-  local state_dir="$XDG_STATE_HOME/spinclass/sessions"
+  # Find the session state file (worktree-local or tombstone) and check description.
   local state_file
-  state_file=$(find "$state_dir" -name '*-state.json' 2>/dev/null | head -1)
+  state_file=$(first_session_state_path 2>/dev/null || true)
   if [ -n "$state_file" ]; then
     run jq -r '.description' "$state_file"
     assert_output "custom desc"

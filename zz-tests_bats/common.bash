@@ -84,14 +84,51 @@ extract_wt_path() {
   echo "$1" | grep -oP 'ok \d+ - create \S+ \K\S+'
 }
 
-# Check if a session state file exists for a given repo+branch.
-# Usage: assert_session_state <repo-path> <branch>
+# Check that at least one session is tracked in the central index.
+# Counts both live entries (resolving symlinks) and tombstones (regular
+# files); does NOT count dangling symlinks (externally-closed sessions).
+# Usage: assert_session_state
 assert_session_state() {
-  local state_dir="$XDG_STATE_HOME/spinclass/sessions"
-  assert [ -d "$state_dir" ]
-  local count
-  count="$(find "$state_dir" -name '*-state.json' | wc -l)"
+  local index_dir="$XDG_STATE_HOME/spinclass/index"
+  assert [ -d "$index_dir" ]
+  local count=0
+  for entry in "$index_dir"/*.json; do
+    [ -e "$entry" ] || continue
+    count=$((count + 1))
+  done
   assert [ "$count" -gt 0 ]
+}
+
+# Echo the path of the worktree-local state.json (or tombstone fallback)
+# for the first index entry found. Used by tests that need to grep the
+# state JSON for a description or other field.
+# Usage: first_session_state_path
+first_session_state_path() {
+  local index_dir="$XDG_STATE_HOME/spinclass/index"
+  for entry in "$index_dir"/*.json; do
+    [ -e "$entry" ] || continue
+    if [ -L "$entry" ]; then
+      readlink -f "$entry"
+    else
+      echo "$entry"
+    fi
+    return 0
+  done
+  return 1
+}
+
+# Assert there is no tracked session — index dir is missing or empty of
+# resolvable entries (live or tombstone). Counterpart to assert_session_state.
+# Usage: assert_no_session_state
+assert_no_session_state() {
+  local index_dir="$XDG_STATE_HOME/spinclass/index"
+  if [ ! -d "$index_dir" ]; then
+    return 0
+  fi
+  for entry in "$index_dir"/*.json; do
+    [ -e "$entry" ] || continue
+    fail "unexpected session index entry: $entry"
+  done
 }
 
 # Write a global sweatfile with fast-exiting entrypoints for session tests.

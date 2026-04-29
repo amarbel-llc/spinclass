@@ -68,8 +68,8 @@ func TestRenderTreeStructure(t *testing.T) {
 	if !strings.Contains(output, "└") {
 		t.Error("expected tree connector └ for last worktree")
 	}
-	if !strings.Contains(output, "● zmx") {
-		t.Error("expected zmx indicator for active session")
+	if !strings.Contains(output, "● live") {
+		t.Error("expected live indicator for active session")
 	}
 }
 
@@ -137,7 +137,7 @@ func TestRenderNoSession(t *testing.T) {
 	}
 
 	output := Render(repos)
-	if strings.Contains(output, "● zmx") {
-		t.Error("did not expect zmx indicator when session is false")
+	if strings.Contains(output, "● live") {
+		t.Error("did not expect live indicator when session is false")
 	}
 }
