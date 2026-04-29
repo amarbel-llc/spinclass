@@ -65,9 +65,22 @@
             substituteInPlace "$pluginShare/.claude-plugin/plugin.json" \
               --replace-fail '@VERSION@' '${spinclassVersion}+${spinclassCommit}'
 
+            # clown-plugin-host resolves a relative `command` against the
+            # plugin directory, with no PATH fallback (see clown
+            # internal/pluginhost/config.go Desugar). Bake the absolute
+            # store path so the bridge can exec the binary regardless of
+            # the host's CWD or PATH.
+            #
+            # The same manifest is installed at both <plugin-dir>/clown.json
+            # (where clown actually reads it, per LoadClownConfig) and at
+            # <plugin-dir>/.clown-plugin/clown.json (kept in sync against
+            # any future change in clown's discovery rules).
             install -m 0644 ${./clown.json} "$pluginShare/clown.json"
-            install -m 0644 ${./.clown-plugin/clown.json} \
-              "$pluginShare/.clown-plugin/clown.json"
+            install -m 0644 ${./clown.json} "$pluginShare/.clown-plugin/clown.json"
+            substituteInPlace \
+              "$pluginShare/clown.json" \
+              "$pluginShare/.clown-plugin/clown.json" \
+              --replace-fail '@SPINCLASS@' "$out/bin/spinclass"
             install -m 0644 ${./.clown-plugin/system-prompt-append.d/00-worktree.md} \
               "$pluginShare/.clown-plugin/system-prompt-append.d/00-worktree.md"
           '';
