@@ -38,7 +38,7 @@ func TestResolveTargetByIDFindsSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gotRepo, gotWT, gotBranch, err := resolveTarget(repoPath, "feature-x")
+	gotRepo, gotWT, gotBranch, err := resolveTarget(repoPath, "feature-x", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestResolveTargetByIDOrphanedWorktreeRejected(t *testing.T) {
 	testgit.MustInit(t, repoPath)
 	testgit.MustWorktreeAdd(t, repoPath, wtPath, "orphan")
 
-	_, _, _, err := resolveTarget(repoPath, "orphan")
+	_, _, _, err := resolveTarget(repoPath, "orphan", nil)
 	if err == nil {
 		t.Fatal("expected error for orphaned worktree")
 	}

@@ -3,6 +3,8 @@ package main
 import (
 	"embed"
 	"encoding/json"
+	"log/slog"
+	"os"
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 )
@@ -100,4 +102,18 @@ func parseGlobalArgs(args json.RawMessage) globalArgs {
 	var g globalArgs
 	_ = json.Unmarshal(args, &g)
 	return g
+}
+
+// debugLogger returns a *slog.Logger that writes structured records to
+// stderr at Debug level when verbose is true, or nil otherwise. Callees
+// treat nil as silent. Stderr is intentional: tab-completion captures
+// stdout via $(...) / fish (...) substitution, so stderr never enters the
+// candidate list and porcelain output on stdout stays clean.
+func (g globalArgs) debugLogger() *slog.Logger {
+	if !g.Verbose {
+		return nil
+	}
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
 }

@@ -3,6 +3,7 @@ package close
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"time"
 
@@ -17,13 +18,17 @@ import (
 	tap "github.com/amarbel-llc/bob/packages/tap-dancer/go"
 )
 
-func Run(w io.Writer, target string, force bool, format string) error {
+// Run closes a session. dbg, when non-nil, is forwarded to the
+// interactive picker (and on through to session.ListAll/ListForRepo) so
+// excluded index entries are logged at Debug level. Pass nil for silent
+// operation.
+func Run(w io.Writer, target string, force bool, format string, dbg *slog.Logger) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
 
-	repoPath, wtPath, branch, err := resolveTarget(cwd, target)
+	repoPath, wtPath, branch, err := resolveTarget(cwd, target, dbg)
 	if err != nil {
 		return err
 	}
@@ -121,7 +126,7 @@ func describeUnintegrated(branch string, unintegrated, dirty bool) string {
 	}
 }
 
-func resolveTarget(cwd, target string) (repoPath, wtPath, branch string, err error) {
+func resolveTarget(cwd, target string, dbg *slog.Logger) (repoPath, wtPath, branch string, err error) {
 	if worktree.IsWorktree(cwd) && target == "" {
 		repoPath, err = git.CommonDir(cwd)
 		if err != nil {
@@ -154,7 +159,7 @@ func resolveTarget(cwd, target string) (repoPath, wtPath, branch string, err err
 		return s.RepoPath, s.WorktreePath, s.Branch, nil
 	}
 
-	picked, err := sessionpick.Choose(repoPath, "close")
+	picked, err := sessionpick.Choose(repoPath, "close", dbg)
 	if err != nil {
 		return "", "", "", err
 	}

@@ -154,7 +154,7 @@ func handleDirtyWorktree(wt worktreeInfo) (removed bool, err error) {
 }
 
 func countAbandonedSessions() (int, []session.State) {
-	states, err := session.ListAll()
+	states, err := session.ListAll(nil)
 	if err != nil {
 		return 0, nil
 	}
@@ -184,7 +184,7 @@ func countStaleTombstones(retention time.Duration) int {
 	if retention <= 0 {
 		return 0
 	}
-	states, err := session.ListAll()
+	states, err := session.ListAll(nil)
 	if err != nil {
 		return 0
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,10 +43,11 @@ func registerQueryCommands(app *command.App) {
 		},
 		Run: func(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 			var p struct {
+				globalArgs
 				Closed bool `json:"closed"`
 			}
 			_ = json.Unmarshal(args, &p)
-			return runListResult(p.Closed)
+			return runListResult(p.Closed, p.debugLogger())
 		},
 	})
 
@@ -264,8 +266,10 @@ func registerQueryCommands(app *command.App) {
 // runListResult builds the `sc list` text output. When closed is true,
 // tombstones and dangling-symlink entries are included. Live entries
 // always appear; abandoned/closed entries are filtered unless closed.
-func runListResult(closed bool) (*command.Result, error) {
-	states, err := session.ListAll()
+// dbg, when non-nil, is forwarded to session.ListAll so excluded index
+// entries are logged at Debug level.
+func runListResult(closed bool, dbg *slog.Logger) (*command.Result, error) {
+	states, err := session.ListAll(dbg)
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
 	}

@@ -157,7 +157,7 @@ func CollectRepoStatus(repoPath string, sessions map[string]string) RepoStatus {
 // them as "running").
 func collectSessionMap() map[string]string {
 	sessions := make(map[string]string)
-	states, err := session.ListAll()
+	states, err := session.ListAll(nil)
 	if err != nil {
 		return sessions
 	}

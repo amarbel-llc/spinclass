@@ -329,7 +329,7 @@ func TestSortStatesPlacesDetachedBetweenActiveAndInactive(t *testing.T) {
 func TestListAllEmpty(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 
-	states, err := ListAll()
+	states, err := ListAll(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +385,7 @@ func TestListAllClassifiesEntryShapes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	states, err := ListAll()
+	states, err := ListAll(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,7 +564,7 @@ func TestListAllWithEntries(t *testing.T) {
 		}
 	}
 
-	states, err := ListAll()
+	states, err := ListAll(nil)
 	if err != nil {
 		t.Fatal(err)
 	}

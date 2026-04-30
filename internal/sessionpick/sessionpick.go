@@ -6,6 +6,7 @@ package sessionpick
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,8 +20,11 @@ import (
 // Choose returns the session the user picked from the list of
 // non-abandoned sessions for repoPath. cmdName is only used to build a
 // helpful "Use: spinclass <cmdName> <id>" hint when stdin isn't a TTY.
-func Choose(repoPath, cmdName string) (*session.State, error) {
-	sessions, err := session.ListForRepo(repoPath)
+// dbg, when non-nil, receives Debug-level records describing every index
+// entry that was excluded by session.ListAll/ListForRepo — pass nil for
+// silent operation (e.g. tab-completion paths).
+func Choose(repoPath, cmdName string, dbg *slog.Logger) (*session.State, error) {
+	sessions, err := session.ListForRepo(repoPath, dbg)
 	if err != nil {
 		return nil, err
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,6 +14,16 @@ import (
 	"syscall"
 	"time"
 )
+
+// debugLogger normalises a possibly-nil *slog.Logger into one that
+// silently discards all records. Callers that want exclusion diagnostics
+// pass a real logger; everyone else passes nil.
+func debugLogger(l *slog.Logger) *slog.Logger {
+	if l != nil {
+		return l
+	}
+	return slog.New(slog.DiscardHandler)
+}
 
 const (
 	StateActive    = "active"
@@ -403,7 +414,7 @@ func FindByWorktreePath(path string) (*State, error) {
 		return direct, nil
 	}
 
-	states, err := ListAll()
+	states, err := ListAll(nil)
 	if err != nil {
 		return nil, err
 	}
@@ -478,7 +489,7 @@ func evalOrClean(p string) string {
 func FindByID(id string) (*State, error) {
 	migrateOnce()
 	suffix := "/.worktrees/" + id
-	states, err := ListAll()
+	states, err := ListAll(nil)
 	if err != nil {
 		return nil, err
 	}
@@ -517,18 +528,37 @@ func SortStates(states []State) {
 }
 
 // ListForRepo returns sessions whose RepoPath matches and whose resolved
-// state is not abandoned.
-func ListForRepo(repoPath string) ([]State, error) {
-	all, err := ListAll()
+// state is not abandoned. When dbg is non-nil, every excluded entry is
+// logged at Debug level with a `reason` attribute.
+func ListForRepo(repoPath string, dbg *slog.Logger) ([]State, error) {
+	log := debugLogger(dbg)
+	all, err := ListAll(log)
 	if err != nil {
 		return nil, err
 	}
 	var filtered []State
 	for i := range all {
 		s := &all[i]
-		if s.RepoPath == repoPath && s.ResolveState() != StateAbandoned {
-			filtered = append(filtered, *s)
+		if s.RepoPath != repoPath {
+			log.Debug("session.ListForRepo: skipped",
+				"reason", "repo_mismatch",
+				"want_repo", repoPath,
+				"got_repo", s.RepoPath,
+				"branch", s.Branch,
+				"worktree", s.WorktreePath,
+			)
+			continue
 		}
+		if s.ResolveState() == StateAbandoned {
+			log.Debug("session.ListForRepo: skipped",
+				"reason", "abandoned",
+				"branch", s.Branch,
+				"worktree", s.WorktreePath,
+				"tombstone", s.isTombstone,
+			)
+			continue
+		}
+		filtered = append(filtered, *s)
 	}
 	return filtered, nil
 }
@@ -536,7 +566,10 @@ func ListForRepo(repoPath string) ([]State, error) {
 // ListAll walks the central index and returns every session it can read.
 // Live entries (symlinks that resolve), tombstones (regular files), and
 // dangling symlinks all appear; ResolveState honours each appropriately.
-func ListAll() ([]State, error) {
+// When dbg is non-nil, every index entry that is silently dropped (lstat
+// failure, unreadable file, malformed JSON) is logged at Debug level.
+func ListAll(dbg *slog.Logger) ([]State, error) {
+	log := debugLogger(dbg)
 	migrateOnce()
 
 	dir := indexDir()
@@ -550,12 +583,21 @@ func ListAll() ([]State, error) {
 	var states []State
 	for _, e := range entries {
 		if e.IsDir() {
+			log.Debug("session.ListAll: skipped index entry",
+				"reason", "is_directory",
+				"name", e.Name(),
+			)
 			continue
 		}
 		full := filepath.Join(dir, e.Name())
 
 		info, lerr := os.Lstat(full)
 		if lerr != nil {
+			log.Debug("session.ListAll: skipped index entry",
+				"reason", "lstat_error",
+				"name", e.Name(),
+				"error", lerr.Error(),
+			)
 			continue
 		}
 
@@ -570,13 +612,36 @@ func ListAll() ([]State, error) {
 		if rerr != nil {
 			if isSymlink {
 				if target, terr := os.Readlink(full); terr == nil {
+					log.Debug("session.ListAll: dangling symlink",
+						"name", e.Name(),
+						"target", target,
+						"read_error", rerr.Error(),
+					)
 					states = append(states, danglingStateFromTarget(target))
+				} else {
+					log.Debug("session.ListAll: skipped index entry",
+						"reason", "unreadable_dangling_symlink",
+						"name", e.Name(),
+						"read_error", rerr.Error(),
+						"readlink_error", terr.Error(),
+					)
 				}
+			} else {
+				log.Debug("session.ListAll: skipped index entry",
+					"reason", "readfile_error",
+					"name", e.Name(),
+					"error", rerr.Error(),
+				)
 			}
 			continue
 		}
 		var s State
 		if jerr := json.Unmarshal(data, &s); jerr != nil {
+			log.Debug("session.ListAll: skipped index entry",
+				"reason", "unmarshal_error",
+				"name", e.Name(),
+				"error", jerr.Error(),
+			)
 			continue
 		}
 		s.isTombstone = isTomb

@@ -91,7 +91,7 @@ func registerSessionCommands(app *command.App) {
 			}
 			_ = json.Unmarshal(args, &p)
 
-			return spinclose.Run(os.Stdout, p.Target, p.Force, p.FormatOrDefault())
+			return spinclose.Run(os.Stdout, p.Target, p.Force, p.FormatOrDefault(), p.debugLogger())
 		},
 	})
 }
@@ -111,9 +111,9 @@ func completeWorktreeTargets() map[string]string {
 	var sessions []session.State
 	repoPath, err := worktree.DetectRepo(cwd)
 	if err == nil {
-		sessions, _ = session.ListForRepo(repoPath)
+		sessions, _ = session.ListForRepo(repoPath, nil)
 	} else {
-		all, err := session.ListAll()
+		all, err := session.ListAll(nil)
 		if err != nil {
 			return nil
 		}
@@ -230,7 +230,7 @@ func runResume(_ context.Context, args json.RawMessage) error {
 			if repoErr != nil {
 				return err
 			}
-			state, err = sessionpick.Choose(repoPath, "resume")
+			state, err = sessionpick.Choose(repoPath, "resume", p.debugLogger())
 		}
 	}
 	if err != nil {

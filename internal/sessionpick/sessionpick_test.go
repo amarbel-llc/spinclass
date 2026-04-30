@@ -16,7 +16,7 @@ import (
 func TestChooseEmptyListErrors(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 
-	_, err := Choose("/tmp/empty-repo", "resume")
+	_, err := Choose("/tmp/empty-repo", "resume", nil)
 	if err == nil {
 		t.Fatal("expected error for empty session list")
 	}
@@ -60,7 +60,7 @@ func TestChooseNonInteractiveListsIDs(t *testing.T) {
 
 	// Stdin in `go test` is /dev/null (non-tty), so interactive() returns
 	// false naturally without us redirecting anything.
-	_, err := Choose(live, "close")
+	_, err := Choose(live, "close", nil)
 	if err == nil {
 		t.Fatal("expected non-interactive error")
 	}
