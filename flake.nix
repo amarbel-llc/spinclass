@@ -3,12 +3,10 @@
 
   inputs = {
     nixpkgs.url = "github:amarbel-llc/nixpkgs";
-    nixpkgs-master.url = "github:NixOS/nixpkgs/e2dde111aea2c0699531dc616112a96cd55ab8b5";
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
     bob = {
       url = "github:amarbel-llc/bob";
       inputs.nixpkgs.follows = "nixpkgs";
-      inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
 };
@@ -17,7 +15,6 @@
     {
       self,
       nixpkgs,
-      nixpkgs-master,
       utils,
       bob,
     }:
@@ -30,12 +27,10 @@
     utils.lib.eachDefaultSystem (
       system:
       let
-        pkgs-master = import nixpkgs-master { inherit system; };
         pkgs = import nixpkgs {
           inherit system;
           overlays = [
             nixpkgs.overlays.default
-            (_: _: { go = pkgs-master.go; })
           ];
         };
 
@@ -99,12 +94,12 @@
 
         devShells.default = pkgs.mkShell {
           packages = [
-            pkgs-master.go
-            pkgs-master.gopls
-            pkgs-master.gotools
-            pkgs-master.golangci-lint
-            pkgs-master.delve
-            pkgs-master.gofumpt
+            pkgs.go
+            pkgs.gopls
+            pkgs.gotools
+            pkgs.golangci-lint
+            pkgs.delve
+            pkgs.gofumpt
             pkgs.gomod2nix
             pkgs.just
             pkgs.bats
