@@ -7,6 +7,7 @@
     bob = {
       url = "github:amarbel-llc/bob";
       inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs-master.follows = "nixpkgs";
       inputs.utils.follows = "utils";
     };
 };
