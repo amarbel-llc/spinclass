@@ -15,3 +15,11 @@ spinclass worktrees are long-lived workers, not subject-scoped branches.
 
 If the user explicitly asks to leave or destroy the worktree, defer to
 them.
+
+## Session-local scratch space
+
+The session's `.tmp/` directory (pointed to by `$TMPDIR` and
+`$CLAUDE_CODE_TMPDIR`) lives inside the worktree. When the session is
+closed (`sc close`, which removes the worktree), `.tmp/` goes with it,
+so you do NOT need to clean up files you create under `.tmp/` — leaving
+them there is fine.
