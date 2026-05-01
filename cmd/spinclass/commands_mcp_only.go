@@ -17,6 +17,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/merge"
 	"github.com/amarbel-llc/spinclass/internal/servelog"
 	"github.com/amarbel-llc/spinclass/internal/session"
+	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 )
 
@@ -61,23 +62,25 @@ func wrapMCPHandler(
 // "session-tool" prefix so users who run `sc help` understand they're
 // agent-facing helpers.
 func registerMCPOnlyCommands(app *command.App) {
-	app.AddCommand(&command.Command{
-		Name:  "merge-this-session",
-		Title: "Merge This Session",
-		Description: command.Description{
-			Short: "Merge the current session's worktree into the default branch and clean up. A non-error return means the merge (and push, if git_sync) succeeded; the output payload is informational and does not need to be read or parsed to confirm success. Only inspect output on error.",
-		},
-		Annotations: &protocol.ToolAnnotations{
-			ReadOnlyHint:    protocol.BoolPtr(false),
-			DestructiveHint: protocol.BoolPtr(true),
-			IdempotentHint:  protocol.BoolPtr(false),
-			OpenWorldHint:   protocol.BoolPtr(false),
-		},
-		Params: []command.Param{
-			{Name: "git_sync", Type: command.Bool, Description: "Pull and push after merge (default false)"},
-		},
-		Run: wrapMCPHandler("merge-this-session", handleMergeThisSession),
-	})
+	if !mergeDisabledForCwd() {
+		app.AddCommand(&command.Command{
+			Name:  "merge-this-session",
+			Title: "Merge This Session",
+			Description: command.Description{
+				Short: "Merge the current session's worktree into the default branch and clean up. A non-error return means the merge (and push, if git_sync) succeeded; the output payload is informational and does not need to be read or parsed to confirm success. Only inspect output on error.",
+			},
+			Annotations: &protocol.ToolAnnotations{
+				ReadOnlyHint:    protocol.BoolPtr(false),
+				DestructiveHint: protocol.BoolPtr(true),
+				IdempotentHint:  protocol.BoolPtr(false),
+				OpenWorldHint:   protocol.BoolPtr(false),
+			},
+			Params: []command.Param{
+				{Name: "git_sync", Type: command.Bool, Description: "Pull and push after merge (default false)"},
+			},
+			Run: wrapMCPHandler("merge-this-session", handleMergeThisSession),
+		})
+	}
 
 	app.AddCommand(&command.Command{
 		Name:  "check-this-session",
@@ -221,4 +224,33 @@ func handleUpdateDescription(_ context.Context, args json.RawMessage, _ command.
 	}
 
 	return command.TextResult(fmt.Sprintf("description updated to: %s", params.Description)), nil
+}
+
+// mergeDisabledForCwd reads the sweatfile hierarchy from the current working
+// directory and reports whether [hooks].disable-merge is set. Returns false
+// on any error so a misconfigured environment doesn't silently strip the
+// merge tool.
+func mergeDisabledForCwd() bool {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return false
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return false
+	}
+	repoPath, err := git.CommonDir(cwd)
+	if err != nil {
+		// Not a worktree (or not a git repo): load the simple hierarchy.
+		h, hErr := sweatfile.LoadHierarchy(home, cwd)
+		if hErr != nil {
+			return false
+		}
+		return h.Merged.DisableMergeEnabled()
+	}
+	h, err := sweatfile.LoadWorktreeHierarchy(home, repoPath, cwd)
+	if err != nil {
+		return false
+	}
+	return h.Merged.DisableMergeEnabled()
 }

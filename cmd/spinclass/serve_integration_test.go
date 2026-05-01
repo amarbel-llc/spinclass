@@ -433,3 +433,229 @@ func TestServeCheckThisSession(t *testing.T) {
 		t.Errorf("expected tool result to contain %q, got:\n%s", "CHECK_OUTPUT", combined.String())
 	}
 }
+
+// setupWorktreeWithSweatfile is a sibling of setupWorktreeWithHook that lets
+// the caller provide arbitrary sweatfile contents. It creates an isolated git
+// repo with the provided sweatfile body at the repo root, plus a worktree
+// branched from main with one commit ready to merge.
+func setupWorktreeWithSweatfile(t *testing.T, branchName, sweatfileBody string) (repoDir, wtPath string) {
+	t.Helper()
+
+	root := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", root)
+	t.Setenv("HOME", root)
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(root, "gitconfig"))
+
+	repoDir = filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+		}
+	}
+
+	run(repoDir, "init", "-b", "main")
+	run(repoDir, "config", "user.email", "test@test")
+	run(repoDir, "config", "user.name", "Test")
+	run(repoDir, "config", "commit.gpgsign", "false")
+	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("initial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(repoDir, "add", "file.txt")
+	run(repoDir, "commit", "-m", "initial")
+
+	if err := os.WriteFile(filepath.Join(repoDir, "sweatfile"), []byte(sweatfileBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	wtPath = filepath.Join(repoDir, ".worktrees", branchName)
+	if err := os.MkdirAll(filepath.Dir(wtPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run(repoDir, "worktree", "add", "-b", branchName, wtPath)
+	if err := os.WriteFile(filepath.Join(wtPath, "new.txt"), []byte("wt content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(wtPath, "add", "new.txt")
+	run(wtPath, "commit", "-m", "worktree commit")
+
+	return repoDir, wtPath
+}
+
+// TestServeMergeThisSessionHiddenWhenDisabled spawns serve in a worktree
+// whose sweatfile sets [hooks].disable-merge = true, then queries
+// tools/list and asserts merge-this-session is absent while
+// check-this-session is present.
+func TestServeMergeThisSessionHiddenWhenDisabled(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("shell hook not portable to Windows")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not in PATH")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not in PATH")
+	}
+
+	bin := buildSpinclassBinary(t)
+	sweatfileBody := "[hooks]\npre-merge = \"true\"\ndisable-merge = true\n"
+	repoDir, wtPath := setupWorktreeWithSweatfile(t, "feature-disabled", sweatfileBody)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, bin, "serve")
+	cmd.Dir = wtPath
+	cmd.Env = append(os.Environ(),
+		"HOME="+filepath.Dir(repoDir),
+		"GIT_CEILING_DIRECTORIES="+filepath.Dir(repoDir),
+		"XDG_STATE_HOME="+t.TempDir(),
+	)
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatalf("stdin pipe: %v", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("stdout pipe: %v", err)
+	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start spinclass serve: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+
+	send := func(msg any) {
+		b, err := json.Marshal(msg)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if _, err := stdin.Write(append(b, '\n')); err != nil {
+			t.Fatalf("write %s: %v", b, err)
+		}
+	}
+
+	send(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "initialize",
+		"params": map[string]any{
+			"protocolVersion": "2024-11-05",
+			"capabilities":    map[string]any{},
+			"clientInfo":      map[string]any{"name": "spinclass-test", "version": "0"},
+		},
+	})
+	send(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "notifications/initialized",
+	})
+	send(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      2,
+		"method":  "tools/list",
+	})
+
+	type toolEntry struct {
+		Name string `json:"name"`
+	}
+	type toolsListResult struct {
+		Tools []toolEntry `json:"tools"`
+	}
+	type rpc struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Method  string          `json:"method"`
+		Result  json.RawMessage `json:"result"`
+		Error   json.RawMessage `json:"error"`
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	var listResp rpc
+	sawListResponse := false
+	deadline := time.After(45 * time.Second)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line == "" {
+				continue
+			}
+			var msg rpc
+			if err := json.Unmarshal([]byte(line), &msg); err != nil {
+				t.Errorf("non-JSON line on stdout: %q\nerror: %v", line, err)
+				return
+			}
+			if msg.JSONRPC != "2.0" {
+				t.Errorf("bad jsonrpc version on line: %q", line)
+				return
+			}
+			if string(msg.ID) == "2" {
+				listResp = msg
+				sawListResponse = true
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-deadline:
+		t.Fatalf("timeout waiting for tools/list response; stderr:\n%s", stderr.String())
+	}
+
+	if err := scanner.Err(); err != nil && err != io.EOF {
+		t.Errorf("scan error: %v", err)
+	}
+
+	if !sawListResponse {
+		t.Fatalf("never received response to tools/list (id=2); stderr:\n%s", stderr.String())
+	}
+
+	if len(listResp.Error) > 0 {
+		t.Fatalf("tools/list returned JSON-RPC error: %s; stderr:\n%s", string(listResp.Error), stderr.String())
+	}
+
+	var res toolsListResult
+	if err := json.Unmarshal(listResp.Result, &res); err != nil {
+		t.Fatalf("unmarshal tools/list result: %v\nresult: %s", err, string(listResp.Result))
+	}
+
+	names := make(map[string]bool, len(res.Tools))
+	for _, t := range res.Tools {
+		names[t.Name] = true
+	}
+
+	if names["merge-this-session"] {
+		nameList := make([]string, 0, len(res.Tools))
+		for _, t := range res.Tools {
+			nameList = append(nameList, t.Name)
+		}
+		t.Errorf("expected merge-this-session to be HIDDEN when [hooks].disable-merge=true, but it was registered. tools: %v", nameList)
+	}
+
+	if !names["check-this-session"] {
+		nameList := make([]string, 0, len(res.Tools))
+		for _, t := range res.Tools {
+			nameList = append(nameList, t.Name)
+		}
+		t.Errorf("expected check-this-session to be PRESENT, but it was missing. tools: %v", nameList)
+	}
+}
