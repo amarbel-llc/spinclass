@@ -125,10 +125,8 @@ space-separated form (`sc perms list`) is also accepted.
 
 `merge-this-session` is registered conditionally: when the active sweatfile
 sets `[hooks].disable-merge = true`, both `sc merge` and the
-`merge-this-session` MCP tool are unavailable in that repo. Agents working
-in such repos should run `sc check` (or call `check-this-session`) to
-exercise the configured `[hooks].pre-merge` command and let the user
-drive the actual merge through their external review process.
+`merge-this-session` MCP tool are unavailable. Agents in such repos should
+fall back to `sc check` / `check-this-session` to exercise `[hooks].pre-merge`.
 
 ## Custom start commands
 
