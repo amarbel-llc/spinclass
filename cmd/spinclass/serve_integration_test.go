@@ -42,7 +42,7 @@ func TestServeMergeThisSessionStdioIntegrity(t *testing.T) {
 	}
 
 	bin := buildSpinclassBinary(t)
-	repoDir, wtPath := setupWorktreeWithHook(t)
+	repoDir, wtPath := setupWorktreeWithHook(t, "feature-it", "echo HOOKOUT_STDOUT; echo HOOKOUT_STDERR 1>&2")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -207,9 +207,10 @@ func findRepoRoot() (string, error) {
 }
 
 // setupWorktreeWithHook creates an isolated git repo with a sweatfile that
-// sets a pre-merge hook emitting both stdout and stderr lines, plus a
-// worktree with a commit ready to merge.
-func setupWorktreeWithHook(t *testing.T) (repoDir, wtPath string) {
+// sets the given pre-merge hook command, plus a worktree with a commit ready
+// to merge. The branch name is used both for the worktree directory and the
+// branch ref.
+func setupWorktreeWithHook(t *testing.T, branchName, hookScript string) (repoDir, wtPath string) {
 	t.Helper()
 
 	root := t.TempDir()
@@ -241,71 +242,16 @@ func setupWorktreeWithHook(t *testing.T) (repoDir, wtPath string) {
 	run(repoDir, "add", "file.txt")
 	run(repoDir, "commit", "-m", "initial")
 
-	sweatfile := "[hooks]\npre-merge = \"echo HOOKOUT_STDOUT; echo HOOKOUT_STDERR 1>&2\"\n"
+	sweatfile := fmt.Sprintf("[hooks]\npre-merge = %q\n", hookScript)
 	if err := os.WriteFile(filepath.Join(repoDir, "sweatfile"), []byte(sweatfile), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	wtPath = filepath.Join(repoDir, ".worktrees", "feature-it")
+	wtPath = filepath.Join(repoDir, ".worktrees", branchName)
 	if err := os.MkdirAll(filepath.Dir(wtPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	run(repoDir, "worktree", "add", "-b", "feature-it", wtPath)
-	if err := os.WriteFile(filepath.Join(wtPath, "new.txt"), []byte("wt content"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	run(wtPath, "add", "new.txt")
-	run(wtPath, "commit", "-m", "worktree commit")
-
-	return repoDir, wtPath
-}
-
-// setupWorktreeWithCheckHook is like setupWorktreeWithHook but writes a
-// pre-merge hook whose stdout contains the unique marker CHECK_OUTPUT so
-// the check-this-session integration test can assert the hook output is
-// surfaced in the tool's text result.
-func setupWorktreeWithCheckHook(t *testing.T) (repoDir, wtPath string) {
-	t.Helper()
-
-	root := t.TempDir()
-	t.Setenv("GIT_CEILING_DIRECTORIES", root)
-	t.Setenv("HOME", root)
-	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(root, "gitconfig"))
-
-	repoDir = filepath.Join(root, "repo")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	run := func(dir string, args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
-		}
-	}
-
-	run(repoDir, "init", "-b", "main")
-	run(repoDir, "config", "user.email", "test@test")
-	run(repoDir, "config", "user.name", "Test")
-	run(repoDir, "config", "commit.gpgsign", "false")
-	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("initial"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	run(repoDir, "add", "file.txt")
-	run(repoDir, "commit", "-m", "initial")
-
-	sweatfile := "[hooks]\npre-merge = \"echo CHECK_OUTPUT\"\n"
-	if err := os.WriteFile(filepath.Join(repoDir, "sweatfile"), []byte(sweatfile), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	wtPath = filepath.Join(repoDir, ".worktrees", "feature-check")
-	if err := os.MkdirAll(filepath.Dir(wtPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	run(repoDir, "worktree", "add", "-b", "feature-check", wtPath)
+	run(repoDir, "worktree", "add", "-b", branchName, wtPath)
 	if err := os.WriteFile(filepath.Join(wtPath, "new.txt"), []byte("wt content"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +281,7 @@ func TestServeCheckThisSession(t *testing.T) {
 	}
 
 	bin := buildSpinclassBinary(t)
-	repoDir, wtPath := setupWorktreeWithCheckHook(t)
+	repoDir, wtPath := setupWorktreeWithHook(t, "feature-check", "echo CHECK_OUTPUT")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
