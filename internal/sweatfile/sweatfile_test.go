@@ -1252,3 +1252,50 @@ func TestMergeWithDoesNotMutateBaseSlice(t *testing.T) {
 		t.Errorf("merged[0] should be overridden, got %q", merged.StartCommands[0].ExecStart[1])
 	}
 }
+
+func TestParseHooksDisableMerge(t *testing.T) {
+	input := `
+[hooks]
+disable-merge = true
+`
+	doc, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sf := doc.Data()
+	if !sf.DisableMergeEnabled() {
+		t.Error("expected disable-merge to be enabled")
+	}
+}
+
+func TestParseHooksDisableMergeAbsent(t *testing.T) {
+	doc, err := Parse([]byte("[git]\nexcludes = [\".claude/\"]"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sf := doc.Data()
+	if sf.DisableMergeEnabled() {
+		t.Error("expected disable-merge to be disabled when absent")
+	}
+}
+
+func TestMergeDisableMergeInherit(t *testing.T) {
+	enabled := true
+	base := Sweatfile{Hooks: &Hooks{DisableMerge: &enabled}}
+	repo := Sweatfile{}
+	merged := base.MergeWith(repo)
+	if !merged.DisableMergeEnabled() {
+		t.Error("expected inherited disable-merge")
+	}
+}
+
+func TestMergeDisableMergeOverride(t *testing.T) {
+	enabled := true
+	disabled := false
+	base := Sweatfile{Hooks: &Hooks{DisableMerge: &enabled}}
+	repo := Sweatfile{Hooks: &Hooks{DisableMerge: &disabled}}
+	merged := base.MergeWith(repo)
+	if merged.DisableMergeEnabled() {
+		t.Error("expected overridden disable-merge to be disabled")
+	}
+}

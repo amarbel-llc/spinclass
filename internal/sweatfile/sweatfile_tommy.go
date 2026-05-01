@@ -104,6 +104,10 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			hooksVal.ToolUseLog = &v
 			d.consumed["hooks.tool-use-log"] = true
 		}
+		if v, err := document.GetFromContainer[bool](d.cstDoc, tableNode, "disable-merge"); err == nil {
+			hooksVal.DisableMerge = &v
+			d.consumed["hooks.disable-merge"] = true
+		}
 		d.data.Hooks = hooksVal
 	} else {
 		hooksVal := &Hooks{}
@@ -142,6 +146,11 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			hooksVal.ToolUseLog = &v
 			found = true
 			d.consumed["tool-use-log"] = true
+		}
+		if v, err := document.GetFromContainer[bool](d.cstDoc, d.cstDoc.Root(), "disable-merge"); err == nil {
+			hooksVal.DisableMerge = &v
+			found = true
+			d.consumed["disable-merge"] = true
 		}
 		if found {
 			d.data.Hooks = hooksVal
@@ -407,6 +416,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				return nil, err
 			}
 		}
+		if d.data.Hooks.DisableMerge != nil {
+			if err := d.cstDoc.SetInContainer(tableNode, "disable-merge", *d.data.Hooks.DisableMerge); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if d.data.SessionEntry != nil {
 		tableNode := d.cstDoc.EnsureTableInContainer(d.cstDoc.Root(), "session-entry")
@@ -543,6 +557,10 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 			hooksVal.ToolUseLog = &v
 			consumed[keyPrefix+"hooks.tool-use-log"] = true
 		}
+		if v, err := document.GetFromContainer[bool](doc, tableNode, "disable-merge"); err == nil {
+			hooksVal.DisableMerge = &v
+			consumed[keyPrefix+"hooks.disable-merge"] = true
+		}
 		data.Hooks = hooksVal
 	} else {
 		hooksVal := &Hooks{}
@@ -581,6 +599,11 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 			hooksVal.ToolUseLog = &v
 			found = true
 			consumed[keyPrefix+"tool-use-log"] = true
+		}
+		if v, err := document.GetFromContainer[bool](doc, container, "disable-merge"); err == nil {
+			hooksVal.DisableMerge = &v
+			found = true
+			consumed[keyPrefix+"disable-merge"] = true
 		}
 		if found {
 			data.Hooks = hooksVal
@@ -686,6 +709,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if data.Hooks.ToolUseLog != nil {
 			if err := doc.SetInContainer(tableNode, "tool-use-log", *data.Hooks.ToolUseLog); err != nil {
+				return err
+			}
+		}
+		if data.Hooks.DisableMerge != nil {
+			if err := doc.SetInContainer(tableNode, "disable-merge", *data.Hooks.DisableMerge); err != nil {
 				return err
 			}
 		}

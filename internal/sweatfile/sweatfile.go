@@ -36,6 +36,7 @@ type Hooks struct {
 	OnDetach             *string `toml:"on-detach"`
 	DisallowMainWorktree *bool   `toml:"disallow-main-worktree"`
 	ToolUseLog           *bool   `toml:"tool-use-log"`
+	DisableMerge         *bool   `toml:"disable-merge"`
 }
 
 // MCPServerDef declares an MCP server to register and auto-approve
@@ -160,6 +161,12 @@ func (sf Sweatfile) ToolUseLogEnabled() bool {
 	return sf.Hooks != nil &&
 		sf.Hooks.ToolUseLog != nil &&
 		*sf.Hooks.ToolUseLog
+}
+
+func (sf Sweatfile) DisableMergeEnabled() bool {
+	return sf.Hooks != nil &&
+		sf.Hooks.DisableMerge != nil &&
+		*sf.Hooks.DisableMerge
 }
 
 func (sf Sweatfile) SessionStart() []string {

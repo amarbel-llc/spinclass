@@ -201,6 +201,9 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if other.Hooks.ToolUseLog != nil {
 			merged.Hooks.ToolUseLog = other.Hooks.ToolUseLog
 		}
+		if other.Hooks.DisableMerge != nil {
+			merged.Hooks.DisableMerge = other.Hooks.DisableMerge
+		}
 	}
 
 	// [session-entry]
