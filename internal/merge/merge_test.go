@@ -460,6 +460,78 @@ func TestResolvedInSessionTapOutput(t *testing.T) {
 	}
 }
 
+func TestResolvedDisabledByMergeFlag(t *testing.T) {
+	repoDir := setupRepo(t)
+
+	wtDir := filepath.Join(repoDir, ".worktrees")
+	if err := os.MkdirAll(wtDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wtPath := filepath.Join(wtDir, "feature-disabled")
+	runGit(t, repoDir, "worktree", "add", "-b", "feature-disabled", wtPath)
+
+	if err := os.WriteFile(filepath.Join(wtPath, "disabled.txt"), []byte("disabled"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "disabled.txt")
+	runGit(t, wtPath, "commit", "-m", "disabled commit")
+
+	// Drop a sweatfile in the worktree that disables merge.
+	sweatfilePath := filepath.Join(wtPath, "sweatfile")
+	if err := os.WriteFile(sweatfilePath, []byte("[hooks]\ndisable-merge = true\n"), 0o644); err != nil {
+		t.Fatalf("write sweatfile: %v", err)
+	}
+
+	// Snapshot main and feature-disabled state before the call so we can
+	// verify nothing happened.
+	mainLogBefore := runGit(t, repoDir, "log", "--oneline", "main")
+	branchLogBefore := runGit(t, repoDir, "log", "--oneline", "feature-disabled")
+
+	mock := &mockExecutor{}
+	var buf bytes.Buffer
+
+	err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-disabled", "main", false, false, false)
+	if err == nil {
+		t.Fatal("expected error when disable-merge is set, got nil")
+	}
+	if !strings.Contains(err.Error(), "merge disabled") {
+		t.Errorf("expected 'merge disabled' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "disable-merge") {
+		t.Errorf("expected 'disable-merge' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "sc check") {
+		t.Errorf("expected 'sc check' hint in error, got: %v", err)
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "disable-merge") {
+		t.Errorf("expected TAP output to mention 'disable-merge', got: %s", got)
+	}
+	if !strings.Contains(got, "sc check") {
+		t.Errorf("expected TAP hint 'sc check', got: %s", got)
+	}
+
+	// No merge-y side effects: main and the feature branch should be
+	// byte-identical to their pre-call state, the worktree directory must
+	// still exist, and the branch must not have been deleted.
+	mainLogAfter := runGit(t, repoDir, "log", "--oneline", "main")
+	if mainLogBefore != mainLogAfter {
+		t.Errorf("main branch log changed; merge guard did not short-circuit before git ops\nbefore:\n%s\nafter:\n%s", mainLogBefore, mainLogAfter)
+	}
+	branchLogAfter := runGit(t, repoDir, "log", "--oneline", "feature-disabled")
+	if branchLogBefore != branchLogAfter {
+		t.Errorf("feature-disabled branch log changed; rebase ran despite disable-merge\nbefore:\n%s\nafter:\n%s", branchLogBefore, branchLogAfter)
+	}
+	if _, statErr := os.Stat(wtPath); os.IsNotExist(statErr) {
+		t.Error("expected worktree to still exist when merge is disabled, but it was removed")
+	}
+	branchCheck := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", "refs/heads/feature-disabled")
+	if err := branchCheck.Run(); err != nil {
+		t.Errorf("expected branch feature-disabled to still exist when merge is disabled, but rev-parse failed: %v", err)
+	}
+}
+
 func TestIsInsideSession(t *testing.T) {
 	t.Run("no env var", func(t *testing.T) {
 		t.Setenv("SPINCLASS_SESSION_ID", "")

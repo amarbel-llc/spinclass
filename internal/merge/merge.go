@@ -87,6 +87,27 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 		ownWriter = true
 	}
 
+	if home, _ := os.UserHomeDir(); home != "" {
+		hierarchy, hErr := sweatfile.LoadWorktreeHierarchy(home, repoPath, wtPath)
+		if hErr == nil && hierarchy.Merged.DisableMergeEnabled() {
+			source := disableMergeSource(hierarchy)
+			msg := fmt.Sprintf(
+				"merge disabled by sweatfile (disable-merge=true at %s); use `sc check` to run the pre-merge hook without merging",
+				source,
+			)
+			if tw != nil {
+				tw.NotOk("merge "+branch, map[string]string{
+					"severity": "fail",
+					"message":  msg,
+				})
+				if ownWriter {
+					tw.Plan()
+				}
+			}
+			return errors.New(msg)
+		}
+	}
+
 	// Pull the default branch BEFORE rebasing, so the session branch is
 	// rebased onto the current origin tip rather than a stale local ref.
 	// Otherwise a concurrent commit on origin/<default> arriving between
@@ -463,4 +484,20 @@ func (lw *lineWriter) Flush() {
 	}
 	lw.ob.Line(string(lw.buf))
 	lw.buf = nil
+}
+
+// disableMergeSource returns the path of the most-specific sweatfile in
+// the hierarchy that set DisableMerge to a non-nil value, or "<unknown>"
+// if none can be located.
+func disableMergeSource(h sweatfile.Hierarchy) string {
+	for i := len(h.Sources) - 1; i >= 0; i-- {
+		s := h.Sources[i]
+		if !s.Found {
+			continue
+		}
+		if s.File.Hooks != nil && s.File.Hooks.DisableMerge != nil {
+			return s.Path
+		}
+	}
+	return "<unknown>"
 }
