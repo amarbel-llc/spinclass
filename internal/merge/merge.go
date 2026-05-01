@@ -487,7 +487,7 @@ func (lw *lineWriter) Flush() {
 }
 
 // disableMergeSource returns the path of the most-specific sweatfile in
-// the hierarchy that set DisableMerge to a non-nil value, or "<unknown>"
+// the hierarchy that set DisableMerge to true, or "<unknown>"
 // if none can be located.
 func disableMergeSource(h sweatfile.Hierarchy) string {
 	for i := len(h.Sources) - 1; i >= 0; i-- {
@@ -495,7 +495,7 @@ func disableMergeSource(h sweatfile.Hierarchy) string {
 		if !s.Found {
 			continue
 		}
-		if s.File.Hooks != nil && s.File.Hooks.DisableMerge != nil {
+		if s.File.Hooks != nil && s.File.Hooks.DisableMerge != nil && *s.File.Hooks.DisableMerge {
 			return s.Path
 		}
 	}
