@@ -23,6 +23,10 @@ import (
 // If no pre-merge hook is configured, Run returns nil and (in TAP mode)
 // emits an "ok" indicating no hook is configured — agents and humans
 // should treat "no hook" as a success because there is nothing to check.
+//
+// The verbose parameter is accepted for API stability but currently
+// unused; check itself emits no git output today. It is reserved for
+// future use when verbose-mode diagnostics become relevant.
 func Run(w io.Writer, format, wtPath string, verbose bool) error {
 	repoPath, err := git.CommonDir(wtPath)
 	if err != nil {
