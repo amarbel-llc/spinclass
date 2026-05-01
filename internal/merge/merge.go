@@ -409,17 +409,11 @@ func promptDefaultBranch() (string, error) {
 	return selected, nil
 }
 
-// runPreMergeHook loads the sweatfile hierarchy and delegates the hook
-// invocation to internal/check. The thin wrapper exists so the merge
-// codepath continues to log the legacy "running pre-merge hook" /
-// "pre-merge hook failed, not merging" lines in passthrough mode and so
-// the merge step can short-circuit silently when home is not resolvable
-// or the hierarchy fails to load.
-//
-// When emitting TAP (tw != nil), the hook runs inside a tap-dancer
-// OutputBlock so the `# Output:` header prints immediately and hook
-// stdout/stderr streams as indented body lines in real time instead of
-// being buffered until the hook exits — this is provided by check.RunWithWriter.
+// runPreMergeHook loads the sweatfile hierarchy and runs the configured
+// pre-merge hook. Returns nil silently when home is not resolvable or
+// the hierarchy fails to load. In passthrough mode, emits the legacy
+// "running pre-merge hook" / "pre-merge hook failed, not merging" log
+// lines that operators rely on.
 func runPreMergeHook(tw *tap.Writer, w io.Writer, repoPath, wtPath, branch string, ownWriter bool) error {
 	home, _ := os.UserHomeDir()
 	if home == "" {

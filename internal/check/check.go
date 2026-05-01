@@ -53,11 +53,6 @@ func Run(w io.Writer, format, wtPath string, verbose bool) error {
 		ownWriter = true
 	}
 
-	// In standalone mode, "no hook configured" is itself a meaningful
-	// check result and should be reported as an OK with an explanation.
-	// RunWithWriter intentionally stays silent on this case because the
-	// merge call site predates the standalone surface and must not change
-	// its TAP stream.
 	cmd := hierarchy.Merged.PreMergeHookCommand()
 	if cmd == nil || *cmd == "" {
 		if tw != nil {
@@ -69,11 +64,7 @@ func Run(w io.Writer, format, wtPath string, verbose bool) error {
 		return nil
 	}
 
-	// Delegate to RunWithWriter for the actual hook invocation. We pass
-	// ownWriter=false so RunWithWriter never calls Plan() — the standalone
-	// path always wants a Plan() emitted regardless of hook success/failure,
-	// which RunWithWriter does not provide on its own (it only emits Plan
-	// on failure to match the legacy merge call pattern).
+	// ownWriter=false: Run owns Plan emission for the standalone path.
 	hookErr := RunWithWriter(tw, w, hierarchy, wtPath, branch, false)
 	if tw != nil && ownWriter {
 		tw.Plan()
