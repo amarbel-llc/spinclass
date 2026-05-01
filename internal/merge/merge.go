@@ -90,21 +90,20 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 	if home, _ := os.UserHomeDir(); home != "" {
 		hierarchy, hErr := sweatfile.LoadWorktreeHierarchy(home, repoPath, wtPath)
 		if hErr == nil && hierarchy.Merged.DisableMergeEnabled() {
-			source := disableMergeSource(hierarchy)
-			msg := fmt.Sprintf(
+			err := fmt.Errorf(
 				"merge disabled by sweatfile (disable-merge=true at %s); use `sc check` to run the pre-merge hook without merging",
-				source,
+				disableMergeSource(hierarchy),
 			)
 			if tw != nil {
 				tw.NotOk("merge "+branch, map[string]string{
 					"severity": "fail",
-					"message":  msg,
+					"message":  err.Error(),
 				})
 				if ownWriter {
 					tw.Plan()
 				}
 			}
-			return errors.New(msg)
+			return err
 		}
 	}
 
