@@ -105,6 +105,24 @@ Boolean.
 When true, a PostToolUse hook logs tool invocations.
 .B Merge:
 scalar override.
+.TP
+.B disable-merge
+Boolean.
+When true,
+.B sc merge
+exits non-zero before any git operation runs, and the
+.B merge-this-session
+MCP tool is omitted from the tool catalog.
+.B sc check
+and
+.B check-this-session
+remain available so the configured
+.B [hooks].pre-merge
+command can still be invoked as agent CI.
+Use this in repositories where merges must go through external
+review (e.g., protected branches that require pull requests).
+.B Merge:
+scalar override.
 .SS [session\-entry]
 Controls what command is exec'd when attaching to a session.
 .TP

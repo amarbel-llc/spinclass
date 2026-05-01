@@ -108,6 +108,7 @@ worktree paths. Applies `claude-allow` rules from sweatfile to
   `sc update-description "<desc>"` Update session description (--id or auto-detect)
   `sc list`                        List all tracked sessions from state directory
   `sc merge [target]`              Merge worktree into main, remove session state
+  `sc check`                       Run [hooks].pre-merge in the current worktree (agent-CI surface)
   `sc clean`                       Remove merged worktrees and abandoned sessions
   `sc fork [branch]`               Fork current worktree (supports `--from <dir>`)
   `sc pull`                        Pull repos and rebase worktrees
@@ -121,6 +122,13 @@ must be quoted, e.g. `sc start "fix login bug"`. `start-gh_pr` and
 Note that the underlying registered subcommands
 use hyphenated names (`perms-list`, `perms-review`, `perms-edit`), but the
 space-separated form (`sc perms list`) is also accepted.
+
+`merge-this-session` is registered conditionally: when the active sweatfile
+sets `[hooks].disable-merge = true`, both `sc merge` and the
+`merge-this-session` MCP tool are unavailable in that repo. Agents working
+in such repos should run `sc check` (or call `check-this-session`) to
+exercise the configured `[hooks].pre-merge` command and let the user
+drive the actual merge through their external review process.
 
 ## Custom start commands
 
