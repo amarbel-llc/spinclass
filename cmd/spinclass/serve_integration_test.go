@@ -212,53 +212,7 @@ func findRepoRoot() (string, error) {
 // branch ref.
 func setupWorktreeWithHook(t *testing.T, branchName, hookScript string) (repoDir, wtPath string) {
 	t.Helper()
-
-	root := t.TempDir()
-	t.Setenv("GIT_CEILING_DIRECTORIES", root)
-	t.Setenv("HOME", root)
-	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(root, "gitconfig"))
-
-	repoDir = filepath.Join(root, "repo")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	run := func(dir string, args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
-		}
-	}
-
-	run(repoDir, "init", "-b", "main")
-	run(repoDir, "config", "user.email", "test@test")
-	run(repoDir, "config", "user.name", "Test")
-	run(repoDir, "config", "commit.gpgsign", "false")
-	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("initial"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	run(repoDir, "add", "file.txt")
-	run(repoDir, "commit", "-m", "initial")
-
-	sweatfile := fmt.Sprintf("[hooks]\npre-merge = %q\n", hookScript)
-	if err := os.WriteFile(filepath.Join(repoDir, "sweatfile"), []byte(sweatfile), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	wtPath = filepath.Join(repoDir, ".worktrees", branchName)
-	if err := os.MkdirAll(filepath.Dir(wtPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	run(repoDir, "worktree", "add", "-b", branchName, wtPath)
-	if err := os.WriteFile(filepath.Join(wtPath, "new.txt"), []byte("wt content"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	run(wtPath, "add", "new.txt")
-	run(wtPath, "commit", "-m", "worktree commit")
-
-	return repoDir, wtPath
+	return setupWorktreeWithSweatfile(t, branchName, fmt.Sprintf("[hooks]\npre-merge = %q\n", hookScript))
 }
 
 // TestServeCheckThisSession exercises the `check-this-session` MCP tool.
