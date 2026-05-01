@@ -1,7 +1,6 @@
 package merge
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +12,7 @@ import (
 	"github.com/charmbracelet/log"
 
 	tap "github.com/amarbel-llc/bob/packages/tap-dancer/go"
+	"github.com/amarbel-llc/spinclass/internal/check"
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/session"
@@ -409,13 +409,17 @@ func promptDefaultBranch() (string, error) {
 	return selected, nil
 }
 
-// runPreMergeHook loads the sweatfile hierarchy, runs the configured
-// pre-merge hook (if any), and reports the outcome.
+// runPreMergeHook loads the sweatfile hierarchy and delegates the hook
+// invocation to internal/check. The thin wrapper exists so the merge
+// codepath continues to log the legacy "running pre-merge hook" /
+// "pre-merge hook failed, not merging" lines in passthrough mode and so
+// the merge step can short-circuit silently when home is not resolvable
+// or the hierarchy fails to load.
 //
 // When emitting TAP (tw != nil), the hook runs inside a tap-dancer
 // OutputBlock so the `# Output:` header prints immediately and hook
 // stdout/stderr streams as indented body lines in real time instead of
-// being buffered until the hook exits.
+// being buffered until the hook exits — this is provided by check.RunWithWriter.
 func runPreMergeHook(tw *tap.Writer, w io.Writer, repoPath, wtPath, branch string, ownWriter bool) error {
 	home, _ := os.UserHomeDir()
 	if home == "" {
@@ -425,64 +429,19 @@ func runPreMergeHook(tw *tap.Writer, w io.Writer, repoPath, wtPath, branch strin
 	if err != nil {
 		return nil
 	}
-	cmd := hierarchy.Merged.PreMergeHookCommand()
-	if cmd == nil || *cmd == "" {
-		return nil
-	}
-	desc := "pre-merge hook for " + branch + ": `" + *cmd + "`"
-
 	if tw == nil {
+		cmd := hierarchy.Merged.PreMergeHookCommand()
+		if cmd == nil || *cmd == "" {
+			return nil
+		}
 		log.Info("running pre-merge hook", "worktree", branch)
-		if err := hierarchy.Merged.RunPreMergeHook(wtPath, w); err != nil {
+		if err := check.RunWithWriter(nil, w, hierarchy, wtPath, branch, ownWriter); err != nil {
 			log.Error("pre-merge hook failed, not merging")
 			return err
 		}
 		return nil
 	}
-
-	var hookErr error
-	tw.OutputBlock(desc, func(ob *tap.OutputBlockWriter) *tap.Diagnostics {
-		lw := &lineWriter{ob: ob}
-		hookErr = hierarchy.Merged.RunPreMergeHook(wtPath, lw)
-		lw.Flush()
-		if hookErr != nil {
-			return &tap.Diagnostics{Severity: "fail", Message: hookErr.Error()}
-		}
-		return nil
-	})
-	if hookErr != nil && ownWriter {
-		tw.Plan()
-	}
-	return hookErr
-}
-
-// lineWriter splits incoming bytes on '\n' and forwards each complete
-// line to an OutputBlockWriter. Partial trailing content is buffered
-// until a newline arrives or Flush() is called.
-type lineWriter struct {
-	ob  *tap.OutputBlockWriter
-	buf []byte
-}
-
-func (lw *lineWriter) Write(p []byte) (int, error) {
-	lw.buf = append(lw.buf, p...)
-	for {
-		i := bytes.IndexByte(lw.buf, '\n')
-		if i < 0 {
-			break
-		}
-		lw.ob.Line(string(lw.buf[:i]))
-		lw.buf = lw.buf[i+1:]
-	}
-	return len(p), nil
-}
-
-func (lw *lineWriter) Flush() {
-	if len(lw.buf) == 0 {
-		return
-	}
-	lw.ob.Line(string(lw.buf))
-	lw.buf = nil
+	return check.RunWithWriter(tw, w, hierarchy, wtPath, branch, ownWriter)
 }
 
 // disableMergeSource returns the path of the most-specific sweatfile in
