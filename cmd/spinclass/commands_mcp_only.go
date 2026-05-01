@@ -174,8 +174,11 @@ func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prom
 
 	var buf bytes.Buffer
 	if err := check.Run(&buf, "tap", cwd, false); err != nil {
-		// Hook failed — surface the captured output AND the error to the agent.
-		return command.TextErrorResult(buf.String() + "\n" + err.Error()), nil
+		text := buf.String()
+		if text == "" {
+			text = err.Error()
+		}
+		return command.TextErrorResult(text), nil
 	}
 	return command.TextResult(buf.String()), nil
 }
