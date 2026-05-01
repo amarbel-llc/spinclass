@@ -11,6 +11,7 @@ import (
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/protocol"
+	"github.com/amarbel-llc/spinclass/internal/check"
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/merge"
@@ -76,6 +77,22 @@ func registerMCPOnlyCommands(app *command.App) {
 			{Name: "git_sync", Type: command.Bool, Description: "Pull and push after merge (default false)"},
 		},
 		Run: wrapMCPHandler("merge-this-session", handleMergeThisSession),
+	})
+
+	app.AddCommand(&command.Command{
+		Name:  "check-this-session",
+		Title: "Check This Session",
+		Description: command.Description{
+			Short: "Run the configured [hooks].pre-merge command in the current worktree without merging. This is the agent-CI surface; safe to call repeatedly. Returns non-zero / error if the hook fails.",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(false),
+			DestructiveHint: protocol.BoolPtr(false),
+			IdempotentHint:  protocol.BoolPtr(false),
+			OpenWorldHint:   protocol.BoolPtr(false),
+		},
+		Params: []command.Param{},
+		Run:    wrapMCPHandler("check-this-session", handleCheckThisSession),
 	})
 
 	app.AddCommand(&command.Command{
@@ -145,6 +162,20 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 	)
 	if mergeErr != nil {
 		return command.TextErrorResult(buf.String()), nil
+	}
+	return command.TextResult(buf.String()), nil
+}
+
+func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
+	}
+
+	var buf bytes.Buffer
+	if err := check.Run(&buf, "tap", cwd, false); err != nil {
+		// Hook failed — surface the captured output AND the error to the agent.
+		return command.TextErrorResult(buf.String() + "\n" + err.Error()), nil
 	}
 	return command.TextResult(buf.String()), nil
 }
