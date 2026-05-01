@@ -239,3 +239,50 @@ EOF
   refute_output --partial '$SPINCLASS_SESSION_ID'
   refute_output --partial '$SPINCLASS_BRANCH'
 }
+
+# Set up a worktree and cd into it; write a sweatfile at the worktree
+# root with the given body. Sets wt_path. Used by the sc-check tests
+# below.
+sc_check_setup_worktree() {
+  local sweatfile_body="$1"
+
+  cd "$TEST_REPO"
+  run_sc start --no-attach sc_check_test
+  assert_success
+
+  wt_path=$(extract_wt_path "$output")
+  assert [ -d "$wt_path" ]
+
+  printf '%s' "$sweatfile_body" >"$wt_path/sweatfile"
+  cd "$wt_path"
+}
+
+function sc_check_runs_pre_merge_hook { # @test
+  sc_check_setup_worktree '[hooks]
+pre-merge = "echo CHECK_RAN"
+'
+
+  run_sc check
+  assert_success
+  assert_output --partial "CHECK_RAN"
+}
+
+function sc_check_fails_when_pre_merge_hook_fails { # @test
+  sc_check_setup_worktree '[hooks]
+pre-merge = "false"
+'
+
+  run_sc check
+  assert_failure
+}
+
+function sc_check_runs_when_disable_merge_set { # @test
+  sc_check_setup_worktree '[hooks]
+disable-merge = true
+pre-merge = "echo CHECK_OK"
+'
+
+  run_sc check
+  assert_success
+  assert_output --partial "CHECK_OK"
+}

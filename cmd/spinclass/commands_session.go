@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
+	"github.com/amarbel-llc/spinclass/internal/check"
 	spinclose "github.com/amarbel-llc/spinclass/internal/close"
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/merge"
@@ -70,6 +71,26 @@ func registerSessionCommands(app *command.App) {
 			_ = json.Unmarshal(args, &p)
 
 			return merge.Run(executor.ShellExecutor{}, p.FormatOrDefault(), p.Target, p.GitSync, p.Verbose)
+		},
+	})
+
+	app.AddCommand(&command.Command{
+		Name: "check",
+		Description: command.Description{
+			Short: "Run the [hooks].pre-merge command without merging",
+			Long:  "Runs the configured [hooks].pre-merge command (the agent-CI hook) in the current worktree. Reports ok / not ok and exits non-zero on failure. Available regardless of [hooks].disable-merge.",
+		},
+		RunCLI: func(_ context.Context, args json.RawMessage) error {
+			var p struct {
+				globalArgs
+			}
+			_ = json.Unmarshal(args, &p)
+
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			return check.Run(os.Stdout, p.FormatOrDefault(), cwd, p.Verbose)
 		},
 	})
 
