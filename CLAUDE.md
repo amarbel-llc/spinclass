@@ -134,6 +134,15 @@ the MCP tool catalog, gated on `[hooks].disable-merge`:
 
 The `sc check` CLI subcommand is available regardless of the flag.
 
+By default `sc close` and `sc clean` perform worktree-scoped Nix garbage
+collection after removing the worktree: spinclass enumerates the gc roots
+resolving into the worktree, expands their closure, and runs `nix-store
+--delete` per path. Nix's own liveness check is the safety net — paths still
+rooted elsewhere are reported as `kept`. Set `[hooks].disable-nix-gc = true`
+in the sweatfile cascade to opt out, or use `sc close --nix-gc=<true|false>`
+to override per-invocation. Silent no-op when `nix-store` isn't on PATH or
+the worktree has no gc roots.
+
 ## Custom start commands
 
 `sc start-<name>` subcommands can be declared in a sweatfile via the

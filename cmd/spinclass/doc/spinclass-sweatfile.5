@@ -129,6 +129,31 @@ that require pull requests). The
 CLI subcommand is available regardless of this flag.
 .B Merge:
 scalar override.
+.TP
+.B disable-nix-gc
+Boolean.
+When true,
+.B sc close
+and
+.B sc clean
+skip the post-removal worktree-scoped Nix garbage collection.
+By default (or when this flag is unset), spinclass enumerates the gc
+roots whose link path resolves into the worktree being removed,
+expands each root's closure, and attempts
+.B nix-store \-\-delete
+on each path; nix's own liveness check refuses paths still kept alive
+by other roots, so the blast radius is bounded to "what only this
+worktree was holding."
+The
+.B sc close \-\-nix\-gc=<true|false>
+flag overrides this setting per-invocation.
+The collection is a silent no-op when
+.B nix-store
+is not on
+.BR PATH ,
+or when the worktree has no gc roots.
+.B Merge:
+scalar override.
 .SS [session\-entry]
 Controls what command is exec'd when attaching to a session.
 .TP
