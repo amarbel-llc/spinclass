@@ -2,12 +2,12 @@
 status: exploring
 date: 2026-05-02
 promotion-criteria: |
-  Promote to `proposed` once both prerequisites have a concrete plan:
-  (a) FDR 0003 (per-worktree madder store) reaches `proposed` and an
-  activation model is selected, and (b) the `go-mcp/command.Result`
-  framework gains resource_link content support in the
-  `amarbel-llc/purse-first` repo. Until both land, this design is
-  blocked from implementation by external dependencies.
+  Promote to `proposed` once FDR 0003 (per-worktree madder store)
+  reaches `proposed` and an activation model is selected. The
+  `go-mcp/command.Result` framework gap is worked around in this
+  design (the URI is emitted as a plain YAMLish string, not as an
+  MCP `resource_link` content block) so that purse-first is NOT a
+  blocker.
 ---
 
 # `merge-this-session` output shape
@@ -146,11 +146,32 @@ flow, no behaviour drift between MCP and CLI invocations.
 
 ### Resource_link URI form
 
-Defers to whatever scheme madder establishes for cross-tool
-references to blobs. As of FDR 0003 the working assumption is
-`madder://<store-id>/<blob-id>` or similar, with the store-id
-being `.default` for spinclass-managed worktrees. Exact form
-will be pinned when madder integration ships.
+The URI is emitted as a **plain string** in the YAMLish
+diagnostic — it is NOT an MCP-protocol-level `resource_link`
+content block. The `command.Result` type in
+`amarbel-llc/purse-first/libs/go-mcp/command` is currently
+text-only; rather than wait for that framework to grow rich
+content support, this design treats the URI as data inside the
+TAP payload that an agent reads as text and can act on
+manually.
+
+Concrete shape: `resource_link: madder://.default/<blob-id>` as
+a YAMLish string field. Agents that want the full output run a
+shell command (e.g. `madder cat <blob-id>` via `Bash`) — which
+is already permitted because FDR 0003 adds `Bash(madder:*)` to
+`claude-allow` when the store is active. No MCP-side affordance
+is needed.
+
+If/when `go-mcp/command.Result` gains a content slice (tracked
+in `amarbel-llc/purse-first` as a non-blocking enhancement), the
+spinclass merge handler can be upgraded to emit a
+protocol-level `resource_link` content block alongside the TAP
+text without changing the on-the-wire URI scheme. The string
+form chosen here is forward-compatible.
+
+The exact URI prefix (whether `madder://`, `mcp+madder://`, or
+something else) will be pinned when madder integration ships;
+spinclass will adopt whatever cross-tool form madder publishes.
 
 ## Open questions
 
@@ -172,31 +193,38 @@ feature shipping.
 
 ## Dependency stack
 
-This feature is blocked from implementation by two external
-prerequisites. Both are concrete and small in scope; neither is
-on the spinclass critical path today.
+This feature has **one** hard prerequisite and one soft
+("nice-to-have, not blocking") follow-up.
 
-1. **Per-worktree madder blob store (spinclass FDR 0003).**
-   Currently `status: exploring`. Activation model is the only
-   open piece; the rest of the design is locked in. Tracked as
-   spinclass issue #53 (milestone v0.2.0). Without the store,
-   the resource_link has no backing storage.
+### Hard prerequisite
 
-2. **`go-mcp/command.Result` resource_link support
-   (`amarbel-llc/purse-first`).** The protocol layer of go-mcp
-   already implements `ResourceLinkContent` and
-   `EmbeddedResourceContent` (see
-   `libs/go-mcp/protocol/content_v1.go`). The gap is in
-   `command.Result` — currently text-only — and in
-   `resultToMCPV1()` which hardcodes
-   `[]ContentBlockV1{TextContentV1(text)}`. A targeted addition
-   (new field on `Result`, helper like `ResourceLinkResult` or
-   `MultiContentResult`, mapping update) unblocks any
-   command.App-based MCP server that wants to return
-   non-text content. To be filed as a separate issue against
-   `amarbel-llc/purse-first`.
+**Per-worktree madder blob store (spinclass FDR 0003).**
+Currently `status: exploring`. Activation model is the only
+open piece; the rest of the design is locked in. Tracked as
+spinclass issue #53 (milestone v0.2.0). Without the store, the
+resource_link has no backing storage.
 
-Once both land, the spinclass-side change is contained to
+### Non-blocking follow-up
+
+**`go-mcp/command.Result` rich content support
+(`amarbel-llc/purse-first`).** The protocol layer of go-mcp
+already implements `ResourceLinkContent` and
+`EmbeddedResourceContent` (see
+`libs/go-mcp/protocol/content_v1.go`). The gap is in
+`command.Result` — currently text-only — and in
+`resultToMCPV1()` which hardcodes
+`[]ContentBlockV1{TextContentV1(text)}`. A targeted addition
+(new field on `Result`, helper like `ResourceLinkResult` or
+`MultiContentResult`, mapping update) would let spinclass
+return a protocol-level `resource_link` block.
+
+Until that ships, this FDR works around the gap by emitting the
+URI as a plain string inside the TAP YAMLish (see
+"Resource_link URI form"). The on-the-wire URI scheme is the
+same in both worlds, so the workaround is forward-compatible
+with the upgrade.
+
+Once FDR 0003 lands, the spinclass-side change is contained to
 `internal/merge/merge.go`, `internal/check/check.go`,
 `cmd/spinclass/commands_mcp_only.go`, and the manpage
 `cmd/spinclass/doc/spinclass-sweatfile.5`.
@@ -231,18 +259,23 @@ Once both land, the spinclass-side change is contained to
   also raw bytes; consumers wanting clean text run their own
   filter.)
 - **Asymmetric guarantees during the dual-architecture period.**
-  Until the go-mcp framework extension and madder store both
-  ship, the merge tool keeps its current OutputBlock shape.
-  There is no intermediate "tail only, no resource_link" mode
-  — partial adoption would just shift the overflow boundary
-  without removing it.
+  Until the madder store ships (FDR 0003), the merge tool keeps
+  its current OutputBlock shape. There is no intermediate
+  "tail only, no resource_link" mode — partial adoption would
+  just shift the overflow boundary without removing it.
+- **URI is data, not affordance.** Because the URI is emitted
+  as a YAMLish string rather than an MCP `resource_link`
+  content block, agents do not get a clickable resource
+  surface from MCP-aware UIs. They follow the URI by reading
+  the TAP diagnostic and acting on it (e.g. `Bash(madder cat
+  ...)`). This is acceptable trade-off versus blocking on the
+  go-mcp framework upgrade.
 
 ## Rollback strategy
 
-Because both prerequisites are additive (new fields on
-`Result`, new sibling directory under the worktree), this
-feature can ship behind a sweatfile knob (e.g.
-`[hooks].merge-output-shape = "compact" | "verbose"`,
+Because the prerequisite is additive (a new sibling directory
+under the worktree), this feature can ship behind a sweatfile
+knob (e.g. `[hooks].merge-output-shape = "compact" | "verbose"`,
 default `"verbose"` initially) for the first release. After
 one release of stable usage with the new shape opted-in, the
 default flips to `"compact"` and the verbose path becomes a
