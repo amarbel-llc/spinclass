@@ -836,6 +836,65 @@ func TestMergeThisSessionFallsThroughWhenPreMergeHookEmpty(t *testing.T) {
 	}
 }
 
+func TestCheckThisSessionAllowedWhenPreMergeHookSet(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cwd := t.TempDir()
+	os.WriteFile(filepath.Join(cwd, "sweatfile"),
+		[]byte("[hooks]\npre-merge = \"just test\"\ndisable-merge = true"), 0o644)
+
+	input := makeInput("mcp__spinclass__check-this-session", map[string]any{}, cwd)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() == 0 {
+		t.Fatal("expected allow output when pre-merge hook is set")
+	}
+	decision, reason := parseHookDecision(t, stdout.Bytes())
+	if decision != "allow" {
+		t.Errorf("expected permissionDecision allow, got %q", decision)
+	}
+	if !strings.Contains(reason, "pre-merge") {
+		t.Errorf("expected reason to mention pre-merge, got %q", reason)
+	}
+}
+
+func TestCheckThisSessionFallsThroughWhenNoPreMergeHook(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cwd := t.TempDir() // no sweatfile here
+
+	input := makeInput("mcp__spinclass__check-this-session", map[string]any{}, cwd)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("expected no output without pre-merge hook, got %q", stdout.String())
+	}
+}
+
+func TestCheckThisSessionFallsThroughWhenPreMergeHookEmpty(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cwd := t.TempDir()
+	os.WriteFile(filepath.Join(cwd, "sweatfile"),
+		[]byte("[hooks]\npre-merge = \"\"\ndisable-merge = true"), 0o644)
+
+	input := makeInput("mcp__spinclass__check-this-session", map[string]any{}, cwd)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("expected no output when pre-merge hook is empty string, got %q", stdout.String())
+	}
+}
+
 func TestEditSpinclassDirDenied(t *testing.T) {
 	mainRepo := t.TempDir()
 	worktree := t.TempDir()

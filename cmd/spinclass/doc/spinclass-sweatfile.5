@@ -87,8 +87,12 @@ left in its rebased state so the user can fix the issue and retry.
 Typical use: run tests or linters as a pre-merge gate.
 When this hook is set, the spinclass PreToolUse hook auto-approves the
 .B mcp__spinclass__merge-this-session
-tool so Claude Code does not prompt: the pre-merge hook acts as the gate
-instead.
+and
+.B mcp__spinclass__check-this-session
+tools (whichever is registered \(em see
+.B disable-merge
+below) so Claude Code does not prompt: the pre-merge hook acts as the
+gate instead.
 .B Merge:
 scalar override.
 .TP
@@ -112,15 +116,17 @@ When true,
 .B sc merge
 exits non-zero before any git operation runs, and the
 .B merge-this-session
-MCP tool is omitted from the tool catalog.
-.B sc check
-and
+MCP tool is replaced in the tool catalog by
 .B check-this-session
-remain available so the configured
+\(em the two tools are mutually exclusive, gated on this flag.
+.B check-this-session
+runs the configured
 .B [hooks].pre-merge
-command can still be invoked as agent CI.
-Use this in repositories where merges must go through external
-review (e.g., protected branches that require pull requests).
+command without merging, providing an agent-CI surface for repositories
+where merges must go through external review (e.g., protected branches
+that require pull requests). The
+.B sc check
+CLI subcommand is available regardless of this flag.
 .B Merge:
 scalar override.
 .SS [session\-entry]

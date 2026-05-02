@@ -62,7 +62,23 @@ func wrapMCPHandler(
 // "session-tool" prefix so users who run `sc help` understand they're
 // agent-facing helpers.
 func registerMCPOnlyCommands(app *command.App) {
-	if !mergeDisabledForCwd() {
+	if mergeDisabledForCwd() {
+		app.AddCommand(&command.Command{
+			Name:  "check-this-session",
+			Title: "Check This Session",
+			Description: command.Description{
+				Short: "Run the configured [hooks].pre-merge command in the current worktree without merging. This is the agent-CI surface; safe to call repeatedly. Returns non-zero / error if the hook fails.",
+			},
+			Annotations: &protocol.ToolAnnotations{
+				ReadOnlyHint:    protocol.BoolPtr(false),
+				DestructiveHint: protocol.BoolPtr(false),
+				IdempotentHint:  protocol.BoolPtr(false),
+				OpenWorldHint:   protocol.BoolPtr(false),
+			},
+			Params: []command.Param{},
+			Run:    wrapMCPHandler("check-this-session", handleCheckThisSession),
+		})
+	} else {
 		app.AddCommand(&command.Command{
 			Name:  "merge-this-session",
 			Title: "Merge This Session",
@@ -81,22 +97,6 @@ func registerMCPOnlyCommands(app *command.App) {
 			Run: wrapMCPHandler("merge-this-session", handleMergeThisSession),
 		})
 	}
-
-	app.AddCommand(&command.Command{
-		Name:  "check-this-session",
-		Title: "Check This Session",
-		Description: command.Description{
-			Short: "Run the configured [hooks].pre-merge command in the current worktree without merging. This is the agent-CI surface; safe to call repeatedly. Returns non-zero / error if the hook fails.",
-		},
-		Annotations: &protocol.ToolAnnotations{
-			ReadOnlyHint:    protocol.BoolPtr(false),
-			DestructiveHint: protocol.BoolPtr(false),
-			IdempotentHint:  protocol.BoolPtr(false),
-			OpenWorldHint:   protocol.BoolPtr(false),
-		},
-		Params: []command.Param{},
-		Run:    wrapMCPHandler("check-this-session", handleCheckThisSession),
-	})
 
 	app.AddCommand(&command.Command{
 		Name:  "update-this-session-description",

@@ -123,10 +123,16 @@ Note that the underlying registered subcommands
 use hyphenated names (`perms-list`, `perms-review`, `perms-edit`), but the
 space-separated form (`sc perms list`) is also accepted.
 
-`merge-this-session` is registered conditionally: when the active sweatfile
-sets `[hooks].disable-merge = true`, both `sc merge` and the
-`merge-this-session` MCP tool are unavailable. Agents in such repos should
-fall back to `sc check` / `check-this-session` to exercise `[hooks].pre-merge`.
+`merge-this-session` and `check-this-session` are mutually exclusive in
+the MCP tool catalog, gated on `[hooks].disable-merge`:
+
+- Default (flag unset/false): `merge-this-session` is registered;
+  `check-this-session` is NOT.
+- `[hooks].disable-merge = true`: `merge-this-session` and `sc merge` are
+  unavailable; `check-this-session` is registered in their place so
+  agents can still exercise `[hooks].pre-merge`.
+
+The `sc check` CLI subcommand is available regardless of the flag.
 
 ## Custom start commands
 

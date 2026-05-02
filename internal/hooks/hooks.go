@@ -85,11 +85,21 @@ func runStopHook(input hookInput, w io.Writer) error {
 
 // The spinclass MCP server registers under the name "spinclass", so its
 // tools appear to Claude Code as mcp__spinclass__<tool>.
-const mergeThisSessionToolName = "mcp__spinclass__merge-this-session"
+const (
+	mergeThisSessionToolName = "mcp__spinclass__merge-this-session"
+	checkThisSessionToolName = "mcp__spinclass__check-this-session"
+)
 
 func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree bool) error {
-	if input.ToolName == mergeThisSessionToolName && hasPreMergeHook(input.CWD) {
-		return writeAllow(w, "sweatfile [hooks].pre-merge gates this merge")
+	switch input.ToolName {
+	case mergeThisSessionToolName:
+		if hasPreMergeHook(input.CWD) {
+			return writeAllow(w, "sweatfile [hooks].pre-merge gates this merge")
+		}
+	case checkThisSessionToolName:
+		if hasPreMergeHook(input.CWD) {
+			return writeAllow(w, "sweatfile [hooks].pre-merge is the agent-CI surface")
+		}
 	}
 
 	resolvedMain := resolvePath(mainRepoRoot)
