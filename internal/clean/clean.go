@@ -1,6 +1,7 @@
 package clean
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 
 	tap "github.com/amarbel-llc/bob/packages/tap-dancer/go"
 	"github.com/amarbel-llc/spinclass/internal/git"
+	"github.com/amarbel-llc/spinclass/internal/nixgc"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
@@ -97,7 +99,13 @@ func scanWorktrees(startDir string) []worktreeInfo {
 	return worktrees
 }
 
-func removeWorktree(wt worktreeInfo) error {
+func removeWorktree(wt worktreeInfo, tw *tap.Writer) error {
+	// Capture nix gc roots BEFORE worktree removal so the auto-roots' link
+	// targets still resolve. Reap runs AFTER the worktree (and its `result`
+	// symlinks) is gone, so nix's own liveness check decides which closure
+	// paths actually disappear.
+	gcPlan := planNixGCForClean(wt.repoPath, wt.worktreePath)
+
 	if err := git.WorktreeRemove(wt.repoPath, wt.worktreePath); err != nil {
 		return fmt.Errorf("removing worktree %s: %w", wt.branch, err)
 	}
@@ -106,7 +114,54 @@ func removeWorktree(wt worktreeInfo) error {
 	}
 	// Clean up session state file if it exists
 	session.Remove(wt.repoPath, wt.branch)
+
+	if gcPlan != nil {
+		summary := nixgc.Reap(*gcPlan)
+		emitNixGCSummary(tw, summary)
+	}
 	return nil
+}
+
+// planNixGCForClean is the override-less twin of close.planNixGC. Returns
+// nil when the gc should not run (sweatfile disabled, nix missing, no roots,
+// or any plan-build error).
+func planNixGCForClean(repoPath, wtPath string) *nixgc.Plan {
+	if nixgc.Disabled(repoPath, wtPath) {
+		return nil
+	}
+	plan, err := nixgc.NewPlan(wtPath)
+	if errors.Is(err, nixgc.ErrNixUnavailable) {
+		return nil
+	}
+	if err != nil {
+		return nil
+	}
+	if len(plan.Roots) == 0 {
+		return nil
+	}
+	return &plan
+}
+
+// emitNixGCSummary writes one TAP line per cleaned worktree summarizing the
+// reap outcome. Errors surface as `not ok` but do NOT propagate; the
+// worktree is already gone, so gc failure is informational.
+func emitNixGCSummary(tw *tap.Writer, s nixgc.Summary) {
+	if tw == nil {
+		return
+	}
+	desc := fmt.Sprintf(
+		"nix-gc: reclaimed %d path(s), kept %d (still rooted)",
+		s.Reclaimed, s.Kept,
+	)
+	if len(s.Errors) == 0 {
+		tw.Ok(desc)
+		return
+	}
+	diag := map[string]string{
+		"errors": fmt.Sprintf("%d", len(s.Errors)),
+		"first":  s.Errors[0].Error(),
+	}
+	tw.NotOk(desc, diag)
 }
 
 func discardFile(wtPath string, fc FileChange) error {
@@ -121,7 +176,7 @@ func discardFile(wtPath string, fc FileChange) error {
 	return git.CheckoutFile(wtPath, fc.Path)
 }
 
-func handleDirtyWorktree(wt worktreeInfo) (removed bool, err error) {
+func handleDirtyWorktree(wt worktreeInfo, tw *tap.Writer) (removed bool, err error) {
 	porcelain := git.StatusPorcelain(wt.worktreePath)
 	changes := ParsePorcelain(porcelain)
 
@@ -147,7 +202,7 @@ func handleDirtyWorktree(wt worktreeInfo) (removed bool, err error) {
 		return false, nil
 	}
 
-	if err := removeWorktree(wt); err != nil {
+	if err := removeWorktree(wt, tw); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -337,7 +392,7 @@ func executeClean(tw *tap.Writer, actions []cleanAction, abandoned []session.Sta
 	for _, a := range actions {
 		switch a.action {
 		case "remove":
-			if err := removeWorktree(a.wt); err != nil {
+			if err := removeWorktree(a.wt, tw); err != nil {
 				if tw != nil {
 					tw.NotOk("remove "+a.label, map[string]string{
 						"error": err.Error(),
@@ -353,7 +408,7 @@ func executeClean(tw *tap.Writer, actions []cleanAction, abandoned []session.Sta
 				log.Info("removed merged worktree", "branch", a.wt.branch)
 			}
 		case "interactive":
-			wasRemoved, err := handleDirtyWorktree(a.wt)
+			wasRemoved, err := handleDirtyWorktree(a.wt, tw)
 			if err != nil {
 				if tw != nil {
 					tw.NotOk("remove "+a.label, map[string]string{

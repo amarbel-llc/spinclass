@@ -103,18 +103,45 @@ func registerSessionCommands(app *command.App) {
 		Params: []command.Param{
 			{Name: "target", Type: command.String, Description: "Target session ID (worktree directory name); auto-detects from cwd if omitted", Completer: completeWorktreeTargets},
 			{Name: "force", Short: 'f', Type: command.Bool, Description: "Skip confirmation for unpushed branches"},
+			{Name: "nix-gc", Type: command.String, Description: "Override [hooks].disable-nix-gc for this invocation: 'true' forces worktree-scoped Nix gc, 'false' skips it"},
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
 			var p struct {
 				globalArgs
 				Target string `json:"target"`
 				Force  bool   `json:"force"`
+				NixGC  string `json:"nix-gc"`
 			}
 			_ = json.Unmarshal(args, &p)
 
-			return spinclose.Run(os.Stdout, p.Target, p.Force, p.FormatOrDefault(), p.debugLogger())
+			nixGCOverride, err := parseNixGCFlag(p.NixGC)
+			if err != nil {
+				return err
+			}
+
+			return spinclose.Run(os.Stdout, p.Target, p.Force, nixGCOverride, p.FormatOrDefault(), p.debugLogger())
 		},
 	})
+}
+
+// parseNixGCFlag turns the raw --nix-gc=<value> argument into a *bool
+// override consumed by close.Run. Empty string means "defer to sweatfile"
+// (returns nil); "true"/"false" return pointers to the parsed boolean. Any
+// other value is rejected with a user-facing error so typos surface
+// immediately instead of silently falling through to default behavior.
+func parseNixGCFlag(raw string) (*bool, error) {
+	switch raw {
+	case "":
+		return nil, nil
+	case "true":
+		v := true
+		return &v, nil
+	case "false":
+		v := false
+		return &v, nil
+	default:
+		return nil, fmt.Errorf("--nix-gc must be 'true' or 'false', got %q", raw)
+	}
 }
 
 // completeWorktreeTargets returns session IDs (worktree directory

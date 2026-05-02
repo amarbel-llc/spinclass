@@ -1,6 +1,7 @@
 package close
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/git"
+	"github.com/amarbel-llc/spinclass/internal/nixgc"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sessionpick"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
@@ -22,7 +24,11 @@ import (
 // interactive picker (and on through to session.ListAll/ListForRepo) so
 // excluded index entries are logged at Debug level. Pass nil for silent
 // operation.
-func Run(w io.Writer, target string, force bool, format string, dbg *slog.Logger) error {
+//
+// nixGCOverride, when non-nil, overrides the [hooks].disable-nix-gc setting
+// from the sweatfile cascade for this single invocation. true forces the gc
+// to run; false skips it. nil defers to sweatfile.
+func Run(w io.Writer, target string, force bool, nixGCOverride *bool, format string, dbg *slog.Logger) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -89,6 +95,13 @@ func Run(w io.Writer, target string, force bool, format string, dbg *slog.Logger
 		_ = session.Remove(repoPath, branch)
 	}
 
+	// Capture the worktree's nix gc roots and their closure BEFORE removing
+	// the worktree (so the auto-roots' link targets still resolve). The reap
+	// itself runs AFTER the worktree is gone, so the auto-roots are dangling
+	// and the underlying store paths are no longer kept alive — `nix-store
+	// --delete` can then succeed (or refuse if other roots still hold them).
+	gcPlan := planNixGC(repoPath, wtPath, nixGCOverride)
+
 	if err := git.WorktreeForceRemove(repoPath, wtPath); err != nil {
 		diag := map[string]string{"error": err.Error()}
 		if tw != nil {
@@ -109,10 +122,68 @@ func Run(w io.Writer, target string, force bool, format string, dbg *slog.Logger
 
 	if tw != nil {
 		tw.Ok("close " + branch)
+	}
+
+	if gcPlan != nil {
+		summary := nixgc.Reap(*gcPlan)
+		emitNixGCSummary(tw, summary)
+	}
+
+	if tw != nil {
 		tw.Plan()
 	}
 
 	return nil
+}
+
+// planNixGC captures the worktree's nix gc roots before removal. Returns nil
+// when gc should not run (sweatfile/override disabled, nix not installed, no
+// roots in the worktree, or any error during plan construction). The reap
+// step runs only when this returns non-nil.
+func planNixGC(repoPath, wtPath string, override *bool) *nixgc.Plan {
+	enabled := !nixgc.Disabled(repoPath, wtPath)
+	if override != nil {
+		enabled = *override
+	}
+	if !enabled {
+		return nil
+	}
+	plan, err := nixgc.NewPlan(wtPath)
+	if errors.Is(err, nixgc.ErrNixUnavailable) {
+		return nil
+	}
+	if err != nil {
+		// Don't surface plan-build errors as TAP — they're noise to non-nix
+		// users. Failing to enumerate just means we'll do nothing, which is
+		// the safe default.
+		return nil
+	}
+	if len(plan.Roots) == 0 {
+		return nil
+	}
+	return &plan
+}
+
+// emitNixGCSummary writes one TAP line summarizing the reap outcome. Errors
+// surface as `not ok` but do NOT propagate; the worktree is already gone, so
+// gc failure is informational rather than fatal.
+func emitNixGCSummary(tw *tap.Writer, s nixgc.Summary) {
+	if tw == nil {
+		return
+	}
+	desc := fmt.Sprintf(
+		"nix-gc: reclaimed %d path(s), kept %d (still rooted)",
+		s.Reclaimed, s.Kept,
+	)
+	if len(s.Errors) == 0 {
+		tw.Ok(desc)
+		return
+	}
+	diag := map[string]string{
+		"errors": fmt.Sprintf("%d", len(s.Errors)),
+		"first":  s.Errors[0].Error(),
+	}
+	tw.NotOk(desc, diag)
 }
 
 func describeUnintegrated(branch string, unintegrated, dirty bool) string {

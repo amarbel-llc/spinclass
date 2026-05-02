@@ -204,6 +204,9 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if other.Hooks.DisableMerge != nil {
 			merged.Hooks.DisableMerge = other.Hooks.DisableMerge
 		}
+		if other.Hooks.DisableNixGC != nil {
+			merged.Hooks.DisableNixGC = other.Hooks.DisableNixGC
+		}
 	}
 
 	// [session-entry]

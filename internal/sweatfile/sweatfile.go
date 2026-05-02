@@ -37,6 +37,7 @@ type Hooks struct {
 	DisallowMainWorktree *bool   `toml:"disallow-main-worktree"`
 	ToolUseLog           *bool   `toml:"tool-use-log"`
 	DisableMerge         *bool   `toml:"disable-merge"`
+	DisableNixGC         *bool   `toml:"disable-nix-gc"`
 }
 
 // MCPServerDef declares an MCP server to register and auto-approve
@@ -167,6 +168,12 @@ func (sf Sweatfile) DisableMergeEnabled() bool {
 	return sf.Hooks != nil &&
 		sf.Hooks.DisableMerge != nil &&
 		*sf.Hooks.DisableMerge
+}
+
+func (sf Sweatfile) DisableNixGCEnabled() bool {
+	return sf.Hooks != nil &&
+		sf.Hooks.DisableNixGC != nil &&
+		*sf.Hooks.DisableNixGC
 }
 
 func (sf Sweatfile) SessionStart() []string {

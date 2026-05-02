@@ -1299,3 +1299,50 @@ func TestMergeDisableMergeOverride(t *testing.T) {
 		t.Error("expected overridden disable-merge to be disabled")
 	}
 }
+
+func TestParseHooksDisableNixGC(t *testing.T) {
+	input := `
+[hooks]
+disable-nix-gc = true
+`
+	doc, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sf := doc.Data()
+	if !sf.DisableNixGCEnabled() {
+		t.Error("expected disable-nix-gc to be enabled")
+	}
+}
+
+func TestParseHooksDisableNixGCAbsent(t *testing.T) {
+	doc, err := Parse([]byte("[git]\nexcludes = [\".claude/\"]"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sf := doc.Data()
+	if sf.DisableNixGCEnabled() {
+		t.Error("expected disable-nix-gc to be disabled when absent")
+	}
+}
+
+func TestMergeDisableNixGCInherit(t *testing.T) {
+	enabled := true
+	base := Sweatfile{Hooks: &Hooks{DisableNixGC: &enabled}}
+	repo := Sweatfile{}
+	merged := base.MergeWith(repo)
+	if !merged.DisableNixGCEnabled() {
+		t.Error("expected inherited disable-nix-gc")
+	}
+}
+
+func TestMergeDisableNixGCOverride(t *testing.T) {
+	enabled := true
+	disabled := false
+	base := Sweatfile{Hooks: &Hooks{DisableNixGC: &enabled}}
+	repo := Sweatfile{Hooks: &Hooks{DisableNixGC: &disabled}}
+	merged := base.MergeWith(repo)
+	if merged.DisableNixGCEnabled() {
+		t.Error("expected overridden disable-nix-gc to be disabled")
+	}
+}

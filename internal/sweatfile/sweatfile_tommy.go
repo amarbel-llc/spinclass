@@ -108,6 +108,10 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			hooksVal.DisableMerge = &v
 			d.consumed["hooks.disable-merge"] = true
 		}
+		if v, err := document.GetFromContainer[bool](d.cstDoc, tableNode, "disable-nix-gc"); err == nil {
+			hooksVal.DisableNixGC = &v
+			d.consumed["hooks.disable-nix-gc"] = true
+		}
 		d.data.Hooks = hooksVal
 	} else {
 		hooksVal := &Hooks{}
@@ -151,6 +155,11 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			hooksVal.DisableMerge = &v
 			found = true
 			d.consumed["disable-merge"] = true
+		}
+		if v, err := document.GetFromContainer[bool](d.cstDoc, d.cstDoc.Root(), "disable-nix-gc"); err == nil {
+			hooksVal.DisableNixGC = &v
+			found = true
+			d.consumed["disable-nix-gc"] = true
 		}
 		if found {
 			d.data.Hooks = hooksVal
@@ -421,6 +430,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				return nil, err
 			}
 		}
+		if d.data.Hooks.DisableNixGC != nil {
+			if err := d.cstDoc.SetInContainer(tableNode, "disable-nix-gc", *d.data.Hooks.DisableNixGC); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if d.data.SessionEntry != nil {
 		tableNode := d.cstDoc.EnsureTableInContainer(d.cstDoc.Root(), "session-entry")
@@ -561,6 +575,10 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 			hooksVal.DisableMerge = &v
 			consumed[keyPrefix+"hooks.disable-merge"] = true
 		}
+		if v, err := document.GetFromContainer[bool](doc, tableNode, "disable-nix-gc"); err == nil {
+			hooksVal.DisableNixGC = &v
+			consumed[keyPrefix+"hooks.disable-nix-gc"] = true
+		}
 		data.Hooks = hooksVal
 	} else {
 		hooksVal := &Hooks{}
@@ -604,6 +622,11 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 			hooksVal.DisableMerge = &v
 			found = true
 			consumed[keyPrefix+"disable-merge"] = true
+		}
+		if v, err := document.GetFromContainer[bool](doc, container, "disable-nix-gc"); err == nil {
+			hooksVal.DisableNixGC = &v
+			found = true
+			consumed[keyPrefix+"disable-nix-gc"] = true
 		}
 		if found {
 			data.Hooks = hooksVal
@@ -714,6 +737,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if data.Hooks.DisableMerge != nil {
 			if err := doc.SetInContainer(tableNode, "disable-merge", *data.Hooks.DisableMerge); err != nil {
+				return err
+			}
+		}
+		if data.Hooks.DisableNixGC != nil {
+			if err := doc.SetInContainer(tableNode, "disable-nix-gc", *data.Hooks.DisableNixGC); err != nil {
 				return err
 			}
 		}
