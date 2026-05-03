@@ -575,6 +575,7 @@ func TestWithMadderEntriesIdempotent(t *testing.T) {
 
 func TestApplyWorktreeConfig_MadderEmbedAddsExcludesAndAllow(t *testing.T) {
 	testgit.RequireGit(t)
+	t.Setenv("HOME", t.TempDir())
 	parentDir := t.TempDir()
 	t.Setenv("GIT_CEILING_DIRECTORIES", parentDir)
 	repoDir := filepath.Join(parentDir, "repo")
@@ -652,6 +653,7 @@ touch "$PWD/.madder/local/share/blob_stores/default/blob_store-config"
 
 func TestApplyWorktreeConfig_NoMadderEmbedNoChanges(t *testing.T) {
 	testgit.RequireGit(t)
+	t.Setenv("HOME", t.TempDir())
 	parentDir := t.TempDir()
 	t.Setenv("GIT_CEILING_DIRECTORIES", parentDir)
 	repoDir := filepath.Join(parentDir, "repo")
@@ -680,6 +682,7 @@ func TestApplyWorktreeConfig_NoMadderEmbedNoChanges(t *testing.T) {
 }
 
 func TestCreateFrom(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	parentDir := t.TempDir()
 	t.Setenv("GIT_CEILING_DIRECTORIES", parentDir)
 	repoDir := filepath.Join(parentDir, "repo")

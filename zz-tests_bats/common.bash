@@ -36,7 +36,7 @@ setup_stubs() {
 
   for cmd in claude direnv; do
     cat >"$stub_dir/$cmd" <<'STUB'
-#!/usr/bin/env bash
+#!/bin/sh
 printf '%s' "$@" >> "$BATS_TEST_TMPDIR/stubs/CMDNAME.log"
 printf '\n' >> "$BATS_TEST_TMPDIR/stubs/CMDNAME.log"
 exit 0

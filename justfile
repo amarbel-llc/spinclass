@@ -4,7 +4,13 @@ build:
     nix build --show-trace
 
 test:
-    nix develop --command tap-dancer go-test -skip-empty ./...
+    nix flake check --print-build-logs
+
+test-bats:
+    nix build .#bats-default --no-link --print-build-logs
+
+test-bats-race:
+    nix build .#bats-race --no-link --print-build-logs
 
 fmt:
     nix develop --command gofumpt -w .

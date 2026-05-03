@@ -23,16 +23,13 @@ func resolveExcludePath(worktreePath string) (string, error) {
 	return rel, nil
 }
 
-func getGitDirCommon() (string, error) {
-	cwd, err := os.Getwd()
+func gitCommonDir(worktreePath string) (string, error) {
+	rel, err := git.Run(worktreePath, "rev-parse", "--git-common-dir")
 	if err != nil {
 		return "", err
 	}
-
-	path, err := git.Run(cwd, "rev-parse", "--git-common-dir")
-	if err != nil {
-		return "", err
+	if !filepath.IsAbs(rel) {
+		rel = filepath.Join(worktreePath, rel)
 	}
-
-	return path, nil
+	return filepath.Clean(rel), nil
 }

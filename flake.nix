@@ -2,7 +2,10 @@
   description = "Spinclass: shell-agnostic git worktree session manager";
 
   inputs = {
-    nixpkgs.url = "github:amarbel-llc/nixpkgs";
+    # Pinned: master triggers a tap-dancer rebuild (cache miss → rustc
+    # 1.94 rebuild from source) that doesn't fit on small dev disks.
+    # Drop this pin once flakehub cache catches up. Tracked in #64.
+    nixpkgs.url = "github:amarbel-llc/nixpkgs/89290d6697a602fe9f7cb9de6ab0e30f0ecb78e6";
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
     bob = {
       url = "github:amarbel-llc/bob";
@@ -58,6 +61,20 @@
             (lib.optional (madder != null) "-X main.madderBin=${madder}/bin/madder")
             ++ (lib.optional (direnv != null) "-X main.direnvBin=${direnv}/bin/direnv");
 
+          # buildGoApplication's stock checkPhase runs only the
+          # subPackages (cmd/spinclass). Override to test every package
+          # so internal/* coverage isn't silently skipped. Tests that
+          # hit pre-existing sandbox-incompatibilities (currently
+          # tracked in #65) detect the sandbox via NIX_BUILD_TOP and
+          # t.Skip themselves.
+          doCheck = true;
+          nativeCheckInputs = [ pkgs.git ];
+          checkPhase = ''
+            runHook preCheck
+            go test -p $NIX_BUILD_CORES ./...
+            runHook postCheck
+          '';
+
           # Generate manpages, mappings, hooks, and shell completions from
           # the command.App definitions. The plugin manifest (and clown
           # plugin metadata) is owned by spinclass directly, not the
@@ -102,11 +119,39 @@
             license = pkgs.lib.licenses.mit;
           };
         };
+
+        # mkBatsLane wraps pkgs.testers.batsLane (amarbel-llc/nixpkgs
+        # overlay) to run zz-tests_bats/ against a chosen spinclass
+        # build. Exports SPINCLASS_BIN to the binary inside `base`,
+        # stages the bats suite, and exits non-zero on any failure.
+        mkBatsLane = { filter ? null, base ? mkSpinclass {} }:
+          pkgs.testers.batsLane ({
+            inherit base;
+            batsSrc           = ./zz-tests_bats;
+            binaries          = { SPINCLASS_BIN = { inherit base; name = "spinclass"; }; };
+            batsLibPath       = [ "${bob.packages.${system}.batman}/share/bats" ];
+            extraEnv          = { BATS_TEST_TIMEOUT = "10"; };
+            nativeBuildInputs = [ pkgs.git pkgs.jq ];
+          } // lib.optionalAttrs (filter != null) { inherit filter; });
+
+        spinclass-race = pkgs.buildGoRace { base = mkSpinclass {}; };
+
+        batsLaneOutputs = {
+          bats-default = mkBatsLane {};
+          bats-race    = mkBatsLane { base = spinclass-race; };
+        };
       in
       {
         packages = {
-          default = mkSpinclass {};
-        };
+          default        = mkSpinclass {};
+          spinclass-race = spinclass-race;
+        } // batsLaneOutputs;
+
+        # `nix flake check` exercises the unit suite (via the
+        # spinclass derivation's checkPhase) plus every bats lane.
+        checks = {
+          spinclass = mkSpinclass {};
+        } // batsLaneOutputs;
 
         # mkSpinclass = { madder ? null, direnv ? null }: ...
         # Consumer flakes call this to produce a spinclass binary with

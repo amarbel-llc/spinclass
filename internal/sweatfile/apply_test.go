@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/amarbel-llc/spinclass/internal/embeds"
+	"github.com/amarbel-llc/spinclass/internal/testgit"
 )
 
 // gitDir returns the directory containing the git binary, for use in tests
@@ -338,6 +339,7 @@ func TestApplyClaudeSettingsNoStopHookWhenNotConfigured(t *testing.T) {
 
 func TestPrepareDirenvWritesEnvrcWithoutUseFlakeWhenNoFlakeNix(t *testing.T) {
 	dir := t.TempDir()
+	testgit.MustInit(t, dir)
 
 	// Create a fake direnv that just exits 0
 	fakeBin := t.TempDir()
@@ -374,14 +376,19 @@ func TestPrepareDirenvWritesEnvrcWithoutUseFlakeWhenNoFlakeNix(t *testing.T) {
 
 func TestPrepareDirenvPrefersEmbeddedOverPath(t *testing.T) {
 	dir := t.TempDir()
+	testgit.MustInit(t, dir)
 
 	// Embedded fake direnv: records its invocation by writing a marker
 	// file. PATH-only fake direnv: would write a *different* marker.
 	// We assert the embedded one ran and the PATH one did not.
+	// Shell-only marker creation (`: > "$path"`) so the script
+	// doesn't depend on `touch` or other coreutils being on the
+	// process's PATH — important for the nix sandbox where PATH
+	// is whatever t.Setenv last wrote.
 	embeddedBin := t.TempDir()
 	embeddedDirenv := filepath.Join(embeddedBin, "direnv")
 	embeddedMarker := filepath.Join(embeddedBin, "ran")
-	embeddedScript := "#!/bin/sh\ntouch \"" + embeddedMarker + "\"\nexit 0\n"
+	embeddedScript := "#!/bin/sh\n: > \"" + embeddedMarker + "\"\nexit 0\n"
 	if err := os.WriteFile(embeddedDirenv, []byte(embeddedScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +396,7 @@ func TestPrepareDirenvPrefersEmbeddedOverPath(t *testing.T) {
 	pathBin := t.TempDir()
 	pathDirenv := filepath.Join(pathBin, "direnv")
 	pathMarker := filepath.Join(pathBin, "ran")
-	pathScript := "#!/bin/sh\ntouch \"" + pathMarker + "\"\nexit 0\n"
+	pathScript := "#!/bin/sh\n: > \"" + pathMarker + "\"\nexit 0\n"
 	if err := os.WriteFile(pathDirenv, []byte(pathScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -433,6 +440,7 @@ func TestPrepareDirenvSkipsWhenDirenvNotInPath(t *testing.T) {
 
 func TestPrepareDirenvWritesEnvrc(t *testing.T) {
 	dir := t.TempDir()
+	testgit.MustInit(t, dir)
 	os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("{}"), 0o644)
 
 	// Create a fake direnv that just exits 0
@@ -468,6 +476,7 @@ func TestPrepareDirenvWritesEnvrc(t *testing.T) {
 
 func TestPrepareDirenvOverwritesExistingEnvrc(t *testing.T) {
 	dir := t.TempDir()
+	testgit.MustInit(t, dir)
 	os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("{}"), 0o644)
 	os.WriteFile(filepath.Join(dir, ".envrc"), []byte("old content\n"), 0o644)
 
@@ -503,6 +512,7 @@ func TestPrepareDirenvOverwritesExistingEnvrc(t *testing.T) {
 
 func TestWriteEnvrcWithDirectives(t *testing.T) {
 	dir := t.TempDir()
+	testgit.MustInit(t, dir)
 
 	fakeBin := t.TempDir()
 	os.WriteFile(
@@ -534,6 +544,7 @@ func TestWriteEnvrcWithDirectives(t *testing.T) {
 
 func TestWriteEnvrcDefaultFallbackWithFlake(t *testing.T) {
 	dir := t.TempDir()
+	testgit.MustInit(t, dir)
 	os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("{}"), 0o644)
 
 	fakeBin := t.TempDir()
@@ -563,6 +574,7 @@ func TestWriteEnvrcDefaultFallbackWithFlake(t *testing.T) {
 
 func TestWriteEnvrcDefaultFallbackWithoutFlake(t *testing.T) {
 	dir := t.TempDir()
+	testgit.MustInit(t, dir)
 
 	fakeBin := t.TempDir()
 	os.WriteFile(
@@ -594,6 +606,7 @@ func TestWriteEnvrcDefaultFallbackWithoutFlake(t *testing.T) {
 
 func TestWriteSpinclassEnv(t *testing.T) {
 	dir := t.TempDir()
+	testgit.MustInit(t, dir)
 
 	fakeBin := t.TempDir()
 	os.WriteFile(
@@ -629,6 +642,7 @@ func TestWriteSpinclassEnv(t *testing.T) {
 
 func TestWriteSpinclassEnvInterpolatesWorktree(t *testing.T) {
 	dir := t.TempDir()
+	testgit.MustInit(t, dir)
 
 	fakeBin := t.TempDir()
 	os.WriteFile(
@@ -663,6 +677,7 @@ func TestWriteSpinclassEnvInterpolatesWorktree(t *testing.T) {
 
 func TestEnvAutoDotenvDirective(t *testing.T) {
 	dir := t.TempDir()
+	testgit.MustInit(t, dir)
 
 	fakeBin := t.TempDir()
 	os.WriteFile(
@@ -691,6 +706,7 @@ func TestEnvAutoDotenvDirective(t *testing.T) {
 
 func TestNoEnvNoDotenvDirective(t *testing.T) {
 	dir := t.TempDir()
+	testgit.MustInit(t, dir)
 
 	fakeBin := t.TempDir()
 	os.WriteFile(
