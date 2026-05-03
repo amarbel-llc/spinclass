@@ -166,36 +166,31 @@ The exact URI prefix (whether `madder://`, `mcp+madder://`, or
 something else) will be pinned when madder integration ships;
 spinclass will adopt whatever cross-tool form madder publishes.
 
-## Open questions
+## Decisions made before shipping
 
-### Should `sc check` / `check-this-session` adopt the same shape?
-
-`check-this-session` currently emits a single-step TAP with the
-hook output inlined as an OutputBlock — same overflow pattern
-as merge, but at smaller scale because most pre-merge hooks
-fail fast. Arguments either way:
-
-- **For**: parity with merge keeps one mental model. Agents
-  running `check-this-session` in `disable-merge=true` repos
-  would benefit from the same "tail + resource_link" UX.
-- **Against**: `sc check` is explicitly the live-streaming
-  surface for humans. Inlining output is the whole point.
-
-Tracked as a separate issue; resolution is independent of this
-feature shipping.
+- **`sc check` / `check-this-session` adopt the same compact
+  shape as merge.** Parity with merge keeps a single mental
+  model; agents in `disable-merge=true` repos get the same
+  tail + resource_link UX. The "live-streaming for humans"
+  argument lost out — humans can still drive a verbose
+  spinclass build (the unpinned-madder fallback) for tailing
+  hook output, and the compact shape stays uniform across
+  surfaces.
+- **No sweatfile knob.** Activation gates on
+  `embeds.MadderBin() != ""` (build-time pin from
+  `lib.mkSpinclass`) rather than a `[hooks].merge-output-shape`
+  config. Binaries built without madder pinned keep the
+  existing `OutputBlock` shape; the rollback path is "rebuild
+  without the madder input."
 
 ## Dependency stack
 
-This feature has **one** hard prerequisite and one soft
-("nice-to-have, not blocking") follow-up.
-
-### Hard prerequisite
+### Hard prerequisite (resolved)
 
 **Per-worktree madder blob store (spinclass FDR 0003).**
-Currently `status: exploring`. Activation model is the only
-open piece; the rest of the design is locked in. Tracked as
-spinclass issue #53 (milestone v0.2.0). Without the store, the
-resource_link has no backing storage.
+`accepted` and shipped — the resource_link writes into the
+per-worktree store, atomically, via `madder write -format
+json -` (stdin streaming, no tempfile).
 
 ### Non-blocking follow-up
 

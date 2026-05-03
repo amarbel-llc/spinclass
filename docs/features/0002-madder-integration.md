@@ -1,11 +1,6 @@
 ---
-status: exploring
+status: accepted
 date: 2026-04-30
-promotion-criteria: |
-  Promote to `proposed` once one of the integration angles is selected and
-  fully designed (interface, data model, lifecycle hooks). Spinclass has
-  agreed to start with #2 (per-worktree blob store); the others remain
-  catalogued here so they aren't lost if the focus narrows further.
 ---
 
 # Madder integration
@@ -141,11 +136,19 @@ is reliably created/destroyed alongside the worktree, ideas 1, 3, and 4
 become incremental additions: each is "use the existing store, write a
 receipt, save the id somewhere."
 
-The detailed interface — sweatfile config (opt-in vs default-on, store
-id, handling of nested `.madder/`), gitignore wiring, claude-allow
-implications, hook ordering on create / merge / close, and the
-`sc validate` checks — will be written up in a separate FDR (or a
-re-promotion of this one) once we agree on the shape.
+**Implemented as FDR 0003**
+([`docs/features/0003-per-worktree-madder-blob-store.md`](0003-per-worktree-madder-blob-store.md))
+— `status: accepted`. The activation model selected (Candidate F:
+build-time pin via `lib.mkSpinclass`) is documented in the child FDR
+along with the full interface, gitignore wiring, claude-allow rule,
+and lifecycle ordering.
+
+Ideas 1, 3, and 4 remain catalogued here; none has been promoted to
+its own FDR yet. The downstream consumer of idea 2 that did materialise
+this round is **FDR 0005 (compact merge-this-session output)** —
+spinclass's merge/check tools write the full pre-merge-hook output as
+a blob in the per-worktree store and surface a `madder://.default/<id>`
+resource_link in the response.
 
 ## Limitations
 
