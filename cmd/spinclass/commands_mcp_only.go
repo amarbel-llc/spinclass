@@ -67,7 +67,7 @@ func registerMCPOnlyCommands(app *command.App) {
 			Name:  "check-this-session",
 			Title: "Check This Session",
 			Description: command.Description{
-				Short: "Run the configured [hooks].pre-merge command in the current worktree without merging. This is the agent-CI surface; safe to call repeatedly. Returns non-zero / error if the hook fails.",
+				Short: "Run the configured [hooks].pre-merge command in the current worktree without merging. This is the agent-CI surface; safe to call repeatedly. Returns non-zero / error if the hook fails. When madder is pinned at build time, the response is compact: a single test point per hook step with a `resource_link` URI to the full output. Inspect the URI only on failure.",
 			},
 			Annotations: &protocol.ToolAnnotations{
 				ReadOnlyHint:    protocol.BoolPtr(false),
@@ -83,7 +83,7 @@ func registerMCPOnlyCommands(app *command.App) {
 			Name:  "merge-this-session",
 			Title: "Merge This Session",
 			Description: command.Description{
-				Short: "Merge the current session's worktree into the default branch and clean up. A non-error return means the merge (and push, if git_sync) succeeded; the output payload is informational and does not need to be read or parsed to confirm success. Only inspect output on error.",
+				Short: "Merge the current session's worktree into the default branch and clean up. A non-error return means the merge (and push, if git_sync) succeeded; the output payload is informational and does not need to be read or parsed to confirm success. When madder is pinned at build time, the pre-merge hook step is compact: its YAMLish carries a `resource_link` URI to the full hook output that you only need to inspect on failure.",
 			},
 			Annotations: &protocol.ToolAnnotations{
 				ReadOnlyHint:    protocol.BoolPtr(false),

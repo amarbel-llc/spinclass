@@ -77,6 +77,38 @@ none of the above happens.
 The feature is fully dormant; no
 .I .madder/
 directory is created and no madder-related allow rule is added.
+.PP
+When madder is pinned, the
+.B sc merge
+/
+.B merge-this-session
+and
+.B sc check
+/
+.B check-this-session
+flows emit a
+.B compact response shape:
+the pre-merge hook step is rendered as a single TAP test point whose
+YAMLish diagnostic carries
+.BR command ,
+.BR exit_code ,
+.BR elapsed ,
+a 50-line
+.B tail
+of stdout+stderr, and a
+.B resource_link
+URI of the form
+.B madder://.default/<blob-id>
+that points at the full hook output stored in the per-worktree blob
+store.
+A
+.B "# directive: ..."
+comment is emitted at the top of the response indicating the
+resource_link only needs to be followed on failure.
+Without madder pinned, the merge/check tools fall back to the
+historical
+.B OutputBlock
+shape that inlines the entire hook output.
 .SS direnv
 When the
 .B direnv

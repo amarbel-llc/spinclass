@@ -12,13 +12,13 @@ import (
 	"github.com/charmbracelet/log"
 	"github.com/mattn/go-isatty"
 
-	tap "github.com/amarbel-llc/tap/go"
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/merge"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
+	tap "github.com/amarbel-llc/tap/go"
 )
 
 func Create(

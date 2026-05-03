@@ -9,11 +9,21 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"strings"
+	"time"
 
-	tap "github.com/amarbel-llc/tap/go"
+	"github.com/amarbel-llc/spinclass/internal/embeds"
 	"github.com/amarbel-llc/spinclass/internal/git"
+	"github.com/amarbel-llc/spinclass/internal/madder"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	tap "github.com/amarbel-llc/tap/go"
 )
+
+// Directive emitted by the compact (madder-pinned) shape so agents
+// reading the response know they don't need to fetch the
+// resource_link unless the test point failed.
+const compactDirective = "directive: if status is ok, the resource_link need not be followed; only inspect on failure"
 
 // Run resolves the worktree containing wtPath, loads the sweatfile
 // hierarchy, and runs the configured [hooks].pre-merge command. It writes
@@ -51,6 +61,9 @@ func Run(w io.Writer, format, wtPath string, verbose bool) error {
 	if format == "tap" {
 		tw = tap.NewWriter(w)
 		ownWriter = true
+		if embeds.MadderBin() != "" {
+			tw.Comment(compactDirective)
+		}
 	}
 
 	cmd := hierarchy.Merged.PreMergeHookCommand()
@@ -100,6 +113,14 @@ func RunWithWriter(
 
 	desc := "pre-merge hook for " + branch + ": `" + *cmd + "`"
 
+	if embeds.MadderBin() != "" {
+		hookErr := runHookCompact(tw, hierarchy, wtPath, *cmd, desc)
+		if hookErr != nil && ownWriter {
+			tw.Plan()
+		}
+		return hookErr
+	}
+
 	var hookErr error
 	tw.OutputBlock(desc, func(ob *tap.OutputBlockWriter) *tap.Diagnostics {
 		lw := &lineWriter{ob: ob}
@@ -115,6 +136,125 @@ func RunWithWriter(
 	}
 	return hookErr
 }
+
+// runHookCompact runs the pre-merge hook with bytes tee'd into both
+// (a) madder's stdin (for atomic content-addressable storage and a
+// resource_link URI), and (b) an in-memory tail ring so the last 50
+// lines surface in-band. Emits a single TAP test point with YAMLish
+// diagnostics carrying command/tail/resource_link/exit_code/elapsed.
+func runHookCompact(tw *tap.Writer, hierarchy sweatfile.Hierarchy, wtPath, cmd, desc string) error {
+	madderStdin, finishMadder, err := madder.Write(wtPath, embeds.MadderBin())
+	if err != nil {
+		// Madder failed to spawn; degrade to tail-only without a
+		// resource_link rather than failing the hook on this account.
+		madderStdin = nopWriteCloser{io.Discard}
+		finishMadder = func() (string, error) { return "", err }
+	}
+	ring := newTailRingWriter(50)
+	sink := io.MultiWriter(madderStdin, ring)
+
+	start := time.Now()
+	hookErr := hierarchy.Merged.RunPreMergeHook(wtPath, sink)
+	elapsed := time.Since(start)
+	_ = madderStdin.Close()
+	blobID, madderErr := finishMadder()
+
+	extras := map[string]any{
+		"command":   cmd,
+		"tail":      ring.Tail(),
+		"exit_code": exitCodeFromErr(hookErr),
+		"elapsed":   elapsed.Round(time.Millisecond).String(),
+	}
+	if blobID != "" {
+		extras["resource_link"] = "madder://.default/" + blobID
+	} else if madderErr != nil {
+		extras["resource_link_error"] = madderErr.Error()
+	}
+
+	if hookErr != nil {
+		// tap.NotOk takes map[string]string only — stringify Extras
+		// so failure responses still carry the same shape.
+		flat := map[string]string{
+			"severity": "fail",
+			"message":  hookErr.Error(),
+		}
+		for k, v := range extras {
+			flat[k] = fmt.Sprintf("%v", v)
+		}
+		tw.NotOk(desc, flat)
+	} else {
+		tw.OkDiag(desc, &tap.Diagnostics{Extras: extras})
+	}
+	return hookErr
+}
+
+// exitCodeFromErr extracts a process exit code from an *exec.ExitError.
+// Returns 0 for success, -1 when err is non-nil but not an ExitError.
+func exitCodeFromErr(err error) int {
+	if err == nil {
+		return 0
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode()
+	}
+	return -1
+}
+
+// tailRingWriter retains the last N complete lines written to it.
+// Bytes written without a trailing newline are buffered until the
+// next newline arrives (or Tail() flushes the partial line).
+type tailRingWriter struct {
+	cap   int
+	lines []string
+	buf   []byte
+}
+
+func newTailRingWriter(capacity int) *tailRingWriter {
+	return &tailRingWriter{cap: capacity}
+}
+
+func (r *tailRingWriter) Write(p []byte) (int, error) {
+	r.buf = append(r.buf, p...)
+	for {
+		i := bytes.IndexByte(r.buf, '\n')
+		if i < 0 {
+			break
+		}
+		r.appendLine(string(r.buf[:i]))
+		r.buf = r.buf[i+1:]
+	}
+	return len(p), nil
+}
+
+func (r *tailRingWriter) appendLine(line string) {
+	r.lines = append(r.lines, line)
+	if len(r.lines) > r.cap {
+		r.lines = r.lines[len(r.lines)-r.cap:]
+	}
+}
+
+// Tail returns the joined ring contents plus any unterminated trailing
+// bytes as a final line. Safe to call repeatedly; non-destructive.
+func (r *tailRingWriter) Tail() string {
+	lines := r.lines
+	if len(r.buf) > 0 {
+		// Append trailing partial line for visibility, but don't
+		// retain it across future writes.
+		lines = append(append([]string(nil), lines...), string(r.buf))
+		if len(lines) > r.cap {
+			lines = lines[len(lines)-r.cap:]
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n")
+}
+
+type nopWriteCloser struct{ io.Writer }
+
+func (nopWriteCloser) Close() error { return nil }
 
 // lineWriter splits incoming bytes on '\n' and forwards each complete
 // line to an OutputBlockWriter. Partial trailing content is buffered

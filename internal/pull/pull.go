@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
-	tap "github.com/amarbel-llc/tap/go"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
+	tap "github.com/amarbel-llc/tap/go"
 )
 
 type repoInfo struct {

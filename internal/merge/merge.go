@@ -11,13 +11,14 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/log"
 
-	tap "github.com/amarbel-llc/tap/go"
 	"github.com/amarbel-llc/spinclass/internal/check"
+	"github.com/amarbel-llc/spinclass/internal/embeds"
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
+	tap "github.com/amarbel-llc/tap/go"
 )
 
 func Run(execr executor.Executor, format string, target string, gitSync bool, verbose bool) error {
@@ -85,6 +86,9 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 	if tw == nil && format == "tap" {
 		tw = tap.NewWriter(w)
 		ownWriter = true
+		if embeds.MadderBin() != "" {
+			tw.Comment("directive: if status is ok, the resource_link need not be followed; only inspect on failure")
+		}
 	}
 
 	if home, _ := os.UserHomeDir(); home != "" {

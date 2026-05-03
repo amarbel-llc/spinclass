@@ -1,6 +1,7 @@
 package madder
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,6 +137,130 @@ func TestLinkInto_OverwritesExistingLink(t *testing.T) {
 	}
 	if got != newer {
 		t.Errorf("expected symlink to be replaced; got %q, want %q", got, newer)
+	}
+}
+
+func TestWrite_NoBinaryDormant(t *testing.T) {
+	worktree := t.TempDir()
+	w, finish, err := Write(worktree, "")
+	if err != nil {
+		t.Fatalf("Write with empty binPath returned err: %v", err)
+	}
+	if _, err := w.Write([]byte("anything")); err != nil {
+		t.Errorf("discard writer rejected bytes: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Errorf("discard close returned err: %v", err)
+	}
+	id, err := finish()
+	if err != nil {
+		t.Errorf("finish returned err: %v", err)
+	}
+	if id != "" {
+		t.Errorf("expected empty id, got %q", id)
+	}
+}
+
+func TestWrite_StreamsAndParsesJSONId(t *testing.T) {
+	worktree := t.TempDir()
+	binDir := t.TempDir()
+	binPath := filepath.Join(binDir, "fake-madder")
+	stdinPath := filepath.Join(binDir, "stdin")
+
+	// Fake madder: copy stdin to a file, then emit a known JSON line.
+	script := `#!/bin/sh
+cat >"` + stdinPath + `"
+printf '{"id":"sha256-abc","size":11,"source":"-"}\n'
+`
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	w, finish, err := Write(worktree, binPath)
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if _, err := io.WriteString(w, "hello world"); err != nil {
+		t.Fatalf("writing payload: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	id, err := finish()
+	if err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if id != "sha256-abc" {
+		t.Errorf("id: got %q, want sha256-abc", id)
+	}
+
+	got, err := os.ReadFile(stdinPath)
+	if err != nil {
+		t.Fatalf("reading stdin capture: %v", err)
+	}
+	if string(got) != "hello world" {
+		t.Errorf("stdin payload: got %q, want \"hello world\"", got)
+	}
+}
+
+func TestWrite_PassesCeilingEnv(t *testing.T) {
+	worktree := t.TempDir()
+	binDir := t.TempDir()
+	binPath := filepath.Join(binDir, "fake-madder")
+	envPath := filepath.Join(binDir, "env")
+
+	script := `#!/bin/sh
+env >"` + envPath + `"
+cat >/dev/null
+printf '{"id":"x","size":0,"source":"-"}\n'
+`
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	w, finish, err := Write(worktree, binPath)
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	w.Close()
+	if _, err := finish(); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+
+	envBytes, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatalf("reading env capture: %v", err)
+	}
+	want := "MADDER_CEILING_DIRECTORIES=" + worktree
+	if !strings.Contains(string(envBytes), want) {
+		t.Errorf("expected %q in env, got:\n%s", want, envBytes)
+	}
+}
+
+func TestWrite_PropagatesNonZeroExit(t *testing.T) {
+	worktree := t.TempDir()
+	binDir := t.TempDir()
+	binPath := filepath.Join(binDir, "fake-madder")
+	script := `#!/bin/sh
+cat >/dev/null
+echo "store unavailable" 1>&2
+exit 1
+`
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	w, finish, err := Write(worktree, binPath)
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	w.Close()
+	id, err := finish()
+	if err == nil {
+		t.Fatalf("expected error from non-zero exit, got id=%q", id)
+	}
+	if !strings.Contains(err.Error(), "store unavailable") {
+		t.Errorf("expected stderr in error, got: %v", err)
 	}
 }
 

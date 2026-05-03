@@ -4,7 +4,10 @@
 package madder
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -63,6 +66,64 @@ func LinkInto(binDir, binPath string) error {
 	}
 	return nil
 }
+
+// Write spawns `madder write -format json -` against the per-worktree
+// store and returns a writer piped into its stdin plus a finish()
+// callback that waits on the subprocess and returns the resulting
+// blob id. Callers tee bytes into the writer (alongside an in-memory
+// tail ring), close it when the producer is done, and call finish().
+//
+// No-op when binPath is empty: writer wraps io.Discard, finish()
+// returns ("", nil), no process is spawned.
+//
+// MADDER_CEILING_DIRECTORIES is scoped to this invocation only.
+func Write(worktreePath, binPath string) (io.WriteCloser, func() (string, error), error) {
+	if binPath == "" {
+		return discardWriteCloser{}, func() (string, error) { return "", nil }, nil
+	}
+
+	cmd := exec.Command(binPath, "write", "-format", "json", "-")
+	cmd.Dir = worktreePath
+	cmd.Env = append(os.Environ(), "MADDER_CEILING_DIRECTORIES="+worktreePath)
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, nil, fmt.Errorf("madder write: stdin pipe: %w", err)
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		stdin.Close()
+		return nil, nil, fmt.Errorf("madder write: start: %w", err)
+	}
+
+	finish := func() (string, error) {
+		// Caller is expected to Close stdin to signal EOF; defensively
+		// close again here so finish() is safe to call without it.
+		_ = stdin.Close()
+		if err := cmd.Wait(); err != nil {
+			msg := bytes.TrimSpace(stderr.Bytes())
+			return "", fmt.Errorf("madder write: %w\n%s", err, msg)
+		}
+		var resp struct {
+			ID     string `json:"id"`
+			Size   int64  `json:"size"`
+			Source string `json:"source"`
+		}
+		if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &resp); err != nil {
+			return "", fmt.Errorf("madder write: parsing response %q: %w", stdout.String(), err)
+		}
+		return resp.ID, nil
+	}
+	return stdin, finish, nil
+}
+
+type discardWriteCloser struct{}
+
+func (discardWriteCloser) Write(p []byte) (int, error) { return len(p), nil }
+func (discardWriteCloser) Close() error                { return nil }
 
 // Init initialises the per-worktree blob store at worktreePath using
 // binPath as the madder binary. Skipped if binPath is empty or the

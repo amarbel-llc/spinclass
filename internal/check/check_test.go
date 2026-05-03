@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/amarbel-llc/spinclass/internal/embeds"
 )
 
 func runGit(t *testing.T, dir string, args ...string) string {
@@ -106,6 +108,105 @@ func TestRunHookFailureTAP(t *testing.T) {
 	}
 	if !strings.Contains(got, "1..") {
 		t.Errorf("expected TAP plan in output (so client can detect failure), got: %q", got)
+	}
+}
+
+// withFakeMadder installs a fake `madder write -format json -` for the
+// duration of the test. The fake reads stdin to EOF and emits a known
+// JSON envelope; the bytes written to stdin are captured to a file so
+// the test can assert on what spinclass piped through.
+func withFakeMadder(t *testing.T) (madderBin, stdinCapture string) {
+	t.Helper()
+	dir := t.TempDir()
+	madderBin = filepath.Join(dir, "fake-madder")
+	stdinCapture = filepath.Join(dir, "stdin")
+	script := `#!/bin/sh
+case "$1" in
+  init)
+    mkdir -p "$PWD/.madder/local/share/blob_stores/default"
+    touch "$PWD/.madder/local/share/blob_stores/default/blob_store-config"
+    ;;
+  write)
+    cat >"` + stdinCapture + `"
+    printf '{"id":"sha256-fake","size":0,"source":"-"}\n'
+    ;;
+esac
+exit 0
+`
+	if err := os.WriteFile(madderBin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	prevMadder, prevDirenv := embeds.MadderBin(), embeds.DirenvBin()
+	embeds.Set(madderBin, prevDirenv)
+	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv) })
+	return madderBin, stdinCapture
+}
+
+func TestRunHookCompactShape(t *testing.T) {
+	_, _, wtPath := setupRepoWithWorktree(t, "feature-compact")
+	_, stdinCapture := withFakeMadder(t)
+	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"echo line-one; echo line-two\"\n")
+
+	var buf bytes.Buffer
+	if err := Run(&buf, "tap", wtPath, false); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	got := buf.String()
+
+	if !strings.Contains(got, "# directive: if status is ok") {
+		t.Errorf("expected directive comment, got:\n%s", got)
+	}
+	for _, want := range []string{
+		"command: echo line-one; echo line-two",
+		"resource_link: madder://.default/sha256-fake",
+		"exit_code: 0",
+		"elapsed:",
+		"tail:",
+		"line-one",
+		"line-two",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in output, got:\n%s", want, got)
+		}
+	}
+	// Compact shape never opens an OutputBlock — no nested `# Subtest`
+	// or indented diagnostic block separator from OutputBlock.
+	if strings.Contains(got, "# Output:") {
+		t.Errorf("did not expect OutputBlock '# Output:' line, got:\n%s", got)
+	}
+
+	stdinBytes, err := os.ReadFile(stdinCapture)
+	if err != nil {
+		t.Fatalf("reading madder stdin capture: %v", err)
+	}
+	if !strings.Contains(string(stdinBytes), "line-one") || !strings.Contains(string(stdinBytes), "line-two") {
+		t.Errorf("expected hook output piped to madder stdin, got: %q", stdinBytes)
+	}
+}
+
+func TestRunHookCompactShape_Failure(t *testing.T) {
+	_, _, wtPath := setupRepoWithWorktree(t, "feature-compact-fail")
+	withFakeMadder(t)
+	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"echo about-to-fail; exit 7\"\n")
+
+	var buf bytes.Buffer
+	if err := Run(&buf, "tap", wtPath, false); err == nil {
+		t.Fatal("expected hook failure")
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "not ok") {
+		t.Errorf("expected 'not ok' for failed hook, got:\n%s", got)
+	}
+	if !strings.Contains(got, "exit_code: 7") {
+		t.Errorf("expected exit_code: 7, got:\n%s", got)
+	}
+	if !strings.Contains(got, "about-to-fail") {
+		t.Errorf("expected hook stdout in tail, got:\n%s", got)
+	}
+	if !strings.Contains(got, "resource_link: madder://.default/sha256-fake") {
+		t.Errorf("expected resource_link in failure response, got:\n%s", got)
 	}
 }
 
