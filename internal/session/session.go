@@ -155,19 +155,16 @@ func Write(s State) error {
 // writeIndexSymlink atomically (re)points the central index entry for
 // worktree at the worktree-local state.json. Existing entries — symlink
 // or tombstone — are replaced.
+//
+// Pid+nano gives a unique-by-construction temp name with no
+// intermediary regular file; we go straight to Symlink. Avoids the
+// create-file/Remove/Symlink TOCTOU window that the simpler
+// CreateTemp pattern would expose.
 func writeIndexSymlink(worktreeAbsPath string) error {
 	target := worktreeStatePath(worktreeAbsPath)
 	link := indexPath(worktreeAbsPath)
 
-	tmp, err := os.CreateTemp(indexDir(), ".tmp-*.json")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	tmp.Close()
-	if err := os.Remove(tmpName); err != nil {
-		return err
-	}
+	tmpName := filepath.Join(indexDir(), fmt.Sprintf(".tmp-%d-%d.json", os.Getpid(), time.Now().UnixNano()))
 	if err := os.Symlink(target, tmpName); err != nil {
 		return err
 	}
