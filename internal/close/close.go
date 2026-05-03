@@ -17,7 +17,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/sessionpick"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 
-	tap "github.com/amarbel-llc/bob/packages/tap-dancer/go"
+	tap "github.com/amarbel-llc/tap/go"
 )
 
 // Run closes a session. dbg, when non-nil, is forwarded to the

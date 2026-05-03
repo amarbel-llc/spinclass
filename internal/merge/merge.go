@@ -11,7 +11,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/log"
 
-	tap "github.com/amarbel-llc/bob/packages/tap-dancer/go"
+	tap "github.com/amarbel-llc/tap/go"
 	"github.com/amarbel-llc/spinclass/internal/check"
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/git"

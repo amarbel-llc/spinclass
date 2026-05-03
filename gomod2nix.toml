@@ -1,17 +1,19 @@
 schema = 3
 
 [mod]
-  [mod.'github.com/amarbel-llc/bob/packages/tap-dancer/go']
-    version = 'v0.1.0'
-    hash = 'sha256-pC95VLeYUZwmcosmo2mtzh1Ggk7N9rlUtXPmf7eGDpE='
-
   [mod.'github.com/amarbel-llc/purse-first/libs/go-mcp']
-    version = 'v0.0.8'
-    hash = 'sha256-6DK5GfCPk+viyJT/FF90zQRfsJwbJNvSQJDQMi22NXY='
+    version = 'v0.0.9'
+    hash = 'sha256-ilXiBA+HaZtl//gNZHeXQq7p+si91luFyRv6HJLUFUo='
+    goVersion = '1.26'
 
   [mod.'github.com/amarbel-llc/purse-first/libs/go-mcp/command/huh']
     version = 'v0.0.4'
     hash = 'sha256-JbqwWV87R2fQge+4BWZQysOpkgMpGCNYFoOR3VkVSK8='
+
+  [mod.'github.com/amarbel-llc/tap/go']
+    version = 'v0.1.2'
+    hash = 'sha256-yFpzdb1J+SPJpgFId9a/kG3w+ouF7HMocK2QuuL5cGo='
+    goVersion = '1.26'
 
   [mod.'github.com/amarbel-llc/tommy']
     version = 'v0.0.0-20260326195616-1e3aa70b25d0'
