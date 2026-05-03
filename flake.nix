@@ -34,14 +34,29 @@
             nixpkgs.overlays.default
           ];
         };
+        inherit (pkgs) lib;
 
-        spinclass = pkgs.buildGoApplication {
+        # mkSpinclass builds spinclass with optional build-time-pinned
+        # absolute /nix/store paths for `madder` and `direnv`. The
+        # buildGoApplication overlay auto-injects -X main.version and
+        # -X main.commit from the derivation attrs and appends any
+        # ldflags supplied here.
+        #
+        # When `madder` is non-null the produced binary activates the
+        # per-worktree blob-store flow at `sc start`. When null, the
+        # feature is dormant. `direnv` falls back to PATH lookup when
+        # the input is null.
+        mkSpinclass = { madder ? null, direnv ? null }: pkgs.buildGoApplication {
           pname = "spinclass";
           version = spinclassVersion;
           commit = spinclassCommit;
           src = ./.;
           modules = ./gomod2nix.toml;
           subPackages = [ "cmd/spinclass" ];
+
+          ldflags =
+            (lib.optional (madder != null) "-X main.madderBin=${madder}/bin/madder")
+            ++ (lib.optional (direnv != null) "-X main.direnvBin=${direnv}/bin/direnv");
 
           # Generate manpages, mappings, hooks, and shell completions from
           # the command.App definitions. The plugin manifest (and clown
@@ -90,8 +105,13 @@
       in
       {
         packages = {
-          default = spinclass;
+          default = mkSpinclass {};
         };
+
+        # mkSpinclass = { madder ? null, direnv ? null }: ...
+        # Consumer flakes call this to produce a spinclass binary with
+        # absolute /nix/store paths burned in.
+        lib.mkSpinclass = mkSpinclass;
 
         devShells.default = pkgs.mkShell {
           packages = [

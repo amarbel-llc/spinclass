@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/amarbel-llc/spinclass/internal/claude"
+	"github.com/amarbel-llc/spinclass/internal/embeds"
 	"github.com/amarbel-llc/spinclass/internal/git"
+	"github.com/amarbel-llc/spinclass/internal/madder"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 )
 
@@ -185,13 +188,33 @@ func CreateFrom(
 }
 
 // applyWorktreeConfig excludes .worktrees from git, loads and applies
-// sweatfile, and trusts worktreePath in Claude.
+// sweatfile, and trusts worktreePath in Claude. When the binary has
+// a build-time-pinned madder, also initialises the per-worktree blob
+// store and adds the matching ignore + allow rules.
+//
+// The madder rule extensions are gated on the *pin*, not on whether
+// the store exists — that way a user who pre-initialised the store
+// manually still gets the rules.
 func applyWorktreeConfig(
 	home string,
 	sweetfile sweatfile.Hierarchy,
 	repoPath string,
 	worktreePath string,
 ) error {
+	if embeds.MadderBin() != "" {
+		if err := madder.Init(worktreePath, embeds.MadderBin()); err != nil {
+			return fmt.Errorf("initialising madder blob store: %w", err)
+		}
+		shimBinDir, err := spinclassShimBinDir(worktreePath)
+		if err != nil {
+			return fmt.Errorf("resolving spinclass shim bin dir: %w", err)
+		}
+		if err := madder.LinkInto(shimBinDir, embeds.MadderBin()); err != nil {
+			return fmt.Errorf("linking madder into shim bin dir: %w", err)
+		}
+		sweetfile.Merged = withMadderEntries(sweetfile.Merged)
+	}
+
 	merged := sweatfile.GetDefault().MergeWith(sweetfile.Merged)
 	if err := applyGitExcludes(repoPath, merged.GitExcludes()); err != nil {
 		return fmt.Errorf("applying git excludes: %w", err)
@@ -238,6 +261,50 @@ func applyWorktreeConfig(
 	}
 
 	return nil
+}
+
+// withMadderEntries returns sf with the madder ignore + allow rules
+// appended. Git/Claude sub-structs and their inner slices are cloned
+// so subsequent appends here cannot clobber the caller's backing
+// arrays even when cap > len.
+func withMadderEntries(sf sweatfile.Sweatfile) sweatfile.Sweatfile {
+	if sf.Git == nil {
+		sf.Git = &sweatfile.Git{}
+	} else {
+		gitCopy := *sf.Git
+		gitCopy.Excludes = slices.Clone(sf.Git.Excludes)
+		sf.Git = &gitCopy
+	}
+	if !slices.Contains(sf.Git.Excludes, madder.ExcludePattern) {
+		sf.Git.Excludes = append(sf.Git.Excludes, madder.ExcludePattern)
+	}
+
+	if sf.Claude == nil {
+		sf.Claude = &sweatfile.Claude{}
+	} else {
+		claudeCopy := *sf.Claude
+		claudeCopy.Allow = slices.Clone(sf.Claude.Allow)
+		sf.Claude = &claudeCopy
+	}
+	if !slices.Contains(sf.Claude.Allow, madder.AllowRule) {
+		sf.Claude.Allow = append(sf.Claude.Allow, madder.AllowRule)
+	}
+
+	return sf
+}
+
+// spinclassShimBinDir is the per-repo dir that writeEnvrc adds to
+// session PATH. Lives under the git common dir so all worktrees of a
+// repo share one shim dir.
+func spinclassShimBinDir(worktreePath string) (string, error) {
+	rel, err := git.Run(worktreePath, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(rel) {
+		rel = filepath.Join(worktreePath, rel)
+	}
+	return filepath.Join(filepath.Clean(rel), "spinclass", "bin"), nil
 }
 
 const (

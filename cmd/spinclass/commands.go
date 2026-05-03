@@ -16,9 +16,16 @@ var extraManpages embed.FS
 // "-X main.version=... -X main.commit=...", auto-injected by
 // amarbel-llc/nixpkgs's buildGoApplication overlay from the derivation's
 // `version` and `commit` attrs.
+//
+// madderBin and direnvBin are absolute /nix/store paths burned in by
+// `lib.mkSpinclass` at link time. Empty values mean the integration
+// is dormant: madder store init is skipped, and direnv falls back to
+// PATH lookup.
 var (
-	version = "dev"
-	commit  = "unknown"
+	version   = "dev"
+	commit    = "unknown"
+	madderBin = ""
+	direnvBin = ""
 )
 
 // buildApp constructs the spinclass command.App with global flags and all
@@ -45,6 +52,12 @@ func buildApp() *command.App {
 			Path:    "doc/spinclass-sweatfile.5",
 			Section: 5,
 			Name:    "spinclass-sweatfile.5",
+		},
+		{
+			Source:  extraManpages,
+			Path:    "doc/spinclass-build-pins.7",
+			Section: 7,
+			Name:    "spinclass-build-pins.7",
 		},
 	}
 

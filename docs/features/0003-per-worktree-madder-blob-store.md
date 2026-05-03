@@ -1,11 +1,6 @@
 ---
-status: exploring
+status: accepted
 date: 2026-04-30
-promotion-criteria: |
-  Promote to `proposed` once an activation model is selected — see
-  "Open question: activation model" below. The remaining design
-  (lifecycle, store identity, gitignore wiring, claude-allow wiring,
-  manpage update) is locked in and does not block promotion.
 ---
 
 # Per-worktree madder blob store
@@ -48,17 +43,21 @@ SFTP, pointer) are out of scope. Users who need them can call
 
 ### Init invocation
 
-When the activation model decides "yes, init now," and
+When `madderBin != ""` (i.e. spinclass was built via `lib.mkSpinclass`
+with a `madder` input — see Candidate F below) and
 `<worktree>/.madder/local/share/blob_stores/default/blob_store-config`
-does not yet exist, spinclass runs:
+does not yet exist, spinclass runs the embedded binary:
 
 ```
-madder init -encryption none .default
+$madderBin init -encryption none .default
 ```
 
 The form matches madder's own bats suite (`run_madder init -encryption
 none .default` in `zz-tests_bats/init.bats`). `-encryption none` is
 required by madder's CLI; spinclass will not set encryption.
+
+Builds with an empty `madderBin` (the default `packages.default`) skip
+the call entirely — the feature is dormant.
 
 ### Idempotency guard
 
@@ -103,13 +102,12 @@ sessions can call madder without a permission prompt.
 
 ### Manpage
 
-`cmd/spinclass/doc/spinclass-sweatfile.5` is updated to document
-whichever activation model is chosen. If the activation model
-introduces a new sweatfile section, it gets its own `.SS [...]`
-entry alongside the existing `[claude]`, `[git]`, `[direnv]`,
-`[hooks]`, etc. If the activation model is purely auto-detection, the
-manpage instead grows a section explaining the auto-detection
-behaviour and pointers to madder(1) / blob-store(7).
+The chosen activation model (Candidate F — build-time pin) introduces
+no sweatfile section, so `cmd/spinclass/doc/spinclass-sweatfile.5` is
+unchanged. Instead, `cmd/spinclass/doc/spinclass.1` grows a
+**BUILD-TIME PINS** section that documents the `madderBin` /
+`direnvBin` link-time strings and their effect on session creation,
+with pointers to madder(1) and blob-store(7).
 
 The manpage is the user-facing source of truth; the FDR documents
 intent. Both stay in sync.
@@ -213,6 +211,51 @@ file, or any sibling worktree that already has a store.
 - **Missing-binary handling.** Hard error when the flag is passed
   but the binary is missing.
 
+### Candidate F — Build-time pin via Nix derivation **(selected)**
+
+Spinclass exposes `lib.mkSpinclass = { madder ? null, direnv ? null }: ...`
+from its flake, mirroring `lib.mkCircus` from
+[clown](https://github.com/amarbel-llc/clown). When a consumer flake
+calls it with a non-null `madder`, the absolute /nix/store path of
+the resulting binary is baked into spinclass at link time via
+`-X main.madderBin=<path>`. The default `packages.default` is
+`mkSpinclass {}` — i.e. an empty `madderBin`, feature dormant.
+
+```nix
+# consumer flake
+spinclass.lib.${system}.mkSpinclass {
+  madder = madder.packages.${system}.default;
+  direnv = pkgs.direnv;
+}
+```
+
+- **Pro.** Activation is a property of the binary, not of runtime
+  state. Two builds of spinclass on the same host can co-exist:
+  `nix run spinclass#default` is dormant, the user's primary
+  `mkSpinclass`-built binary is active.
+- **Pro.** Reproducible — every session created by a given binary
+  uses exactly the madder version that binary was built against. No
+  PATH drift, no version skew between sessions.
+- **Pro.** Composes naturally with the existing `mkCircus` /
+  build-time pinning patterns the user already deploys.
+- **Pro.** No runtime config surface; nothing to validate, nothing
+  to drift between sweatfiles.
+- **Con.** Activation requires a rebuild. Users who want to toggle
+  the integration on or off cannot do it without rebuilding (or
+  switching binaries).
+- **Con.** Distribution-channel-specific: users who install spinclass
+  via a non-Nix path (Homebrew, raw `go install`) cannot opt in
+  without a separate Nix-built artifact. Acceptable today since the
+  primary distribution channel is the flake.
+- **Binary discovery.** Embedded `madderBin` (and `direnvBin`,
+  separately) at link time. No PATH lookup for `madder`. `direnv`
+  falls back to PATH only when `direnvBin` is empty (i.e. vanilla
+  `packages.default`).
+- **Missing-binary handling.** Empty `madderBin` ⇒ silent dormancy
+  (same as Candidate A's missing-binary path). A non-empty but
+  invalid `madderBin` would be a build bug; the file would have to
+  have been deleted from the store after build.
+
 ### What we want from the choice
 
 - **No friction for users who don't care.** Most users should
@@ -227,10 +270,16 @@ file, or any sibling worktree that already has a store.
   goes there. If the answer is "no config", that is also fine — the
   bar is whether config earns its keep.
 
-A working hypothesis (not a decision): start with **Candidate A** as
-the simplest possible thing, and only graduate to **Candidate C** if
-real usage surfaces a need for per-repo escape hatches or binary
-overrides. Candidates B, D, and E feel less likely.
+**Decision.** Selected **Candidate F** — build-time pin via
+`lib.mkSpinclass`. Reproducibility and the ability to keep
+`packages.default` dependency-free outweigh the rebuild-to-toggle
+cost for spinclass's primary user base, who already deploy via Nix
+flake composition (the same mechanism as `mkCircus`). The same
+mechanism extends to `direnv`, which spinclass shells out to today
+via PATH lookup.
+
+Candidates A and C remain plausible future additions if a non-Nix
+distribution channel materialises; they are not foreclosed.
 
 ## Limitations
 

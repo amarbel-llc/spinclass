@@ -1,0 +1,97 @@
+.TH SPINCLASS-BUILD-PINS 7 "" "spinclass" "Spinclass Reference"
+.SH NAME
+spinclass-build-pins \- build-time-pinned binaries (madder, direnv)
+.SH DESCRIPTION
+Spinclass exposes a Nix flake function
+.B lib.mkSpinclass
+that produces a spinclass binary with absolute
+.I /nix/store
+paths burned in for selected runtime tools.
+At link time these paths are written into package-level Go variables
+via
+.B \-X
+.IR ldflags ,
+and the binary picks them up at runtime without consulting
+.BR PATH .
+.PP
+The default
+.B packages.default
+output of the spinclass flake is
+.B mkSpinclass {}
+\(em no inputs supplied, all pinned paths empty, every integration
+dormant.
+A consumer flake that wants the integrations active calls
+.B mkSpinclass
+with the desired derivations:
+.PP
+.RS 4
+.nf
+spinclass.lib.${system}.mkSpinclass {
+  madder = madder.packages.${system}.default;
+  direnv = pkgs.direnv;
+}
+.fi
+.RE
+.SH PINS
+.SS madder
+When the
+.B madder
+input is supplied,
+.BR sc\ start " (and any other path that creates a worktree)"
+initialises a per-worktree blob store at
+.I <worktree>/.madder/local/share/blob_stores/default/
+on first session creation.
+The init command run is
+.RS 4
+.B madder init -encryption none .default
+.RE
+with
+.B MADDER_CEILING_DIRECTORIES=<worktree>
+set on the invocation only (not exported into the broader session) so
+madder will not walk up into a parent repo's
+.I .madder/
+directory during store discovery.
+.PP
+The init step is guarded by an existence check on
+.I blob_store-config
+\(em rerunning
+.B sc start
+in a worktree that already has a store is a no-op.
+.PP
+When the integration is active, two additional rules are applied at
+worktree creation:
+.IP \(bu 2
+.I .madder/
+is appended to the worktree's
+.IR .git/info/exclude .
+.IP \(bu 2
+.B Bash(madder:*)
+is appended to the worktree's Claude Code allow list in
+.IR .claude/settings.local.json .
+.PP
+When the
+.B madder
+input is null (the default
+.BR packages.default ),
+none of the above happens.
+The feature is fully dormant; no
+.I .madder/
+directory is created and no madder-related allow rule is added.
+.SS direnv
+When the
+.B direnv
+input is supplied, spinclass invokes the pinned binary directly
+instead of consulting
+.BR PATH .
+When the input is null, spinclass falls back to
+.BR exec.LookPath ;
+if no
+.B direnv
+is found, the
+.I .envrc
+generation step is skipped (this matches the pre-pin behaviour).
+.SH SEE ALSO
+.BR spinclass (1),
+.BR spinclass\-sweatfile (5),
+.BR madder (1),
+.BR direnv (1)

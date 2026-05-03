@@ -1,11 +1,18 @@
 package worktree
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/amarbel-llc/spinclass/internal/embeds"
+	"github.com/amarbel-llc/spinclass/internal/madder"
+	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/testgit"
 )
 
 func TestResolvePathArgsAreDescription(t *testing.T) {
@@ -482,6 +489,193 @@ func TestResolvePathRandomNameWhenNoArgs(t *testing.T) {
 			"ExistingBranch = %q, want empty for random name",
 			rp.ExistingBranch,
 		)
+	}
+}
+
+func TestWithMadderEntriesAddsBoth(t *testing.T) {
+	sf := sweatfile.Sweatfile{}
+	got := withMadderEntries(sf)
+
+	if got.Git == nil || !slices.Contains(got.Git.Excludes, ".madder/") {
+		t.Errorf("expected Git.Excludes to contain .madder/, got %#v", got.Git)
+	}
+	if got.Claude == nil || !slices.Contains(got.Claude.Allow, "Bash(madder:*)") {
+		t.Errorf("expected Claude.Allow to contain Bash(madder:*), got %#v", got.Claude)
+	}
+}
+
+func TestWithMadderEntriesPreservesExisting(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		Git:    &sweatfile.Git{Excludes: []string{".direnv/"}},
+		Claude: &sweatfile.Claude{Allow: []string{"Bash(git *)"}},
+	}
+	got := withMadderEntries(sf)
+
+	if !slices.Contains(got.Git.Excludes, ".direnv/") || !slices.Contains(got.Git.Excludes, ".madder/") {
+		t.Errorf("expected both .direnv/ and .madder/, got %v", got.Git.Excludes)
+	}
+	if !slices.Contains(got.Claude.Allow, "Bash(git *)") || !slices.Contains(got.Claude.Allow, "Bash(madder:*)") {
+		t.Errorf("expected both existing and madder allow rules, got %v", got.Claude.Allow)
+	}
+}
+
+func TestWithMadderEntriesDoesNotClobberCallerBackingArray(t *testing.T) {
+	// Pre-allocate excess cap so a naive shallow copy + append would
+	// write past the caller's len into the shared backing array.
+	excludes := make([]string, 1, 8)
+	excludes[0] = ".existing/"
+	allow := make([]string, 1, 8)
+	allow[0] = "Bash(git *)"
+
+	sf := sweatfile.Sweatfile{
+		Git:    &sweatfile.Git{Excludes: excludes},
+		Claude: &sweatfile.Claude{Allow: allow},
+	}
+	_ = withMadderEntries(sf)
+
+	if len(excludes) != 1 || excludes[0] != ".existing/" {
+		t.Errorf("caller's Excludes was clobbered: %v", excludes)
+	}
+	if cap(excludes) > 1 && excludes[:cap(excludes)][1] == madder.ExcludePattern {
+		t.Errorf("madder pattern leaked into caller's backing array at index 1")
+	}
+	if len(allow) != 1 || allow[0] != "Bash(git *)" {
+		t.Errorf("caller's Allow was clobbered: %v", allow)
+	}
+	if cap(allow) > 1 && allow[:cap(allow)][1] == madder.AllowRule {
+		t.Errorf("madder allow rule leaked into caller's backing array at index 1")
+	}
+}
+
+func TestWithMadderEntriesIdempotent(t *testing.T) {
+	sf := sweatfile.Sweatfile{}
+	once := withMadderEntries(sf)
+	twice := withMadderEntries(once)
+
+	count := 0
+	for _, e := range twice.Git.Excludes {
+		if e == ".madder/" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly one .madder/ exclude, got %d in %v", count, twice.Git.Excludes)
+	}
+
+	count = 0
+	for _, a := range twice.Claude.Allow {
+		if a == "Bash(madder:*)" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly one Bash(madder:*) allow, got %d in %v", count, twice.Claude.Allow)
+	}
+}
+
+func TestApplyWorktreeConfig_MadderEmbedAddsExcludesAndAllow(t *testing.T) {
+	testgit.RequireGit(t)
+	parentDir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", parentDir)
+	repoDir := filepath.Join(parentDir, "repo")
+	testgit.MustInit(t, repoDir)
+
+	binDir := t.TempDir()
+	binPath := filepath.Join(binDir, "fake-madder")
+	script := `#!/bin/sh
+mkdir -p "$PWD/.madder/local/share/blob_stores/default"
+touch "$PWD/.madder/local/share/blob_stores/default/blob_store-config"
+`
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	prevMadder, prevDirenv := embeds.MadderBin(), embeds.DirenvBin()
+	embeds.Set(binPath, "")
+	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv) })
+
+	wtPath := filepath.Join(parentDir, "wt")
+	if _, err := Create(repoDir, wtPath, ""); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// blob_store-config marker must exist
+	cfg := filepath.Join(wtPath, ".madder", "local", "share", "blob_stores", "default", "blob_store-config")
+	if _, err := os.Stat(cfg); err != nil {
+		t.Errorf("expected blob_store-config at %s: %v", cfg, err)
+	}
+
+	// .git/info/exclude must contain .madder/
+	excludeData, err := os.ReadFile(filepath.Join(repoDir, ".git", "info", "exclude"))
+	if err != nil {
+		t.Fatalf("reading exclude: %v", err)
+	}
+	if !strings.Contains(string(excludeData), ".madder/") {
+		t.Errorf("expected .madder/ in git excludes:\n%s", excludeData)
+	}
+
+	// .claude/settings.local.json must contain Bash(madder:*) in permissions.allow
+	settingsBytes, err := os.ReadFile(filepath.Join(wtPath, ".claude", "settings.local.json"))
+	if err != nil {
+		t.Fatalf("reading settings: %v", err)
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(settingsBytes, &settings); err != nil {
+		t.Fatalf("parsing settings json: %v", err)
+	}
+	perms, _ := settings["permissions"].(map[string]any)
+	if perms == nil {
+		t.Fatalf("settings.permissions missing or wrong type: %#v", settings["permissions"])
+	}
+	allowAny, _ := perms["allow"].([]any)
+	hasMadder := false
+	for _, r := range allowAny {
+		if s, _ := r.(string); s == "Bash(madder:*)" {
+			hasMadder = true
+			break
+		}
+	}
+	if !hasMadder {
+		t.Errorf("expected Bash(madder:*) in permissions.allow, got %v", allowAny)
+	}
+
+	// Symlink at <git-common-dir>/spinclass/bin/madder must point to the embedded path.
+	link := filepath.Join(repoDir, ".git", "spinclass", "bin", "madder")
+	got, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("expected madder symlink at %s: %v", link, err)
+	}
+	if got != binPath {
+		t.Errorf("symlink target: got %q, want %q", got, binPath)
+	}
+}
+
+func TestApplyWorktreeConfig_NoMadderEmbedNoChanges(t *testing.T) {
+	testgit.RequireGit(t)
+	parentDir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", parentDir)
+	repoDir := filepath.Join(parentDir, "repo")
+	testgit.MustInit(t, repoDir)
+
+	prevMadder, prevDirenv := embeds.MadderBin(), embeds.DirenvBin()
+	embeds.Set("", "")
+	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv) })
+
+	wtPath := filepath.Join(parentDir, "wt")
+	if _, err := Create(repoDir, wtPath, ""); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(wtPath, ".madder")); !os.IsNotExist(err) {
+		t.Errorf("expected no .madder/ when madderBin embed is empty, stat err=%v", err)
+	}
+
+	excludeData, err := os.ReadFile(filepath.Join(repoDir, ".git", "info", "exclude"))
+	if err != nil {
+		t.Fatalf("reading exclude: %v", err)
+	}
+	if strings.Contains(string(excludeData), ".madder/") {
+		t.Errorf("expected NO .madder/ in git excludes when embed empty:\n%s", excludeData)
 	}
 }
 

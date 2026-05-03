@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/amarbel-llc/spinclass/internal/embeds"
 	"github.com/amarbel-llc/spinclass/internal/git"
 )
 
@@ -139,8 +140,8 @@ func (sf Sweatfile) writeSpinclassEnv(worktreePath string) error {
 }
 
 func (sf Sweatfile) prepareDirenv(worktreePath string) error {
-	direnvPath, err := exec.LookPath("direnv")
-	if err != nil {
+	direnvPath, ok := resolveDirenv()
+	if !ok {
 		return nil
 	}
 
@@ -155,6 +156,22 @@ func (sf Sweatfile) prepareDirenv(worktreePath string) error {
 	cmd.Stdin = os.Stdin
 
 	return cmd.Run()
+}
+
+// resolveDirenv returns the absolute path to the direnv binary, with
+// the build-time-pinned value (from `lib.mkSpinclass`) taking
+// precedence over PATH lookup. Returns ("", false) when direnv is
+// unavailable in either location — callers treat that as "no direnv,
+// skip envrc handling".
+func resolveDirenv() (string, bool) {
+	if pinned := embeds.DirenvBin(); pinned != "" {
+		return pinned, true
+	}
+	path, err := exec.LookPath("direnv")
+	if err != nil {
+		return "", false
+	}
+	return path, true
 }
 
 func (sf Sweatfile) RunCreateHook(worktreePath string, w io.Writer) error {

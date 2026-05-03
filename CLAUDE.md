@@ -94,7 +94,7 @@ worktree paths. Applies `claude-allow` rules from sweatfile to
 - **Session entrypoint**: `[session].start` and `[session].resume` in sweatfile
   control what command is exec'd. Defaults to `$SHELL`.
 - **Session picking**: both `sc resume` and `sc close` source from `session.ListForRepo` via `internal/sessionpick.Choose` — tab completion (`completeWorktreeTargets`) and the huh menu use the same list, sorted active-first by `session.SortStates`. Non-TTY callers get an error listing IDs instead of a hung huh prompt. Orphaned git worktrees without a state file are not valid `sc close` targets; remove them with `git worktree remove`.
-- **External tool deps**: `git`, `gum` (interactive selection in merge).
+- **External tool deps**: `git` is always required and resolved from `PATH`. `madder` and `direnv` are runtime deps **only** when the binary was built via `lib.mkSpinclass` with the matching input — those paths are burned in at link time (see `spinclass-build-pins(7)` and FDR 0003); the default `nix build` produces a binary with both pins empty, in which case the madder integration is dormant and direnv falls back to `PATH`. Interactive prompts use the in-process `huh` library (no `gum` dependency).
 
 ## CLI Commands
 

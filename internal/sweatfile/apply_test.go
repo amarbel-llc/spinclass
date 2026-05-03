@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/amarbel-llc/spinclass/internal/embeds"
 )
 
 // gitDir returns the directory containing the git binary, for use in tests
@@ -367,6 +369,46 @@ func TestPrepareDirenvWritesEnvrcWithoutUseFlakeWhenNoFlakeNix(t *testing.T) {
 	}
 	if !strings.Contains(content, "PATH_add") || !strings.Contains(content, "spinclass/bin") {
 		t.Errorf("expected PATH_add with spinclass/bin, got %q", content)
+	}
+}
+
+func TestPrepareDirenvPrefersEmbeddedOverPath(t *testing.T) {
+	dir := t.TempDir()
+
+	// Embedded fake direnv: records its invocation by writing a marker
+	// file. PATH-only fake direnv: would write a *different* marker.
+	// We assert the embedded one ran and the PATH one did not.
+	embeddedBin := t.TempDir()
+	embeddedDirenv := filepath.Join(embeddedBin, "direnv")
+	embeddedMarker := filepath.Join(embeddedBin, "ran")
+	embeddedScript := "#!/bin/sh\ntouch \"" + embeddedMarker + "\"\nexit 0\n"
+	if err := os.WriteFile(embeddedDirenv, []byte(embeddedScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	pathBin := t.TempDir()
+	pathDirenv := filepath.Join(pathBin, "direnv")
+	pathMarker := filepath.Join(pathBin, "ran")
+	pathScript := "#!/bin/sh\ntouch \"" + pathMarker + "\"\nexit 0\n"
+	if err := os.WriteFile(pathDirenv, []byte(pathScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PATH", pathBin+":"+gitDir(t))
+
+	prevMadder, prevDirenv := embeds.MadderBin(), embeds.DirenvBin()
+	embeds.Set(prevMadder, embeddedDirenv)
+	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv) })
+
+	if err := (Sweatfile{}).prepareDirenv(dir); err != nil {
+		t.Fatalf("prepareDirenv: %v", err)
+	}
+
+	if _, err := os.Stat(embeddedMarker); err != nil {
+		t.Errorf("expected embedded direnv to be invoked, marker stat err=%v", err)
+	}
+	if _, err := os.Stat(pathMarker); !os.IsNotExist(err) {
+		t.Errorf("expected PATH direnv NOT to be invoked, marker stat err=%v", err)
 	}
 }
 

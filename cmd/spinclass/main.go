@@ -10,9 +10,12 @@ import (
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	commandhuh "github.com/amarbel-llc/purse-first/libs/go-mcp/command/huh"
+
+	"github.com/amarbel-llc/spinclass/internal/embeds"
 )
 
 func main() {
+	embeds.Set(madderBin, direnvBin)
 	app := buildApp()
 
 	ctx := context.Background()
