@@ -1,13 +1,6 @@
 ---
-status: exploring
+status: accepted
 date: 2026-05-02
-promotion-criteria: |
-  Promote to `proposed` once FDR 0003 (per-worktree madder store)
-  reaches `proposed` and an activation model is selected. The
-  `go-mcp/command.Result` framework gap is worked around in this
-  design (the URI is emitted as a plain YAMLish string, not as an
-  MCP `resource_link` content block) so that purse-first is NOT a
-  blocker.
 ---
 
 # `merge-this-session` output shape
