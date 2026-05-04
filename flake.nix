@@ -2,23 +2,31 @@
   description = "Spinclass: shell-agnostic git worktree session manager";
 
   inputs = {
-    # Pinned: master triggers a tap-dancer rebuild (cache miss → rustc
-    # 1.94 rebuild from source) that doesn't fit on small dev disks.
-    # Drop this pin once flakehub cache catches up. Tracked in #64.
-    nixpkgs.url = "github:amarbel-llc/nixpkgs/89290d6697a602fe9f7cb9de6ab0e30f0ecb78e6";
+    # Fork: source of the buildGoApplication / buildGoRace /
+    # testers.batsLane / mkGoEnv overlay. Tracks master.
+    nixpkgs.url = "github:amarbel-llc/nixpkgs";
+
+    # Upstream pin: source of the Go toolchain we pin via
+    # GOTOOLCHAIN=local + go_1_26, plus general dev tools that don't
+    # depend on the fork's overlay. Bumped deliberately, not on every
+    # `nix flake update` of the fork.
+    nixpkgs-master.url = "github:NixOS/nixpkgs/e2dde111aea2c0699531dc616112a96cd55ab8b5";
+
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
+
     bob = {
       url = "github:amarbel-llc/bob";
       inputs.nixpkgs.follows = "nixpkgs";
-      inputs.nixpkgs-master.follows = "nixpkgs";
+      inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
-};
+  };
 
   outputs =
     {
       self,
       nixpkgs,
+      nixpkgs-master,
       utils,
       bob,
     }:
@@ -31,12 +39,11 @@
     utils.lib.eachDefaultSystem (
       system:
       let
-        pkgs = import nixpkgs {
-          inherit system;
-          overlays = [
-            nixpkgs.overlays.default
-          ];
-        };
+        # The fork's default.nix shim auto-applies overlays.default, so
+        # an explicit `overlays = [ nixpkgs.overlays.default ]` would
+        # just compose the overlay twice. Mirror madder's pattern.
+        pkgs = import nixpkgs { inherit system; };
+        pkgs-master = import nixpkgs-master { inherit system; };
         inherit (pkgs) lib;
 
         # mkSpinclass builds spinclass with optional build-time-pinned
@@ -56,6 +63,14 @@
           src = ./.;
           modules = ./gomod2nix.toml;
           subPackages = [ "cmd/spinclass" ];
+
+          # Pin Go through upstream nixpkgs and disable toolchain
+          # auto-download. Without these, `GOTOOLCHAIN=auto` can try to
+          # fetch a toolchain when go.mod's `go 1.26` requirement isn't
+          # satisfied by `pkgs.go`, which fails in the sandbox. Madder
+          # pattern.
+          go = pkgs-master.go_1_26;
+          GOTOOLCHAIN = "local";
 
           ldflags =
             (lib.optional (madder != null) "-X main.madderBin=${madder}/bin/madder")
@@ -158,18 +173,27 @@
         # absolute /nix/store paths burned in.
         lib.mkSpinclass = mkSpinclass;
 
-        devShells.default = pkgs.mkShell {
+        devShells.default = pkgs-master.mkShell {
           packages = [
-            pkgs.go
-            pkgs.gopls
-            pkgs.gotools
-            pkgs.golangci-lint
-            pkgs.delve
-            pkgs.gofumpt
+            # gomod2nix-aware Go env; reads gomod2nix.toml for module
+            # resolution. Drop-in for `pkgs.go` once gomod2nix is in
+            # use. Madder pattern.
+            (pkgs.mkGoEnv { pwd = ./.; })
+            # gomod2nix CLI lives in the fork's overlay alongside
+            # buildGoApplication / mkGoEnv — not in upstream nixpkgs.
             pkgs.gomod2nix
-            pkgs.just
             bob.packages.${system}.batman
-          ];
+          ]
+          ++ (with pkgs-master; [
+            delve
+            gofumpt
+            golangci-lint
+            gopls
+            gotools
+            just
+          ]);
+
+          GOTOOLCHAIN = "local";
 
           # batman provides bats + helper libraries (bats-support, etc.).
           # Tests run inside nix lanes (see mkBatsLane); BATS_LIB_PATH is
