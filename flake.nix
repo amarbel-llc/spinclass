@@ -126,6 +126,18 @@
               --replace-fail '@SPINCLASS@' "$out/bin/spinclass"
             install -m 0644 ${./.clown-plugin/system-prompt-append.d/00-worktree.md} \
               "$pluginShare/.clown-plugin/system-prompt-append.d/00-worktree.md"
+
+            # Plugin-level hook registration. Clown auto-discovers
+            # ${"\${CLAUDE_PLUGIN_ROOT}"}/hooks/hooks.json and wires the listed
+            # PreToolUse/Stop/PostToolUse events for every Claude Code
+            # session, with no per-worktree settings.local.json plumbing
+            # required. The handler script execs the spinclass binary at
+            # the absolute store path baked in here.
+            mkdir -p "$pluginShare/hooks"
+            install -m 0644 ${./hooks/hooks.json} "$pluginShare/hooks/hooks.json"
+            install -m 0755 ${./hooks/handler}    "$pluginShare/hooks/handler"
+            substituteInPlace "$pluginShare/hooks/handler" \
+              --replace-fail '@SPINCLASS@' "$out/bin/spinclass"
           '';
 
           meta = {

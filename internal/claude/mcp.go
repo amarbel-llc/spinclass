@@ -15,16 +15,26 @@ type MCPServerEntry struct {
 	Env     map[string]string
 }
 
-// WriteMCPConfig writes a .mcp.json in worktreePath that configures
-// spinclass serve as a stdio MCP server plus any additional servers.
+// WriteMCPConfig writes a .mcp.json in worktreePath listing the
+// user-declared stdio MCP servers (sweatfile [[mcps]] entries). The
+// spinclass MCP server itself is loaded via the clown plugin and is no
+// longer mirrored into per-worktree .mcp.json.
+//
 // If .mcp.json already exists, entries are merged in without clobbering
-// other servers.
+// other servers. When extraServers is empty and no prior .mcp.json
+// exists, the function is a no-op so worktrees stay free of empty
+// session-local MCP files.
 func WriteMCPConfig(worktreePath string, extraServers []MCPServerEntry) error {
 	mcpPath := filepath.Join(worktreePath, ".mcp.json")
 
+	existed := false
 	var doc map[string]any
 	if data, err := os.ReadFile(mcpPath); err == nil {
+		existed = true
 		json.Unmarshal(data, &doc)
+	}
+	if !existed && len(extraServers) == 0 {
+		return nil
 	}
 	if doc == nil {
 		doc = make(map[string]any)
@@ -33,12 +43,6 @@ func WriteMCPConfig(worktreePath string, extraServers []MCPServerEntry) error {
 	servers, _ := doc["mcpServers"].(map[string]any)
 	if servers == nil {
 		servers = make(map[string]any)
-	}
-
-	servers["spinclass"] = map[string]any{
-		"type":    "stdio",
-		"command": "spinclass",
-		"args":    []string{"serve"},
 	}
 
 	for _, entry := range extraServers {

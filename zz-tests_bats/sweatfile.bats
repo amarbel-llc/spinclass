@@ -121,9 +121,9 @@ EOF
   local mcp_json="$wt_path/.mcp.json"
   assert [ -f "$mcp_json" ]
 
-  # spinclass server always present
-  run jq -r '.mcpServers.spinclass.command' "$mcp_json"
-  assert_output "spinclass"
+  # spinclass MCP server is loaded via the clown plugin, not mirrored here.
+  run jq -r '.mcpServers | has("spinclass")' "$mcp_json"
+  assert_output "false"
 
   # my-linter server registered from sweatfile
   run jq -r '.mcpServers."my-linter".command' "$mcp_json"
@@ -155,9 +155,10 @@ EOF
   local settings="$wt_path/.claude/settings.local.json"
   assert [ -f "$settings" ]
 
-  # enabledMcpjsonServers should include all three
+  # enabledMcpjsonServers should include the user-declared servers, but
+  # not spinclass (which is loaded via the clown plugin).
   run jq -r '.enabledMcpjsonServers[]' "$settings"
-  assert_output --partial "spinclass"
+  refute_output --partial "spinclass"
   assert_output --partial "external-server"
   assert_output --partial "my-linter"
 }
@@ -217,10 +218,14 @@ EOF
   wt_path=$(extract_wt_path "$output")
   local mcp_json="$wt_path/.mcp.json"
 
-  # linter should NOT be in .mcp.json (only spinclass)
-  run jq -r '.mcpServers | keys[]' "$mcp_json"
-  assert_output "spinclass"
-  refute_output --partial "linter"
+  # The removal sentinel suppressed linter, and spinclass is loaded
+  # via the clown plugin (not mirrored here). With no servers left to
+  # write, .mcp.json should be absent entirely.
+  if [ -f "$mcp_json" ]; then
+    run jq -r '.mcpServers | keys[]' "$mcp_json"
+    refute_output --partial "linter"
+    refute_output --partial "spinclass"
+  fi
 }
 
 function session_entrypoint_expands_env_vars { # @test

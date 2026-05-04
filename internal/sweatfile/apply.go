@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/amarbel-llc/spinclass/internal/embeds"
-	"github.com/amarbel-llc/spinclass/internal/git"
 )
 
 func (sweatfile Sweatfile) Apply(worktreePath string) error {
@@ -40,10 +39,6 @@ func resolveSpinclassBinDir(worktreePath string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "spinclass", "bin"), nil
-}
-
-func binaryName() string {
-	return filepath.Base(os.Args[0])
 }
 
 func (sf Sweatfile) writeEnvrc(worktreePath string) error {
@@ -261,63 +256,20 @@ func ApplyClaudeSettings(worktreePath string, sweatfile Sweatfile) error {
 
 	doc["permissions"] = permsMap
 
-	// Auto-approve the spinclass MCP server written to .mcp.json so Claude
-	// Code doesn't prompt the user to enable it on first launch.  Also
-	// approve any servers from the sweatfile's effective allow-list.
-	enabledMCPs := []string{"spinclass"}
-	seen := map[string]bool{"spinclass": true}
+	// Auto-approve any user-declared MCP servers from the sweatfile's
+	// effective allow-list (sweatfile [[mcps]] entries plus allowed-mcps).
+	// The spinclass MCP server itself is loaded via the clown plugin and
+	// does not need a session-local entry here.
+	var enabledMCPs []string
+	seen := map[string]bool{}
 	for _, name := range sweatfile.EffectiveAllowedMCPs() {
 		if !seen[name] {
 			seen[name] = true
 			enabledMCPs = append(enabledMCPs, name)
 		}
 	}
-	doc["enabledMcpjsonServers"] = enabledMCPs
-
-	if git.IsWorktree(worktreePath) {
-		hooksMap := map[string]any{
-			"PreToolUse": []any{
-				map[string]any{
-					"matcher": "*",
-					"hooks": []any{
-						map[string]any{
-							"type":    "command",
-							"command": binaryName() + " hooks",
-						},
-					},
-				},
-			},
-		}
-
-		if cmd := sweatfile.StopHookCommand(); cmd != nil && *cmd != "" {
-			hooksMap["Stop"] = []any{
-				map[string]any{
-					"matcher": "*",
-					"hooks": []any{
-						map[string]any{
-							"type":    "command",
-							"command": binaryName() + " hooks",
-						},
-					},
-				},
-			}
-		}
-
-		if sweatfile.ToolUseLogEnabled() {
-			hooksMap["PostToolUse"] = []any{
-				map[string]any{
-					"matcher": "*",
-					"hooks": []any{
-						map[string]any{
-							"type":    "command",
-							"command": binaryName() + " hooks",
-						},
-					},
-				},
-			}
-		}
-
-		doc["hooks"] = hooksMap
+	if len(enabledMCPs) > 0 {
+		doc["enabledMcpjsonServers"] = enabledMCPs
 	}
 
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {

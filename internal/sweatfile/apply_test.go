@@ -212,128 +212,74 @@ func TestApplyClaudeSettingsOverwritesExistingKeys(t *testing.T) {
 	}
 }
 
-func TestApplyClaudeSettingsWritesHooksForWorktree(t *testing.T) {
-	dir := t.TempDir()
-
-	// Simulate a worktree by creating .git as a file (not directory)
-	os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: /tmp/fake"), 0o644)
-
-	err := ApplyClaudeSettings(dir, Sweatfile{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+// Plugin-level hook registration (hooks/hooks.json shipped via flake.nix
+// postInstall) replaces the per-worktree hook block that ApplyClaudeSettings
+// used to write into settings.local.json. Confirm that the session-local
+// settings file no longer contains a "hooks" key in either a worktree or a
+// main repo, regardless of sweatfile [hooks] config.
+func TestApplyClaudeSettingsNeverWritesHooksKey(t *testing.T) {
+	cases := []struct {
+		name   string
+		gitFn  func(dir string)
+		stop   string
+		toolUL bool
+	}{
+		{
+			name: "worktree empty sweatfile",
+			gitFn: func(dir string) {
+				os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: /tmp/fake"), 0o644)
+			},
+		},
+		{
+			name: "worktree with stop hook configured",
+			gitFn: func(dir string) {
+				os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: /tmp/fake"), 0o644)
+			},
+			stop: "just test",
+		},
+		{
+			name: "worktree with tool-use-log enabled",
+			gitFn: func(dir string) {
+				os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: /tmp/fake"), 0o644)
+			},
+			toolUL: true,
+		},
+		{
+			name: "main repo",
+			gitFn: func(dir string) {
+				os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+			},
+		},
 	}
 
-	data, err := os.ReadFile(
-		filepath.Join(dir, ".claude", "settings.local.json"),
-	)
-	if err != nil {
-		t.Fatalf("reading settings: %v", err)
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			tc.gitFn(dir)
 
-	var doc map[string]any
-	json.Unmarshal(data, &doc)
+			sf := Sweatfile{}
+			if tc.stop != "" || tc.toolUL {
+				sf.Hooks = &Hooks{}
+				if tc.stop != "" {
+					sf.Hooks.Stop = &tc.stop
+				}
+				if tc.toolUL {
+					sf.Hooks.ToolUseLog = &tc.toolUL
+				}
+			}
 
-	hooksRaw, ok := doc["hooks"]
-	if !ok {
-		t.Fatal("expected hooks key in settings")
-	}
+			if err := ApplyClaudeSettings(dir, sf); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 
-	hooks := hooksRaw.(map[string]any)
-	preToolUse, ok := hooks["PreToolUse"]
-	if !ok {
-		t.Fatal("expected PreToolUse key in hooks")
-	}
+			data, _ := os.ReadFile(filepath.Join(dir, ".claude", "settings.local.json"))
+			var doc map[string]any
+			json.Unmarshal(data, &doc)
 
-	entries := preToolUse.([]any)
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 PreToolUse entry, got %d", len(entries))
-	}
-
-	entry := entries[0].(map[string]any)
-	matcher := entry["matcher"].(string)
-	if matcher != "*" {
-		t.Errorf("matcher: got %q", matcher)
-	}
-
-	hooksList := entry["hooks"].([]any)
-	hook := hooksList[0].(map[string]any)
-	if hook["type"] != "command" {
-		t.Errorf("hook type: got %q", hook["type"])
-	}
-	hookCmd := hook["command"].(string)
-	if !strings.HasSuffix(hookCmd, " hooks") {
-		t.Errorf("hook command: got %q", hook["command"])
-	}
-}
-
-func TestApplyClaudeSettingsNoHooksForMainRepo(t *testing.T) {
-	dir := t.TempDir()
-
-	// Simulate a main repo by creating .git as a directory
-	os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
-
-	err := ApplyClaudeSettings(dir, Sweatfile{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	data, _ := os.ReadFile(filepath.Join(dir, ".claude", "settings.local.json"))
-	var doc map[string]any
-	json.Unmarshal(data, &doc)
-
-	if _, ok := doc["hooks"]; ok {
-		t.Error("expected no hooks key for main repo")
-	}
-}
-
-func TestApplyClaudeSettingsWritesStopHookWhenConfigured(t *testing.T) {
-	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: /tmp/fake"), 0o644)
-
-	cmd := "just test"
-	err := ApplyClaudeSettings(dir, Sweatfile{Hooks: &Hooks{Stop: &cmd}})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	data, _ := os.ReadFile(filepath.Join(dir, ".claude", "settings.local.json"))
-	var doc map[string]any
-	json.Unmarshal(data, &doc)
-
-	hooks := doc["hooks"].(map[string]any)
-
-	stopRaw, ok := hooks["Stop"]
-	if !ok {
-		t.Fatal("expected Stop key in hooks")
-	}
-
-	entries := stopRaw.([]any)
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 Stop entry, got %d", len(entries))
-	}
-
-	entry := entries[0].(map[string]any)
-	if entry["matcher"] != "*" {
-		t.Errorf("matcher: got %q", entry["matcher"])
-	}
-}
-
-func TestApplyClaudeSettingsNoStopHookWhenNotConfigured(t *testing.T) {
-	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: /tmp/fake"), 0o644)
-
-	err := ApplyClaudeSettings(dir, Sweatfile{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	data, _ := os.ReadFile(filepath.Join(dir, ".claude", "settings.local.json"))
-	var doc map[string]any
-	json.Unmarshal(data, &doc)
-
-	hooks := doc["hooks"].(map[string]any)
-	if _, ok := hooks["Stop"]; ok {
-		t.Error("expected no Stop key when stop-hook is not configured")
+			if _, ok := doc["hooks"]; ok {
+				t.Errorf("expected no hooks key in settings.local.json (plugin-level registration replaces it); got %v", doc["hooks"])
+			}
+		})
 	}
 }
 
@@ -961,8 +907,10 @@ func TestApplyClaudeSettingsEnabledMCPs(t *testing.T) {
 		enabled[v.(string)] = true
 	}
 
-	if !enabled["spinclass"] {
-		t.Error("expected spinclass in enabledMcpjsonServers")
+	// spinclass is loaded via the clown plugin and must not appear
+	// in the session-local enabled list.
+	if enabled["spinclass"] {
+		t.Error("did not expect spinclass in enabledMcpjsonServers (loaded via clown plugin)")
 	}
 	if !enabled["external-server"] {
 		t.Error("expected external-server in enabledMcpjsonServers")
@@ -976,7 +924,7 @@ func TestApplyClaudeSettingsEnabledMCPsDedup(t *testing.T) {
 	dir := t.TempDir()
 
 	sf := Sweatfile{
-		AllowedMCPs: []string{"spinclass", "my-linter"},
+		AllowedMCPs: []string{"foo", "my-linter"},
 		MCPs: []MCPServerDef{
 			{Name: "my-linter", Command: "lint"},
 		},
@@ -992,15 +940,30 @@ func TestApplyClaudeSettingsEnabledMCPsDedup(t *testing.T) {
 	json.Unmarshal(data, &doc)
 
 	enabledRaw, _ := doc["enabledMcpjsonServers"].([]any)
-	// Should have spinclass and my-linter, no duplicates
 	names := make(map[string]int)
 	for _, v := range enabledRaw {
 		names[v.(string)]++
 	}
-	if names["spinclass"] != 1 {
-		t.Errorf("expected spinclass once, got %d", names["spinclass"])
+	if names["foo"] != 1 {
+		t.Errorf("expected foo once, got %d", names["foo"])
 	}
 	if names["my-linter"] != 1 {
 		t.Errorf("expected my-linter once, got %d", names["my-linter"])
+	}
+}
+
+func TestApplyClaudeSettingsEmptyOmitsEnabledMCPs(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := ApplyClaudeSettings(dir, Sweatfile{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, ".claude", "settings.local.json"))
+	var doc map[string]any
+	json.Unmarshal(data, &doc)
+
+	if _, ok := doc["enabledMcpjsonServers"]; ok {
+		t.Errorf("expected no enabledMcpjsonServers key when no user MCPs are declared; got %v", doc["enabledMcpjsonServers"])
 	}
 }
