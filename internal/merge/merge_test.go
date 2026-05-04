@@ -85,7 +85,7 @@ func TestResolvedMergesAndRemovesWorktree(t *testing.T) {
 	mock := &mockExecutor{}
 	var buf bytes.Buffer
 
-	err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-merge", "main", false, false, false)
+	_, err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-merge", "main", false, false, false)
 	if err != nil {
 		t.Fatalf("Resolved() error: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestResolvedTapOutput(t *testing.T) {
 	mock := &mockExecutor{}
 	var buf bytes.Buffer
 
-	err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-tap", "main", false, false, false)
+	_, err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-tap", "main", false, false, false)
 	if err != nil {
 		t.Fatalf("Resolved() error: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestResolvedGitSyncTapOutput(t *testing.T) {
 	mock := &mockExecutor{}
 	var buf bytes.Buffer
 
-	err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-sync", "main", true, false, false)
+	_, err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-sync", "main", true, false, false)
 	if err != nil {
 		t.Fatalf("Resolved() error: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestResolvedGitSyncPullsBeforeRebase(t *testing.T) {
 	mock := &mockExecutor{}
 	var buf bytes.Buffer
 
-	err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-stale", "main", true, false, false)
+	_, err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-stale", "main", true, false, false)
 	if err != nil {
 		t.Fatalf("Resolved() error (stale local master should not cause failure): %v\n\nTAP output:\n%s", err, buf.String())
 	}
@@ -324,7 +324,7 @@ func TestResolvedRepoNotFound(t *testing.T) {
 	mock := &mockExecutor{}
 	var buf bytes.Buffer
 
-	err := Resolved(mock, &buf, nil, "tap", "/nonexistent/path", "/nonexistent/wt", "feature", "main", false, false, false)
+	_, err := Resolved(mock, &buf, nil, "tap", "/nonexistent/path", "/nonexistent/wt", "feature", "main", false, false, false)
 	if err == nil {
 		t.Error("expected error for nonexistent repo, got nil")
 	}
@@ -360,7 +360,7 @@ func TestResolvedDivergedBranch(t *testing.T) {
 	mock := &mockExecutor{}
 	var buf bytes.Buffer
 
-	err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-diverge", "main", false, false, false)
+	_, err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-diverge", "main", false, false, false)
 	if err == nil {
 		t.Error("expected error for conflicting rebase, got nil")
 	}
@@ -388,7 +388,7 @@ func TestResolvedInSessionSkipsCleanup(t *testing.T) {
 	mock := &mockExecutor{}
 	var buf bytes.Buffer
 
-	err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-insession", "main", false, true, false)
+	_, err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-insession", "main", false, true, false)
 	if err != nil {
 		t.Fatalf("Resolved() error: %v", err)
 	}
@@ -435,7 +435,7 @@ func TestResolvedInSessionTapOutput(t *testing.T) {
 	mock := &mockExecutor{}
 	var buf bytes.Buffer
 
-	err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-session-tap", "main", false, true, false)
+	_, err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-session-tap", "main", false, true, false)
 	if err != nil {
 		t.Fatalf("Resolved() error: %v", err)
 	}
@@ -490,7 +490,7 @@ func TestResolvedDisabledByMergeFlag(t *testing.T) {
 	mock := &mockExecutor{}
 	var buf bytes.Buffer
 
-	err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-disabled", "main", false, false, false)
+	_, err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-disabled", "main", false, false, false)
 	if err == nil {
 		t.Fatal("expected error when disable-merge is set, got nil")
 	}

@@ -90,7 +90,8 @@ func registerSessionCommands(app *command.App) {
 			if err != nil {
 				return err
 			}
-			return check.Run(os.Stdout, p.FormatOrDefault(), cwd, p.Verbose)
+			_, err = check.Run(os.Stdout, p.FormatOrDefault(), cwd, p.Verbose)
+			return err
 		},
 	})
 

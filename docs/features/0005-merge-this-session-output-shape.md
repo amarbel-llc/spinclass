@@ -294,6 +294,33 @@ returns immediately — no revert commit needed.
   is in `libs/go-mcp/command/result.go` and
   `libs/go-mcp/command/mcp.go`'s `resultToMCPV1()`.
 
+## Status: shipped (follow-up)
+
+The framework gap closed in
+`amarbel-llc/purse-first` issue #68 (`libs/go-mcp/v0.0.13`):
+`command.Result` grew a `Content []protocol.ContentBlockV1`
+field with `ResourceLinkResult` / `MultiContentResult`
+helpers, and `resultToMCPV1` returns the content slice
+verbatim when non-empty.
+
+Spinclass adopted it: `merge-this-session` and
+`check-this-session` now emit a real MCP
+`ResourceLinkContent` block alongside the TAP text whenever
+the pre-merge hook produces a madder blob (gated on
+`embeds.MadderBin() != ""`). A `MadderProvider`
+(`internal/resources/madder_provider.go`) registered against
+`server.Options.Resources` resolves
+`madder://.default/<blob-id>` URIs via `madder cat .default
+<blob-id>` scoped to the worktree with
+`MADDER_CEILING_DIRECTORIES`, so MCP-aware agents fetch full
+hook output via `resources/read` instead of the
+`Bash(madder cat ...)` fallback.
+
+The YAMLish `resource_link:` line in the TAP text still ships
+for non-MCP-aware clients (`sc merge` CLI, raw stdout
+consumers); the `Bash(madder:*)` allow rule and per-worktree
+`madder` shim are unchanged.
+
 ---
 
 :clown: drafted by [Clown](https://github.com/amarbel-llc/clown).

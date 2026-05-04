@@ -67,7 +67,7 @@ func registerMCPOnlyCommands(app *command.App) {
 			Name:  "check-this-session",
 			Title: "Check This Session",
 			Description: command.Description{
-				Short: "Run the configured [hooks].pre-merge command in the current worktree without merging. This is the agent-CI surface; safe to call repeatedly. Returns non-zero / error if the hook fails. When madder is pinned at build time, the response is compact: a single test point per hook step with a `resource_link` URI to the full output. Inspect the URI only on failure.",
+				Short: "Run the configured [hooks].pre-merge command in the current worktree without merging. This is the agent-CI surface; safe to call repeatedly. Returns non-zero / error if the hook fails. When madder is pinned at build time, the response is compact: a single test point per hook step plus a real MCP `resource_link` content block (URI scheme `madder://.default/<blob-id>`) pointing to the full output. MCP-aware agents fetch via `resources/read`; inspect only on failure.",
 			},
 			Annotations: &protocol.ToolAnnotations{
 				ReadOnlyHint:    protocol.BoolPtr(false),
@@ -83,7 +83,7 @@ func registerMCPOnlyCommands(app *command.App) {
 			Name:  "merge-this-session",
 			Title: "Merge This Session",
 			Description: command.Description{
-				Short: "Merge the current session's worktree into the default branch and clean up. A non-error return means the merge (and push, if git_sync) succeeded; the output payload is informational and does not need to be read or parsed to confirm success. When madder is pinned at build time, the pre-merge hook step is compact: its YAMLish carries a `resource_link` URI to the full hook output that you only need to inspect on failure.",
+				Short: "Merge the current session's worktree into the default branch and clean up. A non-error return means the merge (and push, if git_sync) succeeded; the output payload is informational and does not need to be read or parsed to confirm success. When madder is pinned at build time, the response also carries a real MCP `resource_link` content block (URI scheme `madder://.default/<blob-id>`) pointing to the full pre-merge hook output. MCP-aware agents fetch via `resources/read`; inspect only on failure.",
 			},
 			Annotations: &protocol.ToolAnnotations{
 				ReadOnlyHint:    protocol.BoolPtr(false),
@@ -150,7 +150,7 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 	}
 
 	var buf bytes.Buffer
-	mergeErr := merge.Resolved(
+	blobURIs, mergeErr := merge.Resolved(
 		executor.ShellExecutor{},
 		&buf,
 		nil,
@@ -163,10 +163,7 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 		true,
 		true,
 	)
-	if mergeErr != nil {
-		return command.TextErrorResult(buf.String()), nil
-	}
-	return command.TextResult(buf.String()), nil
+	return buildHookResult(buf.String(), blobURIs, mergeErr), nil
 }
 
 func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
@@ -176,14 +173,41 @@ func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prom
 	}
 
 	var buf bytes.Buffer
-	if err := check.Run(&buf, "tap", cwd, false); err != nil {
-		text := buf.String()
-		if text == "" {
-			text = err.Error()
-		}
-		return command.TextErrorResult(text), nil
+	blobURIs, hookErr := check.Run(&buf, "tap", cwd, false)
+	text := buf.String()
+	if hookErr != nil && text == "" {
+		text = hookErr.Error()
 	}
-	return command.TextResult(buf.String()), nil
+	return buildHookResult(text, blobURIs, hookErr), nil
+}
+
+// buildHookResult assembles a command.Result that pairs the rendered TAP
+// text with one resource_link content block per blob URI emitted by the
+// pre-merge hook. With no blob URIs (madder unpinned, or no hook
+// configured), it falls back to the legacy text-only Result. The error
+// flag is preserved either way.
+func buildHookResult(text string, blobURIs []string, hookErr error) *command.Result {
+	if len(blobURIs) == 0 {
+		if hookErr != nil {
+			return command.TextErrorResult(text)
+		}
+		return command.TextResult(text)
+	}
+	blocks := make([]protocol.ContentBlockV1, 0, 1+len(blobURIs))
+	blocks = append(blocks, protocol.TextContentV1(text))
+	for _, uri := range blobURIs {
+		blocks = append(blocks, protocol.ResourceLinkContent(
+			uri,
+			"pre-merge hook output",
+			"Full stdout+stderr from the pre-merge hook, content-addressed in the per-worktree madder store.",
+			"text/plain",
+		))
+	}
+	res := command.MultiContentResult(blocks...)
+	if hookErr != nil {
+		res.IsErr = true
+	}
+	return res
 }
 
 func handleUpdateDescription(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {

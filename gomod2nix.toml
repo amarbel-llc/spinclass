@@ -2,8 +2,8 @@ schema = 3
 
 [mod]
   [mod.'github.com/amarbel-llc/purse-first/libs/go-mcp']
-    version = 'v0.0.9'
-    hash = 'sha256-ilXiBA+HaZtl//gNZHeXQq7p+si91luFyRv6HJLUFUo='
+    version = 'v0.0.13'
+    hash = 'sha256-B1FSyxLoZX6J5rn6Hnj1aMLO+fXuj76BOEs6zt/nErE='
     goVersion = '1.26'
 
   [mod.'github.com/amarbel-llc/purse-first/libs/go-mcp/command/huh']
@@ -144,13 +144,15 @@ schema = 3
     hash = 'sha256-2SO1etTQ6UCUhADR5sgvDEDLHcj77pJKCIa/8mGDbAo='
 
   [mod.'golang.org/x/sys']
-    version = 'v0.40.0'
-    hash = 'sha256-KDe+wMr7dfMFwKMJEljzk+f82pQWFFPoFHivjD7qJGg='
+    version = 'v0.42.0'
+    hash = 'sha256-LhNedvUEJbPYyR6EoU91rfOr3DBBoauLOcMcyqghEos='
+    goVersion = '1.25.0'
 
   [mod.'golang.org/x/text']
     version = 'v0.34.0'
     hash = 'sha256-wGKd1JkeiFROibvo2kkAuQ7JajSIfV4utGaoGbTQhQM='
 
   [mod.'mvdan.cc/sh/v3']
-    version = 'v3.12.0'
-    hash = 'sha256-1T55DgxWYDG1Y3SyZYLmSdLQPMVC6LUp1yLH98wKhGk='
+    version = 'v3.13.1'
+    hash = 'sha256-FM+2xpGELZLm4Gc09OE5Z3JeNLPMvzeb1wRcdAIeKy4='
+    goVersion = '1.25.0'

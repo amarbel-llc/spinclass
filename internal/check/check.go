@@ -28,32 +28,35 @@ const compactDirective = "directive: if status is ok, the resource_link need not
 // Run resolves the worktree containing wtPath, loads the sweatfile
 // hierarchy, and runs the configured [hooks].pre-merge command. It writes
 // TAP-14 output (when format == "tap") or passthrough output otherwise to
-// w. Returns a non-nil error if the hook fails.
+// w. Returns the resource_link URIs emitted for the hook output (one per
+// hook step that produced a madder blob; empty when madder is not pinned)
+// and a non-nil error if the hook fails.
 //
-// If no pre-merge hook is configured, Run returns nil and (in TAP mode)
-// emits an "ok" indicating no hook is configured — agents and humans
-// should treat "no hook" as a success because there is nothing to check.
+// If no pre-merge hook is configured, Run returns (nil, nil) and (in TAP
+// mode) emits an "ok" indicating no hook is configured — agents and
+// humans should treat "no hook" as a success because there is nothing to
+// check.
 //
 // The verbose parameter is accepted for API stability but currently
 // unused; check itself emits no git output today. It is reserved for
 // future use when verbose-mode diagnostics become relevant.
-func Run(w io.Writer, format, wtPath string, verbose bool) error {
+func Run(w io.Writer, format, wtPath string, verbose bool) ([]string, error) {
 	repoPath, err := git.CommonDir(wtPath)
 	if err != nil {
-		return fmt.Errorf("not a worktree: %s", wtPath)
+		return nil, fmt.Errorf("not a worktree: %s", wtPath)
 	}
 	branch, err := git.BranchCurrent(wtPath)
 	if err != nil {
-		return fmt.Errorf("could not determine current branch: %w", err)
+		return nil, fmt.Errorf("could not determine current branch: %w", err)
 	}
 
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return errors.New("could not resolve home directory")
+		return nil, errors.New("could not resolve home directory")
 	}
 	hierarchy, err := sweatfile.LoadWorktreeHierarchy(home, repoPath, wtPath)
 	if err != nil {
-		return fmt.Errorf("load sweatfile hierarchy: %w", err)
+		return nil, fmt.Errorf("load sweatfile hierarchy: %w", err)
 	}
 
 	var tw *tap.Writer
@@ -74,15 +77,15 @@ func Run(w io.Writer, format, wtPath string, verbose bool) error {
 				tw.Plan()
 			}
 		}
-		return nil
+		return nil, nil
 	}
 
 	// ownWriter=false: Run owns Plan emission for the standalone path.
-	hookErr := RunWithWriter(tw, w, hierarchy, wtPath, branch, false)
+	blobURIs, hookErr := RunWithWriter(tw, w, hierarchy, wtPath, branch, false)
 	if tw != nil && ownWriter {
 		tw.Plan()
 	}
-	return hookErr
+	return blobURIs, hookErr
 }
 
 // RunWithWriter runs the configured pre-merge hook against an already-
@@ -91,34 +94,41 @@ func Run(w io.Writer, format, wtPath string, verbose bool) error {
 // tw.Plan() when the hook fails (matching the legacy merge call pattern;
 // successful hook runs leave Plan to the caller).
 //
-// When no pre-merge hook is configured, RunWithWriter returns nil and
-// emits NO TAP output. This preserves the historical merge.runPreMergeHook
-// behavior; standalone callers that want a "no hook" report should use
-// Run instead.
+// Returns the resource_link URIs emitted for hook output (compact path
+// only; empty otherwise) and a non-nil error if the hook fails.
+//
+// When no pre-merge hook is configured, RunWithWriter returns (nil, nil)
+// and emits NO TAP output. This preserves the historical
+// merge.runPreMergeHook behavior; standalone callers that want a "no
+// hook" report should use Run instead.
 func RunWithWriter(
 	tw *tap.Writer,
 	w io.Writer,
 	hierarchy sweatfile.Hierarchy,
 	wtPath, branch string,
 	ownWriter bool,
-) error {
+) ([]string, error) {
 	cmd := hierarchy.Merged.PreMergeHookCommand()
 	if cmd == nil || *cmd == "" {
-		return nil
+		return nil, nil
 	}
 
 	if tw == nil {
-		return hierarchy.Merged.RunPreMergeHook(wtPath, w)
+		return nil, hierarchy.Merged.RunPreMergeHook(wtPath, w)
 	}
 
 	desc := "pre-merge hook for " + branch + ": `" + *cmd + "`"
 
 	if embeds.MadderBin() != "" {
-		hookErr := runHookCompact(tw, hierarchy, wtPath, *cmd, desc)
+		blobURI, hookErr := runHookCompact(tw, hierarchy, wtPath, *cmd, desc)
 		if hookErr != nil && ownWriter {
 			tw.Plan()
 		}
-		return hookErr
+		var blobURIs []string
+		if blobURI != "" {
+			blobURIs = []string{blobURI}
+		}
+		return blobURIs, hookErr
 	}
 
 	var hookErr error
@@ -134,7 +144,7 @@ func RunWithWriter(
 	if hookErr != nil && ownWriter {
 		tw.Plan()
 	}
-	return hookErr
+	return nil, hookErr
 }
 
 // runHookCompact runs the pre-merge hook with bytes tee'd into both
@@ -142,7 +152,10 @@ func RunWithWriter(
 // resource_link URI), and (b) an in-memory tail ring so the last 50
 // lines surface in-band. Emits a single TAP test point with YAMLish
 // diagnostics carrying command/tail/resource_link/exit_code/elapsed.
-func runHookCompact(tw *tap.Writer, hierarchy sweatfile.Hierarchy, wtPath, cmd, desc string) error {
+//
+// Returns the resource_link URI when madder produced a blob, or "" when
+// it didn't (madder spawn failed, or post-hook write/parse failed).
+func runHookCompact(tw *tap.Writer, hierarchy sweatfile.Hierarchy, wtPath, cmd, desc string) (string, error) {
 	madderStdin, finishMadder, err := madder.Write(wtPath, embeds.MadderBin())
 	if err != nil {
 		// Madder failed to spawn; degrade to tail-only without a
@@ -165,8 +178,10 @@ func runHookCompact(tw *tap.Writer, hierarchy sweatfile.Hierarchy, wtPath, cmd, 
 		"exit_code": exitCodeFromErr(hookErr),
 		"elapsed":   elapsed.Round(time.Millisecond).String(),
 	}
+	var blobURI string
 	if blobID != "" {
-		extras["resource_link"] = "madder://.default/" + blobID
+		blobURI = "madder://.default/" + blobID
+		extras["resource_link"] = blobURI
 	} else if madderErr != nil {
 		extras["resource_link_error"] = madderErr.Error()
 	}
@@ -185,7 +200,7 @@ func runHookCompact(tw *tap.Writer, hierarchy sweatfile.Hierarchy, wtPath, cmd, 
 	} else {
 		tw.OkDiag(desc, &tap.Diagnostics{Extras: extras})
 	}
-	return hookErr
+	return blobURI, hookErr
 }
 
 // exitCodeFromErr extracts a process exit code from an *exec.ExitError.

@@ -73,8 +73,12 @@ func TestRunHookSuccessTAP(t *testing.T) {
 	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"true\"\n")
 
 	var buf bytes.Buffer
-	if err := Run(&buf, "tap", wtPath, false); err != nil {
+	blobURIs, err := Run(&buf, "tap", wtPath, false)
+	if err != nil {
 		t.Fatalf("Run() error: %v", err)
+	}
+	if len(blobURIs) != 0 {
+		t.Errorf("expected no blob URIs without madder pinned, got %v", blobURIs)
 	}
 
 	got := buf.String()
@@ -97,7 +101,7 @@ func TestRunHookFailureTAP(t *testing.T) {
 	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"false\"\n")
 
 	var buf bytes.Buffer
-	err := Run(&buf, "tap", wtPath, false)
+	_, err := Run(&buf, "tap", wtPath, false)
 	if err == nil {
 		t.Fatalf("expected error when hook fails, got nil. Output: %s", buf.String())
 	}
@@ -148,8 +152,12 @@ func TestRunHookCompactShape(t *testing.T) {
 	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"echo line-one; echo line-two\"\n")
 
 	var buf bytes.Buffer
-	if err := Run(&buf, "tap", wtPath, false); err != nil {
+	blobURIs, err := Run(&buf, "tap", wtPath, false)
+	if err != nil {
 		t.Fatalf("Run() error: %v", err)
+	}
+	if len(blobURIs) != 1 || blobURIs[0] != "madder://.default/sha256-fake" {
+		t.Errorf("expected blob URIs == [madder://.default/sha256-fake], got %v", blobURIs)
 	}
 
 	got := buf.String()
@@ -191,8 +199,12 @@ func TestRunHookCompactShape_Failure(t *testing.T) {
 	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"echo about-to-fail; exit 7\"\n")
 
 	var buf bytes.Buffer
-	if err := Run(&buf, "tap", wtPath, false); err == nil {
+	blobURIs, err := Run(&buf, "tap", wtPath, false)
+	if err == nil {
 		t.Fatal("expected hook failure")
+	}
+	if len(blobURIs) != 1 || blobURIs[0] != "madder://.default/sha256-fake" {
+		t.Errorf("expected blob URIs even on failure, got %v", blobURIs)
 	}
 
 	got := buf.String()
@@ -215,7 +227,7 @@ func TestRunNoHookConfigured(t *testing.T) {
 	// No sweatfile written.
 
 	var buf bytes.Buffer
-	if err := Run(&buf, "tap", wtPath, false); err != nil {
+	if _, err := Run(&buf, "tap", wtPath, false); err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
 

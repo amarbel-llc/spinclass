@@ -66,19 +66,24 @@ func Run(execr executor.Executor, format string, target string, gitSync bool, ve
 		return err
 	}
 
-	return Resolved(execr, os.Stdout, nil, format, repoPath, wtPath, branch, defaultBranch, gitSync, inSession, verbose)
+	_, err = Resolved(execr, os.Stdout, nil, format, repoPath, wtPath, branch, defaultBranch, gitSync, inSession, verbose)
+	return err
 }
 
-func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repoPath, wtPath, branch, defaultBranch string, gitSync bool, inSession bool, verbose bool) error {
-	if info, err := os.Stat(repoPath); err != nil || !info.IsDir() {
-		return fmt.Errorf("repository not found: %s", repoPath)
+// Resolved orchestrates the rebase/pre-merge-hook/merge sequence for a
+// fully-resolved worktree. Returns any resource_link URIs emitted by the
+// pre-merge hook (one per hook step that produced a madder blob; empty
+// when madder is not pinned at build time) and a non-nil error if any
+// step failed.
+func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repoPath, wtPath, branch, defaultBranch string, gitSync bool, inSession bool, verbose bool) (blobURIs []string, err error) {
+	if info, statErr := os.Stat(repoPath); statErr != nil || !info.IsDir() {
+		return nil, fmt.Errorf("repository not found: %s", repoPath)
 	}
 
 	if defaultBranch == "" {
-		var err error
 		defaultBranch, err = ResolveDefaultBranch(repoPath)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -94,20 +99,20 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 	if home, _ := os.UserHomeDir(); home != "" {
 		hierarchy, hErr := sweatfile.LoadWorktreeHierarchy(home, repoPath, wtPath)
 		if hErr == nil && hierarchy.Merged.DisableMergeEnabled() {
-			err := fmt.Errorf(
+			disableErr := fmt.Errorf(
 				"merge disabled by sweatfile (disable-merge=true at %s); use `sc check` to run the pre-merge hook without merging",
 				disableMergeSource(hierarchy),
 			)
 			if tw != nil {
 				tw.NotOk("merge "+branch, map[string]string{
 					"severity": "fail",
-					"message":  err.Error(),
+					"message":  disableErr.Error(),
 				})
 				if ownWriter {
 					tw.Plan()
 				}
 			}
-			return err
+			return nil, disableErr
 		}
 	}
 
@@ -122,9 +127,9 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 		}
 
 		if tw != nil {
-			out, err := git.Pull(repoPath)
-			if err != nil {
-				diag := map[string]string{"severity": "fail", "message": err.Error()}
+			out, pullErr := git.Pull(repoPath)
+			if pullErr != nil {
+				diag := map[string]string{"severity": "fail", "message": pullErr.Error()}
 				if out != "" {
 					diag["output"] = out
 				}
@@ -132,7 +137,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 				if ownWriter {
 					tw.Plan()
 				}
-				return err
+				return nil, pullErr
 			}
 			if verbose && out != "" {
 				tw.OkDiag("pull "+defaultBranch, &tap.Diagnostics{Extras: map[string]any{"output": out}})
@@ -140,8 +145,8 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 				tw.Ok("pull " + defaultBranch)
 			}
 		} else {
-			if err := git.RunPassthrough(repoPath, "pull"); err != nil {
-				return err
+			if pullErr := git.RunPassthrough(repoPath, "pull"); pullErr != nil {
+				return nil, pullErr
 			}
 		}
 	}
@@ -151,9 +156,9 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 	}
 
 	if tw != nil {
-		out, err := git.RunEnv(wtPath, []string{"GIT_SEQUENCE_EDITOR=true"}, "rebase", defaultBranch, "-i")
-		if err != nil {
-			diag := map[string]string{"severity": "fail", "message": err.Error()}
+		out, rebaseErr := git.RunEnv(wtPath, []string{"GIT_SEQUENCE_EDITOR=true"}, "rebase", defaultBranch, "-i")
+		if rebaseErr != nil {
+			diag := map[string]string{"severity": "fail", "message": rebaseErr.Error()}
 			if out != "" {
 				diag["output"] = out
 			}
@@ -161,7 +166,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 			if ownWriter {
 				tw.Plan()
 			}
-			return err
+			return nil, rebaseErr
 		}
 		if verbose && out != "" {
 			tw.OkDiag("rebase "+branch, &tap.Diagnostics{Extras: map[string]any{"output": out}})
@@ -169,14 +174,16 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 			tw.Ok("rebase " + branch)
 		}
 	} else {
-		if err := git.RunPassthroughEnv(wtPath, []string{"GIT_SEQUENCE_EDITOR=true"}, "rebase", defaultBranch, "-i"); err != nil {
+		if rebaseErr := git.RunPassthroughEnv(wtPath, []string{"GIT_SEQUENCE_EDITOR=true"}, "rebase", defaultBranch, "-i"); rebaseErr != nil {
 			log.Error("rebase failed, not merging")
-			return err
+			return nil, rebaseErr
 		}
 	}
 
-	if err := runPreMergeHook(tw, w, repoPath, wtPath, branch, ownWriter); err != nil {
-		return err
+	hookURIs, hookErr := runPreMergeHook(tw, w, repoPath, wtPath, branch, ownWriter)
+	blobURIs = append(blobURIs, hookURIs...)
+	if hookErr != nil {
+		return blobURIs, hookErr
 	}
 
 	if tw == nil {
@@ -184,9 +191,9 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 	}
 
 	if tw != nil {
-		out, err := git.Run(repoPath, "merge", "--ff-only", branch)
-		if err != nil {
-			diag := map[string]string{"severity": "fail", "message": err.Error()}
+		out, mergeErr := git.Run(repoPath, "merge", "--ff-only", branch)
+		if mergeErr != nil {
+			diag := map[string]string{"severity": "fail", "message": mergeErr.Error()}
 			if out != "" {
 				diag["output"] = out
 			}
@@ -194,7 +201,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 			if ownWriter {
 				tw.Plan()
 			}
-			return err
+			return blobURIs, mergeErr
 		}
 		if verbose && out != "" {
 			tw.OkDiag("merge "+branch, &tap.Diagnostics{Extras: map[string]any{"output": out}})
@@ -202,9 +209,9 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 			tw.Ok("merge " + branch)
 		}
 	} else {
-		if err := git.RunPassthrough(repoPath, "merge", "--ff-only", branch); err != nil {
+		if mergeErr := git.RunPassthrough(repoPath, "merge", "--ff-only", branch); mergeErr != nil {
 			log.Error("merge failed, not removing worktree")
-			return err
+			return blobURIs, mergeErr
 		}
 	}
 
@@ -221,9 +228,9 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 		}
 
 		if tw != nil {
-			out, err := git.Run(repoPath, "worktree", "remove", wtPath)
-			if err != nil {
-				diag := map[string]string{"severity": "fail", "message": err.Error()}
+			out, removeErr := git.Run(repoPath, "worktree", "remove", wtPath)
+			if removeErr != nil {
+				diag := map[string]string{"severity": "fail", "message": removeErr.Error()}
 				if out != "" {
 					diag["output"] = out
 				}
@@ -231,7 +238,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 				if ownWriter {
 					tw.Plan()
 				}
-				return err
+				return blobURIs, removeErr
 			}
 			if verbose && out != "" {
 				tw.OkDiag("remove worktree "+branch, &tap.Diagnostics{Extras: map[string]any{"output": out}})
@@ -239,8 +246,8 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 				tw.Ok("remove worktree " + branch)
 			}
 		} else {
-			if err := git.RunPassthrough(repoPath, "worktree", "remove", wtPath); err != nil {
-				return err
+			if removeErr := git.RunPassthrough(repoPath, "worktree", "remove", wtPath); removeErr != nil {
+				return blobURIs, removeErr
 			}
 		}
 
@@ -249,9 +256,9 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 		}
 
 		if tw != nil {
-			out, err := git.BranchDelete(repoPath, branch)
-			if err != nil {
-				diag := map[string]string{"severity": "fail", "message": err.Error()}
+			out, delErr := git.BranchDelete(repoPath, branch)
+			if delErr != nil {
+				diag := map[string]string{"severity": "fail", "message": delErr.Error()}
 				if out != "" {
 					diag["output"] = out
 				}
@@ -259,7 +266,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 				if ownWriter {
 					tw.Plan()
 				}
-				return err
+				return blobURIs, delErr
 			}
 			if verbose && out != "" {
 				tw.OkDiag("delete branch "+branch, &tap.Diagnostics{Extras: map[string]any{"output": out}})
@@ -267,8 +274,8 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 				tw.Ok("delete branch " + branch)
 			}
 		} else {
-			if _, err := git.BranchDelete(repoPath, branch); err != nil {
-				return err
+			if _, delErr := git.BranchDelete(repoPath, branch); delErr != nil {
+				return blobURIs, delErr
 			}
 		}
 	}
@@ -279,9 +286,9 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 		}
 
 		if tw != nil {
-			out, err := git.Push(repoPath)
-			if err != nil {
-				diag := map[string]string{"severity": "fail", "message": err.Error()}
+			out, pushErr := git.Push(repoPath)
+			if pushErr != nil {
+				diag := map[string]string{"severity": "fail", "message": pushErr.Error()}
 				if out != "" {
 					diag["output"] = out
 				}
@@ -289,7 +296,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 				if ownWriter {
 					tw.Plan()
 				}
-				return err
+				return blobURIs, pushErr
 			}
 			if verbose && out != "" {
 				tw.OkDiag("push", &tap.Diagnostics{Extras: map[string]any{"output": out}})
@@ -297,8 +304,8 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 				tw.Ok("push")
 			}
 		} else {
-			if err := git.RunPassthrough(repoPath, "push"); err != nil {
-				return err
+			if pushErr := git.RunPassthrough(repoPath, "push"); pushErr != nil {
+				return blobURIs, pushErr
 			}
 		}
 	}
@@ -310,13 +317,13 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 	if inSession {
 		// Remove session state file after successful merge
 		session.Remove(repoPath, branch)
-		return nil
+		return blobURIs, nil
 	}
 
 	// Outside session: request close if active, then clean up state
 	executor.RequestClose(repoPath, branch)
 	session.Remove(repoPath, branch)
-	return nil
+	return blobURIs, nil
 }
 
 // isInsideSession returns true when both SPINCLASS_SESSION_ID is set and cwd is
@@ -414,30 +421,32 @@ func promptDefaultBranch() (string, error) {
 }
 
 // runPreMergeHook loads the sweatfile hierarchy and runs the configured
-// pre-merge hook. Returns nil silently when home is not resolvable or
-// the hierarchy fails to load. In passthrough mode, emits the legacy
-// "running pre-merge hook" / "pre-merge hook failed, not merging" log
-// lines that operators rely on.
-func runPreMergeHook(tw *tap.Writer, w io.Writer, repoPath, wtPath, branch string, ownWriter bool) error {
+// pre-merge hook. Returns (nil, nil) silently when home is not
+// resolvable or the hierarchy fails to load. Returned blobURIs are the
+// resource_link URIs emitted for hook output (compact path only). In
+// passthrough mode, emits the legacy "running pre-merge hook" /
+// "pre-merge hook failed, not merging" log lines that operators rely
+// on.
+func runPreMergeHook(tw *tap.Writer, w io.Writer, repoPath, wtPath, branch string, ownWriter bool) ([]string, error) {
 	home, _ := os.UserHomeDir()
 	if home == "" {
-		return nil
+		return nil, nil
 	}
 	hierarchy, err := sweatfile.LoadWorktreeHierarchy(home, repoPath, wtPath)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	if tw == nil {
 		cmd := hierarchy.Merged.PreMergeHookCommand()
 		if cmd == nil || *cmd == "" {
-			return nil
+			return nil, nil
 		}
 		log.Info("running pre-merge hook", "worktree", branch)
-		if err := check.RunWithWriter(nil, w, hierarchy, wtPath, branch, ownWriter); err != nil {
+		if _, err := check.RunWithWriter(nil, w, hierarchy, wtPath, branch, ownWriter); err != nil {
 			log.Error("pre-merge hook failed, not merging")
-			return err
+			return nil, err
 		}
-		return nil
+		return nil, nil
 	}
 	return check.RunWithWriter(tw, w, hierarchy, wtPath, branch, ownWriter)
 }

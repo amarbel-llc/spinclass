@@ -11,6 +11,8 @@ import (
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/server"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/transport"
 
+	"github.com/amarbel-llc/spinclass/internal/embeds"
+	"github.com/amarbel-llc/spinclass/internal/resources"
 	"github.com/amarbel-llc/spinclass/internal/servelog"
 )
 
@@ -38,6 +40,20 @@ func registerServeCommand(app *command.App) {
 			registry := server.NewToolRegistryV1()
 			app.RegisterMCPToolsV1(registry)
 
+			// Resource provider is registered only when madder is build-time
+			// pinned: that's the same gate that controls whether merge/check
+			// emit `resource_link` URIs in the first place. Capturing cwd
+			// here scopes every `resources/read` call to this serve
+			// process's worktree.
+			var resourceProvider server.ResourceProviderV1
+			if madderBin := embeds.MadderBin(); madderBin != "" {
+				cwd, cwdErr := os.Getwd()
+				if cwdErr != nil {
+					return fmt.Errorf("resolving cwd for resource provider: %w", cwdErr)
+				}
+				resourceProvider = resources.NewMadderProvider(cwd, madderBin)
+			}
+
 			t := transport.NewStdio(os.Stdin, os.Stdout)
 
 			// Safety net: once the transport has captured the JSON-RPC pipe,
@@ -51,6 +67,7 @@ func registerServeCommand(app *command.App) {
 				ServerVersion: app.Version,
 				Instructions:  "Git worktree session manager. Use the merge tool to merge a worktree branch into the default branch.",
 				Tools:         registry,
+				Resources:     resourceProvider,
 			})
 			if err != nil {
 				return fmt.Errorf("creating server: %w", err)
