@@ -7,8 +7,10 @@ package nixgc
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,6 +68,10 @@ var readLink = os.Readlink
 type commandRunner interface {
 	Output(name string, args ...string) ([]byte, error)
 	CombinedOutput(name string, args ...string) ([]byte, error)
+	// Run executes name with args, streaming stdout to outW and stderr
+	// to errW. Reap uses this so callers can observe per-path nix-store
+	// progress in real time (e.g. via a TAP OutputBlock writer).
+	Run(outW, errW io.Writer, name string, args ...string) error
 }
 
 type execRunner struct{}
@@ -76,6 +82,13 @@ func (execRunner) Output(name string, args ...string) ([]byte, error) {
 
 func (execRunner) CombinedOutput(name string, args ...string) ([]byte, error) {
 	return exec.Command(name, args...).CombinedOutput()
+}
+
+func (execRunner) Run(outW, errW io.Writer, name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Stdout = outW
+	cmd.Stderr = errW
+	return cmd.Run()
 }
 
 // NewPlan enumerates gc roots resolving into worktreePath and expands their
@@ -210,24 +223,38 @@ func expandClosure(roots []Root) ([]string, error) {
 	return out2, nil
 }
 
-// Reap iterates plan.Closure and attempts `nix-store --delete` on each path.
-// Nix refuses paths still kept alive elsewhere; those are counted as Kept.
-// Other failures accumulate in Errors but iteration continues.
-func Reap(plan Plan) Summary {
+// Reap iterates plan.Closure and attempts `nix-store --delete` on each
+// path. nix-store stdout is streamed to outW and stderr to errW so
+// callers can observe per-path progress in real time (e.g. via a TAP
+// OutputBlock writer); pass io.Discard to suppress. Output is also
+// captured internally so "still alive" refusals can be classified as
+// Kept rather than Errors. Nil writers are treated as io.Discard.
+func Reap(plan Plan, outW, errW io.Writer) Summary {
 	var s Summary
+	if outW == nil {
+		outW = io.Discard
+	}
+	if errW == nil {
+		errW = io.Discard
+	}
 	for _, path := range plan.Closure {
-		out, err := runner.CombinedOutput("nix-store", "--delete", path)
+		var captured bytes.Buffer
+		err := runner.Run(
+			io.MultiWriter(outW, &captured),
+			io.MultiWriter(errW, &captured),
+			"nix-store", "--delete", path,
+		)
 		if err == nil {
 			s.Reclaimed++
 			continue
 		}
-		if isStillAliveRefusal(string(out)) {
+		if isStillAliveRefusal(captured.String()) {
 			s.Kept++
 			continue
 		}
 		s.Errors = append(
 			s.Errors,
-			fmt.Errorf("delete %s: %w: %s", path, err, strings.TrimSpace(string(out))),
+			fmt.Errorf("delete %s: %w: %s", path, err, strings.TrimSpace(captured.String())),
 		)
 	}
 	return s

@@ -1,9 +1,12 @@
 package nixgc
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -151,7 +154,8 @@ func TestReapTallies(t *testing.T) {
 		},
 	})()
 
-	s := Reap(plan)
+	var streamed bytes.Buffer
+	s := Reap(plan, &streamed, &streamed)
 	if s.Reclaimed != 1 {
 		t.Errorf("Reclaimed = %d, want 1", s.Reclaimed)
 	}
@@ -160,6 +164,15 @@ func TestReapTallies(t *testing.T) {
 	}
 	if len(s.Errors) != 1 {
 		t.Errorf("Errors = %v, want 1 entry", s.Errors)
+	}
+
+	// Per-path nix-store output should also reach the stream writer
+	// (so callers can show real-time progress / diagnose hangs).
+	got := streamed.String()
+	for _, want := range []string{"deleted", "still alive", "connection refused"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("streamed output missing %q; got %q", want, got)
+		}
 	}
 }
 
@@ -201,6 +214,13 @@ func (s stubRunner) CombinedOutput(_ string, _ ...string) ([]byte, error) {
 	return s.output, s.err
 }
 
+func (s stubRunner) Run(outW, _ io.Writer, _ string, _ ...string) error {
+	if outW != nil && len(s.output) > 0 {
+		outW.Write(s.output)
+	}
+	return s.err
+}
+
 type runResult struct {
 	output []byte
 	err    error
@@ -224,4 +244,22 @@ func (s scriptedRunner) CombinedOutput(_ string, args ...string) ([]byte, error)
 		return nil, errors.New("scripted: no result for " + path)
 	}
 	return r.output, r.err
+}
+
+// Run mirrors CombinedOutput's path-keyed dispatch but writes the
+// scripted bytes to outW (so Reap's caller sees them streamed live)
+// AND lets Reap's internal capture buffer see them via io.MultiWriter.
+func (s scriptedRunner) Run(outW, _ io.Writer, _ string, args ...string) error {
+	if len(args) < 2 {
+		return errors.New("scripted: need at least 2 args (--delete <path>)")
+	}
+	path := args[len(args)-1]
+	r, ok := s.results[path]
+	if !ok {
+		return errors.New("scripted: no result for " + path)
+	}
+	if outW != nil && len(r.output) > 0 {
+		outW.Write(r.output)
+	}
+	return r.err
 }

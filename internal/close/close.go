@@ -1,6 +1,7 @@
 package close
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -133,8 +134,7 @@ func RunResolved(w io.Writer, repoPath, wtPath, branch string, force bool, nixGC
 	}
 
 	if gcPlan != nil {
-		summary := nixgc.Reap(*gcPlan)
-		emitNixGCSummary(tw, summary)
+		runReap(tw, *gcPlan, branch)
 	}
 
 	if tw != nil {
@@ -142,6 +142,72 @@ func RunResolved(w io.Writer, repoPath, wtPath, branch string, force bool, nixGC
 	}
 
 	return nil
+}
+
+// runReap executes nixgc.Reap as a single TAP test point. nix-store
+// stdout+stderr stream live into the TAP OutputBlock so the operator
+// can observe per-path progress (and notice if a path stalls). When
+// no TAP writer is attached (e.g. table format), the reap still runs
+// but its output goes to os.Stderr — silent gc would defeat the point
+// of moving this into a visible test point.
+func runReap(tw *tap.Writer, plan nixgc.Plan, branch string) {
+	desc := fmt.Sprintf("nix-gc reap %s", branch)
+	if tw == nil {
+		nixgc.Reap(plan, os.Stderr, os.Stderr)
+		return
+	}
+	var summary nixgc.Summary
+	tw.OutputBlock(desc, func(ob *tap.OutputBlockWriter) *tap.Diagnostics {
+		lw := &lineWriter{ob: ob}
+		summary = nixgc.Reap(plan, lw, lw)
+		lw.Flush()
+		extras := map[string]any{
+			"reclaimed": summary.Reclaimed,
+			"kept":      summary.Kept,
+			"closure":   len(plan.Closure),
+		}
+		if len(summary.Errors) > 0 {
+			extras["errors"] = len(summary.Errors)
+			extras["first_error"] = summary.Errors[0].Error()
+			return &tap.Diagnostics{
+				Severity: "warn",
+				Message:  fmt.Sprintf("%d path(s) failed to delete", len(summary.Errors)),
+				Extras:   extras,
+			}
+		}
+		return &tap.Diagnostics{Extras: extras}
+	})
+}
+
+// lineWriter splits incoming bytes on '\n' and forwards each complete
+// line to an OutputBlockWriter. Partial trailing content is buffered
+// until a newline arrives or Flush() is called. Mirrors the helper in
+// internal/check/check.go — duplicated rather than shared so each
+// command's output handling stays self-contained.
+type lineWriter struct {
+	ob  *tap.OutputBlockWriter
+	buf []byte
+}
+
+func (lw *lineWriter) Write(p []byte) (int, error) {
+	lw.buf = append(lw.buf, p...)
+	for {
+		i := bytes.IndexByte(lw.buf, '\n')
+		if i < 0 {
+			break
+		}
+		lw.ob.Line(string(lw.buf[:i]))
+		lw.buf = lw.buf[i+1:]
+	}
+	return len(p), nil
+}
+
+func (lw *lineWriter) Flush() {
+	if len(lw.buf) == 0 {
+		return
+	}
+	lw.ob.Line(string(lw.buf))
+	lw.buf = lw.buf[:0]
 }
 
 // planNixGC captures the worktree's nix gc roots before removal. Returns nil
@@ -170,28 +236,6 @@ func planNixGC(repoPath, wtPath string, override *bool) *nixgc.Plan {
 		return nil
 	}
 	return &plan
-}
-
-// emitNixGCSummary writes one TAP line summarizing the reap outcome. Errors
-// surface as `not ok` but do NOT propagate; the worktree is already gone, so
-// gc failure is informational rather than fatal.
-func emitNixGCSummary(tw *tap.Writer, s nixgc.Summary) {
-	if tw == nil {
-		return
-	}
-	desc := fmt.Sprintf(
-		"nix-gc: reclaimed %d path(s), kept %d (still rooted)",
-		s.Reclaimed, s.Kept,
-	)
-	if len(s.Errors) == 0 {
-		tw.Ok(desc)
-		return
-	}
-	diag := map[string]string{
-		"errors": fmt.Sprintf("%d", len(s.Errors)),
-		"first":  s.Errors[0].Error(),
-	}
-	tw.NotOk(desc, diag)
 }
 
 func describeUnintegrated(branch string, unintegrated, dirty bool) string {
