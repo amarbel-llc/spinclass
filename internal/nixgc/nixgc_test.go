@@ -146,12 +146,17 @@ func TestReapTallies(t *testing.T) {
 		"/nix/store/alive",
 		"/nix/store/broken",
 	}}
-	defer overrideRunner(scriptedRunner{
-		results: map[string]runResult{
-			"/nix/store/ok":     {output: []byte("deleted\n"), err: nil},
-			"/nix/store/alive":  {output: []byte("error: cannot delete path '/nix/store/alive' since it is still alive\n"), err: errors.New("exit status 1")},
-			"/nix/store/broken": {output: []byte("error: connection refused\n"), err: errors.New("exit status 1")},
-		},
+	// Reap now batches the entire closure into a single nix-store
+	// invocation; the stub returns the combined stderr for that one call.
+	combinedStderr := strings.Join([]string{
+		"deleting '/nix/store/ok'",
+		"error: cannot delete path '/nix/store/alive' since it is still alive",
+		"error: some other failure for /nix/store/broken",
+		"",
+	}, "\n")
+	defer overrideRunner(stubRunner{
+		output: []byte(combinedStderr),
+		err:    errors.New("exit status 1"),
 	})()
 
 	var streamed bytes.Buffer
@@ -162,17 +167,51 @@ func TestReapTallies(t *testing.T) {
 	if s.Kept != 1 {
 		t.Errorf("Kept = %d, want 1", s.Kept)
 	}
+	// "broken" was neither deleted nor still-alive — it lands in Errors
+	// as a single batched entry describing how many paths went unclassified.
 	if len(s.Errors) != 1 {
 		t.Errorf("Errors = %v, want 1 entry", s.Errors)
 	}
 
-	// Per-path nix-store output should also reach the stream writer
-	// (so callers can show real-time progress / diagnose hangs).
+	// Combined nix-store output should reach the stream writer so callers
+	// can show real-time progress / diagnose hangs.
 	got := streamed.String()
-	for _, want := range []string{"deleted", "still alive", "connection refused"} {
+	for _, want := range []string{"deleting '/nix/store/ok'", "still alive", "some other failure"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("streamed output missing %q; got %q", want, got)
 		}
+	}
+}
+
+func TestReapEmptyClosureIsNoop(t *testing.T) {
+	// With no paths to delete, Reap must not invoke nix-store at all
+	// (the runner is set to one that errors on any call to make this
+	// observable).
+	defer overrideRunner(stubRunner{err: errors.New("nix-store should not be called")})()
+
+	s := Reap(Plan{}, nil, nil)
+	if s.Reclaimed != 0 || s.Kept != 0 || len(s.Errors) != 0 {
+		t.Errorf("expected empty Summary for empty closure, got %+v", s)
+	}
+}
+
+func TestReapAllSucceeded(t *testing.T) {
+	plan := Plan{Closure: []string{
+		"/nix/store/a",
+		"/nix/store/b",
+	}}
+	combinedStderr := "deleting '/nix/store/a'\ndeleting '/nix/store/b'\n"
+	defer overrideRunner(stubRunner{output: []byte(combinedStderr)})()
+
+	s := Reap(plan, nil, nil)
+	if s.Reclaimed != 2 {
+		t.Errorf("Reclaimed = %d, want 2", s.Reclaimed)
+	}
+	if s.Kept != 0 {
+		t.Errorf("Kept = %d, want 0", s.Kept)
+	}
+	if len(s.Errors) != 0 {
+		t.Errorf("Errors = %v, want none", s.Errors)
 	}
 }
 
@@ -219,47 +258,4 @@ func (s stubRunner) Run(outW, _ io.Writer, _ string, _ ...string) error {
 		outW.Write(s.output)
 	}
 	return s.err
-}
-
-type runResult struct {
-	output []byte
-	err    error
-}
-
-type scriptedRunner struct {
-	results map[string]runResult
-}
-
-func (s scriptedRunner) Output(_ string, _ ...string) ([]byte, error) {
-	return nil, nil
-}
-
-func (s scriptedRunner) CombinedOutput(_ string, args ...string) ([]byte, error) {
-	if len(args) < 2 {
-		return nil, errors.New("scripted: need at least 2 args (--delete <path>)")
-	}
-	path := args[len(args)-1]
-	r, ok := s.results[path]
-	if !ok {
-		return nil, errors.New("scripted: no result for " + path)
-	}
-	return r.output, r.err
-}
-
-// Run mirrors CombinedOutput's path-keyed dispatch but writes the
-// scripted bytes to outW (so Reap's caller sees them streamed live)
-// AND lets Reap's internal capture buffer see them via io.MultiWriter.
-func (s scriptedRunner) Run(outW, _ io.Writer, _ string, args ...string) error {
-	if len(args) < 2 {
-		return errors.New("scripted: need at least 2 args (--delete <path>)")
-	}
-	path := args[len(args)-1]
-	r, ok := s.results[path]
-	if !ok {
-		return errors.New("scripted: no result for " + path)
-	}
-	if outW != nil && len(r.output) > 0 {
-		outW.Write(r.output)
-	}
-	return r.err
 }

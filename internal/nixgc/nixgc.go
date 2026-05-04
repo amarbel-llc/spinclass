@@ -223,12 +223,25 @@ func expandClosure(roots []Root) ([]string, error) {
 	return out2, nil
 }
 
-// Reap iterates plan.Closure and attempts `nix-store --delete` on each
-// path. nix-store stdout is streamed to outW and stderr to errW so
-// callers can observe per-path progress in real time (e.g. via a TAP
-// OutputBlock writer); pass io.Discard to suppress. Output is also
-// captured internally so "still alive" refusals can be classified as
-// Kept rather than Errors. Nil writers are treated as io.Discard.
+// Reap deletes plan.Closure with a single `nix-store --delete <p1> <p2>
+// ...` invocation. Batching avoids the per-path fork+exec+daemon-RTT cost
+// that a closure of hundreds of paths would otherwise pay; nix's daemon
+// processes the list in one connection and continues past per-path "still
+// alive" refusals.
+//
+// nix-store stdout is streamed to outW and stderr to errW so callers can
+// observe progress in real time (e.g. via a TAP OutputBlock writer); pass
+// io.Discard to suppress. The output is also captured internally and
+// scanned to classify per-path outcomes:
+//
+//   - lines containing "deleting '" are counted as Reclaimed
+//     (nix's default-verbosity marker for each successful delete)
+//   - lines matching countStillAliveRefusals are counted as Kept
+//   - any closure paths not accounted for by either count are surfaced
+//     as a single error in s.Errors, with the captured output attached
+//     for diagnosis
+//
+// Nil writers are treated as io.Discard. An empty closure is a no-op.
 func Reap(plan Plan, outW, errW io.Writer) Summary {
 	var s Summary
 	if outW == nil {
@@ -237,27 +250,41 @@ func Reap(plan Plan, outW, errW io.Writer) Summary {
 	if errW == nil {
 		errW = io.Discard
 	}
-	for _, path := range plan.Closure {
-		var captured bytes.Buffer
-		err := runner.Run(
-			io.MultiWriter(outW, &captured),
-			io.MultiWriter(errW, &captured),
-			"nix-store", "--delete", path,
+	if len(plan.Closure) == 0 {
+		return s
+	}
+
+	args := append([]string{"--delete"}, plan.Closure...)
+	var captured bytes.Buffer
+	err := runner.Run(
+		io.MultiWriter(outW, &captured),
+		io.MultiWriter(errW, &captured),
+		"nix-store", args...,
+	)
+
+	output := captured.String()
+	s.Reclaimed = strings.Count(output, "deleting '")
+	s.Kept = countStillAliveRefusals(output)
+
+	unaccounted := len(plan.Closure) - s.Reclaimed - s.Kept
+	if unaccounted > 0 {
+		errMsg := fmt.Errorf(
+			"nix-store --delete: %d/%d path(s) not classified as deleted or kept (exit: %v): %s",
+			unaccounted, len(plan.Closure), err, strings.TrimSpace(output),
 		)
-		if err == nil {
-			s.Reclaimed++
-			continue
-		}
-		if isStillAliveRefusal(captured.String()) {
-			s.Kept++
-			continue
-		}
-		s.Errors = append(
-			s.Errors,
-			fmt.Errorf("delete %s: %w: %s", path, err, strings.TrimSpace(captured.String())),
-		)
+		s.Errors = append(s.Errors, errMsg)
 	}
 	return s
+}
+
+// countStillAliveRefusals tallies "cannot delete path '<p>' since it is
+// still alive" (and the related "still in use" / "is in use") error
+// lines in nix-store's stderr — one per refused path.
+func countStillAliveRefusals(output string) int {
+	lower := strings.ToLower(output)
+	return strings.Count(lower, "still alive") +
+		strings.Count(lower, "still in use") +
+		strings.Count(lower, "is in use")
 }
 
 func isStillAliveRefusal(output string) bool {
