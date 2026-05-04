@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/log"
 	"github.com/mattn/go-isatty"
 
+	"github.com/amarbel-llc/spinclass/internal/close"
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/merge"
@@ -321,6 +322,18 @@ func closeShop(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, fo
 		tw.Plan()
 	} else {
 		log.Info(desc, "worktree", rp.SessionKey)
+	}
+
+	// Auto-close prompt: when the branch is fully merged into the
+	// default and the worktree is clean, offer to tear down the
+	// session before returning. Gated on interactive so headless
+	// callers (CI, --no-attach, no TTY) never hang on huh.
+	if interactive && commitsAhead == 0 && worktreeStatus == "" {
+		statusOut, _ := git.Run(rp.AbsPath, "status")
+		proceed, perr := promptCloseFullyMerged(rp.Branch, defaultBranch, statusOut)
+		if perr == nil && proceed {
+			return close.RunResolved(w, rp.RepoPath, rp.AbsPath, rp.Branch, false, nil, format)
+		}
 	}
 
 	return nil

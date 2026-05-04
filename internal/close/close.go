@@ -39,6 +39,14 @@ func Run(w io.Writer, target string, force bool, nixGCOverride *bool, format str
 		return err
 	}
 
+	return RunResolved(w, repoPath, wtPath, branch, force, nixGCOverride, format)
+}
+
+// RunResolved closes a session whose paths have already been resolved
+// by the caller. Equivalent to Run minus the cwd/target lookup; callers
+// that already know the worktree (e.g. internal/shop's exit handler)
+// delegate cleanup here without re-resolving.
+func RunResolved(w io.Writer, repoPath, wtPath, branch string, force bool, nixGCOverride *bool, format string) error {
 	var tw *tap.Writer
 	if format == "tap" {
 		tw = tap.NewWriter(w)
