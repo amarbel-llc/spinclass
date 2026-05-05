@@ -1,13 +1,11 @@
 package close
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/charmbracelet/huh"
@@ -17,6 +15,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/nixgc"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sessionpick"
+	"github.com/amarbel-llc/spinclass/internal/tapblock"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 
 	tap "github.com/amarbel-llc/tap/go"
@@ -159,7 +158,7 @@ func runReap(tw *tap.Writer, plan nixgc.Plan, branch string) {
 	}
 	var summary nixgc.Summary
 	tw.OutputBlock(desc, func(ob *tap.OutputBlockWriter) *tap.Diagnostics {
-		lw := &lineWriter{ob: ob}
+		lw := tapblock.NewLineWriter(ob)
 		summary = nixgc.Reap(plan, lw, lw)
 		lw.Flush()
 		extras := map[string]any{
@@ -178,47 +177,6 @@ func runReap(tw *tap.Writer, plan nixgc.Plan, branch string) {
 		}
 		return &tap.Diagnostics{Extras: extras}
 	})
-}
-
-// lineWriter splits incoming bytes on '\n' and forwards each complete
-// line to an OutputBlockWriter. Partial trailing content is buffered
-// until a newline arrives or Flush() is called. Mirrors the helper in
-// internal/check/check.go — duplicated rather than shared so each
-// command's output handling stays self-contained.
-//
-// Write/Flush are safe to call concurrently: nixgc.Reap passes the same
-// lineWriter as both stdout and stderr to nix-store, and os/exec spawns
-// one goroutine per stream. Without the mutex the two goroutines race
-// on buf and can panic with "slice bounds out of range".
-type lineWriter struct {
-	ob  *tap.OutputBlockWriter
-	mu  sync.Mutex
-	buf []byte
-}
-
-func (lw *lineWriter) Write(p []byte) (int, error) {
-	lw.mu.Lock()
-	defer lw.mu.Unlock()
-	lw.buf = append(lw.buf, p...)
-	for {
-		i := bytes.IndexByte(lw.buf, '\n')
-		if i < 0 {
-			break
-		}
-		lw.ob.Line(string(lw.buf[:i]))
-		lw.buf = lw.buf[i+1:]
-	}
-	return len(p), nil
-}
-
-func (lw *lineWriter) Flush() {
-	lw.mu.Lock()
-	defer lw.mu.Unlock()
-	if len(lw.buf) == 0 {
-		return
-	}
-	lw.ob.Line(string(lw.buf))
-	lw.buf = lw.buf[:0]
 }
 
 // planNixGC captures the worktree's nix gc roots before removal. Returns nil

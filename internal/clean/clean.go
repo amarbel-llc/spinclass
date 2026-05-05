@@ -1,7 +1,6 @@
 package clean
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +16,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/nixgc"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/tapblock"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 	tap "github.com/amarbel-llc/tap/go"
 )
@@ -135,7 +135,7 @@ func runReap(tw *tap.Writer, plan nixgc.Plan, branch string) {
 	}
 	var summary nixgc.Summary
 	tw.OutputBlock(desc, func(ob *tap.OutputBlockWriter) *tap.Diagnostics {
-		lw := &lineWriter{ob: ob}
+		lw := tapblock.NewLineWriter(ob)
 		summary = nixgc.Reap(plan, lw, lw)
 		lw.Flush()
 		extras := map[string]any{
@@ -154,35 +154,6 @@ func runReap(tw *tap.Writer, plan nixgc.Plan, branch string) {
 		}
 		return &tap.Diagnostics{Extras: extras}
 	})
-}
-
-// lineWriter splits incoming bytes on '\n' and forwards each complete
-// line to an OutputBlockWriter. Partial trailing content is buffered
-// until a newline arrives or Flush() is called.
-type lineWriter struct {
-	ob  *tap.OutputBlockWriter
-	buf []byte
-}
-
-func (lw *lineWriter) Write(p []byte) (int, error) {
-	lw.buf = append(lw.buf, p...)
-	for {
-		i := bytes.IndexByte(lw.buf, '\n')
-		if i < 0 {
-			break
-		}
-		lw.ob.Line(string(lw.buf[:i]))
-		lw.buf = lw.buf[i+1:]
-	}
-	return len(p), nil
-}
-
-func (lw *lineWriter) Flush() {
-	if len(lw.buf) == 0 {
-		return
-	}
-	lw.ob.Line(string(lw.buf))
-	lw.buf = lw.buf[:0]
 }
 
 // planNixGCForClean is the override-less twin of close.planNixGC. Returns
