@@ -15,9 +15,32 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 )
+
+// syncBuffer is a goroutine-safe wrapper around bytes.Buffer. Reap
+// hands the same buffer to two MultiWriters (stdout and stderr) so it
+// can scan the combined output for "deleting '" / "still alive" markers
+// later; os/exec drains the pipes in separate goroutines, so writes
+// must be serialized.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 // ErrNixUnavailable is returned by NewPlan when `nix-store` is not on PATH.
 // Callers should treat this as a silent no-op.
@@ -255,7 +278,11 @@ func Reap(plan Plan, outW, errW io.Writer) Summary {
 	}
 
 	args := append([]string{"--delete"}, plan.Closure...)
-	var captured bytes.Buffer
+	// nix-store streams progress to both stdout and stderr; os/exec runs
+	// each pipe drain in its own goroutine, so the two MultiWriter
+	// branches below race on `captured`. bytes.Buffer is not goroutine-
+	// safe, so wrap it in a mutex.
+	var captured syncBuffer
 	err := runner.Run(
 		io.MultiWriter(outW, &captured),
 		io.MultiWriter(errW, &captured),
