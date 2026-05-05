@@ -24,6 +24,24 @@ clean:
 deps:
     nix develop --command gomod2nix
 
+# [debug] Pipe a synthetic PreToolUse payload for merge-this-session through
+# the installed plugin handler, then print exit code, stdout, and stderr.
+[group('debug')]
+debug-hook-pretooluse:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    handler="/nix/store/wchfwfh5vb3s3a4dwb6qj9axcrmiza2g-spinclass-0.1.6/share/purse-first/spinclass/hooks/handler"
+    payload='{"hook_event_name":"PreToolUse","session_id":"synth-test","tool_name":"mcp__plugin_spinclass_spinclass__merge-this-session","tool_input":{},"cwd":"'"$(pwd)"'"}'
+    echo "handler: $handler"
+    echo "payload: $payload"
+    out=$(mktemp); err=$(mktemp)
+    printf '%s' "$payload" | "$handler" >"$out" 2>"$err"
+    rc=$?
+    echo "exit: $rc"
+    echo "--- stdout ---"; cat "$out"
+    echo "--- stderr ---"; cat "$err"
+    rm -f "$out" "$err"
+
 # Verify that the nix-built binary has version+commit burnt in via the
 # fork's buildGoApplication ldflags, and that the prefix matches the
 # spinclassVersion literal in flake.nix.

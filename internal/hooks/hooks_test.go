@@ -785,7 +785,7 @@ func TestMergeThisSessionAllowedWhenPreMergeHookSet(t *testing.T) {
 	os.WriteFile(filepath.Join(cwd, "sweatfile"),
 		[]byte("[hooks]\npre-merge = \"just test\""), 0o644)
 
-	input := makeInput("mcp__spinclass__merge-this-session", map[string]any{}, cwd)
+	input := makeInput("mcp__plugin_spinclass_spinclass__merge-this-session", map[string]any{}, cwd)
 	var stdout bytes.Buffer
 	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -808,7 +808,7 @@ func TestMergeThisSessionFallsThroughWhenNoPreMergeHook(t *testing.T) {
 
 	cwd := t.TempDir() // no sweatfile here
 
-	input := makeInput("mcp__spinclass__merge-this-session", map[string]any{}, cwd)
+	input := makeInput("mcp__plugin_spinclass_spinclass__merge-this-session", map[string]any{}, cwd)
 	var stdout bytes.Buffer
 	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -826,7 +826,7 @@ func TestMergeThisSessionFallsThroughWhenPreMergeHookEmpty(t *testing.T) {
 	os.WriteFile(filepath.Join(cwd, "sweatfile"),
 		[]byte("[hooks]\npre-merge = \"\""), 0o644)
 
-	input := makeInput("mcp__spinclass__merge-this-session", map[string]any{}, cwd)
+	input := makeInput("mcp__plugin_spinclass_spinclass__merge-this-session", map[string]any{}, cwd)
 	var stdout bytes.Buffer
 	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -844,7 +844,7 @@ func TestCheckThisSessionAllowedWhenPreMergeHookSet(t *testing.T) {
 	os.WriteFile(filepath.Join(cwd, "sweatfile"),
 		[]byte("[hooks]\npre-merge = \"just test\"\ndisable-merge = true"), 0o644)
 
-	input := makeInput("mcp__spinclass__check-this-session", map[string]any{}, cwd)
+	input := makeInput("mcp__plugin_spinclass_spinclass__check-this-session", map[string]any{}, cwd)
 	var stdout bytes.Buffer
 	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -867,7 +867,7 @@ func TestCheckThisSessionFallsThroughWhenNoPreMergeHook(t *testing.T) {
 
 	cwd := t.TempDir() // no sweatfile here
 
-	input := makeInput("mcp__spinclass__check-this-session", map[string]any{}, cwd)
+	input := makeInput("mcp__plugin_spinclass_spinclass__check-this-session", map[string]any{}, cwd)
 	var stdout bytes.Buffer
 	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -885,7 +885,7 @@ func TestCheckThisSessionFallsThroughWhenPreMergeHookEmpty(t *testing.T) {
 	os.WriteFile(filepath.Join(cwd, "sweatfile"),
 		[]byte("[hooks]\npre-merge = \"\"\ndisable-merge = true"), 0o644)
 
-	input := makeInput("mcp__spinclass__check-this-session", map[string]any{}, cwd)
+	input := makeInput("mcp__plugin_spinclass_spinclass__check-this-session", map[string]any{}, cwd)
 	var stdout bytes.Buffer
 	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)

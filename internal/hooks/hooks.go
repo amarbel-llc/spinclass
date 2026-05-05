@@ -83,11 +83,12 @@ func runStopHook(input hookInput, w io.Writer) error {
 	return json.NewEncoder(w).Encode(decision)
 }
 
-// The spinclass MCP server registers under the name "spinclass", so its
-// tools appear to Claude Code as mcp__spinclass__<tool>.
+// Spinclass ships as a Claude Code plugin named "spinclass" with an MCP
+// server also named "spinclass", so its tools appear to Claude Code as
+// mcp__plugin_spinclass_spinclass__<tool>.
 const (
-	mergeThisSessionToolName = "mcp__spinclass__merge-this-session"
-	checkThisSessionToolName = "mcp__spinclass__check-this-session"
+	mergeThisSessionToolName = "mcp__plugin_spinclass_spinclass__merge-this-session"
+	checkThisSessionToolName = "mcp__plugin_spinclass_spinclass__check-this-session"
 )
 
 func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree bool) error {
