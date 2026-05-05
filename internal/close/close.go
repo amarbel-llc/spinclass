@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/huh"
@@ -184,12 +185,20 @@ func runReap(tw *tap.Writer, plan nixgc.Plan, branch string) {
 // until a newline arrives or Flush() is called. Mirrors the helper in
 // internal/check/check.go — duplicated rather than shared so each
 // command's output handling stays self-contained.
+//
+// Write/Flush are safe to call concurrently: nixgc.Reap passes the same
+// lineWriter as both stdout and stderr to nix-store, and os/exec spawns
+// one goroutine per stream. Without the mutex the two goroutines race
+// on buf and can panic with "slice bounds out of range".
 type lineWriter struct {
 	ob  *tap.OutputBlockWriter
+	mu  sync.Mutex
 	buf []byte
 }
 
 func (lw *lineWriter) Write(p []byte) (int, error) {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
 	lw.buf = append(lw.buf, p...)
 	for {
 		i := bytes.IndexByte(lw.buf, '\n')
@@ -203,6 +212,8 @@ func (lw *lineWriter) Write(p []byte) (int, error) {
 }
 
 func (lw *lineWriter) Flush() {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
 	if len(lw.buf) == 0 {
 		return
 	}
