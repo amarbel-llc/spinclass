@@ -89,12 +89,12 @@ func (p *MadderProvider) ListResourceTemplatesV1(_ context.Context, _ string) (*
 // namespace marker matching `madder mcp serve`'s template; the local
 // store name (`.default`) is supplied internally.
 func (p *MadderProvider) ReadResource(ctx context.Context, uri string) (*protocol.ResourceReadResult, error) {
-	blobID, err := parseBlobURI(uri)
+	digest, err := parseBlobURI(uri)
 	if err != nil {
 		return nil, err
 	}
 
-	cmd := exec.CommandContext(ctx, p.binPath, "cat", storeID, blobID)
+	cmd := exec.CommandContext(ctx, p.binPath, "cat", storeID, digest)
 	cmd.Dir = p.worktreePath
 	cmd.Env = append(cmd.Environ(), "MADDER_CEILING_DIRECTORIES="+p.worktreePath)
 	out, err := cmd.Output()
@@ -105,9 +105,9 @@ func (p *MadderProvider) ReadResource(ctx context.Context, uri string) (*protoco
 			stderr = strings.TrimSpace(string(ee.Stderr))
 		}
 		if stderr != "" {
-			return nil, fmt.Errorf("madder cat %s: %w\n%s", blobID, err, stderr)
+			return nil, fmt.Errorf("madder cat %s: %w\n%s", digest, err, stderr)
 		}
-		return nil, fmt.Errorf("madder cat %s: %w", blobID, err)
+		return nil, fmt.Errorf("madder cat %s: %w", digest, err)
 	}
 
 	return &protocol.ResourceReadResult{

@@ -162,18 +162,16 @@ protocol-level `resource_link` content block alongside the TAP
 text without changing the on-the-wire URI scheme. The string
 form chosen here is forward-compatible.
 
-The exact URI prefix (whether `madder://`, `mcp+madder://`, or
-something else) will be pinned when madder integration ships;
-spinclass will adopt whatever cross-tool form madder publishes.
-
-**Resolved post-implementation.** The cross-tool form is
-`madder://blobs/<digest>`, matching the resource template
-exposed by `madder mcp serve`. The host slot is a fixed
-`blobs` namespace marker rather than a per-store name, so the
-URIs spinclass emits are portable: any agent that resolves
-madder URIs through `madder mcp serve` accepts them unchanged.
-spinclass's own `MadderProvider` continues to resolve via
-`madder cat .default <digest>` internally.
+The exact URI prefix landed as `madder://blobs/<digest>`,
+matching the resource template `madder mcp serve` exposes.
+The host slot is a fixed `blobs` namespace marker rather than
+a per-store name, so the URIs spinclass emits are portable:
+any agent that resolves madder URIs through `madder mcp serve`
+accepts them unchanged. spinclass's own `MadderProvider`
+continues to resolve via `madder cat .default <digest>`
+internally — the `.default` store name is a private
+implementation detail of the per-worktree blob store from
+FDR 0003.
 
 ## Decisions made before shipping
 
