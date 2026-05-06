@@ -12,12 +12,12 @@ func TestParseBlobURI(t *testing.T) {
 	t.Parallel()
 
 	t.Run("valid", func(t *testing.T) {
-		got, err := parseBlobURI("madder://.default/sha256-deadbeef")
+		got, err := parseBlobURI("madder://blobs/sha256-deadbeef")
 		if err != nil {
 			t.Fatalf("parseBlobURI: %v", err)
 		}
 		if got != "sha256-deadbeef" {
-			t.Errorf("got blob-id %q, want sha256-deadbeef", got)
+			t.Errorf("got digest %q, want sha256-deadbeef", got)
 		}
 	})
 
@@ -25,13 +25,13 @@ func TestParseBlobURI(t *testing.T) {
 		name string
 		uri  string
 	}{
-		{"wrong scheme", "spinclass://.default/sha256-x"},
-		{"missing store", "madder://sha256-x"},
-		{"wrong store", "madder://.cache/sha256-x"},
-		{"empty blob-id", "madder://.default/"},
-		{"slash in blob-id", "madder://.default/sha256/extra"},
-		{"query in blob-id", "madder://.default/sha256-x?foo=bar"},
-		{"fragment in blob-id", "madder://.default/sha256-x#frag"},
+		{"wrong scheme", "spinclass://blobs/sha256-x"},
+		{"missing host", "madder://sha256-x"},
+		{"wrong host", "madder://.default/sha256-x"},
+		{"empty digest", "madder://blobs/"},
+		{"slash in digest", "madder://blobs/sha256/extra"},
+		{"query in digest", "madder://blobs/sha256-x?foo=bar"},
+		{"fragment in digest", "madder://blobs/sha256-x#frag"},
 		{"empty", ""},
 	}
 	for _, tc := range cases {
@@ -44,9 +44,9 @@ func TestParseBlobURI(t *testing.T) {
 }
 
 // fakeMadderBin writes a shell script that, when invoked as
-// `<bin> cat .default <blob-id>`, prints "BLOB:<blob-id>" to stdout
+// `<bin> cat .default <digest>`, prints "BLOB:<digest>" to stdout
 // and exits 0. Anything else (including the wrong store argument or a
-// missing blob-id) exits non-zero with a recognizable stderr message.
+// missing digest) exits non-zero with a recognizable stderr message.
 // The script also records its own arg/env/cwd into a sidecar file so
 // the test can assert on what spinclass invoked.
 func fakeMadderBin(t *testing.T) (binPath, recordPath string) {
@@ -77,7 +77,7 @@ func TestReadResource_Success(t *testing.T) {
 	bin, record := fakeMadderBin(t)
 
 	provider := NewMadderProvider(wt, bin)
-	res, err := provider.ReadResource(context.Background(), "madder://.default/sha256-cafebabe")
+	res, err := provider.ReadResource(context.Background(), "madder://blobs/sha256-cafebabe")
 	if err != nil {
 		t.Fatalf("ReadResource: %v", err)
 	}
@@ -85,8 +85,8 @@ func TestReadResource_Success(t *testing.T) {
 		t.Fatalf("expected 1 content entry, got %d", len(res.Contents))
 	}
 	c := res.Contents[0]
-	if c.URI != "madder://.default/sha256-cafebabe" {
-		t.Errorf("URI = %q, want madder://.default/sha256-cafebabe", c.URI)
+	if c.URI != "madder://blobs/sha256-cafebabe" {
+		t.Errorf("URI = %q, want madder://blobs/sha256-cafebabe", c.URI)
 	}
 	if c.MimeType != "text/plain" {
 		t.Errorf("MimeType = %q, want text/plain", c.MimeType)
@@ -116,14 +116,14 @@ func TestReadResource_MadderFails(t *testing.T) {
 	bin, _ := fakeMadderBin(t)
 
 	provider := NewMadderProvider(wt, bin)
-	// Invalid blob-id passes URI parsing but is impossible — but our fake
+	// Invalid digest passes URI parsing but is impossible — but our fake
 	// rejects empty $3 with exit 2 + stderr. To trigger that path here
 	// we craft a URI the parser accepts then tweak the fake; simpler:
-	// pass a valid URI whose blob-id our fake rejects. Switch the fake
+	// pass a valid URI whose digest our fake rejects. Switch the fake
 	// rejection trigger by giving an unknown subcommand instead.
 	provider.binPath = "/nonexistent/madder-binary-that-does-not-exist"
 
-	if _, err := provider.ReadResource(context.Background(), "madder://.default/sha256-x"); err == nil {
+	if _, err := provider.ReadResource(context.Background(), "madder://blobs/sha256-x"); err == nil {
 		t.Fatal("expected error when madder binary is missing")
 	}
 }
@@ -166,8 +166,8 @@ func TestListResourceTemplates(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected 1 template, got %d", len(got))
 	}
-	if got[0].URITemplate != "madder://.default/{blob-id}" {
-		t.Errorf("template URITemplate = %q, want madder://.default/{blob-id}", got[0].URITemplate)
+	if got[0].URITemplate != "madder://blobs/{digest}" {
+		t.Errorf("template URITemplate = %q, want madder://blobs/{digest}", got[0].URITemplate)
 	}
 
 	gotV1, err := provider.ListResourceTemplatesV1(context.Background(), "")

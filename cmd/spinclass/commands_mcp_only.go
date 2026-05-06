@@ -67,7 +67,7 @@ func registerMCPOnlyCommands(app *command.App) {
 			Name:  "check-this-session",
 			Title: "Check This Session",
 			Description: command.Description{
-				Short: "Run the configured [hooks].pre-merge command in the current worktree without merging. This is the agent-CI surface; safe to call repeatedly. Returns non-zero / error if the hook fails. When madder is pinned at build time, the response is compact: a single test point per hook step plus a real MCP `resource_link` content block (URI scheme `madder://.default/<blob-id>`) pointing to the full output. MCP-aware agents fetch via `resources/read`; inspect only on failure.",
+				Short: "Run the configured [hooks].pre-merge command in the current worktree without merging. This is the agent-CI surface; safe to call repeatedly. Returns non-zero / error if the hook fails. When madder is pinned at build time, the response is compact: a single test point per hook step plus a real MCP `resource_link` content block (URI scheme `madder://blobs/<digest>`) pointing to the full output. MCP-aware agents fetch via `resources/read`; inspect only on failure.",
 			},
 			Annotations: &protocol.ToolAnnotations{
 				ReadOnlyHint:    protocol.BoolPtr(false),
@@ -83,7 +83,7 @@ func registerMCPOnlyCommands(app *command.App) {
 			Name:  "merge-this-session",
 			Title: "Merge This Session",
 			Description: command.Description{
-				Short: "Merge the current session's worktree into the default branch and clean up. A non-error return means the merge (and push, if git_sync) succeeded; the output payload is informational and does not need to be read or parsed to confirm success. When madder is pinned at build time, the response also carries a real MCP `resource_link` content block (URI scheme `madder://.default/<blob-id>`) pointing to the full pre-merge hook output. MCP-aware agents fetch via `resources/read`; inspect only on failure.",
+				Short: "Merge the current session's worktree into the default branch and clean up. A non-error return means the merge (and push, if git_sync) succeeded; the output payload is informational and does not need to be read or parsed to confirm success. When madder is pinned at build time, the response also carries a real MCP `resource_link` content block (URI scheme `madder://blobs/<digest>`) pointing to the full pre-merge hook output. MCP-aware agents fetch via `resources/read`; inspect only on failure.",
 			},
 			Annotations: &protocol.ToolAnnotations{
 				ReadOnlyHint:    protocol.BoolPtr(false),

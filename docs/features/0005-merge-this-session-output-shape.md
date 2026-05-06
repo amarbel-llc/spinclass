@@ -62,7 +62,7 @@ ok 2 - rebase fond-sycamore
 ok 3 - pre-merge hook for fond-sycamore: `just test`
   ---
   command: just test
-  resource_link: madder://.default/<blob-id>
+  resource_link: madder://blobs/<digest>
   tail: |
     ... last ~50 lines of stdout+stderr ...
   exit_code: 0
@@ -148,9 +148,9 @@ content support, this design treats the URI as data inside the
 TAP payload that an agent reads as text and can act on
 manually.
 
-Concrete shape: `resource_link: madder://.default/<blob-id>` as
+Concrete shape: `resource_link: madder://blobs/<digest>` as
 a YAMLish string field. Agents that want the full output run a
-shell command (e.g. `madder cat <blob-id>` via `Bash`) — which
+shell command (e.g. `madder cat <digest>` via `Bash`) — which
 is already permitted because FDR 0003 adds `Bash(madder:*)` to
 `claude-allow` when the store is active. No MCP-side affordance
 is needed.
@@ -165,6 +165,15 @@ form chosen here is forward-compatible.
 The exact URI prefix (whether `madder://`, `mcp+madder://`, or
 something else) will be pinned when madder integration ships;
 spinclass will adopt whatever cross-tool form madder publishes.
+
+**Resolved post-implementation.** The cross-tool form is
+`madder://blobs/<digest>`, matching the resource template
+exposed by `madder mcp serve`. The host slot is a fixed
+`blobs` namespace marker rather than a per-store name, so the
+URIs spinclass emits are portable: any agent that resolves
+madder URIs through `madder mcp serve` accepts them unchanged.
+spinclass's own `MadderProvider` continues to resolve via
+`madder cat .default <digest>` internally.
 
 ## Decisions made before shipping
 
@@ -310,8 +319,8 @@ the pre-merge hook produces a madder blob (gated on
 `embeds.MadderBin() != ""`). A `MadderProvider`
 (`internal/resources/madder_provider.go`) registered against
 `server.Options.Resources` resolves
-`madder://.default/<blob-id>` URIs via `madder cat .default
-<blob-id>` scoped to the worktree with
+`madder://blobs/<digest>` URIs via `madder cat .default
+<digest>` scoped to the worktree with
 `MADDER_CEILING_DIRECTORIES`, so MCP-aware agents fetch full
 hook output via `resources/read` instead of the
 `Bash(madder cat ...)` fallback.

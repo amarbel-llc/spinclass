@@ -147,7 +147,7 @@ Ideas 1, 3, and 4 remain catalogued here; none has been promoted to
 its own FDR yet. The downstream consumer of idea 2 that did materialise
 this round is **FDR 0005 (compact merge-this-session output)** —
 spinclass's merge/check tools write the full pre-merge-hook output as
-a blob in the per-worktree store and surface a `madder://.default/<id>`
+a blob in the per-worktree store and surface a `madder://blobs/<digest>`
 resource_link in the response.
 
 ## Limitations

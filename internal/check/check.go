@@ -181,7 +181,7 @@ func runHookCompact(tw *tap.Writer, hierarchy sweatfile.Hierarchy, wtPath, cmd, 
 	}
 	var blobURI string
 	if blobID != "" {
-		blobURI = "madder://.default/" + blobID
+		blobURI = "madder://blobs/" + blobID
 		extras["resource_link"] = blobURI
 	} else if madderErr != nil {
 		extras["resource_link_error"] = madderErr.Error()

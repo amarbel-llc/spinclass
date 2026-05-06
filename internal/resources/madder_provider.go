@@ -3,9 +3,10 @@
 // MadderProvider serves the resource_link URIs that
 // `merge-this-session` and `check-this-session` emit when madder is
 // build-time pinned (FDR 0005 follow-up). Each URI shape is
-// `madder://.default/<blob-id>` and resolves against the per-worktree
-// blob store at `<worktree>/.madder/local/share/blob_stores/default/`
-// established by FDR 0003.
+// `madder://blobs/<digest>` (matching `madder mcp serve`'s template) and
+// resolves against the per-worktree blob store at
+// `<worktree>/.madder/local/share/blob_stores/default/` established by
+// FDR 0003.
 package resources
 
 import (
@@ -20,12 +21,13 @@ import (
 
 const (
 	uriScheme  = "madder"
-	uriPrefix  = "madder://.default/"
+	uriPrefix  = "madder://blobs/"
+	uriHost    = "blobs"
 	storeID    = ".default"
 	mimeType   = "text/plain"
 	tmplName   = "spinclass merge hook output"
 	tmplDesc   = "Full stdout+stderr captured from a pre-merge hook run, content-addressed in the per-worktree madder store."
-	tmplString = "madder://.default/{blob-id}"
+	tmplString = "madder://blobs/{digest}"
 )
 
 // MadderProvider implements server.ResourceProviderV1 by shelling out
@@ -58,7 +60,7 @@ func (p *MadderProvider) ListResourcesV1(_ context.Context, _ string) (*protocol
 }
 
 // ListResourceTemplates returns the single template describing the
-// `madder://.default/{blob-id}` URI shape.
+// `madder://blobs/{digest}` URI shape.
 func (p *MadderProvider) ListResourceTemplates(_ context.Context) ([]protocol.ResourceTemplate, error) {
 	return []protocol.ResourceTemplate{{
 		URITemplate: tmplString,
@@ -80,10 +82,12 @@ func (p *MadderProvider) ListResourceTemplatesV1(_ context.Context, _ string) (*
 	}, nil
 }
 
-// ReadResource shells out to `madder cat .default <blob-id>` with cwd
+// ReadResource shells out to `madder cat .default <digest>` with cwd
 // scoped to the worktree and MADDER_CEILING_DIRECTORIES preventing
 // store discovery from walking out of the worktree (mirrors
-// internal/madder.Init/Write).
+// internal/madder.Init/Write). The URI's host slot is a fixed `blobs`
+// namespace marker matching `madder mcp serve`'s template; the local
+// store name (`.default`) is supplied internally.
 func (p *MadderProvider) ReadResource(ctx context.Context, uri string) (*protocol.ResourceReadResult, error) {
 	blobID, err := parseBlobURI(uri)
 	if err != nil {
@@ -115,20 +119,19 @@ func (p *MadderProvider) ReadResource(ctx context.Context, uri string) (*protoco
 	}, nil
 }
 
-// parseBlobURI accepts `madder://.default/<blob-id>` and returns the
-// blob-id. Anything else is rejected. The blob-id is required to be
-// non-empty and free of slashes; madder itself enforces the digest
-// shape on lookup.
+// parseBlobURI accepts `madder://blobs/<digest>` and returns the digest.
+// Anything else is rejected. The digest is required to be non-empty and
+// free of slashes; madder itself enforces the digest shape on lookup.
 func parseBlobURI(uri string) (string, error) {
 	rest, ok := strings.CutPrefix(uri, uriPrefix)
 	if !ok {
-		return "", fmt.Errorf("unsupported resource URI %q: expected scheme %q with store %q", uri, uriScheme, storeID)
+		return "", fmt.Errorf("unsupported resource URI %q: expected scheme %q with host %q", uri, uriScheme, uriHost)
 	}
 	if rest == "" {
-		return "", fmt.Errorf("resource URI %q has empty blob-id", uri)
+		return "", fmt.Errorf("resource URI %q has empty digest", uri)
 	}
 	if strings.ContainsAny(rest, "/?#") {
-		return "", fmt.Errorf("resource URI %q has invalid blob-id %q", uri, rest)
+		return "", fmt.Errorf("resource URI %q has invalid digest %q", uri, rest)
 	}
 	return rest, nil
 }

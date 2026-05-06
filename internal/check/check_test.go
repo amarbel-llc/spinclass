@@ -156,8 +156,8 @@ func TestRunHookCompactShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
-	if len(blobURIs) != 1 || blobURIs[0] != "madder://.default/sha256-fake" {
-		t.Errorf("expected blob URIs == [madder://.default/sha256-fake], got %v", blobURIs)
+	if len(blobURIs) != 1 || blobURIs[0] != "madder://blobs/sha256-fake" {
+		t.Errorf("expected blob URIs == [madder://blobs/sha256-fake], got %v", blobURIs)
 	}
 
 	got := buf.String()
@@ -167,7 +167,7 @@ func TestRunHookCompactShape(t *testing.T) {
 	}
 	for _, want := range []string{
 		"command: echo line-one; echo line-two",
-		"resource_link: madder://.default/sha256-fake",
+		"resource_link: madder://blobs/sha256-fake",
 		"exit_code: 0",
 		"elapsed:",
 		"tail:",
@@ -203,7 +203,7 @@ func TestRunHookCompactShape_Failure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected hook failure")
 	}
-	if len(blobURIs) != 1 || blobURIs[0] != "madder://.default/sha256-fake" {
+	if len(blobURIs) != 1 || blobURIs[0] != "madder://blobs/sha256-fake" {
 		t.Errorf("expected blob URIs even on failure, got %v", blobURIs)
 	}
 
@@ -217,7 +217,7 @@ func TestRunHookCompactShape_Failure(t *testing.T) {
 	if !strings.Contains(got, "about-to-fail") {
 		t.Errorf("expected hook stdout in tail, got:\n%s", got)
 	}
-	if !strings.Contains(got, "resource_link: madder://.default/sha256-fake") {
+	if !strings.Contains(got, "resource_link: madder://blobs/sha256-fake") {
 		t.Errorf("expected resource_link in failure response, got:\n%s", got)
 	}
 }
