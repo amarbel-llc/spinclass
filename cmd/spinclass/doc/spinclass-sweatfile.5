@@ -17,6 +17,30 @@ Sweatfiles are loaded as a hierarchy that merges
 .RI ( <worktree>/sweatfile ).
 Later definitions override earlier ones according to per-field merge
 semantics described below.
+.PP
+Intermediate parent directories are walked along
+.B two
+chains: the lexical ancestors of the working directory, and the
+ancestors of its symlink-resolved (\fIrealpath\fR) form. Both chains
+are inspected in root-first order, bounded above by
+.B $HOME
+(exclusive \(em loaded as the global file) when the chain runs through
+home, or by the filesystem root
+.RB ( / ,
+exclusive) otherwise. Candidate directories are deduplicated by
+canonical (symlink-resolved) path: if a directory in one chain
+resolves to the same canonical path as one already loaded, the second
+entry is recorded with a skip reason and not re-merged.
+.PP
+A given physical worktree therefore produces the same merged
+configuration whether entered through a canonical path or through a
+symlink, provided sweatfiles exist along both chains. When a
+filesystem-only-reachable directory has a sweatfile that no path-only
+chain can reach (e.g.\& entering through the canonical path skips a
+sweatfile that would only be visible via a symlinked alias), the
+.B sc validate
+output makes this asymmetry explicit by listing every directory it
+considered alongside the load/skip status.
 .SH TABLES
 .SS [claude]
 Controls Claude Code session behaviour.

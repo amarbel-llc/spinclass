@@ -806,7 +806,13 @@ func TestMergeThisSessionFallsThroughWhenNoPreMergeHook(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	cwd := t.TempDir() // no sweatfile here
+	// cwd under home so the sweatfile parent walk stops at $HOME and does
+	// not reach any sweatfile that happens to exist higher up the tree
+	// (e.g. when TMPDIR points inside this repo).
+	cwd := filepath.Join(home, "cwd")
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	input := makeInput("mcp__plugin_spinclass_spinclass__merge-this-session", map[string]any{}, cwd)
 	var stdout bytes.Buffer
@@ -865,7 +871,13 @@ func TestCheckThisSessionFallsThroughWhenNoPreMergeHook(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	cwd := t.TempDir() // no sweatfile here
+	// cwd under home so the sweatfile parent walk stops at $HOME and does
+	// not reach any sweatfile that happens to exist higher up the tree
+	// (e.g. when TMPDIR points inside this repo).
+	cwd := filepath.Join(home, "cwd")
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	input := makeInput("mcp__plugin_spinclass_spinclass__check-this-session", map[string]any{}, cwd)
 	var stdout bytes.Buffer

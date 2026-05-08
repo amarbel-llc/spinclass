@@ -271,4 +271,3 @@ func (r *tailRingWriter) Tail() string {
 type nopWriteCloser struct{ io.Writer }
 
 func (nopWriteCloser) Close() error { return nil }
-

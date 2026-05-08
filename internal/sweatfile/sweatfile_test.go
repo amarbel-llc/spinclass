@@ -378,6 +378,191 @@ func TestLoadHierarchyNoSweatfiles(t *testing.T) {
 	}
 }
 
+// TestLoadHierarchyOutOfHomeChain exercises flavor (b) of #72: when repoDir
+// is not under $HOME, the parent walk continues all the way up to the
+// filesystem root (exclusive). A sweatfile placed above $HOME but below /
+// must be picked up.
+func TestLoadHierarchyOutOfHomeChain(t *testing.T) {
+	base := t.TempDir()
+	home := filepath.Join(base, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	repoDir := filepath.Join(base, "external", "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Out-of-home ancestor: base/sweatfile. Walking parents of repoDir
+	// without the home bound: base/external, base.
+	parentPath := filepath.Join(base, "sweatfile")
+	writeSweatfile(t, parentPath, `
+[git]
+excludes = ["external-marker"]
+`)
+
+	result, err := LoadHierarchy(home, repoDir)
+	if err != nil {
+		t.Fatalf("LoadHierarchy returned error: %v", err)
+	}
+
+	if result.Merged.Git == nil ||
+		len(result.Merged.Git.Excludes) != 1 ||
+		result.Merged.Git.Excludes[0] != "external-marker" {
+		t.Errorf(
+			"expected base/sweatfile merged into Git.Excludes, got %v",
+			result.Merged.Git,
+		)
+	}
+
+	// Sources should include the base/sweatfile entry as found.
+	var sawBase bool
+	for _, src := range result.Sources {
+		if src.Path == parentPath && src.Found {
+			sawBase = true
+		}
+	}
+	if !sawBase {
+		var paths []string
+		for _, src := range result.Sources {
+			paths = append(paths, src.Path)
+		}
+		t.Errorf("expected sources to include %q, got %v", parentPath, paths)
+	}
+}
+
+// TestLoadHierarchyDualChainViaSymlink exercises the two-chain walk: when
+// repoDir is a symlinked path, sweatfiles found only in the realpath chain
+// must still merge.
+func TestLoadHierarchyDualChainViaSymlink(t *testing.T) {
+	home := t.TempDir()
+
+	canonicalRepo := filepath.Join(home, "canonical", "repo")
+	if err := os.MkdirAll(canonicalRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	symlinkParent := filepath.Join(home, "eng-acme", "repos")
+	if err := os.MkdirAll(symlinkParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	symlinkRepo := filepath.Join(symlinkParent, "repo")
+	if err := os.Symlink(canonicalRepo, symlinkRepo); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reachable only via lexical (symlinked) chain.
+	engAcmePath := filepath.Join(home, "eng-acme", "sweatfile")
+	writeSweatfile(t, engAcmePath, `
+[git]
+excludes = ["from-eng-acme"]
+`)
+
+	// Reachable only via realpath chain.
+	canonicalParentPath := filepath.Join(home, "canonical", "sweatfile")
+	writeSweatfile(t, canonicalParentPath, `
+[git]
+excludes = ["from-canonical"]
+`)
+
+	result, err := LoadHierarchy(home, symlinkRepo)
+	if err != nil {
+		t.Fatalf("LoadHierarchy returned error: %v", err)
+	}
+
+	got := []string{}
+	if result.Merged.Git != nil {
+		got = result.Merged.Git.Excludes
+	}
+	var foundEngAcme, foundCanonical bool
+	for _, e := range got {
+		switch e {
+		case "from-eng-acme":
+			foundEngAcme = true
+		case "from-canonical":
+			foundCanonical = true
+		}
+	}
+	if !foundEngAcme || !foundCanonical {
+		t.Errorf(
+			"expected both lexical and realpath chains merged, got Git.Excludes=%v",
+			got,
+		)
+	}
+}
+
+// TestLoadHierarchyConvergentChainDedup exercises the dedup decision: when
+// the lexical and realpath chains converge on the same canonical directory,
+// the sweatfile is loaded once and the second chain's entry is recorded
+// with SkipReason set.
+func TestLoadHierarchyConvergentChainDedup(t *testing.T) {
+	home := t.TempDir()
+
+	canonicalMid := filepath.Join(home, "canonical")
+	if err := os.MkdirAll(canonicalMid, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	aliasMid := filepath.Join(home, "alias")
+	if err := os.Symlink(canonicalMid, aliasMid); err != nil {
+		t.Fatal(err)
+	}
+
+	repoCanonical := filepath.Join(canonicalMid, "repo")
+	if err := os.MkdirAll(repoCanonical, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Place sweatfile at canonical mid-tree dir; both chains will see it.
+	canonicalPath := filepath.Join(canonicalMid, "sweatfile")
+	writeSweatfile(t, canonicalPath, `
+[git]
+excludes = ["once-only"]
+`)
+
+	repoViaAlias := filepath.Join(aliasMid, "repo")
+	result, err := LoadHierarchy(home, repoViaAlias)
+	if err != nil {
+		t.Fatalf("LoadHierarchy returned error: %v", err)
+	}
+
+	// `once-only` should appear exactly once.
+	if result.Merged.Git == nil || len(result.Merged.Git.Excludes) != 1 ||
+		result.Merged.Git.Excludes[0] != "once-only" {
+		t.Errorf(
+			"expected Git.Excludes=[once-only], got %v",
+			result.Merged.Git,
+		)
+	}
+
+	// One source loaded, one source skipped — both for the canonical
+	// mid-tree dir.
+	var loadedCount, skippedCount int
+	for _, src := range result.Sources {
+		dir := filepath.Dir(src.Path)
+		canon, err := filepath.EvalSymlinks(dir)
+		if err != nil {
+			canon = dir
+		}
+		if canon != canonicalMid {
+			continue
+		}
+		if src.SkipReason != "" {
+			skippedCount++
+		} else if src.Found {
+			loadedCount++
+		}
+	}
+	if loadedCount != 1 {
+		t.Errorf("expected canonical sweatfile loaded once, got %d (sources: %+v)",
+			loadedCount, result.Sources)
+	}
+	if skippedCount != 1 {
+		t.Errorf("expected canonical sweatfile skipped once via dedup, got %d (sources: %+v)",
+			skippedCount, result.Sources)
+	}
+}
+
 func TestParseHooksCreate(t *testing.T) {
 	input := `
 [hooks]

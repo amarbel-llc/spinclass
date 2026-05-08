@@ -307,6 +307,10 @@ func Run(w io.Writer, home, repoDir string) int {
 	}
 
 	for _, src := range result.Sources {
+		if src.SkipReason != "" {
+			tw.Skip(src.Path, src.SkipReason)
+			continue
+		}
 		if !src.Found {
 			tw.Skip(src.Path, "not found")
 			continue
