@@ -1,6 +1,7 @@
 package nixgc
 
 import (
+	"context"
 	"io"
 	"strings"
 	"sync"
@@ -25,7 +26,7 @@ func (c concurrentRunner) CombinedOutput(_ string, _ ...string) ([]byte, error) 
 	return nil, nil
 }
 
-func (c concurrentRunner) Run(outW, errW io.Writer, _ string, _ ...string) error {
+func (c concurrentRunner) Run(_ context.Context, outW, errW io.Writer, _ string, _ ...string) error {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {

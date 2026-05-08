@@ -8,6 +8,7 @@ package nixgc
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -17,9 +18,20 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 )
+
+// reapTimeout bounds the wall-clock duration of a single nix-store
+// --delete invocation. nix-store talks to the nix-daemon over a unix
+// socket and has no producer-side deadline; without this bound a stuck
+// daemon would hang the auto-close prompt indefinitely (issue #68).
+// Reap classifies any closure paths neither deleted nor refused at the
+// deadline as Summary.TimedOut.
+//
+// var (not const) so tests can shorten it without waiting 30s.
+var reapTimeout = 30 * time.Second
 
 // syncBuffer is a goroutine-safe wrapper around bytes.Buffer. Reap
 // hands the same buffer to two MultiWriters (stdout and stderr) so it
@@ -89,9 +101,16 @@ type Plan struct {
 // rooted). Both are 0 when the size lookup (`nix-store -q --size`) fails or
 // the size of an individual path is not available — Reap degrades to
 // counts-only rather than failing.
+//
+// TimedOut is the count of closure paths neither deleted nor refused by
+// the daemon at the ReapTimeout deadline (issue #68). Non-zero TimedOut
+// means the gc made partial progress before the deadline cancelled the
+// nix-store invocation; the remaining paths can be retried by an explicit
+// `sc clean` once the daemon is responsive again.
 type Summary struct {
 	Reclaimed  int
 	Kept       int
+	TimedOut   int
 	BytesFreed int64
 	BytesKept  int64
 	Errors     []error
@@ -139,10 +158,12 @@ var lookPath = exec.LookPath
 type commandRunner interface {
 	Output(name string, args ...string) ([]byte, error)
 	CombinedOutput(name string, args ...string) ([]byte, error)
-	// Run executes name with args, streaming stdout to outW and stderr
-	// to errW. Reap uses this so callers can observe per-path nix-store
-	// progress in real time (e.g. via a TAP OutputBlock writer).
-	Run(outW, errW io.Writer, name string, args ...string) error
+	// Run executes name with args under ctx, streaming stdout to outW
+	// and stderr to errW. Reap uses this so callers can observe per-path
+	// nix-store progress in real time (e.g. via a TAP OutputBlock writer)
+	// and so a stalled nix-daemon round-trip can be cancelled by the
+	// context deadline.
+	Run(ctx context.Context, outW, errW io.Writer, name string, args ...string) error
 }
 
 type execRunner struct{}
@@ -155,8 +176,8 @@ func (execRunner) CombinedOutput(name string, args ...string) ([]byte, error) {
 	return exec.Command(name, args...).CombinedOutput()
 }
 
-func (execRunner) Run(outW, errW io.Writer, name string, args ...string) error {
-	cmd := exec.Command(name, args...)
+func (execRunner) Run(ctx context.Context, outW, errW io.Writer, name string, args ...string) error {
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdout = outW
 	cmd.Stderr = errW
 	return cmd.Run()
@@ -367,11 +388,15 @@ func Reap(plan Plan, outW, errW io.Writer) Summary {
 	// branches below race on `captured`. bytes.Buffer is not goroutine-
 	// safe, so wrap it in a mutex.
 	var captured syncBuffer
+	ctx, cancel := context.WithTimeout(context.Background(), reapTimeout)
+	defer cancel()
 	err := runner.Run(
+		ctx,
 		io.MultiWriter(outW, &captured),
 		io.MultiWriter(errW, &captured),
 		"nix-store", args...,
 	)
+	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
 
 	output := captured.String()
 	s.Reclaimed = strings.Count(output, "deleting '")
@@ -392,11 +417,15 @@ func Reap(plan Plan, outW, errW io.Writer) Summary {
 
 	unaccounted := len(plan.Closure) - s.Reclaimed - s.Kept
 	if unaccounted > 0 {
-		errMsg := fmt.Errorf(
-			"nix-store --delete: %d/%d path(s) not classified as deleted or kept (exit: %v): %s",
-			unaccounted, len(plan.Closure), err, strings.TrimSpace(output),
-		)
-		s.Errors = append(s.Errors, errMsg)
+		if timedOut {
+			s.TimedOut = unaccounted
+		} else {
+			errMsg := fmt.Errorf(
+				"nix-store --delete: %d/%d path(s) not classified as deleted or kept (exit: %v): %s",
+				unaccounted, len(plan.Closure), err, strings.TrimSpace(output),
+			)
+			s.Errors = append(s.Errors, errMsg)
+		}
 	}
 	return s
 }

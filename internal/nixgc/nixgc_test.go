@@ -2,6 +2,7 @@ package nixgc
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseRootsHappy(t *testing.T) {
@@ -368,7 +370,7 @@ func (s stubRunner) CombinedOutput(_ string, _ ...string) ([]byte, error) {
 	return s.output, s.err
 }
 
-func (s stubRunner) Run(outW, _ io.Writer, _ string, _ ...string) error {
+func (s stubRunner) Run(_ context.Context, outW, _ io.Writer, _ string, _ ...string) error {
 	if outW != nil && len(s.output) > 0 {
 		outW.Write(s.output)
 	}
@@ -403,7 +405,7 @@ func (s *sequencedRunner) CombinedOutput(name string, args ...string) ([]byte, e
 	return s.Output(name, args...)
 }
 
-func (s *sequencedRunner) Run(_, _ io.Writer, _ string, _ ...string) error {
+func (s *sequencedRunner) Run(_ context.Context, _, _ io.Writer, _ string, _ ...string) error {
 	return errors.New("sequencedRunner.Run should not be invoked")
 }
 
@@ -426,7 +428,7 @@ func (r reapStub) CombinedOutput(_ string, _ ...string) ([]byte, error) {
 	return r.runOutput, r.runErr
 }
 
-func (r reapStub) Run(outW, _ io.Writer, _ string, _ ...string) error {
+func (r reapStub) Run(_ context.Context, outW, _ io.Writer, _ string, _ ...string) error {
 	if outW != nil && len(r.runOutput) > 0 {
 		outW.Write(r.runOutput)
 	}
@@ -580,4 +582,89 @@ func sortedCopy(s []string) []string {
 	cp := append([]string(nil), s...)
 	sort.Strings(cp)
 	return cp
+}
+
+// hangingRunner emits partial output and then blocks Run until the
+// caller's context fires. Used with a shortened reapTimeout to drive
+// Reap's timeout-classification path without waiting the real 30s.
+type hangingRunner struct {
+	partial []byte
+}
+
+func (h hangingRunner) Output(_ string, _ ...string) ([]byte, error) {
+	// Decline size lookup so pathSizes degrades to nil; bytes accounting
+	// is not under test here.
+	return nil, errors.New("size-lookup declined for hangingRunner")
+}
+
+func (h hangingRunner) CombinedOutput(_ string, _ ...string) ([]byte, error) {
+	return nil, nil
+}
+
+func (h hangingRunner) Run(ctx context.Context, outW, _ io.Writer, _ string, _ ...string) error {
+	if outW != nil && len(h.partial) > 0 {
+		outW.Write(h.partial)
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// overrideReapTimeout temporarily shortens reapTimeout so timeout-path
+// tests run quickly. Returns a restore function for `defer`.
+func overrideReapTimeout(d time.Duration) func() {
+	old := reapTimeout
+	reapTimeout = d
+	return func() { reapTimeout = old }
+}
+
+// TestReapClassifiesUnfinishedAsTimedOut exercises issue #68: when
+// nix-store stalls past the deadline, paths neither deleted nor
+// refused before the timeout fired must land in Summary.TimedOut, not
+// Summary.Errors. Reap inspects ctx.Err() to make the call.
+func TestReapClassifiesUnfinishedAsTimedOut(t *testing.T) {
+	defer overrideReapTimeout(50 * time.Millisecond)()
+	defer overrideRunner(hangingRunner{
+		partial: []byte("deleting '/nix/store/reclaimed'\n"),
+	})()
+
+	plan := Plan{Closure: []string{
+		"/nix/store/reclaimed",
+		"/nix/store/in-flight-1",
+		"/nix/store/in-flight-2",
+	}}
+
+	s := Reap(plan, nil, nil)
+	if s.Reclaimed != 1 {
+		t.Errorf("Reclaimed = %d, want 1", s.Reclaimed)
+	}
+	if s.TimedOut != 2 {
+		t.Errorf("TimedOut = %d, want 2", s.TimedOut)
+	}
+	if len(s.Errors) != 0 {
+		t.Errorf("expected timeout to bypass Errors, got %v", s.Errors)
+	}
+}
+
+// TestReapNonTimeoutUnaccountedStillSurfacesAsError verifies that the
+// non-timeout error-classification path still works after the timeout
+// branch was added: when ctx is healthy but paths went unaccounted,
+// the existing Errors entry is produced.
+func TestReapNonTimeoutUnaccountedStillSurfacesAsError(t *testing.T) {
+	defer overrideRunner(reapStub{
+		runOutput: []byte("deleting '/nix/store/a'\n"),
+		runErr:    errors.New("exit status 1"),
+	})()
+
+	plan := Plan{Closure: []string{
+		"/nix/store/a",
+		"/nix/store/unaccounted",
+	}}
+	s := Reap(plan, nil, nil)
+
+	if s.TimedOut != 0 {
+		t.Errorf("TimedOut should be 0 for non-timeout case, got %d", s.TimedOut)
+	}
+	if len(s.Errors) != 1 {
+		t.Errorf("expected one error entry for unaccounted path, got %v", s.Errors)
+	}
 }
