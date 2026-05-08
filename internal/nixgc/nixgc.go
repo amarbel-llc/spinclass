@@ -33,6 +33,15 @@ import (
 // var (not const) so tests can shorten it without waiting 30s.
 var reapTimeout = 30 * time.Second
 
+// planTimeout bounds the wall-clock duration of NewPlan's
+// `nix-store --gc --print-roots` and `--query --requisites` calls
+// (issue #74). Same rationale as reapTimeout: a stalled nix-daemon
+// would otherwise block sc close inside planNixGC before reap is
+// even reached. NewPlan returns ErrPlanTimedOut on deadline.
+//
+// var (not const) so tests can shorten it without waiting 30s.
+var planTimeout = 30 * time.Second
+
 // syncBuffer is a goroutine-safe wrapper around bytes.Buffer. Reap
 // hands the same buffer to two MultiWriters (stdout and stderr) so it
 // can scan the combined output for "deleting '" / "still alive" markers
@@ -58,6 +67,13 @@ func (b *syncBuffer) String() string {
 // ErrNixUnavailable is returned by NewPlan when `nix-store` is not on PATH.
 // Callers should treat this as a silent no-op.
 var ErrNixUnavailable = errors.New("nix-store not on PATH")
+
+// ErrPlanTimedOut is returned by NewPlan when one of its `nix-store`
+// invocations exceeds planTimeout. Callers (close.planNixGC,
+// clean.planNixGCForClean) treat this as a silent no-op so a stalled
+// daemon does not break sc close / sc clean — the worktree still gets
+// removed, just without the gc cleanup pass for that invocation.
+var ErrPlanTimedOut = errors.New("nix-store plan step timed out")
 
 // Disabled reports whether [hooks].disable-nix-gc is set in the sweatfile
 // cascade for the given worktree. Returns false on any sweatfile-load error
@@ -156,7 +172,11 @@ var readLink = os.Readlink
 var lookPath = exec.LookPath
 
 type commandRunner interface {
-	Output(name string, args ...string) ([]byte, error)
+	// Output executes name with args under ctx and returns captured
+	// stdout. NewPlan and pathSizes use this; the ctx bounds the
+	// wall-clock duration so a stalled nix-daemon round-trip does not
+	// block close/clean indefinitely (issues #68, #74).
+	Output(ctx context.Context, name string, args ...string) ([]byte, error)
 	CombinedOutput(name string, args ...string) ([]byte, error)
 	// Run executes name with args under ctx, streaming stdout to outW
 	// and stderr to errW. Reap uses this so callers can observe per-path
@@ -168,8 +188,8 @@ type commandRunner interface {
 
 type execRunner struct{}
 
-func (execRunner) Output(name string, args ...string) ([]byte, error) {
-	return exec.Command(name, args...).Output()
+func (execRunner) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).Output()
 }
 
 func (execRunner) CombinedOutput(name string, args ...string) ([]byte, error) {
@@ -184,7 +204,8 @@ func (execRunner) Run(ctx context.Context, outW, errW io.Writer, name string, ar
 }
 
 // NewPlan enumerates gc roots resolving into worktreePath and expands their
-// closure. Returns ErrNixUnavailable when nix-store is not on PATH.
+// closure. Returns ErrNixUnavailable when nix-store is not on PATH and
+// ErrPlanTimedOut when one of the nix-store calls exceeds planTimeout.
 func NewPlan(worktreePath string) (Plan, error) {
 	if _, err := lookPath("nix-store"); err != nil {
 		return Plan{}, ErrNixUnavailable
@@ -195,18 +216,30 @@ func NewPlan(worktreePath string) (Plan, error) {
 		return Plan{}, fmt.Errorf("resolving worktree path: %w", err)
 	}
 
-	out, err := runner.Output("nix-store", "--gc", "--print-roots")
+	ctx, cancel := context.WithTimeout(context.Background(), planTimeout)
+	defer cancel()
+
+	out, err := runner.Output(ctx, "nix-store", "--gc", "--print-roots")
 	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return Plan{}, ErrPlanTimedOut
+		}
 		return Plan{}, fmt.Errorf("nix-store --print-roots: %w", err)
 	}
 
 	ourRoots, externalRoots := parseRoots(string(out), abs)
-	ourClosure, err := expandClosure(ourRoots)
+	ourClosure, err := expandClosure(ctx, ourRoots)
 	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return Plan{}, ErrPlanTimedOut
+		}
 		return Plan{}, fmt.Errorf("expanding worktree closure: %w", err)
 	}
-	externallyAlive, err := expandClosure(externalRoots)
+	externallyAlive, err := expandClosure(ctx, externalRoots)
 	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return Plan{}, ErrPlanTimedOut
+		}
 		return Plan{}, fmt.Errorf("expanding externally-alive closure: %w", err)
 	}
 
@@ -301,7 +334,7 @@ func pathInDir(path, dir string) bool {
 // path, returning a deduplicated list of paths in delete-safe order: the
 // rooted paths first, then their dependencies. `--requisites` prints deps
 // first, the path itself last; we reverse and dedupe.
-func expandClosure(roots []Root) ([]string, error) {
+func expandClosure(ctx context.Context, roots []Root) ([]string, error) {
 	if len(roots) == 0 {
 		return nil, nil
 	}
@@ -309,7 +342,7 @@ func expandClosure(roots []Root) ([]string, error) {
 	for _, r := range roots {
 		args = append(args, r.StorePath)
 	}
-	out, err := runner.Output("nix-store", args...)
+	out, err := runner.Output(ctx, "nix-store", args...)
 	if err != nil {
 		return nil, err
 	}
@@ -377,10 +410,15 @@ func Reap(plan Plan, outW, errW io.Writer) Summary {
 		return s
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), reapTimeout)
+	defer cancel()
+
 	// Capture per-path NAR sizes BEFORE delete so the post-delete summary
 	// can report bytes freed (issue #58). Nil on any failure — bytes
-	// reporting degrades to 0 rather than failing the gc.
-	sizes := pathSizes(plan.Closure)
+	// reporting degrades to 0 rather than failing the gc. Shares Reap's
+	// ctx so a stalled size lookup is cancelled by the same deadline as
+	// the delete itself.
+	sizes := pathSizes(ctx, plan.Closure)
 
 	args := append([]string{"--delete"}, plan.Closure...)
 	// nix-store streams progress to both stdout and stderr; os/exec runs
@@ -388,8 +426,6 @@ func Reap(plan Plan, outW, errW io.Writer) Summary {
 	// branches below race on `captured`. bytes.Buffer is not goroutine-
 	// safe, so wrap it in a mutex.
 	var captured syncBuffer
-	ctx, cancel := context.WithTimeout(context.Background(), reapTimeout)
-	defer cancel()
 	err := runner.Run(
 		ctx,
 		io.MultiWriter(outW, &captured),
@@ -432,14 +468,14 @@ func Reap(plan Plan, outW, errW io.Writer) Summary {
 
 // pathSizes returns a map of store path → NAR size in bytes, looked up via
 // `nix-store --query --size`. Returns nil on any failure (unavailable
-// command, exit error, parse error, count mismatch) so callers degrade to
-// counts-only reporting.
-func pathSizes(paths []string) map[string]int64 {
+// command, exit error, parse error, count mismatch, ctx cancellation) so
+// callers degrade to counts-only reporting.
+func pathSizes(ctx context.Context, paths []string) map[string]int64 {
 	if len(paths) == 0 {
 		return nil
 	}
 	args := append([]string{"--query", "--size"}, paths...)
-	out, err := runner.Output("nix-store", args...)
+	out, err := runner.Output(ctx, "nix-store", args...)
 	if err != nil {
 		return nil
 	}

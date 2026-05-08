@@ -188,6 +188,11 @@ func planNixGCForClean(repoPath, wtPath string) *nixgc.Plan {
 	if errors.Is(err, nixgc.ErrNixUnavailable) {
 		return nil
 	}
+	if errors.Is(err, nixgc.ErrPlanTimedOut) {
+		// nix-store stalled past planTimeout. Skip this worktree's gc;
+		// a later sc clean retry will pick it up.
+		return nil
+	}
 	if err != nil {
 		return nil
 	}

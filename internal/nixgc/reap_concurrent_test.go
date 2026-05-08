@@ -18,7 +18,7 @@ type concurrentRunner struct {
 	err       error
 }
 
-func (c concurrentRunner) Output(_ string, _ ...string) ([]byte, error) {
+func (c concurrentRunner) Output(_ context.Context, _ string, _ ...string) ([]byte, error) {
 	return nil, nil
 }
 

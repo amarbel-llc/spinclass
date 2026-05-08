@@ -136,6 +136,22 @@ func TestPlanNixGCNixUnavailableReturnsNil(t *testing.T) {
 	}
 }
 
+// TestPlanNixGCErrPlanTimedOutReturnsNil verifies that nixgc's plan
+// timeout (issue #74) is also treated as a silent no-op so a stalled
+// daemon does not break sc close.
+func TestPlanNixGCErrPlanTimedOutReturnsNil(t *testing.T) {
+	t.Cleanup(restoreNixgcSeams())
+
+	nixgcDisabled = func(string, string) bool { return false }
+	nixgcNewPlan = func(string) (nixgc.Plan, error) {
+		return nixgc.Plan{}, nixgc.ErrPlanTimedOut
+	}
+
+	if got := planNixGC("/fake/repo", "/fake/wt", nil); got != nil {
+		t.Errorf("expected nil plan when plan step timed out, got %+v", got)
+	}
+}
+
 // restoreNixgcSeams snapshots the package-level seams and returns a
 // restorer for `t.Cleanup`. Tests that override either seam must call
 // this before mutating, otherwise leakage corrupts later subtests.

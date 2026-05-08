@@ -228,6 +228,11 @@ func planNixGC(repoPath, wtPath string, override *bool) *nixgc.Plan {
 	if errors.Is(err, nixgc.ErrNixUnavailable) {
 		return nil
 	}
+	if errors.Is(err, nixgc.ErrPlanTimedOut) {
+		// nix-store stalled past planTimeout. Skip gc for this close —
+		// the next sc clean will retry once the daemon is responsive.
+		return nil
+	}
 	if err != nil {
 		// Don't surface plan-build errors as TAP — they're noise to non-nix
 		// users. Failing to enumerate just means we'll do nothing, which is

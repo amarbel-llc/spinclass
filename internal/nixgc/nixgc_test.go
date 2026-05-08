@@ -135,7 +135,7 @@ func TestExpandClosureReverses(t *testing.T) {
 	roots := []Root{{StorePath: "/nix/store/top"}}
 	defer overrideRunner(stubRunner{output: []byte("/nix/store/dep-a\n/nix/store/dep-b\n/nix/store/top\n")})()
 
-	got, err := expandClosure(roots)
+	got, err := expandClosure(context.Background(), roots)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestExpandClosureDedupes(t *testing.T) {
 	}
 	defer overrideRunner(stubRunner{output: []byte("/nix/store/shared\n/nix/store/a\n/nix/store/shared\n/nix/store/b\n")})()
 
-	got, err := expandClosure(roots)
+	got, err := expandClosure(context.Background(), roots)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +362,7 @@ type stubRunner struct {
 	err    error
 }
 
-func (s stubRunner) Output(_ string, _ ...string) ([]byte, error) {
+func (s stubRunner) Output(_ context.Context, _ string, _ ...string) ([]byte, error) {
 	return s.output, s.err
 }
 
@@ -387,7 +387,7 @@ type sequencedRunner struct {
 	calls   int
 }
 
-func (s *sequencedRunner) Output(_ string, args ...string) ([]byte, error) {
+func (s *sequencedRunner) Output(_ context.Context, _ string, args ...string) ([]byte, error) {
 	if s.calls >= len(s.outputs) {
 		s.calls++
 		return nil, fmt.Errorf("unexpected runner call #%d args=%v", s.calls, args)
@@ -402,7 +402,7 @@ func (s *sequencedRunner) Output(_ string, args ...string) ([]byte, error) {
 }
 
 func (s *sequencedRunner) CombinedOutput(name string, args ...string) ([]byte, error) {
-	return s.Output(name, args...)
+	return s.Output(context.Background(), name, args...)
 }
 
 func (s *sequencedRunner) Run(_ context.Context, _, _ io.Writer, _ string, _ ...string) error {
@@ -420,7 +420,7 @@ type reapStub struct {
 	runErr      error
 }
 
-func (r reapStub) Output(_ string, _ ...string) ([]byte, error) {
+func (r reapStub) Output(_ context.Context, _ string, _ ...string) ([]byte, error) {
 	return r.sizesOutput, r.sizesErr
 }
 
@@ -491,7 +491,7 @@ func TestExtractKeptPathsBothStyles(t *testing.T) {
 func TestPathSizesParsesLines(t *testing.T) {
 	defer overrideRunner(stubRunner{output: []byte("100\n2048\n3145728\n")})()
 
-	got := pathSizes([]string{"/nix/store/a", "/nix/store/b", "/nix/store/c"})
+	got := pathSizes(context.Background(), []string{"/nix/store/a", "/nix/store/b", "/nix/store/c"})
 	want := map[string]int64{
 		"/nix/store/a": 100,
 		"/nix/store/b": 2048,
@@ -505,7 +505,7 @@ func TestPathSizesParsesLines(t *testing.T) {
 func TestPathSizesReturnsNilOnNonNumericLine(t *testing.T) {
 	defer overrideRunner(stubRunner{output: []byte("100\nNaN\n300\n")})()
 
-	if got := pathSizes([]string{"/nix/store/a", "/nix/store/b", "/nix/store/c"}); got != nil {
+	if got := pathSizes(context.Background(), []string{"/nix/store/a", "/nix/store/b", "/nix/store/c"}); got != nil {
 		t.Errorf("pathSizes should return nil on parse failure, got %v", got)
 	}
 }
@@ -513,7 +513,7 @@ func TestPathSizesReturnsNilOnNonNumericLine(t *testing.T) {
 func TestPathSizesReturnsNilOnLineCountMismatch(t *testing.T) {
 	defer overrideRunner(stubRunner{output: []byte("100\n200\n")})()
 
-	if got := pathSizes([]string{"/nix/store/a", "/nix/store/b", "/nix/store/c"}); got != nil {
+	if got := pathSizes(context.Background(), []string{"/nix/store/a", "/nix/store/b", "/nix/store/c"}); got != nil {
 		t.Errorf("pathSizes should return nil when output has fewer lines than paths, got %v", got)
 	}
 }
@@ -521,7 +521,7 @@ func TestPathSizesReturnsNilOnLineCountMismatch(t *testing.T) {
 func TestPathSizesReturnsNilOnRunnerError(t *testing.T) {
 	defer overrideRunner(stubRunner{err: errors.New("boom")})()
 
-	if got := pathSizes([]string{"/nix/store/a"}); got != nil {
+	if got := pathSizes(context.Background(), []string{"/nix/store/a"}); got != nil {
 		t.Errorf("pathSizes should return nil on runner error, got %v", got)
 	}
 }
@@ -591,7 +591,7 @@ type hangingRunner struct {
 	partial []byte
 }
 
-func (h hangingRunner) Output(_ string, _ ...string) ([]byte, error) {
+func (h hangingRunner) Output(_ context.Context, _ string, _ ...string) ([]byte, error) {
 	// Decline size lookup so pathSizes degrades to nil; bytes accounting
 	// is not under test here.
 	return nil, errors.New("size-lookup declined for hangingRunner")
@@ -615,6 +615,45 @@ func overrideReapTimeout(d time.Duration) func() {
 	old := reapTimeout
 	reapTimeout = d
 	return func() { reapTimeout = old }
+}
+
+// overridePlanTimeout temporarily shortens planTimeout so NewPlan
+// timeout tests run quickly.
+func overridePlanTimeout(d time.Duration) func() {
+	old := planTimeout
+	planTimeout = d
+	return func() { planTimeout = old }
+}
+
+// hangingOutputRunner blocks runner.Output until ctx fires. Used to
+// drive NewPlan's plan-step timeout classification (issue #74).
+type hangingOutputRunner struct{}
+
+func (hangingOutputRunner) Output(ctx context.Context, _ string, _ ...string) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (hangingOutputRunner) CombinedOutput(_ string, _ ...string) ([]byte, error) {
+	return nil, nil
+}
+
+func (hangingOutputRunner) Run(_ context.Context, _, _ io.Writer, _ string, _ ...string) error {
+	return errors.New("hangingOutputRunner.Run should not be invoked")
+}
+
+// TestNewPlanReturnsErrPlanTimedOutOnPrintRootsStall covers issue #74:
+// when nix-store --gc --print-roots exceeds planTimeout, NewPlan
+// returns ErrPlanTimedOut so callers can degrade gracefully.
+func TestNewPlanReturnsErrPlanTimedOutOnPrintRootsStall(t *testing.T) {
+	defer overrideLookPath(true)()
+	defer overridePlanTimeout(50 * time.Millisecond)()
+	defer overrideRunner(hangingOutputRunner{})()
+
+	_, err := NewPlan("/fake/wt")
+	if !errors.Is(err, ErrPlanTimedOut) {
+		t.Errorf("NewPlan err = %v, want ErrPlanTimedOut", err)
+	}
 }
 
 // TestReapClassifiesUnfinishedAsTimedOut exercises issue #68: when
