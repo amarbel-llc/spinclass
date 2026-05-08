@@ -194,19 +194,28 @@ func runReap(tw *tap.Writer, plan nixgc.Plan, branch string) {
 	})
 }
 
+// nixgcDisabled and nixgcNewPlan are package-level seams for tests. The
+// production path simply forwards to internal/nixgc; tests override these
+// to exercise planNixGC without a real Nix store. See close_test.go's
+// override-precedence matrix.
+var (
+	nixgcDisabled = nixgc.Disabled
+	nixgcNewPlan  = nixgc.NewPlan
+)
+
 // planNixGC captures the worktree's nix gc roots before removal. Returns nil
 // when gc should not run (sweatfile/override disabled, nix not installed, no
 // roots in the worktree, or any error during plan construction). The reap
 // step runs only when this returns non-nil.
 func planNixGC(repoPath, wtPath string, override *bool) *nixgc.Plan {
-	enabled := !nixgc.Disabled(repoPath, wtPath)
+	enabled := !nixgcDisabled(repoPath, wtPath)
 	if override != nil {
 		enabled = *override
 	}
 	if !enabled {
 		return nil
 	}
-	plan, err := nixgc.NewPlan(wtPath)
+	plan, err := nixgcNewPlan(wtPath)
 	if errors.Is(err, nixgc.ErrNixUnavailable) {
 		return nil
 	}

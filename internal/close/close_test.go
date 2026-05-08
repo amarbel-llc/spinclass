@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/amarbel-llc/spinclass/internal/nixgc"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/testgit"
 )
@@ -50,6 +51,100 @@ func TestResolveTargetByIDFindsSession(t *testing.T) {
 	}
 	if gotBranch != "feature-x" {
 		t.Errorf("branch = %q, want %q", gotBranch, "feature-x")
+	}
+}
+
+// TestPlanNixGCOverrideMatrix locks the precedence contract on
+// planNixGC: the explicit `--nix-gc=<bool>` flag (override != nil) wins
+// over the sweatfile cascade's [hooks].disable-nix-gc, and a nil
+// override defers to the sweatfile. See issue #57.
+func TestPlanNixGCOverrideMatrix(t *testing.T) {
+	t.Cleanup(restoreNixgcSeams())
+
+	tBool := func(b bool) *bool { return &b }
+	cases := []struct {
+		name             string
+		sweatfileDisable bool // value returned by nixgcDisabled
+		override         *bool
+		wantNewPlanCall  bool
+		wantNilPlan      bool
+	}{
+		{"sweatfile-enabled, no override, plan runs", false, nil, true, false},
+		{"sweatfile-disabled, no override, skip", true, nil, false, true},
+		{"sweatfile-disabled, override=true, plan runs", true, tBool(true), true, false},
+		{"sweatfile-enabled, override=false, skip", false, tBool(false), false, true},
+		{"sweatfile-enabled, override=true, plan runs", false, tBool(true), true, false},
+		{"sweatfile-disabled, override=false, skip", true, tBool(false), false, true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			disabled := c.sweatfileDisable
+			nixgcDisabled = func(string, string) bool { return disabled }
+
+			var newPlanCalled bool
+			nixgcNewPlan = func(string) (nixgc.Plan, error) {
+				newPlanCalled = true
+				return nixgc.Plan{
+					WorktreePath: "/fake/wt",
+					Roots:        []nixgc.Root{{LinkPath: "/fake/link", StorePath: "/nix/store/x"}},
+					Closure:      []string{"/nix/store/x"},
+				}, nil
+			}
+
+			got := planNixGC("/fake/repo", "/fake/wt", c.override)
+			if newPlanCalled != c.wantNewPlanCall {
+				t.Errorf("nixgcNewPlan called=%v, want=%v", newPlanCalled, c.wantNewPlanCall)
+			}
+			if (got == nil) != c.wantNilPlan {
+				t.Errorf("plan nil=%v, want nil=%v", got == nil, c.wantNilPlan)
+			}
+		})
+	}
+}
+
+// TestPlanNixGCNoRootsReturnsNil verifies the silent no-op path: when
+// gc is enabled but the worktree has no gc roots, planNixGC drops the
+// plan rather than threading an empty closure through to Reap.
+func TestPlanNixGCNoRootsReturnsNil(t *testing.T) {
+	t.Cleanup(restoreNixgcSeams())
+
+	nixgcDisabled = func(string, string) bool { return false }
+	nixgcNewPlan = func(string) (nixgc.Plan, error) {
+		return nixgc.Plan{WorktreePath: "/fake/wt", Roots: nil}, nil
+	}
+
+	if got := planNixGC("/fake/repo", "/fake/wt", nil); got != nil {
+		t.Errorf("expected nil plan when no roots, got %+v", got)
+	}
+}
+
+// TestPlanNixGCNixUnavailableReturnsNil verifies that
+// nixgc.ErrNixUnavailable from the plan-build step is treated as a
+// silent no-op (matches the production behavior on machines without
+// nix-store on PATH).
+func TestPlanNixGCNixUnavailableReturnsNil(t *testing.T) {
+	t.Cleanup(restoreNixgcSeams())
+
+	nixgcDisabled = func(string, string) bool { return false }
+	nixgcNewPlan = func(string) (nixgc.Plan, error) {
+		return nixgc.Plan{}, nixgc.ErrNixUnavailable
+	}
+
+	if got := planNixGC("/fake/repo", "/fake/wt", nil); got != nil {
+		t.Errorf("expected nil plan when nix is unavailable, got %+v", got)
+	}
+}
+
+// restoreNixgcSeams snapshots the package-level seams and returns a
+// restorer for `t.Cleanup`. Tests that override either seam must call
+// this before mutating, otherwise leakage corrupts later subtests.
+func restoreNixgcSeams() func() {
+	disabledOrig := nixgcDisabled
+	newPlanOrig := nixgcNewPlan
+	return func() {
+		nixgcDisabled = disabledOrig
+		nixgcNewPlan = newPlanOrig
 	}
 }
 
