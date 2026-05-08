@@ -130,6 +130,44 @@ gate instead.
 .B Merge:
 scalar override.
 .TP
+.B on-attach
+Script run when a session attaches to the worktree, fired by
+.B sc start
+or
+.B sc resume
+after the session state file has been written but before the
+configured session entrypoint
+.RI ( "[session].start " "or " "[session].resume" )
+is exec'd.
+Typical use: warm caches, kick off background helpers (e.g.\& a tmux
+side-pane, a watcher process), or emit a session-start log line.
+A failing
+.B on-attach
+script is logged as a warning but never blocks session start \(em it
+must not gate attach.
+.B Merge:
+scalar override.
+.TP
+.B on-detach
+Script run when the session detaches from the worktree, fired by
+.B sc start
+or
+.B sc resume
+after the entrypoint exits and the session state has been updated
+to
+.BR running-detached " or " inactive
+(per the
+.B [session].liveness-probe
+result).
+Typical use: tear down on-attach side processes, post a session-end
+notification, or rotate logs.
+A failing
+.B on-detach
+script is logged as a warning; spinclass continues with cleanup
+either way.
+.B Merge:
+scalar override.
+.TP
 .B disallow-main-worktree
 Boolean.
 When true,
