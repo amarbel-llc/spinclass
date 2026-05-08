@@ -62,12 +62,13 @@ func wrapMCPHandler(
 // "session-tool" prefix so users who run `sc help` understand they're
 // agent-facing helpers.
 func registerMCPOnlyCommands(app *command.App) {
+	hookPreview := preMergeHookForCwd()
 	if mergeDisabledForCwd() {
 		app.AddCommand(&command.Command{
 			Name:  "check-this-session",
 			Title: "Check This Session",
 			Description: command.Description{
-				Short: "Run the configured [hooks].pre-merge command in the current worktree without merging. This is the agent-CI surface; safe to call repeatedly. Returns non-zero / error if the hook fails. When madder is pinned at build time, the response is compact: a single test point per hook step plus a real MCP `resource_link` content block (URI scheme `madder://blobs/<digest>`) pointing to the full output. MCP-aware agents fetch via `resources/read`; inspect only on failure.",
+				Short: buildCheckThisSessionDescription(hookPreview),
 			},
 			Annotations: &protocol.ToolAnnotations{
 				ReadOnlyHint:    protocol.BoolPtr(false),
@@ -83,7 +84,7 @@ func registerMCPOnlyCommands(app *command.App) {
 			Name:  "merge-this-session",
 			Title: "Merge This Session",
 			Description: command.Description{
-				Short: "Merge the current session's worktree into the default branch and clean up. A non-error return means the merge (and push, if git_sync) succeeded; the output payload is informational and does not need to be read or parsed to confirm success. When madder is pinned at build time, the response also carries a real MCP `resource_link` content block (URI scheme `madder://blobs/<digest>`) pointing to the full pre-merge hook output. MCP-aware agents fetch via `resources/read`; inspect only on failure.",
+				Short: buildMergeThisSessionDescription(hookPreview),
 			},
 			Annotations: &protocol.ToolAnnotations{
 				ReadOnlyHint:    protocol.BoolPtr(false),
@@ -250,31 +251,118 @@ func handleUpdateDescription(_ context.Context, args json.RawMessage, _ command.
 	return command.TextResult(fmt.Sprintf("description updated to: %s", params.Description)), nil
 }
 
-// mergeDisabledForCwd reads the sweatfile hierarchy from the current working
-// directory and reports whether [hooks].disable-merge is set. Returns false
-// on any error so a misconfigured environment doesn't silently strip the
-// merge tool.
-func mergeDisabledForCwd() bool {
+// buildMergeThisSessionDescription assembles the merge-this-session MCP
+// tool description, optionally appending the resolved [hooks].pre-merge
+// command so agents know what tests/checks the merge will run before
+// invoking it (and skip redundant pre-flight runs of the same suite).
+func buildMergeThisSessionDescription(hookPreview string) string {
+	base := "Merge the current session's worktree into the default branch and clean up. A non-error return means the merge (and push, if git_sync) succeeded; the output payload is informational and does not need to be read or parsed to confirm success. When madder is pinned at build time, the response also carries a real MCP `resource_link` content block (URI scheme `madder://blobs/<digest>`) pointing to the full pre-merge hook output. MCP-aware agents fetch via `resources/read`; inspect only on failure."
+	if hookPreview == "" {
+		return base
+	}
+	return base + fmt.Sprintf(
+		" The configured [hooks].pre-merge command runs as part of this tool: `%s`. Agents do not need to pre-flight that command before calling merge-this-session.",
+		hookPreview,
+	)
+}
+
+// buildCheckThisSessionDescription assembles the check-this-session MCP
+// tool description, optionally appending the resolved [hooks].pre-merge
+// command. Same rationale as buildMergeThisSessionDescription: callers
+// should know which command executes so they don't shadow it.
+func buildCheckThisSessionDescription(hookPreview string) string {
+	base := "Run the configured [hooks].pre-merge command in the current worktree without merging. This is the agent-CI surface; safe to call repeatedly. Returns non-zero / error if the hook fails. When madder is pinned at build time, the response is compact: a single test point per hook step plus a real MCP `resource_link` content block (URI scheme `madder://blobs/<digest>`) pointing to the full output. MCP-aware agents fetch via `resources/read`; inspect only on failure."
+	if hookPreview == "" {
+		return base
+	}
+	return base + fmt.Sprintf(" The configured pre-merge command is `%s`.", hookPreview)
+}
+
+// mergedSweatfileForCwd loads the sweatfile hierarchy applicable to the
+// current working directory and returns the merged result. Returns the
+// zero Sweatfile and false on any error so callers can degrade gracefully
+// (e.g. a misconfigured environment must not strip the merge tool, and
+// it must not crash MCP startup).
+func mergedSweatfileForCwd() (sweatfile.Sweatfile, bool) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return false
+		return sweatfile.Sweatfile{}, false
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return false
+		return sweatfile.Sweatfile{}, false
 	}
 	repoPath, err := git.CommonDir(cwd)
 	if err != nil {
 		// Not a worktree (or not a git repo): load the simple hierarchy.
 		h, hErr := sweatfile.LoadHierarchy(home, cwd)
 		if hErr != nil {
-			return false
+			return sweatfile.Sweatfile{}, false
 		}
-		return h.Merged.DisableMergeEnabled()
+		return h.Merged, true
 	}
 	h, err := sweatfile.LoadWorktreeHierarchy(home, repoPath, cwd)
 	if err != nil {
+		return sweatfile.Sweatfile{}, false
+	}
+	return h.Merged, true
+}
+
+// mergeDisabledForCwd reports whether [hooks].disable-merge is set in the
+// merged sweatfile applicable to the current working directory. Returns
+// false on any load error so a misconfigured environment doesn't silently
+// strip the merge tool.
+func mergeDisabledForCwd() bool {
+	merged, ok := mergedSweatfileForCwd()
+	if !ok {
 		return false
 	}
-	return h.Merged.DisableMergeEnabled()
+	return merged.DisableMergeEnabled()
+}
+
+// preMergeHookForCwd returns the resolved [hooks].pre-merge command for
+// the current working directory's merged sweatfile, or "" when no hook is
+// configured (or the hierarchy can't be loaded). Multi-line scripts are
+// reduced to their first non-empty line followed by " ..." so the value
+// fits in an MCP tool description.
+func preMergeHookForCwd() string {
+	merged, ok := mergedSweatfileForCwd()
+	if !ok {
+		return ""
+	}
+	cmd := merged.PreMergeHookCommand()
+	if cmd == nil || *cmd == "" {
+		return ""
+	}
+	return summarizeHookCommand(*cmd)
+}
+
+// summarizeHookCommand returns a single-line preview of a hook script
+// suitable for inclusion in an MCP tool description. Multi-line scripts
+// are reduced to the first non-empty line plus a " ..." suffix.
+func summarizeHookCommand(script string) string {
+	var first string
+	var seenAfter bool
+	for _, line := range bytes.Split([]byte(script), []byte{'\n'}) {
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) == 0 {
+			if first != "" {
+				continue
+			}
+			continue
+		}
+		if first == "" {
+			first = string(trimmed)
+			continue
+		}
+		seenAfter = true
+		break
+	}
+	if first == "" {
+		return ""
+	}
+	if seenAfter {
+		return first + " ..."
+	}
+	return first
 }
