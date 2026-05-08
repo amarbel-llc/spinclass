@@ -69,10 +69,16 @@ type Root struct {
 }
 
 // Plan enumerates the worktree's gc roots and their closure.
+//
+// Closure is pre-filtered against ExternallyAlive so every path it lists
+// is provably unreachable from any non-worktree gc root — sidestepping
+// nix-store --delete's fail-fast on the first still-rooted path. See
+// issue #73 for the reasoning and the validating POC.
 type Plan struct {
-	WorktreePath string
-	Roots        []Root
-	Closure      []string // store paths in delete-safe order (rooted paths first, deps last)
+	WorktreePath    string
+	Roots           []Root
+	Closure         []string // deletable: ourClosure − ExternallyAlive, in delete-safe order (rooted paths first, deps last)
+	ExternallyAlive []string // closure of all non-worktree gc roots; paths here are kept by an external root and must not be deleted
 }
 
 // Summary reports the outcome of Reap.
@@ -87,6 +93,10 @@ var runner commandRunner = execRunner{}
 
 // readLink is the symlink-resolution seam for parseRoots. Tests override it.
 var readLink = os.Readlink
+
+// lookPath is the PATH-lookup seam used by NewPlan. Tests override it
+// because the nix flake-check sandbox runs without nix-store on PATH.
+var lookPath = exec.LookPath
 
 type commandRunner interface {
 	Output(name string, args ...string) ([]byte, error)
@@ -117,7 +127,7 @@ func (execRunner) Run(outW, errW io.Writer, name string, args ...string) error {
 // NewPlan enumerates gc roots resolving into worktreePath and expands their
 // closure. Returns ErrNixUnavailable when nix-store is not on PATH.
 func NewPlan(worktreePath string) (Plan, error) {
-	if _, err := exec.LookPath("nix-store"); err != nil {
+	if _, err := lookPath("nix-store"); err != nil {
 		return Plan{}, ErrNixUnavailable
 	}
 
@@ -131,31 +141,53 @@ func NewPlan(worktreePath string) (Plan, error) {
 		return Plan{}, fmt.Errorf("nix-store --print-roots: %w", err)
 	}
 
-	roots := parseRoots(string(out), abs)
-	closure, err := expandClosure(roots)
+	ourRoots, externalRoots := parseRoots(string(out), abs)
+	ourClosure, err := expandClosure(ourRoots)
 	if err != nil {
-		return Plan{}, fmt.Errorf("expanding closure: %w", err)
+		return Plan{}, fmt.Errorf("expanding worktree closure: %w", err)
+	}
+	externallyAlive, err := expandClosure(externalRoots)
+	if err != nil {
+		return Plan{}, fmt.Errorf("expanding externally-alive closure: %w", err)
+	}
+
+	aliveSet := make(map[string]bool, len(externallyAlive))
+	for _, p := range externallyAlive {
+		aliveSet[p] = true
+	}
+	deletable := make([]string, 0, len(ourClosure))
+	for _, p := range ourClosure {
+		if aliveSet[p] {
+			continue
+		}
+		deletable = append(deletable, p)
 	}
 
 	return Plan{
-		WorktreePath: abs,
-		Roots:        roots,
-		Closure:      closure,
+		WorktreePath:    abs,
+		Roots:           ourRoots,
+		Closure:         deletable,
+		ExternallyAlive: externallyAlive,
 	}, nil
 }
 
-// parseRoots parses `nix-store --gc --print-roots` output. Each line is
+// parseRoots parses `nix-store --gc --print-roots` output and partitions
+// the entries by whether their link resolves into worktreePath. Each line is
 // formatted as `<link> -> <store-path>`. Lines containing braces (e.g.
 // "{censored}" markers in multi-user mode) or missing the separator are
-// skipped silently. A root is included iff its link path or one Readlink hop
-// from it lands under worktreePath — covering the two common shapes:
+// skipped silently. A root lands in `ours` iff its link path or one Readlink
+// hop from it lands under worktreePath — covering the two common shapes:
 //
 //   - Auto-roots from `nix build`: link is /nix/var/nix/gcroots/auto/<hash>
 //     pointing to <wt>/result.
 //   - Direct roots from `nix-store --add-root <wt>/<path>`: link IS the
 //     in-worktree path.
-func parseRoots(output, worktreePath string) []Root {
-	var roots []Root
+//
+// Everything else parsed cleanly (including dangling auto-roots whose target
+// no longer exists) lands in `external`. Its closure feeds Plan.ExternallyAlive
+// so we never propose deleting a store path that some non-worktree root might
+// still hold alive.
+func parseRoots(output, worktreePath string) (ours, external []Root) {
 	sc := bufio.NewScanner(strings.NewReader(output))
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
@@ -171,12 +203,14 @@ func parseRoots(output, worktreePath string) []Root {
 		if link == "" || store == "" {
 			continue
 		}
-		if !rootInWorktree(link, worktreePath) {
-			continue
+		root := Root{LinkPath: link, StorePath: store}
+		if rootInWorktree(link, worktreePath) {
+			ours = append(ours, root)
+		} else {
+			external = append(external, root)
 		}
-		roots = append(roots, Root{LinkPath: link, StorePath: store})
 	}
-	return roots
+	return ours, external
 }
 
 // rootInWorktree reports whether link (or its single readlink target)
@@ -248,21 +282,28 @@ func expandClosure(roots []Root) ([]string, error) {
 
 // Reap deletes plan.Closure with a single `nix-store --delete <p1> <p2>
 // ...` invocation. Batching avoids the per-path fork+exec+daemon-RTT cost
-// that a closure of hundreds of paths would otherwise pay; nix's daemon
-// processes the list in one connection and continues past per-path "still
-// alive" refusals.
+// that a closure of hundreds of paths would otherwise pay.
+//
+// Closure is pre-filtered by NewPlan to provably-dead paths (those reachable
+// only from worktree-resident gc roots), so nix-store's fail-fast on the
+// first still-rooted path should not trigger. If it does — e.g. a TOCTOU
+// race where an external root materialized between plan and reap — the
+// daemon aborts the batch on the first refusal (`gcDeleteSpecific` mode in
+// nix's gc.cc throws on the first un-deletable path); the resulting Cannot-
+// delete line is counted in Kept, and any closure paths neither deleted nor
+// refused surface as a single error in s.Errors with the captured output
+// attached for diagnosis.
 //
 // nix-store stdout is streamed to outW and stderr to errW so callers can
 // observe progress in real time (e.g. via a TAP OutputBlock writer); pass
-// io.Discard to suppress. The output is also captured internally and
-// scanned to classify per-path outcomes:
+// io.Discard to suppress. Per-path outcomes are scanned from the captured
+// output:
 //
 //   - lines containing "deleting '" are counted as Reclaimed
 //     (nix's default-verbosity marker for each successful delete)
 //   - lines matching countStillAliveRefusals are counted as Kept
 //   - any closure paths not accounted for by either count are surfaced
 //     as a single error in s.Errors, with the captured output attached
-//     for diagnosis
 //
 // Nil writers are treated as io.Discard. An empty closure is a no-op.
 func Reap(plan Plan, outW, errW io.Writer) Summary {
@@ -304,19 +345,22 @@ func Reap(plan Plan, outW, errW io.Writer) Summary {
 	return s
 }
 
-// countStillAliveRefusals tallies "cannot delete path '<p>' since it is
-// still alive" (and the related "still in use" / "is in use") error
-// lines in nix-store's stderr — one per refused path.
+// countStillAliveRefusals tallies refusal lines in nix-store's output by
+// counting occurrences of the canonical "cannot delete path" prefix, which
+// appears in both message styles emitted by the daemon:
+//
+//   - "cannot delete path '<p>' since it is still alive" — older nix and
+//     non-batch deletion paths.
+//   - "Cannot delete path '<p>' because it's referenced by path '<q>'" —
+//     the fail-fast batched-delete refusal in current nix (gc.cc's
+//     gcDeleteSpecific mode), which aborts the batch on the first such
+//     path. With NewPlan's pre-filter this should not fire; if it does,
+//     it indicates a TOCTOU race or a partition bug and the count is
+//     surfaced via Reap's Errors path.
 func countStillAliveRefusals(output string) int {
-	lower := strings.ToLower(output)
-	return strings.Count(lower, "still alive") +
-		strings.Count(lower, "still in use") +
-		strings.Count(lower, "is in use")
+	return strings.Count(strings.ToLower(output), "cannot delete path")
 }
 
 func isStillAliveRefusal(output string) bool {
-	lower := strings.ToLower(output)
-	return strings.Contains(lower, "still alive") ||
-		strings.Contains(lower, "still in use") ||
-		strings.Contains(lower, "is in use")
+	return strings.Contains(strings.ToLower(output), "cannot delete path")
 }

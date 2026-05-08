@@ -3,6 +3,7 @@ package nixgc
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"reflect"
 	"sort"
@@ -23,12 +24,19 @@ func TestParseRootsHappy(t *testing.T) {
 		"/nix/var/nix/profiles/system":  "/nix/var/nix/profiles/system-1-link",
 	})()
 
-	got := parseRoots(out, wt)
-	want := []Root{
+	ours, external := parseRoots(out, wt)
+	wantOurs := []Root{
 		{LinkPath: "/nix/var/nix/gcroots/auto/abc", StorePath: "/nix/store/aaa-foo"},
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("parseRoots() = %v, want %v", got, want)
+	wantExternal := []Root{
+		{LinkPath: "/nix/var/nix/gcroots/auto/def", StorePath: "/nix/store/bbb-bar"},
+		{LinkPath: "/nix/var/nix/profiles/system", StorePath: "/nix/store/ccc-system"},
+	}
+	if !reflect.DeepEqual(ours, wantOurs) {
+		t.Errorf("parseRoots ours = %v, want %v", ours, wantOurs)
+	}
+	if !reflect.DeepEqual(external, wantExternal) {
+		t.Errorf("parseRoots external = %v, want %v", external, wantExternal)
 	}
 }
 
@@ -38,9 +46,12 @@ func TestParseRootsLinkInsideWorktree(t *testing.T) {
 	wt := "/home/u/wt"
 	out := "/home/u/wt/.gcroot/foo -> /nix/store/aaa-foo\n"
 	defer overrideReadLink(nil)()
-	got := parseRoots(out, wt)
-	if len(got) != 1 || got[0].LinkPath != "/home/u/wt/.gcroot/foo" {
-		t.Errorf("expected in-worktree link to match without readlink, got %v", got)
+	ours, external := parseRoots(out, wt)
+	if len(ours) != 1 || ours[0].LinkPath != "/home/u/wt/.gcroot/foo" {
+		t.Errorf("expected in-worktree link to match without readlink, got %v", ours)
+	}
+	if len(external) != 0 {
+		t.Errorf("expected no external roots, got %v", external)
 	}
 }
 
@@ -49,8 +60,15 @@ func TestParseRootsDanglingSymlink(t *testing.T) {
 	out := "/nix/var/nix/gcroots/auto/abc -> /nix/store/aaa-foo\n"
 	// Empty resolver → readLink returns ENOENT-ish error → not in worktree.
 	defer overrideReadLink(nil)()
-	if got := parseRoots(out, wt); len(got) != 0 {
-		t.Errorf("expected dangling-link root to be skipped, got %v", got)
+	ours, external := parseRoots(out, wt)
+	if len(ours) != 0 {
+		t.Errorf("expected dangling-link root not to land in ours, got %v", ours)
+	}
+	// A dangling auto-root still represents a gcroot we don't own; its
+	// store path may or may not be alive but we conservatively treat it
+	// as externally rooted so its closure is excluded from deletable.
+	if len(external) != 1 || external[0].StorePath != "/nix/store/aaa-foo" {
+		t.Errorf("expected dangling-link root to land in external, got %v", external)
 	}
 }
 
@@ -62,8 +80,9 @@ no-arrow-here
 -> /nix/store/x
 `
 	defer overrideReadLink(nil)()
-	if got := parseRoots(out, wt); len(got) != 0 {
-		t.Errorf("expected all malformed lines to be skipped, got %v", got)
+	ours, external := parseRoots(out, wt)
+	if len(ours) != 0 || len(external) != 0 {
+		t.Errorf("expected all malformed lines to be skipped, got ours=%v external=%v", ours, external)
 	}
 }
 
@@ -73,9 +92,9 @@ func TestParseRootsExactWorktreeMatch(t *testing.T) {
 	defer overrideReadLink(map[string]string{
 		"/nix/var/nix/gcroots/auto/abc": "/home/u/wt",
 	})()
-	got := parseRoots(out, wt)
-	if len(got) != 1 {
-		t.Fatalf("expected 1 root for exact-match worktree path, got %v", got)
+	ours, _ := parseRoots(out, wt)
+	if len(ours) != 1 {
+		t.Fatalf("expected 1 root for exact-match worktree path, got %v", ours)
 	}
 }
 
@@ -85,8 +104,9 @@ func TestParseRootsRelativeSymlinkTarget(t *testing.T) {
 	// Link is already in worktree → matches without readlink. Verifies the
 	// in-worktree fast path doesn't depend on the resolver.
 	defer overrideReadLink(map[string]string{})()
-	if got := parseRoots(out, wt); len(got) != 1 {
-		t.Errorf("expected in-worktree link to match, got %v", got)
+	ours, _ := parseRoots(out, wt)
+	if len(ours) != 1 {
+		t.Errorf("expected in-worktree link to match, got %v", ours)
 	}
 }
 
@@ -96,7 +116,9 @@ func TestIsStillAliveRefusal(t *testing.T) {
 		want bool
 	}{
 		{"error: cannot delete path '/nix/store/abc' since it is still alive", true},
-		{"path is still in use", true},
+		// Fail-fast batched-delete refusal (current nix master / Determinate
+		// 3.15.2). Pre-filter should normally prevent this from firing.
+		{"error: Cannot delete path '/nix/store/aaa-numactl' because it's referenced by path '/nix/store/bbb-lttng'", true},
 		{"network unreachable", false},
 		{"", false},
 	}
@@ -215,6 +237,86 @@ func TestReapAllSucceeded(t *testing.T) {
 	}
 }
 
+// TestNewPlanFiltersExternallyAlive is the regression test for issue #73's
+// sharp-fir shape: a path appears in both the worktree's closure and an
+// external root's closure. NewPlan must drop it from Plan.Closure so the
+// subsequent `nix-store --delete` cannot fail-fast on it.
+func TestNewPlanFiltersExternallyAlive(t *testing.T) {
+	wt := "/home/u/wt"
+	rootsOut := "/home/u/wt/result -> /nix/store/ours-app\n" +
+		"/nix/var/nix/profiles/system -> /nix/store/sys\n"
+
+	// expandClosure scans the requisites output and reverses it (top-first,
+	// deps-last). With these inputs:
+	//   reverse(ourReq) = [ours-app, dep-private, dep-shared]
+	//   reverse(extReq) = [sys, sys-glibc, dep-shared]
+	// dep-shared appears in both, so the filter must drop it.
+	ourReq := "/nix/store/dep-shared\n/nix/store/dep-private\n/nix/store/ours-app\n"
+	extReq := "/nix/store/dep-shared\n/nix/store/sys-glibc\n/nix/store/sys\n"
+
+	defer overrideLookPath(true)()
+	defer overrideReadLink(map[string]string{
+		"/nix/var/nix/profiles/system": "/nix/var/nix/profiles/system-1-link",
+	})()
+	sr := &sequencedRunner{outputs: [][]byte{
+		[]byte(rootsOut),
+		[]byte(ourReq),
+		[]byte(extReq),
+	}}
+	defer overrideRunner(sr)()
+
+	plan, err := NewPlan(wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(plan.Roots) != 1 || plan.Roots[0].StorePath != "/nix/store/ours-app" {
+		t.Errorf("Roots = %v, want one ours-app root", plan.Roots)
+	}
+
+	wantAlive := []string{"/nix/store/sys", "/nix/store/sys-glibc", "/nix/store/dep-shared"}
+	if !reflect.DeepEqual(plan.ExternallyAlive, wantAlive) {
+		t.Errorf("ExternallyAlive = %v, want %v", plan.ExternallyAlive, wantAlive)
+	}
+
+	wantClosure := []string{"/nix/store/ours-app", "/nix/store/dep-private"}
+	if !reflect.DeepEqual(plan.Closure, wantClosure) {
+		t.Errorf("Closure = %v, want %v (dep-shared must be filtered out)", plan.Closure, wantClosure)
+	}
+
+	if sr.calls != 3 {
+		t.Errorf("runner.Output calls = %d, want 3 (print-roots + 2 requisites queries)", sr.calls)
+	}
+}
+
+// TestNewPlanNoExternalRootsSkipsRequisitesCall verifies the no-external
+// short-circuit: when every parsed root is in the worktree, NewPlan must
+// not invoke `nix-store --query --requisites` for an empty external set.
+func TestNewPlanNoExternalRootsSkipsRequisitesCall(t *testing.T) {
+	wt := "/home/u/wt"
+	rootsOut := "/home/u/wt/result -> /nix/store/ours-app\n"
+	ourReq := "/nix/store/dep\n/nix/store/ours-app\n"
+
+	defer overrideLookPath(true)()
+	defer overrideReadLink(nil)()
+	sr := &sequencedRunner{outputs: [][]byte{
+		[]byte(rootsOut),
+		[]byte(ourReq),
+	}}
+	defer overrideRunner(sr)()
+
+	plan, err := NewPlan(wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.ExternallyAlive) != 0 {
+		t.Errorf("ExternallyAlive = %v, want empty", plan.ExternallyAlive)
+	}
+	if sr.calls != 2 {
+		t.Errorf("runner.Output calls = %d, want 2 (no requisites query for empty external set)", sr.calls)
+	}
+}
+
 // --- helpers -----------------------------------------------------------------
 
 // overrideReadLink swaps the package-level readLink seam for the duration of
@@ -238,6 +340,19 @@ func overrideRunner(r commandRunner) func() {
 	return func() { runner = old }
 }
 
+// overrideLookPath swaps the package-level lookPath seam. Tests use this
+// to bypass the `exec.LookPath("nix-store")` guard in NewPlan because
+// the nix flake-check sandbox runs without nix-store on PATH.
+func overrideLookPath(found bool) func() {
+	old := lookPath
+	if found {
+		lookPath = func(string) (string, error) { return "/usr/bin/nix-store", nil }
+	} else {
+		lookPath = func(string) (string, error) { return "", errors.New("test: nix-store not on PATH") }
+	}
+	return func() { lookPath = old }
+}
+
 var errSymlinkNotFound = errors.New("test: symlink not found")
 
 type stubRunner struct {
@@ -258,4 +373,36 @@ func (s stubRunner) Run(outW, _ io.Writer, _ string, _ ...string) error {
 		outW.Write(s.output)
 	}
 	return s.err
+}
+
+// sequencedRunner returns predefined outputs in call order. Used by
+// TestNewPlanFiltersExternallyAlive to distinguish the three Output
+// invocations NewPlan makes: --gc --print-roots, --query --requisites
+// for the worktree's roots, and --query --requisites for external roots.
+type sequencedRunner struct {
+	outputs [][]byte
+	errs    []error
+	calls   int
+}
+
+func (s *sequencedRunner) Output(_ string, args ...string) ([]byte, error) {
+	if s.calls >= len(s.outputs) {
+		s.calls++
+		return nil, fmt.Errorf("unexpected runner call #%d args=%v", s.calls, args)
+	}
+	out := s.outputs[s.calls]
+	var err error
+	if s.calls < len(s.errs) {
+		err = s.errs[s.calls]
+	}
+	s.calls++
+	return out, err
+}
+
+func (s *sequencedRunner) CombinedOutput(name string, args ...string) ([]byte, error) {
+	return s.Output(name, args...)
+}
+
+func (s *sequencedRunner) Run(_, _ io.Writer, _ string, _ ...string) error {
+	return errors.New("sequencedRunner.Run should not be invoked")
 }

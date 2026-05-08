@@ -24,62 +24,6 @@ clean:
 deps:
     nix develop --command gomod2nix
 
-# [explore] Build and run the nixgc-prefilter POC. Hardcoded target
-# worktree (see zz-pocs/nixgc-prefilter/main.go). Runs nix-store --delete
-# against the filtered closure — paths are reclaimable but rebuilding
-# costs time.
-[group('explore')]
-explore-nixgc-prefilter:
-    nix develop --command go build -o .tmp/nixgc-prefilter ./zz-pocs/nixgc-prefilter
-    .tmp/nixgc-prefilter
-
-# [explore] Register an indirect gcroot in dodder/fast-linden pointing at
-# the already-realized dodder build output. Uses `nix-store --add-root`
-# (no rebuild) so it completes quickly.
-[group('explore')]
-explore-pin-fast-linden:
-    nix-store --add-root /home/sasha/eng/repos/dodder/.worktrees/fast-linden/result \
-        --indirect --realise /nix/store/5vil5hi24w0k8yfz3dav2h3h4kars676-dodder-0.1.5
-    ls -la /home/sasha/eng/repos/dodder/.worktrees/fast-linden/result
-
-# [explore] Drop a salted writeText derivation in fast-linden so its
-# closure contains at least one provably-unique store path that no other
-# gcroot on the machine pins.
-[group('explore')]
-explore-salt-fast-linden:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    salt="$(date +%s%N)"
-    expr_dir="/home/sasha/eng/repos/dodder/.worktrees/fast-linden"
-    rm -f "$expr_dir/result-poc-salt"
-    nix-build -E "((import <nixpkgs> {}).writeText \"fast-linden-poc-salt\" \"$salt\")" \
-        -o "$expr_dir/result-poc-salt" \
-        -I nixpkgs=flake:nixpkgs
-    ls -la "$expr_dir/result-poc-salt"
-    cat "$(readlink "$expr_dir/result-poc-salt")"
-
-# [explore] Pin a fast-linden-only derivation whose runtime closure
-# includes externally-held paths (bash + libc + ...). Reproduces the
-# sharp-fir failure shape: unique top-level path, deps shared with the
-# rest of the system.
-[group('explore')]
-explore-salt-fast-linden-deps:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    salt="$(date +%s%N)"
-    expr_dir="/home/sasha/eng/repos/dodder/.worktrees/fast-linden"
-    rm -f "$expr_dir/result-poc-deps"
-    nix-build -E "let pkgs = import <nixpkgs> {}; in pkgs.runCommand \"fast-linden-poc-deps-$salt\" {} ''
-      mkdir -p \$out
-      echo $salt > \$out/marker
-      cp \${pkgs.bash}/bin/bash \$out/bash-copy
-    ''" \
-        -o "$expr_dir/result-poc-deps" \
-        -I nixpkgs=flake:nixpkgs
-    ls -la "$expr_dir/result-poc-deps"
-    echo "--- runtime closure (-> -> shared with system?) ---"
-    nix-store --query --requisites "$(readlink "$expr_dir/result-poc-deps")"
-
 # [debug] Pipe a synthetic PreToolUse payload for merge-this-session through
 # the installed plugin handler, then print exit code, stdout, and stderr.
 [group('debug')]
