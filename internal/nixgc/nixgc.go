@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -82,10 +83,47 @@ type Plan struct {
 }
 
 // Summary reports the outcome of Reap.
+//
+// BytesFreed is the summed NAR size of paths the daemon reported as deleted.
+// BytesKept is the summed NAR size of paths it refused to delete (still
+// rooted). Both are 0 when the size lookup (`nix-store -q --size`) fails or
+// the size of an individual path is not available — Reap degrades to
+// counts-only rather than failing.
 type Summary struct {
-	Reclaimed int
-	Kept      int
-	Errors    []error
+	Reclaimed  int
+	Kept       int
+	BytesFreed int64
+	BytesKept  int64
+	Errors     []error
+}
+
+// HumanFreed returns BytesFreed as a humanized string (e.g. "412.3 MiB").
+func (s Summary) HumanFreed() string { return HumanizeBytes(s.BytesFreed) }
+
+// HumanKept returns BytesKept as a humanized string.
+func (s Summary) HumanKept() string { return HumanizeBytes(s.BytesKept) }
+
+// HumanizeBytes renders n as a 1024-based human-readable size string.
+// Returns "0 B" for zero, "<n> B" for sub-KiB values, and one decimal
+// place at KiB / MiB / GiB / TiB / PiB scale.
+func HumanizeBytes(n int64) string {
+	if n < 0 {
+		return "0 B"
+	}
+	if n < 1024 {
+		return fmt.Sprintf("%d B", n)
+	}
+	units := []string{"KiB", "MiB", "GiB", "TiB", "PiB"}
+	v := float64(n)
+	var unit string
+	for _, u := range units {
+		v /= 1024
+		unit = u
+		if v < 1024 {
+			break
+		}
+	}
+	return fmt.Sprintf("%.1f %s", v, unit)
 }
 
 // runner is the shell-out seam used by NewPlan and Reap. Tests override it.
@@ -318,6 +356,11 @@ func Reap(plan Plan, outW, errW io.Writer) Summary {
 		return s
 	}
 
+	// Capture per-path NAR sizes BEFORE delete so the post-delete summary
+	// can report bytes freed (issue #58). Nil on any failure — bytes
+	// reporting degrades to 0 rather than failing the gc.
+	sizes := pathSizes(plan.Closure)
+
 	args := append([]string{"--delete"}, plan.Closure...)
 	// nix-store streams progress to both stdout and stderr; os/exec runs
 	// each pipe drain in its own goroutine, so the two MultiWriter
@@ -334,6 +377,19 @@ func Reap(plan Plan, outW, errW io.Writer) Summary {
 	s.Reclaimed = strings.Count(output, "deleting '")
 	s.Kept = countStillAliveRefusals(output)
 
+	if sizes != nil {
+		for _, p := range extractDeletedPaths(output) {
+			if sz, ok := sizes[p]; ok {
+				s.BytesFreed += sz
+			}
+		}
+		for _, p := range extractKeptPaths(output) {
+			if sz, ok := sizes[p]; ok {
+				s.BytesKept += sz
+			}
+		}
+	}
+
 	unaccounted := len(plan.Closure) - s.Reclaimed - s.Kept
 	if unaccounted > 0 {
 		errMsg := fmt.Errorf(
@@ -343,6 +399,94 @@ func Reap(plan Plan, outW, errW io.Writer) Summary {
 		s.Errors = append(s.Errors, errMsg)
 	}
 	return s
+}
+
+// pathSizes returns a map of store path → NAR size in bytes, looked up via
+// `nix-store --query --size`. Returns nil on any failure (unavailable
+// command, exit error, parse error, count mismatch) so callers degrade to
+// counts-only reporting.
+func pathSizes(paths []string) map[string]int64 {
+	if len(paths) == 0 {
+		return nil
+	}
+	args := append([]string{"--query", "--size"}, paths...)
+	out, err := runner.Output("nix-store", args...)
+	if err != nil {
+		return nil
+	}
+
+	sizes := make(map[string]int64, len(paths))
+	sc := bufio.NewScanner(strings.NewReader(string(out)))
+	i := 0
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		if i >= len(paths) {
+			return nil
+		}
+		sz, err := strconv.ParseInt(line, 10, 64)
+		if err != nil {
+			return nil
+		}
+		sizes[paths[i]] = sz
+		i++
+	}
+	if i != len(paths) {
+		return nil
+	}
+	return sizes
+}
+
+// extractDeletedPaths scans nix-store --delete output for "deleting '<path>'"
+// markers and returns the captured paths in order. Duplicates are preserved
+// (caller dedupes if needed); typical nix output never repeats a path here.
+func extractDeletedPaths(output string) []string {
+	return extractQuotedPathsAfter(output, []string{"deleting '"})
+}
+
+// extractKeptPaths scans nix-store output for both refusal message styles
+// (lower-case "cannot delete path '<p>'" and capitalized "Cannot delete
+// path '<p>'") and returns the captured paths, deduplicated.
+func extractKeptPaths(output string) []string {
+	raw := extractQuotedPathsAfter(output, []string{
+		"cannot delete path '",
+		"Cannot delete path '",
+	})
+	seen := make(map[string]bool, len(raw))
+	deduped := make([]string, 0, len(raw))
+	for _, p := range raw {
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		deduped = append(deduped, p)
+	}
+	return deduped
+}
+
+// extractQuotedPathsAfter finds every occurrence of any string in `prefixes`
+// followed by `<path>'` in `output` and returns the captured paths.
+func extractQuotedPathsAfter(output string, prefixes []string) []string {
+	var paths []string
+	for _, prefix := range prefixes {
+		start := 0
+		for {
+			idx := strings.Index(output[start:], prefix)
+			if idx < 0 {
+				break
+			}
+			abs := start + idx + len(prefix)
+			closeIdx := strings.Index(output[abs:], "'")
+			if closeIdx < 0 {
+				break
+			}
+			paths = append(paths, output[abs:abs+closeIdx])
+			start = abs + closeIdx + 1
+		}
+	}
+	return paths
 }
 
 // countStillAliveRefusals tallies refusal lines in nix-store's output by

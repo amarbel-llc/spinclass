@@ -406,3 +406,178 @@ func (s *sequencedRunner) CombinedOutput(name string, args ...string) ([]byte, e
 func (s *sequencedRunner) Run(_, _ io.Writer, _ string, _ ...string) error {
 	return errors.New("sequencedRunner.Run should not be invoked")
 }
+
+// reapStub returns separate outputs for Output (size query) vs Run
+// (delete invocation), matching the two-call shape Reap exercises after
+// issue #58. Use sizesOutput for `nix-store --query --size` and
+// runOutput as the streamed delete output.
+type reapStub struct {
+	sizesOutput []byte
+	sizesErr    error
+	runOutput   []byte
+	runErr      error
+}
+
+func (r reapStub) Output(_ string, _ ...string) ([]byte, error) {
+	return r.sizesOutput, r.sizesErr
+}
+
+func (r reapStub) CombinedOutput(_ string, _ ...string) ([]byte, error) {
+	return r.runOutput, r.runErr
+}
+
+func (r reapStub) Run(outW, _ io.Writer, _ string, _ ...string) error {
+	if outW != nil && len(r.runOutput) > 0 {
+		outW.Write(r.runOutput)
+	}
+	return r.runErr
+}
+
+func TestHumanizeBytes(t *testing.T) {
+	cases := []struct {
+		in   int64
+		want string
+	}{
+		{0, "0 B"},
+		{1, "1 B"},
+		{1023, "1023 B"},
+		{1024, "1.0 KiB"},
+		{1024 * 1024, "1.0 MiB"},
+		{412 * 1024 * 1024, "412.0 MiB"},
+		{1024 * 1024 * 1024, "1.0 GiB"},
+		// 2.5 GiB built from integer arithmetic to avoid untyped-float→int64 conversion.
+		{(5 * 1024 * 1024 * 1024) / 2, "2.5 GiB"},
+		{1024 * 1024 * 1024 * 1024, "1.0 TiB"},
+		{-1, "0 B"},
+	}
+	for _, c := range cases {
+		if got := HumanizeBytes(c.in); got != c.want {
+			t.Errorf("HumanizeBytes(%d) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestExtractDeletedPaths(t *testing.T) {
+	output := strings.Join([]string{
+		"deleting '/nix/store/aaa-foo'",
+		"deleting '/nix/store/bbb-bar'",
+		"some other line",
+		"deleting '/nix/store/ccc-baz'",
+	}, "\n")
+	got := extractDeletedPaths(output)
+	want := []string{"/nix/store/aaa-foo", "/nix/store/bbb-bar", "/nix/store/ccc-baz"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("extractDeletedPaths = %v, want %v", got, want)
+	}
+}
+
+func TestExtractKeptPathsBothStyles(t *testing.T) {
+	output := strings.Join([]string{
+		"error: cannot delete path '/nix/store/lower-style' since it is still alive",
+		"error: Cannot delete path '/nix/store/upper-style' because it's referenced by path '/nix/store/q'",
+		// Same path repeated under both styles must dedupe.
+		"error: cannot delete path '/nix/store/dup' since it is still alive",
+		"error: Cannot delete path '/nix/store/dup' because it's referenced",
+	}, "\n")
+	got := extractKeptPaths(output)
+	want := []string{"/nix/store/lower-style", "/nix/store/dup", "/nix/store/upper-style"}
+	if !reflect.DeepEqual(sortedCopy(got), sortedCopy(want)) {
+		t.Errorf("extractKeptPaths = %v, want (any order) %v", got, want)
+	}
+}
+
+func TestPathSizesParsesLines(t *testing.T) {
+	defer overrideRunner(stubRunner{output: []byte("100\n2048\n3145728\n")})()
+
+	got := pathSizes([]string{"/nix/store/a", "/nix/store/b", "/nix/store/c"})
+	want := map[string]int64{
+		"/nix/store/a": 100,
+		"/nix/store/b": 2048,
+		"/nix/store/c": 3145728,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("pathSizes = %v, want %v", got, want)
+	}
+}
+
+func TestPathSizesReturnsNilOnNonNumericLine(t *testing.T) {
+	defer overrideRunner(stubRunner{output: []byte("100\nNaN\n300\n")})()
+
+	if got := pathSizes([]string{"/nix/store/a", "/nix/store/b", "/nix/store/c"}); got != nil {
+		t.Errorf("pathSizes should return nil on parse failure, got %v", got)
+	}
+}
+
+func TestPathSizesReturnsNilOnLineCountMismatch(t *testing.T) {
+	defer overrideRunner(stubRunner{output: []byte("100\n200\n")})()
+
+	if got := pathSizes([]string{"/nix/store/a", "/nix/store/b", "/nix/store/c"}); got != nil {
+		t.Errorf("pathSizes should return nil when output has fewer lines than paths, got %v", got)
+	}
+}
+
+func TestPathSizesReturnsNilOnRunnerError(t *testing.T) {
+	defer overrideRunner(stubRunner{err: errors.New("boom")})()
+
+	if got := pathSizes([]string{"/nix/store/a"}); got != nil {
+		t.Errorf("pathSizes should return nil on runner error, got %v", got)
+	}
+}
+
+func TestReapBytesFreedAccountsForDeletedAndKept(t *testing.T) {
+	plan := Plan{Closure: []string{
+		"/nix/store/big-deleted",
+		"/nix/store/small-deleted",
+		"/nix/store/kept",
+	}}
+	defer overrideRunner(reapStub{
+		// Sizes in plan order: big=10MiB, small=1KiB, kept=4MiB.
+		sizesOutput: []byte("10485760\n1024\n4194304\n"),
+		runOutput: []byte(strings.Join([]string{
+			"deleting '/nix/store/big-deleted'",
+			"deleting '/nix/store/small-deleted'",
+			"error: cannot delete path '/nix/store/kept' since it is still alive",
+			"",
+		}, "\n")),
+	})()
+
+	s := Reap(plan, nil, nil)
+	if s.Reclaimed != 2 {
+		t.Errorf("Reclaimed = %d, want 2", s.Reclaimed)
+	}
+	if s.Kept != 1 {
+		t.Errorf("Kept = %d, want 1", s.Kept)
+	}
+	wantFreed := int64(10485760 + 1024)
+	if s.BytesFreed != wantFreed {
+		t.Errorf("BytesFreed = %d, want %d", s.BytesFreed, wantFreed)
+	}
+	if s.BytesKept != int64(4194304) {
+		t.Errorf("BytesKept = %d, want %d", s.BytesKept, 4194304)
+	}
+	if s.HumanFreed() != "10.0 MiB" {
+		t.Errorf("HumanFreed = %q, want %q", s.HumanFreed(), "10.0 MiB")
+	}
+}
+
+func TestReapBytesFreedDegradesWhenSizesUnavailable(t *testing.T) {
+	plan := Plan{Closure: []string{"/nix/store/a"}}
+	defer overrideRunner(reapStub{
+		sizesErr:  errors.New("nix-store unavailable"),
+		runOutput: []byte("deleting '/nix/store/a'\n"),
+	})()
+
+	s := Reap(plan, nil, nil)
+	if s.Reclaimed != 1 {
+		t.Errorf("Reclaimed = %d, want 1", s.Reclaimed)
+	}
+	if s.BytesFreed != 0 {
+		t.Errorf("BytesFreed = %d, want 0 (degraded), got non-zero", s.BytesFreed)
+	}
+}
+
+func sortedCopy(s []string) []string {
+	cp := append([]string(nil), s...)
+	sort.Strings(cp)
+	return cp
+}

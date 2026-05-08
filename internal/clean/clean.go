@@ -139,9 +139,13 @@ func runReap(tw *tap.Writer, plan nixgc.Plan, branch string) {
 		summary = nixgc.Reap(plan, lw, lw)
 		lw.Flush()
 		extras := map[string]any{
-			"reclaimed": summary.Reclaimed,
-			"kept":      summary.Kept,
-			"closure":   len(plan.Closure),
+			"reclaimed":         summary.Reclaimed,
+			"kept":              summary.Kept,
+			"closure":           len(plan.Closure),
+			"bytes_freed":       summary.BytesFreed,
+			"bytes_freed_human": summary.HumanFreed(),
+			"bytes_kept":        summary.BytesKept,
+			"bytes_kept_human":  summary.HumanKept(),
 		}
 		if len(summary.Errors) > 0 {
 			extras["errors"] = len(summary.Errors)
