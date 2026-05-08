@@ -24,6 +24,112 @@ clean:
 deps:
     nix develop --command gomod2nix
 
+# [explore] Inspect nix-store --gc --print-roots output for entries pointing
+# into the spinclass repo. Used to investigate issue #67 — what does
+# print-roots show before vs after worktree removal?
+[group('explore')]
+explore-gcroots-spinclass:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    nix-store --gc --print-roots 2>/dev/null | grep -F 'spinclass' || echo "(no spinclass-rooted entries found)"
+
+# [explore] List ALL dangling auto-root links on the system (regardless of
+# what they used to point at). These are zero-byte symlinks with broken
+# targets — leftovers from removed checkouts/worktrees.
+[group('explore')]
+explore-gcroots-auto-dangling:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    count=0
+    for link in /nix/var/nix/gcroots/auto/*; do
+      if [[ ! -e "$link" ]]; then
+        target=$(readlink "$link" 2>/dev/null) || continue
+        printf '%s -> %s\n' "$link" "$target"
+        count=$((count + 1))
+      fi
+    done
+    echo
+    echo "Total dangling auto-root links: $count"
+
+# [explore] What does `nix-store --gc --print-roots` say about a dangling
+# auto-root? Set up a temp file, register it as an indirect root with
+# nix-store --add-root, remove the file, and check what print-roots shows.
+# Critically, also checks whether print-roots itself silently GCs dangling
+# indirect roots — a known nix side-effect that bears on issue #67.
+[group('explore')]
+explore-print-roots-dangling:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    store_path=$(nix-store -q --requisites $(which nix-store) | head -1)
+    echo "Using store_path=$store_path"
+    fake_root="$tmp/fake-root"
+    nix-store --add-root "$fake_root" --indirect -r "$store_path" >/dev/null
+    auto_link=""
+    for link in /nix/var/nix/gcroots/auto/*; do
+      if [[ "$(readlink "$link" 2>/dev/null)" == "$fake_root" ]]; then
+        auto_link="$link"
+        break
+      fi
+    done
+    echo "auto_link=$auto_link"
+    echo
+    echo "[1] BEFORE removal — print-roots:"
+    nix-store --gc --print-roots 2>/dev/null | grep -F "$tmp" || echo "  (not found)"
+    echo "[2] BEFORE removal — auto/ link state:"
+    if [[ -n "$auto_link" ]] && [[ -L "$auto_link" ]]; then
+      if [[ -e "$auto_link" ]]; then echo "  LIVE: $auto_link -> $(readlink "$auto_link")"; fi
+    fi
+    rm -f "$fake_root"
+    echo
+    echo "[3] AFTER removal, BEFORE re-running print-roots — auto/ link state:"
+    if [[ -L "$auto_link" ]]; then
+      if [[ -e "$auto_link" ]]; then echo "  LIVE: $auto_link -> $(readlink "$auto_link")"
+      else echo "  DANGLING: $auto_link -> $(readlink "$auto_link")"
+      fi
+    else
+      echo "  GONE (auto/ link no longer exists)"
+    fi
+    echo "[4] AFTER removal — print-roots:"
+    nix-store --gc --print-roots 2>/dev/null | grep -F "$tmp" || echo "  (not found)"
+    echo "[5] AFTER removal, AFTER print-roots — auto/ link state:"
+    if [[ -L "$auto_link" ]]; then
+      if [[ -e "$auto_link" ]]; then echo "  LIVE: $auto_link -> $(readlink "$auto_link")"
+      else echo "  DANGLING: $auto_link -> $(readlink "$auto_link")"
+      fi
+    else
+      echo "  GONE (auto/ link no longer exists)"
+    fi
+
+# [explore] Inspect /nix/var/nix/gcroots/auto/ for symlinks whose target
+# resolves into the spinclass repo. Lists each link, its readlink target,
+# and whether the target still exists. Crucial input for #67's
+# "are dangling auto-roots visible to print-roots?" question.
+[group('explore')]
+explore-gcroots-auto-spinclass:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    count=0
+    dangling=0
+    for link in /nix/var/nix/gcroots/auto/*; do
+      target=$(readlink "$link" 2>/dev/null) || continue
+      case "$target" in
+        */spinclass*)
+          count=$((count + 1))
+          if [[ -e "$link" ]]; then
+            status="LIVE"
+          else
+            status="DANGLING"
+            dangling=$((dangling + 1))
+          fi
+          printf '%-9s %s -> %s\n' "$status" "$link" "$target"
+          ;;
+      esac
+    done
+    echo
+    echo "Total auto-roots into spinclass: $count (dangling: $dangling)"
+
 # [debug] Pipe a synthetic PreToolUse payload for merge-this-session through
 # the installed plugin handler, then print exit code, stdout, and stderr.
 [group('debug')]

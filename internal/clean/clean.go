@@ -105,6 +105,12 @@ func removeWorktree(wt worktreeInfo, tw *tap.Writer) error {
 	// targets still resolve. Reap runs AFTER the worktree (and its `result`
 	// symlinks) is gone, so nix's own liveness check decides which closure
 	// paths actually disappear.
+	//
+	// Do NOT flip this order. `nix-store --gc --print-roots` silently
+	// omits any indirect root whose target file is gone — moving the plan
+	// step to post-removal would lose every store path the worktree was
+	// holding alive. See close.go's RunResolved for the same invariant
+	// and issue #67 for the empirical reproduction.
 	gcPlan := planNixGCForClean(wt.repoPath, wt.worktreePath)
 
 	if err := git.WorktreeRemove(wt.repoPath, wt.worktreePath); err != nil {

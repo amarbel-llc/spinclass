@@ -109,6 +109,15 @@ func RunResolved(w io.Writer, repoPath, wtPath, branch string, force bool, nixGC
 	// itself runs AFTER the worktree is gone, so the auto-roots are dangling
 	// and the underlying store paths are no longer kept alive — `nix-store
 	// --delete` can then succeed (or refuse if other roots still hold them).
+	//
+	// Do NOT flip this order. After worktree removal, `nix-store --gc
+	// --print-roots` silently omits any indirect root whose target file is
+	// gone (and silently deletes the dangling auto/<hash> link as a side
+	// effect). Planning post-removal would therefore lose every store path
+	// the worktree was holding alive — the closure could not be enumerated,
+	// and `nix-store --delete` would have nothing to do. The reap step does
+	// not need the worktree present; only the plan step does. See issue #67
+	// for the empirical reproduction (`just explore-print-roots-dangling`).
 	gcPlan := planNixGC(repoPath, wtPath, nixGCOverride)
 
 	if err := git.WorktreeForceRemove(repoPath, wtPath); err != nil {
