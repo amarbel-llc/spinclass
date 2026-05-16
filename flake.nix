@@ -2,8 +2,8 @@
   description = "Spinclass: shell-agnostic git worktree session manager";
 
   inputs = {
-    # Fork: source of the buildGoApplication / buildGoRace /
-    # testers.batsLane / mkGoEnv overlay. Tracks master.
+    # Fork: source of the buildGoApplication / buildGoRace / mkGoEnv
+    # overlay. Tracks master.
     nixpkgs.url = "github:amarbel-llc/nixpkgs";
 
     # Upstream pin: source of the Go toolchain we pin via
@@ -20,6 +20,18 @@
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
+
+    # Source of `batsLane` and `batman`. Previously consumed indirectly
+    # via the amarbel-llc/nixpkgs overlay (`pkgs.testers.batsLane`); the
+    # builder has since moved into this flake and is reached as
+    # `bats.lib.${system}.batsLane`.
+    bats = {
+      url = "github:amarbel-llc/bats";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs-master.follows = "nixpkgs-master";
+      inputs.utils.follows = "utils";
+      inputs.tap.follows = "bob/tap";
+    };
   };
 
   outputs =
@@ -29,6 +41,7 @@
       nixpkgs-master,
       utils,
       bob,
+      bats,
     }:
     let
       spinclassVersion = "0.1.9";
@@ -147,12 +160,13 @@
           };
         };
 
-        # mkBatsLane wraps pkgs.testers.batsLane (amarbel-llc/nixpkgs
-        # overlay) to run zz-tests_bats/ against a chosen spinclass
-        # build. Exports SPINCLASS_BIN to the binary inside `base`,
-        # stages the bats suite, and exits non-zero on any failure.
+        # mkBatsLane wraps bats.lib.${system}.batsLane (from the
+        # amarbel-llc/bats flake) to run zz-tests_bats/ against a chosen
+        # spinclass build. Exports SPINCLASS_BIN to the binary inside
+        # `base`, stages the bats suite, and exits non-zero on any
+        # failure.
         mkBatsLane = { filter ? null, base ? mkSpinclass {} }:
-          pkgs.testers.batsLane ({
+          bats.lib.${system}.batsLane ({
             inherit base;
             batsSrc           = ./zz-tests_bats;
             binaries          = { SPINCLASS_BIN = { inherit base; name = "spinclass"; }; };
