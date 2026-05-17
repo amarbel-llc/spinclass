@@ -14,23 +14,16 @@
 
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
 
-    bob = {
-      url = "github:amarbel-llc/bob";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.nixpkgs-master.follows = "nixpkgs-master";
-      inputs.utils.follows = "utils";
-    };
-
-    # Source of `batsLane` and `batman`. Previously consumed indirectly
-    # via the amarbel-llc/nixpkgs overlay (`pkgs.testers.batsLane`); the
-    # builder has since moved into this flake and is reached as
-    # `bats.lib.${system}.batsLane`.
+    # Source of `batsLane`, `batman`, and the bats helper libraries
+    # (`bats-libs`, `bats-support`, `bats-assert`, …). Previously
+    # consumed indirectly via the amarbel-llc/nixpkgs overlay
+    # (`pkgs.testers.batsLane`); the builder has since moved into this
+    # flake and is reached as `bats.lib.${system}.batsLane`.
     bats = {
       url = "github:amarbel-llc/bats";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
-      inputs.tap.follows = "bob/tap";
     };
   };
 
@@ -40,7 +33,6 @@
       nixpkgs,
       nixpkgs-master,
       utils,
-      bob,
       bats,
     }:
     let
@@ -170,7 +162,7 @@
             inherit base;
             batsSrc           = ./zz-tests_bats;
             binaries          = { SPINCLASS_BIN = { inherit base; name = "spinclass"; }; };
-            batsLibPath       = [ "${bob.packages.${system}.batman}/share/bats" ];
+            batsLibPath       = [ bats.packages.${system}.bats-libs.batsLibPath ];
             extraEnv          = { BATS_TEST_TIMEOUT = "10"; };
             nativeBuildInputs = [ pkgs.git pkgs.jq ];
           } // lib.optionalAttrs (filter != null) { inherit filter; });
@@ -208,7 +200,7 @@
             # gomod2nix CLI lives in the fork's overlay alongside
             # buildGoApplication / mkGoEnv — not in upstream nixpkgs.
             pkgs.gomod2nix
-            bob.packages.${system}.batman
+            pkgs.bats
           ]
           ++ (with pkgs-master; [
             delve
@@ -221,12 +213,12 @@
 
           GOTOOLCHAIN = "local";
 
-          # batman provides bats + helper libraries (bats-support, etc.).
-          # Tests run inside nix lanes (see mkBatsLane); BATS_LIB_PATH is
-          # exported here only for ad-hoc `bats some_test.bats` debugging
-          # in the devshell.
+          # pkgs.bats is the test runner; bats-libs supplies bats-support,
+          # bats-assert, etc. Tests run inside nix lanes (see mkBatsLane);
+          # BATS_LIB_PATH is exported here only for ad-hoc
+          # `bats some_test.bats` debugging in the devshell.
           shellHook = ''
-            export BATS_LIB_PATH="${bob.packages.${system}.batman}/share/bats"
+            export BATS_LIB_PATH="${bats.packages.${system}.bats-libs.batsLibPath}"
           '';
         };
       }
