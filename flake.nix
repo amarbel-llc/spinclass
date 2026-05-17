@@ -10,7 +10,7 @@
     # GOTOOLCHAIN=local + go_1_26, plus general dev tools that don't
     # depend on the fork's overlay. Bumped deliberately, not on every
     # `nix flake update` of the fork.
-    nixpkgs-master.url = "github:NixOS/nixpkgs/ae921939fcbd44874664477bd1d22543c10a8306";
+    nixpkgs-master.url = "github:NixOS/nixpkgs/d233902339c02a9c334e7e593de68855ad26c4cb";
 
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
 
