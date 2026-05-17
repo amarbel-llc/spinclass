@@ -36,7 +36,7 @@
       bats,
     }:
     let
-      spinclassVersion = "0.1.10";
+      spinclassVersion = "0.1.11";
       # shortRev for clean builds, dirtyShortRev for dirty trees so devshell
       # builds visibly read `dirty-abcdef` instead of impersonating a release.
       spinclassCommit = self.shortRev or self.dirtyShortRev or "unknown";
