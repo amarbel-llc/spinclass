@@ -199,8 +199,37 @@ func runReap(tw *tap.Writer, plan nixgc.Plan, branch string) {
 				Extras:   extras,
 			}
 		}
-		return &tap.Diagnostics{Extras: extras}
+		// Success: emit stats as body lines and return nil so the
+		// OutputBlock renders "ok". Non-nil return — even one carrying
+		// only Extras — is the library's "not ok" signal.
+		writeReapSummary(ob, extras)
+		return nil
 	})
+}
+
+// writeReapSummary emits the reap stats as body lines inside the
+// OutputBlock. Used on the success path where the callback must return
+// nil (to render "ok") but we still want the structured summary visible
+// to operators reading the TAP stream. Keys are emitted in a fixed
+// human-friendly order rather than sorted alphabetically.
+func writeReapSummary(ob *tap.OutputBlockWriter, extras map[string]any) {
+	keys := []string{
+		"reclaimed",
+		"kept",
+		"timed_out",
+		"closure",
+		"bytes_freed",
+		"bytes_freed_human",
+		"bytes_kept",
+		"bytes_kept_human",
+	}
+	for _, k := range keys {
+		v, ok := extras[k]
+		if !ok {
+			continue
+		}
+		ob.Line(fmt.Sprintf("%s: %v", k, v))
+	}
 }
 
 // nixgcDisabled and nixgcNewPlan are package-level seams for tests. The

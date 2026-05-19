@@ -1,7 +1,12 @@
 package clean
 
 import (
+	"bytes"
+	"strings"
 	"testing"
+
+	"github.com/amarbel-llc/spinclass/internal/nixgc"
+	tap "github.com/amarbel-llc/tap/go"
 )
 
 func TestParsePorcelainEmpty(t *testing.T) {
@@ -127,5 +132,32 @@ func TestParsePorcelainStagedDeleted(t *testing.T) {
 	}
 	if changes[0].Description() != "deleted" {
 		t.Errorf("expected description 'deleted', got %q", changes[0].Description())
+	}
+}
+
+// TestRunReapEmptyClosureEmitsOk is the regression guard for #76:
+// nixgc.Reap with an empty Closure is a no-op success, and the
+// surrounding OutputBlock must render "ok" — not "not ok". Pre-fix,
+// the success path returned a non-nil *tap.Diagnostics carrying only
+// summary extras, which tap-go interprets as "not ok". Mirrors the
+// twin test in internal/close.
+func TestRunReapEmptyClosureEmitsOk(t *testing.T) {
+	var buf bytes.Buffer
+	tw := tap.NewWriter(&buf)
+	plan := nixgc.Plan{WorktreePath: "/tmp/empty-wt"}
+	runReap(tw, plan, "brave-myrtle")
+	tw.Plan()
+
+	out := buf.String()
+	if strings.Contains(out, "not ok") {
+		t.Errorf("TAP output unexpectedly contains 'not ok' for empty-closure reap:\n%s", out)
+	}
+	if !strings.Contains(out, "ok 1 - nix-gc reap brave-myrtle") {
+		t.Errorf("TAP output missing 'ok 1 - nix-gc reap brave-myrtle':\n%s", out)
+	}
+	for _, want := range []string{"reclaimed: 0", "bytes_freed: 0", "closure: 0"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("TAP output missing summary line %q:\n%s", want, out)
+		}
 	}
 }
