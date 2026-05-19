@@ -84,7 +84,7 @@ A new built-in subcommand. Invoked from the sweatfile entrypoint as the
 last hop into the multiplexer:
 
 ```toml
-[session]
+[session-entry]
 start  = ["zmx", "-g", "spinclass", "new", "sc", "attach", "$SPINCLASS_SESSION_ID"]
 resume = ["zmx", "-g", "spinclass", "sc", "attach", "$SPINCLASS_SESSION_ID"]
 ```
@@ -97,7 +97,7 @@ resume = ["zmx", "-g", "spinclass", "sc", "attach", "$SPINCLASS_SESSION_ID"]
 3. Forks the underlying multiplexer client as a child and `wait()`s for it.
 4. When the child exits (user detached, or session ended), the parent
    queries multiplexer-group liveness via the configurable
-   `[session].liveness-probe` (see below) and writes one of:
+   `[session-entry].liveness-probe` (see below) and writes one of:
    - `running-detached` if the probe reports the group is still alive —
      fires `on-detach`, then exits, leaving `state.json` and the index
      symlink in place.
@@ -123,7 +123,7 @@ under groups via the global `-g <group>` flag (or `$ZMX_GROUP`). spinclass
 exposes a corresponding sweatfile field:
 
 ```toml
-[session]
+[session-entry]
 # Multiplexer group name. Exported as $SPINCLASS_GROUP into the session env.
 group = "sc-dev"
 
@@ -154,7 +154,7 @@ request.
 Users on tmux or zellij override:
 
 ```toml
-[session]
+[session-entry]
 liveness-probe = ["sh", "-c", "tmux has-session -t \"$SPINCLASS_SESSION_ID\" 2>/dev/null"]
 ```
 
