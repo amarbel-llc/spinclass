@@ -326,13 +326,23 @@ func closeShop(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, fo
 
 	// Auto-close prompt: when the branch is fully merged into the
 	// default and the worktree is clean, offer to tear down the
-	// session before returning. Gated on interactive so headless
-	// callers (CI, --no-attach, no TTY) never hang on huh.
-	if interactive && commitsAhead == 0 && worktreeStatus == "" {
-		statusOut, _ := git.Run(rp.AbsPath, "status")
-		proceed, perr := promptCloseFullyMerged(rp.Branch, defaultBranch, statusOut)
-		if perr == nil && proceed {
-			return close.RunResolved(w, rp.RepoPath, rp.AbsPath, rp.Branch, false, nil, format)
+	// session before returning. Gated on interactive (TTY) for the
+	// huh path so headless callers (CI, --no-attach, no TTY) never
+	// hang on the prompt. Headless callers can still drive the path
+	// by setting SPINCLASS_AUTOCLOSE_ASSUME=yes|no, which bypasses
+	// the prompt and uses the env value directly — primarily for
+	// bats coverage of the merged-and-clean branch. See #66.
+	if commitsAhead == 0 && worktreeStatus == "" {
+		if assume, set := parseAutocloseAssume(); set {
+			if assume {
+				return close.RunResolved(w, rp.RepoPath, rp.AbsPath, rp.Branch, false, nil, format)
+			}
+		} else if interactive {
+			statusOut, _ := git.Run(rp.AbsPath, "status")
+			proceed, perr := promptCloseFullyMerged(rp.Branch, defaultBranch, statusOut)
+			if perr == nil && proceed {
+				return close.RunResolved(w, rp.RepoPath, rp.AbsPath, rp.Branch, false, nil, format)
+			}
 		}
 	}
 

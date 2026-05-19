@@ -111,6 +111,44 @@ function spinclass_merge_fast_forwards { # @test
   assert [ ! -d "$wt" ]
 }
 
+function spinclass_autoclose_assume_yes_removes_worktree { # @test
+  # #66: SPINCLASS_AUTOCLOSE_ASSUME=yes bypasses the huh.Confirm so the
+  # auto-close-on-fully-merged branch fires without a TTY. A fresh `sc
+  # start` worktree has 0 commits ahead of main and (with the default
+  # sweatfile's .spinclass/ exclude in place) a clean porcelain, which
+  # is exactly the condition the auto-close prompt gates on.
+  create_session_sweatfile
+  cd "$TEST_REPO"
+  local bin="${SPINCLASS_BIN:-spinclass}"
+
+  local attach_output
+  attach_output=$(SPINCLASS_AUTOCLOSE_ASSUME=yes timeout --preserve-status 10s "$bin" --format tap start 2>&1)
+  local wt
+  wt=$(extract_wt_path "$attach_output")
+  assert [ -n "$wt" ]
+
+  # The auto-close branch should have torn the worktree down.
+  assert [ ! -d "$wt" ]
+}
+
+function spinclass_autoclose_assume_no_keeps_worktree { # @test
+  # #66: SPINCLASS_AUTOCLOSE_ASSUME=no explicitly declines the auto-close
+  # so the worktree stays in place. This is the no-TTY analogue of the
+  # user picking "Keep" at the huh prompt.
+  create_session_sweatfile
+  cd "$TEST_REPO"
+  local bin="${SPINCLASS_BIN:-spinclass}"
+
+  local attach_output
+  attach_output=$(SPINCLASS_AUTOCLOSE_ASSUME=no timeout --preserve-status 10s "$bin" --format tap start 2>&1)
+  local wt
+  wt=$(extract_wt_path "$attach_output")
+  assert [ -n "$wt" ]
+
+  # The worktree should still exist — env said "no".
+  assert [ -d "$wt" ]
+}
+
 function spinclass_clean_removes_merged { # @test
   skip "pre-existing failure — see #45 (sc clean hangs on huh.Confirm without TTY)"
   cd "$TEST_REPO"
