@@ -150,7 +150,13 @@ function spinclass_autoclose_assume_no_keeps_worktree { # @test
 }
 
 function spinclass_clean_removes_merged { # @test
-  skip "pre-existing failure — see #45 (sc clean hangs on huh.Confirm without TTY)"
+  # #51: re-verify #33 scenario 1 — merged worktree removal. Uses
+  # `--yes` to skip the huh.Confirm so the path is non-TTY-driveable
+  # (the `--yes` bypass for #45's prompt issue). `git clean -fd`
+  # before each git-managed remove is the same defensive scrub
+  # `spinclass_merge_fast_forwards` uses: `sc merge` and `sc clean`
+  # both call non-force `git worktree remove`, which refuses on
+  # untracked content like the sweatfile-installed `.envrc`.
   cd "$TEST_REPO"
   local bin="${SPINCLASS_BIN:-spinclass}"
 
@@ -161,7 +167,8 @@ function spinclass_clean_removes_merged { # @test
   local branch1
   branch1=$(basename "$wt1")
 
-  # Clean untracked files so worktree remove succeeds
+  # Remove sweatfile-installed untracked content so `sc merge`'s
+  # non-force `git worktree remove` step succeeds.
   git -C "$wt1" clean -fd
 
   # Merge the worktree first (makes the branch fully merged)
@@ -173,11 +180,112 @@ function spinclass_clean_removes_merged { # @test
   local wt2
   wt2=$(extract_wt_path "$attach2_output")
 
-  # Clean untracked files from sweatfile apply
+  # Same scrub before `sc clean`'s non-force worktree remove.
   git -C "$wt2" clean -fd
 
-  run_sc clean
+  run_sc clean --yes
   assert_success
   # The noop worktree with zero commits ahead should be cleaned
   assert [ ! -d "$wt2" ]
+}
+
+function spinclass_clean_dry_run_keeps_worktree { # @test
+  # #51: re-verify #33 scenario 4 — `--dry-run` must NOT remove
+  # anything. Set up the same merged worktree as the removal test but
+  # use `-n --yes` and assert the worktree still exists afterwards.
+  cd "$TEST_REPO"
+  local bin="${SPINCLASS_BIN:-spinclass}"
+
+  local attach_output
+  attach_output=$("$bin" --format tap start --no-attach 2>&1)
+  local wt
+  wt=$(extract_wt_path "$attach_output")
+
+  run_sc clean --dry-run --yes
+  assert_success
+  # Dry-run should leave the worktree in place.
+  assert [ -d "$wt" ]
+}
+
+function spinclass_clean_reaps_abandoned_sessions { # @test
+  # #51: re-verify #33 scenario 2 — when a session's worktree is
+  # removed externally, the dangling index symlink is reaped without
+  # touching tombstones. Uses `run_sc_session start` (entrypoint
+  # `true`) to land an inactive index symlink, then deletes the
+  # worktree behind spinclass's back.
+  create_session_sweatfile
+  cd "$TEST_REPO"
+
+  run_sc_session start
+  assert_success
+  assert_session_state
+
+  local index_dir="$XDG_STATE_HOME/spinclass/index"
+  local entry
+  entry=$(ls "$index_dir"/*.json | head -1)
+  assert [ -L "$entry" ]
+  local target
+  target=$(readlink "$entry")
+  local wt_dir
+  wt_dir=$(dirname "$(dirname "$target")")
+  assert [ -d "$wt_dir" ]
+
+  # Force the symlink to dangle. `git worktree remove` won't do this
+  # cleanly because removing the worktree dir also yanks the .git
+  # link, so just rm the dir; the abandoned-session reap path is
+  # what we're exercising.
+  rm -rf "$wt_dir"
+  run_sc clean --yes
+  assert_success
+
+  # The dangling symlink should be gone; no tombstone left behind.
+  assert [ ! -e "$entry" ]
+}
+
+function spinclass_clean_gcs_stale_tombstones { # @test
+  # #51: re-verify #33 scenario 3 — tombstone GC removes regular
+  # files at the index path whose `exited_at` is older than the
+  # configured retention. Set retention to 1s, close a session
+  # (writes a tombstone with `exited_at` ~= now), backdate the
+  # tombstone JSON, then run `sc clean --yes`.
+  create_session_sweatfile
+  # Append a tiny tombstone-retention so any backdated tombstone is
+  # immediately past its cutoff.
+  cat >>"$HOME/.config/spinclass/sweatfile" <<'EOF'
+tombstone-retention = "1s"
+EOF
+
+  cd "$TEST_REPO"
+  local bin="${SPINCLASS_BIN:-spinclass}"
+
+  local start_output
+  start_output=$(timeout --preserve-status 10s "$bin" --format tap start 2>&1)
+  local wt
+  wt=$(extract_wt_path "$start_output")
+  local branch
+  branch=$(basename "$wt")
+
+  # Close the session to write a tombstone (regular file at the
+  # index path). `--force` skips the unintegrated/dirty huh prompt
+  # (the worktree here is clean and zero commits ahead, so the
+  # prompt wouldn't fire — but --force keeps the test from hanging
+  # if that ever changes).
+  run_sc close --force "$branch"
+  assert_success
+
+  local index_dir="$XDG_STATE_HOME/spinclass/index"
+  local tomb
+  tomb=$(ls "$index_dir"/*.json | head -1)
+  # Tombstone is a regular file (close promotes the symlink).
+  assert [ -f "$tomb" ]
+  assert [ ! -L "$tomb" ]
+
+  # Backdate exited_at into 2020 so it is past the 1s cutoff.
+  jq '.exited_at = "2020-01-01T00:00:00Z"' "$tomb" >"$tomb.new"
+  mv "$tomb.new" "$tomb"
+
+  run_sc clean --yes
+  assert_success
+  # Tombstone GC'd by clean.
+  assert [ ! -e "$tomb" ]
 }
