@@ -495,9 +495,6 @@ func TestAttachCallsExecutorWithCorrectArgs(t *testing.T) {
 }
 
 func TestNewMergeOnCloseCleanWorktree(t *testing.T) {
-	if os.Getenv("NIX_BUILD_TOP") != "" {
-		t.Skip("merge-on-close flow has a sandbox-incompatible CWD assumption; tracked in #65")
-	}
 	parentDir := t.TempDir()
 	t.Setenv("HOME", parentDir)
 	repoDir := filepath.Join(parentDir, "repo")
@@ -530,6 +527,21 @@ func TestNewMergeOnCloseCleanWorktree(t *testing.T) {
 	wtDir := filepath.Join(repoDir, worktree.WorktreesDir)
 	wtPath := filepath.Join(wtDir, "feature-moc")
 	runGit(repoDir, "worktree", "add", "-b", "feature-moc", wtPath)
+
+	// Mirror production setup: spinclass-managed worktrees get
+	// `.spinclass/` written into `.git/info/exclude` by
+	// `worktree.Create` -> `applyGitExcludes`. This test bypasses that
+	// path (it pre-stages the worktree via raw `git worktree add` so a
+	// feature commit can be added before Attach runs), so the porcelain
+	// status check inside closeShop would otherwise see the session-
+	// state directory as untracked and mark the worktree dirty. On the
+	// host the user's global core.excludesFile masks this; inside the
+	// nix sandbox there is no global excludesFile, so the test fails
+	// unless we install the exclude ourselves. Tracked under #65.
+	excludePath := filepath.Join(repoDir, ".git", "info", "exclude")
+	if err := os.WriteFile(excludePath, []byte(".spinclass/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	// Add a commit on the feature branch so merge has something to do
 	if err := os.WriteFile(filepath.Join(wtPath, "new.txt"), []byte("new"), 0o644); err != nil {
