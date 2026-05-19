@@ -144,13 +144,17 @@ resume = ["true"]
 EOF
 }
 
-# Variant of `create_session_sweatfile` that also appends `.envrc` to
-# `[git].excludes`. Needed by tests that drive the closeShop auto-close
-# branch — sweatfile.Apply.prepareDirenv writes a `.envrc` to the
-# worktree because the bats `direnv` stub is on PATH, and that untracked
-# file otherwise dirties the porcelain check the auto-close gate
-# depends on. The excludes array merges via append against
-# GetDefault()'s `.worktrees/`, `.spinclass/`, `.mcp.json`.
+# Variant of `create_session_sweatfile` that appends every
+# sweatfile-installed-but-not-default-excluded path to `[git].excludes`.
+# Needed by tests that drive the closeShop auto-close branch:
+#   - `.envrc` from sweatfile.Apply.prepareDirenv (the bats `direnv`
+#     stub is on PATH, so prepareDirenv runs).
+#   - `.claude/` from sweatfile.ApplyClaudeSettings (which writes
+#     `.claude/settings.local.json`; the dir itself is untracked).
+# Without these the porcelain check inside closeShop is non-empty and
+# the auto-close gate (commitsAhead == 0 && worktreeStatus == "")
+# never fires. Excludes merge by append against GetDefault()'s
+# `.worktrees/`, `.spinclass/`, `.mcp.json` set.
 create_session_sweatfile_with_envrc_exclude() {
   local sweatfile_dir="$HOME/.config/spinclass"
   mkdir -p "$sweatfile_dir"
@@ -160,7 +164,7 @@ start = ["true"]
 resume = ["true"]
 
 [git]
-excludes = [".envrc"]
+excludes = [".envrc", ".claude/"]
 EOF
 }
 
