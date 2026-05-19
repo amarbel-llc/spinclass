@@ -115,9 +115,13 @@ function spinclass_autoclose_assume_yes_removes_worktree { # @test
   # #66: SPINCLASS_AUTOCLOSE_ASSUME=yes bypasses the huh.Confirm so the
   # auto-close-on-fully-merged branch fires without a TTY. A fresh `sc
   # start` worktree has 0 commits ahead of main and (with the default
-  # sweatfile's .spinclass/ exclude in place) a clean porcelain, which
-  # is exactly the condition the auto-close prompt gates on.
-  create_session_sweatfile
+  # sweatfile's .spinclass/ exclude plus the test-local .envrc exclude
+  # below) a clean porcelain, which is exactly the condition the auto-
+  # close prompt gates on. The .envrc is written by `sweatfile.Apply`
+  # because the bats stub directory puts a `direnv` shim on PATH; it
+  # is untracked content, so without the exclude the porcelain check
+  # would fail and the auto-close branch would not fire.
+  create_session_sweatfile_with_envrc_exclude
   cd "$TEST_REPO"
   local bin="${SPINCLASS_BIN:-spinclass}"
 
@@ -134,8 +138,11 @@ function spinclass_autoclose_assume_yes_removes_worktree { # @test
 function spinclass_autoclose_assume_no_keeps_worktree { # @test
   # #66: SPINCLASS_AUTOCLOSE_ASSUME=no explicitly declines the auto-close
   # so the worktree stays in place. This is the no-TTY analogue of the
-  # user picking "Keep" at the huh prompt.
-  create_session_sweatfile
+  # user picking "Keep" at the huh prompt. Excluding `.envrc` matters
+  # here too: if it weren't excluded the porcelain would be dirty and
+  # the auto-close branch would skip on the wrong condition, masking
+  # whether the env var was actually consulted.
+  create_session_sweatfile_with_envrc_exclude
   cd "$TEST_REPO"
   local bin="${SPINCLASS_BIN:-spinclass}"
 

@@ -144,6 +144,26 @@ resume = ["true"]
 EOF
 }
 
+# Variant of `create_session_sweatfile` that also appends `.envrc` to
+# `[git].excludes`. Needed by tests that drive the closeShop auto-close
+# branch — sweatfile.Apply.prepareDirenv writes a `.envrc` to the
+# worktree because the bats `direnv` stub is on PATH, and that untracked
+# file otherwise dirties the porcelain check the auto-close gate
+# depends on. The excludes array merges via append against
+# GetDefault()'s `.worktrees/`, `.spinclass/`, `.mcp.json`.
+create_session_sweatfile_with_envrc_exclude() {
+  local sweatfile_dir="$HOME/.config/spinclass"
+  mkdir -p "$sweatfile_dir"
+  cat >"$sweatfile_dir/sweatfile" <<'EOF'
+[session-entry]
+start = ["true"]
+resume = ["true"]
+
+[git]
+excludes = [".envrc"]
+EOF
+}
+
 # Run spinclass with a longer timeout for session attach tests.
 # The subprocess spawn + closeShop workflow needs more headroom than
 # the 5s used by run_sc.
