@@ -15,7 +15,6 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/embeds"
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/git"
-	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 	tap "github.com/amarbel-llc/tap/go"
@@ -315,14 +314,19 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 	}
 
 	if inSession {
-		// Remove session state file after successful merge
-		session.Remove(repoPath, branch)
+		// Session state stays put. spinclass worktrees are workers — they
+		// host many sequences of work separated by `merge-this-session`,
+		// and tearing down state.json + the central index symlink here
+		// would orphan the worktree from `sc list`/`resume`/`close` until
+		// the next session.Write. Cleanup is owned by `sc close`/`sc clean`.
 		return blobURIs, nil
 	}
 
-	// Outside session: request close if active, then clean up state
+	// Outside session: request graceful close if the target is still
+	// running. State cleanup is delegated to the close path
+	// (closeShop → close.RunResolved → session.Tombstone) when conditions
+	// warrant; abandoned state is reaped by `sc clean`.
 	executor.RequestClose(repoPath, branch)
-	session.Remove(repoPath, branch)
 	return blobURIs, nil
 }
 

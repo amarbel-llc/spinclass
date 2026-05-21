@@ -12,10 +12,19 @@ import (
 	commandhuh "github.com/amarbel-llc/purse-first/libs/go-mcp/command/huh"
 
 	"github.com/amarbel-llc/spinclass/internal/embeds"
+	"github.com/amarbel-llc/spinclass/internal/sessionlog"
 )
 
 func main() {
 	embeds.Set(madderBin, direnvBin)
+
+	// Open the lifecycle log early so session.Write/Remove/Tombstone
+	// calls from any subcommand land in $XDG_LOG_HOME/spinclass/lifecycle.log.
+	// Best-effort: failures here are silent — observability must never
+	// block startup.
+	_ = sessionlog.Open()
+	defer func() { _ = sessionlog.Close() }()
+
 	app := buildApp()
 
 	ctx := context.Background()

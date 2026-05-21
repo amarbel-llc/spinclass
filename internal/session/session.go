@@ -8,12 +8,27 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/amarbel-llc/spinclass/internal/sessionlog"
 )
+
+// caller returns "file.go:N" of the call site `skip` frames up from
+// the caller of caller(). caller(1) inside session.Write returns the
+// external site that invoked session.Write. Used to tag lifecycle log
+// entries so "who called session.Remove?" can be answered after the fact.
+func caller(skip int) string {
+	_, file, line, ok := runtime.Caller(skip + 1)
+	if !ok {
+		return "?:0"
+	}
+	return fmt.Sprintf("%s:%d", filepath.Base(file), line)
+}
 
 // debugLogger normalises a possibly-nil *slog.Logger into one that
 // silently discards all records. Callers that want exclusion diagnostics
@@ -122,16 +137,20 @@ func legacyStatePath(repoPath, branch string) string {
 func Write(s State) error {
 	migrateOnce()
 
+	from := caller(1)
 	wt := s.WorktreePath
 	if wt == "" {
+		sessionlog.Errorf("session.Write rejected (empty WorktreePath) from=%s", from)
 		return errors.New("session.Write: WorktreePath required")
 	}
 	if _, err := os.Stat(wt); err != nil {
+		sessionlog.Errorf("session.Write worktree-stat-failed wt=%s branch=%s from=%s err=%v", wt, s.Branch, from, err)
 		return fmt.Errorf("session.Write: worktree %q: %w", wt, err)
 	}
 
 	dir := filepath.Join(wt, ".spinclass")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
+		sessionlog.Errorf("session.Write mkdir-failed dir=%s from=%s err=%v", dir, from, err)
 		return err
 	}
 	data, err := json.MarshalIndent(s, "", "  ")
@@ -140,6 +159,7 @@ func Write(s State) error {
 	}
 	statePath := worktreeStatePath(wt)
 	if err := os.WriteFile(statePath, data, 0o644); err != nil {
+		sessionlog.Errorf("session.Write writefile-failed path=%s from=%s err=%v", statePath, from, err)
 		return err
 	}
 
@@ -147,8 +167,10 @@ func Write(s State) error {
 		return err
 	}
 	if err := writeIndexSymlink(wt); err != nil {
+		sessionlog.Errorf("session.Write symlink-failed wt=%s branch=%s from=%s err=%v", wt, s.Branch, from, err)
 		return err
 	}
+	sessionlog.Infof("session.Write wt=%s branch=%s state=%s pid=%d from=%s", wt, s.Branch, s.SessionState, s.PID, from)
 	return nil
 }
 
@@ -225,6 +247,7 @@ func Read(repoPath, branch string) (*State, error) {
 func Remove(repoPath, branch string) error {
 	migrateOnce()
 	wt := worktreeFromRepoBranch(repoPath, branch)
+	sessionlog.Infof("session.Remove wt=%s branch=%s from=%s", wt, branch, caller(1))
 	return removeForWorktree(wt)
 }
 
@@ -257,9 +280,12 @@ func removeForWorktree(worktreeAbsPath string) error {
 func Tombstone(repoPath, branch string) error {
 	migrateOnce()
 	wt := worktreeFromRepoBranch(repoPath, branch)
+	from := caller(1)
+	sessionlog.Infof("session.Tombstone wt=%s branch=%s from=%s", wt, branch, from)
 	statePath := worktreeStatePath(wt)
 	data, err := os.ReadFile(statePath)
 	if err != nil {
+		sessionlog.Errorf("session.Tombstone read-failed path=%s from=%s err=%v", statePath, from, err)
 		return fmt.Errorf("session.Tombstone: read live state: %w", err)
 	}
 
