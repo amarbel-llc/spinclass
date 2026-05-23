@@ -16,8 +16,9 @@ schema = 3
     goVersion = '1.26'
 
   [mod.'github.com/amarbel-llc/tommy']
-    version = 'v0.0.0-20260326195616-1e3aa70b25d0'
-    hash = 'sha256-7ZAcS56xS6VXOly1wWcGjN9IrGuzkzYO4cQhR0iD08k='
+    version = 'v0.2.5'
+    hash = 'sha256-L/vFQOmS0hDa78oV2HMORWWtfuSr6VDR9MtnWvFDskA='
+    goVersion = '1.26'
 
   [mod.'github.com/atotto/clipboard']
     version = 'v0.1.4'

@@ -213,7 +213,7 @@ func attachSession(resolvedPath worktree.ResolvedPath, args startArgs) error {
 	exec := executor.SessionExecutor{
 		Entrypoint:  merged.SessionStart(),
 		Description: resolvedPath.Description,
-		Group:       merged.SessionGroup(),
+		Env:         merged.SessionEnv(),
 	}
 
 	return shop.Attach(
@@ -313,7 +313,7 @@ func runResume(_ context.Context, args json.RawMessage) error {
 	exec := executor.SessionExecutor{
 		Entrypoint:  entrypoint,
 		Description: state.Description,
-		Group:       merged.SessionGroup(),
+		Env:         merged.SessionEnv(),
 	}
 
 	return shop.Attach(

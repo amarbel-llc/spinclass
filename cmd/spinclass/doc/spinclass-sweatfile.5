@@ -227,12 +227,21 @@ or when the worktree has no gc roots.
 .B Merge:
 scalar override.
 .SS [session\-entry]
-Controls what command is exec'd when attaching to a session.
+Controls what command is exec'd when attaching to a session, what
+environment is injected, how liveness is detected after detach, and how
+long tombstones are retained.
 .TP
 .B start
 Argv array for new sessions.
 Defaults to
 .BR $SHELL .
+Each element supports
+.B $VAR
+expansion against the session environment, so
+.B \[dq]$SPINCLASS_SESSION_ID\[dq]
+substitutes at exec time.
+.B Merge:
+scalar override.
 .TP
 .B resume
 Argv array for resumed sessions.
@@ -240,6 +249,51 @@ When nil, falls back to
 .BR start .
 .B Merge:
 scalar override.
+.TP
+.B liveness\-probe
+Argv array exec'd after the entrypoint returns, to distinguish
+.BR running\-detached
+from
+.BR inactive .
+Exit 0 means the session is still attachable in the multiplexer;
+non-zero (or 2-second timeout) means it's gone.
+Inherits the session env including any keys from
+.BR [session\-entry].env .
+Typical zmx-style probe:
+.B "[\(dqsh\(dq, \(dq-c\(dq,\ \(dqzmx -g \\\(dq$SPINCLASS_GROUP\\\(dq list --short | grep -qxF \\\(dq$SPINCLASS_SESSION_ID\\\(dq\(dq]" .
+.B Merge:
+scalar override.
+.TP
+.B tombstone\-retention
+Duration string (e.g.
+.BR 30d ,
+.BR 0
+to keep forever) controlling how long
+.B sc clean
+preserves tombstone entries before reaping.
+.B Merge:
+scalar override.
+.SS [session\-entry.env]
+Subtable map of environment variables injected into every session
+process (entrypoint, hooks, liveness probe).
+Keys are strings, values are strings.
+This is a generic env-injection mechanism with one convention:
+.B SPINCLASS_GROUP
+is the customary key for a multiplexer-group name so the
+.B liveness\-probe
+argv can reference it symbolically instead of hardcoding the group in
+two places.
+Spinclass-owned variables —
+.BR SPINCLASS_SESSION_ID ,
+.BR SPINCLASS_REPO ,
+.BR SPINCLASS_BRANCH ,
+.BR SPINCLASS_WORKTREE ,
+.BR SPINCLASS_DESCRIPTION ,
+.BR TMPDIR ,
+.BR CLAUDE_CODE_TMPDIR
+— are applied AFTER this map and so cannot be clobbered.
+.B Merge:
+per-key map merge (child wins on collision, parent-only keys survive).
 .SS [[start\-commands]]
 Array of tables declaring custom
 .BI sc\ start\- name

@@ -1220,6 +1220,98 @@ func TestMergeSessionNilInherit(t *testing.T) {
 	}
 }
 
+func TestParseSessionEntryEnvSubtable(t *testing.T) {
+	input := `
+[session-entry]
+start = ["zmx", "-g", "spinclass", "attach", "$SPINCLASS_SESSION_ID"]
+
+[session-entry.env]
+SPINCLASS_GROUP = "spinclass"
+FOO = "bar"
+`
+	doc, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sf := doc.Data()
+	if sf.SessionEntry == nil {
+		t.Fatal("expected SessionEntry to be non-nil")
+	}
+	if got := sf.SessionEntry.Env["SPINCLASS_GROUP"]; got != "spinclass" {
+		t.Errorf(`Env["SPINCLASS_GROUP"] = %q, want "spinclass"`, got)
+	}
+	if got := sf.SessionEntry.Env["FOO"]; got != "bar" {
+		t.Errorf(`Env["FOO"] = %q, want "bar"`, got)
+	}
+	if got := sf.SessionEnv()["SPINCLASS_GROUP"]; got != "spinclass" {
+		t.Errorf(`SessionEnv()["SPINCLASS_GROUP"] = %q, want "spinclass"`, got)
+	}
+}
+
+func TestSessionEnvAccessorEmpty(t *testing.T) {
+	if env := (Sweatfile{}).SessionEnv(); env != nil {
+		t.Errorf("expected nil SessionEnv() when SessionEntry is unset, got %v", env)
+	}
+	sf := Sweatfile{SessionEntry: &SessionEntry{}}
+	if env := sf.SessionEnv(); env != nil {
+		t.Errorf("expected nil SessionEnv() when Env is unset, got %v", env)
+	}
+}
+
+func TestMergeSessionEnvPerKey(t *testing.T) {
+	// Parent sets two keys; child overrides one and adds one; child should
+	// win on collision and the parent's untouched key must survive.
+	base := Sweatfile{
+		SessionEntry: &SessionEntry{
+			Env: map[string]string{
+				"SPINCLASS_GROUP": "parent",
+				"FOO":             "from-parent",
+			},
+		},
+	}
+	override := Sweatfile{
+		SessionEntry: &SessionEntry{
+			Env: map[string]string{
+				"SPINCLASS_GROUP": "child",
+				"BAR":             "from-child",
+			},
+		},
+	}
+	merged := base.MergeWith(override)
+	if merged.SessionEntry == nil {
+		t.Fatal("expected SessionEntry to be non-nil after merge")
+	}
+	got := merged.SessionEntry.Env
+	want := map[string]string{
+		"SPINCLASS_GROUP": "child",
+		"FOO":             "from-parent",
+		"BAR":             "from-child",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("Env size = %d (got %v), want %d (%v)", len(got), got, len(want), want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("Env[%q] = %q, want %q", k, got[k], v)
+		}
+	}
+}
+
+func TestMergeSessionEnvInherit(t *testing.T) {
+	base := Sweatfile{
+		SessionEntry: &SessionEntry{
+			Env: map[string]string{"SPINCLASS_GROUP": "parent"},
+		},
+	}
+	override := Sweatfile{
+		SessionEntry: &SessionEntry{Start: []string{"zellij"}},
+	}
+	merged := base.MergeWith(override)
+	if merged.SessionEntry == nil || merged.SessionEntry.Env["SPINCLASS_GROUP"] != "parent" {
+		t.Errorf("expected parent Env to be inherited, got %v", merged.SessionEntry)
+	}
+}
+
 func TestParseStartCommands(t *testing.T) {
 	input := `
 [[start-commands]]

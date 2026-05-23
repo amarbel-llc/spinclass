@@ -120,25 +120,33 @@ the probe is sweatfile-configurable.
 
 zmx (0.4.x verified against `amarbel-llc/zmx` source) namespaces sessions
 under groups via the global `-g <group>` flag (or `$ZMX_GROUP`). spinclass
-exposes a corresponding sweatfile field:
+does not have a dedicated multiplexer-group field; instead, the generic
+`[session-entry].env` map exports arbitrary environment variables into the
+session, and `$SPINCLASS_GROUP` is just a conventional key for callers
+that want a symbolic handle for their multiplexer group:
 
 ```toml
 [session-entry]
-# Multiplexer group name. Exported as $SPINCLASS_GROUP into the session env.
-group = "sc-dev"
+start  = ["zmx", "-g", "spinclass", "attach", "$SPINCLASS_SESSION_ID"]
+resume = ["zmx", "-g", "spinclass", "attach", "$SPINCLASS_SESSION_ID"]
 
 # Built-in default — checks the group for the running session id.
 liveness-probe = ["sh", "-c", "zmx -g \"$SPINCLASS_GROUP\" list --short | grep -qxF \"$SPINCLASS_SESSION_ID\""]
 
-start  = ["zmx", "-g", "sc-dev", "attach", "$SPINCLASS_SESSION_ID"]
-resume = ["zmx", "-g", "sc-dev", "attach", "$SPINCLASS_SESSION_ID"]
+[session-entry.env]
+SPINCLASS_GROUP = "spinclass"
 ```
+
+The env map is applied BEFORE spinclass-owned variables, so users cannot
+clobber `SPINCLASS_SESSION_ID`, `SPINCLASS_REPO`, `SPINCLASS_BRANCH`,
+`SPINCLASS_WORKTREE`, `SPINCLASS_DESCRIPTION`, `TMPDIR`, or
+`CLAUDE_CODE_TMPDIR` — those remain authoritative.
 
 Contract:
 
 - Argv list, exec'd directly. The probe inherits the session env (so
-  `$SPINCLASS_SESSION_ID`, `$SPINCLASS_GROUP`, `$SPINCLASS_WORKTREE`, etc.
-  are available without explicit substitution).
+  `$SPINCLASS_SESSION_ID`, `$SPINCLASS_WORKTREE`, and any keys from
+  `[session-entry].env` are available without explicit substitution).
 - Exit 0 → session alive → state becomes `running-detached`.
 - Non-zero exit → session gone → state becomes `dead`.
 - A 2-second timeout applies; on timeout the parent writes `dead` and logs

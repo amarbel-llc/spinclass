@@ -21,11 +21,11 @@ type Direnv struct {
 }
 
 type SessionEntry struct {
-	Start              []string `toml:"start"`
-	Resume             []string `toml:"resume"`
-	Group              string   `toml:"group"`
-	LivenessProbe      []string `toml:"liveness-probe"`
-	TombstoneRetention string   `toml:"tombstone-retention"`
+	Start              []string          `toml:"start"`
+	Resume             []string          `toml:"resume"`
+	Env                map[string]string `toml:"env"`
+	LivenessProbe      []string          `toml:"liveness-probe"`
+	TombstoneRetention string            `toml:"tombstone-retention"`
 }
 
 type Hooks struct {
@@ -194,14 +194,22 @@ func (sf Sweatfile) SessionResume() []string {
 	return nil
 }
 
-// SessionGroup returns the multiplexer group name configured for this
-// session, or "" if unset. Exported into the session env as
-// $SPINCLASS_GROUP for entrypoints, hooks, and the liveness probe.
-func (sf Sweatfile) SessionGroup() string {
+// SessionEnv returns the user-configured environment variables to inject
+// into the session's process environment. These are exposed to
+// `[session-entry].start`/`resume` argv expansion, to lifecycle hooks,
+// and to the liveness probe. spinclass-owned vars (SPINCLASS_SESSION_ID,
+// SPINCLASS_REPO, SPINCLASS_BRANCH, SPINCLASS_WORKTREE,
+// SPINCLASS_DESCRIPTION, TMPDIR, CLAUDE_CODE_TMPDIR) are applied AFTER
+// this map and so cannot be clobbered by user config.
+//
+// Typical use: set $SPINCLASS_GROUP for a zmx-style multiplexer so the
+// probe and entrypoint argv can reference it symbolically. Returns nil
+// when no [session-entry].env is configured.
+func (sf Sweatfile) SessionEnv() map[string]string {
 	if sf.SessionEntry == nil {
-		return ""
+		return nil
 	}
-	return sf.SessionEntry.Group
+	return sf.SessionEntry.Env
 }
 
 // SessionLivenessProbe returns the argv list used to determine whether

@@ -16,10 +16,14 @@ import (
 type SessionExecutor struct {
 	Entrypoint  []string
 	Description string
-	// Group is exposed to the entrypoint and any hooks as
-	// $SPINCLASS_GROUP. Empty when the sweatfile doesn't configure
-	// `[session-entry].group`.
-	Group string
+	// Env is user-configured environment variables to inject into the
+	// session's process environment, sourced from `[session-entry].env`
+	// in the sweatfile cascade. Applied BEFORE spinclass-owned vars so
+	// SPINCLASS_SESSION_ID/REPO/BRANCH/WORKTREE/DESCRIPTION and TMPDIR
+	// cannot be clobbered. Typical use: set $SPINCLASS_GROUP for a
+	// multiplexer so entrypoint argv and liveness probes can reference
+	// it symbolically.
+	Env map[string]string
 }
 
 func (s SessionExecutor) Attach(dir string, key string, command []string, dryRun bool, tp *tap.TestPoint) error {
@@ -43,14 +47,20 @@ func (s SessionExecutor) Attach(dir string, key string, command []string, dryRun
 		repo, branch = key[:i], key[i+1:]
 	}
 
-	// Set session env vars so os.ExpandEnv can resolve them in entrypoint args
+	// Apply user env first so spinclass-owned vars (below) can't be
+	// clobbered by user config — the integration contract requires
+	// SPINCLASS_SESSION_ID etc. to be authoritative.
+	for k, v := range s.Env {
+		os.Setenv(k, v)
+	}
+
+	// Spinclass-owned env. Set after user env so it wins on collision.
 	sessionEnv := map[string]string{
 		"SPINCLASS_SESSION_ID":  key,
 		"SPINCLASS_REPO":        repo,
 		"SPINCLASS_BRANCH":      branch,
 		"SPINCLASS_WORKTREE":    dir,
 		"SPINCLASS_DESCRIPTION": s.Description,
-		"SPINCLASS_GROUP":       s.Group,
 		"TMPDIR":                tmpDir,
 		"CLAUDE_CODE_TMPDIR":    tmpDir,
 	}

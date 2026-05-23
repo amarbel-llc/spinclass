@@ -311,8 +311,16 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if len(other.SessionEntry.Resume) > 0 {
 			merged.SessionEntry.Resume = other.SessionEntry.Resume
 		}
-		if other.SessionEntry.Group != "" {
-			merged.SessionEntry.Group = other.SessionEntry.Group
+		// Env: per-key merge so a child sweatfile can add SPINCLASS_FOO=...
+		// without dropping the parent's SPINCLASS_GROUP=...; child entries
+		// override parent entries with the same key.
+		if len(other.SessionEntry.Env) > 0 {
+			if merged.SessionEntry.Env == nil {
+				merged.SessionEntry.Env = make(map[string]string, len(other.SessionEntry.Env))
+			}
+			for k, v := range other.SessionEntry.Env {
+				merged.SessionEntry.Env[k] = v
+			}
 		}
 		if len(other.SessionEntry.LivenessProbe) > 0 {
 			merged.SessionEntry.LivenessProbe = other.SessionEntry.LivenessProbe
