@@ -10,7 +10,8 @@ import (
 	"time"
 
 	"github.com/amarbel-llc/spinclass/internal/session"
-	tap "github.com/amarbel-llc/tap/go"
+	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
+	"github.com/amarbel-llc/tap/go/pkgs/yaml_diagnostic"
 )
 
 type SessionExecutor struct {
@@ -76,7 +77,7 @@ func (s SessionExecutor) Attach(dir string, key string, command []string, dryRun
 
 	if dryRun {
 		tp.Skip = "dry run"
-		tp.Diagnostics = &tap.Diagnostics{
+		tp.Diagnostics = &yaml_diagnostic.YAMLDiagnostic{
 			Extras: map[string]any{
 				"command": strings.Join(expanded, " "),
 			},

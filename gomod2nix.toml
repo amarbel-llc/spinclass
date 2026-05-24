@@ -1,6 +1,11 @@
 schema = 3
 
 [mod]
+  [mod.'github.com/amarbel-llc/purse-first/libs/dewey']
+    version = 'v0.1.8'
+    hash = 'sha256-dNrByOns78mIRKUK9003JKK0p3L3UmYeZjRYt3J/huM='
+    goVersion = '1.26'
+
   [mod.'github.com/amarbel-llc/purse-first/libs/go-mcp']
     version = 'v0.0.13'
     hash = 'sha256-B1FSyxLoZX6J5rn6Hnj1aMLO+fXuj76BOEs6zt/nErE='
@@ -11,8 +16,8 @@ schema = 3
     hash = 'sha256-JbqwWV87R2fQge+4BWZQysOpkgMpGCNYFoOR3VkVSK8='
 
   [mod.'github.com/amarbel-llc/tap/go']
-    version = 'v0.1.2'
-    hash = 'sha256-yFpzdb1J+SPJpgFId9a/kG3w+ouF7HMocK2QuuL5cGo='
+    version = 'v0.1.8'
+    hash = 'sha256-ZvId+dizMgnVOXBkg/SdZiK4kRwvula9oB/E4pX9oC8='
     goVersion = '1.26'
 
   [mod.'github.com/amarbel-llc/tommy']
@@ -96,6 +101,11 @@ schema = 3
     version = 'v0.6.0'
     hash = 'sha256-RtIG2qARd5sT10WQ7F3LR8YJhS8exs+KiuUiVf75bWg='
 
+  [mod.'github.com/google/go-cmp']
+    version = 'v0.7.0'
+    hash = 'sha256-JbxZFBFGCh/Rj5XZ1vG94V2x7c18L8XKB0N9ZD5F2rM='
+    goVersion = '1.21'
+
   [mod.'github.com/google/shlex']
     version = 'v0.0.0-20191202100458-e7afc7fbc510'
     hash = 'sha256-1f392pCmS7AXVKXIC1SvKlYtK/rvW47F5CCkGT2G6JM='
@@ -141,17 +151,29 @@ schema = 3
     hash = 'sha256-GyCDxxMQhXA3Pi/TsWXpA8cX5akEoZV7CFx4RO3rARU='
 
   [mod.'golang.org/x/exp']
-    version = 'v0.0.0-20231006140011-7918f672742d'
-    hash = 'sha256-2SO1etTQ6UCUhADR5sgvDEDLHcj77pJKCIa/8mGDbAo='
+    version = 'v0.0.0-20260410095643-746e56fc9e2f'
+    hash = 'sha256-JaDJGLIRoJjjvsg3dgfFuo7XApEJO2V4kUDmd58qTLI='
+    goVersion = '1.25.0'
 
   [mod.'golang.org/x/sys']
+    version = 'v0.43.0'
+    hash = 'sha256-aDQXqSTZES2l/132PBxhZN4ywldpPyfm7LByYCHzzwM='
+    goVersion = '1.25.0'
+
+  [mod.'golang.org/x/term']
     version = 'v0.42.0'
-    hash = 'sha256-LhNedvUEJbPYyR6EoU91rfOr3DBBoauLOcMcyqghEos='
+    hash = 'sha256-FCiDvAfq7dgBGQuiDYDFJbj/JPawhrmPF2qdUEftQ1c='
     goVersion = '1.25.0'
 
   [mod.'golang.org/x/text']
-    version = 'v0.34.0'
-    hash = 'sha256-wGKd1JkeiFROibvo2kkAuQ7JajSIfV4utGaoGbTQhQM='
+    version = 'v0.36.0'
+    hash = 'sha256-/0t9C6Mc8kYjxweFB0us2lGKo8GovHhBiq5nlMOppC0='
+    goVersion = '1.25.0'
+
+  [mod.'golang.org/x/xerrors']
+    version = 'v0.0.0-20240903120638-7835f813f4da'
+    hash = 'sha256-bE7CcrnAvryNvM26ieJGXqbAtuLwHaGcmtVMsVnksqo='
+    goVersion = '1.18'
 
   [mod.'mvdan.cc/sh/v3']
     version = 'v3.13.1'

@@ -17,7 +17,8 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
-	tap "github.com/amarbel-llc/tap/go"
+	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
+	"github.com/amarbel-llc/tap/go/pkgs/yaml_diagnostic"
 )
 
 func Run(execr executor.Executor, format string, target string, gitSync bool, verbose bool) error {
@@ -122,7 +123,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 				return nil, failStep(tw, ownWriter, "pull "+defaultBranch, pullErr, out)
 			}
 			if verbose && out != "" {
-				tw.OkDiag("pull "+defaultBranch, &tap.Diagnostics{Extras: map[string]any{"output": out}})
+				tw.OkDiag("pull "+defaultBranch, &yaml_diagnostic.YAMLDiagnostic{Extras: map[string]any{"output": out}})
 			} else {
 				tw.Ok("pull " + defaultBranch)
 			}
@@ -143,7 +144,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 			return nil, failStep(tw, ownWriter, "rebase "+branch, rebaseErr, out)
 		}
 		if verbose && out != "" {
-			tw.OkDiag("rebase "+branch, &tap.Diagnostics{Extras: map[string]any{"output": out}})
+			tw.OkDiag("rebase "+branch, &yaml_diagnostic.YAMLDiagnostic{Extras: map[string]any{"output": out}})
 		} else {
 			tw.Ok("rebase " + branch)
 		}
@@ -179,7 +180,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 			return blobURIs, failStep(tw, ownWriter, "merge "+branch, mergeErr, out)
 		}
 		if verbose && out != "" {
-			tw.OkDiag("merge "+branch, &tap.Diagnostics{Extras: map[string]any{"output": out}})
+			tw.OkDiag("merge "+branch, &yaml_diagnostic.YAMLDiagnostic{Extras: map[string]any{"output": out}})
 		} else {
 			tw.Ok("merge " + branch)
 		}
@@ -208,7 +209,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 				return blobURIs, failStep(tw, ownWriter, "remove worktree "+branch, removeErr, out)
 			}
 			if verbose && out != "" {
-				tw.OkDiag("remove worktree "+branch, &tap.Diagnostics{Extras: map[string]any{"output": out}})
+				tw.OkDiag("remove worktree "+branch, &yaml_diagnostic.YAMLDiagnostic{Extras: map[string]any{"output": out}})
 			} else {
 				tw.Ok("remove worktree " + branch)
 			}
@@ -228,7 +229,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 				return blobURIs, failStep(tw, ownWriter, "delete branch "+branch, delErr, out)
 			}
 			if verbose && out != "" {
-				tw.OkDiag("delete branch "+branch, &tap.Diagnostics{Extras: map[string]any{"output": out}})
+				tw.OkDiag("delete branch "+branch, &yaml_diagnostic.YAMLDiagnostic{Extras: map[string]any{"output": out}})
 			} else {
 				tw.Ok("delete branch " + branch)
 			}
@@ -250,7 +251,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 				return blobURIs, failStep(tw, ownWriter, "push", pushErr, out)
 			}
 			if verbose && out != "" {
-				tw.OkDiag("push", &tap.Diagnostics{Extras: map[string]any{"output": out}})
+				tw.OkDiag("push", &yaml_diagnostic.YAMLDiagnostic{Extras: map[string]any{"output": out}})
 			} else {
 				tw.Ok("push")
 			}

@@ -6,7 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	tap "github.com/amarbel-llc/tap/go"
+	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
+	"github.com/amarbel-llc/tap/go/pkgs/yaml_diagnostic"
 )
 
 type ShellExecutor struct{}
@@ -18,7 +19,7 @@ func (s ShellExecutor) Attach(dir string, key string, command []string, dryRun b
 
 	if dryRun {
 		tp.Skip = "dry run"
-		tp.Diagnostics = &tap.Diagnostics{
+		tp.Diagnostics = &yaml_diagnostic.YAMLDiagnostic{
 			Extras: map[string]any{
 				"command": strings.Join(command, " "),
 			},

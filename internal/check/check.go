@@ -18,7 +18,8 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/madder"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/tapblock"
-	tap "github.com/amarbel-llc/tap/go"
+	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
+	"github.com/amarbel-llc/tap/go/pkgs/yaml_diagnostic"
 )
 
 // Directive emitted by the compact (madder-pinned) shape so agents
@@ -133,12 +134,12 @@ func RunWithWriter(
 	}
 
 	var hookErr error
-	tw.OutputBlock(desc, func(ob *tap.OutputBlockWriter) *tap.Diagnostics {
+	tw.OutputBlock(desc, func(ob *tap.OutputBlockWriter) *yaml_diagnostic.YAMLDiagnostic {
 		lw := tapblock.NewLineWriter(ob)
 		hookErr = hierarchy.Merged.RunPreMergeHook(wtPath, lw)
 		lw.Flush()
 		if hookErr != nil {
-			return &tap.Diagnostics{Severity: "fail", Message: hookErr.Error()}
+			return &yaml_diagnostic.YAMLDiagnostic{Severity: "fail", Message: hookErr.Error()}
 		}
 		return nil
 	})
@@ -199,7 +200,7 @@ func runHookCompact(tw *tap.Writer, hierarchy sweatfile.Hierarchy, wtPath, cmd, 
 		}
 		tw.NotOk(desc, flat)
 	} else {
-		tw.OkDiag(desc, &tap.Diagnostics{Extras: extras})
+		tw.OkDiag(desc, &yaml_diagnostic.YAMLDiagnostic{Extras: extras})
 	}
 	return blobURI, hookErr
 }

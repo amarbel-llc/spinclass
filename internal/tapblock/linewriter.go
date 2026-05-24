@@ -8,7 +8,7 @@ import (
 	"bytes"
 	"sync"
 
-	tap "github.com/amarbel-llc/tap/go"
+	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
 )
 
 // LineWriter splits incoming bytes on '\n' and forwards each complete

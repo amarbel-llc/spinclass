@@ -18,7 +18,8 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/tapblock"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 
-	tap "github.com/amarbel-llc/tap/go"
+	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
+	"github.com/amarbel-llc/tap/go/pkgs/yaml_diagnostic"
 )
 
 // Run closes a session. dbg, when non-nil, is forwarded to the
@@ -166,7 +167,7 @@ func runReap(tw *tap.Writer, plan nixgc.Plan, branch string) {
 		return
 	}
 	var summary nixgc.Summary
-	tw.OutputBlock(desc, func(ob *tap.OutputBlockWriter) *tap.Diagnostics {
+	tw.OutputBlock(desc, func(ob *tap.OutputBlockWriter) *yaml_diagnostic.YAMLDiagnostic {
 		lw := tapblock.NewLineWriter(ob)
 		summary = nixgc.Reap(plan, lw, lw)
 		lw.Flush()
@@ -181,7 +182,7 @@ func runReap(tw *tap.Writer, plan nixgc.Plan, branch string) {
 			"bytes_kept_human":  summary.HumanKept(),
 		}
 		if summary.TimedOut > 0 {
-			return &tap.Diagnostics{
+			return &yaml_diagnostic.YAMLDiagnostic{
 				Severity: "warn",
 				Message: fmt.Sprintf(
 					"%d path(s) still in flight when nix-store --delete timed out (see #68)",
@@ -193,7 +194,7 @@ func runReap(tw *tap.Writer, plan nixgc.Plan, branch string) {
 		if len(summary.Errors) > 0 {
 			extras["errors"] = len(summary.Errors)
 			extras["first_error"] = summary.Errors[0].Error()
-			return &tap.Diagnostics{
+			return &yaml_diagnostic.YAMLDiagnostic{
 				Severity: "warn",
 				Message:  fmt.Sprintf("%d path(s) failed to delete", len(summary.Errors)),
 				Extras:   extras,

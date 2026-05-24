@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/amarbel-llc/spinclass/internal/nixgc"
-	tap "github.com/amarbel-llc/tap/go"
+	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
 )
 
 func TestParsePorcelainEmpty(t *testing.T) {
@@ -138,7 +138,7 @@ func TestParsePorcelainStagedDeleted(t *testing.T) {
 // TestRunReapEmptyClosureEmitsOk is the regression guard for #76:
 // nixgc.Reap with an empty Closure is a no-op success, and the
 // surrounding OutputBlock must render "ok" — not "not ok". Pre-fix,
-// the success path returned a non-nil *tap.Diagnostics carrying only
+// the success path returned a non-nil *yaml_diagnostic.YAMLDiagnostic carrying only
 // summary extras, which tap-go interprets as "not ok". Mirrors the
 // twin test in internal/close.
 func TestRunReapEmptyClosureEmitsOk(t *testing.T) {

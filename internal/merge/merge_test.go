@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/amarbel-llc/spinclass/internal/git"
-	tap "github.com/amarbel-llc/tap/go"
+	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
 )
 
 type mockExecutor struct {

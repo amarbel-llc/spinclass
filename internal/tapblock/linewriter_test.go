@@ -5,7 +5,8 @@ import (
 	"sync"
 	"testing"
 
-	tap "github.com/amarbel-llc/tap/go"
+	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
+	"github.com/amarbel-llc/tap/go/pkgs/yaml_diagnostic"
 )
 
 // TestLineWriterConcurrentWrite is a regression test for the panic
@@ -19,7 +20,7 @@ import (
 // surface the original slice-bounds panic.
 func TestLineWriterConcurrentWrite(t *testing.T) {
 	tw := tap.NewWriter(io.Discard)
-	tw.OutputBlock("concurrent linewriter", func(ob *tap.OutputBlockWriter) *tap.Diagnostics {
+	tw.OutputBlock("concurrent linewriter", func(ob *tap.OutputBlockWriter) *yaml_diagnostic.YAMLDiagnostic {
 		lw := NewLineWriter(ob)
 
 		const writers = 16
@@ -55,7 +56,7 @@ func TestLineWriterConcurrentWrite(t *testing.T) {
 // panic in production.
 func TestLineWriterConcurrentMixedSizes(t *testing.T) {
 	tw := tap.NewWriter(io.Discard)
-	tw.OutputBlock("concurrent linewriter (mixed)", func(ob *tap.OutputBlockWriter) *tap.Diagnostics {
+	tw.OutputBlock("concurrent linewriter (mixed)", func(ob *tap.OutputBlockWriter) *yaml_diagnostic.YAMLDiagnostic {
 		lw := NewLineWriter(ob)
 
 		const writers = 8

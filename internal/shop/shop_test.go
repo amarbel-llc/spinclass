@@ -11,7 +11,8 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
-	tap "github.com/amarbel-llc/tap/go"
+	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
+	"github.com/amarbel-llc/tap/go/pkgs/yaml_diagnostic"
 )
 
 // TestMain sandboxes $HOME once for the package. Several tests reach
@@ -238,7 +239,7 @@ func (m *mockExecutor) Attach(dir string, key string, command []string, dryRun b
 	m.attachCmd = command
 	if dryRun {
 		tp.Skip = "dry run"
-		tp.Diagnostics = &tap.Diagnostics{
+		tp.Diagnostics = &yaml_diagnostic.YAMLDiagnostic{
 			Extras: map[string]any{"command": "mock-command"},
 		}
 	}
