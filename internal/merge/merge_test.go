@@ -66,16 +66,23 @@ func setupRepo(t *testing.T) (repoDir string) {
 	return repoDir
 }
 
-func TestResolvedMergesAndRemovesWorktree(t *testing.T) {
-	repoDir := setupRepo(t)
-
-	// Create a worktree with a new commit
+// setupWorktree creates repoDir/.worktrees/<branch> via `git worktree add -b`.
+// Returns the absolute worktree path.
+func setupWorktree(t *testing.T, repoDir, branch string) string {
+	t.Helper()
 	wtDir := filepath.Join(repoDir, ".worktrees")
 	if err := os.MkdirAll(wtDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	wtPath := filepath.Join(wtDir, "feature-merge")
-	runGit(t, repoDir, "worktree", "add", "-b", "feature-merge", wtPath)
+	wtPath := filepath.Join(wtDir, branch)
+	runGit(t, repoDir, "worktree", "add", "-b", branch, wtPath)
+	return wtPath
+}
+
+func TestResolvedMergesAndRemovesWorktree(t *testing.T) {
+	repoDir := setupRepo(t)
+
+	wtPath := setupWorktree(t, repoDir, "feature-merge")
 
 	if err := os.WriteFile(filepath.Join(wtPath, "new.txt"), []byte("new content"), 0o644); err != nil {
 		t.Fatal(err)
@@ -118,12 +125,7 @@ func TestResolvedMergesAndRemovesWorktree(t *testing.T) {
 func TestResolvedTapOutput(t *testing.T) {
 	repoDir := setupRepo(t)
 
-	wtDir := filepath.Join(repoDir, ".worktrees")
-	if err := os.MkdirAll(wtDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	wtPath := filepath.Join(wtDir, "feature-tap")
-	runGit(t, repoDir, "worktree", "add", "-b", "feature-tap", wtPath)
+	wtPath := setupWorktree(t, repoDir, "feature-tap")
 
 	if err := os.WriteFile(filepath.Join(wtPath, "tap.txt"), []byte("tap"), 0o644); err != nil {
 		t.Fatal(err)
@@ -185,13 +187,7 @@ func TestResolvedGitSyncTapOutput(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "initial")
 	runGit(t, repoDir, "push")
 
-	// Create a worktree with a commit
-	wtDir := filepath.Join(repoDir, ".worktrees")
-	if err := os.MkdirAll(wtDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	wtPath := filepath.Join(wtDir, "feature-sync")
-	runGit(t, repoDir, "worktree", "add", "-b", "feature-sync", wtPath)
+	wtPath := setupWorktree(t, repoDir, "feature-sync")
 	if err := os.WriteFile(filepath.Join(wtPath, "sync.txt"), []byte("sync"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -266,13 +262,7 @@ func TestResolvedGitSyncPullsBeforeRebase(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "initial")
 	runGit(t, repoDir, "push")
 
-	// Session worktree + commit
-	wtDir := filepath.Join(repoDir, ".worktrees")
-	if err := os.MkdirAll(wtDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	wtPath := filepath.Join(wtDir, "feature-stale")
-	runGit(t, repoDir, "worktree", "add", "-b", "feature-stale", wtPath)
+	wtPath := setupWorktree(t, repoDir, "feature-stale")
 	if err := os.WriteFile(filepath.Join(wtPath, "feature.txt"), []byte("feature"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -337,12 +327,7 @@ func TestResolvedRepoNotFound(t *testing.T) {
 func TestResolvedDivergedBranch(t *testing.T) {
 	repoDir := setupRepo(t)
 
-	wtDir := filepath.Join(repoDir, ".worktrees")
-	if err := os.MkdirAll(wtDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	wtPath := filepath.Join(wtDir, "feature-diverge")
-	runGit(t, repoDir, "worktree", "add", "-b", "feature-diverge", wtPath)
+	wtPath := setupWorktree(t, repoDir, "feature-diverge")
 
 	// Make a commit on the worktree
 	if err := os.WriteFile(filepath.Join(wtPath, "diverge.txt"), []byte("diverge"), 0o644); err != nil {
@@ -373,12 +358,7 @@ func TestResolvedDivergedBranch(t *testing.T) {
 func TestResolvedInSessionSkipsCleanup(t *testing.T) {
 	repoDir := setupRepo(t)
 
-	wtDir := filepath.Join(repoDir, ".worktrees")
-	if err := os.MkdirAll(wtDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	wtPath := filepath.Join(wtDir, "feature-insession")
-	runGit(t, repoDir, "worktree", "add", "-b", "feature-insession", wtPath)
+	wtPath := setupWorktree(t, repoDir, "feature-insession")
 
 	if err := os.WriteFile(filepath.Join(wtPath, "session.txt"), []byte("session"), 0o644); err != nil {
 		t.Fatal(err)
@@ -420,12 +400,7 @@ func TestResolvedInSessionSkipsCleanup(t *testing.T) {
 func TestResolvedInSessionTapOutput(t *testing.T) {
 	repoDir := setupRepo(t)
 
-	wtDir := filepath.Join(repoDir, ".worktrees")
-	if err := os.MkdirAll(wtDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	wtPath := filepath.Join(wtDir, "feature-session-tap")
-	runGit(t, repoDir, "worktree", "add", "-b", "feature-session-tap", wtPath)
+	wtPath := setupWorktree(t, repoDir, "feature-session-tap")
 
 	if err := os.WriteFile(filepath.Join(wtPath, "tap.txt"), []byte("tap"), 0o644); err != nil {
 		t.Fatal(err)
@@ -464,12 +439,7 @@ func TestResolvedInSessionTapOutput(t *testing.T) {
 func TestResolvedDisabledByMergeFlag(t *testing.T) {
 	repoDir := setupRepo(t)
 
-	wtDir := filepath.Join(repoDir, ".worktrees")
-	if err := os.MkdirAll(wtDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	wtPath := filepath.Join(wtDir, "feature-disabled")
-	runGit(t, repoDir, "worktree", "add", "-b", "feature-disabled", wtPath)
+	wtPath := setupWorktree(t, repoDir, "feature-disabled")
 
 	if err := os.WriteFile(filepath.Join(wtPath, "disabled.txt"), []byte("disabled"), 0o644); err != nil {
 		t.Fatal(err)
@@ -536,12 +506,7 @@ func TestResolvedDisabledByMergeFlag(t *testing.T) {
 func TestResolvedShortCircuitsNoOpMerge(t *testing.T) {
 	repoDir := setupRepo(t)
 
-	wtDir := filepath.Join(repoDir, ".worktrees")
-	if err := os.MkdirAll(wtDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	wtPath := filepath.Join(wtDir, "feature-noop")
-	runGit(t, repoDir, "worktree", "add", "-b", "feature-noop", wtPath)
+	wtPath := setupWorktree(t, repoDir, "feature-noop")
 
 	mainLogBefore := runGit(t, repoDir, "log", "--oneline", "main")
 	branchLogBefore := runGit(t, repoDir, "log", "--oneline", "feature-noop")

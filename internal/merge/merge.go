@@ -102,16 +102,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 				"merge disabled by sweatfile (disable-merge=true at %s); use `sc check` to run the pre-merge hook without merging",
 				disableMergeSource(hierarchy),
 			)
-			if tw != nil {
-				tw.NotOk("merge "+branch, map[string]string{
-					"severity": "fail",
-					"message":  disableErr.Error(),
-				})
-				if ownWriter {
-					tw.Plan()
-				}
-			}
-			return nil, disableErr
+			return nil, failStep(tw, ownWriter, "merge "+branch, disableErr, "")
 		}
 	}
 
@@ -128,15 +119,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 		if tw != nil {
 			out, pullErr := git.Pull(repoPath)
 			if pullErr != nil {
-				diag := map[string]string{"severity": "fail", "message": pullErr.Error()}
-				if out != "" {
-					diag["output"] = out
-				}
-				tw.NotOk("pull "+defaultBranch, diag)
-				if ownWriter {
-					tw.Plan()
-				}
-				return nil, pullErr
+				return nil, failStep(tw, ownWriter, "pull "+defaultBranch, pullErr, out)
 			}
 			if verbose && out != "" {
 				tw.OkDiag("pull "+defaultBranch, &tap.Diagnostics{Extras: map[string]any{"output": out}})
@@ -157,15 +140,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 	if tw != nil {
 		out, rebaseErr := git.RunEnv(wtPath, []string{"GIT_SEQUENCE_EDITOR=true"}, "rebase", defaultBranch, "-i")
 		if rebaseErr != nil {
-			diag := map[string]string{"severity": "fail", "message": rebaseErr.Error()}
-			if out != "" {
-				diag["output"] = out
-			}
-			tw.NotOk("rebase "+branch, diag)
-			if ownWriter {
-				tw.Plan()
-			}
-			return nil, rebaseErr
+			return nil, failStep(tw, ownWriter, "rebase "+branch, rebaseErr, out)
 		}
 		if verbose && out != "" {
 			tw.OkDiag("rebase "+branch, &tap.Diagnostics{Extras: map[string]any{"output": out}})
@@ -182,18 +157,10 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 	// Short-circuit so an empty merge doesn't pay for the pre-merge hook.
 	if git.CommitsAhead(wtPath, defaultBranch, branch) == 0 {
 		noopErr := fmt.Errorf("nothing to merge: %s has no commits ahead of %s", branch, defaultBranch)
-		if tw != nil {
-			tw.NotOk("merge "+branch, map[string]string{
-				"severity": "fail",
-				"message":  noopErr.Error(),
-			})
-			if ownWriter {
-				tw.Plan()
-			}
-		} else {
+		if tw == nil {
 			log.Error("nothing to merge", "branch", branch, "default", defaultBranch)
 		}
-		return nil, noopErr
+		return nil, failStep(tw, ownWriter, "merge "+branch, noopErr, "")
 	}
 
 	hookURIs, hookErr := runPreMergeHook(tw, w, repoPath, wtPath, branch, ownWriter)
@@ -209,15 +176,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 	if tw != nil {
 		out, mergeErr := git.Run(repoPath, "merge", "--ff-only", branch)
 		if mergeErr != nil {
-			diag := map[string]string{"severity": "fail", "message": mergeErr.Error()}
-			if out != "" {
-				diag["output"] = out
-			}
-			tw.NotOk("merge "+branch, diag)
-			if ownWriter {
-				tw.Plan()
-			}
-			return blobURIs, mergeErr
+			return blobURIs, failStep(tw, ownWriter, "merge "+branch, mergeErr, out)
 		}
 		if verbose && out != "" {
 			tw.OkDiag("merge "+branch, &tap.Diagnostics{Extras: map[string]any{"output": out}})
@@ -246,15 +205,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 		if tw != nil {
 			out, removeErr := git.Run(repoPath, "worktree", "remove", wtPath)
 			if removeErr != nil {
-				diag := map[string]string{"severity": "fail", "message": removeErr.Error()}
-				if out != "" {
-					diag["output"] = out
-				}
-				tw.NotOk("remove worktree "+branch, diag)
-				if ownWriter {
-					tw.Plan()
-				}
-				return blobURIs, removeErr
+				return blobURIs, failStep(tw, ownWriter, "remove worktree "+branch, removeErr, out)
 			}
 			if verbose && out != "" {
 				tw.OkDiag("remove worktree "+branch, &tap.Diagnostics{Extras: map[string]any{"output": out}})
@@ -274,15 +225,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 		if tw != nil {
 			out, delErr := git.BranchDelete(repoPath, branch)
 			if delErr != nil {
-				diag := map[string]string{"severity": "fail", "message": delErr.Error()}
-				if out != "" {
-					diag["output"] = out
-				}
-				tw.NotOk("delete branch "+branch, diag)
-				if ownWriter {
-					tw.Plan()
-				}
-				return blobURIs, delErr
+				return blobURIs, failStep(tw, ownWriter, "delete branch "+branch, delErr, out)
 			}
 			if verbose && out != "" {
 				tw.OkDiag("delete branch "+branch, &tap.Diagnostics{Extras: map[string]any{"output": out}})
@@ -304,15 +247,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 		if tw != nil {
 			out, pushErr := git.Push(repoPath)
 			if pushErr != nil {
-				diag := map[string]string{"severity": "fail", "message": pushErr.Error()}
-				if out != "" {
-					diag["output"] = out
-				}
-				tw.NotOk("push", diag)
-				if ownWriter {
-					tw.Plan()
-				}
-				return blobURIs, pushErr
+				return blobURIs, failStep(tw, ownWriter, "push", pushErr, out)
 			}
 			if verbose && out != "" {
 				tw.OkDiag("push", &tap.Diagnostics{Extras: map[string]any{"output": out}})
@@ -470,6 +405,26 @@ func runPreMergeHook(tw *tap.Writer, w io.Writer, repoPath, wtPath, branch strin
 		return nil, nil
 	}
 	return check.RunWithWriter(tw, w, hierarchy, wtPath, branch, ownWriter)
+}
+
+// failStep emits a TAP NotOk for label populated from err
+// (severity=fail), optionally including a verbose output field. When
+// ownWriter is true, follows with tw.Plan() to terminate the stream.
+// tw=nil skips emit. Returns err unchanged so callers can write
+// `return failStep(...)`.
+func failStep(tw *tap.Writer, ownWriter bool, label string, err error, output string) error {
+	if tw == nil {
+		return err
+	}
+	diag := map[string]string{"severity": "fail", "message": err.Error()}
+	if output != "" {
+		diag["output"] = output
+	}
+	tw.NotOk(label, diag)
+	if ownWriter {
+		tw.Plan()
+	}
+	return err
 }
 
 // disableMergeSource returns the path of the most-specific sweatfile in
