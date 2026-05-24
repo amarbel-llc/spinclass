@@ -71,11 +71,12 @@ func Run(execr executor.Executor, format string, target string, gitSync bool, ve
 }
 
 // Resolved orchestrates the rebase/pre-merge-hook/merge sequence for a
-// fully-resolved worktree. Returns any resource_link URIs emitted by the
-// pre-merge hook (one per hook step that produced a madder blob; empty
-// when madder is not pinned at build time) and a non-nil error if any
-// step failed.
-func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repoPath, wtPath, branch, defaultBranch string, gitSync bool, inSession bool, verbose bool) (blobURIs []string, err error) {
+// fully-resolved worktree. Returns any resource_link blobs emitted by
+// the pre-merge hook (one per hook step that produced a madder blob;
+// empty when madder is not pinned at build time) and a non-nil error if
+// any step failed. Each BlobLink carries the MIME type matching the
+// format the blob was written in.
+func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repoPath, wtPath, branch, defaultBranch string, gitSync bool, inSession bool, verbose bool) (blobLinks []check.BlobLink, err error) {
 	if info, statErr := os.Stat(repoPath); statErr != nil || !info.IsDir() {
 		return nil, fmt.Errorf("repository not found: %s", repoPath)
 	}
@@ -164,10 +165,10 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 		return nil, failStep(tw, ownWriter, "merge "+branch, noopErr, "")
 	}
 
-	hookURIs, hookErr := runPreMergeHook(tw, w, repoPath, wtPath, branch, ownWriter)
-	blobURIs = append(blobURIs, hookURIs...)
+	hookLinks, hookErr := runPreMergeHook(tw, w, repoPath, wtPath, branch, ownWriter)
+	blobLinks = append(blobLinks, hookLinks...)
 	if hookErr != nil {
-		return blobURIs, hookErr
+		return blobLinks, hookErr
 	}
 
 	if tw == nil {
@@ -177,7 +178,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 	if tw != nil {
 		out, mergeErr := git.Run(repoPath, "merge", "--ff-only", branch)
 		if mergeErr != nil {
-			return blobURIs, failStep(tw, ownWriter, "merge "+branch, mergeErr, out)
+			return blobLinks, failStep(tw, ownWriter, "merge "+branch, mergeErr, out)
 		}
 		if verbose && out != "" {
 			tw.OkDiag("merge "+branch, &yaml_diagnostic.YAMLDiagnostic{Extras: map[string]any{"output": out}})
@@ -187,7 +188,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 	} else {
 		if mergeErr := git.RunPassthrough(repoPath, "merge", "--ff-only", branch); mergeErr != nil {
 			log.Error("merge failed, not removing worktree")
-			return blobURIs, mergeErr
+			return blobLinks, mergeErr
 		}
 	}
 
@@ -206,7 +207,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 		if tw != nil {
 			out, removeErr := git.Run(repoPath, "worktree", "remove", wtPath)
 			if removeErr != nil {
-				return blobURIs, failStep(tw, ownWriter, "remove worktree "+branch, removeErr, out)
+				return blobLinks, failStep(tw, ownWriter, "remove worktree "+branch, removeErr, out)
 			}
 			if verbose && out != "" {
 				tw.OkDiag("remove worktree "+branch, &yaml_diagnostic.YAMLDiagnostic{Extras: map[string]any{"output": out}})
@@ -215,7 +216,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 			}
 		} else {
 			if removeErr := git.RunPassthrough(repoPath, "worktree", "remove", wtPath); removeErr != nil {
-				return blobURIs, removeErr
+				return blobLinks, removeErr
 			}
 		}
 
@@ -226,7 +227,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 		if tw != nil {
 			out, delErr := git.BranchDelete(repoPath, branch)
 			if delErr != nil {
-				return blobURIs, failStep(tw, ownWriter, "delete branch "+branch, delErr, out)
+				return blobLinks, failStep(tw, ownWriter, "delete branch "+branch, delErr, out)
 			}
 			if verbose && out != "" {
 				tw.OkDiag("delete branch "+branch, &yaml_diagnostic.YAMLDiagnostic{Extras: map[string]any{"output": out}})
@@ -235,7 +236,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 			}
 		} else {
 			if _, delErr := git.BranchDelete(repoPath, branch); delErr != nil {
-				return blobURIs, delErr
+				return blobLinks, delErr
 			}
 		}
 	}
@@ -248,7 +249,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 		if tw != nil {
 			out, pushErr := git.Push(repoPath)
 			if pushErr != nil {
-				return blobURIs, failStep(tw, ownWriter, "push", pushErr, out)
+				return blobLinks, failStep(tw, ownWriter, "push", pushErr, out)
 			}
 			if verbose && out != "" {
 				tw.OkDiag("push", &yaml_diagnostic.YAMLDiagnostic{Extras: map[string]any{"output": out}})
@@ -257,7 +258,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 			}
 		} else {
 			if pushErr := git.RunPassthrough(repoPath, "push"); pushErr != nil {
-				return blobURIs, pushErr
+				return blobLinks, pushErr
 			}
 		}
 	}
@@ -272,7 +273,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 		// and tearing down state.json + the central index symlink here
 		// would orphan the worktree from `sc list`/`resume`/`close` until
 		// the next session.Write. Cleanup is owned by `sc close`/`sc clean`.
-		return blobURIs, nil
+		return blobLinks, nil
 	}
 
 	// Outside session: request graceful close if the target is still
@@ -280,7 +281,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 	// (closeShop → close.RunResolved → session.Tombstone) when conditions
 	// warrant; abandoned state is reaped by `sc clean`.
 	executor.RequestClose(repoPath, branch)
-	return blobURIs, nil
+	return blobLinks, nil
 }
 
 // isInsideSession returns true when both SPINCLASS_SESSION_ID is set and cwd is
@@ -379,12 +380,12 @@ func promptDefaultBranch() (string, error) {
 
 // runPreMergeHook loads the sweatfile hierarchy and runs the configured
 // pre-merge hook. Returns (nil, nil) silently when home is not
-// resolvable or the hierarchy fails to load. Returned blobURIs are the
-// resource_link URIs emitted for hook output (compact path only). In
+// resolvable or the hierarchy fails to load. Returned BlobLinks are the
+// resource_link blobs emitted for hook output (compact path only). In
 // passthrough mode, emits the legacy "running pre-merge hook" /
 // "pre-merge hook failed, not merging" log lines that operators rely
 // on.
-func runPreMergeHook(tw *tap.Writer, w io.Writer, repoPath, wtPath, branch string, ownWriter bool) ([]string, error) {
+func runPreMergeHook(tw *tap.Writer, w io.Writer, repoPath, wtPath, branch string, ownWriter bool) ([]check.BlobLink, error) {
 	home, _ := os.UserHomeDir()
 	if home == "" {
 		return nil, nil

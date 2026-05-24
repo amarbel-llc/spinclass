@@ -29,12 +29,34 @@ import (
 // resource_link unless the test point failed.
 const compactDirective = "directive: if status is ok, the resource_link need not be followed; only inspect on failure"
 
+// BlobLink pairs a madder blob URI with the MIME type of its contents.
+// Producers know the format used to write the blob (raw stdout vs.
+// parsed ndjson) and surface it here so the MCP layer can set
+// ResourceLinkContent.mimeType correctly.
+type BlobLink struct {
+	URI      string
+	MimeType string
+}
+
+// mimeTypeForFormat maps the sweatfile [hooks].pre-merge-output-format
+// enum to the IANA-ish MIME type advertised on the MCP
+// ResourceLinkContent block. Anything other than "tap-ndjson" maps to
+// "text/plain" (matching the format=raw default).
+func mimeTypeForFormat(format string) string {
+	if format == "tap-ndjson" {
+		return "application/x-ndjson"
+	}
+	return "text/plain"
+}
+
 // Run resolves the worktree containing wtPath, loads the sweatfile
 // hierarchy, and runs the configured [hooks].pre-merge command. It writes
 // TAP-14 output (when format == "tap") or passthrough output otherwise to
-// w. Returns the resource_link URIs emitted for the hook output (one per
+// w. Returns the resource_link blobs emitted for the hook output (one per
 // hook step that produced a madder blob; empty when madder is not pinned)
-// and a non-nil error if the hook fails.
+// and a non-nil error if the hook fails. Each BlobLink carries the MIME
+// type matching the format the blob was written in (text/plain for raw,
+// application/x-ndjson for tap-ndjson).
 //
 // If no pre-merge hook is configured, Run returns (nil, nil) and (in TAP
 // mode) emits an "ok" indicating no hook is configured — agents and
@@ -44,7 +66,7 @@ const compactDirective = "directive: if status is ok, the resource_link need not
 // The verbose parameter is accepted for API stability but currently
 // unused; check itself emits no git output today. It is reserved for
 // future use when verbose-mode diagnostics become relevant.
-func Run(w io.Writer, format, wtPath string, verbose bool) ([]string, error) {
+func Run(w io.Writer, format, wtPath string, verbose bool) ([]BlobLink, error) {
 	repoPath, err := git.CommonDir(wtPath)
 	if err != nil {
 		return nil, fmt.Errorf("not a worktree: %s", wtPath)
@@ -85,11 +107,11 @@ func Run(w io.Writer, format, wtPath string, verbose bool) ([]string, error) {
 	}
 
 	// ownWriter=false: Run owns Plan emission for the standalone path.
-	blobURIs, hookErr := RunWithWriter(tw, w, hierarchy, wtPath, branch, false)
+	links, hookErr := RunWithWriter(tw, w, hierarchy, wtPath, branch, false)
 	if tw != nil && ownWriter {
 		tw.Plan()
 	}
-	return blobURIs, hookErr
+	return links, hookErr
 }
 
 // RunWithWriter runs the configured pre-merge hook against an already-
@@ -98,8 +120,10 @@ func Run(w io.Writer, format, wtPath string, verbose bool) ([]string, error) {
 // tw.Plan() when the hook fails (matching the legacy merge call pattern;
 // successful hook runs leave Plan to the caller).
 //
-// Returns the resource_link URIs emitted for hook output (compact path
-// only; empty otherwise) and a non-nil error if the hook fails.
+// Returns the resource_link blobs emitted for hook output (compact path
+// only; empty otherwise) and a non-nil error if the hook fails. Each
+// BlobLink carries the MIME type matching the format the blob was
+// written in.
 //
 // When no pre-merge hook is configured, RunWithWriter returns (nil, nil)
 // and emits NO TAP output. This preserves the historical
@@ -111,7 +135,7 @@ func RunWithWriter(
 	hierarchy sweatfile.Hierarchy,
 	wtPath, branch string,
 	ownWriter bool,
-) ([]string, error) {
+) ([]BlobLink, error) {
 	cmd := hierarchy.Merged.PreMergeHookCommand()
 	if cmd == nil || *cmd == "" {
 		return nil, nil
@@ -124,15 +148,15 @@ func RunWithWriter(
 	desc := "pre-merge hook for " + branch + ": `" + *cmd + "`"
 
 	if embeds.MadderBin() != "" {
-		blobURI, hookErr := runHookCompact(tw, hierarchy, wtPath, *cmd, desc)
+		link, hookErr := runHookCompact(tw, hierarchy, wtPath, *cmd, desc)
 		if hookErr != nil && ownWriter {
 			tw.Plan()
 		}
-		var blobURIs []string
-		if blobURI != "" {
-			blobURIs = []string{blobURI}
+		var links []BlobLink
+		if link.URI != "" {
+			links = []BlobLink{link}
 		}
-		return blobURIs, hookErr
+		return links, hookErr
 	}
 
 	var hookErr error
@@ -169,9 +193,10 @@ func RunWithWriter(
 //     with zero parsed records (degenerate stream), the response falls
 //     back to `tail:` carrying the raw output ring.
 //
-// Returns the resource_link URI when madder produced a blob, or "" when
-// it didn't (madder spawn failed, or post-hook write/parse failed).
-func runHookCompact(tw *tap.Writer, hierarchy sweatfile.Hierarchy, wtPath, cmd, desc string) (string, error) {
+// Returns a BlobLink carrying the resource_link URI and the MIME type
+// matching the resolved format. If madder produced no blob (spawn
+// failed, or post-hook write/parse failed), the BlobLink's URI is "".
+func runHookCompact(tw *tap.Writer, hierarchy sweatfile.Hierarchy, wtPath, cmd, desc string) (BlobLink, error) {
 	format := hierarchy.Merged.PreMergeOutputFormatValue()
 
 	// ring is the fallback visibility for failures the parser can't surface.
@@ -238,10 +263,10 @@ func runHookCompact(tw *tap.Writer, hierarchy sweatfile.Hierarchy, wtPath, cmd, 
 		ms, fm, mErr := madder.Write(wtPath, embeds.MadderBin())
 		if mErr != nil {
 			madderErr = mErr
+		} else if wErr := ndjson.WriteAll(ms, parsed); wErr != nil {
+			madderErr = wErr
+			_ = ms.Close()
 		} else {
-			if wErr := ndjson.WriteAll(ms, parsed); wErr != nil {
-				madderErr = wErr
-			}
 			_ = ms.Close()
 			id, fErr := fm()
 			if fErr != nil {
@@ -298,7 +323,7 @@ func runHookCompact(tw *tap.Writer, hierarchy sweatfile.Hierarchy, wtPath, cmd, 
 	} else {
 		tw.OkDiag(desc, &yaml_diagnostic.YAMLDiagnostic{Extras: extras})
 	}
-	return blobURI, hookErr
+	return BlobLink{URI: blobURI, MimeType: mimeTypeForFormat(format)}, hookErr
 }
 
 // buildFailureSummary renders failing TestRecords as a multi-line string

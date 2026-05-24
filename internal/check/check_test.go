@@ -74,12 +74,12 @@ func TestRunHookSuccessTAP(t *testing.T) {
 	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"true\"\n")
 
 	var buf bytes.Buffer
-	blobURIs, err := Run(&buf, "tap", wtPath, false)
+	links, err := Run(&buf, "tap", wtPath, false)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
-	if len(blobURIs) != 0 {
-		t.Errorf("expected no blob URIs without madder pinned, got %v", blobURIs)
+	if len(links) != 0 {
+		t.Errorf("expected no blob links without madder pinned, got %v", links)
 	}
 
 	got := buf.String()
@@ -153,12 +153,15 @@ func TestRunHookCompactShape(t *testing.T) {
 	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"echo line-one; echo line-two\"\n")
 
 	var buf bytes.Buffer
-	blobURIs, err := Run(&buf, "tap", wtPath, false)
+	links, err := Run(&buf, "tap", wtPath, false)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
-	if len(blobURIs) != 1 || blobURIs[0] != "madder://blobs/sha256-fake" {
-		t.Errorf("expected blob URIs == [madder://blobs/sha256-fake], got %v", blobURIs)
+	if len(links) != 1 || links[0].URI != "madder://blobs/sha256-fake" {
+		t.Fatalf("expected one blob link {URI=madder://blobs/sha256-fake}, got %v", links)
+	}
+	if links[0].MimeType != "text/plain" {
+		t.Errorf("expected MimeType text/plain for format=raw, got %q", links[0].MimeType)
 	}
 
 	got := buf.String()
@@ -201,12 +204,15 @@ func TestRunHookCompactShape_Failure(t *testing.T) {
 	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"echo about-to-fail; exit 7\"\n")
 
 	var buf bytes.Buffer
-	blobURIs, err := Run(&buf, "tap", wtPath, false)
+	links, err := Run(&buf, "tap", wtPath, false)
 	if err == nil {
 		t.Fatal("expected hook failure")
 	}
-	if len(blobURIs) != 1 || blobURIs[0] != "madder://blobs/sha256-fake" {
-		t.Errorf("expected blob URIs even on failure, got %v", blobURIs)
+	if len(links) != 1 || links[0].URI != "madder://blobs/sha256-fake" {
+		t.Fatalf("expected one blob link {URI=madder://blobs/sha256-fake} even on failure, got %v", links)
+	}
+	if links[0].MimeType != "text/plain" {
+		t.Errorf("expected MimeType text/plain for format=raw failure, got %q", links[0].MimeType)
 	}
 
 	got := buf.String()
@@ -279,12 +285,15 @@ func TestRunHookCompactShape_TapNDJSONSuccess(t *testing.T) {
 		"pre-merge-output-format = \"tap-ndjson\"\n")
 
 	var buf bytes.Buffer
-	blobURIs, err := Run(&buf, "tap", wtPath, false)
+	links, err := Run(&buf, "tap", wtPath, false)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
-	if len(blobURIs) != 1 || blobURIs[0] != "madder://blobs/sha256-fake" {
-		t.Errorf("expected one blob URI, got %v", blobURIs)
+	if len(links) != 1 || links[0].URI != "madder://blobs/sha256-fake" {
+		t.Fatalf("expected one blob link {URI=madder://blobs/sha256-fake}, got %v", links)
+	}
+	if links[0].MimeType != "application/x-ndjson" {
+		t.Errorf("expected MimeType application/x-ndjson for format=tap-ndjson, got %q", links[0].MimeType)
 	}
 
 	got := buf.String()

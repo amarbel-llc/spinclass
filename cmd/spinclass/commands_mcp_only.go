@@ -151,7 +151,7 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 	}
 
 	var buf bytes.Buffer
-	blobURIs, mergeErr := merge.Resolved(
+	blobLinks, mergeErr := merge.Resolved(
 		executor.ShellExecutor{},
 		&buf,
 		nil,
@@ -164,7 +164,7 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 		true,
 		true,
 	)
-	return buildHookResult(buf.String(), blobURIs, mergeErr), nil
+	return buildHookResult(buf.String(), blobLinks, mergeErr), nil
 }
 
 func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
@@ -174,34 +174,36 @@ func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prom
 	}
 
 	var buf bytes.Buffer
-	blobURIs, hookErr := check.Run(&buf, "tap", cwd, false)
+	blobLinks, hookErr := check.Run(&buf, "tap", cwd, false)
 	text := buf.String()
 	if hookErr != nil && text == "" {
 		text = hookErr.Error()
 	}
-	return buildHookResult(text, blobURIs, hookErr), nil
+	return buildHookResult(text, blobLinks, hookErr), nil
 }
 
 // buildHookResult assembles a command.Result that pairs the rendered TAP
-// text with one resource_link content block per blob URI emitted by the
-// pre-merge hook. With no blob URIs (madder unpinned, or no hook
-// configured), it falls back to the legacy text-only Result. The error
-// flag is preserved either way.
-func buildHookResult(text string, blobURIs []string, hookErr error) *command.Result {
-	if len(blobURIs) == 0 {
+// text with one resource_link content block per blob emitted by the
+// pre-merge hook. With no blob links (madder unpinned, or no hook
+// configured), it falls back to the legacy text-only Result. Each link
+// carries the MIME type matching the format the hook output was written
+// in, so MCP-aware clients can parse/render the blob appropriately. The
+// error flag is preserved either way.
+func buildHookResult(text string, blobLinks []check.BlobLink, hookErr error) *command.Result {
+	if len(blobLinks) == 0 {
 		if hookErr != nil {
 			return command.TextErrorResult(text)
 		}
 		return command.TextResult(text)
 	}
-	blocks := make([]protocol.ContentBlockV1, 0, 1+len(blobURIs))
+	blocks := make([]protocol.ContentBlockV1, 0, 1+len(blobLinks))
 	blocks = append(blocks, protocol.TextContentV1(text))
-	for _, uri := range blobURIs {
+	for _, link := range blobLinks {
 		blocks = append(blocks, protocol.ResourceLinkContent(
-			uri,
+			link.URI,
 			"pre-merge hook output",
-			"Full stdout+stderr from the pre-merge hook, content-addressed in the per-worktree madder store.",
-			"text/plain",
+			"Full output from the pre-merge hook, content-addressed in the per-worktree madder store.",
+			link.MimeType,
 		))
 	}
 	res := command.MultiContentResult(blocks...)
