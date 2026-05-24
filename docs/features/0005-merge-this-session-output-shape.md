@@ -460,6 +460,47 @@ response shape — replaced by `failure:` on not-ok and omitted
 on ok. The resource_link remains the authoritative full-output
 surface.
 
+## Status: shipped (tap-ndjson integration)
+
+The integration described in "Future direction" landed across these commits:
+- `d38e06b` deps: bump tap/go v0.1.2 → v0.1.8 + migrate to pkgs/
+- `e075f81` feat(sweatfile): add [hooks].pre-merge-output-format field
+- `f5f0dec` feat(validate): reject unknown [hooks].pre-merge-output-format
+- `a01d779` feat(check): format-aware pre-merge hook output (raw|tap-ndjson)
+- `a7697fd` feat(mcp): set ResourceLinkContent.mimeType from hook output format
+- `5c03ff2` test(bats): tap-ndjson pre-merge hook output coverage
+
+Implementation summary:
+- Sweatfile field `[hooks].pre-merge-output-format` (single string,
+  default "raw"). Validated by `sc validate` against the closed set
+  {raw, tap-ndjson}.
+- `internal/check/check.go:runHookCompact` branches on format.
+  "tap-ndjson" captures hook stdout, parses via
+  `tap/go/pkgs/{reader,ndjson}`, and writes the parsed ndjson to
+  madder (replacing the raw blob). On not-ok with at least one
+  parsed `TestRecord`, the YAMLish emits `failure:` instead of
+  `tail:`. On not-ok with zero parsed records (degenerate stream),
+  it falls back to `tail:`. On ok, neither field is emitted.
+- New YAMLish field `format:` is always emitted (`raw` or `tap-ndjson`).
+- MCP `ResourceLinkContent.MimeType` is set to `text/plain` for
+  format=raw and `application/x-ndjson` for format=tap-ndjson.
+
+The 15-line tail is now a fallback for the degenerate-parse case
+only when format=tap-ndjson; it remains the default visibility
+signal when format=raw. The "Tail policy revised: 50 → 15 lines"
+section above continues to apply to the raw path.
+
+Out of scope (deferred):
+- Streaming the parse concurrently with the hook (the current
+  implementation buffers stdout fully when format=tap-ndjson).
+  Acceptable today because pre-merge hook output is bounded by
+  test-suite size; revisit if real workloads hit memory limits.
+- Wrappers for `gotest-json`, `cargotest-json`, etc. The format
+  enum is expressly open for these as follow-ups; only "tap-ndjson"
+  ships today.
+- Madder-pinned bats lane so the CLI-level tap-ndjson tests run
+  in CI rather than skipping. Tracked at #85.
+
 ---
 
 :clown: drafted by [Clown](https://github.com/amarbel-llc/clown).

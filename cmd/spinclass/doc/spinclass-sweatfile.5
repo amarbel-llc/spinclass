@@ -130,6 +130,47 @@ gate instead.
 .B Merge:
 scalar override.
 .TP
+.B pre-merge-output-format
+String. One of
+.BR raw " (default) or " tap-ndjson .
+Controls how spinclass interprets the
+.B pre-merge
+hook's stdout when assembling the
+.BR merge-this-session " / " check-this-session
+response. When set to
+.BR tap-ndjson ,
+spinclass parses the hook's stdout as a TAP-14 ndjson stream via
+.B tap/go/pkgs/{reader,ndjson}
+and, on failure, emits each failing test record as a structured
+.B failure:
+field in the YAMLish diagnostic instead of the trailing-N-lines
+.BR tail: .
+The madder blob referenced by
+.B resource_link:
+holds the parsed ndjson rather than the raw stdout, and the MCP
+.B ResourceLinkContent
+block's
+.B mimeType
+is set to
+.B application/x-ndjson
+(versus
+.B text/plain
+when
+.BR format = raw ).
+On parse failure (the hook didn't actually emit TAP, or emitted zero
+parseable records), the response falls back to a 15-line
+.B tail:
+of raw stdout so degenerate output is still visible.
+The
+.B tail:
+field remains the default visibility signal when
+.BR format = raw .
+.B sc validate
+rejects any value outside the closed set
+.BR { raw,\ tap-ndjson } .
+.B Merge:
+scalar override.
+.TP
 .B on-attach
 Script run when a session attaches to the worktree, fired by
 .B sc start
