@@ -328,6 +328,108 @@ for non-MCP-aware clients (`sc merge` CLI, raw stdout
 consumers); the `Bash(madder:*)` allow rule and per-worktree
 `madder` shim are unchanged.
 
+## Revisions (2026-05-24)
+
+### Assumption added: all consumers follow MCP resource_links
+
+Original design hedged: a 50-line in-band tail acted as a preview
+for non-MCP-aware consumers, while the MCP `resource_link`
+content block served MCP-aware ones. Operating experience showed
+the hedge gave the worst of both worlds:
+
+- **On success**, the directive ("if status is ok, the
+  resource_link need not be followed") tells the agent to skip
+  the link — making the tail pure overhead.
+- **On failure**, "last N lines" is the wrong heuristic:
+  post-failure passing tests (e.g. spinclass's bats test #16,
+  where 35 subsequent passes shifted the failure off the tail
+  entirely) routinely move the failure signal off-tail well
+  before any reasonable N. The agent had to follow the
+  resource_link anyway, and the tail competed for tokens.
+
+The revised position: **assume all consumers can follow MCP
+resource_links**. MCP-aware agents fetch via
+`resources/read`. CLI / raw-stdout consumers of `sc merge` read
+the `madder://blobs/<digest>` URI from the YAMLish and run
+`madder cat` themselves — the `Bash(madder:*)` allow rule from
+FDR 0003 already covers this. The in-band tail becomes a
+vestigial liveness check, not the failure-debug surface.
+
+### Tail policy revised: 50 → 15 lines
+
+Cut from 50 to 15 in commit `44d3efc`. Rationale: under the
+assumption above, the tail no longer carries the failure-debug
+burden, so it pays only for "confirm something plausible ran" —
+for which 15 lines suffices. The token cost on every successful
+merge dropped ~5–10× per response.
+
+Caveat: 15 lines hides the failure signal in nearly every
+non-trivial failure case (bats #16 being the canonical example).
+This is intentional given the new assumption — agents fetch the
+resource_link on failure. The tail is preserved as "liveness
+indicator," not "diagnostic surface."
+
+This supersedes the original "Tail policy" section above and
+the "Tail length is fixed at 50 lines" limitation.
+
+### No-op merge short-circuit accepted
+
+The original "Out of scope: Failing on no-commits-ahead"
+decision was reversed in commit `44d3efc`. After rebase, if the
+branch has zero commits ahead of the default branch,
+`merge.Resolved` emits `not ok <merge>` with "nothing to merge:
+..." and returns without running the (expensive) pre-merge hook.
+Fires regardless of `git_sync`.
+
+The rejection rationale no longer holds: the cost is no longer
+just "huge confusing responses" but also "minutes of wall-clock
+building/testing for a merge that produces zero new commits."
+With the hook routinely costing 2–3 minutes, short-circuiting
+matters.
+
+The fixture-setup test `spinclass_clean_removes_merged` was
+updated to add a real commit before its merge call so the new
+short-circuit doesn't fire during fixture setup.
+
+## Future direction: structured failure extraction via tap-ndjson
+
+The 15-line tail is a placeholder for a better failure-debug
+surface that doesn't depend on either (a) a magic tail length
+or (b) the agent always following the resource_link.
+
+**Sketch:** a sweatfile field signals that the pre-merge hook
+emits `amarbel-llc/tap`'s canonical NDJSON format (see
+`tap/go/pkgs/ndjson`). When set, spinclass parses hook stdout as
+NDJSON and extracts the failing test's structured diagnostic
+block — replacing the trailing-N-lines tail with the actual
+assertion failure, panic header, exit code, and any embedded
+resource_links the hook itself emitted.
+
+Strawman config:
+
+```toml
+[hooks]
+pre-merge = "just test"
+pre-merge-output-format = "tap-ndjson"  # default: "raw"
+```
+
+Open questions deferred to the actual design:
+
+- Best-effort parser (degrades to tail-only when NDJSON parsing
+  fails) vs strict (refuses to merge if declared format doesn't
+  validate).
+- "First failing test" vs "all failing tests" in the extracted
+  diagnostic.
+- Whether the diagnostic replaces `tail:` or coexists as a
+  separate `failure:` field.
+- Whether other formats (gotest JSON, junitxml, bats / cargo
+  NDJSON variants) get first-class treatment.
+
+When this lands, `tail:` can drop entirely from the default
+response shape — replaced by `failure:` on not-ok and omitted
+on ok. The resource_link remains the authoritative full-output
+surface.
+
 ---
 
 :clown: drafted by [Clown](https://github.com/amarbel-llc/clown).
