@@ -298,6 +298,9 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if other.Hooks.DisableNixGC != nil {
 			merged.Hooks.DisableNixGC = other.Hooks.DisableNixGC
 		}
+		if other.Hooks.PreMergeOutputFormat != nil {
+			merged.Hooks.PreMergeOutputFormat = other.Hooks.PreMergeOutputFormat
+		}
 	}
 
 	// [session-entry]

@@ -766,6 +766,85 @@ func TestMergeHooksPreMergeClear(t *testing.T) {
 	}
 }
 
+func TestParseHooksPreMergeOutputFormat(t *testing.T) {
+	input := `
+[hooks]
+pre-merge-output-format = "tap-ndjson"
+`
+	doc, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sf := doc.Data()
+	if sf.Hooks == nil || sf.Hooks.PreMergeOutputFormat == nil ||
+		*sf.Hooks.PreMergeOutputFormat != "tap-ndjson" {
+		t.Errorf("hooks.pre-merge-output-format: got %v", sf.Hooks)
+	}
+}
+
+func TestMergeHooksPreMergeOutputFormatInherit(t *testing.T) {
+	fmt := "tap-ndjson"
+	base := Sweatfile{Hooks: &Hooks{PreMergeOutputFormat: &fmt}}
+	repo := Sweatfile{}
+	merged := base.MergeWith(repo)
+	if merged.Hooks == nil || merged.Hooks.PreMergeOutputFormat == nil ||
+		*merged.Hooks.PreMergeOutputFormat != "tap-ndjson" {
+		t.Errorf("expected inherited hooks.pre-merge-output-format, got %v", merged.Hooks)
+	}
+}
+
+func TestMergeHooksPreMergeOutputFormatOverride(t *testing.T) {
+	baseFmt := "tap-ndjson"
+	repoFmt := "raw"
+	base := Sweatfile{Hooks: &Hooks{PreMergeOutputFormat: &baseFmt}}
+	repo := Sweatfile{Hooks: &Hooks{PreMergeOutputFormat: &repoFmt}}
+	merged := base.MergeWith(repo)
+	if merged.Hooks == nil || merged.Hooks.PreMergeOutputFormat == nil ||
+		*merged.Hooks.PreMergeOutputFormat != "raw" {
+		t.Errorf("expected overridden hooks.pre-merge-output-format, got %v", merged.Hooks)
+	}
+}
+
+func TestMergeHooksPreMergeOutputFormatClear(t *testing.T) {
+	baseFmt := "tap-ndjson"
+	empty := ""
+	base := Sweatfile{Hooks: &Hooks{PreMergeOutputFormat: &baseFmt}}
+	repo := Sweatfile{Hooks: &Hooks{PreMergeOutputFormat: &empty}}
+	merged := base.MergeWith(repo)
+	if merged.Hooks == nil || merged.Hooks.PreMergeOutputFormat == nil ||
+		*merged.Hooks.PreMergeOutputFormat != "" {
+		t.Errorf("expected cleared hooks.pre-merge-output-format, got %v", merged.Hooks)
+	}
+}
+
+func TestPreMergeOutputFormatValueDefault(t *testing.T) {
+	// nil Hooks → "raw"
+	sf := Sweatfile{}
+	if got := sf.PreMergeOutputFormatValue(); got != "raw" {
+		t.Errorf("nil Hooks: got %q, want %q", got, "raw")
+	}
+
+	// nil PreMergeOutputFormat → "raw"
+	sf = Sweatfile{Hooks: &Hooks{}}
+	if got := sf.PreMergeOutputFormatValue(); got != "raw" {
+		t.Errorf("nil PreMergeOutputFormat: got %q, want %q", got, "raw")
+	}
+
+	// empty PreMergeOutputFormat → "raw"
+	empty := ""
+	sf = Sweatfile{Hooks: &Hooks{PreMergeOutputFormat: &empty}}
+	if got := sf.PreMergeOutputFormatValue(); got != "raw" {
+		t.Errorf("empty PreMergeOutputFormat: got %q, want %q", got, "raw")
+	}
+
+	// non-empty PreMergeOutputFormat → that value
+	val := "tap-ndjson"
+	sf = Sweatfile{Hooks: &Hooks{PreMergeOutputFormat: &val}}
+	if got := sf.PreMergeOutputFormatValue(); got != "tap-ndjson" {
+		t.Errorf("set PreMergeOutputFormat: got %q, want %q", got, "tap-ndjson")
+	}
+}
+
 func TestLoadHierarchyRepoOverridesParent(t *testing.T) {
 	home := t.TempDir()
 	repoDir := filepath.Join(home, "eng", "repos", "myrepo")

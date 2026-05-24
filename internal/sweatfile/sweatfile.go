@@ -38,6 +38,7 @@ type Hooks struct {
 	ToolUseLog           *bool   `toml:"tool-use-log"`
 	DisableMerge         *bool   `toml:"disable-merge"`
 	DisableNixGC         *bool   `toml:"disable-nix-gc"`
+	PreMergeOutputFormat *string `toml:"pre-merge-output-format"`
 }
 
 // MCPServerDef declares an MCP server to register and auto-approve
@@ -92,6 +93,21 @@ func (sf Sweatfile) PreMergeHookCommand() *string {
 		return nil
 	}
 	return sf.Hooks.PreMerge
+}
+
+// PreMergeOutputFormatValue returns the configured format for the
+// pre-merge hook's output, defaulting to "raw" when unset or empty.
+// Valid values: "raw", "tap-ndjson". Validation lives in
+// internal/validate.
+func (sf Sweatfile) PreMergeOutputFormatValue() string {
+	if sf.Hooks == nil || sf.Hooks.PreMergeOutputFormat == nil {
+		return "raw"
+	}
+	v := *sf.Hooks.PreMergeOutputFormat
+	if v == "" {
+		return "raw"
+	}
+	return v
 }
 
 func (sf Sweatfile) OnAttachHookCommand() *string {

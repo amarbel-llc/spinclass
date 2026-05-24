@@ -266,6 +266,11 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 						hooksVal.DisableNixGC = &v
 						d.consumed["hooks.disable-nix-gc"] = true
 					}
+				case "pre-merge-output-format":
+					if v, ok := cst.ExtractString(_kv); ok {
+						hooksVal.PreMergeOutputFormat = &v
+						d.consumed["hooks.pre-merge-output-format"] = true
+					}
 				}
 			}
 			d.data.Hooks = hooksVal
@@ -330,6 +335,12 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 						hooksVal.DisableNixGC = &v
 						_found = true
 						d.consumed["disable-nix-gc"] = true
+					}
+				case "pre-merge-output-format":
+					if v, ok := cst.ExtractString(_kv); ok {
+						hooksVal.PreMergeOutputFormat = &v
+						_found = true
+						d.consumed["pre-merge-output-format"] = true
 					}
 				}
 			}
@@ -631,6 +642,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 		}
 		if d.data.Hooks.DisableNixGC != nil {
 			if err := cst.SetAny(tableNode, "disable-nix-gc", *d.data.Hooks.DisableNixGC); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.Hooks.PreMergeOutputFormat != nil {
+			if err := cst.SetAny(tableNode, "pre-merge-output-format", *d.data.Hooks.PreMergeOutputFormat); err != nil {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
@@ -1009,6 +1025,11 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 						hooksVal.DisableNixGC = &v
 						consumed[keyPrefix+"hooks.disable-nix-gc"] = true
 					}
+				case "pre-merge-output-format":
+					if v, ok := cst.ExtractString(_kv); ok {
+						hooksVal.PreMergeOutputFormat = &v
+						consumed[keyPrefix+"hooks.pre-merge-output-format"] = true
+					}
 				}
 			}
 			data.Hooks = hooksVal
@@ -1073,6 +1094,12 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 						hooksVal.DisableNixGC = &v
 						_found = true
 						consumed["disable-nix-gc"] = true
+					}
+				case "pre-merge-output-format":
+					if v, ok := cst.ExtractString(_kv); ok {
+						hooksVal.PreMergeOutputFormat = &v
+						_found = true
+						consumed["pre-merge-output-format"] = true
 					}
 				}
 			}
@@ -1359,6 +1386,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if data.Hooks.DisableNixGC != nil {
 			if err := cst.SetAny(tableNode, "disable-nix-gc", *data.Hooks.DisableNixGC); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.Hooks.PreMergeOutputFormat != nil {
+			if err := cst.SetAny(tableNode, "pre-merge-output-format", *data.Hooks.PreMergeOutputFormat); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}
