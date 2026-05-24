@@ -18,6 +18,8 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/madder"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/tapblock"
+	"github.com/amarbel-llc/tap/go/pkgs/ndjson"
+	"github.com/amarbel-llc/tap/go/pkgs/reader"
 	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
 	"github.com/amarbel-llc/tap/go/pkgs/yaml_diagnostic"
 )
@@ -149,43 +151,137 @@ func RunWithWriter(
 	return nil, hookErr
 }
 
-// runHookCompact runs the pre-merge hook with bytes tee'd into both
-// (a) madder's stdin (for atomic content-addressable storage and a
-// resource_link URI), and (b) an in-memory tail ring so the last 15
-// lines surface in-band. Emits a single TAP test point with YAMLish
-// diagnostics carrying command/tail/resource_link/exit_code/elapsed.
+// runHookCompact runs the pre-merge hook and emits a single TAP test
+// point with YAMLish diagnostics carrying command/format/resource_link/
+// exit_code/elapsed plus a visibility field selected by the configured
+// format:
+//
+//   - format=raw (default): hook stdout streams directly into madder
+//     (for atomic content-addressable storage) and through a 15-line
+//     ring; the response always carries `tail:` (success and failure).
+//
+//   - format=tap-ndjson: hook stdout is captured into a buffer, parsed
+//     via tap/go/pkgs/{reader,ndjson}, and the *parsed* ndjson stream
+//     is written to madder (replacing the raw blob). On success, no
+//     visibility field is emitted (the parsed records sit behind the
+//     resource_link). On failure with at least one parsed record,
+//     `failure:` is emitted summarising the failing records. On failure
+//     with zero parsed records (degenerate stream), the response falls
+//     back to `tail:` carrying the raw output ring.
 //
 // Returns the resource_link URI when madder produced a blob, or "" when
 // it didn't (madder spawn failed, or post-hook write/parse failed).
 func runHookCompact(tw *tap.Writer, hierarchy sweatfile.Hierarchy, wtPath, cmd, desc string) (string, error) {
-	madderStdin, finishMadder, err := madder.Write(wtPath, embeds.MadderBin())
-	if err != nil {
-		// Madder failed to spawn; degrade to tail-only without a
-		// resource_link rather than failing the hook on this account.
-		madderStdin = nopWriteCloser{io.Discard}
-		finishMadder = func() (string, error) { return "", err }
-	}
+	format := hierarchy.Merged.PreMergeOutputFormatValue()
+
+	// ring is the fallback visibility for failures the parser can't surface.
 	ring := newTailRingWriter(15)
-	sink := io.MultiWriter(madderStdin, ring)
+
+	var (
+		madderStdin   io.WriteCloser
+		finishMadder  func() (string, error)
+		hookStdoutBuf bytes.Buffer // populated only when format == "tap-ndjson"
+	)
+
+	if format == "tap-ndjson" {
+		// Buffer hook stdout fully; we write the parsed ndjson to
+		// madder below, not the raw stream. madderStdin and
+		// finishMadder are placeholders here so the shared variable
+		// shape compiles for both paths — the real madder.Write for
+		// this format happens after the hook exits and stdout is
+		// parsed (see the post-hook block below).
+		madderStdin = nopWriteCloser{io.Discard}
+		finishMadder = func() (string, error) { return "", nil }
+	} else {
+		var err error
+		madderStdin, finishMadder, err = madder.Write(wtPath, embeds.MadderBin())
+		if err != nil {
+			// Madder failed to spawn; degrade to tail-only without a
+			// resource_link rather than failing the hook on this account.
+			madderStdin = nopWriteCloser{io.Discard}
+			finishMadder = func() (string, error) { return "", err }
+		}
+	}
+
+	var sink io.Writer
+	if format == "tap-ndjson" {
+		sink = io.MultiWriter(&hookStdoutBuf, ring)
+	} else {
+		sink = io.MultiWriter(madderStdin, ring)
+	}
 
 	start := time.Now()
 	hookErr := hierarchy.Merged.RunPreMergeHook(wtPath, sink)
 	elapsed := time.Since(start)
-	_ = madderStdin.Close()
-	blobID, madderErr := finishMadder()
+
+	var (
+		blobID    string
+		madderErr error
+		parsed    ndjson.Output
+		hasParse  bool
+	)
+
+	if format == "tap-ndjson" {
+		rd := reader.NewReader(&hookStdoutBuf)
+		agg := ndjson.NewAggregator()
+		for {
+			ev, e := rd.Next()
+			if e != nil {
+				break
+			}
+			agg.Consume(ev)
+		}
+		parsed = agg.Finalize(rd.Diagnostics(), nil)
+		hasParse = len(parsed.Records) > 0
+
+		// Write parsed ndjson (not the raw stdout) to madder.
+		ms, fm, mErr := madder.Write(wtPath, embeds.MadderBin())
+		if mErr != nil {
+			madderErr = mErr
+		} else {
+			if wErr := ndjson.WriteAll(ms, parsed); wErr != nil {
+				madderErr = wErr
+			}
+			_ = ms.Close()
+			id, fErr := fm()
+			if fErr != nil {
+				madderErr = fErr
+			}
+			blobID = id
+		}
+	} else {
+		_ = madderStdin.Close()
+		blobID, madderErr = finishMadder()
+	}
 
 	extras := map[string]any{
 		"command":   cmd,
-		"tail":      ring.Tail(),
+		"format":    format,
 		"exit_code": exitCodeFromErr(hookErr),
 		"elapsed":   elapsed.Round(time.Millisecond).String(),
 	}
+
 	var blobURI string
 	if blobID != "" {
 		blobURI = "madder://blobs/" + blobID
 		extras["resource_link"] = blobURI
 	} else if madderErr != nil {
 		extras["resource_link_error"] = madderErr.Error()
+	}
+
+	// Visibility field selection:
+	//  - format=raw                   → tail always (current behavior)
+	//  - format=tap-ndjson, success   → neither tail nor failure
+	//  - format=tap-ndjson, fail+rec  → failure (built from parsed)
+	//  - format=tap-ndjson, fail+!rec → tail (fallback)
+	if format == "raw" {
+		extras["tail"] = ring.Tail()
+	} else if hookErr != nil {
+		if hasParse {
+			extras["failure"] = buildFailureSummary(parsed)
+		} else {
+			extras["tail"] = ring.Tail()
+		}
 	}
 
 	if hookErr != nil {
@@ -203,6 +299,34 @@ func runHookCompact(tw *tap.Writer, hierarchy sweatfile.Hierarchy, wtPath, cmd, 
 		tw.OkDiag(desc, &yaml_diagnostic.YAMLDiagnostic{Extras: extras})
 	}
 	return blobURI, hookErr
+}
+
+// buildFailureSummary renders failing TestRecords as a multi-line string
+// suitable for embedding in YAMLDiagnostic.Extras. Mirrors
+// ndjson.WriteSplit's "genuine failure" definition (!OK && Directive==nil).
+// One line per failing record:
+//
+//	#<N> <description>: <diagnostic.message>
+//
+// If a record has an Output block, append it as an indented continuation.
+func buildFailureSummary(out ndjson.Output) string {
+	var b strings.Builder
+	for _, r := range out.Records {
+		if r.OK || r.Directive != nil {
+			continue
+		}
+		fmt.Fprintf(&b, "#%d %s", r.N, r.Description)
+		if msg, ok := r.Diagnostic["message"].(string); ok && msg != "" {
+			fmt.Fprintf(&b, ": %s", msg)
+		}
+		b.WriteByte('\n')
+		if r.Output != nil && *r.Output != "" {
+			for _, line := range strings.Split(strings.TrimRight(*r.Output, "\n"), "\n") {
+				fmt.Fprintf(&b, "  %s\n", line)
+			}
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // exitCodeFromErr extracts a process exit code from an *exec.ExitError.

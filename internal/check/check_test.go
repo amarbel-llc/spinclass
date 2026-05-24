@@ -2,6 +2,7 @@ package check
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -167,6 +168,7 @@ func TestRunHookCompactShape(t *testing.T) {
 	}
 	for _, want := range []string{
 		"command: echo line-one; echo line-two",
+		"format: raw",
 		"resource_link: madder://blobs/sha256-fake",
 		"exit_code: 0",
 		"elapsed:",
@@ -219,6 +221,182 @@ func TestRunHookCompactShape_Failure(t *testing.T) {
 	}
 	if !strings.Contains(got, "resource_link: madder://blobs/sha256-fake") {
 		t.Errorf("expected resource_link in failure response, got:\n%s", got)
+	}
+	if !strings.Contains(got, "format: raw") {
+		t.Errorf("expected 'format: raw' in failure response, got:\n%s", got)
+	}
+}
+
+// readNDJSONRecords parses the stdin capture file from withFakeMadder as
+// newline-delimited JSON, returning only TestRecords (type=="test"). The
+// blob may also carry summary/bailout entries; this helper drops those.
+func readNDJSONRecords(t *testing.T, path string) []struct {
+	Type        string         `json:"type"`
+	N           int            `json:"n"`
+	Description string         `json:"description"`
+	OK          bool           `json:"ok"`
+	Diagnostic  map[string]any `json:"diagnostic"`
+} {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading madder stdin capture: %v", err)
+	}
+	var recs []struct {
+		Type        string         `json:"type"`
+		N           int            `json:"n"`
+		Description string         `json:"description"`
+		OK          bool           `json:"ok"`
+		Diagnostic  map[string]any `json:"diagnostic"`
+	}
+	for _, line := range strings.Split(strings.TrimRight(string(raw), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec struct {
+			Type        string         `json:"type"`
+			N           int            `json:"n"`
+			Description string         `json:"description"`
+			OK          bool           `json:"ok"`
+			Diagnostic  map[string]any `json:"diagnostic"`
+		}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("unmarshalling blob line %q: %v\nfull blob:\n%s", line, err, raw)
+		}
+		if rec.Type == "test" {
+			recs = append(recs, rec)
+		}
+	}
+	return recs
+}
+
+func TestRunHookCompactShape_TapNDJSONSuccess(t *testing.T) {
+	_, _, wtPath := setupRepoWithWorktree(t, "feature-tap-ndjson-success")
+	_, stdinCapture := withFakeMadder(t)
+	// Hook prints a valid TAP-14 stream with one passing test point.
+	writeSweatfile(t, wtPath, "[hooks]\n"+
+		"pre-merge = \"printf 'TAP version 14\\n1..1\\nok 1 - synthetic\\n'\"\n"+
+		"pre-merge-output-format = \"tap-ndjson\"\n")
+
+	var buf bytes.Buffer
+	blobURIs, err := Run(&buf, "tap", wtPath, false)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	if len(blobURIs) != 1 || blobURIs[0] != "madder://blobs/sha256-fake" {
+		t.Errorf("expected one blob URI, got %v", blobURIs)
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "format: tap-ndjson") {
+		t.Errorf("expected 'format: tap-ndjson' in output, got:\n%s", got)
+	}
+	if !strings.Contains(got, "ok") {
+		t.Errorf("expected 'ok' in output, got:\n%s", got)
+	}
+	if strings.Contains(got, "not ok") {
+		t.Errorf("did not expect 'not ok' on success, got:\n%s", got)
+	}
+	if strings.Contains(got, "tail:") {
+		t.Errorf("did not expect 'tail:' on tap-ndjson success, got:\n%s", got)
+	}
+	if strings.Contains(got, "failure:") {
+		t.Errorf("did not expect 'failure:' on success, got:\n%s", got)
+	}
+
+	// The madder blob must be the PARSED ndjson, not the raw stdout.
+	recs := readNDJSONRecords(t, stdinCapture)
+	if len(recs) != 1 {
+		t.Fatalf("expected 1 TestRecord in blob, got %d: %+v", len(recs), recs)
+	}
+	if !recs[0].OK {
+		t.Errorf("expected OK=true on the parsed record, got %+v", recs[0])
+	}
+	if recs[0].N != 1 || recs[0].Description != "synthetic" {
+		t.Errorf("unexpected record fields: %+v", recs[0])
+	}
+	// Sanity: the blob must NOT contain the raw 'TAP version 14' header
+	// (we wrote parsed ndjson, not the raw stream).
+	raw, _ := os.ReadFile(stdinCapture)
+	if strings.Contains(string(raw), "TAP version 14") {
+		t.Errorf("blob should not contain raw TAP header on tap-ndjson, got:\n%s", raw)
+	}
+}
+
+func TestRunHookCompactShape_TapNDJSONFailure(t *testing.T) {
+	_, _, wtPath := setupRepoWithWorktree(t, "feature-tap-ndjson-failure")
+	_, stdinCapture := withFakeMadder(t)
+	// Hook prints a valid TAP-14 stream with one not-ok and a YAML
+	// diagnostic, then exits non-zero so RunPreMergeHook returns an
+	// ExitError. The shell wraps printf with `exit 1` via `&&` chain.
+	writeSweatfile(t, wtPath, "[hooks]\n"+
+		"pre-merge = \"printf 'TAP version 14\\n1..1\\nnot ok 1 - synthetic\\n  ---\\n  message: expected 7 got 9\\n  ...\\n'; exit 1\"\n"+
+		"pre-merge-output-format = \"tap-ndjson\"\n")
+
+	var buf bytes.Buffer
+	_, err := Run(&buf, "tap", wtPath, false)
+	if err == nil {
+		t.Fatalf("expected hook failure, got nil. Output: %s", buf.String())
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "not ok") {
+		t.Errorf("expected 'not ok' for failed hook, got:\n%s", got)
+	}
+	if !strings.Contains(got, "format: tap-ndjson") {
+		t.Errorf("expected 'format: tap-ndjson' in output, got:\n%s", got)
+	}
+	if !strings.Contains(got, "failure:") {
+		t.Errorf("expected 'failure:' field with parsed records, got:\n%s", got)
+	}
+	if !strings.Contains(got, "expected 7 got 9") {
+		t.Errorf("expected diagnostic message in failure summary, got:\n%s", got)
+	}
+	if strings.Contains(got, "tail:") {
+		t.Errorf("did not expect 'tail:' when parsed records exist, got:\n%s", got)
+	}
+
+	// The madder blob must contain exactly one TestRecord with OK=false.
+	recs := readNDJSONRecords(t, stdinCapture)
+	if len(recs) != 1 {
+		t.Fatalf("expected 1 TestRecord in blob, got %d: %+v", len(recs), recs)
+	}
+	if recs[0].OK {
+		t.Errorf("expected OK=false on the parsed failure record, got %+v", recs[0])
+	}
+}
+
+func TestRunHookCompactShape_TapNDJSONDegenerateFallback(t *testing.T) {
+	_, _, wtPath := setupRepoWithWorktree(t, "feature-tap-ndjson-degenerate")
+	withFakeMadder(t)
+	// Hook prints non-TAP garbage (no `TAP version 14` line) and exits
+	// non-zero. The parser produces zero records, so the response must
+	// fall back to `tail:` carrying the raw output.
+	writeSweatfile(t, wtPath, "[hooks]\n"+
+		"pre-merge = \"echo this is not tap; exit 3\"\n"+
+		"pre-merge-output-format = \"tap-ndjson\"\n")
+
+	var buf bytes.Buffer
+	_, err := Run(&buf, "tap", wtPath, false)
+	if err == nil {
+		t.Fatalf("expected hook failure, got nil. Output: %s", buf.String())
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "not ok") {
+		t.Errorf("expected 'not ok' for failed hook, got:\n%s", got)
+	}
+	if !strings.Contains(got, "format: tap-ndjson") {
+		t.Errorf("expected 'format: tap-ndjson' in output, got:\n%s", got)
+	}
+	if !strings.Contains(got, "tail:") {
+		t.Errorf("expected 'tail:' fallback on degenerate stream, got:\n%s", got)
+	}
+	if !strings.Contains(got, "this is not tap") {
+		t.Errorf("expected garbage stdout in tail, got:\n%s", got)
+	}
+	if strings.Contains(got, "failure:") {
+		t.Errorf("did not expect 'failure:' on degenerate stream, got:\n%s", got)
 	}
 }
 
