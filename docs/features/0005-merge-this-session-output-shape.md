@@ -486,9 +486,12 @@ Implementation summary:
   format=raw and `application/x-ndjson` for format=tap-ndjson.
 
 The 15-line tail is now a fallback for the degenerate-parse case
-only when format=tap-ndjson; it remains the default visibility
-signal when format=raw. The "Tail policy revised: 50 → 15 lines"
-section above continues to apply to the raw path.
+only when format=tap-ndjson, and a failure-only diagnostic when
+format=raw. On success, both formats omit the tail entirely — the
+test point being `ok` is itself the liveness signal and the
+resource_link remains the authoritative full-output surface. The
+"Tail policy revised: 50 → 15 lines" section above continues to
+apply to the raw failure path.
 
 Out of scope (deferred):
 - Streaming the parse concurrently with the hook (the current

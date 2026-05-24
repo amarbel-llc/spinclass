@@ -783,8 +783,8 @@ pre-merge-output-format = "tap-ndjson"
 }
 
 func TestMergeHooksPreMergeOutputFormatInherit(t *testing.T) {
-	fmt := "tap-ndjson"
-	base := Sweatfile{Hooks: &Hooks{PreMergeOutputFormat: &fmt}}
+	format := "tap-ndjson"
+	base := Sweatfile{Hooks: &Hooks{PreMergeOutputFormat: &format}}
 	repo := Sweatfile{}
 	merged := base.MergeWith(repo)
 	if merged.Hooks == nil || merged.Hooks.PreMergeOutputFormat == nil ||

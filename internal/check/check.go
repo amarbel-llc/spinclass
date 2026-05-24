@@ -182,7 +182,10 @@ func RunWithWriter(
 //
 //   - format=raw (default): hook stdout streams directly into madder
 //     (for atomic content-addressable storage) and through a 15-line
-//     ring; the response always carries `tail:` (success and failure).
+//     ring; on failure the response carries `tail:` as a visibility
+//     diagnostic. On success no `tail:` is emitted — the test point
+//     being `ok` is itself the liveness signal and the resource_link
+//     remains the authoritative full-output surface.
 //
 //   - format=tap-ndjson: hook stdout is captured into a buffer, parsed
 //     via tap/go/pkgs/{reader,ndjson}, and the *parsed* ndjson stream
@@ -295,12 +298,15 @@ func runHookCompact(tw *tap.Writer, hierarchy sweatfile.Hierarchy, wtPath, cmd, 
 	}
 
 	// Visibility field selection:
-	//  - format=raw                   → tail always (current behavior)
+	//  - format=raw, success          → neither tail nor failure
+	//  - format=raw, failure          → tail
 	//  - format=tap-ndjson, success   → neither tail nor failure
 	//  - format=tap-ndjson, fail+rec  → failure (built from parsed)
 	//  - format=tap-ndjson, fail+!rec → tail (fallback)
 	if format == "raw" {
-		extras["tail"] = ring.Tail()
+		if hookErr != nil {
+			extras["tail"] = ring.Tail()
+		}
 	} else if hookErr != nil {
 		if hasParse {
 			extras["failure"] = buildFailureSummary(parsed)

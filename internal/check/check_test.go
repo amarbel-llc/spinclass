@@ -175,13 +175,19 @@ func TestRunHookCompactShape(t *testing.T) {
 		"resource_link: madder://blobs/sha256-fake",
 		"exit_code: 0",
 		"elapsed:",
-		"tail:",
-		"line-one",
-		"line-two",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("expected %q in output, got:\n%s", want, got)
 		}
+	}
+	// On success, the response must omit both visibility fields: the
+	// test point being `ok` is itself the liveness signal and the
+	// resource_link remains the authoritative full-output surface.
+	if strings.Contains(got, "tail:") {
+		t.Errorf("did not expect 'tail:' on raw success, got:\n%s", got)
+	}
+	if strings.Contains(got, "failure:") {
+		t.Errorf("did not expect 'failure:' on raw success, got:\n%s", got)
 	}
 	// Compact shape never opens an OutputBlock — no nested `# Subtest`
 	// or indented diagnostic block separator from OutputBlock.
