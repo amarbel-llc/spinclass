@@ -397,13 +397,30 @@ The 15-line tail is a placeholder for a better failure-debug
 surface that doesn't depend on either (a) a magic tail length
 or (b) the agent always following the resource_link.
 
+**The path:** tap-ndjson is positioned as the lingua franca for
+operation output across the ecosystem. `tap/go/pkgs/ndjson`
+already exposes a complete consumer-ready API:
+
+- `Aggregator` consumes a streamed ndjson event source
+  best-effort and yields whatever parsed correctly.
+- `Output` is the parsed result: `{Records []TestRecord,
+  Bailout, Summary}`.
+- `TestRecord` and `SummaryRecord` carry structured
+  pass/fail/diagnostic data — no text-parsing required.
+- `WriteSplit(failOut, passOut, out)` is itself a literal split
+  primitive: failing records routed to one writer, passing
+  records to another. This is the operation-level analog of the
+  resource-level split (the resource_link).
+- Adjacent packages (`tap/go/pkgs/gotest`,
+  `tap/go/pkgs/cargotest`) already wrap other runners into the
+  same `Output` shape, so consumers learn one schema.
+
 **Sketch:** a sweatfile field signals that the pre-merge hook
-emits `amarbel-llc/tap`'s canonical NDJSON format (see
-`tap/go/pkgs/ndjson`). When set, spinclass parses hook stdout as
-NDJSON and extracts the failing test's structured diagnostic
-block — replacing the trailing-N-lines tail with the actual
-assertion failure, panic header, exit code, and any embedded
-resource_links the hook itself emitted.
+emits tap-ndjson. When set, `runHookCompact` wraps the hook's
+stdout through `ndjson.NewAggregator()` (alongside or instead
+of the tail ring), and on failure emits each failing
+`TestRecord`'s structured diagnostic in-band instead of the
+trailing-N-lines tail.
 
 Strawman config:
 
@@ -413,17 +430,30 @@ pre-merge = "just test"
 pre-merge-output-format = "tap-ndjson"  # default: "raw"
 ```
 
-Open questions deferred to the actual design:
+The library answers most of the design questions that seemed
+hard at first sketch:
 
-- Best-effort parser (degrades to tail-only when NDJSON parsing
-  fails) vs strict (refuses to merge if declared format doesn't
-  validate).
-- "First failing test" vs "all failing tests" in the extracted
-  diagnostic.
-- Whether the diagnostic replaces `tail:` or coexists as a
-  separate `failure:` field.
-- Whether other formats (gotest JSON, junitxml, bats / cargo
-  NDJSON variants) get first-class treatment.
+- *Parser degradation* — `Aggregator` is best-effort and yields
+  whatever did parse, plus a summary.
+- *First vs all failures* — `WriteSplit` separates them; the
+  spinclass-side choice is just which writer to inline.
+- *Other runners* — `gotest`, `cargotest`, and future wrappers
+  (bats, junitxml) emit the same `Output` shape, so this knob
+  generalizes naturally: the sweatfile field accepts
+  `gotest-json`, `cargotest-json`, etc., resolving to the
+  matching tap wrapper before aggregation.
+
+What remains genuinely spinclass-side:
+
+- Sweatfile field shape — single string
+  (`pre-merge-output-format = "tap-ndjson"`) vs sub-table
+  (`[hooks.pre-merge-output] format = "..."; strict = true`).
+- Whether the in-band diagnostic replaces `tail:` outright or
+  coexists as a separate `failure:` field.
+- Whether the spinclass response also re-emits the structured
+  ndjson via `WriteAll` to a second madder blob (so downstream
+  agents consume structured data via `resources/read` without
+  re-parsing raw stdout).
 
 When this lands, `tail:` can drop entirely from the default
 response shape — replaced by `failure:` on not-ok and omitted
