@@ -64,11 +64,32 @@ type State struct {
 	StartedAt    time.Time         `json:"started_at"`
 	ExitedAt     *time.Time        `json:"exited_at,omitempty"`
 
+	// PreMergeAttestation buffers the agent's most recent
+	// nothing-but-the-truth response. Consumed and cleared by the next
+	// merge-this-session / check-this-session call. See
+	// docs/features/0007-pre-merge-skill-attestation.md.
+	PreMergeAttestation *PreMergeAttestation `json:"pre_merge_attestation,omitempty"`
+
 	// isTombstone is set when the State was loaded from a regular file in
 	// the central index (i.e. a session that was closed cleanly and whose
 	// worktree-local state.json is gone). Unexported so it does not get
 	// serialised. ResolveState honours it as StateAbandoned.
 	isTombstone bool
+}
+
+// PreMergeAttestation records one nothing-but-the-truth call. Lifetime
+// is single-use: the next gated MCP tool consumes the field and clears
+// it via session.Write.
+type PreMergeAttestation struct {
+	RecordedAt time.Time       `json:"recorded_at"`
+	Skills     []AttestedSkill `json:"skills"`
+}
+
+// AttestedSkill is one entry from the agent's response.
+type AttestedSkill struct {
+	Name      string `json:"name"`
+	Used      bool   `json:"used"`
+	Reasoning string `json:"reasoning"`
 }
 
 // xdgStateBase returns $XDG_STATE_HOME or its fallback.

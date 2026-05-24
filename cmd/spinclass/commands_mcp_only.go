@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/protocol"
+	"github.com/amarbel-llc/spinclass/internal/attestation"
 	"github.com/amarbel-llc/spinclass/internal/check"
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/git"
@@ -63,6 +66,7 @@ func wrapMCPHandler(
 // agent-facing helpers.
 func registerMCPOnlyCommands(app *command.App) {
 	hookPreview := preMergeHookForCwd()
+	preMergeSkills := preMergeSkillsForCwd()
 	if mergeDisabledForCwd() {
 		app.AddCommand(&command.Command{
 			Name:  "check-this-session",
@@ -96,6 +100,36 @@ func registerMCPOnlyCommands(app *command.App) {
 				{Name: "git_sync", Type: command.Bool, Description: "Pull and push after merge (default false)"},
 			},
 			Run: wrapMCPHandler("merge-this-session", handleMergeThisSession),
+		})
+	}
+
+	if len(preMergeSkills) > 0 {
+		app.AddCommand(&command.Command{
+			Name:  "nothing-but-the-truth",
+			Title: "Record Pre-Merge Skill Attestation",
+			Description: command.Description{
+				Short: buildNothingButTheTruthDescription(preMergeSkills),
+			},
+			Annotations: &protocol.ToolAnnotations{
+				ReadOnlyHint:    protocol.BoolPtr(false),
+				DestructiveHint: protocol.BoolPtr(false),
+				IdempotentHint:  protocol.BoolPtr(true),
+				OpenWorldHint:   protocol.BoolPtr(false),
+			},
+			Params: []command.Param{
+				{
+					Name:        "skills",
+					Type:        command.Array,
+					Description: "One entry per skill listed in [[pre-merge-skills]]; missing or unrecognised names fail validation; empty reasoning fails validation.",
+					Required:    true,
+					Items: []command.Param{
+						{Name: "name", Type: command.String, Description: "Skill name exactly as listed in sweatfile [[pre-merge-skills]] (e.g. eng:code-reviewer).", Required: true},
+						{Name: "used", Type: command.Bool, Description: "Whether you actually invoked the skill for the current diff.", Required: true},
+						{Name: "reasoning", Type: command.String, Description: "Non-empty explanation: if used=true, what you found and addressed; if used=false, why the skill wasn't applicable.", Required: true},
+					},
+				},
+			},
+			Run: wrapMCPHandler("nothing-but-the-truth", handleNothingButTheTruth),
 		})
 	}
 
@@ -145,6 +179,10 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 		return command.TextErrorResult(fmt.Sprintf("could not determine current branch: %v", err)), nil
 	}
 
+	if msg, ok := enforceAttestation(repoPath, branch); !ok {
+		return command.TextErrorResult(msg), nil
+	}
+
 	defaultBranch, err := merge.ResolveDefaultBranch(repoPath)
 	if err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not determine default branch: %v", err)), nil
@@ -173,6 +211,16 @@ func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prom
 		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
 	}
 
+	if worktree.IsWorktree(cwd) {
+		repoPath, repoErr := git.CommonDir(cwd)
+		branch, branchErr := git.BranchCurrent(cwd)
+		if repoErr == nil && branchErr == nil {
+			if msg, ok := enforceAttestation(repoPath, branch); !ok {
+				return command.TextErrorResult(msg), nil
+			}
+		}
+	}
+
 	var buf bytes.Buffer
 	blobLinks, hookErr := check.Run(&buf, "tap", cwd, false)
 	text := buf.String()
@@ -180,6 +228,33 @@ func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prom
 		text = hookErr.Error()
 	}
 	return buildHookResult(text, blobLinks, hookErr), nil
+}
+
+// enforceAttestation runs the pre-merge skill attestation gate for the
+// given worktree session. Returns (output, true) when the gate is
+// dormant or satisfied (output discarded by the caller). Returns
+// (failureText, false) when the gate refuses to proceed: the caller
+// ships failureText to the agent unchanged.
+//
+// On internal error (e.g. session-state write failure during consume),
+// returns the wrapped error message and false so the agent sees the
+// concrete problem rather than a silent skip.
+func enforceAttestation(repoPath, branch string) (string, bool) {
+	merged, ok := mergedSweatfileForCwd()
+	if !ok {
+		return "", true
+	}
+	if len(merged.ActivePreMergeSkills()) == 0 {
+		return "", true
+	}
+	gateOK, output, err := attestation.Check(merged, repoPath, branch)
+	if err != nil && !errors.Is(err, attestation.ErrAttestationRequired) {
+		return fmt.Sprintf("attestation gate error: %v", err), false
+	}
+	if !gateOK {
+		return output, false
+	}
+	return "", true
 }
 
 // buildHookResult assembles a command.Result that pairs the rendered TAP
@@ -253,6 +328,81 @@ func handleUpdateDescription(_ context.Context, args json.RawMessage, _ command.
 	return command.TextResult(fmt.Sprintf("description updated to: %s", params.Description)), nil
 }
 
+func handleNothingButTheTruth(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	var params struct {
+		Skills []session.AttestedSkill `json:"skills"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
+	}
+
+	if !worktree.IsWorktree(cwd) {
+		return command.TextErrorResult("not inside a worktree session"), nil
+	}
+
+	repoPath, err := git.CommonDir(cwd)
+	if err != nil {
+		return command.TextErrorResult(fmt.Sprintf("could not determine repo path: %v", err)), nil
+	}
+
+	branch, err := git.BranchCurrent(cwd)
+	if err != nil {
+		return command.TextErrorResult(fmt.Sprintf("could not determine current branch: %v", err)), nil
+	}
+
+	merged, ok := mergedSweatfileForCwd()
+	if !ok {
+		return command.TextErrorResult("could not resolve sweatfile hierarchy"), nil
+	}
+	required := merged.ActivePreMergeSkills()
+	if len(required) == 0 {
+		return command.TextErrorResult("nothing-but-the-truth is unavailable: this repo's sweatfile does not declare [[pre-merge-skills]]"), nil
+	}
+
+	verr := attestation.Validate(required, params.Skills)
+	if !verr.Empty() {
+		return command.TextErrorResult(renderValidationError(required, verr)), nil
+	}
+
+	if err := attestation.Record(repoPath, branch, params.Skills); err != nil {
+		return command.TextErrorResult(fmt.Sprintf("could not record attestation: %v", err)), nil
+	}
+
+	return command.TextResult(fmt.Sprintf("ok - attestation recorded for %d skill(s); call merge-this-session or check-this-session to consume it", len(required))), nil
+}
+
+// renderValidationError formats a ValidationError as a TAP error body
+// that names the required list and the offending entries so the agent
+// can correct and retry without re-fetching the skill list.
+func renderValidationError(required []sweatfile.PreMergeSkill, verr attestation.ValidationError) string {
+	var b strings.Builder
+	b.WriteString("attestation rejected: " + verr.Error() + "\n\n")
+	b.WriteString("required skills (sweatfile [[pre-merge-skills]]):\n")
+	for _, s := range required {
+		fmt.Fprintf(&b, "  - %s: %s\n", s.Name, s.Rationale)
+	}
+	return b.String()
+}
+
+// buildNothingButTheTruthDescription writes the tool's description with
+// the resolved [[pre-merge-skills]] list inlined so an agent reading the
+// catalog sees the required names and rationales without a separate
+// fetch.
+func buildNothingButTheTruthDescription(skills []sweatfile.PreMergeSkill) string {
+	var b strings.Builder
+	b.WriteString("Record a pre-merge skill attestation. This repo's sweatfile requires you to address every skill listed below — one entry per skill, with `used` indicating whether you invoked it on the current diff and `reasoning` explaining your decision. Strict on presence (every name must be addressed), lenient on content (any non-empty reasoning is accepted). Each attestation is consumed by the next merge-this-session or check-this-session call.\n\n")
+	b.WriteString("Required skills:\n")
+	for _, s := range skills {
+		fmt.Fprintf(&b, "- %s — %s\n", s.Name, s.Rationale)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 // buildMergeThisSessionDescription assembles the merge-this-session MCP
 // tool description, optionally appending the resolved [hooks].pre-merge
 // command so agents know what tests/checks the merge will run before
@@ -320,6 +470,19 @@ func mergeDisabledForCwd() bool {
 		return false
 	}
 	return merged.DisableMergeEnabled()
+}
+
+// preMergeSkillsForCwd returns the resolved [[pre-merge-skills]] list
+// for the current working directory's merged sweatfile, filtered to
+// active entries (non-empty rationale). Returns nil on any load error
+// so a misconfigured environment doesn't silently register the
+// attestation tool.
+func preMergeSkillsForCwd() []sweatfile.PreMergeSkill {
+	merged, ok := mergedSweatfileForCwd()
+	if !ok {
+		return nil
+	}
+	return merged.ActivePreMergeSkills()
 }
 
 // preMergeHookForCwd returns the resolved [hooks].pre-merge command for

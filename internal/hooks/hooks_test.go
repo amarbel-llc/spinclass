@@ -907,6 +907,68 @@ func TestCheckThisSessionFallsThroughWhenPreMergeHookEmpty(t *testing.T) {
 	}
 }
 
+func TestNothingButTheTruthAllowedWhenPreMergeSkillsSet(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cwd := t.TempDir()
+	os.WriteFile(filepath.Join(cwd, "sweatfile"),
+		[]byte("[[pre-merge-skills]]\nname = \"eng:code-reviewer\"\nrationale = \"Required.\""), 0o644)
+
+	input := makeInput("mcp__plugin_spinclass_spinclass__nothing-but-the-truth", map[string]any{}, cwd)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() == 0 {
+		t.Fatal("expected allow output when pre-merge-skills is non-empty")
+	}
+	decision, reason := parseHookDecision(t, stdout.Bytes())
+	if decision != "allow" {
+		t.Errorf("expected permissionDecision allow, got %q", decision)
+	}
+	if !strings.Contains(reason, "pre-merge-skills") {
+		t.Errorf("expected reason to mention pre-merge-skills, got %q", reason)
+	}
+}
+
+func TestNothingButTheTruthFallsThroughWhenNoSkills(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cwd := filepath.Join(home, "cwd")
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	input := makeInput("mcp__plugin_spinclass_spinclass__nothing-but-the-truth", map[string]any{}, cwd)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("expected no output without pre-merge-skills, got %q", stdout.String())
+	}
+}
+
+func TestNothingButTheTruthFallsThroughWhenSkillsAreOnlySentinels(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cwd := t.TempDir()
+	os.WriteFile(filepath.Join(cwd, "sweatfile"),
+		[]byte("[[pre-merge-skills]]\nname = \"removed\""), 0o644)
+
+	input := makeInput("mcp__plugin_spinclass_spinclass__nothing-but-the-truth", map[string]any{}, cwd)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("expected no output when only sentinel entries are present, got %q", stdout.String())
+	}
+}
+
 func TestEditSpinclassDirDenied(t *testing.T) {
 	mainRepo := t.TempDir()
 	worktree := t.TempDir()

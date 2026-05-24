@@ -62,16 +62,25 @@ type StartCommand struct {
 	ExecStart       []string `toml:"exec-start"`
 }
 
+// PreMergeSkill names a Claude Code skill that an agent must address
+// before merge-this-session / check-this-session may run the pre-merge
+// hook. See docs/features/0007-pre-merge-skill-attestation.md.
+type PreMergeSkill struct {
+	Name      string `toml:"name"`
+	Rationale string `toml:"rationale"`
+}
+
 //go:generate tommy generate
 type Sweatfile struct {
-	Claude        *Claude        `toml:"claude"`
-	Git           *Git           `toml:"git"`
-	Direnv        *Direnv        `toml:"direnv"`
-	Hooks         *Hooks         `toml:"hooks"`
-	SessionEntry  *SessionEntry  `toml:"session-entry"`
-	StartCommands []StartCommand `toml:"start-commands"`
-	AllowedMCPs   []string       `toml:"allowed-mcps"`
-	MCPs          []MCPServerDef `toml:"mcps"`
+	Claude          *Claude         `toml:"claude"`
+	Git             *Git            `toml:"git"`
+	Direnv          *Direnv         `toml:"direnv"`
+	Hooks           *Hooks          `toml:"hooks"`
+	SessionEntry    *SessionEntry   `toml:"session-entry"`
+	StartCommands   []StartCommand  `toml:"start-commands"`
+	AllowedMCPs     []string        `toml:"allowed-mcps"`
+	MCPs            []MCPServerDef  `toml:"mcps"`
+	PreMergeSkills  []PreMergeSkill `toml:"pre-merge-skills"`
 }
 
 func (sf Sweatfile) StopHookCommand() *string {
@@ -169,6 +178,18 @@ func (sf Sweatfile) ActiveMCPs() []MCPServerDef {
 	for _, mcp := range sf.MCPs {
 		if mcp.Command != "" {
 			active = append(active, mcp)
+		}
+	}
+	return active
+}
+
+// ActivePreMergeSkills returns only [[pre-merge-skills]] entries with a
+// non-empty rationale (i.e., excluding removal sentinels).
+func (sf Sweatfile) ActivePreMergeSkills() []PreMergeSkill {
+	var active []PreMergeSkill
+	for _, s := range sf.PreMergeSkills {
+		if s.Rationale != "" {
+			active = append(active, s)
 		}
 	}
 	return active

@@ -225,6 +225,31 @@ func CheckMCPs(sf sweatfile.Sweatfile) []Issue {
 	return issues
 }
 
+func CheckPreMergeSkills(sf sweatfile.Sweatfile) []Issue {
+	var issues []Issue
+	seen := make(map[string]bool, len(sf.PreMergeSkills))
+	for _, s := range sf.PreMergeSkills {
+		if s.Name == "" {
+			issues = append(issues, Issue{
+				Message:  "pre-merge-skills entry missing `name`",
+				Severity: SeverityError,
+				Field:    "pre-merge-skills.name",
+			})
+			continue
+		}
+		if seen[s.Name] {
+			issues = append(issues, Issue{
+				Message:  fmt.Sprintf("duplicate pre-merge-skills entry %q in this file", s.Name),
+				Severity: SeverityWarning,
+				Field:    "pre-merge-skills.name",
+				Value:    s.Name,
+			})
+		}
+		seen[s.Name] = true
+	}
+	return issues
+}
+
 func isShellInterpreter(cmd string) bool {
 	base := filepath.Base(cmd)
 	switch base {
@@ -469,6 +494,27 @@ func Run(w io.Writer, home, repoDir string) int {
 				}
 			} else {
 				sub.Ok("mcps valid")
+			}
+		}
+
+		if len(src.File.PreMergeSkills) > 0 {
+			if issues := CheckPreMergeSkills(src.File); len(issues) > 0 {
+				for _, iss := range issues {
+					if iss.Severity == SeverityError {
+						diag := map[string]string{
+							"severity": iss.Severity,
+							"message":  iss.Message,
+						}
+						if iss.Value != "" {
+							diag["value"] = iss.Value
+						}
+						sub.NotOk("pre-merge-skills valid", diag)
+					} else {
+						sub.Ok(fmt.Sprintf("pre-merge-skills valid # warning: %s", iss.Message))
+					}
+				}
+			} else {
+				sub.Ok("pre-merge-skills valid")
 			}
 		}
 

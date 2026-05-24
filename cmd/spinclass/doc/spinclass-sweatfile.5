@@ -349,6 +349,49 @@ dedup-by-name (full entry replacement, same as
 Every entry with a non-empty
 .B command
 implicitly adds to the allow-list.
+.SS [[pre\-merge\-skills]]
+Array of tables declaring skill names that the agent must address
+before
+.B merge\-this\-session
+or
+.B check\-this\-session
+will run the pre-merge hook.
+When the resolved list is non-empty, those MCP tools refuse to proceed
+until a fresh attestation has been recorded via the companion
+.B nothing\-but\-the\-truth
+tool, which spinclass registers automatically alongside whichever of
+.BR merge\-this\-session " / " check\-this\-session
+is active.
+The terminal CLI
+.RB ( "sc merge" ", " "sc check" )
+is unaffected.
+.TP
+.B name
+(required) Skill identifier as it appears in the Claude Code skill
+catalog (e.g.\&
+.BR eng:code-reviewer ", " simplify ", " security-review ).
+A name-only entry (empty or absent
+.BR rationale )
+acts as a removal sentinel, removing an inherited skill from the
+resolved list.
+.TP
+.B rationale
+Free-form string describing why the skill is required for this repo
+or sweatfile scope.
+The text is echoed back to the agent in the gate-failure response and
+must be addressed in the agent's per-skill reasoning.
+.PP
+.B Merge:
+dedup-by-name (full entry replacement, same as
+.BR [[mcps]] ).
+A non-empty resolved list activates the attestation gate; an empty
+or absent list leaves merge behaviour unchanged.
+.PP
+See
+.B PRE-MERGE SKILL ATTESTATION
+below for the
+.B nothing\-but\-the\-truth
+tool's input schema, lifecycle, and gate-failure response shape.
 .SH AUTO-ALLOW PROTOCOL
 The
 .B auto-allow
@@ -488,6 +531,106 @@ args = ["serve"]
 auto-allow = ["sh", "-c", "echo '{\"tools\": [\"format\", \"check\"]}'"]
 .fi
 .RE
+.SH PRE-MERGE SKILL ATTESTATION
+When a sweatfile's resolved
+.B [[pre\-merge\-skills]]
+list is non-empty, spinclass registers an additional MCP tool,
+.BR nothing\-but\-the\-truth ,
+and gates
+.BR merge\-this\-session " / " check\-this\-session
+behind it.
+.SS Gate behaviour
+On invocation, if no fresh attestation is buffered in the session
+state file
+.RI ( ~/.local/state/spinclass/sessions/<hash>-state.json ),
+the gated tool fails before running any pre-merge hook with a
+TAP-14 response containing
+.B required_skills
+(the full list, each entry's
+.B name
+and
+.BR rationale )
+and
+.BR required_tool: \ nothing-but-the-truth .
+.PP
+Each merge attempt consumes one attestation. After consumption the
+record is cleared; a subsequent merge requires a new attestation
+call against the current diff. There is no sticky once-per-session
+mode.
+.PP
+The terminal CLI
+.RB ( "sc merge" ", " "sc check" )
+bypasses the gate entirely.
+.SS nothing-but-the-truth input schema
+.RS 4
+.nf
+{
+  "skills": [
+    {
+      "name":      "eng:code-reviewer",
+      "used":      true,
+      "reasoning": "Ran the review; addressed one nil-check finding."
+    },
+    {
+      "name":      "simplify",
+      "used":      false,
+      "reasoning": "Single-line bugfix, no abstraction surface to prune."
+    }
+  ]
+}
+.fi
+.RE
+.TP
+.B skills
+(required) Array containing exactly one entry per skill listed in
+the resolved
+.BR [[pre\-merge\-skills]] .
+Names must match exactly; missing or unrecognised names fail
+validation.
+.TP
+.B skills[].name
+(required) Skill identifier matching a
+.B [[pre\-merge\-skills]]
+entry.
+.TP
+.B skills[].used
+(required) Boolean.
+True if the skill was invoked for this diff; false otherwise.
+.TP
+.B skills[].reasoning
+(required) Non-empty free-form string. The tool does not police
+length, style, or content \(em the act of writing the reasoning
+down is the deliverable.
+.SS Validation
+Validation is strict on presence (every listed skill must have an
+entry, names must match exactly, reasoning must be non-empty) and
+lenient on content. On failure the tool emits a TAP error listing
+missing and unrecognised names so the agent can correct and retry
+without re-fetching the skill list.
+.SS Mutual exclusivity with [hooks].disable-merge
+The companion tool tracks the active gated tool:
+.IP \(bu 2
+.B disable-merge
+unset/false plus a non-empty
+.B [[pre\-merge\-skills]]
+list registers
+.B merge\-this\-session
+and
+.BR nothing\-but\-the\-truth .
+.IP \(bu 2
+.B disable-merge = true
+plus a non-empty
+.B [[pre\-merge\-skills]]
+list registers
+.B check\-this\-session
+and
+.BR nothing\-but\-the\-truth .
+.IP \(bu 2
+An empty or absent
+.B [[pre\-merge\-skills]]
+list leaves
+.B nothing\-but\-the\-truth
+unregistered.
 .SH MERGE SEMANTICS
 Each field uses one of these merge strategies when combining files in
 the hierarchy:
@@ -506,7 +649,7 @@ The child's value replaces the parent's entirely.
 .TP
 .B "dedup-by-name"
 Used by array-of-tables:
-.BR [[start-commands]] ", " [[mcps]] .
+.BR [[start-commands]] ", " [[mcps]] ", " [[pre-merge-skills]] .
 Entries are matched by
 .BR name ;
 a later entry replaces the entire earlier entry in-place (not a

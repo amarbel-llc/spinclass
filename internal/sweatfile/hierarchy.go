@@ -383,5 +383,27 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		}
 	}
 
+	// [[pre-merge-skills]] — dedup-by-name, same pattern as [[mcps]].
+	// A name-only entry (empty rationale) is preserved here so that
+	// ActivePreMergeSkills() can filter it out as a removal sentinel
+	// against the inherited list.
+	if len(other.PreMergeSkills) > 0 {
+		cp := make([]PreMergeSkill, len(merged.PreMergeSkills))
+		copy(cp, merged.PreMergeSkills)
+		merged.PreMergeSkills = cp
+		index := make(map[string]int, len(merged.PreMergeSkills))
+		for i, s := range merged.PreMergeSkills {
+			index[s.Name] = i
+		}
+		for _, s := range other.PreMergeSkills {
+			if i, ok := index[s.Name]; ok {
+				merged.PreMergeSkills[i] = s
+				continue
+			}
+			index[s.Name] = len(merged.PreMergeSkills)
+			merged.PreMergeSkills = append(merged.PreMergeSkills, s)
+		}
+	}
+
 	return merged
 }

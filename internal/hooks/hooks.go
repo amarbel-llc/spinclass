@@ -87,8 +87,9 @@ func runStopHook(input hookInput, w io.Writer) error {
 // server also named "spinclass", so its tools appear to Claude Code as
 // mcp__plugin_spinclass_spinclass__<tool>.
 const (
-	mergeThisSessionToolName = "mcp__plugin_spinclass_spinclass__merge-this-session"
-	checkThisSessionToolName = "mcp__plugin_spinclass_spinclass__check-this-session"
+	mergeThisSessionToolName     = "mcp__plugin_spinclass_spinclass__merge-this-session"
+	checkThisSessionToolName     = "mcp__plugin_spinclass_spinclass__check-this-session"
+	nothingButTheTruthToolName   = "mcp__plugin_spinclass_spinclass__nothing-but-the-truth"
 )
 
 func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree bool) error {
@@ -100,6 +101,10 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 	case checkThisSessionToolName:
 		if hasPreMergeHook(input.CWD) {
 			return writeAllow(w, "sweatfile [hooks].pre-merge is the agent-CI surface")
+		}
+	case nothingButTheTruthToolName:
+		if hasPreMergeSkills(input.CWD) {
+			return writeAllow(w, "sweatfile [[pre-merge-skills]] makes this tool the only path to a merge")
 		}
 	}
 
@@ -183,6 +188,18 @@ func hasPreMergeHook(cwd string) bool {
 	}
 	cmd := result.Merged.PreMergeHookCommand()
 	return cmd != nil && *cmd != ""
+}
+
+func hasPreMergeSkills(cwd string) bool {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	result, err := sweatfile.LoadHierarchy(home, cwd)
+	if err != nil {
+		return false
+	}
+	return len(result.Merged.ActivePreMergeSkills()) > 0
 }
 
 func isInsideSpinclassDir(path, mainRepoRoot, sessionWorktree string) bool {

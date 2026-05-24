@@ -21,12 +21,16 @@ type startCommandHandle struct {
 type mCPServerDefHandle struct {
 	node *cst.Node
 }
+type preMergeSkillHandle struct {
+	node *cst.Node
+}
 type SweatfileDocument struct {
-	data          Sweatfile
-	cstDoc        *document.Document
-	consumed      map[string]bool
-	startCommands []startCommandHandle
-	mCPs          []mCPServerDefHandle
+	data           Sweatfile
+	cstDoc         *document.Document
+	consumed       map[string]bool
+	startCommands  []startCommandHandle
+	mCPs           []mCPServerDefHandle
+	preMergeSkills []preMergeSkillHandle
 }
 
 func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
@@ -553,6 +557,35 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			}
 		}
 	}
+	var _nodesPreMergeSkills []*cst.Node
+	for _, _ch := range d.cstDoc.Root().Children {
+		if _ch.Kind == cst.NodeArrayTable && cst.TableHeaderKey(_ch) == "pre-merge-skills" {
+			_nodesPreMergeSkills = append(_nodesPreMergeSkills, _ch)
+		}
+	}
+	d.preMergeSkills = make([]preMergeSkillHandle, len(_nodesPreMergeSkills))
+	d.data.PreMergeSkills = make([]PreMergeSkill, len(_nodesPreMergeSkills))
+	d.consumed["pre-merge-skills"] = true
+	for i, _node := range _nodesPreMergeSkills {
+		d.preMergeSkills[i] = preMergeSkillHandle{node: _node}
+		for _, _kv := range _node.Children {
+			if _kv.Kind != cst.NodeKeyValue {
+				continue
+			}
+			switch cst.KeyValueName(_kv) {
+			case "name":
+				if v, ok := cst.ExtractString(_kv); ok {
+					d.data.PreMergeSkills[i].Name = v
+					d.consumed["pre-merge-skills.name"] = true
+				}
+			case "rationale":
+				if v, ok := cst.ExtractString(_kv); ok {
+					d.data.PreMergeSkills[i].Rationale = v
+					d.consumed["pre-merge-skills.rationale"] = true
+				}
+			}
+		}
+	}
 	return d, nil
 }
 func (d *SweatfileDocument) Data() *Sweatfile {
@@ -777,6 +810,26 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 					if err := cst.SetAny(tableNode, k, v); err != nil {
 						return nil, fmt.Errorf("%w", err)
 					}
+				}
+			}
+		}
+	}
+	{
+		for i := range d.data.PreMergeSkills {
+			var container *cst.Node
+			if i < len(d.preMergeSkills) {
+				container = d.preMergeSkills[i].node
+			} else {
+				container = cst.AppendArrayTableEntryAfter(d.cstDoc.Root(), "pre-merge-skills")
+			}
+			if d.data.PreMergeSkills[i].Name != "" || cst.HasValue(container, "name") {
+				if err := cst.SetAny(container, "name", d.data.PreMergeSkills[i].Name); err != nil {
+					return nil, fmt.Errorf("%w", err)
+				}
+			}
+			if d.data.PreMergeSkills[i].Rationale != "" || cst.HasValue(container, "rationale") {
+				if err := cst.SetAny(container, "rationale", d.data.PreMergeSkills[i].Rationale); err != nil {
+					return nil, fmt.Errorf("%w", err)
 				}
 			}
 		}
@@ -1300,6 +1353,29 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 			}
 		}
 	}
+	var _nodesPreMergeSkills []*cst.Node
+	_nodesPreMergeSkills = doc.FindArrayTableNodes(keyPrefix + "pre-merge-skills")
+	data.PreMergeSkills = make([]PreMergeSkill, len(_nodesPreMergeSkills))
+	consumed[keyPrefix+"pre-merge-skills"] = true
+	for i, _node := range _nodesPreMergeSkills {
+		for _, _kv := range _node.Children {
+			if _kv.Kind != cst.NodeKeyValue {
+				continue
+			}
+			switch cst.KeyValueName(_kv) {
+			case "name":
+				if v, ok := cst.ExtractString(_kv); ok {
+					data.PreMergeSkills[i].Name = v
+					consumed[keyPrefix+"pre-merge-skills.name"] = true
+				}
+			case "rationale":
+				if v, ok := cst.ExtractString(_kv); ok {
+					data.PreMergeSkills[i].Rationale = v
+					consumed[keyPrefix+"pre-merge-skills.rationale"] = true
+				}
+			}
+		}
+	}
 	return nil
 }
 func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst.Node) error {
@@ -1523,6 +1599,27 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 					if err := cst.SetAny(tableNode, k, v); err != nil {
 						return fmt.Errorf("%w", err)
 					}
+				}
+			}
+		}
+	}
+	{
+		_existPreMergeSkills := cst.FindArrayTableNodes(doc.Root(), "pre-merge-skills")
+		for i := range data.PreMergeSkills {
+			var container *cst.Node
+			if i < len(_existPreMergeSkills) {
+				container = _existPreMergeSkills[i]
+			} else {
+				container = cst.AppendArrayTableEntryAfter(doc.Root(), "pre-merge-skills")
+			}
+			if data.PreMergeSkills[i].Name != "" || cst.HasValue(container, "name") {
+				if err := cst.SetAny(container, "name", data.PreMergeSkills[i].Name); err != nil {
+					return fmt.Errorf("%w", err)
+				}
+			}
+			if data.PreMergeSkills[i].Rationale != "" || cst.HasValue(container, "rationale") {
+				if err := cst.SetAny(container, "rationale", data.PreMergeSkills[i].Rationale); err != nil {
+					return fmt.Errorf("%w", err)
 				}
 			}
 		}
