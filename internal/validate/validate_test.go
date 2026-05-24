@@ -269,6 +269,40 @@ func TestCheckMCPsMissingName(t *testing.T) {
 	}
 }
 
+func TestCheckHooksRejectsUnknownPreMergeOutputFormat(t *testing.T) {
+	v := "nonsense"
+	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreMergeOutputFormat: &v}}
+	issues := CheckHooks(sf)
+	if len(issues) != 1 || issues[0].Severity != SeverityError ||
+		issues[0].Field != "hooks.pre-merge-output-format" {
+		t.Fatalf("expected one error issue, got %+v", issues)
+	}
+}
+
+func TestCheckHooksAcceptsKnownPreMergeOutputFormat(t *testing.T) {
+	for _, val := range []string{"raw", "tap-ndjson"} {
+		v := val
+		sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreMergeOutputFormat: &v}}
+		if issues := CheckHooks(sf); len(issues) != 0 {
+			t.Errorf("format %q produced unexpected issues: %+v", val, issues)
+		}
+	}
+}
+
+func TestCheckHooksAllowsUnset(t *testing.T) {
+	sf := sweatfile.Sweatfile{}
+	if issues := CheckHooks(sf); len(issues) != 0 {
+		t.Errorf("nil Hooks produced unexpected issues: %+v", issues)
+	}
+}
+
+func TestCheckHooksAllowsNilFormat(t *testing.T) {
+	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{}}
+	if issues := CheckHooks(sf); len(issues) != 0 {
+		t.Errorf("non-nil Hooks with nil PreMergeOutputFormat produced unexpected issues: %+v", issues)
+	}
+}
+
 func TestCheckMCPsDuplicateName(t *testing.T) {
 	sf := sweatfile.Sweatfile{
 		MCPs: []sweatfile.MCPServerDef{

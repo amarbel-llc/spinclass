@@ -173,6 +173,32 @@ func CheckStartCommands(sf sweatfile.Sweatfile) []Issue {
 	return issues
 }
 
+var validPreMergeOutputFormats = map[string]bool{
+	"raw":        true,
+	"tap-ndjson": true,
+}
+
+// CheckHooks validates fields in the [hooks] table. Today it only checks
+// pre-merge-output-format; extend here as more enum-valued hook fields land.
+func CheckHooks(sf sweatfile.Sweatfile) []Issue {
+	var issues []Issue
+	if sf.Hooks == nil {
+		return issues
+	}
+	if sf.Hooks.PreMergeOutputFormat != nil {
+		v := *sf.Hooks.PreMergeOutputFormat
+		if v != "" && !validPreMergeOutputFormats[v] {
+			issues = append(issues, Issue{
+				Message:  fmt.Sprintf("unknown pre-merge-output-format %q (valid: raw, tap-ndjson)", v),
+				Severity: SeverityError,
+				Field:    "hooks.pre-merge-output-format",
+				Value:    v,
+			})
+		}
+	}
+	return issues
+}
+
 func CheckMCPs(sf sweatfile.Sweatfile) []Issue {
 	var issues []Issue
 	seen := make(map[string]bool, len(sf.MCPs))
@@ -405,6 +431,23 @@ func Run(w io.Writer, home, repoDir string) int {
 				}
 			} else {
 				sub.Ok("start-commands valid")
+			}
+		}
+
+		if src.File.Hooks != nil {
+			if issues := CheckHooks(src.File); len(issues) > 0 {
+				for _, iss := range issues {
+					diag := map[string]string{
+						"severity": iss.Severity,
+						"message":  iss.Message,
+					}
+					if iss.Value != "" {
+						diag["value"] = iss.Value
+					}
+					sub.NotOk("hooks valid", diag)
+				}
+			} else {
+				sub.Ok("hooks valid")
 			}
 		}
 

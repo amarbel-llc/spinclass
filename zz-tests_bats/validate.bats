@@ -81,6 +81,18 @@ EOF
   assert_output --partial "missing"
 }
 
+function validate_rejects_unknown_pre_merge_output_format { # @test
+  cd "$TEST_REPO"
+  cat > "$TEST_REPO/sweatfile" <<'EOF'
+[hooks]
+pre-merge = "just test"
+pre-merge-output-format = "wat"
+EOF
+  run_sc validate
+  assert_failure
+  assert_output --partial "unknown pre-merge-output-format"
+}
+
 function validate_mcps_duplicate_name { # @test
   cat >"$TEST_REPO/sweatfile" <<'EOF'
 [[mcps]]
