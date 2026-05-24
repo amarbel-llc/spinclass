@@ -178,6 +178,12 @@ function spinclass_clean_removes_merged { # @test
   # non-force `git worktree remove` step succeeds.
   git -C "$wt1" clean -fd
 
+  # Give branch1 a real commit so `sc merge` has something to merge —
+  # otherwise the merge short-circuits with "nothing to merge".
+  echo "merged content" > "$wt1/merged.txt"
+  git -C "$wt1" add merged.txt
+  git -C "$wt1" commit -m "commit on branch1"
+
   # Merge the worktree first (makes the branch fully merged)
   "$bin" --format tap merge "$branch1"
 

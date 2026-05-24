@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/amarbel-llc/spinclass/internal/git"
 	tap "github.com/amarbel-llc/tap/go"
 )
 
@@ -529,6 +530,56 @@ func TestResolvedDisabledByMergeFlag(t *testing.T) {
 	branchCheck := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", "refs/heads/feature-disabled")
 	if err := branchCheck.Run(); err != nil {
 		t.Errorf("expected branch feature-disabled to still exist when merge is disabled, but rev-parse failed: %v", err)
+	}
+}
+
+func TestResolvedShortCircuitsNoOpMerge(t *testing.T) {
+	repoDir := setupRepo(t)
+
+	wtDir := filepath.Join(repoDir, ".worktrees")
+	if err := os.MkdirAll(wtDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wtPath := filepath.Join(wtDir, "feature-noop")
+	runGit(t, repoDir, "worktree", "add", "-b", "feature-noop", wtPath)
+
+	mainLogBefore := runGit(t, repoDir, "log", "--oneline", "main")
+	branchLogBefore := runGit(t, repoDir, "log", "--oneline", "feature-noop")
+
+	mock := &mockExecutor{}
+	var buf bytes.Buffer
+
+	_, err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-noop", "main", false, false, false)
+	if err == nil {
+		t.Fatalf("expected error when branch has no commits ahead of main, got nil. Output:\n%s", buf.String())
+	}
+	if !strings.Contains(err.Error(), "nothing to merge") {
+		t.Errorf("expected 'nothing to merge' in error, got: %v", err)
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "not ok") {
+		t.Errorf("expected TAP 'not ok' on short-circuit, got:\n%s", got)
+	}
+	if !strings.Contains(got, "nothing to merge") {
+		t.Errorf("expected TAP message to mention 'nothing to merge', got:\n%s", got)
+	}
+	if strings.Contains(got, "pre-merge hook") {
+		t.Errorf("did not expect pre-merge hook to run when nothing to merge, got:\n%s", got)
+	}
+
+	// No merge-y side effects: branches, worktree, refs all intact.
+	if mainLogBefore != runGit(t, repoDir, "log", "--oneline", "main") {
+		t.Error("main branch log changed; short-circuit ran the merge anyway")
+	}
+	if branchLogBefore != runGit(t, repoDir, "log", "--oneline", "feature-noop") {
+		t.Error("feature-noop branch log changed; short-circuit did not happen cleanly")
+	}
+	if _, statErr := os.Stat(wtPath); os.IsNotExist(statErr) {
+		t.Error("expected worktree to still exist when short-circuited")
+	}
+	if !git.BranchExists(repoDir, "feature-noop") {
+		t.Error("expected branch feature-noop to still exist after short-circuit")
 	}
 }
 

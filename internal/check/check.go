@@ -150,7 +150,7 @@ func RunWithWriter(
 
 // runHookCompact runs the pre-merge hook with bytes tee'd into both
 // (a) madder's stdin (for atomic content-addressable storage and a
-// resource_link URI), and (b) an in-memory tail ring so the last 50
+// resource_link URI), and (b) an in-memory tail ring so the last 15
 // lines surface in-band. Emits a single TAP test point with YAMLish
 // diagnostics carrying command/tail/resource_link/exit_code/elapsed.
 //
@@ -164,7 +164,7 @@ func runHookCompact(tw *tap.Writer, hierarchy sweatfile.Hierarchy, wtPath, cmd, 
 		madderStdin = nopWriteCloser{io.Discard}
 		finishMadder = func() (string, error) { return "", err }
 	}
-	ring := newTailRingWriter(50)
+	ring := newTailRingWriter(15)
 	sink := io.MultiWriter(madderStdin, ring)
 
 	start := time.Now()

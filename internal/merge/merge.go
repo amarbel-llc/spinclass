@@ -179,6 +179,23 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 		}
 	}
 
+	// Short-circuit so an empty merge doesn't pay for the pre-merge hook.
+	if git.CommitsAhead(wtPath, defaultBranch, branch) == 0 {
+		noopErr := fmt.Errorf("nothing to merge: %s has no commits ahead of %s", branch, defaultBranch)
+		if tw != nil {
+			tw.NotOk("merge "+branch, map[string]string{
+				"severity": "fail",
+				"message":  noopErr.Error(),
+			})
+			if ownWriter {
+				tw.Plan()
+			}
+		} else {
+			log.Error("nothing to merge", "branch", branch, "default", defaultBranch)
+		}
+		return nil, noopErr
+	}
+
 	hookURIs, hookErr := runPreMergeHook(tw, w, repoPath, wtPath, branch, ownWriter)
 	blobURIs = append(blobURIs, hookURIs...)
 	if hookErr != nil {
