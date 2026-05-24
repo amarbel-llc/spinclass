@@ -8,7 +8,6 @@
     # `pkgs-master` consumes, instead of pulling a second master-tracking
     # copy.
     nixpkgs.url = "github:amarbel-llc/nixpkgs";
-    nixpkgs.inputs.nixpkgs.follows = "nixpkgs-master";
 
     # Upstream pin: source of the Go toolchain we pin via
     # GOTOOLCHAIN=local + go_1_26, plus general dev tools that don't
