@@ -4,7 +4,48 @@ setup() {
   load "$(dirname "$BATS_TEST_FILE")/common.bash"
   export output
   setup_test_home
+  setup_stubs
   create_repo
+}
+
+# Create a worktree, drop a sweatfile with the given body at its root,
+# and cd into it. Mirrors sc_check_setup_worktree in sweatfile.bats so
+# the pre-merge-output-format tests below match the existing sc_check_*
+# pattern.
+pre_merge_setup_worktree() {
+  local sweatfile_body="$1"
+  local wt_path
+
+  cd "$TEST_REPO"
+  run_sc start --no-attach pre_merge_test
+  assert_success
+
+  wt_path=$(extract_wt_path "$output")
+  assert [ -d "$wt_path" ]
+
+  printf '%s' "$sweatfile_body" >"$wt_path/sweatfile"
+  cd "$wt_path"
+}
+
+# The format-aware pre-merge hook output (`format:`, `failure:`, structured
+# `tail:`) is emitted only by the compact code path in
+# internal/check/check.go, which is gated on `embeds.MadderBin() != ""` —
+# i.e. spinclass was built via `lib.mkSpinclass { madder = ...; }`. The
+# default `just test-bats` lane builds `mkSpinclass {}` with no madder
+# pin, so these tests skip there and only assert against madder-pinned
+# binaries (the `merge-this-session` / `~/.nix-profile/bin/spinclass`
+# environment). See FDR 0003 and CLAUDE.md "External tool deps".
+# TODO(#85): once a madder-pinned bats lane lands, this guard becomes a no-op for that lane.
+require_madder_pinned() {
+  local bin="${SPINCLASS_BIN:-spinclass}"
+  # `sc version` uses text/tabwriter padded with spaces (not tabs), so we
+  # anchor the row at line-start and require space-separated `- ... dormant`
+  # in the trailing columns. Tighter than the original `^madder.*dormant`,
+  # which would match any line beginning with `madder` and containing
+  # `dormant` anywhere.
+  if "$bin" version 2>/dev/null | grep -qE '^madder +- +dormant *$'; then
+    skip "format-aware pre-merge hook output requires a madder-pinned spinclass build (lib.mkSpinclass with madder input); current binary reports madder as dormant"
+  fi
 }
 
 function tool_use_log_writes_to_xdg_log_home { # @test
@@ -77,4 +118,51 @@ function tool_use_log_silent_without_session { # @test
   # No log dir should be created
   local log_dir="$HOME/.local/log/spinclass/tool-uses"
   assert [ ! -d "$log_dir" ]
+}
+
+function pre_merge_output_format_tap_ndjson_success_omits_tail { # @test
+  require_madder_pinned
+  # Build the TAP-14 stream with one echo per line so the test sweatfile
+  # does not have to thread newline escapes through bash → TOML → shell →
+  # printf. Each echo emits its argument plus a newline.
+  pre_merge_setup_worktree '[hooks]
+pre-merge = "echo '"'"'TAP version 14'"'"'; echo '"'"'1..1'"'"'; echo '"'"'ok 1 - synthetic'"'"'"
+pre-merge-output-format = "tap-ndjson"
+'
+
+  run_sc check
+  assert_success
+  assert_output --partial "format: tap-ndjson"
+  refute_output --partial "tail:"
+  refute_output --partial "failure:"
+}
+
+function pre_merge_output_format_tap_ndjson_failure_emits_failure_field { # @test
+  require_madder_pinned
+  pre_merge_setup_worktree '[hooks]
+pre-merge = "echo '"'"'TAP version 14'"'"'; echo '"'"'1..1'"'"'; echo '"'"'not ok 1 - synthetic'"'"'; echo '"'"'  ---'"'"'; echo '"'"'  message: expected 7 got 9'"'"'; echo '"'"'  ...'"'"'; exit 1"
+pre-merge-output-format = "tap-ndjson"
+'
+
+  run_sc check
+  assert_failure
+  assert_output --partial "format: tap-ndjson"
+  assert_output --partial "failure:"
+  assert_output --partial "expected 7 got 9"
+  refute_output --partial "tail:"
+}
+
+function pre_merge_output_format_tap_ndjson_degenerate_falls_back_to_tail { # @test
+  require_madder_pinned
+  pre_merge_setup_worktree '[hooks]
+pre-merge = "echo '"'"'this is not tap'"'"'; exit 2"
+pre-merge-output-format = "tap-ndjson"
+'
+
+  run_sc check
+  assert_failure
+  assert_output --partial "format: tap-ndjson"
+  assert_output --partial "tail:"
+  assert_output --partial "this is not tap"
+  refute_output --partial "failure:"
 }
