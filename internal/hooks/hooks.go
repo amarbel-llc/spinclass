@@ -17,6 +17,7 @@ import (
 type hookInput struct {
 	HookEventName string         `json:"hook_event_name"`
 	SessionID     string         `json:"session_id"`
+	AgentID       string         `json:"agent_id"`
 	ToolName      string         `json:"tool_name"`
 	ToolInput     map[string]any `json:"tool_input"`
 	CWD           string         `json:"cwd"`
@@ -93,6 +94,13 @@ const (
 )
 
 func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree bool) error {
+	if input.AgentID != "" {
+		switch input.ToolName {
+		case mergeThisSessionToolName, checkThisSessionToolName, nothingButTheTruthToolName:
+			return writeDeny(w, "merge and attestation tools are not available to subagents; only the main agent may call them")
+		}
+	}
+
 	switch input.ToolName {
 	case mergeThisSessionToolName:
 		if hasPreMergeHook(input.CWD) {

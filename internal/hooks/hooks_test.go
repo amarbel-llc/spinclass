@@ -20,6 +20,18 @@ func makeInput(toolName string, toolInput map[string]any, cwd string) []byte {
 	return data
 }
 
+func makeInputWithAgentID(toolName string, toolInput map[string]any, cwd, agentID string) []byte {
+	input := map[string]any{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       toolName,
+		"tool_input":      toolInput,
+		"cwd":             cwd,
+		"agent_id":        agentID,
+	}
+	data, _ := json.Marshal(input)
+	return data
+}
+
 func TestDisallowMainWorktreeOffAllowsEverything(t *testing.T) {
 	mainRepo := t.TempDir()
 	outside := t.TempDir()
@@ -781,7 +793,8 @@ func TestMergeThisSessionAllowedWhenPreMergeHookSet(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	cwd := t.TempDir()
+	cwd := filepath.Join(home, "cwd")
+	os.MkdirAll(cwd, 0o755)
 	os.WriteFile(filepath.Join(cwd, "sweatfile"),
 		[]byte("[hooks]\npre-merge = \"just test\""), 0o644)
 
@@ -828,7 +841,8 @@ func TestMergeThisSessionFallsThroughWhenPreMergeHookEmpty(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	cwd := t.TempDir()
+	cwd := filepath.Join(home, "cwd")
+	os.MkdirAll(cwd, 0o755)
 	os.WriteFile(filepath.Join(cwd, "sweatfile"),
 		[]byte("[hooks]\npre-merge = \"\""), 0o644)
 
@@ -846,7 +860,8 @@ func TestCheckThisSessionAllowedWhenPreMergeHookSet(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	cwd := t.TempDir()
+	cwd := filepath.Join(home, "cwd")
+	os.MkdirAll(cwd, 0o755)
 	os.WriteFile(filepath.Join(cwd, "sweatfile"),
 		[]byte("[hooks]\npre-merge = \"just test\"\ndisable-merge = true"), 0o644)
 
@@ -893,7 +908,8 @@ func TestCheckThisSessionFallsThroughWhenPreMergeHookEmpty(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	cwd := t.TempDir()
+	cwd := filepath.Join(home, "cwd")
+	os.MkdirAll(cwd, 0o755)
 	os.WriteFile(filepath.Join(cwd, "sweatfile"),
 		[]byte("[hooks]\npre-merge = \"\"\ndisable-merge = true"), 0o644)
 
@@ -911,7 +927,8 @@ func TestNothingButTheTruthAllowedWhenPreMergeSkillsSet(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	cwd := t.TempDir()
+	cwd := filepath.Join(home, "cwd")
+	os.MkdirAll(cwd, 0o755)
 	os.WriteFile(filepath.Join(cwd, "sweatfile"),
 		[]byte("[[pre-merge-skills]]\nname = \"eng:code-reviewer\"\nrationale = \"Required.\""), 0o644)
 
@@ -955,7 +972,8 @@ func TestNothingButTheTruthFallsThroughWhenSkillsAreOnlySentinels(t *testing.T) 
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	cwd := t.TempDir()
+	cwd := filepath.Join(home, "cwd")
+	os.MkdirAll(cwd, 0o755)
 	os.WriteFile(filepath.Join(cwd, "sweatfile"),
 		[]byte("[[pre-merge-skills]]\nname = \"removed\""), 0o644)
 
@@ -966,6 +984,64 @@ func TestNothingButTheTruthFallsThroughWhenSkillsAreOnlySentinels(t *testing.T) 
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("expected no output when only sentinel entries are present, got %q", stdout.String())
+	}
+}
+
+func TestSubagentDeniedMergeThisSession(t *testing.T) {
+	cwd := t.TempDir()
+	input := makeInputWithAgentID("mcp__plugin_spinclass_spinclass__merge-this-session", map[string]any{}, cwd, "agent-abc123")
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	decision, _ := parseHookDecision(t, stdout.Bytes())
+	if decision != "deny" {
+		t.Errorf("expected deny for subagent calling merge-this-session, got %q", decision)
+	}
+}
+
+func TestSubagentDeniedCheckThisSession(t *testing.T) {
+	cwd := t.TempDir()
+	input := makeInputWithAgentID("mcp__plugin_spinclass_spinclass__check-this-session", map[string]any{}, cwd, "agent-abc123")
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	decision, _ := parseHookDecision(t, stdout.Bytes())
+	if decision != "deny" {
+		t.Errorf("expected deny for subagent calling check-this-session, got %q", decision)
+	}
+}
+
+func TestSubagentDeniedNothingButTheTruth(t *testing.T) {
+	cwd := t.TempDir()
+	input := makeInputWithAgentID("mcp__plugin_spinclass_spinclass__nothing-but-the-truth", map[string]any{}, cwd, "agent-abc123")
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	decision, _ := parseHookDecision(t, stdout.Bytes())
+	if decision != "deny" {
+		t.Errorf("expected deny for subagent calling nothing-but-the-truth, got %q", decision)
+	}
+}
+
+func TestMainAgentAllowedMergeThisSession(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cwd := filepath.Join(home, "cwd")
+	os.MkdirAll(cwd, 0o755)
+	os.WriteFile(filepath.Join(cwd, "sweatfile"),
+		[]byte("[hooks]\npre-merge = \"just test\""), 0o644)
+
+	input := makeInput("mcp__plugin_spinclass_spinclass__merge-this-session", map[string]any{}, cwd)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	decision, _ := parseHookDecision(t, stdout.Bytes())
+	if decision != "allow" {
+		t.Errorf("expected allow for main agent calling merge-this-session, got %q", decision)
 	}
 }
 
