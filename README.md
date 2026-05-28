@@ -1,0 +1,190 @@
+# spinclass
+
+A shell-agnostic git worktree session manager. Aliased as `sc`.
+
+`spinclass` manages the full lifecycle of git worktree-based sessions: it
+creates worktrees with inherited configuration, attaches to them through a
+configurable session entrypoint, rebases/merges them back to the default
+branch, and cleans them up when they're done. It doubles as a Model Context
+Protocol (MCP) server so coding agents can drive the same workflow.
+
+## Why
+
+Working on several branches at once means juggling worktrees by hand: creating
+them, copying over local config and excludes, trusting paths, and tearing
+everything down afterwards. `spinclass` turns that into a few commands. Each
+session gets its own worktree, its own merged configuration, and tracked state,
+so you can spin up an isolated workspace for a task, work in it, and merge it
+back without losing track of what's in flight.
+
+## Installation
+
+`spinclass` is built with Nix against the `amarbel-llc/nixpkgs` flake.
+
+```sh
+# Build the binary (produces ./result/bin/spinclass and the `sc` symlink)
+nix build
+
+# Or run directly
+nix run . -- list
+```
+
+The build installs the binary as `spinclass` with an `sc` symlink, plus bash
+and fish shell completions and generated manpages.
+
+## Quickstart
+
+```sh
+# Create and start a new worktree session
+sc start "fix login bug"
+
+# List tracked sessions
+sc list
+
+# Resume a session (auto-detects from the current directory)
+sc resume
+
+# Merge the worktree back into the default branch and clean up state
+sc merge
+
+# Remove merged worktrees and abandoned sessions
+sc clean
+```
+
+## Commands
+
+| Command | Description |
+| --- | --- |
+| `sc start "<desc>"` | Create and start a new worktree session |
+| `sc start-gh_pr <N\|URL>` | Start a session from a GitHub pull request |
+| `sc start-gh_issue <N>` | Start a session with GitHub issue context |
+| `sc start-<custom> <arg>` | User-defined start commands declared in a sweatfile |
+| `sc resume [id]` | Resume an existing session (auto-detects from cwd) |
+| `sc update-description "<desc>"` | Update a session's description |
+| `sc list` | List all tracked sessions |
+| `sc merge [target]` | Merge a worktree into main, remove session state |
+| `sc check` | Run `[hooks].pre-merge` in the current worktree |
+| `sc clean` | Remove merged worktrees and abandoned sessions |
+| `sc fork [branch]` | Fork the current worktree (supports `--from <dir>`) |
+| `sc pull` | Pull repos and rebase worktrees |
+| `sc validate` | Validate the sweatfile hierarchy |
+| `sc perms list\|review\|edit` | Inspect or edit permission tier rules |
+
+Multi-word descriptions must be quoted, e.g. `sc start "fix login bug"`.
+Global flags: `--format` (`tap`/`table`) and `--verbose`. Most commands default
+to [TAP-14](https://testanything.org/) output, with git stderr and exit codes
+surfaced in YAML diagnostic blocks.
+
+## Configuration: the sweatfile
+
+Sessions are configured through a hierarchy of TOML files called *sweatfiles*.
+Configuration is merged from the global level down to the repository level:
+
+```
+~/.config/spinclass/sweatfile  →  intermediate parent dirs  →  <repo>/sweatfile
+```
+
+A minimal repo-level `sweatfile`:
+
+```toml
+# vim: set ft=toml
+
+[hooks]
+pre-merge = "just"
+```
+
+Sweatfiles support:
+
+- **Array directives** (`git-excludes`, `claude-allow`, `envrc-directives`,
+  `allowed-mcps`): nil inherits, empty clears, non-empty appends.
+- **`[[mcps]]`** and **`[[start-commands]]`**: arrays of tables merged by name.
+- **`[env]`**: environment variable map merge.
+- **`[hooks]`**: `create` / `stop` / `pre-merge` lifecycle hooks.
+- **`[session]`**: `start` / `resume` entrypoint commands (defaults to `$SHELL`).
+
+Run `sc validate` to check the resolved sweatfile hierarchy for the current
+directory.
+
+### Custom start commands
+
+Declare your own `sc start-<name>` subcommands in a sweatfile via
+`[[start-commands]]`:
+
+```toml
+[[start-commands]]
+name             = "jira"               # registers `sc start-jira`
+description      = "Start session for a JIRA ticket"
+arg-name         = "ticket"
+arg-help         = "JIRA ticket ID"
+arg-regex        = "^[A-Z]+-[0-9]+$"    # optional RE2 validator
+exec-completions = ["sh", "-c", "jira list --json | jq '[.[] | {arg: .key, description: .summary}]'"]
+exec-start       = ["sh", "-c", "jira show {arg} --json | jq '{context: .body}'"]
+```
+
+`exec-start` runs when the command is invoked, with `{arg}` substituted for the
+positional value. Its stdout must be JSON of the form
+`{"branch"?: string, "description"?: string, "context": string}`.
+
+### MCP servers
+
+`allowed-mcps` and `[[mcps]]` control which MCP servers are registered and
+auto-approved in Claude Code sessions:
+
+```toml
+allowed-mcps = ["some-external-server"]
+
+[[mcps]]
+name    = "my-linter"
+command = "my-linter"
+args    = ["serve"]
+
+[mcps.env]
+DEBUG = "1"
+```
+
+## MCP server
+
+The same command framework that powers the CLI also exposes commands as MCP
+tools. Start the stdio MCP server with:
+
+```sh
+sc serve
+```
+
+Commands defined with a `Run` handler are exposed as MCP tools; CLI-only
+commands are not. Whether `merge-this-session` or `check-this-session` is
+registered depends on the `[hooks].disable-merge` flag.
+
+## Session state
+
+Sessions are tracked in
+`~/.local/state/spinclass/sessions/<hash>-state.json`. A session is one of:
+
+- **active** — PID alive and worktree exists
+- **inactive** — PID dead but worktree still exists
+- **abandoned** — worktree gone
+
+Dirty state is computed live via git.
+
+## Development
+
+```sh
+just build    # nix build
+just test     # nix flake check (Go tests with TAP-14 output)
+just fmt      # gofumpt
+just lint     # go vet
+just deps     # regenerate gomod2nix.toml after dependency changes
+```
+
+The codebase is organized under `internal/` by concern: `shop` (core
+create/attach/fork workflow), `executor` (session attachment), `session`
+(state tracking), `git` (command wrapper), `worktree` (target resolution),
+`sweatfile` (TOML config), `merge` / `pull` / `clean` (post-session
+workflows), `perms` (permission tiers), and `claude` (Claude Code
+integration). The CLI lives in `cmd/spinclass/`.
+
+See [`CLAUDE.md`](CLAUDE.md) for a deeper architectural tour.
+
+## License
+
+See the repository for license details.
