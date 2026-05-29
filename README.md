@@ -99,8 +99,9 @@ Sweatfiles support:
   `allowed-mcps`): nil inherits, empty clears, non-empty appends.
 - **`[[mcps]]`** and **`[[start-commands]]`**: arrays of tables merged by name.
 - **`[env]`**: environment variable map merge.
-- **`[hooks]`**: `create` / `stop` / `pre-merge` lifecycle hooks.
-- **`[session]`**: `start` / `resume` entrypoint commands (defaults to `$SHELL`).
+- **`[hooks]`**: `create` / `stop` / `on-attach` / `on-detach` / `pre-merge` lifecycle hooks, plus `disable-merge` and `disable-nix-gc` flags.
+- **`[session-entry]`**: `start` / `resume` entrypoint commands (default `$SHELL`), `liveness-probe` for detecting running-detached sessions, `tombstone-retention`, and `[session-entry.env]` for per-session environment injection.
+- **`[[pre-merge-skills]]`**: skill attestation gate — agents must invoke listed skills and record reasoning via `nothing-but-the-truth` before `merge-this-session` will proceed.
 
 Run `sc validate` to check the resolved sweatfile hierarchy for the current
 directory.
@@ -161,7 +162,8 @@ Sessions are tracked in
 `~/.local/state/spinclass/sessions/<hash>-state.json`. A session is one of:
 
 - **active** — PID alive and worktree exists
-- **inactive** — PID dead but worktree still exists
+- **running-detached** — entrypoint exited but liveness probe says the multiplexer session is still alive
+- **inactive** — PID dead and no live multiplexer session, but worktree still exists
 - **abandoned** — worktree gone
 
 Dirty state is computed live via git.
@@ -170,7 +172,7 @@ Dirty state is computed live via git.
 
 ```sh
 just build    # nix build
-just test     # nix flake check (Go tests with TAP-14 output)
+just test     # Go tests with TAP-14 output
 just fmt      # gofumpt
 just lint     # go vet
 just deps     # regenerate gomod2nix.toml after dependency changes
@@ -184,6 +186,30 @@ workflows), `perms` (permission tiers), and `claude` (Claude Code
 integration). The CLI lives in `cmd/spinclass/`.
 
 See [`CLAUDE.md`](CLAUDE.md) for a deeper architectural tour.
+
+## Build pins
+
+The default `nix build` produces a binary with no runtime dependencies burned
+in. A consumer flake can call `lib.mkSpinclass` to pin `madder` and `direnv`
+at specific Nix store paths:
+
+```nix
+spinclass.lib.${system}.mkSpinclass {
+  madder = madder.packages.${system}.default;
+  direnv = pkgs.direnv;
+}
+```
+
+With `madder` pinned, `sc start` initialises a per-worktree blob store and
+`merge-this-session` / `check-this-session` emit a compact response with a
+`resource_link` to the full hook output rather than inlining it. With `direnv`
+pinned, spinclass invokes it directly instead of relying on `PATH`.
+
+## Reference
+
+- `spinclass-sweatfile(5)` — full sweatfile field reference and merge semantics
+- `spinclass-start-commands(7)` — custom start-* plugin authoring guide
+- `spinclass-build-pins(7)` — build-time pin details (madder, direnv)
 
 ## License
 
