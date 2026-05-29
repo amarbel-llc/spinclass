@@ -16,6 +16,16 @@ spinclass worktrees are long-lived workers, not subject-scoped branches.
 If the user explicitly asks to leave or destroy the worktree, defer to
 them.
 
+## Session description
+
+When it becomes clear that the session is resolving to a specific task —
+a GitHub issue, a ticket, a concrete fix, or any well-defined goal —
+call `mcp__spinclass__update-this-session-description` with a short
+imperative description of that task (e.g. "fix login redirect loop",
+"add JIRA-1234 webhook handler"). Do this once, as soon as the task
+crystallises, and do not update it again unless the task fundamentally
+changes.
+
 ## Session-local scratch space
 
 The session's `.tmp/` directory (pointed to by `$TMPDIR` and
