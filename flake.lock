@@ -2,8 +2,8 @@
   "nodes": {
     "bats": {
       "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
+        "igloo": [
+          "igloo"
         ],
         "nixpkgs-master": [
           "nixpkgs-master"
@@ -14,11 +14,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1780057695,
-        "narHash": "sha256-GPc/9XgEtR2UdIFyajHgfIsyV+mTVdCauFLgo6qzWXY=",
+        "lastModified": 1780142667,
+        "narHash": "sha256-z6TNOtX2lSqUC3R6bBuTQRUIsWCvxpCFiRE13vMaPhg=",
         "owner": "amarbel-llc",
         "repo": "bats",
-        "rev": "1ba0ab1590544685fba211dff9e3e7ccf60c0fc0",
+        "rev": "de6f6720965cf34fc965f18c55f13e8094334ba4",
         "type": "github"
       },
       "original": {
@@ -30,19 +30,19 @@
     "bun2nix": {
       "inputs": {
         "flake-parts": [
-          "nixpkgs",
+          "igloo",
           "flake-parts"
         ],
         "nixpkgs": [
-          "nixpkgs",
+          "igloo",
           "nixpkgs-master"
         ],
         "systems": [
-          "nixpkgs",
+          "igloo",
           "systems"
         ],
         "treefmt-nix": [
-          "nixpkgs",
+          "igloo",
           "treefmt-nix"
         ]
       },
@@ -63,7 +63,7 @@
     "flake-parts": {
       "inputs": {
         "nixpkgs-lib": [
-          "nixpkgs",
+          "igloo",
           "nixpkgs-master"
         ]
       },
@@ -81,7 +81,7 @@
         "type": "github"
       }
     },
-    "nixpkgs": {
+    "igloo": {
       "inputs": {
         "bun2nix": "bun2nix",
         "flake-parts": "flake-parts",
@@ -138,7 +138,7 @@
     "root": {
       "inputs": {
         "bats": "bats",
-        "nixpkgs": "nixpkgs",
+        "igloo": "igloo",
         "nixpkgs-master": "nixpkgs-master_2",
         "utils": "utils"
       }
@@ -177,7 +177,7 @@
       "inputs": {
         "nixpkgs": [
           "bats",
-          "nixpkgs"
+          "igloo"
         ]
       },
       "locked": {
@@ -197,7 +197,7 @@
     "treefmt-nix_2": {
       "inputs": {
         "nixpkgs": [
-          "nixpkgs",
+          "igloo",
           "nixpkgs-master"
         ]
       },

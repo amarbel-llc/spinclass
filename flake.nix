@@ -7,7 +7,7 @@
     # `nixpkgs-master` so the overlay sits on the same base that
     # `pkgs-master` consumes, instead of pulling a second master-tracking
     # copy.
-    nixpkgs.url = "github:amarbel-llc/igloo";
+    igloo.url = "github:amarbel-llc/igloo";
 
     # Upstream pin: source of the Go toolchain we pin via
     # GOTOOLCHAIN=local + go_1_26, plus general dev tools that don't
@@ -24,7 +24,7 @@
     # flake and is reached as `bats.lib.${system}.batsLane`.
     bats = {
       url = "github:amarbel-llc/bats";
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.igloo.follows = "igloo";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
@@ -33,7 +33,7 @@
   outputs =
     {
       self,
-      nixpkgs,
+      igloo,
       nixpkgs-master,
       utils,
       bats,
@@ -50,7 +50,7 @@
         # The fork's default.nix shim auto-applies overlays.default, so
         # an explicit `overlays = [ nixpkgs.overlays.default ]` would
         # just compose the overlay twice. Mirror madder's pattern.
-        pkgs = import nixpkgs { inherit system; };
+        pkgs = import igloo { inherit system; };
         pkgs-master = import nixpkgs-master { inherit system; };
         inherit (pkgs) lib;
 
