@@ -245,6 +245,22 @@ explore-dodder-init-plain:
     echo "## on-disk layout:"
     find .madder .dodder -maxdepth 5 2>/dev/null | sort | sed 's/^/    /'
 
+# [explore] Build the dodder-pinned consumer example and run its e2e
+# harness: a real `sc start` that inits a per-worktree dodder repo over the
+# madder store, signs with the pivy key, and wires the dodder MCP server.
+# Requires pivy-agent UNLOCKED. See examples/dodder-consumer/README.md.
+[group('explore')]
+explore-dodder-e2e:
+    examples/dodder-consumer/e2e.sh
+
+# [explore] Build the clown circus from the dodder-consumer example —
+# clown's mkCircus bundling the dodder-pinned spinclass + dodder + madder
+# clown plugins (modeled after ~/eng/lib/circus.nix). Composition smoke
+# test; building proves the plugins resolve. See examples/dodder-consumer.
+[group('explore')]
+explore-dodder-circus:
+    cd examples/dodder-consumer && nix build .#circus --print-build-logs
+
 # [debug] Pipe a synthetic PreToolUse payload for merge-this-session through
 # the installed plugin handler, then print exit code, stdout, and stderr.
 [group('debug')]
