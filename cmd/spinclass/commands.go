@@ -17,15 +17,16 @@ var extraManpages embed.FS
 // amarbel-llc/nixpkgs's buildGoApplication overlay from the derivation's
 // `version` and `commit` attrs.
 //
-// madderBin and direnvBin are absolute /nix/store paths burned in by
-// `lib.mkSpinclass` at link time. Empty values mean the integration
-// is dormant: madder store init is skipped, and direnv falls back to
-// PATH lookup.
+// madderBin, direnvBin, and dodderBin are absolute /nix/store paths
+// burned in by `lib.mkSpinclass` at link time. Empty values mean the
+// integration is dormant: madder store init and dodder repo init are
+// skipped, and direnv falls back to PATH lookup.
 var (
 	version   = "dev"
 	commit    = "unknown"
 	madderBin = ""
 	direnvBin = ""
+	dodderBin = ""
 )
 
 // buildApp constructs the spinclass command.App with global flags and all

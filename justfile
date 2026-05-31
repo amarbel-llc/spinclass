@@ -130,6 +130,121 @@ explore-gcroots-auto-spinclass:
     echo
     echo "Total auto-roots into spinclass: $count (dangling: $dangling)"
 
+# [explore] Dodder-over-madder store reuse, CWD-local `.default` variant.
+# Mirrors what spinclass does today (pinned `madder init -encryption none
+# .default`) then asks dodder to adopt that store via -blob_store-id. This is
+# the path the user CHOSE ("dodder over the madder store") and the one prior
+# research saw fail with `blob store not found: ".default"`. Serves the
+# dodder-integration FDR's store-model verification (issue TBD). Binaries
+# resolve from PATH; override with DODDER_BIN / MADDER_BIN.
+[group('explore')]
+explore-dodder-reuse-cwd:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    dodder_bin="${DODDER_BIN:-dodder}"
+    madder_bin="${MADDER_BIN:-madder}"
+    scratch=$(mktemp -d)
+    trap 'rm -rf "$scratch"' EXIT
+    export MADDER_CEILING_DIRECTORIES="$scratch"
+    export DODDER_CEILING_DIRECTORIES="$scratch"
+    cd "$scratch"
+    echo "## scratch:  $scratch"
+    echo "## madder:   $(command -v "$madder_bin") :: $("$madder_bin" version 2>&1 | head -1)"
+    echo "## dodder:   $(command -v "$dodder_bin") :: $("$dodder_bin" version 2>&1 | head -1)"
+    echo
+    echo "\$ madder init -encryption none .default"
+    "$madder_bin" init -encryption none .default; echo "  -> exit $?"
+    echo "\$ madder list"
+    "$madder_bin" list 2>&1
+    echo
+    echo "\$ dodder init -encryption none -repo_id . -blob_store-id .default reuse-test"
+    "$dodder_bin" init -encryption none -repo_id . -blob_store-id .default reuse-test 2>&1; rc=$?
+    echo "  -> exit $rc"
+    echo
+    echo "## on-disk layout:"
+    find .madder .dodder -maxdepth 5 2>/dev/null | sort | sed 's/^/    /'
+    echo
+    if [[ $rc -eq 0 ]]; then
+      echo "VERDICT: CWD-local .default reuse WORKS with this binary pair"
+    else
+      echo "VERDICT: CWD-local .default reuse FAILS with this binary pair"
+    fi
+
+# [explore] Dodder-over-madder store reuse, XDG-named-store variant — the
+# pivot path. Scopes XDG_*_HOME into the scratch dir, creates a plain-named
+# madder store there, then points dodder at it by name. Prior research found
+# THIS path works while the .default CWD path does not. Contrast with
+# explore-dodder-reuse-cwd: if this succeeds and that fails on the SAME binary
+# pair, the .default failure is dodder genesis discovery, not version skew.
+[group('explore')]
+explore-dodder-reuse-xdg store="shared":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    dodder_bin="${DODDER_BIN:-dodder}"
+    madder_bin="${MADDER_BIN:-madder}"
+    store="{{store}}"
+    scratch=$(mktemp -d)
+    trap 'rm -rf "$scratch"' EXIT
+    export MADDER_CEILING_DIRECTORIES="$scratch"
+    export DODDER_CEILING_DIRECTORIES="$scratch"
+    export XDG_DATA_HOME="$scratch/xdg/data"
+    export XDG_CONFIG_HOME="$scratch/xdg/config"
+    export XDG_STATE_HOME="$scratch/xdg/state"
+    export XDG_CACHE_HOME="$scratch/xdg/cache"
+    mkdir -p "$XDG_DATA_HOME" "$XDG_CONFIG_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
+    cd "$scratch"
+    echo "## scratch:  $scratch"
+    echo "## XDG_DATA_HOME: $XDG_DATA_HOME"
+    echo "## madder:   $(command -v "$madder_bin") :: $("$madder_bin" version 2>&1 | head -1)"
+    echo "## dodder:   $(command -v "$dodder_bin") :: $("$dodder_bin" version 2>&1 | head -1)"
+    echo
+    echo "\$ madder init -encryption none $store"
+    "$madder_bin" init -encryption none "$store" 2>&1; echo "  -> exit $?"
+    echo "\$ madder list"
+    "$madder_bin" list 2>&1
+    echo
+    echo "\$ dodder init -encryption none -repo_id . -blob_store-id $store reuse-test"
+    "$dodder_bin" init -encryption none -repo_id . -blob_store-id "$store" reuse-test 2>&1; rc=$?
+    echo "  -> exit $rc"
+    echo
+    echo "## on-disk layout (xdg data + cwd repo):"
+    find "$XDG_DATA_HOME" .dodder -maxdepth 6 2>/dev/null | sort | sed 's/^/    /'
+    echo
+    if [[ $rc -eq 0 ]]; then
+      echo "VERDICT: XDG-named-store reuse WORKS with this binary pair"
+    else
+      echo "VERDICT: XDG-named-store reuse FAILS with this binary pair"
+    fi
+
+# [explore] Baseline: what does a plain `dodder init` (no -blob_store-id)
+# create on its own? Shows the .dodder repo tree AND the .madder default store
+# dodder's EMBEDDED madder writes, plus the store-id that embedded madder
+# assigns. Reference point for the two reuse recipes above — confirms dodder's
+# own madder uses a `.default`-style CWD store, which is what makes the
+# reuse-vs-collision question sharp.
+[group('explore')]
+explore-dodder-init-plain:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    dodder_bin="${DODDER_BIN:-dodder}"
+    madder_bin="${MADDER_BIN:-madder}"
+    scratch=$(mktemp -d)
+    trap 'rm -rf "$scratch"' EXIT
+    export MADDER_CEILING_DIRECTORIES="$scratch"
+    export DODDER_CEILING_DIRECTORIES="$scratch"
+    cd "$scratch"
+    echo "## scratch:  $scratch"
+    echo "## dodder:   $(command -v "$dodder_bin") :: $("$dodder_bin" version 2>&1 | head -1)"
+    echo
+    echo "\$ dodder init -encryption none -repo_id . plain-test"
+    "$dodder_bin" init -encryption none -repo_id . plain-test 2>&1; echo "  -> exit $?"
+    echo
+    echo "\$ madder list  (what the pinned madder sees in this dir)"
+    "$madder_bin" list 2>&1
+    echo
+    echo "## on-disk layout:"
+    find .madder .dodder -maxdepth 5 2>/dev/null | sort | sed 's/^/    /'
+
 # [debug] Pipe a synthetic PreToolUse payload for merge-this-session through
 # the installed plugin handler, then print exit code, stdout, and stderr.
 [group('debug')]

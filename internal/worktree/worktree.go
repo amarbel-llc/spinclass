@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/amarbel-llc/spinclass/internal/claude"
+	"github.com/amarbel-llc/spinclass/internal/dodder"
 	"github.com/amarbel-llc/spinclass/internal/embeds"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/madder"
@@ -189,12 +190,14 @@ func CreateFrom(
 
 // applyWorktreeConfig excludes .worktrees from git, loads and applies
 // sweatfile, and trusts worktreePath in Claude. When the binary has
-// a build-time-pinned madder, also initialises the per-worktree blob
-// store and adds the matching ignore + allow rules.
+// a build-time-pinned madder (and/or dodder), also initialises the
+// per-worktree blob store (and/or dodder repository over it) and adds
+// the matching ignore + allow rules.
 //
-// The madder rule extensions are gated on the *pin*, not on whether
-// the store exists — that way a user who pre-initialised the store
-// manually still gets the rules.
+// The rule extensions are gated on the *pin*, not on whether the store
+// exists — that way a user who pre-initialised it manually still gets
+// the rules. Dodder runs after madder so the .default store exists for
+// dodder to reuse.
 func applyWorktreeConfig(
 	home string,
 	sweetfile sweatfile.Hierarchy,
@@ -213,6 +216,20 @@ func applyWorktreeConfig(
 			return fmt.Errorf("linking madder into shim bin dir: %w", err)
 		}
 		sweetfile.Merged = withMadderEntries(sweetfile.Merged)
+	}
+
+	if embeds.DodderBin() != "" {
+		if err := dodder.Init(worktreePath, embeds.DodderBin(), embeds.MadderBin()); err != nil {
+			return fmt.Errorf("initialising dodder repository: %w", err)
+		}
+		shimBinDir, err := spinclassShimBinDir(worktreePath)
+		if err != nil {
+			return fmt.Errorf("resolving spinclass shim bin dir: %w", err)
+		}
+		if err := dodder.LinkInto(shimBinDir, embeds.DodderBin()); err != nil {
+			return fmt.Errorf("linking dodder into shim bin dir: %w", err)
+		}
+		sweetfile.Merged = withDodderEntries(sweetfile.Merged)
 	}
 
 	merged := sweatfile.GetDefault().MergeWith(sweetfile.Merged)
@@ -242,6 +259,26 @@ func applyWorktreeConfig(
 			Command: mcp.Command,
 			Args:    mcp.Args,
 			Env:     mcp.Env,
+		})
+	}
+
+	// Auto-register dodder's MCP server when the dodder pin is active,
+	// scoped to the per-worktree repository via the ceiling vars so the
+	// session's agent sees this worktree's .dodder, not an ancestor's
+	// (FDR 0008). A sweatfile [[mcps]] entry named "dodder" takes
+	// precedence: WriteMCPConfig keys servers by name and last-wins, so
+	// skip the auto entry when the user already declared one.
+	if embeds.DodderBin() != "" && !slices.ContainsFunc(mcpEntries, func(e claude.MCPServerEntry) bool {
+		return e.Name == "dodder"
+	}) {
+		mcpEntries = append(mcpEntries, claude.MCPServerEntry{
+			Name:    "dodder",
+			Command: embeds.DodderBin(),
+			Args:    []string{"mcp"},
+			Env: map[string]string{
+				"DODDER_CEILING_DIRECTORIES": worktreePath,
+				"MADDER_CEILING_DIRECTORIES": worktreePath,
+			},
 		})
 	}
 
@@ -288,6 +325,36 @@ func withMadderEntries(sf sweatfile.Sweatfile) sweatfile.Sweatfile {
 	}
 	if !slices.Contains(sf.Claude.Allow, madder.AllowRule) {
 		sf.Claude.Allow = append(sf.Claude.Allow, madder.AllowRule)
+	}
+
+	return sf
+}
+
+// withDodderEntries returns sf with the dodder ignore + allow rules
+// appended, cloning the Git/Claude sub-structs and their inner slices
+// the same way withMadderEntries does so appends here cannot clobber the
+// caller's backing arrays.
+func withDodderEntries(sf sweatfile.Sweatfile) sweatfile.Sweatfile {
+	if sf.Git == nil {
+		sf.Git = &sweatfile.Git{}
+	} else {
+		gitCopy := *sf.Git
+		gitCopy.Excludes = slices.Clone(sf.Git.Excludes)
+		sf.Git = &gitCopy
+	}
+	if !slices.Contains(sf.Git.Excludes, dodder.ExcludePattern) {
+		sf.Git.Excludes = append(sf.Git.Excludes, dodder.ExcludePattern)
+	}
+
+	if sf.Claude == nil {
+		sf.Claude = &sweatfile.Claude{}
+	} else {
+		claudeCopy := *sf.Claude
+		claudeCopy.Allow = slices.Clone(sf.Claude.Allow)
+		sf.Claude = &claudeCopy
+	}
+	if !slices.Contains(sf.Claude.Allow, dodder.AllowRule) {
+		sf.Claude.Allow = append(sf.Claude.Allow, dodder.AllowRule)
 	}
 
 	return sf

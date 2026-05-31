@@ -63,8 +63,10 @@
         # When `madder` is non-null the produced binary activates the
         # per-worktree blob-store flow at `sc start`. When null, the
         # feature is dormant. `direnv` falls back to PATH lookup when
-        # the input is null.
-        mkSpinclass = { madder ? null, direnv ? null }: pkgs.buildGoApplication {
+        # the input is null. When `dodder` is non-null the binary also
+        # inits a per-worktree dodder repository over the madder store
+        # (FDR 0008); dormant when null.
+        mkSpinclass = { madder ? null, direnv ? null, dodder ? null }: pkgs.buildGoApplication {
           pname = "spinclass";
           version = spinclassVersion;
           commit = spinclassCommit;
@@ -82,7 +84,8 @@
 
           ldflags =
             (lib.optional (madder != null) "-X main.madderBin=${madder}/bin/madder")
-            ++ (lib.optional (direnv != null) "-X main.direnvBin=${direnv}/bin/direnv");
+            ++ (lib.optional (direnv != null) "-X main.direnvBin=${direnv}/bin/direnv")
+            ++ (lib.optional (dodder != null) "-X main.dodderBin=${dodder}/bin/dodder");
 
           # buildGoApplication's stock checkPhase runs only the
           # subPackages (cmd/spinclass). Override to test every package

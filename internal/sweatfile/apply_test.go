@@ -349,9 +349,9 @@ func TestPrepareDirenvPrefersEmbeddedOverPath(t *testing.T) {
 
 	t.Setenv("PATH", pathBin+":"+gitDir(t))
 
-	prevMadder, prevDirenv := embeds.MadderBin(), embeds.DirenvBin()
-	embeds.Set(prevMadder, embeddedDirenv)
-	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv) })
+	prevMadder, prevDirenv, prevDodder := embeds.MadderBin(), embeds.DirenvBin(), embeds.DodderBin()
+	embeds.Set(prevMadder, embeddedDirenv, prevDodder)
+	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv, prevDodder) })
 
 	if err := (Sweatfile{}).prepareDirenv(dir); err != nil {
 		t.Fatalf("prepareDirenv: %v", err)

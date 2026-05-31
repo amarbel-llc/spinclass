@@ -141,9 +141,9 @@ exit 0
 	if err := os.WriteFile(madderBin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	prevMadder, prevDirenv := embeds.MadderBin(), embeds.DirenvBin()
-	embeds.Set(madderBin, prevDirenv)
-	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv) })
+	prevMadder, prevDirenv, prevDodder := embeds.MadderBin(), embeds.DirenvBin(), embeds.DodderBin()
+	embeds.Set(madderBin, prevDirenv, prevDodder)
+	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv, prevDodder) })
 	return madderBin, stdinCapture
 }
 

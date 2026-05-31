@@ -591,9 +591,9 @@ touch "$PWD/.madder/local/share/blob_stores/default/blob_store-config"
 		t.Fatal(err)
 	}
 
-	prevMadder, prevDirenv := embeds.MadderBin(), embeds.DirenvBin()
-	embeds.Set(binPath, "")
-	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv) })
+	prevMadder, prevDirenv, prevDodder := embeds.MadderBin(), embeds.DirenvBin(), embeds.DodderBin()
+	embeds.Set(binPath, "", "")
+	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv, prevDodder) })
 
 	wtPath := filepath.Join(parentDir, "wt")
 	if _, err := Create(repoDir, wtPath, ""); err != nil {
@@ -659,9 +659,9 @@ func TestApplyWorktreeConfig_NoMadderEmbedNoChanges(t *testing.T) {
 	repoDir := filepath.Join(parentDir, "repo")
 	testgit.MustInit(t, repoDir)
 
-	prevMadder, prevDirenv := embeds.MadderBin(), embeds.DirenvBin()
-	embeds.Set("", "")
-	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv) })
+	prevMadder, prevDirenv, prevDodder := embeds.MadderBin(), embeds.DirenvBin(), embeds.DodderBin()
+	embeds.Set("", "", "")
+	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv, prevDodder) })
 
 	wtPath := filepath.Join(parentDir, "wt")
 	if _, err := Create(repoDir, wtPath, ""); err != nil {
@@ -678,6 +678,149 @@ func TestApplyWorktreeConfig_NoMadderEmbedNoChanges(t *testing.T) {
 	}
 	if strings.Contains(string(excludeData), ".madder/") {
 		t.Errorf("expected NO .madder/ in git excludes when embed empty:\n%s", excludeData)
+	}
+}
+
+func TestApplyWorktreeConfig_DodderEmbedAddsExcludesAllowAndMCP(t *testing.T) {
+	testgit.RequireGit(t)
+	t.Setenv("HOME", t.TempDir())
+	parentDir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", parentDir)
+	repoDir := filepath.Join(parentDir, "repo")
+	testgit.MustInit(t, repoDir)
+
+	binDir := t.TempDir()
+	binPath := filepath.Join(binDir, "fake-dodder")
+	// info-ssh_agent yields a key; init writes the config-seed marker
+	// relative to its CWD (which dodder.Init sets to the worktree).
+	script := `#!/bin/sh
+case "$1" in
+  info-ssh_agent) printf '%s\n' "ecdsa_p256_ssh-fakekey" ;;
+  init)
+    mkdir -p .dodder/local/share
+    : > .dodder/local/share/config-seed
+    ;;
+esac
+`
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	prevMadder, prevDirenv, prevDodder := embeds.MadderBin(), embeds.DirenvBin(), embeds.DodderBin()
+	embeds.Set("", "", binPath)
+	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv, prevDodder) })
+
+	wtPath := filepath.Join(parentDir, "wt")
+	if _, err := Create(repoDir, wtPath, ""); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// config-seed marker must exist
+	seed := filepath.Join(wtPath, ".dodder", "local", "share", "config-seed")
+	if _, err := os.Stat(seed); err != nil {
+		t.Errorf("expected config-seed at %s: %v", seed, err)
+	}
+
+	// .git/info/exclude must contain .dodder/
+	excludeData, err := os.ReadFile(filepath.Join(repoDir, ".git", "info", "exclude"))
+	if err != nil {
+		t.Fatalf("reading exclude: %v", err)
+	}
+	if !strings.Contains(string(excludeData), ".dodder/") {
+		t.Errorf("expected .dodder/ in git excludes:\n%s", excludeData)
+	}
+
+	// .claude/settings.local.json must contain Bash(dodder:*)
+	settingsBytes, err := os.ReadFile(filepath.Join(wtPath, ".claude", "settings.local.json"))
+	if err != nil {
+		t.Fatalf("reading settings: %v", err)
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(settingsBytes, &settings); err != nil {
+		t.Fatalf("parsing settings json: %v", err)
+	}
+	perms, _ := settings["permissions"].(map[string]any)
+	if perms == nil {
+		t.Fatalf("settings.permissions missing or wrong type: %#v", settings["permissions"])
+	}
+	allowAny, _ := perms["allow"].([]any)
+	hasDodder := false
+	for _, r := range allowAny {
+		if s, _ := r.(string); s == "Bash(dodder:*)" {
+			hasDodder = true
+			break
+		}
+	}
+	if !hasDodder {
+		t.Errorf("expected Bash(dodder:*) in permissions.allow, got %v", allowAny)
+	}
+
+	// dodder shim symlink must point at the embedded path.
+	link := filepath.Join(repoDir, ".git", "spinclass", "bin", "dodder")
+	got, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("expected dodder symlink at %s: %v", link, err)
+	}
+	if got != binPath {
+		t.Errorf("symlink target: got %q, want %q", got, binPath)
+	}
+
+	// .mcp.json must register the dodder MCP server scoped to the worktree.
+	mcpBytes, err := os.ReadFile(filepath.Join(wtPath, ".mcp.json"))
+	if err != nil {
+		t.Fatalf("reading .mcp.json: %v", err)
+	}
+	var mcpDoc struct {
+		MCPServers map[string]struct {
+			Command string            `json:"command"`
+			Args    []string          `json:"args"`
+			Env     map[string]string `json:"env"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(mcpBytes, &mcpDoc); err != nil {
+		t.Fatalf("parsing .mcp.json: %v", err)
+	}
+	srv, ok := mcpDoc.MCPServers["dodder"]
+	if !ok {
+		t.Fatalf("expected dodder MCP server in .mcp.json, got %s", mcpBytes)
+	}
+	if srv.Command != binPath {
+		t.Errorf("dodder MCP command: got %q, want %q", srv.Command, binPath)
+	}
+	if !slices.Equal(srv.Args, []string{"mcp"}) {
+		t.Errorf("dodder MCP args: got %v, want [mcp]", srv.Args)
+	}
+	if srv.Env["DODDER_CEILING_DIRECTORIES"] != wtPath {
+		t.Errorf("dodder MCP DODDER_CEILING_DIRECTORIES: got %q, want %q", srv.Env["DODDER_CEILING_DIRECTORIES"], wtPath)
+	}
+}
+
+func TestApplyWorktreeConfig_NoDodderEmbedNoChanges(t *testing.T) {
+	testgit.RequireGit(t)
+	t.Setenv("HOME", t.TempDir())
+	parentDir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", parentDir)
+	repoDir := filepath.Join(parentDir, "repo")
+	testgit.MustInit(t, repoDir)
+
+	prevMadder, prevDirenv, prevDodder := embeds.MadderBin(), embeds.DirenvBin(), embeds.DodderBin()
+	embeds.Set("", "", "")
+	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv, prevDodder) })
+
+	wtPath := filepath.Join(parentDir, "wt")
+	if _, err := Create(repoDir, wtPath, ""); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(wtPath, ".dodder")); !os.IsNotExist(err) {
+		t.Errorf("expected no .dodder/ when dodderBin embed is empty, stat err=%v", err)
+	}
+	excludeData, err := os.ReadFile(filepath.Join(repoDir, ".git", "info", "exclude"))
+	if err != nil {
+		t.Fatalf("reading exclude: %v", err)
+	}
+	if strings.Contains(string(excludeData), ".dodder/") {
+		t.Errorf("expected NO .dodder/ in git excludes when embed empty:\n%s", excludeData)
 	}
 }
 
