@@ -88,9 +88,11 @@ func runStopHook(input hookInput, w io.Writer) error {
 // server also named "spinclass", so its tools appear to Claude Code as
 // mcp__plugin_spinclass_spinclass__<tool>.
 const (
-	mergeThisSessionToolName     = "mcp__plugin_spinclass_spinclass__merge-this-session"
-	checkThisSessionToolName     = "mcp__plugin_spinclass_spinclass__check-this-session"
-	nothingButTheTruthToolName   = "mcp__plugin_spinclass_spinclass__nothing-but-the-truth"
+	mergeThisSessionToolName   = "mcp__plugin_spinclass_spinclass__merge-this-session"
+	checkThisSessionToolName   = "mcp__plugin_spinclass_spinclass__check-this-session"
+	nothingButTheTruthToolName = "mcp__plugin_spinclass_spinclass__nothing-but-the-truth"
+	listToolName               = "mcp__plugin_spinclass_spinclass__list"
+	updateDescriptionToolName  = "mcp__plugin_spinclass_spinclass__update-this-session-description"
 )
 
 func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree bool) error {
@@ -102,6 +104,12 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 	}
 
 	switch input.ToolName {
+	case listToolName, updateDescriptionToolName:
+		// Benign, session-scoped spinclass tools: list is read-only and
+		// update-this-session-description only mutates spinclass's own
+		// session metadata. Auto-approve unconditionally so agents (and
+		// subagents) never get a permission prompt for them.
+		return writeAllow(w, "spinclass session-management tool, safe to auto-approve")
 	case mergeThisSessionToolName:
 		if hasPreMergeHook(input.CWD) {
 			return writeAllow(w, "sweatfile [hooks].pre-merge gates this merge")

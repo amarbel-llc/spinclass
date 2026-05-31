@@ -1063,3 +1063,56 @@ func TestEditSpinclassDirDenied(t *testing.T) {
 		t.Errorf("expected permissionDecision deny, got %q", decision)
 	}
 }
+
+func TestListToolAutoApproved(t *testing.T) {
+	cwd := t.TempDir()
+	input := makeInput("mcp__plugin_spinclass_spinclass__list", map[string]any{}, cwd)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() == 0 {
+		t.Fatal("expected allow output for list tool")
+	}
+	decision, reason := parseHookDecision(t, stdout.Bytes())
+	if decision != "allow" {
+		t.Errorf("expected permissionDecision allow for list, got %q", decision)
+	}
+	if reason == "" {
+		t.Error("expected a permissionDecisionReason")
+	}
+}
+
+func TestUpdateDescriptionToolAutoApproved(t *testing.T) {
+	cwd := t.TempDir()
+	input := makeInput("mcp__plugin_spinclass_spinclass__update-this-session-description", map[string]any{}, cwd)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() == 0 {
+		t.Fatal("expected allow output for update-this-session-description tool")
+	}
+	decision, _ := parseHookDecision(t, stdout.Bytes())
+	if decision != "allow" {
+		t.Errorf("expected permissionDecision allow for update-this-session-description, got %q", decision)
+	}
+}
+
+// These benign session-management tools are not in the subagent deny guard,
+// so a subagent should be auto-approved too.
+func TestSubagentAllowedUpdateDescription(t *testing.T) {
+	cwd := t.TempDir()
+	input := makeInputWithAgentID(
+		"mcp__plugin_spinclass_spinclass__update-this-session-description",
+		map[string]any{}, cwd, "agent-abc123",
+	)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	decision, _ := parseHookDecision(t, stdout.Bytes())
+	if decision != "allow" {
+		t.Errorf("expected allow for subagent update-this-session-description, got %q", decision)
+	}
+}
