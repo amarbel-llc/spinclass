@@ -28,6 +28,21 @@
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
+
+    # Source of the madder binary the `bats-madder` lane pins into
+    # spinclass via `mkSpinclass { madder = ...; }`. The pin flips
+    # `embeds.MadderBin()` from "" to an absolute /nix/store path, which
+    # activates internal/check/check.go:runHookCompact's compact path so
+    # the format-aware tap-ndjson tests in zz-tests_bats/hooks.bats run
+    # in CI instead of skipping via require_madder_pinned (see #85, FDR
+    # 0003/0005). The default `mkSpinclass {}` build is unaffected.
+    madder = {
+      url = "github:amarbel-llc/madder";
+      inputs.igloo.follows = "igloo";
+      inputs.nixpkgs-master.follows = "nixpkgs-master";
+      inputs.utils.follows = "utils";
+      inputs.bats.follows = "bats";
+    };
   };
 
   outputs =
@@ -37,6 +52,7 @@
       nixpkgs-master,
       utils,
       bats,
+      madder,
     }:
     let
       spinclassVersion = "0.1.16";
@@ -175,9 +191,18 @@
 
         spinclass-race = pkgs.buildGoRace { base = mkSpinclass {}; };
 
+        # Madder-pinned spinclass: the base for the `bats-madder` lane.
+        # The pin sets `-X main.madderBin` to an absolute /nix/store path,
+        # activating runHookCompact's compact path so the tap-ndjson tests
+        # in hooks.bats no longer skip (see #85, FDR 0003/0005).
+        spinclass-madder = mkSpinclass {
+          madder = madder.packages.${system}.default;
+        };
+
         batsLaneOutputs = {
           bats-default = mkBatsLane {};
           bats-race    = mkBatsLane { base = spinclass-race; };
+          bats-madder  = mkBatsLane { base = spinclass-madder; };
         };
       in
       {

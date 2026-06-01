@@ -12,6 +12,12 @@ test-bats:
 test-bats-race:
     nix build .#bats-race --no-link --print-build-logs
 
+# madder-pinned bats lane: runs zz-tests_bats against a spinclass built
+# with a madder pin so the tap-ndjson tests in hooks.bats run instead of
+# skipping (#85). Folded into `just test` via the bats-madder flake check.
+test-bats-madder:
+    nix build .#bats-madder --no-link --print-build-logs
+
 fmt:
     nix develop --command gofumpt -w .
 
