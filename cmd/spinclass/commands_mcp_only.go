@@ -14,6 +14,7 @@ import (
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/protocol"
 	"github.com/amarbel-llc/spinclass/internal/attestation"
+	"github.com/amarbel-llc/spinclass/internal/chat"
 	"github.com/amarbel-llc/spinclass/internal/check"
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/git"
@@ -149,6 +150,25 @@ func registerMCPOnlyCommands(app *command.App) {
 			{Name: "description", Type: command.String, Description: "New description for the session", Required: true},
 		},
 		Run: wrapMCPHandler("update-this-session-description", handleUpdateDescription),
+	})
+
+	app.AddCommand(&command.Command{
+		Name:  "chat-send",
+		Title: "Send Cross-Session Chat Message",
+		Description: command.Description{
+			Short: "Post a message to the global cross-session chatroom. Omit `to` (or pass \"*\") to broadcast to every session; pass a session key (the `<repo>/<branch>` shown in `sc list`, == another session's $SPINCLASS_SESSION_ID) to direct-message one session. Receiving sessions are pushed new messages by the chat-watch monitor; no read call is needed on their side.",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(false),
+			DestructiveHint: protocol.BoolPtr(false),
+			IdempotentHint:  protocol.BoolPtr(false),
+			OpenWorldHint:   protocol.BoolPtr(true),
+		},
+		Params: []command.Param{
+			{Name: "message", Type: command.String, Description: "Message body to send", Required: true},
+			{Name: "to", Type: command.String, Description: "Recipient session key (<repo>/<branch>); omit or \"*\" to broadcast"},
+		},
+		Run: wrapMCPHandler("chat-send", handleChatSend),
 	})
 }
 
@@ -326,6 +346,70 @@ func handleUpdateDescription(_ context.Context, args json.RawMessage, _ command.
 	}
 
 	return command.TextResult(fmt.Sprintf("description updated to: %s", params.Description)), nil
+}
+
+func handleChatSend(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	var params struct {
+		Message string `json:"message"`
+		To      string `json:"to"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+	}
+	if params.Message == "" {
+		return command.TextErrorResult("message is required"), nil
+	}
+
+	from, err := currentSessionKey()
+	if err != nil {
+		return command.TextErrorResult(err.Error()), nil
+	}
+
+	to := params.To
+	if to == "" {
+		to = chat.Broadcast
+	}
+	if err := chat.Send(chat.Message{From: from, To: to, Body: params.Message}); err != nil {
+		return command.TextErrorResult(fmt.Sprintf("could not send message: %v", err)), nil
+	}
+
+	dest := "all sessions"
+	if to != chat.Broadcast {
+		dest = to
+	}
+	return command.TextResult(fmt.Sprintf("sent to %s (from %s)", dest, from)), nil
+}
+
+// currentSessionKey resolves the session key (<repo-dirname>/<branch>) for
+// the current session. It prefers $SPINCLASS_SESSION_ID — which spinclass
+// exports into every session and which IS the session key — and falls back
+// to deriving it from the current worktree when the variable is unset (e.g.
+// the tool is exercised by hand outside a managed session). Returns an error
+// only when neither source resolves.
+func currentSessionKey() (string, error) {
+	if v := os.Getenv("SPINCLASS_SESSION_ID"); v != "" {
+		return v, nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("could not get working directory: %w", err)
+	}
+	if !worktree.IsWorktree(cwd) {
+		return "", errors.New("not inside a worktree session (and $SPINCLASS_SESSION_ID is unset)")
+	}
+	repoPath, err := git.CommonDir(cwd)
+	if err != nil {
+		return "", fmt.Errorf("could not determine repo path: %w", err)
+	}
+	branch, err := git.BranchCurrent(cwd)
+	if err != nil {
+		return "", fmt.Errorf("could not determine current branch: %w", err)
+	}
+	st, err := session.Read(repoPath, branch)
+	if err != nil {
+		return "", fmt.Errorf("could not read session state: %w", err)
+	}
+	return st.SessionKey, nil
 }
 
 func handleNothingButTheTruth(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {

@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
+	"github.com/amarbel-llc/spinclass/internal/chat"
 	"github.com/amarbel-llc/spinclass/internal/check"
 	spinclose "github.com/amarbel-llc/spinclass/internal/close"
 	"github.com/amarbel-llc/spinclass/internal/executor"
@@ -91,6 +93,37 @@ func registerSessionCommands(app *command.App) {
 				return err
 			}
 			_, err = check.Run(os.Stdout, p.FormatOrDefault(), cwd, p.Verbose)
+			return err
+		},
+	})
+
+	app.AddCommand(&command.Command{
+		Name: "chat-watch",
+		Description: command.Description{
+			Short: "Stream cross-session chat messages addressed to this session",
+			Long:  "Watches the global chatroom and prints one line per new message addressed to this session (broadcasts plus direct messages to this session's key). Intended to be run as a Claude Code plugin monitor, which delivers each stdout line into the session as a notification. Resolves this session's key from $SPINCLASS_SESSION_ID, falling back to the current worktree. Runs until interrupted.",
+		},
+		RunCLI: func(ctx context.Context, _ json.RawMessage) error {
+			sessionKey, err := currentSessionKey()
+			if err != nil {
+				return err
+			}
+
+			sigCtx, cancel := signal.NotifyContext(ctx, os.Interrupt)
+			defer cancel()
+
+			err = chat.Watch(sigCtx, sessionKey, func(m chat.Message) error {
+				// One line per message. The leading marker gives the agent a
+				// recognizable, greppable prefix; the from-key tells it who to
+				// reply to via chat-send.
+				_, werr := fmt.Fprintf(os.Stdout, "[spinclass-chat] from %s: %s\n", m.From, m.Body)
+				return werr
+			})
+			// A clean interrupt (ctx cancelled) is a normal monitor shutdown,
+			// not an error.
+			if err != nil && ctx.Err() != nil {
+				return nil
+			}
 			return err
 		},
 	})
