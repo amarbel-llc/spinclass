@@ -156,6 +156,40 @@ function spinclass_autoclose_assume_no_keeps_worktree { # @test
   assert [ -d "$wt" ]
 }
 
+function spinclass_close_by_id_removes_worktree { # @test
+  # #40 regression guard: `sc close <id>` (the explicit worktree-id arg
+  # path, distinct from cwd auto-detect and the interactive picker) must
+  # resolve the session via session.FindByID and tear the worktree down.
+  # This path regressed once after the session-resolution unification
+  # (commit 03a9265) and is now wired in internal/close: resolveCloseTarget
+  # -> FindByID(target) -> closeShop. Drive it end-to-end so the regression
+  # cannot return unnamed. Uses a real `start` (not --no-attach) so a
+  # session state entry exists for FindByID to match on.
+  create_session_sweatfile
+  cd "$TEST_REPO"
+  local bin="${SPINCLASS_BIN:-spinclass}"
+
+  local start_output
+  start_output=$(timeout --preserve-status 10s "$bin" --format tap start 2>&1)
+  local wt
+  wt=$(extract_wt_path "$start_output")
+  assert [ -n "$wt" ]
+  assert [ -d "$wt" ]
+  local id
+  id=$(basename "$wt")
+
+  # Close by the explicit id arg from OUTSIDE the worktree (cwd is the
+  # repo root), so this exercises FindByID, not the cwd-autodetect branch.
+  run_sc close --force "$id"
+  assert_success
+
+  # The worktree is gone, and a non-existent id is rejected with the
+  # bare-worktree hint rather than silently succeeding.
+  assert [ ! -d "$wt" ]
+  run_sc close --force "$id"
+  assert_failure
+}
+
 function spinclass_clean_removes_merged { # @test
   # #51: re-verify #33 scenario 1 — merged worktree removal. Uses
   # `--yes` to skip the huh.Confirm so the path is non-TTY-driveable
