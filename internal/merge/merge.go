@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -77,6 +78,14 @@ func Run(execr executor.Executor, format string, target string, gitSync bool, ve
 // any step failed. Each BlobLink carries the MIME type matching the
 // format the blob was written in.
 func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repoPath, wtPath, branch, defaultBranch string, gitSync bool, inSession bool, verbose bool) (blobLinks []check.BlobLink, err error) {
+	return ResolvedContext(context.Background(), execr, w, tw, format, repoPath, wtPath, branch, defaultBranch, gitSync, inSession, verbose, nil)
+}
+
+// ResolvedContext is Resolved bound to ctx with an optional activity writer.
+// ctx threads to the pre-merge hook subprocess (cancellable by the async job
+// runner); activity, when non-nil, is teed the hook's live output (the async
+// job log). Synchronous callers use Resolved (background ctx, nil activity).
+func ResolvedContext(ctx context.Context, execr executor.Executor, w io.Writer, tw *tap.Writer, format, repoPath, wtPath, branch, defaultBranch string, gitSync bool, inSession bool, verbose bool, activity io.Writer) (blobLinks []check.BlobLink, err error) {
 	if info, statErr := os.Stat(repoPath); statErr != nil || !info.IsDir() {
 		return nil, fmt.Errorf("repository not found: %s", repoPath)
 	}
@@ -165,7 +174,7 @@ func Resolved(execr executor.Executor, w io.Writer, tw *tap.Writer, format, repo
 		return nil, failStep(tw, ownWriter, "merge "+branch, noopErr, "")
 	}
 
-	hookLinks, hookErr := runPreMergeHook(tw, w, repoPath, wtPath, branch, ownWriter)
+	hookLinks, hookErr := runPreMergeHookContext(ctx, tw, w, repoPath, wtPath, branch, ownWriter, activity)
 	blobLinks = append(blobLinks, hookLinks...)
 	if hookErr != nil {
 		return blobLinks, hookErr
@@ -385,7 +394,7 @@ func promptDefaultBranch() (string, error) {
 // passthrough mode, emits the legacy "running pre-merge hook" /
 // "pre-merge hook failed, not merging" log lines that operators rely
 // on.
-func runPreMergeHook(tw *tap.Writer, w io.Writer, repoPath, wtPath, branch string, ownWriter bool) ([]check.BlobLink, error) {
+func runPreMergeHookContext(ctx context.Context, tw *tap.Writer, w io.Writer, repoPath, wtPath, branch string, ownWriter bool, activity io.Writer) ([]check.BlobLink, error) {
 	home, _ := os.UserHomeDir()
 	if home == "" {
 		return nil, nil
@@ -400,13 +409,13 @@ func runPreMergeHook(tw *tap.Writer, w io.Writer, repoPath, wtPath, branch strin
 			return nil, nil
 		}
 		log.Info("running pre-merge hook", "worktree", branch)
-		if _, err := check.RunWithWriter(nil, w, hierarchy, wtPath, branch, ownWriter); err != nil {
+		if _, err := check.RunWithWriterContext(ctx, nil, w, hierarchy, wtPath, branch, ownWriter, activity); err != nil {
 			log.Error("pre-merge hook failed, not merging")
 			return nil, err
 		}
 		return nil, nil
 	}
-	return check.RunWithWriter(tw, w, hierarchy, wtPath, branch, ownWriter)
+	return check.RunWithWriterContext(ctx, tw, w, hierarchy, wtPath, branch, ownWriter, activity)
 }
 
 // failStep emits a TAP NotOk for label populated from err

@@ -88,33 +88,39 @@ func runStopHook(input hookInput, w io.Writer) error {
 // server also named "spinclass", so its tools appear to Claude Code as
 // mcp__plugin_spinclass_spinclass__<tool>.
 const (
-	mergeThisSessionToolName   = "mcp__plugin_spinclass_spinclass__merge-this-session"
-	checkThisSessionToolName   = "mcp__plugin_spinclass_spinclass__check-this-session"
-	nothingButTheTruthToolName = "mcp__plugin_spinclass_spinclass__nothing-but-the-truth"
-	listToolName               = "mcp__plugin_spinclass_spinclass__list"
-	updateDescriptionToolName  = "mcp__plugin_spinclass_spinclass__update-this-session-description"
+	mergeThisSessionToolName      = "mcp__plugin_spinclass_spinclass__merge-this-session"
+	checkThisSessionToolName      = "mcp__plugin_spinclass_spinclass__check-this-session"
+	mergeThisSessionAsyncToolName = "mcp__plugin_spinclass_spinclass__merge-this-session-async"
+	checkThisSessionAsyncToolName = "mcp__plugin_spinclass_spinclass__check-this-session-async"
+	sessionJobStatusToolName      = "mcp__plugin_spinclass_spinclass__session-job-status"
+	sessionJobCancelToolName      = "mcp__plugin_spinclass_spinclass__session-job-cancel"
+	nothingButTheTruthToolName    = "mcp__plugin_spinclass_spinclass__nothing-but-the-truth"
+	listToolName                  = "mcp__plugin_spinclass_spinclass__list"
+	updateDescriptionToolName     = "mcp__plugin_spinclass_spinclass__update-this-session-description"
 )
 
 func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree bool) error {
 	if input.AgentID != "" {
 		switch input.ToolName {
-		case mergeThisSessionToolName, checkThisSessionToolName, nothingButTheTruthToolName:
+		case mergeThisSessionToolName, checkThisSessionToolName,
+			mergeThisSessionAsyncToolName, checkThisSessionAsyncToolName,
+			nothingButTheTruthToolName:
 			return writeDeny(w, "merge and attestation tools are not available to subagents; only the main agent may call them")
 		}
 	}
 
 	switch input.ToolName {
-	case listToolName, updateDescriptionToolName:
-		// Benign, session-scoped spinclass tools: list is read-only and
-		// update-this-session-description only mutates spinclass's own
-		// session metadata. Auto-approve unconditionally so agents (and
-		// subagents) never get a permission prompt for them.
+	case listToolName, updateDescriptionToolName, sessionJobStatusToolName, sessionJobCancelToolName:
+		// Benign, session-scoped spinclass tools: list and session-job-status
+		// are read-only; update-this-session-description and session-job-cancel
+		// only mutate spinclass's own session/job metadata. Auto-approve
+		// unconditionally so agents never get a permission prompt for them.
 		return writeAllow(w, "spinclass session-management tool, safe to auto-approve")
-	case mergeThisSessionToolName:
+	case mergeThisSessionToolName, mergeThisSessionAsyncToolName:
 		if hasPreMergeHook(input.CWD) {
 			return writeAllow(w, "sweatfile [hooks].pre-merge gates this merge")
 		}
-	case checkThisSessionToolName:
+	case checkThisSessionToolName, checkThisSessionAsyncToolName:
 		if hasPreMergeHook(input.CWD) {
 			return writeAllow(w, "sweatfile [hooks].pre-merge is the agent-CI surface")
 		}

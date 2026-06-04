@@ -2,6 +2,7 @@ package sweatfile
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -175,8 +176,15 @@ func (sf Sweatfile) RunCreateHook(worktreePath string, w io.Writer) error {
 }
 
 func (sf Sweatfile) RunPreMergeHook(worktreePath string, w io.Writer) error {
+	return sf.RunPreMergeHookContext(context.Background(), worktreePath, w)
+}
+
+// RunPreMergeHookContext runs the pre-merge hook bound to ctx, so a caller
+// (the async job runner) can cancel/kill the hook subprocess. The synchronous
+// path uses RunPreMergeHook, which passes a background context.
+func (sf Sweatfile) RunPreMergeHookContext(ctx context.Context, worktreePath string, w io.Writer) error {
 	cmd := sf.PreMergeHookCommand()
-	return runHook(cmd, worktreePath, w)
+	return runHookContext(ctx, cmd, worktreePath, w)
 }
 
 func (sf Sweatfile) RunOnAttachHook(worktreePath string, w io.Writer) error {
@@ -190,6 +198,10 @@ func (sf Sweatfile) RunOnDetachHook(worktreePath string, w io.Writer) error {
 }
 
 func runHook(cmd *string, worktreePath string, w io.Writer) error {
+	return runHookContext(context.Background(), cmd, worktreePath, w)
+}
+
+func runHookContext(ctx context.Context, cmd *string, worktreePath string, w io.Writer) error {
 	if cmd == nil || *cmd == "" {
 		return nil
 	}
@@ -203,7 +215,7 @@ func runHook(cmd *string, worktreePath string, w io.Writer) error {
 		w = io.Discard
 	}
 
-	c := exec.Command("sh", "-c", script)
+	c := exec.CommandContext(ctx, "sh", "-c", script)
 	c.Dir = worktreePath
 	// Inherit os.Environ so SPINCLASS_* variables set by callers (or by
 	// the running session) propagate into the hook. Always append WORKTREE
@@ -245,7 +257,8 @@ func ApplyClaudeSettings(worktreePath string, sweatfile Sweatfile) error {
 		allRules = append(allRules, sweatfile.Claude.Allow...)
 	}
 
-	allRules = append(allRules,
+	allRules = append(
+		allRules,
 		fmt.Sprintf("Read(%s/*)", worktreePath),
 		fmt.Sprintf("Edit(%s/*)", worktreePath),
 		fmt.Sprintf("Write(%s/*)", worktreePath),

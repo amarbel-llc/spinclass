@@ -91,7 +91,8 @@ func logSweatfileResult(result sweatfile.Hierarchy) {
 	if merged.Claude != nil {
 		claudeAllow = merged.Claude.Allow
 	}
-	log.Info("merged sweatfile",
+	log.Info(
+		"merged sweatfile",
 		"git.excludes", gitExcludes,
 		"claude.allow", claudeAllow,
 	)

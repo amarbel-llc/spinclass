@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"runtime/debug"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/check"
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/git"
+	"github.com/amarbel-llc/spinclass/internal/job"
 	"github.com/amarbel-llc/spinclass/internal/merge"
 	"github.com/amarbel-llc/spinclass/internal/servelog"
 	"github.com/amarbel-llc/spinclass/internal/session"
@@ -84,6 +86,21 @@ func registerMCPOnlyCommands(app *command.App) {
 			Params: []command.Param{},
 			Run:    wrapMCPHandler("check-this-session", handleCheckThisSession),
 		})
+		app.AddCommand(&command.Command{
+			Name:  "check-this-session-async",
+			Title: "Check This Session (async)",
+			Description: command.Description{
+				Short: buildCheckAsyncDescription(hookPreview),
+			},
+			Annotations: &protocol.ToolAnnotations{
+				ReadOnlyHint:    protocol.BoolPtr(false),
+				DestructiveHint: protocol.BoolPtr(false),
+				IdempotentHint:  protocol.BoolPtr(false),
+				OpenWorldHint:   protocol.BoolPtr(false),
+			},
+			Params: []command.Param{},
+			Run:    wrapMCPHandler("check-this-session-async", handleCheckThisSessionAsync),
+		})
 	} else {
 		app.AddCommand(&command.Command{
 			Name:  "merge-this-session",
@@ -102,7 +119,57 @@ func registerMCPOnlyCommands(app *command.App) {
 			},
 			Run: wrapMCPHandler("merge-this-session", handleMergeThisSession),
 		})
+		app.AddCommand(&command.Command{
+			Name:  "merge-this-session-async",
+			Title: "Merge This Session (async)",
+			Description: command.Description{
+				Short: buildMergeAsyncDescription(hookPreview),
+			},
+			Annotations: &protocol.ToolAnnotations{
+				ReadOnlyHint:    protocol.BoolPtr(false),
+				DestructiveHint: protocol.BoolPtr(true),
+				IdempotentHint:  protocol.BoolPtr(false),
+				OpenWorldHint:   protocol.BoolPtr(false),
+			},
+			Params: []command.Param{
+				{Name: "git_sync", Type: command.Bool, Description: "Pull and push after merge (default false)"},
+			},
+			Run: wrapMCPHandler("merge-this-session-async", handleMergeThisSessionAsync),
+		})
 	}
+
+	// Job poll/cancel tools are always available — they control the *-async
+	// start tools above. status is read-only; cancel is idempotent.
+	app.AddCommand(&command.Command{
+		Name:  "session-job-status",
+		Title: "Session Job Status",
+		Description: command.Description{
+			Short: "Poll the current worktree session's background merge/check job (started by a *-this-session-async tool): reports running|succeeded|failed|cancelled|interrupted, elapsed, last-activity, a tail of live hook output, and the full result when finished.",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(true),
+			DestructiveHint: protocol.BoolPtr(false),
+			IdempotentHint:  protocol.BoolPtr(true),
+			OpenWorldHint:   protocol.BoolPtr(false),
+		},
+		Params: []command.Param{},
+		Run:    wrapMCPHandler("session-job-status", handleJobStatus),
+	})
+	app.AddCommand(&command.Command{
+		Name:  "session-job-cancel",
+		Title: "Cancel Session Job",
+		Description: command.Description{
+			Short: "Cancel the current worktree session's running background merge/check job (kills the pre-merge hook subprocess). No-op if nothing is running.",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(false),
+			DestructiveHint: protocol.BoolPtr(false),
+			IdempotentHint:  protocol.BoolPtr(true),
+			OpenWorldHint:   protocol.BoolPtr(false),
+		},
+		Params: []command.Param{},
+		Run:    wrapMCPHandler("session-job-cancel", handleJobCancel),
+	})
 
 	if len(preMergeSkills) > 0 {
 		app.AddCommand(&command.Command{
@@ -248,6 +315,176 @@ func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prom
 		text = hookErr.Error()
 	}
 	return buildHookResult(text, blobLinks, hookErr), nil
+}
+
+// handleMergeThisSessionAsync starts the merge (incl. the pre-merge hook) in a
+// background goroutine and returns a job id immediately, so the call is never
+// subject to the client's MCP request timeout. Consumes the pre-merge
+// attestation at start, exactly like the synchronous merge-this-session. The
+// result is retrieved via session-job-status.
+func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	var params struct {
+		GitSync bool `json:"git_sync"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
+	}
+	if !worktree.IsWorktree(cwd) {
+		return command.TextErrorResult("not inside a worktree session"), nil
+	}
+	repoPath, err := git.CommonDir(cwd)
+	if err != nil {
+		return command.TextErrorResult(fmt.Sprintf("could not determine repo path: %v", err)), nil
+	}
+	branch, err := git.BranchCurrent(cwd)
+	if err != nil {
+		return command.TextErrorResult(fmt.Sprintf("could not determine current branch: %v", err)), nil
+	}
+	if msg, ok := enforceAttestation(repoPath, branch); !ok {
+		return command.TextErrorResult(msg), nil
+	}
+	defaultBranch, err := merge.ResolveDefaultBranch(repoPath)
+	if err != nil {
+		return command.TextErrorResult(fmt.Sprintf("could not determine default branch: %v", err)), nil
+	}
+
+	gitSync := params.GitSync
+	return startSessionJob(cwd, job.KindMerge, gitSync, func(ctx context.Context, w io.Writer) (string, bool) {
+		var buf bytes.Buffer
+		_, mergeErr := merge.ResolvedContext(
+			ctx, executor.ShellExecutor{}, &buf, nil, "tap",
+			repoPath, cwd, branch, defaultBranch, gitSync, true, true, w,
+		)
+		return buf.String(), mergeErr != nil
+	}), nil
+}
+
+// handleCheckThisSessionAsync is the non-blocking variant of
+// check-this-session: it runs the pre-merge hook in the background and returns
+// a job id immediately.
+func handleCheckThisSessionAsync(_ context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
+	}
+	if !worktree.IsWorktree(cwd) {
+		return command.TextErrorResult("not inside a worktree session"), nil
+	}
+	repoPath, repoErr := git.CommonDir(cwd)
+	branch, branchErr := git.BranchCurrent(cwd)
+	if repoErr == nil && branchErr == nil {
+		if msg, ok := enforceAttestation(repoPath, branch); !ok {
+			return command.TextErrorResult(msg), nil
+		}
+	}
+
+	return startSessionJob(cwd, job.KindCheck, false, func(ctx context.Context, w io.Writer) (string, bool) {
+		var buf bytes.Buffer
+		_, hookErr := check.RunContext(ctx, &buf, "tap", cwd, false, w)
+		text := buf.String()
+		if hookErr != nil && text == "" {
+			text = hookErr.Error()
+		}
+		return text, hookErr != nil
+	}), nil
+}
+
+// startSessionJob launches fn as the worktree's background job and renders the
+// MCP result (job started, or already-running / start error).
+func startSessionJob(wt, kind string, gitSync bool, fn job.Func) *command.Result {
+	id := fmt.Sprintf("%s-%d", kind, time.Now().Unix())
+	j, err := job.Start(wt, kind, gitSync, id, fn)
+	if err != nil {
+		if errors.Is(err, job.ErrAlreadyRunning) {
+			return command.TextErrorResult("a background job is already running for this session; poll session-job-status, or session-job-cancel it first")
+		}
+		return command.TextErrorResult(fmt.Sprintf("could not start background job: %v", err))
+	}
+	return command.TextResult(fmt.Sprintf(
+		"started background %s job %q; the pre-merge hook is running detached, so this call is not subject to the MCP request timeout. Poll session-job-status for progress and the final result; session-job-cancel to stop it.",
+		kind, j.ID,
+	))
+}
+
+// handleJobStatus reports the worktree session's background job.
+func handleJobStatus(_ context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
+	}
+	if !worktree.IsWorktree(cwd) {
+		return command.TextErrorResult("not inside a worktree session"), nil
+	}
+	j, err := job.Read(cwd)
+	if errors.Is(err, os.ErrNotExist) {
+		return command.TextResult("no background job has been started for this session"), nil
+	}
+	if err != nil {
+		return command.TextErrorResult(fmt.Sprintf("could not read job state: %v", err)), nil
+	}
+
+	switch j.Status {
+	case job.StatusRunning:
+		lastDesc := "n/a"
+		if last := job.LastActivity(cwd); !last.IsZero() {
+			lastDesc = time.Since(last).Round(time.Second).String() + " ago"
+		}
+		body := fmt.Sprintf("job %q (%s): running, elapsed %s, last activity %s",
+			j.ID, j.Kind, j.Elapsed().Round(time.Second), lastDesc)
+		if tail := job.TailLog(cwd, 15); tail != "" {
+			body += "\n--- recent hook output ---\n" + tail
+		}
+		return command.TextResult(body), nil
+	case job.StatusInterrupted:
+		return command.TextErrorResult(fmt.Sprintf(
+			"job %q (%s) was interrupted: the serve process ended mid-run, so the merge/check was cut off. Start a new one.",
+			j.ID, j.Kind,
+		)), nil
+	default:
+		header := fmt.Sprintf("job %q (%s): %s, elapsed %s\n", j.ID, j.Kind, j.Status, j.Elapsed().Round(time.Second))
+		if j.ResultIsErr || j.Status != job.StatusSucceeded {
+			return command.TextErrorResult(header + j.ResultText), nil
+		}
+		return command.TextResult(header + j.ResultText), nil
+	}
+}
+
+// handleJobCancel cancels the worktree session's running background job.
+func handleJobCancel(_ context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
+	}
+	if !worktree.IsWorktree(cwd) {
+		return command.TextErrorResult("not inside a worktree session"), nil
+	}
+	if job.Cancel(cwd) {
+		return command.TextResult("cancel signal sent; poll session-job-status to confirm the job stopped"), nil
+	}
+	return command.TextResult("no background job is currently running for this session"), nil
+}
+
+// buildMergeAsyncDescription / buildCheckAsyncDescription mirror their
+// synchronous counterparts but document the non-blocking start+poll flow.
+func buildMergeAsyncDescription(hookPreview string) string {
+	base := "Non-blocking variant of merge-this-session: starts the merge (including the pre-merge hook) in the background and returns a job id immediately, so the call is never cut off by the MCP request timeout no matter how long the hook runs. Consumes the pre-merge attestation at start, exactly like merge-this-session. Poll session-job-status for progress and the final result; session-job-cancel to abort."
+	if hookPreview == "" {
+		return base
+	}
+	return base + fmt.Sprintf(" The configured [hooks].pre-merge command is `%s`.", hookPreview)
+}
+
+func buildCheckAsyncDescription(hookPreview string) string {
+	base := "Non-blocking variant of check-this-session: runs the [hooks].pre-merge command in the background and returns a job id immediately (never cut off by the MCP request timeout). Poll session-job-status for progress and the result; session-job-cancel to abort."
+	if hookPreview == "" {
+		return base
+	}
+	return base + fmt.Sprintf(" The configured pre-merge command is `%s`.", hookPreview)
 }
 
 // enforceAttestation runs the pre-merge skill attestation gate for the

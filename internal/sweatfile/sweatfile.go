@@ -72,15 +72,15 @@ type PreMergeSkill struct {
 
 //go:generate tommy generate
 type Sweatfile struct {
-	Claude          *Claude         `toml:"claude"`
-	Git             *Git            `toml:"git"`
-	Direnv          *Direnv         `toml:"direnv"`
-	Hooks           *Hooks          `toml:"hooks"`
-	SessionEntry    *SessionEntry   `toml:"session-entry"`
-	StartCommands   []StartCommand  `toml:"start-commands"`
-	AllowedMCPs     []string        `toml:"allowed-mcps"`
-	MCPs            []MCPServerDef  `toml:"mcps"`
-	PreMergeSkills  []PreMergeSkill `toml:"pre-merge-skills"`
+	Claude         *Claude         `toml:"claude"`
+	Git            *Git            `toml:"git"`
+	Direnv         *Direnv         `toml:"direnv"`
+	Hooks          *Hooks          `toml:"hooks"`
+	SessionEntry   *SessionEntry   `toml:"session-entry"`
+	StartCommands  []StartCommand  `toml:"start-commands"`
+	AllowedMCPs    []string        `toml:"allowed-mcps"`
+	MCPs           []MCPServerDef  `toml:"mcps"`
+	PreMergeSkills []PreMergeSkill `toml:"pre-merge-skills"`
 }
 
 func (sf Sweatfile) StopHookCommand() *string {

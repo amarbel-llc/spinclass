@@ -584,7 +584,8 @@ func ListForRepo(repoPath string, dbg *slog.Logger) ([]State, error) {
 	for i := range all {
 		s := &all[i]
 		if s.RepoPath != repoPath {
-			log.Debug("session.ListForRepo: skipped",
+			log.Debug(
+				"session.ListForRepo: skipped",
 				"reason", "repo_mismatch",
 				"want_repo", repoPath,
 				"got_repo", s.RepoPath,
@@ -594,7 +595,8 @@ func ListForRepo(repoPath string, dbg *slog.Logger) ([]State, error) {
 			continue
 		}
 		if s.ResolveState() == StateAbandoned {
-			log.Debug("session.ListForRepo: skipped",
+			log.Debug(
+				"session.ListForRepo: skipped",
 				"reason", "abandoned",
 				"branch", s.Branch,
 				"worktree", s.WorktreePath,
@@ -627,7 +629,8 @@ func ListAll(dbg *slog.Logger) ([]State, error) {
 	var states []State
 	for _, e := range entries {
 		if e.IsDir() {
-			log.Debug("session.ListAll: skipped index entry",
+			log.Debug(
+				"session.ListAll: skipped index entry",
 				"reason", "is_directory",
 				"name", e.Name(),
 			)
@@ -637,7 +640,8 @@ func ListAll(dbg *slog.Logger) ([]State, error) {
 
 		info, lerr := os.Lstat(full)
 		if lerr != nil {
-			log.Debug("session.ListAll: skipped index entry",
+			log.Debug(
+				"session.ListAll: skipped index entry",
 				"reason", "lstat_error",
 				"name", e.Name(),
 				"error", lerr.Error(),
@@ -656,14 +660,16 @@ func ListAll(dbg *slog.Logger) ([]State, error) {
 		if rerr != nil {
 			if isSymlink {
 				if target, terr := os.Readlink(full); terr == nil {
-					log.Debug("session.ListAll: dangling symlink",
+					log.Debug(
+						"session.ListAll: dangling symlink",
 						"name", e.Name(),
 						"target", target,
 						"read_error", rerr.Error(),
 					)
 					states = append(states, danglingStateFromTarget(target))
 				} else {
-					log.Debug("session.ListAll: skipped index entry",
+					log.Debug(
+						"session.ListAll: skipped index entry",
 						"reason", "unreadable_dangling_symlink",
 						"name", e.Name(),
 						"read_error", rerr.Error(),
@@ -671,7 +677,8 @@ func ListAll(dbg *slog.Logger) ([]State, error) {
 					)
 				}
 			} else {
-				log.Debug("session.ListAll: skipped index entry",
+				log.Debug(
+					"session.ListAll: skipped index entry",
 					"reason", "readfile_error",
 					"name", e.Name(),
 					"error", rerr.Error(),
@@ -681,7 +688,8 @@ func ListAll(dbg *slog.Logger) ([]State, error) {
 		}
 		var s State
 		if jerr := json.Unmarshal(data, &s); jerr != nil {
-			log.Debug("session.ListAll: skipped index entry",
+			log.Debug(
+				"session.ListAll: skipped index entry",
 				"reason", "unmarshal_error",
 				"name", e.Name(),
 				"error", jerr.Error(),

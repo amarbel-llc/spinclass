@@ -31,7 +31,8 @@ func (s ShellExecutor) Attach(dir string, key string, command []string, dryRun b
 
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(
+		os.Environ(),
 		"SPINCLASS_SESSION_ID="+key,
 		"TMPDIR="+tmpDir,
 		"CLAUDE_CODE_TMPDIR="+tmpDir,

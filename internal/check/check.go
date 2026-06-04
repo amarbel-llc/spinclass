@@ -5,6 +5,7 @@ package check
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -67,6 +68,16 @@ func mimeTypeForFormat(format string) string {
 // unused; check itself emits no git output today. It is reserved for
 // future use when verbose-mode diagnostics become relevant.
 func Run(w io.Writer, format, wtPath string, verbose bool) ([]BlobLink, error) {
+	return RunContext(context.Background(), w, format, wtPath, verbose, nil)
+}
+
+// RunContext is Run bound to ctx, with an optional activity writer that
+// receives the pre-merge hook's live output in addition to the normal
+// madder/ring/TAP plumbing. The async job runner passes its job log as
+// activity so session-job-status can tail live progress and derive a
+// last-activity timestamp; synchronous callers use Run (background ctx, nil
+// activity). ctx cancellation kills the hook subprocess.
+func RunContext(ctx context.Context, w io.Writer, format, wtPath string, verbose bool, activity io.Writer) ([]BlobLink, error) {
 	repoPath, err := git.CommonDir(wtPath)
 	if err != nil {
 		return nil, fmt.Errorf("not a worktree: %s", wtPath)
@@ -107,7 +118,7 @@ func Run(w io.Writer, format, wtPath string, verbose bool) ([]BlobLink, error) {
 	}
 
 	// ownWriter=false: Run owns Plan emission for the standalone path.
-	links, hookErr := RunWithWriter(tw, w, hierarchy, wtPath, branch, false)
+	links, hookErr := RunWithWriterContext(ctx, tw, w, hierarchy, wtPath, branch, false, activity)
 	if tw != nil && ownWriter {
 		tw.Plan()
 	}
@@ -136,19 +147,35 @@ func RunWithWriter(
 	wtPath, branch string,
 	ownWriter bool,
 ) ([]BlobLink, error) {
+	return RunWithWriterContext(context.Background(), tw, w, hierarchy, wtPath, branch, ownWriter, nil)
+}
+
+// RunWithWriterContext is RunWithWriter bound to ctx with an optional activity
+// writer (see RunContext). ctx threads to the hook subprocess (cancellable);
+// activity, when non-nil, is teed the hook's live output alongside the normal
+// madder/ring/TAP destination.
+func RunWithWriterContext(
+	ctx context.Context,
+	tw *tap.Writer,
+	w io.Writer,
+	hierarchy sweatfile.Hierarchy,
+	wtPath, branch string,
+	ownWriter bool,
+	activity io.Writer,
+) ([]BlobLink, error) {
 	cmd := hierarchy.Merged.PreMergeHookCommand()
 	if cmd == nil || *cmd == "" {
 		return nil, nil
 	}
 
 	if tw == nil {
-		return nil, hierarchy.Merged.RunPreMergeHook(wtPath, w)
+		return nil, hierarchy.Merged.RunPreMergeHookContext(ctx, wtPath, teeWriter(w, activity))
 	}
 
 	desc := "pre-merge hook for " + branch + ": `" + *cmd + "`"
 
 	if embeds.MadderBin() != "" {
-		link, hookErr := runHookCompact(tw, hierarchy, wtPath, *cmd, desc)
+		link, hookErr := runHookCompactContext(ctx, tw, hierarchy, wtPath, *cmd, desc, activity)
 		if hookErr != nil && ownWriter {
 			tw.Plan()
 		}
@@ -162,7 +189,7 @@ func RunWithWriter(
 	var hookErr error
 	tw.OutputBlock(desc, func(ob *tap.OutputBlockWriter) *yaml_diagnostic.YAMLDiagnostic {
 		lw := tapblock.NewLineWriter(ob)
-		hookErr = hierarchy.Merged.RunPreMergeHook(wtPath, lw)
+		hookErr = hierarchy.Merged.RunPreMergeHookContext(ctx, wtPath, teeWriter(lw, activity))
 		lw.Flush()
 		if hookErr != nil {
 			return &yaml_diagnostic.YAMLDiagnostic{Severity: "fail", Message: hookErr.Error()}
@@ -175,7 +202,16 @@ func RunWithWriter(
 	return nil, hookErr
 }
 
-// runHookCompact runs the pre-merge hook and emits a single TAP test
+// teeWriter returns primary when activity is nil, else a MultiWriter that also
+// streams to activity (the async job log).
+func teeWriter(primary, activity io.Writer) io.Writer {
+	if activity == nil {
+		return primary
+	}
+	return io.MultiWriter(primary, activity)
+}
+
+// runHookCompactContext runs the pre-merge hook and emits a single TAP test
 // point with YAMLish diagnostics carrying command/format/resource_link/
 // exit_code/elapsed plus a visibility field selected by the configured
 // format:
@@ -199,7 +235,7 @@ func RunWithWriter(
 // Returns a BlobLink carrying the resource_link URI and the MIME type
 // matching the resolved format. If madder produced no blob (spawn
 // failed, or post-hook write/parse failed), the BlobLink's URI is "".
-func runHookCompact(tw *tap.Writer, hierarchy sweatfile.Hierarchy, wtPath, cmd, desc string) (BlobLink, error) {
+func runHookCompactContext(ctx context.Context, tw *tap.Writer, hierarchy sweatfile.Hierarchy, wtPath, cmd, desc string, activity io.Writer) (BlobLink, error) {
 	format := hierarchy.Merged.PreMergeOutputFormatValue()
 
 	// ring is the fallback visibility for failures the parser can't surface.
@@ -237,9 +273,12 @@ func runHookCompact(tw *tap.Writer, hierarchy sweatfile.Hierarchy, wtPath, cmd, 
 	} else {
 		sink = io.MultiWriter(madderStdin, ring)
 	}
+	if activity != nil {
+		sink = io.MultiWriter(sink, activity)
+	}
 
 	start := time.Now()
-	hookErr := hierarchy.Merged.RunPreMergeHook(wtPath, sink)
+	hookErr := hierarchy.Merged.RunPreMergeHookContext(ctx, wtPath, sink)
 	elapsed := time.Since(start)
 
 	var (

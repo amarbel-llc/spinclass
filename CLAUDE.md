@@ -134,6 +134,33 @@ the MCP tool catalog, gated on `[hooks].disable-merge`:
 
 The `sc check` CLI subcommand is available regardless of the flag.
 
+### Async (background + poll) merge/check
+
+Each gated tool has a non-blocking opt-in twin that sidesteps the MCP client's
+per-server request timeout for long `[hooks].pre-merge` runs:
+
+- `merge-this-session-async` / `check-this-session-async` — registered next to
+  their synchronous counterparts under the same `disable-merge` gating. They
+  consume the pre-merge attestation at start (same gate as the sync tools),
+  launch the merge/check in a background goroutine inside the long-lived `serve`
+  process, and return a job id **immediately**. The hook's live output streams
+  to `<worktree>/.spinclass/job.log`; job metadata to `.spinclass/job.json`.
+- `session-job-status` (always registered, read-only) — reports the worktree
+  session's job: `running|succeeded|failed|cancelled|interrupted`, elapsed,
+  last-activity (job.log mtime), a tail of live output, and the full result
+  (the same TAP payload the sync tool returns) once finished.
+- `session-job-cancel` (always registered) — cancels the running job, killing
+  the hook subprocess via the job's context.
+
+One active job per session (async-start refuses while one is running). If the
+`serve` process ends mid-job, the next status read reports `interrupted` (the
+recorded `serve_pid` is no longer alive). The synchronous `merge-this-session`
+/ `check-this-session` remain the default; async is purely additive
+(`internal/job` is the store + runner). Heartbeat-style progress notifications
+from within the synchronous tools are intentionally NOT implemented — that
+requires go-mcp + clown-stdio-bridge changes (see those repos' issues); async
+is the spinclass-only path.
+
 By default `sc close` and `sc clean` perform worktree-scoped Nix garbage
 collection after removing the worktree: spinclass enumerates the gc roots
 resolving into the worktree, expands their closure, and runs `nix-store
