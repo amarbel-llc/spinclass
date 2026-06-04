@@ -30,6 +30,22 @@ clean:
 deps:
     nix develop --command gomod2nix
 
+# Regenerate the tommy-generated sweatfile codec (sweatfile_tommy.go) after a
+# tommy bump or a Sweatfile struct change. Builds the tommy CLI from the
+# pinned module version into a temp dir, puts it on PATH, then runs
+# `go generate` (the //go:generate directive needs `tommy` on PATH and sets
+# $GOFILE). Run after `just deps`.
+gen-tommy:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    nix develop --command bash -c '
+      bindir=$(mktemp -d)
+      trap "rm -rf \"$bindir\"" EXIT
+      go build -o "$bindir/tommy" github.com/amarbel-llc/tommy/cmd/tommy
+      PATH="$bindir:$PATH" go generate ./internal/sweatfile/
+    '
+    nix develop --command gofumpt -w internal/sweatfile/sweatfile_tommy.go
+
 # [explore] Inspect nix-store --gc --print-roots output for entries pointing
 # into the spinclass repo. Used to investigate issue #67 — what does
 # print-roots show before vs after worktree removal?

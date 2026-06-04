@@ -143,6 +143,50 @@ stop = "just build test"
 	}
 }
 
+// TestCheckUnknownFieldsDirenvDotenv is the regression guard for #96 part 1:
+// `sc validate` must NOT reject the documented [direnv.dotenv] sub-table (the
+// shipped 0.1.15 binary did, silently dropping the field at parse), including
+// arbitrary user-chosen keys inside it. The sub-table form is the canonical,
+// supported spelling (see spinclass-sweatfile(5)).
+func TestCheckUnknownFieldsDirenvDotenv(t *testing.T) {
+	data := []byte(`
+[direnv]
+envrc = ["source_up"]
+
+[direnv.dotenv]
+FOO = "$WORKTREE/bar"
+ETSYWEB_PWD = "$WORKTREE"
+`)
+	issues := CheckUnknownFields(data)
+	if len(issues) != 0 {
+		t.Errorf("[direnv.dotenv] sub-table should validate clean, got %v", issues)
+	}
+}
+
+// TestCheckUnknownFieldsDirenvDotenvInlineKnownGap documents a known
+// limitation tracked upstream in amarbel-llc/tommy: the inline-table spelling
+// `dotenv = { ... }` is NOT consumed by the generated decoder (tommy's
+// FindChildTable matches only [parent.dotenv] header tables, not inline-table
+// key-values), so `sc validate` flags it as unknown. The canonical sub-table
+// form works (test above). This test pins the current behavior so a future
+// tommy fix that closes the gap will surface here as a deliberate update,
+// not a silent change.
+func TestCheckUnknownFieldsDirenvDotenvInlineKnownGap(t *testing.T) {
+	data := []byte(`
+[direnv]
+dotenv = { FOO = "$WORKTREE/bar" }
+`)
+	issues := CheckUnknownFields(data)
+	if len(issues) == 0 {
+		t.Skip("inline-table direnv.dotenv now validates clean — tommy gap fixed; " +
+			"promote the inline form in spinclass-sweatfile(5) and fold this into the test above")
+	}
+	// Until then, assert the gap is exactly the documented one.
+	if issues[0].Field != "direnv.dotenv" {
+		t.Errorf("expected unknown-field issue for direnv.dotenv, got %v", issues)
+	}
+}
+
 func TestCheckStartCommandsValid(t *testing.T) {
 	sf := sweatfile.Sweatfile{
 		StartCommands: []sweatfile.StartCommand{

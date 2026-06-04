@@ -62,24 +62,79 @@ nil = inherit, empty = clear, non-empty = append.
 .B envrc
 Array of direnv directive lines written to
 .IR .envrc .
-When nil, defaults to
+When no sweatfile in the cascade sets
+.BR envrc ,
+it defaults to
 .B source_up
 (plus
 .B use flake
 if a
 .I flake.nix
 exists).
+Note that as soon as
+.B any
+sweatfile sets
+.BR envrc ,
+those defaults are dropped entirely \(em the generated
+.I .envrc
+contains only the directives you supply. Include
+.B source_up
+explicitly if you still want it (e.g.\&
+.BR "envrc = [\(dqsource_up\(dq, \(dquse flake . --impure\(dq]" ).
 .B Merge:
-nil = inherit, empty = clear, non-empty = replace.
+nil = inherit, empty = clear, non-empty = append (lines accumulate
+across the cascade, like the other array fields).
 .TP
 .B dotenv
 Table of key-value pairs written to
-.IR .spinclass.env .
+.IR .spinclass.env
+at session create.
 Values support
 .B $VAR
-expansion; the special variable
+expansion (from the create-time environment); the special variable
 .B $WORKTREE
 expands to the worktree path.
+.PP
+Declare it as a sub-table:
+.PP
+.RS
+.EX
+[direnv.dotenv]
+ETSYWEB_PWD = "$WORKTREE"
+.EE
+.RE
+.PP
+When
+.B dotenv
+is non-empty, spinclass appends a
+.B dotenv .spinclass.env
+directive to the generated
+.I .envrc
+so direnv actually loads the file into the shell \(em you do
+.B not
+add that line yourself. This append happens whether
+.I .envrc
+came from the
+.B envrc
+default or from an explicit
+.B envrc
+array; the
+.B dotenv
+line is added after your directives.
+.PP
+.B Note:
+the sub-table spelling above is the supported form. The inline-table
+spelling
+.RB ( "dotenv = { ... }" )
+is
+.B not
+currently recognised \(em it is silently dropped at parse and
+.B sc validate
+flags it as an unknown field (tracked upstream in
+.IR amarbel-llc/tommy ).
+Use the
+.B [direnv.dotenv]
+sub-table.
 .B Merge:
 map merge (child keys override parent keys).
 .SS [hooks]
@@ -324,6 +379,21 @@ scalar override.
 Subtable map of environment variables injected into every session
 process (entrypoint, hooks, liveness probe).
 Keys are strings, values are strings.
+Values are set
+.B literally
+\(em unlike
+.B [direnv].dotenv
+and the
+.B [session\-entry].start
+argv, they are
+.B not
+.B $VAR \" / \" $WORKTREE
+expanded. For a worktree-relative path, use
+.B [direnv].dotenv
+(whose values do expand
+.BR $WORKTREE )
+rather than
+.BR [session\-entry.env] .
 This is a generic env-injection mechanism with one convention:
 .B SPINCLASS_GROUP
 is the customary key for a multiplexer-group name so the
