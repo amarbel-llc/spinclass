@@ -247,6 +247,19 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 					break
 				}
 			}
+			if direnvVal2.Dotenv == nil {
+				_it := cst.FindChildInlineTable(_ftDirenv, "dotenv")
+				if _it != nil {
+					direnvVal2.Dotenv = cst.ExtractStringMap(_it)
+					if direnvVal2.Dotenv == nil {
+						direnvVal2.Dotenv = map[string]string{}
+					}
+					d.consumed["direnv.dotenv"] = true
+					for _ik := range direnvVal2.Dotenv {
+						d.consumed["direnv.dotenv"+"."+_ik] = true
+					}
+				}
+			}
 			d.data.Direnv = direnvVal2
 		} else {
 			direnvVal2 := &Direnv{}
@@ -591,6 +604,19 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 					break
 				}
 			}
+			if sessionEntryVal4.Env == nil {
+				_it := cst.FindChildInlineTable(_ftSessionEntry, "env")
+				if _it != nil {
+					sessionEntryVal4.Env = cst.ExtractStringMap(_it)
+					if sessionEntryVal4.Env == nil {
+						sessionEntryVal4.Env = map[string]string{}
+					}
+					d.consumed["session-entry.env"] = true
+					for _ik := range sessionEntryVal4.Env {
+						d.consumed["session-entry.env"+"."+_ik] = true
+					}
+				}
+			}
 			d.data.SessionEntry = sessionEntryVal4
 		} else {
 			sessionEntryVal4 := &SessionEntry{}
@@ -808,6 +834,18 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				d.consumed["mcps.env"] = true
 				for _ik := range d.data.MCPs[i].Env {
 					d.consumed["mcps.env"+"."+_ik] = true
+				}
+			} else {
+				_it := cst.FindChildInlineTable(_node, "env")
+				if _it != nil {
+					d.data.MCPs[i].Env = cst.ExtractStringMap(_it)
+					if d.data.MCPs[i].Env == nil {
+						d.data.MCPs[i].Env = map[string]string{}
+					}
+					d.consumed["mcps.env"] = true
+					for _ik := range d.data.MCPs[i].Env {
+						d.consumed["mcps.env"+"."+_ik] = true
+					}
 				}
 			}
 		}
@@ -1311,6 +1349,18 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 					for _ik := range direnvVal2.Dotenv {
 						consumed[keyPrefix+"direnv.dotenv"+"."+_ik] = true
 					}
+				} else {
+					_it := cst.FindChildInlineTable(_ctDirenv, "dotenv")
+					if _it != nil {
+						direnvVal2.Dotenv = cst.ExtractStringMap(_it)
+						if direnvVal2.Dotenv == nil {
+							direnvVal2.Dotenv = map[string]string{}
+						}
+						consumed[keyPrefix+"direnv.dotenv"] = true
+						for _ik := range direnvVal2.Dotenv {
+							consumed[keyPrefix+"direnv.dotenv"+"."+_ik] = true
+						}
+					}
 				}
 			}
 			data.Direnv = direnvVal2
@@ -1645,6 +1695,18 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 					for _ik := range sessionEntryVal4.Env {
 						consumed[keyPrefix+"session-entry.env"+"."+_ik] = true
 					}
+				} else {
+					_it := cst.FindChildInlineTable(_ctSessionEntry, "env")
+					if _it != nil {
+						sessionEntryVal4.Env = cst.ExtractStringMap(_it)
+						if sessionEntryVal4.Env == nil {
+							sessionEntryVal4.Env = map[string]string{}
+						}
+						consumed[keyPrefix+"session-entry.env"] = true
+						for _ik := range sessionEntryVal4.Env {
+							consumed[keyPrefix+"session-entry.env"+"."+_ik] = true
+						}
+					}
 				}
 			}
 			data.SessionEntry = sessionEntryVal4
@@ -1853,6 +1915,18 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 					consumed[keyPrefix+"mcps.env"] = true
 					for _ik := range data.MCPs[i].Env {
 						consumed[keyPrefix+"mcps.env"+"."+_ik] = true
+					}
+				} else {
+					_it := cst.FindChildInlineTable(_node, "env")
+					if _it != nil {
+						data.MCPs[i].Env = cst.ExtractStringMap(_it)
+						if data.MCPs[i].Env == nil {
+							data.MCPs[i].Env = map[string]string{}
+						}
+						consumed[keyPrefix+"mcps.env"] = true
+						for _ik := range data.MCPs[i].Env {
+							consumed[keyPrefix+"mcps.env"+"."+_ik] = true
+						}
 					}
 				}
 			}

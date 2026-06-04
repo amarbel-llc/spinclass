@@ -122,19 +122,9 @@ array; the
 .B dotenv
 line is added after your directives.
 .PP
-.B Note:
-the sub-table spelling above is the supported form. The inline-table
-spelling
-.RB ( "dotenv = { ... }" )
-is
-.B not
-currently recognised \(em it is silently dropped at parse and
-.B sc validate
-flags it as an unknown field (tracked upstream in
-.IR amarbel-llc/tommy ).
-Use the
-.B [direnv.dotenv]
-sub-table.
+The inline-table spelling
+.RB ( "dotenv = { FOO = \(dqbar\(dq }" )
+is equivalent and equally accepted; use whichever reads better.
 .B Merge:
 map merge (child keys override parent keys).
 .SS [hooks]
