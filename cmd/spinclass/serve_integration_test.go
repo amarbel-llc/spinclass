@@ -1130,11 +1130,12 @@ func TestServeCheckThisSessionAsyncCancel(t *testing.T) {
 		t.Errorf("expected cancelled status, got:\n%s", final)
 	}
 	// The hook (sleep 120) must have been killed, not waited out: the cancel
-	// round-trip completes in seconds and the TAP carries the context-cancel
-	// signature. (We can't assert on the echo marker — it also appears in the
-	// echoed command string in the TAP description.)
-	if !strings.Contains(final, "context canceled") {
-		t.Errorf("expected the killed hook's context-cancel signature, got:\n%s", final)
+	// round-trip completes in seconds and the TAP carries a ctx-kill signature.
+	// Go surfaces a context-killed exec as either "context canceled" or
+	// "signal: killed" depending on timing, so accept both. (We can't assert on
+	// the echo marker — it also appears in the echoed command in the TAP desc.)
+	if !strings.Contains(final, "context canceled") && !strings.Contains(final, "signal: killed") {
+		t.Errorf("expected a killed-hook signature (context canceled / signal: killed), got:\n%s", final)
 	}
 	if elapsed := time.Since(cancelStart); elapsed > 30*time.Second {
 		t.Errorf("cancel took too long (%s); hook may not have been killed", elapsed)
