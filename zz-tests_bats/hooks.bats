@@ -16,7 +16,7 @@ pre_merge_setup_worktree() {
   local sweatfile_body="$1"
   local wt_path
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc start --no-attach pre_merge_test
   assert_success
 
@@ -24,7 +24,7 @@ pre_merge_setup_worktree() {
   assert [ -d "$wt_path" ]
 
   printf '%s' "$sweatfile_body" >"$wt_path/sweatfile"
-  cd "$wt_path"
+  cd "$wt_path" || return
 }
 
 # The format-aware pre-merge hook output (`format:`, `failure:`, structured
@@ -53,7 +53,7 @@ function tool_use_log_writes_to_xdg_log_home { # @test
   local bin="${SPINCLASS_BIN:-spinclass}"
 
   # Create a worktree so hooks can detect worktree context
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   local attach_output
   attach_output=$("$bin" --format tap start --no-attach 2>&1)
   local wt
@@ -65,7 +65,7 @@ function tool_use_log_writes_to_xdg_log_home { # @test
   export SPINCLASS_SESSION_ID="$repo_name/$branch"
 
   # Pipe a PostToolUse hook payload to spinclass hooks
-  cd "$wt"
+  cd "$wt" || return
   run bash -c 'echo '"'"'{"hook_event_name":"PostToolUse","session_id":"test","tool_name":"Edit","tool_input":{"file_path":"/some/file.go"},"cwd":"'"$wt"'"}'"'"' | '"$bin"' hooks'
   # hooks should not produce output or error
   assert_success
@@ -85,7 +85,7 @@ function tool_use_log_respects_xdg_log_home { # @test
   local custom_log="$BATS_TEST_TMPDIR/custom-logs"
   export XDG_LOG_HOME="$custom_log"
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   local attach_output
   attach_output=$("$bin" --format tap start --no-attach 2>&1)
   local wt
@@ -96,7 +96,7 @@ function tool_use_log_respects_xdg_log_home { # @test
   repo_name=$(basename "$TEST_REPO")
   export SPINCLASS_SESSION_ID="$repo_name/$branch"
 
-  cd "$wt"
+  cd "$wt" || return
   run bash -c 'echo '"'"'{"hook_event_name":"PostToolUse","session_id":"test","tool_name":"Bash","tool_input":{},"cwd":"'"$wt"'"}'"'"' | '"$bin"' hooks'
   assert_success
 
@@ -111,7 +111,7 @@ function tool_use_log_silent_without_session { # @test
   local bin="${SPINCLASS_BIN:-spinclass}"
   unset SPINCLASS_SESSION_ID
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run bash -c 'echo '"'"'{"hook_event_name":"PostToolUse","session_id":"test","tool_name":"Read","tool_input":{},"cwd":"'"$TEST_REPO"'"}'"'"' | '"$bin"' hooks'
   assert_success
 

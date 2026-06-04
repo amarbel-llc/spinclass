@@ -16,7 +16,7 @@ function apply_writes_claude_settings { # @test
 allow = ["Bash(git *)"]
 EOF
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc start --no-attach test_settings
   assert_success
 
@@ -47,7 +47,7 @@ EOF
 allow = ["Bash(nix *)"]
 EOF
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc start --no-attach test_hierarchy
   assert_success
 
@@ -71,7 +71,7 @@ EOF
   git -C "$TEST_REPO" add flake.nix
   git -C "$TEST_REPO" commit -m "add flake.nix"
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc start --no-attach test_envrc_flake
   assert_success
 
@@ -86,7 +86,7 @@ EOF
 }
 
 function apply_skips_use_flake_without_flake_nix { # @test
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc start --no-attach test_envrc_no_flake
   assert_success
 
@@ -112,7 +112,7 @@ args = ["serve", "--format=json"]
 DEBUG = "1"
 EOF
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc start --no-attach test_mcps
   assert_success
 
@@ -146,7 +146,7 @@ command = "my-linter"
 args = ["serve"]
 EOF
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc start --no-attach test_mcps_enabled
   assert_success
 
@@ -181,7 +181,7 @@ command = "lint-v2"
 args = ["serve", "--new"]
 EOF
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc start --no-attach test_mcps_override
   assert_success
 
@@ -210,7 +210,7 @@ EOF
 name = "linter"
 EOF
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc start --no-attach test_mcps_removal
   assert_success
 
@@ -235,13 +235,17 @@ function session_entrypoint_expands_env_vars { # @test
 start = ["echo", "$SPINCLASS_SESSION_ID", "$SPINCLASS_BRANCH"]
 EOF
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc start --no-attach env_expand_test
   assert_success
 
-  # The TAP output should show expanded env vars (repo/<random-branch>), not literals
+  # The TAP output should show expanded env vars (repo/<random-branch>), not literals.
+  # The single quotes are intentional: we assert the LITERAL "$SPINCLASS_*" text is
+  # absent (expansion would defeat the test), so suppress SC2016 here.
   assert_output --partial "repo/"
+  # shellcheck disable=SC2016
   refute_output --partial '$SPINCLASS_SESSION_ID'
+  # shellcheck disable=SC2016
   refute_output --partial '$SPINCLASS_BRANCH'
 }
 
@@ -251,7 +255,7 @@ sc_check_setup_worktree() {
   local sweatfile_body="$1"
   local wt_path
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc start --no-attach sc_check_test
   assert_success
 
@@ -259,7 +263,7 @@ sc_check_setup_worktree() {
   assert [ -d "$wt_path" ]
 
   printf '%s' "$sweatfile_body" >"$wt_path/sweatfile"
-  cd "$wt_path"
+  cd "$wt_path" || return
 }
 
 function sc_check_runs_pre_merge_hook { # @test

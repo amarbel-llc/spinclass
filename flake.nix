@@ -43,6 +43,17 @@
       inputs.utils.follows = "utils";
       inputs.bats.follows = "bats";
     };
+
+    # conformist: the linter + formatter multiplexer (treefmt successor).
+    # Drives the goimports → gofumpt → nixfmt → shfmt chain plus
+    # shellcheck; config lives in ./conformist.toml. Exposed as the
+    # flake `formatter` and gated by `just lint-fmt` (conformist check).
+    conformist = {
+      url = "github:amarbel-llc/conformist";
+      inputs.igloo.follows = "igloo";
+      inputs.nixpkgs-master.follows = "nixpkgs-master";
+      inputs.utils.follows = "utils";
+    };
   };
 
   outputs =
@@ -53,6 +64,7 @@
       utils,
       bats,
       madder,
+      conformist,
     }:
     let
       spinclassVersion = "0.1.16";
@@ -70,6 +82,23 @@
         pkgs-master = import nixpkgs-master { inherit system; };
         inherit (pkgs) lib;
 
+        # `nix fmt` entry point: conformist (the treefmt successor) wrapped
+        # with the formatter binaries its ./conformist.toml drives on PATH.
+        # Formatting drift is gated by `just lint-fmt` (conformist check).
+        # Mirrors madder's conformistFmt.
+        conformistFmt = pkgs.writeShellApplication {
+          name = "conformist-fmt";
+          runtimeInputs = [
+            conformist.packages.${system}.default
+            pkgs-master.gofumpt
+            pkgs-master.gotools
+            pkgs.nixfmt
+            pkgs.shfmt
+            pkgs.shellcheck
+          ];
+          text = ''exec conformist "$@"'';
+        };
+
         # mkSpinclass builds spinclass with optional build-time-pinned
         # absolute /nix/store paths for `madder` and `direnv`. The
         # buildGoApplication overlay auto-injects -X main.version and
@@ -82,114 +111,137 @@
         # the input is null. When `dodder` is non-null the binary also
         # inits a per-worktree dodder repository over the madder store
         # (FDR 0008); dormant when null.
-        mkSpinclass = { madder ? null, direnv ? null, dodder ? null }: pkgs.buildGoApplication {
-          pname = "spinclass";
-          version = spinclassVersion;
-          commit = spinclassCommit;
-          src = ./.;
-          modules = ./gomod2nix.toml;
-          subPackages = [ "cmd/spinclass" ];
+        mkSpinclass =
+          {
+            madder ? null,
+            direnv ? null,
+            dodder ? null,
+          }:
+          pkgs.buildGoApplication {
+            pname = "spinclass";
+            version = spinclassVersion;
+            commit = spinclassCommit;
+            src = ./.;
+            modules = ./gomod2nix.toml;
+            subPackages = [ "cmd/spinclass" ];
 
-          # Pin Go through upstream nixpkgs and disable toolchain
-          # auto-download. Without these, `GOTOOLCHAIN=auto` can try to
-          # fetch a toolchain when go.mod's `go 1.26` requirement isn't
-          # satisfied by `pkgs.go`, which fails in the sandbox. Madder
-          # pattern.
-          go = pkgs-master.go_1_26;
-          GOTOOLCHAIN = "local";
+            # Pin Go through upstream nixpkgs and disable toolchain
+            # auto-download. Without these, `GOTOOLCHAIN=auto` can try to
+            # fetch a toolchain when go.mod's `go 1.26` requirement isn't
+            # satisfied by `pkgs.go`, which fails in the sandbox. Madder
+            # pattern.
+            go = pkgs-master.go_1_26;
+            GOTOOLCHAIN = "local";
 
-          ldflags =
-            (lib.optional (madder != null) "-X main.madderBin=${madder}/bin/madder")
-            ++ (lib.optional (direnv != null) "-X main.direnvBin=${direnv}/bin/direnv")
-            ++ (lib.optional (dodder != null) "-X main.dodderBin=${dodder}/bin/dodder");
+            ldflags =
+              (lib.optional (madder != null) "-X main.madderBin=${madder}/bin/madder")
+              ++ (lib.optional (direnv != null) "-X main.direnvBin=${direnv}/bin/direnv")
+              ++ (lib.optional (dodder != null) "-X main.dodderBin=${dodder}/bin/dodder");
 
-          # buildGoApplication's stock checkPhase runs only the
-          # subPackages (cmd/spinclass). Override to test every package
-          # so internal/* coverage isn't silently skipped. Tests that
-          # hit pre-existing sandbox-incompatibilities (currently
-          # tracked in #65) detect the sandbox via NIX_BUILD_TOP and
-          # t.Skip themselves.
-          doCheck = true;
-          nativeCheckInputs = [ pkgs.git ];
-          checkPhase = ''
-            runHook preCheck
-            go test -p $NIX_BUILD_CORES ./...
-            runHook postCheck
-          '';
+            # buildGoApplication's stock checkPhase runs only the
+            # subPackages (cmd/spinclass). Override to test every package
+            # so internal/* coverage isn't silently skipped. Tests that
+            # hit pre-existing sandbox-incompatibilities (currently
+            # tracked in #65) detect the sandbox via NIX_BUILD_TOP and
+            # t.Skip themselves.
+            doCheck = true;
+            nativeCheckInputs = [ pkgs.git ];
+            checkPhase = ''
+              runHook preCheck
+              go test -p $NIX_BUILD_CORES ./...
+              runHook postCheck
+            '';
 
-          # Generate manpages, mappings, hooks, and shell completions from
-          # the command.App definitions. The plugin manifest (and clown
-          # plugin metadata) is owned by spinclass directly, not the
-          # command.App framework, so we copy and substitute the source
-          # templates here.
-          postInstall = ''
-            $out/bin/spinclass generate-artifacts $out
-            ln -s spinclass $out/bin/sc
+            # Generate manpages, mappings, hooks, and shell completions from
+            # the command.App definitions. The plugin manifest (and clown
+            # plugin metadata) is owned by spinclass directly, not the
+            # command.App framework, so we copy and substitute the source
+            # templates here.
+            postInstall = ''
+              $out/bin/spinclass generate-artifacts $out
+              ln -s spinclass $out/bin/sc
 
-            pluginShare="$out/share/purse-first/spinclass"
-            mkdir -p "$pluginShare/.claude-plugin" \
-                     "$pluginShare/.clown-plugin/system-prompt-append.d"
+              pluginShare="$out/share/purse-first/spinclass"
+              mkdir -p "$pluginShare/.claude-plugin" \
+                       "$pluginShare/.clown-plugin/system-prompt-append.d"
 
-            install -m 0644 ${./.claude-plugin/plugin.json} \
-              "$pluginShare/.claude-plugin/plugin.json"
-            substituteInPlace "$pluginShare/.claude-plugin/plugin.json" \
-              --replace-fail '@VERSION@' '${spinclassVersion}+${spinclassCommit}'
+              install -m 0644 ${./.claude-plugin/plugin.json} \
+                "$pluginShare/.claude-plugin/plugin.json"
+              substituteInPlace "$pluginShare/.claude-plugin/plugin.json" \
+                --replace-fail '@VERSION@' '${spinclassVersion}+${spinclassCommit}'
 
-            # clown-plugin-host resolves a relative `command` against the
-            # plugin directory, with no PATH fallback (see clown
-            # internal/pluginhost/config.go Desugar). Bake the absolute
-            # store path so the bridge can exec the binary regardless of
-            # the host's CWD or PATH.
-            #
-            # The same manifest is installed at both <plugin-dir>/clown.json
-            # (where clown actually reads it, per LoadClownConfig) and at
-            # <plugin-dir>/.clown-plugin/clown.json (kept in sync against
-            # any future change in clown's discovery rules).
-            install -m 0644 ${./clown.json} "$pluginShare/clown.json"
-            install -m 0644 ${./clown.json} "$pluginShare/.clown-plugin/clown.json"
-            substituteInPlace \
-              "$pluginShare/clown.json" \
-              "$pluginShare/.clown-plugin/clown.json" \
-              --replace-fail '@SPINCLASS@' "$out/bin/spinclass"
-            install -m 0644 ${./.clown-plugin/system-prompt-append.d/00-worktree.md} \
-              "$pluginShare/.clown-plugin/system-prompt-append.d/00-worktree.md"
+              # clown-plugin-host resolves a relative `command` against the
+              # plugin directory, with no PATH fallback (see clown
+              # internal/pluginhost/config.go Desugar). Bake the absolute
+              # store path so the bridge can exec the binary regardless of
+              # the host's CWD or PATH.
+              #
+              # The same manifest is installed at both <plugin-dir>/clown.json
+              # (where clown actually reads it, per LoadClownConfig) and at
+              # <plugin-dir>/.clown-plugin/clown.json (kept in sync against
+              # any future change in clown's discovery rules).
+              install -m 0644 ${./clown.json} "$pluginShare/clown.json"
+              install -m 0644 ${./clown.json} "$pluginShare/.clown-plugin/clown.json"
+              substituteInPlace \
+                "$pluginShare/clown.json" \
+                "$pluginShare/.clown-plugin/clown.json" \
+                --replace-fail '@SPINCLASS@' "$out/bin/spinclass"
+              install -m 0644 ${./.clown-plugin/system-prompt-append.d/00-worktree.md} \
+                "$pluginShare/.clown-plugin/system-prompt-append.d/00-worktree.md"
 
-            # Plugin-level hook registration. Clown auto-discovers
-            # ${"\${CLAUDE_PLUGIN_ROOT}"}/hooks/hooks.json and wires the listed
-            # PreToolUse/Stop/PostToolUse events for every Claude Code
-            # session, with no per-worktree settings.local.json plumbing
-            # required. The handler script execs the spinclass binary at
-            # the absolute store path baked in here.
-            mkdir -p "$pluginShare/hooks"
-            install -m 0644 ${./hooks/hooks.json} "$pluginShare/hooks/hooks.json"
-            install -m 0755 ${./hooks/handler}    "$pluginShare/hooks/handler"
-            substituteInPlace "$pluginShare/hooks/handler" \
-              --replace-fail '@SPINCLASS@' "$out/bin/spinclass"
-          '';
+              # Plugin-level hook registration. Clown auto-discovers
+              # ${"\${CLAUDE_PLUGIN_ROOT}"}/hooks/hooks.json and wires the listed
+              # PreToolUse/Stop/PostToolUse events for every Claude Code
+              # session, with no per-worktree settings.local.json plumbing
+              # required. The handler script execs the spinclass binary at
+              # the absolute store path baked in here.
+              mkdir -p "$pluginShare/hooks"
+              install -m 0644 ${./hooks/hooks.json} "$pluginShare/hooks/hooks.json"
+              install -m 0755 ${./hooks/handler}    "$pluginShare/hooks/handler"
+              substituteInPlace "$pluginShare/hooks/handler" \
+                --replace-fail '@SPINCLASS@' "$out/bin/spinclass"
+            '';
 
-          meta = {
-            description = "Shell-agnostic git worktree session manager";
-            homepage = "https://github.com/amarbel-llc/spinclass";
-            license = pkgs.lib.licenses.mit;
+            meta = {
+              description = "Shell-agnostic git worktree session manager";
+              homepage = "https://github.com/amarbel-llc/spinclass";
+              license = pkgs.lib.licenses.mit;
+            };
           };
-        };
 
         # mkBatsLane wraps bats.lib.${system}.batsLane (from the
         # amarbel-llc/bats flake) to run zz-tests_bats/ against a chosen
         # spinclass build. Exports SPINCLASS_BIN to the binary inside
         # `base`, stages the bats suite, and exits non-zero on any
         # failure.
-        mkBatsLane = { filter ? null, base ? mkSpinclass {} }:
-          bats.lib.${system}.batsLane ({
-            inherit base;
-            batsSrc           = ./zz-tests_bats;
-            binaries          = { SPINCLASS_BIN = { inherit base; name = "spinclass"; }; };
-            batsLibPath       = [ bats.packages.${system}.bats-libs.batsLibPath ];
-            extraEnv          = { BATS_TEST_TIMEOUT = "10"; };
-            nativeBuildInputs = [ pkgs.git pkgs.jq ];
-          } // lib.optionalAttrs (filter != null) { inherit filter; });
+        mkBatsLane =
+          {
+            filter ? null,
+            base ? mkSpinclass { },
+          }:
+          bats.lib.${system}.batsLane (
+            {
+              inherit base;
+              batsSrc = ./zz-tests_bats;
+              binaries = {
+                SPINCLASS_BIN = {
+                  inherit base;
+                  name = "spinclass";
+                };
+              };
+              batsLibPath = [ bats.packages.${system}.bats-libs.batsLibPath ];
+              extraEnv = {
+                BATS_TEST_TIMEOUT = "10";
+              };
+              nativeBuildInputs = [
+                pkgs.git
+                pkgs.jq
+              ];
+            }
+            // lib.optionalAttrs (filter != null) { inherit filter; }
+          );
 
-        spinclass-race = pkgs.buildGoRace { base = mkSpinclass {}; };
+        spinclass-race = pkgs.buildGoRace { base = mkSpinclass { }; };
 
         # Madder-pinned spinclass: the base for the `bats-madder` lane.
         # The pin sets `-X main.madderBin` to an absolute /nix/store path,
@@ -200,27 +252,32 @@
         };
 
         batsLaneOutputs = {
-          bats-default = mkBatsLane {};
-          bats-race    = mkBatsLane { base = spinclass-race; };
-          bats-madder  = mkBatsLane { base = spinclass-madder; };
+          bats-default = mkBatsLane { };
+          bats-race = mkBatsLane { base = spinclass-race; };
+          bats-madder = mkBatsLane { base = spinclass-madder; };
         };
       in
       {
         packages = {
-          default        = mkSpinclass {};
+          default = mkSpinclass { };
           spinclass-race = spinclass-race;
-        } // batsLaneOutputs;
+        }
+        // batsLaneOutputs;
 
         # `nix flake check` exercises the unit suite (via the
         # spinclass derivation's checkPhase) plus every bats lane.
         checks = {
-          spinclass = mkSpinclass {};
-        } // batsLaneOutputs;
+          spinclass = mkSpinclass { };
+        }
+        // batsLaneOutputs;
 
         # mkSpinclass = { madder ? null, direnv ? null }: ...
         # Consumer flakes call this to produce a spinclass binary with
         # absolute /nix/store paths burned in.
         lib.mkSpinclass = mkSpinclass;
+
+        # `nix fmt` runs conformist (see conformistFmt above).
+        formatter = conformistFmt;
 
         devShells.default = pkgs-master.mkShell {
           packages = [
@@ -232,6 +289,13 @@
             # buildGoApplication / mkGoEnv — not in upstream nixpkgs.
             pkgs.gomod2nix
             pkgs.bats
+            # conformist (treefmt successor) + the formatters/linters its
+            # ./conformist.toml drives, so `just fmt` / `just lint-fmt`
+            # (conformist / conformist check) work in the devshell.
+            conformist.packages.${system}.default
+            pkgs.nixfmt
+            pkgs.shfmt
+            pkgs.shellcheck
           ]
           ++ (with pkgs-master; [
             delve

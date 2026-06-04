@@ -26,7 +26,15 @@
   };
 
   outputs =
-    { spinclass, dodder, madder, clown, nixpkgs, utils, ... }:
+    {
+      spinclass,
+      dodder,
+      madder,
+      clown,
+      nixpkgs,
+      utils,
+      ...
+    }:
     utils.lib.eachDefaultSystem (
       system:
       let

@@ -9,7 +9,7 @@ setup() {
 }
 
 function fork_creates_new_branch { # @test
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"
   local attach_output
   attach_output=$("$bin" --format tap start --no-attach 2>&1)
@@ -17,7 +17,7 @@ function fork_creates_new_branch { # @test
   wt_path=$(extract_wt_path "$attach_output")
 
   # Fork from inside the worktree (cwd-based)
-  cd "$wt_path"
+  cd "$wt_path" || return
   run_sc fork new_branch
   assert_success
 
@@ -27,7 +27,7 @@ function fork_creates_new_branch { # @test
 }
 
 function fork_creates_branch_with_from_flag { # @test
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"
   local attach_output
   attach_output=$("$bin" --format tap start --no-attach 2>&1)
@@ -43,7 +43,7 @@ function fork_creates_branch_with_from_flag { # @test
 }
 
 function fork_auto_names_branch { # @test
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"
   local attach_output
   attach_output=$("$bin" --format tap start --no-attach 2>&1)
@@ -52,7 +52,7 @@ function fork_auto_names_branch { # @test
   local branch
   branch=$(basename "$wt_path")
 
-  cd "$wt_path"
+  cd "$wt_path" || return
   run_sc fork
   assert_success
 
@@ -61,13 +61,13 @@ function fork_auto_names_branch { # @test
 }
 
 function fork_fails_outside_worktree { # @test
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"
   "$bin" --format tap start --no-attach
 
   # Running from main repo (not a worktree) without --from should fail
   # because the main branch won't have a .worktrees/<branch> layout
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc fork some_branch
   assert_failure
 }

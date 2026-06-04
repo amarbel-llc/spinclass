@@ -1,4 +1,4 @@
-default: build test
+default: lint build test
 
 build:
     nix build --show-trace
@@ -18,11 +18,23 @@ test-bats-race:
 test-bats-madder:
     nix build .#bats-madder --no-link --print-build-logs
 
+# Format all source files via conformist (the treefmt successor): Go
+# (goimports → gofumpt), Nix (nixfmt), shell/bats (shfmt). Config lives
+# in ./conformist.toml. The read-only counterpart is `lint-fmt`.
 fmt:
-    nix develop --command gofumpt -w .
+    nix develop --command conformist
 
-lint:
+lint: lint-vet lint-fmt
+
+lint-vet:
     nix develop --command go vet ./...
+
+# Read-only format + lint gate via conformist: fails on formatter drift
+# (Go/Nix/shell, per ./conformist.toml) plus shellcheck. `just fmt` is
+# the corresponding write mode. Folded into `just lint` → `just default`,
+# so the pre-merge `just` hook enforces fmt-cleanliness on every merge.
+lint-fmt:
+    nix develop --command conformist check
 
 clean:
     rm -rf result

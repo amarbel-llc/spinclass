@@ -19,7 +19,7 @@ name = "test"
 exec-start = ["printf", "{\"context\":\"# Test context for {arg}\"}"]
 EOF
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc start-test --no-attach myvalue
   assert_success
 
@@ -46,7 +46,7 @@ name = "branch-test"
 exec-start = ["printf", "{\"branch\":\"feature-x\",\"context\":\"# Branch test\"}"]
 EOF
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc start-branch-test --no-attach dummy
   assert_success
 
@@ -70,7 +70,7 @@ name = "desc-test"
 exec-start = ["printf", "{\"description\":\"custom desc\",\"context\":\"# Context\"}"]
 EOF
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"
   local start_output
   start_output=$(timeout --preserve-status 10s "$bin" --format tap start-desc-test --no-attach myarg 2>&1)
@@ -99,7 +99,7 @@ arg-regex = "^[0-9]+$"
 exec-start = ["printf", "{\"context\":\"ok\"}"]
 EOF
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc start-strict --no-attach abc
   assert_failure
   assert_output --partial "does not match"
@@ -117,7 +117,7 @@ arg-regex = "^[0-9]+$"
 exec-start = ["printf", "{\"context\":\"user override\"}"]
 EOF
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc start-gh_issue --no-attach 1
   assert_success
 
@@ -133,7 +133,7 @@ name = "risky"
 exec-start = ["sh", "-c", "echo {arg}"]
 EOF
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc validate
   assert_output --partial "shell interpreter without arg-regex"
 }

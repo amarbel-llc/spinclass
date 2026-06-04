@@ -9,7 +9,7 @@ setup() {
 }
 
 function spinclass_start_writes_session_state { # @test
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc_session start
   assert_success
 
@@ -34,7 +34,7 @@ function spinclass_start_writes_session_state { # @test
 }
 
 function spinclass_resume_by_id { # @test
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"
 
   # Start a session — writes state and exits (entrypoint is "true")
@@ -53,7 +53,7 @@ function spinclass_resume_by_id { # @test
 }
 
 function spinclass_resume_from_cwd { # @test
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"
 
   # Start a session — writes state and exits
@@ -64,13 +64,13 @@ function spinclass_resume_from_cwd { # @test
   wt_path=$(extract_wt_path "$start_output")
 
   # cd into the worktree and resume with no args (auto-detect from cwd)
-  cd "$wt_path"
+  cd "$wt_path" || return
   run_sc_session resume
   assert_success
 }
 
 function spinclass_resume_no_session_fails { # @test
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
 
   # Create a worktree with --no-attach (no session state written)
   run_sc start --no-attach
@@ -80,14 +80,14 @@ function spinclass_resume_no_session_fails { # @test
   wt_path=$(extract_wt_path "$output")
 
   # cd into the worktree and try to resume — should fail
-  cd "$wt_path"
+  cd "$wt_path" || return
   run_sc_session resume
   assert_failure
   assert_output --partial "no session"
 }
 
 function spinclass_resume_from_main_repo_by_id { # @test
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"
 
   # Start a session — writes state and exits
@@ -99,14 +99,14 @@ function spinclass_resume_from_main_repo_by_id { # @test
   wt_id=$(basename "$wt_path")
 
   # Resume by ID from main repo (not inside worktree) should succeed
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc_session resume "$wt_id"
   assert_success
 }
 
 function spinclass_resume_from_main_repo_no_args_lists_ids { # @test
-  skip "pre-existing failure — see #45 (assertion text \"available sessions\" drifted in 03a9265)"
-  cd "$TEST_REPO"
+  skip 'pre-existing failure — see #45 (assertion text "available sessions" drifted in 03a9265)'
+  cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"
 
   # Start a session — writes state and exits
@@ -118,7 +118,7 @@ function spinclass_resume_from_main_repo_no_args_lists_ids { # @test
   wt_id=$(basename "$wt_path")
 
   # Resume with no args from main repo (non-TTY) should fail but list IDs
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc_session resume
   assert_failure
   assert_output --partial "available sessions"
@@ -126,7 +126,7 @@ function spinclass_resume_from_main_repo_no_args_lists_ids { # @test
 }
 
 function spinclass_resume_no_attach_shows_dry_run { # @test
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"
 
   # Start a session — writes state and exits

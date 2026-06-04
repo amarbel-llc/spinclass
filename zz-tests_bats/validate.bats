@@ -16,7 +16,7 @@ allow = ["Bash(git *)"]
 excludes = [".worktrees"]
 EOF
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc validate
   assert_success
 }
@@ -26,7 +26,7 @@ function validate_invalid_syntax { # @test
 this is not valid toml [[[
 EOF
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc validate
   assert_failure
 }
@@ -37,7 +37,7 @@ function validate_invalid_claude_allow { # @test
 allow = ["(unclosed"]
 EOF
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc validate
   assert_failure
   assert_output --partial "unmatched parenthesis"
@@ -48,7 +48,7 @@ function validate_unknown_field { # @test
 bogus_field = "should fail"
 EOF
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc validate
   assert_failure
   assert_output --partial "unknown field"
@@ -64,7 +64,7 @@ command = "my-linter"
 args = ["serve"]
 EOF
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc validate
   assert_success
 }
@@ -75,15 +75,15 @@ function validate_mcps_missing_name { # @test
 command = "my-linter"
 EOF
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc validate
   assert_failure
   assert_output --partial "missing"
 }
 
 function validate_rejects_unknown_pre_merge_output_format { # @test
-  cd "$TEST_REPO"
-  cat > "$TEST_REPO/sweatfile" <<'EOF'
+  cd "$TEST_REPO" || return
+  cat >"$TEST_REPO/sweatfile" <<'EOF'
 [hooks]
 pre-merge = "just test"
 pre-merge-output-format = "wat"
@@ -104,7 +104,7 @@ name = "linter"
 command = "lint2"
 EOF
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc validate
   assert_success
   # Should warn about duplicate but not fail

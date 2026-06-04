@@ -40,7 +40,7 @@ cat >"$repo/sweatfile" <<'EOF'
 start = ["true"]
 EOF
 
-echo "# sc start \"dodder e2e\"…"
+echo '# sc start "dodder e2e"…'
 (cd "$repo" && "$spin" start "dodder e2e")
 
 # Fresh repo => exactly one worktree.
@@ -68,8 +68,8 @@ check "Bash(dodder:*) claude-allowed" has "$wt/.claude/settings.local.json" "Bas
 check "Bash(madder:*) claude-allowed" has "$wt/.claude/settings.local.json" "Bash(madder:*)"
 check "dodder shim symlink" test -L "$repo/.git/spinclass/bin/dodder"
 check "madder shim symlink" test -L "$repo/.git/spinclass/bin/madder"
-check ".mcp.json registers dodder" has "$wt/.mcp.json" "\"dodder\""
-check ".mcp.json dodder uses mcp arg" has "$wt/.mcp.json" "\"mcp\""
+check ".mcp.json registers dodder" has "$wt/.mcp.json" '"dodder"'
+check ".mcp.json dodder uses mcp arg" has "$wt/.mcp.json" '"mcp"'
 
 # Bonus (soft): the repo's signatures verify against the agent key. sc
 # start succeeding already proves signing ran (it would have hard-failed

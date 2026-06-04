@@ -9,7 +9,7 @@ setup() {
 }
 
 function spinclass_start_creates_worktree { # @test
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc start --no-attach
   assert_success
 
@@ -26,7 +26,7 @@ function spinclass_start_creates_worktree { # @test
 }
 
 function spinclass_start_auto_name { # @test
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc start --no-attach
 
   assert_success
@@ -37,7 +37,7 @@ function spinclass_start_auto_name { # @test
 }
 
 function spinclass_start_no_attach_skips_session { # @test
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   run_sc start --no-attach
   assert_success
 
@@ -49,7 +49,7 @@ function spinclass_start_no_attach_skips_session { # @test
 }
 
 function spinclass_start_idempotent { # @test
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"
 
   # First start — capture the worktree path
@@ -61,14 +61,14 @@ function spinclass_start_idempotent { # @test
   branch=$(basename "$wt_path")
 
   # Second start to same worktree (by cd'ing into it) should succeed with SKIP
-  cd "$wt_path"
+  cd "$wt_path" || return
   run_sc start --no-attach
   assert_success
   assert_output --partial "SKIP"
 }
 
 function spinclass_list_shows_sessions { # @test
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"
 
   # Create some worktrees
@@ -81,7 +81,7 @@ function spinclass_list_shows_sessions { # @test
 }
 
 function spinclass_merge_fast_forwards { # @test
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"
   local attach_output
   attach_output=$("$bin" --format tap start --no-attach 2>&1)
@@ -92,7 +92,7 @@ function spinclass_merge_fast_forwards { # @test
   branch=$(basename "$wt")
 
   # Make a commit on the worktree branch
-  echo "new content" > "$wt/new-file.txt"
+  echo "new content" >"$wt/new-file.txt"
   git -C "$wt" add new-file.txt
   git -C "$wt" commit -m "add new file"
 
@@ -122,7 +122,7 @@ function spinclass_autoclose_assume_yes_removes_worktree { # @test
   # is untracked content, so without the exclude the porcelain check
   # would fail and the auto-close branch would not fire.
   create_session_sweatfile_with_envrc_exclude
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"
 
   local attach_output
@@ -143,7 +143,7 @@ function spinclass_autoclose_assume_no_keeps_worktree { # @test
   # the auto-close branch would skip on the wrong condition, masking
   # whether the env var was actually consulted.
   create_session_sweatfile_with_envrc_exclude
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"
 
   local attach_output
@@ -166,7 +166,7 @@ function spinclass_close_by_id_removes_worktree { # @test
   # cannot return unnamed. Uses a real `start` (not --no-attach) so a
   # session state entry exists for FindByID to match on.
   create_session_sweatfile
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"
 
   local start_output
@@ -198,7 +198,7 @@ function spinclass_clean_removes_merged { # @test
   # `spinclass_merge_fast_forwards` uses: `sc merge` and `sc clean`
   # both call non-force `git worktree remove`, which refuses on
   # untracked content like the sweatfile-installed `.envrc`.
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"
 
   local attach1_output
@@ -214,7 +214,7 @@ function spinclass_clean_removes_merged { # @test
 
   # Give branch1 a real commit so `sc merge` has something to merge —
   # otherwise the merge short-circuits with "nothing to merge".
-  echo "merged content" > "$wt1/merged.txt"
+  echo "merged content" >"$wt1/merged.txt"
   git -C "$wt1" add merged.txt
   git -C "$wt1" commit -m "commit on branch1"
 
@@ -240,7 +240,7 @@ function spinclass_clean_dry_run_keeps_worktree { # @test
   # #51: re-verify #33 scenario 4 — `--dry-run` must NOT remove
   # anything. Set up the same merged worktree as the removal test but
   # use `-n --yes` and assert the worktree still exists afterwards.
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"
 
   local attach_output
@@ -261,15 +261,15 @@ function spinclass_clean_reaps_abandoned_sessions { # @test
   # `true`) to land an inactive index symlink, then deletes the
   # worktree behind spinclass's back.
   create_session_sweatfile
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
 
   run_sc_session start
   assert_success
   assert_session_state
 
   local index_dir="$XDG_STATE_HOME/spinclass/index"
-  local entry
-  entry=$(ls "$index_dir"/*.json | head -1)
+  local entries=("$index_dir"/*.json)
+  local entry="${entries[0]}"
   assert [ -L "$entry" ]
   local target
   target=$(readlink "$entry")
@@ -302,7 +302,7 @@ function spinclass_clean_gcs_stale_tombstones { # @test
 tombstone-retention = "1s"
 EOF
 
-  cd "$TEST_REPO"
+  cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"
 
   local start_output
@@ -321,8 +321,8 @@ EOF
   assert_success
 
   local index_dir="$XDG_STATE_HOME/spinclass/index"
-  local tomb
-  tomb=$(ls "$index_dir"/*.json | head -1)
+  local tombs=("$index_dir"/*.json)
+  local tomb="${tombs[0]}"
   # Tombstone is a regular file (close promotes the symlink).
   assert [ -f "$tomb" ]
   assert [ ! -L "$tomb" ]
