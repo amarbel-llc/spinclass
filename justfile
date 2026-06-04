@@ -354,6 +354,55 @@ explore-chat-roundtrip:
     if [[ $pass -eq 0 ]]; then echo "VERDICT: chat send->watch round-trip WORKS"; else echo "VERDICT: round-trip FAILED"; fi
     exit $pass
 
+# [explore] End-to-end smoke for the chat-read polling path (#98). Sends a
+# broadcast + a DM as session A, then reads as session B: firehose sees both,
+# a second read sees none (cursor advanced), --peek does not advance, and the
+# to_me / from / repo filters each narrow correctly. Identity via
+# $SPINCLASS_SESSION_ID; temp XDG_STATE_HOME, no real worktree needed.
+[group('explore')]
+explore-chat-read:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    scratch=$(mktemp -d)
+    bin="$scratch/spinclass"
+    trap 'rm -rf "$scratch"' EXIT
+    nix develop --command go build -o "$bin" ./cmd/spinclass || { echo "build failed"; exit 1; }
+    export XDG_STATE_HOME="$scratch/state"
+    A="alpha/feat-a"; B="beta/feat-b"
+    pass=0
+
+    SPINCLASS_SESSION_ID="$A" "$bin" chat-send --message "to-all"
+    SPINCLASS_SESSION_ID="$A" "$bin" chat-send --message "to-b" --to "$B"
+
+    echo "## firehose read as B (peek):"
+    out=$(SPINCLASS_SESSION_ID="$B" "$bin" chat-read --peek); echo "$out" | sed 's/^/    /'
+    echo "$out" | grep -qF "to-all" || { echo "FAIL: firehose missing broadcast"; pass=1; }
+    echo "$out" | grep -qF "to-b"   || { echo "FAIL: firehose missing DM"; pass=1; }
+
+    echo "## peek must not have advanced — real read still sees both:"
+    out=$(SPINCLASS_SESSION_ID="$B" "$bin" chat-read)
+    echo "$out" | grep -qF "to-all" || { echo "FAIL: peek wrongly advanced cursor"; pass=1; }
+
+    echo "## second real read: cursor advanced, nothing new:"
+    out=$(SPINCLASS_SESSION_ID="$B" "$bin" chat-read)
+    [[ "$out" == "no new messages" ]] || { echo "FAIL: expected 'no new messages', got: $out"; pass=1; }
+
+    echo "## filters (peek so cursor state is irrelevant) as B:"
+    SPINCLASS_SESSION_ID="$A" "$bin" chat-send --message "f-all"
+    SPINCLASS_SESSION_ID="$A" "$bin" chat-send --message "f-b" --to "$B"
+    SPINCLASS_SESSION_ID="gamma/x" "$bin" chat-send --message "f-other" --to "other/y"
+    to_me=$(SPINCLASS_SESSION_ID="$B" "$bin" chat-read --peek --to_me)
+    echo "$to_me" | grep -qF "f-other" && { echo "FAIL: to_me leaked a non-addressed msg"; pass=1; }
+    from=$(SPINCLASS_SESSION_ID="$B" "$bin" chat-read --peek --from "gamma/x")
+    echo "$from" | grep -qF "f-other" || { echo "FAIL: --from gamma/x missed its msg"; pass=1; }
+    echo "$from" | grep -qF "f-all"   && { echo "FAIL: --from leaked another sender"; pass=1; }
+    repo=$(SPINCLASS_SESSION_ID="$B" "$bin" chat-read --peek --repo "alpha")
+    echo "$repo" | grep -qF "f-all" || { echo "FAIL: --repo alpha missed its msg"; pass=1; }
+    echo "$repo" | grep -qF "f-other" && { echo "FAIL: --repo alpha leaked gamma"; pass=1; }
+
+    if [[ $pass -eq 0 ]]; then echo "VERDICT: chat-read polling WORKS"; else echo "VERDICT: chat-read FAILED"; fi
+    exit $pass
+
 # Tag a spinclass release. The "v" prefix is added for you, so pass
 # the semver without it. Usage: just tag 0.1.0 "feat: initial release"
 tag version message:

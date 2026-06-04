@@ -312,6 +312,12 @@ Duration string (e.g.
 to keep forever) controlling how long
 .B sc clean
 preserves tombstone entries before reaping.
+The same retention also governs the cross-session chatroom: messages
+older than this window, and stale per-session read cursors, are reaped
+by
+.B sc clean
+(see
+.BR chat\-send (), " chat\-read" ()).
 .B Merge:
 scalar override.
 .SS [session\-entry.env]

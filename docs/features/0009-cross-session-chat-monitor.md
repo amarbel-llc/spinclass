@@ -129,6 +129,32 @@ chat-send  to="dodder/deft-sequoia"  message="can you bump the tap dep?"
 # to != "*").
 ```
 
+## Polling fallback and cleanup
+
+The push monitor is the preferred receive path, but it is not always
+available (see the platform-gated-rollout limitation below — notably it
+is off on macOS today). For those hosts, and as a general pull surface,
+spinclass also ships the polling half from issue #16 (implemented in
+#98):
+
+- **`chat-read`** — returns messages new since this session's last read,
+  defaulting to the full firehose with opt-in `to_me` / `from` / `repo`
+  filters. A per-session cursor file
+  (`$XDG_STATE_HOME/spinclass/chatroom/.cursor-<hash>.json`) advances
+  read-through (past everything scanned, filtered-out included) unless
+  `peek` is set, which reads without advancing.
+- **`chat-list-sessions`** — lists active sessions across all repos (the
+  candidate recipients for a directed `chat-send`).
+
+**Cleanup.** `sc clean` reaps the chatroom using the same retention
+window as session tombstones (`[session-entry].tombstone-retention`,
+default 30d): message files whose timestamp is older than the window are
+removed, and per-session cursor files are reaped by mtime once they have
+gone untouched for that long. Retention is keyed off age, not the
+session index — cursor files are hashed by session key and not reversible
+back to it, so age is the robust proxy for "no live reader." Implemented
+in #99.
+
 ## Limitations
 
 - **Receive only while the session is open.** Monitors run only in live

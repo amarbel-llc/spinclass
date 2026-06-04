@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -236,6 +237,45 @@ func registerMCPOnlyCommands(app *command.App) {
 			{Name: "to", Type: command.String, Description: "Recipient session key (<repo>/<branch>); omit or \"*\" to broadcast"},
 		},
 		Run: wrapMCPHandler("chat-send", handleChatSend),
+	})
+
+	app.AddCommand(&command.Command{
+		Name:  "chat-read",
+		Title: "Read Cross-Session Chat Messages",
+		Description: command.Description{
+			Short: "Read cross-session chat messages new since this session last read. Defaults to the full cross-session firehose (every message from every session); narrow with the optional filters. Advances this session's read cursor unless `peek` is true. This is the polling counterpart to the chat-watch monitor — useful when the monitor isn't running (e.g. macOS, where plugin monitors are gated off).",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(false),
+			DestructiveHint: protocol.BoolPtr(false),
+			IdempotentHint:  protocol.BoolPtr(false),
+			OpenWorldHint:   protocol.BoolPtr(true),
+		},
+		Params: []command.Param{
+			{Name: "to_me", Type: command.Bool, Description: "Only broadcasts and direct messages addressed to this session"},
+			{Name: "from", Type: command.String, Description: "Only messages from this sender session key (<repo>/<branch>)"},
+			{Name: "repo", Type: command.String, Description: "Only messages from senders in this repo (the <repo> segment of the sender key)"},
+			{Name: "peek", Type: command.Bool, Description: "Preview without advancing the read cursor (a later read still returns these messages)"},
+		},
+		Run: wrapMCPHandler("chat-read", handleChatRead),
+	})
+
+	app.AddCommand(&command.Command{
+		Name:  "chat-list-sessions",
+		Title: "List Active Chat Sessions",
+		Description: command.Description{
+			Short: "List active (non-abandoned) spinclass sessions across all repos — the candidate recipients for a directed chat-send. Each row is a session key (<repo>/<branch>), its repo, state, and description. Optionally filter to one repo.",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(true),
+			DestructiveHint: protocol.BoolPtr(false),
+			IdempotentHint:  protocol.BoolPtr(true),
+			OpenWorldHint:   protocol.BoolPtr(true),
+		},
+		Params: []command.Param{
+			{Name: "repo", Type: command.String, Description: "Only sessions in this repo (repo directory name)"},
+		},
+		Run: wrapMCPHandler("chat-list-sessions", handleChatListSessions),
 	})
 }
 
@@ -615,6 +655,83 @@ func handleChatSend(_ context.Context, args json.RawMessage, _ command.Prompter)
 		dest = to
 	}
 	return command.TextResult(fmt.Sprintf("sent to %s (from %s)", dest, from)), nil
+}
+
+func handleChatRead(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	var params struct {
+		ToMe bool   `json:"to_me"`
+		From string `json:"from"`
+		Repo string `json:"repo"`
+		Peek bool   `json:"peek"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+	}
+
+	me, err := currentSessionKey()
+	if err != nil {
+		return command.TextErrorResult(err.Error()), nil
+	}
+
+	msgs, err := chat.Read(me, chat.ReadFilter{ToMe: params.ToMe, From: params.From, Repo: params.Repo}, params.Peek)
+	if err != nil {
+		return command.TextErrorResult(fmt.Sprintf("could not read messages: %v", err)), nil
+	}
+	if len(msgs) == 0 {
+		return command.TextResult("no new messages"), nil
+	}
+
+	var b strings.Builder
+	for _, m := range msgs {
+		dest := ""
+		if m.To != chat.Broadcast {
+			dest = " -> " + m.To
+		}
+		fmt.Fprintf(&b, "from %s%s @%s: %s\n",
+			m.From, dest, m.Timestamp.UTC().Format(time.RFC3339), m.Body)
+	}
+	return command.TextResult(strings.TrimRight(b.String(), "\n")), nil
+}
+
+func handleChatListSessions(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	var params struct {
+		Repo string `json:"repo"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+	}
+
+	all, err := session.ListAll(nil)
+	if err != nil {
+		return command.TextErrorResult(fmt.Sprintf("could not list sessions: %v", err)), nil
+	}
+
+	live := all[:0:0]
+	for _, s := range all {
+		if s.ResolveState() == session.StateAbandoned {
+			continue
+		}
+		if params.Repo != "" && filepath.Base(s.RepoPath) != params.Repo {
+			continue
+		}
+		live = append(live, s)
+	}
+	session.SortStates(live)
+
+	if len(live) == 0 {
+		return command.TextResult("no active sessions"), nil
+	}
+
+	var b strings.Builder
+	for _, s := range live {
+		desc := ""
+		if s.Description != "" {
+			desc = " — " + s.Description
+		}
+		fmt.Fprintf(&b, "%s [%s] (%s)%s\n",
+			s.SessionKey, s.ResolveState(), filepath.Base(s.RepoPath), desc)
+	}
+	return command.TextResult(strings.TrimRight(b.String(), "\n")), nil
 }
 
 // currentSessionKey resolves the session key (<repo-dirname>/<branch>) for
