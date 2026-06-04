@@ -1,12 +1,18 @@
 ---
-status: proposed
-date: 2026-06-03
+status: experimental
+date: 2026-06-04
 promotion-criteria: |
-  Promote to `experimental` once a spinclass-shipped plugin monitor is
-  observed delivering a peer session's `chat-send` message into a second
-  live session's context without that session polling — i.e. the
-  monitor's stdout line lands as a `<channel>`-style notification and the
-  receiving agent reacts on its next turn. Promote to `testing` once the
+  PROMOTED to `experimental` on 2026-06-04: the spinclass-shipped plugin
+  monitor was observed arming and running on a Linux host with the real
+  merged build (`chat-watch` monitor present on launch). The push delivery
+  of a peer `chat-send` into a second live session is the remaining
+  `experimental → testing` gate — verify the streamed line lands as a
+  notification and the receiving agent reacts unprompted. NOTE: monitor
+  arming is gated by the Claude Code GrowthBook flag `tengu_amber_sentinel`,
+  which currently resolves true on Linux and false on macOS (see
+  Limitations → Platform-gated rollout); `experimental → testing`
+  verification must be done on a host where the flag is enabled. Also
+  decide the open questions below before `testing`: the
   open questions below have decisions: the per-session message-filtering
   predicate (how the monitor script selects "messages for THIS session"),
   the monitor restart/dedup story across `sc resume`, and whether the
@@ -149,9 +155,29 @@ chat-send  to="dodder/deft-sequoia"  message="can you bump the tap dep?"
   Information.
 - **Host availability.** No push on Bedrock / Vertex / Foundry or with
   non-essential traffic disabled; those sessions fall back to polling.
+- **Platform-gated rollout (`tengu_amber_sentinel`).** Plugin-monitor
+  arming is gated behind a Claude Code GrowthBook feature flag,
+  `tengu_amber_sentinel` (verified from the CC 2.1.161 binary: the
+  arming entrypoint begins `if (!Wu()) return;` where
+  `Wu() = D_("tengu_amber_sentinel", false)`). When the flag resolves
+  false the monitor is skipped **silently** — no log line, no error,
+  nothing in the task panel. As of 2026-06-04 the flag resolves **true
+  on Linux and false on macOS** for the same account and identical
+  `~/eng` config (confirmed by a matched-control test: same build, same
+  CLI `Bash`/`Write` deny, same plugin manifest — only the OS differs,
+  and only Linux arms the monitor). This is an Anthropic-side rollout
+  decision; **no client env var overrides it** — the only GrowthBook
+  env vars (`DISABLE_GROWTHBOOK`, `DISABLE_TELEMETRY`) push the flag
+  toward its `false` default, and the value is otherwise served by
+  GrowthBook based on platform/account targeting. Consequence: on macOS
+  hosts today the monitor receive-path is unavailable and the polling
+  `chat-read` path (issue #98) is the only working receive mechanism;
+  on Linux the monitor works. Re-check when the flag reaches macOS.
 - **Min version.** Plugin-declared monitors require Claude Code
   v2.1.105+. Older clients silently ignore the `experimental.monitors`
-  entry and get the `chat-read` polling fallback only.
+  entry and get the `chat-read` polling fallback only. (The
+  `experimental.monitors` placement under `experimental` is required as
+  of v2.1.129; top-level `monitors` still works but warns.)
 
 ## Tuning Levers
 
@@ -185,6 +211,19 @@ chat-send  to="dodder/deft-sequoia"  message="can you bump the tap dep?"
   the `claude/channel` push capability deliberately NOT used here;
   research-preview + Anthropic allowlist make it unsuitable for a
   paved-path tool. Recorded as the two-way alternative.
+- **`tengu_amber_sentinel` investigation (2026-06-04).** The monitor not
+  arming on macOS was root-caused to this GrowthBook flag via binary
+  inspection of the CC 2.1.161 bundle, after eliminating (each by
+  evidence): CC version, manifest/clown-compile correctness, telemetry
+  on/off, clown/moxy MCP proxying, inline-vs-installed plugin loading,
+  `policySettings.disableAllHooks` (hooks demonstrably run, so this gate
+  is false), and the CLI `Bash`/`Write` deny (present identically on the
+  working Linux host). The decisive control was the Linux host: same
+  `~/eng`, same deny, monitor works — isolating OS platform as the only
+  differing variable and the `tengu_amber_sentinel` GrowthBook gate as
+  the mechanism. Env-var override was researched and ruled out against
+  the official env-vars reference and the binary's gate functions
+  (`D_`, `Wu`, `gJ_`/`QJ_`).
 - `.claude-plugin/plugin.json` — the manifest the `monitors` entry is
   added to; copied + version-substituted into
   `share/purse-first/spinclass/.claude-plugin/` by `flake.nix`

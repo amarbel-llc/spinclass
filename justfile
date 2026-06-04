@@ -307,6 +307,14 @@ dev-repo:
     build_dir="$(pwd)/build"
     mkdir -p "$build_dir"
     nix develop --command go build -o "$build_dir/spinclass" ./cmd/spinclass
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    git -C "$dir" init -b main
+    git -C "$dir" -c commit.gpgsign=false commit --allow-empty -m "initial commit"
+    printf 'PATH_add "%s"\n' "$build_dir" > "$dir/.envrc"
+    direnv allow "$dir"
+    cd "$dir"
+    "$SHELL"
 
 # [explore] End-to-end smoke test for the cross-session chat prototype
 # (FDR 0009). Builds the binary, points XDG_STATE_HOME at a scratch dir,
@@ -345,14 +353,6 @@ explore-chat-roundtrip:
     if grep -qF "not for B" "$watch_out"; then echo "FAIL: message for C leaked to B"; pass=1; fi
     if [[ $pass -eq 0 ]]; then echo "VERDICT: chat send->watch round-trip WORKS"; else echo "VERDICT: round-trip FAILED"; fi
     exit $pass
-    dir=$(mktemp -d)
-    trap 'rm -rf "$dir"' EXIT
-    git -C "$dir" init -b main
-    git -C "$dir" -c commit.gpgsign=false commit --allow-empty -m "initial commit"
-    printf 'PATH_add "%s"\n' "$build_dir" > "$dir/.envrc"
-    direnv allow "$dir"
-    cd "$dir"
-    "$SHELL"
 
 # Tag a spinclass release. The "v" prefix is added for you, so pass
 # the semver without it. Usage: just tag 0.1.0 "feat: initial release"
