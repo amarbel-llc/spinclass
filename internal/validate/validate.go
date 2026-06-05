@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/tap"
@@ -178,8 +179,9 @@ var validPreMergeOutputFormats = map[string]bool{
 	"tap-ndjson": true,
 }
 
-// CheckHooks validates fields in the [hooks] table. Today it only checks
-// pre-merge-output-format; extend here as more enum-valued hook fields land.
+// CheckHooks validates fields in the [hooks] table: the
+// pre-merge-output-format enum and the inactivity-timeout duration. Extend
+// here as more constrained hook fields land.
 func CheckHooks(sf sweatfile.Sweatfile) []Issue {
 	var issues []Issue
 	if sf.Hooks == nil {
@@ -194,6 +196,26 @@ func CheckHooks(sf sweatfile.Sweatfile) []Issue {
 				Field:    "hooks.pre-merge-output-format",
 				Value:    v,
 			})
+		}
+	}
+	if sf.Hooks.InactivityTimeout != nil {
+		v := *sf.Hooks.InactivityTimeout
+		if v != "" {
+			if d, err := time.ParseDuration(v); err != nil {
+				issues = append(issues, Issue{
+					Message:  fmt.Sprintf("invalid inactivity-timeout %q (want a Go duration like \"180s\" or \"3m\"): %s", v, err),
+					Severity: SeverityError,
+					Field:    "hooks.inactivity-timeout",
+					Value:    v,
+				})
+			} else if d < 0 {
+				issues = append(issues, Issue{
+					Message:  fmt.Sprintf("inactivity-timeout %q must not be negative", v),
+					Severity: SeverityError,
+					Field:    "hooks.inactivity-timeout",
+					Value:    v,
+				})
+			}
 		}
 	}
 	return issues

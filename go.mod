@@ -6,7 +6,7 @@ require (
 	github.com/amarbel-llc/purse-first/libs/go-mcp v0.0.13
 	github.com/amarbel-llc/purse-first/libs/go-mcp/command/huh v0.0.4
 	github.com/amarbel-llc/tap/go v0.1.8
-	github.com/amarbel-llc/tommy v0.3.1-0.20260604181403-dc617508dcde
+	github.com/amarbel-llc/tommy v0.3.1
 	github.com/charmbracelet/huh v1.0.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/log v0.4.2

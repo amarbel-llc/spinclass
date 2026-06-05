@@ -42,6 +42,10 @@
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
       inputs.bats.follows = "bats";
+      # Dedupe tommy onto our top-level input (the single source of
+      # truth that backs goFlakeInputs + the codegen binary) so the
+      # graph resolves exactly one tommy rev.
+      inputs.tommy.follows = "tommy";
     };
 
     # conformist: the linter + formatter multiplexer (treefmt successor).
@@ -50,6 +54,19 @@
     # flake `formatter` and gated by `just lint-fmt` (conformist check).
     conformist = {
       url = "github:amarbel-llc/conformist";
+      inputs.igloo.follows = "igloo";
+      inputs.nixpkgs-master.follows = "nixpkgs-master";
+      inputs.utils.follows = "utils";
+    };
+
+    # Single source of truth for tommy (TOML library + codegen tool). The
+    # `tommy` Go module is bridged into go.mod via gomod2nix(7) goFlakeInputs
+    # and the same input's binary (tommy.packages.<system>.default) is what
+    # `go generate ./internal/sweatfile` (`//go:generate tommy generate`)
+    # runs — so the codegen tool and the library it targets are one rev,
+    # avoiding the cst-API skew that an ambient out-of-flake tommy causes.
+    tommy = {
+      url = "github:amarbel-llc/tommy";
       inputs.igloo.follows = "igloo";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
@@ -65,6 +82,7 @@
       bats,
       madder,
       conformist,
+      tommy,
     }:
     let
       spinclassVersion = "0.1.17";
@@ -99,6 +117,15 @@
           text = ''exec conformist "$@"'';
         };
 
+        # Bridge the tommy Go module from its flake input (gomod2nix(7)
+        # § GOFLAKEINPUTS) so buildGoApplication / mkGoEnv resolve it from
+        # the same rev whose binary regenerates sweatfile_tommy.go. Module
+        # is at tommy's repo root, so the shorthand form applies. (Hardcoded
+        # path pending tommy#112, which would expose this mapping directly.)
+        goFlakeInputs = {
+          "github.com/amarbel-llc/tommy" = tommy;
+        };
+
         # mkSpinclass builds spinclass with optional build-time-pinned
         # absolute /nix/store paths for `madder` and `direnv`. The
         # buildGoApplication overlay auto-injects -X main.version and
@@ -123,6 +150,7 @@
             commit = spinclassCommit;
             src = ./.;
             modules = ./gomod2nix.toml;
+            inherit goFlakeInputs;
             subPackages = [ "cmd/spinclass" ];
 
             # Pin Go through upstream nixpkgs and disable toolchain
@@ -283,8 +311,12 @@
           packages = [
             # gomod2nix-aware Go env; reads gomod2nix.toml for module
             # resolution. Drop-in for `pkgs.go` once gomod2nix is in
-            # use. Madder pattern.
-            (pkgs.mkGoEnv { pwd = ./.; })
+            # use. Madder pattern. goFlakeInputs bridges tommy so devshell
+            # `go build`/gopls resolve it identically to the nix build.
+            (pkgs.mkGoEnv {
+              pwd = ./.;
+              inherit goFlakeInputs;
+            })
             # gomod2nix CLI lives in the fork's overlay alongside
             # buildGoApplication / mkGoEnv — not in upstream nixpkgs.
             pkgs.gomod2nix
@@ -296,6 +328,10 @@
             pkgs.nixfmt
             pkgs.shfmt
             pkgs.shellcheck
+            # tommy codegen tool, from the same flake input that backs the
+            # bridged tommy library — so `go generate ./internal/sweatfile`
+            # (//go:generate tommy generate) targets a matching cst API.
+            tommy.packages.${system}.default
           ]
           ++ (with pkgs-master; [
             delve

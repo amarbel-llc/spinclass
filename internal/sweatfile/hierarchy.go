@@ -301,6 +301,9 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if other.Hooks.PreMergeOutputFormat != nil {
 			merged.Hooks.PreMergeOutputFormat = other.Hooks.PreMergeOutputFormat
 		}
+		if other.Hooks.InactivityTimeout != nil {
+			merged.Hooks.InactivityTimeout = other.Hooks.InactivityTimeout
+		}
 	}
 
 	// [session-entry]

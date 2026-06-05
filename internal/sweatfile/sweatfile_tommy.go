@@ -104,32 +104,61 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			}
 			d.data.Claude = claudeVal0
 		} else {
-			claudeVal0 := &Claude{}
-			_found := false
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range d.cstDoc.Root().Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "allow":
-						if _seen["allow"] {
-							return nil, fmt.Errorf("duplicate key %q", "allow")
+			_itClaude := cst.FindChildInlineTable(d.cstDoc.Root(), "claude")
+			if _itClaude != nil {
+				d.consumed["claude"] = true
+				claudeVal0 := &Claude{}
+				{
+					_seen := map[string]bool{}
+					for _, _kv := range _itClaude.Children {
+						if _kv.Kind != cst.NodeKeyValue {
+							continue
 						}
-						_seen["allow"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							claudeVal0.Allow = v
-							if claudeVal0.Allow == nil {
-								claudeVal0.Allow = []string{}
+						switch cst.KeyValueName(_kv) {
+						case "allow":
+							if _seen["allow"] {
+								return nil, fmt.Errorf("duplicate key %q", "allow")
 							}
-							d.consumed["allow"] = true
+							_seen["allow"] = true
+							if v, ok := cst.ExtractStringSlice(_kv); ok {
+								claudeVal0.Allow = v
+								if claudeVal0.Allow == nil {
+									claudeVal0.Allow = []string{}
+								}
+								d.consumed["claude.allow"] = true
+							}
 						}
 					}
 				}
-			}
-			if _found {
 				d.data.Claude = claudeVal0
+			} else {
+				claudeVal0 := &Claude{}
+				_found := false
+				{
+					_seen := map[string]bool{}
+					for _, _kv := range d.cstDoc.Root().Children {
+						if _kv.Kind != cst.NodeKeyValue {
+							continue
+						}
+						switch cst.KeyValueName(_kv) {
+						case "allow":
+							if _seen["allow"] {
+								return nil, fmt.Errorf("duplicate key %q", "allow")
+							}
+							_seen["allow"] = true
+							if v, ok := cst.ExtractStringSlice(_kv); ok {
+								claudeVal0.Allow = v
+								if claudeVal0.Allow == nil {
+									claudeVal0.Allow = []string{}
+								}
+								d.consumed["allow"] = true
+							}
+						}
+					}
+				}
+				if _found {
+					d.data.Claude = claudeVal0
+				}
 			}
 		}
 	}
@@ -170,32 +199,61 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			}
 			d.data.Git = gitVal1
 		} else {
-			gitVal1 := &Git{}
-			_found := false
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range d.cstDoc.Root().Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "excludes":
-						if _seen["excludes"] {
-							return nil, fmt.Errorf("duplicate key %q", "excludes")
+			_itGit := cst.FindChildInlineTable(d.cstDoc.Root(), "git")
+			if _itGit != nil {
+				d.consumed["git"] = true
+				gitVal1 := &Git{}
+				{
+					_seen := map[string]bool{}
+					for _, _kv := range _itGit.Children {
+						if _kv.Kind != cst.NodeKeyValue {
+							continue
 						}
-						_seen["excludes"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							gitVal1.Excludes = v
-							if gitVal1.Excludes == nil {
-								gitVal1.Excludes = []string{}
+						switch cst.KeyValueName(_kv) {
+						case "excludes":
+							if _seen["excludes"] {
+								return nil, fmt.Errorf("duplicate key %q", "excludes")
 							}
-							d.consumed["excludes"] = true
+							_seen["excludes"] = true
+							if v, ok := cst.ExtractStringSlice(_kv); ok {
+								gitVal1.Excludes = v
+								if gitVal1.Excludes == nil {
+									gitVal1.Excludes = []string{}
+								}
+								d.consumed["git.excludes"] = true
+							}
 						}
 					}
 				}
-			}
-			if _found {
 				d.data.Git = gitVal1
+			} else {
+				gitVal1 := &Git{}
+				_found := false
+				{
+					_seen := map[string]bool{}
+					for _, _kv := range d.cstDoc.Root().Children {
+						if _kv.Kind != cst.NodeKeyValue {
+							continue
+						}
+						switch cst.KeyValueName(_kv) {
+						case "excludes":
+							if _seen["excludes"] {
+								return nil, fmt.Errorf("duplicate key %q", "excludes")
+							}
+							_seen["excludes"] = true
+							if v, ok := cst.ExtractStringSlice(_kv); ok {
+								gitVal1.Excludes = v
+								if gitVal1.Excludes == nil {
+									gitVal1.Excludes = []string{}
+								}
+								d.consumed["excludes"] = true
+							}
+						}
+					}
+				}
+				if _found {
+					d.data.Git = gitVal1
+				}
 			}
 		}
 	}
@@ -262,32 +320,86 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			}
 			d.data.Direnv = direnvVal2
 		} else {
-			direnvVal2 := &Direnv{}
-			_found := false
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range d.cstDoc.Root().Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "envrc":
-						if _seen["envrc"] {
-							return nil, fmt.Errorf("duplicate key %q", "envrc")
+			_itDirenv := cst.FindChildInlineTable(d.cstDoc.Root(), "direnv")
+			if _itDirenv != nil {
+				d.consumed["direnv"] = true
+				direnvVal2 := &Direnv{}
+				{
+					_seen := map[string]bool{}
+					for _, _kv := range _itDirenv.Children {
+						if _kv.Kind != cst.NodeKeyValue {
+							continue
 						}
-						_seen["envrc"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							direnvVal2.Envrc = v
-							if direnvVal2.Envrc == nil {
-								direnvVal2.Envrc = []string{}
+						switch cst.KeyValueName(_kv) {
+						case "envrc":
+							if _seen["envrc"] {
+								return nil, fmt.Errorf("duplicate key %q", "envrc")
 							}
-							d.consumed["envrc"] = true
+							_seen["envrc"] = true
+							if v, ok := cst.ExtractStringSlice(_kv); ok {
+								direnvVal2.Envrc = v
+								if direnvVal2.Envrc == nil {
+									direnvVal2.Envrc = []string{}
+								}
+								d.consumed["direnv.envrc"] = true
+							}
 						}
 					}
 				}
-			}
-			if _found {
+				{
+					_ctDirenvDotenv := cst.FindChildTable(d.cstDoc.Root(), _itDirenv, "dotenv")
+					if _ctDirenvDotenv != nil {
+						direnvVal2.Dotenv = cst.ExtractStringMap(_ctDirenvDotenv)
+						if direnvVal2.Dotenv == nil {
+							direnvVal2.Dotenv = map[string]string{}
+						}
+						d.consumed["direnv.dotenv"] = true
+						for _ik := range direnvVal2.Dotenv {
+							d.consumed["direnv.dotenv"+"."+_ik] = true
+						}
+					} else {
+						_it := cst.FindChildInlineTable(_itDirenv, "dotenv")
+						if _it != nil {
+							direnvVal2.Dotenv = cst.ExtractStringMap(_it)
+							if direnvVal2.Dotenv == nil {
+								direnvVal2.Dotenv = map[string]string{}
+							}
+							d.consumed["direnv.dotenv"] = true
+							for _ik := range direnvVal2.Dotenv {
+								d.consumed["direnv.dotenv"+"."+_ik] = true
+							}
+						}
+					}
+				}
 				d.data.Direnv = direnvVal2
+			} else {
+				direnvVal2 := &Direnv{}
+				_found := false
+				{
+					_seen := map[string]bool{}
+					for _, _kv := range d.cstDoc.Root().Children {
+						if _kv.Kind != cst.NodeKeyValue {
+							continue
+						}
+						switch cst.KeyValueName(_kv) {
+						case "envrc":
+							if _seen["envrc"] {
+								return nil, fmt.Errorf("duplicate key %q", "envrc")
+							}
+							_seen["envrc"] = true
+							if v, ok := cst.ExtractStringSlice(_kv); ok {
+								direnvVal2.Envrc = v
+								if direnvVal2.Envrc == nil {
+									direnvVal2.Envrc = []string{}
+								}
+								d.consumed["envrc"] = true
+							}
+						}
+					}
+				}
+				if _found {
+					d.data.Direnv = direnvVal2
+				}
 			}
 		}
 	}
@@ -401,125 +513,260 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 							hooksVal3.PreMergeOutputFormat = &v
 							d.consumed["hooks.pre-merge-output-format"] = true
 						}
+					case "inactivity-timeout":
+						if _seen["inactivity-timeout"] {
+							return nil, fmt.Errorf("duplicate key %q", "inactivity-timeout")
+						}
+						_seen["inactivity-timeout"] = true
+						if v, ok := cst.ExtractString(_kv); ok {
+							hooksVal3.InactivityTimeout = &v
+							d.consumed["hooks.inactivity-timeout"] = true
+						}
 					}
 				}
 			}
 			d.data.Hooks = hooksVal3
 		} else {
-			hooksVal3 := &Hooks{}
-			_found := false
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range d.cstDoc.Root().Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "create":
-						if _seen["create"] {
-							return nil, fmt.Errorf("duplicate key %q", "create")
+			_itHooks := cst.FindChildInlineTable(d.cstDoc.Root(), "hooks")
+			if _itHooks != nil {
+				d.consumed["hooks"] = true
+				hooksVal3 := &Hooks{}
+				{
+					_seen := map[string]bool{}
+					for _, _kv := range _itHooks.Children {
+						if _kv.Kind != cst.NodeKeyValue {
+							continue
 						}
-						_seen["create"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.Create = &v
-							_found = true
-							d.consumed["create"] = true
-						}
-					case "stop":
-						if _seen["stop"] {
-							return nil, fmt.Errorf("duplicate key %q", "stop")
-						}
-						_seen["stop"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.Stop = &v
-							_found = true
-							d.consumed["stop"] = true
-						}
-					case "pre-merge":
-						if _seen["pre-merge"] {
-							return nil, fmt.Errorf("duplicate key %q", "pre-merge")
-						}
-						_seen["pre-merge"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.PreMerge = &v
-							_found = true
-							d.consumed["pre-merge"] = true
-						}
-					case "on-attach":
-						if _seen["on-attach"] {
-							return nil, fmt.Errorf("duplicate key %q", "on-attach")
-						}
-						_seen["on-attach"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.OnAttach = &v
-							_found = true
-							d.consumed["on-attach"] = true
-						}
-					case "on-detach":
-						if _seen["on-detach"] {
-							return nil, fmt.Errorf("duplicate key %q", "on-detach")
-						}
-						_seen["on-detach"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.OnDetach = &v
-							_found = true
-							d.consumed["on-detach"] = true
-						}
-					case "disallow-main-worktree":
-						if _seen["disallow-main-worktree"] {
-							return nil, fmt.Errorf("duplicate key %q", "disallow-main-worktree")
-						}
-						_seen["disallow-main-worktree"] = true
-						if v, ok := cst.ExtractBool(_kv); ok {
-							hooksVal3.DisallowMainWorktree = &v
-							_found = true
-							d.consumed["disallow-main-worktree"] = true
-						}
-					case "tool-use-log":
-						if _seen["tool-use-log"] {
-							return nil, fmt.Errorf("duplicate key %q", "tool-use-log")
-						}
-						_seen["tool-use-log"] = true
-						if v, ok := cst.ExtractBool(_kv); ok {
-							hooksVal3.ToolUseLog = &v
-							_found = true
-							d.consumed["tool-use-log"] = true
-						}
-					case "disable-merge":
-						if _seen["disable-merge"] {
-							return nil, fmt.Errorf("duplicate key %q", "disable-merge")
-						}
-						_seen["disable-merge"] = true
-						if v, ok := cst.ExtractBool(_kv); ok {
-							hooksVal3.DisableMerge = &v
-							_found = true
-							d.consumed["disable-merge"] = true
-						}
-					case "disable-nix-gc":
-						if _seen["disable-nix-gc"] {
-							return nil, fmt.Errorf("duplicate key %q", "disable-nix-gc")
-						}
-						_seen["disable-nix-gc"] = true
-						if v, ok := cst.ExtractBool(_kv); ok {
-							hooksVal3.DisableNixGC = &v
-							_found = true
-							d.consumed["disable-nix-gc"] = true
-						}
-					case "pre-merge-output-format":
-						if _seen["pre-merge-output-format"] {
-							return nil, fmt.Errorf("duplicate key %q", "pre-merge-output-format")
-						}
-						_seen["pre-merge-output-format"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.PreMergeOutputFormat = &v
-							_found = true
-							d.consumed["pre-merge-output-format"] = true
+						switch cst.KeyValueName(_kv) {
+						case "create":
+							if _seen["create"] {
+								return nil, fmt.Errorf("duplicate key %q", "create")
+							}
+							_seen["create"] = true
+							if v, ok := cst.ExtractString(_kv); ok {
+								hooksVal3.Create = &v
+								d.consumed["hooks.create"] = true
+							}
+						case "stop":
+							if _seen["stop"] {
+								return nil, fmt.Errorf("duplicate key %q", "stop")
+							}
+							_seen["stop"] = true
+							if v, ok := cst.ExtractString(_kv); ok {
+								hooksVal3.Stop = &v
+								d.consumed["hooks.stop"] = true
+							}
+						case "pre-merge":
+							if _seen["pre-merge"] {
+								return nil, fmt.Errorf("duplicate key %q", "pre-merge")
+							}
+							_seen["pre-merge"] = true
+							if v, ok := cst.ExtractString(_kv); ok {
+								hooksVal3.PreMerge = &v
+								d.consumed["hooks.pre-merge"] = true
+							}
+						case "on-attach":
+							if _seen["on-attach"] {
+								return nil, fmt.Errorf("duplicate key %q", "on-attach")
+							}
+							_seen["on-attach"] = true
+							if v, ok := cst.ExtractString(_kv); ok {
+								hooksVal3.OnAttach = &v
+								d.consumed["hooks.on-attach"] = true
+							}
+						case "on-detach":
+							if _seen["on-detach"] {
+								return nil, fmt.Errorf("duplicate key %q", "on-detach")
+							}
+							_seen["on-detach"] = true
+							if v, ok := cst.ExtractString(_kv); ok {
+								hooksVal3.OnDetach = &v
+								d.consumed["hooks.on-detach"] = true
+							}
+						case "disallow-main-worktree":
+							if _seen["disallow-main-worktree"] {
+								return nil, fmt.Errorf("duplicate key %q", "disallow-main-worktree")
+							}
+							_seen["disallow-main-worktree"] = true
+							if v, ok := cst.ExtractBool(_kv); ok {
+								hooksVal3.DisallowMainWorktree = &v
+								d.consumed["hooks.disallow-main-worktree"] = true
+							}
+						case "tool-use-log":
+							if _seen["tool-use-log"] {
+								return nil, fmt.Errorf("duplicate key %q", "tool-use-log")
+							}
+							_seen["tool-use-log"] = true
+							if v, ok := cst.ExtractBool(_kv); ok {
+								hooksVal3.ToolUseLog = &v
+								d.consumed["hooks.tool-use-log"] = true
+							}
+						case "disable-merge":
+							if _seen["disable-merge"] {
+								return nil, fmt.Errorf("duplicate key %q", "disable-merge")
+							}
+							_seen["disable-merge"] = true
+							if v, ok := cst.ExtractBool(_kv); ok {
+								hooksVal3.DisableMerge = &v
+								d.consumed["hooks.disable-merge"] = true
+							}
+						case "disable-nix-gc":
+							if _seen["disable-nix-gc"] {
+								return nil, fmt.Errorf("duplicate key %q", "disable-nix-gc")
+							}
+							_seen["disable-nix-gc"] = true
+							if v, ok := cst.ExtractBool(_kv); ok {
+								hooksVal3.DisableNixGC = &v
+								d.consumed["hooks.disable-nix-gc"] = true
+							}
+						case "pre-merge-output-format":
+							if _seen["pre-merge-output-format"] {
+								return nil, fmt.Errorf("duplicate key %q", "pre-merge-output-format")
+							}
+							_seen["pre-merge-output-format"] = true
+							if v, ok := cst.ExtractString(_kv); ok {
+								hooksVal3.PreMergeOutputFormat = &v
+								d.consumed["hooks.pre-merge-output-format"] = true
+							}
+						case "inactivity-timeout":
+							if _seen["inactivity-timeout"] {
+								return nil, fmt.Errorf("duplicate key %q", "inactivity-timeout")
+							}
+							_seen["inactivity-timeout"] = true
+							if v, ok := cst.ExtractString(_kv); ok {
+								hooksVal3.InactivityTimeout = &v
+								d.consumed["hooks.inactivity-timeout"] = true
+							}
 						}
 					}
 				}
-			}
-			if _found {
 				d.data.Hooks = hooksVal3
+			} else {
+				hooksVal3 := &Hooks{}
+				_found := false
+				{
+					_seen := map[string]bool{}
+					for _, _kv := range d.cstDoc.Root().Children {
+						if _kv.Kind != cst.NodeKeyValue {
+							continue
+						}
+						switch cst.KeyValueName(_kv) {
+						case "create":
+							if _seen["create"] {
+								return nil, fmt.Errorf("duplicate key %q", "create")
+							}
+							_seen["create"] = true
+							if v, ok := cst.ExtractString(_kv); ok {
+								hooksVal3.Create = &v
+								_found = true
+								d.consumed["create"] = true
+							}
+						case "stop":
+							if _seen["stop"] {
+								return nil, fmt.Errorf("duplicate key %q", "stop")
+							}
+							_seen["stop"] = true
+							if v, ok := cst.ExtractString(_kv); ok {
+								hooksVal3.Stop = &v
+								_found = true
+								d.consumed["stop"] = true
+							}
+						case "pre-merge":
+							if _seen["pre-merge"] {
+								return nil, fmt.Errorf("duplicate key %q", "pre-merge")
+							}
+							_seen["pre-merge"] = true
+							if v, ok := cst.ExtractString(_kv); ok {
+								hooksVal3.PreMerge = &v
+								_found = true
+								d.consumed["pre-merge"] = true
+							}
+						case "on-attach":
+							if _seen["on-attach"] {
+								return nil, fmt.Errorf("duplicate key %q", "on-attach")
+							}
+							_seen["on-attach"] = true
+							if v, ok := cst.ExtractString(_kv); ok {
+								hooksVal3.OnAttach = &v
+								_found = true
+								d.consumed["on-attach"] = true
+							}
+						case "on-detach":
+							if _seen["on-detach"] {
+								return nil, fmt.Errorf("duplicate key %q", "on-detach")
+							}
+							_seen["on-detach"] = true
+							if v, ok := cst.ExtractString(_kv); ok {
+								hooksVal3.OnDetach = &v
+								_found = true
+								d.consumed["on-detach"] = true
+							}
+						case "disallow-main-worktree":
+							if _seen["disallow-main-worktree"] {
+								return nil, fmt.Errorf("duplicate key %q", "disallow-main-worktree")
+							}
+							_seen["disallow-main-worktree"] = true
+							if v, ok := cst.ExtractBool(_kv); ok {
+								hooksVal3.DisallowMainWorktree = &v
+								_found = true
+								d.consumed["disallow-main-worktree"] = true
+							}
+						case "tool-use-log":
+							if _seen["tool-use-log"] {
+								return nil, fmt.Errorf("duplicate key %q", "tool-use-log")
+							}
+							_seen["tool-use-log"] = true
+							if v, ok := cst.ExtractBool(_kv); ok {
+								hooksVal3.ToolUseLog = &v
+								_found = true
+								d.consumed["tool-use-log"] = true
+							}
+						case "disable-merge":
+							if _seen["disable-merge"] {
+								return nil, fmt.Errorf("duplicate key %q", "disable-merge")
+							}
+							_seen["disable-merge"] = true
+							if v, ok := cst.ExtractBool(_kv); ok {
+								hooksVal3.DisableMerge = &v
+								_found = true
+								d.consumed["disable-merge"] = true
+							}
+						case "disable-nix-gc":
+							if _seen["disable-nix-gc"] {
+								return nil, fmt.Errorf("duplicate key %q", "disable-nix-gc")
+							}
+							_seen["disable-nix-gc"] = true
+							if v, ok := cst.ExtractBool(_kv); ok {
+								hooksVal3.DisableNixGC = &v
+								_found = true
+								d.consumed["disable-nix-gc"] = true
+							}
+						case "pre-merge-output-format":
+							if _seen["pre-merge-output-format"] {
+								return nil, fmt.Errorf("duplicate key %q", "pre-merge-output-format")
+							}
+							_seen["pre-merge-output-format"] = true
+							if v, ok := cst.ExtractString(_kv); ok {
+								hooksVal3.PreMergeOutputFormat = &v
+								_found = true
+								d.consumed["pre-merge-output-format"] = true
+							}
+						case "inactivity-timeout":
+							if _seen["inactivity-timeout"] {
+								return nil, fmt.Errorf("duplicate key %q", "inactivity-timeout")
+							}
+							_seen["inactivity-timeout"] = true
+							if v, ok := cst.ExtractString(_kv); ok {
+								hooksVal3.InactivityTimeout = &v
+								_found = true
+								d.consumed["inactivity-timeout"] = true
+							}
+						}
+					}
+				}
+				if _found {
+					d.data.Hooks = hooksVal3
+				}
 			}
 		}
 	}
@@ -619,66 +866,153 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			}
 			d.data.SessionEntry = sessionEntryVal4
 		} else {
-			sessionEntryVal4 := &SessionEntry{}
-			_found := false
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range d.cstDoc.Root().Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "start":
-						if _seen["start"] {
-							return nil, fmt.Errorf("duplicate key %q", "start")
+			_itSessionEntry := cst.FindChildInlineTable(d.cstDoc.Root(), "session-entry")
+			if _itSessionEntry != nil {
+				d.consumed["session-entry"] = true
+				sessionEntryVal4 := &SessionEntry{}
+				{
+					_seen := map[string]bool{}
+					for _, _kv := range _itSessionEntry.Children {
+						if _kv.Kind != cst.NodeKeyValue {
+							continue
 						}
-						_seen["start"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							sessionEntryVal4.Start = v
-							if sessionEntryVal4.Start == nil {
-								sessionEntryVal4.Start = []string{}
+						switch cst.KeyValueName(_kv) {
+						case "start":
+							if _seen["start"] {
+								return nil, fmt.Errorf("duplicate key %q", "start")
 							}
-							d.consumed["start"] = true
-						}
-					case "resume":
-						if _seen["resume"] {
-							return nil, fmt.Errorf("duplicate key %q", "resume")
-						}
-						_seen["resume"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							sessionEntryVal4.Resume = v
-							if sessionEntryVal4.Resume == nil {
-								sessionEntryVal4.Resume = []string{}
+							_seen["start"] = true
+							if v, ok := cst.ExtractStringSlice(_kv); ok {
+								sessionEntryVal4.Start = v
+								if sessionEntryVal4.Start == nil {
+									sessionEntryVal4.Start = []string{}
+								}
+								d.consumed["session-entry.start"] = true
 							}
-							d.consumed["resume"] = true
-						}
-					case "liveness-probe":
-						if _seen["liveness-probe"] {
-							return nil, fmt.Errorf("duplicate key %q", "liveness-probe")
-						}
-						_seen["liveness-probe"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							sessionEntryVal4.LivenessProbe = v
-							if sessionEntryVal4.LivenessProbe == nil {
-								sessionEntryVal4.LivenessProbe = []string{}
+						case "resume":
+							if _seen["resume"] {
+								return nil, fmt.Errorf("duplicate key %q", "resume")
 							}
-							d.consumed["liveness-probe"] = true
-						}
-					case "tombstone-retention":
-						if _seen["tombstone-retention"] {
-							return nil, fmt.Errorf("duplicate key %q", "tombstone-retention")
-						}
-						_seen["tombstone-retention"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							sessionEntryVal4.TombstoneRetention = v
-							_found = true
-							d.consumed["tombstone-retention"] = true
+							_seen["resume"] = true
+							if v, ok := cst.ExtractStringSlice(_kv); ok {
+								sessionEntryVal4.Resume = v
+								if sessionEntryVal4.Resume == nil {
+									sessionEntryVal4.Resume = []string{}
+								}
+								d.consumed["session-entry.resume"] = true
+							}
+						case "liveness-probe":
+							if _seen["liveness-probe"] {
+								return nil, fmt.Errorf("duplicate key %q", "liveness-probe")
+							}
+							_seen["liveness-probe"] = true
+							if v, ok := cst.ExtractStringSlice(_kv); ok {
+								sessionEntryVal4.LivenessProbe = v
+								if sessionEntryVal4.LivenessProbe == nil {
+									sessionEntryVal4.LivenessProbe = []string{}
+								}
+								d.consumed["session-entry.liveness-probe"] = true
+							}
+						case "tombstone-retention":
+							if _seen["tombstone-retention"] {
+								return nil, fmt.Errorf("duplicate key %q", "tombstone-retention")
+							}
+							_seen["tombstone-retention"] = true
+							if v, ok := cst.ExtractString(_kv); ok {
+								sessionEntryVal4.TombstoneRetention = v
+								d.consumed["session-entry.tombstone-retention"] = true
+							}
 						}
 					}
 				}
-			}
-			if _found {
+				{
+					_ctSessionEntryEnv := cst.FindChildTable(d.cstDoc.Root(), _itSessionEntry, "env")
+					if _ctSessionEntryEnv != nil {
+						sessionEntryVal4.Env = cst.ExtractStringMap(_ctSessionEntryEnv)
+						if sessionEntryVal4.Env == nil {
+							sessionEntryVal4.Env = map[string]string{}
+						}
+						d.consumed["session-entry.env"] = true
+						for _ik := range sessionEntryVal4.Env {
+							d.consumed["session-entry.env"+"."+_ik] = true
+						}
+					} else {
+						_it := cst.FindChildInlineTable(_itSessionEntry, "env")
+						if _it != nil {
+							sessionEntryVal4.Env = cst.ExtractStringMap(_it)
+							if sessionEntryVal4.Env == nil {
+								sessionEntryVal4.Env = map[string]string{}
+							}
+							d.consumed["session-entry.env"] = true
+							for _ik := range sessionEntryVal4.Env {
+								d.consumed["session-entry.env"+"."+_ik] = true
+							}
+						}
+					}
+				}
 				d.data.SessionEntry = sessionEntryVal4
+			} else {
+				sessionEntryVal4 := &SessionEntry{}
+				_found := false
+				{
+					_seen := map[string]bool{}
+					for _, _kv := range d.cstDoc.Root().Children {
+						if _kv.Kind != cst.NodeKeyValue {
+							continue
+						}
+						switch cst.KeyValueName(_kv) {
+						case "start":
+							if _seen["start"] {
+								return nil, fmt.Errorf("duplicate key %q", "start")
+							}
+							_seen["start"] = true
+							if v, ok := cst.ExtractStringSlice(_kv); ok {
+								sessionEntryVal4.Start = v
+								if sessionEntryVal4.Start == nil {
+									sessionEntryVal4.Start = []string{}
+								}
+								d.consumed["start"] = true
+							}
+						case "resume":
+							if _seen["resume"] {
+								return nil, fmt.Errorf("duplicate key %q", "resume")
+							}
+							_seen["resume"] = true
+							if v, ok := cst.ExtractStringSlice(_kv); ok {
+								sessionEntryVal4.Resume = v
+								if sessionEntryVal4.Resume == nil {
+									sessionEntryVal4.Resume = []string{}
+								}
+								d.consumed["resume"] = true
+							}
+						case "liveness-probe":
+							if _seen["liveness-probe"] {
+								return nil, fmt.Errorf("duplicate key %q", "liveness-probe")
+							}
+							_seen["liveness-probe"] = true
+							if v, ok := cst.ExtractStringSlice(_kv); ok {
+								sessionEntryVal4.LivenessProbe = v
+								if sessionEntryVal4.LivenessProbe == nil {
+									sessionEntryVal4.LivenessProbe = []string{}
+								}
+								d.consumed["liveness-probe"] = true
+							}
+						case "tombstone-retention":
+							if _seen["tombstone-retention"] {
+								return nil, fmt.Errorf("duplicate key %q", "tombstone-retention")
+							}
+							_seen["tombstone-retention"] = true
+							if v, ok := cst.ExtractString(_kv); ok {
+								sessionEntryVal4.TombstoneRetention = v
+								_found = true
+								d.consumed["tombstone-retention"] = true
+							}
+						}
+					}
+				}
+				if _found {
+					d.data.SessionEntry = sessionEntryVal4
+				}
 			}
 		}
 	}
@@ -892,11 +1226,9 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 	}
 	return d, nil
 }
-
 func (d *SweatfileDocument) Data() *Sweatfile {
 	return &d.data
 }
-
 func (d *SweatfileDocument) Encode() ([]byte, error) {
 	if d.data.Claude != nil {
 		tableNode := cst.EnsureChildTable(d.cstDoc.Root(), d.cstDoc.Root(), "claude")
@@ -986,6 +1318,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 		}
 		if d.data.Hooks.PreMergeOutputFormat != nil {
 			if err := cst.SetAny(tableNode, "pre-merge-output-format", *d.data.Hooks.PreMergeOutputFormat); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.Hooks.InactivityTimeout != nil {
+			if err := cst.SetAny(tableNode, "inactivity-timeout", *d.data.Hooks.InactivityTimeout); err != nil {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
@@ -1142,27 +1479,21 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 	}
 	return d.cstDoc.Bytes(), nil
 }
-
 func (d *SweatfileDocument) Undecoded() []string {
 	return document.UndecodedKeys(d.cstDoc.Root(), d.consumed)
 }
-
 func (d *SweatfileDocument) Comment(key string) string {
 	return d.cstDoc.GetComment(key)
 }
-
 func (d *SweatfileDocument) SetComment(key, comment string) {
 	d.cstDoc.SetComment(key, comment)
 }
-
 func (d *SweatfileDocument) InlineComment(key string) string {
 	return d.cstDoc.GetInlineComment(key)
 }
-
 func (d *SweatfileDocument) SetInlineComment(key, comment string) {
 	d.cstDoc.SetInlineComment(key, comment)
 }
-
 func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst.Node, consumed map[string]bool, keyPrefix string) error {
 	{
 		_seen := map[string]bool{}
@@ -1190,6 +1521,9 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 		_ctClaude, _dupClaude := cst.FindChildTableDup(doc.Root(), container, "claude")
 		if _dupClaude {
 			return fmt.Errorf("duplicate table %q", "claude")
+		}
+		if _ctClaude == nil {
+			_ctClaude = cst.FindChildInlineTable(container, "claude")
 		}
 		if _ctClaude != nil {
 			consumed[keyPrefix+"claude"] = true
@@ -1252,6 +1586,9 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 		if _dupGit {
 			return fmt.Errorf("duplicate table %q", "git")
 		}
+		if _ctGit == nil {
+			_ctGit = cst.FindChildInlineTable(container, "git")
+		}
 		if _ctGit != nil {
 			consumed[keyPrefix+"git"] = true
 			gitVal1 := &Git{}
@@ -1312,6 +1649,9 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 		_ctDirenv, _dupDirenv := cst.FindChildTableDup(doc.Root(), container, "direnv")
 		if _dupDirenv {
 			return fmt.Errorf("duplicate table %q", "direnv")
+		}
+		if _ctDirenv == nil {
+			_ctDirenv = cst.FindChildInlineTable(container, "direnv")
 		}
 		if _ctDirenv != nil {
 			consumed[keyPrefix+"direnv"] = true
@@ -1398,6 +1738,9 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 		_ctHooks, _dupHooks := cst.FindChildTableDup(doc.Root(), container, "hooks")
 		if _dupHooks {
 			return fmt.Errorf("duplicate table %q", "hooks")
+		}
+		if _ctHooks == nil {
+			_ctHooks = cst.FindChildInlineTable(container, "hooks")
 		}
 		if _ctHooks != nil {
 			consumed[keyPrefix+"hooks"] = true
@@ -1498,6 +1841,15 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 						if v, ok := cst.ExtractString(_kv); ok {
 							hooksVal3.PreMergeOutputFormat = &v
 							consumed[keyPrefix+"hooks.pre-merge-output-format"] = true
+						}
+					case "inactivity-timeout":
+						if _seen["inactivity-timeout"] {
+							return fmt.Errorf("duplicate key %q", "inactivity-timeout")
+						}
+						_seen["inactivity-timeout"] = true
+						if v, ok := cst.ExtractString(_kv); ok {
+							hooksVal3.InactivityTimeout = &v
+							consumed[keyPrefix+"hooks.inactivity-timeout"] = true
 						}
 					}
 				}
@@ -1613,6 +1965,16 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 							_found = true
 							consumed["pre-merge-output-format"] = true
 						}
+					case "inactivity-timeout":
+						if _seen["inactivity-timeout"] {
+							return fmt.Errorf("duplicate key %q", "inactivity-timeout")
+						}
+						_seen["inactivity-timeout"] = true
+						if v, ok := cst.ExtractString(_kv); ok {
+							hooksVal3.InactivityTimeout = &v
+							_found = true
+							consumed["inactivity-timeout"] = true
+						}
 					}
 				}
 			}
@@ -1625,6 +1987,9 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 		_ctSessionEntry, _dupSessionEntry := cst.FindChildTableDup(doc.Root(), container, "session-entry")
 		if _dupSessionEntry {
 			return fmt.Errorf("duplicate table %q", "session-entry")
+		}
+		if _ctSessionEntry == nil {
+			_ctSessionEntry = cst.FindChildInlineTable(container, "session-entry")
 		}
 		if _ctSessionEntry != nil {
 			consumed[keyPrefix+"session-entry"] = true
@@ -1969,7 +2334,6 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 	}
 	return nil
 }
-
 func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst.Node) error {
 	if data.Claude != nil {
 		tableNode := cst.EnsureChildTable(doc.Root(), container, "claude")
@@ -2059,6 +2423,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if data.Hooks.PreMergeOutputFormat != nil {
 			if err := cst.SetAny(tableNode, "pre-merge-output-format", *data.Hooks.PreMergeOutputFormat); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.Hooks.InactivityTimeout != nil {
+			if err := cst.SetAny(tableNode, "inactivity-timeout", *data.Hooks.InactivityTimeout); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}

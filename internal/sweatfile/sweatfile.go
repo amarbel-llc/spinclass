@@ -39,6 +39,7 @@ type Hooks struct {
 	DisableMerge         *bool   `toml:"disable-merge"`
 	DisableNixGC         *bool   `toml:"disable-nix-gc"`
 	PreMergeOutputFormat *string `toml:"pre-merge-output-format"`
+	InactivityTimeout    *string `toml:"inactivity-timeout"`
 }
 
 // MCPServerDef declares an MCP server to register and auto-approve
@@ -102,6 +103,23 @@ func (sf Sweatfile) PreMergeHookCommand() *string {
 		return nil
 	}
 	return sf.Hooks.PreMerge
+}
+
+// InactivityTimeoutValue returns the parsed [hooks].inactivity-timeout, or 0
+// when unset, empty, or unparseable. A non-zero value arms the pre-merge hook
+// watchdog in RunPreMergeHookContext: the hook is killed after this span with
+// no output (stdout+stderr). Validation (sc validate) rejects an unparseable
+// value up front; the runtime parse here degrades to 0 (disabled) so a bad
+// value can never silently block a merge.
+func (sf Sweatfile) InactivityTimeoutValue() time.Duration {
+	if sf.Hooks == nil || sf.Hooks.InactivityTimeout == nil {
+		return 0
+	}
+	d, err := time.ParseDuration(*sf.Hooks.InactivityTimeout)
+	if err != nil || d < 0 {
+		return 0
+	}
+	return d
 }
 
 // PreMergeOutputFormatValue returns the configured format for the

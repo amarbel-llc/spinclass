@@ -161,6 +161,24 @@ from within the synchronous tools are intentionally NOT implemented — that
 requires go-mcp + clown-stdio-bridge changes (see those repos' issues); async
 is the spinclass-only path.
 
+### Pre-merge hook inactivity watchdog
+
+`[hooks].inactivity-timeout` (a Go duration string, e.g. `"180s"`; unset/`""`/
+non-positive = disabled, the default) bounds how long the `pre-merge` hook may
+go **silent**. An `activityWriter` in `sweatfile.RunPreMergeHookContext` bumps a
+last-activity timestamp on every output line; a goroutine on a `timeout/4`
+ticker (clamped `[1s, 15s]`) cancels the hook's child context once
+`time.Since(lastActivity) > timeout`, which kills the `sh -c` subprocess
+(`exec.CommandContext`). The kill surfaces as a distinct error — `pre-merge hook
+killed: no output for <timeout> (inactivity-timeout)` — and, because the
+watchdog ctx is a child of the caller's, it is distinguishable from a
+`session-job-cancel` (only inactivity yields that error). Both the sync and
+async paths funnel through `RunPreMergeHookContext`, so the watchdog covers
+`merge`/`check`/`sc check` and their `-async` twins. This catches a *wedged*
+hook (different from the async tools, which only sidestep the request-timeout
+for hooks that are still making progress). `sc validate` rejects an
+unparseable or negative value.
+
 By default `sc close` and `sc clean` perform worktree-scoped Nix garbage
 collection after removing the worktree: spinclass enumerates the gc roots
 resolving into the worktree, expands their closure, and runs `nix-store

@@ -11,6 +11,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/amarbel-llc/spinclass/internal/embeds"
 )
@@ -182,9 +185,83 @@ func (sf Sweatfile) RunPreMergeHook(worktreePath string, w io.Writer) error {
 // RunPreMergeHookContext runs the pre-merge hook bound to ctx, so a caller
 // (the async job runner) can cancel/kill the hook subprocess. The synchronous
 // path uses RunPreMergeHook, which passes a background context.
+//
+// When [hooks].inactivity-timeout is set, an activity watchdog wraps the hook:
+// every output line bumps a last-activity timestamp, and a goroutine cancels
+// the hook (killing the subprocess via exec.CommandContext) once it has been
+// silent longer than the timeout. A genuinely hung hook is thus killed instead
+// of running until the outer MCP/clown deadline. The watchdog ctx is a child of
+// the caller's ctx, so an inactivity kill is distinguishable from a user cancel
+// (e.g. session-job-cancel): only inactivity yields the dedicated error below.
 func (sf Sweatfile) RunPreMergeHookContext(ctx context.Context, worktreePath string, w io.Writer) error {
 	cmd := sf.PreMergeHookCommand()
-	return runHookContext(ctx, cmd, worktreePath, w)
+	timeout := sf.InactivityTimeoutValue()
+	if timeout <= 0 {
+		return runHookContext(ctx, cmd, worktreePath, w)
+	}
+
+	aw := &activityWriter{w: w, last: time.Now()}
+	hookCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var killedForInactivity atomic.Bool
+	done := make(chan struct{})
+	go func() {
+		interval := timeout / 4
+		if interval < time.Second {
+			interval = time.Second
+		}
+		if interval > 15*time.Second {
+			interval = 15 * time.Second
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-hookCtx.Done():
+				return
+			case <-ticker.C:
+				if time.Since(aw.lastActivity()) > timeout {
+					killedForInactivity.Store(true)
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
+	err := runHookContext(hookCtx, cmd, worktreePath, aw)
+	close(done)
+	// Only surface the inactivity error when the hook actually failed because
+	// of the kill; a hook that finished cleanly just before a late tick wins.
+	if err != nil && killedForInactivity.Load() {
+		return fmt.Errorf("pre-merge hook killed: no output for %s (inactivity-timeout)", timeout)
+	}
+	return err
+}
+
+// activityWriter wraps an io.Writer and records the time of the most recent
+// Write. The inactivity watchdog in RunPreMergeHookContext reads lastActivity
+// to decide whether the pre-merge hook has gone silent past its budget.
+type activityWriter struct {
+	w    io.Writer
+	mu   sync.Mutex
+	last time.Time
+}
+
+func (a *activityWriter) Write(p []byte) (int, error) {
+	a.mu.Lock()
+	a.last = time.Now()
+	a.mu.Unlock()
+	return a.w.Write(p)
+}
+
+func (a *activityWriter) lastActivity() time.Time {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.last
 }
 
 func (sf Sweatfile) RunOnAttachHook(worktreePath string, w io.Writer) error {

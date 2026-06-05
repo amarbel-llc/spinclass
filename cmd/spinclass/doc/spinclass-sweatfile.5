@@ -312,6 +312,38 @@ is not on
 or when the worktree has no gc roots.
 .B Merge:
 scalar override.
+.TP
+.B inactivity-timeout
+String (a Go duration such as
+.BR \(dq180s\(dq " or " \(dq3m\(dq ).
+When set, an activity watchdog wraps the
+.B pre-merge
+hook: every line the hook writes to stdout/stderr bumps a last-activity
+timestamp, and if the hook produces no output for longer than this
+duration its subprocess is killed (via context cancellation of the
+.B sh \-c
+process) and the merge/check fails with a distinct
+.B inactivity-timeout
+error rather than the generic non-zero-exit message.
+This auto-kills a wedged hook instead of letting it run until the outer
+MCP/clown request deadline, and applies to both the synchronous
+.RB ( merge\-this\-session " / " check\-this\-session )
+and asynchronous
+.RB ( *\-this\-session\-async )
+hook paths.
+An inactivity kill is distinct from a user cancel
+.RB ( session\-job\-cancel ):
+only the former yields the inactivity error.
+Unset (the default), empty, or a non-positive value disables the
+watchdog \(em the hook runs without an inactivity bound, as before.
+Choose a duration comfortably longer than the hook's quietest legitimate
+phase (e.g. a long silent compile or download step) to avoid false
+kills.
+An unparseable or negative value is a
+.B sc validate
+error.
+.B Merge:
+scalar override.
 .SS [session\-entry]
 Controls what command is exec'd when attaching to a session, what
 environment is injected, how liveness is detected after detach, and how
