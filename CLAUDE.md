@@ -151,6 +151,14 @@ per-server request timeout for long `[hooks].pre-merge` runs:
   (the same TAP payload the sync tool returns) once finished.
 - `session-job-cancel` (always registered) — cancels the running job, killing
   the hook subprocess via the job's context.
+- `session-job-wait` (always registered) — blocks until the running job finishes
+  and returns its full result (the same payload the synchronous tool produces) —
+  *join* semantics, it never starts a job. This is the "revert to sync" path: go
+  async because you had other work, then call `session-job-wait` once that work
+  is done instead of hot-polling. Errors if no job was started. Because it
+  blocks, it IS subject to the MCP request timeout for the job's *remaining*
+  duration, so call it at/near completion. Backed by `job.WaitDone` (a per-job
+  completion channel), so it waits event-driven rather than polling.
 
 One active job per session (async-start refuses while one is running). If the
 `serve` process ends mid-job, the next status read reports `interrupted` (the
@@ -168,7 +176,9 @@ independent work to make progress on while the hook runs — then check back via
 `session-job-status` occasionally. The anti-pattern to avoid: starting an async
 job and immediately spinning in a tight `session-job-status` loop with nothing
 else to do — that's strictly worse than the synchronous tool (same wait, extra
-turns). The tool descriptions encode this guidance so agents choose correctly.
+turns). If you started async and then run out of other work, call
+`session-job-wait` to block on the result instead of polling. The tool
+descriptions encode this guidance so agents choose correctly.
 
 ### Pre-merge hook inactivity watchdog
 

@@ -1141,3 +1141,172 @@ func TestServeCheckThisSessionAsyncCancel(t *testing.T) {
 		t.Errorf("cancel took too long (%s); hook may not have been killed", elapsed)
 	}
 }
+
+// TestServeSessionJobWait exercises session-job-wait: first with no job (expects
+// an error pointing at the start tools), then as a blocking join on a running
+// async check whose hook sleeps before emitting. The wait call must block for
+// roughly the hook duration and then return the succeeded result with the hook
+// output — proving it joins the job instead of returning immediately or polling.
+func TestServeSessionJobWait(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("shell hook not portable to Windows")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not in PATH")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not in PATH")
+	}
+
+	bin := buildSpinclassBinary(t)
+	sweatfileBody := "[hooks]\npre-merge = \"sleep 2; echo WAIT_OUTPUT\"\ndisable-merge = true\n"
+	repoDir, wtPath := setupWorktreeWithSweatfile(t, "feature-wait", sweatfileBody)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, bin, "serve")
+	cmd.Dir = wtPath
+	cmd.Env = append(
+		os.Environ(),
+		"HOME="+filepath.Dir(repoDir),
+		"GIT_CEILING_DIRECTORIES="+filepath.Dir(repoDir),
+		"XDG_STATE_HOME="+t.TempDir(),
+	)
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatalf("stdin pipe: %v", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("stdout pipe: %v", err)
+	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start spinclass serve: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+
+	send := func(msg any) {
+		b, err := json.Marshal(msg)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if _, err := stdin.Write(append(b, '\n')); err != nil {
+			t.Fatalf("write %s: %v", b, err)
+		}
+	}
+
+	type contentItem struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	type toolResult struct {
+		Content []contentItem `json:"content"`
+		IsError bool          `json:"isError"`
+	}
+	type rpc struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Method  string          `json:"method"`
+		Result  json.RawMessage `json:"result"`
+		Error   json.RawMessage `json:"error"`
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+
+	readResp := func(wantID string) rpc {
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line == "" {
+				continue
+			}
+			var msg rpc
+			if err := json.Unmarshal([]byte(line), &msg); err != nil {
+				t.Fatalf("non-JSON line on stdout: %q\nerror: %v", line, err)
+			}
+			if string(msg.ID) == wantID {
+				return msg
+			}
+		}
+		t.Fatalf("stdout closed before response id=%s; stderr:\n%s", wantID, stderr.String())
+		return rpc{}
+	}
+
+	text := func(r rpc) (string, bool) {
+		var res toolResult
+		if err := json.Unmarshal(r.Result, &res); err != nil {
+			t.Fatalf("unmarshal tool result: %v\nresult: %s", err, string(r.Result))
+		}
+		var b strings.Builder
+		for _, c := range res.Content {
+			b.WriteString(c.Text)
+		}
+		return b.String(), res.IsError
+	}
+
+	send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{
+			"protocolVersion": "2024-11-05",
+			"capabilities":    map[string]any{},
+			"clientInfo":      map[string]any{"name": "spinclass-test", "version": "0"},
+		},
+	})
+	send(map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"})
+
+	// No job yet: session-job-wait must error and point at the start tools.
+	send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+		"params": map[string]any{"name": "session-job-wait", "arguments": map[string]any{}},
+	})
+	noJobTxt, noJobErr := text(readResp("2"))
+	if !noJobErr {
+		t.Errorf("expected isError for wait with no job, got success: %q", noJobTxt)
+	}
+	if !strings.Contains(noJobTxt, "no background job to wait on") {
+		t.Errorf("unexpected no-job wait response: %q", noJobTxt)
+	}
+
+	// Start the async check, then block on it via session-job-wait.
+	send(map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+		"params": map[string]any{"name": "check-this-session-async", "arguments": map[string]any{}},
+	})
+	if startTxt, startErr := text(readResp("3")); startErr || !strings.Contains(startTxt, "started background check job") {
+		t.Fatalf("unexpected async start (isErr=%v): %q\nstderr:\n%s", startErr, startTxt, stderr.String())
+	}
+
+	waitStart := time.Now()
+	send(map[string]any{
+		"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+		"params": map[string]any{"name": "session-job-wait", "arguments": map[string]any{}},
+	})
+	waitTxt, waitErr := text(readResp("4"))
+	elapsed := time.Since(waitStart)
+
+	if waitErr {
+		t.Fatalf("session-job-wait returned isError; content:\n%s\nstderr:\n%s", waitTxt, stderr.String())
+	}
+	if !strings.Contains(waitTxt, "succeeded") {
+		t.Errorf("expected wait result to report succeeded, got:\n%s", waitTxt)
+	}
+	if !strings.Contains(waitTxt, "WAIT_OUTPUT") {
+		t.Errorf("expected wait result to contain hook output WAIT_OUTPUT, got:\n%s", waitTxt)
+	}
+	// The hook sleeps 2s; a wait that truly blocked on it should not return
+	// near-instantly. Allow slack for scheduling but assert it actually waited.
+	if elapsed < time.Second {
+		t.Errorf("session-job-wait returned in %s; expected it to block until the ~2s hook finished", elapsed)
+	}
+}

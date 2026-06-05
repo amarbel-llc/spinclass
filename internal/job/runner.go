@@ -17,7 +17,10 @@ import (
 // payload the synchronous tool produces) and whether that result is an error.
 type Func func(ctx context.Context, hookOutput io.Writer) (text string, isErr bool)
 
-type runEntry struct{ cancel context.CancelFunc }
+type runEntry struct {
+	cancel context.CancelFunc
+	done   chan struct{} // closed after the final job record is written
+}
 
 var (
 	mu      sync.Mutex
@@ -40,14 +43,20 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 		return nil, ErrAlreadyRunning
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	running[wt] = &runEntry{cancel: cancel}
+	done := make(chan struct{})
+	running[wt] = &runEntry{cancel: cancel, done: done}
 	mu.Unlock()
 
+	// clearRunning runs exactly once per Start (an early-return path OR the
+	// goroutine's defer, never both). Closing done last — after the goroutine
+	// has written the final job record — lets WaitDone callers Read the
+	// terminal status the moment they wake.
 	clearRunning := func() {
 		mu.Lock()
 		delete(running, wt)
 		mu.Unlock()
 		cancel()
+		close(done)
 	}
 
 	j := &Job{
@@ -113,6 +122,23 @@ func IsRunning(wt string) bool {
 	_, ok := running[wt]
 	mu.Unlock()
 	return ok
+}
+
+// WaitDone returns a channel that is closed once the in-flight job for wt has
+// finished and its terminal record is persisted (so a Read after the channel
+// closes observes the final status). If no job is in flight in this serve
+// process, it returns an already-closed channel — the caller should Read to
+// distinguish "finished" from "never started". session-job-wait selects on
+// this so it can block on a running job without polling.
+func WaitDone(wt string) <-chan struct{} {
+	mu.Lock()
+	defer mu.Unlock()
+	if e, ok := running[wt]; ok {
+		return e.done
+	}
+	ch := make(chan struct{})
+	close(ch)
+	return ch
 }
 
 // TailLog returns up to n trailing lines of the worktree's job log, for

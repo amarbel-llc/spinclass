@@ -1118,6 +1118,22 @@ func TestChatSendToolAutoApproved(t *testing.T) {
 	}
 }
 
+func TestJobWaitToolAutoApproved(t *testing.T) {
+	cwd := t.TempDir()
+	input := makeInput("mcp__plugin_spinclass_spinclass__session-job-wait", map[string]any{}, cwd)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() == 0 {
+		t.Fatal("expected allow output for session-job-wait tool")
+	}
+	decision, _ := parseHookDecision(t, stdout.Bytes())
+	if decision != "allow" {
+		t.Errorf("expected permissionDecision allow for session-job-wait, got %q", decision)
+	}
+}
+
 // These benign session-management tools are not in the subagent deny guard,
 // so a subagent should be auto-approved too.
 func TestSubagentAllowedUpdateDescription(t *testing.T) {

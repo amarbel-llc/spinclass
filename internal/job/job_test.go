@@ -125,6 +125,47 @@ func TestStartSucceeds(t *testing.T) {
 	}
 }
 
+func TestWaitDoneNoJobIsClosed(t *testing.T) {
+	wt := t.TempDir()
+	select {
+	case <-WaitDone(wt):
+	default:
+		t.Fatal("expected an already-closed channel when no job is running")
+	}
+}
+
+func TestWaitDoneClosesAfterTerminalRecord(t *testing.T) {
+	wt := t.TempDir()
+	release := make(chan struct{})
+	fn := func(ctx context.Context, w io.Writer) (string, bool) {
+		<-release
+		return "ok 1 - done", false
+	}
+	if _, err := Start(wt, KindCheck, false, "wait-job", fn); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	done := WaitDone(wt)
+	select {
+	case <-done:
+		t.Fatal("WaitDone closed while the job was still running")
+	default:
+	}
+
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("WaitDone did not close after the job finished")
+	}
+
+	// The terminal record is readable the moment done closes.
+	j, err := Read(wt)
+	if err != nil || j.Status != StatusSucceeded {
+		t.Fatalf("expected succeeded after WaitDone closed, got status=%v err=%v", j.Status, err)
+	}
+}
+
 // waitStatus polls Read until the job reaches want or the deadline passes.
 func waitStatus(t *testing.T, wt, want string) *Job {
 	t.Helper()

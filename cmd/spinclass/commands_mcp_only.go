@@ -171,6 +171,21 @@ func registerMCPOnlyCommands(app *command.App) {
 		Params: []command.Param{},
 		Run:    wrapMCPHandler("session-job-cancel", handleJobCancel),
 	})
+	app.AddCommand(&command.Command{
+		Name:  "session-job-wait",
+		Title: "Wait For Session Job",
+		Description: command.Description{
+			Short: "Block until the current worktree session's background merge/check job (started by a *-this-session-async tool) finishes, then return its full result — the same payload the synchronous merge-this-session / check-this-session would have produced. Use this to revert to synchronous behaviour: start async because you had other work, then call session-job-wait once that work is done instead of hot-polling session-job-status. Returns immediately if the job has already finished; errors if no job has been started. NOTE: this blocks, so it is subject to the MCP request timeout for the job's *remaining* duration — call it when the job is at or near completion, not right after starting a long one.",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(true),
+			DestructiveHint: protocol.BoolPtr(false),
+			IdempotentHint:  protocol.BoolPtr(true),
+			OpenWorldHint:   protocol.BoolPtr(false),
+		},
+		Params: []command.Param{},
+		Run:    wrapMCPHandler("session-job-wait", handleJobWait),
+	})
 
 	if len(preMergeSkills) > 0 {
 		app.AddCommand(&command.Command{
@@ -468,8 +483,7 @@ func handleJobStatus(_ context.Context, _ json.RawMessage, _ command.Prompter) (
 		return command.TextErrorResult(fmt.Sprintf("could not read job state: %v", err)), nil
 	}
 
-	switch j.Status {
-	case job.StatusRunning:
+	if j.Status == job.StatusRunning {
 		lastDesc := "n/a"
 		if last := job.LastActivity(cwd); !last.IsZero() {
 			lastDesc = time.Since(last).Round(time.Second).String() + " ago"
@@ -480,17 +494,63 @@ func handleJobStatus(_ context.Context, _ json.RawMessage, _ command.Prompter) (
 			body += "\n--- recent hook output ---\n" + tail
 		}
 		return command.TextResult(body), nil
-	case job.StatusInterrupted:
+	}
+	return renderFinishedJob(j), nil
+}
+
+// renderFinishedJob renders a terminal (non-running) job as the MCP result,
+// mirroring the synchronous tool: a header line plus the stored result payload,
+// surfaced as an error result on failure / interruption. Shared by
+// session-job-status and session-job-wait.
+func renderFinishedJob(j *job.Job) *command.Result {
+	if j.Status == job.StatusInterrupted {
 		return command.TextErrorResult(fmt.Sprintf(
 			"job %q (%s) was interrupted: the serve process ended mid-run, so the merge/check was cut off. Start a new one.",
 			j.ID, j.Kind,
-		)), nil
-	default:
-		header := fmt.Sprintf("job %q (%s): %s, elapsed %s\n", j.ID, j.Kind, j.Status, j.Elapsed().Round(time.Second))
-		if j.ResultIsErr || j.Status != job.StatusSucceeded {
-			return command.TextErrorResult(header + j.ResultText), nil
+		))
+	}
+	header := fmt.Sprintf("job %q (%s): %s, elapsed %s\n", j.ID, j.Kind, j.Status, j.Elapsed().Round(time.Second))
+	if j.ResultIsErr || j.Status != job.StatusSucceeded {
+		return command.TextErrorResult(header + j.ResultText)
+	}
+	return command.TextResult(header + j.ResultText)
+}
+
+// handleJobWait blocks until the worktree session's background job finishes and
+// returns its result (join semantics — it never starts a job). An agent that
+// went async because it had other work calls this once that work is done,
+// instead of hot-polling session-job-status.
+func handleJobWait(ctx context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
+	}
+	if !worktree.IsWorktree(cwd) {
+		return command.TextErrorResult("not inside a worktree session"), nil
+	}
+	for {
+		j, err := job.Read(cwd)
+		if errors.Is(err, os.ErrNotExist) {
+			return command.TextErrorResult(
+				"no background job to wait on for this session; start one with merge-this-session-async / check-this-session-async, or use the synchronous merge-this-session / check-this-session",
+			), nil
 		}
-		return command.TextResult(header + j.ResultText), nil
+		if err != nil {
+			return command.TextErrorResult(fmt.Sprintf("could not read job state: %v", err)), nil
+		}
+		if j.Status != job.StatusRunning {
+			return renderFinishedJob(j), nil
+		}
+		select {
+		case <-ctx.Done():
+			return command.TextErrorResult(fmt.Sprintf(
+				"wait cancelled before the job finished (%v); the job is still running — poll session-job-status or session-job-cancel it",
+				ctx.Err(),
+			)), nil
+		case <-job.WaitDone(cwd):
+			// Job finished (or wasn't tracked in this serve process); loop to
+			// re-read the terminal record.
+		}
 	}
 }
 

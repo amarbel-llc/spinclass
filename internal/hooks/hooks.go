@@ -94,6 +94,7 @@ const (
 	checkThisSessionAsyncToolName = "mcp__plugin_spinclass_spinclass__check-this-session-async"
 	sessionJobStatusToolName      = "mcp__plugin_spinclass_spinclass__session-job-status"
 	sessionJobCancelToolName      = "mcp__plugin_spinclass_spinclass__session-job-cancel"
+	sessionJobWaitToolName        = "mcp__plugin_spinclass_spinclass__session-job-wait"
 	nothingButTheTruthToolName    = "mcp__plugin_spinclass_spinclass__nothing-but-the-truth"
 	listToolName                  = "mcp__plugin_spinclass_spinclass__list"
 	updateDescriptionToolName     = "mcp__plugin_spinclass_spinclass__update-this-session-description"
@@ -111,11 +112,13 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 	}
 
 	switch input.ToolName {
-	case listToolName, updateDescriptionToolName, sessionJobStatusToolName, sessionJobCancelToolName:
-		// Benign, session-scoped spinclass tools: list and session-job-status
-		// are read-only; update-this-session-description and session-job-cancel
-		// only mutate spinclass's own session/job metadata. Auto-approve
-		// unconditionally so agents never get a permission prompt for them.
+	case listToolName, updateDescriptionToolName,
+		sessionJobStatusToolName, sessionJobCancelToolName, sessionJobWaitToolName:
+		// Benign, session-scoped spinclass tools: list, session-job-status, and
+		// session-job-wait are read-only (wait only blocks on an existing job);
+		// update-this-session-description and session-job-cancel only mutate
+		// spinclass's own session/job metadata. Auto-approve unconditionally so
+		// agents never get a permission prompt for them.
 		return writeAllow(w, "spinclass session-management tool, safe to auto-approve")
 	case chatSendToolName:
 		// Posting to the cross-session chatroom is benign (no repo or
