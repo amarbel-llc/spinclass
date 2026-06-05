@@ -161,6 +161,15 @@ from within the synchronous tools are intentionally NOT implemented — that
 requires go-mcp + clown-stdio-bridge changes (see those repos' issues); async
 is the spinclass-only path.
 
+**Async vs sync — pick by whether you have other work.** Default to the
+synchronous `merge-this-session` / `check-this-session`: they block and return
+the result, no polling. Reach for the `-async` twins *only* when you have other
+independent work to make progress on while the hook runs — then check back via
+`session-job-status` occasionally. The anti-pattern to avoid: starting an async
+job and immediately spinning in a tight `session-job-status` loop with nothing
+else to do — that's strictly worse than the synchronous tool (same wait, extra
+turns). The tool descriptions encode this guidance so agents choose correctly.
+
 ### Pre-merge hook inactivity watchdog
 
 `[hooks].inactivity-timeout` (a Go duration string, e.g. `"180s"`; unset/`""`/

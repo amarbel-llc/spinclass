@@ -97,6 +97,7 @@ const (
 	nothingButTheTruthToolName    = "mcp__plugin_spinclass_spinclass__nothing-but-the-truth"
 	listToolName                  = "mcp__plugin_spinclass_spinclass__list"
 	updateDescriptionToolName     = "mcp__plugin_spinclass_spinclass__update-this-session-description"
+	chatSendToolName              = "mcp__plugin_spinclass_spinclass__chat-send"
 )
 
 func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree bool) error {
@@ -116,6 +117,11 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 		// only mutate spinclass's own session/job metadata. Auto-approve
 		// unconditionally so agents never get a permission prompt for them.
 		return writeAllow(w, "spinclass session-management tool, safe to auto-approve")
+	case chatSendToolName:
+		// Posting to the cross-session chatroom is benign (no repo or
+		// filesystem mutation). Auto-approve so inter-session coordination
+		// never trips a permission prompt.
+		return writeAllow(w, "spinclass cross-session chat-send is benign, safe to auto-approve")
 	case mergeThisSessionToolName, mergeThisSessionAsyncToolName:
 		if hasPreMergeHook(input.CWD) {
 			return writeAllow(w, "sweatfile [hooks].pre-merge gates this merge")

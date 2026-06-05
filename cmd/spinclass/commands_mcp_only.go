@@ -145,7 +145,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		Name:  "session-job-status",
 		Title: "Session Job Status",
 		Description: command.Description{
-			Short: "Poll the current worktree session's background merge/check job (started by a *-this-session-async tool): reports running|succeeded|failed|cancelled|interrupted, elapsed, last-activity, a tail of live hook output, and the full result when finished.",
+			Short: "Poll the current worktree session's background merge/check job (started by a *-this-session-async tool): reports running|succeeded|failed|cancelled|interrupted, elapsed, last-activity, a tail of live hook output, and the full result when finished. Poll sparingly — only check back after making progress on other work. Do NOT spin in a tight loop waiting on a job with nothing else to do; if that's your situation you should have started the merge/check with the synchronous tool, which blocks and returns the result for you.",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			ReadOnlyHint:    protocol.BoolPtr(true),
@@ -224,7 +224,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		Name:  "chat-send",
 		Title: "Send Cross-Session Chat Message",
 		Description: command.Description{
-			Short: "Post a message to the global cross-session chatroom. Omit `to` (or pass \"*\") to broadcast to every session; pass a session key (the `<repo>/<branch>` shown in `sc list`, == another session's $SPINCLASS_SESSION_ID) to direct-message one session. Receiving sessions are pushed new messages by the chat-watch monitor; no read call is needed on their side.",
+			Short: "Post a message to the global cross-session chatroom. Omit `to` (or pass \"*\") to broadcast to every session; pass a session key (the `<repo>/<branch>` shown in `sc list`, == another session's $SPINCLASS_SESSION_ID) to direct-message one session. Receiving sessions are pushed new messages by the chat-watch monitor; no read call is needed on their side. The chatroom records and displays each message's sender automatically, so do NOT include or announce your own session ID in `message` — it is redundant; write only the message content.",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			ReadOnlyHint:    protocol.BoolPtr(false),
@@ -512,7 +512,7 @@ func handleJobCancel(_ context.Context, _ json.RawMessage, _ command.Prompter) (
 // buildMergeAsyncDescription / buildCheckAsyncDescription mirror their
 // synchronous counterparts but document the non-blocking start+poll flow.
 func buildMergeAsyncDescription(hookPreview string) string {
-	base := "Non-blocking variant of merge-this-session: starts the merge (including the pre-merge hook) in the background and returns a job id immediately, so the call is never cut off by the MCP request timeout no matter how long the hook runs. Consumes the pre-merge attestation at start, exactly like merge-this-session. Poll session-job-status for progress and the final result; session-job-cancel to abort."
+	base := "Non-blocking variant of merge-this-session: starts the merge (including the pre-merge hook) in the background and returns a job id immediately, so the call is never cut off by the MCP request timeout no matter how long the hook runs. Consumes the pre-merge attestation at start, exactly like merge-this-session. Poll session-job-status for progress and the final result; session-job-cancel to abort. Choose this ONLY when you have other independent work to make progress on while the hook runs — then check back via session-job-status occasionally. If you have nothing else to do, call the synchronous merge-this-session instead: it blocks and returns the result with no polling. Do NOT pick async and then spin in a tight session-job-status loop — that wastes turns for no benefit over the synchronous tool."
 	if hookPreview == "" {
 		return base
 	}
@@ -520,7 +520,7 @@ func buildMergeAsyncDescription(hookPreview string) string {
 }
 
 func buildCheckAsyncDescription(hookPreview string) string {
-	base := "Non-blocking variant of check-this-session: runs the [hooks].pre-merge command in the background and returns a job id immediately (never cut off by the MCP request timeout). Poll session-job-status for progress and the result; session-job-cancel to abort."
+	base := "Non-blocking variant of check-this-session: runs the [hooks].pre-merge command in the background and returns a job id immediately (never cut off by the MCP request timeout). Poll session-job-status for progress and the result; session-job-cancel to abort. Choose this ONLY when you have other independent work to make progress on while the hook runs — then check back via session-job-status occasionally. If you have nothing else to do, call the synchronous check-this-session instead: it blocks and returns the result with no polling. Do NOT pick async and then spin in a tight session-job-status loop."
 	if hookPreview == "" {
 		return base
 	}
@@ -846,7 +846,7 @@ func buildNothingButTheTruthDescription(skills []sweatfile.PreMergeSkill) string
 // command so agents know what tests/checks the merge will run before
 // invoking it (and skip redundant pre-flight runs of the same suite).
 func buildMergeThisSessionDescription(hookPreview string) string {
-	base := "Merge the current session's worktree into the default branch and clean up. A non-error return means the merge (and push, if git_sync) succeeded; the output payload is informational and does not need to be read or parsed to confirm success. When madder is pinned at build time, the response also carries a real MCP `resource_link` content block (URI scheme `madder://blobs/<digest>`) pointing to the full pre-merge hook output. MCP-aware agents fetch via `resources/read`; inspect only on failure."
+	base := "Merge the current session's worktree into the default branch and clean up. A non-error return means the merge (and push, if git_sync) succeeded; the output payload is informational and does not need to be read or parsed to confirm success. This blocks until the pre-merge hook and merge finish, then returns — the right choice when you have nothing else to do (no polling needed). Reach for merge-this-session-async only when you have other independent work to make progress on while the hook runs. When madder is pinned at build time, the response also carries a real MCP `resource_link` content block (URI scheme `madder://blobs/<digest>`) pointing to the full pre-merge hook output. MCP-aware agents fetch via `resources/read`; inspect only on failure."
 	if hookPreview == "" {
 		return base
 	}
@@ -861,7 +861,7 @@ func buildMergeThisSessionDescription(hookPreview string) string {
 // command. Same rationale as buildMergeThisSessionDescription: callers
 // should know which command executes so they don't shadow it.
 func buildCheckThisSessionDescription(hookPreview string) string {
-	base := "Run the configured [hooks].pre-merge command in the current worktree without merging. This is the agent-CI surface; safe to call repeatedly. Returns non-zero / error if the hook fails. When madder is pinned at build time, the response is compact: a single test point per hook step plus a real MCP `resource_link` content block (URI scheme `madder://blobs/<digest>`) pointing to the full output. MCP-aware agents fetch via `resources/read`; inspect only on failure."
+	base := "Run the configured [hooks].pre-merge command in the current worktree without merging. This is the agent-CI surface; safe to call repeatedly. Returns non-zero / error if the hook fails. This blocks until the hook finishes, then returns — the right choice when you have nothing else to do (no polling needed). Reach for check-this-session-async only when you have other independent work to make progress on while the hook runs. When madder is pinned at build time, the response is compact: a single test point per hook step plus a real MCP `resource_link` content block (URI scheme `madder://blobs/<digest>`) pointing to the full output. MCP-aware agents fetch via `resources/read`; inspect only on failure."
 	if hookPreview == "" {
 		return base
 	}

@@ -1099,6 +1099,25 @@ func TestUpdateDescriptionToolAutoApproved(t *testing.T) {
 	}
 }
 
+func TestChatSendToolAutoApproved(t *testing.T) {
+	cwd := t.TempDir()
+	input := makeInput("mcp__plugin_spinclass_spinclass__chat-send", map[string]any{"message": "hi"}, cwd)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() == 0 {
+		t.Fatal("expected allow output for chat-send tool")
+	}
+	decision, reason := parseHookDecision(t, stdout.Bytes())
+	if decision != "allow" {
+		t.Errorf("expected permissionDecision allow for chat-send, got %q", decision)
+	}
+	if reason == "" {
+		t.Error("expected a permissionDecisionReason")
+	}
+}
+
 // These benign session-management tools are not in the subagent deny guard,
 // so a subagent should be auto-approved too.
 func TestSubagentAllowedUpdateDescription(t *testing.T) {
