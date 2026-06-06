@@ -61,15 +61,15 @@ func writeSessions(t *testing.T, branches ...string) string {
 func TestChooseAutoSingleReturnsLoneSession(t *testing.T) {
 	live := writeSessions(t, "feature")
 
-	state, auto, err := ChooseAutoSingle(live, "resume", nil)
+	item, auto, err := ChooseAutoSingle(live, "resume", nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !auto {
 		t.Error("auto = false, want true for a single candidate")
 	}
-	if state == nil || state.Branch != "feature" {
-		t.Fatalf("state = %+v, want the lone 'feature' session", state)
+	if item == nil || item.State == nil || item.State.Branch != "feature" {
+		t.Fatalf("item = %+v, want the lone 'feature' session", item)
 	}
 }
 
@@ -79,7 +79,7 @@ func TestChooseAutoSingleReturnsLoneSession(t *testing.T) {
 func TestChooseAutoSingleMultiNonInteractiveListsIDs(t *testing.T) {
 	live := writeSessions(t, "feature", "other")
 
-	_, auto, err := ChooseAutoSingle(live, "resume", nil)
+	_, auto, err := ChooseAutoSingle(live, "resume", nil, nil)
 	if err == nil {
 		t.Fatal("expected non-interactive error for multiple candidates")
 	}
@@ -88,6 +88,57 @@ func TestChooseAutoSingleMultiNonInteractiveListsIDs(t *testing.T) {
 	}
 	got := err.Error()
 	for _, want := range []string{"feature", "other", "Use: spinclass resume <id>"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("error = %q, missing %q", got, want)
+		}
+	}
+}
+
+// TestChooseAutoSingleShortcutCountsLocalOnly: the single-candidate
+// shortcut counts LOCAL sessions only — cached remote rows alongside a
+// lone local session do not suppress it (remote rows are supplementary,
+// never the auto-single candidate).
+func TestChooseAutoSingleShortcutCountsLocalOnly(t *testing.T) {
+	live := writeSessions(t, "feature")
+	remoteRows := []Item{
+		{TitleText: "remote thing", Detail: "remote(devbox) · active · cached", Filter: "devbox:remote-thing", Target: "devbox:remote-thing"},
+	}
+
+	item, auto, err := ChooseAutoSingle(live, "resume", nil, remoteRows)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !auto {
+		t.Error("auto = false, want true: remote rows must not suppress the lone-local shortcut")
+	}
+	if item == nil || item.State == nil || item.State.Branch != "feature" {
+		t.Fatalf("item = %+v, want the lone local 'feature' session", item)
+	}
+}
+
+// TestChooseAutoSingleRemoteOnlyShowsPicker: when the ONLY candidates
+// are remote rows, the picker still shows — no auto-single (a remote
+// row is never the auto-single candidate) and no "no sessions" error.
+// On a non-TTY stdin that surfaces as the ID-list error including the
+// remote target, proving the picker path was taken.
+func TestChooseAutoSingleRemoteOnlyShowsPicker(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	remoteRows := []Item{
+		{TitleText: "remote thing", Detail: "remote(devbox) · active · cached", Filter: "devbox:remote-thing", Target: "devbox:remote-thing"},
+	}
+
+	_, auto, err := ChooseAutoSingle("/tmp/empty-repo", "resume", nil, remoteRows)
+	if err == nil {
+		t.Fatal("expected non-interactive picker error for remote-only candidates")
+	}
+	if auto {
+		t.Error("auto = true, want false: a remote row is never the auto-single candidate")
+	}
+	got := err.Error()
+	if strings.Contains(got, "no sessions for") {
+		t.Errorf("error = %q: remote-only candidates must reach the picker, not the no-sessions error", got)
+	}
+	for _, want := range []string{"devbox:remote-thing", "Use: spinclass resume <id>"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("error = %q, missing %q", got, want)
 		}

@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -22,29 +23,31 @@ import (
 )
 
 // Item is one selectable row in the picker. Local session rows are built
-// from session.State via itemForState; a later task adds remote rows by
-// constructing Items directly (State stays nil for those) and passing
-// them to Pick alongside the local rows.
+// from session.State via ItemForState; cached remote rows via
+// ItemForRemoteRow (State stays nil for those — selection yields Target).
 type Item struct {
 	// TitleText is the row title: the session description, falling back
-	// to the worktree dir name.
+	// to the worktree dir name (local) or the remote id (remote).
 	TitleText string
 	// Detail is the row description line rendered under the title.
 	Detail string
 	// Filter is the haystack the list's fuzzy filter matches against.
 	Filter string
-	// State is the local session backing this row; nil for non-local
-	// rows (future remote entries).
+	// State is the local session backing this row; nil for remote rows.
 	State *session.State
+	// Target is the `host:<id>` resume target for remote rows; empty for
+	// local rows (State carries everything the caller needs there).
+	Target string
 }
 
 func (i Item) Title() string       { return i.TitleText }
 func (i Item) Description() string { return i.Detail }
 func (i Item) FilterValue() string { return i.Filter }
 
-// itemForState builds the picker row for a local session. now is
-// injected for testability of the relative-time tiering.
-func itemForState(s session.State, now time.Time) Item {
+// ItemForState builds the picker row for a local session. now is
+// injected for testability of the relative-time tiering. Exported so
+// tab completion can reuse Detail and read identically to the picker.
+func ItemForState(s session.State, now time.Time) Item {
 	title := s.Description
 	if title == "" {
 		title = filepath.Base(s.WorktreePath)
@@ -61,6 +64,43 @@ func itemForState(s session.State, now time.Time) Item {
 		Detail:    detail,
 		Filter:    title + " " + filepath.Base(s.WorktreePath) + " " + repoBase,
 	}
+}
+
+// ItemForRemoteRow builds the picker row for a cached remote session
+// (the FDR 0011 completion cache — possibly stale, never networks,
+// hence the "cached" marker). State stays nil; selection yields the
+// `host:<id>` Target, which the caller routes over the remote's attach
+// template.
+func ItemForRemoteRow(name string, r session.ListRow) Item {
+	title := r.Description
+	if title == "" {
+		title = r.ID
+	}
+	target := name + ":" + r.ID
+	return Item{
+		TitleText: title,
+		Detail:    fmt.Sprintf("remote(%s) · %s · cached", name, r.State),
+		Filter:    title + " " + target + " " + r.Repo,
+		Target:    target,
+	}
+}
+
+// ItemsForRemoteRows flattens the per-remote cache map (the shape
+// remote.ReadAllCaches returns) into picker rows: hosts sorted by name
+// for deterministic order, rows kept in cache order within a host.
+func ItemsForRemoteRows(caches map[string][]session.ListRow) []Item {
+	names := make([]string, 0, len(caches))
+	for name := range caches {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var items []Item
+	for _, name := range names {
+		for _, r := range caches[name] {
+			items = append(items, ItemForRemoteRow(name, r))
+		}
+	}
+	return items
 }
 
 // LastActivity returns the session's most recent lifecycle timestamp:
@@ -100,40 +140,55 @@ func FormatRelDate(t, now time.Time) string {
 // tab-completion paths). Dismissing the picker (q/esc/ctrl+c) returns
 // the historical "session selection cancelled" error.
 func Choose(repoPath, cmdName string, dbg *slog.Logger) (*session.State, error) {
-	state, _, err := choose(repoPath, cmdName, dbg, false)
-	return state, err
+	item, _, err := choose(repoPath, cmdName, dbg, false, nil)
+	if err != nil {
+		return nil, err
+	}
+	return item.State, nil
 }
 
 // ChooseAutoSingle is Choose with a single-candidate short-circuit:
-// when exactly one non-abandoned session exists for repoPath it is
-// returned without rendering the picker (auto=true), even on a non-TTY
-// stdin — the caller owns whatever confirmation that path needs. With
-// multiple candidates it behaves exactly like Choose (auto=false).
-// `resume` uses this so the single-match case shows a confirm dialog
-// instead of a one-row picker; `close` keeps Choose so its behavior is
-// unchanged.
-func ChooseAutoSingle(repoPath, cmdName string, dbg *slog.Logger) (*session.State, bool, error) {
-	return choose(repoPath, cmdName, dbg, true)
+// when exactly one non-abandoned LOCAL session exists for repoPath it
+// is returned without rendering the picker (auto=true), even on a
+// non-TTY stdin — the caller owns whatever confirmation that path
+// needs. With multiple candidates it behaves exactly like Choose
+// (auto=false). remoteRows (built via ItemsForRemoteRows) are appended
+// after the local rows in the picker; they never count toward the
+// single-match shortcut — a remote row is only ever reachable by
+// explicit selection, which yields an Item with nil State and its
+// `host:<id>` Target set. `resume` uses this so the single-match case
+// shows a confirm dialog instead of a one-row picker; `close` keeps
+// Choose so its behavior stays local-only.
+func ChooseAutoSingle(repoPath, cmdName string, dbg *slog.Logger, remoteRows []Item) (*Item, bool, error) {
+	return choose(repoPath, cmdName, dbg, true, remoteRows)
 }
 
-func choose(repoPath, cmdName string, dbg *slog.Logger, autoSingle bool) (*session.State, bool, error) {
+func choose(repoPath, cmdName string, dbg *slog.Logger, autoSingle bool, remoteRows []Item) (*Item, bool, error) {
 	sessions, err := session.ListForRepo(repoPath, dbg)
 	if err != nil {
 		return nil, false, err
 	}
-	if len(sessions) == 0 {
+	if len(sessions) == 0 && len(remoteRows) == 0 {
 		return nil, false, fmt.Errorf("no sessions for %s", filepath.Base(repoPath))
 	}
 	session.SortStates(sessions)
 
+	// The shortcut counts LOCAL candidates only: a lone local session
+	// auto-resolves even when cached remote rows exist, and remote-only
+	// candidates always reach the picker.
 	if autoSingle && len(sessions) == 1 {
-		return &sessions[0], true, nil
+		it := ItemForState(sessions[0], time.Now())
+		it.State = &sessions[0]
+		return &it, true, nil
 	}
 
 	if !interactive() {
-		ids := make([]string, len(sessions))
-		for i, s := range sessions {
-			ids[i] = filepath.Base(s.WorktreePath)
+		ids := make([]string, 0, len(sessions)+len(remoteRows))
+		for _, s := range sessions {
+			ids = append(ids, filepath.Base(s.WorktreePath))
+		}
+		for _, r := range remoteRows {
+			ids = append(ids, r.Target)
 		}
 		return nil, false, fmt.Errorf(
 			"no session selected; available: %s\nUse: spinclass %s <id>",
@@ -143,11 +198,13 @@ func choose(repoPath, cmdName string, dbg *slog.Logger, autoSingle bool) (*sessi
 	}
 
 	now := time.Now()
-	items := make([]Item, len(sessions))
+	items := make([]Item, 0, len(sessions)+len(remoteRows))
 	for i := range sessions {
-		items[i] = itemForState(sessions[i], now)
-		items[i].State = &sessions[i]
+		it := ItemForState(sessions[i], now)
+		it.State = &sessions[i]
+		items = append(items, it)
 	}
+	items = append(items, remoteRows...)
 
 	picked, err := Pick(fmt.Sprintf("Select a session to %s", cmdName), items)
 	if err != nil {
@@ -156,7 +213,7 @@ func choose(repoPath, cmdName string, dbg *slog.Logger, autoSingle bool) (*sessi
 	if picked == nil {
 		return nil, false, fmt.Errorf("session selection cancelled")
 	}
-	return picked.State, false, nil
+	return picked, false, nil
 }
 
 func interactive() bool {

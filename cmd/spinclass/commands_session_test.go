@@ -48,7 +48,7 @@ func TestCompleteWorktreeTargetsInRepoSorted(t *testing.T) {
 			RepoPath:     repoA,
 			WorktreePath: live,
 			Branch:       "active-feature",
-			PID:          1, // pid=1 always alive on Linux
+			PID:          os.Getpid(), // the test process itself — definitely alive
 			SessionState: session.StateActive,
 			Entrypoint:   []string{"/bin/sh"},
 			StartedAt:    time.Now().UTC(),
@@ -77,10 +77,15 @@ func TestCompleteWorktreeTargetsInRepoSorted(t *testing.T) {
 		t.Errorf("got %d entries, want 2: %v", len(got), got)
 	}
 
-	// Labels stay clean inside-repo (no repo-basename suffix).
-	for id, label := range got {
-		if strings.Contains(label, "(alpha)") {
-			t.Errorf("in-repo label %q for %q should not include repo basename", label, id)
+	// Labels match the picker's Detail format:
+	// "<state> · <relative-time> · @<branch> · <repo>".
+	want := map[string]string{
+		"active-feature": "active · just now · @active-feature · alpha",
+		"stale-feature":  "inactive · just now · @stale-feature · alpha",
+	}
+	for id, label := range want {
+		if got[id] != label {
+			t.Errorf("label for %q: got %q, want %q", id, got[id], label)
 		}
 	}
 }
@@ -140,7 +145,7 @@ func TestCompleteWorktreeTargetsOutsideRepoIncludesRepoBasenameInLabel(t *testin
 		t.Errorf("got %d entries, want 1 (both sessions share the worktree dirname): %v", len(got), got)
 	}
 	for _, label := range got {
-		if !strings.Contains(label, "(alpha)") && !strings.Contains(label, "(beta)") {
+		if !strings.Contains(label, "· alpha") && !strings.Contains(label, "· beta") {
 			t.Errorf("outside-repo label %q is missing repo basename", label)
 		}
 	}
@@ -177,9 +182,11 @@ func TestCompleteRemoteTargetsCacheOnly(t *testing.T) {
 		{Name: "lab"}, // never listed: no cache file, silently no entries
 	})
 
+	// Labels match the picker's remote Detail format:
+	// "remote(<name>) · <state> · cached".
 	want := map[string]string{
-		"devbox:crisp-catalpa": "[active] crisp-catalpa — fix login bug (devbox)",
-		"devbox:molten-mango":  "[inactive] molten-mango (devbox)",
+		"devbox:crisp-catalpa": "remote(devbox) · active · cached",
+		"devbox:molten-mango":  "remote(devbox) · inactive · cached",
 	}
 	if len(got) != len(want) {
 		t.Errorf("got %d entries, want %d: %v", len(got), len(want), got)

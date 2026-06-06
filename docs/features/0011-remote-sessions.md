@@ -69,6 +69,14 @@ output stays a machine-clean array (merged remote rows carry a
 ONLY — instant, possibly stale, never networks. The cache is refreshed
 by each `sc list`.
 
+**Resume picker**: cached remote sessions also appear in the
+interactive resume picker after the local rows (cache-only, same
+source as completion), marked `remote(<name>) · <state> · cached`;
+selecting one routes over the remote's attach template — selection is
+the confirmation, no dialog. Remote rows never count toward the
+single-match auto-resume shortcut, and the close picker stays
+local-only.
+
 **Resume**: `sc resume host:id` builds the attach argv from the
 remote's template and execs it with full stdio/TTY passthrough; the
 remote spinclass owns sweatfile/entrypoint semantics from there, and

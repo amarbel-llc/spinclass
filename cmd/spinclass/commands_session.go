@@ -9,6 +9,7 @@ import (
 	osexec "os/exec"
 	"os/signal"
 	"path/filepath"
+	"time"
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/amarbel-llc/spinclass/internal/chat"
@@ -48,7 +49,7 @@ func registerSessionCommands(app *command.App) {
 		Name: "resume",
 		Description: command.Description{
 			Short: "Resume an existing worktree session",
-			Long:  "Resume an existing worktree session. With no argument, auto-detects from the current working directory; if cwd isn't inside a tracked session, prompts interactively when stdin is a TTY or errors with the list of available session IDs otherwise. Auto-detected and single-candidate sessions show a confirmation dialog before attaching; -y/--yes skips it, except when the session is active (live PID, probably attached elsewhere), which always warns with default Cancel. With one argument, resumes the session whose worktree directory name matches without any dialog — naming the target is the confirmation. Tab completion offers session IDs scoped to the current repo when run inside one, or all non-abandoned sessions otherwise (labels include the repo basename to disambiguate). A host:-prefixed target naming a configured [[remotes]] entry routes over that remote's attach template instead of resolving locally, and completion additionally offers cached remote sessions under the host: prefix; see spinclass-sweatfile(5) [[remotes]].",
+			Long:  "Resume an existing worktree session. With no argument, auto-detects from the current working directory; if cwd isn't inside a tracked session, prompts interactively when stdin is a TTY or errors with the list of available session IDs otherwise. Auto-detected and single-candidate sessions show a confirmation dialog before attaching; -y/--yes skips it, except when the session is active (live PID, probably attached elsewhere), which always warns with default Cancel. With one argument, resumes the session whose worktree directory name matches without any dialog — naming the target is the confirmation. Tab completion offers session IDs scoped to the current repo when run inside one, or all non-abandoned sessions otherwise (labels include the repo basename to disambiguate). A host:-prefixed target naming a configured [[remotes]] entry routes over that remote's attach template instead of resolving locally, and completion and the interactive picker additionally offer cached remote sessions under the host: prefix (selecting a remote row routes the same way, no dialog); see spinclass-sweatfile(5) [[remotes]].",
 		},
 		Params: []command.Param{
 			{Name: "id", Type: command.String, Description: "Session ID (worktree directory name); auto-detects from cwd if omitted", Completer: completeWorktreeTargets},
@@ -218,9 +219,10 @@ func parseNixGCFlag(raw string) (*bool, error) {
 // completeWorktreeTargets returns session IDs (worktree directory
 // names) keyed to descriptive labels for tab completion. Inside a repo
 // the list is scoped to that repo; outside any repo it includes every
-// non-abandoned session and tags each label with its repo basename so
-// duplicates across repos disambiguate. Output is sorted via
-// session.SortStates so the active session shows up first.
+// non-abandoned session. Labels are the picker rows' Detail strings
+// (sessionpick.ItemForState), so completion and the interactive picker
+// read identically. Output is sorted via session.SortStates so the
+// active session shows up first.
 func completeWorktreeTargets() map[string]string {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -244,17 +246,10 @@ func completeWorktreeTargets() map[string]string {
 	}
 	session.SortStates(sessions)
 
+	now := time.Now()
 	result := make(map[string]string, len(sessions))
 	for _, s := range sessions {
-		id := filepath.Base(s.WorktreePath)
-		label := s.Branch
-		if s.Description != "" {
-			label = fmt.Sprintf("%s — %s", s.Branch, s.Description)
-		}
-		if repoPath == "" {
-			label = fmt.Sprintf("%s (%s)", label, filepath.Base(s.RepoPath))
-		}
-		result[id] = label
+		result[filepath.Base(s.WorktreePath)] = sessionpick.ItemForState(s, now).Detail
 	}
 	for key, label := range completeRemoteTargets(remotesForCwd()) {
 		result[key] = label
@@ -265,10 +260,9 @@ func completeWorktreeTargets() map[string]string {
 // completeRemoteTargets returns `<remote>:<id>`-keyed completion entries
 // built from the per-remote cache files ONLY — no ssh, no network (the
 // cache is refreshed by each `sc list`; see
-// docs/plans/2026-06-06-remote-sessions-design.md). Labels mirror the
-// local `branch — description` style with the remote name appended as
-// the disambiguating suffix; the state is prefixed because remote rows
-// can't rely on local active-first sorting to convey it.
+// docs/plans/2026-06-06-remote-sessions-design.md). Labels are the
+// picker rows' Detail strings (sessionpick.ItemForRemoteRow), so
+// completion and the interactive picker read identically.
 func completeRemoteTargets(remotes []sweatfile.Remote) map[string]string {
 	if len(remotes) == 0 {
 		return nil
@@ -276,11 +270,8 @@ func completeRemoteTargets(remotes []sweatfile.Remote) map[string]string {
 	result := make(map[string]string)
 	for name, rows := range remote.ReadAllCaches(remotes) {
 		for _, r := range rows {
-			label := r.ID
-			if r.Description != "" {
-				label = fmt.Sprintf("%s — %s", r.ID, r.Description)
-			}
-			result[name+":"+r.ID] = fmt.Sprintf("[%s] %s (%s)", r.State, label, name)
+			it := sessionpick.ItemForRemoteRow(name, r)
+			result[it.Target] = it.Detail
 		}
 	}
 	return result
@@ -477,8 +468,31 @@ func runResume(_ context.Context, args json.RawMessage) error {
 			if repoErr != nil {
 				return err
 			}
+			// Cached remote sessions (FDR 0011) appear in the picker after
+			// the local rows; they never count toward the single-match
+			// shortcut, so a remote row is only reachable by explicit
+			// selection.
+			remotes := remotesForCwd()
+			remoteRows := sessionpick.ItemsForRemoteRows(remote.ReadAllCaches(remotes))
+			var picked *sessionpick.Item
 			var autoPicked bool
-			state, autoPicked, err = sessionpick.ChooseAutoSingle(repoPath, "resume", p.debugLogger())
+			picked, autoPicked, err = sessionpick.ChooseAutoSingle(repoPath, "resume", p.debugLogger(), remoteRows)
+			if err != nil {
+				return err
+			}
+			if picked.State == nil {
+				// Remote row picked: selection is the confirmation — route
+				// over the remote's attach template, no dialog.
+				argv, handled, attachErr := remoteAttachPlan(picked.Target, p.NoAttach, remotes)
+				if attachErr != nil {
+					return attachErr
+				}
+				if !handled {
+					return fmt.Errorf("remote target %q matched no configured remote", picked.Target)
+				}
+				return runRemoteAttach(argv)
+			}
+			state = picked.State
 			targetAffirmed = !autoPicked
 		}
 	}
