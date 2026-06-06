@@ -204,3 +204,102 @@ func TestCompleteRemoteTargetsNoRemotes(t *testing.T) {
 		t.Errorf("nil remotes: got %v, want no entries", got)
 	}
 }
+
+// TestRemoteResumeArgv: the resume routing seam. A host:-prefixed target
+// whose prefix names a configured remote yields the attach argv (default
+// ssh template, or the remote's own template with {ssh}/{id} substituted);
+// anything else — plain local targets, unconfigured prefixes, no remotes —
+// falls through to local resolution (ok=false).
+func TestRemoteResumeArgv(t *testing.T) {
+	remotes := []sweatfile.Remote{
+		{Name: "devbox", SSH: "sasha@devbox.lan"},
+		{Name: "lab", Attach: []string{"mosh", "{ssh}", "--", "spinclass", "resume", "{id}"}},
+	}
+
+	cases := []struct {
+		name    string
+		target  string
+		remotes []sweatfile.Remote
+		want    []string
+		wantOK  bool
+	}{
+		{
+			name:    "match with default template uses Dest()",
+			target:  "devbox:crisp-catalpa",
+			remotes: remotes,
+			want:    []string{"ssh", "-t", "sasha@devbox.lan", "spinclass", "resume", "crisp-catalpa"},
+			wantOK:  true,
+		},
+		{
+			name:    "match with custom template substitutes {ssh} and {id}",
+			target:  "lab:molten-mango",
+			remotes: remotes,
+			want:    []string{"mosh", "lab", "--", "spinclass", "resume", "molten-mango"},
+			wantOK:  true,
+		},
+		{
+			name:    "parseable prefix but no configured remote falls through",
+			target:  "other:crisp-catalpa",
+			remotes: remotes,
+			wantOK:  false,
+		},
+		{
+			name:    "plain local target falls through",
+			target:  "crisp-catalpa",
+			remotes: remotes,
+			wantOK:  false,
+		},
+		{
+			name:   "no remotes configured falls through",
+			target: "devbox:crisp-catalpa",
+			wantOK: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := remoteResumeArgv(tc.target, tc.remotes)
+			if ok != tc.wantOK {
+				t.Fatalf("ok: got %v, want %v (argv %v)", ok, tc.wantOK, got)
+			}
+			if !tc.wantOK {
+				if got != nil {
+					t.Fatalf("fallthrough must return nil argv, got %v", got)
+				}
+				return
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("argv: got %v, want %v", got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Fatalf("argv[%d]: got %q, want %q (full %v)", i, got[i], tc.want[i], got)
+				}
+			}
+		})
+	}
+}
+
+// TestRejectRemoteTarget: close and merge are v1-unsupported for remote
+// targets. A host:-prefixed target naming a configured remote yields the
+// exact rejection error; everything else (unconfigured prefix, plain
+// target, empty target) is nil — behavior unchanged.
+func TestRejectRemoteTarget(t *testing.T) {
+	remotes := []sweatfile.Remote{{Name: "devbox"}}
+
+	if err := rejectRemoteTarget("devbox:crisp-catalpa", remotes); err == nil {
+		t.Fatal("configured remote target: want rejection error, got nil")
+	} else if err.Error() != "remote targets support resume only (v1)" {
+		t.Fatalf("rejection text: got %q, want %q", err.Error(), "remote targets support resume only (v1)")
+	}
+
+	for _, target := range []string{"other:crisp-catalpa", "crisp-catalpa", ""} {
+		if err := rejectRemoteTarget(target, remotes); err != nil {
+			t.Errorf("target %q: want nil (unchanged behavior), got %v", target, err)
+		}
+	}
+
+	if err := rejectRemoteTarget("devbox:crisp-catalpa", nil); err != nil {
+		t.Errorf("no remotes configured: want nil, got %v", err)
+	}
+}

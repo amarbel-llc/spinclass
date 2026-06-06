@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	osexec "os/exec"
 	"os/signal"
 	"path/filepath"
 
@@ -73,6 +75,10 @@ func registerSessionCommands(app *command.App) {
 			}
 			_ = json.Unmarshal(args, &p)
 
+			if err := rejectRemoteTarget(p.Target, remotesForCwd()); err != nil {
+				return err
+			}
+
 			return merge.Run(executor.ShellExecutor{}, p.FormatOrDefault(), p.Target, p.GitSync, p.Verbose)
 		},
 	})
@@ -131,6 +137,10 @@ func registerSessionCommands(app *command.App) {
 
 			nixGCOverride, err := parseNixGCFlag(p.NixGC)
 			if err != nil {
+				return err
+			}
+
+			if err := rejectRemoteTarget(p.Target, remotesForCwd()); err != nil {
 				return err
 			}
 
@@ -275,6 +285,61 @@ func completeRemoteTargets(remotes []sweatfile.Remote) map[string]string {
 	return result
 }
 
+// remoteResumeArgv is the resume routing seam: when target parses as
+// host:id AND the host names a configured remote, it returns the attach
+// argv ({ssh}/{id} substituted) and true. Everything else — plain local
+// targets, prefixes matching no configured remote — returns false so the
+// caller falls through to local resolution unchanged (a bare name
+// containing ':' that isn't a configured remote behaves exactly as today).
+func remoteResumeArgv(target string, remotes []sweatfile.Remote) ([]string, bool) {
+	r, id, ok := matchRemoteTarget(target, remotes)
+	if !ok {
+		return nil, false
+	}
+	return remote.AttachArgv(r, id), true
+}
+
+// rejectRemoteTarget guards verbs that don't support remote targets in v1
+// (close, merge): a host:-prefixed target naming a configured remote is
+// rejected explicitly instead of mis-resolving locally. Unconfigured
+// prefixes and plain targets return nil — behavior unchanged.
+func rejectRemoteTarget(target string, remotes []sweatfile.Remote) error {
+	if _, _, ok := matchRemoteTarget(target, remotes); ok {
+		return errors.New("remote targets support resume only (v1)")
+	}
+	return nil
+}
+
+// matchRemoteTarget parses target as host:id and resolves the host against
+// the configured remotes by name. ok is false when the target doesn't parse
+// or no remote matches.
+func matchRemoteTarget(target string, remotes []sweatfile.Remote) (sweatfile.Remote, string, bool) {
+	host, id, ok := remote.ParseTarget(target)
+	if !ok {
+		return sweatfile.Remote{}, "", false
+	}
+	for _, r := range remotes {
+		if r.Name == host {
+			return r, id, true
+		}
+	}
+	return sweatfile.Remote{}, "", false
+}
+
+// runRemoteAttach execs the remote attach argv as the session process,
+// using the same mechanism as the local executors (exec.Command with full
+// stdio/TTY passthrough; see executor.ShellExecutor) rather than inventing
+// a new one. The remote spinclass owns sweatfile/entrypoint semantics from
+// there; attach failures pass through the exec'd command's error. Thin
+// untested glue, mirroring attachSession's exec path.
+func runRemoteAttach(argv []string) error {
+	cmd := osexec.Command(argv[0], argv[1:]...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 type startArgs struct {
 	globalArgs
 	Description  string `json:"description"`
@@ -348,6 +413,12 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		NoAttach bool   `json:"no-attach"`
 	}
 	_ = json.Unmarshal(args, &p)
+
+	// host:-prefixed targets naming a configured remote route over the
+	// remote's attach template; everything else resolves locally as today.
+	if argv, ok := remoteResumeArgv(p.ID, remotesForCwd()); ok {
+		return runRemoteAttach(argv)
+	}
 
 	var state *session.State
 	var err error
