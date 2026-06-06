@@ -155,6 +155,59 @@ session index — cursor files are hashed by session key and not reversible
 back to it, so age is the robust proxy for "no live reader." Implemented
 in #99.
 
+## Clown job-wakeup migration (`SPINCLASS_CHAT_WAKE`)
+
+The push half of chat is migrating onto clown's **job-wakeup channel**
+(clown RFC-0009 / FDR-0013): a chat message addressed to a session is
+exactly a non-terminal *waking* event with addressable targeting, so the
+shared channel replaces this FDR's bespoke monitor + 1s poll. The
+factoring is **store = spinclass, wake = clown**: the chatroom file
+store stays the system of record (history, the `chat-read` firehose,
+the pull/macOS fallback) in both modes — only the push path changes.
+
+`SPINCLASS_CHAT_WAKE` selects the path (default `legacy`; unrecognized
+values resolve to `legacy`):
+
+- **`legacy`** — exactly this FDR's behavior: `chat-watch` monitor
+  polls the chatroom; no clown involvement.
+- **`clown`** — `chat-send` dual-writes: the store first (the message),
+  then a wake emit via
+  `${CLOWN_BIN:-clown} job message --target <key> --from <sender>
+  --source spinclass --message <body> --result-ref "chat-read
+  from=<sender> peek=true"`. Broadcasts emit once to clown's reserved
+  broadcast key `*` (condvar-style channel broadcast — clown's
+  job-watch scans its own channel plus the broadcast channel; a
+  monitor's first attach starts at journal end, so pre-existence
+  broadcasts are never replayed). `sc chat-watch` exits immediately so
+  each message yields exactly one notification, from clown's job-watch.
+
+A wake-emit failure is surfaced in the `chat-send` result but never
+fails the send — the store write already succeeded, so the recipient
+still gets the message via `chat-read` or a legacy monitor. The emit is
+bounded by a 10s timeout so a wedged clown binary cannot hang the tool.
+
+Rollout is fleet-global via the shared profile env; both modes always
+write the store, so flipping either direction loses nothing. During a
+mixed window a clown-mode sender + legacy-mode receiver produces a
+duplicate notification (chat-watch + clown job-watch both fire) —
+tolerated, and consumers dedupe per the channel's at-least-once posture.
+
+Promotion criteria for flipping the default to `clown` and deleting
+`chat-watch` + `internal/chat/watch.go` + the monitor manifest entry:
+
+1. clown `message` waking class merged + conformance-tested (clown side).
+2. Directed push observed end-to-end between two live Linux sessions
+   via clown job-watch.
+3. Broadcast observed reaching ≥2 sessions via the broadcast channel.
+4. Replay verified: a message emitted while the target's monitor is
+   down is delivered on its next monitor start (an upgrade over
+   `chat-watch`, which starts at current end and never replays).
+5. macOS pull path re-verified (trivially — `chat-read` is untouched).
+6. ~1 week of real use with no missed-message reports.
+
+Retention skew is deliberate: the store keeps 30d (system of record);
+clown's journal GC keeps ~7d (push layer only).
+
 ## Limitations
 
 - **Receive only while the session is open.** Monitors run only in live

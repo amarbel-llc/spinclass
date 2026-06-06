@@ -239,7 +239,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		Name:  "chat-send",
 		Title: "Send Cross-Session Chat Message",
 		Description: command.Description{
-			Short: "Post a message to the global cross-session chatroom. Omit `to` (or pass \"*\") to broadcast to every session; pass a session key (the `<repo>/<branch>` shown in `sc list`, == another session's $SPINCLASS_SESSION_ID) to direct-message one session. Receiving sessions are pushed new messages by the chat-watch monitor; no read call is needed on their side. The chatroom records and displays each message's sender automatically, so do NOT include or announce your own session ID in `message` — it is redundant; write only the message content.",
+			Short: "Post a message to the global cross-session chatroom. Omit `to` (or pass \"*\") to broadcast to every session; pass a session key (the `<repo>/<branch>` shown in `sc list`, == another session's $SPINCLASS_SESSION_ID) to direct-message one session. Receiving sessions are pushed new messages by the active chat push monitor (chat-watch, or clown's job-watch when SPINCLASS_CHAT_WAKE=clown); no read call is needed on their side. The chatroom records and displays each message's sender automatically, so do NOT include or announce your own session ID in `message` — it is redundant; write only the message content.",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			ReadOnlyHint:    protocol.BoolPtr(false),
@@ -685,7 +685,7 @@ func handleUpdateDescription(_ context.Context, args json.RawMessage, _ command.
 	return command.TextResult(fmt.Sprintf("description updated to: %s", params.Description)), nil
 }
 
-func handleChatSend(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+func handleChatSend(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	var params struct {
 		Message string `json:"message"`
 		To      string `json:"to"`
@@ -706,13 +706,20 @@ func handleChatSend(_ context.Context, args json.RawMessage, _ command.Prompter)
 	if to == "" {
 		to = chat.Broadcast
 	}
-	if err := chat.Send(chat.Message{From: from, To: to, Body: params.Message}); err != nil {
+	msg := chat.Message{From: from, To: to, Body: params.Message}
+	if err := chat.Send(msg); err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not send message: %v", err)), nil
 	}
 
 	dest := "all sessions"
 	if to != chat.Broadcast {
 		dest = to
+	}
+	// The store write above is the message; the wake emit is only the push.
+	// An emit failure is surfaced but must not fail the send (the recipient
+	// still gets the message via chat-read / the legacy monitor).
+	if err := chat.EmitWake(ctx, msg); err != nil {
+		return command.TextResult(fmt.Sprintf("sent to %s (from %s); wake emit failed: %v", dest, from, err)), nil
 	}
 	return command.TextResult(fmt.Sprintf("sent to %s (from %s)", dest, from)), nil
 }
