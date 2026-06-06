@@ -205,6 +205,32 @@ func TestCompleteRemoteTargetsNoRemotes(t *testing.T) {
 	}
 }
 
+// TestRemoteAttachPlanRejectsNoAttach: --no-attach has no remote meaning
+// (there is nothing local to skip attaching to), so combining it with a
+// routed remote target must error rather than silently attach.
+func TestRemoteAttachPlanRejectsNoAttach(t *testing.T) {
+	remotes := []sweatfile.Remote{{Name: "devbox", SSH: "sasha@devbox.lan"}}
+
+	argv, handled, err := remoteAttachPlan("devbox:crisp-catalpa", true, remotes)
+	if !handled {
+		t.Fatal("remote target with --no-attach: want handled=true (routed), got fallthrough")
+	}
+	if err == nil {
+		t.Fatalf("remote target with --no-attach: want error, got argv %v", argv)
+	}
+
+	// Without the flag the same target routes normally.
+	argv, handled, err = remoteAttachPlan("devbox:crisp-catalpa", false, remotes)
+	if !handled || err != nil || len(argv) == 0 {
+		t.Fatalf("remote target without flag: handled=%v err=%v argv=%v", handled, err, argv)
+	}
+
+	// Local targets are never handled, flag or not.
+	if _, handled, _ := remoteAttachPlan("crisp-catalpa", true, remotes); handled {
+		t.Fatal("plain local target: want fallthrough, got handled")
+	}
+}
+
 // TestRemoteResumeArgv: the resume routing seam. A host:-prefixed target
 // whose prefix names a configured remote yields the attach argv (default
 // ssh template, or the remote's own template with {ssh}/{id} substituted);

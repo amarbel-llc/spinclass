@@ -321,6 +321,22 @@ func remotesForTarget(target string) []sweatfile.Remote {
 	return remotesForCwd()
 }
 
+// remoteAttachPlan decides what resume does with a possibly-remote target:
+// handled=false means local resolution proceeds as today; handled=true with
+// an error rejects an unsupported combination (--no-attach has no remote
+// meaning — there is nothing local to skip attaching to); handled=true with
+// argv means exec the remote attach.
+func remoteAttachPlan(target string, noAttach bool, remotes []sweatfile.Remote) (argv []string, handled bool, err error) {
+	argv, ok := remoteResumeArgv(target, remotes)
+	if !ok {
+		return nil, false, nil
+	}
+	if noAttach {
+		return nil, true, errors.New("--no-attach is not supported for remote targets")
+	}
+	return argv, true, nil
+}
+
 // matchRemoteTarget parses target as host:id and resolves the host against
 // the configured remotes by name. ok is false when the target doesn't parse
 // or no remote matches.
@@ -427,7 +443,10 @@ func runResume(_ context.Context, args json.RawMessage) error {
 
 	// host:-prefixed targets naming a configured remote route over the
 	// remote's attach template; everything else resolves locally as today.
-	if argv, ok := remoteResumeArgv(p.ID, remotesForTarget(p.ID)); ok {
+	if argv, handled, err := remoteAttachPlan(p.ID, p.NoAttach, remotesForTarget(p.ID)); handled {
+		if err != nil {
+			return err
+		}
 		return runRemoteAttach(argv)
 	}
 
