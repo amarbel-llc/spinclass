@@ -58,7 +58,11 @@ subcommand — `sc chat-watch` — that:
 2. Watches the global chatroom directory
    `$XDG_STATE_HOME/spinclass/chatroom/` for new message files.
 3. For each new message whose `to` is `"*"` (broadcast) or this
-   session's key, writes a single human-readable line to stdout.
+   session's key, writes a single human-readable line to stdout —
+   except the session's own messages (`from` == its key), which are
+   never echoed back at their sender (#108): the push surface is for
+   peers' messages, while `chat-read` still returns own messages as
+   history.
 
 Because the monitor declares `"when": "always"`, it starts at session
 start and on plugin reload. Its stdout lines arrive in the agent's

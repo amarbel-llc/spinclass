@@ -165,6 +165,59 @@ func TestWatchDeliversOnlyNewAddressedMessages(t *testing.T) {
 	}
 }
 
+func TestWatchSkipsOwnMessages(t *testing.T) {
+	setChatroom(t)
+
+	const me = "repo/me"
+	var (
+		mu  sync.Mutex
+		got []Message
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- Watch(ctx, me, func(m Message) error {
+			mu.Lock()
+			got = append(got, m)
+			mu.Unlock()
+			return nil
+		})
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	// The session's own broadcast and own self-addressed DM must NOT echo
+	// back as notifications (#108) — the sender wrote them, it already
+	// knows. A peer's broadcast still arrives (the delivery sentinel).
+	mustSend(t, Message{From: me, To: Broadcast, Body: "my-own-broadcast"})
+	mustSend(t, Message{From: me, To: me, Body: "note-to-self"})
+	mustSend(t, Message{From: "peer/one", To: Broadcast, Body: "peer-broadcast"})
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(got)
+		mu.Unlock()
+		if n >= 1 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	// One extra tick so a wrongly-delivered own-message would have landed.
+	time.Sleep(1200 * time.Millisecond)
+
+	cancel()
+	<-done
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 1 || got[0].Body != "peer-broadcast" {
+		t.Fatalf("expected exactly the peer broadcast, got %+v", got)
+	}
+}
+
 func mustSend(t *testing.T, m Message) {
 	t.Helper()
 	if err := Send(m); err != nil {

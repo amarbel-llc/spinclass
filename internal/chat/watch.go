@@ -58,6 +58,13 @@ func Watch(ctx context.Context, sessionKey string, emit func(Message) error) err
 				if !m.addressedTo(sessionKey) {
 					continue
 				}
+				// Never push a session's own messages back at it (#108):
+				// the sender wrote them, it already knows. Applies to its
+				// broadcasts and self-addressed DMs alike; the pull surface
+				// (chat-read) still returns them as history.
+				if m.From == sessionKey {
+					continue
+				}
 				if err := emit(m); err != nil {
 					return err
 				}
