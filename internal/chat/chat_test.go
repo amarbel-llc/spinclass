@@ -1,8 +1,6 @@
 package chat
 
 import (
-	"context"
-	"sync"
 	"testing"
 	"time"
 )
@@ -92,129 +90,6 @@ func TestEntryFilenamesSortedAndFiltered(t *testing.T) {
 		if names[i-1] >= names[i] {
 			t.Errorf("not sorted: %q !< %q", names[i-1], names[i])
 		}
-	}
-}
-
-func TestWatchDeliversOnlyNewAddressedMessages(t *testing.T) {
-	setChatroom(t)
-
-	// A pre-existing message must NOT be delivered: Watch starts from the
-	// current end of the room.
-	if err := Send(Message{From: "old/sender", To: Broadcast, Body: "backlog"}); err != nil {
-		t.Fatalf("seed Send: %v", err)
-	}
-
-	const me = "repo/me"
-	var (
-		mu  sync.Mutex
-		got []Message
-	)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	done := make(chan error, 1)
-	go func() {
-		done <- Watch(ctx, me, func(m Message) error {
-			mu.Lock()
-			got = append(got, m)
-			mu.Unlock()
-			return nil
-		})
-	}()
-
-	// Give Watch a tick to snapshot the backlog as "seen".
-	time.Sleep(50 * time.Millisecond)
-
-	// Now send: one broadcast, one DM to me, one DM to someone else.
-	mustSend(t, Message{From: "x/y", To: Broadcast, Body: "to-all"})
-	mustSend(t, Message{From: "x/y", To: me, Body: "to-me"})
-	mustSend(t, Message{From: "x/y", To: "other/one", Body: "not-for-me"})
-
-	// Poll for the two we expect, up to a generous deadline.
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		mu.Lock()
-		n := len(got)
-		mu.Unlock()
-		if n >= 2 {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	cancel()
-	<-done
-
-	mu.Lock()
-	defer mu.Unlock()
-	if len(got) != 2 {
-		t.Fatalf("expected 2 delivered messages, got %d: %+v", len(got), got)
-	}
-	bodies := map[string]bool{}
-	for _, m := range got {
-		bodies[m.Body] = true
-	}
-	if !bodies["to-all"] || !bodies["to-me"] {
-		t.Errorf("expected to-all and to-me delivered, got %+v", got)
-	}
-	if bodies["backlog"] {
-		t.Error("backlog message should not have been delivered")
-	}
-	if bodies["not-for-me"] {
-		t.Error("message addressed to another session should not have been delivered")
-	}
-}
-
-func TestWatchSkipsOwnMessages(t *testing.T) {
-	setChatroom(t)
-
-	const me = "repo/me"
-	var (
-		mu  sync.Mutex
-		got []Message
-	)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	done := make(chan error, 1)
-	go func() {
-		done <- Watch(ctx, me, func(m Message) error {
-			mu.Lock()
-			got = append(got, m)
-			mu.Unlock()
-			return nil
-		})
-	}()
-
-	time.Sleep(50 * time.Millisecond)
-
-	// The session's own broadcast and own self-addressed DM must NOT echo
-	// back as notifications (#108) — the sender wrote them, it already
-	// knows. A peer's broadcast still arrives (the delivery sentinel).
-	mustSend(t, Message{From: me, To: Broadcast, Body: "my-own-broadcast"})
-	mustSend(t, Message{From: me, To: me, Body: "note-to-self"})
-	mustSend(t, Message{From: "peer/one", To: Broadcast, Body: "peer-broadcast"})
-
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		mu.Lock()
-		n := len(got)
-		mu.Unlock()
-		if n >= 1 {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	// One extra tick so a wrongly-delivered own-message would have landed.
-	time.Sleep(1200 * time.Millisecond)
-
-	cancel()
-	<-done
-
-	mu.Lock()
-	defer mu.Unlock()
-	if len(got) != 1 || got[0].Body != "peer-broadcast" {
-		t.Fatalf("expected exactly the peer broadcast, got %+v", got)
 	}
 }
 

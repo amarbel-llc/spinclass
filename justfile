@@ -344,44 +344,6 @@ dev-repo:
     cd "$dir"
     "$SHELL"
 
-# [explore] End-to-end smoke test for the cross-session chat prototype
-# (FDR 0009). Builds the binary, points XDG_STATE_HOME at a scratch dir,
-# starts `chat-watch` in the background as a fake session B, then sends a
-# broadcast and a directed message as session A via `chat-send`. Asserts the
-# watcher pushed exactly the messages addressed to B. Proves the real binary
-# round-trips send->watch; does NOT prove the Claude Code plugin-monitor push
-# (that needs a live two-session trial). Identity comes from
-# $SPINCLASS_SESSION_ID, so no real worktree is needed.
-[group('explore')]
-explore-chat-roundtrip:
-    #!/usr/bin/env bash
-    set -uo pipefail
-    scratch=$(mktemp -d)
-    bin="$scratch/spinclass"
-    trap 'kill "$watch_pid" 2>/dev/null; rm -rf "$scratch"' EXIT
-    nix develop --command go build -o "$bin" ./cmd/spinclass || { echo "build failed"; exit 1; }
-    export XDG_STATE_HOME="$scratch/state"
-
-    watch_out="$scratch/watch.out"
-    SPINCLASS_SESSION_ID="repo-b/feat-b" "$bin" chat-watch >"$watch_out" 2>&1 &
-    watch_pid=$!
-    sleep 1   # let the watcher snapshot the (empty) room as its baseline
-
-    SPINCLASS_SESSION_ID="repo-a/feat-a" "$bin" chat-send --message "hello everyone"
-    SPINCLASS_SESSION_ID="repo-a/feat-a" "$bin" chat-send --message "psst, just you" --to "repo-b/feat-b"
-    SPINCLASS_SESSION_ID="repo-a/feat-a" "$bin" chat-send --message "not for B"      --to "repo-c/feat-c"
-
-    sleep 2   # poll interval is 1s; give the watcher two ticks
-    kill "$watch_pid" 2>/dev/null; wait "$watch_pid" 2>/dev/null
-
-    echo "## watcher output:"; sed 's/^/    /' "$watch_out"; echo
-    pass=0
-    grep -qF "from repo-a/feat-a: hello everyone" "$watch_out" || { echo "FAIL: broadcast not delivered"; pass=1; }
-    grep -qF "from repo-a/feat-a: psst, just you" "$watch_out" || { echo "FAIL: DM to B not delivered"; pass=1; }
-    if grep -qF "not for B" "$watch_out"; then echo "FAIL: message for C leaked to B"; pass=1; fi
-    if [[ $pass -eq 0 ]]; then echo "VERDICT: chat send->watch round-trip WORKS"; else echo "VERDICT: round-trip FAILED"; fi
-    exit $pass
-
 # [explore] End-to-end smoke for the chat-read polling path (#98). Sends a
 # broadcast + a DM as session A, then reads as session B: firehose sees both,
 # a second read sees none (cursor advanced), --peek does not advance, and the
@@ -430,15 +392,6 @@ explore-chat-read:
 
     if [[ $pass -eq 0 ]]; then echo "VERDICT: chat-read polling WORKS"; else echo "VERDICT: chat-read FAILED"; fi
     exit $pass
-
-# [debug] One-shot clown `job message` emit: manual wake for the mixed-window
-# delivery hole (legacy-mode sender can't emit; see the EmitWake gating fix).
-# Remove once no pre-flip legacy sessions remain.
-[group('debug')]
-debug-clown-message target message:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    "${CLOWN_BIN:-clown}" job message --target '{{target}}' --from "${SPINCLASS_SESSION_ID}" --source spinclass --message '{{message}}' --result-ref "chat-read from=${SPINCLASS_SESSION_ID} peek=true"
 
 # Tag a spinclass release. The "v" prefix is added for you, so pass
 # the semver without it. Usage: just tag 0.1.0 "feat: initial release"

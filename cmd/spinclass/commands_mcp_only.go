@@ -240,7 +240,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		Name:  "chat-send",
 		Title: "Send Cross-Session Chat Message",
 		Description: command.Description{
-			Short: "Post a message to the global cross-session chatroom. `subject` is a one-line summary (max 200 chars) — it is ALL the recipient's push notification carries, so make it stand alone; put detail in `body`, which recipients recover via chat-read. Omit `to` (or pass \"*\") to broadcast to every session; pass a session key (the `<repo>/<branch>` shown in `sc list`, == another session's $SPINCLASS_SESSION_ID) to direct-message one session. Receiving sessions are pushed new messages by the active chat push monitor (chat-watch, or clown's job-watch when SPINCLASS_CHAT_WAKE=clown); no read call is needed on their side. The chatroom records and displays each message's sender automatically, so do NOT include or announce your own session ID — write only the content.",
+			Short: "Post a message to the global cross-session chatroom. `subject` is a one-line summary (max 200 chars) — it is ALL the recipient's push notification carries, so make it stand alone; put detail in `body`, which recipients recover via chat-read. Omit `to` (or pass \"*\") to broadcast to every session; pass a session key (the `<repo>/<branch>` shown in `sc list`, == another session's $SPINCLASS_SESSION_ID) to direct-message one session. Receiving sessions are pushed new messages by clown's job-watch monitor; no read call is needed on their side. The chatroom records and displays each message's sender automatically, so do NOT include or announce your own session ID — write only the content.",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			ReadOnlyHint:    protocol.BoolPtr(false),
@@ -261,7 +261,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		Name:  "chat-read",
 		Title: "Read Cross-Session Chat Messages",
 		Description: command.Description{
-			Short: "Read cross-session chat messages new since this session last read. Defaults to the full cross-session firehose (every message from every session); narrow with the optional filters. Advances this session's read cursor unless `peek` is true. This is the polling counterpart to the chat-watch monitor — useful when the monitor isn't running (e.g. macOS, where plugin monitors are gated off).",
+			Short: "Read cross-session chat messages new since this session last read. Defaults to the full cross-session firehose (every message from every session); narrow with the optional filters. Advances this session's read cursor unless `peek` is true. This is the pull counterpart to the clown job-watch push (and the only receive path without clown, e.g. macOS or bare spinclass).",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			ReadOnlyHint:    protocol.BoolPtr(false),

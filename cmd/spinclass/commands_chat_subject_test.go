@@ -10,38 +10,6 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/chat"
 )
 
-func TestFormatChatNotificationSubjectOnly(t *testing.T) {
-	m := chat.Message{From: "a/b", Subject: "fix landed"}
-	got := formatChatNotification(m)
-	want := "[spinclass-chat] from a/b: fix landed"
-	if got != want {
-		t.Fatalf("got %q, want %q", got, want)
-	}
-}
-
-func TestFormatChatNotificationBodyHint(t *testing.T) {
-	m := chat.Message{From: "a/b", Subject: "fix landed", Body: "long detail\nmore lines"}
-	got := formatChatNotification(m)
-	if !strings.HasPrefix(got, "[spinclass-chat] from a/b: fix landed") {
-		t.Fatalf("missing subject prefix: %q", got)
-	}
-	if !strings.Contains(got, "chat-read from=a/b peek=true") {
-		t.Fatalf("missing body recovery hint: %q", got)
-	}
-}
-
-func TestFormatChatNotificationLegacyBodyFallback(t *testing.T) {
-	// Pre-subject messages (or alias sends) carry only a body; the first
-	// line is the displayed subject, exactly the old rendering for short
-	// single-line messages.
-	m := chat.Message{From: "a/b", Body: "hello everyone"}
-	got := formatChatNotification(m)
-	want := "[spinclass-chat] from a/b: hello everyone"
-	if got != want {
-		t.Fatalf("got %q, want %q", got, want)
-	}
-}
-
 // sendArgs marshals chat-send tool arguments.
 func sendArgs(t *testing.T, kv map[string]string) json.RawMessage {
 	t.Helper()
@@ -63,7 +31,7 @@ func storedMessages(t *testing.T) []chat.Message {
 }
 
 func TestHandleChatSendSubjectAndBodyStored(t *testing.T) {
-	chatWakeEnv(t, "legacy")
+	chatEnv(t)
 
 	res, err := handleChatSend(context.Background(), sendArgs(t, map[string]string{
 		"subject": "rebase needed",
@@ -84,7 +52,7 @@ func TestHandleChatSendSubjectAndBodyStored(t *testing.T) {
 }
 
 func TestHandleChatSendRejectsOverCapSubject(t *testing.T) {
-	chatWakeEnv(t, "legacy")
+	chatEnv(t)
 
 	res, err := handleChatSend(context.Background(), sendArgs(t, map[string]string{
 		"subject": strings.Repeat("x", chat.SubjectMaxLen+1),
@@ -102,7 +70,7 @@ func TestHandleChatSendRejectsOverCapSubject(t *testing.T) {
 }
 
 func TestHandleChatSendMessageAliasDerivesSubject(t *testing.T) {
-	chatWakeEnv(t, "legacy")
+	chatEnv(t)
 
 	res, err := handleChatSend(context.Background(), sendArgs(t, map[string]string{
 		"message": "first line summary\nrest of the detail",
@@ -124,7 +92,7 @@ func TestHandleChatSendMessageAliasDerivesSubject(t *testing.T) {
 }
 
 func TestHandleChatSendRequiresContent(t *testing.T) {
-	chatWakeEnv(t, "legacy")
+	chatEnv(t)
 
 	res, err := handleChatSend(context.Background(), sendArgs(t, map[string]string{"to": "a/b"}), nil)
 	if err != nil {
@@ -136,7 +104,7 @@ func TestHandleChatSendRequiresContent(t *testing.T) {
 }
 
 func TestHandleChatSendEmitCarriesSubject(t *testing.T) {
-	chatWakeEnv(t, "clown")
+	chatEnv(t)
 	argsFile := t.TempDir() + "/args"
 	t.Setenv("CLOWN_BIN", stubClownBin(t, argsFile, true))
 
@@ -159,7 +127,7 @@ func TestHandleChatSendEmitCarriesSubject(t *testing.T) {
 }
 
 func TestHandleChatReadRendersSubjectAndBody(t *testing.T) {
-	chatWakeEnv(t, "legacy")
+	chatEnv(t)
 
 	if res, err := handleChatSend(context.Background(), sendArgs(t, map[string]string{
 		"subject": "the summary",

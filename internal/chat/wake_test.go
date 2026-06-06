@@ -8,28 +8,6 @@ import (
 	"testing"
 )
 
-func TestResolveWakeModeDefaultsToLegacy(t *testing.T) {
-	t.Setenv("SPINCLASS_CHAT_WAKE", "")
-	os.Unsetenv("SPINCLASS_CHAT_WAKE")
-	if got := ResolveWakeMode(); got != WakeModeLegacy {
-		t.Fatalf("unset env: got %q, want %q", got, WakeModeLegacy)
-	}
-}
-
-func TestResolveWakeModeClown(t *testing.T) {
-	t.Setenv("SPINCLASS_CHAT_WAKE", "clown")
-	if got := ResolveWakeMode(); got != WakeModeClown {
-		t.Fatalf("got %q, want %q", got, WakeModeClown)
-	}
-}
-
-func TestResolveWakeModeUnrecognizedFallsBackToLegacy(t *testing.T) {
-	t.Setenv("SPINCLASS_CHAT_WAKE", "bogus")
-	if got := ResolveWakeMode(); got != WakeModeLegacy {
-		t.Fatalf("unrecognized value: got %q, want %q", got, WakeModeLegacy)
-	}
-}
-
 // stubClown writes an executable shell script that records its argv (one
 // element per line) into argsFile and exits successfully iff ok. It returns
 // the script path for CLOWN_BIN injection. Mirrors stubClownBin in
@@ -61,9 +39,8 @@ func recordedArgs(t *testing.T, argsFile string) []string {
 
 func TestEmitWakeWithoutClownBinIsNoop(t *testing.T) {
 	// Emit capability is gated on CLOWN_BIN presence (the producer-may-emit
-	// contract), NOT on the chat wake mode — without clown there is nothing
-	// to emit to, and the legacy chat-watch path covers delivery.
-	t.Setenv("SPINCLASS_CHAT_WAKE", "clown")
+	// contract) — without clown there is nothing to emit to, and chat-read
+	// polling covers delivery.
 	t.Setenv("CLOWN_BIN", "")
 	os.Unsetenv("CLOWN_BIN")
 
@@ -73,27 +50,22 @@ func TestEmitWakeWithoutClownBinIsNoop(t *testing.T) {
 	}
 }
 
-func TestEmitWakeEmitsRegardlessOfChatMode(t *testing.T) {
-	// Regression for the mixed-window delivery hole: a legacy-MODE sender
-	// (pre-flip session) must still emit when running under clown, because
-	// a clown-mode RECEIVER has stood its chat-watch down and the emit is
-	// its only push path. Sender capability (CLOWN_BIN) and receiver mode
-	// (SPINCLASS_CHAT_WAKE) are different axes.
-	t.Setenv("SPINCLASS_CHAT_WAKE", "legacy")
+func TestEmitWakeEmitsUnderClown(t *testing.T) {
+	// The emit is presence-gated: running under clown (CLOWN_BIN set) is
+	// the only condition.
 	argsFile := filepath.Join(t.TempDir(), "args")
 	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, true))
 
 	err := EmitWake(context.Background(), Message{From: "spinclass/a", To: "clown/b", Body: "hi"})
 	if err != nil {
-		t.Fatalf("legacy-mode emit under clown: %v", err)
+		t.Fatalf("emit under clown: %v", err)
 	}
 	if _, statErr := os.Stat(argsFile); statErr != nil {
-		t.Fatalf("legacy-mode sender under clown did not emit: %v", statErr)
+		t.Fatalf("sender under clown did not emit: %v", statErr)
 	}
 }
 
 func TestEmitWakeDirectMessageArgv(t *testing.T) {
-	t.Setenv("SPINCLASS_CHAT_WAKE", "clown")
 	argsFile := filepath.Join(t.TempDir(), "args")
 	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, true))
 
@@ -122,7 +94,6 @@ func TestEmitWakeDirectMessageArgv(t *testing.T) {
 }
 
 func TestEmitWakeCarriesSubjectNotBody(t *testing.T) {
-	t.Setenv("SPINCLASS_CHAT_WAKE", "clown")
 	argsFile := filepath.Join(t.TempDir(), "args")
 	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, true))
 
@@ -144,7 +115,6 @@ func TestEmitWakeCarriesSubjectNotBody(t *testing.T) {
 }
 
 func TestEmitWakeBroadcastTargetsStar(t *testing.T) {
-	t.Setenv("SPINCLASS_CHAT_WAKE", "clown")
 	argsFile := filepath.Join(t.TempDir(), "args")
 	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, true))
 
@@ -169,7 +139,6 @@ func TestEmitWakeBroadcastTargetsStar(t *testing.T) {
 }
 
 func TestEmitWakeFailureSurfacesError(t *testing.T) {
-	t.Setenv("SPINCLASS_CHAT_WAKE", "clown")
 	argsFile := filepath.Join(t.TempDir(), "args")
 	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, false))
 
@@ -180,7 +149,6 @@ func TestEmitWakeFailureSurfacesError(t *testing.T) {
 }
 
 func TestEmitWakeMissingBinaryErrors(t *testing.T) {
-	t.Setenv("SPINCLASS_CHAT_WAKE", "clown")
 	t.Setenv("CLOWN_BIN", filepath.Join(t.TempDir(), "no-such-clown"))
 
 	err := EmitWake(context.Background(), Message{From: "a/b", To: "c/d", Body: "x"})

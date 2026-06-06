@@ -1,6 +1,6 @@
 ---
-status: experimental
-date: 2026-06-04
+status: deprecated
+date: 2026-06-06
 promotion-criteria: |
   PROMOTED to `experimental` on 2026-06-04: the spinclass-shipped plugin
   monitor was observed arming and running on a Linux host with the real
@@ -22,6 +22,12 @@ promotion-criteria: |
 ---
 
 # Cross-session chat via a plugin monitor
+
+> **Deprecated:** the plugin-monitor receive path was removed 2026-06-06
+> after the clown job-wakeup migration completed its live verification —
+> clown's job-watch is the sole push path (see FDR 0010 and clown
+> RFC-0009); chat-send/chat-read and the chatroom store live on
+> unchanged. SPINCLASS_CHAT_WAKE was removed with it.
 
 ## Problem Statement
 
@@ -239,6 +245,19 @@ Promotion criteria for flipping the default to `clown` and deleting
    `chat-watch`, which starts at current end and never replays).
 5. macOS pull path re-verified (trivially — `chat-read` is untouched).
 6. ~1 week of real use with no missed-message reports.
+
+**Executed 2026-06-06 (user-directed promotion).** Criteria 1–5
+satisfied; the ~1-week soak (criterion 6) was deliberately waived by
+user direction on the strength of: the raw-CLI directed and broadcast
+legs, producer wakes observed in both terminal flavors, the
+spinclass-plumbing sender self-echo (msg-44d10e6a), peer broadcast
+confirmations from tommy/solid-mulberry (likely a replay — it was
+inactive at send) and madder/clear-larch, and the mixed-window
+incident fix verified live. `chat-watch`, `internal/chat/watch.go`,
+the monitor manifest entry, and `SPINCLASS_CHAT_WAKE` were deleted;
+clown's job-watch is the sole push path. NEW LIMITATION: push requires
+running under clown (`CLOWN_BIN` set); without it (bare spinclass,
+macOS-without-monitors) `chat-read` polling is the only receive path.
 
 Retention skew is deliberate: the store keeps 30d (system of record);
 clown's journal GC keeps ~7d (push layer only).

@@ -6,8 +6,8 @@
 // is delivered to a session when its `to` is that key or the broadcast
 // sentinel "*".
 //
-// See docs/features/0009-cross-session-chat-monitor.md (receive path) and
-// issue #16 (the chatroom design this is the store for).
+// See docs/features/0010-clown-job-wakeup-producer.md (the clown job-watch
+// push path) and issue #16 (the chatroom design this is the store for).
 package chat
 
 import (
@@ -25,7 +25,7 @@ import (
 const Broadcast = "*"
 
 // Message is one chatroom entry. The on-disk JSON shape is the wire format
-// other tools (and the chat-watch monitor) read, so field tags are stable.
+// other tools read, so field tags are stable.
 // Subject is the short, notification-safe summary (see SubjectMaxLen);
 // messages predating it have only Body, and renderers fall back via
 // DisplaySubject.
@@ -73,7 +73,7 @@ func messageFilename(m Message) string {
 
 // Send writes one message file into the chatroom directory. The directory is
 // created if absent. The write is atomic (temp file + rename) so a reader
-// (the chat-watch monitor) never observes a half-written message.
+// never observes a half-written message.
 func Send(m Message) error {
 	if m.Timestamp.IsZero() {
 		m.Timestamp = time.Now().UTC()

@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // stubClownBin writes an executable shell script that records its argv (one
@@ -29,13 +28,12 @@ func stubClownBin(t *testing.T, argsFile string, ok bool) string {
 	return script
 }
 
-// chatWakeEnv isolates the chatroom store and pins the session identity and
-// wake mode for a handler test.
-func chatWakeEnv(t *testing.T, mode string) {
+// chatEnv isolates the chatroom store and pins the session identity for a
+// handler test.
+func chatEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("SPINCLASS_SESSION_ID", "spinclass/tester")
-	t.Setenv("SPINCLASS_CHAT_WAKE", mode)
 }
 
 // storedMessageCount counts committed message files in the isolated chatroom.
@@ -59,8 +57,11 @@ func storedMessageCount(t *testing.T) int {
 	return n
 }
 
-func TestHandleChatSendClownModeEmitsWake(t *testing.T) {
-	chatWakeEnv(t, "clown")
+// TestHandleChatSendEmits: chat-send dual-writes — the chatroom store first,
+// then a wake emit whenever the session runs under clown (presence-gated on
+// CLOWN_BIN).
+func TestHandleChatSendEmits(t *testing.T) {
+	chatEnv(t)
 	argsFile := filepath.Join(t.TempDir(), "args")
 	t.Setenv("CLOWN_BIN", stubClownBin(t, argsFile, true))
 
@@ -89,7 +90,7 @@ func TestHandleChatSendClownModeEmitsWake(t *testing.T) {
 }
 
 func TestHandleChatSendEmitFailureDoesNotFailSend(t *testing.T) {
-	chatWakeEnv(t, "clown")
+	chatEnv(t)
 	argsFile := filepath.Join(t.TempDir(), "args")
 	t.Setenv("CLOWN_BIN", stubClownBin(t, argsFile, false))
 
@@ -106,45 +107,5 @@ func TestHandleChatSendEmitFailureDoesNotFailSend(t *testing.T) {
 	}
 	if got := storedMessageCount(t); got != 1 {
 		t.Fatalf("stored messages: got %d, want 1", got)
-	}
-}
-
-func TestHandleChatSendLegacyModeStillEmits(t *testing.T) {
-	// Mixed-window delivery-hole regression: a pre-flip (legacy-mode)
-	// sender running under clown must emit, or a clown-mode receiver —
-	// whose chat-watch has stood down — never hears about the message.
-	chatWakeEnv(t, "legacy")
-	argsFile := filepath.Join(t.TempDir(), "args")
-	t.Setenv("CLOWN_BIN", stubClownBin(t, argsFile, true))
-
-	args, _ := json.Marshal(map[string]string{"message": "hi", "to": "clown/peer"})
-	res, err := handleChatSend(context.Background(), args, nil)
-	if err != nil {
-		t.Fatalf("handleChatSend: %v", err)
-	}
-	if res.IsErr {
-		t.Fatalf("result is error: %s", res.Text)
-	}
-	if _, statErr := os.Stat(argsFile); statErr != nil {
-		t.Fatalf("legacy-mode sender under clown did not emit: %v", statErr)
-	}
-}
-
-func TestRunChatWatchClownModeReturnsImmediately(t *testing.T) {
-	chatWakeEnv(t, "clown")
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	done := make(chan error, 1)
-	go func() { done <- runChatWatch(ctx) }()
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("runChatWatch in clown mode: %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("runChatWatch blocked in clown mode; want immediate return (clown job-watch owns the push path)")
 	}
 }

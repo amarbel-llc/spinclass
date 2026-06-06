@@ -7,8 +7,8 @@ import (
 )
 
 // SubjectMaxLen caps a message subject, in runes. The subject is the only
-// part of a message carried in push-notification lines (chat-watch / the
-// clown job-wakeup line), which the harness truncates somewhere past ~500
+// part of a message carried in push-notification lines (the clown
+// job-wakeup line), which the harness truncates somewhere past ~500
 // characters (issue #103; the exact limit varies by event size) — 200 keeps
 // a comfortable margin under every observed truncation after the line's
 // prefix overhead, and reads as a one-line summary. The full body is always
@@ -54,8 +54,8 @@ func (m Message) HasMoreThanSubject() bool {
 }
 
 // RecoveryHint is the chat-read invocation that retrieves this message's
-// full body — the single owner of the hint string both push paths append
-// (the chat-watch line and the clown wake's result_ref).
+// full body — the single owner of the hint string the push path appends
+// (the clown wake's result_ref).
 func (m Message) RecoveryHint() string {
 	return fmt.Sprintf("chat-read from=%s peek=true", m.From)
 }

@@ -11,14 +11,5 @@
       "command": "spinclass",
       "args": ["serve"]
     }
-  },
-  "experimental": {
-    "monitors": [
-      {
-        "name": "chat-watch",
-        "command": "spinclass chat-watch",
-        "description": "Cross-session chat messages addressed to this session"
-      }
-    ]
   }
 }

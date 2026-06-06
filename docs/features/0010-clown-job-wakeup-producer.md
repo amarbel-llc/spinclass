@@ -1,29 +1,34 @@
 ---
-status: experimental
+status: testing
 date: 2026-06-06
 promotion-criteria: |
-  experimental -> testing: the end-to-end wake pass succeeds against a
-  deployed clown >= 7fd142c — (1) a real async merge/check terminal event
-  wakes the originating agent via clown job-watch: OBSERVED 2026-06-06,
-  both terminal flavors (failed wake in spinclass/crisp-catalpa carrying
-  the first `not ok` line; succeeded wake organically in
-  clown/sleek-sumac); (2) a directed chat message wakes its target
-  session: OBSERVED 2026-06-06 (raw `clown job message` leg; the
-  spinclass chat-send dual-write leg still needs a sender running the
-  presence-gated emit binary live); (3) a broadcast reaches >=2 sessions
-  via the broadcast channel:
-  OBSERVED 2026-06-06, three exactly-once receipts (sender self-echo —
-  see spinclass#108 — plus two peer sessions, one freshly attached); (4)
-  replay (event emitted while the target's monitor is down delivered on
-  its next start): per agreement with the clown side, covered by clown's
+  experimental -> testing: PROMOTED 2026-06-06. The end-to-end wake pass
+  succeeded against a deployed clown >= 7fd142c — (1) a real async
+  merge/check terminal event wakes the originating agent via clown
+  job-watch: OBSERVED 2026-06-06, both terminal flavors (failed wake in
+  spinclass/crisp-catalpa carrying the first `not ok` line; succeeded
+  wake organically in clown/sleek-sumac); (2) a directed chat message
+  wakes its target session: OBSERVED 2026-06-06 (raw `clown job
+  message` leg, then the spinclass chat-send dual-write leg from a
+  sender running the presence-gated emit binary — self-echo
+  msg-44d10e6a, and moxy/kind-fig confirmed the directed dual-write
+  message exactly once via [clown-job]); (3) a broadcast reaches >=2 sessions via the broadcast
+  channel: OBSERVED 2026-06-06, three exactly-once receipts on the raw
+  leg (sender self-echo — see spinclass#108 — plus two peer sessions,
+  one freshly attached), then two peer exactly-once `[clown-job]`
+  confirmations on the chat-send dual-write leg
+  (tommy/solid-mulberry — inactive at send, so likely the first
+  organic replay observation — and madder/clear-larch); (4) replay
+  (event emitted while the target's monitor is down delivered on its
+  next start): per agreement with the clown side, covered by clown's
   RFC-0009 §9 bats conformance (replay-unacked-on-start, ack-gated
-  exactly-once, condvar first-attach); a live observation lands
-  organically the first time a session resumes with backlog — not staged
-  deliberately. Remaining for the flip: the chat-path dual-write legs
-  from a session running the presence-gated emit (post-incident fix).
-  testing -> accepted: ~1 week of real async jobs + chat in clown mode with
-  no missed wakeups and no tuning-lever adjustments; then FDR 0009's
-  chat promotion criteria govern deleting the legacy chat-watch monitor.
+  exactly-once, condvar first-attach); tommy/solid-mulberry's
+  inactive-at-send delivery is the likely organic live observation.
+  testing -> accepted: ~1 week of real async jobs + chat under clown with
+  no missed wakeups and no tuning-lever adjustments. (FDR 0009's chat
+  promotion was executed 2026-06-06 by user direction: the legacy
+  chat-watch monitor and SPINCLASS_CHAT_WAKE are deleted; this channel
+  is the sole chat push path.)
 ---
 
 # Clown job-wakeup producer integration
@@ -65,14 +70,12 @@ serve startup: under clown, "start it and end your turn — the wake
 arrives" replaces the poll-discipline warnings.
 
 **Chat wake emits**: gated on **presence** like the job emits —
-`CLOWN_BIN` set means emit. (Originally gated on
-`SPINCLASS_CHAT_WAKE=clown`; that opened a mixed-window delivery hole
-where a pre-flip legacy-mode sender never woke a clown-mode receiver
-whose chat-watch had stood down — observed live 2026-06-06 and fixed
-by splitting the axes. The mode now gates only the receive side; see
-FDR 0009's migration section.) `chat-send` dual-writes (chatroom store
-first, then `clown job message`); broadcasts emit once to clown's
-reserved `*` key (condvar-style channel broadcast, no fan-out).
+`CLOWN_BIN` set means emit; presence-gating is the only gate (the
+legacy chat-watch monitor and its `SPINCLASS_CHAT_WAKE` receive-side
+mode were deleted 2026-06-06 — see FDR 0009's deprecation record).
+`chat-send` dual-writes (chatroom store first, then `clown job
+message`); broadcasts emit once to clown's reserved `*` key
+(condvar-style channel broadcast, no fan-out).
 
 **Rollback**: clown's `CLOWN_DISABLE_JOB_WAKEUP=1` turns every emit
 into an exit-0 no-op, so the whole facility switches off without
@@ -90,7 +93,7 @@ A failing check wakes the agent with the first failure:
 
     [clown-job] spinclass check-3a1b2c4d failed: check failed: not ok 2 - pre-merge hook · spinclass session-job-status
 
-A directed chat message (mode=clown):
+A directed chat message:
 
     chat-send to="clown/sleek-sumac" message="rebase landed"
     # the target session is woken:
@@ -130,11 +133,11 @@ A directed chat message (mode=clown):
   at-least-once) and clown **FDR-0013** (feature-level treatment) — the
   contract this produces onto; spinclass#104 / clown#110 are the
   originating issues.
-- **FDR 0009** (`0009-cross-session-chat-monitor.md`) — the chat
-  migration's modes, dual-architecture rollback, and promotion criteria
-  for deleting the legacy `chat-watch` monitor.
+- **FDR 0009** (`0009-cross-session-chat-monitor.md`, deprecated) — the
+  legacy `chat-watch` monitor this channel replaced, its migration
+  history, and the executed promotion/deletion record.
 - spinclass#107 — promoting `SPINCLASS_CHAT_WAKE` into the sweatfile
-  cascade.
+  cascade (obsolete: the variable was deleted with the legacy monitor).
 - `internal/clown` — the producer package (`Source`, `Bin`, `Enabled`,
   `SendMessage`, `StartJob`, `FinishJob`); `internal/job/runner.go` —
   the emit points around the job goroutine.
