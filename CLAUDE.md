@@ -64,10 +64,17 @@ to console.
 configuration. Merges global (`~/.config/spinclass/sweatfile`) → intermediate
 parent dirs → repo-level. Supports `git-excludes`, `claude-allow`, `envrc-directives`, and
 `allowed-mcps` arrays (nil = inherit, empty = clear, non-empty = append),
-`[[mcps]]` and `[[start-commands]]` arrays of tables (dedup-by-name merge),
+`[[mcps]]`, `[[start-commands]]`, and `[[remotes]]` arrays of tables
+(dedup-by-name merge),
 `[env]` table (map merge), `[hooks]` table (create/stop/pre-merge lifecycle hooks, scalar
 override), and `[session]` table (start/resume entrypoint commands, override
 semantics).
+
+**Remote sessions** (`internal/remote/`): Routes `host:`-prefixed targets to
+sweatfile-declared `[[remotes]]` hosts at the CLI boundary — target grammar,
+attach-argv construction (`{ssh}`/`{id}` substitution), parallel ssh list
+query (3s/host), and the completion cache under
+`~/.local/state/spinclass/remotes/<name>.json`. Resume-only v1; see FDR 0011.
 
 **Merge/Pull/Clean** (`internal/merge/`, `internal/pull/`, `internal/clean/`):
 Post-session workflows. Merge rebases onto default branch then ff-only merges,
@@ -104,9 +111,9 @@ worktree paths. Applies `claude-allow` rules from sweatfile to
   `sc start-gh_pr <N|URL>`         Start a session from a GitHub pull request
   `sc start-gh_issue <N>`          Start a session with GitHub issue context (config-driven, see below)
   `sc start-<custom> <arg>`        User-defined start commands declared in sweatfile
-  `sc resume [id]`                 Resume an existing session (auto-detects from cwd)
+  `sc resume [id]`                 Resume an existing session (auto-detects from cwd; `host:id` reattaches on a `[[remotes]]` host over ssh)
   `sc update-description "<desc>"` Update session description (--id or auto-detect)
-  `sc list`                        List all tracked sessions from state directory
+  `sc list`                        List all tracked sessions, plus `host:`-prefixed rows from `[[remotes]]` hosts
   `sc merge [target]`              Merge worktree into main, remove session state
   `sc check`                       Run [hooks].pre-merge in the current worktree (agent-CI surface)
   `sc clean`                       Remove merged worktrees and abandoned sessions
@@ -297,6 +304,30 @@ DEBUG = "1"
 - `[[mcps]]` uses dedup-by-name merge (same as `[[start-commands]]`).
   Name-only entry (empty command) removes an inherited server.
 - Every `[[mcps]]` entry with a command implicitly adds to the allow-list.
+
+## Remote Sessions
+
+`[[remotes]]` declares hosts whose spinclass sessions appear in `sc list`
+and tab completion under a `<name>:` prefix and reattach via
+`sc resume <name>:<id>` (execs the attach template; default
+`ssh -t {ssh} spinclass resume {id}`).
+
+```toml
+[[remotes]]
+name   = "devbox"            # the <host>: prefix users type
+ssh    = "sasha@devbox.lan"  # optional; Dest() defaults to name
+attach = ["ssh", "-t", "{ssh}", "spinclass", "resume", "{id}"]  # optional; shown value is the default
+```
+
+- Dedup-by-name merge like `[[mcps]]`, but removal is explicit:
+  `remove = true` drops an inherited remote. A name-only entry is a valid
+  all-defaults remote (`~/.ssh/config` does the work), NOT a removal
+  sentinel — a deliberate divergence from `[[mcps]]`.
+- `sc list` queries each host in parallel (`ssh <dest> spinclass list
+  --format json`, 3s/host, per-host diagnostic rows) and refreshes the
+  completion cache; completion reads only the cache, never networks.
+  `close`/`merge` reject `host:` targets ("remote targets support resume
+  only (v1)"). See FDR 0011.
 
 ## Nix Build
 
