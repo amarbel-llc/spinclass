@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	"github.com/amarbel-llc/spinclass/internal/clown"
@@ -43,6 +42,8 @@ func EmitWake(ctx context.Context, m Message) error {
 	if ResolveWakeMode() != WakeModeClown {
 		return nil
 	}
-	resultRef := fmt.Sprintf("chat-read from=%s peek=true", m.From)
-	return clown.SendMessage(ctx, m.To, m.From, clown.Source, m.Body, resultRef)
+	// The wake line carries only the subject — the harness truncates long
+	// notification events (#103); the result_ref names the body's recovery
+	// path.
+	return clown.SendMessage(ctx, m.To, m.From, clown.Source, m.DisplaySubject(), m.RecoveryHint())
 }

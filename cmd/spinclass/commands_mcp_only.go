@@ -240,7 +240,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		Name:  "chat-send",
 		Title: "Send Cross-Session Chat Message",
 		Description: command.Description{
-			Short: "Post a message to the global cross-session chatroom. Omit `to` (or pass \"*\") to broadcast to every session; pass a session key (the `<repo>/<branch>` shown in `sc list`, == another session's $SPINCLASS_SESSION_ID) to direct-message one session. Receiving sessions are pushed new messages by the active chat push monitor (chat-watch, or clown's job-watch when SPINCLASS_CHAT_WAKE=clown); no read call is needed on their side. The chatroom records and displays each message's sender automatically, so do NOT include or announce your own session ID in `message` — it is redundant; write only the message content.",
+			Short: "Post a message to the global cross-session chatroom. `subject` is a one-line summary (max 200 chars) — it is ALL the recipient's push notification carries, so make it stand alone; put detail in `body`, which recipients recover via chat-read. Omit `to` (or pass \"*\") to broadcast to every session; pass a session key (the `<repo>/<branch>` shown in `sc list`, == another session's $SPINCLASS_SESSION_ID) to direct-message one session. Receiving sessions are pushed new messages by the active chat push monitor (chat-watch, or clown's job-watch when SPINCLASS_CHAT_WAKE=clown); no read call is needed on their side. The chatroom records and displays each message's sender automatically, so do NOT include or announce your own session ID — write only the content.",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			ReadOnlyHint:    protocol.BoolPtr(false),
@@ -249,7 +249,9 @@ func registerMCPOnlyCommands(app *command.App) {
 			OpenWorldHint:   protocol.BoolPtr(true),
 		},
 		Params: []command.Param{
-			{Name: "message", Type: command.String, Description: "Message body to send", Required: true},
+			{Name: "subject", Type: command.String, Description: "One-line summary (max 200 chars) — the only part carried in the recipient's push notification. Required unless body/message is given (then derived from its first line)."},
+			{Name: "body", Type: command.String, Description: "Full message content, any length; recipients recover it via chat-read"},
+			{Name: "message", Type: command.String, Description: "DEPRECATED alias for body (subject is derived from its first line)"},
 			{Name: "to", Type: command.String, Description: "Recipient session key (<repo>/<branch>); omit or \"*\" to broadcast"},
 		},
 		Run: wrapMCPHandler("chat-send", handleChatSend),
@@ -701,14 +703,25 @@ func handleUpdateDescription(_ context.Context, args json.RawMessage, _ command.
 
 func handleChatSend(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	var params struct {
-		Message string `json:"message"`
+		Subject string `json:"subject"`
+		Body    string `json:"body"`
+		Message string `json:"message"` // deprecated alias for body
 		To      string `json:"to"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
 	}
-	if params.Message == "" {
-		return command.TextErrorResult("message is required"), nil
+	body := params.Body
+	if body == "" {
+		body = params.Message
+	}
+	if params.Subject == "" && body == "" {
+		return command.TextErrorResult("subject (and optionally body) is required"), nil
+	}
+	// Explicit subjects are validated strictly; a subject derived from the
+	// body (alias path) is clipped instead — see chat.DisplaySubject.
+	if err := chat.ValidateSubject(params.Subject); err != nil {
+		return command.TextErrorResult(err.Error()), nil
 	}
 
 	from, err := currentSessionKey()
@@ -720,7 +733,7 @@ func handleChatSend(ctx context.Context, args json.RawMessage, _ command.Prompte
 	if to == "" {
 		to = chat.Broadcast
 	}
-	msg := chat.Message{From: from, To: to, Body: params.Message}
+	msg := chat.Message{From: from, To: to, Subject: params.Subject, Body: body}
 	if err := chat.Send(msg); err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not send message: %v", err)), nil
 	}
@@ -769,7 +782,13 @@ func handleChatRead(_ context.Context, args json.RawMessage, _ command.Prompter)
 			dest = " -> " + m.To
 		}
 		fmt.Fprintf(&b, "from %s%s @%s: %s\n",
-			m.From, dest, m.Timestamp.UTC().Format(time.RFC3339), m.Body)
+			m.From, dest, m.Timestamp.UTC().Format(time.RFC3339), m.DisplaySubject())
+		// Full body below the header when it carries more than the
+		// subject line — chat-read is the recovery surface for bodies
+		// the push notification could not carry (#103).
+		if m.HasMoreThanSubject() {
+			fmt.Fprintf(&b, "%s\n", m.Body)
+		}
 	}
 	return command.TextResult(strings.TrimRight(b.String(), "\n")), nil
 }

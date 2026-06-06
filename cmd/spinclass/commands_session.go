@@ -158,10 +158,7 @@ func runChatWatch(ctx context.Context) error {
 	defer cancel()
 
 	err = chat.Watch(sigCtx, sessionKey, func(m chat.Message) error {
-		// One line per message. The leading marker gives the agent a
-		// recognizable, greppable prefix; the from-key tells it who to
-		// reply to via chat-send.
-		_, werr := fmt.Fprintf(os.Stdout, "[spinclass-chat] from %s: %s\n", m.From, m.Body)
+		_, werr := fmt.Fprintln(os.Stdout, formatChatNotification(m))
 		return werr
 	})
 	// A clean interrupt (ctx cancelled) is a normal monitor shutdown,
@@ -170,6 +167,20 @@ func runChatWatch(ctx context.Context) error {
 		return nil
 	}
 	return err
+}
+
+// formatChatNotification renders one chat message as a single notification
+// line. The leading marker gives the agent a recognizable, greppable prefix;
+// the from-key tells it who to reply to via chat-send. Only the subject is
+// carried — notification events are truncated by the harness past a few
+// hundred characters (#103) — with a chat-read hint appended when the
+// message has a body beyond it.
+func formatChatNotification(m chat.Message) string {
+	line := fmt.Sprintf("[spinclass-chat] from %s: %s", m.From, m.DisplaySubject())
+	if m.HasMoreThanSubject() {
+		line += " · full body: " + m.RecoveryHint()
+	}
+	return line
 }
 
 // parseNixGCFlag turns the raw --nix-gc=<value> argument into a *bool

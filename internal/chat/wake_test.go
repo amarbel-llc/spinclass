@@ -103,6 +103,28 @@ func TestEmitWakeDirectMessageArgv(t *testing.T) {
 	}
 }
 
+func TestEmitWakeCarriesSubjectNotBody(t *testing.T) {
+	t.Setenv("SPINCLASS_CHAT_WAKE", "clown")
+	argsFile := filepath.Join(t.TempDir(), "args")
+	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, true))
+
+	m := Message{From: "a/b", To: "c/d", Subject: "short summary", Body: "very long body\nacross lines"}
+	if err := EmitWake(context.Background(), m); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+
+	got := recordedArgs(t, argsFile)
+	for i, a := range got {
+		if a == "--message" {
+			if got[i+1] != "short summary" {
+				t.Fatalf("--message: got %q, want the subject", got[i+1])
+			}
+			return
+		}
+	}
+	t.Fatalf("no --message in argv: %q", got)
+}
+
 func TestEmitWakeBroadcastTargetsStar(t *testing.T) {
 	t.Setenv("SPINCLASS_CHAT_WAKE", "clown")
 	argsFile := filepath.Join(t.TempDir(), "args")

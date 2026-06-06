@@ -73,6 +73,20 @@ directory. The two halves compose: **send = `chat-send` MCP tool,
 receive = `sc chat-watch` plugin monitor.** No reply-tool transport is
 needed because send is already a first-class tool.
 
+### Subjects and bodies (#103)
+
+Messages are split into a **subject** (one line, ≤200 runes — rejected
+over-cap when explicit) and an optional **body** of any length. Push
+notification lines (chat-watch and the clown wake `--message`) carry
+ONLY the subject — the harness truncates long notification events, which
+is how bodies used to get lost (#103) — plus a
+`· full body: chat-read from=<sender> peek=true` hint when a body
+exists. `chat-read` renders the subject line followed by the full body;
+the store keeps full fidelity. The pre-subject `message` parameter
+remains as a deprecated alias for `body`, with the subject derived from
+its first line (clipped, never rejected) so in-flight senders keep
+working; stored pre-subject messages render the same way.
+
 ### Plugin manifest shape
 
 ```json
@@ -263,7 +277,8 @@ clown's journal GC keeps ~7d (push layer only).
 | Lever | Current | Rationale | Change signal |
 |---|---|---|---|
 | watch strategy | 1s poll loop (prototype) | dependency-free + portable across macOS/Linux, no cgo; adequate to prove the push loop | latency complaints, or session counts that make per-tick `readdir` costly. Candidates if so: `fsnotify` (pure-Go, no external binary — first choice), `fswatch` (streams change events on stdout, matches the line-consuming shape, but a pinned external dep), `watchexec` (cross-platform, debounced, fits the existing `lib.mkSpinclass` runtime-pin pattern, but rerun-on-change rather than long-lived stream) |
-| emit format | one stdout line per message | cheapest signal the monitor mechanism consumes line-by-line | agents need structured fields (then emit a tagged/JSON line) |
+| emit format | one stdout line per message: subject + chat-read hint (#103 fix) | cheapest signal the monitor mechanism consumes line-by-line; subject survives harness truncation | agents need structured fields (then emit a tagged/JSON line) |
+| subject cap | 200 runes | comfortably under every observed harness truncation (~500+) after prefix overhead; reads as a one-line summary | observed truncation below the cap, or senders chafing at the limit |
 | default scope | broadcast + DMs to this session | matches issue #16's "broadcast-global, opt-in filter" decision | firehose proves too noisy at higher session counts |
 
 ## More Information

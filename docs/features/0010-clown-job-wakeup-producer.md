@@ -4,12 +4,22 @@ date: 2026-06-06
 promotion-criteria: |
   experimental -> testing: the end-to-end wake pass succeeds against a
   deployed clown >= 7fd142c — (1) a real async merge/check terminal event
-  wakes the originating agent via clown job-watch; (2) a directed chat
-  message wakes its target session; (3) a broadcast reaches >=2 sessions
-  via the broadcast channel; (4) replay verified (event emitted while the
-  target's monitor is down is delivered on its next start). NOTE: running
-  sessions keep the previous clown binary until the user redeploys home —
-  coordinate the pass with a redeploy.
+  wakes the originating agent via clown job-watch: OBSERVED 2026-06-06,
+  both terminal flavors (failed wake in spinclass/crisp-catalpa carrying
+  the first `not ok` line; succeeded wake organically in
+  clown/sleek-sumac); (2) a directed chat message wakes its target
+  session: OBSERVED 2026-06-06 (raw `clown job message` leg; the
+  spinclass chat-send dual-write leg still needs SPINCLASS_CHAT_WAKE=clown
+  live); (3) a broadcast reaches >=2 sessions via the broadcast channel:
+  OBSERVED 2026-06-06, three exactly-once receipts (sender self-echo —
+  see spinclass#108 — plus two peer sessions, one freshly attached); (4)
+  replay (event emitted while the target's monitor is down delivered on
+  its next start): per agreement with the clown side, covered by clown's
+  RFC-0009 §9 bats conformance (replay-unacked-on-start, ack-gated
+  exactly-once, condvar first-attach); a live observation lands
+  organically the first time a session resumes with backlog — not staged
+  deliberately. Remaining for the flip: the chat-path dual-write legs
+  under SPINCLASS_CHAT_WAKE=clown after the fleet env flip.
   testing -> accepted: ~1 week of real async jobs + chat in clown mode with
   no missed wakeups and no tuning-lever adjustments; then FDR 0009's
   chat promotion criteria govern deleting the legacy chat-watch monitor.

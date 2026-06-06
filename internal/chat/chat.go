@@ -26,10 +26,14 @@ const Broadcast = "*"
 
 // Message is one chatroom entry. The on-disk JSON shape is the wire format
 // other tools (and the chat-watch monitor) read, so field tags are stable.
+// Subject is the short, notification-safe summary (see SubjectMaxLen);
+// messages predating it have only Body, and renderers fall back via
+// DisplaySubject.
 type Message struct {
 	From      string    `json:"from"`
 	To        string    `json:"to"`
 	Timestamp time.Time `json:"timestamp"`
+	Subject   string    `json:"subject,omitempty"`
 	Body      string    `json:"body"`
 }
 
