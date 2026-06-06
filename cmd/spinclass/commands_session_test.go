@@ -1,12 +1,15 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/amarbel-llc/spinclass/internal/remote"
 	"github.com/amarbel-llc/spinclass/internal/session"
+	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/testgit"
 )
 
@@ -145,4 +148,59 @@ func TestCompleteWorktreeTargetsOutsideRepoIncludesRepoBasenameInLabel(t *testin
 
 func repoOf(wtPath string) string {
 	return filepath.Dir(filepath.Dir(wtPath))
+}
+
+// TestCompleteRemoteTargetsCacheOnly: remote completion entries come from
+// the per-remote cache files ONLY. A recording `ssh` stub sits first on
+// PATH; if completion ever networks, the stub's record file appears and
+// the test fails — completion must stay instant and offline-safe.
+func TestCompleteRemoteTargetsCacheOnly(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	stubDir := t.TempDir()
+	record := filepath.Join(stubDir, "ssh-invoked")
+	script := "#!/bin/sh\necho \"$@\" >> " + record + "\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(stubDir, "ssh"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write stub ssh: %v", err)
+	}
+	t.Setenv("PATH", stubDir+":"+os.Getenv("PATH"))
+
+	if err := remote.WriteCache("devbox", []session.ListRow{
+		{ID: "crisp-catalpa", SessionKey: "spinclass/crisp-catalpa", State: "active", Description: "fix login bug", Repo: "spinclass"},
+		{ID: "molten-mango", SessionKey: "clown/molten-mango", State: "inactive", Description: "", Repo: "clown"},
+	}); err != nil {
+		t.Fatalf("seed devbox cache: %v", err)
+	}
+
+	got := completeRemoteTargets([]sweatfile.Remote{
+		{Name: "devbox", SSH: "devbox.example"},
+		{Name: "lab"}, // never listed: no cache file, silently no entries
+	})
+
+	want := map[string]string{
+		"devbox:crisp-catalpa": "[active] crisp-catalpa — fix login bug (devbox)",
+		"devbox:molten-mango":  "[inactive] molten-mango (devbox)",
+	}
+	if len(got) != len(want) {
+		t.Errorf("got %d entries, want %d: %v", len(got), len(want), got)
+	}
+	for key, label := range want {
+		if got[key] != label {
+			t.Errorf("entry %q: got %q, want %q", key, got[key], label)
+		}
+	}
+
+	if _, err := os.Stat(record); !os.IsNotExist(err) {
+		t.Errorf("completion invoked ssh (record file exists, stat err = %v) — must be cache-only", err)
+	}
+}
+
+// TestCompleteRemoteTargetsNoRemotes: no configured remotes (including a
+// failed config load upstream, which degrades to nil) yields no entries
+// and never errors.
+func TestCompleteRemoteTargetsNoRemotes(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if got := completeRemoteTargets(nil); len(got) != 0 {
+		t.Errorf("nil remotes: got %v, want no entries", got)
+	}
 }

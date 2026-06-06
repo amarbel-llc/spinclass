@@ -14,6 +14,7 @@ import (
 	spinclose "github.com/amarbel-llc/spinclass/internal/close"
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/merge"
+	"github.com/amarbel-llc/spinclass/internal/remote"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sessionpick"
 	"github.com/amarbel-llc/spinclass/internal/shop"
@@ -243,6 +244,33 @@ func completeWorktreeTargets() map[string]string {
 			label = fmt.Sprintf("%s (%s)", label, filepath.Base(s.RepoPath))
 		}
 		result[id] = label
+	}
+	for key, label := range completeRemoteTargets(remotesForCwd()) {
+		result[key] = label
+	}
+	return result
+}
+
+// completeRemoteTargets returns `<remote>:<id>`-keyed completion entries
+// built from the per-remote cache files ONLY — no ssh, no network (the
+// cache is refreshed by each `sc list`; see
+// docs/plans/2026-06-06-remote-sessions-design.md). Labels mirror the
+// local `branch — description` style with the remote name appended as
+// the disambiguating suffix; the state is prefixed because remote rows
+// can't rely on local active-first sorting to convey it.
+func completeRemoteTargets(remotes []sweatfile.Remote) map[string]string {
+	if len(remotes) == 0 {
+		return nil
+	}
+	result := make(map[string]string)
+	for name, rows := range remote.ReadAllCaches(remotes) {
+		for _, r := range rows {
+			label := r.ID
+			if r.Description != "" {
+				label = fmt.Sprintf("%s — %s", r.ID, r.Description)
+			}
+			result[name+":"+r.ID] = fmt.Sprintf("[%s] %s (%s)", r.State, label, name)
+		}
 	}
 	return result
 }
