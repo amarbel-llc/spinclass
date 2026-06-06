@@ -29,6 +29,9 @@ func TestBuildMergeAsyncDescription_ClownWakeGuidance(t *testing.T) {
 	if !strings.Contains(got, "`just`") {
 		t.Fatalf("description lost the hook preview: %q", got)
 	}
+	if !strings.Contains(got, "task list is the test") {
+		t.Fatalf("clown description missing the task-list decision clause: %q", got)
+	}
 }
 
 func TestBuildCheckAsyncDescription_NoClownKeepsPollGuidance(t *testing.T) {
@@ -45,5 +48,8 @@ func TestBuildCheckAsyncDescription_ClownWakeGuidance(t *testing.T) {
 	}
 	if strings.Contains(got, "Do NOT pick async") {
 		t.Fatalf("clown description kept the anti-async warning: %q", got)
+	}
+	if !strings.Contains(got, "task list is the test") {
+		t.Fatalf("clown description missing the task-list decision clause: %q", got)
 	}
 }

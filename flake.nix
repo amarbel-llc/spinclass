@@ -216,6 +216,8 @@
                 --replace-fail '@SPINCLASS@' "$out/bin/spinclass"
               install -m 0644 ${./.clown-plugin/system-prompt-append.d/00-worktree.md} \
                 "$pluginShare/.clown-plugin/system-prompt-append.d/00-worktree.md"
+              install -m 0644 ${./.clown-plugin/system-prompt-append.d/10-session-jobs.md} \
+                "$pluginShare/.clown-plugin/system-prompt-append.d/10-session-jobs.md"
 
               # Plugin-level hook registration. Clown auto-discovers
               # ${"\${CLAUDE_PLUGIN_ROOT}"}/hooks/hooks.json and wires the listed
