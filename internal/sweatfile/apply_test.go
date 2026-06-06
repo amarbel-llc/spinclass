@@ -37,24 +37,22 @@ func TestHardcodedDefaultsGitExcludes(t *testing.T) {
 		t.Fatal("expected non-nil git excludes slice")
 	}
 
-	if len(defaults.Git.Excludes) != 3 {
+	// .spinclass.env is written into every worktree by sweatfile.Apply
+	// (the [session-entry].env dotenv file) and must be excluded so it
+	// never shows as untracked / gets accidentally staged (#116).
+	want := []string{".worktrees/", ".spinclass/", ".spinclass.env", ".mcp.json"}
+	if len(defaults.Git.Excludes) != len(want) {
 		t.Fatalf(
-			"expected 3 git excludes, got %d: %v",
+			"expected %d git excludes, got %d: %v",
+			len(want),
 			len(defaults.Git.Excludes),
 			defaults.Git.Excludes,
 		)
 	}
-
-	if defaults.Git.Excludes[0] != ".worktrees/" {
-		t.Errorf("expected .worktrees/, got %q", defaults.Git.Excludes[0])
-	}
-
-	if defaults.Git.Excludes[1] != ".spinclass/" {
-		t.Errorf("expected .spinclass/, got %q", defaults.Git.Excludes[1])
-	}
-
-	if defaults.Git.Excludes[2] != ".mcp.json" {
-		t.Errorf("expected .mcp.json, got %q", defaults.Git.Excludes[2])
+	for i, w := range want {
+		if defaults.Git.Excludes[i] != w {
+			t.Errorf("excludes[%d]: expected %q, got %q", i, w, defaults.Git.Excludes[i])
+		}
 	}
 }
 

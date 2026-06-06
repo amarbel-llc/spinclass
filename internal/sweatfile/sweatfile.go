@@ -336,7 +336,10 @@ func (sf Sweatfile) TombstoneRetention() (time.Duration, bool) {
 // sweatfile config.
 func GetDefault() Sweatfile {
 	sf := Sweatfile{
-		Git:           &Git{Excludes: []string{".worktrees/", ".spinclass/", ".mcp.json"}},
+		// .spinclass.env is the [session-entry].env dotenv file Apply
+		// writes into every worktree root — excluded so it never shows
+		// as untracked or gets accidentally staged (#116).
+		Git:           &Git{Excludes: []string{".worktrees/", ".spinclass/", ".spinclass.env", ".mcp.json"}},
 		StartCommands: defaultStartCommands(),
 	}
 
