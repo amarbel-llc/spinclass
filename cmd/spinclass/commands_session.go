@@ -75,7 +75,7 @@ func registerSessionCommands(app *command.App) {
 			}
 			_ = json.Unmarshal(args, &p)
 
-			if err := rejectRemoteTarget(p.Target, remotesForCwd()); err != nil {
+			if err := rejectRemoteTarget(p.Target, remotesForTarget(p.Target)); err != nil {
 				return err
 			}
 
@@ -140,7 +140,7 @@ func registerSessionCommands(app *command.App) {
 				return err
 			}
 
-			if err := rejectRemoteTarget(p.Target, remotesForCwd()); err != nil {
+			if err := rejectRemoteTarget(p.Target, remotesForTarget(p.Target)); err != nil {
 				return err
 			}
 
@@ -310,6 +310,17 @@ func rejectRemoteTarget(target string, remotes []sweatfile.Remote) error {
 	return nil
 }
 
+// remotesForTarget gates the sweatfile-hierarchy load behind the target
+// grammar: plain local targets (the overwhelmingly common case) parse false
+// via the pure-regex ParseTarget and skip the config walk entirely; only
+// host:-shaped targets pay for remotesForCwd().
+func remotesForTarget(target string) []sweatfile.Remote {
+	if _, _, ok := remote.ParseTarget(target); !ok {
+		return nil
+	}
+	return remotesForCwd()
+}
+
 // matchRemoteTarget parses target as host:id and resolves the host against
 // the configured remotes by name. ok is false when the target doesn't parse
 // or no remote matches.
@@ -416,7 +427,7 @@ func runResume(_ context.Context, args json.RawMessage) error {
 
 	// host:-prefixed targets naming a configured remote route over the
 	// remote's attach template; everything else resolves locally as today.
-	if argv, ok := remoteResumeArgv(p.ID, remotesForCwd()); ok {
+	if argv, ok := remoteResumeArgv(p.ID, remotesForTarget(p.ID)); ok {
 		return runRemoteAttach(argv)
 	}
 
