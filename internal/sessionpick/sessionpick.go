@@ -49,14 +49,10 @@ func itemForState(s session.State, now time.Time) Item {
 	if title == "" {
 		title = filepath.Base(s.WorktreePath)
 	}
-	last := s.StartedAt
-	if s.ExitedAt != nil && !s.ExitedAt.IsZero() {
-		last = *s.ExitedAt
-	}
 	repoBase := filepath.Base(s.RepoPath)
 	detail := strings.Join([]string{
 		s.ResolveState(),
-		formatRelDate(last, now),
+		FormatRelDate(LastActivity(s), now),
 		"@" + s.Branch,
 		repoBase,
 	}, " · ")
@@ -67,9 +63,19 @@ func itemForState(s session.State, now time.Time) Item {
 	}
 }
 
-// formatRelDate renders t relative to now using clown's tiering:
+// LastActivity returns the session's most recent lifecycle timestamp:
+// ExitedAt when set, else StartedAt. Shared by the picker rows and the
+// resume confirm dialog's detail block.
+func LastActivity(s session.State) time.Time {
+	if s.ExitedAt != nil && !s.ExitedAt.IsZero() {
+		return *s.ExitedAt
+	}
+	return s.StartedAt
+}
+
+// FormatRelDate renders t relative to now using clown's tiering:
 // just now / Nm ago / Nh ago / Nd ago / absolute date beyond a week.
-func formatRelDate(t, now time.Time) string {
+func FormatRelDate(t, now time.Time) string {
 	delta := now.Sub(t)
 	switch {
 	case delta < time.Minute:
@@ -94,21 +100,42 @@ func formatRelDate(t, now time.Time) string {
 // tab-completion paths). Dismissing the picker (q/esc/ctrl+c) returns
 // the historical "session selection cancelled" error.
 func Choose(repoPath, cmdName string, dbg *slog.Logger) (*session.State, error) {
+	state, _, err := choose(repoPath, cmdName, dbg, false)
+	return state, err
+}
+
+// ChooseAutoSingle is Choose with a single-candidate short-circuit:
+// when exactly one non-abandoned session exists for repoPath it is
+// returned without rendering the picker (auto=true), even on a non-TTY
+// stdin — the caller owns whatever confirmation that path needs. With
+// multiple candidates it behaves exactly like Choose (auto=false).
+// `resume` uses this so the single-match case shows a confirm dialog
+// instead of a one-row picker; `close` keeps Choose so its behavior is
+// unchanged.
+func ChooseAutoSingle(repoPath, cmdName string, dbg *slog.Logger) (*session.State, bool, error) {
+	return choose(repoPath, cmdName, dbg, true)
+}
+
+func choose(repoPath, cmdName string, dbg *slog.Logger, autoSingle bool) (*session.State, bool, error) {
 	sessions, err := session.ListForRepo(repoPath, dbg)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if len(sessions) == 0 {
-		return nil, fmt.Errorf("no sessions for %s", filepath.Base(repoPath))
+		return nil, false, fmt.Errorf("no sessions for %s", filepath.Base(repoPath))
 	}
 	session.SortStates(sessions)
+
+	if autoSingle && len(sessions) == 1 {
+		return &sessions[0], true, nil
+	}
 
 	if !interactive() {
 		ids := make([]string, len(sessions))
 		for i, s := range sessions {
 			ids[i] = filepath.Base(s.WorktreePath)
 		}
-		return nil, fmt.Errorf(
+		return nil, false, fmt.Errorf(
 			"no session selected; available: %s\nUse: spinclass %s <id>",
 			strings.Join(ids, ", "),
 			cmdName,
@@ -124,12 +151,12 @@ func Choose(repoPath, cmdName string, dbg *slog.Logger) (*session.State, error) 
 
 	picked, err := Pick(fmt.Sprintf("Select a session to %s", cmdName), items)
 	if err != nil {
-		return nil, fmt.Errorf("session picker: %w", err)
+		return nil, false, fmt.Errorf("session picker: %w", err)
 	}
 	if picked == nil {
-		return nil, fmt.Errorf("session selection cancelled")
+		return nil, false, fmt.Errorf("session selection cancelled")
 	}
-	return picked.State, nil
+	return picked.State, false, nil
 }
 
 func interactive() bool {

@@ -63,10 +63,31 @@ function spinclass_resume_from_cwd { # @test
   local wt_path
   wt_path=$(extract_wt_path "$start_output")
 
-  # cd into the worktree and resume with no args (auto-detect from cwd)
+  # cd into the worktree and resume with no args (auto-detect from cwd).
+  # Auto-detect shows a confirm dialog before attaching; --yes skips it,
+  # which is also required here because the bats harness is non-TTY.
+  cd "$wt_path" || return
+  run_sc_session resume --yes
+  assert_success
+}
+
+function spinclass_resume_from_cwd_non_tty_requires_yes { # @test
+  cd "$TEST_REPO" || return
+  local bin="${SPINCLASS_BIN:-spinclass}"
+
+  # Start a session — writes state and exits
+  local start_output
+  start_output=$(timeout --preserve-status 10s "$bin" --format tap start 2>&1)
+
+  local wt_path
+  wt_path=$(extract_wt_path "$start_output")
+
+  # Auto-detect resume without --yes on a non-TTY stdin must fail with
+  # the -y hint instead of silently attaching (resumeConfirmPlan).
   cd "$wt_path" || return
   run_sc_session resume
-  assert_success
+  assert_failure
+  assert_output --partial "pass -y"
 }
 
 function spinclass_resume_no_session_fails { # @test

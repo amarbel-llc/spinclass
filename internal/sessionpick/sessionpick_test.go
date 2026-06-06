@@ -25,6 +25,75 @@ func TestChooseEmptyListErrors(t *testing.T) {
 	}
 }
 
+// writeSessions persists one inactive-but-listed session per branch
+// under a fresh XDG_STATE_HOME, with live worktree dirs so
+// ResolveState() doesn't mark them abandoned. Returns the repo path.
+func writeSessions(t *testing.T, branches ...string) string {
+	t.Helper()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	live := t.TempDir()
+	for _, branch := range branches {
+		wt := filepath.Join(live, ".worktrees", branch)
+		if err := os.MkdirAll(wt, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		s := session.State{
+			PID:          12345, // not alive — flips to inactive, but still listed
+			SessionState: session.StateActive,
+			RepoPath:     live,
+			WorktreePath: wt,
+			Branch:       branch,
+			SessionKey:   "repo/" + branch,
+			Entrypoint:   []string{"/bin/sh"},
+			StartedAt:    time.Now().UTC(),
+		}
+		if err := session.Write(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return live
+}
+
+// TestChooseAutoSingleReturnsLoneSession: with exactly one candidate,
+// ChooseAutoSingle returns it without rendering the picker (auto=true)
+// — even on a non-TTY stdin, since the caller owns any confirmation.
+func TestChooseAutoSingleReturnsLoneSession(t *testing.T) {
+	live := writeSessions(t, "feature")
+
+	state, auto, err := ChooseAutoSingle(live, "resume", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !auto {
+		t.Error("auto = false, want true for a single candidate")
+	}
+	if state == nil || state.Branch != "feature" {
+		t.Fatalf("state = %+v, want the lone 'feature' session", state)
+	}
+}
+
+// TestChooseAutoSingleMultiNonInteractiveListsIDs: with multiple
+// candidates ChooseAutoSingle behaves exactly like Choose — non-TTY
+// callers get the ID list error, not an auto-pick.
+func TestChooseAutoSingleMultiNonInteractiveListsIDs(t *testing.T) {
+	live := writeSessions(t, "feature", "other")
+
+	_, auto, err := ChooseAutoSingle(live, "resume", nil)
+	if err == nil {
+		t.Fatal("expected non-interactive error for multiple candidates")
+	}
+	if auto {
+		t.Error("auto = true, want false for multiple candidates")
+	}
+	got := err.Error()
+	for _, want := range []string{"feature", "other", "Use: spinclass resume <id>"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("error = %q, missing %q", got, want)
+		}
+	}
+}
+
 // TestChooseNonInteractiveListsIDs covers the CI / piped-stdin path:
 // non-TTY callers get a list of available IDs and a "Use:" hint with
 // the supplied command name (resume vs close).

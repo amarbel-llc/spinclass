@@ -48,11 +48,12 @@ func registerSessionCommands(app *command.App) {
 		Name: "resume",
 		Description: command.Description{
 			Short: "Resume an existing worktree session",
-			Long:  "Resume an existing worktree session. With no argument, auto-detects from the current working directory; if cwd isn't inside a tracked session, prompts interactively when stdin is a TTY or errors with the list of available session IDs otherwise. With one argument, resumes the session whose worktree directory name matches. Tab completion offers session IDs scoped to the current repo when run inside one, or all non-abandoned sessions otherwise (labels include the repo basename to disambiguate). A host:-prefixed target naming a configured [[remotes]] entry routes over that remote's attach template instead of resolving locally, and completion additionally offers cached remote sessions under the host: prefix; see spinclass-sweatfile(5) [[remotes]].",
+			Long:  "Resume an existing worktree session. With no argument, auto-detects from the current working directory; if cwd isn't inside a tracked session, prompts interactively when stdin is a TTY or errors with the list of available session IDs otherwise. Auto-detected and single-candidate sessions show a confirmation dialog before attaching; -y/--yes skips it, except when the session is active (live PID, probably attached elsewhere), which always warns with default Cancel. With one argument, resumes the session whose worktree directory name matches without any dialog — naming the target is the confirmation. Tab completion offers session IDs scoped to the current repo when run inside one, or all non-abandoned sessions otherwise (labels include the repo basename to disambiguate). A host:-prefixed target naming a configured [[remotes]] entry routes over that remote's attach template instead of resolving locally, and completion additionally offers cached remote sessions under the host: prefix; see spinclass-sweatfile(5) [[remotes]].",
 		},
 		Params: []command.Param{
 			{Name: "id", Type: command.String, Description: "Session ID (worktree directory name); auto-detects from cwd if omitted", Completer: completeWorktreeTargets},
 			{Name: "no-attach", Type: command.Bool, Description: "Find session but skip attaching"},
+			{Name: "yes", Short: 'y', Type: command.Bool, Description: "Skip the resume confirmation dialog"},
 		},
 		RunCLI: runResume,
 	})
@@ -438,6 +439,7 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		globalArgs
 		ID       string `json:"id"`
 		NoAttach bool   `json:"no-attach"`
+		Yes      bool   `json:"yes"`
 	}
 	_ = json.Unmarshal(args, &p)
 
@@ -453,6 +455,13 @@ func runResume(_ context.Context, args json.RawMessage) error {
 	var state *session.State
 	var err error
 
+	// targetAffirmed: the user already affirmed the target by naming an
+	// explicit id or by picking it from the multi-match picker — those
+	// paths skip the confirm dialog (resumeConfirmPlan's explicitTarget).
+	// Auto-detect from cwd and the picker's single-match short-circuit
+	// leave it false and confirm before attaching.
+	targetAffirmed := true
+
 	if p.ID != "" {
 		state, err = session.FindByID(p.ID)
 	} else {
@@ -461,16 +470,35 @@ func runResume(_ context.Context, args json.RawMessage) error {
 			return cwdErr
 		}
 		state, err = session.FindByWorktreePath(cwd)
-		if err != nil {
+		if err == nil {
+			targetAffirmed = false
+		} else {
 			repoPath, repoErr := worktree.DetectRepo(cwd)
 			if repoErr != nil {
 				return err
 			}
-			state, err = sessionpick.Choose(repoPath, "resume", p.debugLogger())
+			var autoPicked bool
+			state, autoPicked, err = sessionpick.ChooseAutoSingle(repoPath, "resume", p.debugLogger())
+			targetAffirmed = !autoPicked
 		}
 	}
 	if err != nil {
 		return err
+	}
+
+	resolvedState := state.ResolveState()
+	kind, err := resumeConfirmPlan(resolvedState, targetAffirmed, p.Yes, isInteractiveTerminal())
+	if err != nil {
+		return err
+	}
+	if kind != resumeConfirmNone {
+		ok, err := confirmResume(state, resolvedState, kind)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
 	}
 
 	hierarchy, err := sweatfile.LoadWorktreeHierarchy(

@@ -97,8 +97,8 @@ func TestFormatRelDateTiers(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := formatRelDate(tc.t, now); got != tc.want {
-				t.Errorf("formatRelDate = %q, want %q", got, tc.want)
+			if got := FormatRelDate(tc.t, now); got != tc.want {
+				t.Errorf("FormatRelDate = %q, want %q", got, tc.want)
 			}
 		})
 	}
