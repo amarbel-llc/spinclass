@@ -13,6 +13,11 @@ type ListRow struct {
 	State       string `json:"state"`       // resolved: active|inactive|running-detached|abandoned
 	Description string `json:"description"`
 	Repo        string `json:"repo"` // repo dir basename
+
+	// Remote is the sweatfile [[remotes]] name a row was fetched from.
+	// Set only on rows `sc list` merged in from a remote host; local
+	// rows (and the wire payload a host serves about itself) omit it.
+	Remote string `json:"remote,omitempty"`
 }
 
 // ListRows converts states to wire rows, mirroring the text output's

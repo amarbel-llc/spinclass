@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
@@ -15,8 +16,10 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/clean"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/pull"
+	"github.com/amarbel-llc/spinclass/internal/remote"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/shop"
+	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/validate"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 )
@@ -41,13 +44,13 @@ func registerQueryCommands(app *command.App) {
 		Params: []command.Param{
 			{Name: "closed", Type: command.Bool, Description: "Include closed sessions (tombstones and dangling symlinks)"},
 		},
-		Run: func(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+		Run: func(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 			var p struct {
 				globalArgs
 				Closed bool `json:"closed"`
 			}
 			_ = json.Unmarshal(args, &p)
-			return runListResult(p.Closed, p.FormatOrDefault(), p.debugLogger())
+			return runListResult(ctx, p.Closed, p.FormatOrDefault(), p.debugLogger(), remotesForCwd())
 		},
 	})
 
@@ -270,13 +273,23 @@ func registerQueryCommands(app *command.App) {
 // (the remote wire format); any other value (tap, table, default) emits
 // the tab-separated text rows. dbg, when non-nil, is forwarded to
 // session.ListAll so excluded index entries are logged at Debug level.
-func runListResult(closed bool, format string, dbg *slog.Logger) (*command.Result, error) {
+// remotes, when non-empty, are queried in parallel and their rows
+// rendered after the local rows; an unreachable host yields one
+// diagnostic line (text formats) or a Debug log (json must stay a
+// clean array) — never a command failure.
+func runListResult(ctx context.Context, closed bool, format string, dbg *slog.Logger, remotes []sweatfile.Remote) (*command.Result, error) {
 	states, err := session.ListAll(dbg)
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
 	}
+	remoteRows, diags := queryRemotes(ctx, remotes, dbg)
 	if format == "json" {
-		data, err := json.Marshal(session.ListRows(states, closed))
+		if dbg != nil {
+			for _, d := range diags {
+				dbg.Debug("remote list diagnostic", "diag", d)
+			}
+		}
+		data, err := json.Marshal(append(session.ListRows(states, closed), remoteRows...))
 		if err != nil {
 			return command.TextErrorResult(err.Error()), nil
 		}
@@ -302,5 +315,80 @@ func runListResult(closed bool, format string, dbg *slog.Logger) (*command.Resul
 		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			s.SessionKey, resolved, marker, exited, s.WorktreePath, s.Description)
 	}
+	for _, r := range remoteRows {
+		fmt.Fprintf(&b, "%s:%s\t%s\t\t\t\t%s\n", r.Remote, r.ID, r.State, r.Description)
+	}
+	for _, d := range diags {
+		fmt.Fprintln(&b, d)
+	}
 	return command.TextResult(b.String()), nil
+}
+
+// remotesForCwd returns the [[remotes]] entries from the merged sweatfile
+// hierarchy for the current working directory. Any load failure (including
+// running where no hierarchy resolves) degrades to no remotes — `sc list`
+// must keep working unchanged without remote config.
+func remotesForCwd() []sweatfile.Remote {
+	merged, ok := mergedSweatfileForCwd()
+	if !ok {
+		return nil
+	}
+	return merged.ActiveRemotes()
+}
+
+// queryRemotes fans out remote.QueryHost over the configured remotes in
+// parallel (one goroutine per host, results into per-index slots) and
+// flattens the outcomes in config order: healthy hosts contribute rows
+// tagged with their remote name plus a completion-cache write; unreachable
+// hosts contribute one single-line diagnostic each. Per-host isolation —
+// neither a host error nor a cache-write failure is ever returned as an
+// error; cache failures are logged to dbg (nil = silent) and dropped.
+func queryRemotes(ctx context.Context, remotes []sweatfile.Remote, dbg *slog.Logger) ([]session.ListRow, []string) {
+	if len(remotes) == 0 {
+		return nil, nil
+	}
+	type outcome struct {
+		rows []session.ListRow
+		err  error
+	}
+	outcomes := make([]outcome, len(remotes))
+	var wg sync.WaitGroup
+	for i, r := range remotes {
+		wg.Add(1)
+		go func(i int, r sweatfile.Remote) {
+			defer wg.Done()
+			rows, err := remote.QueryHost(ctx, r)
+			outcomes[i] = outcome{rows: rows, err: err}
+		}(i, r)
+	}
+	wg.Wait()
+
+	var rows []session.ListRow
+	var diags []string
+	for i, r := range remotes {
+		if outcomes[i].err != nil {
+			diags = append(diags, fmt.Sprintf("%s: unreachable (%s)", r.Name, shortErr(outcomes[i].err)))
+			continue
+		}
+		// Cache the wire rows as served (before tagging) so the
+		// completion cache stays in the host's own format.
+		if err := remote.WriteCache(r.Name, outcomes[i].rows); err != nil && dbg != nil {
+			dbg.Debug("remote cache write failed", "remote", r.Name, "error", err)
+		}
+		for j := range outcomes[i].rows {
+			outcomes[i].rows[j].Remote = r.Name
+		}
+		rows = append(rows, outcomes[i].rows...)
+	}
+	return rows, diags
+}
+
+// shortErr collapses an error to its first trimmed line so a per-host
+// diagnostic stays a single list row.
+func shortErr(err error) string {
+	msg := strings.TrimSpace(err.Error())
+	if i := strings.IndexByte(msg, '\n'); i >= 0 {
+		msg = strings.TrimSpace(msg[:i])
+	}
+	return msg
 }
