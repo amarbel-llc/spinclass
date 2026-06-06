@@ -5,8 +5,8 @@ spinclass-sweatfile \- sweatfile configuration format
 Spinclass sessions are configured via TOML files called
 .IR sweatfiles .
 These control git excludes, Claude Code permissions, direnv setup,
-session entrypoints, lifecycle hooks, MCP server registration, and
-custom start-* plugins.
+session entrypoints, lifecycle hooks, MCP server registration,
+custom start-* plugins, and remote session hosts.
 .PP
 Sweatfiles are loaded as a hierarchy that merges
 .I global
@@ -472,15 +472,6 @@ Argv passed to
 .TP
 .B env
 Table of environment variables set on the server process.
-.TP
-.B auto-allow
-Array of strings forming an argv vector
-.RI ( "command arg1 arg2 \&..." ).
-The first element is the executable; remaining elements are its arguments.
-When present, spinclass execs this command at session start to
-discover tool-level permissions.
-See
-.BR "AUTO-ALLOW PROTOCOL" .
 .PP
 .B Merge:
 dedup-by-name (full entry replacement, same as
@@ -531,143 +522,97 @@ See
 below for the
 .B nothing\-but\-the\-truth
 tool's input schema, lifecycle, and gate-failure response shape.
-.SH AUTO-ALLOW PROTOCOL
-The
-.B auto-allow
-field on a
-.B [[mcps]]
-entry declares a command that spinclass executes at session creation
-time.
-The field is a TOML array of strings forming an argv vector: the first
-element is the executable, and any remaining elements are arguments
-passed to it.
-The command must print a single JSON object to stdout describing which
-of its tools should be added to
-.B permissions.allow
+.SS [[remotes]]
+Array of tables declaring remote hosts whose spinclass sessions appear
 in
-.IR .claude/settings.local.json .
-.SS Execution Context
-The auto-allow command runs after
-.I .mcp.json
-is written but before the session entrypoint is exec'd.
-The working directory is the worktree root.
-The command inherits the session's environment, including any variables
-set via the
-.B [env]
-table in the sweatfile hierarchy.
-The command is exec'd directly (not via a shell); wrap in
-.B sh \-c
-if shell features are needed.
-.SS JSON Schema
-.RS 4
-.nf
-{
-  "tools": ["tool_name_1", "tool_name_2"]
-}
-.fi
-.RE
+.B sc list
+and tab completion under a \fIhost\fR\fB:\fR prefix and can be
+reattached via
+.BI "sc resume " host : id\fR.
+Remotes normally live in the global sweatfile.
+Completion entries for \fIhost\fR\fB:\fR targets are served from a
+per-host cache refreshed by each
+.B sc list
+\(em completion never networks.
 .TP
-.B tools
-(required) Array of bare tool names.
-Names must
-.B not
-include the
-.B mcp__
-prefix; spinclass constructs the fully-qualified form
-.BI mcp__ name __ tool
-using the server's
 .B name
-field.
-.SS Error Handling
-.IP \(bu 2
-If the command exits non-zero, the error is reported to stderr and the
-session is still created.
-.IP \(bu 2
-If stdout is not valid JSON or does not match the schema, a warning is
-printed to stderr.
-.IP \(bu 2
-If any tool name contains the
-.B mcp__
-prefix, it is rejected.
-.IP \(bu 2
-If the response contains a
-.B servers
-field, it is rejected.
-MCP servers cannot auto-allow other servers.
-.SS Examples
-.B Basic: MCP server with built-in auto-allow subcommand
+(required) The \fIhost\fR\fB:\fR prefix users type.
+A name containing
+.BR : " or " /
+is an
+.B sc validate
+error.
+.TP
+.B ssh
+ssh destination substituted for the attach template's
+.B {ssh}
+placeholder.
+Defaults to
+.B name
+when empty, so a name-only entry is a valid all-defaults remote and
+.I ~/.ssh/config
+does the work.
+.TP
+.B attach
+Argv template exec'd by
+.B sc resume
+for \fIhost\fR\fB:\fR targets.
+.BR {ssh} " and " {id}
+are substituted literally in every element; the argv is exec'd
+directly (no shell).
+Defaults to
+.BR "[\(dqssh\(dq, \(dq-t\(dq, \(dq{ssh}\(dq, \(dqspinclass\(dq, \(dqresume\(dq, \(dq{id}\(dq]" .
+An empty element is an
+.B sc validate
+error.
+.TP
+.B remove
+Boolean.
+When true, the entry is an explicit removal sentinel that removes an
+inherited remote of the same name.
+This deliberately diverges from the
+.B [[mcps]]
+name-only removal sentinel: a name-only
+.B [[remotes]]
+entry is the most natural declaration of an all-defaults remote (the
+ssh destination defaults to the name, the attach template to the
+default above), so it cannot double as the removal sentinel \(em
+removal must be explicit.
+Setting
+.B remove = true
+alongside
+.BR ssh " or " attach
+fields is an
+.B sc validate
+warning (the fields are ignored).
 .PP
-The server itself exposes an
-.B auto-allow
-subcommand that lists its safe-to-auto-approve tools:
+.B Merge:
+dedup-by-name (full entry replacement, same as
+.BR [[mcps]] ).
+.PP
+Example:
 .PP
 .RS 4
 .nf
-[[mcps]]
-name = "moxy"
-command = "moxy"
-args = ["serve"]
-auto-allow = ["moxy", "auto-allow"]
+[[remotes]]
+name = "devbox"           # the <host>: prefix users type
+ssh  = "sasha@devbox.lan" # optional; defaults to name
+# attach defaults to:
+# ["ssh", "-t", "{ssh}", "spinclass", "resume", "{id}"]
+
+# name-only = all-defaults remote; ~/.ssh/config does the work
+[[remotes]]
+name = "lab"
 .fi
 .RE
 .PP
-Running
-.B moxy auto-allow
-might produce:
+Drop an inherited remote in a child sweatfile:
 .PP
 .RS 4
 .nf
-{
-  "tools": [
-    "lsp_execute-command",
-    "grit_commit",
-    "grit_diff",
-    "rg_search"
-  ]
-}
-.fi
-.RE
-.PP
-Spinclass constructs fully-qualified permission rules and adds them to
-.BR permissions.allow :
-.PP
-.RS 4
-.nf
-mcp__moxy__lsp_execute-command
-mcp__moxy__grit_commit
-mcp__moxy__grit_diff
-mcp__moxy__rg_search
-.fi
-.RE
-.PP
-.B Shell wrapper: dynamic tool list from an external source
-.PP
-When the auto-allow logic requires shell features (pipes, subshells),
-wrap the command in
-.BR "sh \-c" :
-.PP
-.RS 4
-.nf
-[[mcps]]
-name = "db-tools"
-command = "db-mcp"
-args = ["serve"]
-auto-allow = ["sh", "-c", "db-mcp list-tools --safe | jq '{tools: .}'"]
-.fi
-.RE
-.PP
-.B Minimal: allow all tools from a small server
-.PP
-For a server with few tools that are all safe to auto-approve, the
-auto-allow command can return a static list:
-.PP
-.RS 4
-.nf
-[[mcps]]
-name = "formatter"
-command = "fmt-mcp"
-args = ["serve"]
-auto-allow = ["sh", "-c", "echo '{\"tools\": [\"format\", \"check\"]}'"]
+[[remotes]]
+name   = "devbox"
+remove = true
 .fi
 .RE
 .SH PRE-MERGE SKILL ATTESTATION
@@ -788,12 +733,19 @@ The child's value replaces the parent's entirely.
 .TP
 .B "dedup-by-name"
 Used by array-of-tables:
-.BR [[start-commands]] ", " [[mcps]] ", " [[pre-merge-skills]] .
+.BR [[start-commands]] ", " [[mcps]] ", " [[pre-merge-skills]] ", " [[remotes]] .
 Entries are matched by
 .BR name ;
 a later entry replaces the entire earlier entry in-place (not a
 field-level merge).
 New names are appended.
+Removal of an inherited entry is per-table:
+.BR [[mcps]] " and " [[pre-merge-skills]]
+use a name-only sentinel, while
+.B [[remotes]]
+requires an explicit
+.B remove = true
+entry.
 .TP
 .B "map merge"
 Used by

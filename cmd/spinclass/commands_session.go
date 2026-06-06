@@ -48,7 +48,7 @@ func registerSessionCommands(app *command.App) {
 		Name: "resume",
 		Description: command.Description{
 			Short: "Resume an existing worktree session",
-			Long:  "Resume an existing worktree session. With no argument, auto-detects from the current working directory; if cwd isn't inside a tracked session, prompts interactively when stdin is a TTY or errors with the list of available session IDs otherwise. With one argument, resumes the session whose worktree directory name matches. Tab completion offers session IDs scoped to the current repo when run inside one, or all non-abandoned sessions otherwise (labels include the repo basename to disambiguate).",
+			Long:  "Resume an existing worktree session. With no argument, auto-detects from the current working directory; if cwd isn't inside a tracked session, prompts interactively when stdin is a TTY or errors with the list of available session IDs otherwise. With one argument, resumes the session whose worktree directory name matches. Tab completion offers session IDs scoped to the current repo when run inside one, or all non-abandoned sessions otherwise (labels include the repo basename to disambiguate). A host:-prefixed target naming a configured [[remotes]] entry routes over that remote's attach template instead of resolving locally, and completion additionally offers cached remote sessions under the host: prefix; see spinclass-sweatfile(5) [[remotes]].",
 		},
 		Params: []command.Param{
 			{Name: "id", Type: command.String, Description: "Session ID (worktree directory name); auto-detects from cwd if omitted", Completer: completeWorktreeTargets},

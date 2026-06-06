@@ -1,6 +1,6 @@
 .TH SPINCLASS-BUILD-PINS 7 "" "spinclass" "Spinclass Reference"
 .SH NAME
-spinclass-build-pins \- build-time-pinned binaries (madder, direnv)
+spinclass-build-pins \- build-time-pinned binaries (madder, direnv, dodder)
 .SH DESCRIPTION
 Spinclass exposes a Nix flake function
 .B lib.mkSpinclass
@@ -29,6 +29,7 @@ with the desired derivations:
 spinclass.lib.${system}.mkSpinclass {
   madder = madder.packages.${system}.default;
   direnv = pkgs.direnv;
+  dodder = dodder.packages.${system}.default;
 }
 .fi
 .RE
@@ -122,8 +123,64 @@ if no
 is found, the
 .I .envrc
 generation step is skipped (this matches the pre-pin behaviour).
+.SS dodder
+When the
+.B dodder
+input is supplied,
+.BR sc\ start " (and any other path that creates a worktree)"
+additionally initialises a per-worktree dodder repository at
+.I <worktree>/.dodder/
+on first session creation, layered over the per-worktree madder blob
+store: when the madder
+.B .default
+store already exists it is adopted via
+.BR "\-blob_store\-id .default" ;
+otherwise dodder's embedded madder creates a default store.
+The init command run is
+.RS 4
+.B dodder init -encryption none -repo_id . -private_key <key> [\-blob_store\-id .default] <repo-id>
+.RE
+with both
+.B DODDER_CEILING_DIRECTORIES=<worktree>
+and
+.B MADDER_CEILING_DIRECTORIES=<worktree>
+set on the invocation only (not exported into the broader session) so
+discovery will not walk up into a parent repo's
+.IR .dodder/ " or " .madder/
+directories.
+The signing key is resolved from the user's ssh agent via
+.B dodder info-ssh_agent
+(first key listed); a locked or empty agent is a hard error so no
+divergent per-worktree signing identity is silently generated.
+.PP
+The init step is guarded by an existence check on
+.I .dodder/local/share/config-seed
+\(em rerunning
+.B sc start
+in a worktree that already has a repository is a no-op.
+.PP
+When the integration is active, two additional rules are applied at
+worktree creation:
+.IP \(bu 2
+.I .dodder/
+is appended to the worktree's
+.IR .git/info/exclude .
+.IP \(bu 2
+.B Bash(dodder:*)
+is appended to the worktree's Claude Code allow list in
+.IR .claude/settings.local.json .
+.PP
+When the
+.B dodder
+input is null (the default
+.BR packages.default ),
+none of the above happens.
+The feature is fully dormant; no
+.I .dodder/
+directory is created and no dodder-related allow rule is added.
 .SH SEE ALSO
 .BR spinclass (1),
 .BR spinclass\-sweatfile (5),
 .BR madder (1),
-.BR direnv (1)
+.BR direnv (1),
+.BR dodder (1)

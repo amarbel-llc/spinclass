@@ -33,7 +33,13 @@ func registerQueryCommands(app *command.App) {
 			Long: "List tracked sessions from the central index. By default " +
 				"only live entries (active or running-detached) are shown. " +
 				"Use --closed to also include tombstones (cleanly-closed " +
-				"sessions) and dangling symlinks (externally-closed).",
+				"sessions) and dangling symlinks (externally-closed). " +
+				"Hosts declared via [[remotes]] in the sweatfile hierarchy " +
+				"are queried in parallel and their sessions appended as " +
+				"host:-prefixed rows; an unreachable host yields a per-host " +
+				"diagnostic line in text formats, while --format json keeps " +
+				"a machine-clean array and adds a \"remote\" field to " +
+				"remote rows.",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			ReadOnlyHint:    protocol.BoolPtr(true),
