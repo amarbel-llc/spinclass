@@ -138,10 +138,10 @@ func FormatRelDate(t, now time.Time) string {
 // records describing every index entry that was excluded by
 // session.ListAll/ListForRepo — pass nil for silent operation (e.g.
 // tab-completion paths). Dismissing the picker (q/esc/ctrl+c) returns
-// the historical "session selection cancelled" error.
+// (nil, nil) — the caller treats it as "user cancelled" and exits 0.
 func Choose(repoPath, cmdName string, dbg *slog.Logger) (*session.State, error) {
 	item, _, err := choose(repoPath, cmdName, dbg, false, nil)
-	if err != nil {
+	if err != nil || item == nil {
 		return nil, err
 	}
 	return item.State, nil
@@ -211,7 +211,9 @@ func choose(repoPath, cmdName string, dbg *slog.Logger, autoSingle bool, remoteR
 		return nil, false, fmt.Errorf("session picker: %w", err)
 	}
 	if picked == nil {
-		return nil, false, fmt.Errorf("session selection cancelled")
+		// User dismissed the picker (q/esc/ctrl+c): nil item, nil error —
+		// callers exit 0 without acting, clown-style.
+		return nil, false, nil
 	}
 	return picked, false, nil
 }

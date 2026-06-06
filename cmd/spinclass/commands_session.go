@@ -480,6 +480,10 @@ func runResume(_ context.Context, args json.RawMessage) error {
 			if err != nil {
 				return err
 			}
+			if picked == nil {
+				// Picker dismissed (q/esc/ctrl+c): clean exit, clown-style.
+				return nil
+			}
 			if picked.State == nil {
 				// Remote row picked: selection is the confirmation — route
 				// over the remote's attach template, no dialog.

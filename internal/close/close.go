@@ -37,12 +37,20 @@ func Run(w io.Writer, target string, force bool, nixGCOverride *bool, format str
 	}
 
 	repoPath, wtPath, branch, err := resolveTarget(cwd, target, dbg)
+	if errors.Is(err, errPickerDismissed) {
+		// User dismissed the picker: clean exit, nothing closed.
+		return nil
+	}
 	if err != nil {
 		return err
 	}
 
 	return RunResolved(w, repoPath, wtPath, branch, force, nixGCOverride, format)
 }
+
+// errPickerDismissed signals that the user dismissed the interactive
+// session picker (q/esc/ctrl+c) — a clean cancel, not a failure.
+var errPickerDismissed = errors.New("session picker dismissed")
 
 // RunResolved closes a session whose paths have already been resolved
 // by the caller. Equivalent to Run minus the cwd/target lookup; callers
@@ -322,6 +330,11 @@ func resolveTarget(cwd, target string, dbg *slog.Logger) (repoPath, wtPath, bran
 	picked, err := sessionpick.Choose(repoPath, "close", dbg)
 	if err != nil {
 		return "", "", "", err
+	}
+	if picked == nil {
+		// Picker dismissed (q/esc/ctrl+c): signal a clean cancel so Run
+		// exits 0 without closing anything.
+		return "", "", "", errPickerDismissed
 	}
 	return picked.RepoPath, picked.WorktreePath, picked.Branch, nil
 }
