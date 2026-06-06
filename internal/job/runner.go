@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/amarbel-llc/spinclass/internal/clown"
 )
 
 // Func is the unit of work a background job runs. It receives a context that
@@ -78,9 +80,30 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 		return nil, err
 	}
 
+	// Snapshot before the goroutine launches: the goroutine owns j from here
+	// on (status, result, clown job id), so handing the caller the live
+	// pointer would be a data race one field-read away. The snapshot carries
+	// the identity fields the caller renders (ID, Kind, StartedAt).
+	snapshot := *j
+
 	go func() {
 		defer clearRunning()
 		defer logf.Close()
+
+		// Allocate the matching clown job-wakeup entry (clown RFC-0009) when
+		// running under clown, so the terminal emit below can wake the agent.
+		// Inside the goroutine so a slow clown never delays Start's
+		// immediate-return contract. Emit failures are logged, never fatal:
+		// spinclass's job.json/job.log remain the system of record, clown is
+		// only the wake layer.
+		if clown.Enabled() {
+			if cid, cerr := clown.StartJob(context.Background(), kind, clown.Source); cerr != nil {
+				fmt.Fprintf(logf, "[clown] job-start emit failed: %v\n", cerr)
+			} else {
+				j.ClownJobID = cid
+				_ = Write(wt, j)
+			}
+		}
 
 		text, isErr := fn(ctx, logf)
 
@@ -97,9 +120,35 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 			j.Status = StatusSucceeded
 		}
 		_ = Write(wt, j)
+
+		// Terminal wake emit, after the job record is durable (store before
+		// wake — a woken agent reading session-job-status must see the
+		// terminal state). Statuses map 1:1 onto RFC-0009 terminal types.
+		if j.ClownJobID != "" {
+			msg := kind + " " + j.Status
+			if j.Status == StatusFailed {
+				if line := firstFailureLine(text); line != "" {
+					msg += ": " + line
+				}
+			}
+			if cerr := clown.FinishJob(context.Background(), j.ClownJobID, j.Status, msg, "spinclass session-job-status"); cerr != nil {
+				fmt.Fprintf(logf, "[clown] job-done emit failed: %v\n", cerr)
+			}
+		}
 	}()
 
-	return j, nil
+	return &snapshot, nil
+}
+
+// firstFailureLine returns the first TAP failure line ("not ok ...") of the
+// rendered result text, for a one-line wake message that names what broke.
+func firstFailureLine(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "not ok") {
+			return line
+		}
+	}
+	return ""
 }
 
 // Cancel signals the in-flight job for wt to stop (cancels its context, which

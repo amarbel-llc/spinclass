@@ -18,6 +18,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/attestation"
 	"github.com/amarbel-llc/spinclass/internal/chat"
 	"github.com/amarbel-llc/spinclass/internal/check"
+	"github.com/amarbel-llc/spinclass/internal/clown"
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/job"
@@ -91,7 +92,7 @@ func registerMCPOnlyCommands(app *command.App) {
 			Name:  "check-this-session-async",
 			Title: "Check This Session (async)",
 			Description: command.Description{
-				Short: buildCheckAsyncDescription(hookPreview),
+				Short: buildCheckAsyncDescription(hookPreview, clown.Enabled()),
 			},
 			Annotations: &protocol.ToolAnnotations{
 				ReadOnlyHint:    protocol.BoolPtr(false),
@@ -124,7 +125,7 @@ func registerMCPOnlyCommands(app *command.App) {
 			Name:  "merge-this-session-async",
 			Title: "Merge This Session (async)",
 			Description: command.Description{
-				Short: buildMergeAsyncDescription(hookPreview),
+				Short: buildMergeAsyncDescription(hookPreview, clown.Enabled()),
 			},
 			Annotations: &protocol.ToolAnnotations{
 				ReadOnlyHint:    protocol.BoolPtr(false),
@@ -570,17 +571,30 @@ func handleJobCancel(_ context.Context, _ json.RawMessage, _ command.Prompter) (
 }
 
 // buildMergeAsyncDescription / buildCheckAsyncDescription mirror their
-// synchronous counterparts but document the non-blocking start+poll flow.
-func buildMergeAsyncDescription(hookPreview string) string {
-	base := "Non-blocking variant of merge-this-session: starts the merge (including the pre-merge hook) in the background and returns a job id immediately, so the call is never cut off by the MCP request timeout no matter how long the hook runs. Consumes the pre-merge attestation at start, exactly like merge-this-session. Poll session-job-status for progress and the final result; session-job-cancel to abort. Choose this ONLY when you have other independent work to make progress on while the hook runs — then check back via session-job-status occasionally. If you have nothing else to do, call the synchronous merge-this-session instead: it blocks and returns the result with no polling. Do NOT pick async and then spin in a tight session-job-status loop — that wastes turns for no benefit over the synchronous tool."
+// synchronous counterparts but document the non-blocking flow. clownWake
+// (clown.Enabled() at serve startup) selects the guidance: with the
+// job-wakeup channel a completion notification wakes the agent, so the
+// poll-discipline warnings are replaced by the wake contract.
+func buildMergeAsyncDescription(hookPreview string, clownWake bool) string {
+	var base string
+	if clownWake {
+		base = "Non-blocking variant of merge-this-session: starts the merge (including the pre-merge hook) in the background and returns a job id immediately, so the call is never cut off by the MCP request timeout no matter how long the hook runs. Consumes the pre-merge attestation at start, exactly like merge-this-session. This session runs under clown, so a job-wakeup notification ([clown-job] spinclass <job-id> <state>: ...) arrives when the job finishes — start the job, then make progress on other work or simply end your turn; do not poll. session-job-status remains available for on-demand inspection, session-job-wait to block, session-job-cancel to abort."
+	} else {
+		base = "Non-blocking variant of merge-this-session: starts the merge (including the pre-merge hook) in the background and returns a job id immediately, so the call is never cut off by the MCP request timeout no matter how long the hook runs. Consumes the pre-merge attestation at start, exactly like merge-this-session. Poll session-job-status for progress and the final result; session-job-cancel to abort. Choose this ONLY when you have other independent work to make progress on while the hook runs — then check back via session-job-status occasionally. If you have nothing else to do, call the synchronous merge-this-session instead: it blocks and returns the result with no polling. Do NOT pick async and then spin in a tight session-job-status loop — that wastes turns for no benefit over the synchronous tool."
+	}
 	if hookPreview == "" {
 		return base
 	}
 	return base + fmt.Sprintf(" The configured [hooks].pre-merge command is `%s`.", hookPreview)
 }
 
-func buildCheckAsyncDescription(hookPreview string) string {
-	base := "Non-blocking variant of check-this-session: runs the [hooks].pre-merge command in the background and returns a job id immediately (never cut off by the MCP request timeout). Poll session-job-status for progress and the result; session-job-cancel to abort. Choose this ONLY when you have other independent work to make progress on while the hook runs — then check back via session-job-status occasionally. If you have nothing else to do, call the synchronous check-this-session instead: it blocks and returns the result with no polling. Do NOT pick async and then spin in a tight session-job-status loop."
+func buildCheckAsyncDescription(hookPreview string, clownWake bool) string {
+	var base string
+	if clownWake {
+		base = "Non-blocking variant of check-this-session: runs the [hooks].pre-merge command in the background and returns a job id immediately (never cut off by the MCP request timeout). This session runs under clown, so a job-wakeup notification ([clown-job] spinclass <job-id> <state>: ...) arrives when the job finishes — start the job, then make progress on other work or simply end your turn; do not poll. session-job-status remains available for on-demand inspection, session-job-wait to block, session-job-cancel to abort."
+	} else {
+		base = "Non-blocking variant of check-this-session: runs the [hooks].pre-merge command in the background and returns a job id immediately (never cut off by the MCP request timeout). Poll session-job-status for progress and the result; session-job-cancel to abort. Choose this ONLY when you have other independent work to make progress on while the hook runs — then check back via session-job-status occasionally. If you have nothing else to do, call the synchronous check-this-session instead: it blocks and returns the result with no polling. Do NOT pick async and then spin in a tight session-job-status loop."
+	}
 	if hookPreview == "" {
 		return base
 	}

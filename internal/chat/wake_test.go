@@ -31,21 +31,6 @@ func TestResolveWakeModeUnrecognizedFallsBackToLegacy(t *testing.T) {
 	}
 }
 
-func TestClownBinDefaultsToPathLookup(t *testing.T) {
-	t.Setenv("CLOWN_BIN", "")
-	os.Unsetenv("CLOWN_BIN")
-	if got := clownBin(); got != "clown" {
-		t.Fatalf("unset CLOWN_BIN: got %q, want %q", got, "clown")
-	}
-}
-
-func TestClownBinHonorsEnv(t *testing.T) {
-	t.Setenv("CLOWN_BIN", "/nix/store/abc/bin/clown")
-	if got := clownBin(); got != "/nix/store/abc/bin/clown" {
-		t.Fatalf("got %q, want CLOWN_BIN value", got)
-	}
-}
-
 // stubClown writes an executable shell script that records its argv (one
 // element per line) into argsFile and exits successfully iff ok. It returns
 // the script path for CLOWN_BIN injection. Mirrors stubClownBin in

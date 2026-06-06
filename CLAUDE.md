@@ -94,7 +94,7 @@ worktree paths. Applies `claude-allow` rules from sweatfile to
 - **Session entrypoint**: `[session].start` and `[session].resume` in sweatfile
   control what command is exec'd. Defaults to `$SHELL`.
 - **Session picking**: both `sc resume` and `sc close` source from `session.ListForRepo` via `internal/sessionpick.Choose` — tab completion (`completeWorktreeTargets`) and the huh menu use the same list, sorted active-first by `session.SortStates`. Non-TTY callers get an error listing IDs instead of a hung huh prompt. Orphaned git worktrees without a state file are not valid `sc close` targets; remove them with `git worktree remove`.
-- **External tool deps**: `git` is always required and resolved from `PATH`. `madder` and `direnv` are runtime deps **only** when the binary was built via `lib.mkSpinclass` with the matching input — those paths are burned in at link time (see `spinclass-build-pins(7)` and FDR 0003); the default `nix build` produces a binary with both pins empty, in which case the madder integration is dormant and direnv falls back to `PATH`. `clown` is an optional runtime dep only when `SPINCLASS_CHAT_WAKE=clown` (chat wake emits via `$CLOWN_BIN`, `PATH` fallback); dormant in the default legacy mode — see FDR 0009's migration section. Interactive prompts use the in-process `huh` library (no `gum` dependency).
+- **External tool deps**: `git` is always required and resolved from `PATH`. `madder` and `direnv` are runtime deps **only** when the binary was built via `lib.mkSpinclass` with the matching input — those paths are burned in at link time (see `spinclass-build-pins(7)` and FDR 0003); the default `nix build` produces a binary with both pins empty, in which case the madder integration is dormant and direnv falls back to `PATH`. `clown` is an optional runtime dep for job-wakeup emits (`internal/clown`): chat wake emits when `SPINCLASS_CHAT_WAKE=clown`, and async merge/check job-lifecycle emits when `$CLOWN_BIN` is set (the running-under-clown signal); both dormant otherwise — see FDR 0009's migration section and the async section below. Interactive prompts use the in-process `huh` library (no `gum` dependency).
 
 ## CLI Commands
 
@@ -179,6 +179,31 @@ else to do — that's strictly worse than the synchronous tool (same wait, extra
 turns). If you started async and then run out of other work, call
 `session-job-wait` to block on the result instead of polling. The tool
 descriptions encode this guidance so agents choose correctly.
+
+### Clown job-wakeup emits (push instead of poll)
+
+See `docs/features/0010-clown-job-wakeup-producer.md` for the full
+feature record (limitations, tuning levers, promotion criteria).
+
+When serve runs under clown (`CLOWN_BIN` set — the producer-may-emit
+contract from clown RFC-0009), the async tools additionally emit clown
+job lifecycle events via `internal/clown`: `clown job start --label
+merge|check --source spinclass` at launch (the returned id is recorded
+as `clown_job_id` in job.json) and `clown job done --state
+succeeded|failed|cancelled` at completion, so clown's job-watch monitor
+wakes the agent with one `[clown-job]` notification line — the
+poll-discipline guidance above applies only without clown, and the
+async tool descriptions switch wording accordingly at serve startup.
+Emits are purely additive: job.json/job.log remain the system of
+record, emit failures are logged to job.log (`[clown] ... emit
+failed`) and never affect the job result, and the rollback is clown's
+`CLOWN_DISABLE_JOB_WAKEUP=1` (emits become exit-0 no-ops; no
+spinclass-side switch). Known limitation: a job whose serve process
+dies mid-run is reported `interrupted` by the next `session-job-status`
+read but never wakes — a dead producer can't emit. The failed-state
+wake message carries the first `not ok` line of the result when
+present. `internal/clown` is the shared producer integration (chat's
+`EmitWake` delegates to it).
 
 ### Pre-merge hook inactivity watchdog
 

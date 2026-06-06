@@ -52,6 +52,9 @@ func TestServeMergeThisSessionStdioIntegrity(t *testing.T) {
 	cmd.Dir = wtPath
 	cmd.Env = append(
 		os.Environ(),
+		// Neutralize clown job-wakeup emits: the dev/CI env runs under clown,
+		// and the spawned serve must not wake the developer's real session.
+		"CLOWN_BIN=",
 		"HOME="+filepath.Dir(repoDir),
 		"GIT_CEILING_DIRECTORIES="+filepath.Dir(repoDir),
 		"XDG_STATE_HOME="+t.TempDir(),
@@ -247,6 +250,9 @@ func TestServeCheckThisSession(t *testing.T) {
 	cmd.Dir = wtPath
 	cmd.Env = append(
 		os.Environ(),
+		// Neutralize clown job-wakeup emits: the dev/CI env runs under clown,
+		// and the spawned serve must not wake the developer's real session.
+		"CLOWN_BIN=",
 		"HOME="+filepath.Dir(repoDir),
 		"GIT_CEILING_DIRECTORIES="+filepath.Dir(repoDir),
 		"XDG_STATE_HOME="+t.TempDir(),
@@ -475,6 +481,9 @@ func TestServeMergeThisSessionHiddenWhenDisabled(t *testing.T) {
 	cmd.Dir = wtPath
 	cmd.Env = append(
 		os.Environ(),
+		// Neutralize clown job-wakeup emits: the dev/CI env runs under clown,
+		// and the spawned serve must not wake the developer's real session.
+		"CLOWN_BIN=",
 		"HOME="+filepath.Dir(repoDir),
 		"GIT_CEILING_DIRECTORIES="+filepath.Dir(repoDir),
 		"XDG_STATE_HOME="+t.TempDir(),
@@ -647,6 +656,9 @@ func TestServeCheckThisSessionHiddenByDefault(t *testing.T) {
 	cmd.Dir = wtPath
 	cmd.Env = append(
 		os.Environ(),
+		// Neutralize clown job-wakeup emits: the dev/CI env runs under clown,
+		// and the spawned serve must not wake the developer's real session.
+		"CLOWN_BIN=",
 		"HOME="+filepath.Dir(repoDir),
 		"GIT_CEILING_DIRECTORIES="+filepath.Dir(repoDir),
 		"XDG_STATE_HOME="+t.TempDir(),
@@ -823,6 +835,9 @@ func TestServeCheckThisSessionAsync(t *testing.T) {
 	cmd.Dir = wtPath
 	cmd.Env = append(
 		os.Environ(),
+		// Neutralize clown job-wakeup emits: the dev/CI env runs under clown,
+		// and the spawned serve must not wake the developer's real session.
+		"CLOWN_BIN=",
 		"HOME="+filepath.Dir(repoDir),
 		"GIT_CEILING_DIRECTORIES="+filepath.Dir(repoDir),
 		"XDG_STATE_HOME="+t.TempDir(),
@@ -990,6 +1005,9 @@ func TestServeCheckThisSessionAsyncCancel(t *testing.T) {
 	cmd.Dir = wtPath
 	cmd.Env = append(
 		os.Environ(),
+		// Neutralize clown job-wakeup emits: the dev/CI env runs under clown,
+		// and the spawned serve must not wake the developer's real session.
+		"CLOWN_BIN=",
 		"HOME="+filepath.Dir(repoDir),
 		"GIT_CEILING_DIRECTORIES="+filepath.Dir(repoDir),
 		"XDG_STATE_HOME="+t.TempDir(),
@@ -1172,6 +1190,9 @@ func TestServeSessionJobWait(t *testing.T) {
 	cmd.Dir = wtPath
 	cmd.Env = append(
 		os.Environ(),
+		// Neutralize clown job-wakeup emits: the dev/CI env runs under clown,
+		// and the spawned serve must not wake the developer's real session.
+		"CLOWN_BIN=",
 		"HOME="+filepath.Dir(repoDir),
 		"GIT_CEILING_DIRECTORIES="+filepath.Dir(repoDir),
 		"XDG_STATE_HOME="+t.TempDir(),

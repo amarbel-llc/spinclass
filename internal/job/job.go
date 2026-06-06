@@ -44,6 +44,9 @@ type Job struct {
 	EndedAt     *time.Time `json:"ended_at,omitempty"`
 	ResultText  string     `json:"result_text,omitempty"`
 	ResultIsErr bool       `json:"result_is_err,omitempty"`
+	// ClownJobID correlates this job with its clown job-wakeup journal entry
+	// (clown RFC-0009); empty when the job ran without clown.
+	ClownJobID string `json:"clown_job_id,omitempty"`
 }
 
 func jobPath(wt string) string { return filepath.Join(wt, ".spinclass", "job.json") }

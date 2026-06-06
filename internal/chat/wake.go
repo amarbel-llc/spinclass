@@ -1,12 +1,11 @@
 package chat
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
-	"time"
+
+	"github.com/amarbel-llc/spinclass/internal/clown"
 )
 
 // WakeMode selects the push path for chat messages. See
@@ -35,21 +34,6 @@ func ResolveWakeMode() WakeMode {
 	return WakeModeLegacy
 }
 
-// clownBin resolves the clown binary for wake emits: $CLOWN_BIN (exported by
-// clown into every plugin MCP server, RFC-0009 §2) with a PATH-lookup
-// fallback.
-func clownBin() string {
-	if v := os.Getenv("CLOWN_BIN"); v != "" {
-		return v
-	}
-	return "clown"
-}
-
-// emitWakeTimeout bounds the clown CLI call so a wedged binary cannot hang
-// chat-send. The emit is a local journal append + optional datagram; seconds
-// is generous.
-const emitWakeTimeout = 10 * time.Second
-
 // EmitWake emits m as a clown job-wakeup `message` event addressed to m.To
 // (a session key, or the broadcast key "*" — clown's reserved broadcast
 // channel). No-op in legacy mode. The chatroom store write must already have
@@ -59,31 +43,6 @@ func EmitWake(ctx context.Context, m Message) error {
 	if ResolveWakeMode() != WakeModeClown {
 		return nil
 	}
-
-	// Detach from the caller's cancellation: the store write has already
-	// happened, so the recipient should still be woken even if the sender's
-	// MCP request is cancelled mid-emit. The timeout is the only bound.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), emitWakeTimeout)
-	defer cancel()
-
 	resultRef := fmt.Sprintf("chat-read from=%s peek=true", m.From)
-	cmd := exec.CommandContext(
-		ctx, clownBin(),
-		"job", "message",
-		"--target", m.To,
-		"--from", m.From,
-		"--source", "spinclass",
-		"--message", m.Body,
-		"--result-ref", resultRef,
-	)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		detail := bytes.TrimSpace(stderr.Bytes())
-		if len(detail) > 0 {
-			return fmt.Errorf("clown wake emit: %w: %s", err, detail)
-		}
-		return fmt.Errorf("clown wake emit: %w", err)
-	}
-	return nil
+	return clown.SendMessage(ctx, m.To, m.From, clown.Source, m.Body, resultRef)
 }
