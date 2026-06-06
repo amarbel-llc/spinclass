@@ -111,6 +111,12 @@ Drop an inherited remote in a child sweatfile:
 - **Remote rows reflect the remote's own states.** State, description,
   and filtering (non-abandoned only) are whatever the remote spinclass
   reports about itself; the local side adds only the `<name>:` prefix.
+- **Custom attach templates own their argv safety.** The default
+  template places `{id}` after ssh's option boundary, so an id from a
+  compromised remote's list output cannot become an ssh flag. A custom
+  `attach` template that puts `{id}` where its command parses options
+  (e.g. before a `--`) takes on that risk itself — ids in the
+  completion cache are remote-controlled data.
 
 ## Tuning Levers
 

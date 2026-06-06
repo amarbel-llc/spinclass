@@ -59,9 +59,9 @@ sc clean
 | `sc start-gh_pr <N\|URL>` | Start a session from a GitHub pull request |
 | `sc start-gh_issue <N>` | Start a session with GitHub issue context |
 | `sc start-<custom> <arg>` | User-defined start commands declared in a sweatfile |
-| `sc resume [id]` | Resume an existing session (auto-detects from cwd) |
+| `sc resume [id]` | Resume an existing session (auto-detects from cwd; `host:id` reattaches on a `[[remotes]]` host over ssh) |
 | `sc update-description "<desc>"` | Update a session's description |
-| `sc list` | List all tracked sessions |
+| `sc list` | List all tracked sessions, plus sessions on `[[remotes]]` hosts |
 | `sc merge [target]` | Merge a worktree into main, remove session state |
 | `sc check` | Run `[hooks].pre-merge` in the current worktree |
 | `sc clean` | Remove merged worktrees and abandoned sessions |
