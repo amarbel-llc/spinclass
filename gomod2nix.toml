@@ -21,8 +21,8 @@ schema = 3
     goVersion = '1.26'
 
   [mod.'github.com/amarbel-llc/tommy']
-    version = 'v0.3.1'
-    hash = 'sha256-VJTpXLParRwgqmfsG9VK7ra0A03tv6tHp6ReywKykho='
+    version = 'v0.3.2'
+    hash = 'sha256-P1uQ06LA9YPVF0Tld6asUD4Ds6dOZctnp6t9TiYiy8Q='
     goVersion = '1.26'
 
   [mod.'github.com/atotto/clipboard']
@@ -88,6 +88,11 @@ schema = 3
   [mod.'github.com/clipperhouse/uax29/v2']
     version = 'v2.5.0'
     hash = 'sha256-Men4JLhiuEtAx8ZSzId5ciRWhud68o3k/B48ppwyxkM='
+
+  [mod.'github.com/dave/jennifer']
+    version = 'v1.7.1'
+    hash = 'sha256-tKr4x0m+Nup2X9UyxIK+5ZXzrb1vyfPzc9hD2xh6H6g='
+    goVersion = '1.20'
 
   [mod.'github.com/dustin/go-humanize']
     version = 'v1.0.1'
@@ -159,6 +164,16 @@ schema = 3
     hash = 'sha256-JaDJGLIRoJjjvsg3dgfFuo7XApEJO2V4kUDmd58qTLI='
     goVersion = '1.25.0'
 
+  [mod.'golang.org/x/mod']
+    version = 'v0.35.0'
+    hash = 'sha256-ICEQxokHywOFInDPqoP+go9l1tZSz3roknF5SXPtNV4='
+    goVersion = '1.25.0'
+
+  [mod.'golang.org/x/sync']
+    version = 'v0.20.0'
+    hash = 'sha256-ybcjhCfK6lroUM0yswUvWooW8MOQZBXyiSqoxG6Uy0Y='
+    goVersion = '1.25.0'
+
   [mod.'golang.org/x/sys']
     version = 'v0.43.0'
     hash = 'sha256-aDQXqSTZES2l/132PBxhZN4ywldpPyfm7LByYCHzzwM='
@@ -172,6 +187,11 @@ schema = 3
   [mod.'golang.org/x/text']
     version = 'v0.36.0'
     hash = 'sha256-/0t9C6Mc8kYjxweFB0us2lGKo8GovHhBiq5nlMOppC0='
+    goVersion = '1.25.0'
+
+  [mod.'golang.org/x/tools']
+    version = 'v0.44.0'
+    hash = 'sha256-xuj5FLtSJsAojLLTLXtPdLAIFNTKoVFbDMuqRXmj2W4='
     goVersion = '1.25.0'
 
   [mod.'golang.org/x/xerrors']

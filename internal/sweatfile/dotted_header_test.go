@@ -4,14 +4,11 @@ import "testing"
 
 // TestStandaloneDottedHeadersConsumed is the regression gate for issue #113:
 // a standalone dotted sub-table header ([direnv.dotenv] with no bare [direnv]
-// parent) is valid TOML — the parent table is implicit — but the
-// tommy-generated decoder only consumes the dotted header inside the branch
-// entered when the explicit parent header exists, so the fields surface as
-// unknown from `sc validate`. The fix lives in tommy's codegen; unskip after
-// the tommy bump + `just gen-tommy` regen.
+// parent) is valid TOML — the parent table is implicit — and must decode
+// fully (fields populated, nothing undecoded, so `sc validate` stays quiet).
+// Fixed by tommy v0.3.2 (tommy#113: the generated decoder synthesizes the
+// implicit parent); this test pins the regen.
 func TestStandaloneDottedHeadersConsumed(t *testing.T) {
-	t.Skipf("known tommy codegen bug (#113): standalone dotted headers are not consumed; unskip after the tommy fix + `just gen-tommy` regen (verified failing 2026-06-06: undecoded [direnv.dotenv] / [session-entry.env], structs nil)")
-
 	cases := []struct {
 		name  string
 		input string

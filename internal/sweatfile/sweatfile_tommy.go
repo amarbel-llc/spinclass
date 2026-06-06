@@ -401,6 +401,37 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 						}
 					}
 				}
+				_impDirenv := cst.FindImplicitChildTable(d.cstDoc.Root(), d.cstDoc.Root(), "direnv")
+				if _impDirenv != nil {
+					_found = true
+					d.consumed["direnv"] = true
+					for _, _ch := range d.cstDoc.Root().Children {
+						if _ch.Kind == cst.NodeTable && cst.TableHeaderKey(_ch) == "direnv.dotenv" {
+							direnvVal2.Dotenv = cst.ExtractStringMap(_ch)
+							if direnvVal2.Dotenv == nil {
+								direnvVal2.Dotenv = map[string]string{}
+							}
+							d.consumed["direnv.dotenv"] = true
+							for _ik := range direnvVal2.Dotenv {
+								d.consumed["direnv.dotenv"+"."+_ik] = true
+							}
+							break
+						}
+					}
+					if direnvVal2.Dotenv == nil {
+						_it := cst.FindChildInlineTable(_impDirenv, "dotenv")
+						if _it != nil {
+							direnvVal2.Dotenv = cst.ExtractStringMap(_it)
+							if direnvVal2.Dotenv == nil {
+								direnvVal2.Dotenv = map[string]string{}
+							}
+							d.consumed["direnv.dotenv"] = true
+							for _ik := range direnvVal2.Dotenv {
+								d.consumed["direnv.dotenv"+"."+_ik] = true
+							}
+						}
+					}
+				}
 				if _found {
 					d.data.Direnv = direnvVal2
 				}
@@ -1010,6 +1041,37 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 								sessionEntryVal4.TombstoneRetention = v
 								_found = true
 								d.consumed["tombstone-retention"] = true
+							}
+						}
+					}
+				}
+				_impSessionEntry := cst.FindImplicitChildTable(d.cstDoc.Root(), d.cstDoc.Root(), "session-entry")
+				if _impSessionEntry != nil {
+					_found = true
+					d.consumed["session-entry"] = true
+					for _, _ch := range d.cstDoc.Root().Children {
+						if _ch.Kind == cst.NodeTable && cst.TableHeaderKey(_ch) == "session-entry.env" {
+							sessionEntryVal4.Env = cst.ExtractStringMap(_ch)
+							if sessionEntryVal4.Env == nil {
+								sessionEntryVal4.Env = map[string]string{}
+							}
+							d.consumed["session-entry.env"] = true
+							for _ik := range sessionEntryVal4.Env {
+								d.consumed["session-entry.env"+"."+_ik] = true
+							}
+							break
+						}
+					}
+					if sessionEntryVal4.Env == nil {
+						_it := cst.FindChildInlineTable(_impSessionEntry, "env")
+						if _it != nil {
+							sessionEntryVal4.Env = cst.ExtractStringMap(_it)
+							if sessionEntryVal4.Env == nil {
+								sessionEntryVal4.Env = map[string]string{}
+							}
+							d.consumed["session-entry.env"] = true
+							for _ik := range sessionEntryVal4.Env {
+								d.consumed["session-entry.env"+"."+_ik] = true
 							}
 						}
 					}
@@ -1834,6 +1896,36 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 					}
 				}
 			}
+			_impDirenv := cst.FindImplicitChildTable(doc.Root(), container, "direnv")
+			if _impDirenv != nil {
+				_found = true
+				consumed[keyPrefix+"direnv"] = true
+				{
+					_ctDirenvDotenv := cst.FindChildTable(doc.Root(), _impDirenv, "dotenv")
+					if _ctDirenvDotenv != nil {
+						direnvVal2.Dotenv = cst.ExtractStringMap(_ctDirenvDotenv)
+						if direnvVal2.Dotenv == nil {
+							direnvVal2.Dotenv = map[string]string{}
+						}
+						consumed[keyPrefix+"direnv.dotenv"] = true
+						for _ik := range direnvVal2.Dotenv {
+							consumed[keyPrefix+"direnv.dotenv"+"."+_ik] = true
+						}
+					} else {
+						_it := cst.FindChildInlineTable(_impDirenv, "dotenv")
+						if _it != nil {
+							direnvVal2.Dotenv = cst.ExtractStringMap(_it)
+							if direnvVal2.Dotenv == nil {
+								direnvVal2.Dotenv = map[string]string{}
+							}
+							consumed[keyPrefix+"direnv.dotenv"] = true
+							for _ik := range direnvVal2.Dotenv {
+								consumed[keyPrefix+"direnv.dotenv"+"."+_ik] = true
+							}
+						}
+					}
+				}
+			}
 			if _found {
 				data.Direnv = direnvVal2
 			}
@@ -2235,6 +2327,36 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 							sessionEntryVal4.TombstoneRetention = v
 							_found = true
 							consumed["tombstone-retention"] = true
+						}
+					}
+				}
+			}
+			_impSessionEntry := cst.FindImplicitChildTable(doc.Root(), container, "session-entry")
+			if _impSessionEntry != nil {
+				_found = true
+				consumed[keyPrefix+"session-entry"] = true
+				{
+					_ctSessionEntryEnv := cst.FindChildTable(doc.Root(), _impSessionEntry, "env")
+					if _ctSessionEntryEnv != nil {
+						sessionEntryVal4.Env = cst.ExtractStringMap(_ctSessionEntryEnv)
+						if sessionEntryVal4.Env == nil {
+							sessionEntryVal4.Env = map[string]string{}
+						}
+						consumed[keyPrefix+"session-entry.env"] = true
+						for _ik := range sessionEntryVal4.Env {
+							consumed[keyPrefix+"session-entry.env"+"."+_ik] = true
+						}
+					} else {
+						_it := cst.FindChildInlineTable(_impSessionEntry, "env")
+						if _it != nil {
+							sessionEntryVal4.Env = cst.ExtractStringMap(_it)
+							if sessionEntryVal4.Env == nil {
+								sessionEntryVal4.Env = map[string]string{}
+							}
+							consumed[keyPrefix+"session-entry.env"] = true
+							for _ik := range sessionEntryVal4.Env {
+								consumed[keyPrefix+"session-entry.env"+"."+_ik] = true
+							}
 						}
 					}
 				}
