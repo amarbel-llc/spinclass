@@ -55,19 +55,41 @@ func jobPath(wt string) string { return filepath.Join(wt, ".spinclass", "job.jso
 // mtime doubles as the job's last-activity signal.
 func LogPath(wt string) string { return filepath.Join(wt, ".spinclass", "job.log") }
 
-// Write persists j to the worktree's job.json, creating .spinclass on demand.
+// Write persists j to the worktree's job.json, creating .spinclass on
+// demand. The write is atomic (temp file + rename, mirroring chat.Send) so a
+// concurrent reader — session-job-status polls while the job goroutine
+// rewrites the record — never observes a truncated file.
 func Write(wt string, j *Job) error {
 	if wt == "" {
 		return errors.New("job.Write: worktree path required")
 	}
-	if err := os.MkdirAll(filepath.Join(wt, ".spinclass"), 0o755); err != nil {
+	dir := filepath.Join(wt, ".spinclass")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(j, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(jobPath(wt), data, 0o644)
+	tmp, err := os.CreateTemp(dir, ".job-*.json")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, jobPath(wt)); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return nil
 }
 
 // Read loads the worktree's job record. A stale StatusRunning record whose

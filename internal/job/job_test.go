@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
@@ -163,6 +164,45 @@ func TestWaitDoneClosesAfterTerminalRecord(t *testing.T) {
 	j, err := Read(wt)
 	if err != nil || j.Status != StatusSucceeded {
 		t.Fatalf("expected succeeded after WaitDone closed, got status=%v err=%v", j.Status, err)
+	}
+}
+
+// TestWriteIsAtomicUnderConcurrentReads: session-job-status reads job.json
+// while the job goroutine rewrites it (running -> clown-id -> terminal). A
+// non-atomic write lets a reader observe a truncated file ("unexpected end
+// of JSON input" — seen in CI). Hammer concurrent writes/reads: every read
+// must yield either a complete record or (transiently, pre-first-write
+// only) not-exist — never a parse error.
+func TestWriteIsAtomicUnderConcurrentReads(t *testing.T) {
+	wt := t.TempDir()
+	j := &Job{ID: "atomic", Kind: KindCheck, Status: StatusRunning, ServePID: os.Getpid(), StartedAt: time.Now()}
+	if err := Write(wt, j); err != nil {
+		t.Fatalf("seed Write: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 500; i++ {
+			// Alternate growing/shrinking payloads so a torn read is
+			// detectable regardless of which write it interleaves with.
+			j.ResultText = strings.Repeat("x", (i%7)*512)
+			if err := Write(wt, j); err != nil {
+				t.Errorf("Write: %v", err)
+				return
+			}
+		}
+	}()
+
+	for {
+		select {
+		case <-done:
+			return
+		default:
+		}
+		if _, err := Read(wt); err != nil {
+			t.Fatalf("concurrent Read failed (torn write?): %v", err)
+		}
 	}
 }
 
