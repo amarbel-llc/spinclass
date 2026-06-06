@@ -9,8 +9,9 @@ promotion-criteria: |
   the first `not ok` line; succeeded wake organically in
   clown/sleek-sumac); (2) a directed chat message wakes its target
   session: OBSERVED 2026-06-06 (raw `clown job message` leg; the
-  spinclass chat-send dual-write leg still needs SPINCLASS_CHAT_WAKE=clown
-  live); (3) a broadcast reaches >=2 sessions via the broadcast channel:
+  spinclass chat-send dual-write leg still needs a sender running the
+  presence-gated emit binary live); (3) a broadcast reaches >=2 sessions
+  via the broadcast channel:
   OBSERVED 2026-06-06, three exactly-once receipts (sender self-echo —
   see spinclass#108 — plus two peer sessions, one freshly attached); (4)
   replay (event emitted while the target's monitor is down delivered on
@@ -19,7 +20,7 @@ promotion-criteria: |
   exactly-once, condvar first-attach); a live observation lands
   organically the first time a session resumes with backlog — not staged
   deliberately. Remaining for the flip: the chat-path dual-write legs
-  under SPINCLASS_CHAT_WAKE=clown after the fleet env flip.
+  from a session running the presence-gated emit (post-incident fix).
   testing -> accepted: ~1 week of real async jobs + chat in clown mode with
   no missed wakeups and no tuning-lever adjustments; then FDR 0009's
   chat promotion criteria govern deleting the legacy chat-watch monitor.
@@ -63,13 +64,15 @@ caller is already awake. The async tool descriptions switch guidance at
 serve startup: under clown, "start it and end your turn — the wake
 arrives" replaces the poll-discipline warnings.
 
-**Chat wake emits**: gated on **mode** (`SPINCLASS_CHAT_WAKE=clown`,
-default `legacy`) because the migration must displace the legacy
-`chat-watch` monitor — see FDR 0009's migration section for modes,
-rollback, and the chat-specific promotion criteria. `chat-send`
-dual-writes (chatroom store first, then `clown job message`); broadcasts
-emit once to clown's reserved `*` key (condvar-style channel broadcast,
-no fan-out).
+**Chat wake emits**: gated on **presence** like the job emits —
+`CLOWN_BIN` set means emit. (Originally gated on
+`SPINCLASS_CHAT_WAKE=clown`; that opened a mixed-window delivery hole
+where a pre-flip legacy-mode sender never woke a clown-mode receiver
+whose chat-watch had stood down — observed live 2026-06-06 and fixed
+by splitting the axes. The mode now gates only the receive side; see
+FDR 0009's migration section.) `chat-send` dual-writes (chatroom store
+first, then `clown job message`); broadcasts emit once to clown's
+reserved `*` key (condvar-style channel broadcast, no fan-out).
 
 **Rollback**: clown's `CLOWN_DISABLE_JOB_WAKEUP=1` turns every emit
 into an exit-0 no-op, so the whole facility switches off without

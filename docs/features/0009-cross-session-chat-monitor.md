@@ -183,21 +183,38 @@ factoring is **store = spinclass, wake = clown**: the chatroom file
 store stays the system of record (history, the `chat-read` firehose,
 the pull/macOS fallback) in both modes — only the push path changes.
 
-`SPINCLASS_CHAT_WAKE` selects the path (default `legacy`; unrecognized
-values resolve to `legacy`):
+The two halves are gated on DIFFERENT axes (changed after a live
+incident — see below):
 
-- **`legacy`** — exactly this FDR's behavior: `chat-watch` monitor
-  polls the chatroom; no clown involvement.
-- **`clown`** — `chat-send` dual-writes: the store first (the message),
-  then a wake emit via
+- **Send/emit — gated on capability (`CLOWN_BIN` present).** Whenever
+  the session runs under clown, `chat-send` dual-writes: the store
+  first (the message), then a wake emit via
   `${CLOWN_BIN:-clown} job message --target <key> --from <sender>
-  --source spinclass --message <body> --result-ref "chat-read
+  --source spinclass --message <subject> --result-ref "chat-read
   from=<sender> peek=true"`. Broadcasts emit once to clown's reserved
   broadcast key `*` (condvar-style channel broadcast — clown's
   job-watch scans its own channel plus the broadcast channel; a
   monitor's first attach starts at journal end, so pre-existence
-  broadcasts are never replayed). `sc chat-watch` exits immediately so
-  each message yields exactly one notification, from clown's job-watch.
+  broadcasts are never replayed). The chat wake MODE does not gate the
+  emit.
+- **Receive — gated on `SPINCLASS_CHAT_WAKE` (default `legacy`;
+  unrecognized values resolve to `legacy`).** `legacy`: the
+  `chat-watch` monitor polls the chatroom as in this FDR. `clown`:
+  `sc chat-watch` exits immediately and clown's job-watch owns the
+  push path.
+
+**Why the axes split (mixed-window incident, 2026-06-06):** emit and
+stand-down were originally both gated on the mode, which opened a
+delivery hole during the fleet rollout — a pre-flip legacy-mode SENDER
+emitted nothing while a post-flip clown-mode RECEIVER had already stood
+its chat-watch down, so a directed message sat in the store with no
+push of any kind (observed live: a directive to a freshly-restarted
+session went unseen until a manual `clown job message` wake). Sender
+capability and receiver mode are different axes; gating the emit on
+presence closes the hole. The cost is that a legacy-mode receiver of
+an always-emitted wake sees a duplicate notification (chat-watch +
+job-watch) until pre-flip sessions retire — the transitional trade-off
+already accepted above.
 
 A wake-emit failure is surfaced in the `chat-send` result but never
 fails the send — the store write already succeeded, so the recipient

@@ -35,11 +35,18 @@ func ResolveWakeMode() WakeMode {
 
 // EmitWake emits m as a clown job-wakeup `message` event addressed to m.To
 // (a session key, or the broadcast key "*" — clown's reserved broadcast
-// channel). No-op in legacy mode. The chatroom store write must already have
-// happened: an emit failure means a lost push, never a lost message, so
-// callers should surface the error without failing the send.
+// channel). Gated on clown.Enabled() — sender CAPABILITY — not on the chat
+// wake mode: SPINCLASS_CHAT_WAKE only selects the RECEIVE path (whether
+// chat-watch stands down), and gating the emit on it opened a mixed-window
+// delivery hole where a pre-flip legacy-mode sender never woke a clown-mode
+// receiver whose chat-watch had already stood down. A legacy-mode RECEIVER
+// of a now-always-emitted wake sees at worst a duplicate notification
+// (chat-watch + job-watch), the accepted transitional trade-off. The
+// chatroom store write must already have happened: an emit failure means a
+// lost push, never a lost message, so callers should surface the error
+// without failing the send.
 func EmitWake(ctx context.Context, m Message) error {
-	if ResolveWakeMode() != WakeModeClown {
+	if !clown.Enabled() {
 		return nil
 	}
 	// The wake line carries only the subject — the harness truncates long

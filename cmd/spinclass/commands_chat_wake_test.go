@@ -109,7 +109,10 @@ func TestHandleChatSendEmitFailureDoesNotFailSend(t *testing.T) {
 	}
 }
 
-func TestHandleChatSendLegacyModeDoesNotInvokeClown(t *testing.T) {
+func TestHandleChatSendLegacyModeStillEmits(t *testing.T) {
+	// Mixed-window delivery-hole regression: a pre-flip (legacy-mode)
+	// sender running under clown must emit, or a clown-mode receiver —
+	// whose chat-watch has stood down — never hears about the message.
 	chatWakeEnv(t, "legacy")
 	argsFile := filepath.Join(t.TempDir(), "args")
 	t.Setenv("CLOWN_BIN", stubClownBin(t, argsFile, true))
@@ -122,8 +125,8 @@ func TestHandleChatSendLegacyModeDoesNotInvokeClown(t *testing.T) {
 	if res.IsErr {
 		t.Fatalf("result is error: %s", res.Text)
 	}
-	if _, statErr := os.Stat(argsFile); statErr == nil {
-		t.Fatal("legacy mode invoked clown")
+	if _, statErr := os.Stat(argsFile); statErr != nil {
+		t.Fatalf("legacy-mode sender under clown did not emit: %v", statErr)
 	}
 }
 

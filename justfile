@@ -431,6 +431,15 @@ explore-chat-read:
     if [[ $pass -eq 0 ]]; then echo "VERDICT: chat-read polling WORKS"; else echo "VERDICT: chat-read FAILED"; fi
     exit $pass
 
+# [debug] One-shot clown `job message` emit: manual wake for the mixed-window
+# delivery hole (legacy-mode sender can't emit; see the EmitWake gating fix).
+# Remove once no pre-flip legacy sessions remain.
+[group('debug')]
+debug-clown-message target message:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    "${CLOWN_BIN:-clown}" job message --target '{{target}}' --from "${SPINCLASS_SESSION_ID}" --source spinclass --message '{{message}}' --result-ref "chat-read from=${SPINCLASS_SESSION_ID} peek=true"
+
 # Tag a spinclass release. The "v" prefix is added for you, so pass
 # the semver without it. Usage: just tag 0.1.0 "feat: initial release"
 tag version message:

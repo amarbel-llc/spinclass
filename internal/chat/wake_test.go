@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,17 +59,36 @@ func recordedArgs(t *testing.T, argsFile string) []string {
 	return strings.Split(strings.TrimRight(string(data), "\n"), "\n")
 }
 
-func TestEmitWakeLegacyModeIsNoop(t *testing.T) {
+func TestEmitWakeWithoutClownBinIsNoop(t *testing.T) {
+	// Emit capability is gated on CLOWN_BIN presence (the producer-may-emit
+	// contract), NOT on the chat wake mode — without clown there is nothing
+	// to emit to, and the legacy chat-watch path covers delivery.
+	t.Setenv("SPINCLASS_CHAT_WAKE", "clown")
+	t.Setenv("CLOWN_BIN", "")
+	os.Unsetenv("CLOWN_BIN")
+
+	err := EmitWake(context.Background(), Message{From: "spinclass/a", To: "clown/b", Body: "hi"})
+	if err != nil {
+		t.Fatalf("emit without clown: %v", err)
+	}
+}
+
+func TestEmitWakeEmitsRegardlessOfChatMode(t *testing.T) {
+	// Regression for the mixed-window delivery hole: a legacy-MODE sender
+	// (pre-flip session) must still emit when running under clown, because
+	// a clown-mode RECEIVER has stood its chat-watch down and the emit is
+	// its only push path. Sender capability (CLOWN_BIN) and receiver mode
+	// (SPINCLASS_CHAT_WAKE) are different axes.
 	t.Setenv("SPINCLASS_CHAT_WAKE", "legacy")
 	argsFile := filepath.Join(t.TempDir(), "args")
 	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, true))
 
 	err := EmitWake(context.Background(), Message{From: "spinclass/a", To: "clown/b", Body: "hi"})
 	if err != nil {
-		t.Fatalf("legacy mode emit: %v", err)
+		t.Fatalf("legacy-mode emit under clown: %v", err)
 	}
-	if _, statErr := os.Stat(argsFile); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("legacy mode invoked clown (args file exists)")
+	if _, statErr := os.Stat(argsFile); statErr != nil {
+		t.Fatalf("legacy-mode sender under clown did not emit: %v", statErr)
 	}
 }
 
