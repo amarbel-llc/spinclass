@@ -66,7 +66,7 @@ func buildApp() *command.App {
 		{
 			Name:        "format",
 			Type:        command.String,
-			Description: "Output format: tap or table (default: tap)",
+			Description: "Output format: tap or table (default: tap); list also accepts json",
 		},
 		{
 			Name:        "verbose",

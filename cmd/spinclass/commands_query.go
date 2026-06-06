@@ -47,7 +47,7 @@ func registerQueryCommands(app *command.App) {
 				Closed bool `json:"closed"`
 			}
 			_ = json.Unmarshal(args, &p)
-			return runListResult(p.Closed, p.debugLogger())
+			return runListResult(p.Closed, p.FormatOrDefault(), p.debugLogger())
 		},
 	})
 
@@ -263,15 +263,24 @@ func registerQueryCommands(app *command.App) {
 	})
 }
 
-// runListResult builds the `sc list` text output. When closed is true,
+// runListResult builds the `sc list` output. When closed is true,
 // tombstones and dangling-symlink entries are included. Live entries
 // always appear; abandoned/closed entries are filtered unless closed.
-// dbg, when non-nil, is forwarded to session.ListAll so excluded index
-// entries are logged at Debug level.
-func runListResult(closed bool, dbg *slog.Logger) (*command.Result, error) {
+// format selects the rendering: "json" emits a session.ListRow array
+// (the remote wire format); any other value (tap, table, default) emits
+// the tab-separated text rows. dbg, when non-nil, is forwarded to
+// session.ListAll so excluded index entries are logged at Debug level.
+func runListResult(closed bool, format string, dbg *slog.Logger) (*command.Result, error) {
 	states, err := session.ListAll(dbg)
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
+	}
+	if format == "json" {
+		data, err := json.Marshal(session.ListRows(states, closed))
+		if err != nil {
+			return command.TextErrorResult(err.Error()), nil
+		}
+		return command.TextResult(string(data) + "\n"), nil
 	}
 	var b strings.Builder
 	for _, s := range states {
