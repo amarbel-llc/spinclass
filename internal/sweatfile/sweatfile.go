@@ -63,6 +63,30 @@ type StartCommand struct {
 	ExecStart       []string `toml:"exec-start"`
 }
 
+// Remote declares a host whose spinclass sessions appear in sc list and
+// completion under a "<name>:" prefix and can be reattached via sc resume.
+// See docs/plans/2026-06-06-remote-sessions-design.md.
+type Remote struct {
+	Name   string   `toml:"name"`
+	SSH    string   `toml:"ssh"`    // ssh destination; empty = Name
+	Attach []string `toml:"attach"` // argv template; {ssh}/{id} substituted; empty = default
+	// Remove marks the entry as an explicit removal sentinel against an
+	// inherited remote of the same name. This deliberately diverges from
+	// the [[mcps]] name-only-removes precedent: a name-only [[remotes]]
+	// entry is the most natural declaration of an all-defaults remote
+	// (~/.ssh/config does the work), so removal must be explicit.
+	Remove bool `toml:"remove"`
+}
+
+// Dest returns the ssh destination for the remote: the explicit `ssh`
+// value when set, otherwise the remote's name (~/.ssh/config does the work).
+func (r Remote) Dest() string {
+	if r.SSH != "" {
+		return r.SSH
+	}
+	return r.Name
+}
+
 // PreMergeSkill names a Claude Code skill that an agent must address
 // before merge-this-session / check-this-session may run the pre-merge
 // hook. See docs/features/0007-pre-merge-skill-attestation.md.
@@ -82,6 +106,7 @@ type Sweatfile struct {
 	AllowedMCPs    []string        `toml:"allowed-mcps"`
 	MCPs           []MCPServerDef  `toml:"mcps"`
 	PreMergeSkills []PreMergeSkill `toml:"pre-merge-skills"`
+	Remotes        []Remote        `toml:"remotes"`
 }
 
 func (sf Sweatfile) StopHookCommand() *string {
@@ -208,6 +233,19 @@ func (sf Sweatfile) ActivePreMergeSkills() []PreMergeSkill {
 	for _, s := range sf.PreMergeSkills {
 		if s.Rationale != "" {
 			active = append(active, s)
+		}
+	}
+	return active
+}
+
+// ActiveRemotes returns [[remotes]] entries that are not explicit
+// `remove = true` sentinels. A name-only entry is active: it declares an
+// all-defaults remote (~/.ssh/config does the work).
+func (sf Sweatfile) ActiveRemotes() []Remote {
+	var active []Remote
+	for _, r := range sf.Remotes {
+		if !r.Remove {
+			active = append(active, r)
 		}
 	}
 	return active

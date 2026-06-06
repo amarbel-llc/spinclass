@@ -25,6 +25,9 @@ type mCPServerDefHandle struct {
 type preMergeSkillHandle struct {
 	node *cst.Node
 }
+type remoteHandle struct {
+	node *cst.Node
+}
 type SweatfileDocument struct {
 	data           Sweatfile
 	cstDoc         *document.Document
@@ -32,6 +35,7 @@ type SweatfileDocument struct {
 	startCommands  []startCommandHandle
 	mCPs           []mCPServerDefHandle
 	preMergeSkills []preMergeSkillHandle
+	remotes        []remoteHandle
 }
 
 func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
@@ -1224,11 +1228,74 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			}
 		}
 	}
+	var _nodesRemotes []*cst.Node
+	for _, _ch := range d.cstDoc.Root().Children {
+		if _ch.Kind == cst.NodeArrayTable && cst.TableHeaderKey(_ch) == "remotes" {
+			_nodesRemotes = append(_nodesRemotes, _ch)
+		}
+	}
+	d.remotes = make([]remoteHandle, len(_nodesRemotes))
+	d.data.Remotes = make([]Remote, len(_nodesRemotes))
+	d.consumed["remotes"] = true
+	for i, _node := range _nodesRemotes {
+		d.remotes[i] = remoteHandle{node: _node}
+		{
+			_seen := map[string]bool{}
+			for _, _kv := range _node.Children {
+				if _kv.Kind != cst.NodeKeyValue {
+					continue
+				}
+				switch cst.KeyValueName(_kv) {
+				case "name":
+					if _seen["name"] {
+						return nil, fmt.Errorf("duplicate key %q", "name")
+					}
+					_seen["name"] = true
+					if v, ok := cst.ExtractString(_kv); ok {
+						d.data.Remotes[i].Name = v
+						d.consumed["remotes.name"] = true
+					}
+				case "ssh":
+					if _seen["ssh"] {
+						return nil, fmt.Errorf("duplicate key %q", "ssh")
+					}
+					_seen["ssh"] = true
+					if v, ok := cst.ExtractString(_kv); ok {
+						d.data.Remotes[i].SSH = v
+						d.consumed["remotes.ssh"] = true
+					}
+				case "attach":
+					if _seen["attach"] {
+						return nil, fmt.Errorf("duplicate key %q", "attach")
+					}
+					_seen["attach"] = true
+					if v, ok := cst.ExtractStringSlice(_kv); ok {
+						d.data.Remotes[i].Attach = v
+						if d.data.Remotes[i].Attach == nil {
+							d.data.Remotes[i].Attach = []string{}
+						}
+						d.consumed["remotes.attach"] = true
+					}
+				case "remove":
+					if _seen["remove"] {
+						return nil, fmt.Errorf("duplicate key %q", "remove")
+					}
+					_seen["remove"] = true
+					if v, ok := cst.ExtractBool(_kv); ok {
+						d.data.Remotes[i].Remove = v
+						d.consumed["remotes.remove"] = true
+					}
+				}
+			}
+		}
+	}
 	return d, nil
 }
+
 func (d *SweatfileDocument) Data() *Sweatfile {
 	return &d.data
 }
+
 func (d *SweatfileDocument) Encode() ([]byte, error) {
 	if d.data.Claude != nil {
 		tableNode := cst.EnsureChildTable(d.cstDoc.Root(), d.cstDoc.Root(), "claude")
@@ -1477,23 +1544,61 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 			}
 		}
 	}
+	{
+		for i := range d.data.Remotes {
+			var container *cst.Node
+			if i < len(d.remotes) {
+				container = d.remotes[i].node
+			} else {
+				container = cst.AppendArrayTableEntryAfter(d.cstDoc.Root(), "remotes")
+			}
+			if d.data.Remotes[i].Name != "" || cst.HasValue(container, "name") {
+				if err := cst.SetAny(container, "name", d.data.Remotes[i].Name); err != nil {
+					return nil, fmt.Errorf("%w", err)
+				}
+			}
+			if d.data.Remotes[i].SSH != "" || cst.HasValue(container, "ssh") {
+				if err := cst.SetAny(container, "ssh", d.data.Remotes[i].SSH); err != nil {
+					return nil, fmt.Errorf("%w", err)
+				}
+			}
+			{
+				if d.data.Remotes[i].Attach != nil {
+					if err := cst.SetAny(container, "attach", d.data.Remotes[i].Attach); err != nil {
+						return nil, fmt.Errorf("%w", err)
+					}
+				}
+			}
+			if d.data.Remotes[i].Remove != false || cst.HasValue(container, "remove") {
+				if err := cst.SetAny(container, "remove", d.data.Remotes[i].Remove); err != nil {
+					return nil, fmt.Errorf("%w", err)
+				}
+			}
+		}
+	}
 	return d.cstDoc.Bytes(), nil
 }
+
 func (d *SweatfileDocument) Undecoded() []string {
 	return document.UndecodedKeys(d.cstDoc.Root(), d.consumed)
 }
+
 func (d *SweatfileDocument) Comment(key string) string {
 	return d.cstDoc.GetComment(key)
 }
+
 func (d *SweatfileDocument) SetComment(key, comment string) {
 	d.cstDoc.SetComment(key, comment)
 }
+
 func (d *SweatfileDocument) InlineComment(key string) string {
 	return d.cstDoc.GetInlineComment(key)
 }
+
 func (d *SweatfileDocument) SetInlineComment(key, comment string) {
 	d.cstDoc.SetInlineComment(key, comment)
 }
+
 func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst.Node, consumed map[string]bool, keyPrefix string) error {
 	{
 		_seen := map[string]bool{}
@@ -2332,8 +2437,65 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 			}
 		}
 	}
+	{
+		_nodesRemotes := cst.FindChildArrayTableNodes(doc.Root(), container, "remotes")
+		data.Remotes = make([]Remote, len(_nodesRemotes))
+		consumed[keyPrefix+"remotes"] = true
+		for i, _node := range _nodesRemotes {
+			{
+				_seen := map[string]bool{}
+				for _, _kv := range _node.Children {
+					if _kv.Kind != cst.NodeKeyValue {
+						continue
+					}
+					switch cst.KeyValueName(_kv) {
+					case "name":
+						if _seen["name"] {
+							return fmt.Errorf("duplicate key %q", "name")
+						}
+						_seen["name"] = true
+						if v, ok := cst.ExtractString(_kv); ok {
+							data.Remotes[i].Name = v
+							consumed[keyPrefix+"remotes.name"] = true
+						}
+					case "ssh":
+						if _seen["ssh"] {
+							return fmt.Errorf("duplicate key %q", "ssh")
+						}
+						_seen["ssh"] = true
+						if v, ok := cst.ExtractString(_kv); ok {
+							data.Remotes[i].SSH = v
+							consumed[keyPrefix+"remotes.ssh"] = true
+						}
+					case "attach":
+						if _seen["attach"] {
+							return fmt.Errorf("duplicate key %q", "attach")
+						}
+						_seen["attach"] = true
+						if v, ok := cst.ExtractStringSlice(_kv); ok {
+							data.Remotes[i].Attach = v
+							if data.Remotes[i].Attach == nil {
+								data.Remotes[i].Attach = []string{}
+							}
+							consumed[keyPrefix+"remotes.attach"] = true
+						}
+					case "remove":
+						if _seen["remove"] {
+							return fmt.Errorf("duplicate key %q", "remove")
+						}
+						_seen["remove"] = true
+						if v, ok := cst.ExtractBool(_kv); ok {
+							data.Remotes[i].Remove = v
+							consumed[keyPrefix+"remotes.remove"] = true
+						}
+					}
+				}
+			}
+		}
+	}
 	return nil
 }
+
 func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst.Node) error {
 	if data.Claude != nil {
 		tableNode := cst.EnsureChildTable(doc.Root(), container, "claude")
@@ -2583,6 +2745,40 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 			}
 			if data.PreMergeSkills[i].Rationale != "" || cst.HasValue(container, "rationale") {
 				if err := cst.SetAny(container, "rationale", data.PreMergeSkills[i].Rationale); err != nil {
+					return fmt.Errorf("%w", err)
+				}
+			}
+		}
+	}
+	{
+		_apRemotes := container
+		_existRemotes := cst.FindChildArrayTableNodes(doc.Root(), _apRemotes, "remotes")
+		for i := range data.Remotes {
+			var container *cst.Node
+			if i < len(_existRemotes) {
+				container = _existRemotes[i]
+			} else {
+				container = cst.AppendChildArrayTableEntry(doc.Root(), _apRemotes, "remotes")
+			}
+			if data.Remotes[i].Name != "" || cst.HasValue(container, "name") {
+				if err := cst.SetAny(container, "name", data.Remotes[i].Name); err != nil {
+					return fmt.Errorf("%w", err)
+				}
+			}
+			if data.Remotes[i].SSH != "" || cst.HasValue(container, "ssh") {
+				if err := cst.SetAny(container, "ssh", data.Remotes[i].SSH); err != nil {
+					return fmt.Errorf("%w", err)
+				}
+			}
+			{
+				if data.Remotes[i].Attach != nil {
+					if err := cst.SetAny(container, "attach", data.Remotes[i].Attach); err != nil {
+						return fmt.Errorf("%w", err)
+					}
+				}
+			}
+			if data.Remotes[i].Remove != false || cst.HasValue(container, "remove") {
+				if err := cst.SetAny(container, "remove", data.Remotes[i].Remove); err != nil {
 					return fmt.Errorf("%w", err)
 				}
 			}

@@ -408,5 +408,28 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		}
 	}
 
+	// [[remotes]] — dedup-by-name, same merge mechanics as [[mcps]], but
+	// removal is explicit: a `remove = true` entry overrides the inherited
+	// remote in place and is preserved here so that ActiveRemotes() can
+	// filter it out. Name-only entries are NOT sentinels — they declare
+	// all-defaults remotes.
+	if len(other.Remotes) > 0 {
+		cp := make([]Remote, len(merged.Remotes))
+		copy(cp, merged.Remotes)
+		merged.Remotes = cp
+		index := make(map[string]int, len(merged.Remotes))
+		for i, r := range merged.Remotes {
+			index[r.Name] = i
+		}
+		for _, r := range other.Remotes {
+			if i, ok := index[r.Name]; ok {
+				merged.Remotes[i] = r
+				continue
+			}
+			index[r.Name] = len(merged.Remotes)
+			merged.Remotes = append(merged.Remotes, r)
+		}
+	}
+
 	return merged
 }

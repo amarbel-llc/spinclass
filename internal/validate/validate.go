@@ -272,6 +272,58 @@ func CheckPreMergeSkills(sf sweatfile.Sweatfile) []Issue {
 	return issues
 }
 
+func CheckRemotes(sf sweatfile.Sweatfile) []Issue {
+	var issues []Issue
+	seen := make(map[string]bool, len(sf.Remotes))
+	for _, r := range sf.Remotes {
+		if r.Name == "" {
+			issues = append(issues, Issue{
+				Message:  "remotes entry missing `name`",
+				Severity: SeverityError,
+				Field:    "remotes.name",
+			})
+			continue
+		}
+		if strings.ContainsAny(r.Name, ":/") {
+			issues = append(issues, Issue{
+				Message:  fmt.Sprintf("invalid remote name %q (must not contain ':' or '/')", r.Name),
+				Severity: SeverityError,
+				Field:    "remotes.name",
+				Value:    r.Name,
+			})
+		}
+		if seen[r.Name] {
+			issues = append(issues, Issue{
+				Message:  fmt.Sprintf("duplicate remotes entry %q in this file", r.Name),
+				Severity: SeverityWarning,
+				Field:    "remotes.name",
+				Value:    r.Name,
+			})
+		}
+		seen[r.Name] = true
+		if r.Remove && (r.SSH != "" || len(r.Attach) > 0) {
+			issues = append(issues, Issue{
+				Message:  fmt.Sprintf("remote %q sets `remove = true` alongside ssh/attach fields (the fields are ignored; intent is unclear)", r.Name),
+				Severity: SeverityWarning,
+				Field:    "remotes.remove",
+				Value:    r.Name,
+			})
+		}
+		for _, el := range r.Attach {
+			if el == "" {
+				issues = append(issues, Issue{
+					Message:  fmt.Sprintf("remote %q has an empty element in `attach`", r.Name),
+					Severity: SeverityError,
+					Field:    "remotes.attach",
+					Value:    r.Name,
+				})
+				break
+			}
+		}
+	}
+	return issues
+}
+
 func isShellInterpreter(cmd string) bool {
 	base := filepath.Base(cmd)
 	switch base {
@@ -516,6 +568,27 @@ func Run(w io.Writer, home, repoDir string) int {
 				}
 			} else {
 				sub.Ok("mcps valid")
+			}
+		}
+
+		if len(src.File.Remotes) > 0 {
+			if issues := CheckRemotes(src.File); len(issues) > 0 {
+				for _, iss := range issues {
+					if iss.Severity == SeverityError {
+						diag := map[string]string{
+							"severity": iss.Severity,
+							"message":  iss.Message,
+						}
+						if iss.Value != "" {
+							diag["value"] = iss.Value
+						}
+						sub.NotOk("remotes valid", diag)
+					} else {
+						sub.Ok(fmt.Sprintf("remotes valid # warning: %s", iss.Message))
+					}
+				}
+			} else {
+				sub.Ok("remotes valid")
 			}
 		}
 

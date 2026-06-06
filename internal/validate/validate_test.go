@@ -335,6 +335,126 @@ func TestCheckHooksAllowsNilFormat(t *testing.T) {
 	}
 }
 
+func TestCheckRemotesValid(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		Remotes: []sweatfile.Remote{
+			{Name: "devbox", SSH: "sasha@devbox.lan"},
+		},
+	}
+	issues := CheckRemotes(sf)
+	if len(issues) != 0 {
+		t.Errorf("expected no issues, got %v", issues)
+	}
+}
+
+func TestCheckRemotesMissingName(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		Remotes: []sweatfile.Remote{
+			{SSH: "sasha@devbox.lan"},
+		},
+	}
+	issues := CheckRemotes(sf)
+	if len(issues) != 1 || issues[0].Field != "remotes.name" {
+		t.Fatalf("expected 1 name issue, got %v", issues)
+	}
+}
+
+func TestCheckRemotesBadName(t *testing.T) {
+	for _, name := range []string{"bad:name", "bad/name"} {
+		sf := sweatfile.Sweatfile{
+			Remotes: []sweatfile.Remote{
+				{Name: name, SSH: "sasha@devbox.lan"},
+			},
+		}
+		issues := CheckRemotes(sf)
+		if len(issues) != 1 || issues[0].Severity != SeverityError ||
+			issues[0].Field != "remotes.name" {
+			t.Fatalf("name %q: expected 1 name error, got %v", name, issues)
+		}
+	}
+}
+
+func TestCheckRemotesDuplicateName(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		Remotes: []sweatfile.Remote{
+			{Name: "devbox", SSH: "a@devbox"},
+			{Name: "devbox", SSH: "b@devbox"},
+		},
+	}
+	issues := CheckRemotes(sf)
+	if len(issues) != 1 || issues[0].Severity != SeverityWarning ||
+		issues[0].Field != "remotes.name" {
+		t.Fatalf("expected 1 duplicate warning, got %v", issues)
+	}
+}
+
+func TestCheckRemotesEmptyAttachElement(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		Remotes: []sweatfile.Remote{
+			{Name: "devbox", Attach: []string{"ssh", "", "{id}"}},
+		},
+	}
+	issues := CheckRemotes(sf)
+	if len(issues) != 1 || issues[0].Severity != SeverityError ||
+		issues[0].Field != "remotes.attach" {
+		t.Fatalf("expected 1 attach error, got %v", issues)
+	}
+}
+
+func TestCheckRemotesNameOnlyValid(t *testing.T) {
+	// Name-only entries are all-defaults remotes (~/.ssh/config does the
+	// work), not removal sentinels — they must validate clean.
+	sf := sweatfile.Sweatfile{
+		Remotes: []sweatfile.Remote{
+			{Name: "devbox"},
+		},
+	}
+	if issues := CheckRemotes(sf); len(issues) != 0 {
+		t.Errorf("expected no issues for name-only remote, got %v", issues)
+	}
+}
+
+func TestCheckRemotesRemoveWithFieldsWarns(t *testing.T) {
+	for _, sf := range []sweatfile.Sweatfile{
+		{Remotes: []sweatfile.Remote{
+			{Name: "devbox", Remove: true, SSH: "sasha@devbox.lan"},
+		}},
+		{Remotes: []sweatfile.Remote{
+			{Name: "devbox", Remove: true, Attach: []string{"ssh", "{ssh}"}},
+		}},
+	} {
+		issues := CheckRemotes(sf)
+		if len(issues) != 1 || issues[0].Severity != SeverityWarning ||
+			issues[0].Field != "remotes.remove" {
+			t.Fatalf("expected 1 remove warning, got %v", issues)
+		}
+	}
+}
+
+func TestCheckRemotesBareRemoveOK(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		Remotes: []sweatfile.Remote{
+			{Name: "devbox", Remove: true},
+		},
+	}
+	if issues := CheckRemotes(sf); len(issues) != 0 {
+		t.Errorf("expected no issues for bare remove sentinel, got %v", issues)
+	}
+}
+
+func TestCheckRemotesEmptyAttachArrayOK(t *testing.T) {
+	// An absent/empty attach array means "use the default template" —
+	// only present-but-empty elements are rejected.
+	sf := sweatfile.Sweatfile{
+		Remotes: []sweatfile.Remote{
+			{Name: "devbox", SSH: "sasha@devbox.lan", Attach: []string{}},
+		},
+	}
+	if issues := CheckRemotes(sf); len(issues) != 0 {
+		t.Errorf("expected no issues for empty attach array, got %v", issues)
+	}
+}
+
 func TestCheckMCPsDuplicateName(t *testing.T) {
 	sf := sweatfile.Sweatfile{
 		MCPs: []sweatfile.MCPServerDef{
