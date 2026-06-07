@@ -338,16 +338,16 @@ func GetDefault() Sweatfile {
 	sf := Sweatfile{
 		// Every path spinclass (or a tool it invokes) writes into a
 		// worktree root is excluded so it never shows as untracked or
-		// gets accidentally staged (#116, #119): .spinclass.env is the
-		// [session-entry].env dotenv file Apply writes, .envrc is
-		// truncate-rewritten by writeEnvrc whenever direnv resolves
-		// (.direnv/ is direnv's own cache it then creates), .tmp/ is
-		// the session scratch dir, and .claude/settings.local.json
-		// carries the claude-allow rules. Without these the worktree
-		// only looks clean on machines whose personal global gitignore
-		// happens to cover them.
+		// gets accidentally staged (#116, #119): .spinclass/ holds all
+		// spinclass-owned data including the [session-entry].env dotenv
+		// file (#121), .envrc is truncate-rewritten by writeEnvrc
+		// whenever direnv resolves (.direnv/ is direnv's own cache it
+		// then creates), .tmp/ is the session scratch dir, and
+		// .claude/settings.local.json carries the claude-allow rules.
+		// Without these the worktree only looks clean on machines whose
+		// personal global gitignore happens to cover them.
 		Git: &Git{Excludes: []string{
-			".worktrees/", ".spinclass/", ".spinclass.env", ".mcp.json",
+			".worktrees/", ".spinclass/", ".mcp.json",
 			".envrc", ".direnv/", ".tmp/", ".claude/settings.local.json",
 		}},
 		StartCommands: defaultStartCommands(),

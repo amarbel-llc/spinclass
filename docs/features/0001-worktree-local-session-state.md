@@ -205,8 +205,7 @@ writes into a managed worktree, and how each stays out of git status
 
 | Path | Writer | Excluded |
 |------|--------|----------|
-| `.spinclass/` (`state.json`, `job.json`, `job.log`) | `internal/session`, `internal/job` | default |
-| `.spinclass.env` | `sweatfile.Apply` (`writeSpinclassEnv`, the `[session-entry].env` dotenv) | default |
+| `.spinclass/` (`state.json`, `job.json`, `job.log`, `env`, `.settings-snapshot.json`) | `internal/session`, `internal/job`, `sweatfile.Apply` | default |
 | `.mcp.json` | `claude.WriteMCPConfig` (sweatfile `[[mcps]]` entries) | default |
 | `.envrc` | `sweatfile.writeEnvrc` (truncate-rewrite whenever direnv resolves) | default |
 | `.direnv/` | direnv itself, triggered by the spinclass-written `.envrc` | default |

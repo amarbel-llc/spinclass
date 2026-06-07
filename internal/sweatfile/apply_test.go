@@ -39,12 +39,12 @@ func TestHardcodedDefaultsGitExcludes(t *testing.T) {
 
 	// Every path spinclass (or a tool it invokes) writes into a worktree
 	// must be excluded so it never shows as untracked / gets accidentally
-	// staged (#116, #119): .spinclass.env is the [session-entry].env
-	// dotenv file, .envrc and .direnv/ come from the direnv integration,
-	// .tmp/ is the session scratch dir, and .claude/settings.local.json
-	// carries the claude-allow rules.
+	// staged (#116, #119): .envrc and .direnv/ come from the direnv
+	// integration, .tmp/ is the session scratch dir, and
+	// .claude/settings.local.json carries the claude-allow rules. The
+	// [session-entry].env dotenv file lives inside .spinclass/ (#121).
 	want := []string{
-		".worktrees/", ".spinclass/", ".spinclass.env", ".mcp.json",
+		".worktrees/", ".spinclass/", ".mcp.json",
 		".envrc", ".direnv/", ".tmp/", ".claude/settings.local.json",
 	}
 	if len(defaults.Git.Excludes) != len(want) {
@@ -579,14 +579,14 @@ func TestWriteSpinclassEnv(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, ".spinclass.env"))
+	data, err := os.ReadFile(filepath.Join(dir, ".spinclass", "env"))
 	if err != nil {
-		t.Fatalf("reading .spinclass.env: %v", err)
+		t.Fatalf("reading .spinclass/env: %v", err)
 	}
 
 	content := string(data)
 	if content != "BAZ=qux\nFOO=bar\n" {
-		t.Errorf(".spinclass.env content: got %q", content)
+		t.Errorf(".spinclass/env content: got %q", content)
 	}
 }
 
@@ -614,11 +614,11 @@ func TestWriteSpinclassEnvInterpolatesWorktree(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	data, _ := os.ReadFile(filepath.Join(dir, ".spinclass.env"))
+	data, _ := os.ReadFile(filepath.Join(dir, ".spinclass", "env"))
 	want := fmt.Sprintf("INCLUDE_PATH=%s/lib:.\n", dir)
 	if string(data) != want {
 		t.Errorf(
-			".spinclass.env content:\ngot  %q\nwant %q",
+			".spinclass/env content:\ngot  %q\nwant %q",
 			string(data),
 			want,
 		)
@@ -649,8 +649,37 @@ func TestEnvAutoDotenvDirective(t *testing.T) {
 
 	data, _ := os.ReadFile(filepath.Join(dir, ".envrc"))
 	content := string(data)
-	if !strings.Contains(content, "dotenv .spinclass.env") {
-		t.Errorf("expected dotenv .spinclass.env in .envrc, got %q", content)
+	if !strings.Contains(content, "dotenv .spinclass/env") {
+		t.Errorf("expected dotenv .spinclass/env in .envrc, got %q", content)
+	}
+}
+
+// A worktree created by a pre-#121 spinclass has the dotenv file at the
+// old top-level path; Apply removes it even when no dotenv is configured
+// so the stale file can't linger after the location moved.
+func TestApplyRemovesStaleSpinclassEnv(t *testing.T) {
+	dir := t.TempDir()
+	testgit.MustInit(t, dir)
+
+	fakeBin := t.TempDir()
+	os.WriteFile(
+		filepath.Join(fakeBin, "direnv"),
+		[]byte("#!/bin/sh\nexit 0\n"),
+		0o755,
+	)
+	t.Setenv("PATH", fakeBin+":"+gitDir(t))
+
+	stale := filepath.Join(dir, ".spinclass.env")
+	if err := os.WriteFile(stale, []byte("FOO=bar\n"), 0o644); err != nil {
+		t.Fatalf("writing stale .spinclass.env: %v", err)
+	}
+
+	if err := (Sweatfile{}).Apply(dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("expected stale .spinclass.env to be removed, stat err: %v", err)
 	}
 }
 

@@ -87,7 +87,7 @@ across the cascade, like the other array fields).
 .TP
 .B dotenv
 Table of key-value pairs written to
-.IR .spinclass.env
+.IR .spinclass/env
 at session create.
 Values support
 .B $VAR
@@ -107,7 +107,7 @@ ETSYWEB_PWD = "$WORKTREE"
 When
 .B dotenv
 is non-empty, spinclass appends a
-.B dotenv .spinclass.env
+.B dotenv .spinclass/env
 directive to the generated
 .I .envrc
 so direnv actually loads the file into the shell \(em you do

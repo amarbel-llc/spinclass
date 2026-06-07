@@ -27,8 +27,14 @@ func (sweatfile Sweatfile) Apply(worktreePath string) error {
 	}
 
 	if err := sweatfile.writeSpinclassEnv(worktreePath); err != nil {
-		return fmt.Errorf("writing .spinclass.env: %w", err)
+		return fmt.Errorf("writing .spinclass/env: %w", err)
 	}
+
+	// The dotenv file lived at the worktree top level before #121 moved
+	// it inside .spinclass/; remove the stale copy best-effort so it
+	// can't linger (and its old `dotenv .spinclass.env` .envrc directive
+	// is rewritten by prepareDirenv below).
+	os.Remove(filepath.Join(worktreePath, ".spinclass.env"))
 
 	if err := sweatfile.prepareDirenv(worktreePath); err != nil {
 		return err
@@ -75,7 +81,7 @@ func (sf Sweatfile) writeEnvrc(worktreePath string) error {
 	}
 
 	if sf.Direnv != nil && len(sf.Direnv.Dotenv) > 0 {
-		if _, err := fmt.Fprintln(bufferedWriter, "dotenv .spinclass.env"); err != nil {
+		if _, err := fmt.Fprintln(bufferedWriter, "dotenv .spinclass/env"); err != nil {
 			return err
 		}
 	}
@@ -111,8 +117,12 @@ func (sf Sweatfile) writeSpinclassEnv(worktreePath string) error {
 	}
 	sort.Strings(keys)
 
+	if err := os.MkdirAll(filepath.Join(worktreePath, ".spinclass"), 0o755); err != nil {
+		return err
+	}
+
 	file, err := os.OpenFile(
-		filepath.Join(worktreePath, ".spinclass.env"),
+		filepath.Join(worktreePath, ".spinclass", "env"),
 		os.O_TRUNC|os.O_CREATE|os.O_WRONLY,
 		0o644,
 	)
