@@ -175,8 +175,9 @@ func CheckStartCommands(sf sweatfile.Sweatfile) []Issue {
 }
 
 var validPreMergeOutputFormats = map[string]bool{
-	"raw":        true,
-	"tap-ndjson": true,
+	"raw":         true,
+	"tap-ndjson":  true,
+	"ndjson-crap": true,
 }
 
 // CheckHooks validates fields in the [hooks] table: the
@@ -191,7 +192,7 @@ func CheckHooks(sf sweatfile.Sweatfile) []Issue {
 		v := *sf.Hooks.PreMergeOutputFormat
 		if v != "" && !validPreMergeOutputFormats[v] {
 			issues = append(issues, Issue{
-				Message:  fmt.Sprintf("unknown pre-merge-output-format %q (valid: raw, tap-ndjson)", v),
+				Message:  fmt.Sprintf("unknown pre-merge-output-format %q (valid: raw, tap-ndjson, ndjson-crap)", v),
 				Severity: SeverityError,
 				Field:    "hooks.pre-merge-output-format",
 				Value:    v,

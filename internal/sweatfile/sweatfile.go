@@ -149,7 +149,7 @@ func (sf Sweatfile) InactivityTimeoutValue() time.Duration {
 
 // PreMergeOutputFormatValue returns the configured format for the
 // pre-merge hook's output, defaulting to "raw" when unset or empty.
-// Valid values: "raw", "tap-ndjson". Validation lives in
+// Valid values: "raw", "tap-ndjson", "ndjson-crap". Validation lives in
 // internal/validate.
 func (sf Sweatfile) PreMergeOutputFormatValue() string {
 	if sf.Hooks == nil || sf.Hooks.PreMergeOutputFormat == nil {

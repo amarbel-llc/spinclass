@@ -17,6 +17,7 @@ require (
 )
 
 require (
+	github.com/amarbel-llc/crap/go-crap v0.0.0-00010101000000-000000000000
 	github.com/amarbel-llc/purse-first/libs/dewey v0.1.8 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
@@ -55,3 +56,5 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	mvdan.cc/sh/v3 v3.13.1 // indirect
 )
+
+replace github.com/amarbel-llc/crap/go-crap => ../crap/go-crap
