@@ -1130,6 +1130,22 @@ func TestChatToolsAutoApproved(t *testing.T) {
 	}
 }
 
+func TestValidateToolAutoApproved(t *testing.T) {
+	cwd := t.TempDir()
+	input := makeInput("mcp__plugin_spinclass_spinclass__validate", map[string]any{}, cwd)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() == 0 {
+		t.Fatal("expected allow output for validate tool")
+	}
+	decision, _ := parseHookDecision(t, stdout.Bytes())
+	if decision != "allow" {
+		t.Errorf("expected permissionDecision allow for validate, got %q", decision)
+	}
+}
+
 func TestJobWaitToolAutoApproved(t *testing.T) {
 	cwd := t.TempDir()
 	input := makeInput("mcp__plugin_spinclass_spinclass__session-job-wait", map[string]any{}, cwd)

@@ -101,6 +101,7 @@ const (
 	chatSendToolName              = "mcp__plugin_spinclass_spinclass__chat-send"
 	chatReadToolName              = "mcp__plugin_spinclass_spinclass__chat-read"
 	chatListSessionsToolName      = "mcp__plugin_spinclass_spinclass__chat-list-sessions"
+	validateToolName              = "mcp__plugin_spinclass_spinclass__validate"
 )
 
 func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree bool) error {
@@ -114,13 +115,14 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 	}
 
 	switch input.ToolName {
-	case listToolName, updateDescriptionToolName,
+	case listToolName, updateDescriptionToolName, validateToolName,
 		sessionJobStatusToolName, sessionJobCancelToolName, sessionJobWaitToolName:
-		// Benign, session-scoped spinclass tools: list, session-job-status, and
-		// session-job-wait are read-only (wait only blocks on an existing job);
-		// update-this-session-description and session-job-cancel only mutate
-		// spinclass's own session/job metadata. Auto-approve unconditionally so
-		// agents never get a permission prompt for them.
+		// Benign, session-scoped spinclass tools: list, validate,
+		// session-job-status, and session-job-wait are read-only (wait only
+		// blocks on an existing job); update-this-session-description and
+		// session-job-cancel only mutate spinclass's own session/job metadata.
+		// Auto-approve unconditionally so agents never get a permission prompt
+		// for them.
 		return writeAllow(w, "spinclass session-management tool, safe to auto-approve")
 	case chatSendToolName, chatReadToolName, chatListSessionsToolName:
 		// The cross-session chat tools are benign (no repo or filesystem
