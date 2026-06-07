@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/amarbel-llc/crap/go-crap/ndjsoncrap"
 	"github.com/amarbel-llc/spinclass/internal/embeds"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/madder"
@@ -52,7 +53,7 @@ type BlobLink struct {
 // ResourceLinkContent block. Anything other than "tap-ndjson" maps to
 // "text/plain" (matching the format=raw default).
 func mimeTypeForFormat(format string) string {
-	if format == "tap-ndjson" {
+	if format == "tap-ndjson" || format == "ndjson-crap" {
 		return "application/x-ndjson"
 	}
 	return "text/plain"
@@ -343,19 +344,27 @@ func runHookCompactContext(ctx context.Context, tw *tap.Writer, hierarchy sweatf
 	// ring is the fallback visibility for failures the parser can't surface.
 	ring := newTailRingWriter(15)
 
+	// Structured formats buffer hook stdout and store structured output to
+	// madder after the hook exits; "raw" streams straight through.
+	//   - tap-ndjson : hook emits TAP-14 text, spinclass converts via tap's
+	//                  aggregator and stores the ndjson.
+	//   - ndjson-crap: hook emits canonical ndjson-crap directly (the crap
+	//                  wire format); spinclass stores it verbatim and parses
+	//                  it via crap's ndjsoncrap reader for the failure summary.
+	structured := format == "tap-ndjson" || format == "ndjson-crap"
+
 	var (
 		madderStdin   io.WriteCloser
 		finishMadder  func() (string, error)
-		hookStdoutBuf bytes.Buffer // populated only when format == "tap-ndjson"
+		hookStdoutBuf bytes.Buffer // populated only for structured formats
 	)
 
-	if format == "tap-ndjson" {
-		// Buffer hook stdout fully; we write the parsed ndjson to
-		// madder below, not the raw stream. madderStdin and
-		// finishMadder are placeholders here so the shared variable
-		// shape compiles for both paths — the real madder.Write for
-		// this format happens after the hook exits and stdout is
-		// parsed (see the post-hook block below).
+	if structured {
+		// Buffer hook stdout fully; we write to madder below, not the raw
+		// stream. madderStdin and finishMadder are placeholders here so the
+		// shared variable shape compiles for both paths — the real
+		// madder.Write happens after the hook exits (see the post-hook
+		// switch below).
 		madderStdin = nopWriteCloser{io.Discard}
 		finishMadder = func() (string, error) { return "", nil }
 	} else {
@@ -370,7 +379,7 @@ func runHookCompactContext(ctx context.Context, tw *tap.Writer, hierarchy sweatf
 	}
 
 	var sink io.Writer
-	if format == "tap-ndjson" {
+	if structured {
 		sink = io.MultiWriter(&hookStdoutBuf, ring)
 	} else {
 		sink = io.MultiWriter(madderStdin, ring)
@@ -386,11 +395,13 @@ func runHookCompactContext(ctx context.Context, tw *tap.Writer, hierarchy sweatf
 	var (
 		blobID    string
 		madderErr error
-		parsed    ndjson.Output
+		parsed    ndjson.Output     // tap-ndjson path
+		crapTests []ndjsoncrap.Test // ndjson-crap path
 		hasParse  bool
 	)
 
-	if format == "tap-ndjson" {
+	switch format {
+	case "tap-ndjson":
 		rd := reader.NewReader(&hookStdoutBuf)
 		agg := ndjson.NewAggregator()
 		for {
@@ -418,7 +429,29 @@ func runHookCompactContext(ctx context.Context, tw *tap.Writer, hierarchy sweatf
 			}
 			blobID = id
 		}
-	} else {
+
+	case "ndjson-crap":
+		// The hook already emitted canonical ndjson-crap. Parse it (for the
+		// failure summary) and store the stream verbatim — no re-encoding.
+		crapTests = collectCrapTests(bytes.NewReader(hookStdoutBuf.Bytes()))
+		hasParse = len(crapTests) > 0
+
+		ms, fm, mErr := madder.Write(wtPath, embeds.MadderBin())
+		if mErr != nil {
+			madderErr = mErr
+		} else if _, wErr := ms.Write(hookStdoutBuf.Bytes()); wErr != nil {
+			madderErr = wErr
+			_ = ms.Close()
+		} else {
+			_ = ms.Close()
+			id, fErr := fm()
+			if fErr != nil {
+				madderErr = fErr
+			}
+			blobID = id
+		}
+
+	default:
 		_ = madderStdin.Close()
 		blobID, madderErr = finishMadder()
 	}
@@ -444,14 +477,17 @@ func runHookCompactContext(ctx context.Context, tw *tap.Writer, hierarchy sweatf
 	//  - format=tap-ndjson, success   → neither tail nor failure
 	//  - format=tap-ndjson, fail+rec  → failure (built from parsed)
 	//  - format=tap-ndjson, fail+!rec → tail (fallback)
-	if format == "raw" {
+	if !structured {
 		if hookErr != nil {
 			extras["tail"] = ring.Tail()
 		}
 	} else if hookErr != nil {
-		if hasParse {
+		switch {
+		case format == "tap-ndjson" && hasParse:
 			extras["failure"] = buildFailureSummary(parsed)
-		} else {
+		case format == "ndjson-crap" && hasParse:
+			extras["failure"] = buildFailureSummaryCrap(crapTests)
+		default:
 			extras["tail"] = ring.Tail()
 		}
 	}
@@ -484,6 +520,48 @@ func runHookCompactContext(ctx context.Context, tw *tap.Writer, hierarchy sweatf
 func buildFailureSummary(out ndjson.Output) string {
 	var b strings.Builder
 	for _, r := range out.Records {
+		if r.OK || r.Directive != nil {
+			continue
+		}
+		fmt.Fprintf(&b, "#%d %s", r.N, r.Description)
+		if msg, ok := r.Diagnostic["message"].(string); ok && msg != "" {
+			fmt.Fprintf(&b, ": %s", msg)
+		}
+		b.WriteByte('\n')
+		if r.Output != nil && *r.Output != "" {
+			for _, line := range strings.Split(strings.TrimRight(*r.Output, "\n"), "\n") {
+				fmt.Fprintf(&b, "  %s\n", line)
+			}
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// collectCrapTests decodes an ndjson-crap stream and returns its top-level
+// test records (the records the failure summary reports on). Non-test
+// records (plan/summary/header/execution-family) are ignored; decoding stops
+// at EOF or the first undecodable line.
+func collectCrapTests(r io.Reader) []ndjsoncrap.Test {
+	rd := ndjsoncrap.NewReader(r)
+	var tests []ndjsoncrap.Test
+	for {
+		rec, err := rd.Next()
+		if err != nil {
+			break
+		}
+		if t, ok := rec.(ndjsoncrap.Test); ok {
+			tests = append(tests, t)
+		}
+	}
+	return tests
+}
+
+// buildFailureSummaryCrap is the ndjson-crap analogue of buildFailureSummary:
+// one line per genuinely-failing top-level test record (!OK && no directive),
+// with its diagnostic message and any captured output indented beneath.
+func buildFailureSummaryCrap(tests []ndjsoncrap.Test) string {
+	var b strings.Builder
+	for _, r := range tests {
 		if r.OK || r.Directive != nil {
 			continue
 		}

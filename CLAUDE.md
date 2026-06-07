@@ -423,6 +423,9 @@ and fish included.
 
 Module: `github.com/amarbel-llc/spinclass`. Key dependencies: -
 `github.com/amarbel-llc/tap/go` --- TAP-14 output library -
+`github.com/amarbel-llc/crap/go-crap` --- ndjson-crap reader (consumed by the
+`ndjson-crap` pre-merge-output-format, where the hook emits canonical
+ndjson-crap directly; see `internal/check`) -
 `github.com/amarbel-llc/purse-first/libs/go-mcp` --- MCP server framework -
 `github.com/amarbel-llc/tommy` --- TOML library - `github.com/spf13/cobra` ---
 CLI framework

@@ -416,6 +416,74 @@ func TestRunHookCompactShape_TapNDJSONFailure(t *testing.T) {
 	}
 }
 
+func TestRunHookCompactShape_NdjsonCrapSuccess(t *testing.T) {
+	_, _, wtPath := setupRepoWithWorktree(t, "feature-ndjson-crap-success")
+	_, stdinCapture := withFakeMadder(t)
+	// Hook emits canonical ndjson-crap directly (one passing test record).
+	writeSweatfile(t, wtPath, "[hooks]\n"+
+		"pre-merge = \"echo '{\\\"type\\\":\\\"test\\\",\\\"n\\\":1,\\\"description\\\":\\\"synthetic\\\",\\\"ok\\\":true}'\"\n"+
+		"pre-merge-output-format = \"ndjson-crap\"\n")
+
+	var buf bytes.Buffer
+	links, err := Run(&buf, "tap", wtPath, false)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	if len(links) != 1 || links[0].MimeType != "application/x-ndjson" {
+		t.Fatalf("expected one application/x-ndjson blob link, got %v", links)
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "format: ndjson-crap") {
+		t.Errorf("expected 'format: ndjson-crap' in output, got:\n%s", got)
+	}
+	if strings.Contains(got, "not ok") {
+		t.Errorf("did not expect 'not ok' on success, got:\n%s", got)
+	}
+	if strings.Contains(got, "tail:") || strings.Contains(got, "failure:") {
+		t.Errorf("did not expect tail/failure on success, got:\n%s", got)
+	}
+
+	// The blob stores the ndjson-crap stream verbatim (already canonical).
+	raw, _ := os.ReadFile(stdinCapture)
+	if !strings.Contains(string(raw), `"type":"test"`) || !strings.Contains(string(raw), "synthetic") {
+		t.Errorf("blob should contain the verbatim ndjson-crap record, got:\n%s", raw)
+	}
+}
+
+func TestRunHookCompactShape_NdjsonCrapFailure(t *testing.T) {
+	_, _, wtPath := setupRepoWithWorktree(t, "feature-ndjson-crap-failure")
+	withFakeMadder(t)
+	// Hook emits an ndjson-crap failing test record with a diagnostic, then
+	// exits non-zero.
+	writeSweatfile(t, wtPath, "[hooks]\n"+
+		"pre-merge = \"echo '{\\\"type\\\":\\\"test\\\",\\\"n\\\":1,\\\"description\\\":\\\"synthetic\\\",\\\"ok\\\":false,\\\"diagnostic\\\":{\\\"message\\\":\\\"expected 7 got 9\\\"}}'; exit 1\"\n"+
+		"pre-merge-output-format = \"ndjson-crap\"\n")
+
+	var buf bytes.Buffer
+	_, err := Run(&buf, "tap", wtPath, false)
+	if err == nil {
+		t.Fatalf("expected hook failure, got nil. Output: %s", buf.String())
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "not ok") {
+		t.Errorf("expected 'not ok' for failed hook, got:\n%s", got)
+	}
+	if !strings.Contains(got, "format: ndjson-crap") {
+		t.Errorf("expected 'format: ndjson-crap' in output, got:\n%s", got)
+	}
+	if !strings.Contains(got, "failure:") {
+		t.Errorf("expected 'failure:' field built from parsed crap records, got:\n%s", got)
+	}
+	if !strings.Contains(got, "expected 7 got 9") {
+		t.Errorf("expected diagnostic message in failure summary, got:\n%s", got)
+	}
+	if strings.Contains(got, "tail:") {
+		t.Errorf("did not expect 'tail:' when parsed records exist, got:\n%s", got)
+	}
+}
+
 func TestRunHookCompactShape_TapNDJSONDegenerateFallback(t *testing.T) {
 	_, _, wtPath := setupRepoWithWorktree(t, "feature-tap-ndjson-degenerate")
 	withFakeMadder(t)
