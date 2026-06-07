@@ -1,6 +1,6 @@
 ---
 status: proposed
-date: 2026-04-29
+date: 2026-06-07
 promotion-criteria: |
   - Existing sessions in ~/.local/state/spinclass/sessions/ migrate cleanly to
     the new layout on first invocation after upgrade.
@@ -197,6 +197,34 @@ walk `$XDG_STATE_HOME/spinclass/index/`:
   - Tombstone files older than a configurable retention (default: 30 days)
     are removed.
 
+### Worktree file inventory
+
+The canonical record of every path spinclass (or a tool it invokes)
+writes into a managed worktree, and how each stays out of git status
+(#119):
+
+| Path | Writer | Excluded |
+|------|--------|----------|
+| `.spinclass/` (`state.json`, `job.json`, `job.log`) | `internal/session`, `internal/job` | default |
+| `.spinclass.env` | `sweatfile.Apply` (`writeSpinclassEnv`, the `[session-entry].env` dotenv) | default |
+| `.mcp.json` | `claude.WriteMCPConfig` (sweatfile `[[mcps]]` entries) | default |
+| `.envrc` | `sweatfile.writeEnvrc` (truncate-rewrite whenever direnv resolves) | default |
+| `.direnv/` | direnv itself, triggered by the spinclass-written `.envrc` | default |
+| `.tmp/` | worktree create + executors (session scratch, `$TMPDIR`) | default |
+| `.claude/settings.local.json` | `sweatfile.ApplyClaudeSettings` (claude-allow rules) | default |
+| `.madder/` | madder pin activation | appended when pin active |
+| `.dodder/` | dodder pin activation | appended when pin active |
+| `.worktrees/` (main repo root) | worktree create | default |
+
+All exclusion funnels through one mechanism: `applyGitExcludes` writes
+the merged list into a fenced `# --- spinclass-managed ---` block in the
+main repo's `.git/info/exclude` (shared by every worktree via the common
+git dir), replacing the block idempotently on each worktree
+create/attach. Defaults live in `sweatfile.GetDefault()`; the pin
+integrations append their entries via `withMadderEntries` /
+`withDodderEntries`. When adding a new worktree-written path, add it to
+the defaults and to this table in the same change.
+
 ### Migration
 
 One-shot, automatic, idempotent. On any `sc` invocation, before reading
@@ -284,6 +312,11 @@ $ sc clean
 - **No backwards compatibility for the old layout.** After migration the old
   directory is removed; downgrading to a previous spinclass requires manual
   state reconstruction.
+- **Tracked `.envrc` is clobbered, not protected.** `writeEnvrc`
+  truncate-overwrites `.envrc` unconditionally, and git excludes only
+  affect untracked files — a repo that commits its `.envrc` will show a
+  permanent diff in every spinclass worktree. No repo in current use
+  tracks `.envrc`, so this is documented rather than defended against.
 
 ## More Information
 
