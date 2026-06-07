@@ -37,10 +37,16 @@ func TestHardcodedDefaultsGitExcludes(t *testing.T) {
 		t.Fatal("expected non-nil git excludes slice")
 	}
 
-	// .spinclass.env is written into every worktree by sweatfile.Apply
-	// (the [session-entry].env dotenv file) and must be excluded so it
-	// never shows as untracked / gets accidentally staged (#116).
-	want := []string{".worktrees/", ".spinclass/", ".spinclass.env", ".mcp.json"}
+	// Every path spinclass (or a tool it invokes) writes into a worktree
+	// must be excluded so it never shows as untracked / gets accidentally
+	// staged (#116, #119): .spinclass.env is the [session-entry].env
+	// dotenv file, .envrc and .direnv/ come from the direnv integration,
+	// .tmp/ is the session scratch dir, and .claude/settings.local.json
+	// carries the claude-allow rules.
+	want := []string{
+		".worktrees/", ".spinclass/", ".spinclass.env", ".mcp.json",
+		".envrc", ".direnv/", ".tmp/", ".claude/settings.local.json",
+	}
 	if len(defaults.Git.Excludes) != len(want) {
 		t.Fatalf(
 			"expected %d git excludes, got %d: %v",
