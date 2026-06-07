@@ -56,6 +56,67 @@ func TestResolveTargetByIDFindsSession(t *testing.T) {
 	}
 }
 
+// TestResolveTargetBySessionKey: the `<repo-dirname>/<branch>` keys
+// `sc list` prints resolve cross-repo, from a cwd outside any git repo,
+// and disambiguate worktree dirnames that collide across repos.
+func TestResolveTargetBySessionKey(t *testing.T) {
+	testgit.RequireGit(t)
+	root := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	for _, repo := range []string{"alpha", "beta"} {
+		repoPath := filepath.Join(root, repo)
+		wtPath := filepath.Join(repoPath, ".worktrees", "feature-x")
+		testgit.MustInit(t, repoPath)
+		testgit.MustWorktreeAdd(t, repoPath, wtPath, "feature-x")
+		if err := session.Write(session.State{
+			SessionState: session.StateInactive,
+			RepoPath:     repoPath,
+			WorktreePath: wtPath,
+			Branch:       "feature-x",
+			SessionKey:   repo + "/feature-x",
+			Entrypoint:   []string{"/bin/sh"},
+			StartedAt:    time.Now().UTC(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// cwd outside any repo: an explicit target needs no repo detection.
+	outside := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", outside)
+
+	gotRepo, gotWT, gotBranch, err := resolveTarget(outside, "beta/feature-x", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRepo := filepath.Join(root, "beta")
+	if gotRepo != wantRepo {
+		t.Errorf("repo = %q, want %q", gotRepo, wantRepo)
+	}
+	if want := filepath.Join(wantRepo, ".worktrees", "feature-x"); gotWT != want {
+		t.Errorf("wt = %q, want %q", gotWT, want)
+	}
+	if gotBranch != "feature-x" {
+		t.Errorf("branch = %q, want %q", gotBranch, "feature-x")
+	}
+
+	// The ambiguous bare dirname surfaces the session keys, not the
+	// "no spinclass session" hint.
+	_, _, _, err = resolveTarget(outside, "feature-x", nil)
+	if err == nil {
+		t.Fatal("ambiguous bare target: expected error, got nil")
+	}
+	for _, key := range []string{"alpha/feature-x", "beta/feature-x"} {
+		if !strings.Contains(err.Error(), key) {
+			t.Errorf("ambiguity error %q is missing session key %q", err, key)
+		}
+	}
+	if strings.Contains(err.Error(), "no spinclass session") {
+		t.Errorf("ambiguity error %q must not carry the not-found hint", err)
+	}
+}
+
 // TestPlanNixGCOverrideMatrix locks the precedence contract on
 // planNixGC: the explicit `--nix-gc=<bool>` flag (override != nil) wins
 // over the sweatfile cascade's [hooks].disable-nix-gc, and a nil

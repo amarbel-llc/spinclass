@@ -527,23 +527,56 @@ func evalOrClean(p string) string {
 	return filepath.Clean(p)
 }
 
-// FindByID scans all session state entries and returns the one whose
-// WorktreePath ends in /.worktrees/<id>. The id is the worktree directory
-// name, which may differ from the git branch.
-func FindByID(id string) (*State, error) {
+// ErrTargetNotFound tags FindByTarget misses so callers can distinguish
+// "nothing matched" (close appends a bare-git-worktree hint) from an
+// ambiguity error, which must surface to the user untouched.
+var ErrTargetNotFound = errors.New("no session found")
+
+// Key returns the session key (`<repo-dirname>/<branch>`, the first
+// column of `sc list`), computing it from RepoPath and Branch for
+// legacy state files that predate the SessionKey field.
+func (s *State) Key() string {
+	if s.SessionKey != "" {
+		return s.SessionKey
+	}
+	return filepath.Base(s.RepoPath) + "/" + s.Branch
+}
+
+// FindByTarget resolves a user-supplied target to a session. Two
+// grammars match: the worktree directory basename (`quiet-oak`, which
+// may differ from the git branch) and the session key
+// `<repo-dirname>/<branch>` exactly as `sc list` prints it. A bare
+// basename matching sessions in several repos errors with the colliding
+// session keys instead of arbitrarily picking one; misses are tagged
+// ErrTargetNotFound.
+func FindByTarget(target string) (*State, error) {
 	migrateOnce()
-	suffix := "/.worktrees/" + id
+	suffix := "/.worktrees/" + target
 	states, err := ListAll(nil)
 	if err != nil {
 		return nil, err
 	}
+	var matches []*State
 	for i := range states {
 		s := &states[i]
-		if strings.HasSuffix(s.WorktreePath, suffix) {
-			return s, nil
+		if s.Key() == target || strings.HasSuffix(s.WorktreePath, suffix) {
+			matches = append(matches, s)
 		}
 	}
-	return nil, fmt.Errorf("no session found for worktree ID %q", id)
+	switch len(matches) {
+	case 0:
+		return nil, fmt.Errorf("%w for target %q", ErrTargetNotFound, target)
+	case 1:
+		return matches[0], nil
+	}
+	keys := make([]string, len(matches))
+	for i, m := range matches {
+		keys[i] = m.Key()
+	}
+	return nil, fmt.Errorf(
+		"target %q is ambiguous: matches %s — use a session key",
+		target, strings.Join(keys, ", "),
+	)
 }
 
 // SortStates orders sessions in place: active first, then
@@ -597,6 +630,50 @@ func ListForRepo(repoPath string, dbg *slog.Logger) ([]State, error) {
 		if s.ResolveState() == StateAbandoned {
 			log.Debug(
 				"session.ListForRepo: skipped",
+				"reason", "abandoned",
+				"branch", s.Branch,
+				"worktree", s.WorktreePath,
+				"tombstone", s.isTombstone,
+			)
+			continue
+		}
+		filtered = append(filtered, *s)
+	}
+	return filtered, nil
+}
+
+// ListForScope returns the non-abandoned sessions visible from dir:
+// those whose RepoPath is exactly repoPath (the repo containing dir,
+// when inside one) unioned with those whose RepoPath sits at or beneath
+// dir after symlink/lexical normalization — so a cwd above several
+// repos (e.g. ~/eng over ~/eng/repos/*) sees the nested repos'
+// sessions too. Matching is path-component-aware via pathInsideResolved.
+// When dbg is non-nil, every excluded entry is logged at Debug level.
+func ListForScope(repoPath, dir string, dbg *slog.Logger) ([]State, error) {
+	log := debugLogger(dbg)
+	all, err := ListAll(log)
+	if err != nil {
+		return nil, err
+	}
+	resolvedDir := evalOrClean(dir)
+	var filtered []State
+	for i := range all {
+		s := &all[i]
+		if s.RepoPath != repoPath && !pathInsideResolved(evalOrClean(s.RepoPath), resolvedDir) {
+			log.Debug(
+				"session.ListForScope: skipped",
+				"reason", "scope_mismatch",
+				"want_repo", repoPath,
+				"want_dir", dir,
+				"got_repo", s.RepoPath,
+				"branch", s.Branch,
+				"worktree", s.WorktreePath,
+			)
+			continue
+		}
+		if s.ResolveState() == StateAbandoned {
+			log.Debug(
+				"session.ListForScope: skipped",
 				"reason", "abandoned",
 				"branch", s.Branch,
 				"worktree", s.WorktreePath,

@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/amarbel-llc/spinclass/internal/git"
+	"github.com/amarbel-llc/spinclass/internal/session"
 	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
 )
 
@@ -77,6 +79,83 @@ func setupWorktree(t *testing.T, repoDir, branch string) string {
 	wtPath := filepath.Join(wtDir, branch)
 	runGit(t, repoDir, "worktree", "add", "-b", branch, wtPath)
 	return wtPath
+}
+
+// TestResolveTargetSessionKeyCrossRepo: explicit merge targets resolve
+// current-repo git worktrees first (bare worktrees without session
+// state keep working, and a local dirname is never shadowed by another
+// repo's session); session targets — including the `<repo>/<branch>`
+// keys `sc list` prints — then resolve cross-repo from any cwd.
+func TestResolveTargetSessionKeyCrossRepo(t *testing.T) {
+	repoA := setupRepo(t) // sets GIT_CEILING_DIRECTORIES + isolated HOME
+	root := filepath.Dir(repoA)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "xdg-state"))
+
+	// repoA: bare git worktree, NO session state.
+	wtA := setupWorktree(t, repoA, "feature-x")
+
+	// repoB: same branch/dirname, WITH session state.
+	repoB := filepath.Join(root, "other")
+	if err := os.MkdirAll(repoB, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoB, "init", "-b", "main")
+	runGit(t, repoB, "config", "user.email", "test@test.com")
+	runGit(t, repoB, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(repoB, "file.txt"), []byte("initial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoB, "add", "file.txt")
+	runGit(t, repoB, "commit", "-m", "initial")
+	wtB := setupWorktree(t, repoB, "feature-x")
+	if err := session.Write(session.State{
+		SessionState: session.StateInactive,
+		RepoPath:     repoB,
+		WorktreePath: wtB,
+		Branch:       "feature-x",
+		SessionKey:   "other/feature-x",
+		Entrypoint:   []string{"/bin/sh"},
+		StartedAt:    time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Bare dirname from inside repoA: the local git worktree wins, even
+	// though repoB has a session with the same dirname.
+	gotRepo, gotWT, gotBranch, err := resolveTarget(repoA, "feature-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotRepo != repoA || gotWT != wtA || gotBranch != "feature-x" {
+		t.Errorf("local-first: got (%q, %q, %q), want repoA's worktree", gotRepo, gotWT, gotBranch)
+	}
+
+	// Session key from inside repoA: resolves cross-repo to repoB.
+	gotRepo, gotWT, gotBranch, err = resolveTarget(repoA, "other/feature-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotRepo != repoB || gotWT != wtB || gotBranch != "feature-x" {
+		t.Errorf("session key: got (%q, %q, %q), want repoB's worktree", gotRepo, gotWT, gotBranch)
+	}
+
+	// From outside any repo, an explicit session target still resolves.
+	outside := filepath.Join(root, "elsewhere")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gotRepo, _, _, err = resolveTarget(outside, "other/feature-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotRepo != repoB {
+		t.Errorf("outside repo: got repo %q, want %q", gotRepo, repoB)
+	}
+
+	// A target matching nothing keeps the worktree-not-found error.
+	if _, _, _, err = resolveTarget(repoA, "no-such-thing"); err == nil {
+		t.Error("missing target: expected error, got nil")
+	}
 }
 
 func TestResolvedMergesAndRemovesWorktree(t *testing.T) {

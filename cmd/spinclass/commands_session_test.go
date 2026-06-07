@@ -155,6 +155,70 @@ func repoOf(wtPath string) string {
 	return filepath.Dir(filepath.Dir(wtPath))
 }
 
+// TestCompleteWorktreeTargetsNestedRepos: from a repo that contains
+// nested repos (~/eng over ~/eng/repos/*), completion offers the
+// containing repo's sessions by bare dirname and the nested repos'
+// sessions by session key — the same strings `sc list` prints, which
+// FindByTarget accepts. Bare dirnames are only unambiguous within one
+// repo, so nested-repo sessions must NOT appear under their bare name.
+func TestCompleteWorktreeTargetsNestedRepos(t *testing.T) {
+	testgit.RequireGit(t)
+	root := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	eng := filepath.Join(root, "eng")
+	alpha := filepath.Join(eng, "repos", "alpha")
+	for _, r := range []string{eng, alpha} {
+		testgit.MustInit(t, r)
+	}
+
+	engWT := filepath.Join(eng, ".worktrees", "eng-feature")
+	alphaWT := filepath.Join(alpha, ".worktrees", "feature-a")
+	testgit.MustWorktreeAdd(t, eng, engWT, "eng-feature")
+	testgit.MustWorktreeAdd(t, alpha, alphaWT, "feature-a")
+
+	for _, st := range []session.State{
+		{
+			RepoPath:     eng,
+			WorktreePath: engWT,
+			Branch:       "eng-feature",
+			SessionKey:   "eng/eng-feature",
+			SessionState: session.StateInactive,
+			Entrypoint:   []string{"/bin/sh"},
+			StartedAt:    time.Now().UTC(),
+		},
+		{
+			RepoPath:     alpha,
+			WorktreePath: alphaWT,
+			Branch:       "feature-a",
+			SessionKey:   "alpha/feature-a",
+			SessionState: session.StateInactive,
+			Entrypoint:   []string{"/bin/sh"},
+			StartedAt:    time.Now().UTC(),
+		},
+	} {
+		if err := session.Write(st); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Chdir(eng)
+	got := completeWorktreeTargets()
+
+	if _, ok := got["eng-feature"]; !ok {
+		t.Errorf("containing repo's session missing under bare dirname: %v", got)
+	}
+	if _, ok := got["alpha/feature-a"]; !ok {
+		t.Errorf("nested repo's session missing under session key: %v", got)
+	}
+	if _, ok := got["feature-a"]; ok {
+		t.Errorf("nested repo's session must not be offered as a bare dirname: %v", got)
+	}
+	if len(got) != 2 {
+		t.Errorf("got %d entries, want 2: %v", len(got), got)
+	}
+}
+
 // TestCompleteRemoteTargetsCacheOnly: remote completion entries come from
 // the per-remote cache files ONLY. A recording `ssh` stub sits first on
 // PATH; if completion ever networks, the stub's record file appears and

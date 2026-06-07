@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -442,7 +443,7 @@ func TestFindByWorktreePath(t *testing.T) {
 	}
 }
 
-func TestFindByID(t *testing.T) {
+func TestFindByTargetBareID(t *testing.T) {
 	s := setupTestSession(t, "plain-spruce")
 	s.Branch = "different-branch"
 	s.SessionKey = "repo/different-branch"
@@ -451,7 +452,7 @@ func TestFindByID(t *testing.T) {
 	}
 
 	// Match by worktree directory name, not branch.
-	found, err := FindByID("plain-spruce")
+	found, err := FindByTarget("plain-spruce")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -459,8 +460,162 @@ func TestFindByID(t *testing.T) {
 		t.Errorf("WorktreePath = %s, want %s", found.WorktreePath, s.WorktreePath)
 	}
 
-	if _, err = FindByID("nonexistent"); err == nil {
+	if _, err = FindByTarget("nonexistent"); err == nil {
 		t.Error("expected error for non-matching ID")
+	}
+}
+
+// writeSessionFixture creates <base>/<repoRel>/.worktrees/<branch> on disk
+// and writes an inactive session state for it. Unlike setupTestSession it
+// does NOT reset XDG_STATE_HOME, so multiple fixtures share one index —
+// the shape FindByTarget and ListForScope tests need.
+func writeSessionFixture(t *testing.T, base, repoRel, branch string) State {
+	t.Helper()
+	repo := filepath.Join(base, repoRel)
+	wt := filepath.Join(repo, ".worktrees", branch)
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := State{
+		SessionState: StateInactive,
+		RepoPath:     repo,
+		WorktreePath: wt,
+		Branch:       branch,
+		SessionKey:   filepath.Base(repo) + "/" + branch,
+		Entrypoint:   []string{"/bin/sh"},
+		StartedAt:    time.Now().UTC(),
+	}
+	if err := Write(s); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// TestFindByTargetSessionKey: the `<repo-dirname>/<branch>` session keys
+// `sc list` prints resolve to their session, including when the bare
+// worktree dirname would be ambiguous across repos.
+func TestFindByTargetSessionKey(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", filepath.Join(base, "xdg-state"))
+	writeSessionFixture(t, base, "alpha", "feature-x")
+	want := writeSessionFixture(t, base, "beta", "feature-x")
+
+	found, err := FindByTarget("beta/feature-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.WorktreePath != want.WorktreePath {
+		t.Errorf("WorktreePath = %s, want %s", found.WorktreePath, want.WorktreePath)
+	}
+}
+
+// TestFindByTargetAmbiguousBareID: a bare worktree dirname matching
+// sessions in several repos must error with the colliding session keys
+// (the disambiguation hint) instead of arbitrarily picking one. The
+// ambiguity error is NOT ErrTargetNotFound — callers that append a
+// "no such session" hint must let it through untouched.
+func TestFindByTargetAmbiguousBareID(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", filepath.Join(base, "xdg-state"))
+	writeSessionFixture(t, base, "alpha", "feature-x")
+	writeSessionFixture(t, base, "beta", "feature-x")
+
+	_, err := FindByTarget("feature-x")
+	if err == nil {
+		t.Fatal("expected ambiguity error, got nil")
+	}
+	for _, key := range []string{"alpha/feature-x", "beta/feature-x"} {
+		if !strings.Contains(err.Error(), key) {
+			t.Errorf("ambiguity error %q is missing session key %q", err, key)
+		}
+	}
+	if errors.Is(err, ErrTargetNotFound) {
+		t.Error("ambiguity error must not be ErrTargetNotFound")
+	}
+}
+
+// TestFindByTargetNotFound: misses are tagged ErrTargetNotFound so
+// callers (close) can distinguish "nothing matched" from ambiguity.
+func TestFindByTargetNotFound(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", filepath.Join(base, "xdg-state"))
+	writeSessionFixture(t, base, "alpha", "feature-x")
+
+	_, err := FindByTarget("no-such-target")
+	if !errors.Is(err, ErrTargetNotFound) {
+		t.Errorf("err = %v, want ErrTargetNotFound", err)
+	}
+}
+
+// TestListForScopeNestedRepos: ListForScope unions the containing
+// repo's sessions with every session whose repo sits at or beneath dir
+// — so a cwd above several repos (~/eng over ~/eng/repos/*) sees the
+// nested repos' sessions. Matching is path-component-aware (eng-x is
+// not under eng) and abandoned sessions are excluded.
+func TestListForScopeNestedRepos(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", filepath.Join(base, "xdg-state"))
+
+	writeSessionFixture(t, base, "eng", "eng-feature")
+	alpha := writeSessionFixture(t, base, filepath.Join("eng", "repos", "alpha"), "feature-a")
+	writeSessionFixture(t, base, filepath.Join("eng", "repos", "beta"), "feature-b")
+	writeSessionFixture(t, base, "gamma", "feature-c") // outside scope
+	writeSessionFixture(t, base, "eng-x", "feature-d") // sibling prefix, not under eng
+	dead := writeSessionFixture(t, base, filepath.Join("eng", "repos", "zeta"), "feature-e")
+	if err := os.RemoveAll(dead.WorktreePath); err != nil { // → abandoned
+		t.Fatal(err)
+	}
+
+	engRepo := filepath.Join(base, "eng")
+	got, err := ListForScope(engRepo, engRepo, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{
+		"eng/eng-feature": true,
+		"alpha/feature-a": true,
+		"beta/feature-b":  true,
+	}
+	if len(got) != len(want) {
+		t.Errorf("got %d sessions, want %d: %+v", len(got), len(want), got)
+	}
+	for _, s := range got {
+		if !want[s.Key()] {
+			t.Errorf("unexpected session in scope: %s", s.Key())
+		}
+	}
+
+	// Scoped to a leaf repo: only that repo's sessions.
+	got, err = ListForScope(alpha.RepoPath, alpha.RepoPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Key() != "alpha/feature-a" {
+		t.Errorf("leaf scope: got %+v, want only alpha/feature-a", got)
+	}
+
+	// From a subdirectory of a repo: the containing-repo half of the
+	// union still matches even though nothing sits beneath the subdir.
+	got, err = ListForScope(alpha.RepoPath, filepath.Join(alpha.RepoPath, "src"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Key() != "alpha/feature-a" {
+		t.Errorf("subdir scope: got %+v, want only alpha/feature-a", got)
+	}
+}
+
+// TestStateKeyFallsBackToComputed: Key() prefers the stored SessionKey
+// and computes <repo-dirname>/<branch> for legacy states that predate
+// the field.
+func TestStateKeyFallsBackToComputed(t *testing.T) {
+	s := State{RepoPath: "/home/x/repos/alpha", Branch: "feature-x"}
+	if got := s.Key(); got != "alpha/feature-x" {
+		t.Errorf("computed Key() = %q, want %q", got, "alpha/feature-x")
+	}
+	s.SessionKey = "stored/key"
+	if got := s.Key(); got != "stored/key" {
+		t.Errorf("stored Key() = %q, want %q", got, "stored/key")
 	}
 }
 

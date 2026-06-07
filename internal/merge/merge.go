@@ -16,6 +16,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/embeds"
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/git"
+	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
@@ -31,7 +32,8 @@ func Run(execr executor.Executor, format string, target string, gitSync bool, ve
 	var repoPath, wtPath, branch string
 	inSession := false
 
-	if worktree.IsWorktree(cwd) && target == "" {
+	switch {
+	case worktree.IsWorktree(cwd) && target == "":
 		repoPath, err = git.CommonDir(cwd)
 		if err != nil {
 			return fmt.Errorf("not in a worktree directory: %s", cwd)
@@ -42,7 +44,12 @@ func Run(execr executor.Executor, format string, target string, gitSync bool, ve
 			return fmt.Errorf("could not determine current branch: %w", err)
 		}
 		inSession = isInsideSession(cwd, wtPath)
-	} else {
+	case target != "":
+		repoPath, wtPath, branch, err = resolveTarget(cwd, target)
+		if err != nil {
+			return err
+		}
+	default:
 		if worktree.IsWorktree(cwd) {
 			repoPath, err = git.CommonDir(cwd)
 		} else {
@@ -52,11 +59,7 @@ func Run(execr executor.Executor, format string, target string, gitSync bool, ve
 			return fmt.Errorf("not in a git repository: %s", cwd)
 		}
 
-		if target != "" {
-			wtPath, branch, err = ResolveWorktree(repoPath, target)
-		} else {
-			wtPath, branch, err = chooseWorktree(repoPath)
-		}
+		wtPath, branch, err = chooseWorktree(repoPath)
 		if err != nil {
 			return err
 		}
@@ -323,6 +326,37 @@ func ResolveWorktree(repoPath, target string) (wtPath, branch string, err error)
 		}
 	}
 	return "", "", fmt.Errorf("worktree not found: %s", target)
+}
+
+// resolveTarget resolves an explicit merge target. The current repo's
+// git worktrees match first (by dirname — bare worktrees without
+// session state keep working, and a local name is never shadowed by
+// another repo's session); otherwise the target resolves as a session
+// target — a worktree dirname or a `<repo>/<branch>` session key as
+// printed by `sc list` — which makes cross-repo merges work from any
+// cwd, including outside a repo entirely.
+func resolveTarget(cwd, target string) (repoPath, wtPath, branch string, err error) {
+	if worktree.IsWorktree(cwd) {
+		repoPath, err = git.CommonDir(cwd)
+	} else {
+		repoPath, err = worktree.DetectRepo(cwd)
+	}
+	if err == nil {
+		if wtPath, branch, werr := ResolveWorktree(repoPath, target); werr == nil {
+			return repoPath, wtPath, branch, nil
+		}
+	}
+
+	s, serr := session.FindByTarget(target)
+	if errors.Is(serr, session.ErrTargetNotFound) {
+		return "", "", "", fmt.Errorf("worktree not found: %s", target)
+	}
+	if serr != nil {
+		// Ambiguity (or index read failure): the error already carries
+		// the disambiguating session keys.
+		return "", "", "", serr
+	}
+	return s.RepoPath, s.WorktreePath, s.Branch, nil
 }
 
 func chooseWorktree(repoPath string) (wtPath, branch string, err error) {

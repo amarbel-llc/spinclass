@@ -241,7 +241,7 @@ func registerQueryCommands(app *command.App) {
 		},
 		Params: []command.Param{
 			{Name: "description", Type: command.String, Description: "New description (quote multi-word strings)", Required: true},
-			{Name: "id", Type: command.String, Description: "Worktree ID to update (auto-detects from cwd if omitted)", Completer: completeWorktreeTargets},
+			{Name: "id", Type: command.String, Description: "Session target to update (worktree directory name or <repo>/<branch> session key); auto-detects from cwd if omitted", Completer: completeWorktreeTargets},
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
 			var p struct {
@@ -254,7 +254,7 @@ func registerQueryCommands(app *command.App) {
 			var err error
 
 			if p.ID != "" {
-				state, err = session.FindByID(p.ID)
+				state, err = session.FindByTarget(p.ID)
 			} else {
 				cwd, cwdErr := os.Getwd()
 				if cwdErr != nil {

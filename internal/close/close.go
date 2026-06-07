@@ -307,6 +307,25 @@ func resolveTarget(cwd, target string, dbg *slog.Logger) (repoPath, wtPath, bran
 		return repoPath, cwd, branch, nil
 	}
 
+	// An explicit target resolves entirely from session state — no repo
+	// detection needed, so cross-repo targets (session keys from
+	// `sc list`) work from any cwd.
+	if target != "" {
+		s, ferr := session.FindByTarget(target)
+		if errors.Is(ferr, session.ErrTargetNotFound) {
+			return "", "", "", fmt.Errorf(
+				"no spinclass session for target %q; if this is a bare git worktree, remove it with `git worktree remove`",
+				target,
+			)
+		}
+		if ferr != nil {
+			// Ambiguity (or index read failure): the error already
+			// carries the disambiguating session keys.
+			return "", "", "", ferr
+		}
+		return s.RepoPath, s.WorktreePath, s.Branch, nil
+	}
+
 	if worktree.IsWorktree(cwd) {
 		repoPath, err = git.CommonDir(cwd)
 	} else {
@@ -314,17 +333,6 @@ func resolveTarget(cwd, target string, dbg *slog.Logger) (repoPath, wtPath, bran
 	}
 	if err != nil {
 		return "", "", "", fmt.Errorf("not in a git repository: %s", cwd)
-	}
-
-	if target != "" {
-		s, ferr := session.FindByID(target)
-		if ferr != nil {
-			return "", "", "", fmt.Errorf(
-				"no spinclass session for ID %q; if this is a bare git worktree, remove it with `git worktree remove`",
-				target,
-			)
-		}
-		return s.RepoPath, s.WorktreePath, s.Branch, nil
 	}
 
 	picked, err := sessionpick.Choose(repoPath, "close", dbg)

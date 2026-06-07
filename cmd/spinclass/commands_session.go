@@ -47,10 +47,10 @@ func registerSessionCommands(app *command.App) {
 		Name: "resume",
 		Description: command.Description{
 			Short: "Resume an existing worktree session",
-			Long:  "Resume an existing worktree session. With no argument, auto-detects from the current working directory; if cwd isn't inside a tracked session, prompts interactively when stdin is a TTY or errors with the list of available session IDs otherwise. Auto-detected and single-candidate sessions show a confirmation dialog before attaching; -y/--yes skips it, except when the session is active (live PID, probably attached elsewhere), which always warns with default Cancel. With one argument, resumes the session whose worktree directory name matches without any dialog — naming the target is the confirmation. Tab completion offers session IDs scoped to the current repo when run inside one, or all non-abandoned sessions otherwise (labels include the repo basename to disambiguate). A host:-prefixed target naming a configured [[remotes]] entry routes over that remote's attach template instead of resolving locally, and completion and the interactive picker additionally offer cached remote sessions under the host: prefix (selecting a remote row routes the same way, no dialog); see spinclass-sweatfile(5) [[remotes]].",
+			Long:  "Resume an existing worktree session. With no argument, auto-detects from the current working directory; if cwd isn't inside a tracked session, prompts interactively when stdin is a TTY or errors with the list of available session IDs otherwise. Auto-detected and single-candidate sessions show a confirmation dialog before attaching; -y/--yes skips it, except when the session is active (live PID, probably attached elsewhere), which always warns with default Cancel. With one argument, resumes the session matching the target — a worktree directory name or a <repo>/<branch> session key as printed by `sc list` — without any dialog; naming the target is the confirmation. A bare name matching sessions in several repos errors with the colliding session keys. Tab completion offers the current repo's sessions by bare name plus any session whose repo sits beneath the cwd by session key (a cwd above nested repos sees them all); outside any repo it offers all non-abandoned sessions (labels include the repo basename to disambiguate). A host:-prefixed target naming a configured [[remotes]] entry routes over that remote's attach template instead of resolving locally, and completion and the interactive picker additionally offer cached remote sessions under the host: prefix (selecting a remote row routes the same way, no dialog); see spinclass-sweatfile(5) [[remotes]].",
 		},
 		Params: []command.Param{
-			{Name: "id", Type: command.String, Description: "Session ID (worktree directory name); auto-detects from cwd if omitted", Completer: completeWorktreeTargets},
+			{Name: "id", Type: command.String, Description: "Session target (worktree directory name or <repo>/<branch> session key from `sc list`); auto-detects from cwd if omitted", Completer: completeWorktreeTargets},
 			{Name: "no-attach", Type: command.Bool, Description: "Find session but skip attaching"},
 			{Name: "yes", Short: 'y', Type: command.Bool, Description: "Skip the resume confirmation dialog"},
 		},
@@ -64,7 +64,7 @@ func registerSessionCommands(app *command.App) {
 			Long:  "Merge a worktree branch into the main repo with --ff-only and remove the worktree. When run from inside a worktree, merges that worktree. When run from the main repo, specify a target or choose interactively.",
 		},
 		Params: []command.Param{
-			{Name: "target", Type: command.String, Description: "Target worktree to merge (interactive selection if omitted)", Completer: completeWorktreeTargets},
+			{Name: "target", Type: command.String, Description: "Target worktree to merge: a worktree directory name or <repo>/<branch> session key from `sc list` (interactive selection if omitted)", Completer: completeWorktreeTargets},
 			{Name: "git-sync", Type: command.Bool, Description: "Pull and push after merge"},
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
@@ -111,7 +111,7 @@ func registerSessionCommands(app *command.App) {
 			Long:  "Remove a worktree and its branch without merging into main. With no argument, closes the current worktree if cwd is inside one, otherwise prompts interactively when stdin is a TTY (or errors with the list of session IDs). With one argument, closes the named session; orphaned git worktrees without a spinclass state file are rejected with a hint to run `git worktree remove`. Prompts for confirmation if the branch has unintegrated commits or uncommitted changes; use --force to skip.",
 		},
 		Params: []command.Param{
-			{Name: "target", Type: command.String, Description: "Target session ID (worktree directory name); auto-detects from cwd if omitted", Completer: completeWorktreeTargets},
+			{Name: "target", Type: command.String, Description: "Target session (worktree directory name or <repo>/<branch> session key from `sc list`); auto-detects from cwd if omitted", Completer: completeWorktreeTargets},
 			{Name: "force", Short: 'f', Type: command.Bool, Description: "Skip confirmation for unpushed branches"},
 			{Name: "nix-gc", Type: command.String, Description: "Override [hooks].disable-nix-gc for this invocation: 'true' forces worktree-scoped Nix gc, 'false' skips it"},
 		},
@@ -158,13 +158,18 @@ func parseNixGCFlag(raw string) (*bool, error) {
 	}
 }
 
-// completeWorktreeTargets returns session IDs (worktree directory
-// names) keyed to descriptive labels for tab completion. Inside a repo
-// the list is scoped to that repo; outside any repo it includes every
-// non-abandoned session. Labels are the picker rows' Detail strings
-// (sessionpick.ItemForState), so completion and the interactive picker
-// read identically. Output is sorted via session.SortStates so the
-// active session shows up first.
+// completeWorktreeTargets returns session targets keyed to descriptive
+// labels for tab completion. Inside a repo the scope is that repo's
+// sessions plus any session whose repo sits beneath the cwd
+// (session.ListForScope — a cwd above nested repos, e.g. ~/eng over
+// ~/eng/repos/*, sees the nested repos' sessions too); outside any
+// repo it includes every non-abandoned session. Containing-repo
+// sessions are keyed by bare worktree dirname; sessions from other
+// repos by their `<repo>/<branch>` session key — the same strings
+// `sc list` prints, which FindByTarget accepts. Labels are the picker
+// rows' Detail strings (sessionpick.ItemForState), so completion and
+// the interactive picker read identically. Output is sorted via
+// session.SortStates so the active session shows up first.
 func completeWorktreeTargets() map[string]string {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -172,9 +177,9 @@ func completeWorktreeTargets() map[string]string {
 	}
 
 	var sessions []session.State
-	repoPath, err := worktree.DetectRepo(cwd)
-	if err == nil {
-		sessions, _ = session.ListForRepo(repoPath, nil)
+	repoPath, repoErr := worktree.DetectRepo(cwd)
+	if repoErr == nil {
+		sessions, _ = session.ListForScope(repoPath, cwd, nil)
 	} else {
 		all, err := session.ListAll(nil)
 		if err != nil {
@@ -191,7 +196,13 @@ func completeWorktreeTargets() map[string]string {
 	now := time.Now()
 	result := make(map[string]string, len(sessions))
 	for _, s := range sessions {
-		result[filepath.Base(s.WorktreePath)] = sessionpick.ItemForState(s, now).Detail
+		key := filepath.Base(s.WorktreePath)
+		if repoErr == nil && s.RepoPath != repoPath {
+			// Reached via cwd-prefix matching: bare dirnames are only
+			// unambiguous within one repo, so offer the session key.
+			key = s.Key()
+		}
+		result[key] = sessionpick.ItemForState(s, now).Detail
 	}
 	for key, label := range completeRemoteTargets(remotesForCwd()) {
 		result[key] = label
@@ -396,7 +407,7 @@ func runResume(_ context.Context, args json.RawMessage) error {
 	targetAffirmed := true
 
 	if p.ID != "" {
-		state, err = session.FindByID(p.ID)
+		state, err = session.FindByTarget(p.ID)
 	} else {
 		cwd, cwdErr := os.Getwd()
 		if cwdErr != nil {
