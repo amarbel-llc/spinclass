@@ -13,6 +13,7 @@ import (
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 )
 
@@ -64,7 +65,7 @@ func loadMergedSweatfile() (sweatfile.Sweatfile, string, bool) {
 	var repoPath string
 	if rp, err := worktree.DetectRepo(cwd); err == nil {
 		repoPath = rp
-		hierarchy, err := sweatfile.LoadHierarchy(home, repoPath)
+		hierarchy, err := sweatfileio.LoadHierarchy(home, repoPath)
 		if err != nil {
 			return sweatfile.Sweatfile{}, "", false
 		}
@@ -73,7 +74,7 @@ func loadMergedSweatfile() (sweatfile.Sweatfile, string, bool) {
 		// Outside a repo: load only the global sweatfile (LoadHierarchy with
 		// home as the repoDir walks zero intermediate levels, so it just
 		// reads ~/.config/spinclass/sweatfile).
-		hierarchy, err := sweatfile.LoadHierarchy(home, home)
+		hierarchy, err := sweatfileio.LoadHierarchy(home, home)
 		if err != nil {
 			return sweatfile.Sweatfile{}, "", false
 		}

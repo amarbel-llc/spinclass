@@ -31,7 +31,7 @@ type remoteHandle struct {
 type SweatfileDocument struct {
 	data           Sweatfile
 	cstDoc         *document.Document
-	consumed       map[string]bool
+	model          *cst.Value
 	startCommands  []startCommandHandle
 	mCPs           []mCPServerDefHandle
 	preMergeSkills []preMergeSkillHandle
@@ -43,1341 +43,565 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 	if err != nil {
 		return nil, err
 	}
+	model, err := cst.Decompose(doc.Root())
+	if err != nil {
+		return nil, err
+	}
 
 	d := &SweatfileDocument{
-		consumed: make(map[string]bool),
-		cstDoc:   doc,
+		cstDoc: doc,
+		model:  model,
 	}
 
-	{
-		_seen := map[string]bool{}
-		for _, _kv := range d.cstDoc.Root().Children {
-			if _kv.Kind != cst.NodeKeyValue {
-				continue
-			}
-			switch cst.KeyValueName(_kv) {
-			case "allowed-mcps":
-				if _seen["allowed-mcps"] {
-					return nil, fmt.Errorf("duplicate key %q", "allowed-mcps")
+	if _vClaude, _ok := model.Get("claude"); _ok && _vClaude.Kind == cst.VTable {
+		_vClaude.MarkSeen()
+		claudeVal0 := &Claude{}
+		if _vClaudeAllow, _ok := _vClaude.Get("allow"); _ok && _vClaudeAllow.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vClaudeAllow.Leaf); _xok {
+				claudeVal0.Allow = _x
+				if claudeVal0.Allow == nil {
+					claudeVal0.Allow = []string{}
 				}
-				_seen["allowed-mcps"] = true
-				if v, ok := cst.ExtractStringSlice(_kv); ok {
-					d.data.AllowedMCPs = v
-					if d.data.AllowedMCPs == nil {
-						d.data.AllowedMCPs = []string{}
-					}
-					d.consumed["allowed-mcps"] = true
-				}
+				_vClaudeAllow.MarkConsumed()
 			}
 		}
-	}
-	{
-		var _ftClaude *cst.Node
-		for _, _ch := range d.cstDoc.Root().Children {
-			if _ch.Kind == cst.NodeTable && cst.TableHeaderKey(_ch) == "claude" {
-				if _ftClaude != nil {
-					return nil, fmt.Errorf("duplicate table %q", "claude")
+		d.data.Claude = claudeVal0
+	} else {
+		claudeVal0 := &Claude{}
+		_foundClaude := false
+		if _vAllow, _ok := model.Get("allow"); _ok && _vAllow.Kind == cst.VLeaf {
+			_foundClaude = true
+			if _x, _xok := cst.ExtractStringSlice(_vAllow.Leaf); _xok {
+				claudeVal0.Allow = _x
+				if claudeVal0.Allow == nil {
+					claudeVal0.Allow = []string{}
 				}
-				_ftClaude = _ch
+				_vAllow.MarkConsumed()
 			}
 		}
-		if _ftClaude != nil {
-			d.consumed["claude"] = true
-			claudeVal0 := &Claude{}
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range _ftClaude.Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "allow":
-						if _seen["allow"] {
-							return nil, fmt.Errorf("duplicate key %q", "allow")
-						}
-						_seen["allow"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							claudeVal0.Allow = v
-							if claudeVal0.Allow == nil {
-								claudeVal0.Allow = []string{}
-							}
-							d.consumed["claude.allow"] = true
-						}
-					}
-				}
-			}
+		if _foundClaude {
 			d.data.Claude = claudeVal0
-		} else {
-			_itClaude := cst.FindChildInlineTable(d.cstDoc.Root(), "claude")
-			if _itClaude != nil {
-				d.consumed["claude"] = true
-				claudeVal0 := &Claude{}
-				{
-					_seen := map[string]bool{}
-					for _, _kv := range _itClaude.Children {
-						if _kv.Kind != cst.NodeKeyValue {
-							continue
-						}
-						switch cst.KeyValueName(_kv) {
-						case "allow":
-							if _seen["allow"] {
-								return nil, fmt.Errorf("duplicate key %q", "allow")
-							}
-							_seen["allow"] = true
-							if v, ok := cst.ExtractStringSlice(_kv); ok {
-								claudeVal0.Allow = v
-								if claudeVal0.Allow == nil {
-									claudeVal0.Allow = []string{}
-								}
-								d.consumed["claude.allow"] = true
-							}
-						}
-					}
-				}
-				d.data.Claude = claudeVal0
-			} else {
-				claudeVal0 := &Claude{}
-				_found := false
-				{
-					_seen := map[string]bool{}
-					for _, _kv := range d.cstDoc.Root().Children {
-						if _kv.Kind != cst.NodeKeyValue {
-							continue
-						}
-						switch cst.KeyValueName(_kv) {
-						case "allow":
-							if _seen["allow"] {
-								return nil, fmt.Errorf("duplicate key %q", "allow")
-							}
-							_seen["allow"] = true
-							if v, ok := cst.ExtractStringSlice(_kv); ok {
-								claudeVal0.Allow = v
-								if claudeVal0.Allow == nil {
-									claudeVal0.Allow = []string{}
-								}
-								d.consumed["allow"] = true
-							}
-						}
-					}
-				}
-				if _found {
-					d.data.Claude = claudeVal0
-				}
-			}
 		}
 	}
-	{
-		var _ftGit *cst.Node
-		for _, _ch := range d.cstDoc.Root().Children {
-			if _ch.Kind == cst.NodeTable && cst.TableHeaderKey(_ch) == "git" {
-				if _ftGit != nil {
-					return nil, fmt.Errorf("duplicate table %q", "git")
+	if _vGit, _ok := model.Get("git"); _ok && _vGit.Kind == cst.VTable {
+		_vGit.MarkSeen()
+		gitVal1 := &Git{}
+		if _vGitExcludes, _ok := _vGit.Get("excludes"); _ok && _vGitExcludes.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vGitExcludes.Leaf); _xok {
+				gitVal1.Excludes = _x
+				if gitVal1.Excludes == nil {
+					gitVal1.Excludes = []string{}
 				}
-				_ftGit = _ch
+				_vGitExcludes.MarkConsumed()
 			}
 		}
-		if _ftGit != nil {
-			d.consumed["git"] = true
-			gitVal1 := &Git{}
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range _ftGit.Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "excludes":
-						if _seen["excludes"] {
-							return nil, fmt.Errorf("duplicate key %q", "excludes")
-						}
-						_seen["excludes"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							gitVal1.Excludes = v
-							if gitVal1.Excludes == nil {
-								gitVal1.Excludes = []string{}
-							}
-							d.consumed["git.excludes"] = true
-						}
-					}
+		d.data.Git = gitVal1
+	} else {
+		gitVal1 := &Git{}
+		_foundGit := false
+		if _vExcludes, _ok := model.Get("excludes"); _ok && _vExcludes.Kind == cst.VLeaf {
+			_foundGit = true
+			if _x, _xok := cst.ExtractStringSlice(_vExcludes.Leaf); _xok {
+				gitVal1.Excludes = _x
+				if gitVal1.Excludes == nil {
+					gitVal1.Excludes = []string{}
 				}
+				_vExcludes.MarkConsumed()
 			}
+		}
+		if _foundGit {
 			d.data.Git = gitVal1
-		} else {
-			_itGit := cst.FindChildInlineTable(d.cstDoc.Root(), "git")
-			if _itGit != nil {
-				d.consumed["git"] = true
-				gitVal1 := &Git{}
-				{
-					_seen := map[string]bool{}
-					for _, _kv := range _itGit.Children {
-						if _kv.Kind != cst.NodeKeyValue {
-							continue
-						}
-						switch cst.KeyValueName(_kv) {
-						case "excludes":
-							if _seen["excludes"] {
-								return nil, fmt.Errorf("duplicate key %q", "excludes")
-							}
-							_seen["excludes"] = true
-							if v, ok := cst.ExtractStringSlice(_kv); ok {
-								gitVal1.Excludes = v
-								if gitVal1.Excludes == nil {
-									gitVal1.Excludes = []string{}
-								}
-								d.consumed["git.excludes"] = true
-							}
-						}
-					}
-				}
-				d.data.Git = gitVal1
-			} else {
-				gitVal1 := &Git{}
-				_found := false
-				{
-					_seen := map[string]bool{}
-					for _, _kv := range d.cstDoc.Root().Children {
-						if _kv.Kind != cst.NodeKeyValue {
-							continue
-						}
-						switch cst.KeyValueName(_kv) {
-						case "excludes":
-							if _seen["excludes"] {
-								return nil, fmt.Errorf("duplicate key %q", "excludes")
-							}
-							_seen["excludes"] = true
-							if v, ok := cst.ExtractStringSlice(_kv); ok {
-								gitVal1.Excludes = v
-								if gitVal1.Excludes == nil {
-									gitVal1.Excludes = []string{}
-								}
-								d.consumed["excludes"] = true
-							}
-						}
-					}
-				}
-				if _found {
-					d.data.Git = gitVal1
-				}
-			}
 		}
 	}
-	{
-		var _ftDirenv *cst.Node
-		for _, _ch := range d.cstDoc.Root().Children {
-			if _ch.Kind == cst.NodeTable && cst.TableHeaderKey(_ch) == "direnv" {
-				if _ftDirenv != nil {
-					return nil, fmt.Errorf("duplicate table %q", "direnv")
+	if _vDirenv, _ok := model.Get("direnv"); _ok && _vDirenv.Kind == cst.VTable {
+		_vDirenv.MarkSeen()
+		direnvVal2 := &Direnv{}
+		if _vDirenvEnvrc, _ok := _vDirenv.Get("envrc"); _ok && _vDirenvEnvrc.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vDirenvEnvrc.Leaf); _xok {
+				direnvVal2.Envrc = _x
+				if direnvVal2.Envrc == nil {
+					direnvVal2.Envrc = []string{}
 				}
-				_ftDirenv = _ch
+				_vDirenvEnvrc.MarkConsumed()
 			}
 		}
-		if _ftDirenv != nil {
-			d.consumed["direnv"] = true
-			direnvVal2 := &Direnv{}
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range _ftDirenv.Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "envrc":
-						if _seen["envrc"] {
-							return nil, fmt.Errorf("duplicate key %q", "envrc")
-						}
-						_seen["envrc"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							direnvVal2.Envrc = v
-							if direnvVal2.Envrc == nil {
-								direnvVal2.Envrc = []string{}
-							}
-							d.consumed["direnv.envrc"] = true
-						}
+		if _vDirenvDotenv, _ok := _vDirenv.Get("dotenv"); _ok && _vDirenvDotenv.Kind == cst.VTable {
+			_vDirenvDotenv.MarkSeen()
+			direnvVal2.Dotenv = make(map[string]string)
+			for _iDirenvDotenv := range _vDirenvDotenv.Fields {
+				_fDirenvDotenv := &_vDirenvDotenv.Fields[_iDirenvDotenv]
+				if _fDirenvDotenv.Val.Kind == cst.VLeaf {
+					if _s, _sok := cst.ExtractString(_fDirenvDotenv.Val.Leaf); _sok {
+						direnvVal2.Dotenv[_fDirenvDotenv.Key] = _s
+						_fDirenvDotenv.Val.MarkConsumed()
 					}
 				}
 			}
-			for _, _ch := range d.cstDoc.Root().Children {
-				if _ch.Kind == cst.NodeTable && cst.TableHeaderKey(_ch) == "direnv.dotenv" {
-					direnvVal2.Dotenv = cst.ExtractStringMap(_ch)
-					if direnvVal2.Dotenv == nil {
-						direnvVal2.Dotenv = map[string]string{}
-					}
-					d.consumed["direnv.dotenv"] = true
-					for _ik := range direnvVal2.Dotenv {
-						d.consumed["direnv.dotenv"+"."+_ik] = true
-					}
-					break
+		}
+		d.data.Direnv = direnvVal2
+	} else {
+		direnvVal2 := &Direnv{}
+		_foundDirenv := false
+		if _vEnvrc, _ok := model.Get("envrc"); _ok && _vEnvrc.Kind == cst.VLeaf {
+			_foundDirenv = true
+			if _x, _xok := cst.ExtractStringSlice(_vEnvrc.Leaf); _xok {
+				direnvVal2.Envrc = _x
+				if direnvVal2.Envrc == nil {
+					direnvVal2.Envrc = []string{}
 				}
+				_vEnvrc.MarkConsumed()
 			}
-			if direnvVal2.Dotenv == nil {
-				_it := cst.FindChildInlineTable(_ftDirenv, "dotenv")
-				if _it != nil {
-					direnvVal2.Dotenv = cst.ExtractStringMap(_it)
-					if direnvVal2.Dotenv == nil {
-						direnvVal2.Dotenv = map[string]string{}
-					}
-					d.consumed["direnv.dotenv"] = true
-					for _ik := range direnvVal2.Dotenv {
-						d.consumed["direnv.dotenv"+"."+_ik] = true
-					}
-				}
-			}
+		}
+		if _foundDirenv {
 			d.data.Direnv = direnvVal2
-		} else {
-			_itDirenv := cst.FindChildInlineTable(d.cstDoc.Root(), "direnv")
-			if _itDirenv != nil {
-				d.consumed["direnv"] = true
-				direnvVal2 := &Direnv{}
-				{
-					_seen := map[string]bool{}
-					for _, _kv := range _itDirenv.Children {
-						if _kv.Kind != cst.NodeKeyValue {
-							continue
-						}
-						switch cst.KeyValueName(_kv) {
-						case "envrc":
-							if _seen["envrc"] {
-								return nil, fmt.Errorf("duplicate key %q", "envrc")
-							}
-							_seen["envrc"] = true
-							if v, ok := cst.ExtractStringSlice(_kv); ok {
-								direnvVal2.Envrc = v
-								if direnvVal2.Envrc == nil {
-									direnvVal2.Envrc = []string{}
-								}
-								d.consumed["direnv.envrc"] = true
-							}
-						}
-					}
-				}
-				{
-					_ctDirenvDotenv := cst.FindChildTable(d.cstDoc.Root(), _itDirenv, "dotenv")
-					if _ctDirenvDotenv != nil {
-						direnvVal2.Dotenv = cst.ExtractStringMap(_ctDirenvDotenv)
-						if direnvVal2.Dotenv == nil {
-							direnvVal2.Dotenv = map[string]string{}
-						}
-						d.consumed["direnv.dotenv"] = true
-						for _ik := range direnvVal2.Dotenv {
-							d.consumed["direnv.dotenv"+"."+_ik] = true
-						}
-					} else {
-						_it := cst.FindChildInlineTable(_itDirenv, "dotenv")
-						if _it != nil {
-							direnvVal2.Dotenv = cst.ExtractStringMap(_it)
-							if direnvVal2.Dotenv == nil {
-								direnvVal2.Dotenv = map[string]string{}
-							}
-							d.consumed["direnv.dotenv"] = true
-							for _ik := range direnvVal2.Dotenv {
-								d.consumed["direnv.dotenv"+"."+_ik] = true
-							}
-						}
-					}
-				}
-				d.data.Direnv = direnvVal2
-			} else {
-				direnvVal2 := &Direnv{}
-				_found := false
-				{
-					_seen := map[string]bool{}
-					for _, _kv := range d.cstDoc.Root().Children {
-						if _kv.Kind != cst.NodeKeyValue {
-							continue
-						}
-						switch cst.KeyValueName(_kv) {
-						case "envrc":
-							if _seen["envrc"] {
-								return nil, fmt.Errorf("duplicate key %q", "envrc")
-							}
-							_seen["envrc"] = true
-							if v, ok := cst.ExtractStringSlice(_kv); ok {
-								direnvVal2.Envrc = v
-								if direnvVal2.Envrc == nil {
-									direnvVal2.Envrc = []string{}
-								}
-								d.consumed["envrc"] = true
-							}
-						}
-					}
-				}
-				_impDirenv := cst.FindImplicitChildTable(d.cstDoc.Root(), d.cstDoc.Root(), "direnv")
-				if _impDirenv != nil {
-					_found = true
-					d.consumed["direnv"] = true
-					for _, _ch := range d.cstDoc.Root().Children {
-						if _ch.Kind == cst.NodeTable && cst.TableHeaderKey(_ch) == "direnv.dotenv" {
-							direnvVal2.Dotenv = cst.ExtractStringMap(_ch)
-							if direnvVal2.Dotenv == nil {
-								direnvVal2.Dotenv = map[string]string{}
-							}
-							d.consumed["direnv.dotenv"] = true
-							for _ik := range direnvVal2.Dotenv {
-								d.consumed["direnv.dotenv"+"."+_ik] = true
-							}
-							break
-						}
-					}
-					if direnvVal2.Dotenv == nil {
-						_it := cst.FindChildInlineTable(_impDirenv, "dotenv")
-						if _it != nil {
-							direnvVal2.Dotenv = cst.ExtractStringMap(_it)
-							if direnvVal2.Dotenv == nil {
-								direnvVal2.Dotenv = map[string]string{}
-							}
-							d.consumed["direnv.dotenv"] = true
-							for _ik := range direnvVal2.Dotenv {
-								d.consumed["direnv.dotenv"+"."+_ik] = true
-							}
-						}
-					}
-				}
-				if _found {
-					d.data.Direnv = direnvVal2
-				}
-			}
 		}
 	}
-	{
-		var _ftHooks *cst.Node
-		for _, _ch := range d.cstDoc.Root().Children {
-			if _ch.Kind == cst.NodeTable && cst.TableHeaderKey(_ch) == "hooks" {
-				if _ftHooks != nil {
-					return nil, fmt.Errorf("duplicate table %q", "hooks")
-				}
-				_ftHooks = _ch
+	if _vHooks, _ok := model.Get("hooks"); _ok && _vHooks.Kind == cst.VTable {
+		_vHooks.MarkSeen()
+		hooksVal3 := &Hooks{}
+		if _vHooksCreate, _ok := _vHooks.Get("create"); _ok && _vHooksCreate.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksCreate.Leaf); _xok {
+				hooksVal3.Create = &_x
+				_vHooksCreate.MarkConsumed()
 			}
 		}
-		if _ftHooks != nil {
-			d.consumed["hooks"] = true
-			hooksVal3 := &Hooks{}
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range _ftHooks.Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "create":
-						if _seen["create"] {
-							return nil, fmt.Errorf("duplicate key %q", "create")
-						}
-						_seen["create"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.Create = &v
-							d.consumed["hooks.create"] = true
-						}
-					case "stop":
-						if _seen["stop"] {
-							return nil, fmt.Errorf("duplicate key %q", "stop")
-						}
-						_seen["stop"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.Stop = &v
-							d.consumed["hooks.stop"] = true
-						}
-					case "pre-merge":
-						if _seen["pre-merge"] {
-							return nil, fmt.Errorf("duplicate key %q", "pre-merge")
-						}
-						_seen["pre-merge"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.PreMerge = &v
-							d.consumed["hooks.pre-merge"] = true
-						}
-					case "on-attach":
-						if _seen["on-attach"] {
-							return nil, fmt.Errorf("duplicate key %q", "on-attach")
-						}
-						_seen["on-attach"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.OnAttach = &v
-							d.consumed["hooks.on-attach"] = true
-						}
-					case "on-detach":
-						if _seen["on-detach"] {
-							return nil, fmt.Errorf("duplicate key %q", "on-detach")
-						}
-						_seen["on-detach"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.OnDetach = &v
-							d.consumed["hooks.on-detach"] = true
-						}
-					case "disallow-main-worktree":
-						if _seen["disallow-main-worktree"] {
-							return nil, fmt.Errorf("duplicate key %q", "disallow-main-worktree")
-						}
-						_seen["disallow-main-worktree"] = true
-						if v, ok := cst.ExtractBool(_kv); ok {
-							hooksVal3.DisallowMainWorktree = &v
-							d.consumed["hooks.disallow-main-worktree"] = true
-						}
-					case "tool-use-log":
-						if _seen["tool-use-log"] {
-							return nil, fmt.Errorf("duplicate key %q", "tool-use-log")
-						}
-						_seen["tool-use-log"] = true
-						if v, ok := cst.ExtractBool(_kv); ok {
-							hooksVal3.ToolUseLog = &v
-							d.consumed["hooks.tool-use-log"] = true
-						}
-					case "disable-merge":
-						if _seen["disable-merge"] {
-							return nil, fmt.Errorf("duplicate key %q", "disable-merge")
-						}
-						_seen["disable-merge"] = true
-						if v, ok := cst.ExtractBool(_kv); ok {
-							hooksVal3.DisableMerge = &v
-							d.consumed["hooks.disable-merge"] = true
-						}
-					case "disable-nix-gc":
-						if _seen["disable-nix-gc"] {
-							return nil, fmt.Errorf("duplicate key %q", "disable-nix-gc")
-						}
-						_seen["disable-nix-gc"] = true
-						if v, ok := cst.ExtractBool(_kv); ok {
-							hooksVal3.DisableNixGC = &v
-							d.consumed["hooks.disable-nix-gc"] = true
-						}
-					case "disable-merge-build-worktree":
-						if _seen["disable-merge-build-worktree"] {
-							return nil, fmt.Errorf("duplicate key %q", "disable-merge-build-worktree")
-						}
-						_seen["disable-merge-build-worktree"] = true
-						if v, ok := cst.ExtractBool(_kv); ok {
-							hooksVal3.DisableMergeBuildWorktree = &v
-							d.consumed["hooks.disable-merge-build-worktree"] = true
-						}
-					case "pre-merge-output-format":
-						if _seen["pre-merge-output-format"] {
-							return nil, fmt.Errorf("duplicate key %q", "pre-merge-output-format")
-						}
-						_seen["pre-merge-output-format"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.PreMergeOutputFormat = &v
-							d.consumed["hooks.pre-merge-output-format"] = true
-						}
-					case "inactivity-timeout":
-						if _seen["inactivity-timeout"] {
-							return nil, fmt.Errorf("duplicate key %q", "inactivity-timeout")
-						}
-						_seen["inactivity-timeout"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.InactivityTimeout = &v
-							d.consumed["hooks.inactivity-timeout"] = true
-						}
-					}
-				}
+		if _vHooksStop, _ok := _vHooks.Get("stop"); _ok && _vHooksStop.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksStop.Leaf); _xok {
+				hooksVal3.Stop = &_x
+				_vHooksStop.MarkConsumed()
 			}
+		}
+		if _vHooksPreMerge, _ok := _vHooks.Get("pre-merge"); _ok && _vHooksPreMerge.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksPreMerge.Leaf); _xok {
+				hooksVal3.PreMerge = &_x
+				_vHooksPreMerge.MarkConsumed()
+			}
+		}
+		if _vHooksOnAttach, _ok := _vHooks.Get("on-attach"); _ok && _vHooksOnAttach.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksOnAttach.Leaf); _xok {
+				hooksVal3.OnAttach = &_x
+				_vHooksOnAttach.MarkConsumed()
+			}
+		}
+		if _vHooksOnDetach, _ok := _vHooks.Get("on-detach"); _ok && _vHooksOnDetach.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksOnDetach.Leaf); _xok {
+				hooksVal3.OnDetach = &_x
+				_vHooksOnDetach.MarkConsumed()
+			}
+		}
+		if _vHooksDisallowMainWorktree, _ok := _vHooks.Get("disallow-main-worktree"); _ok && _vHooksDisallowMainWorktree.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksDisallowMainWorktree.Leaf); _xok {
+				hooksVal3.DisallowMainWorktree = &_x
+				_vHooksDisallowMainWorktree.MarkConsumed()
+			}
+		}
+		if _vHooksToolUseLog, _ok := _vHooks.Get("tool-use-log"); _ok && _vHooksToolUseLog.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksToolUseLog.Leaf); _xok {
+				hooksVal3.ToolUseLog = &_x
+				_vHooksToolUseLog.MarkConsumed()
+			}
+		}
+		if _vHooksDisableMerge, _ok := _vHooks.Get("disable-merge"); _ok && _vHooksDisableMerge.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksDisableMerge.Leaf); _xok {
+				hooksVal3.DisableMerge = &_x
+				_vHooksDisableMerge.MarkConsumed()
+			}
+		}
+		if _vHooksDisableNixGc, _ok := _vHooks.Get("disable-nix-gc"); _ok && _vHooksDisableNixGc.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksDisableNixGc.Leaf); _xok {
+				hooksVal3.DisableNixGC = &_x
+				_vHooksDisableNixGc.MarkConsumed()
+			}
+		}
+		if _vHooksDisableMergeBuildWorktree, _ok := _vHooks.Get("disable-merge-build-worktree"); _ok && _vHooksDisableMergeBuildWorktree.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksDisableMergeBuildWorktree.Leaf); _xok {
+				hooksVal3.DisableMergeBuildWorktree = &_x
+				_vHooksDisableMergeBuildWorktree.MarkConsumed()
+			}
+		}
+		if _vHooksPreMergeOutputFormat, _ok := _vHooks.Get("pre-merge-output-format"); _ok && _vHooksPreMergeOutputFormat.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksPreMergeOutputFormat.Leaf); _xok {
+				hooksVal3.PreMergeOutputFormat = &_x
+				_vHooksPreMergeOutputFormat.MarkConsumed()
+			}
+		}
+		if _vHooksInactivityTimeout, _ok := _vHooks.Get("inactivity-timeout"); _ok && _vHooksInactivityTimeout.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksInactivityTimeout.Leaf); _xok {
+				hooksVal3.InactivityTimeout = &_x
+				_vHooksInactivityTimeout.MarkConsumed()
+			}
+		}
+		d.data.Hooks = hooksVal3
+	} else {
+		hooksVal3 := &Hooks{}
+		_foundHooks := false
+		if _vCreate, _ok := model.Get("create"); _ok && _vCreate.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vCreate.Leaf); _xok {
+				hooksVal3.Create = &_x
+				_vCreate.MarkConsumed()
+			}
+		}
+		if _vStop, _ok := model.Get("stop"); _ok && _vStop.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vStop.Leaf); _xok {
+				hooksVal3.Stop = &_x
+				_vStop.MarkConsumed()
+			}
+		}
+		if _vPreMerge, _ok := model.Get("pre-merge"); _ok && _vPreMerge.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vPreMerge.Leaf); _xok {
+				hooksVal3.PreMerge = &_x
+				_vPreMerge.MarkConsumed()
+			}
+		}
+		if _vOnAttach, _ok := model.Get("on-attach"); _ok && _vOnAttach.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vOnAttach.Leaf); _xok {
+				hooksVal3.OnAttach = &_x
+				_vOnAttach.MarkConsumed()
+			}
+		}
+		if _vOnDetach, _ok := model.Get("on-detach"); _ok && _vOnDetach.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vOnDetach.Leaf); _xok {
+				hooksVal3.OnDetach = &_x
+				_vOnDetach.MarkConsumed()
+			}
+		}
+		if _vDisallowMainWorktree, _ok := model.Get("disallow-main-worktree"); _ok && _vDisallowMainWorktree.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vDisallowMainWorktree.Leaf); _xok {
+				hooksVal3.DisallowMainWorktree = &_x
+				_vDisallowMainWorktree.MarkConsumed()
+			}
+		}
+		if _vToolUseLog, _ok := model.Get("tool-use-log"); _ok && _vToolUseLog.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vToolUseLog.Leaf); _xok {
+				hooksVal3.ToolUseLog = &_x
+				_vToolUseLog.MarkConsumed()
+			}
+		}
+		if _vDisableMerge, _ok := model.Get("disable-merge"); _ok && _vDisableMerge.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vDisableMerge.Leaf); _xok {
+				hooksVal3.DisableMerge = &_x
+				_vDisableMerge.MarkConsumed()
+			}
+		}
+		if _vDisableNixGc, _ok := model.Get("disable-nix-gc"); _ok && _vDisableNixGc.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vDisableNixGc.Leaf); _xok {
+				hooksVal3.DisableNixGC = &_x
+				_vDisableNixGc.MarkConsumed()
+			}
+		}
+		if _vDisableMergeBuildWorktree, _ok := model.Get("disable-merge-build-worktree"); _ok && _vDisableMergeBuildWorktree.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vDisableMergeBuildWorktree.Leaf); _xok {
+				hooksVal3.DisableMergeBuildWorktree = &_x
+				_vDisableMergeBuildWorktree.MarkConsumed()
+			}
+		}
+		if _vPreMergeOutputFormat, _ok := model.Get("pre-merge-output-format"); _ok && _vPreMergeOutputFormat.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vPreMergeOutputFormat.Leaf); _xok {
+				hooksVal3.PreMergeOutputFormat = &_x
+				_vPreMergeOutputFormat.MarkConsumed()
+			}
+		}
+		if _vInactivityTimeout, _ok := model.Get("inactivity-timeout"); _ok && _vInactivityTimeout.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vInactivityTimeout.Leaf); _xok {
+				hooksVal3.InactivityTimeout = &_x
+				_vInactivityTimeout.MarkConsumed()
+			}
+		}
+		if _foundHooks {
 			d.data.Hooks = hooksVal3
-		} else {
-			_itHooks := cst.FindChildInlineTable(d.cstDoc.Root(), "hooks")
-			if _itHooks != nil {
-				d.consumed["hooks"] = true
-				hooksVal3 := &Hooks{}
-				{
-					_seen := map[string]bool{}
-					for _, _kv := range _itHooks.Children {
-						if _kv.Kind != cst.NodeKeyValue {
-							continue
-						}
-						switch cst.KeyValueName(_kv) {
-						case "create":
-							if _seen["create"] {
-								return nil, fmt.Errorf("duplicate key %q", "create")
-							}
-							_seen["create"] = true
-							if v, ok := cst.ExtractString(_kv); ok {
-								hooksVal3.Create = &v
-								d.consumed["hooks.create"] = true
-							}
-						case "stop":
-							if _seen["stop"] {
-								return nil, fmt.Errorf("duplicate key %q", "stop")
-							}
-							_seen["stop"] = true
-							if v, ok := cst.ExtractString(_kv); ok {
-								hooksVal3.Stop = &v
-								d.consumed["hooks.stop"] = true
-							}
-						case "pre-merge":
-							if _seen["pre-merge"] {
-								return nil, fmt.Errorf("duplicate key %q", "pre-merge")
-							}
-							_seen["pre-merge"] = true
-							if v, ok := cst.ExtractString(_kv); ok {
-								hooksVal3.PreMerge = &v
-								d.consumed["hooks.pre-merge"] = true
-							}
-						case "on-attach":
-							if _seen["on-attach"] {
-								return nil, fmt.Errorf("duplicate key %q", "on-attach")
-							}
-							_seen["on-attach"] = true
-							if v, ok := cst.ExtractString(_kv); ok {
-								hooksVal3.OnAttach = &v
-								d.consumed["hooks.on-attach"] = true
-							}
-						case "on-detach":
-							if _seen["on-detach"] {
-								return nil, fmt.Errorf("duplicate key %q", "on-detach")
-							}
-							_seen["on-detach"] = true
-							if v, ok := cst.ExtractString(_kv); ok {
-								hooksVal3.OnDetach = &v
-								d.consumed["hooks.on-detach"] = true
-							}
-						case "disallow-main-worktree":
-							if _seen["disallow-main-worktree"] {
-								return nil, fmt.Errorf("duplicate key %q", "disallow-main-worktree")
-							}
-							_seen["disallow-main-worktree"] = true
-							if v, ok := cst.ExtractBool(_kv); ok {
-								hooksVal3.DisallowMainWorktree = &v
-								d.consumed["hooks.disallow-main-worktree"] = true
-							}
-						case "tool-use-log":
-							if _seen["tool-use-log"] {
-								return nil, fmt.Errorf("duplicate key %q", "tool-use-log")
-							}
-							_seen["tool-use-log"] = true
-							if v, ok := cst.ExtractBool(_kv); ok {
-								hooksVal3.ToolUseLog = &v
-								d.consumed["hooks.tool-use-log"] = true
-							}
-						case "disable-merge":
-							if _seen["disable-merge"] {
-								return nil, fmt.Errorf("duplicate key %q", "disable-merge")
-							}
-							_seen["disable-merge"] = true
-							if v, ok := cst.ExtractBool(_kv); ok {
-								hooksVal3.DisableMerge = &v
-								d.consumed["hooks.disable-merge"] = true
-							}
-						case "disable-nix-gc":
-							if _seen["disable-nix-gc"] {
-								return nil, fmt.Errorf("duplicate key %q", "disable-nix-gc")
-							}
-							_seen["disable-nix-gc"] = true
-							if v, ok := cst.ExtractBool(_kv); ok {
-								hooksVal3.DisableNixGC = &v
-								d.consumed["hooks.disable-nix-gc"] = true
-							}
-						case "disable-merge-build-worktree":
-							if _seen["disable-merge-build-worktree"] {
-								return nil, fmt.Errorf("duplicate key %q", "disable-merge-build-worktree")
-							}
-							_seen["disable-merge-build-worktree"] = true
-							if v, ok := cst.ExtractBool(_kv); ok {
-								hooksVal3.DisableMergeBuildWorktree = &v
-								d.consumed["hooks.disable-merge-build-worktree"] = true
-							}
-						case "pre-merge-output-format":
-							if _seen["pre-merge-output-format"] {
-								return nil, fmt.Errorf("duplicate key %q", "pre-merge-output-format")
-							}
-							_seen["pre-merge-output-format"] = true
-							if v, ok := cst.ExtractString(_kv); ok {
-								hooksVal3.PreMergeOutputFormat = &v
-								d.consumed["hooks.pre-merge-output-format"] = true
-							}
-						case "inactivity-timeout":
-							if _seen["inactivity-timeout"] {
-								return nil, fmt.Errorf("duplicate key %q", "inactivity-timeout")
-							}
-							_seen["inactivity-timeout"] = true
-							if v, ok := cst.ExtractString(_kv); ok {
-								hooksVal3.InactivityTimeout = &v
-								d.consumed["hooks.inactivity-timeout"] = true
-							}
-						}
-					}
-				}
-				d.data.Hooks = hooksVal3
-			} else {
-				hooksVal3 := &Hooks{}
-				_found := false
-				{
-					_seen := map[string]bool{}
-					for _, _kv := range d.cstDoc.Root().Children {
-						if _kv.Kind != cst.NodeKeyValue {
-							continue
-						}
-						switch cst.KeyValueName(_kv) {
-						case "create":
-							if _seen["create"] {
-								return nil, fmt.Errorf("duplicate key %q", "create")
-							}
-							_seen["create"] = true
-							if v, ok := cst.ExtractString(_kv); ok {
-								hooksVal3.Create = &v
-								_found = true
-								d.consumed["create"] = true
-							}
-						case "stop":
-							if _seen["stop"] {
-								return nil, fmt.Errorf("duplicate key %q", "stop")
-							}
-							_seen["stop"] = true
-							if v, ok := cst.ExtractString(_kv); ok {
-								hooksVal3.Stop = &v
-								_found = true
-								d.consumed["stop"] = true
-							}
-						case "pre-merge":
-							if _seen["pre-merge"] {
-								return nil, fmt.Errorf("duplicate key %q", "pre-merge")
-							}
-							_seen["pre-merge"] = true
-							if v, ok := cst.ExtractString(_kv); ok {
-								hooksVal3.PreMerge = &v
-								_found = true
-								d.consumed["pre-merge"] = true
-							}
-						case "on-attach":
-							if _seen["on-attach"] {
-								return nil, fmt.Errorf("duplicate key %q", "on-attach")
-							}
-							_seen["on-attach"] = true
-							if v, ok := cst.ExtractString(_kv); ok {
-								hooksVal3.OnAttach = &v
-								_found = true
-								d.consumed["on-attach"] = true
-							}
-						case "on-detach":
-							if _seen["on-detach"] {
-								return nil, fmt.Errorf("duplicate key %q", "on-detach")
-							}
-							_seen["on-detach"] = true
-							if v, ok := cst.ExtractString(_kv); ok {
-								hooksVal3.OnDetach = &v
-								_found = true
-								d.consumed["on-detach"] = true
-							}
-						case "disallow-main-worktree":
-							if _seen["disallow-main-worktree"] {
-								return nil, fmt.Errorf("duplicate key %q", "disallow-main-worktree")
-							}
-							_seen["disallow-main-worktree"] = true
-							if v, ok := cst.ExtractBool(_kv); ok {
-								hooksVal3.DisallowMainWorktree = &v
-								_found = true
-								d.consumed["disallow-main-worktree"] = true
-							}
-						case "tool-use-log":
-							if _seen["tool-use-log"] {
-								return nil, fmt.Errorf("duplicate key %q", "tool-use-log")
-							}
-							_seen["tool-use-log"] = true
-							if v, ok := cst.ExtractBool(_kv); ok {
-								hooksVal3.ToolUseLog = &v
-								_found = true
-								d.consumed["tool-use-log"] = true
-							}
-						case "disable-merge":
-							if _seen["disable-merge"] {
-								return nil, fmt.Errorf("duplicate key %q", "disable-merge")
-							}
-							_seen["disable-merge"] = true
-							if v, ok := cst.ExtractBool(_kv); ok {
-								hooksVal3.DisableMerge = &v
-								_found = true
-								d.consumed["disable-merge"] = true
-							}
-						case "disable-nix-gc":
-							if _seen["disable-nix-gc"] {
-								return nil, fmt.Errorf("duplicate key %q", "disable-nix-gc")
-							}
-							_seen["disable-nix-gc"] = true
-							if v, ok := cst.ExtractBool(_kv); ok {
-								hooksVal3.DisableNixGC = &v
-								_found = true
-								d.consumed["disable-nix-gc"] = true
-							}
-						case "disable-merge-build-worktree":
-							if _seen["disable-merge-build-worktree"] {
-								return nil, fmt.Errorf("duplicate key %q", "disable-merge-build-worktree")
-							}
-							_seen["disable-merge-build-worktree"] = true
-							if v, ok := cst.ExtractBool(_kv); ok {
-								hooksVal3.DisableMergeBuildWorktree = &v
-								_found = true
-								d.consumed["disable-merge-build-worktree"] = true
-							}
-						case "pre-merge-output-format":
-							if _seen["pre-merge-output-format"] {
-								return nil, fmt.Errorf("duplicate key %q", "pre-merge-output-format")
-							}
-							_seen["pre-merge-output-format"] = true
-							if v, ok := cst.ExtractString(_kv); ok {
-								hooksVal3.PreMergeOutputFormat = &v
-								_found = true
-								d.consumed["pre-merge-output-format"] = true
-							}
-						case "inactivity-timeout":
-							if _seen["inactivity-timeout"] {
-								return nil, fmt.Errorf("duplicate key %q", "inactivity-timeout")
-							}
-							_seen["inactivity-timeout"] = true
-							if v, ok := cst.ExtractString(_kv); ok {
-								hooksVal3.InactivityTimeout = &v
-								_found = true
-								d.consumed["inactivity-timeout"] = true
-							}
-						}
-					}
-				}
-				if _found {
-					d.data.Hooks = hooksVal3
-				}
-			}
 		}
 	}
-	{
-		var _ftSessionEntry *cst.Node
-		for _, _ch := range d.cstDoc.Root().Children {
-			if _ch.Kind == cst.NodeTable && cst.TableHeaderKey(_ch) == "session-entry" {
-				if _ftSessionEntry != nil {
-					return nil, fmt.Errorf("duplicate table %q", "session-entry")
+	if _vSessionEntry, _ok := model.Get("session-entry"); _ok && _vSessionEntry.Kind == cst.VTable {
+		_vSessionEntry.MarkSeen()
+		sessionEntryVal4 := &SessionEntry{}
+		if _vSessionEntryStart, _ok := _vSessionEntry.Get("start"); _ok && _vSessionEntryStart.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vSessionEntryStart.Leaf); _xok {
+				sessionEntryVal4.Start = _x
+				if sessionEntryVal4.Start == nil {
+					sessionEntryVal4.Start = []string{}
 				}
-				_ftSessionEntry = _ch
+				_vSessionEntryStart.MarkConsumed()
 			}
 		}
-		if _ftSessionEntry != nil {
-			d.consumed["session-entry"] = true
-			sessionEntryVal4 := &SessionEntry{}
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range _ftSessionEntry.Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "start":
-						if _seen["start"] {
-							return nil, fmt.Errorf("duplicate key %q", "start")
-						}
-						_seen["start"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							sessionEntryVal4.Start = v
-							if sessionEntryVal4.Start == nil {
-								sessionEntryVal4.Start = []string{}
-							}
-							d.consumed["session-entry.start"] = true
-						}
-					case "resume":
-						if _seen["resume"] {
-							return nil, fmt.Errorf("duplicate key %q", "resume")
-						}
-						_seen["resume"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							sessionEntryVal4.Resume = v
-							if sessionEntryVal4.Resume == nil {
-								sessionEntryVal4.Resume = []string{}
-							}
-							d.consumed["session-entry.resume"] = true
-						}
-					case "liveness-probe":
-						if _seen["liveness-probe"] {
-							return nil, fmt.Errorf("duplicate key %q", "liveness-probe")
-						}
-						_seen["liveness-probe"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							sessionEntryVal4.LivenessProbe = v
-							if sessionEntryVal4.LivenessProbe == nil {
-								sessionEntryVal4.LivenessProbe = []string{}
-							}
-							d.consumed["session-entry.liveness-probe"] = true
-						}
-					case "tombstone-retention":
-						if _seen["tombstone-retention"] {
-							return nil, fmt.Errorf("duplicate key %q", "tombstone-retention")
-						}
-						_seen["tombstone-retention"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							sessionEntryVal4.TombstoneRetention = v
-							d.consumed["session-entry.tombstone-retention"] = true
-						}
+		if _vSessionEntryResume, _ok := _vSessionEntry.Get("resume"); _ok && _vSessionEntryResume.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vSessionEntryResume.Leaf); _xok {
+				sessionEntryVal4.Resume = _x
+				if sessionEntryVal4.Resume == nil {
+					sessionEntryVal4.Resume = []string{}
+				}
+				_vSessionEntryResume.MarkConsumed()
+			}
+		}
+		if _vSessionEntryEnv, _ok := _vSessionEntry.Get("env"); _ok && _vSessionEntryEnv.Kind == cst.VTable {
+			_vSessionEntryEnv.MarkSeen()
+			sessionEntryVal4.Env = make(map[string]string)
+			for _iSessionEntryEnv := range _vSessionEntryEnv.Fields {
+				_fSessionEntryEnv := &_vSessionEntryEnv.Fields[_iSessionEntryEnv]
+				if _fSessionEntryEnv.Val.Kind == cst.VLeaf {
+					if _s, _sok := cst.ExtractString(_fSessionEntryEnv.Val.Leaf); _sok {
+						sessionEntryVal4.Env[_fSessionEntryEnv.Key] = _s
+						_fSessionEntryEnv.Val.MarkConsumed()
 					}
 				}
 			}
-			for _, _ch := range d.cstDoc.Root().Children {
-				if _ch.Kind == cst.NodeTable && cst.TableHeaderKey(_ch) == "session-entry.env" {
-					sessionEntryVal4.Env = cst.ExtractStringMap(_ch)
-					if sessionEntryVal4.Env == nil {
-						sessionEntryVal4.Env = map[string]string{}
-					}
-					d.consumed["session-entry.env"] = true
-					for _ik := range sessionEntryVal4.Env {
-						d.consumed["session-entry.env"+"."+_ik] = true
-					}
-					break
+		}
+		if _vSessionEntryLivenessProbe, _ok := _vSessionEntry.Get("liveness-probe"); _ok && _vSessionEntryLivenessProbe.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vSessionEntryLivenessProbe.Leaf); _xok {
+				sessionEntryVal4.LivenessProbe = _x
+				if sessionEntryVal4.LivenessProbe == nil {
+					sessionEntryVal4.LivenessProbe = []string{}
 				}
+				_vSessionEntryLivenessProbe.MarkConsumed()
 			}
-			if sessionEntryVal4.Env == nil {
-				_it := cst.FindChildInlineTable(_ftSessionEntry, "env")
-				if _it != nil {
-					sessionEntryVal4.Env = cst.ExtractStringMap(_it)
-					if sessionEntryVal4.Env == nil {
-						sessionEntryVal4.Env = map[string]string{}
-					}
-					d.consumed["session-entry.env"] = true
-					for _ik := range sessionEntryVal4.Env {
-						d.consumed["session-entry.env"+"."+_ik] = true
-					}
+		}
+		if _vSessionEntryTombstoneRetention, _ok := _vSessionEntry.Get("tombstone-retention"); _ok && _vSessionEntryTombstoneRetention.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vSessionEntryTombstoneRetention.Leaf); _xok {
+				sessionEntryVal4.TombstoneRetention = _x
+				_vSessionEntryTombstoneRetention.MarkConsumed()
+			}
+		}
+		d.data.SessionEntry = sessionEntryVal4
+	} else {
+		sessionEntryVal4 := &SessionEntry{}
+		_foundSessionEntry := false
+		if _vStart, _ok := model.Get("start"); _ok && _vStart.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractStringSlice(_vStart.Leaf); _xok {
+				sessionEntryVal4.Start = _x
+				if sessionEntryVal4.Start == nil {
+					sessionEntryVal4.Start = []string{}
 				}
+				_vStart.MarkConsumed()
 			}
+		}
+		if _vResume, _ok := model.Get("resume"); _ok && _vResume.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractStringSlice(_vResume.Leaf); _xok {
+				sessionEntryVal4.Resume = _x
+				if sessionEntryVal4.Resume == nil {
+					sessionEntryVal4.Resume = []string{}
+				}
+				_vResume.MarkConsumed()
+			}
+		}
+		if _vLivenessProbe, _ok := model.Get("liveness-probe"); _ok && _vLivenessProbe.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractStringSlice(_vLivenessProbe.Leaf); _xok {
+				sessionEntryVal4.LivenessProbe = _x
+				if sessionEntryVal4.LivenessProbe == nil {
+					sessionEntryVal4.LivenessProbe = []string{}
+				}
+				_vLivenessProbe.MarkConsumed()
+			}
+		}
+		if _vTombstoneRetention, _ok := model.Get("tombstone-retention"); _ok && _vTombstoneRetention.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractString(_vTombstoneRetention.Leaf); _xok {
+				sessionEntryVal4.TombstoneRetention = _x
+				_vTombstoneRetention.MarkConsumed()
+			}
+		}
+		if _foundSessionEntry {
 			d.data.SessionEntry = sessionEntryVal4
-		} else {
-			_itSessionEntry := cst.FindChildInlineTable(d.cstDoc.Root(), "session-entry")
-			if _itSessionEntry != nil {
-				d.consumed["session-entry"] = true
-				sessionEntryVal4 := &SessionEntry{}
-				{
-					_seen := map[string]bool{}
-					for _, _kv := range _itSessionEntry.Children {
-						if _kv.Kind != cst.NodeKeyValue {
-							continue
-						}
-						switch cst.KeyValueName(_kv) {
-						case "start":
-							if _seen["start"] {
-								return nil, fmt.Errorf("duplicate key %q", "start")
-							}
-							_seen["start"] = true
-							if v, ok := cst.ExtractStringSlice(_kv); ok {
-								sessionEntryVal4.Start = v
-								if sessionEntryVal4.Start == nil {
-									sessionEntryVal4.Start = []string{}
-								}
-								d.consumed["session-entry.start"] = true
-							}
-						case "resume":
-							if _seen["resume"] {
-								return nil, fmt.Errorf("duplicate key %q", "resume")
-							}
-							_seen["resume"] = true
-							if v, ok := cst.ExtractStringSlice(_kv); ok {
-								sessionEntryVal4.Resume = v
-								if sessionEntryVal4.Resume == nil {
-									sessionEntryVal4.Resume = []string{}
-								}
-								d.consumed["session-entry.resume"] = true
-							}
-						case "liveness-probe":
-							if _seen["liveness-probe"] {
-								return nil, fmt.Errorf("duplicate key %q", "liveness-probe")
-							}
-							_seen["liveness-probe"] = true
-							if v, ok := cst.ExtractStringSlice(_kv); ok {
-								sessionEntryVal4.LivenessProbe = v
-								if sessionEntryVal4.LivenessProbe == nil {
-									sessionEntryVal4.LivenessProbe = []string{}
-								}
-								d.consumed["session-entry.liveness-probe"] = true
-							}
-						case "tombstone-retention":
-							if _seen["tombstone-retention"] {
-								return nil, fmt.Errorf("duplicate key %q", "tombstone-retention")
-							}
-							_seen["tombstone-retention"] = true
-							if v, ok := cst.ExtractString(_kv); ok {
-								sessionEntryVal4.TombstoneRetention = v
-								d.consumed["session-entry.tombstone-retention"] = true
-							}
-						}
-					}
+		}
+	}
+	if _vStartCommands, _ok := model.Get("start-commands"); _ok && _vStartCommands.Kind == cst.VArray {
+		_vStartCommands.MarkSeen()
+		d.data.StartCommands = make([]StartCommand, len(_vStartCommands.Items))
+		d.startCommands = make([]startCommandHandle, len(_vStartCommands.Items))
+		for i := range _vStartCommands.Items {
+			_eStartCommands := &_vStartCommands.Items[i]
+			_eStartCommands.MarkSeen()
+			d.startCommands[i] = startCommandHandle{node: _eStartCommands.Node}
+			if _vStartCommandsName, _ok := _eStartCommands.Get("name"); _ok && _vStartCommandsName.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vStartCommandsName.Leaf); _xok {
+					d.data.StartCommands[i].Name = _x
+					_vStartCommandsName.MarkConsumed()
 				}
-				{
-					_ctSessionEntryEnv := cst.FindChildTable(d.cstDoc.Root(), _itSessionEntry, "env")
-					if _ctSessionEntryEnv != nil {
-						sessionEntryVal4.Env = cst.ExtractStringMap(_ctSessionEntryEnv)
-						if sessionEntryVal4.Env == nil {
-							sessionEntryVal4.Env = map[string]string{}
-						}
-						d.consumed["session-entry.env"] = true
-						for _ik := range sessionEntryVal4.Env {
-							d.consumed["session-entry.env"+"."+_ik] = true
-						}
-					} else {
-						_it := cst.FindChildInlineTable(_itSessionEntry, "env")
-						if _it != nil {
-							sessionEntryVal4.Env = cst.ExtractStringMap(_it)
-							if sessionEntryVal4.Env == nil {
-								sessionEntryVal4.Env = map[string]string{}
-							}
-							d.consumed["session-entry.env"] = true
-							for _ik := range sessionEntryVal4.Env {
-								d.consumed["session-entry.env"+"."+_ik] = true
-							}
-						}
-					}
+			}
+			if _vStartCommandsDescription, _ok := _eStartCommands.Get("description"); _ok && _vStartCommandsDescription.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vStartCommandsDescription.Leaf); _xok {
+					d.data.StartCommands[i].Description = _x
+					_vStartCommandsDescription.MarkConsumed()
 				}
-				d.data.SessionEntry = sessionEntryVal4
-			} else {
-				sessionEntryVal4 := &SessionEntry{}
-				_found := false
-				{
-					_seen := map[string]bool{}
-					for _, _kv := range d.cstDoc.Root().Children {
-						if _kv.Kind != cst.NodeKeyValue {
-							continue
-						}
-						switch cst.KeyValueName(_kv) {
-						case "start":
-							if _seen["start"] {
-								return nil, fmt.Errorf("duplicate key %q", "start")
-							}
-							_seen["start"] = true
-							if v, ok := cst.ExtractStringSlice(_kv); ok {
-								sessionEntryVal4.Start = v
-								if sessionEntryVal4.Start == nil {
-									sessionEntryVal4.Start = []string{}
-								}
-								d.consumed["start"] = true
-							}
-						case "resume":
-							if _seen["resume"] {
-								return nil, fmt.Errorf("duplicate key %q", "resume")
-							}
-							_seen["resume"] = true
-							if v, ok := cst.ExtractStringSlice(_kv); ok {
-								sessionEntryVal4.Resume = v
-								if sessionEntryVal4.Resume == nil {
-									sessionEntryVal4.Resume = []string{}
-								}
-								d.consumed["resume"] = true
-							}
-						case "liveness-probe":
-							if _seen["liveness-probe"] {
-								return nil, fmt.Errorf("duplicate key %q", "liveness-probe")
-							}
-							_seen["liveness-probe"] = true
-							if v, ok := cst.ExtractStringSlice(_kv); ok {
-								sessionEntryVal4.LivenessProbe = v
-								if sessionEntryVal4.LivenessProbe == nil {
-									sessionEntryVal4.LivenessProbe = []string{}
-								}
-								d.consumed["liveness-probe"] = true
-							}
-						case "tombstone-retention":
-							if _seen["tombstone-retention"] {
-								return nil, fmt.Errorf("duplicate key %q", "tombstone-retention")
-							}
-							_seen["tombstone-retention"] = true
-							if v, ok := cst.ExtractString(_kv); ok {
-								sessionEntryVal4.TombstoneRetention = v
-								_found = true
-								d.consumed["tombstone-retention"] = true
-							}
-						}
-					}
+			}
+			if _vStartCommandsArgName, _ok := _eStartCommands.Get("arg-name"); _ok && _vStartCommandsArgName.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vStartCommandsArgName.Leaf); _xok {
+					d.data.StartCommands[i].ArgName = _x
+					_vStartCommandsArgName.MarkConsumed()
 				}
-				_impSessionEntry := cst.FindImplicitChildTable(d.cstDoc.Root(), d.cstDoc.Root(), "session-entry")
-				if _impSessionEntry != nil {
-					_found = true
-					d.consumed["session-entry"] = true
-					for _, _ch := range d.cstDoc.Root().Children {
-						if _ch.Kind == cst.NodeTable && cst.TableHeaderKey(_ch) == "session-entry.env" {
-							sessionEntryVal4.Env = cst.ExtractStringMap(_ch)
-							if sessionEntryVal4.Env == nil {
-								sessionEntryVal4.Env = map[string]string{}
-							}
-							d.consumed["session-entry.env"] = true
-							for _ik := range sessionEntryVal4.Env {
-								d.consumed["session-entry.env"+"."+_ik] = true
-							}
-							break
-						}
-					}
-					if sessionEntryVal4.Env == nil {
-						_it := cst.FindChildInlineTable(_impSessionEntry, "env")
-						if _it != nil {
-							sessionEntryVal4.Env = cst.ExtractStringMap(_it)
-							if sessionEntryVal4.Env == nil {
-								sessionEntryVal4.Env = map[string]string{}
-							}
-							d.consumed["session-entry.env"] = true
-							for _ik := range sessionEntryVal4.Env {
-								d.consumed["session-entry.env"+"."+_ik] = true
-							}
-						}
-					}
+			}
+			if _vStartCommandsArgHelp, _ok := _eStartCommands.Get("arg-help"); _ok && _vStartCommandsArgHelp.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vStartCommandsArgHelp.Leaf); _xok {
+					d.data.StartCommands[i].ArgHelp = _x
+					_vStartCommandsArgHelp.MarkConsumed()
 				}
-				if _found {
-					d.data.SessionEntry = sessionEntryVal4
+			}
+			if _vStartCommandsArgRegex, _ok := _eStartCommands.Get("arg-regex"); _ok && _vStartCommandsArgRegex.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vStartCommandsArgRegex.Leaf); _xok {
+					d.data.StartCommands[i].ArgRegex = &_x
+					_vStartCommandsArgRegex.MarkConsumed()
+				}
+			}
+			if _vStartCommandsExecCompletions, _ok := _eStartCommands.Get("exec-completions"); _ok && _vStartCommandsExecCompletions.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractStringSlice(_vStartCommandsExecCompletions.Leaf); _xok {
+					d.data.StartCommands[i].ExecCompletions = _x
+					if d.data.StartCommands[i].ExecCompletions == nil {
+						d.data.StartCommands[i].ExecCompletions = []string{}
+					}
+					_vStartCommandsExecCompletions.MarkConsumed()
+				}
+			}
+			if _vStartCommandsExecStart, _ok := _eStartCommands.Get("exec-start"); _ok && _vStartCommandsExecStart.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractStringSlice(_vStartCommandsExecStart.Leaf); _xok {
+					d.data.StartCommands[i].ExecStart = _x
+					if d.data.StartCommands[i].ExecStart == nil {
+						d.data.StartCommands[i].ExecStart = []string{}
+					}
+					_vStartCommandsExecStart.MarkConsumed()
 				}
 			}
 		}
 	}
-	var _nodesStartCommands []*cst.Node
-	for _, _ch := range d.cstDoc.Root().Children {
-		if _ch.Kind == cst.NodeArrayTable && cst.TableHeaderKey(_ch) == "start-commands" {
-			_nodesStartCommands = append(_nodesStartCommands, _ch)
+	if _eaStartCommands, _eaok := model.Get("start-commands"); _eaok && _eaStartCommands.IsEmptyArray() {
+		_eaStartCommands.MarkConsumed()
+		d.data.StartCommands = []StartCommand{}
+	}
+	if _vAllowedMcps, _ok := model.Get("allowed-mcps"); _ok && _vAllowedMcps.Kind == cst.VLeaf {
+		if _x, _xok := cst.ExtractStringSlice(_vAllowedMcps.Leaf); _xok {
+			d.data.AllowedMCPs = _x
+			if d.data.AllowedMCPs == nil {
+				d.data.AllowedMCPs = []string{}
+			}
+			_vAllowedMcps.MarkConsumed()
 		}
 	}
-	d.startCommands = make([]startCommandHandle, len(_nodesStartCommands))
-	d.data.StartCommands = make([]StartCommand, len(_nodesStartCommands))
-	d.consumed["start-commands"] = true
-	for i, _node := range _nodesStartCommands {
-		d.startCommands[i] = startCommandHandle{node: _node}
-		{
-			_seen := map[string]bool{}
-			for _, _kv := range _node.Children {
-				if _kv.Kind != cst.NodeKeyValue {
-					continue
+	if _vMcps, _ok := model.Get("mcps"); _ok && _vMcps.Kind == cst.VArray {
+		_vMcps.MarkSeen()
+		d.data.MCPs = make([]MCPServerDef, len(_vMcps.Items))
+		d.mCPs = make([]mCPServerDefHandle, len(_vMcps.Items))
+		for i := range _vMcps.Items {
+			_eMcps := &_vMcps.Items[i]
+			_eMcps.MarkSeen()
+			d.mCPs[i] = mCPServerDefHandle{node: _eMcps.Node}
+			if _vMcpsName, _ok := _eMcps.Get("name"); _ok && _vMcpsName.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vMcpsName.Leaf); _xok {
+					d.data.MCPs[i].Name = _x
+					_vMcpsName.MarkConsumed()
 				}
-				switch cst.KeyValueName(_kv) {
-				case "name":
-					if _seen["name"] {
-						return nil, fmt.Errorf("duplicate key %q", "name")
+			}
+			if _vMcpsCommand, _ok := _eMcps.Get("command"); _ok && _vMcpsCommand.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vMcpsCommand.Leaf); _xok {
+					d.data.MCPs[i].Command = _x
+					_vMcpsCommand.MarkConsumed()
+				}
+			}
+			if _vMcpsArgs, _ok := _eMcps.Get("args"); _ok && _vMcpsArgs.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractStringSlice(_vMcpsArgs.Leaf); _xok {
+					d.data.MCPs[i].Args = _x
+					if d.data.MCPs[i].Args == nil {
+						d.data.MCPs[i].Args = []string{}
 					}
-					_seen["name"] = true
-					if v, ok := cst.ExtractString(_kv); ok {
-						d.data.StartCommands[i].Name = v
-						d.consumed["start-commands.name"] = true
-					}
-				case "description":
-					if _seen["description"] {
-						return nil, fmt.Errorf("duplicate key %q", "description")
-					}
-					_seen["description"] = true
-					if v, ok := cst.ExtractString(_kv); ok {
-						d.data.StartCommands[i].Description = v
-						d.consumed["start-commands.description"] = true
-					}
-				case "arg-name":
-					if _seen["arg-name"] {
-						return nil, fmt.Errorf("duplicate key %q", "arg-name")
-					}
-					_seen["arg-name"] = true
-					if v, ok := cst.ExtractString(_kv); ok {
-						d.data.StartCommands[i].ArgName = v
-						d.consumed["start-commands.arg-name"] = true
-					}
-				case "arg-help":
-					if _seen["arg-help"] {
-						return nil, fmt.Errorf("duplicate key %q", "arg-help")
-					}
-					_seen["arg-help"] = true
-					if v, ok := cst.ExtractString(_kv); ok {
-						d.data.StartCommands[i].ArgHelp = v
-						d.consumed["start-commands.arg-help"] = true
-					}
-				case "arg-regex":
-					if _seen["arg-regex"] {
-						return nil, fmt.Errorf("duplicate key %q", "arg-regex")
-					}
-					_seen["arg-regex"] = true
-					if v, ok := cst.ExtractString(_kv); ok {
-						d.data.StartCommands[i].ArgRegex = &v
-						d.consumed["start-commands.arg-regex"] = true
-					}
-				case "exec-completions":
-					if _seen["exec-completions"] {
-						return nil, fmt.Errorf("duplicate key %q", "exec-completions")
-					}
-					_seen["exec-completions"] = true
-					if v, ok := cst.ExtractStringSlice(_kv); ok {
-						d.data.StartCommands[i].ExecCompletions = v
-						if d.data.StartCommands[i].ExecCompletions == nil {
-							d.data.StartCommands[i].ExecCompletions = []string{}
+					_vMcpsArgs.MarkConsumed()
+				}
+			}
+			if _vMcpsEnv, _ok := _eMcps.Get("env"); _ok && _vMcpsEnv.Kind == cst.VTable {
+				_vMcpsEnv.MarkSeen()
+				d.data.MCPs[i].Env = make(map[string]string)
+				for _iMcpsEnv := range _vMcpsEnv.Fields {
+					_fMcpsEnv := &_vMcpsEnv.Fields[_iMcpsEnv]
+					if _fMcpsEnv.Val.Kind == cst.VLeaf {
+						if _s, _sok := cst.ExtractString(_fMcpsEnv.Val.Leaf); _sok {
+							d.data.MCPs[i].Env[_fMcpsEnv.Key] = _s
+							_fMcpsEnv.Val.MarkConsumed()
 						}
-						d.consumed["start-commands.exec-completions"] = true
-					}
-				case "exec-start":
-					if _seen["exec-start"] {
-						return nil, fmt.Errorf("duplicate key %q", "exec-start")
-					}
-					_seen["exec-start"] = true
-					if v, ok := cst.ExtractStringSlice(_kv); ok {
-						d.data.StartCommands[i].ExecStart = v
-						if d.data.StartCommands[i].ExecStart == nil {
-							d.data.StartCommands[i].ExecStart = []string{}
-						}
-						d.consumed["start-commands.exec-start"] = true
 					}
 				}
 			}
 		}
 	}
-	var _nodesMcps []*cst.Node
-	for _, _ch := range d.cstDoc.Root().Children {
-		if _ch.Kind == cst.NodeArrayTable && cst.TableHeaderKey(_ch) == "mcps" {
-			_nodesMcps = append(_nodesMcps, _ch)
-		}
+	if _eaMcps, _eaok := model.Get("mcps"); _eaok && _eaMcps.IsEmptyArray() {
+		_eaMcps.MarkConsumed()
+		d.data.MCPs = []MCPServerDef{}
 	}
-	d.mCPs = make([]mCPServerDefHandle, len(_nodesMcps))
-	d.data.MCPs = make([]MCPServerDef, len(_nodesMcps))
-	d.consumed["mcps"] = true
-	for i, _node := range _nodesMcps {
-		d.mCPs[i] = mCPServerDefHandle{node: _node}
-		{
-			_seen := map[string]bool{}
-			for _, _kv := range _node.Children {
-				if _kv.Kind != cst.NodeKeyValue {
-					continue
-				}
-				switch cst.KeyValueName(_kv) {
-				case "name":
-					if _seen["name"] {
-						return nil, fmt.Errorf("duplicate key %q", "name")
-					}
-					_seen["name"] = true
-					if v, ok := cst.ExtractString(_kv); ok {
-						d.data.MCPs[i].Name = v
-						d.consumed["mcps.name"] = true
-					}
-				case "command":
-					if _seen["command"] {
-						return nil, fmt.Errorf("duplicate key %q", "command")
-					}
-					_seen["command"] = true
-					if v, ok := cst.ExtractString(_kv); ok {
-						d.data.MCPs[i].Command = v
-						d.consumed["mcps.command"] = true
-					}
-				case "args":
-					if _seen["args"] {
-						return nil, fmt.Errorf("duplicate key %q", "args")
-					}
-					_seen["args"] = true
-					if v, ok := cst.ExtractStringSlice(_kv); ok {
-						d.data.MCPs[i].Args = v
-						if d.data.MCPs[i].Args == nil {
-							d.data.MCPs[i].Args = []string{}
-						}
-						d.consumed["mcps.args"] = true
-					}
+	if _vPreMergeSkills, _ok := model.Get("pre-merge-skills"); _ok && _vPreMergeSkills.Kind == cst.VArray {
+		_vPreMergeSkills.MarkSeen()
+		d.data.PreMergeSkills = make([]PreMergeSkill, len(_vPreMergeSkills.Items))
+		d.preMergeSkills = make([]preMergeSkillHandle, len(_vPreMergeSkills.Items))
+		for i := range _vPreMergeSkills.Items {
+			_ePreMergeSkills := &_vPreMergeSkills.Items[i]
+			_ePreMergeSkills.MarkSeen()
+			d.preMergeSkills[i] = preMergeSkillHandle{node: _ePreMergeSkills.Node}
+			if _vPreMergeSkillsName, _ok := _ePreMergeSkills.Get("name"); _ok && _vPreMergeSkillsName.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vPreMergeSkillsName.Leaf); _xok {
+					d.data.PreMergeSkills[i].Name = _x
+					_vPreMergeSkillsName.MarkConsumed()
 				}
 			}
-		}
-		{
-			_ctMcpsEnv := cst.FindChildTable(d.cstDoc.Root(), _node, "env")
-			if _ctMcpsEnv != nil {
-				d.data.MCPs[i].Env = cst.ExtractStringMap(_ctMcpsEnv)
-				if d.data.MCPs[i].Env == nil {
-					d.data.MCPs[i].Env = map[string]string{}
-				}
-				d.consumed["mcps.env"] = true
-				for _ik := range d.data.MCPs[i].Env {
-					d.consumed["mcps.env"+"."+_ik] = true
-				}
-			} else {
-				_it := cst.FindChildInlineTable(_node, "env")
-				if _it != nil {
-					d.data.MCPs[i].Env = cst.ExtractStringMap(_it)
-					if d.data.MCPs[i].Env == nil {
-						d.data.MCPs[i].Env = map[string]string{}
-					}
-					d.consumed["mcps.env"] = true
-					for _ik := range d.data.MCPs[i].Env {
-						d.consumed["mcps.env"+"."+_ik] = true
-					}
+			if _vPreMergeSkillsRationale, _ok := _ePreMergeSkills.Get("rationale"); _ok && _vPreMergeSkillsRationale.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vPreMergeSkillsRationale.Leaf); _xok {
+					d.data.PreMergeSkills[i].Rationale = _x
+					_vPreMergeSkillsRationale.MarkConsumed()
 				}
 			}
 		}
 	}
-	var _nodesPreMergeSkills []*cst.Node
-	for _, _ch := range d.cstDoc.Root().Children {
-		if _ch.Kind == cst.NodeArrayTable && cst.TableHeaderKey(_ch) == "pre-merge-skills" {
-			_nodesPreMergeSkills = append(_nodesPreMergeSkills, _ch)
-		}
+	if _eaPreMergeSkills, _eaok := model.Get("pre-merge-skills"); _eaok && _eaPreMergeSkills.IsEmptyArray() {
+		_eaPreMergeSkills.MarkConsumed()
+		d.data.PreMergeSkills = []PreMergeSkill{}
 	}
-	d.preMergeSkills = make([]preMergeSkillHandle, len(_nodesPreMergeSkills))
-	d.data.PreMergeSkills = make([]PreMergeSkill, len(_nodesPreMergeSkills))
-	d.consumed["pre-merge-skills"] = true
-	for i, _node := range _nodesPreMergeSkills {
-		d.preMergeSkills[i] = preMergeSkillHandle{node: _node}
-		{
-			_seen := map[string]bool{}
-			for _, _kv := range _node.Children {
-				if _kv.Kind != cst.NodeKeyValue {
-					continue
+	if _vRemotes, _ok := model.Get("remotes"); _ok && _vRemotes.Kind == cst.VArray {
+		_vRemotes.MarkSeen()
+		d.data.Remotes = make([]Remote, len(_vRemotes.Items))
+		d.remotes = make([]remoteHandle, len(_vRemotes.Items))
+		for i := range _vRemotes.Items {
+			_eRemotes := &_vRemotes.Items[i]
+			_eRemotes.MarkSeen()
+			d.remotes[i] = remoteHandle{node: _eRemotes.Node}
+			if _vRemotesName, _ok := _eRemotes.Get("name"); _ok && _vRemotesName.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vRemotesName.Leaf); _xok {
+					d.data.Remotes[i].Name = _x
+					_vRemotesName.MarkConsumed()
 				}
-				switch cst.KeyValueName(_kv) {
-				case "name":
-					if _seen["name"] {
-						return nil, fmt.Errorf("duplicate key %q", "name")
+			}
+			if _vRemotesSsh, _ok := _eRemotes.Get("ssh"); _ok && _vRemotesSsh.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vRemotesSsh.Leaf); _xok {
+					d.data.Remotes[i].SSH = _x
+					_vRemotesSsh.MarkConsumed()
+				}
+			}
+			if _vRemotesAttach, _ok := _eRemotes.Get("attach"); _ok && _vRemotesAttach.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractStringSlice(_vRemotesAttach.Leaf); _xok {
+					d.data.Remotes[i].Attach = _x
+					if d.data.Remotes[i].Attach == nil {
+						d.data.Remotes[i].Attach = []string{}
 					}
-					_seen["name"] = true
-					if v, ok := cst.ExtractString(_kv); ok {
-						d.data.PreMergeSkills[i].Name = v
-						d.consumed["pre-merge-skills.name"] = true
-					}
-				case "rationale":
-					if _seen["rationale"] {
-						return nil, fmt.Errorf("duplicate key %q", "rationale")
-					}
-					_seen["rationale"] = true
-					if v, ok := cst.ExtractString(_kv); ok {
-						d.data.PreMergeSkills[i].Rationale = v
-						d.consumed["pre-merge-skills.rationale"] = true
-					}
+					_vRemotesAttach.MarkConsumed()
+				}
+			}
+			if _vRemotesRemove, _ok := _eRemotes.Get("remove"); _ok && _vRemotesRemove.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractBool(_vRemotesRemove.Leaf); _xok {
+					d.data.Remotes[i].Remove = _x
+					_vRemotesRemove.MarkConsumed()
 				}
 			}
 		}
 	}
-	var _nodesRemotes []*cst.Node
-	for _, _ch := range d.cstDoc.Root().Children {
-		if _ch.Kind == cst.NodeArrayTable && cst.TableHeaderKey(_ch) == "remotes" {
-			_nodesRemotes = append(_nodesRemotes, _ch)
-		}
-	}
-	d.remotes = make([]remoteHandle, len(_nodesRemotes))
-	d.data.Remotes = make([]Remote, len(_nodesRemotes))
-	d.consumed["remotes"] = true
-	for i, _node := range _nodesRemotes {
-		d.remotes[i] = remoteHandle{node: _node}
-		{
-			_seen := map[string]bool{}
-			for _, _kv := range _node.Children {
-				if _kv.Kind != cst.NodeKeyValue {
-					continue
-				}
-				switch cst.KeyValueName(_kv) {
-				case "name":
-					if _seen["name"] {
-						return nil, fmt.Errorf("duplicate key %q", "name")
-					}
-					_seen["name"] = true
-					if v, ok := cst.ExtractString(_kv); ok {
-						d.data.Remotes[i].Name = v
-						d.consumed["remotes.name"] = true
-					}
-				case "ssh":
-					if _seen["ssh"] {
-						return nil, fmt.Errorf("duplicate key %q", "ssh")
-					}
-					_seen["ssh"] = true
-					if v, ok := cst.ExtractString(_kv); ok {
-						d.data.Remotes[i].SSH = v
-						d.consumed["remotes.ssh"] = true
-					}
-				case "attach":
-					if _seen["attach"] {
-						return nil, fmt.Errorf("duplicate key %q", "attach")
-					}
-					_seen["attach"] = true
-					if v, ok := cst.ExtractStringSlice(_kv); ok {
-						d.data.Remotes[i].Attach = v
-						if d.data.Remotes[i].Attach == nil {
-							d.data.Remotes[i].Attach = []string{}
-						}
-						d.consumed["remotes.attach"] = true
-					}
-				case "remove":
-					if _seen["remove"] {
-						return nil, fmt.Errorf("duplicate key %q", "remove")
-					}
-					_seen["remove"] = true
-					if v, ok := cst.ExtractBool(_kv); ok {
-						d.data.Remotes[i].Remove = v
-						d.consumed["remotes.remove"] = true
-					}
-				}
-			}
-		}
+	if _eaRemotes, _eaok := model.Get("remotes"); _eaok && _eaRemotes.IsEmptyArray() {
+		_eaRemotes.MarkConsumed()
+		d.data.Remotes = []Remote{}
 	}
 	return d, nil
 }
@@ -1675,7 +899,10 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 }
 
 func (d *SweatfileDocument) Undecoded() []string {
-	return document.UndecodedKeys(d.cstDoc.Root(), d.consumed)
+	if d.model == nil {
+		return nil
+	}
+	return d.model.Undecoded()
 }
 
 func (d *SweatfileDocument) Comment(key string) string {
@@ -1694,978 +921,548 @@ func (d *SweatfileDocument) SetInlineComment(key, comment string) {
 	d.cstDoc.SetInlineComment(key, comment)
 }
 
-func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst.Node, consumed map[string]bool, keyPrefix string) error {
-	{
-		_seen := map[string]bool{}
-		for _, _kv := range container.Children {
-			if _kv.Kind != cst.NodeKeyValue {
-				continue
-			}
-			switch cst.KeyValueName(_kv) {
-			case "allowed-mcps":
-				if _seen["allowed-mcps"] {
-					return fmt.Errorf("duplicate key %q", "allowed-mcps")
+func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
+	if _vClaude, _ok := sub.Get("claude"); _ok && _vClaude.Kind == cst.VTable {
+		_vClaude.MarkSeen()
+		claudeVal0 := &Claude{}
+		if _vClaudeAllow, _ok := _vClaude.Get("allow"); _ok && _vClaudeAllow.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vClaudeAllow.Leaf); _xok {
+				claudeVal0.Allow = _x
+				if claudeVal0.Allow == nil {
+					claudeVal0.Allow = []string{}
 				}
-				_seen["allowed-mcps"] = true
-				if v, ok := cst.ExtractStringSlice(_kv); ok {
-					data.AllowedMCPs = v
-					if data.AllowedMCPs == nil {
-						data.AllowedMCPs = []string{}
-					}
-					consumed[keyPrefix+"allowed-mcps"] = true
-				}
+				_vClaudeAllow.MarkConsumed()
 			}
 		}
-	}
-	{
-		_ctClaude, _dupClaude := cst.FindChildTableDup(doc.Root(), container, "claude")
-		if _dupClaude {
-			return fmt.Errorf("duplicate table %q", "claude")
-		}
-		if _ctClaude == nil {
-			_ctClaude = cst.FindChildInlineTable(container, "claude")
-		}
-		if _ctClaude != nil {
-			consumed[keyPrefix+"claude"] = true
-			claudeVal0 := &Claude{}
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range _ctClaude.Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "allow":
-						if _seen["allow"] {
-							return fmt.Errorf("duplicate key %q", "allow")
-						}
-						_seen["allow"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							claudeVal0.Allow = v
-							if claudeVal0.Allow == nil {
-								claudeVal0.Allow = []string{}
-							}
-							consumed[keyPrefix+"claude.allow"] = true
-						}
-					}
+		data.Claude = claudeVal0
+	} else {
+		claudeVal0 := &Claude{}
+		_foundClaude := false
+		if _vAllow, _ok := sub.Get("allow"); _ok && _vAllow.Kind == cst.VLeaf {
+			_foundClaude = true
+			if _x, _xok := cst.ExtractStringSlice(_vAllow.Leaf); _xok {
+				claudeVal0.Allow = _x
+				if claudeVal0.Allow == nil {
+					claudeVal0.Allow = []string{}
 				}
+				_vAllow.MarkConsumed()
 			}
+		}
+		if _foundClaude {
 			data.Claude = claudeVal0
-		} else {
-			claudeVal0 := &Claude{}
-			_found := false
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range container.Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "allow":
-						if _seen["allow"] {
-							return fmt.Errorf("duplicate key %q", "allow")
-						}
-						_seen["allow"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							claudeVal0.Allow = v
-							if claudeVal0.Allow == nil {
-								claudeVal0.Allow = []string{}
-							}
-							consumed["allow"] = true
-						}
-					}
-				}
-			}
-			if _found {
-				data.Claude = claudeVal0
-			}
 		}
 	}
-	{
-		_ctGit, _dupGit := cst.FindChildTableDup(doc.Root(), container, "git")
-		if _dupGit {
-			return fmt.Errorf("duplicate table %q", "git")
-		}
-		if _ctGit == nil {
-			_ctGit = cst.FindChildInlineTable(container, "git")
-		}
-		if _ctGit != nil {
-			consumed[keyPrefix+"git"] = true
-			gitVal1 := &Git{}
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range _ctGit.Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "excludes":
-						if _seen["excludes"] {
-							return fmt.Errorf("duplicate key %q", "excludes")
-						}
-						_seen["excludes"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							gitVal1.Excludes = v
-							if gitVal1.Excludes == nil {
-								gitVal1.Excludes = []string{}
-							}
-							consumed[keyPrefix+"git.excludes"] = true
-						}
-					}
+	if _vGit, _ok := sub.Get("git"); _ok && _vGit.Kind == cst.VTable {
+		_vGit.MarkSeen()
+		gitVal1 := &Git{}
+		if _vGitExcludes, _ok := _vGit.Get("excludes"); _ok && _vGitExcludes.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vGitExcludes.Leaf); _xok {
+				gitVal1.Excludes = _x
+				if gitVal1.Excludes == nil {
+					gitVal1.Excludes = []string{}
 				}
+				_vGitExcludes.MarkConsumed()
 			}
+		}
+		data.Git = gitVal1
+	} else {
+		gitVal1 := &Git{}
+		_foundGit := false
+		if _vExcludes, _ok := sub.Get("excludes"); _ok && _vExcludes.Kind == cst.VLeaf {
+			_foundGit = true
+			if _x, _xok := cst.ExtractStringSlice(_vExcludes.Leaf); _xok {
+				gitVal1.Excludes = _x
+				if gitVal1.Excludes == nil {
+					gitVal1.Excludes = []string{}
+				}
+				_vExcludes.MarkConsumed()
+			}
+		}
+		if _foundGit {
 			data.Git = gitVal1
-		} else {
-			gitVal1 := &Git{}
-			_found := false
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range container.Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "excludes":
-						if _seen["excludes"] {
-							return fmt.Errorf("duplicate key %q", "excludes")
-						}
-						_seen["excludes"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							gitVal1.Excludes = v
-							if gitVal1.Excludes == nil {
-								gitVal1.Excludes = []string{}
-							}
-							consumed["excludes"] = true
-						}
-					}
-				}
-			}
-			if _found {
-				data.Git = gitVal1
-			}
 		}
 	}
-	{
-		_ctDirenv, _dupDirenv := cst.FindChildTableDup(doc.Root(), container, "direnv")
-		if _dupDirenv {
-			return fmt.Errorf("duplicate table %q", "direnv")
+	if _vDirenv, _ok := sub.Get("direnv"); _ok && _vDirenv.Kind == cst.VTable {
+		_vDirenv.MarkSeen()
+		direnvVal2 := &Direnv{}
+		if _vDirenvEnvrc, _ok := _vDirenv.Get("envrc"); _ok && _vDirenvEnvrc.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vDirenvEnvrc.Leaf); _xok {
+				direnvVal2.Envrc = _x
+				if direnvVal2.Envrc == nil {
+					direnvVal2.Envrc = []string{}
+				}
+				_vDirenvEnvrc.MarkConsumed()
+			}
 		}
-		if _ctDirenv == nil {
-			_ctDirenv = cst.FindChildInlineTable(container, "direnv")
-		}
-		if _ctDirenv != nil {
-			consumed[keyPrefix+"direnv"] = true
-			direnvVal2 := &Direnv{}
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range _ctDirenv.Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "envrc":
-						if _seen["envrc"] {
-							return fmt.Errorf("duplicate key %q", "envrc")
-						}
-						_seen["envrc"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							direnvVal2.Envrc = v
-							if direnvVal2.Envrc == nil {
-								direnvVal2.Envrc = []string{}
-							}
-							consumed[keyPrefix+"direnv.envrc"] = true
-						}
+		if _vDirenvDotenv, _ok := _vDirenv.Get("dotenv"); _ok && _vDirenvDotenv.Kind == cst.VTable {
+			_vDirenvDotenv.MarkSeen()
+			direnvVal2.Dotenv = make(map[string]string)
+			for _iDirenvDotenv := range _vDirenvDotenv.Fields {
+				_fDirenvDotenv := &_vDirenvDotenv.Fields[_iDirenvDotenv]
+				if _fDirenvDotenv.Val.Kind == cst.VLeaf {
+					if _s, _sok := cst.ExtractString(_fDirenvDotenv.Val.Leaf); _sok {
+						direnvVal2.Dotenv[_fDirenvDotenv.Key] = _s
+						_fDirenvDotenv.Val.MarkConsumed()
 					}
 				}
 			}
-			{
-				_ctDirenvDotenv := cst.FindChildTable(doc.Root(), _ctDirenv, "dotenv")
-				if _ctDirenvDotenv != nil {
-					direnvVal2.Dotenv = cst.ExtractStringMap(_ctDirenvDotenv)
-					if direnvVal2.Dotenv == nil {
-						direnvVal2.Dotenv = map[string]string{}
-					}
-					consumed[keyPrefix+"direnv.dotenv"] = true
-					for _ik := range direnvVal2.Dotenv {
-						consumed[keyPrefix+"direnv.dotenv"+"."+_ik] = true
-					}
-				} else {
-					_it := cst.FindChildInlineTable(_ctDirenv, "dotenv")
-					if _it != nil {
-						direnvVal2.Dotenv = cst.ExtractStringMap(_it)
-						if direnvVal2.Dotenv == nil {
-							direnvVal2.Dotenv = map[string]string{}
-						}
-						consumed[keyPrefix+"direnv.dotenv"] = true
-						for _ik := range direnvVal2.Dotenv {
-							consumed[keyPrefix+"direnv.dotenv"+"."+_ik] = true
-						}
-					}
+		}
+		data.Direnv = direnvVal2
+	} else {
+		direnvVal2 := &Direnv{}
+		_foundDirenv := false
+		if _vEnvrc, _ok := sub.Get("envrc"); _ok && _vEnvrc.Kind == cst.VLeaf {
+			_foundDirenv = true
+			if _x, _xok := cst.ExtractStringSlice(_vEnvrc.Leaf); _xok {
+				direnvVal2.Envrc = _x
+				if direnvVal2.Envrc == nil {
+					direnvVal2.Envrc = []string{}
 				}
+				_vEnvrc.MarkConsumed()
 			}
+		}
+		if _foundDirenv {
 			data.Direnv = direnvVal2
-		} else {
-			direnvVal2 := &Direnv{}
-			_found := false
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range container.Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "envrc":
-						if _seen["envrc"] {
-							return fmt.Errorf("duplicate key %q", "envrc")
-						}
-						_seen["envrc"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							direnvVal2.Envrc = v
-							if direnvVal2.Envrc == nil {
-								direnvVal2.Envrc = []string{}
-							}
-							consumed["envrc"] = true
-						}
-					}
-				}
-			}
-			_impDirenv := cst.FindImplicitChildTable(doc.Root(), container, "direnv")
-			if _impDirenv != nil {
-				_found = true
-				consumed[keyPrefix+"direnv"] = true
-				{
-					_ctDirenvDotenv := cst.FindChildTable(doc.Root(), _impDirenv, "dotenv")
-					if _ctDirenvDotenv != nil {
-						direnvVal2.Dotenv = cst.ExtractStringMap(_ctDirenvDotenv)
-						if direnvVal2.Dotenv == nil {
-							direnvVal2.Dotenv = map[string]string{}
-						}
-						consumed[keyPrefix+"direnv.dotenv"] = true
-						for _ik := range direnvVal2.Dotenv {
-							consumed[keyPrefix+"direnv.dotenv"+"."+_ik] = true
-						}
-					} else {
-						_it := cst.FindChildInlineTable(_impDirenv, "dotenv")
-						if _it != nil {
-							direnvVal2.Dotenv = cst.ExtractStringMap(_it)
-							if direnvVal2.Dotenv == nil {
-								direnvVal2.Dotenv = map[string]string{}
-							}
-							consumed[keyPrefix+"direnv.dotenv"] = true
-							for _ik := range direnvVal2.Dotenv {
-								consumed[keyPrefix+"direnv.dotenv"+"."+_ik] = true
-							}
-						}
-					}
-				}
-			}
-			if _found {
-				data.Direnv = direnvVal2
-			}
 		}
 	}
-	{
-		_ctHooks, _dupHooks := cst.FindChildTableDup(doc.Root(), container, "hooks")
-		if _dupHooks {
-			return fmt.Errorf("duplicate table %q", "hooks")
-		}
-		if _ctHooks == nil {
-			_ctHooks = cst.FindChildInlineTable(container, "hooks")
-		}
-		if _ctHooks != nil {
-			consumed[keyPrefix+"hooks"] = true
-			hooksVal3 := &Hooks{}
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range _ctHooks.Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "create":
-						if _seen["create"] {
-							return fmt.Errorf("duplicate key %q", "create")
-						}
-						_seen["create"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.Create = &v
-							consumed[keyPrefix+"hooks.create"] = true
-						}
-					case "stop":
-						if _seen["stop"] {
-							return fmt.Errorf("duplicate key %q", "stop")
-						}
-						_seen["stop"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.Stop = &v
-							consumed[keyPrefix+"hooks.stop"] = true
-						}
-					case "pre-merge":
-						if _seen["pre-merge"] {
-							return fmt.Errorf("duplicate key %q", "pre-merge")
-						}
-						_seen["pre-merge"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.PreMerge = &v
-							consumed[keyPrefix+"hooks.pre-merge"] = true
-						}
-					case "on-attach":
-						if _seen["on-attach"] {
-							return fmt.Errorf("duplicate key %q", "on-attach")
-						}
-						_seen["on-attach"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.OnAttach = &v
-							consumed[keyPrefix+"hooks.on-attach"] = true
-						}
-					case "on-detach":
-						if _seen["on-detach"] {
-							return fmt.Errorf("duplicate key %q", "on-detach")
-						}
-						_seen["on-detach"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.OnDetach = &v
-							consumed[keyPrefix+"hooks.on-detach"] = true
-						}
-					case "disallow-main-worktree":
-						if _seen["disallow-main-worktree"] {
-							return fmt.Errorf("duplicate key %q", "disallow-main-worktree")
-						}
-						_seen["disallow-main-worktree"] = true
-						if v, ok := cst.ExtractBool(_kv); ok {
-							hooksVal3.DisallowMainWorktree = &v
-							consumed[keyPrefix+"hooks.disallow-main-worktree"] = true
-						}
-					case "tool-use-log":
-						if _seen["tool-use-log"] {
-							return fmt.Errorf("duplicate key %q", "tool-use-log")
-						}
-						_seen["tool-use-log"] = true
-						if v, ok := cst.ExtractBool(_kv); ok {
-							hooksVal3.ToolUseLog = &v
-							consumed[keyPrefix+"hooks.tool-use-log"] = true
-						}
-					case "disable-merge":
-						if _seen["disable-merge"] {
-							return fmt.Errorf("duplicate key %q", "disable-merge")
-						}
-						_seen["disable-merge"] = true
-						if v, ok := cst.ExtractBool(_kv); ok {
-							hooksVal3.DisableMerge = &v
-							consumed[keyPrefix+"hooks.disable-merge"] = true
-						}
-					case "disable-nix-gc":
-						if _seen["disable-nix-gc"] {
-							return fmt.Errorf("duplicate key %q", "disable-nix-gc")
-						}
-						_seen["disable-nix-gc"] = true
-						if v, ok := cst.ExtractBool(_kv); ok {
-							hooksVal3.DisableNixGC = &v
-							consumed[keyPrefix+"hooks.disable-nix-gc"] = true
-						}
-					case "disable-merge-build-worktree":
-						if _seen["disable-merge-build-worktree"] {
-							return fmt.Errorf("duplicate key %q", "disable-merge-build-worktree")
-						}
-						_seen["disable-merge-build-worktree"] = true
-						if v, ok := cst.ExtractBool(_kv); ok {
-							hooksVal3.DisableMergeBuildWorktree = &v
-							consumed[keyPrefix+"hooks.disable-merge-build-worktree"] = true
-						}
-					case "pre-merge-output-format":
-						if _seen["pre-merge-output-format"] {
-							return fmt.Errorf("duplicate key %q", "pre-merge-output-format")
-						}
-						_seen["pre-merge-output-format"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.PreMergeOutputFormat = &v
-							consumed[keyPrefix+"hooks.pre-merge-output-format"] = true
-						}
-					case "inactivity-timeout":
-						if _seen["inactivity-timeout"] {
-							return fmt.Errorf("duplicate key %q", "inactivity-timeout")
-						}
-						_seen["inactivity-timeout"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.InactivityTimeout = &v
-							consumed[keyPrefix+"hooks.inactivity-timeout"] = true
-						}
-					}
-				}
+	if _vHooks, _ok := sub.Get("hooks"); _ok && _vHooks.Kind == cst.VTable {
+		_vHooks.MarkSeen()
+		hooksVal3 := &Hooks{}
+		if _vHooksCreate, _ok := _vHooks.Get("create"); _ok && _vHooksCreate.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksCreate.Leaf); _xok {
+				hooksVal3.Create = &_x
+				_vHooksCreate.MarkConsumed()
 			}
+		}
+		if _vHooksStop, _ok := _vHooks.Get("stop"); _ok && _vHooksStop.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksStop.Leaf); _xok {
+				hooksVal3.Stop = &_x
+				_vHooksStop.MarkConsumed()
+			}
+		}
+		if _vHooksPreMerge, _ok := _vHooks.Get("pre-merge"); _ok && _vHooksPreMerge.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksPreMerge.Leaf); _xok {
+				hooksVal3.PreMerge = &_x
+				_vHooksPreMerge.MarkConsumed()
+			}
+		}
+		if _vHooksOnAttach, _ok := _vHooks.Get("on-attach"); _ok && _vHooksOnAttach.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksOnAttach.Leaf); _xok {
+				hooksVal3.OnAttach = &_x
+				_vHooksOnAttach.MarkConsumed()
+			}
+		}
+		if _vHooksOnDetach, _ok := _vHooks.Get("on-detach"); _ok && _vHooksOnDetach.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksOnDetach.Leaf); _xok {
+				hooksVal3.OnDetach = &_x
+				_vHooksOnDetach.MarkConsumed()
+			}
+		}
+		if _vHooksDisallowMainWorktree, _ok := _vHooks.Get("disallow-main-worktree"); _ok && _vHooksDisallowMainWorktree.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksDisallowMainWorktree.Leaf); _xok {
+				hooksVal3.DisallowMainWorktree = &_x
+				_vHooksDisallowMainWorktree.MarkConsumed()
+			}
+		}
+		if _vHooksToolUseLog, _ok := _vHooks.Get("tool-use-log"); _ok && _vHooksToolUseLog.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksToolUseLog.Leaf); _xok {
+				hooksVal3.ToolUseLog = &_x
+				_vHooksToolUseLog.MarkConsumed()
+			}
+		}
+		if _vHooksDisableMerge, _ok := _vHooks.Get("disable-merge"); _ok && _vHooksDisableMerge.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksDisableMerge.Leaf); _xok {
+				hooksVal3.DisableMerge = &_x
+				_vHooksDisableMerge.MarkConsumed()
+			}
+		}
+		if _vHooksDisableNixGc, _ok := _vHooks.Get("disable-nix-gc"); _ok && _vHooksDisableNixGc.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksDisableNixGc.Leaf); _xok {
+				hooksVal3.DisableNixGC = &_x
+				_vHooksDisableNixGc.MarkConsumed()
+			}
+		}
+		if _vHooksDisableMergeBuildWorktree, _ok := _vHooks.Get("disable-merge-build-worktree"); _ok && _vHooksDisableMergeBuildWorktree.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksDisableMergeBuildWorktree.Leaf); _xok {
+				hooksVal3.DisableMergeBuildWorktree = &_x
+				_vHooksDisableMergeBuildWorktree.MarkConsumed()
+			}
+		}
+		if _vHooksPreMergeOutputFormat, _ok := _vHooks.Get("pre-merge-output-format"); _ok && _vHooksPreMergeOutputFormat.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksPreMergeOutputFormat.Leaf); _xok {
+				hooksVal3.PreMergeOutputFormat = &_x
+				_vHooksPreMergeOutputFormat.MarkConsumed()
+			}
+		}
+		if _vHooksInactivityTimeout, _ok := _vHooks.Get("inactivity-timeout"); _ok && _vHooksInactivityTimeout.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksInactivityTimeout.Leaf); _xok {
+				hooksVal3.InactivityTimeout = &_x
+				_vHooksInactivityTimeout.MarkConsumed()
+			}
+		}
+		data.Hooks = hooksVal3
+	} else {
+		hooksVal3 := &Hooks{}
+		_foundHooks := false
+		if _vCreate, _ok := sub.Get("create"); _ok && _vCreate.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vCreate.Leaf); _xok {
+				hooksVal3.Create = &_x
+				_vCreate.MarkConsumed()
+			}
+		}
+		if _vStop, _ok := sub.Get("stop"); _ok && _vStop.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vStop.Leaf); _xok {
+				hooksVal3.Stop = &_x
+				_vStop.MarkConsumed()
+			}
+		}
+		if _vPreMerge, _ok := sub.Get("pre-merge"); _ok && _vPreMerge.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vPreMerge.Leaf); _xok {
+				hooksVal3.PreMerge = &_x
+				_vPreMerge.MarkConsumed()
+			}
+		}
+		if _vOnAttach, _ok := sub.Get("on-attach"); _ok && _vOnAttach.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vOnAttach.Leaf); _xok {
+				hooksVal3.OnAttach = &_x
+				_vOnAttach.MarkConsumed()
+			}
+		}
+		if _vOnDetach, _ok := sub.Get("on-detach"); _ok && _vOnDetach.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vOnDetach.Leaf); _xok {
+				hooksVal3.OnDetach = &_x
+				_vOnDetach.MarkConsumed()
+			}
+		}
+		if _vDisallowMainWorktree, _ok := sub.Get("disallow-main-worktree"); _ok && _vDisallowMainWorktree.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vDisallowMainWorktree.Leaf); _xok {
+				hooksVal3.DisallowMainWorktree = &_x
+				_vDisallowMainWorktree.MarkConsumed()
+			}
+		}
+		if _vToolUseLog, _ok := sub.Get("tool-use-log"); _ok && _vToolUseLog.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vToolUseLog.Leaf); _xok {
+				hooksVal3.ToolUseLog = &_x
+				_vToolUseLog.MarkConsumed()
+			}
+		}
+		if _vDisableMerge, _ok := sub.Get("disable-merge"); _ok && _vDisableMerge.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vDisableMerge.Leaf); _xok {
+				hooksVal3.DisableMerge = &_x
+				_vDisableMerge.MarkConsumed()
+			}
+		}
+		if _vDisableNixGc, _ok := sub.Get("disable-nix-gc"); _ok && _vDisableNixGc.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vDisableNixGc.Leaf); _xok {
+				hooksVal3.DisableNixGC = &_x
+				_vDisableNixGc.MarkConsumed()
+			}
+		}
+		if _vDisableMergeBuildWorktree, _ok := sub.Get("disable-merge-build-worktree"); _ok && _vDisableMergeBuildWorktree.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vDisableMergeBuildWorktree.Leaf); _xok {
+				hooksVal3.DisableMergeBuildWorktree = &_x
+				_vDisableMergeBuildWorktree.MarkConsumed()
+			}
+		}
+		if _vPreMergeOutputFormat, _ok := sub.Get("pre-merge-output-format"); _ok && _vPreMergeOutputFormat.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vPreMergeOutputFormat.Leaf); _xok {
+				hooksVal3.PreMergeOutputFormat = &_x
+				_vPreMergeOutputFormat.MarkConsumed()
+			}
+		}
+		if _vInactivityTimeout, _ok := sub.Get("inactivity-timeout"); _ok && _vInactivityTimeout.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vInactivityTimeout.Leaf); _xok {
+				hooksVal3.InactivityTimeout = &_x
+				_vInactivityTimeout.MarkConsumed()
+			}
+		}
+		if _foundHooks {
 			data.Hooks = hooksVal3
-		} else {
-			hooksVal3 := &Hooks{}
-			_found := false
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range container.Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "create":
-						if _seen["create"] {
-							return fmt.Errorf("duplicate key %q", "create")
-						}
-						_seen["create"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.Create = &v
-							_found = true
-							consumed["create"] = true
-						}
-					case "stop":
-						if _seen["stop"] {
-							return fmt.Errorf("duplicate key %q", "stop")
-						}
-						_seen["stop"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.Stop = &v
-							_found = true
-							consumed["stop"] = true
-						}
-					case "pre-merge":
-						if _seen["pre-merge"] {
-							return fmt.Errorf("duplicate key %q", "pre-merge")
-						}
-						_seen["pre-merge"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.PreMerge = &v
-							_found = true
-							consumed["pre-merge"] = true
-						}
-					case "on-attach":
-						if _seen["on-attach"] {
-							return fmt.Errorf("duplicate key %q", "on-attach")
-						}
-						_seen["on-attach"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.OnAttach = &v
-							_found = true
-							consumed["on-attach"] = true
-						}
-					case "on-detach":
-						if _seen["on-detach"] {
-							return fmt.Errorf("duplicate key %q", "on-detach")
-						}
-						_seen["on-detach"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.OnDetach = &v
-							_found = true
-							consumed["on-detach"] = true
-						}
-					case "disallow-main-worktree":
-						if _seen["disallow-main-worktree"] {
-							return fmt.Errorf("duplicate key %q", "disallow-main-worktree")
-						}
-						_seen["disallow-main-worktree"] = true
-						if v, ok := cst.ExtractBool(_kv); ok {
-							hooksVal3.DisallowMainWorktree = &v
-							_found = true
-							consumed["disallow-main-worktree"] = true
-						}
-					case "tool-use-log":
-						if _seen["tool-use-log"] {
-							return fmt.Errorf("duplicate key %q", "tool-use-log")
-						}
-						_seen["tool-use-log"] = true
-						if v, ok := cst.ExtractBool(_kv); ok {
-							hooksVal3.ToolUseLog = &v
-							_found = true
-							consumed["tool-use-log"] = true
-						}
-					case "disable-merge":
-						if _seen["disable-merge"] {
-							return fmt.Errorf("duplicate key %q", "disable-merge")
-						}
-						_seen["disable-merge"] = true
-						if v, ok := cst.ExtractBool(_kv); ok {
-							hooksVal3.DisableMerge = &v
-							_found = true
-							consumed["disable-merge"] = true
-						}
-					case "disable-nix-gc":
-						if _seen["disable-nix-gc"] {
-							return fmt.Errorf("duplicate key %q", "disable-nix-gc")
-						}
-						_seen["disable-nix-gc"] = true
-						if v, ok := cst.ExtractBool(_kv); ok {
-							hooksVal3.DisableNixGC = &v
-							_found = true
-							consumed["disable-nix-gc"] = true
-						}
-					case "disable-merge-build-worktree":
-						if _seen["disable-merge-build-worktree"] {
-							return fmt.Errorf("duplicate key %q", "disable-merge-build-worktree")
-						}
-						_seen["disable-merge-build-worktree"] = true
-						if v, ok := cst.ExtractBool(_kv); ok {
-							hooksVal3.DisableMergeBuildWorktree = &v
-							_found = true
-							consumed["disable-merge-build-worktree"] = true
-						}
-					case "pre-merge-output-format":
-						if _seen["pre-merge-output-format"] {
-							return fmt.Errorf("duplicate key %q", "pre-merge-output-format")
-						}
-						_seen["pre-merge-output-format"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.PreMergeOutputFormat = &v
-							_found = true
-							consumed["pre-merge-output-format"] = true
-						}
-					case "inactivity-timeout":
-						if _seen["inactivity-timeout"] {
-							return fmt.Errorf("duplicate key %q", "inactivity-timeout")
-						}
-						_seen["inactivity-timeout"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							hooksVal3.InactivityTimeout = &v
-							_found = true
-							consumed["inactivity-timeout"] = true
-						}
-					}
-				}
-			}
-			if _found {
-				data.Hooks = hooksVal3
-			}
 		}
 	}
-	{
-		_ctSessionEntry, _dupSessionEntry := cst.FindChildTableDup(doc.Root(), container, "session-entry")
-		if _dupSessionEntry {
-			return fmt.Errorf("duplicate table %q", "session-entry")
+	if _vSessionEntry, _ok := sub.Get("session-entry"); _ok && _vSessionEntry.Kind == cst.VTable {
+		_vSessionEntry.MarkSeen()
+		sessionEntryVal4 := &SessionEntry{}
+		if _vSessionEntryStart, _ok := _vSessionEntry.Get("start"); _ok && _vSessionEntryStart.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vSessionEntryStart.Leaf); _xok {
+				sessionEntryVal4.Start = _x
+				if sessionEntryVal4.Start == nil {
+					sessionEntryVal4.Start = []string{}
+				}
+				_vSessionEntryStart.MarkConsumed()
+			}
 		}
-		if _ctSessionEntry == nil {
-			_ctSessionEntry = cst.FindChildInlineTable(container, "session-entry")
+		if _vSessionEntryResume, _ok := _vSessionEntry.Get("resume"); _ok && _vSessionEntryResume.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vSessionEntryResume.Leaf); _xok {
+				sessionEntryVal4.Resume = _x
+				if sessionEntryVal4.Resume == nil {
+					sessionEntryVal4.Resume = []string{}
+				}
+				_vSessionEntryResume.MarkConsumed()
+			}
 		}
-		if _ctSessionEntry != nil {
-			consumed[keyPrefix+"session-entry"] = true
-			sessionEntryVal4 := &SessionEntry{}
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range _ctSessionEntry.Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "start":
-						if _seen["start"] {
-							return fmt.Errorf("duplicate key %q", "start")
-						}
-						_seen["start"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							sessionEntryVal4.Start = v
-							if sessionEntryVal4.Start == nil {
-								sessionEntryVal4.Start = []string{}
-							}
-							consumed[keyPrefix+"session-entry.start"] = true
-						}
-					case "resume":
-						if _seen["resume"] {
-							return fmt.Errorf("duplicate key %q", "resume")
-						}
-						_seen["resume"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							sessionEntryVal4.Resume = v
-							if sessionEntryVal4.Resume == nil {
-								sessionEntryVal4.Resume = []string{}
-							}
-							consumed[keyPrefix+"session-entry.resume"] = true
-						}
-					case "liveness-probe":
-						if _seen["liveness-probe"] {
-							return fmt.Errorf("duplicate key %q", "liveness-probe")
-						}
-						_seen["liveness-probe"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							sessionEntryVal4.LivenessProbe = v
-							if sessionEntryVal4.LivenessProbe == nil {
-								sessionEntryVal4.LivenessProbe = []string{}
-							}
-							consumed[keyPrefix+"session-entry.liveness-probe"] = true
-						}
-					case "tombstone-retention":
-						if _seen["tombstone-retention"] {
-							return fmt.Errorf("duplicate key %q", "tombstone-retention")
-						}
-						_seen["tombstone-retention"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							sessionEntryVal4.TombstoneRetention = v
-							consumed[keyPrefix+"session-entry.tombstone-retention"] = true
-						}
+		if _vSessionEntryEnv, _ok := _vSessionEntry.Get("env"); _ok && _vSessionEntryEnv.Kind == cst.VTable {
+			_vSessionEntryEnv.MarkSeen()
+			sessionEntryVal4.Env = make(map[string]string)
+			for _iSessionEntryEnv := range _vSessionEntryEnv.Fields {
+				_fSessionEntryEnv := &_vSessionEntryEnv.Fields[_iSessionEntryEnv]
+				if _fSessionEntryEnv.Val.Kind == cst.VLeaf {
+					if _s, _sok := cst.ExtractString(_fSessionEntryEnv.Val.Leaf); _sok {
+						sessionEntryVal4.Env[_fSessionEntryEnv.Key] = _s
+						_fSessionEntryEnv.Val.MarkConsumed()
 					}
 				}
 			}
-			{
-				_ctSessionEntryEnv := cst.FindChildTable(doc.Root(), _ctSessionEntry, "env")
-				if _ctSessionEntryEnv != nil {
-					sessionEntryVal4.Env = cst.ExtractStringMap(_ctSessionEntryEnv)
-					if sessionEntryVal4.Env == nil {
-						sessionEntryVal4.Env = map[string]string{}
-					}
-					consumed[keyPrefix+"session-entry.env"] = true
-					for _ik := range sessionEntryVal4.Env {
-						consumed[keyPrefix+"session-entry.env"+"."+_ik] = true
-					}
-				} else {
-					_it := cst.FindChildInlineTable(_ctSessionEntry, "env")
-					if _it != nil {
-						sessionEntryVal4.Env = cst.ExtractStringMap(_it)
-						if sessionEntryVal4.Env == nil {
-							sessionEntryVal4.Env = map[string]string{}
-						}
-						consumed[keyPrefix+"session-entry.env"] = true
-						for _ik := range sessionEntryVal4.Env {
-							consumed[keyPrefix+"session-entry.env"+"."+_ik] = true
-						}
-					}
+		}
+		if _vSessionEntryLivenessProbe, _ok := _vSessionEntry.Get("liveness-probe"); _ok && _vSessionEntryLivenessProbe.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vSessionEntryLivenessProbe.Leaf); _xok {
+				sessionEntryVal4.LivenessProbe = _x
+				if sessionEntryVal4.LivenessProbe == nil {
+					sessionEntryVal4.LivenessProbe = []string{}
 				}
+				_vSessionEntryLivenessProbe.MarkConsumed()
 			}
+		}
+		if _vSessionEntryTombstoneRetention, _ok := _vSessionEntry.Get("tombstone-retention"); _ok && _vSessionEntryTombstoneRetention.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vSessionEntryTombstoneRetention.Leaf); _xok {
+				sessionEntryVal4.TombstoneRetention = _x
+				_vSessionEntryTombstoneRetention.MarkConsumed()
+			}
+		}
+		data.SessionEntry = sessionEntryVal4
+	} else {
+		sessionEntryVal4 := &SessionEntry{}
+		_foundSessionEntry := false
+		if _vStart, _ok := sub.Get("start"); _ok && _vStart.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractStringSlice(_vStart.Leaf); _xok {
+				sessionEntryVal4.Start = _x
+				if sessionEntryVal4.Start == nil {
+					sessionEntryVal4.Start = []string{}
+				}
+				_vStart.MarkConsumed()
+			}
+		}
+		if _vResume, _ok := sub.Get("resume"); _ok && _vResume.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractStringSlice(_vResume.Leaf); _xok {
+				sessionEntryVal4.Resume = _x
+				if sessionEntryVal4.Resume == nil {
+					sessionEntryVal4.Resume = []string{}
+				}
+				_vResume.MarkConsumed()
+			}
+		}
+		if _vLivenessProbe, _ok := sub.Get("liveness-probe"); _ok && _vLivenessProbe.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractStringSlice(_vLivenessProbe.Leaf); _xok {
+				sessionEntryVal4.LivenessProbe = _x
+				if sessionEntryVal4.LivenessProbe == nil {
+					sessionEntryVal4.LivenessProbe = []string{}
+				}
+				_vLivenessProbe.MarkConsumed()
+			}
+		}
+		if _vTombstoneRetention, _ok := sub.Get("tombstone-retention"); _ok && _vTombstoneRetention.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractString(_vTombstoneRetention.Leaf); _xok {
+				sessionEntryVal4.TombstoneRetention = _x
+				_vTombstoneRetention.MarkConsumed()
+			}
+		}
+		if _foundSessionEntry {
 			data.SessionEntry = sessionEntryVal4
-		} else {
-			sessionEntryVal4 := &SessionEntry{}
-			_found := false
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range container.Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "start":
-						if _seen["start"] {
-							return fmt.Errorf("duplicate key %q", "start")
-						}
-						_seen["start"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							sessionEntryVal4.Start = v
-							if sessionEntryVal4.Start == nil {
-								sessionEntryVal4.Start = []string{}
-							}
-							consumed["start"] = true
-						}
-					case "resume":
-						if _seen["resume"] {
-							return fmt.Errorf("duplicate key %q", "resume")
-						}
-						_seen["resume"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							sessionEntryVal4.Resume = v
-							if sessionEntryVal4.Resume == nil {
-								sessionEntryVal4.Resume = []string{}
-							}
-							consumed["resume"] = true
-						}
-					case "liveness-probe":
-						if _seen["liveness-probe"] {
-							return fmt.Errorf("duplicate key %q", "liveness-probe")
-						}
-						_seen["liveness-probe"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							sessionEntryVal4.LivenessProbe = v
-							if sessionEntryVal4.LivenessProbe == nil {
-								sessionEntryVal4.LivenessProbe = []string{}
-							}
-							consumed["liveness-probe"] = true
-						}
-					case "tombstone-retention":
-						if _seen["tombstone-retention"] {
-							return fmt.Errorf("duplicate key %q", "tombstone-retention")
-						}
-						_seen["tombstone-retention"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							sessionEntryVal4.TombstoneRetention = v
-							_found = true
-							consumed["tombstone-retention"] = true
-						}
-					}
+		}
+	}
+	if _vStartCommands, _ok := sub.Get("start-commands"); _ok && _vStartCommands.Kind == cst.VArray {
+		_vStartCommands.MarkSeen()
+		data.StartCommands = make([]StartCommand, len(_vStartCommands.Items))
+		for i := range _vStartCommands.Items {
+			_eStartCommands := &_vStartCommands.Items[i]
+			_eStartCommands.MarkSeen()
+			if _vStartCommandsName, _ok := _eStartCommands.Get("name"); _ok && _vStartCommandsName.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vStartCommandsName.Leaf); _xok {
+					data.StartCommands[i].Name = _x
+					_vStartCommandsName.MarkConsumed()
 				}
 			}
-			_impSessionEntry := cst.FindImplicitChildTable(doc.Root(), container, "session-entry")
-			if _impSessionEntry != nil {
-				_found = true
-				consumed[keyPrefix+"session-entry"] = true
-				{
-					_ctSessionEntryEnv := cst.FindChildTable(doc.Root(), _impSessionEntry, "env")
-					if _ctSessionEntryEnv != nil {
-						sessionEntryVal4.Env = cst.ExtractStringMap(_ctSessionEntryEnv)
-						if sessionEntryVal4.Env == nil {
-							sessionEntryVal4.Env = map[string]string{}
-						}
-						consumed[keyPrefix+"session-entry.env"] = true
-						for _ik := range sessionEntryVal4.Env {
-							consumed[keyPrefix+"session-entry.env"+"."+_ik] = true
-						}
-					} else {
-						_it := cst.FindChildInlineTable(_impSessionEntry, "env")
-						if _it != nil {
-							sessionEntryVal4.Env = cst.ExtractStringMap(_it)
-							if sessionEntryVal4.Env == nil {
-								sessionEntryVal4.Env = map[string]string{}
-							}
-							consumed[keyPrefix+"session-entry.env"] = true
-							for _ik := range sessionEntryVal4.Env {
-								consumed[keyPrefix+"session-entry.env"+"."+_ik] = true
-							}
-						}
-					}
+			if _vStartCommandsDescription, _ok := _eStartCommands.Get("description"); _ok && _vStartCommandsDescription.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vStartCommandsDescription.Leaf); _xok {
+					data.StartCommands[i].Description = _x
+					_vStartCommandsDescription.MarkConsumed()
 				}
 			}
-			if _found {
-				data.SessionEntry = sessionEntryVal4
+			if _vStartCommandsArgName, _ok := _eStartCommands.Get("arg-name"); _ok && _vStartCommandsArgName.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vStartCommandsArgName.Leaf); _xok {
+					data.StartCommands[i].ArgName = _x
+					_vStartCommandsArgName.MarkConsumed()
+				}
+			}
+			if _vStartCommandsArgHelp, _ok := _eStartCommands.Get("arg-help"); _ok && _vStartCommandsArgHelp.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vStartCommandsArgHelp.Leaf); _xok {
+					data.StartCommands[i].ArgHelp = _x
+					_vStartCommandsArgHelp.MarkConsumed()
+				}
+			}
+			if _vStartCommandsArgRegex, _ok := _eStartCommands.Get("arg-regex"); _ok && _vStartCommandsArgRegex.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vStartCommandsArgRegex.Leaf); _xok {
+					data.StartCommands[i].ArgRegex = &_x
+					_vStartCommandsArgRegex.MarkConsumed()
+				}
+			}
+			if _vStartCommandsExecCompletions, _ok := _eStartCommands.Get("exec-completions"); _ok && _vStartCommandsExecCompletions.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractStringSlice(_vStartCommandsExecCompletions.Leaf); _xok {
+					data.StartCommands[i].ExecCompletions = _x
+					if data.StartCommands[i].ExecCompletions == nil {
+						data.StartCommands[i].ExecCompletions = []string{}
+					}
+					_vStartCommandsExecCompletions.MarkConsumed()
+				}
+			}
+			if _vStartCommandsExecStart, _ok := _eStartCommands.Get("exec-start"); _ok && _vStartCommandsExecStart.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractStringSlice(_vStartCommandsExecStart.Leaf); _xok {
+					data.StartCommands[i].ExecStart = _x
+					if data.StartCommands[i].ExecStart == nil {
+						data.StartCommands[i].ExecStart = []string{}
+					}
+					_vStartCommandsExecStart.MarkConsumed()
+				}
 			}
 		}
 	}
-	{
-		_nodesStartCommands := cst.FindChildArrayTableNodes(doc.Root(), container, "start-commands")
-		data.StartCommands = make([]StartCommand, len(_nodesStartCommands))
-		consumed[keyPrefix+"start-commands"] = true
-		for i, _node := range _nodesStartCommands {
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range _node.Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
+	if _eaStartCommands, _eaok := sub.Get("start-commands"); _eaok && _eaStartCommands.IsEmptyArray() {
+		_eaStartCommands.MarkConsumed()
+		data.StartCommands = []StartCommand{}
+	}
+	if _vAllowedMcps, _ok := sub.Get("allowed-mcps"); _ok && _vAllowedMcps.Kind == cst.VLeaf {
+		if _x, _xok := cst.ExtractStringSlice(_vAllowedMcps.Leaf); _xok {
+			data.AllowedMCPs = _x
+			if data.AllowedMCPs == nil {
+				data.AllowedMCPs = []string{}
+			}
+			_vAllowedMcps.MarkConsumed()
+		}
+	}
+	if _vMcps, _ok := sub.Get("mcps"); _ok && _vMcps.Kind == cst.VArray {
+		_vMcps.MarkSeen()
+		data.MCPs = make([]MCPServerDef, len(_vMcps.Items))
+		for i := range _vMcps.Items {
+			_eMcps := &_vMcps.Items[i]
+			_eMcps.MarkSeen()
+			if _vMcpsName, _ok := _eMcps.Get("name"); _ok && _vMcpsName.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vMcpsName.Leaf); _xok {
+					data.MCPs[i].Name = _x
+					_vMcpsName.MarkConsumed()
+				}
+			}
+			if _vMcpsCommand, _ok := _eMcps.Get("command"); _ok && _vMcpsCommand.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vMcpsCommand.Leaf); _xok {
+					data.MCPs[i].Command = _x
+					_vMcpsCommand.MarkConsumed()
+				}
+			}
+			if _vMcpsArgs, _ok := _eMcps.Get("args"); _ok && _vMcpsArgs.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractStringSlice(_vMcpsArgs.Leaf); _xok {
+					data.MCPs[i].Args = _x
+					if data.MCPs[i].Args == nil {
+						data.MCPs[i].Args = []string{}
 					}
-					switch cst.KeyValueName(_kv) {
-					case "name":
-						if _seen["name"] {
-							return fmt.Errorf("duplicate key %q", "name")
-						}
-						_seen["name"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							data.StartCommands[i].Name = v
-							consumed[keyPrefix+"start-commands.name"] = true
-						}
-					case "description":
-						if _seen["description"] {
-							return fmt.Errorf("duplicate key %q", "description")
-						}
-						_seen["description"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							data.StartCommands[i].Description = v
-							consumed[keyPrefix+"start-commands.description"] = true
-						}
-					case "arg-name":
-						if _seen["arg-name"] {
-							return fmt.Errorf("duplicate key %q", "arg-name")
-						}
-						_seen["arg-name"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							data.StartCommands[i].ArgName = v
-							consumed[keyPrefix+"start-commands.arg-name"] = true
-						}
-					case "arg-help":
-						if _seen["arg-help"] {
-							return fmt.Errorf("duplicate key %q", "arg-help")
-						}
-						_seen["arg-help"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							data.StartCommands[i].ArgHelp = v
-							consumed[keyPrefix+"start-commands.arg-help"] = true
-						}
-					case "arg-regex":
-						if _seen["arg-regex"] {
-							return fmt.Errorf("duplicate key %q", "arg-regex")
-						}
-						_seen["arg-regex"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							data.StartCommands[i].ArgRegex = &v
-							consumed[keyPrefix+"start-commands.arg-regex"] = true
-						}
-					case "exec-completions":
-						if _seen["exec-completions"] {
-							return fmt.Errorf("duplicate key %q", "exec-completions")
-						}
-						_seen["exec-completions"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							data.StartCommands[i].ExecCompletions = v
-							if data.StartCommands[i].ExecCompletions == nil {
-								data.StartCommands[i].ExecCompletions = []string{}
-							}
-							consumed[keyPrefix+"start-commands.exec-completions"] = true
-						}
-					case "exec-start":
-						if _seen["exec-start"] {
-							return fmt.Errorf("duplicate key %q", "exec-start")
-						}
-						_seen["exec-start"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							data.StartCommands[i].ExecStart = v
-							if data.StartCommands[i].ExecStart == nil {
-								data.StartCommands[i].ExecStart = []string{}
-							}
-							consumed[keyPrefix+"start-commands.exec-start"] = true
+					_vMcpsArgs.MarkConsumed()
+				}
+			}
+			if _vMcpsEnv, _ok := _eMcps.Get("env"); _ok && _vMcpsEnv.Kind == cst.VTable {
+				_vMcpsEnv.MarkSeen()
+				data.MCPs[i].Env = make(map[string]string)
+				for _iMcpsEnv := range _vMcpsEnv.Fields {
+					_fMcpsEnv := &_vMcpsEnv.Fields[_iMcpsEnv]
+					if _fMcpsEnv.Val.Kind == cst.VLeaf {
+						if _s, _sok := cst.ExtractString(_fMcpsEnv.Val.Leaf); _sok {
+							data.MCPs[i].Env[_fMcpsEnv.Key] = _s
+							_fMcpsEnv.Val.MarkConsumed()
 						}
 					}
 				}
 			}
 		}
 	}
-	{
-		_nodesMcps := cst.FindChildArrayTableNodes(doc.Root(), container, "mcps")
-		data.MCPs = make([]MCPServerDef, len(_nodesMcps))
-		consumed[keyPrefix+"mcps"] = true
-		for i, _node := range _nodesMcps {
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range _node.Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "name":
-						if _seen["name"] {
-							return fmt.Errorf("duplicate key %q", "name")
-						}
-						_seen["name"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							data.MCPs[i].Name = v
-							consumed[keyPrefix+"mcps.name"] = true
-						}
-					case "command":
-						if _seen["command"] {
-							return fmt.Errorf("duplicate key %q", "command")
-						}
-						_seen["command"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							data.MCPs[i].Command = v
-							consumed[keyPrefix+"mcps.command"] = true
-						}
-					case "args":
-						if _seen["args"] {
-							return fmt.Errorf("duplicate key %q", "args")
-						}
-						_seen["args"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							data.MCPs[i].Args = v
-							if data.MCPs[i].Args == nil {
-								data.MCPs[i].Args = []string{}
-							}
-							consumed[keyPrefix+"mcps.args"] = true
-						}
-					}
+	if _eaMcps, _eaok := sub.Get("mcps"); _eaok && _eaMcps.IsEmptyArray() {
+		_eaMcps.MarkConsumed()
+		data.MCPs = []MCPServerDef{}
+	}
+	if _vPreMergeSkills, _ok := sub.Get("pre-merge-skills"); _ok && _vPreMergeSkills.Kind == cst.VArray {
+		_vPreMergeSkills.MarkSeen()
+		data.PreMergeSkills = make([]PreMergeSkill, len(_vPreMergeSkills.Items))
+		for i := range _vPreMergeSkills.Items {
+			_ePreMergeSkills := &_vPreMergeSkills.Items[i]
+			_ePreMergeSkills.MarkSeen()
+			if _vPreMergeSkillsName, _ok := _ePreMergeSkills.Get("name"); _ok && _vPreMergeSkillsName.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vPreMergeSkillsName.Leaf); _xok {
+					data.PreMergeSkills[i].Name = _x
+					_vPreMergeSkillsName.MarkConsumed()
 				}
 			}
-			{
-				_ctMcpsEnv := cst.FindChildTable(doc.Root(), _node, "env")
-				if _ctMcpsEnv != nil {
-					data.MCPs[i].Env = cst.ExtractStringMap(_ctMcpsEnv)
-					if data.MCPs[i].Env == nil {
-						data.MCPs[i].Env = map[string]string{}
-					}
-					consumed[keyPrefix+"mcps.env"] = true
-					for _ik := range data.MCPs[i].Env {
-						consumed[keyPrefix+"mcps.env"+"."+_ik] = true
-					}
-				} else {
-					_it := cst.FindChildInlineTable(_node, "env")
-					if _it != nil {
-						data.MCPs[i].Env = cst.ExtractStringMap(_it)
-						if data.MCPs[i].Env == nil {
-							data.MCPs[i].Env = map[string]string{}
-						}
-						consumed[keyPrefix+"mcps.env"] = true
-						for _ik := range data.MCPs[i].Env {
-							consumed[keyPrefix+"mcps.env"+"."+_ik] = true
-						}
-					}
+			if _vPreMergeSkillsRationale, _ok := _ePreMergeSkills.Get("rationale"); _ok && _vPreMergeSkillsRationale.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vPreMergeSkillsRationale.Leaf); _xok {
+					data.PreMergeSkills[i].Rationale = _x
+					_vPreMergeSkillsRationale.MarkConsumed()
 				}
 			}
 		}
 	}
-	{
-		_nodesPreMergeSkills := cst.FindChildArrayTableNodes(doc.Root(), container, "pre-merge-skills")
-		data.PreMergeSkills = make([]PreMergeSkill, len(_nodesPreMergeSkills))
-		consumed[keyPrefix+"pre-merge-skills"] = true
-		for i, _node := range _nodesPreMergeSkills {
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range _node.Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
+	if _eaPreMergeSkills, _eaok := sub.Get("pre-merge-skills"); _eaok && _eaPreMergeSkills.IsEmptyArray() {
+		_eaPreMergeSkills.MarkConsumed()
+		data.PreMergeSkills = []PreMergeSkill{}
+	}
+	if _vRemotes, _ok := sub.Get("remotes"); _ok && _vRemotes.Kind == cst.VArray {
+		_vRemotes.MarkSeen()
+		data.Remotes = make([]Remote, len(_vRemotes.Items))
+		for i := range _vRemotes.Items {
+			_eRemotes := &_vRemotes.Items[i]
+			_eRemotes.MarkSeen()
+			if _vRemotesName, _ok := _eRemotes.Get("name"); _ok && _vRemotesName.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vRemotesName.Leaf); _xok {
+					data.Remotes[i].Name = _x
+					_vRemotesName.MarkConsumed()
+				}
+			}
+			if _vRemotesSsh, _ok := _eRemotes.Get("ssh"); _ok && _vRemotesSsh.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vRemotesSsh.Leaf); _xok {
+					data.Remotes[i].SSH = _x
+					_vRemotesSsh.MarkConsumed()
+				}
+			}
+			if _vRemotesAttach, _ok := _eRemotes.Get("attach"); _ok && _vRemotesAttach.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractStringSlice(_vRemotesAttach.Leaf); _xok {
+					data.Remotes[i].Attach = _x
+					if data.Remotes[i].Attach == nil {
+						data.Remotes[i].Attach = []string{}
 					}
-					switch cst.KeyValueName(_kv) {
-					case "name":
-						if _seen["name"] {
-							return fmt.Errorf("duplicate key %q", "name")
-						}
-						_seen["name"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							data.PreMergeSkills[i].Name = v
-							consumed[keyPrefix+"pre-merge-skills.name"] = true
-						}
-					case "rationale":
-						if _seen["rationale"] {
-							return fmt.Errorf("duplicate key %q", "rationale")
-						}
-						_seen["rationale"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							data.PreMergeSkills[i].Rationale = v
-							consumed[keyPrefix+"pre-merge-skills.rationale"] = true
-						}
-					}
+					_vRemotesAttach.MarkConsumed()
+				}
+			}
+			if _vRemotesRemove, _ok := _eRemotes.Get("remove"); _ok && _vRemotesRemove.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractBool(_vRemotesRemove.Leaf); _xok {
+					data.Remotes[i].Remove = _x
+					_vRemotesRemove.MarkConsumed()
 				}
 			}
 		}
 	}
-	{
-		_nodesRemotes := cst.FindChildArrayTableNodes(doc.Root(), container, "remotes")
-		data.Remotes = make([]Remote, len(_nodesRemotes))
-		consumed[keyPrefix+"remotes"] = true
-		for i, _node := range _nodesRemotes {
-			{
-				_seen := map[string]bool{}
-				for _, _kv := range _node.Children {
-					if _kv.Kind != cst.NodeKeyValue {
-						continue
-					}
-					switch cst.KeyValueName(_kv) {
-					case "name":
-						if _seen["name"] {
-							return fmt.Errorf("duplicate key %q", "name")
-						}
-						_seen["name"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							data.Remotes[i].Name = v
-							consumed[keyPrefix+"remotes.name"] = true
-						}
-					case "ssh":
-						if _seen["ssh"] {
-							return fmt.Errorf("duplicate key %q", "ssh")
-						}
-						_seen["ssh"] = true
-						if v, ok := cst.ExtractString(_kv); ok {
-							data.Remotes[i].SSH = v
-							consumed[keyPrefix+"remotes.ssh"] = true
-						}
-					case "attach":
-						if _seen["attach"] {
-							return fmt.Errorf("duplicate key %q", "attach")
-						}
-						_seen["attach"] = true
-						if v, ok := cst.ExtractStringSlice(_kv); ok {
-							data.Remotes[i].Attach = v
-							if data.Remotes[i].Attach == nil {
-								data.Remotes[i].Attach = []string{}
-							}
-							consumed[keyPrefix+"remotes.attach"] = true
-						}
-					case "remove":
-						if _seen["remove"] {
-							return fmt.Errorf("duplicate key %q", "remove")
-						}
-						_seen["remove"] = true
-						if v, ok := cst.ExtractBool(_kv); ok {
-							data.Remotes[i].Remove = v
-							consumed[keyPrefix+"remotes.remove"] = true
-						}
-					}
-				}
-			}
-		}
+	if _eaRemotes, _eaok := sub.Get("remotes"); _eaok && _eaRemotes.IsEmptyArray() {
+		_eaRemotes.MarkConsumed()
+		data.Remotes = []Remote{}
 	}
 	return nil
 }

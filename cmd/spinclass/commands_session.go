@@ -20,6 +20,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/sessionpick"
 	"github.com/amarbel-llc/spinclass/internal/shop"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 )
 
@@ -322,11 +323,9 @@ type startArgs struct {
 func attachSession(resolvedPath worktree.ResolvedPath, args startArgs) error {
 	repoPath := resolvedPath.RepoPath
 
-	hierarchy, err := sweatfile.LoadWorktreeHierarchy(
-		os.Getenv("HOME"), repoPath, resolvedPath.AbsPath,
-	)
+	hierarchy, err := sweatfileio.LoadWorktreeHierarchy(os.Getenv("HOME"), repoPath, resolvedPath.AbsPath)
 	if err != nil {
-		hierarchy, err = sweatfile.LoadHierarchy(os.Getenv("HOME"), repoPath)
+		hierarchy, err = sweatfileio.LoadHierarchy(os.Getenv("HOME"), repoPath)
 		if err != nil {
 			return err
 		}
@@ -472,11 +471,9 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		}
 	}
 
-	hierarchy, err := sweatfile.LoadWorktreeHierarchy(
-		os.Getenv("HOME"), state.RepoPath, state.WorktreePath,
-	)
+	hierarchy, err := sweatfileio.LoadWorktreeHierarchy(os.Getenv("HOME"), state.RepoPath, state.WorktreePath)
 	if err != nil {
-		hierarchy, err = sweatfile.LoadHierarchy(os.Getenv("HOME"), state.RepoPath)
+		hierarchy, err = sweatfileio.LoadHierarchy(os.Getenv("HOME"), state.RepoPath)
 		if err != nil {
 			return err
 		}

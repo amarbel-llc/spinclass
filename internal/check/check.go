@@ -19,6 +19,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/madder"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
 	"github.com/amarbel-llc/spinclass/internal/tapblock"
 	"github.com/amarbel-llc/tap/go/pkgs/ndjson"
 	"github.com/amarbel-llc/tap/go/pkgs/reader"
@@ -92,7 +93,7 @@ func RunContext(ctx context.Context, w io.Writer, format, wtPath string, verbose
 	if err != nil || home == "" {
 		return nil, errors.New("could not resolve home directory")
 	}
-	hierarchy, err := sweatfile.LoadWorktreeHierarchy(home, repoPath, wtPath)
+	hierarchy, err := sweatfileio.LoadWorktreeHierarchy(home, repoPath, wtPath)
 	if err != nil {
 		return nil, fmt.Errorf("load sweatfile hierarchy: %w", err)
 	}

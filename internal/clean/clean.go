@@ -16,7 +16,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/nixgc"
 	"github.com/amarbel-llc/spinclass/internal/session"
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
 	"github.com/amarbel-llc/spinclass/internal/tapblock"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
@@ -334,7 +334,7 @@ func resolveTombstoneRetention(startDir string) time.Duration {
 	if err != nil {
 		return session.DefaultTombstoneRetention()
 	}
-	hierarchy, err := sweatfile.LoadHierarchy(home, startDir)
+	hierarchy, err := sweatfileio.LoadHierarchy(home, startDir)
 	if err != nil {
 		return session.DefaultTombstoneRetention()
 	}

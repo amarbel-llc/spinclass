@@ -1,9 +1,12 @@
-package sweatfile
+package sweatfile_test
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	. "github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
 )
 
 func TestParseMinimal(t *testing.T) {
@@ -11,7 +14,7 @@ func TestParseMinimal(t *testing.T) {
 [git]
 excludes = [".claude/"]
 `
-	doc, err := Parse([]byte(input))
+	doc, err := sweatfileio.Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -22,7 +25,7 @@ excludes = [".claude/"]
 }
 
 func TestParseEmpty(t *testing.T) {
-	doc, err := Parse([]byte(""))
+	doc, err := sweatfileio.Parse([]byte(""))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -37,7 +40,7 @@ func TestLoadFromPath(t *testing.T) {
 	path := filepath.Join(dir, "sweatfile")
 	os.WriteFile(path, []byte("[git]\nexcludes = [\".direnv/\"]"), 0o644)
 
-	doc, err := Load(path)
+	doc, err := sweatfileio.Load(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -48,7 +51,7 @@ func TestLoadFromPath(t *testing.T) {
 }
 
 func TestLoadMissing(t *testing.T) {
-	doc, err := Load("/nonexistent/sweatfile")
+	doc, err := sweatfileio.Load("/nonexistent/sweatfile")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -101,17 +104,17 @@ func TestSaveRoundTrip(t *testing.T) {
 	path := filepath.Join(dir, "sweatfile")
 
 	input := "[git]\nexcludes = [\".claude/\"]\n"
-	doc, err := Parse([]byte(input))
+	doc, err := sweatfileio.Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	err = doc.Save(path)
+	err = sweatfileio.Save(doc, path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	loaded, err := Load(path)
+	loaded, err := sweatfileio.Load(path)
 	if err != nil {
 		t.Fatalf("unexpected error loading: %v", err)
 	}
@@ -126,7 +129,7 @@ func TestParseClaudeAllow(t *testing.T) {
 [claude]
 allow = ["Read", "Bash(git *)"]
 `
-	doc, err := Parse([]byte(input))
+	doc, err := sweatfileio.Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -186,7 +189,7 @@ excludes = [".DS_Store"]
 allow = ["/docs"]
 `)
 
-	result, err := LoadHierarchy(home, repoDir)
+	result, err := sweatfileio.LoadHierarchy(home, repoDir)
 	if err != nil {
 		t.Fatalf("LoadHierarchy returned error: %v", err)
 	}
@@ -249,7 +252,7 @@ excludes = [".idea"]
 allow = ["/src"]
 `)
 
-	result, err := LoadHierarchy(home, repoDir)
+	result, err := sweatfileio.LoadHierarchy(home, repoDir)
 	if err != nil {
 		t.Fatalf("LoadHierarchy returned error: %v", err)
 	}
@@ -304,7 +307,7 @@ allow = ["/eng-docs"]
 allow = ["/src"]
 `)
 
-	result, err := LoadHierarchy(home, repoDir)
+	result, err := sweatfileio.LoadHierarchy(home, repoDir)
 	if err != nil {
 		t.Fatalf("LoadHierarchy returned error: %v", err)
 	}
@@ -357,7 +360,7 @@ func TestLoadHierarchyNoSweatfiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := LoadHierarchy(home, repoDir)
+	result, err := sweatfileio.LoadHierarchy(home, repoDir)
 	if err != nil {
 		t.Fatalf("LoadHierarchy returned error: %v", err)
 	}
@@ -401,7 +404,7 @@ func TestLoadHierarchyOutOfHomeChain(t *testing.T) {
 excludes = ["external-marker"]
 `)
 
-	result, err := LoadHierarchy(home, repoDir)
+	result, err := sweatfileio.LoadHierarchy(home, repoDir)
 	if err != nil {
 		t.Fatalf("LoadHierarchy returned error: %v", err)
 	}
@@ -465,7 +468,7 @@ excludes = ["from-eng-acme"]
 excludes = ["from-canonical"]
 `)
 
-	result, err := LoadHierarchy(home, symlinkRepo)
+	result, err := sweatfileio.LoadHierarchy(home, symlinkRepo)
 	if err != nil {
 		t.Fatalf("LoadHierarchy returned error: %v", err)
 	}
@@ -521,7 +524,7 @@ excludes = ["once-only"]
 `)
 
 	repoViaAlias := filepath.Join(aliasMid, "repo")
-	result, err := LoadHierarchy(home, repoViaAlias)
+	result, err := sweatfileio.LoadHierarchy(home, repoViaAlias)
 	if err != nil {
 		t.Fatalf("LoadHierarchy returned error: %v", err)
 	}
@@ -568,7 +571,7 @@ func TestParseHooksCreate(t *testing.T) {
 [hooks]
 create = "composer install"
 `
-	doc, err := Parse([]byte(input))
+	doc, err := sweatfileio.Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -584,7 +587,7 @@ func TestParseHooksStop(t *testing.T) {
 [hooks]
 stop = "just test"
 `
-	doc, err := Parse([]byte(input))
+	doc, err := sweatfileio.Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -601,7 +604,7 @@ func TestParseHooksBoth(t *testing.T) {
 create = "npm install"
 stop = "just lint"
 `
-	doc, err := Parse([]byte(input))
+	doc, err := sweatfileio.Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -618,7 +621,7 @@ stop = "just lint"
 }
 
 func TestParseHooksAbsent(t *testing.T) {
-	doc, err := Parse([]byte("[git]\nexcludes = [\".claude/\"]"))
+	doc, err := sweatfileio.Parse([]byte("[git]\nexcludes = [\".claude/\"]"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -720,7 +723,7 @@ func TestParseHooksPreMerge(t *testing.T) {
 [hooks]
 pre-merge = "just test"
 `
-	doc, err := Parse([]byte(input))
+	doc, err := sweatfileio.Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -771,7 +774,7 @@ func TestParseHooksPreMergeOutputFormat(t *testing.T) {
 [hooks]
 pre-merge-output-format = "tap-ndjson"
 `
-	doc, err := Parse([]byte(input))
+	doc, err := sweatfileio.Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -871,7 +874,7 @@ excludes = []
 allow = []
 `)
 
-	result, err := LoadHierarchy(home, repoDir)
+	result, err := sweatfileio.LoadHierarchy(home, repoDir)
 	if err != nil {
 		t.Fatalf("LoadHierarchy returned error: %v", err)
 	}
@@ -900,7 +903,7 @@ func TestLoadHierarchyHooksStopInherited(t *testing.T) {
 	globalPath := filepath.Join(home, ".config", "spinclass", "sweatfile")
 	writeSweatfile(t, globalPath, "[hooks]\nstop = \"just test\"")
 
-	result, err := LoadHierarchy(home, repoDir)
+	result, err := sweatfileio.LoadHierarchy(home, repoDir)
 	if err != nil {
 		t.Fatalf("LoadHierarchy returned error: %v", err)
 	}
@@ -913,7 +916,7 @@ func TestLoadHierarchyHooksStopInherited(t *testing.T) {
 
 func TestParseEnvrcDirectives(t *testing.T) {
 	input := "[direnv]\nenvrc = [\"source_up\", \"dotenv_if_exists\"]"
-	doc, err := Parse([]byte(input))
+	doc, err := sweatfileio.Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -928,7 +931,7 @@ func TestParseEnvrcDirectives(t *testing.T) {
 }
 
 func TestParseEnvrcDirectivesAbsent(t *testing.T) {
-	doc, err := Parse([]byte("[git]\nexcludes = [\".claude/\"]"))
+	doc, err := sweatfileio.Parse([]byte("[git]\nexcludes = [\".claude/\"]"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -979,7 +982,7 @@ func TestParseEnv(t *testing.T) {
 FOO = "bar"
 BAZ = "qux"
 `
-	doc, err := Parse([]byte(input))
+	doc, err := sweatfileio.Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -993,7 +996,7 @@ BAZ = "qux"
 }
 
 func TestParseEnvAbsent(t *testing.T) {
-	doc, err := Parse([]byte("[git]\nexcludes = [\".claude/\"]"))
+	doc, err := sweatfileio.Parse([]byte("[git]\nexcludes = [\".claude/\"]"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1044,7 +1047,7 @@ func TestLoadHierarchyHooksStopOverriddenByRepo(t *testing.T) {
 	repoSweatfile := filepath.Join(repoDir, "sweatfile")
 	writeSweatfile(t, repoSweatfile, "[hooks]\nstop = \"just lint\"")
 
-	result, err := LoadHierarchy(home, repoDir)
+	result, err := sweatfileio.LoadHierarchy(home, repoDir)
 	if err != nil {
 		t.Fatalf("LoadHierarchy returned error: %v", err)
 	}
@@ -1060,7 +1063,7 @@ func TestParseHooksDisallowMainWorktree(t *testing.T) {
 [hooks]
 disallow-main-worktree = true
 `
-	doc, err := Parse([]byte(input))
+	doc, err := sweatfileio.Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1071,7 +1074,7 @@ disallow-main-worktree = true
 }
 
 func TestParseHooksDisallowMainWorktreeAbsent(t *testing.T) {
-	doc, err := Parse([]byte("[git]\nexcludes = [\".claude/\"]"))
+	doc, err := sweatfileio.Parse([]byte("[git]\nexcludes = [\".claude/\"]"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1112,7 +1115,7 @@ func TestLoadWorktreeHierarchyMainRepoSweatfileIncluded(t *testing.T) {
 	writeSweatfile(t, filepath.Join(mainRepo, "sweatfile"),
 		"[hooks]\ndisallow-main-worktree = true\n")
 
-	result, err := LoadWorktreeHierarchy(home, mainRepo, worktreeDir)
+	result, err := sweatfileio.LoadWorktreeHierarchy(home, mainRepo, worktreeDir)
 	if err != nil {
 		t.Fatalf("LoadWorktreeHierarchy returned error: %v", err)
 	}
@@ -1136,7 +1139,7 @@ func TestLoadWorktreeHierarchyWorktreeOverridesMainRepo(t *testing.T) {
 	writeSweatfile(t, filepath.Join(worktreeDir, "sweatfile"),
 		"[hooks]\ndisallow-main-worktree = false\n")
 
-	result, err := LoadWorktreeHierarchy(home, mainRepo, worktreeDir)
+	result, err := sweatfileio.LoadWorktreeHierarchy(home, mainRepo, worktreeDir)
 	if err != nil {
 		t.Fatalf("LoadWorktreeHierarchy returned error: %v", err)
 	}
@@ -1168,7 +1171,7 @@ func TestMergeToolUseLogOverride(t *testing.T) {
 }
 
 func TestParseToolUseLog(t *testing.T) {
-	doc, err := Parse([]byte("[hooks]\ntool-use-log = true\n"))
+	doc, err := sweatfileio.Parse([]byte("[hooks]\ntool-use-log = true\n"))
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
@@ -1204,7 +1207,7 @@ create = "npm install"
 stop = "just test"
 disallow-main-worktree = true
 `
-	doc, err := Parse([]byte(input))
+	doc, err := sweatfileio.Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("Parse error: %v", err)
 	}
@@ -1225,7 +1228,7 @@ func TestParseSessionTable(t *testing.T) {
 start = ["zellij", "-s", "test"]
 resume = ["zellij", "attach", "test"]
 `
-	doc, err := Parse([]byte(input))
+	doc, err := sweatfileio.Parse([]byte(input))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1242,7 +1245,7 @@ resume = ["zellij", "attach", "test"]
 }
 
 func TestParseSessionDefault(t *testing.T) {
-	doc, err := Parse([]byte(""))
+	doc, err := sweatfileio.Parse([]byte(""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1308,7 +1311,7 @@ start = ["zmx", "-g", "spinclass", "attach", "$SPINCLASS_SESSION_ID"]
 SPINCLASS_GROUP = "spinclass"
 FOO = "bar"
 `
-	doc, err := Parse([]byte(input))
+	doc, err := sweatfileio.Parse([]byte(input))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1402,7 +1405,7 @@ arg-regex = "^[A-Z]+-[0-9]+$"
 exec-completions = ["jira", "list"]
 exec-start = ["jira", "show", "{arg}"]
 `
-	doc, err := Parse([]byte(input))
+	doc, err := sweatfileio.Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1438,7 +1441,7 @@ exec-start = ["echo", "jira"]
 name = "linear"
 exec-start = ["echo", "linear"]
 `
-	doc, err := Parse([]byte(input))
+	doc, err := sweatfileio.Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1614,7 +1617,7 @@ func TestParseHooksDisableMerge(t *testing.T) {
 [hooks]
 disable-merge = true
 `
-	doc, err := Parse([]byte(input))
+	doc, err := sweatfileio.Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1625,7 +1628,7 @@ disable-merge = true
 }
 
 func TestParseHooksDisableMergeAbsent(t *testing.T) {
-	doc, err := Parse([]byte("[git]\nexcludes = [\".claude/\"]"))
+	doc, err := sweatfileio.Parse([]byte("[git]\nexcludes = [\".claude/\"]"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1661,7 +1664,7 @@ func TestParseHooksDisableNixGC(t *testing.T) {
 [hooks]
 disable-nix-gc = true
 `
-	doc, err := Parse([]byte(input))
+	doc, err := sweatfileio.Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1672,7 +1675,7 @@ disable-nix-gc = true
 }
 
 func TestParseHooksDisableNixGCAbsent(t *testing.T) {
-	doc, err := Parse([]byte("[git]\nexcludes = [\".claude/\"]"))
+	doc, err := sweatfileio.Parse([]byte("[git]\nexcludes = [\".claude/\"]"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1708,7 +1711,7 @@ func TestParseHooksDisableMergeBuildWorktree(t *testing.T) {
 [hooks]
 disable-merge-build-worktree = true
 `
-	doc, err := Parse([]byte(input))
+	doc, err := sweatfileio.Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1719,7 +1722,7 @@ disable-merge-build-worktree = true
 }
 
 func TestParseHooksDisableMergeBuildWorktreeAbsent(t *testing.T) {
-	doc, err := Parse([]byte("[git]\nexcludes = [\".claude/\"]"))
+	doc, err := sweatfileio.Parse([]byte("[git]\nexcludes = [\".claude/\"]"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

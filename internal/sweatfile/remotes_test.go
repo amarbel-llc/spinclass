@@ -1,6 +1,11 @@
-package sweatfile
+package sweatfile_test
 
-import "testing"
+import (
+	"testing"
+
+	. "github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
+)
 
 func TestRemotesParse(t *testing.T) {
 	input := `
@@ -9,7 +14,7 @@ name = "devbox"
 ssh = "sasha@devbox.lan"
 attach = ["ssh", "-t", "{ssh}", "spinclass", "resume", "{id}"]
 `
-	doc, err := Parse([]byte(input))
+	doc, err := sweatfileio.Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -29,7 +34,7 @@ func TestRemotesParseRemove(t *testing.T) {
 name = "devbox"
 remove = true
 `
-	doc, err := Parse([]byte(input))
+	doc, err := sweatfileio.Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

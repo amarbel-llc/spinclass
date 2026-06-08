@@ -26,6 +26,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/servelog"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 )
 
@@ -1001,13 +1002,13 @@ func mergedSweatfileForCwd() (sweatfile.Sweatfile, bool) {
 	repoPath, err := git.CommonDir(cwd)
 	if err != nil {
 		// Not a worktree (or not a git repo): load the simple hierarchy.
-		h, hErr := sweatfile.LoadHierarchy(home, cwd)
+		h, hErr := sweatfileio.LoadHierarchy(home, cwd)
 		if hErr != nil {
 			return sweatfile.Sweatfile{}, false
 		}
 		return h.Merged, true
 	}
-	h, err := sweatfile.LoadWorktreeHierarchy(home, repoPath, cwd)
+	h, err := sweatfileio.LoadWorktreeHierarchy(home, repoPath, cwd)
 	if err != nil {
 		return sweatfile.Sweatfile{}, false
 	}

@@ -70,7 +70,20 @@ parent dirs → repo-level. Supports `git-excludes`, `claude-allow`, `envrc-dire
 override; includes `disable-merge`, `disable-nix-gc`,
 `disable-merge-build-worktree`, `pre-merge-output-format`,
 `inactivity-timeout`), and `[session]` table (start/resume entrypoint commands, override
-semantics).
+semantics). The package holds the struct definitions, accessors, `MergeWith`,
+`GetDefault`, `Apply`, and the tommy-generated codec (`sweatfile_tommy.go`, via
+`//go:generate tommy generate`).
+
+**Sweatfile decode/IO** (`internal/sweatfileio/`): the decode/encode/IO
+*consumers* of the generated codec — `Parse`, `Load`, `Save`, `LoadHierarchy`,
+`LoadWorktreeHierarchy`. Kept in a package separate from `internal/sweatfile` so
+the codegen package contains no hand-written references to the generated
+`DecodeSweatfile`/`SweatfileDocument` API; that lets `tommy generate` re-analyze
+and regenerate it (the codegen package still type-checks with the generated file
+overlaid empty). See the dodder codegen-isolation pattern and tommy #93. No
+post-decode nil-normalization is needed — tommy's generated decoder gives
+present-empty arrays/maps a non-nil value and leaves absent ones nil, which is
+the distinction `MergeWith` relies on.
 
 **Remote sessions** (`internal/remote/`): Routes `host:`-prefixed targets to
 sweatfile-declared `[[remotes]]` hosts at the CLI boundary — target grammar,

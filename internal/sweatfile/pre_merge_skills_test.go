@@ -1,6 +1,11 @@
-package sweatfile
+package sweatfile_test
 
-import "testing"
+import (
+	"testing"
+
+	. "github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
+)
 
 func TestPreMergeSkillFields(t *testing.T) {
 	sf := Sweatfile{
@@ -117,7 +122,7 @@ rationale = "Mandatory."
 name      = "simplify"
 rationale = "Prune."
 `)
-	doc, err := Parse(input)
+	doc, err := sweatfileio.Parse(input)
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
@@ -139,7 +144,7 @@ func TestParsePreMergeSkillsRemovalSentinel(t *testing.T) {
 [[pre-merge-skills]]
 name = "to-remove"
 `)
-	doc, err := Parse(input)
+	doc, err := sweatfileio.Parse(input)
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
@@ -159,7 +164,7 @@ func TestParsePreMergeSkillsNoUndecodedKeys(t *testing.T) {
 name      = "eng:code-reviewer"
 rationale = "Mandatory."
 `)
-	doc, err := Parse(input)
+	doc, err := sweatfileio.Parse(input)
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}

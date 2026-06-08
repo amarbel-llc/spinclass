@@ -13,6 +13,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/madder"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
 )
 
 const WorktreesDir = ".worktrees"
@@ -136,7 +137,7 @@ func Create(
 		)
 	}
 
-	sweetfile, err := sweatfile.LoadHierarchy(home, repoPath)
+	sweetfile, err := sweatfileio.LoadHierarchy(home, repoPath)
 	if err != nil {
 		return sweetfile, fmt.Errorf("loading sweatfile: %w", err)
 	}
@@ -180,7 +181,7 @@ func CreateFrom(
 		)
 	}
 
-	sweetfile, err := sweatfile.LoadHierarchy(home, repoPath)
+	sweetfile, err := sweatfileio.LoadHierarchy(home, repoPath)
 	if err != nil {
 		return sweetfile, fmt.Errorf("loading sweatfile: %w", err)
 	}

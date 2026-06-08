@@ -1,6 +1,11 @@
-package sweatfile
+package sweatfile_test
 
-import "testing"
+import (
+	"testing"
+
+	. "github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
+)
 
 // TestStandaloneDottedHeadersConsumed is the regression gate for issue #113:
 // a standalone dotted sub-table header ([direnv.dotenv] with no bare [direnv]
@@ -45,7 +50,7 @@ FOO = "bar"
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			doc, err := Parse([]byte(tc.input))
+			doc, err := sweatfileio.Parse([]byte(tc.input))
 			if err != nil {
 				t.Fatalf("parse error: %v", err)
 			}

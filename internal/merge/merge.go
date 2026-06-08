@@ -18,6 +18,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
 	"github.com/amarbel-llc/tap/go/pkgs/yaml_diagnostic"
@@ -148,7 +149,7 @@ func NewMergeWriter(w io.Writer) *tap.Writer {
 // in an isolated build worktree.
 func PrepareMerge(tw *tap.Writer, w io.Writer, repoPath, wtPath, branch, defaultBranch string, gitSync, verbose bool) (pinnedSha string, err error) {
 	if home, _ := os.UserHomeDir(); home != "" {
-		hierarchy, hErr := sweatfile.LoadWorktreeHierarchy(home, repoPath, wtPath)
+		hierarchy, hErr := sweatfileio.LoadWorktreeHierarchy(home, repoPath, wtPath)
 		if hErr == nil && hierarchy.Merged.DisableMergeEnabled() {
 			disableErr := fmt.Errorf(
 				"merge disabled by sweatfile (disable-merge=true at %s); use `sc check` to run the pre-merge hook without merging",
@@ -483,7 +484,7 @@ func runPreMergeHookContext(ctx context.Context, tw *tap.Writer, w io.Writer, re
 	if home == "" {
 		return nil, nil
 	}
-	hierarchy, err := sweatfile.LoadWorktreeHierarchy(home, repoPath, wtPath)
+	hierarchy, err := sweatfileio.LoadWorktreeHierarchy(home, repoPath, wtPath)
 	if err != nil {
 		return nil, nil
 	}

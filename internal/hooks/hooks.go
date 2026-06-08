@@ -9,9 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
 	"github.com/google/shlex"
-
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 )
 
 type hookInput struct {
@@ -52,7 +51,7 @@ func runStopHook(input hookInput, w io.Writer) error {
 		return nil // can't load sweatfile -> approve
 	}
 
-	result, err := sweatfile.LoadHierarchy(home, input.CWD)
+	result, err := sweatfileio.LoadHierarchy(home, input.CWD)
 	stopCmd := result.Merged.StopHookCommand()
 	if err != nil || stopCmd == nil || *stopCmd == "" {
 		return nil // no stop hook configured -> approve
@@ -218,7 +217,7 @@ func hasPreMergeHook(cwd string) bool {
 	if err != nil {
 		return false
 	}
-	result, err := sweatfile.LoadHierarchy(home, cwd)
+	result, err := sweatfileio.LoadHierarchy(home, cwd)
 	if err != nil {
 		return false
 	}
@@ -231,7 +230,7 @@ func hasPreMergeSkills(cwd string) bool {
 	if err != nil {
 		return false
 	}
-	result, err := sweatfile.LoadHierarchy(home, cwd)
+	result, err := sweatfileio.LoadHierarchy(home, cwd)
 	if err != nil {
 		return false
 	}

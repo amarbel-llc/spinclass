@@ -1,4 +1,4 @@
-package sweatfile
+package sweatfile_test
 
 import (
 	"bytes"
@@ -6,12 +6,15 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	. "github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
 )
 
 func sptr(s string) *string { return &s }
 
 func TestParseHooksInactivityTimeout(t *testing.T) {
-	doc, err := Parse([]byte("[hooks]\ninactivity-timeout = \"180s\"\n"))
+	doc, err := sweatfileio.Parse([]byte("[hooks]\ninactivity-timeout = \"180s\"\n"))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}

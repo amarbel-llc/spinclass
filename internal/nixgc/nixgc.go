@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
 )
 
 // reapTimeout bounds the wall-clock duration of a single nix-store
@@ -84,7 +84,7 @@ func Disabled(repoPath, worktreePath string) bool {
 	if err != nil || home == "" {
 		return false
 	}
-	h, err := sweatfile.LoadWorktreeHierarchy(home, repoPath, worktreePath)
+	h, err := sweatfileio.LoadWorktreeHierarchy(home, repoPath, worktreePath)
 	if err != nil {
 		return false
 	}

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/amarbel-llc/spinclass/internal/git"
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 )
 
@@ -41,7 +41,7 @@ func Handle(stdin io.Reader, stdout io.Writer) error {
 	home, _ := os.UserHomeDir()
 	var disallowMainWorktree bool
 	if home != "" {
-		result, err := sweatfile.LoadWorktreeHierarchy(home, mainRepoRoot, cwd)
+		result, err := sweatfileio.LoadWorktreeHierarchy(home, mainRepoRoot, cwd)
 		if err == nil {
 			disallowMainWorktree = result.Merged.DisallowMainWorktreeEnabled()
 		}

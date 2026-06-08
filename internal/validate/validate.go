@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
 	"github.com/amarbel-llc/spinclass/internal/tap"
 )
 
@@ -402,7 +403,7 @@ func findDuplicates(items []string) []string {
 }
 
 func CheckUnknownFields(data []byte) []Issue {
-	doc, err := sweatfile.Parse(data)
+	doc, err := sweatfileio.Parse(data)
 	if err != nil {
 		return nil
 	}
@@ -421,7 +422,7 @@ func CheckUnknownFields(data []byte) []Issue {
 func Run(w io.Writer, home, repoDir string) int {
 	tw := tap.NewWriter(w)
 
-	result, err := sweatfile.LoadHierarchy(home, repoDir)
+	result, err := sweatfileio.LoadHierarchy(home, repoDir)
 	if err != nil {
 		tw.NotOk("load hierarchy", map[string]string{
 			"severity": SeverityError,
@@ -454,7 +455,7 @@ func Run(w io.Writer, home, repoDir string) int {
 			continue
 		}
 
-		_, parseErr := sweatfile.Parse(data)
+		_, parseErr := sweatfileio.Parse(data)
 		if parseErr != nil {
 			sub.NotOk("valid TOML", map[string]string{
 				"severity": SeverityError,

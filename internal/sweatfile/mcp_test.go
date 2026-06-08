@@ -1,6 +1,11 @@
-package sweatfile
+package sweatfile_test
 
-import "testing"
+import (
+	"testing"
+
+	. "github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
+)
 
 func TestMCPServerDefFields(t *testing.T) {
 	sf := Sweatfile{
@@ -195,7 +200,7 @@ DEBUG = "1"
 name = "formatter"
 command = "fmt"
 `)
-	doc, err := Parse(input)
+	doc, err := sweatfileio.Parse(input)
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
@@ -220,7 +225,7 @@ command = "fmt"
 
 func TestParseMCPsEmptyAllowedMCPs(t *testing.T) {
 	input := []byte(`allowed-mcps = []`)
-	doc, err := Parse(input)
+	doc, err := sweatfileio.Parse(input)
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
@@ -246,7 +251,7 @@ args = ["serve"]
 [mcps.env]
 KEY = "val"
 `)
-	doc, err := Parse(input)
+	doc, err := sweatfileio.Parse(input)
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
@@ -261,7 +266,7 @@ func TestParseMCPsRemovalSentinel(t *testing.T) {
 [[mcps]]
 name = "linter"
 `)
-	doc, err := Parse(input)
+	doc, err := sweatfileio.Parse(input)
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
