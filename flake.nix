@@ -65,8 +65,10 @@
     # `go generate ./internal/sweatfile` (`//go:generate tommy generate`)
     # runs — so the codegen tool and the library it targets are one rev,
     # avoiding the cst-API skew that an ambient out-of-flake tommy causes.
+    # Pinned to a release tag (not master) for reproducibility; bump the tag
+    # deliberately + regen the codec when adopting a new tommy.
     tommy = {
-      url = "github:amarbel-llc/tommy";
+      url = "github:amarbel-llc/tommy/v0.4.0";
       inputs.igloo.follows = "igloo";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
