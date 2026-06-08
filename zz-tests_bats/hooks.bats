@@ -166,3 +166,38 @@ pre-merge-output-format = "tap-ndjson"
   assert_output --partial "this is not tap"
   refute_output --partial "failure:"
 }
+
+# By default the pre-merge hook runs in an isolated detached build worktree
+# (a .merge-* sibling under .worktrees/), not in the session worktree. The hook
+# records its working directory to a file outside the (transient) worktree so the
+# assertion works on both madder-pinned (hook stdout → blob) and plain builds.
+function pre_merge_hook_runs_in_isolated_build_worktree { # @test
+  # SC2016: $BATS_TEST_TMPDIR is deliberately left unexpanded here — it is
+  # written literally into the sweatfile and expanded by the hook's `sh -c`.
+  # shellcheck disable=SC2016
+  pre_merge_setup_worktree '[hooks]
+pre-merge = "pwd > \"$BATS_TEST_TMPDIR/hookpwd.txt\""
+'
+
+  run_sc check
+  assert_success
+  run cat "$BATS_TEST_TMPDIR/hookpwd.txt"
+  assert_output --partial "/.worktrees/.merge-"
+}
+
+# With [hooks].disable-merge-build-worktree the hook runs in place in the session
+# worktree (legacy behavior) — its cwd is the session worktree, not a .merge-*.
+function pre_merge_hook_runs_in_place_when_build_worktree_disabled { # @test
+  # SC2016: see the note in pre_merge_hook_runs_in_isolated_build_worktree.
+  # shellcheck disable=SC2016
+  pre_merge_setup_worktree '[hooks]
+pre-merge = "pwd > \"$BATS_TEST_TMPDIR/hookpwd.txt\""
+disable-merge-build-worktree = true
+'
+
+  run_sc check
+  assert_success
+  run cat "$BATS_TEST_TMPDIR/hookpwd.txt"
+  assert_output --partial "/.worktrees/"
+  refute_output --partial "/.worktrees/.merge-"
+}

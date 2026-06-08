@@ -415,6 +415,96 @@ func TestRunHookCompactShape_TapNDJSONDegenerateFallback(t *testing.T) {
 	}
 }
 
+// mergeWorktreeDirs returns the names of transient build worktrees (.merge-*)
+// currently present under <repoDir>/.worktrees.
+func mergeWorktreeDirs(t *testing.T, repoDir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(repoDir, ".worktrees"))
+	if err != nil {
+		t.Fatalf("read .worktrees: %v", err)
+	}
+	var names []string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".merge-") {
+			names = append(names, e.Name())
+		}
+	}
+	return names
+}
+
+// By default the pre-merge hook runs in an isolated detached build worktree
+// (a .merge-* sibling), not in the session worktree, and the build worktree is
+// cleaned up afterward.
+func TestRunHookInBuildWorktree(t *testing.T) {
+	_, repoDir, wtPath := setupRepoWithWorktree(t, "feature-build-wt")
+	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"pwd\"\n")
+
+	var buf bytes.Buffer
+	if _, err := Run(&buf, "tap", wtPath, false); err != nil {
+		t.Fatalf("Run() error: %v\n%s", err, buf.String())
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, ".merge-feature-build-wt-") {
+		t.Errorf("expected hook to run in a .merge-* build worktree, got pwd output:\n%s", got)
+	}
+	if leftovers := mergeWorktreeDirs(t, repoDir); len(leftovers) != 0 {
+		t.Errorf("expected build worktree cleaned up, found leftovers: %v", leftovers)
+	}
+}
+
+// With [hooks].disable-merge-build-worktree the hook runs in place in the
+// session worktree (legacy behavior) and no build worktree is created.
+func TestRunHookInPlaceWhenDisabled(t *testing.T) {
+	_, repoDir, wtPath := setupRepoWithWorktree(t, "feature-inplace")
+	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"pwd\"\ndisable-merge-build-worktree = true\n")
+
+	var buf bytes.Buffer
+	if _, err := Run(&buf, "tap", wtPath, false); err != nil {
+		t.Fatalf("Run() error: %v\n%s", err, buf.String())
+	}
+
+	got := buf.String()
+	if strings.Contains(got, ".merge-") {
+		t.Errorf("expected in-place run with build worktree disabled, got:\n%s", got)
+	}
+	// pwd should resolve to the session worktree itself.
+	if !strings.Contains(got, filepath.Base(wtPath)) {
+		t.Errorf("expected hook pwd to be the session worktree %q, got:\n%s", wtPath, got)
+	}
+	if leftovers := mergeWorktreeDirs(t, repoDir); len(leftovers) != 0 {
+		t.Errorf("expected no build worktree, found: %v", leftovers)
+	}
+}
+
+// The build worktree is a clean checkout of the committed sha, so uncommitted
+// changes in the session worktree are invisible to the hook (the gate verifies
+// what will merge, not the dirty tree). With the feature disabled the same hook
+// would see the uncommitted file — asserted in the second half.
+func TestBuildWorktreeVerifiesCommittedTree(t *testing.T) {
+	_, _, wtPath := setupRepoWithWorktree(t, "feature-committed")
+	// An uncommitted scratch file in the session worktree.
+	if err := os.WriteFile(filepath.Join(wtPath, "scratch.txt"), []byte("dirty"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Default (isolated): hook succeeds because scratch.txt is absent in the
+	// committed-sha checkout.
+	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"test ! -f scratch.txt\"\n")
+	var buf bytes.Buffer
+	if _, err := Run(&buf, "tap", wtPath, false); err != nil {
+		t.Fatalf("isolated hook should not see uncommitted scratch.txt: %v\n%s", err, buf.String())
+	}
+
+	// Disabled (in place): the same hook now fails because scratch.txt IS
+	// present in the session worktree.
+	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"test ! -f scratch.txt\"\ndisable-merge-build-worktree = true\n")
+	var buf2 bytes.Buffer
+	if _, err := Run(&buf2, "tap", wtPath, false); err == nil {
+		t.Fatalf("in-place hook should see uncommitted scratch.txt and fail; output:\n%s", buf2.String())
+	}
+}
+
 func TestRunNoHookConfigured(t *testing.T) {
 	_, _, wtPath := setupRepoWithWorktree(t, "feature-no-hook")
 	// No sweatfile written.

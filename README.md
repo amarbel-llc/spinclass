@@ -99,7 +99,7 @@ Sweatfiles support:
   `allowed-mcps`): nil inherits, empty clears, non-empty appends.
 - **`[[mcps]]`** and **`[[start-commands]]`**: arrays of tables merged by name.
 - **`[env]`**: environment variable map merge.
-- **`[hooks]`**: `create` / `stop` / `on-attach` / `on-detach` / `pre-merge` lifecycle hooks, plus `disable-merge` and `disable-nix-gc` flags.
+- **`[hooks]`**: `create` / `stop` / `on-attach` / `on-detach` / `pre-merge` lifecycle hooks, plus `disable-merge`, `disable-nix-gc`, and `disable-merge-build-worktree` flags. By default the `pre-merge` hook runs in a transient detached build worktree pinned to the committed sha being merged (freeing the session worktree for concurrent work); `disable-merge-build-worktree = true` runs it in place.
 - **`[session-entry]`**: `start` / `resume` entrypoint commands (default `$SHELL`), `liveness-probe` for detecting running-detached sessions, `tombstone-retention`, and `[session-entry.env]` for per-session environment injection.
 - **`[[pre-merge-skills]]`**: skill attestation gate — agents must invoke listed skills and record reasoning via `nothing-but-the-truth` before `merge-this-session` will proceed.
 

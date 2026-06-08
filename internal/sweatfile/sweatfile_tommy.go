@@ -539,6 +539,15 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 							hooksVal3.DisableNixGC = &v
 							d.consumed["hooks.disable-nix-gc"] = true
 						}
+					case "disable-merge-build-worktree":
+						if _seen["disable-merge-build-worktree"] {
+							return nil, fmt.Errorf("duplicate key %q", "disable-merge-build-worktree")
+						}
+						_seen["disable-merge-build-worktree"] = true
+						if v, ok := cst.ExtractBool(_kv); ok {
+							hooksVal3.DisableMergeBuildWorktree = &v
+							d.consumed["hooks.disable-merge-build-worktree"] = true
+						}
 					case "pre-merge-output-format":
 						if _seen["pre-merge-output-format"] {
 							return nil, fmt.Errorf("duplicate key %q", "pre-merge-output-format")
@@ -653,6 +662,15 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 							if v, ok := cst.ExtractBool(_kv); ok {
 								hooksVal3.DisableNixGC = &v
 								d.consumed["hooks.disable-nix-gc"] = true
+							}
+						case "disable-merge-build-worktree":
+							if _seen["disable-merge-build-worktree"] {
+								return nil, fmt.Errorf("duplicate key %q", "disable-merge-build-worktree")
+							}
+							_seen["disable-merge-build-worktree"] = true
+							if v, ok := cst.ExtractBool(_kv); ok {
+								hooksVal3.DisableMergeBuildWorktree = &v
+								d.consumed["hooks.disable-merge-build-worktree"] = true
 							}
 						case "pre-merge-output-format":
 							if _seen["pre-merge-output-format"] {
@@ -775,6 +793,16 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 								hooksVal3.DisableNixGC = &v
 								_found = true
 								d.consumed["disable-nix-gc"] = true
+							}
+						case "disable-merge-build-worktree":
+							if _seen["disable-merge-build-worktree"] {
+								return nil, fmt.Errorf("duplicate key %q", "disable-merge-build-worktree")
+							}
+							_seen["disable-merge-build-worktree"] = true
+							if v, ok := cst.ExtractBool(_kv); ok {
+								hooksVal3.DisableMergeBuildWorktree = &v
+								_found = true
+								d.consumed["disable-merge-build-worktree"] = true
 							}
 						case "pre-merge-output-format":
 							if _seen["pre-merge-output-format"] {
@@ -1445,6 +1473,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
+		if d.data.Hooks.DisableMergeBuildWorktree != nil {
+			if err := cst.SetAny(tableNode, "disable-merge-build-worktree", *d.data.Hooks.DisableMergeBuildWorktree); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
 		if d.data.Hooks.PreMergeOutputFormat != nil {
 			if err := cst.SetAny(tableNode, "pre-merge-output-format", *d.data.Hooks.PreMergeOutputFormat); err != nil {
 				return nil, fmt.Errorf("%w", err)
@@ -2030,6 +2063,15 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 							hooksVal3.DisableNixGC = &v
 							consumed[keyPrefix+"hooks.disable-nix-gc"] = true
 						}
+					case "disable-merge-build-worktree":
+						if _seen["disable-merge-build-worktree"] {
+							return fmt.Errorf("duplicate key %q", "disable-merge-build-worktree")
+						}
+						_seen["disable-merge-build-worktree"] = true
+						if v, ok := cst.ExtractBool(_kv); ok {
+							hooksVal3.DisableMergeBuildWorktree = &v
+							consumed[keyPrefix+"hooks.disable-merge-build-worktree"] = true
+						}
 					case "pre-merge-output-format":
 						if _seen["pre-merge-output-format"] {
 							return fmt.Errorf("duplicate key %q", "pre-merge-output-format")
@@ -2151,6 +2193,16 @@ func DecodeSweatfileInto(data *Sweatfile, doc *document.Document, container *cst
 							hooksVal3.DisableNixGC = &v
 							_found = true
 							consumed["disable-nix-gc"] = true
+						}
+					case "disable-merge-build-worktree":
+						if _seen["disable-merge-build-worktree"] {
+							return fmt.Errorf("duplicate key %q", "disable-merge-build-worktree")
+						}
+						_seen["disable-merge-build-worktree"] = true
+						if v, ok := cst.ExtractBool(_kv); ok {
+							hooksVal3.DisableMergeBuildWorktree = &v
+							_found = true
+							consumed["disable-merge-build-worktree"] = true
 						}
 					case "pre-merge-output-format":
 						if _seen["pre-merge-output-format"] {
@@ -2702,6 +2754,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if data.Hooks.DisableNixGC != nil {
 			if err := cst.SetAny(tableNode, "disable-nix-gc", *data.Hooks.DisableNixGC); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.Hooks.DisableMergeBuildWorktree != nil {
+			if err := cst.SetAny(tableNode, "disable-merge-build-worktree", *data.Hooks.DisableMergeBuildWorktree); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}

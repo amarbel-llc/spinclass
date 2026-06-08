@@ -29,17 +29,18 @@ type SessionEntry struct {
 }
 
 type Hooks struct {
-	Create               *string `toml:"create"`
-	Stop                 *string `toml:"stop"`
-	PreMerge             *string `toml:"pre-merge"`
-	OnAttach             *string `toml:"on-attach"`
-	OnDetach             *string `toml:"on-detach"`
-	DisallowMainWorktree *bool   `toml:"disallow-main-worktree"`
-	ToolUseLog           *bool   `toml:"tool-use-log"`
-	DisableMerge         *bool   `toml:"disable-merge"`
-	DisableNixGC         *bool   `toml:"disable-nix-gc"`
-	PreMergeOutputFormat *string `toml:"pre-merge-output-format"`
-	InactivityTimeout    *string `toml:"inactivity-timeout"`
+	Create                    *string `toml:"create"`
+	Stop                      *string `toml:"stop"`
+	PreMerge                  *string `toml:"pre-merge"`
+	OnAttach                  *string `toml:"on-attach"`
+	OnDetach                  *string `toml:"on-detach"`
+	DisallowMainWorktree      *bool   `toml:"disallow-main-worktree"`
+	ToolUseLog                *bool   `toml:"tool-use-log"`
+	DisableMerge              *bool   `toml:"disable-merge"`
+	DisableNixGC              *bool   `toml:"disable-nix-gc"`
+	DisableMergeBuildWorktree *bool   `toml:"disable-merge-build-worktree"`
+	PreMergeOutputFormat      *string `toml:"pre-merge-output-format"`
+	InactivityTimeout         *string `toml:"inactivity-timeout"`
 }
 
 // MCPServerDef declares an MCP server to register and auto-approve
@@ -267,6 +268,16 @@ func (sf Sweatfile) DisableNixGCEnabled() bool {
 	return sf.Hooks != nil &&
 		sf.Hooks.DisableNixGC != nil &&
 		*sf.Hooks.DisableNixGC
+}
+
+// MergeBuildWorktreeDisabled reports whether [hooks].disable-merge-build-worktree
+// is true. When false (the default), the pre-merge hook runs in a transient
+// detached worktree pinned to the merged sha; when true it runs in place in the
+// session worktree (legacy behavior). See spinclass-sweatfile(5).
+func (sf Sweatfile) MergeBuildWorktreeDisabled() bool {
+	return sf.Hooks != nil &&
+		sf.Hooks.DisableMergeBuildWorktree != nil &&
+		*sf.Hooks.DisableMergeBuildWorktree
 }
 
 func (sf Sweatfile) SessionStart() []string {

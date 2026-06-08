@@ -164,6 +164,29 @@ before the fast-forward merge into it.
 If the script exits non-zero, the merge is aborted and the worktree is
 left in its rebased state so the user can fix the issue and retry.
 Typical use: run tests or linters as a pre-merge gate.
+.IP
+By default the hook runs in a transient, detached
+.B build worktree
+checked out at the exact (post-rebase) commit being merged \(em a hidden
+.B .merge-*
+sibling under
+.BR .worktrees/ .
+This frees the session worktree for concurrent edits the moment the rebase
+lands (especially with the async merge tool, whose rebase runs synchronously
+before the job id is returned) and makes the gate verify the committed tree
+rather than any uncommitted working-tree state.
+The build worktree is removed when the hook finishes.
+Because the branch stays checked out in the session worktree, the build
+worktree is in
+.B detached HEAD
+state: a hook that reads the current branch name (e.g.
+.BR "git rev-parse --abbrev-ref HEAD" )
+sees
+.B HEAD
+rather than the branch.
+Set
+.B disable-merge-build-worktree
+(below) to run the hook in place in the session worktree instead.
 When this hook is set, the spinclass PreToolUse hook auto-approves the
 .B mcp__plugin_spinclass_spinclass__merge-this-session
 and
@@ -310,6 +333,23 @@ The collection is a silent no-op when
 is not on
 .BR PATH ,
 or when the worktree has no gc roots.
+.B Merge:
+scalar override.
+.TP
+.B disable-merge-build-worktree
+Boolean.
+When true, the
+.B pre-merge
+hook runs in place in the session worktree (the legacy behavior) instead of
+in a detached build worktree.
+By default (or when this flag is unset) the hook runs in a transient
+.B .merge-*
+worktree pinned to the committed sha being merged \(em see
+.B pre-merge
+above for the rationale and the detached-HEAD caveat.
+Set this when a hook genuinely needs the session worktree's path or its
+checked-out branch ref, accepting that the session worktree is then frozen
+for the hook's duration and that uncommitted state is what gets verified.
 .B Merge:
 scalar override.
 .TP

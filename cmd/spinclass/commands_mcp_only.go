@@ -412,12 +412,28 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 	}
 
 	gitSync := params.GitSync
+
+	// Run the fast prefix (optional pull + rebase + pin) synchronously, before
+	// returning the job id: this frees the session worktree the moment the
+	// rebase lands (the agent can edit/commit immediately), pins the exact sha
+	// the backgrounded hook verifies and merges, and surfaces rebase conflicts /
+	// nothing-to-merge right away instead of as an orphan job. The shared
+	// writer+buffer carry the prefix's TAP into FinishMerge so the final job
+	// result is one continuous stream (pull → rebase → hook → merge → push).
+	var buf bytes.Buffer
+	tw := merge.NewMergeWriter(&buf)
+	pinnedSha, prepErr := merge.PrepareMerge(tw, &buf, repoPath, cwd, branch, defaultBranch, gitSync, true)
+	if prepErr != nil {
+		tw.Plan()
+		return buildHookResult(buf.String(), nil, prepErr), nil
+	}
+
 	return startSessionJob(cwd, job.KindMerge, gitSync, func(ctx context.Context, w io.Writer) (string, bool) {
-		var buf bytes.Buffer
-		_, mergeErr := merge.ResolvedContext(
-			ctx, executor.ShellExecutor{}, &buf, nil, "tap",
-			repoPath, cwd, branch, defaultBranch, gitSync, true, true, w,
+		_, mergeErr := merge.FinishMerge(
+			ctx, executor.ShellExecutor{}, tw, &buf,
+			repoPath, cwd, branch, defaultBranch, pinnedSha, gitSync, true, true, w,
 		)
+		tw.Plan()
 		return buf.String(), mergeErr != nil
 	}), nil
 }

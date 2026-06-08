@@ -59,6 +59,11 @@ func BranchCurrent(repoPath string) (string, error) {
 	return Run(repoPath, "branch", "--show-current")
 }
 
+// RevParse resolves ref (e.g. "HEAD") to its full commit sha in repoPath.
+func RevParse(repoPath, ref string) (string, error) {
+	return Run(repoPath, "rev-parse", ref)
+}
+
 func CommitsAhead(worktreePath, base, branch string) int {
 	out, err := Run(worktreePath, "rev-list", base+".."+branch, "--count")
 	if err != nil {
@@ -230,6 +235,24 @@ func Rebase(repoPath, onto string) (string, error) {
 // so the new worktree branches from fromPath's current HEAD.
 func WorktreeAddFrom(fromPath, newBranch, newPath string) error {
 	_, err := Run(fromPath, "worktree", "add", "-b", newBranch, newPath)
+	return err
+}
+
+// WorktreePrune runs `git -C repoPath worktree prune`, clearing admin entries
+// for worktrees whose directories no longer exist (e.g. crash-orphaned build
+// worktrees). Best-effort; errors are returned for the caller to ignore.
+func WorktreePrune(repoPath string) error {
+	_, err := Run(repoPath, "worktree", "prune")
+	return err
+}
+
+// WorktreeAddDetached runs `git -C fromPath worktree add --detach newPath ref`,
+// checking ref out into a detached-HEAD worktree at newPath (no branch, so the
+// same ref/branch can stay checked out elsewhere). Prunes stale admin entries
+// first so a crash-orphaned path of the same name does not block the add.
+func WorktreeAddDetached(fromPath, newPath, ref string) error {
+	_ = WorktreePrune(fromPath)
+	_, err := Run(fromPath, "worktree", "add", "--detach", newPath, ref)
 	return err
 }
 

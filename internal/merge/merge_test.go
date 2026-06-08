@@ -2,6 +2,7 @@ package merge
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -79,6 +80,57 @@ func setupWorktree(t *testing.T, repoDir, branch string) string {
 	wtPath := filepath.Join(wtDir, branch)
 	runGit(t, repoDir, "worktree", "add", "-b", branch, wtPath)
 	return wtPath
+}
+
+// TestPrepareMergePinsShaAcrossConcurrentCommit verifies the core #106
+// guarantee: PrepareMerge pins the post-rebase sha, and FinishMerge merges
+// exactly that sha even when a new commit lands on the branch afterward
+// (simulating concurrent agent work while the pre-merge hook runs in an
+// isolated build worktree). main ends at the pinned sha; the branch keeps its
+// later commit, strictly ahead of main by one.
+func TestPrepareMergePinsShaAcrossConcurrentCommit(t *testing.T) {
+	repoDir := setupRepo(t)
+	wtPath := setupWorktree(t, repoDir, "feature-pin")
+
+	// One commit ahead of main on the branch.
+	if err := os.WriteFile(filepath.Join(wtPath, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "a.txt")
+	runGit(t, wtPath, "commit", "-m", "feature commit A")
+
+	// No sweatfile → no pre-merge hook → FinishMerge skips the hook entirely.
+	var buf bytes.Buffer
+	tw := NewMergeWriter(&buf)
+	pinnedSha, err := PrepareMerge(tw, &buf, repoDir, wtPath, "feature-pin", "main", false, false)
+	if err != nil {
+		t.Fatalf("PrepareMerge: %v\n%s", err, buf.String())
+	}
+
+	// Simulate concurrent work: a SECOND commit lands on the branch after pin.
+	if err := os.WriteFile(filepath.Join(wtPath, "b.txt"), []byte("b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "b.txt")
+	runGit(t, wtPath, "commit", "-m", "concurrent commit B")
+	if branchTip := runGit(t, wtPath, "rev-parse", "HEAD"); branchTip == pinnedSha {
+		t.Fatal("test setup: expected branch tip to advance past the pinned sha")
+	}
+
+	// FinishMerge in-session (inSession=true keeps the worktree).
+	if _, err := FinishMerge(context.Background(), &mockExecutor{}, tw, &buf,
+		repoDir, wtPath, "feature-pin", "main", pinnedSha, false, true, false, nil); err != nil {
+		t.Fatalf("FinishMerge: %v\n%s", err, buf.String())
+	}
+
+	// main must be at the pinned sha, NOT the concurrent commit B.
+	if mainTip := runGit(t, repoDir, "rev-parse", "main"); mainTip != pinnedSha {
+		t.Errorf("main = %s, want pinned %s (concurrent commit leaked into the merge)", mainTip, pinnedSha)
+	}
+	// The branch keeps commit B, strictly ahead of main by one.
+	if ahead := git.CommitsAhead(wtPath, "main", "feature-pin"); ahead != 1 {
+		t.Errorf("branch ahead of main = %d, want 1 (concurrent commit preserved)", ahead)
+	}
 }
 
 // TestResolveTargetSessionKeyCrossRepo: explicit merge targets resolve

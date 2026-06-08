@@ -102,13 +102,51 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, w io.Writer, 
 
 	ownWriter := false
 	if tw == nil && format == "tap" {
-		tw = tap.NewWriter(w)
+		tw = NewMergeWriter(w)
 		ownWriter = true
-		if embeds.MadderBin() != "" {
-			tw.Comment("directive: if status is ok, the resource_link need not be followed; only inspect on failure")
-		}
 	}
 
+	pinnedSha, prepErr := PrepareMerge(tw, w, repoPath, wtPath, branch, defaultBranch, gitSync, verbose)
+	if prepErr != nil {
+		if ownWriter {
+			tw.Plan()
+		}
+		return nil, prepErr
+	}
+
+	blobLinks, err = FinishMerge(ctx, execr, tw, w, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, inSession, verbose, activity)
+	if ownWriter {
+		tw.Plan()
+	}
+	return blobLinks, err
+}
+
+// NewMergeWriter creates the tap.Writer used for merge/check TAP output,
+// emitting the madder resource_link directive comment when madder is pinned at
+// build time. The caller owns Plan(). Exported so the async merge tool can share
+// one writer/buffer across the synchronous PrepareMerge prefix and the
+// backgrounded FinishMerge suffix.
+func NewMergeWriter(w io.Writer) *tap.Writer {
+	tw := tap.NewWriter(w)
+	if embeds.MadderBin() != "" {
+		tw.Comment("directive: if status is ok, the resource_link need not be followed; only inspect on failure")
+	}
+	return tw
+}
+
+// PrepareMerge runs the fast, session-worktree-touching prefix of a merge: the
+// disable-merge gate, optional pull of defaultBranch, rebase of branch onto it,
+// and the nothing-to-merge short-circuit. On success it returns the pinned
+// post-rebase HEAD sha — the exact commit FinishMerge verifies and merges, so a
+// commit landing on branch after PrepareMerge returns does not change what gets
+// merged. tw may be nil (passthrough). Never calls tw.Plan(); the caller owns
+// stream termination.
+//
+// Splitting prepare from finish lets the async merge tool run this prefix
+// synchronously (before returning the job id), freeing the session worktree the
+// moment the rebase lands while FinishMerge's slow pre-merge hook runs detached
+// in an isolated build worktree.
+func PrepareMerge(tw *tap.Writer, w io.Writer, repoPath, wtPath, branch, defaultBranch string, gitSync, verbose bool) (pinnedSha string, err error) {
 	if home, _ := os.UserHomeDir(); home != "" {
 		hierarchy, hErr := sweatfile.LoadWorktreeHierarchy(home, repoPath, wtPath)
 		if hErr == nil && hierarchy.Merged.DisableMergeEnabled() {
@@ -116,7 +154,7 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, w io.Writer, 
 				"merge disabled by sweatfile (disable-merge=true at %s); use `sc check` to run the pre-merge hook without merging",
 				disableMergeSource(hierarchy),
 			)
-			return nil, failStep(tw, ownWriter, "merge "+branch, disableErr, "")
+			return "", failStep(tw, "merge "+branch, disableErr, "")
 		}
 	}
 
@@ -133,7 +171,7 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, w io.Writer, 
 		if tw != nil {
 			out, pullErr := git.Pull(repoPath)
 			if pullErr != nil {
-				return nil, failStep(tw, ownWriter, "pull "+defaultBranch, pullErr, out)
+				return "", failStep(tw, "pull "+defaultBranch, pullErr, out)
 			}
 			if verbose && out != "" {
 				tw.OkDiag("pull "+defaultBranch, &yaml_diagnostic.YAMLDiagnostic{Extras: map[string]any{"output": out}})
@@ -142,7 +180,7 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, w io.Writer, 
 			}
 		} else {
 			if pullErr := git.RunPassthrough(repoPath, "pull"); pullErr != nil {
-				return nil, pullErr
+				return "", pullErr
 			}
 		}
 	}
@@ -154,7 +192,7 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, w io.Writer, 
 	if tw != nil {
 		out, rebaseErr := git.RunEnv(wtPath, []string{"GIT_SEQUENCE_EDITOR=true"}, "rebase", defaultBranch, "-i")
 		if rebaseErr != nil {
-			return nil, failStep(tw, ownWriter, "rebase "+branch, rebaseErr, out)
+			return "", failStep(tw, "rebase "+branch, rebaseErr, out)
 		}
 		if verbose && out != "" {
 			tw.OkDiag("rebase "+branch, &yaml_diagnostic.YAMLDiagnostic{Extras: map[string]any{"output": out}})
@@ -164,7 +202,7 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, w io.Writer, 
 	} else {
 		if rebaseErr := git.RunPassthroughEnv(wtPath, []string{"GIT_SEQUENCE_EDITOR=true"}, "rebase", defaultBranch, "-i"); rebaseErr != nil {
 			log.Error("rebase failed, not merging")
-			return nil, rebaseErr
+			return "", rebaseErr
 		}
 	}
 
@@ -174,10 +212,26 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, w io.Writer, 
 		if tw == nil {
 			log.Error("nothing to merge", "branch", branch, "default", defaultBranch)
 		}
-		return nil, failStep(tw, ownWriter, "merge "+branch, noopErr, "")
+		return "", failStep(tw, "merge "+branch, noopErr, "")
 	}
 
-	hookLinks, hookErr := runPreMergeHookContext(ctx, tw, w, repoPath, wtPath, branch, ownWriter, activity)
+	// Pin the post-rebase tip: FinishMerge verifies and merges exactly this sha,
+	// so work committed onto branch while the hook runs is left for a later merge.
+	pinnedSha, shaErr := git.RevParse(wtPath, "HEAD")
+	if shaErr != nil {
+		return "", failStep(tw, "merge "+branch, fmt.Errorf("could not resolve %s HEAD: %w", branch, shaErr), "")
+	}
+	return pinnedSha, nil
+}
+
+// FinishMerge runs the slow, committing suffix of a merge against pinnedSha (the
+// sha PrepareMerge returned): the pre-merge hook (run in an isolated detached
+// build worktree pinned to pinnedSha unless [hooks].disable-merge-build-worktree
+// is set), the ff-only merge of pinnedSha into defaultBranch, optional
+// worktree/branch teardown, and push. Never calls tw.Plan(); the caller owns
+// stream termination.
+func FinishMerge(ctx context.Context, execr executor.Executor, tw *tap.Writer, w io.Writer, repoPath, wtPath, branch, defaultBranch, pinnedSha string, gitSync, inSession, verbose bool, activity io.Writer) (blobLinks []check.BlobLink, err error) {
+	hookLinks, hookErr := runPreMergeHookContext(ctx, tw, w, repoPath, wtPath, branch, pinnedSha, activity)
 	blobLinks = append(blobLinks, hookLinks...)
 	if hookErr != nil {
 		return blobLinks, hookErr
@@ -188,9 +242,9 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, w io.Writer, 
 	}
 
 	if tw != nil {
-		out, mergeErr := git.Run(repoPath, "merge", "--ff-only", branch)
+		out, mergeErr := git.Run(repoPath, "merge", "--ff-only", pinnedSha)
 		if mergeErr != nil {
-			return blobLinks, failStep(tw, ownWriter, "merge "+branch, mergeErr, out)
+			return blobLinks, failStep(tw, "merge "+branch, mergeErr, out)
 		}
 		if verbose && out != "" {
 			tw.OkDiag("merge "+branch, &yaml_diagnostic.YAMLDiagnostic{Extras: map[string]any{"output": out}})
@@ -198,7 +252,7 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, w io.Writer, 
 			tw.Ok("merge " + branch)
 		}
 	} else {
-		if mergeErr := git.RunPassthrough(repoPath, "merge", "--ff-only", branch); mergeErr != nil {
+		if mergeErr := git.RunPassthrough(repoPath, "merge", "--ff-only", pinnedSha); mergeErr != nil {
 			log.Error("merge failed, not removing worktree")
 			return blobLinks, mergeErr
 		}
@@ -219,7 +273,7 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, w io.Writer, 
 		if tw != nil {
 			out, removeErr := git.Run(repoPath, "worktree", "remove", wtPath)
 			if removeErr != nil {
-				return blobLinks, failStep(tw, ownWriter, "remove worktree "+branch, removeErr, out)
+				return blobLinks, failStep(tw, "remove worktree "+branch, removeErr, out)
 			}
 			if verbose && out != "" {
 				tw.OkDiag("remove worktree "+branch, &yaml_diagnostic.YAMLDiagnostic{Extras: map[string]any{"output": out}})
@@ -239,7 +293,7 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, w io.Writer, 
 		if tw != nil {
 			out, delErr := git.BranchDelete(repoPath, branch)
 			if delErr != nil {
-				return blobLinks, failStep(tw, ownWriter, "delete branch "+branch, delErr, out)
+				return blobLinks, failStep(tw, "delete branch "+branch, delErr, out)
 			}
 			if verbose && out != "" {
 				tw.OkDiag("delete branch "+branch, &yaml_diagnostic.YAMLDiagnostic{Extras: map[string]any{"output": out}})
@@ -261,7 +315,7 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, w io.Writer, 
 		if tw != nil {
 			out, pushErr := git.Push(repoPath)
 			if pushErr != nil {
-				return blobLinks, failStep(tw, ownWriter, "push", pushErr, out)
+				return blobLinks, failStep(tw, "push", pushErr, out)
 			}
 			if verbose && out != "" {
 				tw.OkDiag("push", &yaml_diagnostic.YAMLDiagnostic{Extras: map[string]any{"output": out}})
@@ -273,10 +327,6 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, w io.Writer, 
 				return blobLinks, pushErr
 			}
 		}
-	}
-
-	if ownWriter {
-		tw.Plan()
 	}
 
 	if inSession {
@@ -428,7 +478,7 @@ func promptDefaultBranch() (string, error) {
 // passthrough mode, emits the legacy "running pre-merge hook" /
 // "pre-merge hook failed, not merging" log lines that operators rely
 // on.
-func runPreMergeHookContext(ctx context.Context, tw *tap.Writer, w io.Writer, repoPath, wtPath, branch string, ownWriter bool, activity io.Writer) ([]check.BlobLink, error) {
+func runPreMergeHookContext(ctx context.Context, tw *tap.Writer, w io.Writer, repoPath, wtPath, branch, hookSha string, activity io.Writer) ([]check.BlobLink, error) {
 	home, _ := os.UserHomeDir()
 	if home == "" {
 		return nil, nil
@@ -437,27 +487,29 @@ func runPreMergeHookContext(ctx context.Context, tw *tap.Writer, w io.Writer, re
 	if err != nil {
 		return nil, nil
 	}
+	// ownWriter=false: the merge orchestrator (ResolvedContext / the async
+	// handler) owns Plan(); check only emits the hook test point here.
 	if tw == nil {
 		cmd := hierarchy.Merged.PreMergeHookCommand()
 		if cmd == nil || *cmd == "" {
 			return nil, nil
 		}
 		log.Info("running pre-merge hook", "worktree", branch)
-		if _, err := check.RunWithWriterContext(ctx, nil, w, hierarchy, wtPath, branch, ownWriter, activity); err != nil {
+		if _, err := check.RunWithWriterContext(ctx, nil, w, hierarchy, wtPath, branch, hookSha, false, activity); err != nil {
 			log.Error("pre-merge hook failed, not merging")
 			return nil, err
 		}
 		return nil, nil
 	}
-	return check.RunWithWriterContext(ctx, tw, w, hierarchy, wtPath, branch, ownWriter, activity)
+	return check.RunWithWriterContext(ctx, tw, w, hierarchy, wtPath, branch, hookSha, false, activity)
 }
 
-// failStep emits a TAP NotOk for label populated from err
-// (severity=fail), optionally including a verbose output field. When
-// ownWriter is true, follows with tw.Plan() to terminate the stream.
-// tw=nil skips emit. Returns err unchanged so callers can write
-// `return failStep(...)`.
-func failStep(tw *tap.Writer, ownWriter bool, label string, err error, output string) error {
+// failStep emits a TAP NotOk for label populated from err (severity=fail),
+// optionally including a verbose output field. tw=nil skips emit. Never calls
+// tw.Plan() — the merge orchestrator (ResolvedContext / the async handler) owns
+// stream termination so exactly one plan line is emitted per run. Returns err
+// unchanged so callers can write `return failStep(...)`.
+func failStep(tw *tap.Writer, label string, err error, output string) error {
 	if tw == nil {
 		return err
 	}
@@ -466,9 +518,6 @@ func failStep(tw *tap.Writer, ownWriter bool, label string, err error, output st
 		diag["output"] = output
 	}
 	tw.NotOk(label, diag)
-	if ownWriter {
-		tw.Plan()
-	}
 	return err
 }
 

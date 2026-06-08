@@ -67,7 +67,9 @@ parent dirs → repo-level. Supports `git-excludes`, `claude-allow`, `envrc-dire
 `[[mcps]]`, `[[start-commands]]`, and `[[remotes]]` arrays of tables
 (dedup-by-name merge),
 `[env]` table (map merge), `[hooks]` table (create/stop/pre-merge lifecycle hooks, scalar
-override), and `[session]` table (start/resume entrypoint commands, override
+override; includes `disable-merge`, `disable-nix-gc`,
+`disable-merge-build-worktree`, `pre-merge-output-format`,
+`inactivity-timeout`), and `[session]` table (start/resume entrypoint commands, override
 semantics).
 
 **Remote sessions** (`internal/remote/`): Routes `host:`-prefixed targets to
@@ -220,6 +222,36 @@ read but never wakes — a dead producer can't emit. The failed-state
 wake message carries the first `not ok` line of the result when
 present. `internal/clown` is the shared producer integration (chat's
 `EmitWake` delegates to it).
+
+### Pre-merge hook build worktree
+
+By default the `pre-merge` hook runs in a transient **detached build worktree**
+pinned to the exact committed sha being merged, not in the live session
+worktree. `check.resolveHookDir` creates a hidden `.merge-<branch>-<sha>-<pid>`
+sibling under `.worktrees/` via `git.WorktreeAddDetached` (which prunes stale
+admin entries first), runs the hook with `cmd.Dir` set there, and removes it via
+a deferred `git.WorktreeForceRemove`. madder still targets the session worktree
+(`wtPath`); only the hook's working directory relocates. This frees the session
+worktree for concurrent edits while the (slow) hook runs, and verifies the
+committed tree rather than uncommitted state. See FDR 0013 and
+`docs/features/0013-isolated-build-worktree.md`.
+
+The merge flow is split into `merge.PrepareMerge` (disable-merge gate → optional
+pull → rebase → nothing-to-merge short-circuit → **pin** the post-rebase
+`HEAD` sha) and `merge.FinishMerge` (hook in the build worktree → `git merge
+--ff-only <pinnedSha>` → teardown → push). `merge --ff-only` targets the pinned
+**sha**, not the branch name, so a commit landing on the branch while the hook
+runs is left for a later merge instead of leaking in. `merge-this-session-async`
+runs `PrepareMerge` **synchronously** (sharing one `tap.Writer`+buffer via
+`merge.NewMergeWriter`) before returning the job id — so rebase conflicts /
+nothing-to-merge surface immediately and the rebase can't race the agent's next
+edits — then backgrounds `FinishMerge`, whose TAP is appended to the same buffer
+for one continuous result stream. The sync `merge-this-session` and both
+`check`/`check-this-session` paths inherit the build worktree transparently
+(check pins `HEAD`). Opt out per the sweatfile cascade with
+`[hooks].disable-merge-build-worktree = true` (runs the hook in place; legacy).
+Caveat: the build worktree is detached HEAD, so a hook reading the current
+branch name sees `HEAD`.
 
 ### Pre-merge hook inactivity watchdog
 

@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -117,8 +118,11 @@ func RunContext(ctx context.Context, w io.Writer, format, wtPath string, verbose
 		return nil, nil
 	}
 
+	// Pin HEAD so the hook verifies the committed tree in an isolated build
+	// worktree (see resolveHookDir). RevParse failure degrades to "" → in-place.
+	hookSha, _ := git.RevParse(wtPath, "HEAD")
 	// ownWriter=false: Run owns Plan emission for the standalone path.
-	links, hookErr := RunWithWriterContext(ctx, tw, w, hierarchy, wtPath, branch, false, activity)
+	links, hookErr := RunWithWriterContext(ctx, tw, w, hierarchy, wtPath, branch, hookSha, false, activity)
 	if tw != nil && ownWriter {
 		tw.Plan()
 	}
@@ -144,10 +148,10 @@ func RunWithWriter(
 	tw *tap.Writer,
 	w io.Writer,
 	hierarchy sweatfile.Hierarchy,
-	wtPath, branch string,
+	wtPath, branch, hookSha string,
 	ownWriter bool,
 ) ([]BlobLink, error) {
-	return RunWithWriterContext(context.Background(), tw, w, hierarchy, wtPath, branch, ownWriter, nil)
+	return RunWithWriterContext(context.Background(), tw, w, hierarchy, wtPath, branch, hookSha, ownWriter, nil)
 }
 
 // RunWithWriterContext is RunWithWriter bound to ctx with an optional activity
@@ -159,7 +163,7 @@ func RunWithWriterContext(
 	tw *tap.Writer,
 	w io.Writer,
 	hierarchy sweatfile.Hierarchy,
-	wtPath, branch string,
+	wtPath, branch, hookSha string,
 	ownWriter bool,
 	activity io.Writer,
 ) ([]BlobLink, error) {
@@ -168,14 +172,32 @@ func RunWithWriterContext(
 		return nil, nil
 	}
 
+	// Run the hook in an isolated detached worktree pinned to hookSha (default)
+	// or in place in wtPath (legacy / disabled / no sha). madder still targets
+	// wtPath — only the hook's working directory relocates.
+	hookDir, cleanup, prepErr := resolveHookDir(hierarchy, wtPath, branch, hookSha)
+	if prepErr != nil {
+		if tw != nil {
+			tw.NotOk("pre-merge build worktree for "+branch, map[string]string{
+				"severity": "fail",
+				"message":  prepErr.Error(),
+			})
+			if ownWriter {
+				tw.Plan()
+			}
+		}
+		return nil, prepErr
+	}
+	defer cleanup()
+
 	if tw == nil {
-		return nil, hierarchy.Merged.RunPreMergeHookContext(ctx, wtPath, teeWriter(w, activity))
+		return nil, hierarchy.Merged.RunPreMergeHookContext(ctx, hookDir, teeWriter(w, activity))
 	}
 
 	desc := "pre-merge hook for " + branch + ": `" + *cmd + "`"
 
 	if embeds.MadderBin() != "" {
-		link, hookErr := runHookCompactContext(ctx, tw, hierarchy, wtPath, *cmd, desc, activity)
+		link, hookErr := runHookCompactContext(ctx, tw, hierarchy, wtPath, hookDir, *cmd, desc, activity)
 		if hookErr != nil && ownWriter {
 			tw.Plan()
 		}
@@ -189,7 +211,7 @@ func RunWithWriterContext(
 	var hookErr error
 	tw.OutputBlock(desc, func(ob *tap.OutputBlockWriter) *yaml_diagnostic.YAMLDiagnostic {
 		lw := tapblock.NewLineWriter(ob)
-		hookErr = hierarchy.Merged.RunPreMergeHookContext(ctx, wtPath, teeWriter(lw, activity))
+		hookErr = hierarchy.Merged.RunPreMergeHookContext(ctx, hookDir, teeWriter(lw, activity))
 		lw.Flush()
 		if hookErr != nil {
 			return &yaml_diagnostic.YAMLDiagnostic{Severity: "fail", Message: hookErr.Error()}
@@ -209,6 +231,45 @@ func teeWriter(primary, activity io.Writer) io.Writer {
 		return primary
 	}
 	return io.MultiWriter(primary, activity)
+}
+
+// resolveHookDir decides where the pre-merge hook runs and returns a cleanup
+// func the caller must defer.
+//
+// Default behavior: create a transient detached worktree pinned to hookSha as a
+// hidden sibling under .worktrees/ (filepath.Dir(wtPath)), so the hook verifies
+// the exact committed tree being merged while the session worktree stays free
+// for concurrent edits. The branch itself stays checked out in wtPath, so the
+// build worktree is detached-HEAD (a hook that reads the current branch name
+// sees "HEAD" — see spinclass-sweatfile(5)).
+//
+// Legacy / opt-out: when [hooks].disable-merge-build-worktree is true, or hookSha
+// is empty (RevParse failed), the hook runs in place in wtPath and cleanup is a
+// no-op. A worktree-add failure is returned as an error (the gate refuses rather
+// than silently degrading to an in-place run).
+func resolveHookDir(hierarchy sweatfile.Hierarchy, wtPath, branch, hookSha string) (hookDir string, cleanup func(), err error) {
+	noop := func() {}
+	if hookSha == "" || hierarchy.Merged.MergeBuildWorktreeDisabled() {
+		return wtPath, noop, nil
+	}
+
+	short := hookSha
+	if len(short) > 12 {
+		short = short[:12]
+	}
+	name := fmt.Sprintf(".merge-%s-%s-%d", sanitizeBranchForPath(branch), short, os.Getpid())
+	buildPath := filepath.Join(filepath.Dir(wtPath), name)
+
+	if err := git.WorktreeAddDetached(wtPath, buildPath, hookSha); err != nil {
+		return "", noop, fmt.Errorf("create pre-merge build worktree at %s: %w", buildPath, err)
+	}
+	return buildPath, func() { _ = git.WorktreeForceRemove(wtPath, buildPath) }, nil
+}
+
+// sanitizeBranchForPath maps a branch name to a safe path segment: slashes (from
+// branches like "feature/foo") and other separators become hyphens.
+func sanitizeBranchForPath(branch string) string {
+	return strings.NewReplacer("/", "-", string(filepath.Separator), "-").Replace(branch)
 }
 
 // runHookCompactContext runs the pre-merge hook and emits a single TAP test
@@ -235,7 +296,11 @@ func teeWriter(primary, activity io.Writer) io.Writer {
 // Returns a BlobLink carrying the resource_link URI and the MIME type
 // matching the resolved format. If madder produced no blob (spawn
 // failed, or post-hook write/parse failed), the BlobLink's URI is "".
-func runHookCompactContext(ctx context.Context, tw *tap.Writer, hierarchy sweatfile.Hierarchy, wtPath, cmd, desc string, activity io.Writer) (BlobLink, error) {
+//
+// wtPath is the session worktree (where the madder blob store lives); hookDir is
+// where the hook actually runs (an isolated build worktree, or wtPath in the
+// legacy path). They differ only when the build-worktree feature is active.
+func runHookCompactContext(ctx context.Context, tw *tap.Writer, hierarchy sweatfile.Hierarchy, wtPath, hookDir, cmd, desc string, activity io.Writer) (BlobLink, error) {
 	format := hierarchy.Merged.PreMergeOutputFormatValue()
 
 	// ring is the fallback visibility for failures the parser can't surface.
@@ -278,7 +343,7 @@ func runHookCompactContext(ctx context.Context, tw *tap.Writer, hierarchy sweatf
 	}
 
 	start := time.Now()
-	hookErr := hierarchy.Merged.RunPreMergeHookContext(ctx, wtPath, sink)
+	hookErr := hierarchy.Merged.RunPreMergeHookContext(ctx, hookDir, sink)
 	elapsed := time.Since(start)
 
 	var (

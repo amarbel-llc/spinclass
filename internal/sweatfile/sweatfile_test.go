@@ -1702,3 +1702,50 @@ func TestMergeDisableNixGCOverride(t *testing.T) {
 		t.Error("expected overridden disable-nix-gc to be disabled")
 	}
 }
+
+func TestParseHooksDisableMergeBuildWorktree(t *testing.T) {
+	input := `
+[hooks]
+disable-merge-build-worktree = true
+`
+	doc, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sf := doc.Data()
+	if !sf.MergeBuildWorktreeDisabled() {
+		t.Error("expected disable-merge-build-worktree to be enabled")
+	}
+}
+
+func TestParseHooksDisableMergeBuildWorktreeAbsent(t *testing.T) {
+	doc, err := Parse([]byte("[git]\nexcludes = [\".claude/\"]"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sf := doc.Data()
+	if sf.MergeBuildWorktreeDisabled() {
+		t.Error("expected disable-merge-build-worktree to default to false when absent")
+	}
+}
+
+func TestMergeDisableMergeBuildWorktreeInherit(t *testing.T) {
+	enabled := true
+	base := Sweatfile{Hooks: &Hooks{DisableMergeBuildWorktree: &enabled}}
+	repo := Sweatfile{}
+	merged := base.MergeWith(repo)
+	if !merged.MergeBuildWorktreeDisabled() {
+		t.Error("expected inherited disable-merge-build-worktree")
+	}
+}
+
+func TestMergeDisableMergeBuildWorktreeOverride(t *testing.T) {
+	enabled := true
+	disabled := false
+	base := Sweatfile{Hooks: &Hooks{DisableMergeBuildWorktree: &enabled}}
+	repo := Sweatfile{Hooks: &Hooks{DisableMergeBuildWorktree: &disabled}}
+	merged := base.MergeWith(repo)
+	if merged.MergeBuildWorktreeDisabled() {
+		t.Error("expected overridden disable-merge-build-worktree to be disabled")
+	}
+}
