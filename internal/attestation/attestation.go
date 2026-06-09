@@ -111,6 +111,55 @@ func Record(repoPath, branch string, skills []session.AttestedSkill) error {
 	return nil
 }
 
+// RecordImplicit writes a validated attestation into an implicit (main-checkout)
+// session's per-randID state file at checkout. Mirrors Record but loads via
+// FindImplicitAtCwd and persists via WriteImplicit. Overwrites any prior
+// buffered attestation.
+func RecordImplicit(checkout string, skills []session.AttestedSkill) error {
+	st, randID, err := session.FindImplicitAtCwd(checkout)
+	if err != nil {
+		return fmt.Errorf("find implicit session: %w", err)
+	}
+	if st == nil {
+		return fmt.Errorf("no live implicit session at %s", checkout)
+	}
+	st.PreMergeAttestation = &session.PreMergeAttestation{
+		RecordedAt: time.Now().UTC(),
+		Skills:     skills,
+	}
+	if err := session.WriteImplicit(*st, randID); err != nil {
+		return fmt.Errorf("write implicit session state: %w", err)
+	}
+	return nil
+}
+
+// CheckImplicit is Check for an implicit (main-checkout) session: it verifies a
+// fresh attestation is buffered in the per-randID state file and consumes it.
+// Same three outcomes as Check (dormant → (true,"",nil); satisfied → consume +
+// (true,"",nil); failed → (false, TAP doc, ErrAttestationRequired)).
+func CheckImplicit(merged sweatfile.Sweatfile, checkout string) (ok bool, output string, err error) {
+	required := merged.ActivePreMergeSkills()
+	if len(required) == 0 {
+		return true, "", nil
+	}
+
+	st, randID, readErr := session.FindImplicitAtCwd(checkout)
+	if readErr != nil || st == nil {
+		return false, renderFailure(required,
+			"could not read implicit session state to verify attestation; this MCP tool requires a tracked spinclass session"), ErrAttestationRequired
+	}
+	if st.PreMergeAttestation == nil {
+		return false, renderFailure(required,
+			"no fresh attestation buffered; call `nothing-but-the-truth` first, then retry"), ErrAttestationRequired
+	}
+
+	st.PreMergeAttestation = nil
+	if writeErr := session.WriteImplicit(*st, randID); writeErr != nil {
+		return false, "", fmt.Errorf("clear pre-merge attestation: %w", writeErr)
+	}
+	return true, "", nil
+}
+
 // Check verifies whether a fresh attestation is buffered and applies
 // to the required skills declared in the merged sweatfile. Three
 // outcomes:

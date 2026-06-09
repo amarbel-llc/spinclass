@@ -238,6 +238,105 @@ func TestRecordRoundTrip(t *testing.T) {
 	}
 }
 
+// setupImplicitSession materializes a live implicit (main-checkout) session
+// under an XDG-isolated temp checkout. Returns the checkout root.
+func setupImplicitSession(t *testing.T) string {
+	t.Helper()
+	base := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", filepath.Join(base, "xdg-state"))
+	checkout := filepath.Join(base, "checkout")
+	if err := os.MkdirAll(checkout, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	st := session.State{
+		Kind:         session.KindImplicit,
+		PID:          os.Getpid(),
+		SessionState: session.StateActive,
+		WorktreePath: checkout,
+		Branch:       "master",
+		SessionKey:   "r/master-deadbeef",
+	}
+	if err := session.WriteImplicit(st, "deadbeef"); err != nil {
+		t.Fatal(err)
+	}
+	return checkout
+}
+
+func TestRecordImplicitAndCheckImplicitRoundTrip(t *testing.T) {
+	checkout := setupImplicitSession(t)
+
+	required := []sweatfile.PreMergeSkill{
+		{Name: "eng:code-reviewer", Rationale: "Required."},
+	}
+	merged := sweatfile.Sweatfile{PreMergeSkills: required}
+
+	if err := RecordImplicit(checkout, []session.AttestedSkill{
+		{Name: "eng:code-reviewer", Used: true, Reasoning: "x"},
+	}); err != nil {
+		t.Fatalf("RecordImplicit: %v", err)
+	}
+
+	// First CheckImplicit consumes the buffered attestation.
+	ok, output, err := CheckImplicit(merged, checkout)
+	if err != nil {
+		t.Fatalf("first CheckImplicit returned error: %v", err)
+	}
+	if !ok {
+		t.Fatalf("first CheckImplicit expected to pass, got !ok with output: %s", output)
+	}
+	if output != "" {
+		t.Errorf("first CheckImplicit expected empty output, got %q", output)
+	}
+
+	// Second CheckImplicit must fail (single-use consumed).
+	ok2, output2, err2 := CheckImplicit(merged, checkout)
+	if !errors.Is(err2, ErrAttestationRequired) {
+		t.Fatalf("second CheckImplicit: expected ErrAttestationRequired, got %v", err2)
+	}
+	if ok2 {
+		t.Error("second CheckImplicit expected to fail, got ok=true")
+	}
+	if output2 == "" {
+		t.Error("second CheckImplicit expected non-empty TAP output")
+	}
+}
+
+func TestCheckImplicitDormantWhenNoSkills(t *testing.T) {
+	checkout := setupImplicitSession(t)
+
+	merged := sweatfile.Sweatfile{}
+	ok, output, err := CheckImplicit(merged, checkout)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Errorf("expected gate dormant, got !ok with output: %s", output)
+	}
+	if output != "" {
+		t.Errorf("expected empty output, got %q", output)
+	}
+}
+
+func TestCheckImplicitFailsWhenNoAttestation(t *testing.T) {
+	checkout := setupImplicitSession(t)
+
+	merged := sweatfile.Sweatfile{
+		PreMergeSkills: []sweatfile.PreMergeSkill{
+			{Name: "eng:code-reviewer", Rationale: "Required."},
+		},
+	}
+	ok, output, err := CheckImplicit(merged, checkout)
+	if !errors.Is(err, ErrAttestationRequired) {
+		t.Fatalf("expected ErrAttestationRequired, got %v", err)
+	}
+	if ok {
+		t.Errorf("expected gate to fail, got ok=true")
+	}
+	if output == "" {
+		t.Error("expected non-empty TAP output")
+	}
+}
+
 func TestRenderRequiredSkillsQuotesScalar(t *testing.T) {
 	required := []sweatfile.PreMergeSkill{
 		{Name: "with-quote", Rationale: `Has a "quote" and \backslash.`},

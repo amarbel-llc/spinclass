@@ -896,18 +896,23 @@ func handleNothingButTheTruth(_ context.Context, args json.RawMessage, _ command
 		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
 	}
 
-	if !worktree.IsWorktree(cwd) {
-		return command.TextErrorResult("not inside a worktree session"), nil
-	}
-
-	repoPath, err := git.CommonDir(cwd)
-	if err != nil {
-		return command.TextErrorResult(fmt.Sprintf("could not determine repo path: %v", err)), nil
-	}
-
-	branch, err := git.BranchCurrent(cwd)
-	if err != nil {
-		return command.TextErrorResult(fmt.Sprintf("could not determine current branch: %v", err)), nil
+	isImplicit := false
+	var repoPath, branch string
+	if worktree.IsWorktree(cwd) {
+		repoPath, err = git.CommonDir(cwd)
+		if err != nil {
+			return command.TextErrorResult(fmt.Sprintf("could not determine repo path: %v", err)), nil
+		}
+		branch, err = git.BranchCurrent(cwd)
+		if err != nil {
+			return command.TextErrorResult(fmt.Sprintf("could not determine current branch: %v", err)), nil
+		}
+	} else {
+		implicit, _, ferr := session.FindImplicitAtCwd(cwd)
+		if ferr != nil || implicit == nil {
+			return command.TextErrorResult("not inside a worktree session"), nil
+		}
+		isImplicit = true
 	}
 
 	merged, ok := mergedSweatfileForCwd()
@@ -924,7 +929,12 @@ func handleNothingButTheTruth(_ context.Context, args json.RawMessage, _ command
 		return command.TextErrorResult(renderValidationError(required, verr)), nil
 	}
 
-	if err := attestation.Record(repoPath, branch, params.Skills); err != nil {
+	if isImplicit {
+		err = attestation.RecordImplicit(cwd, params.Skills)
+	} else {
+		err = attestation.Record(repoPath, branch, params.Skills)
+	}
+	if err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not record attestation: %v", err)), nil
 	}
 
