@@ -12,13 +12,21 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/testgit"
 )
 
-// TestResolveGatedSession exercises the three outcomes of the extracted
-// merge/check session-gate preamble: a worktree session (implicit=false,
-// repoPath/branch from git), a live implicit main-checkout session
-// (implicit=true, repoPath/branch from the state file), and a bare dir that is
-// neither (ok=false with the canonical reject message). All three run with the
+// TestResolveGatedSession exercises the resolved/reject outcomes of the
+// extracted merge/check session-gate preamble: a worktree session
+// (ok=true, gitErr=nil, implicit=false, repoPath/branch from git), a live
+// implicit main-checkout session (ok=true, gitErr=nil, implicit=true,
+// repoPath/branch from the state file), and a bare dir that is neither
+// (ok=false with the canonical reject message). All three run with the
 // attestation gate dormant — no [[pre-merge-skills]] in the loaded hierarchy —
 // so the gate passes and the routing identity is what's under test.
+//
+// The third outcome — git-fail (ok=true, gitErr set, gs zero) — is not
+// exercised here: it requires a cwd where worktree.IsWorktree is true but
+// git.CommonDir/BranchCurrent then fails, which means a deliberately corrupt
+// .git pointer that's brittle to construct. The merge handlers' fatality on
+// gitErr is the only consumer of that outcome and is covered by the live merge
+// path; the helper just forwards git's error verbatim.
 //
 // The gate's dormancy is load-bearing and non-obvious here: the sweatfile
 // cascade walks the repo dir's ancestors up to $HOME, and $TMPDIR (and thus
@@ -43,15 +51,15 @@ func TestResolveGatedSession(t *testing.T) {
 		// the worktree so the dormant-gate path resolves there.
 		t.Chdir(wt)
 
-		gs, failMsg, ok := resolveGatedSession(wt)
+		gs, gitErr, failMsg, ok := resolveGatedSession(wt)
 		if !ok {
 			t.Fatalf("expected ok, got reject: %q", failMsg)
 		}
+		if gitErr != nil {
+			t.Errorf("worktree session: unexpected gitErr: %v", gitErr)
+		}
 		if gs.implicit {
 			t.Errorf("worktree session: implicit = true, want false")
-		}
-		if gs.gitErr != nil {
-			t.Errorf("worktree session: unexpected gitErr: %v", gs.gitErr)
 		}
 		if gs.repoPath == "" {
 			t.Errorf("worktree session: repoPath empty, want git-common-dir")
@@ -86,15 +94,15 @@ func TestResolveGatedSession(t *testing.T) {
 		}
 		t.Chdir(repo)
 
-		gs, failMsg, ok := resolveGatedSession(repo)
+		gs, gitErr, failMsg, ok := resolveGatedSession(repo)
 		if !ok {
 			t.Fatalf("expected ok, got reject: %q", failMsg)
 		}
+		if gitErr != nil {
+			t.Errorf("implicit session: unexpected gitErr: %v", gitErr)
+		}
 		if !gs.implicit {
 			t.Errorf("implicit session: implicit = false, want true")
-		}
-		if gs.gitErr != nil {
-			t.Errorf("implicit session: unexpected gitErr: %v", gs.gitErr)
 		}
 		if gs.repoPath != repo {
 			t.Errorf("implicit session: repoPath = %q, want %q", gs.repoPath, repo)
@@ -106,13 +114,19 @@ func TestResolveGatedSession(t *testing.T) {
 
 	t.Run("reject", func(t *testing.T) {
 		t.Setenv("XDG_STATE_HOME", t.TempDir())
-		// Bare dir: not a worktree, no implicit session written.
+		// Bare dir: not a worktree, no implicit session written. No $HOME pin is
+		// needed here (unlike the other subtests) — the reject fires before the
+		// attestation gate, so the sweatfile cascade that ~/eng's
+		// [[pre-merge-skills]] would taint is never reached on this path.
 		dir := t.TempDir()
 		t.Chdir(dir)
 
-		gs, failMsg, ok := resolveGatedSession(dir)
+		gs, gitErr, failMsg, ok := resolveGatedSession(dir)
 		if ok {
 			t.Fatalf("expected reject, got ok (gs=%+v)", gs)
+		}
+		if gitErr != nil {
+			t.Errorf("reject: unexpected gitErr: %v", gitErr)
 		}
 		if failMsg != "not inside a worktree session" {
 			t.Errorf("reject message = %q, want %q", failMsg, "not inside a worktree session")
