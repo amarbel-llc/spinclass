@@ -70,11 +70,15 @@ Two net-new events in `hooks/hooks.json` (the hand-maintained plugin manifest),
 dispatched by `hooks.Run`:
 
 - **`SessionStart`** (timeout 10s) → `runSessionStart`. Gates on, in order:
-  (1) cwd is **not** inside a `.worktrees/` worktree; (2) the
-  `[hooks].disable-implicit-sessions` knob is unset/false; (3) cwd is a git repo
-  whose checkout root == cwd and which is on its default branch. If any gate
-  fails it is a silent no-op (exit 0 — never block session startup). Otherwise
-  it sweeps dead-PID orphans (`SweepDeadImplicit`) then upserts
+  (1) cwd is **not** inside a `.worktrees/` worktree; (2) cwd is a git repo
+  whose checkout root == cwd and which is on its default branch; (3) the
+  `[hooks].disable-implicit-sessions` knob is unset/false. The knob runs **last**
+  on purpose: the cheap git-repo/default-branch discriminator precedes the knob's
+  sweatfile-hierarchy walk, so a SessionStart fired in a non-git dir (e.g.
+  `~/Downloads`) skips that I/O entirely — yet the knob still runs before the
+  orphan sweep + state write, so a disabled session materializes nothing. If any
+  gate fails it is a silent no-op (exit 0 — never block session startup).
+  Otherwise it sweeps dead-PID orphans (`SweepDeadImplicit`) then upserts
   `state-<rand>.json` (PID = `os.Getppid()`, best-effort). Fires on
   startup/resume/clear/compact; re-fires are idempotent upserts on the same
   `session_id`.
