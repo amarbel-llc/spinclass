@@ -159,16 +159,6 @@ Disable the feature for a repo (rollback):
 
 ## Limitations
 
-- **Build-worktree placement (#130).** The isolated pre-merge build worktree is
-  created at `filepath.Dir(checkout)`. For a worktree session that is inside
-  `.worktrees/`; for an implicit session `checkout` == the repo root, so the
-  build worktree lands in the repo's **parent** dir (e.g. a repo at
-  `~/eng/repos/myrepo` gets a build worktree at
-  `~/eng/repos/.merge-master-<sha>-<pid>`). Functional but an out-of-repo
-  placement quirk; tracked as a followup.
-- **`check` parity (#132).** `merge` routes implicit sessions to the
-  hook-then-push path, but `check-this-session` / `sc check` do not yet detect
-  an implicit session — a follow-up.
 - **Best-effort PID.** The recorded PID is `os.Getppid()` (the parent of the
   short-lived hook subprocess). It is *not* empirically verified to be the
   stable Claude process versus a transient shell wrapper, so PID-liveness is a
@@ -180,6 +170,18 @@ Disable the feature for a repo (rollback):
   (the `serve` process cannot know its own `session_id`). Broadcasts are
   unaffected; a directed `chat-send` from such a checkout may resolve to a
   sibling agent's key.
+
+### Resolved after initial implementation
+
+- **Build-worktree placement (#130, fixed).** The build worktree originally
+  landed at `filepath.Dir(checkout)` — the repo's **parent** dir for an
+  implicit session (`checkout` == repo root). `resolveHookDir` now derives the
+  parent from the repo root's `.worktrees/` via `git.CommonDir`, so both
+  worktree and implicit sessions land under `<repo>/.worktrees/.merge-…`.
+- **`check` parity (#132, fixed).** `check-this-session` /
+  `check-this-session-async` now detect a live implicit session
+  (`FindImplicitAtCwd`) and enforce `enforceAttestationImplicit`, mirroring the
+  merge handlers. `sc check` (CLI) was already gate-free and worked.
 
 ## Tuning Levers
 
@@ -193,9 +195,16 @@ Disable the feature for a repo (rollback):
 ## More Information
 
 - Issue: [#118](https://github.com/amarbel-llc/spinclass/issues/118).
-  Followups: [#130](https://github.com/amarbel-llc/spinclass/issues/130)
-  (build-worktree placement),
-  [#132](https://github.com/amarbel-llc/spinclass/issues/132) (check parity).
+  Resolved followups: [#130](https://github.com/amarbel-llc/spinclass/issues/130)
+  (build-worktree placement) and
+  [#132](https://github.com/amarbel-llc/spinclass/issues/132) (check parity)
+  are both fixed (see Resolved after initial implementation, above). Open
+  followups: [#134](https://github.com/amarbel-llc/spinclass/issues/134)
+  (`currentSessionKey` error message),
+  [#135](https://github.com/amarbel-llc/spinclass/issues/135) (`sc clean`
+  orphaned-build-worktree sweep),
+  [#136](https://github.com/amarbel-llc/spinclass/issues/136) (extract the
+  shared gate preamble).
   [#128](https://github.com/amarbel-llc/spinclass/issues/128) (decouple chat
   from session-key resolution) was closed as a duplicate — implicit sessions
   give main-checkout agents the unique chat key it asked for.
