@@ -52,15 +52,20 @@ SIGHUP forwarding) and `ShellExecutor` (used by merge). Tests use a
 `abandoned` (worktree gone). Dirty state computed live via git.
 **Implicit sessions** (`State.Kind == KindImplicit`, FDR 0014) extend this to
 agents attached to a repo's **main checkout** (not an `sc start` worktree):
-keyed `<repo>/<default-branch>-<rand>` (`<rand> = sha256(session_id)[:8]`),
-stored worktree-local at `<checkout>/.spinclass/state-<rand>.json` (one file per
-session, central index symlink) so concurrent agents in one checkout never
-collide. Materialized/torn down by Claude Code `SessionStart`/`SessionEnd`
-plugin hooks (`runSessionStart`/`runSessionEnd` in `internal/hooks/`), which
-gate on not-a-worktree + repo-root-on-default-branch + the
-`[hooks].disable-implicit-sessions` knob; dead-PID orphans are reaped by a
-`SessionStart` sweep + PID-liveness. `WriteImplicit`/`RemoveImplicit`/
-`SweepDeadImplicit`/`FindImplicitAtCwd` are the per-rand storage API.
+keyed `<repo>/<rand>` (`<rand> = sha256(session_id)[:8]`) — the branch is NOT in
+the key (any branch qualifies; a slash-bearing branch would corrupt the key), it
+is kept in `State.Branch` as a display-only hint surfaced as a separate `sc list`
+column + `chat-list-sessions` `{branch}` annotation and refreshed on each
+`SessionStart` re-fire. Stored worktree-local at
+`<checkout>/.spinclass/state-<rand>.json` (one file per session, central index
+symlink) so concurrent agents in one checkout never collide. Materialized/torn
+down by Claude Code `SessionStart`/`SessionEnd` plugin hooks
+(`runSessionStart`/`runSessionEnd` in `internal/hooks/`), which gate on
+not-a-worktree (`.git` is a directory) + repo-root == cwd (any branch;
+detached-HEAD is a no-op) + the `[hooks].disable-implicit-sessions` knob;
+dead-PID orphans are reaped by a `SessionStart` sweep + PID-liveness.
+`WriteImplicit`/`RemoveImplicit`/`SweepDeadImplicit`/`FindImplicitAtCwd` are the
+per-rand storage API.
 
 **Git operations** (`internal/git/`): Thin wrapper --- all commands use
 `git -C <dir>`. Two modes: `Run()` captures output, `RunPassthrough()` streams

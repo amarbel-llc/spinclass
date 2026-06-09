@@ -37,14 +37,23 @@ Code lifecycle hooks — no `sc` command to run.
 
 ### Identity
 
-Session key: `<repo-dirname>/<default-branch>-<rand>`, where
-`<rand> = sha256(session_id)[:8]` and `session_id` is the Claude Code hook
-payload's session id (e.g. `spinclass/master-a3f9b2c1`). The `session_id` is
-stable across a session's lifetime (same value at `SessionStart` and
-`SessionEnd`, and across `/clear`, `compact`, and `--resume`), so create and
-teardown derive the same `<rand>`. The key is globally unique, so it collides
-neither with worktree session keys nor with concurrent agents in the same
-checkout (each Claude session has its own `session_id`).
+Session key: `<repo-dirname>/<rand>`, where `<rand> = sha256(session_id)[:8]`
+and `session_id` is the Claude Code hook payload's session id (e.g.
+`spinclass/a3f9b2c1`). The `session_id` is stable across a session's lifetime
+(same value at `SessionStart` and `SessionEnd`, and across `/clear`, `compact`,
+and `--resume`), so create and teardown derive the same `<rand>`. The key is
+globally unique, so it collides neither with worktree session keys nor with
+concurrent agents in the same checkout (each Claude session has its own
+`session_id`).
+
+The **branch is deliberately NOT part of the key.** A main checkout can sit on
+any branch (not just the default), and a slash-bearing branch name
+(`feature/wip`) would leak a second `/` into the key, breaking the single-slash
+`<repo>/<id>` shape that key consumers assume. Instead the branch is stored in
+`State.Branch` as a **display-only hint**: surfaced as a separate column in
+`sc list` and a `{branch}` annotation in `chat-list-sessions`, and refreshed on
+every `SessionStart` re-fire (so it tracks the checkout's current branch after a
+mid-session `git checkout`) while the key itself stays stable.
 
 `session.State` carries a `Kind string` field (`json:"kind,omitempty"`);
 `session.KindImplicit = "implicit"` discriminates. Absent `Kind` ⇒ a worktree
@@ -70,18 +79,22 @@ Two net-new events in `hooks/hooks.json` (the hand-maintained plugin manifest),
 dispatched by `hooks.Run`:
 
 - **`SessionStart`** (timeout 10s) → `runSessionStart`. Gates on, in order:
-  (1) cwd is **not** inside a `.worktrees/` worktree; (2) cwd is a git repo
-  whose checkout root == cwd and which is on its default branch; (3) the
+  (1) cwd is **not** inside a `.worktrees/` worktree (i.e. `.git` is a
+  *directory*, not a worktree's `.git` file/symlink — this is the sole
+  main-checkout discriminator); (2) cwd is a git repo whose checkout root == cwd,
+  **on any branch** (the gate does NOT require the default branch — a main
+  checkout on a feature branch is a first-class implicit session); (3) the
   `[hooks].disable-implicit-sessions` knob is unset/false. The knob runs **last**
-  on purpose: the cheap git-repo/default-branch discriminator precedes the knob's
+  on purpose: the cheap git-repo discriminator precedes the knob's
   sweatfile-hierarchy walk, so a SessionStart fired in a non-git dir (e.g.
   `~/Downloads`) skips that I/O entirely — yet the knob still runs before the
-  orphan sweep + state write, so a disabled session materializes nothing. If any
-  gate fails it is a silent no-op (exit 0 — never block session startup).
-  Otherwise it sweeps dead-PID orphans (`SweepDeadImplicit`) then upserts
-  `state-<rand>.json` (PID = `os.Getppid()`, best-effort). Fires on
+  orphan sweep + state write, so a disabled session materializes nothing. A
+  detached-HEAD checkout (no branch name) is still a no-op (no branch hint to
+  show). If any gate fails it is a silent no-op (exit 0 — never block session
+  startup). Otherwise it sweeps dead-PID orphans (`SweepDeadImplicit`) then
+  upserts `state-<rand>.json` (PID = `os.Getppid()`, best-effort). Fires on
   startup/resume/clear/compact; re-fires are idempotent upserts on the same
-  `session_id`.
+  `session_id` that also refresh the `Branch` hint to the current branch.
 - **`SessionEnd`** (timeout 5s) → `runSessionEnd`. Hard-deletes the per-rand
   state file + its index symlink (best-effort, tolerates not-exist).
 
@@ -142,9 +155,9 @@ A Claude agent starts in a repo's main checkout; the `SessionStart` hook
 materializes the session, which then shows up in `sc list`:
 
     $ sc list
-    KEY                          STATE     ...
-    spinclass/master-a3f9b2c1    active    main
-    spinclass/sleek-locust       active
+    KEY                    STATE     MARKER   BRANCH       ...
+    spinclass/a3f9b2c1     active    main     feature/wip
+    spinclass/sleek-locust active
 
 Merge from the main checkout — hook then push, no rebase/ff:
 
@@ -170,6 +183,11 @@ Disable the feature for a repo (rollback):
   (the `serve` process cannot know its own `session_id`). Broadcasts are
   unaffected; a directed `chat-send` from such a checkout may resolve to a
   sibling agent's key.
+- **Detached-HEAD main checkout.** A main checkout with a detached HEAD (no
+  current branch) materializes nothing — there is no branch name for the hint,
+  and a detached main checkout is atypical. The discriminator is purely
+  `.git`-is-a-directory; only the missing branch name suppresses it. Revisit if
+  a real detached main checkout needs a session.
 
 ### Resolved after initial implementation
 

@@ -60,8 +60,8 @@ func TestListRowsWireFormat(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `[` +
-		`{"id":"crisp-catalpa","session_key":"spinclass/crisp-catalpa","state":"active","description":"remote sessions","repo":"spinclass"},` +
-		`{"id":"mellow-mango","session_key":"spinclass/mellow-mango","state":"inactive","description":"","repo":"spinclass"}` +
+		`{"id":"crisp-catalpa","session_key":"spinclass/crisp-catalpa","state":"active","description":"remote sessions","repo":"spinclass","branch":"crisp-catalpa"},` +
+		`{"id":"mellow-mango","session_key":"spinclass/mellow-mango","state":"inactive","description":"","repo":"spinclass","branch":"mellow-mango"}` +
 		`]`
 	if string(data) != want {
 		t.Errorf("marshal mismatch\n got: %s\nwant: %s", data, want)

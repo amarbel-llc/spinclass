@@ -40,7 +40,7 @@ func TestCloseImplicitRemovesStateNotCheckout(t *testing.T) {
 		RepoPath:     repo,
 		WorktreePath: repo,
 		Branch:       "master",
-		SessionKey:   "repo/master-" + randID,
+		SessionKey:   "repo/" + randID,
 	}
 	if err := session.WriteImplicit(live, randID); err != nil {
 		t.Fatal(err)

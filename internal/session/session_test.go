@@ -74,7 +74,7 @@ func TestWriteRemoveImplicit(t *testing.T) {
 		RepoPath:     checkout,
 		WorktreePath: checkout,
 		Branch:       "master",
-		SessionKey:   "myrepo/master-" + rand,
+		SessionKey:   "myrepo/" + rand,
 		StartedAt:    time.Now(),
 	}
 	if err := WriteImplicit(s, rand); err != nil {
@@ -184,7 +184,7 @@ func TestFindImplicitAtCwd(t *testing.T) {
 		RepoPath:     checkout,
 		WorktreePath: checkout,
 		Branch:       "master",
-		SessionKey:   "myrepo/master-" + rand,
+		SessionKey:   "myrepo/" + rand,
 		StartedAt:    time.Now(),
 	}
 	if err := WriteImplicit(live, rand); err != nil {
@@ -213,7 +213,7 @@ func TestFindImplicitAtCwd(t *testing.T) {
 		RepoPath:     deadCheckout,
 		WorktreePath: deadCheckout,
 		Branch:       "master",
-		SessionKey:   "myrepo/master-dead",
+		SessionKey:   "myrepo/dead5678",
 		StartedAt:    time.Now(),
 	}
 	if err := WriteImplicit(dead, "dead5678"); err != nil {

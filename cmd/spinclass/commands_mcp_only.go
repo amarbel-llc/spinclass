@@ -925,8 +925,12 @@ func handleChatListSessions(_ context.Context, args json.RawMessage, _ command.P
 		if s.Description != "" {
 			desc = " — " + s.Description
 		}
-		fmt.Fprintf(&b, "%s [%s] (%s)%s\n",
-			s.SessionKey, s.ResolveState(), filepath.Base(s.RepoPath), desc)
+		branch := ""
+		if s.Branch != "" {
+			branch = " {" + s.Branch + "}"
+		}
+		fmt.Fprintf(&b, "%s [%s] (%s)%s%s\n",
+			s.SessionKey, s.ResolveState(), filepath.Base(s.RepoPath), branch, desc)
 	}
 	return command.TextResult(strings.TrimRight(b.String(), "\n")), nil
 }

@@ -320,11 +320,11 @@ func runListResult(ctx context.Context, closed bool, format string, dbg *slog.Lo
 		if s.ExitedAt != nil {
 			exited = s.ExitedAt.UTC().Format(time.RFC3339)
 		}
-		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			s.SessionKey, resolved, marker, exited, s.WorktreePath, s.Description)
+		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			s.SessionKey, resolved, marker, s.Branch, exited, s.WorktreePath, s.Description)
 	}
 	for _, r := range remoteRows {
-		fmt.Fprintf(&b, "%s:%s\t%s\t\t\t\t%s\n", r.Remote, r.ID, r.State, r.Description)
+		fmt.Fprintf(&b, "%s:%s\t%s\t\t%s\t\t\t%s\n", r.Remote, r.ID, r.State, r.Branch, r.Description)
 	}
 	for _, d := range diags {
 		fmt.Fprintln(&b, d)

@@ -57,9 +57,10 @@ func implicitRand(sessionID string) string {
 }
 
 // runSessionStart materializes an implicit session when cwd is a deliberate
-// main checkout (a git repo on its default branch, NOT a .worktrees worktree).
-// All failures are swallowed (return nil) — a hook must never block session
-// startup. Honors [hooks].disable-implicit-sessions.
+// main checkout (a git repo whose .git is a directory, NOT a .worktrees
+// worktree) — on ANY branch, not just the default. All failures are swallowed
+// (return nil) — a hook must never block session startup. Honors
+// [hooks].disable-implicit-sessions.
 func runSessionStart(input hookInput) error {
 	cwd := input.CWD
 	if cwd == "" || input.SessionID == "" {
@@ -70,7 +71,9 @@ func runSessionStart(input hookInput) error {
 	if worktree.IsWorktree(cwd) {
 		return nil
 	}
-	// Gate 2: a git repo whose checkout root == cwd and which is on its
+	// Gate 2: a git repo whose checkout root == cwd. Gate 1 already proved
+	// .git is a directory (main checkout), not a file/symlink (worktree), so
+	// the main checkout on ANY branch qualifies — we do NOT restrict to the
 	// default branch. Bail silently on any error. This cheap git-repo
 	// discriminator runs BEFORE the sweatfile I/O walk (Gate 3) so the
 	// common SessionStart-in-a-non-git-dir case (e.g. ~/Downloads) skips
@@ -80,11 +83,7 @@ func runSessionStart(input hookInput) error {
 		return nil
 	}
 	branch, err := git.BranchCurrent(cwd)
-	if err != nil || branch == "" { // empty = detached HEAD
-		return nil
-	}
-	def, err := git.DefaultBranch(cwd)
-	if err != nil || branch != def {
+	if err != nil || branch == "" { // empty = detached HEAD: no branch name for the key
 		return nil
 	}
 	// Gate 3: rollback knob. Now that we know this is a materializable main
@@ -103,7 +102,12 @@ func runSessionStart(input hookInput) error {
 	}
 
 	randID := implicitRand(input.SessionID)
-	key := filepath.Base(repoRoot) + "/" + branch + "-" + randID
+	// Key is <repo>/<rand>, derived purely from the session id — the branch is
+	// deliberately NOT part of the identity. This keeps the key stable across a
+	// mid-session branch switch and avoids slash-bearing branch names (e.g.
+	// feature/wip) leaking a second "/" into the key. Branch is captured below
+	// as a display-only hint and refreshed on every re-fire (see Branch field).
+	key := filepath.Base(repoRoot) + "/" + randID
 	s := session.State{
 		Kind: session.KindImplicit,
 		// os.Getppid() is best-effort: the hook handler is a short-lived
@@ -114,10 +118,14 @@ func runSessionStart(input hookInput) error {
 		SessionState: session.StateActive,
 		RepoPath:     repoRoot,
 		WorktreePath: cwd,
-		Branch:       branch,
-		SessionKey:   key,
-		StartedAt:    time.Now(),
-		Env:          map[string]string{"SPINCLASS_SESSION_ID": key},
+		// Branch is a display hint, not part of the key. SessionStart re-fires
+		// (startup/resume/clear/compact) re-run git.BranchCurrent and WriteImplicit
+		// upserts the same state-<rand>.json, so the hint tracks the checkout's
+		// current branch live while the key stays put.
+		Branch:     branch,
+		SessionKey: key,
+		StartedAt:  time.Now(),
+		Env:        map[string]string{"SPINCLASS_SESSION_ID": key},
 	}
 	_ = session.WriteImplicit(s, randID) // swallow; never block startup
 	return nil

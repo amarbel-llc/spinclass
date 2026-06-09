@@ -23,6 +23,13 @@ type ListRow struct {
 	// empty for a normal worktree session. omitempty keeps the wire shape
 	// unchanged for worktree sessions.
 	Kind string `json:"kind,omitempty"`
+
+	// Branch is a display-only hint of the checkout's current branch. For
+	// implicit (main-checkout) sessions the branch is NOT part of the session
+	// key (which is <repo>/<rand>), so it is surfaced separately here for
+	// `sc list` / chat listing. Appended last and omitempty to keep the remote
+	// wire shape backward-compatible.
+	Branch string `json:"branch,omitempty"`
 }
 
 // ListRows converts states to wire rows, mirroring the text output's
@@ -44,6 +51,7 @@ func ListRows(states []State, closed bool) []ListRow {
 			Description: s.Description,
 			Repo:        filepath.Base(s.RepoPath),
 			Kind:        s.Kind,
+			Branch:      s.Branch,
 		})
 	}
 	return rows

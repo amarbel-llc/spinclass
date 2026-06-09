@@ -1249,11 +1249,60 @@ func TestSessionStartMaterializesImplicit(t *testing.T) {
 		t.Errorf("kind = %q, want implicit", st.Kind)
 	}
 	if st.Branch != "master" {
-		t.Errorf("branch = %q, want master", st.Branch)
+		t.Errorf("branch hint = %q, want master", st.Branch)
 	}
-	wantKey := filepath.Base(repo) + "/master-" + rand
+	// Key is <repo>/<rand> — the branch ("master") is a hint, not part of it.
+	wantKey := filepath.Base(repo) + "/" + rand
 	if st.SessionKey != wantKey {
 		t.Errorf("session_key = %q, want %q", st.SessionKey, wantKey)
+	}
+}
+
+// TestSessionStartMaterializesOnNonDefaultBranch guards the fix for the
+// over-restrictive default-branch gate: a main checkout (.git is a directory)
+// is a first-class implicit session on ANY branch, not just main/master. The
+// discriminator is .git-is-a-directory (Gate 1), never the current branch. It
+// also pins the key shape: the slash-bearing branch "feature/wip" is captured
+// as a display hint in State.Branch but NEVER leaks into the key, which stays
+// <repo>/<rand> (a single slash, from <repo>/).
+func TestSessionStartMaterializesOnNonDefaultBranch(t *testing.T) {
+	repo := initImplicitTestRepo(t)
+	// Move the MAIN checkout (not a worktree) onto a non-default branch whose
+	// name contains a slash — the case that would corrupt a <branch>-in-key.
+	gitRun(t, repo, "checkout", "-b", "feature/wip")
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	input, _ := json.Marshal(map[string]any{
+		"hook_event_name": "SessionStart",
+		"session_id":      "nondefaultbranch",
+		"cwd":             repo,
+		"source":          "startup",
+	})
+	if err := Run(bytes.NewReader(input), &bytes.Buffer{}, "", "", false); err != nil {
+		t.Fatal(err)
+	}
+
+	rand := implicitRand("nondefaultbranch")
+	statePath := filepath.Join(repo, ".spinclass", "state-"+rand+".json")
+	data, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("implicit session not materialized on non-default branch: %v", err)
+	}
+	var st session.State
+	if err := json.Unmarshal(data, &st); err != nil {
+		t.Fatalf("unmarshal state: %v", err)
+	}
+	// Branch is captured as a hint, slash and all.
+	if st.Branch != "feature/wip" {
+		t.Errorf("branch hint = %q, want feature/wip", st.Branch)
+	}
+	// ...but the key is branch-free: <repo>/<rand>, exactly one slash.
+	wantKey := filepath.Base(repo) + "/" + rand
+	if st.SessionKey != wantKey {
+		t.Errorf("session_key = %q, want %q", st.SessionKey, wantKey)
+	}
+	if strings.Count(st.SessionKey, "/") != 1 {
+		t.Errorf("session_key %q must contain exactly one slash (branch must not leak in)", st.SessionKey)
 	}
 }
 

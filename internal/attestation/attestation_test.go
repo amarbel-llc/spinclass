@@ -254,7 +254,7 @@ func setupImplicitSession(t *testing.T) string {
 		SessionState: session.StateActive,
 		WorktreePath: checkout,
 		Branch:       "master",
-		SessionKey:   "r/master-deadbeef",
+		SessionKey:   "r/deadbeef",
 	}
 	if err := session.WriteImplicit(st, "deadbeef"); err != nil {
 		t.Fatal(err)
