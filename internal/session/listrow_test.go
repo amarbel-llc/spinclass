@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -76,6 +77,61 @@ func TestListRowsClosedIncludesAbandoned(t *testing.T) {
 	last := rows[2]
 	if last.ID != "gone" || last.State != StateAbandoned || last.Description != "externally removed" {
 		t.Errorf("abandoned row: %+v", last)
+	}
+}
+
+// TestListRowsCarriesKind verifies the implicit-session marker survives
+// the wire shape: a KindImplicit state yields Kind=="implicit" on its
+// ListRow, while a worktree state (empty Kind) yields Kind=="" and its
+// JSON omits the "kind" key entirely (omitempty preserves the legacy
+// worktree-row shape).
+func TestListRowsCarriesKind(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "spinclass")
+	checkout := filepath.Join(base, "checkout")
+	wt := filepath.Join(repo, ".worktrees", "mellow-mango")
+	for _, dir := range []string{checkout, wt} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	states := []State{
+		{
+			Kind:         KindImplicit,
+			SessionState: StateInactive,
+			RepoPath:     checkout,
+			WorktreePath: checkout,
+			Branch:       "master",
+			SessionKey:   "checkout/master",
+		},
+		{
+			SessionState: StateInactive,
+			RepoPath:     repo,
+			WorktreePath: wt,
+			Branch:       "mellow-mango",
+			SessionKey:   "spinclass/mellow-mango",
+		},
+	}
+
+	rows := ListRows(states, false)
+	if len(rows) != 2 {
+		t.Fatalf("rows: got %d, want 2", len(rows))
+	}
+	if rows[0].Kind != KindImplicit {
+		t.Errorf("implicit row Kind = %q, want %q", rows[0].Kind, KindImplicit)
+	}
+	if rows[1].Kind != "" {
+		t.Errorf("worktree row Kind = %q, want empty", rows[1].Kind)
+	}
+
+	// The worktree row's JSON must not carry a "kind" key (omitempty).
+	data, err := json.Marshal(rows[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "kind") {
+		t.Errorf("worktree row JSON unexpectedly contains \"kind\": %s", data)
 	}
 }
 

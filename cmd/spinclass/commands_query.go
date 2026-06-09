@@ -313,6 +313,8 @@ func runListResult(ctx context.Context, closed bool, format string, dbg *slog.Lo
 			marker = "tombstone"
 		} else if isClosed {
 			marker = "dangling"
+		} else if s.Kind == session.KindImplicit {
+			marker = "main"
 		}
 		exited := ""
 		if s.ExitedAt != nil {

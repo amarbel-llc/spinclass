@@ -18,6 +18,11 @@ type ListRow struct {
 	// Set only on rows `sc list` merged in from a remote host; local
 	// rows (and the wire payload a host serves about itself) omit it.
 	Remote string `json:"remote,omitempty"`
+
+	// Kind is the session kind: "implicit" for a main-checkout session,
+	// empty for a normal worktree session. omitempty keeps the wire shape
+	// unchanged for worktree sessions.
+	Kind string `json:"kind,omitempty"`
 }
 
 // ListRows converts states to wire rows, mirroring the text output's
@@ -38,6 +43,7 @@ func ListRows(states []State, closed bool) []ListRow {
 			State:       resolved,
 			Description: s.Description,
 			Repo:        filepath.Base(s.RepoPath),
+			Kind:        s.Kind,
 		})
 	}
 	return rows

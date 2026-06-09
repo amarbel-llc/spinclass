@@ -36,6 +36,15 @@ func Run(w io.Writer, target string, force bool, nixGCOverride *bool, format str
 		return err
 	}
 
+	// Implicit (main-checkout) session, auto-detected from cwd: drop the
+	// session STATE only — never remove the main checkout. Only fires when no
+	// explicit target was given and cwd is not an sc worktree.
+	if target == "" && !worktree.IsWorktree(cwd) {
+		if implicit, randID, ferr := session.FindImplicitAtCwd(cwd); ferr == nil && implicit != nil {
+			return closeImplicit(w, cwd, randID, implicit, format)
+		}
+	}
+
 	repoPath, wtPath, branch, err := resolveTarget(cwd, target, dbg)
 	if errors.Is(err, errPickerDismissed) {
 		// User dismissed the picker: clean exit, nothing closed.
@@ -46,6 +55,27 @@ func Run(w io.Writer, target string, force bool, nixGCOverride *bool, format str
 	}
 
 	return RunResolved(w, repoPath, wtPath, branch, force, nixGCOverride, format)
+}
+
+// closeImplicit drops an implicit (main-checkout) session's per-randID state
+// file. It never removes the checkout (there is no worktree to remove) and
+// runs no nix gc (no worktree closure to reap). Emits a single TAP ok step in
+// tap format.
+func closeImplicit(w io.Writer, checkout, randID string, st *session.State, format string) error {
+	if err := session.RemoveImplicit(checkout, randID); err != nil {
+		if format == "tap" {
+			tw := tap.NewWriter(w)
+			tw.NotOk("close "+st.SessionKey, map[string]string{"error": err.Error()})
+			tw.Plan()
+		}
+		return err
+	}
+	if format == "tap" {
+		tw := tap.NewWriter(w)
+		tw.Ok("close " + st.SessionKey)
+		tw.Plan()
+	}
+	return nil
 }
 
 // errPickerDismissed signals that the user dismissed the interactive

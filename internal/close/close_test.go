@@ -2,6 +2,8 @@ package close
 
 import (
 	"bytes"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +14,59 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/testgit"
 	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
 )
+
+// TestCloseImplicitRemovesStateNotCheckout verifies the implicit
+// short-circuit in Run: a no-target close auto-detected from a repo's main
+// checkout drops the implicit session's state-<randID>.json but leaves the
+// checkout (and its tracked files) on disk.
+func TestCloseImplicitRemovesStateNotCheckout(t *testing.T) {
+	testgit.RequireGit(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	repo := filepath.Join(t.TempDir(), "repo")
+	testgit.MustInit(t, repo)
+
+	// A tracked file in the main checkout — must survive the close.
+	tracked := filepath.Join(repo, "keep.txt")
+	if err := os.WriteFile(tracked, []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	const randID = "abc12345"
+	live := session.State{
+		Kind:         session.KindImplicit,
+		PID:          os.Getpid(),
+		SessionState: session.StateActive,
+		RepoPath:     repo,
+		WorktreePath: repo,
+		Branch:       "master",
+		SessionKey:   "repo/master-" + randID,
+	}
+	if err := session.WriteImplicit(live, randID); err != nil {
+		t.Fatal(err)
+	}
+
+	// close.Run reads cwd via os.Getwd; chdir into the checkout so the
+	// auto-detect short-circuit fires.
+	t.Chdir(repo)
+
+	if err := Run(io.Discard, "", false, nil, "tap", nil); err != nil {
+		t.Fatalf("close.Run: %v", err)
+	}
+
+	// The implicit session state is gone.
+	if got, gotRand, err := session.FindImplicitAtCwd(repo); err != nil || got != nil || gotRand != "" {
+		t.Fatalf("implicit session still present after close: got (%v, %q, %v)", got, gotRand, err)
+	}
+
+	// The checkout and its tracked file remain — close did NOT remove them.
+	if _, err := os.Stat(repo); err != nil {
+		t.Fatalf("checkout dir wrongly removed: %v", err)
+	}
+	if _, err := os.Stat(tracked); err != nil {
+		t.Fatalf("tracked file wrongly removed: %v", err)
+	}
+}
 
 // TestResolveTargetByIDFindsSession is the happy path: a tracked
 // session for a repo can be resolved by its worktree dirname even when
