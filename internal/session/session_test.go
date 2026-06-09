@@ -152,6 +152,18 @@ func TestSweepDeadImplicit(t *testing.T) {
 	if _, err := os.Stat(implicitStatePath(checkout, "dead5678")); !os.IsNotExist(err) {
 		t.Fatalf("dead session not swept: %v", err)
 	}
+
+	// The dead session's central index entry must also be gone.
+	deadIdx := implicitIndexPath(implicitStatePath(checkout, "dead5678"))
+	if _, err := os.Lstat(deadIdx); !os.IsNotExist(err) {
+		t.Fatalf("dead session index entry not swept: %v", err)
+	}
+	// The live session's index entry must still resolve — proving the sweep
+	// left it untouched.
+	liveIdx := implicitIndexPath(implicitStatePath(checkout, "live1234"))
+	if _, err := os.Readlink(liveIdx); err != nil {
+		t.Fatalf("live session index entry wrongly swept: %v", err)
+	}
 }
 
 func TestStateKindRoundTrips(t *testing.T) {

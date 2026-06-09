@@ -359,11 +359,17 @@ func WriteImplicit(s State, randID string) error {
 // .spinclass dir wholesale (other agents may have siblings there).
 func RemoveImplicit(checkout, randID string) error {
 	sessionlog.Infof("session.RemoveImplicit checkout=%s from=%s", checkout, caller(1))
-	local := implicitStatePath(checkout, randID)
-	if err := os.Remove(local); err != nil && !errors.Is(err, os.ErrNotExist) {
+	return removeImplicitByPath(implicitStatePath(checkout, randID))
+}
+
+// removeImplicitByPath removes an implicit session's local state file at
+// localStatePath and its central index entry. Used by SweepDeadImplicit, which
+// already holds the matched path and need not re-derive the randID.
+func removeImplicitByPath(localStatePath string) error {
+	if err := os.Remove(localStatePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := os.Remove(implicitIndexPath(local)); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := os.Remove(implicitIndexPath(localStatePath)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return nil
@@ -389,9 +395,14 @@ func SweepDeadImplicit(checkout string) error {
 		if json.Unmarshal(data, &s) != nil {
 			continue
 		}
-		if s.PID != 0 && !IsAlive(s.PID) {
-			randID := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(m), "state-"), ".json")
-			_ = RemoveImplicit(checkout, randID)
+		if s.PID == 0 {
+			// PID 0 means the session was written without a recorded PID;
+			// skip rather than reap — we only delete files we can confirm
+			// belong to a dead process.
+			continue
+		}
+		if !IsAlive(s.PID) {
+			_ = removeImplicitByPath(m)
 		}
 	}
 	return nil
