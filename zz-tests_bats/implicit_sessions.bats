@@ -94,6 +94,30 @@ EOF
   refute_output --partial "not inside a worktree session"
 }
 
+@test "check from implicit main-checkout session runs the hook" {
+  create_origin_checkout
+
+  local marker="$BATS_TEST_TMPDIR/check-hook-ran.marker"
+  # shellcheck disable=SC2016
+  cat >"$TEST_CHECKOUT/sweatfile" <<EOF
+[hooks]
+pre-merge = "touch '$marker'"
+EOF
+
+  materialize_implicit_session "$TEST_CHECKOUT"
+
+  # `sc check` is gate-free (no attestation), so it runs the hook against cwd
+  # for an implicit checkout exactly as it would for a worktree.
+  cd "$TEST_CHECKOUT" || return
+  run_sc check
+  assert_success
+
+  # Hook ran.
+  assert [ -f "$marker" ]
+  # Did not hit the worktree-only reject.
+  refute_output --partial "not inside a worktree session"
+}
+
 @test "merge with no implicit session and not a worktree still resolves normally" {
   # Sanity: without a materialized implicit session, `sc merge` from a plain
   # main checkout does NOT take the implicit route (FindImplicitAtCwd → nil),

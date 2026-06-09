@@ -377,6 +377,13 @@ func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prom
 				return command.TextErrorResult(msg), nil
 			}
 		}
+	} else if implicit, _, ferr := session.FindImplicitAtCwd(cwd); ferr == nil && implicit != nil {
+		// Implicit (main-checkout) session: enforce the implicit attestation
+		// gate, mirroring merge-this-session. A non-implicit non-worktree cwd
+		// falls through to check.Run with no attestation (sc check-like).
+		if msg, ok := enforceAttestationImplicit(cwd); !ok {
+			return command.TextErrorResult(msg), nil
+		}
 	}
 
 	var buf bytes.Buffer
@@ -477,13 +484,23 @@ func handleCheckThisSessionAsync(_ context.Context, _ json.RawMessage, _ command
 	if err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
 	}
-	if !worktree.IsWorktree(cwd) {
-		return command.TextErrorResult("not inside a worktree session"), nil
-	}
-	repoPath, repoErr := git.CommonDir(cwd)
-	branch, branchErr := git.BranchCurrent(cwd)
-	if repoErr == nil && branchErr == nil {
-		if msg, ok := enforceAttestation(repoPath, branch); !ok {
+	if worktree.IsWorktree(cwd) {
+		repoPath, repoErr := git.CommonDir(cwd)
+		branch, branchErr := git.BranchCurrent(cwd)
+		if repoErr == nil && branchErr == nil {
+			if msg, ok := enforceAttestation(repoPath, branch); !ok {
+				return command.TextErrorResult(msg), nil
+			}
+		}
+	} else {
+		// Implicit (main-checkout) session reaches the job; a cwd that is
+		// neither a worktree nor an implicit session keeps the (accurate)
+		// reject. Mirrors handleMergeThisSessionAsync's implicit branch.
+		implicit, _, ferr := session.FindImplicitAtCwd(cwd)
+		if ferr != nil || implicit == nil {
+			return command.TextErrorResult("not inside a worktree session"), nil
+		}
+		if msg, ok := enforceAttestationImplicit(cwd); !ok {
 			return command.TextErrorResult(msg), nil
 		}
 	}
