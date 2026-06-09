@@ -369,6 +369,34 @@ func RemoveImplicit(checkout, randID string) error {
 	return nil
 }
 
+// SweepDeadImplicit removes implicit state-<rand>.json files in checkout whose
+// recorded PID is no longer alive. Best-effort: a leaked file from a missed
+// SessionEnd is reaped the next time any agent starts in the checkout. Errors
+// reading or unmarshaling an individual file are ignored; only a failure of the
+// glob itself is returned.
+func SweepDeadImplicit(checkout string) error {
+	pattern := filepath.Join(checkout, ".spinclass", "state-*.json")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return err
+	}
+	for _, m := range matches {
+		data, rerr := os.ReadFile(m)
+		if rerr != nil {
+			continue
+		}
+		var s State
+		if json.Unmarshal(data, &s) != nil {
+			continue
+		}
+		if s.PID != 0 && !IsAlive(s.PID) {
+			randID := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(m), "state-"), ".json")
+			_ = RemoveImplicit(checkout, randID)
+		}
+	}
+	return nil
+}
+
 // Tombstone marks the session as cleanly closed: reads the live state,
 // atomically replaces the central index symlink with a regular file
 // containing the same JSON (the tombstone), and removes the worktree-local

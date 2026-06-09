@@ -124,6 +124,36 @@ func TestWriteImplicitRejectsMissingCheckout(t *testing.T) {
 	}
 }
 
+func TestSweepDeadImplicit(t *testing.T) {
+	checkout := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if err := os.MkdirAll(filepath.Join(checkout, ".spinclass"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Live session (our own PID) — must survive.
+	live := State{Kind: KindImplicit, PID: os.Getpid(), WorktreePath: checkout, Branch: "master"}
+	if err := WriteImplicit(live, "live1234"); err != nil {
+		t.Fatal(err)
+	}
+	// Dead session (huge unused PID) — must be swept.
+	dead := State{Kind: KindImplicit, PID: 2147483646, WorktreePath: checkout, Branch: "master"}
+	if err := WriteImplicit(dead, "dead5678"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SweepDeadImplicit(checkout); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(implicitStatePath(checkout, "live1234")); err != nil {
+		t.Fatalf("live session wrongly swept: %v", err)
+	}
+	if _, err := os.Stat(implicitStatePath(checkout, "dead5678")); !os.IsNotExist(err) {
+		t.Fatalf("dead session not swept: %v", err)
+	}
+}
+
 func TestStateKindRoundTrips(t *testing.T) {
 	s := State{Kind: KindImplicit, WorktreePath: "/x", Branch: "master"}
 	data, err := json.Marshal(s)
