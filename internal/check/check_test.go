@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -145,6 +146,22 @@ exit 0
 	embeds.Set(madderBin, prevDirenv, prevDodder)
 	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv, prevDodder) })
 	return madderBin, stdinCapture
+}
+
+func withFakeSh(t *testing.T, body string) {
+	t.Helper()
+	dir := t.TempDir()
+	name := "sh"
+	content := "#!/bin/sh\n" + body
+	if runtime.GOOS == "windows" {
+		name = "sh.bat"
+		content = "@echo off\r\n" + body
+	}
+	shPath := filepath.Join(dir, name)
+	if err := os.WriteFile(shPath, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 func TestRunHookCompactShape(t *testing.T) {
@@ -412,6 +429,51 @@ func TestRunHookCompactShape_TapNDJSONDegenerateFallback(t *testing.T) {
 	}
 	if strings.Contains(got, "failure:") {
 		t.Errorf("did not expect 'failure:' on degenerate stream, got:\n%s", got)
+	}
+}
+
+func TestRunHookCompactShape_TapNDJSONSkipTodoFallback(t *testing.T) {
+	_, _, wtPath := setupRepoWithWorktree(t, "feature-tap-ndjson-skip-todo")
+	withFakeMadder(t)
+	if runtime.GOOS == "windows" {
+		withFakeSh(t, "echo TAP version 14\r\n"+
+			"echo 1..2\r\n"+
+			"echo ok 1 - skipped # SKIP no env\r\n"+
+			"echo not ok 2 - todo # TODO later\r\n"+
+			"exit /b 5\r\n")
+	} else {
+		withFakeSh(t, "printf 'TAP version 14\\n1..2\\nok 1 - skipped # SKIP no env\\nnot ok 2 - todo # TODO later\\n'\n"+
+			"exit 5\n")
+	}
+	// The hook emits parseable TAP records, but all non-OK records are
+	// directives excluded from the failure summary. A non-zero hook exit
+	// should therefore fall back to the raw tail instead of emitting an
+	// empty failure field.
+	writeSweatfile(t, wtPath, "[hooks]\n"+
+		"pre-merge = \"ignored by fake sh\"\n"+
+		"pre-merge-output-format = \"tap-ndjson\"\n")
+
+	var buf bytes.Buffer
+	_, err := Run(&buf, "tap", wtPath, false)
+	if err == nil {
+		t.Fatalf("expected hook failure, got nil. Output: %s", buf.String())
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "not ok") {
+		t.Errorf("expected 'not ok' for failed hook, got:\n%s", got)
+	}
+	if !strings.Contains(got, "format: tap-ndjson") {
+		t.Errorf("expected 'format: tap-ndjson' in output, got:\n%s", got)
+	}
+	if !strings.Contains(got, "tail:") {
+		t.Errorf("expected 'tail:' fallback when parsed failures are only SKIP/TODO, got:\n%s", got)
+	}
+	if !strings.Contains(got, "skipped # SKIP no env") || !strings.Contains(got, "todo # TODO later") {
+		t.Errorf("expected raw TAP output in tail, got:\n%s", got)
+	}
+	if strings.Contains(got, "failure:") {
+		t.Errorf("did not expect empty 'failure:' when parsed failures are only SKIP/TODO, got:\n%s", got)
 	}
 }
 

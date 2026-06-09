@@ -414,7 +414,11 @@ func runHookCompactContext(ctx context.Context, tw *tap.Writer, hierarchy sweatf
 		}
 	} else if hookErr != nil {
 		if hasParse {
-			extras["failure"] = buildFailureSummary(parsed)
+			if summary := buildFailureSummary(parsed); summary != "" {
+				extras["failure"] = summary
+			} else {
+				extras["tail"] = ring.Tail()
+			}
 		} else {
 			extras["tail"] = ring.Tail()
 		}
