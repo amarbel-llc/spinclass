@@ -68,6 +68,31 @@ func TestCloseImplicitRemovesStateNotCheckout(t *testing.T) {
 	}
 }
 
+// TestRunNoImplicitSessionFallsThrough confirms the implicit short-circuit
+// does NOT fire when cwd is a main checkout with no live implicit session:
+// Run must fall through to resolveTarget (which errors here — no sessions,
+// sessionpick.Choose returns "no sessions" before any picker) rather than
+// short-circuiting to a nil-error no-op. Guards a future broadening of the
+// short-circuit gate.
+func TestRunNoImplicitSessionFallsThrough(t *testing.T) {
+	testgit.RequireGit(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	// A normal checkout: .git is a dir, so worktree.IsWorktree is false and
+	// the implicit-detect branch is eligible — but no implicit state file is
+	// written, so FindImplicitAtCwd returns nil and the short-circuit is
+	// skipped.
+	repo := filepath.Join(t.TempDir(), "repo")
+	testgit.MustInit(t, repo)
+
+	t.Chdir(repo)
+
+	err := Run(io.Discard, "", false, nil, "tap", nil)
+	if err == nil {
+		t.Fatal("expected Run to reach resolveTarget and error, not short-circuit to nil")
+	}
+}
+
 // TestResolveTargetByIDFindsSession is the happy path: a tracked
 // session for a repo can be resolved by its worktree dirname even when
 // resolveTarget is called from outside that worktree (cwd is the main

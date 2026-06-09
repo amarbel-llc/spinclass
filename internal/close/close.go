@@ -62,16 +62,18 @@ func Run(w io.Writer, target string, force bool, nixGCOverride *bool, format str
 // runs no nix gc (no worktree closure to reap). Emits a single TAP ok step in
 // tap format.
 func closeImplicit(w io.Writer, checkout, randID string, st *session.State, format string) error {
+	var tw *tap.Writer
+	if format == "tap" {
+		tw = tap.NewWriter(w)
+	}
 	if err := session.RemoveImplicit(checkout, randID); err != nil {
-		if format == "tap" {
-			tw := tap.NewWriter(w)
+		if tw != nil {
 			tw.NotOk("close "+st.SessionKey, map[string]string{"error": err.Error()})
 			tw.Plan()
 		}
 		return err
 	}
-	if format == "tap" {
-		tw := tap.NewWriter(w)
+	if tw != nil {
 		tw.Ok("close " + st.SessionKey)
 		tw.Plan()
 	}
