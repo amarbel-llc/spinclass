@@ -72,9 +72,18 @@ create_worktree() {
 
 # Run spinclass with timeout.
 # Usage: run_sc <subcommand> [args...]
+#
+# 10s (not 5s): under the bats-madder lane, `sc start` forks an extra
+# synchronous `madder init` subprocess inside applyWorktreeConfig (gated on the
+# madder build-pin; bats-default skips it). With bats running --jobs
+# $NIX_BUILD_CORES, the ~dozen parallel `sc start` tests each fork
+# `git worktree add` + `madder init`, and the contention occasionally pushed a
+# single start past a 5s bound — SIGTERM'd to status 143 (issue #133). 10s
+# matches run_sc_session and BATS_TEST_TIMEOUT. A real hang can't occur on the
+# --no-attach path (no entrypoint is exec'd), so the looser bound costs nothing.
 run_sc() {
   local bin="${SPINCLASS_BIN:-spinclass}"
-  run timeout --preserve-status 5s "$bin" --format tap "$@"
+  run timeout --preserve-status 10s "$bin" --format tap "$@"
 }
 
 # Extract the worktree absolute path from TAP output of a start command.
@@ -168,9 +177,10 @@ excludes = [".envrc", ".claude/"]
 EOF
 }
 
-# Run spinclass with a longer timeout for session attach tests.
-# The subprocess spawn + closeShop workflow needs more headroom than
-# the 5s used by run_sc.
+# Run spinclass for session-attach tests (subprocess spawn + closeShop
+# workflow). Same 10s bound as run_sc; kept as a distinct named helper so
+# attach-path call sites read clearly. (Both were 10s after #133 raised
+# run_sc from 5s — see run_sc above.)
 # Usage: run_sc_session <subcommand> [args...]
 run_sc_session() {
   local bin="${SPINCLASS_BIN:-spinclass}"
