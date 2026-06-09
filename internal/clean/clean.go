@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/log"
 
 	"github.com/amarbel-llc/spinclass/internal/chat"
+	"github.com/amarbel-llc/spinclass/internal/check"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/nixgc"
 	"github.com/amarbel-llc/spinclass/internal/session"
@@ -324,7 +325,7 @@ func findOrphanBuildWorktrees(startDir string) []orphanBuildWorktree {
 			continue
 		}
 		for _, e := range entries {
-			if !e.IsDir() || !strings.HasPrefix(e.Name(), ".merge-") {
+			if !e.IsDir() || !strings.HasPrefix(e.Name(), check.BuildWorktreePrefix) {
 				continue
 			}
 			pid, ok := pidFromBuildWorktreeName(e.Name())
@@ -347,7 +348,9 @@ func findOrphanBuildWorktrees(startDir string) []orphanBuildWorktree {
 // pidFromBuildWorktreeName extracts the trailing <pid> from a
 // .merge-<branch>-<sha>-<pid> name. Returns (0,false) if the last '-'-segment
 // isn't a positive integer. Branch/sha segments can contain '-', so only the
-// final segment is the PID.
+// final segment is the PID. The name format is produced by
+// check.resolveHookDir (prefix check.BuildWorktreePrefix); keep this parser in
+// sync with it.
 func pidFromBuildWorktreeName(name string) (int, bool) {
 	i := strings.LastIndex(name, "-")
 	if i < 0 || i == len(name)-1 {
@@ -365,8 +368,13 @@ func pidFromBuildWorktreeName(name string) (int, bool) {
 // worktree (clears the registration if any), then RemoveAll the physical dir
 // in case it was unregistered (the crash-orphan case), then prune.
 func removeOrphanBuildWorktree(o orphanBuildWorktree) error {
-	_ = git.WorktreeForceRemove(o.repoPath, o.path) // clears admin entry if registered
-	if err := os.RemoveAll(o.path); err != nil {    // clears the physical dir (unregistered case)
+	// ForceRemove clears the git admin entry (and the dir, if it was a
+	// registered worktree); ignored because a crash-orphan is typically
+	// unregistered. RemoveAll then guarantees the physical dir is gone — a
+	// no-op if ForceRemove already deleted it — and its error IS propagated.
+	// Prune clears any leftover stale admin entries; best-effort.
+	_ = git.WorktreeForceRemove(o.repoPath, o.path)
+	if err := os.RemoveAll(o.path); err != nil {
 		return err
 	}
 	_ = git.WorktreePrune(o.repoPath)

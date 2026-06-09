@@ -13,6 +13,11 @@ import (
 	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
 )
 
+// deadPID is above the OS PID_MAX on all supported platforms (math.MaxInt32-1),
+// so session.IsAlive reliably reports it dead. Used to simulate a crashed
+// merge's orphaned build worktree.
+const deadPID = 2147483646
+
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -101,8 +106,7 @@ func TestPidFromBuildWorktreeName(t *testing.T) {
 
 func TestCleanPrunesOrphanedDeadPidBuildWorktree(t *testing.T) {
 	_, repoDir := setupRepo(t)
-	// 2147483646 is a huge PID that is exceedingly unlikely to be alive.
-	orphan := makeBuildWorktreeDir(t, repoDir, ".merge-feature-abc123-2147483646")
+	orphan := makeBuildWorktreeDir(t, repoDir, ".merge-feature-abc123-"+itoa(deadPID))
 
 	out := captureRun(t, repoDir, false, false, true, "tap")
 
@@ -125,9 +129,22 @@ func TestCleanKeepsLivePidBuildWorktree(t *testing.T) {
 	}
 }
 
+func TestCleanKeepsUnparseableBuildWorktree(t *testing.T) {
+	// A .merge-* dir whose name has no parseable trailing PID must be left
+	// alone (we don't guess — see findOrphanBuildWorktrees).
+	_, repoDir := setupRepo(t)
+	unparseable := makeBuildWorktreeDir(t, repoDir, ".merge-no-pid-here")
+
+	_ = captureRun(t, repoDir, false, false, true, "tap")
+
+	if _, err := os.Stat(unparseable); err != nil {
+		t.Errorf("expected unparseable-name build worktree kept, but it is gone: %v", err)
+	}
+}
+
 func TestCleanDryRunKeepsOrphan(t *testing.T) {
 	_, repoDir := setupRepo(t)
-	orphan := makeBuildWorktreeDir(t, repoDir, ".merge-feature-abc123-2147483646")
+	orphan := makeBuildWorktreeDir(t, repoDir, ".merge-feature-abc123-"+itoa(deadPID))
 
 	out := captureRun(t, repoDir, false, true, false, "tap")
 

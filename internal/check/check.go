@@ -32,6 +32,12 @@ import (
 // resource_link unless the test point failed.
 const compactDirective = "directive: if status is ok, the resource_link need not be followed; only inspect on failure"
 
+// BuildWorktreePrefix is the filename prefix of a transient pre-merge build
+// worktree under <repo>/.worktrees/: ".merge-<branch>-<sha>-<pid>". Exported so
+// sc clean can recognize and prune orphaned ones (the <pid> is os.Getpid() of
+// the creating process; see internal/clean.findOrphanBuildWorktrees and #135).
+const BuildWorktreePrefix = ".merge-"
+
 // BlobLink pairs a madder blob URI with the MIME type of its contents.
 // Producers know the format used to write the blob (raw stdout vs.
 // parsed ndjson) and surface it here so the MCP layer can set
@@ -276,7 +282,7 @@ func resolveHookDir(hierarchy sweatfile.Hierarchy, wtPath, branch, hookSha strin
 	if len(short) > 12 {
 		short = short[:12]
 	}
-	name := fmt.Sprintf(".merge-%s-%s-%d", sanitizeBranchForPath(branch), short, os.Getpid())
+	name := BuildWorktreePrefix + fmt.Sprintf("%s-%s-%d", sanitizeBranchForPath(branch), short, os.Getpid())
 	buildPath := filepath.Join(buildParent, name)
 
 	// Clear a stale physical dir from an interrupted prior run. This is the
