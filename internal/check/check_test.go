@@ -593,6 +593,11 @@ func TestResolveHookDirClearsStaleDir(t *testing.T) {
 	if err := os.MkdirAll(buildPath, 0o755); err != nil {
 		t.Fatalf("simulate leftover dir: %v", err)
 	}
+	// DO NOT remove this WriteFile: git happily adds a worktree into an EMPTY
+	// target dir, so without a file inside, the second resolveHookDir would
+	// succeed even WITHOUT the os.RemoveAll fix — making this regression guard
+	// silently useless. The non-empty dir is what actually reproduces the #129
+	// "already exists" wedge.
 	if err := os.WriteFile(filepath.Join(buildPath, "leftover.txt"), []byte("interrupted"), 0o644); err != nil {
 		t.Fatalf("simulate leftover file: %v", err)
 	}

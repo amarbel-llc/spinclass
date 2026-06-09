@@ -279,9 +279,18 @@ func resolveHookDir(hierarchy sweatfile.Hierarchy, wtPath, branch, hookSha strin
 	name := fmt.Sprintf(".merge-%s-%s-%d", sanitizeBranchForPath(branch), short, os.Getpid())
 	buildPath := filepath.Join(buildParent, name)
 
-	// Clear a stale dir from an interrupted prior run (admin entry already gone,
-	// so prune won't); RemoveAll is a no-op on a nonexistent path.
-	_ = os.RemoveAll(buildPath)
+	// Clear a stale physical dir from an interrupted prior run. This is the
+	// complement to WorktreeAddDetached's internal `git worktree prune` (which
+	// clears stale ADMIN ENTRIES, not unregistered physical dirs); both guard the
+	// same "already exists" add failure from opposite directions. RemoveAll is a
+	// no-op on a nonexistent path; a failure (e.g. a permission problem on the
+	// stale tree) is propagated rather than swallowed — otherwise buildPath
+	// survives and the add below fails with a confusing "already exists" that
+	// hides the real cause, violating this function's no-silent-degradation
+	// principle.
+	if err := os.RemoveAll(buildPath); err != nil {
+		return "", noop, fmt.Errorf("remove stale build worktree dir %s: %w", buildPath, err)
+	}
 	if err := git.WorktreeAddDetached(wtPath, buildPath, hookSha); err != nil {
 		return "", noop, fmt.Errorf("create pre-merge build worktree at %s: %w", buildPath, err)
 	}
