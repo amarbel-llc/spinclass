@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,8 +9,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/amarbel-llc/spinclass/internal/git"
+	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
+	"github.com/amarbel-llc/spinclass/internal/worktree"
 	"github.com/google/shlex"
 )
 
@@ -20,6 +25,7 @@ type hookInput struct {
 	ToolName      string         `json:"tool_name"`
 	ToolInput     map[string]any `json:"tool_input"`
 	CWD           string         `json:"cwd"`
+	Source        string         `json:"source"`
 }
 
 func Run(r io.Reader, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree bool) error {
@@ -33,9 +39,78 @@ func Run(r io.Reader, w io.Writer, mainRepoRoot, sessionWorktree string, disallo
 		return runStopHook(input, w)
 	case "PostToolUse":
 		return runPostToolUseLog(input)
+	case "SessionStart":
+		return runSessionStart(input)
 	default:
 		return runPreToolUse(input, w, mainRepoRoot, sessionWorktree, disallowMainWorktree)
 	}
+}
+
+// implicitRand derives the per-session suffix from the Claude session id:
+// sha256(sessionID)[:8] as hex. Stable across the session's lifetime, so
+// SessionStart and SessionEnd derive the same value.
+func implicitRand(sessionID string) string {
+	h := sha256.Sum256([]byte(sessionID))
+	return fmt.Sprintf("%x", h[:8])
+}
+
+// runSessionStart materializes an implicit session when cwd is a deliberate
+// main checkout (a git repo on its default branch, NOT a .worktrees worktree).
+// All failures are swallowed (return nil) — a hook must never block session
+// startup. Honors [hooks].disable-implicit-sessions.
+func runSessionStart(input hookInput) error {
+	cwd := input.CWD
+	if cwd == "" || input.SessionID == "" {
+		return nil
+	}
+	// Gate 1: not inside an sc-created worktree (those already have state).
+	if worktree.IsWorktree(cwd) {
+		return nil
+	}
+	// Gate 2: rollback knob.
+	if home, _ := os.UserHomeDir(); home != "" {
+		if res, err := sweatfileio.LoadHierarchy(home, cwd); err == nil &&
+			res.Merged.DisableImplicitSessionsEnabled() {
+			return nil
+		}
+	}
+	// Gate 3: a git repo whose checkout root == cwd and which is on its
+	// default branch. Bail silently on any error.
+	repoRoot, err := gitToplevel(cwd)
+	if err != nil || filepath.Clean(repoRoot) != filepath.Clean(cwd) {
+		return nil
+	}
+	branch, err := git.BranchCurrent(cwd)
+	if err != nil || branch == "" { // empty = detached HEAD
+		return nil
+	}
+	def, err := git.DefaultBranch(cwd)
+	if err != nil || branch != def {
+		return nil
+	}
+
+	// Orphan sweep before our own write (backstop for missed SessionEnd).
+	_ = session.SweepDeadImplicit(cwd)
+
+	randID := implicitRand(input.SessionID)
+	key := filepath.Base(repoRoot) + "/" + branch + "-" + randID
+	s := session.State{
+		Kind: session.KindImplicit,
+		// os.Getppid() is best-effort: the hook handler is a short-lived
+		// subprocess whose parent may be the Claude process or a transient
+		// shell wrapper — not empirically verified. PID-liveness is only a
+		// backstop reaper; SessionEnd delete + SessionStart sweep are primary.
+		PID:          os.Getppid(),
+		SessionState: session.StateActive,
+		RepoPath:     repoRoot,
+		WorktreePath: cwd,
+		Branch:       branch,
+		SessionKey:   key,
+		StartedAt:    time.Now(),
+		Env:          map[string]string{"SPINCLASS_SESSION_ID": key},
+	}
+	_ = session.WriteImplicit(s, randID) // swallow; never block startup
+	return nil
 }
 
 func runStopHook(input hookInput, w io.Writer) error {

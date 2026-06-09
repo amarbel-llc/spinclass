@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/amarbel-llc/spinclass/internal/session"
 )
 
 func makeInput(toolName string, toolInput map[string]any, cwd string) []byte {
@@ -1177,5 +1180,120 @@ func TestSubagentAllowedUpdateDescription(t *testing.T) {
 	decision, _ := parseHookDecision(t, stdout.Bytes())
 	if decision != "allow" {
 		t.Errorf("expected allow for subagent update-this-session-description, got %q", decision)
+	}
+}
+
+// gitRun execs a git command in dir and fails the test on error.
+func gitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+}
+
+// initImplicitTestRepo creates a git repo on the "master" branch in a fresh
+// temp dir (a deliberate main checkout, NOT a linked worktree). The single
+// default branch keeps git.DefaultBranch unambiguous (master, not main).
+func initImplicitTestRepo(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	gitRun(t, repo, "init")
+	gitRun(t, repo, "config", "user.email", "test@example.com")
+	gitRun(t, repo, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "README.md")
+	gitRun(t, repo, "commit", "-m", "initial")
+	gitRun(t, repo, "branch", "-m", "master")
+	return repo
+}
+
+// initImplicitTestWorktree creates a repo and a linked worktree off it, then
+// returns the worktree path (a .git FILE, so worktree.IsWorktree reports true).
+func initImplicitTestWorktree(t *testing.T) string {
+	t.Helper()
+	repo := initImplicitTestRepo(t)
+	wt := filepath.Join(t.TempDir(), "wt")
+	gitRun(t, repo, "worktree", "add", "-b", "feature", wt)
+	return wt
+}
+
+func TestSessionStartMaterializesImplicit(t *testing.T) {
+	repo := initImplicitTestRepo(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	input, _ := json.Marshal(map[string]any{
+		"hook_event_name": "SessionStart",
+		"session_id":      "abc123def456",
+		"cwd":             repo,
+		"source":          "startup",
+	})
+	var out bytes.Buffer
+	if err := Run(bytes.NewReader(input), &out, "", "", false); err != nil {
+		t.Fatal(err)
+	}
+
+	rand := implicitRand("abc123def456")
+	statePath := filepath.Join(repo, ".spinclass", "state-"+rand+".json")
+	if _, err := os.Stat(statePath); err != nil {
+		t.Fatalf("implicit session not materialized: %v", err)
+	}
+	data, _ := os.ReadFile(statePath)
+	var st session.State
+	if err := json.Unmarshal(data, &st); err != nil {
+		t.Fatalf("unmarshal state: %v", err)
+	}
+	if st.Kind != session.KindImplicit {
+		t.Errorf("kind = %q, want implicit", st.Kind)
+	}
+	if st.Branch != "master" {
+		t.Errorf("branch = %q, want master", st.Branch)
+	}
+	wantKey := filepath.Base(repo) + "/master-" + rand
+	if st.SessionKey != wantKey {
+		t.Errorf("session_key = %q, want %q", st.SessionKey, wantKey)
+	}
+}
+
+func TestSessionStartNoopInsideWorktree(t *testing.T) {
+	wt := initImplicitTestWorktree(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	input, _ := json.Marshal(map[string]any{
+		"hook_event_name": "SessionStart", "session_id": "zzz", "cwd": wt, "source": "startup",
+	})
+	var out bytes.Buffer
+	if err := Run(bytes.NewReader(input), &out, "", "", false); err != nil {
+		t.Fatal(err)
+	}
+	matches, _ := filepath.Glob(filepath.Join(wt, ".spinclass", "state-*.json"))
+	if len(matches) != 0 {
+		t.Fatalf("should not materialize inside a worktree, got %v", matches)
+	}
+}
+
+func TestSessionStartNoopWhenDisabled(t *testing.T) {
+	repo := initImplicitTestRepo(t)
+	// Set HOME to an empty temp dir so the sweatfile cascade only sees the
+	// repo-level sweatfile we write here (the hierarchy loader walks from
+	// $HOME down to cwd; bounding it at an empty HOME isolates the test).
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	// LoadHierarchy reads the repo-level config from <repo>/sweatfile.
+	if err := os.WriteFile(filepath.Join(repo, "sweatfile"),
+		[]byte("[hooks]\ndisable-implicit-sessions = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	input, _ := json.Marshal(map[string]any{
+		"hook_event_name": "SessionStart", "session_id": "disabledtest", "cwd": repo, "source": "startup",
+	})
+	var out bytes.Buffer
+	if err := Run(bytes.NewReader(input), &out, "", "", false); err != nil {
+		t.Fatal(err)
+	}
+	matches, _ := filepath.Glob(filepath.Join(repo, ".spinclass", "state-*.json"))
+	if len(matches) != 0 {
+		t.Fatalf("disabled knob should suppress materialization, got %v", matches)
 	}
 }
