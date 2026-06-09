@@ -50,6 +50,17 @@ SIGHUP forwarding) and `ShellExecutor` (used by merge). Tests use a
 `~/.local/state/spinclass/sessions/<hash>-state.json`. Three states: `active`
 (PID alive, worktree exists), `inactive` (PID dead, worktree exists),
 `abandoned` (worktree gone). Dirty state computed live via git.
+**Implicit sessions** (`State.Kind == KindImplicit`, FDR 0014) extend this to
+agents attached to a repo's **main checkout** (not an `sc start` worktree):
+keyed `<repo>/<default-branch>-<rand>` (`<rand> = sha256(session_id)[:8]`),
+stored worktree-local at `<checkout>/.spinclass/state-<rand>.json` (one file per
+session, central index symlink) so concurrent agents in one checkout never
+collide. Materialized/torn down by Claude Code `SessionStart`/`SessionEnd`
+plugin hooks (`runSessionStart`/`runSessionEnd` in `internal/hooks/`), which
+gate on not-a-worktree + repo-root-on-default-branch + the
+`[hooks].disable-implicit-sessions` knob; dead-PID orphans are reaped by a
+`SessionStart` sweep + PID-liveness. `WriteImplicit`/`RemoveImplicit`/
+`SweepDeadImplicit`/`FindImplicitAtCwd` are the per-rand storage API.
 
 **Git operations** (`internal/git/`): Thin wrapper --- all commands use
 `git -C <dir>`. Two modes: `Run()` captures output, `RunPassthrough()` streams
@@ -68,8 +79,8 @@ parent dirs → repo-level. Supports `git-excludes`, `claude-allow`, `envrc-dire
 (dedup-by-name merge),
 `[env]` table (map merge), `[hooks]` table (create/stop/pre-merge lifecycle hooks, scalar
 override; includes `disable-merge`, `disable-nix-gc`,
-`disable-merge-build-worktree`, `pre-merge-output-format`,
-`inactivity-timeout`), and `[session]` table (start/resume entrypoint commands, override
+`disable-merge-build-worktree`, `disable-implicit-sessions`,
+`pre-merge-output-format`, `inactivity-timeout`), and `[session]` table (start/resume entrypoint commands, override
 semantics). The package holds the struct definitions, accessors, `MergeWith`,
 `GetDefault`, `Apply`, and the tommy-generated codec (`sweatfile_tommy.go`, via
 `//go:generate tommy generate`).
@@ -164,6 +175,17 @@ the MCP tool catalog, gated on `[hooks].disable-merge`:
   agents can still exercise `[hooks].pre-merge`.
 
 The `sc check` CLI subcommand is available regardless of the flag.
+
+From an **implicit (main-checkout) session** (FDR 0014), `merge-this-session` /
+`merge-this-session-async` / `sc merge` detect a live implicit session via
+`session.FindImplicitAtCwd` and route to `merge.MergeImplicit`: there is nothing
+to rebase or ff-merge (the work is already on the default branch), so merge runs
+`[hooks].pre-merge` against HEAD (in the isolated build worktree) then `git push`
+the default branch as a distinct TAP step. The MCP handlers enforce the implicit
+attestation gate (`enforceAttestationImplicit` → `attestation.CheckImplicit`);
+the `sc merge` CLI path is gate-free. `sc close` on an implicit session drops
+`state-<rand>.json` only (never the checkout, no nix gc), and `sc list` marks it
+`main`. (`check`/`sc check` don't yet route implicit sessions — #132.)
 
 ### Async (background + poll) merge/check
 

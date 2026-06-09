@@ -353,6 +353,28 @@ for the hook's duration and that uncommitted state is what gets verified.
 .B Merge:
 scalar override.
 .TP
+.B disable-implicit-sessions
+Boolean.
+When true, an agent started in a repository's main checkout is
+.I not
+materialized as a spinclass session on
+.BR SessionStart :
+the hook handler is a no-op, leaving the main checkout without a session
+identity (the pre-feature behavior).
+By default (or when this flag is unset) a Claude Code agent attached to a
+repo's main checkout \(em a git repository on its default branch, not an
+.B sc start
+worktree \(em becomes a first-class implicit session, visible in
+.B sc list
+(marked
+.BR main ),
+addressable in cross-session chat, and mergeable via
+.B merge-this-session
+(hook-then-push, no rebase).
+This is the rollback lever for the implicit-sessions feature.
+.B Merge:
+scalar override.
+.TP
 .B inactivity-timeout
 String (a Go duration such as
 .BR \(dq180s\(dq " or " \(dq3m\(dq ).

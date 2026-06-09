@@ -223,7 +223,7 @@
 
               # Plugin-level hook registration. Clown auto-discovers
               # ${"\${CLAUDE_PLUGIN_ROOT}"}/hooks/hooks.json and wires the listed
-              # PreToolUse/Stop/PostToolUse events for every Claude Code
+              # PreToolUse/Stop/PostToolUse/SessionStart/SessionEnd events for every Claude Code
               # session, with no per-worktree settings.local.json plumbing
               # required. The handler script execs the spinclass binary at
               # the absolute store path baked in here.
