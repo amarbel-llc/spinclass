@@ -62,6 +62,49 @@ func TestSessionStateRoundTrip(t *testing.T) {
 	}
 }
 
+func TestWriteRemoveImplicit(t *testing.T) {
+	checkout := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	rand := "a3f9b2c1"
+	s := State{
+		Kind:         KindImplicit,
+		PID:          os.Getpid(),
+		SessionState: StateActive,
+		RepoPath:     checkout,
+		WorktreePath: checkout,
+		Branch:       "master",
+		SessionKey:   "myrepo/master-" + rand,
+		StartedAt:    time.Now(),
+	}
+	if err := WriteImplicit(s, rand); err != nil {
+		t.Fatal(err)
+	}
+
+	local := filepath.Join(checkout, ".spinclass", "state-"+rand+".json")
+	if _, err := os.Stat(local); err != nil {
+		t.Fatalf("local state not written: %v", err)
+	}
+	idx := implicitIndexPath(local)
+	resolved, err := os.Readlink(idx)
+	if err != nil {
+		t.Fatalf("index symlink not written: %v", err)
+	}
+	if resolved != local {
+		t.Fatalf("symlink target = %q, want %q", resolved, local)
+	}
+
+	if err := RemoveImplicit(checkout, rand); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(local); !os.IsNotExist(err) {
+		t.Fatalf("local state not removed: %v", err)
+	}
+	if _, err := os.Lstat(idx); !os.IsNotExist(err) {
+		t.Fatalf("index entry not removed: %v", err)
+	}
+}
+
 func TestStateKindRoundTrips(t *testing.T) {
 	s := State{Kind: KindImplicit, WorktreePath: "/x", Branch: "master"}
 	data, err := json.Marshal(s)

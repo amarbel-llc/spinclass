@@ -294,6 +294,69 @@ func removeForWorktree(worktreeAbsPath string) error {
 	return nil
 }
 
+// implicitStatePath is the worktree-local path of an implicit session's
+// per-rand state file: <checkout>/.spinclass/state-<rand>.json.
+func implicitStatePath(checkout, rand string) string {
+	return filepath.Join(checkout, ".spinclass", "state-"+rand+".json")
+}
+
+// implicitIndexPath returns the central index entry for an implicit state
+// file. Hashing the per-rand local path keeps it unique from the worktree's
+// own state.json index entry.
+func implicitIndexPath(localStatePath string) string {
+	return filepath.Join(indexDir(), indexFilename(localStatePath))
+}
+
+// WriteImplicit persists an implicit (main-checkout) session to
+// <checkout>/.spinclass/state-<rand>.json plus a central index symlink. Unlike
+// Write, it keys on rand (not worktree path) so concurrent main-checkout agents
+// never collide. s.WorktreePath must be the checkout root.
+func WriteImplicit(s State, rand string) error {
+	checkout := s.WorktreePath
+	if checkout == "" {
+		return errors.New("session.WriteImplicit: WorktreePath required")
+	}
+	dir := filepath.Join(checkout, ".spinclass")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return err
+	}
+	local := implicitStatePath(checkout, rand)
+	if err := os.WriteFile(local, data, 0o644); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(indexDir(), 0o755); err != nil {
+		return err
+	}
+	link := implicitIndexPath(local)
+	tmp := filepath.Join(indexDir(), fmt.Sprintf(".tmp-%d-%d.json", os.Getpid(), time.Now().UnixNano()))
+	if err := os.Symlink(local, tmp); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, link); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+// RemoveImplicit deletes an implicit session's per-rand state file and its
+// central index entry. Tolerates missing files. Never removes the checkout's
+// .spinclass dir wholesale (other agents may have siblings there).
+func RemoveImplicit(checkout, rand string) error {
+	local := implicitStatePath(checkout, rand)
+	if err := os.Remove(local); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.Remove(implicitIndexPath(local)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
 // Tombstone marks the session as cleanly closed: reads the live state,
 // atomically replaces the central index symlink with a regular file
 // containing the same JSON (the tombstone), and removes the worktree-local
