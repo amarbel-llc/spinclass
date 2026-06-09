@@ -30,6 +30,24 @@ func Run(execr executor.Executor, format string, target string, gitSync bool, ve
 		return err
 	}
 
+	// Implicit (main-checkout) session with no explicit target: hook-then-push,
+	// no rebase. Only a live implicit session at cwd routes here; otherwise we
+	// fall through to the normal worktree/target resolution below. The CLI is
+	// gate-free by design (see attestation.go package doc) — no attestation here.
+	if target == "" && !worktree.IsWorktree(cwd) {
+		if implicit, _, ferr := session.FindImplicitAtCwd(cwd); ferr == nil && implicit != nil {
+			var tw *tap.Writer
+			if format == "tap" {
+				tw = NewMergeWriter(os.Stdout)
+			}
+			_, mergeErr := MergeImplicit(context.Background(), tw, os.Stdout, implicit.RepoPath, cwd, implicit.Branch, verbose, nil)
+			if tw != nil {
+				tw.Plan()
+			}
+			return mergeErr
+		}
+	}
+
 	var repoPath, wtPath, branch string
 	inSession := false
 

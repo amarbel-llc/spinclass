@@ -312,7 +312,19 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 	}
 
 	if !worktree.IsWorktree(cwd) {
-		return command.TextErrorResult("not inside a worktree session"), nil
+		implicit, _, ferr := session.FindImplicitAtCwd(cwd)
+		if ferr != nil || implicit == nil {
+			return command.TextErrorResult("not inside a worktree session"), nil
+		}
+		// Implicit (main-checkout) session: hook-then-push, no rebase.
+		if msg, ok := enforceAttestationImplicit(cwd); !ok {
+			return command.TextErrorResult(msg), nil
+		}
+		var buf bytes.Buffer
+		tw := merge.NewMergeWriter(&buf)
+		blobLinks, mergeErr := merge.MergeImplicit(context.Background(), tw, &buf, implicit.RepoPath, cwd, implicit.Branch, true, nil)
+		tw.Plan()
+		return buildHookResult(buf.String(), blobLinks, mergeErr), nil
 	}
 
 	repoPath, err := git.CommonDir(cwd)
@@ -394,7 +406,25 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
 	}
 	if !worktree.IsWorktree(cwd) {
-		return command.TextErrorResult("not inside a worktree session"), nil
+		implicit, _, ferr := session.FindImplicitAtCwd(cwd)
+		if ferr != nil || implicit == nil {
+			return command.TextErrorResult("not inside a worktree session"), nil
+		}
+		// Implicit (main-checkout) session: hook-then-push, no rebase. There is
+		// no synchronous PrepareMerge prefix (no rebase to do up front) — run
+		// MergeImplicit entirely inside the job goroutine.
+		if msg, ok := enforceAttestationImplicit(cwd); !ok {
+			return command.TextErrorResult(msg), nil
+		}
+		repoPath := implicit.RepoPath
+		branch := implicit.Branch
+		var buf bytes.Buffer
+		tw := merge.NewMergeWriter(&buf)
+		return startSessionJob(cwd, job.KindMerge, params.GitSync, func(ctx context.Context, w io.Writer) (string, bool) {
+			_, mergeErr := merge.MergeImplicit(ctx, tw, &buf, repoPath, cwd, branch, true, w)
+			tw.Plan()
+			return buf.String(), mergeErr != nil
+		}), nil
 	}
 	repoPath, err := git.CommonDir(cwd)
 	if err != nil {
@@ -638,6 +668,28 @@ func enforceAttestation(repoPath, branch string) (string, bool) {
 		return "", true
 	}
 	gateOK, output, err := attestation.Check(merged, repoPath, branch)
+	if err != nil && !errors.Is(err, attestation.ErrAttestationRequired) {
+		return fmt.Sprintf("attestation gate error: %v", err), false
+	}
+	if !gateOK {
+		return output, false
+	}
+	return "", true
+}
+
+// enforceAttestationImplicit is enforceAttestation for an implicit
+// (main-checkout) session: it consults the per-randID attestation via
+// CheckImplicit instead of the worktree-keyed Check. Same contract: ("",true)
+// when dormant/satisfied, (failureText,false) when the gate refuses.
+func enforceAttestationImplicit(checkout string) (string, bool) {
+	merged, ok := mergedSweatfileForCwd()
+	if !ok {
+		return "", true
+	}
+	if len(merged.ActivePreMergeSkills()) == 0 {
+		return "", true
+	}
+	gateOK, output, err := attestation.CheckImplicit(merged, checkout)
 	if err != nil && !errors.Is(err, attestation.ErrAttestationRequired) {
 		return fmt.Sprintf("attestation gate error: %v", err), false
 	}
