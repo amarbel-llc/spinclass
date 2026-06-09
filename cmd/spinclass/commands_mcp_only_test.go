@@ -2,13 +2,123 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/amarbel-llc/spinclass/internal/attestation"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/testgit"
 )
+
+// TestResolveGatedSession exercises the three outcomes of the extracted
+// merge/check session-gate preamble: a worktree session (implicit=false,
+// repoPath/branch from git), a live implicit main-checkout session
+// (implicit=true, repoPath/branch from the state file), and a bare dir that is
+// neither (ok=false with the canonical reject message). All three run with the
+// attestation gate dormant — no [[pre-merge-skills]] in the loaded hierarchy —
+// so the gate passes and the routing identity is what's under test.
+//
+// The gate's dormancy is load-bearing and non-obvious here: the sweatfile
+// cascade walks the repo dir's ancestors up to $HOME, and $TMPDIR (and thus
+// t.TempDir) points *inside* this session's worktree under ~/eng, whose
+// sweatfile declares [[pre-merge-skills]]. To keep the gate dormant each subtest
+// pins $HOME to the repo's own parent dir, so chainAncestors stops immediately
+// and never reaches ~/eng — independent of where t.TempDir lands.
+func TestResolveGatedSession(t *testing.T) {
+	t.Run("worktree", func(t *testing.T) {
+		testgit.RequireGit(t)
+		t.Setenv("XDG_STATE_HOME", t.TempDir())
+		base := t.TempDir()
+		t.Setenv("HOME", base) // bound the cascade walk at the repo's parent
+		repo := filepath.Join(base, "repo")
+		if err := os.MkdirAll(repo, 0o755); err != nil {
+			t.Fatalf("mkdir repo: %v", err)
+		}
+		testgit.MustInit(t, repo)
+		wt := filepath.Join(repo, ".worktrees", "feature")
+		testgit.MustWorktreeAdd(t, repo, wt, "feature")
+		// resolveGatedSession reads the sweatfile hierarchy from cwd; chdir into
+		// the worktree so the dormant-gate path resolves there.
+		t.Chdir(wt)
+
+		gs, failMsg, ok := resolveGatedSession(wt)
+		if !ok {
+			t.Fatalf("expected ok, got reject: %q", failMsg)
+		}
+		if gs.implicit {
+			t.Errorf("worktree session: implicit = true, want false")
+		}
+		if gs.gitErr != nil {
+			t.Errorf("worktree session: unexpected gitErr: %v", gs.gitErr)
+		}
+		if gs.repoPath == "" {
+			t.Errorf("worktree session: repoPath empty, want git-common-dir")
+		}
+		if gs.branch != "feature" {
+			t.Errorf("worktree session: branch = %q, want feature", gs.branch)
+		}
+	})
+
+	t.Run("implicit", func(t *testing.T) {
+		testgit.RequireGit(t)
+		t.Setenv("XDG_STATE_HOME", t.TempDir())
+		base := t.TempDir()
+		t.Setenv("HOME", base) // dormant gate — see the TestResolveGatedSession doc comment
+		// `git init` (not worktree add): .git is a DIRECTORY, so
+		// worktree.IsWorktree is false and the implicit lookup fires — while
+		// git.CommonDir still resolves to this repo (not the enclosing session
+		// worktree TMPDIR lands in), keeping the cascade bounded by base/HOME.
+		repo := filepath.Join(base, "repo")
+		testgit.MustInit(t, repo)
+		st := session.State{
+			Kind:         session.KindImplicit,
+			PID:          os.Getpid(), // alive: this test process
+			SessionState: session.StateActive,
+			RepoPath:     repo,
+			WorktreePath: repo,
+			Branch:       "master",
+			SessionKey:   "myrepo/master-cafe1234",
+		}
+		if err := session.WriteImplicit(st, "cafe1234"); err != nil {
+			t.Fatalf("WriteImplicit: %v", err)
+		}
+		t.Chdir(repo)
+
+		gs, failMsg, ok := resolveGatedSession(repo)
+		if !ok {
+			t.Fatalf("expected ok, got reject: %q", failMsg)
+		}
+		if !gs.implicit {
+			t.Errorf("implicit session: implicit = false, want true")
+		}
+		if gs.gitErr != nil {
+			t.Errorf("implicit session: unexpected gitErr: %v", gs.gitErr)
+		}
+		if gs.repoPath != repo {
+			t.Errorf("implicit session: repoPath = %q, want %q", gs.repoPath, repo)
+		}
+		if gs.branch != "master" {
+			t.Errorf("implicit session: branch = %q, want master", gs.branch)
+		}
+	})
+
+	t.Run("reject", func(t *testing.T) {
+		t.Setenv("XDG_STATE_HOME", t.TempDir())
+		// Bare dir: not a worktree, no implicit session written.
+		dir := t.TempDir()
+		t.Chdir(dir)
+
+		gs, failMsg, ok := resolveGatedSession(dir)
+		if ok {
+			t.Fatalf("expected reject, got ok (gs=%+v)", gs)
+		}
+		if failMsg != "not inside a worktree session" {
+			t.Errorf("reject message = %q, want %q", failMsg, "not inside a worktree session")
+		}
+	})
+}
 
 // TestCurrentSessionKeyImplicitFallback verifies that when not inside a
 // worktree and $SPINCLASS_SESSION_ID is unset, currentSessionKey resolves the

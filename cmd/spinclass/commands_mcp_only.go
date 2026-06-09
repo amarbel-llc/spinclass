@@ -311,37 +311,25 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
 	}
 
-	if !worktree.IsWorktree(cwd) {
-		implicit, _, ferr := session.FindImplicitAtCwd(cwd)
-		if ferr != nil || implicit == nil {
-			return command.TextErrorResult("not inside a worktree session"), nil
-		}
+	gs, failMsg, ok := resolveGatedSession(cwd)
+	if !ok {
+		return command.TextErrorResult(failMsg), nil
+	}
+	if gs.gitErr != nil {
+		// Merge treats a git-resolution failure on the worktree path as fatal.
+		return command.TextErrorResult(gs.gitErr.Error()), nil
+	}
+
+	if gs.implicit {
 		// Implicit (main-checkout) session: hook-then-push, no rebase.
-		if msg, ok := enforceAttestationImplicit(cwd); !ok {
-			return command.TextErrorResult(msg), nil
-		}
 		var buf bytes.Buffer
 		tw := merge.NewMergeWriter(&buf)
-		blobLinks, mergeErr := merge.MergeImplicit(context.Background(), tw, &buf, implicit.RepoPath, cwd, implicit.Branch, true, nil)
+		blobLinks, mergeErr := merge.MergeImplicit(context.Background(), tw, &buf, gs.repoPath, cwd, gs.branch, true, nil)
 		tw.Plan()
 		return buildHookResult(buf.String(), blobLinks, mergeErr), nil
 	}
 
-	repoPath, err := git.CommonDir(cwd)
-	if err != nil {
-		return command.TextErrorResult(fmt.Sprintf("could not determine repo path: %v", err)), nil
-	}
-
-	branch, err := git.BranchCurrent(cwd)
-	if err != nil {
-		return command.TextErrorResult(fmt.Sprintf("could not determine current branch: %v", err)), nil
-	}
-
-	if msg, ok := enforceAttestation(repoPath, branch); !ok {
-		return command.TextErrorResult(msg), nil
-	}
-
-	defaultBranch, err := merge.ResolveDefaultBranch(repoPath)
+	defaultBranch, err := merge.ResolveDefaultBranch(gs.repoPath)
 	if err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not determine default branch: %v", err)), nil
 	}
@@ -352,9 +340,9 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 		&buf,
 		nil,
 		"tap",
-		repoPath,
+		gs.repoPath,
 		cwd,
-		branch,
+		gs.branch,
 		defaultBranch,
 		params.GitSync,
 		true,
@@ -369,27 +357,12 @@ func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prom
 		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
 	}
 
-	if worktree.IsWorktree(cwd) {
-		repoPath, repoErr := git.CommonDir(cwd)
-		branch, branchErr := git.BranchCurrent(cwd)
-		if repoErr == nil && branchErr == nil {
-			if msg, ok := enforceAttestation(repoPath, branch); !ok {
-				return command.TextErrorResult(msg), nil
-			}
-		}
-	} else {
-		// Implicit (main-checkout) session: enforce the implicit attestation
-		// gate, mirroring merge-this-session. A cwd that is neither a worktree
-		// nor a live implicit session is rejected, matching
-		// handleCheckThisSessionAsync. (sc check, the CLI, remains the
-		// gate-free human escape hatch for an arbitrary dir.)
-		implicit, _, ferr := session.FindImplicitAtCwd(cwd)
-		if ferr != nil || implicit == nil {
-			return command.TextErrorResult("not inside a worktree session"), nil
-		}
-		if msg, ok := enforceAttestationImplicit(cwd); !ok {
-			return command.TextErrorResult(msg), nil
-		}
+	// Check TOLERATES a git-resolution failure on the worktree path (gs.gitErr):
+	// it skips the attestation gate and runs the hook against cwd anyway. Only a
+	// genuine non-session cwd, or a refused gate, is fatal here. (sc check, the
+	// CLI, remains the gate-free human escape hatch for an arbitrary dir.)
+	if _, failMsg, ok := resolveGatedSession(cwd); !ok {
+		return command.TextErrorResult(failMsg), nil
 	}
 
 	var buf bytes.Buffer
@@ -418,19 +391,20 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 	if err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
 	}
-	if !worktree.IsWorktree(cwd) {
-		implicit, _, ferr := session.FindImplicitAtCwd(cwd)
-		if ferr != nil || implicit == nil {
-			return command.TextErrorResult("not inside a worktree session"), nil
-		}
+	gs, failMsg, ok := resolveGatedSession(cwd)
+	if !ok {
+		return command.TextErrorResult(failMsg), nil
+	}
+	if gs.gitErr != nil {
+		// Merge treats a git-resolution failure on the worktree path as fatal.
+		return command.TextErrorResult(gs.gitErr.Error()), nil
+	}
+	if gs.implicit {
 		// Implicit (main-checkout) session: hook-then-push, no rebase. There is
 		// no synchronous PrepareMerge prefix (no rebase to do up front) — run
 		// MergeImplicit entirely inside the job goroutine.
-		if msg, ok := enforceAttestationImplicit(cwd); !ok {
-			return command.TextErrorResult(msg), nil
-		}
-		repoPath := implicit.RepoPath
-		branch := implicit.Branch
+		repoPath := gs.repoPath
+		branch := gs.branch
 		var buf bytes.Buffer
 		tw := merge.NewMergeWriter(&buf)
 		return startSessionJob(cwd, job.KindMerge, params.GitSync, func(ctx context.Context, w io.Writer) (string, bool) {
@@ -439,17 +413,8 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 			return buf.String(), mergeErr != nil
 		}), nil
 	}
-	repoPath, err := git.CommonDir(cwd)
-	if err != nil {
-		return command.TextErrorResult(fmt.Sprintf("could not determine repo path: %v", err)), nil
-	}
-	branch, err := git.BranchCurrent(cwd)
-	if err != nil {
-		return command.TextErrorResult(fmt.Sprintf("could not determine current branch: %v", err)), nil
-	}
-	if msg, ok := enforceAttestation(repoPath, branch); !ok {
-		return command.TextErrorResult(msg), nil
-	}
+	repoPath := gs.repoPath
+	branch := gs.branch
 	defaultBranch, err := merge.ResolveDefaultBranch(repoPath)
 	if err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not determine default branch: %v", err)), nil
@@ -490,25 +455,12 @@ func handleCheckThisSessionAsync(_ context.Context, _ json.RawMessage, _ command
 	if err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
 	}
-	if worktree.IsWorktree(cwd) {
-		repoPath, repoErr := git.CommonDir(cwd)
-		branch, branchErr := git.BranchCurrent(cwd)
-		if repoErr == nil && branchErr == nil {
-			if msg, ok := enforceAttestation(repoPath, branch); !ok {
-				return command.TextErrorResult(msg), nil
-			}
-		}
-	} else {
-		// Implicit (main-checkout) session reaches the job; a cwd that is
-		// neither a worktree nor an implicit session keeps the (accurate)
-		// reject. Mirrors handleMergeThisSessionAsync's implicit branch.
-		implicit, _, ferr := session.FindImplicitAtCwd(cwd)
-		if ferr != nil || implicit == nil {
-			return command.TextErrorResult("not inside a worktree session"), nil
-		}
-		if msg, ok := enforceAttestationImplicit(cwd); !ok {
-			return command.TextErrorResult(msg), nil
-		}
+	// Check TOLERATES a git-resolution failure on the worktree path (gs.gitErr):
+	// it skips the attestation gate and runs the hook against cwd anyway. A cwd
+	// that is neither a worktree nor an implicit session keeps the (accurate)
+	// reject; a refused gate is fatal.
+	if _, failMsg, ok := resolveGatedSession(cwd); !ok {
+		return command.TextErrorResult(failMsg), nil
 	}
 
 	return startSessionJob(cwd, job.KindCheck, false, func(ctx context.Context, w io.Writer) (string, bool) {
@@ -671,6 +623,57 @@ func buildCheckAsyncDescription(hookPreview string, clownWake bool) string {
 		return base
 	}
 	return base + fmt.Sprintf(" The configured pre-merge command is `%s`.", hookPreview)
+}
+
+// gatedSession is the resolved identity of the session a gated merge/check MCP
+// tool is operating on, after the pre-merge attestation gate has been enforced.
+type gatedSession struct {
+	implicit bool   // true → a main-checkout (implicit) session; false → a worktree session
+	repoPath string // worktree session: git.CommonDir(cwd); implicit: implicit.RepoPath. May be "" if git resolution failed on the worktree path (see gitErr).
+	branch   string // worktree session: git.BranchCurrent(cwd); implicit: implicit.Branch. May be "" on gitErr.
+	gitErr   error  // non-nil if git.CommonDir/BranchCurrent failed on the worktree path. Merge callers treat this as fatal; check callers tolerate it. The message is already prefixed ("could not determine repo path/current branch: …") so a merge caller can emit it verbatim.
+}
+
+// resolveGatedSession resolves the session at cwd for a gated merge/check MCP
+// tool and enforces the appropriate pre-merge attestation gate
+// (enforceAttestation for a worktree session, enforceAttestationImplicit for an
+// implicit one).
+//
+// Returns (gs, "", true) to proceed, or (zero, failMsg, false) when the caller
+// should return command.TextErrorResult(failMsg) — i.e. cwd is neither a
+// worktree nor a live implicit session, or the attestation gate refused.
+//
+// On the worktree path, a git.CommonDir/BranchCurrent failure is NOT itself a
+// rejection: gs.gitErr is set (carrying the exact "could not determine repo
+// path/current branch: …" message the per-handler code used to emit), the
+// attestation gate is skipped (it can't run without repoPath/branch), and
+// (gs, "", true) is returned so the caller decides fatality — merge handlers
+// emit gs.gitErr.Error() as a fatal TextErrorResult; check handlers ignore
+// gs.gitErr and run the hook against cwd anyway. This preserves the existing
+// per-tool behavior, including error text, exactly.
+func resolveGatedSession(cwd string) (gs gatedSession, failMsg string, ok bool) {
+	if worktree.IsWorktree(cwd) {
+		repoPath, repoErr := git.CommonDir(cwd)
+		if repoErr != nil {
+			return gatedSession{gitErr: fmt.Errorf("could not determine repo path: %v", repoErr)}, "", true
+		}
+		branch, branchErr := git.BranchCurrent(cwd)
+		if branchErr != nil {
+			return gatedSession{gitErr: fmt.Errorf("could not determine current branch: %v", branchErr)}, "", true
+		}
+		if msg, gok := enforceAttestation(repoPath, branch); !gok {
+			return gatedSession{}, msg, false
+		}
+		return gatedSession{repoPath: repoPath, branch: branch}, "", true
+	}
+	implicit, _, ferr := session.FindImplicitAtCwd(cwd)
+	if ferr != nil || implicit == nil {
+		return gatedSession{}, "not inside a worktree session", false
+	}
+	if msg, gok := enforceAttestationImplicit(cwd); !gok {
+		return gatedSession{}, msg, false
+	}
+	return gatedSession{implicit: true, repoPath: implicit.RepoPath, branch: implicit.Branch}, "", true
 }
 
 // enforceAttestation runs the pre-merge skill attestation gate for the
