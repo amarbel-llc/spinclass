@@ -105,6 +105,25 @@ func TestWriteRemoveImplicit(t *testing.T) {
 	}
 }
 
+func TestWriteImplicitRejectsMissingCheckout(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	randID := "a3f9b2c1"
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	s := State{
+		Kind:         KindImplicit,
+		PID:          os.Getpid(),
+		SessionState: StateActive,
+		RepoPath:     missing,
+		WorktreePath: missing,
+		Branch:       "master",
+		StartedAt:    time.Now(),
+	}
+	if err := WriteImplicit(s, randID); err == nil {
+		t.Fatal("WriteImplicit should reject a non-existent checkout path")
+	}
+}
+
 func TestStateKindRoundTrips(t *testing.T) {
 	s := State{Kind: KindImplicit, WorktreePath: "/x", Branch: "master"}
 	data, err := json.Marshal(s)

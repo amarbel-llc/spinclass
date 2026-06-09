@@ -295,37 +295,45 @@ func removeForWorktree(worktreeAbsPath string) error {
 }
 
 // implicitStatePath is the worktree-local path of an implicit session's
-// per-rand state file: <checkout>/.spinclass/state-<rand>.json.
-func implicitStatePath(checkout, rand string) string {
-	return filepath.Join(checkout, ".spinclass", "state-"+rand+".json")
+// per-randID state file: <checkout>/.spinclass/state-<randID>.json.
+func implicitStatePath(checkout, randID string) string {
+	return filepath.Join(checkout, ".spinclass", "state-"+randID+".json")
 }
 
 // implicitIndexPath returns the central index entry for an implicit state
-// file. Hashing the per-rand local path keeps it unique from the worktree's
+// file. Hashing the per-randID local path keeps it unique from the worktree's
 // own state.json index entry.
 func implicitIndexPath(localStatePath string) string {
 	return filepath.Join(indexDir(), indexFilename(localStatePath))
 }
 
 // WriteImplicit persists an implicit (main-checkout) session to
-// <checkout>/.spinclass/state-<rand>.json plus a central index symlink. Unlike
-// Write, it keys on rand (not worktree path) so concurrent main-checkout agents
+// <checkout>/.spinclass/state-<randID>.json plus a central index symlink. Unlike
+// Write, it keys on randID (not worktree path) so concurrent main-checkout agents
 // never collide. s.WorktreePath must be the checkout root.
-func WriteImplicit(s State, rand string) error {
+func WriteImplicit(s State, randID string) error {
+	from := caller(1)
 	checkout := s.WorktreePath
 	if checkout == "" {
+		sessionlog.Errorf("session.WriteImplicit rejected (empty WorktreePath) from=%s", from)
 		return errors.New("session.WriteImplicit: WorktreePath required")
+	}
+	if _, err := os.Stat(checkout); err != nil {
+		sessionlog.Errorf("session.WriteImplicit checkout-stat-failed checkout=%s branch=%s from=%s err=%v", checkout, s.Branch, from, err)
+		return fmt.Errorf("session.WriteImplicit: checkout %q: %w", checkout, err)
 	}
 	dir := filepath.Join(checkout, ".spinclass")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
+		sessionlog.Errorf("session.WriteImplicit mkdir-failed dir=%s from=%s err=%v", dir, from, err)
 		return err
 	}
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
-	local := implicitStatePath(checkout, rand)
+	local := implicitStatePath(checkout, randID)
 	if err := os.WriteFile(local, data, 0o644); err != nil {
+		sessionlog.Errorf("session.WriteImplicit writefile-failed path=%s from=%s err=%v", local, from, err)
 		return err
 	}
 	if err := os.MkdirAll(indexDir(), 0o755); err != nil {
@@ -334,20 +342,24 @@ func WriteImplicit(s State, rand string) error {
 	link := implicitIndexPath(local)
 	tmp := filepath.Join(indexDir(), fmt.Sprintf(".tmp-%d-%d.json", os.Getpid(), time.Now().UnixNano()))
 	if err := os.Symlink(local, tmp); err != nil {
+		sessionlog.Errorf("session.WriteImplicit symlink-failed local=%s from=%s err=%v", local, from, err)
 		return err
 	}
 	if err := os.Rename(tmp, link); err != nil {
 		os.Remove(tmp)
+		sessionlog.Errorf("session.WriteImplicit symlink-failed local=%s from=%s err=%v", local, from, err)
 		return err
 	}
+	sessionlog.Infof("session.WriteImplicit wt=%s branch=%s state=%s pid=%d from=%s", checkout, s.Branch, s.SessionState, s.PID, from)
 	return nil
 }
 
-// RemoveImplicit deletes an implicit session's per-rand state file and its
+// RemoveImplicit deletes an implicit session's per-randID state file and its
 // central index entry. Tolerates missing files. Never removes the checkout's
 // .spinclass dir wholesale (other agents may have siblings there).
-func RemoveImplicit(checkout, rand string) error {
-	local := implicitStatePath(checkout, rand)
+func RemoveImplicit(checkout, randID string) error {
+	sessionlog.Infof("session.RemoveImplicit checkout=%s from=%s", checkout, caller(1))
+	local := implicitStatePath(checkout, randID)
 	if err := os.Remove(local); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
