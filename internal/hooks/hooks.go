@@ -13,6 +13,7 @@ import (
 
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/session"
+	"github.com/amarbel-llc/spinclass/internal/sessionlog"
 	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 	"github.com/google/shlex"
@@ -25,7 +26,6 @@ type hookInput struct {
 	ToolName      string         `json:"tool_name"`
 	ToolInput     map[string]any `json:"tool_input"`
 	CWD           string         `json:"cwd"`
-	Source        string         `json:"source"`
 }
 
 func Run(r io.Reader, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree bool) error {
@@ -64,18 +64,15 @@ func runSessionStart(input hookInput) error {
 		return nil
 	}
 	// Gate 1: not inside an sc-created worktree (those already have state).
+	// Cheapest check (a single Lstat) — runs first.
 	if worktree.IsWorktree(cwd) {
 		return nil
 	}
-	// Gate 2: rollback knob.
-	if home, _ := os.UserHomeDir(); home != "" {
-		if res, err := sweatfileio.LoadHierarchy(home, cwd); err == nil &&
-			res.Merged.DisableImplicitSessionsEnabled() {
-			return nil
-		}
-	}
-	// Gate 3: a git repo whose checkout root == cwd and which is on its
-	// default branch. Bail silently on any error.
+	// Gate 2: a git repo whose checkout root == cwd and which is on its
+	// default branch. Bail silently on any error. This cheap git-repo
+	// discriminator runs BEFORE the sweatfile I/O walk (Gate 3) so the
+	// common SessionStart-in-a-non-git-dir case (e.g. ~/Downloads) skips
+	// the hierarchy stat-walk entirely.
 	repoRoot, err := gitToplevel(cwd)
 	if err != nil || filepath.Clean(repoRoot) != filepath.Clean(cwd) {
 		return nil
@@ -88,9 +85,20 @@ func runSessionStart(input hookInput) error {
 	if err != nil || branch != def {
 		return nil
 	}
+	// Gate 3: rollback knob. Now that we know this is a materializable main
+	// checkout, the sweatfile hierarchy walk only runs when it matters, and
+	// stays BEFORE the sweep + write so a disabled session writes nothing.
+	if home, _ := os.UserHomeDir(); home != "" {
+		if res, err := sweatfileio.LoadHierarchy(home, cwd); err == nil &&
+			res.Merged.DisableImplicitSessionsEnabled() {
+			return nil
+		}
+	}
 
 	// Orphan sweep before our own write (backstop for missed SessionEnd).
-	_ = session.SweepDeadImplicit(cwd)
+	if err := session.SweepDeadImplicit(cwd); err != nil {
+		sessionlog.Errorf("runSessionStart SweepDeadImplicit-failed checkout=%s err=%v", cwd, err)
+	}
 
 	randID := implicitRand(input.SessionID)
 	key := filepath.Base(repoRoot) + "/" + branch + "-" + randID
