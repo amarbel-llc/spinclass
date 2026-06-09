@@ -1257,6 +1257,47 @@ func TestSessionStartMaterializesImplicit(t *testing.T) {
 	}
 }
 
+func TestSessionEndRemovesImplicit(t *testing.T) {
+	repo := initImplicitTestRepo(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	// Materialize first via SessionStart.
+	startInput, _ := json.Marshal(map[string]any{
+		"hook_event_name": "SessionStart", "session_id": "sid999", "cwd": repo, "source": "startup",
+	})
+	if err := Run(bytes.NewReader(startInput), &bytes.Buffer{}, "", "", false); err != nil {
+		t.Fatal(err)
+	}
+	rand := implicitRand("sid999")
+	local := filepath.Join(repo, ".spinclass", "state-"+rand+".json")
+	if _, err := os.Stat(local); err != nil {
+		t.Fatalf("precondition: state should exist after SessionStart: %v", err)
+	}
+
+	// End via SessionEnd.
+	endInput, _ := json.Marshal(map[string]any{
+		"hook_event_name": "SessionEnd", "session_id": "sid999", "cwd": repo, "reason": "other",
+	})
+	if err := Run(bytes.NewReader(endInput), &bytes.Buffer{}, "", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(local); !os.IsNotExist(err) {
+		t.Fatalf("implicit session not removed on SessionEnd: %v", err)
+	}
+}
+
+func TestSessionEndNoopWhenNoState(t *testing.T) {
+	// SessionEnd for a session_id that never materialized must not error.
+	repo := initImplicitTestRepo(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	endInput, _ := json.Marshal(map[string]any{
+		"hook_event_name": "SessionEnd", "session_id": "never-existed", "cwd": repo, "reason": "other",
+	})
+	if err := Run(bytes.NewReader(endInput), &bytes.Buffer{}, "", "", false); err != nil {
+		t.Fatalf("SessionEnd for a nonexistent session should be a silent no-op, got: %v", err)
+	}
+}
+
 func TestSessionStartNoopInsideWorktree(t *testing.T) {
 	wt := initImplicitTestWorktree(t)
 	t.Setenv("XDG_STATE_HOME", t.TempDir())

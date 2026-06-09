@@ -41,6 +41,8 @@ func Run(r io.Reader, w io.Writer, mainRepoRoot, sessionWorktree string, disallo
 		return runPostToolUseLog(input)
 	case "SessionStart":
 		return runSessionStart(input)
+	case "SessionEnd":
+		return runSessionEnd(input)
 	default:
 		return runPreToolUse(input, w, mainRepoRoot, sessionWorktree, disallowMainWorktree)
 	}
@@ -118,6 +120,20 @@ func runSessionStart(input hookInput) error {
 		Env:          map[string]string{"SPINCLASS_SESSION_ID": key},
 	}
 	_ = session.WriteImplicit(s, randID) // swallow; never block startup
+	return nil
+}
+
+// runSessionEnd hard-deletes the implicit session for this session_id. Misses
+// (crash, kill -9, or the SessionEnd timeout) are backstopped by
+// SweepDeadImplicit on the next SessionStart. Swallows errors — a hook must
+// never block session teardown.
+func runSessionEnd(input hookInput) error {
+	if input.CWD == "" || input.SessionID == "" {
+		return nil
+	}
+	if err := session.RemoveImplicit(input.CWD, implicitRand(input.SessionID)); err != nil {
+		sessionlog.Errorf("runSessionEnd RemoveImplicit-failed checkout=%s err=%v", input.CWD, err)
+	}
 	return nil
 }
 
