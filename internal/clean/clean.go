@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -300,6 +301,78 @@ func removeAbandonedSessions(abandoned []session.State) int {
 	return removed
 }
 
+// orphanBuildWorktree is a leftover pre-merge build worktree (.merge-<branch>-
+// <sha>-<pid> under <repo>/.worktrees/) whose creating process is no longer
+// alive — see issue #135. Created by check.resolveHookDir; normally removed by
+// its deferred cleanup, but a crashed merge leaves one behind.
+type orphanBuildWorktree struct {
+	repoPath string
+	path     string // absolute path to the .merge-* dir
+	name     string // basename, for display
+}
+
+// findOrphanBuildWorktrees scans repos under startDir for .merge-* build
+// worktree dirs whose embedded <pid> is dead. A LIVE-pid .merge-* (an in-flight
+// merge) is left untouched. The PID is the segment after the last '-' in the
+// name (branch/sha segments may themselves contain '-', so parse from the end).
+func findOrphanBuildWorktrees(startDir string) []orphanBuildWorktree {
+	var orphans []orphanBuildWorktree
+	for _, repoPath := range worktree.ScanRepos(startDir) {
+		wtDir := filepath.Join(repoPath, worktree.WorktreesDir)
+		entries, err := os.ReadDir(wtDir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !e.IsDir() || !strings.HasPrefix(e.Name(), ".merge-") {
+				continue
+			}
+			pid, ok := pidFromBuildWorktreeName(e.Name())
+			if !ok {
+				continue // unparseable name — leave it alone, don't guess
+			}
+			if session.IsAlive(pid) {
+				continue // in-flight merge — never touch a live one
+			}
+			orphans = append(orphans, orphanBuildWorktree{
+				repoPath: repoPath,
+				path:     filepath.Join(wtDir, e.Name()),
+				name:     e.Name(),
+			})
+		}
+	}
+	return orphans
+}
+
+// pidFromBuildWorktreeName extracts the trailing <pid> from a
+// .merge-<branch>-<sha>-<pid> name. Returns (0,false) if the last '-'-segment
+// isn't a positive integer. Branch/sha segments can contain '-', so only the
+// final segment is the PID.
+func pidFromBuildWorktreeName(name string) (int, bool) {
+	i := strings.LastIndex(name, "-")
+	if i < 0 || i == len(name)-1 {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(name[i+1:])
+	if err != nil || pid <= 0 {
+		return 0, false
+	}
+	return pid, true
+}
+
+// removeOrphanBuildWorktree force-removes one orphaned build worktree and
+// prunes the repo's stale admin entries. Best-effort: force-remove the git
+// worktree (clears the registration if any), then RemoveAll the physical dir
+// in case it was unregistered (the crash-orphan case), then prune.
+func removeOrphanBuildWorktree(o orphanBuildWorktree) error {
+	_ = git.WorktreeForceRemove(o.repoPath, o.path) // clears admin entry if registered
+	if err := os.RemoveAll(o.path); err != nil {    // clears the physical dir (unregistered case)
+		return err
+	}
+	_ = git.WorktreePrune(o.repoPath)
+	return nil
+}
+
 // countStaleTombstones returns how many tombstone files at the central
 // index path have an `exited_at` older than `cutoff`. retention <= 0
 // disables GC and returns 0. Walks via session.ListAll which already
@@ -368,7 +441,7 @@ func planClean(worktrees []worktreeInfo, interactive bool) []cleanAction {
 	return actions
 }
 
-func emitPlan(tw *tap.Writer, actions []cleanAction, abandonedCount int, tombstoneCount int, chatStaleCount int, dryRun bool) {
+func emitPlan(tw *tap.Writer, actions []cleanAction, abandonedCount int, tombstoneCount int, chatStaleCount int, orphanBuildCount int, dryRun bool) {
 	reason := "dry-run"
 	for _, a := range actions {
 		switch a.action {
@@ -448,9 +521,25 @@ func emitPlan(tw *tap.Writer, actions []cleanAction, abandonedCount int, tombsto
 			}
 		}
 	}
+	if orphanBuildCount > 0 {
+		msg := fmt.Sprintf("prune %d orphaned build worktree(s)", orphanBuildCount)
+		if dryRun {
+			if tw != nil {
+				tw.Skip(msg, reason)
+			} else {
+				log.Info("would " + msg)
+			}
+		} else {
+			if tw != nil {
+				tw.Skip(msg, "pending confirmation")
+			} else {
+				log.Info("will " + msg)
+			}
+		}
+	}
 }
 
-func confirmClean(removeCount, abandonedCount, tombstoneCount, chatStaleCount int) (bool, error) {
+func confirmClean(removeCount, abandonedCount, tombstoneCount, chatStaleCount, orphanBuildCount int) (bool, error) {
 	parts := []string{}
 	if removeCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d worktree(s)", removeCount))
@@ -464,6 +553,9 @@ func confirmClean(removeCount, abandonedCount, tombstoneCount, chatStaleCount in
 	if chatStaleCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d stale chat message(s)", chatStaleCount))
 	}
+	if orphanBuildCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d orphaned build worktree(s)", orphanBuildCount))
+	}
 	prompt := fmt.Sprintf("Remove %s?", strings.Join(parts, " and "))
 	var confirmed bool
 	err := huh.NewConfirm().
@@ -476,7 +568,7 @@ func confirmClean(removeCount, abandonedCount, tombstoneCount, chatStaleCount in
 	return confirmed, nil
 }
 
-func executeClean(tw *tap.Writer, actions []cleanAction, abandoned []session.State, retention time.Duration, interactive bool) {
+func executeClean(tw *tap.Writer, actions []cleanAction, abandoned []session.State, orphans []orphanBuildWorktree, retention time.Duration, interactive bool) {
 	for _, a := range actions {
 		switch a.action {
 		case "remove":
@@ -536,6 +628,30 @@ func executeClean(tw *tap.Writer, actions []cleanAction, abandoned []session.Sta
 		}
 	}
 
+	if len(orphans) > 0 {
+		pruned := 0
+		for _, o := range orphans {
+			if err := removeOrphanBuildWorktree(o); err != nil {
+				if tw != nil {
+					tw.NotOk("prune orphaned build worktree "+o.name, map[string]string{
+						"error": err.Error(),
+					})
+				} else {
+					log.Error("failed to prune orphaned build worktree", "name", o.name, "error", err)
+				}
+				continue
+			}
+			pruned++
+		}
+		if pruned > 0 {
+			if tw != nil {
+				tw.Ok(fmt.Sprintf("pruned %d orphaned build worktree(s)", pruned))
+			} else {
+				log.Info("pruned orphaned build worktrees", "count", pruned)
+			}
+		}
+	}
+
 	if retention > 0 {
 		gcCount, err := session.GCTombstones(retention)
 		if err != nil {
@@ -580,8 +696,10 @@ func Run(startDir string, interactive bool, dryRun bool, yes bool, format string
 	retention := resolveTombstoneRetention(startDir)
 	tombstoneCount := countStaleTombstones(retention)
 	chatStaleCount := chat.CountStaleMessages(retention)
+	orphans := findOrphanBuildWorktrees(startDir)
+	orphanCount := len(orphans)
 
-	if len(worktrees) == 0 && abandonedCount == 0 && tombstoneCount == 0 && chatStaleCount == 0 {
+	if len(worktrees) == 0 && abandonedCount == 0 && tombstoneCount == 0 && chatStaleCount == 0 && orphanCount == 0 {
 		if tw != nil {
 			tw.Skip("clean", "no worktrees found")
 			tw.Plan()
@@ -602,8 +720,8 @@ func Run(startDir string, interactive bool, dryRun bool, yes bool, format string
 	}
 
 	// Nothing actionable — just report skips and return.
-	if removeCount == 0 && abandonedCount == 0 && tombstoneCount == 0 && chatStaleCount == 0 {
-		emitPlan(tw, actions, abandonedCount, tombstoneCount, chatStaleCount, dryRun)
+	if removeCount == 0 && abandonedCount == 0 && tombstoneCount == 0 && chatStaleCount == 0 && orphanCount == 0 {
+		emitPlan(tw, actions, abandonedCount, tombstoneCount, chatStaleCount, orphanCount, dryRun)
 		if tw != nil {
 			tw.Plan()
 		}
@@ -611,7 +729,7 @@ func Run(startDir string, interactive bool, dryRun bool, yes bool, format string
 	}
 
 	// Show what will happen.
-	emitPlan(tw, actions, abandonedCount, tombstoneCount, chatStaleCount, dryRun)
+	emitPlan(tw, actions, abandonedCount, tombstoneCount, chatStaleCount, orphanCount, dryRun)
 
 	if dryRun {
 		if tw != nil {
@@ -622,7 +740,7 @@ func Run(startDir string, interactive bool, dryRun bool, yes bool, format string
 
 	// Confirm unless --yes.
 	if !yes {
-		confirmed, err := confirmClean(removeCount, abandonedCount, tombstoneCount, chatStaleCount)
+		confirmed, err := confirmClean(removeCount, abandonedCount, tombstoneCount, chatStaleCount, orphanCount)
 		if err != nil {
 			return err
 		}
@@ -637,7 +755,7 @@ func Run(startDir string, interactive bool, dryRun bool, yes bool, format string
 		}
 	}
 
-	executeClean(tw, actions, abandonedSessions, retention, interactive)
+	executeClean(tw, actions, abandonedSessions, orphans, retention, interactive)
 
 	if tw != nil {
 		tw.Plan()
