@@ -296,8 +296,14 @@ func TestRecordImplicitAndCheckImplicitRoundTrip(t *testing.T) {
 	if ok2 {
 		t.Error("second CheckImplicit expected to fail, got ok=true")
 	}
-	if output2 == "" {
-		t.Error("second CheckImplicit expected non-empty TAP output")
+	if !strings.Contains(output2, "not ok 1 - pre-merge skill attestation missing") {
+		t.Errorf("second CheckImplicit output missing structured TAP failure: %s", output2)
+	}
+	if !strings.Contains(output2, "required_tool: nothing-but-the-truth") {
+		t.Errorf("second CheckImplicit output missing required_tool: %s", output2)
+	}
+	if !strings.Contains(output2, "eng:code-reviewer") {
+		t.Errorf("second CheckImplicit output missing required skill name: %s", output2)
 	}
 }
 
@@ -332,8 +338,17 @@ func TestCheckImplicitFailsWhenNoAttestation(t *testing.T) {
 	if ok {
 		t.Errorf("expected gate to fail, got ok=true")
 	}
-	if output == "" {
-		t.Error("expected non-empty TAP output")
+	if !strings.Contains(output, "not ok 1 - pre-merge skill attestation missing") {
+		t.Errorf("output missing structured TAP failure: %s", output)
+	}
+	if !strings.Contains(output, "required_tool: nothing-but-the-truth") {
+		t.Errorf("output missing required_tool: %s", output)
+	}
+	if !strings.Contains(output, "eng:code-reviewer") {
+		t.Errorf("output missing required skill name: %s", output)
+	}
+	if !strings.Contains(output, `rationale: "Required."`) {
+		t.Errorf("output missing rationale quoting: %s", output)
 	}
 }
 
