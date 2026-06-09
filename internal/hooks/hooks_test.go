@@ -1288,7 +1288,9 @@ func TestSessionEndRemovesImplicit(t *testing.T) {
 
 func TestSessionEndNoopWhenNoState(t *testing.T) {
 	// SessionEnd for a session_id that never materialized must not error.
-	repo := initImplicitTestRepo(t)
+	// runSessionEnd needs only a non-empty cwd; RemoveImplicit tolerates a
+	// missing state file, so a plain temp dir (no git repo) suffices.
+	repo := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	endInput, _ := json.Marshal(map[string]any{
 		"hook_event_name": "SessionEnd", "session_id": "never-existed", "cwd": repo, "reason": "other",
