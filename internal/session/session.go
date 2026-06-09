@@ -408,6 +408,38 @@ func SweepDeadImplicit(checkout string) error {
 	return nil
 }
 
+// FindImplicitAtCwd returns the live implicit session State for a main checkout
+// at cwd plus its randID (the per-session suffix of its state-<randID>.json
+// file), or (nil, "", nil) if there is no live implicit session there. It globs
+// <cwd>/.spinclass/state-*.json and returns the first whose recorded PID is
+// alive (concurrent agents in the same checkout each have their own file; any
+// live one identifies "an implicit session is active here"). The randID is
+// needed by callers that must address the exact state file (e.g. consuming a
+// single-use attestation). Dead-PID files are ignored (swept on next
+// SessionStart). Returns an error only on a glob failure.
+func FindImplicitAtCwd(cwd string) (*State, string, error) {
+	pattern := filepath.Join(cwd, ".spinclass", "state-*.json")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, "", err
+	}
+	for _, m := range matches {
+		data, rerr := os.ReadFile(m)
+		if rerr != nil {
+			continue
+		}
+		var s State
+		if json.Unmarshal(data, &s) != nil {
+			continue
+		}
+		if s.Kind == KindImplicit && s.PID != 0 && IsAlive(s.PID) {
+			randID := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(m), "state-"), ".json")
+			return &s, randID, nil
+		}
+	}
+	return nil, "", nil
+}
+
 // Tombstone marks the session as cleanly closed: reads the live state,
 // atomically replaces the central index symlink with a regular file
 // containing the same JSON (the tombstone), and removes the worktree-local

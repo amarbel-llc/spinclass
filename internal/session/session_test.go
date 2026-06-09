@@ -166,6 +166,64 @@ func TestSweepDeadImplicit(t *testing.T) {
 	}
 }
 
+func TestFindImplicitAtCwd(t *testing.T) {
+	checkout := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	// No .spinclass dir at all: (nil, "", nil).
+	if got, gotRand, err := FindImplicitAtCwd(checkout); err != nil || got != nil || gotRand != "" {
+		t.Fatalf("empty checkout: got (%v, %q, %v), want (nil, \"\", nil)", got, gotRand, err)
+	}
+
+	// A live implicit session is found; SessionKey and randID match.
+	rand := "abc12345"
+	live := State{
+		Kind:         KindImplicit,
+		PID:          os.Getpid(),
+		SessionState: StateActive,
+		RepoPath:     checkout,
+		WorktreePath: checkout,
+		Branch:       "master",
+		SessionKey:   "myrepo/master-" + rand,
+		StartedAt:    time.Now(),
+	}
+	if err := WriteImplicit(live, rand); err != nil {
+		t.Fatal(err)
+	}
+	got, gotRand, err := FindImplicitAtCwd(checkout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("expected to find the live implicit session, got nil")
+	}
+	if got.SessionKey != live.SessionKey {
+		t.Errorf("SessionKey = %q, want %q", got.SessionKey, live.SessionKey)
+	}
+	if gotRand != rand {
+		t.Errorf("randID = %q, want %q", gotRand, rand)
+	}
+
+	// A dir holding only a dead-PID implicit file returns (nil, "", nil).
+	deadCheckout := t.TempDir()
+	dead := State{
+		Kind:         KindImplicit,
+		PID:          2147483646, // huge unused PID
+		SessionState: StateActive,
+		RepoPath:     deadCheckout,
+		WorktreePath: deadCheckout,
+		Branch:       "master",
+		SessionKey:   "myrepo/master-dead",
+		StartedAt:    time.Now(),
+	}
+	if err := WriteImplicit(dead, "dead5678"); err != nil {
+		t.Fatal(err)
+	}
+	if got, gotRand, err := FindImplicitAtCwd(deadCheckout); err != nil || got != nil || gotRand != "" {
+		t.Fatalf("dead-only checkout: got (%v, %q, %v), want (nil, \"\", nil)", got, gotRand, err)
+	}
+}
+
 func TestStateKindRoundTrips(t *testing.T) {
 	s := State{Kind: KindImplicit, WorktreePath: "/x", Branch: "master"}
 	data, err := json.Marshal(s)
