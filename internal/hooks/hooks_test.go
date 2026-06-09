@@ -1193,11 +1193,22 @@ func gitRun(t *testing.T, dir string, args ...string) {
 }
 
 // initImplicitTestRepo creates a git repo on the "master" branch in a fresh
-// temp dir (a deliberate main checkout, NOT a linked worktree). The single
-// default branch keeps git.DefaultBranch unambiguous (master, not main).
+// temp dir (a deliberate main checkout, NOT a linked worktree). The returned
+// path is symlink-resolved (filepath.EvalSymlinks) so it matches what
+// gitToplevel returns from `git rev-parse --show-toplevel` (git canonicalizes
+// the path). Without this, runSessionStart's Gate 2 — which compares the hook's
+// cwd against gitToplevel(cwd) — bails on platforms where t.TempDir() sits under
+// a symlink: macOS /var/folders/... is a symlink to /private/var/..., so the raw
+// temp path != the resolved toplevel. Inside a spinclass session TMPDIR points at
+// the worktree-local .tmp/ (no symlink) and the two already agree; resolving here
+// makes the test pass in both environments. EvalSymlinks is a no-op when there is
+// no symlink to resolve.
 func initImplicitTestRepo(t *testing.T) string {
 	t.Helper()
-	repo := t.TempDir()
+	repo, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	gitRun(t, repo, "init")
 	gitRun(t, repo, "config", "user.email", "test@example.com")
 	gitRun(t, repo, "config", "user.name", "Test User")
@@ -1215,7 +1226,11 @@ func initImplicitTestRepo(t *testing.T) string {
 func initImplicitTestWorktree(t *testing.T) string {
 	t.Helper()
 	repo := initImplicitTestRepo(t)
-	wt := filepath.Join(t.TempDir(), "wt")
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt := filepath.Join(base, "wt")
 	gitRun(t, repo, "worktree", "add", "-b", "feature", wt)
 	return wt
 }
