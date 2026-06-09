@@ -679,6 +679,153 @@ func TestResolvedShortCircuitsNoOpMerge(t *testing.T) {
 	}
 }
 
+// TestMergeImplicitRunsHookThenPushesNoRebase verifies the implicit-session
+// merge path: the work is already on the default branch (a main checkout, not
+// a feature worktree), so MergeImplicit runs the pre-merge hook against HEAD
+// and pushes the default branch — with no rebase and no ff-merge. The hook is
+// proven to run via a marker file it touches; the push is proven by the bare
+// upstream's master advancing to the checkout's HEAD.
+func TestMergeImplicitRunsHookThenPushesNoRebase(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", root)
+
+	gitConfigDir := filepath.Join(root, "gitconfig")
+	if err := os.MkdirAll(gitConfigDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(gitConfigDir, "config"))
+	t.Setenv("HOME", root)
+
+	// Bare upstream (push target).
+	bare := filepath.Join(root, "upstream.git")
+	runGit(t, root, "init", "--bare", "-b", "master", bare)
+
+	// Clone into the "main checkout" on master, with origin tracking the bare.
+	checkout := filepath.Join(root, "checkout")
+	runGit(t, root, "clone", bare, checkout)
+	runGit(t, checkout, "config", "user.email", "test@test.com")
+	runGit(t, checkout, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(checkout, "file.txt"), []byte("initial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, checkout, "add", "file.txt")
+	runGit(t, checkout, "commit", "-m", "initial")
+	runGit(t, checkout, "push", "-u", "origin", "master")
+
+	// Sweatfile with a pre-merge hook that touches a marker — proves it ran.
+	marker := filepath.Join(root, "hook-ran.marker")
+	sweatfileBody := "[hooks]\npre-merge = \"touch " + marker + "\"\n"
+	if err := os.WriteFile(filepath.Join(checkout, "sweatfile"), []byte(sweatfileBody), 0o644); err != nil {
+		t.Fatalf("write sweatfile: %v", err)
+	}
+
+	// The "work already on the default branch": a new commit on master.
+	if err := os.WriteFile(filepath.Join(checkout, "work.txt"), []byte("work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, checkout, "add", "work.txt")
+	runGit(t, checkout, "commit", "-m", "work on master")
+
+	var buf bytes.Buffer
+	tw := NewMergeWriter(&buf)
+	links, err := MergeImplicit(context.Background(), tw, &buf, checkout, checkout, "master", true, nil)
+	tw.Plan()
+	if err != nil {
+		t.Fatalf("MergeImplicit: %v\nTAP:\n%s", err, buf.String())
+	}
+	_ = links
+
+	// Hook ran: marker exists.
+	if _, statErr := os.Stat(marker); statErr != nil {
+		t.Errorf("expected pre-merge hook marker %s to exist, stat err: %v\nTAP:\n%s", marker, statErr, buf.String())
+	}
+
+	// Push landed: bare upstream's master == checkout HEAD.
+	bareMaster := runGit(t, bare, "rev-parse", "master")
+	checkoutHead := runGit(t, checkout, "rev-parse", "HEAD")
+	if bareMaster != checkoutHead {
+		t.Errorf("push did not land: bare master = %s, checkout HEAD = %s", bareMaster, checkoutHead)
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "push master") {
+		t.Errorf("expected 'push master' TAP step, got:\n%s", got)
+	}
+	if strings.Contains(got, "rebase") {
+		t.Errorf("did not expect any rebase in implicit merge, got:\n%s", got)
+	}
+}
+
+// TestMergeImplicitDisabledByMergeFlag verifies the disable-merge gate short-
+// circuits MergeImplicit before any push: an error mentioning disable-merge,
+// and the bare upstream's master left untouched.
+func TestMergeImplicitDisabledByMergeFlag(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", root)
+
+	gitConfigDir := filepath.Join(root, "gitconfig")
+	if err := os.MkdirAll(gitConfigDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(gitConfigDir, "config"))
+	t.Setenv("HOME", root)
+
+	bare := filepath.Join(root, "upstream.git")
+	runGit(t, root, "init", "--bare", "-b", "master", bare)
+
+	checkout := filepath.Join(root, "checkout")
+	runGit(t, root, "clone", bare, checkout)
+	runGit(t, checkout, "config", "user.email", "test@test.com")
+	runGit(t, checkout, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(checkout, "file.txt"), []byte("initial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, checkout, "add", "file.txt")
+	runGit(t, checkout, "commit", "-m", "initial")
+	runGit(t, checkout, "push", "-u", "origin", "master")
+
+	// Sweatfile disabling merge.
+	if err := os.WriteFile(filepath.Join(checkout, "sweatfile"), []byte("[hooks]\ndisable-merge = true\n"), 0o644); err != nil {
+		t.Fatalf("write sweatfile: %v", err)
+	}
+
+	// A new commit that is NOT yet on the upstream.
+	if err := os.WriteFile(filepath.Join(checkout, "work.txt"), []byte("work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, checkout, "add", "work.txt")
+	runGit(t, checkout, "commit", "-m", "work on master")
+
+	bareMasterBefore := runGit(t, bare, "rev-parse", "master")
+
+	var buf bytes.Buffer
+	tw := NewMergeWriter(&buf)
+	_, err := MergeImplicit(context.Background(), tw, &buf, checkout, checkout, "master", false, nil)
+	tw.Plan()
+	if err == nil {
+		t.Fatalf("expected error when disable-merge is set, got nil\nTAP:\n%s", buf.String())
+	}
+	if !strings.Contains(err.Error(), "merge disabled") {
+		t.Errorf("expected 'merge disabled' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "disable-merge") {
+		t.Errorf("expected 'disable-merge' in error, got: %v", err)
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "disable-merge") {
+		t.Errorf("expected TAP output to mention 'disable-merge', got:\n%s", got)
+	}
+	if strings.Contains(got, "push") {
+		t.Errorf("did not expect any push step when merge is disabled, got:\n%s", got)
+	}
+
+	// No push happened: upstream master unchanged.
+	if bareMasterAfter := runGit(t, bare, "rev-parse", "master"); bareMasterAfter != bareMasterBefore {
+		t.Errorf("upstream master advanced despite disable-merge: before %s, after %s", bareMasterBefore, bareMasterAfter)
+	}
+}
+
 func TestIsInsideSession(t *testing.T) {
 	t.Run("no env var", func(t *testing.T) {
 		t.Setenv("SPINCLASS_SESSION_ID", "")

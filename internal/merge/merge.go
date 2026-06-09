@@ -347,6 +347,65 @@ func FinishMerge(ctx context.Context, execr executor.Executor, tw *tap.Writer, w
 	return blobLinks, nil
 }
 
+// MergeImplicit runs the merge path for a main-checkout (implicit) session:
+// the pre-merge hook against HEAD, then a push of the current (default) branch.
+// There is no rebase or ff-merge — the work is already on the default branch.
+// The push is surfaced as its own TAP step so it is never silent. Mirrors
+// FinishMerge's tw/failStep/verbose idioms; the caller owns the writer and
+// Plan(). hookSha pins the exact committed sha the hook verifies.
+//
+// For an implicit session repoPath == checkout == the main checkout (they are
+// the same dir): the hook runs with wtPath=checkout and the push is from
+// checkout. Both params are kept for clarity and signature symmetry with
+// FinishMerge even though they are equal.
+func MergeImplicit(ctx context.Context, tw *tap.Writer, w io.Writer, repoPath, checkout, branch string, verbose bool, activity io.Writer) (blobLinks []check.BlobLink, err error) {
+	if home, _ := os.UserHomeDir(); home != "" {
+		hierarchy, hErr := sweatfileio.LoadWorktreeHierarchy(home, repoPath, checkout)
+		if hErr == nil && hierarchy.Merged.DisableMergeEnabled() {
+			disableErr := fmt.Errorf(
+				"merge disabled by sweatfile (disable-merge=true at %s); use `sc check` to run the pre-merge hook without merging",
+				disableMergeSource(hierarchy),
+			)
+			return nil, failStep(tw, "merge "+branch, disableErr, "")
+		}
+	}
+
+	// Pin HEAD; the hook verifies exactly this committed sha.
+	pinnedSha, shaErr := git.RevParse(checkout, "HEAD")
+	if shaErr != nil {
+		return nil, failStep(tw, "merge "+branch, fmt.Errorf("could not resolve HEAD: %w", shaErr), "")
+	}
+
+	// Pre-merge hook (isolated build worktree pinned to pinnedSha).
+	hookLinks, hookErr := runPreMergeHookContext(ctx, tw, w, repoPath, checkout, branch, pinnedSha, activity)
+	blobLinks = append(blobLinks, hookLinks...)
+	if hookErr != nil {
+		return blobLinks, hookErr
+	}
+
+	// Push the default branch — outward-facing, so it's a distinct TAP step.
+	if tw == nil {
+		log.Info("pushing", "branch", branch)
+	}
+
+	if tw != nil {
+		out, pushErr := git.Push(checkout)
+		if pushErr != nil {
+			return blobLinks, failStep(tw, "push "+branch, pushErr, out)
+		}
+		if verbose && out != "" {
+			tw.OkDiag("push "+branch, &yaml_diagnostic.YAMLDiagnostic{Extras: map[string]any{"output": out}})
+		} else {
+			tw.Ok("push " + branch)
+		}
+	} else {
+		if pushErr := git.RunPassthrough(checkout, "push"); pushErr != nil {
+			return blobLinks, pushErr
+		}
+	}
+	return blobLinks, nil
+}
+
 // isInsideSession returns true when both SPINCLASS_SESSION_ID is set and cwd is
 // within the worktree directory. Both checks are required to avoid false
 // positives from stale env vars or running merge from a different location.
