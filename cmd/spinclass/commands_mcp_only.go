@@ -377,10 +377,16 @@ func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prom
 				return command.TextErrorResult(msg), nil
 			}
 		}
-	} else if implicit, _, ferr := session.FindImplicitAtCwd(cwd); ferr == nil && implicit != nil {
+	} else {
 		// Implicit (main-checkout) session: enforce the implicit attestation
-		// gate, mirroring merge-this-session. A non-implicit non-worktree cwd
-		// falls through to check.Run with no attestation (sc check-like).
+		// gate, mirroring merge-this-session. A cwd that is neither a worktree
+		// nor a live implicit session is rejected, matching
+		// handleCheckThisSessionAsync. (sc check, the CLI, remains the
+		// gate-free human escape hatch for an arbitrary dir.)
+		implicit, _, ferr := session.FindImplicitAtCwd(cwd)
+		if ferr != nil || implicit == nil {
+			return command.TextErrorResult("not inside a worktree session"), nil
+		}
 		if msg, ok := enforceAttestationImplicit(cwd); !ok {
 			return command.TextErrorResult(msg), nil
 		}
