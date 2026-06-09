@@ -918,6 +918,16 @@ func currentSessionKey() (string, error) {
 		return "", fmt.Errorf("could not get working directory: %w", err)
 	}
 	if !worktree.IsWorktree(cwd) {
+		// Implicit (main-checkout) session: resolve the key from the live
+		// per-session state file. Note: when multiple agents share one main
+		// checkout, this returns the first live implicit session's key — the
+		// serve process can't know its own Claude session_id, so it can't
+		// disambiguate further. Chat broadcasts still reach every session
+		// regardless; directed sends from such a shared checkout may resolve
+		// to a sibling's key. (See #118 — acceptable for v1.)
+		if st, _, ferr := session.FindImplicitAtCwd(cwd); ferr == nil && st != nil {
+			return st.SessionKey, nil
+		}
 		return "", errors.New("not inside a worktree session (and $SPINCLASS_SESSION_ID is unset)")
 	}
 	repoPath, err := git.CommonDir(cwd)

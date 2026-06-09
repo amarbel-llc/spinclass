@@ -1,12 +1,63 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/amarbel-llc/spinclass/internal/attestation"
+	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 )
+
+// TestCurrentSessionKeyImplicitFallback verifies that when not inside a
+// worktree and $SPINCLASS_SESSION_ID is unset, currentSessionKey resolves the
+// key from a live implicit (main-checkout) session's state file rather than
+// erroring — the path chat-send/chat-read need from a main checkout (#118).
+func TestCurrentSessionKeyImplicitFallback(t *testing.T) {
+	t.Setenv("SPINCLASS_SESSION_ID", "") // force the fallback path
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	// A bare tempdir has no .git file, so worktree.IsWorktree is false and the
+	// implicit fallback fires before any git call.
+	repo := t.TempDir()
+	st := session.State{
+		Kind:         session.KindImplicit,
+		PID:          os.Getpid(),
+		SessionState: session.StateActive,
+		RepoPath:     repo,
+		WorktreePath: repo,
+		Branch:       "master",
+		SessionKey:   "myrepo/master-cafe1234",
+	}
+	if err := session.WriteImplicit(st, "cafe1234"); err != nil {
+		t.Fatalf("WriteImplicit: %v", err)
+	}
+	t.Chdir(repo)
+
+	key, err := currentSessionKey()
+	if err != nil {
+		t.Fatalf("expected implicit fallback to resolve, got error: %v", err)
+	}
+	if key != "myrepo/master-cafe1234" {
+		t.Fatalf("key = %q, want myrepo/master-cafe1234", key)
+	}
+}
+
+// TestCurrentSessionKeyNoSessionStillErrors verifies the fallback does not mask
+// the genuine "not a session" case: outside a worktree, env unset, and no live
+// implicit session, currentSessionKey still errors.
+func TestCurrentSessionKeyNoSessionStillErrors(t *testing.T) {
+	t.Setenv("SPINCLASS_SESSION_ID", "")
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	repo := t.TempDir() // no implicit session written
+	t.Chdir(repo)
+
+	if _, err := currentSessionKey(); err == nil {
+		t.Fatal("expected error when no implicit session and not a worktree")
+	}
+}
 
 func TestSummarizeHookCommand_SingleLine(t *testing.T) {
 	got := summarizeHookCommand("just test")
