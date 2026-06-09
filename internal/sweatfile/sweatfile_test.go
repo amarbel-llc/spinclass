@@ -1706,6 +1706,58 @@ func TestMergeDisableNixGCOverride(t *testing.T) {
 	}
 }
 
+func TestParseHooksDisableImplicitSessions(t *testing.T) {
+	input := `
+[hooks]
+disable-implicit-sessions = true
+`
+	doc, err := sweatfileio.Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sf := doc.Data()
+	if !sf.DisableImplicitSessionsEnabled() {
+		t.Error("expected disable-implicit-sessions to be enabled")
+	}
+	// The regenerated decoder must CONSUME the key (no undecoded leftovers),
+	// else `sc validate` would flag it as unknown.
+	if u := doc.Undecoded(); len(u) != 0 {
+		t.Errorf("expected no undecoded keys, got %v", u)
+	}
+}
+
+func TestParseHooksDisableImplicitSessionsAbsent(t *testing.T) {
+	doc, err := sweatfileio.Parse([]byte("[git]\nexcludes = [\".claude/\"]"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sf := doc.Data()
+	if sf.DisableImplicitSessionsEnabled() {
+		t.Error("expected disable-implicit-sessions to be disabled when absent")
+	}
+}
+
+func TestMergeDisableImplicitSessionsInherit(t *testing.T) {
+	enabled := true
+	base := Sweatfile{Hooks: &Hooks{DisableImplicitSessions: &enabled}}
+	repo := Sweatfile{}
+	merged := base.MergeWith(repo)
+	if !merged.DisableImplicitSessionsEnabled() {
+		t.Error("expected inherited disable-implicit-sessions")
+	}
+}
+
+func TestMergeDisableImplicitSessionsOverride(t *testing.T) {
+	enabled := true
+	disabled := false
+	base := Sweatfile{Hooks: &Hooks{DisableImplicitSessions: &enabled}}
+	repo := Sweatfile{Hooks: &Hooks{DisableImplicitSessions: &disabled}}
+	merged := base.MergeWith(repo)
+	if merged.DisableImplicitSessionsEnabled() {
+		t.Error("expected overridden disable-implicit-sessions to be disabled")
+	}
+}
+
 func TestParseHooksDisableMergeBuildWorktree(t *testing.T) {
 	input := `
 [hooks]

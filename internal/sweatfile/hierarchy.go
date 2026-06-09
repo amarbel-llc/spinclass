@@ -104,6 +104,9 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if other.Hooks.DisableNixGC != nil {
 			merged.Hooks.DisableNixGC = other.Hooks.DisableNixGC
 		}
+		if other.Hooks.DisableImplicitSessions != nil {
+			merged.Hooks.DisableImplicitSessions = other.Hooks.DisableImplicitSessions
+		}
 		if other.Hooks.DisableMergeBuildWorktree != nil {
 			merged.Hooks.DisableMergeBuildWorktree = other.Hooks.DisableMergeBuildWorktree
 		}

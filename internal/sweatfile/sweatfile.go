@@ -38,6 +38,7 @@ type Hooks struct {
 	ToolUseLog                *bool   `toml:"tool-use-log"`
 	DisableMerge              *bool   `toml:"disable-merge"`
 	DisableNixGC              *bool   `toml:"disable-nix-gc"`
+	DisableImplicitSessions   *bool   `toml:"disable-implicit-sessions"`
 	DisableMergeBuildWorktree *bool   `toml:"disable-merge-build-worktree"`
 	PreMergeOutputFormat      *string `toml:"pre-merge-output-format"`
 	InactivityTimeout         *string `toml:"inactivity-timeout"`
@@ -268,6 +269,12 @@ func (sf Sweatfile) DisableNixGCEnabled() bool {
 	return sf.Hooks != nil &&
 		sf.Hooks.DisableNixGC != nil &&
 		*sf.Hooks.DisableNixGC
+}
+
+func (sf Sweatfile) DisableImplicitSessionsEnabled() bool {
+	return sf.Hooks != nil &&
+		sf.Hooks.DisableImplicitSessions != nil &&
+		*sf.Hooks.DisableImplicitSessions
 }
 
 // MergeBuildWorktreeDisabled reports whether [hooks].disable-merge-build-worktree

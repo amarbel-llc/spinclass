@@ -213,6 +213,12 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				_vHooksDisableNixGc.MarkConsumed()
 			}
 		}
+		if _vHooksDisableImplicitSessions, _ok := _vHooks.Get("disable-implicit-sessions"); _ok && _vHooksDisableImplicitSessions.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksDisableImplicitSessions.Leaf); _xok {
+				hooksVal3.DisableImplicitSessions = &_x
+				_vHooksDisableImplicitSessions.MarkConsumed()
+			}
+		}
 		if _vHooksDisableMergeBuildWorktree, _ok := _vHooks.Get("disable-merge-build-worktree"); _ok && _vHooksDisableMergeBuildWorktree.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractBool(_vHooksDisableMergeBuildWorktree.Leaf); _xok {
 				hooksVal3.DisableMergeBuildWorktree = &_x
@@ -296,6 +302,13 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractBool(_vDisableNixGc.Leaf); _xok {
 				hooksVal3.DisableNixGC = &_x
 				_vDisableNixGc.MarkConsumed()
+			}
+		}
+		if _vDisableImplicitSessions, _ok := model.Get("disable-implicit-sessions"); _ok && _vDisableImplicitSessions.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vDisableImplicitSessions.Leaf); _xok {
+				hooksVal3.DisableImplicitSessions = &_x
+				_vDisableImplicitSessions.MarkConsumed()
 			}
 		}
 		if _vDisableMergeBuildWorktree, _ok := model.Get("disable-merge-build-worktree"); _ok && _vDisableMergeBuildWorktree.Kind == cst.VLeaf {
@@ -697,6 +710,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
+		if d.data.Hooks.DisableImplicitSessions != nil {
+			if err := cst.SetAny(tableNode, "disable-implicit-sessions", *d.data.Hooks.DisableImplicitSessions); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
 		if d.data.Hooks.DisableMergeBuildWorktree != nil {
 			if err := cst.SetAny(tableNode, "disable-merge-build-worktree", *d.data.Hooks.DisableMergeBuildWorktree); err != nil {
 				return nil, fmt.Errorf("%w", err)
@@ -1082,6 +1100,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vHooksDisableNixGc.MarkConsumed()
 			}
 		}
+		if _vHooksDisableImplicitSessions, _ok := _vHooks.Get("disable-implicit-sessions"); _ok && _vHooksDisableImplicitSessions.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksDisableImplicitSessions.Leaf); _xok {
+				hooksVal3.DisableImplicitSessions = &_x
+				_vHooksDisableImplicitSessions.MarkConsumed()
+			}
+		}
 		if _vHooksDisableMergeBuildWorktree, _ok := _vHooks.Get("disable-merge-build-worktree"); _ok && _vHooksDisableMergeBuildWorktree.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractBool(_vHooksDisableMergeBuildWorktree.Leaf); _xok {
 				hooksVal3.DisableMergeBuildWorktree = &_x
@@ -1165,6 +1189,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractBool(_vDisableNixGc.Leaf); _xok {
 				hooksVal3.DisableNixGC = &_x
 				_vDisableNixGc.MarkConsumed()
+			}
+		}
+		if _vDisableImplicitSessions, _ok := sub.Get("disable-implicit-sessions"); _ok && _vDisableImplicitSessions.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vDisableImplicitSessions.Leaf); _xok {
+				hooksVal3.DisableImplicitSessions = &_x
+				_vDisableImplicitSessions.MarkConsumed()
 			}
 		}
 		if _vDisableMergeBuildWorktree, _ok := sub.Get("disable-merge-build-worktree"); _ok && _vDisableMergeBuildWorktree.Kind == cst.VLeaf {
@@ -1551,6 +1582,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if data.Hooks.DisableNixGC != nil {
 			if err := cst.SetAny(tableNode, "disable-nix-gc", *data.Hooks.DisableNixGC); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.Hooks.DisableImplicitSessions != nil {
+			if err := cst.SetAny(tableNode, "disable-implicit-sessions", *data.Hooks.DisableImplicitSessions); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}
