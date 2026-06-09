@@ -372,7 +372,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, tw *tap.Writer, w
 // worktree is created as a sibling of the repo root, OUTSIDE the repo (e.g.
 // for a repo at ~/eng/repos/myrepo the build worktree lands at
 // ~/eng/repos/.merge-master-<sha>-<pid>). Known placement quirk, tracked as a
-// followup (see #NNN).
+// followup (see #130).
 func MergeImplicit(ctx context.Context, tw *tap.Writer, w io.Writer, repoPath, checkout, branch string, verbose bool, activity io.Writer) (blobLinks []check.BlobLink, err error) {
 	if home, _ := os.UserHomeDir(); home != "" {
 		hierarchy, hErr := sweatfileio.LoadWorktreeHierarchy(home, repoPath, checkout)
