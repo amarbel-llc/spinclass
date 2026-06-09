@@ -53,16 +53,23 @@ presence probe (FDR 0012), `[[remotes]]` (FDR 0011), and the clown emit.
 
 ```toml
 [xmpp]
-# Component connection to the tailnet XMPP server (recommended; see
-# "Identity model" for the multi-client alternative).
-component-jid    = "sessions.host.tailnet.ts.net"
-server           = "host.tailnet.ts.net:5347"   # MagicDNS name : component port
-secret-file      = "~/.config/spinclass/xmpp-secret"  # never committed
-muc              = "fleet@conference.host.tailnet.ts.net"  # the "main channel"
+# The bridge is an XEP-0114 *component* that attaches to a Prosody bound
+# on the tailnet (the Slidgnal-gateway pattern; see "Reference
+# topology"). The component link is localhost — Prosody fronts the
+# tailnet, the bridge does not.
+component-jid     = "sessions.circus.code.linenisgreat.com"
+server            = "127.0.0.1:5347"   # Prosody component port, localhost
+secret-file       = "~/.config/spinclass/xmpp-secret"  # never committed
+muc               = "fleet@conference.circus.code.linenisgreat.com"  # the "main channel"
 # Presence is derived from FDR-0012 session presence; this bounds how
 # often the bridge re-derives and re-pushes occupant presence.
 presence-interval = "10s"
 ```
+
+Where `circus.code.linenisgreat.com` is the XMPP **bind point** (the
+Prosody virtual host), `sessions.circus.code.linenisgreat.com` the
+component subdomain the bridge owns, and
+`conference.circus.code.linenisgreat.com` the MUC service.
 
 - **`secret-file`** holds the XEP-0114 component shared secret (or, in
   multi-client mode, a provisioning credential). It is read at startup,
@@ -91,15 +98,17 @@ On start it:
 
 ### Identity model — one occupant per session
 
-**Recommended: an XMPP component (XEP-0114).** The bridge connects once
-as a server component owning a subdomain (`sessions.<host>`), and
-puppeteers one virtual JID per session — `<branch>@sessions.<host>` —
-joining the MUC from each. A component is the canonical XMPP *gateway*
-shape (the same mechanism IRC/Slack transports use): one TCP
-connection, N independent occupants with independent presence, no
-per-session account provisioning. Cost: the XMPP server must be
-configured to trust the component (a `Component` block + shared secret
-in prosody/ejabberd).
+The bridge **is the gateway component** — it plays exactly the role
+Slidgnal plays in the Signal↔XMPP architecture (More Information): an
+XEP-0114 component that attaches to Prosody on `localhost:5347`, owns
+the `sessions.circus.code.linenisgreat.com` subdomain, and puppeteers
+one virtual JID per session — `<branch>@sessions.circus.code.linenisgreat.com`
+— joining the MUC from each. A component is the canonical XMPP *gateway*
+shape (the same mechanism Slidgnal, and IRC/Slack transports, use): one
+localhost TCP connection, N independent occupants with independent
+presence, no per-session account provisioning. Cost: Prosody must be
+configured to trust the component (a `Component` block + shared secret),
+which the reference deployment owns.
 
 - **Nick** = the session branch. On collision across repos the nick
   disambiguates to the full session key `<repo>/<branch>` (the same
@@ -107,16 +116,24 @@ in prosody/ejabberd).
 - A reserved occupant (`fleet-bridge`, the bridge's own JID) represents
   the bridge itself and is the author of system notices.
 
-**Alternative (zero server-config): multi-client puppets.** Where the
-XMPP server cannot host a component, the bridge instead opens one
-ordinary **client** connection per live session, each authenticating as
-a per-session account (in-band registration, XEP-0077, or a pool of
-pre-provisioned accounts) and joining the MUC with its own nick. Same
-external behavior, N connections instead of one, and it works against
-any stock XMPP server. The component vs multi-client choice is the
-**one server-coupling decision** an operator makes; the bridge supports
-both behind the same `[xmpp]` config (the presence of `component-jid`
-selects component mode). See Open Questions.
+**Component-role mapping** (against the reference Signal bridge):
+
+| Signal bridge | spinclass analog |
+|---|---|
+| signal-cli (primary device, the message backend) | the session fleet: `internal/chat` store + session index + `EmitWake` |
+| **Slidgnal** (XEP-0114 component gateway) | **`spinclass xmpp-bridge`** (the component) |
+| Prosody (binds tailnet, MUC, federation) | same — Prosody on the tailnet bind point |
+| Snikket (remote federated server / the human) | the human's XMPP client/account |
+| VPS nginx TCP-stream proxy (public S2S ingress) | optional S2S proxy for a *federated* human account |
+
+**Alternative (no Prosody component access): multi-client puppets.**
+Where the bridge cannot attach as a trusted component, it instead opens
+one ordinary **client** connection per live session (in-band
+registration / a pre-provisioned account pool), each joining the MUC
+with its own nick. Same external behavior, N connections instead of one,
+works against any stock XMPP server. Presence of `component-jid` in
+`[xmpp]` selects component mode; its absence selects multi-client. See
+Open Questions.
 
 ### Presence + status ← session state (FDR 0012)
 
@@ -166,23 +183,69 @@ Chatroom contents are **untrusted** (a compromised session can inject):
 the bridge relays bodies as plain text, never as XMPP markup/commands,
 mirroring FDR 0009's monitor trust note.
 
-### Transport — over tailscale
+### Transport — Prosody on the tailnet, bridge on localhost
 
-spinclass does **not** ship or operate the XMPP server; it binds to one
-the operator points it at (prosody recommended — lightweight, built-in
-`mod_muc` and component support). "Available over tailscale" means that
-server's listeners bind to the tailnet interface and are addressed by
-MagicDNS name; the human's client connects to `<host>.tailnet.ts.net`
-over tailscale, and tailnet ACLs gate who may reach the port. TLS uses a
-tailscale-issued cert (`tailscale cert <magicdns-name>`). A reference
-prosody + nix deployment is a follow-up, out of scope here. The Go XMPP
-client library is `mellium.im/xmpp` (idiomatic, maintained, component +
-c2s + MUC support).
+spinclass does **not** ship or operate the XMPP server; it attaches to a
+Prosody the operator runs (lightweight, built-in `mod_muc` and component
+support). The topology mirrors the reference Signal bridge, minus the
+Signal-egress half:
+
+- **Prosody** is the bind point `circus.code.linenisgreat.com`. It binds
+  its c2s (5222) and s2s (5269) listeners **exclusively to the tailnet
+  interface** and is addressed by tailnet/MagicDNS name; tailnet ACLs
+  gate who may reach those ports. TLS uses a tailscale-issued cert
+  (`tailscale cert circus.code.linenisgreat.com`). It enforces TLS +
+  SASL and (if federating) whitelists peer servers — the same posture as
+  the reference deployment's Prosody.
+- **The bridge** attaches as a component over **localhost:5347**, never
+  the tailnet. Like Slidgnal it never exposes a port itself; Prosody is
+  its only peer, and the chatroom store / clown wake is its only
+  backend. So the only externally reachable surface is Prosody's
+  tailnet-bound c2s/s2s.
+- **Human access — two shapes:**
+  1. **Tailnet-direct (default).** The human's XMPP client holds a c2s
+     account on `circus.code.linenisgreat.com` and connects to 5222 over
+     tailscale. Fully on-tailnet; no public layer, no federation.
+  2. **Federated (the reference topology in full).** The human keeps an
+     account on an existing server (e.g. Snikket) and reaches the MUC by
+     **S2S federation**. That is the only case needing public ingress: a
+     hardened TCP-stream proxy (nginx on a VPS) forwards inbound 5269
+     over a Tailscale/WireGuard tunnel to Prosody, whitelisting the one
+     federated peer — exactly the reference VPS layer. SRV records for
+     `circus.code.linenisgreat.com` point at it.
+
+The Go XMPP library is `mellium.im/xmpp` (idiomatic, maintained;
+component + c2s + MUC support).
+
+### Reference deployment topology (recommended, out of spinclass scope)
+
+Borrowed wholesale from the Signal-bridge document — the bridge inherits
+its operational hardening posture from being a component behind this
+Prosody, so it is recorded here as the recommended deployment rather
+than re-litigated:
+
+- **Network isolation.** Run Prosody + bridge in their own bridge
+  network; the only ingress is Prosody's tailnet-bound ports (and, in
+  the federated shape, the VPS S2S proxy over WireGuard).
+- **Egress filtering / least privilege.** Containers drop all
+  capabilities except `NET_BIND_SERVICE`, mount config read-only, and
+  use tmpfs for runtime dirs.
+- **Out-of-band monitoring.** A separate always-on device pings a
+  per-container healthcheck (~60s); independent email alerts cover
+  file-integrity / firewall events — so a dead bridge host is detected
+  by *missed* pings rather than by a host that can no longer send.
+- **Provisioning.** Terraform/cloud-init for the optional VPS proxy
+  (nginx + fail2ban + tailscale + ACME); the bridge itself is the
+  spinclass binary + the component secret in `secret-file`.
+
+A concrete prosody + nix + container manifest for this is a follow-up,
+out of scope for this FDR.
 
 ## Examples
 
 A human on their phone (Conversations, over tailscale) joins
-`fleet@conference.host.tailnet.ts.net` and sees the roster of occupants:
+`fleet@conference.circus.code.linenisgreat.com` and sees the roster of
+occupants:
 
 ```
 fleet  (3 occupants)
@@ -241,10 +304,11 @@ me → light-birch (private):  this one's blocked on you
   into the MUC under its nick; the bridge does not authenticate message
   *content*, only relays it. The human must treat in-room text as they
   would any chat.
-- **Server coupling.** Component mode requires editing the XMPP server
-  config (shared secret + component block); multi-client mode requires N
-  accounts. Either is a one-time operator step, but spinclass cannot
-  bootstrap it.
+- **Server coupling.** Component mode requires a `Component` block +
+  shared secret in Prosody; multi-client mode requires N accounts.
+  Either is a one-time operator step owned by the reference deployment,
+  but spinclass cannot bootstrap it. Federated human access additionally
+  needs the VPS S2S proxy + SRV records.
 - **Single host / single MUC (v1).** The bridge watches one host's
   session index and one room. Multi-host fleets (cf. FDR 0011 remotes)
   would run a bridge per host into a shared MUC — occupant nicks already
@@ -255,7 +319,8 @@ me → light-birch (private):  this one's blocked on you
 
 | Lever | Proposed | Rationale | Change signal |
 |---|---|---|---|
-| identity model | XEP-0114 component | one connection, native per-occupant presence, canonical gateway shape | server can't host a component → multi-client puppets |
+| identity model | XEP-0114 component on localhost:5347 (Slidgnal pattern) | one connection, native per-occupant presence, canonical gateway shape, no surface beyond Prosody | no component access → multi-client puppets |
+| human access | tailnet-direct c2s (default) | fully on-tailnet, no public layer | human's account lives on a federated server → S2S via VPS proxy |
 | presence interval | 10s | matches FDR 0012 render cadence; presence is low-churn | occupants lag real state, or stanza churn shows in the server |
 | nick | branch, `<repo>/<branch>` on collision | shortest stable handle a human reads | cross-repo collisions common enough to always qualify |
 | broadcast sender label | `xmpp/<muc-nick>` | distinguishes human-origin from peer-session messages; loop-break key | need richer human identity (map to roster JID) |
@@ -288,13 +353,22 @@ me → light-birch (private):  this one's blocked on you
   (In-Band Registration), XEP-0357 (Push) — the XMPP mechanisms;
   `mellium.im/xmpp` — the proposed Go library; prosody `mod_muc` /
   `Component` — the recommended reference server.
+- **Signal↔XMPP bridge architecture** (the reference doc) — the
+  topology this FDR adapts: Prosody bound to the tailnet, a **Slidgnal**
+  XEP-0114 component gateway on `localhost:5347`, optional hardened VPS
+  TCP-stream S2S proxy over WireGuard, and out-of-band
+  (Healthchecks + email) monitoring. spinclass's `xmpp-bridge` occupies
+  the Slidgnal slot; the Signal-egress half is not used. Bind point
+  here: `circus.code.linenisgreat.com`.
 
 ## Open Questions
 
-1. **Component vs multi-client as the shipped default.** Component is
-   the cleaner architecture but couples to server config; multi-client
-   works anywhere but is N connections + account provisioning. Ship
-   both behind `[xmpp]` (recommended) or pick one for v1?
+1. **Multi-client as a needed fallback at all?** The reference topology
+   settles the default — component on `localhost:5347` (the Slidgnal
+   slot). Since spinclass owns the reference deployment's Prosody, the
+   component is always available there; is the zero-config multi-client
+   path worth building for v1, or deferred until a "bring-your-own
+   Prosody we can't add a component to" case actually appears?
 2. **Account/secret provisioning.** Who creates the component secret or
    the per-session accounts, and where does the bridge read it — a
    single `secret-file`, or per-session credentials derived from the
