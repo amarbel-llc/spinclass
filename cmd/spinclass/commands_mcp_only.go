@@ -953,7 +953,14 @@ func currentSessionKey() (string, error) {
 		if st, _, ferr := session.FindImplicitAtCwd(cwd); ferr == nil && st != nil {
 			return st.SessionKey, nil
 		}
-		return "", errors.New("not inside a worktree session (and $SPINCLASS_SESSION_ID is unset)")
+		// cwd is a main checkout (or other non-worktree dir) with no live
+		// implicit session — distinct from "not in a worktree at all". The
+		// implicit session may never have materialized (the SessionStart hook
+		// didn't fire) or [hooks].disable-implicit-sessions is set.
+		return "", errors.New(
+			"no live implicit session at this checkout and $SPINCLASS_SESSION_ID is unset " +
+				"(a SessionStart hook materializes one; check [hooks].disable-implicit-sessions)",
+		)
 	}
 	repoPath, err := git.CommonDir(cwd)
 	if err != nil {
