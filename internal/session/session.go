@@ -51,6 +51,10 @@ const (
 	StateRunningDetached = "running-detached"
 )
 
+// KindImplicit marks a session materialized for a repo's main checkout (no
+// sc-created worktree). Absent Kind ⇒ a normal worktree session.
+const KindImplicit = "implicit"
+
 type State struct {
 	PID          int               `json:"pid"`
 	SessionState string            `json:"state"`
@@ -58,6 +62,7 @@ type State struct {
 	WorktreePath string            `json:"worktree_path"`
 	Branch       string            `json:"branch"`
 	SessionKey   string            `json:"session_key"`
+	Kind         string            `json:"kind,omitempty"`
 	Description  string            `json:"description,omitempty"`
 	Entrypoint   []string          `json:"entrypoint"`
 	Env          map[string]string `json:"env"`

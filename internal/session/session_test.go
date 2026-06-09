@@ -62,6 +62,33 @@ func TestSessionStateRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStateKindRoundTrips(t *testing.T) {
+	s := State{Kind: KindImplicit, WorktreePath: "/x", Branch: "master"}
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"kind":"implicit"`) {
+		t.Fatalf("kind not serialized: %s", data)
+	}
+	var got State
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Kind != KindImplicit {
+		t.Fatalf("kind = %q, want %q", got.Kind, KindImplicit)
+	}
+
+	// Absent kind ⇒ empty (worktree session, the existing default).
+	var wt State
+	if err := json.Unmarshal([]byte(`{"branch":"x"}`), &wt); err != nil {
+		t.Fatal(err)
+	}
+	if wt.Kind != "" {
+		t.Fatalf("absent kind should be empty, got %q", wt.Kind)
+	}
+}
+
 func TestWriteCreatesIndexSymlink(t *testing.T) {
 	s := setupTestSession(t, "feature-x")
 	if err := Write(s); err != nil {
