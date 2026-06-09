@@ -907,8 +907,10 @@ func handleChatListSessions(_ context.Context, args json.RawMessage, _ command.P
 // the current session. It prefers $SPINCLASS_SESSION_ID — which spinclass
 // exports into every session and which IS the session key — and falls back
 // to deriving it from the current worktree when the variable is unset (e.g.
-// the tool is exercised by hand outside a managed session). Returns an error
-// only when neither source resolves.
+// the tool is exercised by hand outside a managed session). When cwd is not a
+// worktree it falls back further to a live implicit (main-checkout) session's
+// state file (see the inline comment for the shared-checkout caveat). Returns
+// an error only when none of the three sources resolves.
 func currentSessionKey() (string, error) {
 	if v := os.Getenv("SPINCLASS_SESSION_ID"); v != "" {
 		return v, nil
