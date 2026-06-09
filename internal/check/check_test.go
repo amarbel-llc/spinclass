@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/amarbel-llc/spinclass/internal/embeds"
+	"github.com/amarbel-llc/spinclass/internal/git"
+	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 )
 
 func runGit(t *testing.T, dir string, args ...string) string {
@@ -60,6 +62,39 @@ func setupRepoWithWorktree(t *testing.T, branch string) (root, repoDir, wtPath s
 	runGit(t, repoDir, "worktree", "add", "-b", branch, wtPath)
 
 	return root, repoDir, wtPath
+}
+
+// setupRepo creates an isolated git repo (a plain main checkout, NO worktree)
+// under t.TempDir() and returns (root, repoDir). It mirrors the repo-init half
+// of setupRepoWithWorktree and is used to exercise the implicit (main-checkout)
+// session case where wtPath == repoDir.
+func setupRepo(t *testing.T) (root, repoDir string) {
+	t.Helper()
+	root = t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", root)
+
+	gitConfigDir := filepath.Join(root, "gitconfig")
+	if err := os.MkdirAll(gitConfigDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(gitConfigDir, "config"))
+	t.Setenv("HOME", root)
+
+	repoDir = filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	runGit(t, repoDir, "init", "-b", "main")
+	runGit(t, repoDir, "config", "user.email", "test@test.com")
+	runGit(t, repoDir, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("initial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", "file.txt")
+	runGit(t, repoDir, "commit", "-m", "initial")
+
+	return root, repoDir
 }
 
 func writeSweatfile(t *testing.T, wtPath, contents string) {
@@ -526,5 +561,90 @@ func TestRunNoHookConfigured(t *testing.T) {
 	}
 	if !strings.Contains(got, "1..") {
 		t.Errorf("expected TAP plan in output, got: %q", got)
+	}
+}
+
+// #129 regression: an interrupted prior merge can leave the physical build
+// worktree directory behind with no git admin entry. `git worktree prune`
+// (run by WorktreeAddDetached) is a no-op on such a dir, so the subsequent
+// `git worktree add` would fail "already exists" and wedge all future merges.
+// resolveHookDir must force-remove the exact buildPath before the add.
+//
+// Deterministic because buildPath embeds os.Getpid() (stable within the test
+// process) plus the known sha/branch — calling resolveHookDir twice with the
+// same args computes the same buildPath, so simulating the leftover dir at the
+// first call's hookDir reproduces the collision exactly.
+func TestResolveHookDirClearsStaleDir(t *testing.T) {
+	_, _, wtPath := setupRepoWithWorktree(t, "feature-stale")
+	hookSha := runGit(t, wtPath, "rev-parse", "HEAD")
+
+	// First call: create the build worktree, then clean it up.
+	buildPath, cleanup, err := resolveHookDir(sweatfile.Hierarchy{}, wtPath, "feature-stale", hookSha)
+	if err != nil {
+		t.Fatalf("first resolveHookDir: %v", err)
+	}
+	cleanup()
+
+	// Simulate an interrupted run: a leftover NON-EMPTY physical dir at the same
+	// path, with no git admin entry (cleanup already removed the registration).
+	// git refuses to `worktree add` into a non-empty dir, so the leftover wedges
+	// the add unless resolveHookDir force-removes it first. (An empty dir would
+	// not reproduce the bug — git tolerates adding into an empty target.)
+	if err := os.MkdirAll(buildPath, 0o755); err != nil {
+		t.Fatalf("simulate leftover dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(buildPath, "leftover.txt"), []byte("interrupted"), 0o644); err != nil {
+		t.Fatalf("simulate leftover file: %v", err)
+	}
+
+	// Second call with identical args computes the same buildPath. Without the
+	// os.RemoveAll fix this fails with "already exists".
+	buildPath2, cleanup2, err := resolveHookDir(sweatfile.Hierarchy{}, wtPath, "feature-stale", hookSha)
+	if err != nil {
+		t.Fatalf("second resolveHookDir must not be wedged by stale dir: %v", err)
+	}
+	defer cleanup2()
+
+	if buildPath2 != buildPath {
+		t.Fatalf("expected identical buildPath across calls, got %q then %q", buildPath, buildPath2)
+	}
+	// The returned dir must be a usable worktree (has a .git file).
+	if _, err := os.Stat(filepath.Join(buildPath2, ".git")); err != nil {
+		t.Errorf("expected usable build worktree at %q: %v", buildPath2, err)
+	}
+}
+
+// #130 regression: for an implicit (main-checkout) session wtPath is the repo
+// root, so the old filepath.Dir(wtPath) put the build worktree in the repo's
+// PARENT dir — outside the repo. resolveHookDir must derive the parent from the
+// repo root's .worktrees/ via git.CommonDir, so even a main checkout lands
+// under <repo>/.worktrees/.
+func TestResolveHookDirMainCheckoutPlacement(t *testing.T) {
+	_, repoDir := setupRepo(t)
+	hookSha := runGit(t, repoDir, "rev-parse", "HEAD")
+
+	// Implicit session: wtPath == repoDir.
+	buildPath, cleanup, err := resolveHookDir(sweatfile.Hierarchy{}, repoDir, "main", hookSha)
+	if err != nil {
+		t.Fatalf("resolveHookDir for main checkout: %v", err)
+	}
+	defer cleanup()
+
+	wantPrefix := filepath.Join(repoDir, ".worktrees") + string(filepath.Separator)
+	if !strings.HasPrefix(buildPath, wantPrefix) {
+		t.Errorf("expected build worktree under %q, got %q", wantPrefix, buildPath)
+	}
+	// And NOT a sibling of the repo (the old buggy location).
+	if filepath.Dir(buildPath) == filepath.Dir(repoDir) {
+		t.Errorf("build worktree landed in repo's parent dir (the #130 bug): %q", buildPath)
+	}
+
+	// Sanity: CommonDir on a main checkout returns the repo root.
+	root, err := git.CommonDir(repoDir)
+	if err != nil {
+		t.Fatalf("CommonDir(repoDir): %v", err)
+	}
+	if root != repoDir {
+		t.Errorf("CommonDir(main checkout) = %q, want repo root %q", root, repoDir)
 	}
 }

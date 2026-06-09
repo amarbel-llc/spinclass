@@ -238,11 +238,20 @@ func teeWriter(primary, activity io.Writer) io.Writer {
 // func the caller must defer.
 //
 // Default behavior: create a transient detached worktree pinned to hookSha as a
-// hidden sibling under .worktrees/ (filepath.Dir(wtPath)), so the hook verifies
-// the exact committed tree being merged while the session worktree stays free
-// for concurrent edits. The branch itself stays checked out in wtPath, so the
-// build worktree is detached-HEAD (a hook that reads the current branch name
-// sees "HEAD" — see spinclass-sweatfile(5)).
+// hidden sibling under the repo's .worktrees/ — derived from the repo root via
+// git.CommonDir(wtPath), so it is correct for BOTH worktree sessions
+// (wtPath = <repo>/.worktrees/<branch>) AND implicit main-checkout sessions
+// (wtPath = <repo>). The hook then verifies the exact committed tree being
+// merged while the session worktree stays free for concurrent edits. The branch
+// itself stays checked out in wtPath, so the build worktree is detached-HEAD (a
+// hook that reads the current branch name sees "HEAD" — see
+// spinclass-sweatfile(5)). The .worktrees/ parent is created if absent (a fresh
+// main checkout that never ran `sc start` has none).
+//
+// A stale physical dir from an interrupted prior run at the exact buildPath is
+// force-removed before the add: such a dir has no git admin entry, so
+// `git worktree prune` (run inside WorktreeAddDetached) cannot clear it and the
+// add would otherwise fail "already exists" and wedge all future merges.
 //
 // Legacy / opt-out: when [hooks].disable-merge-build-worktree is true, or hookSha
 // is empty (RevParse failed), the hook runs in place in wtPath and cleanup is a
@@ -254,13 +263,25 @@ func resolveHookDir(hierarchy sweatfile.Hierarchy, wtPath, branch, hookSha strin
 		return wtPath, noop, nil
 	}
 
+	repoRoot, err := git.CommonDir(wtPath)
+	if err != nil {
+		return "", noop, fmt.Errorf("resolve repo root for build worktree: %w", err)
+	}
+	buildParent := filepath.Join(repoRoot, ".worktrees")
+	if err := os.MkdirAll(buildParent, 0o755); err != nil {
+		return "", noop, fmt.Errorf("create build worktree parent %s: %w", buildParent, err)
+	}
+
 	short := hookSha
 	if len(short) > 12 {
 		short = short[:12]
 	}
 	name := fmt.Sprintf(".merge-%s-%s-%d", sanitizeBranchForPath(branch), short, os.Getpid())
-	buildPath := filepath.Join(filepath.Dir(wtPath), name)
+	buildPath := filepath.Join(buildParent, name)
 
+	// Clear a stale dir from an interrupted prior run (admin entry already gone,
+	// so prune won't); RemoveAll is a no-op on a nonexistent path.
+	_ = os.RemoveAll(buildPath)
 	if err := git.WorktreeAddDetached(wtPath, buildPath, hookSha); err != nil {
 		return "", noop, fmt.Errorf("create pre-merge build worktree at %s: %w", buildPath, err)
 	}
