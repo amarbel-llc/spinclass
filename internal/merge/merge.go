@@ -358,6 +358,21 @@ func FinishMerge(ctx context.Context, execr executor.Executor, tw *tap.Writer, w
 // the same dir): the hook runs with wtPath=checkout and the push is from
 // checkout. Both params are kept for clarity and signature symmetry with
 // FinishMerge even though they are equal.
+//
+// Unlike PrepareMerge/FinishMerge there is no gitSync parameter — push is
+// unconditional. For an implicit session the work is already on the default
+// branch, so there is nothing to conditionally sync; the push is always
+// performed.
+//
+// CAVEAT: runPreMergeHookContext runs the hook in an isolated build worktree
+// at filepath.Join(filepath.Dir(wtPath), name). For a normal worktree session
+// wtPath is <repo>/.worktrees/<branch>, so the build worktree lands inside
+// .worktrees/. But for an implicit session wtPath == checkout == the repo
+// root, so filepath.Dir(checkout) is the repo's PARENT dir — the build
+// worktree is created as a sibling of the repo root, OUTSIDE the repo (e.g.
+// for a repo at ~/eng/repos/myrepo the build worktree lands at
+// ~/eng/repos/.merge-master-<sha>-<pid>). Known placement quirk, tracked as a
+// followup (see #NNN).
 func MergeImplicit(ctx context.Context, tw *tap.Writer, w io.Writer, repoPath, checkout, branch string, verbose bool, activity io.Writer) (blobLinks []check.BlobLink, err error) {
 	if home, _ := os.UserHomeDir(); home != "" {
 		hierarchy, hErr := sweatfileio.LoadWorktreeHierarchy(home, repoPath, checkout)
