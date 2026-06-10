@@ -137,9 +137,10 @@ sc merge > records.ndjson         # live viewport on stderr, records captured
 - Splice an ndjson-crap-emitting hook's records into the merge stream as
   nested phases instead of opaque `Output` lines (named follow-up from
   the design doc).
-- `internal/tapblock` is now consumed only by the close/clean TAP paths
-  — verify in the Task 9 sweep whether it (or other TAP plumbing) is
-  orphaned and prunable.
+- ~~Verify in the Task 9 sweep whether `internal/tapblock` (or other TAP
+  plumbing) is orphaned and prunable.~~ Done: the sweep confirmed
+  `internal/tapblock` is still consumed by `internal/close` and
+  `internal/clean` (their nix-gc reap OutputBlocks), so it stays.
 
 ## More Information
 

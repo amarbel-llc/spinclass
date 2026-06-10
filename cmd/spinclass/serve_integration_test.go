@@ -167,7 +167,7 @@ func TestServeMergeThisSessionStdioIntegrity(t *testing.T) {
 
 	// Stderr should contain the hook's output (it either went there via the
 	// safety net's stdout-redirect to stderr, or via the hookWriter being
-	// rendered into the TAP tool result — either way, the bytes exist).
+	// rendered into the tool result — either way, the bytes exist).
 	// We don't make this a hard assertion because stdout capture into the
 	// tool result is the primary path; stderr is only a catch.
 }
@@ -1148,10 +1148,11 @@ func TestServeCheckThisSessionAsyncCancel(t *testing.T) {
 		t.Errorf("expected cancelled status, got:\n%s", final)
 	}
 	// The hook (sleep 120) must have been killed, not waited out: the cancel
-	// round-trip completes in seconds and the TAP carries a ctx-kill signature.
-	// Go surfaces a context-killed exec as either "context canceled" or
-	// "signal: killed" depending on timing, so accept both. (We can't assert on
-	// the echo marker — it also appears in the echoed command in the TAP desc.)
+	// round-trip completes in seconds and the result carries a ctx-kill
+	// signature. Go surfaces a context-killed exec as either "context canceled"
+	// or "signal: killed" depending on timing, so accept both. (We can't assert
+	// on the echo marker — it also appears in the echoed hook command in the
+	// result.)
 	if !strings.Contains(final, "context canceled") && !strings.Contains(final, "signal: killed") {
 		t.Errorf("expected a killed-hook signature (context canceled / signal: killed), got:\n%s", final)
 	}

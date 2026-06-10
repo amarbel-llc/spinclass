@@ -57,9 +57,10 @@ The merge flow is split (in `internal/merge/merge.go`) into:
 
 `ResolvedContext` (sync) runs both inline. `merge-this-session-async` runs
 `PrepareMerge` **synchronously before returning the job id** — sharing one
-`tap.Writer`+buffer (`merge.NewMergeWriter`) so the prefix's TAP is appended to
-the backgrounded `FinishMerge`'s output as one stream — then backgrounds only
-`FinishMerge`. This is what makes async genuinely concurrent: the rebase (the one
+`crap.Reporter`+buffer so the prefix's records are appended to the backgrounded
+`FinishMerge`'s output as one stream (originally a `tap.Writer` via
+`merge.NewMergeWriter`, deleted when merge moved to ndjson-crap; see FDR 0015)
+— then backgrounds only `FinishMerge`. This is what makes async genuinely concurrent: the rebase (the one
 step that mutates `wtPath`) completes before the agent is told the job started,
 so it cannot race the agent's next edits, and rebase conflicts / nothing-to-merge
 surface immediately instead of as an orphan job.
@@ -115,7 +116,7 @@ disable-merge-build-worktree = true
 ## More Information
 
 - Issue: #106.
-- `internal/merge/merge.go` (`PrepareMerge`/`FinishMerge`/`NewMergeWriter`),
+- `internal/merge/merge.go` (`PrepareMerge`/`FinishMerge`),
   `internal/check/check.go` (`resolveHookDir`, `hookSha` threading),
   `internal/git/git.go` (`WorktreeAddDetached`/`WorktreePrune`/`RevParse`),
   `cmd/spinclass/commands_mcp_only.go` (`handleMergeThisSessionAsync`).

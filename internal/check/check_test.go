@@ -285,7 +285,7 @@ exit 0
 	return madderBin, stdinCapture
 }
 
-func TestRunHookCompactShape(t *testing.T) {
+func TestRunHookPhaseShape(t *testing.T) {
 	_, _, wtPath := setupRepoWithWorktree(t, "feature-compact")
 	_, stdinCapture := withFakeMadder(t)
 	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"echo line-one; echo line-two\"\n")
@@ -333,7 +333,7 @@ func TestRunHookCompactShape(t *testing.T) {
 	}
 }
 
-func TestRunHookCompactShape_Failure(t *testing.T) {
+func TestRunHookPhaseShape_Failure(t *testing.T) {
 	_, _, wtPath := setupRepoWithWorktree(t, "feature-compact-fail")
 	withFakeMadder(t)
 	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"echo about-to-fail; exit 7\"\n")
@@ -415,7 +415,7 @@ func readNDJSONRecords(t *testing.T, path string) []struct {
 	return recs
 }
 
-func TestRunHookCompactShape_TapNDJSONSuccess(t *testing.T) {
+func TestRunHookPhaseShape_TapNDJSONSuccess(t *testing.T) {
 	_, _, wtPath := setupRepoWithWorktree(t, "feature-tap-ndjson-success")
 	_, stdinCapture := withFakeMadder(t)
 	// Hook prints a valid TAP-14 stream with one passing test point.
@@ -467,7 +467,7 @@ func TestRunHookCompactShape_TapNDJSONSuccess(t *testing.T) {
 	}
 }
 
-func TestRunHookCompactShape_TapNDJSONFailure(t *testing.T) {
+func TestRunHookPhaseShape_TapNDJSONFailure(t *testing.T) {
 	_, _, wtPath := setupRepoWithWorktree(t, "feature-tap-ndjson-failure")
 	_, stdinCapture := withFakeMadder(t)
 	// Hook prints a valid TAP-14 stream with one not-ok and a YAML
@@ -507,7 +507,7 @@ func TestRunHookCompactShape_TapNDJSONFailure(t *testing.T) {
 	}
 }
 
-func TestRunHookCompactShape_NdjsonCrapSuccess(t *testing.T) {
+func TestRunHookPhaseShape_NdjsonCrapSuccess(t *testing.T) {
 	_, _, wtPath := setupRepoWithWorktree(t, "feature-ndjson-crap-success")
 	_, stdinCapture := withFakeMadder(t)
 	// Hook emits canonical ndjson-crap directly (one passing test record).
@@ -538,7 +538,7 @@ func TestRunHookCompactShape_NdjsonCrapSuccess(t *testing.T) {
 	}
 }
 
-func TestRunHookCompactShape_NdjsonCrapFailure(t *testing.T) {
+func TestRunHookPhaseShape_NdjsonCrapFailure(t *testing.T) {
 	_, _, wtPath := setupRepoWithWorktree(t, "feature-ndjson-crap-failure")
 	withFakeMadder(t)
 	// Hook emits an ndjson-crap failing test record with a diagnostic, then
@@ -565,7 +565,7 @@ func TestRunHookCompactShape_NdjsonCrapFailure(t *testing.T) {
 	}
 }
 
-func TestRunHookCompactShape_TapNDJSONDegenerateFallback(t *testing.T) {
+func TestRunHookPhaseShape_TapNDJSONDegenerateFallback(t *testing.T) {
 	_, _, wtPath := setupRepoWithWorktree(t, "feature-tap-ndjson-degenerate")
 	withFakeMadder(t)
 	// Hook prints non-TAP garbage (no `TAP version 14` line) and exits

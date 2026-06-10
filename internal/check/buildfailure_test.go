@@ -12,8 +12,8 @@ func strPtr(s string) *string { return &s }
 
 // TestBuildFailureSummary exercises the failing-record filter and
 // formatting performed by buildFailureSummary. The function is the
-// source of the YAMLish `failure:` field emitted by runHookCompact in
-// the format=tap-ndjson failure path.
+// source of the failure summary emitted by runHookPhase in the
+// format=tap-ndjson failure path.
 func TestBuildFailureSummary(t *testing.T) {
 	cases := []struct {
 		name string
