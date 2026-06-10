@@ -330,6 +330,9 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 		blobLinks, mergeErr := merge.MergeImplicit(context.Background(), rep, ts, gs.repoPath, cwd, gs.branch, nil)
 		ts.Finish()
 		text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
+		if mergeErr != nil && text == "" {
+			text = mergeErr.Error()
+		}
 		return buildHookResult(text, blobLinks, mergeErr), nil
 	}
 
@@ -354,6 +357,9 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 	)
 	ts.Finish()
 	text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
+	if mergeErr != nil && text == "" {
+		text = mergeErr.Error()
+	}
 	return buildHookResult(text, blobLinks, mergeErr), nil
 }
 
@@ -420,7 +426,11 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 		return startSessionJob(cwd, job.KindMerge, params.GitSync, func(ctx context.Context, w io.Writer) (string, bool) {
 			_, mergeErr := merge.MergeImplicit(ctx, rep, ts, repoPath, cwd, branch, w)
 			ts.Finish()
-			return present.RenderPlain(bytes.NewReader(buf.Bytes())), mergeErr != nil
+			text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
+			if mergeErr != nil && text == "" {
+				text = mergeErr.Error()
+			}
+			return text, mergeErr != nil
 		}), nil
 	}
 	repoPath := gs.repoPath
@@ -448,7 +458,11 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 	pinnedSha, prepErr := merge.PrepareMerge(ts, repoPath, cwd, branch, defaultBranch, gitSync)
 	if prepErr != nil {
 		ts.Finish()
-		return buildHookResult(present.RenderPlain(bytes.NewReader(buf.Bytes())), nil, prepErr), nil
+		text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
+		if text == "" {
+			text = prepErr.Error()
+		}
+		return buildHookResult(text, nil, prepErr), nil
 	}
 
 	return startSessionJob(cwd, job.KindMerge, gitSync, func(ctx context.Context, w io.Writer) (string, bool) {
@@ -457,7 +471,11 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 			repoPath, cwd, branch, defaultBranch, pinnedSha, gitSync, true, w,
 		)
 		ts.Finish()
-		return present.RenderPlain(bytes.NewReader(buf.Bytes())), mergeErr != nil
+		text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
+		if mergeErr != nil && text == "" {
+			text = mergeErr.Error()
+		}
+		return text, mergeErr != nil
 	}), nil
 }
 

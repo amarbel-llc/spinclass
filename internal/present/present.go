@@ -75,6 +75,9 @@ func WithReporter(format, title string, stdout, tty io.Writer, fn func(rep *crap
 	defer func() { _ = pw.Close() }()
 	rep := crap.NewReporter(pw, opts)
 	err := fn(rep)
+	// Close pw now (before <-done) so the renderer goroutine sees EOF and
+	// returns from Present — removing this Close would deadlock the join.
+	// The deferred Close above is only a panic-safety net (no-op here).
 	_ = pw.Close()
 	renderErr := <-done
 	if err != nil {
