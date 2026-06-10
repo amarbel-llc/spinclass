@@ -100,7 +100,7 @@ function spinclass_merge_fast_forwards { # @test
   git -C "$wt" clean -fd
 
   # Merge from the main repo
-  run_sc merge "$branch"
+  run_sc_crap merge "$branch"
   assert_success
 
   # Commit should now be on main
@@ -218,8 +218,9 @@ function spinclass_clean_removes_merged { # @test
   git -C "$wt1" add merged.txt
   git -C "$wt1" commit -m "commit on branch1"
 
-  # Merge the worktree first (makes the branch fully merged)
-  "$bin" --format tap merge "$branch1"
+  # Merge the worktree first (makes the branch fully merged; TAP is
+  # retired for merge/check, so this speaks the ndjson-crap wire).
+  "$bin" --format ndjson merge "$branch1"
 
   # Create another worktree that IS merged (no extra commits)
   local attach2_output

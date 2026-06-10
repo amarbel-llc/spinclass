@@ -27,14 +27,15 @@ pre_merge_setup_worktree() {
   cd "$wt_path" || return
 }
 
-# The format-aware pre-merge hook output (`format:`, `failure:`, structured
-# `tail:`) is emitted only by the compact code path in
-# internal/check/check.go, which is gated on `embeds.MadderBin() != ""` —
-# i.e. spinclass was built via `lib.mkSpinclass { madder = ...; }`. The
-# default `just test-bats` lane builds `mkSpinclass {}` with no madder
-# pin, so these tests skip there and only assert against madder-pinned
-# binaries (the `merge-this-session` / `~/.nix-profile/bin/spinclass`
-# environment). See FDR 0003 and CLAUDE.md "External tool deps".
+# The pre-merge-output-format tests below assert blob behavior (the
+# `resource_link: madder://blobs/...` output record emitted by
+# internal/check/check.go runHookPhase), which is gated on
+# `embeds.MadderBin() != ""` — i.e. spinclass was built via
+# `lib.mkSpinclass { madder = ...; }`. The default `just test-bats` lane
+# builds `mkSpinclass {}` with no madder pin, so these tests skip there
+# and only assert against madder-pinned binaries (the
+# `merge-this-session` / `~/.nix-profile/bin/spinclass` environment).
+# See FDR 0003 and CLAUDE.md "External tool deps".
 # TODO(#85): once a madder-pinned bats lane lands, this guard becomes a no-op for that lane.
 require_madder_pinned() {
   local bin="${SPINCLASS_BIN:-spinclass}"
@@ -130,11 +131,14 @@ pre-merge = "echo '"'"'TAP version 14'"'"'; echo '"'"'1..1'"'"'; echo '"'"'ok 1 
 pre-merge-output-format = "tap-ndjson"
 '
 
-  run_sc check
+  run_sc_crap check
   assert_success
-  assert_output --partial "format: tap-ndjson"
-  refute_output --partial "tail:"
-  refute_output --partial "failure:"
+  # Success → exactly one ok test record carrying NO diagnostic (no tail,
+  # no failure summary; the ok verdict is itself the liveness signal).
+  assert_crap '[.[] | select(.type == "test")] | length == 1 and all(.ok) and all(.diagnostic == null)'
+  # Madder-pinned: the parsed tap-ndjson stream is stored as a blob and
+  # linked from an output record.
+  assert_output --partial "resource_link: madder://blobs/"
 }
 
 function pre_merge_output_format_tap_ndjson_failure_emits_failure_field { # @test
@@ -144,12 +148,19 @@ pre-merge = "echo '"'"'TAP version 14'"'"'; echo '"'"'1..1'"'"'; echo '"'"'not o
 pre-merge-output-format = "tap-ndjson"
 '
 
-  run_sc check
+  run_sc_crap check
   assert_failure
-  assert_output --partial "format: tap-ndjson"
-  assert_output --partial "failure:"
-  assert_output --partial "expected 7 got 9"
-  refute_output --partial "tail:"
+  # Failure → the failing test record's diagnostic carries the resolved
+  # format plus a failure SUMMARY built from the parsed TAP records
+  # ("#<N> <desc>: <message>" lines), not the raw output ring tail — the
+  # raw "TAP version 14" line would only appear via the tail fallback.
+  # shellcheck disable=SC2016  # $f is a jq binding, not a shell variable
+  assert_crap '[.[] | select(.type == "test" and .ok == false)] as $f
+    | ($f | length) == 1
+    and ($f[0].diagnostic.format == "tap-ndjson")
+    and ($f[0].diagnostic.output | startswith("#1 synthetic"))
+    and ($f[0].diagnostic.output | contains("expected 7 got 9"))
+    and ($f[0].diagnostic.output | contains("TAP version 14") | not)'
 }
 
 function pre_merge_output_format_tap_ndjson_degenerate_falls_back_to_tail { # @test
@@ -159,12 +170,17 @@ pre-merge = "echo '"'"'this is not tap'"'"'; exit 2"
 pre-merge-output-format = "tap-ndjson"
 '
 
-  run_sc check
+  run_sc_crap check
   assert_failure
-  assert_output --partial "format: tap-ndjson"
-  assert_output --partial "tail:"
-  assert_output --partial "this is not tap"
-  refute_output --partial "failure:"
+  # Degenerate stream (zero parsed TAP records) → the diagnostic's output
+  # falls back to the raw ring tail (the literal hook lines), not a parsed
+  # "#<N> ..." failure summary.
+  # shellcheck disable=SC2016  # $f is a jq binding, not a shell variable
+  assert_crap '[.[] | select(.type == "test" and .ok == false)] as $f
+    | ($f | length) == 1
+    and ($f[0].diagnostic.format == "tap-ndjson")
+    and ($f[0].diagnostic.output | contains("this is not tap"))
+    and ($f[0].diagnostic.output | startswith("#") | not)'
 }
 
 # By default the pre-merge hook runs in an isolated detached build worktree
@@ -179,7 +195,7 @@ function pre_merge_hook_runs_in_isolated_build_worktree { # @test
 pre-merge = "pwd > \"$BATS_TEST_TMPDIR/hookpwd.txt\""
 '
 
-  run_sc check
+  run_sc_crap check
   assert_success
   run cat "$BATS_TEST_TMPDIR/hookpwd.txt"
   assert_output --partial "/.worktrees/.merge-"
@@ -195,7 +211,7 @@ pre-merge = "pwd > \"$BATS_TEST_TMPDIR/hookpwd.txt\""
 disable-merge-build-worktree = true
 '
 
-  run_sc check
+  run_sc_crap check
   assert_success
   run cat "$BATS_TEST_TMPDIR/hookpwd.txt"
   assert_output --partial "/.worktrees/"

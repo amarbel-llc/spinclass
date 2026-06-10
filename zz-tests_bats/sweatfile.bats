@@ -271,8 +271,9 @@ function sc_check_runs_pre_merge_hook { # @test
 pre-merge = "echo CHECK_RAN"
 '
 
-  run_sc check
+  run_sc_crap check
   assert_success
+  # The hook's live stdout streams as ndjson-crap output records.
   assert_output --partial "CHECK_RAN"
 }
 
@@ -281,9 +282,10 @@ function sc_check_fails_when_pre_merge_hook_fails { # @test
 pre-merge = "false"
 '
 
-  run_sc check
+  run_sc_crap check
   assert_failure
-  assert_output --partial "not ok"
+  # The hook stage surfaces as a failing test record on the wire.
+  assert_crap '[.[] | select(.type == "test")] | length > 0 and any(.ok == false)'
 }
 
 function sc_check_runs_when_disable_merge_set { # @test
@@ -292,7 +294,7 @@ disable-merge = true
 pre-merge = "echo CHECK_OK"
 '
 
-  run_sc check
+  run_sc_crap check
   assert_success
   assert_output --partial "CHECK_OK"
 }

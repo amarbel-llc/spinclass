@@ -77,7 +77,7 @@ EOF
 
   # Merge from inside the checkout, no target → implicit route.
   cd "$TEST_CHECKOUT" || return
-  run_sc merge
+  run_sc_crap merge
   assert_success
 
   # Hook ran.
@@ -88,6 +88,8 @@ EOF
   upstream_head=$(git -C "$TEST_UPSTREAM" rev-parse master)
   assert [ "$upstream_head" = "$head" ]
 
+  # No failing stage on the wire.
+  assert_crap '[.[] | select(.type == "test")] | length > 0 and all(.ok)'
   # No rebase step in the output (implicit path is hook-then-push only).
   refute_output --partial "rebase"
   # Reached the push path, not the worktree-only reject.
@@ -109,11 +111,13 @@ EOF
   # `sc check` is gate-free (no attestation), so it runs the hook against cwd
   # for an implicit checkout exactly as it would for a worktree.
   cd "$TEST_CHECKOUT" || return
-  run_sc check
+  run_sc_crap check
   assert_success
 
   # Hook ran.
   assert [ -f "$marker" ]
+  # No failing stage on the wire.
+  assert_crap '[.[] | select(.type == "test")] | length > 0 and all(.ok)'
   # Did not hit the worktree-only reject.
   refute_output --partial "not inside a worktree session"
 }
@@ -125,7 +129,7 @@ EOF
   # not erroneously short-circuit as implicit (no push of an unmerged tree).
   create_origin_checkout
   cd "$TEST_CHECKOUT" || return
-  run_sc merge
+  run_sc_crap merge
   # No implicit session and no worktrees to choose → normal path. We don't
   # pin the exact outcome (it depends on worktree resolution), only that the
   # implicit branch was not taken (it would have pushed/hooked silently).

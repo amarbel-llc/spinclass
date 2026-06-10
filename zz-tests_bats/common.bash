@@ -86,6 +86,28 @@ run_sc() {
   run timeout --preserve-status 10s "$bin" --format tap "$@"
 }
 
+# Run spinclass merge/check on the ndjson-crap wire. TAP is retired for
+# merge/check (present.ResolveFormat rejects --format tap), so those call
+# sites cannot go through run_sc. Piped bats output means --format auto
+# would also resolve to ndjson; the explicit flag keeps the intent visible.
+# Usage: run_sc_crap <merge|check> [args...]
+run_sc_crap() {
+  local bin="${SPINCLASS_BIN:-spinclass}"
+  run timeout --preserve-status 10s "$bin" --format ndjson "$@"
+}
+
+# Assert a jq filter holds over the array of ndjson-crap records parsed
+# from $output. Non-JSON lines (interleaved stderr) are dropped rather
+# than breaking the parse; the filter sees one array of record objects.
+# Prefer this over substring assertions on raw records — JSON key order
+# comes from Go struct field order and is not contractual.
+# Usage: assert_crap '<jq filter over the records array>'
+assert_crap() {
+  # shellcheck disable=SC2154  # $output is set by bats' run
+  echo "$output" | jq -enR "[inputs | fromjson?] | $1" >/dev/null ||
+    fail "ndjson-crap assertion failed: $1 -- output: $output"
+}
+
 # Extract the worktree absolute path from TAP output of a start command.
 # Looks for "ok N - create <branch> <path>" and returns <path>.
 # Usage: extract_wt_path "$output"
