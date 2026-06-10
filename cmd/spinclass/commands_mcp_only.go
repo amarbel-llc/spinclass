@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/amarbel-llc/crap/go-crap/v2/crap"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/protocol"
 	"github.com/amarbel-llc/spinclass/internal/attestation"
@@ -23,6 +24,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/job"
 	"github.com/amarbel-llc/spinclass/internal/merge"
+	"github.com/amarbel-llc/spinclass/internal/present"
 	"github.com/amarbel-llc/spinclass/internal/servelog"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
@@ -323,10 +325,12 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 	if gs.implicit {
 		// Implicit (main-checkout) session: hook-then-push, no rebase.
 		var buf bytes.Buffer
-		tw := merge.NewMergeWriter(&buf)
-		blobLinks, mergeErr := merge.MergeImplicit(context.Background(), tw, &buf, gs.repoPath, cwd, gs.branch, true, nil)
-		tw.Plan()
-		return buildHookResult(buf.String(), blobLinks, mergeErr), nil
+		rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "merge " + gs.branch, Source: "spinclass"})
+		ts := rep.TestStream(0)
+		blobLinks, mergeErr := merge.MergeImplicit(context.Background(), rep, ts, gs.repoPath, cwd, gs.branch, nil)
+		ts.Finish()
+		text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
+		return buildHookResult(text, blobLinks, mergeErr), nil
 	}
 
 	defaultBranch, err := merge.ResolveDefaultBranch(gs.repoPath)
@@ -335,20 +339,22 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 	}
 
 	var buf bytes.Buffer
+	rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "merge " + gs.branch, Source: "spinclass"})
+	ts := rep.TestStream(0)
 	blobLinks, mergeErr := merge.Resolved(
 		executor.ShellExecutor{},
-		&buf,
-		nil,
-		"tap",
+		rep,
+		ts,
 		gs.repoPath,
 		cwd,
 		gs.branch,
 		defaultBranch,
 		params.GitSync,
 		true,
-		true,
 	)
-	return buildHookResult(buf.String(), blobLinks, mergeErr), nil
+	ts.Finish()
+	text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
+	return buildHookResult(text, blobLinks, mergeErr), nil
 }
 
 func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
@@ -368,8 +374,9 @@ func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prom
 	}
 
 	var buf bytes.Buffer
-	blobLinks, hookErr := check.Run(&buf, "tap", cwd, false)
-	text := buf.String()
+	rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "check", Source: "spinclass"})
+	blobLinks, hookErr := check.Run(rep, cwd)
+	text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
 	if hookErr != nil && text == "" {
 		text = hookErr.Error()
 	}
@@ -408,11 +415,12 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 		repoPath := gs.repoPath
 		branch := gs.branch
 		var buf bytes.Buffer
-		tw := merge.NewMergeWriter(&buf)
+		rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "merge " + branch, Source: "spinclass"})
+		ts := rep.TestStream(0)
 		return startSessionJob(cwd, job.KindMerge, params.GitSync, func(ctx context.Context, w io.Writer) (string, bool) {
-			_, mergeErr := merge.MergeImplicit(ctx, tw, &buf, repoPath, cwd, branch, true, w)
-			tw.Plan()
-			return buf.String(), mergeErr != nil
+			_, mergeErr := merge.MergeImplicit(ctx, rep, ts, repoPath, cwd, branch, w)
+			ts.Finish()
+			return present.RenderPlain(bytes.NewReader(buf.Bytes())), mergeErr != nil
 		}), nil
 	}
 	repoPath := gs.repoPath
@@ -429,23 +437,27 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 	// rebase lands (the agent can edit/commit immediately), pins the exact sha
 	// the backgrounded hook verifies and merges, and surfaces rebase conflicts /
 	// nothing-to-merge right away instead of as an orphan job. The shared
-	// writer+buffer carry the prefix's TAP into FinishMerge so the final job
-	// result is one continuous stream (pull → rebase → hook → merge → push).
+	// reporter+buffer carry the prefix's records into FinishMerge so the final
+	// job result is one continuous stream (pull → rebase → hook → merge → push).
+	// Single-writer discipline: the job goroutine only writes buf after this
+	// synchronous prefix returns, and nothing reads buf until the closure
+	// renders it — no locking needed.
 	var buf bytes.Buffer
-	tw := merge.NewMergeWriter(&buf)
-	pinnedSha, prepErr := merge.PrepareMerge(tw, &buf, repoPath, cwd, branch, defaultBranch, gitSync, true)
+	rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "merge " + branch, Source: "spinclass"})
+	ts := rep.TestStream(0)
+	pinnedSha, prepErr := merge.PrepareMerge(ts, repoPath, cwd, branch, defaultBranch, gitSync)
 	if prepErr != nil {
-		tw.Plan()
-		return buildHookResult(buf.String(), nil, prepErr), nil
+		ts.Finish()
+		return buildHookResult(present.RenderPlain(bytes.NewReader(buf.Bytes())), nil, prepErr), nil
 	}
 
 	return startSessionJob(cwd, job.KindMerge, gitSync, func(ctx context.Context, w io.Writer) (string, bool) {
 		_, mergeErr := merge.FinishMerge(
-			ctx, executor.ShellExecutor{}, tw, &buf,
-			repoPath, cwd, branch, defaultBranch, pinnedSha, gitSync, true, true, w,
+			ctx, executor.ShellExecutor{}, rep, ts,
+			repoPath, cwd, branch, defaultBranch, pinnedSha, gitSync, true, w,
 		)
-		tw.Plan()
-		return buf.String(), mergeErr != nil
+		ts.Finish()
+		return present.RenderPlain(bytes.NewReader(buf.Bytes())), mergeErr != nil
 	}), nil
 }
 
@@ -466,10 +478,13 @@ func handleCheckThisSessionAsync(_ context.Context, _ json.RawMessage, _ command
 		return command.TextErrorResult(failMsg), nil
 	}
 
+	// Reporter built before startSessionJob (NewReporter writes its Meta record
+	// synchronously); check.RunContext owns and finishes its own TestStream.
+	var buf bytes.Buffer
+	rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "check", Source: "spinclass"})
 	return startSessionJob(cwd, job.KindCheck, false, func(ctx context.Context, w io.Writer) (string, bool) {
-		var buf bytes.Buffer
-		_, hookErr := check.RunContext(ctx, &buf, "tap", cwd, false, w)
-		text := buf.String()
+		_, hookErr := check.RunContext(ctx, rep, cwd, w)
+		text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
 		if hookErr != nil && text == "" {
 			text = hookErr.Error()
 		}
@@ -727,8 +742,8 @@ func enforceAttestationImplicit(checkout string) (string, bool) {
 	return "", true
 }
 
-// buildHookResult assembles a command.Result that pairs the rendered TAP
-// text with one resource_link content block per blob emitted by the
+// buildHookResult assembles a command.Result that pairs the plain-rendered
+// verdict text with one resource_link content block per blob emitted by the
 // pre-merge hook. With no blob links (madder unpinned, or no hook
 // configured), it falls back to the legacy text-only Result. Each link
 // carries the MIME type matching the format the hook output was written

@@ -10,11 +10,13 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/amarbel-llc/crap/go-crap/v2/crap"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/amarbel-llc/spinclass/internal/check"
 	spinclose "github.com/amarbel-llc/spinclass/internal/close"
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/merge"
+	"github.com/amarbel-llc/spinclass/internal/present"
 	"github.com/amarbel-llc/spinclass/internal/remote"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sessionpick"
@@ -22,6 +24,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
+	"github.com/mattn/go-isatty"
 )
 
 func registerSessionCommands(app *command.App) {
@@ -62,7 +65,7 @@ func registerSessionCommands(app *command.App) {
 		Name: "merge",
 		Description: command.Description{
 			Short: "Merge a worktree into main",
-			Long:  "Merge a worktree branch into the main repo with --ff-only and remove the worktree. When run from inside a worktree, merges that worktree. When run from the main repo, specify a target or choose interactively.",
+			Long:  "Merge a worktree branch into the main repo with --ff-only and remove the worktree. When run from inside a worktree, merges that worktree. When run from the main repo, specify a target or choose interactively. Output formats: auto (default; live viewport on a TTY, ndjson-crap records when piped), viewport, plain (verdict lines), or ndjson. TAP is retired for merge/check.",
 		},
 		Params: []command.Param{
 			{Name: "target", Type: command.String, Description: "Target worktree to merge: a worktree directory name or <repo>/<branch> session key from `sc list` (interactive selection if omitted)", Completer: completeWorktreeTargets},
@@ -80,7 +83,9 @@ func registerSessionCommands(app *command.App) {
 				return err
 			}
 
-			return merge.Run(executor.ShellExecutor{}, p.FormatOrDefault(), p.Target, p.GitSync, p.Verbose)
+			// merge.Run resolves the format itself: pass the RAW --format
+			// value ("" means auto — viewport on a TTY, ndjson when piped).
+			return merge.Run(executor.ShellExecutor{}, p.Format, p.Target, p.GitSync)
 		},
 	})
 
@@ -88,7 +93,7 @@ func registerSessionCommands(app *command.App) {
 		Name: "check",
 		Description: command.Description{
 			Short: "Run the [hooks].pre-merge command without merging",
-			Long:  "Runs the configured [hooks].pre-merge command (the agent-CI hook) in the current worktree. Reports ok / not ok and exits non-zero on failure. Available regardless of [hooks].disable-merge.",
+			Long:  "Runs the configured [hooks].pre-merge command (the agent-CI hook) in the current worktree. Reports ok / not ok and exits non-zero on failure. Available regardless of [hooks].disable-merge. Output formats: auto (default; live viewport on a TTY, ndjson-crap records when piped), viewport, plain (verdict lines), or ndjson. TAP is retired for merge/check.",
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
 			var p struct {
@@ -100,8 +105,14 @@ func registerSessionCommands(app *command.App) {
 			if err != nil {
 				return err
 			}
-			_, err = check.Run(os.Stdout, p.FormatOrDefault(), cwd, p.Verbose)
-			return err
+			resolved, rerr := present.ResolveFormat(p.Format, isatty.IsTerminal(os.Stdout.Fd()))
+			if rerr != nil {
+				return rerr
+			}
+			return present.WithReporter(resolved, "check", os.Stdout, os.Stderr, func(rep *crap.Reporter) error {
+				_, err := check.Run(rep, cwd)
+				return err
+			})
 		},
 	})
 
