@@ -42,10 +42,12 @@ func ResolveFormat(format string, stdoutIsTTY bool) (string, error) {
 }
 
 // WithReporter builds a crap.Reporter wired to the resolved renderer, runs
-// fn with it, and tears the renderer down. stdout receives ndjson/plain
-// output; tty receives the live viewport (callers pass os.Stderr so
-// `sc merge > records.ndjson` keeps a live viewport). fn's error is
-// returned; a renderer error is joined only if fn succeeded.
+// fn with it, and tears the renderer down. The renderer modes are mutually
+// exclusive: stdout receives the output in plain/ndjson mode; tty receives
+// the live viewport in viewport mode, and stdout gets nothing (callers pass
+// os.Stderr as tty so the TTY-mode viewport never fights stdout
+// redirection). fn's error is returned; a renderer error is joined only if
+// fn succeeded.
 func WithReporter(format, title string, stdout, tty io.Writer, fn func(rep *crap.Reporter) error) error {
 	opts := crap.ReporterOptions{Title: title, Source: "spinclass"}
 

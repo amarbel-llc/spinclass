@@ -42,8 +42,8 @@ deliberately bilingual.
   sync's convention — `sc merge | crap-present` works).
 - `viewport`: crap's live bubbletea presenter — spinner, rolling tail of
   hook output, persisted ✓/✗ verdict lines. Renders to **stderr**;
-  records go to **stdout**, so `sc merge > records.ndjson` with a TTY
-  stderr shows the live viewport AND captures clean records.
+  nothing is written to stdout. Record capture is the `ndjson` mode
+  (`sc merge > records.ndjson` auto-resolves to ndjson — no viewport).
 - `plain`: boring-terminal escape hatch — verdict-per-line rendering
   (`✓ rebase <branch>`, `✗ pre-merge hook …` with echoed failure output).
 - `ndjson`: the raw records.
@@ -67,15 +67,18 @@ wake carries the first `✗ ` line. `session-job-status`'s live tail
 
 Emission is **mixed-family** on one stream:
 
-- Merge stages (`pull`, `rebase <branch>`, `merge <branch>`,
-  `remove worktree`, `delete branch`, `push`) are result-family test
-  records on a shared `TestStream`; the orchestrator owns `Finish()`.
+- Merge stages (`pull <defaultBranch>`, `rebase <branch>`,
+  `merge <branch>`, `remove worktree <branch>`, `delete branch <branch>`,
+  `push` — the implicit flow's push is `push <branch>`) are
+  result-family test records on a shared `TestStream`; the orchestrator
+  owns `Finish()`.
   `failStep`'s diagnostics (git stderr, exit codes) ride the failing
   record's diagnostic map, echoed by the plain/viewport renderers.
 - The pre-merge hook is BOTH: an execution-family `Phase` (`Command`,
   live `Output` records via `present.LineWriter` — the viewport's
   rolling tail; the madder `resource_link:` line also rides the wire
-  here) and a closing result-family test point carrying the failure
+  here) and a closing result-family test point (labelled
+  ``pre-merge hook for <branch>: `<cmd>` ``) carrying the failure
   diagnostic (`command`, `exit_code`, `elapsed`, failure-output tail).
 
 Single source of truth — no TAP/event drift is possible. The
@@ -96,7 +99,7 @@ adds no new terminal-probe exposure.
 sc merge                          # TTY: live viewport; piped: ndjson records
 sc merge --format plain           # ✓/✗ verdict lines only
 sc check --format ndjson | jq .   # wire-level inspection
-sc merge > records.ndjson         # live viewport on stderr, records captured
+sc merge > records.ndjson         # auto resolves to ndjson: records captured, no viewport
 ```
 
 ## Tuning Levers
@@ -131,12 +134,17 @@ sc merge > records.ndjson         # live viewport on stderr, records captured
 - **Detached attestation refusals still speak TAP** — the gate
   (`internal/attestation`) is upstream of the merge stream and was not
   migrated.
+- **Viewport and record capture are mutually exclusive** — viewport mode
+  does not tee records to stdout. A `--format viewport` run with
+  redirected stdout writes nothing to it.
 
 ## Follow-ups
 
 - Splice an ndjson-crap-emitting hook's records into the merge stream as
   nested phases instead of opaque `Output` lines (named follow-up from
   the design doc).
+- Tee records to a redirected stdout in viewport mode (live viewport +
+  captured wire in one run) if real usage wants it.
 - ~~Verify in the Task 9 sweep whether `internal/tapblock` (or other TAP
   plumbing) is orphaned and prunable.~~ Done: the sweep confirmed
   `internal/tapblock` is still consumed by `internal/close` and

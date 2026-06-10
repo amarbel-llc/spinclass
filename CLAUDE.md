@@ -129,8 +129,8 @@ worktree paths. Applies `claude-allow` rules from sweatfile to
   emit ndjson-crap (the CRAP-2 wire format) instead — their `--format` is
   `auto` (default: live viewport on a TTY, raw ndjson records when piped) |
   `viewport` | `plain` (verdict-per-line) | `ndjson`; `tap`/`table` are
-  rejected there. The viewport renders to stderr, records go to stdout, so
-  `sc merge > records.ndjson` keeps a live viewport. See FDR 0015 and
+  rejected there. The viewport renders to stderr; record capture is the ndjson mode
+  (`sc merge > records.ndjson` auto-resolves to ndjson — no viewport). See FDR 0015 and
   `internal/present`.
 - **Path resolution**: `worktree.ResolvePath()` is the single entry point for
   target → absolute path conversion. Session keys follow
