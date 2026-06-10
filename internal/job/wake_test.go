@@ -93,7 +93,7 @@ func TestStartEmitsClownLifecycleOnSuccess(t *testing.T) {
 	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, true))
 
 	runWaked(t, wt, KindMerge, func(ctx context.Context, w io.Writer) (string, bool) {
-		return "ok 1 - hook\n1..1", false
+		return "✓ hook", false
 	})
 
 	inv := recordedInvocations(t, argsFile)
@@ -123,7 +123,7 @@ func TestStartEmitsFailedStateWithFailureLine(t *testing.T) {
 	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, true))
 
 	runWaked(t, wt, KindCheck, func(ctx context.Context, w io.Writer) (string, bool) {
-		return "ok 1 - rebase\nnot ok 2 - pre-merge hook\n1..2", true
+		return "✓ rebase\n✗ pre-merge hook", true
 	})
 
 	inv := recordedInvocations(t, argsFile)
@@ -133,7 +133,7 @@ func TestStartEmitsFailedStateWithFailureLine(t *testing.T) {
 	assertArgv(t, inv[1], []string{
 		"job", "done", "job-deadbeef",
 		"--state", "failed",
-		"--message", "check failed: not ok 2 - pre-merge hook",
+		"--message", "check failed: ✗ pre-merge hook",
 		"--result-ref", "spinclass session-job-status",
 	})
 }
@@ -177,7 +177,7 @@ func TestStartNoEmitWhenClownAbsent(t *testing.T) {
 	// CLOWN_BIN deliberately unset (TestMain stripped it).
 
 	runWaked(t, wt, KindMerge, func(ctx context.Context, w io.Writer) (string, bool) {
-		return "ok 1 - hook", false
+		return "✓ hook", false
 	})
 
 	if _, err := os.Stat(argsFile); err == nil {
@@ -211,7 +211,7 @@ func TestStartReturnsImmediatelyDespiteSlowClown(t *testing.T) {
 
 	began := time.Now()
 	if _, err := Start(wt, KindMerge, false, "fast-job", func(ctx context.Context, w io.Writer) (string, bool) {
-		return "ok 1 - hook", false
+		return "✓ hook", false
 	}); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestStartReturnsSnapshotNotSharedPointer(t *testing.T) {
 	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, true))
 
 	ret, err := Start(wt, KindMerge, false, "snap-job", func(ctx context.Context, w io.Writer) (string, bool) {
-		return "ok 1 - hook", false
+		return "✓ hook", false
 	})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -263,7 +263,7 @@ func TestStartEmitFailureDoesNotAffectJob(t *testing.T) {
 	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, false))
 
 	runWaked(t, wt, KindMerge, func(ctx context.Context, w io.Writer) (string, bool) {
-		return "ok 1 - hook", false
+		return "✓ hook", false
 	})
 
 	j, err := Read(wt)

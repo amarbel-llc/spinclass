@@ -15,8 +15,9 @@ import (
 
 // Func is the unit of work a background job runs. It receives a context that
 // is cancelled by Cancel and a writer for the pre-merge hook's live output
-// (streamed to job.log). It returns the rendered result text (the same TAP
-// payload the synchronous tool produces) and whether that result is an error.
+// (streamed to job.log). It returns the rendered result text (the same plain
+// verdict lines — "✓ <desc>"/"✗ <desc>" from present.RenderPlain — the
+// synchronous tool produces) and whether that result is an error.
 type Func func(ctx context.Context, hookOutput io.Writer) (text string, isErr bool)
 
 type runEntry struct {
@@ -140,11 +141,12 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 	return &snapshot, nil
 }
 
-// firstFailureLine returns the first TAP failure line ("not ok ...") of the
-// rendered result text, for a one-line wake message that names what broke.
+// firstFailureLine returns the first plain-verdict failure line ("✗ <desc>",
+// as rendered by present.RenderPlain) of the rendered result text, for a
+// one-line wake message that names what broke.
 func firstFailureLine(text string) string {
 	for _, line := range strings.Split(text, "\n") {
-		if strings.HasPrefix(line, "not ok") {
+		if strings.HasPrefix(line, "✗ ") {
 			return line
 		}
 	}

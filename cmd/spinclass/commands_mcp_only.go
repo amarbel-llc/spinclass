@@ -1067,7 +1067,7 @@ func handleNothingButTheTruth(_ context.Context, args json.RawMessage, _ command
 	return command.TextResult(fmt.Sprintf("ok - attestation recorded for %d skill(s); call merge-this-session or check-this-session to consume it", len(required))), nil
 }
 
-// renderValidationError formats a ValidationError as a TAP error body
+// renderValidationError formats a ValidationError as a plain-text error body
 // that names the required list and the offending entries so the agent
 // can correct and retry without re-fetching the skill list.
 func renderValidationError(required []sweatfile.PreMergeSkill, verr attestation.ValidationError) string {
