@@ -26,7 +26,8 @@ just deps     # Regenerate gomod2nix.toml after dependency changes
 calls `buildApp()` (in `commands.go`) and dispatches via `app.RunCLI()`.
 Commands are split across `commands_query.go`, `commands_session.go`,
 `commands_perms.go`, `commands_hooks.go`, `commands_mcp.go`, and
-`commands_mcp_only.go`. Global flags: `--format` (tap/table), `--verbose`.
+`commands_mcp_only.go`. Global flags: `--format` (tap/table for most
+commands; merge/check take auto|viewport|plain|ndjson), `--verbose`.
 
 The same `command.App` registers both CLI subcommands and MCP tools. Commands
 with `Run` are exposed as MCP tools via `serve`; commands with `RunCLI` are
@@ -122,8 +123,15 @@ worktree paths. Applies `claude-allow` rules from sweatfile to
 
 ## Key Patterns
 
-- **TAP-14 everywhere**: Most commands default to `--format tap`. Diagnostics
-  include git stderr and exit codes in YAML blocks.
+- **TAP-14 everywhere — except merge/check**: Most commands default to
+  `--format tap`. Diagnostics include git stderr and exit codes in YAML
+  blocks. **Carve-out**: `sc merge`/`sc check` and the merge/check MCP tools
+  emit ndjson-crap (the CRAP-2 wire format) instead — their `--format` is
+  `auto` (default: live viewport on a TTY, raw ndjson records when piped) |
+  `viewport` | `plain` (verdict-per-line) | `ndjson`; `tap`/`table` are
+  rejected there. The viewport renders to stderr, records go to stdout, so
+  `sc merge > records.ndjson` keeps a live viewport. See FDR 0015 and
+  `internal/present`.
 - **Path resolution**: `worktree.ResolvePath()` is the single entry point for
   target → absolute path conversion. Session keys follow
   `<repo-dirname>/<branch>` format.
@@ -186,7 +194,7 @@ From an **implicit (main-checkout) session** (FDR 0014), `merge-this-session` /
 `session.FindImplicitAtCwd` and route to `merge.MergeImplicit`: there is nothing
 to rebase or ff-merge (the work is already on the default branch), so merge runs
 `[hooks].pre-merge` against HEAD (in the isolated build worktree) then `git push`
-the default branch as a distinct TAP step. The MCP handlers enforce the implicit
+the default branch as a distinct test record. The MCP handlers enforce the implicit
 attestation gate (`enforceAttestationImplicit` → `attestation.CheckImplicit`);
 the `sc merge` CLI path is gate-free. `sc close` on an implicit session drops
 `state-<rand>.json` only (never the checkout, no nix gc), and `sc list` marks it
@@ -206,7 +214,7 @@ per-server request timeout for long `[hooks].pre-merge` runs:
 - `session-job-status` (always registered, read-only) — reports the worktree
   session's job: `running|succeeded|failed|cancelled|interrupted`, elapsed,
   last-activity (job.log mtime), a tail of live output, and the full result
-  (the same TAP payload the sync tool returns) once finished.
+  (the same plain ✓/✗ verdict text the sync tool returns) once finished.
 - `session-job-cancel` (always registered) — cancels the running job, killing
   the hook subprocess via the job's context.
 - `session-job-wait` (always registered) — blocks until the running job finishes
@@ -259,8 +267,8 @@ failed`) and never affect the job result, and the rollback is clown's
 spinclass-side switch). Known limitation: a job whose serve process
 dies mid-run is reported `interrupted` by the next `session-job-status`
 read but never wakes — a dead producer can't emit. The failed-state
-wake message carries the first `not ok` line of the result when
-present. `internal/clown` is the shared producer integration (chat's
+wake message carries the first `✗ ` line of the plain-rendered result
+when present. `internal/clown` is the shared producer integration (chat's
 `EmitWake` delegates to it).
 
 ### Pre-merge hook build worktree
@@ -282,11 +290,11 @@ pull → rebase → nothing-to-merge short-circuit → **pin** the post-rebase
 --ff-only <pinnedSha>` → teardown → push). `merge --ff-only` targets the pinned
 **sha**, not the branch name, so a commit landing on the branch while the hook
 runs is left for a later merge instead of leaking in. `merge-this-session-async`
-runs `PrepareMerge` **synchronously** (sharing one `tap.Writer`+buffer via
-`merge.NewMergeWriter`) before returning the job id — so rebase conflicts /
+runs `PrepareMerge` **synchronously** (sharing one `crap.Reporter`+buffer)
+before returning the job id — so rebase conflicts /
 nothing-to-merge surface immediately and the rebase can't race the agent's next
-edits — then backgrounds `FinishMerge`, whose TAP is appended to the same buffer
-for one continuous result stream. The sync `merge-this-session` and both
+edits — then backgrounds `FinishMerge`, whose records are appended to the same
+buffer for one continuous result stream. The sync `merge-this-session` and both
 `check`/`check-this-session` paths inherit the build worktree transparently
 (check pins `HEAD`). Opt out per the sweatfile cascade with
 `[hooks].disable-merge-build-worktree = true` (runs the hook in place; legacy).
@@ -422,11 +430,15 @@ and fish included.
 ## Dependencies
 
 Module: `github.com/amarbel-llc/spinclass`. Key dependencies: -
-`github.com/amarbel-llc/tap/go` --- TAP-14 output library -
+`github.com/amarbel-llc/tap/go` --- TAP-14 output library (non-merge/check
+commands) -
 `github.com/amarbel-llc/crap/go-crap/v2` --- ndjson-crap reader (consumed by
 the `ndjson-crap` pre-merge-output-format, where the hook emits canonical
-ndjson-crap directly; see `internal/check`; bridged from the `crap` flake
-input via goFlakeInputs) -
+ndjson-crap directly; see `internal/check`) AND the merge/check output stack:
+`package crap`'s `Reporter` backs merge/check stage emission and
+`package viewport` backs the TTY presentation + plain rendering (consumer
+wiring in `internal/present`; bridged from the `crap` flake input via
+goFlakeInputs) -
 `github.com/amarbel-llc/purse-first/libs/go-mcp` --- MCP server framework -
 `github.com/amarbel-llc/tommy` --- TOML library - `github.com/spf13/cobra` ---
 CLI framework

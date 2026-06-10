@@ -291,6 +291,12 @@ func TestBuildMergeThisSessionDescription_NoHook(t *testing.T) {
 	if !strings.Contains(got, "Merge the current session's worktree") {
 		t.Errorf("description missing baseline text:\n%s", got)
 	}
+	if !strings.Contains(got, "plain verdict lines") {
+		t.Errorf("description should advertise the plain verdict-line result shape (TAP is retired for merge/check):\n%s", got)
+	}
+	if strings.Contains(got, "TAP") {
+		t.Errorf("description still claims TAP output:\n%s", got)
+	}
 }
 
 func TestBuildMergeThisSessionDescription_WithHook(t *testing.T) {
@@ -307,6 +313,12 @@ func TestBuildCheckThisSessionDescription_NoHook(t *testing.T) {
 	got := buildCheckThisSessionDescription("")
 	if strings.Contains(got, "configured pre-merge command is") {
 		t.Errorf("description should not advertise pre-merge command when hook is unset:\n%s", got)
+	}
+	if !strings.Contains(got, "plain verdict lines") {
+		t.Errorf("description should advertise the plain verdict-line result shape (TAP is retired for merge/check):\n%s", got)
+	}
+	if strings.Contains(got, "TAP") || strings.Contains(got, "test point") {
+		t.Errorf("description still claims TAP output:\n%s", got)
 	}
 }
 

@@ -73,7 +73,9 @@ sc clean
 Multi-word descriptions must be quoted, e.g. `sc start "fix login bug"`.
 Global flags: `--format` (`tap`/`table`) and `--verbose`. Most commands default
 to [TAP-14](https://testanything.org/) output, with git stderr and exit codes
-surfaced in YAML diagnostic blocks.
+surfaced in YAML diagnostic blocks. `sc merge` and `sc check` instead emit
+ndjson-crap and take `--format auto|viewport|plain|ndjson` (auto: live
+viewport on a TTY, raw records when piped).
 
 ## Configuration: the sweatfile
 

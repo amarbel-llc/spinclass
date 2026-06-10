@@ -89,27 +89,23 @@ and
 .B check-this-session
 flows emit a
 .B compact response shape:
-the pre-merge hook step is rendered as a single TAP test point whose
-YAMLish diagnostic carries
+the pre-merge hook stage is a single verdict line in the plain
+rendering of the ndjson-crap stream; on failure its diagnostic carries
 .BR command ,
 .BR exit_code ,
 .BR elapsed ,
-a 50-line
+a 15-line
 .B tail
 of stdout+stderr, and a
 .B resource_link
 URI of the form
 .B madder://blobs/<digest>
 that points at the full hook output stored in the per-worktree blob
-store.
-A
-.B "# directive: ..."
-comment is emitted at the top of the response indicating the
-resource_link only needs to be followed on failure.
-Without madder pinned, the merge/check tools fall back to the
-historical
-.B OutputBlock
-shape that inlines the entire hook output.
+store (surfaced to MCP clients as a resource_link content block; it
+only needs to be followed on failure).
+Without madder pinned, no blob is stored and no resource_link is
+emitted; the hook's lines still stream as live output records (the
+viewport's rolling tail), and a failure falls back to the inline tail.
 .SS direnv
 When the
 .B direnv
