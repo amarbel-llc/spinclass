@@ -1,9 +1,14 @@
 ---
-status: accepted
+status: superseded by FDR 0015
 date: 2026-05-02
 ---
 
 # `merge-this-session` output shape
+
+> **Superseded (2026-06-10):** FDR 0015 re-platformed merge/check output
+> from the TAP shape described here onto ndjson-crap; tool results are now
+> plain ✓/✗ verdict lines. The madder blob + resource_link mechanics this
+> record introduced survive unchanged. Kept for the historical rationale.
 
 ## Problem Statement
 
