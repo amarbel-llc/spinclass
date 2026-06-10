@@ -3,6 +3,8 @@ package merge
 import (
 	"bytes"
 	"context"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/amarbel-llc/crap/go-crap/v2/crap"
+	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
@@ -82,6 +86,79 @@ func setupWorktree(t *testing.T, repoDir, branch string) string {
 	return wtPath
 }
 
+// decodeRecords parses a buffered ndjson-crap stream into its records.
+func decodeRecords(t *testing.T, raw []byte) []ndjsoncrap.Record {
+	t.Helper()
+	rd := ndjsoncrap.NewReader(bytes.NewReader(raw))
+	var recs []ndjsoncrap.Record
+	for {
+		rec, err := rd.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("decoding ndjson-crap stream: %v\nstream:\n%s", err, raw)
+		}
+		recs = append(recs, rec)
+	}
+	return recs
+}
+
+// testRecords extracts the result-family test records from the stream,
+// in wire order.
+func testRecords(recs []ndjsoncrap.Record) []ndjsoncrap.Test {
+	var tests []ndjsoncrap.Test
+	for _, rec := range recs {
+		if tr, ok := rec.(ndjsoncrap.Test); ok {
+			tests = append(tests, tr)
+		}
+	}
+	return tests
+}
+
+// hasSummary reports whether the stream carries the result-family
+// summary framing (the ndjson-crap analogue of TAP's plan line).
+func hasSummary(recs []ndjsoncrap.Record) bool {
+	for _, rec := range recs {
+		if _, ok := rec.(ndjsoncrap.Summary); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// assertTestPoint asserts tests[i] exists, has 1-based number i+1, the given
+// description, and the given verdict.
+func assertTestPoint(t *testing.T, tests []ndjsoncrap.Test, i int, desc string, ok bool) {
+	t.Helper()
+	if i >= len(tests) {
+		t.Fatalf("expected test point #%d %q, but stream has only %d test records", i+1, desc, len(tests))
+	}
+	tr := tests[i]
+	if tr.N != i+1 {
+		t.Errorf("test point %q: n = %d, want %d", desc, tr.N, i+1)
+	}
+	if tr.Description != desc {
+		t.Errorf("test point #%d: description = %q, want %q", i+1, tr.Description, desc)
+	}
+	if tr.OK != ok {
+		t.Errorf("test point %q: ok = %v, want %v", desc, tr.OK, ok)
+	}
+}
+
+// runResolved drives Resolved with a Reporter over a bytes.Buffer (a
+// Reporter writes its Meta record synchronously, so no pipe) and returns
+// the decoded record stream and Resolved's error.
+func runResolved(t *testing.T, mock *mockExecutor, repoDir, wtPath, branch, defaultBranch string, gitSync, inSession bool) ([]ndjsoncrap.Record, error) {
+	t.Helper()
+	var buf bytes.Buffer
+	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
+	ts := rep.TestStream(0)
+	_, err := Resolved(mock, rep, ts, repoDir, wtPath, branch, defaultBranch, gitSync, inSession)
+	ts.Finish()
+	return decodeRecords(t, buf.Bytes()), err
+}
+
 // TestPrepareMergePinsShaAcrossConcurrentCommit verifies the core #106
 // guarantee: PrepareMerge pins the post-rebase sha, and FinishMerge merges
 // exactly that sha even when a new commit lands on the branch afterward
@@ -101,8 +178,9 @@ func TestPrepareMergePinsShaAcrossConcurrentCommit(t *testing.T) {
 
 	// No sweatfile → no pre-merge hook → FinishMerge skips the hook entirely.
 	var buf bytes.Buffer
-	tw := NewMergeWriter(&buf)
-	pinnedSha, err := PrepareMerge(tw, &buf, repoDir, wtPath, "feature-pin", "main", false, false)
+	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
+	ts := rep.TestStream(0)
+	pinnedSha, err := PrepareMerge(ts, repoDir, wtPath, "feature-pin", "main", false)
 	if err != nil {
 		t.Fatalf("PrepareMerge: %v\n%s", err, buf.String())
 	}
@@ -118,10 +196,11 @@ func TestPrepareMergePinsShaAcrossConcurrentCommit(t *testing.T) {
 	}
 
 	// FinishMerge in-session (inSession=true keeps the worktree).
-	if _, err := FinishMerge(context.Background(), &mockExecutor{}, tw, &buf,
-		repoDir, wtPath, "feature-pin", "main", pinnedSha, false, true, false, nil); err != nil {
+	if _, err := FinishMerge(context.Background(), &mockExecutor{}, rep, ts,
+		repoDir, wtPath, "feature-pin", "main", pinnedSha, false, true, nil); err != nil {
 		t.Fatalf("FinishMerge: %v\n%s", err, buf.String())
 	}
+	ts.Finish()
 
 	// main must be at the pinned sha, NOT the concurrent commit B.
 	if mainTip := runGit(t, repoDir, "rev-parse", "main"); mainTip != pinnedSha {
@@ -221,10 +300,7 @@ func TestResolvedMergesAndRemovesWorktree(t *testing.T) {
 	runGit(t, wtPath, "add", "new.txt")
 	runGit(t, wtPath, "commit", "-m", "add new file")
 
-	mock := &mockExecutor{}
-	var buf bytes.Buffer
-
-	_, err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-merge", "main", false, false, false)
+	recs, err := runResolved(t, &mockExecutor{}, repoDir, wtPath, "feature-merge", "main", false, false)
 	if err != nil {
 		t.Fatalf("Resolved() error: %v", err)
 	}
@@ -246,14 +322,19 @@ func TestResolvedMergesAndRemovesWorktree(t *testing.T) {
 		t.Error("expected branch feature-merge to be deleted, but it still exists")
 	}
 
-	// TAP output should contain all three steps
-	got := buf.String()
-	if !strings.Contains(got, "ok") {
-		t.Errorf("expected TAP ok lines, got: %q", got)
+	// Every stage should be a passing test record on the wire.
+	tests := testRecords(recs)
+	if len(tests) == 0 {
+		t.Fatalf("expected test records, got none")
+	}
+	for _, tr := range tests {
+		if !tr.OK {
+			t.Errorf("expected all stages ok, got failing %+v", tr)
+		}
 	}
 }
 
-func TestResolvedTapOutput(t *testing.T) {
+func TestResolvedRecordStream(t *testing.T) {
 	repoDir := setupRepo(t)
 
 	wtPath := setupWorktree(t, repoDir, "feature-tap")
@@ -264,34 +345,25 @@ func TestResolvedTapOutput(t *testing.T) {
 	runGit(t, wtPath, "add", "tap.txt")
 	runGit(t, wtPath, "commit", "-m", "tap commit")
 
-	mock := &mockExecutor{}
-	var buf bytes.Buffer
-
-	_, err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-tap", "main", false, false, false)
+	recs, err := runResolved(t, &mockExecutor{}, repoDir, wtPath, "feature-tap", "main", false, false)
 	if err != nil {
 		t.Fatalf("Resolved() error: %v", err)
 	}
 
-	got := buf.String()
-
-	if !strings.Contains(got, "ok 1 - rebase feature-tap") {
-		t.Errorf("expected rebase test point, got: %q", got)
+	tests := testRecords(recs)
+	if len(tests) != 4 {
+		t.Fatalf("expected 4 test records, got %d: %+v", len(tests), tests)
 	}
-	if !strings.Contains(got, "ok 2 - merge feature-tap") {
-		t.Errorf("expected merge test point, got: %q", got)
-	}
-	if !strings.Contains(got, "ok 3 - remove worktree feature-tap") {
-		t.Errorf("expected remove worktree test point, got: %q", got)
-	}
-	if !strings.Contains(got, "ok 4 - delete branch feature-tap") {
-		t.Errorf("expected delete branch test point, got: %q", got)
-	}
-	if !strings.Contains(got, "1..4") {
-		t.Errorf("expected plan 1..4, got: %q", got)
+	assertTestPoint(t, tests, 0, "rebase feature-tap", true)
+	assertTestPoint(t, tests, 1, "merge feature-tap", true)
+	assertTestPoint(t, tests, 2, "remove worktree feature-tap", true)
+	assertTestPoint(t, tests, 3, "delete branch feature-tap", true)
+	if !hasSummary(recs) {
+		t.Errorf("expected summary record (stream framing), got: %+v", recs)
 	}
 }
 
-func TestResolvedGitSyncTapOutput(t *testing.T) {
+func TestResolvedGitSyncRecordStream(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("GIT_CEILING_DIRECTORIES", root)
 
@@ -325,36 +397,24 @@ func TestResolvedGitSyncTapOutput(t *testing.T) {
 	runGit(t, wtPath, "add", "sync.txt")
 	runGit(t, wtPath, "commit", "-m", "sync commit")
 
-	mock := &mockExecutor{}
-	var buf bytes.Buffer
-
-	_, err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-sync", "main", true, false, false)
+	recs, err := runResolved(t, &mockExecutor{}, repoDir, wtPath, "feature-sync", "main", true, false)
 	if err != nil {
 		t.Fatalf("Resolved() error: %v", err)
 	}
 
-	got := buf.String()
-
-	if !strings.Contains(got, "ok 1 - pull main") {
-		t.Errorf("expected pull test point first (so rebase target is fresh), got: %q", got)
+	tests := testRecords(recs)
+	if len(tests) != 6 {
+		t.Fatalf("expected 6 test records, got %d: %+v", len(tests), tests)
 	}
-	if !strings.Contains(got, "ok 2 - rebase feature-sync") {
-		t.Errorf("expected rebase test point, got: %q", got)
-	}
-	if !strings.Contains(got, "ok 3 - merge feature-sync") {
-		t.Errorf("expected merge test point, got: %q", got)
-	}
-	if !strings.Contains(got, "ok 4 - remove worktree feature-sync") {
-		t.Errorf("expected remove worktree test point, got: %q", got)
-	}
-	if !strings.Contains(got, "ok 5 - delete branch feature-sync") {
-		t.Errorf("expected delete branch test point, got: %q", got)
-	}
-	if !strings.Contains(got, "ok 6 - push") {
-		t.Errorf("expected push test point, got: %q", got)
-	}
-	if !strings.Contains(got, "1..6") {
-		t.Errorf("expected plan 1..6, got: %q", got)
+	// Pull must come first so the rebase target is fresh.
+	assertTestPoint(t, tests, 0, "pull main", true)
+	assertTestPoint(t, tests, 1, "rebase feature-sync", true)
+	assertTestPoint(t, tests, 2, "merge feature-sync", true)
+	assertTestPoint(t, tests, 3, "remove worktree feature-sync", true)
+	assertTestPoint(t, tests, 4, "delete branch feature-sync", true)
+	assertTestPoint(t, tests, 5, "push", true)
+	if !hasSummary(recs) {
+		t.Errorf("expected summary record (stream framing), got: %+v", recs)
 	}
 }
 
@@ -416,20 +476,21 @@ func TestResolvedGitSyncPullsBeforeRebase(t *testing.T) {
 	// Without the fix, Resolved() would rebase feature-stale onto local main
 	// (stale) and then `git merge --ff-only` on main would fail.
 
-	mock := &mockExecutor{}
-	var buf bytes.Buffer
-
-	_, err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-stale", "main", true, false, false)
+	recs, err := runResolved(t, &mockExecutor{}, repoDir, wtPath, "feature-stale", "main", true, false)
 	if err != nil {
-		t.Fatalf("Resolved() error (stale local master should not cause failure): %v\n\nTAP output:\n%s", err, buf.String())
+		t.Fatalf("Resolved() error (stale local master should not cause failure): %v\n\nrecords:\n%+v", err, recs)
 	}
 
-	got := buf.String()
-	if !strings.Contains(got, "ok 1 - pull main") {
-		t.Errorf("expected upfront pull as step 1, got: %q", got)
+	tests := testRecords(recs)
+	assertTestPoint(t, tests, 0, "pull main", true)
+	merged := false
+	for _, tr := range tests {
+		if tr.Description == "merge feature-stale" && tr.OK {
+			merged = true
+		}
 	}
-	if !strings.Contains(got, "ok 3 - merge feature-stale") {
-		t.Errorf("expected merge to succeed after upfront pull, got: %q", got)
+	if !merged {
+		t.Errorf("expected merge to succeed after upfront pull, got: %+v", tests)
 	}
 
 	// And the concurrent origin commit should be present in local main now.
@@ -443,15 +504,28 @@ func TestResolvedGitSyncPullsBeforeRebase(t *testing.T) {
 }
 
 func TestResolvedRepoNotFound(t *testing.T) {
-	mock := &mockExecutor{}
-	var buf bytes.Buffer
-
-	_, err := Resolved(mock, &buf, nil, "tap", "/nonexistent/path", "/nonexistent/wt", "feature", "main", false, false, false)
+	recs, err := runResolved(t, &mockExecutor{}, "/nonexistent/path", "/nonexistent/wt", "feature", "main", false, false)
 	if err == nil {
 		t.Error("expected error for nonexistent repo, got nil")
 	}
 	if !strings.Contains(err.Error(), "repository not found") {
 		t.Errorf("expected 'repository not found' error, got: %v", err)
+	}
+	if tests := testRecords(recs); len(tests) != 0 {
+		t.Errorf("expected no test records before repo validation, got: %+v", tests)
+	}
+}
+
+func TestResolvedRequiresDefaultBranch(t *testing.T) {
+	repoDir := setupRepo(t)
+	wtPath := setupWorktree(t, repoDir, "feature-nodefault")
+
+	_, err := runResolved(t, &mockExecutor{}, repoDir, wtPath, "feature-nodefault", "", false, false)
+	if err == nil {
+		t.Fatal("expected error for empty defaultBranch, got nil")
+	}
+	if !strings.Contains(err.Error(), "default branch not resolved") {
+		t.Errorf("expected 'default branch not resolved' error, got: %v", err)
 	}
 }
 
@@ -474,12 +548,23 @@ func TestResolvedDivergedBranch(t *testing.T) {
 	runGit(t, repoDir, "add", "diverge.txt")
 	runGit(t, repoDir, "commit", "-m", "conflicting commit on main")
 
-	mock := &mockExecutor{}
-	var buf bytes.Buffer
-
-	_, err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-diverge", "main", false, false, false)
+	recs, err := runResolved(t, &mockExecutor{}, repoDir, wtPath, "feature-diverge", "main", false, false)
 	if err == nil {
 		t.Error("expected error for conflicting rebase, got nil")
+	}
+
+	// The rebase failure surfaces as a failing test record with the git
+	// output in its diagnostic.
+	tests := testRecords(recs)
+	if len(tests) != 1 || tests[0].OK {
+		t.Errorf("expected exactly one failing rebase record, got: %+v", tests)
+	} else {
+		if tests[0].Description != "rebase feature-diverge" {
+			t.Errorf("expected failing 'rebase feature-diverge' record, got %q", tests[0].Description)
+		}
+		if out, _ := tests[0].Diagnostic["output"].(string); out == "" {
+			t.Errorf("expected git output in failure diagnostic, got %+v", tests[0].Diagnostic)
+		}
 	}
 
 	// Abort the rebase to clean up
@@ -498,9 +583,7 @@ func TestResolvedInSessionSkipsCleanup(t *testing.T) {
 	runGit(t, wtPath, "commit", "-m", "session commit")
 
 	mock := &mockExecutor{}
-	var buf bytes.Buffer
-
-	_, err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-insession", "main", false, true, false)
+	_, err := runResolved(t, mock, repoDir, wtPath, "feature-insession", "main", false, true)
 	if err != nil {
 		t.Fatalf("Resolved() error: %v", err)
 	}
@@ -528,7 +611,7 @@ func TestResolvedInSessionSkipsCleanup(t *testing.T) {
 	}
 }
 
-func TestResolvedInSessionTapOutput(t *testing.T) {
+func TestResolvedInSessionRecordStream(t *testing.T) {
 	repoDir := setupRepo(t)
 
 	wtPath := setupWorktree(t, repoDir, "feature-session-tap")
@@ -539,31 +622,19 @@ func TestResolvedInSessionTapOutput(t *testing.T) {
 	runGit(t, wtPath, "add", "tap.txt")
 	runGit(t, wtPath, "commit", "-m", "session tap commit")
 
-	mock := &mockExecutor{}
-	var buf bytes.Buffer
-
-	_, err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-session-tap", "main", false, true, false)
+	recs, err := runResolved(t, &mockExecutor{}, repoDir, wtPath, "feature-session-tap", "main", false, true)
 	if err != nil {
 		t.Fatalf("Resolved() error: %v", err)
 	}
 
-	got := buf.String()
-
-	if !strings.Contains(got, "ok 1 - rebase feature-session-tap") {
-		t.Errorf("expected rebase test point, got: %q", got)
+	tests := testRecords(recs)
+	if len(tests) != 2 {
+		t.Fatalf("expected exactly 2 test records in session mode (no cleanup stages), got %d: %+v", len(tests), tests)
 	}
-	if !strings.Contains(got, "ok 2 - merge feature-session-tap") {
-		t.Errorf("expected merge test point, got: %q", got)
-	}
-	// Should NOT contain worktree removal or branch deletion
-	if strings.Contains(got, "remove worktree") {
-		t.Errorf("did not expect remove worktree in session mode, got: %q", got)
-	}
-	if strings.Contains(got, "delete branch") {
-		t.Errorf("did not expect delete branch in session mode, got: %q", got)
-	}
-	if !strings.Contains(got, "1..2") {
-		t.Errorf("expected plan 1..2, got: %q", got)
+	assertTestPoint(t, tests, 0, "rebase feature-session-tap", true)
+	assertTestPoint(t, tests, 1, "merge feature-session-tap", true)
+	if !hasSummary(recs) {
+		t.Errorf("expected summary record (stream framing), got: %+v", recs)
 	}
 }
 
@@ -589,10 +660,7 @@ func TestResolvedDisabledByMergeFlag(t *testing.T) {
 	mainLogBefore := runGit(t, repoDir, "log", "--oneline", "main")
 	branchLogBefore := runGit(t, repoDir, "log", "--oneline", "feature-disabled")
 
-	mock := &mockExecutor{}
-	var buf bytes.Buffer
-
-	_, err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-disabled", "main", false, false, false)
+	recs, err := runResolved(t, &mockExecutor{}, repoDir, wtPath, "feature-disabled", "main", false, false)
 	if err == nil {
 		t.Fatal("expected error when disable-merge is set, got nil")
 	}
@@ -606,12 +674,18 @@ func TestResolvedDisabledByMergeFlag(t *testing.T) {
 		t.Errorf("expected 'sc check' hint in error, got: %v", err)
 	}
 
-	got := buf.String()
-	if !strings.Contains(got, "disable-merge") {
-		t.Errorf("expected TAP output to mention 'disable-merge', got: %s", got)
+	// The gate surfaces as a single failing test record whose diagnostic
+	// carries the full message.
+	tests := testRecords(recs)
+	if len(tests) != 1 || tests[0].OK {
+		t.Fatalf("expected exactly one failing test record, got: %+v", tests)
 	}
-	if !strings.Contains(got, "sc check") {
-		t.Errorf("expected TAP hint 'sc check', got: %s", got)
+	msg, _ := tests[0].Diagnostic["message"].(string)
+	if !strings.Contains(msg, "disable-merge") {
+		t.Errorf("expected diagnostic message to mention 'disable-merge', got: %q", msg)
+	}
+	if !strings.Contains(msg, "sc check") {
+		t.Errorf("expected diagnostic hint 'sc check', got: %q", msg)
 	}
 
 	// No merge-y side effects: main and the feature branch should be
@@ -642,26 +716,29 @@ func TestResolvedShortCircuitsNoOpMerge(t *testing.T) {
 	mainLogBefore := runGit(t, repoDir, "log", "--oneline", "main")
 	branchLogBefore := runGit(t, repoDir, "log", "--oneline", "feature-noop")
 
-	mock := &mockExecutor{}
-	var buf bytes.Buffer
-
-	_, err := Resolved(mock, &buf, nil, "tap", repoDir, wtPath, "feature-noop", "main", false, false, false)
+	recs, err := runResolved(t, &mockExecutor{}, repoDir, wtPath, "feature-noop", "main", false, false)
 	if err == nil {
-		t.Fatalf("expected error when branch has no commits ahead of main, got nil. Output:\n%s", buf.String())
+		t.Fatalf("expected error when branch has no commits ahead of main, got nil. Records:\n%+v", recs)
 	}
 	if !strings.Contains(err.Error(), "nothing to merge") {
 		t.Errorf("expected 'nothing to merge' in error, got: %v", err)
 	}
 
-	got := buf.String()
-	if !strings.Contains(got, "not ok") {
-		t.Errorf("expected TAP 'not ok' on short-circuit, got:\n%s", got)
+	// The short-circuit is a failing 'merge' record after the passing
+	// rebase; the pre-merge hook never runs.
+	tests := testRecords(recs)
+	if len(tests) != 2 {
+		t.Fatalf("expected rebase + failing merge records, got %d: %+v", len(tests), tests)
 	}
-	if !strings.Contains(got, "nothing to merge") {
-		t.Errorf("expected TAP message to mention 'nothing to merge', got:\n%s", got)
+	assertTestPoint(t, tests, 0, "rebase feature-noop", true)
+	assertTestPoint(t, tests, 1, "merge feature-noop", false)
+	if msg, _ := tests[1].Diagnostic["message"].(string); !strings.Contains(msg, "nothing to merge") {
+		t.Errorf("expected diagnostic message to mention 'nothing to merge', got: %q", msg)
 	}
-	if strings.Contains(got, "pre-merge hook") {
-		t.Errorf("did not expect pre-merge hook to run when nothing to merge, got:\n%s", got)
+	for _, tr := range tests {
+		if strings.Contains(tr.Description, "pre-merge hook") {
+			t.Errorf("did not expect pre-merge hook to run when nothing to merge, got: %+v", tr)
+		}
 	}
 
 	// No merge-y side effects: branches, worktree, refs all intact.
@@ -727,17 +804,18 @@ func TestMergeImplicitRunsHookThenPushesNoRebase(t *testing.T) {
 	runGit(t, checkout, "commit", "-m", "work on master")
 
 	var buf bytes.Buffer
-	tw := NewMergeWriter(&buf)
-	links, err := MergeImplicit(context.Background(), tw, &buf, checkout, checkout, "master", true, nil)
-	tw.Plan()
+	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
+	ts := rep.TestStream(0)
+	links, err := MergeImplicit(context.Background(), rep, ts, checkout, checkout, "master", nil)
+	ts.Finish()
 	if err != nil {
-		t.Fatalf("MergeImplicit: %v\nTAP:\n%s", err, buf.String())
+		t.Fatalf("MergeImplicit: %v\nrecords:\n%s", err, buf.String())
 	}
 	_ = links
 
 	// Hook ran: marker exists.
 	if _, statErr := os.Stat(marker); statErr != nil {
-		t.Errorf("expected pre-merge hook marker %s to exist, stat err: %v\nTAP:\n%s", marker, statErr, buf.String())
+		t.Errorf("expected pre-merge hook marker %s to exist, stat err: %v\nrecords:\n%s", marker, statErr, buf.String())
 	}
 
 	// Push landed: bare upstream's master == checkout HEAD.
@@ -747,12 +825,19 @@ func TestMergeImplicitRunsHookThenPushesNoRebase(t *testing.T) {
 		t.Errorf("push did not land: bare master = %s, checkout HEAD = %s", bareMaster, checkoutHead)
 	}
 
-	got := buf.String()
-	if !strings.Contains(got, "push master") {
-		t.Errorf("expected 'push master' TAP step, got:\n%s", got)
+	recs := decodeRecords(t, buf.Bytes())
+	tests := testRecords(recs)
+	pushed := false
+	for _, tr := range tests {
+		if tr.Description == "push master" && tr.OK {
+			pushed = true
+		}
+		if strings.Contains(tr.Description, "rebase") {
+			t.Errorf("did not expect any rebase in implicit merge, got: %+v", tr)
+		}
 	}
-	if strings.Contains(got, "rebase") {
-		t.Errorf("did not expect any rebase in implicit merge, got:\n%s", got)
+	if !pushed {
+		t.Errorf("expected passing 'push master' test record, got: %+v", tests)
 	}
 }
 
@@ -799,11 +884,12 @@ func TestMergeImplicitDisabledByMergeFlag(t *testing.T) {
 	bareMasterBefore := runGit(t, bare, "rev-parse", "master")
 
 	var buf bytes.Buffer
-	tw := NewMergeWriter(&buf)
-	_, err := MergeImplicit(context.Background(), tw, &buf, checkout, checkout, "master", false, nil)
-	tw.Plan()
+	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
+	ts := rep.TestStream(0)
+	_, err := MergeImplicit(context.Background(), rep, ts, checkout, checkout, "master", nil)
+	ts.Finish()
 	if err == nil {
-		t.Fatalf("expected error when disable-merge is set, got nil\nTAP:\n%s", buf.String())
+		t.Fatalf("expected error when disable-merge is set, got nil\nrecords:\n%s", buf.String())
 	}
 	if !strings.Contains(err.Error(), "merge disabled") {
 		t.Errorf("expected 'merge disabled' in error, got: %v", err)
@@ -812,12 +898,18 @@ func TestMergeImplicitDisabledByMergeFlag(t *testing.T) {
 		t.Errorf("expected 'disable-merge' in error, got: %v", err)
 	}
 
-	got := buf.String()
-	if !strings.Contains(got, "disable-merge") {
-		t.Errorf("expected TAP output to mention 'disable-merge', got:\n%s", got)
+	recs := decodeRecords(t, buf.Bytes())
+	tests := testRecords(recs)
+	if len(tests) != 1 || tests[0].OK {
+		t.Fatalf("expected exactly one failing test record, got: %+v", tests)
 	}
-	if strings.Contains(got, "push") {
-		t.Errorf("did not expect any push step when merge is disabled, got:\n%s", got)
+	if msg, _ := tests[0].Diagnostic["message"].(string); !strings.Contains(msg, "disable-merge") {
+		t.Errorf("expected diagnostic message to mention 'disable-merge', got: %q", msg)
+	}
+	for _, tr := range tests {
+		if strings.Contains(tr.Description, "push") {
+			t.Errorf("did not expect any push step when merge is disabled, got: %+v", tr)
+		}
 	}
 
 	// No push happened: upstream master unchanged.
