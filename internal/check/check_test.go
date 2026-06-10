@@ -593,6 +593,63 @@ func TestRunHookPhaseShape_TapNDJSONDegenerateFallback(t *testing.T) {
 	}
 }
 
+func TestRunHookPhaseShape_TapNDJSONAllSkipFallsBackToTail(t *testing.T) {
+	_, _, wtPath := setupRepoWithWorktree(t, "feature-tap-ndjson-all-skip")
+	withFakeMadder(t)
+	// Hook emits valid TAP whose only records are SKIP/TODO, then exits
+	// non-zero. buildFailureSummary filters directive-bearing records, so the
+	// summary is empty; the diagnostic's output must fall back to the raw
+	// ring tail instead of going silent (#86, ported from PR #127).
+	writeSweatfile(t, wtPath, "[hooks]\n"+
+		"pre-merge = \"printf 'TAP version 14\\n1..2\\nok 1 - flaky # SKIP quarantined\\nnot ok 2 - later # TODO known gap\\n'; exit 1\"\n"+
+		"pre-merge-output-format = \"tap-ndjson\"\n")
+
+	_, recs, err := runCheck(t, wtPath)
+	if err == nil {
+		t.Fatalf("expected hook failure, got nil")
+	}
+
+	tr := singleTest(t, recs)
+	if tr.OK {
+		t.Errorf("expected failing test record, got %+v", tr)
+	}
+	out, _ := tr.Diagnostic["output"].(string)
+	if out == "" {
+		t.Fatalf("diagnostic output empty: all-skip summary must fall back to tail")
+	}
+	if !strings.Contains(out, "quarantined") {
+		t.Errorf("expected raw tail fallback in output on all-skip stream, got %q", out)
+	}
+}
+
+func TestRunHookPhaseShape_NdjsonCrapAllSkipFallsBackToTail(t *testing.T) {
+	_, _, wtPath := setupRepoWithWorktree(t, "feature-ndjson-crap-all-skip")
+	withFakeMadder(t)
+	// Same bug class for the ndjson-crap format: the only record carries a
+	// skip directive, buildFailureSummaryCrap returns "", and the output
+	// must fall back to the ring tail.
+	writeSweatfile(t, wtPath, "[hooks]\n"+
+		"pre-merge = \"echo '{\\\"type\\\":\\\"test\\\",\\\"n\\\":1,\\\"description\\\":\\\"flaky\\\",\\\"ok\\\":true,\\\"directive\\\":{\\\"kind\\\":\\\"skip\\\",\\\"reason\\\":\\\"quarantined\\\"}}'; exit 1\"\n"+
+		"pre-merge-output-format = \"ndjson-crap\"\n")
+
+	_, recs, err := runCheck(t, wtPath)
+	if err == nil {
+		t.Fatalf("expected hook failure, got nil")
+	}
+
+	tr := singleTest(t, recs)
+	if tr.OK {
+		t.Errorf("expected failing test record, got %+v", tr)
+	}
+	out, _ := tr.Diagnostic["output"].(string)
+	if out == "" {
+		t.Fatalf("diagnostic output empty: all-skip summary must fall back to tail")
+	}
+	if !strings.Contains(out, "quarantined") {
+		t.Errorf("expected raw tail fallback in output on all-skip stream, got %q", out)
+	}
+}
+
 // mergeWorktreeDirs returns the names of transient build worktrees (.merge-*)
 // currently present under <repoDir>/.worktrees.
 func mergeWorktreeDirs(t *testing.T, repoDir string) []string {

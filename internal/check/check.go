@@ -418,6 +418,7 @@ func runHookPhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, 
 	//  - format=tap-ndjson, rec       → failure summary (built from parsed)
 	//  - format=ndjson-crap, rec      → failure summary (built from crap tests)
 	//  - structured, no records       → ring tail (fallback)
+	//  - empty summary (all SKIP/TODO)→ ring tail (fallback, #86)
 	var failureText string
 	switch {
 	case format == "tap-ndjson" && hasParse:
@@ -425,6 +426,11 @@ func runHookPhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, 
 	case format == "ndjson-crap" && hasParse:
 		failureText = buildFailureSummaryCrap(crapTests)
 	default:
+		failureText = ring.Tail()
+	}
+	// A parsed stream whose records are all SKIP/TODO yields an empty
+	// summary; fall back to the tail rather than going silent (#86).
+	if failureText == "" {
 		failureText = ring.Tail()
 	}
 
