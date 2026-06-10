@@ -165,6 +165,34 @@ func outputText(recs []ndjsoncrap.Record) string {
 	return b.String()
 }
 
+// nodeEnds returns the execution-family NodeEnd records in the stream —
+// the phase verdicts (Phase.Done writes exit_code 0, Phase.Fail writes 1).
+func nodeEnds(recs []ndjsoncrap.Record) []ndjsoncrap.NodeEnd {
+	var ends []ndjsoncrap.NodeEnd
+	for _, rec := range recs {
+		if ne, ok := rec.(ndjsoncrap.NodeEnd); ok {
+			ends = append(ends, ne)
+		}
+	}
+	return ends
+}
+
+// assertNodeEndExit asserts the stream carries exactly one NodeEnd and that
+// its exit_code is non-nil and equal to want.
+func assertNodeEndExit(t *testing.T, recs []ndjsoncrap.Record, want int) {
+	t.Helper()
+	ends := nodeEnds(recs)
+	if len(ends) != 1 {
+		t.Fatalf("expected exactly 1 node_end record, got %d: %+v", len(ends), ends)
+	}
+	if ends[0].ExitCode == nil {
+		t.Fatalf("expected non-nil exit_code on node_end, got %+v", ends[0])
+	}
+	if *ends[0].ExitCode != want {
+		t.Errorf("expected node_end exit_code %d, got %d", want, *ends[0].ExitCode)
+	}
+}
+
 // hasPlanAndSummary reports whether the stream carries the result-family
 // plan and summary framing (the ndjson-crap analogue of TAP's "1..N").
 func hasPlanAndSummary(recs []ndjsoncrap.Record) (plan, summary bool) {
@@ -284,6 +312,9 @@ func TestRunHookCompactShape(t *testing.T) {
 		t.Errorf("did not expect 'output' diagnostic on raw success, got %+v", tr.Diagnostic)
 	}
 
+	// The Phase closes with a success verdict on the wire.
+	assertNodeEndExit(t, recs, 0)
+
 	// The Phase carries the hook's live lines as Output records (the
 	// viewport's rolling tail) plus the blob-link line for the wire.
 	out := outputText(recs)
@@ -334,6 +365,11 @@ func TestRunHookCompactShape_Failure(t *testing.T) {
 	if tr.Diagnostic["format"] != "raw" {
 		t.Errorf("expected format raw in failure diagnostic, got %v", tr.Diagnostic["format"])
 	}
+
+	// The Phase closes with a failure verdict on the wire (Phase.Fail
+	// always writes exit_code 1, regardless of the hook's own exit code —
+	// the hook's 7 lives in the test record's diagnostic above).
+	assertNodeEndExit(t, recs, 1)
 }
 
 // readNDJSONRecords parses the stdin capture file from withFakeMadder as

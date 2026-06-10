@@ -357,6 +357,7 @@ func runHookPhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, 
 			} else if wErr := ndjson.WriteAll(ms, parsed); wErr != nil {
 				madderErr = wErr
 				_ = ms.Close()
+				_, _ = fm() // reap the subprocess even on write failure
 			} else {
 				_ = ms.Close()
 				id, fErr := fm()
@@ -380,6 +381,7 @@ func runHookPhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, 
 			} else if _, wErr := ms.Write(hookStdoutBuf.Bytes()); wErr != nil {
 				madderErr = wErr
 				_ = ms.Close()
+				_, _ = fm() // reap the subprocess even on write failure
 			} else {
 				_ = ms.Close()
 				id, fErr := fm()
