@@ -68,6 +68,9 @@ func WithReporter(format, title string, stdout, tty io.Writer, fn func(rep *crap
 	go func() {
 		done <- viewport.Present(pr, viewport.Options{Title: title, Out: out, IsTTY: isTTY})
 	}()
+	// Pipe must close even if fn panics so the renderer goroutine
+	// terminates (Close is idempotent; the explicit Close below stands).
+	defer func() { _ = pw.Close() }()
 	rep := crap.NewReporter(pw, opts)
 	err := fn(rep)
 	_ = pw.Close()
