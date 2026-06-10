@@ -59,6 +59,20 @@
       inputs.utils.follows = "utils";
     };
 
+    # crap: source of the go-crap Go module (ndjson-crap wire format +
+    # viewport presenter), bridged into go.mod via gomod2nix(7)
+    # goFlakeInputs below. crap is polyglot, so its `go-pkgs` output is
+    # full-repo-filtered and we slice with subPath = "go-crap" (mirrors
+    # cutting-garden's bridge). Consumed by the `ndjson-crap`
+    # pre-merge-output-format in internal/check.
+    crap = {
+      url = "github:amarbel-llc/crap";
+      inputs.igloo.follows = "igloo";
+      inputs.nixpkgs-master.follows = "nixpkgs-master";
+      inputs.utils.follows = "utils";
+      inputs.bats.follows = "bats";
+    };
+
     # Single source of truth for tommy (TOML library + codegen tool). The
     # `tommy` Go module is bridged into go.mod via gomod2nix(7) goFlakeInputs
     # and the same input's binary (tommy.packages.<system>.default) is what
@@ -84,6 +98,7 @@
       bats,
       madder,
       conformist,
+      crap,
       tommy,
     }:
     let
@@ -126,6 +141,13 @@
         # path pending tommy#112, which would expose this mapping directly.)
         goFlakeInputs = {
           "github.com/amarbel-llc/tommy" = tommy;
+          # crap's go-pkgs is full-repo-filtered (polyglot), so slice into
+          # go-crap. The module is at major version 2, so the key carries
+          # the /v2 suffix while the on-disk subPath stays go-crap.
+          "github.com/amarbel-llc/crap/go-crap/v2" = {
+            src = crap.packages.${system}.go-pkgs;
+            subPath = "go-crap";
+          };
         };
 
         # mkSpinclass builds spinclass with optional build-time-pinned
