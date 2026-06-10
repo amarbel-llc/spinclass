@@ -15,23 +15,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/amarbel-llc/crap/go-crap/v2/crap"
 	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
 	"github.com/amarbel-llc/spinclass/internal/embeds"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/madder"
+	"github.com/amarbel-llc/spinclass/internal/present"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
-	"github.com/amarbel-llc/spinclass/internal/tapblock"
 	"github.com/amarbel-llc/tap/go/pkgs/ndjson"
 	"github.com/amarbel-llc/tap/go/pkgs/reader"
-	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
-	"github.com/amarbel-llc/tap/go/pkgs/yaml_diagnostic"
 )
-
-// Directive emitted by the compact (madder-pinned) shape so agents
-// reading the response know they don't need to fetch the
-// resource_link unless the test point failed.
-const compactDirective = "directive: if status is ok, the resource_link need not be followed; only inspect on failure"
 
 // BuildWorktreePrefix is the filename prefix of a transient pre-merge build
 // worktree under <repo>/.worktrees/: ".merge-<branch>-<sha>-<pid>". Exported so
@@ -60,33 +54,34 @@ func mimeTypeForFormat(format string) string {
 }
 
 // Run resolves the worktree containing wtPath, loads the sweatfile
-// hierarchy, and runs the configured [hooks].pre-merge command. It writes
-// TAP-14 output (when format == "tap") or passthrough output otherwise to
-// w. Returns the resource_link blobs emitted for the hook output (one per
-// hook step that produced a madder blob; empty when madder is not pinned)
-// and a non-nil error if the hook fails. Each BlobLink carries the MIME
-// type matching the format the blob was written in (text/plain for raw,
-// application/x-ndjson for tap-ndjson).
+// hierarchy, and runs the configured [hooks].pre-merge command, emitting
+// ndjson-crap records via rep (never nil): a result-family test point for
+// the hook stage plus an execution-family Phase carrying the hook's live
+// output lines. Returns the resource_link blobs emitted for the hook
+// output (one per hook step that produced a madder blob; empty when
+// madder is not pinned) and a non-nil error if the hook fails. Each
+// BlobLink carries the MIME type matching the format the blob was written
+// in (text/plain for raw, application/x-ndjson for tap-ndjson and
+// ndjson-crap).
 //
-// If no pre-merge hook is configured, Run returns (nil, nil) and (in TAP
-// mode) emits an "ok" indicating no hook is configured — agents and
-// humans should treat "no hook" as a success because there is nothing to
-// check.
-//
-// The verbose parameter is accepted for API stability but currently
-// unused; check itself emits no git output today. It is reserved for
-// future use when verbose-mode diagnostics become relevant.
-func Run(w io.Writer, format, wtPath string, verbose bool) ([]BlobLink, error) {
-	return RunContext(context.Background(), w, format, wtPath, verbose, nil)
+// If no pre-merge hook is configured, Run returns (nil, nil) and emits an
+// "ok" test point indicating no hook is configured — agents and humans
+// should treat "no hook" as a success because there is nothing to check.
+func Run(rep *crap.Reporter, wtPath string) ([]BlobLink, error) {
+	return RunContext(context.Background(), rep, wtPath, nil)
 }
 
 // RunContext is Run bound to ctx, with an optional activity writer that
 // receives the pre-merge hook's live output in addition to the normal
-// madder/ring/TAP plumbing. The async job runner passes its job log as
+// madder/ring/record plumbing. The async job runner passes its job log as
 // activity so session-job-status can tail live progress and derive a
 // last-activity timestamp; synchronous callers use Run (background ctx, nil
 // activity). ctx cancellation kills the hook subprocess.
-func RunContext(ctx context.Context, w io.Writer, format, wtPath string, verbose bool, activity io.Writer) ([]BlobLink, error) {
+//
+// RunContext owns its result-family stream: it opens a TestStream with a
+// plan of one (the hook stage) and finishes it before returning. Callers
+// that share a stream across stages (merge) use RunWithReporterContext.
+func RunContext(ctx context.Context, rep *crap.Reporter, wtPath string, activity io.Writer) ([]BlobLink, error) {
 	repoPath, err := git.CommonDir(wtPath)
 	if err != nil {
 		return nil, fmt.Errorf("not a worktree: %s", wtPath)
@@ -105,74 +100,46 @@ func RunContext(ctx context.Context, w io.Writer, format, wtPath string, verbose
 		return nil, fmt.Errorf("load sweatfile hierarchy: %w", err)
 	}
 
-	var tw *tap.Writer
-	ownWriter := false
-	if format == "tap" {
-		tw = tap.NewWriter(w)
-		ownWriter = true
-		if embeds.MadderBin() != "" {
-			tw.Comment(compactDirective)
-		}
-	}
+	ts := rep.TestStream(1)
 
 	cmd := hierarchy.Merged.PreMergeHookCommand()
 	if cmd == nil || *cmd == "" {
-		if tw != nil {
-			tw.Ok("no pre-merge hook configured")
-			if ownWriter {
-				tw.Plan()
-			}
-		}
+		ts.Ok("no pre-merge hook configured")
+		ts.Finish()
 		return nil, nil
 	}
 
 	// Pin HEAD so the hook verifies the committed tree in an isolated build
 	// worktree (see resolveHookDir). RevParse failure degrades to "" → in-place.
 	hookSha, _ := git.RevParse(wtPath, "HEAD")
-	// ownWriter=false: Run owns Plan emission for the standalone path.
-	links, hookErr := RunWithWriterContext(ctx, tw, w, hierarchy, wtPath, branch, hookSha, false, activity)
-	if tw != nil && ownWriter {
-		tw.Plan()
-	}
+	links, hookErr := RunWithReporterContext(ctx, rep, ts, hierarchy, wtPath, branch, hookSha, activity)
+	ts.Finish()
 	return links, hookErr
 }
 
-// RunWithWriter runs the configured pre-merge hook against an already-
-// loaded hierarchy and a caller-supplied tap.Writer. Pass tw=nil for
-// passthrough mode. ownWriter controls whether RunWithWriter calls
-// tw.Plan() when the hook fails (matching the legacy merge call pattern;
-// successful hook runs leave Plan to the caller).
+// RunWithReporterContext runs the configured pre-merge hook against an
+// already-loaded hierarchy, emitting onto a caller-supplied Reporter and
+// result-family TestStream. ts is the caller's shared stream when check
+// runs inside a merge (one stream numbers all merge stages); the caller
+// owns ts.Finish(). ctx threads to the hook subprocess (cancellable);
+// activity, when non-nil, is teed the hook's live output alongside the
+// normal madder/ring/record destination.
 //
-// Returns the resource_link blobs emitted for hook output (compact path
-// only; empty otherwise) and a non-nil error if the hook fails. Each
-// BlobLink carries the MIME type matching the format the blob was
+// Returns the resource_link blobs emitted for hook output (madder-pinned
+// builds only; empty otherwise) and a non-nil error if the hook fails.
+// Each BlobLink carries the MIME type matching the format the blob was
 // written in.
 //
-// When no pre-merge hook is configured, RunWithWriter returns (nil, nil)
-// and emits NO TAP output. This preserves the historical
+// When no pre-merge hook is configured, RunWithReporterContext returns
+// (nil, nil) and emits NO records. This preserves the historical
 // merge.runPreMergeHook behavior; standalone callers that want a "no
 // hook" report should use Run instead.
-func RunWithWriter(
-	tw *tap.Writer,
-	w io.Writer,
-	hierarchy sweatfile.Hierarchy,
-	wtPath, branch, hookSha string,
-	ownWriter bool,
-) ([]BlobLink, error) {
-	return RunWithWriterContext(context.Background(), tw, w, hierarchy, wtPath, branch, hookSha, ownWriter, nil)
-}
-
-// RunWithWriterContext is RunWithWriter bound to ctx with an optional activity
-// writer (see RunContext). ctx threads to the hook subprocess (cancellable);
-// activity, when non-nil, is teed the hook's live output alongside the normal
-// madder/ring/TAP destination.
-func RunWithWriterContext(
+func RunWithReporterContext(
 	ctx context.Context,
-	tw *tap.Writer,
-	w io.Writer,
+	rep *crap.Reporter,
+	ts *crap.TestStream,
 	hierarchy sweatfile.Hierarchy,
 	wtPath, branch, hookSha string,
-	ownWriter bool,
 	activity io.Writer,
 ) ([]BlobLink, error) {
 	cmd := hierarchy.Merged.PreMergeHookCommand()
@@ -185,60 +152,21 @@ func RunWithWriterContext(
 	// wtPath — only the hook's working directory relocates.
 	hookDir, cleanup, prepErr := resolveHookDir(hierarchy, wtPath, branch, hookSha)
 	if prepErr != nil {
-		if tw != nil {
-			tw.NotOk("pre-merge build worktree for "+branch, map[string]string{
-				"severity": "fail",
-				"message":  prepErr.Error(),
-			})
-			if ownWriter {
-				tw.Plan()
-			}
-		}
+		ts.NotOk("pre-merge build worktree for "+branch, map[string]any{
+			"severity": "fail",
+			"message":  prepErr.Error(),
+		})
 		return nil, prepErr
 	}
 	defer cleanup()
 
-	if tw == nil {
-		return nil, hierarchy.Merged.RunPreMergeHookContext(ctx, hookDir, teeWriter(w, activity))
-	}
-
 	desc := "pre-merge hook for " + branch + ": `" + *cmd + "`"
-
-	if embeds.MadderBin() != "" {
-		link, hookErr := runHookCompactContext(ctx, tw, hierarchy, wtPath, hookDir, *cmd, desc, activity)
-		if hookErr != nil && ownWriter {
-			tw.Plan()
-		}
-		var links []BlobLink
-		if link.URI != "" {
-			links = []BlobLink{link}
-		}
-		return links, hookErr
+	link, hookErr := runHookPhase(ctx, rep, ts, hierarchy, wtPath, hookDir, *cmd, desc, activity)
+	var links []BlobLink
+	if link.URI != "" {
+		links = []BlobLink{link}
 	}
-
-	var hookErr error
-	tw.OutputBlock(desc, func(ob *tap.OutputBlockWriter) *yaml_diagnostic.YAMLDiagnostic {
-		lw := tapblock.NewLineWriter(ob)
-		hookErr = hierarchy.Merged.RunPreMergeHookContext(ctx, hookDir, teeWriter(lw, activity))
-		lw.Flush()
-		if hookErr != nil {
-			return &yaml_diagnostic.YAMLDiagnostic{Severity: "fail", Message: hookErr.Error()}
-		}
-		return nil
-	})
-	if hookErr != nil && ownWriter {
-		tw.Plan()
-	}
-	return nil, hookErr
-}
-
-// teeWriter returns primary when activity is nil, else a MultiWriter that also
-// streams to activity (the async job log).
-func teeWriter(primary, activity io.Writer) io.Writer {
-	if activity == nil {
-		return primary
-	}
-	return io.MultiWriter(primary, activity)
+	return links, hookErr
 }
 
 // resolveHookDir decides where the pre-merge hook runs and returns a cleanup
@@ -310,36 +238,44 @@ func sanitizeBranchForPath(branch string) string {
 	return strings.NewReplacer("/", "-", string(filepath.Separator), "-").Replace(branch)
 }
 
-// runHookCompactContext runs the pre-merge hook and emits a single TAP test
-// point with YAMLish diagnostics carrying command/format/resource_link/
-// exit_code/elapsed plus a visibility field selected by the configured
-// format:
+// runHookPhase runs the pre-merge hook wrapped in an execution-family
+// Phase (live Output records — the viewport's rolling tail) and closed by
+// a result-family test point on ts carrying the failure diagnostic:
 //
 //   - format=raw (default): hook stdout streams directly into madder
-//     (for atomic content-addressable storage) and through a 15-line
-//     ring; on failure the response carries `tail:` as a visibility
-//     diagnostic. On success no `tail:` is emitted — the test point
+//     (for atomic content-addressable storage, when pinned) and through a
+//     15-line ring; on failure the diagnostic's `output` entry carries
+//     the ring tail. On success no `output` is emitted — the test point
 //     being `ok` is itself the liveness signal and the resource_link
 //     remains the authoritative full-output surface.
 //
 //   - format=tap-ndjson: hook stdout is captured into a buffer, parsed
 //     via tap/go/pkgs/{reader,ndjson}, and the *parsed* ndjson stream
 //     is written to madder (replacing the raw blob). On success, no
-//     visibility field is emitted (the parsed records sit behind the
+//     `output` is emitted (the parsed records sit behind the
 //     resource_link). On failure with at least one parsed record,
-//     `failure:` is emitted summarising the failing records. On failure
-//     with zero parsed records (degenerate stream), the response falls
-//     back to `tail:` carrying the raw output ring.
+//     `output` carries a summary of the failing records. On failure
+//     with zero parsed records (degenerate stream), `output` falls
+//     back to the raw output ring.
+//
+//   - format=ndjson-crap: like tap-ndjson, but the hook already emits
+//     canonical ndjson-crap; the stream is stored verbatim and parsed
+//     via crap's ndjsoncrap reader for the failure summary.
+//
+// When madder is not pinned (embeds.MadderBin() == "") the hook still
+// runs and its lines still stream as Output records — no blob is stored
+// and no resource_link line is emitted.
 //
 // Returns a BlobLink carrying the resource_link URI and the MIME type
-// matching the resolved format. If madder produced no blob (spawn
-// failed, or post-hook write/parse failed), the BlobLink's URI is "".
+// matching the resolved format. If madder produced no blob (not pinned,
+// spawn failed, or post-hook write/parse failed), the BlobLink's URI is "".
 //
 // wtPath is the session worktree (where the madder blob store lives); hookDir is
 // where the hook actually runs (an isolated build worktree, or wtPath in the
 // legacy path). They differ only when the build-worktree feature is active.
-func runHookCompactContext(ctx context.Context, tw *tap.Writer, hierarchy sweatfile.Hierarchy, wtPath, hookDir, cmd, desc string, activity io.Writer) (BlobLink, error) {
+func runHookPhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, hierarchy sweatfile.Hierarchy, wtPath, hookDir, cmd, desc string, activity io.Writer) (BlobLink, error) {
 	format := hierarchy.Merged.PreMergeOutputFormatValue()
+	madderPinned := embeds.MadderBin() != ""
 
 	// ring is the fallback visibility for failures the parser can't surface.
 	ring := newTailRingWriter(15)
@@ -353,21 +289,15 @@ func runHookCompactContext(ctx context.Context, tw *tap.Writer, hierarchy sweatf
 	//                  it via crap's ndjsoncrap reader for the failure summary.
 	structured := format == "tap-ndjson" || format == "ndjson-crap"
 
+	// Placeholders cover the structured path (madder.Write happens after the
+	// hook exits) and the madder-not-pinned path (no blob at all).
 	var (
-		madderStdin   io.WriteCloser
-		finishMadder  func() (string, error)
-		hookStdoutBuf bytes.Buffer // populated only for structured formats
+		madderStdin   io.WriteCloser         = nopWriteCloser{io.Discard}
+		finishMadder  func() (string, error) = func() (string, error) { return "", nil }
+		hookStdoutBuf bytes.Buffer           // populated only for structured formats
 	)
 
-	if structured {
-		// Buffer hook stdout fully; we write to madder below, not the raw
-		// stream. madderStdin and finishMadder are placeholders here so the
-		// shared variable shape compiles for both paths — the real
-		// madder.Write happens after the hook exits (see the post-hook
-		// switch below).
-		madderStdin = nopWriteCloser{io.Discard}
-		finishMadder = func() (string, error) { return "", nil }
-	} else {
+	if !structured && madderPinned {
 		var err error
 		madderStdin, finishMadder, err = madder.Write(wtPath, embeds.MadderBin())
 		if err != nil {
@@ -378,11 +308,15 @@ func runHookCompactContext(ctx context.Context, tw *tap.Writer, hierarchy sweatf
 		}
 	}
 
+	ph := rep.Phase(desc)
+	ph.Command(cmd)
+	lw := present.NewLineWriter(ph)
+
 	var sink io.Writer
 	if structured {
-		sink = io.MultiWriter(&hookStdoutBuf, ring)
+		sink = io.MultiWriter(&hookStdoutBuf, ring, lw)
 	} else {
-		sink = io.MultiWriter(madderStdin, ring)
+		sink = io.MultiWriter(madderStdin, ring, lw)
 	}
 	if activity != nil {
 		sink = io.MultiWriter(sink, activity)
@@ -391,6 +325,7 @@ func runHookCompactContext(ctx context.Context, tw *tap.Writer, hierarchy sweatf
 	start := time.Now()
 	hookErr := hierarchy.Merged.RunPreMergeHookContext(ctx, hookDir, sink)
 	elapsed := time.Since(start)
+	lw.Flush()
 
 	var (
 		blobID    string
@@ -415,19 +350,21 @@ func runHookCompactContext(ctx context.Context, tw *tap.Writer, hierarchy sweatf
 		hasParse = len(parsed.Records) > 0
 
 		// Write parsed ndjson (not the raw stdout) to madder.
-		ms, fm, mErr := madder.Write(wtPath, embeds.MadderBin())
-		if mErr != nil {
-			madderErr = mErr
-		} else if wErr := ndjson.WriteAll(ms, parsed); wErr != nil {
-			madderErr = wErr
-			_ = ms.Close()
-		} else {
-			_ = ms.Close()
-			id, fErr := fm()
-			if fErr != nil {
-				madderErr = fErr
+		if madderPinned {
+			ms, fm, mErr := madder.Write(wtPath, embeds.MadderBin())
+			if mErr != nil {
+				madderErr = mErr
+			} else if wErr := ndjson.WriteAll(ms, parsed); wErr != nil {
+				madderErr = wErr
+				_ = ms.Close()
+			} else {
+				_ = ms.Close()
+				id, fErr := fm()
+				if fErr != nil {
+					madderErr = fErr
+				}
+				blobID = id
 			}
-			blobID = id
 		}
 
 	case "ndjson-crap":
@@ -436,19 +373,21 @@ func runHookCompactContext(ctx context.Context, tw *tap.Writer, hierarchy sweatf
 		crapTests = collectCrapTests(bytes.NewReader(hookStdoutBuf.Bytes()))
 		hasParse = len(crapTests) > 0
 
-		ms, fm, mErr := madder.Write(wtPath, embeds.MadderBin())
-		if mErr != nil {
-			madderErr = mErr
-		} else if _, wErr := ms.Write(hookStdoutBuf.Bytes()); wErr != nil {
-			madderErr = wErr
-			_ = ms.Close()
-		} else {
-			_ = ms.Close()
-			id, fErr := fm()
-			if fErr != nil {
-				madderErr = fErr
+		if madderPinned {
+			ms, fm, mErr := madder.Write(wtPath, embeds.MadderBin())
+			if mErr != nil {
+				madderErr = mErr
+			} else if _, wErr := ms.Write(hookStdoutBuf.Bytes()); wErr != nil {
+				madderErr = wErr
+				_ = ms.Close()
+			} else {
+				_ = ms.Close()
+				id, fErr := fm()
+				if fErr != nil {
+					madderErr = fErr
+				}
+				blobID = id
 			}
-			blobID = id
 		}
 
 	default:
@@ -456,56 +395,54 @@ func runHookCompactContext(ctx context.Context, tw *tap.Writer, hierarchy sweatf
 		blobID, madderErr = finishMadder()
 	}
 
-	extras := map[string]any{
+	// The blob link rides the wire too (viewport + plain rendering); the
+	// BlobLink return value stays the MCP resource_link path.
+	var blobURI string
+	if blobID != "" {
+		blobURI = "madder://blobs/" + blobID
+		ph.Output(ndjsoncrap.StreamStdout, "resource_link: "+blobURI+"\n")
+	} else if madderErr != nil {
+		ph.Output(ndjsoncrap.StreamStderr, "resource_link_error: "+madderErr.Error()+"\n")
+	}
+
+	if hookErr == nil {
+		ph.Done()
+		ts.Ok(desc)
+		return BlobLink{URI: blobURI, MimeType: mimeTypeForFormat(format)}, nil
+	}
+
+	// Failure-output selection (the diagnostic's `output` entry):
+	//  - format=raw                   → ring tail
+	//  - format=tap-ndjson, rec       → failure summary (built from parsed)
+	//  - format=ndjson-crap, rec      → failure summary (built from crap tests)
+	//  - structured, no records       → ring tail (fallback)
+	var failureText string
+	switch {
+	case format == "tap-ndjson" && hasParse:
+		failureText = buildFailureSummary(parsed)
+	case format == "ndjson-crap" && hasParse:
+		failureText = buildFailureSummaryCrap(crapTests)
+	default:
+		failureText = ring.Tail()
+	}
+
+	diagnostic := map[string]any{
+		"severity":  "fail",
+		"message":   hookErr.Error(),
 		"command":   cmd,
 		"format":    format,
 		"exit_code": exitCodeFromErr(hookErr),
 		"elapsed":   elapsed.Round(time.Millisecond).String(),
+		"output":    failureText,
 	}
-
-	var blobURI string
-	if blobID != "" {
-		blobURI = "madder://blobs/" + blobID
-		extras["resource_link"] = blobURI
+	if blobURI != "" {
+		diagnostic["resource_link"] = blobURI
 	} else if madderErr != nil {
-		extras["resource_link_error"] = madderErr.Error()
+		diagnostic["resource_link_error"] = madderErr.Error()
 	}
 
-	// Visibility field selection:
-	//  - format=raw, success          → neither tail nor failure
-	//  - format=raw, failure          → tail
-	//  - format=tap-ndjson, success   → neither tail nor failure
-	//  - format=tap-ndjson, fail+rec  → failure (built from parsed)
-	//  - format=tap-ndjson, fail+!rec → tail (fallback)
-	if !structured {
-		if hookErr != nil {
-			extras["tail"] = ring.Tail()
-		}
-	} else if hookErr != nil {
-		switch {
-		case format == "tap-ndjson" && hasParse:
-			extras["failure"] = buildFailureSummary(parsed)
-		case format == "ndjson-crap" && hasParse:
-			extras["failure"] = buildFailureSummaryCrap(crapTests)
-		default:
-			extras["tail"] = ring.Tail()
-		}
-	}
-
-	if hookErr != nil {
-		// tap.NotOk takes map[string]string only — stringify Extras
-		// so failure responses still carry the same shape.
-		flat := map[string]string{
-			"severity": "fail",
-			"message":  hookErr.Error(),
-		}
-		for k, v := range extras {
-			flat[k] = fmt.Sprintf("%v", v)
-		}
-		tw.NotOk(desc, flat)
-	} else {
-		tw.OkDiag(desc, &yaml_diagnostic.YAMLDiagnostic{Extras: extras})
-	}
+	ph.Fail(hookErr)
+	ts.NotOk(desc, diagnostic)
 	return BlobLink{URI: blobURI, MimeType: mimeTypeForFormat(format)}, hookErr
 }
 

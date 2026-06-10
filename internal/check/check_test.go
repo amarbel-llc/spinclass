@@ -3,12 +3,17 @@ package check
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/amarbel-llc/crap/go-crap/v2/crap"
+	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
 	"github.com/amarbel-llc/spinclass/internal/embeds"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
@@ -104,12 +109,81 @@ func writeSweatfile(t *testing.T, wtPath, contents string) {
 	}
 }
 
-func TestRunHookSuccessTAP(t *testing.T) {
+// decodeRecords parses a buffered ndjson-crap stream into its records.
+func decodeRecords(t *testing.T, raw []byte) []ndjsoncrap.Record {
+	t.Helper()
+	rd := ndjsoncrap.NewReader(bytes.NewReader(raw))
+	var recs []ndjsoncrap.Record
+	for {
+		rec, err := rd.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("decoding ndjson-crap stream: %v\nstream:\n%s", err, raw)
+		}
+		recs = append(recs, rec)
+	}
+	return recs
+}
+
+// runCheck drives Run with a Reporter over a bytes.Buffer and returns the
+// blob links, the decoded record stream, and Run's error.
+func runCheck(t *testing.T, wtPath string) ([]BlobLink, []ndjsoncrap.Record, error) {
+	t.Helper()
+	var buf bytes.Buffer
+	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
+	links, err := Run(rep, wtPath)
+	return links, decodeRecords(t, buf.Bytes()), err
+}
+
+// singleTest asserts the stream carries exactly one result-family test
+// record and returns it.
+func singleTest(t *testing.T, recs []ndjsoncrap.Record) ndjsoncrap.Test {
+	t.Helper()
+	var tests []ndjsoncrap.Test
+	for _, rec := range recs {
+		if tr, ok := rec.(ndjsoncrap.Test); ok {
+			tests = append(tests, tr)
+		}
+	}
+	if len(tests) != 1 {
+		t.Fatalf("expected exactly 1 test record, got %d: %+v", len(tests), tests)
+	}
+	return tests[0]
+}
+
+// outputText concatenates the Data of every execution-family Output record
+// — the hook's live lines as carried on the wire.
+func outputText(recs []ndjsoncrap.Record) string {
+	var b strings.Builder
+	for _, rec := range recs {
+		if out, ok := rec.(ndjsoncrap.Output); ok {
+			b.WriteString(out.Data)
+		}
+	}
+	return b.String()
+}
+
+// hasPlanAndSummary reports whether the stream carries the result-family
+// plan and summary framing (the ndjson-crap analogue of TAP's "1..N").
+func hasPlanAndSummary(recs []ndjsoncrap.Record) (plan, summary bool) {
+	for _, rec := range recs {
+		switch rec.(type) {
+		case ndjsoncrap.Plan:
+			plan = true
+		case ndjsoncrap.Summary:
+			summary = true
+		}
+	}
+	return plan, summary
+}
+
+func TestRunHookSuccess(t *testing.T) {
 	_, _, wtPath := setupRepoWithWorktree(t, "feature-success")
 	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"true\"\n")
 
-	var buf bytes.Buffer
-	links, err := Run(&buf, "tap", wtPath, false)
+	links, recs, err := runCheck(t, wtPath)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -117,37 +191,38 @@ func TestRunHookSuccessTAP(t *testing.T) {
 		t.Errorf("expected no blob links without madder pinned, got %v", links)
 	}
 
-	got := buf.String()
-	if !strings.Contains(got, "ok") {
-		t.Errorf("expected TAP 'ok' in output, got: %q", got)
+	tr := singleTest(t, recs)
+	if !tr.OK {
+		t.Errorf("expected passing test record, got %+v", tr)
 	}
-	if strings.Contains(got, "not ok") {
-		t.Errorf("did not expect 'not ok' in output, got: %q", got)
+	if !strings.Contains(tr.Description, "pre-merge hook") {
+		t.Errorf("expected 'pre-merge hook' description, got %q", tr.Description)
 	}
-	if !strings.Contains(got, "pre-merge hook") {
-		t.Errorf("expected 'pre-merge hook' description in output, got: %q", got)
-	}
-	if !strings.Contains(got, "1..") {
-		t.Errorf("expected TAP plan in output, got: %q", got)
+	if plan, summary := hasPlanAndSummary(recs); !plan || !summary {
+		t.Errorf("expected plan+summary framing, got plan=%v summary=%v", plan, summary)
 	}
 }
 
-func TestRunHookFailureTAP(t *testing.T) {
+func TestRunHookFailure(t *testing.T) {
 	_, _, wtPath := setupRepoWithWorktree(t, "feature-failure")
 	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"false\"\n")
 
-	var buf bytes.Buffer
-	_, err := Run(&buf, "tap", wtPath, false)
+	_, recs, err := runCheck(t, wtPath)
 	if err == nil {
-		t.Fatalf("expected error when hook fails, got nil. Output: %s", buf.String())
+		t.Fatalf("expected error when hook fails, got nil")
 	}
 
-	got := buf.String()
-	if !strings.Contains(got, "not ok") {
-		t.Errorf("expected TAP 'not ok' in output, got: %q", got)
+	tr := singleTest(t, recs)
+	if tr.OK {
+		t.Errorf("expected failing test record, got %+v", tr)
 	}
-	if !strings.Contains(got, "1..") {
-		t.Errorf("expected TAP plan in output (so client can detect failure), got: %q", got)
+	if got := fmt.Sprintf("%v", tr.Diagnostic["exit_code"]); got != "1" {
+		t.Errorf("expected exit_code 1 in diagnostic, got %v", tr.Diagnostic["exit_code"])
+	}
+	// Summary must still be emitted on failure so a client can detect the
+	// stream finished (the analogue of the TAP plan).
+	if plan, summary := hasPlanAndSummary(recs); !plan || !summary {
+		t.Errorf("expected plan+summary framing on failure, got plan=%v summary=%v", plan, summary)
 	}
 }
 
@@ -187,8 +262,7 @@ func TestRunHookCompactShape(t *testing.T) {
 	_, stdinCapture := withFakeMadder(t)
 	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"echo line-one; echo line-two\"\n")
 
-	var buf bytes.Buffer
-	links, err := Run(&buf, "tap", wtPath, false)
+	links, recs, err := runCheck(t, wtPath)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -199,35 +273,24 @@ func TestRunHookCompactShape(t *testing.T) {
 		t.Errorf("expected MimeType text/plain for format=raw, got %q", links[0].MimeType)
 	}
 
-	got := buf.String()
-
-	if !strings.Contains(got, "# directive: if status is ok") {
-		t.Errorf("expected directive comment, got:\n%s", got)
+	tr := singleTest(t, recs)
+	if !tr.OK {
+		t.Errorf("expected passing test record, got %+v", tr)
 	}
-	for _, want := range []string{
-		"command: echo line-one; echo line-two",
-		"format: raw",
-		"resource_link: madder://blobs/sha256-fake",
-		"exit_code: 0",
-		"elapsed:",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("expected %q in output, got:\n%s", want, got)
-		}
-	}
-	// On success, the response must omit both visibility fields: the
+	// On success, the diagnostic must omit the failure-output entry: the
 	// test point being `ok` is itself the liveness signal and the
 	// resource_link remains the authoritative full-output surface.
-	if strings.Contains(got, "tail:") {
-		t.Errorf("did not expect 'tail:' on raw success, got:\n%s", got)
+	if _, ok := tr.Diagnostic["output"]; ok {
+		t.Errorf("did not expect 'output' diagnostic on raw success, got %+v", tr.Diagnostic)
 	}
-	if strings.Contains(got, "failure:") {
-		t.Errorf("did not expect 'failure:' on raw success, got:\n%s", got)
-	}
-	// Compact shape never opens an OutputBlock — no nested `# Subtest`
-	// or indented diagnostic block separator from OutputBlock.
-	if strings.Contains(got, "# Output:") {
-		t.Errorf("did not expect OutputBlock '# Output:' line, got:\n%s", got)
+
+	// The Phase carries the hook's live lines as Output records (the
+	// viewport's rolling tail) plus the blob-link line for the wire.
+	out := outputText(recs)
+	for _, want := range []string{"line-one", "line-two", "resource_link: madder://blobs/sha256-fake"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in phase output records, got:\n%s", want, out)
+		}
 	}
 
 	stdinBytes, err := os.ReadFile(stdinCapture)
@@ -244,8 +307,7 @@ func TestRunHookCompactShape_Failure(t *testing.T) {
 	withFakeMadder(t)
 	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"echo about-to-fail; exit 7\"\n")
 
-	var buf bytes.Buffer
-	links, err := Run(&buf, "tap", wtPath, false)
+	links, recs, err := runCheck(t, wtPath)
 	if err == nil {
 		t.Fatal("expected hook failure")
 	}
@@ -256,21 +318,21 @@ func TestRunHookCompactShape_Failure(t *testing.T) {
 		t.Errorf("expected MimeType text/plain for format=raw failure, got %q", links[0].MimeType)
 	}
 
-	got := buf.String()
-	if !strings.Contains(got, "not ok") {
-		t.Errorf("expected 'not ok' for failed hook, got:\n%s", got)
+	tr := singleTest(t, recs)
+	if tr.OK {
+		t.Errorf("expected failing test record, got %+v", tr)
 	}
-	if !strings.Contains(got, "exit_code: 7") {
-		t.Errorf("expected exit_code: 7, got:\n%s", got)
+	if got := fmt.Sprintf("%v", tr.Diagnostic["exit_code"]); got != "7" {
+		t.Errorf("expected exit_code 7, got %v", tr.Diagnostic["exit_code"])
 	}
-	if !strings.Contains(got, "about-to-fail") {
-		t.Errorf("expected hook stdout in tail, got:\n%s", got)
+	if got, _ := tr.Diagnostic["output"].(string); !strings.Contains(got, "about-to-fail") {
+		t.Errorf("expected hook stdout in diagnostic output, got %v", tr.Diagnostic["output"])
 	}
-	if !strings.Contains(got, "resource_link: madder://blobs/sha256-fake") {
-		t.Errorf("expected resource_link in failure response, got:\n%s", got)
+	if tr.Diagnostic["resource_link"] != "madder://blobs/sha256-fake" {
+		t.Errorf("expected resource_link in failure diagnostic, got %v", tr.Diagnostic["resource_link"])
 	}
-	if !strings.Contains(got, "format: raw") {
-		t.Errorf("expected 'format: raw' in failure response, got:\n%s", got)
+	if tr.Diagnostic["format"] != "raw" {
+		t.Errorf("expected format raw in failure diagnostic, got %v", tr.Diagnostic["format"])
 	}
 }
 
@@ -325,8 +387,7 @@ func TestRunHookCompactShape_TapNDJSONSuccess(t *testing.T) {
 		"pre-merge = \"printf 'TAP version 14\\n1..1\\nok 1 - synthetic\\n'\"\n"+
 		"pre-merge-output-format = \"tap-ndjson\"\n")
 
-	var buf bytes.Buffer
-	links, err := Run(&buf, "tap", wtPath, false)
+	links, recs, err := runCheck(t, wtPath)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -337,33 +398,30 @@ func TestRunHookCompactShape_TapNDJSONSuccess(t *testing.T) {
 		t.Errorf("expected MimeType application/x-ndjson for format=tap-ndjson, got %q", links[0].MimeType)
 	}
 
-	got := buf.String()
-	if !strings.Contains(got, "format: tap-ndjson") {
-		t.Errorf("expected 'format: tap-ndjson' in output, got:\n%s", got)
+	tr := singleTest(t, recs)
+	if !tr.OK {
+		t.Errorf("expected passing test record, got %+v", tr)
 	}
-	if !strings.Contains(got, "ok") {
-		t.Errorf("expected 'ok' in output, got:\n%s", got)
+	if _, ok := tr.Diagnostic["output"]; ok {
+		t.Errorf("did not expect 'output' diagnostic on tap-ndjson success, got %+v", tr.Diagnostic)
 	}
-	if strings.Contains(got, "not ok") {
-		t.Errorf("did not expect 'not ok' on success, got:\n%s", got)
-	}
-	if strings.Contains(got, "tail:") {
-		t.Errorf("did not expect 'tail:' on tap-ndjson success, got:\n%s", got)
-	}
-	if strings.Contains(got, "failure:") {
-		t.Errorf("did not expect 'failure:' on success, got:\n%s", got)
+
+	// Even on the buffered (structured) path the hook's raw lines stream
+	// live as Output records on the phase.
+	if out := outputText(recs); !strings.Contains(out, "ok 1 - synthetic") {
+		t.Errorf("expected raw hook TAP lines in phase output records, got:\n%s", out)
 	}
 
 	// The madder blob must be the PARSED ndjson, not the raw stdout.
-	recs := readNDJSONRecords(t, stdinCapture)
-	if len(recs) != 1 {
-		t.Fatalf("expected 1 TestRecord in blob, got %d: %+v", len(recs), recs)
+	blobRecs := readNDJSONRecords(t, stdinCapture)
+	if len(blobRecs) != 1 {
+		t.Fatalf("expected 1 TestRecord in blob, got %d: %+v", len(blobRecs), blobRecs)
 	}
-	if !recs[0].OK {
-		t.Errorf("expected OK=true on the parsed record, got %+v", recs[0])
+	if !blobRecs[0].OK {
+		t.Errorf("expected OK=true on the parsed record, got %+v", blobRecs[0])
 	}
-	if recs[0].N != 1 || recs[0].Description != "synthetic" {
-		t.Errorf("unexpected record fields: %+v", recs[0])
+	if blobRecs[0].N != 1 || blobRecs[0].Description != "synthetic" {
+		t.Errorf("unexpected record fields: %+v", blobRecs[0])
 	}
 	// Sanity: the blob must NOT contain the raw 'TAP version 14' header
 	// (we wrote parsed ndjson, not the raw stream).
@@ -378,41 +436,38 @@ func TestRunHookCompactShape_TapNDJSONFailure(t *testing.T) {
 	_, stdinCapture := withFakeMadder(t)
 	// Hook prints a valid TAP-14 stream with one not-ok and a YAML
 	// diagnostic, then exits non-zero so RunPreMergeHook returns an
-	// ExitError. The shell wraps printf with `exit 1` via `&&` chain.
+	// ExitError.
 	writeSweatfile(t, wtPath, "[hooks]\n"+
 		"pre-merge = \"printf 'TAP version 14\\n1..1\\nnot ok 1 - synthetic\\n  ---\\n  message: expected 7 got 9\\n  ...\\n'; exit 1\"\n"+
 		"pre-merge-output-format = \"tap-ndjson\"\n")
 
-	var buf bytes.Buffer
-	_, err := Run(&buf, "tap", wtPath, false)
+	_, recs, err := runCheck(t, wtPath)
 	if err == nil {
-		t.Fatalf("expected hook failure, got nil. Output: %s", buf.String())
+		t.Fatalf("expected hook failure, got nil")
 	}
 
-	got := buf.String()
-	if !strings.Contains(got, "not ok") {
-		t.Errorf("expected 'not ok' for failed hook, got:\n%s", got)
+	tr := singleTest(t, recs)
+	if tr.OK {
+		t.Errorf("expected failing test record, got %+v", tr)
 	}
-	if !strings.Contains(got, "format: tap-ndjson") {
-		t.Errorf("expected 'format: tap-ndjson' in output, got:\n%s", got)
+	if tr.Diagnostic["format"] != "tap-ndjson" {
+		t.Errorf("expected format tap-ndjson in diagnostic, got %v", tr.Diagnostic["format"])
 	}
-	if !strings.Contains(got, "failure:") {
-		t.Errorf("expected 'failure:' field with parsed records, got:\n%s", got)
+	out, _ := tr.Diagnostic["output"].(string)
+	if !strings.Contains(out, "expected 7 got 9") {
+		t.Errorf("expected failure summary with diagnostic message in output, got %q", out)
 	}
-	if !strings.Contains(got, "expected 7 got 9") {
-		t.Errorf("expected diagnostic message in failure summary, got:\n%s", got)
-	}
-	if strings.Contains(got, "tail:") {
-		t.Errorf("did not expect 'tail:' when parsed records exist, got:\n%s", got)
+	if !strings.Contains(out, "#1 synthetic") {
+		t.Errorf("expected failing record reference in failure summary, got %q", out)
 	}
 
 	// The madder blob must contain exactly one TestRecord with OK=false.
-	recs := readNDJSONRecords(t, stdinCapture)
-	if len(recs) != 1 {
-		t.Fatalf("expected 1 TestRecord in blob, got %d: %+v", len(recs), recs)
+	blobRecs := readNDJSONRecords(t, stdinCapture)
+	if len(blobRecs) != 1 {
+		t.Fatalf("expected 1 TestRecord in blob, got %d: %+v", len(blobRecs), blobRecs)
 	}
-	if recs[0].OK {
-		t.Errorf("expected OK=false on the parsed failure record, got %+v", recs[0])
+	if blobRecs[0].OK {
+		t.Errorf("expected OK=false on the parsed failure record, got %+v", blobRecs[0])
 	}
 }
 
@@ -424,8 +479,7 @@ func TestRunHookCompactShape_NdjsonCrapSuccess(t *testing.T) {
 		"pre-merge = \"echo '{\\\"type\\\":\\\"test\\\",\\\"n\\\":1,\\\"description\\\":\\\"synthetic\\\",\\\"ok\\\":true}'\"\n"+
 		"pre-merge-output-format = \"ndjson-crap\"\n")
 
-	var buf bytes.Buffer
-	links, err := Run(&buf, "tap", wtPath, false)
+	links, recs, err := runCheck(t, wtPath)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -433,15 +487,12 @@ func TestRunHookCompactShape_NdjsonCrapSuccess(t *testing.T) {
 		t.Fatalf("expected one application/x-ndjson blob link, got %v", links)
 	}
 
-	got := buf.String()
-	if !strings.Contains(got, "format: ndjson-crap") {
-		t.Errorf("expected 'format: ndjson-crap' in output, got:\n%s", got)
+	tr := singleTest(t, recs)
+	if !tr.OK {
+		t.Errorf("expected passing test record, got %+v", tr)
 	}
-	if strings.Contains(got, "not ok") {
-		t.Errorf("did not expect 'not ok' on success, got:\n%s", got)
-	}
-	if strings.Contains(got, "tail:") || strings.Contains(got, "failure:") {
-		t.Errorf("did not expect tail/failure on success, got:\n%s", got)
+	if _, ok := tr.Diagnostic["output"]; ok {
+		t.Errorf("did not expect 'output' diagnostic on success, got %+v", tr.Diagnostic)
 	}
 
 	// The blob stores the ndjson-crap stream verbatim (already canonical).
@@ -460,27 +511,21 @@ func TestRunHookCompactShape_NdjsonCrapFailure(t *testing.T) {
 		"pre-merge = \"echo '{\\\"type\\\":\\\"test\\\",\\\"n\\\":1,\\\"description\\\":\\\"synthetic\\\",\\\"ok\\\":false,\\\"diagnostic\\\":{\\\"message\\\":\\\"expected 7 got 9\\\"}}'; exit 1\"\n"+
 		"pre-merge-output-format = \"ndjson-crap\"\n")
 
-	var buf bytes.Buffer
-	_, err := Run(&buf, "tap", wtPath, false)
+	_, recs, err := runCheck(t, wtPath)
 	if err == nil {
-		t.Fatalf("expected hook failure, got nil. Output: %s", buf.String())
+		t.Fatalf("expected hook failure, got nil")
 	}
 
-	got := buf.String()
-	if !strings.Contains(got, "not ok") {
-		t.Errorf("expected 'not ok' for failed hook, got:\n%s", got)
+	tr := singleTest(t, recs)
+	if tr.OK {
+		t.Errorf("expected failing test record, got %+v", tr)
 	}
-	if !strings.Contains(got, "format: ndjson-crap") {
-		t.Errorf("expected 'format: ndjson-crap' in output, got:\n%s", got)
+	if tr.Diagnostic["format"] != "ndjson-crap" {
+		t.Errorf("expected format ndjson-crap in diagnostic, got %v", tr.Diagnostic["format"])
 	}
-	if !strings.Contains(got, "failure:") {
-		t.Errorf("expected 'failure:' field built from parsed crap records, got:\n%s", got)
-	}
-	if !strings.Contains(got, "expected 7 got 9") {
-		t.Errorf("expected diagnostic message in failure summary, got:\n%s", got)
-	}
-	if strings.Contains(got, "tail:") {
-		t.Errorf("did not expect 'tail:' when parsed records exist, got:\n%s", got)
+	out, _ := tr.Diagnostic["output"].(string)
+	if !strings.Contains(out, "expected 7 got 9") {
+		t.Errorf("expected failure summary built from parsed crap records, got %q", out)
 	}
 }
 
@@ -488,33 +533,27 @@ func TestRunHookCompactShape_TapNDJSONDegenerateFallback(t *testing.T) {
 	_, _, wtPath := setupRepoWithWorktree(t, "feature-tap-ndjson-degenerate")
 	withFakeMadder(t)
 	// Hook prints non-TAP garbage (no `TAP version 14` line) and exits
-	// non-zero. The parser produces zero records, so the response must
-	// fall back to `tail:` carrying the raw output.
+	// non-zero. The parser produces zero records, so the diagnostic's
+	// output must fall back to the raw ring tail.
 	writeSweatfile(t, wtPath, "[hooks]\n"+
 		"pre-merge = \"echo this is not tap; exit 3\"\n"+
 		"pre-merge-output-format = \"tap-ndjson\"\n")
 
-	var buf bytes.Buffer
-	_, err := Run(&buf, "tap", wtPath, false)
+	_, recs, err := runCheck(t, wtPath)
 	if err == nil {
-		t.Fatalf("expected hook failure, got nil. Output: %s", buf.String())
+		t.Fatalf("expected hook failure, got nil")
 	}
 
-	got := buf.String()
-	if !strings.Contains(got, "not ok") {
-		t.Errorf("expected 'not ok' for failed hook, got:\n%s", got)
+	tr := singleTest(t, recs)
+	if tr.OK {
+		t.Errorf("expected failing test record, got %+v", tr)
 	}
-	if !strings.Contains(got, "format: tap-ndjson") {
-		t.Errorf("expected 'format: tap-ndjson' in output, got:\n%s", got)
+	if tr.Diagnostic["format"] != "tap-ndjson" {
+		t.Errorf("expected format tap-ndjson in diagnostic, got %v", tr.Diagnostic["format"])
 	}
-	if !strings.Contains(got, "tail:") {
-		t.Errorf("expected 'tail:' fallback on degenerate stream, got:\n%s", got)
-	}
-	if !strings.Contains(got, "this is not tap") {
-		t.Errorf("expected garbage stdout in tail, got:\n%s", got)
-	}
-	if strings.Contains(got, "failure:") {
-		t.Errorf("did not expect 'failure:' on degenerate stream, got:\n%s", got)
+	out, _ := tr.Diagnostic["output"].(string)
+	if !strings.Contains(out, "this is not tap") {
+		t.Errorf("expected raw tail fallback in output on degenerate stream, got %q", out)
 	}
 }
 
@@ -542,14 +581,14 @@ func TestRunHookInBuildWorktree(t *testing.T) {
 	_, repoDir, wtPath := setupRepoWithWorktree(t, "feature-build-wt")
 	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"pwd\"\n")
 
-	var buf bytes.Buffer
-	if _, err := Run(&buf, "tap", wtPath, false); err != nil {
-		t.Fatalf("Run() error: %v\n%s", err, buf.String())
+	_, recs, err := runCheck(t, wtPath)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
 	}
 
-	got := buf.String()
-	if !strings.Contains(got, ".merge-feature-build-wt-") {
-		t.Errorf("expected hook to run in a .merge-* build worktree, got pwd output:\n%s", got)
+	// The hook's pwd output streams as Output records on the phase.
+	if out := outputText(recs); !strings.Contains(out, ".merge-feature-build-wt-") {
+		t.Errorf("expected hook to run in a .merge-* build worktree, got pwd output:\n%s", out)
 	}
 	if leftovers := mergeWorktreeDirs(t, repoDir); len(leftovers) != 0 {
 		t.Errorf("expected build worktree cleaned up, found leftovers: %v", leftovers)
@@ -562,18 +601,18 @@ func TestRunHookInPlaceWhenDisabled(t *testing.T) {
 	_, repoDir, wtPath := setupRepoWithWorktree(t, "feature-inplace")
 	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"pwd\"\ndisable-merge-build-worktree = true\n")
 
-	var buf bytes.Buffer
-	if _, err := Run(&buf, "tap", wtPath, false); err != nil {
-		t.Fatalf("Run() error: %v\n%s", err, buf.String())
+	_, recs, err := runCheck(t, wtPath)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
 	}
 
-	got := buf.String()
-	if strings.Contains(got, ".merge-") {
-		t.Errorf("expected in-place run with build worktree disabled, got:\n%s", got)
+	out := outputText(recs)
+	if strings.Contains(out, ".merge-") {
+		t.Errorf("expected in-place run with build worktree disabled, got:\n%s", out)
 	}
 	// pwd should resolve to the session worktree itself.
-	if !strings.Contains(got, filepath.Base(wtPath)) {
-		t.Errorf("expected hook pwd to be the session worktree %q, got:\n%s", wtPath, got)
+	if !strings.Contains(out, filepath.Base(wtPath)) {
+		t.Errorf("expected hook pwd to be the session worktree %q, got:\n%s", wtPath, out)
 	}
 	if leftovers := mergeWorktreeDirs(t, repoDir); len(leftovers) != 0 {
 		t.Errorf("expected no build worktree, found: %v", leftovers)
@@ -594,17 +633,15 @@ func TestBuildWorktreeVerifiesCommittedTree(t *testing.T) {
 	// Default (isolated): hook succeeds because scratch.txt is absent in the
 	// committed-sha checkout.
 	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"test ! -f scratch.txt\"\n")
-	var buf bytes.Buffer
-	if _, err := Run(&buf, "tap", wtPath, false); err != nil {
-		t.Fatalf("isolated hook should not see uncommitted scratch.txt: %v\n%s", err, buf.String())
+	if _, _, err := runCheck(t, wtPath); err != nil {
+		t.Fatalf("isolated hook should not see uncommitted scratch.txt: %v", err)
 	}
 
 	// Disabled (in place): the same hook now fails because scratch.txt IS
 	// present in the session worktree.
 	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"test ! -f scratch.txt\"\ndisable-merge-build-worktree = true\n")
-	var buf2 bytes.Buffer
-	if _, err := Run(&buf2, "tap", wtPath, false); err == nil {
-		t.Fatalf("in-place hook should see uncommitted scratch.txt and fail; output:\n%s", buf2.String())
+	if _, _, err := runCheck(t, wtPath); err == nil {
+		t.Fatalf("in-place hook should see uncommitted scratch.txt and fail")
 	}
 }
 
@@ -612,23 +649,23 @@ func TestRunNoHookConfigured(t *testing.T) {
 	_, _, wtPath := setupRepoWithWorktree(t, "feature-no-hook")
 	// No sweatfile written.
 
-	var buf bytes.Buffer
-	if _, err := Run(&buf, "tap", wtPath, false); err != nil {
+	_, recs, err := runCheck(t, wtPath)
+	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
 
-	got := buf.String()
-	if !strings.Contains(got, "ok") {
-		t.Errorf("expected TAP 'ok' for no-hook case, got: %q", got)
+	tr := singleTest(t, recs)
+	if !tr.OK {
+		t.Errorf("expected passing test record for no-hook case, got %+v", tr)
 	}
 	// Per the design: agents should treat "no hook" as a successful check
-	// because there is nothing to run. The TAP message should make that
+	// because there is nothing to run. The description should make that
 	// reason explicit so a human reading the output is not confused.
-	if !strings.Contains(strings.ToLower(got), "no pre-merge hook") {
-		t.Errorf("expected 'no pre-merge hook' message, got: %q", got)
+	if !strings.Contains(strings.ToLower(tr.Description), "no pre-merge hook") {
+		t.Errorf("expected 'no pre-merge hook' message, got %q", tr.Description)
 	}
-	if !strings.Contains(got, "1..") {
-		t.Errorf("expected TAP plan in output, got: %q", got)
+	if plan, summary := hasPlanAndSummary(recs); !plan || !summary {
+		t.Errorf("expected plan+summary framing, got plan=%v summary=%v", plan, summary)
 	}
 }
 
