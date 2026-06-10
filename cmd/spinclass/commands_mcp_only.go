@@ -772,7 +772,15 @@ func handleUpdateDescription(_ context.Context, args json.RawMessage, _ command.
 	}
 
 	if !worktree.IsWorktree(cwd) {
-		return command.TextErrorResult("not inside a worktree session"), nil
+		implicit, randID, ferr := session.FindImplicitAtCwd(cwd)
+		if ferr != nil || implicit == nil {
+			return command.TextErrorResult("not inside a worktree session"), nil
+		}
+		implicit.Description = params.Description
+		if err := session.WriteImplicit(*implicit, randID); err != nil {
+			return command.TextErrorResult(fmt.Sprintf("could not write session state: %v", err)), nil
+		}
+		return command.TextResult(fmt.Sprintf("description updated to: %s", params.Description)), nil
 	}
 
 	repoPath, err := git.CommonDir(cwd)

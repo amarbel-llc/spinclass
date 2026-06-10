@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -180,6 +182,68 @@ func TestCurrentSessionKeyNoSessionStillErrors(t *testing.T) {
 
 	if _, err := currentSessionKey(); err == nil {
 		t.Fatal("expected error when no implicit session and not a worktree")
+	}
+}
+
+// TestHandleUpdateDescriptionImplicit verifies that
+// update-this-session-description falls back to a live implicit
+// (main-checkout) session when not inside a worktree, writing the description
+// into its state-<rand>.json — the behavior FDR 0014 documents (#137).
+func TestHandleUpdateDescriptionImplicit(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	// A bare tempdir has no .git file, so worktree.IsWorktree is false and the
+	// implicit fallback fires before any git call.
+	repo := t.TempDir()
+	st := session.State{
+		Kind:         session.KindImplicit,
+		PID:          os.Getpid(),
+		SessionState: session.StateActive,
+		RepoPath:     repo,
+		WorktreePath: repo,
+		Branch:       "master",
+		SessionKey:   "myrepo/master-cafe1234",
+	}
+	if err := session.WriteImplicit(st, "cafe1234"); err != nil {
+		t.Fatalf("WriteImplicit: %v", err)
+	}
+	t.Chdir(repo)
+
+	res, err := handleUpdateDescription(context.Background(), json.RawMessage(`{"description":"triage the flaky test"}`), nil)
+	if err != nil {
+		t.Fatalf("handleUpdateDescription: %v", err)
+	}
+	if res.IsErr {
+		t.Fatalf("expected success for implicit session, got error result: %s", res.Text)
+	}
+
+	got, _, ferr := session.FindImplicitAtCwd(repo)
+	if ferr != nil || got == nil {
+		t.Fatalf("FindImplicitAtCwd after update: state=%v err=%v", got, ferr)
+	}
+	if got.Description != "triage the flaky test" {
+		t.Errorf("persisted description = %q, want %q", got.Description, "triage the flaky test")
+	}
+}
+
+// TestHandleUpdateDescriptionNoSessionStillErrors verifies the fallback does
+// not mask the genuine "not a session" case: outside a worktree with no live
+// implicit session, the tool still returns the canonical error.
+func TestHandleUpdateDescriptionNoSessionStillErrors(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	dir := t.TempDir() // no implicit session written
+	t.Chdir(dir)
+
+	res, err := handleUpdateDescription(context.Background(), json.RawMessage(`{"description":"anything"}`), nil)
+	if err != nil {
+		t.Fatalf("handleUpdateDescription: %v", err)
+	}
+	if !res.IsErr {
+		t.Fatalf("expected error result with no session, got success: %s", res.Text)
+	}
+	if !strings.Contains(res.Text, "not inside a worktree session") {
+		t.Errorf("error text = %q, want it to contain %q", res.Text, "not inside a worktree session")
 	}
 }
 
