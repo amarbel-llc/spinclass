@@ -12,10 +12,13 @@ import (
 	"github.com/charmbracelet/log"
 	"github.com/mattn/go-isatty"
 
+	"github.com/amarbel-llc/crap/go-crap/v2/crap"
+
 	"github.com/amarbel-llc/spinclass/internal/close"
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/merge"
+	"github.com/amarbel-llc/spinclass/internal/present"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
@@ -222,10 +225,28 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 
 	interactive := isatty.IsTerminal(os.Stdin.Fd()) || isatty.IsCygwinTerminal(os.Stdin.Fd())
 
-	return closeShop(w, exec, rp, format, mergeOnClose, verbose, tw, interactive, noAttach)
+	return closeShop(w, exec, rp, format, mergeOnClose, tw, interactive, noAttach)
 }
 
-func closeShop(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, format string, mergeOnClose bool, verbose bool, tw *tap.Writer, interactive bool, noAttach bool) error {
+// runMergeOnClose runs one self-contained merge attempt with its own
+// ndjson-crap renderer scope (merge/check no longer speak TAP — see
+// docs/plans/2026-06-10-merge-ndjson-crap-viewport-design.md). The
+// viewport/plain/ndjson selection mirrors `sc merge`: auto-resolve from
+// stdout TTY-ness. huh prompts in closeShop stay outside this scope.
+func runMergeOnClose(exec executor.Executor, rp worktree.ResolvedPath, defaultBranch string) error {
+	resolved, err := present.ResolveFormat("", isatty.IsTerminal(os.Stdout.Fd()))
+	if err != nil {
+		return err
+	}
+	return present.WithReporter(resolved, "merge "+rp.Branch, os.Stdout, os.Stderr, func(rep *crap.Reporter) error {
+		ts := rep.TestStream(0)
+		defer ts.Finish()
+		_, mergeErr := merge.Resolved(exec, rep, ts, rp.RepoPath, rp.AbsPath, rp.Branch, defaultBranch, false, false)
+		return mergeErr
+	})
+}
+
+func closeShop(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, format string, mergeOnClose bool, tw *tap.Writer, interactive bool, noAttach bool) error {
 	if rp.Branch == "" {
 		if err := rp.FillBranchFromGit(); err != nil {
 			log.Warn("could not determine current branch")
@@ -254,11 +275,10 @@ func closeShop(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, fo
 	isClean := worktreeStatus == ""
 
 	if isClean && mergeOnClose {
-		_, err := merge.Resolved(exec, w, tw, format, rp.RepoPath, rp.AbsPath, rp.Branch, defaultBranch, false, false, verbose)
 		if tw != nil {
 			tw.Plan()
 		}
-		return err
+		return runMergeOnClose(exec, rp, defaultBranch)
 	}
 
 	if interactive && mergeOnClose {
@@ -280,11 +300,10 @@ func closeShop(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, fo
 					}
 					return discardErr
 				}
-				_, mergeErr := merge.Resolved(exec, w, tw, format, rp.RepoPath, rp.AbsPath, rp.Branch, defaultBranch, false, false, verbose)
 				if tw != nil {
 					tw.Plan()
 				}
-				return mergeErr
+				return runMergeOnClose(exec, rp, defaultBranch)
 
 			case actionReattach:
 				tp := tap.TestPoint{
@@ -297,11 +316,10 @@ func closeShop(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, fo
 				worktreeStatus = git.StatusPorcelain(rp.AbsPath)
 				isClean = worktreeStatus == ""
 				if isClean {
-					_, mergeErr := merge.Resolved(exec, w, tw, format, rp.RepoPath, rp.AbsPath, rp.Branch, defaultBranch, false, false, verbose)
 					if tw != nil {
 						tw.Plan()
 					}
-					return mergeErr
+					return runMergeOnClose(exec, rp, defaultBranch)
 				}
 				continue
 
