@@ -115,12 +115,19 @@ spawned workers boot straight into the harness.
 
 ### Kick-off — synchronous until chat hello
 
-The driver tool blocks until the worker's **first chat message**
-arrives (a hello emitted once the harness is up), with a deadline;
-failure or timeout inside the window surfaces as a tool error to the
-driver. This gate proves the full stack — multiplexer session,
-entrypoint, harness, chat plumbing — where the previously-leaned
-PID-alive probe proved only that a process existed.
+The driver tool blocks until the worker's **hello chat message**
+arrives, with a 60s default deadline (see Tuning Levers); failure or
+timeout inside the window surfaces as a tool error to the driver. This
+gate proves the full stack — multiplexer session, entrypoint, harness,
+hooks, chat plumbing — where the previously-leaned PID-alive probe
+proved only that a process existed.
+
+The hello is emitted **mechanically by the worker's `SessionStart`
+plugin hook** (the FDR 0014 infrastructure): the spawn records the
+driver's session key in the worker's state (`spawned_by`, below), and
+the hook, seeing it, chat-sends the hello to that key. Deterministic —
+it fires the moment the harness is up, with no reliance on the model
+reading and obeying an instruction in the brief.
 
 (Supersedes: sync-until-healthy with PID-alive lean. The healthy-gate
 open question is resolved by construction.)
@@ -160,11 +167,27 @@ upgrade path if instinct-driven probing proves insufficient.
 
 (Resolves the failure-modes open question.)
 
+### The same machinery powers `sc fork`
+
+The launch half of spawn — the `[session].spawn` multiplexer template,
+the `[session].spawn-entry` harness boot, the hello gate, and
+`spawned_by` lineage — is deliberately not cross-repo-specific.
+`sc fork` (branch a new session off the current worktree) gains the
+same detached-launch path: a fork can come up as a harness-booted,
+chat-addressable worker in its **own** repo, briefed by the forking
+session, instead of requiring the user to attach a terminal to it.
+Spawn = "worker in a sibling repo"; detached fork = "worker on a
+branch of this repo"; one launch mechanism underneath.
+
 ## Sketch — interface
 
 ```
-sc spawn-sibling <repo-dirname> --brief "<text>" [--issue <N>] [--description "<text>"]
+sc spawn <repo-dirname> --brief "<text>" [--issue <N>] [--description "<text>"]
 ```
+
+(Named `sc spawn`, not `spawn-sibling`: dirname addressing made the
+target a repo name rather than a filesystem sibling, and the launch
+machinery also backs detached forks.)
 
 - `<repo-dirname>`: leaf name of the sibling repo (explicit path
   accepted as escape hatch). Must resolve to a different repo than the
@@ -174,7 +197,9 @@ sc spawn-sibling <repo-dirname> --brief "<text>" [--issue <N>] [--description "<
 - `--description`: worker session description; defaults to a
   derivation from the brief's first line.
 
-MCP tool: `spawn-sibling-session`, same inputs.
+MCP tool: `spawn-session`, same inputs. `sc fork` grows the matching
+detached mode (flag shape decided at implementation-plan time) reusing
+steps 3–5 below verbatim.
 
 Effects:
 
@@ -184,9 +209,17 @@ Effects:
    trust), with `spawned_by` set to the driver's session key.
 3. Exec the `[session].spawn` template, which launches the
    `[session].spawn-entry` harness with the brief.
-4. Block until the worker's hello chat message (deadline; error on
-   timeout).
+4. Block until the worker's hello chat message (60s default deadline;
+   error on timeout).
 5. Return `{session_key, worktree_path, multiplexer_session}`.
+
+## Tuning Levers
+
+- **Hello deadline (60s)**: comfortably past typical harness startup
+  (10–30s), far inside MCP request timeouts, no async twin needed.
+  Signal to raise it (or grow a `[spawn].hello-timeout` knob): cold
+  nix-cache session starts — direnv/devshell evaluation on first
+  attach — exceeding the window in practice.
 
 ## Deferred
 
