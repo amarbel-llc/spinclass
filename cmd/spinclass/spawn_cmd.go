@@ -90,9 +90,10 @@ func parseHelloTimeout(s string) (time.Duration, error) {
 	if err != nil {
 		return 0, fmt.Errorf("invalid hello-timeout %q (want a Go duration like \"90s\"): %w", s, err)
 	}
-	// A negative duration would silently fall through to the 60s default
-	// inside the spawn package — reject it instead of surprising the user.
-	if d < 0 {
+	// An explicit non-positive duration ("0s", "-5s") would silently fall
+	// through to the 60s default inside the spawn package — reject it
+	// instead of surprising the user. Only "" means "use the default".
+	if d <= 0 {
 		return 0, fmt.Errorf("hello-timeout must be positive, got %q", s)
 	}
 	return d, nil

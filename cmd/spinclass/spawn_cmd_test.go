@@ -32,6 +32,7 @@ func TestHandleSpawnSessionValidation(t *testing.T) {
 		{"missing repo", `{"brief":"do the thing"}`, "repo is required"},
 		{"bad hello-timeout", `{"repo":"somewhere","brief":"do","hello-timeout":"bogus"}`, "invalid hello-timeout"},
 		{"negative hello-timeout", `{"repo":"somewhere","brief":"do","hello-timeout":"-5s"}`, "must be positive"},
+		{"zero hello-timeout", `{"repo":"somewhere","brief":"do","hello-timeout":"0s"}`, "must be positive"},
 		{"unknown repo", `{"repo":"no-such-repo","brief":"do the thing"}`, "no repo named"},
 	}
 	for _, tc := range cases {

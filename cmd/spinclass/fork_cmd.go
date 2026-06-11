@@ -99,12 +99,14 @@ func runForkDetached(source worktree.ResolvedPath, p forkDetachedParams) (spawn.
 		return spawn.Result{}, "", fmt.Errorf("creating forked worktree: %w", err)
 	}
 
+	// Description deliberately travels only as LaunchExisting's desc param
+	// (the channel that reaches the state write); rp.Description is unread
+	// by the spawn package and setting it too would invite drift.
 	rp := worktree.ResolvedPath{
-		AbsPath:     newPath,
-		RepoPath:    source.RepoPath,
-		Branch:      newBranch,
-		SessionKey:  filepath.Base(source.RepoPath) + "/" + newBranch,
-		Description: p.Description,
+		AbsPath:    newPath,
+		RepoPath:   source.RepoPath,
+		Branch:     newBranch,
+		SessionKey: filepath.Base(source.RepoPath) + "/" + newBranch,
 	}
 
 	res, err := spawn.LaunchExisting(home, rp, driverKey, p.Brief, p.Description, deadline)
