@@ -2,12 +2,15 @@
 status: proposed
 date: 2026-05-02
 revised: 2026-06-11
+implemented: 2026-06-11
 promotion-criteria: |
-  Promote to `accepted` when an implementation plan exists and the
-  motivating driver/worker pattern (see Problem Statement) has been
-  exercised end-to-end through the new tool: spawn, chat hello, brief
-  delivered, worker merges, completion wake — with no manual
-  terminal-juggling.
+  Promote to `accepted` when the motivating driver/worker pattern (see
+  Problem Statement) has been exercised end-to-end through the new tool
+  IN PRODUCTION: spawn, chat hello, brief delivered, worker merges,
+  completion wake — with no manual terminal-juggling. The implementation
+  (docs/plans/2026-06-11-spawn-sessions.md) landed 2026-06-11 with bats
+  e2e covering spawn/hello/brief/timeout over stub templates; the
+  worker-merges + completion-wake legs await the first real spawn.
 ---
 
 # Spawn sibling-repo sessions

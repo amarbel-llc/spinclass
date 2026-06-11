@@ -86,8 +86,9 @@ parent dirs → repo-level. Supports `git-excludes`, `claude-allow`, `envrc-dire
 `[env]` table (map merge), `[hooks]` table (create/stop/pre-merge lifecycle hooks, scalar
 override; includes `disable-merge`, `disable-nix-gc`,
 `disable-merge-build-worktree`, `disable-implicit-sessions`,
-`pre-merge-output-format`, `inactivity-timeout`), and `[session]` table (start/resume entrypoint commands, override
-semantics). The package holds the struct definitions, accessors, `MergeWith`,
+`pre-merge-output-format`, `inactivity-timeout`), and `[session-entry]` table (start/resume entrypoint commands plus the
+FDR 0006 `spawn`/`spawn-entry` argv templates for detached worker launch;
+per-field override semantics). The package holds the struct definitions, accessors, `MergeWith`,
 `GetDefault`, `Apply`, and the tommy-generated codec (`sweatfile_tommy.go`, via
 `//go:generate tommy generate`).
 
@@ -145,11 +146,12 @@ worktree paths. Applies `claude-allow` rules from sweatfile to
   falls back to the session lookup.
 - **Sweatfile merging**: Config files walk from `$HOME` down to repo root,
   merging at each level.
-- **Session entrypoint**: `[session].start` and `[session].resume` in sweatfile
+- **Session entrypoint**: `[session-entry].start` and `[session-entry].resume`
+  in sweatfile
   control what command is exec'd. Defaults to `$SHELL`.
 - **Session picking**: both `sc resume` and `sc close` source from `session.ListForRepo` via `internal/sessionpick` (`Choose` for close, `ChooseAutoSingle` for resume, which short-circuits a lone candidate past the picker), sorted active-first by `session.SortStates`. Tab completion (`completeWorktreeTargets`, shared by resume/close/merge/update-description) scopes via `session.ListForScope` instead: the containing repo's sessions (offered by bare dirname) plus any session whose repo sits beneath the cwd (offered by `<repo>/<branch>` session key — a cwd above nested repos, e.g. `~/eng` over `~/eng/repos/*`, sees them all); outside any repo, all non-abandoned sessions. Completion labels reuse the picker rows' Detail strings so both read identically. The resume picker (only — close stays local-only) appends cached remote rows from `remote.ReadAllCaches` after the local rows (`Item.State` nil, `Item.Target` = `host:<id>`); selecting one routes over the remote attach template with no dialog, and remote rows never count toward the lone-candidate shortcut. Non-TTY callers get an error listing IDs instead of a hung prompt. Orphaned git worktrees without a state file are not valid `sc close` targets; remove them with `git worktree remove`.
 - **Resume confirmation**: auto-detect and picker-single-match resume show a clown-style huh confirm (`resumeConfirmPlan` in `cmd/spinclass/resume_confirm.go` is the pure decision seam); `-y/--yes` skips it. Explicit `sc resume <id>` and multi-match picker selection are dialog-free (naming/selecting is the confirmation — keeps remote attach templates non-interactive). An `active` session (live PID, probably attached elsewhere) warns with default Cancel; `-y` does NOT skip the warning variant, and non-TTY always errors there.
-- **External tool deps**: `git` is always required and resolved from `PATH`. `madder` and `direnv` are runtime deps **only** when the binary was built via `lib.mkSpinclass` with the matching input — those paths are burned in at link time (see `spinclass-build-pins(7)` and FDR 0003); the default `nix build` produces a binary with both pins empty, in which case the madder integration is dormant and direnv falls back to `PATH`. `clown` is an optional runtime dep for job-wakeup emits (`internal/clown`): chat wake emits AND async merge/check job-lifecycle emits both fire when `$CLOWN_BIN` is set (the running-under-clown signal) and are dormant otherwise — clown's job-watch monitor is the sole chat push path; without clown, `chat-read` polling is the only receive path (see FDR 0010 and the async section below). Interactive prompts use the in-process `huh` library (no `gum` dependency).
+- **External tool deps**: `git` is always required and resolved from `PATH`. `madder` and `direnv` are runtime deps **only** when the binary was built via `lib.mkSpinclass` with the matching input — those paths are burned in at link time (see `spinclass-build-pins(7)` and FDR 0003); the default `nix build` produces a binary with both pins empty, in which case the madder integration is dormant and direnv falls back to `PATH`. `clown` is an optional runtime dep for job-wakeup emits (`internal/clown`): chat wake emits AND async merge/check job-lifecycle emits both fire when `$CLOWN_BIN` is set (the running-under-clown signal) and are dormant otherwise — clown's job-watch monitor is the sole chat push path; without clown, `chat-read` polling is the only receive path (see FDR 0010 and the async section below). `zmx` is an optional runtime dep for `sc spawn`/detached fork **only** when the default `[session-entry].spawn` template is in effect — the template is sweatfile-overridable to any multiplexer (FDR 0006). Interactive prompts use the in-process `huh` library (no `gum` dependency).
 
 ## CLI Commands
 
@@ -165,7 +167,8 @@ worktree paths. Applies `claude-allow` rules from sweatfile to
   `sc merge [target]`              Merge worktree into main, remove session state
   `sc check`                       Run [hooks].pre-merge in the current worktree (agent-CI surface)
   `sc clean`                       Remove merged worktrees and abandoned sessions
-  `sc fork [branch]`               Fork current worktree (supports `--from <dir>`)
+  `sc fork [branch]`               Fork current worktree (supports `--from <dir>`; `--brief` launches the fork as a detached worker, FDR 0006)
+  `sc spawn <repo> --brief "…"`    Launch a detached, harness-booted worker session in a sibling repo (dirname-addressed; blocks on the worker's chat hello, FDR 0006)
   `sc pull`                        Pull repos and rebase worktrees
   `sc validate`                    Validate sweatfile hierarchy
   `sc perms list|review|edit`      Inspect or edit permission tier rules
@@ -188,6 +191,25 @@ the MCP tool catalog, gated on `[hooks].disable-merge`:
   agents can still exercise `[hooks].pre-merge`.
 
 The `sc check` CLI subcommand is available regardless of the flag.
+
+**Spawned worker sessions** (FDR 0006): `sc spawn <repo> --brief "…"` and the
+`spawn-session` / `fork-session` MCP tools launch detached, harness-booted
+worker sessions. The target repo is addressed by dirname (leaf search under
+`$HOME/*/repos/<leaf>`; explicit paths need a separator). The launch execs
+the cascade-merged `[session-entry].spawn` multiplexer template (default
+`["zmx", "run", "{id}", "--", "{entry}"]`) which boots
+`[session-entry].spawn-entry` (e.g. `["clown", "{prompt}"]`) with the
+driver's brief as the harness's initial prompt; the worker process env
+carries the WORKER's spinclass identity (mirrors `SessionExecutor`). The
+spawn blocks until the worker's `SessionStart` hook chat-sends a hello to
+the driver (keyed off `spawned_by` in the worker's state; 60s default
+deadline, `--hello-timeout` tunes it; dedup via `hello_sent_at`). On
+timeout the worker worktree+state persist for inspection (`sc close`
+cleans). Coordination after the hello is the FDR 0010 chat system —
+the brief should tell the worker to message the driver's session key when
+done. `fork-session` is the same-repo variant (caller must be in an sc
+worktree; see #142 for the implicit-driver gap). `internal/spawn` owns
+resolution, template substitution, and the hello-gated launch.
 
 From an **implicit (main-checkout) session** (FDR 0014), `merge-this-session` /
 `merge-this-session-async` / `sc merge` detect a live implicit session via

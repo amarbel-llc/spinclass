@@ -65,7 +65,8 @@ sc clean
 | `sc merge [target]` | Merge a worktree into main, remove session state |
 | `sc check` | Run `[hooks].pre-merge` in the current worktree |
 | `sc clean` | Remove merged worktrees and abandoned sessions |
-| `sc fork [branch]` | Fork the current worktree (supports `--from <dir>`) |
+| `sc fork [branch]` | Fork the current worktree (supports `--from <dir>`; `--brief` launches the fork as a detached worker) |
+| `sc spawn <repo> --brief "…"` | Launch a detached, harness-booted worker session in a sibling repo (blocks on the worker's chat hello) |
 | `sc pull` | Pull repos and rebase worktrees |
 | `sc validate` | Validate the sweatfile hierarchy |
 | `sc perms list\|review\|edit` | Inspect or edit permission tier rules |
