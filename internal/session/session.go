@@ -68,11 +68,15 @@ type State struct {
 	// `sc spawn` / detached fork when this session was launched as a worker.
 	// Display-only lineage surfaced by `sc list` and chat-list-sessions —
 	// no behavioral branches key off it. See FDR 0006.
-	SpawnedBy  string            `json:"spawned_by,omitempty"`
-	Entrypoint []string          `json:"entrypoint"`
-	Env        map[string]string `json:"env"`
-	StartedAt  time.Time         `json:"started_at"`
-	ExitedAt   *time.Time        `json:"exited_at,omitempty"`
+	SpawnedBy string `json:"spawned_by,omitempty"`
+	// HelloSentAt records when the SessionStart hook emitted the spawn
+	// hello to SpawnedBy, deduping re-fires (resume/clear/compact). Set
+	// only on spawned sessions (FDR 0006).
+	HelloSentAt *time.Time        `json:"hello_sent_at,omitempty"`
+	Entrypoint  []string          `json:"entrypoint"`
+	Env         map[string]string `json:"env"`
+	StartedAt   time.Time         `json:"started_at"`
+	ExitedAt    *time.Time        `json:"exited_at,omitempty"`
 
 	// PreMergeAttestation buffers the agent's most recent
 	// nothing-but-the-truth response. Consumed and cleared by the next

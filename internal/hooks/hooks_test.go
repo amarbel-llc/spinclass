@@ -8,8 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/amarbel-llc/spinclass/internal/chat"
 	"github.com/amarbel-llc/spinclass/internal/session"
+	"github.com/amarbel-llc/spinclass/internal/testgit"
 )
 
 func makeInput(toolName string, toolInput map[string]any, cwd string) []byte {
@@ -1377,6 +1380,157 @@ func TestSessionStartNoopInsideWorktree(t *testing.T) {
 	matches, _ := filepath.Glob(filepath.Join(wt, ".spinclass", "state-*.json"))
 	if len(matches) != 0 {
 		t.Fatalf("should not materialize inside a worktree, got %v", matches)
+	}
+}
+
+// initSpawnedWorktree creates a repo plus an sc-style worktree at
+// <repo>/.worktrees/feature (the layout session.Read reconstructs from
+// repoPath+branch) and writes a worktree session state with the given
+// SpawnedBy. Paths are symlink-resolved for the same reason as
+// initImplicitTestRepo: git.CommonDir returns git's canonicalized path.
+func initSpawnedWorktree(t *testing.T, spawnedBy string) (repo, wt string) {
+	t.Helper()
+	repo, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	testgit.MustInit(t, repo)
+	wt = filepath.Join(repo, ".worktrees", "feature")
+	testgit.MustWorktreeAdd(t, repo, wt, "feature")
+	st := session.State{
+		PID:          0,
+		SessionState: session.StateActive,
+		RepoPath:     repo,
+		WorktreePath: wt,
+		Branch:       "feature",
+		SessionKey:   "myrepo/feature",
+		SpawnedBy:    spawnedBy,
+		StartedAt:    time.Now(),
+	}
+	if err := session.Write(st); err != nil {
+		t.Fatalf("session.Write: %v", err)
+	}
+	return repo, wt
+}
+
+// fireSessionStart runs the hook entrypoint with a SessionStart payload.
+func fireSessionStart(t *testing.T, cwd string) {
+	t.Helper()
+	input, _ := json.Marshal(map[string]any{
+		"hook_event_name": "SessionStart",
+		"session_id":      "spawn-test-session",
+		"cwd":             cwd,
+		"source":          "startup",
+	})
+	var out bytes.Buffer
+	if err := Run(bytes.NewReader(input), &out, "", "", false); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// readHellos peek-reads the chatroom as the driver, filtered to the worker's
+// sends. peek=true keeps the driver's cursor untouched across repeated calls.
+func readHellos(t *testing.T, driver, worker string) []chat.Message {
+	t.Helper()
+	msgs, err := chat.Read(driver, chat.ReadFilter{ToMe: true, From: worker}, true)
+	if err != nil {
+		t.Fatalf("chat.Read: %v", err)
+	}
+	return msgs
+}
+
+func TestSessionStartSpawnHello(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	repo, wt := initSpawnedWorktree(t, "driver/key")
+
+	fireSessionStart(t, wt)
+
+	msgs := readHellos(t, "driver/key", "myrepo/feature")
+	if len(msgs) != 1 {
+		t.Fatalf("expected exactly one hello message, got %d: %+v", len(msgs), msgs)
+	}
+	if msgs[0].To != "driver/key" {
+		t.Errorf("hello To = %q, want driver/key", msgs[0].To)
+	}
+	if !strings.HasPrefix(msgs[0].Subject, chat.HelloSubject) {
+		t.Errorf("hello Subject = %q, want %q prefix", msgs[0].Subject, chat.HelloSubject)
+	}
+
+	st, err := session.Read(repo, "feature")
+	if err != nil {
+		t.Fatalf("session.Read: %v", err)
+	}
+	if st.HelloSentAt == nil {
+		t.Error("HelloSentAt not set after hello")
+	}
+	if st.PID == 0 {
+		t.Error("PID not adopted (still 0)")
+	}
+	if st.SessionState != session.StateActive {
+		t.Errorf("state = %q, want active", st.SessionState)
+	}
+}
+
+func TestSessionStartSpawnHelloDedupes(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	_, wt := initSpawnedWorktree(t, "driver/key")
+
+	fireSessionStart(t, wt)
+	fireSessionStart(t, wt) // resume/clear/compact re-fire
+
+	msgs := readHellos(t, "driver/key", "myrepo/feature")
+	if len(msgs) != 1 {
+		t.Fatalf("expected exactly one hello after two SessionStarts, got %d: %+v", len(msgs), msgs)
+	}
+}
+
+func TestSessionStartWorktreeWithoutSpawnedByNoHello(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	repo, wt := initSpawnedWorktree(t, "")
+
+	fireSessionStart(t, wt)
+
+	msgs := readHellos(t, "driver/key", "myrepo/feature")
+	if len(msgs) != 0 {
+		t.Fatalf("expected no hello without SpawnedBy, got %d: %+v", len(msgs), msgs)
+	}
+	st, err := session.Read(repo, "feature")
+	if err != nil {
+		t.Fatalf("session.Read: %v", err)
+	}
+	if st.HelloSentAt != nil {
+		t.Error("HelloSentAt set on a non-spawned session")
+	}
+	if st.PID != 0 {
+		t.Errorf("state touched: PID = %d, want 0", st.PID)
+	}
+}
+
+func TestSessionStartSpawnHelloSendFailureLeavesUnmarked(t *testing.T) {
+	// Write the state under a working XDG_STATE_HOME, then point
+	// XDG_STATE_HOME at a regular FILE so chat.Send's MkdirAll fails.
+	// session.Read/Write key off the worktree-local state.json, so the
+	// post-hook state assertions still work.
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	repo, wt := initSpawnedWorktree(t, "driver/key")
+
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("not a dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_STATE_HOME", blocker)
+
+	fireSessionStart(t, wt) // must swallow the send failure
+
+	st, err := session.Read(repo, "feature")
+	if err != nil {
+		t.Fatalf("session.Read: %v", err)
+	}
+	if st.HelloSentAt != nil {
+		t.Error("HelloSentAt set despite send failure")
+	}
+	if st.PID != 0 {
+		t.Errorf("state adopted despite send failure: PID = %d, want 0", st.PID)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/amarbel-llc/spinclass/internal/chat"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sessionlog"
@@ -69,6 +70,7 @@ func runSessionStart(input hookInput) error {
 	// Gate 1: not inside an sc-created worktree (those already have state).
 	// Cheapest check (a single Lstat) — runs first.
 	if worktree.IsWorktree(cwd) {
+		maybeSendSpawnHello(cwd) // spawn handshake (FDR 0006); never blocks startup
 		return nil
 	}
 	// Gate 2: a git repo whose checkout root == cwd. Gate 1 already proved
@@ -129,6 +131,50 @@ func runSessionStart(input hookInput) error {
 	}
 	_ = session.WriteImplicit(s, randID) // swallow; never block startup
 	return nil
+}
+
+// maybeSendSpawnHello emits the spawn handshake (FDR 0006) when cwd is an sc
+// worktree whose session state carries SpawnedBy: it sends the hello to the
+// driver, then adopts the state (PID, active, HelloSentAt dedup marker so
+// resume/clear/compact re-fires do not re-hello). The hello uses the state's
+// SessionKey VERBATIM — the driver's WaitForHello filters From == that exact
+// key, so recomputing it from git here would break the gate. Order matters:
+// send first (a state-write failure must not suppress the handshake), mark
+// only on success (a send failure must not set HelloSentAt). All failures are
+// swallowed and logged via sessionlog — a hook must never block startup.
+func maybeSendSpawnHello(cwd string) {
+	repoPath, err := git.CommonDir(cwd)
+	if err != nil {
+		sessionlog.Errorf("maybeSendSpawnHello common-dir-failed cwd=%s err=%v", cwd, err)
+		return
+	}
+	branch, err := git.BranchCurrent(cwd)
+	if err != nil || branch == "" { // empty = detached HEAD: no session key to read
+		return
+	}
+	st, err := session.Read(repoPath, branch)
+	if err != nil {
+		// No session state — a worktree spinclass doesn't track. Expected
+		// for non-sc worktrees; stay silent.
+		return
+	}
+	if st.SpawnedBy == "" || st.HelloSentAt != nil {
+		return
+	}
+	if err := chat.SendHello(st.SessionKey, st.SpawnedBy); err != nil {
+		sessionlog.Errorf("maybeSendSpawnHello send-failed key=%s to=%s err=%v", st.SessionKey, st.SpawnedBy, err)
+		return
+	}
+	now := time.Now().UTC()
+	st.HelloSentAt = &now
+	// os.Getppid() is best-effort, same caveat as the implicit path: the
+	// hook handler is a short-lived subprocess whose parent may be the
+	// Claude process or a transient shell wrapper.
+	st.PID = os.Getppid()
+	st.SessionState = session.StateActive
+	if err := session.Write(*st); err != nil {
+		sessionlog.Errorf("maybeSendSpawnHello write-failed key=%s err=%v", st.SessionKey, err)
+	}
 }
 
 // runSessionEnd hard-deletes the implicit session for this session_id. Misses
