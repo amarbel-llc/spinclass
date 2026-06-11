@@ -48,6 +48,24 @@ func registerSessionCommands(app *command.App) {
 	// defaultStartCommands().
 
 	app.AddCommand(&command.Command{
+		Name: "spawn",
+		Description: command.Description{
+			Short: "Spawn a detached worker session in a sibling repo",
+			Long: "Launch a detached, harness-booted worker session in a DIFFERENT repo (FDR 0006). " +
+				"The target is a repo dirname leaf-searched under $HOME/*/repos/<name> (or an explicit path); " +
+				"the worker repo's sweatfile [session-entry].spawn / spawn-entry templates decide the multiplexer and harness. " +
+				"Spawn creates the worker worktree and session state (with spawned_by lineage), execs the spawn template detached, " +
+				"then blocks up to the hello deadline (60s default; --hello-timeout tunes it) for the worker's SessionStart chat hello. " +
+				"The brief is the worker's ONLY context — include everything it needs plus an explicit instruction to message you back " +
+				"via chat when done (the printed session_key is the worker's chat address; yours is its reply target). " +
+				"--issue prepends a GitHub issue's title and body (fetched in the target repo via `gh issue view`) to the brief. " +
+				"On a hello timeout the worker worktree and state are intentionally left behind for inspection; clean up with `sc close`.",
+		},
+		Params: spawnParamList(),
+		RunCLI: runSpawnCLI,
+	})
+
+	app.AddCommand(&command.Command{
 		Name: "resume",
 		Description: command.Description{
 			Short: "Resume an existing worktree session",

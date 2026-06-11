@@ -240,6 +240,22 @@ func registerMCPOnlyCommands(app *command.App) {
 	})
 
 	app.AddCommand(&command.Command{
+		Name:  "spawn-session",
+		Title: "Spawn Worker Session",
+		Description: command.Description{
+			Short: "Spawn a detached, harness-booted worker session in a sibling repo (FDR 0006). Blocks up to the hello deadline (60s default; tune via hello-timeout) waiting for the worker's SessionStart chat hello. The brief is the worker's ONLY context: include everything it needs plus an explicit 'message me back at <your session key> via chat when done' instruction. Returns the worker's session_key (= its chat address for chat-send), worktree_path, and multiplexer id. On a hello timeout the worker's worktree and session state are left in place for inspection; clean up with `sc close`.",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(false),
+			DestructiveHint: protocol.BoolPtr(false),
+			IdempotentHint:  protocol.BoolPtr(false),
+			OpenWorldHint:   protocol.BoolPtr(false),
+		},
+		Params: spawnParamList(),
+		Run:    wrapMCPHandler("spawn-session", handleSpawnSession),
+	})
+
+	app.AddCommand(&command.Command{
 		Name:  "chat-send",
 		Title: "Send Cross-Session Chat Message",
 		Description: command.Description{
