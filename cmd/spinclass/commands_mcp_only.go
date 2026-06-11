@@ -256,6 +256,22 @@ func registerMCPOnlyCommands(app *command.App) {
 	})
 
 	app.AddCommand(&command.Command{
+		Name:  "fork-session",
+		Title: "Fork Detached Worker Session",
+		Description: command.Description{
+			Short: "Fork the CURRENT repo at this session's HEAD into a detached, harness-booted worker on a new branch (FDR 0006). Same-repo by design — the worker lands in this repo's .worktrees/<branch>; use spawn-session for a sibling repo. Same hello/timeout/cleanup contract as spawn-session: blocks up to the hello deadline (60s default; tune via hello-timeout) waiting for the worker's SessionStart chat hello. The brief is the worker's ONLY context: include everything it needs plus an explicit 'message me back at <your session key> via chat when done' instruction. Returns the worker's session_key (= its chat address for chat-send), worktree_path, and multiplexer id. On a failure after worktree creation (bad spawn config, hello timeout) the forked worktree and session state are left in place for inspection; clean up with `sc close`.",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(false),
+			DestructiveHint: protocol.BoolPtr(false),
+			IdempotentHint:  protocol.BoolPtr(false),
+			OpenWorldHint:   protocol.BoolPtr(false),
+		},
+		Params: forkSessionParamList(),
+		Run:    wrapMCPHandler("fork-session", handleForkSession),
+	})
+
+	app.AddCommand(&command.Command{
 		Name:  "chat-send",
 		Title: "Send Cross-Session Chat Message",
 		Description: command.Description{

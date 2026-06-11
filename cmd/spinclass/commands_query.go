@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -14,14 +13,12 @@ import (
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/protocol"
 	"github.com/amarbel-llc/spinclass/internal/clean"
-	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/pull"
 	"github.com/amarbel-llc/spinclass/internal/remote"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/shop"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/validate"
-	"github.com/amarbel-llc/spinclass/internal/worktree"
 )
 
 func registerQueryCommands(app *command.App) {
@@ -181,17 +178,20 @@ func registerQueryCommands(app *command.App) {
 		Name: "fork",
 		Description: command.Description{
 			Short: "Fork current worktree into a new branch",
-			Long:  "Create a new worktree branched from the current worktree's HEAD. If new-branch is omitted, a name is auto-generated as <current-branch>-N. Resolves the source worktree from the current directory or --from flag. Does not attach to the new session.",
+			Long:  "Create a new worktree branched from the current worktree's HEAD. If new-branch is omitted, a name is auto-generated as <current-branch>-N. Resolves the source worktree from the current directory or --from flag. Does not attach to the new session. With --brief, the fork instead launches as a detached, harness-booted worker session (FDR 0006): the new worktree is created the same way, then booted via the [session-entry].spawn template and the command blocks for the worker's SessionStart chat hello.",
 		},
 		Params: []command.Param{
 			{Name: "new-branch", Type: command.String, Description: "Name for the forked branch (auto-generated if omitted)"},
 			{Name: "from", Type: command.String, Description: "Source worktree directory to fork from", Completer: completeWorktreeTargets},
+			{Name: "brief", Type: command.String, Description: "Detached-fork brief: when set, the forked worktree is launched as a detached, harness-booted worker (FDR 0006) seeded with this brief, and the command blocks for the worker's chat hello. Omit for the classic create-only fork."},
+			{Name: "description", Type: command.String, Description: "Session description for the detached worker (shows in `sc list`); only used with --brief"},
+			{Name: "hello-timeout", Type: command.String, Description: "How long to wait for the worker's SessionStart hello, as a Go duration (e.g. \"90s\"). Default 60s. Only used with --brief."},
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
 			var p struct {
 				globalArgs
-				NewBranch string `json:"new-branch"`
-				From      string `json:"from"`
+				From string `json:"from"`
+				forkDetachedParams
 			}
 			_ = json.Unmarshal(args, &p)
 
@@ -204,32 +204,21 @@ func registerQueryCommands(app *command.App) {
 				sourceDir = cwd
 			}
 
-			repoPath, err := worktree.DetectRepo(sourceDir)
+			source, err := resolveForkSource(sourceDir)
 			if err != nil {
 				return err
 			}
 
-			currentBranch, err := git.BranchCurrent(sourceDir)
+			if p.Brief == "" {
+				return shop.Fork(os.Stdout, source, p.NewBranch, p.FormatOrDefault())
+			}
+
+			res, driverKey, err := runForkDetached(source, p.forkDetachedParams)
 			if err != nil {
-				return fmt.Errorf("could not determine current branch in %s: %w", sourceDir, err)
+				return err
 			}
-
-			currentPath := filepath.Join(repoPath, worktree.WorktreesDir, currentBranch)
-			if _, err := os.Stat(currentPath); os.IsNotExist(err) {
-				return fmt.Errorf(
-					"worktree path %s does not exist; fork requires a standard .worktrees layout",
-					currentPath,
-				)
-			}
-
-			rp := worktree.ResolvedPath{
-				AbsPath:    currentPath,
-				RepoPath:   repoPath,
-				Branch:     currentBranch,
-				SessionKey: filepath.Base(repoPath) + "/" + currentBranch,
-			}
-
-			return shop.Fork(os.Stdout, rp, p.NewBranch, p.FormatOrDefault())
+			fmt.Println(spawnResultText(driverKey, res))
+			return nil
 		},
 	})
 

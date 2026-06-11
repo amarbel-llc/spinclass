@@ -41,13 +41,9 @@ func runSpawn(p spawnParams) (spawn.Result, string, error) {
 	if p.Brief == "" {
 		return spawn.Result{}, "", errors.New("brief is required")
 	}
-	var deadline time.Duration
-	if p.HelloTimeout != "" {
-		d, err := time.ParseDuration(p.HelloTimeout)
-		if err != nil {
-			return spawn.Result{}, "", fmt.Errorf("invalid hello-timeout %q (want a Go duration like \"90s\"): %w", p.HelloTimeout, err)
-		}
-		deadline = d
+	deadline, err := parseHelloTimeout(p.HelloTimeout)
+	if err != nil {
+		return spawn.Result{}, "", err
 	}
 
 	home, err := os.UserHomeDir()
@@ -81,6 +77,20 @@ func runSpawn(p spawnParams) (spawn.Result, string, error) {
 		return spawn.Result{}, "", err
 	}
 	return res, driverKey, nil
+}
+
+// parseHelloTimeout parses the shared hello-timeout param of the spawn and
+// detached-fork surfaces. "" means 0, which the spawn package maps to
+// DefaultHelloDeadline.
+func parseHelloTimeout(s string) (time.Duration, error) {
+	if s == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, fmt.Errorf("invalid hello-timeout %q (want a Go duration like \"90s\"): %w", s, err)
+	}
+	return d, nil
 }
 
 // driverRepoPath best-effort resolves the DRIVER's repo path for
