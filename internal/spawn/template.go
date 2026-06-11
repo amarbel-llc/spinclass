@@ -9,15 +9,16 @@ import (
 	"strings"
 )
 
-// SubstituteEntry renders the spawn-entry argv: {prompt}→brief, {dir}→wtPath.
+// SubstituteEntry renders the spawn-entry argv: {dir}→wtPath, {prompt}→brief.
 // Replacement is substring-level within each element (an element may embed
 // the placeholder), but the brief always stays within its element — no
-// shell joining or re-splitting.
+// shell joining or re-splitting. {dir} is substituted BEFORE {prompt} so a
+// brief that happens to contain the literal text "{dir}" survives verbatim.
 func SubstituteEntry(entry []string, brief, wtPath string) []string {
 	out := make([]string, len(entry))
 	for i, e := range entry {
-		e = strings.ReplaceAll(e, "{prompt}", brief)
 		e = strings.ReplaceAll(e, "{dir}", wtPath)
+		e = strings.ReplaceAll(e, "{prompt}", brief)
 		out[i] = e
 	}
 	return out

@@ -104,6 +104,29 @@ func TestResolveRepoExplicitPathEscape(t *testing.T) {
 	}
 }
 
+// TestResolveRepoBareNameMatchingCwdSubdirStillLeafSearches guards against
+// the explicit-path escape hijacking a bare repo dirname: a cwd subdir that
+// happens to share the target's name must NOT short-circuit leaf search —
+// only a target containing a path separator is treated as a path.
+func TestResolveRepoBareNameMatchingCwdSubdirStillLeafSearches(t *testing.T) {
+	home, fooPath, barPath := fakeWorkspace(t)
+
+	// A cwd whose subdir is coincidentally named like the target repo.
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, "bar"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(cwd)
+
+	got, err := ResolveRepo(home, "bar", fooPath)
+	if err != nil {
+		t.Fatalf("ResolveRepo: %v", err)
+	}
+	if got != barPath {
+		t.Errorf("got %q, want leaf-searched %q (cwd subdir must not hijack)", got, barPath)
+	}
+}
+
 func TestResolveRepoExplicitPathNonRepoErrors(t *testing.T) {
 	home, fooPath, _ := fakeWorkspace(t)
 

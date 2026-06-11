@@ -41,6 +41,16 @@ func TestSubstituteEntry(t *testing.T) {
 			want:  []string{"clown", `fix the "weird" thing; rm -rf $HOME`},
 		},
 		{
+			// {dir} must be substituted BEFORE {prompt}: a brief that
+			// happens to contain the literal text "{dir}" must survive
+			// verbatim, not get the worktree path injected.
+			name:   "brief containing literal {dir} survives verbatim",
+			entry:  []string{"clown", "--cwd", "{dir}", "{prompt}"},
+			brief:  "the template uses {dir} — fix its docs",
+			wtPath: "/work/tree",
+			want:   []string{"clown", "--cwd", "/work/tree", "the template uses {dir} — fix its docs"},
+		},
+		{
 			name:  "nil entry stays nil-length",
 			entry: nil,
 			brief: "x",

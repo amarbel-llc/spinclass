@@ -8,14 +8,16 @@ import (
 )
 
 // ResolveRepo resolves a spawn target. A target containing a path separator
-// or pointing at an existing path is used directly (escape hatch);
-// otherwise it is a repo dirname, leaf-searched as $HOME/*/repos/<leaf>
-// (FDR 0006: leaves are unique across workspace roots; a configured root
-// list is deferred). The resolved dir must be a git repo whose .git is a
-// directory (a main checkout, not a worktree), and must be a DIFFERENT repo
-// than the driver's — detached fork covers the same-repo case.
+// is used directly as a path (escape hatch — a bare name NEVER is, even when
+// it matches a cwd subdir, so leaf search stays deterministic regardless of
+// where the driver runs); otherwise it is a repo dirname, leaf-searched as
+// $HOME/*/repos/<leaf> (FDR 0006: leaves are unique across workspace roots;
+// a configured root list is deferred). The resolved dir must be a git repo
+// whose .git is a directory (a main checkout, not a worktree), and must be
+// a DIFFERENT repo than the driver's — detached fork covers the same-repo
+// case.
 func ResolveRepo(home, target, driverRepoPath string) (string, error) {
-	if strings.ContainsRune(target, os.PathSeparator) || pathExists(target) {
+	if strings.ContainsRune(target, filepath.Separator) || strings.Contains(target, "/") {
 		abs, err := filepath.Abs(target)
 		if err != nil {
 			return "", fmt.Errorf("resolving spawn target %q: %w", target, err)
@@ -51,11 +53,6 @@ func ResolveRepo(home, target, driverRepoPath string) (string, error) {
 			target, strings.Join(repos, ", "),
 		)
 	}
-}
-
-func pathExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
 }
 
 // isMainCheckout reports whether dir is a git repo whose .git is a

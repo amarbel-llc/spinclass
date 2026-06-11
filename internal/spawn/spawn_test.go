@@ -139,6 +139,82 @@ func TestLaunchHappyPath(t *testing.T) {
 	}
 }
 
+// envSweatfile's spawn template dumps its environment so the test can
+// assert the worker (not driver) identity vars were delivered, plus a
+// [session-entry].env var from the sweatfile cascade.
+const envSweatfile = `[session-entry]
+spawn       = ["sh", "-c", 'env > "$1/env.txt"', "sh", "{dir}", "{entry}"]
+spawn-entry = ["true", "{prompt}"]
+
+[session-entry.env]
+SPINCLASS_GROUP = "workers"
+`
+
+// envValue scans `env` output for key and returns its value. Scanning line
+// prefixes (instead of building a map) sidesteps host env vars whose values
+// contain newlines.
+func envValue(t *testing.T, envTxt, key string) string {
+	t.Helper()
+	for _, line := range strings.Split(envTxt, "\n") {
+		if v, ok := strings.CutPrefix(line, key+"="); ok {
+			return v
+		}
+	}
+	t.Errorf("env.txt has no %s", key)
+	return ""
+}
+
+// TestLaunchExecEnvCarriesWorkerIdentity guards the spawn exec's cmd.Env:
+// the worker process must see the WORKER's spinclass identity (mirroring
+// executor.SessionExecutor.Attach's env construction), not the driver's
+// inherited SPINCLASS_* vars — otherwise a multiplexer that propagates
+// client env hands the worker the driver's chat identity.
+func TestLaunchExecEnvCarriesWorkerIdentity(t *testing.T) {
+	home, repoPath := newWorkerFixture(t, envSweatfile)
+	// The driver's identity, baked into this process env the way
+	// executor.SessionExecutor does for a real driver session.
+	t.Setenv("SPINCLASS_SESSION_ID", "driver/test-session")
+	t.Setenv("SPINCLASS_WORKTREE", "/driver/worktree")
+
+	const desc = "env worker"
+	// No hello sender: Launch errors on the hello deadline, but the spawn
+	// template has already run by then and written env.txt.
+	_, err := Launch(home, repoPath, "driver/test-session", "do work", desc, 300*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected hello-deadline error, got nil")
+	}
+
+	envFiles, _ := filepath.Glob(filepath.Join(repoPath, ".worktrees", "*", "env.txt"))
+	if len(envFiles) != 1 {
+		t.Fatalf("expected exactly one env.txt, got %v", envFiles)
+	}
+	wt := filepath.Dir(envFiles[0])
+	branch := filepath.Base(wt)
+	data, err := os.ReadFile(envFiles[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	envTxt := string(data)
+
+	tmpDir := filepath.Join(wt, ".tmp")
+	want := map[string]string{
+		"SPINCLASS_SESSION_ID":  "worker/" + branch,
+		"SPINCLASS_REPO":        "worker",
+		"SPINCLASS_BRANCH":      branch,
+		"SPINCLASS_WORKTREE":    wt,
+		"SPINCLASS_DESCRIPTION": desc,
+		"TMPDIR":                tmpDir,
+		"CLAUDE_CODE_TMPDIR":    tmpDir,
+		// From the sweatfile [session-entry].env layer.
+		"SPINCLASS_GROUP": "workers",
+	}
+	for k, v := range want {
+		if got := envValue(t, envTxt, k); got != v {
+			t.Errorf("%s: got %q, want %q", k, got, v)
+		}
+	}
+}
+
 // timeoutSweatfile launches successfully but nothing ever sends the hello.
 const timeoutSweatfile = `[session-entry]
 spawn       = ["sh", "-c", 'touch "$PWD/launched"', "sh", "{entry}"]
@@ -190,9 +266,15 @@ func TestLaunchMissingSpawnEntryErrorsBeforeExec(t *testing.T) {
 		t.Errorf("error %q does not name [session-entry].spawn-entry", err)
 	}
 
-	// The error fired before any template exec: no marker anywhere.
-	markers, _ := filepath.Glob(filepath.Join(repoPath, ".worktrees", "*", "launched"))
-	if len(markers) != 0 {
-		t.Errorf("spawn template ran despite missing spawn-entry: %v", markers)
+	// Template validation runs BEFORE any worktree or session-state
+	// creation: bad config must not litter. No worktree at all…
+	worktrees, _ := filepath.Glob(filepath.Join(repoPath, ".worktrees", "*"))
+	if len(worktrees) != 0 {
+		t.Errorf("worktree created despite missing spawn-entry: %v", worktrees)
+	}
+	// …and no session state file in the central index.
+	states, _ := filepath.Glob(filepath.Join(home, ".local", "state", "spinclass", "sessions", "*"))
+	if len(states) != 0 {
+		t.Errorf("session state written despite missing spawn-entry: %v", states)
 	}
 }
