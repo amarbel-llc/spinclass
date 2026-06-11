@@ -3,7 +3,7 @@ module github.com/amarbel-llc/spinclass
 go 1.26
 
 require (
-	github.com/amarbel-llc/crap/go-crap/v2 v2.1.1
+	github.com/amarbel-llc/crap/go-crap/v2 v2.2.2
 	github.com/amarbel-llc/purse-first/libs/go-mcp v0.0.13
 	github.com/amarbel-llc/purse-first/libs/go-mcp/command/huh v0.0.4
 	github.com/amarbel-llc/tap/go v0.1.8

@@ -2,8 +2,8 @@ schema = 3
 
 [mod]
   [mod.'github.com/amarbel-llc/crap/go-crap/v2']
-    version = 'v2.1.1'
-    hash = 'sha256-wM0Z7/xV60TjFu/Q4Lsweezr/zTP74HtYzOmxM50/X4='
+    version = 'v2.2.2'
+    hash = 'sha256-ZyZNwjoJjDNB3pVJnHXomcQ5EYNOoLVSQu2X1Tj3CCY='
     goVersion = '1.26'
 
   [mod.'github.com/amarbel-llc/purse-first/libs/dewey']

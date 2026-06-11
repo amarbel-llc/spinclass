@@ -74,12 +74,24 @@ Emission is **mixed-family** on one stream:
   owns `Finish()`.
   `failStep`'s diagnostics (git stderr, exit codes) ride the failing
   record's diagnostic map, echoed by the plain/viewport renderers.
-- The pre-merge hook is BOTH: an execution-family `Phase` (`Command`,
-  live `Output` records via `present.LineWriter` — the viewport's
-  rolling tail; the madder `resource_link:` line also rides the wire
-  here) and a closing result-family test point (labelled
-  ``pre-merge hook for <branch>: `<cmd>` ``) carrying the failure
-  diagnostic (`command`, `exit_code`, `elapsed`, failure-output tail).
+- The pre-merge hook is a single execution-family `Phase` (named
+  ``pre-merge hook for <branch>: `<cmd>` ``): `Command`, live `Output`
+  records via `present.LineWriter` — the viewport's rolling tail; the
+  madder `resource_link:` line also rides the wire here — closed by a
+  `node_end` whose verdict is self-sufficient (go-crap ≥ v2.2.x,
+  crap#22): on failure, `Phase.FailDiag` rides the diagnostic
+  (`command`, `format`, `exit_code`, `elapsed`, failure-output tail,
+  `resource_link`) on the `node_end`, and both renderers merge it over
+  the synthesized exit-code keys. **Revision 2026-06-11**: the original
+  emission paired the Phase with a result-family test point of the same
+  description, which double-rendered the verdict (one line per family —
+  caught in the first TTY pilot); go-crap v2.2.1 added the `node_end`
+  diagnostic so the duplicate record could be dropped, and v2.2.2 made
+  the run verdict count failing nodes (crap#24) so the final frame
+  reflects a hook failure without a result-family record. The only
+  result-family records check itself now emits are the standalone
+  no-hook "ok" point and the build-worktree prep-failure point (no hook
+  ever ran there, so there is no Phase to carry a verdict).
 
 Single source of truth — no TAP/event drift is possible. The
 alternatives (a TAP→viewport bridge; an event seam alongside TAP) were
@@ -123,7 +135,7 @@ sc merge > records.ndjson         # auto resolves to ndjson: records captured, n
   diagnostic (`format` key) and the BlobLink MIME type; a successful
   run's records don't say which format the blob was written in.
 - **The hook Phase's NodeEnd duration includes post-hook madder/parse
-  time.** `Done()`/`Fail()` fire after the madder blob write (and, for
+  time.** `Done()`/`FailDiag()` fire after the madder blob write (and, for
   structured formats, the parse of the buffered hook stdout), so the
   wire-reported phase duration slightly exceeds the hook subprocess's
   own runtime (the failure diagnostic's `elapsed` measures only the
@@ -157,7 +169,7 @@ sc merge > records.ndjson         # auto resolves to ndjson: records captured, n
 - `internal/present/present.go` (format resolution, renderer wiring,
   plain rendering, LineWriter), `internal/merge/merge.go` (stage
   emission, `PrepareMerge`/`FinishMerge`), `internal/check/check.go`
-  (`runHookPhase` — the mixed-family hook stage),
+  (`runHookPhase` — the phase-only hook stage),
   `cmd/spinclass/commands_session.go` (CLI `--format` surface),
   `cmd/spinclass/commands_mcp_only.go` (`present.RenderPlain` result
   text, `buildHookResult`), `internal/job/runner.go`

@@ -284,8 +284,9 @@ pre-merge = "false"
 
   run_sc_crap check
   assert_failure
-  # The hook stage surfaces as a failing test record on the wire.
-  assert_crap '[.[] | select(.type == "test")] | length > 0 and any(.ok == false)'
+  # The hook stage surfaces as a failing node_end on the wire (phase-only
+  # since go-crap v2.2.1 / crap#22; no paired test record).
+  assert_crap '[.[] | select(.type == "node_end")] | length == 1 and all(.exit_code != 0)'
 }
 
 function sc_check_runs_when_disable_merge_set { # @test

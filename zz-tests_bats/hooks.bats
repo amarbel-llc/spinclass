@@ -133,9 +133,11 @@ pre-merge-output-format = "tap-ndjson"
 
   run_sc_crap check
   assert_success
-  # Success → exactly one ok test record carrying NO diagnostic (no tail,
-  # no failure summary; the ok verdict is itself the liveness signal).
-  assert_crap '[.[] | select(.type == "test")] | length == 1 and all(.ok) and all(.diagnostic == null)'
+  # Success → exactly one passing node_end carrying NO diagnostic (no tail,
+  # no failure summary), and no paired test record — the hook stage is a
+  # self-sufficient execution Phase since go-crap v2.2.1 (crap#22).
+  assert_crap '([.[] | select(.type == "node_end")] | length == 1 and all(.exit_code == 0 and .diagnostic == null))
+    and ([.[] | select(.type == "test")] | length == 0)'
   # Madder-pinned: the parsed tap-ndjson stream is stored as a blob and
   # linked from an output record.
   assert_output --partial "resource_link: madder://blobs/"
@@ -150,12 +152,13 @@ pre-merge-output-format = "tap-ndjson"
 
   run_sc_crap check
   assert_failure
-  # Failure → the failing test record's diagnostic carries the resolved
-  # format plus a failure SUMMARY built from the parsed TAP records
-  # ("#<N> <desc>: <message>" lines), not the raw output ring tail — the
-  # raw "TAP version 14" line would only appear via the tail fallback.
+  # Failure → the failing node_end's diagnostic (Phase.FailDiag, crap#22)
+  # carries the resolved format plus a failure SUMMARY built from the
+  # parsed TAP records ("#<N> <desc>: <message>" lines), not the raw output
+  # ring tail — the raw "TAP version 14" line would only appear via the
+  # tail fallback.
   # shellcheck disable=SC2016  # $f is a jq binding, not a shell variable
-  assert_crap '[.[] | select(.type == "test" and .ok == false)] as $f
+  assert_crap '[.[] | select(.type == "node_end")] as $f
     | ($f | length) == 1
     and ($f[0].diagnostic.format == "tap-ndjson")
     and ($f[0].diagnostic.output | startswith("#1 synthetic"))
@@ -172,11 +175,11 @@ pre-merge-output-format = "tap-ndjson"
 
   run_sc_crap check
   assert_failure
-  # Degenerate stream (zero parsed TAP records) → the diagnostic's output
-  # falls back to the raw ring tail (the literal hook lines), not a parsed
-  # "#<N> ..." failure summary.
+  # Degenerate stream (zero parsed TAP records) → the failing node_end's
+  # diagnostic output falls back to the raw ring tail (the literal hook
+  # lines), not a parsed "#<N> ..." failure summary.
   # shellcheck disable=SC2016  # $f is a jq binding, not a shell variable
-  assert_crap '[.[] | select(.type == "test" and .ok == false)] as $f
+  assert_crap '[.[] | select(.type == "node_end")] as $f
     | ($f | length) == 1
     and ($f[0].diagnostic.format == "tap-ndjson")
     and ($f[0].diagnostic.output | contains("this is not tap"))

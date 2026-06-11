@@ -55,14 +55,16 @@ func mimeTypeForFormat(format string) string {
 
 // Run resolves the worktree containing wtPath, loads the sweatfile
 // hierarchy, and runs the configured [hooks].pre-merge command, emitting
-// ndjson-crap records via rep (never nil): a result-family test point for
-// the hook stage plus an execution-family Phase carrying the hook's live
-// output lines. Returns the resource_link blobs emitted for the hook
-// output (one per hook step that produced a madder blob; empty when
-// madder is not pinned) and a non-nil error if the hook fails. Each
-// BlobLink carries the MIME type matching the format the blob was written
-// in (text/plain for raw, application/x-ndjson for tap-ndjson and
-// ndjson-crap).
+// ndjson-crap records via rep (never nil): a single execution-family Phase
+// carrying the hook's live output lines, whose node_end carries the verdict
+// (with the failure diagnostic riding on it via Phase.FailDiag — crap#22's
+// self-sufficient verdict unit; no result-family test record is paired with
+// it, which would double-render the verdict). Returns the resource_link
+// blobs emitted for the hook output (one per hook step that produced a
+// madder blob; empty when madder is not pinned) and a non-nil error if the
+// hook fails. Each BlobLink carries the MIME type matching the format the
+// blob was written in (text/plain for raw, application/x-ndjson for
+// tap-ndjson and ndjson-crap).
 //
 // If no pre-merge hook is configured, Run returns (nil, nil) and emits an
 // "ok" test point indicating no hook is configured — agents and humans
@@ -78,9 +80,11 @@ func Run(rep *crap.Reporter, wtPath string) ([]BlobLink, error) {
 // last-activity timestamp; synchronous callers use Run (background ctx, nil
 // activity). ctx cancellation kills the hook subprocess.
 //
-// RunContext owns its result-family stream: it opens a TestStream with a
-// plan of one (the hook stage) and finishes it before returning. Callers
-// that share a stream across stages (merge) use RunWithReporterContext.
+// RunContext owns its result-family stream: it opens a TestStream (plan 0
+// — the hook stage is an execution Phase, not a test point) and finishes it
+// before returning so the stream is always framed by plan+summary. The
+// no-hook case emits its "ok" point onto that stream. Callers that share a
+// stream across stages (merge) use RunWithReporterContext.
 func RunContext(ctx context.Context, rep *crap.Reporter, wtPath string, activity io.Writer) ([]BlobLink, error) {
 	repoPath, err := git.CommonDir(wtPath)
 	if err != nil {
@@ -100,7 +104,7 @@ func RunContext(ctx context.Context, rep *crap.Reporter, wtPath string, activity
 		return nil, fmt.Errorf("load sweatfile hierarchy: %w", err)
 	}
 
-	ts := rep.TestStream(1)
+	ts := rep.TestStream(0)
 
 	cmd := hierarchy.Merged.PreMergeHookCommand()
 	if cmd == nil || *cmd == "" {
@@ -119,11 +123,13 @@ func RunContext(ctx context.Context, rep *crap.Reporter, wtPath string, activity
 
 // RunWithReporterContext runs the configured pre-merge hook against an
 // already-loaded hierarchy, emitting onto a caller-supplied Reporter and
-// result-family TestStream. ts is the caller's shared stream when check
-// runs inside a merge (one stream numbers all merge stages); the caller
-// owns ts.Finish(). ctx threads to the hook subprocess (cancellable);
-// activity, when non-nil, is teed the hook's live output alongside the
-// normal madder/ring/record destination.
+// result-family TestStream. The hook stage itself is an execution-family
+// Phase whose node_end carries the verdict (crap#22); ts — the caller's
+// shared stream when check runs inside a merge — is used only for the
+// build-worktree prep-failure record, where no hook ever ran and there is
+// no Phase to carry a verdict. The caller owns ts.Finish(). ctx threads to
+// the hook subprocess (cancellable); activity, when non-nil, is teed the
+// hook's live output alongside the normal madder/ring/record destination.
 //
 // Returns the resource_link blobs emitted for hook output (madder-pinned
 // builds only; empty otherwise) and a non-nil error if the hook fails.
@@ -161,7 +167,7 @@ func RunWithReporterContext(
 	defer cleanup()
 
 	desc := "pre-merge hook for " + branch + ": `" + *cmd + "`"
-	link, hookErr := runHookPhase(ctx, rep, ts, hierarchy, wtPath, hookDir, *cmd, desc, activity)
+	link, hookErr := runHookPhase(ctx, rep, hierarchy, wtPath, hookDir, *cmd, desc, activity)
 	var links []BlobLink
 	if link.URI != "" {
 		links = []BlobLink{link}
@@ -273,7 +279,7 @@ func sanitizeBranchForPath(branch string) string {
 // wtPath is the session worktree (where the madder blob store lives); hookDir is
 // where the hook actually runs (an isolated build worktree, or wtPath in the
 // legacy path). They differ only when the build-worktree feature is active.
-func runHookPhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, hierarchy sweatfile.Hierarchy, wtPath, hookDir, cmd, desc string, activity io.Writer) (BlobLink, error) {
+func runHookPhase(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.Hierarchy, wtPath, hookDir, cmd, desc string, activity io.Writer) (BlobLink, error) {
 	format := hierarchy.Merged.PreMergeOutputFormatValue()
 	madderPinned := embeds.MadderBin() != ""
 
@@ -409,7 +415,6 @@ func runHookPhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, 
 
 	if hookErr == nil {
 		ph.Done()
-		ts.Ok(desc)
 		return BlobLink{URI: blobURI, MimeType: mimeTypeForFormat(format)}, nil
 	}
 
@@ -449,8 +454,11 @@ func runHookPhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, 
 		diagnostic["resource_link_error"] = madderErr.Error()
 	}
 
-	ph.Fail(hookErr)
-	ts.NotOk(desc, diagnostic)
+	// FailDiag makes the node a self-sufficient verdict unit (crap#22): the
+	// diagnostic rides the node_end and both renderers merge it over the
+	// synthesized exit_code/signal keys, so no result-family test record is
+	// paired with the phase (that double-rendered the verdict).
+	ph.FailDiag(hookErr, diagnostic)
 	return BlobLink{URI: blobURI, MimeType: mimeTypeForFormat(format)}, hookErr
 }
 

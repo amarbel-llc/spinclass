@@ -207,6 +207,46 @@ func hasPlanAndSummary(recs []ndjsoncrap.Record) (plan, summary bool) {
 	return plan, summary
 }
 
+// assertNoTestRecords fails if the stream carries any result-family test
+// record: since go-crap v2.2.1 the hook stage is a self-sufficient execution
+// Phase (node_end carries the verdict diagnostic), and pairing it with a Test
+// record double-renders the verdict (crap#22).
+func assertNoTestRecords(t *testing.T, recs []ndjsoncrap.Record) {
+	t.Helper()
+	for _, rec := range recs {
+		if tr, ok := rec.(ndjsoncrap.Test); ok {
+			t.Errorf("unexpected result-family test record %q: the hook stage must be phase-only", tr.Description)
+		}
+	}
+}
+
+// singleNodeEnd returns the stream's only node_end record, failing unless
+// exactly one exists.
+func singleNodeEnd(t *testing.T, recs []ndjsoncrap.Record) ndjsoncrap.NodeEnd {
+	t.Helper()
+	ends := nodeEnds(recs)
+	if len(ends) != 1 {
+		t.Fatalf("expected exactly one node_end record, got %d", len(ends))
+	}
+	return ends[0]
+}
+
+// hookNodeName returns the node_start name for the hook phase, failing
+// unless exactly one node_start exists.
+func hookNodeName(t *testing.T, recs []ndjsoncrap.Record) string {
+	t.Helper()
+	var names []string
+	for _, rec := range recs {
+		if ns, ok := rec.(ndjsoncrap.NodeStart); ok {
+			names = append(names, ns.Name)
+		}
+	}
+	if len(names) != 1 {
+		t.Fatalf("expected exactly one node_start record, got %d", len(names))
+	}
+	return names[0]
+}
+
 func TestRunHookSuccess(t *testing.T) {
 	_, _, wtPath := setupRepoWithWorktree(t, "feature-success")
 	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"true\"\n")
@@ -219,12 +259,16 @@ func TestRunHookSuccess(t *testing.T) {
 		t.Errorf("expected no blob links without madder pinned, got %v", links)
 	}
 
-	tr := singleTest(t, recs)
-	if !tr.OK {
-		t.Errorf("expected passing test record, got %+v", tr)
+	assertNoTestRecords(t, recs)
+	ne := singleNodeEnd(t, recs)
+	if ne.ExitCode == nil || *ne.ExitCode != 0 {
+		t.Errorf("expected passing node_end (exit 0), got %+v", ne)
 	}
-	if !strings.Contains(tr.Description, "pre-merge hook") {
-		t.Errorf("expected 'pre-merge hook' description, got %q", tr.Description)
+	if ne.Diagnostic != nil {
+		t.Errorf("expected nil diagnostic on success, got %+v", ne.Diagnostic)
+	}
+	if name := hookNodeName(t, recs); !strings.Contains(name, "pre-merge hook") {
+		t.Errorf("expected 'pre-merge hook' phase name, got %q", name)
 	}
 	if plan, summary := hasPlanAndSummary(recs); !plan || !summary {
 		t.Errorf("expected plan+summary framing, got plan=%v summary=%v", plan, summary)
@@ -240,12 +284,13 @@ func TestRunHookFailure(t *testing.T) {
 		t.Fatalf("expected error when hook fails, got nil")
 	}
 
-	tr := singleTest(t, recs)
-	if tr.OK {
-		t.Errorf("expected failing test record, got %+v", tr)
+	assertNoTestRecords(t, recs)
+	ne := singleNodeEnd(t, recs)
+	if ne.ExitCode == nil || *ne.ExitCode == 0 {
+		t.Errorf("expected failing node_end, got %+v", ne)
 	}
-	if got := fmt.Sprintf("%v", tr.Diagnostic["exit_code"]); got != "1" {
-		t.Errorf("expected exit_code 1 in diagnostic, got %v", tr.Diagnostic["exit_code"])
+	if got := fmt.Sprintf("%v", ne.Diagnostic["exit_code"]); got != "1" {
+		t.Errorf("expected exit_code 1 in node_end diagnostic, got %v", ne.Diagnostic["exit_code"])
 	}
 	// Summary must still be emitted on failure so a client can detect the
 	// stream finished (the analogue of the TAP plan).
@@ -301,19 +346,13 @@ func TestRunHookPhaseShape(t *testing.T) {
 		t.Errorf("expected MimeType text/plain for format=raw, got %q", links[0].MimeType)
 	}
 
-	tr := singleTest(t, recs)
-	if !tr.OK {
-		t.Errorf("expected passing test record, got %+v", tr)
-	}
-	// On success, the diagnostic must omit the failure-output entry: the
-	// test point being `ok` is itself the liveness signal and the
-	// resource_link remains the authoritative full-output surface.
-	if _, ok := tr.Diagnostic["output"]; ok {
-		t.Errorf("did not expect 'output' diagnostic on raw success, got %+v", tr.Diagnostic)
-	}
-
-	// The Phase closes with a success verdict on the wire.
+	// The Phase IS the verdict unit (crap#22): a success verdict on the
+	// node_end, no diagnostic, and no paired result-family test record.
+	assertNoTestRecords(t, recs)
 	assertNodeEndExit(t, recs, 0)
+	if ne := singleNodeEnd(t, recs); ne.Diagnostic != nil {
+		t.Errorf("did not expect diagnostic on raw success, got %+v", ne.Diagnostic)
+	}
 
 	// The Phase carries the hook's live lines as Output records (the
 	// viewport's rolling tail) plus the blob-link line for the wire.
@@ -349,27 +388,26 @@ func TestRunHookPhaseShape_Failure(t *testing.T) {
 		t.Errorf("expected MimeType text/plain for format=raw failure, got %q", links[0].MimeType)
 	}
 
-	tr := singleTest(t, recs)
-	if tr.OK {
-		t.Errorf("expected failing test record, got %+v", tr)
-	}
-	if got := fmt.Sprintf("%v", tr.Diagnostic["exit_code"]); got != "7" {
-		t.Errorf("expected exit_code 7, got %v", tr.Diagnostic["exit_code"])
-	}
-	if got, _ := tr.Diagnostic["output"].(string); !strings.Contains(got, "about-to-fail") {
-		t.Errorf("expected hook stdout in diagnostic output, got %v", tr.Diagnostic["output"])
-	}
-	if tr.Diagnostic["resource_link"] != "madder://blobs/sha256-fake" {
-		t.Errorf("expected resource_link in failure diagnostic, got %v", tr.Diagnostic["resource_link"])
-	}
-	if tr.Diagnostic["format"] != "raw" {
-		t.Errorf("expected format raw in failure diagnostic, got %v", tr.Diagnostic["format"])
-	}
-
-	// The Phase closes with a failure verdict on the wire (Phase.Fail
-	// always writes exit_code 1, regardless of the hook's own exit code —
-	// the hook's 7 lives in the test record's diagnostic above).
+	// The Phase IS the verdict unit (crap#22): FailDiag rides the
+	// diagnostic on the node_end, and no result-family test record is
+	// paired with it. The node_end's own exit_code stays 1 (Phase.FailDiag
+	// hardcodes it); the hook's real 7 lives in the diagnostic, whose keys
+	// win when the renderers merge.
+	assertNoTestRecords(t, recs)
 	assertNodeEndExit(t, recs, 1)
+	ne := singleNodeEnd(t, recs)
+	if got := fmt.Sprintf("%v", ne.Diagnostic["exit_code"]); got != "7" {
+		t.Errorf("expected exit_code 7, got %v", ne.Diagnostic["exit_code"])
+	}
+	if got, _ := ne.Diagnostic["output"].(string); !strings.Contains(got, "about-to-fail") {
+		t.Errorf("expected hook stdout in diagnostic output, got %v", ne.Diagnostic["output"])
+	}
+	if ne.Diagnostic["resource_link"] != "madder://blobs/sha256-fake" {
+		t.Errorf("expected resource_link in failure diagnostic, got %v", ne.Diagnostic["resource_link"])
+	}
+	if ne.Diagnostic["format"] != "raw" {
+		t.Errorf("expected format raw in failure diagnostic, got %v", ne.Diagnostic["format"])
+	}
 }
 
 // readNDJSONRecords parses the stdin capture file from withFakeMadder as
@@ -434,12 +472,10 @@ func TestRunHookPhaseShape_TapNDJSONSuccess(t *testing.T) {
 		t.Errorf("expected MimeType application/x-ndjson for format=tap-ndjson, got %q", links[0].MimeType)
 	}
 
-	tr := singleTest(t, recs)
-	if !tr.OK {
-		t.Errorf("expected passing test record, got %+v", tr)
-	}
-	if _, ok := tr.Diagnostic["output"]; ok {
-		t.Errorf("did not expect 'output' diagnostic on tap-ndjson success, got %+v", tr.Diagnostic)
+	assertNoTestRecords(t, recs)
+	assertNodeEndExit(t, recs, 0)
+	if ne := singleNodeEnd(t, recs); ne.Diagnostic != nil {
+		t.Errorf("did not expect diagnostic on tap-ndjson success, got %+v", ne.Diagnostic)
 	}
 
 	// Even on the buffered (structured) path the hook's raw lines stream
@@ -482,14 +518,13 @@ func TestRunHookPhaseShape_TapNDJSONFailure(t *testing.T) {
 		t.Fatalf("expected hook failure, got nil")
 	}
 
-	tr := singleTest(t, recs)
-	if tr.OK {
-		t.Errorf("expected failing test record, got %+v", tr)
+	assertNoTestRecords(t, recs)
+	assertNodeEndExit(t, recs, 1)
+	ne := singleNodeEnd(t, recs)
+	if ne.Diagnostic["format"] != "tap-ndjson" {
+		t.Errorf("expected format tap-ndjson in diagnostic, got %v", ne.Diagnostic["format"])
 	}
-	if tr.Diagnostic["format"] != "tap-ndjson" {
-		t.Errorf("expected format tap-ndjson in diagnostic, got %v", tr.Diagnostic["format"])
-	}
-	out, _ := tr.Diagnostic["output"].(string)
+	out, _ := ne.Diagnostic["output"].(string)
 	if !strings.Contains(out, "expected 7 got 9") {
 		t.Errorf("expected failure summary with diagnostic message in output, got %q", out)
 	}
@@ -523,12 +558,10 @@ func TestRunHookPhaseShape_NdjsonCrapSuccess(t *testing.T) {
 		t.Fatalf("expected one application/x-ndjson blob link, got %v", links)
 	}
 
-	tr := singleTest(t, recs)
-	if !tr.OK {
-		t.Errorf("expected passing test record, got %+v", tr)
-	}
-	if _, ok := tr.Diagnostic["output"]; ok {
-		t.Errorf("did not expect 'output' diagnostic on success, got %+v", tr.Diagnostic)
+	assertNoTestRecords(t, recs)
+	assertNodeEndExit(t, recs, 0)
+	if ne := singleNodeEnd(t, recs); ne.Diagnostic != nil {
+		t.Errorf("did not expect diagnostic on success, got %+v", ne.Diagnostic)
 	}
 
 	// The blob stores the ndjson-crap stream verbatim (already canonical).
@@ -552,14 +585,13 @@ func TestRunHookPhaseShape_NdjsonCrapFailure(t *testing.T) {
 		t.Fatalf("expected hook failure, got nil")
 	}
 
-	tr := singleTest(t, recs)
-	if tr.OK {
-		t.Errorf("expected failing test record, got %+v", tr)
+	assertNoTestRecords(t, recs)
+	assertNodeEndExit(t, recs, 1)
+	ne := singleNodeEnd(t, recs)
+	if ne.Diagnostic["format"] != "ndjson-crap" {
+		t.Errorf("expected format ndjson-crap in diagnostic, got %v", ne.Diagnostic["format"])
 	}
-	if tr.Diagnostic["format"] != "ndjson-crap" {
-		t.Errorf("expected format ndjson-crap in diagnostic, got %v", tr.Diagnostic["format"])
-	}
-	out, _ := tr.Diagnostic["output"].(string)
+	out, _ := ne.Diagnostic["output"].(string)
 	if !strings.Contains(out, "expected 7 got 9") {
 		t.Errorf("expected failure summary built from parsed crap records, got %q", out)
 	}
@@ -580,14 +612,13 @@ func TestRunHookPhaseShape_TapNDJSONDegenerateFallback(t *testing.T) {
 		t.Fatalf("expected hook failure, got nil")
 	}
 
-	tr := singleTest(t, recs)
-	if tr.OK {
-		t.Errorf("expected failing test record, got %+v", tr)
+	assertNoTestRecords(t, recs)
+	assertNodeEndExit(t, recs, 1)
+	ne := singleNodeEnd(t, recs)
+	if ne.Diagnostic["format"] != "tap-ndjson" {
+		t.Errorf("expected format tap-ndjson in diagnostic, got %v", ne.Diagnostic["format"])
 	}
-	if tr.Diagnostic["format"] != "tap-ndjson" {
-		t.Errorf("expected format tap-ndjson in diagnostic, got %v", tr.Diagnostic["format"])
-	}
-	out, _ := tr.Diagnostic["output"].(string)
+	out, _ := ne.Diagnostic["output"].(string)
 	if !strings.Contains(out, "this is not tap") {
 		t.Errorf("expected raw tail fallback in output on degenerate stream, got %q", out)
 	}
@@ -609,11 +640,10 @@ func TestRunHookPhaseShape_TapNDJSONAllSkipFallsBackToTail(t *testing.T) {
 		t.Fatalf("expected hook failure, got nil")
 	}
 
-	tr := singleTest(t, recs)
-	if tr.OK {
-		t.Errorf("expected failing test record, got %+v", tr)
-	}
-	out, _ := tr.Diagnostic["output"].(string)
+	assertNoTestRecords(t, recs)
+	assertNodeEndExit(t, recs, 1)
+	ne := singleNodeEnd(t, recs)
+	out, _ := ne.Diagnostic["output"].(string)
 	if out == "" {
 		t.Fatalf("diagnostic output empty: all-skip summary must fall back to tail")
 	}
@@ -637,11 +667,10 @@ func TestRunHookPhaseShape_NdjsonCrapAllSkipFallsBackToTail(t *testing.T) {
 		t.Fatalf("expected hook failure, got nil")
 	}
 
-	tr := singleTest(t, recs)
-	if tr.OK {
-		t.Errorf("expected failing test record, got %+v", tr)
-	}
-	out, _ := tr.Diagnostic["output"].(string)
+	assertNoTestRecords(t, recs)
+	assertNodeEndExit(t, recs, 1)
+	ne := singleNodeEnd(t, recs)
+	out, _ := ne.Diagnostic["output"].(string)
 	if out == "" {
 		t.Fatalf("diagnostic output empty: all-skip summary must fall back to tail")
 	}

@@ -88,8 +88,10 @@ EOF
   upstream_head=$(git -C "$TEST_UPSTREAM" rev-parse master)
   assert [ "$upstream_head" = "$head" ]
 
-  # No failing stage on the wire.
-  assert_crap '[.[] | select(.type == "test")] | length > 0 and all(.ok)'
+  # No failing stage on the wire: git stages are ok test records, the hook
+  # is a passing node_end (phase-only since go-crap v2.2.1 / crap#22).
+  assert_crap '([.[] | select(.type == "test")] | length > 0 and all(.ok))
+    and ([.[] | select(.type == "node_end")] | length == 1 and all(.exit_code == 0))'
   # No rebase step in the output (implicit path is hook-then-push only).
   refute_output --partial "rebase"
   # Reached the push path, not the worktree-only reject.
@@ -116,8 +118,10 @@ EOF
 
   # Hook ran.
   assert [ -f "$marker" ]
-  # No failing stage on the wire.
-  assert_crap '[.[] | select(.type == "test")] | length > 0 and all(.ok)'
+  # The hook is the stream's only stage: a passing node_end, no failing
+  # test records (phase-only since go-crap v2.2.1 / crap#22).
+  assert_crap '([.[] | select(.type == "node_end")] | length == 1 and all(.exit_code == 0))
+    and ([.[] | select(.type == "test" and .ok == false)] | length == 0)'
   # Did not hit the worktree-only reject.
   refute_output --partial "not inside a worktree session"
 }
