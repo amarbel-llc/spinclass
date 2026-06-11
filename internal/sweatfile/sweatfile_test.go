@@ -1302,6 +1302,123 @@ func TestMergeSessionNilInherit(t *testing.T) {
 	}
 }
 
+func TestParseSessionSpawnFields(t *testing.T) {
+	input := `
+[session-entry]
+spawn = ["tmux", "new-session", "-d", "-s", "{id}", "{entry}"]
+spawn-entry = ["clown", "{prompt}"]
+`
+	doc, err := sweatfileio.Parse([]byte(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sf := doc.Data()
+	if sf.SessionEntry == nil {
+		t.Fatal("expected SessionEntry to be non-nil")
+	}
+	if len(sf.SessionEntry.Spawn) != 6 || sf.SessionEntry.Spawn[0] != "tmux" ||
+		sf.SessionEntry.Spawn[5] != "{entry}" {
+		t.Errorf("Spawn = %v, want [tmux new-session -d -s {id} {entry}]", sf.SessionEntry.Spawn)
+	}
+	if len(sf.SessionEntry.SpawnEntry) != 2 || sf.SessionEntry.SpawnEntry[0] != "clown" ||
+		sf.SessionEntry.SpawnEntry[1] != "{prompt}" {
+		t.Errorf("SpawnEntry = %v, want [clown {prompt}]", sf.SessionEntry.SpawnEntry)
+	}
+}
+
+func TestSessionSpawnAccessorDefault(t *testing.T) {
+	want := []string{"zmx", "run", "{id}", "--", "{entry}"}
+	for _, sf := range []Sweatfile{
+		{},
+		{SessionEntry: &SessionEntry{}},
+	} {
+		got := sf.SessionSpawn()
+		if len(got) != len(want) {
+			t.Fatalf("SessionSpawn() = %v, want %v", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("SessionSpawn() = %v, want %v", got, want)
+			}
+		}
+	}
+}
+
+func TestSessionSpawnAccessorConfigured(t *testing.T) {
+	sf := Sweatfile{
+		SessionEntry: &SessionEntry{
+			Spawn: []string{"tmux", "new-session", "-d", "-s", "{id}", "{entry}"},
+		},
+	}
+	got := sf.SessionSpawn()
+	if len(got) != 6 || got[0] != "tmux" {
+		t.Errorf("SessionSpawn() = %v, want configured tmux argv", got)
+	}
+}
+
+func TestSessionSpawnEntryAccessorNoDefault(t *testing.T) {
+	for _, sf := range []Sweatfile{
+		{},
+		{SessionEntry: &SessionEntry{}},
+	} {
+		if got := sf.SessionSpawnEntry(); got != nil {
+			t.Errorf("SessionSpawnEntry() = %v, want nil", got)
+		}
+	}
+}
+
+func TestSessionSpawnEntryAccessorConfigured(t *testing.T) {
+	sf := Sweatfile{
+		SessionEntry: &SessionEntry{
+			SpawnEntry: []string{"clown", "{prompt}"},
+		},
+	}
+	got := sf.SessionSpawnEntry()
+	if len(got) != 2 || got[0] != "clown" || got[1] != "{prompt}" {
+		t.Errorf("SessionSpawnEntry() = %v, want [clown {prompt}]", got)
+	}
+}
+
+func TestMergeSessionSpawnOverride(t *testing.T) {
+	base := Sweatfile{
+		SessionEntry: &SessionEntry{
+			Spawn:      []string{"zmx", "run", "{id}", "--", "{entry}"},
+			SpawnEntry: []string{"clown", "{prompt}"},
+		},
+	}
+	override := Sweatfile{
+		SessionEntry: &SessionEntry{
+			Spawn: []string{"tmux", "new-session", "-d", "-s", "{id}", "{entry}"},
+		},
+	}
+	merged := base.MergeWith(override)
+	if merged.SessionEntry == nil {
+		t.Fatal("expected SessionEntry to be non-nil after merge")
+	}
+	if len(merged.SessionEntry.Spawn) != 6 || merged.SessionEntry.Spawn[0] != "tmux" {
+		t.Errorf("Spawn = %v, want overriding tmux argv", merged.SessionEntry.Spawn)
+	}
+	if len(merged.SessionEntry.SpawnEntry) != 2 || merged.SessionEntry.SpawnEntry[0] != "clown" {
+		t.Errorf("SpawnEntry = %v, want inherited [clown {prompt}]", merged.SessionEntry.SpawnEntry)
+	}
+}
+
+func TestMergeSessionSpawnNilInherit(t *testing.T) {
+	base := Sweatfile{
+		SessionEntry: &SessionEntry{
+			Spawn:      []string{"zmx", "run", "{id}", "--", "{entry}"},
+			SpawnEntry: []string{"clown", "{prompt}"},
+		},
+	}
+	override := Sweatfile{}
+	merged := base.MergeWith(override)
+	if merged.SessionEntry == nil ||
+		len(merged.SessionEntry.Spawn) != 5 ||
+		len(merged.SessionEntry.SpawnEntry) != 2 {
+		t.Errorf("expected Spawn/SpawnEntry to be inherited, got %+v", merged.SessionEntry)
+	}
+}
+
 func TestParseSessionEntryEnvSubtable(t *testing.T) {
 	input := `
 [session-entry]

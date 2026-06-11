@@ -335,6 +335,80 @@ func TestCheckHooksAllowsNilFormat(t *testing.T) {
 	}
 }
 
+func TestCheckSessionEntrySpawnMissingEntryPlaceholder(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		SessionEntry: &sweatfile.SessionEntry{
+			Spawn: []string{"zmx", "run", "{id}"},
+		},
+	}
+	issues := CheckSessionEntry(sf)
+	if len(issues) != 1 || issues[0].Severity != SeverityError ||
+		issues[0].Field != "session-entry.spawn" {
+		t.Fatalf("expected one error issue for spawn without {entry}, got %+v", issues)
+	}
+}
+
+func TestCheckSessionEntrySpawnEntryElementMustEqualNotContain(t *testing.T) {
+	// {entry} is spliced element-wise, so an element merely containing it
+	// (e.g. inside a shell string) is still an error.
+	sf := sweatfile.Sweatfile{
+		SessionEntry: &sweatfile.SessionEntry{
+			Spawn: []string{"sh", "-c", "zmx run {id} -- {entry}"},
+		},
+	}
+	issues := CheckSessionEntry(sf)
+	if len(issues) != 1 || issues[0].Severity != SeverityError {
+		t.Fatalf("expected one error issue for embedded {entry}, got %+v", issues)
+	}
+}
+
+func TestCheckSessionEntrySpawnEntryMissingPromptPlaceholder(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		SessionEntry: &sweatfile.SessionEntry{
+			SpawnEntry: []string{"clown"},
+		},
+	}
+	issues := CheckSessionEntry(sf)
+	if len(issues) != 1 || issues[0].Severity != SeverityWarning ||
+		issues[0].Field != "session-entry.spawn-entry" {
+		t.Fatalf("expected one warning issue for spawn-entry without {prompt}, got %+v", issues)
+	}
+}
+
+func TestCheckSessionEntryPromptMayBeEmbedded(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		SessionEntry: &sweatfile.SessionEntry{
+			SpawnEntry: []string{"sh", "-c", "claude '{prompt}'"},
+		},
+	}
+	if issues := CheckSessionEntry(sf); len(issues) != 0 {
+		t.Errorf("embedded {prompt} produced unexpected issues: %+v", issues)
+	}
+}
+
+func TestCheckSessionEntryClean(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		SessionEntry: &sweatfile.SessionEntry{
+			Spawn:      []string{"zmx", "run", "{id}", "--", "{entry}"},
+			SpawnEntry: []string{"clown", "{prompt}"},
+		},
+	}
+	if issues := CheckSessionEntry(sf); len(issues) != 0 {
+		t.Errorf("valid spawn config produced unexpected issues: %+v", issues)
+	}
+}
+
+func TestCheckSessionEntryAllowsUnset(t *testing.T) {
+	for _, sf := range []sweatfile.Sweatfile{
+		{},
+		{SessionEntry: &sweatfile.SessionEntry{}},
+	} {
+		if issues := CheckSessionEntry(sf); len(issues) != 0 {
+			t.Errorf("unset spawn fields produced unexpected issues: %+v", issues)
+		}
+	}
+}
+
 func TestCheckRemotesValid(t *testing.T) {
 	sf := sweatfile.Sweatfile{
 		Remotes: []sweatfile.Remote{

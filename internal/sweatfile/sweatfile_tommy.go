@@ -385,6 +385,24 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				_vSessionEntryTombstoneRetention.MarkConsumed()
 			}
 		}
+		if _vSessionEntrySpawn, _ok := _vSessionEntry.Get("spawn"); _ok && _vSessionEntrySpawn.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vSessionEntrySpawn.Leaf); _xok {
+				sessionEntryVal4.Spawn = _x
+				if sessionEntryVal4.Spawn == nil {
+					sessionEntryVal4.Spawn = []string{}
+				}
+				_vSessionEntrySpawn.MarkConsumed()
+			}
+		}
+		if _vSessionEntrySpawnEntry, _ok := _vSessionEntry.Get("spawn-entry"); _ok && _vSessionEntrySpawnEntry.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vSessionEntrySpawnEntry.Leaf); _xok {
+				sessionEntryVal4.SpawnEntry = _x
+				if sessionEntryVal4.SpawnEntry == nil {
+					sessionEntryVal4.SpawnEntry = []string{}
+				}
+				_vSessionEntrySpawnEntry.MarkConsumed()
+			}
+		}
 		d.data.SessionEntry = sessionEntryVal4
 	} else {
 		sessionEntryVal4 := &SessionEntry{}
@@ -424,6 +442,26 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractString(_vTombstoneRetention.Leaf); _xok {
 				sessionEntryVal4.TombstoneRetention = _x
 				_vTombstoneRetention.MarkConsumed()
+			}
+		}
+		if _vSpawn, _ok := model.Get("spawn"); _ok && _vSpawn.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractStringSlice(_vSpawn.Leaf); _xok {
+				sessionEntryVal4.Spawn = _x
+				if sessionEntryVal4.Spawn == nil {
+					sessionEntryVal4.Spawn = []string{}
+				}
+				_vSpawn.MarkConsumed()
+			}
+		}
+		if _vSpawnEntry, _ok := model.Get("spawn-entry"); _ok && _vSpawnEntry.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractStringSlice(_vSpawnEntry.Leaf); _xok {
+				sessionEntryVal4.SpawnEntry = _x
+				if sessionEntryVal4.SpawnEntry == nil {
+					sessionEntryVal4.SpawnEntry = []string{}
+				}
+				_vSpawnEntry.MarkConsumed()
 			}
 		}
 		if _foundSessionEntry {
@@ -766,6 +804,20 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 		if d.data.SessionEntry.TombstoneRetention != "" || cst.HasValue(tableNode, "tombstone-retention") {
 			if err := cst.SetAny(tableNode, "tombstone-retention", d.data.SessionEntry.TombstoneRetention); err != nil {
 				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		{
+			if d.data.SessionEntry.Spawn != nil {
+				if err := cst.SetAny(tableNode, "spawn", d.data.SessionEntry.Spawn); err != nil {
+					return nil, fmt.Errorf("%w", err)
+				}
+			}
+		}
+		{
+			if d.data.SessionEntry.SpawnEntry != nil {
+				if err := cst.SetAny(tableNode, "spawn-entry", d.data.SessionEntry.SpawnEntry); err != nil {
+					return nil, fmt.Errorf("%w", err)
+				}
 			}
 		}
 	}
@@ -1272,6 +1324,24 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vSessionEntryTombstoneRetention.MarkConsumed()
 			}
 		}
+		if _vSessionEntrySpawn, _ok := _vSessionEntry.Get("spawn"); _ok && _vSessionEntrySpawn.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vSessionEntrySpawn.Leaf); _xok {
+				sessionEntryVal4.Spawn = _x
+				if sessionEntryVal4.Spawn == nil {
+					sessionEntryVal4.Spawn = []string{}
+				}
+				_vSessionEntrySpawn.MarkConsumed()
+			}
+		}
+		if _vSessionEntrySpawnEntry, _ok := _vSessionEntry.Get("spawn-entry"); _ok && _vSessionEntrySpawnEntry.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vSessionEntrySpawnEntry.Leaf); _xok {
+				sessionEntryVal4.SpawnEntry = _x
+				if sessionEntryVal4.SpawnEntry == nil {
+					sessionEntryVal4.SpawnEntry = []string{}
+				}
+				_vSessionEntrySpawnEntry.MarkConsumed()
+			}
+		}
 		data.SessionEntry = sessionEntryVal4
 	} else {
 		sessionEntryVal4 := &SessionEntry{}
@@ -1311,6 +1381,26 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractString(_vTombstoneRetention.Leaf); _xok {
 				sessionEntryVal4.TombstoneRetention = _x
 				_vTombstoneRetention.MarkConsumed()
+			}
+		}
+		if _vSpawn, _ok := sub.Get("spawn"); _ok && _vSpawn.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractStringSlice(_vSpawn.Leaf); _xok {
+				sessionEntryVal4.Spawn = _x
+				if sessionEntryVal4.Spawn == nil {
+					sessionEntryVal4.Spawn = []string{}
+				}
+				_vSpawn.MarkConsumed()
+			}
+		}
+		if _vSpawnEntry, _ok := sub.Get("spawn-entry"); _ok && _vSpawnEntry.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractStringSlice(_vSpawnEntry.Leaf); _xok {
+				sessionEntryVal4.SpawnEntry = _x
+				if sessionEntryVal4.SpawnEntry == nil {
+					sessionEntryVal4.SpawnEntry = []string{}
+				}
+				_vSpawnEntry.MarkConsumed()
 			}
 		}
 		if _foundSessionEntry {
@@ -1641,6 +1731,20 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		if data.SessionEntry.TombstoneRetention != "" || cst.HasValue(tableNode, "tombstone-retention") {
 			if err := cst.SetAny(tableNode, "tombstone-retention", data.SessionEntry.TombstoneRetention); err != nil {
 				return fmt.Errorf("%w", err)
+			}
+		}
+		{
+			if data.SessionEntry.Spawn != nil {
+				if err := cst.SetAny(tableNode, "spawn", data.SessionEntry.Spawn); err != nil {
+					return fmt.Errorf("%w", err)
+				}
+			}
+		}
+		{
+			if data.SessionEntry.SpawnEntry != nil {
+				if err := cst.SetAny(tableNode, "spawn-entry", data.SessionEntry.SpawnEntry); err != nil {
+					return fmt.Errorf("%w", err)
+				}
 			}
 		}
 	}

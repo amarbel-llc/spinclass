@@ -146,6 +146,12 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if other.SessionEntry.TombstoneRetention != "" {
 			merged.SessionEntry.TombstoneRetention = other.SessionEntry.TombstoneRetention
 		}
+		if len(other.SessionEntry.Spawn) > 0 {
+			merged.SessionEntry.Spawn = other.SessionEntry.Spawn
+		}
+		if len(other.SessionEntry.SpawnEntry) > 0 {
+			merged.SessionEntry.SpawnEntry = other.SessionEntry.SpawnEntry
+		}
 	}
 
 	// [[start-commands]] — append across levels, then dedupe by Name with

@@ -223,6 +223,54 @@ func CheckHooks(sf sweatfile.Sweatfile) []Issue {
 	return issues
 }
 
+// CheckSessionEntry validates the spawn template fields in the
+// [session-entry] table. `spawn` must carry a standalone "{entry}" element
+// (it is spliced element-wise, so an element merely containing the
+// placeholder cannot work); `spawn-entry` without "{prompt}" anywhere is
+// suspicious (the worker would boot without the driver's brief) but legal,
+// so it only warns. See FDR 0006.
+func CheckSessionEntry(sf sweatfile.Sweatfile) []Issue {
+	var issues []Issue
+	if sf.SessionEntry == nil {
+		return issues
+	}
+	if len(sf.SessionEntry.Spawn) > 0 {
+		hasEntry := false
+		for _, el := range sf.SessionEntry.Spawn {
+			if el == "{entry}" {
+				hasEntry = true
+				break
+			}
+		}
+		if !hasEntry {
+			issues = append(issues, Issue{
+				Message:  `spawn template has no "{entry}" element (the spawn-entry argv is spliced element-wise; a placeholder embedded in a larger string does not count)`,
+				Severity: SeverityError,
+				Field:    "session-entry.spawn",
+				Value:    strings.Join(sf.SessionEntry.Spawn, " "),
+			})
+		}
+	}
+	if len(sf.SessionEntry.SpawnEntry) > 0 {
+		hasPrompt := false
+		for _, el := range sf.SessionEntry.SpawnEntry {
+			if strings.Contains(el, "{prompt}") {
+				hasPrompt = true
+				break
+			}
+		}
+		if !hasPrompt {
+			issues = append(issues, Issue{
+				Message:  `spawn-entry has no element containing "{prompt}"; the spawned harness will not receive the driver's brief`,
+				Severity: SeverityWarning,
+				Field:    "session-entry.spawn-entry",
+				Value:    strings.Join(sf.SessionEntry.SpawnEntry, " "),
+			})
+		}
+	}
+	return issues
+}
+
 func CheckMCPs(sf sweatfile.Sweatfile) []Issue {
 	var issues []Issue
 	seen := make(map[string]bool, len(sf.MCPs))
@@ -549,6 +597,27 @@ func Run(w io.Writer, home, repoDir string) int {
 				}
 			} else {
 				sub.Ok("hooks valid")
+			}
+		}
+
+		if src.File.SessionEntry != nil {
+			if issues := CheckSessionEntry(src.File); len(issues) > 0 {
+				for _, iss := range issues {
+					if iss.Severity == SeverityError {
+						diag := map[string]string{
+							"severity": iss.Severity,
+							"message":  iss.Message,
+						}
+						if iss.Value != "" {
+							diag["value"] = iss.Value
+						}
+						sub.NotOk("session-entry valid", diag)
+					} else {
+						sub.Ok(fmt.Sprintf("session-entry valid # warning: %s", iss.Message))
+					}
+				}
+			} else {
+				sub.Ok("session-entry valid")
 			}
 		}
 

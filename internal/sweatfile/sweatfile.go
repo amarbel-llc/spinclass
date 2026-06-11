@@ -26,6 +26,18 @@ type SessionEntry struct {
 	Env                map[string]string `toml:"env"`
 	LivenessProbe      []string          `toml:"liveness-probe"`
 	TombstoneRetention string            `toml:"tombstone-retention"`
+	// Spawn is the multiplexer argv template `sc spawn` (and detached
+	// fork) execs to launch a worker session detached: {id} = the
+	// worker's branch/session name (multiplexer-safe), {dir} = the
+	// worker worktree, {entry} = splice point for the spawn-entry argv
+	// (replaced element-wise, not as one string). Default:
+	// ["zmx", "run", "{id}", "--", "{entry}"]. See FDR 0006.
+	Spawn []string `toml:"spawn"`
+	// SpawnEntry is the harness argv the spawned session boots into;
+	// {prompt} is replaced by the driver's brief (and {dir} by the
+	// worker worktree). No default — the harness is the user's choice
+	// (e.g. ["clown", "{prompt}"]); spawn errors when unset.
+	SpawnEntry []string `toml:"spawn-entry"`
 }
 
 type Hooks struct {
@@ -301,6 +313,26 @@ func (sf Sweatfile) SessionStart() []string {
 func (sf Sweatfile) SessionResume() []string {
 	if sf.SessionEntry != nil && len(sf.SessionEntry.Resume) > 0 {
 		return sf.SessionEntry.Resume
+	}
+	return nil
+}
+
+// SessionSpawn returns the multiplexer argv template for detached worker
+// launches (`sc spawn` / detached fork), defaulting to the zmx template
+// when unset or empty. See FDR 0006.
+func (sf Sweatfile) SessionSpawn() []string {
+	if sf.SessionEntry != nil && len(sf.SessionEntry.Spawn) > 0 {
+		return sf.SessionEntry.Spawn
+	}
+	return []string{"zmx", "run", "{id}", "--", "{entry}"}
+}
+
+// SessionSpawnEntry returns the harness argv a spawned session boots into,
+// or nil when unconfigured — there is deliberately no default: the harness
+// is the user's choice, and spawn errors when this is unset. See FDR 0006.
+func (sf Sweatfile) SessionSpawnEntry() []string {
+	if sf.SessionEntry != nil && len(sf.SessionEntry.SpawnEntry) > 0 {
+		return sf.SessionEntry.SpawnEntry
 	}
 	return nil
 }
