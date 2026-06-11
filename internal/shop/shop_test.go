@@ -10,6 +10,7 @@ import (
 
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/testgit"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
 	"github.com/amarbel-llc/tap/go/pkgs/yaml_diagnostic"
@@ -18,13 +19,20 @@ import (
 // TestMain sandboxes $HOME once for the package. Several tests reach
 // claude.TrustWorkspace, which mkdirs under HOME — fails inside the
 // nix sandbox where the default HOME (/homeless-shelter) is read-only.
+// It also isolates every git invocation from the host git configuration
+// (signing agent, hooks, templates) — see testgit.SetHermeticEnv.
 func TestMain(m *testing.M) {
 	home, err := os.MkdirTemp("", "shop-test-home-")
 	if err != nil {
 		panic(err)
 	}
 	os.Setenv("HOME", home)
+	gitCleanup, err := testgit.SetHermeticEnv()
+	if err != nil {
+		panic(err)
+	}
 	code := m.Run()
+	gitCleanup()
 	os.RemoveAll(home)
 	os.Exit(code)
 }

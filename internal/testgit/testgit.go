@@ -4,9 +4,42 @@
 package testgit
 
 import (
+	"os"
 	"os/exec"
 	"testing"
 )
+
+// SetHermeticEnv isolates every git invocation in the test process from the
+// host's git configuration. The global config is pointed at a generated
+// minimal file (supplying the identity fixture commits need) and the system
+// config at the null device, so host settings — commit.gpgsign and its
+// signing-agent dependency, hook paths, templates, init.defaultBranch — can
+// never reach a fixture repo OR a production code path under test (e.g. a
+// rebase re-signing commits). This matches the nix sandbox, where no host
+// config exists and the suite is hermetic by construction.
+//
+// Call from TestMain before m.Run and run the returned cleanup after.
+// Process-wide by design: per-test t.Setenv would miss nothing today but
+// forces sequential tests; TestMain covers parallel subtests too.
+func SetHermeticEnv() (cleanup func(), err error) {
+	f, err := os.CreateTemp("", "testgit-gitconfig-")
+	if err != nil {
+		return nil, err
+	}
+	config := "[user]\n\tname = spinclass-test\n\temail = test@spinclass.invalid\n[commit]\n\tgpgsign = false\n[tag]\n\tgpgsign = false\n"
+	if _, err := f.WriteString(config); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return nil, err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return nil, err
+	}
+	os.Setenv("GIT_CONFIG_GLOBAL", f.Name())
+	os.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	return func() { _ = os.Remove(f.Name()) }, nil
+}
 
 // RequireGit skips the test when git isn't on PATH. The nix-build
 // sandbox runs `go test` without git, and integration tests like these
