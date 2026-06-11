@@ -16,7 +16,9 @@ const helloPollInterval = 250 * time.Millisecond
 
 // SendHello posts the spawn handshake from the worker session (from) to the
 // driver session (to). Fired by the worker's SessionStart hook when its
-// state carries spawned_by (FDR 0006). Send handles the clown wake emit.
+// state carries spawned_by (FDR 0006). Deliberately no wake emit: the
+// driver blocks in WaitForHello during the handshake window, and the peek
+// reads leave the hello unread for the driver's next chat-read anyway.
 func SendHello(from, to string) error {
 	return Send(Message{
 		From: from, To: to,
