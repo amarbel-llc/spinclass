@@ -251,6 +251,46 @@ func TestStateKindRoundTrips(t *testing.T) {
 	}
 }
 
+// TestStateSpawnedByRoundTrips locks the spawned_by lineage field's JSON
+// shape (FDR 0006): present values serialize as "spawned_by" and survive a
+// round-trip; absent values stay empty and omitempty keeps the key out of
+// non-spawned sessions' state files.
+func TestStateSpawnedByRoundTrips(t *testing.T) {
+	s := State{SpawnedBy: "spinclass/bright-cedar", WorktreePath: "/x", Branch: "spawned-walnut"}
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"spawned_by":"spinclass/bright-cedar"`) {
+		t.Fatalf("spawned_by not serialized: %s", data)
+	}
+	var got State
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.SpawnedBy != "spinclass/bright-cedar" {
+		t.Fatalf("SpawnedBy = %q, want %q", got.SpawnedBy, "spinclass/bright-cedar")
+	}
+
+	// Absent spawned_by ⇒ empty (a session nobody spawned, the default).
+	var plain State
+	if err := json.Unmarshal([]byte(`{"branch":"x"}`), &plain); err != nil {
+		t.Fatal(err)
+	}
+	if plain.SpawnedBy != "" {
+		t.Fatalf("absent spawned_by should be empty, got %q", plain.SpawnedBy)
+	}
+
+	// omitempty: a non-spawned session's JSON must not carry the key.
+	data, err = json.Marshal(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "spawned_by") {
+		t.Fatalf("non-spawned state JSON unexpectedly contains \"spawned_by\": %s", data)
+	}
+}
+
 func TestWriteCreatesIndexSymlink(t *testing.T) {
 	s := setupTestSession(t, "feature-x")
 	if err := Write(s); err != nil {

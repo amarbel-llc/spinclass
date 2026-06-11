@@ -320,16 +320,29 @@ func runListResult(ctx context.Context, closed bool, format string, dbg *slog.Lo
 		if s.ExitedAt != nil {
 			exited = s.ExitedAt.UTC().Format(time.RFC3339)
 		}
-		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			s.SessionKey, resolved, marker, s.Branch, exited, s.WorktreePath, s.Description)
+		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%s\t%s\t%s%s\n",
+			s.SessionKey, resolved, marker, s.Branch, exited, s.WorktreePath, s.Description,
+			spawnedBySuffix(s.SpawnedBy))
 	}
 	for _, r := range remoteRows {
-		fmt.Fprintf(&b, "%s:%s\t%s\t\t%s\t\t\t%s\n", r.Remote, r.ID, r.State, r.Branch, r.Description)
+		fmt.Fprintf(&b, "%s:%s\t%s\t\t%s\t\t\t%s%s\n",
+			r.Remote, r.ID, r.State, r.Branch, r.Description, spawnedBySuffix(r.SpawnedBy))
 	}
 	for _, d := range diags {
 		fmt.Fprintln(&b, d)
 	}
 	return command.TextResult(b.String()), nil
+}
+
+// spawnedBySuffix renders the spawn lineage hint appended to `sc list`
+// text rows: a trailing `spawned-by:<driver-key>` column for sessions
+// launched by `sc spawn` / detached fork (FDR 0006), empty otherwise so
+// non-spawned rows keep the legacy shape.
+func spawnedBySuffix(key string) string {
+	if key == "" {
+		return ""
+	}
+	return "\tspawned-by:" + key
 }
 
 // remotesForCwd returns the [[remotes]] entries from the merged sweatfile

@@ -970,8 +970,12 @@ func handleChatListSessions(_ context.Context, args json.RawMessage, _ command.P
 		if s.Branch != "" {
 			branch = " {" + s.Branch + "}"
 		}
-		fmt.Fprintf(&b, "%s [%s] (%s)%s%s\n",
-			s.SessionKey, s.ResolveState(), filepath.Base(s.RepoPath), branch, desc)
+		spawned := ""
+		if s.SpawnedBy != "" {
+			spawned = " [spawned-by " + s.SpawnedBy + "]"
+		}
+		fmt.Fprintf(&b, "%s [%s] (%s)%s%s%s\n",
+			s.SessionKey, s.ResolveState(), filepath.Base(s.RepoPath), branch, spawned, desc)
 	}
 	return command.TextResult(strings.TrimRight(b.String(), "\n")), nil
 }

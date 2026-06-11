@@ -124,6 +124,72 @@ func TestRunListResultTextIncludesRemoteRows(t *testing.T) {
 	}
 }
 
+// TestRunListResultTextSpawnedByAnnotation verifies the `sc list` text
+// rows carry the spawn lineage hint (FDR 0006): a session whose state
+// records SpawnedBy gets a trailing `spawned-by:<key>` annotation, and a
+// session without it stays byte-identical to the legacy row shape.
+func TestRunListResultTextSpawnedByAnnotation(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	base := t.TempDir()
+	repo := filepath.Join(base, "spinclass")
+	spawnedWT := filepath.Join(repo, ".worktrees", "spawned-walnut")
+	plainWT := filepath.Join(repo, ".worktrees", "plain-pine")
+	for _, dir := range []string{spawnedWT, plainWT} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	states := []session.State{
+		{
+			SessionState: session.StateInactive,
+			RepoPath:     repo,
+			WorktreePath: spawnedWT,
+			Branch:       "spawned-walnut",
+			SessionKey:   "spinclass/spawned-walnut",
+			SpawnedBy:    "spinclass/bright-cedar",
+		},
+		{
+			SessionState: session.StateInactive,
+			RepoPath:     repo,
+			WorktreePath: plainWT,
+			Branch:       "plain-pine",
+			SessionKey:   "spinclass/plain-pine",
+		},
+	}
+	for _, s := range states {
+		if err := session.Write(s); err != nil {
+			t.Fatalf("session.Write(%s): %v", s.Branch, err)
+		}
+	}
+
+	res, err := runListResult(context.Background(), false, "tap", nil, nil)
+	if err != nil {
+		t.Fatalf("runListResult: %v", err)
+	}
+	if res.IsErr {
+		t.Fatalf("runListResult: unexpected error result: %s", res.Text)
+	}
+
+	var spawnedLine, plainLine string
+	for _, line := range strings.Split(res.Text, "\n") {
+		if strings.HasPrefix(line, "spinclass/spawned-walnut\t") {
+			spawnedLine = line
+		}
+		if strings.HasPrefix(line, "spinclass/plain-pine\t") {
+			plainLine = line
+		}
+	}
+	if spawnedLine == "" || plainLine == "" {
+		t.Fatalf("rows missing from text output:\n%s", res.Text)
+	}
+	if !strings.HasSuffix(spawnedLine, "\tspawned-by:spinclass/bright-cedar") {
+		t.Errorf("spawned row missing annotation suffix: %q", spawnedLine)
+	}
+	if strings.Contains(plainLine, "spawned-by:") {
+		t.Errorf("plain row unexpectedly annotated: %q", plainLine)
+	}
+}
+
 func TestRunListResultJSONTagsRemoteRows(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir()) // empty local index
 	stubSSHPerDest(t, "devbox.example")

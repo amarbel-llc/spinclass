@@ -247,6 +247,74 @@ func TestHandleUpdateDescriptionNoSessionStillErrors(t *testing.T) {
 	}
 }
 
+// TestHandleChatListSessionsSpawnedByAnnotation verifies chat-list-sessions
+// rows carry the spawn lineage hint (FDR 0006) as a `[spawned-by <key>]`
+// annotation, mirroring the implicit-session `{branch}` hint's placement,
+// and that non-spawned sessions render without it.
+func TestHandleChatListSessionsSpawnedByAnnotation(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	base := t.TempDir()
+	repo := filepath.Join(base, "spinclass")
+	spawnedWT := filepath.Join(repo, ".worktrees", "spawned-walnut")
+	plainWT := filepath.Join(repo, ".worktrees", "plain-pine")
+	for _, dir := range []string{spawnedWT, plainWT} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	states := []session.State{
+		{
+			SessionState: session.StateInactive,
+			RepoPath:     repo,
+			WorktreePath: spawnedWT,
+			Branch:       "spawned-walnut",
+			SessionKey:   "spinclass/spawned-walnut",
+			SpawnedBy:    "spinclass/bright-cedar",
+			Description:  "fix the thing",
+		},
+		{
+			SessionState: session.StateInactive,
+			RepoPath:     repo,
+			WorktreePath: plainWT,
+			Branch:       "plain-pine",
+			SessionKey:   "spinclass/plain-pine",
+		},
+	}
+	for _, s := range states {
+		if err := session.Write(s); err != nil {
+			t.Fatalf("session.Write(%s): %v", s.Branch, err)
+		}
+	}
+
+	res, err := handleChatListSessions(context.Background(), json.RawMessage(`{}`), nil)
+	if err != nil {
+		t.Fatalf("handleChatListSessions: %v", err)
+	}
+	if res.IsErr {
+		t.Fatalf("unexpected error result: %s", res.Text)
+	}
+
+	var spawnedLine, plainLine string
+	for _, line := range strings.Split(res.Text, "\n") {
+		if strings.HasPrefix(line, "spinclass/spawned-walnut ") {
+			spawnedLine = line
+		}
+		if strings.HasPrefix(line, "spinclass/plain-pine ") {
+			plainLine = line
+		}
+	}
+	if spawnedLine == "" || plainLine == "" {
+		t.Fatalf("rows missing from output:\n%s", res.Text)
+	}
+	want := "{spawned-walnut} [spawned-by spinclass/bright-cedar] — fix the thing"
+	if !strings.Contains(spawnedLine, want) {
+		t.Errorf("spawned row = %q, want it to contain %q", spawnedLine, want)
+	}
+	if strings.Contains(plainLine, "[spawned-by") {
+		t.Errorf("plain row unexpectedly annotated: %q", plainLine)
+	}
+}
+
 func TestSummarizeHookCommand_SingleLine(t *testing.T) {
 	got := summarizeHookCommand("just test")
 	if got != "just test" {

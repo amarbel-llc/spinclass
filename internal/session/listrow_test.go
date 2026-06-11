@@ -135,6 +135,60 @@ func TestListRowsCarriesKind(t *testing.T) {
 	}
 }
 
+// TestListRowsCarriesSpawnedBy verifies the spawn lineage hint survives
+// the wire shape (FDR 0006): a state with SpawnedBy yields the driver key
+// on its ListRow, while an ordinary state yields "" and its JSON omits the
+// "spawned_by" key entirely (omitempty preserves the legacy row shape).
+func TestListRowsCarriesSpawnedBy(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "spinclass")
+	spawned := filepath.Join(repo, ".worktrees", "spawned-walnut")
+	plain := filepath.Join(repo, ".worktrees", "plain-pine")
+	for _, dir := range []string{spawned, plain} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	states := []State{
+		{
+			SessionState: StateInactive,
+			RepoPath:     repo,
+			WorktreePath: spawned,
+			Branch:       "spawned-walnut",
+			SessionKey:   "spinclass/spawned-walnut",
+			SpawnedBy:    "spinclass/bright-cedar",
+		},
+		{
+			SessionState: StateInactive,
+			RepoPath:     repo,
+			WorktreePath: plain,
+			Branch:       "plain-pine",
+			SessionKey:   "spinclass/plain-pine",
+		},
+	}
+
+	rows := ListRows(states, false)
+	if len(rows) != 2 {
+		t.Fatalf("rows: got %d, want 2", len(rows))
+	}
+	if rows[0].SpawnedBy != "spinclass/bright-cedar" {
+		t.Errorf("spawned row SpawnedBy = %q, want %q", rows[0].SpawnedBy, "spinclass/bright-cedar")
+	}
+	if rows[1].SpawnedBy != "" {
+		t.Errorf("plain row SpawnedBy = %q, want empty", rows[1].SpawnedBy)
+	}
+
+	// The plain row's JSON must not carry a "spawned_by" key (omitempty).
+	data, err := json.Marshal(rows[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "spawned_by") {
+		t.Errorf("plain row JSON unexpectedly contains \"spawned_by\": %s", data)
+	}
+}
+
 // TestListRowsEmptyMarshalsToArray guards against `null` output: an
 // empty session list must serialize as [] for remote consumers.
 func TestListRowsEmptyMarshalsToArray(t *testing.T) {

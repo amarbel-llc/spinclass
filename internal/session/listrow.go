@@ -30,6 +30,12 @@ type ListRow struct {
 	// `sc list` / chat listing. Appended last and omitempty to keep the remote
 	// wire shape backward-compatible.
 	Branch string `json:"branch,omitempty"`
+
+	// SpawnedBy is the driver session's key recorded when this session was
+	// launched as a worker by `sc spawn` / detached fork. Display-only
+	// lineage (FDR 0006). Appended last and omitempty to keep the remote
+	// wire shape backward-compatible.
+	SpawnedBy string `json:"spawned_by,omitempty"`
 }
 
 // ListRows converts states to wire rows, mirroring the text output's
@@ -52,6 +58,7 @@ func ListRows(states []State, closed bool) []ListRow {
 			Repo:        filepath.Base(s.RepoPath),
 			Kind:        s.Kind,
 			Branch:      s.Branch,
+			SpawnedBy:   s.SpawnedBy,
 		})
 	}
 	return rows

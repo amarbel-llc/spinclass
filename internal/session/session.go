@@ -56,18 +56,23 @@ const (
 const KindImplicit = "implicit"
 
 type State struct {
-	PID          int               `json:"pid"`
-	SessionState string            `json:"state"`
-	RepoPath     string            `json:"repo_path"`
-	WorktreePath string            `json:"worktree_path"`
-	Branch       string            `json:"branch"`
-	SessionKey   string            `json:"session_key"`
-	Kind         string            `json:"kind,omitempty"`
-	Description  string            `json:"description,omitempty"`
-	Entrypoint   []string          `json:"entrypoint"`
-	Env          map[string]string `json:"env"`
-	StartedAt    time.Time         `json:"started_at"`
-	ExitedAt     *time.Time        `json:"exited_at,omitempty"`
+	PID          int    `json:"pid"`
+	SessionState string `json:"state"`
+	RepoPath     string `json:"repo_path"`
+	WorktreePath string `json:"worktree_path"`
+	Branch       string `json:"branch"`
+	SessionKey   string `json:"session_key"`
+	Kind         string `json:"kind,omitempty"`
+	Description  string `json:"description,omitempty"`
+	// SpawnedBy is the driver session's key (<repo>/<branch>) recorded by
+	// `sc spawn` / detached fork when this session was launched as a worker.
+	// Display-only lineage surfaced by `sc list` and chat-list-sessions —
+	// no behavioral branches key off it. See FDR 0006.
+	SpawnedBy  string            `json:"spawned_by,omitempty"`
+	Entrypoint []string          `json:"entrypoint"`
+	Env        map[string]string `json:"env"`
+	StartedAt  time.Time         `json:"started_at"`
+	ExitedAt   *time.Time        `json:"exited_at,omitempty"`
 
 	// PreMergeAttestation buffers the agent's most recent
 	// nothing-but-the-truth response. Consumed and cleared by the next
