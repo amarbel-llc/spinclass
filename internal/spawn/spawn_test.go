@@ -141,37 +141,10 @@ func TestLaunchHappyPath(t *testing.T) {
 	const desc = "test worker"
 	brief := `fix the "thing" with spaces`
 
-	// The stub template cannot send the hello itself (SendHello is a Go
-	// API), so a goroutine plays the worker's SessionStart hook: poll for
-	// the template's marker, derive the worker key from the worktree dir
-	// name, send the hello to the driver.
-	helloErr := make(chan error, 1)
-	stop := make(chan struct{})
-	go func() {
-		deadline := time.After(15 * time.Second)
-		tick := time.NewTicker(20 * time.Millisecond)
-		defer tick.Stop()
-		for {
-			select {
-			case <-stop:
-				helloErr <- nil
-				return
-			case <-deadline:
-				helloErr <- fmt.Errorf("spawn template marker never appeared")
-				return
-			case <-tick.C:
-				matches, _ := filepath.Glob(filepath.Join(repoPath, ".worktrees", "*", "launched"))
-				if len(matches) == 1 {
-					branch := filepath.Base(filepath.Dir(matches[0]))
-					helloErr <- chat.SendHello("worker/"+branch, driverKey)
-					return
-				}
-			}
-		}
-	}()
+	stop, helloErr := helloAfterLaunch(t, repoPath, driverKey)
 
 	res, err := Launch(home, repoPath, driverKey, brief, desc, 15*time.Second)
-	close(stop)
+	stop()
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
