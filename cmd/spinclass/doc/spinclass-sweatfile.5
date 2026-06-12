@@ -407,9 +407,10 @@ error.
 .B Merge:
 scalar override.
 .SS [session\-entry]
-Controls what command is exec'd when attaching to a session, what
-environment is injected, how liveness is detected after detach, and how
-long tombstones are retained.
+Controls what command is exec'd when attaching to a session, how
+detached worker sessions are launched, what environment is injected,
+how liveness is detected after detach, and how long tombstones are
+retained.
 .TP
 .B start
 Argv array for new sessions.
@@ -427,6 +428,97 @@ scalar override.
 Argv array for resumed sessions.
 When nil, falls back to
 .BR start .
+.B Merge:
+scalar override.
+.TP
+.B spawn
+Multiplexer argv template exec'd by
+.B sc spawn
+and detached
+.B sc fork \-\-brief
+to launch a worker session detached from the driver's TTY.
+Defaults to
+.BR "[\(dqzmx\(dq, \(dqattach\(dq, \(dq{id}\(dq, \(dq\-\-detach\(dq, \(dq{entry}\(dq]" .
+Substitution variables:
+.B {id}
+expands to the worker's full
+.B session key
+.RI ( <repo>/<branch> )
+\(em deliberately the same name the
+.BR start / resume
+entries and the
+.B liveness\-probe
+address, so
+.B sc resume
+reattaches to the spawned session rather than starting a fresh one;
+.B {dir}
+expands to the worker worktree's absolute path; and the element
+.B exactly equal to
+.B \(dq{entry}\(dq
+is replaced by splicing in the rendered
+.B spawn\-entry
+argv element-wise.
+.B {id}
+and
+.B {dir}
+substitute substring-level within each element, but an
+.B {entry}
+embedded inside a larger string is not a splice point \(em an argv
+cannot be expanded element-wise inside one string \(em and
+.B sc validate
+errors when the template has no standalone
+.B {entry}
+element.
+Template contract: the argv must detach the session and return
+promptly \(em
+.B sc spawn
+blocks until the worker's hello chat message arrives (60s default
+deadline), so a template that blocks until the harness exits burns
+the deadline.
+The default uses
+.B zmx attach \-\-detach
+rather than
+.B zmx run
+because
+.B run
+types the space-joined argv as keystrokes into a shell (a multi-line
+brief would be shell-interpreted) while
+.B attach
+with a command execs the argv directly, element-preserving.
+The exec'd process inherits the session env including any keys from
+.BR [session\-entry].env ,
+carrying the
+.I worker's
+.B SPINCLASS_*
+identity \(em never the driver's.
+.B Merge:
+scalar override.
+.TP
+.B spawn\-entry
+Argv array for the harness a spawned worker session boots into,
+spliced into
+.B spawn
+at its
+.B {entry}
+element.
+.B {prompt}
+is replaced by the driver's brief verbatim, staying within its single
+argv element \(em no shell joining or re-splitting \(em and
+.B {dir}
+by the worker worktree's absolute path.
+No default: the harness is the user's choice, and spawn errors when
+this is unset.
+A clown-style entry:
+.B "[\(dqclown\(dq, \(dq\-\-\(dq, \(dq{prompt}\(dq]"
+\(em the
+.B \-\-
+is required because clown's grammar is
+.IR "clown [clown-flags] \-\- [provider-args]" ;
+a bare positional brief is rejected as an unknown flag.
+.B sc validate
+warns when no element contains
+.B {prompt}
+(legal, but the worker would boot without the driver's brief).
 .B Merge:
 scalar override.
 .TP
