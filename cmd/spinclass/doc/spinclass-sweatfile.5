@@ -626,7 +626,7 @@ is the customary key for a multiplexer-group name so the
 .B liveness\-probe
 argv can reference it symbolically instead of hardcoding the group in
 two places.
-Spinclass-owned variables —
+Spinclass-owned variables \(em
 .BR SPINCLASS_SESSION_ID ,
 .BR SPINCLASS_REPO ,
 .BR SPINCLASS_BRANCH ,
@@ -634,7 +634,7 @@ Spinclass-owned variables —
 .BR SPINCLASS_DESCRIPTION ,
 .BR TMPDIR ,
 .BR CLAUDE_CODE_TMPDIR
-— are applied AFTER this map and so cannot be clobbered.
+\(em are applied AFTER this map and so cannot be clobbered.
 .B Merge:
 per-key map merge (child wins on collision, parent-only keys survive).
 .SS [[start\-commands]]
