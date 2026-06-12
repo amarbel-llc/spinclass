@@ -146,6 +146,22 @@ function spinclass_resume_from_main_repo_no_args_lists_ids { # @test
   assert_output --partial "$wt_id"
 }
 
+function spinclass_resume_non_tty_emits_no_title_escape { # @test
+  cd "$TEST_REPO" || return
+  local bin="${SPINCLASS_BIN:-spinclass}"
+
+  local start_output
+  start_output=$(timeout --preserve-status 10s "$bin" --format tap start 2>&1)
+  local wt_id
+  wt_id=$(basename "$(extract_wt_path "$start_output")")
+
+  # resume-title (#154) is TTY-gated: piped (non-TTY) output must carry
+  # no OSC-2 escape bytes.
+  run_sc_session resume "$wt_id"
+  assert_success
+  refute_output --partial $'\033]2;'
+}
+
 function spinclass_resume_no_attach_shows_dry_run { # @test
   cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"

@@ -114,6 +114,42 @@ EOF
   assert [ -f "$wt/.spinclass/state.json" ]
 }
 
+@test "spawn-window fires with id and dir, in the worker worktree" {
+  create_spawn_repo windowrepo "$STUB_DIR/stub-harness.sh"
+  cat >>"$WORKER_REPO/sweatfile" <<'EOF'
+spawn-window = ["sh", "-c", "printf '%s\n%s\n' \"$1\" \"$2\" > window.txt", "sh", "{id}", "{dir}"]
+EOF
+  git -C "$WORKER_REPO" add sweatfile
+  git -C "$WORKER_REPO" commit -m "window stub"
+
+  SPINCLASS_SESSION_ID=driver/bats run_sc spawn windowrepo --brief "do the thing"
+  assert_success
+  local wt
+  wt=$(echo "$output" | grep -oP 'worktree_path: \K\S+')
+  # fire-and-forget: the window command runs async — poll briefly.
+  local i=0
+  while [ ! -f "$wt/window.txt" ] && [ "$i" -lt 50 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  run cat "$wt/window.txt"
+  assert_output --partial "windowrepo/"
+  assert_output --partial "$wt"
+}
+
+@test "failing spawn-window does not fail the spawn" {
+  create_spawn_repo windowfailrepo "$STUB_DIR/stub-harness.sh"
+  cat >>"$WORKER_REPO/sweatfile" <<'EOF'
+spawn-window = ["false", "{id}"]
+EOF
+  git -C "$WORKER_REPO" add sweatfile
+  git -C "$WORKER_REPO" commit -m "failing window stub"
+
+  SPINCLASS_SESSION_ID=driver/bats run_sc spawn windowfailrepo --brief "still works"
+  assert_success
+  assert_output --partial "session_key: windowfailrepo/"
+}
+
 @test "spawn rejects an unknown repo dirname" {
   SPINCLASS_SESSION_ID=driver/bats run_sc spawn no-such-repo --brief "anything"
   assert_failure
