@@ -61,7 +61,7 @@ sc clean
 | `sc start-<custom> <arg>` | User-defined start commands declared in a sweatfile |
 | `sc resume [id]` | Resume an existing session (auto-detects from cwd; `host:id` reattaches on a `[[remotes]]` host over ssh) |
 | `sc update-description "<desc>"` | Update a session's description |
-| `sc list` | List all tracked sessions, plus sessions on `[[remotes]]` hosts |
+| `sc list [--watch]` | List tracked sessions (styled table on a TTY; `--watch` live-reloads), plus sessions on `[[remotes]]` hosts |
 | `sc merge [target]` | Merge a worktree into main, remove session state |
 | `sc check` | Run `[hooks].pre-merge` in the current worktree |
 | `sc clean` | Remove merged worktrees and abandoned sessions |

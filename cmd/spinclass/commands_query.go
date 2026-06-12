@@ -37,7 +37,14 @@ func registerQueryCommands(app *command.App) {
 				"host:-prefixed rows; an unreachable host yields a per-host " +
 				"diagnostic line in text formats, while --format json keeps " +
 				"a machine-clean array and adds a \"remote\" field to " +
-				"remote rows.",
+				"remote rows.\n\n" +
+				"On an interactive terminal the CLI renders a styled table; " +
+				"piped output, --format json, and --format tap/table keep the " +
+				"plain text/JSON shape (the MCP tool always returns plain " +
+				"text). Pass --watch to keep the table open and live-reload " +
+				"local session state every --interval (default 2s); --watch " +
+				"requires a TTY and refreshes local sessions only (remote rows " +
+				"are fetched once at startup).",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			ReadOnlyHint:    protocol.BoolPtr(true),
@@ -47,6 +54,8 @@ func registerQueryCommands(app *command.App) {
 		},
 		Params: []command.Param{
 			{Name: "closed", Type: command.Bool, Description: "Include closed sessions (tombstones and dangling symlinks)"},
+			{Name: "watch", Short: 'w', Type: command.Bool, Description: "Continuously reload and re-render the session table (CLI only; requires a TTY)"},
+			{Name: "interval", Type: command.String, Description: "Watch refresh interval as a Go duration, e.g. 5s (CLI only; default 2s)"},
 		},
 		Run: func(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 			var p struct {
@@ -55,6 +64,16 @@ func registerQueryCommands(app *command.App) {
 			}
 			_ = json.Unmarshal(args, &p)
 			return runListResult(ctx, p.Closed, p.FormatOrDefault(), p.debugLogger(), remotesForCwd())
+		},
+		RunCLI: func(ctx context.Context, args json.RawMessage) error {
+			var p struct {
+				globalArgs
+				Closed   bool   `json:"closed"`
+				Watch    bool   `json:"watch"`
+				Interval string `json:"interval"`
+			}
+			_ = json.Unmarshal(args, &p)
+			return runListCLI(ctx, p.globalArgs, p.Closed, p.Watch, p.Interval, remotesForCwd())
 		},
 	})
 
@@ -289,6 +308,23 @@ func runUpdateDescription(description, id string) error {
 	return session.Write(*state)
 }
 
+// gatherListData collects the raw inputs every `sc list` renderer shares:
+// all local index states (unfiltered — the abandoned/closed filter is
+// applied at render time so each renderer can honour its own `closed`
+// flag) plus the parallel-queried remote rows and their per-host
+// diagnostics. The MCP/text path (runListResult), the pretty CLI table,
+// and the --watch model all source from here. An index read failure is
+// the only hard error; remote failures degrade to diagnostics inside
+// queryRemotes.
+func gatherListData(ctx context.Context, dbg *slog.Logger, remotes []sweatfile.Remote) ([]session.State, []session.ListRow, []string, error) {
+	states, err := session.ListAll(dbg)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	remoteRows, diags := queryRemotes(ctx, remotes, dbg)
+	return states, remoteRows, diags, nil
+}
+
 // runListResult builds the `sc list` output. When closed is true,
 // tombstones and dangling-symlink entries are included. Live entries
 // always appear; abandoned/closed entries are filtered unless closed.
@@ -301,11 +337,10 @@ func runUpdateDescription(description, id string) error {
 // diagnostic line (text formats) or a Debug log (json must stay a
 // clean array) — never a command failure.
 func runListResult(ctx context.Context, closed bool, format string, dbg *slog.Logger, remotes []sweatfile.Remote) (*command.Result, error) {
-	states, err := session.ListAll(dbg)
+	states, remoteRows, diags, err := gatherListData(ctx, dbg, remotes)
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
 	}
-	remoteRows, diags := queryRemotes(ctx, remotes, dbg)
 	if format == "json" {
 		if dbg != nil {
 			for _, d := range diags {

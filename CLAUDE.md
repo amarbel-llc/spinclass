@@ -168,7 +168,7 @@ worktree paths. Applies `claude-allow` rules from sweatfile to
   `sc start-<custom> <arg>`        User-defined start commands declared in sweatfile
   `sc resume [id]`                 Resume an existing session (auto-detects from cwd; `host:id` reattaches on a `[[remotes]]` host over ssh)
   `sc update-description "<desc>"` Update session description (--id or auto-detect)
-  `sc list`                        List all tracked sessions, plus `host:`-prefixed rows from `[[remotes]]` hosts
+  `sc list [--watch]`              List tracked sessions (styled charm table on a TTY; plain text/JSON when piped or via `--format tap`/`json`); `--watch` keeps it open and live-reloads local sessions every `--interval` (default 2s). Plus `host:`-prefixed rows from `[[remotes]]` hosts
   `sc merge [target]`              Merge worktree into main, remove session state
   `sc check`                       Run [hooks].pre-merge in the current worktree (agent-CI surface)
   `sc clean`                       Remove merged worktrees and abandoned sessions
