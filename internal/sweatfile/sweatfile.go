@@ -31,7 +31,7 @@ type SessionEntry struct {
 	// worker's branch/session name (multiplexer-safe), {dir} = the
 	// worker worktree, {entry} = splice point for the spawn-entry argv
 	// (replaced element-wise, not as one string). Default:
-	// ["zmx", "run", "{id}", "--", "{entry}"]. See FDR 0006.
+	// ["zmx", "attach", "{id}", "--detach", "{entry}"]. See FDR 0006.
 	Spawn []string `toml:"spawn"`
 	// SpawnEntry is the harness argv the spawned session boots into;
 	// {prompt} is replaced by the driver's brief (and {dir} by the
@@ -324,7 +324,13 @@ func (sf Sweatfile) SessionSpawn() []string {
 	if sf.SessionEntry != nil && len(sf.SessionEntry.Spawn) > 0 {
 		return sf.SessionEntry.Spawn
 	}
-	return []string{"zmx", "run", "{id}", "--", "{entry}"}
+	// attach+--detach, NOT `zmx run`: run creates a shell session and
+	// space-joins the argv into typed keystrokes (a multi-line {prompt}
+	// brief would be shell-interpreted) and does not understand `--`.
+	// attach with a command execs the argv directly, element-preserving,
+	// and --detach returns promptly without a client. Verified against
+	// real zmx 2026-06-11 (#145); FDR 0001 carries the matching warning.
+	return []string{"zmx", "attach", "{id}", "--detach", "{entry}"}
 }
 
 // SessionSpawnEntry returns the harness argv a spawned session boots into,

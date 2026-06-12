@@ -389,8 +389,8 @@ func TestCheckSessionEntryPromptMayBeEmbedded(t *testing.T) {
 func TestCheckSessionEntryClean(t *testing.T) {
 	sf := sweatfile.Sweatfile{
 		SessionEntry: &sweatfile.SessionEntry{
-			Spawn:      []string{"zmx", "run", "{id}", "--", "{entry}"},
-			SpawnEntry: []string{"clown", "{prompt}"},
+			Spawn:      []string{"zmx", "attach", "{id}", "--detach", "{entry}"},
+			SpawnEntry: []string{"clown", "--", "{prompt}"},
 		},
 	}
 	if issues := CheckSessionEntry(sf); len(issues) != 0 {

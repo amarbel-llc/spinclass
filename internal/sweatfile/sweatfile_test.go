@@ -1327,7 +1327,8 @@ spawn-entry = ["clown", "{prompt}"]
 }
 
 func TestSessionSpawnAccessorDefault(t *testing.T) {
-	want := []string{"zmx", "run", "{id}", "--", "{entry}"}
+	// attach+--detach, NOT `zmx run` — see the SessionSpawn accessor and #145.
+	want := []string{"zmx", "attach", "{id}", "--detach", "{entry}"}
 	for _, sf := range []Sweatfile{
 		{},
 		{SessionEntry: &SessionEntry{}},
@@ -1382,7 +1383,7 @@ func TestSessionSpawnEntryAccessorConfigured(t *testing.T) {
 func TestMergeSessionSpawnOverride(t *testing.T) {
 	base := Sweatfile{
 		SessionEntry: &SessionEntry{
-			Spawn:      []string{"zmx", "run", "{id}", "--", "{entry}"},
+			Spawn:      []string{"zmx", "attach", "{id}", "--detach", "{entry}"},
 			SpawnEntry: []string{"clown", "{prompt}"},
 		},
 	}
@@ -1406,7 +1407,7 @@ func TestMergeSessionSpawnOverride(t *testing.T) {
 func TestMergeSessionSpawnNilInherit(t *testing.T) {
 	base := Sweatfile{
 		SessionEntry: &SessionEntry{
-			Spawn:      []string{"zmx", "run", "{id}", "--", "{entry}"},
+			Spawn:      []string{"zmx", "attach", "{id}", "--detach", "{entry}"},
 			SpawnEntry: []string{"clown", "{prompt}"},
 		},
 	}

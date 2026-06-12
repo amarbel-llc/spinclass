@@ -72,21 +72,21 @@ func TestSubstituteEntry(t *testing.T) {
 }
 
 func TestSubstituteSpawn(t *testing.T) {
-	zmxDefault := []string{"zmx", "run", "{id}", "--", "{entry}"}
+	zmxDefault := []string{"zmx", "attach", "{id}", "--detach", "{entry}"}
 
 	t.Run("zmx default with clown entry", func(t *testing.T) {
-		entry := SubstituteEntry([]string{"clown", "{prompt}"}, "fix the thing", "/wt")
+		entry := SubstituteEntry([]string{"clown", "--", "{prompt}"}, "fix the thing", "/wt")
 		got, err := SubstituteSpawn(zmxDefault, "wt-name", "/wt", entry)
 		if err != nil {
 			t.Fatalf("SubstituteSpawn: %v", err)
 		}
-		want := []string{"zmx", "run", "wt-name", "--", "clown", "fix the thing"}
+		want := []string{"zmx", "attach", "wt-name", "--detach", "clown", "--", "fix the thing"}
 		if !slices.Equal(got, want) {
 			t.Errorf("got %q, want %q", got, want)
 		}
 		// The brief must remain a single argv element — no shell joining.
-		if len(got) != 6 {
-			t.Errorf("got %d elements, want 6: %q", len(got), got)
+		if len(got) != 7 {
+			t.Errorf("got %d elements, want 7: %q", len(got), got)
 		}
 	})
 

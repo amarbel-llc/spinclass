@@ -172,8 +172,8 @@ func launchRendered(rp worktree.ResolvedPath, driverKey, desc string, deadline t
 	startTime := time.Now()
 
 	// Template contract: the spawn argv detaches the session and returns
-	// promptly (like `zmx run`); Run blocking until the harness exits would
-	// burn the hello deadline.
+	// promptly (like `zmx attach --detach`); Run blocking until the harness
+	// exits would burn the hello deadline.
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = rp.AbsPath
 	cmd.Env = workerEnv(rp, desc, sessionEnv)

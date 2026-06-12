@@ -197,8 +197,10 @@ The `sc check` CLI subcommand is available regardless of the flag.
 worker sessions. The target repo is addressed by dirname (leaf search under
 `$HOME/*/repos/<leaf>`; explicit paths need a separator). The launch execs
 the cascade-merged `[session-entry].spawn` multiplexer template (default
-`["zmx", "run", "{id}", "--", "{entry}"]`) which boots
-`[session-entry].spawn-entry` (e.g. `["clown", "{prompt}"]`) with the
+`["zmx", "attach", "{id}", "--detach", "{entry}"]` — attach execs the argv
+directly and returns promptly; `zmx run` is unusable here, it types
+space-joined keystrokes into a shell, see #145) which boots
+`[session-entry].spawn-entry` (e.g. `["clown", "--", "{prompt}"]`) with the
 driver's brief as the harness's initial prompt; the worker process env
 carries the WORKER's spinclass identity (mirrors `SessionExecutor`). The
 spawn blocks until the worker's `SessionStart` hook chat-sends a hello to

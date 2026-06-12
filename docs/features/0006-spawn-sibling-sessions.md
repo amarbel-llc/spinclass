@@ -84,14 +84,19 @@ attach template pattern, with zmx as the shipped default:
 
 ```toml
 [session]
-spawn = ["zmx", "run", "{id}", "--", "{entry}"]
+spawn = ["zmx", "attach", "{id}", "--detach", "{entry}"]
 ```
 
 `{id}` is the worker's session id; `{entry}` expands to the worker's
 entry argv (see Autonomy). tmux users override one line; the driver's
 TTY is never touched.
 
-(Refines: hard-coded `zmx run`.)
+(Refines: hard-coded `zmx run`. Corrected 2026-06-11 after the first
+production spawn: the draft default used `zmx run`, which types the argv
+as space-joined keystrokes into a shell — a multi-line brief would be
+shell-interpreted — and does not understand `--`; `attach` with a command
+execs the argv directly and `--detach` returns promptly. FDR 0001 had
+already flagged `zmx run` as unsafe. See #145.)
 
 ### Autonomy — interactive, with harness kickoff
 
@@ -103,8 +108,12 @@ brief. The mechanism is a sweatfile argv template:
 
 ```toml
 [session]
-spawn-entry = ["clown", "{prompt}"]
+spawn-entry = ["clown", "--", "{prompt}"]
 ```
+
+(Example corrected 2026-06-11: clown's grammar is `clown [clown-flags]
+-- [provider-args]` — a bare positional is rejected as an unknown flag,
+killing the worker at boot; the brief must ride after `--`.)
 
 Harnesses accept an initial prompt as a positional argument, so this is
 "typing clown into the prompt and hitting return" without keystroke
