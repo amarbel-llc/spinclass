@@ -228,7 +228,9 @@ func CheckHooks(sf sweatfile.Sweatfile) []Issue {
 // (it is spliced element-wise, so an element merely containing the
 // placeholder cannot work); `spawn-entry` without "{prompt}" anywhere is
 // suspicious (the worker would boot without the driver's brief) but legal,
-// so it only warns. See FDR 0006.
+// so it only warns. `spawn-window` is a leaf argv: {entry}/{prompt} in it
+// is an error, and no {id}/{dir} anywhere warns (the window command could
+// not identify its session). See FDR 0006.
 func CheckSessionEntry(sf sweatfile.Sweatfile) []Issue {
 	var issues []Issue
 	if sf.SessionEntry == nil {
@@ -248,6 +250,33 @@ func CheckSessionEntry(sf sweatfile.Sweatfile) []Issue {
 				Severity: SeverityError,
 				Field:    "session-entry.spawn",
 				Value:    strings.Join(sf.SessionEntry.Spawn, " "),
+			})
+		}
+	}
+	if len(sf.SessionEntry.SpawnWindow) > 0 {
+		badPlaceholder := false
+		identified := false
+		for _, el := range sf.SessionEntry.SpawnWindow {
+			if strings.Contains(el, "{entry}") || strings.Contains(el, "{prompt}") {
+				badPlaceholder = true
+			}
+			if strings.Contains(el, "{id}") || strings.Contains(el, "{dir}") {
+				identified = true
+			}
+		}
+		if badPlaceholder {
+			issues = append(issues, Issue{
+				Message:  `spawn-window must not reference {entry} or {prompt}: it is a leaf argv taking {id}/{dir} only (see FDR 0006)`,
+				Severity: SeverityError,
+				Field:    "session-entry.spawn-window",
+				Value:    strings.Join(sf.SessionEntry.SpawnWindow, " "),
+			})
+		} else if !identified {
+			issues = append(issues, Issue{
+				Message:  `spawn-window has no element containing "{id}" or "{dir}"; the window command cannot identify which session to open`,
+				Severity: SeverityWarning,
+				Field:    "session-entry.spawn-window",
+				Value:    strings.Join(sf.SessionEntry.SpawnWindow, " "),
 			})
 		}
 	}

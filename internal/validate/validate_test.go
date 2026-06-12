@@ -386,6 +386,45 @@ func TestCheckSessionEntryPromptMayBeEmbedded(t *testing.T) {
 	}
 }
 
+func TestCheckSessionEntrySpawnWindowRejectsEntryAndPrompt(t *testing.T) {
+	for _, bad := range []string{"{entry}", "x {prompt} y"} {
+		sf := sweatfile.Sweatfile{
+			SessionEntry: &sweatfile.SessionEntry{
+				SpawnWindow: []string{"kitty", bad, "{id}"},
+			},
+		}
+		issues := CheckSessionEntry(sf)
+		if len(issues) != 1 || issues[0].Severity != SeverityError ||
+			issues[0].Field != "session-entry.spawn-window" {
+			t.Fatalf("%s: expected one error issue, got %+v", bad, issues)
+		}
+	}
+}
+
+func TestCheckSessionEntrySpawnWindowWarnsWithoutIDOrDir(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		SessionEntry: &sweatfile.SessionEntry{
+			SpawnWindow: []string{"kitty", "--detach"},
+		},
+	}
+	issues := CheckSessionEntry(sf)
+	if len(issues) != 1 || issues[0].Severity != SeverityWarning ||
+		issues[0].Field != "session-entry.spawn-window" {
+		t.Fatalf("expected one warning issue, got %+v", issues)
+	}
+}
+
+func TestCheckSessionEntrySpawnWindowClean(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		SessionEntry: &sweatfile.SessionEntry{
+			SpawnWindow: []string{"sc-spawn-window", "{id}", "{dir}"},
+		},
+	}
+	if issues := CheckSessionEntry(sf); len(issues) != 0 {
+		t.Errorf("valid spawn-window produced unexpected issues: %+v", issues)
+	}
+}
+
 func TestCheckSessionEntryClean(t *testing.T) {
 	sf := sweatfile.Sweatfile{
 		SessionEntry: &sweatfile.SessionEntry{
