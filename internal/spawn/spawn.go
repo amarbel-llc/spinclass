@@ -27,7 +27,7 @@ const DefaultHelloDeadline = 60 * time.Second
 type Result struct {
 	SessionKey    string // <repo-dirname>/<branch> — the worker's chat target
 	WorktreePath  string // absolute path to the worker's worktree
-	MultiplexerID string // the {id} the spawn template received (the branch)
+	MultiplexerID string // the {id} the spawn template received (the session key, #146)
 }
 
 // Launch creates a detached, harness-booted worker session in repoPath and
@@ -93,7 +93,11 @@ func renderSpawn(home string, rp worktree.ResolvedPath, brief string) ([]string,
 	merged := hierarchy.Merged
 
 	entry := SubstituteEntry(merged.SessionSpawnEntry(), brief, rp.AbsPath)
-	argv, err := SubstituteSpawn(merged.SessionSpawn(), rp.Branch, rp.AbsPath, entry)
+	// {id} = the full session key, NOT the branch: start/resume entries name
+	// multiplexer sessions $SPINCLASS_SESSION_ID and the conventional
+	// liveness-probe greps for it — a branch-named session would be
+	// invisible to both (#146).
+	argv, err := SubstituteSpawn(merged.SessionSpawn(), rp.SessionKey, rp.AbsPath, entry)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -188,6 +192,6 @@ func launchRendered(rp worktree.ResolvedPath, driverKey, desc string, deadline t
 	return Result{
 		SessionKey:    rp.SessionKey,
 		WorktreePath:  rp.AbsPath,
-		MultiplexerID: rp.Branch,
+		MultiplexerID: rp.SessionKey,
 	}, nil
 }

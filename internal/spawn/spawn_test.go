@@ -88,12 +88,17 @@ func TestLaunchHappyPath(t *testing.T) {
 		t.Fatalf("hello goroutine: %v", herr)
 	}
 
-	branch := res.MultiplexerID
-	if branch == "" {
-		t.Fatal("empty MultiplexerID")
+	branch := filepath.Base(res.WorktreePath)
+	if branch == "" || branch == "." {
+		t.Fatal("empty worktree basename")
 	}
 	if want := "worker/" + branch; res.SessionKey != want {
 		t.Errorf("SessionKey: got %q, want %q", res.SessionKey, want)
+	}
+	// {id} is the full session key — the name start/resume/liveness-probe
+	// entries address multiplexer sessions by (#146).
+	if res.MultiplexerID != res.SessionKey {
+		t.Errorf("MultiplexerID: got %q, want session key %q", res.MultiplexerID, res.SessionKey)
 	}
 	if want := filepath.Join(repoPath, ".worktrees", branch); res.WorktreePath != want {
 		t.Errorf("WorktreePath: got %q, want %q", res.WorktreePath, want)
@@ -108,7 +113,7 @@ func TestLaunchHappyPath(t *testing.T) {
 		t.Fatalf("argv.txt: %v", err)
 	}
 	gotArgs := strings.Split(strings.TrimRight(string(argv), "\n"), "\n")
-	wantArgs := []string{branch, "true", brief}
+	wantArgs := []string{res.SessionKey, "true", brief}
 	if len(gotArgs) != len(wantArgs) {
 		t.Fatalf("argv: got %d elements %q, want %q (brief must stay one element)", len(gotArgs), gotArgs, wantArgs)
 	}

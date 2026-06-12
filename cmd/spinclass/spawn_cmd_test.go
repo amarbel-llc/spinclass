@@ -142,7 +142,7 @@ func TestHandleSpawnSessionHappyPath(t *testing.T) {
 	for _, want := range []string{
 		"session_key: worker/" + branch,
 		"worktree_path: " + worktrees[0],
-		"multiplexer_id: " + branch,
+		"multiplexer_id: worker/" + branch, // the session key, not the branch (#146)
 		"worker will message " + driverKey + " via chat",
 	} {
 		if !strings.Contains(res.Text, want) {

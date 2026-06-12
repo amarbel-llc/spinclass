@@ -87,9 +87,11 @@ attach template pattern, with zmx as the shipped default:
 spawn = ["zmx", "attach", "{id}", "--detach", "{entry}"]
 ```
 
-`{id}` is the worker's session id; `{entry}` expands to the worker's
-entry argv (see Autonomy). tmux users override one line; the driver's
-TTY is never touched.
+`{id}` is the worker's full session key (`<repo>/<branch>` — the same
+name start/resume entries and liveness probes address, so `sc resume`
+reattaches to the spawned session rather than a fresh one; #146);
+`{entry}` expands to the worker's entry argv (see Autonomy). tmux users
+override one line; the driver's TTY is never touched.
 
 (Refines: hard-coded `zmx run`. Corrected 2026-06-11 after the first
 production spawn: the draft default used `zmx run`, which types the argv

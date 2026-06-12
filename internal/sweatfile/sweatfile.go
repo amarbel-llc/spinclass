@@ -28,8 +28,9 @@ type SessionEntry struct {
 	TombstoneRetention string            `toml:"tombstone-retention"`
 	// Spawn is the multiplexer argv template `sc spawn` (and detached
 	// fork) execs to launch a worker session detached: {id} = the
-	// worker's branch/session name (multiplexer-safe), {dir} = the
-	// worker worktree, {entry} = splice point for the spawn-entry argv
+	// worker's session key (<repo>/<branch> — the name start/resume
+	// entries and liveness probes address, #146), {dir} = the worker
+	// worktree, {entry} = splice point for the spawn-entry argv
 	// (replaced element-wise, not as one string). Default:
 	// ["zmx", "attach", "{id}", "--detach", "{entry}"]. See FDR 0006.
 	Spawn []string `toml:"spawn"`

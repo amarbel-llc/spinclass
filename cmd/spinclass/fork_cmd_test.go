@@ -191,7 +191,7 @@ func TestHandleForkSessionHappyPath(t *testing.T) {
 	for _, want := range []string{
 		"session_key: worker/feat-fork",
 		"worktree_path: " + newPath,
-		"multiplexer_id: feat-fork",
+		"multiplexer_id: worker/feat-fork", // the session key, not the branch (#146)
 		"worker will message " + driverKey + " via chat",
 	} {
 		if !strings.Contains(res.Text, want) {
