@@ -60,6 +60,13 @@ never requires or creates one.
 (Supersedes: "GitHub issues + Monitor exclusively." The 06-10 crap#22
 handoff demonstrated chat carrying the entire protocol in practice.)
 
+Brief discipline until clown#132 lands: chat *delivery* to a worker
+depends on a clown job-watch consumer that nothing currently arms in
+spawned sessions, so driver-sent follow-ons can sit unread (observed
+2026-06-12: a queued task was silently orphaned). Briefs should tell
+workers to `chat-read` once before closing; drop this guidance when
+clown owns a per-session push connection.
+
 ### Addressing — repo dirname
 
 The spawn target is the sibling repo's **directory name** (`crap`,

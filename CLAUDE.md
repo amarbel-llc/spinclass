@@ -92,7 +92,8 @@ parent dirs → repo-level. Supports `git-excludes`, `claude-allow`, `envrc-dire
 override; includes `disable-merge`, `disable-nix-gc`,
 `disable-merge-build-worktree`, `disable-implicit-sessions`,
 `pre-merge-output-format`, `inactivity-timeout`), and `[session-entry]` table (start/resume entrypoint commands plus the
-FDR 0006 `spawn`/`spawn-entry` argv templates for detached worker launch;
+FDR 0006 `spawn`/`spawn-entry`/`spawn-window` argv templates for detached
+worker launch and `resume-title` for the attach-time terminal title;
 per-field override semantics). The package holds the struct definitions, accessors, `MergeWith`,
 `GetDefault`, `Apply`, and the tommy-generated codec (`sweatfile_tommy.go`, via
 `//go:generate tommy generate`).
