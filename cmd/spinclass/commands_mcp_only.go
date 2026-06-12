@@ -123,7 +123,7 @@ func registerMCPOnlyCommands(app *command.App) {
 				OpenWorldHint:   protocol.BoolPtr(false),
 			},
 			Params: []command.Param{
-				{Name: "git_sync", Type: command.Bool, Description: "Pull and push after merge (default false)"},
+				{Name: "git_sync", Type: command.Bool, Description: gitSyncParamDesc},
 			},
 			Run: wrapMCPHandler("merge-this-session", handleMergeThisSession),
 		})
@@ -140,7 +140,7 @@ func registerMCPOnlyCommands(app *command.App) {
 				OpenWorldHint:   protocol.BoolPtr(false),
 			},
 			Params: []command.Param{
-				{Name: "git_sync", Type: command.Bool, Description: "Pull and push after merge (default false)"},
+				{Name: "git_sync", Type: command.Bool, Description: gitSyncParamDesc},
 			},
 			Run: wrapMCPHandler("merge-this-session-async", handleMergeThisSessionAsync),
 		})
@@ -335,6 +335,22 @@ func registerMCPOnlyCommands(app *command.App) {
 	})
 }
 
+// gitSyncParamDesc is shared by merge-this-session and its -async twin so
+// the two surfaces cannot drift (#158).
+const gitSyncParamDesc = "Pull before and push after the merge (default false). WITHOUT it the merge lands on the LOCAL default branch only — origin is not updated, and the result says so. Workers coordinating with a driver should pass true so 'merged' means 'on origin'."
+
+// appendNotPushedNote makes a local-only merge result say so explicitly
+// (#158): spawned workers truthfully reported "merged green" from
+// git_sync=false merges while origin never got the work, and their drivers
+// rebased onto origin and missed it. Worded to stay true on the
+// nothing-to-merge short-circuit too (the work is local either way).
+func appendNotPushedNote(text string, gitSync bool, mergeErr error) string {
+	if gitSync || mergeErr != nil || text == "" {
+		return text
+	}
+	return text + "\nNOTE: NOT pushed (git_sync=false) — this work exists on the LOCAL default branch only; origin does not have it until someone pushes."
+}
+
 func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	var params struct {
 		GitSync bool `json:"git_sync"`
@@ -395,6 +411,7 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 	if mergeErr != nil && text == "" {
 		text = mergeErr.Error()
 	}
+	text = appendNotPushedNote(text, params.GitSync, mergeErr)
 	return buildHookResult(text, blobLinks, mergeErr), nil
 }
 
@@ -510,6 +527,7 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 		if mergeErr != nil && text == "" {
 			text = mergeErr.Error()
 		}
+		text = appendNotPushedNote(text, gitSync, mergeErr)
 		return text, mergeErr != nil
 	}), nil
 }

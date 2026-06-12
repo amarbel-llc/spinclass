@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -185,6 +186,37 @@ func TestCurrentSessionKeyNoSessionStillErrors(t *testing.T) {
 		t.Fatal("expected error when no implicit session and not a worktree")
 	}
 }
+
+// TestAppendNotPushedNote pins #158's result-text contract: a successful
+// merge without git_sync must SAY it didn't push, so worker completion
+// reports stop implying origin has the work.
+func TestAppendNotPushedNote(t *testing.T) {
+	const text = "✓ rebase x\n✓ merge x"
+	t.Run("success without git_sync appends", func(t *testing.T) {
+		got := appendNotPushedNote(text, false, nil)
+		if !strings.Contains(got, "NOT pushed") || !strings.Contains(got, "git_sync") {
+			t.Errorf("note missing: %q", got)
+		}
+	})
+	t.Run("git_sync true appends nothing", func(t *testing.T) {
+		if got := appendNotPushedNote(text, true, nil); got != text {
+			t.Errorf("got %q, want unchanged", got)
+		}
+	})
+	t.Run("failed merge appends nothing", func(t *testing.T) {
+		if got := appendNotPushedNote(text, false, errTest); got != text {
+			t.Errorf("got %q, want unchanged", got)
+		}
+	})
+	t.Run("empty text appends nothing", func(t *testing.T) {
+		if got := appendNotPushedNote("", false, nil); got != "" {
+			t.Errorf("got %q, want empty", got)
+		}
+	})
+}
+
+// errTest is a sentinel for table cases needing any non-nil error.
+var errTest = errors.New("test error")
 
 // lazyKeyFixture builds a main-checkout git repo whose parent dir is $HOME
 // (bounding the sweatfile cascade the disable-implicit-sessions gate walks)
