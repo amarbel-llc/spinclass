@@ -1380,6 +1380,78 @@ func TestSessionSpawnEntryAccessorConfigured(t *testing.T) {
 	}
 }
 
+func TestSessionSpawnWindowAccessor(t *testing.T) {
+	for _, sf := range []Sweatfile{{}, {SessionEntry: &SessionEntry{}}} {
+		if got := sf.SessionSpawnWindow(); got != nil {
+			t.Errorf("SessionSpawnWindow() = %v, want nil (no default)", got)
+		}
+	}
+	sf := Sweatfile{SessionEntry: &SessionEntry{
+		SpawnWindow: []string{"sc-spawn-window", "{id}", "{dir}"},
+	}}
+	if got := sf.SessionSpawnWindow(); len(got) != 3 || got[0] != "sc-spawn-window" {
+		t.Errorf("SessionSpawnWindow() = %v, want configured argv", got)
+	}
+}
+
+func TestSessionResumeTitleAccessor(t *testing.T) {
+	for _, sf := range []Sweatfile{{}, {SessionEntry: &SessionEntry{}}} {
+		if got := sf.SessionResumeTitle(); got != "{id}" {
+			t.Errorf("SessionResumeTitle() = %q, want default {id}", got)
+		}
+	}
+	custom := "sc/{id}"
+	sf := Sweatfile{SessionEntry: &SessionEntry{ResumeTitle: &custom}}
+	if got := sf.SessionResumeTitle(); got != "sc/{id}" {
+		t.Errorf("SessionResumeTitle() = %q, want sc/{id}", got)
+	}
+	empty := ""
+	sf = Sweatfile{SessionEntry: &SessionEntry{ResumeTitle: &empty}}
+	if got := sf.SessionResumeTitle(); got != "" {
+		t.Errorf("SessionResumeTitle() = %q, want empty (disabled)", got)
+	}
+}
+
+func TestMergeSessionSpawnWindowAndResumeTitle(t *testing.T) {
+	baseTitle := "base/{id}"
+	base := Sweatfile{SessionEntry: &SessionEntry{
+		SpawnWindow: []string{"old", "{id}"},
+		ResumeTitle: &baseTitle,
+	}}
+	override := Sweatfile{SessionEntry: &SessionEntry{
+		SpawnWindow: []string{"new", "{id}", "{dir}"},
+	}}
+	merged := base.MergeWith(override)
+	if len(merged.SessionEntry.SpawnWindow) != 3 || merged.SessionEntry.SpawnWindow[0] != "new" {
+		t.Errorf("SpawnWindow = %v, want override", merged.SessionEntry.SpawnWindow)
+	}
+	if merged.SessionResumeTitle() != "base/{id}" {
+		t.Errorf("ResumeTitle = %q, want inherited base/{id}", merged.SessionResumeTitle())
+	}
+}
+
+func TestParseSpawnWindowResumeTitle(t *testing.T) {
+	input := `
+[session-entry]
+spawn-window = ["sc-spawn-window", "{id}", "{dir}"]
+resume-title = "sc/{id}"
+`
+	doc, err := sweatfileio.Parse([]byte(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sf := doc.Data()
+	if sf.SessionEntry == nil {
+		t.Fatal("expected SessionEntry to be non-nil")
+	}
+	if len(sf.SessionEntry.SpawnWindow) != 3 || sf.SessionEntry.SpawnWindow[0] != "sc-spawn-window" {
+		t.Errorf("SpawnWindow = %v, want [sc-spawn-window {id} {dir}]", sf.SessionEntry.SpawnWindow)
+	}
+	if sf.SessionEntry.ResumeTitle == nil || *sf.SessionEntry.ResumeTitle != "sc/{id}" {
+		t.Errorf("ResumeTitle = %v, want sc/{id}", sf.SessionEntry.ResumeTitle)
+	}
+}
+
 func TestMergeSessionSpawnOverride(t *testing.T) {
 	base := Sweatfile{
 		SessionEntry: &SessionEntry{

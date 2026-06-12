@@ -403,6 +403,21 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				_vSessionEntrySpawnEntry.MarkConsumed()
 			}
 		}
+		if _vSessionEntrySpawnWindow, _ok := _vSessionEntry.Get("spawn-window"); _ok && _vSessionEntrySpawnWindow.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vSessionEntrySpawnWindow.Leaf); _xok {
+				sessionEntryVal4.SpawnWindow = _x
+				if sessionEntryVal4.SpawnWindow == nil {
+					sessionEntryVal4.SpawnWindow = []string{}
+				}
+				_vSessionEntrySpawnWindow.MarkConsumed()
+			}
+		}
+		if _vSessionEntryResumeTitle, _ok := _vSessionEntry.Get("resume-title"); _ok && _vSessionEntryResumeTitle.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vSessionEntryResumeTitle.Leaf); _xok {
+				sessionEntryVal4.ResumeTitle = &_x
+				_vSessionEntryResumeTitle.MarkConsumed()
+			}
+		}
 		d.data.SessionEntry = sessionEntryVal4
 	} else {
 		sessionEntryVal4 := &SessionEntry{}
@@ -462,6 +477,23 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 					sessionEntryVal4.SpawnEntry = []string{}
 				}
 				_vSpawnEntry.MarkConsumed()
+			}
+		}
+		if _vSpawnWindow, _ok := model.Get("spawn-window"); _ok && _vSpawnWindow.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractStringSlice(_vSpawnWindow.Leaf); _xok {
+				sessionEntryVal4.SpawnWindow = _x
+				if sessionEntryVal4.SpawnWindow == nil {
+					sessionEntryVal4.SpawnWindow = []string{}
+				}
+				_vSpawnWindow.MarkConsumed()
+			}
+		}
+		if _vResumeTitle, _ok := model.Get("resume-title"); _ok && _vResumeTitle.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractString(_vResumeTitle.Leaf); _xok {
+				sessionEntryVal4.ResumeTitle = &_x
+				_vResumeTitle.MarkConsumed()
 			}
 		}
 		if _foundSessionEntry {
@@ -818,6 +850,18 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				if err := cst.SetAny(tableNode, "spawn-entry", d.data.SessionEntry.SpawnEntry); err != nil {
 					return nil, fmt.Errorf("%w", err)
 				}
+			}
+		}
+		{
+			if d.data.SessionEntry.SpawnWindow != nil {
+				if err := cst.SetAny(tableNode, "spawn-window", d.data.SessionEntry.SpawnWindow); err != nil {
+					return nil, fmt.Errorf("%w", err)
+				}
+			}
+		}
+		if d.data.SessionEntry.ResumeTitle != nil {
+			if err := cst.SetAny(tableNode, "resume-title", *d.data.SessionEntry.ResumeTitle); err != nil {
+				return nil, fmt.Errorf("%w", err)
 			}
 		}
 	}
@@ -1342,6 +1386,21 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vSessionEntrySpawnEntry.MarkConsumed()
 			}
 		}
+		if _vSessionEntrySpawnWindow, _ok := _vSessionEntry.Get("spawn-window"); _ok && _vSessionEntrySpawnWindow.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vSessionEntrySpawnWindow.Leaf); _xok {
+				sessionEntryVal4.SpawnWindow = _x
+				if sessionEntryVal4.SpawnWindow == nil {
+					sessionEntryVal4.SpawnWindow = []string{}
+				}
+				_vSessionEntrySpawnWindow.MarkConsumed()
+			}
+		}
+		if _vSessionEntryResumeTitle, _ok := _vSessionEntry.Get("resume-title"); _ok && _vSessionEntryResumeTitle.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vSessionEntryResumeTitle.Leaf); _xok {
+				sessionEntryVal4.ResumeTitle = &_x
+				_vSessionEntryResumeTitle.MarkConsumed()
+			}
+		}
 		data.SessionEntry = sessionEntryVal4
 	} else {
 		sessionEntryVal4 := &SessionEntry{}
@@ -1401,6 +1460,23 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 					sessionEntryVal4.SpawnEntry = []string{}
 				}
 				_vSpawnEntry.MarkConsumed()
+			}
+		}
+		if _vSpawnWindow, _ok := sub.Get("spawn-window"); _ok && _vSpawnWindow.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractStringSlice(_vSpawnWindow.Leaf); _xok {
+				sessionEntryVal4.SpawnWindow = _x
+				if sessionEntryVal4.SpawnWindow == nil {
+					sessionEntryVal4.SpawnWindow = []string{}
+				}
+				_vSpawnWindow.MarkConsumed()
+			}
+		}
+		if _vResumeTitle, _ok := sub.Get("resume-title"); _ok && _vResumeTitle.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractString(_vResumeTitle.Leaf); _xok {
+				sessionEntryVal4.ResumeTitle = &_x
+				_vResumeTitle.MarkConsumed()
 			}
 		}
 		if _foundSessionEntry {
@@ -1745,6 +1821,18 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 				if err := cst.SetAny(tableNode, "spawn-entry", data.SessionEntry.SpawnEntry); err != nil {
 					return fmt.Errorf("%w", err)
 				}
+			}
+		}
+		{
+			if data.SessionEntry.SpawnWindow != nil {
+				if err := cst.SetAny(tableNode, "spawn-window", data.SessionEntry.SpawnWindow); err != nil {
+					return fmt.Errorf("%w", err)
+				}
+			}
+		}
+		if data.SessionEntry.ResumeTitle != nil {
+			if err := cst.SetAny(tableNode, "resume-title", *data.SessionEntry.ResumeTitle); err != nil {
+				return fmt.Errorf("%w", err)
 			}
 		}
 	}

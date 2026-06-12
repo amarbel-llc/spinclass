@@ -37,8 +37,20 @@ type SessionEntry struct {
 	// SpawnEntry is the harness argv the spawned session boots into;
 	// {prompt} is replaced by the driver's brief (and {dir} by the
 	// worker worktree). No default — the harness is the user's choice
-	// (e.g. ["clown", "{prompt}"]); spawn errors when unset.
+	// (e.g. ["clown", "--", "{prompt}"]); spawn errors when unset.
 	SpawnEntry []string `toml:"spawn-entry"`
+	// SpawnWindow is an argv template exec'd fire-and-forget right after
+	// the spawn template returns: it opens a terminal window onto the
+	// freshly spawned worker (#149). {id} = the worker's session key,
+	// {dir} = the worker worktree; {entry}/{prompt} are rejected by
+	// validate. Unset = no window.
+	SpawnWindow []string `toml:"spawn-window"`
+	// ResumeTitle is the terminal title `sc resume` emits (one OSC 2
+	// escape) before exec'ing the attach entrypoint — spawned sessions'
+	// ptys have no title-writing shell, so the stale outer title persists
+	// without it (#154). {id} = the session key. nil = default "{id}";
+	// empty string disables emission.
+	ResumeTitle *string `toml:"resume-title"`
 }
 
 type Hooks struct {
@@ -342,6 +354,25 @@ func (sf Sweatfile) SessionSpawnEntry() []string {
 		return sf.SessionEntry.SpawnEntry
 	}
 	return nil
+}
+
+// SessionSpawnWindow returns the spawn-window argv template, or nil when
+// unconfigured — there is no default: opening windows is a desktop
+// preference (#149). See FDR 0006.
+func (sf Sweatfile) SessionSpawnWindow() []string {
+	if sf.SessionEntry != nil && len(sf.SessionEntry.SpawnWindow) > 0 {
+		return sf.SessionEntry.SpawnWindow
+	}
+	return nil
+}
+
+// SessionResumeTitle returns the resume title template (#154). Default
+// "{id}"; an explicit empty string disables emission.
+func (sf Sweatfile) SessionResumeTitle() string {
+	if sf.SessionEntry != nil && sf.SessionEntry.ResumeTitle != nil {
+		return *sf.SessionEntry.ResumeTitle
+	}
+	return "{id}"
 }
 
 // SessionEnv returns the user-configured environment variables to inject
