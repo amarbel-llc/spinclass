@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/amarbel-llc/crap/go-crap/v2/crap"
@@ -528,6 +530,12 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		Env:         merged.SessionEnv(),
 	}
 
+	// One-shot terminal title before the exec chain (#154); TTY-gated so
+	// piped output stays clean.
+	if !p.NoAttach && isatty.IsTerminal(os.Stdout.Fd()) {
+		emitResumeTitle(os.Stdout, merged, state.SessionKey)
+	}
+
 	return shop.Attach(
 		os.Stdout,
 		exec,
@@ -538,4 +546,17 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		p.NoAttach,
 		p.Verbose,
 	)
+}
+
+// emitResumeTitle writes the OSC 2 terminal title for the session being
+// resumed (#154). Spawned (FDR 0006) sessions' ptys have no title-writing
+// shell, so without this the attaching terminal keeps its stale outer
+// title; one shot suffices (an interactive shell inside an ordinary
+// session overwrites it at its next prompt anyway).
+func emitResumeTitle(w io.Writer, merged sweatfile.Sweatfile, sessionKey string) {
+	tpl := merged.SessionResumeTitle()
+	if tpl == "" {
+		return
+	}
+	fmt.Fprintf(w, "\033]2;%s\007", strings.ReplaceAll(tpl, "{id}", sessionKey))
 }
