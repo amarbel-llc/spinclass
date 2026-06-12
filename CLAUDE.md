@@ -212,7 +212,14 @@ spawn blocks until the worker's `SessionStart` hook chat-sends a hello to
 the driver (keyed off `spawned_by` in the worker's state; 60s default
 deadline, `--hello-timeout` tunes it; dedup via `hello_sent_at`). On
 timeout the worker worktree+state persist for inspection (`sc close`
-cleans). Coordination after the hello is the FDR 0010 chat system —
+cleans). An optional `[session-entry].spawn-window` argv template
+(`{id}`/`{dir}`, no default) is exec'd fire-and-forget right after the
+spawn template returns — it opens a terminal window onto the worker
+(#149); failures are warnings, never spawn failures. Relatedly,
+`sc resume` emits one TTY-gated OSC-2 title (`[session-entry].resume-title`,
+default `"{id}"`, empty disables) before exec'ing the attach entrypoint,
+since spawned sessions' ptys have no title-writing shell (#154).
+Coordination after the hello is the FDR 0010 chat system —
 the brief should tell the worker to message the driver's session key when
 done. `fork-session` is the same-repo variant (caller must be in an sc
 worktree; see #142 for the implicit-driver gap). `internal/spawn` owns

@@ -431,6 +431,24 @@ When nil, falls back to
 .B Merge:
 scalar override.
 .TP
+.B resume\-title
+String template for the terminal title
+.B sc resume
+emits (one OSC\ 2 escape, only when stdout is a TTY) just before
+exec'ing the attach entrypoint.
+.B {id}
+expands to the session key.
+Defaults to
+.BR \(dq{id}\(dq ;
+an explicitly empty string disables emission.
+Spawned worker sessions exec their harness directly \(em no
+interactive shell inside the session's pty ever writes a title \(em
+so without this the attaching terminal keeps its stale outer title;
+ordinary sessions' inner shells overwrite the emitted title at their
+next prompt, so the emission is harmless there.
+.B Merge:
+scalar override.
+.TP
 .B spawn
 Multiplexer argv template exec'd by
 .B sc spawn
@@ -519,6 +537,38 @@ a bare positional brief is rejected as an unknown flag.
 warns when no element contains
 .B {prompt}
 (legal, but the worker would boot without the driver's brief).
+.B Merge:
+scalar override.
+.TP
+.B spawn\-window
+Argv template exec'd fire-and-forget right after the
+.B spawn
+template returns (before the hello wait, so the harness boot is
+watchable live): it opens a terminal window onto the freshly spawned
+worker.
+.B {id}
+expands to the worker's session key and
+.B {dir}
+to the worker worktree's absolute path; this is a leaf argv \(em
+.BR {entry} " and " {prompt}
+are rejected by
+.BR "sc validate" ,
+which also warns when no element contains
+.BR {id} " or " {dir}
+(the window command could not identify its session).
+The command runs with the worker's
+.B SPINCLASS_*
+identity and cwd set to the worker worktree; start and exit failures
+are logged warnings, never spawn failures.
+No default \(em opening windows is a desktop preference.
+A typical value points at a small user script that dispatches per
+platform, e.g.\&
+.BR "[\(dqsc-spawn-window\(dq, \(dq{id}\(dq, \(dq{dir}\(dq]"
+wrapping
+.I kitty \-\-detach \-\-title sc/$1 \-\-directory $2 sc resume $1
+on Linux or
+.I open \-na kitty \-\-args ...
+on macOS.
 .B Merge:
 scalar override.
 .TP

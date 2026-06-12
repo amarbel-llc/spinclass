@@ -181,6 +181,21 @@ upgrade path if instinct-driven probing proves insufficient.
 
 (Resolves the failure-modes open question.)
 
+### Desktop integration — spawn-window and resume-title (added 2026-06-12)
+
+Two additive knobs from the #149/#154 design
+(docs/plans/2026-06-12-spawn-window-resume-title-design.md):
+`[session-entry].spawn-window` is a `{id}`/`{dir}` argv template exec'd
+fire-and-forget immediately after the spawn template returns (before
+the hello wait — the harness boot is watchable live); failures are
+warnings, never spawn failures, and there is no default. Platform
+dispatch (kitty/sway on Linux, kitty/PaperWM on macOS) belongs in a
+user-side script the template names, not in spinclass.
+`[session-entry].resume-title` makes `sc resume` emit one TTY-gated
+OSC-2 title before the attach exec — spawned sessions' ptys have no
+title-writing shell, so the attaching terminal otherwise keeps its
+stale outer title (#154).
+
 ### The same machinery powers `sc fork`
 
 The launch half of spawn — the `[session].spawn` multiplexer template,
