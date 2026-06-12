@@ -43,20 +43,14 @@ deps:
     nix develop --command gomod2nix
 
 # Regenerate the tommy-generated sweatfile codec (sweatfile_tommy.go) after a
-# tommy bump or a Sweatfile struct change. Builds the tommy CLI from the
-# pinned module version into a temp dir, puts it on PATH, then runs
-# `go generate` (the //go:generate directive needs `tommy` on PATH and sets
-# $GOFILE). Run after `just deps`.
+# tommy bump or a Sweatfile struct change. The devshell ships the tommy binary
+# from the flake's `tommy` input (the same rev that backs the bridged tommy
+# library), so `go generate` (//go:generate tommy generate) finds it on PATH —
+# do NOT `go build` tommy from the main module here: module graph pruning
+# drops the codegen tool's transitive deps from go.sum (#140). Run after
+# `just deps`.
 gen-tommy:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    nix develop --command bash -c '
-      bindir=$(mktemp -d)
-      trap "rm -rf \"$bindir\"" EXIT
-      go build -o "$bindir/tommy" github.com/amarbel-llc/tommy/cmd/tommy
-      PATH="$bindir:$PATH" go generate ./internal/sweatfile/
-    '
-    nix develop --command gofumpt -w internal/sweatfile/sweatfile_tommy.go
+    nix develop --command bash -c 'go generate ./internal/sweatfile/ && gofumpt -w internal/sweatfile/sweatfile_tommy.go'
 
 # [explore] Inspect nix-store --gc --print-roots output for entries pointing
 # into the spinclass repo. Used to investigate issue #67 — what does
