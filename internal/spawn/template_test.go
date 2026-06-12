@@ -124,6 +124,21 @@ func TestSubstituteSpawn(t *testing.T) {
 		}
 	})
 
+	t.Run("window template: id and dir substituted in every element", func(t *testing.T) {
+		got := SubstituteWindow([]string{"sc-spawn-window", "{id}", "{dir}", "x={id}"},
+			"repo/feat", "/wt")
+		want := []string{"sc-spawn-window", "repo/feat", "/wt", "x=repo/feat"}
+		if !slices.Equal(got, want) {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("window template: nil renders nil", func(t *testing.T) {
+		if got := SubstituteWindow(nil, "id", "/wt"); got != nil {
+			t.Errorf("got %q, want nil", got)
+		}
+	})
+
 	t.Run("missing {entry} element errors", func(t *testing.T) {
 		_, err := SubstituteSpawn([]string{"zmx", "run", "{id}"}, "id", "/wt", []string{"clown"})
 		if err == nil {

@@ -31,6 +31,23 @@ func SubstituteEntry(entry []string, brief, wtPath string) []string {
 // be expanded element-wise inside one string. Errors when entry is empty
 // (no [session-entry].spawn-entry configured) or spawnTpl has no "{entry}"
 // element.
+// SubstituteWindow renders the spawn-window argv template (#149): {id}→id
+// and {dir}→wtPath substring-substituted per element. Returns nil for an
+// empty template (knob unset). No {entry} splice — the window command is a
+// leaf argv; validate rejects {entry}/{prompt} in it.
+func SubstituteWindow(template []string, id, wtPath string) []string {
+	if len(template) == 0 {
+		return nil
+	}
+	out := make([]string, len(template))
+	for i, e := range template {
+		e = strings.ReplaceAll(e, "{id}", id)
+		e = strings.ReplaceAll(e, "{dir}", wtPath)
+		out[i] = e
+	}
+	return out
+}
+
 func SubstituteSpawn(spawnTpl []string, id, wtPath string, entry []string) ([]string, error) {
 	if len(entry) == 0 {
 		return nil, fmt.Errorf(
