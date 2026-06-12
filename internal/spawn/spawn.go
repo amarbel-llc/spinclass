@@ -3,6 +3,7 @@ package spawn
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,7 +55,7 @@ func Launch(home, repoPath, driverKey, brief, desc string, deadline time.Duratio
 	// sweatfile layer, but that layer is the repo sweatfile checked out
 	// fresh from the default branch — same content the repo layer already
 	// contributed.
-	argv, sessionEnv, err := renderSpawn(home, rp, brief)
+	argv, window, sessionEnv, err := renderSpawn(home, rp, brief)
 	if err != nil {
 		return Result{}, err
 	}
@@ -63,7 +64,7 @@ func Launch(home, repoPath, driverKey, brief, desc string, deadline time.Duratio
 		return Result{}, fmt.Errorf("creating worker worktree: %w", err)
 	}
 
-	return launchRendered(rp, driverKey, desc, deadline, argv, sessionEnv)
+	return launchRendered(rp, driverKey, desc, deadline, argv, window, sessionEnv)
 }
 
 // LaunchExisting runs the post-worktree tail of Launch over an existing
@@ -73,11 +74,11 @@ func Launch(home, repoPath, driverKey, brief, desc string, deadline time.Duratio
 // the chat hello. Task 7's detached fork reuses it over a
 // worktree.CreateFrom-produced worktree.
 func LaunchExisting(home string, rp worktree.ResolvedPath, driverKey, brief, desc string, deadline time.Duration) (Result, error) {
-	argv, sessionEnv, err := renderSpawn(home, rp, brief)
+	argv, window, sessionEnv, err := renderSpawn(home, rp, brief)
 	if err != nil {
 		return Result{}, err
 	}
-	return launchRendered(rp, driverKey, desc, deadline, argv, sessionEnv)
+	return launchRendered(rp, driverKey, desc, deadline, argv, window, sessionEnv)
 }
 
 // renderSpawn loads the WORKER repo's sweatfile hierarchy (its multiplexer
@@ -85,10 +86,10 @@ func LaunchExisting(home string, rp worktree.ResolvedPath, driverKey, brief, des
 // spawn/spawn-entry argv. It also returns the hierarchy's [session-entry].env
 // for the exec's environment. Safe to call before the worktree exists:
 // LoadWorktreeHierarchy treats a missing leaf sweatfile as an empty layer.
-func renderSpawn(home string, rp worktree.ResolvedPath, brief string) ([]string, map[string]string, error) {
+func renderSpawn(home string, rp worktree.ResolvedPath, brief string) (argv, window []string, sessionEnv map[string]string, err error) {
 	hierarchy, err := sweatfileio.LoadWorktreeHierarchy(home, rp.RepoPath, rp.AbsPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("loading worker sweatfile hierarchy: %w", err)
+		return nil, nil, nil, fmt.Errorf("loading worker sweatfile hierarchy: %w", err)
 	}
 	merged := hierarchy.Merged
 
@@ -97,11 +98,34 @@ func renderSpawn(home string, rp worktree.ResolvedPath, brief string) ([]string,
 	// multiplexer sessions $SPINCLASS_SESSION_ID and the conventional
 	// liveness-probe greps for it — a branch-named session would be
 	// invisible to both (#146).
-	argv, err := SubstituteSpawn(merged.SessionSpawn(), rp.SessionKey, rp.AbsPath, entry)
+	argv, err = SubstituteSpawn(merged.SessionSpawn(), rp.SessionKey, rp.AbsPath, entry)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return argv, merged.SessionEnv(), nil
+	window = SubstituteWindow(merged.SessionSpawnWindow(), rp.SessionKey, rp.AbsPath)
+	return argv, window, merged.SessionEnv(), nil
+}
+
+// launchSpawnWindow opens the configured terminal window onto the worker
+// (#149), fire-and-forget: the window is a convenience side effect, so
+// start/exit failures are logged warnings, never spawn failures. The
+// goroutine's warning is best-effort — a CLI exiting first simply loses it.
+func launchSpawnWindow(argv []string, rp worktree.ResolvedPath, desc string, sessionEnv map[string]string) {
+	if len(argv) == 0 {
+		return
+	}
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Dir = rp.AbsPath
+	cmd.Env = workerEnv(rp, desc, sessionEnv)
+	if err := cmd.Start(); err != nil {
+		slog.Warn("spawn-window failed to start", "argv", argv, "err", err)
+		return
+	}
+	go func() {
+		if err := cmd.Wait(); err != nil {
+			slog.Warn("spawn-window exited nonzero", "argv", argv, "err", err)
+		}
+	}()
 }
 
 // workerEnv builds the spawn exec's process environment. It MIRRORS
@@ -144,7 +168,7 @@ func workerEnv(rp worktree.ResolvedPath, desc string, userEnv map[string]string)
 // launchRendered is the shared tail of Launch and LaunchExisting: write the
 // worker's session state, exec the already-rendered spawn argv with the
 // worker's environment, and block on the chat hello.
-func launchRendered(rp worktree.ResolvedPath, driverKey, desc string, deadline time.Duration, argv []string, sessionEnv map[string]string) (Result, error) {
+func launchRendered(rp worktree.ResolvedPath, driverKey, desc string, deadline time.Duration, argv, window []string, sessionEnv map[string]string) (Result, error) {
 	if deadline <= 0 {
 		deadline = DefaultHelloDeadline
 	}
@@ -184,6 +208,10 @@ func launchRendered(rp worktree.ResolvedPath, driverKey, desc string, deadline t
 	if err := cmd.Run(); err != nil {
 		return Result{}, fmt.Errorf("spawn template %q failed: %w", argv, err)
 	}
+
+	// Window BEFORE the hello wait — the user watches the harness boot
+	// live (FDR 0006 #149 design: window-at-launch).
+	launchSpawnWindow(window, rp, desc, sessionEnv)
 
 	if err := chat.WaitForHello(driverKey, rp.SessionKey, startTime, deadline); err != nil {
 		return Result{}, err

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -43,6 +44,96 @@ const happySweatfile = `[session-entry]
 spawn       = ["sh", "-c", 'touch "$PWD/launched"; printf "%s\n" "$@" > "$PWD/argv.txt"', "sh", "{id}", "{entry}"]
 spawn-entry = ["true", "{prompt}"]
 `
+
+// windowSweatfile adds a spawn-window stub recording its substituted args
+// into the worktree (cmd.Dir), proving the fire-and-forget exec ran there
+// with {id}/{dir} rendered.
+const windowSweatfile = happySweatfile + `spawn-window = ["sh", "-c", 'printf "%s %s" "$1" "$2" > "$PWD/window.txt"', "sh", "{id}", "{dir}"]
+`
+
+// failingWindowSweatfile's window command exits nonzero — the spawn must
+// not care.
+const failingWindowSweatfile = happySweatfile + `spawn-window = ["false", "{id}"]
+`
+
+// helloAfterLaunch plays the worker's SessionStart hook for Launch tests:
+// it polls for the spawn template's marker file, derives the worker key
+// from the worktree dir name, and sends the hello to the driver. Returns
+// a stop func (call after Launch returns) and the error channel.
+func helloAfterLaunch(t *testing.T, repoPath, driverKey string) (func(), chan error) {
+	t.Helper()
+	helloErr := make(chan error, 1)
+	stop := make(chan struct{})
+	go func() {
+		deadline := time.After(15 * time.Second)
+		tick := time.NewTicker(20 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-stop:
+				helloErr <- nil
+				return
+			case <-deadline:
+				helloErr <- fmt.Errorf("spawn template marker never appeared")
+				return
+			case <-tick.C:
+				matches, _ := filepath.Glob(filepath.Join(repoPath, ".worktrees", "*", "launched"))
+				if len(matches) == 1 {
+					branch := filepath.Base(filepath.Dir(matches[0]))
+					helloErr <- chat.SendHello("worker/"+branch, driverKey)
+					return
+				}
+			}
+		}
+	}()
+	var once sync.Once
+	return func() { once.Do(func() { close(stop) }) }, helloErr
+}
+
+func TestLaunchSpawnWindowFires(t *testing.T) {
+	home, repoPath := newWorkerFixture(t, windowSweatfile)
+	const driverKey = "driver/window-test"
+	stop, helloErr := helloAfterLaunch(t, repoPath, driverKey)
+
+	res, err := Launch(home, repoPath, driverKey, "brief", "", 15*time.Second)
+	stop()
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if herr := <-helloErr; herr != nil {
+		t.Fatalf("hello goroutine: %v", herr)
+	}
+
+	// The window command is fire-and-forget (async): poll briefly.
+	deadline := time.Now().Add(5 * time.Second)
+	var data []byte
+	for time.Now().Before(deadline) {
+		if b, rerr := os.ReadFile(filepath.Join(res.WorktreePath, "window.txt")); rerr == nil {
+			data = b
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	want := res.SessionKey + " " + res.WorktreePath
+	if string(data) != want {
+		t.Errorf("window.txt = %q, want %q", data, want)
+	}
+}
+
+func TestLaunchSpawnWindowFailureDoesNotFailSpawn(t *testing.T) {
+	home, repoPath := newWorkerFixture(t, failingWindowSweatfile)
+	const driverKey = "driver/window-fail-test"
+	stop, helloErr := helloAfterLaunch(t, repoPath, driverKey)
+
+	_, err := Launch(home, repoPath, driverKey, "brief", "", 15*time.Second)
+	stop()
+	if err != nil {
+		t.Fatalf("Launch failed because of the window command: %v", err)
+	}
+	if herr := <-helloErr; herr != nil {
+		t.Fatalf("hello goroutine: %v", herr)
+	}
+}
 
 func TestLaunchHappyPath(t *testing.T) {
 	home, repoPath := newWorkerFixture(t, happySweatfile)
