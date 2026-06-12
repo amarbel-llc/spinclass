@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/amarbel-llc/spinclass/internal/git"
+	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/testgit"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
@@ -500,6 +502,87 @@ func TestAttachCallsExecutorWithCorrectArgs(t *testing.T) {
 	}
 	if mock.attachKey != "myrepo/feature-attach" {
 		t.Errorf("Attach key = %q, want %q", mock.attachKey, "myrepo/feature-attach")
+	}
+}
+
+// TestAttachPreservesFieldsItDoesNotOwn pins #147: the pre-attach state
+// write must carry over fields owned by other flows — FDR 0006 lineage
+// (spawned_by, hello_sent_at) and a buffered pre-merge attestation — instead
+// of constructing a fresh State that silently drops them on every resume.
+func TestAttachPreservesFieldsItDoesNotOwn(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	parentDir := t.TempDir()
+	repoDir := filepath.Join(parentDir, "myrepo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	runGit := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	runGit(repoDir, "init")
+	runGit(repoDir, "config", "user.email", "test@test.com")
+	runGit(repoDir, "config", "user.name", "Test")
+	runGit(repoDir, "commit", "--allow-empty", "-m", "initial")
+
+	wtPath := filepath.Join(repoDir, worktree.WorktreesDir, "spawned-worker")
+	runGit(repoDir, "worktree", "add", "-b", "spawned-worker", wtPath)
+	// Keep the worktree dirty so closeShop's auto-close gate (clean +
+	// nothing ahead) never fires and removes the state under assertion.
+	if err := os.WriteFile(filepath.Join(wtPath, "wip.txt"), []byte("wip"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	hello := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
+	prior := session.State{
+		PID:          0,
+		SessionState: session.StateActive,
+		RepoPath:     repoDir,
+		WorktreePath: wtPath,
+		Branch:       "spawned-worker",
+		SessionKey:   "myrepo/spawned-worker",
+		SpawnedBy:    "myrepo/driver",
+		HelloSentAt:  &hello,
+		PreMergeAttestation: &session.PreMergeAttestation{
+			RecordedAt: hello,
+			Skills:     []session.AttestedSkill{{Name: "review", Used: true, Reasoning: "buffered"}},
+		},
+	}
+	if err := session.Write(prior); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+
+	rp := worktree.ResolvedPath{
+		AbsPath:    wtPath,
+		RepoPath:   repoDir,
+		Branch:     "spawned-worker",
+		SessionKey: "myrepo/spawned-worker",
+	}
+	mock := &mockExecutor{}
+	var buf bytes.Buffer
+	if err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", false, false, false); err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+
+	got, err := session.Read(repoDir, "spawned-worker")
+	if err != nil {
+		t.Fatalf("session.Read after attach: %v", err)
+	}
+	if got.SpawnedBy != "myrepo/driver" {
+		t.Errorf("SpawnedBy = %q, want %q (clobbered by attach)", got.SpawnedBy, "myrepo/driver")
+	}
+	if got.HelloSentAt == nil || !got.HelloSentAt.Equal(hello) {
+		t.Errorf("HelloSentAt = %v, want %v (clobbered by attach)", got.HelloSentAt, hello)
+	}
+	if got.PreMergeAttestation == nil || len(got.PreMergeAttestation.Skills) != 1 {
+		t.Errorf("PreMergeAttestation = %+v, want the buffered attestation preserved", got.PreMergeAttestation)
 	}
 }
 

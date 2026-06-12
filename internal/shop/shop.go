@@ -173,6 +173,14 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 		if sexec, ok := exec.(executor.SessionExecutor); ok {
 			st.Entrypoint = sexec.Entrypoint
 		}
+		// Attach owns the lifecycle fields (PID, state, entrypoint,
+		// timestamps) but not these: FDR 0006 lineage and a buffered
+		// pre-merge attestation must survive a resume (#147).
+		if existing, err := session.Read(rp.RepoPath, rp.Branch); err == nil {
+			st.SpawnedBy = existing.SpawnedBy
+			st.HelloSentAt = existing.HelloSentAt
+			st.PreMergeAttestation = existing.PreMergeAttestation
+		}
 		st.StartedAt = time.Now().UTC()
 		if err := session.Write(st); err != nil {
 			log.Warn("failed to write session state", "err", err)
