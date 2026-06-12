@@ -169,6 +169,17 @@ display as a later cosmetic.
 
 (Resolves the worker-visibility open question.)
 
+### No recursive spawning (added 2026-06-12, #148)
+
+A session whose own state carries `spawned_by` — i.e. a spawned worker —
+is refused by all four spawn surfaces (`spawn-session`, `fork-session`,
+`sc spawn`, `sc fork --brief`). The driver/worker topology stays a
+one-level tree the user can supervise, and a misbehaving worker cannot
+recursively fan out token-burning sub-workers. Revisit as a sweatfile
+knob if a production pattern ever genuinely wants a mid-level
+coordinator. (Depends on #147: `spawned_by` survives resumes, so the
+gate is not leaky.)
+
 ### Failure after handoff — presence probe on suspicion
 
 A worker that dies silently emits no chat wake (dead producers cannot

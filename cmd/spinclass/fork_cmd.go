@@ -89,6 +89,10 @@ func runForkDetached(source worktree.ResolvedPath, p forkDetachedParams) (spawn.
 		return spawn.Result{}, "", fmt.Errorf("resolving driver session key (the worker's hello target): %w", err)
 	}
 
+	if err := refuseRecursiveSpawn(); err != nil {
+		return spawn.Result{}, "", err
+	}
+
 	newBranch := p.NewBranch
 	if newBranch == "" {
 		newBranch = worktree.ForkName(source.RepoPath, source.Branch)
