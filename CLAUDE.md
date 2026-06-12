@@ -456,6 +456,16 @@ attrs — `spinclassVersion` and `spinclassCommit` in `flake.nix`). Binary
 installs as `spinclass` with `sc` symlink. Shell completions for bash
 and fish included.
 
+`gomod.nix` is the consumer half of the flake-input-go_mod protocol
+(igloo RFC 0001): it maps the bridged Go modules (`tommy`, `crap`) onto
+their producer flakes' `go-pkgs` outputs, and `flake.nix` threads it as
+`goFlakeInputs` into both `buildGoApplication` and `mkGoEnv` (see the
+gomod.nix header for the lockstep rationale). Bump a bridged dep with
+`nix flake update <input>` — no `go get`/`gomod2nix` lockstep, unless
+the new rev changes the producer's own dependency graph (its
+transitives still resolve organically, so go.mod/go.sum/gomod2nix.toml
+need a regen then).
+
 ## Dependencies
 
 Module: `github.com/amarbel-llc/spinclass`. Key dependencies: -

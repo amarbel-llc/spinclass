@@ -61,11 +61,8 @@
     };
 
     # crap: source of the go-crap Go module (ndjson-crap wire format +
-    # viewport presenter), bridged into go.mod via gomod2nix(7)
-    # goFlakeInputs below. crap is polyglot, so its `go-pkgs` output is
-    # full-repo-filtered and we slice with subPath = "go-crap" (mirrors
-    # cutting-garden's bridge). Consumed by the `ndjson-crap`
-    # pre-merge-output-format in internal/check.
+    # viewport presenter), bridged into go.mod via gomod.nix. Consumed
+    # by the `ndjson-crap` pre-merge-output-format in internal/check.
     crap = {
       url = "github:amarbel-llc/crap";
       inputs.igloo.follows = "igloo";
@@ -74,14 +71,11 @@
       inputs.bats.follows = "bats";
     };
 
-    # Single source of truth for tommy (TOML library + codegen tool). The
-    # `tommy` Go module is bridged into go.mod via gomod2nix(7) goFlakeInputs
-    # and the same input's binary (tommy.packages.<system>.default) is what
-    # `go generate ./internal/sweatfile` (`//go:generate tommy generate`)
-    # runs — so the codegen tool and the library it targets are one rev,
-    # avoiding the cst-API skew that an ambient out-of-flake tommy causes.
-    # Pinned to a release tag (not master) for reproducibility; bump the tag
-    # deliberately + regen the codec when adopting a new tommy.
+    # Single source of truth for tommy (TOML library + codegen tool):
+    # the Go module is bridged into go.mod via gomod.nix and the same
+    # input's binary backs `just gen-tommy` (see the devShell packages).
+    # Pinned to a release tag (not master) for reproducibility; bump the
+    # tag deliberately + regen the codec when adopting a new tommy.
     tommy = {
       url = "github:amarbel-llc/tommy/v0.4.0";
       inputs.igloo.follows = "igloo";
@@ -135,21 +129,11 @@
           text = ''exec conformist "$@"'';
         };
 
-        # Bridge the tommy Go module from its flake input (gomod2nix(7)
-        # § GOFLAKEINPUTS) so buildGoApplication / mkGoEnv resolve it from
-        # the same rev whose binary regenerates sweatfile_tommy.go. Module
-        # is at tommy's repo root, so the shorthand form applies. (Hardcoded
-        # path pending tommy#112, which would expose this mapping directly.)
-        goFlakeInputs = {
-          "github.com/amarbel-llc/tommy" = tommy;
-          # crap's go-pkgs is full-repo-filtered (polyglot), so slice into
-          # go-crap. The module is at major version 2, so the key carries
-          # the /v2 suffix while the on-disk subPath stays go-crap.
-          "github.com/amarbel-llc/crap/go-crap/v2" = {
-            src = crap.packages.${system}.go-pkgs;
-            subPath = "go-crap";
-          };
-        };
+        # Consumer half of the flake-input-go_mod protocol (RFC 0001):
+        # which sibling Go modules resolve from producer go-pkgs outputs
+        # instead of the proxy. See gomod.nix for the entries and the
+        # lockstep rationale.
+        goFlakeInputs = import ./gomod.nix { inherit tommy crap system; };
 
         # mkSpinclass builds spinclass with optional build-time-pinned
         # absolute /nix/store paths for `madder` and `direnv`. The
