@@ -170,18 +170,170 @@ func TestCurrentSessionKeyImplicitFallback(t *testing.T) {
 	}
 }
 
-// TestCurrentSessionKeyNoSessionStillErrors verifies the fallback does not mask
-// the genuine "not a session" case: outside a worktree, env unset, and no live
-// implicit session, currentSessionKey still errors.
+// TestCurrentSessionKeyNoSessionStillErrors verifies the fallbacks do not mask
+// the genuine "not a session" case: outside a worktree, env unset, no live
+// implicit session, and a cwd that is not even a git repo (so lazy
+// materialization is gated too), currentSessionKey still errors.
 func TestCurrentSessionKeyNoSessionStillErrors(t *testing.T) {
 	t.Setenv("SPINCLASS_SESSION_ID", "")
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 
-	repo := t.TempDir() // no implicit session written
+	repo := t.TempDir() // not a git repo, no implicit session written
 	t.Chdir(repo)
 
 	if _, err := currentSessionKey(); err == nil {
 		t.Fatal("expected error when no implicit session and not a worktree")
+	}
+}
+
+// lazyKeyFixture builds a main-checkout git repo whose parent dir is $HOME
+// (bounding the sweatfile cascade the disable-implicit-sessions gate walks)
+// and chdirs into it — the cwd shape currentSessionKey's lazy
+// materialization path (#141) requires.
+func lazyKeyFixture(t *testing.T) (repo string) {
+	t.Helper()
+	testgit.RequireGit(t)
+	t.Setenv("SPINCLASS_SESSION_ID", "")
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	base := t.TempDir()
+	t.Setenv("HOME", base)
+	repo = filepath.Join(base, "repo")
+	testgit.MustInit(t, repo)
+	t.Chdir(repo)
+	return repo
+}
+
+// implicitStateFiles returns the state-<rand>.json paths at the checkout.
+func implicitStateFiles(t *testing.T, checkout string) []string {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(checkout, ".spinclass", "state-*.json"))
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	return matches
+}
+
+// TestCurrentSessionKeyLazyMaterialization verifies the #141 path: at a
+// main-checkout repo root with no live implicit session (the SessionStart
+// hook never fired), currentSessionKey materializes one lazily — the key is
+// <repo>/<rand>, the state file records this process as the liveness PID,
+// and repeated calls return the identical key (chat-send/chat-read sender
+// identity and the read cursor depend on that stability).
+func TestCurrentSessionKeyLazyMaterialization(t *testing.T) {
+	repo := lazyKeyFixture(t)
+
+	key, err := currentSessionKey()
+	if err != nil {
+		t.Fatalf("expected lazy materialization to resolve, got error: %v", err)
+	}
+	if !strings.HasPrefix(key, "repo/") || len(key) == len("repo/") {
+		t.Fatalf("key = %q, want repo/<rand>", key)
+	}
+
+	files := implicitStateFiles(t, repo)
+	if len(files) != 1 {
+		t.Fatalf("state files = %v, want exactly one", files)
+	}
+	data, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatalf("read state file: %v", err)
+	}
+	var st session.State
+	if err := json.Unmarshal(data, &st); err != nil {
+		t.Fatalf("unmarshal state file: %v", err)
+	}
+	if st.SessionKey != key {
+		t.Errorf("state SessionKey = %q, want %q", st.SessionKey, key)
+	}
+	if st.PID != os.Getpid() {
+		t.Errorf("state PID = %d, want this process %d", st.PID, os.Getpid())
+	}
+	if st.Kind != session.KindImplicit {
+		t.Errorf("state Kind = %q, want %q", st.Kind, session.KindImplicit)
+	}
+
+	key2, err := currentSessionKey()
+	if err != nil {
+		t.Fatalf("second call errored: %v", err)
+	}
+	if key2 != key {
+		t.Fatalf("second call key = %q, want %q (identity must be stable)", key2, key)
+	}
+}
+
+// TestCurrentSessionKeyLazySticksAcrossSiblingStateFile verifies the lazily
+// materialized identity survives a sibling state file appearing later (e.g. a
+// SessionStart hook re-fire on resume/clear/compact): FindImplicitAtCwd picks
+// the first live file in glob order, so without the in-process cache a
+// lexically-smaller sibling rand would flip the sender identity mid-session.
+func TestCurrentSessionKeyLazySticksAcrossSiblingStateFile(t *testing.T) {
+	repo := lazyKeyFixture(t)
+
+	key, err := currentSessionKey()
+	if err != nil {
+		t.Fatalf("expected lazy materialization to resolve, got error: %v", err)
+	}
+
+	sibling := session.State{
+		Kind:         session.KindImplicit,
+		PID:          os.Getpid(), // alive: this test process
+		SessionState: session.StateActive,
+		RepoPath:     repo,
+		WorktreePath: repo,
+		Branch:       "main",
+		SessionKey:   "repo/00000000000000000000", // sorts before any hex rand
+	}
+	if err := session.WriteImplicit(sibling, "00000000000000000000"); err != nil {
+		t.Fatalf("WriteImplicit sibling: %v", err)
+	}
+
+	key2, err := currentSessionKey()
+	if err != nil {
+		t.Fatalf("call after sibling appeared errored: %v", err)
+	}
+	if key2 != key {
+		t.Fatalf("key flipped to %q after sibling state file, want %q", key2, key)
+	}
+}
+
+// TestCurrentSessionKeyLazyRespectsDisableKnob verifies lazy materialization
+// honors the FDR 0014 rollback knob exactly like the SessionStart hook: with
+// [hooks].disable-implicit-sessions set in the cascade, currentSessionKey
+// errors and writes nothing.
+func TestCurrentSessionKeyLazyRespectsDisableKnob(t *testing.T) {
+	repo := lazyKeyFixture(t)
+	sweat := "[hooks]\ndisable-implicit-sessions = true\n"
+	if err := os.WriteFile(filepath.Join(repo, "sweatfile"), []byte(sweat), 0o644); err != nil {
+		t.Fatalf("write sweatfile: %v", err)
+	}
+
+	if _, err := currentSessionKey(); err == nil {
+		t.Fatal("expected error with disable-implicit-sessions set")
+	}
+	if files := implicitStateFiles(t, repo); len(files) != 0 {
+		t.Fatalf("state files = %v, want none (knob must gate the write)", files)
+	}
+}
+
+// TestCurrentSessionKeyLazyNotAtSubdir verifies the repo-root gate is shared
+// with the SessionStart hook: a subdirectory of a main checkout neither
+// resolves nor materializes (state files live only at checkout roots).
+func TestCurrentSessionKeyLazyNotAtSubdir(t *testing.T) {
+	repo := lazyKeyFixture(t)
+	sub := filepath.Join(repo, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
+	t.Chdir(sub)
+
+	if _, err := currentSessionKey(); err == nil {
+		t.Fatal("expected error at a checkout subdirectory")
+	}
+	if files := implicitStateFiles(t, repo); len(files) != 0 {
+		t.Fatalf("state files = %v, want none", files)
+	}
+	if files := implicitStateFiles(t, sub); len(files) != 0 {
+		t.Fatalf("state files under subdir = %v, want none", files)
 	}
 }
 

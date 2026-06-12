@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/amarbel-llc/crap/go-crap/v2/crap"
@@ -22,6 +24,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/clown"
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/git"
+	"github.com/amarbel-llc/spinclass/internal/hooks"
 	"github.com/amarbel-llc/spinclass/internal/job"
 	"github.com/amarbel-llc/spinclass/internal/merge"
 	"github.com/amarbel-llc/spinclass/internal/present"
@@ -1012,14 +1015,28 @@ func handleChatListSessions(_ context.Context, args json.RawMessage, _ command.P
 	return command.TextResult(strings.TrimRight(b.String(), "\n")), nil
 }
 
+// lazyImplicit caches the implicit session key this serve process
+// materialized lazily (see currentSessionKey, #141). The cache pins the
+// identity for the process lifetime: chat sender attribution and the
+// chat-read cursor key off it, and a SessionStart hook re-fire mid-session
+// can add a sibling state file that FindImplicitAtCwd's first-live pick
+// would otherwise flip the identity to. Keyed by cwd out of paranoia (serve
+// never changes directory) and to keep tests with distinct fixtures from
+// observing each other's cache.
+var lazyImplicit struct {
+	sync.Mutex
+	cwd, key string
+}
+
 // currentSessionKey resolves the session key (<repo-dirname>/<branch>) for
 // the current session. It prefers $SPINCLASS_SESSION_ID — which spinclass
 // exports into every session and which IS the session key — and falls back
 // to deriving it from the current worktree when the variable is unset (e.g.
 // the tool is exercised by hand outside a managed session). When cwd is not a
 // worktree it falls back further to a live implicit (main-checkout) session's
-// state file (see the inline comment for the shared-checkout caveat). Returns
-// an error only when none of the three sources resolves.
+// state file (see the inline comment for the shared-checkout caveat), and
+// when no live implicit session exists it materializes one lazily (#141).
+// Returns an error only when none of the four sources resolves.
 func currentSessionKey() (string, error) {
 	if v := os.Getenv("SPINCLASS_SESSION_ID"); v != "" {
 		return v, nil
@@ -1029,6 +1046,11 @@ func currentSessionKey() (string, error) {
 		return "", fmt.Errorf("could not get working directory: %w", err)
 	}
 	if !worktree.IsWorktree(cwd) {
+		lazyImplicit.Lock()
+		defer lazyImplicit.Unlock()
+		if lazyImplicit.key != "" && lazyImplicit.cwd == cwd {
+			return lazyImplicit.key, nil
+		}
 		// Implicit (main-checkout) session: resolve the key from the live
 		// per-session state file. Note: when multiple agents share one main
 		// checkout, this returns the first live implicit session's key — the
@@ -1039,13 +1061,23 @@ func currentSessionKey() (string, error) {
 		if st, _, ferr := session.FindImplicitAtCwd(cwd); ferr == nil && st != nil {
 			return st.SessionKey, nil
 		}
-		// cwd is a main checkout (or other non-worktree dir) with no live
-		// implicit session — distinct from "not in a worktree at all". The
-		// implicit session may never have materialized (the SessionStart hook
-		// didn't fire) or [hooks].disable-implicit-sessions is set.
+		// No live implicit session — the SessionStart hook never fired (or
+		// its gates failed). Materialize one lazily so chat and spawn sender
+		// resolution work from a session-less main checkout (#141), behind
+		// the same gates as the hook (incl. [hooks].disable-implicit-sessions).
+		// The randID is process-random — serve cannot know the Claude
+		// session_id the hook derives its rand from — and the recorded PID is
+		// this serve process, so liveness tracks the session exactly and the
+		// dead-PID sweep reaps the file after the session ends (SessionEnd
+		// removes only the hook-derived randID, never this one).
+		if key, ok := hooks.MaterializeImplicit(cwd, lazyImplicitRand(), os.Getpid()); ok {
+			lazyImplicit.cwd, lazyImplicit.key = cwd, key
+			return key, nil
+		}
 		return "", errors.New(
-			"no live implicit session at this checkout and $SPINCLASS_SESSION_ID is unset " +
-				"(a SessionStart hook materializes one; check [hooks].disable-implicit-sessions)",
+			"no live implicit session at this checkout, $SPINCLASS_SESSION_ID is unset, " +
+				"and lazy materialization is gated (cwd must be a main-checkout repo root " +
+				"on a branch; check [hooks].disable-implicit-sessions)",
 		)
 	}
 	repoPath, err := git.CommonDir(cwd)
@@ -1061,6 +1093,15 @@ func currentSessionKey() (string, error) {
 		return "", fmt.Errorf("could not read session state: %w", err)
 	}
 	return st.SessionKey, nil
+}
+
+// lazyImplicitRand returns a fresh random rand-suffix for a lazily
+// materialized implicit session — same 16-hex shape as the SessionStart
+// hook's sha256(session_id)[:8].
+func lazyImplicitRand() string {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	return fmt.Sprintf("%x", b)
 }
 
 func handleNothingButTheTruth(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {

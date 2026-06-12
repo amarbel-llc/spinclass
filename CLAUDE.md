@@ -64,7 +64,12 @@ down by Claude Code `SessionStart`/`SessionEnd` plugin hooks
 (`runSessionStart`/`runSessionEnd` in `internal/hooks/`), which gate on
 not-a-worktree (`.git` is a directory) + repo-root == cwd (any branch;
 detached-HEAD is a no-op) + the `[hooks].disable-implicit-sessions` knob;
-dead-PID orphans are reaped by a `SessionStart` sweep + PID-liveness.
+dead-PID orphans are reaped by a `SessionStart` sweep + PID-liveness. The
+gates-plus-write core is `hooks.MaterializeImplicit`, shared with serve's
+`currentSessionKey`, which lazily materializes an implicit session (#141:
+process-random rand, serve's own PID, in-process key cache) when chat/spawn
+sender resolution finds none — so chat works even where the harness never
+delivered `SessionStart`.
 `WriteImplicit`/`RemoveImplicit`/`SweepDeadImplicit`/`FindImplicitAtCwd` are the
 per-rand storage API.
 

@@ -73,50 +73,64 @@ func runSessionStart(input hookInput) error {
 		maybeSendSpawnHello(cwd) // spawn handshake (FDR 0006); never blocks startup
 		return nil
 	}
-	// Gate 2: a git repo whose checkout root == cwd. Gate 1 already proved
-	// .git is a directory (main checkout), not a file/symlink (worktree), so
-	// the main checkout on ANY branch qualifies — we do NOT restrict to the
-	// default branch. Bail silently on any error. This cheap git-repo
-	// discriminator runs BEFORE the sweatfile I/O walk (Gate 3) so the
-	// common SessionStart-in-a-non-git-dir case (e.g. ~/Downloads) skips
-	// the hierarchy stat-walk entirely.
+	// os.Getppid() is best-effort: the hook handler is a short-lived
+	// subprocess whose parent may be the Claude process or a transient
+	// shell wrapper — not empirically verified. PID-liveness is only a
+	// backstop reaper; SessionEnd delete + SessionStart sweep are primary.
+	_, _ = MaterializeImplicit(cwd, implicitRand(input.SessionID), os.Getppid())
+	return nil
+}
+
+// MaterializeImplicit applies the main-checkout gates and, when they pass,
+// writes an implicit session state file keyed by randID with pid as the
+// liveness PID, returning the session key and true. It is the shared core
+// behind the SessionStart hook and the serve process's lazy chat/spawn sender
+// resolution (#141) — keeping the gates in one place guarantees the two paths
+// can never disagree about what qualifies as a materializable checkout.
+// Callers must have already established cwd is NOT an sc worktree.
+//
+// Returns ("", false) when gated or on any failure; errors are swallowed and
+// logged — both callers treat materialization as best-effort.
+func MaterializeImplicit(cwd, randID string, pid int) (string, bool) {
+	// Gate: a git repo whose checkout root == cwd. The caller's not-a-worktree
+	// check already proved .git is a directory (main checkout), not a
+	// file/symlink (worktree), so the main checkout on ANY branch qualifies —
+	// we do NOT restrict to the default branch. Bail silently on any error.
+	// This cheap git-repo discriminator runs BEFORE the sweatfile I/O walk
+	// (the knob gate) so the common non-git-dir case (e.g. ~/Downloads)
+	// skips the hierarchy stat-walk entirely.
 	repoRoot, err := gitToplevel(cwd)
 	if err != nil || filepath.Clean(repoRoot) != filepath.Clean(cwd) {
-		return nil
+		return "", false
 	}
 	branch, err := git.BranchCurrent(cwd)
-	if err != nil || branch == "" { // empty = detached HEAD: no branch name for the key
-		return nil
+	if err != nil || branch == "" { // empty = detached HEAD: no branch hint
+		return "", false
 	}
-	// Gate 3: rollback knob. Now that we know this is a materializable main
-	// checkout, the sweatfile hierarchy walk only runs when it matters, and
-	// stays BEFORE the sweep + write so a disabled session writes nothing.
+	// Rollback knob. Now that we know this is a materializable main checkout,
+	// the sweatfile hierarchy walk only runs when it matters, and stays
+	// BEFORE the sweep + write so a disabled session writes nothing.
 	if home, _ := os.UserHomeDir(); home != "" {
 		if res, err := sweatfileio.LoadHierarchy(home, cwd); err == nil &&
 			res.Merged.DisableImplicitSessionsEnabled() {
-			return nil
+			return "", false
 		}
 	}
 
 	// Orphan sweep before our own write (backstop for missed SessionEnd).
 	if err := session.SweepDeadImplicit(cwd); err != nil {
-		sessionlog.Errorf("runSessionStart SweepDeadImplicit-failed checkout=%s err=%v", cwd, err)
+		sessionlog.Errorf("MaterializeImplicit SweepDeadImplicit-failed checkout=%s err=%v", cwd, err)
 	}
 
-	randID := implicitRand(input.SessionID)
-	// Key is <repo>/<rand>, derived purely from the session id — the branch is
-	// deliberately NOT part of the identity. This keeps the key stable across a
-	// mid-session branch switch and avoids slash-bearing branch names (e.g.
-	// feature/wip) leaking a second "/" into the key. Branch is captured below
-	// as a display-only hint and refreshed on every re-fire (see Branch field).
+	// Key is <repo>/<rand> — the branch is deliberately NOT part of the
+	// identity. This keeps the key stable across a mid-session branch switch
+	// and avoids slash-bearing branch names (e.g. feature/wip) leaking a
+	// second "/" into the key. Branch is captured below as a display-only
+	// hint and refreshed on every re-fire (see Branch field).
 	key := filepath.Base(repoRoot) + "/" + randID
 	s := session.State{
-		Kind: session.KindImplicit,
-		// os.Getppid() is best-effort: the hook handler is a short-lived
-		// subprocess whose parent may be the Claude process or a transient
-		// shell wrapper — not empirically verified. PID-liveness is only a
-		// backstop reaper; SessionEnd delete + SessionStart sweep are primary.
-		PID:          os.Getppid(),
+		Kind:         session.KindImplicit,
+		PID:          pid,
 		SessionState: session.StateActive,
 		RepoPath:     repoRoot,
 		WorktreePath: cwd,
@@ -129,8 +143,10 @@ func runSessionStart(input hookInput) error {
 		StartedAt:  time.Now(),
 		Env:        map[string]string{"SPINCLASS_SESSION_ID": key},
 	}
-	_ = session.WriteImplicit(s, randID) // swallow; never block startup
-	return nil
+	if err := session.WriteImplicit(s, randID); err != nil {
+		return "", false
+	}
+	return key, true
 }
 
 // maybeSendSpawnHello emits the spawn handshake (FDR 0006) when cwd is an sc

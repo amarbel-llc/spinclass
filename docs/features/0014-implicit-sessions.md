@@ -132,7 +132,16 @@ else inherits existing behavior.
 - **Chat (`chat-send` / `chat-read` / `chat-list-sessions`)** —
   `currentSessionKey` falls back to `FindImplicitAtCwd` when not in a worktree
   and `$SPINCLASS_SESSION_ID` is unset, so chat works from a main checkout with
-  a unique send-as/receive-on key.
+  a unique send-as/receive-on key. When no live implicit session exists (the
+  `SessionStart` hook never fired — e.g. the plugin hooks aren't wired in that
+  harness), `currentSessionKey` **materializes one lazily** (#141) through the
+  same gates (`hooks.MaterializeImplicit`): randID is process-random (serve
+  cannot know the Claude `session_id`), the liveness PID is the serve process
+  itself, and the resolved key is cached in-process so the sender identity and
+  chat-read cursor stay stable even if a hook re-fire later adds a sibling
+  state file. `SessionEnd` never knows the lazy randID; the dead-PID sweep
+  reaps the file once the materializing process exits (serve, or the
+  short-lived CLI on an `sc spawn`/`sc fork --brief` driver-key resolution).
 
 ### Attestation
 
@@ -145,9 +154,11 @@ admits a live implicit session when recording the attestation.
 ### Rollback lever
 
 `[hooks].disable-implicit-sessions = true` (sweatfile cascade, scalar override,
-default false) makes `runSessionStart` a no-op. Single config change, no revert;
-the plugin hooks stay registered but do nothing. The feature is otherwise purely
-additive — worktree sessions (the daily driver) are untouched.
+default false) makes `hooks.MaterializeImplicit` a no-op — gating both the
+`SessionStart` hook and serve's lazy chat/spawn materialization (#141) with one
+knob. Single config change, no revert; the plugin hooks stay registered but do
+nothing. The feature is otherwise purely additive — worktree sessions (the
+daily driver) are untouched.
 
 ## Examples
 
@@ -200,6 +211,12 @@ Disable the feature for a repo (rollback):
   `check-this-session-async` now detect a live implicit session
   (`FindImplicitAtCwd`) and enforce `enforceAttestationImplicit`, mirroring the
   merge handlers. `sc check` (CLI) was already gate-free and worked.
+- **Chat unusable when the hook never fired (#141, fixed).** A session at a
+  main checkout whose harness never delivered `SessionStart` had no implicit
+  session, so `chat-send`/`chat-read` sender resolution refused.
+  `currentSessionKey` now lazily materializes an implicit session through the
+  hook's exact gates (`hooks.MaterializeImplicit`) with a process-random randID
+  and serve's own PID, caching the key in-process for identity stability.
 
 ## Tuning Levers
 
