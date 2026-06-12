@@ -46,6 +46,89 @@ func twoRemotes() []sweatfile.Remote {
 	}
 }
 
+// TestRunUpdateDescriptionImplicit verifies the CLI auto-detect path writes a
+// main checkout's live implicit session via WriteImplicit (state-<rand>.json),
+// not session.Write — which would litter a wrongly-keyed state.json next to
+// the real file and leave the live session untouched (#139).
+func TestRunUpdateDescriptionImplicit(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	// A bare tempdir has no .git file, so worktree.IsWorktree is false and the
+	// implicit fallback fires before any git call.
+	repo := t.TempDir()
+	st := session.State{
+		Kind:         session.KindImplicit,
+		PID:          os.Getpid(),
+		SessionState: session.StateActive,
+		RepoPath:     repo,
+		WorktreePath: repo,
+		Branch:       "master",
+		SessionKey:   "myrepo/master-cafe1234",
+	}
+	if err := session.WriteImplicit(st, "cafe1234"); err != nil {
+		t.Fatalf("WriteImplicit: %v", err)
+	}
+	t.Chdir(repo)
+
+	if err := runUpdateDescription("triage the flaky test", ""); err != nil {
+		t.Fatalf("runUpdateDescription: %v", err)
+	}
+
+	got, _, ferr := session.FindImplicitAtCwd(repo)
+	if ferr != nil || got == nil {
+		t.Fatalf("FindImplicitAtCwd after update: state=%v err=%v", got, ferr)
+	}
+	if got.Description != "triage the flaky test" {
+		t.Errorf("persisted description = %q, want %q", got.Description, "triage the flaky test")
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".spinclass", "state.json")); !os.IsNotExist(err) {
+		t.Errorf("stray wrongly-keyed state.json exists (stat err=%v); implicit sessions must only have state-<rand>.json", err)
+	}
+}
+
+// TestRunUpdateDescriptionImplicitByIDErrors verifies the --id path refuses an
+// implicit session instead of corrupting its storage: the randID is only
+// derivable at the checkout (from the state filename), so a target-resolved
+// implicit state cannot be written safely (#139).
+func TestRunUpdateDescriptionImplicitByIDErrors(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	repo := t.TempDir()
+	st := session.State{
+		Kind:         session.KindImplicit,
+		PID:          os.Getpid(),
+		SessionState: session.StateActive,
+		RepoPath:     repo,
+		WorktreePath: repo,
+		Branch:       "master",
+		SessionKey:   "myrepo/master-cafe1234",
+	}
+	if err := session.WriteImplicit(st, "cafe1234"); err != nil {
+		t.Fatalf("WriteImplicit: %v", err)
+	}
+	// cwd deliberately elsewhere: target the session by key, as a user
+	// updating a remote-to-them session would.
+	t.Chdir(t.TempDir())
+
+	err := runUpdateDescription("new desc", "myrepo/master-cafe1234")
+	if err == nil {
+		t.Fatal("expected error for --id targeting an implicit session, got nil")
+	}
+	if !strings.Contains(err.Error(), "implicit") {
+		t.Errorf("error %q does not mention implicit", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(repo, ".spinclass", "state.json")); !os.IsNotExist(statErr) {
+		t.Errorf("stray wrongly-keyed state.json exists (stat err=%v)", statErr)
+	}
+	got, _, ferr := session.FindImplicitAtCwd(repo)
+	if ferr != nil || got == nil {
+		t.Fatalf("FindImplicitAtCwd: state=%v err=%v", got, ferr)
+	}
+	if got.Description != "" {
+		t.Errorf("description = %q, want unchanged empty", got.Description)
+	}
+}
+
 func TestQueryRemotesPerHostIsolation(t *testing.T) {
 	stateHome := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", stateHome)

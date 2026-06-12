@@ -19,6 +19,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/shop"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/validate"
+	"github.com/amarbel-llc/spinclass/internal/worktree"
 )
 
 func registerQueryCommands(app *command.App) {
@@ -238,27 +239,54 @@ func registerQueryCommands(app *command.App) {
 				ID          string `json:"id"`
 			}
 			_ = json.Unmarshal(args, &p)
-
-			var state *session.State
-			var err error
-
-			if p.ID != "" {
-				state, err = session.FindByTarget(p.ID)
-			} else {
-				cwd, cwdErr := os.Getwd()
-				if cwdErr != nil {
-					return cwdErr
-				}
-				state, err = session.FindByWorktreePath(cwd)
-			}
-			if err != nil {
-				return err
-			}
-
-			state.Description = p.Description
-			return session.Write(*state)
+			return runUpdateDescription(p.Description, p.ID)
 		},
 	})
+}
+
+// runUpdateDescription is the update-description CLI body, extracted for
+// testability (#139).
+func runUpdateDescription(description, id string) error {
+	var state *session.State
+	var err error
+
+	if id != "" {
+		state, err = session.FindByTarget(id)
+	} else {
+		cwd, cwdErr := os.Getwd()
+		if cwdErr != nil {
+			return cwdErr
+		}
+		// Mirror the MCP handler's fallback (#137): a main checkout's live
+		// implicit session is keyed by the randID in its state-<rand>.json
+		// filename, which only FindImplicitAtCwd recovers.
+		if !worktree.IsWorktree(cwd) {
+			implicit, randID, ferr := session.FindImplicitAtCwd(cwd)
+			if ferr == nil && implicit != nil {
+				implicit.Description = description
+				return session.WriteImplicit(*implicit, randID)
+			}
+		}
+		state, err = session.FindByWorktreePath(cwd)
+	}
+	if err != nil {
+		return err
+	}
+
+	// An implicit state resolved any other way (--id by session key, a
+	// checkout subdirectory, a dead-PID survivor) cannot go through
+	// session.Write: that keys <WorktreePath>/.spinclass/state.json and
+	// would litter a stray file next to the real state-<rand>.json while
+	// leaving the live session untouched (#139).
+	if state.Kind == session.KindImplicit {
+		return fmt.Errorf(
+			"%s is an implicit (main-checkout) session; run `sc update-description` without --id from %s",
+			state.Key(), state.WorktreePath,
+		)
+	}
+
+	state.Description = description
+	return session.Write(*state)
 }
 
 // runListResult builds the `sc list` output. When closed is true,
