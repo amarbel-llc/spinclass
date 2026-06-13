@@ -224,6 +224,50 @@ func TestFindImplicitAtCwd(t *testing.T) {
 	}
 }
 
+// TestFindImplicitAtCwdFromSubdir pins #162: the implicit session lives at
+// the checkout root, so a lookup from a SUBDIRECTORY must climb to the
+// nearest .git root and find it there, not glob the literal cwd and miss.
+func TestFindImplicitAtCwdFromSubdir(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	checkout := t.TempDir()
+	// DetectRepo climbs to the nearest .git DIRECTORY (a main checkout); a
+	// bare dir suffices because DetectRepo only Lstats .git for IsDir — no
+	// real git repo needed.
+	if err := os.Mkdir(filepath.Join(checkout, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rand := "5ub01234"
+	live := State{
+		Kind:         KindImplicit,
+		PID:          os.Getpid(),
+		SessionState: StateActive,
+		RepoPath:     checkout,
+		WorktreePath: checkout,
+		Branch:       "master",
+		SessionKey:   "myrepo/" + rand,
+		StartedAt:    time.Now(),
+	}
+	if err := WriteImplicit(live, rand); err != nil {
+		t.Fatal(err)
+	}
+
+	subdir := filepath.Join(checkout, "internal", "foo")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, gotRand, err := FindImplicitAtCwd(subdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("expected to resolve the checkout-root implicit session from a subdir, got nil")
+	}
+	if got.SessionKey != live.SessionKey || gotRand != rand {
+		t.Errorf("got (%q, %q), want (%q, %q)", got.SessionKey, gotRand, live.SessionKey, rand)
+	}
+}
+
 func TestStateKindRoundTrips(t *testing.T) {
 	s := State{Kind: KindImplicit, WorktreePath: "/x", Branch: "master"}
 	data, err := json.Marshal(s)

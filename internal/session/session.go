@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/amarbel-llc/spinclass/internal/sessionlog"
+	"github.com/amarbel-llc/spinclass/internal/worktree"
 )
 
 // caller returns "file.go:N" of the call site `skip` frames up from
@@ -417,20 +418,43 @@ func SweepDeadImplicit(checkout string) error {
 	return nil
 }
 
-// FindImplicitAtCwd returns the live implicit session State for a main checkout
-// at cwd plus its randID (the per-session suffix of its state-<randID>.json
-// file), or (nil, "", nil) if there is no live implicit session there. It globs
-// <cwd>/.spinclass/state-*.json and returns the first whose recorded PID is
-// alive (concurrent agents in the same checkout each have their own file; any
-// live one identifies "an implicit session is active here"). The randID is
-// needed by callers that must address the exact state file (e.g. consuming a
-// single-use attestation). Dead-PID files are ignored (swept on next
+// FindImplicitAtCwd returns the live implicit session State for the main
+// checkout containing cwd plus its randID (the per-session suffix of its
+// state-<randID>.json file), or (nil, "", nil) if there is none. Implicit
+// state lives in <checkout-root>/.spinclass/, so the lookup first globs cwd
+// directly (the common case: cwd IS the checkout root) and, on a miss, climbs
+// to the nearest .git root and globs there — so invocation from a checkout
+// SUBDIRECTORY resolves the same session (#162). The first state-*.json whose
+// recorded PID is alive wins (concurrent agents in one checkout each have
+// their own file; any live one identifies "an implicit session is active
+// here"). The randID lets callers address the exact state file (e.g. consuming
+// a single-use attestation). Dead-PID files are ignored (swept on next
 // SessionStart). Returns an error only on a glob failure.
 func FindImplicitAtCwd(cwd string) (*State, string, error) {
-	pattern := filepath.Join(cwd, ".spinclass", "state-*.json")
-	matches, err := filepath.Glob(pattern)
+	st, randID, found, err := findLiveImplicitInDir(cwd)
+	if err != nil || found {
+		return st, randID, err
+	}
+	// cwd had no live implicit session. If cwd is a subdirectory of a main
+	// checkout, the state lives at the checkout root — climb and glob once
+	// more there. DetectRepo respects GIT_CEILING_DIRECTORIES and errors on a
+	// non-git dir (the legitimate not-a-session case), which we treat as
+	// "nothing here" rather than propagate.
+	root, derr := worktree.DetectRepo(cwd)
+	if derr != nil || filepath.Clean(root) == filepath.Clean(cwd) {
+		return nil, "", nil
+	}
+	st, randID, _, err = findLiveImplicitInDir(root)
+	return st, randID, err
+}
+
+// findLiveImplicitInDir globs <dir>/.spinclass/state-*.json for the first
+// live implicit session. found distinguishes a hit from a clean miss so
+// callers know whether to keep searching. err is only ever a glob failure.
+func findLiveImplicitInDir(dir string) (st *State, randID string, found bool, err error) {
+	matches, err := filepath.Glob(filepath.Join(dir, ".spinclass", "state-*.json"))
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	for _, m := range matches {
 		data, rerr := os.ReadFile(m)
@@ -442,11 +466,11 @@ func FindImplicitAtCwd(cwd string) (*State, string, error) {
 			continue
 		}
 		if s.Kind == KindImplicit && s.PID != 0 && IsAlive(s.PID) {
-			randID := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(m), "state-"), ".json")
-			return &s, randID, nil
+			rand := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(m), "state-"), ".json")
+			return &s, rand, true, nil
 		}
 	}
-	return nil, "", nil
+	return nil, "", false, nil
 }
 
 // Tombstone marks the session as cleanly closed: reads the live state,
