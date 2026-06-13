@@ -410,7 +410,7 @@ explore-chat-read:
 
 # Tag a spinclass release. The "v" prefix is added for you, so pass
 # the semver without it. Usage: just tag 0.1.0 "feat: initial release"
-tag version message:
+tag version $message:
     #!/usr/bin/env bash
     set -euo pipefail
     tag="v{{version}}"
@@ -419,7 +419,7 @@ tag version message:
       gum log --level info "Previous: $prev"
       git log --oneline "$prev"..HEAD
     fi
-    git tag -s -m "{{message}}" "$tag"
+    git tag -s -m "$message" "$tag"
     gum log --level info "Created tag: $tag"
     git push origin "$tag"
     gum log --level info "Pushed $tag"
