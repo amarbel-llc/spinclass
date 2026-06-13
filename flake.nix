@@ -112,6 +112,47 @@
         pkgs-master = import nixpkgs-master { inherit system; };
         inherit (pkgs) lib;
 
+        # tommy codegen as a conformist linter driver. Walks the tree for
+        # `//go:generate tommy generate` directives and runs `tommy generate
+        # --check` (check) / `tommy generate` (repair) per file. Resolves tommy +
+        # go from the AMBIENT PATH and skips (exit 0) when either is missing, so
+        # it is a safe no-op outside the devshell and acts inside it (where the
+        # pinned tommy + go_1_26 are present). Wired as [linter.tommy-codegen] in
+        # ./conformist.toml; repair regen lands in `conformist --commit`.
+        tommyCodegen = pkgs.writeShellApplication {
+          name = "conformist-tommy-codegen";
+          runtimeInputs = [
+            pkgs.coreutils
+            pkgs.findutils
+            pkgs.gnugrep
+          ];
+          text = ''
+            mode="repair"
+            if [ "''${1:-}" = "--check" ]; then
+              mode="check"
+            fi
+            if ! command -v tommy >/dev/null 2>&1; then
+              echo "tommy-codegen: tommy not on PATH; skipping" >&2
+              exit 0
+            fi
+            if ! command -v go >/dev/null 2>&1; then
+              echo "tommy-codegen: go not on PATH; skipping" >&2
+              exit 0
+            fi
+            status=0
+            while IFS= read -r f; do
+              dir=$(dirname "$f")
+              base=$(basename "$f")
+              if [ "$mode" = "check" ]; then
+                ( cd "$dir" || exit 1; GOFILE="$base" tommy generate --check; ) || status=1
+              else
+                ( cd "$dir" || exit 1; GOFILE="$base" tommy generate; ) || status=1
+              fi
+            done < <(grep -rIl --include='*.go' 'go:generate tommy generate' . 2>/dev/null | grep -v '/result' || true)
+            exit "$status"
+          '';
+        };
+
         # `nix fmt` entry point: conformist (the treefmt successor) wrapped
         # with the formatter binaries its ./conformist.toml drives on PATH.
         # Formatting drift is gated by `just lint-fmt` (conformist check).
@@ -125,6 +166,10 @@
             pkgs.nixfmt
             pkgs.shfmt
             pkgs.shellcheck
+            # tommy (TOML formatter, [formatter.tommy]) + the codegen driver
+            # ([linter.tommy-codegen]) so `nix fmt` resolves both.
+            tommy.packages.${system}.default
+            tommyCodegen
           ];
           text = ''exec conformist "$@"'';
         };
@@ -344,6 +389,9 @@
             # bridged tommy library — so `go generate ./internal/sweatfile`
             # (//go:generate tommy generate) targets a matching cst API.
             tommy.packages.${system}.default
+            # conformist's tommy-codegen linter driver (regen on `conformist`
+            # repair / drift check on `conformist check`).
+            tommyCodegen
           ]
           ++ (with pkgs-master; [
             delve
