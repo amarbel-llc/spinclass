@@ -109,7 +109,7 @@ func TestServeMergeThisSessionStdioIntegrity(t *testing.T) {
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name":      "merge-this-session",
-			"arguments": map[string]any{"git_sync": false},
+			"arguments": map[string]any{"local_only": true}, // keep the test local; push is now the default (#126)
 		},
 	})
 

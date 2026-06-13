@@ -99,8 +99,9 @@ function spinclass_merge_fast_forwards { # @test
   # Clean untracked files created by sweatfile apply so worktree remove succeeds
   git -C "$wt" clean -fd
 
-  # Merge from the main repo
-  run_sc_crap merge "$branch"
+  # Merge from the main repo. --local-only: push is the default now (#126)
+  # but this sandbox repo has no remote, so exercise the local ff-merge.
+  run_sc_crap merge "$branch" --local-only
   assert_success
 
   # Commit should now be on main
@@ -220,7 +221,9 @@ function spinclass_clean_removes_merged { # @test
 
   # Merge the worktree first (makes the branch fully merged; TAP is
   # retired for merge/check, so this speaks the ndjson-crap wire).
-  "$bin" --format ndjson merge "$branch1"
+  # --local-only: push is the default now (#126) but this sandbox has no
+  # remote.
+  "$bin" --format ndjson merge "$branch1" --local-only
 
   # Create another worktree that IS merged (no extra commits)
   local attach2_output

@@ -225,17 +225,17 @@ func TestCurrentSessionKeyNoSessionStillErrors(t *testing.T) {
 }
 
 // TestAppendNotPushedNote pins #158's result-text contract: a successful
-// merge without git_sync must SAY it didn't push, so worker completion
-// reports stop implying origin has the work.
+// local-only merge (gitSync=false) must SAY it didn't push, so worker
+// completion reports stop implying origin has the work.
 func TestAppendNotPushedNote(t *testing.T) {
 	const text = "✓ rebase x\n✓ merge x"
-	t.Run("success without git_sync appends", func(t *testing.T) {
+	t.Run("local-only success appends", func(t *testing.T) {
 		got := appendNotPushedNote(text, false, nil)
-		if !strings.Contains(got, "NOT pushed") || !strings.Contains(got, "git_sync") {
+		if !strings.Contains(got, "NOT pushed") || !strings.Contains(got, "local_only") {
 			t.Errorf("note missing: %q", got)
 		}
 	})
-	t.Run("git_sync true appends nothing", func(t *testing.T) {
+	t.Run("pushed (gitSync true) appends nothing", func(t *testing.T) {
 		if got := appendNotPushedNote(text, true, nil); got != text {
 			t.Errorf("got %q, want unchanged", got)
 		}

@@ -123,7 +123,7 @@ func registerMCPOnlyCommands(app *command.App) {
 				OpenWorldHint:   protocol.BoolPtr(false),
 			},
 			Params: []command.Param{
-				{Name: "git_sync", Type: command.Bool, Description: gitSyncParamDesc},
+				{Name: "local_only", Type: command.Bool, Description: localOnlyParamDesc},
 			},
 			Run: wrapMCPHandler("merge-this-session", handleMergeThisSession),
 		})
@@ -140,7 +140,7 @@ func registerMCPOnlyCommands(app *command.App) {
 				OpenWorldHint:   protocol.BoolPtr(false),
 			},
 			Params: []command.Param{
-				{Name: "git_sync", Type: command.Bool, Description: gitSyncParamDesc},
+				{Name: "local_only", Type: command.Bool, Description: localOnlyParamDesc},
 			},
 			Run: wrapMCPHandler("merge-this-session-async", handleMergeThisSessionAsync),
 		})
@@ -335,29 +335,31 @@ func registerMCPOnlyCommands(app *command.App) {
 	})
 }
 
-// gitSyncParamDesc is shared by merge-this-session and its -async twin so
-// the two surfaces cannot drift (#158).
-const gitSyncParamDesc = "Pull before and push after the merge (default false). WITHOUT it the merge lands on the LOCAL default branch only — origin is not updated, and the result says so. Workers coordinating with a driver should pass true so 'merged' means 'on origin'."
+// localOnlyParamDesc is shared by merge-this-session and its -async twin so
+// the two surfaces cannot drift (#126/#158).
+const localOnlyParamDesc = "Merge into the LOCAL default branch only — skip the pull-before and push-after. Default is to pull+push so the merge reaches origin and 'merged' means 'on origin' (#126). Set this only for a deliberate local-only merge you intend to push later; the result text flags a local-only merge as NOT pushed."
 
 // appendNotPushedNote makes a local-only merge result say so explicitly
-// (#158): spawned workers truthfully reported "merged green" from
-// git_sync=false merges while origin never got the work, and their drivers
-// rebased onto origin and missed it. Worded to stay true on the
+// (#158): spawned workers truthfully reported "merged green" from local-only
+// merges while origin never got the work, and their drivers rebased onto
+// origin and missed it. Since #126 push is the default, this only fires when
+// the caller opted out via local_only. Worded to stay true on the
 // nothing-to-merge short-circuit too (the work is local either way).
 func appendNotPushedNote(text string, gitSync bool, mergeErr error) string {
 	if gitSync || mergeErr != nil || text == "" {
 		return text
 	}
-	return text + "\nNOTE: NOT pushed (git_sync=false) — this work exists on the LOCAL default branch only; origin does not have it until someone pushes."
+	return text + "\nNOTE: NOT pushed (local_only) — this work exists on the LOCAL default branch only; origin does not have it until someone pushes."
 }
 
 func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	var params struct {
-		GitSync bool `json:"git_sync"`
+		LocalOnly bool `json:"local_only"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
 	}
+	gitSync := !params.LocalOnly // push by default; local_only opts out (#126)
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -403,7 +405,7 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 		cwd,
 		gs.branch,
 		defaultBranch,
-		params.GitSync,
+		gitSync,
 		true,
 	)
 	ts.Finish()
@@ -411,7 +413,7 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 	if mergeErr != nil && text == "" {
 		text = mergeErr.Error()
 	}
-	text = appendNotPushedNote(text, params.GitSync, mergeErr)
+	text = appendNotPushedNote(text, gitSync, mergeErr)
 	return buildHookResult(text, blobLinks, mergeErr), nil
 }
 
@@ -448,11 +450,12 @@ func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prom
 // result is retrieved via session-job-status.
 func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	var params struct {
-		GitSync bool `json:"git_sync"`
+		LocalOnly bool `json:"local_only"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
 	}
+	gitSync := !params.LocalOnly // push by default; local_only opts out (#126)
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -475,7 +478,7 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 		var buf bytes.Buffer
 		rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "merge " + branch, Source: "spinclass"})
 		ts := rep.TestStream(0)
-		return startSessionJob(cwd, job.KindMerge, params.GitSync, func(ctx context.Context, w io.Writer) (string, bool) {
+		return startSessionJob(cwd, job.KindMerge, gitSync, func(ctx context.Context, w io.Writer) (string, bool) {
 			_, mergeErr := merge.MergeImplicit(ctx, rep, ts, repoPath, cwd, branch, w)
 			ts.Finish()
 			text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
@@ -491,8 +494,6 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 	if err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not determine default branch: %v", err)), nil
 	}
-
-	gitSync := params.GitSync
 
 	// Run the fast prefix (optional pull + rebase + pin) synchronously, before
 	// returning the job id: this frees the session worktree the moment the
@@ -1247,7 +1248,7 @@ func buildNothingButTheTruthDescription(skills []sweatfile.PreMergeSkill) string
 // command so agents know what tests/checks the merge will run before
 // invoking it (and skip redundant pre-flight runs of the same suite).
 func buildMergeThisSessionDescription(hookPreview string) string {
-	base := "Merge the current session's worktree into the default branch and clean up. A non-error return means the merge (and push, if git_sync) succeeded; the result text is plain verdict lines (✓/✗ per stage) and is informational — it does not need to be read or parsed to confirm success. This blocks until the pre-merge hook and merge finish, then returns — the right choice when you have nothing else to do (no polling needed). Reach for merge-this-session-async only when you have other independent work to make progress on while the hook runs. When madder is pinned at build time, the response also carries a real MCP `resource_link` content block (URI scheme `madder://blobs/<digest>`) pointing to the full pre-merge hook output. MCP-aware agents fetch via `resources/read`; inspect only on failure."
+	base := "Merge the current session's worktree into the default branch and clean up. Pushes to origin by default (#126); pass local_only to keep the merge on the LOCAL default branch (the result then flags it NOT pushed). A non-error return means the merge (and push, unless local_only) succeeded; the result text is plain verdict lines (✓/✗ per stage) and is informational — it does not need to be read or parsed to confirm success. This blocks until the pre-merge hook and merge finish, then returns — the right choice when you have nothing else to do (no polling needed). Reach for merge-this-session-async only when you have other independent work to make progress on while the hook runs. When madder is pinned at build time, the response also carries a real MCP `resource_link` content block (URI scheme `madder://blobs/<digest>`) pointing to the full pre-merge hook output. MCP-aware agents fetch via `resources/read`; inspect only on failure."
 	if hookPreview == "" {
 		return base
 	}

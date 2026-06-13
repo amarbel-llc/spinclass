@@ -89,13 +89,13 @@ func registerSessionCommands(app *command.App) {
 		},
 		Params: []command.Param{
 			{Name: "target", Type: command.String, Description: "Target worktree to merge: a worktree directory name or <repo>/<branch> session key from `sc list` (interactive selection if omitted)", Completer: completeWorktreeTargets},
-			{Name: "git-sync", Type: command.Bool, Description: "Pull and push after merge"},
+			{Name: "local-only", Type: command.Bool, Description: "Merge into the LOCAL default branch only — skip the pull-before and push-after. Default is to pull+push so the merge reaches origin (#126)."},
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
 			var p struct {
 				globalArgs
-				Target  string `json:"target"`
-				GitSync bool   `json:"git-sync"`
+				Target    string `json:"target"`
+				LocalOnly bool   `json:"local-only"`
 			}
 			_ = json.Unmarshal(args, &p)
 
@@ -105,7 +105,9 @@ func registerSessionCommands(app *command.App) {
 
 			// merge.Run resolves the format itself: pass the RAW --format
 			// value ("" means auto — viewport on a TTY, ndjson when piped).
-			return merge.Run(executor.ShellExecutor{}, p.Format, p.Target, p.GitSync)
+			// git_sync now defaults ON (push by default, #126); --local-only
+			// is the explicit opt-out.
+			return merge.Run(executor.ShellExecutor{}, p.Format, p.Target, !p.LocalOnly)
 		},
 	})
 
