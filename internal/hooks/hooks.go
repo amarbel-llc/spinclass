@@ -100,7 +100,15 @@ func MaterializeImplicit(cwd, randID string, pid int) (string, bool) {
 	// (the knob gate) so the common non-git-dir case (e.g. ~/Downloads)
 	// skips the hierarchy stat-walk entirely.
 	repoRoot, err := gitToplevel(cwd)
-	if err != nil || filepath.Clean(repoRoot) != filepath.Clean(cwd) {
+	// gitToplevel (`git rev-parse --show-toplevel`) canonicalizes symlinks; the
+	// raw hook cwd does not. A checkout under a symlinked path (symlinked
+	// $HOME/TMPDIR, macOS /var -> /private/var) would otherwise fail this gate —
+	// filepath.Clean normalizes . / .. / separators but never resolves symlinks,
+	// so the two sides disagree. Resolve BOTH sides before comparing so the
+	// checkout still qualifies as its own toplevel. resolvePath degrades to
+	// filepath.Clean when EvalSymlinks fails (e.g. a vanished path), matching the
+	// surrounding path handling.
+	if err != nil || resolvePath(cwd) != resolvePath(repoRoot) {
 		return "", false
 	}
 	branch, err := git.BranchCurrent(cwd)

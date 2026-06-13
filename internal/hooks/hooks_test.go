@@ -1324,6 +1324,56 @@ func TestSessionStartMaterializesOnNonDefaultBranch(t *testing.T) {
 	}
 }
 
+// TestSessionStartMaterializesUnderSymlinkedCwd guards the fix for the latent
+// Gate 2 fragility (amarbel-llc/eng#168): the gate compares the raw hook cwd
+// against gitToplevel(cwd), and `git rev-parse --show-toplevel` canonicalizes
+// symlinks while filepath.Clean does not. So when the checkout sits under a
+// symlinked path (symlinked $HOME/TMPDIR, macOS /var -> /private/var) the two
+// sides disagreed and no implicit session materialized. Here we drive the hook
+// with a symlink that points at the real checkout as cwd and assert a session
+// IS created. Fails before resolving both sides; passes after.
+func TestSessionStartMaterializesUnderSymlinkedCwd(t *testing.T) {
+	repo := initImplicitTestRepo(t)
+	// Symlink in a separate (resolved) temp dir, pointing at the real checkout.
+	linkBase, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	symlinked := filepath.Join(linkBase, "checkout-link")
+	if err := os.Symlink(repo, symlinked); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	input, _ := json.Marshal(map[string]any{
+		"hook_event_name": "SessionStart",
+		"session_id":      "symlinkcwd",
+		"cwd":             symlinked,
+		"source":          "startup",
+	})
+	if err := Run(bytes.NewReader(input), &bytes.Buffer{}, "", "", false); err != nil {
+		t.Fatal(err)
+	}
+
+	// The state file lands in the REAL checkout (.spinclass follows the symlink),
+	// so assert via the resolved repo path.
+	rand := implicitRand("symlinkcwd")
+	statePath := filepath.Join(repo, ".spinclass", "state-"+rand+".json")
+	data, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("implicit session not materialized under symlinked cwd: %v", err)
+	}
+	var st session.State
+	if err := json.Unmarshal(data, &st); err != nil {
+		t.Fatalf("unmarshal state: %v", err)
+	}
+	// The key uses the CANONICAL repo basename, never the symlink's name.
+	wantKey := filepath.Base(repo) + "/" + rand
+	if st.SessionKey != wantKey {
+		t.Errorf("session_key = %q, want %q", st.SessionKey, wantKey)
+	}
+}
+
 func TestSessionEndRemovesImplicit(t *testing.T) {
 	repo := initImplicitTestRepo(t)
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
