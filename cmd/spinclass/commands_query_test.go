@@ -4,13 +4,55 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/testgit"
 )
+
+// TestRunUpdateDescriptionHealsUntrackedWorktree pins #161 on the CLI side:
+// a worktree with no spinclass state (harness run directly, never via
+// sc start/resume) auto-heals into a tracked session carrying the new
+// description, rather than failing on the missing index.
+func TestRunUpdateDescriptionHealsUntrackedWorktree(t *testing.T) {
+	testgit.RequireGit(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("SPINCLASS_SESSION_ID", "") // exercise the <repo>/<branch> fallback key
+	repoDir := filepath.Join(t.TempDir(), "myrepo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testgit.MustInit(t, repoDir)
+	wtPath := filepath.Join(repoDir, ".worktrees", "feat")
+	if out, err := osexec.Command("git", "-C", repoDir, "worktree", "add", "-b", "feat", wtPath).CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add: %v\n%s", err, out)
+	}
+	t.Chdir(wtPath)
+
+	// No state was ever written for this worktree.
+	if _, err := session.Read(repoDir, "feat"); err == nil {
+		t.Fatal("precondition: expected no session state for the fresh worktree")
+	}
+
+	if err := runUpdateDescription("triage the flaky test", ""); err != nil {
+		t.Fatalf("runUpdateDescription healed path: %v", err)
+	}
+
+	got, err := session.Read(repoDir, "feat")
+	if err != nil {
+		t.Fatalf("session.Read after heal: %v", err)
+	}
+	if got.Description != "triage the flaky test" {
+		t.Errorf("description = %q, want healed value", got.Description)
+	}
+	if got.SessionKey != "myrepo/feat" {
+		t.Errorf("SessionKey = %q, want myrepo/feat (the <repo>/<branch> fallback)", got.SessionKey)
+	}
+}
 
 // remoteCannedJSON is the wire payload the healthy stub host serves —
 // the session.ListRow array shape locked by internal/session's tests.

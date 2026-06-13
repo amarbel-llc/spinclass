@@ -879,7 +879,11 @@ func handleUpdateDescription(_ context.Context, args json.RawMessage, _ command.
 		return command.TextErrorResult(fmt.Sprintf("could not determine current branch: %v", err)), nil
 	}
 
-	st, err := session.Read(repoPath, branch)
+	// Auto-heal a worktree that has no spinclass state yet (an agent that ran
+	// the harness directly instead of via `sc start`/`resume`): synthesize a
+	// minimal record so the description sticks rather than failing on the
+	// missing index (#161).
+	st, err := resolveOrHealWorktreeState(repoPath, branch)
 	if err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not read session state: %v", err)), nil
 	}
@@ -890,6 +894,21 @@ func handleUpdateDescription(_ context.Context, args json.RawMessage, _ command.
 	}
 
 	return command.TextResult(fmt.Sprintf("description updated to: %s", params.Description)), nil
+}
+
+// resolveOrHealWorktreeState reads the worktree session at (repoPath, branch),
+// synthesizing minimal active state when the worktree has none yet (#161 —
+// e.g. the harness ran directly in the worktree, never via sc start/resume).
+// Shared by the update-this-session-description MCP handler and the
+// `sc update-description` CLI so the two surfaces cannot drift (the lesson of
+// #139). The session key prefers $SPINCLASS_SESSION_ID (which spinclass exports
+// and which IS the key), falling back to the conventional <repo-dirname>/<branch>.
+func resolveOrHealWorktreeState(repoPath, branch string) (*session.State, error) {
+	key := os.Getenv("SPINCLASS_SESSION_ID")
+	if key == "" {
+		key = filepath.Base(repoPath) + "/" + branch
+	}
+	return session.EnsureWorktreeState(repoPath, branch, key, os.Getpid())
 }
 
 func handleChatSend(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {

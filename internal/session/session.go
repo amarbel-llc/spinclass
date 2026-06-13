@@ -275,6 +275,40 @@ func Read(repoPath, branch string) (*State, error) {
 	return &s, nil
 }
 
+// EnsureWorktreeState returns the State for (repoPath, branch) if one exists,
+// or synthesizes a minimal active State when none does — i.e. the worktree
+// was never attached via `sc start`/`resume` (an agent ran the harness in it
+// directly) or its state was removed. Single-field updaters (notably
+// update-this-session-description) use this to auto-heal an untracked
+// worktree session rather than surfacing the raw "missing index" lstat (#161),
+// mirroring the implicit-session lazy-materialization precedent (#141).
+//
+// The synthesized State uses the conventional <repo>/.worktrees/<branch>
+// worktree path so a later Read round-trips, the caller-supplied sessionKey
+// (typically $SPINCLASS_SESSION_ID, else <repo-dirname>/<branch>), and pid as
+// the liveness PID (the serve process, which lives as long as the session).
+// It is NOT persisted: the caller mutates the field it owns and calls Write,
+// keeping one persist point. A non-not-exist Read error is propagated.
+func EnsureWorktreeState(repoPath, branch, sessionKey string, pid int) (*State, error) {
+	st, err := Read(repoPath, branch)
+	if err == nil {
+		return st, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	return &State{
+		PID:          pid,
+		SessionState: StateActive,
+		RepoPath:     repoPath,
+		WorktreePath: worktreeFromRepoBranch(repoPath, branch),
+		Branch:       branch,
+		SessionKey:   sessionKey,
+		StartedAt:    time.Now().UTC(),
+		Env:          map[string]string{"SPINCLASS_SESSION_ID": sessionKey},
+	}, nil
+}
+
 // Remove deletes both the worktree-local state file and the central index
 // entry. Tolerates missing files. Used by callers that have torn down the
 // worktree (sc close, sc clean) and by abandoned-session reaping. To

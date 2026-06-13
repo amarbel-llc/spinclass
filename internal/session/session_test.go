@@ -268,6 +268,62 @@ func TestFindImplicitAtCwdFromSubdir(t *testing.T) {
 	}
 }
 
+// TestEnsureWorktreeState pins #161: when a worktree has live state, the
+// helper returns it; when it has none (never attached via sc / state
+// removed), it synthesizes a minimal active State at the conventional
+// <repo>/.worktrees/<branch> path rather than surfacing the raw lstat miss.
+func TestEnsureWorktreeState(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	repo := t.TempDir()
+	wt := filepath.Join(repo, ".worktrees", "feat")
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("missing state synthesizes", func(t *testing.T) {
+		st, err := EnsureWorktreeState(repo, "feat", "myrepo/feat", 4242)
+		if err != nil {
+			t.Fatalf("EnsureWorktreeState: %v", err)
+		}
+		if st.SessionKey != "myrepo/feat" || st.Branch != "feat" || st.RepoPath != repo {
+			t.Errorf("synthesized identity wrong: %+v", st)
+		}
+		if st.WorktreePath != wt {
+			t.Errorf("WorktreePath = %q, want %q (must match Read's worktreeFromRepoBranch)", st.WorktreePath, wt)
+		}
+		if st.PID != 4242 || st.SessionState != StateActive {
+			t.Errorf("synthesized liveness wrong: pid=%d state=%q", st.PID, st.SessionState)
+		}
+		// Synthesizing must not persist — the caller owns the Write.
+		if _, rerr := Read(repo, "feat"); !errors.Is(rerr, os.ErrNotExist) {
+			t.Errorf("EnsureWorktreeState should not persist; Read err = %v", rerr)
+		}
+	})
+
+	t.Run("existing state is returned, not re-synthesized", func(t *testing.T) {
+		existing := State{
+			PID:          os.Getpid(),
+			SessionState: StateActive,
+			RepoPath:     repo,
+			WorktreePath: wt,
+			Branch:       "feat",
+			SessionKey:   "myrepo/feat",
+			Description:  "real session",
+			StartedAt:    time.Now(),
+		}
+		if err := Write(existing); err != nil {
+			t.Fatal(err)
+		}
+		st, err := EnsureWorktreeState(repo, "feat", "ignored/key", 1)
+		if err != nil {
+			t.Fatalf("EnsureWorktreeState: %v", err)
+		}
+		if st.Description != "real session" || st.SessionKey != "myrepo/feat" {
+			t.Errorf("expected the existing state, got %+v", st)
+		}
+	})
+}
+
 func TestStateKindRoundTrips(t *testing.T) {
 	s := State{Kind: KindImplicit, WorktreePath: "/x", Branch: "master"}
 	data, err := json.Marshal(s)

@@ -13,6 +13,7 @@ import (
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/protocol"
 	"github.com/amarbel-llc/spinclass/internal/clean"
+	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/pull"
 	"github.com/amarbel-llc/spinclass/internal/remote"
 	"github.com/amarbel-llc/spinclass/internal/session"
@@ -287,6 +288,17 @@ func runUpdateDescription(description, id string) error {
 			}
 		}
 		state, err = session.FindByWorktreePath(cwd)
+		// A worktree with no tracked state (harness run directly, never via
+		// sc start/resume) auto-heals into a minimal session rather than
+		// erroring — same path the MCP tool takes (#161); shared helper so
+		// CLI and tool can't drift (#139).
+		if err != nil && worktree.IsWorktree(cwd) {
+			repoPath, rerr := git.CommonDir(cwd)
+			branch, berr := git.BranchCurrent(cwd)
+			if rerr == nil && berr == nil {
+				state, err = resolveOrHealWorktreeState(repoPath, branch)
+			}
+		}
 	}
 	if err != nil {
 		return err
