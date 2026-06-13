@@ -140,7 +140,11 @@ func launchSpawnWindow(argv []string, rp worktree.ResolvedPath, desc string, ses
 // precedence: inherited driver environ, then user [session-entry].env, then
 // the spinclass-owned identity vars (appended last — authoritative).
 func workerEnv(rp worktree.ResolvedPath, desc string, userEnv map[string]string) []string {
-	env := os.Environ()
+	// Strip the driver's inherited CLOWN_SESSION_ID/CLAUDE_SESSION_ID so the
+	// worker's clown re-derives its channel from the worker's own
+	// SPINCLASS_SESSION_ID (appended below). Otherwise the worker arms the
+	// driver's channel and directed chat wakes to it are dropped (#169).
+	env := session.StripInheritedSessionIDs(os.Environ())
 	for k, v := range userEnv {
 		env = append(env, k+"="+v)
 	}

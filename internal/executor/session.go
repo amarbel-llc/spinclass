@@ -87,7 +87,11 @@ func (s SessionExecutor) Attach(dir string, key string, command []string, dryRun
 
 	cmd := exec.Command(expanded[0], expanded[1:]...)
 	cmd.Dir = dir
-	cmd.Env = os.Environ()
+	// Strip an inherited CLOWN_SESSION_ID/CLAUDE_SESSION_ID (e.g. when `sc` is
+	// run from within another clown session) so this session's clown re-derives
+	// its channel from the SPINCLASS_SESSION_ID set above, rather than arming
+	// the launcher's channel (#169).
+	cmd.Env = session.StripInheritedSessionIDs(os.Environ())
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin

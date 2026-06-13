@@ -307,6 +307,27 @@ debug-hook-pretooluse:
     echo "--- stderr ---"; cat "$err"
     rm -f "$out" "$err"
 
+# [debug] Map every live process that has a SPINCLASS_SESSION_ID to its
+# CLOWN_SESSION_ID vs SPINCLASS_SESSION_ID. Confirms the spawn env-leak
+# (spinclass#169): a spawned worker shows CLOWN_SESSION_ID = the DRIVER's
+# key while SPINCLASS_SESSION_ID = the worker's key (they should match).
+[group('debug')]
+debug-session-env-map:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    for d in /proc/[0-9]*; do
+      pid=${d#/proc/}
+      env=$(tr '\0' '\n' < "$d/environ" 2>/dev/null) || continue
+      sp=$(printf '%s\n' "$env" | grep -E '^SPINCLASS_SESSION_ID=') || continue
+      cl=$(printf '%s\n' "$env" | grep -E '^CLOWN_SESSION_ID=' || echo 'CLOWN_SESSION_ID=(unset)')
+      cmd=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null | cut -c1-50)
+      flag=""
+      [ "${sp#SPINCLASS_SESSION_ID=}" != "${cl#CLOWN_SESSION_ID=}" ] && flag="  <-- DIVERGENT"
+      echo "pid $pid [$cmd]$flag"
+      echo "   $sp"
+      echo "   $cl"
+    done
+
 # Verify that the nix-built binary has version+commit burnt in via the
 # fork's buildGoApplication ldflags, and that the prefix matches the
 # spinclassVersion literal in flake.nix.

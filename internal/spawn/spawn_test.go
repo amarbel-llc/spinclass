@@ -233,6 +233,17 @@ func envValue(t *testing.T, envTxt, key string) string {
 	return ""
 }
 
+// envLookup is the non-fatal variant of envValue: it reports whether key is
+// present (used to assert a var was stripped/absent).
+func envLookup(envTxt, key string) (string, bool) {
+	for _, line := range strings.Split(envTxt, "\n") {
+		if v, ok := strings.CutPrefix(line, key+"="); ok {
+			return v, true
+		}
+	}
+	return "", false
+}
+
 // TestLaunchExecEnvCarriesWorkerIdentity guards the spawn exec's cmd.Env:
 // the worker process must see the WORKER's spinclass identity (mirroring
 // executor.SessionExecutor.Attach's env construction), not the driver's
@@ -244,6 +255,10 @@ func TestLaunchExecEnvCarriesWorkerIdentity(t *testing.T) {
 	// executor.SessionExecutor does for a real driver session.
 	t.Setenv("SPINCLASS_SESSION_ID", "driver/test-session")
 	t.Setenv("SPINCLASS_WORKTREE", "/driver/worktree")
+	// The driver is a clown session, so clown exported CLOWN_SESSION_ID into
+	// this process env. It must NOT leak to the worker, or the worker's clown
+	// arms the driver's channel and directed chat wakes are dropped (#169).
+	t.Setenv("CLOWN_SESSION_ID", "driver/test-session")
 
 	const desc = "env worker"
 	// No hello sender: Launch errors on the hello deadline, but the spawn
@@ -281,6 +296,11 @@ func TestLaunchExecEnvCarriesWorkerIdentity(t *testing.T) {
 		if got := envValue(t, envTxt, k); got != v {
 			t.Errorf("%s: got %q, want %q", k, got, v)
 		}
+	}
+	// The driver's CLOWN_SESSION_ID must be stripped, not propagated, so the
+	// worker's clown re-derives its channel from the worker's SPINCLASS key.
+	if got, found := envLookup(envTxt, "CLOWN_SESSION_ID"); found {
+		t.Errorf("CLOWN_SESSION_ID leaked to worker: got %q, want stripped", got)
 	}
 }
 

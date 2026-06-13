@@ -208,7 +208,10 @@ directly and returns promptly; `zmx run` is unusable here, it types
 space-joined keystrokes into a shell, see #145) which boots
 `[session-entry].spawn-entry` (e.g. `["clown", "--", "{prompt}"]`) with the
 driver's brief as the harness's initial prompt; the worker process env
-carries the WORKER's spinclass identity (mirrors `SessionExecutor`). The
+carries the WORKER's spinclass identity (mirrors `SessionExecutor`) and
+strips the driver's inherited `CLOWN_SESSION_ID`/`CLAUDE_SESSION_ID`
+(`session.StripInheritedSessionIDs`) so the worker's clown re-derives its
+own job-wakeup channel instead of arming the driver's (#169). The
 spawn blocks until the worker's `SessionStart` hook chat-sends a hello to
 the driver (keyed off `spawned_by` in the worker's state; 60s default
 deadline, `--hello-timeout` tunes it; dedup via `hello_sent_at`). On
