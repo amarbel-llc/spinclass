@@ -99,6 +99,33 @@ func TestCheckNoMatchProducesEmptyOutput(t *testing.T) {
 	}
 }
 
+// spawn-session / fork-session can never be auto-approved via a tier rule,
+// even when a user explicitly lists them: RunCheck bails before matching so
+// the always-ask PreToolUse decision governs (#151).
+func TestCheckNeverAutoApprovesSpawnEvenWhenListed(t *testing.T) {
+	tiersDir := t.TempDir()
+
+	globalTier := Tier{Allow: []string{"mcp__plugin_spinclass_spinclass__spawn-session"}}
+	data, _ := json.MarshalIndent(globalTier, "", "  ")
+	os.WriteFile(filepath.Join(tiersDir, "global.json"), data, 0o644)
+
+	input := map[string]any{
+		"tool_name":  "mcp__plugin_spinclass_spinclass__spawn-session",
+		"tool_input": map[string]any{},
+		"cwd":        "/home/user/eng/worktrees/myrepo/feature",
+	}
+	inputJSON, _ := json.Marshal(input)
+
+	var out bytes.Buffer
+	if err := RunCheck(bytes.NewReader(inputJSON), &out, tiersDir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if out.Len() != 0 {
+		t.Errorf("expected empty output (no auto-approve) for spawn-session, got %q", out.String())
+	}
+}
+
 func TestCheckUsesRepoTier(t *testing.T) {
 	tiersDir := t.TempDir()
 

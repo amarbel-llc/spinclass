@@ -1168,6 +1168,53 @@ func TestJobWaitToolAutoApproved(t *testing.T) {
 	}
 }
 
+// spawn-session / fork-session are always-ask: an `ask` decision forces a
+// prompt regardless of any allow-list, so no spinclass-reachable config can
+// make these token-consuming worker launches run silently (#151).
+func TestSpawnSessionAsksConfirmation(t *testing.T) {
+	cwd := t.TempDir()
+	input := makeInput("mcp__plugin_spinclass_spinclass__spawn-session", map[string]any{}, cwd)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	decision, reason := parseHookDecision(t, stdout.Bytes())
+	if decision != "ask" {
+		t.Errorf("expected permissionDecision ask for spawn-session, got %q", decision)
+	}
+	if reason == "" {
+		t.Error("expected a permissionDecisionReason")
+	}
+}
+
+func TestForkSessionAsksConfirmation(t *testing.T) {
+	cwd := t.TempDir()
+	input := makeInput("mcp__plugin_spinclass_spinclass__fork-session", map[string]any{}, cwd)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	decision, _ := parseHookDecision(t, stdout.Bytes())
+	if decision != "ask" {
+		t.Errorf("expected permissionDecision ask for fork-session, got %q", decision)
+	}
+}
+
+// The always-ask floor applies to subagents too: the subagent-deny block does
+// not name spawn/fork, so the main switch's ask still fires.
+func TestSpawnSessionAsksEvenForSubagent(t *testing.T) {
+	cwd := t.TempDir()
+	input := makeInputWithAgentID("mcp__plugin_spinclass_spinclass__spawn-session", map[string]any{}, cwd, "agent-abc123")
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	decision, _ := parseHookDecision(t, stdout.Bytes())
+	if decision != "ask" {
+		t.Errorf("expected permissionDecision ask for subagent spawn-session, got %q", decision)
+	}
+}
+
 // These benign session-management tools are not in the subagent deny guard,
 // so a subagent should be auto-approved too.
 func TestSubagentAllowedUpdateDescription(t *testing.T) {

@@ -187,6 +187,31 @@ knob if a production pattern ever genuinely wants a mid-level
 coordinator. (Depends on #147: `spawned_by` survives resumes, so the
 gate is not leaky.)
 
+### Always-ask — never silently auto-approved (added 2026-06-13, #151)
+
+The `spawn-session` and `fork-session` MCP tools always prompt: every
+invocation requires a fresh user confirmation, regardless of `claude-allow`
+rules, perms-tier rules, or a permissive session mode. They launch a full
+harness-booted worker that immediately consumes tokens — categorically
+heavier than any other spinclass tool — so a driver agent must never trigger
+one silently. Where #148 bounds *who* may spawn (not a spawned worker), this
+bounds *how silently* (never).
+
+Enforced server-side across both spinclass-owned auto-approve surfaces:
+
+- The **PreToolUse hook** (`internal/hooks`) returns `permissionDecision:
+  "ask"` for both tools. A hook `ask` overrides any allow-list, so the
+  decision fires before settings are ever consulted.
+- **`perms.RunCheck`** (`internal/perms`) refuses to emit an allow for these
+  tool names even if a tier rule lists them — so the perms surface can't
+  auto-approve them either, independent of hook ordering.
+
+Caveat (the issue's documented fallback): Claude Code's `bypassPermissions`
+mode (`--dangerously-skip-permissions`) skips the permission system entirely,
+including a hook `ask` — that is the one place the prompt cannot be forced
+from the server side. `sc spawn` / `sc fork --brief` from a human shell are
+out of scope: typing the command IS the confirmation.
+
 ### Failure after handoff — presence probe on suspicion
 
 A worker that dies silently emits no chat wake (dead producers cannot

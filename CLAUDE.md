@@ -215,7 +215,11 @@ deadline, `--hello-timeout` tunes it; dedup via `hello_sent_at`). On
 timeout the worker worktree+state persist for inspection (`sc close`
 cleans). Spawned workers may not themselves spawn/fork sub-workers — all
 four spawn surfaces refuse a caller whose state carries `spawned_by`
-(#148). An optional `[session-entry].spawn-window` argv template
+(#148). The `spawn-session` / `fork-session` MCP tools are always-ask —
+the PreToolUse hook returns `ask` and `perms.RunCheck` never auto-approves
+them, so every invocation prompts regardless of allow-lists (#151; the CLI
+`sc spawn` / `sc fork --brief` are out of scope, as typing is the
+confirmation). An optional `[session-entry].spawn-window` argv template
 (`{id}`/`{dir}`, no default) is exec'd fire-and-forget right after the
 spawn template returns — it opens a terminal window onto the worker
 (#149); failures are warnings, never spawn failures. Relatedly,

@@ -8,6 +8,16 @@ import (
 	"strings"
 )
 
+// neverAutoApprove names spinclass tools that must always prompt and can never
+// be auto-approved via a tier rule, even if a user lists them. These launch a
+// token-consuming worker agent; the always-ask floor is enforced primarily by
+// the PreToolUse hook, and mirrored here so the perms-tier surface cannot
+// auto-approve them regardless of hook ordering. See FDR 0006 / spinclass#151.
+var neverAutoApprove = map[string]bool{
+	"mcp__plugin_spinclass_spinclass__spawn-session": true,
+	"mcp__plugin_spinclass_spinclass__fork-session":  true,
+}
+
 // RunCheck reads a PermissionRequest hook payload from r, checks if the tool
 // invocation matches any curated tier rule, and writes an allow decision to w
 // when matched. When no rule matches, nothing is written to w.
@@ -20,6 +30,10 @@ func RunCheck(r io.Reader, w io.Writer, tiersDir string) error {
 
 	if err := json.NewDecoder(r).Decode(&input); err != nil {
 		return fmt.Errorf("decoding hook input: %w", err)
+	}
+
+	if neverAutoApprove[input.ToolName] {
+		return nil // defer to the always-ask PreToolUse decision
 	}
 
 	repo := repoFromCWD(input.CWD)

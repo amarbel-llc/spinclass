@@ -278,6 +278,8 @@ const (
 	chatReadToolName              = "mcp__plugin_spinclass_spinclass__chat-read"
 	chatListSessionsToolName      = "mcp__plugin_spinclass_spinclass__chat-list-sessions"
 	validateToolName              = "mcp__plugin_spinclass_spinclass__validate"
+	spawnSessionToolName          = "mcp__plugin_spinclass_spinclass__spawn-session"
+	forkSessionToolName           = "mcp__plugin_spinclass_spinclass__fork-session"
 )
 
 func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree bool) error {
@@ -291,6 +293,14 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 	}
 
 	switch input.ToolName {
+	case spawnSessionToolName, forkSessionToolName:
+		// Spawning/forking a worker launches a full harness-booted agent that
+		// immediately consumes tokens — categorically heavier than any other
+		// spinclass tool. Always prompt: an `ask` decision overrides any
+		// allow-list (claude-allow, perms tier, permissive mode), so no
+		// spinclass-reachable configuration can make these run silently
+		// (spinclass#151). Bounds #148 (who may spawn) with how silently.
+		return writeAsk(w, "spawning a worker session launches a token-consuming agent; confirm each invocation")
 	case listToolName, updateDescriptionToolName, validateToolName,
 		sessionJobStatusToolName, sessionJobCancelToolName, sessionJobWaitToolName:
 		// Benign, session-scoped spinclass tools: list, validate,
