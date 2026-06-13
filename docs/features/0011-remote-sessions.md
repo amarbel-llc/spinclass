@@ -110,6 +110,17 @@ Drop an inherited remote in a child sweatfile:
 - **Resume-only v1.** `close` and `merge` reject `host:` targets
   rather than mis-resolving them locally; remote lifecycle management
   stays on the remote host.
+- **No remote detached workers yet.** This `host:` story is ssh-resume
+  of sessions that already exist remotely; it does not spawn a detached
+  worker (FDR 0006) on another host. The posh multiplexer substrate
+  (see `eng-spinclass(7)`) is the candidate native-remote path — posh
+  treats `host:group/session` as a first-class roaming attach — but
+  remote-worker parity is blocked on two posh gaps: **posh#66** (`posh
+  list host:` ignores `-g/--group`, so remote liveness can't be
+  group-scoped) and **posh#67** (no remote `attach --detach`, so a
+  remote spawn can't return non-blocking). When both land, spinclass's
+  spawn/liveness templates could target a `host:` worker the same way
+  they target a local one.
 - **Remote needs a json-capable spinclass.** The remote host must run
   a spinclass that supports `list --format json`; older binaries
   surface as a per-host unreachable/parse-error row, not a crash.
