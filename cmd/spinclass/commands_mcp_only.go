@@ -1126,6 +1126,22 @@ func currentSessionKey() (string, error) {
 		return "", fmt.Errorf("could not determine current branch: %w", err)
 	}
 	st, err := session.Read(repoPath, branch)
+	if errors.Is(err, os.ErrNotExist) {
+		// Untracked worktree (the harness ran here directly, never via
+		// sc start/resume, so shop.Attach wrote no state): lazily register
+		// it so chat/spawn resolve a stable, listable, addressable identity
+		// rather than failing on the missing index — the worktree sibling of
+		// #141's implicit lazy materialization (#163). Persisting (vs.
+		// resolving in-memory) is deliberate and matches #141: a sender that
+		// isn't on disk can't be a chat-list-sessions entry or a reply target.
+		// Write failure is non-fatal — the key still resolves, so chat-send
+		// from here degrades to "send works, not addressable" rather than a
+		// hard error.
+		if synth, herr := resolveOrHealWorktreeState(repoPath, branch); herr == nil {
+			_ = session.Write(*synth)
+			return synth.SessionKey, nil
+		}
+	}
 	if err != nil {
 		return "", fmt.Errorf("could not read session state: %w", err)
 	}

@@ -171,6 +171,43 @@ func TestCurrentSessionKeyImplicitFallback(t *testing.T) {
 	}
 }
 
+// TestCurrentSessionKeyHealsUntrackedWorktree pins #163: from a worktree
+// with no spinclass state (harness run directly, never via sc start/resume),
+// chat/spawn sender resolution lazily registers the worktree session — the
+// worktree sibling of #141's implicit lazy materialization — rather than
+// failing on the missing index. The session must persist so it is a listable,
+// addressable reply target.
+func TestCurrentSessionKeyHealsUntrackedWorktree(t *testing.T) {
+	testgit.RequireGit(t)
+	t.Setenv("SPINCLASS_SESSION_ID", "") // force worktree-branch derivation
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	repo := filepath.Join(t.TempDir(), "myrepo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testgit.MustInit(t, repo)
+	wt := filepath.Join(repo, ".worktrees", "feat")
+	testgit.MustWorktreeAdd(t, repo, wt, "feat")
+	t.Chdir(wt)
+
+	// Precondition: no state for this worktree.
+	if _, err := session.Read(repo, "feat"); err == nil {
+		t.Fatal("precondition: expected no session state for the fresh worktree")
+	}
+
+	key, err := currentSessionKey()
+	if err != nil {
+		t.Fatalf("currentSessionKey from untracked worktree: %v", err)
+	}
+	if key != "myrepo/feat" {
+		t.Errorf("key = %q, want myrepo/feat", key)
+	}
+	// Persisted: the worktree is now a tracked, addressable session.
+	if st, rerr := session.Read(repo, "feat"); rerr != nil || st.SessionKey != "myrepo/feat" {
+		t.Errorf("expected the worktree session registered, got %v err=%v", st, rerr)
+	}
+}
+
 // TestCurrentSessionKeyNoSessionStillErrors verifies the fallbacks do not mask
 // the genuine "not a session" case: outside a worktree, env unset, no live
 // implicit session, and a cwd that is not even a git repo (so lazy
