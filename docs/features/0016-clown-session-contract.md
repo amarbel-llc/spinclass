@@ -11,7 +11,7 @@ promotion-criteria: |
 # spinclass ⇆ clown: session identity, addressing, and liveness (consumer side)
 
 > **Draft.** This is the spinclass-side half of a two-document contract. The
-> canonical/normative half is the clown RFC (number TBD — owned by clown; see
+> canonical/normative half is **clown RFC-0012** (owned by clown; see also
 > clown#135/#136). The **Venn boundary** section below MUST read consistently
 > with that RFC; treat any divergence as a doc bug to reconcile, not a design
 > choice.
@@ -144,8 +144,9 @@ signals and is folded in here rather than standing alone.
 
 ## More Information
 
-- clown RFC (TBD) — the canonical contract; RFC-0009/0010/0011 (job-wakeup
-  channel, output spool, MCP tools); clown#135 (whoami + warn-on-divergence),
+- **clown RFC-0012** — the canonical/normative contract (references this FDR
+  by number); RFC-0009/0010/0011 (job-wakeup channel, output spool, MCP
+  tools); clown#135 (whoami + warn-on-divergence),
   clown#136 (env-hygiene), clown#132 (monitor auto-arm), clown#117 (clown as
   the complete job system).
 - spinclass#169 (canonical-id addressing; Phase 0 env-leak fix landed),
