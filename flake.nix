@@ -77,7 +77,7 @@
     # Pinned to a release tag (not master) for reproducibility; bump the
     # tag deliberately + regen the codec when adopting a new tommy.
     tommy = {
-      url = "github:amarbel-llc/tommy/v0.4.0";
+      url = "github:amarbel-llc/tommy/v0.4.6";
       inputs.igloo.follows = "igloo";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
@@ -128,6 +128,9 @@
             # tommy fmt owns *.toml (conformist.toml [formatter.tommy]); same
             # input that backs the bridged library + codegen tool.
             tommy.packages.${system}.default
+            # conformist.toml [linter.tommy-codegen] repair driver; bakes its
+            # own v0.4.6 tommy and walks for //go:generate tommy generate.
+            tommy.packages.${system}.conformist-tommy-codegen
           ];
           text = ''exec conformist "$@"'';
         };
@@ -347,6 +350,9 @@
             # bridged tommy library — so `go generate ./internal/sweatfile`
             # (//go:generate tommy generate) targets a matching cst API.
             tommy.packages.${system}.default
+            # conformist tommy-codegen repair driver (conformist.toml
+            # [linter.tommy-codegen]); so `just fmt` regenerates the codec.
+            tommy.packages.${system}.conformist-tommy-codegen
           ]
           ++ (with pkgs-master; [
             delve

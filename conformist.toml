@@ -62,3 +62,20 @@ includes = ["*.toml"]
 [linter.shellcheck]
 command = "shellcheck"
 includes = ["*.sh", "*.bash", "*.bats"]
+
+# tommy codegen driver (tommy v0.4.6 conformist-tommy-codegen). Run-once,
+# whole-tree: passes-files=false means conformist invokes repair-command ONCE
+# with no file args; the driver does its own walk for //go:generate tommy
+# generate and regenerates per directive. includes=["*.go"] only GATES whether
+# the linter fires. check is a deliberate no-op (command="true"): tommy's own
+# --check diverges from the gofumpt'd committed codec and needs `go` on PATH, so
+# it would false-flag; the REPAIR lane (conformist / `just fmt`) regenerates.
+# NOTE: because check is a no-op this AUTOMATES regen but does NOT enforce drift
+# in `conformist check`; the enforcing #159 guard (regen + git diff --exit-code)
+# is separate. The driver bakes its own v0.4.6 tommy; it needs `go` ambient and
+# self-skips (exit 0) when go/tommy are absent (e.g. a sandboxed check lane).
+[linter.tommy-codegen]
+command = "true"
+repair-command = "conformist-tommy-codegen"
+includes = ["*.go"]
+passes-files = false
