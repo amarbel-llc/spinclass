@@ -33,6 +33,13 @@ promotion-criteria: |
 
 # Clown job-wakeup producer integration
 
+> **Post-cutover note (2026-06-14):** cross-session chat left spinclass
+> entirely and is now a clown construct — see
+> [FDR-0017](0017-clown-session-attach-grouping-chat-rescope.md). The chat
+> references below are specifically the now-removed `chat-send` dual-write
+> *wake* leg; the async-job-lifecycle emit half (`clown job start`/`done`
+> for merge/check) is unaffected and remains the live producer integration.
+
 ## Problem Statement
 
 Spinclass's async merge/check tools return a job id immediately, but the

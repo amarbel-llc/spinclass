@@ -18,6 +18,13 @@ promotion-criteria: |
 
 # Implicit sessions (main-checkout agents)
 
+> **Post-cutover note (2026-06-14):** cross-session chat left spinclass
+> entirely and is now a clown construct — see
+> [FDR-0017](0017-clown-session-attach-grouping-chat-rescope.md). The
+> `chat-send` / `chat-read` / `chat-list-sessions` tools and the `chatroom/`
+> store referenced below have been removed; those references describe the
+> pre-cutover state.
+
 ## Problem Statement
 
 A spinclass session existed only for worktrees spinclass created under

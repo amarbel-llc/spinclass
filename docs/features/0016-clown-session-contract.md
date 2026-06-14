@@ -16,6 +16,13 @@ promotion-criteria: |
 > with that RFC; treat any divergence as a doc bug to reconcile, not a design
 > choice.
 
+> **Post-cutover note (2026-06-14):** cross-session chat left spinclass
+> entirely and is now a clown construct — see
+> [FDR-0017](0017-clown-session-attach-grouping-chat-rescope.md). The
+> `chat-send` / `chat-read` / `chat-list-sessions` tools and the `chatroom/`
+> store referenced below have been removed; those references describe the
+> pre-cutover state.
+
 ## Problem Statement
 
 spinclass and clown each maintain a notion of "a session," and the seam between

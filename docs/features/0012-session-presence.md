@@ -9,6 +9,13 @@ promotion-criteria: working implementation behind an unset-by-default sweatfile 
 > **Draft.** Design approved, not yet implemented. Sections describe intended
 > behavior.
 
+> **Post-cutover note (2026-06-14):** cross-session chat left spinclass
+> entirely and is now a clown construct — see
+> [FDR-0017](0017-clown-session-attach-grouping-chat-rescope.md). The
+> `chat-send` / `chat-read` / `chat-list-sessions` tools and the `chatroom/`
+> store referenced below have been removed; those references describe the
+> pre-cutover state.
+
 ## Problem Statement
 
 `sc list` and the resume picker show a session as `active` when the single
