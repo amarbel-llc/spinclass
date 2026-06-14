@@ -1,8 +1,8 @@
 // Package clown is the producer-side integration with clown's job-wakeup
-// channel (clown RFC-0009): chat message wakes and background-job lifecycle
-// events, emitted via the clown CLI. The on-disk journal clown maintains is
-// the wake layer only — spinclass state (chatroom store, job.json) remains
-// the system of record for every consumer of this package.
+// channel (clown RFC-0009): background-job lifecycle events emitted via the
+// clown CLI. The on-disk journal clown maintains is the wake layer only —
+// spinclass state (job.json) remains the system of record for every consumer
+// of this package.
 package clown
 
 import (
@@ -62,22 +62,6 @@ func run(ctx context.Context, args ...string) (string, error) {
 		return "", fmt.Errorf("clown %s: %w", args[0], err)
 	}
 	return strings.TrimSpace(stdout.String()), nil
-}
-
-// SendMessage emits a chat `message` waking event addressed to target (a
-// session key, or clown's reserved broadcast key "*"). Clown flattens
-// newlines in body; pass it raw.
-func SendMessage(ctx context.Context, target, from, source, body, resultRef string) error {
-	_, err := run(
-		ctx,
-		"job", "message",
-		"--target", target,
-		"--from", from,
-		"--source", source,
-		"--message", body,
-		"--result-ref", resultRef,
-	)
-	return err
 }
 
 // StartJob allocates a clown job (journal-only `started` record, no wake) and

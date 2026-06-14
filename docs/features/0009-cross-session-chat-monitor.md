@@ -1,5 +1,5 @@
 ---
-status: deprecated
+status: superseded by FDR-0017
 date: 2026-06-06
 promotion-criteria: |
   PROMOTED to `experimental` on 2026-06-04: the spinclass-shipped plugin
@@ -23,11 +23,13 @@ promotion-criteria: |
 
 # Cross-session chat via a plugin monitor
 
-> **Deprecated:** the plugin-monitor receive path was removed 2026-06-06
-> after the clown job-wakeup migration completed its live verification —
-> clown's job-watch is the sole push path (see FDR 0010 and clown
-> RFC-0009); chat-send/chat-read and the chatroom store live on
-> unchanged. SPINCLASS_CHAT_WAKE was removed with it.
+> **Superseded by [FDR-0017](0017-clown-session-attach-grouping-chat-rescope.md)
+> (2026-06-14):** cross-session chat left spinclass entirely and is now a clown
+> construct. `internal/chat`, the `chat-send`/`chat-read`/`chat-list-sessions`
+> MCP tools, and the `chatroom/` store have all been removed; clown owns chat
+> (store + transport + addressing). Retained for history. (Earlier, 2026-06-06:
+> the plugin-monitor receive path was removed in favor of clown's job-watch
+> push; the store + chat-* tools then lived on until this supersession.)
 
 ## Problem Statement
 

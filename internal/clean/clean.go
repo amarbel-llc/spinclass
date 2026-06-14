@@ -13,7 +13,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/log"
 
-	"github.com/amarbel-llc/spinclass/internal/chat"
 	"github.com/amarbel-llc/spinclass/internal/check"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/nixgc"
@@ -449,7 +448,7 @@ func planClean(worktrees []worktreeInfo, interactive bool) []cleanAction {
 	return actions
 }
 
-func emitPlan(tw *tap.Writer, actions []cleanAction, abandonedCount int, tombstoneCount int, chatStaleCount int, orphanBuildCount int, dryRun bool) {
+func emitPlan(tw *tap.Writer, actions []cleanAction, abandonedCount int, tombstoneCount int, orphanBuildCount int, dryRun bool) {
 	reason := "dry-run"
 	for _, a := range actions {
 		switch a.action {
@@ -513,22 +512,6 @@ func emitPlan(tw *tap.Writer, actions []cleanAction, abandonedCount int, tombsto
 			}
 		}
 	}
-	if chatStaleCount > 0 {
-		msg := fmt.Sprintf("GC %d stale chat message(s)", chatStaleCount)
-		if dryRun {
-			if tw != nil {
-				tw.Skip(msg, reason)
-			} else {
-				log.Info("would " + msg)
-			}
-		} else {
-			if tw != nil {
-				tw.Skip(msg, "pending confirmation")
-			} else {
-				log.Info("will " + msg)
-			}
-		}
-	}
 	if orphanBuildCount > 0 {
 		msg := fmt.Sprintf("prune %d orphaned build worktree(s)", orphanBuildCount)
 		if dryRun {
@@ -547,7 +530,7 @@ func emitPlan(tw *tap.Writer, actions []cleanAction, abandonedCount int, tombsto
 	}
 }
 
-func confirmClean(removeCount, abandonedCount, tombstoneCount, chatStaleCount, orphanBuildCount int) (bool, error) {
+func confirmClean(removeCount, abandonedCount, tombstoneCount, orphanBuildCount int) (bool, error) {
 	parts := []string{}
 	if removeCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d worktree(s)", removeCount))
@@ -557,9 +540,6 @@ func confirmClean(removeCount, abandonedCount, tombstoneCount, chatStaleCount, o
 	}
 	if tombstoneCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d stale tombstone(s)", tombstoneCount))
-	}
-	if chatStaleCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d stale chat message(s)", chatStaleCount))
 	}
 	if orphanBuildCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d orphaned build worktree(s)", orphanBuildCount))
@@ -675,21 +655,6 @@ func executeClean(tw *tap.Writer, actions []cleanAction, abandoned []session.Sta
 				log.Info("GC'd stale tombstones", "count", gcCount)
 			}
 		}
-
-		chatCount, err := chat.GCMessages(retention)
-		if err != nil {
-			if tw != nil {
-				tw.NotOk("GC chat messages", map[string]string{"error": err.Error()})
-			} else {
-				log.Error("failed to GC chat messages", "error", err)
-			}
-		} else if chatCount > 0 {
-			if tw != nil {
-				tw.Ok(fmt.Sprintf("GC'd %d stale chat message(s)", chatCount))
-			} else {
-				log.Info("GC'd stale chat messages", "count", chatCount)
-			}
-		}
 	}
 }
 
@@ -703,11 +668,10 @@ func Run(startDir string, interactive bool, dryRun bool, yes bool, format string
 	abandonedCount, abandonedSessions := countAbandonedSessions()
 	retention := resolveTombstoneRetention(startDir)
 	tombstoneCount := countStaleTombstones(retention)
-	chatStaleCount := chat.CountStaleMessages(retention)
 	orphans := findOrphanBuildWorktrees(startDir)
 	orphanCount := len(orphans)
 
-	if len(worktrees) == 0 && abandonedCount == 0 && tombstoneCount == 0 && chatStaleCount == 0 && orphanCount == 0 {
+	if len(worktrees) == 0 && abandonedCount == 0 && tombstoneCount == 0 && orphanCount == 0 {
 		if tw != nil {
 			tw.Skip("clean", "no worktrees found")
 			tw.Plan()
@@ -728,8 +692,8 @@ func Run(startDir string, interactive bool, dryRun bool, yes bool, format string
 	}
 
 	// Nothing actionable — just report skips and return.
-	if removeCount == 0 && abandonedCount == 0 && tombstoneCount == 0 && chatStaleCount == 0 && orphanCount == 0 {
-		emitPlan(tw, actions, abandonedCount, tombstoneCount, chatStaleCount, orphanCount, dryRun)
+	if removeCount == 0 && abandonedCount == 0 && tombstoneCount == 0 && orphanCount == 0 {
+		emitPlan(tw, actions, abandonedCount, tombstoneCount, orphanCount, dryRun)
 		if tw != nil {
 			tw.Plan()
 		}
@@ -737,7 +701,7 @@ func Run(startDir string, interactive bool, dryRun bool, yes bool, format string
 	}
 
 	// Show what will happen.
-	emitPlan(tw, actions, abandonedCount, tombstoneCount, chatStaleCount, orphanCount, dryRun)
+	emitPlan(tw, actions, abandonedCount, tombstoneCount, orphanCount, dryRun)
 
 	if dryRun {
 		if tw != nil {
@@ -748,7 +712,7 @@ func Run(startDir string, interactive bool, dryRun bool, yes bool, format string
 
 	// Confirm unless --yes.
 	if !yes {
-		confirmed, err := confirmClean(removeCount, abandonedCount, tombstoneCount, chatStaleCount, orphanCount)
+		confirmed, err := confirmClean(removeCount, abandonedCount, tombstoneCount, orphanCount)
 		if err != nil {
 			return err
 		}

@@ -56,8 +56,7 @@ agents attached to a repo's **main checkout** (not an `sc start` worktree):
 keyed `<repo>/<rand>` (`<rand> = sha256(session_id)[:8]`) — the branch is NOT in
 the key (any branch qualifies; a slash-bearing branch would corrupt the key), it
 is kept in `State.Branch` as a display-only hint surfaced as a separate `sc list`
-column + `chat-list-sessions` `{branch}` annotation and refreshed on each
-`SessionStart` re-fire. Stored worktree-local at
+column and refreshed on each `SessionStart` re-fire. Stored worktree-local at
 `<checkout>/.spinclass/state-<rand>.json` (one file per session, central index
 symlink) so concurrent agents in one checkout never collide. Materialized/torn
 down by Claude Code `SessionStart`/`SessionEnd` plugin hooks
@@ -67,9 +66,9 @@ detached-HEAD is a no-op) + the `[hooks].disable-implicit-sessions` knob;
 dead-PID orphans are reaped by a `SessionStart` sweep + PID-liveness. The
 gates-plus-write core is `hooks.MaterializeImplicit`, shared with serve's
 `currentSessionKey`, which lazily materializes an implicit session (#141:
-process-random rand, serve's own PID, in-process key cache) when chat/spawn
-sender resolution finds none — so chat works even where the harness never
-delivered `SessionStart`.
+process-random rand, serve's own PID, in-process key cache) when spawn/fork
+sender resolution finds none — so spawn/fork driver-key resolution works even
+where the harness never delivered `SessionStart`.
 `WriteImplicit`/`RemoveImplicit`/`SweepDeadImplicit`/`FindImplicitAtCwd` are the
 per-rand storage API.
 
@@ -157,7 +156,7 @@ worktree paths. Applies `claude-allow` rules from sweatfile to
   control what command is exec'd. Defaults to `$SHELL`.
 - **Session picking**: both `sc resume` and `sc close` source from `session.ListForRepo` via `internal/sessionpick` (`Choose` for close, `ChooseAutoSingle` for resume, which short-circuits a lone candidate past the picker), sorted active-first by `session.SortStates`. Tab completion (`completeWorktreeTargets`, shared by resume/close/merge/update-description) scopes via `session.ListForScope` instead: the containing repo's sessions (offered by bare dirname) plus any session whose repo sits beneath the cwd (offered by `<repo>/<branch>` session key — a cwd above nested repos, e.g. `~/eng` over `~/eng/repos/*`, sees them all); outside any repo, all non-abandoned sessions. Completion labels reuse the picker rows' Detail strings so both read identically. The resume picker (only — close stays local-only) appends cached remote rows from `remote.ReadAllCaches` after the local rows (`Item.State` nil, `Item.Target` = `host:<id>`); selecting one routes over the remote attach template with no dialog, and remote rows never count toward the lone-candidate shortcut. Non-TTY callers get an error listing IDs instead of a hung prompt. Orphaned git worktrees without a state file are not valid `sc close` targets; remove them with `git worktree remove`.
 - **Resume confirmation**: auto-detect and picker-single-match resume show a clown-style huh confirm (`resumeConfirmPlan` in `cmd/spinclass/resume_confirm.go` is the pure decision seam); `-y/--yes` skips it. Explicit `sc resume <id>` and multi-match picker selection are dialog-free (naming/selecting is the confirmation — keeps remote attach templates non-interactive). An `active` session (live PID, probably attached elsewhere) warns with default Cancel; `-y` does NOT skip the warning variant, and non-TTY always errors there.
-- **External tool deps**: `git` is always required and resolved from `PATH`. `madder` and `direnv` are runtime deps **only** when the binary was built via `lib.mkSpinclass` with the matching input — those paths are burned in at link time (see `spinclass-build-pins(7)` and FDR 0003); the default `nix build` produces a binary with both pins empty, in which case the madder integration is dormant and direnv falls back to `PATH`. `clown` is an optional runtime dep for job-wakeup emits (`internal/clown`): chat wake emits AND async merge/check job-lifecycle emits both fire when `$CLOWN_BIN` is set (the running-under-clown signal) and are dormant otherwise — clown's job-watch monitor is the sole chat push path; without clown, `chat-read` polling is the only receive path (see FDR 0010 and the async section below). `zmx` is an optional runtime dep for `sc spawn`/detached fork **only** when the default `[session-entry].spawn` template is in effect — the template is sweatfile-overridable to any multiplexer (FDR 0006). Interactive prompts use the in-process `huh` library (no `gum` dependency).
+- **External tool deps**: `git` is always required and resolved from `PATH`. `madder` and `direnv` are runtime deps **only** when the binary was built via `lib.mkSpinclass` with the matching input — those paths are burned in at link time (see `spinclass-build-pins(7)` and FDR 0003); the default `nix build` produces a binary with both pins empty, in which case the madder integration is dormant and direnv falls back to `PATH`. `clown` is an optional runtime dep for job-wakeup emits (`internal/clown`): async merge/check job-lifecycle emits fire when `$CLOWN_BIN` is set (the running-under-clown signal) and are dormant otherwise (see FDR 0010 and the async section below). Cross-session chat left spinclass entirely (FDR 0017) and is now a clown construct, so it is no longer a spinclass concern. `zmx` is an optional runtime dep for `sc spawn`/detached fork **only** when the default `[session-entry].spawn` template is in effect — the template is sweatfile-overridable to any multiplexer (FDR 0006). Interactive prompts use the in-process `huh` library (no `gum` dependency).
 
 ## CLI Commands
 
@@ -231,9 +230,9 @@ spawn template returns — it opens a terminal window onto the worker
 `sc resume` emits one TTY-gated OSC-2 title (`[session-entry].resume-title`,
 default `"{id}"`, empty disables) before exec'ing the attach entrypoint,
 since spawned sessions' ptys have no title-writing shell (#154).
-Coordination after the hello is the FDR 0010 chat system —
-the brief should tell the worker to message the driver's session key when
-done. `fork-session` is the same-repo variant (caller must be in an sc
+Coordination after the hello is clown's cross-session chat (chat left
+spinclass entirely — FDR 0017) — the brief should tell the worker to message
+the driver via clown chat when done. `fork-session` is the same-repo variant (caller must be in an sc
 worktree; see #142 for the implicit-driver gap). `internal/spawn` owns
 resolution, template substitution, and the hello-gated launch.
 
@@ -316,8 +315,8 @@ spinclass-side switch). Known limitation: a job whose serve process
 dies mid-run is reported `interrupted` by the next `session-job-status`
 read but never wakes — a dead producer can't emit. The failed-state
 wake message carries the first `✗ ` line of the plain-rendered result
-when present. `internal/clown` is the shared producer integration (chat's
-`EmitWake` delegates to it).
+when present. `internal/clown` is the shared producer integration for the
+async job-lifecycle emits.
 
 ### Pre-merge hook build worktree
 

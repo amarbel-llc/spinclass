@@ -81,24 +81,6 @@ func TestEnabledRequiresClownBin(t *testing.T) {
 	}
 }
 
-func TestSendMessageArgv(t *testing.T) {
-	argsFile := filepath.Join(t.TempDir(), "args")
-	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, "msg-12345678", true))
-
-	err := SendMessage(context.Background(), "clown/peer", "spinclass/me", "spinclass", "hello", "chat-read from=spinclass/me peek=true")
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
-	assertArgv(t, recordedArgs(t, argsFile), []string{
-		"job", "message",
-		"--target", "clown/peer",
-		"--from", "spinclass/me",
-		"--source", "spinclass",
-		"--message", "hello",
-		"--result-ref", "chat-read from=spinclass/me peek=true",
-	})
-}
-
 func TestStartJobArgvAndID(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
 	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, "merge-9f3c1a2b", true))

@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: experimental
 date: 2026-06-14
 promotion-criteria: |
   proposed -> experimental: clown RFC-0013 (clownfile + per-instance-key
@@ -16,7 +16,11 @@ promotion-criteria: |
 
 # clown ⇆ spinclass: session-attach, grouping, and chat ownership rescope
 
-> **Draft (proposed).** This is the spinclass-side half of a two-document
+> **Experimental** — the clown keystone landed (clown `4d67a42`) and **Piece 4
+> (the spinclass chat deletion) landed on master 2026-06-14**; the spawn hello
+> was first carved into `internal/spawnhandshake`. Remaining: the clownfile/mux
+> attach (Piece 1, gated on clown's `[attach]`) and the presence-consume read
+> (clown#137). This is the spinclass-side half of a two-document
 > contract. The clown-owned design — the clownfile schema, the **per-instance
 > key derivation**, the **chat construct**, and the **spinclass-session
 > addressing decoration** — is normative in **clown RFC-0013** (the companion,
@@ -262,9 +266,9 @@ registry.
   polling is the pull fallback.
 - **Recipients (spinclass):** `chat-list-sessions` via `session.ListAll`.
 
-### After (deleted — chat is a clown construct)
+### After (DELETED on master 2026-06-14 — chat is a clown construct)
 
-The entire chat surface **leaves spinclass**:
+The entire chat surface **left spinclass**:
 
 - **delete** `internal/chat/` (store, cursor, wake emit, subject handling);
 - **remove** the `chat-send` / `chat-read` / `chat-list-sessions` MCP tools and
@@ -410,9 +414,9 @@ universal path — never while an old binary is still live.
   presence-read (RFC-0013 §3.3).
 - **FDR-0016** — the prior spinclass-side half of the clown ⇆ spinclass
   contract (identity / addressing / liveness); this FDR redraws its Venn.
-- **FDR-0009** — cross-session chat; its spinclass store + `chat-*` surface are
-  **removed** by Piece 4 (chat becomes a clown construct). FDR-0009 should be
-  marked superseded by FDR-0017 on the spinclass side once Piece 4 lands.
+- **FDR-0009** — cross-session chat; its spinclass store + `chat-*` surface were
+  **removed** by Piece 4 (chat is now a clown construct). FDR-0009 is marked
+  **superseded by FDR-0017** (Piece 4 landed 2026-06-14).
 - FDR-0014 (implicit sessions / SessionStart-End materialization), FDR-0011
   (remote sessions — **unchanged**; remote attach stays spinclass, migration
   out of scope — Sasha decided 2026-06-14: not a used feature yet),
