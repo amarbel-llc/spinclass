@@ -46,7 +46,7 @@
         spinclassPinned = spinclass.lib.${system}.mkSpinclass {
           dodder = dodder.packages.${system}.default;
           madder = dodder.packages.${system}.madder-bin;
-          direnv = pkgs.direnv;
+          inherit (pkgs) direnv;
         };
 
         # Plugin records mirror ~/eng/lib/circus.nix: each is a flake-shaped

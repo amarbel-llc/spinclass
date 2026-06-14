@@ -1,6 +1,7 @@
 # conformist configuration (treefmt successor): the goimports -> gofumpt -> nixfmt
 # -> shfmt formatter chain (plus tommy fmt for TOML) that produces this repo's
-# canonical formatting, plus linters conformist runs natively (shellcheck).
+# canonical formatting, plus the linters (shellcheck, go vet, statix + deadnix
+# for Nix, and the tommy-codegen drift driver).
 # Run via `conformist` (repair) /
 # `conformist check`. Wired as the flake `formatter` and gated by `just lint-fmt`.
 
@@ -90,3 +91,20 @@ command = "go"
 options = ["vet", "./..."]
 includes = ["*.go"]
 passes-files = false
+
+# Nix linters (no autofix wired — check-only, like shellcheck/govet).
+# statix is target-oriented (one path, defaults to `.`), so run-once whole-tree:
+# passes-files=false → `statix check` walks the tree; includes only GATES it.
+[linter.statix]
+command = "statix"
+options = ["check"]
+includes = ["*.nix"]
+passes-files = false
+
+# deadnix takes explicit file args, so leave passes-files at its default (true):
+# conformist appends the matched .nix files → `deadnix --fail <files>` (exit
+# non-zero on dead code).
+[linter.deadnix]
+command = "deadnix"
+options = ["--fail"]
+includes = ["*.nix"]

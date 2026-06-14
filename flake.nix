@@ -125,6 +125,9 @@
             pkgs.nixfmt
             pkgs.shfmt
             pkgs.shellcheck
+            # Nix linters (conformist.toml [linter.statix] / [linter.deadnix]).
+            pkgs.statix
+            pkgs.deadnix
             # tommy fmt owns *.toml (conformist.toml [formatter.tommy]); same
             # input that backs the bridged library + codegen tool.
             tommy.packages.${system}.default
@@ -306,7 +309,7 @@
       {
         packages = {
           default = mkSpinclass { };
-          spinclass-race = spinclass-race;
+          inherit spinclass-race;
         }
         // batsLaneOutputs;
 
@@ -346,6 +349,8 @@
             pkgs.nixfmt
             pkgs.shfmt
             pkgs.shellcheck
+            pkgs.statix
+            pkgs.deadnix
             # tommy codegen tool, from the same flake input that backs the
             # bridged tommy library — so `go generate ./internal/sweatfile`
             # (//go:generate tommy generate) targets a matching cst API.

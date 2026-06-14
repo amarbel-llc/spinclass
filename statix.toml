@@ -1,0 +1,8 @@
+# statix (Nix linter) config — consumed by conformist.toml [linter.statix].
+#
+# Disable the "repeated keys" lint: it flags the idiomatic per-input
+# `inputs.<name>.follows = "..."` flake pattern as a repeated `inputs` key.
+# That pattern is deliberate and readable here (one `follows` line per pinned
+# input); collapsing every input block into a single `inputs = { ... }` is
+# churn with no real benefit. All other statix lints stay on.
+disabled = ["repeated_keys"]
