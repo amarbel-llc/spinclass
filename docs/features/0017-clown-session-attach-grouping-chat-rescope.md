@@ -275,7 +275,13 @@ The entire chat surface **leaves spinclass**:
   sender-identity, cursor, and the recipient listing. The listing is a clown
   **presence index**: each clown registers `{per-instance key, SPINCLASS_SESSION_ID
   decoration, description}` on SessionStart; clown's chat-list reads it grouped
-  by decoration — replacing `chat-list-sessions`.
+  by decoration — replacing `chat-list-sessions`. The `description` source is the
+  existing **`SPINCLASS_DESCRIPTION`** env (spinclass already sets it alongside
+  `SPINCLASS_SESSION_ID` in `executor/session.go` + `spawn/spawn.go`) — no new
+  var. It is **launch-time**: `update-this-session-description` rewrites session
+  state, not a live process env, so a mid-session rename doesn't propagate.
+  Both vars are absent for implicit (main-checkout) sessions spinclass doesn't
+  launch — the same decoration boundary, not a new one.
 
 What spinclass retains for chat is **only the decoration**:
 `SPINCLASS_SESSION_ID` set in each clown's env, kept accurate by the FDR-0016 /
@@ -320,9 +326,12 @@ landed, so it gates nothing.
    journal record itself**: today's journal is *wake-only* (it carries the
    subject + a recovery hint, never the body — the body lives only in
    spinclass's `chatroom/` store, the #103 truncation guard). Journal-as-store
-   therefore requires clown's chat-send to write the **full body** into the
-   journal record, kept **distinct from the subject-only wake notification** (a
-   full body in the wake line re-triggers #103). See the body-gap below.
+   therefore requires the **full body** stored distinctly from the subject-only
+   wake notification (a full body in the wake line re-triggers #103).
+   **Resolved (RFC-0013 §3.1, clown-side): the body lands in the RFC-0010
+   per-message *spool*, not a fat record field; the journal record keeps
+   `Message` = the ≤200-rune subject; record + spool = the store.** See the
+   body-gap below.
 3. **clown — clownfile** (attach + profile, cascading): clown reads it on boot
    and wraps itself in the multiplexer. Independent of (1)/(2); can land in
    parallel.
@@ -342,7 +351,8 @@ message to the `chatroom/` store and emits a `clown job message` wake carrying
 **only the subject** (≤200 runes) + a recovery hint — never the body
 (`internal/chat/wake.go`, `internal/clown/clown.go`; the latter's header:
 "the journal … is the wake layer only"). So the journal is a notification log,
-not a store, until step 2 makes clown's chat-send write full bodies.
+not a store, until step 2 makes clown's chat-send write full bodies (to the
+RFC-0010 per-message spool; the record keeps the ≤200-rune subject).
 
 **Mixed-fleet window (the one real hazard — step 5).** The chat surface is
 **per-binary** — a session reads/writes via whatever its binary serves (old →
