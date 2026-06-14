@@ -1,4 +1,4 @@
-default: lint build test
+default: lint build test gen-tommy-check
 
 build:
     nix build --show-trace
@@ -47,9 +47,20 @@ deps:
 # library), so `go generate` (//go:generate tommy generate) finds it on PATH —
 # do NOT `go build` tommy from the main module here: module graph pruning
 # drops the codegen tool's transitive deps from go.sum (#140). Run after
-# `just deps`.
+# `just deps`. (No trailing gofumpt: tommy v0.4.6 gofumpt's its generated
+# output internally, version-matched to go.mod via #134, so an extra pass is a
+# no-op.)
 gen-tommy:
-    nix develop --command bash -c 'go generate ./internal/sweatfile/ && gofumpt -w internal/sweatfile/sweatfile_tommy.go'
+    nix develop --command go generate ./internal/sweatfile/
+
+# Drift guard (#159): regenerate the codec and fail if it differs from the
+# committed file — catches a `tommy` pin bump landed without a matching
+# `just gen-tommy`. Lives here (a go-available lane, folded into `default` →
+# the pre-merge hook) rather than conformist: the [linter.tommy-codegen] check
+# is a deliberate no-op because the conformist check lane lacks `go`. The
+# conformist stanza automates regen in the repair lane; this enforces it.
+gen-tommy-check: gen-tommy
+    git diff --exit-code -- internal/sweatfile/sweatfile_tommy.go
 
 # [explore] Inspect nix-store --gc --print-roots output for entries pointing
 # into the spinclass repo. Used to investigate issue #67 — what does
