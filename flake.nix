@@ -125,6 +125,9 @@
             pkgs.nixfmt
             pkgs.shfmt
             pkgs.shellcheck
+            # tommy fmt owns *.toml (conformist.toml [formatter.tommy]); same
+            # input that backs the bridged library + codegen tool.
+            tommy.packages.${system}.default
           ];
           text = ''exec conformist "$@"'';
         };

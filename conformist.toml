@@ -1,6 +1,7 @@
 # conformist configuration (treefmt successor): the goimports -> gofumpt -> nixfmt
-# -> shfmt formatter chain that produces this repo's canonical formatting, plus
-# linters conformist runs natively (shellcheck). Run via `conformist` (repair) /
+# -> shfmt formatter chain (plus tommy fmt for TOML) that produces this repo's
+# canonical formatting, plus linters conformist runs natively (shellcheck).
+# Run via `conformist` (repair) /
 # `conformist check`. Wired as the flake `formatter` and gated by `just lint-fmt`.
 
 # Generated / locked / prose / hand-formatted — not formatted.
@@ -46,6 +47,16 @@ includes = ["*.nix"]
 command = "shfmt"
 options = ["-w", "-i", "2", "-s", "-ci"]
 includes = ["*.sh", "*.bash", "*.bats"]
+
+# TOML: tommy fmt owns *.toml in place (conformist passes matched files
+# positionally -> `tommy fmt <files...>`). `*` crosses `/` in conformist's
+# globs, so one pattern covers nested files. The repo's only .toml files
+# (conformist.toml, gomod2nix.toml) are excluded, so this is forward-looking
+# wiring for future TOML rather than a reformat of today's tree.
+[formatter.tommy]
+command = "tommy"
+options = ["fmt"]
+includes = ["*.toml"]
 
 # Linter: shellcheck runs read-only in `conformist check` (no autofix).
 [linter.shellcheck]
