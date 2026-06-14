@@ -112,6 +112,12 @@
         pkgs-master = import nixpkgs-master { inherit system; };
         inherit (pkgs) lib;
 
+        # tommy's conformist codegen driver ([linter.tommy-codegen]), owned by
+        # the tommy flake so the binary is resolved by the pinned tommy input
+        # (no per-repo driver duplication). It bakes that tommy in and skips when
+        # go is absent. Repair regen lands in `conformist --commit`.
+        tommyCodegen = tommy.packages.${system}.conformist-tommy-codegen;
+
         # `nix fmt` entry point: conformist (the treefmt successor) wrapped
         # with the formatter binaries its ./conformist.toml drives on PATH.
         # Formatting drift is gated by `just lint-fmt` (conformist check).
@@ -125,6 +131,10 @@
             pkgs.nixfmt
             pkgs.shfmt
             pkgs.shellcheck
+            # tommy (TOML formatter, [formatter.tommy]) + the codegen driver
+            # ([linter.tommy-codegen]) so `nix fmt` resolves both.
+            tommy.packages.${system}.default
+            tommyCodegen
           ];
           text = ''exec conformist "$@"'';
         };
@@ -344,6 +354,9 @@
             # bridged tommy library — so `go generate ./internal/sweatfile`
             # (//go:generate tommy generate) targets a matching cst API.
             tommy.packages.${system}.default
+            # conformist's tommy-codegen linter driver (regen on `conformist`
+            # repair / drift check on `conformist check`).
+            tommyCodegen
           ]
           ++ (with pkgs-master; [
             delve

@@ -47,7 +47,32 @@ command = "shfmt"
 options = ["-w", "-i", "2", "-s", "-ci"]
 includes = ["*.sh", "*.bash", "*.bats"]
 
+# TOML via tommy's CST-preserving formatter (`tommy fmt`). conformist.toml
+# itself is excluded above (intentional layout); the generated
+# sweatfile_tommy.go is .go, not .toml, so it is untouched here.
+[formatter.tommy]
+command = "tommy"
+options = ["fmt"]
+includes = ["*.toml"]
+
 # Linter: shellcheck runs read-only in `conformist check` (no autofix).
 [linter.shellcheck]
 command = "shellcheck"
 includes = ["*.sh", "*.bash", "*.bats"]
+
+# tommy codegen as a REPAIR linter: `conformist` / `nix fmt` / `conformist
+# --commit` runs `tommy generate` for every `//go:generate tommy generate` source
+# file (here: internal/sweatfile/sweatfile.go), so a regenerated
+# sweatfile_tommy.go lands in the auto-fix chore commit. The driver self-gates on
+# tommy + go (present in the devshell `just fmt` runs under), so it is a no-op
+# where the toolchain is absent. The CHECK command is a deliberate no-op (`true`)
+# so `conformist check` never reports false codegen drift — `tommy generate
+# --check` compares against tommy's raw render, which can differ from the
+# committed file once it has been re-run through the formatter (see
+# `just gen-tommy`); true codegen staleness stays gated by that recipe.
+# passes-files=false: the driver walks the tree for the directive itself.
+[linter.tommy-codegen]
+command = "true"
+repair-command = "conformist-tommy-codegen"
+includes = ["*.go", "**/*.go"]
+passes-files = false
