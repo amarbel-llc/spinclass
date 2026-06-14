@@ -353,16 +353,19 @@ boundary**), so the two never collide on the `chat-send`/`chat-read` tool names.
 The window is purely *cross-binary*. The only thing lost in it is cross-binary
 **body** delivery (an old-binary session and a new-binary session use different
 stores, and neither reads the other's). Two ways to handle it:
-- **accept the brief window** (recommended; chat is ephemeral coordination, and
-  FDR-0009 already accepted a transitional window) — hard-swap at rebuild, lose
-  cross-binary bodies for the (short) duration; or
+- **accept the brief window** — hard-swap at rebuild, lose cross-binary bodies
+  for the (short) duration; or
 - **bridge it (zero-loss)** — an additive spinclass pre-step: upgrade the emit
   to write the full body to the journal *and* read from the journal *before*
   deleting `chat-*`, so both binaries share one store.
 
-The interop bar (accept vs bridge) is a rollout-risk call for Sasha.
-Regardless: **delete spinclass chat last and fleet-global**, after clown's chat
-is the universal path — never while an old binary is still live.
+**Decided (Sasha, 2026-06-14): accept the brief window — no bridge.** Chat is
+ephemeral coordination and FDR-0009 already accepted a transitional window, so
+the brief cross-binary loss is acceptable; spinclass builds no dual-write
+pre-step. clown is the full-body journal writer; spinclass's chatroom store +
+subject wake stay untouched until the deletion. Regardless of that choice:
+**delete spinclass chat last and fleet-global**, after clown's chat is the
+universal path — never while an old binary is still live.
 
 ## Limitations / non-goals
 
