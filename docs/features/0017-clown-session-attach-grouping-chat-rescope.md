@@ -301,6 +301,47 @@ This is **clown RFC-0013** (filed on clown master, status proposed; it
 references FDR-0017 — the mutual cross-ref is complete). The spinclass-side
 **presence read** (consuming RFC-0013 §3.3) is deferred to clown#137.
 
+## Migration sequencing
+
+The order is fixed by one rule: **the spinclass work is deletion, and nothing is
+deleted before clown's replacement is live.** Steps 1–3 are clown's and unblock
+the spinclass removals; the spinclass decoration foundation
+(`SPINCLASS_SESSION_ID` + the #169 no-leak strip in `session/env.go`) is already
+landed, so it gates nothing.
+
+1. **clown — per-instance key** (the keystone): a unique `CLOWN_SESSION_ID` per
+   instance (basis: the `--session-id` uuid). Independent. As a side effect this
+   fixes the #169 directed-wake drop *by construction* — once each instance arms
+   its own channel, the decoration-derived group channel is the only shared one.
+2. **clown — chat construct**: the derived channels (per-instance, group
+   `ChannelID(SPINCLASS_SESSION_ID)`, broadcast), the per-reader cursor, the
+   `chat-*` surface, and the presence index. Depends on (1). Its only spinclass
+   input — the decoration — is already in place.
+3. **clown — clownfile** (attach + profile, cascading): clown reads it on boot
+   and wraps itself in the multiplexer. Independent of (1)/(2); can land in
+   parallel.
+4. **spinclass — drop the `[session-entry]` multiplexer defaults.** Gated on (3)
+   being live, or sessions launch with no multiplexer. (`liveness-probe` and
+   `tombstone-retention` stay; `resume-title` moves with clown's resume attach.)
+5. **spinclass — delete chat** (`internal/chat`, the `chat-*` tools, the
+   `chatroom/` store, `currentSessionKey`'s chat role). Gated on (2) being live
+   **and** the fleet having moved to clown's chat-read (see the mixed-fleet
+   window). Then mark **FDR-0009 superseded by FDR-0017**.
+6. **deferred — spinclass-consumes-presence** (clown#137): optional, later, for
+   a per-clown group view in `sc list`. Not on the critical path.
+
+**Mixed-fleet window (the one real hazard — step 5).** Today `chat-send`
+dual-writes: the spinclass `chatroom/` store *and* a `clown job message` wake,
+so every sent message already reaches clown's journal. During rollout a *new*
+(chat-deleted) session reads via clown's chat-read and still sees an *old*
+session's messages (they're in the journal). The asymmetric risk is the
+reverse: an *old* session reading only its `chatroom/` store would miss a *new*
+session's messages (a new session writes only to the journal). Mitigation:
+**delete spinclass chat last and fleet-global**, after clown's chat is the
+universal read path — keep the old dual-write alive until no session depends on
+the `chatroom/` store, mirroring FDR-0009's own fleet-global flip. Both modes
+always reach the journal, so the cutover loses nothing.
+
 ## Limitations / non-goals
 
 - This is the spinclass side; clown's transport/identity/attach/chat
@@ -318,10 +359,10 @@ references FDR-0017 — the mutual cross-ref is complete). The spinclass-side
   they are worktree-manager core, not chat. Only the chat surface and the
   multiplexer defaults leave.
 - `posh` is not wired today; this FDR does not block on posh#66/#67.
-- Migration sequencing (when the chat-deletion lands relative to clown's chat
-  construct going live; the mixed-fleet window) is deferred to the
-  `proposed → experimental` transition. The dependency order (keystone +
-  decoration first, then spinclass deletes chat) is fixed.
+- Migration sequencing is no longer deferred — see § Migration sequencing. The
+  dependency order (clown keystone + chat construct + clownfile → spinclass
+  drops mux defaults → spinclass deletes chat) is fixed; only the rollout
+  *timing* tracks clown's implementation pace.
 
 ## More Information
 
