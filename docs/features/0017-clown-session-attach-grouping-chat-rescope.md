@@ -174,8 +174,9 @@ glue (finalize against the clownfile schema):
 - **remote attach** — **stays spinclass, unchanged** (`internal/remote` /
   FDR-0011). This rescope is the **local** `zmx`/`posh` implicit-per-instance
   attach only; the `clown resume` remote template floated earlier was an
-  extrapolation, not a decision. Migrating the remote path is a separate,
-  bigger call **escalated to Sasha** and deliberately out of scope here.
+  extrapolation, not a decision. **Decided (Sasha, 2026-06-14): leave as-is —
+  remote sessions are not a used feature yet**, so migrating the remote path is
+  out of scope here and is a separate, later call if it's ever wanted.
 
 ## Piece 2 — clownfile (clown-owned)
 
@@ -338,7 +339,8 @@ references FDR-0017 — the mutual cross-ref is complete). The spinclass-side
   marked superseded by FDR-0017 on the spinclass side once Piece 4 lands.
 - FDR-0014 (implicit sessions / SessionStart-End materialization), FDR-0011
   (remote sessions — **unchanged**; remote attach stays spinclass, migration
-  out of scope / escalated to Sasha), FDR-0010 (clown job-wakeup producer),
+  out of scope — Sasha decided 2026-06-14: not a used feature yet),
+  FDR-0010 (clown job-wakeup producer),
   FDR-0006 (spawn/fork lineage — the local multiplexer attach templates Piece 1
   moves).
 - spinclass#118 (shared-checkout sender ambiguity — dissolved by the keystone +
