@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/chat"
 	"github.com/amarbel-llc/spinclass/internal/session"
+	"github.com/amarbel-llc/spinclass/internal/spawnhandshake"
 	"github.com/amarbel-llc/spinclass/internal/testgit"
 )
 
@@ -146,7 +146,7 @@ func awaitForkHello(newPath, workerKey, driverKey string) (<-chan error, chan<- 
 				return
 			case <-tick.C:
 				if _, err := os.Stat(filepath.Join(newPath, "launched")); err == nil {
-					helloErr <- chat.SendHello(workerKey, driverKey)
+					helloErr <- spawnhandshake.SendHello(workerKey, driverKey)
 					return
 				}
 			}

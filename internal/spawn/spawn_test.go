@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/chat"
 	"github.com/amarbel-llc/spinclass/internal/session"
+	"github.com/amarbel-llc/spinclass/internal/spawnhandshake"
 	"github.com/amarbel-llc/spinclass/internal/testgit"
 )
 
@@ -80,7 +80,7 @@ func helloAfterLaunch(t *testing.T, repoPath, driverKey string) (func(), chan er
 				matches, _ := filepath.Glob(filepath.Join(repoPath, ".worktrees", "*", "launched"))
 				if len(matches) == 1 {
 					branch := filepath.Base(filepath.Dir(matches[0]))
-					helloErr <- chat.SendHello("worker/"+branch, driverKey)
+					helloErr <- spawnhandshake.SendHello("worker/"+branch, driverKey)
 					return
 				}
 			}

@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/chat"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/shop"
+	"github.com/amarbel-llc/spinclass/internal/spawnhandshake"
 	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 )
@@ -217,7 +217,7 @@ func launchRendered(rp worktree.ResolvedPath, driverKey, desc string, deadline t
 	// live (FDR 0006 #149 design: window-at-launch).
 	launchSpawnWindow(window, rp, desc, sessionEnv)
 
-	if err := chat.WaitForHello(driverKey, rp.SessionKey, startTime, deadline); err != nil {
+	if err := spawnhandshake.WaitForHello(driverKey, rp.SessionKey, startTime, deadline); err != nil {
 		return Result{}, err
 	}
 

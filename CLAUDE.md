@@ -174,7 +174,7 @@ worktree paths. Applies `claude-allow` rules from sweatfile to
   `sc check`                       Run [hooks].pre-merge in the current worktree (agent-CI surface)
   `sc clean`                       Remove merged worktrees and abandoned sessions
   `sc fork [branch]`               Fork current worktree (supports `--from <dir>`; `--brief` launches the fork as a detached worker, FDR 0006)
-  `sc spawn <repo> --brief "…"`    Launch a detached, harness-booted worker session in a sibling repo (dirname-addressed; blocks on the worker's chat hello, FDR 0006)
+  `sc spawn <repo> --brief "…"`    Launch a detached, harness-booted worker session in a sibling repo (dirname-addressed; blocks on the worker's spawn-handshake hello, FDR 0006)
   `sc pull`                        Pull repos and rebase worktrees
   `sc validate`                    Validate sweatfile hierarchy
   `sc perms list|review|edit`      Inspect or edit permission tier rules
@@ -212,9 +212,11 @@ carries the WORKER's spinclass identity (mirrors `SessionExecutor`) and
 strips the driver's inherited `CLOWN_SESSION_ID`/`CLAUDE_SESSION_ID`
 (`session.StripInheritedSessionIDs`) so the worker's clown re-derives its
 own job-wakeup channel instead of arming the driver's (#169). The
-spawn blocks until the worker's `SessionStart` hook chat-sends a hello to
-the driver (keyed off `spawned_by` in the worker's state; 60s default
-deadline, `--hello-timeout` tunes it; dedup via `hello_sent_at`). On
+spawn blocks until the worker's `SessionStart` hook sends a hello to the
+driver via the standalone `internal/spawnhandshake` (a dedicated
+per-`(worker,driver)` file, no longer the chat store — FDR 0017 carve-out;
+keyed off `spawned_by` in the worker's state; 60s default deadline,
+`--hello-timeout` tunes it; dedup via `hello_sent_at`). On
 timeout the worker worktree+state persist for inspection (`sc close`
 cleans). Spawned workers may not themselves spawn/fork sub-workers — all
 four spawn surfaces refuse a caller whose state carries `spawned_by`

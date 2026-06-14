@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/chat"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sessionlog"
+	"github.com/amarbel-llc/spinclass/internal/spawnhandshake"
 	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 	"github.com/google/shlex"
@@ -185,7 +185,7 @@ func maybeSendSpawnHello(cwd string) {
 	if st.SpawnedBy == "" || st.HelloSentAt != nil {
 		return
 	}
-	if err := chat.SendHello(st.SessionKey, st.SpawnedBy); err != nil {
+	if err := spawnhandshake.SendHello(st.SessionKey, st.SpawnedBy); err != nil {
 		sessionlog.Errorf("maybeSendSpawnHello send-failed key=%s to=%s err=%v", st.SessionKey, st.SpawnedBy, err)
 		return
 	}

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/chat"
 	"github.com/amarbel-llc/spinclass/internal/session"
+	"github.com/amarbel-llc/spinclass/internal/spawnhandshake"
 	"github.com/amarbel-llc/spinclass/internal/testgit"
 )
 
@@ -1525,32 +1525,16 @@ func fireSessionStart(t *testing.T, cwd string) {
 	}
 }
 
-// readHellos peek-reads the chatroom as the driver, filtered to the worker's
-// sends. peek=true keeps the driver's cursor untouched across repeated calls.
-func readHellos(t *testing.T, driver, worker string) []chat.Message {
-	t.Helper()
-	msgs, err := chat.Read(driver, chat.ReadFilter{ToMe: true, From: worker}, true)
-	if err != nil {
-		t.Fatalf("chat.Read: %v", err)
-	}
-	return msgs
-}
-
 func TestSessionStartSpawnHello(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	repo, wt := initSpawnedWorktree(t, "driver/key")
 
 	fireSessionStart(t, wt)
 
-	msgs := readHellos(t, "driver/key", "myrepo/feature")
-	if len(msgs) != 1 {
-		t.Fatalf("expected exactly one hello message, got %d: %+v", len(msgs), msgs)
-	}
-	if msgs[0].To != "driver/key" {
-		t.Errorf("hello To = %q, want driver/key", msgs[0].To)
-	}
-	if !strings.HasPrefix(msgs[0].Subject, chat.HelloSubject) {
-		t.Errorf("hello Subject = %q, want %q prefix", msgs[0].Subject, chat.HelloSubject)
+	// The driver's WaitForHello must see the worker's hello, pair-scoped to
+	// driver/key ← myrepo/feature.
+	if err := spawnhandshake.WaitForHello("driver/key", "myrepo/feature", time.Now().Add(-time.Minute), time.Second); err != nil {
+		t.Fatalf("expected a spawn hello for the driver: %v", err)
 	}
 
 	st, err := session.Read(repo, "feature")
@@ -1570,14 +1554,27 @@ func TestSessionStartSpawnHello(t *testing.T) {
 
 func TestSessionStartSpawnHelloDedupes(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	_, wt := initSpawnedWorktree(t, "driver/key")
+	repo, wt := initSpawnedWorktree(t, "driver/key")
 
 	fireSessionStart(t, wt)
-	fireSessionStart(t, wt) // resume/clear/compact re-fire
+	st1, err := session.Read(repo, "feature")
+	if err != nil {
+		t.Fatalf("session.Read: %v", err)
+	}
+	if st1.HelloSentAt == nil {
+		t.Fatal("HelloSentAt not set after first SessionStart")
+	}
 
-	msgs := readHellos(t, "driver/key", "myrepo/feature")
-	if len(msgs) != 1 {
-		t.Fatalf("expected exactly one hello after two SessionStarts, got %d: %+v", len(msgs), msgs)
+	fireSessionStart(t, wt) // resume/clear/compact re-fire must NOT re-send
+
+	st2, err := session.Read(repo, "feature")
+	if err != nil {
+		t.Fatalf("session.Read: %v", err)
+	}
+	// Dedup is the HelloSentAt guard: a re-send would stamp a new HelloSentAt,
+	// so an unchanged timestamp proves the second fire did not re-send.
+	if st2.HelloSentAt == nil || !st2.HelloSentAt.Equal(*st1.HelloSentAt) {
+		t.Errorf("HelloSentAt changed on re-fire (hello re-sent): %v -> %v", st1.HelloSentAt, st2.HelloSentAt)
 	}
 }
 
@@ -1587,9 +1584,9 @@ func TestSessionStartWorktreeWithoutSpawnedByNoHello(t *testing.T) {
 
 	fireSessionStart(t, wt)
 
-	msgs := readHellos(t, "driver/key", "myrepo/feature")
-	if len(msgs) != 0 {
-		t.Fatalf("expected no hello without SpawnedBy, got %d: %+v", len(msgs), msgs)
+	// No SpawnedBy → no hello: the driver's wait must time out.
+	if err := spawnhandshake.WaitForHello("driver/key", "myrepo/feature", time.Now().Add(-time.Minute), 200*time.Millisecond); err == nil {
+		t.Fatal("expected no hello without SpawnedBy")
 	}
 	st, err := session.Read(repo, "feature")
 	if err != nil {
@@ -1605,7 +1602,8 @@ func TestSessionStartWorktreeWithoutSpawnedByNoHello(t *testing.T) {
 
 func TestSessionStartSpawnHelloSendFailureLeavesUnmarked(t *testing.T) {
 	// Write the state under a working XDG_STATE_HOME, then point
-	// XDG_STATE_HOME at a regular FILE so chat.Send's MkdirAll fails.
+	// XDG_STATE_HOME at a regular FILE so spawnhandshake.SendHello's MkdirAll
+	// fails.
 	// session.Read/Write key off the worktree-local state.json, so the
 	// post-hook state assertions still work.
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
