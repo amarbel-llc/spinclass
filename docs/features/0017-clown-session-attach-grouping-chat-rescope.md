@@ -17,10 +17,18 @@ promotion-criteria: |
 # clown ⇆ spinclass: session-attach, grouping, and chat ownership rescope
 
 > **Experimental** — the clown keystone landed (clown `4d67a42`) and **Piece 4
-> (the spinclass chat deletion) landed on master 2026-06-14**; the spawn hello
-> was first carved into `internal/spawnhandshake`. Remaining: the clownfile/mux
-> attach (Piece 1, gated on clown's `[attach]`) and the presence-consume read
-> (clown#137). This is the spinclass-side half of a two-document
+> (the spinclass chat deletion) landed on master 2026-06-14** (spinclass
+> `11f650b`); the spawn hello was first carved into `internal/spawnhandshake`.
+> The eng env bump then deployed it, and the cutover is **verified live
+> end-to-end 2026-06-14**: clown chat is delivering cross-session (a clown-chat
+> message reached a spinclass session and was answered over `clown chat_send`),
+> and `clown chat_list` confirms the keystone in production — unique per-instance
+> UUID keys (no #118 collapse), the `SPINCLASS_SESSION_ID` decoration, the
+> `SPINCLASS_DESCRIPTION` presence label, and the presence index, all rendering.
+> Remaining: the clownfile/mux attach (Piece 1, gated on clown's `[attach]`) and
+> the presence-consume read (clown#137); `experimental → testing` also wants the
+> ~1-week soak and a multi-clown group-send exercised. This is the spinclass-side
+> half of a two-document
 > contract. The clown-owned design — the clownfile schema, the **per-instance
 > key derivation**, the **chat construct**, and the **spinclass-session
 > addressing decoration** — is normative in **clown RFC-0013** (the companion,
