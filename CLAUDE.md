@@ -14,8 +14,8 @@ entrypoints, rebasing/merging back to main, and cleaning up. Aliased as `sc`.
 ``` sh
 just build    # nix build
 just test     # Go tests with TAP-14 output
-just fmt      # gofumpt
-just lint     # go vet
+just fmt      # conformist: format Go/Nix/shell/TOML + regen tommy codec
+just lint     # conformist check: format-drift + shellcheck + go vet + codegen
 just deps     # Regenerate gomod2nix.toml after dependency changes
 ```
 

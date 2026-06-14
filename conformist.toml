@@ -79,3 +79,14 @@ command = "true"
 repair-command = "conformist-tommy-codegen"
 includes = ["*.go"]
 passes-files = false
+
+# go vet, run-once over the whole module. passes-files=false: conformist
+# invokes `go vet ./...` ONCE with no file args (go vet is package-oriented,
+# not per-file). includes=["*.go"] only GATES whether it fires. No autofix, so
+# no repair-command — `conformist check` runs it and fails on vet findings.
+# This folds the former `just lint-vet` into the single conformist gate.
+[linter.govet]
+command = "go"
+options = ["vet", "./..."]
+includes = ["*.go"]
+passes-files = false

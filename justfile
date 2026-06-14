@@ -24,15 +24,14 @@ test-bats-madder:
 fmt:
     nix develop --command conformist
 
-lint: lint-vet lint-fmt
-
-lint-vet:
-    nix develop --command go vet ./...
+lint: lint-fmt
 
 # Read-only format + lint gate via conformist: fails on formatter drift
-# (Go/Nix/shell, per ./conformist.toml) plus shellcheck. `just fmt` is
-# the corresponding write mode. Folded into `just lint` → `just default`,
-# so the pre-merge `just` hook enforces fmt-cleanliness on every merge.
+# (Go/Nix/shell/TOML, per ./conformist.toml) plus the linters — shellcheck
+# and `go vet ./...` (the [linter.govet] run-once entry, formerly the separate
+# `just lint-vet`). `just fmt` is the corresponding write mode. Folded into
+# `just lint` → `just default`, so the pre-merge `just` hook enforces it on
+# every merge.
 lint-fmt:
     nix develop --command conformist check
 
