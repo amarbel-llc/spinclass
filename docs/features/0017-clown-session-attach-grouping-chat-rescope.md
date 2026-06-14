@@ -316,7 +316,13 @@ landed, so it gates nothing.
 2. **clown — chat construct**: the derived channels (per-instance, group
    `ChannelID(SPINCLASS_SESSION_ID)`, broadcast), the per-reader cursor, the
    `chat-*` surface, and the presence index. Depends on (1). Its only spinclass
-   input — the decoration — is already in place.
+   input — the decoration — is already in place. **The load-bearing piece is the
+   journal record itself**: today's journal is *wake-only* (it carries the
+   subject + a recovery hint, never the body — the body lives only in
+   spinclass's `chatroom/` store, the #103 truncation guard). Journal-as-store
+   therefore requires clown's chat-send to write the **full body** into the
+   journal record, kept **distinct from the subject-only wake notification** (a
+   full body in the wake line re-triggers #103). See the body-gap below.
 3. **clown — clownfile** (attach + profile, cascading): clown reads it on boot
    and wraps itself in the multiplexer. Independent of (1)/(2); can land in
    parallel.
@@ -330,17 +336,33 @@ landed, so it gates nothing.
 6. **deferred — spinclass-consumes-presence** (clown#137): optional, later, for
    a per-clown group view in `sc list`. Not on the critical path.
 
-**Mixed-fleet window (the one real hazard — step 5).** Today `chat-send`
-dual-writes: the spinclass `chatroom/` store *and* a `clown job message` wake,
-so every sent message already reaches clown's journal. During rollout a *new*
-(chat-deleted) session reads via clown's chat-read and still sees an *old*
-session's messages (they're in the journal). The asymmetric risk is the
-reverse: an *old* session reading only its `chatroom/` store would miss a *new*
-session's messages (a new session writes only to the journal). Mitigation:
-**delete spinclass chat last and fleet-global**, after clown's chat is the
-universal read path — keep the old dual-write alive until no session depends on
-the `chatroom/` store, mirroring FDR-0009's own fleet-global flip. Both modes
-always reach the journal, so the cutover loses nothing.
+**The body-gap (corrects an earlier over-claim).** It is *not* true that "every
+sent message already reaches the journal." Today `chat-send` writes the full
+message to the `chatroom/` store and emits a `clown job message` wake carrying
+**only the subject** (≤200 runes) + a recovery hint — never the body
+(`internal/chat/wake.go`, `internal/clown/clown.go`; the latter's header:
+"the journal … is the wake layer only"). So the journal is a notification log,
+not a store, until step 2 makes clown's chat-send write full bodies.
+
+**Mixed-fleet window (the one real hazard — step 5).** The chat surface is
+**per-binary** — a session reads/writes via whatever its binary serves (old →
+spinclass `chatroom/`; new → clown journal). There is **no in-binary
+coexistence**: the spinclass release that deletes `chat-*` ships in lockstep
+with the environment gaining clown's `chat-*` (a **hard swap at the binary
+boundary**), so the two never collide on the `chat-send`/`chat-read` tool names.
+The window is purely *cross-binary*. The only thing lost in it is cross-binary
+**body** delivery (an old-binary session and a new-binary session use different
+stores, and neither reads the other's). Two ways to handle it:
+- **accept the brief window** (recommended; chat is ephemeral coordination, and
+  FDR-0009 already accepted a transitional window) — hard-swap at rebuild, lose
+  cross-binary bodies for the (short) duration; or
+- **bridge it (zero-loss)** — an additive spinclass pre-step: upgrade the emit
+  to write the full body to the journal *and* read from the journal *before*
+  deleting `chat-*`, so both binaries share one store.
+
+The interop bar (accept vs bridge) is a rollout-risk call for Sasha.
+Regardless: **delete spinclass chat last and fleet-global**, after clown's chat
+is the universal path — never while an old binary is still live.
 
 ## Limitations / non-goals
 
