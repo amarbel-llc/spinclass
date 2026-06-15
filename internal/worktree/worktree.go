@@ -52,31 +52,6 @@ func ResolvePath(
 	}, nil
 }
 
-func detectBranch(repoPath string, candidates ...string) (string, string) {
-	seen := make(map[string]bool)
-	var unique []string
-	for _, c := range candidates {
-		if c != "" && !seen[c] {
-			seen[c] = true
-			unique = append(unique, c)
-		}
-	}
-
-	for _, name := range unique {
-		if git.BranchExists(repoPath, name) {
-			return name, name
-		}
-	}
-	for _, name := range unique {
-		if git.RemoteBranchExists(repoPath, name) {
-			return name, name
-		}
-	}
-
-	// No existing branch found — use the last candidate (most transformed).
-	return unique[len(unique)-1], ""
-}
-
 // DetectRepo walks up from dir looking for a .git directory (must be a
 // directory, not a file — files indicate worktrees). Respects
 // GIT_CEILING_DIRECTORIES to prevent discovery above certain paths.

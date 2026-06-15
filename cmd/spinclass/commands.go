@@ -2,7 +2,6 @@ package main
 
 import (
 	"embed"
-	"encoding/json"
 	"log/slog"
 	"os"
 
@@ -108,14 +107,6 @@ func (g globalArgs) FormatOrDefault() string {
 		return "tap"
 	}
 	return g.Format
-}
-
-// parseGlobalArgs unmarshals the args JSON into a globalArgs. Errors are
-// silently ignored: missing or unparseable globals fall back to defaults.
-func parseGlobalArgs(args json.RawMessage) globalArgs {
-	var g globalArgs
-	_ = json.Unmarshal(args, &g)
-	return g
 }
 
 // debugLogger returns a *slog.Logger that writes structured records to

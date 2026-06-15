@@ -12,17 +12,6 @@ func fileExists(path string) (os.FileInfo, bool) {
 	return info, err == nil
 }
 
-func resolveExcludePath(worktreePath string) (string, error) {
-	rel, err := git.Run(worktreePath, "rev-parse", "--git-path", "info/exclude")
-	if err != nil {
-		return "", err
-	}
-	if !filepath.IsAbs(rel) {
-		rel = filepath.Join(worktreePath, rel)
-	}
-	return rel, nil
-}
-
 func gitCommonDir(worktreePath string) (string, error) {
 	rel, err := git.Run(worktreePath, "rev-parse", "--git-common-dir")
 	if err != nil {

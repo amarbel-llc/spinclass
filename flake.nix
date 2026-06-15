@@ -128,6 +128,9 @@
             # Nix linters (conformist.toml [linter.statix] / [linter.deadnix]).
             pkgs.statix
             pkgs.deadnix
+            # staticcheck (conformist.toml [linter.staticcheck]); go-tools is
+            # its nixpkgs home (provides the `staticcheck` binary).
+            pkgs.go-tools
             # tommy fmt owns *.toml (conformist.toml [formatter.tommy]); same
             # input that backs the bridged library + codegen tool.
             tommy.packages.${system}.default
@@ -351,6 +354,7 @@
             pkgs.shellcheck
             pkgs.statix
             pkgs.deadnix
+            pkgs.go-tools
             # tommy codegen tool, from the same flake input that backs the
             # bridged tommy library — so `go generate ./internal/sweatfile`
             # (//go:generate tommy generate) targets a matching cst API.

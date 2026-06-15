@@ -49,10 +49,7 @@ func isKnownTool(name string) bool {
 			return true
 		}
 	}
-	if strings.HasPrefix(name, "mcp__") {
-		return true
-	}
-	return false
+	return strings.HasPrefix(name, "mcp__")
 }
 
 func parseRuleSyntax(rule string) (string, error) {
