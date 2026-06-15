@@ -61,8 +61,8 @@ A new opt-in sweatfile knob on `[hooks]`:
 
 ```toml
 [hooks]
-repair    = "conformist --commit --amend"   # the REPAIR phase command
-pre-merge = "just"                            # the existing VERIFY gate
+repair    = "conformist --commit --amend --exit-zero-on-fix"  # REPAIR phase
+pre-merge = "just"                                            # VERIFY gate
 ```
 
 - `repair` (scalar, sweatfile-cascade override; nil/empty = **disabled**, the
@@ -87,11 +87,13 @@ which conformist's amend refuses by design) — mirroring the implicit-session
 gap already noted for check (#132).
 
 The repair phase emits its own ndjson-crap test point so the verdict stream
-shows what happened:
+shows what happened. With `--exit-zero-on-fix` (see Resolved questions §1) the
+command exits 0 whether or not it changed anything, so the **HEAD-sha delta**
+— not the exit code — distinguishes "repaired" from "already clean":
 
-- exit 0 → `ok  repair <branch> (already conformant)`
-- exit 3 → `ok  repair <branch> (amended <shortsha>: N file(s))`
-- exit 1/2 → `not ok  repair <branch>` with the command's stderr as the
+- exit 0, HEAD unchanged → `ok  repair <branch> (already conformant)`
+- exit 0, HEAD changed → `ok  repair <branch> (amended <shortsha>: N file(s))`
+- nonzero → `not ok  repair <branch>` with the command's stderr as the
   diagnostic, and the merge aborts.
 
 ## Design
@@ -146,19 +148,20 @@ runs detached.
 
 ### Exit-code mapping (continue vs abort)
 
-spinclass cannot treat the repair command like a generic pre-merge hook (any
-nonzero = fail): conformist returns **3 on success-with-fixes**. The proposed
-contract for the repair phase:
+Resolved (§1): conformist's `--exit-zero-on-fix` flag makes the command exit
+**0 on both clean and fixed**, so spinclass treats the repair command like a
+generic hook — **0 = ok, nonzero = abort** — and stays convention-free. The
+draft's `{0,3}` mapping and `repair-success-codes` knob are both dropped.
+Whether an amend actually happened is read from the **HEAD-sha delta**:
 
-- `0` → ok, nothing repaired, continue.
-- `3` → ok, repaired, continue (and the HEAD-sha delta confirms the amend).
+- `0`, HEAD unchanged → ok, nothing repaired, continue.
+- `0`, HEAD changed → ok, repaired (the delta is the amend), continue.
 - anything else → fail, abort the merge, surface stderr.
 
 The HEAD-sha delta (step 2) is the tool-agnostic "did it change anything"
-signal; the exit code only gates ok-vs-fail. Accepting `{0, 3}` as "ok"
-documents a dependency on conformist's convention — see Open questions for
-whether to hardcode it, make the success set configurable, or push a
-plain-`0`-on-fix flag down into conformist.
+signal; the exit code only gates ok-vs-fail. Because `--exit-zero-on-fix`
+carries the convention-bridging inside conformist, spinclass needs no
+knowledge of conformist's `3`-on-fix code at all.
 
 ### What a failed VERIFY leaves behind
 
@@ -177,7 +180,7 @@ will be surprised.
 ```toml
 # Opt in: auto-format-and-fold before every merge's verify gate.
 [hooks]
-repair    = "conformist --commit --amend"
+repair    = "conformist --commit --amend --exit-zero-on-fix"
 pre-merge = "just"
 ```
 
@@ -219,35 +222,34 @@ not ok   repair prime-pine
   only. The formatting is correct tree-wide, but it lands as one chore-fold on
   HEAD rather than distributed per-commit — fine for the squash-style worker
   flow, slightly odd for a curated multi-commit branch.
-- **Tool-agnostic in name, conformist-shaped in contract.** `[hooks].repair`
-  is a generic command string, but the `{0,3}` success mapping encodes
-  conformist's exit-code convention. A repair tool that signals differently
-  would need the configurable-success-codes escape hatch (Open questions).
+- **Tool-agnostic.** `[hooks].repair` is a generic command string with a
+  generic contract (exit 0 = ok, HEAD-sha delta = "did it amend"). conformist
+  bridges its own `3`-on-fix convention via `--exit-zero-on-fix`, so any repair
+  tool that can exit 0 on success and amend HEAD fits with no spinclass-side
+  special-casing.
 - **Not a verify replacement.** Repair only fixes what its tool can
   mechanically fix. The VERIFY hook still runs and still gates; repair just
   removes the mechanical-failure round-trip ahead of it.
 
-## Open questions (for conformist/merry-pine review)
+## Resolved questions (conformist/merry-pine review, 2026-06-15)
 
-1. **Exit-code contract.** Hardcode `{0,3}` as the repair-phase "ok" set
-   (couples spinclass to conformist's convention), add a
-   `[hooks].repair-success-codes = [0, 3]` knob (flexible, fiddly), or have
-   conformist grow a flag (`--exit-zero-on-fix`?) so spinclass can use plain
-   "0 = ok" semantics and stay convention-free? The last pushes the bridging
-   into the tool that owns the convention — likely cleanest cross-repo.
-2. **Trailers / attribution.** conformist's `--commit` supports `--trailer`
-   (#26). Should the spinclass repair phase inject a standard attribution
-   trailer (e.g. a Clown sign-off) on the amend, or leave trailers to the
-   sweatfile command string?
-3. **`sc check` behavior.** Should `check` run repair at all? Options: (a)
-   skip it (merge-only, this FDR's default); (b) run conformist in
-   check-only mode (no `--commit`) so check *reports* would-be repairs
-   without amending; (c) run the full amend (rewrites the agent's HEAD
-   outside a merge — likely surprising). Leaning (a) or (b).
-4. **`--allow-dirty`.** The post-rebase tree is clean by construction, so v1
-   runs repair with conformist's default refuse-on-dirty. Is there a flow
-   where we'd want `--allow-dirty` on the merge path? (Probably not — dirty
-   wtPath would have failed the rebase first.)
+All four resolved by `conformist/merry-pine` (design endorsed, proceed):
+
+1. **Exit-code contract → conformist flag.** conformist shipped
+   `--exit-zero-on-fix` (merged on master). The spinclass repair command is
+   `conformist --commit --amend --exit-zero-on-fix`; spinclass treats it as a
+   plain hook (exit 0 = ok, nonzero = fail) and detects whether an amend
+   happened via the **HEAD-sha delta**, staying convention-free. No
+   `{0,3}` hardcoding and no `repair-success-codes` knob.
+2. **Trailers → leave to the command string.** No spinclass-injected
+   attribution trailer; if a repo wants one it adds `--trailer ...` to the
+   `[hooks].repair` command itself.
+3. **`sc check` → skip repair (merge-only).** `sc check` /
+   `check-this-session` do **not** run repair. Repair is a merge-path phase
+   only (it commits/amends; check only verifies).
+4. **`--allow-dirty` → no.** Rely on conformist's default refuse-on-dirty;
+   the post-rebase tree is clean by construction (a dirty wtPath fails the
+   rebase first).
 
 ## More Information
 
