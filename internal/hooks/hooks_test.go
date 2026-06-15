@@ -1233,6 +1233,244 @@ func TestSubagentAllowedUpdateDescription(t *testing.T) {
 	}
 }
 
+func parseRewrite(t *testing.T, output []byte) (decision string, updatedInput map[string]any, sysMsg string) {
+	t.Helper()
+	var result map[string]any
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("expected valid JSON, got %q: %v", string(output), err)
+	}
+	hso, ok := result["hookSpecificOutput"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected hookSpecificOutput in output, got %q", string(output))
+	}
+	decision, _ = hso["permissionDecision"].(string)
+	updatedInput, _ = hso["updatedInput"].(map[string]any)
+	sysMsg, _ = result["systemMessage"].(string)
+	return decision, updatedInput, sysMsg
+}
+
+func TestRewritePathString(t *testing.T) {
+	main := resolvePath(t.TempDir())
+	worktree := resolvePath(t.TempDir())
+	cases := []struct {
+		name    string
+		in      string
+		want    string
+		changed bool
+	}{
+		{"under main", filepath.Join(main, "foo.go"), filepath.Join(worktree, "foo.go"), true},
+		{"nested under main", filepath.Join(main, "a", "b", "c.go"), filepath.Join(worktree, "a", "b", "c.go"), true},
+		{"main root itself", main, worktree, true},
+		{"already in worktree", filepath.Join(worktree, "x.go"), filepath.Join(worktree, "x.go"), false},
+		{"outside both", filepath.Join(resolvePath(t.TempDir()), "z.go"), "", false},
+		{"empty", "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, changed := rewritePathString(tc.in, main, worktree)
+			if changed != tc.changed {
+				t.Fatalf("changed = %v, want %v (got %q)", changed, tc.changed, got)
+			}
+			if tc.changed && got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+			if !tc.changed && got != tc.in {
+				t.Errorf("unchanged value mutated: got %q, want %q", got, tc.in)
+			}
+		})
+	}
+}
+
+func TestRewritePathStringExemptsWorktreeSpaceAndSpinclass(t *testing.T) {
+	main := resolvePath(t.TempDir())
+	worktree := filepath.Join(main, ".worktrees", "me")
+	os.MkdirAll(worktree, 0o755)
+
+	if _, c := rewritePathString(filepath.Join(main, ".worktrees", "other", "x.go"), main, worktree); c {
+		t.Error("a sibling worktree path must not be rewritten")
+	}
+	if _, c := rewritePathString(filepath.Join(main, ".spinclass", "env"), main, worktree); c {
+		t.Error("a .spinclass path must not be rewritten")
+	}
+	if _, c := rewritePathString(filepath.Join(worktree, "x.go"), main, worktree); c {
+		t.Error("the session worktree's own path must not be rewritten")
+	}
+	got, c := rewritePathString(filepath.Join(main, "foo.go"), main, worktree)
+	if !c || got != filepath.Join(worktree, "foo.go") {
+		t.Errorf("a parent-checkout file should rewrite into the worktree: got %q changed=%v", got, c)
+	}
+}
+
+func TestRewriteWriteRedirectsIntoWorktree(t *testing.T) {
+	main := t.TempDir()
+	worktree := t.TempDir()
+	input := makeInput("Write", map[string]any{"file_path": filepath.Join(main, "foo.go")}, worktree)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, main, worktree, false, WithWorktreePathRewrite(true)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() == 0 {
+		t.Fatal("expected rewrite output for a parent-checkout write")
+	}
+	decision, updated, sysMsg := parseRewrite(t, stdout.Bytes())
+	if decision != "allow" {
+		t.Errorf("expected allow, got %q", decision)
+	}
+	want := filepath.Join(resolvePath(worktree), "foo.go")
+	if updated["file_path"] != want {
+		t.Errorf("expected file_path %q, got %v", want, updated["file_path"])
+	}
+	if sysMsg == "" {
+		t.Error("expected a systemMessage surfacing the rewrite")
+	}
+}
+
+func TestRewriteReadRedirectsIntoWorktree(t *testing.T) {
+	main := t.TempDir()
+	worktree := t.TempDir()
+	input := makeInput("Read", map[string]any{"file_path": filepath.Join(main, "bar.go")}, worktree)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, main, worktree, false, WithWorktreePathRewrite(true)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	decision, updated, _ := parseRewrite(t, stdout.Bytes())
+	if decision != "allow" {
+		t.Errorf("expected allow, got %q", decision)
+	}
+	if want := filepath.Join(resolvePath(worktree), "bar.go"); updated["file_path"] != want {
+		t.Errorf("expected file_path %q, got %v", want, updated["file_path"])
+	}
+}
+
+func TestRewriteMoxyFolioWritePreservesOtherArgs(t *testing.T) {
+	main := t.TempDir()
+	worktree := t.TempDir()
+	input := makeInput("mcp__plugin_moxy_moxy__folio_write",
+		map[string]any{"file_path": filepath.Join(main, "x.go"), "content": "hi"}, worktree)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, main, worktree, false, WithWorktreePathRewrite(true)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, updated, _ := parseRewrite(t, stdout.Bytes())
+	if want := filepath.Join(resolvePath(worktree), "x.go"); updated["file_path"] != want {
+		t.Errorf("expected file_path %q, got %v", want, updated["file_path"])
+	}
+	if updated["content"] != "hi" {
+		t.Errorf("expected content preserved, got %v", updated["content"])
+	}
+}
+
+func TestRewriteGetHubbedCopyDestPath(t *testing.T) {
+	main := t.TempDir()
+	worktree := t.TempDir()
+	input := makeInput("mcp__plugin_moxy_moxy__get-hubbed_copy-file",
+		map[string]any{"src_path": "Formula/x.rb", "dest_path": filepath.Join(main, "out.rb")}, worktree)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, main, worktree, false, WithWorktreePathRewrite(true)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, updated, _ := parseRewrite(t, stdout.Bytes())
+	if want := filepath.Join(resolvePath(worktree), "out.rb"); updated["dest_path"] != want {
+		t.Errorf("expected dest_path %q, got %v", want, updated["dest_path"])
+	}
+	if updated["src_path"] != "Formula/x.rb" {
+		t.Errorf("expected in-repo src_path untouched, got %v", updated["src_path"])
+	}
+}
+
+func TestRewriteBashCommand(t *testing.T) {
+	main := t.TempDir()
+	worktree := t.TempDir()
+	target := filepath.Join(main, "src", "main.go")
+	input := makeInput("Bash", map[string]any{"command": "cat " + target}, worktree)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, main, worktree, false, WithWorktreePathRewrite(true)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	decision, updated, _ := parseRewrite(t, stdout.Bytes())
+	if decision != "allow" {
+		t.Errorf("expected allow, got %q", decision)
+	}
+	want := "cat " + filepath.Join(resolvePath(worktree), "src", "main.go")
+	if updated["command"] != want {
+		t.Errorf("expected command %q, got %v", want, updated["command"])
+	}
+}
+
+func TestRewriteLeavesWorktreePathUntouched(t *testing.T) {
+	main := t.TempDir()
+	worktree := t.TempDir()
+	input := makeInput("Write", map[string]any{"file_path": filepath.Join(worktree, "ok.go")}, worktree)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, main, worktree, false, WithWorktreePathRewrite(true)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("expected no output for an in-worktree path, got %q", stdout.String())
+	}
+}
+
+func TestRewriteSpinclassDirStillDenied(t *testing.T) {
+	main := t.TempDir()
+	worktree := t.TempDir()
+	target := filepath.Join(main, ".spinclass", "env")
+	input := makeInput("Write", map[string]any{"file_path": target}, worktree)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, main, worktree, false, WithWorktreePathRewrite(true)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	decision, _ := parseHookDecision(t, stdout.Bytes())
+	if decision != "deny" {
+		t.Errorf("expected .spinclass deny to win over rewrite, got %q", decision)
+	}
+}
+
+func TestRewriteNoOpForImplicitSession(t *testing.T) {
+	worktree := t.TempDir()
+	otherMain := t.TempDir()
+	input := makeInput("Write", map[string]any{"file_path": filepath.Join(otherMain, "foo.go")}, worktree)
+	var stdout bytes.Buffer
+	// Implicit session: mainRepoRoot == "" — rewrite must not fire.
+	if err := Run(bytes.NewReader(input), &stdout, "", worktree, false, WithWorktreePathRewrite(true)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("expected no output for an implicit session, got %q", stdout.String())
+	}
+}
+
+func TestRewriteDisabledFallsThrough(t *testing.T) {
+	main := t.TempDir()
+	worktree := t.TempDir()
+	input := makeInput("Write", map[string]any{"file_path": filepath.Join(main, "foo.go")}, worktree)
+	var stdout bytes.Buffer
+	// Rewrite explicitly disabled + disallow-main-worktree off: nothing fires.
+	if err := Run(bytes.NewReader(input), &stdout, main, worktree, false, WithWorktreePathRewrite(false)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("expected no output when rewrite disabled and disallow off, got %q", stdout.String())
+	}
+}
+
+func TestRewriteWinsOverDisallowMainWorktree(t *testing.T) {
+	main := t.TempDir()
+	worktree := t.TempDir()
+	input := makeInput("Write", map[string]any{"file_path": filepath.Join(main, "foo.go")}, worktree)
+	var stdout bytes.Buffer
+	// Both rewrite and disallow-main-worktree on: rewrite runs first and wins.
+	if err := Run(bytes.NewReader(input), &stdout, main, worktree, true, WithWorktreePathRewrite(true)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	decision, updated, _ := parseRewrite(t, stdout.Bytes())
+	if decision != "allow" {
+		t.Errorf("expected rewrite (allow) to win over disallow deny, got %q", decision)
+	}
+	if want := filepath.Join(resolvePath(worktree), "foo.go"); updated["file_path"] != want {
+		t.Errorf("expected file_path %q, got %v", want, updated["file_path"])
+	}
+}
+
 // gitRun execs a git command in dir and fails the test on error.
 func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()

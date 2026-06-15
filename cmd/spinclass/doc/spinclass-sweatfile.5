@@ -353,6 +353,29 @@ for the hook's duration and that uncommitted state is what gets verified.
 .B Merge:
 scalar override.
 .TP
+.B disable-worktree-path-rewrite
+Boolean.
+When false (the default), the PreToolUse hook rewrites a tool-call path that
+targets the
+.I parent checkout
+(\fI<repo>/X\fR) into the active worktree (\fI<repo>/.worktrees/<name>/X\fR),
+covering the file-reading and -writing tools (\fBRead\fR, \fBWrite\fR,
+\fBEdit\fR, \fBNotebookEdit\fR, \fBGlob\fR, \fBGrep\fR, \fBBash\fR) and the
+moxy/MCP path tools (\fBfolio_*\fR, \fBrg_search\fR, \fBget-hubbed copy-*\fR,
+and the like). The corrected call proceeds without a prompt; the rewrite is
+surfaced in a system message. Paths already inside the worktree, under
+.B .worktrees/
+or
+.B .spinclass/
+, or outside the parent checkout entirely (\fB$HOME\fR, \fB/tmp\fR, sibling
+repos, \fB/nix/store\fR) pass through untouched. The rewrite is a no-op for
+implicit (main-checkout) sessions, which have no separate worktree.
+When true, the rewrite is disabled; the opt-in
+.B disallow-main-worktree
+deny (if also set) then applies instead.
+.B Merge:
+scalar override.
+.TP
 .B disable-implicit-sessions
 Boolean.
 When true, an agent started in a repository's main checkout is

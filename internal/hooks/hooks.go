@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,7 +30,26 @@ type hookInput struct {
 	CWD           string         `json:"cwd"`
 }
 
-func Run(r io.Reader, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree bool) error {
+// RunOption configures optional Run behavior.
+type RunOption func(*runOptions)
+
+type runOptions struct {
+	rewriteEnabled bool
+}
+
+// WithWorktreePathRewrite toggles the #176 parent-checkout → worktree path
+// rewrite. It is OFF unless an option enables it, so the default-on policy lives
+// in Handle (the production entry) while Run's own tests opt in explicitly.
+func WithWorktreePathRewrite(enabled bool) RunOption {
+	return func(o *runOptions) { o.rewriteEnabled = enabled }
+}
+
+func Run(r io.Reader, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree bool, opts ...RunOption) error {
+	var o runOptions
+	for _, fn := range opts {
+		fn(&o)
+	}
+
 	var input hookInput
 	if err := json.NewDecoder(r).Decode(&input); err != nil {
 		return fmt.Errorf("decoding hook input: %w", err)
@@ -45,7 +65,7 @@ func Run(r io.Reader, w io.Writer, mainRepoRoot, sessionWorktree string, disallo
 	case "SessionEnd":
 		return runSessionEnd(input)
 	default:
-		return runPreToolUse(input, w, mainRepoRoot, sessionWorktree, disallowMainWorktree)
+		return runPreToolUse(input, w, mainRepoRoot, sessionWorktree, disallowMainWorktree, o.rewriteEnabled)
 	}
 }
 
@@ -282,7 +302,7 @@ const (
 	forkSessionToolName           = "mcp__plugin_spinclass_spinclass__fork-session"
 )
 
-func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree bool) error {
+func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree, rewriteEnabled bool) error {
 	if input.AgentID != "" {
 		switch input.ToolName {
 		case mergeThisSessionToolName, checkThisSessionToolName,
@@ -346,6 +366,18 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 					"This modifies the sweatfile at %s, which controls session configuration.", fp,
 				))
 			}
+		}
+	}
+
+	// #176: rewrite a parent-checkout path into the session worktree. Runs after
+	// the session-config guards (which win for .spinclass/sweatfile) and before
+	// the opt-in disallow-main-worktree deny, so an enabled rewrite supersedes the
+	// deny for any path it corrects. The default-on policy is resolved in Handle;
+	// no-op for implicit sessions (resolvedMain == "").
+	if rewriteEnabled && mainRepoRoot != "" && sessionWorktree != "" {
+		if updated, summary, changed := rewriteWorktreePaths(input, resolvedMain, resolvedWorktree); changed {
+			reason := fmt.Sprintf("redirected into the session worktree (%s): %s", resolvedWorktree, summary)
+			return writeRewrite(w, updated, reason, "[spinclass] "+reason)
 		}
 	}
 
@@ -458,6 +490,178 @@ func writeDeny(w io.Writer, reason string) error {
 		},
 	}
 	return json.NewEncoder(w).Encode(output)
+}
+
+// writeRewrite emits a PreToolUse "allow" decision whose updatedInput replaces the
+// tool's entire input with the path-corrected version (#176). The nested
+// hookSpecificOutput form (with updatedInput) is the shape claude-code honors for
+// all tools incl. MCP plugin tools; systemMessage surfaces the correction so the
+// rewrite is not silent.
+func writeRewrite(w io.Writer, updatedInput map[string]any, reason, sysMsg string) error {
+	output := map[string]any{
+		"hookSpecificOutput": map[string]any{
+			"hookEventName":            "PreToolUse",
+			"permissionDecision":       "allow",
+			"permissionDecisionReason": reason,
+			"updatedInput":             updatedInput,
+		},
+		"systemMessage": sysMsg,
+	}
+	return json.NewEncoder(w).Encode(output)
+}
+
+// builtinRewriteTools are the built-in Claude Code tools whose path arguments the
+// worktree path rewrite (#176) covers. Beyond these, the rewrite applies to every
+// moxy tool (the mcp__plugin_moxy_moxy__ prefix) — see isRewriteTargetTool.
+var builtinRewriteTools = map[string]bool{
+	"Read": true, "Write": true, "Edit": true, "NotebookEdit": true,
+	"Glob": true, "Grep": true, "Bash": true,
+}
+
+// pathArgKeys are the tool-input argument names that carry a filesystem path the
+// rewrite considers (scalar string or []string). Keyed by argument name rather
+// than per-tool so the same set transparently covers the built-in tools and all
+// moxy path tools (folio_*, rg_search, arboretum_*, grit_* repo_path, get-hubbed
+// copy-* dest_path/dest_dir, hamster cwd, jq files, …). Only values that resolve
+// to an absolute path under the parent checkout are rewritten, so a relative or
+// non-path value under one of these keys (e.g. an in-repo get-hubbed path) is
+// left untouched. Bash's "command" is handled separately (tokenized).
+var pathArgKeys = map[string]bool{
+	"file_path": true, "path": true, "notebook_path": true,
+	"dest_path": true, "dest_dir": true, "source": true, "destination": true,
+	"target": true, "repo_path": true, "cwd": true, "flake_dir": true,
+	"file": true, "files": true, "paths": true,
+}
+
+// isRewriteTargetTool reports whether a tool participates in the path rewrite: the
+// built-in file tools plus every moxy tool. Other MCP servers' tools are left
+// alone (their path semantics are theirs to define).
+func isRewriteTargetTool(name string) bool {
+	return builtinRewriteTools[name] || strings.HasPrefix(name, "mcp__plugin_moxy_moxy__")
+}
+
+// rewritePathString rewrites a single path value that targets the parent checkout
+// into the session worktree, returning (newValue, changed). It leaves the value
+// unchanged when it is already inside the worktree, under the parent checkout's
+// .worktrees/ (this or a sibling worktree) or .spinclass/ trees, or outside the
+// parent checkout entirely. mainRoot and worktree must already be symlink-resolved.
+func rewritePathString(value, mainRoot, worktree string) (string, bool) {
+	if value == "" {
+		return value, false
+	}
+	resolved := resolvePath(value)
+	sep := string(filepath.Separator)
+	// Already inside the session worktree — nothing to do. The worktree is itself
+	// under mainRoot, so this MUST be checked before the under-mainRoot test.
+	if resolved == worktree || strings.HasPrefix(resolved, worktree+sep) {
+		return value, false
+	}
+	// Outside the parent checkout entirely ($HOME, /tmp, sibling repos, /nix/store).
+	if resolved != mainRoot && !strings.HasPrefix(resolved, mainRoot+sep) {
+		return value, false
+	}
+	rel, err := filepath.Rel(mainRoot, resolved)
+	if err != nil {
+		return value, false
+	}
+	if rel != "." {
+		first := rel
+		if i := strings.IndexRune(rel, filepath.Separator); i >= 0 {
+			first = rel[:i]
+		}
+		// Worktree-space (this/other worktrees) and spinclass-managed dirs are not
+		// parent-checkout files; leave them (the existing guards handle .spinclass).
+		if first == ".worktrees" || first == ".spinclass" {
+			return value, false
+		}
+	}
+	return filepath.Join(worktree, rel), true
+}
+
+// rewriteArgValue rewrites a scalar string path value or each string element of a
+// []any list value, returning the (possibly new) value and whether anything changed.
+func rewriteArgValue(v any, mainRoot, worktree string) (any, bool) {
+	switch x := v.(type) {
+	case string:
+		return rewritePathString(x, mainRoot, worktree)
+	case []any:
+		changed := false
+		out := make([]any, len(x))
+		for i, e := range x {
+			if s, ok := e.(string); ok {
+				nv, c := rewritePathString(s, mainRoot, worktree)
+				out[i] = nv
+				changed = changed || c
+			} else {
+				out[i] = e
+			}
+		}
+		return out, changed
+	}
+	return v, false
+}
+
+// rewriteBashCommand rewrites parent-checkout absolute paths embedded in a Bash
+// command into the session worktree. It tokenizes (shlex) to find absolute-path
+// tokens, rewrites each via rewritePathString (so the same exemptions apply), and
+// substitutes the token text in the raw command — which also corrects a quoted
+// occurrence, since the unquoted token is a substring of the quoted form.
+func rewriteBashCommand(cmd, mainRoot, worktree string) (string, bool) {
+	tokens, err := shlex.Split(cmd)
+	if err != nil {
+		return cmd, false
+	}
+	changed := false
+	seen := map[string]bool{}
+	for _, tok := range tokens {
+		if !strings.HasPrefix(tok, "/") || seen[tok] {
+			continue
+		}
+		seen[tok] = true
+		if nv, c := rewritePathString(tok, mainRoot, worktree); c {
+			cmd = strings.ReplaceAll(cmd, tok, nv)
+			changed = true
+		}
+	}
+	return cmd, changed
+}
+
+// rewriteWorktreePaths returns a path-corrected copy of the tool input, a summary
+// of the changed argument keys, and whether any rewrite happened. It returns
+// (nil, "", false) when the tool is out of scope or nothing needed correcting.
+func rewriteWorktreePaths(input hookInput, mainRoot, worktree string) (map[string]any, string, bool) {
+	if !isRewriteTargetTool(input.ToolName) || len(input.ToolInput) == 0 {
+		return nil, "", false
+	}
+	updated := make(map[string]any, len(input.ToolInput))
+	for k, v := range input.ToolInput {
+		updated[k] = v
+	}
+	var changed []string
+	if input.ToolName == "Bash" {
+		if cmd, ok := updated["command"].(string); ok {
+			if nv, c := rewriteBashCommand(cmd, mainRoot, worktree); c {
+				updated["command"] = nv
+				changed = append(changed, "command")
+			}
+		}
+	} else {
+		for key := range pathArgKeys {
+			v, ok := updated[key]
+			if !ok {
+				continue
+			}
+			if nv, c := rewriteArgValue(v, mainRoot, worktree); c {
+				updated[key] = nv
+				changed = append(changed, key)
+			}
+		}
+	}
+	if len(changed) == 0 {
+		return nil, "", false
+	}
+	sort.Strings(changed)
+	return updated, strings.Join(changed, ", "), true
 }
 
 // checkBashCdToMainWorktree detects commands like "cd /path/to/main/repo && just"

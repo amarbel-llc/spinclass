@@ -110,6 +110,9 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if other.Hooks.DisableMergeBuildWorktree != nil {
 			merged.Hooks.DisableMergeBuildWorktree = other.Hooks.DisableMergeBuildWorktree
 		}
+		if other.Hooks.DisableWorktreePathRewrite != nil {
+			merged.Hooks.DisableWorktreePathRewrite = other.Hooks.DisableWorktreePathRewrite
+		}
 		if other.Hooks.PreMergeOutputFormat != nil {
 			merged.Hooks.PreMergeOutputFormat = other.Hooks.PreMergeOutputFormat
 		}

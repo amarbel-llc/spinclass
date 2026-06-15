@@ -1994,3 +1994,50 @@ func TestMergeDisableMergeBuildWorktreeOverride(t *testing.T) {
 		t.Error("expected overridden disable-merge-build-worktree to be disabled")
 	}
 }
+
+func TestParseHooksDisableWorktreePathRewrite(t *testing.T) {
+	input := `
+[hooks]
+disable-worktree-path-rewrite = true
+`
+	doc, err := sweatfileio.Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sf := doc.Data()
+	if !sf.WorktreePathRewriteDisabled() {
+		t.Error("expected disable-worktree-path-rewrite to be enabled")
+	}
+}
+
+func TestParseHooksDisableWorktreePathRewriteAbsent(t *testing.T) {
+	doc, err := sweatfileio.Parse([]byte("[git]\nexcludes = [\".claude/\"]"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sf := doc.Data()
+	if sf.WorktreePathRewriteDisabled() {
+		t.Error("expected disable-worktree-path-rewrite to default to false when absent")
+	}
+}
+
+func TestMergeDisableWorktreePathRewriteInherit(t *testing.T) {
+	enabled := true
+	base := Sweatfile{Hooks: &Hooks{DisableWorktreePathRewrite: &enabled}}
+	repo := Sweatfile{}
+	merged := base.MergeWith(repo)
+	if !merged.WorktreePathRewriteDisabled() {
+		t.Error("expected inherited disable-worktree-path-rewrite")
+	}
+}
+
+func TestMergeDisableWorktreePathRewriteOverride(t *testing.T) {
+	enabled := true
+	disabled := false
+	base := Sweatfile{Hooks: &Hooks{DisableWorktreePathRewrite: &enabled}}
+	repo := Sweatfile{Hooks: &Hooks{DisableWorktreePathRewrite: &disabled}}
+	merged := base.MergeWith(repo)
+	if merged.WorktreePathRewriteDisabled() {
+		t.Error("expected overridden disable-worktree-path-rewrite to be disabled")
+	}
+}

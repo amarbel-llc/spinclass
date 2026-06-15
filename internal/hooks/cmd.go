@@ -40,14 +40,17 @@ func Handle(stdin io.Reader, stdout io.Writer) error {
 
 	home, _ := os.UserHomeDir()
 	var disallowMainWorktree bool
+	// Worktree path rewrite (#176) is on by default; the sweatfile opt-out flips it.
+	rewriteEnabled := true
 	if home != "" {
 		result, err := sweatfileio.LoadWorktreeHierarchy(home, mainRepoRoot, cwd)
 		if err == nil {
 			disallowMainWorktree = result.Merged.DisallowMainWorktreeEnabled()
+			rewriteEnabled = !result.Merged.WorktreePathRewriteDisabled()
 		}
 	}
 
-	return Run(stdin, stdout, mainRepoRoot, cwd, disallowMainWorktree)
+	return Run(stdin, stdout, mainRepoRoot, cwd, disallowMainWorktree, WithWorktreePathRewrite(rewriteEnabled))
 }
 
 func gitToplevel(dir string) (string, error) {

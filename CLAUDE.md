@@ -90,7 +90,8 @@ parent dirs → repo-level. Supports `git-excludes`, `claude-allow`, `envrc-dire
 `[env]` table (map merge), `[hooks]` table (create/stop/pre-merge lifecycle hooks, scalar
 override; includes `disable-merge`, `disable-nix-gc`,
 `disable-merge-build-worktree`, `disable-implicit-sessions`,
-`pre-merge-output-format`, `inactivity-timeout`), and `[session-entry]` table (start/resume entrypoint commands plus the
+`disable-worktree-path-rewrite`, `pre-merge-output-format`,
+`inactivity-timeout`), and `[session-entry]` table (start/resume entrypoint commands plus the
 FDR 0006 `spawn`/`spawn-entry`/`spawn-window` argv templates for detached
 worker launch and `resume-title` for the attach-time terminal title;
 per-field override semantics). The package holds the struct definitions, accessors, `MergeWith`,

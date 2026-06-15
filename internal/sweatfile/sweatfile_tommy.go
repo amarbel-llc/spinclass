@@ -225,6 +225,12 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				_vHooksDisableMergeBuildWorktree.MarkConsumed()
 			}
 		}
+		if _vHooksDisableWorktreePathRewrite, _ok := _vHooks.Get("disable-worktree-path-rewrite"); _ok && _vHooksDisableWorktreePathRewrite.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksDisableWorktreePathRewrite.Leaf); _xok {
+				hooksVal3.DisableWorktreePathRewrite = &_x
+				_vHooksDisableWorktreePathRewrite.MarkConsumed()
+			}
+		}
 		if _vHooksPreMergeOutputFormat, _ok := _vHooks.Get("pre-merge-output-format"); _ok && _vHooksPreMergeOutputFormat.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractString(_vHooksPreMergeOutputFormat.Leaf); _xok {
 				hooksVal3.PreMergeOutputFormat = &_x
@@ -316,6 +322,13 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractBool(_vDisableMergeBuildWorktree.Leaf); _xok {
 				hooksVal3.DisableMergeBuildWorktree = &_x
 				_vDisableMergeBuildWorktree.MarkConsumed()
+			}
+		}
+		if _vDisableWorktreePathRewrite, _ok := model.Get("disable-worktree-path-rewrite"); _ok && _vDisableWorktreePathRewrite.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vDisableWorktreePathRewrite.Leaf); _xok {
+				hooksVal3.DisableWorktreePathRewrite = &_x
+				_vDisableWorktreePathRewrite.MarkConsumed()
 			}
 		}
 		if _vPreMergeOutputFormat, _ok := model.Get("pre-merge-output-format"); _ok && _vPreMergeOutputFormat.Kind == cst.VLeaf {
@@ -790,6 +803,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
+		if d.data.Hooks.DisableWorktreePathRewrite != nil {
+			if err := cst.SetAny(tableNode, "disable-worktree-path-rewrite", *d.data.Hooks.DisableWorktreePathRewrite); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
 		if d.data.Hooks.PreMergeOutputFormat != nil {
 			if err := cst.SetAny(tableNode, "pre-merge-output-format", *d.data.Hooks.PreMergeOutputFormat); err != nil {
 				return nil, fmt.Errorf("%w", err)
@@ -1208,6 +1226,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vHooksDisableMergeBuildWorktree.MarkConsumed()
 			}
 		}
+		if _vHooksDisableWorktreePathRewrite, _ok := _vHooks.Get("disable-worktree-path-rewrite"); _ok && _vHooksDisableWorktreePathRewrite.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksDisableWorktreePathRewrite.Leaf); _xok {
+				hooksVal3.DisableWorktreePathRewrite = &_x
+				_vHooksDisableWorktreePathRewrite.MarkConsumed()
+			}
+		}
 		if _vHooksPreMergeOutputFormat, _ok := _vHooks.Get("pre-merge-output-format"); _ok && _vHooksPreMergeOutputFormat.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractString(_vHooksPreMergeOutputFormat.Leaf); _xok {
 				hooksVal3.PreMergeOutputFormat = &_x
@@ -1299,6 +1323,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractBool(_vDisableMergeBuildWorktree.Leaf); _xok {
 				hooksVal3.DisableMergeBuildWorktree = &_x
 				_vDisableMergeBuildWorktree.MarkConsumed()
+			}
+		}
+		if _vDisableWorktreePathRewrite, _ok := sub.Get("disable-worktree-path-rewrite"); _ok && _vDisableWorktreePathRewrite.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vDisableWorktreePathRewrite.Leaf); _xok {
+				hooksVal3.DisableWorktreePathRewrite = &_x
+				_vDisableWorktreePathRewrite.MarkConsumed()
 			}
 		}
 		if _vPreMergeOutputFormat, _ok := sub.Get("pre-merge-output-format"); _ok && _vPreMergeOutputFormat.Kind == cst.VLeaf {
@@ -1758,6 +1789,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if data.Hooks.DisableMergeBuildWorktree != nil {
 			if err := cst.SetAny(tableNode, "disable-merge-build-worktree", *data.Hooks.DisableMergeBuildWorktree); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.Hooks.DisableWorktreePathRewrite != nil {
+			if err := cst.SetAny(tableNode, "disable-worktree-path-rewrite", *data.Hooks.DisableWorktreePathRewrite); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}

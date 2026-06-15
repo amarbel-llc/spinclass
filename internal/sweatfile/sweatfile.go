@@ -54,19 +54,20 @@ type SessionEntry struct {
 }
 
 type Hooks struct {
-	Create                    *string `toml:"create"`
-	Stop                      *string `toml:"stop"`
-	PreMerge                  *string `toml:"pre-merge"`
-	OnAttach                  *string `toml:"on-attach"`
-	OnDetach                  *string `toml:"on-detach"`
-	DisallowMainWorktree      *bool   `toml:"disallow-main-worktree"`
-	ToolUseLog                *bool   `toml:"tool-use-log"`
-	DisableMerge              *bool   `toml:"disable-merge"`
-	DisableNixGC              *bool   `toml:"disable-nix-gc"`
-	DisableImplicitSessions   *bool   `toml:"disable-implicit-sessions"`
-	DisableMergeBuildWorktree *bool   `toml:"disable-merge-build-worktree"`
-	PreMergeOutputFormat      *string `toml:"pre-merge-output-format"`
-	InactivityTimeout         *string `toml:"inactivity-timeout"`
+	Create                     *string `toml:"create"`
+	Stop                       *string `toml:"stop"`
+	PreMerge                   *string `toml:"pre-merge"`
+	OnAttach                   *string `toml:"on-attach"`
+	OnDetach                   *string `toml:"on-detach"`
+	DisallowMainWorktree       *bool   `toml:"disallow-main-worktree"`
+	ToolUseLog                 *bool   `toml:"tool-use-log"`
+	DisableMerge               *bool   `toml:"disable-merge"`
+	DisableNixGC               *bool   `toml:"disable-nix-gc"`
+	DisableImplicitSessions    *bool   `toml:"disable-implicit-sessions"`
+	DisableMergeBuildWorktree  *bool   `toml:"disable-merge-build-worktree"`
+	DisableWorktreePathRewrite *bool   `toml:"disable-worktree-path-rewrite"`
+	PreMergeOutputFormat       *string `toml:"pre-merge-output-format"`
+	InactivityTimeout          *string `toml:"inactivity-timeout"`
 }
 
 // MCPServerDef declares an MCP server to register and auto-approve
@@ -310,6 +311,17 @@ func (sf Sweatfile) MergeBuildWorktreeDisabled() bool {
 	return sf.Hooks != nil &&
 		sf.Hooks.DisableMergeBuildWorktree != nil &&
 		*sf.Hooks.DisableMergeBuildWorktree
+}
+
+// WorktreePathRewriteDisabled reports whether [hooks].disable-worktree-path-rewrite
+// is true. When false (the default), the PreToolUse hook rewrites a tool-call path
+// that targets the parent checkout into the active worktree; when true the rewrite
+// is off (the legacy disallow-main-worktree deny, if enabled, then applies). No-op
+// for implicit (main-checkout) sessions. See spinclass-sweatfile(5).
+func (sf Sweatfile) WorktreePathRewriteDisabled() bool {
+	return sf.Hooks != nil &&
+		sf.Hooks.DisableWorktreePathRewrite != nil &&
+		*sf.Hooks.DisableWorktreePathRewrite
 }
 
 func (sf Sweatfile) SessionStart() []string {
