@@ -25,9 +25,13 @@ promotion-criteria: |
 > and `clown chat_list` confirms the keystone in production — unique per-instance
 > UUID keys (no #118 collapse), the `SPINCLASS_SESSION_ID` decoration, the
 > `SPINCLASS_DESCRIPTION` presence label, and the presence index, all rendering.
-> Remaining: the clownfile/mux attach (Piece 1, gated on clown's `[attach]`) and
-> the presence-consume read (clown#137); `experimental → testing` also wants the
-> ~1-week soak and a multi-clown group-send exercised. This is the spinclass-side
+> **Update 2026-06-15:** Piece 1's design is settled — **clown RFC-0014**
+> (awareness seam: `group-id` + presence) is **merged** (clown `c71c2dc`) and
+> ratified here (§ RFC-0014 ratification); the framing call is **spinclass exits
+> multiplexing entirely**. Remaining: the clown implementation of RFC-0014
+> §2/§3/§5, then the spinclass mux-template removal + presence-wired
+> liveness/`sc list` (#175); `experimental → testing` also wants the ~1-week soak
+> and a multi-clown group-send exercised. This is the spinclass-side
 > half of a two-document
 > contract. The clown-owned design — the clownfile schema, the **per-instance
 > key derivation**, the **chat construct**, and the **spinclass-session
@@ -190,6 +194,12 @@ glue (finalize against the clownfile schema):
   remote sessions are not a used feature yet**, so migrating the remote path is
   out of scope here and is a separate, later call if it's ever wanted.
 
+**Refined by RFC-0014 (2026-06-15) — see § RFC-0014 ratification.** spinclass now
+exits multiplexing entirely (not merely "drops the mux defaults"): the
+detached-spawn executor also moves to clown; `resume-title` moves via the
+`{group}` placeholder; `liveness-probe` stays but **consumes clown presence**;
+the decoration is consumed via a config-sourced `group-id`.
+
 ## Piece 2 — clownfile (clown-owned)
 
 > **Normative in clown RFC-0013.** Summarized here for the consumer-side seam;
@@ -259,6 +269,11 @@ identity + derived-channel chat — ships without spinclass ever enumerating the
 presence index. Tracked as clown#137; explicitly **not** a spinclass chat
 registry.
 
+**Update (RFC-0014, 2026-06-15):** while *addressing* still needs no presence
+read, **session liveness now consumes the presence index** (RFC-0014 §4.3) — so
+presence-consume is on the critical path for the `liveness-probe` rework, not
+purely a deferred `sc list` nicety. See § RFC-0014 ratification.
+
 ## Piece 4 — chat removed from spinclass entirely
 
 ### spinclass current state (store=spinclass, wake=clown)
@@ -319,6 +334,67 @@ This is **clown RFC-0013** (filed on clown master, status proposed; it
 references FDR-0017 — the mutual cross-ref is complete). The spinclass-side
 **presence read** (consuming RFC-0013 §3.3) is deferred to clown#137.
 
+## RFC-0014 ratification (2026-06-15)
+
+**clown RFC-0014** ("clown ↔ spinclass awareness seam — `group-id` + presence")
+is **merged to clown master** (`c71c2dc`, status: proposed) and is the normative
+home for the Piece 1 attach/grouping wire. It refines several dispositions above;
+where they differ, **RFC-0014 + this section win**.
+
+**Framing decision (Sasha, 2026-06-15): spinclass exits multiplexing entirely.**
+A spinclass session is *just a worktree + identity env + a place to run shells*;
+inside it you run any number of shells **and** clowns. clown owns **all**
+attach/multiplexing/grouping — interactive **and the detached-spawn executor**
+(resolving the RFC-0013 §1.3 open question, RFC-0014 §5). spinclass ships **no
+multiplexer templates**: `sc start`/`sc resume` exec `$SHELL`; `sc spawn` execs
+clown in spawn mode (the hidden `--clown-attach=spawn` arg, RFC-0014 §5.1) and
+relies on clown's `[attach].spawn` to self-detach and return promptly. `sc resume`
+becomes "open a shell in the worktree"; reattaching a live agent is clown's job
+(native `sc`-side reattach hooks are a future exploration, not v1).
+
+**The seam is bidirectional** (refines the "narrowed seam = one env var" claim):
+- **spinclass → clown:** the `SPINCLASS_*` decoration env (RFC-0014 §6), sourced
+  into clown's `group-id` by env interpolation in clown's **burned-in default
+  clownfile** (`group-id = "${SPINCLASS_SESSION_ID}"`) — no operator/eng-root
+  file required, no hardcoded read in clown (config-only, RFC-0014 §2).
+- **clown → spinclass:** the **presence index** (RFC-0014 §4) that spinclass
+  *consumes* for session liveness and `sc list`.
+
+**Disposition refinements (supersede Piece 1 "After" / Piece 3 "Deferred"):**
+- **`resume-title` → clown via `{group}`** (RFC-0014 §3.1): default `"{group}"`
+  with `{id}` fallback, so the title shows `<repo>/<branch>`, not a minted UUID.
+  spinclass drops `emitResumeTitle`/`SessionResumeTitle`/`ResumeTitle` once clown
+  ships `{group}`.
+- **`liveness-probe` — stays spinclass, but consumes presence** (RFC-0014 §4.3),
+  not a spinclass-owned mux grep. This **promotes presence-consume from Piece 3's
+  "deferred future pass" onto the critical path** for the liveness rework: live
+  iff some presence record has `decoration == group-id` within the 2-min
+  staleness window; degrade stale/missing → dead, never false-alive. A generic
+  config-driven `liveness-probe` argv remains the non-clown fallback.
+- **detached-spawn executor → clown** (RFC-0014 §5): spinclass keeps only
+  worktree-create + identity-env + the hello handshake; clown's spawn-mode
+  re-exec preserves the worker's `SPINCLASS_*` decoration, and the #169
+  CLOWN/CLAUDE strip stays spinclass's.
+- **double-wrap hazard dissolved + flag-day eliminated** (RFC-0014 §7): with
+  spinclass no longer wrapping, clown's `[attach]` is the sole multiplexer; and
+  because the `group-id` binding ships in clown's burned-in default, the
+  read-removal + binding land in one atomic clown release — no config-ordering
+  dance (supersedes the "config leads removal" framing in Migration sequencing
+  step 4).
+
+**Companion contract.** The spinclass-export half — the `SPINCLASS_*` decoration
+contract (names, set/strip incl. #169) and the consumer side (liveness + `sc
+list` from presence) — lives in
+`docs/plans/2026-06-15-clown-spinclass-awareness-seam.md` and is **ratified by
+this FDR**. RFC-0014 §6 states the var names normatively and references that doc
+for producer-side semantics.
+
+**Status.** Piece 1 design is **settled** (RFC-0014 merged; clown#146 shipped the
+`[attach]` self-wrap + burned-in defaults). Remaining spinclass implementation
+(gated on clown shipping RFC-0014 §2/§3/§5): drop the mux templates, pass
+`--clown-attach=spawn` from `sc spawn`, and wire liveness + `sc list` onto
+presence (#175 item 1 + item 2).
+
 ## Migration sequencing
 
 The order is fixed by one rule: **the spinclass work is deletion, and nothing is
@@ -347,9 +423,14 @@ landed, so it gates nothing.
 3. **clown — clownfile** (attach + profile, cascading): clown reads it on boot
    and wraps itself in the multiplexer. Independent of (1)/(2); can land in
    parallel.
-4. **spinclass — drop the `[session-entry]` multiplexer defaults.** Gated on (3)
-   being live, or sessions launch with no multiplexer. (`liveness-probe` and
-   `tombstone-retention` stay; `resume-title` moves with clown's resume attach.)
+4. **spinclass — exit multiplexing entirely** (RFC-0014; supersedes "drop the
+   mux defaults"). Drop all `[session-entry]` mux templates (start/resume →
+   `$SHELL`; `sc spawn` execs clown via `--clown-attach=spawn`, clown
+   self-detaches). Gated on clown shipping RFC-0014 §2/§3/§5. The **flag-day is
+   eliminated** — the `group-id` binding ships in clown's burned-in default, so
+   the hardcoded-read removal + binding land atomically (RFC-0014 §7); no "config
+   leads removal" step. (`liveness-probe` stays but consumes presence, RFC-0014
+   §4; `tombstone-retention` stays; `resume-title` → clown `{group}`.)
 5. **spinclass — delete chat** (`internal/chat`, the `chat-*` tools, the
    `chatroom/` store, `currentSessionKey`'s chat role). Gated on (2) being live
    **and** the fleet having moved to clown's chat-read (see the mixed-fleet
@@ -420,6 +501,17 @@ universal path — never while an old binary is still live.
   profile+attach), per-instance key derivation, the chat construct (derived
   group channels + presence index). clown#137 tracks the deferred spinclass
   presence-read (RFC-0013 §3.3).
+- **clown RFC-0014** — *clown ↔ spinclass awareness seam (`group-id` + presence)*
+  (clown `docs/rfcs/0014-clown-spinclass-awareness-seam.md`, **merged** clown
+  `c71c2dc`, status proposed) — the normative clown half of the awareness seam:
+  the config-sourced `group-id` (env-interpolated, config-only), the `{group}`
+  title, the presence index schema + query contract, and the detached-spawn
+  executor wire (resolves the RFC-0013 §1.3 open question). Ratified here (§
+  RFC-0014 ratification).
+- **spinclass companion export contract** —
+  `docs/plans/2026-06-15-clown-spinclass-awareness-seam.md`: the `SPINCLASS_*`
+  decoration export (names, set/strip incl. #169) and the consumer side
+  (liveness + `sc list` from presence). Referenced normatively by RFC-0014 §6.
 - **FDR-0016** — the prior spinclass-side half of the clown ⇆ spinclass
   contract (identity / addressing / liveness); this FDR redraws its Venn.
 - **FDR-0009** — cross-session chat; its spinclass store + `chat-*` surface were
