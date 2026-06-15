@@ -87,8 +87,8 @@ parent dirs → repo-level. Supports `git-excludes`, `claude-allow`, `envrc-dire
 `allowed-mcps` arrays (nil = inherit, empty = clear, non-empty = append),
 `[[mcps]]`, `[[start-commands]]`, and `[[remotes]]` arrays of tables
 (dedup-by-name merge),
-`[env]` table (map merge), `[hooks]` table (create/stop/pre-merge lifecycle hooks, scalar
-override; includes `disable-merge`, `disable-nix-gc`,
+`[env]` table (map merge), `[hooks]` table (create/stop/pre-merge/repair lifecycle hooks, scalar
+override; includes `disable-merge`, `disable-repair`, `disable-nix-gc`,
 `disable-merge-build-worktree`, `disable-implicit-sessions`,
 `disable-worktree-path-rewrite`, `pre-merge-output-format`,
 `inactivity-timeout`), and `[session-entry]` table (start/resume entrypoint
@@ -333,8 +333,8 @@ committed tree rather than uncommitted state. See FDR 0013 and
 `docs/features/0013-isolated-build-worktree.md`.
 
 The merge flow is split into `merge.PrepareMerge` (disable-merge gate → optional
-pull → rebase → nothing-to-merge short-circuit → **pin** the post-rebase
-`HEAD` sha) and `merge.FinishMerge` (hook in the build worktree → `git merge
+pull → rebase → nothing-to-merge short-circuit → optional **REPAIR phase** →
+**pin** the post-rebase `HEAD` sha) and `merge.FinishMerge` (hook in the build worktree → `git merge
 --ff-only <pinnedSha>` → teardown → push). `merge --ff-only` targets the pinned
 **sha**, not the branch name, so a commit landing on the branch while the hook
 runs is left for a later merge instead of leaking in. `merge-this-session-async`
@@ -348,6 +348,22 @@ buffer for one continuous result stream. The sync `merge-this-session` and both
 `[hooks].disable-merge-build-worktree = true` (runs the hook in place; legacy).
 Caveat: the build worktree is detached HEAD, so a hook reading the current
 branch name sees `HEAD`.
+
+### Pre-merge REPAIR phase
+
+When `[hooks].repair` is set (and not `[hooks].disable-repair`), `PrepareMerge`
+runs it as a distinct **REPAIR** phase — after the nothing-to-merge guard, before
+the pin — to auto-fold mechanical fixes into the commit being merged ahead of the
+`pre-merge` VERIFY hook. The canonical value is
+`conformist --commit --amend --exit-zero-on-fix`. `merge.runRepairPhase` runs the
+command in the **session worktree** (not the build worktree: its pinned-sha
+ff-only merge would discard an amend made there, and threading the repaired sha
+out would strand the session branch — see FDR 0018), detects an amend via the
+**HEAD-sha delta** (the command exits 0 whether or not it changed anything, so
+spinclass stays convention-free), and aborts the merge on a non-zero exit.
+Repair is merge-only (`sc check` skips it) and scoped to worktree sessions;
+implicit sessions are out of scope (their HEAD may be pushed, which conformist's
+`--amend` refuses). See FDR 0018 and `spinclass-sweatfile(5)` `[hooks].repair`.
 
 ### Pre-merge hook inactivity watchdog
 
