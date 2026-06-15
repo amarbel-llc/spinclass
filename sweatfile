@@ -1,4 +1,5 @@
 # vim: set ft=toml
 
 [hooks]
+repair    = "conformist --commit --amend --exit-zero-on-fix"
 pre-merge = "just"
