@@ -220,3 +220,43 @@ disable-merge-build-worktree = true
   assert_output --partial "/.worktrees/"
   refute_output --partial "/.worktrees/.merge-"
 }
+
+# sc merge runs the REPAIR phase (before the absent verify hook) when
+# [hooks].repair is set. A no-op repair command (no tree change) emits an
+# "already conformant" verdict and the merge proceeds. Exercises the
+# cmd/spinclass merge wiring; the Go tests cover the amend→default-branch path
+# directly (TestPrepareMergeRepairAmend). FDR 0018.
+function repair_phase_runs_on_merge { # @test
+  cd "$TEST_REPO" || return
+  local bin="${SPINCLASS_BIN:-spinclass}"
+
+  # Repair sweatfile at the repo root (the repo layer of the hierarchy) so it
+  # survives the worktree `git clean -fd` below and is not removed at merge.
+  # pre-merge = "true" overrides the ancestor sweatfile's slow CI hook
+  # (the hierarchy climbs past the sandbox to the real repo) so the merge
+  # exercises only the REPAIR phase, not a full `just` build.
+  printf '%s\n' '[hooks]
+repair = "true"
+pre-merge = "true"' >"$TEST_REPO/sweatfile"
+
+  local attach_output wt branch
+  attach_output=$("$bin" --format tap start --no-attach 2>&1)
+  wt=$(extract_wt_path "$attach_output")
+  branch=$(basename "$wt")
+
+  echo "new content" >"$wt/new-file.txt"
+  git -C "$wt" add new-file.txt
+  git -C "$wt" commit -m "add new file"
+
+  # Drop untracked sweatfile-apply artifacts so worktree removal succeeds.
+  git -C "$wt" clean -fd
+
+  run_sc_crap merge "$branch" --local-only
+  assert_success
+  assert_output --partial "repair $branch"
+  assert_output --partial "already conformant"
+
+  # The merge still lands the commit on the default branch.
+  run git -C "$TEST_REPO" log --oneline main
+  assert_output --partial "add new file"
+}

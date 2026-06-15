@@ -43,11 +43,13 @@ type Hooks struct {
 	Create                     *string `toml:"create"`
 	Stop                       *string `toml:"stop"`
 	PreMerge                   *string `toml:"pre-merge"`
+	Repair                     *string `toml:"repair"`
 	OnAttach                   *string `toml:"on-attach"`
 	OnDetach                   *string `toml:"on-detach"`
 	DisallowMainWorktree       *bool   `toml:"disallow-main-worktree"`
 	ToolUseLog                 *bool   `toml:"tool-use-log"`
 	DisableMerge               *bool   `toml:"disable-merge"`
+	DisableRepair              *bool   `toml:"disable-repair"`
 	DisableNixGC               *bool   `toml:"disable-nix-gc"`
 	DisableImplicitSessions    *bool   `toml:"disable-implicit-sessions"`
 	DisableMergeBuildWorktree  *bool   `toml:"disable-merge-build-worktree"`
@@ -142,6 +144,18 @@ func (sf Sweatfile) PreMergeHookCommand() *string {
 		return nil
 	}
 	return sf.Hooks.PreMerge
+}
+
+// RepairHookCommand returns the [hooks].repair command, or nil when unset.
+// When set (and not disabled via RepairDisabled), the merge runs it as a
+// distinct REPAIR phase before the pre-merge VERIFY hook — auto-folding
+// mechanical fixes into the merged commit. The canonical value is
+// `conformist --commit --amend --exit-zero-on-fix`. See FDR 0018.
+func (sf Sweatfile) RepairHookCommand() *string {
+	if sf.Hooks == nil {
+		return nil
+	}
+	return sf.Hooks.Repair
 }
 
 // InactivityTimeoutValue returns the parsed [hooks].inactivity-timeout, or 0
@@ -275,6 +289,27 @@ func (sf Sweatfile) DisableMergeEnabled() bool {
 	return sf.Hooks != nil &&
 		sf.Hooks.DisableMerge != nil &&
 		*sf.Hooks.DisableMerge
+}
+
+// RepairDisabled reports whether [hooks].disable-repair is true. It suppresses
+// an inherited [hooks].repair command without having to clear the string,
+// mirroring the disable-merge / disable-nix-gc opt-out shape. See FDR 0018.
+func (sf Sweatfile) RepairDisabled() bool {
+	return sf.Hooks != nil &&
+		sf.Hooks.DisableRepair != nil &&
+		*sf.Hooks.DisableRepair
+}
+
+// RepairActive reports whether a REPAIR phase should run for a merge: a
+// non-empty [hooks].repair command that is not suppressed by
+// [hooks].disable-repair. Uses the same emptiness test as the hook runner so
+// a whitespace-only command is treated as unset.
+func (sf Sweatfile) RepairActive() bool {
+	if sf.RepairDisabled() {
+		return false
+	}
+	cmd := sf.RepairHookCommand()
+	return cmd != nil && stripEmptyLines(*cmd) != ""
 }
 
 func (sf Sweatfile) DisableNixGCEnabled() bool {

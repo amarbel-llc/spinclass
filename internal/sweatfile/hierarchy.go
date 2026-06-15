@@ -86,6 +86,9 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if other.Hooks.PreMerge != nil {
 			merged.Hooks.PreMerge = other.Hooks.PreMerge
 		}
+		if other.Hooks.Repair != nil {
+			merged.Hooks.Repair = other.Hooks.Repair
+		}
 		if other.Hooks.OnAttach != nil {
 			merged.Hooks.OnAttach = other.Hooks.OnAttach
 		}
@@ -100,6 +103,9 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		}
 		if other.Hooks.DisableMerge != nil {
 			merged.Hooks.DisableMerge = other.Hooks.DisableMerge
+		}
+		if other.Hooks.DisableRepair != nil {
+			merged.Hooks.DisableRepair = other.Hooks.DisableRepair
 		}
 		if other.Hooks.DisableNixGC != nil {
 			merged.Hooks.DisableNixGC = other.Hooks.DisableNixGC

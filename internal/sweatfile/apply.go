@@ -192,6 +192,19 @@ func (sf Sweatfile) RunPreMergeHook(worktreePath string, w io.Writer) error {
 	return sf.RunPreMergeHookContext(context.Background(), worktreePath, w)
 }
 
+// RunRepairHookContext runs the [hooks].repair command (FDR 0018) in
+// worktreePath, streaming combined stdout+stderr to w, and returns the
+// command's exit status as its error. Callers gate on RepairActive() first; if
+// repair is inactive this is a no-op returning nil. Unlike the pre-merge hook
+// there is no inactivity watchdog — repair is a fast formatter/amend pass, not
+// a minutes-long build/test hook.
+func (sf Sweatfile) RunRepairHookContext(ctx context.Context, worktreePath string, w io.Writer) error {
+	if !sf.RepairActive() {
+		return nil
+	}
+	return runHookContext(ctx, sf.RepairHookCommand(), worktreePath, w)
+}
+
 // RunPreMergeHookContext runs the pre-merge hook bound to ctx, so a caller
 // (the async job runner) can cancel/kill the hook subprocess. The synchronous
 // path uses RunPreMergeHook, which passes a background context.

@@ -131,7 +131,7 @@ map merge (child keys override parent keys).
 Lifecycle hooks executed as shell scripts.
 .PP
 The
-.BR create ", " pre-merge ", " on-attach ", and " on-detach
+.BR create ", " pre-merge ", " repair ", " on-attach ", and " on-detach
 hooks are invoked via
 .B sh \-c
 with the working directory set to the worktree path.
@@ -195,6 +195,56 @@ tools (whichever is registered \(em see
 .B disable-merge
 below) so Claude Code does not prompt: the pre-merge hook acts as the
 gate instead.
+.B Merge:
+scalar override.
+.TP
+.B repair
+Shell script run by
+.B sc merge
+as a
+.B REPAIR
+phase \(em after the rebase and the nothing-to-merge check, but before the
+.B pre-merge
+verify hook \(em to auto-fold mechanical fixes (formatting, lint-repair) into
+the commit being merged. The canonical value is
+.BR "conformist --commit --amend --exit-zero-on-fix" .
+.IP
+Unlike
+.BR pre-merge ,
+repair runs
+.B in the session worktree
+(not the detached build worktree): it amends the post-rebase
+.B HEAD
+in place, which moves the branch ref and leaves the working tree clean
+together. Running it in the build worktree would discard the amend, because
+the merge fast-forwards the originally pinned sha (see
+.B FDR 0018
+in the source tree). spinclass detects whether the command amended anything by
+comparing
+.B HEAD
+before and after \(em the command is expected to exit 0 whether or not it
+changed the tree (hence
+.BR --exit-zero-on-fix );
+a non-zero exit aborts the merge. The pin then reads the post-repair
+.BR HEAD ,
+so the verify hook and fast-forward merge act on the repaired commit.
+.IP
+Repair is
+.B merge-only
+\(em
+.B sc check
+and
+.B check-this-session
+do not run it. It applies to worktree sessions only; implicit (main-checkout)
+sessions are out of scope because their
+.B HEAD
+may already be pushed, which
+.B "conformist --amend"
+refuses. Because the amend re-signs
+.BR HEAD ,
+a locked commit-signing agent fails repair (and thus the merge) rather than
+producing an unsigned commit. A repair that amends before a later verify
+failure leaves the amended commit on the session branch.
 .B Merge:
 scalar override.
 .TP
@@ -308,6 +358,18 @@ where merges must go through external review (e.g., protected branches
 that require pull requests). The
 .B sc check
 CLI subcommand is available regardless of this flag.
+.B Merge:
+scalar override.
+.TP
+.B disable-repair
+Boolean.
+When true, suppresses an inherited
+.B [hooks].repair
+command without having to clear the string \(em the
+.B REPAIR
+phase is skipped and the merge proceeds straight to the
+.B pre-merge
+verify hook.
 .B Merge:
 scalar override.
 .TP

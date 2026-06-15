@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -150,15 +151,25 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, rep *crap.Rep
 // moment the rebase lands while FinishMerge's slow pre-merge hook runs detached
 // in an isolated build worktree.
 func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch string, gitSync bool) (pinnedSha string, err error) {
+	// Load the sweatfile hierarchy once for the disable-merge gate and the
+	// repair phase. An unresolvable home or load failure degrades gracefully:
+	// both the gate and repair are skipped rather than blocking the merge.
+	var (
+		hierarchy     sweatfile.Hierarchy
+		haveHierarchy bool
+	)
 	if home, _ := os.UserHomeDir(); home != "" {
-		hierarchy, hErr := sweatfileio.LoadWorktreeHierarchy(home, repoPath, wtPath)
-		if hErr == nil && hierarchy.Merged.DisableMergeEnabled() {
-			disableErr := fmt.Errorf(
-				"merge disabled by sweatfile (disable-merge=true at %s); use `sc check` to run the pre-merge hook without merging",
-				disableMergeSource(hierarchy),
-			)
-			return "", failStep(ts, "merge "+branch, disableErr, "")
+		if h, hErr := sweatfileio.LoadWorktreeHierarchy(home, repoPath, wtPath); hErr == nil {
+			hierarchy, haveHierarchy = h, true
 		}
+	}
+
+	if haveHierarchy && hierarchy.Merged.DisableMergeEnabled() {
+		disableErr := fmt.Errorf(
+			"merge disabled by sweatfile (disable-merge=true at %s); use `sc check` to run the pre-merge hook without merging",
+			disableMergeSource(hierarchy),
+		)
+		return "", failStep(ts, "merge "+branch, disableErr, "")
 	}
 
 	// Pull the default branch BEFORE rebasing, so the session branch is
@@ -186,8 +197,20 @@ func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch s
 		return "", failStep(ts, "merge "+branch, noopErr, "")
 	}
 
-	// Pin the post-rebase tip: FinishMerge verifies and merges exactly this sha,
-	// so work committed onto branch while the hook runs is left for a later merge.
+	// REPAIR phase (FDR 0018): auto-fold mechanical fixes into the commit being
+	// merged before the VERIFY hook. Runs here — after the nothing-to-merge guard
+	// (so HEAD is an unpushed session commit conformist's --amend accepts) and
+	// before the pin (so the pin reads the post-repair HEAD). Skipped when repair
+	// is inactive or the hierarchy did not load.
+	if haveHierarchy {
+		if rErr := runRepairPhase(ts, hierarchy, wtPath, branch); rErr != nil {
+			return "", rErr
+		}
+	}
+
+	// Pin the post-rebase (and post-repair) tip: FinishMerge verifies and merges
+	// exactly this sha, so work committed onto branch while the hook runs is left
+	// for a later merge.
 	pinnedSha, shaErr := git.RevParse(wtPath, "HEAD")
 	if shaErr != nil {
 		return "", failStep(ts, "merge "+branch, fmt.Errorf("could not resolve %s HEAD: %w", branch, shaErr), "")
@@ -456,6 +479,53 @@ func runPreMergeHookContext(ctx context.Context, rep *crap.Reporter, ts *crap.Te
 		return nil, nil
 	}
 	return check.RunWithReporterContext(ctx, rep, ts, hierarchy, wtPath, branch, hookSha, activity)
+}
+
+// runRepairPhase runs the [hooks].repair command (FDR 0018) in wtPath when
+// active, emitting a test point on ts, and aborts the merge on a nonzero exit.
+// On success the HEAD-sha delta distinguishes an amend ("amended <sha>") from a
+// no-op ("already conformant"). Returns nil (no-op) when repair is inactive.
+//
+// Repair deliberately runs in the session worktree, not the build worktree: the
+// build worktree's pinned-sha `merge --ff-only` would discard an amend made
+// there, and threading the repaired sha out would strand the session branch and
+// replay-conflict on the next merge (see FDR 0018). It uses context.Background
+// because PrepareMerge is the synchronous prefix — for async merge it runs
+// before the cancellable job exists, and repair is a fast formatter pass.
+func runRepairPhase(ts *crap.TestStream, hierarchy sweatfile.Hierarchy, wtPath, branch string) error {
+	if !hierarchy.Merged.RepairActive() {
+		return nil
+	}
+
+	// Pre-repair HEAD; the delta against the post-repair HEAD is the
+	// tool-agnostic "did it amend" signal (the repair command exits 0 whether or
+	// not it changed anything, e.g. conformist --exit-zero-on-fix).
+	sha0, _ := git.RevParse(wtPath, "HEAD")
+
+	var out bytes.Buffer
+	if hookErr := hierarchy.Merged.RunRepairHookContext(context.Background(), wtPath, &out); hookErr != nil {
+		return failStep(ts, "repair "+branch, fmt.Errorf("repair hook failed: %w", hookErr), out.String())
+	}
+
+	sha1, shaErr := git.RevParse(wtPath, "HEAD")
+	if shaErr != nil {
+		return failStep(ts, "repair "+branch, fmt.Errorf("could not resolve HEAD after repair: %w", shaErr), out.String())
+	}
+	if sha1 == sha0 {
+		ts.Ok("repair " + branch + " (already conformant)")
+		return nil
+	}
+	ts.Ok("repair " + branch + " (amended " + shortSha(sha1) + ")")
+	return nil
+}
+
+// shortSha truncates a git object id to 12 chars for display, leaving shorter
+// ids untouched.
+func shortSha(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
 }
 
 // failStep emits a failing test point for label populated from err

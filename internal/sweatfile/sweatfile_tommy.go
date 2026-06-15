@@ -177,6 +177,12 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				_vHooksPreMerge.MarkConsumed()
 			}
 		}
+		if _vHooksRepair, _ok := _vHooks.Get("repair"); _ok && _vHooksRepair.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksRepair.Leaf); _xok {
+				hooksVal3.Repair = &_x
+				_vHooksRepair.MarkConsumed()
+			}
+		}
 		if _vHooksOnAttach, _ok := _vHooks.Get("on-attach"); _ok && _vHooksOnAttach.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractString(_vHooksOnAttach.Leaf); _xok {
 				hooksVal3.OnAttach = &_x
@@ -205,6 +211,12 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractBool(_vHooksDisableMerge.Leaf); _xok {
 				hooksVal3.DisableMerge = &_x
 				_vHooksDisableMerge.MarkConsumed()
+			}
+		}
+		if _vHooksDisableRepair, _ok := _vHooks.Get("disable-repair"); _ok && _vHooksDisableRepair.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksDisableRepair.Leaf); _xok {
+				hooksVal3.DisableRepair = &_x
+				_vHooksDisableRepair.MarkConsumed()
 			}
 		}
 		if _vHooksDisableNixGc, _ok := _vHooks.Get("disable-nix-gc"); _ok && _vHooksDisableNixGc.Kind == cst.VLeaf {
@@ -268,6 +280,13 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				_vPreMerge.MarkConsumed()
 			}
 		}
+		if _vRepair, _ok := model.Get("repair"); _ok && _vRepair.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vRepair.Leaf); _xok {
+				hooksVal3.Repair = &_x
+				_vRepair.MarkConsumed()
+			}
+		}
 		if _vOnAttach, _ok := model.Get("on-attach"); _ok && _vOnAttach.Kind == cst.VLeaf {
 			_foundHooks = true
 			if _x, _xok := cst.ExtractString(_vOnAttach.Leaf); _xok {
@@ -301,6 +320,13 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractBool(_vDisableMerge.Leaf); _xok {
 				hooksVal3.DisableMerge = &_x
 				_vDisableMerge.MarkConsumed()
+			}
+		}
+		if _vDisableRepair, _ok := model.Get("disable-repair"); _ok && _vDisableRepair.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vDisableRepair.Leaf); _xok {
+				hooksVal3.DisableRepair = &_x
+				_vDisableRepair.MarkConsumed()
 			}
 		}
 		if _vDisableNixGc, _ok := model.Get("disable-nix-gc"); _ok && _vDisableNixGc.Kind == cst.VLeaf {
@@ -731,6 +757,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
+		if d.data.Hooks.Repair != nil {
+			if err := cst.SetAny(tableNode, "repair", *d.data.Hooks.Repair); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
 		if d.data.Hooks.OnAttach != nil {
 			if err := cst.SetAny(tableNode, "on-attach", *d.data.Hooks.OnAttach); err != nil {
 				return nil, fmt.Errorf("%w", err)
@@ -753,6 +784,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 		}
 		if d.data.Hooks.DisableMerge != nil {
 			if err := cst.SetAny(tableNode, "disable-merge", *d.data.Hooks.DisableMerge); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.Hooks.DisableRepair != nil {
+			if err := cst.SetAny(tableNode, "disable-repair", *d.data.Hooks.DisableRepair); err != nil {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
@@ -1134,6 +1170,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vHooksPreMerge.MarkConsumed()
 			}
 		}
+		if _vHooksRepair, _ok := _vHooks.Get("repair"); _ok && _vHooksRepair.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksRepair.Leaf); _xok {
+				hooksVal3.Repair = &_x
+				_vHooksRepair.MarkConsumed()
+			}
+		}
 		if _vHooksOnAttach, _ok := _vHooks.Get("on-attach"); _ok && _vHooksOnAttach.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractString(_vHooksOnAttach.Leaf); _xok {
 				hooksVal3.OnAttach = &_x
@@ -1162,6 +1204,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractBool(_vHooksDisableMerge.Leaf); _xok {
 				hooksVal3.DisableMerge = &_x
 				_vHooksDisableMerge.MarkConsumed()
+			}
+		}
+		if _vHooksDisableRepair, _ok := _vHooks.Get("disable-repair"); _ok && _vHooksDisableRepair.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksDisableRepair.Leaf); _xok {
+				hooksVal3.DisableRepair = &_x
+				_vHooksDisableRepair.MarkConsumed()
 			}
 		}
 		if _vHooksDisableNixGc, _ok := _vHooks.Get("disable-nix-gc"); _ok && _vHooksDisableNixGc.Kind == cst.VLeaf {
@@ -1225,6 +1273,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vPreMerge.MarkConsumed()
 			}
 		}
+		if _vRepair, _ok := sub.Get("repair"); _ok && _vRepair.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vRepair.Leaf); _xok {
+				hooksVal3.Repair = &_x
+				_vRepair.MarkConsumed()
+			}
+		}
 		if _vOnAttach, _ok := sub.Get("on-attach"); _ok && _vOnAttach.Kind == cst.VLeaf {
 			_foundHooks = true
 			if _x, _xok := cst.ExtractString(_vOnAttach.Leaf); _xok {
@@ -1258,6 +1313,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractBool(_vDisableMerge.Leaf); _xok {
 				hooksVal3.DisableMerge = &_x
 				_vDisableMerge.MarkConsumed()
+			}
+		}
+		if _vDisableRepair, _ok := sub.Get("disable-repair"); _ok && _vDisableRepair.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vDisableRepair.Leaf); _xok {
+				hooksVal3.DisableRepair = &_x
+				_vDisableRepair.MarkConsumed()
 			}
 		}
 		if _vDisableNixGc, _ok := sub.Get("disable-nix-gc"); _ok && _vDisableNixGc.Kind == cst.VLeaf {
@@ -1676,6 +1738,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 				return fmt.Errorf("%w", err)
 			}
 		}
+		if data.Hooks.Repair != nil {
+			if err := cst.SetAny(tableNode, "repair", *data.Hooks.Repair); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
 		if data.Hooks.OnAttach != nil {
 			if err := cst.SetAny(tableNode, "on-attach", *data.Hooks.OnAttach); err != nil {
 				return fmt.Errorf("%w", err)
@@ -1698,6 +1765,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if data.Hooks.DisableMerge != nil {
 			if err := cst.SetAny(tableNode, "disable-merge", *data.Hooks.DisableMerge); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.Hooks.DisableRepair != nil {
+			if err := cst.SetAny(tableNode, "disable-repair", *data.Hooks.DisableRepair); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}
