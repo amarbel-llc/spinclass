@@ -171,10 +171,15 @@ checked out at the exact (post-rebase) commit being merged \(em a hidden
 .B .merge-*
 sibling under
 .BR .worktrees/ .
-This frees the session worktree for concurrent edits the moment the rebase
-lands (especially with the async merge tool, whose rebase runs synchronously
-before the job id is returned) and makes the gate verify the committed tree
-rather than any uncommitted working-tree state.
+This frees the session worktree for concurrent edits the moment the
+synchronous prefix (rebase, plus any
+.B repair
+phase) lands \(em especially with the async merge tool, whose prefix runs
+before the job id is returned, so the worktree is yours again the moment you
+hold the job id. It also makes the gate verify the committed tree rather than
+any uncommitted working-tree state. A merge therefore never locks your
+worktree: edits made while the hook runs are left for the next merge, since
+the gate builds and fast-forwards the sha it pinned when it started.
 The build worktree is removed when the hook finishes.
 Because the branch stays checked out in the session worktree, the build
 worktree is in
