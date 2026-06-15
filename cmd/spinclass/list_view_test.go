@@ -59,7 +59,8 @@ func TestParseWatchInterval(t *testing.T) {
 // spawned-by lineage hint, prefixed remote rows, and per-host diagnostics,
 // and that an abandoned (missing-worktree) row is filtered when closed=false.
 func TestRenderListTable(t *testing.T) {
-	wt := t.TempDir() // exists → ResolveState is not abandoned
+	t.Setenv("XDG_STATE_HOME", t.TempDir()) // hermetic: no clown presence
+	wt := t.TempDir()                       // exists → ResolveState is not abandoned
 
 	states := []session.State{
 		{
@@ -114,9 +115,39 @@ func TestRenderListTable(t *testing.T) {
 	}
 }
 
+// TestRenderListTableShowsClownColumn: when clown presence exists for a
+// session's key (decoration), the table gains a CLOWNS column.
+func TestRenderListTableShowsClownColumn(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	dir := filepath.Join(state, "clown", "presence")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rec := `{"sessionKey":"uuid","channelId":"abcd","decoration":"spinclass/feat","lastSeen":"` +
+		time.Now().Format(time.RFC3339Nano) + `"}`
+	if err := os.WriteFile(filepath.Join(dir, "abcd.json"), []byte(rec), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out := renderListTable([]session.State{{
+		SessionState: session.StateActive,
+		PID:          os.Getpid(),
+		WorktreePath: t.TempDir(),
+		Branch:       "feat",
+		SessionKey:   "spinclass/feat",
+		StartedAt:    time.Now(),
+	}}, nil, nil, false)
+
+	if !strings.Contains(out, "CLOWNS") {
+		t.Errorf("expected CLOWNS column when presence exists:\n%s", out)
+	}
+}
+
 // TestRenderListTableClosedIncludesAbandoned confirms the closed flag flips
 // the abandoned-row filter on, mirroring the text path's --closed semantics.
 func TestRenderListTableClosedIncludesAbandoned(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir()) // hermetic: no clown presence
 	out := renderListTable([]session.State{
 		{
 			SessionState: session.StateActive,
@@ -134,6 +165,7 @@ func TestRenderListTableClosedIncludesAbandoned(t *testing.T) {
 // TestRenderListTableEmpty checks the empty-state message and that diagnostics
 // still render when there are no session rows.
 func TestRenderListTableEmpty(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir()) // hermetic: no clown presence
 	out := renderListTable(nil, nil, []string{"lab: unreachable (timeout)"}, false)
 	if !strings.Contains(out, "No sessions.") {
 		t.Errorf("empty list should say 'No sessions.':\n%s", out)

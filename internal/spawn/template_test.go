@@ -2,7 +2,6 @@ package spawn
 
 import (
 	"slices"
-	"strings"
 	"testing"
 )
 
@@ -71,60 +70,8 @@ func TestSubstituteEntry(t *testing.T) {
 	}
 }
 
-func TestSubstituteSpawn(t *testing.T) {
-	zmxDefault := []string{"zmx", "attach", "{id}", "--detach", "{entry}"}
-
-	t.Run("zmx default with clown entry", func(t *testing.T) {
-		entry := SubstituteEntry([]string{"clown", "--", "{prompt}"}, "fix the thing", "/wt")
-		got, err := SubstituteSpawn(zmxDefault, "wt-name", "/wt", entry)
-		if err != nil {
-			t.Fatalf("SubstituteSpawn: %v", err)
-		}
-		want := []string{"zmx", "attach", "wt-name", "--detach", "clown", "--", "fix the thing"}
-		if !slices.Equal(got, want) {
-			t.Errorf("got %q, want %q", got, want)
-		}
-		// The brief must remain a single argv element — no shell joining.
-		if len(got) != 7 {
-			t.Errorf("got %d elements, want 7: %q", len(got), got)
-		}
-	})
-
-	t.Run("dir substituted in spawn template", func(t *testing.T) {
-		tpl := []string{"tmux", "new-session", "-d", "-c", "{dir}", "-s", "{id}", "{entry}"}
-		got, err := SubstituteSpawn(tpl, "sess", "/the/worktree", []string{"true"})
-		if err != nil {
-			t.Fatalf("SubstituteSpawn: %v", err)
-		}
-		want := []string{"tmux", "new-session", "-d", "-c", "/the/worktree", "-s", "sess", "true"}
-		if !slices.Equal(got, want) {
-			t.Errorf("got %q, want %q", got, want)
-		}
-	})
-
-	t.Run("multiple elements after splice preserved in order", func(t *testing.T) {
-		tpl := []string{"wrapper", "{entry}", "--detach", "{id}"}
-		got, err := SubstituteSpawn(tpl, "name", "/wt", []string{"clown", "-p", "brief text"})
-		if err != nil {
-			t.Fatalf("SubstituteSpawn: %v", err)
-		}
-		want := []string{"wrapper", "clown", "-p", "brief text", "--detach", "name"}
-		if !slices.Equal(got, want) {
-			t.Errorf("got %q, want %q", got, want)
-		}
-	})
-
-	t.Run("empty entry errors naming the knob", func(t *testing.T) {
-		_, err := SubstituteSpawn(zmxDefault, "id", "/wt", nil)
-		if err == nil {
-			t.Fatal("expected error for empty entry, got nil")
-		}
-		if !strings.Contains(err.Error(), "[session-entry].spawn-entry") {
-			t.Errorf("error %q does not name [session-entry].spawn-entry", err)
-		}
-	})
-
-	t.Run("window template: id and dir substituted in every element", func(t *testing.T) {
+func TestSubstituteWindow(t *testing.T) {
+	t.Run("id and dir substituted in every element", func(t *testing.T) {
 		got := SubstituteWindow([]string{"sc-spawn-window", "{id}", "{dir}", "x={id}"},
 			"repo/feat", "/wt")
 		want := []string{"sc-spawn-window", "repo/feat", "/wt", "x=repo/feat"}
@@ -133,28 +80,9 @@ func TestSubstituteSpawn(t *testing.T) {
 		}
 	})
 
-	t.Run("window template: nil renders nil", func(t *testing.T) {
+	t.Run("nil renders nil", func(t *testing.T) {
 		if got := SubstituteWindow(nil, "id", "/wt"); got != nil {
 			t.Errorf("got %q, want nil", got)
-		}
-	})
-
-	t.Run("missing {entry} element errors", func(t *testing.T) {
-		_, err := SubstituteSpawn([]string{"zmx", "run", "{id}"}, "id", "/wt", []string{"clown"})
-		if err == nil {
-			t.Fatal("expected error for missing {entry}, got nil")
-		}
-		if !strings.Contains(err.Error(), "{entry}") {
-			t.Errorf("error %q does not mention {entry}", err)
-		}
-	})
-
-	t.Run("embedded {entry} is not a splice point", func(t *testing.T) {
-		// Only an element exactly equal to "{entry}" splices; an embedded
-		// occurrence cannot be expanded element-wise, so it errors.
-		_, err := SubstituteSpawn([]string{"sh", "-c", "exec {entry}"}, "id", "/wt", []string{"clown"})
-		if err == nil {
-			t.Fatal("expected error for embedded {entry}, got nil")
 		}
 	})
 }

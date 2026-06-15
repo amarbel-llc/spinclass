@@ -21,6 +21,17 @@ promotion-criteria: |
 > `chat-send` / `chat-read` / `chat-list-sessions` tools and the `chatroom/`
 > store referenced below have been removed; those references describe the
 > pre-cutover state.
+>
+> **Post-cutover note (2026-06-15, FDR-0017 Piece 1):** spinclass exited
+> multiplexing entirely. The `[session-entry].spawn` zmx wrapper template and
+> the `resume-title` knob described below are **removed** — `sc spawn` now
+> execs `[session-entry].spawn-entry` directly (default
+> `["clown", "--clown-attach=spawn", "--", "{prompt}"]`), and clown self-detaches
+> via its clownfile `[attach]` (clown RFC-0014). The spawn *orchestration*
+> (worktree creation, `spawned_by` lineage, the hello handshake, `spawn-window`)
+> stays in spinclass; only the multiplexer wrap and the OSC-2 title moved to
+> clown. Sections below describing the `spawn` template / `resume-title` are
+> pre-cutover.
 
 ## Problem Statement
 

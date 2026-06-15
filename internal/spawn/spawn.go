@@ -28,7 +28,7 @@ const DefaultHelloDeadline = 60 * time.Second
 type Result struct {
 	SessionKey    string // <repo-dirname>/<branch> — the worker's chat target
 	WorktreePath  string // absolute path to the worker's worktree
-	MultiplexerID string // the {id} the spawn template received (the session key, #146)
+	MultiplexerID string // the worker's session key (= SPINCLASS_SESSION_ID, #146)
 }
 
 // Launch creates a detached, harness-booted worker session in repoPath and
@@ -81,11 +81,11 @@ func LaunchExisting(home string, rp worktree.ResolvedPath, driverKey, brief, des
 	return launchRendered(rp, driverKey, desc, deadline, argv, window, sessionEnv)
 }
 
-// renderSpawn loads the WORKER repo's sweatfile hierarchy (its multiplexer
-// and harness decide the templates, not the driver's) and renders the
-// spawn/spawn-entry argv. It also returns the hierarchy's [session-entry].env
-// for the exec's environment. Safe to call before the worktree exists:
-// LoadWorktreeHierarchy treats a missing leaf sweatfile as an empty layer.
+// renderSpawn loads the WORKER repo's sweatfile hierarchy (its harness decides
+// the spawn-entry, not the driver's) and renders the detached-harness argv. It
+// also returns the hierarchy's [session-entry].env for the exec's environment.
+// Safe to call before the worktree exists: LoadWorktreeHierarchy treats a
+// missing leaf sweatfile as an empty layer.
 func renderSpawn(home string, rp worktree.ResolvedPath, brief string) (argv, window []string, sessionEnv map[string]string, err error) {
 	hierarchy, err := sweatfileio.LoadWorktreeHierarchy(home, rp.RepoPath, rp.AbsPath)
 	if err != nil {
@@ -93,15 +93,13 @@ func renderSpawn(home string, rp worktree.ResolvedPath, brief string) (argv, win
 	}
 	merged := hierarchy.Merged
 
-	entry := SubstituteEntry(merged.SessionSpawnEntry(), brief, rp.AbsPath)
-	// {id} = the full session key, NOT the branch: start/resume entries name
-	// multiplexer sessions $SPINCLASS_SESSION_ID and the conventional
-	// liveness-probe greps for it — a branch-named session would be
-	// invisible to both (#146).
-	argv, err = SubstituteSpawn(merged.SessionSpawn(), rp.SessionKey, rp.AbsPath, entry)
-	if err != nil {
-		return nil, nil, nil, err
-	}
+	// FDR-0017 Piece 1: spinclass no longer wraps the worker in a multiplexer.
+	// Exec the detached-harness argv DIRECTLY; the harness (clown's
+	// --clown-attach=spawn) self-detaches and returns promptly, preserving the
+	// launchRendered prompt-return + hello-handshake contract. {id} is not
+	// substituted here — the worker derives its identity from SPINCLASS_SESSION_ID
+	// in the exec env (workerEnv).
+	argv = SubstituteEntry(merged.SessionSpawnEntry(), brief, rp.AbsPath)
 	window = SubstituteWindow(merged.SessionSpawnWindow(), rp.SessionKey, rp.AbsPath)
 	return argv, window, merged.SessionEnv(), nil
 }

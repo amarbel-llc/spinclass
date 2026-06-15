@@ -36,13 +36,12 @@ func newWorkerFixture(t *testing.T, sweatfileTOML string) (home, repoPath string
 	return home, repoPath
 }
 
-// happySweatfile's spawn template records its working directory (the marker
-// proves cmd.Dir = the worktree) and its positional argv (one element per
-// line) so the test can assert {id} substitution and that the brief stayed
-// a single element.
+// happySweatfile's spawn-entry (exec'd directly — FDR-0017 Piece 1) records its
+// working directory (the marker proves cmd.Dir = the worktree) and its
+// positional argv (one element per line) so the test can assert {prompt}
+// substitution and that the brief stayed a single element.
 const happySweatfile = `[session-entry]
-spawn       = ["sh", "-c", 'touch "$PWD/launched"; printf "%s\n" "$@" > "$PWD/argv.txt"', "sh", "{id}", "{entry}"]
-spawn-entry = ["true", "{prompt}"]
+spawn-entry = ["sh", "-c", 'touch "$PWD/launched"; printf "%s\n" "$@" > "$PWD/argv.txt"', "sh", "{prompt}"]
 `
 
 // windowSweatfile adds a spawn-window stub recording its substituted args
@@ -159,8 +158,7 @@ func TestLaunchHappyPath(t *testing.T) {
 	if want := "worker/" + branch; res.SessionKey != want {
 		t.Errorf("SessionKey: got %q, want %q", res.SessionKey, want)
 	}
-	// {id} is the full session key — the name start/resume/liveness-probe
-	// entries address multiplexer sessions by (#146).
+	// MultiplexerID is the worker's session key (its chat target).
 	if res.MultiplexerID != res.SessionKey {
 		t.Errorf("MultiplexerID: got %q, want session key %q", res.MultiplexerID, res.SessionKey)
 	}
@@ -177,7 +175,9 @@ func TestLaunchHappyPath(t *testing.T) {
 		t.Fatalf("argv.txt: %v", err)
 	}
 	gotArgs := strings.Split(strings.TrimRight(string(argv), "\n"), "\n")
-	wantArgs := []string{res.SessionKey, "true", brief}
+	// spawn-entry is exec'd directly with {prompt}→brief; the brief must stay a
+	// single argv element (no shell joining).
+	wantArgs := []string{brief}
 	if len(gotArgs) != len(wantArgs) {
 		t.Fatalf("argv: got %d elements %q, want %q (brief must stay one element)", len(gotArgs), gotArgs, wantArgs)
 	}
@@ -208,12 +208,11 @@ func TestLaunchHappyPath(t *testing.T) {
 	}
 }
 
-// envSweatfile's spawn template dumps its environment so the test can
-// assert the worker (not driver) identity vars were delivered, plus a
-// [session-entry].env var from the sweatfile cascade.
+// envSweatfile's spawn-entry dumps its environment so the test can assert the
+// worker (not driver) identity vars were delivered, plus a [session-entry].env
+// var from the sweatfile cascade.
 const envSweatfile = `[session-entry]
-spawn       = ["sh", "-c", 'env > "$1/env.txt"', "sh", "{dir}", "{entry}"]
-spawn-entry = ["true", "{prompt}"]
+spawn-entry = ["sh", "-c", 'env > "$PWD/env.txt"', "sh", "{prompt}"]
 
 [session-entry.env]
 SPINCLASS_GROUP = "workers"
@@ -306,8 +305,7 @@ func TestLaunchExecEnvCarriesWorkerIdentity(t *testing.T) {
 
 // timeoutSweatfile launches successfully but nothing ever sends the hello.
 const timeoutSweatfile = `[session-entry]
-spawn       = ["sh", "-c", 'touch "$PWD/launched"', "sh", "{entry}"]
-spawn-entry = ["true", "{prompt}"]
+spawn-entry = ["sh", "-c", 'touch "$PWD/launched"', "sh", "{prompt}"]
 `
 
 func TestLaunchHelloTimeout(t *testing.T) {
@@ -336,34 +334,5 @@ func TestLaunchHelloTimeout(t *testing.T) {
 	}
 	if st.SpawnedBy != driverKey {
 		t.Errorf("SpawnedBy after timeout: got %q, want %q", st.SpawnedBy, driverKey)
-	}
-}
-
-// noEntrySweatfile configures a spawn template but no spawn-entry harness.
-const noEntrySweatfile = `[session-entry]
-spawn = ["sh", "-c", 'touch "$PWD/launched"', "sh", "{entry}"]
-`
-
-func TestLaunchMissingSpawnEntryErrorsBeforeExec(t *testing.T) {
-	home, repoPath := newWorkerFixture(t, noEntrySweatfile)
-
-	_, err := Launch(home, repoPath, "driver/test-session", "do work", "desc", time.Second)
-	if err == nil {
-		t.Fatal("expected missing spawn-entry error, got nil")
-	}
-	if !strings.Contains(err.Error(), "[session-entry].spawn-entry") {
-		t.Errorf("error %q does not name [session-entry].spawn-entry", err)
-	}
-
-	// Template validation runs BEFORE any worktree or session-state
-	// creation: bad config must not litter. No worktree at all…
-	worktrees, _ := filepath.Glob(filepath.Join(repoPath, ".worktrees", "*"))
-	if len(worktrees) != 0 {
-		t.Errorf("worktree created despite missing spawn-entry: %v", worktrees)
-	}
-	// …and no session state file in the central index.
-	states, _ := filepath.Glob(filepath.Join(home, ".local", "state", "spinclass", "sessions", "*"))
-	if len(states) != 0 {
-		t.Errorf("session state written despite missing spawn-entry: %v", states)
 	}
 }

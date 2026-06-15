@@ -26,31 +26,17 @@ type SessionEntry struct {
 	Env                map[string]string `toml:"env"`
 	LivenessProbe      []string          `toml:"liveness-probe"`
 	TombstoneRetention string            `toml:"tombstone-retention"`
-	// Spawn is the multiplexer argv template `sc spawn` (and detached
-	// fork) execs to launch a worker session detached: {id} = the
-	// worker's session key (<repo>/<branch> — the name start/resume
-	// entries and liveness probes address, #146), {dir} = the worker
-	// worktree, {entry} = splice point for the spawn-entry argv
-	// (replaced element-wise, not as one string). Default:
-	// ["zmx", "attach", "{id}", "--detach", "{entry}"]. See FDR 0006.
-	Spawn []string `toml:"spawn"`
-	// SpawnEntry is the harness argv the spawned session boots into;
-	// {prompt} is replaced by the driver's brief (and {dir} by the
-	// worker worktree). No default — the harness is the user's choice
-	// (e.g. ["clown", "--", "{prompt}"]); spawn errors when unset.
+	// SpawnEntry is the detached-harness argv `sc spawn` (and detached fork)
+	// exec DIRECTLY (FDR-0017 Piece 1: spinclass no longer wraps in a
+	// multiplexer — the harness self-detaches and returns promptly, e.g.
+	// clown's --clown-attach=spawn). {prompt} = the driver's brief, {dir} =
+	// the worker worktree. Defaults to the clown spawn form (SessionSpawnEntry).
 	SpawnEntry []string `toml:"spawn-entry"`
-	// SpawnWindow is an argv template exec'd fire-and-forget right after
-	// the spawn template returns: it opens a terminal window onto the
-	// freshly spawned worker (#149). {id} = the worker's session key,
-	// {dir} = the worker worktree; {entry}/{prompt} are rejected by
-	// validate. Unset = no window.
+	// SpawnWindow is an argv template exec'd fire-and-forget right after the
+	// spawn entry launches: it opens a terminal window onto the freshly
+	// spawned worker (#149). {id} = the worker's session key, {dir} = the
+	// worker worktree; {entry}/{prompt} are rejected by validate. Unset = no window.
 	SpawnWindow []string `toml:"spawn-window"`
-	// ResumeTitle is the terminal title `sc resume` emits (one OSC 2
-	// escape) before exec'ing the attach entrypoint — spawned sessions'
-	// ptys have no title-writing shell, so the stale outer title persists
-	// without it (#154). {id} = the session key. nil = default "{id}";
-	// empty string disables emission.
-	ResumeTitle *string `toml:"resume-title"`
 }
 
 type Hooks struct {
@@ -342,30 +328,17 @@ func (sf Sweatfile) SessionResume() []string {
 	return nil
 }
 
-// SessionSpawn returns the multiplexer argv template for detached worker
-// launches (`sc spawn` / detached fork), defaulting to the zmx template
-// when unset or empty. See FDR 0006.
-func (sf Sweatfile) SessionSpawn() []string {
-	if sf.SessionEntry != nil && len(sf.SessionEntry.Spawn) > 0 {
-		return sf.SessionEntry.Spawn
-	}
-	// attach+--detach, NOT `zmx run`: run creates a shell session and
-	// space-joins the argv into typed keystrokes (a multi-line {prompt}
-	// brief would be shell-interpreted) and does not understand `--`.
-	// attach with a command execs the argv directly, element-preserving,
-	// and --detach returns promptly without a client. Verified against
-	// real zmx 2026-06-11 (#145); FDR 0001 carries the matching warning.
-	return []string{"zmx", "attach", "{id}", "--detach", "{entry}"}
-}
-
-// SessionSpawnEntry returns the harness argv a spawned session boots into,
-// or nil when unconfigured — there is deliberately no default: the harness
-// is the user's choice, and spawn errors when this is unset. See FDR 0006.
+// SessionSpawnEntry returns the detached-harness argv that `sc spawn` /
+// detached fork exec DIRECTLY (FDR-0017 Piece 1: spinclass no longer wraps in
+// a multiplexer — the harness self-detaches and returns promptly, e.g. clown's
+// --clown-attach=spawn). Defaults to the clown spawn form; override per the
+// sweatfile cascade for a different harness. {prompt} = the brief, {dir} = the
+// worktree.
 func (sf Sweatfile) SessionSpawnEntry() []string {
 	if sf.SessionEntry != nil && len(sf.SessionEntry.SpawnEntry) > 0 {
 		return sf.SessionEntry.SpawnEntry
 	}
-	return nil
+	return []string{"clown", "--clown-attach=spawn", "--", "{prompt}"}
 }
 
 // SessionSpawnWindow returns the spawn-window argv template, or nil when
@@ -376,15 +349,6 @@ func (sf Sweatfile) SessionSpawnWindow() []string {
 		return sf.SessionEntry.SpawnWindow
 	}
 	return nil
-}
-
-// SessionResumeTitle returns the resume title template (#154). Default
-// "{id}"; an explicit empty string disables emission.
-func (sf Sweatfile) SessionResumeTitle() string {
-	if sf.SessionEntry != nil && sf.SessionEntry.ResumeTitle != nil {
-		return *sf.SessionEntry.ResumeTitle
-	}
-	return "{id}"
 }
 
 // SessionEnv returns the user-configured environment variables to inject

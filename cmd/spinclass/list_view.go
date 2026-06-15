@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/mattn/go-isatty"
 
+	"github.com/amarbel-llc/spinclass/internal/clown"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sessionpick"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
@@ -159,6 +161,16 @@ func renderDiags(diags []string) string {
 	return strings.Join(lines, "\n")
 }
 
+// clownsCell renders the count of live clowns running under a session (from
+// clown's presence index), or "" when none — so the column reads clean for
+// sessions with no attached clown.
+func clownsCell(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return strconv.Itoa(n)
+}
+
 // renderListTable renders the styled session table — the summary view shared
 // by the static pretty path and the --watch model. Local states are sorted
 // active-first (session.SortStates) and filtered the same way the text path
@@ -170,7 +182,14 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 	now := time.Now()
 	session.SortStates(states)
 
-	type row struct{ state, sess, branch, age, desc string }
+	// Clown presence (RFC-0014 §4): the 1-to-many "clowns under this session"
+	// view, grouped by decoration == the spinclass session key. The CLOWNS
+	// column is shown only when some clown presence exists, so a bare spinclass
+	// (or no clown) keeps the legacy 5-column table.
+	presByKey := clown.PresenceByDecoration(now)
+	showClowns := len(presByKey) > 0
+
+	type row struct{ state, sess, branch, age, desc, clowns string }
 	var rows []row
 
 	for i := range states {
@@ -195,6 +214,7 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 			branch: s.Branch,
 			age:    sessionpick.FormatRelDate(sessionpick.LastActivity(*s), now),
 			desc:   descCell(s.Description, s.SpawnedBy),
+			clowns: clownsCell(len(presByKey[s.SessionKey])),
 		})
 	}
 	for _, r := range remoteRows {
@@ -215,10 +235,16 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 		return out + "\n"
 	}
 
+	headers := []string{"STATE"}
+	if showClowns {
+		headers = append(headers, "CLOWNS")
+	}
+	headers = append(headers, "SESSION", "BRANCH", "AGE", "DESCRIPTION")
+
 	t := table.New().
 		Border(lipgloss.RoundedBorder()).
 		BorderStyle(borderStyle).
-		Headers("STATE", "SESSION", "BRANCH", "AGE", "DESCRIPTION").
+		Headers(headers...).
 		StyleFunc(func(r, _ int) lipgloss.Style {
 			if r == table.HeaderRow {
 				return headerStyle
@@ -226,7 +252,12 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 			return cellStyle
 		})
 	for _, r := range rows {
-		t.Row(r.state, r.sess, r.branch, r.age, r.desc)
+		cells := []string{r.state}
+		if showClowns {
+			cells = append(cells, r.clowns)
+		}
+		cells = append(cells, r.sess, r.branch, r.age, r.desc)
+		t.Row(cells...)
 	}
 	out := t.Render()
 	if len(diags) > 0 {

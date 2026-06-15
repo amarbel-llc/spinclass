@@ -220,35 +220,17 @@ func CheckHooks(sf sweatfile.Sweatfile) []Issue {
 	return issues
 }
 
-// CheckSessionEntry validates the spawn template fields in the
-// [session-entry] table. `spawn` must carry a standalone "{entry}" element
-// (it is spliced element-wise, so an element merely containing the
-// placeholder cannot work); `spawn-entry` without "{prompt}" anywhere is
-// suspicious (the worker would boot without the driver's brief) but legal,
-// so it only warns. `spawn-window` is a leaf argv: {entry}/{prompt} in it
-// is an error, and no {id}/{dir} anywhere warns (the window command could
-// not identify its session). See FDR 0006.
+// CheckSessionEntry validates the spawn-related fields in the [session-entry]
+// table. `spawn-entry` is exec'd directly as the detached harness (FDR-0017
+// Piece 1: spinclass no longer wraps in a multiplexer); without "{prompt}"
+// anywhere it is suspicious (the worker would boot without the driver's brief)
+// but legal, so it only warns. `spawn-window` is a leaf argv: {entry}/{prompt}
+// in it is an error, and no {id}/{dir} anywhere warns (the window command could
+// not identify its session). See FDR 0006 / FDR 0017.
 func CheckSessionEntry(sf sweatfile.Sweatfile) []Issue {
 	var issues []Issue
 	if sf.SessionEntry == nil {
 		return issues
-	}
-	if len(sf.SessionEntry.Spawn) > 0 {
-		hasEntry := false
-		for _, el := range sf.SessionEntry.Spawn {
-			if el == "{entry}" {
-				hasEntry = true
-				break
-			}
-		}
-		if !hasEntry {
-			issues = append(issues, Issue{
-				Message:  `spawn template has no "{entry}" element (the spawn-entry argv is spliced element-wise; a placeholder embedded in a larger string does not count)`,
-				Severity: SeverityError,
-				Field:    "session-entry.spawn",
-				Value:    strings.Join(sf.SessionEntry.Spawn, " "),
-			})
-		}
 	}
 	if len(sf.SessionEntry.SpawnWindow) > 0 {
 		badPlaceholder := false

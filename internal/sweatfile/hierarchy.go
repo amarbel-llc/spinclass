@@ -149,17 +149,11 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if other.SessionEntry.TombstoneRetention != "" {
 			merged.SessionEntry.TombstoneRetention = other.SessionEntry.TombstoneRetention
 		}
-		if len(other.SessionEntry.Spawn) > 0 {
-			merged.SessionEntry.Spawn = other.SessionEntry.Spawn
-		}
 		if len(other.SessionEntry.SpawnEntry) > 0 {
 			merged.SessionEntry.SpawnEntry = other.SessionEntry.SpawnEntry
 		}
 		if len(other.SessionEntry.SpawnWindow) > 0 {
 			merged.SessionEntry.SpawnWindow = other.SessionEntry.SpawnWindow
-		}
-		if other.SessionEntry.ResumeTitle != nil {
-			merged.SessionEntry.ResumeTitle = other.SessionEntry.ResumeTitle
 		}
 	}
 

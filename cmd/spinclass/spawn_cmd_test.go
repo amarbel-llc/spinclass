@@ -113,11 +113,11 @@ func TestRefuseRecursiveSpawn(t *testing.T) {
 }
 
 // spawnCmdHappySweatfile mirrors internal/spawn's happy-path fixture: the
-// stub multiplexer template just drops a marker in the worktree; the test
-// plays the worker's SessionStart hook by sending the chat hello itself.
+// stub spawn-entry (exec'd directly — FDR-0017 Piece 1) just drops a marker in
+// the worktree; the test plays the worker's SessionStart hook by sending the
+// chat hello itself.
 const spawnCmdHappySweatfile = `[session-entry]
-spawn       = ["sh", "-c", 'touch "$PWD/launched"', "sh", "{entry}"]
-spawn-entry = ["true", "{prompt}"]
+spawn-entry = ["sh", "-c", 'touch "$PWD/launched"', "sh", "{prompt}"]
 `
 
 // newSpawnCmdFixture sandboxes HOME (worktree creation trusts the workspace

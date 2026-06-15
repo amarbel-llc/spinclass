@@ -335,33 +335,6 @@ func TestCheckHooksAllowsNilFormat(t *testing.T) {
 	}
 }
 
-func TestCheckSessionEntrySpawnMissingEntryPlaceholder(t *testing.T) {
-	sf := sweatfile.Sweatfile{
-		SessionEntry: &sweatfile.SessionEntry{
-			Spawn: []string{"zmx", "run", "{id}"},
-		},
-	}
-	issues := CheckSessionEntry(sf)
-	if len(issues) != 1 || issues[0].Severity != SeverityError ||
-		issues[0].Field != "session-entry.spawn" {
-		t.Fatalf("expected one error issue for spawn without {entry}, got %+v", issues)
-	}
-}
-
-func TestCheckSessionEntrySpawnEntryElementMustEqualNotContain(t *testing.T) {
-	// {entry} is spliced element-wise, so an element merely containing it
-	// (e.g. inside a shell string) is still an error.
-	sf := sweatfile.Sweatfile{
-		SessionEntry: &sweatfile.SessionEntry{
-			Spawn: []string{"sh", "-c", "zmx run {id} -- {entry}"},
-		},
-	}
-	issues := CheckSessionEntry(sf)
-	if len(issues) != 1 || issues[0].Severity != SeverityError {
-		t.Fatalf("expected one error issue for embedded {entry}, got %+v", issues)
-	}
-}
-
 func TestCheckSessionEntrySpawnEntryMissingPromptPlaceholder(t *testing.T) {
 	sf := sweatfile.Sweatfile{
 		SessionEntry: &sweatfile.SessionEntry{
@@ -428,8 +401,8 @@ func TestCheckSessionEntrySpawnWindowClean(t *testing.T) {
 func TestCheckSessionEntryClean(t *testing.T) {
 	sf := sweatfile.Sweatfile{
 		SessionEntry: &sweatfile.SessionEntry{
-			Spawn:      []string{"zmx", "attach", "{id}", "--detach", "{entry}"},
-			SpawnEntry: []string{"clown", "--", "{prompt}"},
+			SpawnEntry:  []string{"clown", "--clown-attach=spawn", "--", "{prompt}"},
+			SpawnWindow: []string{"sc-spawn-window", "{id}", "{dir}"},
 		},
 	}
 	if issues := CheckSessionEntry(sf); len(issues) != 0 {

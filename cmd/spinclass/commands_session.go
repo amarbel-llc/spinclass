@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/amarbel-llc/crap/go-crap/v2/crap"
@@ -55,8 +53,8 @@ func registerSessionCommands(app *command.App) {
 			Short: "Spawn a detached worker session in a sibling repo",
 			Long: "Launch a detached, harness-booted worker session in a DIFFERENT repo (FDR 0006). " +
 				"The target is a repo dirname leaf-searched under $HOME/*/repos/<name> (or an explicit path); " +
-				"the worker repo's sweatfile [session-entry].spawn / spawn-entry templates decide the multiplexer and harness. " +
-				"Spawn creates the worker worktree and session state (with spawned_by lineage), execs the spawn template detached, " +
+				"the worker repo's sweatfile [session-entry].spawn-entry decides the detached harness (default the clown spawn form). " +
+				"Spawn creates the worker worktree and session state (with spawned_by lineage), execs the spawn-entry detached (the harness self-detaches), " +
 				"then blocks up to the hello deadline (60s default; --hello-timeout tunes it) for the worker's SessionStart chat hello. " +
 				"The brief is the worker's ONLY context — include everything it needs plus an explicit instruction to message you back " +
 				"via chat when done (the printed session_key is the worker's chat address; yours is its reply target). " +
@@ -532,12 +530,6 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		Env:         merged.SessionEnv(),
 	}
 
-	// One-shot terminal title before the exec chain (#154); TTY-gated so
-	// piped output stays clean.
-	if !p.NoAttach && isatty.IsTerminal(os.Stdout.Fd()) {
-		emitResumeTitle(os.Stdout, merged, state.SessionKey)
-	}
-
 	return shop.Attach(
 		os.Stdout,
 		exec,
@@ -548,17 +540,4 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		p.NoAttach,
 		p.Verbose,
 	)
-}
-
-// emitResumeTitle writes the OSC 2 terminal title for the session being
-// resumed (#154). Spawned (FDR 0006) sessions' ptys have no title-writing
-// shell, so without this the attaching terminal keeps its stale outer
-// title; one shot suffices (an interactive shell inside an ordinary
-// session overwrites it at its next prompt anyway).
-func emitResumeTitle(w io.Writer, merged sweatfile.Sweatfile, sessionKey string) {
-	tpl := merged.SessionResumeTitle()
-	if tpl == "" {
-		return
-	}
-	fmt.Fprintf(w, "\033]2;%s\007", strings.ReplaceAll(tpl, "{id}", sessionKey))
 }

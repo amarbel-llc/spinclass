@@ -1,13 +1,10 @@
 // Package spawn launches detached, harness-booted worker sessions (FDR
-// 0006): repo-dirname resolution, sweatfile spawn/spawn-entry template
+// 0006): repo-dirname resolution, sweatfile spawn-entry template
 // substitution, worktree + session-state creation with spawned_by lineage,
 // and the chat-hello gate that proves the worker came up.
 package spawn
 
-import (
-	"fmt"
-	"strings"
-)
+import "strings"
 
 // SubstituteEntry renders the spawn-entry argv: {dir}→wtPath, {prompt}→brief.
 // Replacement is substring-level within each element (an element may embed
@@ -24,13 +21,6 @@ func SubstituteEntry(entry []string, brief, wtPath string) []string {
 	return out
 }
 
-// SubstituteSpawn renders the spawn argv: {id}→id and {dir}→wtPath
-// substring-substituted per element; the element exactly equal to "{entry}"
-// is replaced by splicing in the (already-substituted) entry argv
-// element-wise. An embedded {entry} is NOT a splice point — an argv cannot
-// be expanded element-wise inside one string. Errors when entry is empty
-// (no [session-entry].spawn-entry configured) or spawnTpl has no "{entry}"
-// element.
 // SubstituteWindow renders the spawn-window argv template (#149): {id}→id
 // and {dir}→wtPath substring-substituted per element. Returns nil for an
 // empty template (knob unset). No {entry} splice — the window command is a
@@ -46,31 +36,4 @@ func SubstituteWindow(template []string, id, wtPath string) []string {
 		out[i] = e
 	}
 	return out
-}
-
-func SubstituteSpawn(spawnTpl []string, id, wtPath string, entry []string) ([]string, error) {
-	if len(entry) == 0 {
-		return nil, fmt.Errorf(
-			"no [session-entry].spawn-entry configured: spawn needs a harness argv to boot the worker into (e.g. [\"clown\", \"{prompt}\"])",
-		)
-	}
-
-	out := make([]string, 0, len(spawnTpl)+len(entry)-1)
-	spliced := false
-	for _, e := range spawnTpl {
-		if e == "{entry}" {
-			out = append(out, entry...)
-			spliced = true
-			continue
-		}
-		e = strings.ReplaceAll(e, "{id}", id)
-		e = strings.ReplaceAll(e, "{dir}", wtPath)
-		out = append(out, e)
-	}
-	if !spliced {
-		return nil, fmt.Errorf(
-			"spawn template %q has no \"{entry}\" element to splice the harness argv into", spawnTpl,
-		)
-	}
-	return out, nil
 }

@@ -199,7 +199,7 @@ func registerQueryCommands(app *command.App) {
 		Name: "fork",
 		Description: command.Description{
 			Short: "Fork current worktree into a new branch",
-			Long:  "Create a new worktree branched from the current worktree's HEAD. If new-branch is omitted, a name is auto-generated as <current-branch>-N. Resolves the source worktree from the current directory or --from flag. Does not attach to the new session. With --brief, the fork instead launches as a detached, harness-booted worker session (FDR 0006): the new worktree is created the same way, then booted via the [session-entry].spawn template and the command blocks for the worker's SessionStart chat hello.",
+			Long:  "Create a new worktree branched from the current worktree's HEAD. If new-branch is omitted, a name is auto-generated as <current-branch>-N. Resolves the source worktree from the current directory or --from flag. Does not attach to the new session. With --brief, the fork instead launches as a detached, harness-booted worker session (FDR 0006): the new worktree is created the same way, then booted by exec'ing [session-entry].spawn-entry directly (the harness self-detaches) and the command blocks for the worker's SessionStart chat hello.",
 		},
 		Params: []command.Param{
 			{Name: "new-branch", Type: command.String, Description: "Name for the forked branch (auto-generated if omitted)"},

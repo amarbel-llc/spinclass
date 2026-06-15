@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,35 +12,6 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/testgit"
 )
-
-// TestEmitResumeTitle pins the #154 fix: one OSC-2 title escape rendered
-// from [session-entry].resume-title before the attach exec chain.
-func TestEmitResumeTitle(t *testing.T) {
-	withTitle := func(s string) sweatfile.Sweatfile {
-		return sweatfile.Sweatfile{SessionEntry: &sweatfile.SessionEntry{ResumeTitle: &s}}
-	}
-	t.Run("default emits the session key", func(t *testing.T) {
-		var b bytes.Buffer
-		emitResumeTitle(&b, sweatfile.Sweatfile{}, "spinclass/fix-141")
-		if got, want := b.String(), "\033]2;spinclass/fix-141\007"; got != want {
-			t.Errorf("got %q, want %q", got, want)
-		}
-	})
-	t.Run("custom template", func(t *testing.T) {
-		var b bytes.Buffer
-		emitResumeTitle(&b, withTitle("sc/{id}"), "repo/branch")
-		if got, want := b.String(), "\033]2;sc/repo/branch\007"; got != want {
-			t.Errorf("got %q, want %q", got, want)
-		}
-	})
-	t.Run("empty template disables", func(t *testing.T) {
-		var b bytes.Buffer
-		emitResumeTitle(&b, withTitle(""), "repo/branch")
-		if b.Len() != 0 {
-			t.Errorf("expected no output, got %q", b.String())
-		}
-	})
-}
 
 // TestCompleteWorktreeTargetsInRepoSorted: when cwd is inside a git
 // repo, the completer scopes to that repo's sessions and orders them

@@ -52,20 +52,20 @@ create_spawn_repo() {
   write_stub_sweatfile "$WORKER_REPO" "$harness"
 }
 
-# Write a repo-level sweatfile pointing [session-entry] at the stub
-# multiplexer/harness. The spawn template runs the entry argv in the
-# FOREGROUND ("exec") — it completes in milliseconds, which satisfies the
-# detach-promptly contract while keeping the test deterministic.
+# Write a repo-level sweatfile pointing [session-entry].spawn-entry at the stub
+# harness (FDR-0017 Piece 1: spinclass execs spawn-entry directly — no
+# multiplexer wrap). The stub runs in the FOREGROUND ("exec"), completing in
+# milliseconds, which satisfies the detach-promptly contract while keeping the
+# test deterministic; its output is redirected to spawn.log in the worktree.
 # Usage: write_stub_sweatfile <repo> <harness-script>
 write_stub_sweatfile() {
   local repo="$1" harness="$2"
   cat >"$repo/sweatfile" <<EOF
 [session-entry]
-spawn       = ["sh", "-c", "exec \"\$@\" >spawn.log 2>&1", "sh", "{entry}"]
-spawn-entry = ["$harness", "{prompt}"]
+spawn-entry = ["sh", "-c", "exec \"\$0\" \"\$@\" >spawn.log 2>&1", "$harness", "{prompt}"]
 EOF
   git -C "$repo" add sweatfile
-  git -C "$repo" commit -m "stub spawn templates"
+  git -C "$repo" commit -m "stub spawn-entry"
 }
 
 @test "spawn launches a hello-gated worker in a sibling repo" {
