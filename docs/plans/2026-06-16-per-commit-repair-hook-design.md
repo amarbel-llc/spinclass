@@ -75,16 +75,19 @@ worktree. The `extensions.worktreeConfig` extension is what makes
 (`state-<rand>.json`, `job.json`), so the hook script fits there and is torn
 down with the worktree on `sc close` — no explicit teardown.
 
-> **Feasibility spike (first implementation step, not yet settled).** Before
-> writing the installer, a scratch-repo spike must confirm:
-> 1. per-worktree `core.hooksPath` truly isolates the hook to one worktree;
-> 2. enabling `extensions.worktreeConfig` does not disturb the main checkout —
->    in particular when `core.worktree` / `core.bare` live in the *common*
->    config (a documented git footgun);
-> 3. the per-worktree config is cleaned up on `git worktree remove`.
+> **Feasibility spike — DONE (`just explore-worktree-hooks`).** A scratch-repo
+> spike confirmed all three properties:
+> 1. ✓ per-worktree `core.hooksPath` fires the hook only in the worktree that
+>    has it;
+> 2. ✓ the main checkout and a sibling worktree are unaffected (neither fires
+>    the hook nor sees the `core.hooksPath`);
+> 3. ✓ the per-worktree config is removed by `git worktree remove`.
 >
-> If the spike fails, the isolation mechanism is revisited before the installer
-> is built.
+> **Caveat not exercised:** the spike used a plain `git init` repo, which has no
+> `core.worktree` / `core.bare` in its common config, so the documented
+> `extensions.worktreeConfig` footgun wasn't triggered. The installer should
+> defensively check for those keys in the common config before flipping the
+> extension (refuse or warn).
 
 ### What the hook runs
 
@@ -95,22 +98,35 @@ conformist --staged --exit-zero-on-fix
 ```
 
 `--staged` formats only the staged blobs and restages them, so the in-flight
-commit lands conformant with **no extra commit and no amend**. The generated
-wrapper script:
+commit lands conformant with **no extra commit and no amend**. Its exit codes
+(verified against conformist source, `cmd/format/staged.go`):
+
+- **0** — staged content already conformant (or, with conformist fix A,
+  reformatted-and-restaged);
+- **3** (`ErrFixesRestaged`) — files were reformatted and **restaged** *without*
+  `--exit-zero-on-fix`; this is a success signal, not a failure;
+- **2** (`ErrStagedRefused`) — refused before formatting (outside a worktree,
+  stdin mode, or fail-on-change).
+
+> **Depends on conformist fixes A + B** (being done in `conformist/sunny-locust`,
+> see Dependencies). **A** makes `--exit-zero-on-fix` valid with `--staged` and
+> collapses the restage exit 3 → 0, so conformist owns the exit mapping and the
+> canonical command is `conformist --staged --exit-zero-on-fix`. **B** gives
+> `--staged` graduated partial-stage semantics (format the staged blob alone)
+> instead of refusing, closing the partial-stage gap. Until A lands the wrapper's
+> own 3→0 mapping (below) is the fallback.
+
+The generated wrapper script:
 
 1. guards on `command -v <first-token>`; if the formatter is absent, exits 0
    (silent no-op — a missing tool never blocks commits);
 2. runs the configured command;
-3. on exit 0 (conformant, or fixed-and-restaged via `--exit-zero-on-fix`), the
-   commit proceeds with the restaged content;
-4. on any nonzero exit (refusal — including partial-stage — or operational
-   error), logs a one-line warning to stderr and **exits 0 anyway**. The hook is
-   best-effort and never blocks a commit.
-
-> **Verify:** that `--exit-zero-on-fix` collapses `--staged`'s restage exit (3)
-> to 0. If it does not, the wrapper maps 3→0 itself. (Either way step 4 makes
-> the hook non-blocking, so this only affects whether the "fixed" case is logged
-> as a warning.)
+3. on exit 0, the commit proceeds (conformant, or restaged via A);
+4. on **any nonzero exit**, exits 0 anyway — belt-and-suspenders once A lands.
+   Exit 3 (restaged, pre-A) is a success path: the formatted content is already
+   restaged, so the commit proceeds conformant. Genuine refusals/operational
+   errors log a one-line warning to stderr and let the commit proceed. The hook
+   is best-effort and never blocks a commit.
 
 GPG note: because the hook only *restages* and the commit itself signs once
 normally, this sidesteps REPAIR's GPG limitation entirely — no amend, no
@@ -160,29 +176,50 @@ Dual-architecture transition, not a hard cut:
 - **Hook script location** (`.spinclass/hooks/`). Unlikely to change; listed for
   completeness.
 
+## Dependencies (conformist, `conformist/sunny-locust`)
+
+Two conformist changes are prerequisites for the clean design, both in flight in
+the `conformist/sunny-locust` worker session:
+
+- **A — `--exit-zero-on-fix` for `--staged`.** Relax the `--exit-zero-on-fix
+  requires --commit` guard (`cmd/root.go`) and thread the flag into `RunStaged`
+  so a successful restage returns exit 0 instead of `ErrFixesRestaged` (3).
+  Unblocks the canonical `conformist --staged --exit-zero-on-fix` invocation.
+- **B — graduated partial-stage semantics.** `--staged` should format the staged
+  *blob alone* for a partially-staged file (via blob plumbing — `git show
+  :path` → format → `git hash-object -w` → `update-index`), leaving unstaged
+  hunks untouched, instead of refusing (`ErrStagedRefused`, `cmd/format/staged.go`).
+  Closes the partial-stage gap below.
+
+Each is cross-linked to a conformist issue. A is the unblocker; B can land as a
+follow-up.
+
 ## Known limitations
 
-- **Partial-stage refusal.** `conformist --staged` refuses a partially-staged
-  file (`git add -p` then commit with leftover unstaged changes). The hook
-  soft-skips this, so the commit proceeds **unformatted** — drift passes
-  through. A cross-linked conformist issue is filed to handle partial stages
-  gracefully; until then this is the main gap in the #2 guarantee.
 - **`--no-verify` bypasses the hook.** A deliberate git escape hatch; such
   commits are not repaired.
 - **Imported commits** (rebase / cherry-pick into the session) are not
   reformatted — the hook only fires on commits authored in the session, and
   there is no merge backstop.
 - **Implicit/main-checkout sessions** are out of scope (see Scope).
+- **Partial-stage (pre-B).** Until conformist fix B lands, a partially-staged
+  file is refused (exit 2) and the hook soft-skips it, so that commit proceeds
+  unformatted. Closed once B ships.
 
 ## Deliverables
 
-1. Scratch-repo spike validating the isolation mechanism (gate).
+0. **(conformist, `sunny-locust`)** Fixes A + B, with cross-linked issues.
+   Prerequisite for steps 2–4's canonical command and the partial-stage path.
+1. ✓ Scratch-repo spike validating the isolation mechanism
+   (`just explore-worktree-hooks`).
 2. `[hooks].pre-commit` + `[hooks].disable-pre-commit` sweatfile fields,
    accessors, codec regen, `sc validate` coverage.
 3. Generated hook-script writer + per-worktree `core.hooksPath` installer wired
-   into `shop.Create()`.
-4. spinclass's own sweatfile switched from `repair` to `pre-commit`.
+   into `shop.Create()` — including the defensive `core.worktree`/`core.bare`
+   common-config check before enabling `extensions.worktreeConfig`.
+4. spinclass's own sweatfile switched from `repair` to `pre-commit`
+   (`conformist --staged --exit-zero-on-fix`).
 5. bats integration coverage: commit with drift gets formatted; main checkout
-   hooks untouched; `--no-verify` bypasses; missing-tool no-op.
-6. Cross-linked conformist issue for partial-stage handling.
-7. (Post-promotion, separate change) delete the REPAIR phase code.
+   hooks untouched; `--no-verify` bypasses; missing-tool no-op; partial-stage
+   (post-B) formats the staged blob and preserves unstaged hunks.
+6. (Post-promotion, separate change) delete the REPAIR phase code.

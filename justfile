@@ -487,3 +487,65 @@ release version:
       gum log --level info "pushed flake.nix bump to master"
     fi
     just tag "{{version}}" "$msg"
+
+# [explore] Spike for the per-commit-repair-hook design
+# (docs/plans/2026-06-16-per-commit-repair-hook-design.md). Verifies the
+# load-bearing isolation mechanism: extensions.worktreeConfig + a
+# per-worktree core.hooksPath confines a pre-commit hook to ONE worktree.
+# Scratch repo, marker hook, six checks. Delete once the installer lands.
+[group('explore')]
+explore-worktree-hooks:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    scratch=$(mktemp -d)
+    trap 'rm -rf "$scratch"' EXIT
+    repo="$scratch/repo"
+    marker="$scratch/fired.log"
+    pass=0
+    g() { git -C "$1" -c commit.gpgsign=false "${@:2}"; }
+
+    git init -q -b main "$repo"
+    g "$repo" commit -q --allow-empty -m initial
+
+    wt="$repo/.worktrees/feat"
+    g "$repo" worktree add -q -b feat "$wt" >/dev/null 2>&1
+
+    # Enable per-worktree config + a worktree-scoped hooksPath, in the WORKTREE only.
+    git -C "$wt" config extensions.worktreeConfig true
+    hooks="$wt/.spinclass/hooks"
+    mkdir -p "$hooks"
+    printf '#!/usr/bin/env bash\necho "FIRED:$(git rev-parse --show-toplevel)" >> "%s"\nexit 0\n' "$marker" > "$hooks/pre-commit"
+    chmod +x "$hooks/pre-commit"
+    git -C "$wt" config --worktree core.hooksPath "$hooks"
+
+    echo "## 1: commit in worktree fires the hook"
+    : > "$marker"; g "$wt" commit -q --allow-empty -m in-wt
+    if grep -q FIRED "$marker"; then echo "  PASS"; else echo "  FAIL: hook did not fire in worktree"; pass=1; fi
+
+    echo "## 2: commit in MAIN checkout does NOT fire the worktree hook"
+    : > "$marker"; g "$repo" commit -q --allow-empty -m in-main
+    if [[ -s "$marker" ]]; then echo "  FAIL: main fired worktree hook"; cat "$marker"; pass=1; else echo "  PASS"; fi
+
+    echo "## 3: main checkout sees no core.hooksPath"
+    hp=$(git -C "$repo" config --get core.hooksPath || true)
+    if [[ -z "$hp" ]]; then echo "  PASS"; else echo "  FAIL: main core.hooksPath=$hp"; pass=1; fi
+
+    echo "## 4: a second worktree without the config does not inherit it"
+    wt2="$repo/.worktrees/feat2"
+    g "$repo" worktree add -q -b feat2 "$wt2" >/dev/null 2>&1
+    hp2=$(git -C "$wt2" config --get core.hooksPath || true)
+    if [[ -z "$hp2" ]]; then echo "  PASS"; else echo "  FAIL: second worktree core.hooksPath=$hp2"; pass=1; fi
+
+    echo "## 5: extensions.worktreeConfig is repo-global (informational)"
+    echo "  main sees extensions.worktreeConfig=$(git -C "$repo" config --get extensions.worktreeConfig || true)"
+
+    echo "## 6: cleanup on git worktree remove"
+    cfg="$repo/.git/worktrees/feat/config.worktree"
+    echo "  per-worktree config before remove: $([[ -f "$cfg" ]] && echo present || echo absent)"
+    g "$repo" worktree remove --force "$wt"
+    after=$([[ -f "$cfg" ]] && echo STILL-PRESENT || echo gone)
+    echo "  per-worktree config after remove:  $after"
+    [[ "$after" == gone ]] || { echo "  FAIL: per-worktree config leaked after remove"; pass=1; }
+
+    if [[ $pass -eq 0 ]]; then echo "VERDICT: per-worktree hooksPath isolation WORKS"; else echo "VERDICT: isolation FAILED (see above)"; fi
+    exit $pass
