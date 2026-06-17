@@ -403,8 +403,13 @@ code), so native hooks of every type keep firing and a blocking native hook
 still blocks. When `[hooks].pre-commit` is **inactive**, `installPreCommitHook`
 instead **restores** (unsets our per-worktree `core.hooksPath` if it's ours,
 removes the dispatcher + sentinel), making `disable-pre-commit` a true uninstall
-and the rollback. Known limitation: a hook manager that rewrites `core.hooksPath`
-itself can clobber our override between `sc start`/`resume` re-installs.
+and the rollback. A nonzero formatter exit is surfaced loudly (its stderr + a
+banner) rather than silently swallowed, so a stale/misconfigured formatter isn't
+an invisible no-op (the commit still proceeds — non-blocking). Known
+limitations: a hook manager that rewrites `core.hooksPath` itself can clobber our
+override between `sc start`/`resume` re-installs; and the captured original is
+the *shared* `$GIT_COMMON_DIR/hooks`, so a *blocking* native hook there gates
+every worktree's commits, not one.
 
 ### Pre-merge hook inactivity watchdog
 

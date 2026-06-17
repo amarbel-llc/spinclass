@@ -93,7 +93,12 @@ exit 0
   hook runs on the conformant tree.
 - **Exit codes:** `exec` hands the commit's gate to the original hook — a
   blocking lint still blocks. Our conformist part stays best-effort/non-blocking
-  (a missing formatter or nonzero conformist exit never blocks).
+  (a missing formatter or nonzero conformist exit never blocks). **But a nonzero
+  formatter exit is surfaced loudly** — the dispatcher captures the formatter's
+  stderr, prints it, and adds an explanatory banner — so a stale/misconfigured
+  formatter (e.g. a conformist that rejects its own `--exit-zero-on-fix` flag
+  because it predates conformist#39) is not a *silent* no-op. A missing formatter
+  (`command -v` miss) stays quiet; only a present-but-failing one is loud.
 - **stdin/args:** `exec "$orig/$hook" "$@"` passes through `commit-msg`'s file
   arg, `pre-push`'s ref stream, etc. The conformist block runs only for
   `pre-commit` (no stdin), so it never consumes another hook's input.
@@ -140,6 +145,15 @@ makes `disable-pre-commit` the clean one-config rollback.
   but between those the manager's dir wins. Documented, not solved.
 - Composition only covers hooks present at install time; a native hook added
   mid-session isn't picked up until the next `Apply` (resume).
+- **The captured original is the *shared* `$GIT_COMMON_DIR/hooks`** (or a
+  repo-level `core.hooksPath`), which all worktrees and the parent checkout
+  share. So a *blocking* native hook there gates **every** concurrent session's
+  commits, not one worktree — composition delegates to it per worktree but the
+  hook itself is global. Inherent to native git hooks; flagged so it isn't a
+  surprise (spinclass#183 review, plain-banyan).
+- The formatter runs **per commit**, so a present-but-failing formatter prints
+  its loud banner on every commit until fixed (no once-per-session throttle).
+  Acceptable — it's a persistent reminder; throttling is a future tuning lever.
 
 ## Deliverables
 

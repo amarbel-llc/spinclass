@@ -16,11 +16,18 @@ func boolPtr(b bool) *bool    { return &b }
 
 func TestDispatcherScript(t *testing.T) {
 	s := dispatcherScript("/orig/hooks", "/wt/.spinclass/hooks", "conformist --staged --exit-zero-on-fix")
-	if !strings.Contains(s, "command -v 'conformist'") {
-		t.Errorf("expected PATH guard on conformist, got:\n%s", s)
+	if !strings.Contains(s, "bin='conformist'") {
+		t.Errorf("expected baked bin, got:\n%s", s)
 	}
-	if !strings.Contains(s, "sh -c 'conformist --staged --exit-zero-on-fix'") {
-		t.Errorf("expected command body, got:\n%s", s)
+	if !strings.Contains(s, "cmd='conformist --staged --exit-zero-on-fix'") {
+		t.Errorf("expected baked command, got:\n%s", s)
+	}
+	if !strings.Contains(s, `command -v "$bin"`) || !strings.Contains(s, `sh -c "$cmd"`) {
+		t.Errorf("expected PATH guard + command run, got:\n%s", s)
+	}
+	// A nonzero formatter exit is surfaced loudly, not silently swallowed.
+	if !strings.Contains(s, "staged content NOT repaired") {
+		t.Errorf("expected loud nonzero warning, got:\n%s", s)
 	}
 	// Delegates to the original same-named hook, preserving exit code via exec.
 	if !strings.Contains(s, `exec "$orig/$hook" "$@"`) {
@@ -33,7 +40,7 @@ func TestDispatcherScript(t *testing.T) {
 		t.Errorf("expected non-blocking exit 0 tail, got:\n%s", s)
 	}
 	// A `sh -c '...'` command guards on the sh binary, not the inner tool.
-	if got := dispatcherScript("/o", "/s", "sh -c 'foo bar'"); !strings.Contains(got, "command -v 'sh'") {
+	if got := dispatcherScript("/o", "/s", "sh -c 'foo bar'"); !strings.Contains(got, "bin='sh'") {
 		t.Errorf("expected guard on sh, got:\n%s", got)
 	}
 }
@@ -116,6 +123,46 @@ func TestInstallPreCommitHookFiresOnCommit(t *testing.T) {
 
 	if _, err := os.Stat(marker); err != nil {
 		t.Errorf("pre-commit hook did not fire at commit time: %v", err)
+	}
+}
+
+// A formatter that fails its own arg validation (mimics a stale conformist
+// rejecting --exit-zero-on-fix, spinclass#183 review) must not silently no-op:
+// the commit still proceeds (non-blocking) but the failure is surfaced loudly
+// with the formatter's stderr.
+func TestInstallPreCommitHookSurfacesFormatterError(t *testing.T) {
+	testgit.RequireGit(t)
+	repo := t.TempDir()
+	testgit.MustInit(t, repo)
+	wt := filepath.Join(repo, ".worktrees", "feat")
+	testgit.MustWorktreeAdd(t, repo, wt, "feat")
+
+	binDir := t.TempDir()
+	writeExec(t, filepath.Join(binDir, "badfmt"),
+		"#!/bin/sh\necho 'badfmt: --exit-zero-on-fix requires --commit' >&2\nexit 2\n")
+
+	sf := Sweatfile{Hooks: &Hooks{PreCommit: strptr("badfmt --staged --exit-zero-on-fix")}}
+	if err := sf.installPreCommitHook(wt); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(wt, "f.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitPath(t, wt, binDir, "add", "f.txt")
+
+	cmd := exec.Command("git", "-C", wt, "commit", "-m", "c")
+	cmd.Env = append(os.Environ(), "PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("commit must not be blocked by a non-blocking formatter: %v\n%s", err, out)
+	}
+	got := string(out)
+	if !strings.Contains(got, "staged content NOT repaired") {
+		t.Errorf("expected loud formatter-error banner in commit output, got:\n%s", got)
+	}
+	if !strings.Contains(got, "requires --commit") {
+		t.Errorf("expected the formatter's own stderr passed through, got:\n%s", got)
 	}
 }
 

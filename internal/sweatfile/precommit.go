@@ -218,6 +218,13 @@ func commonConfigHasWorktreeOverride(worktreePath string) bool {
 // non-blocking) and then delegates to the repo's original same-named hook,
 // preserving its args, stdin, and exit code (so a blocking native lint still
 // blocks the commit). A self-reference guard prevents an exec loop.
+//
+// A NONZERO formatter exit is surfaced loudly — its captured stderr is shown
+// plus an explanatory banner — rather than silently swallowed. A stale or
+// misconfigured formatter (e.g. a conformist that rejects its own canonical
+// flags) would otherwise be indistinguishable from a working one, landing
+// commits unformatted while looking fine (spinclass#183 review). The formatter
+// is still non-blocking: the commit proceeds regardless.
 func dispatcherScript(originalDir, hooksDir, cmd string) string {
 	bin := cmd
 	if i := strings.IndexAny(cmd, " \t"); i >= 0 {
@@ -227,15 +234,28 @@ func dispatcherScript(originalDir, hooksDir, cmd string) string {
 		"# Managed by spinclass — per-session pre-commit repair hook (composing dispatcher).\n" +
 		"# Runs the configured formatter on pre-commit, then delegates to the repo's\n" +
 		"# original same-named native hook (preserving its exit code). The formatter is\n" +
-		"# best-effort/non-blocking; the native hook's gate is preserved. Regenerated on\n" +
-		"# every `sc start`/`sc resume`. See\n" +
+		"# best-effort/non-blocking, BUT a nonzero formatter exit is surfaced loudly (with\n" +
+		"# its stderr) so a stale/misconfigured formatter is not a silent no-op. Regenerated\n" +
+		"# on every `sc start`/`sc resume`. See\n" +
 		"# docs/plans/2026-06-17-precommit-hook-composition-design.md.\n" +
 		"hook=$(basename \"$0\")\n" +
 		"orig=" + shSingleQuote(originalDir) + "\n" +
 		"self=" + shSingleQuote(hooksDir) + "\n" +
 		"if [ \"$hook\" = pre-commit ]; then\n" +
-		"\tif command -v " + shSingleQuote(bin) + " >/dev/null 2>&1; then\n" +
-		"\t\tsh -c " + shSingleQuote(cmd) + " || echo 'spinclass pre-commit: formatter exited nonzero; continuing' >&2\n" +
+		"\tbin=" + shSingleQuote(bin) + "\n" +
+		"\tcmd=" + shSingleQuote(cmd) + "\n" +
+		"\tif command -v \"$bin\" >/dev/null 2>&1; then\n" +
+		"\t\terr=$(mktemp 2>/dev/null || printf '%s' \"${TMPDIR:-/tmp}/spinclass-precommit.$$\")\n" +
+		"\t\tsh -c \"$cmd\" 2>\"$err\"\n" +
+		"\t\trc=$?\n" +
+		"\t\tcat \"$err\" >&2\n" +
+		"\t\trm -f \"$err\"\n" +
+		"\t\tif [ \"$rc\" -ne 0 ]; then\n" +
+		"\t\t\tprintf '%s\\n' \\\n" +
+		"\t\t\t\t\"spinclass pre-commit: formatter exited $rc — staged content NOT repaired (committing anyway).\" \\\n" +
+		"\t\t\t\t\"  command: $cmd\" \\\n" +
+		"\t\t\t\t\"  a flag/usage error here usually means the formatter is stale or misconfigured.\" >&2\n" +
+		"\t\tfi\n" +
 		"\tfi\n" +
 		"fi\n" +
 		"if [ \"$orig\" != \"$self\" ] && [ -x \"$orig/$hook\" ]; then\n" +
