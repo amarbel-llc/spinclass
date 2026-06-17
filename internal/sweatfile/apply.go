@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/charmbracelet/log"
+
 	"github.com/amarbel-llc/spinclass/internal/embeds"
 )
 
@@ -38,6 +40,14 @@ func (sweatfile Sweatfile) Apply(worktreePath string) error {
 
 	if err := sweatfile.prepareDirenv(worktreePath); err != nil {
 		return err
+	}
+
+	// Install the per-session pre-commit repair hook (best-effort): a failure
+	// here must never block session creation, so log and continue. No-op when
+	// [hooks].pre-commit is inactive. See
+	// docs/plans/2026-06-16-per-commit-repair-hook-design.md.
+	if err := merged.installPreCommitHook(worktreePath); err != nil {
+		log.Warn("pre-commit hook install skipped", "err", err)
 	}
 
 	return nil

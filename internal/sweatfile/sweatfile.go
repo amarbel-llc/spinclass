@@ -44,12 +44,14 @@ type Hooks struct {
 	Stop                       *string `toml:"stop"`
 	PreMerge                   *string `toml:"pre-merge"`
 	Repair                     *string `toml:"repair"`
+	PreCommit                  *string `toml:"pre-commit"`
 	OnAttach                   *string `toml:"on-attach"`
 	OnDetach                   *string `toml:"on-detach"`
 	DisallowMainWorktree       *bool   `toml:"disallow-main-worktree"`
 	ToolUseLog                 *bool   `toml:"tool-use-log"`
 	DisableMerge               *bool   `toml:"disable-merge"`
 	DisableRepair              *bool   `toml:"disable-repair"`
+	DisablePreCommit           *bool   `toml:"disable-pre-commit"`
 	DisableNixGC               *bool   `toml:"disable-nix-gc"`
 	DisableImplicitSessions    *bool   `toml:"disable-implicit-sessions"`
 	DisableMergeBuildWorktree  *bool   `toml:"disable-merge-build-worktree"`
@@ -309,6 +311,40 @@ func (sf Sweatfile) RepairActive() bool {
 		return false
 	}
 	cmd := sf.RepairHookCommand()
+	return cmd != nil && stripEmptyLines(*cmd) != ""
+}
+
+// PreCommitHookCommand returns the [hooks].pre-commit command, or nil when
+// unset. When set (and not disabled), `sc start` installs it as a per-session
+// git pre-commit hook that repairs staged content at authoring time so each
+// commit is conformant in history. The canonical value is
+// `conformist --staged --exit-zero-on-fix`. See
+// docs/plans/2026-06-16-per-commit-repair-hook-design.md.
+func (sf Sweatfile) PreCommitHookCommand() *string {
+	if sf.Hooks == nil {
+		return nil
+	}
+	return sf.Hooks.PreCommit
+}
+
+// PreCommitDisabled reports whether [hooks].disable-pre-commit is true. It
+// suppresses an inherited [hooks].pre-commit command without clearing the
+// string, mirroring the disable-repair / disable-merge opt-out shape.
+func (sf Sweatfile) PreCommitDisabled() bool {
+	return sf.Hooks != nil &&
+		sf.Hooks.DisablePreCommit != nil &&
+		*sf.Hooks.DisablePreCommit
+}
+
+// PreCommitActive reports whether the per-session pre-commit hook should be
+// installed: a non-empty [hooks].pre-commit command not suppressed by
+// [hooks].disable-pre-commit. Uses the same emptiness test as RepairActive so a
+// whitespace-only command is treated as unset.
+func (sf Sweatfile) PreCommitActive() bool {
+	if sf.PreCommitDisabled() {
+		return false
+	}
+	cmd := sf.PreCommitHookCommand()
 	return cmd != nil && stripEmptyLines(*cmd) != ""
 }
 

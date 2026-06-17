@@ -260,3 +260,108 @@ pre-merge = "true"' >"$TEST_REPO/sweatfile"
   run git -C "$TEST_REPO" log --oneline main
   assert_output --partial "add new file"
 }
+
+# install_fakefmt_stub drops a stand-in formatter on PATH that proves the
+# pre-commit hook fired: it logs to fakefmt.log AND appends a FORMATTED marker
+# to each staged file and restages it (mimicking `conformist --staged`), so the
+# committed content reflects the hook's restaged output. See
+# docs/plans/2026-06-16-per-commit-repair-hook-design.md.
+install_fakefmt_stub() {
+  local stub="$BATS_TEST_TMPDIR/stubs/fakefmt"
+  cat >"$stub" <<'STUB'
+#!/bin/sh
+echo fired >> "$BATS_TEST_TMPDIR/fakefmt.log"
+for f in $(git diff --cached --name-only); do
+  printf 'FORMATTED\n' >> "$f"
+  git add "$f"
+done
+exit 0
+STUB
+  chmod +x "$stub"
+}
+
+# A repo-root sweatfile with [hooks].pre-commit is installed as a per-worktree
+# git pre-commit hook at `sc start` time (worktree.Create → Apply →
+# installPreCommitHook). The sweatfile must exist BEFORE start so the hierarchy
+# carries it into the worktree (mirrors repair_phase_runs_on_merge). The hook
+# repairs staged content at authoring time, so the committed blob carries the
+# formatter's restaged output.
+function pre_commit_hook_formats_staged_content { # @test
+  cd "$TEST_REPO" || return
+  install_fakefmt_stub
+  printf '%s\n' '[hooks]
+pre-commit = "fakefmt"' >"$TEST_REPO/sweatfile"
+
+  run_sc start --no-attach pc_fmt
+  assert_success
+  local wt
+  wt=$(extract_wt_path "$output")
+  assert [ -d "$wt" ]
+
+  echo "hello" >"$wt/note.txt"
+  git -C "$wt" add note.txt
+  git -C "$wt" commit -m "add note"
+
+  assert [ -f "$BATS_TEST_TMPDIR/fakefmt.log" ]
+  run git -C "$wt" show HEAD:note.txt
+  assert_output --partial "FORMATTED"
+}
+
+# The hook is scoped to the worktree via a per-worktree core.hooksPath
+# (extensions.worktreeConfig); a commit in the parent checkout must NOT fire it.
+function pre_commit_hook_does_not_touch_main_checkout { # @test
+  cd "$TEST_REPO" || return
+  install_fakefmt_stub
+  printf '%s\n' '[hooks]
+pre-commit = "fakefmt"' >"$TEST_REPO/sweatfile"
+
+  run_sc start --no-attach pc_iso
+  assert_success
+
+  rm -f "$BATS_TEST_TMPDIR/fakefmt.log"
+  echo "main change" >"$TEST_REPO/mainfile.txt"
+  git -C "$TEST_REPO" add mainfile.txt
+  git -C "$TEST_REPO" commit -m "main commit"
+
+  refute [ -f "$BATS_TEST_TMPDIR/fakefmt.log" ]
+  run git -C "$TEST_REPO" show HEAD:mainfile.txt
+  refute_output --partial "FORMATTED"
+}
+
+# `git commit --no-verify` is git's deliberate hook escape hatch: the pre-commit
+# repair hook must not fire.
+function pre_commit_hook_no_verify_bypasses { # @test
+  cd "$TEST_REPO" || return
+  install_fakefmt_stub
+  printf '%s\n' '[hooks]
+pre-commit = "fakefmt"' >"$TEST_REPO/sweatfile"
+
+  run_sc start --no-attach pc_nv
+  assert_success
+  local wt
+  wt=$(extract_wt_path "$output")
+
+  echo "x" >"$wt/nv.txt"
+  git -C "$wt" add nv.txt
+  git -C "$wt" commit --no-verify -m "skip hook"
+
+  refute [ -f "$BATS_TEST_TMPDIR/fakefmt.log" ]
+}
+
+# When the configured formatter is not on PATH, the hook's `command -v` guard
+# makes it a no-op so commits are never blocked by a missing tool.
+function pre_commit_hook_missing_tool_is_noop { # @test
+  cd "$TEST_REPO" || return
+  printf '%s\n' '[hooks]
+pre-commit = "definitely-not-a-real-binary-xyz"' >"$TEST_REPO/sweatfile"
+
+  run_sc start --no-attach pc_missing
+  assert_success
+  local wt
+  wt=$(extract_wt_path "$output")
+
+  echo "y" >"$wt/m.txt"
+  git -C "$wt" add m.txt
+  run git -C "$wt" commit -m "commit with missing formatter"
+  assert_success
+}

@@ -56,10 +56,11 @@ authoring-time, best-effort repair over a belt-and-suspenders guarantee.
 
 ### Installation & isolation
 
-`shop.Create()` (which runs on both `sc start` and `sc resume`, idempotently)
-writes a generated `pre-commit` script to
-`<worktree>/.spinclass/hooks/pre-commit` and points git at it scoped to the
-session worktree only:
+The worktree's `sweatfile.Apply` (run by `worktree.Create` on both `sc start`
+and `sc resume`, idempotently, alongside git-excludes / claude-trust /
+direnv) writes a generated `pre-commit` script to
+`<worktree>/.spinclass/hooks/pre-commit` (via `installPreCommitHook`) and points
+git at it scoped to the session worktree only:
 
 ```
 git config extensions.worktreeConfig true        # once per repo, idempotent
@@ -141,10 +142,12 @@ New sweatfile fields under `[hooks]`, mirroring `[hooks].repair`:
 - `disable-pre-commit` (`*bool`) — scalar override to suppress an inherited
   command without clearing the string.
 
-Accessors mirror `RepairHookCommand` / `RepairDisabled` / `RepairActive`.
-spinclass's own sweatfile sets `pre-commit = "conformist --staged
---exit-zero-on-fix"`; every other repo opts in. `sc validate` flags an empty /
-malformed entry.
+Accessors mirror `RepairHookCommand` / `RepairDisabled` / `RepairActive`
+(`PreCommitHookCommand` / `PreCommitDisabled` / `PreCommitActive`). spinclass's
+own sweatfile sets `pre-commit = "conformist --staged --exit-zero-on-fix"`; every
+other repo opts in. No `sc validate` rule is added: like `repair` / `pre-merge` /
+`create` / `stop`, this is a free-form command string (empty = inactive, not an
+error), and none of those sibling hooks are validated.
 
 ### Scope
 
@@ -202,24 +205,27 @@ follow-up.
   reformatted — the hook only fires on commits authored in the session, and
   there is no merge backstop.
 - **Implicit/main-checkout sessions** are out of scope (see Scope).
-- **Partial-stage (pre-B).** Until conformist fix B lands, a partially-staged
-  file is refused (exit 2) and the hook soft-skips it, so that commit proceeds
-  unformatted. Closed once B ships.
+
+(The partial-stage gap is closed: conformist fix B — #40, merged — formats the
+staged blob rather than refusing.)
 
 ## Deliverables
 
-0. **(conformist, `sunny-locust`)** Fixes A + B, with cross-linked issues.
-   Prerequisite for steps 2–4's canonical command and the partial-stage path.
+0. ✓ **(conformist, `sunny-locust`)** Fix A (#39, `ed79939`) and fix B
+   (#40, `5f0385a`), both merged & cross-linked.
 1. ✓ Scratch-repo spike validating the isolation mechanism
    (`just explore-worktree-hooks`).
-2. `[hooks].pre-commit` + `[hooks].disable-pre-commit` sweatfile fields,
-   accessors, codec regen, `sc validate` coverage.
-3. Generated hook-script writer + per-worktree `core.hooksPath` installer wired
-   into `shop.Create()` — including the defensive `core.worktree`/`core.bare`
-   common-config check before enabling `extensions.worktreeConfig`.
-4. spinclass's own sweatfile switched from `repair` to `pre-commit`
+2. ✓ `[hooks].pre-commit` + `[hooks].disable-pre-commit` sweatfile fields,
+   accessors, codec regen (no `sc validate` rule — free-form command, parity
+   with `repair`).
+3. ✓ Generated hook-script writer + per-worktree `core.hooksPath` installer
+   (`internal/sweatfile/precommit.go`) wired into `sweatfile.Apply` — including
+   the defensive `core.worktree` common-config check before enabling
+   `extensions.worktreeConfig`. Best-effort: a failure is logged, never blocks
+   session creation.
+4. ✓ spinclass's own sweatfile switched from `repair` to `pre-commit`
    (`conformist --staged --exit-zero-on-fix`).
-5. bats integration coverage: commit with drift gets formatted; main checkout
-   hooks untouched; `--no-verify` bypasses; missing-tool no-op; partial-stage
-   (post-B) formats the staged blob and preserves unstaged hunks.
+5. ✓ bats integration coverage (`zz-tests_bats/hooks.bats`): commit gets the
+   formatter's restaged output; main checkout untouched; `--no-verify` bypasses;
+   missing-tool no-op. Plus Go coverage incl. an on-commit-fires test.
 6. (Post-promotion, separate change) delete the REPAIR phase code.

@@ -87,8 +87,8 @@ parent dirs → repo-level. Supports `git-excludes`, `claude-allow`, `envrc-dire
 `allowed-mcps` arrays (nil = inherit, empty = clear, non-empty = append),
 `[[mcps]]`, `[[start-commands]]`, and `[[remotes]]` arrays of tables
 (dedup-by-name merge),
-`[env]` table (map merge), `[hooks]` table (create/stop/pre-merge/repair lifecycle hooks, scalar
-override; includes `disable-merge`, `disable-repair`, `disable-nix-gc`,
+`[env]` table (map merge), `[hooks]` table (create/stop/pre-merge/repair/pre-commit lifecycle hooks, scalar
+override; includes `disable-merge`, `disable-repair`, `disable-pre-commit`, `disable-nix-gc`,
 `disable-merge-build-worktree`, `disable-implicit-sessions`,
 `disable-worktree-path-rewrite`, `pre-merge-output-format`,
 `inactivity-timeout`), and `[session-entry]` table (start/resume entrypoint
@@ -364,6 +364,31 @@ spinclass stays convention-free), and aborts the merge on a non-zero exit.
 Repair is merge-only (`sc check` skips it) and scoped to worktree sessions;
 implicit sessions are out of scope (their HEAD may be pushed, which conformist's
 `--amend` refuses). See FDR 0018 and `spinclass-sweatfile(5)` `[hooks].repair`.
+
+### Per-commit repair hook (authoring-time)
+
+When `[hooks].pre-commit` is set (and not `[hooks].disable-pre-commit`),
+`sweatfile.Apply` (run by `worktree.Create` on every `sc start`/`sc resume`)
+installs it as a per-session git **pre-commit** hook
+(`internal/sweatfile/precommit.go` → `installPreCommitHook`), so drift is
+repaired **at authoring time** and every commit is conformant in history —
+unlike the merge-time REPAIR phase, which only ever amends the top commit. The
+canonical value is `conformist --staged --exit-zero-on-fix` (formats the staged
+blobs and restages them — no extra commit, no amend). The generated wrapper is
+written to `<worktree>/.spinclass/hooks/pre-commit` and scoped to that worktree
+alone via `git config extensions.worktreeConfig true` + `git config --worktree
+core.hooksPath <dir>` — worktrees otherwise share `$GIT_COMMON_DIR/hooks`, so
+this isolation is load-bearing (it keeps the hook out of the parent checkout and
+sibling worktrees; the installer defensively refuses if `core.worktree` is set in
+the common config). The wrapper is **best-effort and non-blocking**: a missing
+formatter (`command -v` guard) or any non-zero exit never blocks the commit
+(exit 3's restage has already landed; refusals/errors warn and proceed). Install
+is best-effort too — a failure is logged, never blocks session creation. Worktree
+sessions only; implicit (main-checkout) sessions are out of scope. This is the
+per-commit successor to the merge-time REPAIR phase; spinclass's own sweatfile
+uses it (`repair` retired with a one-line rollback). See
+`docs/plans/2026-06-16-per-commit-repair-hook-design.md` and
+`spinclass-sweatfile(5)` `[hooks].pre-commit`.
 
 ### Pre-merge hook inactivity watchdog
 

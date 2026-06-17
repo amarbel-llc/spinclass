@@ -183,6 +183,12 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				_vHooksRepair.MarkConsumed()
 			}
 		}
+		if _vHooksPreCommit, _ok := _vHooks.Get("pre-commit"); _ok && _vHooksPreCommit.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksPreCommit.Leaf); _xok {
+				hooksVal3.PreCommit = &_x
+				_vHooksPreCommit.MarkConsumed()
+			}
+		}
 		if _vHooksOnAttach, _ok := _vHooks.Get("on-attach"); _ok && _vHooksOnAttach.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractString(_vHooksOnAttach.Leaf); _xok {
 				hooksVal3.OnAttach = &_x
@@ -217,6 +223,12 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractBool(_vHooksDisableRepair.Leaf); _xok {
 				hooksVal3.DisableRepair = &_x
 				_vHooksDisableRepair.MarkConsumed()
+			}
+		}
+		if _vHooksDisablePreCommit, _ok := _vHooks.Get("disable-pre-commit"); _ok && _vHooksDisablePreCommit.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksDisablePreCommit.Leaf); _xok {
+				hooksVal3.DisablePreCommit = &_x
+				_vHooksDisablePreCommit.MarkConsumed()
 			}
 		}
 		if _vHooksDisableNixGc, _ok := _vHooks.Get("disable-nix-gc"); _ok && _vHooksDisableNixGc.Kind == cst.VLeaf {
@@ -287,6 +299,13 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				_vRepair.MarkConsumed()
 			}
 		}
+		if _vPreCommit, _ok := model.Get("pre-commit"); _ok && _vPreCommit.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vPreCommit.Leaf); _xok {
+				hooksVal3.PreCommit = &_x
+				_vPreCommit.MarkConsumed()
+			}
+		}
 		if _vOnAttach, _ok := model.Get("on-attach"); _ok && _vOnAttach.Kind == cst.VLeaf {
 			_foundHooks = true
 			if _x, _xok := cst.ExtractString(_vOnAttach.Leaf); _xok {
@@ -327,6 +346,13 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractBool(_vDisableRepair.Leaf); _xok {
 				hooksVal3.DisableRepair = &_x
 				_vDisableRepair.MarkConsumed()
+			}
+		}
+		if _vDisablePreCommit, _ok := model.Get("disable-pre-commit"); _ok && _vDisablePreCommit.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vDisablePreCommit.Leaf); _xok {
+				hooksVal3.DisablePreCommit = &_x
+				_vDisablePreCommit.MarkConsumed()
 			}
 		}
 		if _vDisableNixGc, _ok := model.Get("disable-nix-gc"); _ok && _vDisableNixGc.Kind == cst.VLeaf {
@@ -762,6 +788,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
+		if d.data.Hooks.PreCommit != nil {
+			if err := cst.SetAny(tableNode, "pre-commit", *d.data.Hooks.PreCommit); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
 		if d.data.Hooks.OnAttach != nil {
 			if err := cst.SetAny(tableNode, "on-attach", *d.data.Hooks.OnAttach); err != nil {
 				return nil, fmt.Errorf("%w", err)
@@ -789,6 +820,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 		}
 		if d.data.Hooks.DisableRepair != nil {
 			if err := cst.SetAny(tableNode, "disable-repair", *d.data.Hooks.DisableRepair); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.Hooks.DisablePreCommit != nil {
+			if err := cst.SetAny(tableNode, "disable-pre-commit", *d.data.Hooks.DisablePreCommit); err != nil {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
@@ -1176,6 +1212,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vHooksRepair.MarkConsumed()
 			}
 		}
+		if _vHooksPreCommit, _ok := _vHooks.Get("pre-commit"); _ok && _vHooksPreCommit.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksPreCommit.Leaf); _xok {
+				hooksVal3.PreCommit = &_x
+				_vHooksPreCommit.MarkConsumed()
+			}
+		}
 		if _vHooksOnAttach, _ok := _vHooks.Get("on-attach"); _ok && _vHooksOnAttach.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractString(_vHooksOnAttach.Leaf); _xok {
 				hooksVal3.OnAttach = &_x
@@ -1210,6 +1252,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractBool(_vHooksDisableRepair.Leaf); _xok {
 				hooksVal3.DisableRepair = &_x
 				_vHooksDisableRepair.MarkConsumed()
+			}
+		}
+		if _vHooksDisablePreCommit, _ok := _vHooks.Get("disable-pre-commit"); _ok && _vHooksDisablePreCommit.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksDisablePreCommit.Leaf); _xok {
+				hooksVal3.DisablePreCommit = &_x
+				_vHooksDisablePreCommit.MarkConsumed()
 			}
 		}
 		if _vHooksDisableNixGc, _ok := _vHooks.Get("disable-nix-gc"); _ok && _vHooksDisableNixGc.Kind == cst.VLeaf {
@@ -1280,6 +1328,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vRepair.MarkConsumed()
 			}
 		}
+		if _vPreCommit, _ok := sub.Get("pre-commit"); _ok && _vPreCommit.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vPreCommit.Leaf); _xok {
+				hooksVal3.PreCommit = &_x
+				_vPreCommit.MarkConsumed()
+			}
+		}
 		if _vOnAttach, _ok := sub.Get("on-attach"); _ok && _vOnAttach.Kind == cst.VLeaf {
 			_foundHooks = true
 			if _x, _xok := cst.ExtractString(_vOnAttach.Leaf); _xok {
@@ -1320,6 +1375,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractBool(_vDisableRepair.Leaf); _xok {
 				hooksVal3.DisableRepair = &_x
 				_vDisableRepair.MarkConsumed()
+			}
+		}
+		if _vDisablePreCommit, _ok := sub.Get("disable-pre-commit"); _ok && _vDisablePreCommit.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vDisablePreCommit.Leaf); _xok {
+				hooksVal3.DisablePreCommit = &_x
+				_vDisablePreCommit.MarkConsumed()
 			}
 		}
 		if _vDisableNixGc, _ok := sub.Get("disable-nix-gc"); _ok && _vDisableNixGc.Kind == cst.VLeaf {
@@ -1743,6 +1805,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 				return fmt.Errorf("%w", err)
 			}
 		}
+		if data.Hooks.PreCommit != nil {
+			if err := cst.SetAny(tableNode, "pre-commit", *data.Hooks.PreCommit); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
 		if data.Hooks.OnAttach != nil {
 			if err := cst.SetAny(tableNode, "on-attach", *data.Hooks.OnAttach); err != nil {
 				return fmt.Errorf("%w", err)
@@ -1770,6 +1837,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if data.Hooks.DisableRepair != nil {
 			if err := cst.SetAny(tableNode, "disable-repair", *data.Hooks.DisableRepair); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.Hooks.DisablePreCommit != nil {
+			if err := cst.SetAny(tableNode, "disable-pre-commit", *data.Hooks.DisablePreCommit); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}

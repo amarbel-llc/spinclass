@@ -253,6 +253,47 @@ failure leaves the amended commit on the session branch.
 .B Merge:
 scalar override.
 .TP
+.B pre-commit
+Shell command installed as a per-session git
+.B pre-commit
+hook at
+.BR "sc start" / "sc resume"
+time, repairing staged content at
+.B authoring time
+so each commit is conformant in history (rather than folding fixes into the
+top commit at merge, as
+.B repair
+does). The canonical value is
+.BR "conformist --staged --exit-zero-on-fix" ,
+which formats only the staged blobs and restages them \(em no extra commit, no
+amend. The hook is installed into
+.B <worktree>/.spinclass/hooks/pre-commit
+and scoped to that worktree alone via
+.B extensions.worktreeConfig
+plus a per-worktree
+.BR core.hooksPath ,
+so it never leaks into the parent checkout or sibling worktrees. It is
+.B best-effort and non-blocking:
+a missing formatter (failed
+.BR "command -v" )
+or any non-zero exit never blocks the commit. Worktree sessions only; implicit
+(main-checkout) sessions are out of scope (spinclass does not install hooks in a
+user's main checkout). Suppress an inherited command with
+.BR disable-pre-commit .
+See
+.B docs/plans/2026-06-16-per-commit-repair-hook-design.md
+in the source tree.
+.B Merge:
+scalar override.
+.TP
+.B disable-pre-commit
+Boolean. Suppresses an inherited
+.B pre-commit
+command without clearing the string (mirrors
+.BR disable-repair ).
+.B Merge:
+scalar override.
+.TP
 .B pre-merge-output-format
 String. One of
 .BR raw " (default) or " tap-ndjson .
