@@ -390,6 +390,22 @@ uses it (`repair` retired with a one-line rollback). See
 `docs/plans/2026-06-16-per-commit-repair-hook-design.md` and
 `spinclass-sweatfile(5)` `[hooks].pre-commit`.
 
+Because git consults exactly one hooks dir, `.spinclass/hooks` is a **composing
+dispatcher** (FDR-pending, #183, `docs/plans/2026-06-17-precommit-hook-composition-design.md`):
+`installPreCommitHook` captures the repo's pre-override hooks dir (the prior
+`core.hooksPath`, else `$GIT_COMMON_DIR/hooks`) into a `.spinclass/`
+sentinel (persisted once — re-`Apply` on resume would otherwise re-read our own
+dir and self-reference), then symlinks one dispatcher (`_spinclass-dispatch`)
+under `pre-commit` plus every active native hook the original dir provides. The
+dispatcher branches on its own basename: runs the formatter on `pre-commit`
+**first**, then `exec`s the original same-named hook (preserving args/stdin/exit
+code), so native hooks of every type keep firing and a blocking native hook
+still blocks. When `[hooks].pre-commit` is **inactive**, `installPreCommitHook`
+instead **restores** (unsets our per-worktree `core.hooksPath` if it's ours,
+removes the dispatcher + sentinel), making `disable-pre-commit` a true uninstall
+and the rollback. Known limitation: a hook manager that rewrites `core.hooksPath`
+itself can clobber our override between `sc start`/`resume` re-installs.
+
 ### Pre-merge hook inactivity watchdog
 
 `[hooks].inactivity-timeout` (a Go duration string, e.g. `"180s"`; unset/`""`/

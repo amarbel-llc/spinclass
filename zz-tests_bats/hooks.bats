@@ -365,3 +365,36 @@ pre-commit = "definitely-not-a-real-binary-xyz"' >"$TEST_REPO/sweatfile"
   run git -C "$wt" commit -m "commit with missing formatter"
   assert_success
 }
+
+# Composition: our hook does not shadow a repo's native pre-commit. The
+# dispatcher runs conformist first, then delegates to the native hook in the
+# shared $GIT_COMMON_DIR/hooks, so BOTH fire. See
+# docs/plans/2026-06-17-precommit-hook-composition-design.md.
+function pre_commit_hook_composes_with_native_pre_commit { # @test
+  cd "$TEST_REPO" || return
+  install_fakefmt_stub
+  printf '%s\n' '[hooks]
+pre-commit = "fakefmt"' >"$TEST_REPO/sweatfile"
+
+  # Native pre-commit in the shared hooks dir (common to all worktrees).
+  mkdir -p "$TEST_REPO/.git/hooks"
+  cat >"$TEST_REPO/.git/hooks/pre-commit" <<EOF
+#!/bin/sh
+echo native >> "$BATS_TEST_TMPDIR/native.log"
+exit 0
+EOF
+  chmod +x "$TEST_REPO/.git/hooks/pre-commit"
+
+  run_sc start --no-attach pc_compose
+  assert_success
+  local wt
+  wt=$(extract_wt_path "$output")
+
+  echo "hello" >"$wt/note.txt"
+  git -C "$wt" add note.txt
+  git -C "$wt" commit -m "add note"
+
+  # Both our formatter and the repo's native pre-commit ran.
+  assert [ -f "$BATS_TEST_TMPDIR/fakefmt.log" ]
+  assert [ -f "$BATS_TEST_TMPDIR/native.log" ]
+}

@@ -9,43 +9,92 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/git"
 )
 
-// installPreCommitHook writes a generated pre-commit wrapper to
-// <worktreePath>/.spinclass/hooks/pre-commit and points git at it scoped to
-// THIS worktree only: extensions.worktreeConfig + a per-worktree
-// core.hooksPath. Worktrees share $GIT_COMMON_DIR/hooks by default, so the
-// per-worktree config is what keeps the hook from leaking into the main
-// checkout or sibling worktrees (verified by `just explore-worktree-hooks`).
+// dispatcherName is the single dispatcher script in the worktree hooks dir;
+// each shimmed hook name symlinks to it. git never runs it directly (its name
+// is not a hook event), only the symlinks.
+const dispatcherName = "_spinclass-dispatch"
+
+// originalSentinelName records, inside .spinclass/, the hooks dir git would use
+// absent our override. Persisted once: install re-runs idempotently on every
+// resume, by which time core.hooksPath already points at our dir, so we must
+// not re-derive the original from it (that would self-reference). See
+// docs/plans/2026-06-17-precommit-hook-composition-design.md.
+const originalSentinelName = "precommit-original-hooks"
+
+// standardHookNames is the set of git hook event names we will shim when the
+// original hooks dir provides one, so native hooks of every type keep firing
+// under our per-worktree core.hooksPath (which otherwise shadows them all).
+var standardHookNames = map[string]bool{
+	"applypatch-msg": true, "pre-applypatch": true, "post-applypatch": true,
+	"pre-commit": true, "pre-merge-commit": true, "prepare-commit-msg": true,
+	"commit-msg": true, "post-commit": true, "pre-rebase": true,
+	"post-checkout": true, "post-merge": true, "pre-push": true,
+	"post-rewrite": true, "pre-auto-gc": true, "push-to-checkout": true,
+	"sendemail-validate": true, "post-index-change": true, "fsmonitor-watchman": true,
+	"pre-receive": true, "update": true, "post-receive": true, "post-update": true,
+	"proc-receive": true, "reference-transaction": true,
+}
+
+// installPreCommitHook installs (or, when inactive, restores) the per-session
+// pre-commit repair hook. When active it makes <worktree>/.spinclass/hooks a
+// COMPOSING dispatcher: it runs the configured formatter on pre-commit and
+// delegates to the repo's pre-existing native hooks (captured before our
+// override), so native hooks of every type keep firing instead of being
+// shadowed. Scoped to the worktree via extensions.worktreeConfig + a
+// per-worktree core.hooksPath. When inactive it restores native-hooks-only.
 //
-// It is a no-op when [hooks].pre-commit is inactive. Errors are returned for
-// the caller to log, but Apply treats them as non-fatal — a hook-install
-// failure must never block session creation. See
-// docs/plans/2026-06-16-per-commit-repair-hook-design.md.
+// Errors are returned for the caller to log, but Apply treats them as non-fatal
+// — a hook-install failure must never block session creation. See
+// docs/plans/2026-06-17-precommit-hook-composition-design.md.
 func (sf Sweatfile) installPreCommitHook(worktreePath string) error {
+	hooksDir := filepath.Join(worktreePath, ".spinclass", "hooks")
+	if abs, err := filepath.Abs(hooksDir); err == nil {
+		hooksDir = abs
+	}
+
 	if !sf.PreCommitActive() {
-		return nil
+		return restorePreCommitHook(worktreePath, hooksDir)
 	}
 
 	cmd := stripEmptyLines(*sf.PreCommitHookCommand())
 
 	// Defensive: a core.worktree set in the COMMON config is the documented
-	// extensions.worktreeConfig footgun — once the extension is enabled it
-	// would apply to every linked worktree. Refuse rather than risk the main
-	// checkout; the hook is best-effort and skipping it is safe.
+	// extensions.worktreeConfig footgun. Refuse rather than risk the checkout.
 	if commonConfigHasWorktreeOverride(worktreePath) {
 		return fmt.Errorf("refusing to enable extensions.worktreeConfig: core.worktree is set in the common config")
 	}
 
-	hooksDir := filepath.Join(worktreePath, ".spinclass", "hooks")
-	if abs, err := filepath.Abs(hooksDir); err == nil {
-		hooksDir = abs
+	original, err := resolveOriginalHooksDir(worktreePath, hooksDir)
+	if err != nil {
+		return err
+	}
+
+	// Rebuild our hooks dir deterministically so a native hook removed upstream
+	// drops its stale shim. The sentinel lives in .spinclass/ (the parent), so
+	// it survives this.
+	if err := os.RemoveAll(hooksDir); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		return err
 	}
 
-	hookPath := filepath.Join(hooksDir, "pre-commit")
-	if err := os.WriteFile(hookPath, []byte(preCommitScript(cmd)), 0o755); err != nil {
+	dispatchPath := filepath.Join(hooksDir, dispatcherName)
+	if err := os.WriteFile(dispatchPath, []byte(dispatcherScript(original, hooksDir, cmd)), 0o755); err != nil {
 		return err
+	}
+
+	// Shim pre-commit (always, for our repair) plus every active native hook
+	// the original dir provides (so they keep firing). Each is a symlink to the
+	// dispatcher, which branches on its own basename.
+	names := map[string]bool{"pre-commit": true}
+	for _, n := range enumerateActiveHooks(original) {
+		names[n] = true
+	}
+	for n := range names {
+		if err := os.Symlink(dispatcherName, filepath.Join(hooksDir, n)); err != nil {
+			return fmt.Errorf("linking %s hook: %w", n, err)
+		}
 	}
 
 	if _, err := git.Run(worktreePath, "config", "extensions.worktreeConfig", "true"); err != nil {
@@ -56,6 +105,99 @@ func (sf Sweatfile) installPreCommitHook(worktreePath string) error {
 	}
 
 	return nil
+}
+
+// restorePreCommitHook uninstalls the hook so native hooks fire normally again:
+// it unsets our per-worktree core.hooksPath (only if it is ours, so a
+// user-managed value is left untouched) and removes our dispatcher dir and the
+// sentinel. No-op when we were never installed. This makes
+// [hooks].disable-pre-commit a true uninstall (and the rollback).
+func restorePreCommitHook(worktreePath, hooksDir string) error {
+	sentinel := filepath.Join(worktreePath, ".spinclass", originalSentinelName)
+	_, sentErr := os.Stat(sentinel)
+
+	cur, _ := git.Run(worktreePath, "config", "--worktree", "--get", "core.hooksPath")
+	cur = strings.TrimSpace(cur)
+
+	if sentErr != nil && cur != hooksDir {
+		return nil // never installed
+	}
+
+	if cur == hooksDir {
+		_, _ = git.Run(worktreePath, "config", "--worktree", "--unset", "core.hooksPath")
+	}
+	_ = os.RemoveAll(hooksDir)
+	_ = os.Remove(sentinel)
+	return nil
+}
+
+// resolveOriginalHooksDir returns the hooks dir git would use absent our
+// override, reading the persisted sentinel first and capturing it on the first
+// install. Capture: the effective core.hooksPath if set and not already ours
+// (relative values resolved against the worktree top), else
+// $GIT_COMMON_DIR/hooks. The result is guaranteed != hooksDir.
+func resolveOriginalHooksDir(worktreePath, hooksDir string) (string, error) {
+	sentinel := filepath.Join(worktreePath, ".spinclass", originalSentinelName)
+	if data, err := os.ReadFile(sentinel); err == nil {
+		if s := strings.TrimSpace(string(data)); s != "" {
+			return s, nil
+		}
+	}
+
+	original := ""
+	if cur := strings.TrimSpace(mustConfig(worktreePath, "core.hooksPath")); cur != "" {
+		abs := cur
+		if !filepath.IsAbs(abs) {
+			abs = filepath.Join(worktreePath, abs)
+		}
+		if abs = filepath.Clean(abs); abs != hooksDir {
+			original = abs
+		}
+	}
+	if original == "" {
+		common, err := gitCommonDir(worktreePath)
+		if err != nil {
+			return "", err
+		}
+		original = filepath.Join(common, "hooks")
+	}
+
+	if err := os.MkdirAll(filepath.Dir(sentinel), 0o755); err == nil {
+		_ = os.WriteFile(sentinel, []byte(original+"\n"), 0o644)
+	}
+	return original, nil
+}
+
+// mustConfig returns the effective git config value for key, or "" on error.
+func mustConfig(worktreePath, key string) string {
+	out, err := git.Run(worktreePath, "config", "--get", key)
+	if err != nil {
+		return ""
+	}
+	return out
+}
+
+// enumerateActiveHooks lists the standard git hook names present in dir as
+// executable, non-.sample files (symlinks followed). pre-commit is excluded —
+// the caller always shims it.
+func enumerateActiveHooks(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		name := e.Name()
+		if name == "pre-commit" || !standardHookNames[name] {
+			continue
+		}
+		st, err := os.Stat(filepath.Join(dir, name)) // follows symlinks
+		if err != nil || st.IsDir() || st.Mode()&0o111 == 0 {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
 }
 
 // commonConfigHasWorktreeOverride reports whether core.worktree is set in the
@@ -71,28 +213,33 @@ func commonConfigHasWorktreeOverride(worktreePath string) bool {
 	return err == nil && strings.TrimSpace(out) != ""
 }
 
-// preCommitScript renders the wrapper installed as the git pre-commit hook.
-// It is deliberately best-effort and NON-BLOCKING:
-//   - if the command's binary is not on PATH, exit 0 (a missing formatter never
-//     blocks commits);
-//   - run the configured command via `sh -c`; on exit 0 the commit proceeds
-//     (conformant, or — with conformist fix A — reformatted-and-restaged);
-//   - on any nonzero exit, warn to stderr and exit 0 anyway. A pre-A restage
-//     (exit 3) has already restaged the formatted content; a refusal/error
-//     proceeds unformatted. The hook never blocks a commit.
-func preCommitScript(cmd string) string {
+// dispatcherScript renders the composing dispatcher. Keyed on its own basename
+// ($0), it runs the configured formatter on pre-commit (best-effort,
+// non-blocking) and then delegates to the repo's original same-named hook,
+// preserving its args, stdin, and exit code (so a blocking native lint still
+// blocks the commit). A self-reference guard prevents an exec loop.
+func dispatcherScript(originalDir, hooksDir, cmd string) string {
 	bin := cmd
 	if i := strings.IndexAny(cmd, " \t"); i >= 0 {
 		bin = cmd[:i]
 	}
 	return "#!/bin/sh\n" +
-		"# Managed by spinclass — per-session pre-commit repair hook.\n" +
-		"# Best-effort and NON-BLOCKING: a missing formatter or any nonzero exit\n" +
-		"# never blocks the commit. Regenerated on every `sc start`/`sc resume`.\n" +
-		"# See docs/plans/2026-06-16-per-commit-repair-hook-design.md.\n" +
-		"command -v " + shSingleQuote(bin) + " >/dev/null 2>&1 || exit 0\n" +
-		"if ! sh -c " + shSingleQuote(cmd) + "; then\n" +
-		"\techo 'spinclass pre-commit: formatter exited nonzero; committing anyway' >&2\n" +
+		"# Managed by spinclass — per-session pre-commit repair hook (composing dispatcher).\n" +
+		"# Runs the configured formatter on pre-commit, then delegates to the repo's\n" +
+		"# original same-named native hook (preserving its exit code). The formatter is\n" +
+		"# best-effort/non-blocking; the native hook's gate is preserved. Regenerated on\n" +
+		"# every `sc start`/`sc resume`. See\n" +
+		"# docs/plans/2026-06-17-precommit-hook-composition-design.md.\n" +
+		"hook=$(basename \"$0\")\n" +
+		"orig=" + shSingleQuote(originalDir) + "\n" +
+		"self=" + shSingleQuote(hooksDir) + "\n" +
+		"if [ \"$hook\" = pre-commit ]; then\n" +
+		"\tif command -v " + shSingleQuote(bin) + " >/dev/null 2>&1; then\n" +
+		"\t\tsh -c " + shSingleQuote(cmd) + " || echo 'spinclass pre-commit: formatter exited nonzero; continuing' >&2\n" +
+		"\tfi\n" +
+		"fi\n" +
+		"if [ \"$orig\" != \"$self\" ] && [ -x \"$orig/$hook\" ]; then\n" +
+		"\texec \"$orig/$hook\" \"$@\"\n" +
 		"fi\n" +
 		"exit 0\n"
 }
