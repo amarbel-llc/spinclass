@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/amarbel-llc/spinclass/internal/testfs"
 )
 
 func TestTrustWorkspaceNewFile(t *testing.T) {
@@ -119,7 +121,7 @@ func TestTrustWorkspaceCorruptFile(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, ".claude.json")
 
-	os.WriteFile(configPath, []byte("not valid json!!!"), 0o644)
+	testfs.MustWriteFile(t, configPath, []byte("not valid json!!!"), 0o644)
 
 	err := TrustWorkspace(configPath, "/some/path")
 	if err != nil {

@@ -168,7 +168,7 @@ func captureRun(t *testing.T, startDir string, interactive, dryRun, yes bool, fo
 	os.Stdout = w
 	runErr := Run(startDir, interactive, dryRun, yes, format)
 	os.Stdout = orig
-	w.Close()
+	_ = w.Close()
 	var buf bytes.Buffer
 	if _, err := buf.ReadFrom(r); err != nil {
 		t.Fatalf("read pipe: %v", err)

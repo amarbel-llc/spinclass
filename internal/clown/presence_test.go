@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/amarbel-llc/spinclass/internal/testfs"
 )
 
 func writePresence(t *testing.T, dir string, p Presence) {
@@ -51,7 +53,7 @@ func TestReadPresenceSkipsUnparseable(t *testing.T) {
 	}
 	now := time.Now()
 	// Garbage file + a record with a bad timestamp — both dropped, no error.
-	os.WriteFile(filepath.Join(dir, "garbage.json"), []byte("not json"), 0o600)
+	testfs.MustWriteFile(t, filepath.Join(dir, "garbage.json"), []byte("not json"), 0o600)
 	writePresence(t, dir, Presence{ChannelID: "bad", Decoration: "repo/x", LastSeen: "not-a-time"})
 	writePresence(t, dir, Presence{ChannelID: "ok", Decoration: "repo/x", LastSeen: now.Format(time.RFC3339Nano)})
 

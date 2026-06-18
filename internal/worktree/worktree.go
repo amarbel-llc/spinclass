@@ -263,7 +263,7 @@ func applyWorktreeConfig(
 	}
 
 	if err := sweetfile.Merged.RunCreateHook(worktreePath, os.Stdout); err != nil {
-		git.RunPassthrough(
+		_ = git.RunPassthrough(
 			repoPath,
 			"worktree",
 			"remove",

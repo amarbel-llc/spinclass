@@ -12,6 +12,7 @@ import (
 
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/spawnhandshake"
+	"github.com/amarbel-llc/spinclass/internal/testfs"
 	"github.com/amarbel-llc/spinclass/internal/testgit"
 )
 
@@ -178,9 +179,9 @@ func TestDisallowMainWorktreeSymlinkResolution(t *testing.T) {
 	mainRepo := t.TempDir()
 	worktreeCwd := t.TempDir()
 	target := filepath.Join(mainRepo, "real.go")
-	os.WriteFile(target, []byte("package main"), 0o644)
+	testfs.MustWriteFile(t, target, []byte("package main"), 0o644)
 	link := filepath.Join(worktreeCwd, "link.go")
-	os.Symlink(target, link)
+	testfs.MustSymlink(t, target, link)
 	input := makeInput("Read", map[string]any{"file_path": link}, worktreeCwd)
 	var stdout bytes.Buffer
 	err := Run(bytes.NewReader(input), &stdout, mainRepo, worktreeCwd, true)
@@ -196,7 +197,7 @@ func TestDisallowMainWorktreeNonExistentFileInMainRepo(t *testing.T) {
 	mainRepo := t.TempDir()
 	worktreeCwd := t.TempDir()
 	subdir := filepath.Join(mainRepo, "src")
-	os.MkdirAll(subdir, 0o755)
+	testfs.MustMkdirAll(t, subdir, 0o755)
 	target := filepath.Join(subdir, "new.go")
 	input := makeInput("Write", map[string]any{"file_path": target}, worktreeCwd)
 	var stdout bytes.Buffer
@@ -212,7 +213,7 @@ func TestDisallowMainWorktreeNonExistentFileInMainRepo(t *testing.T) {
 func TestDisallowMainWorktreeAllowsSessionWorktreeInsideMainRepo(t *testing.T) {
 	mainRepo := t.TempDir()
 	sessionWorktree := filepath.Join(mainRepo, ".worktrees", "my-session")
-	os.MkdirAll(sessionWorktree, 0o755)
+	testfs.MustMkdirAll(t, sessionWorktree, 0o755)
 	target := filepath.Join(sessionWorktree, "file.go")
 	input := makeInput("Read", map[string]any{"file_path": target}, sessionWorktree)
 	var stdout bytes.Buffer
@@ -228,7 +229,7 @@ func TestDisallowMainWorktreeAllowsSessionWorktreeInsideMainRepo(t *testing.T) {
 func TestDisallowMainWorktreeAllowsSessionWorktreeExactPath(t *testing.T) {
 	mainRepo := t.TempDir()
 	sessionWorktree := filepath.Join(mainRepo, ".worktrees", "my-session")
-	os.MkdirAll(sessionWorktree, 0o755)
+	testfs.MustMkdirAll(t, sessionWorktree, 0o755)
 	input := makeInput("Glob", map[string]any{"path": sessionWorktree}, sessionWorktree)
 	var stdout bytes.Buffer
 	err := Run(bytes.NewReader(input), &stdout, mainRepo, sessionWorktree, true)
@@ -244,8 +245,8 @@ func TestDisallowMainWorktreeDeniesOtherWorktreeInsideMainRepo(t *testing.T) {
 	mainRepo := t.TempDir()
 	sessionWorktree := filepath.Join(mainRepo, ".worktrees", "my-session")
 	otherWorktree := filepath.Join(mainRepo, ".worktrees", "other-session")
-	os.MkdirAll(sessionWorktree, 0o755)
-	os.MkdirAll(otherWorktree, 0o755)
+	testfs.MustMkdirAll(t, sessionWorktree, 0o755)
+	testfs.MustMkdirAll(t, otherWorktree, 0o755)
 	target := filepath.Join(otherWorktree, "file.go")
 	input := makeInput("Read", map[string]any{"file_path": target}, sessionWorktree)
 	var stdout bytes.Buffer
@@ -261,7 +262,7 @@ func TestDisallowMainWorktreeDeniesOtherWorktreeInsideMainRepo(t *testing.T) {
 func TestDisallowMainWorktreeDeniesMainRepoRootDirectly(t *testing.T) {
 	mainRepo := t.TempDir()
 	sessionWorktree := filepath.Join(mainRepo, ".worktrees", "my-session")
-	os.MkdirAll(sessionWorktree, 0o755)
+	testfs.MustMkdirAll(t, sessionWorktree, 0o755)
 	input := makeInput("Glob", map[string]any{"path": mainRepo}, sessionWorktree)
 	var stdout bytes.Buffer
 	err := Run(bytes.NewReader(input), &stdout, mainRepo, sessionWorktree, true)
@@ -276,7 +277,7 @@ func TestDisallowMainWorktreeDeniesMainRepoRootDirectly(t *testing.T) {
 func TestDisallowMainWorktreeDenyMessageIncludesSessionWorktree(t *testing.T) {
 	mainRepo := t.TempDir()
 	sessionWorktree := filepath.Join(mainRepo, ".worktrees", "my-session")
-	os.MkdirAll(sessionWorktree, 0o755)
+	testfs.MustMkdirAll(t, sessionWorktree, 0o755)
 	target := filepath.Join(mainRepo, "main.go")
 	input := makeInput("Read", map[string]any{"file_path": target}, sessionWorktree)
 	var stdout bytes.Buffer
@@ -285,7 +286,7 @@ func TestDisallowMainWorktreeDenyMessageIncludesSessionWorktree(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	var result map[string]any
-	json.Unmarshal(stdout.Bytes(), &result)
+	testfs.MustUnmarshal(t, stdout.Bytes(), &result)
 	hso := result["hookSpecificOutput"].(map[string]any)
 	reason := hso["permissionDecisionReason"].(string)
 	if !strings.Contains(reason, sessionWorktree) {
@@ -307,7 +308,7 @@ func TestBashCdToMainWorktreeDeniesWithSuggestion(t *testing.T) {
 		t.Fatal("expected deny output for cd to main worktree")
 	}
 	var result map[string]any
-	json.Unmarshal(stdout.Bytes(), &result)
+	testfs.MustUnmarshal(t, stdout.Bytes(), &result)
 	hso := result["hookSpecificOutput"].(map[string]any)
 	if hso["permissionDecision"] != "deny" {
 		t.Errorf("expected deny, got %v", hso["permissionDecision"])
@@ -335,7 +336,7 @@ func TestBashCdToMainWorktreeWithSemicolon(t *testing.T) {
 		t.Fatal("expected deny output for cd to main worktree with semicolon")
 	}
 	var result map[string]any
-	json.Unmarshal(stdout.Bytes(), &result)
+	testfs.MustUnmarshal(t, stdout.Bytes(), &result)
 	reason := result["hookSpecificOutput"].(map[string]any)["permissionDecisionReason"].(string)
 	if !strings.Contains(reason, "just test") {
 		t.Errorf("expected suggestion to contain 'just test', got %q", reason)
@@ -346,7 +347,7 @@ func TestBashCdToMainWorktreeSubdir(t *testing.T) {
 	mainRepo := t.TempDir()
 	worktreeCwd := t.TempDir()
 	subdir := filepath.Join(mainRepo, "src")
-	os.MkdirAll(subdir, 0o755)
+	testfs.MustMkdirAll(t, subdir, 0o755)
 	cmd := "cd " + subdir + " && make"
 	input := makeInput("Bash", map[string]any{"command": cmd}, worktreeCwd)
 	var stdout bytes.Buffer
@@ -358,7 +359,7 @@ func TestBashCdToMainWorktreeSubdir(t *testing.T) {
 		t.Fatal("expected deny output for cd to main worktree subdir")
 	}
 	var result map[string]any
-	json.Unmarshal(stdout.Bytes(), &result)
+	testfs.MustUnmarshal(t, stdout.Bytes(), &result)
 	reason := result["hookSpecificOutput"].(map[string]any)["permissionDecisionReason"].(string)
 	if !strings.Contains(reason, "make") {
 		t.Errorf("expected suggestion to contain 'make', got %q", reason)
@@ -425,7 +426,7 @@ func TestBashCdWithQuotedPath(t *testing.T) {
 		t.Fatal("expected deny output for cd with quoted path to main worktree")
 	}
 	var result map[string]any
-	json.Unmarshal(stdout.Bytes(), &result)
+	testfs.MustUnmarshal(t, stdout.Bytes(), &result)
 	reason := result["hookSpecificOutput"].(map[string]any)["permissionDecisionReason"].(string)
 	if !strings.Contains(reason, "just") {
 		t.Errorf("expected suggestion to contain 'just', got %q", reason)
@@ -457,7 +458,7 @@ func TestStopHookBlocksOnFailure(t *testing.T) {
 
 	// Create a sweatfile with a failing stop-hook
 	cwd := t.TempDir()
-	os.WriteFile(filepath.Join(cwd, "sweatfile"), []byte("[hooks]\nstop = \"false\""), 0o644)
+	testfs.MustWriteFile(t, filepath.Join(cwd, "sweatfile"), []byte("[hooks]\nstop = \"false\""), 0o644)
 
 	input, _ := json.Marshal(map[string]any{
 		"hook_event_name": "Stop",
@@ -476,7 +477,7 @@ func TestStopHookBlocksOnFailure(t *testing.T) {
 	}
 
 	var result map[string]any
-	json.Unmarshal(out.Bytes(), &result)
+	testfs.MustUnmarshal(t, out.Bytes(), &result)
 	if result["decision"] != "block" {
 		t.Errorf("expected block decision, got %v", result["decision"])
 	}
@@ -493,11 +494,11 @@ func TestStopHookApprovesOnSecondInvocation(t *testing.T) {
 	t.Setenv("TMPDIR", tmpDir)
 
 	cwd := t.TempDir()
-	os.WriteFile(filepath.Join(cwd, "sweatfile"), []byte("[hooks]\nstop = \"false\""), 0o644)
+	testfs.MustWriteFile(t, filepath.Join(cwd, "sweatfile"), []byte("[hooks]\nstop = \"false\""), 0o644)
 
 	// Create sentinel file (simulating first invocation already happened)
 	sentinel := filepath.Join(tmpDir, "stop-hook-approve-test-session")
-	os.WriteFile(sentinel, []byte("previous failure output"), 0o644)
+	testfs.MustWriteFile(t, sentinel, []byte("previous failure output"), 0o644)
 
 	input, _ := json.Marshal(map[string]any{
 		"hook_event_name": "Stop",
@@ -621,7 +622,7 @@ func TestPostToolUseLogsFromSubdir(t *testing.T) {
 
 	worktree := t.TempDir()
 	subdir := filepath.Join(worktree, "src", "pkg")
-	os.MkdirAll(subdir, 0o755)
+	testfs.MustMkdirAll(t, subdir, 0o755)
 
 	input, _ := json.Marshal(map[string]any{
 		"hook_event_name": "PostToolUse",
@@ -648,7 +649,7 @@ func TestStopHookApprovesOnSuccess(t *testing.T) {
 	t.Setenv("TMPDIR", tmpDir)
 
 	cwd := t.TempDir()
-	os.WriteFile(filepath.Join(cwd, "sweatfile"), []byte("[hooks]\nstop = \"true\""), 0o644)
+	testfs.MustWriteFile(t, filepath.Join(cwd, "sweatfile"), []byte("[hooks]\nstop = \"true\""), 0o644)
 
 	input, _ := json.Marshal(map[string]any{
 		"hook_event_name": "Stop",
@@ -800,8 +801,8 @@ func TestMergeThisSessionAllowedWhenPreMergeHookSet(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	cwd := filepath.Join(home, "cwd")
-	os.MkdirAll(cwd, 0o755)
-	os.WriteFile(filepath.Join(cwd, "sweatfile"),
+	testfs.MustMkdirAll(t, cwd, 0o755)
+	testfs.MustWriteFile(t, filepath.Join(cwd, "sweatfile"),
 		[]byte("[hooks]\npre-merge = \"just test\""), 0o644)
 
 	input := makeInput("mcp__plugin_spinclass_spinclass__merge-this-session", map[string]any{}, cwd)
@@ -848,8 +849,8 @@ func TestMergeThisSessionFallsThroughWhenPreMergeHookEmpty(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	cwd := filepath.Join(home, "cwd")
-	os.MkdirAll(cwd, 0o755)
-	os.WriteFile(filepath.Join(cwd, "sweatfile"),
+	testfs.MustMkdirAll(t, cwd, 0o755)
+	testfs.MustWriteFile(t, filepath.Join(cwd, "sweatfile"),
 		[]byte("[hooks]\npre-merge = \"\""), 0o644)
 
 	input := makeInput("mcp__plugin_spinclass_spinclass__merge-this-session", map[string]any{}, cwd)
@@ -867,8 +868,8 @@ func TestCheckThisSessionAllowedWhenPreMergeHookSet(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	cwd := filepath.Join(home, "cwd")
-	os.MkdirAll(cwd, 0o755)
-	os.WriteFile(filepath.Join(cwd, "sweatfile"),
+	testfs.MustMkdirAll(t, cwd, 0o755)
+	testfs.MustWriteFile(t, filepath.Join(cwd, "sweatfile"),
 		[]byte("[hooks]\npre-merge = \"just test\"\ndisable-merge = true"), 0o644)
 
 	input := makeInput("mcp__plugin_spinclass_spinclass__check-this-session", map[string]any{}, cwd)
@@ -915,8 +916,8 @@ func TestCheckThisSessionFallsThroughWhenPreMergeHookEmpty(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	cwd := filepath.Join(home, "cwd")
-	os.MkdirAll(cwd, 0o755)
-	os.WriteFile(filepath.Join(cwd, "sweatfile"),
+	testfs.MustMkdirAll(t, cwd, 0o755)
+	testfs.MustWriteFile(t, filepath.Join(cwd, "sweatfile"),
 		[]byte("[hooks]\npre-merge = \"\"\ndisable-merge = true"), 0o644)
 
 	input := makeInput("mcp__plugin_spinclass_spinclass__check-this-session", map[string]any{}, cwd)
@@ -934,8 +935,8 @@ func TestNothingButTheTruthAllowedWhenPreMergeSkillsSet(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	cwd := filepath.Join(home, "cwd")
-	os.MkdirAll(cwd, 0o755)
-	os.WriteFile(filepath.Join(cwd, "sweatfile"),
+	testfs.MustMkdirAll(t, cwd, 0o755)
+	testfs.MustWriteFile(t, filepath.Join(cwd, "sweatfile"),
 		[]byte("[[pre-merge-skills]]\nname = \"eng:code-reviewer\"\nrationale = \"Required.\""), 0o644)
 
 	input := makeInput("mcp__plugin_spinclass_spinclass__nothing-but-the-truth", map[string]any{}, cwd)
@@ -979,8 +980,8 @@ func TestNothingButTheTruthFallsThroughWhenSkillsAreOnlySentinels(t *testing.T) 
 	t.Setenv("HOME", home)
 
 	cwd := filepath.Join(home, "cwd")
-	os.MkdirAll(cwd, 0o755)
-	os.WriteFile(filepath.Join(cwd, "sweatfile"),
+	testfs.MustMkdirAll(t, cwd, 0o755)
+	testfs.MustWriteFile(t, filepath.Join(cwd, "sweatfile"),
 		[]byte("[[pre-merge-skills]]\nname = \"removed\""), 0o644)
 
 	input := makeInput("mcp__plugin_spinclass_spinclass__nothing-but-the-truth", map[string]any{}, cwd)
@@ -1036,8 +1037,8 @@ func TestMainAgentAllowedMergeThisSession(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	cwd := filepath.Join(home, "cwd")
-	os.MkdirAll(cwd, 0o755)
-	os.WriteFile(filepath.Join(cwd, "sweatfile"),
+	testfs.MustMkdirAll(t, cwd, 0o755)
+	testfs.MustWriteFile(t, filepath.Join(cwd, "sweatfile"),
 		[]byte("[hooks]\npre-merge = \"just test\""), 0o644)
 
 	input := makeInput("mcp__plugin_spinclass_spinclass__merge-this-session", map[string]any{}, cwd)
@@ -1284,7 +1285,7 @@ func TestRewritePathString(t *testing.T) {
 func TestRewritePathStringExemptsWorktreeSpaceAndSpinclass(t *testing.T) {
 	main := resolvePath(t.TempDir())
 	worktree := filepath.Join(main, ".worktrees", "me")
-	os.MkdirAll(worktree, 0o755)
+	testfs.MustMkdirAll(t, worktree, 0o755)
 
 	if _, c := rewritePathString(filepath.Join(main, ".worktrees", "other", "x.go"), main, worktree); c {
 		t.Error("a sibling worktree path must not be rewritten")

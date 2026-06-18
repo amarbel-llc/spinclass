@@ -279,7 +279,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	// running. State cleanup is delegated to the close path
 	// (closeShop → close.RunResolved → session.Tombstone) when conditions
 	// warrant; abandoned state is reaped by `sc clean`.
-	executor.RequestClose(repoPath, branch)
+	_ = executor.RequestClose(repoPath, branch)
 	return blobLinks, nil
 }
 

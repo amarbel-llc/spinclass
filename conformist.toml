@@ -1,7 +1,8 @@
 # conformist configuration (treefmt successor): the goimports -> gofumpt -> nixfmt
 # -> shfmt formatter chain (plus tommy fmt for TOML) that produces this repo's
-# canonical formatting, plus the linters (shellcheck, go vet, staticcheck,
-# statix + deadnix for Nix, and the tommy-codegen drift driver).
+# canonical formatting, plus the linters (shellcheck, golangci-lint for Go — the
+# v2 standard set, superseding standalone go vet + staticcheck — statix + deadnix
+# for Nix, and the tommy-codegen drift driver).
 # Run via `conformist` (repair) /
 # `conformist check`. Wired as the flake `formatter` and gated by `just lint-fmt`.
 
@@ -81,18 +82,25 @@ repair-command = "conformist-tommy-codegen"
 includes = ["*.go"]
 passes-files = false
 
-# go vet, run-once over the whole module. passes-files=false: conformist
-# invokes `go vet ./...` ONCE with no file args (go vet is package-oriented,
-# not per-file). includes=["*.go"] only GATES whether it fires. No autofix, so
-# no repair-command — `conformist check` runs it and fails on vet findings.
-# This folds the former `just lint-vet` into the single conformist gate.
-[linter.govet]
-command = "go"
-options = ["vet", "./..."]
+# golangci-lint — run-once over the whole module (passes-files=false →
+# `golangci-lint run ./...`; includes=["*.go"] only GATES whether it fires).
+# The v2 `standard` linter set (config in .golangci.yml) bundles go vet AND
+# staticcheck plus errcheck/ineffassign/unused, so it SUPERSEDES the former
+# standalone [linter.govet] and [linter.staticcheck] stanzas (which would
+# otherwise double-run vet/staticcheck). Check-only: golangci-lint's `--fix`
+# is omitted here, matching the read-only posture of the other Go linters; the
+# conformist check lane has `go` on PATH (it runs under `nix develop`), so the
+# package-loading linter works. Cache isolation: GOLANGCI_LINT_CACHE is pinned
+# per-worktree via the sweatfile [direnv.dotenv] to avoid the cross-worktree
+# cache-leak footgun (conformist#34) — golangci-lint replays per-package
+# diagnostics keyed on absolute paths, so a shared cache leaks stale findings.
+[linter.golangci-lint]
+command = "golangci-lint"
+options = ["run", "./..."]
 includes = ["*.go"]
 passes-files = false
 
-# Nix linters (no autofix wired — check-only, like shellcheck/govet).
+# Nix linters (no autofix wired — check-only, like shellcheck).
 # statix is target-oriented (one path, defaults to `.`), so run-once whole-tree:
 # passes-files=false → `statix check` walks the tree; includes only GATES it.
 [linter.statix]
@@ -108,11 +116,3 @@ passes-files = false
 command = "deadnix"
 options = ["--fail"]
 includes = ["*.nix"]
-
-# staticcheck — run-once over the whole module (like go vet): passes-files=false
-# → `staticcheck ./...`. Stricter than go vet; check-only (no autofix).
-[linter.staticcheck]
-command = "staticcheck"
-options = ["./..."]
-includes = ["*.go"]
-passes-files = false

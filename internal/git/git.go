@@ -187,7 +187,7 @@ func DefaultBranch(repoPath string) (string, error) {
 
 func NewestFileTime(path string) time.Time {
 	var newest time.Time
-	filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}

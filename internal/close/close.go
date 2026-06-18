@@ -102,8 +102,8 @@ func RunResolved(w io.Writer, repoPath, wtPath, branch string, force bool, nixGC
 		activePID = st.PID
 	}
 
-	// Request graceful close if session is active.
-	executor.RequestClose(repoPath, branch)
+	// Request graceful close if session is active (best-effort signal).
+	_ = executor.RequestClose(repoPath, branch)
 
 	defaultBranch, dbErr := git.DefaultBranch(repoPath)
 	unintegrated := dbErr == nil && git.CommitsAhead(wtPath, defaultBranch, branch) > 0

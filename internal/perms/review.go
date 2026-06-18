@@ -66,27 +66,27 @@ func DryRunDecisions(w io.Writer, tiersDir, repo string, decisions []ReviewDecis
 	repoPath := filepath.Join(tiersDir, "repos", repo+".json")
 
 	if len(groups[ReviewPromoteGlobal]) > 0 {
-		fmt.Fprintf(w, "would promote to global tier (%s):\n", globalPath)
+		_, _ = fmt.Fprintf(w, "would promote to global tier (%s):\n", globalPath)
 		for _, r := range groups[ReviewPromoteGlobal] {
-			fmt.Fprintf(w, "  %s\n", r)
+			_, _ = fmt.Fprintf(w, "  %s\n", r)
 		}
 	}
 	if len(groups[ReviewPromoteRepo]) > 0 {
-		fmt.Fprintf(w, "would promote to repo tier (%s):\n", repoPath)
+		_, _ = fmt.Fprintf(w, "would promote to repo tier (%s):\n", repoPath)
 		for _, r := range groups[ReviewPromoteRepo] {
-			fmt.Fprintf(w, "  %s\n", r)
+			_, _ = fmt.Fprintf(w, "  %s\n", r)
 		}
 	}
 	if len(groups[ReviewDiscard]) > 0 {
-		fmt.Fprintln(w, "would discard (not promoted):")
+		_, _ = fmt.Fprintln(w, "would discard (not promoted):")
 		for _, r := range groups[ReviewDiscard] {
-			fmt.Fprintf(w, "  %s\n", r)
+			_, _ = fmt.Fprintf(w, "  %s\n", r)
 		}
 	}
 	if len(groups[ReviewKeep]) > 0 {
-		fmt.Fprintln(w, "would keep (not promoted):")
+		_, _ = fmt.Fprintln(w, "would keep (not promoted):")
 		for _, r := range groups[ReviewKeep] {
-			fmt.Fprintf(w, "  %s\n", r)
+			_, _ = fmt.Fprintf(w, "  %s\n", r)
 		}
 	}
 }

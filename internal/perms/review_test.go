@@ -3,28 +3,29 @@ package perms
 import (
 	"bytes"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/amarbel-llc/spinclass/internal/testfs"
 )
 
 func TestRouteDecisions(t *testing.T) {
 	tmpDir := t.TempDir()
 	tiersDir := filepath.Join(tmpDir, "tiers")
-	os.MkdirAll(filepath.Join(tiersDir, "repos"), 0o755)
+	testfs.MustMkdirAll(t, filepath.Join(tiersDir, "repos"), 0o755)
 
 	// Seed global tier with ["Read"]
 	globalPath := filepath.Join(tiersDir, "global.json")
 	globalTier := Tier{Allow: []string{"Read"}}
 	globalData, _ := json.MarshalIndent(globalTier, "", "  ")
-	os.WriteFile(globalPath, globalData, 0o644)
+	testfs.MustWriteFile(t, globalPath, globalData, 0o644)
 
 	// Seed repo tier with []
 	repoPath := filepath.Join(tiersDir, "repos", "myrepo.json")
 	repoTier := Tier{Allow: []string{}}
 	repoData, _ := json.MarshalIndent(repoTier, "", "  ")
-	os.WriteFile(repoPath, repoData, 0o644)
+	testfs.MustWriteFile(t, repoPath, repoData, 0o644)
 
 	decisions := []ReviewDecision{
 		{Rule: "Edit", Action: ReviewPromoteGlobal},
@@ -69,7 +70,7 @@ func TestRouteDecisions(t *testing.T) {
 func TestRouteDecisionsDiscard(t *testing.T) {
 	tmpDir := t.TempDir()
 	tiersDir := filepath.Join(tmpDir, "tiers")
-	os.MkdirAll(filepath.Join(tiersDir, "repos"), 0o755)
+	testfs.MustMkdirAll(t, filepath.Join(tiersDir, "repos"), 0o755)
 
 	decisions := []ReviewDecision{
 		{Rule: "Bash(rm -rf:*)", Action: ReviewDiscard},
@@ -85,7 +86,7 @@ func TestRouteDecisionsDiscard(t *testing.T) {
 func TestRouteDecisionsKeep(t *testing.T) {
 	tmpDir := t.TempDir()
 	tiersDir := filepath.Join(tmpDir, "tiers")
-	os.MkdirAll(filepath.Join(tiersDir, "repos"), 0o755)
+	testfs.MustMkdirAll(t, filepath.Join(tiersDir, "repos"), 0o755)
 
 	decisions := []ReviewDecision{
 		{Rule: "Edit", Action: ReviewKeep},

@@ -3,10 +3,11 @@ package perms
 import (
 	"bytes"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/amarbel-llc/spinclass/internal/testfs"
 )
 
 func TestCheckMatchProducesAllow(t *testing.T) {
@@ -14,7 +15,7 @@ func TestCheckMatchProducesAllow(t *testing.T) {
 
 	globalTier := Tier{Allow: []string{"Bash(go test:*)"}}
 	data, _ := json.MarshalIndent(globalTier, "", "  ")
-	os.WriteFile(filepath.Join(tiersDir, "global.json"), data, 0o644)
+	testfs.MustWriteFile(t, filepath.Join(tiersDir, "global.json"), data, 0o644)
 
 	input := map[string]any{
 		"tool_name":  "Bash",
@@ -79,7 +80,7 @@ func TestCheckNoMatchProducesEmptyOutput(t *testing.T) {
 
 	globalTier := Tier{Allow: []string{"Bash(go test:*)"}}
 	data, _ := json.MarshalIndent(globalTier, "", "  ")
-	os.WriteFile(filepath.Join(tiersDir, "global.json"), data, 0o644)
+	testfs.MustWriteFile(t, filepath.Join(tiersDir, "global.json"), data, 0o644)
 
 	input := map[string]any{
 		"tool_name":  "Bash",
@@ -107,7 +108,7 @@ func TestCheckNeverAutoApprovesSpawnEvenWhenListed(t *testing.T) {
 
 	globalTier := Tier{Allow: []string{"mcp__plugin_spinclass_spinclass__spawn-session"}}
 	data, _ := json.MarshalIndent(globalTier, "", "  ")
-	os.WriteFile(filepath.Join(tiersDir, "global.json"), data, 0o644)
+	testfs.MustWriteFile(t, filepath.Join(tiersDir, "global.json"), data, 0o644)
 
 	input := map[string]any{
 		"tool_name":  "mcp__plugin_spinclass_spinclass__spawn-session",
@@ -131,13 +132,13 @@ func TestCheckUsesRepoTier(t *testing.T) {
 
 	globalTier := Tier{Allow: []string{"Bash(git *)"}}
 	globalData, _ := json.MarshalIndent(globalTier, "", "  ")
-	os.WriteFile(filepath.Join(tiersDir, "global.json"), globalData, 0o644)
+	testfs.MustWriteFile(t, filepath.Join(tiersDir, "global.json"), globalData, 0o644)
 
 	repoDir := filepath.Join(tiersDir, "repos")
-	os.MkdirAll(repoDir, 0o755)
+	testfs.MustMkdirAll(t, repoDir, 0o755)
 	repoTier := Tier{Allow: []string{"Bash(cargo test:*)"}}
 	repoData, _ := json.MarshalIndent(repoTier, "", "  ")
-	os.WriteFile(filepath.Join(repoDir, "ssh-agent-mux.json"), repoData, 0o644)
+	testfs.MustWriteFile(t, filepath.Join(repoDir, "ssh-agent-mux.json"), repoData, 0o644)
 
 	input := map[string]any{
 		"tool_name":  "Bash",

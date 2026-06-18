@@ -61,7 +61,7 @@ func LinkInto(binDir, binPath string) error {
 		return fmt.Errorf("creating temp symlink: %w", err)
 	}
 	if err := os.Rename(tmpName, link); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("renaming temp to %s: %w", link, err)
 	}
 	return nil
@@ -95,7 +95,7 @@ func Write(worktreePath, binPath string) (io.WriteCloser, func() (string, error)
 	cmd.Stderr = &stderr
 
 	if err := cmd.Start(); err != nil {
-		stdin.Close()
+		_ = stdin.Close()
 		return nil, nil, fmt.Errorf("madder write: start: %w", err)
 	}
 

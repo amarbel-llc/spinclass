@@ -1,0 +1,21 @@
+# golangci-lint configuration. The v2 `standard` set (errcheck, govet,
+# ineffassign, staticcheck, unused) wired as a hard gate through the
+# [linter.golangci-lint] stanza in conformist.toml -> `just lint-fmt` ->
+# `just default` -> the pre-merge hook. This supersedes the former standalone
+# [linter.govet] and [linter.staticcheck] conformist stanzas (golangci-lint
+# bundles both) and adds errcheck/ineffassign/unused on top.
+version: "2"
+
+linters:
+  default: standard
+  exclusions:
+    rules:
+      # The tommy-generated sweatfile codec is machine-authored; do not hold
+      # it to the hand-written linters (mirrors its conformist.toml exclude).
+      - path: internal/sweatfile/sweatfile_tommy.go
+        linters:
+          - errcheck
+          - govet
+          - ineffassign
+          - staticcheck
+          - unused

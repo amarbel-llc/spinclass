@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/amarbel-llc/spinclass/internal/embeds"
+	"github.com/amarbel-llc/spinclass/internal/testfs"
 	"github.com/amarbel-llc/spinclass/internal/testgit"
 )
 
@@ -181,7 +182,7 @@ func TestApplyClaudeSettingsEmpty(t *testing.T) {
 	}
 
 	var doc map[string]any
-	json.Unmarshal(data, &doc)
+	testfs.MustUnmarshal(t, data, &doc)
 	permsMap, _ := doc["permissions"].(map[string]any)
 	allowRaw, _ := permsMap["allow"].([]any)
 
@@ -194,13 +195,13 @@ func TestApplyClaudeSettingsEmpty(t *testing.T) {
 func TestApplyClaudeSettingsOverwritesExistingKeys(t *testing.T) {
 	dir := t.TempDir()
 	claudeDir := filepath.Join(dir, ".claude")
-	os.MkdirAll(claudeDir, 0o755)
+	testfs.MustMkdirAll(t, claudeDir, 0o755)
 
 	existing := map[string]any{
 		"mcpServers": map[string]any{"test": true},
 	}
 	data, _ := json.MarshalIndent(existing, "", "  ")
-	os.WriteFile(filepath.Join(claudeDir, "settings.local.json"), data, 0o644)
+	testfs.MustWriteFile(t, filepath.Join(claudeDir, "settings.local.json"), data, 0o644)
 
 	err := ApplyClaudeSettings(dir, Sweatfile{Claude: &Claude{Allow: []string{"Read"}}})
 	if err != nil {
@@ -209,7 +210,7 @@ func TestApplyClaudeSettingsOverwritesExistingKeys(t *testing.T) {
 
 	result, _ := os.ReadFile(filepath.Join(claudeDir, "settings.local.json"))
 	var doc map[string]any
-	json.Unmarshal(result, &doc)
+	testfs.MustUnmarshal(t, result, &doc)
 
 	if _, ok := doc["mcpServers"]; ok {
 		t.Error("expected mcpServers key to be overwritten")
@@ -231,27 +232,27 @@ func TestApplyClaudeSettingsNeverWritesHooksKey(t *testing.T) {
 		{
 			name: "worktree empty sweatfile",
 			gitFn: func(dir string) {
-				os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: /tmp/fake"), 0o644)
+				_ = os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: /tmp/fake"), 0o644)
 			},
 		},
 		{
 			name: "worktree with stop hook configured",
 			gitFn: func(dir string) {
-				os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: /tmp/fake"), 0o644)
+				_ = os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: /tmp/fake"), 0o644)
 			},
 			stop: "just test",
 		},
 		{
 			name: "worktree with tool-use-log enabled",
 			gitFn: func(dir string) {
-				os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: /tmp/fake"), 0o644)
+				_ = os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: /tmp/fake"), 0o644)
 			},
 			toolUL: true,
 		},
 		{
 			name: "main repo",
 			gitFn: func(dir string) {
-				os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+				_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
 			},
 		},
 	}
@@ -278,7 +279,7 @@ func TestApplyClaudeSettingsNeverWritesHooksKey(t *testing.T) {
 
 			data, _ := os.ReadFile(filepath.Join(dir, ".claude", "settings.local.json"))
 			var doc map[string]any
-			json.Unmarshal(data, &doc)
+			testfs.MustUnmarshal(t, data, &doc)
 
 			if _, ok := doc["hooks"]; ok {
 				t.Errorf("expected no hooks key in settings.local.json (plugin-level registration replaces it); got %v", doc["hooks"])
@@ -294,11 +295,11 @@ func TestPrepareDirenvWritesEnvrcWithoutUseFlakeWhenNoFlakeNix(t *testing.T) {
 	// Create a fake direnv that just exits 0
 	fakeBin := t.TempDir()
 	fakeDirenv := filepath.Join(fakeBin, "direnv")
-	os.WriteFile(fakeDirenv, []byte("#!/bin/sh\nexit 0\n"), 0o755)
+	testfs.MustWriteFile(t, fakeDirenv, []byte("#!/bin/sh\nexit 0\n"), 0o755)
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", fakeBin+":"+gitDir(t))
-	defer os.Setenv("PATH", origPath)
+	defer func() { _ = os.Setenv("PATH", origPath) }()
 
 	err := Sweatfile{}.prepareDirenv(dir)
 	if err != nil {
@@ -371,11 +372,11 @@ func TestPrepareDirenvPrefersEmbeddedOverPath(t *testing.T) {
 
 func TestPrepareDirenvSkipsWhenDirenvNotInPath(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("{}"), 0o644)
+	testfs.MustWriteFile(t, filepath.Join(dir, "flake.nix"), []byte("{}"), 0o644)
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", t.TempDir())
-	defer os.Setenv("PATH", origPath)
+	defer func() { _ = os.Setenv("PATH", origPath) }()
 
 	err := Sweatfile{}.prepareDirenv(dir)
 	if err != nil {
@@ -391,16 +392,16 @@ func TestPrepareDirenvSkipsWhenDirenvNotInPath(t *testing.T) {
 func TestPrepareDirenvWritesEnvrc(t *testing.T) {
 	dir := t.TempDir()
 	testgit.MustInit(t, dir)
-	os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("{}"), 0o644)
+	testfs.MustWriteFile(t, filepath.Join(dir, "flake.nix"), []byte("{}"), 0o644)
 
 	// Create a fake direnv that just exits 0
 	fakeBin := t.TempDir()
 	fakeDirenv := filepath.Join(fakeBin, "direnv")
-	os.WriteFile(fakeDirenv, []byte("#!/bin/sh\nexit 0\n"), 0o755)
+	testfs.MustWriteFile(t, fakeDirenv, []byte("#!/bin/sh\nexit 0\n"), 0o755)
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", fakeBin+":"+gitDir(t))
-	defer os.Setenv("PATH", origPath)
+	defer func() { _ = os.Setenv("PATH", origPath) }()
 
 	err := Sweatfile{}.prepareDirenv(dir)
 	if err != nil {
@@ -427,16 +428,16 @@ func TestPrepareDirenvWritesEnvrc(t *testing.T) {
 func TestPrepareDirenvOverwritesExistingEnvrc(t *testing.T) {
 	dir := t.TempDir()
 	testgit.MustInit(t, dir)
-	os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("{}"), 0o644)
-	os.WriteFile(filepath.Join(dir, ".envrc"), []byte("old content\n"), 0o644)
+	testfs.MustWriteFile(t, filepath.Join(dir, "flake.nix"), []byte("{}"), 0o644)
+	testfs.MustWriteFile(t, filepath.Join(dir, ".envrc"), []byte("old content\n"), 0o644)
 
 	fakeBin := t.TempDir()
 	fakeDirenv := filepath.Join(fakeBin, "direnv")
-	os.WriteFile(fakeDirenv, []byte("#!/bin/sh\nexit 0\n"), 0o755)
+	testfs.MustWriteFile(t, fakeDirenv, []byte("#!/bin/sh\nexit 0\n"), 0o755)
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", fakeBin+":"+gitDir(t))
-	defer os.Setenv("PATH", origPath)
+	defer func() { _ = os.Setenv("PATH", origPath) }()
 
 	err := Sweatfile{}.prepareDirenv(dir)
 	if err != nil {
@@ -465,7 +466,8 @@ func TestWriteEnvrcWithDirectives(t *testing.T) {
 	testgit.MustInit(t, dir)
 
 	fakeBin := t.TempDir()
-	os.WriteFile(
+	testfs.MustWriteFile(
+		t,
 		filepath.Join(fakeBin, "direnv"),
 		[]byte("#!/bin/sh\nexit 0\n"),
 		0o755,
@@ -495,10 +497,11 @@ func TestWriteEnvrcWithDirectives(t *testing.T) {
 func TestWriteEnvrcDefaultFallbackWithFlake(t *testing.T) {
 	dir := t.TempDir()
 	testgit.MustInit(t, dir)
-	os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("{}"), 0o644)
+	testfs.MustWriteFile(t, filepath.Join(dir, "flake.nix"), []byte("{}"), 0o644)
 
 	fakeBin := t.TempDir()
-	os.WriteFile(
+	testfs.MustWriteFile(
+		t,
 		filepath.Join(fakeBin, "direnv"),
 		[]byte("#!/bin/sh\nexit 0\n"),
 		0o755,
@@ -527,7 +530,8 @@ func TestWriteEnvrcDefaultFallbackWithoutFlake(t *testing.T) {
 	testgit.MustInit(t, dir)
 
 	fakeBin := t.TempDir()
-	os.WriteFile(
+	testfs.MustWriteFile(
+		t,
 		filepath.Join(fakeBin, "direnv"),
 		[]byte("#!/bin/sh\nexit 0\n"),
 		0o755,
@@ -559,7 +563,8 @@ func TestWriteSpinclassEnv(t *testing.T) {
 	testgit.MustInit(t, dir)
 
 	fakeBin := t.TempDir()
-	os.WriteFile(
+	testfs.MustWriteFile(
+		t,
 		filepath.Join(fakeBin, "direnv"),
 		[]byte("#!/bin/sh\nexit 0\n"),
 		0o755,
@@ -595,7 +600,8 @@ func TestWriteSpinclassEnvInterpolatesWorktree(t *testing.T) {
 	testgit.MustInit(t, dir)
 
 	fakeBin := t.TempDir()
-	os.WriteFile(
+	testfs.MustWriteFile(
+		t,
 		filepath.Join(fakeBin, "direnv"),
 		[]byte("#!/bin/sh\nexit 0\n"),
 		0o755,
@@ -630,7 +636,8 @@ func TestEnvAutoDotenvDirective(t *testing.T) {
 	testgit.MustInit(t, dir)
 
 	fakeBin := t.TempDir()
-	os.WriteFile(
+	testfs.MustWriteFile(
+		t,
 		filepath.Join(fakeBin, "direnv"),
 		[]byte("#!/bin/sh\nexit 0\n"),
 		0o755,
@@ -662,7 +669,8 @@ func TestApplyRemovesStaleSpinclassEnv(t *testing.T) {
 	testgit.MustInit(t, dir)
 
 	fakeBin := t.TempDir()
-	os.WriteFile(
+	testfs.MustWriteFile(
+		t,
 		filepath.Join(fakeBin, "direnv"),
 		[]byte("#!/bin/sh\nexit 0\n"),
 		0o755,
@@ -670,9 +678,7 @@ func TestApplyRemovesStaleSpinclassEnv(t *testing.T) {
 	t.Setenv("PATH", fakeBin+":"+gitDir(t))
 
 	stale := filepath.Join(dir, ".spinclass.env")
-	if err := os.WriteFile(stale, []byte("FOO=bar\n"), 0o644); err != nil {
-		t.Fatalf("writing stale .spinclass.env: %v", err)
-	}
+	testfs.MustWriteFile(t, stale, []byte("FOO=bar\n"), 0o644)
 
 	if err := (Sweatfile{}).Apply(dir); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -688,7 +694,8 @@ func TestNoEnvNoDotenvDirective(t *testing.T) {
 	testgit.MustInit(t, dir)
 
 	fakeBin := t.TempDir()
-	os.WriteFile(
+	testfs.MustWriteFile(
+		t,
 		filepath.Join(fakeBin, "direnv"),
 		[]byte("#!/bin/sh\nexit 0\n"),
 		0o755,
@@ -932,7 +939,7 @@ func TestApplyClaudeSettingsEnabledMCPs(t *testing.T) {
 
 	data, _ := os.ReadFile(filepath.Join(dir, ".claude", "settings.local.json"))
 	var doc map[string]any
-	json.Unmarshal(data, &doc)
+	testfs.MustUnmarshal(t, data, &doc)
 
 	enabledRaw, _ := doc["enabledMcpjsonServers"].([]any)
 	enabled := make(map[string]bool)
@@ -970,7 +977,7 @@ func TestApplyClaudeSettingsEnabledMCPsDedup(t *testing.T) {
 
 	data, _ := os.ReadFile(filepath.Join(dir, ".claude", "settings.local.json"))
 	var doc map[string]any
-	json.Unmarshal(data, &doc)
+	testfs.MustUnmarshal(t, data, &doc)
 
 	enabledRaw, _ := doc["enabledMcpjsonServers"].([]any)
 	names := make(map[string]int)
@@ -994,7 +1001,7 @@ func TestApplyClaudeSettingsEmptyOmitsEnabledMCPs(t *testing.T) {
 
 	data, _ := os.ReadFile(filepath.Join(dir, ".claude", "settings.local.json"))
 	var doc map[string]any
-	json.Unmarshal(data, &doc)
+	testfs.MustUnmarshal(t, data, &doc)
 
 	if _, ok := doc["enabledMcpjsonServers"]; ok {
 		t.Errorf("expected no enabledMcpjsonServers key when no user MCPs are declared; got %v", doc["enabledMcpjsonServers"])

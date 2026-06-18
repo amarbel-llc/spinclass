@@ -56,7 +56,7 @@ func assertArgv(t *testing.T, got, want []string) {
 
 func TestBinDefaultsToPathLookup(t *testing.T) {
 	t.Setenv("CLOWN_BIN", "")
-	os.Unsetenv("CLOWN_BIN")
+	_ = os.Unsetenv("CLOWN_BIN")
 	if got := Bin(); got != "clown" {
 		t.Fatalf("unset CLOWN_BIN: got %q, want %q", got, "clown")
 	}
@@ -71,7 +71,7 @@ func TestBinHonorsEnv(t *testing.T) {
 
 func TestEnabledRequiresClownBin(t *testing.T) {
 	t.Setenv("CLOWN_BIN", "")
-	os.Unsetenv("CLOWN_BIN")
+	_ = os.Unsetenv("CLOWN_BIN")
 	if Enabled() {
 		t.Fatal("Enabled with CLOWN_BIN unset: got true, want false")
 	}

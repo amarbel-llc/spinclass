@@ -15,7 +15,7 @@ import (
 // REAL job-wakeup events at the developer's session. Wake tests opt back in
 // with a stub via t.Setenv.
 func TestMain(m *testing.M) {
-	os.Unsetenv("CLOWN_BIN")
+	_ = os.Unsetenv("CLOWN_BIN")
 	os.Exit(m.Run())
 }
 

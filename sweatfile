@@ -9,3 +9,19 @@
 # loud backstop that surfaces any drift the hook missed.
 pre-commit = "conformist --staged --exit-zero-on-fix"
 pre-merge  = "just"
+
+# Per-worktree golangci-lint cache (conformist#34). golangci-lint replays
+# per-package diagnostics whose embedded absolute paths point at whichever
+# worktree populated the cache; a cache shared across worktrees — e.g. the
+# merge hook's throwaway build worktree inheriting a session's path — makes
+# nolint/generated-file suppression fail open and leaks spurious findings, a
+# non-deterministic gate. Pinning the cache inside the worktree keeps every
+# cached path valid for the worktree's lifetime and dies with it. The
+# [linter.golangci-lint] conformist stanza reads this from the env.
+#
+# NB the bare [direnv] header is load-bearing: spinclass's tommy decoder only
+# consumes [direnv.dotenv] when the parent table header is explicit (#113).
+[direnv]
+
+[direnv.dotenv]
+GOLANGCI_LINT_CACHE = "$WORKTREE/.tmp/golangci-lint"

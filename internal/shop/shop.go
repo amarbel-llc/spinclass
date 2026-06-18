@@ -50,7 +50,7 @@ func Create(
 		return nil
 	}
 
-	fmt.Fprintln(writer, worktreePath.AbsPath)
+	_, _ = fmt.Fprintln(writer, worktreePath.AbsPath)
 	return nil
 }
 
@@ -439,6 +439,6 @@ func Fork(
 		return nil
 	}
 
-	fmt.Fprintln(writer, newPath)
+	_, _ = fmt.Fprintln(writer, newPath)
 	return nil
 }

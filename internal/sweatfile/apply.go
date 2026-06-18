@@ -36,7 +36,7 @@ func (sweatfile Sweatfile) Apply(worktreePath string) error {
 	// it inside .spinclass/; remove the stale copy best-effort so it
 	// can't linger (and its old `dotenv .spinclass.env` .envrc directive
 	// is rewritten by prepareDirenv below).
-	os.Remove(filepath.Join(worktreePath, ".spinclass.env"))
+	_ = os.Remove(filepath.Join(worktreePath, ".spinclass.env"))
 
 	if err := sweatfile.prepareDirenv(worktreePath); err != nil {
 		return err
@@ -70,7 +70,7 @@ func (sf Sweatfile) writeEnvrc(worktreePath string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	bufferedWriter := bufio.NewWriter(file)
 
@@ -139,7 +139,7 @@ func (sf Sweatfile) writeSpinclassEnv(worktreePath string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	expand := func(key string) string {
 		if key == "WORKTREE" {

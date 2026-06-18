@@ -26,12 +26,12 @@ func RunListWriter(w io.Writer, repo string) error {
 		return fmt.Errorf("loading global tier: %w", err)
 	}
 
-	fmt.Fprintln(w, "Global tier:")
+	_, _ = fmt.Fprintln(w, "Global tier:")
 	if len(globalTier.Allow) == 0 {
-		fmt.Fprintln(w, "  (empty)")
+		_, _ = fmt.Fprintln(w, "  (empty)")
 	} else {
 		for _, rule := range globalTier.Allow {
-			fmt.Fprintf(w, "  %s\n", rule)
+			_, _ = fmt.Fprintf(w, "  %s\n", rule)
 		}
 	}
 
@@ -42,12 +42,12 @@ func RunListWriter(w io.Writer, repo string) error {
 			return fmt.Errorf("loading repo tier %s: %w", repo, err)
 		}
 
-		fmt.Fprintf(w, "\nRepo tier (%s):\n", repo)
+		_, _ = fmt.Fprintf(w, "\nRepo tier (%s):\n", repo)
 		if len(repoTier.Allow) == 0 {
-			fmt.Fprintln(w, "  (empty)")
+			_, _ = fmt.Fprintln(w, "  (empty)")
 		} else {
 			for _, rule := range repoTier.Allow {
-				fmt.Fprintf(w, "  %s\n", rule)
+				_, _ = fmt.Fprintf(w, "  %s\n", rule)
 			}
 		}
 
@@ -78,9 +78,9 @@ func RunListWriter(w io.Writer, repo string) error {
 			continue
 		}
 
-		fmt.Fprintf(w, "\nRepo tier (%s):\n", repoName)
+		_, _ = fmt.Fprintf(w, "\nRepo tier (%s):\n", repoName)
 		for _, rule := range repoTier.Allow {
-			fmt.Fprintf(w, "  %s\n", rule)
+			_, _ = fmt.Fprintf(w, "  %s\n", rule)
 		}
 	}
 
@@ -181,13 +181,13 @@ func RunReviewEditor(worktreePath, repoName string, dryRun, includeBuiltin bool)
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 
 	if _, err := tmpFile.WriteString(content); err != nil {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		return err
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	for {
 		if err := openEditor(tmpFile.Name()); err != nil {
@@ -274,13 +274,13 @@ func RunReviewEditorAll(dryRun, includeBuiltin bool) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 
 	if _, err := tmpFile.WriteString(content); err != nil {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		return err
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	for {
 		if err := openEditor(tmpFile.Name()); err != nil {

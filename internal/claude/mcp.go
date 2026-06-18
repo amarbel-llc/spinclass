@@ -31,7 +31,8 @@ func WriteMCPConfig(worktreePath string, extraServers []MCPServerEntry) error {
 	var doc map[string]any
 	if data, err := os.ReadFile(mcpPath); err == nil {
 		existed = true
-		json.Unmarshal(data, &doc)
+		// Best-effort parse: on malformed JSON doc stays nil and is recreated below.
+		_ = json.Unmarshal(data, &doc)
 	}
 	if !existed && len(extraServers) == 0 {
 		return nil
@@ -67,12 +68,12 @@ func WriteMCPConfig(worktreePath string, extraServers []MCPServerEntry) error {
 
 	tmp := fmt.Sprintf("%s.tmp.%d", mcpPath, os.Getpid())
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return err
 	}
 
 	if err := os.Rename(tmp, mcpPath); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return err
 	}
 

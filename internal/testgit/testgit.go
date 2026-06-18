@@ -36,8 +36,8 @@ func SetHermeticEnv() (cleanup func(), err error) {
 		_ = os.Remove(f.Name())
 		return nil, err
 	}
-	os.Setenv("GIT_CONFIG_GLOBAL", f.Name())
-	os.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	_ = os.Setenv("GIT_CONFIG_GLOBAL", f.Name())
+	_ = os.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
 	return func() { _ = os.Remove(f.Name()) }, nil
 }
 

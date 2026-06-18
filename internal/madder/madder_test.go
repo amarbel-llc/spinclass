@@ -222,7 +222,7 @@ printf '{"id":"x","size":0,"source":"-"}\n'
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	w.Close()
+	_ = w.Close()
 	if _, err := finish(); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
@@ -254,7 +254,7 @@ exit 1
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	w.Close()
+	_ = w.Close()
 	id, err := finish()
 	if err == nil {
 		t.Fatalf("expected error from non-zero exit, got id=%q", id)

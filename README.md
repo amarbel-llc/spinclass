@@ -176,8 +176,8 @@ Dirty state is computed live via git.
 ```sh
 just build    # nix build
 just test     # Go tests with TAP-14 output
-just fmt      # gofumpt
-just lint     # go vet
+just fmt      # conformist (format + repair)
+just lint     # conformist check (format-drift + golangci-lint + shellcheck + statix/deadnix)
 just deps     # regenerate gomod2nix.toml after dependency changes
 ```
 

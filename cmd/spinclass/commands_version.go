@@ -37,30 +37,33 @@ func formatVersionTable(spinclassVersion, spinclassCommit, madder, direnv string
 	var sb strings.Builder
 	tw := tabwriter.NewWriter(&sb, 0, 2, 2, ' ', 0)
 
-	fmt.Fprintln(tw, "COMPONENT\tVERSION\tREV")
+	// Writes target a tabwriter over an in-memory strings.Builder, so they
+	// cannot fail; discard the errors explicitly to satisfy errcheck.
+	_, _ = fmt.Fprintln(tw, "COMPONENT\tVERSION\tREV")
 
 	selfComp := "spinclass-" + spinclassVersion + "/spinclass"
 	selfVer := spinclassVersion + "+" + spinclassCommit
-	fmt.Fprintf(tw, "%s\t%s\t%s\n", selfComp, selfVer, spinclassCommit)
+	_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", selfComp, selfVer, spinclassCommit)
 
 	writePinRow(tw, "madder", madder)
 	writePinRow(tw, "direnv", direnv)
 
-	tw.Flush()
+	_ = tw.Flush()
 	return sb.String()
 }
 
 func writePinRow(tw *tabwriter.Writer, name, binPath string) {
+	// Infallible writes to a tabwriter over an in-memory builder (see RunVersion).
 	if binPath == "" {
-		fmt.Fprintf(tw, "%s\t-\tdormant\n", name)
+		_, _ = fmt.Fprintf(tw, "%s\t-\tdormant\n", name)
 		return
 	}
 	comp, ver, rev := parseStorePathBinary(binPath)
 	if comp == "" {
-		fmt.Fprintf(tw, "%s\t?\t%s\n", name, binPath)
+		_, _ = fmt.Fprintf(tw, "%s\t?\t%s\n", name, binPath)
 		return
 	}
-	fmt.Fprintf(tw, "%s\t%s\t%s\n", comp, ver, rev)
+	_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", comp, ver, rev)
 }
 
 // pnameVersionRe splits a `<pname>-<version>` segment of a /nix/store

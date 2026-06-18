@@ -47,7 +47,7 @@ func SaveClaudeSettings(path string, rules []string) error {
 	// Read existing file to preserve non-permission fields
 	var doc map[string]any
 	if existing, err := os.ReadFile(path); err == nil {
-		json.Unmarshal(existing, &doc)
+		_ = json.Unmarshal(existing, &doc) // best-effort parse; nil doc is handled below
 	}
 	if doc == nil {
 		doc = make(map[string]any)
@@ -125,7 +125,7 @@ func LoadRulesFromLog(logPath string) ([]string, error) {
 		}
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	seen := make(map[string]bool)
 	var rules []string

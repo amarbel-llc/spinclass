@@ -568,7 +568,7 @@ func TestResolvedDivergedBranch(t *testing.T) {
 	}
 
 	// Abort the rebase to clean up
-	exec.Command("git", "-C", wtPath, "rebase", "--abort").Run()
+	_ = exec.Command("git", "-C", wtPath, "rebase", "--abort").Run()
 }
 
 func TestResolvedInSessionSkipsCleanup(t *testing.T) {

@@ -28,14 +28,14 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	os.Setenv("HOME", home)
+	_ = os.Setenv("HOME", home)
 	gitCleanup, err := testgit.SetHermeticEnv()
 	if err != nil {
 		panic(err)
 	}
 	code := m.Run()
 	gitCleanup()
-	os.RemoveAll(home)
+	_ = os.RemoveAll(home)
 	os.Exit(code)
 }
 

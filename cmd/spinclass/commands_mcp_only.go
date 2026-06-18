@@ -680,7 +680,12 @@ type gatedSession struct {
 // impossible to forget: a caller that ignores gitErr is visibly dropping a
 // return value.
 //
-//lint:ignore ST1008 gitErr is deliberately the 2nd return, not last — separating it from gs (see above) keeps the merge tools' fatality handling un-ignorable; reordering would churn 7 call sites for a purely stylistic win.
+// gitErr is deliberately the 2nd return, not last — separating it from gs (see
+// above) keeps the merge tools' fatality handling un-ignorable; reordering would
+// churn 7 call sites for a purely stylistic win. golangci-lint does not honor
+// staticcheck's native //lint:ignore, so the suppression is its //nolint form.
+//
+//nolint:staticcheck // ST1008: see rationale above.
 func resolveGatedSession(cwd string) (gs gatedSession, gitErr error, failMsg string, ok bool) {
 	if worktree.IsWorktree(cwd) {
 		repoPath, repoErr := git.CommonDir(cwd)

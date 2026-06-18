@@ -52,7 +52,7 @@ func (s SessionExecutor) Attach(dir string, key string, command []string, dryRun
 	// clobbered by user config — the integration contract requires
 	// SPINCLASS_SESSION_ID etc. to be authoritative.
 	for k, v := range s.Env {
-		os.Setenv(k, v)
+		_ = os.Setenv(k, v)
 	}
 
 	// Spinclass-owned env. Set after user env so it wins on collision.
@@ -66,7 +66,7 @@ func (s SessionExecutor) Attach(dir string, key string, command []string, dryRun
 		"CLAUDE_CODE_TMPDIR":    tmpDir,
 	}
 	for k, v := range sessionEnv {
-		os.Setenv(k, v)
+		_ = os.Setenv(k, v)
 	}
 
 	// Expand env vars in entrypoint args (e.g. "$SPINCLASS_SESSION_ID" → "repo/branch")
@@ -106,12 +106,12 @@ func (s SessionExecutor) Attach(dir string, key string, command []string, dryRun
 	go func() {
 		<-sighup
 		if cmd.Process != nil {
-			cmd.Process.Signal(syscall.SIGHUP)
+			_ = cmd.Process.Signal(syscall.SIGHUP) // best-effort forwarding
 			timer := time.NewTimer(10 * time.Second)
 			defer timer.Stop()
 			<-timer.C
 			if cmd.Process != nil {
-				cmd.Process.Signal(syscall.SIGTERM)
+				_ = cmd.Process.Signal(syscall.SIGTERM)
 			}
 		}
 	}()

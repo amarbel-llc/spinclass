@@ -2,9 +2,10 @@ package perms
 
 import (
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/amarbel-llc/spinclass/internal/testfs"
 )
 
 func TestLoadTierFile(t *testing.T) {
@@ -16,7 +17,7 @@ func TestLoadTierFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to marshal: %v", err)
 	}
-	os.WriteFile(path, data, 0o644)
+	testfs.MustWriteFile(t, path, data, 0o644)
 
 	loaded, err := LoadTierFile(path)
 	if err != nil {
@@ -51,13 +52,13 @@ func TestLoadTiers(t *testing.T) {
 
 	globalTier := Tier{Allow: []string{"Bash(git *)"}}
 	globalData, _ := json.MarshalIndent(globalTier, "", "  ")
-	os.WriteFile(filepath.Join(tmpDir, "global.json"), globalData, 0o644)
+	testfs.MustWriteFile(t, filepath.Join(tmpDir, "global.json"), globalData, 0o644)
 
 	repoDir := filepath.Join(tmpDir, "repos")
-	os.MkdirAll(repoDir, 0o755)
+	testfs.MustMkdirAll(t, repoDir, 0o755)
 	repoTier := Tier{Allow: []string{"Read(~/eng/**)"}}
 	repoData, _ := json.MarshalIndent(repoTier, "", "  ")
-	os.WriteFile(filepath.Join(repoDir, "myrepo.json"), repoData, 0o644)
+	testfs.MustWriteFile(t, filepath.Join(repoDir, "myrepo.json"), repoData, 0o644)
 
 	merged := LoadTiers(tmpDir, "myrepo")
 	if len(merged) != 2 {
@@ -104,7 +105,7 @@ func TestAppendToTierFile(t *testing.T) {
 
 	tier := Tier{Allow: []string{"Bash(git *)"}}
 	data, _ := json.MarshalIndent(tier, "", "  ")
-	os.WriteFile(path, data, 0o644)
+	testfs.MustWriteFile(t, path, data, 0o644)
 
 	err := AppendToTierFile(path, "Read(~/eng/**)")
 	if err != nil {
@@ -129,7 +130,7 @@ func TestAppendToTierFileNoDuplicates(t *testing.T) {
 
 	tier := Tier{Allow: []string{"Bash(git *)"}}
 	data, _ := json.MarshalIndent(tier, "", "  ")
-	os.WriteFile(path, data, 0o644)
+	testfs.MustWriteFile(t, path, data, 0o644)
 
 	err := AppendToTierFile(path, "Bash(git *)")
 	if err != nil {

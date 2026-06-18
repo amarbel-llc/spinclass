@@ -178,7 +178,7 @@ func LinkInto(binDir, binPath string) error {
 		return fmt.Errorf("creating temp symlink: %w", err)
 	}
 	if err := os.Rename(tmpName, link); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("renaming temp to %s: %w", link, err)
 	}
 	return nil

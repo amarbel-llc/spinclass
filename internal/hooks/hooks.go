@@ -262,8 +262,8 @@ func runStopHook(input hookInput, w io.Writer) error {
 		return nil // command passed -> approve
 	}
 
-	// Command failed -> write output to sentinel and block
-	os.WriteFile(sentinelPath, output, 0o644)
+	// Command failed -> write output to sentinel and block (best-effort)
+	_ = os.WriteFile(sentinelPath, output, 0o644)
 
 	reason := fmt.Sprintf("stop hook failed: %s", *stopCmd)
 	systemMsg := fmt.Sprintf(
@@ -817,7 +817,7 @@ func runPostToolUseLog(input hookInput) error {
 	if err != nil {
 		return nil // fail silently
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	data, err := json.Marshal(input)
 	if err != nil {
@@ -825,7 +825,7 @@ func runPostToolUseLog(input hookInput) error {
 	}
 
 	data = append(data, '\n')
-	f.Write(data)
+	_, _ = f.Write(data)
 
 	return nil
 }

@@ -122,8 +122,8 @@ func removeWorktree(wt worktreeInfo, tw *tap.Writer) error {
 	if _, err := git.BranchDelete(wt.repoPath, wt.branch); err != nil {
 		return fmt.Errorf("deleting branch %s: %w", wt.branch, err)
 	}
-	// Clean up session state file if it exists
-	session.Remove(wt.repoPath, wt.branch)
+	// Clean up session state file if it exists (best-effort)
+	_ = session.Remove(wt.repoPath, wt.branch)
 
 	if gcPlan != nil {
 		runReap(tw, *gcPlan, wt.branch)
@@ -295,7 +295,7 @@ func countAbandonedSessions() (int, []session.State) {
 func removeAbandonedSessions(abandoned []session.State) int {
 	removed := 0
 	for _, s := range abandoned {
-		session.Remove(s.RepoPath, s.Branch)
+		_ = session.Remove(s.RepoPath, s.Branch)
 		removed++
 	}
 	return removed

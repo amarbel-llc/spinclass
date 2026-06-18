@@ -6,13 +6,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/amarbel-llc/spinclass/internal/testfs"
 )
 
 func TestLoadClaudeSettings(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, ".claude", "settings.local.json")
 
-	os.MkdirAll(filepath.Dir(path), 0o755)
+	testfs.MustMkdirAll(t, filepath.Dir(path), 0o755)
 
 	settings := map[string]any{
 		"permissions": map[string]any{
@@ -23,7 +25,7 @@ func TestLoadClaudeSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to marshal: %v", err)
 	}
-	os.WriteFile(path, data, 0o644)
+	testfs.MustWriteFile(t, path, data, 0o644)
 
 	rules, err := LoadClaudeSettings(path)
 	if err != nil {
@@ -124,7 +126,7 @@ func TestSaveClaudeSettingsPreservesOtherFields(t *testing.T) {
   }
 }
 `
-	os.WriteFile(path, []byte(initial), 0o644)
+	testfs.MustWriteFile(t, path, []byte(initial), 0o644)
 
 	// Save with updated allow list
 	err := SaveClaudeSettings(path, []string{"Read"})
@@ -135,7 +137,7 @@ func TestSaveClaudeSettingsPreservesOtherFields(t *testing.T) {
 	// Read back raw JSON and verify other fields survived
 	data, _ := os.ReadFile(path)
 	var doc map[string]any
-	json.Unmarshal(data, &doc)
+	testfs.MustUnmarshal(t, data, &doc)
 
 	permsMap, ok := doc["permissions"].(map[string]any)
 	if !ok {
@@ -181,7 +183,7 @@ func TestLoadRulesFromLog(t *testing.T) {
 		`{"tool_name":"Edit","tool_input":{"file_path":"/some/file.go"}}`,
 		`{"tool_name":"Glob","tool_input":{}}`,
 	}
-	os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+	testfs.MustWriteFile(t, logPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
 
 	rules, err := LoadRulesFromLog(logPath)
 	if err != nil {
@@ -228,11 +230,11 @@ func TestDiscoverToolUseLogs(t *testing.T) {
 
 	// Populate dir with mixed file types
 	logDir := filepath.Join(tmpDir, "spinclass", "tool-uses")
-	os.MkdirAll(logDir, 0o755)
-	os.WriteFile(filepath.Join(logDir, "repoA--branch1.jsonl"), []byte("{}\n"), 0o644)
-	os.WriteFile(filepath.Join(logDir, "repoB--branch2.jsonl"), []byte("{}\n"), 0o644)
-	os.WriteFile(filepath.Join(logDir, "ignored.txt"), []byte("noise\n"), 0o644)
-	os.MkdirAll(filepath.Join(logDir, "subdir"), 0o755)
+	testfs.MustMkdirAll(t, logDir, 0o755)
+	testfs.MustWriteFile(t, filepath.Join(logDir, "repoA--branch1.jsonl"), []byte("{}\n"), 0o644)
+	testfs.MustWriteFile(t, filepath.Join(logDir, "repoB--branch2.jsonl"), []byte("{}\n"), 0o644)
+	testfs.MustWriteFile(t, filepath.Join(logDir, "ignored.txt"), []byte("noise\n"), 0o644)
+	testfs.MustMkdirAll(t, filepath.Join(logDir, "subdir"), 0o755)
 
 	logs, err = DiscoverToolUseLogs()
 	if err != nil {
@@ -256,10 +258,10 @@ func TestComputeReviewableRulesAll(t *testing.T) {
 	t.Setenv("XDG_LOG_HOME", tmpDir)
 
 	logDir := filepath.Join(tmpDir, "spinclass", "tool-uses")
-	os.MkdirAll(logDir, 0o755)
+	testfs.MustMkdirAll(t, logDir, 0o755)
 
 	// Two sessions with overlapping rules
-	os.WriteFile(filepath.Join(logDir, "repoA--main.jsonl"), []byte(strings.Join([]string{
+	testfs.MustWriteFile(t, filepath.Join(logDir, "repoA--main.jsonl"), []byte(strings.Join([]string{
 		`{"tool_name":"Bash","tool_input":{"command":"go test ./..."}}`,
 		`{"tool_name":"Bash","tool_input":{"command":"nix build"}}`,
 		`{"tool_name":"Edit","tool_input":{"file_path":"/Users/me/repos/A/main.go"}}`,
@@ -267,7 +269,7 @@ func TestComputeReviewableRulesAll(t *testing.T) {
 		`{"tool_name":"Read","tool_input":{"file_path":"/Users/me/.claude/CLAUDE.md"}}`,
 		`{"tool_name":"mcp__plugin_grit_grit__add","tool_input":{}}`,
 	}, "\n")+"\n"), 0o644)
-	os.WriteFile(filepath.Join(logDir, "repoB--feat.jsonl"), []byte(strings.Join([]string{
+	testfs.MustWriteFile(t, filepath.Join(logDir, "repoB--feat.jsonl"), []byte(strings.Join([]string{
 		`{"tool_name":"Bash","tool_input":{"command":"go test ./..."}}`, // dup
 		`{"tool_name":"Bash","tool_input":{"command":"cargo test"}}`,
 		`{"tool_name":"WebSearch","tool_input":{}}`,
@@ -285,7 +287,7 @@ func TestComputeReviewableRulesAll(t *testing.T) {
 	// Tier files: global tier excludes Edit; per-repo tier includes
 	// Bash(go test ./...) — should NOT be excluded in --all mode.
 	tiersDir := filepath.Join(tmpDir, "tiers")
-	os.MkdirAll(filepath.Join(tiersDir, "repos"), 0o755)
+	testfs.MustMkdirAll(t, filepath.Join(tiersDir, "repos"), 0o755)
 	if err := SaveTierFile(filepath.Join(tiersDir, "global.json"), Tier{Allow: []string{"Edit"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +372,7 @@ func TestComputeReviewableRules(t *testing.T) {
 		`{"tool_name":"mcp__plugin_grit_grit__add","tool_input":{}}`,
 		`{"tool_name":"WebSearch","tool_input":{}}`,
 	}
-	os.WriteFile(logPath, []byte(strings.Join(logEntries, "\n")+"\n"), 0o644)
+	testfs.MustWriteFile(t, logPath, []byte(strings.Join(logEntries, "\n")+"\n"), 0o644)
 
 	// Global settings: some overlap
 	globalSettingsPath := filepath.Join(tmpDir, "global-settings.json")
@@ -383,7 +385,7 @@ func TestComputeReviewableRules(t *testing.T) {
 
 	// Tier files: some overlap
 	tiersDir := filepath.Join(tmpDir, "tiers")
-	os.MkdirAll(filepath.Join(tiersDir, "repos"), 0o755)
+	testfs.MustMkdirAll(t, filepath.Join(tiersDir, "repos"), 0o755)
 	if err := SaveTierFile(filepath.Join(tiersDir, "global.json"), Tier{Allow: []string{"Edit"}}); err != nil {
 		t.Fatal(err)
 	}

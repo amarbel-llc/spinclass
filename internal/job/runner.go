@@ -89,7 +89,7 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 
 	go func() {
 		defer clearRunning()
-		defer logf.Close()
+		defer func() { _ = logf.Close() }()
 
 		// Allocate the matching clown job-wakeup entry (clown RFC-0009) when
 		// running under clown, so the terminal emit below can wake the agent.
@@ -99,7 +99,7 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 		// only the wake layer.
 		if clown.Enabled() {
 			if cid, cerr := clown.StartJob(context.Background(), kind, clown.Source); cerr != nil {
-				fmt.Fprintf(logf, "[clown] job-start emit failed: %v\n", cerr)
+				_, _ = fmt.Fprintf(logf, "[clown] job-start emit failed: %v\n", cerr)
 			} else {
 				j.ClownJobID = cid
 				_ = Write(wt, j)
@@ -133,7 +133,7 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 				}
 			}
 			if cerr := clown.FinishJob(context.Background(), j.ClownJobID, j.Status, msg, "spinclass session-job-status"); cerr != nil {
-				fmt.Fprintf(logf, "[clown] job-done emit failed: %v\n", cerr)
+				_, _ = fmt.Fprintf(logf, "[clown] job-done emit failed: %v\n", cerr)
 			}
 		}
 	}()
@@ -199,7 +199,7 @@ func TailLog(wt string, n int) string {
 	if err != nil {
 		return ""
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	lines := make([]string, 0, n)
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)

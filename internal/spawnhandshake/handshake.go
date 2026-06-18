@@ -76,16 +76,16 @@ func SendHello(worker, driver string) error {
 	}
 	tmpName := tmp.Name()
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("write temp hello: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("close temp hello: %w", err)
 	}
 	if err := os.Rename(tmpName, final); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("commit hello: %w", err)
 	}
 	return nil

@@ -298,9 +298,9 @@ func runHookPhase(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.H
 	// Placeholders cover the structured path (madder.Write happens after the
 	// hook exits) and the madder-not-pinned path (no blob at all).
 	var (
-		madderStdin   io.WriteCloser         = nopWriteCloser{io.Discard}
-		finishMadder  func() (string, error) = func() (string, error) { return "", nil }
-		hookStdoutBuf bytes.Buffer           // populated only for structured formats
+		madderStdin   io.WriteCloser = nopWriteCloser{io.Discard}
+		finishMadder                 = func() (string, error) { return "", nil }
+		hookStdoutBuf bytes.Buffer   // populated only for structured formats
 	)
 
 	if !structured && madderPinned {

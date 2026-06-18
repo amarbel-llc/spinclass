@@ -227,7 +227,7 @@ func writeIndexSymlink(worktreeAbsPath string) error {
 		return err
 	}
 	if err := os.Rename(tmpName, link); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return err
 	}
 	return nil
@@ -390,7 +390,7 @@ func WriteImplicit(s State, randID string) error {
 		return err
 	}
 	if err := os.Rename(tmp, link); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		sessionlog.Errorf("session.WriteImplicit symlink-failed local=%s from=%s err=%v", local, from, err)
 		return err
 	}
@@ -538,16 +538,16 @@ func Tombstone(repoPath, branch string) error {
 	}
 	tmpName := tmp.Name()
 	if _, werr := tmp.Write(data); werr != nil {
-		tmp.Close()
-		os.Remove(tmpName)
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
 		return werr
 	}
 	if cerr := tmp.Close(); cerr != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return cerr
 	}
 	if err := os.Rename(tmpName, idx); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return err
 	}
 	// State file and the .spinclass dir are now redundant — clean up.
@@ -1071,7 +1071,7 @@ func runMigration() error {
 		// drop the stale state file (the new layout has no place to put
 		// it; slice 3's tombstone retention handles closed history).
 		if _, werr := os.Stat(s.WorktreePath); errors.Is(werr, os.ErrNotExist) {
-			os.Remove(oldFile)
+			_ = os.Remove(oldFile)
 			continue
 		}
 

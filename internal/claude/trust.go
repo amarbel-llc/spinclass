@@ -14,7 +14,7 @@ import (
 func TrustWorkspace(claudeJSONPath, absPath string) error {
 	var doc map[string]any
 	if data, err := os.ReadFile(claudeJSONPath); err == nil {
-		json.Unmarshal(data, &doc)
+		_ = json.Unmarshal(data, &doc) // best-effort parse; nil doc is handled below
 	}
 	if doc == nil {
 		doc = make(map[string]any)
@@ -46,12 +46,12 @@ func TrustWorkspace(claudeJSONPath, absPath string) error {
 
 	tmp := fmt.Sprintf("%s.tmp.%d", claudeJSONPath, os.Getpid())
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return err
 	}
 
 	if err := os.Rename(tmp, claudeJSONPath); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return err
 	}
 

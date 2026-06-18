@@ -27,11 +27,11 @@ fmt:
 lint: lint-fmt
 
 # Read-only format + lint gate via conformist: fails on formatter drift
-# (Go/Nix/shell/TOML, per ./conformist.toml) plus the linters — shellcheck
-# and `go vet ./...` (the [linter.govet] run-once entry, formerly the separate
-# `just lint-vet`). `just fmt` is the corresponding write mode. Folded into
-# `just lint` → `just default`, so the pre-merge `just` hook enforces it on
-# every merge.
+# (Go/Nix/shell/TOML, per ./conformist.toml) plus the linters — shellcheck and
+# golangci-lint (the [linter.golangci-lint] run-once entry, v2 `standard` set:
+# errcheck/govet/staticcheck/ineffassign/unused, config in .golangci.yml).
+# `just fmt` is the corresponding write mode. Folded into `just lint` →
+# `just default`, so the pre-merge `just` hook enforces it on every merge.
 lint-fmt:
     nix develop --command conformist check
 

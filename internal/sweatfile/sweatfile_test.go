@@ -7,6 +7,7 @@ import (
 
 	. "github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
+	"github.com/amarbel-llc/spinclass/internal/testfs"
 )
 
 func TestParseMinimal(t *testing.T) {
@@ -38,7 +39,7 @@ func TestParseEmpty(t *testing.T) {
 func TestLoadFromPath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sweatfile")
-	os.WriteFile(path, []byte("[git]\nexcludes = [\".direnv/\"]"), 0o644)
+	testfs.MustWriteFile(t, path, []byte("[git]\nexcludes = [\".direnv/\"]"), 0o644)
 
 	doc, err := sweatfileio.Load(path)
 	if err != nil {
@@ -898,7 +899,7 @@ allow = []
 func TestLoadHierarchyHooksStopInherited(t *testing.T) {
 	home := t.TempDir()
 	repoDir := filepath.Join(home, "eng", "repos", "myrepo")
-	os.MkdirAll(repoDir, 0o755)
+	testfs.MustMkdirAll(t, repoDir, 0o755)
 
 	globalPath := filepath.Join(home, ".config", "spinclass", "sweatfile")
 	writeSweatfile(t, globalPath, "[hooks]\nstop = \"just test\"")
@@ -1039,7 +1040,7 @@ func TestMergeEnvAddKey(t *testing.T) {
 func TestLoadHierarchyHooksStopOverriddenByRepo(t *testing.T) {
 	home := t.TempDir()
 	repoDir := filepath.Join(home, "eng", "repos", "myrepo")
-	os.MkdirAll(repoDir, 0o755)
+	testfs.MustMkdirAll(t, repoDir, 0o755)
 
 	globalPath := filepath.Join(home, ".config", "spinclass", "sweatfile")
 	writeSweatfile(t, globalPath, "[hooks]\nstop = \"just test\"")
@@ -1109,7 +1110,7 @@ func TestLoadWorktreeHierarchyMainRepoSweatfileIncluded(t *testing.T) {
 	home := t.TempDir()
 	mainRepo := filepath.Join(home, "eng", "repos", "myrepo")
 	worktreeDir := filepath.Join(mainRepo, ".worktrees", "my-branch")
-	os.MkdirAll(worktreeDir, 0o755)
+	testfs.MustMkdirAll(t, worktreeDir, 0o755)
 
 	// Main repo sweatfile enables disallow-main-worktree
 	writeSweatfile(t, filepath.Join(mainRepo, "sweatfile"),
@@ -1129,7 +1130,7 @@ func TestLoadWorktreeHierarchyWorktreeOverridesMainRepo(t *testing.T) {
 	home := t.TempDir()
 	mainRepo := filepath.Join(home, "eng", "repos", "myrepo")
 	worktreeDir := filepath.Join(mainRepo, ".worktrees", "my-branch")
-	os.MkdirAll(worktreeDir, 0o755)
+	testfs.MustMkdirAll(t, worktreeDir, 0o755)
 
 	// Main repo enables it
 	writeSweatfile(t, filepath.Join(mainRepo, "sweatfile"),

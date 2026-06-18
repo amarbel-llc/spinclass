@@ -372,7 +372,7 @@ func (s stubRunner) CombinedOutput(_ string, _ ...string) ([]byte, error) {
 
 func (s stubRunner) Run(_ context.Context, outW, _ io.Writer, _ string, _ ...string) error {
 	if outW != nil && len(s.output) > 0 {
-		outW.Write(s.output)
+		_, _ = outW.Write(s.output)
 	}
 	return s.err
 }
@@ -430,7 +430,7 @@ func (r reapStub) CombinedOutput(_ string, _ ...string) ([]byte, error) {
 
 func (r reapStub) Run(_ context.Context, outW, _ io.Writer, _ string, _ ...string) error {
 	if outW != nil && len(r.runOutput) > 0 {
-		outW.Write(r.runOutput)
+		_, _ = outW.Write(r.runOutput)
 	}
 	return r.runErr
 }
@@ -603,7 +603,7 @@ func (h hangingRunner) CombinedOutput(_ string, _ ...string) ([]byte, error) {
 
 func (h hangingRunner) Run(ctx context.Context, outW, _ io.Writer, _ string, _ ...string) error {
 	if outW != nil && len(h.partial) > 0 {
-		outW.Write(h.partial)
+		_, _ = outW.Write(h.partial)
 	}
 	<-ctx.Done()
 	return ctx.Err()

@@ -12,6 +12,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/embeds"
 	"github.com/amarbel-llc/spinclass/internal/madder"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"github.com/amarbel-llc/spinclass/internal/testfs"
 	"github.com/amarbel-llc/spinclass/internal/testgit"
 )
 
@@ -269,7 +270,7 @@ func TestIsWorktreeNoGit(t *testing.T) {
 func TestApplyGitExcludesFirstWrite(t *testing.T) {
 	root := t.TempDir()
 	repoDir := filepath.Join(root, "myrepo")
-	os.MkdirAll(filepath.Join(repoDir, ".git"), 0o755)
+	testfs.MustMkdirAll(t, filepath.Join(repoDir, ".git"), 0o755)
 
 	if err := applyGitExcludes(repoDir, []string{".worktrees/", ".mcp.json"}); err != nil {
 		t.Fatal(err)
@@ -290,8 +291,8 @@ func TestApplyGitExcludesPreservesExistingContent(t *testing.T) {
 	root := t.TempDir()
 	repoDir := filepath.Join(root, "myrepo")
 	excludePath := filepath.Join(repoDir, ".git", "info", "exclude")
-	os.MkdirAll(filepath.Dir(excludePath), 0o755)
-	os.WriteFile(excludePath, []byte("# user exclude\n*.swp\n"), 0o644)
+	testfs.MustMkdirAll(t, filepath.Dir(excludePath), 0o755)
+	testfs.MustWriteFile(t, excludePath, []byte("# user exclude\n*.swp\n"), 0o644)
 
 	if err := applyGitExcludes(repoDir, []string{".spinclass/"}); err != nil {
 		t.Fatal(err)
@@ -314,7 +315,7 @@ func TestApplyGitExcludesPreservesExistingContent(t *testing.T) {
 func TestApplyGitExcludesIdempotentReplace(t *testing.T) {
 	root := t.TempDir()
 	repoDir := filepath.Join(root, "myrepo")
-	os.MkdirAll(filepath.Join(repoDir, ".git"), 0o755)
+	testfs.MustMkdirAll(t, filepath.Join(repoDir, ".git"), 0o755)
 
 	excludes := []string{".worktrees/", ".mcp.json"}
 
@@ -347,8 +348,8 @@ func TestApplyGitExcludesContentChanges(t *testing.T) {
 	root := t.TempDir()
 	repoDir := filepath.Join(root, "myrepo")
 	excludePath := filepath.Join(repoDir, ".git", "info", "exclude")
-	os.MkdirAll(filepath.Dir(excludePath), 0o755)
-	os.WriteFile(excludePath, []byte("*.swp\n"), 0o644)
+	testfs.MustMkdirAll(t, filepath.Dir(excludePath), 0o755)
+	testfs.MustWriteFile(t, excludePath, []byte("*.swp\n"), 0o644)
 
 	// First write
 	if err := applyGitExcludes(repoDir, []string{".old/"}); err != nil {
@@ -381,10 +382,10 @@ func TestApplyGitExcludesWorktreesMigration(t *testing.T) {
 	root := t.TempDir()
 	repoDir := filepath.Join(root, "myrepo")
 	excludePath := filepath.Join(repoDir, ".git", "info", "exclude")
-	os.MkdirAll(filepath.Dir(excludePath), 0o755)
+	testfs.MustMkdirAll(t, filepath.Dir(excludePath), 0o755)
 
 	// Simulate old-style bare .worktrees line from excludeWorktreesDir
-	os.WriteFile(excludePath, []byte(".worktrees\n"), 0o644)
+	testfs.MustWriteFile(t, excludePath, []byte(".worktrees\n"), 0o644)
 
 	if err := applyGitExcludes(repoDir, []string{".worktrees/", ".mcp.json"}); err != nil {
 		t.Fatal(err)
