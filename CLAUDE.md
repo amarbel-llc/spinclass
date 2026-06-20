@@ -171,6 +171,7 @@ worktree paths. Applies `claude-allow` rules from sweatfile to
   `sc start-<custom> <arg>`        User-defined start commands declared in sweatfile
   `sc resume [id]`                 Resume an existing session (auto-detects from cwd; `host:id` reattaches on a `[[remotes]]` host over ssh)
   `sc update-description "<desc>"` Update session description (--id or auto-detect)
+  `sc exec [--session <t>] [-- <util> …]` Run a util in a session's worktree (devshell + SPINCLASS_* env; defaults to $SHELL); the form posh's escape key targets
   `sc list [--watch]`              List tracked sessions (styled charm table on a TTY; plain text/JSON when piped or via `--format tap`/`json`); `--watch` keeps it open and live-reloads local sessions every `--interval` (default 2s). Plus `host:`-prefixed rows from `[[remotes]]` hosts
   `sc merge [target]`              Merge worktree into main, remove session state
   `sc check`                       Run [hooks].pre-merge in the current worktree (agent-CI surface)
@@ -247,6 +248,26 @@ attestation gate (`enforceAttestationImplicit` → `attestation.CheckImplicit`);
 the `sc merge` CLI path is gate-free. `sc close` on an implicit session drops
 `state-<rand>.json` only (never the checkout, no nix gc), and `sc list` marks it
 `main`. (`check`/`sc check` don't yet route implicit sessions — #132.)
+
+### `sc exec` — escape-to-shell payload
+
+`sc exec [--session <target>] [--] [<util> [args...]]` runs a util inside a
+session's worktree, devshell-scoped via `direnv exec`, with the session's
+`SPINCLASS_*` identity env set. With no `--session` it auto-detects the session
+from cwd (`session.FindByWorktreePath`); `<util>` defaults to `$SHELL`, so a
+bare `sc exec` drops into a shell in the worktree root. Its motivating consumer
+is the posh "escape to shell" key (the FDR-0017 follow-up to the dead
+ctrl-z-to-shell UX — claude holds the pts in raw mode with `-isig`, so no
+tty-signal escape can work; posh intercepts a key above claude's tty and spawns
+a configurable command, which a spinclass/eng environment sets to `sc exec`).
+**Resolution asymmetry:** an explicit `--session` miss errors; an implicit (cwd)
+miss degrades — runs the util in cwd, stripping inherited `SPINCLASS_*` so the
+"no session" is honest — letting posh default its escape to `sc exec` even
+outside a session. Implemented in `internal/sessionexec`; CLI-only (not an MCP
+tool). It uses raw passthrough (`PassthroughArgs`), so util args colliding with
+spinclass's global flags (`--format`/`--verbose`/`-v`) or a `-h`/`--help` among
+them are consumed by spinclass — wrap such a util in a script. The `--session`
+flag is hand-parsed (no tab completion in v1).
 
 ### Async (background + poll) merge/check
 

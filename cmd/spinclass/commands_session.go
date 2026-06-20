@@ -19,6 +19,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/present"
 	"github.com/amarbel-llc/spinclass/internal/remote"
 	"github.com/amarbel-llc/spinclass/internal/session"
+	"github.com/amarbel-llc/spinclass/internal/sessionexec"
 	"github.com/amarbel-llc/spinclass/internal/sessionpick"
 	"github.com/amarbel-llc/spinclass/internal/shop"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
@@ -63,6 +64,33 @@ func registerSessionCommands(app *command.App) {
 		},
 		Params: spawnParamList(),
 		RunCLI: runSpawnCLI,
+	})
+
+	app.AddCommand(&command.Command{
+		Name:            "exec",
+		PassthroughArgs: true,
+		Description: command.Description{
+			Short: "Run a command inside a session's worktree (devshell + identity env)",
+			Long: "Run a command inside a spinclass session's worktree, devshell-scoped via `direnv exec` (a plain cwd-scoped exec when direnv is unavailable), with the session's SPINCLASS_* identity environment set. " +
+				"Usage: sc exec [--session <target> | -s <target>] [--] [<util> [args...]]. " +
+				"With no --session, the session is auto-detected from the current working directory; <target> is a worktree directory name or a <repo>/<branch> session key from `sc list`. " +
+				"The util defaults to $SHELL (then /bin/sh), so a bare `sc exec` drops into a shell in the worktree root with the devshell loaded — the form posh's escape key is configured to. " +
+				"Resolution asymmetry: an explicit --session miss is an error; an implicit (cwd) miss runs the util in the current directory WITHOUT the SPINCLASS_* env, so callers can default an escape command to `sc exec` even outside a session. " +
+				"The util's exit code is propagated. Caveats (this command uses raw passthrough): util arguments that collide with spinclass's own global flags (--format, --verbose, -v) are consumed by spinclass, and a -h/--help among the util args prints this usage — use a wrapper script if the util needs those.",
+		},
+		RunCLI: func(_ context.Context, args json.RawMessage) error {
+			var p struct {
+				Args []string `json:"args"`
+			}
+			_ = json.Unmarshal(args, &p)
+			target, util := sessionexec.ParseArgs(p.Args)
+			err := sessionexec.Run(target, util)
+			var exitErr *osexec.ExitError
+			if errors.As(err, &exitErr) {
+				os.Exit(exitErr.ExitCode())
+			}
+			return err
+		},
 	})
 
 	app.AddCommand(&command.Command{
