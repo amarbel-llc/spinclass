@@ -17,6 +17,7 @@ import (
 
 func main() {
 	embeds.Set(madderBin, direnvBin, dodderBin)
+	embeds.SetVersion(version, commit)
 
 	// Open the lifecycle log early so session.Write/Remove/Tombstone
 	// calls from any subcommand land in $XDG_LOG_HOME/spinclass/lifecycle.log.

@@ -58,6 +58,7 @@ type Hooks struct {
 	DisableWorktreePathRewrite *bool   `toml:"disable-worktree-path-rewrite"`
 	PreMergeOutputFormat       *string `toml:"pre-merge-output-format"`
 	InactivityTimeout          *string `toml:"inactivity-timeout"`
+	AutoRebuildOnResume        *bool   `toml:"auto-rebuild-on-resume"`
 }
 
 // MCPServerDef declares an MCP server to register and auto-approve
@@ -346,6 +347,16 @@ func (sf Sweatfile) PreCommitActive() bool {
 	}
 	cmd := sf.PreCommitHookCommand()
 	return cmd != nil && stripEmptyLines(*cmd) != ""
+}
+
+// AutoRebuildOnResume reports whether [hooks].auto-rebuild-on-resume is true.
+// When set, `sc resume` re-applies a stale worktree's setup (worktree.Reapply)
+// before attaching, instead of only warning. Default false keeps resume
+// side-effect-free. See the rebuild/staleness design.
+func (sf Sweatfile) AutoRebuildOnResume() bool {
+	return sf.Hooks != nil &&
+		sf.Hooks.AutoRebuildOnResume != nil &&
+		*sf.Hooks.AutoRebuildOnResume
 }
 
 func (sf Sweatfile) DisableNixGCEnabled() bool {

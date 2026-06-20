@@ -136,7 +136,7 @@ func TestCreateTapNewWorktreeErrorPath(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := Create(&buf, rp, false, "tap", nil)
+	_, err := Create(&buf, rp, false, "tap", nil)
 	if err == nil {
 		t.Error("expected error when creating worktree in non-git dir, got nil")
 	}
@@ -152,7 +152,7 @@ func TestCreateTapSkipExisting(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := Create(&buf, rp, false, "tap", nil); err != nil {
+	if _, err := Create(&buf, rp, false, "tap", nil); err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
@@ -193,7 +193,7 @@ func TestCreateTapNewWorktree(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := Create(&buf, rp, false, "tap", nil); err != nil {
+	if _, err := Create(&buf, rp, false, "tap", nil); err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
@@ -219,7 +219,7 @@ func TestCreateSharedWriter(t *testing.T) {
 	tw := tap.NewWriter(&buf)
 	tw.PlanAhead(2)
 
-	if err := Create(&buf, rp, false, "tap", tw); err != nil {
+	if _, err := Create(&buf, rp, false, "tap", tw); err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 

@@ -25,16 +25,20 @@ import (
 	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
 )
 
+// Create ensures the worktree exists and applies its setup on first creation.
+// It returns whether the worktree already existed (true ⇒ setup was NOT
+// re-applied, since createWorktree only applies on a fresh worktree), so
+// callers can decide whether to record a fresh setup fingerprint.
 func Create(
 	writer io.Writer,
 	worktreePath worktree.ResolvedPath,
 	verbose bool,
 	format string,
 	tapWriter *tap.Writer,
-) error {
+) (bool, error) {
 	existed, err := createWorktree(worktreePath, verbose)
 	if err != nil {
-		return err
+		return existed, err
 	}
 
 	if format == "tap" {
@@ -47,11 +51,11 @@ func Create(
 		} else {
 			tapWriter.Ok("create " + worktreePath.Branch + " " + worktreePath.AbsPath)
 		}
-		return nil
+		return existed, nil
 	}
 
 	_, _ = fmt.Fprintln(writer, worktreePath.AbsPath)
-	return nil
+	return existed, nil
 }
 
 func createWorktree(worktreePath worktree.ResolvedPath, verbose bool) (bool, error) {
@@ -147,7 +151,8 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 		return err
 	}
 
-	if err := Create(w, rp, verbose, format, tw); err != nil {
+	existed, err := Create(w, rp, verbose, format, tw)
+	if err != nil {
 		return err
 	}
 
@@ -180,6 +185,44 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 			st.SpawnedBy = existing.SpawnedBy
 			st.HelloSentAt = existing.HelloSentAt
 			st.PreMergeAttestation = existing.PreMergeAttestation
+			// Carry the recorded setup fingerprint forward by default. A
+			// resume (existed) did NOT re-apply setup (createWorktree only
+			// applies on a fresh worktree), so a stale fingerprint must stay
+			// stale until `sc rebuild` / resume auto-rebuild refreshes it.
+			st.SetupFingerprint = existing.SetupFingerprint
+			st.SetupScheme = existing.SetupScheme
+			st.SetupAt = existing.SetupAt
+		}
+		if home, herr := os.UserHomeDir(); herr == nil {
+			if !existed {
+				// A freshly-created worktree just had its setup applied —
+				// record the current fingerprint, overriding any carry-forward.
+				if hash, scheme, ferr := worktree.SetupFingerprint(home, rp.RepoPath); ferr == nil {
+					now := time.Now().UTC()
+					st.SetupFingerprint, st.SetupScheme, st.SetupAt = hash, scheme, &now
+				} else {
+					log.Warn("failed to compute setup fingerprint", "err", ferr)
+				}
+			} else {
+				// Resume of an existing worktree: setup was NOT re-applied
+				// (createWorktree skips it). Warn if the recorded fingerprint
+				// is stale, and — when [hooks].auto-rebuild-on-resume is set —
+				// re-apply now and refresh the fingerprint before attaching.
+				// Warnings go to stderr so they never corrupt TAP stdout.
+				if stale, reason, serr := worktree.SetupStale(home, rp.RepoPath, st.SetupFingerprint, st.SetupScheme); serr == nil && stale {
+					if sf.AutoRebuildOnResume() {
+						if _, rerr := worktree.Reapply(rp.RepoPath, rp.AbsPath); rerr != nil {
+							fmt.Fprintf(os.Stderr, "spinclass: auto-rebuild failed: %v\n", rerr)
+						} else if hash, scheme, ferr := worktree.SetupFingerprint(home, rp.RepoPath); ferr == nil {
+							now := time.Now().UTC()
+							st.SetupFingerprint, st.SetupScheme, st.SetupAt = hash, scheme, &now
+							fmt.Fprintln(os.Stderr, "spinclass: worktree setup was stale — auto-rebuilt")
+						}
+					} else {
+						fmt.Fprintf(os.Stderr, "spinclass: worktree setup is stale (%s) — run `sc rebuild`\n", reason)
+					}
+				}
+			}
 		}
 		st.StartedAt = time.Now().UTC()
 		if err := session.Write(st); err != nil {

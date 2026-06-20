@@ -196,6 +196,85 @@ func registerSessionCommands(app *command.App) {
 			return spinclose.Run(os.Stdout, p.Target, p.Force, nixGCOverride, p.FormatOrDefault(), p.debugLogger())
 		},
 	})
+
+	app.AddCommand(&command.Command{
+		Name: "rebuild",
+		Description: command.Description{
+			Short: "Re-apply a worktree's setup, or --check whether it's stale",
+			Long: "Re-applies the worktree setup (the same sweatfile Apply `sc start` runs: pre-commit hook, .envrc/direnv, .claude settings, .mcp.json, git excludes, per-worktree git config, madder/dodder) for a session whose installed setup has drifted from the current config, spinclass binary, or pinned tools, then refreshes its recorded setup fingerprint. " +
+				"With no target, operates on the session containing the current directory; otherwise <target> is a worktree directory name or a <repo>/<branch> session key from `sc list`. " +
+				"--check reports stale/fresh WITHOUT re-applying and exits nonzero when stale (for scripting). " +
+				"Setup is otherwise applied only at `sc start`; `sc resume` warns when stale and, with [hooks].auto-rebuild-on-resume, re-applies automatically. " +
+				"Does NOT detect external-tool version drift (e.g. a changed conformist binary behind an unchanged hook command).",
+		},
+		Params: []command.Param{
+			{Name: "target", Type: command.String, Description: "Session target (worktree directory name or <repo>/<branch> key); auto-detects from cwd if omitted", Completer: completeWorktreeTargets},
+			{Name: "check", Type: command.Bool, Description: "Report stale/fresh without re-applying; exit nonzero if stale"},
+		},
+		RunCLI: runRebuild,
+	})
+}
+
+func runRebuild(_ context.Context, args json.RawMessage) error {
+	var p struct {
+		globalArgs
+		Target string `json:"target"`
+		Check  bool   `json:"check"`
+	}
+	_ = json.Unmarshal(args, &p)
+
+	if err := rejectRemoteTarget(p.Target, remotesForTarget(p.Target)); err != nil {
+		return err
+	}
+
+	var state *session.State
+	var err error
+	if p.Target != "" {
+		state, err = session.FindByTarget(p.Target)
+	} else {
+		cwd, cwdErr := os.Getwd()
+		if cwdErr != nil {
+			return cwdErr
+		}
+		state, err = session.FindByWorktreePath(cwd)
+	}
+	if err != nil {
+		return err
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	if p.Check {
+		stale, reason, serr := worktree.SetupStale(home, state.RepoPath, state.SetupFingerprint, state.SetupScheme)
+		if serr != nil {
+			return serr
+		}
+		if stale {
+			return fmt.Errorf("%s: setup is stale: %s", state.Key(), reason)
+		}
+		_, _ = fmt.Fprintf(os.Stdout, "%s: setup is up to date\n", state.Key())
+		return nil
+	}
+
+	if _, err := worktree.Reapply(state.RepoPath, state.WorktreePath); err != nil {
+		return fmt.Errorf("re-applying worktree setup: %w", err)
+	}
+	hash, scheme, ferr := worktree.SetupFingerprint(home, state.RepoPath)
+	if ferr != nil {
+		return ferr
+	}
+	now := time.Now().UTC()
+	state.SetupFingerprint = hash
+	state.SetupScheme = scheme
+	state.SetupAt = &now
+	if err := session.Write(*state); err != nil {
+		return fmt.Errorf("updating session state: %w", err)
+	}
+	_, _ = fmt.Fprintf(os.Stdout, "rebuilt %s\n", state.Key())
+	return nil
 }
 
 // parseNixGCFlag turns the raw --nix-gc=<value> argument into a *bool

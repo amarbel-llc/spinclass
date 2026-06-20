@@ -563,6 +563,23 @@ An unparseable or negative value is a
 error.
 .B Merge:
 scalar override.
+.TP
+.B auto-rebuild-on-resume
+Boolean.
+When true,
+.B sc resume
+re-applies a worktree's setup (as
+.BR "sc rebuild" " does)"
+before attaching whenever its recorded setup fingerprint is stale \(em the
+merged sweatfile config, the spinclass binary, or the build-time-pinned tools
+changed since the setup was last applied.
+Default (false): a stale worktree only prints a warning on resume; refresh it
+explicitly with
+.BR "sc rebuild" .
+External-tool version drift (e.g. a changed formatter binary behind an
+unchanged hook command) is not detected, since the config is unchanged.
+.B Merge:
+scalar override.
 .SS [session\-entry]
 Controls what command is exec'd when attaching to a session, how
 detached worker sessions are launched, what environment is injected,

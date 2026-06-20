@@ -85,6 +85,18 @@ type State struct {
 	// docs/features/0007-pre-merge-skill-attestation.md.
 	PreMergeAttestation *PreMergeAttestation `json:"pre_merge_attestation,omitempty"`
 
+	// SetupFingerprint / SetupScheme record the setupfingerprint.Compute
+	// hash (and its scheme version) captured the last time this worktree's
+	// setup was applied (`sc start`, `sc rebuild`, or resume auto-rebuild).
+	// A mismatch against the freshly-computed fingerprint flags the worktree
+	// as stale (setup drifted from current config/binary/pins) — see the
+	// rebuild design. Empty/zero on worktrees that predate staleness tracking,
+	// which reads as stale (a one-time rebuild). SetupAt is the wall-clock of
+	// that last apply, for display.
+	SetupFingerprint string     `json:"setup_fingerprint,omitempty"`
+	SetupScheme      int        `json:"setup_scheme,omitempty"`
+	SetupAt          *time.Time `json:"setup_at,omitempty"`
+
 	// isTombstone is set when the State was loaded from a regular file in
 	// the central index (i.e. a session that was closed cleanly and whose
 	// worktree-local state.json is gone). Unexported so it does not get

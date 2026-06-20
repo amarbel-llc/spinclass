@@ -12,6 +12,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/embeds"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/madder"
+	"github.com/amarbel-llc/spinclass/internal/setupfingerprint"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
 )
@@ -162,6 +163,52 @@ func CreateFrom(
 	}
 
 	return sweetfile, applyWorktreeConfig(home, sweetfile, repoPath, newPath)
+}
+
+// Reapply re-runs the worktree setup (applyWorktreeConfig) on an EXISTING
+// worktree, WITHOUT a `git worktree add`. It is the seam `sc rebuild` and
+// resume auto-rebuild use to refresh a worktree whose installed setup has
+// drifted from current config/binary/pins. It loads the same repo-level
+// hierarchy `Create` does (LoadHierarchy — NOT the worktree-leaf-inclusive
+// LoadWorktreeHierarchy), so a rebuild reproduces exactly what `sc start`
+// applied and the setup fingerprint stays comparable across the two. Returns
+// the merged hierarchy so the caller can compute and record the fresh
+// fingerprint.
+func Reapply(repoPath, worktreePath string) (sweatfile.Hierarchy, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return sweatfile.Hierarchy{}, fmt.Errorf("getting home directory: %w", err)
+	}
+
+	sweetfile, err := sweatfileio.LoadHierarchy(home, repoPath)
+	if err != nil {
+		return sweetfile, fmt.Errorf("loading sweatfile: %w", err)
+	}
+
+	return sweetfile, applyWorktreeConfig(home, sweetfile, repoPath, worktreePath)
+}
+
+// SetupFingerprint computes the current setup fingerprint for repoPath, using
+// the same repo-level hierarchy (LoadHierarchy) that Create/Reapply apply, so
+// the value is directly comparable to one recorded at apply time.
+func SetupFingerprint(home, repoPath string) (hash string, scheme int, err error) {
+	h, err := sweatfileio.LoadHierarchy(home, repoPath)
+	if err != nil {
+		return "", 0, fmt.Errorf("loading sweatfile: %w", err)
+	}
+	hash, scheme = setupfingerprint.Compute(h.Merged)
+	return hash, scheme, nil
+}
+
+// SetupStale reports whether a worktree's recorded setup fingerprint/scheme is
+// stale relative to the current repo config + binary + pins, with a reason.
+func SetupStale(home, repoPath, recordedHash string, recordedScheme int) (stale bool, reason string, err error) {
+	h, err := sweatfileio.LoadHierarchy(home, repoPath)
+	if err != nil {
+		return false, "", fmt.Errorf("loading sweatfile: %w", err)
+	}
+	stale, reason = setupfingerprint.IsStale(recordedHash, recordedScheme, h.Merged)
+	return stale, reason, nil
 }
 
 // applyWorktreeConfig excludes .worktrees from git, loads and applies

@@ -91,7 +91,7 @@ parent dirs → repo-level. Supports `git-excludes`, `claude-allow`, `envrc-dire
 override; includes `disable-merge`, `disable-repair`, `disable-pre-commit`, `disable-nix-gc`,
 `disable-merge-build-worktree`, `disable-implicit-sessions`,
 `disable-worktree-path-rewrite`, `pre-merge-output-format`,
-`inactivity-timeout`), and `[session-entry]` table (start/resume entrypoint
+`inactivity-timeout`, `auto-rebuild-on-resume`), and `[session-entry]` table (start/resume entrypoint
 commands — default `$SHELL`, since spinclass exited multiplexing and clown owns
 attach + the terminal title via its clownfile `[attach]`, FDR 0017 — plus the
 FDR 0006 `spawn-entry` (exec'd directly, default the clown spawn form) and
@@ -176,6 +176,7 @@ worktree paths. Applies `claude-allow` rules from sweatfile to
   `sc merge [target]`              Merge worktree into main, remove session state
   `sc check`                       Run [hooks].pre-merge in the current worktree (agent-CI surface)
   `sc clean`                       Remove merged worktrees and abandoned sessions
+  `sc rebuild [target] [--check]`  Re-apply a drifted worktree's setup, refreshing its fingerprint; `--check` reports stale/fresh (nonzero if stale)
   `sc fork [branch]`               Fork current worktree (supports `--from <dir>`; `--brief` launches the fork as a detached worker, FDR 0006)
   `sc spawn <repo> --brief "…"`    Launch a detached, harness-booted worker session in a sibling repo (dirname-addressed; blocks on the worker's spawn-handshake hello, FDR 0006)
   `sc pull`                        Pull repos and rebase worktrees
@@ -389,8 +390,10 @@ implicit sessions are out of scope (their HEAD may be pushed, which conformist's
 ### Per-commit repair hook (authoring-time)
 
 When `[hooks].pre-commit` is set (and not `[hooks].disable-pre-commit`),
-`sweatfile.Apply` (run by `worktree.Create` on every `sc start`/`sc resume`)
-installs it as a per-session git **pre-commit** hook
+`sweatfile.Apply` (run by `worktree.Create` at `sc start`, i.e. on worktree
+creation — `sc resume` of an existing worktree does NOT re-apply; see the
+staleness/rebuild section below) installs it as a per-session git
+**pre-commit** hook
 (`internal/sweatfile/precommit.go` → `installPreCommitHook`), so drift is
 repaired **at authoring time** and every commit is conformant in history —
 unlike the merge-time REPAIR phase, which only ever amends the top commit. The
@@ -449,6 +452,41 @@ async paths funnel through `RunPreMergeHookContext`, so the watchdog covers
 hook (different from the async tools, which only sidestep the request-timeout
 for hooks that are still making progress). `sc validate` rejects an
 unparseable or negative value.
+
+### Worktree setup staleness & `sc rebuild`
+
+`sweatfile.Apply` + `applyWorktreeConfig` install a worktree's setup (pre-commit
+hook, `.envrc`/direnv, `.claude` settings, `.mcp.json`, git excludes, per-worktree
+git config, madder/dodder) **once, at `sc start`** — `createWorktree`
+(`internal/shop/shop.go`) only applies on a *fresh* worktree, so `sc resume` of an
+existing worktree does NOT re-apply. Setup therefore drifts as the sweatfile
+config, the spinclass binary, or pinned tools evolve.
+
+`internal/setupfingerprint` records a stable fingerprint of those inputs —
+`sha256(scheme · spinclass version+commit · embeds pins · canonical-JSON(merged
+config))`, where canonical-JSON is a sorted-key JSON round-trip (struct-field-order
+independent; no JCS dependency) — into `session.State`
+(`setup_fingerprint`/`setup_scheme`/`setup_at`) whenever setup is applied (`sc
+start`, `sc rebuild`, resume auto-rebuild). A mismatch vs the recomputed value
+flags the worktree stale. The version/commit are surfaced to non-`main` packages
+via `internal/embeds` (`SetVersion`/`Version`/`Commit`).
+
+- **`sc rebuild [target]`** re-applies setup on an existing worktree
+  (`worktree.Reapply` = `applyWorktreeConfig` without `git worktree add`, using the
+  same `LoadHierarchy` source `Create` does so a rebuild reproduces `sc start`) and
+  refreshes the fingerprint. `--check` reports stale/fresh read-only, exiting
+  nonzero when stale (for scripting / gates). CLI-only.
+- **`sc resume`** (the `existed` branch of `shop.Attach`) warns on stderr when
+  stale, and — with `[hooks].auto-rebuild-on-resume = true` — re-applies and
+  refreshes before attaching; default-off keeps resume side-effect-free.
+  `worktree.SetupFingerprint`/`SetupStale` wrap the load+compute so the
+  `LoadHierarchy` source choice lives in one place.
+
+**Limitation (the motivating case):** this does NOT detect external-tool *version*
+drift — e.g. a changed conformist binary behind an unchanged `[hooks].pre-commit`
+command. The config is unchanged, so the fingerprint is unchanged. Catching that
+needs probing each tool's version (out of scope; see the `[hooks].pre-commit`
+conformist-version requirement).
 
 By default `sc close` and `sc clean` perform worktree-scoped Nix garbage
 collection after removing the worktree: spinclass enumerates the gc roots

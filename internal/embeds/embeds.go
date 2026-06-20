@@ -12,6 +12,8 @@ var (
 	madderBin string
 	direnvBin string
 	dodderBin string
+	version   string
+	commit    string
 )
 
 // Set records the build-time-pinned binary paths. Called once from
@@ -22,6 +24,22 @@ func Set(madder, direnv, dodder string) {
 	direnvBin = direnv
 	dodderBin = dodder
 }
+
+// SetVersion records the build-time spinclass version and commit (the
+// main.version/main.commit ldflags values). Kept separate from Set so the
+// pinned-binary callers stay untouched. Callers that need the values for the
+// setup fingerprint (internal/setupfingerprint) read them via Version/Commit;
+// tests may call SetVersion to override per-test.
+func SetVersion(v, c string) {
+	version = v
+	commit = c
+}
+
+// Version returns the build-time spinclass version ("" if unset).
+func Version() string { return version }
+
+// Commit returns the build-time spinclass commit ("" if unset).
+func Commit() string { return commit }
 
 // MadderBin returns the absolute path to the pinned madder binary, or
 // "" if no madder was supplied at build time.

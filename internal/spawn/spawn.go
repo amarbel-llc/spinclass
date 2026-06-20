@@ -60,7 +60,7 @@ func Launch(home, repoPath, driverKey, brief, desc string, deadline time.Duratio
 		return Result{}, err
 	}
 
-	if err := shop.Create(io.Discard, rp, false, "", nil); err != nil {
+	if _, err := shop.Create(io.Discard, rp, false, "", nil); err != nil {
 		return Result{}, fmt.Errorf("creating worker worktree: %w", err)
 	}
 

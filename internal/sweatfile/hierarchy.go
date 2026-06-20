@@ -131,6 +131,9 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if other.Hooks.InactivityTimeout != nil {
 			merged.Hooks.InactivityTimeout = other.Hooks.InactivityTimeout
 		}
+		if other.Hooks.AutoRebuildOnResume != nil {
+			merged.Hooks.AutoRebuildOnResume = other.Hooks.AutoRebuildOnResume
+		}
 	}
 
 	// [session-entry]

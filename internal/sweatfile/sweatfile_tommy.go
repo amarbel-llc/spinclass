@@ -267,6 +267,12 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				_vHooksInactivityTimeout.MarkConsumed()
 			}
 		}
+		if _vHooksAutoRebuildOnResume, _ok := _vHooks.Get("auto-rebuild-on-resume"); _ok && _vHooksAutoRebuildOnResume.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksAutoRebuildOnResume.Leaf); _xok {
+				hooksVal3.AutoRebuildOnResume = &_x
+				_vHooksAutoRebuildOnResume.MarkConsumed()
+			}
+		}
 		d.data.Hooks = hooksVal3
 	} else {
 		hooksVal3 := &Hooks{}
@@ -395,6 +401,13 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractString(_vInactivityTimeout.Leaf); _xok {
 				hooksVal3.InactivityTimeout = &_x
 				_vInactivityTimeout.MarkConsumed()
+			}
+		}
+		if _vAutoRebuildOnResume, _ok := model.Get("auto-rebuild-on-resume"); _ok && _vAutoRebuildOnResume.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vAutoRebuildOnResume.Leaf); _xok {
+				hooksVal3.AutoRebuildOnResume = &_x
+				_vAutoRebuildOnResume.MarkConsumed()
 			}
 		}
 		if _foundHooks {
@@ -858,6 +871,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
+		if d.data.Hooks.AutoRebuildOnResume != nil {
+			if err := cst.SetAny(tableNode, "auto-rebuild-on-resume", *d.data.Hooks.AutoRebuildOnResume); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
 	}
 	if d.data.SessionEntry != nil {
 		tableNode := cst.EnsureChildTable(d.cstDoc.Root(), d.cstDoc.Root(), "session-entry")
@@ -1296,6 +1314,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vHooksInactivityTimeout.MarkConsumed()
 			}
 		}
+		if _vHooksAutoRebuildOnResume, _ok := _vHooks.Get("auto-rebuild-on-resume"); _ok && _vHooksAutoRebuildOnResume.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksAutoRebuildOnResume.Leaf); _xok {
+				hooksVal3.AutoRebuildOnResume = &_x
+				_vHooksAutoRebuildOnResume.MarkConsumed()
+			}
+		}
 		data.Hooks = hooksVal3
 	} else {
 		hooksVal3 := &Hooks{}
@@ -1424,6 +1448,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractString(_vInactivityTimeout.Leaf); _xok {
 				hooksVal3.InactivityTimeout = &_x
 				_vInactivityTimeout.MarkConsumed()
+			}
+		}
+		if _vAutoRebuildOnResume, _ok := sub.Get("auto-rebuild-on-resume"); _ok && _vAutoRebuildOnResume.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vAutoRebuildOnResume.Leaf); _xok {
+				hooksVal3.AutoRebuildOnResume = &_x
+				_vAutoRebuildOnResume.MarkConsumed()
 			}
 		}
 		if _foundHooks {
@@ -1872,6 +1903,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if data.Hooks.InactivityTimeout != nil {
 			if err := cst.SetAny(tableNode, "inactivity-timeout", *data.Hooks.InactivityTimeout); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.Hooks.AutoRebuildOnResume != nil {
+			if err := cst.SetAny(tableNode, "auto-rebuild-on-resume", *data.Hooks.AutoRebuildOnResume); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}
