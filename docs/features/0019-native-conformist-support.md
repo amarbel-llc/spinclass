@@ -1,27 +1,35 @@
 ---
-status: proposed
+status: experimental
 date: 2026-06-20
 promotion-criteria: |
-  proposed -> experimental: conformist ships `lib.mkToolchainHooks` (the
-  TOML-consumer mirror of build.{wrapper,preCommit,repair}); spinclass wires it
-  into flake.nix and switches its sweatfile to `pre-commit = "conformist-pre-commit"`,
-  proven to produce byte-identical fmt/check to today's conformistFmt.
+  proposed -> experimental: DONE — conformist shipped `lib.mkToolchainHooks`
+  (conformist#59, master @ 8ac5fce); spinclass wired it in flake.nix (commit
+  3e4c210) and switched its sweatfile to `pre-commit = "conformist-pre-commit"`,
+  proven byte-identical (formatting "0 changed") + a live staged-format hook run.
   experimental -> testing: the wired hook survives a conformist bump (flake.lock
   update + devShell reload) with no version/formatter-PATH/flag breakage, ~1 week.
 ---
 
 # Native conformist support in spinclass
 
-> **Proposed / exploration.** Design-first, after `sc rebuild`. This is the
-> THIRD revision and the direction is now settled with conformist/live-alder.
-> The two earlier drafts were wrong-headed: (1) pinning the bare `conformist`
-> binary + rewriting the flag string (reinvents what conformist already ships);
-> (2) migrating spinclass to conformist's **Nix module** (`build.preCommit`).
-> spinclass is **not** a module consumer — it is a **TOML consumer** (a
-> hand-written `conformist.toml` + bespoke tools + a hand-rolled wrapper). For
-> that shape conformist's answer is `wrapWithToolchain` (#51) and a new
-> `lib.mkToolchainHooks` helper. Adoption becomes ~3 lines, no module port, no
-> eng-preset tax.
+> **Experimental** — the conformist side (conformist#59: `mkToolchainHooks`,
+> scaffold `repair`, the two-shapes guide) is merged, and the spinclass adoption
+> landed (commit `3e4c210`): `flake.nix` uses `conformist.lib.mkToolchainHooks`,
+> the sweatfile names `conformist-pre-commit`, proven end-to-end (the live hook
+> reformatted + restaged a staged file hermetically via the wrapper's baked
+> toolchain). Settled with conformist/live-alder. Two earlier drafts were
+> wrong-headed: (1) pinning the bare `conformist` binary + rewriting the flag
+> string (reinvents what conformist ships); (2) migrating spinclass to
+> conformist's **Nix module**. spinclass is a **TOML consumer** (hand-written
+> `conformist.toml`), so the path is `lib.mkToolchainHooks` — ~3 lines, no module
+> port, no eng-preset tax.
+>
+> **Known post-adoption nuance (filed):** `sc rebuild`/`Create` re-apply the hook
+> from the **main checkout's** sweatfile (`LoadHierarchy`), not the worktree
+> branch's — so a worktree's `pre-commit` value only flips to
+> `conformist-pre-commit` once the sweatfile change is on master. Functionally
+> moot here (the devShell's `conformist` is already the wrapper, so even the old
+> command string runs hermetically); the rename is cosmetic + post-merge.
 
 ## Problem Statement
 

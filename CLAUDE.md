@@ -397,8 +397,18 @@ staleness/rebuild section below) installs it as a per-session git
 (`internal/sweatfile/precommit.go` → `installPreCommitHook`), so drift is
 repaired **at authoring time** and every commit is conformant in history —
 unlike the merge-time REPAIR phase, which only ever amends the top commit. The
-canonical value is `conformist --staged --exit-zero-on-fix` (formats the staged
-blobs and restages them — no extra commit, no amend). The generated wrapper is
+canonical value is **`conformist-pre-commit`** — conformist's store-pinned
+toolchain-hermetic wrapper (its `lib.mkToolchainHooks`, conformist#59), wired in
+`flake.nix` and on the devShell PATH; it runs `conformist --staged
+--exit-zero-on-fix` with the conformist binary AND every formatter baked as
+store paths. **Best practice: name the wrapper, NOT a bare
+`conformist --staged --exit-zero-on-fix` string** — the bare string resolves
+conformist (and its formatters) from PATH, so a stale conformist breaks the hook
+and a missing formatter silently skips its filetypes (conformist#51). For a
+hand-written `conformist.toml` repo (like spinclass) the wrapper comes from
+`conformist.lib.mkToolchainHooks` → `{ formatter, preCommit, repair }`; for a
+conformist-module repo it's `build.preCommit`. See FDR 0019 and conformist's
+`docs/site/guides/nix-module.md` (the two consumer shapes). The generated wrapper is
 written to `<worktree>/.spinclass/hooks/pre-commit` and scoped to that worktree
 alone via `git config extensions.worktreeConfig true` + `git config --worktree
 core.hooksPath <dir>` — worktrees otherwise share `$GIT_COMMON_DIR/hooks`, so
