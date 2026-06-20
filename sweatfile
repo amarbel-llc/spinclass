@@ -1,13 +1,16 @@
 # vim: set ft=toml
 
 [hooks]
-# Per-commit repair at authoring time: each commit is formatted as it's made
-# (docs/plans/2026-06-16-per-commit-repair-hook-design.md), replacing the
-# merge-time REPAIR phase (FDR 0018). Rollback during the promotion window is a
-# one-line swap back to `repair = "conformist --commit --amend --exit-zero-on-fix"`
-# (+ disable-pre-commit = true). The `pre-merge = "just"` lint gate stays as the
-# loud backstop that surfaces any drift the hook missed.
-pre-commit = "conformist --staged --exit-zero-on-fix"
+# Per-commit repair at authoring time: each commit is formatted as it's made.
+# The command is conformist's store-pinned toolchain wrapper
+# `conformist-pre-commit` (conformist#59 mkToolchainHooks, on the devShell PATH
+# via flake.nix) — NOT a bare `conformist --staged --exit-zero-on-fix` string:
+# the wrapper bakes the conformist binary AND every formatter as store paths, so
+# the hook can't break on a stale PATH conformist (the 0.1.6 regression) or
+# silently skip a filetype whose formatter is missing from PATH (conformist#51).
+# Requires the devShell active (the wrapper is a devShell PATH entry). The
+# `pre-merge = "just"` lint gate stays as the loud backstop. See FDR 0019.
+pre-commit = "conformist-pre-commit"
 pre-merge  = "just"
 
 # Per-worktree golangci-lint cache (conformist#34). golangci-lint replays

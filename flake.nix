@@ -112,36 +112,38 @@
         pkgs-master = import nixpkgs-master { inherit system; };
         inherit (pkgs) lib;
 
-        # `nix fmt` entry point: conformist (the treefmt successor) wrapped
-        # with the formatter binaries its ./conformist.toml drives on PATH.
-        # Formatting drift is gated by `just lint-fmt` (conformist check).
-        # Mirrors madder's conformistFmt.
-        conformistFmt = pkgs.writeShellApplication {
-          name = "conformist-fmt";
-          runtimeInputs = [
-            conformist.packages.${system}.default
+        # Toolchain-hermetic conformist hooks (conformist#59): the TOML-consumer
+        # mirror of the module's build.{wrapper,preCommit,repair}. Returns three
+        # store-pinned wrappers — `conformist` (nix fmt / check / repair entry,
+        # the flake `formatter`), `conformist-pre-commit`
+        # (--staged --exit-zero-on-fix), and `conformist-repair`
+        # (--commit --amend …) — each exec'ing conformist with the toolchain below
+        # baked on PATH, so a hook never silently skips a filetype whose formatter
+        # is absent from the ambient PATH (the conformist#51 trap), and with
+        # --config-file pinned to ./conformist.toml. Supersedes the hand-rolled
+        # conformistFmt; the sweatfile names `conformist-pre-commit` as the
+        # per-commit hook. `go` stays ambient (devShell mkGoEnv) for the
+        # golangci-lint / tommy-codegen linters, per the helper's documented caveat.
+        conformistHooks = conformist.lib.mkToolchainHooks pkgs {
+          conformist = conformist.packages.${system}.default;
+          configFile = ./conformist.toml;
+          tools = [
             pkgs-master.gofumpt
-            pkgs-master.gotools
+            pkgs-master.gotools # provides goimports
             pkgs.nixfmt
             pkgs.shfmt
             pkgs.shellcheck
             # Nix linters (conformist.toml [linter.statix] / [linter.deadnix]).
             pkgs.statix
             pkgs.deadnix
-            # Go linter (conformist.toml [linter.golangci-lint]); the v2
-            # `standard` set bundles go vet + staticcheck + errcheck/ineffassign/
-            # unused, so it replaces the former standalone go-tools/staticcheck
-            # entry. golangci-lint loads packages with `go`, available because
-            # the conformist check lane runs under `nix develop`.
+            # Go linter (conformist.toml [linter.golangci-lint], v2 standard set).
             pkgs-master.golangci-lint
             # tommy fmt owns *.toml (conformist.toml [formatter.tommy]); same
             # input that backs the bridged library + codegen tool.
             tommy.packages.${system}.default
-            # conformist.toml [linter.tommy-codegen] repair driver; bakes its
-            # own v0.4.6 tommy and walks for //go:generate tommy generate.
+            # conformist.toml [linter.tommy-codegen] repair driver.
             tommy.packages.${system}.conformist-tommy-codegen
           ];
-          text = ''exec conformist "$@"'';
         };
 
         # Consumer half of the flake-input-go_mod protocol (RFC 0001):
@@ -331,8 +333,8 @@
         # absolute /nix/store paths burned in.
         lib.mkSpinclass = mkSpinclass;
 
-        # `nix fmt` runs conformist (see conformistFmt above).
-        formatter = conformistFmt;
+        # `nix fmt` runs conformist (the toolchain-hermetic wrapper).
+        inherit (conformistHooks) formatter;
 
         devShells.default = pkgs-master.mkShell {
           packages = [
@@ -348,10 +350,15 @@
             # buildGoApplication / mkGoEnv — not in upstream nixpkgs.
             pkgs.gomod2nix
             pkgs.bats
-            # conformist (treefmt successor) + the formatters/linters its
-            # ./conformist.toml drives, so `just fmt` / `just lint-fmt`
-            # (conformist / conformist check) work in the devshell.
-            conformist.packages.${system}.default
+            # conformist hooks (toolchain-hermetic wrappers, conformist#59):
+            # `conformist` (= conformistHooks.formatter; what `just fmt` /
+            # `just lint-fmt` invoke) REPLACES the bare conformist binary on PATH,
+            # so a bare `conformist` resolves to the toolchain-carrying wrapper —
+            # plus the `conformist-pre-commit` / `conformist-repair` hook commands
+            # the sweatfile names. The formatter tools below stay for ad-hoc use.
+            conformistHooks.formatter
+            conformistHooks.preCommit
+            conformistHooks.repair
             pkgs.nixfmt
             pkgs.shfmt
             pkgs.shellcheck
