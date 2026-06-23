@@ -93,12 +93,10 @@ function spinclass_resume_from_cwd_non_tty_requires_yes { # @test
 function spinclass_resume_no_session_fails { # @test
   cd "$TEST_REPO" || return
 
-  # Create a worktree with --no-attach (no session state written)
-  run_sc start --no-attach
-  assert_success
-
-  local wt_path
-  wt_path=$(extract_wt_path "$output")
+  # A raw git worktree with no spinclass state at all (--no-attach now writes
+  # findable inactive state, so it would no longer be session-less).
+  local wt_path="$TEST_REPO/.worktrees/orphan-wt"
+  git -C "$TEST_REPO" worktree add -b orphan-wt "$wt_path"
 
   # cd into the worktree and try to resume — should fail
   cd "$wt_path" || return

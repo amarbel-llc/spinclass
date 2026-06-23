@@ -1,0 +1,151 @@
+#! /usr/bin/env bats
+
+setup() {
+  load "$(dirname "$BATS_TEST_FILE")/common.bash"
+  export output
+  setup_test_home
+  setup_stubs
+  create_run_sweatfile
+  create_repo
+  install_passthrough_direnv
+}
+
+# A sweatfile for `sc run` tests: a trivial pre-merge hook (so the merge VERIFY
+# step is instant, not the project's real `just`) plus the sweatfile-installed
+# untracked-file excludes (so the post-merge non-force worktree remove succeeds).
+create_run_sweatfile() {
+  local sweatfile_dir="$HOME/.config/spinclass"
+  mkdir -p "$sweatfile_dir"
+  cat >"$sweatfile_dir/sweatfile" <<'EOF'
+[session-entry]
+start = ["true"]
+resume = ["true"]
+
+[hooks]
+pre-merge = "true"
+
+[git]
+excludes = [".envrc", ".claude/"]
+EOF
+}
+
+# Replace the logging direnv stub with one that actually execs the wrapped
+# command (`direnv exec <dir> <util...>`), so the run step runs. Every other
+# direnv subcommand (allow, ...) is a no-op so worktree setup still succeeds.
+install_passthrough_direnv() {
+  cat >"$BATS_TEST_TMPDIR/stubs/direnv" <<'STUB'
+#!/bin/sh
+if [ "$1" = "exec" ]; then
+  dir="$2"; shift 2
+  cd "$dir" || exit 1
+  exec "$@"
+fi
+exit 0
+STUB
+  chmod +x "$BATS_TEST_TMPDIR/stubs/direnv"
+}
+
+# Run `sc run` on the ndjson-crap wire (its output uses the merge/check present
+# stack; TAP is rejected). Mirrors run_sc_crap. Usage: run_sc_run [args...]
+run_sc_run() {
+  local bin="${SPINCLASS_BIN:-spinclass}"
+  run timeout --preserve-status 30s "$bin" --format ndjson run "$@"
+}
+
+# Count entries under the repo's .worktrees/ (0 when empty/absent).
+worktree_count() {
+  local d="$TEST_REPO/.worktrees"
+  [ -d "$d" ] || {
+    echo 0
+    return
+  }
+  find "$d" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' '
+}
+
+@test "run: default merges the commit and tears the session down" {
+  cd "$TEST_REPO" || return
+  run_sc_run --local-only -- sh -c 'echo hi > run-file.txt && git add run-file.txt && git commit -qm "add run-file"'
+  assert_success
+  # Step verdict + a merge stage are present on the wire.
+  assert_crap 'any(.[]; .type == "node_end" and .exit_code == 0)'
+
+  # Commit landed on the default branch.
+  run git -C "$TEST_REPO" log --oneline main
+  assert_output --partial "add run-file"
+  # Worktree removed (merge teardown) and the index entry dropped.
+  assert_equal "$(worktree_count)" "0"
+  assert_no_session_state
+}
+
+@test "run: empty run (no commits) is a clean success" {
+  cd "$TEST_REPO" || return
+  run_sc_run --local-only -- true
+  assert_success
+  assert_crap 'any(.[]; .type == "test" and .ok == true and (.description | test("nothing to merge")))'
+  # Closed: no worktree, no tracked session.
+  assert_equal "$(worktree_count)" "0"
+  assert_no_session_state
+}
+
+@test "run: a failing step leaves the session intact and exits nonzero" {
+  cd "$TEST_REPO" || return
+  run_sc_run --local-only -- sh -c 'exit 7'
+  # shellcheck disable=SC2154
+  assert_equal "$status" 7
+  # The step phase is recorded as a failure carrying the util's exit code in
+  # its diagnostic (crap synthesizes a generic node_end.exit_code; the real
+  # code rides the diagnostic).
+  assert_crap 'any(.[]; .type == "node_end" and .diagnostic.exit_code == 7)'
+  # Session left for inspection.
+  assert_equal "$(worktree_count)" "1"
+  assert_session_state
+}
+
+@test "run: --no-close merges but leaves the worktree" {
+  cd "$TEST_REPO" || return
+  run_sc_run --local-only --no-close -- sh -c 'echo x > nc.txt && git add nc.txt && git commit -qm "nc-commit"'
+  assert_success
+  # Merged to main.
+  run git -C "$TEST_REPO" log --oneline main
+  assert_output --partial "nc-commit"
+  # But the worktree remains (--no-close).
+  assert_equal "$(worktree_count)" "1"
+}
+
+@test "run: --no-merge with commits leaves the session (never discards work)" {
+  cd "$TEST_REPO" || return
+  run_sc_run --no-merge -- sh -c 'echo y > nm.txt && git add nm.txt && git commit -qm "nm-commit"'
+  assert_success
+  # NOT merged to main.
+  run git -C "$TEST_REPO" log --oneline main
+  refute_output --partial "nm-commit"
+  # Session left intact because the run produced commits.
+  assert_equal "$(worktree_count)" "1"
+  assert_session_state
+}
+
+@test "run: --no-merge with no commits closes the session" {
+  cd "$TEST_REPO" || return
+  run_sc_run --no-merge -- true
+  assert_success
+  # Nothing committed, nothing merged → session closed.
+  assert_equal "$(worktree_count)" "0"
+}
+
+@test "run: stdin shebang script runs under its interpreter and merges" {
+  cd "$TEST_REPO" || return
+  local bin="${SPINCLASS_BIN:-spinclass}"
+  run timeout --preserve-status 30s sh -c \
+    "printf '#!/usr/bin/env bash\nset -e\necho via-stdin > s.txt\ngit add s.txt\ngit commit -qm stdin-commit\n' | '$bin' --format ndjson run --local-only"
+  assert_success
+  run git -C "$TEST_REPO" log --oneline main
+  assert_output --partial "stdin-commit"
+}
+
+@test "run: no command and no stdin script errors" {
+  cd "$TEST_REPO" || return
+  run timeout --preserve-status 10s sh -c \
+    "printf '' | '${SPINCLASS_BIN:-spinclass}' --format ndjson run"
+  assert_failure
+  assert_output --partial "nothing to run"
+}

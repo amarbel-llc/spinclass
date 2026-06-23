@@ -172,6 +172,7 @@ worktree paths. Applies `claude-allow` rules from sweatfile to
   `sc resume [id]`                 Resume an existing session (auto-detects from cwd; `host:id` reattaches on a `[[remotes]]` host over ssh)
   `sc update-description "<desc>"` Update session description (--id or auto-detect)
   `sc exec [--session <t>] [-- <util> …]` Run a util in a session's worktree (devshell + SPINCLASS_* env; defaults to $SHELL); the form posh's escape key targets
+  `sc run [flags] (-- <util> … \| <stdin>)` One-shot: start a session, run one command (or a stdin script) in it, then merge + clean up (FDR 0020)
   `sc list [--watch]`              List tracked sessions (styled charm table on a TTY; plain text/JSON when piped or via `--format tap`/`json`); `--watch` keeps it open and live-reloads local sessions every `--interval` (default 2s). Plus `host:`-prefixed rows from `[[remotes]]` hosts
   `sc merge [target]`              Merge worktree into main, remove session state
   `sc check`                       Run [hooks].pre-merge in the current worktree (agent-CI surface)
@@ -269,6 +270,57 @@ tool). It uses raw passthrough (`PassthroughArgs`), so util args colliding with
 spinclass's global flags (`--format`/`--verbose`/`-v`) or a `-h`/`--help` among
 them are consumed by spinclass — wrap such a util in a script. The `--session`
 flag is hand-parsed (no tab completion in v1).
+
+### `sc run` — one-shot scripted session
+
+`sc run [--description D] [--no-merge] [--no-close] [--local-only] ( -- <util>
+[args...] | <stdin script> )` collapses the hand-assembled start → exec → merge
+→ close lifecycle (#194, FDR 0020) into one non-interactive primitive: it starts
+a worktree session, runs ONE command sequence inside it (the same devshell +
+`SPINCLASS_*` identity path as `sc exec` — it reuses
+`sessionexec.CommandIn`/`IdentityEnv`), then merges into the default branch and
+tears the session down. Its motivating consumer is eng's `update-nix-repos`
+cascade, which spins up a session per repo so each repo's `[hooks].pre-commit`
+autofix fires at commit time and the sweatfile is the source of truth for the CI
+loop. Implemented in `internal/run`; CLI-only (no MCP tool — it execs a command
+sequence and reads stdin, neither of which fits the MCP request/response shape).
+
+**Two input forms (mutually exclusive):** a single command after a single `--`
+separator (exactly `sc exec`'s grammar), or — with no `--` — a script piped on
+stdin, read in full. The stdin form is **shebang-aware**: if line 1 is a `#!`
+shebang the script runs under that interpreter (the script is materialized to a
+temp file under `<worktree>/.tmp`, `chmod +x`, and exec'd as `interp path`),
+else under `sh`. Empty input (no `--` util and blank/absent stdin) errors with
+"nothing to run".
+
+**Success-path teardown is a 2×2 matrix** over the two orthogonal flags:
+
+| flags | merge | teardown |
+|---|---|---|
+| *(default)* | merge into default branch | session torn down (merge runs with `inSession=false`, removing the worktree+branch; the dangling index entry it leaves is dropped via `session.Remove`) |
+| `--no-close` | merge into default branch | worktree + branch + session left intact (merge runs with `inSession=true`, which skips its teardown — the session keeps accumulating like a normal `sc` worktree) |
+| `--no-merge` | skipped | session closed ONLY IF no commits were produced; if commits exist the session is left intact (never silently discards committed work) |
+| `--no-merge --no-close` | skipped | worktree/session left fully intact |
+
+An **empty run** (0 commits ahead of the default branch) is a **clean success**,
+not a failure: the merge path emits an ok "nothing to merge (skipped)" verdict
+and tears down per `--no-close`. **Any step that exits nonzero** leaves the
+worktree + session intact for inspection (clean up with `sc close`) and
+propagates the step's exit code; the teardown matrix is ignored on the failure
+path. (Matches spawn's hello-timeout "leave for inspection" convention; `sc
+clean` does not reap it — the worktree is present and the state is inactive, not
+abandoned.) `--local-only` passes through to the merge step (skip the
+pull-before and push-after). Output uses the merge/check `present` stack
+(`--format` auto | viewport | plain | ndjson, NOT TAP): the step is a crap
+`Phase` with its live output teed via `present.NewLineWriter`, and the merge
+stages append to the same `TestStream` for one continuous result stream.
+
+`sc run` builds on the companion change that makes **`sc start --no-attach`
+write findable inactive state** (PID 0, `StateInactive`) instead of writing none
+— so a session can be created and then operated on by `sc exec`/merge/close.
+(Resolving the default branch on an ambiguous main/master repo would prompt; on
+a non-TTY `sc run` errors instead of hanging unless `--no-merge` makes the
+default branch irrelevant.)
 
 ### Async (background + poll) merge/check
 

@@ -403,6 +403,20 @@ func TestNewNoAttach(t *testing.T) {
 	if !strings.Contains(got, "1..3") {
 		t.Errorf("expected plan 1..3, got: %q", got)
 	}
+
+	// --no-attach now writes findable session state (inactive, PID 0) so a
+	// later `sc exec`/merge/close can target it (the create-then-operate
+	// workflow `sc run` builds on). It used to write nothing.
+	st, err := session.Read(repoDir, "feature-dry")
+	if err != nil {
+		t.Fatalf("expected --no-attach to write session state, got error: %v", err)
+	}
+	if st.PID != 0 {
+		t.Errorf("--no-attach state PID = %d, want 0", st.PID)
+	}
+	if st.SessionState != session.StateInactive {
+		t.Errorf("--no-attach state = %q, want %q", st.SessionState, session.StateInactive)
+	}
 }
 
 func TestForkAutoName(t *testing.T) {

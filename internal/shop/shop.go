@@ -161,8 +161,11 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 		Ok:          true,
 	}
 
-	// Write session state before attaching
-	if !noAttach {
+	// Write session state. With --no-attach no entrypoint is exec'd, so the
+	// session is recorded as inactive (PID 0) rather than active — but it IS
+	// recorded, so `sc exec --session <key>`, `sc list`, and merge/close can
+	// target it afterward (the create-then-operate workflow `sc run` builds on).
+	{
 		st := session.State{
 			PID:          os.Getpid(),
 			SessionState: session.StateActive,
@@ -174,6 +177,10 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 			Env: map[string]string{
 				"SPINCLASS_SESSION_ID": rp.SessionKey,
 			},
+		}
+		if noAttach {
+			st.PID = 0
+			st.SessionState = session.StateInactive
 		}
 		if sexec, ok := exec.(executor.SessionExecutor); ok {
 			st.Entrypoint = sexec.Entrypoint
@@ -232,8 +239,12 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 		// Fire on-attach hook after state is committed but before
 		// handing off to the entrypoint. Errors are warnings, not
 		// fatal — a failing hook should never block session start.
-		if hookErr := sf.RunOnAttachHook(rp.AbsPath, w); hookErr != nil {
-			log.Warn("on-attach hook failed", "err", hookErr)
+		// Skipped for --no-attach: nothing is being attached, so the
+		// "on attach" lifecycle moment never happens.
+		if !noAttach {
+			if hookErr := sf.RunOnAttachHook(rp.AbsPath, w); hookErr != nil {
+				log.Warn("on-attach hook failed", "err", hookErr)
+			}
 		}
 	}
 

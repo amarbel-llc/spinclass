@@ -85,6 +85,12 @@ func stripSpinclassEnv(env []string) []string {
 	return out
 }
 
+// IdentityEnv returns the SPINCLASS_* identity environment for st, layered
+// over the current process env. It is the exported entry point for callers
+// (e.g. internal/run) that build their own *exec.Cmd via CommandIn rather
+// than going through Run; identityEnv remains the internal implementation.
+func IdentityEnv(st *session.State) []string { return identityEnv(st) }
+
 // identityEnv mirrors executor.SessionExecutor.Attach and spawn.workerEnv
 // (keep the var list in sync). It strips the launcher's inherited
 // CLOWN_SESSION_ID/CLAUDE_SESSION_ID (#169) then appends the spinclass-owned
@@ -112,11 +118,14 @@ func identityEnv(st *session.State) []string {
 	)
 }
 
-// execIn runs util in dir with env, inheriting this process's stdio so an
-// interactive shell takes over the terminal. An empty util defaults to $SHELL.
-// When direnv resolves, util is wrapped as `direnv exec <dir> <util>...` so the
-// worktree devshell is loaded.
-func execIn(dir string, util []string, env []string) error {
+// CommandIn builds the *exec.Cmd that runs util in dir with env. An empty
+// util defaults to $SHELL (then /bin/sh). When direnv resolves, util is
+// wrapped as `direnv exec <dir> <util>...` so the worktree devshell is loaded.
+// The caller owns the command's Stdin/Stdout/Stderr — execIn inherits this
+// process's stdio (an interactive shell takes over the terminal), while
+// callers that capture output (e.g. internal/run, teeing into a crap
+// LineWriter) set their own writers.
+func CommandIn(dir string, util []string, env []string) *exec.Cmd {
 	if len(util) == 0 {
 		shell := os.Getenv("SHELL")
 		if shell == "" {
@@ -133,6 +142,13 @@ func execIn(dir string, util []string, env []string) error {
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = dir
 	cmd.Env = env
+	return cmd
+}
+
+// execIn runs util in dir with env, inheriting this process's stdio so an
+// interactive shell takes over the terminal.
+func execIn(dir string, util []string, env []string) error {
+	cmd := CommandIn(dir, util, env)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

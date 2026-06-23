@@ -18,6 +18,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/merge"
 	"github.com/amarbel-llc/spinclass/internal/present"
 	"github.com/amarbel-llc/spinclass/internal/remote"
+	"github.com/amarbel-llc/spinclass/internal/run"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sessionexec"
 	"github.com/amarbel-llc/spinclass/internal/sessionpick"
@@ -90,6 +91,47 @@ func registerSessionCommands(app *command.App) {
 				os.Exit(exitErr.ExitCode())
 			}
 			return err
+		},
+	})
+
+	app.AddCommand(&command.Command{
+		Name:            "run",
+		PassthroughArgs: true,
+		Description: command.Description{
+			Short: "Start a session, run a command in it, then merge + clean up (one-shot)",
+			Long: "Run a single non-interactive lifecycle as one primitive (#194): start a worktree session, run ONE command sequence inside it (the same devshell + SPINCLASS_* identity path as `sc exec`), then merge into the default branch and tear the session down. " +
+				"Usage: sc run [--description D] [--no-merge] [--no-close] [--local-only] ( -- <util> [args...] | <stdin script> ). " +
+				"Two mutually-exclusive input forms: a single command after `--` (exactly `sc exec`'s grammar), or — with no `--` — a script piped on stdin (read in full; if line 1 is a #! shebang the script runs under that interpreter, else under sh). " +
+				"Success-path teardown is a 2×2 matrix over --no-merge and --no-close: default merges then tears down; --no-close merges but leaves the worktree/session; --no-merge skips the merge and closes only if no commits were produced (commits present ⇒ session left, never silently discarded); --no-merge --no-close leaves everything intact. " +
+				"An empty run (no commits ahead of the default branch) is a clean success, not a failure. Any step that exits nonzero leaves the worktree + session intact for inspection (clean up with `sc close`) and propagates a nonzero exit code. " +
+				"--local-only passes through to the merge step (skip the pull-before and push-after). " +
+				"Output uses the merge/check present stack: --format auto (viewport on a TTY, ndjson when piped) | viewport | plain | ndjson. " +
+				"Caveats (raw passthrough, like `sc exec`): util arguments after `--` that collide with spinclass's global flags are consumed before the `--`; flags must precede the `--`.",
+		},
+		RunCLI: func(_ context.Context, args json.RawMessage) error {
+			var p struct {
+				globalArgs
+				Args []string `json:"args"`
+			}
+			_ = json.Unmarshal(args, &p)
+			spec, err := run.ParseArgs(p.Args, os.Stdin)
+			if err != nil {
+				return err
+			}
+			// A global --format placed BEFORE the subcommand is parsed by the
+			// framework into p.Format; one placed after `run` is captured by
+			// ParseArgs. Prefer the pre-subcommand global when present.
+			if p.Format != "" {
+				spec.Format = p.Format
+			}
+			code, err := run.Run(spec)
+			if err != nil {
+				return err
+			}
+			if code != 0 {
+				os.Exit(code)
+			}
+			return nil
 		},
 	})
 

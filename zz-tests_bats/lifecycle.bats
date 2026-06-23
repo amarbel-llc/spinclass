@@ -36,7 +36,7 @@ function spinclass_start_auto_name { # @test
   assert [ -n "$output" ]
 }
 
-function spinclass_start_no_attach_skips_session { # @test
+function spinclass_start_no_attach_writes_inactive_session { # @test
   cd "$TEST_REPO" || return
   run_sc start --no-attach
   assert_success
@@ -44,8 +44,16 @@ function spinclass_start_no_attach_skips_session { # @test
   local wt_path
   wt_path=$(extract_wt_path "$output")
   assert [ -d "$wt_path" ]
-  # No session state file should be created with --no-attach
-  assert_no_session_state
+  # --no-attach now writes findable inactive session state (PID 0) so a later
+  # `sc exec`/merge/close can target it (the workflow `sc run` builds on).
+  assert_session_state
+  local state_file
+  state_file=$(first_session_state_path)
+  assert [ -n "$state_file" ]
+  run jq -r '.state' "$state_file"
+  assert_output "inactive"
+  run jq -r '.pid' "$state_file"
+  assert_output "0"
 }
 
 function spinclass_start_idempotent { # @test
@@ -75,9 +83,10 @@ function spinclass_list_shows_sessions { # @test
   "$bin" --format tap start --no-attach
   "$bin" --format tap start --no-attach
 
-  # list without active sessions should produce empty output (no-attach doesn't write state)
+  # --no-attach writes inactive session state, so these now appear in `sc list`.
   run_sc list
   assert_success
+  assert_session_state
 }
 
 function spinclass_merge_fast_forwards { # @test
