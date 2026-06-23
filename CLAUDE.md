@@ -312,9 +312,7 @@ independent work to make progress on while the hook runs — then check back via
 `session-job-status` occasionally. The anti-pattern to avoid: starting an async
 job and immediately spinning in a tight `session-job-status` loop with nothing
 else to do — that's strictly worse than the synchronous tool (same wait, extra
-turns). If you started async and then run out of other work, call
-`session-job-wait` to block on the result instead of polling. The tool
-descriptions encode this guidance so agents choose correctly.
+turns). The tool descriptions encode this guidance so agents choose correctly.
 
 ### Clown job-wakeup emits (push instead of poll)
 
@@ -618,16 +616,18 @@ need a regen then).
 
 ## Dependencies
 
-Module: `github.com/amarbel-llc/spinclass`. Key dependencies: -
-`github.com/amarbel-llc/tap/go` --- TAP-14 output library (non-merge/check
-commands) -
-`github.com/amarbel-llc/crap/go-crap/v2` --- ndjson-crap reader (consumed by
-the `ndjson-crap` pre-merge-output-format, where the hook emits canonical
-ndjson-crap directly; see `internal/check`) AND the merge/check output stack:
-`package crap`'s `Reporter` backs merge/check stage emission and
-`package viewport` backs the TTY presentation + plain rendering (consumer
-wiring in `internal/present`; bridged from the `crap` flake input via
-goFlakeInputs) -
-`github.com/amarbel-llc/purse-first/libs/go-mcp` --- MCP server framework -
-`github.com/amarbel-llc/tommy` --- TOML library - `github.com/spf13/cobra` ---
-CLI framework
+Module: `github.com/amarbel-llc/spinclass`. Key dependencies:
+
+- `github.com/amarbel-llc/tap/go` — TAP-14 output library (non-merge/check
+  commands).
+- `github.com/amarbel-llc/crap/go-crap/v2` — ndjson-crap reader (consumed by
+  the `ndjson-crap` pre-merge-output-format, where the hook emits canonical
+  ndjson-crap directly; see `internal/check`) AND the merge/check output stack:
+  `package crap`'s `Reporter` backs merge/check stage emission and
+  `package viewport` backs the TTY presentation + plain rendering (consumer
+  wiring in `internal/present`; bridged from the `crap` flake input via
+  goFlakeInputs).
+- `github.com/amarbel-llc/purse-first/libs/go-mcp` — MCP server framework
+  (`command.App` provides both CLI dispatch and MCP serving; spinclass does
+  not use cobra).
+- `github.com/amarbel-llc/tommy` — TOML library.
