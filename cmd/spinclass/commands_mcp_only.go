@@ -305,7 +305,7 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
 	}
 
-	gs, gitErr, failMsg, ok := resolveGatedSession(cwd)
+	gs, failMsg, ok, gitErr := resolveGatedSession(cwd)
 	if !ok {
 		return command.TextErrorResult(failMsg), nil
 	}
@@ -368,7 +368,7 @@ func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prom
 	// against cwd regardless; only an outright reject (!ok) — a genuine
 	// non-session cwd or a refused gate — stops it. (sc check, the CLI, remains
 	// the gate-free human escape hatch for an arbitrary dir.)
-	if _, _, failMsg, ok := resolveGatedSession(cwd); !ok {
+	if _, failMsg, ok, _ := resolveGatedSession(cwd); !ok {
 		return command.TextErrorResult(failMsg), nil
 	}
 
@@ -400,7 +400,7 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 	if err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
 	}
-	gs, gitErr, failMsg, ok := resolveGatedSession(cwd)
+	gs, failMsg, ok, gitErr := resolveGatedSession(cwd)
 	if !ok {
 		return command.TextErrorResult(failMsg), nil
 	}
@@ -485,7 +485,7 @@ func handleCheckThisSessionAsync(_ context.Context, _ json.RawMessage, _ command
 	// failure) is deliberately ignored: check tolerates it and runs the hook
 	// against cwd regardless. A cwd that is neither a worktree nor an implicit
 	// session keeps the (accurate) reject; a refused gate is fatal.
-	if _, _, failMsg, ok := resolveGatedSession(cwd); !ok {
+	if _, failMsg, ok, _ := resolveGatedSession(cwd); !ok {
 		return command.TextErrorResult(failMsg), nil
 	}
 
@@ -678,37 +678,31 @@ type gatedSession struct {
 // Separating gitErr from gs (rather than carrying it inside a partially-zero
 // gatedSession with ok=true) makes the merge tools' fatality handling
 // impossible to forget: a caller that ignores gitErr is visibly dropping a
-// return value.
-//
-// gitErr is deliberately the 2nd return, not last — separating it from gs (see
-// above) keeps the merge tools' fatality handling un-ignorable; reordering would
-// churn 7 call sites for a purely stylistic win. golangci-lint does not honor
-// staticcheck's native //lint:ignore, so the suppression is its //nolint form.
-//
-//nolint:staticcheck // ST1008: see rationale above.
-func resolveGatedSession(cwd string) (gs gatedSession, gitErr error, failMsg string, ok bool) {
+// return value. gitErr is the LAST return (per staticcheck ST1008); it is
+// non-nil only in the git-fail outcome (ok=true, gs zero).
+func resolveGatedSession(cwd string) (gs gatedSession, failMsg string, ok bool, gitErr error) {
 	if worktree.IsWorktree(cwd) {
 		repoPath, repoErr := git.CommonDir(cwd)
 		if repoErr != nil {
-			return gatedSession{}, fmt.Errorf("could not determine repo path: %v", repoErr), "", true
+			return gatedSession{}, "", true, fmt.Errorf("could not determine repo path: %v", repoErr)
 		}
 		branch, branchErr := git.BranchCurrent(cwd)
 		if branchErr != nil {
-			return gatedSession{}, fmt.Errorf("could not determine current branch: %v", branchErr), "", true
+			return gatedSession{}, "", true, fmt.Errorf("could not determine current branch: %v", branchErr)
 		}
 		if msg, gok := enforceAttestation(repoPath, branch); !gok {
-			return gatedSession{}, nil, msg, false
+			return gatedSession{}, msg, false, nil
 		}
-		return gatedSession{repoPath: repoPath, branch: branch}, nil, "", true
+		return gatedSession{repoPath: repoPath, branch: branch}, "", true, nil
 	}
 	implicit, _, ferr := session.FindImplicitAtCwd(cwd)
 	if ferr != nil || implicit == nil {
-		return gatedSession{}, nil, "not inside a worktree session", false
+		return gatedSession{}, "not inside a worktree session", false, nil
 	}
 	if msg, gok := enforceAttestationImplicit(cwd); !gok {
-		return gatedSession{}, nil, msg, false
+		return gatedSession{}, msg, false, nil
 	}
-	return gatedSession{implicit: true, repoPath: implicit.RepoPath, branch: implicit.Branch}, nil, "", true
+	return gatedSession{implicit: true, repoPath: implicit.RepoPath, branch: implicit.Branch}, "", true, nil
 }
 
 // enforceAttestation runs the pre-merge skill attestation gate for the

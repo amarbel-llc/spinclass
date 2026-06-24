@@ -54,7 +54,7 @@ func TestResolveGatedSession(t *testing.T) {
 		// the worktree so the dormant-gate path resolves there.
 		t.Chdir(wt)
 
-		gs, gitErr, failMsg, ok := resolveGatedSession(wt)
+		gs, failMsg, ok, gitErr := resolveGatedSession(wt)
 		if !ok {
 			t.Fatalf("expected ok, got reject: %q", failMsg)
 		}
@@ -97,7 +97,7 @@ func TestResolveGatedSession(t *testing.T) {
 		}
 		t.Chdir(repo)
 
-		gs, gitErr, failMsg, ok := resolveGatedSession(repo)
+		gs, failMsg, ok, gitErr := resolveGatedSession(repo)
 		if !ok {
 			t.Fatalf("expected ok, got reject: %q", failMsg)
 		}
@@ -124,7 +124,7 @@ func TestResolveGatedSession(t *testing.T) {
 		dir := t.TempDir()
 		t.Chdir(dir)
 
-		gs, gitErr, failMsg, ok := resolveGatedSession(dir)
+		gs, failMsg, ok, gitErr := resolveGatedSession(dir)
 		if ok {
 			t.Fatalf("expected reject, got ok (gs=%+v)", gs)
 		}
