@@ -29,21 +29,8 @@ excludes = [".envrc", ".claude/"]
 EOF
 }
 
-# Replace the logging direnv stub with one that actually execs the wrapped
-# command (`direnv exec <dir> <util...>`), so the run step runs. Every other
-# direnv subcommand (allow, ...) is a no-op so worktree setup still succeeds.
-install_passthrough_direnv() {
-  cat >"$BATS_TEST_TMPDIR/stubs/direnv" <<'STUB'
-#!/bin/sh
-if [ "$1" = "exec" ]; then
-  dir="$2"; shift 2
-  cd "$dir" || exit 1
-  exec "$@"
-fi
-exit 0
-STUB
-  chmod +x "$BATS_TEST_TMPDIR/stubs/direnv"
-}
+# install_passthrough_direnv is provided by common.bash (shared with exec.bats
+# and hooks.bats).
 
 # Run `sc run` on the ndjson-crap wire (its output uses the merge/check present
 # stack; TAP is rejected). Mirrors run_sc_crap. Usage: run_sc_run [args...]

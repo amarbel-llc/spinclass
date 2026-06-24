@@ -23,6 +23,12 @@ pre_merge_setup_worktree() {
   wt_path=$(extract_wt_path "$output")
   assert [ -d "$wt_path" ]
 
+  # `sc start` wrote a .envrc (the logging direnv stub makes direnv "resolve"),
+  # so the pre-merge hook now runs devshell-scoped via `direnv exec` (#198).
+  # Swap the logging stub for the passthrough one AFTER start so the hook's
+  # command actually execs instead of being swallowed by the logger.
+  install_passthrough_direnv
+
   printf '%s' "$sweatfile_body" >"$wt_path/sweatfile"
   cd "$wt_path" || return
 }

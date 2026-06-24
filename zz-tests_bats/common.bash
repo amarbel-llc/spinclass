@@ -48,6 +48,26 @@ STUB
   export PATH="$stub_dir:$PATH"
 }
 
+# Replace the logging direnv stub (setup_stubs) with one that actually execs the
+# wrapped command (`direnv exec <dir> <cmd...>`), so a direnv-scoped command runs
+# instead of being swallowed. Faithful to real `direnv exec DIR COMMAND`: it
+# loads the .envrc from DIR but does NOT change the working directory — the
+# command inherits the caller's cwd (spinclass sets it via cmd.Dir). This matters
+# for the pre-merge hook, whose env-dir (session worktree) and run-dir (build
+# worktree) differ. Every other direnv subcommand (allow, ...) is a no-op so
+# worktree setup still succeeds.
+install_passthrough_direnv() {
+  cat >"$BATS_TEST_TMPDIR/stubs/direnv" <<'STUB'
+#!/bin/sh
+if [ "$1" = "exec" ]; then
+  shift 2  # drop `exec <dir>`; do NOT cd — real direnv preserves cwd
+  exec "$@"
+fi
+exit 0
+STUB
+  chmod +x "$BATS_TEST_TMPDIR/stubs/direnv"
+}
+
 # Create a git repo with an initial commit.
 # Sets TEST_REPO to the repo path.
 create_repo() {

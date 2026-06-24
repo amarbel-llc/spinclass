@@ -9,20 +9,9 @@ setup() {
   create_repo
 }
 
-# Replace the logging direnv stub (setup_stubs) with one that actually
-# execs the wrapped command, so a test can observe the env/cwd `sc exec`
-# set. direnv is invoked as `direnv exec <dir> <util...>`; drop the first
-# two args and exec the rest in <dir>.
-install_passthrough_direnv() {
-  cat >"$BATS_TEST_TMPDIR/stubs/direnv" <<'STUB'
-#!/bin/sh
-dir="$2"
-shift 2
-cd "$dir" || exit 1
-exec "$@"
-STUB
-  chmod +x "$BATS_TEST_TMPDIR/stubs/direnv"
-}
+# install_passthrough_direnv is provided by common.bash (shared with run.bats
+# and hooks.bats). `sc exec` sets cmd.Dir itself, so the no-cd passthrough still
+# lands the util in the worktree.
 
 # Start a session via the "true" entrypoint (create_session_sweatfile) and
 # echo its worktree path. Writes findable session state (unlike --no-attach).
