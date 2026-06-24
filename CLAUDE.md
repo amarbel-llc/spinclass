@@ -3,11 +3,16 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with
 code in this repository.
 
+The deep design rationale for most subsystems lives in `docs/features/` (FDRs)
+and the `spinclass-*(5)`/`(7)` manpages — this file orients you and points there
+rather than duplicating it. When a section cites an FDR or manpage, read it
+before changing that subsystem.
+
 ## Overview
 
-Shell-agnostic git worktree session manager. Manages worktree lifecycles:
-creating worktrees with config inheritance, attaching via configurable session
-entrypoints, rebasing/merging back to main, and cleaning up. Aliased as `sc`.
+Shell-agnostic git worktree session manager, aliased `sc`. Manages worktree
+lifecycles: creating worktrees with hierarchical config inheritance, attaching
+via configurable entrypoints, rebasing/merging back to main, and cleaning up.
 
 ## Build & Test Commands
 
@@ -15,151 +20,90 @@ entrypoints, rebasing/merging back to main, and cleaning up. Aliased as `sc`.
 just build    # nix build
 just test     # Go tests with TAP-14 output
 just fmt      # conformist: format Go/Nix/shell/TOML + regen tommy codec
-just lint     # conformist check: format-drift + shellcheck + golangci-lint (Go) + statix/deadnix + codegen
+just lint     # conformist check: format-drift + shellcheck + golangci-lint + statix/deadnix + codegen
 just deps     # Regenerate gomod2nix.toml after dependency changes
 ```
 
+`merge-this-session`'s pre-merge hook runs `just` (the default verification
+suite) — do NOT redundantly run `just`/`just test` right before merging.
+Cheap per-package `go build ./internal/foo/...` checks are fine.
+
 ## Architecture
 
-**CLI layer** (`cmd/spinclass/`): Built on the purse-first
-`go-mcp/command.App` framework, not cobra. `main.go` is a thin bootstrap that
-calls `buildApp()` (in `commands.go`) and dispatches via `app.RunCLI()`.
-Commands are split across `commands_query.go`, `commands_session.go`,
-`commands_perms.go`, `commands_hooks.go`, `commands_mcp.go`, and
-`commands_mcp_only.go`. Global flags: `--format` (tap/table for most
-commands; merge/check take auto|viewport|plain|ndjson), `--verbose`.
-
-The same `command.App` registers both CLI subcommands and MCP tools. Commands
-with `Run` are exposed as MCP tools via `serve`; commands with `RunCLI` are
-CLI-only. The `serve` subcommand starts the stdio MCP server.
-
-Manpages, shell completions, and the purse-first plugin manifest are
-generated at build time by the hidden `generate-artifacts` subcommand,
-invoked from `flake.nix` `postInstall`.
-
-**Core workflow** (`internal/shop/`): Orchestrates create, attach, and fork.
-`Create()` sets up worktree + sweatfile + Claude trust. `Attach()` calls Create,
-writes session state, then delegates to an `Executor`. `Fork()` branches from
-current worktree.
-
-**Executor abstraction** (`internal/executor/`): Interface for session
-attachment. `SessionExecutor` (production, execs sweatfile entrypoint with
-SIGHUP forwarding) and `ShellExecutor` (used by merge). Tests use a
-`mockExecutor`.
-
-**Session state** (`internal/session/`): Tracks sessions in
-`~/.local/state/spinclass/sessions/<hash>-state.json`. Three states: `active`
-(PID alive, worktree exists), `inactive` (PID dead, worktree exists),
-`abandoned` (worktree gone). Dirty state computed live via git.
-**Implicit sessions** (`State.Kind == KindImplicit`, FDR 0014) extend this to
-agents attached to a repo's **main checkout** (not an `sc start` worktree):
-keyed `<repo>/<rand>` (`<rand> = sha256(session_id)[:8]`) — the branch is NOT in
-the key (any branch qualifies; a slash-bearing branch would corrupt the key), it
-is kept in `State.Branch` as a display-only hint surfaced as a separate `sc list`
-column and refreshed on each `SessionStart` re-fire. Stored worktree-local at
-`<checkout>/.spinclass/state-<rand>.json` (one file per session, central index
-symlink) so concurrent agents in one checkout never collide. Materialized/torn
-down by Claude Code `SessionStart`/`SessionEnd` plugin hooks
-(`runSessionStart`/`runSessionEnd` in `internal/hooks/`), which gate on
-not-a-worktree (`.git` is a directory) + repo-root == cwd (any branch;
-detached-HEAD is a no-op) + the `[hooks].disable-implicit-sessions` knob;
-dead-PID orphans are reaped by a `SessionStart` sweep + PID-liveness. The
-gates-plus-write core is `hooks.MaterializeImplicit`, shared with serve's
-`currentSessionKey`, which lazily materializes an implicit session (#141:
-process-random rand, serve's own PID, in-process key cache) when spawn/fork
-sender resolution finds none — so spawn/fork driver-key resolution works even
-where the harness never delivered `SessionStart`.
-`WriteImplicit`/`RemoveImplicit`/`SweepDeadImplicit`/`FindImplicitAtCwd` are the
-per-rand storage API.
-
-**Git operations** (`internal/git/`): Thin wrapper --- all commands use
-`git -C <dir>`. Two modes: `Run()` captures output, `RunPassthrough()` streams
-to console.
-
-**Worktree resolution** (`internal/worktree/`): Resolves targets to
-`ResolvedPath` (branch, abs path, repo path, session key). Bare name →
-`<repo>/.worktrees/<branch>`, relative path → resolved from repo root, absolute
-→ used directly.
-
-**Sweatfile config** (`internal/sweatfile/`): TOML-based hierarchical
-configuration. Merges global (`~/.config/spinclass/sweatfile`) → intermediate
-parent dirs → repo-level. Supports `git-excludes`, `claude-allow`, `envrc-directives`, and
-`allowed-mcps` arrays (nil = inherit, empty = clear, non-empty = append),
-`[[mcps]]`, `[[start-commands]]`, and `[[remotes]]` arrays of tables
-(dedup-by-name merge),
-`[env]` table (map merge), `[hooks]` table (create/stop/pre-merge/repair/pre-commit lifecycle hooks, scalar
-override; includes `disable-merge`, `disable-repair`, `disable-pre-commit`, `disable-nix-gc`,
-`disable-merge-build-worktree`, `disable-implicit-sessions`,
-`disable-worktree-path-rewrite`, `pre-merge-output-format`,
-`inactivity-timeout`, `auto-rebuild-on-resume`), and `[session-entry]` table (start/resume entrypoint
-commands — default `$SHELL`, since spinclass exited multiplexing and clown owns
-attach + the terminal title via its clownfile `[attach]`, FDR 0017 — plus the
-FDR 0006 `spawn-entry` (exec'd directly, default the clown spawn form) and
-`spawn-window` argv templates for detached worker launch;
-per-field override semantics). The package holds the struct definitions, accessors, `MergeWith`,
-`GetDefault`, `Apply`, and the tommy-generated codec (`sweatfile_tommy.go`, via
-`//go:generate tommy generate`).
-
-**Sweatfile decode/IO** (`internal/sweatfileio/`): the decode/encode/IO
-*consumers* of the generated codec — `Parse`, `Load`, `Save`, `LoadHierarchy`,
-`LoadWorktreeHierarchy`. Kept in a package separate from `internal/sweatfile` so
-the codegen package contains no hand-written references to the generated
-`DecodeSweatfile`/`SweatfileDocument` API; that lets `tommy generate` re-analyze
-and regenerate it (the codegen package still type-checks with the generated file
-overlaid empty). See the dodder codegen-isolation pattern and tommy #93. No
-post-decode nil-normalization is needed — tommy's generated decoder gives
-present-empty arrays/maps a non-nil value and leaves absent ones nil, which is
-the distinction `MergeWith` relies on.
-
-**Remote sessions** (`internal/remote/`): Routes `host:`-prefixed targets to
-sweatfile-declared `[[remotes]]` hosts at the CLI boundary — target grammar,
-attach-argv construction (`{ssh}`/`{id}` substitution), parallel ssh list
-query (3s/host), and the completion cache under
-`~/.local/state/spinclass/remotes/<name>.json`. Resume-only v1; see FDR 0011.
-
-**Merge/Pull/Clean** (`internal/merge/`, `internal/pull/`, `internal/clean/`):
-Post-session workflows. Merge rebases onto default branch then ff-only merges,
-removes session state. Clean removes fully-merged worktree branches and
-auto-cleans abandoned sessions.
-
-**Permission tiers** (`internal/perms/`): Claude Code hook integration.
-Tier-based permission rules stored as JSON (`global.json` +
-`repos/<repo>.json`).
-
-**Claude integration** (`internal/claude/`): Updates `~/.claude.json` to trust
-worktree paths. Applies `claude-allow` rules from sweatfile to
-`.claude/settings.local.json`.
+- **CLI layer** (`cmd/spinclass/`): Built on purse-first `go-mcp/command.App`
+  (not cobra). `main.go` bootstraps `buildApp()` (`commands.go`) and dispatches
+  via `app.RunCLI()`. Commands split across `commands_*.go`. The same `App`
+  registers both CLI subcommands and MCP tools: commands with `Run` become MCP
+  tools via `serve`; `RunCLI` commands are CLI-only. `serve` starts the stdio
+  MCP server. Manpages, completions, and the plugin manifest are generated at
+  build time by the hidden `generate-artifacts` subcommand (`flake.nix`
+  `postInstall`).
+- **Core workflow** (`internal/shop/`): `Create()` sets up worktree + sweatfile
+  + Claude trust; `Attach()` calls Create, writes session state, delegates to an
+  `Executor`; `Fork()` branches from the current worktree.
+- **Executor** (`internal/executor/`): session-attach interface.
+  `SessionExecutor` (production; execs the entrypoint with SIGHUP forwarding),
+  `ShellExecutor` (merge), `mockExecutor` (tests).
+- **Session state** (`internal/session/`): tracks sessions in
+  `~/.local/state/spinclass/sessions/<hash>-state.json`. States: `active` (PID
+  alive + worktree), `inactive` (PID dead + worktree), `abandoned` (worktree
+  gone); dirty computed live via git. **Implicit sessions** (FDR 0014) extend
+  this to agents in a repo's **main checkout**: keyed `<repo>/<rand>`, stored
+  worktree-local at `<checkout>/.spinclass/state-<rand>.json`, materialized by
+  Claude Code `SessionStart`/`SessionEnd` hooks (`internal/hooks/`). See FDR
+  0014 for the full model.
+- **Git** (`internal/git/`): thin `git -C <dir>` wrapper. `Run()` captures,
+  `RunPassthrough()` streams.
+- **Worktree resolution** (`internal/worktree/`): `ResolvePath()` is the single
+  target→absolute-path entry point. Bare name → `<repo>/.worktrees/<branch>`,
+  relative → from repo root, absolute → as-is.
+- **Sweatfile config** (`internal/sweatfile/` + `internal/sweatfileio/`):
+  hierarchical TOML, merged global (`~/.config/spinclass/sweatfile`) → parent
+  dirs → repo. `sweatfile` holds the structs, `MergeWith`, `GetDefault`,
+  `Apply`, and the tommy-generated codec (`sweatfile_tommy.go`); `sweatfileio`
+  holds the decode/IO consumers (`Parse`/`Load`/`Save`/`LoadHierarchy`) — split
+  so codegen can regenerate the codec package cleanly (dodder codegen-isolation
+  pattern, tommy #93). Config surface is documented in `spinclass-sweatfile(5)`.
+- **Merge/Pull/Clean** (`internal/merge/`, `internal/pull/`, `internal/clean/`):
+  post-session workflows. Merge rebases onto the default branch then ff-only
+  merges; clean removes merged worktree branches and abandoned sessions.
+- **Permission tiers** (`internal/perms/`): Claude Code hook integration,
+  rules as JSON (`global.json` + `repos/<repo>.json`).
+- **Claude integration** (`internal/claude/`): trusts worktree paths in
+  `~/.claude.json`, applies `claude-allow` to `.claude/settings.local.json`.
+- **Remote sessions** (`internal/remote/`): routes `host:`-prefixed targets to
+  sweatfile `[[remotes]]` hosts; resume-only (FDR 0011).
 
 ## Key Patterns
 
-- **TAP-14 everywhere — except merge/check**: Most commands default to
-  `--format tap`. Diagnostics include git stderr and exit codes in YAML
-  blocks. **Carve-out**: `sc merge`/`sc check` and the merge/check MCP tools
-  emit ndjson-crap (the CRAP-2 wire format) instead — their `--format` is
-  `auto` (default: live viewport on a TTY, raw ndjson records when piped) |
-  `viewport` | `plain` (verdict-per-line) | `ndjson`; `tap`/`table` are
-  rejected there. The viewport renders to stderr; record capture is the ndjson mode
-  (`sc merge > records.ndjson` auto-resolves to ndjson — no viewport). See FDR 0015 and
-  `internal/present`.
-- **Path resolution**: `worktree.ResolvePath()` is the single entry point for
-  target → absolute path conversion. Session keys follow
-  `<repo-dirname>/<branch>` format.
-- **Target resolution**: explicit `resume`/`close`/`merge`/
-  `update-description` targets resolve via `session.FindByTarget`, which
-  accepts a worktree directory basename OR a `<repo>/<branch>` session key —
-  the exact strings `sc list` prints — from any cwd (cross-repo). An
-  ambiguous bare name errors with the colliding session keys; misses are
-  tagged `session.ErrTargetNotFound`. `merge` tries the current repo's git
-  worktrees first (bare worktrees without session state still merge), then
-  falls back to the session lookup.
-- **Sweatfile merging**: Config files walk from `$HOME` down to repo root,
-  merging at each level.
-- **Session entrypoint**: `[session-entry].start` and `[session-entry].resume`
-  in sweatfile
-  control what command is exec'd. Defaults to `$SHELL`.
-- **Session picking**: both `sc resume` and `sc close` source from `session.ListForRepo` via `internal/sessionpick` (`Choose` for close, `ChooseAutoSingle` for resume, which short-circuits a lone candidate past the picker), sorted active-first by `session.SortStates`. Tab completion (`completeWorktreeTargets`, shared by resume/close/merge/update-description) scopes via `session.ListForScope` instead: the containing repo's sessions (offered by bare dirname) plus any session whose repo sits beneath the cwd (offered by `<repo>/<branch>` session key — a cwd above nested repos, e.g. `~/eng` over `~/eng/repos/*`, sees them all); outside any repo, all non-abandoned sessions. Completion labels reuse the picker rows' Detail strings so both read identically. The resume picker (only — close stays local-only) appends cached remote rows from `remote.ReadAllCaches` after the local rows (`Item.State` nil, `Item.Target` = `host:<id>`); selecting one routes over the remote attach template with no dialog, and remote rows never count toward the lone-candidate shortcut. Non-TTY callers get an error listing IDs instead of a hung prompt. Orphaned git worktrees without a state file are not valid `sc close` targets; remove them with `git worktree remove`.
-- **Resume confirmation**: auto-detect and picker-single-match resume show a clown-style huh confirm (`resumeConfirmPlan` in `cmd/spinclass/resume_confirm.go` is the pure decision seam); `-y/--yes` skips it. Explicit `sc resume <id>` and multi-match picker selection are dialog-free (naming/selecting is the confirmation — keeps remote attach templates non-interactive). An `active` session (live PID, probably attached elsewhere) warns with default Cancel; `-y` does NOT skip the warning variant, and non-TTY always errors there.
-- **External tool deps**: `git` is always required and resolved from `PATH`. `madder` and `direnv` are runtime deps **only** when the binary was built via `lib.mkSpinclass` with the matching input — those paths are burned in at link time (see `spinclass-build-pins(7)` and FDR 0003); the default `nix build` produces a binary with both pins empty, in which case the madder integration is dormant and direnv falls back to `PATH`. `clown` is an optional runtime dep for job-wakeup emits (`internal/clown`): async merge/check job-lifecycle emits fire when `$CLOWN_BIN` is set (the running-under-clown signal) and are dormant otherwise (see FDR 0010 and the async section below). Cross-session chat left spinclass entirely (FDR 0017) and is now a clown construct, so it is no longer a spinclass concern. spinclass no longer ships a multiplexer template (FDR 0017): `sc spawn`/detached fork exec `[session-entry].spawn-entry` directly (default the clown spawn form) and the harness self-detaches — any `zmx` dependency is now clown's, via its clownfile `[attach]`. Interactive prompts use the in-process `huh` library (no `gum` dependency).
+- **TAP-14 everywhere — except merge/check.** Most commands default to
+  `--format tap` with git stderr/exit-codes in YAML diagnostic blocks.
+  `sc merge`/`sc check` and the merge/check MCP tools instead emit ndjson-crap:
+  `--format` is `auto` (TTY viewport, raw ndjson when piped) | `viewport` |
+  `plain` | `ndjson` (`tap`/`table` rejected). Consumer wiring in
+  `internal/present`; see FDR 0015.
+- **Path / target resolution.** `worktree.ResolvePath()` converts targets;
+  session keys are `<repo-dirname>/<branch>`. Explicit
+  `resume`/`close`/`merge`/`update-description` targets resolve via
+  `session.FindByTarget` (worktree basename OR `<repo>/<branch>` key, the exact
+  strings `sc list` prints, from any cwd). Ambiguous bare names error; misses
+  are `session.ErrTargetNotFound`. `merge` tries the current repo's git
+  worktrees first (bare worktrees merge), then the session lookup.
+- **Session picking** (`internal/sessionpick`): `sc resume`/`sc close` source
+  from `session.ListForRepo`; tab completion (`completeWorktreeTargets`) scopes
+  via `session.ListForScope`. The resume picker also appends cached remote rows
+  (`remote.ReadAllCaches`). Non-TTY callers get an error, not a hung prompt.
+- **Resume confirmation.** Auto-detect / picker-single-match resume show a huh
+  confirm (`resumeConfirmPlan` in `cmd/spinclass/resume_confirm.go`); `-y/--yes`
+  skips it. Explicit `sc resume <id>` and multi-match selection are dialog-free.
+  An `active` session warns with default Cancel (`-y` does NOT skip that
+  variant; non-TTY always errors).
+- **External tool deps.** `git` is always required (from PATH). `madder` and
+  `direnv` are runtime deps **only** when built via `lib.mkSpinclass` with the
+  matching input (paths burned in at link time — `spinclass-build-pins(7)`, FDR
+  0003); the default `nix build` leaves both pins empty (madder dormant, direnv
+  from PATH). `clown` is optional, for async job-wakeup emits (`internal/clown`,
+  FDR 0010). Interactive prompts use the in-process `huh` library.
 
 ## CLI Commands
 
@@ -167,519 +111,165 @@ worktree paths. Applies `claude-allow` rules from sweatfile to
   -------------------------------- ---------------------------------------------------------
   `sc start "<desc>"`              Create and start a new worktree session
   `sc start-gh_pr <N|URL>`         Start a session from a GitHub pull request
-  `sc start-gh_issue <N>`          Start a session with GitHub issue context (config-driven, see below)
-  `sc start-<custom> <arg>`        User-defined start commands declared in sweatfile
-  `sc resume [id]`                 Resume an existing session (auto-detects from cwd; `host:id` reattaches on a `[[remotes]]` host over ssh)
+  `sc start-gh_issue <N>`          Start a session with GitHub issue context (config-driven)
+  `sc start-<custom> <arg>`        User-defined start commands (sweatfile `[[start-commands]]`)
+  `sc resume [id]`                 Resume a session (auto-detects from cwd; `host:id` reattaches over ssh)
   `sc update-description "<desc>"` Update session description (--id or auto-detect)
-  `sc exec [--session <t>] [-- <util> …]` Run a util in a session's worktree (devshell + SPINCLASS_* env; defaults to $SHELL); the form posh's escape key targets
-  `sc run [flags] (-- <util> … \| <stdin>)` One-shot: start a session, run one command (or a stdin script) in it, then merge + clean up (FDR 0020)
-  `sc list [--watch]`              List tracked sessions (styled charm table on a TTY; plain text/JSON when piped or via `--format tap`/`json`); `--watch` keeps it open and live-reloads local sessions every `--interval` (default 2s). Plus `host:`-prefixed rows from `[[remotes]]` hosts
+  `sc exec [--session <t>] [-- <util> …]` Run a util in a session's worktree (devshell + SPINCLASS_* env; defaults to $SHELL)
+  `sc run [flags] (-- <util> … \| <stdin>)` One-shot: start → run one command → merge + clean up (FDR 0020)
+  `sc list [--watch]`              List tracked sessions (charm table on TTY, plain/JSON when piped); `--watch` live-reloads
   `sc merge [target]`              Merge worktree into main, remove session state
   `sc check`                       Run [hooks].pre-merge in the current worktree (agent-CI surface)
   `sc clean`                       Remove merged worktrees and abandoned sessions
-  `sc rebuild [target] [--check]`  Re-apply a drifted worktree's setup, refreshing its fingerprint; `--check` reports stale/fresh (nonzero if stale)
-  `sc fork [branch]`               Fork current worktree (supports `--from <dir>`; `--brief` launches the fork as a detached worker, FDR 0006)
-  `sc spawn <repo> --brief "…"`    Launch a detached, harness-booted worker session in a sibling repo (dirname-addressed; blocks on the worker's spawn-handshake hello, FDR 0006)
+  `sc rebuild [target] [--check]`  Re-apply a drifted worktree's setup; `--check` reports stale/fresh
+  `sc fork [branch]`               Fork current worktree (`--from <dir>`; `--brief` launches a detached worker, FDR 0006)
+  `sc spawn <repo> --brief "…"`    Launch a detached worker session in a sibling repo (FDR 0006)
   `sc pull`                        Pull repos and rebase worktrees
   `sc validate`                    Validate sweatfile hierarchy
   `sc perms list|review|edit`      Inspect or edit permission tier rules
 
-`start`, `start-gh_pr`, `start-gh_issue`, and `update-description` take
-their primary argument as a single positional value. Multi-word descriptions
-must be quoted, e.g. `sc start "fix login bug"`. `start-gh_pr` and
-`start-gh_issue` offer tab completion for open PRs and issues respectively.
-Note that the underlying registered subcommands
-use hyphenated names (`perms-list`, `perms-review`, `perms-edit`), but the
-space-separated form (`sc perms list`) is also accepted.
+`start*` and `update-description` take a single positional value (quote
+multi-word descriptions). Registered subcommands use hyphenated names
+(`perms-list`), but the space-separated form (`sc perms list`) is accepted.
 
-`merge-this-session` and `check-this-session` are mutually exclusive in
-the MCP tool catalog, gated on `[hooks].disable-merge`:
+**merge/check tool gating.** `merge-this-session` and `check-this-session` are
+mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`: default
+registers `merge-this-session`; `disable-merge = true` removes it (and
+`sc merge`) and registers `check-this-session` instead. The `sc check` CLI
+subcommand is always available.
 
-- Default (flag unset/false): `merge-this-session` is registered;
-  `check-this-session` is NOT.
-- `[hooks].disable-merge = true`: `merge-this-session` and `sc merge` are
-  unavailable; `check-this-session` is registered in their place so
-  agents can still exercise `[hooks].pre-merge`.
+## Subsystems (read the cited record before changing)
 
-The `sc check` CLI subcommand is available regardless of the flag.
+- **Spawned/forked workers** (FDR 0006): `sc spawn <repo> --brief`,
+  `sc fork --brief`, and the `spawn-session`/`fork-session` MCP tools launch
+  detached harness-booted workers. Target repo addressed by dirname. Launch
+  execs the cascade-merged `[session-entry].spawn-entry` (default the clown
+  spawn form) with the brief as initial prompt; blocks on the worker's
+  `SessionStart` hello (`internal/spawnhandshake`, 60s default,
+  `--hello-timeout`). Workers can't spawn sub-workers (#148); the MCP tools are
+  always-ask (#151). Coordination afterward is clown chat. `internal/spawn` owns
+  resolution + launch.
+- **Implicit-session merge** (FDR 0014): from a main-checkout session, merge
+  routes to `merge.MergeImplicit` — runs `[hooks].pre-merge` against HEAD then
+  `git push` (nothing to rebase). MCP path enforces the implicit attestation
+  gate; CLI is gate-free. `sc close` drops only `state-<rand>.json`.
+- **`sc exec`** (`internal/sessionexec`): runs a util in a session worktree,
+  devshell-scoped via `direnv exec`, with `SPINCLASS_*` identity env. No
+  `--session` → auto-detect from cwd; util defaults to `$SHELL`. Explicit
+  `--session` miss errors; cwd miss degrades (runs in cwd, strips identity).
+  Motivating consumer: posh "escape to shell". CLI-only; raw passthrough.
+- **`sc run`** (`internal/run`, FDR 0020): one-shot start → run one command (or
+  a shebang-aware stdin script) → merge + teardown. Teardown is a 2×2 matrix
+  over `--no-merge`/`--no-close`; an empty run (0 commits) is a clean success;
+  any nonzero step leaves the session intact for inspection. `--local-only`
+  passes through to merge. Builds on `sc start --no-attach` writing findable
+  inactive state. CLI-only. Uses the merge/check `present` stack.
+- **Async merge/check** (`internal/job`): `merge-this-session-async` /
+  `check-this-session-async` consume the attestation, launch in a background
+  goroutine inside `serve`, return a job id immediately (output →
+  `.spinclass/job.log`, metadata → `.spinclass/job.json`). Inspect via
+  `session-job-status` (read-only), `session-job-cancel`, `session-job-wait`
+  (blocking join). One active job per session. **Default to the synchronous
+  tools** — reach for async only when you have other work to do while the hook
+  runs; never start async then hot-poll status.
+- **Clown job-wakeup emits** (FDR 0010, `internal/clown`): when `serve` runs
+  under clown (`CLOWN_BIN` set), async tools emit `clown job start/done` so
+  clown wakes the agent with one `[clown-job]` line. Purely additive;
+  job.json/job.log stay the system of record; rollback is
+  `CLOWN_DISABLE_JOB_WAKEUP=1`.
+- **Pre-merge build worktree** (FDR 0013): by default the hook runs in a
+  transient detached worktree pinned to the committed sha (`check.resolveHookDir`
+  → `.merge-<branch>-<sha>-<pid>` under `.worktrees/`), freeing the session
+  worktree for concurrent edits. Merge splits into `merge.PrepareMerge` (gate →
+  pull → rebase → nothing-to-merge → REPAIR → pin HEAD sha) and
+  `merge.FinishMerge` (hook → `git merge --ff-only <pinnedSha>` → teardown →
+  push). Async runs Prepare synchronously, backgrounds Finish. Opt out with
+  `[hooks].disable-merge-build-worktree`.
+- **Pre-merge REPAIR phase** (FDR 0018): when `[hooks].repair` is set,
+  `PrepareMerge` runs it in the **session worktree** before the pin to fold
+  mechanical fixes into the merged commit (canonical
+  `conformist --commit --amend --exit-zero-on-fix`; amend detected via HEAD-sha
+  delta). Merge-only; worktree sessions only. spinclass's own sweatfile has
+  **retired** this in favour of the per-commit hook below.
+- **Per-commit repair hook** (FDR 0019, #183): when `[hooks].pre-commit` is set,
+  `sweatfile.Apply` installs a per-worktree git pre-commit hook
+  (`internal/sweatfile/precommit.go`), so drift is repaired at authoring time and
+  every commit is conformant in history. Canonical value is the store-pinned
+  wrapper **`conformist-pre-commit`** (name the wrapper, NOT a bare
+  `conformist --staged` string — conformist#51). Scoped to the worktree via
+  `core.hooksPath`; `.spinclass/hooks` is a composing dispatcher that runs the
+  formatter then execs the original native hook. Best-effort, non-blocking.
+  `disable-pre-commit` is a true uninstall (the rollback). Worktree sessions
+  only.
+- **Inactivity watchdog**: `[hooks].inactivity-timeout` (Go duration; unset =
+  off) bounds how long the pre-merge hook may go silent. Covers
+  merge/check/`sc check` + async twins (all funnel through
+  `RunPreMergeHookContext`). Distinct error message vs `session-job-cancel`.
+- **Setup staleness & `sc rebuild`** (`internal/setupfingerprint`): setup is
+  applied **once at `sc start`** (`sc resume` does NOT re-apply), so it drifts.
+  A fingerprint (`sha256(scheme · version+commit · pins · canonical-JSON(merged
+  config))`) is recorded in session state; a mismatch flags stale. `sc rebuild`
+  re-applies (`--check` reports read-only, nonzero when stale); `sc resume`
+  warns and, with `[hooks].auto-rebuild-on-resume`, re-applies.
+  **Limitation:** does not detect external-tool *version* drift behind an
+  unchanged command.
+- **Nix gc on close/clean**: `sc close`/`sc clean` gc the worktree's resolved
+  closure (`nix-store --delete`; Nix liveness is the safety net). Opt out with
+  `[hooks].disable-nix-gc` or `sc close --nix-gc=<bool>`. No-op without
+  `nix-store` on PATH.
 
-**Spawned worker sessions** (FDR 0006): `sc spawn <repo> --brief "…"` and the
-`spawn-session` / `fork-session` MCP tools launch detached, harness-booted
-worker sessions. The target repo is addressed by dirname (leaf search under
-`$HOME/*/repos/<leaf>`; explicit paths need a separator). The launch execs
-the cascade-merged `[session-entry].spawn-entry` detached-harness argv
-directly (default `["clown", "--clown-attach=spawn", "--", "{prompt}"]` — FDR
-0017 Piece 1: spinclass no longer wraps in a multiplexer; the harness
-self-detaches and returns promptly) with the
-driver's brief as the harness's initial prompt; the worker process env
-carries the WORKER's spinclass identity (mirrors `SessionExecutor`) and
-strips the driver's inherited `CLOWN_SESSION_ID`/`CLAUDE_SESSION_ID`
-(`session.StripInheritedSessionIDs`) so the worker's clown re-derives its
-own job-wakeup channel instead of arming the driver's (#169). The
-spawn blocks until the worker's `SessionStart` hook sends a hello to the
-driver via the standalone `internal/spawnhandshake` (a dedicated
-per-`(worker,driver)` file, no longer the chat store — FDR 0017 carve-out;
-keyed off `spawned_by` in the worker's state; 60s default deadline,
-`--hello-timeout` tunes it; dedup via `hello_sent_at`). On
-timeout the worker worktree+state persist for inspection (`sc close`
-cleans). Spawned workers may not themselves spawn/fork sub-workers — all
-four spawn surfaces refuse a caller whose state carries `spawned_by`
-(#148). The `spawn-session` / `fork-session` MCP tools are always-ask —
-the PreToolUse hook returns `ask` and `perms.RunCheck` never auto-approves
-them, so every invocation prompts regardless of allow-lists (#151; the CLI
-`sc spawn` / `sc fork --brief` are out of scope, as typing is the
-confirmation). An optional `[session-entry].spawn-window` argv template
-(`{id}`/`{dir}`, no default) is exec'd fire-and-forget right after the
-spawn-entry launches — it opens a terminal window onto the worker
-(#149); failures are warnings, never spawn failures. The terminal title
-is now clown's job (its clownfile `[attach]` `resume-title` default `{group}`,
-FDR 0017) — spinclass no longer emits it.
-Coordination after the hello is clown's cross-session chat (chat left
-spinclass entirely — FDR 0017) — the brief should tell the worker to message
-the driver via clown chat when done. `fork-session` is the same-repo variant (caller must be in an sc
-worktree; see #142 for the implicit-driver gap). `internal/spawn` owns
-resolution, template substitution, and the hello-gated launch.
+## Sweatfile config quick reference
 
-From an **implicit (main-checkout) session** (FDR 0014), `merge-this-session` /
-`merge-this-session-async` / `sc merge` detect a live implicit session via
-`session.FindImplicitAtCwd` and route to `merge.MergeImplicit`: there is nothing
-to rebase or ff-merge (the work is already on the default branch), so merge runs
-`[hooks].pre-merge` against HEAD (in the isolated build worktree) then `git push`
-the default branch as a distinct test record. The MCP handlers enforce the implicit
-attestation gate (`enforceAttestationImplicit` → `attestation.CheckImplicit`);
-the `sc merge` CLI path is gate-free. `sc close` on an implicit session drops
-`state-<rand>.json` only (never the checkout, no nix gc), and `sc list` marks it
-`main`. (`check`/`sc check` don't yet route implicit sessions — #132.)
+Full reference: `spinclass-sweatfile(5)`. The hierarchy merges global → parent
+dirs → repo at each level. Notable surface:
 
-### `sc exec` — escape-to-shell payload
+- Arrays with nil/empty/non-empty merge semantics (nil inherit, `[]` clear,
+  non-empty append): `git-excludes`, `claude-allow`, `envrc-directives`,
+  `allowed-mcps`.
+- Arrays of tables, dedup-by-name: `[[mcps]]`, `[[start-commands]]`,
+  `[[remotes]]`.
+- `[env]` (map merge); `[hooks]` (lifecycle hooks + the `disable-*` /
+  `*-timeout` / output-format knobs, scalar override);
+  `[session-entry]` (start/resume/spawn-entry/spawn-window argv, per-field
+  override).
 
-`sc exec [--session <target>] [--] [<util> [args...]]` runs a util inside a
-session's worktree, devshell-scoped via `direnv exec`, with the session's
-`SPINCLASS_*` identity env set. With no `--session` it auto-detects the session
-from cwd (`session.FindByWorktreePath`); `<util>` defaults to `$SHELL`, so a
-bare `sc exec` drops into a shell in the worktree root. Its motivating consumer
-is the posh "escape to shell" key (the FDR-0017 follow-up to the dead
-ctrl-z-to-shell UX — claude holds the pts in raw mode with `-isig`, so no
-tty-signal escape can work; posh intercepts a key above claude's tty and spawns
-a configurable command, which a spinclass/eng environment sets to `sc exec`).
-**Resolution asymmetry:** an explicit `--session` miss errors; an implicit (cwd)
-miss degrades — runs the util in cwd, stripping inherited `SPINCLASS_*` so the
-"no session" is honest — letting posh default its escape to `sc exec` even
-outside a session. Implemented in `internal/sessionexec`; CLI-only (not an MCP
-tool). It uses raw passthrough (`PassthroughArgs`), so util args colliding with
-spinclass's global flags (`--format`/`--verbose`/`-v`) or a `-h`/`--help` among
-them are consumed by spinclass — wrap such a util in a script. The `--session`
-flag is hand-parsed (no tab completion in v1).
+**Custom start commands** (`[[start-commands]]`): each entry registers
+`sc start-<name>` with a validated positional arg + tab completion.
+`exec-completions` emits `[{arg, description}]` JSON; `exec-start` emits
+`{branch?, description?, context}` JSON with `{arg}` substituted. Merges across
+the hierarchy (later wins by name); built-in subcommands always win. The
+built-in `gh_issue` ships via `GetDefault()` as a tracer bullet.
 
-### `sc run` — one-shot scripted session
+**MCP servers**: `allowed-mcps` (array-append) auto-approves external servers;
+`[[mcps]]` (dedup-by-name) registers + auto-approves servers (name-only entry
+removes an inherited one; every entry with a command implicitly allow-lists).
 
-`sc run [--description D] [--no-merge] [--no-close] [--local-only] ( -- <util>
-[args...] | <stdin script> )` collapses the hand-assembled start → exec → merge
-→ close lifecycle (#194, FDR 0020) into one non-interactive primitive: it starts
-a worktree session, runs ONE command sequence inside it (the same devshell +
-`SPINCLASS_*` identity path as `sc exec` — it reuses
-`sessionexec.CommandIn`/`IdentityEnv`), then merges into the default branch and
-tears the session down. Its motivating consumer is eng's `update-nix-repos`
-cascade, which spins up a session per repo so each repo's `[hooks].pre-commit`
-autofix fires at commit time and the sweatfile is the source of truth for the CI
-loop. Implemented in `internal/run`; CLI-only (no MCP tool — it execs a command
-sequence and reads stdin, neither of which fits the MCP request/response shape).
-
-**Two input forms (mutually exclusive):** a single command after a single `--`
-separator (exactly `sc exec`'s grammar), or — with no `--` — a script piped on
-stdin, read in full. The stdin form is **shebang-aware**: if line 1 is a `#!`
-shebang the script runs under that interpreter (the script is materialized to a
-temp file under `<worktree>/.tmp`, `chmod +x`, and exec'd as `interp path`),
-else under `sh`. Empty input (no `--` util and blank/absent stdin) errors with
-"nothing to run".
-
-**Success-path teardown is a 2×2 matrix** over the two orthogonal flags:
-
-| flags | merge | teardown |
-|---|---|---|
-| *(default)* | merge into default branch | session torn down (merge runs with `inSession=false`, removing the worktree+branch; the dangling index entry it leaves is dropped via `session.Remove`) |
-| `--no-close` | merge into default branch | worktree + branch + session left intact (merge runs with `inSession=true`, which skips its teardown — the session keeps accumulating like a normal `sc` worktree) |
-| `--no-merge` | skipped | session closed ONLY IF no commits were produced; if commits exist the session is left intact (never silently discards committed work) |
-| `--no-merge --no-close` | skipped | worktree/session left fully intact |
-
-An **empty run** (0 commits ahead of the default branch) is a **clean success**,
-not a failure: the merge path emits an ok "nothing to merge (skipped)" verdict
-and tears down per `--no-close`. **Any step that exits nonzero** leaves the
-worktree + session intact for inspection (clean up with `sc close`) and
-propagates the step's exit code; the teardown matrix is ignored on the failure
-path. (Matches spawn's hello-timeout "leave for inspection" convention; `sc
-clean` does not reap it — the worktree is present and the state is inactive, not
-abandoned.) `--local-only` passes through to the merge step (skip the
-pull-before and push-after). Output uses the merge/check `present` stack
-(`--format` auto | viewport | plain | ndjson, NOT TAP): the step is a crap
-`Phase` with its live output teed via `present.NewLineWriter`, and the merge
-stages append to the same `TestStream` for one continuous result stream.
-
-`sc run` builds on the companion change that makes **`sc start --no-attach`
-write findable inactive state** (PID 0, `StateInactive`) instead of writing none
-— so a session can be created and then operated on by `sc exec`/merge/close.
-(Resolving the default branch on an ambiguous main/master repo would prompt; on
-a non-TTY `sc run` errors instead of hanging unless `--no-merge` makes the
-default branch irrelevant.)
-
-### Async (background + poll) merge/check
-
-Each gated tool has a non-blocking opt-in twin that sidesteps the MCP client's
-per-server request timeout for long `[hooks].pre-merge` runs:
-
-- `merge-this-session-async` / `check-this-session-async` — registered next to
-  their synchronous counterparts under the same `disable-merge` gating. They
-  consume the pre-merge attestation at start (same gate as the sync tools),
-  launch the merge/check in a background goroutine inside the long-lived `serve`
-  process, and return a job id **immediately**. The hook's live output streams
-  to `<worktree>/.spinclass/job.log`; job metadata to `.spinclass/job.json`.
-- `session-job-status` (always registered, read-only) — reports the worktree
-  session's job: `running|succeeded|failed|cancelled|interrupted`, elapsed,
-  last-activity (job.log mtime), a tail of live output, and the full result
-  (the same plain ✓/✗ verdict text the sync tool returns) once finished.
-- `session-job-cancel` (always registered) — cancels the running job, killing
-  the hook subprocess via the job's context.
-- `session-job-wait` (always registered) — blocks until the running job finishes
-  and returns its full result (the same payload the synchronous tool produces) —
-  *join* semantics, it never starts a job. This is the "revert to sync" path: go
-  async because you had other work, then call `session-job-wait` once that work
-  is done instead of hot-polling. Errors if no job was started. Because it
-  blocks, it IS subject to the MCP request timeout for the job's *remaining*
-  duration, so call it at/near completion. Backed by `job.WaitDone` (a per-job
-  completion channel), so it waits event-driven rather than polling.
-
-One active job per session (async-start refuses while one is running). If the
-`serve` process ends mid-job, the next status read reports `interrupted` (the
-recorded `serve_pid` is no longer alive). The synchronous `merge-this-session`
-/ `check-this-session` remain the default; async is purely additive
-(`internal/job` is the store + runner). Heartbeat-style progress notifications
-from within the synchronous tools are intentionally NOT implemented — that
-requires go-mcp + clown-stdio-bridge changes (see those repos' issues); async
-is the spinclass-only path.
-
-**Async vs sync — pick by whether you have other work.** Default to the
-synchronous `merge-this-session` / `check-this-session`: they block and return
-the result, no polling. Reach for the `-async` twins *only* when you have other
-independent work to make progress on while the hook runs — then check back via
-`session-job-status` occasionally. The anti-pattern to avoid: starting an async
-job and immediately spinning in a tight `session-job-status` loop with nothing
-else to do — that's strictly worse than the synchronous tool (same wait, extra
-turns). The tool descriptions encode this guidance so agents choose correctly.
-
-### Clown job-wakeup emits (push instead of poll)
-
-See `docs/features/0010-clown-job-wakeup-producer.md` for the full
-feature record (limitations, tuning levers, promotion criteria).
-
-When serve runs under clown (`CLOWN_BIN` set — the producer-may-emit
-contract from clown RFC-0009), the async tools additionally emit clown
-job lifecycle events via `internal/clown`: `clown job start --label
-merge|check --source spinclass` at launch (the returned id is recorded
-as `clown_job_id` in job.json) and `clown job done --state
-succeeded|failed|cancelled` at completion, so clown's job-watch monitor
-wakes the agent with one `[clown-job]` notification line — the
-poll-discipline guidance above applies only without clown, and the
-async tool descriptions switch wording accordingly at serve startup.
-Emits are purely additive: job.json/job.log remain the system of
-record, emit failures are logged to job.log (`[clown] ... emit
-failed`) and never affect the job result, and the rollback is clown's
-`CLOWN_DISABLE_JOB_WAKEUP=1` (emits become exit-0 no-ops; no
-spinclass-side switch). Known limitation: a job whose serve process
-dies mid-run is reported `interrupted` by the next `session-job-status`
-read but never wakes — a dead producer can't emit. The failed-state
-wake message carries the first `✗ ` line of the plain-rendered result
-when present. `internal/clown` is the shared producer integration for the
-async job-lifecycle emits.
-
-### Pre-merge hook build worktree
-
-By default the `pre-merge` hook runs in a transient **detached build worktree**
-pinned to the exact committed sha being merged, not in the live session
-worktree. `check.resolveHookDir` creates a hidden `.merge-<branch>-<sha>-<pid>`
-sibling under `.worktrees/` via `git.WorktreeAddDetached` (which prunes stale
-admin entries first), runs the hook with `cmd.Dir` set there, and removes it via
-a deferred `git.WorktreeForceRemove`. madder still targets the session worktree
-(`wtPath`); only the hook's working directory relocates. This frees the session
-worktree for concurrent edits while the (slow) hook runs, and verifies the
-committed tree rather than uncommitted state. See FDR 0013 and
-`docs/features/0013-isolated-build-worktree.md`.
-
-The merge flow is split into `merge.PrepareMerge` (disable-merge gate → optional
-pull → rebase → nothing-to-merge short-circuit → optional **REPAIR phase** →
-**pin** the post-rebase `HEAD` sha) and `merge.FinishMerge` (hook in the build worktree → `git merge
---ff-only <pinnedSha>` → teardown → push). `merge --ff-only` targets the pinned
-**sha**, not the branch name, so a commit landing on the branch while the hook
-runs is left for a later merge instead of leaking in. `merge-this-session-async`
-runs `PrepareMerge` **synchronously** (sharing one `crap.Reporter`+buffer)
-before returning the job id — so rebase conflicts /
-nothing-to-merge surface immediately and the rebase can't race the agent's next
-edits — then backgrounds `FinishMerge`, whose records are appended to the same
-buffer for one continuous result stream. The sync `merge-this-session` and both
-`check`/`check-this-session` paths inherit the build worktree transparently
-(check pins `HEAD`). Opt out per the sweatfile cascade with
-`[hooks].disable-merge-build-worktree = true` (runs the hook in place; legacy).
-Caveat: the build worktree is detached HEAD, so a hook reading the current
-branch name sees `HEAD`.
-
-### Pre-merge REPAIR phase
-
-When `[hooks].repair` is set (and not `[hooks].disable-repair`), `PrepareMerge`
-runs it as a distinct **REPAIR** phase — after the nothing-to-merge guard, before
-the pin — to auto-fold mechanical fixes into the commit being merged ahead of the
-`pre-merge` VERIFY hook. The canonical value is
-`conformist --commit --amend --exit-zero-on-fix`. `merge.runRepairPhase` runs the
-command in the **session worktree** (not the build worktree: its pinned-sha
-ff-only merge would discard an amend made there, and threading the repaired sha
-out would strand the session branch — see FDR 0018), detects an amend via the
-**HEAD-sha delta** (the command exits 0 whether or not it changed anything, so
-spinclass stays convention-free), and aborts the merge on a non-zero exit.
-Repair is merge-only (`sc check` skips it) and scoped to worktree sessions;
-implicit sessions are out of scope (their HEAD may be pushed, which conformist's
-`--amend` refuses). See FDR 0018 and `spinclass-sweatfile(5)` `[hooks].repair`.
-
-### Per-commit repair hook (authoring-time)
-
-When `[hooks].pre-commit` is set (and not `[hooks].disable-pre-commit`),
-`sweatfile.Apply` (run by `worktree.Create` at `sc start`, i.e. on worktree
-creation — `sc resume` of an existing worktree does NOT re-apply; see the
-staleness/rebuild section below) installs it as a per-session git
-**pre-commit** hook
-(`internal/sweatfile/precommit.go` → `installPreCommitHook`), so drift is
-repaired **at authoring time** and every commit is conformant in history —
-unlike the merge-time REPAIR phase, which only ever amends the top commit. The
-canonical value is **`conformist-pre-commit`** — conformist's store-pinned
-toolchain-hermetic wrapper (its `lib.mkToolchainHooks`, conformist#59), wired in
-`flake.nix` and on the devShell PATH; it runs `conformist --staged
---exit-zero-on-fix` with the conformist binary AND every formatter baked as
-store paths. **Best practice: name the wrapper, NOT a bare
-`conformist --staged --exit-zero-on-fix` string** — the bare string resolves
-conformist (and its formatters) from PATH, so a stale conformist breaks the hook
-and a missing formatter silently skips its filetypes (conformist#51). For a
-hand-written `conformist.toml` repo (like spinclass) the wrapper comes from
-`conformist.lib.mkToolchainHooks` → `{ formatter, preCommit, repair }`; for a
-conformist-module repo it's `build.preCommit`. See FDR 0019 and conformist's
-`docs/site/guides/nix-module.md` (the two consumer shapes). The generated wrapper is
-written to `<worktree>/.spinclass/hooks/pre-commit` and scoped to that worktree
-alone via `git config extensions.worktreeConfig true` + `git config --worktree
-core.hooksPath <dir>` — worktrees otherwise share `$GIT_COMMON_DIR/hooks`, so
-this isolation is load-bearing (it keeps the hook out of the parent checkout and
-sibling worktrees; the installer defensively refuses if `core.worktree` is set in
-the common config). The wrapper is **best-effort and non-blocking**: a missing
-formatter (`command -v` guard) or any non-zero exit never blocks the commit
-(exit 3's restage has already landed; refusals/errors warn and proceed). Install
-is best-effort too — a failure is logged, never blocks session creation. Worktree
-sessions only; implicit (main-checkout) sessions are out of scope. This is the
-per-commit successor to the merge-time REPAIR phase; spinclass's own sweatfile
-uses it (`repair` retired with a one-line rollback). See
-`docs/plans/2026-06-16-per-commit-repair-hook-design.md` and
-`spinclass-sweatfile(5)` `[hooks].pre-commit`.
-
-Because git consults exactly one hooks dir, `.spinclass/hooks` is a **composing
-dispatcher** (FDR-pending, #183, `docs/plans/2026-06-17-precommit-hook-composition-design.md`):
-`installPreCommitHook` captures the repo's pre-override hooks dir (the prior
-`core.hooksPath`, else `$GIT_COMMON_DIR/hooks`) into a `.spinclass/`
-sentinel (persisted once — re-`Apply` on resume would otherwise re-read our own
-dir and self-reference), then symlinks one dispatcher (`_spinclass-dispatch`)
-under `pre-commit` plus every active native hook the original dir provides. The
-dispatcher branches on its own basename: runs the formatter on `pre-commit`
-**first**, then `exec`s the original same-named hook (preserving args/stdin/exit
-code), so native hooks of every type keep firing and a blocking native hook
-still blocks. When `[hooks].pre-commit` is **inactive**, `installPreCommitHook`
-instead **restores** (unsets our per-worktree `core.hooksPath` if it's ours,
-removes the dispatcher + sentinel), making `disable-pre-commit` a true uninstall
-and the rollback. A nonzero formatter exit is surfaced loudly (its stderr + a
-banner) rather than silently swallowed, so a stale/misconfigured formatter isn't
-an invisible no-op (the commit still proceeds — non-blocking). Known
-limitations: a hook manager that rewrites `core.hooksPath` itself can clobber our
-override between `sc start`/`resume` re-installs; and the captured original is
-the *shared* `$GIT_COMMON_DIR/hooks`, so a *blocking* native hook there gates
-every worktree's commits, not one.
-
-### Pre-merge hook inactivity watchdog
-
-`[hooks].inactivity-timeout` (a Go duration string, e.g. `"180s"`; unset/`""`/
-non-positive = disabled, the default) bounds how long the `pre-merge` hook may
-go **silent**. An `activityWriter` in `sweatfile.RunPreMergeHookContext` bumps a
-last-activity timestamp on every output line; a goroutine on a `timeout/4`
-ticker (clamped `[1s, 15s]`) cancels the hook's child context once
-`time.Since(lastActivity) > timeout`, which kills the `sh -c` subprocess
-(`exec.CommandContext`). The kill surfaces as a distinct error — `pre-merge hook
-killed: no output for <timeout> (inactivity-timeout)` — and, because the
-watchdog ctx is a child of the caller's, it is distinguishable from a
-`session-job-cancel` (only inactivity yields that error). Both the sync and
-async paths funnel through `RunPreMergeHookContext`, so the watchdog covers
-`merge`/`check`/`sc check` and their `-async` twins. This catches a *wedged*
-hook (different from the async tools, which only sidestep the request-timeout
-for hooks that are still making progress). `sc validate` rejects an
-unparseable or negative value.
-
-### Worktree setup staleness & `sc rebuild`
-
-`sweatfile.Apply` + `applyWorktreeConfig` install a worktree's setup (pre-commit
-hook, `.envrc`/direnv, `.claude` settings, `.mcp.json`, git excludes, per-worktree
-git config, madder/dodder) **once, at `sc start`** — `createWorktree`
-(`internal/shop/shop.go`) only applies on a *fresh* worktree, so `sc resume` of an
-existing worktree does NOT re-apply. Setup therefore drifts as the sweatfile
-config, the spinclass binary, or pinned tools evolve.
-
-`internal/setupfingerprint` records a stable fingerprint of those inputs —
-`sha256(scheme · spinclass version+commit · embeds pins · canonical-JSON(merged
-config))`, where canonical-JSON is a sorted-key JSON round-trip (struct-field-order
-independent; no JCS dependency) — into `session.State`
-(`setup_fingerprint`/`setup_scheme`/`setup_at`) whenever setup is applied (`sc
-start`, `sc rebuild`, resume auto-rebuild). A mismatch vs the recomputed value
-flags the worktree stale. The version/commit are surfaced to non-`main` packages
-via `internal/embeds` (`SetVersion`/`Version`/`Commit`).
-
-- **`sc rebuild [target]`** re-applies setup on an existing worktree
-  (`worktree.Reapply` = `applyWorktreeConfig` without `git worktree add`, using the
-  same `LoadHierarchy` source `Create` does so a rebuild reproduces `sc start`) and
-  refreshes the fingerprint. `--check` reports stale/fresh read-only, exiting
-  nonzero when stale (for scripting / gates). CLI-only.
-- **`sc resume`** (the `existed` branch of `shop.Attach`) warns on stderr when
-  stale, and — with `[hooks].auto-rebuild-on-resume = true` — re-applies and
-  refreshes before attaching; default-off keeps resume side-effect-free.
-  `worktree.SetupFingerprint`/`SetupStale` wrap the load+compute so the
-  `LoadHierarchy` source choice lives in one place.
-
-**Limitation (the motivating case):** this does NOT detect external-tool *version*
-drift — e.g. a changed conformist binary behind an unchanged `[hooks].pre-commit`
-command. The config is unchanged, so the fingerprint is unchanged. Catching that
-needs probing each tool's version (out of scope; see the `[hooks].pre-commit`
-conformist-version requirement).
-
-By default `sc close` and `sc clean` perform worktree-scoped Nix garbage
-collection after removing the worktree: spinclass enumerates the gc roots
-resolving into the worktree, expands their closure, and runs `nix-store
---delete` per path. Nix's own liveness check is the safety net — paths still
-rooted elsewhere are reported as `kept`. Set `[hooks].disable-nix-gc = true`
-in the sweatfile cascade to opt out, or use `sc close --nix-gc=<true|false>`
-to override per-invocation. Silent no-op when `nix-store` isn't on PATH or
-the worktree has no gc roots.
-
-## Custom start commands
-
-`sc start-<name>` subcommands can be declared in a sweatfile via the
-`[[start-commands]]` array of tables. At CLI startup spinclass loads the
-sweatfile hierarchy for the current directory and dynamically registers one
-command per entry. Each command validates its single positional argument
-and offers tab completion.
-
-```toml
-[[start-commands]]
-name             = "jira"               # registers `sc start-jira`
-description      = "Start session for a JIRA ticket"
-arg-name         = "ticket"             # positional parameter name
-arg-help         = "JIRA ticket ID"
-arg-regex        = "^[A-Z]+-[0-9]+$"    # optional RE2 validator
-exec-completions = ["sh", "-c", "jira list --json | jq '[.[] | {arg: .key, description: .summary}]'"]
-exec-start       = ["sh", "-c", "jira show {arg} --json | jq '{context: .body}'"]
-```
-
-- `exec-completions` is exec'd at tab-completion time. Stdout must be JSON:
-  `[{"arg": "...", "description": "..."}, ...]`. Failures are silent.
-- `exec-start` is exec'd when the command runs, with `{arg}` literally
-  replaced by the positional value in every argv element. Stdout must be
-  JSON with the schema: `{"branch"?: string, "description"?: string,
-  "context": string}`. The command is exec'd directly (no shell); wrap in
-  `sh -c` for shell features.
-  - `context` — session context string.
-  - `description` — used as the session description if the user didn't
-    pass `--description`.
-  - `branch` — when present, checks out an existing local or remote
-    branch (mirroring `start-gh_pr` behaviour) instead of creating a
-    new one. The branch must already exist.
-- Entries merge across the sweatfile hierarchy (`global → parent → repo`)
-  and later definitions override earlier ones by `name`. The built-in
-  `gh_issue` entry ships via `sweatfile.GetDefault()` as a tracer bullet —
-  it is the same plugin mechanism users get, just baked in.
-- Built-in subcommands (e.g. `start` itself or `start-gh_pr`) always win
-  over a sweatfile entry with the same name; `sc validate` flags obviously
-  broken entries (missing `exec-start`, bad name, non-compiling regex,
-  shell interpreter without `arg-regex`).
-
-## MCP Server Configuration
-
-`allowed-mcps` and `[[mcps]]` control which MCP servers are registered
-and auto-approved in Claude Code sessions.
-
-```toml
-# Auto-approve externally-registered MCP servers by name
-allowed-mcps = ["some-external-server"]
-
-# Register and auto-approve MCP servers
-[[mcps]]
-name = "my-linter"
-command = "my-linter"
-args = ["serve"]
-
-[mcps.env]
-DEBUG = "1"
-```
-
-- `allowed-mcps` uses array-append merge (nil = inherit, `[]` = clear,
-  non-empty = append).
-- `[[mcps]]` uses dedup-by-name merge (same as `[[start-commands]]`).
-  Name-only entry (empty command) removes an inherited server.
-- Every `[[mcps]]` entry with a command implicitly adds to the allow-list.
-
-## Remote Sessions
-
-`[[remotes]]` declares hosts whose spinclass sessions appear in `sc list`
-and tab completion under a `<name>:` prefix and reattach via
-`sc resume <name>:<id>` (execs the attach template; default
-`ssh -t {ssh} spinclass resume {id}`).
-
-```toml
-[[remotes]]
-name   = "devbox"            # the <host>: prefix users type
-ssh    = "sasha@devbox.lan"  # optional; Dest() defaults to name
-attach = ["ssh", "-t", "{ssh}", "spinclass", "resume", "{id}"]  # optional; shown value is the default
-```
-
-- Dedup-by-name merge like `[[mcps]]`, but removal is explicit:
-  `remove = true` drops an inherited remote. A name-only entry is a valid
-  all-defaults remote (`~/.ssh/config` does the work), NOT a removal
-  sentinel — a deliberate divergence from `[[mcps]]`.
-- `sc list` queries each host in parallel (`ssh <dest> spinclass list
-  --format json`, 3s/host, per-host diagnostic rows) and refreshes the
-  completion cache; completion reads only the cache, never networks.
-  `close`/`merge` reject `host:` targets ("remote targets support resume
-  only (v1)"). See FDR 0011.
+**Remotes**: `[[remotes]]` declares `host:`-prefixed resume targets (dedup-by-
+name; `remove = true` drops an inherited one). `sc list` queries each host in
+parallel and refreshes a completion cache; `close`/`merge` reject `host:`
+targets (FDR 0011).
 
 ## Nix Build
 
-Standalone flake against `amarbel-llc/nixpkgs` (the fork's
-`buildGoApplication` overlay auto-injects `-X main.version` and
-`-X main.commit` ldflags from the derivation's `version` and `commit`
-attrs — `spinclassVersion` and `spinclassCommit` in `flake.nix`). Binary
-installs as `spinclass` with `sc` symlink. Shell completions for bash
-and fish included.
+Standalone flake against `amarbel-llc/nixpkgs`; the fork's `buildGoApplication`
+overlay injects `-X main.version`/`-X main.commit` ldflags from the derivation's
+`version`/`commit` attrs. Binary installs as `spinclass` with an `sc` symlink;
+bash + fish completions included.
 
-`gomod.nix` is the consumer half of the flake-input-go_mod protocol
-(igloo RFC 0001): it maps the bridged Go modules (`tommy`, `crap`) onto
-their producer flakes' `go-pkgs` outputs, and `flake.nix` threads it as
-`goFlakeInputs` into both `buildGoApplication` and `mkGoEnv` (see the
-gomod.nix header for the lockstep rationale). Bump a bridged dep with
-`nix flake update <input>` — no `go get`/`gomod2nix` lockstep, unless
-the new rev changes the producer's own dependency graph (its
-transitives still resolve organically, so go.mod/go.sum/gomod2nix.toml
-need a regen then).
+`gomod.nix` is the consumer half of the flake-input-go_mod protocol (igloo RFC
+0001): it maps bridged Go modules (`tommy`, `crap`) onto their producer flakes'
+`go-pkgs` outputs, threaded as `goFlakeInputs`. Bump a bridged dep with
+`nix flake update <input>` — no gomod2nix lockstep unless the new rev changes
+the producer's own dependency graph.
 
 ## Dependencies
 
-Module: `github.com/amarbel-llc/spinclass`. Key dependencies:
+Module: `github.com/amarbel-llc/spinclass`.
 
-- `github.com/amarbel-llc/tap/go` — TAP-14 output library (non-merge/check
-  commands).
-- `github.com/amarbel-llc/crap/go-crap/v2` — ndjson-crap reader (consumed by
-  the `ndjson-crap` pre-merge-output-format, where the hook emits canonical
-  ndjson-crap directly; see `internal/check`) AND the merge/check output stack:
-  `package crap`'s `Reporter` backs merge/check stage emission and
-  `package viewport` backs the TTY presentation + plain rendering (consumer
-  wiring in `internal/present`; bridged from the `crap` flake input via
-  goFlakeInputs).
+- `github.com/amarbel-llc/tap/go` — TAP-14 output (non-merge/check commands).
+- `github.com/amarbel-llc/crap/go-crap/v2` — ndjson-crap reader + the
+  merge/check output stack (`crap.Reporter` emission, `viewport` presentation;
+  wired in `internal/present`).
 - `github.com/amarbel-llc/purse-first/libs/go-mcp` — MCP server framework
-  (`command.App` provides both CLI dispatch and MCP serving; spinclass does
-  not use cobra).
+  (`command.App` does CLI dispatch + MCP serving; no cobra).
 - `github.com/amarbel-llc/tommy` — TOML library.
