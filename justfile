@@ -418,6 +418,62 @@ explore-chat-read:
     if [[ $pass -eq 0 ]]; then echo "VERDICT: chat-read polling WORKS"; else echo "VERDICT: chat-read FAILED"; fi
     exit $pass
 
+# [debug] Faithful end-to-end #196 repro against the INSTALLED sc binary, in a
+# throwaway repo so nothing real is touched. Mirrors the reporter: a global
+# sweatfile contributes an inherited dotenv key via the bare [direnv] form; the
+# repo sweatfile adds keys via the scalar-before-subtable form ([direnv] with
+# envrc, then [direnv.dotenv]). `sc start --no-attach` reads the repo sweatfile
+# via LoadHierarchy and writes .spinclass/env — so a dropped key is visible.
+# Delete once #196 is closed.
+[group('debug')]
+debug-issue196-scratch:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    scratch=$(mktemp -d)
+    trap 'rm -rf "$scratch"' EXIT
+    export HOME="$scratch"
+    export XDG_STATE_HOME="$scratch/.local/state"
+    export XDG_CONFIG_HOME="$scratch/.config"
+    # Inherited parent key via the bare [direnv] form (known-good shape).
+    mkdir -p "$scratch/.config/spinclass"
+    cat > "$scratch/.config/spinclass/sweatfile" <<'EOF'
+    [direnv]
+
+    [direnv.dotenv]
+    INHERITED_KEY = "/parent"
+    EOF
+    # Repo with the scalar-before-subtable form (the failing shape).
+    repo="$scratch/repo"
+    mkdir -p "$repo"
+    git -C "$repo" init -q -b main
+    git -C "$repo" config user.email "test@test"
+    git -C "$repo" config user.name "test"
+    git -C "$repo" config commit.gpgsign false
+    git -C "$repo" commit -q --allow-empty -m initial
+    cat > "$repo/sweatfile" <<'EOF'
+    [direnv]
+    envrc = ["source_up"]
+
+    [direnv.dotenv]
+    INHERITED_KEY = "/repo"
+    PROBE_KEY = "/probe"
+    EOF
+    cd "$repo"
+    sc start --no-attach "issue196 repro" 2>&1 | sed 's/^/  /'
+    wt=$(find "$repo/.worktrees" -mindepth 1 -maxdepth 1 -type d | head -1)
+    env_file="$wt/.spinclass/env"
+    echo "--- $env_file ---"
+    if [[ -f "$env_file" ]]; then cat "$env_file"; else echo "(missing)"; ls -la "$wt" 2>&1; fi
+    echo "--- expected: INHERITED_KEY + PROBE_KEY both present ---"
+
+# [debug] Run the issue #196 regression test (scalar-before-subtable decode
+# drop) against the BRIDGED tommy via the devshell go — the same tommy rev the
+# nix-built binary links, unlike a raw `go test` which resolves go.mod. Delete
+# once #196 is closed.
+[group('debug')]
+debug-issue196:
+    nix develop --command go test -run 'TestScalarBeforeSubtable|TestScalarBeforeSubtableWithPrecedingTable|TestScalarBeforeSubtableHierarchy|TestStandaloneDottedHeadersConsumed' -v ./internal/sweatfile/
+
 # Tag a spinclass release. The "v" prefix is added for you, so pass
 # the semver without it. Usage: just tag 0.1.0 "feat: initial release"
 tag version $message:
