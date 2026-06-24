@@ -329,7 +329,10 @@ func runHookPhase(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.H
 	}
 
 	start := time.Now()
-	hookErr := hierarchy.Merged.RunPreMergeHookContext(ctx, hookDir, sink)
+	// Load the devshell from the session worktree (wtPath, which has an allowed
+	// .envrc) but run the hook in hookDir (the build worktree pinned to the
+	// committed sha). They coincide in legacy in-place mode. See spinclass#198.
+	hookErr := hierarchy.Merged.RunPreMergeHookInDir(ctx, wtPath, hookDir, sink)
 	elapsed := time.Since(start)
 	lw.Flush()
 

@@ -177,6 +177,16 @@ func (sf Sweatfile) prepareDirenv(worktreePath string) error {
 	return cmd.Run()
 }
 
+// worktreeHasEnvrc reports whether the worktree has a regular .envrc file,
+// the precondition for devshell-scoping a hook via `direnv exec`. spinclass
+// writes one (writeEnvrc) whenever direnv resolves; gating on its presence
+// keeps the bare `sh -c` path for non-direnv repos so their hook behavior is
+// unchanged.
+func worktreeHasEnvrc(worktreePath string) bool {
+	info, ok := fileExists(filepath.Join(worktreePath, ".envrc"))
+	return ok && info.Mode().IsRegular()
+}
+
 // resolveDirenv returns the absolute path to the direnv binary, with
 // the build-time-pinned value (from `lib.mkSpinclass`) taking
 // precedence over PATH lookup. Returns ("", false) when direnv is
@@ -227,10 +237,19 @@ func (sf Sweatfile) RunRepairHookContext(ctx context.Context, worktreePath strin
 // the caller's ctx, so an inactivity kill is distinguishable from a user cancel
 // (e.g. session-job-cancel): only inactivity yields the dedicated error below.
 func (sf Sweatfile) RunPreMergeHookContext(ctx context.Context, worktreePath string, w io.Writer) error {
+	return sf.RunPreMergeHookInDir(ctx, worktreePath, worktreePath, w)
+}
+
+// RunPreMergeHookInDir runs the pre-merge hook with the devshell loaded from
+// envDir (the session worktree, which has an allowed .envrc) while the hook's
+// working directory is runDir (the detached build worktree pinned to the
+// committed sha). The single-dir RunPreMergeHookContext is the envDir==runDir
+// case (legacy in-place mode). See runHookInDir and FDR 0013.
+func (sf Sweatfile) RunPreMergeHookInDir(ctx context.Context, envDir, runDir string, w io.Writer) error {
 	cmd := sf.PreMergeHookCommand()
 	timeout := sf.InactivityTimeoutValue()
 	if timeout <= 0 {
-		return runHookContext(ctx, cmd, worktreePath, w)
+		return runHookInDir(ctx, cmd, envDir, runDir, w)
 	}
 
 	aw := &activityWriter{w: w, last: time.Now()}
@@ -265,7 +284,7 @@ func (sf Sweatfile) RunPreMergeHookContext(ctx context.Context, worktreePath str
 		}
 	}()
 
-	err := runHookContext(hookCtx, cmd, worktreePath, aw)
+	err := runHookInDir(hookCtx, cmd, envDir, runDir, aw)
 	close(done)
 	// Only surface the inactivity error when the hook actually failed because
 	// of the kill; a hook that finished cleanly just before a late tick wins.
@@ -312,6 +331,19 @@ func runHook(cmd *string, worktreePath string, w io.Writer) error {
 }
 
 func runHookContext(ctx context.Context, cmd *string, worktreePath string, w io.Writer) error {
+	return runHookInDir(ctx, cmd, worktreePath, worktreePath, w)
+}
+
+// runHookInDir runs a hook command with two distinct directory roles: envDir is
+// the directory whose devshell (.envrc) is loaded via `direnv exec`, and runDir
+// is the hook's working directory (cmd.Dir). For most hooks these coincide (the
+// session worktree). They differ for the pre-merge hook, which runs in a
+// detached build worktree (runDir) pinned to the committed sha but must load the
+// devshell from the session worktree (envDir) — the build worktree is created
+// from the tracked tree only, so it has neither the git-excluded .envrc nor a
+// `direnv allow` record, whereas the session worktree has both (writeEnvrc +
+// `direnv allow` at `sc start`). See spinclass#198 and FDR 0013.
+func runHookInDir(ctx context.Context, cmd *string, envDir, runDir string, w io.Writer) error {
 	if cmd == nil || *cmd == "" {
 		return nil
 	}
@@ -325,12 +357,36 @@ func runHookContext(ctx context.Context, cmd *string, worktreePath string, w io.
 		w = io.Discard
 	}
 
-	c := exec.CommandContext(ctx, "sh", "-c", script)
-	c.Dir = worktreePath
+	// Run the hook inside the envDir devshell when one exists, so a hook command
+	// provided by the repo's devShell (e.g. a flake-exposed conformist-repair)
+	// resolves regardless of whether the spinclass process invoking the hook is
+	// itself inside that devShell. Without this, a merge driven from a foreign
+	// ambient env — e.g. ~/eng's update-nix-repos calling sc run, where the
+	// merge phase runs in the orchestrator's PATH, not the sub-repo's — fails
+	// with `command not found` (spinclass#198). Like sessionexec.CommandIn, which
+	// devshell-scopes session-entry exec, but additionally gated on a real .envrc
+	// in envDir so non-direnv repos keep the bare `sh -c`. `direnv exec <dir>`
+	// loads the .envrc from <dir> independently of cmd.Dir, which lets the
+	// pre-merge hook load the session worktree's allowed devshell while running
+	// in the build worktree.
+	// worktreeHasEnvrc (a single stat) is checked before resolveDirenv (a PATH
+	// scan when direnv is not build-pinned) so the common non-direnv repo skips
+	// the lookup entirely.
+	argv := []string{"sh", "-c", script}
+	if worktreeHasEnvrc(envDir) {
+		if direnv, ok := resolveDirenv(); ok {
+			argv = append([]string{direnv, "exec", envDir}, argv...)
+		}
+	}
+
+	c := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	c.Dir = runDir
 	// Inherit os.Environ so SPINCLASS_* variables set by callers (or by
 	// the running session) propagate into the hook. Always append WORKTREE
-	// for backwards compatibility with existing hook scripts.
-	c.Env = append(os.Environ(), "WORKTREE="+worktreePath)
+	// (the session worktree = envDir, the logical session location a hook
+	// reasons about, not the transient build worktree) for backwards
+	// compatibility with existing hook scripts.
+	c.Env = append(os.Environ(), "WORKTREE="+envDir)
 	c.Stdout = w
 	c.Stderr = w
 

@@ -100,11 +100,20 @@ disable-merge-build-worktree = true
   build worktree is detached; a hook that reads the current branch name (`git
   rev-parse --abbrev-ref HEAD`) sees `HEAD`. Opt out if a hook needs the branch
   ref.
-- **Inherited environment.** The hook gets its toolchain (and `[direnv].dotenv`
-  vars) from the `serve`/CLI process environment, not from re-running direnv in
-  the build worktree — the same assumption as the in-place hook (`runHookContext`
-  never invoked direnv), so no regression, but a hook relying on cwd-relative
-  direnv state would not see it.
+- **Devshell loaded from the session worktree.** When the session worktree has a
+  `.envrc`, the hook runs under `direnv exec <session-worktree> sh -c …` so a
+  devShell-provided hook command resolves regardless of the ambient PATH
+  (spinclass#198). The devshell is loaded from the session worktree (which has the
+  allowed `.envrc`), not the build worktree (which is checked out from the tracked
+  tree only and never has the git-excluded `.envrc` nor a `direnv allow` record).
+  Without an `.envrc`, the hook runs as a bare `sh -c` inheriting the `serve`/CLI
+  process environment (legacy behavior).
+- **`$WORKTREE` is the session worktree, `$PWD` is the build worktree.** As a
+  consequence of the above, the hook's `WORKTREE` env var points at the session
+  worktree (the logical session location) while its working directory (`$PWD`) is
+  the build worktree pinned to the committed sha. A hook that `cd "$WORKTREE"`
+  would land in the session worktree and verify *uncommitted* state instead of the
+  pinned tree — read the tree from `$PWD`, not `$WORKTREE`.
 - **Origin moved during hook.** If `origin/<default>` advances while the hook
   runs, the final `merge --ff-only` into the local default can still fail —
   pre-existing behavior, not introduced here.
