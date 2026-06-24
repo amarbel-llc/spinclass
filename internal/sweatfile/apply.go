@@ -17,7 +17,7 @@ import (
 
 	"github.com/charmbracelet/log"
 
-	"github.com/amarbel-llc/spinclass/internal/embeds"
+	"github.com/amarbel-llc/spinclass/internal/direnv"
 )
 
 func (sweatfile Sweatfile) Apply(worktreePath string) error {
@@ -159,7 +159,7 @@ func (sf Sweatfile) writeSpinclassEnv(worktreePath string) error {
 }
 
 func (sf Sweatfile) prepareDirenv(worktreePath string) error {
-	direnvPath, ok := resolveDirenv()
+	direnvPath, ok := direnv.Resolve()
 	if !ok {
 		return nil
 	}
@@ -185,22 +185,6 @@ func (sf Sweatfile) prepareDirenv(worktreePath string) error {
 func worktreeHasEnvrc(worktreePath string) bool {
 	info, ok := fileExists(filepath.Join(worktreePath, ".envrc"))
 	return ok && info.Mode().IsRegular()
-}
-
-// resolveDirenv returns the absolute path to the direnv binary, with
-// the build-time-pinned value (from `lib.mkSpinclass`) taking
-// precedence over PATH lookup. Returns ("", false) when direnv is
-// unavailable in either location — callers treat that as "no direnv,
-// skip envrc handling".
-func resolveDirenv() (string, bool) {
-	if pinned := embeds.DirenvBin(); pinned != "" {
-		return pinned, true
-	}
-	path, err := exec.LookPath("direnv")
-	if err != nil {
-		return "", false
-	}
-	return path, true
 }
 
 func (sf Sweatfile) RunCreateHook(worktreePath string, w io.Writer) error {
@@ -369,13 +353,13 @@ func runHookInDir(ctx context.Context, cmd *string, envDir, runDir string, w io.
 	// loads the .envrc from <dir> independently of cmd.Dir, which lets the
 	// pre-merge hook load the session worktree's allowed devshell while running
 	// in the build worktree.
-	// worktreeHasEnvrc (a single stat) is checked before resolveDirenv (a PATH
+	// worktreeHasEnvrc (a single stat) is checked before direnv.Resolve (a PATH
 	// scan when direnv is not build-pinned) so the common non-direnv repo skips
 	// the lookup entirely.
 	argv := []string{"sh", "-c", script}
 	if worktreeHasEnvrc(envDir) {
-		if direnv, ok := resolveDirenv(); ok {
-			argv = append([]string{direnv, "exec", envDir}, argv...)
+		if direnvPath, ok := direnv.Resolve(); ok {
+			argv = direnv.WrapExec(direnvPath, envDir, argv)
 		}
 	}
 

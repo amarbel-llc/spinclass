@@ -17,7 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/amarbel-llc/spinclass/internal/embeds"
+	"github.com/amarbel-llc/spinclass/internal/direnv"
 	"github.com/amarbel-llc/spinclass/internal/session"
 )
 
@@ -135,8 +135,8 @@ func CommandIn(dir string, util []string, env []string) *exec.Cmd {
 	}
 
 	argv := util
-	if direnv, ok := resolveDirenv(); ok {
-		argv = append([]string{direnv, "exec", dir}, util...)
+	if direnvPath, ok := direnv.Resolve(); ok {
+		argv = direnv.WrapExec(direnvPath, dir, util)
 	}
 
 	cmd := exec.Command(argv[0], argv[1:]...)
@@ -153,20 +153,6 @@ func execIn(dir string, util []string, env []string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
-}
-
-// resolveDirenv returns the direnv binary path, preferring the build-time
-// pin (lib.mkSpinclass) over PATH. Mirrors sweatfile.resolveDirenv; returns
-// ("", false) when direnv is unavailable, so callers exec util directly.
-func resolveDirenv() (string, bool) {
-	if pinned := embeds.DirenvBin(); pinned != "" {
-		return pinned, true
-	}
-	path, err := exec.LookPath("direnv")
-	if err != nil {
-		return "", false
-	}
-	return path, true
 }
 
 // ParseArgs splits the passthrough argv of `sc exec` into the optional

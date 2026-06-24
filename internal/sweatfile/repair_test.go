@@ -15,7 +15,7 @@ import (
 
 // pinDirenv writes an executable fake direnv with the given shell body and pins
 // it as the build-time direnv via embeds.Set, restoring the prior pin on
-// cleanup. Pinning (rather than relying on PATH) sidesteps resolveDirenv's
+// cleanup. Pinning (rather than relying on PATH) sidesteps direnv.Resolve's
 // embeds-over-PATH precedence so the fake is used deterministically.
 func pinDirenv(t *testing.T, body string) {
 	t.Helper()
