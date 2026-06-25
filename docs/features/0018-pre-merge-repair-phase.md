@@ -122,9 +122,18 @@ mutation FDR 0013 exists to avoid.
 So REPAIR runs in the **session worktree**, inside the synchronous
 `PrepareMerge` prefix, right after the rebase and **before** the pin:
 
-1. `rebase branch onto defaultBranch` (existing) — leaves wtPath clean, so
-   conformist's default refuse-on-dirty policy is satisfied with no
+1. `rebase branch onto defaultBranch` (existing) — normally leaves wtPath clean,
+   so conformist's default refuse-on-dirty policy is satisfied with no
    `--allow-dirty`.
+1b. **CONFLICT GUARD** (#200): a `git rebase` with `rebase.autoStash` can exit 0
+   yet leave wtPath conflicted — a *failed autostash pop* applies the rebase
+   cleanly but leaves unmerged paths + conflict markers behind (a failed pop is
+   a warning, not a rebase failure), so the "clean by construction" assumption
+   below does NOT always hold. After the rebase and **before** REPAIR,
+   `PrepareMerge` checks `git.UnmergedPaths(wtPath)` and halts the merge if it is
+   non-empty. Without this, REPAIR's `conformist --commit --amend` would stage
+   and amend the markers into the rebased commit — landing a non-building,
+   conflict-marked commit that only the VERIFY build catches.
 2. **REPAIR**: record `HEAD` (`sha0`), run the repair command in wtPath,
    record `HEAD` again (`sha1`).
    - `sha1 != sha0` → repair amended the branch HEAD in place. `git commit
@@ -247,9 +256,11 @@ All four resolved by `conformist/merry-pine` (design endorsed, proceed):
 3. **`sc check` → skip repair (merge-only).** `sc check` /
    `check-this-session` do **not** run repair. Repair is a merge-path phase
    only (it commits/amends; check only verifies).
-4. **`--allow-dirty` → no.** Rely on conformist's default refuse-on-dirty;
-   the post-rebase tree is clean by construction (a dirty wtPath fails the
-   rebase first).
+4. **`--allow-dirty` → no.** Rely on conformist's default refuse-on-dirty; the
+   post-rebase tree is normally clean (a dirty wtPath fails the rebase first).
+   The one exception — a failed autostash pop leaving wtPath conflicted after an
+   exit-0 rebase — is caught by the conflict guard (step 1b above) that halts
+   before REPAIR, so repair never runs against a conflicted tree (#200).
 
 ## More Information
 
