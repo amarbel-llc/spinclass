@@ -212,6 +212,71 @@ func TestPrepareMergePinsShaAcrossConcurrentCommit(t *testing.T) {
 	}
 }
 
+// TestPrepareMergeHaltsOnPostRebaseConflict is the #200 guard: a rebase that
+// exits 0 but leaves the worktree conflicted (a failed autostash pop) must halt
+// the merge at the conflict-check step — BEFORE the repair phase that would
+// otherwise stage and amend the conflict markers into the rebased commit. The
+// markers stay uncommitted in the worktree for the agent to resolve.
+func TestPrepareMergeHaltsOnPostRebaseConflict(t *testing.T) {
+	repoDir := setupRepo(t) // main: file.txt="initial"
+	writeFile := func(dir, name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Base f.txt + g.txt on main: the feature edit (g) and the main edit (f)
+	// touch different files, so the rebase itself is clean — only the autostash
+	// pop of the uncommitted f.txt change conflicts.
+	writeFile(repoDir, "f.txt", "base\n")
+	writeFile(repoDir, "g.txt", "base\n")
+	runGit(t, repoDir, "add", "f.txt", "g.txt")
+	runGit(t, repoDir, "commit", "-m", "base f and g")
+
+	wtPath := setupWorktree(t, repoDir, "feature-conflict")
+	runGit(t, wtPath, "config", "rebase.autoStash", "true")
+
+	// Feature commit touches g.txt only.
+	writeFile(wtPath, "g.txt", "feature-g\n")
+	runGit(t, wtPath, "add", "g.txt")
+	runGit(t, wtPath, "commit", "-m", "feature: g")
+
+	// main advances on f.txt (a different file from the feature edit).
+	writeFile(repoDir, "f.txt", "main-f\n")
+	runGit(t, repoDir, "add", "f.txt")
+	runGit(t, repoDir, "commit", "-m", "main: f")
+
+	// Uncommitted change to f.txt that the autostash pop fails to re-apply onto
+	// main-f → conflict markers + unmerged f.txt after a clean (exit-0) rebase.
+	writeFile(wtPath, "f.txt", "dirty-f\n")
+
+	var buf bytes.Buffer
+	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
+	ts := rep.TestStream(0)
+	_, err := PrepareMerge(ts, repoDir, wtPath, "feature-conflict", "main", false)
+	if err == nil {
+		t.Fatalf("expected PrepareMerge to halt on the post-rebase conflict; stream:\n%s", buf.String())
+	}
+
+	// The conflict is surfaced and left in the worktree, NOT committed.
+	unmerged, uErr := git.UnmergedPaths(wtPath)
+	if uErr != nil {
+		t.Fatalf("UnmergedPaths: %v", uErr)
+	}
+	if len(unmerged) == 0 {
+		t.Errorf("expected unmerged paths left in the worktree, got none\nstream:\n%s", buf.String())
+	}
+	// Nothing was amended: HEAD:f.txt is the clean rebased content, no markers.
+	if head := runGit(t, wtPath, "show", "HEAD:f.txt"); strings.Contains(head, "<<<<<<<") {
+		t.Errorf("conflict markers were committed into HEAD:f.txt:\n%s", head)
+	}
+	// The halt is at the conflict-check step (rebase reported ok first).
+	stream := buf.String()
+	if !strings.Contains(stream, "conflict check feature-conflict") {
+		t.Errorf("expected a conflict-check failure record; stream:\n%s", stream)
+	}
+}
+
 // TestResolveTargetSessionKeyCrossRepo: explicit merge targets resolve
 // current-repo git worktrees first (bare worktrees without session
 // state keep working, and a local dirname is never shadowed by another

@@ -191,6 +191,25 @@ func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch s
 	}
 	ts.Ok("rebase " + branch)
 
+	// A rebase that exits 0 can still leave the worktree conflicted: a failed
+	// autostash pop (git config rebase.autoStash) applies the rebase cleanly but
+	// leaves unmerged paths + conflict markers in the worktree — a failed pop is
+	// a warning, not a rebase failure. Halt HERE, before the repair phase:
+	// otherwise `[hooks].repair` (conformist --commit --amend) would stage and
+	// amend those markers into the rebased commit, landing a non-building,
+	// conflict-marked commit in history that only the pre-merge build catches
+	// (#200). The markers stay in the worktree (uncommitted) for the agent to
+	// resolve, then re-merge.
+	if conflicted, cErr := git.UnmergedPaths(wtPath); cErr != nil {
+		return "", failStep(ts, "conflict check "+branch, cErr, "")
+	} else if len(conflicted) > 0 {
+		conflictErr := fmt.Errorf(
+			"unresolved conflicts after rebase (resolve them in the worktree, then re-merge): %s",
+			strings.Join(conflicted, ", "),
+		)
+		return "", failStep(ts, "conflict check "+branch, conflictErr, "")
+	}
+
 	// Short-circuit so an empty merge doesn't pay for the pre-merge hook.
 	if git.CommitsAhead(wtPath, defaultBranch, branch) == 0 {
 		noopErr := fmt.Errorf("nothing to merge: %s has no commits ahead of %s", branch, defaultBranch)

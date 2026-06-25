@@ -81,6 +81,23 @@ func StatusPorcelain(path string) string {
 	return out
 }
 
+// UnmergedPaths returns the worktree's files with unresolved merge-conflict
+// status (index stages 1/2/3), one path per entry, or nil when the worktree is
+// conflict-free. A non-empty result means a rebase, merge, or stash pop left
+// conflicts that must be resolved before any commit — git itself refuses to
+// commit unmerged entries, so a caller about to auto-commit (e.g. a repair
+// formatter) must check this first to avoid staging conflict markers.
+func UnmergedPaths(path string) ([]string, error) {
+	out, err := Run(path, "diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
 func RevListLeftRight(path string) (ahead, behind int) {
 	out, err := Run(path, "rev-list", "--left-right", "--count", "@{upstream}...HEAD")
 	if err != nil {
