@@ -122,8 +122,14 @@ worktree_count() {
 @test "run: stdin shebang script runs under its interpreter and merges" {
   cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"
+  # #197: the script shebang MUST be #!/bin/sh, not #!/usr/bin/env bash. This
+  # lane runs in the hermetic linux nix build sandbox, which exposes /bin/sh but
+  # NOT /usr/bin/env — so `sc run` exec'ing /usr/bin/env fails with exit 127.
+  # /bin/sh is the one interpreter nix guarantees; the body below is POSIX. (On
+  # darwin's permissive sandbox /usr/bin/env resolves, which is why this only
+  # ever went red on the linux lane.)
   run timeout --preserve-status 30s sh -c \
-    "printf '#!/usr/bin/env bash\nset -e\necho via-stdin > s.txt\ngit add s.txt\ngit commit -qm stdin-commit\n' | '$bin' --format ndjson run --local-only"
+    "printf '#!/bin/sh\nset -e\necho via-stdin > s.txt\ngit add s.txt\ngit commit -qm stdin-commit\n' | '$bin' --format ndjson run --local-only"
   assert_success
   run git -C "$TEST_REPO" log --oneline main
   assert_output --partial "stdin-commit"
