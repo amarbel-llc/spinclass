@@ -1,11 +1,5 @@
 github.com/MakeNowJust/heredoc v1.0.0 h1:cXCdzVdstXyiTqTvfqk9SDHpKNjxuom+DOlyEeQ4pzQ=
 github.com/MakeNowJust/heredoc v1.0.0/go.mod h1:mG5amYoWBHf8vpLOuehzbGGw0EHxpZZ6lCpQ4fNJ8LE=
-github.com/amarbel-llc/crap/go-crap/v2 v2.1.1 h1:H9a35my+WrSQY7wo9JbseR44uyF1y6Fdq/BL4zzKDxo=
-github.com/amarbel-llc/crap/go-crap/v2 v2.1.1/go.mod h1:uu9rKZID7II1lWu+892mMErK43Lvc0e8cRYs3cRlayI=
-github.com/amarbel-llc/crap/go-crap/v2 v2.2.0 h1:7A1cxB5kE/NvOLDkjBPsN0wSfqktcKEcmfCI6k75MxM=
-github.com/amarbel-llc/crap/go-crap/v2 v2.2.0/go.mod h1:uu9rKZID7II1lWu+892mMErK43Lvc0e8cRYs3cRlayI=
-github.com/amarbel-llc/crap/go-crap/v2 v2.2.1 h1:q8x2PGi3Zt4dazIwWsr9OmlOuClUqzKhUgk4RK+vCus=
-github.com/amarbel-llc/crap/go-crap/v2 v2.2.1/go.mod h1:uu9rKZID7II1lWu+892mMErK43Lvc0e8cRYs3cRlayI=
 github.com/amarbel-llc/crap/go-crap/v2 v2.2.2 h1:obhuaA7a8HYj//3z321tm48K+DaDh+ztFYxVD5B3dKs=
 github.com/amarbel-llc/crap/go-crap/v2 v2.2.2/go.mod h1:uu9rKZID7II1lWu+892mMErK43Lvc0e8cRYs3cRlayI=
 github.com/amarbel-llc/purse-first/libs/dewey v0.1.8 h1:vdSI99KvN/fnfkmHFhBV41FPXIQlgfikIrnZ1QYYzM8=

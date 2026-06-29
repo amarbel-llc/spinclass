@@ -338,6 +338,30 @@ debug-session-env-map:
       echo "   $cl"
     done
 
+# [debug] Render an `sc` subcommand through a REAL PTY and dump the screen, so
+# TTY-only output — the pretty `sc list` table's colored status dots, 🤡 clown
+# badges, and description wrapping — can be eyeballed the way color-stripped
+# `go test` logs and piped stdout cannot. Builds a throwaway binary, resizes a
+# transient detached `posh` session to <cols> columns (so wrapping can be tested
+# at any width), runs `sc <args>` in it, prints the rendered scrollback, then
+# tears the session down. Renders your LIVE sessions. Swap the `history` line for
+# `posh history "$sess" --vt` to inspect colors/attributes as an escape stream.
+# Serves the cmd/spinclass/list_view rendering dev-loop. Requires `posh` on PATH.
+[group('debug')]
+debug-render-tty cols="100" *args="list":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    command -v posh >/dev/null || { echo "debug-render-tty needs 'posh' on PATH"; exit 1; }
+    bin="$(mktemp -d)/sc"
+    go build -o "$bin" ./cmd/spinclass || exit 1
+    sess="sc-render-$$"
+    trap 'posh kill "$sess" >/dev/null 2>&1' EXIT
+    # posh `run` space-joins argv and feeds it to the session shell, so a bare
+    # `;` argv becomes a real command separator: resize the PTY, then run sc.
+    posh run "$sess" -- stty cols {{ cols }} rows 50 ';' "$bin" {{ args }}
+    sleep 2
+    posh history "$sess"
+
 # Verify that the nix-built binary has version+commit burnt in via the
 # fork's buildGoApplication ldflags, and that the prefix matches the
 # spinclassVersion literal in flake.nix.

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/amarbel-llc/spinclass/internal/session"
 )
 
@@ -96,12 +98,14 @@ func TestRenderListTable(t *testing.T) {
 	}
 	diags := []string{"lab: unreachable (no route to host)"}
 
-	out := renderListTable(states, remoteRows, diags, false)
+	// width 0 ⇒ content-sized layout (no wrapping), so the spawned-by hint
+	// stays contiguous in its cell for the substring assertion below.
+	out := renderListTable(states, remoteRows, diags, false, 0)
 
 	for _, want := range []string{
-		"STATE", "SESSION", "BRANCH", "AGE", "DESCRIPTION", // headers
-		"spinclass/bright-cedar", "charm render", // active local row
-		"spinclass/spawned-walnut",          // spawned local row
+		"REPO", "NAME", "STATUS", "AGE", "DESCRIPTION", // headers (merged STATE+CLOWNS → STATUS)
+		"bright-cedar", "charm render", // active local row (NAME split from REPO)
+		"spawned-walnut",                    // spawned local row
 		"↰spinclass/bright-cedar",           // spawned-by hint (contiguous in cell)
 		"devbox:crisp-catalpa", "fix login", // prefixed remote row
 		"lab: unreachable", // diagnostic
@@ -110,24 +114,29 @@ func TestRenderListTable(t *testing.T) {
 			t.Errorf("table missing %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "spinclass/ghost") {
+	if strings.Contains(out, "ghost") {
 		t.Errorf("abandoned row must be filtered when closed=false:\n%s", out)
 	}
 }
 
-// TestRenderListTableShowsClownColumn: when clown presence exists for a
-// session's key (decoration), the table gains a CLOWNS column.
-func TestRenderListTableShowsClownColumn(t *testing.T) {
+// TestRenderListTableFoldsClownCountIntoStatus: when clown presence exists for
+// a session's key (decoration), each live clown is rendered as a 🤡 inside the
+// merged STATUS cell — there is no longer a separate CLOWNS column.
+func TestRenderListTableFoldsClownCountIntoStatus(t *testing.T) {
 	state := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", state)
 	dir := filepath.Join(state, "clown", "presence")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	rec := `{"sessionKey":"uuid","channelId":"abcd","decoration":"spinclass/feat","lastSeen":"` +
-		time.Now().Format(time.RFC3339Nano) + `"}`
-	if err := os.WriteFile(filepath.Join(dir, "abcd.json"), []byte(rec), 0o600); err != nil {
-		t.Fatal(err)
+	// Two live clowns on the same session key → two presence records → two 🤡.
+	for _, ch := range []string{"abcd", "efgh"} {
+		rec := `{"sessionKey":"uuid-` + ch + `","channelId":"` + ch +
+			`","decoration":"spinclass/feat","lastSeen":"` +
+			time.Now().Format(time.RFC3339Nano) + `"}`
+		if err := os.WriteFile(filepath.Join(dir, ch+".json"), []byte(rec), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	out := renderListTable([]session.State{{
@@ -137,18 +146,26 @@ func TestRenderListTableShowsClownColumn(t *testing.T) {
 		Branch:       "feat",
 		SessionKey:   "spinclass/feat",
 		StartedAt:    time.Now(),
-	}}, nil, nil, false)
+	}}, nil, nil, false, 0)
 
-	if !strings.Contains(out, "CLOWNS") {
-		t.Errorf("expected CLOWNS column when presence exists:\n%s", out)
+	if strings.Contains(out, "CLOWNS") {
+		t.Errorf("CLOWNS column was merged into STATUS; header must be gone:\n%s", out)
+	}
+	// One 🤡 per clown (not a 🤡N count): two clowns must render two emoji.
+	if !strings.Contains(out, "🤡🤡") {
+		t.Errorf("expected two 🤡 (one per clown) in the STATUS cell:\n%s", out)
 	}
 }
 
-// TestRenderListTablePresenceOverridesInactiveState: a session whose recorded
-// PID is dead (base state inactive) but which has a live clown must render
-// running-detached, not inactive — the #153 fix, so the STATE cell never
-// contradicts the CLOWNS count beside it.
-func TestRenderListTablePresenceOverridesInactiveState(t *testing.T) {
+// TestRenderListTablePresenceFoldsIntoStatus: a session whose recorded PID is
+// dead (base state inactive) but which has a live clown must still surface that
+// clown in its STATUS cell — the #153 concern that the status never contradict
+// the clown count beside it. With the dot-only STATUS design the
+// resolved state (inactive→running-detached) is carried by the dot's COLOR,
+// which lipgloss strips in a non-TTY test, so the assertable signal here is the
+// 🤡 badge; the inactive→running-detached promotion itself is covered by
+// session.TestResolveDisplayState.
+func TestRenderListTablePresenceFoldsIntoStatus(t *testing.T) {
 	state := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", state)
 	dir := filepath.Join(state, "clown", "presence")
@@ -167,10 +184,10 @@ func TestRenderListTablePresenceOverridesInactiveState(t *testing.T) {
 		Branch:       "feat",
 		SessionKey:   "spinclass/feat",
 		StartedAt:    time.Now(),
-	}}, nil, nil, false)
+	}}, nil, nil, false, 0)
 
-	if !strings.Contains(out, session.StateRunningDetached) {
-		t.Errorf("live clown over dead PID must render running-detached:\n%s", out)
+	if !strings.Contains(out, "🤡") {
+		t.Errorf("live clown over dead PID must surface a 🤡 in STATUS:\n%s", out)
 	}
 }
 
@@ -185,9 +202,9 @@ func TestRenderListTableClosedIncludesAbandoned(t *testing.T) {
 			Branch:       "ghost",
 			SessionKey:   "spinclass/ghost",
 		},
-	}, nil, nil, true)
+	}, nil, nil, true, 0)
 
-	if !strings.Contains(out, "spinclass/ghost") {
+	if !strings.Contains(out, "ghost") {
 		t.Errorf("closed=true must include abandoned row:\n%s", out)
 	}
 }
@@ -196,11 +213,40 @@ func TestRenderListTableClosedIncludesAbandoned(t *testing.T) {
 // still render when there are no session rows.
 func TestRenderListTableEmpty(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir()) // hermetic: no clown presence
-	out := renderListTable(nil, nil, []string{"lab: unreachable (timeout)"}, false)
+	out := renderListTable(nil, nil, []string{"lab: unreachable (timeout)"}, false, 0)
 	if !strings.Contains(out, "No sessions.") {
 		t.Errorf("empty list should say 'No sessions.':\n%s", out)
 	}
 	if !strings.Contains(out, "lab: unreachable") {
 		t.Errorf("empty list should still show diagnostics:\n%s", out)
+	}
+}
+
+// TestRenderListTableWrapsDescription verifies the DESCRIPTION column wraps to
+// the terminal width instead of overflowing and breaking the grid:
+// given a known width, no rendered line exceeds it, and the long description is
+// wrapped rather than truncated (its trailing END marker survives).
+func TestRenderListTableWrapsDescription(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir()) // hermetic: no clown presence
+	const width = 100
+	longDesc := strings.Repeat("alpha bravo charlie delta ", 12) + "END"
+
+	out := renderListTable([]session.State{{
+		SessionState: session.StateActive,
+		PID:          os.Getpid(),
+		WorktreePath: t.TempDir(),
+		Branch:       "wide-willow",
+		SessionKey:   "spinclass/wide-willow",
+		Description:  longDesc,
+		StartedAt:    time.Now(),
+	}}, nil, nil, false, width)
+
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if w := lipgloss.Width(line); w > width {
+			t.Errorf("line exceeds width %d (got %d): %q", width, w, line)
+		}
+	}
+	if !strings.Contains(out, "END") {
+		t.Errorf("wrapped description must not be truncated (missing trailing END):\n%s", out)
 	}
 }

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strconv"
+	"regexp"
 	"strings"
 	"time"
 
@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/mattn/go-isatty"
+	"golang.org/x/term"
 
 	"github.com/amarbel-llc/spinclass/internal/clown"
 	"github.com/amarbel-llc/spinclass/internal/session"
@@ -75,7 +76,7 @@ func runListCLI(ctx context.Context, g globalArgs, closed, watch bool, interval 
 		if err != nil {
 			return err
 		}
-		fmt.Print(renderListTable(states, remoteRows, diags, closed))
+		fmt.Print(renderListTable(states, remoteRows, diags, closed, terminalWidth()))
 		return nil
 	default: // modePlain, modeJSON
 		// Both reuse runListResult. FormatOrDefault() already yields "json"
@@ -109,35 +110,76 @@ func parseWatchInterval(s string) (time.Duration, error) {
 // ---- styling ---------------------------------------------------------------
 
 var (
-	// stateStyles colors the STATE cell by resolved session state. ANSI
-	// palette indices keep it readable across terminal themes.
+	// subtleColor dims the borders, the dot legend, and other secondary text
+	// while staying legible on both light and dark terminals. A fixed ANSI "8"
+	// (bright black) renders near-invisible against a dark background — looking
+	// "all black" next to the default-foreground main text — so use an adaptive
+	// 256-color gray that tracks the detected background the way the uncolored
+	// main text already does.
+	subtleColor = lipgloss.AdaptiveColor{Light: "240", Dark: "245"}
+
+	// stateStyles colors the STATUS dot by resolved session state. ANSI palette
+	// indices keep the live states readable across terminal themes; abandoned
+	// reuses the adaptive subtle gray so it never disappears into the bg.
 	stateStyles = map[string]lipgloss.Style{
 		session.StateActive:          lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true), // green
 		session.StateRunningDetached: lipgloss.NewStyle().Foreground(lipgloss.Color("6")),            // cyan
 		session.StateInactive:        lipgloss.NewStyle().Foreground(lipgloss.Color("3")),            // yellow
-		session.StateAbandoned:       lipgloss.NewStyle().Foreground(lipgloss.Color("8")),            // gray
+		session.StateAbandoned:       lipgloss.NewStyle().Foreground(subtleColor),                    // gray
 	}
-	dimStyle           = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	dimStyle           = lipgloss.NewStyle().Foreground(subtleColor)
 	headerStyle        = lipgloss.NewStyle().Bold(true).Padding(0, 1)
 	cellStyle          = lipgloss.NewStyle().Padding(0, 1)
-	borderStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	borderStyle        = lipgloss.NewStyle().Foreground(subtleColor)
 	remoteSessionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("5")) // magenta
 	titleStyle         = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
 	errStyle           = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 )
 
-// stateCell renders the colored STATE cell with an optional dim marker
-// suffix (main / tombstone / dangling / remote).
-func stateCell(state, marker string) string {
+// statusCell renders the merged STATUS cell: a state-colored ● dot, one 🤡 per
+// live clown running under the session (so a busy session reads as "active,
+// 🤡🤡🤡" — the badge width itself shows the count at a glance), and an optional
+// dim marker suffix (main / tombstone / dangling / remote). State is carried by
+// the dot's color alone — see statusLegend for the key — which the dot+clowns
+// design trades word-legibility for a far narrower column.
+func statusCell(state string, clowns int, marker string) string {
 	st, ok := stateStyles[state]
 	if !ok {
 		st = dimStyle
 	}
-	out := st.Render(state)
+	out := st.Render("●")
+	if clowns > 0 {
+		out += " " + st.Render(strings.Repeat("🤡", clowns))
+	}
 	if marker != "" {
 		out += " " + dimStyle.Render("("+marker+")")
 	}
 	return out
+}
+
+// statusLegend is the dim key decoding the STATUS dot colors, rendered once in
+// the table's footer row (legendFooter) so the dot-only column stays
+// self-explanatory.
+func statusLegend() string {
+	dot := func(state, label string) string {
+		return stateStyles[state].Render("●") + dimStyle.Render(" "+label)
+	}
+	return strings.Join([]string{
+		dot(session.StateActive, "active"),
+		dot(session.StateRunningDetached, "running-detached"),
+		dot(session.StateInactive, "inactive"),
+		dot(session.StateAbandoned, "abandoned"),
+	}, dimStyle.Render(" · "))
+}
+
+// terminalWidth reports stdout's column count for description wrapping, or 0
+// when stdout is not a sized terminal (callers treat 0 as "don't wrap").
+func terminalWidth() int {
+	w, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil || w <= 0 {
+		return 0
+	}
+	return w
 }
 
 // descCell renders the DESCRIPTION cell, folding the spawn-lineage hint in
@@ -161,14 +203,25 @@ func renderDiags(diags []string) string {
 	return strings.Join(lines, "\n")
 }
 
-// clownsCell renders the count of live clowns running under a session (from
-// clown's presence index), or "" when none — so the column reads clean for
-// sessions with no attached clown.
-func clownsCell(n int) string {
-	if n == 0 {
-		return ""
+// descColumn is the 0-based index of the DESCRIPTION column in the table
+// layout below (REPO · NAME · STATUS · AGE · DESCRIPTION). It is the only
+// column given a fixed width, so it is the one that wraps.
+const descColumn = 4
+
+// listTableRow is one fully-rendered row of the summary table.
+type listTableRow struct{ repo, name, status, age, desc string }
+
+// repoAndName splits a session key (<repo>/<rest>, where <rest> is a branch or
+// the implicit-session random id) into its repo and name halves for the first
+// two columns — eliminating the old SESSION+BRANCH redundancy where the branch
+// was printed both inside the key and again on its own. Cutting on the first
+// "/" keeps slashes in branch names (e.g. feature/foo) attached to the name.
+func repoAndName(sessionKey string) (repo, name string) {
+	repo, name, found := strings.Cut(sessionKey, "/")
+	if !found {
+		return "", sessionKey
 	}
-	return strconv.Itoa(n)
+	return repo, name
 }
 
 // renderListTable renders the styled session table — the summary view shared
@@ -176,21 +229,21 @@ func clownsCell(n int) string {
 // active-first (session.SortStates) and filtered the same way the text path
 // is: abandoned/closed entries are dropped unless closed is true. The full
 // worktree path is intentionally omitted (available via --format tap/json);
-// this is a scannable summary. Pure: returns the rendered string with a
-// trailing newline.
-func renderListTable(states []session.State, remoteRows []session.ListRow, diags []string, closed bool) string {
+// this is a scannable summary. width is stdout's column count (0 ⇒ unknown);
+// when known, the DESCRIPTION column is bounded so long descriptions wrap
+// inside their cell instead of overflowing and breaking the grid. Pure:
+// returns the rendered string with a trailing newline.
+func renderListTable(states []session.State, remoteRows []session.ListRow, diags []string, closed bool, width int) string {
 	now := time.Now()
 	session.SortStates(states)
 
 	// Clown presence (RFC-0014 §4): the 1-to-many "clowns under this session"
-	// view, grouped by decoration == the spinclass session key. The CLOWNS
-	// column is shown only when some clown presence exists, so a bare spinclass
-	// (or no clown) keeps the legacy 5-column table.
+	// view, grouped by decoration == the spinclass session key. The count folds
+	// into the STATUS cell — presence of live clowns IS activity — so there is
+	// no longer a separate CLOWNS column.
 	presByKey := clown.PresenceByDecoration(now)
-	showClowns := len(presByKey) > 0
 
-	type row struct{ state, sess, branch, age, desc, clowns string }
-	var rows []row
+	var rows []listTableRow
 
 	for i := range states {
 		s := &states[i]
@@ -209,24 +262,24 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 		case s.Kind == session.KindImplicit:
 			marker = "main"
 		}
-		// State cell uses the presence-aware display state so a live clown over a
-		// dead spinclass PID reads running-detached, not inactive (#153) — never
-		// contradicting the CLOWNS count beside it. Filter/marker stay on the base
+		repo, name := repoAndName(s.SessionKey)
+		// Status uses the presence-aware display state so a live clown over a dead
+		// spinclass PID reads running-detached, not inactive (#153) — never
+		// contradicting the 🤡 count beside it. Filter/marker stay on the base
 		// resolved state above so presence never un-abandons a row.
-		rows = append(rows, row{
-			state:  stateCell(s.ResolveDisplayState(clowns), marker),
-			sess:   s.SessionKey,
-			branch: s.Branch,
+		rows = append(rows, listTableRow{
+			repo:   repo,
+			name:   name,
+			status: statusCell(s.ResolveDisplayState(clowns), clowns, marker),
 			age:    sessionpick.FormatRelDate(sessionpick.LastActivity(*s), now),
 			desc:   descCell(s.Description, s.SpawnedBy),
-			clowns: clownsCell(clowns),
 		})
 	}
 	for _, r := range remoteRows {
-		rows = append(rows, row{
-			state:  stateCell(r.State, "remote"),
-			sess:   remoteSessionStyle.Render(r.Remote + ":" + r.ID),
-			branch: r.Branch,
+		rows = append(rows, listTableRow{
+			repo:   r.Repo,
+			name:   remoteSessionStyle.Render(r.Remote + ":" + r.ID),
+			status: statusCell(r.State, r.ClownCount, "remote"),
 			age:    "",
 			desc:   descCell(r.Description, r.SpawnedBy),
 		})
@@ -240,35 +293,115 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 		return out + "\n"
 	}
 
-	headers := []string{"STATE"}
-	if showClowns {
-		headers = append(headers, "CLOWNS")
-	}
-	headers = append(headers, "SESSION", "BRANCH", "AGE", "DESCRIPTION")
-
 	t := table.New().
 		Border(lipgloss.RoundedBorder()).
 		BorderStyle(borderStyle).
-		Headers(headers...).
-		StyleFunc(func(r, _ int) lipgloss.Style {
-			if r == table.HeaderRow {
-				return headerStyle
-			}
-			return cellStyle
-		})
-	for _, r := range rows {
-		cells := []string{r.state}
-		if showClowns {
-			cells = append(cells, r.clowns)
-		}
-		cells = append(cells, r.sess, r.branch, r.age, r.desc)
-		t.Row(cells...)
+		BorderBottom(false). // the legend footer (legendFooter) supplies the closing border
+		Headers("REPO", "NAME", "STATUS", "AGE", "DESCRIPTION").
+		StyleFunc(listTableStyleFunc(width, fixedColumnWidths(rows)))
+	// Description-column wrapping: when stdout's width is known, give
+	// the table that total width and pin the four narrow columns to their content
+	// width (below); lipgloss's resizer grows the shortest column and shrinks the
+	// biggest but skips any column already at its fixed width, so it flexes only
+	// the one unpinned column — DESCRIPTION — to the remaining space, wrapping it
+	// (table wrapping is on by default) rather than letting it overflow and break
+	// the grid. Width 0 (non-TTY / unknown) keeps the legacy content-sized layout.
+	if width > 0 {
+		t = t.Width(width)
 	}
-	out := t.Render()
+	for _, r := range rows {
+		t.Row(r.repo, r.name, r.status, r.age, r.desc)
+	}
+	out := legendFooter(t.Render(), statusLegend())
 	if len(diags) > 0 {
 		out += "\n" + renderDiags(diags)
 	}
 	return out + "\n"
+}
+
+// ansiSGR matches SGR color/style escape sequences, used to measure the
+// table's border geometry from its (styled) top border line.
+var ansiSGR = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+// legendFooter attaches the status-dot color key as a footer row spanning the
+// full width of body — a table rendered WITHOUT its bottom border. It reads the
+// column geometry from the table's top border line (stripped of color) so the
+// connecting rule can drop a ┴ under each column boundary, merging the columns
+// into the spanning footer; the legend is then framed to the table's inner
+// width (lipgloss wraps it if the terminal is narrower than the key) and closed
+// by a flat bottom border. Border glyphs reuse borderStyle so the footer is the
+// same color as the rest of the grid.
+func legendFooter(body, legend string) string {
+	lines := strings.Split(body, "\n")
+	top := []rune(ansiSGR.ReplaceAllString(lines[0], ""))
+	total := len(top)
+	if total < 2 {
+		// Degenerate (no recognizable border) — fall back to a plain trailing line.
+		return body + "\n" + legend
+	}
+	inner := total - 2
+
+	connector := make([]rune, total)
+	bottom := make([]rune, total)
+	for i := range connector {
+		connector[i], bottom[i] = '─', '─'
+	}
+	connector[0], connector[total-1] = '├', '┤'
+	bottom[0], bottom[total-1] = '╰', '╯'
+	for i, r := range top {
+		if r == '┬' {
+			connector[i] = '┴'
+		}
+	}
+
+	bar := borderStyle.Render("│")
+	keyBody := lipgloss.NewStyle().Width(inner).Padding(0, 1).Align(lipgloss.Center).Render(legend)
+	out := append(lines, borderStyle.Render(string(connector)))
+	for _, ln := range strings.Split(keyBody, "\n") {
+		out = append(out, bar+ln+bar)
+	}
+	out = append(out, borderStyle.Render(string(bottom)))
+	return strings.Join(out, "\n")
+}
+
+// fixedColumnWidths returns the content width to pin each non-DESCRIPTION column
+// to: the widest cell in that column, headers included. Pinning these lets
+// lipgloss direct all of the table's flex onto the single unpinned DESCRIPTION
+// column (see renderListTable).
+func fixedColumnWidths(rows []listTableRow) [descColumn]int {
+	w := [descColumn]int{
+		lipgloss.Width("REPO"),
+		lipgloss.Width("NAME"),
+		lipgloss.Width("STATUS"),
+		lipgloss.Width("AGE"),
+	}
+	for _, r := range rows {
+		w[0] = max(w[0], lipgloss.Width(r.repo))
+		w[1] = max(w[1], lipgloss.Width(r.name))
+		w[2] = max(w[2], lipgloss.Width(r.status))
+		w[3] = max(w[3], lipgloss.Width(r.age))
+	}
+	return w
+}
+
+// listTableStyleFunc returns the per-cell StyleFunc. Headers get headerStyle;
+// when width is known the four leading columns are pinned to their content
+// width (fixed[c]) so DESCRIPTION is the only column lipgloss reflows. With
+// width 0 every body cell gets the plain padded cellStyle and the table sizes
+// to content.
+func listTableStyleFunc(width int, fixed [descColumn]int) table.StyleFunc {
+	return func(r, c int) lipgloss.Style {
+		if r == table.HeaderRow {
+			return headerStyle
+		}
+		if width > 0 && c < descColumn {
+			// lipgloss .Width() is the total cell width including padding, so add
+			// cellStyle's horizontal padding back onto the measured content width —
+			// otherwise the pinned column truncates its content by the padding.
+			return cellStyle.Width(fixed[c] + cellStyle.GetHorizontalPadding())
+		}
+		return cellStyle
+	}
 }
 
 // ---- watch model -----------------------------------------------------------
@@ -296,6 +429,7 @@ type watchModel struct {
 	states      []session.State   // reloaded each tick
 	loadErr     error
 	lastRefresh time.Time
+	width       int // terminal columns, from the latest WindowSizeMsg (0 until first)
 }
 
 func reloadListCmd() tea.Msg {
@@ -313,6 +447,9 @@ func (m watchModel) Init() tea.Cmd {
 
 func (m watchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		return m, nil
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c", "esc":
@@ -341,7 +478,7 @@ func (m watchModel) View() string {
 	if m.loadErr != nil {
 		b.WriteString(errStyle.Render("reload error: "+m.loadErr.Error()) + "\n")
 	}
-	b.WriteString(renderListTable(m.states, m.remoteRows, m.diags, m.closed))
+	b.WriteString(renderListTable(m.states, m.remoteRows, m.diags, m.closed, m.width))
 	b.WriteString(dimStyle.Render(fmt.Sprintf("q quit · r refresh · every %s", m.interval)))
 	return b.String()
 }
