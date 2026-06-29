@@ -105,7 +105,7 @@ Sweatfiles support:
 - **`[[mcps]]`** and **`[[start-commands]]`**: arrays of tables merged by name.
 - **`[env]`**: environment variable map merge.
 - **`[hooks]`**: `create` / `stop` / `on-attach` / `on-detach` / `pre-merge` / `repair` / `pre-commit` lifecycle hooks, plus `disable-merge`, `disable-repair`, `disable-pre-commit`, `disable-nix-gc`, `disable-merge-build-worktree`, and `auto-rebuild-on-resume` flags. `auto-rebuild-on-resume = true` makes `sc resume` re-apply a drifted worktree's setup before attaching (default: warn only; see `sc rebuild`). By default the `pre-merge` hook runs in a transient detached build worktree pinned to the committed sha being merged (freeing the session worktree for concurrent work); `disable-merge-build-worktree = true` runs it in place. `pre-commit` (e.g. `conformist-pre-commit` — conformist's store-pinned toolchain wrapper from `lib.mkToolchainHooks`, preferred over a bare `conformist --staged --exit-zero-on-fix` string so a stale PATH conformist or a missing formatter can't break/skip the hook) installs a per-session git pre-commit hook that repairs staged content at authoring time so each commit is conformant in history (worktree-scoped via `extensions.worktreeConfig` + per-worktree `core.hooksPath`; best-effort, never blocks a commit). It installs as a composing dispatcher that delegates to the repo's existing native hooks rather than shadowing them; `disable-pre-commit` is a true uninstall that restores native-hooks-only. The older `repair` (e.g. `conformist --commit --amend --exit-zero-on-fix`) instead runs before the `pre-merge` VERIFY hook to fold fixes into the merged commit at merge time (FDR 0018).
-- **`[session-entry]`**: `start` / `resume` entrypoint commands (default `$SHELL` — spinclass no longer wraps in a multiplexer; clown owns attach + the terminal title via its clownfile `[attach]`, FDR 0017), `spawn-entry` / `spawn-window` for detached worker launch (FDR 0006; `spawn-entry` is exec'd directly and defaults to the clown spawn form), `liveness-probe` for detecting running-detached sessions, `tombstone-retention`, and `[session-entry.env]` for per-session environment injection.
+- **`[session-entry]`**: `start` / `resume` entrypoint commands (default `$SHELL` — spinclass no longer wraps in a multiplexer; clown owns attach + the terminal title via its clownfile `[attach]`, FDR 0017), `spawn-entry` / `spawn-window` for detached worker launch (FDR 0006; `spawn-entry` is exec'd directly and defaults to the clown spawn form), `liveness-probe` (deprecated — post-FDR-0017 liveness derives from clown's presence index, not this argv), `tombstone-retention`, and `[session-entry.env]` for per-session environment injection.
 - **`[[pre-merge-skills]]`**: skill attestation gate — agents must invoke listed skills and record reasoning via `nothing-but-the-truth` before `merge-this-session` will proceed.
 
 Run `sc validate` to check the resolved sweatfile hierarchy for the current
@@ -167,8 +167,8 @@ Sessions are tracked in
 `~/.local/state/spinclass/sessions/<hash>-state.json`. A session is one of:
 
 - **active** — PID alive and worktree exists
-- **running-detached** — entrypoint exited but liveness probe says the multiplexer session is still alive
-- **inactive** — PID dead and no live multiplexer session, but worktree still exists
+- **running-detached** — the spinclass attach exited, but a live clown harness is present for the session (matched via clown's presence index, `decoration == <repo>/<branch>`)
+- **inactive** — PID dead and no live clown harness, but worktree still exists
 - **abandoned** — worktree gone
 
 Dirty state is computed live via git.

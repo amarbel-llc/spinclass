@@ -676,16 +676,22 @@ on macOS.
 scalar override.
 .TP
 .B liveness\-probe
-Argv array exec'd after the entrypoint returns, to distinguish
+.B Deprecated
+(post-FDR-0017): clown owns the multiplexer attach and names sessions by its
+own per-instance key, so this argv can no longer match.
+Spinclass now derives liveness from clown's presence index
+.RB ( decoration
+==
+.BR $SPINCLASS_SESSION_ID ),
+and this probe is no longer consulted \(em retained only until removed.
+Formerly an argv array exec'd after the entrypoint returned, to distinguish
 .BR running\-detached
 from
-.BR inactive .
-Exit 0 means the session is still attachable in the multiplexer;
-non-zero (or 2-second timeout) means it's gone.
-Inherits the session env including any keys from
-.BR [session\-entry].env .
-Typical zmx-style probe:
-.B "[\(dqsh\(dq, \(dq-c\(dq,\ \(dqzmx -g \\\(dq$SPINCLASS_GROUP\\\(dq list --short | grep -qxF \\\(dq$SPINCLASS_SESSION_ID\\\(dq\(dq]" .
+.BR inactive ,
+inheriting the session env including any keys from
+.BR [session\-entry].env ;
+e.g.
+.B "[\(dqsh\(dq, \(dq-c\(dq,\ \(dqposh -g \\\(dq$SPINCLASS_GROUP\\\(dq list --short | grep -qxF \\\(dq$SPINCLASS_SESSION_ID\\\(dq\(dq]" .
 .B Merge:
 scalar override.
 .TP

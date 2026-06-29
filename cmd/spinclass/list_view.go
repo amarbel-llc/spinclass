@@ -194,6 +194,7 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 
 	for i := range states {
 		s := &states[i]
+		clowns := len(presByKey[s.SessionKey])
 		resolved := s.ResolveState()
 		isClosed := resolved == session.StateAbandoned
 		if isClosed && !closed {
@@ -208,13 +209,17 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 		case s.Kind == session.KindImplicit:
 			marker = "main"
 		}
+		// State cell uses the presence-aware display state so a live clown over a
+		// dead spinclass PID reads running-detached, not inactive (#153) — never
+		// contradicting the CLOWNS count beside it. Filter/marker stay on the base
+		// resolved state above so presence never un-abandons a row.
 		rows = append(rows, row{
-			state:  stateCell(resolved, marker),
+			state:  stateCell(s.ResolveDisplayState(clowns), marker),
 			sess:   s.SessionKey,
 			branch: s.Branch,
 			age:    sessionpick.FormatRelDate(sessionpick.LastActivity(*s), now),
 			desc:   descCell(s.Description, s.SpawnedBy),
-			clowns: clownsCell(len(presByKey[s.SessionKey])),
+			clowns: clownsCell(clowns),
 		})
 	}
 	for _, r := range remoteRows {

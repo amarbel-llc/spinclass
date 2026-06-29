@@ -89,6 +89,34 @@ function spinclass_list_shows_sessions { # @test
   assert_session_state
 }
 
+# A fresh clown presence record (decoration == session key) makes `sc list`
+# show an otherwise-inactive session as running-detached and counts the clown
+# (#153 / #175 item 2). This is the clown→spinclass liveness seam under the
+# posh substrate cutover.
+function spinclass_list_presence_marks_session_live { # @test
+  cd "$TEST_REPO" || return
+  local bin="${SPINCLASS_BIN:-spinclass}"
+
+  local start_out wt branch key
+  start_out=$("$bin" --format tap start --no-attach 2>&1)
+  wt=$(extract_wt_path "$start_out")
+  branch=$(basename "$wt")
+  key="$(basename "$TEST_REPO")/$branch"
+
+  # Forge clown's presence file: decoration is the spinclass session key, a
+  # fresh lastSeen keeps it inside the 2-minute staleness window.
+  local pres_dir="$XDG_STATE_HOME/clown/presence"
+  mkdir -p "$pres_dir"
+  printf '{"sessionKey":"uuid-x","channelId":"chan-x","decoration":"%s","lastSeen":"%s"}\n' \
+    "$key" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$pres_dir/chan-x.json"
+
+  run timeout --preserve-status 10s "$bin" --format json list
+  assert_success
+  echo "$output" | jq -e --arg k "$key" \
+    'any(.[]; .session_key == $k and .state == "running-detached" and .clown_count == 1)' \
+    >/dev/null || fail "session $key not shown running-detached w/ clown_count 1: $output"
+}
+
 function spinclass_merge_fast_forwards { # @test
   cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"

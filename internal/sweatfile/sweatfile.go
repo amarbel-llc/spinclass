@@ -441,9 +441,9 @@ func (sf Sweatfile) SessionSpawnWindow() []string {
 // SPINCLASS_DESCRIPTION, TMPDIR, CLAUDE_CODE_TMPDIR) are applied AFTER
 // this map and so cannot be clobbered by user config.
 //
-// Typical use: set $SPINCLASS_GROUP for a zmx-style multiplexer so the
-// probe and entrypoint argv can reference it symbolically. Returns nil
-// when no [session-entry].env is configured.
+// Typical use: set $SPINCLASS_GROUP so a multiplexer (posh under the
+// FDR-0017 cutover) and any session-aware argv can reference the session's
+// group symbolically. Returns nil when no [session-entry].env is configured.
 func (sf Sweatfile) SessionEnv() map[string]string {
 	if sf.SessionEntry == nil {
 		return nil
@@ -451,10 +451,15 @@ func (sf Sweatfile) SessionEnv() map[string]string {
 	return sf.SessionEntry.Env
 }
 
-// SessionLivenessProbe returns the argv list used to determine whether
-// a multiplexer-managed session is still attachable after the entrypoint
-// returns. Empty argv means no probe is configured — callers should treat
-// the absence of a probe as "session is dead" (the conservative answer).
+// SessionLivenessProbe returns the configured [session-entry].liveness-probe
+// argv.
+//
+// Deprecated: post-FDR-0017 clown owns the multiplexer attach and names
+// sessions by its own per-instance key, so a `posh -g … list | grep
+// $SPINCLASS_SESSION_ID`-style probe can never match. Liveness now derives from
+// clown's presence index (internal/clown.PresenceByDecoration). No production
+// code consults this accessor; it (and the `liveness-probe` field) are retained
+// only until the eng home/spinclass.nix probe is dropped, then removed. See #201.
 func (sf Sweatfile) SessionLivenessProbe() []string {
 	if sf.SessionEntry == nil {
 		return nil

@@ -13,6 +13,7 @@ import (
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/protocol"
 	"github.com/amarbel-llc/spinclass/internal/clean"
+	"github.com/amarbel-llc/spinclass/internal/clown"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/pull"
 	"github.com/amarbel-llc/spinclass/internal/remote"
@@ -348,18 +349,30 @@ func gatherListData(ctx context.Context, dbg *slog.Logger, remotes []sweatfile.R
 // rendered after the local rows; an unreachable host yields one
 // diagnostic line (text formats) or a Debug log (json must stay a
 // clean array) — never a command failure.
+// clownCountsByKey reads clown's presence index once and returns the live-clown
+// count per spinclass session key (decoration). Shared by every `sc list` path
+// so the presence read and its `now` are consistent within a single render.
+func clownCountsByKey(now time.Time) map[string]int {
+	out := map[string]int{}
+	for key, ps := range clown.PresenceByDecoration(now) {
+		out[key] = len(ps)
+	}
+	return out
+}
+
 func runListResult(ctx context.Context, closed bool, format string, dbg *slog.Logger, remotes []sweatfile.Remote) (*command.Result, error) {
 	states, remoteRows, diags, err := gatherListData(ctx, dbg, remotes)
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
 	}
+	counts := clownCountsByKey(time.Now())
 	if format == "json" {
 		if dbg != nil {
 			for _, d := range diags {
 				dbg.Debug("remote list diagnostic", "diag", d)
 			}
 		}
-		data, err := json.Marshal(append(session.ListRows(states, closed), remoteRows...))
+		data, err := json.Marshal(append(session.ListRowsWithClowns(states, closed, counts), remoteRows...))
 		if err != nil {
 			return command.TextErrorResult(err.Error()), nil
 		}
@@ -367,11 +380,11 @@ func runListResult(ctx context.Context, closed bool, format string, dbg *slog.Lo
 	}
 	var b strings.Builder
 	for _, s := range states {
-		resolved := s.ResolveState()
-		isClosed := resolved == session.StateAbandoned
+		isClosed := s.ResolveState() == session.StateAbandoned
 		if isClosed && !closed {
 			continue
 		}
+		resolved := s.ResolveDisplayState(counts[s.SessionKey])
 		marker := ""
 		if s.IsTombstone() {
 			marker = "tombstone"

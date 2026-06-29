@@ -37,6 +37,20 @@ func TestReadPresenceDropsStale(t *testing.T) {
 	}
 }
 
+// TestReadPresenceAcceptsRFC3339WithoutFraction guards the bats fixture path:
+// a lastSeen with no fractional seconds (what `date -u +%Y-%m-%dT%H:%M:%SZ`
+// emits) must still parse against RFC3339Nano and count as live.
+func TestReadPresenceAcceptsRFC3339WithoutFraction(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	dir := filepath.Join(state, "clown", "presence")
+	now := time.Now()
+	writePresence(t, dir, Presence{ChannelID: "nf", Decoration: "repo/feat", LastSeen: now.UTC().Format("2006-01-02T15:04:05Z")})
+	if got := ReadPresence(now); len(got) != 1 {
+		t.Errorf("ReadPresence = %d, want 1 (no-fraction RFC3339 must parse)", len(got))
+	}
+}
+
 func TestReadPresenceMissingDirIsEmpty(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir()) // no clown/presence subdir
 	if got := ReadPresence(time.Now()); len(got) != 0 {

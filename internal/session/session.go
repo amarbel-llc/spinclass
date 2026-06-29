@@ -670,6 +670,24 @@ func (s *State) ResolveState() string {
 	return s.SessionState
 }
 
+// ResolveDisplayState augments ResolveState with clown-presence liveness for
+// `sc list`. Under the FDR-0017 posh cutover clown owns the multiplexer attach
+// and names sessions by its own per-instance key, so the recorded spinclass PID
+// is routinely dead even while a clown harness runs in the worktree (spawned
+// workers, post-exec attaches) — ResolveState would call that inactive (#153).
+// When the base state is inactive but at least one live clown is present
+// (liveClowns > 0, the count of fresh clown presence records whose decoration ==
+// this session's key), the session is shown running-detached: harness alive, no
+// attached spinclass client. Presence never rescues an abandoned session
+// (worktree gone / tombstone) — callers keep filtering on the base ResolveState.
+func (s *State) ResolveDisplayState(liveClowns int) string {
+	base := s.ResolveState()
+	if base == StateInactive && liveClowns > 0 {
+		return StateRunningDetached
+	}
+	return base
+}
+
 // FindByWorktreePath returns the session whose WorktreePath is path or
 // contains it. Symlinks on either side are resolved before comparison so
 // a symlink-backed cwd matches a real worktree, and component-aware

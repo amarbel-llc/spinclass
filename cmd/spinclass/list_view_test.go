@@ -144,6 +144,36 @@ func TestRenderListTableShowsClownColumn(t *testing.T) {
 	}
 }
 
+// TestRenderListTablePresenceOverridesInactiveState: a session whose recorded
+// PID is dead (base state inactive) but which has a live clown must render
+// running-detached, not inactive — the #153 fix, so the STATE cell never
+// contradicts the CLOWNS count beside it.
+func TestRenderListTablePresenceOverridesInactiveState(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	dir := filepath.Join(state, "clown", "presence")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rec := `{"sessionKey":"uuid","channelId":"abcd","decoration":"spinclass/feat","lastSeen":"` +
+		time.Now().Format(time.RFC3339Nano) + `"}`
+	if err := os.WriteFile(filepath.Join(dir, "abcd.json"), []byte(rec), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out := renderListTable([]session.State{{
+		SessionState: session.StateInactive, // recorded PID dead → base inactive
+		WorktreePath: t.TempDir(),           // worktree exists → not abandoned
+		Branch:       "feat",
+		SessionKey:   "spinclass/feat",
+		StartedAt:    time.Now(),
+	}}, nil, nil, false)
+
+	if !strings.Contains(out, session.StateRunningDetached) {
+		t.Errorf("live clown over dead PID must render running-detached:\n%s", out)
+	}
+}
+
 // TestRenderListTableClosedIncludesAbandoned confirms the closed flag flips
 // the abandoned-row filter on, mirroring the text path's --closed semantics.
 func TestRenderListTableClosedIncludesAbandoned(t *testing.T) {

@@ -15,6 +15,7 @@ import (
 	"github.com/amarbel-llc/crap/go-crap/v2/crap"
 
 	"github.com/amarbel-llc/spinclass/internal/close"
+	"github.com/amarbel-llc/spinclass/internal/clown"
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/merge"
@@ -261,15 +262,18 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 	}
 
 	// Post-Attach state update. The spinclass-spawned entrypoint has
-	// exited; run the configured liveness probe to distinguish
-	// "user detached but multiplexer still alive" (running-detached)
-	// from "process truly gone" (inactive). When no probe is set, the
-	// conservative answer is inactive — same as pre-slice-2 behaviour.
+	// exited; consult clown's presence index to distinguish "harness still
+	// alive, no attached spinclass client" (running-detached) from "process
+	// truly gone" (inactive). Under the FDR-0017 posh cutover clown owns the
+	// multiplexer attach and names sessions by its own per-instance key, so
+	// the old `posh -g … list | grep $SPINCLASS_SESSION_ID` probe could never
+	// match — presence (decoration == session key) is the liveness source now.
+	// A missing/stale presence record degrades to inactive (never false-alive).
 	now := time.Now().UTC()
 	if existing, err := session.Read(rp.RepoPath, rp.Branch); err == nil {
 		existing.PID = 0
 		existing.ExitedAt = &now
-		if probeAlive(sf.SessionLivenessProbe(), 2*time.Second) {
+		if len(clown.PresenceByDecoration(now)[existing.SessionKey]) > 0 {
 			existing.SessionState = session.StateRunningDetached
 		} else {
 			existing.SessionState = session.StateInactive

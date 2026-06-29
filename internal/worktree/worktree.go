@@ -22,7 +22,7 @@ const WorktreesDir = ".worktrees"
 type ResolvedPath struct {
 	AbsPath        string // absolute filesystem path to the worktree
 	RepoPath       string // absolute path to the parent git repo
-	SessionKey     string // key for zmx/executor sessions (<repo-dirname>/<branch>)
+	SessionKey     string // key for clown/executor sessions (<repo-dirname>/<branch>)
 	Branch         string // branch name
 	Description    string // freeform session description
 	ExistingBranch string // non-empty when an existing branch was detected

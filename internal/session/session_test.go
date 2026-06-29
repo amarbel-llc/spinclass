@@ -547,6 +547,53 @@ func TestResolveStateRunningDetachedReturnsAsIs(t *testing.T) {
 	}
 }
 
+// TestResolveDisplayState covers the clown-presence augmentation: an inactive
+// base with live clowns reads running-detached (#153); every other base is
+// returned unchanged, and presence never rescues an abandoned session.
+func TestResolveDisplayState(t *testing.T) {
+	live := t.TempDir()
+	gone := filepath.Join(t.TempDir(), "missing")
+	cases := []struct {
+		name   string
+		state  State
+		clowns int
+		want   string
+	}{
+		{
+			"inactive base + live clown → running-detached",
+			State{SessionState: StateInactive, WorktreePath: live},
+			2, StateRunningDetached,
+		},
+		{
+			"inactive base + no clown stays inactive",
+			State{SessionState: StateInactive, WorktreePath: live},
+			0, StateInactive,
+		},
+		{
+			"active+alive base unaffected by clowns",
+			State{SessionState: StateActive, PID: os.Getpid(), WorktreePath: live},
+			3, StateActive,
+		},
+		{
+			"running-detached base unchanged",
+			State{SessionState: StateRunningDetached, WorktreePath: live},
+			1, StateRunningDetached,
+		},
+		{
+			"abandoned (missing worktree) never rescued by clowns",
+			State{SessionState: StateActive, PID: os.Getpid(), WorktreePath: gone},
+			5, StateAbandoned,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.state.ResolveDisplayState(c.clowns); got != c.want {
+				t.Errorf("ResolveDisplayState(%d) = %s, want %s", c.clowns, got, c.want)
+			}
+		})
+	}
+}
+
 func TestGCTombstones(t *testing.T) {
 	base := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", filepath.Join(base, "xdg-state"))

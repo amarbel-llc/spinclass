@@ -135,6 +135,46 @@ func TestListRowsCarriesKind(t *testing.T) {
 	}
 }
 
+// TestListRowsWithClowns: a live clown over an inactive session sets ClownCount
+// and flips the row's State to running-detached (#153/#175 item 2); a session
+// with no clown keeps State inactive and omits clown_count from the wire JSON.
+func TestListRowsWithClowns(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "spinclass")
+	withClown := filepath.Join(repo, ".worktrees", "with-clown")
+	noClown := filepath.Join(repo, ".worktrees", "no-clown")
+	for _, dir := range []string{withClown, noClown} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	states := []State{
+		{SessionState: StateInactive, RepoPath: repo, WorktreePath: withClown, Branch: "with-clown", SessionKey: "spinclass/with-clown"},
+		{SessionState: StateInactive, RepoPath: repo, WorktreePath: noClown, Branch: "no-clown", SessionKey: "spinclass/no-clown"},
+	}
+
+	rows := ListRowsWithClowns(states, false, map[string]int{"spinclass/with-clown": 2})
+	if len(rows) != 2 {
+		t.Fatalf("rows: got %d, want 2", len(rows))
+	}
+	if rows[0].ClownCount != 2 || rows[0].State != StateRunningDetached {
+		t.Errorf("with-clown row = {ClownCount:%d State:%q}, want {2 running-detached}", rows[0].ClownCount, rows[0].State)
+	}
+	if rows[1].ClownCount != 0 || rows[1].State != StateInactive {
+		t.Errorf("no-clown row = {ClownCount:%d State:%q}, want {0 inactive}", rows[1].ClownCount, rows[1].State)
+	}
+
+	// The clown-less row's JSON must omit "clown_count" (omitempty preserves the
+	// legacy wire shape for hosts/sessions with no clown).
+	data, err := json.Marshal(rows[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "clown_count") {
+		t.Errorf("clown-less row JSON unexpectedly contains \"clown_count\": %s", data)
+	}
+}
+
 // TestListRowsCarriesSpawnedBy verifies the spawn lineage hint survives
 // the wire shape (FDR 0006): a state with SpawnedBy yields the driver key
 // on its ListRow, while an ordinary state yields "" and its JSON omits the
