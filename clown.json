@@ -4,7 +4,8 @@
     "spinclass": {
       "command": "@SPINCLASS@",
       "args": ["serve"],
-      "timeout": 900000
+      "timeout": 900000,
+      "systemPrompt": true
     }
   }
 }

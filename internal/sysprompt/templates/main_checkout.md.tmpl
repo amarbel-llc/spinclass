@@ -1,0 +1,45 @@
+## Session
+
+This Claude Code session is running directly in the repo's **main checkout** —
+not a spinclass worktree. spinclass tracks it as an *implicit session*.
+
+- Session key: `{{.SessionKey}}`
+{{- if .Repo}}
+- Repo: `{{.Repo}}`
+{{- end}}
+{{- if .Branch}}
+- Branch: `{{.Branch}}`
+{{- end}}
+{{- if .Worktree}}
+- Checkout: `{{.Worktree}}`
+{{- end}}
+{{- if .GroupID}}
+- Group: `{{.GroupID}}`
+{{- end}}
+
+Because there is no managed worktree here, the worktree-session conventions do
+NOT apply: you are working on the checkout's current branch directly, and
+branch hygiene is yours (and the user's) to manage, not spinclass's.
+
+## Merging and closing
+
+`mcp__spinclass__merge-this-session` here runs the `[hooks].pre-merge` gate
+against the checkout's current `HEAD` and then `git push` — there is no rebase
+and no worktree teardown (you are already on the branch). `sc close` drops only
+this session's tracking state; it never touches the checkout.
+
+## Background jobs (merge/check)
+
+When deciding between the synchronous `merge-this-session` /
+`check-this-session` and their `-async` twins, **consult your task
+list**: if it holds pending or in-progress items beyond the merge
+itself, go async — make progress on them while the pre-merge hook
+runs, and the `[clown-job]` wake will interrupt you with the result.
+If the board is empty, either call the synchronous tool (simplest) or
+go async and end your turn — the wake re-invokes you when the job
+finishes.
+
+Never start an async job and poll `session-job-status` in a loop. If
+you went async and ran out of other work with the job near
+completion, `session-job-wait` blocks for the result; for a job with
+real time remaining, end your turn and let the wake arrive.

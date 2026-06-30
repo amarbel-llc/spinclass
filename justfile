@@ -338,6 +338,24 @@ debug-session-env-map:
       echo "   $cl"
     done
 
+# [debug] Pipe a cold `prompts/get` (no `initialize`) into `spinclass serve` and
+# print the dynamic system-prompt fragment it returns, extracted from the
+# JSON-RPC result. Serves the internal/sysprompt dev-loop (spinclass#187): edit a
+# template, re-run, eyeball the rendered markdown. With mode=worktree, sets the
+# SPINCLASS_* identity env so the worktree variant renders; default resolves
+# whatever the cwd maps to (a git checkout -> the main-checkout variant).
+[group('debug')]
+debug-prompt-fragment mode="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    req='{"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":"system-prompt-append"}}'
+    if [ "{{ mode }}" = "worktree" ]; then
+      export SPINCLASS_WORKTREE="$PWD" SPINCLASS_SESSION_ID="demo/branch" SPINCLASS_BRANCH="branch"
+    fi
+    printf '%s\n' "$req" \
+      | go run ./cmd/spinclass serve 2>/dev/null \
+      | jq -r 'select(.id == 1) | .result.messages[0].content.text'
+
 # [debug] Render an `sc` subcommand through a REAL PTY and dump the screen, so
 # TTY-only output — the pretty `sc list` table's colored status dots, 🤡 clown
 # badges, and description wrapping — can be eyeballed the way color-stripped

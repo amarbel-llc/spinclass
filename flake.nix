@@ -217,7 +217,7 @@
 
               pluginShare="$out/share/purse-first/spinclass"
               mkdir -p "$pluginShare/.claude-plugin" \
-                       "$pluginShare/.clown-plugin/system-prompt-append.d"
+                       "$pluginShare/.clown-plugin"
 
               install -m 0644 ${./.claude-plugin/plugin.json} \
                 "$pluginShare/.claude-plugin/plugin.json"
@@ -240,10 +240,12 @@
                 "$pluginShare/clown.json" \
                 "$pluginShare/.clown-plugin/clown.json" \
                 --replace-fail '@SPINCLASS@' "$out/bin/spinclass"
-              install -m 0644 ${./.clown-plugin/system-prompt-append.d/00-worktree.md} \
-                "$pluginShare/.clown-plugin/system-prompt-append.d/00-worktree.md"
-              install -m 0644 ${./.clown-plugin/system-prompt-append.d/10-session-jobs.md} \
-                "$pluginShare/.clown-plugin/system-prompt-append.d/10-session-jobs.md"
+
+              # No static system-prompt-append.d fragments are installed: the
+              # session orientation is contributed dynamically at launch by
+              # `spinclass serve` (clown plugin protocol RFC-0002 §5; the
+              # `systemPrompt: true` opt-in in clown.json above). See
+              # internal/sysprompt and spinclass#187.
 
               # Plugin-level hook registration. Clown auto-discovers
               # ${"\${CLAUDE_PLUGIN_ROOT}"}/hooks/hooks.json and wires the listed

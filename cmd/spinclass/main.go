@@ -37,10 +37,11 @@ func main() {
 
 // generateArtifacts mirrors command.App.GenerateAllWithSkills minus the
 // plugin manifest step. Spinclass owns its .claude-plugin/plugin.json
-// (and its sibling clown.json + system-prompt-append.d fragments) directly
-// so the manifest can carry a real version. The Nix build copies those
-// files into share/purse-first/spinclass/ in postInstall and substitutes
-// @VERSION@ at install time.
+// (and its sibling clown.json) directly so the manifest can carry a real
+// version. The Nix build copies those files into share/purse-first/spinclass/
+// in postInstall and substitutes @VERSION@ at install time. Session
+// orientation is contributed dynamically by `spinclass serve` (see
+// internal/sysprompt), so no static system-prompt fragments are installed.
 func generateArtifacts(app *command.App, outDir string) error {
 	purseDir := filepath.Join(outDir, "share", "purse-first")
 	if err := app.GenerateMappings(purseDir); err != nil {

@@ -177,6 +177,18 @@ subcommand is always available.
   clown wakes the agent with one `[clown-job]` line. Purely additive;
   job.json/job.log stay the system of record; rollback is
   `CLOWN_DISABLE_JOB_WAKEUP=1`.
+- **Dynamic system-prompt fragment** (spinclass#187, clown plugin protocol
+  RFC-0002 §5, `internal/sysprompt`): `serve` advertises an MCP `prompts`
+  capability and answers `prompts/get` for the well-known `system-prompt-append`
+  prompt. clown's stdio bridge (opted in via `clown.json`
+  `stdioServers.spinclass.systemPrompt = true`) fetches it **before
+  `initialize`** and appends it last into the agent's system prompt; go-mcp's
+  V0-only `PromptRegistry` answers the cold request. `sysprompt.Resolve` branches
+  on runtime state — **worktree session** (`SPINCLASS_WORKTREE` set + cwd inside
+  it) vs **main checkout** (implicit session, FDR 0014; coordinates from
+  cwd+git) — and `Render` picks the matching embedded template. This **replaces**
+  the retired static `.clown-plugin/system-prompt-append.d/` fragments (no static
+  fallback); rollback is restoring those files + the flake install lines.
 - **Pre-merge build worktree** (FDR 0013): by default the hook runs in a
   transient detached worktree pinned to the committed sha (`check.resolveHookDir`
   → `.merge-<branch>-<sha>-<pid>` under `.worktrees/`), freeing the session
