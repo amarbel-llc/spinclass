@@ -64,6 +64,12 @@ func RevParse(repoPath, ref string) (string, error) {
 	return Run(repoPath, "rev-parse", ref)
 }
 
+// RemoteURL returns the fetch URL configured for the "origin" remote of the
+// repo (or worktree) at repoPath. It errors when no origin remote exists.
+func RemoteURL(repoPath string) (string, error) {
+	return Run(repoPath, "remote", "get-url", "origin")
+}
+
 func CommitsAhead(worktreePath, base, branch string) int {
 	out, err := Run(worktreePath, "rev-list", base+".."+branch, "--count")
 	if err != nil {

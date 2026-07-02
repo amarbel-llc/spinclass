@@ -19,7 +19,7 @@ func registerVersionCommand(app *command.App) {
 		Title: "Print Spinclass Version",
 		Description: command.Description{
 			Short: "Print spinclass version and any build-time-pinned tools",
-			Long:  "Print a table of components: spinclass itself plus any binaries pinned via lib.mkSpinclass (madder, direnv). Empty pins display as `dormant`. Version and commit are injected at build time as `<version>+<commit>`; a devshell `go build` reports `dev+unknown`.",
+			Long:  "Print a table of components: spinclass itself plus any binaries pinned via lib.mkSpinclass (madder, direnv, papi, gh). Empty pins display as `dormant`. Version and commit are injected at build time as `<version>+<commit>`; a devshell `go build` reports `dev+unknown`.",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			ReadOnlyHint:    protocol.BoolPtr(true),
@@ -28,12 +28,12 @@ func registerVersionCommand(app *command.App) {
 			OpenWorldHint:   protocol.BoolPtr(false),
 		},
 		Run: func(_ context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
-			return command.TextResult(formatVersionTable(version, commit, madderBin, direnvBin)), nil
+			return command.TextResult(formatVersionTable(version, commit, madderBin, direnvBin, papiBin, ghBin)), nil
 		},
 	})
 }
 
-func formatVersionTable(spinclassVersion, spinclassCommit, madder, direnv string) string {
+func formatVersionTable(spinclassVersion, spinclassCommit, madder, direnv, papi, gh string) string {
 	var sb strings.Builder
 	tw := tabwriter.NewWriter(&sb, 0, 2, 2, ' ', 0)
 
@@ -47,6 +47,8 @@ func formatVersionTable(spinclassVersion, spinclassCommit, madder, direnv string
 
 	writePinRow(tw, "madder", madder)
 	writePinRow(tw, "direnv", direnv)
+	writePinRow(tw, "papi", papi)
+	writePinRow(tw, "gh", gh)
 
 	_ = tw.Flush()
 	return sb.String()

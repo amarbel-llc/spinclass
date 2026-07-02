@@ -102,8 +102,12 @@ Cheap per-package `go build ./internal/foo/...` checks are fine.
   `direnv` are runtime deps **only** when built via `lib.mkSpinclass` with the
   matching input (paths burned in at link time — `spinclass-build-pins(7)`, FDR
   0003); the default `nix build` leaves both pins empty (madder dormant, direnv
-  from PATH). `clown` is optional, for async job-wakeup emits (`internal/clown`,
-  FDR 0010). Interactive prompts use the in-process `huh` library.
+  from PATH). `papi` and `gh` are pinned the same way (`-X main.papiBin`/`ghBin`)
+  and, unlike madder, are burned into the **default** build; they power the
+  dynamic system-prompt repository line (`internal/repoinfo`) and fall back to
+  PATH lookup when unpinned (devshell `go build`). `clown` is optional, for async
+  job-wakeup emits (`internal/clown`, FDR 0010). Interactive prompts use the
+  in-process `huh` library.
 
 ## CLI Commands
 
@@ -186,9 +190,16 @@ subcommand is always available.
   V0-only `PromptRegistry` answers the cold request. `sysprompt.Resolve` branches
   on runtime state — **worktree session** (`SPINCLASS_WORKTREE` set + cwd inside
   it) vs **main checkout** (implicit session, FDR 0014; coordinates from
-  cwd+git) — and `Render` picks the matching embedded template. This **replaces**
-  the retired static `.clown-plugin/system-prompt-append.d/` fragments (no static
-  fallback); rollback is restoring those files + the flake install lines.
+  cwd+git) — and `Render` picks the matching embedded template. Both templates
+  carry a best-effort **repository line** (provider/owner/link/description)
+  resolved by `internal/repoinfo`: the git remote gives host/owner/name/link with
+  no network, then a **deadline-capped** (`repoFetchTimeout`, 2s) live lookup adds
+  the forge kind (papi, matched against the operator's published PAPI forges) and
+  the description (`gh api` for GitHub, the Gitea/Forgejo REST API self-hosted).
+  Any failure omits only the affected lines — the fetch runs before `initialize`,
+  so it must never block. This **replaces** the retired static
+  `.clown-plugin/system-prompt-append.d/` fragments (no static fallback);
+  rollback is restoring those files + the flake install lines.
 - **Pre-merge build worktree** (FDR 0013): by default the hook runs in a
   transient detached worktree pinned to the committed sha (`check.resolveHookDir`
   → `.merge-<branch>-<sha>-<pid>` under `.worktrees/`), freeing the session

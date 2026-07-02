@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/amarbel-llc/spinclass/internal/git"
+	"github.com/amarbel-llc/spinclass/internal/repoinfo"
 )
 
 // envFunc builds a getenv stub from a map.
@@ -15,6 +16,20 @@ func envFunc(m map[string]string) func(string) string {
 
 func wdFunc(dir string) func() (string, error) {
 	return func() (string, error) { return dir, nil }
+}
+
+// noRepo is a repo-enrichment stub that resolves nothing.
+func noRepo(string) repoinfo.RepoInfo { return repoinfo.RepoInfo{} }
+
+// repoStub returns a fetcher that records the path it was called with and
+// returns a fixed RepoInfo.
+func repoStub(info repoinfo.RepoInfo, gotPath *string) func(string) repoinfo.RepoInfo {
+	return func(p string) repoinfo.RepoInfo {
+		if gotPath != nil {
+			*gotPath = p
+		}
+		return info
+	}
 }
 
 func TestResolveWorktreeMode(t *testing.T) {
@@ -28,7 +43,9 @@ func TestResolveWorktreeMode(t *testing.T) {
 		"CLOWN_GROUP_ID":        "myrepo/feat-x",
 	}
 	// cwd inside the worktree (a subdirectory) must still resolve to worktree.
-	c := resolve(envFunc(env), wdFunc(filepath.Join(wt, "internal", "pkg")))
+	var fetchedPath string
+	want := repoinfo.RepoInfo{ForgeKind: "github", Owner: "o", Name: "r", URL: "https://github.com/o/r"}
+	c := resolve(envFunc(env), wdFunc(filepath.Join(wt, "internal", "pkg")), repoStub(want, &fetchedPath))
 
 	if c.Mode != ModeWorktree {
 		t.Fatalf("Mode: got %q, want %q", c.Mode, ModeWorktree)
@@ -39,6 +56,13 @@ func TestResolveWorktreeMode(t *testing.T) {
 	if c.Description != "do a thing" || c.GroupID != "myrepo/feat-x" {
 		t.Errorf("description/group: got %+v", c)
 	}
+	// RepoInfo is fetched from the worktree path, not a subdirectory.
+	if fetchedPath != wt {
+		t.Errorf("repo fetched from %q, want worktree %q", fetchedPath, wt)
+	}
+	if c.RepoInfo != want {
+		t.Errorf("RepoInfo: got %+v, want %+v", c.RepoInfo, want)
+	}
 }
 
 // A nested clown launched from within a worktree session inherits
@@ -46,7 +70,7 @@ func TestResolveWorktreeMode(t *testing.T) {
 // must not mislabel the session as a worktree.
 func TestResolveWorktreeEnvButCwdOutside(t *testing.T) {
 	env := map[string]string{"SPINCLASS_WORKTREE": "/repos/myrepo/.worktrees/feat-x"}
-	c := resolve(envFunc(env), wdFunc("/somewhere/else/not-a-repo"))
+	c := resolve(envFunc(env), wdFunc("/somewhere/else/not-a-repo"), noRepo)
 
 	if c.Mode != ModeMainCheckout {
 		t.Fatalf("Mode: got %q, want %q (cwd outside the inherited worktree)", c.Mode, ModeMainCheckout)
@@ -58,7 +82,8 @@ func TestResolveMainCheckout(t *testing.T) {
 	gitInit(t, dir, "trunk")
 
 	env := map[string]string{"CLOWN_SESSION_ID": "clown-key-123"}
-	c := resolve(envFunc(env), wdFunc(dir))
+	var fetchedPath string
+	c := resolve(envFunc(env), wdFunc(dir), repoStub(repoinfo.RepoInfo{ForgeKind: "github"}, &fetchedPath))
 
 	if c.Mode != ModeMainCheckout {
 		t.Fatalf("Mode: got %q, want %q", c.Mode, ModeMainCheckout)
@@ -71,6 +96,13 @@ func TestResolveMainCheckout(t *testing.T) {
 	}
 	if c.SessionKey != "clown-key-123" {
 		t.Errorf("SessionKey: got %q, want CLOWN_SESSION_ID", c.SessionKey)
+	}
+	// RepoInfo is fetched from the derived git toplevel.
+	if fetchedPath != c.Worktree {
+		t.Errorf("repo fetched from %q, want toplevel %q", fetchedPath, c.Worktree)
+	}
+	if c.RepoInfo.ForgeKind != "github" {
+		t.Errorf("RepoInfo not populated: %+v", c.RepoInfo)
 	}
 }
 
@@ -110,6 +142,44 @@ func TestRenderMainCheckoutVariant(t *testing.T) {
 	// The worktree-only guidance must NOT leak into the main-checkout variant.
 	if strings.Contains(got, "Worktree management") || strings.Contains(got, "EnterWorktree") {
 		t.Error("main-checkout variant must omit worktree-management guidance")
+	}
+}
+
+// The repository block renders provider/owner/link/description when the
+// RepoInfo is populated, in both template variants.
+func TestRenderRepoBlock(t *testing.T) {
+	info := repoinfo.RepoInfo{
+		ForgeKind:   "github",
+		Owner:       "amarbel-llc",
+		OwnerType:   "org",
+		Name:        "spinclass",
+		URL:         "https://github.com/amarbel-llc/spinclass",
+		Description: "worktree session manager",
+	}
+	for _, mode := range []Mode{ModeWorktree, ModeMainCheckout} {
+		got, err := Render(Coordinates{Mode: mode, SessionKey: "k", RepoInfo: info})
+		if err != nil {
+			t.Fatalf("Render(%s): %v", mode, err)
+		}
+		mustContain(t, got, "amarbel-llc/spinclass")
+		mustContain(t, got, "github")
+		mustContain(t, got, "org")
+		mustContain(t, got, "https://github.com/amarbel-llc/spinclass")
+		mustContain(t, got, "worktree session manager")
+	}
+}
+
+// An empty RepoInfo omits the repository block entirely (no dangling
+// "Repository:" label).
+func TestRenderRepoBlockOmittedWhenEmpty(t *testing.T) {
+	for _, mode := range []Mode{ModeWorktree, ModeMainCheckout} {
+		got, err := Render(Coordinates{Mode: mode, SessionKey: "k"})
+		if err != nil {
+			t.Fatalf("Render(%s): %v", mode, err)
+		}
+		if strings.Contains(got, "Repository:") || strings.Contains(got, "Repository URL") {
+			t.Errorf("%s: repo block should be omitted for empty RepoInfo:\n%s", mode, got)
+		}
 	}
 }
 

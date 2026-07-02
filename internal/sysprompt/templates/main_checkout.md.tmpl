@@ -4,7 +4,13 @@ This Claude Code session is running directly in the repo's **main checkout** —
 not a spinclass worktree. spinclass tracks it as an *implicit session*.
 
 - Session key: `{{.SessionKey}}`
-{{- if .Repo}}
+{{- if .RepoInfo.URL}}
+- Repository: {{.RepoInfo.Owner}}/{{.RepoInfo.Name}}{{if .RepoInfo.ForgeKind}} ({{.RepoInfo.ForgeKind}}{{if .RepoInfo.OwnerType}} {{.RepoInfo.OwnerType}}{{end}}){{end}}
+- Repository URL: {{.RepoInfo.URL}}
+{{- if .RepoInfo.Description}}
+- Repository description: {{.RepoInfo.Description}}
+{{- end}}
+{{- else if .Repo}}
 - Repo: `{{.Repo}}`
 {{- end}}
 {{- if .Branch}}

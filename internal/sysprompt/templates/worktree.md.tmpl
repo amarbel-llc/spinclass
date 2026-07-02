@@ -15,6 +15,13 @@ This Claude Code session is a spinclass-managed **worktree session**.
 {{- if .Description}}
 - Description: {{.Description}}
 {{- end}}
+{{- if .RepoInfo.URL}}
+- Repository: {{.RepoInfo.Owner}}/{{.RepoInfo.Name}}{{if .RepoInfo.ForgeKind}} ({{.RepoInfo.ForgeKind}}{{if .RepoInfo.OwnerType}} {{.RepoInfo.OwnerType}}{{end}}){{end}}
+- Repository URL: {{.RepoInfo.URL}}
+{{- if .RepoInfo.Description}}
+- Repository description: {{.RepoInfo.Description}}
+{{- end}}
+{{- end}}
 
 ## Worktree management
 

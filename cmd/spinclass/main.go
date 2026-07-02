@@ -17,6 +17,7 @@ import (
 
 func main() {
 	embeds.Set(madderBin, direnvBin, dodderBin)
+	embeds.SetForges(papiBin, ghBin)
 	embeds.SetVersion(version, commit)
 
 	// Open the lifecycle log early so session.Write/Remove/Tombstone

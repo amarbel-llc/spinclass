@@ -46,32 +46,40 @@ func TestFormatVersionTable_AllPinned(t *testing.T) {
 		"0.1.5", "ff06182",
 		"/nix/store/wpg177xj66s03zn3yfh6n06zwkxmqn39-madder-0.1.5/bin/madder",
 		"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-direnv-2.32.3/bin/direnv",
+		"/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-papi-0.2.0/bin/papi",
+		"/nix/store/cccccccccccccccccccccccccccccccc-gh-2.63.0/bin/gh",
 	)
 
 	requireLine(t, out, "spinclass-0.1.5/spinclass", "0.1.5+ff06182", "ff06182")
 	requireLine(t, out, "madder-0.1.5/madder", "0.1.5", "wpg177xj66s03zn3yfh6n06zwkxmqn39")
 	requireLine(t, out, "direnv-2.32.3/direnv", "2.32.3", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	requireLine(t, out, "papi-0.2.0/papi", "0.2.0", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	requireLine(t, out, "gh-2.63.0/gh", "2.63.0", "cccccccccccccccccccccccccccccccc")
 	if !strings.HasPrefix(out, "COMPONENT") {
 		t.Errorf("expected header line first, got:\n%s", out)
 	}
 }
 
 func TestFormatVersionTable_DormantPins(t *testing.T) {
-	out := formatVersionTable("dev", "unknown", "", "")
+	out := formatVersionTable("dev", "unknown", "", "", "", "")
 
 	requireLine(t, out, "madder", "-", "dormant")
 	requireLine(t, out, "direnv", "-", "dormant")
+	requireLine(t, out, "papi", "-", "dormant")
+	requireLine(t, out, "gh", "-", "dormant")
 }
 
 func TestFormatVersionTable_OnlyMadderPinned(t *testing.T) {
 	out := formatVersionTable(
 		"0.1.5", "ff06182",
 		"/nix/store/wpg177xj66s03zn3yfh6n06zwkxmqn39-madder-0.1.5/bin/madder",
-		"",
+		"", "", "",
 	)
 
 	requireLine(t, out, "madder-0.1.5/madder", "0.1.5", "wpg177xj66s03zn3yfh6n06zwkxmqn39")
 	requireLine(t, out, "direnv", "-", "dormant")
+	requireLine(t, out, "papi", "-", "dormant")
+	requireLine(t, out, "gh", "-", "dormant")
 }
 
 type pinTriple struct {

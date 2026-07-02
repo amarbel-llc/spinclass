@@ -82,6 +82,20 @@
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
+
+    # papi: the Personal API CLI. Pinned into spinclass via
+    # `mkSpinclass { papi = ...; }` and burned into the default build's
+    # binary (-X main.papiBin). The dynamic system-prompt fragment
+    # (internal/repoinfo) shells out to it to resolve the forge kind of a
+    # non-github.com remote against the operator's published PAPI forges.
+    # gh (the other repo-line dependency) is not a standalone flake — it
+    # is pinned from nixpkgs-master (`pkgs-master.gh`).
+    papi = {
+      url = "github:amarbel-llc/papi";
+      inputs.igloo.follows = "igloo";
+      inputs.nixpkgs-master.follows = "nixpkgs-master";
+      inputs.utils.follows = "utils";
+    };
   };
 
   outputs =
@@ -95,6 +109,7 @@
       conformist,
       crap,
       tommy,
+      papi,
     }:
     let
       spinclassVersion = "0.1.32";
@@ -163,12 +178,16 @@
         # feature is dormant. `direnv` falls back to PATH lookup when
         # the input is null. When `dodder` is non-null the binary also
         # inits a per-worktree dodder repository over the madder store
-        # (FDR 0008); dormant when null.
+        # (FDR 0008); dormant when null. `papi` and `gh` are pinned for
+        # the dynamic system-prompt repository line (internal/repoinfo);
+        # both fall back to PATH lookup when null.
         mkSpinclass =
           {
             madder ? null,
             direnv ? null,
             dodder ? null,
+            papi ? null,
+            gh ? null,
           }:
           pkgs.buildGoApplication {
             pname = "spinclass";
@@ -190,7 +209,9 @@
             ldflags =
               (lib.optional (madder != null) "-X main.madderBin=${madder}/bin/madder")
               ++ (lib.optional (direnv != null) "-X main.direnvBin=${direnv}/bin/direnv")
-              ++ (lib.optional (dodder != null) "-X main.dodderBin=${dodder}/bin/dodder");
+              ++ (lib.optional (dodder != null) "-X main.dodderBin=${dodder}/bin/dodder")
+              ++ (lib.optional (papi != null) "-X main.papiBin=${papi}/bin/papi")
+              ++ (lib.optional (gh != null) "-X main.ghBin=${gh}/bin/gh");
 
             # buildGoApplication's stock checkPhase runs only the
             # subPackages (cmd/spinclass). Override to test every package
@@ -299,6 +320,16 @@
             // lib.optionalAttrs (filter != null) { inherit filter; }
           );
 
+        # papi/gh pins for the default build's dynamic system-prompt
+        # repository line (internal/repoinfo). Burned into the shipped
+        # binary so the forge lookup is deterministic; a devshell `go build`
+        # (which sets no ldflags) falls back to PATH. gh comes from
+        # nixpkgs-master, papi from its flake input.
+        forgePins = {
+          papi = papi.packages.${system}.default;
+          inherit (pkgs-master) gh;
+        };
+
         spinclass-race = pkgs.buildGoRace { base = mkSpinclass { }; };
 
         # Madder-pinned spinclass: the base for the `bats-madder` lane.
@@ -318,15 +349,18 @@
       in
       {
         packages = {
-          default = mkSpinclass { };
+          default = mkSpinclass forgePins;
           inherit spinclass-race;
         }
         // batsLaneOutputs;
 
         # `nix flake check` exercises the unit suite (via the
-        # spinclass derivation's checkPhase) plus every bats lane.
+        # spinclass derivation's checkPhase) plus every bats lane. The
+        # `spinclass` check builds the same forge-pinned variant as the
+        # default package, so `nix flake check` also verifies the papi/gh
+        # burn-in.
         checks = {
-          spinclass = mkSpinclass { };
+          spinclass = mkSpinclass forgePins;
         }
         // batsLaneOutputs;
 

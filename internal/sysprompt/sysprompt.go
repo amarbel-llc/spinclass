@@ -12,17 +12,33 @@
 // repo's MAIN CHECKOUT (an implicit session, FDR-0014). The worktree path sets
 // SPINCLASS_* env vars via the executor (internal/executor/session.go); a main
 // checkout has no executor, so coordinates come from cwd + git instead.
+//
+// Both shapes additionally carry a best-effort repository line (provider,
+// owner, link, description) resolved by internal/repoinfo from the git remote
+// plus a bounded live forge lookup (papi for the forge kind, gh / the
+// Gitea-Forgejo API for the description). The lookup is deadline-capped
+// (repoFetchTimeout) so it can never stall the pre-initialize prompts/get, and
+// any failure just omits the affected lines.
 package sysprompt
 
 import (
+	"context"
 	"embed"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/amarbel-llc/spinclass/internal/git"
+	"github.com/amarbel-llc/spinclass/internal/repoinfo"
 )
+
+// repoFetchTimeout bounds the live forge enrichment (papi/gh/HTTP) so the
+// prompts/get the clown bridge issues before `initialize` can never be
+// stalled by a slow or unreachable forge. On timeout the repository line
+// simply degrades to whatever was resolved locally (or is omitted).
+const repoFetchTimeout = 2 * time.Second
 
 // PromptName is the well-known MCP prompt the clown stdio bridge issues a
 // `prompts/get` for when it asks spinclass for a dynamic system-prompt fragment
@@ -49,6 +65,10 @@ type Coordinates struct {
 	Worktree    string // worktree path (worktree mode) or checkout path (main checkout)
 	Description string
 	GroupID     string
+	// RepoInfo is the best-effort forge identity of the session's repo —
+	// provider, owner, link, description — resolved from the git remote plus
+	// a bounded live forge lookup. Empty fields render as omitted lines.
+	RepoInfo repoinfo.RepoInfo
 }
 
 //go:embed templates/*.md.tmpl
@@ -59,12 +79,23 @@ var fragmentTmpl = template.Must(template.ParseFS(templatesFS, "templates/*.md.t
 // Resolve discovers the current session's coordinates from the serve process's
 // environment and, for a main checkout, its cwd + git.
 func Resolve() Coordinates {
-	return resolve(os.Getenv, os.Getwd)
+	return resolve(os.Getenv, os.Getwd, fetchRepoInfo)
 }
 
-// resolve is the testable core of Resolve with the environment and cwd lookups
-// injected.
-func resolve(getenv func(string) string, getwd func() (string, error)) Coordinates {
+// fetchRepoInfo is the production repo-enrichment fetcher: a bounded
+// repoinfo.Fetch. An empty path yields a zero RepoInfo.
+func fetchRepoInfo(path string) repoinfo.RepoInfo {
+	if path == "" {
+		return repoinfo.RepoInfo{}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), repoFetchTimeout)
+	defer cancel()
+	return repoinfo.Fetch(ctx, path)
+}
+
+// resolve is the testable core of Resolve with the environment, cwd, and
+// repo-enrichment lookups injected.
+func resolve(getenv func(string) string, getwd func() (string, error), fetchRepo func(string) repoinfo.RepoInfo) Coordinates {
 	c := Coordinates{
 		SessionKey:  getenv("SPINCLASS_SESSION_ID"),
 		Repo:        getenv("SPINCLASS_REPO"),
@@ -83,6 +114,7 @@ func resolve(getenv func(string) string, getwd func() (string, error)) Coordinat
 	// the env var alone would mislabel a main checkout as a worktree.
 	if c.Worktree != "" && pathWithin(cwd, c.Worktree) {
 		c.Mode = ModeWorktree
+		c.RepoInfo = fetchRepo(c.Worktree)
 		return c
 	}
 
@@ -114,6 +146,13 @@ func resolve(getenv func(string) string, getwd func() (string, error)) Coordinat
 			c.SessionKey = c.Repo + "/" + c.Branch
 		}
 	}
+	// Enrich from the checkout's git toplevel (falling back to cwd when the
+	// toplevel couldn't be derived, e.g. a bare or non-standard checkout).
+	repoPath := c.Worktree
+	if repoPath == "" {
+		repoPath = cwd
+	}
+	c.RepoInfo = fetchRepo(repoPath)
 	return c
 }
 
