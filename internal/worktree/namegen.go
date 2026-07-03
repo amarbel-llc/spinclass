@@ -5,6 +5,8 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+
+	"github.com/amarbel-llc/spinclass/internal/git"
 )
 
 var adjectives = []string{
@@ -33,8 +35,14 @@ var nouns = []string{
 	"buckeye", "catalpa", "dogwood", "ebony", "fig",
 }
 
-// RandomName generates a random adjective-noun name that does not collide
-// with existing directories in <repoPath>/.worktrees/.
+// RandomName generates a random adjective-noun name that collides with neither
+// an existing directory in <repoPath>/.worktrees/ nor an existing local or
+// remote branch. The branch check matters because `git worktree add <path>`
+// (with no -b) silently checks out a pre-existing branch of the same name
+// instead of cutting a fresh one — so a name matching a stale, worktree-less
+// branch would adopt that branch's history under a supposedly new session
+// (#207). A non-git repoPath (or any git error) reports no branch, so the
+// candidate is accepted.
 func RandomName(repoPath string) string {
 	wtDir := filepath.Join(repoPath, WorktreesDir)
 	for {
@@ -43,9 +51,12 @@ func RandomName(repoPath string) string {
 			adjectives[rand.IntN(len(adjectives))],
 			nouns[rand.IntN(len(nouns))],
 		)
-		_, err := os.Stat(filepath.Join(wtDir, candidate))
-		if os.IsNotExist(err) {
-			return candidate
+		if _, err := os.Stat(filepath.Join(wtDir, candidate)); !os.IsNotExist(err) {
+			continue
 		}
+		if git.BranchExists(repoPath, candidate) || git.RemoteBranchExists(repoPath, candidate) {
+			continue
+		}
+		return candidate
 	}
 }

@@ -868,3 +868,35 @@ func TestCreateFrom(t *testing.T) {
 		t.Errorf("expected %s to be a worktree", newPath)
 	}
 }
+
+// TestCreateFreshBranchRejectsExistingBranch covers #207: the fresh-branch
+// path (existingBranch == "") must hard-fail when a branch of the target name
+// already exists, rather than letting `git worktree add` silently check the
+// stale branch out. Adopting an existing branch is reserved for the explicit
+// existingBranch != "" path (resume / start-from-PR).
+func TestCreateFreshBranchRejectsExistingBranch(t *testing.T) {
+	testgit.RequireGit(t)
+	t.Setenv("HOME", t.TempDir())
+	parentDir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", parentDir)
+	repoDir := filepath.Join(parentDir, "repo")
+	testgit.MustInit(t, repoDir)
+
+	prevMadder, prevDirenv, prevDodder := embeds.MadderBin(), embeds.DirenvBin(), embeds.DodderBin()
+	embeds.Set("", "", "")
+	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv, prevDodder) })
+
+	// A lingering branch with no matching worktree directory — the exact
+	// state issue #207 describes (branch survived a worktree removal).
+	const stale = "lingering-branch"
+	if out, err := exec.Command("git", "-C", repoDir, "branch", stale).CombinedOutput(); err != nil {
+		t.Fatalf("git branch %s: %v\n%s", stale, err, out)
+	}
+
+	// wtPath basename == the stale branch name, so `git worktree add` would
+	// derive (and, without -b, adopt) that branch.
+	wtPath := filepath.Join(parentDir, stale)
+	if _, err := Create(repoDir, wtPath, ""); err == nil {
+		t.Fatalf("Create adopted existing branch %q instead of failing", stale)
+	}
+}

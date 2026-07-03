@@ -126,7 +126,13 @@ func Create(
 			)
 		}
 	} else {
-		if err := git.RunPassthrough(repoPath, "worktree", "add", worktreePath); err != nil {
+		// Pass -b explicitly so a name matching a pre-existing branch is a
+		// hard error rather than a silent checkout of that branch. Adopting an
+		// existing branch is reserved for the existingBranch != "" path above;
+		// under the fresh-session path it would replay stale (possibly
+		// unmerged) history in a supposedly new worktree (#207).
+		branch := filepath.Base(worktreePath)
+		if err := git.RunPassthrough(repoPath, "worktree", "add", "-b", branch, worktreePath); err != nil {
 			return sweatfile.Hierarchy{}, fmt.Errorf("git worktree add: %w", err)
 		}
 	}
