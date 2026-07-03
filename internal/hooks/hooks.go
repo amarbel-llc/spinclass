@@ -294,9 +294,6 @@ const (
 	nothingButTheTruthToolName    = "mcp__plugin_spinclass_spinclass__nothing-but-the-truth"
 	listToolName                  = "mcp__plugin_spinclass_spinclass__list"
 	updateDescriptionToolName     = "mcp__plugin_spinclass_spinclass__update-this-session-description"
-	chatSendToolName              = "mcp__plugin_spinclass_spinclass__chat-send"
-	chatReadToolName              = "mcp__plugin_spinclass_spinclass__chat-read"
-	chatListSessionsToolName      = "mcp__plugin_spinclass_spinclass__chat-list-sessions"
 	validateToolName              = "mcp__plugin_spinclass_spinclass__validate"
 	spawnSessionToolName          = "mcp__plugin_spinclass_spinclass__spawn-session"
 	forkSessionToolName           = "mcp__plugin_spinclass_spinclass__fork-session"
@@ -330,12 +327,6 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 		// Auto-approve unconditionally so agents never get a permission prompt
 		// for them.
 		return writeAllow(w, "spinclass session-management tool, safe to auto-approve")
-	case chatSendToolName, chatReadToolName, chatListSessionsToolName:
-		// The cross-session chat tools are benign (no repo or filesystem
-		// mutation): send posts a message, read only advances spinclass's
-		// own read cursor, list-sessions is read-only. Auto-approve so
-		// inter-session coordination never trips a permission prompt.
-		return writeAllow(w, "spinclass cross-session chat tool is benign, safe to auto-approve")
 	case mergeThisSessionToolName, mergeThisSessionAsyncToolName:
 		if hasPreMergeHook(input.CWD) {
 			return writeAllow(w, "sweatfile [hooks].pre-merge gates this merge")

@@ -1106,37 +1106,6 @@ func TestUpdateDescriptionToolAutoApproved(t *testing.T) {
 	}
 }
 
-func TestChatToolsAutoApproved(t *testing.T) {
-	cases := []struct {
-		toolName  string
-		toolInput map[string]any
-	}{
-		{"mcp__plugin_spinclass_spinclass__chat-send", map[string]any{"message": "hi"}},
-		{"mcp__plugin_spinclass_spinclass__chat-read", map[string]any{}},
-		{"mcp__plugin_spinclass_spinclass__chat-list-sessions", map[string]any{}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.toolName, func(t *testing.T) {
-			cwd := t.TempDir()
-			input := makeInput(tc.toolName, tc.toolInput, cwd)
-			var stdout bytes.Buffer
-			if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if stdout.Len() == 0 {
-				t.Fatalf("expected allow output for %s tool", tc.toolName)
-			}
-			decision, reason := parseHookDecision(t, stdout.Bytes())
-			if decision != "allow" {
-				t.Errorf("expected permissionDecision allow for %s, got %q", tc.toolName, decision)
-			}
-			if reason == "" {
-				t.Error("expected a permissionDecisionReason")
-			}
-		})
-	}
-}
-
 func TestValidateToolAutoApproved(t *testing.T) {
 	cwd := t.TempDir()
 	input := makeInput("mcp__plugin_spinclass_spinclass__validate", map[string]any{}, cwd)
