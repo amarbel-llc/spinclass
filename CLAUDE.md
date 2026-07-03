@@ -197,9 +197,18 @@ subcommand is always available.
   the forge kind (papi, matched against the operator's published PAPI forges) and
   the description (`gh api` for GitHub, the Gitea/Forgejo REST API self-hosted).
   Any failure omits only the affected lines — the fetch runs before `initialize`,
-  so it must never block. This **replaces** the retired static
-  `.clown-plugin/system-prompt-append.d/` fragments (no static fallback);
-  rollback is restoring those files + the flake install lines.
+  so it must never block. Both templates additionally gain a Go-composed
+  **Design records** trailer (FDR 0021, `internal/sysprompt/docsindex.go`): an
+  index of the repo's `docs/features`/`docs/adrs`/`docs/rfcs` records by
+  number·title·status, grouped by status, scanned scan-if-exists from local
+  files (no network, so pre-`initialize`-safe); the scanned dirs are overridable
+  via `[sysprompt].doc-index-dirs` (override not append; `[]` disables), read by
+  `sysprompt.Resolve` via a `sweatfileio.LoadHierarchy` load. Malformed records
+  (unreadable / unterminated frontmatter) surface in a `⚠ malformed` diagnostic
+  block, and a `recover()` guarantees a broken doc can never fail the
+  pre-`initialize` render. This **replaces**
+  the retired static `.clown-plugin/system-prompt-append.d/` fragments (no static
+  fallback); rollback is restoring those files + the flake install lines.
 - **Pre-merge build worktree** (FDR 0013): by default the hook runs in a
   transient detached worktree pinned to the committed sha (`check.resolveHookDir`
   → `.merge-<branch>-<sha>-<pid>` under `.worktrees/`), freeing the session
@@ -254,7 +263,8 @@ dirs → repo at each level. Notable surface:
 - `[env]` (map merge); `[hooks]` (lifecycle hooks + the `disable-*` /
   `*-timeout` / output-format knobs, scalar override);
   `[session-entry]` (start/resume/spawn-entry/spawn-window argv, per-field
-  override).
+  override); `[sysprompt]` (`doc-index-dirs` array — **override not append**:
+  non-empty replaces, `[]` disables, nil inherits the built-in default).
 
 **Custom start commands** (`[[start-commands]]`): each entry registers
 `sc start-<name>` with a validated positional arg + tab completion.

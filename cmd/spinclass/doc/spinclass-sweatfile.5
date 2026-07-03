@@ -5,8 +5,8 @@ spinclass-sweatfile \- sweatfile configuration format
 Spinclass sessions are configured via TOML files called
 .IR sweatfiles .
 These control git excludes, Claude Code permissions, direnv setup,
-session entrypoints, lifecycle hooks, MCP server registration,
-custom start-* plugins, and remote session hosts.
+session entrypoints, lifecycle hooks, the dynamic system-prompt fragment,
+MCP server registration, custom start-* plugins, and remote session hosts.
 .PP
 Sweatfiles are loaded as a hierarchy that merges
 .I global
@@ -127,6 +127,47 @@ The inline-table spelling
 is equivalent and equally accepted; use whichever reads better.
 .B Merge:
 map merge (child keys override parent keys).
+.SS [sysprompt]
+Configures the dynamic system-prompt fragment spinclass contributes to a
+clown-launched session (see FDR 0021). The fragment carries a
+.B Design records
+section: an index of the repository's design records \(em
+.IR docs/features ,
+.IR docs/adrs ,
+and
+.I docs/rfcs
+by default \(em listed by number, title, and lifecycle
+.B status
+(read from each file's YAML frontmatter) and grouped by status.
+.TP
+.B doc-index-dirs
+Array of directories (relative to the worktree/checkout root) scanned for
+.I NNNN-*.md
+design records. Records are genre-tagged by directory
+.RB ( docs/features " \(-> " FDR ,
+.B docs/adrs
+\(->
+.BR ADR ,
+.B docs/rfcs
+\(->
+.BR RFC ;
+any other directory uses its basename). Scan-if-exists: an absent directory
+contributes nothing, so a repository with none of the scanned directories
+renders no
+.B Design records
+section at all. A structurally broken record (unreadable, or a frontmatter
+block opened with
+.B ---
+but never closed) is reported in a trailing diagnostic block instead of
+being silently dropped \(em the fragment renders best-effort and never
+fails on a malformed doc.
+.B Merge:
+override, not append \(em unlike the other array fields. A non-empty value
+replaces the inherited list (override-wins down the cascade); an explicit
+empty array
+.RB ( "doc-index-dirs = []" )
+disables the index; nil (unset) inherits, falling back to the built-in
+default directories when unset everywhere.
 .SS [hooks]
 Lifecycle hooks executed as shell scripts.
 .PP

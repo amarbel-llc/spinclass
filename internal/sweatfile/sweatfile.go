@@ -61,6 +61,18 @@ type Hooks struct {
 	AutoRebuildOnResume        *bool   `toml:"auto-rebuild-on-resume"`
 }
 
+// Sysprompt configures the dynamic system-prompt fragment spinclass
+// contributes to a clown-launched session (internal/sysprompt, FDR 0021).
+type Sysprompt struct {
+	// DocIndexDirs overrides the dirs the design-record index scans (relative
+	// to the worktree/checkout root). Tri-state, but with OVERRIDE semantics
+	// rather than the append default of other string arrays — these are scan
+	// roots: nil inherits (and, unset at the leaf, the sysprompt package's
+	// built-in default dirs apply); a non-empty value replaces the inherited
+	// list; an explicit empty list disables the index (the off switch).
+	DocIndexDirs []string `toml:"doc-index-dirs"`
+}
+
 // MCPServerDef declares an MCP server to register and auto-approve
 // in Claude Code sessions. See CLAUDE.md "MCP Sweatfile Config" design.
 type MCPServerDef struct {
@@ -120,6 +132,7 @@ type Sweatfile struct {
 	Git            *Git            `toml:"git"`
 	Direnv         *Direnv         `toml:"direnv"`
 	Hooks          *Hooks          `toml:"hooks"`
+	Sysprompt      *Sysprompt      `toml:"sysprompt"`
 	SessionEntry   *SessionEntry   `toml:"session-entry"`
 	StartCommands  []StartCommand  `toml:"start-commands"`
 	AllowedMCPs    []string        `toml:"allowed-mcps"`
@@ -219,6 +232,17 @@ func (sf Sweatfile) GitExcludes() []string {
 		return nil
 	}
 	return sf.Git.Excludes
+}
+
+// SyspromptDocIndexDirs returns the configured [sysprompt].doc-index-dirs and
+// whether it was set. When ok is false the caller applies its built-in default;
+// when ok is true an empty slice means the design-record index is explicitly
+// disabled. See FDR 0021.
+func (sf Sweatfile) SyspromptDocIndexDirs() (dirs []string, ok bool) {
+	if sf.Sysprompt == nil || sf.Sysprompt.DocIndexDirs == nil {
+		return nil, false
+	}
+	return sf.Sysprompt.DocIndexDirs, true
 }
 
 // EffectiveAllowedMCPs returns the deduplicated list of MCP server names

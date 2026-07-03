@@ -32,6 +32,7 @@ import (
 
 	"github.com/amarbel-llc/spinclass/internal/git"
 	"github.com/amarbel-llc/spinclass/internal/repoinfo"
+	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
 )
 
 // repoFetchTimeout bounds the live forge enrichment (papi/gh/HTTP) so the
@@ -69,6 +70,10 @@ type Coordinates struct {
 	// provider, owner, link, description — resolved from the git remote plus
 	// a bounded live forge lookup. Empty fields render as omitted lines.
 	RepoInfo repoinfo.RepoInfo
+	// DesignRecords is the pre-rendered "## Design records" markdown section
+	// (FDR 0021), or "" when the repo has no scanned design-record dirs or the
+	// index is disabled. Render appends it after the template body.
+	DesignRecords string
 }
 
 //go:embed templates/*.md.tmpl
@@ -79,7 +84,27 @@ var fragmentTmpl = template.Must(template.ParseFS(templatesFS, "templates/*.md.t
 // Resolve discovers the current session's coordinates from the serve process's
 // environment and, for a main checkout, its cwd + git.
 func Resolve() Coordinates {
-	return resolve(os.Getenv, os.Getwd, fetchRepoInfo)
+	return resolve(os.Getenv, os.Getwd, fetchRepoInfo, loadDocIndex)
+}
+
+// loadDocIndex is the production design-record index loader: it reads the
+// merged sweatfile hierarchy rooted at root for [sysprompt].doc-index-dirs
+// (falling back to the built-in default dirs when unset), then scans and
+// renders the index. Local file I/O only — safe before `initialize` — and any
+// failure yields an empty section. See FDR 0021.
+func loadDocIndex(root string) string {
+	if root == "" {
+		return ""
+	}
+	dirs := defaultDocIndexDirs
+	if home, err := os.UserHomeDir(); err == nil {
+		if h, err := sweatfileio.LoadHierarchy(home, root); err == nil {
+			if configured, ok := h.Merged.SyspromptDocIndexDirs(); ok {
+				dirs = configured
+			}
+		}
+	}
+	return renderDesignRecords(root, dirs)
 }
 
 // fetchRepoInfo is the production repo-enrichment fetcher: a bounded
@@ -93,9 +118,9 @@ func fetchRepoInfo(path string) repoinfo.RepoInfo {
 	return repoinfo.Fetch(ctx, path)
 }
 
-// resolve is the testable core of Resolve with the environment, cwd, and
-// repo-enrichment lookups injected.
-func resolve(getenv func(string) string, getwd func() (string, error), fetchRepo func(string) repoinfo.RepoInfo) Coordinates {
+// resolve is the testable core of Resolve with the environment, cwd,
+// repo-enrichment, and design-record lookups injected.
+func resolve(getenv func(string) string, getwd func() (string, error), fetchRepo func(string) repoinfo.RepoInfo, renderDocs func(string) string) Coordinates {
 	c := Coordinates{
 		SessionKey:  getenv("SPINCLASS_SESSION_ID"),
 		Repo:        getenv("SPINCLASS_REPO"),
@@ -115,6 +140,7 @@ func resolve(getenv func(string) string, getwd func() (string, error), fetchRepo
 	if c.Worktree != "" && pathWithin(cwd, c.Worktree) {
 		c.Mode = ModeWorktree
 		c.RepoInfo = fetchRepo(c.Worktree)
+		c.DesignRecords = renderDocs(c.Worktree)
 		return c
 	}
 
@@ -153,6 +179,7 @@ func resolve(getenv func(string) string, getwd func() (string, error), fetchRepo
 		repoPath = cwd
 	}
 	c.RepoInfo = fetchRepo(repoPath)
+	c.DesignRecords = renderDocs(repoPath)
 	return c
 }
 
@@ -169,7 +196,14 @@ func Render(c Coordinates) (string, error) {
 	if err := fragmentTmpl.ExecuteTemplate(&b, name, c); err != nil {
 		return "", err
 	}
-	return strings.TrimRight(b.String(), "\n"), nil
+	frag := strings.TrimRight(b.String(), "\n")
+	// The design-record index (FDR 0021) is composed in Go rather than in the
+	// templates: it is a Go-rendered markdown trailer, and appending it here
+	// keeps the templates free of the grouping/whitespace logic.
+	if c.DesignRecords != "" {
+		frag += "\n\n" + c.DesignRecords
+	}
+	return frag, nil
 }
 
 // pathWithin reports whether cwd is base or a descendant of base. A sibling that

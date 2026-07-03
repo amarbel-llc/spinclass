@@ -136,6 +136,21 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		}
 	}
 
+	// [sysprompt]
+	if other.Sysprompt != nil {
+		if merged.Sysprompt == nil {
+			merged.Sysprompt = &Sysprompt{}
+		}
+		// doc-index-dirs: OVERRIDE, not append. A non-nil value — including an
+		// explicit [] — replaces the inherited list (override-wins down the
+		// hierarchy); [] therefore disables the index. These are scan roots, so
+		// override is the natural semantics, diverging from the append default
+		// of other string arrays. nil inherits.
+		if other.Sysprompt.DocIndexDirs != nil {
+			merged.Sysprompt.DocIndexDirs = other.Sysprompt.DocIndexDirs
+		}
+	}
+
 	// [session-entry]
 	if other.SessionEntry != nil {
 		if merged.SessionEntry == nil {

@@ -32,6 +32,19 @@ func repoStub(info repoinfo.RepoInfo, gotPath *string) func(string) repoinfo.Rep
 	}
 }
 
+// noDocs is a design-record loader stub that renders nothing.
+func noDocs(string) string { return "" }
+
+// docsStub records the root it was called with and returns a fixed section.
+func docsStub(section string, gotRoot *string) func(string) string {
+	return func(root string) string {
+		if gotRoot != nil {
+			*gotRoot = root
+		}
+		return section
+	}
+}
+
 func TestResolveWorktreeMode(t *testing.T) {
 	wt := "/repos/myrepo/.worktrees/feat-x"
 	env := map[string]string{
@@ -43,9 +56,18 @@ func TestResolveWorktreeMode(t *testing.T) {
 		"CLOWN_GROUP_ID":        "myrepo/feat-x",
 	}
 	// cwd inside the worktree (a subdirectory) must still resolve to worktree.
-	var fetchedPath string
+	var fetchedPath, docsRoot string
 	want := repoinfo.RepoInfo{ForgeKind: "github", Owner: "o", Name: "r", URL: "https://github.com/o/r"}
-	c := resolve(envFunc(env), wdFunc(filepath.Join(wt, "internal", "pkg")), repoStub(want, &fetchedPath))
+	c := resolve(envFunc(env), wdFunc(filepath.Join(wt, "internal", "pkg")), repoStub(want, &fetchedPath), docsStub("## Design records\n\n**proposed**\n- FDR 0021 — X", &docsRoot))
+
+	// The docs index is rendered from the worktree root, not a subdirectory,
+	// and appended to the fragment via Render.
+	if docsRoot != wt {
+		t.Errorf("docs rendered from %q, want worktree %q", docsRoot, wt)
+	}
+	if !strings.Contains(c.DesignRecords, "FDR 0021") {
+		t.Errorf("DesignRecords not wired: %q", c.DesignRecords)
+	}
 
 	if c.Mode != ModeWorktree {
 		t.Fatalf("Mode: got %q, want %q", c.Mode, ModeWorktree)
@@ -70,7 +92,7 @@ func TestResolveWorktreeMode(t *testing.T) {
 // must not mislabel the session as a worktree.
 func TestResolveWorktreeEnvButCwdOutside(t *testing.T) {
 	env := map[string]string{"SPINCLASS_WORKTREE": "/repos/myrepo/.worktrees/feat-x"}
-	c := resolve(envFunc(env), wdFunc("/somewhere/else/not-a-repo"), noRepo)
+	c := resolve(envFunc(env), wdFunc("/somewhere/else/not-a-repo"), noRepo, noDocs)
 
 	if c.Mode != ModeMainCheckout {
 		t.Fatalf("Mode: got %q, want %q (cwd outside the inherited worktree)", c.Mode, ModeMainCheckout)
@@ -82,8 +104,13 @@ func TestResolveMainCheckout(t *testing.T) {
 	gitInit(t, dir, "trunk")
 
 	env := map[string]string{"CLOWN_SESSION_ID": "clown-key-123"}
-	var fetchedPath string
-	c := resolve(envFunc(env), wdFunc(dir), repoStub(repoinfo.RepoInfo{ForgeKind: "github"}, &fetchedPath))
+	var fetchedPath, docsRoot string
+	c := resolve(envFunc(env), wdFunc(dir), repoStub(repoinfo.RepoInfo{ForgeKind: "github"}, &fetchedPath), docsStub("", &docsRoot))
+
+	// The docs index is rendered from the derived git toplevel.
+	if docsRoot != c.Worktree {
+		t.Errorf("docs rendered from %q, want toplevel %q", docsRoot, c.Worktree)
+	}
 
 	if c.Mode != ModeMainCheckout {
 		t.Fatalf("Mode: got %q, want %q", c.Mode, ModeMainCheckout)
@@ -179,6 +206,34 @@ func TestRenderRepoBlockOmittedWhenEmpty(t *testing.T) {
 		}
 		if strings.Contains(got, "Repository:") || strings.Contains(got, "Repository URL") {
 			t.Errorf("%s: repo block should be omitted for empty RepoInfo:\n%s", mode, got)
+		}
+	}
+}
+
+// Render appends the design-record section, separated by a blank line, in
+// both variants; an empty DesignRecords adds nothing.
+func TestRenderDesignRecordsTrailer(t *testing.T) {
+	section := "## Design records\n\n**proposed**\n- FDR 0021 — Composable dynamic system-prompt"
+	for _, mode := range []Mode{ModeWorktree, ModeMainCheckout} {
+		got, err := Render(Coordinates{Mode: mode, SessionKey: "k", DesignRecords: section})
+		if err != nil {
+			t.Fatalf("Render(%s): %v", mode, err)
+		}
+		mustContain(t, got, "## Design records")
+		mustContain(t, got, "- FDR 0021 — Composable dynamic system-prompt")
+		if !strings.HasSuffix(got, section) {
+			t.Errorf("%s: design records not appended as trailer:\n%s", mode, got)
+		}
+		if !strings.Contains(got, "\n\n"+section) {
+			t.Errorf("%s: design records not blank-line separated", mode)
+		}
+
+		none, err := Render(Coordinates{Mode: mode, SessionKey: "k"})
+		if err != nil {
+			t.Fatalf("Render(%s): %v", mode, err)
+		}
+		if strings.Contains(none, "## Design records") {
+			t.Errorf("%s: empty DesignRecords must add no section", mode)
 		}
 	}
 }
