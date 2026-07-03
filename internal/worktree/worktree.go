@@ -533,15 +533,21 @@ func ListWorktrees(repoPath string) []string {
 }
 
 // ForkName returns a collision-free branch name for forking sourceBranch.
-// It tries <sourceBranch>-1, <sourceBranch>-2, etc., checking for existing
-// directories in <repoPath>/.worktrees/.
+// It tries <sourceBranch>-1, <sourceBranch>-2, etc., skipping any suffix that
+// collides with an existing directory in <repoPath>/.worktrees/ OR an existing
+// local/remote branch. The branch check mirrors RandomName's (#207): a
+// lingering <sourceBranch>-N branch whose worktree was removed must not be
+// re-adopted by `git worktree add -b`, which would hard-fail on it.
 func ForkName(repoPath, sourceBranch string) string {
 	wtDir := filepath.Join(repoPath, WorktreesDir)
 	for n := 1; ; n++ {
 		candidate := fmt.Sprintf("%s-%d", sourceBranch, n)
-		_, err := os.Stat(filepath.Join(wtDir, candidate))
-		if os.IsNotExist(err) {
-			return candidate
+		if _, err := os.Stat(filepath.Join(wtDir, candidate)); !os.IsNotExist(err) {
+			continue
 		}
+		if git.BranchExists(repoPath, candidate) || git.RemoteBranchExists(repoPath, candidate) {
+			continue
+		}
+		return candidate
 	}
 }

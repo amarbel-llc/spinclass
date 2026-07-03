@@ -439,6 +439,27 @@ func TestForkName(t *testing.T) {
 	}
 }
 
+// TestForkNameAvoidsBranchCollision covers the #207-class blind spot in
+// ForkName: a lingering <sourceBranch>-N branch (worktree dir gone) must count
+// as a collision, so a fork never draws a name that `git worktree add -b` would
+// then reject — it skips to the next free suffix instead.
+func TestForkNameAvoidsBranchCollision(t *testing.T) {
+	testgit.RequireGit(t)
+	repoPath := t.TempDir()
+	testgit.MustInit(t, repoPath)
+
+	// A branch named my-feature-1 exists with no matching worktree directory.
+	if out, err := exec.Command("git", "-C", repoPath, "branch", "my-feature-1").CombinedOutput(); err != nil {
+		t.Fatalf("git branch: %v\n%s", err, out)
+	}
+
+	// The directory check alone would return my-feature-1; the branch check
+	// must skip it to my-feature-2.
+	if got := ForkName(repoPath, "my-feature"); got != "my-feature-2" {
+		t.Errorf("ForkName() = %q, want %q (must skip the existing branch)", got, "my-feature-2")
+	}
+}
+
 func TestResolvePathDescriptionFromMultipleArgs(t *testing.T) {
 	home := t.TempDir()
 	repoPath := filepath.Join(home, "repos", "myrepo")
