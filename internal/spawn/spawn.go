@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/amarbel-llc/spinclass/internal/session"
@@ -94,36 +95,65 @@ func renderSpawn(home string, rp worktree.ResolvedPath, brief string) (argv, win
 	merged := hierarchy.Merged
 
 	// FDR-0017 Piece 1: spinclass no longer wraps the worker in a multiplexer.
-	// Exec the detached-harness argv DIRECTLY; the harness (clown's
-	// --clown-attach=spawn) self-detaches and returns promptly, preserving the
-	// launchRendered prompt-return + hello-handshake contract. {id} is not
-	// substituted here — the worker derives its identity from SPINCLASS_SESSION_ID
-	// in the exec env (workerEnv).
+	// The detached-harness argv (clown's --clown-attach=spawn) is *expected* to
+	// self-detach, but launchRendered no longer relies on that — startDetached
+	// runs it in its own session and never waits on it, so a non-detaching entry
+	// cannot wedge the launcher. {id} is not substituted here — the worker
+	// derives its identity from SPINCLASS_SESSION_ID in the exec env (workerEnv).
 	argv = SubstituteEntry(merged.SessionSpawnEntry(), brief, rp.AbsPath)
 	window = SubstituteWindow(merged.SessionSpawnWindow(), rp.SessionKey, rp.AbsPath)
 	return argv, window, merged.SessionEnv(), nil
 }
 
+// startDetached launches argv in its OWN session (setsid) with stdio wired to
+// logPath — never the launcher's stdin/stdout/stderr — and does NOT wait for it
+// to exit. It is the mechanism that makes every spawn "always detach": the
+// child neither blocks the launcher (we never wait on its exit) nor tethers the
+// launcher's stdio (so `sc spawn` / `sc fork` and the MCP tools return and their
+// output pipes close as soon as the hello arrives), and it survives the
+// launcher process exiting because it is a new session leader. A well-behaved
+// entry (clown --clown-attach=spawn) still forks the worker and exits promptly;
+// a misbehaving one that never returns can no longer wedge or tether the
+// launcher. The child's own dup of the log fd keeps it writable after the
+// launcher closes its copy; the reaper goroutine prevents a zombie in the
+// long-lived serve process.
+func startDetached(argv []string, dir string, env []string, logPath string) error {
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		return fmt.Errorf("creating spawn log dir: %w", err)
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Errorf("opening spawn log %s: %w", logPath, err)
+	}
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Dir = dir
+	cmd.Env = env
+	cmd.Stdin = nil // /dev/null: no controlling stdin
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+		return fmt.Errorf("starting %q: %w", argv, err)
+	}
+	_ = logFile.Close() // the child holds its own dup; drop the launcher's copy
+	go func() { _ = cmd.Wait() }()
+	return nil
+}
+
 // launchSpawnWindow opens the configured terminal window onto the worker
-// (#149), fire-and-forget: the window is a convenience side effect, so
-// start/exit failures are logged warnings, never spawn failures. The
-// goroutine's warning is best-effort — a CLI exiting first simply loses it.
+// (#149), fire-and-forget: the window is a convenience side effect, so a
+// start failure is a logged warning, never a spawn failure. Detached like the
+// entry (startDetached) so the window process never tethers the launcher's
+// stdio — otherwise `sc spawn` would not exit until the window did.
 func launchSpawnWindow(argv []string, rp worktree.ResolvedPath, desc string, sessionEnv map[string]string) {
 	if len(argv) == 0 {
 		return
 	}
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Dir = rp.AbsPath
-	cmd.Env = workerEnv(rp, desc, sessionEnv)
-	if err := cmd.Start(); err != nil {
+	logPath := filepath.Join(rp.AbsPath, ".spinclass", "spawn-window.log")
+	if err := startDetached(argv, rp.AbsPath, workerEnv(rp, desc, sessionEnv), logPath); err != nil {
 		slog.Warn("spawn-window failed to start", "argv", argv, "err", err)
-		return
 	}
-	go func() {
-		if err := cmd.Wait(); err != nil {
-			slog.Warn("spawn-window exited nonzero", "argv", argv, "err", err)
-		}
-	}()
 }
 
 // workerEnv builds the spawn exec's process environment. It MIRRORS
@@ -197,17 +227,19 @@ func launchRendered(rp worktree.ResolvedPath, driverKey, desc string, deadline t
 		return Result{}, fmt.Errorf("writing worker session state: %w", err)
 	}
 
-	// Captured BEFORE the template exec so a hello racing the template's
-	// return still satisfies the gate.
+	// Captured BEFORE the exec so a hello racing worker startup still satisfies
+	// the gate.
 	startTime := time.Now()
 
-	// Template contract: the spawn argv detaches the session and returns
-	// promptly (like `posh attach --detach`, or clown's --clown-attach=spawn);
-	// Run blocking until the harness exits would burn the hello deadline.
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Dir = rp.AbsPath
-	cmd.Env = workerEnv(rp, desc, sessionEnv)
-	if err := cmd.Run(); err != nil {
+	// spinclass GUARANTEES detachment rather than trusting the spawn-entry to
+	// self-detach: startDetached launches the entry in its own session with
+	// stdio redirected to a log and never waits for it to exit. Readiness is
+	// proven SOLELY by the hello handshake below (bounded by deadline), so an
+	// entry that never returns — a blocking direnv build, a foregrounded
+	// clown/posh attach — can no longer wedge the launcher. A well-behaved
+	// clown --clown-attach=spawn still forks the worker and exits promptly.
+	logPath := filepath.Join(rp.AbsPath, ".spinclass", "spawn.log")
+	if err := startDetached(argv, rp.AbsPath, workerEnv(rp, desc, sessionEnv), logPath); err != nil {
 		return Result{}, fmt.Errorf("spawn template %q failed: %w", argv, err)
 	}
 

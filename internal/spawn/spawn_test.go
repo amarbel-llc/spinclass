@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -39,9 +41,13 @@ func newWorkerFixture(t *testing.T, sweatfileTOML string) (home, repoPath string
 // happySweatfile's spawn-entry (exec'd directly — FDR-0017 Piece 1) records its
 // working directory (the marker proves cmd.Dir = the worktree) and its
 // positional argv (one element per line) so the test can assert {prompt}
-// substitution and that the brief stayed a single element.
+// substitution and that the brief stayed a single element. The `launched`
+// marker — which the hello sender waits on before firing — is written LAST, so
+// that once the hello arrives every other side effect (argv.txt) is already on
+// disk: the entry now runs concurrently with Launch (startDetached), not before
+// it returns.
 const happySweatfile = `[session-entry]
-spawn-entry = ["sh", "-c", 'touch "$PWD/launched"; printf "%s\n" "$@" > "$PWD/argv.txt"', "sh", "{prompt}"]
+spawn-entry = ["sh", "-c", 'printf "%s\n" "$@" > "$PWD/argv.txt"; touch "$PWD/launched"', "sh", "{prompt}"]
 `
 
 // windowSweatfile adds a spawn-window stub recording its substituted args
@@ -205,6 +211,62 @@ func TestLaunchHappyPath(t *testing.T) {
 	}
 	if got := st.Env["SPINCLASS_SESSION_ID"]; got != res.SessionKey {
 		t.Errorf("Env[SPINCLASS_SESSION_ID]: got %q, want %q", got, res.SessionKey)
+	}
+}
+
+// blockingSweatfile's spawn-entry records its pid, signals readiness via the
+// launched marker, then blocks forever (exec sleep). spinclass must still
+// return — it detaches the entry instead of waiting for it to exit. Under the
+// old cmd.Run() launch this test hangs, because Launch blocks on the sleep and
+// never reaches the hello wait.
+const blockingSweatfile = `[session-entry]
+spawn-entry = ["sh", "-c", 'echo $$ > "$PWD/entry.pid"; touch "$PWD/launched"; exec sleep 30', "sh", "{prompt}"]
+`
+
+// killEntryPidFile SIGKILLs the pid recorded by blockingSweatfile's entry, so a
+// detached (setsid) sleep does not outlive the test.
+func killEntryPidFile(t *testing.T, repoPath string) {
+	t.Helper()
+	pids, _ := filepath.Glob(filepath.Join(repoPath, ".worktrees", "*", "entry.pid"))
+	for _, p := range pids {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	}
+}
+
+// TestLaunchDetachesNonExitingEntry is the always-detach guarantee: a
+// spawn-entry that never exits must not wedge Launch. Launch must return
+// promptly once the worker's hello arrives, with the entry still running
+// detached.
+func TestLaunchDetachesNonExitingEntry(t *testing.T) {
+	home, repoPath := newWorkerFixture(t, blockingSweatfile)
+	const driverKey = "driver/detach-test"
+	t.Cleanup(func() { killEntryPidFile(t, repoPath) })
+
+	stop, helloErr := helloAfterLaunch(t, repoPath, driverKey)
+	t.Cleanup(stop)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := Launch(home, repoPath, driverKey, "brief", "", 15*time.Second)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Launch returned error: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Launch did not return while the spawn-entry was still running — it blocked on the entry instead of detaching")
+	}
+	if herr := <-helloErr; herr != nil {
+		t.Fatalf("hello goroutine: %v", herr)
 	}
 }
 

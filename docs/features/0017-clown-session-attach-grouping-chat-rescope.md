@@ -347,8 +347,14 @@ inside it you run any number of shells **and** clowns. clown owns **all**
 attach/multiplexing/grouping — interactive **and the detached-spawn executor**
 (resolving the RFC-0013 §1.3 open question, RFC-0014 §5). spinclass ships **no
 multiplexer templates**: `sc start`/`sc resume` exec `$SHELL`; `sc spawn` execs
-clown in spawn mode (the hidden `--clown-attach=spawn` arg, RFC-0014 §5.1) and
-relies on clown's `[attach].spawn` to self-detach and return promptly. `sc resume`
+clown in spawn mode (the hidden `--clown-attach=spawn` arg, RFC-0014 §5.1),
+which is *expected* to self-detach and return promptly. spinclass no longer
+**relies** on that, though: `spawn.startDetached` launches the spawn-entry in its
+own session (`setsid`) with stdio redirected to `.spinclass/spawn.log` and never
+waits for it to exit — readiness is proven solely by the hello handshake. So a
+spawn-entry that fails to self-detach (a foregrounded `clown`/`posh` attach, a
+blocking `direnv exec` devshell build) can neither wedge nor tether `sc spawn` /
+`sc fork`; the command still returns and exits once the hello arrives. `sc resume`
 becomes "open a shell in the worktree"; reattaching a live agent is clown's job
 (native `sc`-side reattach hooks are a future exploration, not v1).
 
