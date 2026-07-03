@@ -40,6 +40,18 @@ promotion-criteria: |
 > *wake* leg; the async-job-lifecycle emit half (`clown job start`/`done`
 > for merge/check) is unaffected and remains the live producer integration.
 
+> **CLI rename note (2026-07-03):** clown RFC-0015 split the `clown job`
+> subcommands into a standalone `ringmaster` binary (shipped alongside `clown`
+> on PATH). spinclass's producer (`internal/clown`) now shells out to
+> `ringmaster start`/`ringmaster done` instead of `clown job start`/`done` — a
+> behavior-preserving rename (same flags, exit codes, output). ringmaster is
+> resolved from PATH (override with `$RINGMASTER_BIN`); spinclass deliberately
+> does **not** pin clown as a flake input for it (that would drag clown's whole
+> input closure in for one small binary) — the job platform is slated to move
+> to its own lightweight repo, pinnable then. The `clown job …` spellings below
+> are historical; read them as `ringmaster …`. The design and wake semantics
+> are unchanged.
+
 ## Problem Statement
 
 Spinclass's async merge/check tools return a job id immediately, but the

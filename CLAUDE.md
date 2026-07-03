@@ -177,8 +177,10 @@ subcommand is always available.
   tools** — reach for async only when you have other work to do while the hook
   runs; never start async then hot-poll status.
 - **Clown job-wakeup emits** (FDR 0010, `internal/clown`): when `serve` runs
-  under clown (`CLOWN_BIN` set), async tools emit `clown job start/done` so
-  clown wakes the agent with one `[clown-job]` line. Purely additive;
+  under clown (`CLOWN_BIN` set), async tools emit `ringmaster start/done`
+  (clown's job-control CLI, clown RFC-0015; resolved from PATH or
+  `$RINGMASTER_BIN`, never by pinning clown) so clown wakes the agent with one
+  `[clown-job]` line. Purely additive;
   job.json/job.log stay the system of record; rollback is
   `CLOWN_DISABLE_JOB_WAKEUP=1`.
 - **Dynamic system-prompt fragment** (spinclass#187, clown plugin protocol

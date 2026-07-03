@@ -13,31 +13,33 @@ import (
 // TestMain strips CLOWN_BIN for the whole package: the dev/CI environment
 // runs under clown, and without this every pre-existing Start test would emit
 // REAL job-wakeup events at the developer's session. Wake tests opt back in
-// with a stub via t.Setenv.
+// with a stub via installStub.
 func TestMain(m *testing.M) {
 	_ = os.Unsetenv("CLOWN_BIN")
 	os.Exit(m.Run())
 }
 
-// stubClown writes an executable shell script that appends each invocation's
-// argv (one element per line, terminated by a "--" line) to argsFile,
-// printing a fixed job id for `job start` calls. ok=false makes every call
-// exit 1.
-func stubClown(t *testing.T, argsFile string, ok bool) string {
+// installStub writes an executable shell script that appends each invocation's
+// argv (one element per line, terminated by a "--" line) to argsFile, printing
+// a fixed job id for `ringmaster start` calls. It points $RINGMASTER_BIN at the
+// stub (clown RFC-0015 resolution) and sets $CLOWN_BIN so clown.Enabled()
+// reports true (the emit gate). ok=false makes every call exit 1.
+func installStub(t *testing.T, argsFile string, ok bool) {
 	t.Helper()
 	dir := t.TempDir()
-	script := filepath.Join(dir, "clown")
+	script := filepath.Join(dir, "ringmaster")
 	exit := "1"
 	if ok {
 		exit = "0"
 	}
 	body := "#!/bin/sh\n{ printf '%s\\n' \"$@\"; echo --; } >> " + argsFile + "\n" +
-		"if [ \"$2\" = start ]; then echo job-deadbeef; fi\n" +
+		"if [ \"$1\" = start ]; then echo job-deadbeef; fi\n" +
 		"exit " + exit + "\n"
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatalf("write stub clown: %v", err)
+		t.Fatalf("write stub ringmaster: %v", err)
 	}
-	return script
+	t.Setenv("CLOWN_BIN", filepath.Join(dir, "clown"))
+	t.Setenv("RINGMASTER_BIN", script)
 }
 
 // recordedInvocations splits the stub's args file back into one argv slice
@@ -90,7 +92,7 @@ func runWaked(t *testing.T, wt, kind string, fn Func) {
 func TestStartEmitsClownLifecycleOnSuccess(t *testing.T) {
 	wt := t.TempDir()
 	argsFile := filepath.Join(t.TempDir(), "args")
-	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, true))
+	installStub(t, argsFile, true)
 
 	runWaked(t, wt, KindMerge, func(ctx context.Context, w io.Writer) (string, bool) {
 		return "✓ hook", false
@@ -98,11 +100,11 @@ func TestStartEmitsClownLifecycleOnSuccess(t *testing.T) {
 
 	inv := recordedInvocations(t, argsFile)
 	if len(inv) != 2 {
-		t.Fatalf("clown invocations: got %d (%q), want 2 (start + done)", len(inv), inv)
+		t.Fatalf("ringmaster invocations: got %d (%q), want 2 (start + done)", len(inv), inv)
 	}
-	assertArgv(t, inv[0], []string{"job", "start", "--label", "merge", "--source", "spinclass"})
+	assertArgv(t, inv[0], []string{"start", "--label", "merge", "--source", "spinclass"})
 	assertArgv(t, inv[1], []string{
-		"job", "done", "job-deadbeef",
+		"done", "job-deadbeef",
 		"--state", "succeeded",
 		"--message", "merge succeeded",
 		"--result-ref", "spinclass session-job-status",
@@ -120,7 +122,7 @@ func TestStartEmitsClownLifecycleOnSuccess(t *testing.T) {
 func TestStartEmitsFailedStateWithFailureLine(t *testing.T) {
 	wt := t.TempDir()
 	argsFile := filepath.Join(t.TempDir(), "args")
-	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, true))
+	installStub(t, argsFile, true)
 
 	runWaked(t, wt, KindCheck, func(ctx context.Context, w io.Writer) (string, bool) {
 		return "✓ rebase\n✗ pre-merge hook", true
@@ -128,10 +130,10 @@ func TestStartEmitsFailedStateWithFailureLine(t *testing.T) {
 
 	inv := recordedInvocations(t, argsFile)
 	if len(inv) != 2 {
-		t.Fatalf("clown invocations: got %d, want 2", len(inv))
+		t.Fatalf("ringmaster invocations: got %d, want 2", len(inv))
 	}
 	assertArgv(t, inv[1], []string{
-		"job", "done", "job-deadbeef",
+		"done", "job-deadbeef",
 		"--state", "failed",
 		"--message", "check failed: ✗ pre-merge hook",
 		"--result-ref", "spinclass session-job-status",
@@ -141,7 +143,7 @@ func TestStartEmitsFailedStateWithFailureLine(t *testing.T) {
 func TestStartEmitsCancelledState(t *testing.T) {
 	wt := t.TempDir()
 	argsFile := filepath.Join(t.TempDir(), "args")
-	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, true))
+	installStub(t, argsFile, true)
 
 	started := make(chan struct{})
 	if _, err := Start(wt, KindMerge, false, "cancel-job", func(ctx context.Context, w io.Writer) (string, bool) {
@@ -161,10 +163,10 @@ func TestStartEmitsCancelledState(t *testing.T) {
 
 	inv := recordedInvocations(t, argsFile)
 	if len(inv) != 2 {
-		t.Fatalf("clown invocations: got %d, want 2", len(inv))
+		t.Fatalf("ringmaster invocations: got %d, want 2", len(inv))
 	}
 	assertArgv(t, inv[1], []string{
-		"job", "done", "job-deadbeef",
+		"done", "job-deadbeef",
 		"--state", "cancelled",
 		"--message", "merge cancelled",
 		"--result-ref", "spinclass session-job-status",
@@ -174,14 +176,14 @@ func TestStartEmitsCancelledState(t *testing.T) {
 func TestStartNoEmitWhenClownAbsent(t *testing.T) {
 	wt := t.TempDir()
 	argsFile := filepath.Join(t.TempDir(), "args")
-	// CLOWN_BIN deliberately unset (TestMain stripped it).
+	// CLOWN_BIN deliberately unset (TestMain stripped it): the emit gate is off.
 
 	runWaked(t, wt, KindMerge, func(ctx context.Context, w io.Writer) (string, bool) {
 		return "✓ hook", false
 	})
 
 	if _, err := os.Stat(argsFile); err == nil {
-		t.Fatal("clown invoked despite CLOWN_BIN being unset")
+		t.Fatal("ringmaster invoked despite CLOWN_BIN being unset")
 	}
 	j, err := Read(wt)
 	if err != nil {
@@ -198,16 +200,17 @@ func TestStartNoEmitWhenClownAbsent(t *testing.T) {
 func TestStartReturnsImmediatelyDespiteSlowClown(t *testing.T) {
 	wt := t.TempDir()
 	argsFile := filepath.Join(t.TempDir(), "args")
-	// A clown that hangs for 3s: the async tool's contract is to return a
+	// A ringmaster that hangs for 3s: the async tool's contract is to return a
 	// job id immediately, so the start emit must not be on Start's path.
 	dir := t.TempDir()
-	script := filepath.Join(dir, "clown")
+	script := filepath.Join(dir, "ringmaster")
 	body := "#!/bin/sh\nsleep 3\n{ printf '%s\\n' \"$@\"; echo --; } >> " + argsFile + "\n" +
-		"if [ \"$2\" = start ]; then echo job-deadbeef; fi\nexit 0\n"
+		"if [ \"$1\" = start ]; then echo job-deadbeef; fi\nexit 0\n"
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatalf("write stub clown: %v", err)
+		t.Fatalf("write stub ringmaster: %v", err)
 	}
-	t.Setenv("CLOWN_BIN", script)
+	t.Setenv("CLOWN_BIN", filepath.Join(dir, "clown"))
+	t.Setenv("RINGMASTER_BIN", script)
 
 	began := time.Now()
 	if _, err := Start(wt, KindMerge, false, "fast-job", func(ctx context.Context, w io.Writer) (string, bool) {
@@ -216,7 +219,7 @@ func TestStartReturnsImmediatelyDespiteSlowClown(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	if elapsed := time.Since(began); elapsed > 1*time.Second {
-		t.Fatalf("Start blocked %v on a slow clown; want immediate return", elapsed)
+		t.Fatalf("Start blocked %v on a slow ringmaster; want immediate return", elapsed)
 	}
 	select {
 	case <-WaitDone(wt):
@@ -228,7 +231,7 @@ func TestStartReturnsImmediatelyDespiteSlowClown(t *testing.T) {
 func TestStartReturnsSnapshotNotSharedPointer(t *testing.T) {
 	wt := t.TempDir()
 	argsFile := filepath.Join(t.TempDir(), "args")
-	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, true))
+	installStub(t, argsFile, true)
 
 	ret, err := Start(wt, KindMerge, false, "snap-job", func(ctx context.Context, w io.Writer) (string, bool) {
 		return "✓ hook", false
@@ -260,7 +263,7 @@ func TestStartReturnsSnapshotNotSharedPointer(t *testing.T) {
 func TestStartEmitFailureDoesNotAffectJob(t *testing.T) {
 	wt := t.TempDir()
 	argsFile := filepath.Join(t.TempDir(), "args")
-	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, false))
+	installStub(t, argsFile, false)
 
 	runWaked(t, wt, KindMerge, func(ctx context.Context, w io.Writer) (string, bool) {
 		return "✓ hook", false

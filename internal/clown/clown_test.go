@@ -8,13 +8,13 @@ import (
 	"testing"
 )
 
-// stubClown writes an executable shell script that records its argv (one
+// stubRingmaster writes an executable shell script that records its argv (one
 // element per line) into argsFile, prints stdout, and exits successfully iff
-// ok. It returns the script path for CLOWN_BIN injection.
-func stubClown(t *testing.T, argsFile, stdout string, ok bool) string {
+// ok. It returns the script path for $RINGMASTER_BIN injection.
+func stubRingmaster(t *testing.T, argsFile, stdout string, ok bool) string {
 	t.Helper()
 	dir := t.TempDir()
-	script := filepath.Join(dir, "clown")
+	script := filepath.Join(dir, "ringmaster")
 	exit := "1"
 	if ok {
 		exit = "0"
@@ -27,7 +27,7 @@ func stubClown(t *testing.T, argsFile, stdout string, ok bool) string {
 	}
 	body += "exit " + exit + "\n"
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatalf("write stub clown: %v", err)
+		t.Fatalf("write stub ringmaster: %v", err)
 	}
 	return script
 }
@@ -54,18 +54,18 @@ func assertArgv(t *testing.T, got, want []string) {
 	}
 }
 
-func TestBinDefaultsToPathLookup(t *testing.T) {
-	t.Setenv("CLOWN_BIN", "")
-	_ = os.Unsetenv("CLOWN_BIN")
-	if got := Bin(); got != "clown" {
-		t.Fatalf("unset CLOWN_BIN: got %q, want %q", got, "clown")
+func TestRingmasterBinHonorsOverride(t *testing.T) {
+	t.Setenv("RINGMASTER_BIN", "/nix/store/abc/bin/ringmaster")
+	if got := ringmasterBin(); got != "/nix/store/abc/bin/ringmaster" {
+		t.Fatalf("got %q, want RINGMASTER_BIN value", got)
 	}
 }
 
-func TestBinHonorsEnv(t *testing.T) {
-	t.Setenv("CLOWN_BIN", "/nix/store/abc/bin/clown")
-	if got := Bin(); got != "/nix/store/abc/bin/clown" {
-		t.Fatalf("got %q, want CLOWN_BIN value", got)
+func TestRingmasterBinDefaultsToPathLookup(t *testing.T) {
+	t.Setenv("RINGMASTER_BIN", "")
+	_ = os.Unsetenv("RINGMASTER_BIN")
+	if got := ringmasterBin(); got != "ringmaster" {
+		t.Fatalf("unset RINGMASTER_BIN: got %q, want %q", got, "ringmaster")
 	}
 }
 
@@ -83,7 +83,7 @@ func TestEnabledRequiresClownBin(t *testing.T) {
 
 func TestStartJobArgvAndID(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
-	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, "merge-9f3c1a2b", true))
+	t.Setenv("RINGMASTER_BIN", stubRingmaster(t, argsFile, "merge-9f3c1a2b", true))
 
 	id, err := StartJob(context.Background(), "merge", "spinclass")
 	if err != nil {
@@ -93,7 +93,7 @@ func TestStartJobArgvAndID(t *testing.T) {
 		t.Fatalf("job id: got %q, want %q", id, "merge-9f3c1a2b")
 	}
 	assertArgv(t, recordedArgs(t, argsFile), []string{
-		"job", "start",
+		"start",
 		"--label", "merge",
 		"--source", "spinclass",
 	})
@@ -101,7 +101,7 @@ func TestStartJobArgvAndID(t *testing.T) {
 
 func TestStartJobEmptyStdoutErrors(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
-	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, "", true))
+	t.Setenv("RINGMASTER_BIN", stubRingmaster(t, argsFile, "", true))
 
 	if _, err := StartJob(context.Background(), "merge", "spinclass"); err == nil {
 		t.Fatal("StartJob with empty stdout: want error, got nil")
@@ -110,14 +110,14 @@ func TestStartJobEmptyStdoutErrors(t *testing.T) {
 
 func TestFinishJobArgv(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
-	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, "", true))
+	t.Setenv("RINGMASTER_BIN", stubRingmaster(t, argsFile, "", true))
 
 	err := FinishJob(context.Background(), "merge-9f3c1a2b", "succeeded", "merge landed", "spinclass session-job-status")
 	if err != nil {
 		t.Fatalf("FinishJob: %v", err)
 	}
 	assertArgv(t, recordedArgs(t, argsFile), []string{
-		"job", "done", "merge-9f3c1a2b",
+		"done", "merge-9f3c1a2b",
 		"--state", "succeeded",
 		"--message", "merge landed",
 		"--result-ref", "spinclass session-job-status",
@@ -126,13 +126,13 @@ func TestFinishJobArgv(t *testing.T) {
 
 func TestFinishJobOmitsEmptyOptionals(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
-	t.Setenv("CLOWN_BIN", stubClown(t, argsFile, "", true))
+	t.Setenv("RINGMASTER_BIN", stubRingmaster(t, argsFile, "", true))
 
 	if err := FinishJob(context.Background(), "check-1", "failed", "", ""); err != nil {
 		t.Fatalf("FinishJob: %v", err)
 	}
 	assertArgv(t, recordedArgs(t, argsFile), []string{
-		"job", "done", "check-1",
+		"done", "check-1",
 		"--state", "failed",
 	})
 }
@@ -140,16 +140,16 @@ func TestFinishJobOmitsEmptyOptionals(t *testing.T) {
 func TestFailureSurfacesStderr(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
 	dir := t.TempDir()
-	script := filepath.Join(dir, "clown")
+	script := filepath.Join(dir, "ringmaster")
 	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argsFile + "\necho 'boom detail' >&2\nexit 1\n"
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatalf("write stub clown: %v", err)
+		t.Fatalf("write stub ringmaster: %v", err)
 	}
-	t.Setenv("CLOWN_BIN", script)
+	t.Setenv("RINGMASTER_BIN", script)
 
 	err := FinishJob(context.Background(), "j-1", "succeeded", "", "")
 	if err == nil {
-		t.Fatal("failing clown: want error, got nil")
+		t.Fatal("failing ringmaster: want error, got nil")
 	}
 	if !strings.Contains(err.Error(), "boom detail") {
 		t.Fatalf("error missing stderr detail: %v", err)
