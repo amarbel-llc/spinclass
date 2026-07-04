@@ -66,6 +66,10 @@ type Coordinates struct {
 	Worktree    string // worktree path (worktree mode) or checkout path (main checkout)
 	Description string
 	GroupID     string
+	// Timezone is the host's local timezone, e.g. "America/New_York (UTC-04:00)",
+	// resolved fully locally (no network) so it is safe before `initialize`.
+	// Empty renders as an omitted line.
+	Timezone string
 	// RepoInfo is the best-effort forge identity of the session's repo —
 	// provider, owner, link, description — resolved from the git remote plus
 	// a bounded live forge lookup. Empty fields render as omitted lines.
@@ -128,6 +132,10 @@ func resolve(getenv func(string) string, getwd func() (string, error), fetchRepo
 		Worktree:    getenv("SPINCLASS_WORKTREE"),
 		Description: getenv("SPINCLASS_DESCRIPTION"),
 		GroupID:     getenv("CLOWN_GROUP_ID"),
+		// Host-level and mode-independent: a worktree session and a main
+		// checkout share the same host clock, so it survives the main-checkout
+		// field reset below.
+		Timezone: hostTimezone(),
 	}
 
 	cwd, _ := getwd()

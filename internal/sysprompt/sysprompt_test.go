@@ -238,6 +238,26 @@ func TestRenderDesignRecordsTrailer(t *testing.T) {
 	}
 }
 
+// The host timezone line renders when set and is omitted when empty, in both
+// template variants.
+func TestRenderTimezoneLine(t *testing.T) {
+	for _, mode := range []Mode{ModeWorktree, ModeMainCheckout} {
+		got, err := Render(Coordinates{Mode: mode, SessionKey: "k", Timezone: "America/New_York (UTC-04:00)"})
+		if err != nil {
+			t.Fatalf("Render(%s): %v", mode, err)
+		}
+		mustContain(t, got, "Host timezone: America/New_York (UTC-04:00)")
+
+		none, err := Render(Coordinates{Mode: mode, SessionKey: "k"})
+		if err != nil {
+			t.Fatalf("Render(%s): %v", mode, err)
+		}
+		if strings.Contains(none, "Host timezone") {
+			t.Errorf("%s: timezone line must be omitted when empty", mode)
+		}
+	}
+}
+
 func mustContain(t *testing.T, haystack, needle string) {
 	t.Helper()
 	if !strings.Contains(haystack, needle) {

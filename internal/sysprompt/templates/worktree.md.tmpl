@@ -3,6 +3,9 @@
 This Claude Code session is a spinclass-managed **worktree session**.
 
 - Session key: `{{.SessionKey}}`
+{{- if .Timezone}}
+- Host timezone: {{.Timezone}}
+{{- end}}
 {{- if .Branch}}
 - Branch: `{{.Branch}}`
 {{- end}}
