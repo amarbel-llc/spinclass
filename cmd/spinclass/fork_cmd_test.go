@@ -146,7 +146,7 @@ func awaitForkHello(newPath, workerKey, driverKey string) (<-chan error, chan<- 
 				return
 			case <-tick.C:
 				if _, err := os.Stat(filepath.Join(newPath, "launched")); err == nil {
-					helloErr <- spawnhandshake.SendHello(workerKey, driverKey)
+					helloErr <- spawnhandshake.SendHello(workerKey, driverKey, "")
 					return
 				}
 			}

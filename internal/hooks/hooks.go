@@ -88,9 +88,12 @@ func runSessionStart(input hookInput) error {
 		return nil
 	}
 	// Gate 1: not inside an sc-created worktree (those already have state).
-	// Cheapest check (a single Lstat) — runs first.
+	// Cheapest check (a single Lstat) — runs first. input.SessionID is the
+	// worker's claude --session-id, which by construction equals its posh
+	// multiplexer session name (clown mints one UUID for both) — the driver
+	// needs it to reattach, so it rides along in the hello (direction B).
 	if worktree.IsWorktree(cwd) {
-		maybeSendSpawnHello(cwd) // spawn handshake (FDR 0006); never blocks startup
+		maybeSendSpawnHello(cwd, input.SessionID) // spawn handshake (FDR 0006); never blocks startup
 		return nil
 	}
 	// os.Getppid() is best-effort: the hook handler is a short-lived
@@ -186,7 +189,7 @@ func MaterializeImplicit(cwd, randID string, pid int) (string, bool) {
 // send first (a state-write failure must not suppress the handshake), mark
 // only on success (a send failure must not set HelloSentAt). All failures are
 // swallowed and logged via sessionlog — a hook must never block startup.
-func maybeSendSpawnHello(cwd string) {
+func maybeSendSpawnHello(cwd, poshSessionID string) {
 	repoPath, err := git.CommonDir(cwd)
 	if err != nil {
 		sessionlog.Errorf("maybeSendSpawnHello common-dir-failed cwd=%s err=%v", cwd, err)
@@ -205,7 +208,7 @@ func maybeSendSpawnHello(cwd string) {
 	if st.SpawnedBy == "" || st.HelloSentAt != nil {
 		return
 	}
-	if err := spawnhandshake.SendHello(st.SessionKey, st.SpawnedBy); err != nil {
+	if err := spawnhandshake.SendHello(st.SessionKey, st.SpawnedBy, poshSessionID); err != nil {
 		sessionlog.Errorf("maybeSendSpawnHello send-failed key=%s to=%s err=%v", st.SessionKey, st.SpawnedBy, err)
 		return
 	}

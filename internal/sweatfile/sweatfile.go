@@ -32,10 +32,12 @@ type SessionEntry struct {
 	// clown's --clown-attach=spawn). {prompt} = the driver's brief, {dir} =
 	// the worker worktree. Defaults to the clown spawn form (SessionSpawnEntry).
 	SpawnEntry []string `toml:"spawn-entry"`
-	// SpawnWindow is an argv template exec'd fire-and-forget right after the
-	// spawn entry launches: it opens a terminal window onto the freshly
-	// spawned worker (#149). {id} = the worker's session key, {dir} = the
-	// worker worktree; {entry}/{prompt} are rejected by validate. Unset = no window.
+	// SpawnWindow is an argv template exec'd fire-and-forget once the worker's
+	// hello arrives: it opens a terminal window onto the spawned worker (#149).
+	// {id} = the worker's session key, {dir} = the worker worktree, {attach-id}
+	// = the worker's posh session id from the hello (for a
+	// `posh attach {attach-id}` reattach window, direction B); {entry}/{prompt}
+	// are rejected by validate. Unset = no window.
 	SpawnWindow []string `toml:"spawn-window"`
 }
 

@@ -23,8 +23,10 @@ func SubstituteEntry(entry []string, brief, wtPath string) []string {
 
 // SubstituteWindow renders the spawn-window argv template (#149): {id}→id
 // and {dir}→wtPath substring-substituted per element. Returns nil for an
-// empty template (knob unset). No {entry} splice — the window command is a
-// leaf argv; validate rejects {entry}/{prompt} in it.
+// empty template (knob unset). {attach-id} is deliberately NOT resolved here —
+// it is filled by substituteAttachID after the hello, since the worker's posh
+// session id is unknown at render time. No {entry} splice — the window command
+// is a leaf argv; validate rejects {entry}/{prompt} in it.
 func SubstituteWindow(template []string, id, wtPath string) []string {
 	if len(template) == 0 {
 		return nil
@@ -34,6 +36,18 @@ func SubstituteWindow(template []string, id, wtPath string) []string {
 		e = strings.ReplaceAll(e, "{id}", id)
 		e = strings.ReplaceAll(e, "{dir}", wtPath)
 		out[i] = e
+	}
+	return out
+}
+
+// substituteAttachID resolves the {attach-id} placeholder in an
+// already-rendered spawn-window argv with the worker's posh session id, learned
+// from the hello (direction B). Separated from SubstituteWindow because that id
+// is only known after the worker boots, whereas {id}/{dir} are known at launch.
+func substituteAttachID(argv []string, attachID string) []string {
+	out := make([]string, len(argv))
+	for i, e := range argv {
+		out[i] = strings.ReplaceAll(e, "{attach-id}", attachID)
 	}
 	return out
 }

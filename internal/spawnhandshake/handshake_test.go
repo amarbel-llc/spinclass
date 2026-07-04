@@ -20,13 +20,20 @@ func TestHelloRoundTrip(t *testing.T) {
 		worker = "otherrepo/calm-willow"
 	)
 
-	if err := SendHello(worker, driver); err != nil {
+	const poshID = "b3bfa155-8881-4177-92f7-33862a309d2c"
+	if err := SendHello(worker, driver, poshID); err != nil {
 		t.Fatalf("SendHello: %v", err)
 	}
 
 	start := time.Now()
-	if err := WaitForHello(driver, worker, time.Now().Add(-time.Second), 2*time.Second); err != nil {
+	gotID, err := WaitForHello(driver, worker, time.Now().Add(-time.Second), 2*time.Second)
+	if err != nil {
 		t.Fatalf("WaitForHello: %v", err)
+	}
+	// The worker's reported posh session id must round-trip so the driver can
+	// reattach with `posh attach <id>`.
+	if gotID != poshID {
+		t.Errorf("WaitForHello id = %q, want %q", gotID, poshID)
 	}
 	// The hello was already present, so the immediate pre-tick check must
 	// satisfy the wait well before the first poll tick.
@@ -44,7 +51,7 @@ func TestWaitForHelloTimesOut(t *testing.T) {
 
 	deadline := 300 * time.Millisecond
 	start := time.Now()
-	err := WaitForHello(driver, worker, time.Now(), deadline)
+	_, err := WaitForHello(driver, worker, time.Now(), deadline)
 	if err == nil {
 		t.Fatal("WaitForHello: expected deadline error, got nil")
 	}
@@ -66,14 +73,14 @@ func TestWaitForHelloIgnoresOlder(t *testing.T) {
 		worker = "otherrepo/calm-willow"
 	)
 
-	if err := SendHello(worker, driver); err != nil {
+	if err := SendHello(worker, driver, ""); err != nil {
 		t.Fatalf("SendHello: %v", err)
 	}
 
 	// since is in the future of the send: the existing hello must not satisfy
 	// the gate, so the wait times out.
 	since := time.Now().Add(time.Hour)
-	if err := WaitForHello(driver, worker, since, 300*time.Millisecond); err == nil {
+	if _, err := WaitForHello(driver, worker, since, 300*time.Millisecond); err == nil {
 		t.Fatal("WaitForHello: a pre-since hello must not satisfy the gate")
 	}
 }
@@ -82,12 +89,12 @@ func TestWaitForHelloPairScoped(t *testing.T) {
 	isolate(t)
 	const worker = "otherrepo/calm-willow"
 
-	if err := SendHello(worker, "spinclass/bright-cedar"); err != nil {
+	if err := SendHello(worker, "spinclass/bright-cedar", ""); err != nil {
 		t.Fatalf("SendHello: %v", err)
 	}
 
 	// Same worker, a different driver → different pair key → no match.
-	err := WaitForHello("spinclass/other-driver", worker, time.Now().Add(-time.Second), 300*time.Millisecond)
+	_, err := WaitForHello("spinclass/other-driver", worker, time.Now().Add(-time.Second), 300*time.Millisecond)
 	if err == nil {
 		t.Fatal("WaitForHello: a hello for a different (worker,driver) pair must not satisfy the gate")
 	}

@@ -30,6 +30,7 @@ type Result struct {
 	SessionKey    string // <repo-dirname>/<branch> — the worker's chat target
 	WorktreePath  string // absolute path to the worker's worktree
 	MultiplexerID string // the worker's session key (= SPINCLASS_SESSION_ID, #146)
+	PoshSessionID string // the worker's posh/clown session id from the hello (reattach target); empty if the worker reported none
 }
 
 // Launch creates a detached, harness-booted worker session in repoPath and
@@ -243,17 +244,22 @@ func launchRendered(rp worktree.ResolvedPath, driverKey, desc string, deadline t
 		return Result{}, fmt.Errorf("spawn template %q failed: %w", argv, err)
 	}
 
-	// Window BEFORE the hello wait — the user watches the harness boot
-	// live (FDR 0006 #149 design: window-at-launch).
-	launchSpawnWindow(window, rp, desc, sessionEnv)
-
-	if err := spawnhandshake.WaitForHello(driverKey, rp.SessionKey, startTime, deadline); err != nil {
+	// Block on the worker's hello, which carries its posh session id. The
+	// window opens AFTER the hello (not before) so it can attach to the now-
+	// ready session: the id is a crypto-random UUID unknowable until the worker
+	// boots (direction B), so {attach-id} can only be resolved here. A hello
+	// timeout returns before any window opens — a failed spawn shows no window.
+	poshID, err := spawnhandshake.WaitForHello(driverKey, rp.SessionKey, startTime, deadline)
+	if err != nil {
 		return Result{}, err
 	}
+
+	launchSpawnWindow(substituteAttachID(window, poshID), rp, desc, sessionEnv)
 
 	return Result{
 		SessionKey:    rp.SessionKey,
 		WorktreePath:  rp.AbsPath,
 		MultiplexerID: rp.SessionKey,
+		PoshSessionID: poshID,
 	}, nil
 }

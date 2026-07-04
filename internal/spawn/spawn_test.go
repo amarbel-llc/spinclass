@@ -52,8 +52,8 @@ spawn-entry = ["sh", "-c", 'printf "%s\n" "$@" > "$PWD/argv.txt"; touch "$PWD/la
 
 // windowSweatfile adds a spawn-window stub recording its substituted args
 // into the worktree (cmd.Dir), proving the fire-and-forget exec ran there
-// with {id}/{dir} rendered.
-const windowSweatfile = happySweatfile + `spawn-window = ["sh", "-c", 'printf "%s %s" "$1" "$2" > "$PWD/window.txt"', "sh", "{id}", "{dir}"]
+// with {id}/{dir} rendered AND {attach-id} resolved from the hello.
+const windowSweatfile = happySweatfile + `spawn-window = ["sh", "-c", 'printf "%s %s %s" "$1" "$2" "$3" > "$PWD/window.txt"', "sh", "{id}", "{dir}", "{attach-id}"]
 `
 
 // failingWindowSweatfile's window command exits nonzero — the spawn must
@@ -61,10 +61,16 @@ const windowSweatfile = happySweatfile + `spawn-window = ["sh", "-c", 'printf "%
 const failingWindowSweatfile = happySweatfile + `spawn-window = ["false", "{id}"]
 `
 
+// testPoshID is the posh session id the fake worker reports in its hello, so
+// tests can assert it round-trips into Result and the {attach-id} window
+// substitution.
+const testPoshID = "b3bfa155-8881-4177-92f7-33862a309d2c"
+
 // helloAfterLaunch plays the worker's SessionStart hook for Launch tests:
 // it polls for the spawn template's marker file, derives the worker key
-// from the worktree dir name, and sends the hello to the driver. Returns
-// a stop func (call after Launch returns) and the error channel.
+// from the worktree dir name, and sends the hello (carrying testPoshID) to
+// the driver. Returns a stop func (call after Launch returns) and the error
+// channel.
 func helloAfterLaunch(t *testing.T, repoPath, driverKey string) (func(), chan error) {
 	t.Helper()
 	helloErr := make(chan error, 1)
@@ -85,7 +91,7 @@ func helloAfterLaunch(t *testing.T, repoPath, driverKey string) (func(), chan er
 				matches, _ := filepath.Glob(filepath.Join(repoPath, ".worktrees", "*", "launched"))
 				if len(matches) == 1 {
 					branch := filepath.Base(filepath.Dir(matches[0]))
-					helloErr <- spawnhandshake.SendHello("worker/"+branch, driverKey)
+					helloErr <- spawnhandshake.SendHello("worker/"+branch, driverKey, testPoshID)
 					return
 				}
 			}
@@ -119,9 +125,13 @@ func TestLaunchSpawnWindowFires(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	want := res.SessionKey + " " + res.WorktreePath
+	want := res.SessionKey + " " + res.WorktreePath + " " + testPoshID
 	if string(data) != want {
 		t.Errorf("window.txt = %q, want %q", data, want)
+	}
+	// The hello's posh id must also surface on Result for the driver/CLI.
+	if res.PoshSessionID != testPoshID {
+		t.Errorf("Result.PoshSessionID = %q, want %q", res.PoshSessionID, testPoshID)
 	}
 }
 

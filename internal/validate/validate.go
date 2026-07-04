@@ -225,8 +225,10 @@ func CheckHooks(sf sweatfile.Sweatfile) []Issue {
 // Piece 1: spinclass no longer wraps in a multiplexer); without "{prompt}"
 // anywhere it is suspicious (the worker would boot without the driver's brief)
 // but legal, so it only warns. `spawn-window` is a leaf argv: {entry}/{prompt}
-// in it is an error, and no {id}/{dir} anywhere warns (the window command could
-// not identify its session). See FDR 0006 / FDR 0017.
+// in it is an error, and no {id}/{dir}/{attach-id} anywhere warns (the window
+// command could not identify its session). {attach-id} resolves to the worker's
+// posh session id from the hello, for a `posh attach {attach-id}` reattach
+// window (direction B). See FDR 0006 / FDR 0017.
 func CheckSessionEntry(sf sweatfile.Sweatfile) []Issue {
 	var issues []Issue
 	if sf.SessionEntry == nil {
@@ -239,7 +241,7 @@ func CheckSessionEntry(sf sweatfile.Sweatfile) []Issue {
 			if strings.Contains(el, "{entry}") || strings.Contains(el, "{prompt}") {
 				badPlaceholder = true
 			}
-			if strings.Contains(el, "{id}") || strings.Contains(el, "{dir}") {
+			if strings.Contains(el, "{id}") || strings.Contains(el, "{dir}") || strings.Contains(el, "{attach-id}") {
 				identified = true
 			}
 		}
@@ -252,7 +254,7 @@ func CheckSessionEntry(sf sweatfile.Sweatfile) []Issue {
 			})
 		} else if !identified {
 			issues = append(issues, Issue{
-				Message:  `spawn-window has no element containing "{id}" or "{dir}"; the window command cannot identify which session to open`,
+				Message:  `spawn-window has no element containing "{id}", "{dir}", or "{attach-id}"; the window command cannot identify which session to open`,
 				Severity: SeverityWarning,
 				Field:    "session-entry.spawn-window",
 				Value:    strings.Join(sf.SessionEntry.SpawnWindow, " "),

@@ -171,7 +171,7 @@ func TestHandleSpawnSessionHappyPath(t *testing.T) {
 				matches, _ := filepath.Glob(filepath.Join(repoPath, ".worktrees", "*", "launched"))
 				if len(matches) == 1 {
 					branch := filepath.Base(filepath.Dir(matches[0]))
-					helloErr <- spawnhandshake.SendHello("worker/"+branch, driverKey)
+					helloErr <- spawnhandshake.SendHello("worker/"+branch, driverKey, "")
 					return
 				}
 			}

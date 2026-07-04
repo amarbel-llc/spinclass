@@ -23,11 +23,16 @@ import (
 const pollInterval = 250 * time.Millisecond
 
 // hello is the on-disk handshake record: the worker's readiness timestamp,
-// with the pair recorded for debuggability.
+// with the pair recorded for debuggability. PoshSessionID carries the worker's
+// multiplexer session name (clown's minted UUID == the claude --session-id)
+// back to the driver so it can reattach with `posh attach <id>` — the id is
+// crypto-random per spawn and unknowable until the worker boots, which is why
+// the worker reports it here (FDR-0017 reattach; direction B).
 type hello struct {
-	Worker string    `json:"worker"`
-	Driver string    `json:"driver"`
-	SentAt time.Time `json:"sent_at"`
+	Worker        string    `json:"worker"`
+	Driver        string    `json:"driver"`
+	SentAt        time.Time `json:"sent_at"`
+	PoshSessionID string    `json:"posh_session_id,omitempty"`
 }
 
 // xdgStateBase returns $XDG_STATE_HOME or its fallback, so the handshake dir
@@ -59,13 +64,15 @@ func pairPath(worker, driver string) string {
 // worker's SessionStart hook when its state carries spawned_by (FDR 0006). The
 // write is atomic (temp file + rename) so the polling driver never reads a
 // half-written record; a prior hello for the same pair is overwritten with a
-// fresh timestamp.
-func SendHello(worker, driver string) error {
+// fresh timestamp. poshSessionID is the worker's multiplexer session name for
+// the driver's reattach; empty is fine (older/unknown workers) — the driver
+// just skips the auto-attach.
+func SendHello(worker, driver, poshSessionID string) error {
 	d := dir()
 	if err := os.MkdirAll(d, 0o755); err != nil {
 		return fmt.Errorf("create spawn-handshake dir: %w", err)
 	}
-	data, err := json.Marshal(hello{Worker: worker, Driver: driver, SentAt: time.Now().UTC()})
+	data, err := json.Marshal(hello{Worker: worker, Driver: driver, SentAt: time.Now().UTC(), PoshSessionID: poshSessionID})
 	if err != nil {
 		return fmt.Errorf("marshal hello: %w", err)
 	}
@@ -95,31 +102,35 @@ func SendHello(worker, driver string) error {
 // this driver, or deadline elapses (the error names the deadline and the worker
 // key). Polls every pollInterval; the read is non-destructive, so a slow caller
 // never loses the signal, and a stale hello from a prior spawn of the same pair
-// is rejected by the since check.
-func WaitForHello(driver, worker string, since time.Time, deadline time.Duration) error {
-	arrived := func() (bool, error) {
+// is rejected by the since check. On success it returns the worker's reported
+// posh session id (empty when the worker did not report one).
+func WaitForHello(driver, worker string, since time.Time, deadline time.Duration) (string, error) {
+	arrived := func() (bool, string, error) {
 		data, err := os.ReadFile(pairPath(worker, driver))
 		if err != nil {
 			if os.IsNotExist(err) {
-				return false, nil
+				return false, "", nil
 			}
-			return false, err
+			return false, "", err
 		}
 		var h hello
 		if err := json.Unmarshal(data, &h); err != nil {
 			// A half-written or corrupt record: treat as not-yet-arrived
 			// rather than failing the spawn; the next poll re-reads.
-			return false, nil
+			return false, "", nil
 		}
-		return h.SentAt.After(since), nil
+		if !h.SentAt.After(since) {
+			return false, "", nil
+		}
+		return true, h.PoshSessionID, nil
 	}
 
 	// Check once before the first tick so an already-arrived hello does not
 	// pay the poll interval.
-	if ok, err := arrived(); err != nil {
-		return err
+	if ok, id, err := arrived(); err != nil {
+		return "", err
 	} else if ok {
-		return nil
+		return id, nil
 	}
 
 	ticker := time.NewTicker(pollInterval)
@@ -129,12 +140,12 @@ func WaitForHello(driver, worker string, since time.Time, deadline time.Duration
 	for {
 		select {
 		case <-timer.C:
-			return fmt.Errorf("no hello from spawned session %s within %s (spawn handshake deadline, FDR 0006)", worker, deadline)
+			return "", fmt.Errorf("no hello from spawned session %s within %s (spawn handshake deadline, FDR 0006)", worker, deadline)
 		case <-ticker.C:
-			if ok, err := arrived(); err != nil {
-				return err
+			if ok, id, err := arrived(); err != nil {
+				return "", err
 			} else if ok {
-				return nil
+				return id, nil
 			}
 		}
 	}

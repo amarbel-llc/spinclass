@@ -1740,9 +1740,14 @@ func TestSessionStartSpawnHello(t *testing.T) {
 	fireSessionStart(t, wt)
 
 	// The driver's WaitForHello must see the worker's hello, pair-scoped to
-	// driver/key ← myrepo/feature.
-	if err := spawnhandshake.WaitForHello("driver/key", "myrepo/feature", time.Now().Add(-time.Minute), time.Second); err != nil {
+	// driver/key ← myrepo/feature, and the hello must carry the worker's
+	// session id (fireSessionStart's session_id) so the driver can reattach.
+	poshID, err := spawnhandshake.WaitForHello("driver/key", "myrepo/feature", time.Now().Add(-time.Minute), time.Second)
+	if err != nil {
 		t.Fatalf("expected a spawn hello for the driver: %v", err)
+	}
+	if poshID != "spawn-test-session" {
+		t.Errorf("hello posh session id = %q, want %q (the worker's session_id)", poshID, "spawn-test-session")
 	}
 
 	st, err := session.Read(repo, "feature")
@@ -1793,7 +1798,7 @@ func TestSessionStartWorktreeWithoutSpawnedByNoHello(t *testing.T) {
 	fireSessionStart(t, wt)
 
 	// No SpawnedBy → no hello: the driver's wait must time out.
-	if err := spawnhandshake.WaitForHello("driver/key", "myrepo/feature", time.Now().Add(-time.Minute), 200*time.Millisecond); err == nil {
+	if _, err := spawnhandshake.WaitForHello("driver/key", "myrepo/feature", time.Now().Add(-time.Minute), 200*time.Millisecond); err == nil {
 		t.Fatal("expected no hello without SpawnedBy")
 	}
 	st, err := session.Read(repo, "feature")
