@@ -116,8 +116,10 @@ EOF
 
 @test "spawn-window fires with id and dir, in the worker worktree" {
   create_spawn_repo windowrepo "$STUB_DIR/stub-harness.sh"
+  # The stub writes via temp file + mv so the existence poll below can never
+  # observe the file empty between the shell's O_TRUNC open and printf's write.
   cat >>"$WORKER_REPO/sweatfile" <<'EOF'
-spawn-window = ["sh", "-c", "printf '%s\n%s\n' \"$1\" \"$2\" > window.txt", "sh", "{id}", "{dir}"]
+spawn-window = ["sh", "-c", "printf '%s\n%s\n' \"$1\" \"$2\" > window.txt.tmp && mv window.txt.tmp window.txt", "sh", "{id}", "{dir}"]
 EOF
   git -C "$WORKER_REPO" add sweatfile
   git -C "$WORKER_REPO" commit -m "window stub"

@@ -52,8 +52,10 @@ spawn-entry = ["sh", "-c", 'printf "%s\n" "$@" > "$PWD/argv.txt"; touch "$PWD/la
 
 // windowSweatfile adds a spawn-window stub recording its substituted args
 // into the worktree (cmd.Dir), proving the fire-and-forget exec ran there
-// with {id}/{dir} rendered AND {attach-id} resolved from the hello.
-const windowSweatfile = happySweatfile + `spawn-window = ["sh", "-c", 'printf "%s %s %s" "$1" "$2" "$3" > "$PWD/window.txt"', "sh", "{id}", "{dir}", "{attach-id}"]
+// with {id}/{dir} rendered AND {attach-id} resolved from the hello. The stub
+// writes via temp file + mv so the test's existence poll can never observe
+// the file empty between the shell's O_TRUNC open and printf's write.
+const windowSweatfile = happySweatfile + `spawn-window = ["sh", "-c", 'printf "%s %s %s" "$1" "$2" "$3" > "$PWD/window.txt.tmp" && mv "$PWD/window.txt.tmp" "$PWD/window.txt"', "sh", "{id}", "{dir}", "{attach-id}"]
 `
 
 // failingWindowSweatfile's window command exits nonzero — the spawn must
