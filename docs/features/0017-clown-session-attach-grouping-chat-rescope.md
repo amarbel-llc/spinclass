@@ -355,8 +355,14 @@ waits for it to exit — readiness is proven solely by the hello handshake. So a
 spawn-entry that fails to self-detach (a foregrounded `clown`/`posh` attach, a
 blocking `direnv exec` devshell build) can neither wedge nor tether `sc spawn` /
 `sc fork`; the command still returns and exits once the hello arrives. `sc resume`
-becomes "open a shell in the worktree"; reattaching a live agent is clown's job
-(native `sc`-side reattach hooks are a future exploration, not v1).
+becomes "open a shell in the worktree"; reattaching a live agent is clown's job.
+**Driver-side reattach for spawns is now implemented** (direction B): the
+spawned worker's SessionStart hook reports its posh session id (clown's minted
+UUID == the claude `--session-id`) back in the hello, `WaitForHello` returns it,
+and the `spawn-window` template can attach to the live session via the
+`{attach-id}` placeholder (`posh attach {attach-id}`) instead of opening a bare
+shell. General `sc resume`-side reattach of arbitrary live agents remains a
+future exploration.
 
 **The seam is bidirectional** (refines the "narrowed seam = one env var" claim):
 - **spinclass → clown:** the `SPINCLASS_*` decoration env (RFC-0014 §6), sourced
