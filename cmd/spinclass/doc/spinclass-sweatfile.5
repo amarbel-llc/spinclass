@@ -191,6 +191,19 @@ not export
 Script run after worktree creation (before session attach).
 .B Merge:
 scalar override.
+.IP
+Spinclass writes and
+.B direnv allow
+s the generated
+.I .envrc
+before running this hook, then re-runs a bare
+.B direnv allow
+after it succeeds. A create hook that mutates
+.I .envrc
+(for example, appending a directive) therefore does
+.B not
+need to re-authorize the file itself \(em the final content is
+re-allowed automatically.
 .TP
 .B stop
 Script run when the Claude Code session ends (via Stop hook).

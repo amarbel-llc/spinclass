@@ -1007,3 +1007,78 @@ func TestApplyClaudeSettingsEmptyOmitsEnabledMCPs(t *testing.T) {
 		t.Errorf("expected no enabledMcpjsonServers key when no user MCPs are declared; got %v", doc["enabledMcpjsonServers"])
 	}
 }
+
+// pinLoggingDirenv installs a fake direnv on PATH that appends its full argv
+// (space-joined, one line per invocation) to a log file, and returns the log
+// path. Used to assert both WHAT subcommand AllowDirenv invokes (must be a bare
+// `allow`, never `exec`) and HOW MANY times it fires.
+func pinLoggingDirenv(t *testing.T) (logPath string) {
+	t.Helper()
+	fakeBin := t.TempDir()
+	logPath = filepath.Join(fakeBin, "direnv.log")
+	// `printf '%s\n' "$*"` records the whole argv on one line. exit 0 so allow
+	// always "succeeds".
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"" + logPath + "\"\nexit 0\n"
+	testfs.MustWriteFile(t, filepath.Join(fakeBin, "direnv"), []byte(script), 0o755)
+	t.Setenv("PATH", fakeBin+":"+gitDir(t))
+	return logPath
+}
+
+func direnvInvocations(t *testing.T, logPath string) []string {
+	t.Helper()
+	data, err := os.ReadFile(logPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatalf("reading direnv log: %v", err)
+	}
+	return strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+}
+
+// TestAllowDirenvBareAndIdempotent is the unit guard for the #213 fix. It
+// asserts AllowDirenv (a) invokes a bare `allow` subcommand — NOT wrapped in
+// `direnv exec` — and (b) can be called repeatedly (the post-create-hook
+// re-allow is a second call over a possibly-mutated .envrc).
+func TestAllowDirenvBareAndIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	testgit.MustInit(t, dir)
+	logPath := pinLoggingDirenv(t)
+
+	sf := Sweatfile{}
+	// Write the .envrc first (prepareDirenv does one allow), then call
+	// AllowDirenv again to mimic the post-create-hook re-allow.
+	if err := sf.prepareDirenv(dir); err != nil {
+		t.Fatalf("prepareDirenv: %v", err)
+	}
+	if err := sf.AllowDirenv(dir); err != nil {
+		t.Fatalf("AllowDirenv: %v", err)
+	}
+
+	invocations := direnvInvocations(t, logPath)
+	if len(invocations) != 2 {
+		t.Fatalf("expected 2 direnv invocations (initial + re-allow), got %d: %q", len(invocations), invocations)
+	}
+	for i, argv := range invocations {
+		if argv != "allow" {
+			t.Errorf("invocation %d: expected bare %q (not wrapped in `direnv exec`), got %q", i, "allow", argv)
+		}
+	}
+}
+
+// TestAllowDirenvNoEnvrcIsNoop asserts AllowDirenv does not invoke direnv when
+// the worktree has no .envrc (a non-direnv repo), so the guard keeps it safe to
+// call unconditionally from worktree.Create.
+func TestAllowDirenvNoEnvrcIsNoop(t *testing.T) {
+	dir := t.TempDir()
+	testgit.MustInit(t, dir)
+	logPath := pinLoggingDirenv(t)
+
+	if err := (Sweatfile{}).AllowDirenv(dir); err != nil {
+		t.Fatalf("AllowDirenv: %v", err)
+	}
+
+	if invocations := direnvInvocations(t, logPath); len(invocations) != 0 {
+		t.Errorf("expected no direnv invocation without a .envrc, got %q", invocations)
+	}
+}

@@ -159,13 +159,33 @@ func (sf Sweatfile) writeSpinclassEnv(worktreePath string) error {
 }
 
 func (sf Sweatfile) prepareDirenv(worktreePath string) error {
-	direnvPath, ok := direnv.Resolve()
-	if !ok {
+	if _, ok := direnv.Resolve(); !ok {
 		return nil
 	}
 
 	if err := sf.writeEnvrc(worktreePath); err != nil {
 		return err
+	}
+
+	return sf.AllowDirenv(worktreePath)
+}
+
+// AllowDirenv records a bare `direnv allow` for worktreePath's .envrc so a
+// subsequently-loaded devshell is authorized — including the create hook's own
+// `direnv exec` (runHookInDir), which refuses to load a blocked .envrc. This is
+// deliberately the plain allow subcommand run against the worktree dir, NOT
+// wrapped in `direnv exec`.
+//
+// No-op when direnv is unavailable or the worktree has no .envrc. Idempotent:
+// safe to call again after a create hook may have mutated .envrc, which is how
+// worktree.Create re-authorizes the final .envrc post-hook (fix #213).
+func (sf Sweatfile) AllowDirenv(worktreePath string) error {
+	direnvPath, ok := direnv.Resolve()
+	if !ok {
+		return nil
+	}
+	if !worktreeHasEnvrc(worktreePath) {
+		return nil
 	}
 
 	cmd := exec.Command(direnvPath, "allow")

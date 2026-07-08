@@ -890,6 +890,102 @@ func TestCreateFrom(t *testing.T) {
 	}
 }
 
+// TestCreateReAllowsDirenvAfterCreateHookMutatesEnvrc is the regression guard
+// for #213: an inherited `[hooks].create` hook that appends to .envrc must not
+// leave the worktree with a blocked .envrc. spinclass records `direnv allow`
+// in Apply (before the hook), and must re-run a bare `direnv allow` AFTER the
+// hook so its mutation is re-authorized. Without the post-hook re-allow, a
+// subsequent devshell load (the session's, or the hook's own `direnv exec` on
+// a later worktree) trips "`.envrc` is blocked" and `sc start` tears the
+// worktree down with `create hook failed`.
+func TestCreateReAllowsDirenvAfterCreateHookMutatesEnvrc(t *testing.T) {
+	testgit.RequireGit(t)
+	t.Setenv("HOME", t.TempDir())
+	parentDir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", parentDir)
+	repoDir := filepath.Join(parentDir, "repo")
+	testgit.MustInit(t, repoDir)
+
+	// events.log records, in real order, both create-hook runs and fake-direnv
+	// invocations, so we can assert an `allow` lands after the `hook`.
+	eventsLog := filepath.Join(parentDir, "events.log")
+
+	// The create hook is a script file (avoids TOML-in-shell quote nesting): it
+	// logs a "hook" marker, then appends a directive to .envrc — the exact
+	// shape of the inherited envrc-patch hook that triggered #213.
+	hookScript := filepath.Join(parentDir, "create-hook.sh")
+	hookBody := "#!/bin/sh\n" +
+		"printf 'hook\\n' >> '" + eventsLog + "'\n" +
+		"printf 'export FROM_HOOK=1\\n' >> \"$WORKTREE/.envrc\"\n"
+	if err := os.WriteFile(hookScript, []byte(hookBody), 0o755); err != nil {
+		t.Fatalf("writing create hook script: %v", err)
+	}
+	sweatfileBody := "[hooks]\ncreate = \"sh '" + hookScript + "'\"\n"
+	if err := os.WriteFile(filepath.Join(repoDir, "sweatfile"), []byte(sweatfileBody), 0o644); err != nil {
+		t.Fatalf("writing repo sweatfile: %v", err)
+	}
+
+	// Fake direnv that logs each invocation's first arg to events.log:
+	//   - `exec <dir> <cmd...>`: log "exec", drop the exec+dir argv, run the
+	//     wrapped command (so the create hook actually executes and mutates
+	//     .envrc, exactly as production's devshell-scoped hook does).
+	//   - anything else (`allow`): log the subcommand and exit 0.
+	fakeBin := t.TempDir()
+	fakeDirenv := filepath.Join(fakeBin, "direnv")
+	direnvScript := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$1\" >> '" + eventsLog + "'\n" +
+		"if [ \"$1\" = exec ]; then shift 2; exec \"$@\"; fi\n" +
+		"exit 0\n"
+	if err := os.WriteFile(fakeDirenv, []byte(direnvScript), 0o755); err != nil {
+		t.Fatalf("writing fake direnv: %v", err)
+	}
+
+	prevMadder, prevDirenv, prevDodder := embeds.MadderBin(), embeds.DirenvBin(), embeds.DodderBin()
+	embeds.Set("", fakeDirenv, "")
+	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv, prevDodder) })
+
+	wtPath := filepath.Join(parentDir, "wt")
+	if _, err := Create(repoDir, wtPath, ""); err != nil {
+		t.Fatalf("Create returned error (create hook should not fail on a mutated .envrc): %v", err)
+	}
+
+	// The hook's mutation must be present in the final .envrc.
+	envrc, err := os.ReadFile(filepath.Join(wtPath, ".envrc"))
+	if err != nil {
+		t.Fatalf("reading .envrc: %v", err)
+	}
+	if !strings.Contains(string(envrc), "export FROM_HOOK=1") {
+		t.Errorf("expected create hook's .envrc mutation to survive, got:\n%s", envrc)
+	}
+
+	// Event ordering: an `allow` must appear AFTER the `hook` line (the
+	// post-create-hook re-allow). The initial Apply allow lands before the
+	// hook; the fix adds one after.
+	data, err := os.ReadFile(eventsLog)
+	if err != nil {
+		t.Fatalf("reading events log: %v", err)
+	}
+	events := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	lastHook, lastAllow := -1, -1
+	for i, e := range events {
+		switch e {
+		case "hook":
+			lastHook = i
+		case "allow":
+			lastAllow = i
+		}
+	}
+	if lastHook == -1 {
+		t.Fatalf("create hook never ran; events: %v", events)
+	}
+	if lastAllow == -1 {
+		t.Fatalf("`direnv allow` never invoked; events: %v", events)
+	}
+	if lastAllow < lastHook {
+		t.Errorf("expected a bare `direnv allow` AFTER the create hook; events (in order): %v", events)
+	}
+}
+
 // TestCreateFreshBranchRejectsExistingBranch covers #207: the fresh-branch
 // path (existingBranch == "") must hard-fail when a branch of the target name
 // already exists, rather than letting `git worktree add` silently check the
