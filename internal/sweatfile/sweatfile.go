@@ -39,6 +39,15 @@ type SessionEntry struct {
 	// `posh attach {attach-id}` reattach window, direction B); {entry}/{prompt}
 	// are rejected by validate. Unset = no window.
 	SpawnWindow []string `toml:"spawn-window"`
+	// ModelFlags maps a clown provider name (as selected by spawn-entry's
+	// --provider/--provider=) to the CLI flag that provider's binary uses to
+	// select a model, e.g. {"claude": "--model"}. Consulted by
+	// spawn.SpliceModelFlag when the spawn-session/fork-session `model` param
+	// is set. Per-key merge like Env. Defaults to {"claude": "--model"} — the
+	// only mapping verified against an actual provider CLI (forwarded through
+	// clown's `--` provider-args boundary). See
+	// docs/plans/2026-07-11-spawn-model-selection-design.md.
+	ModelFlags map[string]string `toml:"model-flags"`
 }
 
 type Hooks struct {
@@ -457,6 +466,17 @@ func (sf Sweatfile) SessionSpawnWindow() []string {
 		return sf.SessionEntry.SpawnWindow
 	}
 	return nil
+}
+
+// SessionModelFlags returns the configured [session-entry.model-flags]
+// provider->flag map, falling back to the built-in default
+// {"claude": "--model"} when unset or empty. See the spawn model-selection
+// design doc.
+func (sf Sweatfile) SessionModelFlags() map[string]string {
+	if sf.SessionEntry != nil && len(sf.SessionEntry.ModelFlags) > 0 {
+		return sf.SessionEntry.ModelFlags
+	}
+	return map[string]string{"claude": "--model"}
 }
 
 // SessionEnv returns the user-configured environment variables to inject

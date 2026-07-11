@@ -173,6 +173,15 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 				merged.SessionEntry.Env[k] = v
 			}
 		}
+		// ModelFlags: per-key merge, same rationale as Env.
+		if len(other.SessionEntry.ModelFlags) > 0 {
+			if merged.SessionEntry.ModelFlags == nil {
+				merged.SessionEntry.ModelFlags = make(map[string]string, len(other.SessionEntry.ModelFlags))
+			}
+			for k, v := range other.SessionEntry.ModelFlags {
+				merged.SessionEntry.ModelFlags[k] = v
+			}
+		}
 		if len(other.SessionEntry.LivenessProbe) > 0 {
 			merged.SessionEntry.LivenessProbe = other.SessionEntry.LivenessProbe
 		}

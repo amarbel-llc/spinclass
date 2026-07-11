@@ -1410,6 +1410,68 @@ func TestMergeSessionSpawnEntryOverrideAndInherit(t *testing.T) {
 	}
 }
 
+func TestSessionModelFlagsAccessorDefault(t *testing.T) {
+	for _, sf := range []Sweatfile{
+		{},
+		{SessionEntry: &SessionEntry{}},
+	} {
+		got := sf.SessionModelFlags()
+		want := map[string]string{"claude": "--model"}
+		if len(got) != len(want) || got["claude"] != want["claude"] {
+			t.Errorf("SessionModelFlags() = %v, want built-in default %v", got, want)
+		}
+	}
+}
+
+func TestSessionModelFlagsAccessorConfigured(t *testing.T) {
+	sf := Sweatfile{
+		SessionEntry: &SessionEntry{
+			ModelFlags: map[string]string{"codex": "--model-name"},
+		},
+	}
+	got := sf.SessionModelFlags()
+	if len(got) != 1 || got["codex"] != "--model-name" {
+		t.Errorf("SessionModelFlags() = %v, want configured map verbatim (no claude default folded in)", got)
+	}
+}
+
+func TestMergeSessionModelFlagsPerKey(t *testing.T) {
+	// Mirrors TestMergeSessionEnvPerKeyOverride: child adds a key without
+	// dropping the parent's, and overrides a colliding key.
+	base := Sweatfile{
+		SessionEntry: &SessionEntry{
+			ModelFlags: map[string]string{"claude": "--model", "circus": "--old-flag"},
+		},
+	}
+	override := Sweatfile{
+		SessionEntry: &SessionEntry{
+			ModelFlags: map[string]string{"circus": "--new-flag", "codex": "--model-name"},
+		},
+	}
+	merged := base.MergeWith(override)
+	want := map[string]string{"claude": "--model", "circus": "--new-flag", "codex": "--model-name"}
+	got := merged.SessionEntry.ModelFlags
+	if len(got) != len(want) {
+		t.Fatalf("merged ModelFlags = %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("merged ModelFlags[%q] = %q, want %q", k, got[k], v)
+		}
+	}
+}
+
+func TestMergeSessionModelFlagsInherit(t *testing.T) {
+	base := Sweatfile{
+		SessionEntry: &SessionEntry{ModelFlags: map[string]string{"claude": "--model"}},
+	}
+	override := Sweatfile{SessionEntry: &SessionEntry{Start: []string{"zellij"}}}
+	merged := base.MergeWith(override)
+	if got := merged.SessionEntry.ModelFlags; len(got) != 1 || got["claude"] != "--model" {
+		t.Errorf("expected inherited ModelFlags, got %v", got)
+	}
+}
+
 func TestParseSessionEntryEnvSubtable(t *testing.T) {
 	input := `
 [session-entry]
