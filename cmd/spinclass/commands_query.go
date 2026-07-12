@@ -208,6 +208,7 @@ func registerQueryCommands(app *command.App) {
 			{Name: "brief", Type: command.String, Description: "Detached-fork brief: when set, the forked worktree is launched as a detached, harness-booted worker (FDR 0006) seeded with this brief, and the command blocks for the worker's chat hello. Omit for the classic create-only fork."},
 			{Name: "description", Type: command.String, Description: "Session description for the detached worker (shows in `sc list`); only used with --brief"},
 			{Name: "hello-timeout", Type: command.String, Description: "How long to wait for the worker's SessionStart hello, as a Go duration (e.g. \"90s\"). Default 60s. Only used with --brief."},
+			{Name: "model", Type: command.String, Description: "Model alias for the worker (sonnet, opus, haiku, fable). Spliced into the resolved spawn-entry's provider-args per [session-entry.model-flags] (default: {\"claude\": \"--model\"}). Omit to use the harness's own default. Only used with --brief.", Completer: completeModelAliases},
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
 			var p struct {

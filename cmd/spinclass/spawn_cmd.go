@@ -28,6 +28,7 @@ type spawnParams struct {
 	Issue        string `json:"issue"`
 	Description  string `json:"description"`
 	HelloTimeout string `json:"hello-timeout"`
+	Model        string `json:"model"`
 }
 
 // runSpawn is the shared spawn flow behind both surfaces (FDR 0006):
@@ -46,6 +47,11 @@ func runSpawn(p spawnParams) (spawn.Result, string, error) {
 	deadline, err := parseHelloTimeout(p.HelloTimeout)
 	if err != nil {
 		return spawn.Result{}, "", err
+	}
+	if p.Model != "" {
+		if err := spawn.ValidateModelAlias(p.Model); err != nil {
+			return spawn.Result{}, "", err
+		}
 	}
 
 	home, err := os.UserHomeDir()
@@ -78,7 +84,7 @@ func runSpawn(p spawnParams) (spawn.Result, string, error) {
 		}
 	}
 
-	res, err := spawn.Launch(home, repoPath, driverKey, brief, p.Description, deadline)
+	res, err := spawn.Launch(home, repoPath, driverKey, brief, p.Description, p.Model, deadline)
 	if err != nil {
 		return spawn.Result{}, "", err
 	}
@@ -235,6 +241,17 @@ func handleSpawnSession(_ context.Context, args json.RawMessage, _ command.Promp
 	return command.TextResult(spawnResultText(driverKey, res)), nil
 }
 
+// completeModelAliases offers the fixed set of known model aliases for
+// tab completion / MCP client hinting.
+func completeModelAliases() map[string]string {
+	return map[string]string{
+		"sonnet": "Claude Sonnet 5",
+		"opus":   "Claude Opus 4.8",
+		"haiku":  "Claude Haiku 4.5",
+		"fable":  "Claude Fable 5",
+	}
+}
+
 // completeSpawnRepos offers repo dirname leaves matching spawn.ResolveRepo's
 // search pattern ($HOME/*/repos/*). Cheap glob only — no git checks at
 // completion time; ResolveRepo validates the choice at execution.
@@ -285,6 +302,12 @@ func spawnParamList() []command.Param {
 			Name:        "hello-timeout",
 			Type:        command.String,
 			Description: "How long to wait for the worker's SessionStart hello, as a Go duration (e.g. \"90s\", \"3m\"). Default 60s. THE tuning lever when harness startup (cold nix cache, slow hosts) exceeds the default window.",
+		},
+		{
+			Name:        "model",
+			Type:        command.String,
+			Description: "Model alias for the worker (sonnet, opus, haiku, fable). Spliced into the resolved spawn-entry's provider-args per [session-entry.model-flags] (default: {\"claude\": \"--model\"}). Omit to use the harness's own default.",
+			Completer:   completeModelAliases,
 		},
 	}
 }

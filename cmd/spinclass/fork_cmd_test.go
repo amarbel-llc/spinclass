@@ -32,6 +32,7 @@ func TestHandleForkSessionValidation(t *testing.T) {
 	}{
 		{"missing brief", `{}`, "brief is required"},
 		{"bad hello-timeout", `{"brief":"do","hello-timeout":"bogus"}`, "invalid hello-timeout"},
+		{"bad model", `{"brief":"do","model":"gpt5"}`, "unrecognized model"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

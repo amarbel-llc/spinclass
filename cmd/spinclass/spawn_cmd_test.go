@@ -35,6 +35,7 @@ func TestHandleSpawnSessionValidation(t *testing.T) {
 		{"negative hello-timeout", `{"repo":"somewhere","brief":"do","hello-timeout":"-5s"}`, "must be positive"},
 		{"zero hello-timeout", `{"repo":"somewhere","brief":"do","hello-timeout":"0s"}`, "must be positive"},
 		{"unknown repo", `{"repo":"no-such-repo","brief":"do the thing"}`, "no repo named"},
+		{"bad model", `{"repo":"somewhere","brief":"do","model":"gpt5"}`, "unrecognized model"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

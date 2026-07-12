@@ -22,6 +22,7 @@ type forkDetachedParams struct {
 	Brief        string `json:"brief"`
 	Description  string `json:"description"`
 	HelloTimeout string `json:"hello-timeout"`
+	Model        string `json:"model"`
 }
 
 // resolveForkSource resolves the fork SOURCE worktree from a directory,
@@ -75,6 +76,11 @@ func runForkDetached(source worktree.ResolvedPath, p forkDetachedParams) (spawn.
 	if err != nil {
 		return spawn.Result{}, "", err
 	}
+	if p.Model != "" {
+		if err := spawn.ValidateModelAlias(p.Model); err != nil {
+			return spawn.Result{}, "", err
+		}
+	}
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -113,7 +119,7 @@ func runForkDetached(source worktree.ResolvedPath, p forkDetachedParams) (spawn.
 		SessionKey: filepath.Base(source.RepoPath) + "/" + newBranch,
 	}
 
-	res, err := spawn.LaunchExisting(home, rp, driverKey, p.Brief, p.Description, deadline)
+	res, err := spawn.LaunchExisting(home, rp, driverKey, p.Brief, p.Description, p.Model, deadline)
 	if err != nil {
 		return spawn.Result{}, "", err
 	}
@@ -136,6 +142,11 @@ func handleForkSession(_ context.Context, args json.RawMessage, _ command.Prompt
 	}
 	if _, err := parseHelloTimeout(params.HelloTimeout); err != nil {
 		return command.TextErrorResult(err.Error()), nil
+	}
+	if params.Model != "" {
+		if err := spawn.ValidateModelAlias(params.Model); err != nil {
+			return command.TextErrorResult(err.Error()), nil
+		}
 	}
 
 	cwd, err := os.Getwd()
@@ -187,6 +198,12 @@ func forkSessionParamList() []command.Param {
 			Name:        "hello-timeout",
 			Type:        command.String,
 			Description: "How long to wait for the worker's SessionStart hello, as a Go duration (e.g. \"90s\", \"3m\"). Default 60s. THE tuning lever when harness startup (cold nix cache, slow hosts) exceeds the default window.",
+		},
+		{
+			Name:        "model",
+			Type:        command.String,
+			Description: "Model alias for the worker (sonnet, opus, haiku, fable). Spliced into the resolved spawn-entry's provider-args per [session-entry.model-flags] (default: {\"claude\": \"--model\"}). Omit to use the harness's own default.",
+			Completer:   completeModelAliases,
 		},
 	}
 }
