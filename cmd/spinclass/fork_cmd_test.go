@@ -32,7 +32,6 @@ func TestHandleForkSessionValidation(t *testing.T) {
 	}{
 		{"missing brief", `{}`, "brief is required"},
 		{"bad hello-timeout", `{"brief":"do","hello-timeout":"bogus"}`, "invalid hello-timeout"},
-		{"bad model", `{"brief":"do","model":"gpt5"}`, "unrecognized model"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -209,6 +208,39 @@ func TestHandleForkSessionHappyPath(t *testing.T) {
 	}
 	if st.Description != "forked worker" {
 		t.Errorf("Description = %q, want %q", st.Description, "forked worker")
+	}
+}
+
+// TestHandleForkSessionBadModelForClaudeProvider proves the provider-aware
+// model validation actually rejects a bad Claude alias end to end on the
+// fork path too. Unlike spawn, worktree.CreateFrom runs BEFORE
+// spawn.LaunchExisting's render (see runForkDetached's doc comment), so —
+// exactly like any other bad spawn-entry config on this path — the forked
+// worktree IS left behind on this failure; this test pins that existing,
+// already-accepted contract rather than assuming spawn's no-litter guarantee
+// carries over.
+func TestHandleForkSessionBadModelForClaudeProvider(t *testing.T) {
+	const driverKey = "worker/feat"
+	repoPath, _ := newForkCmdFixture(t, spawnCmdModelSweatfile, driverKey, "feat")
+
+	res, err := handleForkSession(
+		context.Background(),
+		json.RawMessage(`{"brief":"do the thing","model":"gpt5"}`),
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("handleForkSession: %v", err)
+	}
+	if !res.IsErr {
+		t.Fatalf("expected error result, got success: %s", res.Text)
+	}
+	if !strings.Contains(res.Text, "unrecognized model") {
+		t.Errorf("error text = %q, want it to mention the unrecognized model", res.Text)
+	}
+
+	newPath := filepath.Join(repoPath, ".worktrees", "feat-1")
+	if _, statErr := os.Stat(newPath); statErr != nil {
+		t.Errorf("expected the forked worktree to exist at %s despite the model error (existing fork contract), stat: %v", newPath, statErr)
 	}
 }
 

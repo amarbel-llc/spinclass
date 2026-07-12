@@ -35,7 +35,6 @@ func TestHandleSpawnSessionValidation(t *testing.T) {
 		{"negative hello-timeout", `{"repo":"somewhere","brief":"do","hello-timeout":"-5s"}`, "must be positive"},
 		{"zero hello-timeout", `{"repo":"somewhere","brief":"do","hello-timeout":"0s"}`, "must be positive"},
 		{"unknown repo", `{"repo":"no-such-repo","brief":"do the thing"}`, "no repo named"},
-		{"bad model", `{"repo":"somewhere","brief":"do","model":"gpt5"}`, "unrecognized model"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -119,6 +118,24 @@ func TestRefuseRecursiveSpawn(t *testing.T) {
 // chat hello itself.
 const spawnCmdHappySweatfile = `[session-entry]
 spawn-entry = ["sh", "-c", 'touch "$PWD/launched"', "sh", "{prompt}"]
+`
+
+// spawnCmdModelSweatfile mirrors spawnCmdHappySweatfile but includes a
+// literal "--" provider-args separator, so a `model` param has somewhere to
+// splice into (spawnCmdHappySweatfile has none and would only ever exercise
+// the "no separator" error, not alias validation).
+const spawnCmdModelSweatfile = `[session-entry]
+spawn-entry = ["sh", "-c", 'touch "$PWD/launched"', "sh", "--", "{prompt}"]
+`
+
+// spawnCmdJugglerModelSweatfile selects a non-claude provider and maps it in
+// [session-entry.model-flags], so a model name that would never pass the
+// fixed Claude alias set (a GGUF-style name here) must still succeed.
+const spawnCmdJugglerModelSweatfile = `[session-entry]
+spawn-entry = ["sh", "-c", 'touch "$PWD/launched"', "sh", "--provider=juggler", "--", "{prompt}"]
+
+[session-entry.model-flags]
+juggler = "--model"
 `
 
 // newSpawnCmdFixture sandboxes HOME (worktree creation trusts the workspace
@@ -221,6 +238,86 @@ func TestHandleSpawnSessionHappyPath(t *testing.T) {
 	}
 	if st.Description != "spawned worker" {
 		t.Errorf("Description = %q, want %q", st.Description, "spawned worker")
+	}
+}
+
+// TestHandleSpawnSessionBadModelForClaudeProvider proves the provider-aware
+// model validation actually rejects a bad Claude alias end to end (not just
+// at the internal/spawn unit level), and that the failure happens BEFORE any
+// worktree is created — renderSpawn (which now does this validation) still
+// runs before shop.Create on the spawn path.
+func TestHandleSpawnSessionBadModelForClaudeProvider(t *testing.T) {
+	const driverKey = "driver/test-session"
+	_, repoPath := newSpawnCmdFixture(t, spawnCmdModelSweatfile, driverKey)
+
+	res, err := handleSpawnSession(
+		context.Background(),
+		json.RawMessage(`{"repo":"worker","brief":"do the thing","model":"gpt5"}`),
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("handleSpawnSession: %v", err)
+	}
+	if !res.IsErr {
+		t.Fatalf("expected error result, got success: %s", res.Text)
+	}
+	if !strings.Contains(res.Text, "unrecognized model") {
+		t.Errorf("error text = %q, want it to mention the unrecognized model", res.Text)
+	}
+
+	worktrees, _ := filepath.Glob(filepath.Join(repoPath, ".worktrees", "*"))
+	if len(worktrees) != 0 {
+		t.Errorf("expected no worktree to be created, found %v", worktrees)
+	}
+}
+
+// TestHandleSpawnSessionModelForNonClaudeProviderSucceeds is the actual
+// juggler-composition proof: a model name that would never pass the fixed
+// Claude alias set succeeds end to end once the resolved spawn-entry selects
+// a non-claude provider that's mapped in [session-entry.model-flags].
+func TestHandleSpawnSessionModelForNonClaudeProviderSucceeds(t *testing.T) {
+	const driverKey = "driver/test-session"
+	_, repoPath := newSpawnCmdFixture(t, spawnCmdJugglerModelSweatfile, driverKey)
+
+	helloErr := make(chan error, 1)
+	stop := make(chan struct{})
+	go func() {
+		deadline := time.After(15 * time.Second)
+		tick := time.NewTicker(20 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-stop:
+				helloErr <- nil
+				return
+			case <-deadline:
+				helloErr <- fmt.Errorf("spawn template marker never appeared")
+				return
+			case <-tick.C:
+				matches, _ := filepath.Glob(filepath.Join(repoPath, ".worktrees", "*", "launched"))
+				if len(matches) == 1 {
+					branch := filepath.Base(filepath.Dir(matches[0]))
+					helloErr <- spawnhandshake.SendHello("worker/"+branch, driverKey, "")
+					return
+				}
+			}
+		}
+	}()
+
+	res, err := handleSpawnSession(
+		context.Background(),
+		json.RawMessage(`{"repo":"worker","brief":"do the thing","model":"llama-3-70b-instruct.Q4_K_M","hello-timeout":"15s"}`),
+		nil,
+	)
+	close(stop)
+	if err != nil {
+		t.Fatalf("handleSpawnSession: %v", err)
+	}
+	if herr := <-helloErr; herr != nil {
+		t.Fatalf("hello goroutine: %v", herr)
+	}
+	if res.IsErr {
+		t.Fatalf("expected success (non-claude provider, unvalidated model alias), got error result: %s", res.Text)
 	}
 }
 

@@ -76,11 +76,13 @@ func runForkDetached(source worktree.ResolvedPath, p forkDetachedParams) (spawn.
 	if err != nil {
 		return spawn.Result{}, "", err
 	}
-	if p.Model != "" {
-		if err := spawn.ValidateModelAlias(p.Model); err != nil {
-			return spawn.Result{}, "", err
-		}
-	}
+	// Model alias validation is NOT done here: it's provider-conditional
+	// (spawn.ValidateModelAlias), and the provider is only knowable once the
+	// worker's sweatfile hierarchy is loaded inside spawn.LaunchExisting ->
+	// renderSpawn -> SpliceModelFlag. Unlike the spawn path, that render
+	// happens AFTER worktree.CreateFrom below, so — like any other bad
+	// spawn-entry config — a bad model on the fork path can leave a forked
+	// worktree behind; `sc close` cleans it up.
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -143,11 +145,9 @@ func handleForkSession(_ context.Context, args json.RawMessage, _ command.Prompt
 	if _, err := parseHelloTimeout(params.HelloTimeout); err != nil {
 		return command.TextErrorResult(err.Error()), nil
 	}
-	if params.Model != "" {
-		if err := spawn.ValidateModelAlias(params.Model); err != nil {
-			return command.TextErrorResult(err.Error()), nil
-		}
-	}
+	// Model alias validation happens later, inside runForkDetached's call to
+	// spawn.LaunchExisting — see the comment there for why it can't be
+	// checked this early (provider-conditional, needs the sweatfile).
 
 	cwd, err := os.Getwd()
 	if err != nil {

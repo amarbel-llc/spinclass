@@ -730,31 +730,55 @@ on macOS.
 scalar override.
 .TP
 .B model\-flags
-Map from a clown provider name to the CLI flag that provider's binary
-uses to select a model.
-The provider name is resolved by scanning the resolved
+Map from a clown provider name
+.RI ( "or profile name, see below" )
+to the CLI flag that provider's binary uses to select a model.
+The lookup key is resolved by scanning the resolved
 .B spawn\-entry
-for
-.RB ( \-\-provider " or " \-\-provider= ),
+for, in order,
+.RB ( \-\-provider " or " \-\-provider= )
+then
+.RB ( \-\-profile " or " \-\-profile= ),
 defaulting to
 .B claude
-(clown's own default) when neither is present.
+(clown's own default) when none are present.
+An explicit
+.B \-\-provider
+always wins over
+.BR \-\-profile ,
+matching clown's own precedence; when only
+.B \-\-profile
+is present, spinclass cannot resolve which provider it implies (that
+requires querying clown's own profile registry), so the profile name
+itself is used as the lookup key \(em a
+.B model\-flags
+entry may be keyed by profile name instead of provider name for this
+case.
 Consulted when the
 .RB ( spawn\-session " / " fork\-session )
 .B model
 param, or the equivalent
 .RB ( "sc spawn \-\-model" " / " "sc fork \-\-brief \-\-model" )
-CLI flag, is set: the flag and the requested model alias
-.RB ( sonnet ", " opus ", " haiku ", or " fable )
+CLI flag, is set: the flag and the requested model
+.RI ( alias )
 are spliced into
 .B spawn\-entry
 immediately after its literal
 .B \(dq\-\-\(dq
 provider-args separator.
+The requested value is validated against a fixed alias set
+.RB ( sonnet ", " opus ", " haiku ", or " fable )
+.B only
+when the resolved key is
+.BR claude ;
+for any other key (juggler, a profile name, ...) the value is passed
+through unvalidated \(em spinclass has no registry to check it
+against, so a bad value only surfaces as a failure from the provider
+itself.
 Defaults to
 .BR "{ claude = \(dq\-\-model\(dq }" ,
 the only mapping verified against an actual provider CLI; a model
-requested for a provider absent from this map, or for a
+requested for a key absent from this map, or for a
 .B spawn\-entry
 with no
 .BR \(dq\-\-\(dq ,

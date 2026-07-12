@@ -48,11 +48,11 @@ func runSpawn(p spawnParams) (spawn.Result, string, error) {
 	if err != nil {
 		return spawn.Result{}, "", err
 	}
-	if p.Model != "" {
-		if err := spawn.ValidateModelAlias(p.Model); err != nil {
-			return spawn.Result{}, "", err
-		}
-	}
+	// Model alias validation is NOT done here: it's provider-conditional
+	// (spawn.ValidateModelAlias), and the provider is only knowable once the
+	// worker's sweatfile hierarchy is loaded inside spawn.Launch ->
+	// renderSpawn -> SpliceModelFlag. That still runs before shop.Create, so
+	// a bad model never litters a worktree on this path.
 
 	home, err := os.UserHomeDir()
 	if err != nil {
