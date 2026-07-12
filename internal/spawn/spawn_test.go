@@ -108,7 +108,7 @@ func TestLaunchSpawnWindowFires(t *testing.T) {
 	const driverKey = "driver/window-test"
 	stop, helloErr := helloAfterLaunch(t, repoPath, driverKey)
 
-	res, err := Launch(home, repoPath, driverKey, "brief", "", 15*time.Second)
+	res, err := Launch(home, repoPath, driverKey, "brief", "", "", 15*time.Second)
 	stop()
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
@@ -142,7 +142,7 @@ func TestLaunchSpawnWindowFailureDoesNotFailSpawn(t *testing.T) {
 	const driverKey = "driver/window-fail-test"
 	stop, helloErr := helloAfterLaunch(t, repoPath, driverKey)
 
-	_, err := Launch(home, repoPath, driverKey, "brief", "", 15*time.Second)
+	_, err := Launch(home, repoPath, driverKey, "brief", "", "", 15*time.Second)
 	stop()
 	if err != nil {
 		t.Fatalf("Launch failed because of the window command: %v", err)
@@ -160,7 +160,7 @@ func TestLaunchHappyPath(t *testing.T) {
 
 	stop, helloErr := helloAfterLaunch(t, repoPath, driverKey)
 
-	res, err := Launch(home, repoPath, driverKey, brief, desc, 15*time.Second)
+	res, err := Launch(home, repoPath, driverKey, brief, desc, "", 15*time.Second)
 	stop()
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
@@ -265,7 +265,7 @@ func TestLaunchDetachesNonExitingEntry(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := Launch(home, repoPath, driverKey, "brief", "", 15*time.Second)
+		_, err := Launch(home, repoPath, driverKey, "brief", "", "", 15*time.Second)
 		done <- err
 	}()
 
@@ -336,7 +336,7 @@ func TestLaunchExecEnvCarriesWorkerIdentity(t *testing.T) {
 	const desc = "env worker"
 	// No hello sender: Launch errors on the hello deadline, but the spawn
 	// template has already run by then and written env.txt.
-	_, err := Launch(home, repoPath, "driver/test-session", "do work", desc, 300*time.Millisecond)
+	_, err := Launch(home, repoPath, "driver/test-session", "do work", desc, "", 300*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected hello-deadline error, got nil")
 	}
@@ -377,6 +377,74 @@ func TestLaunchExecEnvCarriesWorkerIdentity(t *testing.T) {
 	}
 }
 
+// modelSpawnSweatfile's spawn-entry mirrors the real clown default shape (has
+// a literal "--" provider-args separator) so a model param has somewhere to
+// splice into, and records its full argv like happySweatfile.
+const modelSpawnSweatfile = `[session-entry]
+spawn-entry = ["sh", "-c", 'printf "%s\n" "$@" > "$PWD/argv.txt"; touch "$PWD/launched"', "sh", "--", "{prompt}"]
+`
+
+func TestLaunchSplicesModelFlag(t *testing.T) {
+	home, repoPath := newWorkerFixture(t, modelSpawnSweatfile)
+	const driverKey = "driver/test-session"
+	stop, helloErr := helloAfterLaunch(t, repoPath, driverKey)
+
+	res, err := Launch(home, repoPath, driverKey, "brief", "", "opus", 15*time.Second)
+	stop()
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if herr := <-helloErr; herr != nil {
+		t.Fatalf("hello goroutine: %v", herr)
+	}
+	if res.SessionKey == "" {
+		t.Fatal("expected a session key")
+	}
+
+	argvBytes, err := os.ReadFile(filepath.Join(res.WorktreePath, "argv.txt"))
+	if err != nil {
+		t.Fatalf("reading argv.txt: %v", err)
+	}
+	argv := strings.Split(strings.TrimRight(string(argvBytes), "\n"), "\n")
+	// The entry's fixed "sh" element becomes $0 in the "sh -c script sh -- {prompt}"
+	// invocation, so it is NOT part of $@ (matches happySweatfile's
+	// TestLaunchHappyPath, which likewise only sees the brief, not the
+	// leading "sh"). The recorded argv is $@ after the model splice: the
+	// "--" separator, the spliced model flag+alias, then the substituted
+	// brief. The default model-flags map ({"claude": "--model"}) applies
+	// since the entry selects no --provider (defaults to "claude").
+	want := []string{"--", "--model", "opus", "brief"}
+	if len(argv) != len(want) {
+		t.Fatalf("argv = %v, want %v", argv, want)
+	}
+	for i := range want {
+		if argv[i] != want[i] {
+			t.Errorf("argv[%d] = %q, want %q", i, argv[i], want[i])
+		}
+	}
+}
+
+func TestLaunchModelWithoutSeparatorErrors(t *testing.T) {
+	// happySweatfile's spawn-entry has no "--" — model has nowhere to splice.
+	home, repoPath := newWorkerFixture(t, happySweatfile)
+	const driverKey = "driver/test-session"
+
+	_, err := Launch(home, repoPath, driverKey, "brief", "", "opus", 15*time.Second)
+	if err == nil {
+		t.Fatal("Launch() = nil error, want error (no \"--\" separator)")
+	}
+	if !strings.Contains(err.Error(), "\"--\"") {
+		t.Errorf("error = %q, want it to mention the missing separator", err.Error())
+	}
+	// Must fail BEFORE worktree creation (matches the existing bad-template
+	// contract for spawn-entry validation). Branch names are random
+	// (worktree.RandomName), so check the whole .worktrees glob is empty
+	// rather than a specific guessed name.
+	if matches, _ := filepath.Glob(filepath.Join(repoPath, ".worktrees", "*")); len(matches) != 0 {
+		t.Errorf("worktree(s) created despite the model-splice error: %v", matches)
+	}
+}
+
 // timeoutSweatfile launches successfully but nothing ever sends the hello.
 const timeoutSweatfile = `[session-entry]
 spawn-entry = ["sh", "-c", 'touch "$PWD/launched"', "sh", "{prompt}"]
@@ -387,7 +455,7 @@ func TestLaunchHelloTimeout(t *testing.T) {
 	const driverKey = "driver/test-session"
 	deadline := 500 * time.Millisecond
 
-	_, err := Launch(home, repoPath, driverKey, "do work", "desc", deadline)
+	_, err := Launch(home, repoPath, driverKey, "do work", "desc", "", deadline)
 	if err == nil {
 		t.Fatal("expected hello-deadline error, got nil")
 	}

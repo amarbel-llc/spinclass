@@ -35,13 +35,17 @@ type Result struct {
 
 // Launch creates a detached, harness-booted worker session in repoPath and
 // blocks until its SessionStart hello (FDR 0006). deadline 0 means
-// DefaultHelloDeadline. The branch name and ResolvedPath are produced
-// exactly as `sc start` does (worktree.ResolvePath), and the worktree is
-// created via shop.Create — the existing non-attaching create path.
+// DefaultHelloDeadline. model, when non-empty, requests a specific model
+// alias (e.g. "opus") for the worker's provider — spliced into the
+// spawn-entry template via renderSpawn/SpliceModelFlag; "" means no model
+// requested (the entry runs unmodified). The branch name and ResolvedPath
+// are produced exactly as `sc start` does (worktree.ResolvePath), and the
+// worktree is created via shop.Create — the existing non-attaching create
+// path.
 //
 // On a hello timeout the worktree and its session state are intentionally
 // left behind for inspection (`sc close` cleans them up).
-func Launch(home, repoPath, driverKey, brief, desc string, deadline time.Duration) (Result, error) {
+func Launch(home, repoPath, driverKey, brief, desc, model string, deadline time.Duration) (Result, error) {
 	var descArgs []string
 	if desc != "" {
 		descArgs = []string{desc}
@@ -52,12 +56,13 @@ func Launch(home, repoPath, driverKey, brief, desc string, deadline time.Duratio
 	}
 
 	// Validate the spawn templates BEFORE creating anything: bad config
-	// (missing spawn-entry, no {entry} splice) must not litter a worktree.
-	// Rendering pre-create skips the worktree's own (not yet checked out)
-	// sweatfile layer, but that layer is the repo sweatfile checked out
-	// fresh from the default branch — same content the repo layer already
-	// contributed.
-	argv, window, sessionEnv, err := renderSpawn(home, rp, brief)
+	// (missing spawn-entry, no {entry} splice, or — with a model requested —
+	// no "--" separator to splice the model flag into) must not litter a
+	// worktree. Rendering pre-create skips the worktree's own (not yet
+	// checked out) sweatfile layer, but that layer is the repo sweatfile
+	// checked out fresh from the default branch — same content the repo
+	// layer already contributed.
+	argv, window, sessionEnv, err := renderSpawn(home, rp, brief, model)
 	if err != nil {
 		return Result{}, err
 	}
@@ -71,12 +76,14 @@ func Launch(home, repoPath, driverKey, brief, desc string, deadline time.Duratio
 
 // LaunchExisting runs the post-worktree tail of Launch over an existing
 // worktree: render the worker repo's spawn/spawn-entry templates (FIRST,
-// so bad config fails before any state is written), write the worker's
-// session state (spawned_by lineage), exec the spawn argv, and block on
-// the chat hello. Task 7's detached fork reuses it over a
-// worktree.CreateFrom-produced worktree.
-func LaunchExisting(home string, rp worktree.ResolvedPath, driverKey, brief, desc string, deadline time.Duration) (Result, error) {
-	argv, window, sessionEnv, err := renderSpawn(home, rp, brief)
+// so bad config — including a model that has nowhere to splice — fails
+// before any state is written), write the worker's session state
+// (spawned_by lineage), exec the spawn argv, and block on the chat hello.
+// model, when non-empty, requests a specific model alias for the worker's
+// provider, same as Launch; "" means no model requested. Task 7's detached
+// fork reuses it over a worktree.CreateFrom-produced worktree.
+func LaunchExisting(home string, rp worktree.ResolvedPath, driverKey, brief, desc, model string, deadline time.Duration) (Result, error) {
+	argv, window, sessionEnv, err := renderSpawn(home, rp, brief, model)
 	if err != nil {
 		return Result{}, err
 	}
@@ -86,14 +93,26 @@ func LaunchExisting(home string, rp worktree.ResolvedPath, driverKey, brief, des
 // renderSpawn loads the WORKER repo's sweatfile hierarchy (its harness decides
 // the spawn-entry, not the driver's) and renders the detached-harness argv. It
 // also returns the hierarchy's [session-entry].env for the exec's environment.
-// Safe to call before the worktree exists: LoadWorktreeHierarchy treats a
-// missing leaf sweatfile as an empty layer.
-func renderSpawn(home string, rp worktree.ResolvedPath, brief string) (argv, window []string, sessionEnv map[string]string, err error) {
+// When model is non-empty, the resolved provider's model flag and alias
+// (from [session-entry.model-flags]) are spliced into the entry immediately
+// after its literal "--" provider-args separator, via SpliceModelFlag,
+// BEFORE {prompt}/{dir} substitution; model == "" leaves the entry
+// unmodified. Safe to call before the worktree exists: LoadWorktreeHierarchy
+// treats a missing leaf sweatfile as an empty layer.
+func renderSpawn(home string, rp worktree.ResolvedPath, brief, model string) (argv, window []string, sessionEnv map[string]string, err error) {
 	hierarchy, err := sweatfileio.LoadWorktreeHierarchy(home, rp.RepoPath, rp.AbsPath)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("loading worker sweatfile hierarchy: %w", err)
 	}
 	merged := hierarchy.Merged
+
+	entry := merged.SessionSpawnEntry()
+	if model != "" {
+		entry, err = SpliceModelFlag(entry, model, merged.SessionModelFlags())
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
 
 	// FDR-0017 Piece 1: spinclass no longer wraps the worker in a multiplexer.
 	// The detached-harness argv (clown's --clown-attach=spawn) is *expected* to
@@ -101,7 +120,7 @@ func renderSpawn(home string, rp worktree.ResolvedPath, brief string) (argv, win
 	// runs it in its own session and never waits on it, so a non-detaching entry
 	// cannot wedge the launcher. {id} is not substituted here — the worker
 	// derives its identity from SPINCLASS_SESSION_ID in the exec env (workerEnv).
-	argv = SubstituteEntry(merged.SessionSpawnEntry(), brief, rp.AbsPath)
+	argv = SubstituteEntry(entry, brief, rp.AbsPath)
 	window = SubstituteWindow(merged.SessionSpawnWindow(), rp.SessionKey, rp.AbsPath)
 	return argv, window, merged.SessionEnv(), nil
 }
