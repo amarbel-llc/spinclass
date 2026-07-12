@@ -265,7 +265,8 @@ dirs → repo at each level. Notable surface:
 - `[env]` (map merge); `[hooks]` (lifecycle hooks + the `disable-*` /
   `*-timeout` / output-format knobs, scalar override);
   `[session-entry]` (start/resume/spawn-entry/spawn-window argv, per-field
-  override); `[sysprompt]` (`doc-index-dirs` array — **override not append**:
+  override; `model-flags` provider→CLI-flag map, merged per-key like `[env]`);
+  `[sysprompt]` (`doc-index-dirs` array — **override not append**:
   non-empty replaces, `[]` disables, nil inherits the built-in default).
 
 **Custom start commands** (`[[start-commands]]`): each entry registers

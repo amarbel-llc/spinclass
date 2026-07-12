@@ -729,6 +729,41 @@ on macOS.
 .B Merge:
 scalar override.
 .TP
+.B model\-flags
+Map from a clown provider name to the CLI flag that provider's binary
+uses to select a model.
+The provider name is resolved by scanning the resolved
+.B spawn\-entry
+for
+.RB ( \-\-provider " or " \-\-provider= ),
+defaulting to
+.B claude
+(clown's own default) when neither is present.
+Consulted when the
+.RB ( spawn\-session " / " fork\-session )
+.B model
+param, or the equivalent
+.RB ( "sc spawn \-\-model" " / " "sc fork \-\-brief \-\-model" )
+CLI flag, is set: the flag and the requested model alias
+.RB ( sonnet ", " opus ", " haiku ", or " fable )
+are spliced into
+.B spawn\-entry
+immediately after its literal
+.B \(dq\-\-\(dq
+provider-args separator.
+Defaults to
+.BR "{ claude = \(dq\-\-model\(dq }" ,
+the only mapping verified against an actual provider CLI; a model
+requested for a provider absent from this map, or for a
+.B spawn\-entry
+with no
+.BR \(dq\-\-\(dq ,
+is a hard spawn error.
+.B Merge:
+per-key map merge (child wins on collision, parent-only keys survive),
+same as
+.BR [session\-entry.env] .
+.TP
 .B liveness\-probe
 .B Deprecated
 (post-FDR-0017): clown owns the multiplexer attach and names sessions by its

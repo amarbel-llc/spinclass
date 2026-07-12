@@ -1,7 +1,7 @@
 # Model selection for spawn-session / fork-session — design
 
 **Date:** 2026-07-11
-**Status:** approved (brainstorming), pending implementation plan
+**Status:** implemented 2026-07-12
 
 ## Goal
 
