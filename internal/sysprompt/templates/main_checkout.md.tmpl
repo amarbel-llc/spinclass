@@ -25,6 +25,15 @@ not a spinclass worktree. spinclass tracks it as an *implicit session*.
 {{- if .GroupID}}
 - Group: `{{.GroupID}}`
 {{- end}}
+{{- if and .RepoInfo.URL .RepoInfo.ForgeKind (ne .RepoInfo.ForgeKind "github")}}
+
+## Forge workflow
+
+This repository's primary forge is **{{.RepoInfo.ForgeKind}}** ({{.RepoInfo.URL}}), not GitHub.
+Use `fj` (CLI) or `smith` MCP tools for issues and pull requests — do NOT use `gh`
+and do NOT open issues or PRs on GitHub. If a GitHub mirror exists it is read-only:
+push, file issues, and open PRs against the forge URL above.
+{{- end}}
 
 Because there is no managed worktree here, the worktree-session conventions do
 NOT apply: you are working on the checkout's current branch directly, and

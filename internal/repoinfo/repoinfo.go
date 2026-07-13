@@ -80,7 +80,11 @@ func fetch(ctx context.Context, path string, d deps) RepoInfo {
 		return info
 	}
 	info.Host, info.Owner, info.Name = host, owner, name
-	info.URL = "https://" + host + "/" + owner + "/" + name
+	// URL requires an owner; defer construction until owner is known. For
+	// vanity remotes (owner-less path), owner may be resolved below via papi.
+	if owner != "" {
+		info.URL = "https://" + host + "/" + owner + "/" + name
+	}
 
 	// Forge kind: github.com is unambiguous; any other host is resolved
 	// against the operator's published PAPI forges/organizations.
@@ -88,22 +92,38 @@ func fetch(ctx context.Context, path string, d deps) RepoInfo {
 	if host == "github.com" {
 		info.ForgeKind = "github"
 	} else {
-		info.ForgeKind, info.OwnerType, baseURL = papiForge(ctx, d, host)
+		var papiLogin string
+		info.ForgeKind, info.OwnerType, baseURL, papiLogin = papiForge(ctx, d, host)
+		// Vanity remote: owner was absent in the remote path; fill from the
+		// papi organization login when available (spinclass#221).
+		if info.Owner == "" && papiLogin != "" {
+			info.Owner = papiLogin
+		}
+		// Construct URL now that we (may) have an owner.
+		if info.Owner != "" && info.URL == "" {
+			if baseURL != "" {
+				info.URL = strings.TrimRight(baseURL, "/") + "/" + info.Owner + "/" + info.Name
+			} else {
+				info.URL = "https://" + host + "/" + info.Owner + "/" + info.Name
+			}
+		}
 	}
 
 	// Description (and, for GitHub, an authoritative link + owner type) is
 	// fetched live from the forge, dispatched on the resolved kind.
 	switch info.ForgeKind {
 	case "github":
-		if r, ok := githubRepo(ctx, d, owner, name); ok {
-			if r.Description != "" {
-				info.Description = r.Description
-			}
-			if r.OwnerType != "" {
-				info.OwnerType = r.OwnerType
-			}
-			if r.HTMLURL != "" {
-				info.URL = r.HTMLURL
+		if info.Owner != "" {
+			if r, ok := githubRepo(ctx, d, info.Owner, name); ok {
+				if r.Description != "" {
+					info.Description = r.Description
+				}
+				if r.OwnerType != "" {
+					info.OwnerType = r.OwnerType
+				}
+				if r.HTMLURL != "" {
+					info.URL = r.HTMLURL
+				}
 			}
 		}
 	case "gitea", "forgejo", "codeberg":
@@ -111,8 +131,8 @@ func fetch(ctx context.Context, path string, d deps) RepoInfo {
 		// share the /api/v1 REST surface. Unauthenticated best-effort: a
 		// public repo returns its description; a private one 404s and the
 		// description is simply omitted.
-		if baseURL != "" {
-			if desc := giteaDescription(ctx, d, baseURL, owner, name); desc != "" {
+		if baseURL != "" && info.Owner != "" {
+			if desc := giteaDescription(ctx, d, baseURL, info.Owner, name); desc != "" {
 				info.Description = desc
 			}
 		}
@@ -123,8 +143,9 @@ func fetch(ctx context.Context, path string, d deps) RepoInfo {
 
 // parseRemoteURL extracts host, owner, and name from a git remote URL in
 // either scp-like SSH form (git@host:owner/repo.git), ssh:// URL form, or
-// http(s):// form. ok is false when the shape is unrecognized or an
-// owner/name pair can't be isolated.
+// http(s):// form. ok is false when the shape is unrecognized or a name
+// can't be isolated. owner may be empty for vanity single-segment paths
+// (e.g. git@code.example.com:repo.git); callers must handle that case.
 func parseRemoteURL(raw string) (host, owner, name string, ok bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -149,9 +170,19 @@ func parseRemoteURL(raw string) (host, owner, name string, ok bool) {
 	default:
 		return "", "", "", false
 	}
+	if host == "" {
+		return "", "", "", false
+	}
 
 	owner, name, ok = splitOwnerRepo(path)
-	if !ok || host == "" {
+	if !ok {
+		// Vanity single-segment path: just a repo name with no owner prefix
+		// (e.g. git@code.linenisgreat.com:spinclass.git). Return ok=true with
+		// empty owner; fetch() resolves the owner via papi (spinclass#221).
+		seg := strings.TrimSuffix(strings.Trim(path, "/"), ".git")
+		if seg != "" && !strings.Contains(seg, "/") {
+			return host, "", seg, true
+		}
 		return "", "", "", false
 	}
 	return host, owner, name, true
@@ -216,43 +247,58 @@ func parseGitHubRepoJSON(b []byte) (ghRepo, bool) {
 	}, true
 }
 
-// papiForge looks up the forge kind (and owner type + base URL) for host by
-// querying the operator's published PAPI. Best-effort: no papi, no
-// identity domain, or no matching forge yields empty strings.
-func papiForge(ctx context.Context, d deps, host string) (kind, ownerType, baseURL string) {
+// papiForge looks up the forge kind (and owner type, base URL, and org login)
+// for host by querying the operator's published PAPI. Best-effort: no papi,
+// no identity domain, or no matching forge yields empty strings. login is the
+// organization login found in a matching .organizations[] entry — non-empty
+// only when the papi identity includes an org whose base_url matches host,
+// used to resolve the owner for vanity remotes (spinclass#221).
+func papiForge(ctx context.Context, d deps, host string) (kind, ownerType, baseURL, login string) {
 	domain, err := d.run(ctx, d.papiBin, "identity", "domain")
 	if err != nil || domain == "" {
-		return "", "", ""
+		return
 	}
 	out, err := d.run(ctx, d.papiBin, "query", domain, ".forges[], .organizations[]")
 	if err != nil || out == "" {
-		return "", "", ""
+		return
 	}
 	return matchForge(out, host)
 }
 
 // matchForge scans papi query output — a stream of JSON objects (forges then
-// organizations) — for the entry whose base_url host matches host, returning
-// its kind, normalized identity type, and base URL.
-func matchForge(papiOut, host string) (kind, ownerType, baseURL string) {
+// organizations) — for entries whose base_url host matches host. It
+// accumulates forge kind + owner type + base URL from forge entries and
+// org login from organization entries; multiple entries for the same host
+// are merged so a forge entry and an org entry together yield all four
+// values (spinclass#221).
+func matchForge(papiOut, host string) (kind, ownerType, baseURL, login string) {
 	dec := json.NewDecoder(strings.NewReader(papiOut))
 	for {
 		var e struct {
 			Kind         string `json:"kind"`
 			BaseURL      string `json:"base_url"`
 			IdentityType string `json:"identity_type"`
+			Login        string `json:"login"`
 		}
 		if err := dec.Decode(&e); err != nil {
 			break
 		}
-		if e.BaseURL == "" {
+		if e.BaseURL == "" || hostOf(e.BaseURL) != host {
 			continue
 		}
-		if hostOf(e.BaseURL) == host {
-			return e.Kind, normalizeOwnerType(e.IdentityType), e.BaseURL
+		if e.Kind != "" && kind == "" {
+			kind = e.Kind
+			ownerType = normalizeOwnerType(e.IdentityType)
+			baseURL = e.BaseURL
+		}
+		if e.Login != "" && login == "" {
+			login = e.Login
+			if baseURL == "" {
+				baseURL = e.BaseURL
+			}
 		}
 	}
-	return "", "", ""
+	return
 }
 
 // giteaDescription fetches a repo's description from a Gitea/Forgejo forge's

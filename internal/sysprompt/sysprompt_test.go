@@ -238,6 +238,56 @@ func TestRenderDesignRecordsTrailer(t *testing.T) {
 	}
 }
 
+// A non-github forge produces a "Forge workflow" guidance block; GitHub does not.
+func TestRenderForgeWorkflowBlock(t *testing.T) {
+	forgeInfo := repoinfo.RepoInfo{
+		ForgeKind: "forgejo",
+		Owner:     "myorg",
+		Name:      "myrepo",
+		URL:       "https://code.example.com/myorg/myrepo",
+	}
+	for _, mode := range []Mode{ModeWorktree, ModeMainCheckout} {
+		got, err := Render(Coordinates{Mode: mode, SessionKey: "k", RepoInfo: forgeInfo})
+		if err != nil {
+			t.Fatalf("Render(%s): %v", mode, err)
+		}
+		mustContain(t, got, "Forge workflow")
+		mustContain(t, got, "forgejo")
+		mustContain(t, got, "fj")
+		mustContain(t, got, "smith")
+		mustContain(t, got, "read-only")
+	}
+
+	// GitHub repos must NOT render the forge workflow block.
+	ghInfo := repoinfo.RepoInfo{
+		ForgeKind: "github",
+		Owner:     "amarbel-llc",
+		Name:      "spinclass",
+		URL:       "https://github.com/amarbel-llc/spinclass",
+	}
+	for _, mode := range []Mode{ModeWorktree, ModeMainCheckout} {
+		got, err := Render(Coordinates{Mode: mode, SessionKey: "k", RepoInfo: ghInfo})
+		if err != nil {
+			t.Fatalf("Render(%s): %v", mode, err)
+		}
+		if strings.Contains(got, "Forge workflow") {
+			t.Errorf("%s: forge workflow block must not render for github repos:\n%s", mode, got)
+		}
+	}
+
+	// No URL → no forge workflow block even if forge kind is set.
+	noURLInfo := repoinfo.RepoInfo{ForgeKind: "forgejo", Name: "myrepo"}
+	for _, mode := range []Mode{ModeWorktree, ModeMainCheckout} {
+		got, err := Render(Coordinates{Mode: mode, SessionKey: "k", RepoInfo: noURLInfo})
+		if err != nil {
+			t.Fatalf("Render(%s): %v", mode, err)
+		}
+		if strings.Contains(got, "Forge workflow") {
+			t.Errorf("%s: forge workflow block must not render without URL", mode)
+		}
+	}
+}
+
 // The host timezone line renders when set and is omitted when empty, in both
 // template variants.
 func TestRenderTimezoneLine(t *testing.T) {
