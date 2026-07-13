@@ -195,11 +195,17 @@ subcommand is always available.
   cwd+git) — and `Render` picks the matching embedded template. Both templates
   carry a best-effort **repository line** (provider/owner/link/description)
   resolved by `internal/repoinfo`: the git remote gives host/owner/name/link with
-  no network, then a **deadline-capped** (`repoFetchTimeout`, 2s) live lookup adds
-  the forge kind (papi, matched against the operator's published PAPI forges) and
-  the description (`gh api` for GitHub, the Gitea/Forgejo REST API self-hosted).
-  Any failure omits only the affected lines — the fetch runs before `initialize`,
-  so it must never block. Both templates additionally gain a Go-composed
+  no network (for vanity single-segment remotes like `git@host:repo.git` the owner
+  is absent from the path and resolved via papi — spinclass#221), then a
+  **deadline-capped** (`repoFetchTimeout`, 2s) live lookup adds the forge kind and
+  owner login via the operator's published PAPI (`.forges[]` for kind,
+  `.organizations[]` for the missing owner on vanity remotes) and the description
+  (`gh api` for GitHub, the Gitea/Forgejo REST API self-hosted). Any failure omits
+  only the affected lines — the fetch runs before `initialize`, so it must never
+  block. Both templates also conditionally render a **Forge workflow** block (when
+  the resolved forge kind is non-GitHub and a URL is present) instructing the agent
+  to use `fj`/`smith` rather than `gh` and noting any GitHub copy is a read-only
+  mirror. Both templates additionally gain a Go-composed
   **Design records** trailer (FDR 0021, `internal/sysprompt/docsindex.go`): an
   index of the repo's `docs/features`/`docs/adrs`/`docs/rfcs` records by
   number·title·status, grouped by status, scanned scan-if-exists from local

@@ -258,32 +258,22 @@ func TestRenderForgeWorkflowBlock(t *testing.T) {
 		mustContain(t, got, "read-only")
 	}
 
-	// GitHub repos must NOT render the forge workflow block.
-	ghInfo := repoinfo.RepoInfo{
-		ForgeKind: "github",
-		Owner:     "amarbel-llc",
-		Name:      "spinclass",
-		URL:       "https://github.com/amarbel-llc/spinclass",
-	}
-	for _, mode := range []Mode{ModeWorktree, ModeMainCheckout} {
-		got, err := Render(Coordinates{Mode: mode, SessionKey: "k", RepoInfo: ghInfo})
-		if err != nil {
-			t.Fatalf("Render(%s): %v", mode, err)
-		}
-		if strings.Contains(got, "Forge workflow") {
-			t.Errorf("%s: forge workflow block must not render for github repos:\n%s", mode, got)
-		}
-	}
-
-	// No URL → no forge workflow block even if forge kind is set.
-	noURLInfo := repoinfo.RepoInfo{ForgeKind: "forgejo", Name: "myrepo"}
-	for _, mode := range []Mode{ModeWorktree, ModeMainCheckout} {
-		got, err := Render(Coordinates{Mode: mode, SessionKey: "k", RepoInfo: noURLInfo})
-		if err != nil {
-			t.Fatalf("Render(%s): %v", mode, err)
-		}
-		if strings.Contains(got, "Forge workflow") {
-			t.Errorf("%s: forge workflow block must not render without URL", mode)
+	// GitHub and no-URL cases must NOT render the forge workflow block.
+	for _, tc := range []struct {
+		name string
+		info repoinfo.RepoInfo
+	}{
+		{"github", repoinfo.RepoInfo{ForgeKind: "github", Owner: "amarbel-llc", Name: "spinclass", URL: "https://github.com/amarbel-llc/spinclass"}},
+		{"no URL", repoinfo.RepoInfo{ForgeKind: "forgejo", Name: "myrepo"}},
+	} {
+		for _, mode := range []Mode{ModeWorktree, ModeMainCheckout} {
+			got, err := Render(Coordinates{Mode: mode, SessionKey: "k", RepoInfo: tc.info})
+			if err != nil {
+				t.Fatalf("Render(%s/%s): %v", tc.name, mode, err)
+			}
+			if strings.Contains(got, "Forge workflow") {
+				t.Errorf("%s/%s: forge workflow block must not render:\n%s", tc.name, mode, got)
+			}
 		}
 	}
 }

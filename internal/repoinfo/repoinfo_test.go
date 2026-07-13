@@ -76,6 +76,15 @@ func TestMatchForge(t *testing.T) {
 	if kind != "forgejo" || base != "https://code.example.com" || login != "myorg" {
 		t.Errorf("with org entry: got (%q,%q,%q,%q)", kind, ownerType, base, login)
 	}
+
+	// When the forge entry has no IdentityType, the org entry's IdentityType
+	// fills ownerType (spinclass#221, review finding A2).
+	outOrgOwnerType := `{"kind":"forgejo","base_url":"https://code.example.com"}
+{"login":"myorg","base_url":"https://code.example.com","identity_type":"org"}`
+	kind, ownerType, base, login = matchForge(outOrgOwnerType, "code.example.com")
+	if kind != "forgejo" || ownerType != "org" || login != "myorg" {
+		t.Errorf("ownerType from org entry: got (%q,%q,%q,%q)", kind, ownerType, base, login)
+	}
 }
 
 func TestNormalizeOwnerType(t *testing.T) {

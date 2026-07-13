@@ -80,11 +80,6 @@ func fetch(ctx context.Context, path string, d deps) RepoInfo {
 		return info
 	}
 	info.Host, info.Owner, info.Name = host, owner, name
-	// URL requires an owner; defer construction until owner is known. For
-	// vanity remotes (owner-less path), owner may be resolved below via papi.
-	if owner != "" {
-		info.URL = "https://" + host + "/" + owner + "/" + name
-	}
 
 	// Forge kind: github.com is unambiguous; any other host is resolved
 	// against the operator's published PAPI forges/organizations.
@@ -99,13 +94,13 @@ func fetch(ctx context.Context, path string, d deps) RepoInfo {
 		if info.Owner == "" && papiLogin != "" {
 			info.Owner = papiLogin
 		}
-		// Construct URL now that we (may) have an owner.
-		if info.Owner != "" && info.URL == "" {
-			if baseURL != "" {
-				info.URL = strings.TrimRight(baseURL, "/") + "/" + info.Owner + "/" + info.Name
-			} else {
-				info.URL = "https://" + host + "/" + info.Owner + "/" + info.Name
-			}
+	}
+	// Construct URL once all owner sources are resolved.
+	if info.Owner != "" {
+		if baseURL != "" {
+			info.URL = strings.TrimRight(baseURL, "/") + "/" + info.Owner + "/" + info.Name
+		} else {
+			info.URL = "https://" + host + "/" + info.Owner + "/" + info.Name
 		}
 	}
 
@@ -145,7 +140,7 @@ func fetch(ctx context.Context, path string, d deps) RepoInfo {
 // either scp-like SSH form (git@host:owner/repo.git), ssh:// URL form, or
 // http(s):// form. ok is false when the shape is unrecognized or a name
 // can't be isolated. owner may be empty for vanity single-segment paths
-// (e.g. git@code.example.com:repo.git); callers must handle that case.
+// (e.g. git@code.example.com:repo.git) — see splitOwnerRepo.
 func parseRemoteURL(raw string) (host, owner, name string, ok bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -176,13 +171,6 @@ func parseRemoteURL(raw string) (host, owner, name string, ok bool) {
 
 	owner, name, ok = splitOwnerRepo(path)
 	if !ok {
-		// Vanity single-segment path: just a repo name with no owner prefix
-		// (e.g. git@code.linenisgreat.com:spinclass.git). Return ok=true with
-		// empty owner; fetch() resolves the owner via papi (spinclass#221).
-		seg := strings.TrimSuffix(strings.Trim(path, "/"), ".git")
-		if seg != "" && !strings.Contains(seg, "/") {
-			return host, "", seg, true
-		}
 		return "", "", "", false
 	}
 	return host, owner, name, true
@@ -201,13 +189,18 @@ func isSCPLike(raw string) bool {
 // splitOwnerRepo turns a remote path ("/amarbel-llc/spinclass.git",
 // "group/sub/repo") into owner + name. name is the last segment (minus a
 // trailing .git); owner is everything before it joined by '/', which
-// preserves GitLab-style subgroups. Fewer than two segments is a miss.
+// preserves GitLab-style subgroups. A single-segment path (vanity remote
+// like git@host:repo.git) returns empty owner with ok=true; the caller
+// resolves the owner via papi (spinclass#221).
 func splitOwnerRepo(path string) (owner, name string, ok bool) {
 	path = strings.Trim(path, "/")
 	path = strings.TrimSuffix(path, ".git")
 	segs := strings.Split(path, "/")
-	if len(segs) < 2 || segs[0] == "" || segs[len(segs)-1] == "" {
+	if segs[0] == "" || segs[len(segs)-1] == "" {
 		return "", "", false
+	}
+	if len(segs) == 1 {
+		return "", segs[0], true
 	}
 	name = segs[len(segs)-1]
 	owner = strings.Join(segs[:len(segs)-1], "/")
@@ -293,9 +286,15 @@ func matchForge(papiOut, host string) (kind, ownerType, baseURL, login string) {
 		}
 		if e.Login != "" && login == "" {
 			login = e.Login
+			if ownerType == "" {
+				ownerType = normalizeOwnerType(e.IdentityType)
+			}
 			if baseURL == "" {
 				baseURL = e.BaseURL
 			}
+		}
+		if kind != "" && login != "" {
+			break
 		}
 	}
 	return
