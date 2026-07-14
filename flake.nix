@@ -96,6 +96,18 @@
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
     };
+    igloo.inputs.treefmt-nix.follows = "bats/treefmt-nix";
+    tommy.inputs.bats.inputs.treefmt-nix.follows = "bats/treefmt-nix";
+    tommy.inputs.tap.inputs.treefmt-nix.follows = "bats/treefmt-nix";
+    crap.inputs.conformist.follows = "conformist";
+    madder.inputs.conformist.follows = "conformist";
+    papi.inputs.conformist.follows = "conformist";
+    madder.inputs.crap.follows = "crap";
+    utils.inputs.systems.follows = "igloo/systems";
+    papi.inputs.piggy.follows = "madder/piggy";
+    papi.inputs.purse-first.follows = "madder/purse-first";
+    igloo.inputs.nixpkgs-master.follows = "nixpkgs-master";
+    tommy.inputs.tap.inputs.gomod2nix.inputs.flake-utils.follows = "utils";
   };
 
   outputs =
