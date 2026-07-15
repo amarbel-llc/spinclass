@@ -7,7 +7,7 @@
     # `nixpkgs-master` so the overlay sits on the same base that
     # `pkgs-master` consumes, instead of pulling a second master-tracking
     # copy.
-    igloo.url = "git+https://code.linenisgreat.com/igloo.git";
+    igloo.url = "git+https://github.com/amarbel-llc/igloo.git";
 
     # Upstream pin: source of the Go toolchain we pin via
     # GOTOOLCHAIN=local + go_1_26, plus general dev tools that don't
@@ -54,7 +54,7 @@
     # shellcheck; config lives in ./conformist.toml. Exposed as the
     # flake `formatter` and gated by `just lint-fmt` (conformist check).
     conformist = {
-      url = "git+https://code.linenisgreat.com/conformist.git";
+      url = "git+https://github.com/amarbel-llc/conformist.git";
       inputs.igloo.follows = "igloo";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
