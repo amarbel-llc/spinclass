@@ -7,7 +7,7 @@
     # `nixpkgs-master` so the overlay sits on the same base that
     # `pkgs-master` consumes, instead of pulling a second master-tracking
     # copy.
-    igloo.url = "git+https://code.linenisgreat.com/igloo.git";
+    igloo.url = "https://code.linenisgreat.com/igloo/archive/master.tar.gz";
 
     # Upstream pin: source of the Go toolchain we pin via
     # GOTOOLCHAIN=local + go_1_26, plus general dev tools that don't
@@ -23,7 +23,7 @@
     # (`pkgs.testers.batsLane`); the builder has since moved into this
     # flake and is reached as `bats.lib.${system}.batsLane`.
     bats = {
-      url = "git+https://code.linenisgreat.com/bats.git";
+      url = "https://code.linenisgreat.com/bats/archive/master.tar.gz";
       inputs.igloo.follows = "igloo";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
@@ -38,7 +38,7 @@
     # require_madder_pinned (see #85, FDR 0003/0015). The default
     # `mkSpinclass {}` build is unaffected.
     madder = {
-      url = "git+https://code.linenisgreat.com/madder.git";
+      url = "https://code.linenisgreat.com/madder/archive/master.tar.gz";
       inputs.igloo.follows = "igloo";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
@@ -54,7 +54,7 @@
     # shellcheck; config lives in ./conformist.toml. Exposed as the
     # flake `formatter` and gated by `just lint-fmt` (conformist check).
     conformist = {
-      url = "git+https://code.linenisgreat.com/conformist.git";
+      url = "https://code.linenisgreat.com/conformist/archive/master.tar.gz";
       inputs.igloo.follows = "igloo";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
@@ -64,7 +64,7 @@
     # viewport presenter), bridged into go.mod via gomod.nix. Consumed
     # by the `ndjson-crap` pre-merge-output-format in internal/check.
     crap = {
-      url = "git+https://code.linenisgreat.com/crap.git";
+      url = "https://code.linenisgreat.com/crap/archive/master.tar.gz";
       inputs.igloo.follows = "igloo";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
@@ -77,7 +77,7 @@
     # Pinned to a release tag (not master) for reproducibility; bump the
     # tag deliberately + regen the codec when adopting a new tommy.
     tommy = {
-      url = "git+https://code.linenisgreat.com/tommy.git";
+      url = "https://code.linenisgreat.com/tommy/archive/master.tar.gz";
       inputs.igloo.follows = "igloo";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
@@ -91,7 +91,7 @@
     # gh (the other repo-line dependency) is not a standalone flake — it
     # is pinned from nixpkgs-master (`pkgs-master.gh`).
     papi = {
-      url = "git+https://code.linenisgreat.com/papi.git";
+      url = "https://code.linenisgreat.com/papi/archive/master.tar.gz";
       inputs.igloo.follows = "igloo";
       inputs.nixpkgs-master.follows = "nixpkgs-master";
       inputs.utils.follows = "utils";
