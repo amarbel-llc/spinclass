@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/log"
+	"github.com/mattn/go-isatty"
 
 	"github.com/amarbel-llc/spinclass/internal/check"
 	"github.com/amarbel-llc/spinclass/internal/git"
@@ -25,6 +26,13 @@ import (
 )
 
 var styleCode = lipgloss.NewStyle().Foreground(lipgloss.Color("#E88388")).Background(lipgloss.Color("#1D1F21")).Padding(0, 1)
+
+// cleanInteractive reports whether stdin is a TTY. Overridable in tests to
+// exercise the no-TTY guards in confirmClean and handleDirtyWorktree.
+var cleanInteractive = func() bool {
+	fd := os.Stdin.Fd()
+	return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
+}
 
 type FileChange struct {
 	Code string
@@ -249,6 +257,10 @@ func discardFile(wtPath string, fc FileChange) error {
 func handleDirtyWorktree(wt worktreeInfo, tw *tap.Writer) (removed bool, err error) {
 	porcelain := git.StatusPorcelain(wt.worktreePath)
 	changes := ParsePorcelain(porcelain)
+
+	if !cleanInteractive() {
+		return false, fmt.Errorf("sc clean -i requires an interactive terminal to review dirty files; omit -i to skip dirty worktrees")
+	}
 
 	for _, fc := range changes {
 		var discard bool
@@ -543,6 +555,9 @@ func confirmClean(removeCount, abandonedCount, tombstoneCount, orphanBuildCount 
 	}
 	if orphanBuildCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d orphaned build worktree(s)", orphanBuildCount))
+	}
+	if !cleanInteractive() {
+		return false, fmt.Errorf("sc clean requires an interactive terminal to confirm; use --yes to skip")
 	}
 	prompt := fmt.Sprintf("Remove %s?", strings.Join(parts, " and "))
 	var confirmed bool

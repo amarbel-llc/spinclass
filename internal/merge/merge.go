@@ -430,6 +430,10 @@ func chooseWorktree(repoPath string) (wtPath, branch string, err error) {
 		branches[i] = filepath.Base(p)
 	}
 
+	if !mergeInteractive() {
+		return "", "", fmt.Errorf("sc merge requires an interactive terminal to select a worktree; specify a target with `sc merge <branch>`")
+	}
+
 	var selected string
 	options := make([]huh.Option[string], len(branches))
 	for i, b := range branches {
@@ -466,6 +470,9 @@ func ResolveDefaultBranch(repoPath string) (string, error) {
 }
 
 func promptDefaultBranch() (string, error) {
+	if !mergeInteractive() {
+		return "", fmt.Errorf("both main and master exist; sc merge requires an interactive terminal to select the default branch")
+	}
 	var selected string
 	err := huh.NewSelect[string]().
 		Title("Both main and master branches exist. Which should be the rebase target?").
@@ -479,6 +486,13 @@ func promptDefaultBranch() (string, error) {
 		return "", fmt.Errorf("branch selection cancelled: %w", err)
 	}
 	return selected, nil
+}
+
+// mergeInteractive reports whether stdin is a TTY. Overridable in tests to
+// exercise the no-TTY guards in chooseWorktree and promptDefaultBranch.
+var mergeInteractive = func() bool {
+	fd := os.Stdin.Fd()
+	return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
 }
 
 // runPreMergeHookContext loads the sweatfile hierarchy and runs the configured
