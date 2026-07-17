@@ -543,6 +543,9 @@ func emitPlan(tw *tap.Writer, actions []cleanAction, abandonedCount int, tombsto
 }
 
 func confirmClean(removeCount, abandonedCount, tombstoneCount, orphanBuildCount int) (bool, error) {
+	if !cleanInteractive() {
+		return false, fmt.Errorf("sc clean requires an interactive terminal to confirm; use --yes to skip")
+	}
 	parts := []string{}
 	if removeCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d worktree(s)", removeCount))
@@ -555,9 +558,6 @@ func confirmClean(removeCount, abandonedCount, tombstoneCount, orphanBuildCount 
 	}
 	if orphanBuildCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d orphaned build worktree(s)", orphanBuildCount))
-	}
-	if !cleanInteractive() {
-		return false, fmt.Errorf("sc clean requires an interactive terminal to confirm; use --yes to skip")
 	}
 	prompt := fmt.Sprintf("Remove %s?", strings.Join(parts, " and "))
 	var confirmed bool

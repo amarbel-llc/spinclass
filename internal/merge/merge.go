@@ -24,6 +24,13 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 )
 
+// mergeInteractive reports whether stdin is a TTY. Overridable in tests to
+// exercise the no-TTY guards in chooseWorktree and promptDefaultBranch.
+var mergeInteractive = func() bool {
+	fd := os.Stdin.Fd()
+	return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
+}
+
 func Run(execr executor.Executor, format string, target string, gitSync bool) error {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -486,13 +493,6 @@ func promptDefaultBranch() (string, error) {
 		return "", fmt.Errorf("branch selection cancelled: %w", err)
 	}
 	return selected, nil
-}
-
-// mergeInteractive reports whether stdin is a TTY. Overridable in tests to
-// exercise the no-TTY guards in chooseWorktree and promptDefaultBranch.
-var mergeInteractive = func() bool {
-	fd := os.Stdin.Fd()
-	return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
 }
 
 // runPreMergeHookContext loads the sweatfile hierarchy and runs the configured
