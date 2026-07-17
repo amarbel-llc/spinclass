@@ -183,6 +183,62 @@ func itoa(n int) string {
 	return strconv.Itoa(n)
 }
 
+// setupNoTTYClean overrides cleanInteractive to report non-TTY.
+func setupNoTTYClean(t *testing.T) {
+	t.Helper()
+	orig := cleanInteractive
+	cleanInteractive = func() bool { return false }
+	t.Cleanup(func() { cleanInteractive = orig })
+}
+
+// TestConfirmCleanNoTTYErrors is the regression guard for #225: confirmClean
+// must immediately error (not block on huh.Confirm) when stdin/stderr are not
+// a TTY. The error must mention --yes and -i.
+func TestConfirmCleanNoTTYErrors(t *testing.T) {
+	setupNoTTYClean(t)
+
+	_, err := confirmClean(1, 0, 0, 0)
+	if err == nil {
+		t.Fatal("expected error on non-TTY, got nil")
+	}
+	if !strings.Contains(err.Error(), "--yes") {
+		t.Errorf("error %q does not mention --yes", err)
+	}
+	if !strings.Contains(err.Error(), "-i") {
+		t.Errorf("error %q does not mention -i", err)
+	}
+}
+
+// TestHandleDirtyWorktreeNoTTYErrors verifies the -i guard: handleDirtyWorktree
+// errors (not hangs) when stdin/stderr are not a TTY.
+func TestHandleDirtyWorktreeNoTTYErrors(t *testing.T) {
+	setupNoTTYClean(t)
+	_, repoDir := setupRepo(t)
+
+	wtPath := filepath.Join(repoDir, ".worktrees", "dirty-x")
+	runGit(t, repoDir, "worktree", "add", "-b", "dirty-x", wtPath)
+
+	// Write an untracked file to make the worktree dirty.
+	if err := os.WriteFile(filepath.Join(wtPath, "dirty.txt"), []byte("dirty"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wt := worktreeInfo{
+		repo:         "repo",
+		branch:       "dirty-x",
+		repoPath:     repoDir,
+		worktreePath: wtPath,
+		merged:       true,
+		dirty:        true,
+	}
+	_, err := handleDirtyWorktree(wt, nil)
+	if err == nil {
+		t.Fatal("expected error on non-TTY with dirty worktree, got nil")
+	}
+	if !strings.Contains(err.Error(), "-i") {
+		t.Errorf("error %q does not mention -i", err)
+	}
+}
+
 func TestParsePorcelainEmpty(t *testing.T) {
 	changes := ParsePorcelain("")
 	if len(changes) != 0 {

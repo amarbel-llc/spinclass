@@ -286,11 +286,14 @@ var (
 	nixgcNewPlan  = nixgc.NewPlan
 )
 
-// closeInteractive reports whether stdin is a TTY. Overridable in tests to
-// exercise the no-TTY guard in RunResolved without a real terminal.
+// closeInteractive reports whether both stdin and stderr are TTYs. huh renders
+// via stderr (tea.WithOutput(os.Stderr)), so both fds must be terminals before
+// we invoke any interactive prompt. Overridable in tests.
 var closeInteractive = func() bool {
-	fd := os.Stdin.Fd()
-	return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
+	stdin := os.Stdin.Fd()
+	stderr := os.Stderr.Fd()
+	return (isatty.IsTerminal(stdin) || isatty.IsCygwinTerminal(stdin)) &&
+		(isatty.IsTerminal(stderr) || isatty.IsCygwinTerminal(stderr))
 }
 
 // planNixGC captures the worktree's nix gc roots before removal. Returns nil

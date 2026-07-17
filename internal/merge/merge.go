@@ -24,11 +24,14 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/worktree"
 )
 
-// mergeInteractive reports whether stdin is a TTY. Overridable in tests to
-// exercise the no-TTY guards in chooseWorktree and promptDefaultBranch.
+// mergeInteractive reports whether both stdin and stderr are TTYs. huh renders
+// via stderr (tea.WithOutput(os.Stderr)), so both fds must be terminals before
+// we invoke any interactive prompt. Overridable in tests.
 var mergeInteractive = func() bool {
-	fd := os.Stdin.Fd()
-	return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
+	stdin := os.Stdin.Fd()
+	stderr := os.Stderr.Fd()
+	return (isatty.IsTerminal(stdin) || isatty.IsCygwinTerminal(stdin)) &&
+		(isatty.IsTerminal(stderr) || isatty.IsCygwinTerminal(stderr))
 }
 
 func Run(execr executor.Executor, format string, target string, gitSync bool) error {

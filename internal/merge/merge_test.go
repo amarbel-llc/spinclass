@@ -1020,6 +1020,66 @@ func TestIsInsideSession(t *testing.T) {
 	})
 }
 
+// setupNoTTYMerge overrides mergeInteractive to report non-TTY.
+func setupNoTTYMerge(t *testing.T) {
+	t.Helper()
+	orig := mergeInteractive
+	mergeInteractive = func() bool { return false }
+	t.Cleanup(func() { mergeInteractive = orig })
+}
+
+// TestChooseWorktreeSingleNoTTY verifies the single-worktree short-circuit:
+// when exactly one worktree exists, chooseWorktree returns without consulting
+// mergeInteractive, so it succeeds even in a non-TTY environment.
+func TestChooseWorktreeSingleNoTTY(t *testing.T) {
+	setupNoTTYMerge(t)
+	repoDir := setupRepo(t)
+	wtPath := setupWorktree(t, repoDir, "single-wt")
+
+	gotWt, gotBranch, err := chooseWorktree(repoDir)
+	if err != nil {
+		t.Fatalf("expected success for single worktree, got %v", err)
+	}
+	if gotWt != wtPath {
+		t.Errorf("wtPath = %q, want %q", gotWt, wtPath)
+	}
+	if gotBranch != "single-wt" {
+		t.Errorf("branch = %q, want %q", gotBranch, "single-wt")
+	}
+}
+
+// TestChooseWorktreeMultiNoTTYErrors verifies the multi-worktree guard:
+// when more than one worktree exists and stdin/stderr are not a TTY,
+// chooseWorktree errors instead of hanging on the huh picker.
+func TestChooseWorktreeMultiNoTTYErrors(t *testing.T) {
+	setupNoTTYMerge(t)
+	repoDir := setupRepo(t)
+	setupWorktree(t, repoDir, "alpha")
+	setupWorktree(t, repoDir, "beta")
+
+	_, _, err := chooseWorktree(repoDir)
+	if err == nil {
+		t.Fatal("expected error on non-TTY with multiple worktrees, got nil")
+	}
+	if !strings.Contains(err.Error(), "sc merge") {
+		t.Errorf("error %q does not mention sc merge", err)
+	}
+}
+
+// TestPromptDefaultBranchNoTTYErrors verifies the ambiguous-branch guard:
+// promptDefaultBranch errors immediately on non-TTY instead of hanging.
+func TestPromptDefaultBranchNoTTYErrors(t *testing.T) {
+	setupNoTTYMerge(t)
+
+	_, err := promptDefaultBranch()
+	if err == nil {
+		t.Fatal("expected error on non-TTY, got nil")
+	}
+	if !strings.Contains(err.Error(), "default_branch") {
+		t.Errorf("error %q does not mention default_branch", err)
+	}
+}
+
 func TestIsInsideWorktree(t *testing.T) {
 	t.Run("cwd matches wtPath", func(t *testing.T) {
 		if !isInsideWorktree("/tmp/repo/.worktrees/branch", "/tmp/repo/.worktrees/branch") {
