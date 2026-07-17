@@ -109,6 +109,7 @@
     tommy.inputs.bats.follows = "bats";
     tommy.inputs.conformist.follows = "conformist";
     tommy.inputs.tap.follows = "madder/tap";
+    bats.inputs.conformist.follows = "conformist";
   };
 
   outputs =
