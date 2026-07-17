@@ -113,7 +113,7 @@ func RunResolved(w io.Writer, repoPath, wtPath, branch string, force bool, nixGC
 	if (unintegrated || dirty) && !force {
 		reason := describeUnintegrated(branch, unintegrated, dirty)
 		if !closeInteractive() {
-			return fmt.Errorf("%s close requires an interactive terminal to confirm; use --force to skip", reason)
+			return fmt.Errorf("%s Close requires an interactive terminal to confirm; use --force to skip", reason)
 		}
 		var proceed bool
 		err := huh.NewConfirm().
