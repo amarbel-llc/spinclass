@@ -437,6 +437,10 @@ func chooseWorktree(repoPath string) (wtPath, branch string, err error) {
 		branches[i] = filepath.Base(p)
 	}
 
+	if len(paths) == 1 {
+		return paths[0], branches[0], nil
+	}
+
 	if !mergeInteractive() {
 		return "", "", fmt.Errorf("sc merge requires an interactive terminal to select a worktree; specify a target with `sc merge <branch>`")
 	}
@@ -478,7 +482,7 @@ func ResolveDefaultBranch(repoPath string) (string, error) {
 
 func promptDefaultBranch() (string, error) {
 	if !mergeInteractive() {
-		return "", fmt.Errorf("both main and master exist; sc merge requires an interactive terminal to select the default branch")
+		return "", fmt.Errorf("both main and master exist; pass default_branch='main' or default_branch='master' to the merge tool, or run sc merge interactively to select")
 	}
 	var selected string
 	err := huh.NewSelect[string]().

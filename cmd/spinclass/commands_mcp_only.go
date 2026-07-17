@@ -123,6 +123,7 @@ func registerMCPOnlyCommands(app *command.App) {
 			},
 			Params: []command.Param{
 				{Name: "local_only", Type: command.Bool, Description: localOnlyParamDesc},
+				{Name: "default_branch", Type: command.String, Description: defaultBranchParamDesc},
 			},
 			Run: wrapMCPHandler("merge-this-session", handleMergeThisSession),
 		})
@@ -140,6 +141,7 @@ func registerMCPOnlyCommands(app *command.App) {
 			},
 			Params: []command.Param{
 				{Name: "local_only", Type: command.Bool, Description: localOnlyParamDesc},
+				{Name: "default_branch", Type: command.String, Description: defaultBranchParamDesc},
 			},
 			Run: wrapMCPHandler("merge-this-session-async", handleMergeThisSessionAsync),
 		})
@@ -274,9 +276,11 @@ func registerMCPOnlyCommands(app *command.App) {
 	})
 }
 
-// localOnlyParamDesc is shared by merge-this-session and its -async twin so
-// the two surfaces cannot drift (#126/#158).
+// localOnlyParamDesc and defaultBranchParamDesc are shared by merge-this-session
+// and its -async twin so the two surfaces cannot drift (#126/#158).
 const localOnlyParamDesc = "Merge into the LOCAL default branch only — skip the pull-before and push-after. Default is to pull+push so the merge reaches origin and 'merged' means 'on origin' (#126). Set this only for a deliberate local-only merge you intend to push later; the result text flags a local-only merge as NOT pushed."
+
+const defaultBranchParamDesc = `Override the default branch when both main and master exist in the repo. Omit to auto-detect; pass "main" or "master" to resolve the ambiguity without an interactive terminal.`
 
 // appendNotPushedNote makes a local-only merge result say so explicitly
 // (#158): spawned workers truthfully reported "merged green" from local-only
@@ -293,7 +297,8 @@ func appendNotPushedNote(text string, gitSync bool, mergeErr error) string {
 
 func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	var params struct {
-		LocalOnly bool `json:"local_only"`
+		LocalOnly     bool   `json:"local_only"`
+		DefaultBranch string `json:"default_branch"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
@@ -328,9 +333,13 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 		return buildHookResult(text, blobLinks, mergeErr), nil
 	}
 
-	defaultBranch, err := merge.ResolveDefaultBranch(gs.repoPath)
-	if err != nil {
-		return command.TextErrorResult(fmt.Sprintf("could not determine default branch: %v", err)), nil
+	defaultBranch := params.DefaultBranch
+	if defaultBranch == "" {
+		var err error
+		defaultBranch, err = merge.ResolveDefaultBranch(gs.repoPath)
+		if err != nil {
+			return command.TextErrorResult(fmt.Sprintf("could not determine default branch: %v", err)), nil
+		}
 	}
 
 	var buf bytes.Buffer
@@ -389,7 +398,8 @@ func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prom
 // result is retrieved via session-job-status.
 func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	var params struct {
-		LocalOnly bool `json:"local_only"`
+		LocalOnly     bool   `json:"local_only"`
+		DefaultBranch string `json:"default_branch"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
@@ -429,9 +439,13 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 	}
 	repoPath := gs.repoPath
 	branch := gs.branch
-	defaultBranch, err := merge.ResolveDefaultBranch(repoPath)
-	if err != nil {
-		return command.TextErrorResult(fmt.Sprintf("could not determine default branch: %v", err)), nil
+	defaultBranch := params.DefaultBranch
+	if defaultBranch == "" {
+		var err error
+		defaultBranch, err = merge.ResolveDefaultBranch(repoPath)
+		if err != nil {
+			return command.TextErrorResult(fmt.Sprintf("could not determine default branch: %v", err)), nil
+		}
 	}
 
 	// Run the fast prefix (optional pull + rebase + pin) synchronously, before

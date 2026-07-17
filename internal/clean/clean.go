@@ -544,7 +544,7 @@ func emitPlan(tw *tap.Writer, actions []cleanAction, abandonedCount int, tombsto
 
 func confirmClean(removeCount, abandonedCount, tombstoneCount, orphanBuildCount int) (bool, error) {
 	if !cleanInteractive() {
-		return false, fmt.Errorf("sc clean requires an interactive terminal to confirm; use --yes to skip")
+		return false, fmt.Errorf("sc clean requires an interactive terminal to confirm; use --yes to skip (and omit -i to skip dirty-file review)")
 	}
 	parts := []string{}
 	if removeCount > 0 {
@@ -729,6 +729,9 @@ func Run(startDir string, interactive bool, dryRun bool, yes bool, format string
 	if !yes {
 		confirmed, err := confirmClean(removeCount, abandonedCount, tombstoneCount, orphanCount)
 		if err != nil {
+			if tw != nil {
+				tw.Plan()
+			}
 			return err
 		}
 		if !confirmed {
