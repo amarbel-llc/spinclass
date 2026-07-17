@@ -194,6 +194,42 @@ function spinclass_autoclose_assume_no_keeps_worktree { # @test
   assert [ -d "$wt" ]
 }
 
+function spinclass_close_dirty_notty_errors_immediately { # @test
+  # #222: sc close on a branch with unintegrated commits must error
+  # immediately when stdin is not a TTY, not block on the confirmation
+  # prompt. The bats harness is non-TTY, so a plain run exercises the
+  # guard. --force must still close successfully.
+  create_session_sweatfile
+  cd "$TEST_REPO" || return
+  local bin="${SPINCLASS_BIN:-spinclass}"
+
+  local start_output
+  start_output=$(timeout --preserve-status 10s "$bin" --format tap start --no-attach 2>&1)
+  local wt
+  wt=$(extract_wt_path "$start_output")
+  local branch
+  branch=$(basename "$wt")
+
+  # Commit something unmerged on the worktree branch.
+  echo "unmerged" >"$wt/unmerged.txt"
+  git -C "$wt" add unmerged.txt
+  git -C "$wt" commit -m "unmerged commit"
+
+  # Non-TTY stdin with unintegrated commits: must error immediately, not hang.
+  # 5s timeout ensures the test fails fast even if the guard is absent.
+  run timeout --preserve-status 5s "$bin" --format tap close "$branch"
+  assert_failure
+  assert_output --partial "--force"
+
+  # Worktree and session must be untouched.
+  assert [ -d "$wt" ]
+
+  # --force closes without prompting even on non-TTY stdin.
+  run_sc close --force "$branch"
+  assert_success
+  assert [ ! -d "$wt" ]
+}
+
 function spinclass_close_by_id_removes_worktree { # @test
   # #40 regression guard: `sc close <id>` (the explicit worktree-id arg
   # path, distinct from cwd auto-detect and the interactive picker) must

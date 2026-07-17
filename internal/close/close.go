@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/huh"
+	"github.com/mattn/go-isatty"
 
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/git"
@@ -111,6 +112,9 @@ func RunResolved(w io.Writer, repoPath, wtPath, branch string, force bool, nixGC
 
 	if (unintegrated || dirty) && !force {
 		reason := describeUnintegrated(branch, unintegrated, dirty)
+		if !closeInteractive() {
+			return fmt.Errorf("%s close requires an interactive terminal to confirm; use --force to skip", reason)
+		}
 		var proceed bool
 		err := huh.NewConfirm().
 			Title(reason + " Close anyway?").
@@ -281,6 +285,13 @@ var (
 	nixgcDisabled = nixgc.Disabled
 	nixgcNewPlan  = nixgc.NewPlan
 )
+
+// closeInteractive reports whether stdin is a TTY. Overridable in tests to
+// exercise the no-TTY guard in RunResolved without a real terminal.
+var closeInteractive = func() bool {
+	fd := os.Stdin.Fd()
+	return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
+}
 
 // planNixGC captures the worktree's nix gc roots before removal. Returns nil
 // when gc should not run (sweatfile/override disabled, nix not installed, no

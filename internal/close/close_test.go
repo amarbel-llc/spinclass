@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -304,6 +305,81 @@ func restoreNixgcSeams() func() {
 	return func() {
 		nixgcDisabled = disabledOrig
 		nixgcNewPlan = newPlanOrig
+	}
+}
+
+// mustCommitFile adds and commits a new file in dir using the provided
+// git identity already configured by testgit.SetHermeticEnv/MustInit.
+func mustCommitFile(t *testing.T, dir, name, content, msg string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"-C", dir, "add", name},
+		{"-C", dir, "commit", "-m", msg},
+	} {
+		out, err := exec.Command("git", args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
+// TestRunResolvedNoTTYDirtyErrors is the regression guard for #222:
+// RunResolved must immediately error (not block on huh.Confirm) when
+// stdin is not a TTY and the branch has unintegrated commits.
+// The error must name the unintegrated state and point at --force.
+func TestRunResolvedNoTTYDirtyErrors(t *testing.T) {
+	testgit.RequireGit(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "repo")
+	wtPath := filepath.Join(repoPath, ".worktrees", "feature-x")
+	testgit.MustInit(t, repoPath)
+	testgit.MustWorktreeAdd(t, repoPath, wtPath, "feature-x")
+	mustCommitFile(t, wtPath, "change.txt", "change", "unintegrated commit")
+
+	orig := closeInteractive
+	closeInteractive = func() bool { return false }
+	t.Cleanup(func() { closeInteractive = orig })
+
+	err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", false, nil, "tap")
+	if err == nil {
+		t.Fatal("expected error on non-TTY with unintegrated commits, got nil")
+	}
+	if !strings.Contains(err.Error(), "--force") {
+		t.Errorf("error %q does not mention --force", err)
+	}
+	if _, statErr := os.Stat(wtPath); statErr != nil {
+		t.Errorf("worktree was unexpectedly removed: %v", statErr)
+	}
+}
+
+// TestRunResolvedNoTTYForceBypassesPrompt verifies that --force still
+// closes the worktree when stdin is not a TTY: force skips the
+// confirmation entirely so the TTY guard is never reached (#222).
+func TestRunResolvedNoTTYForceBypassesPrompt(t *testing.T) {
+	testgit.RequireGit(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "repo")
+	wtPath := filepath.Join(repoPath, ".worktrees", "feature-x")
+	testgit.MustInit(t, repoPath)
+	testgit.MustWorktreeAdd(t, repoPath, wtPath, "feature-x")
+	mustCommitFile(t, wtPath, "change.txt", "change", "unintegrated commit")
+
+	orig := closeInteractive
+	closeInteractive = func() bool { return false }
+	t.Cleanup(func() { closeInteractive = orig })
+
+	if err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", true, nil, "tap"); err != nil {
+		t.Fatalf("RunResolved with force=true: %v", err)
+	}
+	if _, statErr := os.Stat(wtPath); !os.IsNotExist(statErr) {
+		t.Errorf("expected worktree to be removed, stat returned: %v", statErr)
 	}
 }
 
