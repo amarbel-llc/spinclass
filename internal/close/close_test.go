@@ -326,24 +326,30 @@ func mustCommitFile(t *testing.T, dir, name, content, msg string) {
 	}
 }
 
+// setupNoTTYClose creates a worktree with one unintegrated commit and
+// overrides closeInteractive to report non-TTY. Returns repoPath and wtPath.
+func setupNoTTYClose(t *testing.T) (repoPath, wtPath string) {
+	t.Helper()
+	testgit.RequireGit(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	root := t.TempDir()
+	repoPath = filepath.Join(root, "repo")
+	wtPath = filepath.Join(repoPath, ".worktrees", "feature-x")
+	testgit.MustInit(t, repoPath)
+	testgit.MustWorktreeAdd(t, repoPath, wtPath, "feature-x")
+	mustCommitFile(t, wtPath, "change.txt", "change", "unintegrated commit")
+	orig := closeInteractive
+	closeInteractive = func() bool { return false }
+	t.Cleanup(func() { closeInteractive = orig })
+	return
+}
+
 // TestRunResolvedNoTTYDirtyErrors is the regression guard for #222:
 // RunResolved must immediately error (not block on huh.Confirm) when
 // stdin is not a TTY and the branch has unintegrated commits.
 // The error must name the unintegrated state and point at --force.
 func TestRunResolvedNoTTYDirtyErrors(t *testing.T) {
-	testgit.RequireGit(t)
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-
-	root := t.TempDir()
-	repoPath := filepath.Join(root, "repo")
-	wtPath := filepath.Join(repoPath, ".worktrees", "feature-x")
-	testgit.MustInit(t, repoPath)
-	testgit.MustWorktreeAdd(t, repoPath, wtPath, "feature-x")
-	mustCommitFile(t, wtPath, "change.txt", "change", "unintegrated commit")
-
-	orig := closeInteractive
-	closeInteractive = func() bool { return false }
-	t.Cleanup(func() { closeInteractive = orig })
+	repoPath, wtPath := setupNoTTYClose(t)
 
 	err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", false, nil, "tap")
 	if err == nil {
@@ -361,19 +367,7 @@ func TestRunResolvedNoTTYDirtyErrors(t *testing.T) {
 // closes the worktree when stdin is not a TTY: force skips the
 // confirmation entirely so the TTY guard is never reached (#222).
 func TestRunResolvedNoTTYForceBypassesPrompt(t *testing.T) {
-	testgit.RequireGit(t)
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-
-	root := t.TempDir()
-	repoPath := filepath.Join(root, "repo")
-	wtPath := filepath.Join(repoPath, ".worktrees", "feature-x")
-	testgit.MustInit(t, repoPath)
-	testgit.MustWorktreeAdd(t, repoPath, wtPath, "feature-x")
-	mustCommitFile(t, wtPath, "change.txt", "change", "unintegrated commit")
-
-	orig := closeInteractive
-	closeInteractive = func() bool { return false }
-	t.Cleanup(func() { closeInteractive = orig })
+	repoPath, wtPath := setupNoTTYClose(t)
 
 	if err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", true, nil, "tap"); err != nil {
 		t.Fatalf("RunResolved with force=true: %v", err)
