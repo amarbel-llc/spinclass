@@ -78,7 +78,7 @@ func TestContention(t *testing.T) {
 			mu.Unlock()
 		})
 		if err == nil {
-			defer lockB.Release()
+			defer func() { _ = lockB.Release() }()
 		}
 		acquiredB <- err
 	}()
@@ -139,14 +139,14 @@ func TestAcquireContextCancelled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Acquire A: %v", err)
 	}
-	defer lockA.Release()
+	defer func() { _ = lockA.Release() }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
 	go func() {
 		lock, err := Acquire(ctx, dir, "holder-b", nil)
 		if err == nil {
-			lock.Release()
+			_ = lock.Release()
 		}
 		result <- err
 	}()
