@@ -222,9 +222,24 @@ subcommand is always available.
   → `.merge-<branch>-<sha>-<pid>` under `.worktrees/`), freeing the session
   worktree for concurrent edits. Merge splits into `merge.PrepareMerge` (gate →
   pull → rebase → nothing-to-merge → REPAIR → pin HEAD sha) and
-  `merge.FinishMerge` (hook → `git merge --ff-only <pinnedSha>` → teardown →
-  push). Async runs Prepare synchronously, backgrounds Finish. Opt out with
+  `merge.FinishMerge` (gate + landing, serialized under the merge queue by
+  default — next bullet; with `[hooks].disable-merge-queue`: hook →
+  `git merge --ff-only <pinnedSha>` → teardown → push). Async runs Prepare
+  synchronously, backgrounds Finish. Opt out with
   `[hooks].disable-merge-build-worktree`.
+- **Per-repo merge queue** (FDR 0022, #235): `FinishMerge` serializes landings
+  on an advisory flock (`internal/mergelock`; `spinclass-merge.lock` in the
+  shared git common dir via `git.CommonGitDir` — poll-based so acquisition is
+  ctx-cancellable, self-releases on process death, never unlinked). Acquired
+  BEFORE the gate; under the lock: re-pull → ancestry check → if the default
+  tip moved, rebase the pinned commits in a transient `.land-*` worktree
+  (conflict ⇒ `merge.ErrIntegrationConflict`, the queue's only hard failure —
+  resolution is a plain re-merge) → gate on the LANDING sha → ff-only →
+  teardown (`branch -D` when rebased) → push. Queue waits heartbeat to the
+  async job log and are exempt from the inactivity watchdog (it wraps only the
+  hook subprocess). Worktree merges only (`MergeImplicit` excluded); lock is
+  host-local. `[hooks].disable-merge-queue` restores the pre-#235 fail-on-race
+  path verbatim.
 - **Pre-merge REPAIR phase** (FDR 0018): when `[hooks].repair` is set,
   `PrepareMerge` runs it in the **session worktree** before the pin to fold
   mechanical fixes into the merged commit (canonical
