@@ -890,6 +890,44 @@ func ListForRepo(repoPath string, dbg *slog.Logger) ([]State, error) {
 	return filtered, nil
 }
 
+// ListActiveForRepoExcluding returns the sessions on repoPath whose resolved
+// state is StateActive (PID alive + worktree present), excluding any whose
+// WorktreePath resolves to excludeWorktree — the caller's own session. For a
+// main checkout the exclusion conservatively drops every implicit session at
+// that checkout (concurrent implicit agents share the checkout path and cannot
+// be told apart), leaving only worktree sessions. Results are sorted by branch
+// for deterministic display. Best-effort consumers (the co-active surfacing of
+// spinclass#238) treat an error as "none".
+func ListActiveForRepoExcluding(repoPath, excludeWorktree string) ([]State, error) {
+	all, err := ListForRepo(repoPath, nil)
+	if err != nil {
+		return nil, err
+	}
+	exclude := evalOrClean(excludeWorktree)
+	var active []State
+	for i := range all {
+		s := &all[i]
+		if s.ResolveState() != StateActive {
+			continue
+		}
+		if evalOrClean(s.WorktreePath) == exclude {
+			continue
+		}
+		active = append(active, *s)
+	}
+	sort.Slice(active, func(i, j int) bool { return active[i].Branch < active[j].Branch })
+	return active, nil
+}
+
+// BranchOrKey returns the branch name when known, falling back to the
+// session key — the short display name co-active listings use (#238).
+func (s *State) BranchOrKey() string {
+	if s.Branch != "" {
+		return s.Branch
+	}
+	return s.Key()
+}
+
 // ListForScope returns the non-abandoned sessions visible from dir:
 // those whose RepoPath is exactly repoPath (the repo containing dir,
 // when inside one) unioned with those whose RepoPath sits at or beneath

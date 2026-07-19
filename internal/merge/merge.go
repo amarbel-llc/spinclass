@@ -164,6 +164,8 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, rep *crap.Rep
 // moment the rebase lands while FinishMerge's slow pre-merge hook runs detached
 // in an isolated build worktree.
 func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch string, gitSync bool) (pinnedSha string, err error) {
+	emitCoActiveSessions(ts, repoPath, wtPath)
+
 	// Load the sweatfile hierarchy once for the disable-merge gate and the
 	// repair phase. An unresolvable home or load failure degrades gracefully:
 	// both the gate and repair are skipped rather than blocking the merge.
@@ -594,6 +596,8 @@ func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, gitSy
 // a main checkout — check.resolveHookDir derives the parent from
 // git.CommonDir(wtPath), not filepath.Dir(wtPath) (#130).
 func MergeImplicit(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, checkout, branch string, activity io.Writer) (blobLinks []check.BlobLink, err error) {
+	emitCoActiveSessions(ts, repoPath, checkout)
+
 	if home, _ := os.UserHomeDir(); home != "" {
 		hierarchy, hErr := sweatfileio.LoadWorktreeHierarchy(home, repoPath, checkout)
 		if hErr == nil && hierarchy.Merged.DisableMergeEnabled() {
@@ -818,6 +822,31 @@ func runRepairPhase(ts *crap.TestStream, hierarchy sweatfile.Hierarchy, wtPath, 
 	}
 	ts.Ok("repair " + branch + " (amended " + shortSha(sha1) + ")")
 	return nil
+}
+
+// emitCoActiveSessions emits one informational ok test point listing the OTHER
+// active sessions on the repo when a merge starts (spinclass#238), e.g.
+// "2 co-active sessions on <repo>: bright-cherry, bright-olive". The session
+// being merged is excluded by its worktree path; for an implicit merge that
+// path is the checkout, which also excludes indistinguishable implicit
+// siblings. Best-effort: a listing failure emits nothing and never fails the
+// merge. Both merge entry points (PrepareMerge and MergeImplicit) call this;
+// `sc check` / the check tools do not, so a check run stays silent.
+func emitCoActiveSessions(ts *crap.TestStream, repoPath, excludeWorktree string) {
+	others, err := session.ListActiveForRepoExcluding(repoPath, excludeWorktree)
+	if err != nil || len(others) == 0 {
+		return
+	}
+	names := make([]string, len(others))
+	for i := range others {
+		names[i] = others[i].BranchOrKey()
+	}
+	noun := "sessions"
+	if len(others) == 1 {
+		noun = "session"
+	}
+	ts.Ok(fmt.Sprintf("%d co-active %s on %s: %s",
+		len(others), noun, filepath.Base(repoPath), strings.Join(names, ", ")))
 }
 
 // shortSha truncates a git object id to 12 chars for display, leaving shorter

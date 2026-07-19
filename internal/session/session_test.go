@@ -703,6 +703,77 @@ func TestSortStatesPlacesDetachedBetweenActiveAndInactive(t *testing.T) {
 	}
 }
 
+// TestListActiveForRepoExcluding: only resolved-active sessions on the repo
+// are returned, the excluded worktree (the caller's own session) is dropped,
+// a dead-PID "active" state resolves inactive and is filtered, and results
+// are branch-sorted.
+func TestListActiveForRepoExcluding(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", filepath.Join(base, "xdg-state"))
+	repo := filepath.Join(base, "repo")
+
+	mk := func(branch string, pid int, desc string) State {
+		t.Helper()
+		wt := filepath.Join(repo, ".worktrees", branch)
+		if err := os.MkdirAll(wt, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		s := State{
+			PID:          pid,
+			SessionState: StateActive,
+			RepoPath:     repo,
+			WorktreePath: wt,
+			Branch:       branch,
+			SessionKey:   "repo/" + branch,
+			Description:  desc,
+			StartedAt:    time.Now(),
+		}
+		if err := Write(s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+
+	self := mk("self", os.Getpid(), "me")
+	mk("zz-olive", os.Getpid(), "")
+	mk("bright-cherry", os.Getpid(), "fix foo")
+	mk("dead-branch", 2147483646, "") // state says active, PID dead → inactive
+
+	got, err := ListActiveForRepoExcluding(repo, self.WorktreePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 co-active sessions, got %d: %v", len(got), branches(got))
+	}
+	if got[0].Branch != "bright-cherry" || got[1].Branch != "zz-olive" {
+		t.Errorf("expected branch-sorted [bright-cherry zz-olive], got %v", branches(got))
+	}
+	if got[0].Description != "fix foo" {
+		t.Errorf("Description = %q, want %q", got[0].Description, "fix foo")
+	}
+
+	// A repo with no sessions yields none.
+	none, err := ListActiveForRepoExcluding(filepath.Join(base, "other-repo"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(none) != 0 {
+		t.Errorf("expected no sessions for an unrelated repo, got %v", branches(none))
+	}
+}
+
+func TestBranchOrKey(t *testing.T) {
+	withBranch := State{Branch: "bright-cherry", RepoPath: "/r/repo", SessionKey: "repo/bright-cherry"}
+	if got := withBranch.BranchOrKey(); got != "bright-cherry" {
+		t.Errorf("BranchOrKey = %q, want branch", got)
+	}
+	noBranch := State{RepoPath: "/r/repo", SessionKey: "repo/a3f9"}
+	if got := noBranch.BranchOrKey(); got != "repo/a3f9" {
+		t.Errorf("BranchOrKey = %q, want session key fallback", got)
+	}
+}
+
 func TestListAllEmpty(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 

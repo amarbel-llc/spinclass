@@ -25,6 +25,9 @@ not a spinclass worktree. spinclass tracks it as an *implicit session*.
 {{- if .GroupID}}
 - Group: `{{.GroupID}}`
 {{- end}}
+{{- if .CoActiveSessions}}
+- Co-active: {{.CoActiveSessions}}
+{{- end}}
 {{- if and .RepoInfo.URL .RepoInfo.ForgeKind (ne .RepoInfo.ForgeKind "github")}}
 
 ## Forge workflow

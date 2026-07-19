@@ -985,6 +985,152 @@ func TestMergeImplicitDisabledByMergeFlag(t *testing.T) {
 	}
 }
 
+// writeActiveSessionState fabricates an on-disk ACTIVE session (state JSON +
+// central index entry under the test's XDG_STATE_HOME) for repoDir/branch at
+// wtPath, using this test process's PID so it resolves active.
+func writeActiveSessionState(t *testing.T, repoDir, wtPath, branch string) {
+	t.Helper()
+	if err := os.MkdirAll(wtPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.Write(session.State{
+		PID:          os.Getpid(),
+		SessionState: session.StateActive,
+		RepoPath:     repoDir,
+		WorktreePath: wtPath,
+		Branch:       branch,
+		SessionKey:   filepath.Base(repoDir) + "/" + branch,
+		Entrypoint:   []string{"/bin/sh"},
+		StartedAt:    time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestPrepareMergeEmitsCoActiveSessionsPoint (spinclass#238): a merge whose
+// repo has another ACTIVE session emits one informational ok point naming it,
+// excluding the session being merged.
+func TestPrepareMergeEmitsCoActiveSessionsPoint(t *testing.T) {
+	repoDir := setupRepo(t)
+	root := filepath.Dir(repoDir)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "xdg-state"))
+
+	wtPath := setupWorktree(t, repoDir, "feature-co")
+	if err := os.WriteFile(filepath.Join(wtPath, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "a.txt")
+	runGit(t, wtPath, "commit", "-m", "feature commit")
+
+	// The session being merged (must be excluded) plus one co-active sibling.
+	writeActiveSessionState(t, repoDir, wtPath, "feature-co")
+	writeActiveSessionState(t, repoDir, filepath.Join(repoDir, ".worktrees", "bright-cherry"), "bright-cherry")
+
+	var buf bytes.Buffer
+	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
+	ts := rep.TestStream(0)
+	if _, err := PrepareMerge(ts, repoDir, wtPath, "feature-co", "main", false); err != nil {
+		t.Fatalf("PrepareMerge: %v\n%s", err, buf.String())
+	}
+	ts.Finish()
+
+	tests := testRecords(decodeRecords(t, buf.Bytes()))
+	assertTestPoint(t, tests, 0, "1 co-active session on repo: bright-cherry", true)
+	for _, tr := range tests {
+		if strings.Contains(tr.Description, "co-active") && strings.Contains(tr.Description, "feature-co") {
+			t.Errorf("co-active point must exclude the session being merged: %+v", tr)
+		}
+	}
+}
+
+// TestPrepareMergeNoCoActivePointWhenNone (spinclass#238): with no other
+// active session on the repo, the merge stream carries no co-active point.
+func TestPrepareMergeNoCoActivePointWhenNone(t *testing.T) {
+	repoDir := setupRepo(t)
+	root := filepath.Dir(repoDir)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "xdg-state"))
+
+	wtPath := setupWorktree(t, repoDir, "feature-solo")
+	if err := os.WriteFile(filepath.Join(wtPath, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "a.txt")
+	runGit(t, wtPath, "commit", "-m", "feature commit")
+
+	// Only the session being merged exists — excluded, so no point.
+	writeActiveSessionState(t, repoDir, wtPath, "feature-solo")
+
+	var buf bytes.Buffer
+	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
+	ts := rep.TestStream(0)
+	if _, err := PrepareMerge(ts, repoDir, wtPath, "feature-solo", "main", false); err != nil {
+		t.Fatalf("PrepareMerge: %v\n%s", err, buf.String())
+	}
+	ts.Finish()
+
+	for _, tr := range testRecords(decodeRecords(t, buf.Bytes())) {
+		if strings.Contains(tr.Description, "co-active") {
+			t.Errorf("expected no co-active point, got: %+v", tr)
+		}
+	}
+}
+
+// TestMergeImplicitEmitsCoActiveSessionsPoint (spinclass#238): the implicit
+// (main-checkout) merge path emits the co-active point too, listing worktree
+// sessions on the repo while excluding implicit sessions at the checkout
+// (indistinguishable from the one being merged).
+func TestMergeImplicitEmitsCoActiveSessionsPoint(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", root)
+
+	gitConfigDir := filepath.Join(root, "gitconfig")
+	if err := os.MkdirAll(gitConfigDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(gitConfigDir, "config"))
+	t.Setenv("HOME", root)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "xdg-state"))
+
+	bare := filepath.Join(root, "upstream.git")
+	runGit(t, root, "init", "--bare", "-b", "master", bare)
+	checkout := filepath.Join(root, "checkout")
+	runGit(t, root, "clone", bare, checkout)
+	runGit(t, checkout, "config", "user.email", "test@test.com")
+	runGit(t, checkout, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(checkout, "file.txt"), []byte("initial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, checkout, "add", "file.txt")
+	runGit(t, checkout, "commit", "-m", "initial")
+	runGit(t, checkout, "push", "-u", "origin", "master")
+
+	// A co-active worktree session on the repo, plus an implicit session at
+	// the checkout (excluded — could be the one being merged).
+	writeActiveSessionState(t, checkout, filepath.Join(checkout, ".worktrees", "bright-olive"), "bright-olive")
+	if err := session.WriteImplicit(session.State{
+		Kind:         session.KindImplicit,
+		PID:          os.Getpid(),
+		SessionState: session.StateActive,
+		RepoPath:     checkout,
+		WorktreePath: checkout,
+		Branch:       "master",
+		StartedAt:    time.Now().UTC(),
+	}, "rand1234"); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
+	ts := rep.TestStream(0)
+	if _, err := MergeImplicit(context.Background(), rep, ts, checkout, checkout, "master", nil); err != nil {
+		t.Fatalf("MergeImplicit: %v\n%s", err, buf.String())
+	}
+	ts.Finish()
+
+	tests := testRecords(decodeRecords(t, buf.Bytes()))
+	assertTestPoint(t, tests, 0, "1 co-active session on checkout: bright-olive", true)
+}
+
 func TestIsInsideSession(t *testing.T) {
 	t.Run("no env var", func(t *testing.T) {
 		t.Setenv("SPINCLASS_SESSION_ID", "")

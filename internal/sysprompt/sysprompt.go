@@ -78,6 +78,12 @@ type Coordinates struct {
 	// (FDR 0021), or "" when the repo has no scanned design-record dirs or the
 	// index is disabled. Render appends it after the template body.
 	DesignRecords string
+	// CoActiveSessions is the pre-rendered one-line summary of the OTHER
+	// active sessions on the same repo ("2 other live sessions on <repo>: …",
+	// spinclass#238), or "" when there are none or the lookup failed. Resolved
+	// entirely from local session state (no network) so it is safe before
+	// `initialize`; empty renders as an omitted line.
+	CoActiveSessions string
 }
 
 //go:embed templates/*.md.tmpl
@@ -88,7 +94,7 @@ var fragmentTmpl = template.Must(template.ParseFS(templatesFS, "templates/*.md.t
 // Resolve discovers the current session's coordinates from the serve process's
 // environment and, for a main checkout, its cwd + git.
 func Resolve() Coordinates {
-	return resolve(os.Getenv, os.Getwd, fetchRepoInfo, loadDocIndex)
+	return resolve(os.Getenv, os.Getwd, fetchRepoInfo, loadDocIndex, loadCoActiveLine)
 }
 
 // loadDocIndex is the production design-record index loader: it reads the
@@ -123,8 +129,8 @@ func fetchRepoInfo(path string) repoinfo.RepoInfo {
 }
 
 // resolve is the testable core of Resolve with the environment, cwd,
-// repo-enrichment, and design-record lookups injected.
-func resolve(getenv func(string) string, getwd func() (string, error), fetchRepo func(string) repoinfo.RepoInfo, renderDocs func(string) string) Coordinates {
+// repo-enrichment, design-record, and co-active-session lookups injected.
+func resolve(getenv func(string) string, getwd func() (string, error), fetchRepo func(string) repoinfo.RepoInfo, renderDocs func(string) string, coActive func(Mode, string) string) Coordinates {
 	c := Coordinates{
 		SessionKey:  getenv("SPINCLASS_SESSION_ID"),
 		Repo:        getenv("SPINCLASS_REPO"),
@@ -149,6 +155,7 @@ func resolve(getenv func(string) string, getwd func() (string, error), fetchRepo
 		c.Mode = ModeWorktree
 		c.RepoInfo = fetchRepo(c.Worktree)
 		c.DesignRecords = renderDocs(c.Worktree)
+		c.CoActiveSessions = coActive(ModeWorktree, c.Worktree)
 		return c
 	}
 
@@ -188,6 +195,7 @@ func resolve(getenv func(string) string, getwd func() (string, error), fetchRepo
 	}
 	c.RepoInfo = fetchRepo(repoPath)
 	c.DesignRecords = renderDocs(repoPath)
+	c.CoActiveSessions = coActive(ModeMainCheckout, repoPath)
 	return c
 }
 

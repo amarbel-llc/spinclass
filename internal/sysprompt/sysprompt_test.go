@@ -35,6 +35,9 @@ func repoStub(info repoinfo.RepoInfo, gotPath *string) func(string) repoinfo.Rep
 // noDocs is a design-record loader stub that renders nothing.
 func noDocs(string) string { return "" }
 
+// noCoActive is a co-active-session loader stub that finds nothing.
+func noCoActive(Mode, string) string { return "" }
+
 // docsStub records the root it was called with and returns a fixed section.
 func docsStub(section string, gotRoot *string) func(string) string {
 	return func(root string) string {
@@ -58,7 +61,7 @@ func TestResolveWorktreeMode(t *testing.T) {
 	// cwd inside the worktree (a subdirectory) must still resolve to worktree.
 	var fetchedPath, docsRoot string
 	want := repoinfo.RepoInfo{ForgeKind: "github", Owner: "o", Name: "r", URL: "https://github.com/o/r"}
-	c := resolve(envFunc(env), wdFunc(filepath.Join(wt, "internal", "pkg")), repoStub(want, &fetchedPath), docsStub("## Design records\n\n**proposed**\n- FDR 0021 — X", &docsRoot))
+	c := resolve(envFunc(env), wdFunc(filepath.Join(wt, "internal", "pkg")), repoStub(want, &fetchedPath), docsStub("## Design records\n\n**proposed**\n- FDR 0021 — X", &docsRoot), noCoActive)
 
 	// The docs index is rendered from the worktree root, not a subdirectory,
 	// and appended to the fragment via Render.
@@ -92,7 +95,7 @@ func TestResolveWorktreeMode(t *testing.T) {
 // must not mislabel the session as a worktree.
 func TestResolveWorktreeEnvButCwdOutside(t *testing.T) {
 	env := map[string]string{"SPINCLASS_WORKTREE": "/repos/myrepo/.worktrees/feat-x"}
-	c := resolve(envFunc(env), wdFunc("/somewhere/else/not-a-repo"), noRepo, noDocs)
+	c := resolve(envFunc(env), wdFunc("/somewhere/else/not-a-repo"), noRepo, noDocs, noCoActive)
 
 	if c.Mode != ModeMainCheckout {
 		t.Fatalf("Mode: got %q, want %q (cwd outside the inherited worktree)", c.Mode, ModeMainCheckout)
@@ -105,7 +108,7 @@ func TestResolveMainCheckout(t *testing.T) {
 
 	env := map[string]string{"CLOWN_SESSION_ID": "clown-key-123"}
 	var fetchedPath, docsRoot string
-	c := resolve(envFunc(env), wdFunc(dir), repoStub(repoinfo.RepoInfo{ForgeKind: "github"}, &fetchedPath), docsStub("", &docsRoot))
+	c := resolve(envFunc(env), wdFunc(dir), repoStub(repoinfo.RepoInfo{ForgeKind: "github"}, &fetchedPath), docsStub("", &docsRoot), noCoActive)
 
 	// The docs index is rendered from the derived git toplevel.
 	if docsRoot != c.Worktree {

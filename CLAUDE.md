@@ -77,7 +77,9 @@ Cheap per-package `go build ./internal/foo/...` checks are fine.
   pattern, tommy #93). Config surface is documented in `spinclass-sweatfile(5)`.
 - **Merge/Pull/Clean** (`internal/merge/`, `internal/pull/`, `internal/clean/`):
   post-session workflows. Merge rebases onto the default branch then ff-only
-  merges; clean removes merged worktree branches and abandoned sessions.
+  merges; clean removes merged worktree branches and abandoned sessions. A
+  starting merge (all surfaces, not `sc check`) emits a best-effort
+  informational test point listing co-active sessions on the repo (#238).
 - **Permission tiers** (`internal/perms/`): Claude Code hook integration,
   rules as JSON (`global.json` + `repos/<repo>.json`).
 - **Claude integration** (`internal/claude/`): trusts worktree paths in
@@ -216,7 +218,10 @@ subcommand is always available.
   block. Both templates also conditionally render a **Forge workflow** block (when
   the resolved forge kind is non-GitHub and a URL is present) instructing the agent
   to use `fj`/`smith` rather than `gh` and noting any GitHub copy is a read-only
-  mirror. Both templates additionally gain a Go-composed
+  mirror. Both templates also carry a best-effort **co-active sessions** line
+  (#238) — the other `active` sessions on the same repo, from local session
+  state + PID liveness only (no network, current session excluded; any failure
+  omits the line). Both templates additionally gain a Go-composed
   **Design records** trailer (FDR 0021, `internal/sysprompt/docsindex.go`): an
   index of the repo's `docs/features`/`docs/adrs`/`docs/rfcs` records by
   number·title·status, grouped by status, scanned scan-if-exists from local
