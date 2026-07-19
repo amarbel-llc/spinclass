@@ -148,10 +148,11 @@ and in the result stream:
 - **Host-local only.** flock does not serialize across hosts (and is not
   NFS-safe); a cross-host origin race still fails at push, the legible
   pre-existing error.
-- **`sc clean` does not yet reap orphaned `.land-*` worktrees** from a crash
-  between worktree add and cleanup (it reaps `.merge-*` only); a stale dir
-  from an interrupted run at the same name is cleared on the next attempt.
-  Follow-up: issue #237.
+- **Orphaned `.land-*` worktrees** from a crash between worktree add and
+  cleanup are reaped by `sc clean` alongside `.merge-*` build worktrees
+  (dead-pid detection via the trailing `-<pid>`; issue #237, resolved). A
+  stale dir from an interrupted run at the same name is also cleared on the
+  next attempt.
 - **With `[hooks].disable-merge-build-worktree`** the gate runs in the
   session worktree (pre-existing `resolveHookDir` behavior), so a rebased
   landing's gate verifies whatever that worktree has checked out — not the

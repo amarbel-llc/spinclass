@@ -94,6 +94,10 @@ func TestPidFromBuildWorktreeName(t *testing.T) {
 		{".merge-foo", 0, false},
 		{".merge-foo-", 0, false},
 		{".merge-foo-notanumber", 0, false},
+		{".land-feature-abc123-12345", 12345, true},
+		{".land-feat-ure-deadbeef-678", 678, true},
+		{".land-foo", 0, false},
+		{".land-foo-notanumber", 0, false},
 	}
 	for _, c := range cases {
 		pid, ok := pidFromBuildWorktreeName(c.name)
@@ -139,6 +143,35 @@ func TestCleanKeepsUnparseableBuildWorktree(t *testing.T) {
 
 	if _, err := os.Stat(unparseable); err != nil {
 		t.Errorf("expected unparseable-name build worktree kept, but it is gone: %v", err)
+	}
+}
+
+// TestCleanPrunesOrphanedDeadPidLandWorktree covers the merge-queue landing
+// worktrees (.land-<branch>-<shortsha>-<pid>, FDR 0022): a hard kill between
+// `git worktree add` and cleanup leaves an orphan, which clean must reap the
+// same way it reaps .merge-* build worktrees — see issue #237.
+func TestCleanPrunesOrphanedDeadPidLandWorktree(t *testing.T) {
+	_, repoDir := setupRepo(t)
+	orphan := makeBuildWorktreeDir(t, repoDir, ".land-feature-abc123-"+itoa(deadPID))
+
+	out := captureRun(t, repoDir, false, false, true, "tap")
+
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Errorf("expected orphan landing worktree removed, still present at %q (err=%v)", orphan, err)
+	}
+	if !strings.Contains(out, "orphaned build worktree") {
+		t.Errorf("expected TAP output to mention pruning orphaned build worktree, got:\n%s", out)
+	}
+}
+
+func TestCleanKeepsLivePidLandWorktree(t *testing.T) {
+	_, repoDir := setupRepo(t)
+	live := makeBuildWorktreeDir(t, repoDir, ".land-feature-abc123-"+itoa(os.Getpid()))
+
+	_ = captureRun(t, repoDir, false, false, true, "tap")
+
+	if _, err := os.Stat(live); err != nil {
+		t.Errorf("expected live-pid landing worktree kept, but it is gone: %v", err)
 	}
 }
 

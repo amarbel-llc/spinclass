@@ -16,6 +16,7 @@ import (
 
 	"github.com/amarbel-llc/spinclass/internal/check"
 	"github.com/amarbel-llc/spinclass/internal/git"
+	"github.com/amarbel-llc/spinclass/internal/merge"
 	"github.com/amarbel-llc/spinclass/internal/nixgc"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
@@ -316,20 +317,24 @@ func removeAbandonedSessions(abandoned []session.State) int {
 	return removed
 }
 
-// orphanBuildWorktree is a leftover pre-merge build worktree (.merge-<branch>-
-// <sha>-<pid> under <repo>/.worktrees/) whose creating process is no longer
-// alive — see issue #135. Created by check.resolveHookDir; normally removed by
-// its deferred cleanup, but a crashed merge leaves one behind.
+// orphanBuildWorktree is a leftover transient merge worktree whose creating
+// process is no longer alive: either a pre-merge build worktree
+// (.merge-<branch>-<sha>-<pid>, check.resolveHookDir — see issue #135) or a
+// merge-queue landing worktree (.land-<branch>-<shortsha>-<pid>,
+// merge.rebaseLanding, FDR 0022 — see issue #237), both under
+// <repo>/.worktrees/. Normally removed by their deferred cleanup, but a
+// crashed merge leaves one behind.
 type orphanBuildWorktree struct {
 	repoPath string
-	path     string // absolute path to the .merge-* dir
+	path     string // absolute path to the .merge-* / .land-* dir
 	name     string // basename, for display
 }
 
-// findOrphanBuildWorktrees scans repos under startDir for .merge-* build
-// worktree dirs whose embedded <pid> is dead. A LIVE-pid .merge-* (an in-flight
-// merge) is left untouched. The PID is the segment after the last '-' in the
-// name (branch/sha segments may themselves contain '-', so parse from the end).
+// findOrphanBuildWorktrees scans repos under startDir for .merge-* build and
+// .land-* landing worktree dirs whose embedded <pid> is dead. A LIVE-pid dir
+// (an in-flight merge) is left untouched. The PID is the segment after the
+// last '-' in the name (branch/sha segments may themselves contain '-', so
+// parse from the end).
 func findOrphanBuildWorktrees(startDir string) []orphanBuildWorktree {
 	var orphans []orphanBuildWorktree
 	for _, repoPath := range worktree.ScanRepos(startDir) {
@@ -339,7 +344,7 @@ func findOrphanBuildWorktrees(startDir string) []orphanBuildWorktree {
 			continue
 		}
 		for _, e := range entries {
-			if !e.IsDir() || !strings.HasPrefix(e.Name(), check.BuildWorktreePrefix) {
+			if !e.IsDir() || !isTransientMergeWorktreeName(e.Name()) {
 				continue
 			}
 			pid, ok := pidFromBuildWorktreeName(e.Name())
@@ -359,12 +364,21 @@ func findOrphanBuildWorktrees(startDir string) []orphanBuildWorktree {
 	return orphans
 }
 
+// isTransientMergeWorktreeName reports whether name is a transient merge
+// worktree: a .merge-* pre-merge build worktree or a .land-* merge-queue
+// landing worktree.
+func isTransientMergeWorktreeName(name string) bool {
+	return strings.HasPrefix(name, check.BuildWorktreePrefix) ||
+		strings.HasPrefix(name, merge.LandWorktreePrefix)
+}
+
 // pidFromBuildWorktreeName extracts the trailing <pid> from a
-// .merge-<branch>-<sha>-<pid> name. Returns (0,false) if the last '-'-segment
-// isn't a positive integer. Branch/sha segments can contain '-', so only the
-// final segment is the PID. The name format is produced by
-// check.resolveHookDir (prefix check.BuildWorktreePrefix); keep this parser in
-// sync with it.
+// .merge-<branch>-<sha>-<pid> or .land-<branch>-<shortsha>-<pid> name. Returns
+// (0,false) if the last '-'-segment isn't a positive integer. Branch/sha
+// segments can contain '-', so only the final segment is the PID. The name
+// formats are produced by check.resolveHookDir (prefix
+// check.BuildWorktreePrefix) and merge.rebaseLanding (prefix
+// merge.LandWorktreePrefix); keep this parser in sync with them.
 func pidFromBuildWorktreeName(name string) (int, bool) {
 	i := strings.LastIndex(name, "-")
 	if i < 0 || i == len(name)-1 {
