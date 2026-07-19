@@ -317,26 +317,26 @@ func removeAbandonedSessions(abandoned []session.State) int {
 	return removed
 }
 
-// orphanBuildWorktree is a leftover transient merge worktree whose creating
+// orphanTransientWorktree is a leftover transient merge worktree whose creating
 // process is no longer alive: either a pre-merge build worktree
 // (.merge-<branch>-<sha>-<pid>, check.resolveHookDir — see issue #135) or a
 // merge-queue landing worktree (.land-<branch>-<shortsha>-<pid>,
 // merge.rebaseLanding, FDR 0022 — see issue #237), both under
 // <repo>/.worktrees/. Normally removed by their deferred cleanup, but a
 // crashed merge leaves one behind.
-type orphanBuildWorktree struct {
+type orphanTransientWorktree struct {
 	repoPath string
 	path     string // absolute path to the .merge-* / .land-* dir
 	name     string // basename, for display
 }
 
-// findOrphanBuildWorktrees scans repos under startDir for .merge-* build and
+// findOrphanTransientWorktrees scans repos under startDir for .merge-* build and
 // .land-* landing worktree dirs whose embedded <pid> is dead. A LIVE-pid dir
 // (an in-flight merge) is left untouched. The PID is the segment after the
 // last '-' in the name (branch/sha segments may themselves contain '-', so
 // parse from the end).
-func findOrphanBuildWorktrees(startDir string) []orphanBuildWorktree {
-	var orphans []orphanBuildWorktree
+func findOrphanTransientWorktrees(startDir string) []orphanTransientWorktree {
+	var orphans []orphanTransientWorktree
 	for _, repoPath := range worktree.ScanRepos(startDir) {
 		wtDir := filepath.Join(repoPath, worktree.WorktreesDir)
 		entries, err := os.ReadDir(wtDir)
@@ -347,14 +347,14 @@ func findOrphanBuildWorktrees(startDir string) []orphanBuildWorktree {
 			if !e.IsDir() || !isTransientMergeWorktreeName(e.Name()) {
 				continue
 			}
-			pid, ok := pidFromBuildWorktreeName(e.Name())
+			pid, ok := pidFromTransientWorktreeName(e.Name())
 			if !ok {
 				continue // unparseable name — leave it alone, don't guess
 			}
 			if session.IsAlive(pid) {
 				continue // in-flight merge — never touch a live one
 			}
-			orphans = append(orphans, orphanBuildWorktree{
+			orphans = append(orphans, orphanTransientWorktree{
 				repoPath: repoPath,
 				path:     filepath.Join(wtDir, e.Name()),
 				name:     e.Name(),
@@ -372,14 +372,14 @@ func isTransientMergeWorktreeName(name string) bool {
 		strings.HasPrefix(name, merge.LandWorktreePrefix)
 }
 
-// pidFromBuildWorktreeName extracts the trailing <pid> from a
+// pidFromTransientWorktreeName extracts the trailing <pid> from a
 // .merge-<branch>-<sha>-<pid> or .land-<branch>-<shortsha>-<pid> name. Returns
 // (0,false) if the last '-'-segment isn't a positive integer. Branch/sha
 // segments can contain '-', so only the final segment is the PID. The name
 // formats are produced by check.resolveHookDir (prefix
 // check.BuildWorktreePrefix) and merge.rebaseLanding (prefix
 // merge.LandWorktreePrefix); keep this parser in sync with them.
-func pidFromBuildWorktreeName(name string) (int, bool) {
+func pidFromTransientWorktreeName(name string) (int, bool) {
 	i := strings.LastIndex(name, "-")
 	if i < 0 || i == len(name)-1 {
 		return 0, false
@@ -391,11 +391,11 @@ func pidFromBuildWorktreeName(name string) (int, bool) {
 	return pid, true
 }
 
-// removeOrphanBuildWorktree force-removes one orphaned build worktree and
+// removeOrphanTransientWorktree force-removes one orphaned transient worktree and
 // prunes the repo's stale admin entries. Best-effort: force-remove the git
 // worktree (clears the registration if any), then RemoveAll the physical dir
 // in case it was unregistered (the crash-orphan case), then prune.
-func removeOrphanBuildWorktree(o orphanBuildWorktree) error {
+func removeOrphanTransientWorktree(o orphanTransientWorktree) error {
 	// ForceRemove clears the git admin entry (and the dir, if it was a
 	// registered worktree); ignored because a crash-orphan is typically
 	// unregistered. RemoveAll then guarantees the physical dir is gone — a
@@ -542,7 +542,7 @@ func emitPlan(tw *tap.Writer, actions []cleanAction, abandonedCount int, tombsto
 		}
 	}
 	if orphanBuildCount > 0 {
-		msg := fmt.Sprintf("prune %d orphaned build worktree(s)", orphanBuildCount)
+		msg := fmt.Sprintf("prune %d orphaned transient worktree(s)", orphanBuildCount)
 		if dryRun {
 			if tw != nil {
 				tw.Skip(msg, reason)
@@ -574,7 +574,7 @@ func confirmClean(removeCount, abandonedCount, tombstoneCount, orphanBuildCount 
 		parts = append(parts, fmt.Sprintf("%d stale tombstone(s)", tombstoneCount))
 	}
 	if orphanBuildCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d orphaned build worktree(s)", orphanBuildCount))
+		parts = append(parts, fmt.Sprintf("%d orphaned transient worktree(s)", orphanBuildCount))
 	}
 	prompt := fmt.Sprintf("Remove %s?", strings.Join(parts, " and "))
 	var confirmed bool
@@ -588,7 +588,7 @@ func confirmClean(removeCount, abandonedCount, tombstoneCount, orphanBuildCount 
 	return confirmed, nil
 }
 
-func executeClean(tw *tap.Writer, actions []cleanAction, abandoned []session.State, orphans []orphanBuildWorktree, retention time.Duration, interactive bool) {
+func executeClean(tw *tap.Writer, actions []cleanAction, abandoned []session.State, orphans []orphanTransientWorktree, retention time.Duration, interactive bool) {
 	for _, a := range actions {
 		switch a.action {
 		case "remove":
@@ -651,13 +651,13 @@ func executeClean(tw *tap.Writer, actions []cleanAction, abandoned []session.Sta
 	if len(orphans) > 0 {
 		pruned := 0
 		for _, o := range orphans {
-			if err := removeOrphanBuildWorktree(o); err != nil {
+			if err := removeOrphanTransientWorktree(o); err != nil {
 				if tw != nil {
-					tw.NotOk("prune orphaned build worktree "+o.name, map[string]string{
+					tw.NotOk("prune orphaned transient worktree "+o.name, map[string]string{
 						"error": err.Error(),
 					})
 				} else {
-					log.Error("failed to prune orphaned build worktree", "name", o.name, "error", err)
+					log.Error("failed to prune orphaned transient worktree", "name", o.name, "error", err)
 				}
 				continue
 			}
@@ -665,9 +665,9 @@ func executeClean(tw *tap.Writer, actions []cleanAction, abandoned []session.Sta
 		}
 		if pruned > 0 {
 			if tw != nil {
-				tw.Ok(fmt.Sprintf("pruned %d orphaned build worktree(s)", pruned))
+				tw.Ok(fmt.Sprintf("pruned %d orphaned transient worktree(s)", pruned))
 			} else {
-				log.Info("pruned orphaned build worktrees", "count", pruned)
+				log.Info("pruned orphaned transient worktrees", "count", pruned)
 			}
 		}
 	}
@@ -700,7 +700,7 @@ func Run(startDir string, interactive bool, dryRun bool, yes bool, format string
 	abandonedCount, abandonedSessions := countAbandonedSessions()
 	retention := resolveTombstoneRetention(startDir)
 	tombstoneCount := countStaleTombstones(retention)
-	orphans := findOrphanBuildWorktrees(startDir)
+	orphans := findOrphanTransientWorktrees(startDir)
 	orphanCount := len(orphans)
 
 	if len(worktrees) == 0 && abandonedCount == 0 && tombstoneCount == 0 && orphanCount == 0 {

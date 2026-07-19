@@ -1,9 +1,7 @@
 package sysprompt
 
 import (
-	"fmt"
 	"path/filepath"
-	"strings"
 
 	"github.com/amarbel-llc/spinclass/internal/session"
 )
@@ -56,10 +54,5 @@ func formatCoActiveLine(repo string, others []session.State) string {
 		}
 		entries[i] = entry
 	}
-	noun := "sessions"
-	if len(others) == 1 {
-		noun = "session"
-	}
-	return fmt.Sprintf("%d other live %s on %s: %s",
-		len(others), noun, repo, strings.Join(entries, ", "))
+	return session.CoActiveSummary("other live", repo, entries)
 }

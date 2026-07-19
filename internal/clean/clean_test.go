@@ -15,7 +15,7 @@ import (
 
 // deadPID is above the OS PID_MAX on all supported platforms (math.MaxInt32-1),
 // so session.IsAlive reliably reports it dead. Used to simulate a crashed
-// merge's orphaned build worktree.
+// merge's orphaned transient worktree.
 const deadPID = 2147483646
 
 func runGit(t *testing.T, dir string, args ...string) string {
@@ -68,10 +68,11 @@ func setupRepo(t *testing.T) (root, repoDir string) {
 	return root, repoDir
 }
 
-// makeBuildWorktreeDir creates a non-empty .merge-* build worktree dir under
-// <repo>/.worktrees/ (mirroring the #129 test's non-empty fixture so a stray
-// git worktree remove can't silently succeed) and returns its path.
-func makeBuildWorktreeDir(t *testing.T, repoDir, name string) string {
+// makeTransientWorktreeDir creates a non-empty transient merge worktree dir
+// (.merge-* build or .land-* landing) under <repo>/.worktrees/ (mirroring the
+// #129 test's non-empty fixture so a stray git worktree remove can't silently
+// succeed) and returns its path.
+func makeTransientWorktreeDir(t *testing.T, repoDir, name string) string {
 	t.Helper()
 	p := filepath.Join(repoDir, ".worktrees", name)
 	if err := os.MkdirAll(p, 0o755); err != nil {
@@ -83,7 +84,7 @@ func makeBuildWorktreeDir(t *testing.T, repoDir, name string) string {
 	return p
 }
 
-func TestPidFromBuildWorktreeName(t *testing.T) {
+func TestPidFromTransientWorktreeName(t *testing.T) {
 	cases := []struct {
 		name    string
 		wantPid int
@@ -100,9 +101,9 @@ func TestPidFromBuildWorktreeName(t *testing.T) {
 		{".land-foo-notanumber", 0, false},
 	}
 	for _, c := range cases {
-		pid, ok := pidFromBuildWorktreeName(c.name)
+		pid, ok := pidFromTransientWorktreeName(c.name)
 		if pid != c.wantPid || ok != c.wantOk {
-			t.Errorf("pidFromBuildWorktreeName(%q) = (%d,%v); want (%d,%v)",
+			t.Errorf("pidFromTransientWorktreeName(%q) = (%d,%v); want (%d,%v)",
 				c.name, pid, ok, c.wantPid, c.wantOk)
 		}
 	}
@@ -110,21 +111,21 @@ func TestPidFromBuildWorktreeName(t *testing.T) {
 
 func TestCleanPrunesOrphanedDeadPidBuildWorktree(t *testing.T) {
 	_, repoDir := setupRepo(t)
-	orphan := makeBuildWorktreeDir(t, repoDir, ".merge-feature-abc123-"+itoa(deadPID))
+	orphan := makeTransientWorktreeDir(t, repoDir, ".merge-feature-abc123-"+itoa(deadPID))
 
 	out := captureRun(t, repoDir, false, false, true, "tap")
 
 	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
 		t.Errorf("expected orphan build worktree removed, still present at %q (err=%v)", orphan, err)
 	}
-	if !strings.Contains(out, "orphaned build worktree") {
-		t.Errorf("expected TAP output to mention pruning orphaned build worktree, got:\n%s", out)
+	if !strings.Contains(out, "orphaned transient worktree") {
+		t.Errorf("expected TAP output to mention pruning orphaned transient worktree, got:\n%s", out)
 	}
 }
 
 func TestCleanKeepsLivePidBuildWorktree(t *testing.T) {
 	_, repoDir := setupRepo(t)
-	live := makeBuildWorktreeDir(t, repoDir, ".merge-feature-abc123-"+itoa(os.Getpid()))
+	live := makeTransientWorktreeDir(t, repoDir, ".merge-feature-abc123-"+itoa(os.Getpid()))
 
 	_ = captureRun(t, repoDir, false, false, true, "tap")
 
@@ -135,9 +136,9 @@ func TestCleanKeepsLivePidBuildWorktree(t *testing.T) {
 
 func TestCleanKeepsUnparseableBuildWorktree(t *testing.T) {
 	// A .merge-* dir whose name has no parseable trailing PID must be left
-	// alone (we don't guess — see findOrphanBuildWorktrees).
+	// alone (we don't guess — see findOrphanTransientWorktrees).
 	_, repoDir := setupRepo(t)
-	unparseable := makeBuildWorktreeDir(t, repoDir, ".merge-no-pid-here")
+	unparseable := makeTransientWorktreeDir(t, repoDir, ".merge-no-pid-here")
 
 	_ = captureRun(t, repoDir, false, false, true, "tap")
 
@@ -152,21 +153,21 @@ func TestCleanKeepsUnparseableBuildWorktree(t *testing.T) {
 // same way it reaps .merge-* build worktrees — see issue #237.
 func TestCleanPrunesOrphanedDeadPidLandWorktree(t *testing.T) {
 	_, repoDir := setupRepo(t)
-	orphan := makeBuildWorktreeDir(t, repoDir, ".land-feature-abc123-"+itoa(deadPID))
+	orphan := makeTransientWorktreeDir(t, repoDir, ".land-feature-abc123-"+itoa(deadPID))
 
 	out := captureRun(t, repoDir, false, false, true, "tap")
 
 	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
 		t.Errorf("expected orphan landing worktree removed, still present at %q (err=%v)", orphan, err)
 	}
-	if !strings.Contains(out, "orphaned build worktree") {
-		t.Errorf("expected TAP output to mention pruning orphaned build worktree, got:\n%s", out)
+	if !strings.Contains(out, "orphaned transient worktree") {
+		t.Errorf("expected TAP output to mention pruning orphaned transient worktree, got:\n%s", out)
 	}
 }
 
 func TestCleanKeepsLivePidLandWorktree(t *testing.T) {
 	_, repoDir := setupRepo(t)
-	live := makeBuildWorktreeDir(t, repoDir, ".land-feature-abc123-"+itoa(os.Getpid()))
+	live := makeTransientWorktreeDir(t, repoDir, ".land-feature-abc123-"+itoa(os.Getpid()))
 
 	_ = captureRun(t, repoDir, false, false, true, "tap")
 
@@ -177,15 +178,15 @@ func TestCleanKeepsLivePidLandWorktree(t *testing.T) {
 
 func TestCleanDryRunKeepsOrphan(t *testing.T) {
 	_, repoDir := setupRepo(t)
-	orphan := makeBuildWorktreeDir(t, repoDir, ".merge-feature-abc123-"+itoa(deadPID))
+	orphan := makeTransientWorktreeDir(t, repoDir, ".merge-feature-abc123-"+itoa(deadPID))
 
 	out := captureRun(t, repoDir, false, true, false, "tap")
 
 	if _, err := os.Stat(orphan); err != nil {
 		t.Errorf("expected orphan kept on dry-run, but it is gone: %v", err)
 	}
-	if !strings.Contains(out, "orphaned build worktree") {
-		t.Errorf("expected dry-run TAP to plan an orphaned build worktree prune, got:\n%s", out)
+	if !strings.Contains(out, "orphaned transient worktree") {
+		t.Errorf("expected dry-run TAP to plan an orphaned transient worktree prune, got:\n%s", out)
 	}
 }
 

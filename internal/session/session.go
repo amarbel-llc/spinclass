@@ -928,6 +928,19 @@ func (s *State) BranchOrKey() string {
 	return s.Key()
 }
 
+// CoActiveSummary renders the shared co-active display line (#238):
+// "N <adjective> session(s) on <repo>: e1, e2". The adjective is the caller's
+// wording ("co-active" in merge output, "other live" in the system-prompt
+// fragment); entries are pre-rendered display names.
+func CoActiveSummary(adjective, repo string, entries []string) string {
+	noun := "sessions"
+	if len(entries) == 1 {
+		noun = "session"
+	}
+	return fmt.Sprintf("%d %s %s on %s: %s",
+		len(entries), adjective, noun, repo, strings.Join(entries, ", "))
+}
+
 // ListForScope returns the non-abandoned sessions visible from dir:
 // those whose RepoPath is exactly repoPath (the repo containing dir,
 // when inside one) unioned with those whose RepoPath sits at or beneath

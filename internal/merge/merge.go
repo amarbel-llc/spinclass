@@ -841,12 +841,7 @@ func emitCoActiveSessions(ts *crap.TestStream, repoPath, excludeWorktree string)
 	for i := range others {
 		names[i] = others[i].BranchOrKey()
 	}
-	noun := "sessions"
-	if len(others) == 1 {
-		noun = "session"
-	}
-	ts.Ok(fmt.Sprintf("%d co-active %s on %s: %s",
-		len(others), noun, filepath.Base(repoPath), strings.Join(names, ", ")))
+	ts.Ok(session.CoActiveSummary("co-active", filepath.Base(repoPath), names))
 }
 
 // shortSha truncates a git object id to 12 chars for display, leaving shorter

@@ -30,7 +30,7 @@ import (
 // BuildWorktreePrefix is the filename prefix of a transient pre-merge build
 // worktree under <repo>/.worktrees/: ".merge-<branch>-<sha>-<pid>". Exported so
 // sc clean can recognize and prune orphaned ones (the <pid> is os.Getpid() of
-// the creating process; see internal/clean.findOrphanBuildWorktrees and #135).
+// the creating process; see internal/clean.findOrphanTransientWorktrees and #135).
 const BuildWorktreePrefix = ".merge-"
 
 // BlobLink pairs a madder blob URI with the MIME type of its contents.
