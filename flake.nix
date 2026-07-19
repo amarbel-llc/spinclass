@@ -192,6 +192,30 @@
           package = conformist.packages.${system}.default;
         };
 
+        # Impure lane: the eng-convention git-state checks (git-remotes,
+        # git-default-branch, sweatfile, agents-md, gomod2nix — presets.eng-impure)
+        # PLUS golangci-lint, relocated here from the pure eval above. golangci-lint
+        # is a package-loading linter: it needs ambient `go` (to resolve imports)
+        # and a writable $HOME for its build cache, neither available in the
+        # sandboxed `checks.formatting` derivation (confirmed: `exec: "go":
+        # executable file not found in $PATH` + `mkdir /homeless-shelter:
+        # permission denied` when it was wired into the pure lane). This is why
+        # the OLD spinclass ran it via `nix develop --command conformist check`
+        # (an impure devShell invocation) rather than a sandboxed build — no
+        # fleet repo runs a real `golangci-lint run` inside checks.formatting
+        # (golangci-dewey, the only related preset linter, only greps for
+        # .custom-gcl.yml wiring). These checks need a live .git / a real Go
+        # toolchain, so they run against the working tree via `just lint-worktree`
+        # (crap/papi/tommy shape), not the sandboxed check.
+        conformistImpureEval = conformist.lib.evalModule pkgs {
+          imports = [
+            conformist.lib.presets.eng-impure
+            ./conformist-impure.nix
+          ];
+          package = conformist.packages.${system}.default;
+          projectRootFile = "flake.nix";
+        };
+
         # Consumer half of the flake-input-go_mod protocol (RFC 0001):
         # which sibling Go modules resolve from producer go-pkgs outputs
         # instead of the proxy. See gomod.nix for the entries and the
@@ -382,6 +406,11 @@
         packages = {
           default = mkSpinclass forgePins;
           inherit spinclass-race;
+          # The generated impure-lane config (git-state eng-convention checks
+          # + golangci-lint), consumed by `just lint-worktree` to run
+          # `conformist check` against the working tree where .git/go are
+          # available. See conformistImpureEval above.
+          conformist-impure-config = conformistImpureEval.config.build.configFile;
         }
         // batsLaneOutputs;
 
@@ -422,14 +451,17 @@
             # buildGoApplication / mkGoEnv — not in upstream nixpkgs.
             pkgs.gomod2nix
             pkgs.bats
-            # conformist hooks, from the nix module eval (conformistEval
-            # above): `conformist` (= conformistEval.config.build.wrapper;
-            # what `just fmt` / `nix fmt` invoke) REPLACES the bare conformist
-            # binary on PATH, so a bare `conformist` resolves to the
-            # toolchain-carrying wrapper — plus the `conformist-pre-commit` /
-            # `conformist-repair` hook commands the sweatfile names. The
-            # formatter tools below stay for ad-hoc use.
-            conformistEval.config.build.wrapper
+            # The RAW conformist binary on PATH — NOT conformistEval.config.build.wrapper.
+            # The wrapper hardcodes `--tree-root-file=flake.nix` (repair mode,
+            # `nix fmt`'s job); `just lint-worktree` invokes the bare `conformist`
+            # with an explicit `--config-file <impure-config> --tree-root .`,
+            # which collides with the wrapper's baked-in flags (mutually
+            # exclusive). Mirrors crap/tommy's devShell (cutting-garden's flake.nix
+            # documents the same collision explicitly). `nix fmt` still runs the
+            # wrapper via the `formatter` flake output below.
+            conformist.packages.${system}.default
+            # conformist-pre-commit / conformist-repair: the config-specific,
+            # toolchain-hermetic hook commands (FDR 0019) the sweatfile names.
             conformistEval.config.build.preCommit
             conformistEval.config.build.repair
             pkgs.nixfmt

@@ -25,14 +25,12 @@ test-bats-madder:
 fmt:
     nix fmt
 
-lint: lint-fmt
+lint: lint-fmt lint-worktree
 
 # Read-only format + lint gate via the sandboxed checks.formatting
 # derivation: formatter drift (Go/Nix/shell/TOML, per ./conformist.nix) plus
-# the linters — shellcheck, statix/deadnix, tommy-codegen, golangci-lint (the
-# [linter.golangci-lint] run-once entry, v2 `standard` set:
-# errcheck/govet/staticcheck/ineffassign/unused, config in .golangci.yml), and
-# the eng-convention linters (eng-versioning, flake-outputs/lock, justfile-*)
+# the linters — shellcheck, statix/deadnix, tommy-codegen, and the
+# eng-convention linters (eng-versioning, flake-outputs/lock, justfile-*)
 # from conformist.lib.presets.eng. `just fmt` is the corresponding write mode.
 # Folded into `just lint` → `just default`, so the pre-merge `just` hook
 # enforces it on every merge.
@@ -41,6 +39,18 @@ lint-fmt:
     set -euo pipefail
     system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
     nix build ".#checks.${system}.formatting" --no-link --print-build-logs
+
+# The impure eng-convention checks (git remotes, sweatfile, agents-md,
+# gomod2nix) plus golangci-lint (the v2 `standard` set — config in
+# .golangci.yml — relocated here from the pure lane: it needs ambient `go`
+# + a writable build cache, unavailable in the sandboxed checks.formatting)
+# against the working tree, where .git/go are available. Runs conformist
+# from the devShell PATH (direnv `use flake`).
+lint-worktree:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cfg=$(nix build --no-link --print-out-paths '.#conformist-impure-config')
+    conformist check --config-file "$cfg" --tree-root .
 
 clean:
     rm -rf result

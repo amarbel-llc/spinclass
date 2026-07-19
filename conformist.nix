@@ -3,7 +3,9 @@
 # eng-convention linters (eng-versioning, flake-outputs/lock, the justfile-*
 # roster); presets.eng-go carries the canonical goimports -> gofumpt chain.
 # Here live the repo-specific formatters/linters (shfmt, shellcheck, statix,
-# deadnix, golangci-lint) and excludes. tommy fmt (*.toml) and the
+# deadnix) and excludes. golangci-lint lives in ./conformist-impure.nix (it
+# needs ambient `go` + a writable cache, unavailable in this sandboxed lane —
+# see flake.nix's conformistImpureEval). tommy fmt (*.toml) and the
 # tommy-codegen repair linter have no registry program and need the `tommy`
 # flake input, so they are inlined in flake.nix instead (a standalone module
 # file can't see flake inputs) — see conformistTommyModule there.
@@ -50,26 +52,6 @@
         "*.bash"
         "*.bats"
       ];
-    };
-
-    # golangci-lint — v2 `standard` linter set (config in .golangci.yml),
-    # CHECK-ONLY: the registry's `programs.golangci-lint` always appends
-    # `--fix` (it's a formatter), which doesn't match this repo's read-only
-    # posture for Go linters, so this stays a hand-declared linter
-    # (nix-module guide "Declaring a tool the module doesn't ship") —
-    # matches the old [linter.golangci-lint] stanza exactly. Run-once over
-    # the whole module: passes-files=false -> `golangci-lint run ./...`;
-    # includes only GATES whether it fires. Cache isolation
-    # (GOLANGCI_LINT_CACHE) stays pinned per-worktree via the sweatfile
-    # [direnv.dotenv] (conformist#34).
-    linter.golangci-lint = {
-      command = "${pkgs.golangci-lint}/bin/golangci-lint";
-      options = [
-        "run"
-        "./..."
-      ];
-      includes = [ "*.go" ];
-      "passes-files" = false;
     };
 
     # Generated / locked / prose / hand-formatted — not formatted or linted.
