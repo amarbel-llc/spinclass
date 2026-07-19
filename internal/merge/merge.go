@@ -330,7 +330,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 		}
 		lastHolder = holder
 		if activity != nil {
-			fmt.Fprintf(activity, "merge queue: waiting behind %s (%s)\n", holder, elapsed.Round(time.Second))
+			_, _ = fmt.Fprintf(activity, "merge queue: waiting behind %s (%s)\n", holder, elapsed.Round(time.Second))
 		}
 	})
 	if lockErr != nil {

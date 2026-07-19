@@ -91,13 +91,13 @@ func Acquire(ctx context.Context, gitCommonDir, holderID string, onWait func(hol
 
 	acquired, err := tryFlock(file)
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, err
 	}
 
 	if !acquired {
 		if err := waitFlock(ctx, file, onWait); err != nil {
-			file.Close()
+			_ = file.Close()
 			return nil, err
 		}
 	}
