@@ -107,6 +107,9 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if other.Hooks.DisableMerge != nil {
 			merged.Hooks.DisableMerge = other.Hooks.DisableMerge
 		}
+		if other.Hooks.DisableMergeQueue != nil {
+			merged.Hooks.DisableMergeQueue = other.Hooks.DisableMergeQueue
+		}
 		if other.Hooks.DisableRepair != nil {
 			merged.Hooks.DisableRepair = other.Hooks.DisableRepair
 		}

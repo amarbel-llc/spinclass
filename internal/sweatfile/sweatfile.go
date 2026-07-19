@@ -61,6 +61,7 @@ type Hooks struct {
 	DisallowMainWorktree       *bool   `toml:"disallow-main-worktree"`
 	ToolUseLog                 *bool   `toml:"tool-use-log"`
 	DisableMerge               *bool   `toml:"disable-merge"`
+	DisableMergeQueue          *bool   `toml:"disable-merge-queue"`
 	DisableRepair              *bool   `toml:"disable-repair"`
 	DisablePreCommit           *bool   `toml:"disable-pre-commit"`
 	DisableNixGC               *bool   `toml:"disable-nix-gc"`
@@ -327,6 +328,16 @@ func (sf Sweatfile) DisableMergeEnabled() bool {
 	return sf.Hooks != nil &&
 		sf.Hooks.DisableMerge != nil &&
 		*sf.Hooks.DisableMerge
+}
+
+// DisableMergeQueueEnabled reports whether [hooks].disable-merge-queue is
+// true. When true, the per-repo merge serialization lock (issue #235) is
+// disabled: merges fail immediately if the default branch moved during the
+// pre-merge gate instead of queuing, rebasing, and re-gating under the lock.
+func (sf Sweatfile) DisableMergeQueueEnabled() bool {
+	return sf.Hooks != nil &&
+		sf.Hooks.DisableMergeQueue != nil &&
+		*sf.Hooks.DisableMergeQueue
 }
 
 // RepairDisabled reports whether [hooks].disable-repair is true. It suppresses

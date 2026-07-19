@@ -487,6 +487,15 @@ CLI subcommand is available regardless of this flag.
 .B Merge:
 scalar override.
 .TP
+.B disable-merge-queue
+Boolean.
+When true, disables the per-repo merge serialization lock (issue #235);
+merges then fail immediately if the default branch moved during the
+pre-merge gate instead of queuing, rebasing, and re-gating under the
+lock.
+.B Merge:
+scalar override.
+.TP
 .B disable-repair
 Boolean.
 When true, suppresses an inherited

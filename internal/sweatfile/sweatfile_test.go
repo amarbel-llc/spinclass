@@ -1829,6 +1829,53 @@ func TestMergeDisableMergeOverride(t *testing.T) {
 	}
 }
 
+func TestParseHooksDisableMergeQueue(t *testing.T) {
+	input := `
+[hooks]
+disable-merge-queue = true
+`
+	doc, err := sweatfileio.Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sf := doc.Data()
+	if !sf.DisableMergeQueueEnabled() {
+		t.Error("expected disable-merge-queue to be enabled")
+	}
+}
+
+func TestParseHooksDisableMergeQueueAbsent(t *testing.T) {
+	doc, err := sweatfileio.Parse([]byte("[git]\nexcludes = [\".claude/\"]"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sf := doc.Data()
+	if sf.DisableMergeQueueEnabled() {
+		t.Error("expected disable-merge-queue to be disabled when absent")
+	}
+}
+
+func TestMergeDisableMergeQueueInherit(t *testing.T) {
+	enabled := true
+	base := Sweatfile{Hooks: &Hooks{DisableMergeQueue: &enabled}}
+	repo := Sweatfile{}
+	merged := base.MergeWith(repo)
+	if !merged.DisableMergeQueueEnabled() {
+		t.Error("expected inherited disable-merge-queue")
+	}
+}
+
+func TestMergeDisableMergeQueueOverride(t *testing.T) {
+	enabled := true
+	disabled := false
+	base := Sweatfile{Hooks: &Hooks{DisableMergeQueue: &enabled}}
+	repo := Sweatfile{Hooks: &Hooks{DisableMergeQueue: &disabled}}
+	merged := base.MergeWith(repo)
+	if merged.DisableMergeQueueEnabled() {
+		t.Error("expected overridden disable-merge-queue to be disabled")
+	}
+}
+
 func TestParseHooksDisableNixGC(t *testing.T) {
 	input := `
 [hooks]
