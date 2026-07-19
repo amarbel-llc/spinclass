@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 func TestBuildPluginCommandParams(t *testing.T) {

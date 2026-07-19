@@ -71,8 +71,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/amarbel-llc/spinclass/internal/tap"
-	"github.com/amarbel-llc/spinclass/internal/worktree"
+	"code.linenisgreat.com/spinclass/internal/tap"
+	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 ```
 

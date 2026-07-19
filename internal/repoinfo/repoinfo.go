@@ -26,8 +26,8 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/amarbel-llc/spinclass/internal/embeds"
-	"github.com/amarbel-llc/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/embeds"
+	"code.linenisgreat.com/spinclass/internal/git"
 )
 
 // RepoInfo is the resolved forge identity of a repository. Every field is
@@ -38,7 +38,7 @@ type RepoInfo struct {
 	Owner       string // owner/org login, e.g. amarbel-llc
 	OwnerType   string // "org" | "user" (best-effort)
 	Name        string // repo name, e.g. spinclass
-	URL         string // web link, e.g. https://github.com/amarbel-llc/spinclass
+	URL         string // web link, e.g. https://code.linenisgreat.com/spinclass
 	Description string // one-line summary, live-fetched
 }
 

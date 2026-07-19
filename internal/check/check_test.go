@@ -12,11 +12,11 @@ import (
 	"strings"
 	"testing"
 
+	"code.linenisgreat.com/spinclass/internal/embeds"
+	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"github.com/amarbel-llc/crap/go-crap/v2/crap"
 	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
-	"github.com/amarbel-llc/spinclass/internal/embeds"
-	"github.com/amarbel-llc/spinclass/internal/git"
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
 )
 
 func runGit(t *testing.T, dir string, args ...string) string {

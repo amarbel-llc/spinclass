@@ -14,15 +14,15 @@ import (
 
 	"github.com/amarbel-llc/crap/go-crap/v2/crap"
 
-	"github.com/amarbel-llc/spinclass/internal/close"
-	"github.com/amarbel-llc/spinclass/internal/clown"
-	"github.com/amarbel-llc/spinclass/internal/executor"
-	"github.com/amarbel-llc/spinclass/internal/git"
-	"github.com/amarbel-llc/spinclass/internal/merge"
-	"github.com/amarbel-llc/spinclass/internal/present"
-	"github.com/amarbel-llc/spinclass/internal/session"
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
-	"github.com/amarbel-llc/spinclass/internal/worktree"
+	"code.linenisgreat.com/spinclass/internal/close"
+	"code.linenisgreat.com/spinclass/internal/clown"
+	"code.linenisgreat.com/spinclass/internal/executor"
+	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/merge"
+	"code.linenisgreat.com/spinclass/internal/present"
+	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/worktree"
 	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
 )
 

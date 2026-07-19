@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/madder"
+	"code.linenisgreat.com/spinclass/internal/madder"
 )
 
 // Public contract knobs, mirroring internal/madder. ExcludePattern

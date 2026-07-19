@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/amarbel-llc/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/session"
 )
 
 // TestIdentityEnvVars asserts IdentityEnv layers the SPINCLASS_* identity

@@ -1,4 +1,4 @@
-module github.com/amarbel-llc/spinclass
+module code.linenisgreat.com/spinclass
 
 go 1.26
 

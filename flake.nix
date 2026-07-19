@@ -367,7 +367,7 @@
 
             meta = {
               description = "Shell-agnostic git worktree session manager";
-              homepage = "https://github.com/amarbel-llc/spinclass";
+              homepage = "https://code.linenisgreat.com/spinclass";
               license = pkgs.lib.licenses.mit;
             };
           };

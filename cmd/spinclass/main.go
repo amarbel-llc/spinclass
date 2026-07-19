@@ -11,8 +11,8 @@ import (
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	commandhuh "github.com/amarbel-llc/purse-first/libs/go-mcp/command/huh"
 
-	"github.com/amarbel-llc/spinclass/internal/embeds"
-	"github.com/amarbel-llc/spinclass/internal/sessionlog"
+	"code.linenisgreat.com/spinclass/internal/embeds"
+	"code.linenisgreat.com/spinclass/internal/sessionlog"
 )
 
 func main() {

@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 // targetPattern is the host:-prefix grammar: a non-empty prefix without ':'

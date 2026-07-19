@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/mergelock"
 	"github.com/amarbel-llc/crap/go-crap/v2/crap"
-	"github.com/amarbel-llc/spinclass/internal/git"
-	"github.com/amarbel-llc/spinclass/internal/mergelock"
 )
 
 // prepareRacedMerge builds the common merge-queue race fixture: a worktree

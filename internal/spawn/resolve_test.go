@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/amarbel-llc/spinclass/internal/testgit"
+	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 
 // fakeWorkspace builds a fake $HOME with two workspace roots

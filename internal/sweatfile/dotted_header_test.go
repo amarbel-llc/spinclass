@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	. "github.com/amarbel-llc/spinclass/internal/sweatfile"
-	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
+	. "code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 )
 
 // TestStandaloneDottedHeadersConsumed is the regression gate for issue #113:

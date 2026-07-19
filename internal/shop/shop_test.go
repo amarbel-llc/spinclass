@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/git"
-	"github.com/amarbel-llc/spinclass/internal/session"
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
-	"github.com/amarbel-llc/spinclass/internal/testgit"
-	"github.com/amarbel-llc/spinclass/internal/worktree"
+	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/testgit"
+	"code.linenisgreat.com/spinclass/internal/worktree"
 	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
 	"github.com/amarbel-llc/tap/go/pkgs/yaml_diagnostic"
 )

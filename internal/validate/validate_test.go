@@ -3,7 +3,7 @@ package validate
 import (
 	"testing"
 
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 func TestCheckClaudeAllowSyntaxValid(t *testing.T) {

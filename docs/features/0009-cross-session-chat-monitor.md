@@ -325,12 +325,12 @@ clown's journal GC keeps ~7d (push layer only).
 
 ## More Information
 
-- Issue [#16](https://github.com/amarbel-llc/spinclass/issues/16) —
+- Issue [#16](https://code.linenisgreat.com/spinclass/issues/16) —
   the global/open cross-session chatroom this feature is the receive
   half of. `chat-send` / `chat-read` / `chat-list-sessions` and the
   flat `$XDG_STATE_HOME/spinclass/chatroom/` storage model live there;
   this FDR replaces #16's polling receive with a push monitor.
-- Issue [#97](https://github.com/amarbel-llc/spinclass/issues/97) —
+- Issue [#97](https://code.linenisgreat.com/spinclass/issues/97) —
   expose merge/check-this-session as MCP tasks; shares the broader
   "session reacts to background/async work" surface.
 - FDR 0006 (`docs/features/0006-spawn-sibling-sessions.md`) — the

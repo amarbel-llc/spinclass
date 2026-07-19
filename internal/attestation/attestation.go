@@ -21,8 +21,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/session"
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
 )
 

@@ -7,14 +7,14 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/amarbel-llc/spinclass/internal/claude"
-	"github.com/amarbel-llc/spinclass/internal/dodder"
-	"github.com/amarbel-llc/spinclass/internal/embeds"
-	"github.com/amarbel-llc/spinclass/internal/git"
-	"github.com/amarbel-llc/spinclass/internal/madder"
-	"github.com/amarbel-llc/spinclass/internal/setupfingerprint"
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
-	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/claude"
+	"code.linenisgreat.com/spinclass/internal/dodder"
+	"code.linenisgreat.com/spinclass/internal/embeds"
+	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/madder"
+	"code.linenisgreat.com/spinclass/internal/setupfingerprint"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 )
 
 const WorktreesDir = ".worktrees"

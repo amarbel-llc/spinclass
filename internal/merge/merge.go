@@ -16,15 +16,15 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/mattn/go-isatty"
 
-	"github.com/amarbel-llc/spinclass/internal/check"
-	"github.com/amarbel-llc/spinclass/internal/executor"
-	"github.com/amarbel-llc/spinclass/internal/git"
-	"github.com/amarbel-llc/spinclass/internal/mergelock"
-	"github.com/amarbel-llc/spinclass/internal/present"
-	"github.com/amarbel-llc/spinclass/internal/session"
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
-	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
-	"github.com/amarbel-llc/spinclass/internal/worktree"
+	"code.linenisgreat.com/spinclass/internal/check"
+	"code.linenisgreat.com/spinclass/internal/executor"
+	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/mergelock"
+	"code.linenisgreat.com/spinclass/internal/present"
+	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 
 // mergeInteractive reports whether both stdin and stderr are TTYs. huh renders

@@ -11,8 +11,8 @@ import (
 
 	"github.com/charmbracelet/huh"
 
-	"github.com/amarbel-llc/spinclass/internal/git"
-	"github.com/amarbel-llc/spinclass/internal/worktree"
+	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 
 // RunListWriter writes the global tier and either a single repo's tier (if

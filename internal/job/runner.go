@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/clown"
+	"code.linenisgreat.com/spinclass/internal/clown"
 )
 
 // Func is the unit of work a background job runs. It receives a context that

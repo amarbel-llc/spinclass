@@ -3,8 +3,8 @@ package setupfingerprint
 import (
 	"testing"
 
-	"github.com/amarbel-llc/spinclass/internal/embeds"
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/embeds"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 func cfg(excludes ...string) sweatfile.Sweatfile {

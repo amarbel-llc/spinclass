@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/amarbel-llc/spinclass/internal/sweatfile"
-	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
+	. "code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 )
 
 func sptr(s string) *string { return &s }

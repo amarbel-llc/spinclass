@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/spawn"
+	"code.linenisgreat.com/spinclass/internal/worktree"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
-	"github.com/amarbel-llc/spinclass/internal/git"
-	"github.com/amarbel-llc/spinclass/internal/session"
-	"github.com/amarbel-llc/spinclass/internal/spawn"
-	"github.com/amarbel-llc/spinclass/internal/worktree"
 )
 
 // spawnParams is the shared parameter set of the `sc spawn` CLI command and

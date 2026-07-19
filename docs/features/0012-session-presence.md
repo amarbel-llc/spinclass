@@ -155,5 +155,5 @@ Resume collision warning:
   `running-detached` state this feature refines the display of).
 - FDR 0011 — remote sessions (the `list --format json` wire that carries
   presence fields across hosts).
-- [#119](https://github.com/amarbel-llc/spinclass/issues/119) — inventory of
+- [#119](https://code.linenisgreat.com/spinclass/issues/119) — inventory of
   spinclass-generated worktree files (`agent.json` adds to it).

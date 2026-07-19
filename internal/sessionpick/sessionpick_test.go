@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/session"
 )
 
 // TestChooseEmptyListErrors covers the no-sessions-for-this-repo path:

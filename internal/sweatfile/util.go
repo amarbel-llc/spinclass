@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/amarbel-llc/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/git"
 )
 
 func fileExists(path string) (os.FileInfo, bool) {

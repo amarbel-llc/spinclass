@@ -17,7 +17,7 @@ import (
 
 	"github.com/charmbracelet/log"
 
-	"github.com/amarbel-llc/spinclass/internal/direnv"
+	"code.linenisgreat.com/spinclass/internal/direnv"
 )
 
 func (sweatfile Sweatfile) Apply(worktreePath string) error {

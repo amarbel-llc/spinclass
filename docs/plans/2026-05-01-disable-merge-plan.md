@@ -320,7 +320,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/amarbel-llc/spinclass/internal/check"
+	"code.linenisgreat.com/spinclass/internal/check"
 )
 
 func TestRunHookSuccessTAP(t *testing.T) {
@@ -399,9 +399,9 @@ import (
 	"path/filepath"
 
 	tap "github.com/amarbel-llc/bob/packages/tap-dancer/go"
-	"github.com/amarbel-llc/spinclass/internal/git"
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
-	"github.com/amarbel-llc/spinclass/internal/worktree"
+	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 
 // Run resolves the worktree containing wtPath (or wtPath itself), loads
@@ -635,7 +635,7 @@ In `cmd/spinclass/commands_session.go`, after the `merge` command's `app.AddComm
 	})
 ```
 
-Add the import: `"github.com/amarbel-llc/spinclass/internal/check"`.
+Add the import: `"code.linenisgreat.com/spinclass/internal/check"`.
 
 **Step 4: Build and run bats**
 
@@ -735,7 +735,7 @@ func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prom
 }
 ```
 
-Add imports: `"bytes"`, `"github.com/amarbel-llc/spinclass/internal/check"`.
+Add imports: `"bytes"`, `"code.linenisgreat.com/spinclass/internal/check"`.
 
 **Step 5: Build and run integration test**
 

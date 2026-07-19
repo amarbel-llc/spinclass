@@ -34,15 +34,15 @@ import (
 	"github.com/amarbel-llc/crap/go-crap/v2/crap"
 	"github.com/mattn/go-isatty"
 
-	"github.com/amarbel-llc/spinclass/internal/executor"
-	"github.com/amarbel-llc/spinclass/internal/git"
-	"github.com/amarbel-llc/spinclass/internal/merge"
-	"github.com/amarbel-llc/spinclass/internal/present"
-	"github.com/amarbel-llc/spinclass/internal/session"
-	"github.com/amarbel-llc/spinclass/internal/sessionexec"
-	"github.com/amarbel-llc/spinclass/internal/shop"
-	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
-	"github.com/amarbel-llc/spinclass/internal/worktree"
+	"code.linenisgreat.com/spinclass/internal/executor"
+	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/merge"
+	"code.linenisgreat.com/spinclass/internal/present"
+	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/sessionexec"
+	"code.linenisgreat.com/spinclass/internal/shop"
+	"code.linenisgreat.com/spinclass/internal/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 
 // Spec is the fully-parsed `sc run` invocation. Exactly one of Util / Script

@@ -9,7 +9,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/amarbel-llc/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/session"
 )
 
 // TestListRenderMode locks the CLI render-mode decision: --watch wins over

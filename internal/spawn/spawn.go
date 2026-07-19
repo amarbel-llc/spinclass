@@ -11,11 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/session"
-	"github.com/amarbel-llc/spinclass/internal/shop"
-	"github.com/amarbel-llc/spinclass/internal/spawnhandshake"
-	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
-	"github.com/amarbel-llc/spinclass/internal/worktree"
+	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/shop"
+	"code.linenisgreat.com/spinclass/internal/spawnhandshake"
+	"code.linenisgreat.com/spinclass/internal/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 
 // DefaultHelloDeadline bounds how long Launch waits for the worker's

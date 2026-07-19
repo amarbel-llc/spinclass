@@ -266,13 +266,13 @@ import (
 
 	"github.com/charmbracelet/log"
 
-	"github.com/amarbel-llc/spinclass/internal/executor"
-	"github.com/amarbel-llc/spinclass/internal/flake"
-	"github.com/amarbel-llc/spinclass/internal/git"
-	"github.com/amarbel-llc/spinclass/internal/merge"
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
-	"github.com/amarbel-llc/spinclass/internal/tap"
-	"github.com/amarbel-llc/spinclass/internal/worktree"
+	"code.linenisgreat.com/spinclass/internal/executor"
+	"code.linenisgreat.com/spinclass/internal/flake"
+	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/merge"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/tap"
+	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 ```
 

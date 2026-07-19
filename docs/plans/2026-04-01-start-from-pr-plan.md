@@ -415,7 +415,7 @@ git commit -m "test(spinclass): add remote URL slug parsing tests"
 
 In the `var` block at line 32, add `startPR string`.
 
-In the imports at line 3, add `"github.com/amarbel-llc/spinclass/internal/pr"`.
+In the imports at line 3, add `"code.linenisgreat.com/spinclass/internal/pr"`.
 
 **Step 2: Modify `startCmd.RunE` to handle `--pr`**
 

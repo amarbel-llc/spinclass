@@ -1,6 +1,6 @@
 # Implicit Sessions — Design
 
-**Issue:** [#118 — Support implicit sessions started from repo main worktrees](https://github.com/amarbel-llc/spinclass/issues/118)
+**Issue:** [#118 — Support implicit sessions started from repo main worktrees](https://code.linenisgreat.com/spinclass/issues/118)
 **Date:** 2026-06-09
 **Status:** Design approved; ready for implementation plan
 

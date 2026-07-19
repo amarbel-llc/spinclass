@@ -10,11 +10,11 @@ import (
 	"regexp"
 	"strings"
 
+	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/worktree"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
-	"github.com/amarbel-llc/spinclass/internal/git"
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
-	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
-	"github.com/amarbel-llc/spinclass/internal/worktree"
 )
 
 // execStartOutput is the JSON schema returned by an exec-start command.

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/testfs"
+	"code.linenisgreat.com/spinclass/internal/testfs"
 )
 
 func writePresence(t *testing.T, dir string, p Presence) {

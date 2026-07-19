@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/amarbel-llc/spinclass/internal/testgit"
+	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 
 // TestMain isolates every git invocation in this package's tests from the

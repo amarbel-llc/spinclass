@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/amarbel-llc/spinclass/internal/nixgc"
+	"code.linenisgreat.com/spinclass/internal/nixgc"
 	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
 )
 

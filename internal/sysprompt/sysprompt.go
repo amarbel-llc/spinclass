@@ -30,9 +30,9 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/git"
-	"github.com/amarbel-llc/spinclass/internal/repoinfo"
-	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/repoinfo"
+	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 )
 
 // repoFetchTimeout bounds the live forge enrichment (papi/gh/HTTP) so the

@@ -322,15 +322,15 @@ $ sc clean
 - Tracked under milestone `v0.1.0 — Worktree-local session state +
   clean/completion triage`.
 - Implementation slices (sequential):
-  - [#41](https://github.com/amarbel-llc/spinclass/issues/41) — slice 1:
+  - [#41](https://code.linenisgreat.com/spinclass/issues/41) — slice 1:
     worktree-local `state.json` + central symlink index (storage
     relocation, no behaviour change).
-  - [#42](https://github.com/amarbel-llc/spinclass/issues/42) — slice 2:
+  - [#42](https://code.linenisgreat.com/spinclass/issues/42) — slice 2:
     `sc attach <id>` lifecycle wrapper, fork-and-wait, new state enum,
     liveness probe, `on-attach`/`on-detach` hooks.
-  - [#43](https://github.com/amarbel-llc/spinclass/issues/43) — slice 3:
+  - [#43](https://code.linenisgreat.com/spinclass/issues/43) — slice 3:
     `sc list --closed` + tombstone GC retention.
-- Issue [#40](https://github.com/amarbel-llc/spinclass/issues/40) — the
+- Issue [#40](https://code.linenisgreat.com/spinclass/issues/40) — the
   `sc close <id>` regression that motivated revisiting this area;
   expected to be resolved by slice 1.
 - Existing sweatfile hooks (`create` / `stop` / `pre-merge`) documented in

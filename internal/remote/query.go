@@ -8,8 +8,8 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/session"
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 // queryTimeout bounds each per-host list query. Tuning lever (see the

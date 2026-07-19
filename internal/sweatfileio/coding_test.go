@@ -3,7 +3,7 @@ package sweatfileio
 import (
 	"testing"
 
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 // TestDecodeEmptyVsAbsentArrays locks the behavior the deleted consumed-map

@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/remote"
-	"github.com/amarbel-llc/spinclass/internal/session"
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
-	"github.com/amarbel-llc/spinclass/internal/testgit"
+	"code.linenisgreat.com/spinclass/internal/remote"
+	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 
 // TestCompleteWorktreeTargetsInRepoSorted: when cwd is inside a git

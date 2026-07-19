@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/session"
-	"github.com/amarbel-llc/spinclass/internal/spawnhandshake"
-	"github.com/amarbel-llc/spinclass/internal/testfs"
-	"github.com/amarbel-llc/spinclass/internal/testgit"
+	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/spawnhandshake"
+	"code.linenisgreat.com/spinclass/internal/testfs"
+	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 
 func makeInput(toolName string, toolInput map[string]any, cwd string) []byte {

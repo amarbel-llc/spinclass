@@ -14,7 +14,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 // Parse decodes sweatfile TOML bytes into a document. tommy's generated decoder

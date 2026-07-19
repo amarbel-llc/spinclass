@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 )
 
 // reapTimeout bounds the wall-clock duration of a single nix-store

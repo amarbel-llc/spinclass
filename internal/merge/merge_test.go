@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/session"
 	"github.com/amarbel-llc/crap/go-crap/v2/crap"
 	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
-	"github.com/amarbel-llc/spinclass/internal/git"
-	"github.com/amarbel-llc/spinclass/internal/session"
 	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
 )
 

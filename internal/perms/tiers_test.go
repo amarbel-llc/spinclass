@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/amarbel-llc/spinclass/internal/testfs"
+	"code.linenisgreat.com/spinclass/internal/testfs"
 )
 
 func TestLoadTierFile(t *testing.T) {

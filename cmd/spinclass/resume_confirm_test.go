@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/session"
 )
 
 // TestResumeConfirmPlan tables the confirmation decision: which dialog

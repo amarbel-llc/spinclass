@@ -10,18 +10,18 @@ import (
 	"sync"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/clean"
+	"code.linenisgreat.com/spinclass/internal/clown"
+	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/pull"
+	"code.linenisgreat.com/spinclass/internal/remote"
+	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/shop"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/validate"
+	"code.linenisgreat.com/spinclass/internal/worktree"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/protocol"
-	"github.com/amarbel-llc/spinclass/internal/clean"
-	"github.com/amarbel-llc/spinclass/internal/clown"
-	"github.com/amarbel-llc/spinclass/internal/git"
-	"github.com/amarbel-llc/spinclass/internal/pull"
-	"github.com/amarbel-llc/spinclass/internal/remote"
-	"github.com/amarbel-llc/spinclass/internal/session"
-	"github.com/amarbel-llc/spinclass/internal/shop"
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
-	"github.com/amarbel-llc/spinclass/internal/validate"
-	"github.com/amarbel-llc/spinclass/internal/worktree"
 )
 
 func registerQueryCommands(app *command.App) {

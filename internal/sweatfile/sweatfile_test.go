@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	. "github.com/amarbel-llc/spinclass/internal/sweatfile"
-	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
-	"github.com/amarbel-llc/spinclass/internal/testfs"
+	. "code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/testfs"
 )
 
 func TestParseMinimal(t *testing.T) {

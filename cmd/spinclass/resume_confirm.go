@@ -12,8 +12,8 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/mattn/go-isatty"
 
-	"github.com/amarbel-llc/spinclass/internal/session"
-	"github.com/amarbel-llc/spinclass/internal/sessionpick"
+	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/sessionpick"
 )
 
 // resumeConfirmKind names which confirmation dialog (if any) resume

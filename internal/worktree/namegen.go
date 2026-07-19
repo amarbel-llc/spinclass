@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/amarbel-llc/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/git"
 )
 
 var adjectives = []string{

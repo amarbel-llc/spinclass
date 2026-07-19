@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/amarbel-llc/spinclass/internal/testfs"
+	"code.linenisgreat.com/spinclass/internal/testfs"
 )
 
 func TestCheckMatchProducesAllow(t *testing.T) {

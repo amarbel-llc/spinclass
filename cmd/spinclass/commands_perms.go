@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 
+	"code.linenisgreat.com/spinclass/internal/perms"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/protocol"
-	"github.com/amarbel-llc/spinclass/internal/perms"
 )
 
 func registerPermsCommands(app *command.App) {

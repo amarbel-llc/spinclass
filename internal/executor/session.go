@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/session"
 	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
 	"github.com/amarbel-llc/tap/go/pkgs/yaml_diagnostic"
 )

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/amarbel-llc/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/git"
 )
 
 // dispatcherName is the single dispatcher script in the worktree hooks dir;

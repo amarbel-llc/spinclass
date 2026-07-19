@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/amarbel-llc/spinclass/internal/testgit"
+	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 
 func TestRandomNameFormat(t *testing.T) {

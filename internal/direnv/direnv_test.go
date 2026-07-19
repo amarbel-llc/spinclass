@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/amarbel-llc/spinclass/internal/direnv"
-	"github.com/amarbel-llc/spinclass/internal/embeds"
+	"code.linenisgreat.com/spinclass/internal/direnv"
+	"code.linenisgreat.com/spinclass/internal/embeds"
 )
 
 // pinDirenv sets the build-time direnv pin to path and restores the prior pins

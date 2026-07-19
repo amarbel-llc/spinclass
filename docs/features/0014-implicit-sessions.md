@@ -236,18 +236,18 @@ Disable the feature for a repo (rollback):
 
 ## More Information
 
-- Issue: [#118](https://github.com/amarbel-llc/spinclass/issues/118).
-  Resolved followups: [#130](https://github.com/amarbel-llc/spinclass/issues/130)
+- Issue: [#118](https://code.linenisgreat.com/spinclass/issues/118).
+  Resolved followups: [#130](https://code.linenisgreat.com/spinclass/issues/130)
   (build-worktree placement) and
-  [#132](https://github.com/amarbel-llc/spinclass/issues/132) (check parity)
+  [#132](https://code.linenisgreat.com/spinclass/issues/132) (check parity)
   are both fixed (see Resolved after initial implementation, above). Open
-  followups: [#134](https://github.com/amarbel-llc/spinclass/issues/134)
+  followups: [#134](https://code.linenisgreat.com/spinclass/issues/134)
   (`currentSessionKey` error message),
-  [#135](https://github.com/amarbel-llc/spinclass/issues/135) (`sc clean`
+  [#135](https://code.linenisgreat.com/spinclass/issues/135) (`sc clean`
   orphaned-build-worktree sweep),
-  [#136](https://github.com/amarbel-llc/spinclass/issues/136) (extract the
+  [#136](https://code.linenisgreat.com/spinclass/issues/136) (extract the
   shared gate preamble).
-  [#128](https://github.com/amarbel-llc/spinclass/issues/128) (decouple chat
+  [#128](https://code.linenisgreat.com/spinclass/issues/128) (decouple chat
   from session-key resolution) was closed as a duplicate — implicit sessions
   give main-checkout agents the unique chat key it asked for.
 - Design doc: `docs/plans/2026-06-09-implicit-sessions-design.md`;

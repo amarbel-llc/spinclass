@@ -111,7 +111,7 @@ func TestFetch_GitHub(t *testing.T) {
 		ghBin:     "gh",
 		run: func(_ context.Context, name string, args ...string) (string, error) {
 			if name == "gh" && len(args) >= 1 && args[0] == "api" {
-				return `{"description":"worktree mgr","html_url":"https://github.com/amarbel-llc/spinclass","owner":{"type":"Organization"}}`, nil
+				return `{"description":"worktree mgr","html_url":"https://code.linenisgreat.com/spinclass","owner":{"type":"Organization"}}`, nil
 			}
 			return "", fmt.Errorf("unexpected call %s %v", name, args)
 		},
@@ -125,7 +125,7 @@ func TestFetch_GitHub(t *testing.T) {
 		Owner:       "amarbel-llc",
 		OwnerType:   "org",
 		Name:        "spinclass",
-		URL:         "https://github.com/amarbel-llc/spinclass",
+		URL:         "https://code.linenisgreat.com/spinclass",
 		Description: "worktree mgr",
 	}
 	if got != want {

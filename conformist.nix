@@ -32,7 +32,7 @@
     };
 
     # eng-versioning(7): go.mod's module path derives the key already
-    # (github.com/amarbel-llc/spinclass -> SPINCLASS_VERSION), pinned
+    # (code.linenisgreat.com/spinclass -> SPINCLASS_VERSION), pinned
     # explicitly to document the version.env contract (matches
     # maneater/nebulous).
     eng-versioning.key = "SPINCLASS_VERSION";

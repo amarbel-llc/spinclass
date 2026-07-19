@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/git"
-	"github.com/amarbel-llc/spinclass/internal/session"
-	"github.com/amarbel-llc/spinclass/internal/sessionlog"
-	"github.com/amarbel-llc/spinclass/internal/spawnhandshake"
-	"github.com/amarbel-llc/spinclass/internal/sweatfileio"
-	"github.com/amarbel-llc/spinclass/internal/worktree"
+	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/sessionlog"
+	"code.linenisgreat.com/spinclass/internal/spawnhandshake"
+	"code.linenisgreat.com/spinclass/internal/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/worktree"
 	"github.com/google/shlex"
 )
 

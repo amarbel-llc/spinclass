@@ -327,7 +327,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 func runStopHook(input hookInput, w io.Writer) error {

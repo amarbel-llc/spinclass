@@ -167,7 +167,7 @@ package validate
 import (
 	"testing"
 
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 func TestCheckClaudeAllowSyntaxValid(t *testing.T) {
@@ -298,7 +298,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 const (
@@ -784,7 +784,7 @@ func Run(w io.Writer, home, repoDir string) int {
 }
 ```
 
-Add `"io"` and `"os"` to imports. Add import for `"github.com/amarbel-llc/spinclass/internal/tap"`.
+Add `"io"` and `"os"` to imports. Add import for `"code.linenisgreat.com/spinclass/internal/tap"`.
 
 **Step 4: Run tests to verify they pass**
 
@@ -809,7 +809,7 @@ and dry-run apply checks with TAP-14 output including subtests.
 
 **Step 1: Add the validate command**
 
-Add import: `"github.com/amarbel-llc/spinclass/internal/validate"`
+Add import: `"code.linenisgreat.com/spinclass/internal/validate"`
 
 Add command:
 

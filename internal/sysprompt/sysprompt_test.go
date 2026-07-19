@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/amarbel-llc/spinclass/internal/git"
-	"github.com/amarbel-llc/spinclass/internal/repoinfo"
+	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/repoinfo"
 )
 
 // envFunc builds a getenv stub from a map.
@@ -183,7 +183,7 @@ func TestRenderRepoBlock(t *testing.T) {
 		Owner:       "amarbel-llc",
 		OwnerType:   "org",
 		Name:        "spinclass",
-		URL:         "https://github.com/amarbel-llc/spinclass",
+		URL:         "https://code.linenisgreat.com/spinclass",
 		Description: "worktree session manager",
 	}
 	for _, mode := range []Mode{ModeWorktree, ModeMainCheckout} {
@@ -194,7 +194,7 @@ func TestRenderRepoBlock(t *testing.T) {
 		mustContain(t, got, "amarbel-llc/spinclass")
 		mustContain(t, got, "github")
 		mustContain(t, got, "org")
-		mustContain(t, got, "https://github.com/amarbel-llc/spinclass")
+		mustContain(t, got, "https://code.linenisgreat.com/spinclass")
 		mustContain(t, got, "worktree session manager")
 	}
 }
@@ -266,7 +266,7 @@ func TestRenderForgeWorkflowBlock(t *testing.T) {
 		name string
 		info repoinfo.RepoInfo
 	}{
-		{"github", repoinfo.RepoInfo{ForgeKind: "github", Owner: "amarbel-llc", Name: "spinclass", URL: "https://github.com/amarbel-llc/spinclass"}},
+		{"github", repoinfo.RepoInfo{ForgeKind: "github", Owner: "amarbel-llc", Name: "spinclass", URL: "https://code.linenisgreat.com/spinclass"}},
 		{"no URL", repoinfo.RepoInfo{ForgeKind: "forgejo", Name: "myrepo"}},
 	} {
 		for _, mode := range []Mode{ModeWorktree, ModeMainCheckout} {

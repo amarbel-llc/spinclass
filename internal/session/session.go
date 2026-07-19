@@ -15,8 +15,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/amarbel-llc/spinclass/internal/sessionlog"
-	"github.com/amarbel-llc/spinclass/internal/worktree"
+	"code.linenisgreat.com/spinclass/internal/sessionlog"
+	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 
 // caller returns "file.go:N" of the call site `skip` frames up from

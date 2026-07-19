@@ -12,7 +12,7 @@ package direnv
 import (
 	"os/exec"
 
-	"github.com/amarbel-llc/spinclass/internal/embeds"
+	"code.linenisgreat.com/spinclass/internal/embeds"
 )
 
 // Resolve returns the absolute path to the direnv binary, preferring the

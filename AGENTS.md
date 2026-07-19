@@ -337,7 +337,7 @@ the producer's own dependency graph.
 
 ## Dependencies
 
-Module: `github.com/amarbel-llc/spinclass`.
+Module: `code.linenisgreat.com/spinclass`.
 
 - `github.com/amarbel-llc/tap/go` — TAP-14 output (non-merge/check commands).
 - `github.com/amarbel-llc/crap/go-crap/v2` — ndjson-crap reader + the

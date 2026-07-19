@@ -327,7 +327,7 @@ These apply once an activation model is chosen, regardless of which.
     env-var description) — the isolation knob spinclass uses during
     init.
 - Implementation tracking issue:
-  [#53](https://github.com/amarbel-llc/spinclass/issues/53),
+  [#53](https://code.linenisgreat.com/spinclass/issues/53),
   scoped to milestone v0.2.0.
 
 ---

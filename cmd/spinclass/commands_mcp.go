@@ -12,10 +12,10 @@ import (
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/server"
 	"github.com/amarbel-llc/purse-first/libs/go-mcp/transport"
 
-	"github.com/amarbel-llc/spinclass/internal/embeds"
-	"github.com/amarbel-llc/spinclass/internal/resources"
-	"github.com/amarbel-llc/spinclass/internal/servelog"
-	"github.com/amarbel-llc/spinclass/internal/sysprompt"
+	"code.linenisgreat.com/spinclass/internal/embeds"
+	"code.linenisgreat.com/spinclass/internal/resources"
+	"code.linenisgreat.com/spinclass/internal/servelog"
+	"code.linenisgreat.com/spinclass/internal/sysprompt"
 )
 
 func registerServeCommand(app *command.App) {

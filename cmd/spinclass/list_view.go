@@ -15,10 +15,10 @@ import (
 	"github.com/mattn/go-isatty"
 	"golang.org/x/term"
 
-	"github.com/amarbel-llc/spinclass/internal/clown"
-	"github.com/amarbel-llc/spinclass/internal/session"
-	"github.com/amarbel-llc/spinclass/internal/sessionpick"
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/clown"
+	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/sessionpick"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 // listMode is the resolved rendering for a CLI `sc list` invocation.

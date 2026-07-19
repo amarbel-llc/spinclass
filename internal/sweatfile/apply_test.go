@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/amarbel-llc/spinclass/internal/embeds"
-	"github.com/amarbel-llc/spinclass/internal/testfs"
-	"github.com/amarbel-llc/spinclass/internal/testgit"
+	"code.linenisgreat.com/spinclass/internal/embeds"
+	"code.linenisgreat.com/spinclass/internal/testfs"
+	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 
 // gitDir returns the directory containing the git binary, for use in tests

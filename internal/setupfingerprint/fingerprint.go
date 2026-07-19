@@ -17,8 +17,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/amarbel-llc/spinclass/internal/embeds"
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/embeds"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 // Scheme is the fingerprint scheme version. Bump it whenever the SET of hashed

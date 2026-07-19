@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/amarbel-llc/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 func TestParseTarget(t *testing.T) {
