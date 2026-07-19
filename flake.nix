@@ -127,7 +127,14 @@
       papi,
     }:
     let
-      spinclassVersion = "0.1.39";
+      # version.env at repo root is the single source of truth for the release
+      # version (eng-versioning(7)). The fork's buildGoApplication auto-reads
+      # it (see mkSpinclass below — no explicit `version` attr is passed), so
+      # this let-binding exists only for the genuine eval-time consumer that
+      # isn't Go: the plugin.json `@VERSION@` substitution in postInstall.
+      spinclassVersion = builtins.head (
+        builtins.match ".*SPINCLASS_VERSION=([^\n]+).*" (builtins.readFile ./version.env)
+      );
       # shortRev for clean builds, dirtyShortRev for dirty trees so devshell
       # builds visibly read `dirty-abcdef` instead of impersonating a release.
       spinclassCommit = self.shortRev or self.dirtyShortRev or "unknown";
@@ -246,7 +253,11 @@
           }:
           pkgs.buildGoApplication {
             pname = "spinclass";
-            version = spinclassVersion;
+            # No explicit `version` here: buildGoApplication auto-reads
+            # version.env (eng-versioning(7) VERSION EMBEDDING) from `src`
+            # (pwd defaults to src when unset) and feeds both the derivation
+            # `version` attr and the `-X main.version` ldflag. An explicit
+            # `version` attr would silently override that auto-read.
             commit = spinclassCommit;
             src = ./.;
             modules = ./gomod2nix.toml;
