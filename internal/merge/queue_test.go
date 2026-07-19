@@ -286,3 +286,75 @@ func TestFinishMergeQueueRebasedLandingTeardown(t *testing.T) {
 	assertOk("delete branch feature-teardown")
 	assertNoLandWorktrees(t, repoDir)
 }
+
+// TestFinishMergeQueuePostPinCommitsSurviveRebasedTeardown: the pin contract
+// allows commits to land on the session branch after PrepareMerge pins ("left
+// for a later merge"). When the landing was ALSO rebased (default branch moved
+// after the pin), the old unconditional `branch -D` would force-delete the
+// advanced ref after `worktree remove` — stranding the post-pin commits
+// unreachable. The fix must instead keep both the worktree and the branch:
+// the pinned commit lands, the post-pin commit stays reachable, and a "keep
+// worktree" test point records why teardown was skipped.
+func TestFinishMergeQueuePostPinCommitsSurviveRebasedTeardown(t *testing.T) {
+	repoDir := setupRepo(t)
+	wtPath := setupWorktree(t, repoDir, "feature-postpin")
+
+	pinnedSha, _, rep, ts, buf := prepareRacedMerge(t, repoDir, wtPath, "feature-postpin",
+		"a.txt", "a", "racing.txt", "race")
+
+	// The other half of the race: a commit lands on the SESSION branch after
+	// the pin (the pin contract's "left for a later merge" window).
+	if err := os.WriteFile(filepath.Join(wtPath, "later.txt"), []byte("later"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "later.txt")
+	runGit(t, wtPath, "commit", "-m", "post-pin commit")
+	postPinSha := runGit(t, wtPath, "rev-parse", "HEAD")
+
+	_, err := FinishMerge(context.Background(), &mockExecutor{}, rep, ts,
+		repoDir, wtPath, "feature-postpin", "main", pinnedSha, false, false, nil)
+	ts.Finish()
+	if err != nil {
+		t.Fatalf("FinishMerge: %v\n%s", err, buf.String())
+	}
+
+	// The pinned session commit and the racing commit both landed on main; the
+	// post-pin commit did NOT.
+	mainLog := runGit(t, repoDir, "log", "--oneline", "main")
+	if !strings.Contains(mainLog, "session commit") || !strings.Contains(mainLog, "racing commit on main") {
+		t.Errorf("expected pinned + racing commits on main, got:\n%s", mainLog)
+	}
+	if strings.Contains(mainLog, "post-pin commit") {
+		t.Errorf("post-pin commit must not land in this merge, got:\n%s", mainLog)
+	}
+
+	// The branch ref survives at the post-pin tip (the commit stays reachable)
+	// and the worktree directory is still on disk.
+	if !git.BranchExists(repoDir, "feature-postpin") {
+		t.Fatal("expected branch feature-postpin to survive (post-pin commits would be unreachable)")
+	}
+	if tip := runGit(t, repoDir, "rev-parse", "refs/heads/feature-postpin"); tip != postPinSha {
+		t.Errorf("branch tip = %s, want the post-pin commit %s", tip, postPinSha)
+	}
+	if _, statErr := os.Stat(wtPath); statErr != nil {
+		t.Errorf("expected the session worktree to survive: %v", statErr)
+	}
+
+	// Teardown was skipped via the "keep worktree" point — no remove/delete.
+	tests := testRecords(decodeRecords(t, buf.Bytes()))
+	foundKeep := false
+	for _, tr := range tests {
+		switch tr.Description {
+		case "keep worktree feature-postpin (commits added since pin; left for a later merge)":
+			if tr.OK {
+				foundKeep = true
+			}
+		case "remove worktree feature-postpin", "delete branch feature-postpin":
+			t.Errorf("teardown ran despite post-pin commits: %+v", tr)
+		}
+	}
+	if !foundKeep {
+		t.Errorf("expected passing 'keep worktree feature-postpin (commits added since pin; left for a later merge)' record, got: %+v", tests)
+	}
+	assertNoLandWorktrees(t, repoDir)
+}

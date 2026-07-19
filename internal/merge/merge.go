@@ -273,7 +273,11 @@ const LandWorktreePrefix = ".land-"
 // moved tip in a transient landing worktree when it is not, runs the pre-merge
 // hook against the exact LANDING sha, ff-only merges it, tears down, and
 // pushes — so the gate always verifies the tree that actually lands and the
-// ff-only merge can no longer lose a race to a concurrent merge.
+// ff-only merge can no longer lose a race to a concurrent merge. Teardown is
+// guarded by the pin contract: when the session branch tip advanced past
+// pinnedSha while this merge waited (commits "left for a later merge"), the
+// worktree and branch are KEPT — not removed/deleted — so the post-pin commits
+// stay reachable for a follow-up merge; the push still happens.
 //
 // With [hooks].disable-merge-queue the pre-#235 path runs instead: hook on
 // pinnedSha → ff-only → teardown → push, no lock.
@@ -396,8 +400,16 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	// transient landing worktree's HEAD was its only ref.
 	cleanupLand()
 
-	// (f)+(g) teardown and push, still under the lock.
-	if tdErr := teardownAndPush(ts, repoPath, wtPath, branch, gitSync, inSession, rebased); tdErr != nil {
+	// (f)+(g) teardown and push, still under the lock. The pin contract allows
+	// commits to land on branch after PrepareMerge pins ("left for a later
+	// merge"), and the queue wait + gate make that window long: resolve the
+	// branch's CURRENT tip (from repoPath — worktree-independent) and only
+	// allow teardown when it still equals the pin. A RevParse failure
+	// conservatively reads as NOT matching — skip deletion rather than risk
+	// force-deleting unreachable post-pin commits.
+	tip, tipErr := git.RevParse(repoPath, "refs/heads/"+branch)
+	tipMatchesPin := tipErr == nil && tip == pinnedSha
+	if tdErr := teardownAndPush(ts, repoPath, wtPath, branch, gitSync, inSession, rebased, tipMatchesPin); tdErr != nil {
 		return blobLinks, tdErr
 	}
 	return blobLinks, nil
@@ -420,7 +432,10 @@ func finishMergeUnqueued(ctx context.Context, rep *crap.Reporter, ts *crap.TestS
 	}
 	ts.Ok("merge " + branch)
 
-	if tdErr := teardownAndPush(ts, repoPath, wtPath, branch, gitSync, inSession, false); tdErr != nil {
+	// tipMatchesPin=true preserves the pre-#235 semantics verbatim: no tip
+	// check, teardown always attempted, plain `-d` with its natural refusal
+	// when the branch tip advanced past the pin.
+	if tdErr := teardownAndPush(ts, repoPath, wtPath, branch, gitSync, inSession, false, true); tdErr != nil {
 		return blobLinks, tdErr
 	}
 	return blobLinks, nil
@@ -492,7 +507,17 @@ func rebaseLanding(ts *crap.TestStream, repoPath, branch, defaultBranch, pinnedS
 // would refuse — force is safe because the patch-identical content just landed
 // via the rebased landing sha. The unrebased path keeps `-d` as the existing
 // safety net.
-func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, gitSync, inSession, forceBranchDelete bool) error {
+//
+// tipMatchesPin gates teardown entirely: the pin contract allows commits to
+// land on branch after PrepareMerge pins, and `git worktree remove` + `-D`
+// would silently strand those post-pin commits unreachable (worktree remove
+// only checks dirtiness, not unmerged commits, and -D bypasses -d's ancestry
+// refusal). When false, both worktree removal and branch deletion are skipped
+// — the worktree and branch survive so the commits stay reachable for a later
+// merge — and an ok "keep worktree" test point records why. The push still
+// happens. finishMergeUnqueued passes true unconditionally (behavior-
+// preserving: no tip check on the pre-#235 path).
+func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, gitSync, inSession, forceBranchDelete, tipMatchesPin bool) error {
 	// Skip worktree removal when running from inside the worktree being
 	// merged (can't remove cwd) or when inside an active session.
 	insideWorktree := false
@@ -501,22 +526,26 @@ func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, gitSy
 	}
 
 	if !inSession && !insideWorktree {
-		out, removeErr := git.Run(repoPath, "worktree", "remove", wtPath)
-		if removeErr != nil {
-			return failStep(ts, "remove worktree "+branch, removeErr, out)
-		}
-		ts.Ok("remove worktree " + branch)
-
-		var delErr error
-		if forceBranchDelete {
-			out, delErr = git.BranchForceDelete(repoPath, branch)
+		if !tipMatchesPin {
+			ts.Ok("keep worktree " + branch + " (commits added since pin; left for a later merge)")
 		} else {
-			out, delErr = git.BranchDelete(repoPath, branch)
+			out, removeErr := git.Run(repoPath, "worktree", "remove", wtPath)
+			if removeErr != nil {
+				return failStep(ts, "remove worktree "+branch, removeErr, out)
+			}
+			ts.Ok("remove worktree " + branch)
+
+			var delErr error
+			if forceBranchDelete {
+				out, delErr = git.BranchForceDelete(repoPath, branch)
+			} else {
+				out, delErr = git.BranchDelete(repoPath, branch)
+			}
+			if delErr != nil {
+				return failStep(ts, "delete branch "+branch, delErr, out)
+			}
+			ts.Ok("delete branch " + branch)
 		}
-		if delErr != nil {
-			return failStep(ts, "delete branch "+branch, delErr, out)
-		}
-		ts.Ok("delete branch " + branch)
 	}
 
 	if gitSync {
