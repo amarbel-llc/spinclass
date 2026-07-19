@@ -468,16 +468,18 @@ func TestResolvedGitSyncRecordStream(t *testing.T) {
 	}
 
 	tests := testRecords(recs)
-	if len(tests) != 6 {
-		t.Fatalf("expected 6 test records, got %d: %+v", len(tests), tests)
+	if len(tests) != 7 {
+		t.Fatalf("expected 7 test records, got %d: %+v", len(tests), tests)
 	}
-	// Pull must come first so the rebase target is fresh.
+	// Pull must come first so the rebase target is fresh; the merge queue
+	// (spinclass#235) re-pulls under the landing lock before the ff.
 	assertTestPoint(t, tests, 0, "pull main", true)
 	assertTestPoint(t, tests, 1, "rebase feature-sync", true)
-	assertTestPoint(t, tests, 2, "merge feature-sync", true)
-	assertTestPoint(t, tests, 3, "remove worktree feature-sync", true)
-	assertTestPoint(t, tests, 4, "delete branch feature-sync", true)
-	assertTestPoint(t, tests, 5, "push", true)
+	assertTestPoint(t, tests, 2, "pull main (landing)", true)
+	assertTestPoint(t, tests, 3, "merge feature-sync", true)
+	assertTestPoint(t, tests, 4, "remove worktree feature-sync", true)
+	assertTestPoint(t, tests, 5, "delete branch feature-sync", true)
+	assertTestPoint(t, tests, 6, "push", true)
 	if !hasSummary(recs) {
 		t.Errorf("expected summary record (stream framing), got: %+v", recs)
 	}

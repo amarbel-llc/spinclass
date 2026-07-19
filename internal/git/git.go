@@ -226,6 +226,36 @@ func NewestFileTime(path string) time.Time {
 	return newest
 }
 
+// CommonGitDir returns the ABSOLUTE path of the repo's shared .git directory
+// (`git rev-parse --git-common-dir`, made absolute), which every worktree of a
+// repo shares. NOT the same as CommonDir, which strips the trailing ".git" and
+// returns the main-checkout ROOT. Per-repo coordination files (e.g. the merge
+// lock, spinclass#235) live inside the git dir so they never appear in
+// worktree status.
+func CommonGitDir(path string) (string, error) {
+	out, err := Run(path, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(out) {
+		out = filepath.Join(path, out)
+	}
+	return filepath.Clean(out), nil
+}
+
+// IsAncestor reports whether ancestor is an ancestor of commit in the repo at
+// dir (`git merge-base --is-ancestor`). git exits 1 when the answer is "no"
+// and >1 on real errors (bad ref, corrupt repo); both surface as an error from
+// Run, and IsAncestor deliberately treats ANY error as "not an ancestor". That
+// is the conservative choice for the merge queue: a false "no" routes to the
+// rebase-landing path, where a genuine error resurfaces loudly from the
+// worktree add or rebase, whereas a false "yes" would ff-merge a sha the moved
+// default branch cannot fast-forward to.
+func IsAncestor(dir, ancestor, commit string) bool {
+	_, err := Run(dir, "merge-base", "--is-ancestor", ancestor, commit)
+	return err == nil
+}
+
 func CommonDir(worktreePath string) (string, error) {
 	out, err := Run(worktreePath, "rev-parse", "--git-common-dir")
 	if err != nil {

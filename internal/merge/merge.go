@@ -8,7 +8,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/amarbel-llc/crap/go-crap/v2/crap"
 	"github.com/charmbracelet/huh"
@@ -17,6 +19,7 @@ import (
 	"github.com/amarbel-llc/spinclass/internal/check"
 	"github.com/amarbel-llc/spinclass/internal/executor"
 	"github.com/amarbel-llc/spinclass/internal/git"
+	"github.com/amarbel-llc/spinclass/internal/mergelock"
 	"github.com/amarbel-llc/spinclass/internal/present"
 	"github.com/amarbel-llc/spinclass/internal/session"
 	"github.com/amarbel-llc/spinclass/internal/sweatfile"
@@ -247,13 +250,164 @@ func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch s
 	return pinnedSha, nil
 }
 
-// FinishMerge runs the slow, committing suffix of a merge against pinnedSha (the
-// sha PrepareMerge returned): the pre-merge hook (run in an isolated detached
-// build worktree pinned to pinnedSha unless [hooks].disable-merge-build-worktree
-// is set), the ff-only merge of pinnedSha into defaultBranch, optional
-// worktree/branch teardown, and push. Stages emit test points on ts; FinishMerge
-// never finishes the stream — the caller owns ts.Finish().
+// ErrIntegrationConflict is returned when the merge queue's landing rebase —
+// replaying the pinned session commits onto a default branch that moved while
+// this merge waited for the lock — hits conflicts. It is the ONLY hard failure
+// class introduced by the merge queue (spinclass#235). Resolution: re-merge,
+// which rebases the session worktree onto the moved tip so the conflicts can
+// be resolved there.
+var ErrIntegrationConflict = errors.New("integration conflict with commits that landed during the merge gate")
+
+// LandWorktreePrefix is the filename prefix of a transient landing-rebase
+// worktree under <repo>/.worktrees/: ".land-<branch>-<shortsha>-<pid>"
+// (mirrors check.BuildWorktreePrefix's naming convention).
+const LandWorktreePrefix = ".land-"
+
+// FinishMerge runs the slow, committing suffix of a merge against pinnedSha
+// (the sha PrepareMerge returned).
+//
+// By default (spinclass#235) it serializes on the per-repo landing lock
+// (internal/mergelock, an flock in the shared .git dir) and, under the lock:
+// re-pulls the default branch (gitSync only), checks whether the default-branch
+// tip is still an ancestor of pinnedSha, rebases the pinned commits onto a
+// moved tip in a transient landing worktree when it is not, runs the pre-merge
+// hook against the exact LANDING sha, ff-only merges it, tears down, and
+// pushes — so the gate always verifies the tree that actually lands and the
+// ff-only merge can no longer lose a race to a concurrent merge.
+//
+// With [hooks].disable-merge-queue the pre-#235 path runs instead: hook on
+// pinnedSha → ff-only → teardown → push, no lock.
+//
+// The pre-merge hook runs in an isolated detached build worktree pinned to the
+// hook sha unless [hooks].disable-merge-build-worktree is set. Stages emit
+// test points on ts; FinishMerge never finishes the stream — the caller owns
+// ts.Finish().
 func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch, pinnedSha string, gitSync, inSession bool, activity io.Writer) (blobLinks []check.BlobLink, err error) {
+	_ = execr // kept for signature stability; close requests go through executor.RequestClose
+
+	// Merge-queue knob. Mirrors PrepareMerge's graceful-degrade hierarchy
+	// load: an unresolvable home or a load failure leaves the queue ENABLED —
+	// the knob only disables when explicitly readable as true.
+	queueDisabled := false
+	if home, _ := os.UserHomeDir(); home != "" {
+		if h, hErr := sweatfileio.LoadWorktreeHierarchy(home, repoPath, wtPath); hErr == nil {
+			queueDisabled = h.Merged.DisableMergeQueueEnabled()
+		}
+	}
+	if queueDisabled {
+		return finishMergeUnqueued(ctx, rep, ts, repoPath, wtPath, branch, pinnedSha, gitSync, inSession, activity)
+	}
+
+	// Acquire the per-repo landing lock BEFORE the gate, so the gate always
+	// runs under the lock against the exact tree that lands (the load-bearing
+	// change of spinclass#235). The lock file lives inside the shared .git
+	// dir — git.CommonGitDir, NOT git.CommonDir (which is the main-checkout
+	// ROOT) — so it never appears in worktree status.
+	lockDir, lockDirErr := git.CommonGitDir(repoPath)
+	if lockDirErr != nil {
+		return nil, failStep(ts, "merge queue "+branch, fmt.Errorf("resolve git common dir for merge lock: %w", lockDirErr), "")
+	}
+	holderID := filepath.Base(repoPath) + "/" + branch // the session key `sc list` prints
+
+	// Periodic wait heartbeats go only to activity (the async job log): test
+	// points are one-shot, so the stream instead gets a single post-acquire
+	// summary point. The [hooks].inactivity-timeout watchdog wraps only the
+	// hook subprocess (sweatfile.RunPreMergeHookInDir), so time spent queued
+	// here is naturally exempt from it.
+	var (
+		waited     bool
+		lastHolder string
+	)
+	waitStart := time.Now()
+	lock, lockErr := mergelock.Acquire(ctx, lockDir, holderID, func(holder string, elapsed time.Duration) {
+		waited = true
+		if holder == "" {
+			holder = "another session"
+		}
+		lastHolder = holder
+		if activity != nil {
+			fmt.Fprintf(activity, "merge queue: waiting behind %s (%s)\n", holder, elapsed.Round(time.Second))
+		}
+	})
+	if lockErr != nil {
+		return nil, failStep(ts, "merge queue "+branch, lockErr, "")
+	}
+	// Release is idempotent, so the deferred release covers every early-return
+	// error path; the push below still happens under the lock.
+	defer func() { _ = lock.Release() }()
+	if waited {
+		ts.Ok(fmt.Sprintf("merge queue wait %s (behind %s)", time.Since(waitStart).Round(time.Second), lastHolder))
+	}
+
+	// (a) Re-pull under the lock: PrepareMerge's pull is now stale by the
+	// length of the queue wait.
+	if gitSync {
+		out, pullErr := git.Pull(repoPath)
+		if pullErr != nil {
+			return nil, failStep(ts, "pull "+defaultBranch+" (landing)", pullErr, out)
+		}
+		ts.Ok("pull " + defaultBranch + " (landing)")
+	}
+
+	// (b) Ancestry check: pinnedSha lands as-is iff the default-branch tip is
+	// still an ancestor of it (nothing landed since PrepareMerge pinned).
+	landingSha := pinnedSha
+	rebased := false
+	cleanupLand := func() {}
+	if !git.IsAncestor(repoPath, defaultBranch, pinnedSha) {
+		// (c) The branch lost the race: rebase the pinned commits onto the
+		// moved tip in a transient detached worktree — NOT the session
+		// worktree, whose HEAD may have advanced past the pin (that is the
+		// pin contract).
+		var landErr error
+		landingSha, cleanupLand, landErr = rebaseLanding(ts, repoPath, branch, defaultBranch, pinnedSha)
+		if landErr != nil {
+			return nil, landErr
+		}
+		rebased = true
+	}
+	// Deferred safety net for error paths below; the explicit call after the
+	// ff is the intended removal point. Idempotent.
+	defer cleanupLand()
+
+	// (d) The gate, under the lock, against the exact sha that will land.
+	// (With [hooks].disable-merge-build-worktree the hook runs in the session
+	// worktree instead — pre-existing resolveHookDir behavior, in which the
+	// sha it verifies is whatever that worktree has checked out.)
+	hookLinks, hookErr := runPreMergeHookContext(ctx, rep, ts, repoPath, wtPath, branch, landingSha, activity)
+	blobLinks = append(blobLinks, hookLinks...)
+	if hookErr != nil {
+		return blobLinks, hookErr
+	}
+
+	// (e) ff-only merge of the landing sha, with a distinct label when the
+	// landing was rebased past a moved tip.
+	mergeLabel := "merge " + branch
+	if rebased {
+		mergeLabel = "merge " + branch + " (rebased onto moved " + defaultBranch + ")"
+	}
+	out, mergeErr := git.Run(repoPath, "merge", "--ff-only", landingSha)
+	if mergeErr != nil {
+		return blobLinks, failStep(ts, mergeLabel, mergeErr, out)
+	}
+	ts.Ok(mergeLabel)
+
+	// The landing commit is now reachable from defaultBranch; until here the
+	// transient landing worktree's HEAD was its only ref.
+	cleanupLand()
+
+	// (f)+(g) teardown and push, still under the lock.
+	if tdErr := teardownAndPush(ts, repoPath, wtPath, branch, gitSync, inSession, rebased); tdErr != nil {
+		return blobLinks, tdErr
+	}
+	return blobLinks, nil
+}
+
+// finishMergeUnqueued is the pre-#235 FinishMerge path, kept verbatim behind
+// the [hooks].disable-merge-queue rollback knob: hook on pinnedSha → ff-only →
+// teardown → push, with no lock, no re-pull, and no landing rebase — a default
+// branch that moved during the hook fails the ff-only merge exactly as before.
+func finishMergeUnqueued(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, pinnedSha string, gitSync, inSession bool, activity io.Writer) (blobLinks []check.BlobLink, err error) {
 	hookLinks, hookErr := runPreMergeHookContext(ctx, rep, ts, repoPath, wtPath, branch, pinnedSha, activity)
 	blobLinks = append(blobLinks, hookLinks...)
 	if hookErr != nil {
@@ -266,6 +420,79 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	}
 	ts.Ok("merge " + branch)
 
+	if tdErr := teardownAndPush(ts, repoPath, wtPath, branch, gitSync, inSession, false); tdErr != nil {
+		return blobLinks, tdErr
+	}
+	return blobLinks, nil
+}
+
+// rebaseLanding replays pinnedSha's commits onto the moved defaultBranch tip
+// in a transient detached worktree under <repo>/.worktrees/ and returns the
+// resulting landing sha plus an idempotent cleanup that force-removes the
+// worktree and prunes admin entries. Call cleanup only after the ff-only merge
+// — until then the landing commit's only ref is this worktree's HEAD.
+//
+// On rebase conflict (or any rebase failure) it best-effort aborts, removes
+// the worktree, emits a failing "land <branch>" test point, and returns an
+// error wrapping ErrIntegrationConflict.
+func rebaseLanding(ts *crap.TestStream, repoPath, branch, defaultBranch, pinnedSha string) (landingSha string, cleanup func(), err error) {
+	noop := func() {}
+	landParent := filepath.Join(repoPath, ".worktrees")
+	if mkErr := os.MkdirAll(landParent, 0o755); mkErr != nil {
+		return "", noop, failStep(ts, "land "+branch, fmt.Errorf("create landing worktree parent %s: %w", landParent, mkErr), "")
+	}
+	name := LandWorktreePrefix + strings.ReplaceAll(branch, "/", "-") + "-" + shortSha(pinnedSha) + "-" + strconv.Itoa(os.Getpid())
+	landPath := filepath.Join(landParent, name)
+
+	// Clear a stale physical dir from an interrupted prior run (same guard,
+	// same rationale as check.resolveHookDir).
+	if rmErr := os.RemoveAll(landPath); rmErr != nil {
+		return "", noop, failStep(ts, "land "+branch, fmt.Errorf("remove stale landing worktree dir %s: %w", landPath, rmErr), "")
+	}
+	if addErr := git.WorktreeAddDetached(repoPath, landPath, pinnedSha); addErr != nil {
+		return "", noop, failStep(ts, "land "+branch, fmt.Errorf("create landing worktree at %s: %w", landPath, addErr), "")
+	}
+	removed := false
+	cleanup = func() {
+		if removed {
+			return
+		}
+		removed = true
+		_ = git.WorktreeForceRemove(repoPath, landPath)
+		_ = git.WorktreePrune(repoPath)
+	}
+
+	out, rebaseErr := git.Rebase(landPath, defaultBranch)
+	if rebaseErr != nil {
+		conflicted, _ := git.UnmergedPaths(landPath)
+		_, _ = git.Run(landPath, "rebase", "--abort") // best-effort
+		cleanup()
+		guidance := "commits landed during the gate conflict with this branch; re-merge to rebase and resolve in the session worktree"
+		conflictErr := fmt.Errorf("%w: %s", ErrIntegrationConflict, guidance)
+		if len(conflicted) > 0 {
+			conflictErr = fmt.Errorf("%w (conflicting: %s): %s", ErrIntegrationConflict, strings.Join(conflicted, ", "), guidance)
+		}
+		return "", noop, failStep(ts, "land "+branch, conflictErr, out)
+	}
+
+	landingSha, shaErr := git.RevParse(landPath, "HEAD")
+	if shaErr != nil {
+		cleanup()
+		return "", noop, failStep(ts, "land "+branch, fmt.Errorf("could not resolve landing HEAD: %w", shaErr), "")
+	}
+	return landingSha, cleanup, nil
+}
+
+// teardownAndPush is FinishMerge's shared suffix: worktree/branch teardown
+// (skipped in-session or when run from inside the worktree), optional push,
+// and the out-of-session close request.
+//
+// forceBranchDelete selects `git branch -D`: after a rebased landing the
+// session branch tip is no longer an ancestor of the default branch, so `-d`
+// would refuse — force is safe because the patch-identical content just landed
+// via the rebased landing sha. The unrebased path keeps `-d` as the existing
+// safety net.
+func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, gitSync, inSession, forceBranchDelete bool) error {
 	// Skip worktree removal when running from inside the worktree being
 	// merged (can't remove cwd) or when inside an active session.
 	insideWorktree := false
@@ -276,13 +503,18 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	if !inSession && !insideWorktree {
 		out, removeErr := git.Run(repoPath, "worktree", "remove", wtPath)
 		if removeErr != nil {
-			return blobLinks, failStep(ts, "remove worktree "+branch, removeErr, out)
+			return failStep(ts, "remove worktree "+branch, removeErr, out)
 		}
 		ts.Ok("remove worktree " + branch)
 
-		out, delErr := git.BranchDelete(repoPath, branch)
+		var delErr error
+		if forceBranchDelete {
+			out, delErr = git.BranchForceDelete(repoPath, branch)
+		} else {
+			out, delErr = git.BranchDelete(repoPath, branch)
+		}
 		if delErr != nil {
-			return blobLinks, failStep(ts, "delete branch "+branch, delErr, out)
+			return failStep(ts, "delete branch "+branch, delErr, out)
 		}
 		ts.Ok("delete branch " + branch)
 	}
@@ -290,7 +522,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	if gitSync {
 		out, pushErr := git.Push(repoPath)
 		if pushErr != nil {
-			return blobLinks, failStep(ts, "push", pushErr, out)
+			return failStep(ts, "push", pushErr, out)
 		}
 		ts.Ok("push")
 	}
@@ -301,7 +533,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 		// and tearing down state.json + the central index symlink here
 		// would orphan the worktree from `sc list`/`resume`/`close` until
 		// the next session.Write. Cleanup is owned by `sc close`/`sc clean`.
-		return blobLinks, nil
+		return nil
 	}
 
 	// Outside session: request graceful close if the target is still
@@ -309,7 +541,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	// (closeShop → close.RunResolved → session.Tombstone) when conditions
 	// warrant; abandoned state is reaped by `sc clean`.
 	_ = executor.RequestClose(repoPath, branch)
-	return blobLinks, nil
+	return nil
 }
 
 // MergeImplicit runs the merge path for a main-checkout (implicit) session:
