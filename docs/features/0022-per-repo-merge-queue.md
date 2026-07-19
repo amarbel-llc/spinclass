@@ -151,7 +151,7 @@ and in the result stream:
 - **`sc clean` does not yet reap orphaned `.land-*` worktrees** from a crash
   between worktree add and cleanup (it reaps `.merge-*` only); a stale dir
   from an interrupted run at the same name is cleared on the next attempt.
-  Follow-up issue being filed separately.
+  Follow-up: issue #237.
 - **With `[hooks].disable-merge-build-worktree`** the gate runs in the
   session worktree (pre-existing `resolveHookDir` behavior), so a rebased
   landing's gate verifies whatever that worktree has checked out — not the

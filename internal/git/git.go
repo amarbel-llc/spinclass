@@ -257,14 +257,10 @@ func IsAncestor(dir, ancestor, commit string) bool {
 }
 
 func CommonDir(worktreePath string) (string, error) {
-	out, err := Run(worktreePath, "rev-parse", "--git-common-dir")
+	out, err := CommonGitDir(worktreePath)
 	if err != nil {
 		return "", err
 	}
-	if !filepath.IsAbs(out) {
-		out = filepath.Join(worktreePath, out)
-	}
-	out = filepath.Clean(out)
 	// Strip trailing .git to get the repo root
 	if filepath.Base(out) == ".git" {
 		out = filepath.Dir(out)
