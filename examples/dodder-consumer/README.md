@@ -28,7 +28,7 @@ exact madder it embeds. Pinning madder from there guarantees the madder that
 *creates* the `.default` store and the dodder that *reuses* it are a
 version-matched pair — sidestepping the FDR 0008 caveat that store reuse was
 only verified for one binary pair. To pin an independent madder instead, add
-a `madder.url = "github:amarbel-llc/madder"` input and use
+a `madder.url = "https://code.linenisgreat.com/madder/archive/master.tar.gz"` input and use
 `madder.packages.${system}.default`.
 
 ## Running the e2e
@@ -58,7 +58,7 @@ shim symlinks, and the `dodder` MCP server in `.mcp.json`.
 dodder-pinned spinclass as a plugin, modeled after `~/eng/lib/circus.nix`:
 
 ```nix
-packages.circus = clown.lib.${system}.mkCircus {
+packages.circus = clown.lib.${system}.mkJuggler {
   plugins = [
     { flake = { packages.${system}.default = spinclassPinned; rev = …; };
       dirs = [ "share/purse-first/spinclass" ]; }
@@ -93,7 +93,7 @@ Notes on the circus:
 
 ## Notes
 
-- `spinclass.url` points at `github:amarbel-llc/spinclass` (master carries
+- `spinclass.url` points at `https://code.linenisgreat.com/spinclass/archive/master.tar.gz` (master carries
   the FDR 0008 integration). To test **local** spinclass changes, swap it
   for `spinclass.url = "path:../..";`.
 - If the store-reuse assertion ever fails, that is the FDR 0008 version-pair

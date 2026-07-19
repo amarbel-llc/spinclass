@@ -82,12 +82,20 @@
         packages.default = spinclassPinned;
 
         # A clown circus bundling the dodder-pinned spinclass + the dodder
-        # and madder clown plugins. mkCircus returns a set of flake outputs
-        # ({ packages; devShells; checks; }); the launchable clown binary is
-        # its packages.default. enableTentClaude = false keeps the example
-        # off the aarch64-linux tent closure (eng defaults to isLinux).
+        # and madder clown plugins. clown's plugin-bundling builder is now
+        # named mkJuggler (renamed from mkCircus upstream, clown#183); it
+        # returns a set of flake outputs ({ packages; devShells; } — the
+        # `checks` member from the old mkCircus shape is gone, unused here
+        # regardless). The launchable clown binary is its packages.default.
+        # The output attribute stays `circus`: eng's own flake.nix
+        # (lib/circus.nix, packages.circus) keeps "circus" as the stable
+        # product noun for an assembled clown+plugins bundle even after the
+        # builder itself was renamed — this example follows that
+        # convention rather than the internal Nix function name.
+        # enableTentClaude = false keeps the example off the aarch64-linux
+        # tent closure (eng defaults to isLinux).
         packages.circus =
-          (clown.lib.${system}.mkCircus {
+          (clown.lib.${system}.mkJuggler {
             inherit plugins;
             enableTentClaude = false;
           }).packages.default;

@@ -348,9 +348,10 @@ explore-dodder-e2e:
     examples/dodder-consumer/e2e.sh
 
 # [explore] Build the clown circus from the dodder-consumer example —
-# clown's mkCircus bundling the dodder-pinned spinclass + dodder + madder
-# clown plugins (modeled after ~/eng/lib/circus.nix). Composition smoke
-# test; building proves the plugins resolve. See examples/dodder-consumer.
+# clown's mkJuggler (renamed from mkCircus, clown#183) bundling the
+# dodder-pinned spinclass + dodder + madder clown plugins (modeled after
+# ~/eng/lib/circus.nix). Composition smoke test; building proves the
+# plugins resolve. See examples/dodder-consumer.
 [group('explore')]
 explore-dodder-circus:
     cd examples/dodder-consumer && nix build .#circus --print-build-logs
