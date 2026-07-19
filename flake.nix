@@ -50,9 +50,10 @@
     };
 
     # conformist: the linter + formatter multiplexer (treefmt successor).
-    # Drives the goimports → gofumpt → nixfmt → shfmt chain plus
-    # shellcheck; config lives in ./conformist.toml. Exposed as the
-    # flake `formatter` and gated by `just lint-fmt` (conformist check).
+    # Consumed as a nix module (conformist.lib.evalModule): config is defined
+    # in ./conformist.nix + presets.{eng,eng-go} and GENERATED (no
+    # hand-written conformist.toml). Exposed as the flake `formatter` and
+    # gated by `just lint-fmt` (the sandboxed checks.formatting).
     conformist = {
       url = "https://code.linenisgreat.com/conformist/archive/master.tar.gz";
       inputs.igloo.follows = "igloo";
@@ -141,38 +142,54 @@
         pkgs-master = import nixpkgs-master { inherit system; };
         inherit (pkgs) lib;
 
-        # Toolchain-hermetic conformist hooks (conformist#59): the TOML-consumer
-        # mirror of the module's build.{wrapper,preCommit,repair}. Returns three
-        # store-pinned wrappers — `conformist` (nix fmt / check / repair entry,
-        # the flake `formatter`), `conformist-pre-commit`
-        # (--staged --exit-zero-on-fix), and `conformist-repair`
-        # (--commit --amend …) — each exec'ing conformist with the toolchain below
-        # baked on PATH, so a hook never silently skips a filetype whose formatter
-        # is absent from the ambient PATH (the conformist#51 trap), and with
-        # --config-file pinned to ./conformist.toml. Supersedes the hand-rolled
-        # conformistFmt; the sweatfile names `conformist-pre-commit` as the
-        # per-commit hook. `go` stays ambient (devShell mkGoEnv) for the
-        # golangci-lint / tommy-codegen linters, per the helper's documented caveat.
-        conformistHooks = conformist.lib.mkToolchainHooks pkgs {
-          conformist = conformist.packages.${system}.default;
-          configFile = ./conformist.toml;
-          tools = [
-            pkgs-master.gofumpt
-            pkgs-master.gotools # provides goimports
-            pkgs.nixfmt
-            pkgs.shfmt
-            pkgs.shellcheck
-            # Nix linters (conformist.toml [linter.statix] / [linter.deadnix]).
-            pkgs.statix
-            pkgs.deadnix
-            # Go linter (conformist.toml [linter.golangci-lint], v2 standard set).
-            pkgs-master.golangci-lint
-            # tommy fmt owns *.toml (conformist.toml [formatter.tommy]); same
-            # input that backs the bridged library + codegen tool.
-            tommy.packages.${system}.default
-            # conformist.toml [linter.tommy-codegen] repair driver.
-            tommy.packages.${system}.conformist-tommy-codegen
+        # tommy fmt (*.toml) and the tommy-codegen repair linter have no
+        # registry program (repo-specific) and need the `tommy` flake input,
+        # so they are inlined here rather than in ./conformist.nix (a
+        # standalone module file can't see flake inputs — same shape as
+        # cutting-garden's/dodder's conformistTommyModule). getExe' with an
+        # explicit binary name: tommy lacks meta.mainProgram.
+        #
+        # command="true" / repair-command=conformist-tommy-codegen matches the
+        # old [linter.tommy-codegen] stanza exactly: run-once whole-tree
+        # (passes-files=false), check is a deliberate no-op (tommy's own
+        # --check diverges from the gofumpt'd committed codec and needs `go`
+        # on PATH), repair regenerates via the store-pinned driver. `just
+        # gen-tommy-check` (not conformist) is the separate drift-enforcing
+        # guard (#159) — no restage-repair-outputs/stage-* flags here.
+        conformistTommyModule =
+          { ... }:
+          {
+            settings.formatter.tommy = {
+              command = pkgs.lib.getExe' tommy.packages.${system}.default "tommy";
+              options = [ "fmt" ];
+              includes = [ "*.toml" ];
+            };
+            settings.linter.tommy-codegen = {
+              command = "true";
+              "repair-command" =
+                pkgs.lib.getExe' tommy.packages.${system}.conformist-tommy-codegen
+                  "conformist-tommy-codegen";
+              includes = [ "*.go" ];
+              "passes-files" = false;
+            };
+          };
+
+        # conformist config via its nix module (conformist#51/#114): the eng
+        # preset (eng-convention linters) + the canonical Go formatter chain
+        # (eng-go) + this repo's formatters/excludes (./conformist.nix) + the
+        # tommy blocks above. Drives `nix fmt` (build.wrapper), the sandboxed
+        # `checks.formatting` (build.check), and the store-pinned
+        # `conformist-pre-commit` / `conformist-repair` hook commands the
+        # sweatfile names (FDR 0019). Supersedes the hand-rolled
+        # mkToolchainHooks + hand-written ./conformist.toml.
+        conformistEval = conformist.lib.evalModule pkgs {
+          imports = [
+            conformist.lib.presets.eng
+            conformist.lib.presets.eng-go
+            ./conformist.nix
+            conformistTommyModule
           ];
+          package = conformist.packages.${system}.default;
         };
 
         # Consumer half of the flake-input-go_mod protocol (RFC 0001):
@@ -375,6 +392,10 @@
         # burn-in.
         checks = {
           spinclass = mkSpinclass forgePins;
+          # Sandboxed read-only formatting + eng-convention-linter gate
+          # (conformist check against a /nix/store snapshot of the tracked
+          # tree). `just lint-fmt` builds this. See conformistEval above.
+          formatting = conformistEval.config.build.check self;
         }
         // batsLaneOutputs;
 
@@ -383,8 +404,9 @@
         # absolute /nix/store paths burned in.
         lib.mkSpinclass = mkSpinclass;
 
-        # `nix fmt` runs conformist (the toolchain-hermetic wrapper).
-        inherit (conformistHooks) formatter;
+        # `nix fmt` runs the module-generated conformist wrapper (see
+        # conformistEval above).
+        formatter = conformistEval.config.build.wrapper;
 
         devShells.default = pkgs-master.mkShell {
           packages = [
@@ -400,15 +422,16 @@
             # buildGoApplication / mkGoEnv — not in upstream nixpkgs.
             pkgs.gomod2nix
             pkgs.bats
-            # conformist hooks (toolchain-hermetic wrappers, conformist#59):
-            # `conformist` (= conformistHooks.formatter; what `just fmt` /
-            # `just lint-fmt` invoke) REPLACES the bare conformist binary on PATH,
-            # so a bare `conformist` resolves to the toolchain-carrying wrapper —
-            # plus the `conformist-pre-commit` / `conformist-repair` hook commands
-            # the sweatfile names. The formatter tools below stay for ad-hoc use.
-            conformistHooks.formatter
-            conformistHooks.preCommit
-            conformistHooks.repair
+            # conformist hooks, from the nix module eval (conformistEval
+            # above): `conformist` (= conformistEval.config.build.wrapper;
+            # what `just fmt` / `nix fmt` invoke) REPLACES the bare conformist
+            # binary on PATH, so a bare `conformist` resolves to the
+            # toolchain-carrying wrapper — plus the `conformist-pre-commit` /
+            # `conformist-repair` hook commands the sweatfile names. The
+            # formatter tools below stay for ad-hoc use.
+            conformistEval.config.build.wrapper
+            conformistEval.config.build.preCommit
+            conformistEval.config.build.repair
             pkgs.nixfmt
             pkgs.shfmt
             pkgs.shellcheck
@@ -418,8 +441,9 @@
             # bridged tommy library — so `go generate ./internal/sweatfile`
             # (//go:generate tommy generate) targets a matching cst API.
             tommy.packages.${system}.default
-            # conformist tommy-codegen repair driver (conformist.toml
-            # [linter.tommy-codegen]); so `just fmt` regenerates the codec.
+            # conformist tommy-codegen repair driver ([linter.tommy-codegen]
+            # in conformistTommyModule above); so `just fmt` regenerates the
+            # codec.
             tommy.packages.${system}.conformist-tommy-codegen
           ]
           ++ (with pkgs-master; [

@@ -19,21 +19,28 @@ test-bats-madder:
     nix build .#bats-madder --no-link --print-build-logs
 
 # Format all source files via conformist (the treefmt successor): Go
-# (goimports → gofumpt), Nix (nixfmt), shell/bats (shfmt). Config lives
-# in ./conformist.toml. The read-only counterpart is `lint-fmt`.
+# (goimports → gofumpt), Nix (nixfmt), shell/bats (shfmt), TOML (tommy fmt).
+# Config is Nix-generated from ./conformist.nix + presets.{eng,eng-go}. The
+# read-only counterpart is `lint-fmt`.
 fmt:
-    nix develop --command conformist
+    nix fmt
 
 lint: lint-fmt
 
-# Read-only format + lint gate via conformist: fails on formatter drift
-# (Go/Nix/shell/TOML, per ./conformist.toml) plus the linters — shellcheck and
-# golangci-lint (the [linter.golangci-lint] run-once entry, v2 `standard` set:
-# errcheck/govet/staticcheck/ineffassign/unused, config in .golangci.yml).
-# `just fmt` is the corresponding write mode. Folded into `just lint` →
-# `just default`, so the pre-merge `just` hook enforces it on every merge.
+# Read-only format + lint gate via the sandboxed checks.formatting
+# derivation: formatter drift (Go/Nix/shell/TOML, per ./conformist.nix) plus
+# the linters — shellcheck, statix/deadnix, tommy-codegen, golangci-lint (the
+# [linter.golangci-lint] run-once entry, v2 `standard` set:
+# errcheck/govet/staticcheck/ineffassign/unused, config in .golangci.yml), and
+# the eng-convention linters (eng-versioning, flake-outputs/lock, justfile-*)
+# from conformist.lib.presets.eng. `just fmt` is the corresponding write mode.
+# Folded into `just lint` → `just default`, so the pre-merge `just` hook
+# enforces it on every merge.
 lint-fmt:
-    nix develop --command conformist check
+    #!/usr/bin/env bash
+    set -euo pipefail
+    system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    nix build ".#checks.${system}.formatting" --no-link --print-build-logs
 
 clean:
     rm -rf result
