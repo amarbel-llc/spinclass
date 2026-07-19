@@ -1,38 +1,15 @@
-default: lint build test gen-tommy-check
+default: lint build test verify
 
-build:
-    nix build --show-trace
-
-test:
-    nix flake check --print-build-logs
-
-test-bats:
-    nix build .#bats-default --no-link --print-build-logs
-
-test-bats-race:
-    nix build .#bats-race --no-link --print-build-logs
-
-# madder-pinned bats lane: runs zz-tests_bats against a spinclass built
-# with a madder pin so the tap-ndjson tests in hooks.bats run instead of
-# skipping (#85). Folded into `just test` via the bats-madder flake check.
-test-bats-madder:
-    nix build .#bats-madder --no-link --print-build-logs
-
-# Format all source files via conformist (the treefmt successor): Go
-# (goimports → gofumpt), Nix (nixfmt), shell/bats (shfmt), TOML (tommy fmt).
-# Config is Nix-generated from ./conformist.nix + presets.{eng,eng-go}. The
-# read-only counterpart is `lint-fmt`.
-fmt:
-    nix fmt
+# --- lint ---
 
 lint: lint-fmt lint-worktree
 
 # Read-only format + lint gate via the sandboxed checks.formatting
 # derivation: formatter drift (Go/Nix/shell/TOML, per ./conformist.nix) plus
 # the linters — shellcheck, statix/deadnix, tommy-codegen, and the
-# eng-convention linters (eng-versioning, flake-outputs/lock, justfile-*)
-# from conformist.lib.presets.eng. `just fmt` is the corresponding write mode.
-# Folded into `just lint` → `just default`, so the pre-merge `just` hook
+# eng-convention linters (eng-versioning, flake-outputs/lock, justfile-*) from
+# conformist.lib.presets.eng. `just codemod-fmt` is the corresponding write
+# mode. Folded into `just lint` → `just default`, so the pre-merge `just` hook
 # enforces it on every merge.
 lint-fmt:
     #!/usr/bin/env bash
@@ -52,11 +29,14 @@ lint-worktree:
     cfg=$(nix build --no-link --print-out-paths '.#conformist-impure-config')
     conformist check --config-file "$cfg" --tree-root .
 
-clean:
-    rm -rf result
+# --- build ---
 
-deps:
-    nix develop --command gomod2nix
+build: build-nix build-tommy-codegen
+
+# Build the spinclass binary via nix (burns version.env + commit into the
+# binary via -ldflags — see mkSpinclass in flake.nix).
+build-nix:
+    nix build --show-trace
 
 # Regenerate the tommy-generated sweatfile codec (sweatfile_tommy.go) after a
 # tommy bump or a Sweatfile struct change. The devshell ships the tommy binary
@@ -64,20 +44,79 @@ deps:
 # library), so `go generate` (//go:generate tommy generate) finds it on PATH —
 # do NOT `go build` tommy from the main module here: module graph pruning
 # drops the codegen tool's transitive deps from go.sum (#140). Run after
-# `just deps`. (No trailing gofumpt: tommy v0.4.6 gofumpt's its generated
-# output internally, version-matched to go.mod via #134, so an extra pass is a
-# no-op.)
-gen-tommy:
+# `just update-gomod2nix`. (No trailing gofumpt: tommy v0.4.6 gofumpt's its
+# generated output internally, version-matched to go.mod via #134, so an
+# extra pass is a no-op.)
+build-tommy-codegen:
     nix develop --command go generate ./internal/sweatfile/
+
+# --- test ---
+
+test: test-nix
+
+# Go unit tests plus every bats integration lane via `nix flake check` (the
+# [checks] output: spinclass's `go test ./...`, bats-default, bats-race,
+# bats-madder, plus the formatting gate — the same set `lint-fmt` targets
+# individually).
+test-nix:
+    nix flake check --print-build-logs
+
+# --- verify ---
+
+verify: verify-version-burnin verify-tommy-codegen
+
+# Verify that the nix-built binary has version+commit burnt in via the
+# fork's buildGoApplication ldflags (auto-reading version.env —
+# eng-versioning(7)), and that the version prefix matches version.env.
+verify-version-burnin: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    got="$(./result/bin/spinclass version)"
+    echo "spinclass version: $got"
+    [[ "$got" =~ ^[^+]+\+[^+]+$ ]] || { echo "bad shape: $got" >&2; exit 1; }
+    [[ "$got" != "dev+unknown" ]]   || { echo "ldflags did not fire" >&2; exit 1; }
+    . ./version.env
+    prefix="${got%%+*}"
+    [[ "$prefix" == "$SPINCLASS_VERSION" ]] || \
+        { echo "version prefix '$prefix' != version.env '$SPINCLASS_VERSION'" >&2; exit 1; }
+    echo "OK: shape, non-default, prefix match"
 
 # Drift guard (#159): regenerate the codec and fail if it differs from the
 # committed file — catches a `tommy` pin bump landed without a matching
-# `just gen-tommy`. Lives here (a go-available lane, folded into `default` →
-# the pre-merge hook) rather than conformist: the [linter.tommy-codegen] check
-# is a deliberate no-op because the conformist check lane lacks `go`. The
-# conformist stanza automates regen in the repair lane; this enforces it.
-gen-tommy-check: gen-tommy
+# `just build-tommy-codegen`. Lives here (a go-available lane) rather than
+# conformist: the [linter.tommy-codegen] check is a deliberate no-op because
+# the conformist check lane lacks `go`. The conformist stanza automates
+# regen in the repair lane; this enforces it.
+verify-tommy-codegen: build-tommy-codegen
     git diff --exit-code -- internal/sweatfile/sweatfile_tommy.go
+
+# --- codemod ---
+
+codemod-fmt: codemod-fmt-tree
+
+# Format the tree in place (repair mode) via `nix fmt`: Go (goimports →
+# gofumpt), Nix (nixfmt), shell/bats (shfmt), TOML (tommy fmt). Config is
+# Nix-generated from ./conformist.nix + presets.{eng,eng-go}. The read-only
+# counterpart is `lint-fmt`.
+codemod-fmt-tree:
+    nix fmt
+
+# --- clean ---
+
+clean: clean-build
+
+# Remove the nix build result symlink.
+clean-build:
+    rm -rf result
+
+# --- maintenance ---
+
+# Regenerate gomod2nix.toml after go.mod/go.sum changes. Deliberately NOT
+# wired into `build`: spinclass regenerates this manually after a dependency
+# change rather than on every build (unlike e.g. crap/papi's always-fresh
+# convention).
+update-gomod2nix:
+    nix develop --command gomod2nix
 
 # [explore] Inspect nix-store --gc --print-roots output for entries pointing
 # into the spinclass repo. Used to investigate issue #67 — what does
@@ -316,6 +355,31 @@ explore-dodder-e2e:
 explore-dodder-circus:
     cd examples/dodder-consumer && nix build .#circus --print-build-logs
 
+# [debug] Build just the bats-default lane, without the full `test-nix` (nix
+# flake check) run — already fully covered by `test-nix`/`checks.bats-default`;
+# this is a drill-down for iterating on zz-tests_bats without waiting for the
+# unit-test checkPhase or the other bats lanes (mirrors tommy's
+# debug-bats-nix-tag).
+[group('debug')]
+debug-bats-default:
+    nix build .#bats-default --no-link --print-build-logs
+
+# [debug] Build just the race-instrumented bats lane. Slower than
+# bats-default (race-detector overhead); already covered by `test-nix` —
+# deliberately NOT wired into the `test` aggregate as a first-class step so
+# `just`/`just test` stays fast, matching this repo's other opt-in slow lanes.
+[group('debug')]
+debug-bats-race:
+    nix build .#bats-race --no-link --print-build-logs
+
+# [debug] Build just the madder-pinned bats lane: runs zz-tests_bats against a
+# spinclass built with a madder pin so the tap-ndjson tests in hooks.bats run
+# instead of skipping (#85). Already covered by `test-nix` via the
+# bats-madder flake check; this is the single-lane drill-down.
+[group('debug')]
+debug-bats-madder:
+    nix build .#bats-madder --no-link --print-build-logs
+
 # [debug] Pipe a synthetic PreToolUse payload for merge-this-session through
 # the installed plugin handler, then print exit code, stdout, and stderr.
 [group('debug')]
@@ -397,23 +461,12 @@ debug-render-tty cols="100" *args="list":
     sleep 2
     posh history "$sess"
 
-# Verify that the nix-built binary has version+commit burnt in via the
-# fork's buildGoApplication ldflags, and that the prefix matches the
-# spinclassVersion literal in flake.nix.
-verify-version-burnin: build
-    #!/usr/bin/env bash
-    set -euo pipefail
-    got="$(./result/bin/spinclass version)"
-    echo "spinclass version: $got"
-    [[ "$got" =~ ^[^+]+\+[^+]+$ ]] || { echo "bad shape: $got" >&2; exit 1; }
-    [[ "$got" != "dev+unknown" ]]   || { echo "ldflags did not fire" >&2; exit 1; }
-    flake_version="$(grep 'spinclassVersion = ' flake.nix | sed 's/.*"\(.*\)".*/\1/')"
-    prefix="${got%%+*}"
-    [[ "$prefix" == "$flake_version" ]] || \
-        { echo "version prefix '$prefix' != flake.nix '$flake_version'" >&2; exit 1; }
-    echo "OK: shape, non-default, prefix match"
-
-dev-repo:
+# [debug] Scaffold a throwaway repo wired (via direnv PATH_add) to a
+# devshell-built spinclass binary, then drop into $SHELL inside it — a
+# real-worktree-free sandbox for manually exercising `sc start`/etc. against
+# uncommitted spinclass changes.
+[group('debug')]
+debug-dev-repo:
     #!/usr/bin/env bash
     set -euo pipefail
     build_dir="$(pwd)/build"

@@ -7,7 +7,10 @@
     # `nixpkgs-master` so the overlay sits on the same base that
     # `pkgs-master` consumes, instead of pulling a second master-tracking
     # copy.
-    igloo.url = "https://code.linenisgreat.com/igloo/archive/master.tar.gz";
+    igloo = {
+      url = "https://code.linenisgreat.com/igloo/archive/master.tar.gz";
+      inputs.nixpkgs-master.follows = "nixpkgs-master";
+    };
 
     # Upstream pin: source of the Go toolchain we pin via
     # GOTOOLCHAIN=local + go_1_26, plus general dev tools that don't
@@ -15,7 +18,10 @@
     # `nix flake update` of the fork.
     nixpkgs-master.url = "github:NixOS/nixpkgs/567a49d1913ce81ac6e9582e3553dd90a955875f";
 
-    utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
+    utils = {
+      url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
+      inputs.systems.follows = "igloo/systems";
+    };
 
     # Source of `batsLane`, `batman`, and the bats helper libraries
     # (`bats-libs`, `bats-support`, `bats-assert`, …). Previously
@@ -24,9 +30,12 @@
     # flake and is reached as `bats.lib.${system}.batsLane`.
     bats = {
       url = "https://code.linenisgreat.com/bats/archive/master.tar.gz";
-      inputs.igloo.follows = "igloo";
-      inputs.nixpkgs-master.follows = "nixpkgs-master";
-      inputs.utils.follows = "utils";
+      inputs = {
+        igloo.follows = "igloo";
+        nixpkgs-master.follows = "nixpkgs-master";
+        utils.follows = "utils";
+        conformist.follows = "conformist";
+      };
     };
 
     # Source of the madder binary the `bats-madder` lane pins into
@@ -39,14 +48,18 @@
     # `mkSpinclass {}` build is unaffected.
     madder = {
       url = "https://code.linenisgreat.com/madder/archive/master.tar.gz";
-      inputs.igloo.follows = "igloo";
-      inputs.nixpkgs-master.follows = "nixpkgs-master";
-      inputs.utils.follows = "utils";
-      inputs.bats.follows = "bats";
-      # Dedupe tommy onto our top-level input (the single source of
-      # truth that backs goFlakeInputs + the codegen binary) so the
-      # graph resolves exactly one tommy rev.
-      inputs.tommy.follows = "tommy";
+      inputs = {
+        igloo.follows = "igloo";
+        nixpkgs-master.follows = "nixpkgs-master";
+        utils.follows = "utils";
+        bats.follows = "bats";
+        # Dedupe tommy onto our top-level input (the single source of
+        # truth that backs goFlakeInputs + the codegen binary) so the
+        # graph resolves exactly one tommy rev.
+        tommy.follows = "tommy";
+        conformist.follows = "conformist";
+        crap.follows = "crap";
+      };
     };
 
     # conformist: the linter + formatter multiplexer (treefmt successor).
@@ -56,9 +69,11 @@
     # gated by `just lint-fmt` (the sandboxed checks.formatting).
     conformist = {
       url = "https://code.linenisgreat.com/conformist/archive/master.tar.gz";
-      inputs.igloo.follows = "igloo";
-      inputs.nixpkgs-master.follows = "nixpkgs-master";
-      inputs.utils.follows = "utils";
+      inputs = {
+        igloo.follows = "igloo";
+        nixpkgs-master.follows = "nixpkgs-master";
+        utils.follows = "utils";
+      };
     };
 
     # crap: source of the go-crap Go module (ndjson-crap wire format +
@@ -66,10 +81,13 @@
     # by the `ndjson-crap` pre-merge-output-format in internal/check.
     crap = {
       url = "https://code.linenisgreat.com/crap/archive/master.tar.gz";
-      inputs.igloo.follows = "igloo";
-      inputs.nixpkgs-master.follows = "nixpkgs-master";
-      inputs.utils.follows = "utils";
-      inputs.bats.follows = "bats";
+      inputs = {
+        igloo.follows = "igloo";
+        nixpkgs-master.follows = "nixpkgs-master";
+        utils.follows = "utils";
+        bats.follows = "bats";
+        conformist.follows = "conformist";
+      };
     };
 
     # Single source of truth for tommy (TOML library + codegen tool):
@@ -79,9 +97,20 @@
     # tag deliberately + regen the codec when adopting a new tommy.
     tommy = {
       url = "https://code.linenisgreat.com/tommy/archive/master.tar.gz";
-      inputs.igloo.follows = "igloo";
-      inputs.nixpkgs-master.follows = "nixpkgs-master";
-      inputs.utils.follows = "utils";
+      inputs = {
+        igloo.follows = "igloo";
+        nixpkgs-master.follows = "nixpkgs-master";
+        utils.follows = "utils";
+        bats.follows = "bats";
+        conformist.follows = "conformist";
+        tap = {
+          follows = "madder/tap";
+          inputs = {
+            treefmt-nix.follows = "igloo/treefmt-nix";
+            gomod2nix.inputs.flake-utils.follows = "utils";
+          };
+        };
+      };
     };
 
     # papi: the Personal API CLI. Pinned into spinclass via
@@ -93,24 +122,15 @@
     # is pinned from nixpkgs-master (`pkgs-master.gh`).
     papi = {
       url = "https://code.linenisgreat.com/papi/archive/master.tar.gz";
-      inputs.igloo.follows = "igloo";
-      inputs.nixpkgs-master.follows = "nixpkgs-master";
-      inputs.utils.follows = "utils";
+      inputs = {
+        igloo.follows = "igloo";
+        nixpkgs-master.follows = "nixpkgs-master";
+        utils.follows = "utils";
+        conformist.follows = "conformist";
+        piggy.follows = "madder/piggy";
+        purse-first.follows = "madder/purse-first";
+      };
     };
-    tommy.inputs.tap.inputs.treefmt-nix.follows = "igloo/treefmt-nix";
-    crap.inputs.conformist.follows = "conformist";
-    madder.inputs.conformist.follows = "conformist";
-    papi.inputs.conformist.follows = "conformist";
-    madder.inputs.crap.follows = "crap";
-    utils.inputs.systems.follows = "igloo/systems";
-    papi.inputs.piggy.follows = "madder/piggy";
-    papi.inputs.purse-first.follows = "madder/purse-first";
-    igloo.inputs.nixpkgs-master.follows = "nixpkgs-master";
-    tommy.inputs.tap.inputs.gomod2nix.inputs.flake-utils.follows = "utils";
-    tommy.inputs.bats.follows = "bats";
-    tommy.inputs.conformist.follows = "conformist";
-    tommy.inputs.tap.follows = "madder/tap";
-    bats.inputs.conformist.follows = "conformist";
   };
 
   outputs =
@@ -163,23 +183,21 @@
         # on PATH), repair regenerates via the store-pinned driver. `just
         # gen-tommy-check` (not conformist) is the separate drift-enforcing
         # guard (#159) — no restage-repair-outputs/stage-* flags here.
-        conformistTommyModule =
-          { ... }:
-          {
-            settings.formatter.tommy = {
-              command = pkgs.lib.getExe' tommy.packages.${system}.default "tommy";
-              options = [ "fmt" ];
-              includes = [ "*.toml" ];
-            };
-            settings.linter.tommy-codegen = {
-              command = "true";
-              "repair-command" =
-                pkgs.lib.getExe' tommy.packages.${system}.conformist-tommy-codegen
-                  "conformist-tommy-codegen";
-              includes = [ "*.go" ];
-              "passes-files" = false;
-            };
+        conformistTommyModule = _: {
+          settings.formatter.tommy = {
+            command = pkgs.lib.getExe' tommy.packages.${system}.default "tommy";
+            options = [ "fmt" ];
+            includes = [ "*.toml" ];
           };
+          settings.linter.tommy-codegen = {
+            command = "true";
+            "repair-command" =
+              pkgs.lib.getExe' tommy.packages.${system}.conformist-tommy-codegen
+                "conformist-tommy-codegen";
+            includes = [ "*.go" ];
+            "passes-files" = false;
+          };
+        };
 
         # conformist config via its nix module (conformist#51/#114): the eng
         # preset (eng-convention linters) + the canonical Go formatter chain
