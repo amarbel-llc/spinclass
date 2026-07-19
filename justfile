@@ -68,11 +68,17 @@ verify: verify-version-burnin verify-tommy-codegen
 # Verify that the nix-built binary has version+commit burnt in via the
 # fork's buildGoApplication ldflags (auto-reading version.env —
 # eng-versioning(7)), and that the version prefix matches version.env.
+# `spinclass version` emits the blessed self-as-row component table
+# (eng-versioning(7) "version subcommand output"), so the self version
+# is the VERSION column of the first `spinclass-*` row, not raw stdout.
 verify-version-burnin: build
     #!/usr/bin/env bash
     set -euo pipefail
-    got="$(./result/bin/spinclass version)"
-    echo "spinclass version: $got"
+    table="$(./result/bin/spinclass version)"
+    echo "spinclass version:"
+    echo "$table"
+    got="$(awk '$1 ~ /^spinclass-/ { print $2; exit }' <<<"$table")"
+    [[ -n "$got" ]] || { echo "no spinclass self-row in version table" >&2; exit 1; }
     [[ "$got" =~ ^[^+]+\+[^+]+$ ]] || { echo "bad shape: $got" >&2; exit 1; }
     [[ "$got" != "dev+unknown" ]]   || { echo "ldflags did not fire" >&2; exit 1; }
     . ./version.env
