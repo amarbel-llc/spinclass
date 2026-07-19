@@ -5,21 +5,21 @@
     # spinclass master already carries the FDR 0008 dodder integration.
     # To test LOCAL spinclass changes instead, swap this for:
     #   spinclass.url = "path:../..";
-    spinclass.url = "github:amarbel-llc/spinclass";
+    spinclass.url = "https://code.linenisgreat.com/spinclass/archive/master.tar.gz";
 
     # dodder also re-exports the exact madder it embeds as `madder-bin`,
     # which we use for the binary pin (see `spinclassPinned`) so the
     # madder that creates the .default store and the dodder that reuses
     # it are a version-matched pair — sidestepping the FDR 0008 caveat
     # that store reuse was only verified for one binary pair.
-    dodder.url = "github:amarbel-llc/dodder";
+    dodder.url = "https://code.linenisgreat.com/dodder/archive/master.tar.gz";
 
     # madder is pulled in ONLY for its clown plugin (`madder-clown-plugin`);
     # the spinclass binary pin uses dodder's matched `madder-bin` instead.
-    madder.url = "github:amarbel-llc/madder";
+    madder.url = "https://code.linenisgreat.com/madder/archive/master.tar.gz";
 
     # clown's mkCircus bundles the plugins into a launchable clown binary.
-    clown.url = "github:amarbel-llc/clown";
+    clown.url = "https://code.linenisgreat.com/clown/archive/master.tar.gz";
 
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     utils.url = "github:numtide/flake-utils";
