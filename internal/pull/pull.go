@@ -7,7 +7,7 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/worktree"
-	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
+	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
 
 type repoInfo struct {

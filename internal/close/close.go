@@ -19,8 +19,8 @@ import (
 	"code.linenisgreat.com/spinclass/internal/tapblock"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 
-	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
-	"github.com/amarbel-llc/tap/go/pkgs/yaml_diagnostic"
+	tap "code.linenisgreat.com/tap/go/pkgs/writer"
+	"code.linenisgreat.com/tap/go/pkgs/yaml_diagnostic"
 )
 
 // Run closes a session. dbg, when non-nil, is forwarded to the

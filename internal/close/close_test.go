@@ -13,7 +13,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/nixgc"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/testgit"
-	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
+	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
 
 // TestCloseImplicitRemovesStateNotCheckout verifies the implicit

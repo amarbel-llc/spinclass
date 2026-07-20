@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/crap/go-crap/v2/crap"
+	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/session"
-	"github.com/amarbel-llc/crap/go-crap/v2/crap"
-	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
-	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
+	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
 
 type mockExecutor struct {

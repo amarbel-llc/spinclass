@@ -6,13 +6,13 @@
 
 **Architecture:** `internal/merge` and `internal/check` drop `*tap.Writer` for `*crap.Reporter` (crap/go-crap/v2). Merge stages are result-family test points (preserving TAP's verdict+diagnostic information model — `presentPlain` echoes failure diagnostics for Test records); the pre-merge hook stage is *additionally* wrapped in an execution-family Phase whose `Output` records carry the hook's live lines (the viewport's rolling tail). Mixed-family streams are explicitly legal in ndjson-crap. Presentation is consumer selection in a new `internal/present` package: `auto` (default) → viewport on TTY / raw ndjson piped; `viewport`/`plain`/`ndjson` force. MCP handlers buffer records and render the plain (verdict-per-line) text for agents; madder BlobLinks are untouched (they travel as Go return values).
 
-**Tech Stack:** `github.com/amarbel-llc/crap/go-crap/v2` (`crap` Reporter, `ndjsoncrap`, `viewport`), `github.com/mattn/go-isatty` (already a dep), bubbletea (already a dep via huh).
+**Tech Stack:** `code.linenisgreat.com/crap/go-crap/v2` (`crap` Reporter, `ndjsoncrap`, `viewport`), `github.com/mattn/go-isatty` (already a dep), bubbletea (already a dep via huh).
 
 **Rollback:** `git revert` of this series. No dual period (approved design decision): change is presentation-only — git operations, session state, blob storage, attestation gate untouched. `--format plain` is the boring-terminal escape.
 
 **Design doc:** `docs/plans/2026-06-10-merge-ndjson-crap-viewport-design.md` (approved).
 
-**Reference reading for any task:** crap's producer API `crap/go-crap/go.mod`-module: package `crap` (`Reporter`, `TestStream` Ok/NotOk/Skip/Finish, `Phase` Command/Output/Done/Fail), package `viewport` (`Present(in, Options{Title,TailLines,Out,IsTTY})`, `presentPlain` semantics), package `ndjsoncrap` (record structs). Read with `hamster doc github.com/amarbel-llc/crap/go-crap/v2/<pkg>` or `hamster mod-read`.
+**Reference reading for any task:** crap's producer API `crap/go-crap/go.mod`-module: package `crap` (`Reporter`, `TestStream` Ok/NotOk/Skip/Finish, `Phase` Command/Output/Done/Fail), package `viewport` (`Present(in, Options{Title,TailLines,Out,IsTTY})`, `presentPlain` semantics), package `ndjsoncrap` (record structs). Read with `hamster doc code.linenisgreat.com/crap/go-crap/v2/<pkg>` or `hamster mod-read`.
 
 **Build/test commands:** scoped Go tests via the hamster MCP tool (`go-test` with `packages`/`run`); compile checks via `hamster go-build`. Do NOT run full `just`/`just test` mid-series — the merge hook is the CI lane.
 
@@ -33,7 +33,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/amarbel-llc/crap/go-crap/v2/crap"
+	"code.linenisgreat.com/crap/go-crap/v2/crap"
 )
 
 func TestResolveFormat(t *testing.T) {
@@ -151,9 +151,9 @@ import (
 	"io"
 	"strings"
 
-	"github.com/amarbel-llc/crap/go-crap/v2/crap"
-	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
-	"github.com/amarbel-llc/crap/go-crap/v2/viewport"
+	"code.linenisgreat.com/crap/go-crap/v2/crap"
+	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
+	"code.linenisgreat.com/crap/go-crap/v2/viewport"
 )
 
 // Resolved format names. "auto" and "" resolve to viewport on a TTY and
@@ -263,7 +263,7 @@ func (l *LineWriter) Flush() {
 }
 ```
 
-NOTE for implementer: verify exact names `crap.ReporterOptions`, `viewport.Options`, `ndjsoncrap.StreamStdout` against the module (`hamster doc github.com/amarbel-llc/crap/go-crap/v2/crap`). Adjust if the API differs — the tests are the contract.
+NOTE for implementer: verify exact names `crap.ReporterOptions`, `viewport.Options`, `ndjsoncrap.StreamStdout` against the module (`hamster doc code.linenisgreat.com/crap/go-crap/v2/crap`). Adjust if the API differs — the tests are the contract.
 
 **Step 4: Run tests, verify pass**
 

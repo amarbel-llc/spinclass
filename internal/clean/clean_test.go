@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"code.linenisgreat.com/spinclass/internal/nixgc"
-	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
+	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
 
 // deadPID is above the OS PID_MAX on all supported platforms (math.MaxInt32-1),

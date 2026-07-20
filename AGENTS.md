@@ -339,8 +339,8 @@ the producer's own dependency graph.
 
 Module: `code.linenisgreat.com/spinclass`.
 
-- `github.com/amarbel-llc/tap/go` — TAP-14 output (non-merge/check commands).
-- `github.com/amarbel-llc/crap/go-crap/v2` — ndjson-crap reader + the
+- `code.linenisgreat.com/tap/go` — TAP-14 output (non-merge/check commands).
+- `code.linenisgreat.com/crap/go-crap/v2` — ndjson-crap reader + the
   merge/check output stack (`crap.Reporter` emission, `viewport` presentation;
   wired in `internal/present`).
 - `code.linenisgreat.com/purse-first/libs/go-mcp` — MCP server framework

@@ -1,6 +1,16 @@
 schema = 3
 
 [mod]
+  [mod.'code.linenisgreat.com/crap/go-crap/v2']
+    version = 'v2.3.0'
+    hash = 'sha256-lC8mXs5K+MhAetVGst1lG1plJF7jS3KNl51Dk1XA6Nk='
+    goVersion = '1.26'
+
+  [mod.'code.linenisgreat.com/purse-first/libs/dewey']
+    version = 'v0.5.0'
+    hash = 'sha256-WaAb5xVdkek2jtlcD8y+99VuZyAoCVzezyIrs5X9Mbg='
+    goVersion = '1.26'
+
   [mod.'code.linenisgreat.com/purse-first/libs/go-mcp']
     version = 'v0.5.0'
     hash = 'sha256-dX5SW7t2TrvJjQvzsZB+Yue9mD2yJosBN8fPWWC819c='
@@ -11,24 +21,14 @@ schema = 3
     hash = 'sha256-nZcZldhbxdD43F424KrFsfowPN3HTzoIqVmiAJovQjw='
     goVersion = '1.26'
 
+  [mod.'code.linenisgreat.com/tap/go']
+    version = 'v0.2.0'
+    hash = 'sha256-ifwq9+ER3gl317X0uizQkn2cYTtXiqWwPsFyfHZ91Bs='
+    goVersion = '1.26'
+
   [mod.'code.linenisgreat.com/tommy']
     version = 'v0.5.0'
     hash = 'sha256-Stc6rRy+e/nVDkH7Ykww3NxBR/KeAy+UXDt13peknDg='
-    goVersion = '1.26'
-
-  [mod.'github.com/amarbel-llc/crap/go-crap/v2']
-    version = 'v2.2.2'
-    hash = 'sha256-ZyZNwjoJjDNB3pVJnHXomcQ5EYNOoLVSQu2X1Tj3CCY='
-    goVersion = '1.26'
-
-  [mod.'github.com/amarbel-llc/purse-first/libs/dewey']
-    version = 'v0.1.8'
-    hash = 'sha256-dNrByOns78mIRKUK9003JKK0p3L3UmYeZjRYt3J/huM='
-    goVersion = '1.26'
-
-  [mod.'github.com/amarbel-llc/tap/go']
-    version = 'v0.1.8'
-    hash = 'sha256-ZvId+dizMgnVOXBkg/SdZiK4kRwvula9oB/E4pX9oC8='
     goVersion = '1.26'
 
   [mod.'github.com/atotto/clipboard']

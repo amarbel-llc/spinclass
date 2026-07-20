@@ -22,8 +22,8 @@ import (
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/tapblock"
 	"code.linenisgreat.com/spinclass/internal/worktree"
-	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
-	"github.com/amarbel-llc/tap/go/pkgs/yaml_diagnostic"
+	tap "code.linenisgreat.com/tap/go/pkgs/writer"
+	"code.linenisgreat.com/tap/go/pkgs/yaml_diagnostic"
 )
 
 var styleCode = lipgloss.NewStyle().Foreground(lipgloss.Color("#E88388")).Background(lipgloss.Color("#1D1F21")).Padding(0, 1)

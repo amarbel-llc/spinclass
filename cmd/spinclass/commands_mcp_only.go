@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"code.linenisgreat.com/crap/go-crap/v2/crap"
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
 	"code.linenisgreat.com/spinclass/internal/attestation"
@@ -31,7 +32,6 @@ import (
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/worktree"
-	"github.com/amarbel-llc/crap/go-crap/v2/crap"
 )
 
 // wrapMCPHandler adds entry/exit logging and panic recovery around an MCP

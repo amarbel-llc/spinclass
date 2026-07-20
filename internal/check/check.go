@@ -15,16 +15,16 @@ import (
 	"strings"
 	"time"
 
+	"code.linenisgreat.com/crap/go-crap/v2/crap"
+	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
 	"code.linenisgreat.com/spinclass/internal/embeds"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/madder"
 	"code.linenisgreat.com/spinclass/internal/present"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
-	"github.com/amarbel-llc/crap/go-crap/v2/crap"
-	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
-	"github.com/amarbel-llc/tap/go/pkgs/ndjson"
-	"github.com/amarbel-llc/tap/go/pkgs/reader"
+	"code.linenisgreat.com/tap/go/pkgs/ndjson"
+	"code.linenisgreat.com/tap/go/pkgs/reader"
 )
 
 // BuildWorktreePrefix is the filename prefix of a transient pre-merge build

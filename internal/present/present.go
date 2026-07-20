@@ -10,9 +10,9 @@ import (
 	"io"
 	"strings"
 
-	"github.com/amarbel-llc/crap/go-crap/v2/crap"
-	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
-	"github.com/amarbel-llc/crap/go-crap/v2/viewport"
+	"code.linenisgreat.com/crap/go-crap/v2/crap"
+	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
+	"code.linenisgreat.com/crap/go-crap/v2/viewport"
 )
 
 // Resolved format names. "auto" and "" resolve to viewport on a TTY and

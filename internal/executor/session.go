@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/session"
-	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
-	"github.com/amarbel-llc/tap/go/pkgs/yaml_diagnostic"
+	tap "code.linenisgreat.com/tap/go/pkgs/writer"
+	"code.linenisgreat.com/tap/go/pkgs/yaml_diagnostic"
 )
 
 type SessionExecutor struct {

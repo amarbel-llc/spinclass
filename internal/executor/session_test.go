@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
+	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
 
 func TestSessionExecutorDryRunExpandsEnvVars(t *testing.T) {

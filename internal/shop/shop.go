@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/log"
 	"github.com/mattn/go-isatty"
 
-	"github.com/amarbel-llc/crap/go-crap/v2/crap"
+	"code.linenisgreat.com/crap/go-crap/v2/crap"
 
 	"code.linenisgreat.com/spinclass/internal/close"
 	"code.linenisgreat.com/spinclass/internal/clown"
@@ -23,7 +23,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/worktree"
-	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
+	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
 
 // Create ensures the worktree exists and applies its setup on first creation.

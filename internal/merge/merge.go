@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/amarbel-llc/crap/go-crap/v2/crap"
+	"code.linenisgreat.com/crap/go-crap/v2/crap"
 	"github.com/charmbracelet/huh"
 	"github.com/mattn/go-isatty"
 

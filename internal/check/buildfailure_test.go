@@ -3,8 +3,8 @@ package check
 import (
 	"testing"
 
-	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
-	"github.com/amarbel-llc/tap/go/pkgs/ndjson"
+	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
+	"code.linenisgreat.com/tap/go/pkgs/ndjson"
 )
 
 // strPtr returns a pointer to s, used to populate TestRecord.Output.

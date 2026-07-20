@@ -35,7 +35,7 @@
   # crap's go-pkgs is full-repo-filtered (polyglot), so slice into
   # go-crap. The module is at major version 2, so the key carries the
   # /v2 suffix while the on-disk subPath stays go-crap.
-  "github.com/amarbel-llc/crap/go-crap/v2" = {
+  "code.linenisgreat.com/crap/go-crap/v2" = {
     src = crap.packages.${system}.go-pkgs;
     subPath = "go-crap";
   };

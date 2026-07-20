@@ -1,7 +1,7 @@
 package executor
 
 import (
-	tap "github.com/amarbel-llc/tap/go/pkgs/writer"
+	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
 
 type Executor interface {

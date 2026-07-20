@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amarbel-llc/crap/go-crap/v2/crap"
-	"github.com/amarbel-llc/crap/go-crap/v2/ndjsoncrap"
+	"code.linenisgreat.com/crap/go-crap/v2/crap"
+	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
 )
 
 // writeRepoSweatfile writes a repo-root sweatfile (loaded as the repo layer of

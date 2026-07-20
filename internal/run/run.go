@@ -31,7 +31,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/amarbel-llc/crap/go-crap/v2/crap"
+	"code.linenisgreat.com/crap/go-crap/v2/crap"
 	"github.com/mattn/go-isatty"
 
 	"code.linenisgreat.com/spinclass/internal/executor"
