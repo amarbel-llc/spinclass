@@ -128,7 +128,7 @@ func (sf Sweatfile) SessionResumeTitle() string {
 
 In `MergeWith`'s SessionEntry arm, mirror the `Spawn` (len>0 overrides) handling for `SpawnWindow` and the pointer-field handling (non-nil overrides) for `ResumeTitle` — read the existing arm first and copy its exact style.
 
-**Step 4: Regenerate the tommy codec.** Try `just gen-tommy`. The #140 worker may have already fixed it (rebase/check `git log master --oneline -3` mentions #140); if it still fails with missing go.sum entries, use the documented dance from issue #140: `go get github.com/amarbel-llc/tommy/generate@v0.4.0`, run `just gen-tommy`, then `git checkout master -- go.mod go.sum` and `just deps` to restore (verify `git diff go.mod` is empty afterwards).
+**Step 4: Regenerate the tommy codec.** Try `just gen-tommy`. The #140 worker may have already fixed it (rebase/check `git log master --oneline -3` mentions #140); if it still fails with missing go.sum entries, use the documented dance from issue #140: `go get code.linenisgreat.com/tommy/generate@v0.4.0`, run `just gen-tommy`, then `git checkout master -- go.mod go.sum` and `just deps` to restore (verify `git diff go.mod` is empty afterwards).
 
 **Step 5: Run** `go test ./internal/sweatfile/` — expect PASS.
 

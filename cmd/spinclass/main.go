@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
-	commandhuh "github.com/amarbel-llc/purse-first/libs/go-mcp/command/huh"
+	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
+	commandhuh "code.linenisgreat.com/purse-first/libs/go-mcp/command/huh"
 
 	"code.linenisgreat.com/spinclass/internal/embeds"
 	"code.linenisgreat.com/spinclass/internal/sessionlog"

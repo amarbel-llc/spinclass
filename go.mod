@@ -3,11 +3,11 @@ module code.linenisgreat.com/spinclass
 go 1.26
 
 require (
+	code.linenisgreat.com/purse-first/libs/go-mcp v0.5.0
+	code.linenisgreat.com/purse-first/libs/go-mcp/command/huh v0.0.5
+	code.linenisgreat.com/tommy v0.5.0
 	github.com/amarbel-llc/crap/go-crap/v2 v2.2.2
-	github.com/amarbel-llc/purse-first/libs/go-mcp v0.0.13
-	github.com/amarbel-llc/purse-first/libs/go-mcp/command/huh v0.0.4
 	github.com/amarbel-llc/tap/go v0.1.8
-	github.com/amarbel-llc/tommy v0.4.0
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/huh v1.0.0

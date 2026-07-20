@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"os"
 
+	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/hooks"
-	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 )
 
 func registerHookCommand(app *command.App) {

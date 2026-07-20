@@ -29,7 +29,7 @@
   # codegen binary (also from this input — see the devShell packages)
   # and the Go library compile at one flake.lock rev. (Hardcoded module
   # path pending tommy#112, which would expose this mapping directly.)
-  "github.com/amarbel-llc/tommy" = {
+  "code.linenisgreat.com/tommy" = {
     src = tommy.packages.${system}.go-pkgs;
   };
   # crap's go-pkgs is full-repo-filtered (polyglot), so slice into

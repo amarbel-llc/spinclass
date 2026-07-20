@@ -8,10 +8,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/spawn"
 	"code.linenisgreat.com/spinclass/internal/worktree"
-	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 )
 
 // forkDetachedParams is the shared parameter set of `sc fork --brief` and the

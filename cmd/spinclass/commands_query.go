@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
+	"code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
 	"code.linenisgreat.com/spinclass/internal/clean"
 	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/git"
@@ -20,8 +22,6 @@ import (
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/validate"
 	"code.linenisgreat.com/spinclass/internal/worktree"
-	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
-	"github.com/amarbel-llc/purse-first/libs/go-mcp/protocol"
 )
 
 func registerQueryCommands(app *command.App) {

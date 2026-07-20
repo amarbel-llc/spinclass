@@ -343,6 +343,6 @@ Module: `code.linenisgreat.com/spinclass`.
 - `github.com/amarbel-llc/crap/go-crap/v2` — ndjson-crap reader + the
   merge/check output stack (`crap.Reporter` emission, `viewport` presentation;
   wired in `internal/present`).
-- `github.com/amarbel-llc/purse-first/libs/go-mcp` — MCP server framework
+- `code.linenisgreat.com/purse-first/libs/go-mcp` — MCP server framework
   (`command.App` does CLI dispatch + MCP serving; no cobra).
-- `github.com/amarbel-llc/tommy` — TOML library.
+- `code.linenisgreat.com/tommy` — TOML library.

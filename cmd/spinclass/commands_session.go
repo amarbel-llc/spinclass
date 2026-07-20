@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/check"
 	spinclose "code.linenisgreat.com/spinclass/internal/close"
 	"code.linenisgreat.com/spinclass/internal/executor"
@@ -25,7 +26,6 @@ import (
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 	"github.com/amarbel-llc/crap/go-crap/v2/crap"
-	"github.com/amarbel-llc/purse-first/libs/go-mcp/command"
 	"github.com/mattn/go-isatty"
 )
 
