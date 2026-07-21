@@ -61,6 +61,7 @@
         crap.follows = "crap";
       };
     };
+    madder.inputs.hyphence.inputs.langlang.follows = "papi/langlang";
 
     # conformist: the linter + formatter multiplexer (treefmt successor).
     # Consumed as a nix module (conformist.lib.evalModule): config is defined
@@ -131,6 +132,8 @@
         purse-first.follows = "madder/purse-first";
       };
     };
+    papi.inputs.hyphence.follows = "madder/hyphence";
+    papi.inputs.langlang.inputs.tap.inputs.crane.follows = "madder/tap/crane";
   };
 
   outputs =
