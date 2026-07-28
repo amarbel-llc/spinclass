@@ -124,6 +124,15 @@ clean-build:
 update-gomod2nix:
     nix develop --command gomod2nix
 
+# [debug] Fast single-package Go test loop. `just test` runs the whole
+# `nix flake check`, which is far too slow for red/green TDD iteration and
+# only sees git-tracked files; this runs `go test` inside the devshell against
+# the working tree. Serves the agent inner dev-loop — `just` is still the
+# gate that counts (and is what the pre-merge hook runs).
+[group('debug')]
+debug-go-test pkg='./...' *args='':
+    nix develop --command go test {{ args }} {{ pkg }}
+
 # [explore] Inspect nix-store --gc --print-roots output for entries pointing
 # into the spinclass repo. Used to investigate issue #67 — what does
 # print-roots show before vs after worktree removal?
