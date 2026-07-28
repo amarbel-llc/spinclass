@@ -301,7 +301,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 		}
 	}
 	if queueDisabled {
-		return finishMergeUnqueued(ctx, rep, ts, repoPath, wtPath, branch, pinnedSha, gitSync, inSession, activity)
+		return finishMergeUnqueued(ctx, rep, ts, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, inSession, activity)
 	}
 
 	// Acquire the per-repo landing lock BEFORE the gate, so the gate always
@@ -414,6 +414,23 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	if tdErr := teardownAndPush(ts, repoPath, wtPath, branch, gitSync, inSession, rebased, tipMatchesPin); tdErr != nil {
 		return blobLinks, tdErr
 	}
+
+	// (h) The merge has fully landed: release the queue BEFORE the post-merge
+	// hook. A post-merge hook is typically a deploy trigger measured in
+	// minutes; running it under the landing lock would serialize every
+	// sibling session in the repo behind this session's deploy for no reason
+	// — the lock protects gate+land+push, all of which are done. Release is
+	// idempotent, so the deferred release above stays as the error-path net.
+	if relErr := lock.Release(); relErr != nil {
+		// Losing the release is not a merge failure (the landing succeeded and
+		// the flock self-releases on process exit), but it must not be silent:
+		// a leaked lock stalls the queue.
+		ts.NotOk("release merge lock "+branch, map[string]any{
+			"severity": "warn",
+			"message":  relErr.Error(),
+		})
+	}
+	runPostMergePhase(ctx, ts, repoPath, wtPath, branch, defaultBranch, landingSha, gitSync, activity)
 	return blobLinks, nil
 }
 
@@ -421,7 +438,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 // the [hooks].disable-merge-queue rollback knob: hook on pinnedSha → ff-only →
 // teardown → push, with no lock, no re-pull, and no landing rebase — a default
 // branch that moved during the hook fails the ff-only merge exactly as before.
-func finishMergeUnqueued(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, pinnedSha string, gitSync, inSession bool, activity io.Writer) (blobLinks []check.BlobLink, err error) {
+func finishMergeUnqueued(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch, pinnedSha string, gitSync, inSession bool, activity io.Writer) (blobLinks []check.BlobLink, err error) {
 	hookLinks, hookErr := runPreMergeHookContext(ctx, rep, ts, repoPath, wtPath, branch, pinnedSha, activity)
 	blobLinks = append(blobLinks, hookLinks...)
 	if hookErr != nil {
@@ -440,6 +457,9 @@ func finishMergeUnqueued(ctx context.Context, rep *crap.Reporter, ts *crap.TestS
 	if tdErr := teardownAndPush(ts, repoPath, wtPath, branch, gitSync, inSession, false, true); tdErr != nil {
 		return blobLinks, tdErr
 	}
+	// No lock on this path, so nothing to release first; pinnedSha is what
+	// landed (the unqueued path never rebases the landing).
+	runPostMergePhase(ctx, ts, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, activity)
 	return blobLinks, nil
 }
 
@@ -628,6 +648,13 @@ func MergeImplicit(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream,
 		return blobLinks, failStep(ts, "push "+branch, pushErr, out)
 	}
 	ts.Ok("push " + branch)
+
+	// Post-merge hook (FDR 0023). An implicit session's work is already ON the
+	// default branch, so the branch that merged and the branch it landed on are
+	// the same ref, and the push is unconditional — hence pushed=true. No lock
+	// to release first: implicit merges are out of the merge queue's scope
+	// (FDR 0022 Limitations).
+	runPostMergePhase(ctx, ts, repoPath, checkout, branch, branch, pinnedSha, true, activity)
 	return blobLinks, nil
 }
 
@@ -784,6 +811,78 @@ func runPreMergeHookContext(ctx context.Context, rep *crap.Reporter, ts *crap.Te
 		return nil, nil
 	}
 	return check.RunWithReporterContext(ctx, rep, ts, hierarchy, wtPath, branch, hookSha, activity)
+}
+
+// runPostMergePhase runs the [hooks].post-merge command (FDR 0023) after a
+// merge has landed, emitting one test point on ts. It is deliberately
+// NON-FATAL: the merge already landed (and, with gitSync, was pushed), so
+// there is nothing to roll back and nothing for a caller to retry. A nonzero
+// exit therefore emits a not-ok point carrying severity=warn and the hook's
+// output, but runPostMergePhase always returns nil — surfaced and logged, not
+// treated as a merge failure (spinclass#244). Returns immediately when no
+// post-merge command is active or the hierarchy cannot be loaded.
+//
+// MUST be called by the queued path only AFTER the per-repo merge lock has
+// been released: a post-merge hook is typically a deploy trigger measured in
+// minutes, and holding the landing lock across it would queue every sibling
+// session in the repo behind this session's deploy (FDR 0022's lock covers
+// gate+land+push, not what happens afterwards).
+//
+// The hook runs in the session worktree when it still exists — teardown may
+// have removed it — and otherwise in repoPath, which is sitting on the merged
+// tip of the default branch either way. landedSha is the sha that actually
+// landed: the LANDING sha on a rebased queued landing, not the original pin.
+func runPostMergePhase(ctx context.Context, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch, landedSha string, pushed bool, activity io.Writer) {
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		return
+	}
+	hierarchy, err := sweatfileio.LoadWorktreeHierarchy(home, repoPath, wtPath)
+	if err != nil || !hierarchy.Merged.PostMergeActive() {
+		return
+	}
+
+	// Teardown may have removed the session worktree; repoPath is always
+	// present and is on the merged default-branch tip.
+	runDir := wtPath
+	if info, statErr := os.Stat(runDir); statErr != nil || !info.IsDir() {
+		runDir = repoPath
+	}
+
+	pushedVal := "0"
+	if pushed {
+		pushedVal = "1"
+	}
+	env := []string{
+		"SPINCLASS_MERGED_SHA=" + landedSha,
+		"SPINCLASS_MERGED_BRANCH=" + branch,
+		"SPINCLASS_DEFAULT_BRANCH=" + defaultBranch,
+		"SPINCLASS_MERGE_PUSHED=" + pushedVal,
+		"SPINCLASS_REPO_PATH=" + repoPath,
+	}
+
+	var out bytes.Buffer
+	var sink io.Writer = &out
+	if activity != nil {
+		sink = io.MultiWriter(&out, activity)
+	}
+
+	label := "post-merge " + branch + " (" + shortSha(landedSha) + ")"
+	if hookErr := hierarchy.Merged.RunPostMergeHookContext(ctx, runDir, env, sink); hookErr != nil {
+		diag := map[string]any{
+			"severity": "warn",
+			"message": fmt.Sprintf(
+				"post-merge hook failed: %v (the merge already landed — nothing was rolled back)",
+				hookErr,
+			),
+		}
+		if o := out.String(); o != "" {
+			diag["output"] = o
+		}
+		ts.NotOk(label, diag)
+		return
+	}
+	ts.Ok(label)
 }
 
 // runRepairPhase runs the [hooks].repair command (FDR 0018) in wtPath when

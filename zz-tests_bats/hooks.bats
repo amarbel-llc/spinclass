@@ -267,6 +267,79 @@ pre-merge = "true"' >"$TEST_REPO/sweatfile"
   assert_output --partial "add new file"
 }
 
+# post_merge_setup_landed_merge drops a repo-root sweatfile with the given
+# [hooks] body, starts a detached session, commits to it, and merges
+# --local-only. Mirrors repair_phase_runs_on_merge's shape (repo-root sweatfile
+# so it survives the worktree clean; pre-merge = "true" so the merge does not
+# inherit the real repo's slow CI hook). Echoes the branch name.
+post_merge_setup_landed_merge() {
+  local hooks_body="$1"
+  local bin="${SPINCLASS_BIN:-spinclass}"
+
+  printf '%s\n' "$hooks_body" >"$TEST_REPO/sweatfile"
+
+  local attach_output wt branch
+  attach_output=$("$bin" --format tap start --no-attach 2>&1)
+  wt=$(extract_wt_path "$attach_output")
+  branch=$(basename "$wt")
+
+  # git's own stdout must not pollute the command substitution that captures
+  # the echoed branch name below.
+  echo "new content" >"$wt/new-file.txt"
+  git -C "$wt" add new-file.txt >&2
+  git -C "$wt" commit -m "add new file" >&2
+  git -C "$wt" clean -fd >&2
+
+  echo "$branch"
+}
+
+# sc merge runs the post-merge hook after the merge lands, handing it the sha
+# that actually landed. Exercises the cmd/spinclass merge wiring end-to-end in
+# the built binary; the Go tests cover the lock-release ordering and the
+# non-fatal semantics directly (internal/merge/post_merge_phase_test.go).
+# FDR 0023, #244.
+function post_merge_hook_runs_after_merge_lands { # @test
+  cd "$TEST_REPO" || return
+
+  local branch
+  # shellcheck disable=SC2016
+  branch=$(post_merge_setup_landed_merge '[hooks]
+pre-merge = "true"
+post-merge = "echo \"$SPINCLASS_MERGED_SHA $SPINCLASS_MERGED_BRANCH $SPINCLASS_MERGE_PUSHED\" > \"$BATS_TEST_TMPDIR/postmerge.txt\""')
+
+  run_sc_crap merge "$branch" --local-only
+  assert_success
+  assert_output --partial "post-merge $branch"
+
+  # The hook ran, and saw the sha that main now points at. --local-only means
+  # nothing was pushed, so the hook must be told so.
+  assert [ -f "$BATS_TEST_TMPDIR/postmerge.txt" ]
+  local landed
+  landed=$(git -C "$TEST_REPO" rev-parse main)
+  run cat "$BATS_TEST_TMPDIR/postmerge.txt"
+  assert_output "$landed $branch 0"
+}
+
+# A failing post-merge hook must NOT fail the merge: by the time it runs the
+# merge has already landed, so there is nothing to roll back and re-running
+# would find nothing to merge. The failure is surfaced, not fatal.
+function post_merge_hook_failure_does_not_fail_merge { # @test
+  cd "$TEST_REPO" || return
+
+  local branch
+  branch=$(post_merge_setup_landed_merge '[hooks]
+pre-merge = "true"
+post-merge = "echo deploy-broke >&2; exit 7"')
+
+  run_sc_crap merge "$branch" --local-only
+  assert_success
+  assert_output --partial "post-merge $branch"
+
+  # And the merge really landed despite the hook failing.
+  run git -C "$TEST_REPO" log --oneline main
+  assert_output --partial "add new file"
+}
+
 # install_fakefmt_stub drops a stand-in formatter on PATH that proves the
 # pre-commit hook fired: it logs to fakefmt.log AND appends a FORMATTED marker
 # to each staged file and restages it (mimicking `conformist --staged`), so the
