@@ -292,8 +292,39 @@ That ordering is the point \(em two deploys interleaving is the failure this
 hook exists to prevent \(em but it means a slow hook delays every other merge
 in the repo, which will sit logging
 .B "merge queue: waiting behind <session>"
-until it finishes. Keep the hook a cheap trigger (enqueue, fire a webhook)
-rather than a long inline deploy.
+until it finishes. Keep the hook a cheap trigger rather than a long inline
+deploy.
+.IP
+The simplest way to do that is to detach the slow work and return. spinclass
+sets no process group on hook subprocesses and does not reap the process tree,
+so a detached child reliably outlives the hook:
+.IP
+.EX
+post\-merge = """
+[ "$SPINCLASS_MERGE_PUSHED" = 1 ] || exit 0
+setsid ./bin/deploy.sh "$SPINCLASS_MERGED_SHA" \e
+  </dev/null >>deploy.log 2>&1 &
+"""
+.EE
+.IP
+The
+.B redirects are load-bearing, not cosmetic.
+spinclass captures the hook's stdout/stderr through a pipe and waits for every
+holder of its write end to close. A detached child that inherits that pipe
+keeps it open, so the hook \(em and the merge lock \(em blocks for the child's
+full duration anyway. Point the child's stdout and stderr somewhere else and
+the hook returns immediately.
+.IP
+.B setsid
+additionally puts the child in its own session, so it survives a
+process-group signal; plain
+.B &
+is enough today but is not future-proof against
+.B spinclass#188
+(reaping the hook's process tree on interrupt). Note that a detached deploy
+gives up the ordering guarantee above \(em two deploys can then overlap \(em so
+detach only work that is itself safe to run concurrently, or that serializes
+on its own lock at the far end.
 .IP
 The hook runs in the session worktree when it still exists (teardown may have
 removed it) and otherwise in the main checkout \(em which is sitting on the

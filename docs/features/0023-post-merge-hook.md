@@ -163,6 +163,31 @@ timeout 600 ./bin/deploy.sh "$SPINCLASS_MERGED_SHA"
 """
 ```
 
+Detaching a slow deploy so the merge lock is not held for its duration:
+
+```toml
+[hooks]
+post-merge = """
+[ "$SPINCLASS_MERGE_PUSHED" = 1 ] || exit 0
+setsid ./bin/deploy.sh "$SPINCLASS_MERGED_SHA" </dev/null >>deploy.log 2>&1 &
+"""
+```
+
+The redirects are **load-bearing**. spinclass captures hook output through a
+pipe and `cmd.Wait()` blocks until every holder of its write end closes; a
+detached child inheriting that pipe keeps it open, so the hook — and the lock
+— blocks for the child's full duration regardless of the `&`. Measured, not
+assumed: `TestRunPostMergeHookContextDetachedChildOutlivesHook` asserts the
+hook returns in <500ms and the child still completes afterwards, and was
+confirmed to fail (blocking the full child duration) with the redirects
+removed.
+
+`setsid` puts the child in its own session so it survives a process-group
+signal; plain `&` suffices today but is not future-proof against #188.
+**Detaching gives up the exclusivity guarantee** — two deploys can then
+overlap — so detach only work that is safe to run concurrently or that
+serializes at the far end.
+
 Result stream on a landed merge:
 
     ✓ merge bright-olive

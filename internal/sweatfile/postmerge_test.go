@@ -3,10 +3,12 @@ package sweatfile_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	. "code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
@@ -164,6 +166,74 @@ func TestRunPostMergeHookContextExtraEnv(t *testing.T) {
 	}
 	if got := strings.TrimSpace(buf.String()); got != "sha=abc123 pushed=1" {
 		t.Errorf("extraEnv not applied: got %q", got)
+	}
+}
+
+// A post-merge hook may detach a child that outlives it. This is the
+// recommended shape for a deploy trigger (FDR 0023): the hook backgrounds the
+// slow work and returns immediately, so the per-repo merge lock — which the
+// post-merge hook runs UNDER — is not held for the deploy's duration.
+//
+// Two properties are load-bearing for that consumer, so pin both:
+//
+//  1. The hook returns promptly rather than waiting out the child. os/exec's
+//     Wait blocks until every holder of the stdout pipe's write end closes
+//     it, so a detached child that inherits the pipe would stall the hook for
+//     its full duration. Redirecting the child's stdout+stderr away from the
+//     pipe is what avoids that — hence the `>log 2>&1` below, which is not
+//     cosmetic.
+//  2. The child survives the hook's exit. spinclass sets no process group on
+//     hook subprocesses and does not reap the tree, so it does today. If
+//     spinclass#188's process-tree kill lands and is applied to the
+//     post-merge hook, this test fails loudly rather than letting a
+//     consumer's deploys be silently dropped.
+//
+// Uses plain `&` (same process group) deliberately: it is the strictest probe
+// for "does spinclass reap descendants". A consumer wanting to survive a
+// future process-GROUP kill should additionally `setsid`.
+func TestRunPostMergeHookContextDetachedChildOutlivesHook(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "deployed")
+	childLog := filepath.Join(dir, "deploy.log")
+
+	sf := Sweatfile{Hooks: &Hooks{PostMerge: sptr(fmt.Sprintf(
+		"sh -c 'sleep 1; echo done > %s' </dev/null >%s 2>&1 &\necho trigger-fired",
+		marker, childLog,
+	))}}
+
+	var buf bytes.Buffer
+	start := time.Now()
+	if err := sf.RunPostMergeHookContext(context.Background(), dir, nil, &buf); err != nil {
+		t.Fatalf("hook failed: %v\noutput: %s", err, buf.String())
+	}
+	elapsed := time.Since(start)
+
+	if !strings.Contains(buf.String(), "trigger-fired") {
+		t.Errorf("hook output not captured: %q", buf.String())
+	}
+	// Property 1: returned without waiting out the ~1s child.
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("hook blocked %s on its detached child; a backgrounded deploy "+
+			"would still hold the merge lock for the deploy's duration", elapsed)
+	}
+	// Guard: if the child had already finished, the survival check below would
+	// pass vacuously.
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("detached child finished before the hook returned; test cannot " +
+			"distinguish survival from inline execution")
+	}
+
+	// Property 2: the child still completes after the hook returned.
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("detached child did not survive the hook's exit — a " +
+				"backgrounded deploy would be silently dropped, not fired")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
