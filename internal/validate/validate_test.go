@@ -335,6 +335,38 @@ func TestCheckHooksAllowsNilFormat(t *testing.T) {
 	}
 }
 
+// post-merge-timeout degrades to the 10m default at runtime rather than to
+// "off", so validation is the only place a typo is surfaced — it must be.
+func TestCheckHooksRejectsUnparseablePostMergeTimeout(t *testing.T) {
+	v := "ten minutes"
+	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PostMergeTimeout: &v}}
+	issues := CheckHooks(sf)
+	if len(issues) != 1 || issues[0].Severity != SeverityError ||
+		issues[0].Field != "hooks.post-merge-timeout" {
+		t.Fatalf("expected one error issue, got %+v", issues)
+	}
+}
+
+func TestCheckHooksRejectsNegativePostMergeTimeout(t *testing.T) {
+	v := "-5m"
+	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PostMergeTimeout: &v}}
+	issues := CheckHooks(sf)
+	if len(issues) != 1 || issues[0].Field != "hooks.post-merge-timeout" {
+		t.Fatalf("expected one error issue, got %+v", issues)
+	}
+}
+
+// "0" is the documented off switch, so it must validate clean.
+func TestCheckHooksAcceptsPostMergeTimeoutValues(t *testing.T) {
+	for _, val := range []string{"0", "0s", "30s", "10m", "1h"} {
+		v := val
+		sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PostMergeTimeout: &v}}
+		if issues := CheckHooks(sf); len(issues) != 0 {
+			t.Errorf("post-merge-timeout %q produced unexpected issues: %+v", val, issues)
+		}
+	}
+}
+
 func TestCheckSessionEntrySpawnEntryMissingPromptPlaceholder(t *testing.T) {
 	sf := sweatfile.Sweatfile{
 		SessionEntry: &sweatfile.SessionEntry{

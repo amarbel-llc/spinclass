@@ -179,8 +179,9 @@ var validPreMergeOutputFormats = map[string]bool{
 }
 
 // CheckHooks validates fields in the [hooks] table: the
-// pre-merge-output-format enum and the inactivity-timeout duration. Extend
-// here as more constrained hook fields land.
+// pre-merge-output-format enum and the inactivity-timeout /
+// post-merge-timeout durations. Extend here as more constrained hook fields
+// land.
 func CheckHooks(sf sweatfile.Sweatfile) []Issue {
 	var issues []Issue
 	if sf.Hooks == nil {
@@ -212,6 +213,29 @@ func CheckHooks(sf sweatfile.Sweatfile) []Issue {
 					Message:  fmt.Sprintf("inactivity-timeout %q must not be negative", v),
 					Severity: SeverityError,
 					Field:    "hooks.inactivity-timeout",
+					Value:    v,
+				})
+			}
+		}
+	}
+	// post-merge-timeout: same duration shape as inactivity-timeout, but a bad
+	// value degrades to the 10m DEFAULT rather than to "off" at runtime (see
+	// sweatfile.PostMergeTimeoutValue), so this check is what surfaces the typo.
+	if sf.Hooks.PostMergeTimeout != nil {
+		v := *sf.Hooks.PostMergeTimeout
+		if v != "" {
+			if d, err := time.ParseDuration(v); err != nil {
+				issues = append(issues, Issue{
+					Message:  fmt.Sprintf("invalid post-merge-timeout %q (want a Go duration like \"10m\" or \"600s\", or \"0\" to disable): %s", v, err),
+					Severity: SeverityError,
+					Field:    "hooks.post-merge-timeout",
+					Value:    v,
+				})
+			} else if d < 0 {
+				issues = append(issues, Issue{
+					Message:  fmt.Sprintf("post-merge-timeout %q must not be negative (use \"0\" to disable the cap)", v),
+					Severity: SeverityError,
+					Field:    "hooks.post-merge-timeout",
 					Value:    v,
 				})
 			}

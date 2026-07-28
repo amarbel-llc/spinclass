@@ -332,9 +332,13 @@ merged tip either way. There is no detached build worktree: the merge has
 already landed, so there is nothing to isolate. Unlike
 .BR pre-merge ,
 .B inactivity-timeout
-does not apply; a hook that can wedge should bound itself (e.g.
-.BR "timeout 300 deploy.sh" )
-\(em all the more so because it wedges the merge queue, not just this merge.
+does not apply \(em that knob bounds the pre-merge gate's silence. The
+post-merge hook has its own wall-clock cap,
+.B post-merge-timeout
+(below), which unlike the pre-merge watchdog is
+.B on by default
+(10 minutes), because a wedged post-merge hook holds the whole repo's merge
+queue rather than just its own session.
 Beyond the usual environment (including
 .BR WORKTREE ),
 the hook receives:
@@ -751,6 +755,58 @@ kills.
 An unparseable or negative value is a
 .B sc validate
 error.
+.B Merge:
+scalar override.
+.TP
+.B post-merge-timeout
+String (a Go duration such as
+.BR \(dq10m\(dq " or " \(dq600s\(dq ).
+Wall-clock cap on the
+.B post-merge
+hook. When the hook exceeds it, its subprocess is killed and the merge emits
+the usual
+.B severity=warn
+point naming this knob \(em the merge itself still succeeded, so the cap never
+fails a merge.
+.IP
+Unlike
+.BR inactivity-timeout ,
+this is
+.B on by default
+at
+.BR 10m .
+The asymmetry is deliberate: the pre-merge gate holds nothing while it runs, so
+an unbounded gate only stalls its own session, whereas
+.B post-merge
+runs under the per-repo landing lock \(em an unbounded hook there wedges every
+other session's merge in the repo. Set
+.B \(dq0\(dq
+to disable the cap entirely.
+.IP
+It is a
+.B wall-clock
+bound, not an inactivity one: a deploy can legitimately emit nothing for
+minutes, so silence is not evidence of a wedge. A cap kill is distinct from a
+user cancel
+.RB ( session\-job\-cancel );
+only the former names
+.BR post-merge-timeout .
+.IP
+The cap
+.B frees the merge queue; it does not stop the work.
+Cancelling the hook kills its shell, not the whole process tree, so an
+overrunning deploy's subprocesses keep running afterwards \(em what is
+guaranteed is that other sessions stop waiting, not that the deploy halted. A
+deploy that must be interruptible has to arrange that itself.
+.IP
+An unparseable or negative value is a
+.B sc validate
+error, and at runtime falls back to the
+.B default
+rather than to \(dqno cap\(dq \(em a typo must not silently strip a protection
+that is on by default. (This is the opposite of
+.BR inactivity-timeout ,
+whose default is off, so degrading a bad value to off changes nothing there.)
 .B Merge:
 scalar override.
 .TP

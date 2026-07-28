@@ -285,6 +285,12 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				_vHooksInactivityTimeout.MarkConsumed()
 			}
 		}
+		if _vHooksPostMergeTimeout, _ok := _vHooks.Get("post-merge-timeout"); _ok && _vHooksPostMergeTimeout.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksPostMergeTimeout.Leaf); _xok {
+				hooksVal3.PostMergeTimeout = &_x
+				_vHooksPostMergeTimeout.MarkConsumed()
+			}
+		}
 		if _vHooksAutoRebuildOnResume, _ok := _vHooks.Get("auto-rebuild-on-resume"); _ok && _vHooksAutoRebuildOnResume.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractBool(_vHooksAutoRebuildOnResume.Leaf); _xok {
 				hooksVal3.AutoRebuildOnResume = &_x
@@ -440,6 +446,13 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractString(_vInactivityTimeout.Leaf); _xok {
 				hooksVal3.InactivityTimeout = &_x
 				_vInactivityTimeout.MarkConsumed()
+			}
+		}
+		if _vPostMergeTimeout, _ok := model.Get("post-merge-timeout"); _ok && _vPostMergeTimeout.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vPostMergeTimeout.Leaf); _xok {
+				hooksVal3.PostMergeTimeout = &_x
+				_vPostMergeTimeout.MarkConsumed()
 			}
 		}
 		if _vAutoRebuildOnResume, _ok := model.Get("auto-rebuild-on-resume"); _ok && _vAutoRebuildOnResume.Kind == cst.VLeaf {
@@ -968,6 +981,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
+		if d.data.Hooks.PostMergeTimeout != nil {
+			if err := cst.SetAny(tableNode, "post-merge-timeout", *d.data.Hooks.PostMergeTimeout); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
 		if d.data.Hooks.AutoRebuildOnResume != nil {
 			if err := cst.SetAny(tableNode, "auto-rebuild-on-resume", *d.data.Hooks.AutoRebuildOnResume); err != nil {
 				return nil, fmt.Errorf("%w", err)
@@ -1448,6 +1466,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vHooksInactivityTimeout.MarkConsumed()
 			}
 		}
+		if _vHooksPostMergeTimeout, _ok := _vHooks.Get("post-merge-timeout"); _ok && _vHooksPostMergeTimeout.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksPostMergeTimeout.Leaf); _xok {
+				hooksVal3.PostMergeTimeout = &_x
+				_vHooksPostMergeTimeout.MarkConsumed()
+			}
+		}
 		if _vHooksAutoRebuildOnResume, _ok := _vHooks.Get("auto-rebuild-on-resume"); _ok && _vHooksAutoRebuildOnResume.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractBool(_vHooksAutoRebuildOnResume.Leaf); _xok {
 				hooksVal3.AutoRebuildOnResume = &_x
@@ -1603,6 +1627,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractString(_vInactivityTimeout.Leaf); _xok {
 				hooksVal3.InactivityTimeout = &_x
 				_vInactivityTimeout.MarkConsumed()
+			}
+		}
+		if _vPostMergeTimeout, _ok := sub.Get("post-merge-timeout"); _ok && _vPostMergeTimeout.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vPostMergeTimeout.Leaf); _xok {
+				hooksVal3.PostMergeTimeout = &_x
+				_vPostMergeTimeout.MarkConsumed()
 			}
 		}
 		if _vAutoRebuildOnResume, _ok := sub.Get("auto-rebuild-on-resume"); _ok && _vAutoRebuildOnResume.Kind == cst.VLeaf {
@@ -2116,6 +2147,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if data.Hooks.InactivityTimeout != nil {
 			if err := cst.SetAny(tableNode, "inactivity-timeout", *data.Hooks.InactivityTimeout); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.Hooks.PostMergeTimeout != nil {
+			if err := cst.SetAny(tableNode, "post-merge-timeout", *data.Hooks.PostMergeTimeout); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}

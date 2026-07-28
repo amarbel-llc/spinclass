@@ -169,6 +169,172 @@ func TestRunPostMergeHookContextExtraEnv(t *testing.T) {
 	}
 }
 
+func TestPostMergeTimeoutValue(t *testing.T) {
+	cases := []struct {
+		name string
+		set  *string
+		want time.Duration
+	}{
+		// Capped by default: post-merge runs under the landing lock, so an
+		// uncapped wedge would hold the whole repo's queue (#246).
+		{"unset", nil, DefaultPostMergeTimeout},
+		{"empty", sptr(""), DefaultPostMergeTimeout},
+		{"explicit", sptr("90s"), 90 * time.Second},
+		{"minutes", sptr("30m"), 30 * time.Minute},
+		// "0" is the documented off switch, NOT a degenerate default.
+		{"zero disables", sptr("0"), 0},
+		{"zero seconds disables", sptr("0s"), 0},
+		// A typo must not silently strip a protection that is on by default,
+		// so bad input falls back to the default rather than to 0. This is the
+		// deliberate divergence from InactivityTimeoutValue, whose default is
+		// off so degrading to 0 is a no-op there.
+		{"unparseable falls back to default", sptr("ten minutes"), DefaultPostMergeTimeout},
+		{"negative falls back to default", sptr("-5m"), DefaultPostMergeTimeout},
+	}
+	for _, c := range cases {
+		sf := Sweatfile{Hooks: &Hooks{PostMergeTimeout: c.set}}
+		if got := sf.PostMergeTimeoutValue(); got != c.want {
+			t.Errorf("%s: PostMergeTimeoutValue() = %v, want %v", c.name, got, c.want)
+		}
+	}
+	if got := (Sweatfile{}).PostMergeTimeoutValue(); got != DefaultPostMergeTimeout {
+		t.Errorf("nil Hooks: PostMergeTimeoutValue() = %v, want %v", got, DefaultPostMergeTimeout)
+	}
+}
+
+func TestMergeHooksPostMergeTimeoutOverride(t *testing.T) {
+	base := Sweatfile{Hooks: &Hooks{PostMergeTimeout: sptr("5m")}}
+	if merged := base.MergeWith(Sweatfile{}); merged.PostMergeTimeoutValue() != 5*time.Minute {
+		t.Errorf("expected inherited post-merge-timeout, got %v", merged.PostMergeTimeoutValue())
+	}
+	repo := Sweatfile{Hooks: &Hooks{PostMergeTimeout: sptr("0")}}
+	if merged := base.MergeWith(repo); merged.PostMergeTimeoutValue() != 0 {
+		t.Errorf("expected child override to disable the cap, got %v", merged.PostMergeTimeoutValue())
+	}
+}
+
+// A hook that outruns the cap is killed, with a message naming the knob so the
+// operator can raise or disable it.
+func TestRunPostMergeHookContextEnforcesTimeout(t *testing.T) {
+	dir := t.TempDir()
+	sf := Sweatfile{Hooks: &Hooks{
+		PostMerge:        sptr("sleep 30"),
+		PostMergeTimeout: sptr("150ms"),
+	}}
+
+	var buf bytes.Buffer
+	start := time.Now()
+	err := sf.RunPostMergeHookContext(context.Background(), dir, nil, &buf)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected the capped hook to error")
+	}
+	if !strings.Contains(err.Error(), "post-merge-timeout") {
+		t.Errorf("error should name the knob, got %v", err)
+	}
+	if elapsed > 5*time.Second {
+		t.Errorf("hook ran %s; the cap should have killed it near 150ms", elapsed)
+	}
+}
+
+// The cap must bound WALL-CLOCK time even when the hook leaves a child holding
+// its output pipe — the common shape, since a deploy script's subprocesses
+// inherit stdout by default.
+//
+// This is the property the cap exists for, and the one that was broken when
+// post-merge-timeout first landed: cancelling the context kills the shell on
+// time, but os/exec's Wait keeps draining until every holder of the pipe's
+// write end closes it, so a surviving descendant held the merge lock for its
+// full lifetime regardless of the cap. Measured then: a 200ms cap with a 3s
+// pipe-holding child returned after 3.0s. cmd.WaitDelay is the fix.
+//
+// A cap that only works when the hook has no subprocesses is not a cap, so
+// this asserts the real bound rather than the happy path.
+func TestRunPostMergeHookContextCapBoundsWallClockWithPipeHoldingChild(t *testing.T) {
+	dir := t.TempDir()
+	// Child inherits stdout/stderr (deliberately no redirect) and outlives the
+	// cap by a wide margin. `wait` keeps the shell from exiting early, so the
+	// only way out is the cap.
+	sf := Sweatfile{Hooks: &Hooks{
+		PostMerge:        sptr("sh -c 'sleep 60' &\nwait\n"),
+		PostMergeTimeout: sptr("200ms"),
+	}}
+
+	var buf bytes.Buffer
+	start := time.Now()
+	err := sf.RunPostMergeHookContext(context.Background(), dir, nil, &buf)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected the capped hook to error")
+	}
+	// Cap + WaitDelay, with slack for a loaded machine — the point is that it
+	// is bounded at all, nowhere near the child's 60s.
+	if elapsed > 30*time.Second {
+		t.Fatalf("hook returned after %s despite a 200ms cap: the cap is not "+
+			"bounding wall-clock time, so a wedged hook still holds the merge lock", elapsed)
+	}
+}
+
+// The cap is a wall-clock bound, not an inactivity one: a hook that is
+// completely silent but finishes inside the cap must succeed. (A deploy can
+// legitimately produce no output for minutes.)
+func TestRunPostMergeHookContextSilentHookWithinCapSucceeds(t *testing.T) {
+	dir := t.TempDir()
+	sf := Sweatfile{Hooks: &Hooks{
+		PostMerge:        sptr("sleep 0.3"),
+		PostMergeTimeout: sptr("10s"),
+	}}
+	var buf bytes.Buffer
+	if err := sf.RunPostMergeHookContext(context.Background(), dir, nil, &buf); err != nil {
+		t.Fatalf("silent-but-prompt hook should pass a wall-clock cap, got %v", err)
+	}
+}
+
+// "0" means no cap: a hook that would blow the default must run to completion.
+func TestRunPostMergeHookContextZeroDisablesCap(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "done")
+	sf := Sweatfile{Hooks: &Hooks{
+		PostMerge:        sptr(fmt.Sprintf("sleep 0.3; echo ok > %s", marker)),
+		PostMergeTimeout: sptr("0"),
+	}}
+	var buf bytes.Buffer
+	if err := sf.RunPostMergeHookContext(context.Background(), dir, nil, &buf); err != nil {
+		t.Fatalf("uncapped hook should run to completion, got %v", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("hook did not complete: %v", err)
+	}
+}
+
+// A caller cancel (session-job-cancel) must NOT be misreported as a cap kill —
+// the two have different remedies, so they must read differently.
+func TestRunPostMergeHookContextCallerCancelIsNotReportedAsTimeout(t *testing.T) {
+	dir := t.TempDir()
+	sf := Sweatfile{Hooks: &Hooks{
+		PostMerge:        sptr("sleep 30"),
+		PostMergeTimeout: sptr("30s"), // generous; the caller cancels first
+	}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		cancel()
+	}()
+	defer cancel()
+
+	var buf bytes.Buffer
+	err := sf.RunPostMergeHookContext(ctx, dir, nil, &buf)
+	if err == nil {
+		t.Fatal("expected an error when the caller cancels")
+	}
+	if strings.Contains(err.Error(), "post-merge-timeout") {
+		t.Errorf("caller cancel misreported as a cap kill: %v", err)
+	}
+}
+
 // A post-merge hook may detach a child that outlives it. This is the
 // recommended shape for a deploy trigger (FDR 0023): the hook backgrounds the
 // slow work and returns immediately, so the per-repo merge lock — which the
@@ -191,6 +357,12 @@ func TestRunPostMergeHookContextExtraEnv(t *testing.T) {
 // Uses plain `&` (same process group) deliberately: it is the strictest probe
 // for "does spinclass reap descendants". A consumer wanting to survive a
 // future process-GROUP kill should additionally `setsid`.
+//
+// Note this runs under the DEFAULT post-merge cap (#246), so it also pins a
+// third property that is easy to break by accident: the cap's
+// `defer cancel()` fires the moment the hook returns, and that must not reap
+// the detached child. It does not, because exec's cancel kills only the
+// direct child (the shell, already exited) and no process group is set.
 func TestRunPostMergeHookContextDetachedChildOutlivesHook(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "deployed")

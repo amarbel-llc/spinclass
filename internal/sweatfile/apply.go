@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -235,17 +236,63 @@ func (sf Sweatfile) RunRepairHookContext(ctx context.Context, worktreePath strin
 // on PostMergeActive() first; if post-merge is inactive this is a no-op
 // returning nil.
 //
-// Like repair — and unlike the pre-merge hook — there is no inactivity
-// watchdog: [hooks].inactivity-timeout is documented as the pre-merge gate's
-// watchdog, and silently extending it here would change the meaning of every
-// existing config. A post-merge hook that can wedge should bound itself (e.g.
-// `timeout 300 deploy.sh`). Tracked as a follow-up.
+// The hook is bounded by a WALL-CLOCK cap (PostMergeTimeoutValue: 10m by
+// default, overridable via [hooks].post-merge-timeout, 0 to disable). It is
+// capped by default — unlike the opt-in pre-merge inactivity watchdog —
+// because post-merge runs under the per-repo landing lock, so a wedged hook
+// holds the whole repo's merge queue (spinclass#246). Wall-clock rather than
+// inactivity because a deploy can legitimately be silent for minutes.
+//
+// A cap kill is reported distinctly from a caller cancel (session-job-cancel),
+// which cancels the parent ctx: the timeout message is only produced when the
+// deadline fired while the parent was still live.
 func (sf Sweatfile) RunPostMergeHookContext(ctx context.Context, dir string, extraEnv []string, w io.Writer) error {
 	if !sf.PostMergeActive() {
 		return nil
 	}
-	return runHookInDirEnv(ctx, sf.PostMergeHookCommand(), dir, dir, extraEnv, w)
+	cmd := sf.PostMergeHookCommand()
+
+	timeout := sf.PostMergeTimeoutValue()
+	if timeout <= 0 {
+		// Cap explicitly disabled: no deadline, and no WaitDelay either — the
+		// operator asked for an unbounded hook, so draining a lingering child's
+		// output is not ours to truncate.
+		return runHookInDirEnv(ctx, cmd, dir, dir, extraEnv, 0, w)
+	}
+
+	hookCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	err := runHookInDirEnv(hookCtx, cmd, dir, dir, extraEnv, postMergeWaitDelay, w)
+	switch {
+	// Only OUR deadline yields the cap message: if the caller's ctx is also
+	// done, the kill is theirs (a cancelled job) and keeps its own error.
+	case err != nil && errors.Is(hookCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil:
+		return fmt.Errorf(
+			"post-merge hook killed: exceeded post-merge-timeout %s (the merge already landed; "+
+				"set [hooks].post-merge-timeout to raise or 0 to disable the cap)",
+			timeout,
+		)
+	// The hook itself finished, but left a child holding its output pipe, so
+	// Wait had to be cut short. Worth naming precisely: the usual cause is a
+	// backgrounded child that did not redirect stdout/stderr, which would
+	// otherwise hold the merge lock for the child's full lifetime.
+	case errors.Is(err, exec.ErrWaitDelay):
+		return fmt.Errorf(
+			"post-merge hook left a child holding its output pipe; stopped waiting after %s "+
+				"(redirect backgrounded work off the hook's stdout/stderr, e.g. `… >>deploy.log 2>&1 &`)",
+			postMergeWaitDelay,
+		)
+	}
+	return err
 }
+
+// postMergeWaitDelay bounds how long Wait keeps draining the hook's output
+// pipe after the hook process itself is done or killed. It is the difference
+// between post-merge-timeout being a real wall-clock bound and being advisory
+// — see runHookInDirEnv. Generous enough to collect a normal hook's trailing
+// output, short enough that a lingering child cannot hold the merge lock.
+const postMergeWaitDelay = 5 * time.Second
 
 // RunPreMergeHookContext runs the pre-merge hook bound to ctx, so a caller
 // (the async job runner) can cancel/kill the hook subprocess. The synchronous
@@ -366,14 +413,27 @@ func runHookContext(ctx context.Context, cmd *string, worktreePath string, w io.
 // `direnv allow` record, whereas the session worktree has both (writeEnvrc +
 // `direnv allow` at `sc start`). See spinclass#198 and FDR 0013.
 func runHookInDir(ctx context.Context, cmd *string, envDir, runDir string, w io.Writer) error {
-	return runHookInDirEnv(ctx, cmd, envDir, runDir, nil, w)
+	return runHookInDirEnv(ctx, cmd, envDir, runDir, nil, 0, w)
 }
 
-// runHookInDirEnv is runHookInDir with extraEnv appended to the hook's
-// environment (after os.Environ and WORKTREE, so it wins on duplicate keys).
-// Only the post-merge hook uses it, to publish the landed sha and push state
-// the hook is meant to act on; every other hook passes nil via runHookInDir.
-func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, extraEnv []string, w io.Writer) error {
+// runHookInDirEnv is runHookInDir with two extras, both used only by the
+// post-merge hook; every other hook passes the zero values via runHookInDir.
+//
+// extraEnv is appended to the hook's environment (after os.Environ and
+// WORKTREE, so it wins on duplicate keys) to publish the landed sha and push
+// state the hook acts on.
+//
+// waitDelay, when non-zero, is set as the command's WaitDelay. This is what
+// makes a timeout actually bound wall-clock time. Killing the hook cancels its
+// context, which kills the shell — but os/exec's Wait does not return until
+// every holder of the output pipe's write end has closed it, and a killed
+// shell's surviving descendants still hold it. Without WaitDelay a 10m cap on
+// a hook whose child runs for an hour returns after an HOUR, so the merge lock
+// stays held for the full overrun: precisely the wedge the cap exists to
+// prevent (measured before this was added — a 200ms cap on a hook with a 3s
+// pipe-holding child returned after 3.0s). WaitDelay bounds that drain, after
+// which Wait closes the pipes and returns.
+func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, extraEnv []string, waitDelay time.Duration, w io.Writer) error {
 	if cmd == nil || *cmd == "" {
 		return nil
 	}
@@ -420,6 +480,7 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 	c.Env = append(c.Env, extraEnv...)
 	c.Stdout = w
 	c.Stderr = w
+	c.WaitDelay = waitDelay
 
 	return c.Run()
 }

@@ -43,6 +43,9 @@ confirmed landed. See issue #244.
 [hooks]
 post-merge = "deploy-krone.sh"
 
+# Wall-clock cap. Default 10m; "0" disables.
+post-merge-timeout = "10m"
+
 # Suppress an inherited command without clearing it.
 disable-post-merge = true
 ```
@@ -142,11 +145,16 @@ hook is byte-for-byte unchanged.
 
 - **Backgrounding the hook** (fire-and-forget goroutine): orphaned output,
   races process exit on the CLI path, no way to report the result.
-- **Reusing `inactivity-timeout`** as a post-merge watchdog: that knob is
+- **Reusing `inactivity-timeout`** as the post-merge bound: that knob is
   documented as the pre-merge gate's watchdog, and silently extending its
-  scope would change the meaning of every existing config. A hook that can
-  wedge should bound itself (`timeout 300 …`). Revisit if wedged deploys
-  prove common.
+  scope would change the meaning of every existing config. It is also the
+  wrong shape — inactivity, when a deploy's silence is not evidence of a
+  wedge. A distinct wall-clock `post-merge-timeout` landed instead (#246).
+- **Leaving the hook unbounded** (the original shipping decision, since
+  reversed): defensible while post-merge ran outside the lock, indefensible
+  once it runs under it — an unbounded hook then wedges the whole repo's
+  queue, and "self-bound it with `timeout(1)`" puts the burden on every
+  consumer to avoid taking the repo down.
 - **Running in a detached worktree** (the FDR 0013 pattern): pointless — the
   merge has already landed, so there is nothing to isolate it from.
 
@@ -159,9 +167,14 @@ Deploy only what actually shipped, and only once it is public:
 pre-merge = "just"
 post-merge = """
 [ "$SPINCLASS_MERGE_PUSHED" = 1 ] || exit 0
-timeout 600 ./bin/deploy.sh "$SPINCLASS_MERGED_SHA"
+./bin/deploy.sh "$SPINCLASS_MERGED_SHA"
 """
+# Optional: this deploy is slower than the 10m default.
+post-merge-timeout = "20m"
 ```
+
+No `timeout(1)` wrapper needed — `post-merge-timeout` bounds the hook, and
+overrunning it produces a message naming the knob rather than a bare `124`.
 
 Detaching a slow deploy so the merge lock is not held for its duration:
 
@@ -181,6 +194,13 @@ assumed: `TestRunPostMergeHookContextDetachedChildOutlivesHook` asserts the
 hook returns in <500ms and the child still completes afterwards, and was
 confirmed to fail (blocking the full child duration) with the redirects
 removed.
+
+Forgetting them is no longer silent: the hook's `WaitDelay` cuts the drain
+short after 5s and reports "left a child holding its output pipe", naming the
+redirect as the fix. That same `WaitDelay` is what makes `post-merge-timeout` a
+real bound rather than an advisory one — without it, killing the hook still
+left `Wait` draining a surviving descendant's pipe for the descendant's full
+lifetime.
 
 `setsid` puts the child in its own session so it survives a process-group
 signal; plain `&` suffices today but is not future-proof against #188.
@@ -209,10 +229,20 @@ and when the deploy fails — note the merge still succeeds:
   so a slow deploy delays every other merge in the repo (they heartbeat
   "merge queue: waiting behind <session>" meanwhile). Deliberate — see Design
   — but it means the hook should be a cheap trigger, not a long inline deploy.
-- **No inactivity watchdog.** A hook that never exits and never writes wedges
-  the merge call AND holds the queue, since it runs under the lock. Self-bound
-  it (`timeout 300 …`); `session-job-cancel` also kills it on the async path.
-  Tracked as #246.
+- **Bounded by a wall-clock cap, not an inactivity watchdog.**
+  `[hooks].post-merge-timeout` defaults to **10m** and is **on by default** —
+  the asymmetry with the opt-in `inactivity-timeout` is deliberate: the
+  pre-merge gate holds nothing, so an unbounded gate stalls only its own
+  session, whereas an unbounded post-merge hook wedges the whole repo's queue
+  (#246). `"0"` disables. A bad value falls back to the default, not to "no
+  cap". Wall-clock because a deploy can legitimately be silent for minutes.
+- **The cap frees the lock; it does not stop the work.** Cancelling the hook
+  kills the shell, not the process tree — descendants survive (measured). So an
+  overrunning deploy's subprocesses keep running after the cap fires; what the
+  cap guarantees is that the *merge queue* is released, not that the deploy
+  stopped. A deploy that must be interruptible has to handle that itself.
+  Killing the tree is spinclass#188's territory, and would also break the
+  documented detach pattern, so it is not a free fix.
 - **Fires once per landing, with no delivery guarantee.** A crash between the
   push and the hook loses the trigger; nothing records that the hook is owed.
   A consumer needing at-least-once semantics must reconcile from the merged
@@ -230,7 +260,8 @@ and when the deploy fails — note the merge still succeeds:
 | lock scope | hook runs UNDER the landing lock | a merge is exclusive end to end; an early release lets two sessions' deploys interleave, reintroducing circus#139 one level up | queue latency from slow hooks becoming the dominant complaint, with a safe way to keep deploys ordered without the lock |
 | synchronous vs backgrounded | synchronous | keeps output attributable, survives CLI process exit, and is what makes the exclusivity guarantee meaningful; zero cost when unconfigured | deploys long enough that blocking the merge call is itself the complaint, even async |
 | failure verdict | `NotOk` + `severity=warn`, no error | visible without making a landed merge look failed | agents ignoring the warn line, or conversely treating it as a merge failure |
-| watchdog | none | `inactivity-timeout` means the pre-merge gate; scope creep would change existing configs | wedged post-merge hooks in practice ⇒ add a distinct `post-merge-timeout` |
+| cap default | 10m, on by default (`post-merge-timeout`) | an unbounded hook wedges the repo's queue, not just its session, so this one ships capped — unlike the opt-in pre-merge watchdog; 10m sits clear of a real deploy while bounding a genuine wedge | false kills on legitimately long deploys (raise it), or wedges going unnoticed for 10m (lower it) |
+| bad-value fallback | the default, not "no cap" | a typo must not silently strip a protection that is on by default | operators preferring a hard failure over a silent fallback |
 
 ## More Information
 

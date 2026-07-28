@@ -267,8 +267,11 @@ subcommand is always available.
   Non-fatal by design: a nonzero exit emits a `severity=warn` not-ok point
   with the hook's output but does NOT fail the merge (nothing to roll back;
   a retry would find nothing to merge). Runs in the session worktree if it
-  survived teardown, else `repoPath`; no build worktree, no
-  `inactivity-timeout`. Publishes `SPINCLASS_MERGED_SHA` (the **landing** sha
+  survived teardown, else `repoPath`; no build worktree. Bounded by
+  `[hooks].post-merge-timeout` — a **wall-clock** cap, **on by default at 10m**
+  (#246), because a wedged hook holds the repo's queue, not just its session;
+  `"0"` disables, a bad value falls back to the default rather than to no cap.
+  Publishes `SPINCLASS_MERGED_SHA` (the **landing** sha
   on a rebased queued landing), `_MERGED_BRANCH`, `_DEFAULT_BRANCH`,
   `_MERGE_PUSHED`, `_REPO_PATH` via `sweatfile.runHookInDirEnv`. All three
   land paths fire it (queued, `disable-merge-queue`, `MergeImplicit`);

@@ -72,6 +72,7 @@ type Hooks struct {
 	DisableWorktreePathRewrite *bool   `toml:"disable-worktree-path-rewrite"`
 	PreMergeOutputFormat       *string `toml:"pre-merge-output-format"`
 	InactivityTimeout          *string `toml:"inactivity-timeout"`
+	PostMergeTimeout           *string `toml:"post-merge-timeout"`
 	AutoRebuildOnResume        *bool   `toml:"auto-rebuild-on-resume"`
 }
 
@@ -187,6 +188,46 @@ func (sf Sweatfile) PostMergeHookCommand() *string {
 		return nil
 	}
 	return sf.Hooks.PostMerge
+}
+
+// DefaultPostMergeTimeout caps how long a post-merge hook may run when
+// [hooks].post-merge-timeout is unset. Unlike the pre-merge gate — whose
+// watchdog is opt-in and off by default — post-merge runs UNDER the per-repo
+// landing lock, so a wedged hook holds the whole repo's merge queue, not just
+// its own session. That blast radius is why this one ships capped by default
+// (spinclass#246).
+//
+// 10m is chosen to sit well clear of a real deploy (minutes, longer on a cold
+// nix cache) while still bounding a genuine wedge.
+const DefaultPostMergeTimeout = 10 * time.Minute
+
+// PostMergeTimeoutValue returns the wall-clock cap for the post-merge hook:
+// the parsed [hooks].post-merge-timeout, DefaultPostMergeTimeout when unset or
+// empty, and 0 (meaning NO timeout) when explicitly set to a zero duration.
+//
+// A wall-clock cap rather than an inactivity one: a deploy can legitimately
+// produce no output for minutes, so silence is not evidence of a wedge (this
+// is the deliberate difference from [hooks].inactivity-timeout).
+//
+// An unparseable or negative value degrades to the DEFAULT, not to 0. This
+// also differs from InactivityTimeoutValue, and for a reason: that knob
+// defaults to off, so degrading a bad value to 0 changes nothing, whereas here
+// it would silently strip a protection that is on by default. `sc validate`
+// rejects a bad value up front; the runtime fallback just refuses to make a
+// typo the thing that wedges a repo's merge queue.
+func (sf Sweatfile) PostMergeTimeoutValue() time.Duration {
+	if sf.Hooks == nil || sf.Hooks.PostMergeTimeout == nil {
+		return DefaultPostMergeTimeout
+	}
+	v := *sf.Hooks.PostMergeTimeout
+	if v == "" {
+		return DefaultPostMergeTimeout
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < 0 {
+		return DefaultPostMergeTimeout
+	}
+	return d
 }
 
 // PostMergeDisabled reports whether [hooks].disable-post-merge is true. It
