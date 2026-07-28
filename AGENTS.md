@@ -258,9 +258,12 @@ subcommand is always available.
   path verbatim.
 - **`post-merge` hook** (FDR 0023, #244): when `[hooks].post-merge` is set,
   `merge.runPostMergePhase` runs it after a merge has fully landed (ff-only
-  done; pushed when gitSync). On the queued path the merge lock is **released
-  explicitly first** — a deploy-trigger hook must not hold the queue against
-  sibling sessions — with the idempotent `defer` left as the error-path net.
+  done; pushed when gitSync). On the queued path it runs **under the landing
+  lock**, as the last stage before `FinishMerge` returns and the deferred
+  `Release` fires — a merge is exclusive end to end, so no sibling session can
+  land or deploy mid-hook (an early release would let two deploys interleave,
+  the exact failure #244 exists to prevent). Cost: a slow hook extends the
+  exclusive region and delays every other merge in the repo.
   Non-fatal by design: a nonzero exit emits a `severity=warn` not-ok point
   with the hook's output but does NOT fail the merge (nothing to roll back;
   a retry would find nothing to merge). Runs in the session worktree if it

@@ -281,15 +281,19 @@ Re-running the merge would find nothing to merge, so a failed post-merge hook
 is something to act on out of band, not to retry.
 .IP
 Crucially, post-merge runs
-.B after the per-repo merge lock is released
+.B under the per-repo merge lock
 (see
 .B disable-merge-queue
 below and
 .B FDR 0022
-in the source tree). A deploy trigger measured in minutes would otherwise
-queue every other session in the repo behind it; the lock protects
-gate + land + push, all of which are complete by then. The merge tool call
-does still wait for the hook before returning.
+in the source tree), as the merge's last stage. A merge is exclusive end to
+end: while your hook runs, no sibling session in the repo can land or deploy.
+That ordering is the point \(em two deploys interleaving is the failure this
+hook exists to prevent \(em but it means a slow hook delays every other merge
+in the repo, which will sit logging
+.B "merge queue: waiting behind <session>"
+until it finishes. Keep the hook a cheap trigger (enqueue, fire a webhook)
+rather than a long inline deploy.
 .IP
 The hook runs in the session worktree when it still exists (teardown may have
 removed it) and otherwise in the main checkout \(em which is sitting on the
@@ -298,7 +302,8 @@ already landed, so there is nothing to isolate. Unlike
 .BR pre-merge ,
 .B inactivity-timeout
 does not apply; a hook that can wedge should bound itself (e.g.
-.BR "timeout 300 deploy.sh" ).
+.BR "timeout 300 deploy.sh" )
+\(em all the more so because it wedges the merge queue, not just this merge.
 Beyond the usual environment (including
 .BR WORKTREE ),
 the hook receives:

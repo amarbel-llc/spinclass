@@ -178,9 +178,10 @@ func (sf Sweatfile) PreMergeHookCommand() *string {
 
 // PostMergeHookCommand returns the [hooks].post-merge command, or nil when
 // unset. When set (and not disabled via PostMergeDisabled) the merge runs it
-// AFTER the merge has landed and been pushed — and, on the queued path, after
-// the per-repo merge lock has been released, so a slow hook never holds the
-// queue against sibling sessions. See FDR 0023.
+// AFTER the merge has landed and been pushed, as the merge's last stage — on
+// the queued path still UNDER the per-repo merge lock, so a merge stays
+// exclusive end to end and no sibling session can land or deploy mid-hook.
+// See FDR 0023.
 func (sf Sweatfile) PostMergeHookCommand() *string {
 	if sf.Hooks == nil {
 		return nil

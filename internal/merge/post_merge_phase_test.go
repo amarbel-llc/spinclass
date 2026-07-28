@@ -3,6 +3,7 @@ package merge
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -50,16 +51,18 @@ func runFinish(t *testing.T, repoDir, wtPath, branch string, gitSync bool) ([]nd
 	return testRecords(decodeRecords(t, buf.Bytes())), err
 }
 
-// TestPostMergeRunsOutsideTheMergeLock is the load-bearing property of FDR
-// 0023: a post-merge hook is typically a deploy measured in minutes, and the
-// per-repo landing lock (FDR 0022) must NOT still be held while it runs — or
-// every sibling session in the repo queues behind this session's deploy.
+// TestPostMergeRunsUnderTheMergeLock is the load-bearing property of FDR
+// 0023: the per-repo landing lock (FDR 0022) makes a merge exclusive END TO
+// END, and the post-merge hook is part of the merge. While the hook runs, no
+// sibling session may perform any part of a merge — otherwise two sessions'
+// deploys could interleave and the older one could win, which is the failure
+// the queue exists to prevent.
 //
 // The hook blocks until the test releases it. While it is blocked, the test
-// acquires the same per-repo lock from a second file descriptor; flock is
-// per-open-file-description, so this genuinely contends and would fail if
-// FinishMerge still held the lock.
-func TestPostMergeRunsOutsideTheMergeLock(t *testing.T) {
+// tries to acquire the same per-repo lock from a second file descriptor;
+// flock is per-open-file-description, so this genuinely contends and MUST
+// time out. After the merge returns, the lock must be free again.
+func TestPostMergeRunsUnderTheMergeLock(t *testing.T) {
 	repoDir, wtPath := setupPostMergeRepo(t, "feature")
 
 	signals := t.TempDir()
@@ -92,12 +95,13 @@ func TestPostMergeRunsOutsideTheMergeLock(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	// The merge lock must be free RIGHT NOW, while the hook is still running.
+	// A sibling session must NOT be able to start a merge right now: the hook
+	// is running and the landing lock is still held.
 	lockDir, err := git.CommonGitDir(repoDir)
 	if err != nil {
 		t.Fatalf("CommonGitDir: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	lock, acqErr := mergelock.Acquire(ctx, lockDir, "sibling-session", nil)
 
@@ -112,9 +116,13 @@ func TestPostMergeRunsOutsideTheMergeLock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if acqErr != nil {
-		t.Fatalf("merge lock still held while the post-merge hook ran (%v) — "+
-			"a slow post-merge hook would serialize every session in the repo", acqErr)
+	if acqErr == nil {
+		t.Fatal("a sibling session acquired the merge lock while the post-merge " +
+			"hook was still running — the merge must stay exclusive end to end, " +
+			"or two sessions' deploys can interleave")
+	}
+	if !errors.Is(acqErr, context.DeadlineExceeded) {
+		t.Fatalf("expected the probe to time out contending for a held lock, got %v", acqErr)
 	}
 
 	select {
@@ -131,6 +139,18 @@ func TestPostMergeRunsOutsideTheMergeLock(t *testing.T) {
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("FinishMerge did not complete within 30s after releasing the hook")
+	}
+
+	// ...and once the merge returns, the lock must be free again — held for
+	// the whole merge is the contract, held forever is a wedged queue.
+	afterCtx, afterCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer afterCancel()
+	after, afterErr := mergelock.Acquire(afterCtx, lockDir, "sibling-session", nil)
+	if afterErr != nil {
+		t.Fatalf("merge lock not released after FinishMerge returned: %v", afterErr)
+	}
+	if relErr := after.Release(); relErr != nil {
+		t.Errorf("releasing probe lock: %v", relErr)
 	}
 }
 

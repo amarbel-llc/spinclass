@@ -415,21 +415,14 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 		return blobLinks, tdErr
 	}
 
-	// (h) The merge has fully landed: release the queue BEFORE the post-merge
-	// hook. A post-merge hook is typically a deploy trigger measured in
-	// minutes; running it under the landing lock would serialize every
-	// sibling session in the repo behind this session's deploy for no reason
-	// — the lock protects gate+land+push, all of which are done. Release is
-	// idempotent, so the deferred release above stays as the error-path net.
-	if relErr := lock.Release(); relErr != nil {
-		// Losing the release is not a merge failure (the landing succeeded and
-		// the flock self-releases on process exit), but it must not be silent:
-		// a leaked lock stalls the queue.
-		ts.NotOk("release merge lock "+branch, map[string]any{
-			"severity": "warn",
-			"message":  relErr.Error(),
-		})
-	}
+	// (h) The post-merge hook runs UNDER the landing lock, like every other
+	// stage of the merge. The queue's contract (FDR 0022) is that a merge is
+	// exclusive end to end: while the lock is held no other session may
+	// perform ANY part of a merge. A post-merge deploy is part of the merge —
+	// letting a sibling session land (and deploy) while this session's deploy
+	// is still running would defeat the point of serializing in the first
+	// place, since the two deploys could interleave and the older one could
+	// win. The deferred Release above fires when FinishMerge returns.
 	runPostMergePhase(ctx, ts, repoPath, wtPath, branch, defaultBranch, landingSha, gitSync, activity)
 	return blobLinks, nil
 }
@@ -457,8 +450,9 @@ func finishMergeUnqueued(ctx context.Context, rep *crap.Reporter, ts *crap.TestS
 	if tdErr := teardownAndPush(ts, repoPath, wtPath, branch, gitSync, inSession, false, true); tdErr != nil {
 		return blobLinks, tdErr
 	}
-	// No lock on this path, so nothing to release first; pinnedSha is what
-	// landed (the unqueued path never rebases the landing).
+	// No lock on this path at all (that is what disable-merge-queue means), so
+	// there is no exclusivity to preserve; pinnedSha is what landed, since the
+	// unqueued path never rebases the landing.
 	runPostMergePhase(ctx, ts, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, activity)
 	return blobLinks, nil
 }
@@ -652,8 +646,8 @@ func MergeImplicit(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream,
 	// Post-merge hook (FDR 0023). An implicit session's work is already ON the
 	// default branch, so the branch that merged and the branch it landed on are
 	// the same ref, and the push is unconditional — hence pushed=true. No lock
-	// to release first: implicit merges are out of the merge queue's scope
-	// (FDR 0022 Limitations).
+	// is involved: implicit merges are out of the merge queue's scope entirely
+	// (FDR 0022 Limitations), so this hook carries no exclusivity guarantee.
 	runPostMergePhase(ctx, ts, repoPath, checkout, branch, branch, pinnedSha, true, activity)
 	return blobLinks, nil
 }
@@ -822,11 +816,14 @@ func runPreMergeHookContext(ctx context.Context, rep *crap.Reporter, ts *crap.Te
 // treated as a merge failure (spinclass#244). Returns immediately when no
 // post-merge command is active or the hierarchy cannot be loaded.
 //
-// MUST be called by the queued path only AFTER the per-repo merge lock has
-// been released: a post-merge hook is typically a deploy trigger measured in
-// minutes, and holding the landing lock across it would queue every sibling
-// session in the repo behind this session's deploy (FDR 0022's lock covers
-// gate+land+push, not what happens afterwards).
+// On the queued path this runs UNDER the per-repo merge lock, as the last
+// stage before FinishMerge returns and the deferred Release fires. That is
+// deliberate: FDR 0022's queue makes a merge exclusive end to end, and a
+// post-merge deploy is part of the merge. Two sessions deploying concurrently
+// — or a sibling landing mid-deploy — is exactly the interleaving the queue
+// exists to prevent. The cost is real and accepted: a slow post-merge hook
+// extends the exclusive region, so N racing sessions drain in
+// N × (gate + hook) time.
 //
 // The hook runs in the session worktree when it still exists — teardown may
 // have removed it — and otherwise in repoPath, which is sitting on the merged

@@ -6,9 +6,11 @@ promotion-criteria: |
   krone self-deploy (circus#139) triggering off `[hooks].post-merge` — with
   (1) a landed merge firing the hook exactly once against the sha that
   actually shipped, (2) an observed contended merge where a sibling session
-  acquires the merge lock while this session's deploy hook is still running
-  (the FDR 0022 interaction this design exists for), and (3) one deliberate
-  hook failure confirming the merge still reports success with a warn point.
+  waits out this session's deploy hook before landing — logging the
+  "merge queue: waiting behind <session>" heartbeats for the hook's duration,
+  confirming a merge stays exclusive through post-merge — and (3) one
+  deliberate hook failure confirming the merge still reports success with a
+  warn point.
   testing -> accepted: ~2 weeks of real deploys with no case where a
   post-merge failure was mistaken for a merge failure (or vice versa), and
   no repo needing `disable-post-merge`.
@@ -52,7 +54,9 @@ disable-post-merge = true
   point carrying the hook's output; the merge still reports success. Retrying
   the merge would find nothing to merge, so a failure here is acted on out of
   band.
-- **Runs after the per-repo merge lock is released** (see Design).
+- **Runs under the per-repo merge lock**, as the merge's last stage — a merge
+  stays exclusive end to end, so no sibling session can land (or deploy) while
+  this hook is in flight. See Design for the cost.
 - Environment, on top of the usual inherited env and `WORKTREE`:
 
   | Variable | Meaning |
@@ -72,32 +76,45 @@ disable-post-merge = true
 
 ## Design
 
-### Placement: outside the merge lock, inside the call
+### Placement: under the merge lock, as the last stage
 
 The load-bearing decision. FDR 0022 gave merges a per-repo `flock` that
 `FinishMerge` acquires **before** the gate and holds through gate → land →
-push. A post-merge hook is typically a deploy measured in minutes. Running it
-inside that region would put every sibling session in the repo behind this
-session's deploy, converting the merge queue's bounded "N × gate-time" into
-"N × (gate + deploy) time" for work the lock does not protect.
+push. The post-merge hook runs inside that region, as the last stage before
+`FinishMerge` returns and the deferred `Release` fires.
 
-So the queued path releases the lock **explicitly** once `teardownAndPush`
-returns, and only then runs the hook. `mergelock.Lock.Release` is documented
-idempotent, so the existing `defer` stays untouched as the error-path net.
-`internal/merge/post_merge_phase_test.go` pins this with a hook that blocks
-while the test acquires the same lock from a second file descriptor — flock
-being per-open-file-description, that genuinely contends, and the test was
-confirmed to fail when the release is removed.
+The queue's contract is that a merge is **exclusive end to end**: while the
+lock is held, no other session may perform any part of a merge. A post-merge
+deploy is part of the merge. Releasing early would let a sibling session gate,
+land and deploy while this session's deploy is still in flight — the two
+deploys interleave, and the older one can win. That is precisely the failure
+that motivated the hook (circus#139: a stale deploy silently overwriting a
+newer live config), so escaping the lock to run it would reintroduce the bug
+the feature exists to fix, one level up.
 
-The hook still runs **synchronously within the merge call**, so the tool does
-not return until it finishes. That is deliberate:
+The hook also runs **synchronously within the merge call**, so the tool does
+not return until it finishes:
 
 - Fire-and-forget would orphan the hook's output (nothing to attach it to
   once the stream is finished) and, on the CLI path, race process exit —
-  `sc merge` would exit mid-deploy.
+  `sc merge` would exit mid-deploy. It would also drop the exclusivity
+  guarantee above.
 - Callers with no `post-merge` configured pay exactly nothing: the phase
   returns before doing any work when `PostMergeActive()` is false.
-- The latency is the user's own opt-in, and it no longer costs anyone else.
+
+**The cost is real and accepted:** a slow post-merge hook extends the
+exclusive region, so N racing sessions drain in N × (gate + hook) time rather
+than N × gate time. This is the same burst-latency trade FDR 0022 already
+made, paid unattended in background jobs with clown wakeups. A repo whose
+deploys are slow enough for this to hurt should make the hook a cheap trigger
+(enqueue, fire a webhook) rather than an inline deploy.
+
+`internal/merge/post_merge_phase_test.go` pins the property with a hook that
+blocks while the test tries to acquire the same lock from a second file
+descriptor — flock being per-open-file-description, that genuinely contends.
+The probe must time out while the hook runs, and must succeed once
+`FinishMerge` returns; the test was confirmed to fail in both directions (an
+early release, and a leaked lock).
 
 ### Non-fatal reporting
 
@@ -163,11 +180,14 @@ and when the deploy fails — note the merge still succeeds:
 
 ## Limitations
 
-- **The merge call still blocks on the hook.** Other sessions are not
-  serialized, but this session's `merge-this-session` does not return until
-  the hook finishes. Use the async merge tool for long deploys.
+- **The hook extends the exclusive region.** Sibling sessions queue behind it,
+  so a slow deploy delays every other merge in the repo (they heartbeat
+  "merge queue: waiting behind <session>" meanwhile). Deliberate — see Design
+  — but it means the hook should be a cheap trigger, not a long inline deploy.
 - **No inactivity watchdog.** A hook that never exits and never writes wedges
-  the merge call (not the queue). Self-bound it.
+  the merge call AND holds the queue, since it runs under the lock. Self-bound
+  it (`timeout 300 …`); `session-job-cancel` also kills it on the async path.
+  Tracked as #246.
 - **Fires once per landing, with no delivery guarantee.** A crash between the
   push and the hook loses the trigger; nothing records that the hook is owed.
   A consumer needing at-least-once semantics must reconcile from the merged
@@ -182,7 +202,8 @@ and when the deploy fails — note the merge still succeeds:
 
 | Lever | Current | Rationale | Change signal |
 |---|---|---|---|
-| synchronous vs backgrounded | synchronous | keeps output attributable and survives CLI process exit; zero cost when unconfigured | deploys long enough that blocking the merge call is itself the complaint, even async |
+| lock scope | hook runs UNDER the landing lock | a merge is exclusive end to end; an early release lets two sessions' deploys interleave, reintroducing circus#139 one level up | queue latency from slow hooks becoming the dominant complaint, with a safe way to keep deploys ordered without the lock |
+| synchronous vs backgrounded | synchronous | keeps output attributable, survives CLI process exit, and is what makes the exclusivity guarantee meaningful; zero cost when unconfigured | deploys long enough that blocking the merge call is itself the complaint, even async |
 | failure verdict | `NotOk` + `severity=warn`, no error | visible without making a landed merge look failed | agents ignoring the warn line, or conversely treating it as a merge failure |
 | watchdog | none | `inactivity-timeout` means the pre-merge gate; scope creep would change existing configs | wedged post-merge hooks in practice ⇒ add a distinct `post-merge-timeout` |
 
@@ -197,7 +218,7 @@ and when the deploy fails — note the merge still succeeds:
   `internal/merge/post_merge_phase_test.go`,
   `internal/sweatfile/postmerge_test.go`.
 - Related FDRs: [FDR-0022](0022-per-repo-merge-queue.md) (the lock this hook
-  must run outside of), [FDR-0018](0018-pre-merge-repair-phase.md) (the phase
+  runs under), [FDR-0018](0018-pre-merge-repair-phase.md) (the phase
   shape this mirrors), [FDR-0013](0013-isolated-build-worktree.md) (the
   PrepareMerge/FinishMerge split and the pinned-vs-landing sha distinction),
   [FDR-0014](0014-implicit-sessions.md) (the implicit-session merge path).
