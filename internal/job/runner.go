@@ -38,7 +38,14 @@ var ErrAlreadyRunning = fmt.Errorf("a job is already running for this session")
 // running Job record, and streams fn's hook output to job.log. It returns the
 // created Job immediately. The goroutine outlives the caller (serve is a
 // long-lived process); on completion it persists the final status + result.
-// Returns ErrAlreadyRunning if a job is already in flight for wt.
+//
+// The returned Job.ID is the clown/ringmaster job id when running under clown,
+// so it matches the id the completion wake reports (#243); the caller's id
+// argument is the fallback used when clown is not enabled.
+//
+// Returns ErrAlreadyRunning if a job is already in flight for wt, and refuses
+// to dispatch at all if the clown job-wakeup allocation fails while clown is
+// enabled (see below).
 func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 	mu.Lock()
 	if _, ok := running[wt]; ok {
@@ -62,13 +69,53 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 		close(done)
 	}
 
+	// Allocate the clown job-wakeup entry (clown RFC-0009) BEFORE launching the
+	// goroutine, so the id handed back to the caller is the SAME id the
+	// completion wake will carry (#243). Previously this ran inside the
+	// goroutine and the two ids diverged: an agent that recorded the dispatch
+	// id saw a wake bearing an unfamiliar one and reasonably concluded the
+	// notification belonged to another session. The confusion was sharpened by
+	// the two schemes rhyming — ringmaster mints `<label>-<hash>` and the label
+	// is `kind`, so `merge-b009b2b1` sat next to a local `merge-<unix-ts>`.
+	//
+	// Dispatch-time allocation is what `ringmaster start` is for, and it costs
+	// ~7ms (measured; almost entirely process startup) against a dispatch that
+	// has already paid for PrepareMerge's network `git pull` and rebase. The
+	// earlier "a slow clown must not delay Start's immediate-return contract"
+	// rationale guarded a cost that is not there; ringmaster's own emit
+	// deadline remains the backstop against a genuinely wedged binary.
+	//
+	// Not running under clown at all is fine — the job just gets no wake, the
+	// pre-clown behaviour. But a FAILED allocation while clown IS enabled is a
+	// hard refusal: the wake is how the agent learns an async job finished, so
+	// dispatching without one produces a job that completes into silence, which
+	// is worse than not dispatching. The error carries the local id we would
+	// have used plus the identifying context, so the failure is debuggable
+	// without digging for the job record that was never written.
+	clownID := ""
+	if clown.Enabled() {
+		cid, cerr := clown.StartJob(context.Background(), kind, clown.Source)
+		if cerr != nil {
+			clearRunning()
+			return nil, fmt.Errorf(
+				"allocating the clown job-wakeup entry failed, so this %s job would run with no "+
+					"completion wake; refusing to dispatch (local job id would have been %q, "+
+					"worktree %q): %w",
+				kind, id, wt, cerr,
+			)
+		}
+		clownID = cid
+		id = cid
+	}
+
 	j := &Job{
-		ID:        id,
-		Kind:      kind,
-		Status:    StatusRunning,
-		GitSync:   gitSync,
-		ServePID:  os.Getpid(),
-		StartedAt: time.Now(),
+		ID:         id,
+		ClownJobID: clownID,
+		Kind:       kind,
+		Status:     StatusRunning,
+		GitSync:    gitSync,
+		ServePID:   os.Getpid(),
+		StartedAt:  time.Now(),
 	}
 	if err := Write(wt, j); err != nil {
 		clearRunning()
@@ -90,21 +137,6 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 	go func() {
 		defer clearRunning()
 		defer func() { _ = logf.Close() }()
-
-		// Allocate the matching clown job-wakeup entry (clown RFC-0009) when
-		// running under clown, so the terminal emit below can wake the agent.
-		// Inside the goroutine so a slow clown never delays Start's
-		// immediate-return contract. Emit failures are logged, never fatal:
-		// spinclass's job.json/job.log remain the system of record, clown is
-		// only the wake layer.
-		if clown.Enabled() {
-			if cid, cerr := clown.StartJob(context.Background(), kind, clown.Source); cerr != nil {
-				_, _ = fmt.Fprintf(logf, "[clown] job-start emit failed: %v\n", cerr)
-			} else {
-				j.ClownJobID = cid
-				_ = Write(wt, j)
-			}
-		}
 
 		text, isErr := fn(ctx, logf)
 

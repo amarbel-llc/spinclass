@@ -544,8 +544,11 @@ func startSessionJob(wt, kind string, gitSync bool, fn job.Func) *command.Result
 		}
 		return command.TextErrorResult(fmt.Sprintf("could not start background job: %v", err))
 	}
+	// j.ID is the ringmaster job id when running under clown (#243), so it is
+	// the SAME id the completion wake reports — say so, since the whole point
+	// of adopting it is that an agent can match the two.
 	return command.TextResult(fmt.Sprintf(
-		"started background %s job %q; the pre-merge hook is running detached, so this call is not subject to the MCP request timeout. Poll session-job-status for progress and the final result; session-job-cancel to stop it.",
+		"started background %s job %q; the completion wake reports this same id. The pre-merge hook is running detached, so this call is not subject to the MCP request timeout. Poll session-job-status for progress and the final result; session-job-cancel to stop it.",
 		kind, j.ID,
 	))
 }

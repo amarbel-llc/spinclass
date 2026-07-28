@@ -197,33 +197,86 @@ func TestStartNoEmitWhenClownAbsent(t *testing.T) {
 	}
 }
 
-func TestStartReturnsImmediatelyDespiteSlowClown(t *testing.T) {
+// Start's immediate-return contract is about the JOB BODY, not the wakeup
+// allocation. Since #243 the allocation is deliberately on Start's path (it is
+// what makes the returned id match the wake's, and `ringmaster start` is a
+// ~7ms local call built for dispatch-time use), so the property worth pinning
+// is that the slow thing — fn, the pre-merge gate — still runs detached.
+func TestStartDoesNotWaitForTheJobBody(t *testing.T) {
 	wt := t.TempDir()
 	argsFile := filepath.Join(t.TempDir(), "args")
-	// A ringmaster that hangs for 3s: the async tool's contract is to return a
-	// job id immediately, so the start emit must not be on Start's path.
-	dir := t.TempDir()
-	script := filepath.Join(dir, "ringmaster")
-	body := "#!/bin/sh\nsleep 3\n{ printf '%s\\n' \"$@\"; echo --; } >> " + argsFile + "\n" +
-		"if [ \"$1\" = start ]; then echo job-deadbeef; fi\nexit 0\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatalf("write stub ringmaster: %v", err)
-	}
-	t.Setenv("CLOWN_BIN", filepath.Join(dir, "clown"))
-	t.Setenv("RINGMASTER_BIN", script)
+	installStub(t, argsFile, true)
 
+	release := make(chan struct{})
 	began := time.Now()
 	if _, err := Start(wt, KindMerge, false, "fast-job", func(ctx context.Context, w io.Writer) (string, bool) {
+		<-release
 		return "✓ hook", false
 	}); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if elapsed := time.Since(began); elapsed > 1*time.Second {
-		t.Fatalf("Start blocked %v on a slow ringmaster; want immediate return", elapsed)
+	if elapsed := time.Since(began); elapsed > 2*time.Second {
+		t.Fatalf("Start blocked %v on the job body; want return before fn completes", elapsed)
 	}
+	close(release)
 	select {
 	case <-WaitDone(wt):
 	case <-time.After(10 * time.Second):
+		t.Fatal("job did not finish in time")
+	}
+}
+
+// The core of #243: under clown the id handed back at dispatch IS the
+// ringmaster job id the completion wake will carry. Before this, Start
+// returned a locally-minted `<kind>-<unix-ts>` while the wake reported
+// ringmaster's `<kind>-<hash>` — same prefix, different suffix, so an agent
+// matching them reasonably concluded the wake belonged to another session.
+func TestStartReturnsRingmasterJobID(t *testing.T) {
+	wt := t.TempDir()
+	argsFile := filepath.Join(t.TempDir(), "args")
+	installStub(t, argsFile, true)
+
+	ret, err := Start(wt, KindMerge, false, "local-fallback-id", func(ctx context.Context, w io.Writer) (string, bool) {
+		return "✓ hook", false
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if ret.ID != "job-deadbeef" {
+		t.Fatalf("returned id %q, want the ringmaster id %q the wake will carry", ret.ID, "job-deadbeef")
+	}
+	select {
+	case <-WaitDone(wt):
+	case <-time.After(5 * time.Second):
+		t.Fatal("job did not finish in time")
+	}
+	// The persisted record agrees, so session-job-status reports the same id.
+	j, err := Read(wt)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if j.ID != "job-deadbeef" {
+		t.Fatalf("persisted id %q, want %q", j.ID, "job-deadbeef")
+	}
+}
+
+// Without clown there is no ringmaster id to adopt, so the caller's locally
+// minted id stands and the job simply runs without a wake.
+func TestStartKeepsLocalIDWithoutClown(t *testing.T) {
+	wt := t.TempDir()
+	// CLOWN_BIN deliberately unset (TestMain stripped it).
+	ret, err := Start(wt, KindMerge, false, "local-fallback-id", func(ctx context.Context, w io.Writer) (string, bool) {
+		return "✓ hook", false
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if ret.ID != "local-fallback-id" {
+		t.Fatalf("returned id %q, want the caller's local id", ret.ID)
+	}
+	select {
+	case <-WaitDone(wt):
+	case <-time.After(5 * time.Second):
 		t.Fatal("job did not finish in time")
 	}
 }
@@ -246,13 +299,15 @@ func TestStartReturnsSnapshotNotSharedPointer(t *testing.T) {
 	}
 
 	// The returned record is a point-in-time snapshot: the goroutine's later
-	// mutations (status, clown job id, result) must not be visible through
-	// it — reading them concurrently would be a data race otherwise.
+	// mutations (status, result) must not be visible through it — reading them
+	// concurrently would be a data race otherwise. ClownJobID is NOT one of
+	// those mutations since #243: it is set before the goroutine launches, so
+	// the snapshot legitimately carries it.
 	if ret.Status != StatusRunning {
 		t.Fatalf("returned job mutated by goroutine: status %q, want snapshot %q", ret.Status, StatusRunning)
 	}
-	if ret.ClownJobID != "" {
-		t.Fatalf("returned job mutated by goroutine: clown id %q, want empty snapshot", ret.ClownJobID)
+	if ret.ClownJobID != "job-deadbeef" {
+		t.Fatalf("snapshot clown id %q, want it populated at dispatch (%q)", ret.ClownJobID, "job-deadbeef")
 	}
 	j, err := Read(wt)
 	if err != nil || j.Status != StatusSucceeded {
@@ -260,10 +315,60 @@ func TestStartReturnsSnapshotNotSharedPointer(t *testing.T) {
 	}
 }
 
-func TestStartEmitFailureDoesNotAffectJob(t *testing.T) {
+// A failed ALLOCATION under clown refuses the dispatch outright (#243). The
+// wake is how an agent learns an async job finished, so a job dispatched
+// without one would complete into silence — worse than not dispatching. The
+// error names the local id and worktree so the refusal is debuggable without a
+// job record, since none was written.
+func TestStartRefusesWhenClownAllocationFails(t *testing.T) {
 	wt := t.TempDir()
 	argsFile := filepath.Join(t.TempDir(), "args")
 	installStub(t, argsFile, false)
+
+	ran := make(chan struct{}, 1)
+	_, err := Start(wt, KindMerge, false, "local-fallback-id", func(ctx context.Context, w io.Writer) (string, bool) {
+		ran <- struct{}{}
+		return "✓ hook", false
+	})
+	if err == nil {
+		t.Fatal("expected Start to refuse when the wakeup allocation fails")
+	}
+	for _, want := range []string{"local-fallback-id", wt, "no completion wake"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err, want)
+		}
+	}
+	select {
+	case <-ran:
+		t.Fatal("job body ran despite the refusal")
+	case <-time.After(200 * time.Millisecond):
+	}
+	// No job record, and the worktree is left free for a retry rather than
+	// wedged behind a phantom in-flight entry.
+	if _, rerr := Read(wt); rerr == nil {
+		t.Error("a job record was written for a refused dispatch")
+	}
+	if IsRunning(wt) {
+		t.Error("running entry leaked after a refused dispatch")
+	}
+}
+
+// A failed TERMINAL emit is still non-fatal: the job has already done its
+// work, spinclass's own record is the system of record, and only the wake is
+// lost — so it is logged rather than raised.
+func TestFinishEmitFailureDoesNotAffectJob(t *testing.T) {
+	wt := t.TempDir()
+	argsFile := filepath.Join(t.TempDir(), "args")
+	// Succeed on `start` so dispatch proceeds, fail on `done`.
+	dir := t.TempDir()
+	script := filepath.Join(dir, "ringmaster")
+	body := "#!/bin/sh\n{ printf '%s\\n' \"$@\"; echo --; } >> " + argsFile + "\n" +
+		"if [ \"$1\" = start ]; then echo job-deadbeef; exit 0; fi\nexit 1\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatalf("write stub ringmaster: %v", err)
+	}
+	t.Setenv("CLOWN_BIN", filepath.Join(dir, "clown"))
+	t.Setenv("RINGMASTER_BIN", script)
 
 	runWaked(t, wt, KindMerge, func(ctx context.Context, w io.Writer) (string, bool) {
 		return "✓ hook", false

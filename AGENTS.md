@@ -206,7 +206,14 @@ subcommand is always available.
   (blocking join). One active job per session. **Default to the synchronous
   tools** — reach for async only when you have other work to do while the hook
   runs; never start async then hot-poll status.
-- **Clown job-wakeup emits** (FDR 0010, `internal/clown`): when `serve` runs
+- **Clown job-wakeup emits** (FDR 0010, `internal/clown`): the `ringmaster start`
+  allocation happens **before** the job goroutine launches, so the id returned at
+  dispatch IS the id the completion wake carries (#243) — previously the two
+  diverged (`merge-<unix-ts>` vs ringmaster's `merge-<hash>`, same prefix) and
+  agents read their own wake as a sibling's. Dispatch-time allocation is what
+  `ringmaster start` is for (~7ms, measured). A failed allocation under clown
+  **refuses the dispatch**: a job with no wake completes into silence. Without
+  clown the caller's local id stands and there is simply no wake. When `serve` runs
   under clown (`CLOWN_BIN` set), async tools emit `ringmaster start/done`
   (clown's job-control CLI, clown RFC-0015; resolved from PATH or
   `$RINGMASTER_BIN`, never by pinning clown) so clown wakes the agent with one
