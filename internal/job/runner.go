@@ -128,6 +128,27 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 		return nil, err
 	}
 
+	// Tee the hook's output into ringmaster's spool as well, so its native
+	// surface (`ringmaster status --tail`, `ringmaster tail -f`) can show a
+	// running job instead of the `spool_bytes: 0` it reported before
+	// (spinclass#251). job.log stays the system of record and keeps driving
+	// LastActivity's mtime signal, so this is purely additive: every failure
+	// path here leaves the job running with an empty spool, exactly as before.
+	out := io.Writer(logf)
+	var spoolf *os.File
+	if clownID != "" {
+		if p, perr := clown.SpoolPath(context.Background(), clownID); perr == nil {
+			if f, ferr := os.Create(p); ferr == nil {
+				spoolf = f
+				out = io.MultiWriter(logf, spoolf)
+			} else {
+				_, _ = fmt.Fprintf(logf, "[clown] spool open failed: %v\n", ferr)
+			}
+		} else {
+			_, _ = fmt.Fprintf(logf, "[clown] spool-path failed: %v\n", perr)
+		}
+	}
+
 	// Snapshot before the goroutine launches: the goroutine owns j from here
 	// on (status, result, clown job id), so handing the caller the live
 	// pointer would be a data race one field-read away. The snapshot carries
@@ -137,8 +158,13 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 	go func() {
 		defer clearRunning()
 		defer func() { _ = logf.Close() }()
+		defer func() {
+			if spoolf != nil {
+				_ = spoolf.Close()
+			}
+		}()
 
-		text, isErr := fn(ctx, logf)
+		text, isErr := fn(ctx, out)
 
 		end := time.Now()
 		j.EndedAt = &end

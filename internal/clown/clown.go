@@ -86,6 +86,27 @@ func StartJob(ctx context.Context, label, source string) (string, error) {
 	return id, nil
 }
 
+// SpoolPath resolves the absolute path of the job's output spool — where
+// ringmaster expects a producer to write the job's live output, and what
+// `ringmaster status --tail` / `ringmaster tail -f` read (RFC-0015). The file
+// is not created by this call.
+//
+// spinclass's own `.spinclass/job.log` remains the system of record for job
+// output; the spool is written in addition, so ringmaster's native surface
+// reports something better than the `spool_bytes: 0` it saw before
+// (spinclass#251). A failure here is never fatal: the job simply runs with an
+// empty spool, exactly as before.
+func SpoolPath(ctx context.Context, id string) (string, error) {
+	path, err := run(ctx, "spool-path", id)
+	if err != nil {
+		return "", err
+	}
+	if path == "" {
+		return "", fmt.Errorf("ringmaster spool-path: no path on stdout")
+	}
+	return path, nil
+}
+
 // FinishJob appends the job's terminal record (state is one of clown
 // RFC-0009 §5's terminal types), waking the target session. Empty message and
 // resultRef are omitted.

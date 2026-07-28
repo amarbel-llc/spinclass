@@ -42,6 +42,23 @@ func installStub(t *testing.T, argsFile string, ok bool) {
 	t.Setenv("RINGMASTER_BIN", script)
 }
 
+// installStubWithSpool is installStub plus a `spool-path` answer, so the tee
+// into ringmaster's spool has somewhere to land (#251).
+func installStubWithSpool(t *testing.T, argsFile, spoolPath string) {
+	t.Helper()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "ringmaster")
+	body := "#!/bin/sh\n{ printf '%s\\n' \"$@\"; echo --; } >> " + argsFile + "\n" +
+		"if [ \"$1\" = start ]; then echo job-deadbeef; fi\n" +
+		"if [ \"$1\" = spool-path ]; then echo " + spoolPath + "; fi\n" +
+		"exit 0\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatalf("write stub ringmaster: %v", err)
+	}
+	t.Setenv("CLOWN_BIN", filepath.Join(dir, "clown"))
+	t.Setenv("RINGMASTER_BIN", script)
+}
+
 // recordedInvocations splits the stub's args file back into one argv slice
 // per invocation.
 func recordedInvocations(t *testing.T, argsFile string) [][]string {
@@ -98,12 +115,16 @@ func TestStartEmitsClownLifecycleOnSuccess(t *testing.T) {
 		return "✓ hook", false
 	})
 
+	// start -> spool-path -> done. The spool lookup sits between them because
+	// the job's output is teed into ringmaster's spool so its native surface
+	// can tail a running job (#251).
 	inv := recordedInvocations(t, argsFile)
-	if len(inv) != 2 {
-		t.Fatalf("ringmaster invocations: got %d (%q), want 2 (start + done)", len(inv), inv)
+	if len(inv) != 3 {
+		t.Fatalf("ringmaster invocations: got %d (%q), want 3 (start + spool-path + done)", len(inv), inv)
 	}
 	assertArgv(t, inv[0], []string{"start", "--label", "merge", "--source", "spinclass"})
-	assertArgv(t, inv[1], []string{
+	assertArgv(t, inv[1], []string{"spool-path", "job-deadbeef"})
+	assertArgv(t, inv[2], []string{
 		"done", "job-deadbeef",
 		"--state", "succeeded",
 		"--message", "merge succeeded",
@@ -129,10 +150,10 @@ func TestStartEmitsFailedStateWithFailureLine(t *testing.T) {
 	})
 
 	inv := recordedInvocations(t, argsFile)
-	if len(inv) != 2 {
-		t.Fatalf("ringmaster invocations: got %d, want 2", len(inv))
+	if len(inv) != 3 {
+		t.Fatalf("ringmaster invocations: got %d, want 3 (start + spool-path + done)", len(inv))
 	}
-	assertArgv(t, inv[1], []string{
+	assertArgv(t, inv[2], []string{
 		"done", "job-deadbeef",
 		"--state", "failed",
 		"--message", "check failed: ✗ pre-merge hook",
@@ -162,10 +183,10 @@ func TestStartEmitsCancelledState(t *testing.T) {
 	}
 
 	inv := recordedInvocations(t, argsFile)
-	if len(inv) != 2 {
-		t.Fatalf("ringmaster invocations: got %d, want 2", len(inv))
+	if len(inv) != 3 {
+		t.Fatalf("ringmaster invocations: got %d, want 3 (start + spool-path + done)", len(inv))
 	}
-	assertArgv(t, inv[1], []string{
+	assertArgv(t, inv[2], []string{
 		"done", "job-deadbeef",
 		"--state", "cancelled",
 		"--message", "merge cancelled",
@@ -223,6 +244,63 @@ func TestStartDoesNotWaitForTheJobBody(t *testing.T) {
 	case <-WaitDone(wt):
 	case <-time.After(10 * time.Second):
 		t.Fatal("job did not finish in time")
+	}
+}
+
+// #251: the hook's output is teed into ringmaster's spool, so its native
+// surface (`ringmaster status --tail`, `tail -f`) can show a running job.
+// Before this, ringmaster reported `spool_bytes: 0` for every spinclass job
+// and the wake's result_ref pointed back at session-job-status.
+//
+// job.log stays the system of record and must keep receiving the same bytes —
+// LastActivity's mtime signal and TailLog both read it — so both destinations
+// are asserted rather than just the new one.
+func TestStartTeesHookOutputToRingmasterSpool(t *testing.T) {
+	wt := t.TempDir()
+	argsFile := filepath.Join(t.TempDir(), "args")
+	spool := filepath.Join(t.TempDir(), "spool.log")
+	installStubWithSpool(t, argsFile, spool)
+
+	runWaked(t, wt, KindMerge, func(ctx context.Context, w io.Writer) (string, bool) {
+		_, _ = io.WriteString(w, "building the thing\n")
+		return "✓ hook", false
+	})
+
+	data, err := os.ReadFile(spool)
+	if err != nil {
+		t.Fatalf("ringmaster spool not written: %v", err)
+	}
+	if !strings.Contains(string(data), "building the thing") {
+		t.Errorf("spool missing hook output: %q", data)
+	}
+	if log := TailLog(wt, 10); !strings.Contains(log, "building the thing") {
+		t.Errorf("job.log missing hook output after teeing: %q", log)
+	}
+}
+
+// A spool that cannot be resolved or opened must not affect the job: the
+// spool is an additional destination, never a dependency.
+func TestStartToleratesUnavailableSpool(t *testing.T) {
+	wt := t.TempDir()
+	argsFile := filepath.Join(t.TempDir(), "args")
+	// The default stub prints a job id for `start` and nothing for
+	// `spool-path`, so SpoolPath errors on the empty stdout.
+	installStub(t, argsFile, true)
+
+	runWaked(t, wt, KindMerge, func(ctx context.Context, w io.Writer) (string, bool) {
+		_, _ = io.WriteString(w, "still running\n")
+		return "✓ hook", false
+	})
+
+	j, err := Read(wt)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if j.Status != StatusSucceeded {
+		t.Fatalf("unavailable spool changed job status: got %q", j.Status)
+	}
+	if log := TailLog(wt, 10); !strings.Contains(log, "still running") {
+		t.Errorf("job.log missing hook output: %q", log)
 	}
 }
 
