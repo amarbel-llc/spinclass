@@ -229,6 +229,24 @@ func (sf Sweatfile) RunRepairHookContext(ctx context.Context, worktreePath strin
 	return runHookContext(ctx, sf.RepairHookCommand(), worktreePath, w)
 }
 
+// RunPostMergeHookContext runs the [hooks].post-merge command (FDR 0023) in
+// dir, streaming combined stdout+stderr to w, with extraEnv (the
+// SPINCLASS_MERGED_* facts) appended to the hook's environment. Callers gate
+// on PostMergeActive() first; if post-merge is inactive this is a no-op
+// returning nil.
+//
+// Like repair — and unlike the pre-merge hook — there is no inactivity
+// watchdog: [hooks].inactivity-timeout is documented as the pre-merge gate's
+// watchdog, and silently extending it here would change the meaning of every
+// existing config. A post-merge hook that can wedge should bound itself (e.g.
+// `timeout 300 deploy.sh`). Tracked as a follow-up.
+func (sf Sweatfile) RunPostMergeHookContext(ctx context.Context, dir string, extraEnv []string, w io.Writer) error {
+	if !sf.PostMergeActive() {
+		return nil
+	}
+	return runHookInDirEnv(ctx, sf.PostMergeHookCommand(), dir, dir, extraEnv, w)
+}
+
 // RunPreMergeHookContext runs the pre-merge hook bound to ctx, so a caller
 // (the async job runner) can cancel/kill the hook subprocess. The synchronous
 // path uses RunPreMergeHook, which passes a background context.
@@ -348,6 +366,14 @@ func runHookContext(ctx context.Context, cmd *string, worktreePath string, w io.
 // `direnv allow` record, whereas the session worktree has both (writeEnvrc +
 // `direnv allow` at `sc start`). See spinclass#198 and FDR 0013.
 func runHookInDir(ctx context.Context, cmd *string, envDir, runDir string, w io.Writer) error {
+	return runHookInDirEnv(ctx, cmd, envDir, runDir, nil, w)
+}
+
+// runHookInDirEnv is runHookInDir with extraEnv appended to the hook's
+// environment (after os.Environ and WORKTREE, so it wins on duplicate keys).
+// Only the post-merge hook uses it, to publish the landed sha and push state
+// the hook is meant to act on; every other hook passes nil via runHookInDir.
+func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, extraEnv []string, w io.Writer) error {
 	if cmd == nil || *cmd == "" {
 		return nil
 	}
@@ -391,6 +417,7 @@ func runHookInDir(ctx context.Context, cmd *string, envDir, runDir string, w io.
 	// reasons about, not the transient build worktree) for backwards
 	// compatibility with existing hook scripts.
 	c.Env = append(os.Environ(), "WORKTREE="+envDir)
+	c.Env = append(c.Env, extraEnv...)
 	c.Stdout = w
 	c.Stderr = w
 

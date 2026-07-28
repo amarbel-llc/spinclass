@@ -54,6 +54,7 @@ type Hooks struct {
 	Create                     *string `toml:"create"`
 	Stop                       *string `toml:"stop"`
 	PreMerge                   *string `toml:"pre-merge"`
+	PostMerge                  *string `toml:"post-merge"`
 	Repair                     *string `toml:"repair"`
 	PreCommit                  *string `toml:"pre-commit"`
 	OnAttach                   *string `toml:"on-attach"`
@@ -63,6 +64,7 @@ type Hooks struct {
 	DisableMerge               *bool   `toml:"disable-merge"`
 	DisableMergeQueue          *bool   `toml:"disable-merge-queue"`
 	DisableRepair              *bool   `toml:"disable-repair"`
+	DisablePostMerge           *bool   `toml:"disable-post-merge"`
 	DisablePreCommit           *bool   `toml:"disable-pre-commit"`
 	DisableNixGC               *bool   `toml:"disable-nix-gc"`
 	DisableImplicitSessions    *bool   `toml:"disable-implicit-sessions"`
@@ -172,6 +174,39 @@ func (sf Sweatfile) PreMergeHookCommand() *string {
 		return nil
 	}
 	return sf.Hooks.PreMerge
+}
+
+// PostMergeHookCommand returns the [hooks].post-merge command, or nil when
+// unset. When set (and not disabled via PostMergeDisabled) the merge runs it
+// AFTER the merge has landed and been pushed — and, on the queued path, after
+// the per-repo merge lock has been released, so a slow hook never holds the
+// queue against sibling sessions. See FDR 0023.
+func (sf Sweatfile) PostMergeHookCommand() *string {
+	if sf.Hooks == nil {
+		return nil
+	}
+	return sf.Hooks.PostMerge
+}
+
+// PostMergeDisabled reports whether [hooks].disable-post-merge is true. It
+// suppresses an inherited [hooks].post-merge command without having to clear
+// the string, mirroring the disable-repair / disable-merge opt-out shape.
+func (sf Sweatfile) PostMergeDisabled() bool {
+	return sf.Hooks != nil &&
+		sf.Hooks.DisablePostMerge != nil &&
+		*sf.Hooks.DisablePostMerge
+}
+
+// PostMergeActive reports whether a post-merge hook should run after a landed
+// merge: a non-empty [hooks].post-merge command that is not suppressed by
+// [hooks].disable-post-merge. Uses the same emptiness test as RepairActive so
+// a whitespace-only command is treated as unset.
+func (sf Sweatfile) PostMergeActive() bool {
+	if sf.PostMergeDisabled() {
+		return false
+	}
+	cmd := sf.PostMergeHookCommand()
+	return cmd != nil && stripEmptyLines(*cmd) != ""
 }
 
 // RepairHookCommand returns the [hooks].repair command, or nil when unset.

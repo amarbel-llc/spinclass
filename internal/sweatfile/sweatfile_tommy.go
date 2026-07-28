@@ -177,6 +177,12 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				_vHooksPreMerge.MarkConsumed()
 			}
 		}
+		if _vHooksPostMerge, _ok := _vHooks.Get("post-merge"); _ok && _vHooksPostMerge.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksPostMerge.Leaf); _xok {
+				hooksVal3.PostMerge = &_x
+				_vHooksPostMerge.MarkConsumed()
+			}
+		}
 		if _vHooksRepair, _ok := _vHooks.Get("repair"); _ok && _vHooksRepair.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractString(_vHooksRepair.Leaf); _xok {
 				hooksVal3.Repair = &_x
@@ -229,6 +235,12 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractBool(_vHooksDisableRepair.Leaf); _xok {
 				hooksVal3.DisableRepair = &_x
 				_vHooksDisableRepair.MarkConsumed()
+			}
+		}
+		if _vHooksDisablePostMerge, _ok := _vHooks.Get("disable-post-merge"); _ok && _vHooksDisablePostMerge.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksDisablePostMerge.Leaf); _xok {
+				hooksVal3.DisablePostMerge = &_x
+				_vHooksDisablePostMerge.MarkConsumed()
 			}
 		}
 		if _vHooksDisablePreCommit, _ok := _vHooks.Get("disable-pre-commit"); _ok && _vHooksDisablePreCommit.Kind == cst.VLeaf {
@@ -304,6 +316,13 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				_vPreMerge.MarkConsumed()
 			}
 		}
+		if _vPostMerge, _ok := model.Get("post-merge"); _ok && _vPostMerge.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vPostMerge.Leaf); _xok {
+				hooksVal3.PostMerge = &_x
+				_vPostMerge.MarkConsumed()
+			}
+		}
 		if _vRepair, _ok := model.Get("repair"); _ok && _vRepair.Kind == cst.VLeaf {
 			_foundHooks = true
 			if _x, _xok := cst.ExtractString(_vRepair.Leaf); _xok {
@@ -365,6 +384,13 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractBool(_vDisableRepair.Leaf); _xok {
 				hooksVal3.DisableRepair = &_x
 				_vDisableRepair.MarkConsumed()
+			}
+		}
+		if _vDisablePostMerge, _ok := model.Get("disable-post-merge"); _ok && _vDisablePostMerge.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vDisablePostMerge.Leaf); _xok {
+				hooksVal3.DisablePostMerge = &_x
+				_vDisablePostMerge.MarkConsumed()
 			}
 		}
 		if _vDisablePreCommit, _ok := model.Get("disable-pre-commit"); _ok && _vDisablePreCommit.Kind == cst.VLeaf {
@@ -852,6 +878,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
+		if d.data.Hooks.PostMerge != nil {
+			if err := cst.SetAny(tableNode, "post-merge", *d.data.Hooks.PostMerge); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
 		if d.data.Hooks.Repair != nil {
 			if err := cst.SetAny(tableNode, "repair", *d.data.Hooks.Repair); err != nil {
 				return nil, fmt.Errorf("%w", err)
@@ -894,6 +925,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 		}
 		if d.data.Hooks.DisableRepair != nil {
 			if err := cst.SetAny(tableNode, "disable-repair", *d.data.Hooks.DisableRepair); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.Hooks.DisablePostMerge != nil {
+			if err := cst.SetAny(tableNode, "disable-post-merge", *d.data.Hooks.DisablePostMerge); err != nil {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
@@ -1304,6 +1340,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vHooksPreMerge.MarkConsumed()
 			}
 		}
+		if _vHooksPostMerge, _ok := _vHooks.Get("post-merge"); _ok && _vHooksPostMerge.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksPostMerge.Leaf); _xok {
+				hooksVal3.PostMerge = &_x
+				_vHooksPostMerge.MarkConsumed()
+			}
+		}
 		if _vHooksRepair, _ok := _vHooks.Get("repair"); _ok && _vHooksRepair.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractString(_vHooksRepair.Leaf); _xok {
 				hooksVal3.Repair = &_x
@@ -1356,6 +1398,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractBool(_vHooksDisableRepair.Leaf); _xok {
 				hooksVal3.DisableRepair = &_x
 				_vHooksDisableRepair.MarkConsumed()
+			}
+		}
+		if _vHooksDisablePostMerge, _ok := _vHooks.Get("disable-post-merge"); _ok && _vHooksDisablePostMerge.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksDisablePostMerge.Leaf); _xok {
+				hooksVal3.DisablePostMerge = &_x
+				_vHooksDisablePostMerge.MarkConsumed()
 			}
 		}
 		if _vHooksDisablePreCommit, _ok := _vHooks.Get("disable-pre-commit"); _ok && _vHooksDisablePreCommit.Kind == cst.VLeaf {
@@ -1431,6 +1479,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vPreMerge.MarkConsumed()
 			}
 		}
+		if _vPostMerge, _ok := sub.Get("post-merge"); _ok && _vPostMerge.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vPostMerge.Leaf); _xok {
+				hooksVal3.PostMerge = &_x
+				_vPostMerge.MarkConsumed()
+			}
+		}
 		if _vRepair, _ok := sub.Get("repair"); _ok && _vRepair.Kind == cst.VLeaf {
 			_foundHooks = true
 			if _x, _xok := cst.ExtractString(_vRepair.Leaf); _xok {
@@ -1492,6 +1547,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractBool(_vDisableRepair.Leaf); _xok {
 				hooksVal3.DisableRepair = &_x
 				_vDisableRepair.MarkConsumed()
+			}
+		}
+		if _vDisablePostMerge, _ok := sub.Get("disable-post-merge"); _ok && _vDisablePostMerge.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vDisablePostMerge.Leaf); _xok {
+				hooksVal3.DisablePostMerge = &_x
+				_vDisablePostMerge.MarkConsumed()
 			}
 		}
 		if _vDisablePreCommit, _ok := sub.Get("disable-pre-commit"); _ok && _vDisablePreCommit.Kind == cst.VLeaf {
@@ -1967,6 +2029,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 				return fmt.Errorf("%w", err)
 			}
 		}
+		if data.Hooks.PostMerge != nil {
+			if err := cst.SetAny(tableNode, "post-merge", *data.Hooks.PostMerge); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
 		if data.Hooks.Repair != nil {
 			if err := cst.SetAny(tableNode, "repair", *data.Hooks.Repair); err != nil {
 				return fmt.Errorf("%w", err)
@@ -2009,6 +2076,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if data.Hooks.DisableRepair != nil {
 			if err := cst.SetAny(tableNode, "disable-repair", *data.Hooks.DisableRepair); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.Hooks.DisablePostMerge != nil {
+			if err := cst.SetAny(tableNode, "disable-post-merge", *data.Hooks.DisablePostMerge); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}
