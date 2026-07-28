@@ -256,6 +256,20 @@ subcommand is always available.
   hook subprocess). Worktree merges only (`MergeImplicit` excluded); lock is
   host-local. `[hooks].disable-merge-queue` restores the pre-#235 fail-on-race
   path verbatim.
+- **`post-merge` hook** (FDR 0023, #244): when `[hooks].post-merge` is set,
+  `merge.runPostMergePhase` runs it after a merge has fully landed (ff-only
+  done; pushed when gitSync). On the queued path the merge lock is **released
+  explicitly first** — a deploy-trigger hook must not hold the queue against
+  sibling sessions — with the idempotent `defer` left as the error-path net.
+  Non-fatal by design: a nonzero exit emits a `severity=warn` not-ok point
+  with the hook's output but does NOT fail the merge (nothing to roll back;
+  a retry would find nothing to merge). Runs in the session worktree if it
+  survived teardown, else `repoPath`; no build worktree, no
+  `inactivity-timeout`. Publishes `SPINCLASS_MERGED_SHA` (the **landing** sha
+  on a rebased queued landing), `_MERGED_BRANCH`, `_DEFAULT_BRANCH`,
+  `_MERGE_PUSHED`, `_REPO_PATH` via `sweatfile.runHookInDirEnv`. All three
+  land paths fire it (queued, `disable-merge-queue`, `MergeImplicit`);
+  `sc check` never does. `disable-post-merge` is the opt-out.
 - **Pre-merge REPAIR phase** (FDR 0018): when `[hooks].repair` is set,
   `PrepareMerge` runs it in the **session worktree** before the pin to fold
   mechanical fixes into the merged commit (canonical

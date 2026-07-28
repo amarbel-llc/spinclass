@@ -257,6 +257,97 @@ gate instead.
 .B Merge:
 scalar override.
 .TP
+.B post-merge
+Shell script run by
+.B sc merge
+.B after
+the merge has landed on the default branch \(em the mirror image of
+.BR pre-merge .
+Typical use: trigger a deploy, notify a service, or record the landing
+somewhere, keyed on the commit that actually shipped.
+.IP
+It runs only on a
+.B fully successful
+merge: the fast-forward completed and, when git sync is on, the push to the
+remote succeeded. Any earlier failure (gate, landing rebase, teardown, push)
+returns before it. The hook is
+.B non-fatal:
+by the time it runs the merge cannot be undone, so a non-zero exit does
+.B not
+fail the merge \(em it emits a
+.B severity=warn
+test point carrying the hook's output, and the merge still reports success.
+Re-running the merge would find nothing to merge, so a failed post-merge hook
+is something to act on out of band, not to retry.
+.IP
+Crucially, post-merge runs
+.B after the per-repo merge lock is released
+(see
+.B disable-merge-queue
+below and
+.B FDR 0022
+in the source tree). A deploy trigger measured in minutes would otherwise
+queue every other session in the repo behind it; the lock protects
+gate + land + push, all of which are complete by then. The merge tool call
+does still wait for the hook before returning.
+.IP
+The hook runs in the session worktree when it still exists (teardown may have
+removed it) and otherwise in the main checkout \(em which is sitting on the
+merged tip either way. There is no detached build worktree: the merge has
+already landed, so there is nothing to isolate. Unlike
+.BR pre-merge ,
+.B inactivity-timeout
+does not apply; a hook that can wedge should bound itself (e.g.
+.BR "timeout 300 deploy.sh" ).
+Beyond the usual environment (including
+.BR WORKTREE ),
+the hook receives:
+.RS
+.IP \(bu 2
+.B SPINCLASS_MERGED_SHA
+\(em the commit that landed. On a queued landing that had to be rebased past a
+moved default branch this is the
+.B landing
+sha, not the originally pinned one.
+.IP \(bu 2
+.B SPINCLASS_MERGED_BRANCH
+\(em the branch that was merged.
+.IP \(bu 2
+.B SPINCLASS_DEFAULT_BRANCH
+\(em the branch it landed on.
+.IP \(bu 2
+.B SPINCLASS_MERGE_PUSHED
+\(em
+.BR 1 " when the landing was pushed to the remote, " 0
+when it is local-only (e.g.
+.BR "sc run --local-only" ).
+A deploy trigger should gate on this.
+.IP \(bu 2
+.B SPINCLASS_REPO_PATH
+\(em the main checkout.
+.RE
+.IP
+Applies to worktree sessions and to implicit (main-checkout) sessions, whose
+push is unconditional \(em there
+.B SPINCLASS_MERGED_BRANCH
+and
+.B SPINCLASS_DEFAULT_BRANCH
+are the same ref.
+.B sc check
+and
+.B check-this-session
+never run it: nothing lands.
+.B Merge:
+scalar override.
+.TP
+.B disable-post-merge
+Boolean. Suppresses an inherited
+.B post-merge
+command without clearing the string (mirrors
+.BR disable-repair ).
+.B Merge:
+scalar override.
+.TP
 .B repair
 Shell script run by
 .B sc merge
