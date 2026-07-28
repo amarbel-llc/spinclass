@@ -127,7 +127,7 @@ codemod-fmt-tree:
 
 clean: clean-build
 
-# Remove the nix build result symlink.
+# remove the nix build result symlink
 clean-build:
     rm -rf result
 
