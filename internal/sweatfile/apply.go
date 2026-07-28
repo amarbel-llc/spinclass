@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/charmbracelet/log"
@@ -287,6 +288,14 @@ func (sf Sweatfile) RunPostMergeHookContext(ctx context.Context, dir string, ext
 	return err
 }
 
+// cancelGrace is how long a cancelled hook has to exit after SIGTERM before
+// exec escalates: closing its I/O pipes and sending SIGKILL. It therefore
+// doubles as the universal upper bound on how long a cancel can appear to
+// hang — the failure #188 reports, where an orphaned `nix` held the pipe for
+// 224s. Generous enough for a large build to notice a signal and unwind,
+// short enough that no cancel is mistaken for a wedge.
+const cancelGrace = 10 * time.Second
+
 // postMergeWaitDelay bounds how long Wait keeps draining the hook's output
 // pipe after the hook process itself is done or killed. It is the difference
 // between post-merge-timeout being a real wall-clock bound and being advisory
@@ -423,16 +432,30 @@ func runHookInDir(ctx context.Context, cmd *string, envDir, runDir string, w io.
 // WORKTREE, so it wins on duplicate keys) to publish the landed sha and push
 // state the hook acts on.
 //
-// waitDelay, when non-zero, is set as the command's WaitDelay. This is what
-// makes a timeout actually bound wall-clock time. Killing the hook cancels its
-// context, which kills the shell — but os/exec's Wait does not return until
-// every holder of the output pipe's write end has closed it, and a killed
-// shell's surviving descendants still hold it. Without WaitDelay a 10m cap on
-// a hook whose child runs for an hour returns after an HOUR, so the merge lock
-// stays held for the full overrun: precisely the wedge the cap exists to
-// prevent (measured before this was added — a 200ms cap on a hook with a 3s
-// pipe-holding child returned after 3.0s). WaitDelay bounds that drain, after
-// which Wait closes the pipes and returns.
+// waitDelay, when non-zero, tightens the post-exit drain bound below the
+// default cancelGrace; callers that do not care pass 0 and get cancelGrace.
+//
+// Cancellation semantics matter more than they look, and were measured
+// (spinclass#188). exec.CommandContext's DEFAULT Cancel is Process.Kill() —
+// SIGKILL, which cannot be trapped. The hook's argv collapses by exec
+// (`direnv exec <dir> sh -c <script>`: direnv execs into sh, sh execs into the
+// single command), so cmd.Process is the hook command itself, e.g. `just`.
+// SIGKILLing it denies it any chance to tear down its own children, so a
+// `nix` it spawned is orphaned still holding the inherited stdout/stderr —
+// and Wait cannot return until every holder of that pipe closes it. Measured
+// on a real gate: pipe still held 224s after the kill.
+//
+// So Cancel is overridden to SIGTERM, which `just` (and any well-behaved hook
+// runner) propagates to its children: the same probe freed the pipe in under a
+// second. WaitDelay is the escalation — if the hook has not exited by then,
+// exec closes the pipes and sends SIGKILL, so an ill-behaved hook still cannot
+// wedge a cancel forever.
+//
+// Deliberately NO Setpgid/process-group signalling: a group kill would also
+// reap the DETACHED children FDR 0023 documents as the supported way to run a
+// slow post-merge deploy without holding the merge lock. Residual: a hook
+// whose top process swallows SIGTERM without propagating leaves its
+// descendants orphaned, and only the pipes are reclaimed.
 func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, extraEnv []string, waitDelay time.Duration, w io.Writer) error {
 	if cmd == nil || *cmd == "" {
 		return nil
@@ -480,7 +503,15 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 	c.Env = append(c.Env, extraEnv...)
 	c.Stdout = w
 	c.Stderr = w
-	c.WaitDelay = waitDelay
+
+	// See the doc comment: SIGTERM so the hook can tear down its own process
+	// tree, with WaitDelay as the SIGKILL escalation. Every hook gets an
+	// escalation bound — a caller-supplied waitDelay only tightens it.
+	c.Cancel = func() error { return c.Process.Signal(syscall.SIGTERM) }
+	c.WaitDelay = cancelGrace
+	if waitDelay > 0 && waitDelay < cancelGrace {
+		c.WaitDelay = waitDelay
+	}
 
 	return c.Run()
 }
