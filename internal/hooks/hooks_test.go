@@ -1203,6 +1203,48 @@ func TestSubagentAllowedUpdateDescription(t *testing.T) {
 	}
 }
 
+// close-child-session splits on its `force` argument (#249): reaping a worker
+// that finished cleanly is routine and should never interrupt the agent, but
+// forcing discards the child's uncommitted changes and unmerged commits and is
+// a human's call. Exercised end to end through Run, not just perms.AlwaysAsk,
+// because the ordering matters — the ask check has to run BEFORE the
+// auto-approve switch that now also lists this tool, or force would be
+// swallowed by it.
+func TestCloseChildSessionAsksOnlyWhenForcing(t *testing.T) {
+	tests := []struct {
+		name         string
+		toolInput    map[string]any
+		wantDecision string
+	}{
+		{"clean reap", map[string]any{"child": "repo/branch"}, "allow"},
+		{"explicit force=false", map[string]any{"child": "repo/branch", "force": false}, "allow"},
+		{"force=true", map[string]any{"child": "repo/branch", "force": true}, "ask"},
+		// Fails closed: a non-boolean force must not slip through the
+		// auto-approve path just because a type assertion returned false.
+		{"non-boolean force", map[string]any{"child": "repo/branch", "force": "true"}, "ask"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cwd := t.TempDir()
+			input := makeInput(
+				"mcp__plugin_spinclass_spinclass__close-child-session", tt.toolInput, cwd,
+			)
+			var stdout bytes.Buffer
+			if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			decision, reason := parseHookDecision(t, stdout.Bytes())
+			if decision != tt.wantDecision {
+				t.Fatalf("expected %q for %v, got %q", tt.wantDecision, tt.toolInput, decision)
+			}
+			if decision == "ask" && reason == "" {
+				t.Error("an ask must explain what the human is being asked to approve")
+			}
+		})
+	}
+}
+
 func parseRewrite(t *testing.T, output []byte) (decision string, updatedInput map[string]any, sysMsg string) {
 	t.Helper()
 	var result map[string]any

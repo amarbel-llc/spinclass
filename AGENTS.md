@@ -183,6 +183,18 @@ subcommand is always available.
   never-spawned session is refused with both keys named. Teardown itself is
   plain `close.RunResolved` — the unintegrated/dirty check stays there, and a
   non-TTY MCP caller gets its `--force` refusal instead of a prompt.
+  **Permission posture** splits on `force`: a clean reap auto-approves (the
+  worst it can do is remove a fully-integrated worktree the caller spawned),
+  while `force: true` is always-ask because it discards uncommitted changes
+  and unmerged commits. The rule lives in `perms.AlwaysAsk` — one predicate
+  shared by both enforcement surfaces (the PreToolUse hook and the perms-tier
+  `RunCheck`), since duplicating it would seam a security floor. It judges an
+  *invocation*, not a tool, which is why it takes tool input; a perms tier
+  cannot draw this line itself because `BuildPermissionString` discards
+  arguments for MCP tools, so allow-listing the tool would otherwise grant
+  force too. `force` is read fail-closed: only absent, `null`, or boolean
+  `false` count as safe. Elicitation could replace the flag entirely for the
+  MCP path (#254).
 - **Implicit-session merge** (FDR 0014): from a main-checkout session, merge
   routes to `merge.MergeImplicit` — runs `[hooks].pre-merge` against HEAD then
   `git push` (nothing to rebase). MCP path enforces the implicit attestation

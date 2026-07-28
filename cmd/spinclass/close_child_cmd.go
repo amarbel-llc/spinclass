@@ -134,7 +134,7 @@ func closeChildSessionParamList() []command.Param {
 		{
 			Name:        "force",
 			Type:        command.Bool,
-			Description: "Reap even when the child has uncommitted changes or commits not yet integrated into the default branch. Without it such a child is refused so its work is not silently discarded; a clean child with nothing to lose needs no force.",
+			Description: "Reap even when the child has uncommitted changes or commits not yet integrated into the default branch. Without it such a child is refused so its work is not silently discarded; a clean child with nothing to lose needs no force. Setting it always prompts the human — no allow-list can approve it silently — so reach for it only when the child's work is genuinely disposable.",
 		},
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/perms"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sessionlog"
 	"code.linenisgreat.com/spinclass/internal/spawnhandshake"
@@ -300,6 +301,7 @@ const (
 	validateToolName              = "mcp__plugin_spinclass_spinclass__validate"
 	spawnSessionToolName          = "mcp__plugin_spinclass_spinclass__spawn-session"
 	forkSessionToolName           = "mcp__plugin_spinclass_spinclass__fork-session"
+	closeChildSessionToolName     = "mcp__plugin_spinclass_spinclass__close-child-session"
 )
 
 func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree, rewriteEnabled bool) error {
@@ -312,21 +314,39 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 		}
 	}
 
+	// The always-ask floor, shared verbatim with the perms-tier surface
+	// (perms.AlwaysAsk is the single source of truth for both). An `ask`
+	// decision overrides every allow-list — claude-allow, perms tier,
+	// permissive mode — so no spinclass-reachable configuration can make these
+	// run silently (#151). Checked before the auto-approve switch below so a
+	// dangerous invocation of an otherwise-benign tool still prompts.
+	// The always-ask floor, shared verbatim with the perms-tier surface
+	// (perms.AlwaysAsk is the single source of truth for both). An `ask`
+	// decision overrides every allow-list — claude-allow, perms tier,
+	// permissive mode — so no spinclass-reachable configuration can make these
+	// run silently (#151).
+	//
+	// This MUST stay ahead of the auto-approve switch below, which now lists
+	// close-child-session: reversing the two lets a forcing reap match the
+	// benign case and return `allow` before the floor is ever consulted
+	// (verified — the ordering is load-bearing, not stylistic).
+	if reason, ask := perms.AlwaysAsk(input.ToolName, input.ToolInput); ask {
+		return writeAsk(w, reason)
+	}
+
 	switch input.ToolName {
-	case spawnSessionToolName, forkSessionToolName:
-		// Spawning/forking a worker launches a full harness-booted agent that
-		// immediately consumes tokens — categorically heavier than any other
-		// spinclass tool. Always prompt: an `ask` decision overrides any
-		// allow-list (claude-allow, perms tier, permissive mode), so no
-		// spinclass-reachable configuration can make these run silently
-		// (spinclass#151). Bounds #148 (who may spawn) with how silently.
-		return writeAsk(w, "spawning a worker session launches a token-consuming agent; confirm each invocation")
 	case listToolName, updateDescriptionToolName, validateToolName,
-		sessionJobStatusToolName, sessionJobCancelToolName, sessionJobWaitToolName:
+		sessionJobStatusToolName, sessionJobCancelToolName, sessionJobWaitToolName,
+		closeChildSessionToolName:
 		// Benign, session-scoped spinclass tools: list, validate,
 		// session-job-status, and session-job-wait are read-only (wait only
 		// blocks on an existing job); update-this-session-description and
 		// session-job-cancel only mutate spinclass's own session/job metadata.
+		// close-child-session reaches here only WITHOUT force (the check above
+		// caught the forcing case), where close.RunResolved still refuses a
+		// child holding unmerged work and the caller is already restricted to
+		// workers it spawned — so the most it can do is remove a clean,
+		// fully-integrated worktree.
 		// Auto-approve unconditionally so agents never get a permission prompt
 		// for them.
 		return writeAllow(w, "spinclass session-management tool, safe to auto-approve")

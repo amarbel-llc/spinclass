@@ -8,14 +8,73 @@ import (
 	"strings"
 )
 
-// neverAutoApprove names spinclass tools that must always prompt and can never
-// be auto-approved via a tier rule, even if a user lists them. These launch a
-// token-consuming worker agent; the always-ask floor is enforced primarily by
-// the PreToolUse hook, and mirrored here so the perms-tier surface cannot
-// auto-approve them regardless of hook ordering. See FDR 0006 / spinclass#151.
-var neverAutoApprove = map[string]bool{
-	"mcp__plugin_spinclass_spinclass__spawn-session": true,
-	"mcp__plugin_spinclass_spinclass__fork-session":  true,
+// Tool names the always-ask floor is expressed over.
+const (
+	spawnSessionTool      = "mcp__plugin_spinclass_spinclass__spawn-session"
+	forkSessionTool       = "mcp__plugin_spinclass_spinclass__fork-session"
+	closeChildSessionTool = "mcp__plugin_spinclass_spinclass__close-child-session"
+)
+
+// AlwaysAsk reports whether an invocation must prompt the human, and why. It is
+// the single source of truth for spinclass's always-ask floor, consulted by BOTH
+// enforcement surfaces: the PreToolUse hook turns a true into an `ask` decision
+// (which overrides every allow-list), and RunCheck below refuses to auto-approve
+// it from a perms tier. Duplicating the rule across the two would put a seam in
+// a security floor, so they share this.
+//
+// Note this judges an INVOCATION, not a tool: it was a name-keyed map until
+// close-child-session needed a decision that depends on an argument (#249).
+// Callers must pass the tool input, not just the name.
+func AlwaysAsk(toolName string, toolInput map[string]any) (string, bool) {
+	switch toolName {
+	case spawnSessionTool, forkSessionTool:
+		// Spawning/forking launches a full harness-booted agent that
+		// immediately consumes tokens — categorically heavier than any other
+		// spinclass tool, and unconditional regardless of arguments. Bounds
+		// #148 (who may spawn) with how silently. See FDR 0006 / #151.
+		return "spawning a worker session launches a token-consuming agent; confirm each invocation", true
+
+	case closeChildSessionTool:
+		// A reap without force is safe to run silently: close.RunResolved
+		// refuses a child holding uncommitted changes or unintegrated commits,
+		// and authorizeChildReap already limits the caller to workers it
+		// spawned itself. So the worst case is deleting a clean, fully merged
+		// worktree — nothing is lost.
+		//
+		// force is what removes that floor: it discards unmerged commits and
+		// the worktree outright. Prompt on exactly that, so tidying up after a
+		// finished worker stays frictionless while destruction stays a human
+		// decision. A perms tier cannot draw this line itself — MatchingRule
+		// discards tool input for MCP tools (BuildPermissionString returns the
+		// bare name), so allow-listing the tool at all would otherwise grant
+		// force too.
+		if forceRequested(toolInput) {
+			return "force discards the child's uncommitted changes and unmerged commits; confirm each invocation", true
+		}
+		return "", false
+	}
+
+	return "", false
+}
+
+// forceRequested reads the `force` argument, failing CLOSED: anything that is
+// not definitively "no force" counts as a force request.
+//
+// The naive `toolInput["force"].(bool)` yields false for every non-boolean —
+// the string "true", a number, anything unexpected — which would auto-approve
+// precisely the invocation this floor exists to catch. Since the whole reason
+// the rule is mirrored into RunCheck is to avoid trusting that another layer
+// got it right, it should not then trust the payload's shape either.
+func forceRequested(toolInput map[string]any) bool {
+	v, present := toolInput["force"]
+	if !present || v == nil {
+		// Absent, or JSON null — both unambiguously mean "not set".
+		return false
+	}
+	if b, ok := v.(bool); ok {
+		return b
+	}
+	return true
 }
 
 // RunCheck reads a PermissionRequest hook payload from r, checks if the tool
@@ -32,7 +91,7 @@ func RunCheck(r io.Reader, w io.Writer, tiersDir string) error {
 		return fmt.Errorf("decoding hook input: %w", err)
 	}
 
-	if neverAutoApprove[input.ToolName] {
+	if _, ask := AlwaysAsk(input.ToolName, input.ToolInput); ask {
 		return nil // defer to the always-ask PreToolUse decision
 	}
 
