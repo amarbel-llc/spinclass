@@ -141,6 +141,7 @@ Cheap per-package `go build ./internal/foo/...` checks are fine.
   `sc rebuild [target] [--check]`  Re-apply a drifted worktree's setup; `--check` reports stale/fresh
   `sc fork [branch]`               Fork current worktree (`--from <dir>`; `--brief` launches a detached worker, FDR 0006)
   `sc spawn <repo> --brief "…"`    Launch a detached worker session in a sibling repo (FDR 0006)
+  `sc close-child-session <child>` Reap a worker THIS session spawned (#249); refuses anything it did not spawn
   `sc pull`                        Pull repos and rebase worktrees
   `sc validate`                    Validate sweatfile hierarchy
   `sc perms list|review|edit`      Inspect or edit permission tier rules
@@ -173,6 +174,15 @@ subcommand is always available.
   stale text and silently produce a wrong brief. Workers can't spawn
   sub-workers (#148); the MCP tools are always-ask (#151). Coordination
   afterward is clown chat. `internal/spawn` owns resolution + launch.
+  **Reaping** (#249, `cmd/spinclass/close_child_cmd.go`): `close-child-session`
+  lets a driver tear down a worker it spawned — completed children and failed
+  spawns (a hello timeout leaves the worktree + state on disk by design) would
+  otherwise pile up in `sc list` with no path for the agent that owns them.
+  Authorization is the child's `spawned_by` lineage: `authorizeChildReap`
+  requires it to equal the caller's own `currentSessionKey()`, so a foreign or
+  never-spawned session is refused with both keys named. Teardown itself is
+  plain `close.RunResolved` — the unintegrated/dirty check stays there, and a
+  non-TTY MCP caller gets its `--force` refusal instead of a prompt.
 - **Implicit-session merge** (FDR 0014): from a main-checkout session, merge
   routes to `merge.MergeImplicit` — runs `[hooks].pre-merge` against HEAD then
   `git push` (nothing to rebase). MCP path enforces the implicit attestation

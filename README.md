@@ -69,6 +69,7 @@ sc clean
 | `sc rebuild [target] [--check]` | Re-apply a drifted worktree's setup and refresh its fingerprint; `--check` reports stale/fresh (exits nonzero if stale) |
 | `sc fork [branch]` | Fork the current worktree (supports `--from <dir>`; `--brief` launches the fork as a detached worker) |
 | `sc spawn <repo> --brief "…"` | Launch a detached, harness-booted worker session in a sibling repo (blocks on the worker's chat hello) |
+| `sc close-child-session <child>` | Close a worker session this session spawned; refuses anything it did not spawn (`--force` for a child with unmerged work) |
 | `sc pull` | Pull repos and rebase worktrees |
 | `sc validate` | Validate the sweatfile hierarchy |
 | `sc perms list\|review\|edit` | Inspect or edit permission tier rules |

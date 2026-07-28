@@ -274,6 +274,22 @@ func registerMCPOnlyCommands(app *command.App) {
 		Params: forkSessionParamList(),
 		Run:    wrapMCPHandler("fork-session", handleForkSession),
 	})
+
+	app.AddCommand(&command.Command{
+		Name:  "close-child-session",
+		Title: "Close Spawned Child Session",
+		Description: command.Description{
+			Short: "Reap a worker session THIS session spawned via spawn-session or fork-session (FDR 0006, #249) — remove its worktree, delete its branch, and tombstone its state, the same teardown `sc close` performs. Authorization is the child's spawned_by lineage: a child spawned by a DIFFERENT session, or one never spawned at all, is refused with both session keys named — reaping those remains the child's own or the human's call. A child holding uncommitted changes or commits not yet integrated into the default branch is refused too; pass force to discard that work deliberately. The case this exists for — a spawn that failed its hello handshake, or a worker that finished and left nothing behind — has no commits and a clean tree, so it reaps without force.",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(false),
+			DestructiveHint: protocol.BoolPtr(true),
+			IdempotentHint:  protocol.BoolPtr(false),
+			OpenWorldHint:   protocol.BoolPtr(false),
+		},
+		Params: closeChildSessionParamList(),
+		Run:    wrapMCPHandler("close-child-session", handleCloseChildSession),
+	})
 }
 
 // localOnlyParamDesc and defaultBranchParamDesc are shared by merge-this-session
