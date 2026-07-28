@@ -271,6 +271,60 @@ func TestPostMergeNotRunWhenGateFails(t *testing.T) {
 	}
 }
 
+// Out-of-session merges tear the worktree down before the hook would run, so
+// the hierarchy load and the hook's working directory must both survive a
+// wtPath that no longer exists — otherwise post-merge silently never fires on
+// the `sc merge <target>` path. Falls back to the main checkout, which is on
+// the merged tip.
+func TestPostMergeRunsAfterWorktreeTeardown(t *testing.T) {
+	repoDir, wtPath := setupPostMergeRepo(t, "feature")
+
+	pwdFile := filepath.Join(t.TempDir(), "pwd")
+	writeRepoSweatfile(t, repoDir, fmt.Sprintf(
+		"[hooks]\npost-merge = \"pwd > %s\"\n", pwdFile,
+	))
+
+	// inSession=false ⇒ teardownAndPush removes the worktree and branch.
+	var buf bytes.Buffer
+	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
+	ts := rep.TestStream(0)
+	pinnedSha, prepErr := PrepareMerge(ts, repoDir, wtPath, "feature", "main", false)
+	if prepErr != nil {
+		t.Fatalf("PrepareMerge: %v", prepErr)
+	}
+	_, err := FinishMerge(context.Background(), &mockExecutor{}, rep, ts,
+		repoDir, wtPath, "feature", "main", pinnedSha, false, false, nil)
+	ts.Finish()
+	if err != nil {
+		t.Fatalf("FinishMerge: %v\n%s", err, buf.String())
+	}
+	tests := testRecords(decodeRecords(t, buf.Bytes()))
+
+	// Precondition: the worktree really is gone by the time the hook runs.
+	if _, statErr := os.Stat(wtPath); !os.IsNotExist(statErr) {
+		t.Fatalf("expected worktree removed, stat err = %v", statErr)
+	}
+
+	tr, ok := findTest(tests, "post-merge feature")
+	if !ok {
+		t.Fatalf("post-merge did not run after teardown: %v", testDescs(tests))
+	}
+	if !tr.OK {
+		t.Errorf("post-merge point not ok: %+v", tr)
+	}
+
+	raw, readErr := os.ReadFile(pwdFile)
+	if readErr != nil {
+		t.Fatalf("hook did not run: %v", readErr)
+	}
+	// EvalSymlinks: the hook's $PWD is the resolved path, while repoDir may
+	// carry an unresolved /tmp -> /private/tmp style prefix.
+	wantDir, _ := filepath.EvalSymlinks(repoDir)
+	if got := strings.TrimSpace(string(raw)); got != wantDir {
+		t.Errorf("hook ran in %q, want the main checkout %q", got, wantDir)
+	}
+}
+
 // The [hooks].disable-merge-queue rollback path (no lock at all) still runs
 // post-merge — the hook is a property of a landed merge, not of the queue.
 func TestPostMergeRunsOnUnqueuedPath(t *testing.T) {
