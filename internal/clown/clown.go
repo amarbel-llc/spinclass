@@ -25,12 +25,20 @@ import (
 const Source = "spinclass"
 
 // ringmasterBin resolves clown's ringmaster job-control CLI (clown RFC-0015).
-// $RINGMASTER_BIN overrides — for tests, or a future pin of the job platform
-// once it is extracted into its own lightweight flake — otherwise a bare name
-// resolves ringmaster from PATH, where it ships alongside clown. spinclass
-// deliberately does NOT derive this from $CLOWN_BIN, nor pin clown as a flake
-// input for it: pinning clown would drag its whole input closure in for two
-// small Go binaries, and the platform is moving to a standalone repo.
+// $RINGMASTER_BIN overrides — used by the contract tests — otherwise a bare
+// name resolves ringmaster from PATH. spinclass deliberately does NOT derive
+// this from $CLOWN_BIN: the two are separate binaries, and clown's presence is
+// the emit GATE (see Enabled), not the way ringmaster is located.
+//
+// Resolution stays PATH-based at run time even though the job platform is now
+// pinnable. FDR 0010 originally justified that by the cost of pinning clown
+// itself; that reasoning expired when the platform was extracted into the
+// standalone `ringmaster` repo, whose inputs are a strict subset of
+// spinclass's. The flake now pins it as a checkPhase input so the contract can
+// be tested for real (#253) — but a RUNTIME pin would be wrong for a different
+// reason: the wake has to land in the journal of whatever clown is hosting
+// this process, so the binary must be the one that clown ships, not one
+// spinclass froze at its own build time.
 func ringmasterBin() string {
 	if v := os.Getenv("RINGMASTER_BIN"); v != "" {
 		return v

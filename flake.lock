@@ -632,6 +632,33 @@
         "url": "https://code.linenisgreat.com/purse-first/archive/master.tar.gz"
       }
     },
+    "ringmaster": {
+      "inputs": {
+        "bats": [
+          "bats"
+        ],
+        "igloo": [
+          "igloo"
+        ],
+        "nixpkgs-master": [
+          "nixpkgs-master"
+        ],
+        "utils": [
+          "utils"
+        ]
+      },
+      "locked": {
+        "lastModified": 1784651977,
+        "narHash": "sha256-1Y+fFrnAfE/nFkIF3U91AwLABqvK45DA28Y1PZiKP7M=",
+        "rev": "94132c9c7039be807ab869bdec179429290c4b0b",
+        "type": "tarball",
+        "url": "https://code.linenisgreat.com/ringmaster/archive/94132c9c7039be807ab869bdec179429290c4b0b.tar.gz"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://code.linenisgreat.com/ringmaster/archive/master.tar.gz"
+      }
+    },
     "root": {
       "inputs": {
         "bats": "bats",
@@ -641,6 +668,7 @@
         "madder": "madder",
         "nixpkgs-master": "nixpkgs-master",
         "papi": "papi",
+        "ringmaster": "ringmaster",
         "tommy": "tommy",
         "utils": "utils"
       }

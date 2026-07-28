@@ -51,6 +51,10 @@ promotion-criteria: |
 > to its own lightweight repo, pinnable then. The `clown job …` spellings below
 > are historical; read them as `ringmaster …`. The design and wake semantics
 > are unchanged.
+>
+> **Superseded in part (2026-07-28, spinclass#253):** the move happened. See
+> the *checkPhase pin* amendment below — the closure rationale no longer holds
+> and ringmaster IS now a flake input, though only for tests.
 
 ## Problem Statement
 
@@ -115,6 +119,49 @@ rebase, so the original "a slow clown must not delay Start's
 immediate-return contract" rationale guarded a cost that was not there.
 That contract now means "does not wait for the job body," which is what
 `internal/job`'s tests pin.
+
+### Amendment (2026-07-28, spinclass#253): checkPhase pin
+
+This record twice justified resolving ringmaster from bare PATH on the grounds
+that pinning would "drag clown's whole input closure in" and that the platform
+was only *slated* to become standalone. Both are now false: `ringmaster` is an
+extracted repo whose four inputs (`igloo`, `nixpkgs-master`, `utils`, `bats`)
+are a strict subset of spinclass's, so every one `follows` an existing pin.
+Adding it grew the lock by four `follows` lines and no transitive inputs.
+
+The consequence of the old position was not merely stylistic. **No sandboxed
+lane had a `ringmaster` binary, so no part of this contract had ever been
+regression-tested.** `internal/job`'s and `internal/clown`'s suites assert argv
+against shell stubs they install themselves, and a stub agrees with whatever it
+is sent — the `--state` flag could have been renamed upstream and every test
+would still have passed. That blind spot had been open since this record
+landed.
+
+ringmaster is now a **checkPhase input only** (`nativeCheckInputs`), which:
+
+- keeps the shipped closure unchanged — it is a build-time input, never a
+  runtime dependency, and `packages.default` / `checks.spinclass` stay one
+  derivation;
+- leaves **runtime** resolution on PATH deliberately. A runtime pin would be
+  actively wrong: the wake must land in the journal of whatever clown is
+  hosting the process, so the binary has to be the one clown ships, not one
+  spinclass froze at build time;
+- makes `internal/clown/contract_test.go` drive the real lifecycle (`start` →
+  `spool-path` → spool write → `status --tail` → `done` → `read`) against a
+  scratch `XDG_STATE_HOME`, verified hermetic: `done` succeeds with no monitor
+  bound, and nothing escapes the temp journal.
+
+The suite skips when no binary is reachable so a devshell `go test` still
+passes, but **fails hard inside the sandbox** (`NIX_BUILD_TOP` set) if the pin
+is ever dropped. Without that guard a removed pin would silently return
+coverage to zero while the lane stayed green — the precise way the gap stayed
+invisible the first time. Verified by removing the pin: both tests fail with
+that message; restored, both pass.
+
+Two contract facts this immediately corrected, neither observable through a
+stub: `spool-path` is a **pure path computation**, not a lookup (it answers
+normally for a job that never existed; only a *malformed* id is an error), and
+`done` rejects an unknown flag with exit 2 rather than ignoring it.
 
 **Chat wake emits**: gated on **presence** like the job emits —
 `CLOWN_BIN` set means emit; presence-gating is the only gate (the
@@ -198,6 +245,15 @@ ringmaster records no worker PID by design), which in turn is gated on the
 pre-merge hook's teardown actually being prompt (spinclass#188). Not decided;
 tracked in #251.
 
+One prerequisite that *was* blocking it has cleared. Retirement would sharply
+raise spinclass's reliance on the ringmaster contract — today a silent upstream
+change loses wakes (recoverable: `job.json` is still the record and
+`session-job-status` still works), whereas afterwards it would lose job
+observation and cancellation outright, with no fallback. Betting that on an
+untested contract was not defensible while no lane could exercise one. The
+#253 pin removes that objection: the contract is now covered, and the
+remaining questions are the model inversion and cooperative cancel above.
+
 ## More Information
 
 - clown **RFC-0009** (job-wakeup channel: journal schema, nudge, replay,
@@ -216,7 +272,11 @@ tracked in #251.
 - spinclass#243 — the id-adoption amendment above (dispatch-time
   allocation, refuse-on-failure). spinclass#251 — the proposed retirement
   of the pull surface. spinclass#188 — the pre-merge teardown latency that
-  gates cooperative cancel.
+  gates cooperative cancel. spinclass#253 — the checkPhase pin amendment
+  above (stale closure rationale, first real coverage of the contract).
+- `internal/clown/contract_test.go` — the real-binary suite; contrast with
+  `clown_test.go` / `internal/job/wake_test.go`, which stub ringmaster and
+  can only verify the argv spinclass *intends* to send.
 - `ringmaster(1)` — the job-control CLI. Note its CAVEATS: `cancel` is
   cooperative, not forceful, because the journal deliberately records no
   worker PID; the owning producer is expected to tear down its own process

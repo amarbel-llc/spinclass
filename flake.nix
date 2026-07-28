@@ -114,6 +114,34 @@
       };
     };
 
+    # ringmaster: clown's job platform (durable job journal +
+    # wake-on-completion channel), extracted standalone from clown and now
+    # upstream of both troupe and clown. internal/clown shells out to its CLI
+    # to emit async-job lifecycle events (FDR 0010).
+    #
+    # Consumed ONLY as a checkPhase input: it puts a real `ringmaster` on PATH
+    # inside the sandbox so internal/clown's contract test exercises the actual
+    # argv + journal behaviour instead of the stub it had to settle for before
+    # (#253). This is deliberately NOT a runtime pin — the binary still
+    # resolves from PATH at run time, gated on CLOWN_BIN, so the shipped
+    # closure is unchanged.
+    #
+    # FDR 0010 originally declined to pin on the grounds that "pinning clown
+    # would drag its whole input closure in". That reasoning applied to clown,
+    # not to the extracted platform: ringmaster's four inputs (igloo,
+    # nixpkgs-master, utils, bats) are a strict subset of spinclass's own, so
+    # every one `follows` an existing pin and no closure grows. Tracks master
+    # like every sibling input — deliberately not rev-pinned.
+    ringmaster = {
+      url = "https://code.linenisgreat.com/ringmaster/archive/master.tar.gz";
+      inputs = {
+        igloo.follows = "igloo";
+        nixpkgs-master.follows = "nixpkgs-master";
+        utils.follows = "utils";
+        bats.follows = "bats";
+      };
+    };
+
     # papi: the Personal API CLI. Pinned into spinclass via
     # `mkSpinclass { papi = ...; }` and burned into the default build's
     # binary (-X main.papiBin). The dynamic system-prompt fragment
@@ -148,6 +176,7 @@
       crap,
       tommy,
       papi,
+      ringmaster,
     }:
     let
       # version.env at repo root is the single source of truth for the release
@@ -306,8 +335,18 @@
             # hit pre-existing sandbox-incompatibilities (currently
             # tracked in #65) detect the sandbox via NIX_BUILD_TOP and
             # t.Skip themselves.
+            # ringmaster is a check-only input: it puts the real job-platform
+            # CLI on PATH so internal/clown's contract test can drive actual
+            # start/spool-path/done calls against a scratch XDG journal
+            # instead of asserting argv against a stub (#253). It stays out of
+            # the runtime closure — at run time the binary is resolved from
+            # PATH and gated on CLOWN_BIN. Kept unconditional so
+            # `packages.default` and `checks.spinclass` remain one derivation.
             doCheck = true;
-            nativeCheckInputs = [ pkgs.git ];
+            nativeCheckInputs = [
+              pkgs.git
+              ringmaster.packages.${system}.ringmaster
+            ];
             checkPhase = ''
               runHook preCheck
               go test -p $NIX_BUILD_CORES ./...

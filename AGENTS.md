@@ -215,9 +215,18 @@ subcommand is always available.
   **refuses the dispatch**: a job with no wake completes into silence. Without
   clown the caller's local id stands and there is simply no wake. When `serve` runs
   under clown (`CLOWN_BIN` set), async tools emit `ringmaster start/done`
-  (clown's job-control CLI, clown RFC-0015; resolved from PATH or
-  `$RINGMASTER_BIN`, never by pinning clown) so clown wakes the agent with one
-  `[clown-job]` line. Purely additive;
+  (clown's job-control CLI, clown RFC-0015) so clown wakes the agent with one
+  `[clown-job]` line. **Runtime** resolution is PATH or `$RINGMASTER_BIN`,
+  never a build-time pin — the wake must land in the journal of the clown
+  hosting this process, not one spinclass froze at its own build time. But
+  ringmaster IS a flake input as a **checkPhase** dep (#253): it puts the real
+  binary in the sandbox so `internal/clown/contract_test.go` drives an actual
+  start → spool-path → done lifecycle against a scratch `XDG_STATE_HOME`.
+  Before that no lane had the binary and the contract had never been tested —
+  the stub suites (`clown_test.go`, `internal/job/wake_test.go`) can only
+  confirm the argv spinclass *intends* to send, since a stub accepts anything.
+  The suite skips without a binary but **fails hard** inside `NIX_BUILD_TOP`
+  if the pin is dropped, so coverage cannot silently return to zero.
   job.json/job.log stay the system of record; rollback is
   `CLOWN_DISABLE_JOB_WAKEUP=1`.
 - **Dynamic system-prompt fragment** (spinclass#187, clown plugin protocol
