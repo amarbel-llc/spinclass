@@ -11,6 +11,8 @@ lint: lint-fmt lint-worktree
 # conformist.lib.presets.eng. `just codemod-fmt` is the corresponding write
 # mode. Folded into `just lint` → `just default`, so the pre-merge `just` hook
 # enforces it on every merge.
+#
+# check formatting and the eng-convention lints, read-only
 lint-fmt:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -23,6 +25,8 @@ lint-fmt:
 # + a writable build cache, unavailable in the sandboxed checks.formatting)
 # against the working tree, where .git/go are available. Runs conformist
 # from the devShell PATH (direnv `use flake`).
+#
+# run the impure eng checks and golangci-lint against the working tree
 lint-worktree:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -35,6 +39,8 @@ build: build-nix build-tommy-codegen
 
 # Build the spinclass binary via nix (burns version.env + commit into the
 # binary via -ldflags — see mkSpinclass in flake.nix).
+#
+# build the spinclass binary via nix
 build-nix:
     nix build --show-trace
 
@@ -47,6 +53,8 @@ build-nix:
 # `just update-gomod2nix`. (No trailing gofumpt: tommy v0.4.6 gofumpt's its
 # generated output internally, version-matched to go.mod via #134, so an
 # extra pass is a no-op.)
+#
+# regenerate the tommy-generated sweatfile codec
 build-tommy-codegen:
     nix develop --command go generate ./internal/sweatfile/
 
@@ -58,6 +66,8 @@ test: test-nix
 # [checks] output: spinclass's `go test ./...`, bats-default, bats-race,
 # bats-madder, plus the formatting gate — the same set `lint-fmt` targets
 # individually).
+#
+# run the Go unit tests and every bats lane via `nix flake check`
 test-nix:
     nix flake check --print-build-logs
 
@@ -71,6 +81,8 @@ verify: verify-version-burnin verify-tommy-codegen
 # `spinclass version` emits the blessed self-as-row component table
 # (eng-versioning(7) "version subcommand output"), so the self version
 # is the VERSION column of the first `spinclass-*` row, not raw stdout.
+#
+# verify version and commit are burnt into the nix-built binary
 verify-version-burnin: build
     #!/usr/bin/env bash
     set -euo pipefail
@@ -93,6 +105,8 @@ verify-version-burnin: build
 # conformist: the [linter.tommy-codegen] check is a deliberate no-op because
 # the conformist check lane lacks `go`. The conformist stanza automates
 # regen in the repair lane; this enforces it.
+#
+# fail if the committed tommy codec differs from a fresh regen
 verify-tommy-codegen: build-tommy-codegen
     git diff --exit-code -- internal/sweatfile/sweatfile_tommy.go
 
@@ -104,6 +118,8 @@ codemod-fmt: codemod-fmt-tree
 # gofumpt), Nix (nixfmt), shell/bats (shfmt), TOML (tommy fmt). Config is
 # Nix-generated from ./conformist.nix + presets.{eng,eng-go}. The read-only
 # counterpart is `lint-fmt`.
+#
+# format the tree in place via `nix fmt`
 codemod-fmt-tree:
     nix fmt
 
@@ -121,6 +137,8 @@ clean-build:
 # wired into `build`: spinclass regenerates this manually after a dependency
 # change rather than on every build (unlike e.g. crap/papi's always-fresh
 # convention).
+#
+# regenerate gomod2nix.toml after go.mod/go.sum changes
 update-gomod2nix:
     nix develop --command gomod2nix
 
@@ -136,6 +154,8 @@ debug-go-test pkg='./...' *args='':
 # [explore] Inspect nix-store --gc --print-roots output for entries pointing
 # into the spinclass repo. Used to investigate issue #67 — what does
 # print-roots show before vs after worktree removal?
+#
+# list nix gc roots pointing into the spinclass repo
 [group('explore')]
 explore-gcroots-spinclass:
     #!/usr/bin/env bash
@@ -145,6 +165,8 @@ explore-gcroots-spinclass:
 # [explore] List ALL dangling auto-root links on the system (regardless of
 # what they used to point at). These are zero-byte symlinks with broken
 # targets — leftovers from removed checkouts/worktrees.
+#
+# list all dangling auto gc-root links on the system
 [group('explore')]
 explore-gcroots-auto-dangling:
     #!/usr/bin/env bash
@@ -165,6 +187,8 @@ explore-gcroots-auto-dangling:
 # nix-store --add-root, remove the file, and check what print-roots shows.
 # Critically, also checks whether print-roots itself silently GCs dangling
 # indirect roots — a known nix side-effect that bears on issue #67.
+#
+# probe how print-roots treats a dangling indirect auto-root
 [group('explore')]
 explore-print-roots-dangling:
     #!/usr/bin/env bash
@@ -215,6 +239,8 @@ explore-print-roots-dangling:
 # resolves into the spinclass repo. Lists each link, its readlink target,
 # and whether the target still exists. Crucial input for #67's
 # "are dangling auto-roots visible to print-roots?" question.
+#
+# list auto gc-root symlinks resolving into the spinclass repo
 [group('explore')]
 explore-gcroots-auto-spinclass:
     #!/usr/bin/env bash
@@ -246,6 +272,8 @@ explore-gcroots-auto-spinclass:
 # research saw fail with `blob store not found: ".default"`. Serves the
 # dodder-integration FDR's store-model verification (issue TBD). Binaries
 # resolve from PATH; override with DODDER_BIN / MADDER_BIN.
+#
+# probe dodder reuse of a CWD-local `.default` madder store
 [group('explore')]
 explore-dodder-reuse-cwd:
     #!/usr/bin/env bash
@@ -285,6 +313,8 @@ explore-dodder-reuse-cwd:
 # THIS path works while the .default CWD path does not. Contrast with
 # explore-dodder-reuse-cwd: if this succeeds and that fails on the SAME binary
 # pair, the .default failure is dodder genesis discovery, not version skew.
+#
+# probe dodder reuse of an XDG-named madder store
 [group('explore')]
 explore-dodder-reuse-xdg store="shared":
     #!/usr/bin/env bash
@@ -331,6 +361,8 @@ explore-dodder-reuse-xdg store="shared":
 # assigns. Reference point for the two reuse recipes above — confirms dodder's
 # own madder uses a `.default`-style CWD store, which is what makes the
 # reuse-vs-collision question sharp.
+#
+# show what a plain `dodder init` creates on its own
 [group('explore')]
 explore-dodder-init-plain:
     #!/usr/bin/env bash
@@ -358,6 +390,8 @@ explore-dodder-init-plain:
 # harness: a real `sc start` that inits a per-worktree dodder repo over the
 # madder store, signs with the pivy key, and wires the dodder MCP server.
 # Requires pivy-agent UNLOCKED. See examples/dodder-consumer/README.md.
+#
+# run the dodder-consumer example's end-to-end harness
 [group('explore')]
 explore-dodder-e2e:
     examples/dodder-consumer/e2e.sh
@@ -367,6 +401,8 @@ explore-dodder-e2e:
 # dodder-pinned spinclass + dodder + madder clown plugins (modeled after
 # ~/eng/lib/circus.nix). Composition smoke test; building proves the
 # plugins resolve. See examples/dodder-consumer.
+#
+# build the clown circus from the dodder-consumer example
 [group('explore')]
 explore-dodder-circus:
     cd examples/dodder-consumer && nix build .#circus --print-build-logs
@@ -376,6 +412,8 @@ explore-dodder-circus:
 # this is a drill-down for iterating on zz-tests_bats without waiting for the
 # unit-test checkPhase or the other bats lanes (mirrors tommy's
 # debug-bats-nix-tag).
+#
+# build just the bats-default lane
 [group('debug')]
 debug-bats-default:
     nix build .#bats-default --no-link --print-build-logs
@@ -384,6 +422,8 @@ debug-bats-default:
 # bats-default (race-detector overhead); already covered by `test-nix` —
 # deliberately NOT wired into the `test` aggregate as a first-class step so
 # `just`/`just test` stays fast, matching this repo's other opt-in slow lanes.
+#
+# build just the race-instrumented bats lane
 [group('debug')]
 debug-bats-race:
     nix build .#bats-race --no-link --print-build-logs
@@ -392,12 +432,16 @@ debug-bats-race:
 # spinclass built with a madder pin so the tap-ndjson tests in hooks.bats run
 # instead of skipping (#85). Already covered by `test-nix` via the
 # bats-madder flake check; this is the single-lane drill-down.
+#
+# build just the madder-pinned bats lane
 [group('debug')]
 debug-bats-madder:
     nix build .#bats-madder --no-link --print-build-logs
 
 # [debug] Pipe a synthetic PreToolUse payload for merge-this-session through
 # the installed plugin handler, then print exit code, stdout, and stderr.
+#
+# pipe a synthetic PreToolUse payload through the installed plugin handler
 [group('debug')]
 debug-hook-pretooluse:
     #!/usr/bin/env bash
@@ -418,6 +462,8 @@ debug-hook-pretooluse:
 # CLOWN_SESSION_ID vs SPINCLASS_SESSION_ID. Confirms the spawn env-leak
 # (spinclass#169): a spawned worker shows CLOWN_SESSION_ID = the DRIVER's
 # key while SPINCLASS_SESSION_ID = the worker's key (they should match).
+#
+# map live processes' SPINCLASS_SESSION_ID against their CLOWN_SESSION_ID
 [group('debug')]
 debug-session-env-map:
     #!/usr/bin/env bash
@@ -441,6 +487,8 @@ debug-session-env-map:
 # template, re-run, eyeball the rendered markdown. With mode=worktree, sets the
 # SPINCLASS_* identity env so the worktree variant renders; default resolves
 # whatever the cwd maps to (a git checkout -> the main-checkout variant).
+#
+# print the dynamic system-prompt fragment `spinclass serve` returns
 [group('debug')]
 debug-prompt-fragment mode="":
     #!/usr/bin/env bash
@@ -462,6 +510,8 @@ debug-prompt-fragment mode="":
 # tears the session down. Renders your LIVE sessions. Swap the `history` line for
 # `posh history "$sess" --vt` to inspect colors/attributes as an escape stream.
 # Serves the cmd/spinclass/list_view rendering dev-loop. Requires `posh` on PATH.
+#
+# render an `sc` subcommand through a real PTY and dump the screen
 [group('debug')]
 debug-render-tty cols="100" *args="list":
     #!/usr/bin/env bash
@@ -481,6 +531,8 @@ debug-render-tty cols="100" *args="list":
 # devshell-built spinclass binary, then drop into $SHELL inside it — a
 # real-worktree-free sandbox for manually exercising `sc start`/etc. against
 # uncommitted spinclass changes.
+#
+# scaffold a throwaway repo on a devshell-built binary and drop into $SHELL
 [group('debug')]
 debug-dev-repo:
     #!/usr/bin/env bash
@@ -504,6 +556,8 @@ debug-dev-repo:
 # envrc, then [direnv.dotenv]). `sc start --no-attach` reads the repo sweatfile
 # via LoadHierarchy and writes .spinclass/env — so a dropped key is visible.
 # Delete once #196 is closed.
+#
+# reproduce issue #196 end-to-end against the installed sc binary
 [group('debug')]
 debug-issue196-scratch:
     #!/usr/bin/env bash
@@ -549,12 +603,16 @@ debug-issue196-scratch:
 # drop) against the BRIDGED tommy via the devshell go — the same tommy rev the
 # nix-built binary links, unlike a raw `go test` which resolves go.mod. Delete
 # once #196 is closed.
+#
+# run the issue #196 regression test against the bridged tommy
 [group('debug')]
 debug-issue196:
     nix develop --command go test -run 'TestScalarBeforeSubtable|TestScalarBeforeSubtableWithPrecedingTable|TestScalarBeforeSubtableHierarchy|TestStandaloneDottedHeadersConsumed' -v ./internal/sweatfile/
 
 # Tag a spinclass release. The "v" prefix is added for you, so pass
 # the semver without it. Usage: just tag 0.1.0 "feat: initial release"
+#
+# sign and push a spinclass release tag
 tag version $message:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -574,6 +632,8 @@ tag version $message:
 # (eng-versioning(7) single source of truth) — the fork's buildGoApplication
 # auto-reads it and burns it into the binary at build time via -ldflags. No-op
 # if already at the target version. Usage: just bump-version 0.1.1
+#
+# rewrite SPINCLASS_VERSION in version.env to the given semver
 bump-version new_version:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -593,6 +653,8 @@ bump-version new_version:
 #
 # Use `just tag <version> <message>` directly if you want to control
 # the commit message yourself without bumping.
+#
+# cut a release: bump version.env, commit, push master, then sign and push the tag
 release version:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -627,6 +689,8 @@ release version:
 # load-bearing isolation mechanism: extensions.worktreeConfig + a
 # per-worktree core.hooksPath confines a pre-commit hook to ONE worktree.
 # Scratch repo, marker hook, six checks. Delete once the installer lands.
+#
+# verify a per-worktree core.hooksPath confines a pre-commit hook to one worktree
 [group('explore')]
 explore-worktree-hooks:
     #!/usr/bin/env bash
