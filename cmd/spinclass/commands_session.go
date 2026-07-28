@@ -60,7 +60,9 @@ func registerSessionCommands(app *command.App) {
 				"then blocks up to the hello deadline (60s default; --hello-timeout tunes it) for the worker's SessionStart chat hello. " +
 				"The brief is the worker's ONLY context — include everything it needs plus an explicit instruction to message you back " +
 				"via chat when done (the printed session_key is the worker's chat address; yours is its reply target). " +
-				"--issue prepends a GitHub issue's title and body (fetched in the target repo via `gh issue view`) to the brief. " +
+				"--issue prepends an issue's title and body to the brief: a bare number resolves against the TARGET repo's own forge, " +
+				"while a full issue URL (https://<host>/<owner>/<repo>/issues/<n>) is fetched from that forge whatever the target repo's remote says. " +
+				"GitHub issues are read with `gh issue view`, Gitea/Forgejo/Codeberg issues with `fj api`; an unsupported or unresolvable forge is an error, never a fallback. " +
 				"On a hello timeout the worker worktree and state are intentionally left behind for inspection; clean up with `sc close`.",
 		},
 		Params: spawnParamList(),

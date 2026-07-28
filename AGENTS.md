@@ -163,9 +163,16 @@ subcommand is always available.
   execs the cascade-merged `[session-entry].spawn-entry` (default the clown
   spawn form) with the brief as initial prompt; blocks on the worker's
   `SessionStart` hello (`internal/spawnhandshake`, 60s default,
-  `--hello-timeout`). Workers can't spawn sub-workers (#148); the MCP tools are
-  always-ask (#151). Coordination afterward is clown chat. `internal/spawn` owns
-  resolution + launch.
+  `--hello-timeout`). `--issue` prepends an issue to the brief and is
+  **forge-aware** (#245, `cmd/spinclass/spawn_issue.go`): a bare number resolves
+  the TARGET repo's forge via `internal/repoinfo` and dispatches to
+  `gh issue view` (GitHub) or `fj api` (Gitea/Forgejo/Codeberg); a full issue
+  URL (`https://<host>/<owner>/<repo>/issues/<n>`) is fetched from ITS host
+  whatever the target's remote says. An unsupported or unresolvable forge is a
+  hard error, never a gh fallback — a read-only GitHub mirror would answer with
+  stale text and silently produce a wrong brief. Workers can't spawn
+  sub-workers (#148); the MCP tools are always-ask (#151). Coordination
+  afterward is clown chat. `internal/spawn` owns resolution + launch.
 - **Implicit-session merge** (FDR 0014): from a main-checkout session, merge
   routes to `merge.MergeImplicit` — runs `[hooks].pre-merge` against HEAD then
   `git push` (nothing to rebase). MCP path enforces the implicit attestation

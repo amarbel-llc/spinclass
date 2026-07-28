@@ -1,15 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
@@ -33,11 +30,12 @@ type spawnParams struct {
 
 // runSpawn is the shared spawn flow behind both surfaces (FDR 0006):
 // validate params, resolve the driver identity (the worker's hello target
-// and message-back address) and the target repo, optionally prepend a GitHub
+// and message-back address) and the target repo, optionally prepend a forge
 // issue to the brief, then block in spawn.Launch until the worker's
 // SessionStart hello or the deadline. Returns the launch result plus the
-// driver key for the chat hint line.
-func runSpawn(p spawnParams) (spawn.Result, string, error) {
+// driver key for the chat hint line. ctx bounds only the issue fetch — the
+// hello wait has its own deadline (parseHelloTimeout).
+func runSpawn(ctx context.Context, p spawnParams) (spawn.Result, string, error) {
 	if p.Repo == "" {
 		return spawn.Result{}, "", errors.New("repo is required")
 	}
@@ -78,7 +76,7 @@ func runSpawn(p spawnParams) (spawn.Result, string, error) {
 
 	brief := p.Brief
 	if p.Issue != "" {
-		brief, err = prependIssueToBrief(repoPath, p.Issue, brief)
+		brief, err = prependIssueToBrief(ctx, repoPath, p.Issue, brief)
 		if err != nil {
 			return spawn.Result{}, "", err
 		}
@@ -174,34 +172,6 @@ func driverRepoPath() string {
 	return repoPath
 }
 
-// prependIssueToBrief fetches a GitHub issue from the RESOLVED target repo
-// (cmd.Dir = repoPath so gh resolves against the worker repo's origin) and
-// prepends "<title>\n\n<body>\n\n---\n\n" to the brief. Any failure — gh
-// missing, API error, bad JSON — is a hard error: spawning a half-briefed
-// worker is worse than not spawning.
-func prependIssueToBrief(repoPath, issue, brief string) (string, error) {
-	cmd := osexec.Command("gh", "issue", "view", issue, "--json", "title,body")
-	cmd.Dir = repoPath
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg != "" {
-			msg = ": " + msg
-		}
-		return "", fmt.Errorf("gh issue view %s in %s failed (refusing to spawn a half-briefed worker)%s: %w", issue, repoPath, msg, err)
-	}
-	var parsed struct {
-		Title string `json:"title"`
-		Body  string `json:"body"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &parsed); err != nil {
-		return "", fmt.Errorf("parsing gh issue view %s output (refusing to spawn a half-briefed worker): %w", issue, err)
-	}
-	return parsed.Title + "\n\n" + parsed.Body + "\n\n---\n\n" + brief, nil
-}
-
 // spawnResultText renders the launch result for both surfaces: plain lines
 // (spawn is not a merge/check command — mirror fork's plain print) plus the
 // hint that the returned session key is the worker's chat address.
@@ -213,14 +183,14 @@ func spawnResultText(driverKey string, res spawn.Result) string {
 }
 
 // runSpawnCLI is the `sc spawn` RunCLI handler.
-func runSpawnCLI(_ context.Context, args json.RawMessage) error {
+func runSpawnCLI(ctx context.Context, args json.RawMessage) error {
 	var p struct {
 		globalArgs
 		spawnParams
 	}
 	_ = json.Unmarshal(args, &p)
 
-	res, driverKey, err := runSpawn(p.spawnParams)
+	res, driverKey, err := runSpawn(ctx, p.spawnParams)
 	if err != nil {
 		return err
 	}
@@ -229,12 +199,12 @@ func runSpawnCLI(_ context.Context, args json.RawMessage) error {
 }
 
 // handleSpawnSession is the `spawn-session` MCP tool handler.
-func handleSpawnSession(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+func handleSpawnSession(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	var params spawnParams
 	if err := json.Unmarshal(args, &params); err != nil {
 		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
 	}
-	res, driverKey, err := runSpawn(params)
+	res, driverKey, err := runSpawn(ctx, params)
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
 	}
@@ -291,7 +261,7 @@ func spawnParamList() []command.Param {
 		{
 			Name:        "issue",
 			Type:        command.String,
-			Description: "GitHub issue number (or URL) in the TARGET repo: its title and body are fetched via `gh issue view` and prepended to the brief. Errors if gh is missing or the fetch fails — no half-briefed spawns.",
+			Description: "Issue to prepend to the brief, as a bare number (e.g. \"244\") in the TARGET repo, or a full issue URL (https://<host>/<owner>/<repo>/issues/<n>) on any forge — a URL is fetched from ITS forge, so the issue need not live on the target repo's. The forge is resolved (internal/repoinfo) and dispatched: GitHub via `gh issue view`, Gitea/Forgejo/Codeberg via `fj api`. Its title and body are prepended. Errors if the forge is unsupported or unresolvable, the client binary is missing, or the fetch fails — never falls back to another forge, since a mirror's stale copy would silently produce a wrong brief.",
 		},
 		{
 			Name:        "description",
