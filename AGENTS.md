@@ -320,6 +320,15 @@ subcommand is always available.
   off) bounds how long the pre-merge hook may go silent. Covers
   merge/check/`sc check` + async twins (all funnel through
   `RunPreMergeHookContext`). Distinct error message vs `session-job-cancel`.
+- **Hook cancellation** (#188, `sweatfile.runHookInDirEnv`): `cmd.Cancel` is
+  overridden to **SIGTERM**, not exec's default SIGKILL, so a cancelled hook
+  can tear down its own children. The argv collapses by exec
+  (`direnv exec … sh -c <script>` → the hook command itself), so SIGKILL used
+  to orphan the `nix` below `just` still holding the inherited pipe — and
+  `Wait` cannot return until every pipe holder closes it (measured: 224s).
+  `cancelGrace` (10s) is the SIGKILL escalation for a hook that swallows
+  SIGTERM. Deliberately **no `Setpgid`**: a group kill would reap the detached
+  children FDR 0023 sanctions for slow post-merge deploys.
 - **Setup staleness & `sc rebuild`** (`internal/setupfingerprint`): setup is
   applied **once at `sc start`** (`sc resume` does NOT re-apply), so it drifts.
   A fingerprint (`sha256(scheme · version+commit · pins · canonical-JSON(merged
