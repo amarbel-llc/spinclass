@@ -69,24 +69,52 @@ plumbing.
 
 `internal/clown` is the producer-side integration; everything funnels
 through the clown CLI located via `$CLOWN_BIN` (exported by clown into
-every plugin MCP server) with a `PATH` fallback. Spinclass state is
-always the system of record; the clown journal is only the wake layer.
+every plugin MCP server) with a `PATH` fallback. Spinclass state remains
+the system of record for job *results*; the clown journal is the wake
+layer — but see the **id adoption** amendment below, which makes the
+start emit load-bearing rather than purely additive.
 
 **Background-job lifecycle emits** (`merge-this-session-async` /
 `check-this-session-async`): gated on **presence** — `CLOWN_BIN` set
 means "running under clown, may emit"; there is no spinclass-side
-switch. The job goroutine emits `clown job start --label merge|check
---source spinclass` at launch (the returned id is persisted as
-`clown_job_id` in the worktree's `job.json`) and `clown job done
+switch. Spinclass emits `ringmaster start --label merge|check --source
+spinclass` and, after the terminal record is durable, `ringmaster done
 --state succeeded|failed|cancelled --message <summary> --result-ref
-"spinclass session-job-status"` after the terminal record is durable.
-The agent is woken with one notification line; the failed-state message
-carries the first `not ok` line of the result when present. Emit
-failures are appended to `job.log` (`[clown] ... emit failed`) and
-never affect the job result. The synchronous tools emit nothing — their
-caller is already awake. The async tool descriptions switch guidance at
-serve startup: under clown, "start it and end your turn — the wake
-arrives" replaces the poll-discipline warnings.
+"spinclass session-job-status"`. The agent is woken with one
+notification line; the failed-state message carries the first `not ok`
+line of the result when present. The synchronous tools emit nothing —
+their caller is already awake. The async tool descriptions switch
+guidance at serve startup: under clown, "start it and end your turn —
+the wake arrives" replaces the poll-discipline warnings.
+
+### Amendment (2026-07-28, spinclass#243): id adoption
+
+The original design allocated the clown job **inside the job goroutine**,
+so `Start` could return before it completed, and treated every emit
+failure as non-fatal. Both were revised:
+
+- **The start allocation now runs before the goroutine**, and its returned
+  id becomes the job's own `ID` (still also persisted as `clown_job_id`).
+  Previously spinclass minted `<kind>-<unix-ts>` while the wake carried
+  ringmaster's `<kind>-<hash>` — the same prefix with a different suffix,
+  so the two read as one scheme and an agent matching them concluded its
+  own wake belonged to another session. Reproduced 4/4 before the fix.
+- **A failed start allocation under clown now refuses the dispatch.** The
+  wake is how an agent learns an async job finished, so a job dispatched
+  without one completes into silence. This is the one place the
+  integration is **no longer purely additive**: the wake layer can now
+  block a merge from starting. It cannot corrupt or fail a *running*
+  job — the terminal emit stays non-fatal and logged — and the rollback
+  (`CLOWN_DISABLE_JOB_WAKEUP=1`) still disables the facility wholesale.
+  Without clown at all, nothing changes: the caller's local id stands.
+
+Dispatch-time allocation is what `ringmaster start` is for; it measured
+~7ms on the reference host (5–6ms of that bare process startup) against a
+dispatch that has already paid for `PrepareMerge`'s network `git pull` and
+rebase, so the original "a slow clown must not delay Start's
+immediate-return contract" rationale guarded a cost that was not there.
+That contract now means "does not wait for the job body," which is what
+`internal/job`'s tests pin.
 
 **Chat wake emits**: gated on **presence** like the job emits —
 `CLOWN_BIN` set means emit; presence-gating is the only gate (the
@@ -144,7 +172,31 @@ A directed chat message:
 | job progress emits | none (journal-only skipped entirely) | one exec per output line is absurd; job.log is the observability surface | demand for `clown job read` mid-job visibility |
 | failed-wake message detail | first `not ok` line | names what broke in one line; result_ref carries the rest | messages truncated/unhelpful in practice |
 | emit timeout | 10s | local journal append + datagram; generous | wedged-clown warnings appearing in job.log |
-| emit execution point | inside job goroutine, sequential before/after hook | keeps Start's immediate-return contract; simple ordering | start-emit latency measurably delaying hook start |
+| start-emit execution point | before the goroutine, on the dispatch path (#243) | the returned id must be the id the wake carries; measured ~7ms against a dispatch already doing a network pull | start allocation measurably delaying dispatch |
+| start-emit failure policy | refuses the dispatch (#243) | a job with no wake completes into silence, which is worse than not dispatching | refusals seen for transient clown hiccups rather than real breakage |
+| terminal-emit failure policy | logged, non-fatal | the work is already done and recorded; only the wake is lost | agents missing completions without noticing |
+
+## Future direction
+
+**Retiring spinclass's pull surface** (spinclass#251). Since #243 the two
+sides name the same job identically, which raises whether spinclass should
+own `session-job-status`/`-cancel`/`-wait` at all rather than producing onto
+the channel and letting `ringmaster status`/`tail`/`wait`/`cancel` be the
+interface. Measured today, ringmaster knows almost nothing about a spinclass
+job: two journal records, a one-line message, `spool_bytes: 0`, and a
+`result_ref` pointing back at `session-job-status`. Closing that gap means
+writing hook output to `ringmaster spool-path` and attaching the rendered
+verdict ladder via `done --resource <madder-uri>` — both worth doing on their
+own merits, since a wake that carries its result beats one that says "call my
+other tool."
+
+Retiring the tools themselves would **invert this record's model**: the
+journal, not `job.json`, would become authoritative for job observability.
+It also needs spinclass to implement its half of ringmaster's *cooperative*
+cancel (observe the `cancelled` record, tear down its own process tree —
+ringmaster records no worker PID by design), which in turn is gated on the
+pre-merge hook's teardown actually being prompt (spinclass#188). Not decided;
+tracked in #251.
 
 ## More Information
 
@@ -159,7 +211,17 @@ A directed chat message:
   cascade (obsolete: the variable was deleted with the legacy monitor).
 - `internal/clown` — the producer package (`Source`, `Bin`, `Enabled`,
   `SendMessage`, `StartJob`, `FinishJob`); `internal/job/runner.go` —
-  the emit points around the job goroutine.
+  the start allocation ahead of the job goroutine and the terminal emit
+  inside it.
+- spinclass#243 — the id-adoption amendment above (dispatch-time
+  allocation, refuse-on-failure). spinclass#251 — the proposed retirement
+  of the pull surface. spinclass#188 — the pre-merge teardown latency that
+  gates cooperative cancel.
+- `ringmaster(1)` — the job-control CLI. Note its CAVEATS: `cancel` is
+  cooperative, not forceful, because the journal deliberately records no
+  worker PID; the owning producer is expected to tear down its own process
+  tree. `cancel`, `ls` and `tail` are CLI-only — the `mcp` subcommand
+  exposes only `job_start/progress/done/read/status/spool_path/wait`.
 
 ---
 
