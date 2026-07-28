@@ -147,9 +147,21 @@ update-gomod2nix:
 # only sees git-tracked files; this runs `go test` inside the devshell against
 # the working tree. Serves the agent inner dev-loop — `just` is still the
 # gate that counts (and is what the pre-merge hook runs).
+#
+# Pass a -run regex via the `run` parameter, NOT via args: just interpolates
+# variadic args as raw text, so an alternation like 'A|B' reaches the shell
+# with a live pipe and the second name is executed as a command. `run` is
+# shell-quoted here, which is the only place that can be done correctly.
+#
+#     just debug-go-test ./internal/perms/ 'TestA|TestB' -v
+#
+# `pkg` is a single package pattern. Passing several relies on go's argument
+# ordering and silently tests only some of them — use ./... or one at a time.
+#
+# run go test for one package in the devshell (fast inner loop)
 [group('debug')]
-debug-go-test pkg='./...' *args='':
-    nix develop --command go test {{ args }} {{ pkg }}
+debug-go-test pkg='./...' run='' *args='':
+    nix develop --command go test {{ if run == '' { '' } else { '-run ' + quote(run) } }} {{ args }} {{ pkg }}
 
 # [explore] Inspect nix-store --gc --print-roots output for entries pointing
 # into the spinclass repo. Used to investigate issue #67 — what does
