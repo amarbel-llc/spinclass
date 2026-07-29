@@ -68,9 +68,10 @@ type State struct {
 	// SpawnedBy is the driver session's key (<repo>/<branch>) recorded by
 	// `sc spawn` / detached fork when this session was launched as a worker.
 	// Surfaced as lineage by `sc list` and chat-list-sessions, and
-	// load-bearing in two places: the #148 recursive-spawn guard refuses to
-	// spawn from a session that carries it, and close-child-session (#249)
-	// authorizes a reap only when it equals the caller's own session key.
+	// load-bearing for close-child-session (#249), which authorizes a reap
+	// only when it equals the caller's own session key. It formerly also
+	// gated spawning (the #148 recursive-spawn guard); that guard is gone,
+	// but the field is NOT vestigial — reap authorization still turns on it.
 	// See FDR 0006.
 	SpawnedBy string `json:"spawned_by,omitempty"`
 	// HelloSentAt records when the SessionStart hook emitted the spawn

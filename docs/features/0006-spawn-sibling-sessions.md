@@ -194,7 +194,11 @@ display as a later cosmetic.
 
 (Resolves the worker-visibility open question.)
 
-### No recursive spawning (added 2026-06-12, #148)
+### No recursive spawning (added 2026-06-12, #148 — REMOVED 2026-07-28)
+
+> **Removed.** A spawned worker may now spawn its own workers. All four
+> spawn surfaces accept a caller carrying `spawned_by`. The paragraph below
+> is retained as the original rationale; see the reversal note after it.
 
 A session whose own state carries `spawned_by` — i.e. a spawned worker —
 is refused by all four spawn surfaces (`spawn-session`, `fork-session`,
@@ -205,6 +209,34 @@ knob if a production pattern ever genuinely wants a mid-level
 coordinator. (Depends on #147: `spawned_by` survives resumes, so the
 gate is not leaky.)
 
+**Reversal (2026-07-28).** The restriction was lifted outright rather than
+turned into the sweatfile knob this section anticipated.
+
+The stated harm — "a misbehaving worker cannot recursively fan out
+token-burning sub-workers" — is already prevented by the always-ask floor
+below, which landed *after* this guard. Every spawn and fork prompts a
+human at every depth, regardless of allow-lists, permissive mode, or how
+deep in a worker tree the caller sits (`TestSpawnSessionAsksEvenForSubagent`
+pins that it applies to subagents too). A runaway tree therefore cannot grow
+without a person approving each node. #148 was belt-and-braces on a floor
+that already held, at the cost of blocking the legitimate mid-level
+coordinator case entirely.
+
+What this trades away is the *supervision* half: the topology is no longer
+guaranteed one level deep, so `sc list` can show a tree rather than a flat
+set, and a driver reasoning about "my workers" may now be looking at a
+subtree. `spawned_by` still records the immediate parent, so lineage is
+reconstructible, but nothing walks it transitively today.
+
+`spawned_by` remains load-bearing — `close-child-session` (#249) authorizes
+a reap only when it equals the caller's key. Note the interaction: reaping
+authority is **immediate-parent only**, so a grandparent cannot reap a
+grandchild it did not directly spawn. That was unreachable while the tree
+was one level deep and becomes reachable now.
+
+Rollback is restoring `refuseRecursiveSpawn` in `cmd/spinclass/spawn_cmd.go`
+and its two call sites (`spawn_cmd.go`, `fork_cmd.go`).
+
 ### Always-ask — never silently auto-approved (added 2026-06-13, #151)
 
 The `spawn-session` and `fork-session` MCP tools always prompt: every
@@ -212,8 +244,9 @@ invocation requires a fresh user confirmation, regardless of `claude-allow`
 rules, perms-tier rules, or a permissive session mode. They launch a full
 harness-booted worker that immediately consumes tokens — categorically
 heavier than any other spinclass tool — so a driver agent must never trigger
-one silently. Where #148 bounds *who* may spawn (not a spawned worker), this
-bounds *how silently* (never).
+one silently. This bounds *how silently* (never) — and since #148's
+who-may-spawn bound was removed above, it is now the only bound of either
+kind, which is precisely why removing #148 was safe.
 
 Enforced server-side across both spinclass-owned auto-approve surfaces:
 

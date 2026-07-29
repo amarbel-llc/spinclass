@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -52,65 +51,13 @@ func TestHandleSpawnSessionValidation(t *testing.T) {
 	}
 }
 
-// TestRefuseRecursiveSpawn pins the #148 gate: a session whose own state
-// carries spawned_by is itself a spawned worker and must not fan out
-// sub-workers; everything else (ordinary worktree sessions, non-worktree
-// cwds, missing state) passes.
-func TestRefuseRecursiveSpawn(t *testing.T) {
-	testgit.RequireGit(t)
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	repoDir := filepath.Join(t.TempDir(), "myrepo")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	testgit.MustInit(t, repoDir)
-	wtPath := filepath.Join(repoDir, ".worktrees", "wkr")
-	wtCmd := osexec.Command("git", "-C", repoDir, "worktree", "add", "-b", "wkr", wtPath)
-	if out, err := wtCmd.CombinedOutput(); err != nil {
-		t.Fatalf("git worktree add: %v\n%s", err, out)
-	}
-
-	seed := func(spawnedBy string) {
-		t.Helper()
-		if err := session.Write(session.State{
-			SessionState: session.StateActive,
-			RepoPath:     repoDir,
-			WorktreePath: wtPath,
-			Branch:       "wkr",
-			SessionKey:   "myrepo/wkr",
-			SpawnedBy:    spawnedBy,
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	t.Run("spawned worker is refused", func(t *testing.T) {
-		seed("driver/origin")
-		t.Chdir(wtPath)
-		err := refuseRecursiveSpawn()
-		if err == nil {
-			t.Fatal("expected refusal for a spawned_by session, got nil")
-		}
-		if !strings.Contains(err.Error(), "spawned") {
-			t.Errorf("error %q does not explain the spawned-worker refusal", err)
-		}
-	})
-
-	t.Run("ordinary worktree session passes", func(t *testing.T) {
-		seed("")
-		t.Chdir(wtPath)
-		if err := refuseRecursiveSpawn(); err != nil {
-			t.Fatalf("unexpected refusal: %v", err)
-		}
-	})
-
-	t.Run("non-worktree cwd passes", func(t *testing.T) {
-		t.Chdir(t.TempDir())
-		if err := refuseRecursiveSpawn(); err != nil {
-			t.Fatalf("unexpected refusal outside a worktree: %v", err)
-		}
-	})
-}
+// The #148 recursive-spawn gate and its test are gone: a spawned worker may
+// now spawn its own workers. What used to be tested here has moved to the two
+// mechanisms that actually still constrain this —
+// perms.AlwaysAsk/TestSpawnSessionAsksEvenForSubagent (every spawn at every
+// depth prompts a human, so fan-out cannot run away silently) and
+// TestAuthorizeChildReap (spawned_by still governs who may reap whom, so the
+// field remains load-bearing even though it no longer gates spawning).
 
 // spawnCmdHappySweatfile mirrors internal/spawn's happy-path fixture: the
 // stub spawn-entry (exec'd directly — FDR-0017 Piece 1) just drops a marker in

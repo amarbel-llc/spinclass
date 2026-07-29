@@ -11,9 +11,7 @@ import (
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/git"
-	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/spawn"
-	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 
 // spawnParams is the shared parameter set of the `sc spawn` CLI command and
@@ -65,10 +63,6 @@ func runSpawn(ctx context.Context, p spawnParams) (spawn.Result, string, error) 
 		return spawn.Result{}, "", fmt.Errorf("resolving driver session key (the worker's hello target): %w", err)
 	}
 
-	if err := refuseRecursiveSpawn(); err != nil {
-		return spawn.Result{}, "", err
-	}
-
 	repoPath, err := spawn.ResolveRepo(home, p.Repo, driverRepoPath())
 	if err != nil {
 		return spawn.Result{}, "", err
@@ -107,51 +101,6 @@ func parseHelloTimeout(s string) (time.Duration, error) {
 		return 0, fmt.Errorf("hello-timeout must be positive, got %q", s)
 	}
 	return d, nil
-}
-
-// refuseRecursiveSpawn rejects spawning from a session that is itself a
-// spawned worker (#148): a session whose own state carries spawned_by must
-// not fan out sub-workers — the driver/worker topology stays a one-level
-// tree the user can supervise, and a misbehaving worker can't recursively
-// burn tokens and worktrees. Revisit as a sweatfile knob if a production
-// pattern ever wants a mid-level coordinator.
-//
-// Resolution is best-effort: anywhere the caller's own state can't be read
-// (non-worktree cwd, no state file) the gate simply doesn't fire — the
-// spawn fails later on driver-identity resolution if there's genuinely no
-// session. Note #147 (attach clobbering spawned_by) is fixed, so the field
-// survives resumes and the gate is not leaky.
-func refuseRecursiveSpawn() error {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil
-	}
-	if !worktree.IsWorktree(cwd) {
-		// Spawn only ever creates worktree sessions, so only those can
-		// carry spawned_by; implicit sessions pass by construction.
-		return nil
-	}
-	repoPath, err := git.CommonDir(cwd)
-	if err != nil {
-		return nil
-	}
-	branch, err := git.BranchCurrent(cwd)
-	if err != nil {
-		return nil
-	}
-	st, err := session.Read(repoPath, branch)
-	if err != nil || st == nil {
-		return nil
-	}
-	if st.SpawnedBy != "" {
-		return fmt.Errorf(
-			"this session (%s) is itself a spawned worker (spawned by %s); "+
-				"spawned workers may not spawn sub-sessions (#148) — "+
-				"ask your driver to spawn the worker instead",
-			st.SessionKey, st.SpawnedBy,
-		)
-	}
-	return nil
 }
 
 // driverRepoPath best-effort resolves the DRIVER's repo path for

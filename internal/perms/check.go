@@ -30,8 +30,12 @@ func AlwaysAsk(toolName string, toolInput map[string]any) (string, bool) {
 	case spawnSessionTool, forkSessionTool:
 		// Spawning/forking launches a full harness-booted agent that
 		// immediately consumes tokens — categorically heavier than any other
-		// spinclass tool, and unconditional regardless of arguments. Bounds
-		// #148 (who may spawn) with how silently. See FDR 0006 / #151.
+		// spinclass tool, and unconditional regardless of arguments.
+		//
+		// Since the #148 recursive-spawn guard was removed, this is the ONLY
+		// thing preventing runaway fan-out: a worker may now spawn its own
+		// workers, so an `ask` at every depth is what keeps a recursive tree
+		// from growing without a human in the loop. See FDR 0006 / #151.
 		return "spawning a worker session launches a token-consuming agent; confirm each invocation", true
 
 	case closeChildSessionTool:

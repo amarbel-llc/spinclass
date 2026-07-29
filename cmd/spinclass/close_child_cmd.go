@@ -23,7 +23,9 @@ type closeChildParams struct {
 
 // authorizeChildReap decides whether callerKey owns child (#249). The
 // parent→child link is session.State.SpawnedBy — the driver key internal/spawn
-// records at launch, and the same lineage the #148 recursive-spawn guard reads.
+// records at launch. Since the #148 recursive-spawn guard was removed this is
+// the only remaining consumer of that field, so it is the sole thing keeping
+// lineage load-bearing.
 // A session may reap ONLY what it spawned, so every uncertain case is a
 // refusal: an unresolvable caller identity, a child with no lineage at all, or
 // a child belonging to a different driver. Failing open here would let any

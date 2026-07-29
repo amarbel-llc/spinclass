@@ -171,8 +171,11 @@ subcommand is always available.
   URL (`https://<host>/<owner>/<repo>/issues/<n>`) is fetched from ITS host
   whatever the target's remote says. An unsupported or unresolvable forge is a
   hard error, never a gh fallback — a read-only GitHub mirror would answer with
-  stale text and silently produce a wrong brief. Workers can't spawn
-  sub-workers (#148); the MCP tools are always-ask (#151). Coordination
+  stale text and silently produce a wrong brief. Workers **may** spawn their
+  own workers — the #148 one-level restriction was removed, since the
+  always-ask floor (#151) already prevents silent fan-out at every depth and
+  was the actual protection; the tree is no longer guaranteed flat, and
+  reaping authority stays immediate-parent-only. Coordination
   afterward is clown chat. `internal/spawn` owns resolution + launch.
   **Reaping** (#249, `cmd/spinclass/close_child_cmd.go`): `close-child-session`
   lets a driver tear down a worker it spawned — completed children and failed
