@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/clown"
+	"code.linenisgreat.com/spinclass/internal/embeds"
+	"code.linenisgreat.com/spinclass/internal/madder"
 )
 
 // Func is the unit of work a background job runs. It receives a context that
@@ -190,13 +192,72 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 					msg += ": " + line
 				}
 			}
-			if cerr := clown.FinishJob(context.Background(), j.ClownJobID, j.Status, msg, "spinclass session-job-status"); cerr != nil {
+
+			// Attach the rendered verdict ladder by reference so the wake
+			// carries its own result (#251 piece 2b). Before this the terminal
+			// record's only pointer was `result_ref: "spinclass
+			// session-job-status"` — a wake that says "call my other tool",
+			// which is exactly what made the retire-or-keep question in #251
+			// hard to answer from usage.
+			//
+			// The two are alternatives, not companions: when the blob exists
+			// it IS the result, so repeating a pointer to a tool that serves
+			// the same bytes is noise. result_ref stays as the fallback for a
+			// build with no madder pin, where there is no blob to point at.
+			resource := storeResultBlob(wt, text, logf)
+			resultRef := ""
+			if resource == "" {
+				resultRef = "spinclass session-job-status"
+			}
+
+			if cerr := clown.FinishJob(context.Background(), j.ClownJobID, j.Status, msg, resultRef, resource); cerr != nil {
 				_, _ = fmt.Fprintf(logf, "[clown] job-done emit failed: %v\n", cerr)
 			}
 		}
 	}()
 
 	return &snapshot, nil
+}
+
+// storeResultBlob writes the job's rendered verdict ladder to the worktree's
+// madder blob store and returns its `madder://blobs/<digest>` URI, for
+// attachment to the terminal wake (#251 piece 2b).
+//
+// Returns "" whenever no blob could be produced — no madder pin (the default
+// build leaves it dormant, FDR 0003), an uninitialised store, a spawn or write
+// failure. That is a degrade, never an error: the job has already finished and
+// its result is durable in job.json, so failing the wake over a missing
+// attachment would trade a working notification for none. Failures are noted
+// in job.log so a missing attachment is diagnosable rather than silent.
+func storeResultBlob(wt, text string, logf io.Writer) string {
+	if embeds.MadderBin() == "" {
+		return ""
+	}
+	w, finish, err := madder.Write(wt, embeds.MadderBin())
+	if err != nil {
+		_, _ = fmt.Fprintf(logf, "[clown] result blob: madder write failed to start: %v\n", err)
+		return ""
+	}
+	if _, err := io.WriteString(w, text); err != nil {
+		_ = w.Close()
+		_, _ = finish() // reap the subprocess even on write failure
+		_, _ = fmt.Fprintf(logf, "[clown] result blob: write failed: %v\n", err)
+		return ""
+	}
+	if err := w.Close(); err != nil {
+		_, _ = finish()
+		_, _ = fmt.Fprintf(logf, "[clown] result blob: close failed: %v\n", err)
+		return ""
+	}
+	id, err := finish()
+	if err != nil {
+		_, _ = fmt.Fprintf(logf, "[clown] result blob: %v\n", err)
+		return ""
+	}
+	if id == "" {
+		return ""
+	}
+	return "madder://blobs/" + id
 }
 
 // firstFailureLine returns the first plain-verdict failure line ("✗ <desc>",

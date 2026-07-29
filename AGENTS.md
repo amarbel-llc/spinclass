@@ -244,6 +244,17 @@ subcommand is always available.
   if the pin is dropped, so coverage cannot silently return to zero.
   job.json/job.log stay the system of record; rollback is
   `CLOWN_DISABLE_JOB_WAKEUP=1`.
+  **Self-sufficient wakes** (#251 piece 2): the hook's output is teed into
+  ringmaster's spool (2a) so `status --tail`/`tail -f` show a running job, and
+  the terminal emit attaches the rendered verdict ladder as a
+  `madder://blobs/<digest>` via `done --resource` (2b, `storeResultBlob`).
+  Resource and `result_ref` are **alternatives**: with a blob the blob IS the
+  result, so `result_ref` is only emitted as the fallback for a build with no
+  madder pin. Blob failures degrade to no attachment and are logged — the job
+  has already finished, so failing a wake over a missing attachment would
+  trade a working notification for none. Note plain `ringmaster read` renders
+  attachments as a count (`· 2 resource(s)`); `--json` is needed to get the
+  URIs.
 - **Dynamic system-prompt fragment** (spinclass#187, clown plugin protocol
   RFC-0002 §5, `internal/sysprompt`): `serve` advertises an MCP `prompts`
   capability and answers `prompts/get` for the well-known `system-prompt-append`

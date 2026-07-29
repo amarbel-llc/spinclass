@@ -118,13 +118,25 @@ func SpoolPath(ctx context.Context, id string) (string, error) {
 // FinishJob appends the job's terminal record (state is one of clown
 // RFC-0009 §5's terminal types), waking the target session. Empty message and
 // resultRef are omitted.
-func FinishJob(ctx context.Context, id, state, message, resultRef string) error {
+//
+// resources are attached by reference via `--resource` (repeatable), which is
+// how a wake carries its actual result rather than a pointer back at another
+// tool (spinclass#251). Each is a URI the receiver fetches — in practice a
+// `madder://blobs/<digest>` holding the rendered verdict ladder. Empty entries
+// are skipped, so a caller that failed to produce a blob can pass "" without
+// branching.
+func FinishJob(ctx context.Context, id, state, message, resultRef string, resources ...string) error {
 	args := []string{"done", id, "--state", state}
 	if message != "" {
 		args = append(args, "--message", message)
 	}
 	if resultRef != "" {
 		args = append(args, "--result-ref", resultRef)
+	}
+	for _, r := range resources {
+		if r != "" {
+			args = append(args, "--resource", r)
+		}
 	}
 	_, err := run(ctx, args...)
 	return err

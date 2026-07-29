@@ -149,6 +149,69 @@ func TestRingmasterJobLifecycleContract(t *testing.T) {
 	}
 }
 
+// A terminal record can carry its result by reference (#251 piece 2b). Before
+// that, spinclass's only pointer was `result_ref: "spinclass
+// session-job-status"` — a wake telling the reader to call another tool.
+//
+// Worth driving against the real binary rather than a stub for the specific
+// reason that a stub cannot reject a flag: `--resource` is repeatable and
+// takes a URI, and the only way to know ringmaster parses our argv the way we
+// think is to hand it to ringmaster and read the journal back.
+func TestRingmasterDoneAttachesResources(t *testing.T) {
+	realRingmaster(t)
+	ctx := context.Background()
+
+	id, err := StartJob(ctx, "merge", Source)
+	if err != nil {
+		t.Fatalf("StartJob: %v", err)
+	}
+
+	// Two attachments, since the flag is documented as repeatable and
+	// spinclass may grow a second one (hook output alongside the verdict
+	// ladder). Digests here are synthetic — ringmaster records the URI and
+	// does not resolve it, so no blob store is needed.
+	first := "madder://blobs/blake2b256-aaaa"
+	second := "madder://blobs/blake2b256-bbbb"
+	if err := FinishJob(ctx, id, "succeeded", "merge succeeded", "", first, second); err != nil {
+		t.Fatalf("FinishJob with resources: %v", err)
+	}
+
+	// --json is required to see the URIs at all: plain `read` renders the
+	// notification-line form, which summarizes attachments as a count
+	// ("· 2 resource(s)") rather than listing them. Worth knowing for #251 —
+	// an agent reading only the wake line learns that a result is attached
+	// and how many, but must go to the JSON to fetch one.
+	records := ringmasterOut(t, "read", "--job", id, "--json")
+	for _, want := range []string{first, second} {
+		if !strings.Contains(records, want) {
+			t.Errorf("journal did not carry attached resource %q;\ngot:\n%s", want, records)
+		}
+	}
+}
+
+// Empty resource entries must be skipped rather than passed through as an
+// empty --resource value. runner.go relies on this: when no madder pin exists
+// there is no blob, and it passes "" instead of branching at the call site. If
+// that reached ringmaster as a flag with an empty argument it could be a usage
+// error, turning a routine degrade into a lost wake.
+func TestRingmasterDoneSkipsEmptyResources(t *testing.T) {
+	realRingmaster(t)
+	ctx := context.Background()
+
+	id, err := StartJob(ctx, "check", Source)
+	if err != nil {
+		t.Fatalf("StartJob: %v", err)
+	}
+	if err := FinishJob(ctx, id, "succeeded", "check succeeded", "spinclass session-job-status", ""); err != nil {
+		t.Fatalf("FinishJob with an empty resource: %v", err)
+	}
+
+	records := ringmasterOut(t, "read", "--job", id)
+	if !strings.Contains(records, "succeeded") {
+		t.Errorf("terminal record missing after an empty-resource emit;\ngot:\n%s", records)
+	}
+}
+
 // spool-path is a pure path computation, NOT a lookup: ringmaster(1) documents
 // that it creates the channel directory but leaves the spool file to the
 // producer, and only a *malformed* job-id is an error (exit 2). An id for a job

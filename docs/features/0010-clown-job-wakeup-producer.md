@@ -245,6 +245,22 @@ ringmaster records no worker PID by design), which in turn is gated on the
 pre-merge hook's teardown actually being prompt (spinclass#188). Not decided;
 tracked in #251.
 
+**Piece 2 is done** (2a `96469e0`, 2b spinclass#251). The hook's output is teed
+into ringmaster's spool, and the terminal emit attaches the rendered verdict
+ladder as a `madder://blobs/<digest>` through `done --resource` instead of the
+self-referential `result_ref`. The two are alternatives rather than companions:
+where a blob exists it *is* the result, so `result_ref` survives only as the
+fallback for a build with no madder pin. Both are best-effort — a failed blob
+write degrades to no attachment and logs, because the job has already finished
+and its result is durable in `job.json`, so failing the wake over a missing
+attachment would trade a working notification for none.
+
+One contract detail found by driving the real binary: plain `ringmaster read`
+renders attachments as a count (`· 2 resource(s)`) rather than listing them;
+`--json` is required to recover the URIs. So an agent reading only the wake
+line learns *that* a result is attached and how many, and must go to the JSON
+to fetch one.
+
 One prerequisite that *was* blocking it has cleared. Retirement would sharply
 raise spinclass's reliance on the ringmaster contract — today a silent upstream
 change loses wakes (recoverable: `job.json` is still the record and
