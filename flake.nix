@@ -107,8 +107,6 @@
         tap = {
           follows = "madder/tap";
           inputs = {
-            treefmt-nix.follows = "igloo/treefmt-nix";
-            gomod2nix.inputs.flake-utils.follows = "utils";
           };
         };
       };
