@@ -475,6 +475,114 @@ debug-hook-pretooluse:
 # (spinclass#169): a spawned worker shows CLOWN_SESSION_ID = the DRIVER's
 # key while SPINCLASS_SESSION_ID = the worker's key (they should match).
 #
+# Exercise #250's base-branch gate against the INSTALLED binary in a throwaway
+# repo, rather than the nix-built one the bats lane uses. The distinction is the
+# point: a merge validates code the merging process is not itself running, so
+# "the tests pass" and "the thing on your PATH does this" are separate claims.
+#
+# Sets up the two defects #250 fixes at once — a checkout parked on an unrelated
+# branch AND behind its origin — so a session cut from HEAD would miss the
+# upstream commit twice over. Everything lives under .tmp/ and is removed after.
+#
+# verify #250's freshened base end-to-end against the installed sc
+[group('debug')]
+debug-stale-base:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    bin="${SPINCLASS_BIN:-spinclass}"
+    root="$(mktemp -d "$PWD/.tmp/stale-base-XXXXXX")"
+    trap 'rm -rf "$root"' EXIT
+
+    git init -q --bare --initial-branch=master "$root/upstream.git"
+    git init -q --initial-branch=master "$root/seed"
+    git -C "$root/seed" commit -q --allow-empty -m "initial"
+    git -C "$root/seed" remote add origin "$root/upstream.git"
+    git -C "$root/seed" push -q -u origin master
+
+    git clone -q "$root/upstream.git" "$root/checkout"
+
+    # Another session lands work upstream.
+    git clone -q "$root/upstream.git" "$root/other"
+    git -C "$root/other" commit -q --allow-empty -m "upstream work"
+    git -C "$root/other" push -q origin master
+    tip=$(git -C "$root/other" rev-parse HEAD)
+
+    # The operator leaves their checkout somewhere else entirely.
+    git -C "$root/checkout" checkout -q -b unrelated
+    git -C "$root/checkout" commit -q --allow-empty -m "work nobody asked for"
+    unrelated=$(git -C "$root/checkout" rev-parse HEAD)
+
+    echo "upstream tip:      $tip"
+    echo "checkout HEAD:     $unrelated (on branch 'unrelated', behind origin)"
+    echo
+    ( cd "$root/checkout" && "$bin" --format tap start --no-attach )
+    echo
+
+    wt=$(ls -d "$root/checkout/.worktrees"/*/ 2>/dev/null | head -1)
+    [ -n "$wt" ] || { echo "FAIL: no worktree created"; exit 1; }
+
+    if git -C "$wt" merge-base --is-ancestor "$tip" HEAD; then
+      echo "PASS: session contains the upstream commit"
+    else
+      echo "FAIL: session is missing the upstream commit — it was cut from a stale base"
+      exit 1
+    fi
+    if git -C "$wt" merge-base --is-ancestor "$unrelated" HEAD; then
+      echo "FAIL: session inherited the 'unrelated' branch — it was cut from HEAD"
+      exit 1
+    else
+      echo "PASS: session did not inherit the checkout's parked branch"
+    fi
+    if [ "$(git -C "$root/checkout" rev-parse refs/heads/master)" = "$tip" ]; then
+      echo "PASS: local master was fast-forwarded, not merely read"
+    else
+      echo "FAIL: local master did not move"
+      exit 1
+    fi
+    if [ "$(git -C "$root/checkout" branch --show-current)" = "unrelated" ]; then
+      echo "PASS: the checkout stayed where the operator left it"
+    else
+      echo "FAIL: the checkout was moved off 'unrelated'"
+      exit 1
+    fi
+
+# Inspect what a spinclass async job looks like from ringmaster's side rather
+# than spinclass's own job.json — the two are different surfaces and #251 turns
+# on whether the ringmaster one is good enough to retire ours. Checks both
+# halves of #251 piece 2 at once: a populated spool (`status --tail` shows live
+# hook output instead of the `spool_bytes: 0` the issue reports) and a terminal
+# record carrying its result by reference.
+#
+# Note plain `ringmaster read` renders attachments as a count, so the URIs only
+# appear under --json; the blob fetch below is what proves the reference
+# actually resolves rather than merely being recorded.
+#
+# inspect a ringmaster job: spool tail, journal records, and any attached blobs
+[group('debug')]
+debug-ringmaster-job job tail="20":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "=== ringmaster status (spool tail {{ tail }}) ==="
+    ringmaster status {{ quote(job) }} --tail {{ tail }} || echo "(status failed)"
+    echo
+    echo "=== journal records (--json) ==="
+    records=$(ringmaster read --job {{ quote(job) }} --json) || { echo "(read failed)"; exit 1; }
+    printf '%s\n' "$records" | jq . 2>/dev/null || printf '%s\n' "$records"
+    echo
+    echo "=== attached resources ==="
+    # Scraped rather than jq-pathed so this keeps working if the record shape
+    # shifts — the point is whether a URI is there and resolves, not its key.
+    uris=$(printf '%s\n' "$records" | grep -oE 'madder://blobs/[A-Za-z0-9-]+' | sort -u)
+    if [ -z "$uris" ]; then
+      echo "(none attached)"
+      exit 0
+    fi
+    for uri in $uris; do
+      echo "--- $uri ---"
+      madder cat "${uri#madder://blobs/}" || echo "(blob fetch FAILED — the wake recorded a reference that does not resolve)"
+      echo
+    done
+
 # map live processes' SPINCLASS_SESSION_ID against their CLOWN_SESSION_ID
 [group('debug')]
 debug-session-env-map:
