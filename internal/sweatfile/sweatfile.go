@@ -74,6 +74,7 @@ type Hooks struct {
 	InactivityTimeout          *string `toml:"inactivity-timeout"`
 	PostMergeTimeout           *string `toml:"post-merge-timeout"`
 	AutoRebuildOnResume        *bool   `toml:"auto-rebuild-on-resume"`
+	AllowStaleBase             *bool   `toml:"allow-stale-base"`
 }
 
 // Sysprompt configures the dynamic system-prompt fragment spinclass
@@ -480,6 +481,21 @@ func (sf Sweatfile) AutoRebuildOnResume() bool {
 	return sf.Hooks != nil &&
 		sf.Hooks.AutoRebuildOnResume != nil &&
 		*sf.Hooks.AutoRebuildOnResume
+}
+
+// AllowStaleBase reports whether [hooks].allow-stale-base is true. When set,
+// session creation proceeds even though the default branch could not be
+// confirmed current — an unreachable remote, a dirty checkout blocking the
+// fast-forward, a diverged local default (spinclass#250, internal/basebranch).
+//
+// This is the persistent half of the override; `sc start --allow-stale-base` is
+// the per-invocation half. There is deliberately no equivalent MCP tool
+// parameter: a spawned agent must not be able to wave away its own stale
+// toolchain, so opting out stays a decision the repo's owner records here.
+func (sf Sweatfile) AllowStaleBase() bool {
+	return sf.Hooks != nil &&
+		sf.Hooks.AllowStaleBase != nil &&
+		*sf.Hooks.AllowStaleBase
 }
 
 func (sf Sweatfile) DisableNixGCEnabled() bool {

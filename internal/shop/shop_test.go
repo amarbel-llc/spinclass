@@ -136,7 +136,7 @@ func TestCreateTapNewWorktreeErrorPath(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	_, err := Create(&buf, rp, false, "tap", nil)
+	_, err := Create(&buf, rp, CreateOpts{Format: "tap"}, nil)
 	if err == nil {
 		t.Error("expected error when creating worktree in non-git dir, got nil")
 	}
@@ -152,7 +152,7 @@ func TestCreateTapSkipExisting(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if _, err := Create(&buf, rp, false, "tap", nil); err != nil {
+	if _, err := Create(&buf, rp, CreateOpts{Format: "tap"}, nil); err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
@@ -193,16 +193,25 @@ func TestCreateTapNewWorktree(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if _, err := Create(&buf, rp, false, "tap", nil); err != nil {
+	if _, err := Create(&buf, rp, CreateOpts{Format: "tap"}, nil); err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
 	got := buf.String()
-	if !strings.Contains(got, "ok 1 - create") {
-		t.Errorf("expected ok line, got: %q", got)
+	// Creating fresh emits two points: the base-branch step (skipped here — the
+	// fixture repo has no remote) and the create itself. A self-owned writer
+	// therefore closes with a trailing plan rather than a PlanAhead, since the
+	// count depends on whether a worktree is actually being created.
+	// The branch name is deliberately not asserted: it comes from the host's
+	// init.defaultBranch, which differs across environments.
+	if !strings.Contains(got, "ok 1 - base repo") || !strings.Contains(got, "SKIP no remote configured") {
+		t.Errorf("expected base SKIP line, got: %q", got)
 	}
-	if !strings.Contains(got, "1..1") {
-		t.Errorf("expected plan line 1..1, got: %q", got)
+	if !strings.Contains(got, "ok 2 - create") {
+		t.Errorf("expected create ok line, got: %q", got)
+	}
+	if !strings.Contains(got, "1..2") {
+		t.Errorf("expected plan line 1..2, got: %q", got)
 	}
 }
 
@@ -219,7 +228,7 @@ func TestCreateSharedWriter(t *testing.T) {
 	tw := tap.NewWriter(&buf)
 	tw.PlanAhead(2)
 
-	if _, err := Create(&buf, rp, false, "tap", tw); err != nil {
+	if _, err := Create(&buf, rp, CreateOpts{Format: "tap"}, tw); err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
@@ -297,7 +306,7 @@ func TestNewTapExistingWorktree(t *testing.T) {
 
 	mock := &mockExecutor{}
 	var buf bytes.Buffer
-	err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", false, false, false)
+	err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", false, false, false, false)
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
@@ -318,14 +327,16 @@ func TestNewTapExistingWorktree(t *testing.T) {
 		t.Errorf("expected plan 1..3, got: %q", got)
 	}
 
-	// Pull test point (no upstream -> SKIP)
-	if !strings.Contains(got, "ok 1 - pull repo # SKIP no upstream") {
-		t.Errorf("expected pull SKIP test point, got: %q", got)
+	// Create test point (existing worktree -> SKIP)
+	if !strings.Contains(got, "ok 1 - create feature-tap # SKIP") {
+		t.Errorf("expected create SKIP test point, got: %q", got)
 	}
 
-	// Create test point (existing worktree -> SKIP)
-	if !strings.Contains(got, "ok 2 - create feature-tap # SKIP") {
-		t.Errorf("expected create SKIP test point, got: %q", got)
+	// Base-branch test point. On an existing worktree this runs AFTER create,
+	// since whether to freshen at all depends on create reporting that the
+	// worktree already existed. A repo with no remote skips it.
+	if !strings.Contains(got, "ok 2 - base repo") || !strings.Contains(got, "SKIP no remote configured") {
+		t.Errorf("expected base SKIP test point, got: %q", got)
 	}
 
 	// Close test point
@@ -369,7 +380,7 @@ func TestNewNoAttach(t *testing.T) {
 
 	mock := &mockExecutor{}
 	var buf bytes.Buffer
-	err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", true, true, false)
+	err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", true, true, false, false)
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
@@ -381,14 +392,15 @@ func TestNewNoAttach(t *testing.T) {
 		t.Errorf("expected exactly one TAP version line, got: %q", got)
 	}
 
-	// Pull test point (no upstream -> SKIP)
-	if !strings.Contains(got, "ok 1 - pull repo # SKIP no upstream") {
-		t.Errorf("expected pull SKIP test point, got: %q", got)
+	// Create test point (existing worktree -> SKIP)
+	if !strings.Contains(got, "ok 1 - create feature-dry # SKIP") {
+		t.Errorf("expected create SKIP test point, got: %q", got)
 	}
 
-	// Create test point (existing worktree -> SKIP)
-	if !strings.Contains(got, "ok 2 - create feature-dry # SKIP") {
-		t.Errorf("expected create SKIP test point, got: %q", got)
+	// Base-branch test point (no remote -> SKIP), emitted after create on the
+	// already-exists path.
+	if !strings.Contains(got, "ok 2 - base repo") || !strings.Contains(got, "SKIP no remote configured") {
+		t.Errorf("expected base SKIP test point, got: %q", got)
 	}
 
 	// Attach test point (dry run -> SKIP with command diagnostic)
@@ -503,7 +515,7 @@ func TestAttachCallsExecutorWithCorrectArgs(t *testing.T) {
 
 	mock := &mockExecutor{}
 	var buf bytes.Buffer
-	err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", false, true, false)
+	err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", false, true, false, false)
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
@@ -581,7 +593,7 @@ func TestAttachPreservesFieldsItDoesNotOwn(t *testing.T) {
 	}
 	mock := &mockExecutor{}
 	var buf bytes.Buffer
-	if err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", false, false, false); err != nil {
+	if err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", false, false, false, false); err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
 
@@ -667,7 +679,7 @@ func TestNewMergeOnCloseCleanWorktree(t *testing.T) {
 	var buf bytes.Buffer
 
 	// mergeOnClose=true, noAttach=false (Attach returns immediately from mock)
-	err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", true, false, false)
+	err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", true, false, false, false)
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}

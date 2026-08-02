@@ -48,13 +48,14 @@ import (
 // Spec is the fully-parsed `sc run` invocation. Exactly one of Util / Script
 // is non-empty (ParseArgs enforces this).
 type Spec struct {
-	Description string
-	NoMerge     bool
-	NoClose     bool
-	LocalOnly   bool
-	Format      string   // global --format value (auto/viewport/plain/ndjson)
-	Util        []string // `-- <util> [args...]` form
-	Script      []byte   // stdin-script form (shebang-aware)
+	Description    string
+	NoMerge        bool
+	NoClose        bool
+	LocalOnly      bool
+	AllowStaleBase bool     // --allow-stale-base: create even from an unverified default branch
+	Format         string   // global --format value (auto/viewport/plain/ndjson)
+	Util           []string // `-- <util> [args...]` form
+	Script         []byte   // stdin-script form (shebang-aware)
 }
 
 // Run executes the full lifecycle and returns the process exit code to
@@ -129,7 +130,7 @@ func Run(spec Spec) (exitCode int, err error) {
 		Description: rp.Description,
 		Env:         merged.SessionEnv(),
 	}
-	if aerr := shop.Attach(io.Discard, sexec, rp, merged, "", false, true /*noAttach*/, false); aerr != nil {
+	if aerr := shop.Attach(io.Discard, sexec, rp, merged, "", false, true /*noAttach*/, false, spec.AllowStaleBase); aerr != nil {
 		return 1, aerr
 	}
 
@@ -376,7 +377,8 @@ func nonzero(code int) int {
 // ParseArgs splits the passthrough argv of `sc run` into a Spec. Grammar:
 //
 //	[--description D | -d D | --description=D] [--no-merge] [--no-close]
-//	[--local-only] [--format F | --format=F]  ( -- <util> [args...] | <stdin script> )
+//	[--local-only] [--allow-stale-base] [--format F | --format=F]
+//	( -- <util> [args...] | <stdin script> )
 //
 // Flags are hand-parsed (the command uses PassthroughArgs, like `sc exec`) up
 // to a `--`; everything after `--` is the util argv. With no `--`, a script is
@@ -401,6 +403,9 @@ func ParseArgs(args []string, stdin io.Reader) (Spec, error) {
 			i++
 		case a == "--local-only":
 			spec.LocalOnly = true
+			i++
+		case a == "--allow-stale-base":
+			spec.AllowStaleBase = true
 			i++
 		case a == "--description" || a == "-d":
 			if i+1 >= len(args) {

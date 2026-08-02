@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -29,6 +30,23 @@ func Run(repoPath string, args ...string) (string, error) {
 func RunEnv(repoPath string, env []string, args ...string) (string, error) {
 	cmdArgs := append([]string{"-C", repoPath}, args...)
 	cmd := exec.Command("git", cmdArgs...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return strings.TrimSpace(string(out)), fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// RunEnvContext is RunEnv bound to ctx: the git subprocess is killed once ctx
+// is done. Every other runner here uses exec.Command with no deadline, which is
+// fine for local plumbing but not for anything that talks to a remote — see
+// FetchContext.
+func RunEnvContext(ctx context.Context, repoPath string, env []string, args ...string) (string, error) {
+	cmdArgs := append([]string{"-C", repoPath}, args...)
+	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)
 	}
@@ -68,6 +86,44 @@ func RevParse(repoPath, ref string) (string, error) {
 // repo (or worktree) at repoPath. It errors when no origin remote exists.
 func RemoteURL(repoPath string) (string, error) {
 	return Run(repoPath, "remote", "get-url", "origin")
+}
+
+// Remotes returns the repo's configured remote names, or nil when it has none.
+// A repo with no remote has no upstream it can be stale against, which is the
+// first thing any freshness check has to establish.
+func Remotes(repoPath string) []string {
+	out, err := Run(repoPath, "remote")
+	if err != nil || out == "" {
+		return nil
+	}
+	return strings.Split(out, "\n")
+}
+
+// FetchContext updates repoPath's remote-tracking ref for branch from remote,
+// bounded by ctx.
+//
+// The refspec is spelled out rather than relying on `git fetch <remote>
+// <branch>` to update the tracking ref as a side effect: that only happens when
+// remote.<name>.fetch happens to cover the ref, and callers read the tracking
+// ref back to classify ancestry, so it has to be updated unconditionally.
+// Naming the destination also keeps the write off any LOCAL branch, so git's
+// refusal to update a checked-out branch can never apply here. The leading `+`
+// is the conventional force for a remote-tracking ref — it lets an upstream
+// history rewrite be recorded and still touches no local branch.
+//
+// Every interactive credential path is disabled. An ssh passphrase prompt and a
+// git credential helper both read /dev/tty rather than stdin, so a nil Stdin is
+// NOT protection — and a hang here is close to undiagnosable: under
+// spawn-session stdio is a log file, and the only symptom is the hello deadline
+// expiring with nothing to show for it.
+func FetchContext(ctx context.Context, repoPath, remote, branch string) (string, error) {
+	refspec := "+refs/heads/" + branch + ":refs/remotes/" + remote + "/" + branch
+	return RunEnvContext(ctx, repoPath, []string{
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_ASKPASS=/bin/false",
+		"SSH_ASKPASS=/bin/false",
+		"GIT_SSH_COMMAND=ssh -o BatchMode=yes",
+	}, "fetch", "--no-tags", remote, refspec)
 }
 
 func CommitsAhead(worktreePath, base, branch string) int {
@@ -182,6 +238,57 @@ func BranchExists(repoPath, branch string) bool {
 func RemoteBranchExists(repoPath, branch string) bool {
 	_, err := Run(repoPath, "rev-parse", "--verify", "refs/remotes/origin/"+branch)
 	return err == nil
+}
+
+// BranchWorktree returns the absolute path of the worktree that currently has
+// branch checked out, or "" when none does.
+//
+// Backed by `git worktree list --porcelain`, whose records are blank-line
+// separated and always open with `worktree <path>`. A `branch refs/heads/<name>`
+// line appears only when a branch is actually checked out, so detached and bare
+// records never match — which is exactly what keeps spinclass's own transient
+// build and landing worktrees (created via WorktreeAddDetached) from being
+// mistaken for a holder of the branch they were cut from.
+//
+// Callers should use the returned path directly rather than comparing it
+// against a path of their own: git reports its own canonicalization, which
+// need not match a caller's string form of the same directory.
+func BranchWorktree(repoPath, branch string) (string, error) {
+	out, err := Run(repoPath, "worktree", "list", "--porcelain")
+	if err != nil {
+		return "", err
+	}
+	want := "branch refs/heads/" + branch
+	current := ""
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			current = strings.TrimPrefix(line, "worktree ")
+		case line == want:
+			return current, nil
+		}
+	}
+	return "", nil
+}
+
+// BranchSetTo points refs/heads/<branch> at target (`git branch -f`).
+//
+// The caller MUST have established that the move is a fast-forward first: git
+// branch -f does not check, and nothing in this package should be able to
+// rewind a branch by accident. git does refuse when branch is checked out in
+// some worktree, but treat that as a backstop rather than the guard — a caller
+// is expected to have routed the checked-out case to MergeFFOnly already.
+func BranchSetTo(repoPath, branch, target string) error {
+	_, err := Run(repoPath, "branch", "-f", branch, target)
+	return err
+}
+
+// MergeFFOnly runs `git -C dir merge --ff-only ref`, advancing dir's
+// checked-out branch without ever writing a merge commit. It fails when the
+// move would not be a fast-forward, and when the working tree has changes in
+// the way.
+func MergeFFOnly(dir, ref string) (string, error) {
+	return Run(dir, "merge", "--ff-only", ref)
 }
 
 func DefaultBranch(repoPath string) (string, error) {

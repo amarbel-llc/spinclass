@@ -102,8 +102,18 @@ func isCeiling(dir string, ceilings []string) bool {
 // Create creates a new git worktree and applies sweatfile configuration.
 // If existingBranch is non-empty, the worktree checks out that branch
 // instead of creating a new one from the directory name.
+//
+// base, when non-empty, is the commit-ish the new branch is created at. Empty
+// means repoPath's HEAD, which is git's own default for `worktree add -b` and
+// therefore whatever branch that checkout happens to be sitting on — fine for a
+// checkout parked on the default branch, silently wrong for one parked
+// anywhere else (spinclass#250). Callers that care resolve a base via
+// internal/basebranch and pass it here; "" remains the correct fallback for
+// every case where no default branch could be resolved. Ignored entirely when
+// existingBranch is set, since that path adopts a branch rather than cutting
+// one.
 func Create(
-	repoPath, worktreePath, existingBranch string,
+	repoPath, worktreePath, existingBranch, base string,
 ) (sweatfile.Hierarchy, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -132,7 +142,11 @@ func Create(
 		// under the fresh-session path it would replay stale (possibly
 		// unmerged) history in a supposedly new worktree (#207).
 		branch := filepath.Base(worktreePath)
-		if err := git.RunPassthrough(repoPath, "worktree", "add", "-b", branch, worktreePath); err != nil {
+		args := []string{"worktree", "add", "-b", branch, worktreePath}
+		if base != "" {
+			args = append(args, base)
+		}
+		if err := git.RunPassthrough(repoPath, args...); err != nil {
 			return sweatfile.Hierarchy{}, fmt.Errorf("git worktree add: %w", err)
 		}
 	}

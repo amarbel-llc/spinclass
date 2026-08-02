@@ -14,6 +14,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/shop"
 	"code.linenisgreat.com/spinclass/internal/spawnhandshake"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 )
@@ -62,12 +63,18 @@ func Launch(home, repoPath, driverKey, brief, desc, model string, deadline time.
 	// checked out) sweatfile layer, but that layer is the repo sweatfile
 	// checked out fresh from the default branch — same content the repo
 	// layer already contributed.
-	argv, window, sessionEnv, err := renderSpawn(home, rp, brief, model)
+	argv, window, sessionEnv, merged, err := renderSpawn(home, rp, brief, model)
 	if err != nil {
 		return Result{}, err
 	}
 
-	if _, err := shop.Create(io.Discard, rp, false, "", nil); err != nil {
+	// The worker repo's own sweatfile decides whether a stale base is
+	// tolerable. There is deliberately no spawn-session parameter for it: a
+	// driver agent must not be able to wave away its worker's stale toolchain,
+	// so only the repo's owner can opt out (spinclass#250).
+	if _, err := shop.Create(io.Discard, rp, shop.CreateOpts{
+		AllowStaleBase: merged.AllowStaleBase(),
+	}, nil); err != nil {
 		return Result{}, fmt.Errorf("creating worker worktree: %w", err)
 	}
 
@@ -83,7 +90,9 @@ func Launch(home, repoPath, driverKey, brief, desc, model string, deadline time.
 // provider, same as Launch; "" means no model requested. Task 7's detached
 // fork reuses it over a worktree.CreateFrom-produced worktree.
 func LaunchExisting(home string, rp worktree.ResolvedPath, driverKey, brief, desc, model string, deadline time.Duration) (Result, error) {
-	argv, window, sessionEnv, err := renderSpawn(home, rp, brief, model)
+	// The merged config is unused here: this path runs over a worktree that
+	// already exists (a fork), so there is no base to resolve.
+	argv, window, sessionEnv, _, err := renderSpawn(home, rp, brief, model)
 	if err != nil {
 		return Result{}, err
 	}
@@ -99,18 +108,22 @@ func LaunchExisting(home string, rp worktree.ResolvedPath, driverKey, brief, des
 // BEFORE {prompt}/{dir} substitution; model == "" leaves the entry
 // unmodified. Safe to call before the worktree exists: LoadWorktreeHierarchy
 // treats a missing leaf sweatfile as an empty layer.
-func renderSpawn(home string, rp worktree.ResolvedPath, brief, model string) (argv, window []string, sessionEnv map[string]string, err error) {
+// It also returns the merged config itself, because the caller needs the
+// worker repo's [hooks].allow-stale-base before creating the worktree and
+// re-loading the hierarchy for one boolean would be a second full walk of the
+// sweatfile chain.
+func renderSpawn(home string, rp worktree.ResolvedPath, brief, model string) (argv, window []string, sessionEnv map[string]string, merged sweatfile.Sweatfile, err error) {
 	hierarchy, err := sweatfileio.LoadWorktreeHierarchy(home, rp.RepoPath, rp.AbsPath)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("loading worker sweatfile hierarchy: %w", err)
+		return nil, nil, nil, merged, fmt.Errorf("loading worker sweatfile hierarchy: %w", err)
 	}
-	merged := hierarchy.Merged
+	merged = hierarchy.Merged
 
 	entry := merged.SessionSpawnEntry()
 	if model != "" {
 		entry, err = SpliceModelFlag(entry, model, merged.SessionModelFlags())
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, merged, err
 		}
 	}
 
@@ -122,7 +135,7 @@ func renderSpawn(home string, rp worktree.ResolvedPath, brief, model string) (ar
 	// derives its identity from SPINCLASS_SESSION_ID in the exec env (workerEnv).
 	argv = SubstituteEntry(entry, brief, rp.AbsPath)
 	window = SubstituteWindow(merged.SessionSpawnWindow(), rp.SessionKey, rp.AbsPath)
-	return argv, window, merged.SessionEnv(), nil
+	return argv, window, merged.SessionEnv(), merged, nil
 }
 
 // startDetached launches argv in its OWN session (setsid) with stdio wired to

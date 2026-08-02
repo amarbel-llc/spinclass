@@ -146,6 +146,9 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if other.Hooks.AutoRebuildOnResume != nil {
 			merged.Hooks.AutoRebuildOnResume = other.Hooks.AutoRebuildOnResume
 		}
+		if other.Hooks.AllowStaleBase != nil {
+			merged.Hooks.AllowStaleBase = other.Hooks.AllowStaleBase
+		}
 	}
 
 	// [sysprompt]

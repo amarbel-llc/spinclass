@@ -1,6 +1,7 @@
 package shop
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 
+	"code.linenisgreat.com/spinclass/internal/basebranch"
 	"code.linenisgreat.com/spinclass/internal/close"
 	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/executor"
@@ -33,24 +35,33 @@ import (
 func Create(
 	writer io.Writer,
 	worktreePath worktree.ResolvedPath,
-	verbose bool,
-	format string,
+	opts CreateOpts,
 	tapWriter *tap.Writer,
 ) (bool, error) {
-	existed, err := createWorktree(worktreePath, verbose)
+	// The writer has to exist before createWorktree runs, since the base-branch
+	// step reports through it. A self-owned writer closes with a trailing
+	// Plan() rather than PlanAhead: the point count is conditional (the base
+	// step only runs when a worktree is actually being created), so it is not
+	// knowable up front.
+	ownWriter := false
+	if opts.Format == "tap" && tapWriter == nil {
+		tapWriter = tap.NewWriter(writer)
+		ownWriter = true
+	}
+
+	existed, err := createWorktree(worktreePath, opts, tapWriter)
 	if err != nil {
 		return existed, err
 	}
 
-	if format == "tap" {
-		if tapWriter == nil {
-			tapWriter = tap.NewWriter(writer)
-			tapWriter.PlanAhead(1)
-		}
+	if opts.Format == "tap" {
 		if existed {
 			tapWriter.Skip("create "+worktreePath.Branch, "already exists "+worktreePath.AbsPath)
 		} else {
 			tapWriter.Ok("create " + worktreePath.Branch + " " + worktreePath.AbsPath)
+		}
+		if ownWriter {
+			tapWriter.Plan()
 		}
 		return existed, nil
 	}
@@ -59,21 +70,81 @@ func Create(
 	return existed, nil
 }
 
-func createWorktree(worktreePath worktree.ResolvedPath, verbose bool) (bool, error) {
+// CreateOpts carries what Create needs beyond the resolved path.
+type CreateOpts struct {
+	Verbose bool
+	Format  string
+	// AllowStaleBase permits creating a session even when the repo's default
+	// branch could not be confirmed current. The caller resolves it from
+	// `--allow-stale-base` OR [hooks].allow-stale-base — two halves of one
+	// override — so this is already the final answer by the time it lands here.
+	AllowStaleBase bool
+}
+
+func createWorktree(worktreePath worktree.ResolvedPath, opts CreateOpts, tw *tap.Writer) (bool, error) {
 	existed := true
 
 	if _, err := os.Stat(worktreePath.AbsPath); os.IsNotExist(err) {
 		existed = false
-		result, err := worktree.Create(worktreePath.RepoPath, worktreePath.AbsPath, worktreePath.ExistingBranch)
+
+		// Freshen the default branch and resolve the base BEFORE anything
+		// touches the filesystem, so a refusal cannot leave a half-built
+		// worktree behind — the same ordering reason spawn.Launch validates its
+		// templates pre-create.
+		//
+		// This sits in createWorktree rather than in Attach because Attach is
+		// not the only way here: spawn.Launch calls Create directly, and a
+		// worker dispatched into an untouched sibling repo is the single most
+		// likely session to inherit a stale tree (spinclass#250). Gating at the
+		// shared funnel closes that by construction instead of by remembering.
+		//
+		// Skipped when adopting an existing branch (start-gh_pr): that path's
+		// base is the branch being adopted, by intent.
+		base := ""
+		if worktreePath.ExistingBranch == "" {
+			res, ferr := basebranch.Freshen(
+				context.Background(), worktreePath.RepoPath, opts.AllowStaleBase, true,
+			)
+			if ferr != nil {
+				return false, ferr
+			}
+			reportBase(tw, worktreePath.RepoPath, res)
+			base = res.BaseSha
+		}
+
+		result, err := worktree.Create(
+			worktreePath.RepoPath, worktreePath.AbsPath, worktreePath.ExistingBranch, base,
+		)
 		if err != nil {
 			return false, err
 		}
-		if verbose {
+		if opts.Verbose {
 			logSweatfileResult(result)
 		}
 	}
 
 	return existed, nil
+}
+
+// reportBase emits the base-branch step's test point. Successes and skips only:
+// a failure aborts creation and travels back as an error, which the caller
+// already surfaces, so a test point for it would report the same thing twice.
+func reportBase(tw *tap.Writer, repoPath string, res basebranch.Result) {
+	if tw == nil {
+		return
+	}
+	desc := "base " + filepath.Base(repoPath)
+	if res.Branch != "" {
+		desc += " " + res.Branch
+	}
+	if res.Action.Skipped() {
+		tw.Skip(desc, res.Reason)
+		return
+	}
+	if res.Reason != "" {
+		desc += " — " + res.Reason
+	}
+	tw.Ok(desc)
 }
 
 func logSweatfileResult(result sweatfile.Hierarchy) {
@@ -106,55 +177,34 @@ func logSweatfileResult(result sweatfile.Hierarchy) {
 	)
 }
 
-func pullMainWorktree(rp worktree.ResolvedPath, tw *tap.Writer) error {
-	label := "pull " + filepath.Base(rp.RepoPath)
-
-	if git.Upstream(rp.RepoPath) == "" {
-		if tw != nil {
-			tw.Skip(label, "no upstream")
-		}
-		return nil
-	}
-
-	porcelain := git.StatusPorcelain(rp.RepoPath)
-	if porcelain != "" {
-		if tw != nil {
-			tw.Skip(label, "dirty")
-		}
-		return nil
-	}
-
-	_, err := git.Pull(rp.RepoPath)
-	if err != nil {
-		if tw != nil {
-			tw.NotOk(label, map[string]string{
-				"message":  err.Error(),
-				"severity": "fail",
-			})
-		}
-		return err
-	}
-
-	if tw != nil {
-		tw.Ok(label)
-	}
-
-	return nil
-}
-
-func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sweatfile.Sweatfile, format string, mergeOnClose bool, noAttach bool, verbose bool) error {
+func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sweatfile.Sweatfile, format string, mergeOnClose bool, noAttach bool, verbose bool, allowStaleBase bool) error {
 	var tw *tap.Writer
 	if format == "tap" {
 		tw = tap.NewWriter(w)
 	}
 
-	if err := pullMainWorktree(rp, tw); err != nil {
+	// The CLI flag and the sweatfile knob are two spellings of one override, so
+	// resolve them here and hand the rest of the call chain a single answer.
+	allowStale := allowStaleBase || sf.AllowStaleBase()
+
+	existed, err := Create(w, rp, CreateOpts{
+		Verbose:        verbose,
+		Format:         format,
+		AllowStaleBase: allowStale,
+	}, tw)
+	if err != nil {
 		return err
 	}
 
-	existed, err := Create(w, rp, verbose, format, tw)
-	if err != nil {
-		return err
+	// Resuming an existing worktree still keeps the repo's default branch
+	// current — this replaces the old pull step, which pulled whatever branch
+	// the checkout happened to be on and so could advance a feature branch.
+	// Advisory here: refusing to re-enter a session that already exists because
+	// a remote is unreachable would be an obstruction, not a safeguard, so
+	// Freshen is called in its non-required mode and cannot return an error.
+	if existed {
+		res, _ := basebranch.Freshen(context.Background(), rp.RepoPath, allowStale, false)
+		reportBase(tw, rp.RepoPath, res)
 	}
 
 	tp := tap.TestPoint{

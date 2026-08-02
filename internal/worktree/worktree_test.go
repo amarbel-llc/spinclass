@@ -618,7 +618,7 @@ touch "$PWD/.madder/local/share/blob_stores/default/blob_store-config"
 	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv, prevDodder) })
 
 	wtPath := filepath.Join(parentDir, "wt")
-	if _, err := Create(repoDir, wtPath, ""); err != nil {
+	if _, err := Create(repoDir, wtPath, "", ""); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -686,7 +686,7 @@ func TestApplyWorktreeConfig_NoMadderEmbedNoChanges(t *testing.T) {
 	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv, prevDodder) })
 
 	wtPath := filepath.Join(parentDir, "wt")
-	if _, err := Create(repoDir, wtPath, ""); err != nil {
+	if _, err := Create(repoDir, wtPath, "", ""); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -733,7 +733,7 @@ esac
 	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv, prevDodder) })
 
 	wtPath := filepath.Join(parentDir, "wt")
-	if _, err := Create(repoDir, wtPath, ""); err != nil {
+	if _, err := Create(repoDir, wtPath, "", ""); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -830,7 +830,7 @@ func TestApplyWorktreeConfig_NoDodderEmbedNoChanges(t *testing.T) {
 	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv, prevDodder) })
 
 	wtPath := filepath.Join(parentDir, "wt")
-	if _, err := Create(repoDir, wtPath, ""); err != nil {
+	if _, err := Create(repoDir, wtPath, "", ""); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -945,7 +945,7 @@ func TestCreateReAllowsDirenvAfterCreateHookMutatesEnvrc(t *testing.T) {
 	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv, prevDodder) })
 
 	wtPath := filepath.Join(parentDir, "wt")
-	if _, err := Create(repoDir, wtPath, ""); err != nil {
+	if _, err := Create(repoDir, wtPath, "", ""); err != nil {
 		t.Fatalf("Create returned error (create hook should not fail on a mutated .envrc): %v", err)
 	}
 
@@ -1013,7 +1013,59 @@ func TestCreateFreshBranchRejectsExistingBranch(t *testing.T) {
 	// wtPath basename == the stale branch name, so `git worktree add` would
 	// derive (and, without -b, adopt) that branch.
 	wtPath := filepath.Join(parentDir, stale)
-	if _, err := Create(repoDir, wtPath, ""); err == nil {
+	if _, err := Create(repoDir, wtPath, "", ""); err == nil {
 		t.Fatalf("Create adopted existing branch %q instead of failing", stale)
+	}
+}
+
+// TestCreateBasesFreshBranchOnExplicitBase is the mechanism-layer assertion for
+// spinclass#250. `git worktree add -b` with no start-point bases the new branch
+// on HEAD, so a checkout parked on an unrelated branch silently hands that
+// branch's tree — and its flake.lock, and therefore its whole devShell — to
+// every session created from it. An explicit base fixes that; "" must keep
+// meaning git's default, since it stays the fallback whenever no default branch
+// could be resolved.
+func TestCreateBasesFreshBranchOnExplicitBase(t *testing.T) {
+	testgit.RequireGit(t)
+	t.Setenv("HOME", t.TempDir())
+	parentDir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", parentDir)
+	repoDir := filepath.Join(parentDir, "repo")
+	testgit.MustInit(t, repoDir)
+
+	prevMadder, prevDirenv, prevDodder := embeds.MadderBin(), embeds.DirenvBin(), embeds.DodderBin()
+	embeds.Set("", "", "")
+	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv, prevDodder) })
+
+	runGit := func(dir string, args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	mainSha := runGit(repoDir, "rev-parse", "HEAD")
+
+	// Park the checkout somewhere else entirely, ahead of the default branch.
+	runGit(repoDir, "checkout", "-q", "-b", "unrelated")
+	runGit(repoDir, "commit", "-q", "--allow-empty", "-m", "work nobody asked for")
+	unrelatedSha := runGit(repoDir, "rev-parse", "HEAD")
+
+	based := filepath.Join(parentDir, "based")
+	if _, err := Create(repoDir, based, "", mainSha); err != nil {
+		t.Fatalf("Create with a base: %v", err)
+	}
+	if got := runGit(based, "rev-parse", "HEAD"); got != mainSha {
+		t.Errorf("session branch is at %q, want the requested base %q", got, mainSha)
+	}
+
+	inherited := filepath.Join(parentDir, "inherited")
+	if _, err := Create(repoDir, inherited, "", ""); err != nil {
+		t.Fatalf("Create without a base: %v", err)
+	}
+	if got := runGit(inherited, "rev-parse", "HEAD"); got != unrelatedSha {
+		t.Errorf("with no base the session branch is at %q, want the checkout's HEAD %q", got, unrelatedSha)
 	}
 }

@@ -40,6 +40,7 @@ func registerSessionCommands(app *command.App) {
 			{Name: "description", Type: command.String, Description: "Freeform session description (quote multi-word strings)"},
 			{Name: "merge-on-close", Type: command.Bool, Description: "Auto-merge worktree into default branch on session close"},
 			{Name: "no-attach", Type: command.Bool, Description: "Create worktree but skip attaching"},
+			{Name: "allow-stale-base", Type: command.Bool, Description: "Create even when the default branch could not be confirmed current (offline, or a dirty/diverged checkout)"},
 		},
 		RunCLI: runStart,
 	})
@@ -107,6 +108,7 @@ func registerSessionCommands(app *command.App) {
 				"Success-path teardown is a 2×2 matrix over --no-merge and --no-close: default merges then tears down; --no-close merges but leaves the worktree/session; --no-merge skips the merge and closes only if no commits were produced (commits present ⇒ session left, never silently discarded); --no-merge --no-close leaves everything intact. " +
 				"An empty run (no commits ahead of the default branch) is a clean success, not a failure. Any step that exits nonzero leaves the worktree + session intact for inspection (clean up with `sc close`) and propagates a nonzero exit code. " +
 				"--local-only passes through to the merge step (skip the pull-before and push-after). " +
+				"--allow-stale-base creates the session even when the repo's default branch could not be confirmed current (offline, or a dirty/diverged checkout). " +
 				"Output uses the merge/check present stack: --format auto (viewport on a TTY, ndjson when piped) | viewport | plain | ndjson. " +
 				"Caveats (raw passthrough, like `sc exec`): util arguments after `--` that collide with spinclass's global flags are consumed before the `--`; flags must precede the `--`.",
 		},
@@ -500,6 +502,13 @@ type startArgs struct {
 	Description  string `json:"description"`
 	MergeOnClose bool   `json:"merge-on-close"`
 	NoAttach     bool   `json:"no-attach"`
+	// AllowStaleBase is CLI-only by construction: `start`, `resume`, and `run`
+	// register RunCLI handlers with no Run, and RegisterMCPToolsV1 skips those,
+	// so no MCP tool ever exposes this. That is the point — an agent must not
+	// be able to opt its own session out of a verified base (spinclass#250).
+	// The persistent equivalent is [hooks].allow-stale-base, which a repo owner
+	// sets deliberately.
+	AllowStaleBase bool `json:"allow-stale-base"`
 }
 
 func attachSession(resolvedPath worktree.ResolvedPath, args startArgs) error {
@@ -529,6 +538,7 @@ func attachSession(resolvedPath worktree.ResolvedPath, args startArgs) error {
 		args.MergeOnClose,
 		args.NoAttach,
 		args.Verbose,
+		args.AllowStaleBase,
 	)
 }
 
@@ -681,6 +691,11 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		Env:         merged.SessionEnv(),
 	}
 
+	// No --allow-stale-base on resume: the worktree already exists, so the
+	// base-branch step runs in its advisory mode and cannot fail the command.
+	// There is nothing for an override to override. The sweatfile knob is still
+	// honoured inside Attach, which is enough to silence the step entirely for
+	// a deliberately offline repo.
 	return shop.Attach(
 		os.Stdout,
 		exec,
@@ -690,5 +705,6 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		false,
 		p.NoAttach,
 		p.Verbose,
+		false,
 	)
 }

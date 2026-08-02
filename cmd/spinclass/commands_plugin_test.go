@@ -27,8 +27,8 @@ func TestBuildPluginCommandParams(t *testing.T) {
 	if cmd.Description.Short != "Start a JIRA session" {
 		t.Errorf("Short = %q", cmd.Description.Short)
 	}
-	if len(cmd.Params) != 4 {
-		t.Fatalf("expected 4 params (arg + 3 standard), got %d", len(cmd.Params))
+	if len(cmd.Params) != 5 {
+		t.Fatalf("expected 5 params (arg + 4 standard), got %d", len(cmd.Params))
 	}
 	arg := cmd.Params[0]
 	if arg.Name != "ticket" {
@@ -40,7 +40,7 @@ func TestBuildPluginCommandParams(t *testing.T) {
 	if arg.Completer == nil {
 		t.Error("arg.Completer should be non-nil")
 	}
-	wantNames := []string{"ticket", "description", "merge-on-close", "no-attach"}
+	wantNames := []string{"ticket", "description", "merge-on-close", "no-attach", "allow-stale-base"}
 	for i, want := range wantNames {
 		if cmd.Params[i].Name != want {
 			t.Errorf("Params[%d].Name = %q, want %q", i, cmd.Params[i].Name, want)

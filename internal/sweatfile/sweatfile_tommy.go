@@ -297,6 +297,12 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				_vHooksAutoRebuildOnResume.MarkConsumed()
 			}
 		}
+		if _vHooksAllowStaleBase, _ok := _vHooks.Get("allow-stale-base"); _ok && _vHooksAllowStaleBase.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksAllowStaleBase.Leaf); _xok {
+				hooksVal3.AllowStaleBase = &_x
+				_vHooksAllowStaleBase.MarkConsumed()
+			}
+		}
 		d.data.Hooks = hooksVal3
 	} else {
 		hooksVal3 := &Hooks{}
@@ -460,6 +466,13 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractBool(_vAutoRebuildOnResume.Leaf); _xok {
 				hooksVal3.AutoRebuildOnResume = &_x
 				_vAutoRebuildOnResume.MarkConsumed()
+			}
+		}
+		if _vAllowStaleBase, _ok := model.Get("allow-stale-base"); _ok && _vAllowStaleBase.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vAllowStaleBase.Leaf); _xok {
+				hooksVal3.AllowStaleBase = &_x
+				_vAllowStaleBase.MarkConsumed()
 			}
 		}
 		if _foundHooks {
@@ -991,6 +1004,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
+		if d.data.Hooks.AllowStaleBase != nil {
+			if err := cst.SetAny(tableNode, "allow-stale-base", *d.data.Hooks.AllowStaleBase); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
 	}
 	if d.data.Sysprompt != nil {
 		tableNode := cst.EnsureChildTable(d.cstDoc.Root(), d.cstDoc.Root(), "sysprompt")
@@ -1478,6 +1496,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vHooksAutoRebuildOnResume.MarkConsumed()
 			}
 		}
+		if _vHooksAllowStaleBase, _ok := _vHooks.Get("allow-stale-base"); _ok && _vHooksAllowStaleBase.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksAllowStaleBase.Leaf); _xok {
+				hooksVal3.AllowStaleBase = &_x
+				_vHooksAllowStaleBase.MarkConsumed()
+			}
+		}
 		data.Hooks = hooksVal3
 	} else {
 		hooksVal3 := &Hooks{}
@@ -1641,6 +1665,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractBool(_vAutoRebuildOnResume.Leaf); _xok {
 				hooksVal3.AutoRebuildOnResume = &_x
 				_vAutoRebuildOnResume.MarkConsumed()
+			}
+		}
+		if _vAllowStaleBase, _ok := sub.Get("allow-stale-base"); _ok && _vAllowStaleBase.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vAllowStaleBase.Leaf); _xok {
+				hooksVal3.AllowStaleBase = &_x
+				_vAllowStaleBase.MarkConsumed()
 			}
 		}
 		if _foundHooks {
@@ -2157,6 +2188,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if data.Hooks.AutoRebuildOnResume != nil {
 			if err := cst.SetAny(tableNode, "auto-rebuild-on-resume", *data.Hooks.AutoRebuildOnResume); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.Hooks.AllowStaleBase != nil {
+			if err := cst.SetAny(tableNode, "allow-stale-base", *data.Hooks.AllowStaleBase); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}
