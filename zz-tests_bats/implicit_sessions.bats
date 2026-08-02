@@ -7,26 +7,8 @@ setup() {
   setup_stubs
 }
 
-# Create a bare upstream and a clone checked out on master, with origin
-# tracking. Sets TEST_UPSTREAM (bare) and TEST_CHECKOUT (working clone on
-# master). The clone is the implicit "main checkout" the session attaches to.
-create_origin_checkout() {
-  export TEST_UPSTREAM="$BATS_TEST_TMPDIR/upstream.git"
-  git init --bare --initial-branch=master "$TEST_UPSTREAM"
-
-  local seed="$BATS_TEST_TMPDIR/seed"
-  git init --initial-branch=master "$seed"
-  echo "initial" >"$seed/file.txt"
-  git -C "$seed" add file.txt
-  git -C "$seed" commit -m "initial commit"
-  git -C "$seed" remote add origin "$TEST_UPSTREAM"
-  git -C "$seed" push -u origin master
-
-  export TEST_CHECKOUT="$BATS_TEST_TMPDIR/checkout"
-  git clone "$TEST_UPSTREAM" "$TEST_CHECKOUT"
-  git -C "$TEST_CHECKOUT" config branch.master.remote origin
-  git -C "$TEST_CHECKOUT" config branch.master.merge refs/heads/master
-}
+# create_origin_checkout now lives in common.bash — the stale-base suite needs
+# the same bare-upstream-plus-clone fixture.
 
 # Materialize a live implicit session at the given checkout. Writes the
 # per-randID state file directly (mirroring session.WriteImplicit's on-disk

@@ -79,6 +79,41 @@ create_repo() {
   git -C "$TEST_REPO" commit -m "initial commit"
 }
 
+# Create a bare upstream and a clone checked out on master, with origin
+# tracking. Sets TEST_UPSTREAM (bare) and TEST_CHECKOUT (working clone on
+# master). Only master exists, so the default branch resolves unambiguously.
+create_origin_checkout() {
+  export TEST_UPSTREAM="$BATS_TEST_TMPDIR/upstream.git"
+  git init --bare --initial-branch=master "$TEST_UPSTREAM"
+
+  local seed="$BATS_TEST_TMPDIR/seed"
+  git init --initial-branch=master "$seed"
+  echo "initial" >"$seed/file.txt"
+  git -C "$seed" add file.txt
+  git -C "$seed" commit -m "initial commit"
+  git -C "$seed" remote add origin "$TEST_UPSTREAM"
+  git -C "$seed" push -u origin master
+
+  export TEST_CHECKOUT="$BATS_TEST_TMPDIR/checkout"
+  git clone "$TEST_UPSTREAM" "$TEST_CHECKOUT"
+  git -C "$TEST_CHECKOUT" config branch.master.remote origin
+  git -C "$TEST_CHECKOUT" config branch.master.merge refs/heads/master
+}
+
+# Land a commit on the bare upstream's master from a throwaway clone, standing
+# in for another session's merge. Echoes the new upstream tip sha. Edits the
+# seeded file so the resulting fast-forward genuinely collides with local
+# modifications — an empty commit would fast-forward straight past a dirty tree.
+# Usage: tip=$(advance_upstream)
+advance_upstream() {
+  local work="$BATS_TEST_TMPDIR/upstream-work-$RANDOM"
+  git clone --quiet "$TEST_UPSTREAM" "$work"
+  echo "from upstream" >"$work/file.txt"
+  git -C "$work" commit --quiet -am "upstream work"
+  git -C "$work" push --quiet origin master
+  git -C "$work" rev-parse HEAD
+}
+
 # Create a worktree in the standard .worktrees/ location.
 # Usage: create_worktree <branch-name>
 # Sets WT_PATH to the worktree path.

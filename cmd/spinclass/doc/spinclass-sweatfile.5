@@ -826,6 +826,52 @@ External-tool version drift (e.g. a changed formatter binary behind an
 unchanged hook command) is not detected, since the config is unchanged.
 .B Merge:
 scalar override.
+.TP
+.B allow\-stale\-base
+Boolean.
+Permits creating a session even when the repo's default branch could not be
+confirmed current.
+.IP
+By default,
+.BR "sc start" ", " "sc run" ,
+.B spawn\-session
+and the
+.B [[start\-commands]]
+plugins fetch the default branch and fast\-forward the local copy before cutting
+the new branch from it, then pass that commit as an explicit start\-point.
+A stale base is not merely stale source:
+.B flake.lock
+is part of the tree, so it materializes a stale devShell and every tool pinned
+below it.
+.IP
+Three conditions refuse creation, and this knob (or the per\-invocation
+.BR \-\-allow\-stale\-base ,
+which
+.B spawn\-session
+deliberately does not expose) is the way past them: the remote is unreachable,
+a worktree holding the default branch has uncommitted changes that block the
+fast\-forward, or the local default branch has diverged from its upstream.
+A default branch that is merely
+.I ahead
+of upstream is not stale \(em it contains everything upstream has \(em and never
+refuses.
+Neither does a repo with no remote configured, nor one where
+.B main
+and
+.B master
+both exist and
+.B origin/HEAD
+does not break the tie; those fall back to the pre\-#250 behaviour of branching
+from
+.BR HEAD .
+.IP
+.B sc resume
+runs the same step advisorily and can never fail on it, so the knob only
+silences its report there.
+.B sc fork
+is excluded entirely \(em forking means \(dqbranch from here\(dq.
+.B Merge:
+scalar override.
 .SS [session\-entry]
 Controls what command is exec'd when attaching to a session, how
 detached worker sessions are launched, what environment is injected,

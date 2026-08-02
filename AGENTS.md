@@ -364,6 +364,32 @@ subcommand is always available.
   `cancelGrace` (10s) is the SIGKILL escalation for a hook that swallows
   SIGTERM. Deliberately **no `Setpgid`**: a group kill would reap the detached
   children FDR 0023 sanctions for slow post-merge deploys.
+- **Base-branch freshening at creation** (#250, `internal/basebranch`): a fresh
+  session's branch is cut from the repo's **default branch**, fetched and
+  fast-forwarded first, passed to `git worktree add -b` as an explicit sha.
+  Fixes two independent defects: `-b` with no start-point bases on **HEAD** (so
+  a checkout parked on a feature branch handed that branch to every session),
+  and only *some* paths freshened anything — `shop.Attach` pulled the main
+  worktree, but `spawn.Launch` calls `shop.Create` directly and so did nothing,
+  which is the case most likely to be stale. The retired `pullMainWorktree` was
+  also aimed wrong: it pulled the checkout's *current* branch (so it could
+  advance a feature branch) and skipped silently on a dirty tree. The gate lives
+  in `shop.createWorktree` — the single funnel below start/spawn/run — so the
+  spawn gap closes by construction. `sc fork` and `start-gh_pr` are excluded
+  (both have a base by intent). **Ahead of upstream is NOT staleness** (local
+  contains upstream; the state of every repo after a `--local-only` merge) and
+  never refuses. Unreachable, dirty-blocking-the-ff, and diverged do refuse,
+  overridable by `--allow-stale-base` or `[hooks].allow-stale-base`; there is
+  deliberately **no MCP parameter**, so a driver cannot wave away its worker's
+  stale toolchain. `sc resume` runs the same step advisorily and cannot fail on
+  it. Two mechanics worth not re-deriving: the fetch uses an explicit
+  `+refs/heads/<b>:refs/remotes/<r>/<b>` refspec (whether a bare
+  `git fetch <remote> <branch>` also updates the tracking ref depends on
+  `remote.<name>.fetch` covering it, and the ancestry check reads that ref
+  back), and it is context-bounded with `GIT_TERMINAL_PROMPT=0` +
+  `ssh -o BatchMode=yes` because ssh and credential helpers read `/dev/tty`, not
+  stdin — a nil `Stdin` is not protection, and a hang there surfaces only as a
+  spawn hello-deadline expiry with nothing to explain it.
 - **Setup staleness & `sc rebuild`** (`internal/setupfingerprint`): setup is
   applied **once at `sc start`** (`sc resume` does NOT re-apply), so it drifts.
   A fingerprint (`sha256(scheme · version+commit · pins · canonical-JSON(merged
