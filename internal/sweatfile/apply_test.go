@@ -131,9 +131,9 @@ func TestApplyClaudeSettings(t *testing.T) {
 	}
 
 	allowRaw, _ := permsMap["allow"].([]any)
-	if len(allowRaw) != 6 {
+	if len(allowRaw) != 5 {
 		t.Fatalf(
-			"expected 6 rules (3 passed + 3 scoped), got %d: %v",
+			"expected 5 rules (3 passed + 2 scoped), got %d: %v",
 			len(allowRaw),
 			allowRaw,
 		)
@@ -147,22 +147,24 @@ func TestApplyClaudeSettings(t *testing.T) {
 		}
 	}
 
-	// Last 3 are auto-injected scoped rules
+	// Last 2 are auto-injected scoped rules. There is deliberately no
+	// Write(...) rule: Edit(path) already covers every file-editing tool,
+	// and newer Claude Code rejects path-scoped Write rules at startup.
 	readRule, _ := allowRaw[3].(string)
 	editRule, _ := allowRaw[4].(string)
-	writeRule, _ := allowRaw[5].(string)
 
 	wantRead := "Read(" + dir + "/*)"
 	wantEdit := "Edit(" + dir + "/*)"
-	wantWrite := "Write(" + dir + "/*)"
 	if readRule != wantRead {
 		t.Errorf("read rule: got %q, want %q", readRule, wantRead)
 	}
 	if editRule != wantEdit {
 		t.Errorf("edit rule: got %q, want %q", editRule, wantEdit)
 	}
-	if writeRule != wantWrite {
-		t.Errorf("write rule: got %q, want %q", writeRule, wantWrite)
+	for _, rule := range allowRaw {
+		if s, _ := rule.(string); strings.HasPrefix(s, "Write(") {
+			t.Errorf("unexpected path-scoped Write rule: %q", s)
+		}
 	}
 }
 
@@ -186,9 +188,9 @@ func TestApplyClaudeSettingsEmpty(t *testing.T) {
 	permsMap, _ := doc["permissions"].(map[string]any)
 	allowRaw, _ := permsMap["allow"].([]any)
 
-	// Even with no passed rules, the 3 scoped rules are injected
-	if len(allowRaw) != 3 {
-		t.Fatalf("expected 3 scoped rules, got %d: %v", len(allowRaw), allowRaw)
+	// Even with no passed rules, the 2 scoped rules are injected
+	if len(allowRaw) != 2 {
+		t.Fatalf("expected 2 scoped rules, got %d: %v", len(allowRaw), allowRaw)
 	}
 }
 

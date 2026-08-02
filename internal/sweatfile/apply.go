@@ -546,11 +546,13 @@ func ApplyClaudeSettings(worktreePath string, sweatfile Sweatfile) error {
 		allRules = append(allRules, sweatfile.Claude.Allow...)
 	}
 
+	// Edit(path) covers every file-editing tool (Read/Edit/Write/MultiEdit/
+	// NotebookEdit); a path-scoped Write(...) rule is redundant and newer
+	// Claude Code rejects it at startup with a validation warning.
 	allRules = append(
 		allRules,
 		fmt.Sprintf("Read(%s/*)", worktreePath),
 		fmt.Sprintf("Edit(%s/*)", worktreePath),
-		fmt.Sprintf("Write(%s/*)", worktreePath),
 	)
 
 	permsMap["defaultMode"] = "acceptEdits"
