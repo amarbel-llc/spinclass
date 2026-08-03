@@ -24,12 +24,14 @@ package sysprompt
 import (
 	"context"
 	"embed"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/repoinfo"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
@@ -84,6 +86,12 @@ type Coordinates struct {
 	// entirely from local session state (no network) so it is safe before
 	// `initialize`; empty renders as an omitted line.
 	CoActiveSessions string
+	// ProtocolWarning is a one-line ⚠ notice, prepended to the fragment, when
+	// running under clown and this binary's linked jobwake ProtocolVersion does
+	// not match the host ringmaster's `version --protocol` (#26, RFC-0018) —
+	// the agent-visible half of the loud degrade. Empty when not under clown or
+	// on a clean match. Reads clown.CheckProtocol's memoized verdict.
+	ProtocolWarning string
 }
 
 //go:embed templates/*.md.tmpl
@@ -94,7 +102,41 @@ var fragmentTmpl = template.Must(template.ParseFS(templatesFS, "templates/*.md.t
 // Resolve discovers the current session's coordinates from the serve process's
 // environment and, for a main checkout, its cwd + git.
 func Resolve() Coordinates {
-	return resolve(os.Getenv, os.Getwd, fetchRepoInfo, loadDocIndex, loadCoActiveLine)
+	c := resolve(os.Getenv, os.Getwd, fetchRepoInfo, loadDocIndex, loadCoActiveLine)
+	// The ProtocolVersion warning is a process-global fact (from clown's
+	// memoized CheckProtocol), independent of the worktree/main-checkout split,
+	// so it is set here rather than threaded through resolve's injected
+	// loaders — keeping resolve's signature and its unit tests untouched.
+	c.ProtocolWarning = protocolWarning(context.Background())
+	return c
+}
+
+// protocolWarning returns a one-line ⚠ notice when running under clown and the
+// linked jobwake ProtocolVersion does not match the host ringmaster's
+// `version --protocol` (#26, RFC-0018) — the agent-visible half of the loud
+// degrade (serve-start also logs it to stderr/servelog). Empty when not under
+// clown or on a clean match. Reads clown.CheckProtocol's memoized verdict, so
+// it never re-shells.
+func protocolWarning(ctx context.Context) string {
+	if !clown.Enabled() {
+		return ""
+	}
+	ok, want, got, err := clown.CheckProtocol(ctx)
+	if ok {
+		return ""
+	}
+	if err != nil {
+		return fmt.Sprintf(
+			"⚠ ringmaster protocol could not be verified (this spinclass linked jobwake "+
+				"ProtocolVersion=%d): %v — per-job crash-liveness is disabled; async "+
+				"merge/check wakes are unaffected.", want, err,
+		)
+	}
+	return fmt.Sprintf(
+		"⚠ ringmaster protocol mismatch: this spinclass linked jobwake ProtocolVersion=%d "+
+			"but the host ringmaster reports %d — per-job crash-liveness is disabled until "+
+			"they match; async merge/check wakes are unaffected.", want, got,
+	)
 }
 
 // loadDocIndex is the production design-record index loader: it reads the
@@ -218,6 +260,12 @@ func Render(c Coordinates) (string, error) {
 	// keeps the templates free of the grouping/whitespace logic.
 	if c.DesignRecords != "" {
 		frag += "\n\n" + c.DesignRecords
+	}
+	// The ProtocolVersion warning (#26) is prepended so the degrade is the
+	// first thing the agent reads in the fragment, not buried after the
+	// orientation body. Empty on a clean match (the common case).
+	if c.ProtocolWarning != "" {
+		frag = c.ProtocolWarning + "\n\n" + frag
 	}
 	return frag, nil
 }

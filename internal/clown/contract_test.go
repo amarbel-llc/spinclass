@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"code.linenisgreat.com/ringmaster/pkgs/jobwake"
 )
 
 // These tests drive the REAL ringmaster binary rather than the shell stubs the
@@ -235,5 +237,30 @@ func TestRingmasterSpoolPathRejectsMalformedJobID(t *testing.T) {
 	// log is attributable without re-deriving which call broke.
 	if !strings.Contains(err.Error(), "spool-path") {
 		t.Errorf("error %q does not name the failing subcommand", err)
+	}
+}
+
+// The core #26 contract: the jobwake ProtocolVersion this binary LINKED at
+// build time must equal the integer the checkPhase-pinned ringmaster prints for
+// `version --protocol`. Both come from the same flake input, so they SHOULD
+// match — this proves it, and fails loudly if a future ringmaster bump moves
+// the runtime protocol without the linked lib following (or vice versa), which
+// is exactly the skew the serve-start gate degrades on in production. A stub
+// cannot cover this: it would print whatever we tell it, agreeing with the
+// linked const by construction.
+func TestCheckProtocolMatchesRealRingmaster(t *testing.T) {
+	realRingmaster(t)
+	resetProtocolCheck()
+
+	ok, want, got, err := CheckProtocol(context.Background())
+	if err != nil {
+		t.Fatalf("CheckProtocol against real ringmaster: %v", err)
+	}
+	if !ok {
+		t.Errorf("linked jobwake ProtocolVersion=%d != `ringmaster version --protocol`=%d; "+
+			"the build-time pin has drifted from the pinned binary", want, got)
+	}
+	if want != jobwake.ProtocolVersion {
+		t.Errorf("want=%d, expected the linked const %d", want, jobwake.ProtocolVersion)
 	}
 }

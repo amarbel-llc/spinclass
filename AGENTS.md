@@ -119,8 +119,11 @@ Cheap per-package `go build ./internal/foo/...` checks are fine.
   and, unlike madder, are burned into the **default** build; they power the
   dynamic system-prompt repository line (`internal/repoinfo`) and fall back to
   PATH lookup when unpinned (devshell `go build`). `clown` is optional, for async
-  job-wakeup emits (`internal/clown`, FDR 0010). Interactive prompts use the
-  in-process `huh` library.
+  job-wakeup emits (`internal/clown`, FDR 0010). `ringmaster` has **two** roles:
+  a runtime PATH CLI (the wake emit/observe, never pinned) AND a **build-time
+  linked library** — `code.linenisgreat.com/ringmaster/pkgs/jobwake`, bridged
+  via `gomod.nix` — for the per-job liveness flock and the `ProtocolVersion`
+  constant (#26). Interactive prompts use the in-process `huh` library.
 
 ## CLI Commands
 
@@ -257,6 +260,34 @@ subcommand is always available.
   trade a working notification for none. Note plain `ringmaster read` renders
   attachments as a count (`· 2 resource(s)`); `--json` is needed to get the
   URIs.
+- **Per-job liveness flock + ProtocolVersion gate** (#26, ringmaster RFC-0016 +
+  RFC-0018, `internal/clown`): `serve` holds ringmaster's per-job advisory lock
+  (`jobwake.AcquireJobLock`, wrapped by `clown.AcquireJobLock`) for an async
+  job's lifetime, so a crashed serve is *detectable* — the OS releases the lock
+  on process death, the probe reports `gone`, and ringmaster's reaper writes
+  `interrupted` instead of leaving the job stuck in `running`. This is why
+  `jobwake` is now **build-time LINKED** (the `gomod.nix` bridge onto
+  ringmaster's `go-pkgs`, the tommy pattern) *in addition to* the runtime PATH
+  CLI of the previous bullet — the flock must be an **in-process fd**, since a
+  CLI subprocess would drop it the instant it exits. Keep both: the CLI still
+  emits/observes at runtime (PATH-resolved, FDR 0010), the linked library
+  supplies the flock and the version constant. The flock is gated by a
+  **ProtocolVersion** check: `clown.CheckProtocol` (memoized, one shell-out per
+  serve) compares the compiled-in `jobwake.ProtocolVersion` against
+  `ringmaster version --protocol`. On an **exact** match, serve-start calls
+  `clown.SetFlockEnabled(true)` and `job.Start` acquires the flock (releasing it
+  in `clearRunning` *after* the terminal record, preserving "lock held ⟺ job
+  running"). On a mismatch — the linked lib's lock-path derivation may not match
+  the running ringmaster's probe — it **degrades loudly and skips only the
+  flock**: a warning to stderr + `servelog` + a ⚠ line prepended to the
+  system-prompt fragment, and `FlockEnabled` stays false so `job.Start` reads
+  the flag and skips the acquire. Async wakes and cancel-observe are pure CLI
+  shell-outs (self-consistent with the running binary), so they are **unaffected**
+  by a skew — only crash auto-reap is lost until versions align. `job.Start`
+  reads the cached flag, never re-shelling `version --protocol` per dispatch.
+  The core contract is `TestCheckProtocolMatchesRealRingmaster` (against the
+  checkPhase-pinned binary): it fails loudly if the linked `ProtocolVersion`
+  ever drifts from the pinned ringmaster's runtime value.
 - **Dynamic system-prompt fragment** (spinclass#187, clown plugin protocol
   RFC-0002 §5, `internal/sysprompt`): `serve` advertises an MCP `prompts`
   capability and answers `prompts/get` for the well-known `system-prompt-append`
@@ -446,10 +477,13 @@ overlay injects `-X main.version`/`-X main.commit` ldflags from the derivation's
 bash + fish completions included.
 
 `gomod.nix` is the consumer half of the flake-input-go_mod protocol (igloo RFC
-0001): it maps bridged Go modules (`tommy`, `crap`) onto their producer flakes'
-`go-pkgs` outputs, threaded as `goFlakeInputs`. Bump a bridged dep with
-`nix flake update <input>` — no gomod2nix lockstep unless the new rev changes
-the producer's own dependency graph.
+0001): it maps bridged Go modules (`tommy`, `crap`, `ringmaster`) onto their
+producer flakes' `go-pkgs` outputs, threaded as `goFlakeInputs`. Bump a bridged
+dep with `nix flake update <input>` — no gomod2nix lockstep unless the new rev
+changes the producer's own dependency graph. `ringmaster` is bridged at the
+repo-root module (no `subPath`, the tommy shape); it is *also* a checkPhase
+`nativeCheckInputs` binary and a devShell package, so the same flake rev backs
+the linked `jobwake` library, the contract-test binary, and the dev-loop CLI.
 
 ## Dependencies
 
@@ -462,3 +496,7 @@ Module: `code.linenisgreat.com/spinclass`.
 - `code.linenisgreat.com/purse-first/libs/go-mcp` — MCP server framework
   (`command.App` does CLI dispatch + MCP serving; no cobra).
 - `code.linenisgreat.com/tommy` — TOML library.
+- `code.linenisgreat.com/ringmaster/pkgs/jobwake` — the linked half of the
+  job platform: `AcquireJobLock` (per-job liveness flock) + `ProtocolVersion`
+  (the serve-start compatibility pin), consumed by `internal/clown` (#26). The
+  runtime CLI is resolved from PATH, not this import.

@@ -12,6 +12,7 @@ import (
 	"code.linenisgreat.com/purse-first/libs/go-mcp/server"
 	"code.linenisgreat.com/purse-first/libs/go-mcp/transport"
 
+	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/embeds"
 	"code.linenisgreat.com/spinclass/internal/resources"
 	"code.linenisgreat.com/spinclass/internal/servelog"
@@ -38,6 +39,31 @@ func registerServeCommand(app *command.App) {
 			}
 			defer func() { _ = servelog.Close() }()
 			servelog.Infof("serve.start version=%s pid=%d", app.Version, os.Getpid())
+
+			// ProtocolVersion gate (#26, RFC-0018). Under clown, verify the
+			// jobwake this binary linked at build time matches the hosting
+			// ringmaster's observable protocol. A mismatch does NOT stop serve:
+			// async wakes and cancel-observe are pure `ringmaster` CLI
+			// shell-outs, self-consistent with the running binary, so they keep
+			// working. It DOES disable the in-process liveness flock
+			// (internal/job consults the same memoized CheckProtocol), so warn
+			// loudly here and via the system-prompt fragment. Silent on a clean
+			// match; only skew (or an old ringmaster with no `--protocol`)
+			// surfaces.
+			if clown.Enabled() {
+				ok, want, got, perr := clown.CheckProtocol(sigCtx)
+				clown.SetFlockEnabled(ok)
+				if !ok {
+					detail := fmt.Sprintf("linked jobwake ProtocolVersion=%d, ringmaster reports %d", want, got)
+					if perr != nil {
+						detail = fmt.Sprintf("linked jobwake ProtocolVersion=%d, could not read `ringmaster version --protocol`: %v", want, perr)
+					}
+					servelog.Errorf("serve.protocol mismatch: %s; per-job liveness flock disabled", detail)
+					fmt.Fprintf(os.Stderr,
+						"spinclass serve: ⚠ ringmaster protocol mismatch: %s; per-job liveness flock disabled (async wakes unaffected)\n",
+						detail)
+				}
+			}
 
 			registry := server.NewToolRegistryV1()
 			app.RegisterMCPToolsV1(registry)

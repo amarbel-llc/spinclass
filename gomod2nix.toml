@@ -21,6 +21,11 @@ schema = 3
     hash = 'sha256-nZcZldhbxdD43F424KrFsfowPN3HTzoIqVmiAJovQjw='
     goVersion = '1.26'
 
+  [mod.'code.linenisgreat.com/ringmaster']
+    version = 'v0.0.0-20260803170956-e1ea0c5bffe7'
+    hash = 'sha256-mhTb+QmgH5xt5SxIT2NkmEvkni7U/V+2BPd3fNhuSyE='
+    goVersion = '1.25.0'
+
   [mod.'code.linenisgreat.com/tap/go']
     version = 'v0.2.0'
     hash = 'sha256-ifwq9+ER3gl317X0uizQkn2cYTtXiqWwPsFyfHZ91Bs='

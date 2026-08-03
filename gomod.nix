@@ -21,6 +21,7 @@
 {
   tommy,
   crap,
+  ringmaster,
   system,
 }:
 {
@@ -38,5 +39,15 @@
   "code.linenisgreat.com/crap/go-crap/v2" = {
     src = crap.packages.${system}.go-pkgs;
     subPath = "go-crap";
+  };
+  # ringmaster's go-pkgs is the whole repo-root module (module path is the
+  # repo root, single root go.mod), so no subPath — the tommy shape. Bridged
+  # so the linked jobwake library (internal/clown imports
+  # code.linenisgreat.com/ringmaster/pkgs/jobwake for the flock +
+  # ProtocolVersion, #26) compiles at the same flake.lock rev the ringmaster
+  # CLI is pinned at for the checkPhase. The runtime CLI still resolves from
+  # PATH (FDR 0010) — this bridge is the compile-time library half only.
+  "code.linenisgreat.com/ringmaster" = {
+    src = ringmaster.packages.${system}.go-pkgs;
   };
 }

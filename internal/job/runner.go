@@ -59,15 +59,28 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 	running[wt] = &runEntry{cancel: cancel, done: done}
 	mu.Unlock()
 
+	// releaseFlock is set once the per-job liveness lock is acquired (below),
+	// and released by clearRunning. Captured by reference: it is nil on the
+	// early-return paths (which run before the acquire) and non-nil only for
+	// the goroutine's terminal defer, so the nil guard in clearRunning covers
+	// both. The assignment happens-before the goroutine launch, so the defer's
+	// read is race-free.
+	var releaseFlock func() error
+
 	// clearRunning runs exactly once per Start (an early-return path OR the
-	// goroutine's defer, never both). Closing done last — after the goroutine
-	// has written the final job record — lets WaitDone callers Read the
-	// terminal status the moment they wake.
+	// goroutine's defer, never both). Releasing the flock here — after the
+	// goroutine body has written the final job record (defers run LIFO, so this
+	// registered-first defer runs last) — keeps the "lock held ⟺ job running"
+	// invariant the probe relies on. Closing done last lets WaitDone callers
+	// Read the terminal status the moment they wake.
 	clearRunning := func() {
 		mu.Lock()
 		delete(running, wt)
 		mu.Unlock()
 		cancel()
+		if releaseFlock != nil {
+			_ = releaseFlock()
+		}
 		close(done)
 	}
 
@@ -148,6 +161,27 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 			}
 		} else {
 			_, _ = fmt.Fprintf(logf, "[clown] spool-path failed: %v\n", perr)
+		}
+	}
+
+	// Hold ringmaster's per-job advisory lock for the job's lifetime (#26,
+	// RFC-0016): the OS releases it when serve dies, so a crashed producer's
+	// job is declared `gone` by the liveness probe instead of hanging in
+	// `running` forever. In-process by necessity — a CLI shell-out would drop
+	// the lock the instant it exits. Gated on an exact ProtocolVersion match:
+	// on a skew the linked jobwake's lock-path derivation may disagree with the
+	// running ringmaster's probe, so skip the flock (serve-start already warned
+	// loudly). Any acquire failure — including ErrAlreadyLocked — is non-fatal:
+	// the job still runs and wakes, it just carries no liveness signal.
+	// Released by clearRunning after the terminal record is written, or by the
+	// OS on crash. clown.FlockEnabled is the cached serve-start ProtocolVersion
+	// verdict — a plain flag read, no per-dispatch shell-out.
+	if clownID != "" && clown.FlockEnabled() {
+		if rel, lerr := clown.AcquireJobLock(clownID); lerr != nil {
+			_, _ = fmt.Fprintf(logf,
+				"[clown] per-job liveness lock not acquired (job runs without a liveness signal): %v\n", lerr)
+		} else {
+			releaseFlock = rel
 		}
 	}
 

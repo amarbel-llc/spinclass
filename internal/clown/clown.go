@@ -15,8 +15,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
+
+	"code.linenisgreat.com/ringmaster/pkgs/jobwake"
 )
 
 // Source is the producer label spinclass stamps on every emitted event
@@ -140,4 +145,86 @@ func FinishJob(ctx context.Context, id, state, message, resultRef string, resour
 	}
 	_, err := run(ctx, args...)
 	return err
+}
+
+// protocolCheck memoizes the one-time comparison of the ProtocolVersion this
+// binary linked jobwake at (compiled in) against the running ringmaster's
+// `version --protocol`. The verdict is a process-global fact, so it is computed
+// once and every later caller reads the cache.
+var (
+	protocolOnce sync.Once
+	protocolOK   bool
+	protocolWant int
+	protocolGot  int
+	protocolErr  error
+)
+
+// CheckProtocol compares the jobwake ProtocolVersion this build linked against
+// (RFC-0018 §1, compiled in) with the integer the hosting ringmaster prints for
+// `ringmaster version --protocol`, and reports whether they match EXACTLY.
+//
+// Memoized: the first call shells out and caches the verdict; later calls
+// (serve-start gate, the sysprompt fragment, each async dispatch) read the
+// cache, so the ctx of later calls is ignored — the check is a one-time global
+// fact, not a per-request operation. want is jobwake.ProtocolVersion, got is
+// the CLI's integer. A shell-out or parse failure returns ok=false with err
+// set; the caller treats "couldn't determine" the same as a mismatch (an old
+// ringmaster with no `--protocol` flag errors here, which is exactly a skew).
+//
+// Only meaningful under clown (the flock + wake machinery it gates is only
+// used when clown.Enabled()); callers gate on that before consulting it.
+func CheckProtocol(ctx context.Context) (ok bool, want, got int, err error) {
+	protocolOnce.Do(func() {
+		protocolWant = jobwake.ProtocolVersion
+		out, rerr := run(ctx, "version", "--protocol")
+		if rerr != nil {
+			protocolErr = rerr
+			return
+		}
+		n, perr := strconv.Atoi(strings.TrimSpace(out))
+		if perr != nil {
+			protocolErr = fmt.Errorf(
+				"parsing `ringmaster version --protocol` output %q: %w", out, perr,
+			)
+			return
+		}
+		protocolGot = n
+		protocolOK = n == protocolWant
+	})
+	return protocolOK, protocolWant, protocolGot, protocolErr
+}
+
+// flockEnabled records whether serve should hold the per-job liveness flock:
+// true only after a serve-start CheckProtocol confirmed an exact
+// ProtocolVersion match. job.Start reads it per dispatch WITHOUT re-shelling
+// `version --protocol` — doing that would add a subprocess to every job and
+// couple the job tests to the ringmaster CLI (and, because CheckProtocol is
+// memoized process-globally, make the shell-out order-dependent across tests).
+// Default false: a process that never ran the serve-start gate (a unit test, a
+// non-serve entrypoint) holds no flock — the safe degrade.
+var flockEnabled atomic.Bool
+
+// SetFlockEnabled records the serve-start ProtocolVersion verdict. Called once
+// from serve startup, before the MCP server accepts requests, so job.Start's
+// reads never race the write.
+func SetFlockEnabled(ok bool) { flockEnabled.Store(ok) }
+
+// FlockEnabled reports whether job.Start should acquire the per-job liveness
+// flock — the cached serve-start verdict from SetFlockEnabled, no shell-out.
+func FlockEnabled() bool { return flockEnabled.Load() }
+
+// AcquireJobLock takes ringmaster's per-job advisory lock (RFC-0016 §1) for
+// jobID on the current session's channel. The lock is held by THIS process for
+// the job's lifetime, so the OS releases it when serve dies — including a hard
+// crash that never writes a terminal record, which is the liveness signal the
+// probe reads to declare a producer gone.
+//
+// It is a linked-library call into jobwake, deliberately NOT a CLI shell-out:
+// a short-lived `ringmaster` subprocess would drop the lock the instant it
+// exits, defeating the crash guarantee. The empty target selects the current
+// session, exactly the channel clown.StartJob's argument-free `start` allocated
+// the job on. Returns the release closer the caller invokes on the terminal
+// write, or jobwake.ErrAlreadyLocked if a live holder already holds it.
+func AcquireJobLock(jobID string) (func() error, error) {
+	return jobwake.AcquireJobLock("", jobID)
 }

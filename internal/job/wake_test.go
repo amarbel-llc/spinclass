@@ -2,12 +2,17 @@ package job
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"code.linenisgreat.com/ringmaster/pkgs/jobwake"
+
+	"code.linenisgreat.com/spinclass/internal/clown"
 )
 
 // TestMain strips CLOWN_BIN for the whole package: the dev/CI environment
@@ -104,6 +109,59 @@ func runWaked(t *testing.T, wt, kind string, fn Func) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("job did not finish in time")
 	}
+}
+
+// TestStartHoldsLivenessFlockWhenEnabled proves the #26 wiring end to end: with
+// the serve-start verdict enabled, Start acquires ringmaster's per-job flock and
+// holds it for the job's lifetime (an independent acquire is refused mid-run),
+// then releases it before the job is observably done. The release-before-done
+// ordering is load-bearing — WaitDone closing signals the terminal record is
+// durable, and the flock must already be free by then so a reaper never sees a
+// finished job as still-held.
+func TestStartHoldsLivenessFlockWhenEnabled(t *testing.T) {
+	wt := t.TempDir()
+	argsFile := filepath.Join(t.TempDir(), "args")
+	installStub(t, argsFile, true)
+
+	// Isolate the flock's on-disk world and turn on the flag job.Start reads
+	// (the serve-start ProtocolVersion verdict). Reset the process-global flag
+	// after so the other job tests keep the default-off behaviour.
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CLOWN_SESSION_ID", "spinclass-job-flock-test")
+	clown.SetFlockEnabled(true)
+	t.Cleanup(func() { clown.SetFlockEnabled(false) })
+
+	running := make(chan struct{})
+	finish := make(chan struct{})
+	if _, err := Start(wt, KindMerge, false, "test-job", func(_ context.Context, _ io.Writer) (string, bool) {
+		close(running)
+		<-finish
+		return "✓ hook", false
+	}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Mid-run, serve holds job-deadbeef's flock (the id the stub's `start`
+	// returns), so an independent acquire must be refused.
+	<-running
+	if _, err := clown.AcquireJobLock("job-deadbeef"); !errors.Is(err, jobwake.ErrAlreadyLocked) {
+		t.Errorf("during the job: AcquireJobLock got %v, want ErrAlreadyLocked (serve should hold the flock)", err)
+	}
+
+	close(finish)
+	select {
+	case <-WaitDone(wt):
+	case <-time.After(5 * time.Second):
+		t.Fatal("job did not finish in time")
+	}
+
+	// The terminal record is durable and the flock released (clearRunning frees
+	// it before closing done) — a re-acquire must now succeed.
+	rel, err := clown.AcquireJobLock("job-deadbeef")
+	if err != nil {
+		t.Fatalf("after the job: AcquireJobLock should succeed (flock released), got %v", err)
+	}
+	_ = rel()
 }
 
 func TestStartEmitsClownLifecycleOnSuccess(t *testing.T) {

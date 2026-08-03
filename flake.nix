@@ -275,7 +275,14 @@
         # which sibling Go modules resolve from producer go-pkgs outputs
         # instead of the proxy. See gomod.nix for the entries and the
         # lockstep rationale.
-        goFlakeInputs = import ./gomod.nix { inherit tommy crap system; };
+        goFlakeInputs = import ./gomod.nix {
+          inherit
+            tommy
+            crap
+            ringmaster
+            system
+            ;
+        };
 
         # mkSpinclass builds spinclass with optional build-time-pinned
         # absolute /nix/store paths for `madder` and `direnv`. The
@@ -546,6 +553,13 @@
             # in conformistTommyModule above); so `just fmt` regenerates the
             # codec.
             tommy.packages.${system}.conformist-tommy-codegen
+            # ringmaster CLI on the devshell PATH so `ringmaster version
+            # --protocol` (the ProtocolVersion serve-start gate, #26) and the
+            # flock probe resolve in the dev-loop and bats, matching the
+            # checkPhase pin (nativeCheckInputs). Runtime resolution is still
+            # PATH-based (FDR 0010); this just makes the same binary present in
+            # the devshell.
+            ringmaster.packages.${system}.ringmaster
           ]
           ++ (with pkgs-master; [
             delve
