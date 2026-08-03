@@ -298,8 +298,10 @@ func IsRunning(wt string) bool {
 // finished and its terminal record is persisted (so a Read after the channel
 // closes observes the final status). If no job is in flight in this serve
 // process, it returns an already-closed channel — the caller should Read to
-// distinguish "finished" from "never started". session-job-wait selects on
-// this so it can block on a running job without polling.
+// distinguish "finished" from "never started". A blocking-join primitive: it
+// lets a caller wait on a running job without polling. The retired
+// session-job-wait tool selected on this; it survives as a synchronization
+// point for the job package's own tests.
 func WaitDone(wt string) <-chan struct{} {
 	mu.Lock()
 	defer mu.Unlock()

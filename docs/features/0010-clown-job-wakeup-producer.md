@@ -60,8 +60,8 @@ promotion-criteria: |
 
 Spinclass's async merge/check tools return a job id immediately, but the
 agent then has no push signal for completion: it must poll
-`session-job-status` (the documented anti-pattern) or block on
-`session-job-wait` and re-expose itself to the MCP request timeout.
+`session-job-status` (the documented anti-pattern) or block on a
+synchronous wait and re-expose itself to the MCP request timeout.
 Similarly, cross-session chat's push path was a bespoke 1s-poll monitor.
 Clown's job-wakeup channel (clown RFC-0009) provides the shared
 machinery — a durable per-session journal plus a `clown job-watch`

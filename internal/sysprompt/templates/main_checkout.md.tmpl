@@ -62,5 +62,6 @@ finishes.
 
 Never start an async job and poll `session-job-status` in a loop. If
 you went async and ran out of other work with the job near
-completion, `session-job-wait` blocks for the result; for a job with
-real time remaining, end your turn and let the wake arrive.
+completion, ringmaster's `job_wait` (with the job id the async tool
+returned) blocks for the result; for a job with real time remaining,
+end your turn and let the wake arrive.

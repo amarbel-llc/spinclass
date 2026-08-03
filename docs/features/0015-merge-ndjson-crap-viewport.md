@@ -54,8 +54,9 @@ deliberately bilingual.
 rendering** (`present.RenderPlain` over a buffered Reporter); full hook
 output stays behind madder `resource_link` content blocks as before.
 Async jobs store the same plain rendering as `ResultText`, so
-`session-job-status`/`session-job-wait` return it; the clown failed-state
-wake carries the first `✗ ` line. `session-job-status`'s live tail
+`session-job-status` returns it (and ringmaster's completion wake
+attaches it as a result blob); the clown failed-state wake carries the
+first `✗ ` line. `session-job-status`'s live tail
 (raw `job.log` hook output) is unchanged.
 
 ## Design
