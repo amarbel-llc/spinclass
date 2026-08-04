@@ -37,11 +37,16 @@ func installStub(t *testing.T, argsFile string, ok bool) {
 	if ok {
 		exit = "0"
 	}
-	// One atomic append per invocation: a single printf (argv + the "--"
-	// separator) is one write() < PIPE_BUF, so concurrent stub invocations — the
-	// #22 observer's `wait` racing `done` — cannot interleave and corrupt the
-	// separator-delimited parse recordedInvocations relies on.
-	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" '--' >> " + argsFile + "\n" +
+	// Each invocation records to its OWN file under argsFile (treated as a
+	// directory), so the #22 observer's concurrent `ringmaster wait` never
+	// shares a file with the job's own invocations: no interleaving, no lock,
+	// and nothing that depends on a shell's printf being a single write() (it
+	// isn't in dash — the assumption that failed the eng build). mktemp gives
+	// each concurrent invocation a unique filename; recordedInvocations reads
+	// the directory back, one file per invocation.
+	body := "#!/bin/sh\n" +
+		"mkdir -p " + argsFile + " 2>/dev/null\n" +
+		"printf '%s\\n' \"$@\" > \"$(mktemp " + argsFile + "/inv.XXXXXX)\"\n" +
 		"if [ \"$1\" = start ]; then echo job-deadbeef; fi\n" +
 		"exit " + exit + "\n"
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
@@ -57,11 +62,16 @@ func installStubWithSpool(t *testing.T, argsFile, spoolPath string) {
 	t.Helper()
 	dir := t.TempDir()
 	script := filepath.Join(dir, "ringmaster")
-	// One atomic append per invocation: a single printf (argv + the "--"
-	// separator) is one write() < PIPE_BUF, so concurrent stub invocations — the
-	// #22 observer's `wait` racing `done` — cannot interleave and corrupt the
-	// separator-delimited parse recordedInvocations relies on.
-	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" '--' >> " + argsFile + "\n" +
+	// Each invocation records to its OWN file under argsFile (treated as a
+	// directory), so the #22 observer's concurrent `ringmaster wait` never
+	// shares a file with the job's own invocations: no interleaving, no lock,
+	// and nothing that depends on a shell's printf being a single write() (it
+	// isn't in dash — the assumption that failed the eng build). mktemp gives
+	// each concurrent invocation a unique filename; recordedInvocations reads
+	// the directory back, one file per invocation.
+	body := "#!/bin/sh\n" +
+		"mkdir -p " + argsFile + " 2>/dev/null\n" +
+		"printf '%s\\n' \"$@\" > \"$(mktemp " + argsFile + "/inv.XXXXXX)\"\n" +
 		"if [ \"$1\" = start ]; then echo job-deadbeef; fi\n" +
 		"if [ \"$1\" = spool-path ]; then echo " + spoolPath + "; fi\n" +
 		"exit 0\n"
@@ -72,23 +82,32 @@ func installStubWithSpool(t *testing.T, argsFile, spoolPath string) {
 	t.Setenv("RINGMASTER_BIN", script)
 }
 
-// recordedInvocations splits the stub's args file back into one argv slice
-// per invocation.
+// recordedInvocations reads back the stub's per-invocation files (argsFile is
+// the directory each invocation wrote one file into), one argv slice per file.
+// Order is not meaningful (concurrent invocations, arbitrary mktemp names) — the
+// callers match by subcommand via findInvocation, not by position. An empty file
+// (an invocation SIGKILLed mid-write, e.g. the observer's `wait` when the job
+// ends) is skipped rather than yielding a bogus empty argv.
 func recordedInvocations(t *testing.T, argsFile string) [][]string {
 	t.Helper()
-	data, err := os.ReadFile(argsFile)
+	entries, err := os.ReadDir(argsFile)
 	if err != nil {
-		t.Fatalf("read recorded args: %v", err)
+		t.Fatalf("read recorded invocations dir %s: %v", argsFile, err)
 	}
 	var out [][]string
-	var cur []string
-	for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
-		if line == "--" {
-			out = append(out, cur)
-			cur = nil
+	for _, e := range entries {
+		if e.IsDir() {
 			continue
 		}
-		cur = append(cur, line)
+		data, err := os.ReadFile(filepath.Join(argsFile, e.Name()))
+		if err != nil {
+			t.Fatalf("read invocation file %s: %v", e.Name(), err)
+		}
+		s := strings.TrimRight(string(data), "\n")
+		if s == "" {
+			continue
+		}
+		out = append(out, strings.Split(s, "\n"))
 	}
 	return out
 }
@@ -278,11 +297,16 @@ func installStubObservesCancel(t *testing.T, argsFile string) {
 	t.Helper()
 	dir := t.TempDir()
 	script := filepath.Join(dir, "ringmaster")
-	// One atomic append per invocation: a single printf (argv + the "--"
-	// separator) is one write() < PIPE_BUF, so concurrent stub invocations — the
-	// #22 observer's `wait` racing `done` — cannot interleave and corrupt the
-	// separator-delimited parse recordedInvocations relies on.
-	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" '--' >> " + argsFile + "\n" +
+	// Each invocation records to its OWN file under argsFile (treated as a
+	// directory), so the #22 observer's concurrent `ringmaster wait` never
+	// shares a file with the job's own invocations: no interleaving, no lock,
+	// and nothing that depends on a shell's printf being a single write() (it
+	// isn't in dash — the assumption that failed the eng build). mktemp gives
+	// each concurrent invocation a unique filename; recordedInvocations reads
+	// the directory back, one file per invocation.
+	body := "#!/bin/sh\n" +
+		"mkdir -p " + argsFile + " 2>/dev/null\n" +
+		"printf '%s\\n' \"$@\" > \"$(mktemp " + argsFile + "/inv.XXXXXX)\"\n" +
 		"if [ \"$1\" = start ]; then echo job-deadbeef; fi\n" +
 		"if [ \"$1\" = wait ]; then printf '%s\\n' '{\"state\":\"running\"}'; fi\n" +
 		"exit 0\n"
@@ -565,11 +589,16 @@ func TestFinishEmitFailureDoesNotAffectJob(t *testing.T) {
 	// Succeed on `start` so dispatch proceeds, fail on `done`.
 	dir := t.TempDir()
 	script := filepath.Join(dir, "ringmaster")
-	// One atomic append per invocation: a single printf (argv + the "--"
-	// separator) is one write() < PIPE_BUF, so concurrent stub invocations — the
-	// #22 observer's `wait` racing `done` — cannot interleave and corrupt the
-	// separator-delimited parse recordedInvocations relies on.
-	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" '--' >> " + argsFile + "\n" +
+	// Each invocation records to its OWN file under argsFile (treated as a
+	// directory), so the #22 observer's concurrent `ringmaster wait` never
+	// shares a file with the job's own invocations: no interleaving, no lock,
+	// and nothing that depends on a shell's printf being a single write() (it
+	// isn't in dash — the assumption that failed the eng build). mktemp gives
+	// each concurrent invocation a unique filename; recordedInvocations reads
+	// the directory back, one file per invocation.
+	body := "#!/bin/sh\n" +
+		"mkdir -p " + argsFile + " 2>/dev/null\n" +
+		"printf '%s\\n' \"$@\" > \"$(mktemp " + argsFile + "/inv.XXXXXX)\"\n" +
 		"if [ \"$1\" = start ]; then echo job-deadbeef; exit 0; fi\nexit 1\n"
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatalf("write stub ringmaster: %v", err)
