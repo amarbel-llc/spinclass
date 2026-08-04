@@ -12,6 +12,7 @@ package clown
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -212,6 +213,65 @@ func SetFlockEnabled(ok bool) { flockEnabled.Store(ok) }
 // FlockEnabled reports whether job.Start should acquire the per-job liveness
 // flock — the cached serve-start verdict from SetFlockEnabled, no shell-out.
 func FlockEnabled() bool { return flockEnabled.Load() }
+
+// terminalStates are the ringmaster job states meaning the job has ended
+// (RFC-0009 §5 / RFC-0018 aborted). A cancel-requested job's DERIVED state
+// stays "running" — the record is non-terminal — so it is deliberately absent
+// here; that absence is exactly how WaitForCancel tells a cancel-requested
+// return from a terminal one.
+var terminalStates = map[string]bool{
+	"succeeded":   true,
+	"failed":      true,
+	"aborted":     true,
+	"interrupted": true,
+}
+
+// WaitForCancel blocks until ringmaster records either a cancel-requested or a
+// terminal state for jobID, then reports whether it was a cancel-requested
+// (RFC-0018). The #22 cancel observer runs this per async job and fires the
+// job's context cancel when it returns true (tearing down the hook so the
+// producer writes the terminal `aborted` itself).
+//
+// It shells `ringmaster wait <id> --on-cancel --json --timeout 0` under ctx —
+// a long-lived, ctx-cancellable call, so it deliberately does NOT go through
+// run(): run()'s emitTimeout would cut a legitimately long job short, and its
+// WithoutCancel would ignore the observer's ctx. Cancelling ctx (the job ended
+// by another path) kills the wait subprocess, surfacing as an error the caller
+// treats as "nothing to observe".
+//
+// The signal is indirect by necessity (verified live 2026-08-04): `wait
+// --on-cancel`'s status reports state "running" for a cancel-requested job —
+// the derived state, since the record is non-terminal — never
+// "cancel-requested". Because --on-cancel's only stop conditions are a terminal
+// OR a cancel-requested, a return with a NON-terminal state means
+// cancel-requested was observed. Using the CLI (not the linked
+// jobwake.WaitDoneOnCancel) keeps cancel observation working across a
+// ProtocolVersion skew, where the in-process flock is disabled but the runtime
+// ringmaster's cancel surface still functions.
+func WaitForCancel(ctx context.Context, jobID string) (cancelRequested bool, err error) {
+	cmd := exec.CommandContext(ctx, ringmasterBin(),
+		"wait", jobID, "--on-cancel", "--json", "--timeout", "0")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if rerr := cmd.Run(); rerr != nil {
+		detail := bytes.TrimSpace(stderr.Bytes())
+		if len(detail) > 0 {
+			return false, fmt.Errorf("ringmaster wait: %w: %s", rerr, detail)
+		}
+		return false, fmt.Errorf("ringmaster wait: %w", rerr)
+	}
+	var status struct {
+		State string `json:"state"`
+	}
+	if jerr := json.Unmarshal(stdout.Bytes(), &status); jerr != nil {
+		return false, fmt.Errorf(
+			"parsing `ringmaster wait --json` output %q: %w",
+			bytes.TrimSpace(stdout.Bytes()), jerr,
+		)
+	}
+	return !terminalStates[status.State], nil
+}
 
 // AcquireJobLock takes ringmaster's per-job advisory lock (RFC-0016 §1) for
 // jobID on the current session's channel. The lock is held by THIS process for

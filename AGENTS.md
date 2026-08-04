@@ -288,6 +288,29 @@ subcommand is always available.
   The core contract is `TestCheckProtocolMatchesRealRingmaster` (against the
   checkPhase-pinned binary): it fails loudly if the linked `ProtocolVersion`
   ever drifts from the pinned ringmaster's runtime value.
+- **Cancellation observer** (#22, ringmaster RFC-0018, `internal/job` +
+  `internal/clown`): `ringmaster cancel` is cooperative — it records a
+  **non-terminal `cancel-requested`** and wakes, but signals no process. So for
+  each async job under clown, `job.Start` launches an observer goroutine that
+  blocks in `clown.WaitForCancel` (`ringmaster wait <id> --on-cancel
+  --timeout 0`) and, on a cancel-requested, fires the job's context cancel —
+  tearing down the hook exactly as `session-job-cancel` and the inactivity
+  watchdog do. The producer then writes the terminal itself, staying the **sole
+  terminal-writer** (no double-write, no journal lie). The cancel terminal is
+  now **`StatusAborted`** (`"aborted"`, RFC-0018), renamed from `cancelled`; the
+  reaper writes `interrupted` if serve dies mid-teardown. `WaitForCancel` is
+  CLI-based (**not** the linked `jobwake.WaitDoneOnCancel`) and gated on
+  `clown.Enabled()` alone — **not** `FlockEnabled` — so cancel observation
+  survives a `ProtocolVersion` skew, where the in-process flock is disabled but
+  the runtime ringmaster's cancel surface still works. NON-OBVIOUS (verified
+  live, locked by `TestWaitForCancelObservesRealCancelRequested`): `wait
+  --on-cancel`'s status reports the DERIVED state `running` for a cancel-requested
+  job (the record is non-terminal), never `cancel-requested` — so `WaitForCancel`
+  maps a **non-terminal** return to `cancelRequested=true`, since --on-cancel's
+  only non-terminal stop condition is a cancel-requested. The observer runs
+  under the job's own ctx, so `clearRunning`'s `cancel()` tears down its
+  `ringmaster wait` subprocess when the job ends by any other path (no separate
+  cancel to track — which also sidesteps a govet `lostcancel` false positive).
 - **Dynamic system-prompt fragment** (spinclass#187, clown plugin protocol
   RFC-0002 §5, `internal/sysprompt`): `serve` advertises an MCP `prompts`
   capability and answers `prompts/get` for the well-known `system-prompt-append`

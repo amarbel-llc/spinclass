@@ -59,20 +59,21 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 	running[wt] = &runEntry{cancel: cancel, done: done}
 	mu.Unlock()
 
-	// releaseFlock is set once the per-job liveness lock is acquired (below),
-	// and released by clearRunning. Captured by reference: it is nil on the
-	// early-return paths (which run before the acquire) and non-nil only for
-	// the goroutine's terminal defer, so the nil guard in clearRunning covers
-	// both. The assignment happens-before the goroutine launch, so the defer's
-	// read is race-free.
+	// releaseFlock is set once the per-job liveness lock is acquired (below), and
+	// released by clearRunning. Captured by reference: it is nil on the
+	// early-return paths (which run before the acquire) and non-nil only for the
+	// goroutine's terminal defer, so the nil guard in clearRunning covers both.
+	// The assignment happens-before the goroutine launch, so the defer's read is
+	// race-free.
 	var releaseFlock func() error
 
 	// clearRunning runs exactly once per Start (an early-return path OR the
-	// goroutine's defer, never both). Releasing the flock here — after the
-	// goroutine body has written the final job record (defers run LIFO, so this
-	// registered-first defer runs last) — keeps the "lock held ⟺ job running"
-	// invariant the probe relies on. Closing done last lets WaitDone callers
-	// Read the terminal status the moment they wake.
+	// goroutine's defer, never both). The cancel() here also tears down the
+	// cancel observer, whose `ringmaster wait` runs under this same ctx.
+	// Releasing the flock after the goroutine body has written the final job
+	// record (defers run LIFO, so this registered-first defer runs last) keeps
+	// the "lock held ⟺ job running" invariant the probe relies on. Closing done
+	// last lets WaitDone callers Read the terminal status the moment they wake.
 	clearRunning := func() {
 		mu.Lock()
 		delete(running, wt)
@@ -185,6 +186,34 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 		}
 	}
 
+	// Observe an external cancellation (#22, RFC-0018). `ringmaster cancel`
+	// records a non-terminal `cancel-requested` rather than signalling a
+	// process, so the owning producer must observe it and tear down. This
+	// goroutine blocks in clown.WaitForCancel (`ringmaster wait --on-cancel`)
+	// and, on a cancel-requested, fires the job's context cancel — killing the
+	// hook exactly as an in-process cancel does, after which fn returns and the
+	// goroutine below writes the terminal `aborted`, keeping the producer the
+	// sole terminal-writer. CLI-based so it survives a ProtocolVersion skew
+	// (where the flock is off but the runtime cancel surface still works). Gated
+	// on clownID (there is a ringmaster job to observe). It runs under the job's
+	// own ctx, so when the job ends by any other path, clearRunning's cancel()
+	// kills the `ringmaster wait` subprocess and this goroutine exits — no
+	// separate cancel to track.
+	if clownID != "" {
+		go func() {
+			canceled, werr := clown.WaitForCancel(ctx, clownID)
+			if werr != nil {
+				// ctx cancelled (the job ended first) or the runtime ringmaster
+				// lacks --on-cancel — either way, nothing to observe.
+				return
+			}
+			if canceled {
+				_, _ = fmt.Fprintf(logf, "[clown] external cancel-requested observed; tearing down the hook\n")
+				cancel()
+			}
+		}()
+	}
+
 	// Snapshot before the goroutine launches: the goroutine owns j from here
 	// on (status, result, clown job id), so handing the caller the live
 	// pointer would be a data race one field-read away. The snapshot carries
@@ -208,7 +237,11 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 		j.ResultIsErr = isErr
 		switch {
 		case ctx.Err() != nil:
-			j.Status = StatusCancelled
+			// The context was cancelled — by the #22 observer on an external
+			// cancel-requested, by session-job-cancel, or by the inactivity
+			// watchdog. All are the producer tearing down in response to a
+			// cancellation, so the terminal is `aborted` (RFC-0018).
+			j.Status = StatusAborted
 		case isErr:
 			j.Status = StatusFailed
 		default:

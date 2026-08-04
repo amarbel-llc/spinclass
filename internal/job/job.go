@@ -17,10 +17,15 @@ import (
 
 // Status values for a Job.
 const (
-	StatusRunning     = "running"
-	StatusSucceeded   = "succeeded"
-	StatusFailed      = "failed"
-	StatusCancelled   = "cancelled"
+	StatusRunning   = "running"
+	StatusSucceeded = "succeeded"
+	StatusFailed    = "failed"
+	// StatusAborted is the terminal a producer writes when it tears down in
+	// response to a cancellation (RFC-0018): an external `ringmaster cancel`
+	// (which records a non-terminal cancel-requested the #22 observer reacts to)
+	// or an in-process cancel (session-job-cancel, the inactivity watchdog).
+	// Renamed from the pre-RFC-0018 "cancelled".
+	StatusAborted     = "aborted"
 	StatusInterrupted = "interrupted"
 )
 

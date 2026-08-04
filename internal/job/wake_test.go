@@ -97,6 +97,22 @@ func assertArgv(t *testing.T, got, want []string) {
 	}
 }
 
+// findInvocation returns the recorded stub invocation whose first arg is cmd, or
+// fails. Match by subcommand rather than a fixed index because the #22 cancel
+// observer adds a `ringmaster wait --on-cancel` invocation whose position — and,
+// in a fast job, whose very presence — races job completion, so start/spool-path/
+// done are the only stable invocations to assert on.
+func findInvocation(t *testing.T, inv [][]string, cmd string) []string {
+	t.Helper()
+	for _, iv := range inv {
+		if len(iv) > 0 && iv[0] == cmd {
+			return iv
+		}
+	}
+	t.Fatalf("no %q invocation recorded among %q", cmd, inv)
+	return nil
+}
+
 // runWaked starts fn as a job with the stub installed and blocks until the
 // terminal record is persisted and emits have run.
 func runWaked(t *testing.T, wt, kind string, fn Func) {
@@ -173,16 +189,14 @@ func TestStartEmitsClownLifecycleOnSuccess(t *testing.T) {
 		return "✓ hook", false
 	})
 
-	// start -> spool-path -> done. The spool lookup sits between them because
-	// the job's output is teed into ringmaster's spool so its native surface
-	// can tail a running job (#251).
+	// start, spool-path, and done are the stable invocations (the spool lookup
+	// sits between start and done because the job's output is teed into
+	// ringmaster's spool, #251). The #22 observer may add a `wait --on-cancel`
+	// too, so match by subcommand rather than exact count/index.
 	inv := recordedInvocations(t, argsFile)
-	if len(inv) != 3 {
-		t.Fatalf("ringmaster invocations: got %d (%q), want 3 (start + spool-path + done)", len(inv), inv)
-	}
-	assertArgv(t, inv[0], []string{"start", "--label", "merge", "--source", "spinclass"})
-	assertArgv(t, inv[1], []string{"spool-path", "job-deadbeef"})
-	assertArgv(t, inv[2], []string{
+	assertArgv(t, findInvocation(t, inv, "start"), []string{"start", "--label", "merge", "--source", "spinclass"})
+	assertArgv(t, findInvocation(t, inv, "spool-path"), []string{"spool-path", "job-deadbeef"})
+	assertArgv(t, findInvocation(t, inv, "done"), []string{
 		"done", "job-deadbeef",
 		"--state", "succeeded",
 		"--message", "merge succeeded",
@@ -208,10 +222,7 @@ func TestStartEmitsFailedStateWithFailureLine(t *testing.T) {
 	})
 
 	inv := recordedInvocations(t, argsFile)
-	if len(inv) != 3 {
-		t.Fatalf("ringmaster invocations: got %d, want 3 (start + spool-path + done)", len(inv))
-	}
-	assertArgv(t, inv[2], []string{
+	assertArgv(t, findInvocation(t, inv, "done"), []string{
 		"done", "job-deadbeef",
 		"--state", "failed",
 		"--message", "check failed: ✗ pre-merge hook",
@@ -219,7 +230,7 @@ func TestStartEmitsFailedStateWithFailureLine(t *testing.T) {
 	})
 }
 
-func TestStartEmitsCancelledState(t *testing.T) {
+func TestStartEmitsAbortedStateOnCancel(t *testing.T) {
 	wt := t.TempDir()
 	argsFile := filepath.Join(t.TempDir(), "args")
 	installStub(t, argsFile, true)
@@ -240,16 +251,60 @@ func TestStartEmitsCancelledState(t *testing.T) {
 		t.Fatal("job did not finish after cancel")
 	}
 
+	// An in-process Cancel is a producer teardown, so the terminal emit is
+	// `aborted` (RFC-0018), not the pre-RFC-0018 `cancelled`.
 	inv := recordedInvocations(t, argsFile)
-	if len(inv) != 3 {
-		t.Fatalf("ringmaster invocations: got %d, want 3 (start + spool-path + done)", len(inv))
-	}
-	assertArgv(t, inv[2], []string{
+	assertArgv(t, findInvocation(t, inv, "done"), []string{
 		"done", "job-deadbeef",
-		"--state", "cancelled",
-		"--message", "merge cancelled",
+		"--state", "aborted",
+		"--message", "merge aborted",
 		"--result-ref", "spinclass session-job-status",
 	})
+}
+
+// installStubObservesCancel installs a ringmaster stub whose `wait --on-cancel`
+// reports a cancel-requested — surfaced as the derived non-terminal state
+// "running" (RFC-0018, verified live) — so the #22 observer fires the job's
+// context cancel. `start` still returns the fixed job id.
+func installStubObservesCancel(t *testing.T, argsFile string) {
+	t.Helper()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "ringmaster")
+	body := "#!/bin/sh\n{ printf '%s\\n' \"$@\"; echo --; } >> " + argsFile + "\n" +
+		"if [ \"$1\" = start ]; then echo job-deadbeef; fi\n" +
+		"if [ \"$1\" = wait ]; then printf '%s\\n' '{\"state\":\"running\"}'; fi\n" +
+		"exit 0\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatalf("write stub ringmaster: %v", err)
+	}
+	t.Setenv("CLOWN_BIN", filepath.Join(dir, "clown"))
+	t.Setenv("RINGMASTER_BIN", script)
+}
+
+// TestStartObservesExternalCancel proves the #22 observer end to end: a
+// ringmaster cancel-requested (surfaced by `wait --on-cancel` as a non-terminal
+// "running" state) fires the job's context cancel, tearing down the hook so the
+// producer writes the terminal `aborted` itself. Nothing here calls Cancel(wt),
+// so the aborted terminal can only have come from the observer reacting to the
+// stub — and fn's `<-ctx.Done()` can only unblock the same way.
+func TestStartObservesExternalCancel(t *testing.T) {
+	wt := t.TempDir()
+	argsFile := filepath.Join(t.TempDir(), "args")
+	installStubObservesCancel(t, argsFile)
+
+	if _, err := Start(wt, KindMerge, false, "obs-job", func(ctx context.Context, _ io.Writer) (string, bool) {
+		<-ctx.Done() // only the observer's cancel can unblock this
+		return "", true
+	}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	j := waitStatus(t, wt, StatusAborted)
+	if j.Status != StatusAborted {
+		t.Fatalf("status: got %q, want %q", j.Status, StatusAborted)
+	}
+	assertArgv(t, findInvocation(t, recordedInvocations(t, argsFile), "wait"),
+		[]string{"wait", "job-deadbeef", "--on-cancel", "--json", "--timeout", "0"})
 }
 
 func TestStartNoEmitWhenClownAbsent(t *testing.T) {

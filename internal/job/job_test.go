@@ -105,7 +105,7 @@ func TestStartRefusesSecondJob(t *testing.T) {
 		t.Fatalf("want ErrAlreadyRunning, got %v", err)
 	}
 	Cancel(wt)
-	waitStatus(t, wt, StatusCancelled)
+	waitStatus(t, wt, StatusAborted)
 }
 
 func TestStartSucceeds(t *testing.T) {

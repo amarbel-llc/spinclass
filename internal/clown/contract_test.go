@@ -264,3 +264,56 @@ func TestCheckProtocolMatchesRealRingmaster(t *testing.T) {
 		t.Errorf("want=%d, expected the linked const %d", want, jobwake.ProtocolVersion)
 	}
 }
+
+// The #22 observer contract: WaitForCancel must report true when ringmaster has
+// recorded a cancel-requested. This is the exact live behavior a stub cannot
+// prove — `ringmaster wait --on-cancel` reports the DERIVED state "running" for
+// a cancel-requested job (the record is non-terminal), never "cancel-requested",
+// and WaitForCancel maps a non-terminal return to cancelRequested=true. A stub
+// would just echo whatever we told it; only the real binary confirms the
+// derived-state quirk this depends on.
+func TestWaitForCancelObservesRealCancelRequested(t *testing.T) {
+	realRingmaster(t)
+	ctx := context.Background()
+
+	id, err := StartJob(ctx, "obs", Source)
+	if err != nil {
+		t.Fatalf("StartJob: %v", err)
+	}
+	// `ringmaster cancel` records the non-terminal cancel-requested — what an
+	// external canceller does; the producer is expected to observe and abort.
+	ringmasterOut(t, "cancel", id)
+
+	cancelRequested, err := WaitForCancel(ctx, id)
+	if err != nil {
+		t.Fatalf("WaitForCancel: %v", err)
+	}
+	if !cancelRequested {
+		t.Error("WaitForCancel returned false for a cancel-requested job; the observer " +
+			"would never tear down the hook")
+	}
+}
+
+// The terminal counterpart: WaitForCancel must report false when the job ended
+// on its own, so the observer no-ops instead of firing a spurious cancel.
+func TestWaitForCancelReturnsFalseForTerminal(t *testing.T) {
+	realRingmaster(t)
+	ctx := context.Background()
+
+	id, err := StartJob(ctx, "obs", Source)
+	if err != nil {
+		t.Fatalf("StartJob: %v", err)
+	}
+	if err := FinishJob(ctx, id, "succeeded", "done", ""); err != nil {
+		t.Fatalf("FinishJob: %v", err)
+	}
+
+	cancelRequested, err := WaitForCancel(ctx, id)
+	if err != nil {
+		t.Fatalf("WaitForCancel: %v", err)
+	}
+	if cancelRequested {
+		t.Error("WaitForCancel returned true for a succeeded (terminal) job; the observer " +
+			"would fire a spurious cancel")
+	}
+}

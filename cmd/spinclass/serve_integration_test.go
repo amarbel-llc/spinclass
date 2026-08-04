@@ -1144,8 +1144,10 @@ func TestServeCheckThisSessionAsyncCancel(t *testing.T) {
 	if final == "" {
 		t.Fatalf("job never left running state after cancel; stderr:\n%s", stderr.String())
 	}
-	if !strings.Contains(final, "cancelled") {
-		t.Errorf("expected cancelled status, got:\n%s", final)
+	// An in-process cancel is a producer teardown, so the terminal is `aborted`
+	// (RFC-0018), not the pre-RFC-0018 `cancelled`.
+	if !strings.Contains(final, "aborted") {
+		t.Errorf("expected aborted status, got:\n%s", final)
 	}
 	// The hook (sleep 120) must have been killed, not waited out: the cancel
 	// round-trip completes in seconds and the result carries a ctx-kill
