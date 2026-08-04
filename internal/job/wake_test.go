@@ -37,7 +37,11 @@ func installStub(t *testing.T, argsFile string, ok bool) {
 	if ok {
 		exit = "0"
 	}
-	body := "#!/bin/sh\n{ printf '%s\\n' \"$@\"; echo --; } >> " + argsFile + "\n" +
+	// One atomic append per invocation: a single printf (argv + the "--"
+	// separator) is one write() < PIPE_BUF, so concurrent stub invocations — the
+	// #22 observer's `wait` racing `done` — cannot interleave and corrupt the
+	// separator-delimited parse recordedInvocations relies on.
+	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" '--' >> " + argsFile + "\n" +
 		"if [ \"$1\" = start ]; then echo job-deadbeef; fi\n" +
 		"exit " + exit + "\n"
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
@@ -53,7 +57,11 @@ func installStubWithSpool(t *testing.T, argsFile, spoolPath string) {
 	t.Helper()
 	dir := t.TempDir()
 	script := filepath.Join(dir, "ringmaster")
-	body := "#!/bin/sh\n{ printf '%s\\n' \"$@\"; echo --; } >> " + argsFile + "\n" +
+	// One atomic append per invocation: a single printf (argv + the "--"
+	// separator) is one write() < PIPE_BUF, so concurrent stub invocations — the
+	// #22 observer's `wait` racing `done` — cannot interleave and corrupt the
+	// separator-delimited parse recordedInvocations relies on.
+	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" '--' >> " + argsFile + "\n" +
 		"if [ \"$1\" = start ]; then echo job-deadbeef; fi\n" +
 		"if [ \"$1\" = spool-path ]; then echo " + spoolPath + "; fi\n" +
 		"exit 0\n"
@@ -270,7 +278,11 @@ func installStubObservesCancel(t *testing.T, argsFile string) {
 	t.Helper()
 	dir := t.TempDir()
 	script := filepath.Join(dir, "ringmaster")
-	body := "#!/bin/sh\n{ printf '%s\\n' \"$@\"; echo --; } >> " + argsFile + "\n" +
+	// One atomic append per invocation: a single printf (argv + the "--"
+	// separator) is one write() < PIPE_BUF, so concurrent stub invocations — the
+	// #22 observer's `wait` racing `done` — cannot interleave and corrupt the
+	// separator-delimited parse recordedInvocations relies on.
+	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" '--' >> " + argsFile + "\n" +
 		"if [ \"$1\" = start ]; then echo job-deadbeef; fi\n" +
 		"if [ \"$1\" = wait ]; then printf '%s\\n' '{\"state\":\"running\"}'; fi\n" +
 		"exit 0\n"
@@ -553,7 +565,11 @@ func TestFinishEmitFailureDoesNotAffectJob(t *testing.T) {
 	// Succeed on `start` so dispatch proceeds, fail on `done`.
 	dir := t.TempDir()
 	script := filepath.Join(dir, "ringmaster")
-	body := "#!/bin/sh\n{ printf '%s\\n' \"$@\"; echo --; } >> " + argsFile + "\n" +
+	// One atomic append per invocation: a single printf (argv + the "--"
+	// separator) is one write() < PIPE_BUF, so concurrent stub invocations — the
+	// #22 observer's `wait` racing `done` — cannot interleave and corrupt the
+	// separator-delimited parse recordedInvocations relies on.
+	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" '--' >> " + argsFile + "\n" +
 		"if [ \"$1\" = start ]; then echo job-deadbeef; exit 0; fi\nexit 1\n"
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatalf("write stub ringmaster: %v", err)
