@@ -93,21 +93,23 @@ func registerMCPOnlyCommands(app *command.App) {
 			Params: []command.Param{},
 			Run:    wrapMCPHandler("check-this-session", handleCheckThisSession),
 		})
-		app.AddCommand(&command.Command{
-			Name:  "check-this-session-async",
-			Title: "Check This Session (async)",
-			Description: command.Description{
-				Short: buildCheckAsyncDescription(hookPreview, clown.Enabled()),
-			},
-			Annotations: &protocol.ToolAnnotations{
-				ReadOnlyHint:    protocol.BoolPtr(false),
-				DestructiveHint: protocol.BoolPtr(false),
-				IdempotentHint:  protocol.BoolPtr(false),
-				OpenWorldHint:   protocol.BoolPtr(false),
-			},
-			Params: []command.Param{},
-			Run:    wrapMCPHandler("check-this-session-async", handleCheckThisSessionAsync),
-		})
+		if clown.Enabled() {
+			app.AddCommand(&command.Command{
+				Name:  "check-this-session-async",
+				Title: "Check This Session (async)",
+				Description: command.Description{
+					Short: buildCheckAsyncDescription(hookPreview),
+				},
+				Annotations: &protocol.ToolAnnotations{
+					ReadOnlyHint:    protocol.BoolPtr(false),
+					DestructiveHint: protocol.BoolPtr(false),
+					IdempotentHint:  protocol.BoolPtr(false),
+					OpenWorldHint:   protocol.BoolPtr(false),
+				},
+				Params: []command.Param{},
+				Run:    wrapMCPHandler("check-this-session-async", handleCheckThisSessionAsync),
+			})
+		}
 	} else {
 		app.AddCommand(&command.Command{
 			Name:  "merge-this-session",
@@ -127,58 +129,51 @@ func registerMCPOnlyCommands(app *command.App) {
 			},
 			Run: wrapMCPHandler("merge-this-session", handleMergeThisSession),
 		})
+		if clown.Enabled() {
+			app.AddCommand(&command.Command{
+				Name:  "merge-this-session-async",
+				Title: "Merge This Session (async)",
+				Description: command.Description{
+					Short: buildMergeAsyncDescription(hookPreview),
+				},
+				Annotations: &protocol.ToolAnnotations{
+					ReadOnlyHint:    protocol.BoolPtr(false),
+					DestructiveHint: protocol.BoolPtr(true),
+					IdempotentHint:  protocol.BoolPtr(false),
+					OpenWorldHint:   protocol.BoolPtr(false),
+				},
+				Params: []command.Param{
+					{Name: "local_only", Type: command.Bool, Description: localOnlyParamDesc},
+					{Name: "default_branch", Type: command.String, Description: defaultBranchParamDesc},
+				},
+				Run: wrapMCPHandler("merge-this-session-async", handleMergeThisSessionAsync),
+			})
+		}
+	}
+
+	// session-job-cancel controls the *-async start tools above, which are only
+	// registered under clown; without clown there is no async job to cancel, so
+	// it is clown-gated too. Job status and wait are no longer spinclass's to
+	// serve: an async job IS a ringmaster job (#243), inspected via ringmaster's
+	// own job_status/job_read/job_wait with the id the start tool returns
+	// (session-job-wait retired in #21, session-job-status in #23).
+	if clown.Enabled() {
 		app.AddCommand(&command.Command{
-			Name:  "merge-this-session-async",
-			Title: "Merge This Session (async)",
+			Name:  "session-job-cancel",
+			Title: "Cancel Session Job",
 			Description: command.Description{
-				Short: buildMergeAsyncDescription(hookPreview, clown.Enabled()),
+				Short: "Cancel the current worktree session's running background merge/check job (kills the pre-merge hook subprocess). No-op if nothing is running.",
 			},
 			Annotations: &protocol.ToolAnnotations{
 				ReadOnlyHint:    protocol.BoolPtr(false),
-				DestructiveHint: protocol.BoolPtr(true),
-				IdempotentHint:  protocol.BoolPtr(false),
+				DestructiveHint: protocol.BoolPtr(false),
+				IdempotentHint:  protocol.BoolPtr(true),
 				OpenWorldHint:   protocol.BoolPtr(false),
 			},
-			Params: []command.Param{
-				{Name: "local_only", Type: command.Bool, Description: localOnlyParamDesc},
-				{Name: "default_branch", Type: command.String, Description: defaultBranchParamDesc},
-			},
-			Run: wrapMCPHandler("merge-this-session-async", handleMergeThisSessionAsync),
+			Params: []command.Param{},
+			Run:    wrapMCPHandler("session-job-cancel", handleJobCancel),
 		})
 	}
-
-	// Job poll/cancel tools are always available — they control the *-async
-	// start tools above. status is read-only; cancel is idempotent.
-	app.AddCommand(&command.Command{
-		Name:  "session-job-status",
-		Title: "Session Job Status",
-		Description: command.Description{
-			Short: "Poll the current worktree session's background merge/check job (started by a *-this-session-async tool): reports running|succeeded|failed|cancelled|interrupted, elapsed, last-activity, a tail of live hook output, and the full result when finished. Poll sparingly — only check back after making progress on other work. Do NOT spin in a tight loop waiting on a job with nothing else to do; if that's your situation you should have started the merge/check with the synchronous tool, which blocks and returns the result for you.",
-		},
-		Annotations: &protocol.ToolAnnotations{
-			ReadOnlyHint:    protocol.BoolPtr(true),
-			DestructiveHint: protocol.BoolPtr(false),
-			IdempotentHint:  protocol.BoolPtr(true),
-			OpenWorldHint:   protocol.BoolPtr(false),
-		},
-		Params: []command.Param{},
-		Run:    wrapMCPHandler("session-job-status", handleJobStatus),
-	})
-	app.AddCommand(&command.Command{
-		Name:  "session-job-cancel",
-		Title: "Cancel Session Job",
-		Description: command.Description{
-			Short: "Cancel the current worktree session's running background merge/check job (kills the pre-merge hook subprocess). No-op if nothing is running.",
-		},
-		Annotations: &protocol.ToolAnnotations{
-			ReadOnlyHint:    protocol.BoolPtr(false),
-			DestructiveHint: protocol.BoolPtr(false),
-			IdempotentHint:  protocol.BoolPtr(true),
-			OpenWorldHint:   protocol.BoolPtr(false),
-		},
-		Params: []command.Param{},
-		Run:    wrapMCPHandler("session-job-cancel", handleJobCancel),
-	})
 
 	if len(preMergeSkills) > 0 {
 		app.AddCommand(&command.Command{
@@ -396,7 +391,8 @@ func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prom
 // background goroutine and returns a job id immediately, so the call is never
 // subject to the client's MCP request timeout. Consumes the pre-merge
 // attestation at start, exactly like the synchronous merge-this-session. The
-// result is retrieved via session-job-status.
+// result is retrieved via ringmaster's own surfaces (job_status/job_read/
+// job_wait) using the returned id; only registered under clown.
 func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	var params struct {
 		LocalOnly     bool   `json:"local_only"`
@@ -525,7 +521,7 @@ func startSessionJob(wt, kind string, gitSync bool, fn job.Func) *command.Result
 	j, err := job.Start(wt, kind, gitSync, id, fn)
 	if err != nil {
 		if errors.Is(err, job.ErrAlreadyRunning) {
-			return command.TextErrorResult("a background job is already running for this session; poll session-job-status, or session-job-cancel it first")
+			return command.TextErrorResult("a background job is already running for this session; inspect it via ringmaster (job_status/job_read/job_wait) with its id, or session-job-cancel it first")
 		}
 		return command.TextErrorResult(fmt.Sprintf("could not start background job: %v", err))
 	}
@@ -533,59 +529,9 @@ func startSessionJob(wt, kind string, gitSync bool, fn job.Func) *command.Result
 	// the SAME id the completion wake reports — say so, since the whole point
 	// of adopting it is that an agent can match the two.
 	return command.TextResult(fmt.Sprintf(
-		"started background %s job %q; the completion wake reports this same id. The pre-merge hook is running detached, so this call is not subject to the MCP request timeout. Poll session-job-status for progress and the final result; session-job-cancel to stop it.",
+		"started background %s job %q; the completion wake reports this same id. The pre-merge hook is running detached, so this call is not subject to the MCP request timeout. Inspect progress and the final result via ringmaster's job_status/job_read with that id, or block on it with job_wait; session-job-cancel to stop it.",
 		kind, j.ID,
 	))
-}
-
-// handleJobStatus reports the worktree session's background job.
-func handleJobStatus(_ context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
-	}
-	if !worktree.IsWorktree(cwd) {
-		return command.TextErrorResult("not inside a worktree session"), nil
-	}
-	j, err := job.Read(cwd)
-	if errors.Is(err, os.ErrNotExist) {
-		return command.TextResult("no background job has been started for this session"), nil
-	}
-	if err != nil {
-		return command.TextErrorResult(fmt.Sprintf("could not read job state: %v", err)), nil
-	}
-
-	if j.Status == job.StatusRunning {
-		lastDesc := "n/a"
-		if last := job.LastActivity(cwd); !last.IsZero() {
-			lastDesc = time.Since(last).Round(time.Second).String() + " ago"
-		}
-		body := fmt.Sprintf("job %q (%s): running, elapsed %s, last activity %s",
-			j.ID, j.Kind, j.Elapsed().Round(time.Second), lastDesc)
-		if tail := job.TailLog(cwd, 15); tail != "" {
-			body += "\n--- recent hook output ---\n" + tail
-		}
-		return command.TextResult(body), nil
-	}
-	return renderFinishedJob(j), nil
-}
-
-// renderFinishedJob renders a terminal (non-running) job as the MCP result,
-// mirroring the synchronous tool: a header line plus the stored result payload,
-// surfaced as an error result on failure / interruption. Used by
-// session-job-status.
-func renderFinishedJob(j *job.Job) *command.Result {
-	if j.Status == job.StatusInterrupted {
-		return command.TextErrorResult(fmt.Sprintf(
-			"job %q (%s) was interrupted: the serve process ended mid-run, so the merge/check was cut off. Start a new one.",
-			j.ID, j.Kind,
-		))
-	}
-	header := fmt.Sprintf("job %q (%s): %s, elapsed %s\n", j.ID, j.Kind, j.Status, j.Elapsed().Round(time.Second))
-	if j.ResultIsErr || j.Status != job.StatusSucceeded {
-		return command.TextErrorResult(header + j.ResultText)
-	}
-	return command.TextResult(header + j.ResultText)
 }
 
 // handleJobCancel cancels the worktree session's running background job.
@@ -598,36 +544,26 @@ func handleJobCancel(_ context.Context, _ json.RawMessage, _ command.Prompter) (
 		return command.TextErrorResult("not inside a worktree session"), nil
 	}
 	if job.Cancel(cwd) {
-		return command.TextResult("cancel signal sent; poll session-job-status to confirm the job stopped"), nil
+		return command.TextResult("cancel signal sent; the job tears down and emits its terminal state — confirm via ringmaster's job_status/job_read, or wait for the completion wake"), nil
 	}
 	return command.TextResult("no background job is currently running for this session"), nil
 }
 
 // buildMergeAsyncDescription / buildCheckAsyncDescription mirror their
-// synchronous counterparts but document the non-blocking flow. clownWake
-// (clown.Enabled() at serve startup) selects the guidance: with the
-// job-wakeup channel a completion notification wakes the agent, so the
-// poll-discipline warnings are replaced by the wake contract.
-func buildMergeAsyncDescription(hookPreview string, clownWake bool) string {
-	var base string
-	if clownWake {
-		base = "Non-blocking variant of merge-this-session: starts the merge (including the pre-merge hook) in the background and returns a job id immediately, so the call is never cut off by the MCP request timeout no matter how long the hook runs. Consumes the pre-merge attestation at start, exactly like merge-this-session. The pre-merge hook runs in a dedicated build worktree, not yours, so the session worktree stays free — keep editing and committing there while the job runs; your concurrent edits are simply left for the next merge (never lost, never half-merged). While queued behind the per-repo merge queue (concurrent sessions' merges serialize; FDR 0022), the job log carries `merge queue: waiting behind <session>` heartbeats. This session runs under clown, so a job-wakeup notification ([clown-job] spinclass <job-id> <state>: ...) arrives when the job finishes — start the job, then make progress on other work or simply end your turn; do not poll. Your task list is the test: pending items ⇒ async; empty board ⇒ sync or async-then-end-turn. session-job-status remains available for on-demand inspection; to block on the result instead, use ringmaster's job_wait with the returned job id; session-job-cancel to abort."
-	} else {
-		base = "Non-blocking variant of merge-this-session: starts the merge (including the pre-merge hook) in the background and returns a job id immediately, so the call is never cut off by the MCP request timeout no matter how long the hook runs. Consumes the pre-merge attestation at start, exactly like merge-this-session. The pre-merge hook runs in a dedicated build worktree, not yours, so the session worktree stays free — keep editing and committing there while the job runs; your concurrent edits are simply left for the next merge (never lost, never half-merged). While queued behind the per-repo merge queue (concurrent sessions' merges serialize; FDR 0022), the job log carries `merge queue: waiting behind <session>` heartbeats. Poll session-job-status for progress and the final result; session-job-cancel to abort. Choose this ONLY when you have other independent work to make progress on while the hook runs — then check back via session-job-status occasionally. If you have nothing else to do, call the synchronous merge-this-session instead: it blocks and returns the result with no polling. Do NOT pick async and then spin in a tight session-job-status loop — that wastes turns for no benefit over the synchronous tool."
-	}
+// synchronous counterparts but document the non-blocking flow. The async tools
+// are registered only under clown (registerMCPOnlyCommands), so the job-wakeup
+// contract is always in force here — there is no clown-absent variant, and
+// inspection is via ringmaster's own surfaces (job_status/job_read/job_wait).
+func buildMergeAsyncDescription(hookPreview string) string {
+	base := "Non-blocking variant of merge-this-session: starts the merge (including the pre-merge hook) in the background and returns a job id immediately, so the call is never cut off by the MCP request timeout no matter how long the hook runs. Consumes the pre-merge attestation at start, exactly like merge-this-session. The pre-merge hook runs in a dedicated build worktree, not yours, so the session worktree stays free — keep editing and committing there while the job runs; your concurrent edits are simply left for the next merge (never lost, never half-merged). While queued behind the per-repo merge queue (concurrent sessions' merges serialize; FDR 0022), the job log carries `merge queue: waiting behind <session>` heartbeats. This session runs under clown, so a job-wakeup notification ([clown-job] spinclass <job-id> <state>: ...) arrives when the job finishes — start the job, then make progress on other work or simply end your turn; do not poll. Your task list is the test: pending items ⇒ async; empty board ⇒ sync or async-then-end-turn. Inspect on demand with ringmaster's job_status/job_read using the returned job id (a spinclass async job IS a ringmaster job); to block on the result instead, use ringmaster's job_wait; session-job-cancel to abort."
 	if hookPreview == "" {
 		return base
 	}
 	return base + fmt.Sprintf(" The configured [hooks].pre-merge command is `%s`.", hookPreview)
 }
 
-func buildCheckAsyncDescription(hookPreview string, clownWake bool) string {
-	var base string
-	if clownWake {
-		base = "Non-blocking variant of check-this-session: runs the [hooks].pre-merge command in the background and returns a job id immediately (never cut off by the MCP request timeout). This session runs under clown, so a job-wakeup notification ([clown-job] spinclass <job-id> <state>: ...) arrives when the job finishes — start the job, then make progress on other work or simply end your turn; do not poll. Your task list is the test: pending items ⇒ async; empty board ⇒ sync or async-then-end-turn. session-job-status remains available for on-demand inspection; to block on the result instead, use ringmaster's job_wait with the returned job id; session-job-cancel to abort."
-	} else {
-		base = "Non-blocking variant of check-this-session: runs the [hooks].pre-merge command in the background and returns a job id immediately (never cut off by the MCP request timeout). Poll session-job-status for progress and the result; session-job-cancel to abort. Choose this ONLY when you have other independent work to make progress on while the hook runs — then check back via session-job-status occasionally. If you have nothing else to do, call the synchronous check-this-session instead: it blocks and returns the result with no polling. Do NOT pick async and then spin in a tight session-job-status loop."
-	}
+func buildCheckAsyncDescription(hookPreview string) string {
+	base := "Non-blocking variant of check-this-session: runs the [hooks].pre-merge command in the background and returns a job id immediately (never cut off by the MCP request timeout). This session runs under clown, so a job-wakeup notification ([clown-job] spinclass <job-id> <state>: ...) arrives when the job finishes — start the job, then make progress on other work or simply end your turn; do not poll. Your task list is the test: pending items ⇒ async; empty board ⇒ sync or async-then-end-turn. Inspect on demand with ringmaster's job_status/job_read using the returned job id (a spinclass async job IS a ringmaster job); to block on the result instead, use ringmaster's job_wait; session-job-cancel to abort."
 	if hookPreview == "" {
 		return base
 	}

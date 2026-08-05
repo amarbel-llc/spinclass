@@ -147,9 +147,9 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 	// Tee the hook's output into ringmaster's spool as well, so its native
 	// surface (`ringmaster status --tail`, `ringmaster tail -f`) can show a
 	// running job instead of the `spool_bytes: 0` it reported before
-	// (spinclass#251). job.log stays the system of record and keeps driving
-	// LastActivity's mtime signal, so this is purely additive: every failure
-	// path here leaves the job running with an empty spool, exactly as before.
+	// (spinclass#251). job.log stays the system of record, so this is purely
+	// additive: every failure path here leaves the job running with an empty
+	// spool, exactly as before.
 	out := io.Writer(logf)
 	var spoolf *os.File
 	if clownID != "" {
@@ -250,7 +250,7 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 		_ = Write(wt, j)
 
 		// Terminal wake emit, after the job record is durable (store before
-		// wake — a woken agent reading session-job-status must see the
+		// wake — a woken agent inspecting the job via ringmaster must see the
 		// terminal state). Statuses map 1:1 onto RFC-0009 terminal types.
 		if j.ClownJobID != "" {
 			msg := kind + " " + j.Status
@@ -261,20 +261,16 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 			}
 
 			// Attach the rendered verdict ladder by reference so the wake
-			// carries its own result (#251 piece 2b). Before this the terminal
-			// record's only pointer was `result_ref: "spinclass
-			// session-job-status"` — a wake that says "call my other tool",
-			// which is exactly what made the retire-or-keep question in #251
-			// hard to answer from usage.
-			//
-			// The two are alternatives, not companions: when the blob exists
-			// it IS the result, so repeating a pointer to a tool that serves
-			// the same bytes is noise. result_ref stays as the fallback for a
-			// build with no madder pin, where there is no blob to point at.
+			// carries its own result (#251 piece 2b). The two are alternatives,
+			// not companions: when the blob exists it IS the result, so a pointer
+			// alongside it is noise. result_ref stays as the fallback for a build
+			// with no madder pin, where there is no blob to point at — it now
+			// names ringmaster's own read surface (spinclass's session-job-status
+			// was retired in #23), which resolves against this same job id.
 			resource := storeResultBlob(wt, text, logf)
 			resultRef := ""
 			if resource == "" {
-				resultRef = "spinclass session-job-status"
+				resultRef = "ringmaster read " + j.ClownJobID
 			}
 
 			if cerr := clown.FinishJob(context.Background(), j.ClownJobID, j.Status, msg, resultRef, resource); cerr != nil {
@@ -380,8 +376,10 @@ func WaitDone(wt string) <-chan struct{} {
 	return ch
 }
 
-// TailLog returns up to n trailing lines of the worktree's job log, for
-// surfacing live activity in session-job-status. Missing log -> "".
+// TailLog returns up to n trailing lines of the worktree's job log. Now a
+// test-only helper for asserting job.log content: the live-activity surface it
+// fed, session-job-status, was retired in #23, and ringmaster tails its own
+// spool copy of the same output (#251). Missing log -> "".
 func TailLog(wt string, n int) string {
 	f, err := os.Open(LogPath(wt))
 	if err != nil {

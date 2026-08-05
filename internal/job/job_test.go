@@ -167,9 +167,9 @@ func TestWaitDoneClosesAfterTerminalRecord(t *testing.T) {
 	}
 }
 
-// TestWriteIsAtomicUnderConcurrentReads: session-job-status reads job.json
-// while the job goroutine rewrites it (running -> clown-id -> terminal). A
-// non-atomic write lets a reader observe a truncated file ("unexpected end
+// TestWriteIsAtomicUnderConcurrentReads: a concurrent Read (a WaitDone joiner
+// or a test) races the job goroutine's rewrite (running -> clown-id ->
+// terminal). A non-atomic write lets a reader observe a truncated file ("unexpected end
 // of JSON input" — seen in CI). Hammer concurrent writes/reads: every read
 // must yield either a complete record or (transiently, pre-first-write
 // only) not-exist — never a parse error.

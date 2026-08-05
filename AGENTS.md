@@ -219,13 +219,16 @@ subcommand is always available.
 - **Async merge/check** (`internal/job`): `merge-this-session-async` /
   `check-this-session-async` consume the attestation, launch in a background
   goroutine inside `serve`, return a job id immediately (output →
-  `.spinclass/job.log`, metadata → `.spinclass/job.json`). Inspect via
-  `session-job-status` (read-only) and `session-job-cancel`; to block on
-  completion, use ringmaster's `job_wait` with the returned id — a spinclass
-  async job is a real ringmaster job (spinclass's own `session-job-wait` was
-  retired in favour of it). One active job per session. **Default to the
+  `.spinclass/job.log`, metadata → `.spinclass/job.json`). The `*-async` tools
+  (and `session-job-cancel`) are registered **only under clown** — an async job
+  IS a ringmaster job (#243), so without clown there is nothing to observe or
+  wake on and only the synchronous merge/check exist. Inspect a running job via
+  ringmaster's own `job_status`/`job_read`, or block with `job_wait`, using the
+  id the start tool returns; `session-job-cancel` stops it. spinclass's own
+  `session-job-wait` and `session-job-status` were retired in favour of those
+  ringmaster surfaces (#21, #23). One active job per session. **Default to the
   synchronous tools** — reach for async only when you have other work to do
-  while the hook runs; never start async then hot-poll status.
+  while the hook runs; never start async then hot-poll.
 - **Clown job-wakeup emits** (FDR 0010, `internal/clown`): the `ringmaster start`
   allocation happens **before** the job goroutine launches, so the id returned at
   dispatch IS the id the completion wake carries (#243) — previously the two

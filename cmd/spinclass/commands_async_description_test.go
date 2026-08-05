@@ -5,51 +5,41 @@ import (
 	"testing"
 )
 
-func TestBuildMergeAsyncDescription_NoClownKeepsPollGuidance(t *testing.T) {
-	got := buildMergeAsyncDescription("just", false)
-	if !strings.Contains(got, "Do NOT pick async") {
-		t.Fatalf("no-clown description lost the anti-polling guidance: %q", got)
+// The async tools are registered only under clown (registerMCPOnlyCommands), so
+// the description always documents the job-wakeup contract — there is no
+// clown-absent variant. Inspection points at ringmaster's own surfaces, and the
+// retired session-job-status must never reappear.
+func TestBuildMergeAsyncDescription(t *testing.T) {
+	got := buildMergeAsyncDescription("just")
+	if !strings.Contains(got, "job-wakeup") {
+		t.Fatalf("description missing wake guidance: %q", got)
 	}
-	if strings.Contains(got, "job-wakeup") {
-		t.Fatalf("no-clown description mentions the wake it cannot deliver: %q", got)
+	if !strings.Contains(got, "task list is the test") {
+		t.Fatalf("description missing the task-list decision clause: %q", got)
+	}
+	if !strings.Contains(got, "job_status") {
+		t.Fatalf("description should point inspection at ringmaster's job_status: %q", got)
+	}
+	if strings.Contains(got, "session-job-status") {
+		t.Fatalf("description references the retired session-job-status: %q", got)
 	}
 	if !strings.Contains(got, "`just`") {
 		t.Fatalf("description lost the hook preview: %q", got)
 	}
 }
 
-func TestBuildMergeAsyncDescription_ClownWakeGuidance(t *testing.T) {
-	got := buildMergeAsyncDescription("just", true)
+func TestBuildCheckAsyncDescription(t *testing.T) {
+	got := buildCheckAsyncDescription("")
 	if !strings.Contains(got, "job-wakeup") {
-		t.Fatalf("clown description missing wake guidance: %q", got)
-	}
-	if strings.Contains(got, "Do NOT pick async") {
-		t.Fatalf("clown description kept the anti-async warning that no longer applies: %q", got)
-	}
-	if !strings.Contains(got, "`just`") {
-		t.Fatalf("description lost the hook preview: %q", got)
+		t.Fatalf("description missing wake guidance: %q", got)
 	}
 	if !strings.Contains(got, "task list is the test") {
-		t.Fatalf("clown description missing the task-list decision clause: %q", got)
+		t.Fatalf("description missing the task-list decision clause: %q", got)
 	}
-}
-
-func TestBuildCheckAsyncDescription_NoClownKeepsPollGuidance(t *testing.T) {
-	got := buildCheckAsyncDescription("", false)
-	if !strings.Contains(got, "Do NOT pick async") {
-		t.Fatalf("no-clown description lost the anti-polling guidance: %q", got)
+	if !strings.Contains(got, "job_status") {
+		t.Fatalf("description should point inspection at ringmaster's job_status: %q", got)
 	}
-}
-
-func TestBuildCheckAsyncDescription_ClownWakeGuidance(t *testing.T) {
-	got := buildCheckAsyncDescription("", true)
-	if !strings.Contains(got, "job-wakeup") {
-		t.Fatalf("clown description missing wake guidance: %q", got)
-	}
-	if strings.Contains(got, "Do NOT pick async") {
-		t.Fatalf("clown description kept the anti-async warning: %q", got)
-	}
-	if !strings.Contains(got, "task list is the test") {
-		t.Fatalf("clown description missing the task-list decision clause: %q", got)
+	if strings.Contains(got, "session-job-status") {
+		t.Fatalf("description references the retired session-job-status: %q", got)
 	}
 }

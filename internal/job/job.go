@@ -1,9 +1,9 @@
 // Package job tracks background merge/check jobs started by the async MCP
 // tools (merge-this-session-async / check-this-session-async). State lives
 // worktree-local under <worktree>/.spinclass/ alongside session state, with
-// the pre-merge hook's live output streamed to a sibling job.log so
-// session-job-status can tail it and derive a last-activity timestamp from
-// the log's mtime.
+// the pre-merge hook's live output streamed to a sibling job.log that is also
+// teed into ringmaster's spool (#251), so a job is tailable via ringmaster's
+// own surfaces (spinclass's session-job-status was retired in #23).
 package job
 
 import (
@@ -62,8 +62,9 @@ func LogPath(wt string) string { return filepath.Join(wt, ".spinclass", "job.log
 
 // Write persists j to the worktree's job.json, creating .spinclass on
 // demand. The write is atomic (temp file + rename, mirroring chat.Send) so a
-// concurrent reader — session-job-status polls while the job goroutine
-// rewrites the record — never observes a truncated file.
+// concurrent reader never observes a truncated file — the job goroutine
+// rewrites the record (running -> clown-id -> terminal) while WaitDone callers
+// and tests may Read it.
 func Write(wt string, j *Job) error {
 	if wt == "" {
 		return errors.New("job.Write: worktree path required")
@@ -114,23 +115,6 @@ func Read(wt string) (*Job, error) {
 		j.Status = StatusInterrupted
 	}
 	return &j, nil
-}
-
-// Elapsed returns how long the job ran (or has been running).
-func (j *Job) Elapsed() time.Duration {
-	if j.EndedAt != nil {
-		return j.EndedAt.Sub(j.StartedAt)
-	}
-	return time.Since(j.StartedAt)
-}
-
-// LastActivity returns the mtime of the job log (when the hook last produced
-// output), or the job's start time if the log isn't present yet.
-func LastActivity(wt string) time.Time {
-	if info, err := os.Stat(LogPath(wt)); err == nil {
-		return info.ModTime()
-	}
-	return time.Time{}
 }
 
 // alive reports whether pid is a live process (mirrors session.IsAlive,

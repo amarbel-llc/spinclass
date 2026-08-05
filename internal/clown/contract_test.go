@@ -139,7 +139,7 @@ func TestRingmasterJobLifecycleContract(t *testing.T) {
 	// Terminal emit with nothing listening. This is the sandbox's condition
 	// and the common one in production too — a wake with no monitor bound
 	// must not be an error, or every job would report a spurious failure.
-	if err := FinishJob(ctx, id, "succeeded", "merge succeeded", "spinclass session-job-status"); err != nil {
+	if err := FinishJob(ctx, id, "succeeded", "merge succeeded", "ringmaster read "+id); err != nil {
 		t.Fatalf("FinishJob with no monitor listening: %v", err)
 	}
 
@@ -204,7 +204,7 @@ func TestRingmasterDoneSkipsEmptyResources(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartJob: %v", err)
 	}
-	if err := FinishJob(ctx, id, "succeeded", "check succeeded", "spinclass session-job-status", ""); err != nil {
+	if err := FinishJob(ctx, id, "succeeded", "check succeeded", "ringmaster read "+id, ""); err != nil {
 		t.Fatalf("FinishJob with an empty resource: %v", err)
 	}
 

@@ -292,7 +292,6 @@ const (
 	checkThisSessionToolName      = "mcp__plugin_spinclass_spinclass__check-this-session"
 	mergeThisSessionAsyncToolName = "mcp__plugin_spinclass_spinclass__merge-this-session-async"
 	checkThisSessionAsyncToolName = "mcp__plugin_spinclass_spinclass__check-this-session-async"
-	sessionJobStatusToolName      = "mcp__plugin_spinclass_spinclass__session-job-status"
 	sessionJobCancelToolName      = "mcp__plugin_spinclass_spinclass__session-job-cancel"
 	nothingButTheTruthToolName    = "mcp__plugin_spinclass_spinclass__nothing-but-the-truth"
 	listToolName                  = "mcp__plugin_spinclass_spinclass__list"
@@ -335,11 +334,10 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 
 	switch input.ToolName {
 	case listToolName, updateDescriptionToolName, validateToolName,
-		sessionJobStatusToolName, sessionJobCancelToolName,
-		closeChildSessionToolName:
-		// Benign, session-scoped spinclass tools: list, validate, and
-		// session-job-status are read-only; update-this-session-description and
-		// session-job-cancel only mutate spinclass's own session/job metadata.
+		sessionJobCancelToolName, closeChildSessionToolName:
+		// Benign, session-scoped spinclass tools: list and validate are
+		// read-only; update-this-session-description and session-job-cancel only
+		// mutate spinclass's own session/job metadata.
 		// close-child-session reaches here only WITHOUT force (the check above
 		// caught the forcing case), where close.RunResolved still refuses a
 		// child holding unmerged work and the caller is already restricted to

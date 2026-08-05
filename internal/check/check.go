@@ -76,9 +76,10 @@ func Run(rep *crap.Reporter, wtPath string) ([]BlobLink, error) {
 // RunContext is Run bound to ctx, with an optional activity writer that
 // receives the pre-merge hook's live output in addition to the normal
 // madder/ring/record plumbing. The async job runner passes its job log as
-// activity so session-job-status can tail live progress and derive a
-// last-activity timestamp; synchronous callers use Run (background ctx, nil
-// activity). ctx cancellation kills the hook subprocess.
+// activity; that log is teed into ringmaster's spool so a running job is
+// tailable via ringmaster's own surfaces (spinclass#251). Synchronous callers
+// use Run (background ctx, nil activity). ctx cancellation kills the hook
+// subprocess.
 //
 // RunContext owns its result-family stream: it opens a TestStream (plan 0
 // — the hook stage is an execution Phase, not a test point) and finishes it

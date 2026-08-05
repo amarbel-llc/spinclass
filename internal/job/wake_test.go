@@ -227,7 +227,7 @@ func TestStartEmitsClownLifecycleOnSuccess(t *testing.T) {
 		"done", "job-deadbeef",
 		"--state", "succeeded",
 		"--message", "merge succeeded",
-		"--result-ref", "spinclass session-job-status",
+		"--result-ref", "ringmaster read job-deadbeef",
 	})
 
 	j, err := Read(wt)
@@ -253,7 +253,7 @@ func TestStartEmitsFailedStateWithFailureLine(t *testing.T) {
 		"done", "job-deadbeef",
 		"--state", "failed",
 		"--message", "check failed: ✗ pre-merge hook",
-		"--result-ref", "spinclass session-job-status",
+		"--result-ref", "ringmaster read job-deadbeef",
 	})
 }
 
@@ -285,7 +285,7 @@ func TestStartEmitsAbortedStateOnCancel(t *testing.T) {
 		"done", "job-deadbeef",
 		"--state", "aborted",
 		"--message", "merge aborted",
-		"--result-ref", "spinclass session-job-status",
+		"--result-ref", "ringmaster read job-deadbeef",
 	})
 }
 
@@ -399,11 +399,12 @@ func TestStartDoesNotWaitForTheJobBody(t *testing.T) {
 // #251: the hook's output is teed into ringmaster's spool, so its native
 // surface (`ringmaster status --tail`, `tail -f`) can show a running job.
 // Before this, ringmaster reported `spool_bytes: 0` for every spinclass job
-// and the wake's result_ref pointed back at session-job-status.
+// and the wake's result_ref pointed back at spinclass's own status tool (since
+// retired, #23).
 //
 // job.log stays the system of record and must keep receiving the same bytes —
-// LastActivity's mtime signal and TailLog both read it — so both destinations
-// are asserted rather than just the new one.
+// TailLog reads it back here — so both destinations are asserted rather than
+// just the new one.
 func TestStartTeesHookOutputToRingmasterSpool(t *testing.T) {
 	wt := t.TempDir()
 	argsFile := filepath.Join(t.TempDir(), "args")
@@ -477,7 +478,7 @@ func TestStartReturnsRingmasterJobID(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("job did not finish in time")
 	}
-	// The persisted record agrees, so session-job-status reports the same id.
+	// The persisted record agrees, so a Read (and ringmaster) report the same id.
 	j, err := Read(wt)
 	if err != nil {
 		t.Fatalf("Read: %v", err)

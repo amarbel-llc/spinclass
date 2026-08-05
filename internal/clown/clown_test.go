@@ -112,7 +112,7 @@ func TestFinishJobArgv(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
 	t.Setenv("RINGMASTER_BIN", stubRingmaster(t, argsFile, "", true))
 
-	err := FinishJob(context.Background(), "merge-9f3c1a2b", "succeeded", "merge landed", "spinclass session-job-status")
+	err := FinishJob(context.Background(), "merge-9f3c1a2b", "succeeded", "merge landed", "ringmaster read merge-9f3c1a2b")
 	if err != nil {
 		t.Fatalf("FinishJob: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestFinishJobArgv(t *testing.T) {
 		"done", "merge-9f3c1a2b",
 		"--state", "succeeded",
 		"--message", "merge landed",
-		"--result-ref", "spinclass session-job-status",
+		"--result-ref", "ringmaster read merge-9f3c1a2b",
 	})
 }
 

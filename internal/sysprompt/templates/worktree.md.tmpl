@@ -94,8 +94,8 @@ If the board is empty, either call the synchronous tool (simplest) or
 go async and end your turn — the wake re-invokes you when the job
 finishes.
 
-Never start an async job and poll `session-job-status` in a loop. If
-you went async and ran out of other work with the job near
-completion, ringmaster's `job_wait` (with the job id the async tool
-returned) blocks for the result; for a job with real time remaining,
-end your turn and let the wake arrive.
+Never poll in a tight loop. If you went async and ran out of other
+work with the job near completion, ringmaster's `job_wait` (with the
+job id the async tool returned) blocks for the result; inspect on
+demand with ringmaster's `job_status` / `job_read`. For a job with
+real time remaining, end your turn and let the wake arrive.
