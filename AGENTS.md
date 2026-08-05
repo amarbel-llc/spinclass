@@ -314,6 +314,13 @@ subcommand is always available.
   under the job's own ctx, so `clearRunning`'s `cancel()` tears down its
   `ringmaster wait` subprocess when the job ends by any other path (no separate
   cancel to track — which also sidesteps a govet `lostcancel` false positive).
+  `clearRunning` then **joins** the observer (`<-observerDone`) after `cancel()`
+  and before closing `done`, so a woken `WaitDone` caller is guaranteed the
+  observer subprocess is already reaped — cancel() SIGKILLs it, so the join
+  cannot hang. Without the join a completed job could report done with the
+  subprocess still alive; in tests that surfaced as the stub still writing into a
+  `t.TempDir()` during `RemoveAll` (an `ENOTEMPTY` race seen only under the eng
+  checkPhase's load, never in a faster devshell).
 - **Dynamic system-prompt fragment** (spinclass#187, clown plugin protocol
   RFC-0002 §5, `internal/sysprompt`): `serve` advertises an MCP `prompts`
   capability and answers `prompts/get` for the well-known `system-prompt-append`
