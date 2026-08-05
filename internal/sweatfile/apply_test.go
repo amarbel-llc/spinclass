@@ -2,6 +2,7 @@ package sweatfile
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/embeds"
 	"code.linenisgreat.com/spinclass/internal/testfs"
 	"code.linenisgreat.com/spinclass/internal/testgit"
@@ -822,6 +824,62 @@ func TestRunPreMergeHookExecutes(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); os.IsNotExist(err) {
 		t.Error("expected pre-merge hook to run and create marker file")
+	}
+}
+
+// With a job id in ctx (the pre-merge hook's #25 scope signal) but the scope
+// tier disabled, the hook must run BARE — the systemd-run wrap is a no-op when
+// ScopeArgv reports unavailable, so a host without a systemd user bus (or with
+// RINGMASTER_DISABLE_SCOPE) still runs the hook normally. Guards against a
+// scopeJobID-set path accidentally prepending a prefix that isn't runnable. The
+// wrap-active path needs a live user bus and is dogfooded, not covered here.
+func TestRunPreMergeHookScopeDisabledRunsBare(t *testing.T) {
+	t.Setenv("RINGMASTER_DISABLE_SCOPE", "1")
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "pre-merge-ran")
+
+	cmd := "touch " + marker
+	sf := Sweatfile{Hooks: &Hooks{PreMerge: &cmd}}
+
+	ctx := clown.WithJobID(context.Background(), "merge-9f3c1a2b")
+	if err := sf.RunPreMergeHookContext(ctx, dir, io.Discard); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := os.Stat(marker); os.IsNotExist(err) {
+		t.Error("expected pre-merge hook to run bare (scope disabled) and create marker")
+	}
+}
+
+// TestRunPreMergeHookScopeActiveWrapsInCgroup validates the wrap-ACTIVE path on
+// a host with a systemd user bus: the pre-merge hook runs inside its
+// ringmaster-<id>.scope, so the hook process's own cgroup carries that unit
+// name. Skips when the scope tier is unavailable (the checkPhase sandbox and
+// macOS have no user bus), so it exercises the real path on a Linux dev host and
+// is a clean no-op in CI. This is the only automated coverage of the wrap
+// actually taking effect.
+func TestRunPreMergeHookScopeActiveWrapsInCgroup(t *testing.T) {
+	jobID := "merge-scopetest1"
+	if _, ok := clown.ScopeArgv(jobID); !ok {
+		t.Skip("scope tier unavailable (no systemd user bus); active-path test skipped")
+	}
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "cgroup")
+
+	cmd := "cat /proc/self/cgroup > " + marker
+	sf := Sweatfile{Hooks: &Hooks{PreMerge: &cmd}}
+
+	ctx := clown.WithJobID(context.Background(), jobID)
+	if err := sf.RunPreMergeHookContext(ctx, dir, io.Discard); err != nil {
+		t.Fatalf("scoped pre-merge hook: %v", err)
+	}
+	content, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("reading cgroup marker: %v", err)
+	}
+	want := clown.ScopeUnitName(jobID)
+	if !strings.Contains(string(content), want) {
+		t.Errorf("hook cgroup %q does not contain the scope unit %q",
+			strings.TrimSpace(string(content)), want)
 	}
 }
 

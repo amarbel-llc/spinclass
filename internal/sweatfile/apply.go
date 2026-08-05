@@ -19,6 +19,7 @@ import (
 
 	"github.com/charmbracelet/log"
 
+	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/direnv"
 )
 
@@ -258,13 +259,15 @@ func (sf Sweatfile) RunPostMergeHookContext(ctx context.Context, dir string, ext
 		// Cap explicitly disabled: no deadline, and no WaitDelay either — the
 		// operator asked for an unbounded hook, so draining a lingering child's
 		// output is not ours to truncate.
-		return runHookInDirEnv(ctx, cmd, dir, dir, extraEnv, 0, w)
+		// scopeJobID "" — post-merge is deliberately unscoped so a control-group
+		// kill never reaps the detached children FDR 0023 sanctions for slow deploys.
+		return runHookInDirEnv(ctx, cmd, dir, dir, extraEnv, 0, "", w)
 	}
 
 	hookCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	err := runHookInDirEnv(hookCtx, cmd, dir, dir, extraEnv, postMergeWaitDelay, w)
+	err := runHookInDirEnv(hookCtx, cmd, dir, dir, extraEnv, postMergeWaitDelay, "", w)
 	switch {
 	// Only OUR deadline yields the cap message: if the caller's ctx is also
 	// done, the kill is theirs (a cancelled job) and keeps its own error.
@@ -422,18 +425,32 @@ func runHookContext(ctx context.Context, cmd *string, worktreePath string, w io.
 // `direnv allow` record, whereas the session worktree has both (writeEnvrc +
 // `direnv allow` at `sc start`). See spinclass#198 and FDR 0013.
 func runHookInDir(ctx context.Context, cmd *string, envDir, runDir string, w io.Writer) error {
-	return runHookInDirEnv(ctx, cmd, envDir, runDir, nil, 0, w)
+	// The pre-merge hook runs under the async job's ctx, which carries the job id
+	// (clown.WithJobID, set in job.Start); reading it here scopes that hook (#25),
+	// while repair/create/attach/detach — run under context.Background — get "" and
+	// stay unscoped. Post-merge calls runHookInDirEnv directly with "" so FDR 0023
+	// detached children are not caught in a control-group scope kill.
+	return runHookInDirEnv(ctx, cmd, envDir, runDir, nil, 0, clown.JobIDFromContext(ctx), w)
 }
 
-// runHookInDirEnv is runHookInDir with two extras, both used only by the
-// post-merge hook; every other hook passes the zero values via runHookInDir.
+// runHookInDirEnv is runHookInDir with three extras; every hook that needs none
+// passes the zero values via runHookInDir.
 //
 // extraEnv is appended to the hook's environment (after os.Environ and
 // WORKTREE, so it wins on duplicate keys) to publish the landed sha and push
-// state the hook acts on.
+// state the hook acts on. Used only by the post-merge hook.
 //
 // waitDelay, when non-zero, tightens the post-exit drain bound below the
 // default cancelGrace; callers that do not care pass 0 and get cancelGrace.
+// Used only by the post-merge hook.
+//
+// scopeJobID, when non-empty AND the scope tier is available, runs the hook
+// inside its transient systemd scope (#25, RFC-0016): the argv is prefixed with
+// clown.ScopeArgv's `systemd-run --user --scope …` so a wedged or detached hook
+// subtree is reaped as a control group on cancel (via clown.ScopeStop below),
+// above the SIGTERM/WaitDelay floor. Only the pre-merge path passes it non-empty
+// (runHookInDir reads the job id from ctx); post-merge passes "" so its
+// FDR-0023 detached children are not caught in the control-group kill.
 //
 // Cancellation semantics matter more than they look, and were measured
 // (spinclass#188). exec.CommandContext's DEFAULT Cancel is Process.Kill() —
@@ -456,7 +473,7 @@ func runHookInDir(ctx context.Context, cmd *string, envDir, runDir string, w io.
 // slow post-merge deploy without holding the merge lock. Residual: a hook
 // whose top process swallows SIGTERM without propagating leaves its
 // descendants orphaned, and only the pipes are reclaimed.
-func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, extraEnv []string, waitDelay time.Duration, w io.Writer) error {
+func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, extraEnv []string, waitDelay time.Duration, scopeJobID string, w io.Writer) error {
 	if cmd == nil || *cmd == "" {
 		return nil
 	}
@@ -492,6 +509,20 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 		}
 	}
 
+	// #25: when a job id is present and the scope tier is available, wrap the
+	// whole command (outermost) in the job's transient systemd scope, so a hook
+	// subtree that ignores SIGTERM is still reaped as a control group by the
+	// ScopeStop on cancel below. Prepended AFTER the direnv wrap so systemd-run is
+	// argv[0]. Unavailable (no systemd user bus, or RINGMASTER_DISABLE_SCOPE) means
+	// the hook runs bare and the #26 flock stays the liveness floor.
+	scoped := false
+	if scopeJobID != "" {
+		if prefix, ok := clown.ScopeArgv(scopeJobID); ok {
+			argv = append(append([]string(nil), prefix...), argv...)
+			scoped = true
+		}
+	}
+
 	c := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	c.Dir = runDir
 	// Inherit os.Environ so SPINCLASS_* variables set by callers (or by
@@ -513,7 +544,21 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 		c.WaitDelay = waitDelay
 	}
 
-	return c.Run()
+	err := c.Run()
+	if scoped && ctx.Err() != nil {
+		// The hook's ctx was cancelled (inactivity watchdog, #22 observer, or
+		// session-job-cancel). SIGTERM + WaitDelay already fired at the front
+		// systemd-run process; stop the scope to reap the whole cgroup as the
+		// backstop for a subtree that ignored SIGTERM. Fresh bounded ctx (the
+		// hook ctx is already cancelled); the job is ending, so a failed stop is
+		// logged, not surfaced.
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), cancelGrace)
+		defer stopCancel()
+		if serr := clown.ScopeStop(stopCtx, scopeJobID); serr != nil {
+			_, _ = fmt.Fprintf(w, "[clown] scope stop failed: %v\n", serr)
+		}
+	}
+	return err
 }
 
 func stripEmptyLines(s string) string {

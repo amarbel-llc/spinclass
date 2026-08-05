@@ -138,6 +138,11 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 		}
 		clownID = cid
 		id = cid
+		// Carry the job id on the ctx handed to fn (and the observer) so the
+		// pre-merge hook can run inside this job's transient systemd scope (#25):
+		// sweatfile's runHookInDir reads it via clown.JobIDFromContext. Post-merge
+		// runs under the same ctx but deliberately does not scope (FDR 0023).
+		ctx = clown.WithJobID(ctx, clownID)
 	}
 
 	j := &Job{

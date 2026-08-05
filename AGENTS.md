@@ -430,6 +430,30 @@ subcommand is always available.
   `cancelGrace` (10s) is the SIGKILL escalation for a hook that swallows
   SIGTERM. Deliberately **no `Setpgid`**: a group kill would reap the detached
   children FDR 0023 sanctions for slow post-merge deploys.
+- **Pre-merge hook systemd scope** (#25, ringmaster#12/RFC-0016 §3-4,
+  `internal/clown` + `sweatfile.runHookInDirEnv`): the `no Setpgid` decision
+  above leaves a residual — a hook whose top process swallows SIGTERM orphans
+  its descendants. So the **pre-merge** hook runs inside a transient systemd
+  scope: `clown.ScopeArgv(jobID)` prepends `systemd-run --user --scope
+  --unit=ringmaster-<id>.scope --property=KillMode=control-group --` (outermost,
+  after the direnv wrap), and on cancel `runHookInDirEnv` calls
+  `clown.ScopeStop` (`systemctl --user stop <unit>`) to reap the whole cgroup —
+  the backstop above the #188 SIGTERM/`WaitDelay` floor, which stays. Producer-
+  called and **RFC-0016 §4.2-safe**: ringmaster only supplies the argv + unit
+  name (`ScopeUnitName`, the single derivation site), never decides to kill and
+  is not in the `status` path, so cancel and status stay platform-uniform. The
+  job id reaches the hook via a ctx value — `clown.WithJobID` set in `job.Start`,
+  read by `runHookInDir` via `clown.JobIDFromContext`; this scopes **only** the
+  pre-merge hook (post-merge calls `runHookInDirEnv` directly with `""` so its
+  FDR-0023 detached children are never caught in the control-group kill; repair/
+  create/attach/detach run under `context.Background` so carry no id). Async is
+  clown-only, so a job id is present exactly when there is a ringmaster job to
+  scope. Availability-gated by `jobwake.ScopeArgv` (systemd-run on PATH +
+  reachable user manager + session bus, off under `RINGMASTER_DISABLE_SCOPE`);
+  unavailable ⇒ the hook runs **bare** and the #26 flock stays the liveness
+  floor. The wrap-active path needs a systemd user bus, absent in the nix
+  checkPhase sandbox and on macOS, so CI covers only the disabled/bare path +
+  the unit-name derivation + the ctx threading; the active path is dogfooded.
 - **Base-branch freshening at creation** (#250, `internal/basebranch`): a fresh
   session's branch is cut from the repo's **default branch**, fetched and
   fast-forwarded first, passed to `git worktree add -b` as an explicit sha.
@@ -531,5 +555,6 @@ Module: `code.linenisgreat.com/spinclass`.
 - `code.linenisgreat.com/tommy` — TOML library.
 - `code.linenisgreat.com/ringmaster/pkgs/jobwake` — the linked half of the
   job platform: `AcquireJobLock` (per-job liveness flock) + `ProtocolVersion`
-  (the serve-start compatibility pin), consumed by `internal/clown` (#26). The
+  (the serve-start compatibility pin), consumed by `internal/clown` (#26), plus
+  the scope-tier helpers `ScopeArgv`/`ScopeStop`/`ScopeUnitName` (#25). The
   runtime CLI is resolved from PATH, not this import.

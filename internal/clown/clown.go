@@ -288,3 +288,58 @@ func WaitForCancel(ctx context.Context, jobID string) (cancelRequested bool, err
 func AcquireJobLock(jobID string) (func() error, error) {
 	return jobwake.AcquireJobLock("", jobID)
 }
+
+// ScopeArgv returns the `systemd-run --user --scope --unit=… --property=
+// KillMode=control-group --` prefix a producer prepends to its own hook command
+// to run it inside the job's transient scope (RFC-0016 §3/§4), together with
+// whether the scope tier is available on this host. When the bool is false the
+// caller runs the hook bare — the #26 AcquireJobLock liveness floor still
+// applies on every platform. Producer-called and RFC-0016 §4.2-safe: ringmaster
+// only supplies the argv, it never decides to kill and is not in the `status`
+// path, so cancel and status stay platform-uniform. Availability is a cheap
+// best-effort pre-check (systemd-run on PATH + a reachable user manager +
+// session bus, unless RINGMASTER_DISABLE_SCOPE is set), not a guarantee — a
+// spawn failure still falls back to the bare command.
+func ScopeArgv(jobID string) ([]string, bool) {
+	return jobwake.ScopeArgv(jobID)
+}
+
+// ScopeStop reaps a job's scope cgroup — `systemctl --user stop
+// ringmaster-<job-id>.scope` — as the cancellation backstop above spinclass's
+// #188 SIGTERM teardown: it guarantees a hook subtree (a detached `nix`, a
+// wedged builder) is gone even if the top process swallowed SIGTERM. Returns
+// ErrScopeUnavailable when the tier is off, so a caller need not pre-check; ctx
+// bounds the call (the stop SIGTERMs then SIGKILLs the cgroup, up to the unit's
+// stop timeout). Consumer/observer affordance only — ringmaster's own cancel
+// path never calls it (RFC-0016 §4.2).
+func ScopeStop(ctx context.Context, jobID string) error {
+	return jobwake.ScopeStop(ctx, jobID)
+}
+
+// ScopeUnitName is the transient scope unit name a job's hook runs under
+// (`ringmaster-<job-id>.scope`, RFC-0016 §3), computed in exactly one place so a
+// stopper names the identical unit the producer created rather than re-spelling
+// the convention.
+func ScopeUnitName(jobID string) string {
+	return jobwake.ScopeUnitName(jobID)
+}
+
+// jobIDKey types the context key that carries an async job's id from job.Start
+// down to the pre-merge hook exec, so the hook can be wrapped in the job's scope
+// (#25) without threading the id through the merge/check call chain.
+type jobIDKey struct{}
+
+// WithJobID returns ctx carrying the async job id. job.Start sets it on the
+// context handed to the job function; the pre-merge hook exec reads it back via
+// JobIDFromContext to scope the hook. Post-merge deliberately does NOT consult
+// it — a control-group scope kill would reap the detached children FDR 0023
+// sanctions for slow deploys.
+func WithJobID(ctx context.Context, jobID string) context.Context {
+	return context.WithValue(ctx, jobIDKey{}, jobID)
+}
+
+// JobIDFromContext returns the async job id set by WithJobID, or "" if none.
+func JobIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(jobIDKey{}).(string)
+	return id
+}
