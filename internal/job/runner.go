@@ -67,13 +67,26 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 	// race-free.
 	var releaseFlock func() error
 
+	// observerDone is closed by the cancel-observer goroutine when it returns.
+	// Set by reference (like releaseFlock) only when that goroutine launches, so
+	// it is nil on the early-return paths and non-nil once there is an observer
+	// to join. The assignment happens-before the job goroutine launches, so
+	// clearRunning's read from that goroutine is race-free.
+	var observerDone chan struct{}
+
 	// clearRunning runs exactly once per Start (an early-return path OR the
-	// goroutine's defer, never both). The cancel() here also tears down the
-	// cancel observer, whose `ringmaster wait` runs under this same ctx.
-	// Releasing the flock after the goroutine body has written the final job
-	// record (defers run LIFO, so this registered-first defer runs last) keeps
-	// the "lock held ⟺ job running" invariant the probe relies on. Closing done
-	// last lets WaitDone callers Read the terminal status the moment they wake.
+	// goroutine's defer, never both). cancel() tears down the cancel observer,
+	// whose `ringmaster wait` runs under this same ctx; clearRunning then JOINS
+	// that observer (<-observerDone) before closing done, so a woken WaitDone
+	// caller is guaranteed the observer's subprocess is already reaped. Without
+	// the join the subprocess can outlive the (possibly instant) job body and
+	// still be writing when a woken caller acts — in tests that is a t.TempDir
+	// RemoveAll racing the stub's writes (ENOTEMPTY, seen only under load); in
+	// production it is a job reporting done with a child still alive. Releasing
+	// the flock after the goroutine body has written the final job record (defers
+	// run LIFO, so this registered-first defer runs last) keeps the "lock held ⟺
+	// job running" invariant the probe relies on. Closing done last lets WaitDone
+	// callers Read the terminal status the moment they wake.
 	clearRunning := func() {
 		mu.Lock()
 		delete(running, wt)
@@ -81,6 +94,9 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 		cancel()
 		if releaseFlock != nil {
 			_ = releaseFlock()
+		}
+		if observerDone != nil {
+			<-observerDone
 		}
 		close(done)
 	}
@@ -200,7 +216,9 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 	// kills the `ringmaster wait` subprocess and this goroutine exits — no
 	// separate cancel to track.
 	if clownID != "" {
+		observerDone = make(chan struct{})
 		go func() {
+			defer close(observerDone)
 			canceled, werr := clown.WaitForCancel(ctx, clownID)
 			if werr != nil {
 				// ctx cancelled (the job ended first) or the runtime ringmaster
