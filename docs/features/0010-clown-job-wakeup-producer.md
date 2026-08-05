@@ -73,20 +73,25 @@ plumbing.
 
 `internal/clown` is the producer-side integration; everything funnels
 through the clown CLI located via `$CLOWN_BIN` (exported by clown into
-every plugin MCP server) with a `PATH` fallback. Spinclass state remains
-the system of record for job *results*; the clown journal is the wake
-layer — but see the **id adoption** amendment below, which makes the
-start emit load-bearing rather than purely additive.
+every plugin MCP server) with a `PATH` fallback. Spinclass's `job.json`
+remains the durable local record of a job's *result*; the clown journal is
+the wake layer — but see the **id adoption** and **pull-surface retirement**
+amendments below: the first makes the start emit load-bearing rather than
+purely additive, the second moves agent-facing job *observability* off
+spinclass's own tools and onto ringmaster's surfaces.
 
 **Background-job lifecycle emits** (`merge-this-session-async` /
 `check-this-session-async`): gated on **presence** — `CLOWN_BIN` set
 means "running under clown, may emit"; there is no spinclass-side
 switch. Spinclass emits `ringmaster start --label merge|check --source
 spinclass` and, after the terminal record is durable, `ringmaster done
---state succeeded|failed|cancelled --message <summary> --result-ref
-"spinclass session-job-status"`. The agent is woken with one
-notification line; the failed-state message carries the first `not ok`
-line of the result when present. The synchronous tools emit nothing —
+--state succeeded|failed|aborted --message <summary>` with the rendered
+result attached by reference (`--resource <madder-uri>`, or a
+`--result-ref "ringmaster read <id>"` fallback when there is no madder pin —
+see the **pull-surface retirement** amendment; `aborted` is the RFC-0018
+cancel terminal, #27). The agent is woken with one notification line; the
+failed-state message carries the first `not ok` line of the result when
+present. The synchronous tools emit nothing —
 their caller is already awake. The async tool descriptions switch
 guidance at serve startup: under clown, "start it and end your turn —
 the wake arrives" replaces the poll-discipline warnings.
@@ -163,6 +168,41 @@ stub: `spool-path` is a **pure path computation**, not a lookup (it answers
 normally for a job that never existed; only a *malformed* id is an error), and
 `done` rejects an unknown flag with exit 2 rather than ignoring it.
 
+### Amendment (2026-08-05, spinclass#251 stages 1 & 3–4): pull surface retired, observability model inverted
+
+The retirement the *Future direction* below proposed has landed, so this
+record's system-of-record model is now **split** rather than spinclass-owned:
+
+- **Job *results* still live in `job.json`** — the durable, local,
+  authoritative record of what a merge/check produced. That has not changed.
+- **Job *observability and control* moved to ringmaster's own surfaces.**
+  spinclass's `session-job-wait` (stage 1, #21) and `session-job-status`
+  (stage 3, #23) are gone; agents inspect a job with ringmaster's
+  `job_status`/`job_read` and block on `job_wait`, all keyed by the shared id
+  (#243). For *observability* the journal — not `job.json` — is now the
+  agent-facing surface, the inversion the *Future direction* flagged.
+- **Async is now clown-only.** Because inspection is ringmaster's and a
+  spinclass async job *is* a ringmaster job, the `*-async` tools and
+  `session-job-cancel` are registered only when clown is present (#23);
+  without clown there is nothing to observe, wake on, or cancel, so only the
+  synchronous merge/check exist. This closed the gap stage 1 would otherwise
+  have left — a no-clown async job with neither a wait nor a status surface.
+- **Cooperative cancel is implemented** (stage 2, #22): spinclass observes
+  ringmaster's non-terminal `cancel-requested` record (`ringmaster wait
+  --on-cancel`, RFC-0018) and tears down its own process tree, since
+  ringmaster records no worker PID. The terminal it then writes is `aborted`.
+- **Liveness is the per-job flock** (#26, RFC-0016): `interrupted` is written
+  by ringmaster's reaper when the flock is found released without a terminal
+  record, replacing the old "a later `session-job-status` read finds the
+  producer dead" mechanism.
+
+The prerequisite that gated this — betting spinclass's observability on an
+untested ringmaster contract — cleared with the #253 checkPhase pin, which put
+the real binary in the sandbox and gave the contract its first coverage. And
+the terminal wake now carries its own result (the rendered verdict ladder as a
+`madder://blobs/<digest>` resource, *Piece 2* below), so the retired
+`result_ref: "spinclass session-job-status"` self-pointer is gone with it.
+
 **Chat wake emits**: gated on **presence** like the job emits —
 `CLOWN_BIN` set means emit; presence-gating is the only gate (the
 legacy chat-watch monitor and its `SPINCLASS_CHAT_WAKE` receive-side
@@ -181,11 +221,11 @@ An agent backgrounds a merge and is woken instead of polling:
 
     merge-this-session-async        -> "started background merge job ..."
     # agent ends its turn; ~9 minutes later clown job-watch delivers:
-    [clown-job] spinclass merge-9f3c1a2b succeeded: merge succeeded · spinclass session-job-status
+    [clown-job] spinclass merge-9f3c1a2b succeeded: merge succeeded · 1 resource(s)
 
 A failing check wakes the agent with the first failure:
 
-    [clown-job] spinclass check-3a1b2c4d failed: check failed: not ok 2 - pre-merge hook · spinclass session-job-status
+    [clown-job] spinclass check-3a1b2c4d failed: check failed: not ok 2 - pre-merge hook · 1 resource(s)
 
 A directed chat message:
 
@@ -195,18 +235,19 @@ A directed chat message:
 
 ## Limitations
 
-- **`interrupted` never wakes.** That status is assigned by a later
-  `session-job-status` read when the owning serve process is found
-  dead — a dead producer cannot emit. The pull surface still reports
-  it; the channel's at-least-once guarantee covers emitted events only.
+- **`interrupted` never wakes.** That status is assigned by ringmaster's
+  liveness reaper when the per-job flock (#26, RFC-0016) is found released
+  without a terminal record — a dead producer cannot emit. The channel's
+  at-least-once guarantee covers emitted events only.
 - **Terminal events only for jobs.** `progress` emits are deliberately
   skipped in v1: they are journal-only (never wake) and one exec per
-  hook-output line is wasteful; `job.log` + `session-job-status` remain
-  the observability surface.
+  hook-output line is wasteful; `job.log` — teed into ringmaster's spool
+  (#251) — is the observability surface, tailable via ringmaster's own
+  `status --tail` / `read`.
 - **Wakes require a live monitor host.** Plugin monitors are gated off
   on macOS today (`tengu_amber_sentinel`, see FDR 0009); there the
-  journal still records events and `clown job read` /
-  `session-job-status` are the pull paths.
+  journal still records events and ringmaster's own `read` / `status`
+  are the pull paths.
 - **New clown required.** The `message` waking class and broadcast
   channel need clown >= 7fd142c; running sessions pick it up only after
   a home redeploy. Older monitors treat unknown event types as
@@ -225,10 +266,12 @@ A directed chat message:
 
 ## Future direction
 
-**Retiring spinclass's pull surface** (spinclass#251). Since #243 the two
-sides name the same job identically, which raises whether spinclass should
-own `session-job-status`/`-cancel`/`-wait` at all rather than producing onto
-the channel and letting `ringmaster status`/`tail`/`wait`/`cancel` be the
+**Retiring spinclass's pull surface** (spinclass#251) — **landed in stages 1 &
+3–4; see the *pull surface retired* amendment above for the resulting model. The
+reasoning below is preserved as it stood while this was still a proposal.** Since
+#243 the two sides name the same job identically, which raised whether spinclass
+should own `session-job-status`/`-cancel`/`-wait` at all rather than producing
+onto the channel and letting `ringmaster status`/`tail`/`wait`/`cancel` be the
 interface. Measured today, ringmaster knows almost nothing about a spinclass
 job: two journal records, a one-line message, `spool_bytes: 0`, and a
 `result_ref` pointing back at `session-job-status`. Closing that gap means
@@ -242,8 +285,9 @@ journal, not `job.json`, would become authoritative for job observability.
 It also needs spinclass to implement its half of ringmaster's *cooperative*
 cancel (observe the `cancelled` record, tear down its own process tree —
 ringmaster records no worker PID by design), which in turn is gated on the
-pre-merge hook's teardown actually being prompt (spinclass#188). Not decided;
-tracked in #251.
+pre-merge hook's teardown actually being prompt (spinclass#188). This is the
+model inversion that has since landed — stages 1 & 3–4 (#21, #23) with the
+cooperative cancel of stage 2 (#22); see the amendment above.
 
 **Piece 2 is done** (2a `96469e0`, 2b spinclass#251). The hook's output is teed
 into ringmaster's spool, and the terminal emit attaches the rendered verdict
@@ -261,14 +305,15 @@ renders attachments as a count (`· 2 resource(s)`) rather than listing them;
 line learns *that* a result is attached and how many, and must go to the JSON
 to fetch one.
 
-One prerequisite that *was* blocking it has cleared. Retirement would sharply
-raise spinclass's reliance on the ringmaster contract — today a silent upstream
-change loses wakes (recoverable: `job.json` is still the record and
-`session-job-status` still works), whereas afterwards it would lose job
-observation and cancellation outright, with no fallback. Betting that on an
-untested contract was not defensible while no lane could exercise one. The
-#253 pin removes that objection: the contract is now covered, and the
-remaining questions are the model inversion and cooperative cancel above.
+The prerequisite that *was* blocking it has cleared, and retirement then
+proceeded. It sharply raised spinclass's reliance on the ringmaster contract:
+before, a silent upstream change only lost wakes (recoverable — `job.json` was
+still the record and `session-job-status` still worked); now it would lose job
+observation and cancellation outright, with no spinclass-side fallback. Betting
+that on an untested contract would not have been defensible while no lane could
+exercise one — so the #253 checkPhase pin, which covers the contract, landed
+first. With it in place, the model inversion and cooperative cancel this
+paragraph gated have both shipped; see the amendment above.
 
 ## More Information
 
@@ -286,9 +331,9 @@ remaining questions are the model inversion and cooperative cancel above.
   the start allocation ahead of the job goroutine and the terminal emit
   inside it.
 - spinclass#243 — the id-adoption amendment above (dispatch-time
-  allocation, refuse-on-failure). spinclass#251 — the proposed retirement
-  of the pull surface. spinclass#188 — the pre-merge teardown latency that
-  gates cooperative cancel. spinclass#253 — the checkPhase pin amendment
+  allocation, refuse-on-failure). spinclass#251 — the retirement of the pull
+  surface (stages 1 & 3–4 landed; see the amendment above). spinclass#188 — the
+  pre-merge teardown latency that gated cooperative cancel. spinclass#253 — the checkPhase pin amendment
   above (stale closure rationale, first real coverage of the contract).
 - `internal/clown/contract_test.go` — the real-binary suite; contrast with
   `clown_test.go` / `internal/job/wake_test.go`, which stub ringmaster and

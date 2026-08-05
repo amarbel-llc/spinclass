@@ -50,8 +50,9 @@ the pre-merge gate runs **under the lock against the exact sha that lands**:
   Recovery is a plain re-merge: the fresh `PrepareMerge` rebases the session
   worktree onto the moved tip so the conflict is resolved there.
 - While queued, the waiter heartbeats to the async job log ("merge queue:
-  waiting behind <session>", every 30s) — visible via
-  `session-job-status`'s live tail — and, once acquired, emits a single
+  waiting behind <session>", every 30s) — visible via ringmaster's
+  `status --tail` (the job log is teed into its spool, #251) — and, once
+  acquired, emits a single
   "merge queue wait <elapsed> (behind <session>)" test point. The holder's
   session key is written into the lock file so waiters can name it.
 - The `[hooks].inactivity-timeout` watchdog wraps only the hook subprocess,

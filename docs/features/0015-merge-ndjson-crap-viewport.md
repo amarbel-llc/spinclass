@@ -53,11 +53,12 @@ deliberately bilingual.
 **MCP handlers** (no TTY, no flag): result text is the **plain
 rendering** (`present.RenderPlain` over a buffered Reporter); full hook
 output stays behind madder `resource_link` content blocks as before.
-Async jobs store the same plain rendering as `ResultText`, so
-`session-job-status` returns it (and ringmaster's completion wake
-attaches it as a result blob); the clown failed-state wake carries the
-first `✗ ` line. `session-job-status`'s live tail
-(raw `job.log` hook output) is unchanged.
+Async jobs store the same plain rendering as `ResultText` in `job.json`;
+ringmaster's completion wake attaches it as a result blob (#251), and the
+clown failed-state wake carries the first `✗ ` line. The live tail (raw
+`job.log` hook output, teed into ringmaster's spool) is unchanged — read it
+via ringmaster's `status --tail`/`read` (spinclass's own `session-job-status`
+was retired, #23).
 
 ## Design
 

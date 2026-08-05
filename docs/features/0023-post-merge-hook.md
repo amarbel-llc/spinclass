@@ -135,7 +135,8 @@ confusable.
 Modelled on the `repair` phase (FDR 0018), not the `pre-merge` gate: a single
 buffered hook run and one test point, no madder blob, no output-format
 parsing, no build worktree. Output is teed to the async job log when one is
-present, so a slow deploy is tailable via `session-job-status`.
+present (itself teed into ringmaster's spool, #251), so a slow deploy is
+tailable via ringmaster's `status --tail`/`read`.
 
 `runHookInDir` grew a sibling `runHookInDirEnv` taking `extraEnv`; post-merge
 is its only caller, and `runHookInDir` delegates with `nil` so every other
