@@ -139,6 +139,8 @@
         bats.follows = "bats";
       };
     };
+    ringmaster.inputs.purse-first.inputs.conformist.follows = "conformist";
+    ringmaster.inputs.purse-first.inputs.gomod2nix.follows = "madder/purse-first/gomod2nix";
 
     # papi: the Personal API CLI. Pinned into spinclass via
     # `mkSpinclass { papi = ...; }` and burned into the default build's
