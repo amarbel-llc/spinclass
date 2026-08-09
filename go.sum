@@ -10,6 +10,8 @@ code.linenisgreat.com/ringmaster v0.0.0-20260803170956-e1ea0c5bffe7 h1:d730sfEJw
 code.linenisgreat.com/ringmaster v0.0.0-20260803170956-e1ea0c5bffe7/go.mod h1:prsw0jmttp9okezeINNtL6f429afU/e5mxtw43CAoNE=
 code.linenisgreat.com/ringmaster v0.0.0-20260803173553-65df85ab984d h1:KX+EFYasBo9cXj2RhndDm0AWuj/hkeks0pZyY4vBHUc=
 code.linenisgreat.com/ringmaster v0.0.0-20260803173553-65df85ab984d/go.mod h1:prsw0jmttp9okezeINNtL6f429afU/e5mxtw43CAoNE=
+code.linenisgreat.com/ringmaster v0.0.0-20260809131504-4589075aa5f4 h1:cN8zUnMljTo3fFM59oDR5UkT5265L+I07jKtHqZB9So=
+code.linenisgreat.com/ringmaster v0.0.0-20260809131504-4589075aa5f4/go.mod h1:prsw0jmttp9okezeINNtL6f429afU/e5mxtw43CAoNE=
 code.linenisgreat.com/tap/go v0.2.0 h1:xtQ8Ny8Kbx5wA3+TwrJz7rrERq54HRBNQoos4bX1XEY=
 code.linenisgreat.com/tap/go v0.2.0/go.mod h1:ldOXHYcw5RPm1llq11gUBiGiQymEsh0ppy24jhTM2ak=
 code.linenisgreat.com/tommy v0.5.0 h1:tgFeUayWv/C9+xHYXT+TFltHhVt6PE2LOF2PuX5SmKY=

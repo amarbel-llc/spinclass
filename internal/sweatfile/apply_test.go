@@ -895,15 +895,6 @@ func TestRunPreMergeHookScopeActiveWrapsInCgroup(t *testing.T) {
 // ringmaster-<id>.scope`) reaps the whole cgroup. Self-skips without a systemd
 // user bus (checkPhase sandbox, macOS); runs for real on a Linux dev host.
 func TestRunPreMergeHookScopeReapsSubtreeOnCancel(t *testing.T) {
-	// PENDING ringmaster#16: ScopeStop (`systemctl --user stop <scope>`) waits the
-	// unit's full stop-timeout (~90s) before SIGKILLing a SIGTERM-ignoring cgroup,
-	// so spinclass's ~10s ScopeStop ctx kills `systemctl stop` before the reap and
-	// the stubborn subtree survives. Verified: this test passes only with a
-	// ~2-minute ScopeStop ctx. Un-skip once ringmaster makes the scope reap prompt
-	// (short TimeoutStopSec on ScopeArgv, or a force-kill ScopeStop) and spinclass
-	// re-bumps ringmaster.
-	t.Skip("pending ringmaster#16: scope reap of a SIGTERM-ignoring subtree is not prompt")
-
 	jobID := fmt.Sprintf("merge-scopekill-%d", time.Now().UnixNano())
 	if _, ok := clown.ScopeArgv(jobID); !ok {
 		t.Skip("scope tier unavailable (no systemd user bus)")
