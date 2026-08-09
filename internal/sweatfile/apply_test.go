@@ -9,8 +9,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/embeds"
@@ -880,6 +883,92 @@ func TestRunPreMergeHookScopeActiveWrapsInCgroup(t *testing.T) {
 	if !strings.Contains(string(content), want) {
 		t.Errorf("hook cgroup %q does not contain the scope unit %q",
 			strings.TrimSpace(string(content)), want)
+	}
+}
+
+// TestRunPreMergeHookScopeReapsSubtreeOnCancel is the decisive #25 test: it
+// proves the scope's control-group kill reaps a hook subtree that IGNORES
+// SIGTERM — the exact residual #188's SIGTERM + WaitDelay-SIGKILL + no-Setpgid
+// teardown leaves behind. The hook traps SIGTERM and backgrounds a `sleep` that
+// holds the inherited pipe; under #188 alone that child is reparented and
+// survives the top's SIGKILL, but #25's ScopeStop (`systemctl --user stop
+// ringmaster-<id>.scope`) reaps the whole cgroup. Self-skips without a systemd
+// user bus (checkPhase sandbox, macOS); runs for real on a Linux dev host.
+func TestRunPreMergeHookScopeReapsSubtreeOnCancel(t *testing.T) {
+	// PENDING ringmaster#16: ScopeStop (`systemctl --user stop <scope>`) waits the
+	// unit's full stop-timeout (~90s) before SIGKILLing a SIGTERM-ignoring cgroup,
+	// so spinclass's ~10s ScopeStop ctx kills `systemctl stop` before the reap and
+	// the stubborn subtree survives. Verified: this test passes only with a
+	// ~2-minute ScopeStop ctx. Un-skip once ringmaster makes the scope reap prompt
+	// (short TimeoutStopSec on ScopeArgv, or a force-kill ScopeStop) and spinclass
+	// re-bumps ringmaster.
+	t.Skip("pending ringmaster#16: scope reap of a SIGTERM-ignoring subtree is not prompt")
+
+	jobID := fmt.Sprintf("merge-scopekill-%d", time.Now().UnixNano())
+	if _, ok := clown.ScopeArgv(jobID); !ok {
+		t.Skip("scope tier unavailable (no systemd user bus)")
+	}
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "child.pid")
+
+	// Top ignores SIGTERM; the backgrounded sleep is the stubborn subtree that
+	// survives #188's teardown but must not survive #25's scope reap.
+	cmd := "trap '' TERM; sleep 300 & echo $! > " + pidFile + "; wait"
+	sf := Sweatfile{Hooks: &Hooks{PreMerge: &cmd}}
+
+	ctx, cancel := context.WithCancel(clown.WithJobID(context.Background(), jobID))
+	var hookOut bytes.Buffer
+	done := make(chan error, 1)
+	go func() { done <- sf.RunPreMergeHookContext(ctx, dir, &hookOut) }()
+
+	pid := waitForChildPID(t, pidFile)
+	// Belt-and-suspenders: never leak the stubborn child (or its scope) past the
+	// test, whatever the outcome.
+	t.Cleanup(func() {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+		_ = clown.ScopeStop(context.Background(), jobID)
+	})
+	if !processAlive(pid) {
+		t.Fatalf("child %d not alive after the hook started", pid)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("RunPreMergeHookContext did not return within 30s of cancel")
+	}
+	t.Logf("scope unit: %s\nhook output after cancel:\n%s", clown.ScopeUnitName(jobID), hookOut.String())
+
+	// The hook has returned, so ScopeStop has run; the subtree must be gone.
+	deadline := time.Now().Add(15 * time.Second)
+	for processAlive(pid) {
+		if time.Now().After(deadline) {
+			t.Fatalf("child %d survived cancel — the scope did not reap the subtree (#25 regression)", pid)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// processAlive reports whether pid is a live process (a signal-0 probe).
+func processAlive(pid int) bool {
+	return pid > 0 && syscall.Kill(pid, 0) == nil
+}
+
+// waitForChildPID polls pidFile until it holds a parseable, positive pid.
+func waitForChildPID(t *testing.T, pidFile string) int {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if b, err := os.ReadFile(pidFile); err == nil {
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid > 0 {
+				return pid
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("child pid file never appeared")
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 

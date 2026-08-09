@@ -438,7 +438,13 @@ subcommand is always available.
   --unit=ringmaster-<id>.scope --property=KillMode=control-group --` (outermost,
   after the direnv wrap), and on cancel `runHookInDirEnv` calls
   `clown.ScopeStop` (`systemctl --user stop <unit>`) to reap the whole cgroup —
-  the backstop above the #188 SIGTERM/`WaitDelay` floor, which stays. Producer-
+  the backstop above the #188 SIGTERM/`WaitDelay` floor, which stays. **Known gap
+  (ringmaster#16):** that reap is not yet prompt for a SIGTERM-*ignoring* subtree
+  — `systemctl stop` waits the scope's stop-timeout (~90s) before SIGKILL, so the
+  ~10s `ScopeStop` ctx kills `systemctl stop` first and the stubborn child
+  survives (same end-state as pre-#25; no regression). The fix belongs in
+  ringmaster (short `TimeoutStopSec` on the scope, or a force-kill `ScopeStop`);
+  the parked `TestRunPreMergeHookScopeReapsSubtreeOnCancel` guards it. Producer-
   called and **RFC-0016 §4.2-safe**: ringmaster only supplies the argv + unit
   name (`ScopeUnitName`, the single derivation site), never decides to kill and
   is not in the `status` path, so cancel and status stay platform-uniform. The
