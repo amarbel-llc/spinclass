@@ -1,5 +1,20 @@
 #! /usr/bin/env bats
 
+setup_file() {
+  # The -race bats lane runs `bats --jobs num_cpus()`, so every core is
+  # saturated by parallel race-instrumented spinclass+git processes. The
+  # heavier tests in this file are pure subprocess fan-out — e.g.
+  # spinclass_clean_removes_merged does a real `sc merge` + `sc start` + an
+  # `sc clean` that spawns ~15 git children (DefaultBranch=2, CommitsAhead,
+  # StatusPorcelain per worktree, plus remove+delete per reaped worktree). Under
+  # that starvation their cumulative wall-clock occasionally crosses the flat 10s
+  # per-test cap — a load-dependent flake, not a hang or a bug in the code under
+  # test. Raise the whole-file timeout so the safety net stays a real bound while
+  # absorbing scheduler contention. Per bats(7), BATS_TEST_TIMEOUT only re-arms
+  # the countdown from setup_file() — updates in setup()/@test are too late.
+  export BATS_TEST_TIMEOUT=30
+}
+
 setup() {
   load "$(dirname "$BATS_TEST_FILE")/common.bash"
   export output
