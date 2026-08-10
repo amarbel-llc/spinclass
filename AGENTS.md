@@ -381,6 +381,18 @@ subcommand is always available.
   hook subprocess). Worktree merges only (`MergeImplicit` excluded); lock is
   host-local. `[hooks].disable-merge-queue` restores the pre-#235 fail-on-race
   path verbatim.
+- **Stacked / queued intra-session merges** (FDR 0025, #265): a second
+  `merge-this-session-async` while a gate runs ENQUEUES the next batch
+  (in-process per-worktree queue, `cmd/spinclass/merge_queue.go`) rather than
+  refusing. A queued entry records **no pin**: at dequeue it re-runs
+  `PrepareMerge`+`FinishMerge` fresh, so git patch-id dedup drops the
+  already-landed prior batch. `job.OnJobDone` drives `processMergeQueue`: a
+  failed merge drains the queue (aborted wake naming the culprit), a succeeded
+  merge or completed check dequeues the next. The **attestation** is consumed
+  only once a merge is committed (dispatch or enqueue), so a refusal never
+  burns it (`attestation.Peek`/`Consume` split from `Check`). Worktree sessions
+  only; queued merges carry no ringmaster job id (the wake signals);
+  `[hooks].disable-merge-stacking` is the rollback.
 - **`post-merge` hook** (FDR 0023, #244): when `[hooks].post-merge` is set,
   `merge.runPostMergePhase` runs it after a merge has fully landed (ff-only
   done; pushed when gitSync). On the queued path it runs **under the landing

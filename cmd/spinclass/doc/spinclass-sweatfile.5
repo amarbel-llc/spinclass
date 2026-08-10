@@ -627,6 +627,25 @@ lock.
 .B Merge:
 scalar override.
 .TP
+.B disable-merge-stacking
+Boolean.
+When true, disables the intra-session merge queue
+.RB ( spinclass#265 ,
+.B FDR 0025
+in the source tree): a second
+.B merge-this-session-async
+issued while a merge is already running for the session is refused
+.RB ( "a background job is already running" )
+instead of enqueued to run when the current gate completes. Distinct from
+.B disable-merge-queue
+above, which governs the
+.I cross-session
+per-repo landing lock, not the
+.I intra-session
+enqueue. The refusal still does not consume the pre-merge attestation.
+.B Merge:
+scalar override.
+.TP
 .B disable-repair
 Boolean.
 When true, suppresses an inherited

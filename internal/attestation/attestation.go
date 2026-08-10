@@ -149,11 +149,30 @@ func RecordImplicit(checkout string, skills []session.AttestedSkill) error {
 // "no buffered attestation" path) is returned as the third tuple
 // element with output empty.
 func Check(merged sweatfile.Sweatfile, repoPath, branch string) (ok bool, output string, err error) {
+	if pok, output, perr := Peek(merged, repoPath, branch); !pok {
+		return false, output, perr
+	}
+	if cerr := Consume(merged, repoPath, branch); cerr != nil {
+		return false, "", cerr
+	}
+	return true, "", nil
+}
+
+// Peek reports whether the gate is satisfied for (repoPath, branch) WITHOUT
+// consuming the buffered attestation. It is the non-destructive half of Check,
+// used by callers (the async merge tool) that must decide whether to dispatch
+// or enqueue BEFORE committing the scarce attestation — so a refusal never
+// burns it (spinclass#265). Three outcomes mirror Check:
+//
+//   - Gate dormant (no required skills): (true, "", nil).
+//   - Fresh attestation buffered: (true, "", nil) — buffer untouched.
+//   - No fresh attestation / unreadable state: (false, <TAP failure doc>,
+//     ErrAttestationRequired).
+func Peek(merged sweatfile.Sweatfile, repoPath, branch string) (ok bool, output string, err error) {
 	required := merged.ActivePreMergeSkills()
 	if len(required) == 0 {
 		return true, "", nil
 	}
-
 	st, readErr := session.Read(repoPath, branch)
 	if readErr != nil {
 		return false, renderFailure(required,
@@ -163,12 +182,27 @@ func Check(merged sweatfile.Sweatfile, repoPath, branch string) (ok bool, output
 		return false, renderFailure(required,
 			"no fresh attestation buffered; call `nothing-but-the-truth` first, then retry"), ErrAttestationRequired
 	}
+	return true, "", nil
+}
 
+// Consume clears any buffered attestation for (repoPath, branch). It is the
+// destructive half of Check, invoked at the point a caller commits to a merge
+// (dispatch or enqueue). A dormant gate or an already-clear buffer is a no-op
+// success — call Peek first to distinguish "satisfied" from "absent". Returns
+// an error only on a session-state write failure.
+func Consume(merged sweatfile.Sweatfile, repoPath, branch string) error {
+	if len(merged.ActivePreMergeSkills()) == 0 {
+		return nil
+	}
+	st, readErr := session.Read(repoPath, branch)
+	if readErr != nil || st.PreMergeAttestation == nil {
+		return nil
+	}
 	st.PreMergeAttestation = nil
 	if writeErr := session.Write(*st); writeErr != nil {
-		return false, "", fmt.Errorf("clear pre-merge attestation: %w", writeErr)
+		return fmt.Errorf("clear pre-merge attestation: %w", writeErr)
 	}
-	return true, "", nil
+	return nil
 }
 
 // CheckImplicit is Check for an implicit (main-checkout) session: it verifies a
@@ -176,12 +210,24 @@ func Check(merged sweatfile.Sweatfile, repoPath, branch string) (ok bool, output
 // Same three outcomes as Check (dormant → (true,"",nil); satisfied → consume +
 // (true,"",nil); failed → (false, TAP doc, ErrAttestationRequired)).
 func CheckImplicit(merged sweatfile.Sweatfile, checkout string) (ok bool, output string, err error) {
+	if pok, output, perr := PeekImplicit(merged, checkout); !pok {
+		return false, output, perr
+	}
+	if cerr := ConsumeImplicit(merged, checkout); cerr != nil {
+		return false, "", cerr
+	}
+	return true, "", nil
+}
+
+// PeekImplicit is Peek for an implicit (main-checkout) session: it verifies a
+// fresh attestation is buffered in the per-randID state file WITHOUT consuming
+// it. Same three outcomes as Peek.
+func PeekImplicit(merged sweatfile.Sweatfile, checkout string) (ok bool, output string, err error) {
 	required := merged.ActivePreMergeSkills()
 	if len(required) == 0 {
 		return true, "", nil
 	}
-
-	st, randID, readErr := session.FindImplicitAtCwd(checkout)
+	st, _, readErr := session.FindImplicitAtCwd(checkout)
 	if readErr != nil || st == nil {
 		return false, renderFailure(required,
 			"could not find a live implicit session at checkout to verify attestation; the session may have ended"), ErrAttestationRequired
@@ -190,12 +236,25 @@ func CheckImplicit(merged sweatfile.Sweatfile, checkout string) (ok bool, output
 		return false, renderFailure(required,
 			"no fresh attestation buffered; call `nothing-but-the-truth` first, then retry"), ErrAttestationRequired
 	}
+	return true, "", nil
+}
 
+// ConsumeImplicit is Consume for an implicit (main-checkout) session: it clears
+// any buffered attestation in the per-randID state file. Dormant gate, no live
+// session, or already-clear buffer is a no-op success.
+func ConsumeImplicit(merged sweatfile.Sweatfile, checkout string) error {
+	if len(merged.ActivePreMergeSkills()) == 0 {
+		return nil
+	}
+	st, randID, readErr := session.FindImplicitAtCwd(checkout)
+	if readErr != nil || st == nil || st.PreMergeAttestation == nil {
+		return nil
+	}
 	st.PreMergeAttestation = nil
 	if writeErr := session.WriteImplicit(*st, randID); writeErr != nil {
-		return false, "", fmt.Errorf("clear pre-merge attestation: %w", writeErr)
+		return fmt.Errorf("clear pre-merge attestation: %w", writeErr)
 	}
-	return true, "", nil
+	return nil
 }
 
 // renderFailure builds a self-contained TAP-14 document describing the

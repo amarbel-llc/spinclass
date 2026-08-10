@@ -63,6 +63,7 @@ type Hooks struct {
 	ToolUseLog                 *bool   `toml:"tool-use-log"`
 	DisableMerge               *bool   `toml:"disable-merge"`
 	DisableMergeQueue          *bool   `toml:"disable-merge-queue"`
+	DisableMergeStacking       *bool   `toml:"disable-merge-stacking"`
 	DisableRepair              *bool   `toml:"disable-repair"`
 	DisablePostMerge           *bool   `toml:"disable-post-merge"`
 	DisablePreCommit           *bool   `toml:"disable-pre-commit"`
@@ -416,6 +417,20 @@ func (sf Sweatfile) DisableMergeQueueEnabled() bool {
 	return sf.Hooks != nil &&
 		sf.Hooks.DisableMergeQueue != nil &&
 		*sf.Hooks.DisableMergeQueue
+}
+
+// DisableMergeStackingEnabled reports whether [hooks].disable-merge-stacking is
+// true. When true, the intra-session merge queue (spinclass#265) is disabled:
+// a second merge-this-session-async while one is already running is refused
+// ("a background job is already running") instead of enqueued to run when the
+// current gate completes. The refusal still does not consume the pre-merge
+// attestation (that fix — #265 deliverable 2 — is independent of stacking).
+// This is the FDR 0025 rollback: distinct from disable-merge-queue, which
+// governs the per-repo landing lock, not intra-session enqueue.
+func (sf Sweatfile) DisableMergeStackingEnabled() bool {
+	return sf.Hooks != nil &&
+		sf.Hooks.DisableMergeStacking != nil &&
+		*sf.Hooks.DisableMergeStacking
 }
 
 // RepairDisabled reports whether [hooks].disable-repair is true. It suppresses

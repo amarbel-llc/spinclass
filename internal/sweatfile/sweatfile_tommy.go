@@ -231,6 +231,12 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				_vHooksDisableMergeQueue.MarkConsumed()
 			}
 		}
+		if _vHooksDisableMergeStacking, _ok := _vHooks.Get("disable-merge-stacking"); _ok && _vHooksDisableMergeStacking.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksDisableMergeStacking.Leaf); _xok {
+				hooksVal3.DisableMergeStacking = &_x
+				_vHooksDisableMergeStacking.MarkConsumed()
+			}
+		}
 		if _vHooksDisableRepair, _ok := _vHooks.Get("disable-repair"); _ok && _vHooksDisableRepair.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractBool(_vHooksDisableRepair.Leaf); _xok {
 				hooksVal3.DisableRepair = &_x
@@ -389,6 +395,13 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractBool(_vDisableMergeQueue.Leaf); _xok {
 				hooksVal3.DisableMergeQueue = &_x
 				_vDisableMergeQueue.MarkConsumed()
+			}
+		}
+		if _vDisableMergeStacking, _ok := model.Get("disable-merge-stacking"); _ok && _vDisableMergeStacking.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vDisableMergeStacking.Leaf); _xok {
+				hooksVal3.DisableMergeStacking = &_x
+				_vDisableMergeStacking.MarkConsumed()
 			}
 		}
 		if _vDisableRepair, _ok := model.Get("disable-repair"); _ok && _vDisableRepair.Kind == cst.VLeaf {
@@ -949,6 +962,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
+		if d.data.Hooks.DisableMergeStacking != nil {
+			if err := cst.SetAny(tableNode, "disable-merge-stacking", *d.data.Hooks.DisableMergeStacking); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
 		if d.data.Hooks.DisableRepair != nil {
 			if err := cst.SetAny(tableNode, "disable-repair", *d.data.Hooks.DisableRepair); err != nil {
 				return nil, fmt.Errorf("%w", err)
@@ -1430,6 +1448,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vHooksDisableMergeQueue.MarkConsumed()
 			}
 		}
+		if _vHooksDisableMergeStacking, _ok := _vHooks.Get("disable-merge-stacking"); _ok && _vHooksDisableMergeStacking.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksDisableMergeStacking.Leaf); _xok {
+				hooksVal3.DisableMergeStacking = &_x
+				_vHooksDisableMergeStacking.MarkConsumed()
+			}
+		}
 		if _vHooksDisableRepair, _ok := _vHooks.Get("disable-repair"); _ok && _vHooksDisableRepair.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractBool(_vHooksDisableRepair.Leaf); _xok {
 				hooksVal3.DisableRepair = &_x
@@ -1588,6 +1612,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractBool(_vDisableMergeQueue.Leaf); _xok {
 				hooksVal3.DisableMergeQueue = &_x
 				_vDisableMergeQueue.MarkConsumed()
+			}
+		}
+		if _vDisableMergeStacking, _ok := sub.Get("disable-merge-stacking"); _ok && _vDisableMergeStacking.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vDisableMergeStacking.Leaf); _xok {
+				hooksVal3.DisableMergeStacking = &_x
+				_vDisableMergeStacking.MarkConsumed()
 			}
 		}
 		if _vDisableRepair, _ok := sub.Get("disable-repair"); _ok && _vDisableRepair.Kind == cst.VLeaf {
@@ -2133,6 +2164,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if data.Hooks.DisableMergeQueue != nil {
 			if err := cst.SetAny(tableNode, "disable-merge-queue", *data.Hooks.DisableMergeQueue); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.Hooks.DisableMergeStacking != nil {
+			if err := cst.SetAny(tableNode, "disable-merge-stacking", *data.Hooks.DisableMergeStacking); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}

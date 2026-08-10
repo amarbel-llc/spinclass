@@ -4,15 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"code.linenisgreat.com/spinclass/internal/attestation"
-	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/job"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
@@ -142,93 +139,24 @@ func TestResolveGatedSession(t *testing.T) {
 }
 
 // TestMergeAsyncRefusalPreservesAttestation pins spinclass#265 deliverable 2:
-// a merge-this-session-async invoked while a background job is already running
-// must refuse WITHOUT consuming the buffered pre-merge attestation. Before the
-// fix, resolveGatedSession consumed the attestation (an active gate clears it)
-// before the handler reached the already-running refusal, forcing a full
-// re-attestation of unchanged content on the retry.
+// a merge-this-session-async that REFUSES must not consume the buffered
+// pre-merge attestation. With deliverable 1 (stacking) shipped, a busy worktree
+// merge normally enqueues instead of refusing, so this test exercises the path
+// that still refuses — [hooks].disable-merge-stacking = true — and asserts the
+// refusal leaves the attestation intact for a retry.
 //
-// The active gate is load-bearing: attestation.Check only consumes when
+// The active gate is load-bearing: attestation.Peek/Consume only engage when
 // [[pre-merge-skills]] is present, so a repo-root sweatfile declaring one is
-// what makes the pre-fix consume reproduce. EvalSymlinks keeps the test's
+// what makes a stray consume observable. EvalSymlinks keeps the test's
 // constructed paths in agreement with git's realpath output, so the attestation
-// key (git.CommonDir(cwd), branch) the old path would have consumed is the same
-// key this test writes and reads back.
+// key (git.CommonDir(cwd), branch) is the same key this test writes and reads.
 func TestMergeAsyncRefusalPreservesAttestation(t *testing.T) {
-	testgit.RequireGit(t)
-	// Force clown off so job.Start neither allocates a ringmaster job nor
-	// shells out — the blocking goroutine is all this test needs from it.
-	t.Setenv("CLOWN_BIN", "")
-	_ = os.Unsetenv("CLOWN_BIN")
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-
-	base, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatalf("evalsymlinks tempdir: %v", err)
-	}
-	t.Setenv("HOME", base) // bound the sweatfile cascade at the repo's parent
-
-	repo := filepath.Join(base, "repo")
-	if err := os.MkdirAll(repo, 0o755); err != nil {
-		t.Fatalf("mkdir repo: %v", err)
-	}
-	testgit.MustInit(t, repo)
-	wt := filepath.Join(repo, ".worktrees", "feature")
-	testgit.MustWorktreeAdd(t, repo, wt, "feature")
-
-	// Activate the attestation gate: a repo-root sweatfile declaring one
-	// pre-merge skill. Without it, the pre-fix consume is a no-op and the
-	// regression would not reproduce.
-	sweat := "[[pre-merge-skills]]\nname = \"eng:code-reviewer\"\nrationale = \"Mandatory.\"\n"
-	if err := os.WriteFile(filepath.Join(repo, "sweatfile"), []byte(sweat), 0o644); err != nil {
-		t.Fatalf("write sweatfile: %v", err)
-	}
-
-	t.Chdir(wt)
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	// Key the attestation exactly as the gate would: (git.CommonDir(cwd),
-	// BranchCurrent(cwd)). These are the canonical values resolveGatedSession
-	// feeds attestation.Check.
-	repoPath, err := git.CommonDir(cwd)
-	if err != nil {
-		t.Fatalf("common dir: %v", err)
-	}
-	branch, err := git.BranchCurrent(cwd)
-	if err != nil {
-		t.Fatalf("branch: %v", err)
-	}
-
-	// Buffer a fresh attestation on a worktree session state findable by
-	// (repoPath, branch).
-	st := session.State{
-		PID:          os.Getpid(),
-		SessionState: session.StateActive,
-		RepoPath:     repoPath,
-		WorktreePath: filepath.Join(repoPath, ".worktrees", branch),
-		Branch:       branch,
-		SessionKey:   filepath.Base(repoPath) + "/" + branch,
-		StartedAt:    time.Now().UTC(),
-		PreMergeAttestation: &session.PreMergeAttestation{
-			RecordedAt: time.Now().UTC(),
-			Skills:     []session.AttestedSkill{{Name: "eng:code-reviewer", Used: true, Reasoning: "reviewed"}},
-		},
-	}
-	if err := session.Write(st); err != nil {
-		t.Fatalf("write session state: %v", err)
-	}
-
-	// Occupy the single background-job slot with a job that blocks until the
-	// test releases it, so job.IsRunning(cwd) is true across the handler call.
-	release := make(chan struct{})
-	if _, err := job.Start(cwd, job.KindMerge, false, "test-blocker", func(_ context.Context, _ io.Writer) (string, bool) {
-		<-release
-		return "", false
-	}); err != nil {
-		t.Fatalf("start blocking job: %v", err)
-	}
+	// Gate active AND stacking disabled, so a busy merge-async refuses (rather
+	// than enqueues) — the path where the no-consume-on-refusal invariant applies.
+	cwd, repoPath, branch := gatedWorktreeFixture(t, gateSweatNoStacking)
+	// Occupy the single background-job slot so job.IsRunning(cwd) is true across
+	// the handler call.
+	release := startBlockingJob(t, cwd)
 	t.Cleanup(func() {
 		close(release)
 		<-job.WaitDone(cwd)

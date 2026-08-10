@@ -36,6 +36,17 @@ var (
 // the worktree within this serve process.
 var ErrAlreadyRunning = fmt.Errorf("a job is already running for this session")
 
+// OnJobDone, when non-nil, is invoked exactly once per successfully-dispatched
+// job, in the job's own goroutine, AFTER the terminal record is written, the
+// clown wake is emitted, and the running slot is cleared (so the callback may
+// Start the next job for wt without racing ErrAlreadyRunning). It carries the
+// job's worktree, kind, terminal status, and id. The cmd layer sets it once at
+// serve startup to drive the intra-session merge queue (spinclass#265, FDR
+// 0025); it stays nil in tests and non-serve paths, and is not called on the
+// early-return Start failure paths (no job ran). Set-once-before-any-job, then
+// read-only, so the bare global needs no lock.
+var OnJobDone func(wt, kind, status, id string)
+
 // Start launches fn in a background goroutine for worktree wt, writes a
 // running Job record, and streams fn's hook output to job.log. It returns the
 // created Job immediately. The goroutine outlives the caller (serve is a
@@ -244,6 +255,16 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 	snapshot := *j
 
 	go func() {
+		// Registered FIRST so it runs LAST — after clearRunning has removed wt
+		// from the running map — so the completion hook may Start the next
+		// queued job for wt without hitting ErrAlreadyRunning. Reads j only
+		// after the body below has set its terminal fields (same goroutine, no
+		// race). Drives the intra-session merge queue (spinclass#265).
+		defer func() {
+			if OnJobDone != nil {
+				OnJobDone(wt, j.Kind, j.Status, j.ID)
+			}
+		}()
 		defer clearRunning()
 		defer func() { _ = logf.Close() }()
 		defer func() {

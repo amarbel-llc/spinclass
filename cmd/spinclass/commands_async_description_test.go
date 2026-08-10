@@ -26,6 +26,12 @@ func TestBuildMergeAsyncDescription(t *testing.T) {
 	if !strings.Contains(got, "`just`") {
 		t.Fatalf("description lost the hook preview: %q", got)
 	}
+	if !strings.Contains(got, "ENQUEUE") {
+		t.Fatalf("description should document intra-session enqueue (spinclass#265 stacked merges): %q", got)
+	}
+	if !strings.Contains(got, "NO ringmaster job id") {
+		t.Fatalf("description must state a queued merge has no ringmaster job id (FDR 0025 ratified wording): %q", got)
+	}
 }
 
 func TestBuildCheckAsyncDescription(t *testing.T) {
