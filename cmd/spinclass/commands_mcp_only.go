@@ -407,6 +407,19 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 	if err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
 	}
+	// Refuse an already-running session BEFORE resolveGatedSession consumes the
+	// pre-merge attestation (spinclass#265 deliverable 2). resolveGatedSession's
+	// gate clears the buffered attestation as a side effect, so consuming it here
+	// only to hit startSessionJob's ErrAlreadyRunning below would force a full
+	// re-attestation of unchanged content on the retry — the exact papercut #265
+	// fixes. MCP stdio processes one request to completion before reading the
+	// next (startSessionJob flips the running slot before this handler returns),
+	// so this check races nothing in practice; startSessionJob keeps the same
+	// refusal as a backstop for any concurrent-dispatch corner. (Deliverable 1
+	// turns this branch into an enqueue.)
+	if job.IsRunning(cwd) {
+		return jobAlreadyRunningResult(), nil
+	}
 	gs, failMsg, ok, gitErr := resolveGatedSession(cwd)
 	if !ok {
 		return command.TextErrorResult(failMsg), nil
@@ -491,6 +504,11 @@ func handleCheckThisSessionAsync(_ context.Context, _ json.RawMessage, _ command
 	if err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
 	}
+	// Refuse an already-running session before the gate consumes the attestation
+	// (spinclass#265 deliverable 2), same rationale as the async merge handler.
+	if job.IsRunning(cwd) {
+		return jobAlreadyRunningResult(), nil
+	}
 	// Check needs only the gate's ok flag, not the resolved identity — it always
 	// runs the hook against cwd. The discarded gitErr (a worktree git-resolution
 	// failure) is deliberately ignored: check tolerates it and runs the hook
@@ -521,7 +539,7 @@ func startSessionJob(wt, kind string, gitSync bool, fn job.Func) *command.Result
 	j, err := job.Start(wt, kind, gitSync, id, fn)
 	if err != nil {
 		if errors.Is(err, job.ErrAlreadyRunning) {
-			return command.TextErrorResult("a background job is already running for this session; inspect it via ringmaster (job_status/job_read/job_wait) with its id, or session-job-cancel it first")
+			return jobAlreadyRunningResult()
 		}
 		return command.TextErrorResult(fmt.Sprintf("could not start background job: %v", err))
 	}
@@ -532,6 +550,17 @@ func startSessionJob(wt, kind string, gitSync bool, fn job.Func) *command.Result
 		"started background %s job %q; the completion wake reports this same id. The pre-merge hook is running detached, so this call is not subject to the MCP request timeout. Inspect progress and the final result via ringmaster's job_status/job_read with that id, or block on it with job_wait; session-job-cancel to stop it.",
 		kind, j.ID,
 	))
+}
+
+// jobAlreadyRunningResult is the shared refusal for an async merge/check tool
+// invoked while a background job is already in flight for the session. It is
+// returned both by the pre-consume guard in the async handlers (which refuses
+// WITHOUT consuming the pre-merge attestation — spinclass#265 deliverable 2:
+// a refusal must never burn the scarce attestation token) and by
+// startSessionJob as the backstop for the near-impossible concurrent-dispatch
+// race the guard cannot see.
+func jobAlreadyRunningResult() *command.Result {
+	return command.TextErrorResult("a background job is already running for this session; inspect it via ringmaster (job_status/job_read/job_wait) with its id, or session-job-cancel it first")
 }
 
 // handleJobCancel cancels the worktree session's running background job.

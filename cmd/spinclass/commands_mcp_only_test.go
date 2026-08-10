@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"code.linenisgreat.com/spinclass/internal/attestation"
+	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/job"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/testgit"
@@ -135,6 +139,121 @@ func TestResolveGatedSession(t *testing.T) {
 			t.Errorf("reject message = %q, want %q", failMsg, "not inside a worktree session")
 		}
 	})
+}
+
+// TestMergeAsyncRefusalPreservesAttestation pins spinclass#265 deliverable 2:
+// a merge-this-session-async invoked while a background job is already running
+// must refuse WITHOUT consuming the buffered pre-merge attestation. Before the
+// fix, resolveGatedSession consumed the attestation (an active gate clears it)
+// before the handler reached the already-running refusal, forcing a full
+// re-attestation of unchanged content on the retry.
+//
+// The active gate is load-bearing: attestation.Check only consumes when
+// [[pre-merge-skills]] is present, so a repo-root sweatfile declaring one is
+// what makes the pre-fix consume reproduce. EvalSymlinks keeps the test's
+// constructed paths in agreement with git's realpath output, so the attestation
+// key (git.CommonDir(cwd), branch) the old path would have consumed is the same
+// key this test writes and reads back.
+func TestMergeAsyncRefusalPreservesAttestation(t *testing.T) {
+	testgit.RequireGit(t)
+	// Force clown off so job.Start neither allocates a ringmaster job nor
+	// shells out — the blocking goroutine is all this test needs from it.
+	t.Setenv("CLOWN_BIN", "")
+	_ = os.Unsetenv("CLOWN_BIN")
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("evalsymlinks tempdir: %v", err)
+	}
+	t.Setenv("HOME", base) // bound the sweatfile cascade at the repo's parent
+
+	repo := filepath.Join(base, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	testgit.MustInit(t, repo)
+	wt := filepath.Join(repo, ".worktrees", "feature")
+	testgit.MustWorktreeAdd(t, repo, wt, "feature")
+
+	// Activate the attestation gate: a repo-root sweatfile declaring one
+	// pre-merge skill. Without it, the pre-fix consume is a no-op and the
+	// regression would not reproduce.
+	sweat := "[[pre-merge-skills]]\nname = \"eng:code-reviewer\"\nrationale = \"Mandatory.\"\n"
+	if err := os.WriteFile(filepath.Join(repo, "sweatfile"), []byte(sweat), 0o644); err != nil {
+		t.Fatalf("write sweatfile: %v", err)
+	}
+
+	t.Chdir(wt)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	// Key the attestation exactly as the gate would: (git.CommonDir(cwd),
+	// BranchCurrent(cwd)). These are the canonical values resolveGatedSession
+	// feeds attestation.Check.
+	repoPath, err := git.CommonDir(cwd)
+	if err != nil {
+		t.Fatalf("common dir: %v", err)
+	}
+	branch, err := git.BranchCurrent(cwd)
+	if err != nil {
+		t.Fatalf("branch: %v", err)
+	}
+
+	// Buffer a fresh attestation on a worktree session state findable by
+	// (repoPath, branch).
+	st := session.State{
+		PID:          os.Getpid(),
+		SessionState: session.StateActive,
+		RepoPath:     repoPath,
+		WorktreePath: filepath.Join(repoPath, ".worktrees", branch),
+		Branch:       branch,
+		SessionKey:   filepath.Base(repoPath) + "/" + branch,
+		StartedAt:    time.Now().UTC(),
+		PreMergeAttestation: &session.PreMergeAttestation{
+			RecordedAt: time.Now().UTC(),
+			Skills:     []session.AttestedSkill{{Name: "eng:code-reviewer", Used: true, Reasoning: "reviewed"}},
+		},
+	}
+	if err := session.Write(st); err != nil {
+		t.Fatalf("write session state: %v", err)
+	}
+
+	// Occupy the single background-job slot with a job that blocks until the
+	// test releases it, so job.IsRunning(cwd) is true across the handler call.
+	release := make(chan struct{})
+	if _, err := job.Start(cwd, job.KindMerge, false, "test-blocker", func(_ context.Context, _ io.Writer) (string, bool) {
+		<-release
+		return "", false
+	}); err != nil {
+		t.Fatalf("start blocking job: %v", err)
+	}
+	t.Cleanup(func() {
+		close(release)
+		<-job.WaitDone(cwd)
+	})
+
+	res, herr := handleMergeThisSessionAsync(context.Background(), json.RawMessage(`{}`), nil)
+	if herr != nil {
+		t.Fatalf("handler returned a transport error: %v", herr)
+	}
+	if !res.IsErr {
+		t.Fatalf("expected an error result (job already running), got success: %s", res.Text)
+	}
+	if !strings.Contains(res.Text, "already running") {
+		t.Errorf("error text = %q, want it to name the already-running refusal", res.Text)
+	}
+
+	// The heart of deliverable 2: the refusal must NOT have consumed the
+	// buffered attestation.
+	got, rerr := session.Read(repoPath, branch)
+	if rerr != nil {
+		t.Fatalf("read session state after refusal: %v", rerr)
+	}
+	if got.PreMergeAttestation == nil {
+		t.Fatal("attestation was consumed by a refused merge-async (spinclass#265 deliverable 2 regression)")
+	}
 }
 
 // TestCurrentSessionKeyImplicitFallback verifies that when not inside a
