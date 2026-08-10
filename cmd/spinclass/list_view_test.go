@@ -103,11 +103,11 @@ func TestRenderListTable(t *testing.T) {
 	out := renderListTable(states, remoteRows, diags, false, 0)
 
 	for _, want := range []string{
-		"REPO", "NAME", "STATUS", "AGE", "DESCRIPTION", // headers (merged STATE+CLOWNS → STATUS)
-		"bright-cedar", "charm render", // active local row (NAME split from REPO)
-		"spawned-walnut",                    // spawned local row
-		"↰spinclass/bright-cedar",           // spawned-by hint (contiguous in cell)
-		"devbox:crisp-catalpa", "fix login", // prefixed remote row
+		"ID", "STATUS", "AGE", "DESCRIPTION", // headers (REPO+NAME merged → ID)
+		"spinclass/bright-cedar", "charm render", // active local row (ID == full session key)
+		"spinclass/spawned-walnut",                    // spawned local row
+		"↰spinclass/bright-cedar",                     // spawned-by hint (contiguous in cell)
+		"devbox:spinclass/crisp-catalpa", "fix login", // remote row (host:repo/id in one cell)
 		"lab: unreachable", // diagnostic
 	} {
 		if !strings.Contains(out, want) {

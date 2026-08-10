@@ -204,25 +204,14 @@ func renderDiags(diags []string) string {
 }
 
 // descColumn is the 0-based index of the DESCRIPTION column in the table
-// layout below (REPO · NAME · STATUS · AGE · DESCRIPTION). It is the only
-// column given a fixed width, so it is the one that wraps.
-const descColumn = 4
+// layout below (ID · STATUS · AGE · DESCRIPTION). It is the only column given a
+// fixed width, so it is the one that wraps.
+const descColumn = 3
 
-// listTableRow is one fully-rendered row of the summary table.
-type listTableRow struct{ repo, name, status, age, desc string }
-
-// repoAndName splits a session key (<repo>/<rest>, where <rest> is a branch or
-// the implicit-session random id) into its repo and name halves for the first
-// two columns — eliminating the old SESSION+BRANCH redundancy where the branch
-// was printed both inside the key and again on its own. Cutting on the first
-// "/" keeps slashes in branch names (e.g. feature/foo) attached to the name.
-func repoAndName(sessionKey string) (repo, name string) {
-	repo, name, found := strings.Cut(sessionKey, "/")
-	if !found {
-		return "", sessionKey
-	}
-	return repo, name
-}
+// listTableRow is one fully-rendered row of the summary table. id is the full
+// session key (<repo>/<branch> or <repo>/<rand> for an implicit session), shown
+// verbatim so the ID column is exactly the string `sc resume`/`sc close` take.
+type listTableRow struct{ id, status, age, desc string }
 
 // renderListTable renders the styled session table — the summary view shared
 // by the static pretty path and the --watch model. Local states are sorted
@@ -262,23 +251,23 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 		case s.Kind == session.KindImplicit:
 			marker = "main"
 		}
-		repo, name := repoAndName(s.SessionKey)
 		// Status uses the presence-aware display state so a live clown over a dead
 		// spinclass PID reads running-detached, not inactive (#153) — never
 		// contradicting the 🤡 count beside it. Filter/marker stay on the base
 		// resolved state above so presence never un-abandons a row.
 		rows = append(rows, listTableRow{
-			repo:   repo,
-			name:   name,
+			id:     s.SessionKey,
 			status: statusCell(s.ResolveDisplayState(clowns), clowns, marker),
 			age:    sessionpick.FormatRelDate(sessionpick.LastActivity(*s), now),
 			desc:   descCell(s.Description, s.SpawnedBy),
 		})
 	}
 	for _, r := range remoteRows {
+		// Combine the host and the repo/id session key into the single ID cell,
+		// styled magenta so remote rows still stand out. Host-first mirrors the
+		// `host:` resume-target convention (FDR 0011): <remote>:<repo>/<id>.
 		rows = append(rows, listTableRow{
-			repo:   r.Repo,
-			name:   remoteSessionStyle.Render(r.Remote + ":" + r.ID),
+			id:     remoteSessionStyle.Render(r.Remote + ":" + r.Repo + "/" + r.ID),
 			status: statusCell(r.State, r.ClownCount, "remote"),
 			age:    "",
 			desc:   descCell(r.Description, r.SpawnedBy),
@@ -297,10 +286,10 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 		Border(lipgloss.RoundedBorder()).
 		BorderStyle(borderStyle).
 		BorderBottom(false). // the legend footer (legendFooter) supplies the closing border
-		Headers("REPO", "NAME", "STATUS", "AGE", "DESCRIPTION").
+		Headers("ID", "STATUS", "AGE", "DESCRIPTION").
 		StyleFunc(listTableStyleFunc(width, fixedColumnWidths(rows)))
 	// Description-column wrapping: when stdout's width is known, give
-	// the table that total width and pin the four narrow columns to their content
+	// the table that total width and pin the three narrow columns to their content
 	// width (below); lipgloss's resizer grows the shortest column and shrinks the
 	// biggest but skips any column already at its fixed width, so it flexes only
 	// the one unpinned column — DESCRIPTION — to the remaining space, wrapping it
@@ -310,7 +299,7 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 		t = t.Width(width)
 	}
 	for _, r := range rows {
-		t.Row(r.repo, r.name, r.status, r.age, r.desc)
+		t.Row(r.id, r.status, r.age, r.desc)
 	}
 	out := legendFooter(t.Render(), statusLegend())
 	if len(diags) > 0 {
@@ -370,22 +359,20 @@ func legendFooter(body, legend string) string {
 // column (see renderListTable).
 func fixedColumnWidths(rows []listTableRow) [descColumn]int {
 	w := [descColumn]int{
-		lipgloss.Width("REPO"),
-		lipgloss.Width("NAME"),
+		lipgloss.Width("ID"),
 		lipgloss.Width("STATUS"),
 		lipgloss.Width("AGE"),
 	}
 	for _, r := range rows {
-		w[0] = max(w[0], lipgloss.Width(r.repo))
-		w[1] = max(w[1], lipgloss.Width(r.name))
-		w[2] = max(w[2], lipgloss.Width(r.status))
-		w[3] = max(w[3], lipgloss.Width(r.age))
+		w[0] = max(w[0], lipgloss.Width(r.id))
+		w[1] = max(w[1], lipgloss.Width(r.status))
+		w[2] = max(w[2], lipgloss.Width(r.age))
 	}
 	return w
 }
 
 // listTableStyleFunc returns the per-cell StyleFunc. Headers get headerStyle;
-// when width is known the four leading columns are pinned to their content
+// when width is known the three leading columns are pinned to their content
 // width (fixed[c]) so DESCRIPTION is the only column lipgloss reflows. With
 // width 0 every body cell gets the plain padded cellStyle and the table sizes
 // to content.
