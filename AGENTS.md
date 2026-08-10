@@ -167,14 +167,10 @@ subcommand is always available.
   execs the cascade-merged `[session-entry].spawn-entry` (default the clown
   spawn form) with the brief as initial prompt; blocks on the worker's
   `SessionStart` hello (`internal/spawnhandshake`, 60s default,
-  `--hello-timeout`). `--issue` prepends an issue to the brief and is
-  **forge-aware** (#245, `cmd/spinclass/spawn_issue.go`): a bare number resolves
-  the TARGET repo's forge via `internal/repoinfo` and dispatches to
-  `gh issue view` (GitHub) or `fj api` (Gitea/Forgejo/Codeberg); a full issue
-  URL (`https://<host>/<owner>/<repo>/issues/<n>`) is fetched from ITS host
-  whatever the target's remote says. An unsupported or unresolvable forge is a
-  hard error, never a gh fallback — a read-only GitHub mirror would answer with
-  stale text and silently produce a wrong brief. Workers **may** spawn their
+  `--hello-timeout`). The brief is the worker's ONLY context: spinclass#258
+  removed the issue-prefill arg (a spawn-time forge dependency that failed
+  where least recoverable), so the spawning agent references any issue in the
+  brief and the worker fetches it. Workers **may** spawn their
   own workers — the #148 one-level restriction was removed, since the
   always-ask floor (#151) already prevents silent fan-out at every depth and
   was the actual protection; the tree is no longer guaranteed flat, and

@@ -20,7 +20,6 @@ import (
 type spawnParams struct {
 	Repo         string `json:"repo"`
 	Brief        string `json:"brief"`
-	Issue        string `json:"issue"`
 	Description  string `json:"description"`
 	HelloTimeout string `json:"hello-timeout"`
 	Model        string `json:"model"`
@@ -28,12 +27,13 @@ type spawnParams struct {
 
 // runSpawn is the shared spawn flow behind both surfaces (FDR 0006):
 // validate params, resolve the driver identity (the worker's hello target
-// and message-back address) and the target repo, optionally prepend a forge
-// issue to the brief, then block in spawn.Launch until the worker's
-// SessionStart hello or the deadline. Returns the launch result plus the
-// driver key for the chat hint line. ctx bounds only the issue fetch — the
-// hello wait has its own deadline (parseHelloTimeout).
-func runSpawn(ctx context.Context, p spawnParams) (spawn.Result, string, error) {
+// and message-back address) and the target repo, then block in spawn.Launch
+// until the worker's SessionStart hello or the deadline (parseHelloTimeout).
+// Returns the launch result plus the driver key for the chat hint line. The
+// brief is the worker's ONLY context (spinclass#258 removed the issue-prefill
+// arg — the spawning agent references any issue in the brief and the worker
+// fetches it).
+func runSpawn(p spawnParams) (spawn.Result, string, error) {
 	if p.Repo == "" {
 		return spawn.Result{}, "", errors.New("repo is required")
 	}
@@ -68,15 +68,7 @@ func runSpawn(ctx context.Context, p spawnParams) (spawn.Result, string, error) 
 		return spawn.Result{}, "", err
 	}
 
-	brief := p.Brief
-	if p.Issue != "" {
-		brief, err = prependIssueToBrief(ctx, repoPath, p.Issue, brief)
-		if err != nil {
-			return spawn.Result{}, "", err
-		}
-	}
-
-	res, err := spawn.Launch(home, repoPath, driverKey, brief, p.Description, p.Model, deadline)
+	res, err := spawn.Launch(home, repoPath, driverKey, p.Brief, p.Description, p.Model, deadline)
 	if err != nil {
 		return spawn.Result{}, "", err
 	}
@@ -132,14 +124,14 @@ func spawnResultText(driverKey string, res spawn.Result) string {
 }
 
 // runSpawnCLI is the `sc spawn` RunCLI handler.
-func runSpawnCLI(ctx context.Context, args json.RawMessage) error {
+func runSpawnCLI(_ context.Context, args json.RawMessage) error {
 	var p struct {
 		globalArgs
 		spawnParams
 	}
 	_ = json.Unmarshal(args, &p)
 
-	res, driverKey, err := runSpawn(ctx, p.spawnParams)
+	res, driverKey, err := runSpawn(p.spawnParams)
 	if err != nil {
 		return err
 	}
@@ -148,12 +140,12 @@ func runSpawnCLI(ctx context.Context, args json.RawMessage) error {
 }
 
 // handleSpawnSession is the `spawn-session` MCP tool handler.
-func handleSpawnSession(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+func handleSpawnSession(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	var params spawnParams
 	if err := json.Unmarshal(args, &params); err != nil {
 		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
 	}
-	res, driverKey, err := runSpawn(ctx, params)
+	res, driverKey, err := runSpawn(params)
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
 	}
@@ -206,11 +198,6 @@ func spawnParamList() []command.Param {
 			Type:        command.String,
 			Required:    true,
 			Description: "The worker's task brief — its ONLY context. Include everything it needs plus an explicit instruction to message you back via chat when done (your session key is its chat target).",
-		},
-		{
-			Name:        "issue",
-			Type:        command.String,
-			Description: "Issue to prepend to the brief, as a bare number (e.g. \"244\") in the TARGET repo, or a full issue URL (https://<host>/<owner>/<repo>/issues/<n>) on any forge — a URL is fetched from ITS forge, so the issue need not live on the target repo's. The forge is resolved (internal/repoinfo) and dispatched: GitHub via `gh issue view`, Gitea/Forgejo/Codeberg via `fj api`. Its title and body are prepended. Errors if the forge is unsupported or unresolvable, the client binary is missing, or the fetch fails — never falls back to another forge, since a mirror's stale copy would silently produce a wrong brief.",
 		},
 		{
 			Name:        "description",

@@ -305,7 +305,7 @@ branch of this repo"; one launch mechanism underneath.
 ## Sketch — interface
 
 ```
-sc spawn <repo-dirname> --brief "<text>" [--issue <N>] [--description "<text>"]
+sc spawn <repo-dirname> --brief "<text>" [--description "<text>"]
 ```
 
 (Named `sc spawn`, not `spawn-sibling`: dirname addressing made the
@@ -316,9 +316,13 @@ machinery also backs detached forks.)
   accepted as escape hatch). Must resolve to a different repo than the
   driver's.
 - `--brief`: required; the driver-written kickoff prompt.
-- `--issue`: optional; prepends the named issue's body to the brief.
 - `--description`: worker session description; defaults to a
   derivation from the brief's first line.
+
+(A `--issue` arg to prepend a forge issue to the brief was added post-record
+and later **removed** in spinclass#258: a spawn-time forge dependency that
+failed exactly where least recoverable. The brief is the worker's only
+context — reference an issue in it and let the worker fetch it.)
 
 MCP tool: `spawn-session`, same inputs. `sc fork` grows the matching
 detached mode (flag shape decided at implementation-plan time) reusing
