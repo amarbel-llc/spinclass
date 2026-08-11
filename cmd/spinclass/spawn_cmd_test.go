@@ -96,6 +96,13 @@ juggler = "--model"
 func newSpawnCmdFixture(t *testing.T, sweatfileTOML, driverKey string) (home, repoPath string) {
 	t.Helper()
 	testgit.RequireGit(t)
+	// Force clown OFF so handleSpawnSession takes the synchronous path and
+	// returns the full result inline (spinclass#266 made the MCP tool async
+	// under clown; these end-to-end tests exercise the shared spawn machinery
+	// deterministically via the sync fallback — the async dispatch, response
+	// contract, and reap-if-dead policy are covered by focused unit tests).
+	t.Setenv("CLOWN_BIN", "")
+	_ = os.Unsetenv("CLOWN_BIN")
 	home = t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))

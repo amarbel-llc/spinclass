@@ -34,26 +34,44 @@ type Result struct {
 	PoshSessionID string // the worker's posh/clown session id from the hello (reattach target); empty if the worker reported none
 }
 
-// Launch creates a detached, harness-booted worker session in repoPath and
-// blocks until its SessionStart hello (FDR 0006). deadline 0 means
-// DefaultHelloDeadline. model, when non-empty, requests a specific model
-// alias (e.g. "opus") for the worker's provider — spliced into the
-// spawn-entry template via renderSpawn/SpliceModelFlag; "" means no model
-// requested (the entry runs unmodified). The branch name and ResolvedPath
-// are produced exactly as `sc start` does (worktree.ResolvePath), and the
-// worktree is created via shop.Create — the existing non-attaching create
-// path.
+// Pending is a spawned worker whose worktree exists and whose detached entry
+// has been exec'd, but whose SessionStart hello has not yet been awaited. The
+// async spawn path (spinclass#266) returns SessionKey/WorktreePath to the caller
+// immediately and hands the Pending to WaitHello in a background job; the sync
+// path (Launch) awaits it inline.
+type Pending struct {
+	SessionKey   string // <repo-dirname>/<branch> — the worker's chat target
+	WorktreePath string // absolute path to the worker's worktree
+	RepoPath     string // the worker repo's main checkout (for a timeout reap)
+	Branch       string // the worker's branch (for a timeout reap)
+
+	rp         worktree.ResolvedPath
+	driverKey  string
+	desc       string
+	startTime  time.Time
+	window     []string
+	sessionEnv map[string]string
+}
+
+// LaunchDetached is the SYNCHRONOUS prefix of a spawn: validate the spawn
+// templates, create the worker worktree (shop.Create), write its session state,
+// and exec the detached harness entry. It returns as soon as the worker is
+// booting — its SessionKey/WorktreePath are known — WITHOUT waiting for the
+// hello. Pass the returned Pending to WaitHello (inline for the sync path, or in
+// a background job for the async path, spinclass#266).
 //
-// On a hello timeout the worktree and its session state are intentionally
-// left behind for inspection (`sc close` cleans them up).
-func Launch(home, repoPath, driverKey, brief, desc, model string, deadline time.Duration) (Result, error) {
+// model, when non-empty, requests a specific model alias (e.g. "opus") for the
+// worker's provider — spliced into the spawn-entry template via
+// renderSpawn/SpliceModelFlag; "" runs the entry unmodified. The branch name and
+// ResolvedPath are produced exactly as `sc start` does (worktree.ResolvePath).
+func LaunchDetached(home, repoPath, driverKey, brief, desc, model string) (Pending, error) {
 	var descArgs []string
 	if desc != "" {
 		descArgs = []string{desc}
 	}
 	rp, err := worktree.ResolvePath(repoPath, descArgs)
 	if err != nil {
-		return Result{}, err
+		return Pending{}, err
 	}
 
 	// Validate the spawn templates BEFORE creating anything: bad config
@@ -65,7 +83,7 @@ func Launch(home, repoPath, driverKey, brief, desc, model string, deadline time.
 	// layer already contributed.
 	argv, window, sessionEnv, merged, err := renderSpawn(home, rp, brief, model)
 	if err != nil {
-		return Result{}, err
+		return Pending{}, err
 	}
 
 	// The worker repo's own sweatfile decides whether a stale base is
@@ -75,10 +93,23 @@ func Launch(home, repoPath, driverKey, brief, desc, model string, deadline time.
 	if _, err := shop.Create(io.Discard, rp, shop.CreateOpts{
 		AllowStaleBase: merged.AllowStaleBase(),
 	}, nil); err != nil {
-		return Result{}, fmt.Errorf("creating worker worktree: %w", err)
+		return Pending{}, fmt.Errorf("creating worker worktree: %w", err)
 	}
 
-	return launchRendered(rp, driverKey, desc, deadline, argv, window, sessionEnv)
+	return startDetachedEntry(rp, driverKey, desc, argv, window, sessionEnv)
+}
+
+// Launch is the SYNCHRONOUS spawn: LaunchDetached then WaitHello. deadline 0
+// means DefaultHelloDeadline. It blocks until the worker's SessionStart hello
+// (FDR 0006). On a hello timeout the worktree and its session state are
+// intentionally left behind for inspection (`sc close` / `close-child-session`).
+// Used by the `sc spawn` CLI and by the async tool's no-clown fallback.
+func Launch(home, repoPath, driverKey, brief, desc, model string, deadline time.Duration) (Result, error) {
+	p, err := LaunchDetached(home, repoPath, driverKey, brief, desc, model)
+	if err != nil {
+		return Result{}, err
+	}
+	return WaitHello(p, deadline)
 }
 
 // renderSpawn loads the WORKER repo's sweatfile hierarchy (its harness decides
@@ -212,18 +243,11 @@ func workerEnv(rp worktree.ResolvedPath, desc string, userEnv map[string]string)
 	)
 }
 
-// launchRendered is the shared tail of Launch and LaunchExisting: write the
-// worker's session state, exec the already-rendered spawn argv with the
-// worker's environment, and block on the chat hello.
-func launchRendered(rp worktree.ResolvedPath, driverKey, desc string, deadline time.Duration, argv, window []string, sessionEnv map[string]string) (Result, error) {
-	if deadline <= 0 {
-		deadline = DefaultHelloDeadline
-	}
-
-	// PID 0 resolves "inactive" via ResolveState's PID-liveness until the
-	// worker's SessionStart hook adopts the state (refreshing PID and
-	// HelloSentAt — Task 5 of the spawn plan). That is correct pre-hello:
-	// nothing is attached yet.
+// startDetachedEntry writes the worker's pre-hello session state and execs the
+// detached harness entry, returning a Pending (worktree booting, hello not yet
+// awaited). The SessionStart hook adopts the state (PID + HelloSentAt) when the
+// worker boots; pre-hello PID is 0 (nothing attached yet).
+func startDetachedEntry(rp worktree.ResolvedPath, driverKey, desc string, argv, window []string, sessionEnv map[string]string) (Pending, error) {
 	st := session.State{
 		PID:          0,
 		SessionState: session.StateActive,
@@ -239,41 +263,79 @@ func launchRendered(rp worktree.ResolvedPath, driverKey, desc string, deadline t
 		},
 	}
 	if err := session.Write(st); err != nil {
-		return Result{}, fmt.Errorf("writing worker session state: %w", err)
+		return Pending{}, fmt.Errorf("writing worker session state: %w", err)
 	}
 
 	// Captured BEFORE the exec so a hello racing worker startup still satisfies
-	// the gate.
+	// the gate (WaitHello reads it back off the Pending).
 	startTime := time.Now()
 
 	// spinclass GUARANTEES detachment rather than trusting the spawn-entry to
 	// self-detach: startDetached launches the entry in its own session with
 	// stdio redirected to a log and never waits for it to exit. Readiness is
-	// proven SOLELY by the hello handshake below (bounded by deadline), so an
-	// entry that never returns — a blocking direnv build, a foregrounded
+	// proven SOLELY by the hello handshake (WaitHello, bounded by deadline), so
+	// an entry that never returns — a blocking direnv build, a foregrounded
 	// clown/posh attach — can no longer wedge the launcher. A well-behaved
 	// clown --clown-attach=spawn still forks the worker and exits promptly.
 	logPath := filepath.Join(rp.AbsPath, ".spinclass", "spawn.log")
 	if err := startDetached(argv, rp.AbsPath, workerEnv(rp, desc, sessionEnv), logPath); err != nil {
-		return Result{}, fmt.Errorf("spawn template %q failed: %w", argv, err)
+		return Pending{}, fmt.Errorf("spawn template %q failed: %w", argv, err)
 	}
 
-	// Block on the worker's hello, which carries its posh session id. The
-	// window opens AFTER the hello (not before) so it can attach to the now-
-	// ready session: the id is a crypto-random UUID unknowable until the worker
-	// boots (direction B), so {attach-id} can only be resolved here. A hello
-	// timeout returns before any window opens — a failed spawn shows no window.
-	poshID, err := spawnhandshake.WaitForHello(driverKey, rp.SessionKey, startTime, deadline)
+	return Pending{
+		SessionKey:   rp.SessionKey,
+		WorktreePath: rp.AbsPath,
+		RepoPath:     rp.RepoPath,
+		Branch:       rp.Branch,
+		rp:           rp,
+		driverKey:    driverKey,
+		desc:         desc,
+		startTime:    startTime,
+		window:       window,
+		sessionEnv:   sessionEnv,
+	}, nil
+}
+
+// WaitHello blocks on the pending worker's SessionStart hello (bounded by
+// deadline; 0 means DefaultHelloDeadline), then opens the spawn-window and
+// returns the Result. Called inline by Launch (sync) or in a background job by
+// the async spawn tool (spinclass#266). On timeout it returns the handshake
+// error and opens no window (a failed spawn shows no window).
+func WaitHello(p Pending, deadline time.Duration) (Result, error) {
+	if deadline <= 0 {
+		deadline = DefaultHelloDeadline
+	}
+
+	// The window opens AFTER the hello (not before) so it can attach to the
+	// now-ready session: the posh id is a crypto-random UUID unknowable until the
+	// worker boots (direction B), so {attach-id} can only be resolved here.
+	poshID, err := spawnhandshake.WaitForHello(p.driverKey, p.rp.SessionKey, p.startTime, deadline)
 	if err != nil {
 		return Result{}, err
 	}
 
-	launchSpawnWindow(substituteAttachID(window, poshID), rp, desc, sessionEnv)
+	launchSpawnWindow(substituteAttachID(p.window, poshID), p.rp, p.desc, p.sessionEnv)
 
 	return Result{
-		SessionKey:    rp.SessionKey,
-		WorktreePath:  rp.AbsPath,
-		MultiplexerID: rp.SessionKey,
+		SessionKey:    p.rp.SessionKey,
+		WorktreePath:  p.rp.AbsPath,
+		MultiplexerID: p.rp.SessionKey,
 		PoshSessionID: poshID,
 	}, nil
+}
+
+// SpawnLogActiveWithin reports whether the worker's spawn.log was written within
+// the given window — a best-effort "is the worker still booting?" signal for the
+// async spawn's reap-if-dead timeout policy (spinclass#266). spinclass does not
+// track the worker PID (it guarantees detachment; the entry exits promptly), so
+// this log-activity heuristic is the spinclass-only liveness proxy. It errs
+// toward "active" (a missing/unreadable log reads as NOT active → reapable):
+// recent writes mean the harness is still doing work, so the worker is not
+// yanked mid-boot.
+func SpawnLogActiveWithin(worktreePath string, within time.Duration) bool {
+	info, err := os.Stat(filepath.Join(worktreePath, ".spinclass", "spawn.log"))
+	if err != nil {
+		return false
+	}
+	return time.Since(info.ModTime()) <= within
 }

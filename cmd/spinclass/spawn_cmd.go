@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
+	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/spawn"
 )
@@ -60,24 +61,9 @@ func runSpawn(p spawnParams) (spawn.Result, string, error) {
 		return spawn.Result{}, "", fmt.Errorf("resolving driver session key (the worker's hello target): %w", err)
 	}
 
-	// Resolve the target repo (spinclass#262: repo is optional). An omitted
-	// repo — or one that resolves to the driver's own repo — means "this repo":
-	// a fresh worker off its default branch. A sibling dirname/path targets that
-	// repo. There is no same-repo refusal (fork-at-HEAD was dropped; a worker
-	// repositions its own branch if it needs a non-default starting point).
-	var repoPath string
-	if p.Repo == "" {
-		repoPath = driverRepoPath()
-		if repoPath == "" {
-			return spawn.Result{}, "", errors.New(
-				"no repo specified and the current directory is not inside a git repo; pass a target repo dirname or path",
-			)
-		}
-	} else {
-		repoPath, err = spawn.ResolveRepo(home, p.Repo)
-		if err != nil {
-			return spawn.Result{}, "", err
-		}
+	repoPath, err := resolveSpawnRepo(home, p.Repo)
+	if err != nil {
+		return spawn.Result{}, "", err
 	}
 
 	res, err := spawn.Launch(home, repoPath, driverKey, p.Brief, p.Description, p.Model, deadline)
@@ -85,6 +71,24 @@ func runSpawn(p spawnParams) (spawn.Result, string, error) {
 		return spawn.Result{}, "", err
 	}
 	return res, driverKey, nil
+}
+
+// resolveSpawnRepo resolves a spawn target repo (spinclass#262: repo is
+// optional). An omitted repo — or one that resolves to the driver's own repo —
+// means "this repo": a fresh worker off its default branch. A sibling
+// dirname/path targets that repo. No same-repo refusal (fork-at-HEAD was
+// dropped; a worker repositions its own branch if it needs a non-default start).
+func resolveSpawnRepo(home, repo string) (string, error) {
+	if repo == "" {
+		repoPath := driverRepoPath()
+		if repoPath == "" {
+			return "", errors.New(
+				"no repo specified and the current directory is not inside a git repo; pass a target repo dirname or path",
+			)
+		}
+		return repoPath, nil
+	}
+	return spawn.ResolveRepo(home, repo)
 }
 
 // parseHelloTimeout parses the spawn surface's hello-timeout param. "" means 0,
@@ -150,11 +154,19 @@ func runSpawnCLI(_ context.Context, args json.RawMessage) error {
 	return nil
 }
 
-// handleSpawnSession is the `spawn-session` MCP tool handler.
+// handleSpawnSession is the `spawn-session` MCP tool handler. It is async-only
+// by design (spinclass#266): under clown it returns the session key + a
+// ringmaster job id immediately and delivers the worker's SessionStart hello as
+// a job-wakeup (handleSpawnSessionAsync). Without clown there is no wake
+// channel, so it falls back to the synchronous spawn (block on the hello and
+// return the result inline) — the same path the `sc spawn` CLI uses.
 func handleSpawnSession(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	var params spawnParams
 	if err := json.Unmarshal(args, &params); err != nil {
 		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+	}
+	if clown.Enabled() {
+		return handleSpawnSessionAsync(params)
 	}
 	res, driverKey, err := runSpawn(params)
 	if err != nil {
@@ -217,7 +229,7 @@ func spawnParamList() []command.Param {
 		{
 			Name:        "hello-timeout",
 			Type:        command.String,
-			Description: "How long to wait for the worker's SessionStart hello, as a Go duration (e.g. \"90s\", \"3m\"). Default 60s. THE tuning lever when harness startup (cold nix cache, slow hosts) exceeds the default window.",
+			Description: "How long to wait for the worker's SessionStart hello, as a Go duration (e.g. \"90s\", \"3m\"). Default: 5m for the async spawn-session MCP tool (the wait is costless), 60s for the synchronous `sc spawn` CLI. The tuning lever when harness startup (cold nix cache, slow hosts) exceeds the default window.",
 		},
 		{
 			Name:        "model",

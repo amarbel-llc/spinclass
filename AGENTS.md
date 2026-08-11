@@ -170,15 +170,17 @@ subcommand is always available.
   needs a non-default start), and `fork-session` / `sc fork --brief` were removed
   (create-only `sc fork` stays). Launch execs the cascade-merged
   `[session-entry].spawn-entry` (default the clown spawn form) with the brief as
-  initial prompt; blocks on the worker's `SessionStart` hello
-  (`internal/spawnhandshake`, 60s default, `--hello-timeout`). The brief is the
-  worker's ONLY context (spinclass#258 removed the issue-prefill arg). Workers
+  initial prompt. The `spawn-session` MCP tool is ASYNC under clown (#266): it
+  returns the session key + a ringmaster job id and delivers the hello (or a
+  reap-if-dead timeout) as a wake; `sc spawn` (CLI) blocks. `internal/spawn`
+  splits `LaunchDetached`/`WaitHello`. The brief is
+  the worker's ONLY context (spinclass#258 removed the
+  issue-prefill arg). Workers
   **may** spawn their
-  own workers — the #148 one-level restriction was removed, since the
-  always-ask floor (#151) already prevents silent fan-out at every depth and
-  was the actual protection; the tree is no longer guaranteed flat, and
-  reaping authority stays immediate-parent-only. Coordination
-  afterward is clown chat. `internal/spawn` owns resolution + launch.
+  own workers (#148's one-level cap lifted; the #151 always-ask floor is the
+  real protection against silent fan-out, so the tree is no longer flat);
+  reaping authority stays immediate-parent-only. Coordination afterward is
+  clown chat. `internal/spawn` owns resolution + launch.
   **Reaping** (#249, `cmd/spinclass/close_child_cmd.go`): `close-child-session`
   lets a driver tear down a worker it spawned — completed children and failed
   spawns (a hello timeout leaves the worktree + state on disk by design) would
