@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
 
 	"code.linenisgreat.com/spinclass/internal/git"
 )
@@ -231,6 +232,23 @@ func commonConfigHasWorktreeOverride(worktreePath string) bool {
 	return err == nil && strings.TrimSpace(out) != ""
 }
 
+// dispatcherData is the substitution set for dispatcherTemplate. Every field is
+// single-quoted for POSIX sh by the template's `sq` func.
+type dispatcherData struct {
+	Orig     string // original hooks dir git would use absent our override
+	Self     string // our per-worktree hooks dir (the exec-loop guard compares against it)
+	Bin      string // the formatter's leading word, for the command-exists guard
+	Cmd      string // the full formatter command line
+	LockHash string // baked flake.lock hash for the #267 staleness check ("" disables it)
+}
+
+// dispatcherTemplate renders the composing dispatcher (see dispatcherScript for
+// what the script does). Parsed once at init; a malformed template panics the
+// package on load rather than emitting a broken hook at runtime.
+var dispatcherTemplate = template.Must(
+	template.New("dispatch").Funcs(template.FuncMap{"sq": shSingleQuote}).Parse(dispatcherTemplateText),
+)
+
 // dispatcherScript renders the composing dispatcher. Keyed on its own basename
 // ($0), it runs the configured formatter on pre-commit (best-effort,
 // non-blocking) and then delegates to the repo's original same-named hook,
@@ -243,63 +261,86 @@ func commonConfigHasWorktreeOverride(worktreePath string) bool {
 // flags) would otherwise be indistinguishable from a working one, landing
 // commits unformatted while looking fine (spinclass#183 review). The formatter
 // is still non-blocking: the commit proceeds regardless.
+//
+// When flake.lock has drifted since the session's devShell froze (the baked
+// LockHash), the formatter is re-evaluated via `nix develop --command` so a
+// stale toolchain cannot restamp generated files (spinclass#267).
 func dispatcherScript(originalDir, hooksDir, cmd, lockHash string) string {
 	bin := cmd
 	if i := strings.IndexAny(cmd, " \t"); i >= 0 {
 		bin = cmd[:i]
 	}
-	return "#!/bin/sh\n" +
-		"# Managed by spinclass — per-session pre-commit repair hook (composing dispatcher).\n" +
-		"# Runs the configured formatter on pre-commit, then delegates to the repo's\n" +
-		"# original same-named native hook (preserving its exit code). The formatter is\n" +
-		"# best-effort/non-blocking, BUT a nonzero formatter exit is surfaced loudly (with\n" +
-		"# its stderr) so a stale/misconfigured formatter is not a silent no-op. When the\n" +
-		"# tree's flake.lock has drifted since this session's devShell was frozen, the\n" +
-		"# formatter is re-evaluated in the CURRENT devShell (building it if needed) so a\n" +
-		"# stale toolchain cannot restamp generated files (spinclass#267). Regenerated on\n" +
-		"# every `sc start`/`sc resume`. See\n" +
-		"# docs/plans/2026-06-17-precommit-hook-composition-design.md and\n" +
-		"# docs/plans/2026-08-11-self-healing-precommit-dispatch-design.md.\n" +
-		"hook=$(basename \"$0\")\n" +
-		"orig=" + shSingleQuote(originalDir) + "\n" +
-		"self=" + shSingleQuote(hooksDir) + "\n" +
-		"if [ \"$hook\" = pre-commit ]; then\n" +
-		"\tbin=" + shSingleQuote(bin) + "\n" +
-		"\tcmd=" + shSingleQuote(cmd) + "\n" +
-		"\tlockhash=" + shSingleQuote(lockHash) + "\n" +
-		"\t# spinclass#267: re-eval the hook in the current devShell if flake.lock\n" +
-		"\t# drifted since this session's devShell was frozen (baked lockhash).\n" +
-		"\tvia_nix=0\n" +
-		"\tif [ -n \"$lockhash\" ] && [ -f flake.lock ] && command -v nix >/dev/null 2>&1; then\n" +
-		"\t\tlive=$(git hash-object flake.lock 2>/dev/null || printf '')\n" +
-		"\t\tif [ -n \"$live\" ] && [ \"$live\" != \"$lockhash\" ]; then\n" +
-		"\t\t\tprintf '%s\\n' \"spinclass pre-commit: flake.lock changed since this session's devShell loaded; re-evaluating the hook in the current devShell (may build).\" >&2\n" +
-		"\t\t\tvia_nix=1\n" +
-		"\t\tfi\n" +
-		"\tfi\n" +
-		"\tif [ \"$via_nix\" = 1 ] || command -v \"$bin\" >/dev/null 2>&1; then\n" +
-		"\t\terr=$(mktemp 2>/dev/null || printf '%s' \"${TMPDIR:-/tmp}/spinclass-precommit.$$\")\n" +
-		"\t\tif [ \"$via_nix\" = 1 ]; then\n" +
-		"\t\t\tnix develop --command sh -c \"$cmd\" 2>\"$err\"\n" +
-		"\t\telse\n" +
-		"\t\t\tsh -c \"$cmd\" 2>\"$err\"\n" +
-		"\t\tfi\n" +
-		"\t\trc=$?\n" +
-		"\t\tcat \"$err\" >&2\n" +
-		"\t\trm -f \"$err\"\n" +
-		"\t\tif [ \"$rc\" -ne 0 ]; then\n" +
-		"\t\t\tprintf '%s\\n' \\\n" +
-		"\t\t\t\t\"spinclass pre-commit: formatter exited $rc — staged content NOT repaired (committing anyway).\" \\\n" +
-		"\t\t\t\t\"  command: $cmd\" \\\n" +
-		"\t\t\t\t\"  a flag/usage error here usually means the formatter is stale or misconfigured.\" >&2\n" +
-		"\t\tfi\n" +
-		"\tfi\n" +
-		"fi\n" +
-		"if [ \"$orig\" != \"$self\" ] && [ -x \"$orig/$hook\" ]; then\n" +
-		"\texec \"$orig/$hook\" \"$@\"\n" +
-		"fi\n" +
-		"exit 0\n"
+	var buf strings.Builder
+	// Execute cannot fail here: the template is Must-parsed at init, `sq` is
+	// infallible, every referenced field exists, and strings.Builder.Write never
+	// errors — so the error is deliberately discarded.
+	_ = dispatcherTemplate.Execute(&buf, dispatcherData{
+		Orig:     originalDir,
+		Self:     hooksDir,
+		Bin:      bin,
+		Cmd:      cmd,
+		LockHash: lockHash,
+	})
+	return buf.String()
 }
+
+// dispatcherTemplateText is the composing dispatcher as a text/template. The
+// script has no backticks, so it lives in a raw string literal: real newlines
+// are line breaks and a literal \n inside a printf format survives verbatim. The
+// {{.Field | sq}} actions inject POSIX-single-quoted values; the shell's own
+// $0 / $@ / ${VAR} use single braces and never collide with template actions.
+const dispatcherTemplateText = `#!/bin/sh
+# Managed by spinclass — per-session pre-commit repair hook (composing dispatcher).
+# Runs the configured formatter on pre-commit, then delegates to the repo's
+# original same-named native hook (preserving its exit code). The formatter is
+# best-effort/non-blocking, BUT a nonzero formatter exit is surfaced loudly (with
+# its stderr) so a stale/misconfigured formatter is not a silent no-op. When the
+# tree's flake.lock has drifted since this session's devShell was frozen, the
+# formatter is re-evaluated in the CURRENT devShell (building it if needed) so a
+# stale toolchain cannot restamp generated files (spinclass#267). Regenerated on
+# every 'sc start' / 'sc resume'. See
+# docs/plans/2026-06-17-precommit-hook-composition-design.md and
+# docs/plans/2026-08-11-self-healing-precommit-dispatch-design.md.
+hook=$(basename "$0")
+orig={{.Orig | sq}}
+self={{.Self | sq}}
+if [ "$hook" = pre-commit ]; then
+	bin={{.Bin | sq}}
+	cmd={{.Cmd | sq}}
+	lockhash={{.LockHash | sq}}
+	# spinclass#267: re-eval the hook in the current devShell if flake.lock
+	# drifted since this session's devShell was frozen (baked lockhash).
+	via_nix=0
+	if [ -n "$lockhash" ] && [ -f flake.lock ] && command -v nix >/dev/null 2>&1; then
+		live=$(git hash-object flake.lock 2>/dev/null || printf '')
+		if [ -n "$live" ] && [ "$live" != "$lockhash" ]; then
+			printf '%s\n' "spinclass pre-commit: flake.lock changed since this session's devShell loaded; re-evaluating the hook in the current devShell (may build)." >&2
+			via_nix=1
+		fi
+	fi
+	if [ "$via_nix" = 1 ] || command -v "$bin" >/dev/null 2>&1; then
+		err=$(mktemp 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}/spinclass-precommit.$$")
+		if [ "$via_nix" = 1 ]; then
+			nix develop --command sh -c "$cmd" 2>"$err"
+		else
+			sh -c "$cmd" 2>"$err"
+		fi
+		rc=$?
+		cat "$err" >&2
+		rm -f "$err"
+		if [ "$rc" -ne 0 ]; then
+			printf '%s\n' \
+				"spinclass pre-commit: formatter exited $rc — staged content NOT repaired (committing anyway)." \
+				"  command: $cmd" \
+				"  a flag/usage error here usually means the formatter is stale or misconfigured." >&2
+		fi
+	fi
+fi
+if [ "$orig" != "$self" ] && [ -x "$orig/$hook" ]; then
+	exec "$orig/$hook" "$@"
+fi
+exit 0
+`
 
 // shSingleQuote wraps s in single quotes safe for POSIX sh, escaping any
 // embedded single quotes via the '\” idiom.

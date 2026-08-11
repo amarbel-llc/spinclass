@@ -64,6 +64,30 @@ func TestDispatcherScript(t *testing.T) {
 	}
 }
 
+// TestDispatcherScriptRendersValidSh guards the concat→template refactor
+// (spinclass#269): the rendered dispatcher must always be syntactically valid
+// POSIX sh, checked directly with `sh -n` (independent of the git-driven
+// execution tests). Both branches — with and without a baked lock hash — render.
+func TestDispatcherScriptRendersValidSh(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		lockHash string
+	}{
+		{"with-lockhash", "deadbeefcafe"},
+		{"empty-lockhash", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			script := dispatcherScript("/orig/hooks", "/wt/.spinclass/hooks",
+				"conformist --staged --exit-zero-on-fix", tc.lockHash)
+			cmd := exec.Command("sh", "-n")
+			cmd.Stdin = strings.NewReader(script)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("rendered dispatcher is not valid sh: %v\n%s\n--- script ---\n%s", err, out, script)
+			}
+		})
+	}
+}
+
 // TestInstallPreCommitHookBakesFlakeLockHash: when the worktree has a flake.lock,
 // its git content hash is baked into the dispatcher as the session-start lock
 // identity (spinclass#267). No flake.lock ⇒ empty hash ⇒ drift branch inert
