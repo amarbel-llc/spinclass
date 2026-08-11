@@ -11,7 +11,6 @@ import (
 // Tool names the always-ask floor is expressed over.
 const (
 	spawnSessionTool      = "mcp__plugin_spinclass_spinclass__spawn-session"
-	forkSessionTool       = "mcp__plugin_spinclass_spinclass__fork-session"
 	closeChildSessionTool = "mcp__plugin_spinclass_spinclass__close-child-session"
 )
 
@@ -27,10 +26,12 @@ const (
 // Callers must pass the tool input, not just the name.
 func AlwaysAsk(toolName string, toolInput map[string]any) (string, bool) {
 	switch toolName {
-	case spawnSessionTool, forkSessionTool:
-		// Spawning/forking launches a full harness-booted agent that
-		// immediately consumes tokens — categorically heavier than any other
-		// spinclass tool, and unconditional regardless of arguments.
+	case spawnSessionTool:
+		// Spawning launches a full harness-booted agent that immediately
+		// consumes tokens — categorically heavier than any other spinclass tool,
+		// and unconditional regardless of arguments. (spinclass#262 merged
+		// fork-session into spawn-session, so this one tool is the whole spawn
+		// surface now.)
 		//
 		// Since the #148 recursive-spawn guard was removed, this is the ONLY
 		// thing preventing runaway fan-out: a worker may now spawn its own

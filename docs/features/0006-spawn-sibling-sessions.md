@@ -201,8 +201,9 @@ display as a later cosmetic.
 > is retained as the original rationale; see the reversal note after it.
 
 A session whose own state carries `spawned_by` — i.e. a spawned worker —
-is refused by all four spawn surfaces (`spawn-session`, `fork-session`,
-`sc spawn`, `sc fork --brief`). The driver/worker topology stays a
+is refused by the spawn surfaces (`spawn-session`, `sc spawn`;
+`fork-session` / `sc fork --brief` were removed in spinclass#262). The
+driver/worker topology stays a
 one-level tree the user can supervise, and a misbehaving worker cannot
 recursively fan out token-burning sub-workers. Revisit as a sweatfile
 knob if a production pattern ever genuinely wants a mid-level
@@ -239,7 +240,7 @@ and its two call sites (`spawn_cmd.go`, `fork_cmd.go`).
 
 ### Always-ask — never silently auto-approved (added 2026-06-13, #151)
 
-The `spawn-session` and `fork-session` MCP tools always prompt: every
+The `spawn-session` MCP tool always prompts: every
 invocation requires a fresh user confirmation, regardless of `claude-allow`
 rules, perms-tier rules, or a permissive session mode. They launch a full
 harness-booted worker that immediately consumes tokens — categorically
@@ -260,7 +261,7 @@ Enforced server-side across both spinclass-owned auto-approve surfaces:
 Caveat (the issue's documented fallback): Claude Code's `bypassPermissions`
 mode (`--dangerously-skip-permissions`) skips the permission system entirely,
 including a hook `ask` — that is the one place the prompt cannot be forced
-from the server side. `sc spawn` / `sc fork --brief` from a human shell are
+from the server side. `sc spawn` from a human shell is
 out of scope: typing the command IS the confirmation.
 
 ### Failure after handoff — presence probe on suspicion
@@ -295,26 +296,28 @@ stale outer title (#154).
 The launch half of spawn — the `[session].spawn` multiplexer template,
 the `[session].spawn-entry` harness boot, the hello gate, and
 `spawned_by` lineage — is deliberately not cross-repo-specific.
-`sc fork` (branch a new session off the current worktree) gains the
-same detached-launch path: a fork can come up as a harness-booted,
-chat-addressable worker in its **own** repo, briefed by the forking
-session, instead of requiring the user to attach a terminal to it.
-Spawn = "worker in a sibling repo"; detached fork = "worker on a
-branch of this repo"; one launch mechanism underneath.
+`sc fork` briefly gained the same detached-launch path (a fork booting
+as a harness-booted, chat-addressable worker on a branch of this repo).
+**spinclass#262 removed it**: `sc spawn`'s `repo` arg became optional, so
+a worker in the current repo is just `sc spawn` (a fresh worktree off the
+default branch — fork-at-HEAD was dropped, a worker repositions its own
+branch if needed). The one launch mechanism now backs only `sc spawn`;
+`sc fork` is create-only again.
 
 ## Sketch — interface
 
 ```
-sc spawn <repo-dirname> --brief "<text>" [--description "<text>"]
+sc spawn [repo-dirname] --brief "<text>" [--description "<text>"]
 ```
 
 (Named `sc spawn`, not `spawn-sibling`: dirname addressing made the
-target a repo name rather than a filesystem sibling, and the launch
-machinery also backs detached forks.)
+target a repo name rather than a filesystem sibling. spinclass#262 made
+the repo arg optional, so `sc spawn` also covers a worker in the current
+repo — the case the removed detached fork used to serve.)
 
-- `<repo-dirname>`: leaf name of the sibling repo (explicit path
-  accepted as escape hatch). Must resolve to a different repo than the
-  driver's.
+- `[repo-dirname]`: OPTIONAL (spinclass#262). Omitted — or naming the
+  driver's own repo — spawns a worker in THIS repo. A different repo is a
+  leaf name (explicit path accepted as escape hatch). No same-repo refusal.
 - `--brief`: required; the driver-written kickoff prompt.
 - `--description`: worker session description; defaults to a
   derivation from the brief's first line.

@@ -240,26 +240,10 @@ func registerMCPOnlyCommands(app *command.App) {
 	})
 
 	app.AddCommand(&command.Command{
-		Name:  "fork-session",
-		Title: "Fork Detached Worker Session",
-		Description: command.Description{
-			Short: "Fork the CURRENT repo at this session's HEAD into a detached, harness-booted worker on a new branch (FDR 0006). Same-repo by design — the worker lands in this repo's .worktrees/<branch>; use spawn-session for a sibling repo. Same hello/timeout/cleanup contract as spawn-session: blocks up to the hello deadline (60s default; tune via hello-timeout) waiting for the worker's SessionStart chat hello. The brief is the worker's ONLY context: include everything it needs plus an explicit 'message me back at <your session key> via chat when done' instruction. Returns the worker's session_key (= its chat address for chat-send), worktree_path, and multiplexer id. On a failure after worktree creation the forked worktree is left in place for inspection (session state too when the failure came after launch, e.g. a hello timeout; bad spawn config fails before any state is written); clean up with `sc close`. A spawned worker MAY fork its own workers — the former one-level restriction is gone — but note that `close-child-session` authorizes on immediate parentage only, so a worker you spawn indirectly is not yours to reap.",
-		},
-		Annotations: &protocol.ToolAnnotations{
-			ReadOnlyHint:    protocol.BoolPtr(false),
-			DestructiveHint: protocol.BoolPtr(false),
-			IdempotentHint:  protocol.BoolPtr(false),
-			OpenWorldHint:   protocol.BoolPtr(false),
-		},
-		Params: forkSessionParamList(),
-		Run:    wrapMCPHandler("fork-session", handleForkSession),
-	})
-
-	app.AddCommand(&command.Command{
 		Name:  "close-child-session",
 		Title: "Close Spawned Child Session",
 		Description: command.Description{
-			Short: "Reap a worker session THIS session spawned via spawn-session or fork-session (FDR 0006, #249) — remove its worktree, delete its branch, and tombstone its state, the same teardown `sc close` performs. Authorization is the child's spawned_by lineage: a child spawned by a DIFFERENT session, or one never spawned at all, is refused with both session keys named — reaping those remains the child's own or the human's call. A child holding uncommitted changes or commits not yet integrated into the default branch is refused too; pass force to discard that work deliberately. The case this exists for — a spawn that failed its hello handshake, or a worker that finished and left nothing behind — has no commits and a clean tree, so it reaps without force.",
+			Short: "Reap a worker session THIS session spawned via spawn-session (FDR 0006, #249) — remove its worktree, delete its branch, and tombstone its state, the same teardown `sc close` performs. Authorization is the child's spawned_by lineage: a child spawned by a DIFFERENT session, or one never spawned at all, is refused with both session keys named — reaping those remains the child's own or the human's call. A child holding uncommitted changes or commits not yet integrated into the default branch is refused too; pass force to discard that work deliberately. The case this exists for — a spawn that failed its hello handshake, or a worker that finished and left nothing behind — has no commits and a clean tree, so it reaps without force.",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			ReadOnlyHint:    protocol.BoolPtr(false),

@@ -1122,9 +1122,10 @@ func TestValidateToolAutoApproved(t *testing.T) {
 	}
 }
 
-// spawn-session / fork-session are always-ask: an `ask` decision forces a
-// prompt regardless of any allow-list, so no spinclass-reachable config can
-// make these token-consuming worker launches run silently (#151).
+// spawn-session is always-ask: an `ask` decision forces a prompt regardless of
+// any allow-list, so no spinclass-reachable config can make this token-consuming
+// worker launch run silently (#151). (spinclass#262 merged fork-session into
+// spawn-session, so spawn-session is the whole spawn surface.)
 func TestSpawnSessionAsksConfirmation(t *testing.T) {
 	cwd := t.TempDir()
 	input := makeInput("mcp__plugin_spinclass_spinclass__spawn-session", map[string]any{}, cwd)
@@ -1138,19 +1139,6 @@ func TestSpawnSessionAsksConfirmation(t *testing.T) {
 	}
 	if reason == "" {
 		t.Error("expected a permissionDecisionReason")
-	}
-}
-
-func TestForkSessionAsksConfirmation(t *testing.T) {
-	cwd := t.TempDir()
-	input := makeInput("mcp__plugin_spinclass_spinclass__fork-session", map[string]any{}, cwd)
-	var stdout bytes.Buffer
-	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	decision, _ := parseHookDecision(t, stdout.Bytes())
-	if decision != "ask" {
-		t.Errorf("expected permissionDecision ask for fork-session, got %q", decision)
 	}
 }
 

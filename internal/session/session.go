@@ -66,7 +66,7 @@ type State struct {
 	Kind         string `json:"kind,omitempty"`
 	Description  string `json:"description,omitempty"`
 	// SpawnedBy is the driver session's key (<repo>/<branch>) recorded by
-	// `sc spawn` / detached fork when this session was launched as a worker.
+	// `sc spawn` when this session was launched as a worker.
 	// Surfaced as lineage by `sc list` and chat-list-sessions, and
 	// load-bearing for close-child-session (#249), which authorizes a reap
 	// only when it equals the caller's own session key. It formerly also

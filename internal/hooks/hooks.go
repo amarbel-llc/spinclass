@@ -298,7 +298,6 @@ const (
 	updateDescriptionToolName     = "mcp__plugin_spinclass_spinclass__update-this-session-description"
 	validateToolName              = "mcp__plugin_spinclass_spinclass__validate"
 	spawnSessionToolName          = "mcp__plugin_spinclass_spinclass__spawn-session"
-	forkSessionToolName           = "mcp__plugin_spinclass_spinclass__fork-session"
 	closeChildSessionToolName     = "mcp__plugin_spinclass_spinclass__close-child-session"
 )
 

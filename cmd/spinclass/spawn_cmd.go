@@ -34,9 +34,6 @@ type spawnParams struct {
 // arg — the spawning agent references any issue in the brief and the worker
 // fetches it).
 func runSpawn(p spawnParams) (spawn.Result, string, error) {
-	if p.Repo == "" {
-		return spawn.Result{}, "", errors.New("repo is required")
-	}
 	if p.Brief == "" {
 		return spawn.Result{}, "", errors.New("brief is required")
 	}
@@ -63,9 +60,24 @@ func runSpawn(p spawnParams) (spawn.Result, string, error) {
 		return spawn.Result{}, "", fmt.Errorf("resolving driver session key (the worker's hello target): %w", err)
 	}
 
-	repoPath, err := spawn.ResolveRepo(home, p.Repo, driverRepoPath())
-	if err != nil {
-		return spawn.Result{}, "", err
+	// Resolve the target repo (spinclass#262: repo is optional). An omitted
+	// repo — or one that resolves to the driver's own repo — means "this repo":
+	// a fresh worker off its default branch. A sibling dirname/path targets that
+	// repo. There is no same-repo refusal (fork-at-HEAD was dropped; a worker
+	// repositions its own branch if it needs a non-default starting point).
+	var repoPath string
+	if p.Repo == "" {
+		repoPath = driverRepoPath()
+		if repoPath == "" {
+			return spawn.Result{}, "", errors.New(
+				"no repo specified and the current directory is not inside a git repo; pass a target repo dirname or path",
+			)
+		}
+	} else {
+		repoPath, err = spawn.ResolveRepo(home, p.Repo)
+		if err != nil {
+			return spawn.Result{}, "", err
+		}
 	}
 
 	res, err := spawn.Launch(home, repoPath, driverKey, p.Brief, p.Description, p.Model, deadline)
@@ -75,9 +87,8 @@ func runSpawn(p spawnParams) (spawn.Result, string, error) {
 	return res, driverKey, nil
 }
 
-// parseHelloTimeout parses the shared hello-timeout param of the spawn and
-// detached-fork surfaces. "" means 0, which the spawn package maps to
-// DefaultHelloDeadline.
+// parseHelloTimeout parses the spawn surface's hello-timeout param. "" means 0,
+// which the spawn package maps to DefaultHelloDeadline.
 func parseHelloTimeout(s string) (time.Duration, error) {
 	if s == "" {
 		return 0, nil
@@ -95,12 +106,12 @@ func parseHelloTimeout(s string) (time.Duration, error) {
 	return d, nil
 }
 
-// driverRepoPath best-effort resolves the DRIVER's repo path for
-// spawn.ResolveRepo's same-repo rejection. git.CommonDir covers both session
-// shapes: from a worktree it resolves the main checkout; from an implicit
-// (main-checkout) session the cwd IS the repo. Anywhere git can't answer
-// (not in a repo at all) it returns "" — an empty driver path never matches
-// the always-absolute resolved target, so the rejection simply never fires.
+// driverRepoPath best-effort resolves the DRIVER's repo path — used as the
+// spawn target when `repo` is omitted (spinclass#262: spawn in THIS repo).
+// git.CommonDir covers both session shapes: from a worktree it resolves the
+// main checkout; from an implicit (main-checkout) session the cwd IS the repo.
+// Anywhere git can't answer (not in a repo at all) it returns "", which runSpawn
+// turns into a "no repo specified and not inside a repo" error.
 func driverRepoPath() string {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -189,8 +200,7 @@ func spawnParamList() []command.Param {
 		{
 			Name:        "repo",
 			Type:        command.String,
-			Required:    true,
-			Description: "Target repo: a dirname leaf-searched under $HOME/*/repos/<name>, or an explicit path (anything containing a path separator). Must be a main checkout of a DIFFERENT repo than the driver's — use a detached fork for a worker on a branch of this one.",
+			Description: "Target repo (OPTIONAL, spinclass#262). Omit it — or name the current repo — to spawn a worker in THIS repo (a fresh worktree off its default branch). A different repo is a dirname leaf-searched under $HOME/*/repos/<name>, or an explicit path (anything containing a path separator); it must be a main checkout, not a worktree. The worker always starts fresh off the target's default branch with only the brief — if it needs a different starting point, it repositions its own branch.",
 			Completer:   completeSpawnRepos,
 		},
 		{

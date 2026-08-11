@@ -13,10 +13,11 @@ import (
 // where the driver runs); otherwise it is a repo dirname, leaf-searched as
 // $HOME/*/repos/<leaf> (FDR 0006: leaves are unique across workspace roots;
 // a configured root list is deferred). The resolved dir must be a git repo
-// whose .git is a directory (a main checkout, not a worktree), and must be
-// a DIFFERENT repo than the driver's — detached fork covers the same-repo
-// case.
-func ResolveRepo(home, target, driverRepoPath string) (string, error) {
+// whose .git is a directory (a main checkout, not a worktree). The target MAY
+// be the driver's own repo: spinclass#262 unified spawn/fork, so a spawn into
+// the current repo is a fresh worker off its default branch (the caller passes
+// the current repo when `repo` is omitted); there is no same-repo refusal.
+func ResolveRepo(home, target string) (string, error) {
 	if strings.ContainsRune(target, filepath.Separator) || strings.Contains(target, "/") {
 		abs, err := filepath.Abs(target)
 		if err != nil {
@@ -27,7 +28,7 @@ func ResolveRepo(home, target, driverRepoPath string) (string, error) {
 				"spawn target %q is not a git main checkout (.git must be a directory — worktrees cannot be spawn targets)", abs,
 			)
 		}
-		return abs, rejectDriverRepo(abs, driverRepoPath)
+		return abs, nil
 	}
 
 	candidates, err := filepath.Glob(filepath.Join(home, "*", "repos", target))
@@ -46,7 +47,7 @@ func ResolveRepo(home, target, driverRepoPath string) (string, error) {
 			"no repo named %q found under %s (searched %s)", target, home, filepath.Join(home, "*", "repos", target),
 		)
 	case 1:
-		return repos[0], rejectDriverRepo(repos[0], driverRepoPath)
+		return repos[0], nil
 	default:
 		return "", fmt.Errorf(
 			"repo dirname %q is ambiguous across workspace roots: %s (use an explicit path)",
@@ -60,25 +61,4 @@ func ResolveRepo(home, target, driverRepoPath string) (string, error) {
 func isMainCheckout(dir string) bool {
 	info, err := os.Stat(filepath.Join(dir, ".git"))
 	return err == nil && info.IsDir()
-}
-
-// rejectDriverRepo errors when resolved is the driver's own repo: spawn
-// targets a sibling repo by contract (FDR 0006); a worker on a branch of
-// the driver's repo is the detached-fork path.
-func rejectDriverRepo(resolved, driverRepoPath string) error {
-	if canonical(resolved) == canonical(driverRepoPath) {
-		return fmt.Errorf(
-			"spawn target %s is the driver's own repo — spawn launches workers in a different repo; use a detached fork for a worker on a branch of this one", resolved,
-		)
-	}
-	return nil
-}
-
-// canonical best-effort symlink-resolves p for comparison; falls back to
-// the cleaned path when resolution fails.
-func canonical(p string) string {
-	if resolved, err := filepath.EvalSymlinks(p); err == nil {
-		return resolved
-	}
-	return filepath.Clean(p)
 }

@@ -29,7 +29,10 @@ func TestHandleSpawnSessionValidation(t *testing.T) {
 		want string
 	}{
 		{"missing brief", `{"repo":"somewhere"}`, "brief is required"},
-		{"missing repo", `{"brief":"do the thing"}`, "repo is required"},
+		// repo is OPTIONAL now (spinclass#262: omitted => the current repo), so a
+		// missing repo is no longer a validation error — it is covered by
+		// spawn.ResolveRepo's TestResolveRepoAllowsSameRepo and runSpawn's
+		// current-repo resolution instead.
 		{"bad hello-timeout", `{"repo":"somewhere","brief":"do","hello-timeout":"bogus"}`, "invalid hello-timeout"},
 		{"negative hello-timeout", `{"repo":"somewhere","brief":"do","hello-timeout":"-5s"}`, "must be positive"},
 		{"zero hello-timeout", `{"repo":"somewhere","brief":"do","hello-timeout":"0s"}`, "must be positive"},

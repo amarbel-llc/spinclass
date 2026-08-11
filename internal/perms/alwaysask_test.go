@@ -25,7 +25,6 @@ func TestAlwaysAsk(t *testing.T) {
 		wantAsk   bool
 	}{
 		{"spawn always asks", spawnSessionTool, nil, true},
-		{"fork always asks", forkSessionTool, nil, true},
 		{"spawn asks regardless of args", spawnSessionTool, map[string]any{"force": false}, true},
 
 		{"reap without force is silent", closeChildSessionTool, map[string]any{"child": "repo/branch"}, false},

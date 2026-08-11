@@ -109,7 +109,7 @@ the sweatfile knob. That is the intended pressure.
 start-commands. It is CLI-only *by construction*: those register `RunCLI` with
 no `Run`, and `RegisterMCPToolsV1` skips such commands.
 
-`spawn-session` and `fork-session` get no equivalent. A driver agent must not be
+`spawn-session` gets no equivalent. A driver agent must not be
 able to wave away its worker's stale toolchain — that is the failure this record
 exists to prevent, and an agent under time pressure is exactly who would reach
 for the flag. The sweatfile knob still applies to spawned workers, so a repo's

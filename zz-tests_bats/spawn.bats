@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# E2E for `sc spawn` and detached `sc fork` (FDR 0006) over a stub
+# E2E for `sc spawn` (FDR 0006; #262 made its repo arg optional) over a stub
 # multiplexer + stub harness: the [session-entry].spawn template execs the
 # entry argv in the foreground (returns in ms, satisfying the
 # detach-promptly contract), and the stub harness records the brief then
@@ -158,22 +158,38 @@ EOF
   assert_output --partial "no repo named"
 }
 
-@test "detached fork launches a hello-gated worker on a new branch" {
+# spinclass#262: `repo` is optional. Omitting it spawns a worker in the CURRENT
+# repo (a fresh worktree off its default branch) — the case the removed detached
+# fork used to serve, minus the HEAD inheritance.
+@test "spawn with no repo launches a worker in the current repo (#262)" {
+  create_spawn_repo selfrepo "$STUB_DIR/stub-harness.sh"
+
+  cd "$WORKER_REPO"
+  SPINCLASS_SESSION_ID=driver/bats run_sc spawn \
+    --brief "self spawn" --description "bats self worker"
+  assert_success
+  assert_output --partial "session_key: selfrepo/"
+  assert_output --partial "worktree_path: $WORKER_REPO/.worktrees/"
+  assert_output --partial "worker will message driver/bats via chat"
+
+  local wt
+  wt=$(echo "$output" | grep -oP 'worktree_path: \K\S+')
+  assert [ -d "$wt" ]
+  run cat "$wt/brief.txt"
+  assert_output "self spawn"
+  run cat "$wt/.spinclass/state.json"
+  assert_output --partial '"spawned_by": "driver/bats"'
+}
+
+# The detached-worker fork was removed in #262; `sc fork --brief` now errors
+# with a pointer to `sc spawn`. (Create-only `sc fork` is covered elsewhere.)
+@test "sc fork --brief is rejected, pointing at sc spawn (#262)" {
   create_repo
-  write_stub_sweatfile "$TEST_REPO" "$STUB_DIR/stub-harness.sh"
   create_worktree feature
 
   cd "$WT_PATH"
-  SPINCLASS_SESSION_ID=driver/bats run_sc fork forked-worker \
-    --brief "branch work"
-  assert_success
-  assert_output --partial "session_key: repo/forked-worker"
-  assert_output --partial "worktree_path: $TEST_REPO/.worktrees/forked-worker"
-  assert_output --partial "worker will message driver/bats via chat"
-
-  assert [ -d "$TEST_REPO/.worktrees/forked-worker" ]
-  run cat "$TEST_REPO/.worktrees/forked-worker/brief.txt"
-  assert_output "branch work"
-  run cat "$TEST_REPO/.worktrees/forked-worker/.spinclass/state.json"
-  assert_output --partial '"spawned_by": "driver/bats"'
+  run_sc fork forked-worker --brief "branch work"
+  assert_failure
+  assert_output --partial "removed in spinclass#262"
+  assert_output --partial "sc spawn"
 }

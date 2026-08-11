@@ -32,7 +32,7 @@ type ListRow struct {
 	Branch string `json:"branch,omitempty"`
 
 	// SpawnedBy is the driver session's key recorded when this session was
-	// launched as a worker by `sc spawn` / detached fork. Display-only
+	// launched as a worker by `sc spawn`. Display-only
 	// lineage (FDR 0006). Appended last and omitempty to keep the remote
 	// wire shape backward-compatible.
 	SpawnedBy string `json:"spawned_by,omitempty"`

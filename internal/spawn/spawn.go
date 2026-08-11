@@ -81,24 +81,6 @@ func Launch(home, repoPath, driverKey, brief, desc, model string, deadline time.
 	return launchRendered(rp, driverKey, desc, deadline, argv, window, sessionEnv)
 }
 
-// LaunchExisting runs the post-worktree tail of Launch over an existing
-// worktree: render the worker repo's spawn/spawn-entry templates (FIRST,
-// so bad config — including a model that has nowhere to splice — fails
-// before any state is written), write the worker's session state
-// (spawned_by lineage), exec the spawn argv, and block on the chat hello.
-// model, when non-empty, requests a specific model alias for the worker's
-// provider, same as Launch; "" means no model requested. Task 7's detached
-// fork reuses it over a worktree.CreateFrom-produced worktree.
-func LaunchExisting(home string, rp worktree.ResolvedPath, driverKey, brief, desc, model string, deadline time.Duration) (Result, error) {
-	// The merged config is unused here: this path runs over a worktree that
-	// already exists (a fork), so there is no base to resolve.
-	argv, window, sessionEnv, _, err := renderSpawn(home, rp, brief, model)
-	if err != nil {
-		return Result{}, err
-	}
-	return launchRendered(rp, driverKey, desc, deadline, argv, window, sessionEnv)
-}
-
 // renderSpawn loads the WORKER repo's sweatfile hierarchy (its harness decides
 // the spawn-entry, not the driver's) and renders the detached-harness argv. It
 // also returns the hierarchy's [session-entry].env for the exec's environment.

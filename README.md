@@ -67,8 +67,8 @@ sc clean
 | `sc check` | Run `[hooks].pre-merge` in the current worktree |
 | `sc clean` | Remove merged worktrees and abandoned sessions |
 | `sc rebuild [target] [--check]` | Re-apply a drifted worktree's setup and refresh its fingerprint; `--check` reports stale/fresh (exits nonzero if stale) |
-| `sc fork [branch]` | Fork the current worktree (supports `--from <dir>`; `--brief` launches the fork as a detached worker) |
-| `sc spawn <repo> --brief "…"` | Launch a detached, harness-booted worker session in a sibling repo (blocks on the worker's chat hello) |
+| `sc fork [branch]` | Fork the current worktree into a new branch (supports `--from <dir>`); create-only (the `--brief` detached worker was removed in #262) |
+| `sc spawn [repo] --brief "…"` | Launch a detached, harness-booted worker session (blocks on the worker's chat hello); `repo` is optional — omit it (or name the current repo) to spawn in THIS repo, else a sibling (#262) |
 | `sc close-child-session <child>` | Close a worker session this session spawned; refuses anything it did not spawn (`--force` for a child with unmerged work) |
 | `sc pull` | Pull repos and rebase worktrees |
 | `sc validate` | Validate the sweatfile hierarchy |

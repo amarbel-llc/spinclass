@@ -100,7 +100,7 @@ func TestCheckNoMatchProducesEmptyOutput(t *testing.T) {
 	}
 }
 
-// spawn-session / fork-session can never be auto-approved via a tier rule,
+// spawn-session can never be auto-approved via a tier rule,
 // even when a user explicitly lists them: RunCheck bails before matching so
 // the always-ask PreToolUse decision governs (#151).
 func TestCheckNeverAutoApprovesSpawnEvenWhenListed(t *testing.T) {

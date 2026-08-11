@@ -26,8 +26,8 @@ type SessionEntry struct {
 	Env                map[string]string `toml:"env"`
 	LivenessProbe      []string          `toml:"liveness-probe"`
 	TombstoneRetention string            `toml:"tombstone-retention"`
-	// SpawnEntry is the detached-harness argv `sc spawn` (and detached fork)
-	// exec DIRECTLY (FDR-0017 Piece 1: spinclass no longer wraps in a
+	// SpawnEntry is the detached-harness argv `sc spawn` execs DIRECTLY
+	// (FDR-0017 Piece 1: spinclass no longer wraps in a
 	// multiplexer — the harness self-detaches and returns promptly, e.g.
 	// clown's --clown-attach=spawn). {prompt} = the driver's brief, {dir} =
 	// the worker worktree. Defaults to the clown spawn form (SessionSpawnEntry).
@@ -42,7 +42,7 @@ type SessionEntry struct {
 	// ModelFlags maps a clown provider name (as selected by spawn-entry's
 	// --provider/--provider=) to the CLI flag that provider's binary uses to
 	// select a model, e.g. {"claude": "--model"}. Consulted by
-	// spawn.SpliceModelFlag when the spawn-session/fork-session `model` param
+	// spawn.SpliceModelFlag when the spawn-session `model` param
 	// is set. Per-key merge like Env. Defaults to {"claude": "--model"} — the
 	// only mapping verified against an actual provider CLI (forwarded through
 	// clown's `--` provider-args boundary). See
@@ -564,8 +564,8 @@ func (sf Sweatfile) SessionResume() []string {
 	return nil
 }
 
-// SessionSpawnEntry returns the detached-harness argv that `sc spawn` /
-// detached fork exec DIRECTLY (FDR-0017 Piece 1: spinclass no longer wraps in
+// SessionSpawnEntry returns the detached-harness argv that `sc spawn`
+// execs DIRECTLY (FDR-0017 Piece 1: spinclass no longer wraps in
 // a multiplexer — the harness self-detaches and returns promptly, e.g. clown's
 // --clown-attach=spawn). Defaults to the clown spawn form; override per the
 // sweatfile cascade for a different harness. {prompt} = the brief, {dir} = the

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -200,23 +201,27 @@ func registerQueryCommands(app *command.App) {
 		Name: "fork",
 		Description: command.Description{
 			Short: "Fork current worktree into a new branch",
-			Long:  "Create a new worktree branched from the current worktree's HEAD. If new-branch is omitted, a name is auto-generated as <current-branch>-N. Resolves the source worktree from the current directory or --from flag. Does not attach to the new session. With --brief, the fork instead launches as a detached, harness-booted worker session (FDR 0006): the new worktree is created the same way, then booted by exec'ing [session-entry].spawn-entry directly (the harness self-detaches) and the command blocks for the worker's SessionStart chat hello.",
+			Long:  "Create a new worktree branched from the current worktree's HEAD. If new-branch is omitted, a name is auto-generated as <current-branch>-N. Resolves the source worktree from the current directory or --from flag. Does not attach to the new session. (The former --brief detached-worker mode was removed in spinclass#262 — use `sc spawn` (its repo arg is now optional) to launch a detached worker in THIS repo.)",
 		},
 		Params: []command.Param{
 			{Name: "new-branch", Type: command.String, Description: "Name for the forked branch (auto-generated if omitted)"},
 			{Name: "from", Type: command.String, Description: "Source worktree directory to fork from", Completer: completeWorktreeTargets},
-			{Name: "brief", Type: command.String, Description: "Detached-fork brief: when set, the forked worktree is launched as a detached, harness-booted worker (FDR 0006) seeded with this brief, and the command blocks for the worker's chat hello. Omit for the classic create-only fork."},
-			{Name: "description", Type: command.String, Description: "Session description for the detached worker (shows in `sc list`); only used with --brief"},
-			{Name: "hello-timeout", Type: command.String, Description: "How long to wait for the worker's SessionStart hello, as a Go duration (e.g. \"90s\"). Default 60s. Only used with --brief."},
-			{Name: "model", Type: command.String, Description: "Model alias for the worker (sonnet, opus, haiku, fable). Spliced into the resolved spawn-entry's provider-args per [session-entry.model-flags] (default: {\"claude\": \"--model\"}). Omit to use the harness's own default. Only used with --brief.", Completer: completeModelAliases},
+			{Name: "brief", Type: command.String, Description: "REMOVED (spinclass#262): the detached-worker fork is gone. Use `sc spawn --brief \"...\"` (repo now optional) to launch a detached worker in this repo."},
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
 			var p struct {
 				globalArgs
-				From string `json:"from"`
-				forkDetachedParams
+				From      string `json:"from"`
+				NewBranch string `json:"new-branch"`
+				Brief     string `json:"brief"`
 			}
 			_ = json.Unmarshal(args, &p)
+
+			if p.Brief != "" {
+				return errors.New(
+					"`sc fork --brief` (detached worker) was removed in spinclass#262; use `sc spawn --brief \"...\"` instead — its repo arg is now optional, so it launches a detached worker in THIS repo (a fresh worktree off the default branch)",
+				)
+			}
 
 			sourceDir := p.From
 			if sourceDir == "" {
@@ -231,17 +236,7 @@ func registerQueryCommands(app *command.App) {
 			if err != nil {
 				return err
 			}
-
-			if p.Brief == "" {
-				return shop.Fork(os.Stdout, source, p.NewBranch, p.FormatOrDefault())
-			}
-
-			res, driverKey, err := runForkDetached(source, p.forkDetachedParams)
-			if err != nil {
-				return err
-			}
-			fmt.Println(spawnResultText(driverKey, res))
-			return nil
+			return shop.Fork(os.Stdout, source, p.NewBranch, p.FormatOrDefault())
 		},
 	})
 
@@ -414,7 +409,7 @@ func runListResult(ctx context.Context, closed bool, format string, dbg *slog.Lo
 
 // spawnedBySuffix renders the spawn lineage hint appended to `sc list`
 // text rows: a trailing `spawned-by:<driver-key>` column for sessions
-// launched by `sc spawn` / detached fork (FDR 0006), empty otherwise so
+// launched by `sc spawn` (FDR 0006), empty otherwise so
 // non-spawned rows keep the legacy shape.
 func spawnedBySuffix(key string) string {
 	if key == "" {

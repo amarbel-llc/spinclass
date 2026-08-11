@@ -6,8 +6,8 @@ import (
 )
 
 // KnownModelAliases is the fixed set of short model aliases accepted by the
-// `model` param on spawn-session/fork-session (and sc spawn/sc fork
-// --brief). Update as models are renamed or added — see the design doc's
+// `model` param on spawn-session (and `sc spawn`). Update as models are
+// renamed or added — see the design doc's
 // Tuning Levers (docs/plans/2026-07-11-spawn-model-selection-design.md).
 var KnownModelAliases = []string{"sonnet", "opus", "haiku", "fable"}
 

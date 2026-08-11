@@ -142,8 +142,8 @@ Cheap per-package `go build ./internal/foo/...` checks are fine.
   `sc check`                       Run [hooks].pre-merge in the current worktree (agent-CI surface)
   `sc clean`                       Remove merged worktrees and abandoned sessions
   `sc rebuild [target] [--check]`  Re-apply a drifted worktree's setup; `--check` reports stale/fresh
-  `sc fork [branch]`               Fork current worktree (`--from <dir>`; `--brief` launches a detached worker, FDR 0006)
-  `sc spawn <repo> --brief "…"`    Launch a detached worker session in a sibling repo (FDR 0006)
+  `sc fork [branch]`               Fork current worktree into a new branch (`--from <dir>`); create-only (the `--brief` detached worker was removed in #262)
+  `sc spawn [repo] --brief "…"`    Launch a detached worker session; `repo` optional — omitted = this repo, else a sibling (FDR 0006, #262)
   `sc close-child-session <child>` Reap a worker THIS session spawned (#249); refuses anything it did not spawn
   `sc pull`                        Pull repos and rebase worktrees
   `sc validate`                    Validate sweatfile hierarchy
@@ -161,16 +161,19 @@ subcommand is always available.
 
 ## Subsystems (read the cited record before changing)
 
-- **Spawned/forked workers** (FDR 0006): `sc spawn <repo> --brief`,
-  `sc fork --brief`, and the `spawn-session`/`fork-session` MCP tools launch
-  detached harness-booted workers. Target repo addressed by dirname. Launch
-  execs the cascade-merged `[session-entry].spawn-entry` (default the clown
-  spawn form) with the brief as initial prompt; blocks on the worker's
-  `SessionStart` hello (`internal/spawnhandshake`, 60s default,
-  `--hello-timeout`). The brief is the worker's ONLY context: spinclass#258
-  removed the issue-prefill arg (a spawn-time forge dependency that failed
-  where least recoverable), so the spawning agent references any issue in the
-  brief and the worker fetches it. Workers **may** spawn their
+- **Spawned workers** (FDR 0006, #262): `sc spawn [repo] --brief` and the
+  `spawn-session` MCP tool launch a detached harness-booted worker. `repo` is
+  optional (#262 unified spawn/fork): omitted — or naming the current repo —
+  spawns in THIS repo; a sibling dirname/path targets that repo. The worker
+  **always** starts a fresh worktree off the target's default branch with only
+  the brief; fork-at-HEAD was dropped (a worker repositions its own branch if it
+  needs a non-default start), and `fork-session` / `sc fork --brief` were removed
+  (create-only `sc fork` stays). Launch execs the cascade-merged
+  `[session-entry].spawn-entry` (default the clown spawn form) with the brief as
+  initial prompt; blocks on the worker's `SessionStart` hello
+  (`internal/spawnhandshake`, 60s default, `--hello-timeout`). The brief is the
+  worker's ONLY context (spinclass#258 removed the issue-prefill arg). Workers
+  **may** spawn their
   own workers — the #148 one-level restriction was removed, since the
   always-ask floor (#151) already prevents silent fan-out at every depth and
   was the actual protection; the tree is no longer guaranteed flat, and

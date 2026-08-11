@@ -27,9 +27,9 @@ func fakeWorkspace(t *testing.T) (home, fooPath, barPath string) {
 }
 
 func TestResolveRepoLeafHit(t *testing.T) {
-	home, fooPath, barPath := fakeWorkspace(t)
+	home, _, barPath := fakeWorkspace(t)
 
-	got, err := ResolveRepo(home, "bar", fooPath)
+	got, err := ResolveRepo(home, "bar")
 	if err != nil {
 		t.Fatalf("ResolveRepo: %v", err)
 	}
@@ -47,13 +47,7 @@ func TestResolveRepoAmbiguousLeafListsCandidates(t *testing.T) {
 	}
 	testgit.MustInit(t, dup)
 
-	driver := filepath.Join(home, "eng", "repos", "driver")
-	if err := os.MkdirAll(driver, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	testgit.MustInit(t, driver)
-
-	_, err := ResolveRepo(home, "foo", driver)
+	_, err := ResolveRepo(home, "foo")
 	if err == nil {
 		t.Fatal("expected ambiguity error, got nil")
 	}
@@ -65,9 +59,9 @@ func TestResolveRepoAmbiguousLeafListsCandidates(t *testing.T) {
 }
 
 func TestResolveRepoMiss(t *testing.T) {
-	home, fooPath, _ := fakeWorkspace(t)
+	home, _, _ := fakeWorkspace(t)
 
-	_, err := ResolveRepo(home, "nosuch", fooPath)
+	_, err := ResolveRepo(home, "nosuch")
 	if err == nil {
 		t.Fatal("expected no-match error, got nil")
 	}
@@ -76,17 +70,33 @@ func TestResolveRepoMiss(t *testing.T) {
 	}
 }
 
-func TestResolveRepoRejectsSameRepo(t *testing.T) {
+// TestResolveRepoAllowsSameRepo pins spinclass#262: the driver's OWN repo is a
+// valid spawn target now (a fresh worker off its default branch), not a
+// refusal. It replaces the two same-repo-rejection tests.
+func TestResolveRepoAllowsSameRepo(t *testing.T) {
 	home, fooPath, _ := fakeWorkspace(t)
 
-	_, err := ResolveRepo(home, "foo", fooPath)
-	if err == nil {
-		t.Fatal("expected same-repo error, got nil")
+	// By leaf name.
+	got, err := ResolveRepo(home, "foo")
+	if err != nil {
+		t.Fatalf("ResolveRepo(same-repo leaf): %v", err)
+	}
+	if got != fooPath {
+		t.Errorf("got %q, want %q", got, fooPath)
+	}
+
+	// By explicit path.
+	got, err = ResolveRepo(home, fooPath)
+	if err != nil {
+		t.Fatalf("ResolveRepo(same-repo path): %v", err)
+	}
+	if got != fooPath {
+		t.Errorf("got %q, want %q", got, fooPath)
 	}
 }
 
 func TestResolveRepoExplicitPathEscape(t *testing.T) {
-	home, fooPath, _ := fakeWorkspace(t)
+	home, _, _ := fakeWorkspace(t)
 
 	// A repo outside any workspace root, addressed by absolute path.
 	outside := filepath.Join(t.TempDir(), "elsewhere")
@@ -95,7 +105,7 @@ func TestResolveRepoExplicitPathEscape(t *testing.T) {
 	}
 	testgit.MustInit(t, outside)
 
-	got, err := ResolveRepo(home, outside, fooPath)
+	got, err := ResolveRepo(home, outside)
 	if err != nil {
 		t.Fatalf("ResolveRepo: %v", err)
 	}
@@ -109,7 +119,7 @@ func TestResolveRepoExplicitPathEscape(t *testing.T) {
 // happens to share the target's name must NOT short-circuit leaf search —
 // only a target containing a path separator is treated as a path.
 func TestResolveRepoBareNameMatchingCwdSubdirStillLeafSearches(t *testing.T) {
-	home, fooPath, barPath := fakeWorkspace(t)
+	home, _, barPath := fakeWorkspace(t)
 
 	// A cwd whose subdir is coincidentally named like the target repo.
 	cwd := t.TempDir()
@@ -118,7 +128,7 @@ func TestResolveRepoBareNameMatchingCwdSubdirStillLeafSearches(t *testing.T) {
 	}
 	t.Chdir(cwd)
 
-	got, err := ResolveRepo(home, "bar", fooPath)
+	got, err := ResolveRepo(home, "bar")
 	if err != nil {
 		t.Fatalf("ResolveRepo: %v", err)
 	}
@@ -128,10 +138,10 @@ func TestResolveRepoBareNameMatchingCwdSubdirStillLeafSearches(t *testing.T) {
 }
 
 func TestResolveRepoExplicitPathNonRepoErrors(t *testing.T) {
-	home, fooPath, _ := fakeWorkspace(t)
+	home, _, _ := fakeWorkspace(t)
 
 	notRepo := t.TempDir()
-	_, err := ResolveRepo(home, notRepo, fooPath)
+	_, err := ResolveRepo(home, notRepo)
 	if err == nil {
 		t.Fatal("expected non-repo error, got nil")
 	}
@@ -140,21 +150,12 @@ func TestResolveRepoExplicitPathNonRepoErrors(t *testing.T) {
 func TestResolveRepoExplicitPathWorktreeRejected(t *testing.T) {
 	// A worktree has a .git FILE, not a directory — it is not a main
 	// checkout and must be rejected even via the explicit-path escape.
-	home, fooPath, barPath := fakeWorkspace(t)
+	home, _, barPath := fakeWorkspace(t)
 	wt := filepath.Join(barPath, ".worktrees", "wt-branch")
 	testgit.MustWorktreeAdd(t, barPath, wt, "wt-branch")
 
-	_, err := ResolveRepo(home, wt, fooPath)
+	_, err := ResolveRepo(home, wt)
 	if err == nil {
 		t.Fatal("expected worktree rejection, got nil")
-	}
-}
-
-func TestResolveRepoExplicitSameRepoRejected(t *testing.T) {
-	home, fooPath, _ := fakeWorkspace(t)
-
-	_, err := ResolveRepo(home, fooPath, fooPath)
-	if err == nil {
-		t.Fatal("expected same-repo error for explicit path, got nil")
 	}
 }

@@ -148,7 +148,7 @@ else inherits existing behavior.
   chat-read cursor stay stable even if a hook re-fire later adds a sibling
   state file. `SessionEnd` never knows the lazy randID; the dead-PID sweep
   reaps the file once the materializing process exits (serve, or the
-  short-lived CLI on an `sc spawn`/`sc fork --brief` driver-key resolution).
+  short-lived CLI on an `sc spawn` driver-key resolution).
 
 ### Attestation
 
