@@ -15,7 +15,7 @@ func strptr(s string) *string { return &s }
 func boolPtr(b bool) *bool    { return &b }
 
 func TestDispatcherScript(t *testing.T) {
-	s := dispatcherScript("/orig/hooks", "/wt/.spinclass/hooks", "conformist --staged --exit-zero-on-fix")
+	s := dispatcherScript("/orig/hooks", "/wt/.spinclass/hooks", "conformist --staged --exit-zero-on-fix", "deadbeefcafe")
 	if !strings.Contains(s, "bin='conformist'") {
 		t.Errorf("expected baked bin, got:\n%s", s)
 	}
@@ -39,9 +39,57 @@ func TestDispatcherScript(t *testing.T) {
 	if !strings.HasSuffix(s, "exit 0\n") {
 		t.Errorf("expected non-blocking exit 0 tail, got:\n%s", s)
 	}
+
+	// spinclass#267: the baked lock hash + the flake.lock-drift re-eval branch.
+	if !strings.Contains(s, "lockhash='deadbeefcafe'") {
+		t.Errorf("expected baked flake.lock hash, got:\n%s", s)
+	}
+	if !strings.Contains(s, "git hash-object flake.lock") {
+		t.Errorf("expected live flake.lock hash compare, got:\n%s", s)
+	}
+	if !strings.Contains(s, `nix develop --command sh -c "$cmd"`) {
+		t.Errorf("expected the current-devShell re-eval branch, got:\n%s", s)
+	}
+	if !strings.Contains(s, "flake.lock changed since this session") {
+		t.Errorf("expected the re-eval heads-up, got:\n%s", s)
+	}
+
 	// A `sh -c '...'` command guards on the sh binary, not the inner tool.
-	if got := dispatcherScript("/o", "/s", "sh -c 'foo bar'"); !strings.Contains(got, "bin='sh'") {
+	if got := dispatcherScript("/o", "/s", "sh -c 'foo bar'", ""); !strings.Contains(got, "bin='sh'") {
 		t.Errorf("expected guard on sh, got:\n%s", got)
+	}
+	// With no flake.lock (empty baked hash), the drift branch is inert.
+	if got := dispatcherScript("/o", "/s", "conformist", ""); !strings.Contains(got, "lockhash=''") {
+		t.Errorf("expected empty baked hash to disable the drift branch, got:\n%s", got)
+	}
+}
+
+// TestInstallPreCommitHookBakesFlakeLockHash: when the worktree has a flake.lock,
+// its git content hash is baked into the dispatcher as the session-start lock
+// identity (spinclass#267). No flake.lock ⇒ empty hash ⇒ drift branch inert
+// (covered by the other install tests, whose repos have no flake.lock).
+func TestInstallPreCommitHookBakesFlakeLockHash(t *testing.T) {
+	testgit.RequireGit(t)
+	repo := t.TempDir()
+	testgit.MustInit(t, repo)
+	wt := filepath.Join(repo, ".worktrees", "feat")
+	testgit.MustWorktreeAdd(t, repo, wt, "feat")
+
+	if err := os.WriteFile(filepath.Join(wt, "flake.lock"), []byte(`{"nodes":{}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want := flakeLockHash(wt)
+	if want == "" {
+		t.Fatal("expected a non-empty flake.lock hash")
+	}
+
+	sf := Sweatfile{Hooks: &Hooks{PreCommit: strptr("conformist --staged")}}
+	if err := sf.installPreCommitHook(wt); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	body, _ := os.ReadFile(filepath.Join(wt, ".spinclass", "hooks", "pre-commit"))
+	if !strings.Contains(string(body), "lockhash='"+want+"'") {
+		t.Errorf("expected baked flake.lock hash %q in dispatcher:\n%s", want, body)
 	}
 }
 
@@ -163,6 +211,58 @@ func TestInstallPreCommitHookSurfacesFormatterError(t *testing.T) {
 	}
 	if !strings.Contains(got, "requires --commit") {
 		t.Errorf("expected the formatter's own stderr passed through, got:\n%s", got)
+	}
+}
+
+// TestInstallPreCommitHookReEvalsOnFlakeLockDrift proves the spinclass#267
+// control flow: when flake.lock has drifted since install (live git-hash != baked
+// hash), the dispatcher routes the formatter through `nix develop --command`
+// instead of the frozen PATH. Stub `nix` and formatter binaries record that they
+// fired — no real devShell build.
+func TestInstallPreCommitHookReEvalsOnFlakeLockDrift(t *testing.T) {
+	testgit.RequireGit(t)
+	repo := t.TempDir()
+	testgit.MustInit(t, repo)
+	wt := filepath.Join(repo, ".worktrees", "feat")
+	testgit.MustWorktreeAdd(t, repo, wt, "feat")
+
+	// flake.lock present at install ⇒ its content hash is baked in.
+	lockPath := filepath.Join(wt, "flake.lock")
+	if err := os.WriteFile(lockPath, []byte(`{"v":1}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	binDir := t.TempDir()
+	nixMarker := filepath.Join(t.TempDir(), "nix-called")
+	fmtMarker := filepath.Join(t.TempDir(), "fmt-ran")
+	// Stub `nix`: on `develop --command <rest...>`, record it fired then exec the
+	// rest (the `sh -c "$cmd"` the dispatcher hands it).
+	writeExec(t, filepath.Join(binDir, "nix"),
+		"#!/bin/sh\necho called > "+shSingleQuote(nixMarker)+"\nshift 2\nexec \"$@\"\n")
+	writeExec(t, filepath.Join(binDir, "fakefmt"),
+		"#!/bin/sh\necho ran > "+shSingleQuote(fmtMarker)+"\nexit 0\n")
+
+	sf := Sweatfile{Hooks: &Hooks{PreCommit: strptr("fakefmt")}}
+	if err := sf.installPreCommitHook(wt); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+
+	// Drift the lock so the live hash differs from the baked one.
+	if err := os.WriteFile(lockPath, []byte(`{"v":2}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(wt, "f.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitPath(t, wt, binDir, "add", "f.txt")
+	runGitPath(t, wt, binDir, "commit", "-q", "-m", "c")
+
+	if _, err := os.Stat(nixMarker); err != nil {
+		t.Errorf("flake.lock drift should re-eval via `nix develop`, but stub nix was not called: %v", err)
+	}
+	if _, err := os.Stat(fmtMarker); err != nil {
+		t.Errorf("the formatter should still run (under the re-eval): %v", err)
 	}
 }
 

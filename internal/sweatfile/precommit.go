@@ -80,7 +80,8 @@ func (sf Sweatfile) installPreCommitHook(worktreePath string) error {
 	}
 
 	dispatchPath := filepath.Join(hooksDir, dispatcherName)
-	if err := os.WriteFile(dispatchPath, []byte(dispatcherScript(original, hooksDir, cmd)), 0o755); err != nil {
+	lockHash := flakeLockHash(worktreePath)
+	if err := os.WriteFile(dispatchPath, []byte(dispatcherScript(original, hooksDir, cmd, lockHash)), 0o755); err != nil {
 		return err
 	}
 
@@ -168,6 +169,23 @@ func resolveOriginalHooksDir(worktreePath, hooksDir string) (string, error) {
 	return original, nil
 }
 
+// flakeLockHash returns git's content hash (`git hash-object`) of the
+// worktree's flake.lock, or "" when there is no flake.lock or git cannot hash
+// it. It is baked into the dispatcher as the session-start lock identity for the
+// self-healing staleness check (spinclass#267). git-only by design: the
+// dispatcher IS a git hook, so `git` is always available — no dependency on
+// sha256sum/nix in the commit environment.
+func flakeLockHash(worktreePath string) string {
+	if _, err := os.Stat(filepath.Join(worktreePath, "flake.lock")); err != nil {
+		return ""
+	}
+	out, err := git.Run(worktreePath, "hash-object", "flake.lock")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
 // mustConfig returns the effective git config value for key, or "" on error.
 func mustConfig(worktreePath, key string) string {
 	out, err := git.Run(worktreePath, "config", "--get", key)
@@ -225,7 +243,7 @@ func commonConfigHasWorktreeOverride(worktreePath string) bool {
 // flags) would otherwise be indistinguishable from a working one, landing
 // commits unformatted while looking fine (spinclass#183 review). The formatter
 // is still non-blocking: the commit proceeds regardless.
-func dispatcherScript(originalDir, hooksDir, cmd string) string {
+func dispatcherScript(originalDir, hooksDir, cmd, lockHash string) string {
 	bin := cmd
 	if i := strings.IndexAny(cmd, " \t"); i >= 0 {
 		bin = cmd[:i]
@@ -235,18 +253,37 @@ func dispatcherScript(originalDir, hooksDir, cmd string) string {
 		"# Runs the configured formatter on pre-commit, then delegates to the repo's\n" +
 		"# original same-named native hook (preserving its exit code). The formatter is\n" +
 		"# best-effort/non-blocking, BUT a nonzero formatter exit is surfaced loudly (with\n" +
-		"# its stderr) so a stale/misconfigured formatter is not a silent no-op. Regenerated\n" +
-		"# on every `sc start`/`sc resume`. See\n" +
-		"# docs/plans/2026-06-17-precommit-hook-composition-design.md.\n" +
+		"# its stderr) so a stale/misconfigured formatter is not a silent no-op. When the\n" +
+		"# tree's flake.lock has drifted since this session's devShell was frozen, the\n" +
+		"# formatter is re-evaluated in the CURRENT devShell (building it if needed) so a\n" +
+		"# stale toolchain cannot restamp generated files (spinclass#267). Regenerated on\n" +
+		"# every `sc start`/`sc resume`. See\n" +
+		"# docs/plans/2026-06-17-precommit-hook-composition-design.md and\n" +
+		"# docs/plans/2026-08-11-self-healing-precommit-dispatch-design.md.\n" +
 		"hook=$(basename \"$0\")\n" +
 		"orig=" + shSingleQuote(originalDir) + "\n" +
 		"self=" + shSingleQuote(hooksDir) + "\n" +
 		"if [ \"$hook\" = pre-commit ]; then\n" +
 		"\tbin=" + shSingleQuote(bin) + "\n" +
 		"\tcmd=" + shSingleQuote(cmd) + "\n" +
-		"\tif command -v \"$bin\" >/dev/null 2>&1; then\n" +
+		"\tlockhash=" + shSingleQuote(lockHash) + "\n" +
+		"\t# spinclass#267: re-eval the hook in the current devShell if flake.lock\n" +
+		"\t# drifted since this session's devShell was frozen (baked lockhash).\n" +
+		"\tvia_nix=0\n" +
+		"\tif [ -n \"$lockhash\" ] && [ -f flake.lock ] && command -v nix >/dev/null 2>&1; then\n" +
+		"\t\tlive=$(git hash-object flake.lock 2>/dev/null || printf '')\n" +
+		"\t\tif [ -n \"$live\" ] && [ \"$live\" != \"$lockhash\" ]; then\n" +
+		"\t\t\tprintf '%s\\n' \"spinclass pre-commit: flake.lock changed since this session's devShell loaded; re-evaluating the hook in the current devShell (may build).\" >&2\n" +
+		"\t\t\tvia_nix=1\n" +
+		"\t\tfi\n" +
+		"\tfi\n" +
+		"\tif [ \"$via_nix\" = 1 ] || command -v \"$bin\" >/dev/null 2>&1; then\n" +
 		"\t\terr=$(mktemp 2>/dev/null || printf '%s' \"${TMPDIR:-/tmp}/spinclass-precommit.$$\")\n" +
-		"\t\tsh -c \"$cmd\" 2>\"$err\"\n" +
+		"\t\tif [ \"$via_nix\" = 1 ]; then\n" +
+		"\t\t\tnix develop --command sh -c \"$cmd\" 2>\"$err\"\n" +
+		"\t\telse\n" +
+		"\t\t\tsh -c \"$cmd\" 2>\"$err\"\n" +
+		"\t\tfi\n" +
 		"\t\trc=$?\n" +
 		"\t\tcat \"$err\" >&2\n" +
 		"\t\trm -f \"$err\"\n" +
