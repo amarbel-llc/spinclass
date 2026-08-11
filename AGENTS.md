@@ -5,8 +5,10 @@ code in this repository.
 
 The deep design rationale for most subsystems lives in `docs/features/` (FDRs)
 and the `spinclass-*(5)`/`(7)` manpages — this file orients you and points there
-rather than duplicating it. When a section cites an FDR or manpage, read it
-before changing that subsystem.
+rather than duplicating it. Your system prompt already staples a live **Design
+records** index (every FDR/doc by number·title·status, via FDR 0021) into
+context, so a bare `(FDR NNNN)` cite here is enough to locate the record — read
+it before changing that subsystem.
 
 ## Overview
 
@@ -161,47 +163,24 @@ subcommand is always available.
 
 ## Subsystems (read the cited record before changing)
 
-- **Spawned workers** (FDR 0006, #262): `sc spawn [repo] --brief` and the
+- **Spawned workers** (FDR 0006, #262): `sc spawn [repo] --brief` + the
   `spawn-session` MCP tool launch a detached harness-booted worker. `repo` is
-  optional (#262 unified spawn/fork): omitted — or naming the current repo —
-  spawns in THIS repo; a sibling dirname/path targets that repo. The worker
-  **always** starts a fresh worktree off the target's default branch with only
-  the brief; fork-at-HEAD was dropped (a worker repositions its own branch if it
-  needs a non-default start), and `fork-session` / `sc fork --brief` were removed
-  (create-only `sc fork` stays). Launch execs the cascade-merged
-  `[session-entry].spawn-entry` (default the clown spawn form) with the brief as
-  initial prompt. The `spawn-session` MCP tool is ASYNC under clown (#266): it
-  returns the session key + a ringmaster job id and delivers the hello (or a
-  reap-if-dead timeout) as a wake; `sc spawn` (CLI) blocks. `internal/spawn`
-  splits `LaunchDetached`/`WaitHello`. The brief is
-  the worker's ONLY context (spinclass#258 removed the
-  issue-prefill arg). Workers
-  **may** spawn their
-  own workers (#148's one-level cap lifted; the #151 always-ask floor is the
-  real protection against silent fan-out, so the tree is no longer flat);
-  reaping authority stays immediate-parent-only. Coordination afterward is
-  clown chat. `internal/spawn` owns resolution + launch.
-  **Reaping** (#249, `cmd/spinclass/close_child_cmd.go`): `close-child-session`
-  lets a driver tear down a worker it spawned — completed children and failed
-  spawns (a hello timeout leaves the worktree + state on disk by design) would
-  otherwise pile up in `sc list` with no path for the agent that owns them.
-  Authorization is the child's `spawned_by` lineage: `authorizeChildReap`
-  requires it to equal the caller's own `currentSessionKey()`, so a foreign or
-  never-spawned session is refused with both keys named. Teardown itself is
-  plain `close.RunResolved` — the unintegrated/dirty check stays there, and a
-  non-TTY MCP caller gets its `--force` refusal instead of a prompt.
-  **Permission posture** splits on `force`: a clean reap auto-approves (the
-  worst it can do is remove a fully-integrated worktree the caller spawned),
-  while `force: true` is always-ask because it discards uncommitted changes
-  and unmerged commits. The rule lives in `perms.AlwaysAsk` — one predicate
-  shared by both enforcement surfaces (the PreToolUse hook and the perms-tier
-  `RunCheck`), since duplicating it would seam a security floor. It judges an
-  *invocation*, not a tool, which is why it takes tool input; a perms tier
-  cannot draw this line itself because `BuildPermissionString` discards
-  arguments for MCP tools, so allow-listing the tool would otherwise grant
-  force too. `force` is read fail-closed: only absent, `null`, or boolean
-  `false` count as safe. Elicitation could replace the flag entirely for the
-  MCP path (#254).
+  optional — omitted (or the current repo) spawns HERE, a sibling dirname/path
+  targets that repo; the worker always starts fresh off the target's default
+  branch with only the brief (fork-at-HEAD dropped; `fork-session` / `sc fork
+  --brief` removed, create-only `sc fork` stays). `spawn-session` is ASYNC under
+  clown (#266): returns session key + ringmaster job id, delivers the hello (or a
+  reap-if-dead timeout) as a wake; `sc spawn` CLI blocks. The brief is the
+  worker's ONLY context (#258). Workers may spawn workers (the #151 always-ask
+  floor, not a depth cap, guards fan-out). `internal/spawn` owns resolution +
+  launch (`LaunchDetached`/`WaitHello`). **Reaping** (#249): `close-child-session`
+  tears down a worker you spawned; `authorizeChildReap` gates on
+  `spawned_by == caller`, refusing foreign/never-spawned children. Force-reap
+  discards uncommitted/unmerged work, so a clean reap auto-approves while
+  `force: true` is always-ask — one `perms.AlwaysAsk` predicate shared by the
+  PreToolUse hook and the perms-tier `RunCheck` (it judges an *invocation*, not a
+  tool, since `BuildPermissionString` discards MCP args); `force` is read
+  fail-closed. Elicitation could replace the flag (#254).
 - **Implicit-session merge** (FDR 0014): from a main-checkout session, merge
   routes to `merge.MergeImplicit` — runs `[hooks].pre-merge` against HEAD then
   `git push` (nothing to rebase). MCP path enforces the implicit attestation
@@ -218,147 +197,65 @@ subcommand is always available.
   passes through to merge. Builds on `sc start --no-attach` writing findable
   inactive state. CLI-only. Uses the merge/check `present` stack.
 - **Async merge/check** (`internal/job`): `merge-this-session-async` /
-  `check-this-session-async` consume the attestation, launch in a background
-  goroutine inside `serve`, return a job id immediately (output →
-  `.spinclass/job.log`, metadata → `.spinclass/job.json`). The `*-async` tools
-  (and `session-job-cancel`) are registered **only under clown** — an async job
-  IS a ringmaster job (#243), so without clown there is nothing to observe or
-  wake on and only the synchronous merge/check exist. Inspect a running job via
-  ringmaster's own `job_status`/`job_read`, or block with `job_wait`, using the
-  id the start tool returns; `session-job-cancel` stops it. spinclass's own
-  `session-job-wait` and `session-job-status` were retired in favour of those
-  ringmaster surfaces (#21, #23). One active job per session. **Default to the
-  synchronous tools** — reach for async only when you have other work to do
-  while the hook runs; never start async then hot-poll.
-- **Clown job-wakeup emits** (FDR 0010, `internal/clown`): the `ringmaster start`
-  allocation happens **before** the job goroutine launches, so the id returned at
-  dispatch IS the id the completion wake carries (#243) — previously the two
-  diverged (`merge-<unix-ts>` vs ringmaster's `merge-<hash>`, same prefix) and
-  agents read their own wake as a sibling's. Dispatch-time allocation is what
-  `ringmaster start` is for (~7ms, measured). A failed allocation under clown
-  **refuses the dispatch**: a job with no wake completes into silence. Without
-  clown the caller's local id stands and there is simply no wake. When `serve` runs
-  under clown (`CLOWN_BIN` set), async tools emit `ringmaster start/done`
-  (clown's job-control CLI, clown RFC-0015) so clown wakes the agent with one
-  `[clown-job]` line. **Runtime** resolution is PATH or `$RINGMASTER_BIN`,
-  never a build-time pin — the wake must land in the journal of the clown
-  hosting this process, not one spinclass froze at its own build time. But
-  ringmaster IS a flake input as a **checkPhase** dep (#253): it puts the real
-  binary in the sandbox so `internal/clown/contract_test.go` drives an actual
-  start → spool-path → done lifecycle against a scratch `XDG_STATE_HOME`.
-  Before that no lane had the binary and the contract had never been tested —
-  the stub suites (`clown_test.go`, `internal/job/wake_test.go`) can only
-  confirm the argv spinclass *intends* to send, since a stub accepts anything.
-  The suite skips without a binary but **fails hard** inside `NIX_BUILD_TOP`
-  if the pin is dropped, so coverage cannot silently return to zero.
-  job.json/job.log stay the system of record; rollback is
-  `CLOWN_DISABLE_JOB_WAKEUP=1`.
-  **Self-sufficient wakes** (#251 piece 2): the hook's output is teed into
-  ringmaster's spool (2a) so `status --tail`/`tail -f` show a running job, and
-  the terminal emit attaches the rendered verdict ladder as a
-  `madder://blobs/<digest>` via `done --resource` (2b, `storeResultBlob`).
-  Resource and `result_ref` are **alternatives**: with a blob the blob IS the
-  result, so `result_ref` is only emitted as the fallback for a build with no
-  madder pin. Blob failures degrade to no attachment and are logged — the job
-  has already finished, so failing a wake over a missing attachment would
-  trade a working notification for none. Note plain `ringmaster read` renders
-  attachments as a count (`· 2 resource(s)`); `--json` is needed to get the
-  URIs.
-- **Per-job liveness flock + ProtocolVersion gate** (#26, ringmaster RFC-0016 +
-  RFC-0018, `internal/clown`): `serve` holds ringmaster's per-job advisory lock
-  (`jobwake.AcquireJobLock`, wrapped by `clown.AcquireJobLock`) for an async
-  job's lifetime, so a crashed serve is *detectable* — the OS releases the lock
-  on process death, the probe reports `gone`, and ringmaster's reaper writes
-  `interrupted` instead of leaving the job stuck in `running`. This is why
-  `jobwake` is now **build-time LINKED** (the `gomod.nix` bridge onto
-  ringmaster's `go-pkgs`, the tommy pattern) *in addition to* the runtime PATH
-  CLI of the previous bullet — the flock must be an **in-process fd**, since a
-  CLI subprocess would drop it the instant it exits. Keep both: the CLI still
-  emits/observes at runtime (PATH-resolved, FDR 0010), the linked library
-  supplies the flock and the version constant. The flock is gated by a
-  **ProtocolVersion** check: `clown.CheckProtocol` (memoized, one shell-out per
-  serve) compares the compiled-in `jobwake.ProtocolVersion` against
-  `ringmaster version --protocol`. On an **exact** match, serve-start calls
-  `clown.SetFlockEnabled(true)` and `job.Start` acquires the flock (releasing it
-  in `clearRunning` *after* the terminal record, preserving "lock held ⟺ job
-  running"). On a mismatch — the linked lib's lock-path derivation may not match
-  the running ringmaster's probe — it **degrades loudly and skips only the
-  flock**: a warning to stderr + `servelog` + a ⚠ line prepended to the
-  system-prompt fragment, and `FlockEnabled` stays false so `job.Start` reads
-  the flag and skips the acquire. Async wakes and cancel-observe are pure CLI
-  shell-outs (self-consistent with the running binary), so they are **unaffected**
-  by a skew — only crash auto-reap is lost until versions align. `job.Start`
-  reads the cached flag, never re-shelling `version --protocol` per dispatch.
-  The core contract is `TestCheckProtocolMatchesRealRingmaster` (against the
-  checkPhase-pinned binary): it fails loudly if the linked `ProtocolVersion`
-  ever drifts from the pinned ringmaster's runtime value.
+  `check-this-session-async` consume the attestation, launch a background
+  goroutine in `serve`, return a job id immediately (output → `.spinclass/job.log`,
+  meta → `.spinclass/job.json`). Registered **only under clown** — an async job
+  IS a ringmaster job (#243); inspect via ringmaster's `job_status`/`job_read` or
+  block with `job_wait`, `session-job-cancel` to stop. One active job per session.
+  **Default to the synchronous tools**; async only when you have other work while
+  the hook runs, and never hot-poll.
+- **Clown job-wakeup emits** (FDR 0010, `internal/clown`): async merge/check emit
+  `ringmaster start/done` (clown RFC-0015) so clown wakes the agent with one
+  `[clown-job]` line. The job id is allocated at dispatch, so the id returned to
+  the caller IS the id the wake carries (#243); a failed allocation under clown
+  **refuses the dispatch** (a wake-less job completes into silence). Runtime
+  ringmaster is PATH/`$RINGMASTER_BIN`, never build-pinned (the wake must land in
+  the hosting clown's journal); it IS a flake input as a **checkPhase** dep (#253)
+  so `contract_test.go` drives a real start→done lifecycle. **Self-sufficient
+  wakes** (#251): hook output tees into ringmaster's spool, and the verdict ladder
+  attaches as a `madder://blobs/<digest>` via `done --resource` (blob and
+  `result_ref` are alternatives; `ringmaster read --json` to get the URIs).
+  Rollback `CLOWN_DISABLE_JOB_WAKEUP=1`.
+- **Per-job liveness flock + ProtocolVersion gate** (#26, ringmaster RFC-0016/
+  0018, `internal/clown`): `serve` holds ringmaster's per-job advisory lock
+  (`jobwake.AcquireJobLock`) for an async job's life, so a crashed serve is
+  detectable — the OS drops the lock, the reaper writes `interrupted` instead of
+  a stuck `running`. This is why `jobwake` is build-time **LINKED** (the
+  `gomod.nix` bridge) in ADDITION to the runtime PATH CLI: the flock must be an
+  in-process fd. Gated by `clown.CheckProtocol` (memoized) comparing compiled-in
+  `jobwake.ProtocolVersion` to `ringmaster version --protocol`: exact match
+  enables the flock, a mismatch degrades **loudly** and skips only the flock
+  (async wakes + cancel-observe are pure CLI shell-outs, unaffected by skew — only
+  crash auto-reap is lost). `TestCheckProtocolMatchesRealRingmaster` guards the
+  drift against the checkPhase-pinned binary.
 - **Cancellation observer** (#22, ringmaster RFC-0018, `internal/job` +
   `internal/clown`): `ringmaster cancel` is cooperative — it records a
-  **non-terminal `cancel-requested`** and wakes, but signals no process. So for
-  each async job under clown, `job.Start` launches an observer goroutine that
-  blocks in `clown.WaitForCancel` (`ringmaster wait <id> --on-cancel
-  --timeout 0`) and, on a cancel-requested, fires the job's context cancel —
-  tearing down the hook exactly as `session-job-cancel` and the inactivity
-  watchdog do. The producer then writes the terminal itself, staying the **sole
-  terminal-writer** (no double-write, no journal lie). The cancel terminal is
-  now **`StatusAborted`** (`"aborted"`, RFC-0018), renamed from `cancelled`; the
-  reaper writes `interrupted` if serve dies mid-teardown. `WaitForCancel` is
-  CLI-based (**not** the linked `jobwake.WaitDoneOnCancel`) and gated on
-  `clown.Enabled()` alone — **not** `FlockEnabled` — so cancel observation
-  survives a `ProtocolVersion` skew, where the in-process flock is disabled but
-  the runtime ringmaster's cancel surface still works. NON-OBVIOUS (verified
-  live, locked by `TestWaitForCancelObservesRealCancelRequested`): `wait
-  --on-cancel`'s status reports the DERIVED state `running` for a cancel-requested
-  job (the record is non-terminal), never `cancel-requested` — so `WaitForCancel`
-  maps a **non-terminal** return to `cancelRequested=true`, since --on-cancel's
-  only non-terminal stop condition is a cancel-requested. The observer runs
-  under the job's own ctx, so `clearRunning`'s `cancel()` tears down its
-  `ringmaster wait` subprocess when the job ends by any other path (no separate
-  cancel to track — which also sidesteps a govet `lostcancel` false positive).
-  `clearRunning` then **joins** the observer (`<-observerDone`) after `cancel()`
-  and before closing `done`, so a woken `WaitDone` caller is guaranteed the
-  observer subprocess is already reaped — cancel() SIGKILLs it, so the join
-  cannot hang. Without the join a completed job could report done with the
-  subprocess still alive; in tests that surfaced as the stub still writing into a
-  `t.TempDir()` during `RemoveAll` (an `ENOTEMPTY` race seen only under the eng
-  checkPhase's load, never in a faster devshell).
-- **Dynamic system-prompt fragment** (spinclass#187, clown plugin protocol
-  RFC-0002 §5, `internal/sysprompt`): `serve` advertises an MCP `prompts`
-  capability and answers `prompts/get` for the well-known `system-prompt-append`
-  prompt. clown's stdio bridge (opted in via `clown.json`
-  `stdioServers.spinclass.systemPrompt = true`) fetches it **before
-  `initialize`** and appends it last into the agent's system prompt; go-mcp's
-  V0-only `PromptRegistry` answers the cold request. `sysprompt.Resolve` branches
-  on runtime state — **worktree session** (`SPINCLASS_WORKTREE` set + cwd inside
-  it) vs **main checkout** (implicit session, FDR 0014; coordinates from
-  cwd+git) — and `Render` picks the matching embedded template. Both templates
-  carry a best-effort **repository line** (provider/owner/link/description)
-  resolved by `internal/repoinfo`: the git remote gives host/owner/name/link with
-  no network (for vanity single-segment remotes like `git@host:repo.git` the owner
-  is absent from the path and resolved via papi — spinclass#221), then a
-  **deadline-capped** (`repoFetchTimeout`, 2s) live lookup adds the forge kind and
-  owner login via the operator's published PAPI (`.forges[]` for kind,
-  `.organizations[]` for the missing owner on vanity remotes) and the description
-  (`gh api` for GitHub, the Gitea/Forgejo REST API self-hosted). Any failure omits
-  only the affected lines — the fetch runs before `initialize`, so it must never
-  block. Both templates also conditionally render a **Forge workflow** block (when
-  the resolved forge kind is non-GitHub and a URL is present) instructing the agent
-  to use `fj`/`smith` rather than `gh` and noting any GitHub copy is a read-only
-  mirror. Both templates also carry a best-effort **co-active sessions** line
-  (#238) — the other `active` sessions on the same repo, from local session
-  state + PID liveness only (no network, current session excluded; any failure
-  omits the line). Both templates additionally gain a Go-composed
-  **Design records** trailer (FDR 0021, `internal/sysprompt/docsindex.go`): an
-  index of the repo's `docs/features`/`docs/adrs`/`docs/rfcs` records by
-  number·title·status, grouped by status, scanned scan-if-exists from local
-  files (no network, so pre-`initialize`-safe); the scanned dirs are overridable
-  via `[sysprompt].doc-index-dirs` (override not append; `[]` disables), read by
-  `sysprompt.Resolve` via a `sweatfileio.LoadHierarchy` load. Malformed records
-  (unreadable / unterminated frontmatter) surface in a `⚠ malformed` diagnostic
-  block, and a `recover()` guarantees a broken doc can never fail the
-  pre-`initialize` render. This **replaces**
-  the retired static `.clown-plugin/system-prompt-append.d/` fragments (no static
-  fallback); rollback is restoring those files + the flake install lines.
+  non-terminal `cancel-requested` and wakes, signalling no process. So each async
+  job runs an observer goroutine (`clown.WaitForCancel`, gated on `clown.Enabled()`
+  alone so it survives a ProtocolVersion skew) that fires the job ctx cancel on a
+  cancel-requested; the producer writes the terminal itself (sole terminal-writer;
+  terminal is `StatusAborted`, reaper writes `interrupted` if serve dies
+  mid-teardown). NON-OBVIOUS (locked by
+  `TestWaitForCancelObservesRealCancelRequested`): `wait --on-cancel` reports the
+  derived state `running` for a cancel-requested job, so a non-terminal return
+  maps to cancelRequested=true. `clearRunning` joins the observer after `cancel()`
+  (which SIGKILLs its `ringmaster wait` subprocess) before closing `done`, so a
+  woken caller is guaranteed the subprocess is already reaped.
+- **Dynamic system-prompt fragment** (spinclass#187, FDR 0021, clown plugin
+  protocol RFC-0002 §5, `internal/sysprompt`): `serve` answers `prompts/get` for
+  `system-prompt-append`; clown's stdio bridge fetches it **before `initialize`**
+  and appends it last. `sysprompt.Resolve` branches worktree-session vs
+  main-checkout (implicit session, FDR 0014) and `Render` picks the embedded
+  template. Both carry best-effort, **deadline-capped** (`repoFetchTimeout` 2s —
+  the pre-`initialize` fetch must never block) lines: a **repository line**
+  (`internal/repoinfo` — git remote + a PAPI/`gh`/Gitea lookup for forge kind,
+  vanity-remote owner (#221), description), a **Forge workflow** block (non-GitHub
+  forge → use `fj`/`smith`), a **co-active sessions** line (#238; local state +
+  PID only), and the Go-composed **Design records** trailer (`docsindex.go`)
+  indexing `docs/features`/`adrs`/`rfcs` by number·title·status (dirs overridable
+  via `[sysprompt].doc-index-dirs`; a `recover()` guarantees a broken doc never
+  fails the render). Replaces the retired static
+  `.clown-plugin/system-prompt-append.d/` fragments.
 - **Pre-merge build worktree** (FDR 0013): by default the hook runs in a
   transient detached worktree pinned to the committed sha (`check.resolveHookDir`
   → `.merge-<branch>-<sha>-<pid>` under `.worktrees/`), freeing the session
@@ -369,19 +266,15 @@ subcommand is always available.
   `git merge --ff-only <pinnedSha>` → teardown → push). Async runs Prepare
   synchronously, backgrounds Finish. Opt out with
   `[hooks].disable-merge-build-worktree`.
-- **Per-repo merge queue** (FDR 0022, #235): `FinishMerge` serializes landings
-  on an advisory flock (`internal/mergelock`; `spinclass-merge.lock` in the
-  shared git common dir via `git.CommonGitDir` — poll-based so acquisition is
-  ctx-cancellable, self-releases on process death, never unlinked). Acquired
-  BEFORE the gate; under the lock: re-pull → ancestry check → if the default
-  tip moved, rebase the pinned commits in a transient `.land-*` worktree
-  (conflict ⇒ `merge.ErrIntegrationConflict`, the queue's only hard failure —
-  resolution is a plain re-merge) → gate on the LANDING sha → ff-only →
-  teardown (`branch -D` when rebased) → push. Queue waits heartbeat to the
-  async job log and are exempt from the inactivity watchdog (it wraps only the
-  hook subprocess). Worktree merges only (`MergeImplicit` excluded); lock is
+- **Per-repo merge queue** (FDR 0022, #235): `FinishMerge` serializes landings on
+  an advisory flock (`internal/mergelock`; `spinclass-merge.lock` in the shared
+  git common dir — poll-based, ctx-cancellable, self-releasing). Acquired BEFORE
+  the gate; under the lock: re-pull → ancestry check → if the tip moved, rebase
+  the pinned commits in a transient `.land-*` worktree (conflict ⇒
+  `merge.ErrIntegrationConflict`, resolved by a plain re-merge) → gate on the
+  LANDING sha → ff-only → teardown → push. Worktree merges only; lock is
   host-local. `[hooks].disable-merge-queue` restores the pre-#235 fail-on-race
-  path verbatim.
+  path.
 - **Stacked / queued intra-session merges** (FDR 0025, #265): a second
   `merge-this-session-async` while a gate runs ENQUEUES the next batch
   (in-process per-worktree queue, `cmd/spinclass/merge_queue.go`) rather than
@@ -394,111 +287,70 @@ subcommand is always available.
   burns it (`attestation.Peek`/`Consume` split from `Check`). Worktree sessions
   only; queued merges carry no ringmaster job id (the wake signals);
   `[hooks].disable-merge-stacking` is the rollback.
-- **`post-merge` hook** (FDR 0023, #244): when `[hooks].post-merge` is set,
-  `merge.runPostMergePhase` runs it after a merge has fully landed (ff-only
-  done; pushed when gitSync). On the queued path it runs **under the landing
-  lock**, as the last stage before `FinishMerge` returns and the deferred
-  `Release` fires — a merge is exclusive end to end, so no sibling session can
-  land or deploy mid-hook (an early release would let two deploys interleave,
-  the exact failure #244 exists to prevent). Cost: a slow hook extends the
-  exclusive region and delays every other merge in the repo.
-  Non-fatal by design: a nonzero exit emits a `severity=warn` not-ok point
-  with the hook's output but does NOT fail the merge (nothing to roll back;
-  a retry would find nothing to merge). Runs in the session worktree if it
-  survived teardown, else `repoPath`; no build worktree. Bounded by
-  `[hooks].post-merge-timeout` — a **wall-clock** cap, **on by default at 10m**
-  (#246), because a wedged hook holds the repo's queue, not just its session;
-  `"0"` disables, a bad value falls back to the default rather than to no cap.
-  Publishes `SPINCLASS_MERGED_SHA` (the **landing** sha
-  on a rebased queued landing), `_MERGED_BRANCH`, `_DEFAULT_BRANCH`,
-  `_MERGE_PUSHED`, `_REPO_PATH` via `sweatfile.runHookInDirEnv`. All three
-  land paths fire it (queued, `disable-merge-queue`, `MergeImplicit`);
-  `sc check` never does. `disable-post-merge` is the opt-out.
+- **`post-merge` hook** (FDR 0023, #244): `[hooks].post-merge` runs after a merge
+  fully lands (ff-only done; pushed when gitSync). On the queued path it runs
+  **under the landing lock**, as the last stage before `FinishMerge` returns — a
+  merge is exclusive end to end so no sibling deploy interleaves (#244; a slow hook
+  extends that exclusive region). Non-fatal: a nonzero exit emits a `severity=warn`
+  point but does NOT fail the merge (nothing to roll back). Bounded by
+  `[hooks].post-merge-timeout`, a **wall-clock** cap ON by default at 10m (#246;
+  `"0"` disables). Publishes `SPINCLASS_MERGED_SHA` (the LANDING sha on a rebased
+  landing), `_MERGED_BRANCH`, `_DEFAULT_BRANCH`, `_MERGE_PUSHED`, `_REPO_PATH`.
+  All land paths fire it; `sc check` never does. `disable-post-merge` opts out.
 - **Pre-merge REPAIR phase** (FDR 0018): when `[hooks].repair` is set,
   `PrepareMerge` runs it in the **session worktree** before the pin to fold
   mechanical fixes into the merged commit (canonical
   `conformist --commit --amend --exit-zero-on-fix`; amend detected via HEAD-sha
   delta). Merge-only; worktree sessions only. spinclass's own sweatfile has
   **retired** this in favour of the per-commit hook below.
-- **Per-commit repair hook** (FDR 0019, #183): when `[hooks].pre-commit` is set,
-  `sweatfile.Apply` installs a per-worktree git pre-commit hook
-  (`internal/sweatfile/precommit.go`), so drift is repaired at authoring time and
-  every commit is conformant in history. Canonical value is the store-pinned
-  wrapper **`conformist-pre-commit`** (name the wrapper, NOT a bare
-  `conformist --staged` string — conformist#51). Scoped to the worktree via
-  `core.hooksPath`; `.spinclass/hooks` is a composing dispatcher that runs the
-  formatter then execs the original native hook. Best-effort, non-blocking.
-  `disable-pre-commit` is a true uninstall (the rollback). Worktree sessions
-  only.
+- **Per-commit repair hook** (FDR 0019, #183, #267): `[hooks].pre-commit`
+  installs a per-worktree git pre-commit hook (`internal/sweatfile/precommit.go`)
+  so drift is repaired at authoring time. Canonical value is the store-pinned
+  wrapper **`conformist-pre-commit`** (not a bare `conformist --staged` —
+  conformist#51). `.spinclass/hooks` (via `core.hooksPath`) is a composing
+  dispatcher that runs the formatter then execs the native hook. **#267**: it
+  bakes `git hash-object flake.lock` at install; on a commit, if the live lock
+  hash differs (a flake bump since the session froze) it re-evals the formatter
+  via `nix develop --command` — building the current devShell if needed (a
+  blocking commit, accepted) — so a stale toolchain can't restamp generated
+  files. The baked hash never self-updates (that would fast-path back to the
+  stale hook); `sc resume` regenerates it fresh. `disable-pre-commit` uninstalls
+  (rollback). Worktree sessions only.
 - **Inactivity watchdog**: `[hooks].inactivity-timeout` (Go duration; unset =
   off) bounds how long the pre-merge hook may go silent. Covers
   merge/check/`sc check` + async twins (all funnel through
   `RunPreMergeHookContext`). Distinct error message vs `session-job-cancel`.
 - **Hook cancellation** (#188, `sweatfile.runHookInDirEnv`): `cmd.Cancel` is
-  overridden to **SIGTERM**, not exec's default SIGKILL, so a cancelled hook
-  can tear down its own children. The argv collapses by exec
-  (`direnv exec … sh -c <script>` → the hook command itself), so SIGKILL used
-  to orphan the `nix` below `just` still holding the inherited pipe — and
-  `Wait` cannot return until every pipe holder closes it (measured: 224s).
-  `cancelGrace` (10s) is the SIGKILL escalation for a hook that swallows
-  SIGTERM. Deliberately **no `Setpgid`**: a group kill would reap the detached
-  children FDR 0023 sanctions for slow post-merge deploys.
-- **Pre-merge hook systemd scope** (#25, ringmaster#12/RFC-0016 §3-4,
-  `internal/clown` + `sweatfile.runHookInDirEnv`): the `no Setpgid` decision
-  above leaves a residual — a hook whose top process swallows SIGTERM orphans
-  its descendants. So the **pre-merge** hook runs inside a transient systemd
-  scope: `clown.ScopeArgv(jobID)` prepends `systemd-run --user --scope
-  --unit=ringmaster-<id>.scope --property=KillMode=control-group --` (outermost,
-  after the direnv wrap), and on cancel `runHookInDirEnv` calls
-  `clown.ScopeStop` to reap the whole cgroup — the backstop above the #188
-  SIGTERM/`WaitDelay` floor, which stays. The reap is prompt: ringmaster#16 made
-  `ScopeArgv` set `--property=TimeoutStopSec=3s` on the scope AND `ScopeStop`
-  force-kill via `systemctl --user kill --signal=SIGKILL <unit>`, so a
-  SIGTERM-*ignoring* subtree is reaped well within the ~10s `ScopeStop` ctx (the
-  first cut, against a stop-only ScopeStop with systemd's ~90s default
-  stop-timeout, let the stubborn child survive the ctx — `TestRunPreMergeHook
-  ScopeReapsSubtreeOnCancel` guards the regression). Producer-
-  called and **RFC-0016 §4.2-safe**: ringmaster only supplies the argv + unit
-  name (`ScopeUnitName`, the single derivation site), never decides to kill and
-  is not in the `status` path, so cancel and status stay platform-uniform. The
-  job id reaches the hook via a ctx value — `clown.WithJobID` set in `job.Start`,
-  read by `runHookInDir` via `clown.JobIDFromContext`; this scopes **only** the
-  pre-merge hook (post-merge calls `runHookInDirEnv` directly with `""` so its
-  FDR-0023 detached children are never caught in the control-group kill; repair/
-  create/attach/detach run under `context.Background` so carry no id). Async is
-  clown-only, so a job id is present exactly when there is a ringmaster job to
-  scope. Availability-gated by `jobwake.ScopeArgv` (systemd-run on PATH +
-  reachable user manager + session bus, off under `RINGMASTER_DISABLE_SCOPE`);
-  unavailable ⇒ the hook runs **bare** and the #26 flock stays the liveness
-  floor. The wrap-active path needs a systemd user bus, absent in the nix
-  checkPhase sandbox and on macOS, so CI covers only the disabled/bare path +
-  the unit-name derivation + the ctx threading; the active path is dogfooded.
+  **SIGTERM** not SIGKILL, so a cancelled hook can tear down its own children
+  (exec collapses the argv, so SIGKILL orphaned the `nix` below `just` still
+  holding the inherited pipe — `Wait` blocks until every pipe holder closes it).
+  `cancelGrace` (10s) escalates to SIGKILL. Deliberately **no `Setpgid`**: a group
+  kill would reap the detached children FDR 0023 sanctions.
+- **Pre-merge hook systemd scope** (#25, ringmaster#12/RFC-0016, `internal/clown`
+  + `sweatfile.runHookInDirEnv`): to backstop the no-`Setpgid` residual (a hook
+  swallowing SIGTERM orphans descendants), the pre-merge hook runs in a transient
+  systemd scope — `clown.ScopeArgv(jobID)` prepends `systemd-run --user --scope`
+  (outermost), and cancel calls `clown.ScopeStop` to force-kill the whole cgroup
+  (ringmaster#16 sets `TimeoutStopSec=3s` + a SIGKILL `systemctl kill`, so a
+  SIGTERM-ignoring subtree dies within the ~10s ctx; `TestRunPreMergeHookScope
+  ReapsSubtreeOnCancel` guards it). Scopes **only** the pre-merge hook (job id via
+  the `clown.WithJobID` ctx value; post-merge passes `""` so its FDR-0023 detached
+  children survive). Availability-gated by `jobwake.ScopeArgv`; unavailable ⇒ bare
+  hook, the #26 flock stays the liveness floor. Active path needs a systemd user
+  bus (absent in the checkPhase sandbox + macOS) so it is dogfooded, not CI.
 - **Base-branch freshening at creation** (#250, `internal/basebranch`): a fresh
-  session's branch is cut from the repo's **default branch**, fetched and
-  fast-forwarded first, passed to `git worktree add -b` as an explicit sha.
-  Fixes two independent defects: `-b` with no start-point bases on **HEAD** (so
-  a checkout parked on a feature branch handed that branch to every session),
-  and only *some* paths freshened anything — `shop.Attach` pulled the main
-  worktree, but `spawn.Launch` calls `shop.Create` directly and so did nothing,
-  which is the case most likely to be stale. The retired `pullMainWorktree` was
-  also aimed wrong: it pulled the checkout's *current* branch (so it could
-  advance a feature branch) and skipped silently on a dirty tree. The gate lives
-  in `shop.createWorktree` — the single funnel below start/spawn/run — so the
-  spawn gap closes by construction. `sc fork` and `start-gh_pr` are excluded
-  (both have a base by intent). **Ahead of upstream is NOT staleness** (local
-  contains upstream; the state of every repo after a `--local-only` merge) and
-  never refuses. Unreachable, dirty-blocking-the-ff, and diverged do refuse,
-  overridable by `--allow-stale-base` or `[hooks].allow-stale-base`; there is
-  deliberately **no MCP parameter**, so a driver cannot wave away its worker's
-  stale toolchain. `sc resume` runs the same step advisorily and cannot fail on
-  it. Two mechanics worth not re-deriving: the fetch uses an explicit
-  `+refs/heads/<b>:refs/remotes/<r>/<b>` refspec (whether a bare
-  `git fetch <remote> <branch>` also updates the tracking ref depends on
-  `remote.<name>.fetch` covering it, and the ancestry check reads that ref
-  back), and it is context-bounded with `GIT_TERMINAL_PROMPT=0` +
-  `ssh -o BatchMode=yes` because ssh and credential helpers read `/dev/tty`, not
-  stdin — a nil `Stdin` is not protection, and a hang there surfaces only as a
-  spawn hello-deadline expiry with nothing to explain it.
+  session's branch is cut from the repo's **default branch**, fetched +
+  fast-forwarded first, passed to `git worktree add -b` as an explicit sha —
+  fixing `-b`'s base-on-HEAD (a checkout parked on a feature branch) and the spawn
+  path that freshened nothing (`spawn.Launch` → `shop.Create` bypassed the old
+  main-worktree pull). Gate lives in `shop.createWorktree`, the single funnel
+  below start/spawn/run. **Ahead-of-upstream is NOT staleness** and never refuses;
+  unreachable, dirty-ff-blocked, and diverged refuse, overridable by
+  `--allow-stale-base` / `[hooks].allow-stale-base` — deliberately **no MCP
+  parameter** (a driver can't wave away a worker's stale toolchain). `sc fork` /
+  `start-gh_pr` excluded. Fetch is context-bounded with `GIT_TERMINAL_PROMPT=0` +
+  `ssh -o BatchMode=yes` (ssh/cred helpers read `/dev/tty`, so a nil Stdin isn't
+  protection — a hang surfaces only as a spawn hello-deadline expiry).
 - **Setup staleness & `sc rebuild`** (`internal/setupfingerprint`): setup is
   applied **once at `sc start`** (`sc resume` does NOT re-apply), so it drifts.
   A fingerprint (`sha256(scheme · version+commit · pins · canonical-JSON(merged
