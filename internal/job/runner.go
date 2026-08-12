@@ -298,9 +298,23 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 		// terminal state). Statuses map 1:1 onto RFC-0009 terminal types.
 		if j.ClownJobID != "" {
 			msg := kind + " " + j.Status
-			if j.Status == StatusFailed {
+			switch j.Status {
+			case StatusFailed:
 				if line := firstFailureLine(text); line != "" {
 					msg += ": " + line
+				}
+			case StatusSucceeded:
+				// A ✗ line on a SUCCEEDED job is a non-fatal warning the
+				// terminal status hides. Today that is only the post-merge
+				// hook (FDR 0023): it emits a severity=warn not-ok point but
+				// does not fail the merge, so without this the wake reads a
+				// bare "merge succeeded" over e.g. a deploy that silently did
+				// not happen — both operator and agent then believe it did
+				// (spinclass#259). The full ladder is still attached by
+				// reference below, so this only lifts the verdict into the
+				// one-line summary that is all a skimming reader sees.
+				if line := postMergeFailureLine(text); line != "" {
+					msg += "; " + line
 				}
 			}
 
@@ -373,6 +387,23 @@ func storeResultBlob(wt, text string, logf io.Writer) string {
 func firstFailureLine(text string) string {
 	for _, line := range strings.Split(text, "\n") {
 		if strings.HasPrefix(line, "✗ ") {
+			return line
+		}
+	}
+	return ""
+}
+
+// postMergeFailureLine returns the post-merge hook's "✗ post-merge …" verdict
+// line if the rendered ladder carries one, else "". The post-merge hook (FDR
+// 0023) is the sole NON-fatal failure in the merge stream — it emits a
+// severity=warn not-ok point yet leaves the merge (and so the job) succeeded —
+// so a plain firstFailureLine would never be consulted for it. Matching the
+// "post-merge " label prefix (merge.runPostMergePhase) keeps this from firing
+// on any future non-post-merge warning that a caller does not mean to elevate
+// to the wake summary (spinclass#259).
+func postMergeFailureLine(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "✗ post-merge") {
 			return line
 		}
 	}

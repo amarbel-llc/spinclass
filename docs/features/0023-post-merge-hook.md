@@ -54,9 +54,13 @@ disable-post-merge = true
   sync, the push succeeded. Every earlier failure path returns first.
 - **Non-fatal.** The merge cannot be undone by the time the hook runs, so a
   nonzero exit does not fail the merge. It emits a `severity=warn` not-ok test
-  point carrying the hook's output; the merge still reports success. Retrying
-  the merge would find nothing to merge, so a failure here is acted on out of
-  band.
+  point carrying the hook's output; the merge still reports success. The
+  failure is not hidden, though: it renders as a `✗ post-merge …` line in the
+  result ladder, and the async completion wake lifts that line into its
+  one-line summary (`merge succeeded; ✗ post-merge …`) so a background merge
+  does not read as a clean landing over a deploy that silently did not happen
+  (spinclass#259). Retrying the merge would find nothing to merge, so a failure
+  here is acted on out of band.
 - **Runs under the per-repo merge lock**, as the merge's last stage — a merge
   stays exclusive end to end, so no sibling session can land (or deploy) while
   this hook is in flight. See Design for the cost.

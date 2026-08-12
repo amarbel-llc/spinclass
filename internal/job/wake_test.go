@@ -257,6 +257,54 @@ func TestStartEmitsFailedStateWithFailureLine(t *testing.T) {
 	})
 }
 
+// A post-merge hook failure (FDR 0023) is non-fatal — the merge already
+// landed — so the job terminates `succeeded`. But the completion wake must
+// still surface the post-merge ✗ instead of a bare "merge succeeded", or a
+// masked deploy failure reads as a clean landing and both operator and agent
+// believe a deploy happened that silently did not (spinclass#259).
+func TestStartSucceededWakeSurfacesPostMergeFailure(t *testing.T) {
+	wt := t.TempDir()
+	argsFile := filepath.Join(t.TempDir(), "args")
+	installStub(t, argsFile, true)
+
+	// isErr=false ⇒ StatusSucceeded, but the rendered ladder carries the
+	// non-fatal post-merge ✗ (severity=warn) exactly as a real merge whose
+	// deploy hook exited nonzero renders it. Every other not-ok in the merge
+	// stream is fatal (⇒ failed) or an ok informational point (#238), so this
+	// ✗ is unambiguously the post-merge one.
+	runWaked(t, wt, KindMerge, func(ctx context.Context, w io.Writer) (string, bool) {
+		return "✓ merge feature\n✗ post-merge feature (abc123def456)", false
+	})
+
+	inv := recordedInvocations(t, argsFile)
+	assertArgv(t, findInvocation(t, inv, "done"), []string{
+		"done", "job-deadbeef",
+		"--state", "succeeded",
+		"--message", "merge succeeded; ✗ post-merge feature (abc123def456)",
+		"--result-ref", "ringmaster read job-deadbeef",
+	})
+}
+
+// A succeeded merge with a clean post-merge (no ✗) keeps the bare summary —
+// the #259 suffix must not fire when there is nothing to surface.
+func TestStartSucceededWakeUnchangedWhenPostMergeClean(t *testing.T) {
+	wt := t.TempDir()
+	argsFile := filepath.Join(t.TempDir(), "args")
+	installStub(t, argsFile, true)
+
+	runWaked(t, wt, KindMerge, func(ctx context.Context, w io.Writer) (string, bool) {
+		return "✓ merge feature\n✓ post-merge feature (abc123def456)", false
+	})
+
+	inv := recordedInvocations(t, argsFile)
+	assertArgv(t, findInvocation(t, inv, "done"), []string{
+		"done", "job-deadbeef",
+		"--state", "succeeded",
+		"--message", "merge succeeded",
+		"--result-ref", "ringmaster read job-deadbeef",
+	})
+}
+
 func TestStartEmitsAbortedStateOnCancel(t *testing.T) {
 	wt := t.TempDir()
 	argsFile := filepath.Join(t.TempDir(), "args")
