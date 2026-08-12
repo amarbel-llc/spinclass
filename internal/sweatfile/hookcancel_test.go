@@ -38,9 +38,16 @@ func TestRunPreMergeHookCancelTearsDownChildren(t *testing.T) {
 	// trap forwards SIGTERM to the child, as a well-behaved runner does. The
 	// child sleeps far longer than the test tolerates, so if it survives the
 	// cancel the assertion below sees it alive.
+	//
+	// The parent records the child's pid itself (from $!) BEFORE touching the
+	// ready marker, so `started` can only appear once child.pid is already on
+	// disk. Letting the backgrounded child self-report its own $$ raced the
+	// parent's `touch`: the marker could win, and readPID would then open a
+	// child.pid that did not exist yet (spinclass#271).
 	script := fmt.Sprintf(`
-sh -c 'echo $$ > %s; exec sleep 600' &
+sleep 600 &
 child=$!
+echo $child > %s
 trap 'kill -TERM $child 2>/dev/null; exit 143' TERM
 touch %s
 wait $child
