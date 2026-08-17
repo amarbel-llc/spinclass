@@ -17,6 +17,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sessionlog"
 	"code.linenisgreat.com/spinclass/internal/spawnhandshake"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 	"github.com/google/shlex"
@@ -139,13 +140,19 @@ func MaterializeImplicit(cwd, randID string, pid int) (string, bool) {
 	if err != nil || branch == "" { // empty = detached HEAD: no branch hint
 		return "", false
 	}
-	// Rollback knob. Now that we know this is a materializable main checkout,
-	// the sweatfile hierarchy walk only runs when it matters, and stays
-	// BEFORE the sweep + write so a disabled session writes nothing.
+	// Rollback knob AND the [direnv.dotenv] source (#274). Now that we know this
+	// is a materializable main checkout, load the sweatfile hierarchy once — it
+	// gates the disable knob and provides the merged dotenv map written after
+	// state below. Stays BEFORE the sweep + write so a disabled session writes
+	// nothing. GetDefault-merged to mirror the managed-worktree Apply path; a
+	// load miss (no HOME, read error) leaves merged zero so the env write no-ops.
+	var merged sweatfile.Sweatfile
 	if home, _ := os.UserHomeDir(); home != "" {
-		if res, err := sweatfileio.LoadHierarchy(home, cwd); err == nil &&
-			res.Merged.DisableImplicitSessionsEnabled() {
-			return "", false
+		if res, err := sweatfileio.LoadHierarchy(home, cwd); err == nil {
+			if res.Merged.DisableImplicitSessionsEnabled() {
+				return "", false
+			}
+			merged = sweatfile.GetDefault().MergeWith(res.Merged)
 		}
 	}
 
@@ -177,6 +184,16 @@ func MaterializeImplicit(cwd, randID string, pid int) (string, bool) {
 	}
 	if err := session.WriteImplicit(s, randID); err != nil {
 		return "", false
+	}
+	// #274: generate <checkout>/.spinclass/env from the merged [direnv.dotenv]
+	// map so an implicit session's committed `.envrc` can `dotenv_if_exists
+	// .spinclass/env` and receive the same values a managed worktree gets. The
+	// repo-owned .envrc is deliberately never rewritten (unlike a managed
+	// worktree's), so the load is opt-in per repo. Best-effort and idempotent:
+	// a write failure must not fail materialization, and re-fires (resume/
+	// clear/compact) refresh the file. No-op when no dotenv entries exist.
+	if err := merged.WriteSpinclassEnv(cwd); err != nil {
+		sessionlog.Errorf("MaterializeImplicit WriteSpinclassEnv-failed checkout=%s err=%v", cwd, err)
 	}
 	return key, true
 }

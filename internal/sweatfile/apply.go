@@ -31,7 +31,7 @@ func (sweatfile Sweatfile) Apply(worktreePath string) error {
 		return fmt.Errorf("applying claude settings: %w", err)
 	}
 
-	if err := sweatfile.writeSpinclassEnv(worktreePath); err != nil {
+	if err := sweatfile.WriteSpinclassEnv(worktreePath); err != nil {
 		return fmt.Errorf("writing .spinclass/env: %w", err)
 	}
 
@@ -119,7 +119,15 @@ func (sf Sweatfile) writeEnvrc(worktreePath string) error {
 	return bufferedWriter.Flush()
 }
 
-func (sf Sweatfile) writeSpinclassEnv(worktreePath string) error {
+// WriteSpinclassEnv renders the merged [direnv.dotenv] map to
+// <worktreePath>/.spinclass/env (the file the generated `dotenv .spinclass/env`
+// .envrc line sources), expanding $WORKTREE to worktreePath and other $VARs
+// from the process env, with keys sorted for a stable file. A no-op when no
+// dotenv entries are declared. It never touches .envrc, so implicit
+// (main-checkout) sessions can call it to receive dotenv values via a committed
+// `dotenv_if_exists .spinclass/env` without their repo-owned .envrc being
+// rewritten (#274); managed worktrees reach it through Apply.
+func (sf Sweatfile) WriteSpinclassEnv(worktreePath string) error {
 	if sf.Direnv == nil || len(sf.Direnv.Dotenv) == 0 {
 		return nil
 	}

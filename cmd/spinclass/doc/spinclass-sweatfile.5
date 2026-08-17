@@ -122,6 +122,41 @@ array; the
 .B dotenv
 line is added after your directives.
 .PP
+This automatic
+.I .envrc
+rewrite applies only to spinclass-managed worktrees, whose
+.I .envrc
+spinclass owns. An
+.B implicit
+session \(em an agent running in a repo's own main checkout rather than an
+.BR sc -created
+worktree \(em also gets
+.I .spinclass/env
+generated from the same merged
+.B dotenv
+map (regenerated on every
+.B SessionStart
+so it tracks the current config), but its
+.I .envrc
+is committed and repo-owned, so spinclass never rewrites it.
+To load the values there, the committed
+.I .envrc
+must opt in itself with
+.PP
+.RS
+.EX
+dotenv_if_exists .spinclass/env
+.EE
+.RE
+.PP
+(the
+.B _if_exists
+form so the checkout still loads cleanly when no implicit session has
+generated the file). Without that line, a main-checkout session silently
+does not receive
+.B dotenv
+values.
+.PP
 The inline-table spelling
 .RB ( "dotenv = { FOO = \(dqbar\(dq }" )
 is equivalent and equally accepted; use whichever reads better.

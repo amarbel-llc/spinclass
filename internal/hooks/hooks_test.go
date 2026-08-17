@@ -1545,6 +1545,55 @@ func TestSessionStartMaterializesImplicit(t *testing.T) {
 	}
 }
 
+// TestSessionStartMaterializesImplicitWritesDotenvEnv guards #274: an implicit
+// (main-checkout) session must get a generated <checkout>/.spinclass/env from
+// the merged [direnv.dotenv] map, so a committed `.envrc` can
+// `dotenv_if_exists .spinclass/env` and receive the same values a managed
+// worktree does. Before the fix MaterializeImplicit wrote only session state,
+// and every [direnv.dotenv] entry silently never reached the main checkout.
+func TestSessionStartMaterializesImplicitWritesDotenvEnv(t *testing.T) {
+	repo := initImplicitTestRepo(t)
+	// Empty HOME bounds the hierarchy walk to <repo>/sweatfile (no global
+	// config, no accidental parent pickup); <repo>/sweatfile is loaded
+	// regardless of HOME. Mirrors TestSessionStartNoopWhenDisabled.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if err := os.WriteFile(filepath.Join(repo, "sweatfile"),
+		[]byte("[direnv.dotenv]\nTROUPE_XMPP_ROOMS = \"presence@rooms\"\nWT = \"$WORKTREE\"\n"),
+		0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	input, _ := json.Marshal(map[string]any{
+		"hook_event_name": "SessionStart",
+		"session_id":      "dotenv-session",
+		"cwd":             repo,
+		"source":          "startup",
+	})
+	var out bytes.Buffer
+	if err := Run(bytes.NewReader(input), &out, "", "", false); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(repo, ".spinclass", "env"))
+	if err != nil {
+		t.Fatalf("implicit .spinclass/env not generated: %v", err)
+	}
+	// Assert the declared entries reach the checkout (the #274 regression),
+	// tolerating any entries inherited from an ancestor sweatfile — the exact
+	// sorted-key byte format is locked by the sweatfile package's own tests.
+	// $WORKTREE expands to the checkout root.
+	got := string(data)
+	for _, want := range []string{
+		"TROUPE_XMPP_ROOMS=presence@rooms\n",
+		"WT=" + repo + "\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("env content missing %q; got:\n%s", want, got)
+		}
+	}
+}
+
 // TestSessionStartMaterializesOnNonDefaultBranch guards the fix for the
 // over-restrictive default-branch gate: a main checkout (.git is a directory)
 // is a first-class implicit session on ANY branch, not just main/master. The
