@@ -204,7 +204,7 @@ func registerQueryCommands(app *command.App) {
 			Long:  "Create a new worktree branched from the current worktree's HEAD. If new-branch is omitted, a name is auto-generated as <current-branch>-N. Resolves the source worktree from the current directory or --from flag. Does not attach to the new session. (The former --brief detached-worker mode was removed in spinclass#262 — use `sc spawn` (its repo arg is now optional) to launch a detached worker in THIS repo.)",
 		},
 		Params: []command.Param{
-			{Name: "new-branch", Type: command.String, Description: "Name for the forked branch (auto-generated if omitted)"},
+			{Name: "new-branch", Type: command.String, Description: "Name for the forked branch (auto-generated if omitted); must not contain '.' (reserved as the fleet room-JID component separator)"},
 			{Name: "from", Type: command.String, Description: "Source worktree directory to fork from", Completer: completeWorktreeTargets},
 			{Name: "brief", Type: command.String, Description: "REMOVED (spinclass#262): the detached-worker fork is gone. Use `sc spawn --brief \"...\"` (repo now optional) to launch a detached worker in this repo."},
 		},

@@ -527,6 +527,11 @@ func Fork(
 ) error {
 	if newBranch == "" {
 		newBranch = worktree.ForkName(worktreePath.RepoPath, worktreePath.Branch)
+	} else if err := worktree.ValidateName(newBranch); err != nil {
+		// A user-supplied fork name must not contain the reserved room-JID
+		// component separator (#275); the generated ForkName above is always
+		// safe, so only the explicit name is checked.
+		return err
 	}
 
 	newPath := filepath.Join(worktreePath.RepoPath, worktree.WorktreesDir, newBranch)

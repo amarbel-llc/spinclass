@@ -5,9 +5,28 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"code.linenisgreat.com/spinclass/internal/git"
 )
+
+// ValidateName rejects a session/worktree name that would break fleet MUC
+// room-JID parsing (#275). Fleet room JIDs encode the repo/worktree display
+// form dot-separated in the localpart (e.g. repo.worktree@rooms.xmpp.<zone>) —
+// "/" is illegal in an XMPP localpart (RFC 7622), so "." is the chosen
+// separator — which reserves "." as a component delimiter. A dot in a
+// worktree/session name would make that parsing ambiguous, so it is forbidden.
+// RandomName never emits one (its wordlists are dot-free, joined by "-"); this
+// guards the user-supplied paths (sc fork <new-branch>).
+func ValidateName(name string) error {
+	if strings.Contains(name, ".") {
+		return fmt.Errorf(
+			"invalid session/worktree name %q: '.' is reserved as the fleet room-JID component separator (repo.worktree) and must not appear in a name",
+			name,
+		)
+	}
+	return nil
+}
 
 var adjectives = []string{
 	"bold", "brave", "bright", "calm", "clear",

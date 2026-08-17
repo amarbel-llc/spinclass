@@ -480,6 +480,53 @@ func TestForkAutoName(t *testing.T) {
 	}
 }
 
+// TestForkRejectsDottedName covers #275: a user-supplied fork name containing a
+// dot is rejected (the dot is reserved as the fleet room-JID component
+// separator) before any worktree is created.
+func TestForkRejectsDottedName(t *testing.T) {
+	parentDir := t.TempDir()
+	repoDir := filepath.Join(parentDir, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGit(repoDir, "init")
+	runGit(repoDir, "config", "user.email", "test@test.com")
+	runGit(repoDir, "config", "user.name", "Test")
+	runGit(repoDir, "commit", "--allow-empty", "-m", "initial")
+
+	wtDir := filepath.Join(repoDir, worktree.WorktreesDir)
+	srcPath := filepath.Join(wtDir, "source-branch")
+	runGit(repoDir, "worktree", "add", "-b", "source-branch", srcPath)
+
+	rp := worktree.ResolvedPath{
+		AbsPath:  srcPath,
+		RepoPath: repoDir,
+		Branch:   "source-branch",
+	}
+
+	var buf bytes.Buffer
+	err := Fork(&buf, rp, "bad.name", "tap")
+	if err == nil {
+		t.Fatal("Fork() with dotted name = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "room-JID") {
+		t.Errorf("Fork() error %q should name the reservation", err)
+	}
+	// No worktree should have been created for the rejected name.
+	if _, statErr := os.Stat(filepath.Join(wtDir, "bad.name")); !os.IsNotExist(statErr) {
+		t.Errorf("worktree dir for rejected name should not exist")
+	}
+}
+
 func TestAttachCallsExecutorWithCorrectArgs(t *testing.T) {
 	parentDir := t.TempDir()
 	repoDir := filepath.Join(parentDir, "myrepo")
