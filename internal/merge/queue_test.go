@@ -33,7 +33,7 @@ func prepareRacedMerge(t *testing.T, repoDir, wtPath, branch, sessionFile, sessi
 	rep = crap.NewReporter(buf, crap.ReporterOptions{})
 	ts = rep.TestStream(0)
 	var err error
-	pinnedSha, err = PrepareMerge(ts, repoDir, wtPath, branch, "main", false)
+	pinnedSha, err = PrepareMerge(ts, repoDir, wtPath, branch, "main", false, nil)
 	if err != nil {
 		t.Fatalf("PrepareMerge: %v\n%s", err, buf.String())
 	}
@@ -93,7 +93,7 @@ func TestFinishMergeQueueRebasesLandingAndGatesOnLandingSha(t *testing.T) {
 		"a.txt", "a", "racing.txt", "race")
 
 	_, err := FinishMerge(context.Background(), &mockExecutor{}, rep, ts,
-		repoDir, wtPath, "feature-race", "main", pinnedSha, false, true, nil)
+		repoDir, wtPath, "feature-race", "main", pinnedSha, false, true, nil, nil)
 	ts.Finish()
 	if err != nil {
 		t.Fatalf("FinishMerge: %v\n%s", err, buf.String())
@@ -151,7 +151,7 @@ func TestFinishMergeQueueIntegrationConflict(t *testing.T) {
 		"file.txt", "feature", "file.txt", "racing")
 
 	_, err := FinishMerge(context.Background(), &mockExecutor{}, rep, ts,
-		repoDir, wtPath, "feature-conflict-race", "main", pinnedSha, false, true, nil)
+		repoDir, wtPath, "feature-conflict-race", "main", pinnedSha, false, true, nil, nil)
 	ts.Finish()
 	if err == nil {
 		t.Fatalf("expected FinishMerge to fail on the integration conflict\n%s", buf.String())
@@ -210,7 +210,7 @@ func TestFinishMergeQueueDisabledKnobFailsAtFF(t *testing.T) {
 		"a.txt", "a", "racing.txt", "race")
 
 	_, err := FinishMerge(context.Background(), &mockExecutor{}, rep, ts,
-		repoDir, wtPath, "feature-knob", "main", pinnedSha, false, true, nil)
+		repoDir, wtPath, "feature-knob", "main", pinnedSha, false, true, nil, nil)
 	ts.Finish()
 	if err == nil {
 		t.Fatalf("expected ff-only failure with the queue disabled\n%s", buf.String())
@@ -253,7 +253,7 @@ func TestFinishMergeQueueRebasedLandingTeardown(t *testing.T) {
 		"a.txt", "a", "racing.txt", "race")
 
 	_, err := FinishMerge(context.Background(), &mockExecutor{}, rep, ts,
-		repoDir, wtPath, "feature-teardown", "main", pinnedSha, false, false, nil)
+		repoDir, wtPath, "feature-teardown", "main", pinnedSha, false, false, nil, nil)
 	ts.Finish()
 	if err != nil {
 		t.Fatalf("FinishMerge: %v\n%s", err, buf.String())
@@ -312,7 +312,7 @@ func TestFinishMergeQueuePostPinCommitsSurviveRebasedTeardown(t *testing.T) {
 	postPinSha := runGit(t, wtPath, "rev-parse", "HEAD")
 
 	_, err := FinishMerge(context.Background(), &mockExecutor{}, rep, ts,
-		repoDir, wtPath, "feature-postpin", "main", pinnedSha, false, false, nil)
+		repoDir, wtPath, "feature-postpin", "main", pinnedSha, false, false, nil, nil)
 	ts.Finish()
 	if err != nil {
 		t.Fatalf("FinishMerge: %v\n%s", err, buf.String())

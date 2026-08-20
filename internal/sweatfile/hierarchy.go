@@ -309,5 +309,27 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		}
 	}
 
+	// [[post-merge]] — dedup-by-name, same pattern as [[mcps]] (FDR 0026).
+	// A name-only entry (empty command) is preserved here so that
+	// ActivePostMergeTargets() can filter it out as a removal sentinel
+	// against the inherited list.
+	if len(other.PostMerge) > 0 {
+		cp := make([]PostMergeTarget, len(merged.PostMerge))
+		copy(cp, merged.PostMerge)
+		merged.PostMerge = cp
+		index := make(map[string]int, len(merged.PostMerge))
+		for i, t := range merged.PostMerge {
+			index[t.Name] = i
+		}
+		for _, t := range other.PostMerge {
+			if i, ok := index[t.Name]; ok {
+				merged.PostMerge[i] = t
+				continue
+			}
+			index[t.Name] = len(merged.PostMerge)
+			merged.PostMerge = append(merged.PostMerge, t)
+		}
+	}
+
 	return merged
 }

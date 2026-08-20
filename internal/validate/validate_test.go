@@ -591,3 +591,55 @@ func TestCheckMCPsDuplicateName(t *testing.T) {
 		t.Errorf("expected warning for duplicate name, got %v", issues)
 	}
 }
+
+func TestCheckPostMergeTargetsValid(t *testing.T) {
+	verify := "check-health"
+	sf := sweatfile.Sweatfile{
+		PostMerge: []sweatfile.PostMergeTarget{
+			{Name: "krone", Command: "deploy", Verify: &verify},
+			{Name: "nikulin", Command: "deploy2"},
+			{Name: "stale"}, // name-only removal sentinel is valid
+		},
+	}
+	if issues := CheckPostMergeTargets(sf); len(issues) != 0 {
+		t.Errorf("expected no issues, got %v", issues)
+	}
+}
+
+func TestCheckPostMergeTargetsMissingName(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		PostMerge: []sweatfile.PostMergeTarget{
+			{Command: "deploy"},
+		},
+	}
+	issues := CheckPostMergeTargets(sf)
+	if len(issues) != 1 || issues[0].Severity != SeverityError || issues[0].Field != "post-merge.name" {
+		t.Fatalf("expected 1 name error, got %v", issues)
+	}
+}
+
+func TestCheckPostMergeTargetsDuplicateName(t *testing.T) {
+	sf := sweatfile.Sweatfile{
+		PostMerge: []sweatfile.PostMergeTarget{
+			{Name: "krone", Command: "deploy"},
+			{Name: "krone", Command: "deploy2"},
+		},
+	}
+	issues := CheckPostMergeTargets(sf)
+	if len(issues) != 1 || issues[0].Severity != SeverityWarning || issues[0].Field != "post-merge.name" {
+		t.Fatalf("expected 1 duplicate warning, got %v", issues)
+	}
+}
+
+func TestCheckPostMergeTargetsVerifyWithoutCommandWarns(t *testing.T) {
+	verify := "check"
+	sf := sweatfile.Sweatfile{
+		PostMerge: []sweatfile.PostMergeTarget{
+			{Name: "krone", Verify: &verify}, // sentinel with a verify — confused
+		},
+	}
+	issues := CheckPostMergeTargets(sf)
+	if len(issues) != 1 || issues[0].Severity != SeverityWarning || issues[0].Field != "post-merge.verify" {
+		t.Fatalf("expected 1 verify-without-command warning, got %v", issues)
+	}
+}

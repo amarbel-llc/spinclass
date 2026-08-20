@@ -37,7 +37,7 @@ var mergeInteractive = func() bool {
 		(isatty.IsTerminal(stderr) || isatty.IsCygwinTerminal(stderr))
 }
 
-func Run(execr executor.Executor, format string, target string, gitSync bool) error {
+func Run(execr executor.Executor, format string, target string, gitSync bool, postMergeTargets []string) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -57,7 +57,7 @@ func Run(execr executor.Executor, format string, target string, gitSync bool) er
 			return present.WithReporter(resolved, "merge "+implicit.Branch, os.Stdout, os.Stderr, func(rep *crap.Reporter) error {
 				ts := rep.TestStream(0)
 				defer ts.Finish()
-				_, mergeErr := MergeImplicit(context.Background(), rep, ts, implicit.RepoPath, cwd, implicit.Branch, nil)
+				_, mergeErr := MergeImplicit(context.Background(), rep, ts, implicit.RepoPath, cwd, implicit.Branch, nil, postMergeTargets)
 				return mergeErr
 			})
 		}
@@ -110,7 +110,7 @@ func Run(execr executor.Executor, format string, target string, gitSync bool) er
 	return present.WithReporter(resolved, "merge "+branch, os.Stdout, os.Stderr, func(rep *crap.Reporter) error {
 		ts := rep.TestStream(0)
 		defer ts.Finish()
-		_, mergeErr := Resolved(execr, rep, ts, repoPath, wtPath, branch, defaultBranch, gitSync, inSession)
+		_, mergeErr := Resolved(execr, rep, ts, repoPath, wtPath, branch, defaultBranch, gitSync, inSession, postMergeTargets)
 		return mergeErr
 	})
 }
@@ -122,8 +122,8 @@ func Run(execr executor.Executor, format string, target string, gitSync bool) er
 // hook step that produced a madder blob; empty when madder is not pinned
 // at build time) and a non-nil error if any step failed. Each BlobLink
 // carries the MIME type matching the format the blob was written in.
-func Resolved(execr executor.Executor, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch string, gitSync, inSession bool) ([]check.BlobLink, error) {
-	return ResolvedContext(context.Background(), execr, rep, ts, repoPath, wtPath, branch, defaultBranch, gitSync, inSession, nil)
+func Resolved(execr executor.Executor, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch string, gitSync, inSession bool, postMergeTargets []string) ([]check.BlobLink, error) {
+	return ResolvedContext(context.Background(), execr, rep, ts, repoPath, wtPath, branch, defaultBranch, gitSync, inSession, nil, postMergeTargets)
 }
 
 // ResolvedContext is Resolved bound to ctx with an optional activity writer.
@@ -134,7 +134,12 @@ func Resolved(execr executor.Executor, rep *crap.Reporter, ts *crap.TestStream, 
 // defaultBranch must be non-empty: resolving it may huh-prompt
 // (ResolveDefaultBranch), which cannot run inside the reporter scope, so
 // callers resolve it before building the Reporter.
-func ResolvedContext(ctx context.Context, execr executor.Executor, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch string, gitSync, inSession bool, activity io.Writer) ([]check.BlobLink, error) {
+//
+// postMergeTargets selects which named [[post-merge]] targets deploy (FDR
+// 0026): nil = all active targets (the default), a non-nil list = exactly those
+// names (empty = none). An unknown name fails PrepareMerge before anything
+// lands.
+func ResolvedContext(ctx context.Context, execr executor.Executor, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch string, gitSync, inSession bool, activity io.Writer, postMergeTargets []string) ([]check.BlobLink, error) {
 	if info, statErr := os.Stat(repoPath); statErr != nil || !info.IsDir() {
 		return nil, fmt.Errorf("repository not found: %s", repoPath)
 	}
@@ -143,12 +148,12 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, rep *crap.Rep
 		return nil, errors.New("default branch not resolved: callers must resolve it (ResolveDefaultBranch) before ResolvedContext")
 	}
 
-	pinnedSha, prepErr := PrepareMerge(ts, repoPath, wtPath, branch, defaultBranch, gitSync)
+	pinnedSha, prepErr := PrepareMerge(ts, repoPath, wtPath, branch, defaultBranch, gitSync, postMergeTargets)
 	if prepErr != nil {
 		return nil, prepErr
 	}
 
-	return FinishMerge(ctx, execr, rep, ts, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, inSession, activity)
+	return FinishMerge(ctx, execr, rep, ts, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, inSession, activity, postMergeTargets)
 }
 
 // PrepareMerge runs the fast, session-worktree-touching prefix of a merge: the
@@ -163,7 +168,7 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, rep *crap.Rep
 // synchronously (before returning the job id), freeing the session worktree the
 // moment the rebase lands while FinishMerge's slow pre-merge hook runs detached
 // in an isolated build worktree.
-func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch string, gitSync bool) (pinnedSha string, err error) {
+func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch string, gitSync bool, postMergeTargets []string) (pinnedSha string, err error) {
 	emitCoActiveSessions(ts, repoPath, wtPath)
 
 	// Load the sweatfile hierarchy once for the disable-merge gate and the
@@ -185,6 +190,22 @@ func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch s
 			disableMergeSource(hierarchy),
 		)
 		return "", failStep(ts, "merge "+branch, disableErr, "")
+	}
+
+	// Validate the post-merge target selection BEFORE anything lands (FDR 0026):
+	// a caller naming a target no [[post-merge]] stanza declares is a typo that
+	// would otherwise silently skip the deploy the caller intended, so it is the
+	// one post-merge concern that can still be fatal — nothing has shipped yet.
+	// A nil selection (deploy all) needs no validation; an empty one (deploy
+	// none) is always valid.
+	if postMergeTargets != nil {
+		var active []sweatfile.PostMergeTarget
+		if haveHierarchy {
+			active = hierarchy.Merged.ActivePostMergeTargets()
+		}
+		if _, selErr := selectPostMergeTargets(active, postMergeTargets); selErr != nil {
+			return "", failStep(ts, "post-merge selection "+branch, selErr, "")
+		}
 	}
 
 	// Pull the default branch BEFORE rebasing, so the session branch is
@@ -288,7 +309,7 @@ const LandWorktreePrefix = ".land-"
 // hook sha unless [hooks].disable-merge-build-worktree is set. Stages emit
 // test points on ts; FinishMerge never finishes the stream — the caller owns
 // ts.Finish().
-func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch, pinnedSha string, gitSync, inSession bool, activity io.Writer) (blobLinks []check.BlobLink, err error) {
+func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch, pinnedSha string, gitSync, inSession bool, activity io.Writer, postMergeTargets []string) (blobLinks []check.BlobLink, err error) {
 	_ = execr // kept for signature stability; close requests go through executor.RequestClose
 
 	// Merge-queue knob. Mirrors PrepareMerge's graceful-degrade hierarchy
@@ -301,7 +322,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 		}
 	}
 	if queueDisabled {
-		return finishMergeUnqueued(ctx, rep, ts, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, inSession, activity)
+		return finishMergeUnqueued(ctx, rep, ts, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, inSession, activity, postMergeTargets)
 	}
 
 	// Acquire the per-repo landing lock BEFORE the gate, so the gate always
@@ -423,7 +444,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	// is still running would defeat the point of serializing in the first
 	// place, since the two deploys could interleave and the older one could
 	// win. The deferred Release above fires when FinishMerge returns.
-	runPostMergePhase(ctx, ts, repoPath, wtPath, branch, defaultBranch, landingSha, gitSync, activity)
+	runPostMergePhase(ctx, ts, repoPath, wtPath, branch, defaultBranch, landingSha, gitSync, activity, postMergeTargets)
 	return blobLinks, nil
 }
 
@@ -431,7 +452,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 // the [hooks].disable-merge-queue rollback knob: hook on pinnedSha → ff-only →
 // teardown → push, with no lock, no re-pull, and no landing rebase — a default
 // branch that moved during the hook fails the ff-only merge exactly as before.
-func finishMergeUnqueued(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch, pinnedSha string, gitSync, inSession bool, activity io.Writer) (blobLinks []check.BlobLink, err error) {
+func finishMergeUnqueued(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch, pinnedSha string, gitSync, inSession bool, activity io.Writer, postMergeTargets []string) (blobLinks []check.BlobLink, err error) {
 	hookLinks, hookErr := runPreMergeHookContext(ctx, rep, ts, repoPath, wtPath, branch, pinnedSha, activity)
 	blobLinks = append(blobLinks, hookLinks...)
 	if hookErr != nil {
@@ -453,7 +474,7 @@ func finishMergeUnqueued(ctx context.Context, rep *crap.Reporter, ts *crap.TestS
 	// No lock on this path at all (that is what disable-merge-queue means), so
 	// there is no exclusivity to preserve; pinnedSha is what landed, since the
 	// unqueued path never rebases the landing.
-	runPostMergePhase(ctx, ts, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, activity)
+	runPostMergePhase(ctx, ts, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, activity, postMergeTargets)
 	return blobLinks, nil
 }
 
@@ -609,17 +630,35 @@ func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, gitSy
 // The hook's isolated build worktree lands under <repo>/.worktrees/ even for
 // a main checkout — check.resolveHookDir derives the parent from
 // git.CommonDir(wtPath), not filepath.Dir(wtPath) (#130).
-func MergeImplicit(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, checkout, branch string, activity io.Writer) (blobLinks []check.BlobLink, err error) {
+func MergeImplicit(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, checkout, branch string, activity io.Writer, postMergeTargets []string) (blobLinks []check.BlobLink, err error) {
 	emitCoActiveSessions(ts, repoPath, checkout)
 
+	var (
+		hierarchy     sweatfile.Hierarchy
+		haveHierarchy bool
+	)
 	if home, _ := os.UserHomeDir(); home != "" {
-		hierarchy, hErr := sweatfileio.LoadWorktreeHierarchy(home, repoPath, checkout)
-		if hErr == nil && hierarchy.Merged.DisableMergeEnabled() {
-			disableErr := fmt.Errorf(
-				"merge disabled by sweatfile (disable-merge=true at %s); use `sc check` to run the pre-merge hook without merging",
-				disableMergeSource(hierarchy),
-			)
-			return nil, failStep(ts, "merge "+branch, disableErr, "")
+		if h, hErr := sweatfileio.LoadWorktreeHierarchy(home, repoPath, checkout); hErr == nil {
+			hierarchy, haveHierarchy = h, true
+		}
+	}
+	if haveHierarchy && hierarchy.Merged.DisableMergeEnabled() {
+		disableErr := fmt.Errorf(
+			"merge disabled by sweatfile (disable-merge=true at %s); use `sc check` to run the pre-merge hook without merging",
+			disableMergeSource(hierarchy),
+		)
+		return nil, failStep(ts, "merge "+branch, disableErr, "")
+	}
+
+	// Validate the post-merge target selection before anything is pushed (FDR
+	// 0026), same as PrepareMerge on the worktree path.
+	if postMergeTargets != nil {
+		var active []sweatfile.PostMergeTarget
+		if haveHierarchy {
+			active = hierarchy.Merged.ActivePostMergeTargets()
+		}
+		if _, selErr := selectPostMergeTargets(active, postMergeTargets); selErr != nil {
+			return nil, failStep(ts, "post-merge selection "+branch, selErr, "")
 		}
 	}
 
@@ -648,7 +687,7 @@ func MergeImplicit(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream,
 	// the same ref, and the push is unconditional — hence pushed=true. No lock
 	// is involved: implicit merges are out of the merge queue's scope entirely
 	// (FDR 0022 Limitations), so this hook carries no exclusivity guarantee.
-	runPostMergePhase(ctx, ts, repoPath, checkout, branch, branch, pinnedSha, true, activity)
+	runPostMergePhase(ctx, ts, repoPath, checkout, branch, branch, pinnedSha, true, activity, postMergeTargets)
 	return blobLinks, nil
 }
 
@@ -807,35 +846,44 @@ func runPreMergeHookContext(ctx context.Context, rep *crap.Reporter, ts *crap.Te
 	return check.RunWithReporterContext(ctx, rep, ts, hierarchy, wtPath, branch, hookSha, activity)
 }
 
-// runPostMergePhase runs the [hooks].post-merge command (FDR 0023) after a
-// merge has landed, emitting one test point on ts. It is deliberately
-// NON-FATAL: the merge already landed (and, with gitSync, was pushed), so
-// there is nothing to roll back and nothing for a caller to retry. A nonzero
-// exit therefore emits a not-ok point carrying severity=warn and the hook's
-// output, but runPostMergePhase always returns nil — surfaced and logged, not
-// treated as a merge failure (spinclass#244). Returns immediately when no
-// post-merge command is active or the hierarchy cannot be loaded.
+// runPostMergePhase runs the post-merge phase after a merge has landed (FDR
+// 0023, extended by FDR 0026 named targets), emitting one test point per target
+// on ts. It is deliberately NON-FATAL: the merge already landed (and, with
+// gitSync, was pushed), so there is nothing to roll back and nothing for a
+// caller to retry. A failing target emits a not-ok point carrying severity=warn,
+// its verdict, and its output, but runPostMergePhase always returns — surfaced
+// and logged, not treated as a merge failure (spinclass#244). Returns
+// immediately when the phase is inactive or the hierarchy cannot be loaded.
 //
 // On the queued path this runs UNDER the per-repo merge lock, as the last
 // stage before FinishMerge returns and the deferred Release fires. That is
 // deliberate: FDR 0022's queue makes a merge exclusive end to end, and a
 // post-merge deploy is part of the merge. Two sessions deploying concurrently
 // — or a sibling landing mid-deploy — is exactly the interleaving the queue
-// exists to prevent. The cost is real and accepted: a slow post-merge hook
+// exists to prevent. The cost is real and accepted: a slow post-merge phase
 // extends the exclusive region, so N racing sessions drain in
-// N × (gate + hook) time.
+// N × (gate + phase) time.
 //
-// The hook runs in the session worktree when it still exists — teardown may
+// The phase runs in the session worktree when it still exists — teardown may
 // have removed it — and otherwise in repoPath, which is sitting on the merged
 // tip of the default branch either way. landedSha is the sha that actually
 // landed: the LANDING sha on a rebased queued landing, not the original pin.
-func runPostMergePhase(ctx context.Context, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch, landedSha string, pushed bool, activity io.Writer) {
+//
+// FDR 0026: when the sweatfile declares active [[post-merge]] targets they ARE
+// the phase — the legacy [hooks].post-merge string is superseded. Targets run
+// sequentially in declaration order, filtered by postMergeTargets (nil = all,
+// non-nil = that subset, empty = none), each with its own verdict point, all
+// sharing one wall-clock deadline. With no named targets, the legacy string
+// runs exactly as FDR 0023 shipped it — but only under the default (nil)
+// selection, since an explicit selection names entries the unnamed string is
+// not among.
+func runPostMergePhase(ctx context.Context, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch, landedSha string, pushed bool, activity io.Writer, postMergeTargets []string) {
 	home, _ := os.UserHomeDir()
 	if home == "" {
 		return
 	}
 	hierarchy, err := sweatfileio.LoadWorktreeHierarchy(home, repoPath, wtPath)
-	if err != nil || !hierarchy.Merged.PostMergeActive() {
+	if err != nil || !hierarchy.Merged.PostMergePhaseActive() {
 		return
 	}
 
@@ -858,12 +906,23 @@ func runPostMergePhase(ctx context.Context, ts *crap.TestStream, repoPath, wtPat
 		"SPINCLASS_REPO_PATH=" + repoPath,
 	}
 
+	// Named targets supersede the legacy string (FDR 0026).
+	if active := hierarchy.Merged.ActivePostMergeTargets(); len(active) > 0 {
+		runNamedPostMergeTargets(ctx, ts, hierarchy.Merged, active, postMergeTargets, runDir, env, landedSha, activity)
+		return
+	}
+
+	// Legacy single-string path (FDR 0023). The unnamed string is not among any
+	// explicit selection, so only the default (nil) selection runs it.
+	if postMergeTargets != nil {
+		return
+	}
+
 	var out bytes.Buffer
 	var sink io.Writer = &out
 	if activity != nil {
 		sink = io.MultiWriter(&out, activity)
 	}
-
 	label := "post-merge " + branch + " (" + shortSha(landedSha) + ")"
 	if hookErr := hierarchy.Merged.RunPostMergeHookContext(ctx, runDir, env, sink); hookErr != nil {
 		diag := map[string]any{
@@ -880,6 +939,152 @@ func runPostMergePhase(ctx context.Context, ts *crap.TestStream, repoPath, wtPat
 		return
 	}
 	ts.Ok(label)
+}
+
+// runNamedPostMergeTargets runs the selected [[post-merge]] targets (FDR 0026)
+// sequentially in declaration order, each emitting one verdict point labeled
+// "post-merge <name> (<sha>)" — the "post-merge " prefix is load-bearing so the
+// async completion wake surfaces every failed target (spinclass#259). All
+// targets and their verifies share ONE wall-clock deadline derived from
+// post-merge-timeout, so N-target fan-out can never hold the merge lock past the
+// cap; when it fires, the in-flight target is a warn point and the remainder are
+// skipped. Every failure is non-fatal — the merge already landed.
+func runNamedPostMergeTargets(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, active []sweatfile.PostMergeTarget, requested []string, runDir string, env []string, landedSha string, activity io.Writer) {
+	selected, selErr := selectPostMergeTargets(active, requested)
+	if selErr != nil {
+		// Pre-landing validation (PrepareMerge/MergeImplicit) should have caught
+		// this; surface defensively rather than silently deploying nothing.
+		ts.NotOk("post-merge selection ("+shortSha(landedSha)+")", map[string]any{
+			"severity": "warn",
+			"message":  selErr.Error(),
+		})
+		return
+	}
+
+	// One shared wall-clock deadline for the whole phase (FDR 0026): N targets
+	// under one cap keeps FDR 0023's lock-hold bound regardless of fan-out.
+	// PostMergeTimeoutValue is 10m by default; <=0 means the cap is disabled.
+	phaseCtx := ctx
+	phaseCap := sf.PostMergeTimeoutValue()
+	if phaseCap > 0 {
+		var cancel context.CancelFunc
+		phaseCtx, cancel = context.WithTimeout(ctx, phaseCap)
+		defer cancel()
+	}
+
+	for _, tgt := range selected {
+		label := "post-merge " + tgt.Name + " (" + shortSha(landedSha) + ")"
+
+		// A prior target already spent the shared budget (or the caller
+		// cancelled): skip the rest rather than start doomed subprocesses.
+		if phaseCtx.Err() != nil {
+			diag := map[string]any{"severity": "warn", "verdict": "skipped"}
+			if errors.Is(phaseCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+				diag["message"] = fmt.Sprintf(
+					"post-merge target %q skipped: the phase exceeded post-merge-timeout %s before it ran",
+					tgt.Name, phaseCap,
+				)
+			} else {
+				diag["message"] = fmt.Sprintf("post-merge target %q skipped: %v", tgt.Name, phaseCtx.Err())
+			}
+			ts.NotOk(label, diag)
+			continue
+		}
+
+		var out bytes.Buffer
+		var sink io.Writer = &out
+		if activity != nil {
+			sink = io.MultiWriter(&out, activity)
+		}
+
+		verdict, runErr := tgt.Run(phaseCtx, runDir, env, sink)
+		if runErr == nil {
+			ts.Ok(label)
+			continue
+		}
+
+		stage := "command"
+		if verdict == sweatfile.PostMergeVerifyFailed {
+			stage = "verify"
+		}
+		diag := map[string]any{"severity": "warn", "verdict": string(verdict), "stage": stage}
+		switch {
+		// Our shared deadline killed it (only when the caller's ctx is still
+		// live — otherwise the kill is the caller's cancel, below).
+		case errors.Is(phaseCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil:
+			diag["verdict"] = "timeout"
+			diag["message"] = fmt.Sprintf(
+				"post-merge target %q killed at the %s stage: the phase exceeded post-merge-timeout %s "+
+					"(the merge already landed — nothing was rolled back; raise [hooks].post-merge-timeout, or 0 to disable)",
+				tgt.Name, stage, phaseCap,
+			)
+		case ctx.Err() != nil:
+			diag["verdict"] = "cancelled"
+			diag["message"] = fmt.Sprintf("post-merge target %q cancelled at the %s stage: %v", tgt.Name, stage, ctx.Err())
+		case verdict == sweatfile.PostMergeVerifyFailed:
+			diag["message"] = fmt.Sprintf(
+				"post-merge target %q deployed but verify failed: %v (the merge already landed — nothing was rolled back)",
+				tgt.Name, runErr,
+			)
+		default:
+			diag["message"] = fmt.Sprintf(
+				"post-merge target %q command failed: %v (the merge already landed — nothing was rolled back)",
+				tgt.Name, runErr,
+			)
+		}
+		if o := out.String(); o != "" {
+			diag["output"] = o
+		}
+		ts.NotOk(label, diag)
+	}
+}
+
+// selectPostMergeTargets resolves a caller's requested post-merge selection (FDR
+// 0026) against the active targets: nil selects all (declaration order), a
+// non-nil list selects exactly those names (also declaration order), empty
+// selects none. It errors — naming the unknown names and the declared set — if
+// any requested name is not an active target, which PrepareMerge turns into a
+// fatal pre-landing failure so a typo never silently skips a deploy.
+func selectPostMergeTargets(active []sweatfile.PostMergeTarget, requested []string) ([]sweatfile.PostMergeTarget, error) {
+	if requested == nil {
+		return active, nil
+	}
+	declared := make(map[string]bool, len(active))
+	for _, t := range active {
+		declared[t.Name] = true
+	}
+	want := make(map[string]bool, len(requested))
+	var unknown []string
+	for _, name := range requested {
+		if !declared[name] {
+			unknown = append(unknown, name)
+		}
+		want[name] = true
+	}
+	if len(unknown) > 0 {
+		return nil, fmt.Errorf(
+			"unknown post-merge target(s): %s (declared: %s)",
+			strings.Join(unknown, ", "), postMergeTargetNames(active),
+		)
+	}
+	var out []sweatfile.PostMergeTarget
+	for _, t := range active {
+		if want[t.Name] {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
+func postMergeTargetNames(targets []sweatfile.PostMergeTarget) string {
+	if len(targets) == 0 {
+		return "(none)"
+	}
+	names := make([]string, len(targets))
+	for i, t := range targets {
+		names[i] = t.Name
+	}
+	return strings.Join(names, ", ")
 }
 
 // runRepairPhase runs the [hooks].repair command (FDR 0018) in wtPath when

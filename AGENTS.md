@@ -297,6 +297,23 @@ subcommand is always available.
   `"0"` disables). Publishes `SPINCLASS_MERGED_SHA` (the LANDING sha on a rebased
   landing), `_MERGED_BRANCH`, `_DEFAULT_BRANCH`, `_MERGE_PUSHED`, `_REPO_PATH`.
   All land paths fire it; `sc check` never does. `disable-post-merge` opts out.
+- **Named post-merge targets + verify** (FDR 0026, #273): a top-level
+  `[[post-merge]]` array (the `[[mcps]]`/`[[remotes]]` idiom; NOT `[[hooks.post-merge]]`
+  — TOML can't union the `post-merge` key as both a string and an array, and
+  retiring the string would be a flag-day) of `{name, command, verify?}` targets.
+  `verify` runs iff `command` exits 0; per-target verdict ∈ `ok`/`command-failed`/
+  `verify-failed` (the split a human needs). Named targets SUPERSEDE the legacy
+  `[hooks].post-merge` string (dormant, not dead — stanza-by-stanza migration). A
+  name-only entry is a removal sentinel (like `[[mcps]]`). `merge-this-session(-async)`
+  gains a `targets` param (nil=all, `[]`=none, subset=those; unknown name fails
+  PRE-landing) and `sc merge` gains `--post-merge-targets`/`--no-post-merge`. Targets
+  run **sequentially** under **one shared** `post-merge-timeout` (size for sum();
+  parallel is a deferred, contract-neutral opt). #259's wake-surfacing extended to
+  every `✗ post-merge` line. Code: `sweatfile.PostMergeTarget`/`ActivePostMergeTargets`/
+  `PostMergePhaseActive` + `PostMergeTarget.Run` (verdicts), `merge.runNamedPostMergeTargets`/
+  `selectPostMergeTargets`, `validate.CheckPostMergeTargets`. Fields are phase-neutral
+  (no git) — paves toward the operator's "configurable pipeline phases" direction;
+  per-target `paths` filters deferred (would bake in a git-diff assumption).
 - **Pre-merge REPAIR phase** (FDR 0018): when `[hooks].repair` is set,
   `PrepareMerge` runs it in the **session worktree** before the pin to fold
   mechanical fixes into the merged commit (canonical

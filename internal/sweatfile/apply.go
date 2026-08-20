@@ -299,6 +299,39 @@ func (sf Sweatfile) RunPostMergeHookContext(ctx context.Context, dir string, ext
 	return err
 }
 
+// Run runs one named [[post-merge]] target (FDR 0026) in dir, streaming the
+// combined stdout+stderr of both stages to w with extraEnv (the
+// SPINCLASS_MERGED_* facts) appended. It runs Command; only if Command exits
+// zero AND the target declares a non-empty Verify does it run Verify.
+//
+// Unlike RunPostMergeHookContext (the legacy single-string path, which derives
+// its own cap), this applies NO timeout of its own: the named-target phase
+// owns one shared wall-clock deadline across all targets (so N targets cannot
+// hold the merge lock past post-merge-timeout), and passes it in via ctx. Each
+// stage runs under that ctx with the post-merge WaitDelay/drain, so a
+// backgrounded child that forgot to redirect its output cannot hold the lock
+// for its full lifetime.
+//
+// Returns the verdict — PostMergeOK, PostMergeCommandFailed, or
+// PostMergeVerifyFailed — and, for a failed stage, the underlying error (which
+// the phase inspects against the shared deadline to distinguish a genuine
+// failure from a cap kill).
+func (t PostMergeTarget) Run(ctx context.Context, dir string, extraEnv []string, w io.Writer) (PostMergeVerdict, error) {
+	command := t.Command
+	// scopeJobID "" — post-merge is deliberately unscoped so a control-group
+	// kill never reaps the detached children FDR 0023 sanctions for slow deploys.
+	if err := runHookInDirEnv(ctx, &command, dir, dir, extraEnv, postMergeWaitDelay, "", w); err != nil {
+		return PostMergeCommandFailed, err
+	}
+	if t.HasVerify() {
+		verify := *t.Verify
+		if err := runHookInDirEnv(ctx, &verify, dir, dir, extraEnv, postMergeWaitDelay, "", w); err != nil {
+			return PostMergeVerifyFailed, err
+		}
+	}
+	return PostMergeOK, nil
+}
+
 // cancelGrace is how long a cancelled hook has to exit after SIGTERM before
 // exec escalates: closing its I/O pipes and sending SIGKILL. It therefore
 // doubles as the universal upper bound on how long a cancel can appear to

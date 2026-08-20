@@ -184,7 +184,7 @@ func Run(spec Spec) (exitCode int, err error) {
 		// (inSession=false) lets the merge remove the worktree + branch; the
 		// dangling index entry is then dropped in teardown.
 		if _, mErr := merge.Resolved(executor.ShellExecutor{}, rep, ts,
-			rp.RepoPath, rp.AbsPath, rp.Branch, defaultBranch, !spec.LocalOnly, spec.NoClose); mErr != nil {
+			rp.RepoPath, rp.AbsPath, rp.Branch, defaultBranch, !spec.LocalOnly, spec.NoClose, nil); mErr != nil {
 			mergeFailed = true
 			return mErr
 		}

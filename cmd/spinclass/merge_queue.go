@@ -157,12 +157,12 @@ func enqueuedMergeResult(position int) *command.Result {
 // backgrounding) into the job, since the base it rebases onto does not exist
 // until the prior batch lands. inSession is passed true, matching the immediate
 // MCP path (worktree removal skipped).
-func buildQueuedMergeRun(repoPath, wtPath, branch, defaultBranch string, gitSync bool) func(context.Context, io.Writer) (string, bool) {
+func buildQueuedMergeRun(repoPath, wtPath, branch, defaultBranch string, gitSync bool, postMergeTargets []string) func(context.Context, io.Writer) (string, bool) {
 	return func(ctx context.Context, w io.Writer) (string, bool) {
 		var buf bytes.Buffer
 		rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "merge " + branch, Source: "spinclass"})
 		ts := rep.TestStream(0)
-		pinnedSha, prepErr := merge.PrepareMerge(ts, repoPath, wtPath, branch, defaultBranch, gitSync)
+		pinnedSha, prepErr := merge.PrepareMerge(ts, repoPath, wtPath, branch, defaultBranch, gitSync, postMergeTargets)
 		if prepErr != nil {
 			ts.Finish()
 			text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
@@ -173,7 +173,7 @@ func buildQueuedMergeRun(repoPath, wtPath, branch, defaultBranch string, gitSync
 		}
 		_, mergeErr := merge.FinishMerge(
 			ctx, executor.ShellExecutor{}, rep, ts,
-			repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, true, w,
+			repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, true, w, postMergeTargets,
 		)
 		ts.Finish()
 		text := present.RenderPlain(bytes.NewReader(buf.Bytes()))

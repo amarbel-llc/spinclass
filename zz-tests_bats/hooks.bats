@@ -340,6 +340,80 @@ post-merge = "echo deploy-broke >&2; exit 7"')
   assert_output --partial "add new file"
 }
 
+# A named [[post-merge]] target runs its command then its verify, reporting a
+# per-target verdict labeled "post-merge <name>". Exercises the FDR 0026 CLI
+# wiring end-to-end in the built binary. The Go tests cover the verdict matrix
+# and selection directly (internal/merge/named_targets_phase_test.go).
+function named_post_merge_target_runs_command_and_verify { # @test
+  cd "$TEST_REPO" || return
+
+  local branch
+  # shellcheck disable=SC2016
+  branch=$(post_merge_setup_landed_merge '[hooks]
+pre-merge = "true"
+
+[[post-merge]]
+name = "krone"
+command = "touch \"$BATS_TEST_TMPDIR/krone-command\""
+verify = "touch \"$BATS_TEST_TMPDIR/krone-verify\""')
+
+  run_sc_crap merge "$branch" --local-only
+  assert_success
+  assert_output --partial "post-merge krone"
+
+  assert [ -f "$BATS_TEST_TMPDIR/krone-command" ]
+  assert [ -f "$BATS_TEST_TMPDIR/krone-verify" ]
+
+  run git -C "$TEST_REPO" log --oneline main
+  assert_output --partial "add new file"
+}
+
+# --no-post-merge deploys nothing (a docs-only merge) yet still lands, and the
+# named target's command never runs. FDR 0026.
+function post_merge_no_targets_flag_skips_deploy { # @test
+  cd "$TEST_REPO" || return
+
+  local branch
+  # shellcheck disable=SC2016
+  branch=$(post_merge_setup_landed_merge '[hooks]
+pre-merge = "true"
+
+[[post-merge]]
+name = "krone"
+command = "touch \"$BATS_TEST_TMPDIR/krone-command\""')
+
+  run_sc_crap merge "$branch" --local-only --no-post-merge
+  assert_success
+  refute_output --partial "post-merge krone"
+
+  assert [ ! -f "$BATS_TEST_TMPDIR/krone-command" ]
+
+  # The merge still landed.
+  run git -C "$TEST_REPO" log --oneline main
+  assert_output --partial "add new file"
+}
+
+# Selecting a target no stanza declares fails the merge BEFORE it lands. FDR 0026.
+function post_merge_unknown_target_fails_before_landing { # @test
+  cd "$TEST_REPO" || return
+
+  local branch
+  # shellcheck disable=SC2016
+  branch=$(post_merge_setup_landed_merge '[hooks]
+pre-merge = "true"
+
+[[post-merge]]
+name = "krone"
+command = "true"')
+
+  run_sc_crap merge "$branch" --local-only --post-merge-targets kron
+  assert_failure
+
+  # The merge did NOT land.
+  run git -C "$TEST_REPO" log --oneline main
+  refute_output --partial "add new file"
+}
+
 # install_fakefmt_stub drops a stand-in formatter on PATH that proves the
 # pre-commit hook fired: it logs to fakefmt.log AND appends a FORMATTED marker
 # to each staged file and restages it (mimicking `conformist --staged`), so the

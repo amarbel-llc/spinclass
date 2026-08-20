@@ -357,7 +357,7 @@ func runMergeOnClose(exec executor.Executor, rp worktree.ResolvedPath, defaultBr
 	return present.WithReporter(resolved, "merge "+rp.Branch, os.Stdout, os.Stderr, func(rep *crap.Reporter) error {
 		ts := rep.TestStream(0)
 		defer ts.Finish()
-		_, mergeErr := merge.Resolved(exec, rep, ts, rp.RepoPath, rp.AbsPath, rp.Branch, defaultBranch, false, false)
+		_, mergeErr := merge.Resolved(exec, rep, ts, rp.RepoPath, rp.AbsPath, rp.Branch, defaultBranch, false, false, nil)
 		return mergeErr
 	})
 }

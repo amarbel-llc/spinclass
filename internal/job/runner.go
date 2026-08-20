@@ -393,21 +393,27 @@ func firstFailureLine(text string) string {
 	return ""
 }
 
-// postMergeFailureLine returns the post-merge hook's "✗ post-merge …" verdict
-// line if the rendered ladder carries one, else "". The post-merge hook (FDR
-// 0023) is the sole NON-fatal failure in the merge stream — it emits a
-// severity=warn not-ok point yet leaves the merge (and so the job) succeeded —
-// so a plain firstFailureLine would never be consulted for it. Matching the
-// "post-merge " label prefix (merge.runPostMergePhase) keeps this from firing
-// on any future non-post-merge warning that a caller does not mean to elevate
-// to the wake summary (spinclass#259).
+// postMergeFailureLine returns EVERY "✗ post-merge …" verdict line in the
+// rendered ladder, joined by "; ", or "" when there are none. The post-merge
+// phase (FDR 0023/0026) is the sole NON-fatal failure in the merge stream — it
+// emits severity=warn not-ok points yet leaves the merge (and so the job)
+// succeeded — so a plain firstFailureLine would never be consulted for it.
+// Matching the "post-merge " label prefix (merge.runPostMergePhase) keeps this
+// from firing on any future non-post-merge warning that a caller does not mean
+// to elevate to the wake summary (spinclass#259).
+//
+// With FDR 0026 named targets a single merge can fail SEVERAL post-merge
+// targets, so all of them are surfaced rather than just the first — a
+// multi-target run that half-succeeds is only actionable if the wake names
+// every target that failed. One failing target reads exactly as before.
 func postMergeFailureLine(text string) string {
+	var lines []string
 	for _, line := range strings.Split(text, "\n") {
 		if strings.HasPrefix(line, "✗ post-merge") {
-			return line
+			lines = append(lines, line)
 		}
 	}
-	return ""
+	return strings.Join(lines, "; ")
 }
 
 // Cancel signals the in-flight job for wt to stop (cancels its context, which

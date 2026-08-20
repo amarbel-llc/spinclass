@@ -285,6 +285,31 @@ func TestStartSucceededWakeSurfacesPostMergeFailure(t *testing.T) {
 	})
 }
 
+// With FDR 0026 named targets, a single merge can fail several post-merge
+// targets. The wake must surface EVERY failed target (joined), not just the
+// first — a half-succeeding multi-target run is only actionable if the summary
+// names each target that failed (spinclass#259 extension).
+func TestStartSucceededWakeSurfacesAllPostMergeTargetFailures(t *testing.T) {
+	wt := t.TempDir()
+	argsFile := filepath.Join(t.TempDir(), "args")
+	installStub(t, argsFile, true)
+
+	runWaked(t, wt, KindMerge, func(ctx context.Context, w io.Writer) (string, bool) {
+		return "✓ merge feature\n" +
+			"✗ post-merge krone (abc123def456)\n" +
+			"✓ post-merge nikulin (abc123def456)\n" +
+			"✗ post-merge vlad (abc123def456)", false
+	})
+
+	inv := recordedInvocations(t, argsFile)
+	assertArgv(t, findInvocation(t, inv, "done"), []string{
+		"done", "job-deadbeef",
+		"--state", "succeeded",
+		"--message", "merge succeeded; ✗ post-merge krone (abc123def456); ✗ post-merge vlad (abc123def456)",
+		"--result-ref", "ringmaster read job-deadbeef",
+	})
+}
+
 // A succeeded merge with a clean post-merge (no ✗) keeps the bare summary —
 // the #259 suffix must not fire when there is nothing to surface.
 func TestStartSucceededWakeUnchangedWhenPostMergeClean(t *testing.T) {

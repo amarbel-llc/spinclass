@@ -408,6 +408,47 @@ func CheckRemotes(sf sweatfile.Sweatfile) []Issue {
 	return issues
 }
 
+// CheckPostMergeTargets validates the top-level [[post-merge]] array (FDR
+// 0026): every entry needs a name, duplicate names in one file warn, and a
+// verify on a command-less entry (a removal sentinel) is confused intent.
+func CheckPostMergeTargets(sf sweatfile.Sweatfile) []Issue {
+	var issues []Issue
+	seen := make(map[string]bool, len(sf.PostMerge))
+	for _, t := range sf.PostMerge {
+		if t.Name == "" {
+			issues = append(issues, Issue{
+				Message:  "post-merge entry missing `name`",
+				Severity: SeverityError,
+				Field:    "post-merge.name",
+			})
+			continue
+		}
+		if seen[t.Name] {
+			issues = append(issues, Issue{
+				Message:  fmt.Sprintf("duplicate post-merge entry %q in this file", t.Name),
+				Severity: SeverityWarning,
+				Field:    "post-merge.name",
+				Value:    t.Name,
+			})
+		}
+		seen[t.Name] = true
+		// A command-less entry is a removal sentinel; a verify never runs on it
+		// (verify runs only after a successful command), so it is confused intent.
+		if strings.TrimSpace(t.Command) == "" && t.HasVerify() {
+			issues = append(issues, Issue{
+				Message: fmt.Sprintf(
+					"post-merge target %q sets `verify` with no `command` (verify runs only after a successful command; a command-less entry is a removal sentinel)",
+					t.Name,
+				),
+				Severity: SeverityWarning,
+				Field:    "post-merge.verify",
+				Value:    t.Name,
+			})
+		}
+	}
+	return issues
+}
+
 func isShellInterpreter(cmd string) bool {
 	base := filepath.Base(cmd)
 	switch base {
@@ -715,6 +756,27 @@ func Run(w io.Writer, home, repoDir string) int {
 				}
 			} else {
 				sub.Ok("pre-merge-skills valid")
+			}
+		}
+
+		if len(src.File.PostMerge) > 0 {
+			if issues := CheckPostMergeTargets(src.File); len(issues) > 0 {
+				for _, iss := range issues {
+					if iss.Severity == SeverityError {
+						diag := map[string]string{
+							"severity": iss.Severity,
+							"message":  iss.Message,
+						}
+						if iss.Value != "" {
+							diag["value"] = iss.Value
+						}
+						sub.NotOk("post-merge valid", diag)
+					} else {
+						sub.Ok(fmt.Sprintf("post-merge valid # warning: %s", iss.Message))
+					}
+				}
+			} else {
+				sub.Ok("post-merge valid")
 			}
 		}
 

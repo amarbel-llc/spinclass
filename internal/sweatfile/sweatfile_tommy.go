@@ -28,6 +28,9 @@ type sweatfilePreMergeSkillsHandle struct {
 type sweatfileRemotesHandle struct {
 	node *cst.Node
 }
+type sweatfilePostMergeHandle struct {
+	node *cst.Node
+}
 type SweatfileDocument struct {
 	data           Sweatfile
 	cstDoc         *document.Document
@@ -36,6 +39,7 @@ type SweatfileDocument struct {
 	mCPs           []sweatfileMCPsHandle
 	preMergeSkills []sweatfilePreMergeSkillsHandle
 	remotes        []sweatfileRemotesHandle
+	postMerge      []sweatfilePostMergeHandle
 }
 
 func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
@@ -332,13 +336,6 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractString(_vPreMerge.Leaf); _xok {
 				hooksVal3.PreMerge = &_x
 				_vPreMerge.MarkConsumed()
-			}
-		}
-		if _vPostMerge, _ok := model.Get("post-merge"); _ok && _vPostMerge.Kind == cst.VLeaf {
-			_foundHooks = true
-			if _x, _xok := cst.ExtractString(_vPostMerge.Leaf); _xok {
-				hooksVal3.PostMerge = &_x
-				_vPostMerge.MarkConsumed()
 			}
 		}
 		if _vRepair, _ok := model.Get("repair"); _ok && _vRepair.Kind == cst.VLeaf {
@@ -853,6 +850,38 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 		_eaRemotes.MarkConsumed()
 		d.data.Remotes = []Remote{}
 	}
+	if _vPostMerge, _ok := model.Get("post-merge"); _ok && _vPostMerge.Kind == cst.VArray {
+		_vPostMerge.MarkSeen()
+		d.data.PostMerge = make([]PostMergeTarget, len(_vPostMerge.Items))
+		d.postMerge = make([]sweatfilePostMergeHandle, len(_vPostMerge.Items))
+		for i := range _vPostMerge.Items {
+			_ePostMerge := &_vPostMerge.Items[i]
+			_ePostMerge.MarkSeen()
+			d.postMerge[i] = sweatfilePostMergeHandle{node: _ePostMerge.Node}
+			if _vPostMergeName, _ok := _ePostMerge.Get("name"); _ok && _vPostMergeName.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vPostMergeName.Leaf); _xok {
+					d.data.PostMerge[i].Name = _x
+					_vPostMergeName.MarkConsumed()
+				}
+			}
+			if _vPostMergeCommand, _ok := _ePostMerge.Get("command"); _ok && _vPostMergeCommand.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vPostMergeCommand.Leaf); _xok {
+					d.data.PostMerge[i].Command = _x
+					_vPostMergeCommand.MarkConsumed()
+				}
+			}
+			if _vPostMergeVerify, _ok := _ePostMerge.Get("verify"); _ok && _vPostMergeVerify.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vPostMergeVerify.Leaf); _xok {
+					d.data.PostMerge[i].Verify = &_x
+					_vPostMergeVerify.MarkConsumed()
+				}
+			}
+		}
+	}
+	if _eaPostMerge, _eaok := model.Get("post-merge"); _eaok && _eaPostMerge.IsEmptyArray() {
+		_eaPostMerge.MarkConsumed()
+		d.data.PostMerge = []PostMergeTarget{}
+	}
 	return d, nil
 }
 
@@ -1243,6 +1272,31 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 			}
 		}
 	}
+	{
+		for i := range d.data.PostMerge {
+			var container *cst.Node
+			if i < len(d.postMerge) {
+				container = d.postMerge[i].node
+			} else {
+				container = cst.AppendArrayTableEntryAfter(d.cstDoc.Root(), "post-merge")
+			}
+			if d.data.PostMerge[i].Name != "" || cst.HasValue(container, "name") {
+				if err := cst.SetAny(container, "name", d.data.PostMerge[i].Name); err != nil {
+					return nil, fmt.Errorf("%w", err)
+				}
+			}
+			if d.data.PostMerge[i].Command != "" || cst.HasValue(container, "command") {
+				if err := cst.SetAny(container, "command", d.data.PostMerge[i].Command); err != nil {
+					return nil, fmt.Errorf("%w", err)
+				}
+			}
+			if d.data.PostMerge[i].Verify != nil {
+				if err := cst.SetAny(container, "verify", *d.data.PostMerge[i].Verify); err != nil {
+					return nil, fmt.Errorf("%w", err)
+				}
+			}
+		}
+	}
 	return d.cstDoc.Bytes(), nil
 }
 
@@ -1549,13 +1603,6 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractString(_vPreMerge.Leaf); _xok {
 				hooksVal3.PreMerge = &_x
 				_vPreMerge.MarkConsumed()
-			}
-		}
-		if _vPostMerge, _ok := sub.Get("post-merge"); _ok && _vPostMerge.Kind == cst.VLeaf {
-			_foundHooks = true
-			if _x, _xok := cst.ExtractString(_vPostMerge.Leaf); _xok {
-				hooksVal3.PostMerge = &_x
-				_vPostMerge.MarkConsumed()
 			}
 		}
 		if _vRepair, _ok := sub.Get("repair"); _ok && _vRepair.Kind == cst.VLeaf {
@@ -2062,6 +2109,36 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 		_eaRemotes.MarkConsumed()
 		data.Remotes = []Remote{}
 	}
+	if _vPostMerge, _ok := sub.Get("post-merge"); _ok && _vPostMerge.Kind == cst.VArray {
+		_vPostMerge.MarkSeen()
+		data.PostMerge = make([]PostMergeTarget, len(_vPostMerge.Items))
+		for i := range _vPostMerge.Items {
+			_ePostMerge := &_vPostMerge.Items[i]
+			_ePostMerge.MarkSeen()
+			if _vPostMergeName, _ok := _ePostMerge.Get("name"); _ok && _vPostMergeName.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vPostMergeName.Leaf); _xok {
+					data.PostMerge[i].Name = _x
+					_vPostMergeName.MarkConsumed()
+				}
+			}
+			if _vPostMergeCommand, _ok := _ePostMerge.Get("command"); _ok && _vPostMergeCommand.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vPostMergeCommand.Leaf); _xok {
+					data.PostMerge[i].Command = _x
+					_vPostMergeCommand.MarkConsumed()
+				}
+			}
+			if _vPostMergeVerify, _ok := _ePostMerge.Get("verify"); _ok && _vPostMergeVerify.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vPostMergeVerify.Leaf); _xok {
+					data.PostMerge[i].Verify = &_x
+					_vPostMergeVerify.MarkConsumed()
+				}
+			}
+		}
+	}
+	if _eaPostMerge, _eaok := sub.Get("post-merge"); _eaok && _eaPostMerge.IsEmptyArray() {
+		_eaPostMerge.MarkConsumed()
+		data.PostMerge = []PostMergeTarget{}
+	}
 	return nil
 }
 
@@ -2451,6 +2528,33 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 			}
 			if data.Remotes[i].Remove != false || cst.HasValue(container, "remove") {
 				if err := cst.SetAny(container, "remove", data.Remotes[i].Remove); err != nil {
+					return fmt.Errorf("%w", err)
+				}
+			}
+		}
+	}
+	{
+		_apPostMerge := container
+		_existPostMerge := cst.FindChildArrayTableNodes(doc.Root(), _apPostMerge, "post-merge")
+		for i := range data.PostMerge {
+			var container *cst.Node
+			if i < len(_existPostMerge) {
+				container = _existPostMerge[i]
+			} else {
+				container = cst.AppendChildArrayTableEntry(doc.Root(), _apPostMerge, "post-merge")
+			}
+			if data.PostMerge[i].Name != "" || cst.HasValue(container, "name") {
+				if err := cst.SetAny(container, "name", data.PostMerge[i].Name); err != nil {
+					return fmt.Errorf("%w", err)
+				}
+			}
+			if data.PostMerge[i].Command != "" || cst.HasValue(container, "command") {
+				if err := cst.SetAny(container, "command", data.PostMerge[i].Command); err != nil {
+					return fmt.Errorf("%w", err)
+				}
+			}
+			if data.PostMerge[i].Verify != nil {
+				if err := cst.SetAny(container, "verify", *data.PostMerge[i].Verify); err != nil {
 					return fmt.Errorf("%w", err)
 				}
 			}

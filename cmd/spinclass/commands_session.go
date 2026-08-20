@@ -8,6 +8,7 @@ import (
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
@@ -160,12 +161,16 @@ func registerSessionCommands(app *command.App) {
 		Params: []command.Param{
 			{Name: "target", Type: command.String, Description: "Target worktree to merge: a worktree directory name or <repo>/<branch> session key from `sc list` (interactive selection if omitted)", Completer: completeWorktreeTargets},
 			{Name: "local-only", Type: command.Bool, Description: "Merge into the LOCAL default branch only — skip the pull-before and push-after. Default is to pull+push so the merge reaches origin (#126)."},
+			{Name: "post-merge-targets", Type: command.String, Description: "Comma-separated named [[post-merge]] targets to deploy after landing (FDR 0026). Omit to deploy ALL configured targets (default). A name no stanza declares fails the merge before it lands."},
+			{Name: "no-post-merge", Type: command.Bool, Description: "Deploy no [[post-merge]] targets — a docs-only merge that skips every deploy (FDR 0026). Wins over --post-merge-targets."},
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
 			var p struct {
 				globalArgs
-				Target    string `json:"target"`
-				LocalOnly bool   `json:"local-only"`
+				Target           string `json:"target"`
+				LocalOnly        bool   `json:"local-only"`
+				PostMergeTargets string `json:"post-merge-targets"`
+				NoPostMerge      bool   `json:"no-post-merge"`
 			}
 			_ = json.Unmarshal(args, &p)
 
@@ -173,11 +178,22 @@ func registerSessionCommands(app *command.App) {
 				return err
 			}
 
+			// Post-merge target selection (FDR 0026): nil = all (default),
+			// []string{} = none, a non-empty slice = that subset. --no-post-merge
+			// wins over --post-merge-targets when both are given.
+			var postMergeTargets []string
+			switch {
+			case p.NoPostMerge:
+				postMergeTargets = []string{}
+			case p.PostMergeTargets != "":
+				postMergeTargets = splitCommaList(p.PostMergeTargets)
+			}
+
 			// merge.Run resolves the format itself: pass the RAW --format
 			// value ("" means auto — viewport on a TTY, ndjson when piped).
 			// git_sync now defaults ON (push by default, #126); --local-only
 			// is the explicit opt-out.
-			return merge.Run(executor.ShellExecutor{}, p.Format, p.Target, !p.LocalOnly)
+			return merge.Run(executor.ShellExecutor{}, p.Format, p.Target, !p.LocalOnly, postMergeTargets)
 		},
 	})
 
@@ -257,6 +273,18 @@ func registerSessionCommands(app *command.App) {
 		},
 		RunCLI: runRebuild,
 	})
+}
+
+// splitCommaList splits a comma-separated flag value into trimmed, non-empty
+// items (FDR 0026 --post-merge-targets). "a, b ,,c" -> ["a","b","c"].
+func splitCommaList(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if t := strings.TrimSpace(part); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 func runRebuild(_ context.Context, args json.RawMessage) error {

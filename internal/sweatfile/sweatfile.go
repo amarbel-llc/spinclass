@@ -143,6 +143,44 @@ type PreMergeSkill struct {
 	Rationale string `toml:"rationale"`
 }
 
+// PostMergeTarget is one named target of the post-merge phase (FDR 0026,
+// spinclass#273): a deploy trigger (Command) and an optional remote acceptance
+// check (Verify) that runs only when Command exits zero. Targets are declared
+// as a top-level [[post-merge]] array — the [[mcps]]/[[remotes]] idiom — and
+// merge dedup-by-name across the hierarchy; a name-only entry (empty Command)
+// is a removal sentinel filtered by ActivePostMergeTargets, mirroring [[mcps]].
+//
+// The fields are deliberately phase-neutral — no git, no sha, no diff — so the
+// type can generalize to a shared phase-target when a second phase wants
+// targets. The git-shaped landing facts reach Command/Verify as environment,
+// computed by the phase (FDR 0023's SPINCLASS_MERGED_* env).
+type PostMergeTarget struct {
+	Name    string  `toml:"name"`
+	Command string  `toml:"command"`
+	Verify  *string `toml:"verify"`
+}
+
+// PostMergeVerdict is the three-way outcome of running one PostMergeTarget (FDR
+// 0026). The command-failed/verify-failed split is what a human acting on a
+// failed merge needs — "fix the change" vs "investigate the probe/ack path".
+type PostMergeVerdict string
+
+const (
+	// PostMergeOK: the command exited zero, and verify (if any) passed.
+	PostMergeOK PostMergeVerdict = "ok"
+	// PostMergeCommandFailed: the deploy trigger itself exited nonzero; verify
+	// was not run.
+	PostMergeCommandFailed PostMergeVerdict = "command-failed"
+	// PostMergeVerifyFailed: the command succeeded but the acceptance check
+	// exited nonzero.
+	PostMergeVerifyFailed PostMergeVerdict = "verify-failed"
+)
+
+// HasVerify reports whether the target declares a non-empty verify stage.
+func (t PostMergeTarget) HasVerify() bool {
+	return t.Verify != nil && stripEmptyLines(*t.Verify) != ""
+}
+
 //go:generate tommy generate
 type Sweatfile struct {
 	Claude         *Claude         `toml:"claude"`
@@ -156,6 +194,11 @@ type Sweatfile struct {
 	MCPs           []MCPServerDef  `toml:"mcps"`
 	PreMergeSkills []PreMergeSkill `toml:"pre-merge-skills"`
 	Remotes        []Remote        `toml:"remotes"`
+	// PostMerge is the top-level [[post-merge]] array of named deploy targets
+	// (FDR 0026). It is distinct from the legacy [hooks].post-merge scalar
+	// string; when any named target is active the string is superseded (see
+	// merge.runPostMergePhase). Dedup-by-name merge, name-only removes.
+	PostMerge []PostMergeTarget `toml:"post-merge"`
 }
 
 func (sf Sweatfile) StopHookCommand() *string {
@@ -248,6 +291,43 @@ func (sf Sweatfile) PostMergeDisabled() bool {
 func (sf Sweatfile) PostMergeActive() bool {
 	if sf.PostMergeDisabled() {
 		return false
+	}
+	cmd := sf.PostMergeHookCommand()
+	return cmd != nil && stripEmptyLines(*cmd) != ""
+}
+
+// PostMergeTargets returns the declared top-level [[post-merge]] targets (FDR
+// 0026), including removal sentinels. Nil-safe.
+func (sf Sweatfile) PostMergeTargets() []PostMergeTarget {
+	return sf.PostMerge
+}
+
+// ActivePostMergeTargets returns the [[post-merge]] targets with a non-empty
+// Command. A name-only entry (empty command) is a removal sentinel against an
+// inherited target of the same name — filtered here, mirroring ActiveMCPs. Uses
+// the same emptiness test as PostMergeActive so a whitespace-only command is
+// treated as unset.
+func (sf Sweatfile) ActivePostMergeTargets() []PostMergeTarget {
+	var active []PostMergeTarget
+	for _, t := range sf.PostMerge {
+		if stripEmptyLines(t.Command) != "" {
+			active = append(active, t)
+		}
+	}
+	return active
+}
+
+// PostMergePhaseActive reports whether the post-merge phase should run after a
+// landed merge (FDR 0026): not suppressed by [hooks].disable-post-merge, and
+// either an active named [[post-merge]] target exists OR the legacy
+// [hooks].post-merge string is non-empty. When named targets are active they
+// supersede the legacy string — see merge.runPostMergePhase.
+func (sf Sweatfile) PostMergePhaseActive() bool {
+	if sf.PostMergeDisabled() {
+		return false
+	}
+	if len(sf.ActivePostMergeTargets()) > 0 {
+		return true
 	}
 	cmd := sf.PostMergeHookCommand()
 	return cmd != nil && stripEmptyLines(*cmd) != ""

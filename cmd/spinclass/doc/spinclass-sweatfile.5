@@ -300,6 +300,10 @@ the merge has landed on the default branch \(em the mirror image of
 .BR pre-merge .
 Typical use: trigger a deploy, notify a service, or record the landing
 somewhere, keyed on the commit that actually shipped.
+This single-string form is the degenerate case of the named
+.B [[post\-merge]]
+targets (see below): when any named target is active, this string is
+SUPERSEDED and does not run.
 .IP
 It runs only on a
 .B fully successful
@@ -1331,6 +1335,114 @@ Drop an inherited remote in a child sweatfile:
 [[remotes]]
 name   = "devbox"
 remove = true
+.fi
+.RE
+.SS [[post\-merge]]
+Array of tables declaring NAMED post-merge deploy targets (FDR 0026).
+A top-level array \(em distinct from the legacy
+.B [hooks].post\-merge
+scalar string \(em modelled on
+.BR [[mcps]] .
+Each target is a deploy trigger and an optional acceptance check, run
+after a merge lands, under the per-repo landing lock, with the same
+.B SPINCLASS_MERGED_*
+environment as the legacy hook (see
+.B [hooks].post\-merge
+above).
+.TP
+.B name
+(required) Target name.
+Used to select the target at merge time and to label its verdict.
+A name-only entry (empty
+.BR command )
+acts as a removal sentinel, removing an inherited target of the same
+name (like
+.BR [[mcps]] ).
+.TP
+.B command
+The deploy trigger.
+Run first; a nonzero exit yields the
+.B command\-failed
+verdict and
+.B verify
+is not run.
+.TP
+.B verify
+(optional) A remote acceptance check, run only when
+.B command
+exits zero.
+A nonzero exit yields the
+.B verify\-failed
+verdict.
+The command\-failed / verify\-failed split tells a human whether to fix
+the change or investigate the probe/ack path.
+A target with no
+.B verify
+is opaque-command: command zero is
+.BR ok ,
+nonzero is
+.BR command\-failed .
+.PP
+.B Verdicts:
+each target emits one result point labeled
+.RB \(dq "post\-merge <name> (<sha>)" \(dq
+with a per-target verdict of
+.BR ok ", " command\-failed ", or " verify\-failed .
+Every failure is NON-fatal \(em the merge already landed \(em and carries
+.BR severity=warn .
+The async completion wake surfaces every failed target.
+.PP
+.B Supersession:
+when any active
+.B [[post\-merge]]
+target exists, the legacy
+.B [hooks].post\-merge
+string is NOT run \(em the named targets are the phase.
+With no named targets, the string runs exactly as before.
+A repo migrates by adding stanzas (the string goes dormant) and deleting
+it at leisure; no flag-day.
+.PP
+.B Selection:
+.B merge\-this\-session
+and its
+.B \-async
+twin take a
+.B targets
+parameter, and
+.B sc merge
+takes
+.B \-\-post\-merge\-targets
+(comma-separated) and
+.BR \-\-no\-post\-merge .
+Omitting the selection deploys ALL active targets; a subset deploys only
+those names; an empty selection deploys none (a docs-only merge).
+A name no target declares fails the merge BEFORE it lands.
+.PP
+.B Timeout:
+.B [hooks].post\-merge\-timeout
+bounds the WHOLE phase \(em all targets and verifies run sequentially,
+in declaration order, under one shared wall-clock deadline \(em so
+multi-target fan-out never holds the merge lock past the cap.
+Size it for the sum of every selected target's command plus verify.
+.PP
+.B Merge:
+dedup-by-name (full entry replacement, same as
+.BR [[mcps]] ).
+Suppressed entirely by
+.BR [hooks].disable\-post\-merge .
+.PP
+Example \(em split a deploy into a trigger and an acceptance check:
+.PP
+.RS 4
+.nf
+[[post\-merge]]
+name    = "krone"
+command = "just infra/hosts/trigger\-redeploy\-krone"
+verify  = "kssh krone \-\- systemctl is\-active krone.service"
+
+[[post\-merge]]
+name    = "nikulin"
+command = "just infra/hosts/trigger\-redeploy\-nikulin"
 .fi
 .RE
 .SH PRE-MERGE SKILL ATTESTATION

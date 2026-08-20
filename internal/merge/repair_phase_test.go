@@ -52,7 +52,7 @@ func runPrepare(t *testing.T, repoDir, wtPath, branch string) (pinnedSha string,
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	pinnedSha, err = PrepareMerge(ts, repoDir, wtPath, branch, "main", false)
+	pinnedSha, err = PrepareMerge(ts, repoDir, wtPath, branch, "main", false, nil)
 	ts.Finish()
 	return pinnedSha, testRecords(decodeRecords(t, buf.Bytes())), err
 }
@@ -114,7 +114,7 @@ func TestPrepareMergeRepairAmend(t *testing.T) {
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
 	if _, err := FinishMerge(context.Background(), &mockExecutor{}, rep, ts,
-		repoDir, wtPath, "feature", "main", pinnedSha, false, true, nil); err != nil {
+		repoDir, wtPath, "feature", "main", pinnedSha, false, true, nil, nil); err != nil {
 		t.Fatalf("FinishMerge: %v\n%s", err, buf.String())
 	}
 	ts.Finish()

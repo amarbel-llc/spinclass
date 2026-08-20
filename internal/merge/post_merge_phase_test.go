@@ -37,16 +37,23 @@ func setupPostMergeRepo(t *testing.T, branch string) (repoDir, wtPath string) {
 // the session worktree survives teardown (the common merge-this-session case).
 func runFinish(t *testing.T, repoDir, wtPath, branch string, gitSync bool) ([]ndjsoncrap.Test, error) {
 	t.Helper()
+	return runFinishTargets(t, repoDir, wtPath, branch, gitSync, nil)
+}
+
+// runFinishTargets is runFinish with an explicit post-merge target selection
+// (FDR 0026): nil = all, a non-nil list = that subset, empty = none.
+func runFinishTargets(t *testing.T, repoDir, wtPath, branch string, gitSync bool, postMergeTargets []string) ([]ndjsoncrap.Test, error) {
+	t.Helper()
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	pinnedSha, prepErr := PrepareMerge(ts, repoDir, wtPath, branch, "main", gitSync)
+	pinnedSha, prepErr := PrepareMerge(ts, repoDir, wtPath, branch, "main", gitSync, postMergeTargets)
 	if prepErr != nil {
 		ts.Finish()
-		t.Fatalf("PrepareMerge: %v\n%s", prepErr, buf.String())
+		return testRecords(decodeRecords(t, buf.Bytes())), prepErr
 	}
 	_, err := FinishMerge(context.Background(), &mockExecutor{}, rep, ts,
-		repoDir, wtPath, branch, "main", pinnedSha, gitSync, true, nil)
+		repoDir, wtPath, branch, "main", pinnedSha, gitSync, true, nil, postMergeTargets)
 	ts.Finish()
 	return testRecords(decodeRecords(t, buf.Bytes())), err
 }
@@ -308,12 +315,12 @@ func TestPostMergeRunsAfterWorktreeTeardown(t *testing.T) {
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	pinnedSha, prepErr := PrepareMerge(ts, repoDir, wtPath, "feature", "main", false)
+	pinnedSha, prepErr := PrepareMerge(ts, repoDir, wtPath, "feature", "main", false, nil)
 	if prepErr != nil {
 		t.Fatalf("PrepareMerge: %v", prepErr)
 	}
 	_, err := FinishMerge(context.Background(), &mockExecutor{}, rep, ts,
-		repoDir, wtPath, "feature", "main", pinnedSha, false, false, nil)
+		repoDir, wtPath, "feature", "main", pinnedSha, false, false, nil, nil)
 	ts.Finish()
 	if err != nil {
 		t.Fatalf("FinishMerge: %v\n%s", err, buf.String())
