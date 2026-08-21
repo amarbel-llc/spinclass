@@ -307,11 +307,23 @@ subcommand is always available.
   name-only entry is a removal sentinel (like `[[mcps]]`). `merge-this-session(-async)`
   gains a `targets` param (nil=all, `[]`=none, subset=those; unknown name fails
   PRE-landing) and `sc merge` gains `--post-merge-targets`/`--no-post-merge`. Targets
-  run **sequentially** under **one shared** `post-merge-timeout` (size for sum();
-  parallel is a deferred, contract-neutral opt). #259's wake-surfacing extended to
-  every `✗ post-merge` line. Code: `sweatfile.PostMergeTarget`/`ActivePostMergeTargets`/
+  run **concurrently** (spinclass#276), each as its own reporter **Phase node**
+  (crap's muxing model, like the pre-merge hook): output streams as node-tagged
+  `Output` records, verdict rides on the `node_end` (`✓/✗ post-merge <name>`), the
+  ndjson writer serializes the wire, and the viewport demuxes — no hand-rolled
+  prefixer. Nodes are allocated up front in declaration order (deterministic
+  ladder; `crap.Reporter`'s id counter/err field aren't goroutine-guarded, so a
+  shared mutex guards the goroutines' output/close + the raw job-log tee). One
+  shared `post-merge-timeout` (size for max(), not sum — lock-hold = slowest
+  single target); a deadline kill → `verdict=timeout`. A failed node is
+  `severity=warn` and non-fatal (merge still succeeds); #259's wake-surfacing
+  lifts every `✗ post-merge` line. Each target snapshots the deadline/cancel
+  state at Run-return so a sibling's later timeout can't mislabel its failure.
+  The legacy `[hooks].post-merge` string stays a result-family test point (the
+  superseded single-command shim). Code: `sweatfile.PostMergeTarget`/`ActivePostMergeTargets`/
   `PostMergePhaseActive` + `PostMergeTarget.Run` (verdicts), `merge.runNamedPostMergeTargets`/
-  `selectPostMergeTargets`, `validate.CheckPostMergeTargets`. Fields are phase-neutral
+  `merge.postMergeFailDiag`/`merge.postMergeTargetSink`/`selectPostMergeTargets`,
+  `validate.CheckPostMergeTargets`. Fields are phase-neutral
   (no git) — paves toward the operator's "configurable pipeline phases" direction;
   per-target `paths` filters deferred (would bake in a git-diff assumption).
 - **Pre-merge REPAIR phase** (FDR 0018): when `[hooks].repair` is set,

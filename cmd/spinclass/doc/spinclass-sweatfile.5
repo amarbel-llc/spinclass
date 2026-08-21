@@ -1420,10 +1420,18 @@ A name no target declares fails the merge BEFORE it lands.
 .PP
 .B Timeout:
 .B [hooks].post\-merge\-timeout
-bounds the WHOLE phase \(em all targets and verifies run sequentially,
-in declaration order, under one shared wall-clock deadline \(em so
-multi-target fan-out never holds the merge lock past the cap.
-Size it for the sum of every selected target's command plus verify.
+bounds the WHOLE phase \(em all selected targets run
+.B concurrently
+under one shared wall-clock deadline, so lock-hold is
+.B max
+of the targets, not their sum.
+Size it for the slowest single target's command plus verify;
+when the deadline fires, every still-running target is killed and
+reports
+.BR verdict=timeout .
+Verdict points are emitted in declaration order after all targets
+complete, so the result ladder is deterministic regardless of finish
+order.
 .PP
 .B Merge:
 dedup-by-name (full entry replacement, same as

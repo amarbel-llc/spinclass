@@ -33,16 +33,20 @@ func setupPostMergeRepo(t *testing.T, branch string) (repoDir, wtPath string) {
 }
 
 // runFinish drives PrepareMerge + FinishMerge over a buffered Reporter and
-// returns the decoded test points plus FinishMerge's error. inSession=true so
-// the session worktree survives teardown (the common merge-this-session case).
-func runFinish(t *testing.T, repoDir, wtPath, branch string, gitSync bool) ([]ndjsoncrap.Test, error) {
+// returns the full decoded record stream plus FinishMerge's error. inSession=true
+// so the session worktree survives teardown (the common merge-this-session case).
+// The stream carries both result-family Test points (the legacy [hooks].post-merge
+// string path) and execution-family Phase nodes (named [[post-merge]] targets,
+// FDR 0026 / spinclass#276); use testRecords for the former, postMergeNodes for
+// the latter.
+func runFinish(t *testing.T, repoDir, wtPath, branch string, gitSync bool) ([]ndjsoncrap.Record, error) {
 	t.Helper()
 	return runFinishTargets(t, repoDir, wtPath, branch, gitSync, nil)
 }
 
 // runFinishTargets is runFinish with an explicit post-merge target selection
 // (FDR 0026): nil = all, a non-nil list = that subset, empty = none.
-func runFinishTargets(t *testing.T, repoDir, wtPath, branch string, gitSync bool, postMergeTargets []string) ([]ndjsoncrap.Test, error) {
+func runFinishTargets(t *testing.T, repoDir, wtPath, branch string, gitSync bool, postMergeTargets []string) ([]ndjsoncrap.Record, error) {
 	t.Helper()
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
@@ -50,12 +54,12 @@ func runFinishTargets(t *testing.T, repoDir, wtPath, branch string, gitSync bool
 	pinnedSha, prepErr := PrepareMerge(ts, repoDir, wtPath, branch, "main", gitSync, postMergeTargets)
 	if prepErr != nil {
 		ts.Finish()
-		return testRecords(decodeRecords(t, buf.Bytes())), prepErr
+		return decodeRecords(t, buf.Bytes()), prepErr
 	}
 	_, err := FinishMerge(context.Background(), &mockExecutor{}, rep, ts,
 		repoDir, wtPath, branch, "main", pinnedSha, gitSync, true, nil, postMergeTargets)
 	ts.Finish()
-	return testRecords(decodeRecords(t, buf.Bytes())), err
+	return decodeRecords(t, buf.Bytes()), err
 }
 
 // TestPostMergeRunsUnderTheMergeLock is the load-bearing property of FDR
@@ -81,13 +85,13 @@ func TestPostMergeRunsUnderTheMergeLock(t *testing.T) {
 	))
 
 	type result struct {
-		tests []ndjsoncrap.Test
-		err   error
+		recs []ndjsoncrap.Record
+		err  error
 	}
 	done := make(chan result, 1)
 	go func() {
-		tests, err := runFinish(t, repoDir, wtPath, "feature", false)
-		done <- result{tests, err}
+		recs, err := runFinish(t, repoDir, wtPath, "feature", false)
+		done <- result{recs, err}
 	}()
 
 	// Wait for the hook to be running.
@@ -137,9 +141,9 @@ func TestPostMergeRunsUnderTheMergeLock(t *testing.T) {
 		if r.err != nil {
 			t.Fatalf("FinishMerge: %v", r.err)
 		}
-		tr, ok := findTest(r.tests, "post-merge feature")
+		tr, ok := findTest(testRecords(r.recs), "post-merge feature")
 		if !ok {
-			t.Fatalf("no post-merge test point in %v", testDescs(r.tests))
+			t.Fatalf("no post-merge test point in %v", testDescs(testRecords(r.recs)))
 		}
 		if !tr.OK {
 			t.Errorf("post-merge point not ok: %+v", tr)
@@ -173,12 +177,12 @@ func TestPostMergeReceivesLandedFactsEnv(t *testing.T) {
 		"[hooks]\npost-merge = \"env | grep '^SPINCLASS_' | sort > %s\"\n", envFile,
 	))
 
-	tests, err := runFinish(t, repoDir, wtPath, "feature", false)
+	recs, err := runFinish(t, repoDir, wtPath, "feature", false)
 	if err != nil {
 		t.Fatalf("FinishMerge: %v", err)
 	}
-	if tr, ok := findTest(tests, "post-merge feature"); !ok || !tr.OK {
-		t.Fatalf("expected ok post-merge point, got %+v (all: %v)", tr, testDescs(tests))
+	if tr, ok := findTest(testRecords(recs), "post-merge feature"); !ok || !tr.OK {
+		t.Fatalf("expected ok post-merge point, got %+v (all: %v)", tr, testDescs(testRecords(recs)))
 	}
 
 	raw, readErr := os.ReadFile(envFile)
@@ -242,7 +246,7 @@ func TestPostMergeFailureIsNonFatal(t *testing.T) {
 	repoDir, wtPath := setupPostMergeRepo(t, "feature")
 	writeRepoSweatfile(t, repoDir, "[hooks]\npost-merge = \"echo deploy-broke >&2; exit 7\"\n")
 
-	tests, err := runFinish(t, repoDir, wtPath, "feature", false)
+	recs, err := runFinish(t, repoDir, wtPath, "feature", false)
 	if err != nil {
 		t.Fatalf("post-merge failure must not fail the merge, got %v", err)
 	}
@@ -252,9 +256,9 @@ func TestPostMergeFailureIsNonFatal(t *testing.T) {
 		t.Errorf("merge did not land: main:a.txt = %q", got)
 	}
 
-	tr, ok := findTest(tests, "post-merge feature")
+	tr, ok := findTest(testRecords(recs), "post-merge feature")
 	if !ok {
-		t.Fatalf("no post-merge test point in %v", testDescs(tests))
+		t.Fatalf("no post-merge test point in %v", testDescs(testRecords(recs)))
 	}
 	if tr.OK {
 		t.Errorf("post-merge point should be not-ok on failure: %+v", tr)
@@ -273,12 +277,15 @@ func TestPostMergeDisabledEmitsNoPoint(t *testing.T) {
 	writeRepoSweatfile(t, repoDir,
 		"[hooks]\npost-merge = \"exit 1\"\ndisable-post-merge = true\n")
 
-	tests, err := runFinish(t, repoDir, wtPath, "feature", false)
+	recs, err := runFinish(t, repoDir, wtPath, "feature", false)
 	if err != nil {
 		t.Fatalf("FinishMerge: %v", err)
 	}
-	if tr, ok := findTest(tests, "post-merge"); ok {
+	if tr, ok := findTest(testRecords(recs), "post-merge"); ok {
 		t.Errorf("disabled post-merge should emit no point, got %+v", tr)
+	}
+	if n, ok := findNode(recs, "post-merge"); ok {
+		t.Errorf("disabled post-merge should emit no node, got %+v", n)
 	}
 }
 
@@ -289,11 +296,11 @@ func TestPostMergeNotRunWhenGateFails(t *testing.T) {
 	writeRepoSweatfile(t, repoDir,
 		"[hooks]\npre-merge = \"exit 1\"\npost-merge = \"echo should-not-run\"\n")
 
-	tests, err := runFinish(t, repoDir, wtPath, "feature", false)
+	recs, err := runFinish(t, repoDir, wtPath, "feature", false)
 	if err == nil {
 		t.Fatal("expected the failing pre-merge gate to fail the merge")
 	}
-	if tr, ok := findTest(tests, "post-merge"); ok {
+	if tr, ok := findTest(testRecords(recs), "post-merge"); ok {
 		t.Errorf("post-merge must not run when the merge never landed, got %+v", tr)
 	}
 }
@@ -359,10 +366,11 @@ func TestPostMergeRunsOnUnqueuedPath(t *testing.T) {
 	writeRepoSweatfile(t, repoDir,
 		"[hooks]\ndisable-merge-queue = true\npost-merge = \"true\"\n")
 
-	tests, err := runFinish(t, repoDir, wtPath, "feature", false)
+	recs, err := runFinish(t, repoDir, wtPath, "feature", false)
 	if err != nil {
 		t.Fatalf("FinishMerge: %v", err)
 	}
+	tests := testRecords(recs)
 	tr, ok := findTest(tests, "post-merge feature")
 	if !ok {
 		t.Fatalf("no post-merge point on the unqueued path: %v", testDescs(tests))

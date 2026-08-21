@@ -180,20 +180,50 @@ verify under it; when it fires, the in-flight target is killed (`command-failed`
 single-string path keeps FDR 0023's per-hook cap unchanged (one hook = one
 target, identical behaviour).
 
-### Sequential execution (the first slice)
+### Concurrent execution as reporter Phase nodes (spinclass#276)
 
-Targets run **sequentially, in declaration order**. The phase-timeout therefore
-covers **sum**(commands + verifies), and the result ladder's per-target points
-are emitted in a deterministic order. Parallel execution is attractive — targets
-are independent hosts by construction, and the phase runs under the merge lock,
-so parallelism would cut lock-hold time from sum() to max() and shorten the
-exclusive region every sibling merge waits behind. But it is deliberately
-deferred: it adds concurrent-output buffering, multi-goroutine deadline
-cancellation, and stable verdict ordering, none of which the load-bearing slice
-(per-target verdicts + verify) needs. Crucially it changes **no contract** — the
-per-target verdicts are identical whatever the execution order — so switching to
-parallel later is a pure implementation change that leaves every consumer's
-stanzas untouched. Pave, not paint.
+Targets run **concurrently**, each as its own execution-family **Phase node** on
+the reporter — the same crap muxing model the pre-merge hook uses. A node has a
+unique id; its live output streams as `Output` records tagged with that id, and
+its verdict rides on the `node_end`. crap's ndjson writer serializes the wire, so
+concurrent output neither races nor tears and the viewport demuxes each target's
+output under its own node — **no hand-rolled line-prefixing into a raw sink**.
+The nodes' `node_start` records are emitted up front in **declaration order**
+(a deterministic ladder, and the reporter's unsynchronized id counter is never
+raced); the goroutines then only stream output and close their own node.
+
+One shared wall-clock deadline (`post-merge-timeout`) bounds the phase, so
+lock-hold is now **max**(commands + verifies) rather than their sum — the
+exclusive region every sibling merge queues behind shrinks to the slowest single
+target. A target killed by the shared deadline reports `verdict=timeout`. A
+failed node carries `severity=warn` and closes with a non-zero exit, but the
+merge still returns success (the phase is non-fatal — the merge already landed);
+the `post-merge ` label prefix is load-bearing so `#259`'s wake-surfacing lifts
+every `✗ post-merge <name>` line into the async completion summary.
+
+This adopts crap's muxing strategy in place of the first cut's hand-rolled
+`sharedActivity`/`prefixedLineWriter` prefixer. It is a **representation change**
+inside the phase — verdicts now render as execution nodes (`✓/✗ post-merge
+<name>`) rather than result-family test points — but the operator-facing contract
+(one verdict per target, the same `verdict`/`stage`/`severity` fields, selection,
+and non-fatality) is unchanged; consumer stanzas are untouched. It also **streams
+each target's output live to the viewport**, where the test-point cut only
+surfaced output on failure as a diagnostic field.
+
+The remaining coordination is minimal and structural: `crap.Reporter`'s id
+counter and sticky-error field are not goroutine-guarded (only the underlying
+ndjson writer is), so the nodes are allocated up front single-threaded and a
+single shared mutex guards each goroutine's node-output/close writes (and the raw
+job-log tee). Each target still snapshots the deadline/cancel state the instant
+its command returns, so a sibling's later deadline kill can't mislabel a genuine
+command/verify failure as a timeout. Targets are independent by construction
+(they observe no ordering between each other), which is what makes the fan-out
+safe; sequential remains the fallback should a future target ever need to observe
+another's side effects.
+
+The legacy single-string `[hooks].post-merge` path is left as a result-family
+test point — it is the superseded, single-command shim (no muxing concern) on its
+way out; only the live named-targets contract adopts the node model.
 
 ### Rejected
 
@@ -258,13 +288,11 @@ A docs-only merge deploys nothing:
   region (a slow target delays sibling merges), fires once per landing with no
   delivery guarantee, and cancelling frees the lock without killing the deploy's
   process tree.
-- **The whole-phase cap is shared, and targets run sequentially.** A slow first
-  target can consume the budget and leave later targets killed/skipped, and the
-  phase holds the merge lock for sum(all targets), not max(). So
-  `post-merge-timeout` must be sized for the sum of every selected target's
-  command + verify, and a repo with several genuinely-slow deploys should raise
-  it or make each target a cheap trigger. Parallel execution (max() lock-hold)
-  is a deferred optimization that would not change the contract.
+- **The whole-phase cap is shared across concurrently-running targets.** Targets
+  run in parallel (spinclass#276), so the phase holds the merge lock for
+  **max**(all selected targets), not their sum. `post-merge-timeout` must be
+  sized for the *slowest single* target's command + verify; the shared deadline
+  kills every still-running target at once, each reporting `verdict=timeout`.
 - **Supersede is silent.** A child that adds one `[[post-merge]]` target
   silently dormants an inherited `[hooks].post-merge` string. Documented, and
   the natural migration, but a repo relying on the inherited string will notice
@@ -284,7 +312,7 @@ A docs-only merge deploys nothing:
 | verify stages | exactly two (`command`, `verify`) | the ack rides verify's tail; a third stage adds no verdict fidelity | a consumer needing a verdict split verify cannot express |
 | unknown-target selection | fatal pre-landing | a typo silently skipping a deploy is worse than a hard stop before anything ships | selection becoming dynamic enough that an unknown name is routine |
 | timeout scope | whole phase | N targets under one cap keeps the FDR 0023 lock-hold bound | per-target isolation mattering more than the aggregate bound |
-| execution order | sequential (sum lock-hold) | simplest first slice; changes no contract, so parallel (max lock-hold) is a safe later opt | slow independent targets making the exclusive region the dominant queue-latency complaint |
+| execution order | concurrent (max lock-hold), emit in declaration order (spinclass#276) | targets are independent hosts, so max() lock-hold beats sum() and changes no contract; ordered emit keeps the ladder deterministic | a future target needing to observe another's side effects (sequential stays the fallback) |
 
 ## More Information
 

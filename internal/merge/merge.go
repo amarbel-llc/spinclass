@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
@@ -444,7 +445,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	// is still running would defeat the point of serializing in the first
 	// place, since the two deploys could interleave and the older one could
 	// win. The deferred Release above fires when FinishMerge returns.
-	runPostMergePhase(ctx, ts, repoPath, wtPath, branch, defaultBranch, landingSha, gitSync, activity, postMergeTargets)
+	runPostMergePhase(ctx, rep, ts, repoPath, wtPath, branch, defaultBranch, landingSha, gitSync, activity, postMergeTargets)
 	return blobLinks, nil
 }
 
@@ -474,7 +475,7 @@ func finishMergeUnqueued(ctx context.Context, rep *crap.Reporter, ts *crap.TestS
 	// No lock on this path at all (that is what disable-merge-queue means), so
 	// there is no exclusivity to preserve; pinnedSha is what landed, since the
 	// unqueued path never rebases the landing.
-	runPostMergePhase(ctx, ts, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, activity, postMergeTargets)
+	runPostMergePhase(ctx, rep, ts, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, activity, postMergeTargets)
 	return blobLinks, nil
 }
 
@@ -687,7 +688,7 @@ func MergeImplicit(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream,
 	// the same ref, and the push is unconditional — hence pushed=true. No lock
 	// is involved: implicit merges are out of the merge queue's scope entirely
 	// (FDR 0022 Limitations), so this hook carries no exclusivity guarantee.
-	runPostMergePhase(ctx, ts, repoPath, checkout, branch, branch, pinnedSha, true, activity, postMergeTargets)
+	runPostMergePhase(ctx, rep, ts, repoPath, checkout, branch, branch, pinnedSha, true, activity, postMergeTargets)
 	return blobLinks, nil
 }
 
@@ -877,7 +878,7 @@ func runPreMergeHookContext(ctx context.Context, rep *crap.Reporter, ts *crap.Te
 // runs exactly as FDR 0023 shipped it — but only under the default (nil)
 // selection, since an explicit selection names entries the unnamed string is
 // not among.
-func runPostMergePhase(ctx context.Context, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch, landedSha string, pushed bool, activity io.Writer, postMergeTargets []string) {
+func runPostMergePhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch, landedSha string, pushed bool, activity io.Writer, postMergeTargets []string) {
 	home, _ := os.UserHomeDir()
 	if home == "" {
 		return
@@ -908,7 +909,7 @@ func runPostMergePhase(ctx context.Context, ts *crap.TestStream, repoPath, wtPat
 
 	// Named targets supersede the legacy string (FDR 0026).
 	if active := hierarchy.Merged.ActivePostMergeTargets(); len(active) > 0 {
-		runNamedPostMergeTargets(ctx, ts, hierarchy.Merged, active, postMergeTargets, runDir, env, landedSha, activity)
+		runNamedPostMergeTargets(ctx, rep, hierarchy.Merged, active, postMergeTargets, runDir, env, landedSha, activity)
 		return
 	}
 
@@ -942,28 +943,39 @@ func runPostMergePhase(ctx context.Context, ts *crap.TestStream, repoPath, wtPat
 }
 
 // runNamedPostMergeTargets runs the selected [[post-merge]] targets (FDR 0026)
-// sequentially in declaration order, each emitting one verdict point labeled
-// "post-merge <name> (<sha>)" — the "post-merge " prefix is load-bearing so the
-// async completion wake surfaces every failed target (spinclass#259). All
-// targets and their verifies share ONE wall-clock deadline derived from
-// post-merge-timeout, so N-target fan-out can never hold the merge lock past the
-// cap; when it fires, the in-flight target is a warn point and the remainder are
-// skipped. Every failure is non-fatal — the merge already landed.
-func runNamedPostMergeTargets(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, active []sweatfile.PostMergeTarget, requested []string, runDir string, env []string, landedSha string, activity io.Writer) {
+// CONCURRENTLY (spinclass#276) as execution-family Phase nodes on the reporter —
+// crap's muxing model, the same one the pre-merge hook uses: each target is its
+// own node with a unique id, its live output streamed as Output records tagged
+// with that id, and its verdict carried on the node_end. crap's ndjson writer
+// serializes the wire, so concurrent output neither races nor tears and the
+// viewport demuxes each target's output under its own node — no hand-rolled
+// prefixing. The nodes' node_start records are emitted up front in DECLARATION
+// order (a deterministic ladder, and the reporter's unsynchronized counter is
+// never raced); the goroutines then only stream output and close their own node.
+//
+// All targets and their verifies share ONE wall-clock deadline derived from
+// post-merge-timeout, so the phase holds the merge lock for MAX(target
+// durations), not their sum; when it fires, every still-running target is killed
+// and its node reports verdict=timeout. Every failure is non-fatal — the merge
+// already landed, so a failed node carries severity=warn and the merge still
+// returns success (the "post-merge " label prefix is load-bearing so the async
+// completion wake surfaces every failed target, spinclass#259). Targets are
+// independent by construction (they observe no ordering between each other),
+// which is what makes the fan-out safe.
+func runNamedPostMergeTargets(ctx context.Context, rep *crap.Reporter, sf sweatfile.Sweatfile, active []sweatfile.PostMergeTarget, requested []string, runDir string, env []string, landedSha string, activity io.Writer) {
 	selected, selErr := selectPostMergeTargets(active, requested)
 	if selErr != nil {
 		// Pre-landing validation (PrepareMerge/MergeImplicit) should have caught
 		// this; surface defensively rather than silently deploying nothing.
-		ts.NotOk("post-merge selection ("+shortSha(landedSha)+")", map[string]any{
-			"severity": "warn",
-			"message":  selErr.Error(),
-		})
+		ph := rep.Phase("post-merge selection (" + shortSha(landedSha) + ")")
+		ph.FailDiag(selErr, map[string]any{"severity": "warn"})
 		return
 	}
 
-	// One shared wall-clock deadline for the whole phase (FDR 0026): N targets
-	// under one cap keeps FDR 0023's lock-hold bound regardless of fan-out.
-	// PostMergeTimeoutValue is 10m by default; <=0 means the cap is disabled.
+	// One shared wall-clock deadline for the whole phase (FDR 0026): with targets
+	// running concurrently (spinclass#276), this bounds lock-hold to the slowest
+	// single target rather than their sum. PostMergeTimeoutValue is 10m by
+	// default; <=0 means the cap is disabled.
 	phaseCtx := ctx
 	phaseCap := sf.PostMergeTimeoutValue()
 	if phaseCap > 0 {
@@ -972,71 +984,107 @@ func runNamedPostMergeTargets(ctx context.Context, ts *crap.TestStream, sf sweat
 		defer cancel()
 	}
 
-	for _, tgt := range selected {
-		label := "post-merge " + tgt.Name + " (" + shortSha(landedSha) + ")"
-
-		// A prior target already spent the shared budget (or the caller
-		// cancelled): skip the rest rather than start doomed subprocesses.
-		if phaseCtx.Err() != nil {
-			diag := map[string]any{"severity": "warn", "verdict": "skipped"}
-			if errors.Is(phaseCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
-				diag["message"] = fmt.Sprintf(
-					"post-merge target %q skipped: the phase exceeded post-merge-timeout %s before it ran",
-					tgt.Name, phaseCap,
-				)
-			} else {
-				diag["message"] = fmt.Sprintf("post-merge target %q skipped: %v", tgt.Name, phaseCtx.Err())
-			}
-			ts.NotOk(label, diag)
-			continue
-		}
-
-		var out bytes.Buffer
-		var sink io.Writer = &out
-		if activity != nil {
-			sink = io.MultiWriter(&out, activity)
-		}
-
-		verdict, runErr := tgt.Run(phaseCtx, runDir, env, sink)
-		if runErr == nil {
-			ts.Ok(label)
-			continue
-		}
-
-		stage := "command"
-		if verdict == sweatfile.PostMergeVerifyFailed {
-			stage = "verify"
-		}
-		diag := map[string]any{"severity": "warn", "verdict": string(verdict), "stage": stage}
-		switch {
-		// Our shared deadline killed it (only when the caller's ctx is still
-		// live — otherwise the kill is the caller's cancel, below).
-		case errors.Is(phaseCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil:
-			diag["verdict"] = "timeout"
-			diag["message"] = fmt.Sprintf(
-				"post-merge target %q killed at the %s stage: the phase exceeded post-merge-timeout %s "+
-					"(the merge already landed — nothing was rolled back; raise [hooks].post-merge-timeout, or 0 to disable)",
-				tgt.Name, stage, phaseCap,
-			)
-		case ctx.Err() != nil:
-			diag["verdict"] = "cancelled"
-			diag["message"] = fmt.Sprintf("post-merge target %q cancelled at the %s stage: %v", tgt.Name, stage, ctx.Err())
-		case verdict == sweatfile.PostMergeVerifyFailed:
-			diag["message"] = fmt.Sprintf(
-				"post-merge target %q deployed but verify failed: %v (the merge already landed — nothing was rolled back)",
-				tgt.Name, runErr,
-			)
-		default:
-			diag["message"] = fmt.Sprintf(
-				"post-merge target %q command failed: %v (the merge already landed — nothing was rolled back)",
-				tgt.Name, runErr,
-			)
-		}
-		if o := out.String(); o != "" {
-			diag["output"] = o
-		}
-		ts.NotOk(label, diag)
+	// Allocate every node up front, single-threaded: node_starts land in
+	// declaration order and the reporter's unsynchronized counter is never
+	// raced. Each goroutine below touches only its own already-allocated node.
+	phases := make([]*crap.Phase, len(selected))
+	for i, tgt := range selected {
+		ph := rep.Phase("post-merge " + tgt.Name + " (" + shortSha(landedSha) + ")")
+		ph.Command(tgt.Command)
+		phases[i] = ph
 	}
+
+	// repMu guards the reporter's unsynchronized state (its sticky err field)
+	// across the concurrent nodes' Output/close writes, and serializes the shared
+	// raw activity tee (the async job log). crap's ndjson writer is already
+	// line-atomic; this is the wrapper-level guard the Reporter itself lacks.
+	var repMu sync.Mutex
+	var wg sync.WaitGroup
+	for i := range selected {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			tgt := selected[i]
+			ph := phases[i]
+			lw := present.NewLineWriter(ph)
+			sink := &postMergeTargetSink{mu: &repMu, lw: lw, activity: activity}
+
+			verdict, runErr := tgt.Run(phaseCtx, runDir, env, sink)
+			// Snapshot the deadline/cancel state now, before a sibling's later
+			// kill can move phaseCtx.Err out from under a genuine failure.
+			timedOut := runErr != nil && errors.Is(phaseCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
+			cancelled := runErr != nil && ctx.Err() != nil
+
+			repMu.Lock()
+			defer repMu.Unlock()
+			lw.Flush()
+			if runErr == nil {
+				ph.Done()
+				return
+			}
+			ph.FailDiag(nil, postMergeFailDiag(tgt, verdict, runErr, timedOut, cancelled, phaseCap))
+		}(i)
+	}
+	wg.Wait()
+}
+
+// postMergeFailDiag builds the node_end diagnostic for a failed post-merge target
+// (FDR 0026): severity=warn (a landed merge is never a failure), the verdict
+// (command-failed / verify-failed / timeout / cancelled), the stage it failed at,
+// and an operator-facing message. The target's output is NOT duplicated here — it
+// already streamed as Output records on the node.
+func postMergeFailDiag(tgt sweatfile.PostMergeTarget, verdict sweatfile.PostMergeVerdict, runErr error, timedOut, cancelled bool, phaseCap time.Duration) map[string]any {
+	stage := "command"
+	if verdict == sweatfile.PostMergeVerifyFailed {
+		stage = "verify"
+	}
+	diag := map[string]any{"severity": "warn", "verdict": string(verdict), "stage": stage}
+	switch {
+	// Our shared deadline killed it (only when the caller's ctx was still live —
+	// otherwise the kill is the caller's cancel, below).
+	case timedOut:
+		diag["verdict"] = "timeout"
+		diag["message"] = fmt.Sprintf(
+			"post-merge target %q killed at the %s stage: the phase exceeded post-merge-timeout %s "+
+				"(the merge already landed — nothing was rolled back; raise [hooks].post-merge-timeout, or 0 to disable)",
+			tgt.Name, stage, phaseCap,
+		)
+	case cancelled:
+		diag["verdict"] = "cancelled"
+		diag["message"] = fmt.Sprintf("post-merge target %q cancelled at the %s stage: %v", tgt.Name, stage, runErr)
+	case verdict == sweatfile.PostMergeVerifyFailed:
+		diag["message"] = fmt.Sprintf(
+			"post-merge target %q deployed but verify failed: %v (the merge already landed — nothing was rolled back)",
+			tgt.Name, runErr,
+		)
+	default:
+		diag["message"] = fmt.Sprintf(
+			"post-merge target %q command failed: %v (the merge already landed — nothing was rolled back)",
+			tgt.Name, runErr,
+		)
+	}
+	return diag
+}
+
+// postMergeTargetSink streams one concurrent post-merge target's output to its
+// reporter node (via lw, which forwards complete lines as Output records) and,
+// when non-nil, tees the raw bytes to the async job log. One mutex — shared
+// across every target's sink — guards both, so the reporter's unsynchronized
+// state and the shared activity writer stay race-free; a single lock per Write
+// keeps lw's node output and the activity tee from interleaving mid-call.
+type postMergeTargetSink struct {
+	mu       *sync.Mutex
+	lw       *present.LineWriter // wraps this target's Phase; used only under mu
+	activity io.Writer           // raw job-log tee; may be nil
+}
+
+func (s *postMergeTargetSink) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.activity != nil {
+		_, _ = s.activity.Write(p)
+	}
+	return s.lw.Write(p)
 }
 
 // selectPostMergeTargets resolves a caller's requested post-merge selection (FDR
