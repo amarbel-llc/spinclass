@@ -191,8 +191,9 @@ worktree_count() {
     -- sh -c 'echo fail > fail.txt && git add fail.txt && git commit -qm "fail-hook-commit"'
   # Merge succeeds despite the failing hook.
   assert_success
-  run git -C "$TEST_REPO" log --oneline main
-  assert_output --partial "fail-hook-commit"
   # The wire carries a warn-severity diagnostic for the failed hook.
   assert_crap 'any(.[]; .type == "node_end" and .exit_code != 0 and .diagnostic.severity == "warn")'
+  # Commit landed.
+  run git -C "$TEST_REPO" log --oneline main
+  assert_output --partial "fail-hook-commit"
 }

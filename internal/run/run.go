@@ -409,9 +409,10 @@ func runDynamicPostMergeHooks(rep *crap.Reporter, repoPath, defaultBranch, branc
 		lw.Flush()
 		if runErr != nil {
 			ph.FailDiag(runErr, map[string]any{
-				"severity": "warn",
-				"message":  runErr.Error(),
-				"command":  h,
+				"severity":  "warn",
+				"message":   runErr.Error(),
+				"command":   h,
+				"exit_code": exitCodeFromErr(runErr),
 			})
 		} else {
 			ph.Done()
