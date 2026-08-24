@@ -142,3 +142,57 @@ worktree_count() {
   assert_failure
   assert_output --partial "nothing to run"
 }
+
+@test "run: --post-merge hook runs after merge lands" {
+  cd "$TEST_REPO" || return
+  local flag_file="$TEST_REPO/post-merge-ran"
+  run_sc_run --local-only \
+    --post-merge "touch '$flag_file'" \
+    -- sh -c 'echo pm > pm.txt && git add pm.txt && git commit -qm "pm-commit"'
+  assert_success
+  # Commit landed.
+  run git -C "$TEST_REPO" log --oneline main
+  assert_output --partial "pm-commit"
+  # Dynamic hook ran.
+  [ -f "$flag_file" ] || fail "--post-merge hook did not create $flag_file"
+}
+
+@test "run: --post-merge hook receives SPINCLASS_MERGED_SHA env" {
+  cd "$TEST_REPO" || return
+  local sha_file="$TEST_REPO/merged-sha"
+  run_sc_run --local-only \
+    --post-merge "echo \$SPINCLASS_MERGED_SHA > '$sha_file'" \
+    -- sh -c 'echo sha > sha.txt && git add sha.txt && git commit -qm "sha-commit"'
+  assert_success
+  local recorded
+  recorded="$(cat "$sha_file" 2>/dev/null | tr -d '[:space:]')"
+  [ -n "$recorded" ] || fail "SPINCLASS_MERGED_SHA was empty"
+  local landed
+  landed="$(git -C "$TEST_REPO" rev-parse main)"
+  assert_equal "$recorded" "$landed"
+}
+
+@test "run: multiple --post-merge hooks run in order" {
+  cd "$TEST_REPO" || return
+  local log_file="$TEST_REPO/hook-log"
+  run_sc_run --local-only \
+    --post-merge "echo first >> '$log_file'" \
+    --post-merge "echo second >> '$log_file'" \
+    -- sh -c 'echo multi > m.txt && git add m.txt && git commit -qm "multi-hook"'
+  assert_success
+  run cat "$log_file"
+  assert_output "$(printf 'first\nsecond')"
+}
+
+@test "run: failing --post-merge hook does not fail the merge" {
+  cd "$TEST_REPO" || return
+  run_sc_run --local-only \
+    --post-merge "exit 42" \
+    -- sh -c 'echo fail > fail.txt && git add fail.txt && git commit -qm "fail-hook-commit"'
+  # Merge succeeds despite the failing hook.
+  assert_success
+  run git -C "$TEST_REPO" log --oneline main
+  assert_output --partial "fail-hook-commit"
+  # The wire carries a warn-severity diagnostic for the failed hook.
+  assert_crap 'any(.[]; .type == "node_end" and .exit_code != 0 and .diagnostic.severity == "warn")'
+}

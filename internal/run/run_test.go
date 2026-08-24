@@ -86,6 +86,42 @@ func TestParseArgsDanglingValueFlag(t *testing.T) {
 	}
 }
 
+func TestParseArgsPostMergeSingle(t *testing.T) {
+	spec, err := ParseArgs([]string{"--post-merge", "echo done", "--", "true"}, nil)
+	if err != nil {
+		t.Fatalf("ParseArgs: %v", err)
+	}
+	if !slices.Equal(spec.DynamicPostMergeHooks, []string{"echo done"}) {
+		t.Errorf("DynamicPostMergeHooks = %v, want [echo done]", spec.DynamicPostMergeHooks)
+	}
+}
+
+func TestParseArgsPostMergeEqualForm(t *testing.T) {
+	spec, err := ParseArgs([]string{"--post-merge=echo done", "--", "true"}, nil)
+	if err != nil {
+		t.Fatalf("ParseArgs: %v", err)
+	}
+	if !slices.Equal(spec.DynamicPostMergeHooks, []string{"echo done"}) {
+		t.Errorf("DynamicPostMergeHooks = %v, want [echo done]", spec.DynamicPostMergeHooks)
+	}
+}
+
+func TestParseArgsPostMergeRepeatable(t *testing.T) {
+	spec, err := ParseArgs([]string{"--post-merge", "step1", "--post-merge=step2", "--", "true"}, nil)
+	if err != nil {
+		t.Fatalf("ParseArgs: %v", err)
+	}
+	if !slices.Equal(spec.DynamicPostMergeHooks, []string{"step1", "step2"}) {
+		t.Errorf("DynamicPostMergeHooks = %v, want [step1 step2]", spec.DynamicPostMergeHooks)
+	}
+}
+
+func TestParseArgsPostMergeDanglingIsError(t *testing.T) {
+	if _, err := ParseArgs([]string{"--post-merge"}, nil); err == nil {
+		t.Error("--post-merge with no value: want error, got nil")
+	}
+}
+
 func TestSplitShebang(t *testing.T) {
 	tests := []struct {
 		name       string

@@ -56,6 +56,9 @@ type Spec struct {
 	Format         string   // global --format value (auto/viewport/plain/ndjson)
 	Util           []string // `-- <util> [args...]` form
 	Script         []byte   // stdin-script form (shebang-aware)
+	// DynamicPostMergeHooks are shell commands passed via --post-merge; each
+	// runs after the merge lands, non-fatally, in the default-branch checkout.
+	DynamicPostMergeHooks []string
 }
 
 // Run executes the full lifecycle and returns the process exit code to
@@ -189,6 +192,9 @@ func Run(spec Spec) (exitCode int, err error) {
 			return mErr
 		}
 		didMerge = true
+		if len(spec.DynamicPostMergeHooks) > 0 {
+			runDynamicPostMergeHooks(rep, rp.RepoPath, defaultBranch, rp.Branch, !spec.LocalOnly, spec.DynamicPostMergeHooks)
+		}
 		return nil
 	})
 
@@ -374,10 +380,50 @@ func nonzero(code int) int {
 	return code
 }
 
+// runDynamicPostMergeHooks runs each --post-merge hook after a successful
+// merge, in the repo's default-branch checkout. Failures are non-fatal
+// (severity=warn): the merge is already durable.
+func runDynamicPostMergeHooks(rep *crap.Reporter, repoPath, defaultBranch, branch string, pushed bool, hooks []string) {
+	mergedSHA, _ := git.RevParse(repoPath, defaultBranch)
+	pushedStr := "false"
+	if pushed {
+		pushedStr = "true"
+	}
+	extraEnv := []string{
+		"SPINCLASS_MERGED_SHA=" + mergedSHA,
+		"SPINCLASS_MERGED_BRANCH=" + branch,
+		"SPINCLASS_DEFAULT_BRANCH=" + defaultBranch,
+		"SPINCLASS_MERGE_PUSHED=" + pushedStr,
+		"SPINCLASS_REPO_PATH=" + repoPath,
+	}
+	for _, h := range hooks {
+		ph := rep.Phase("post-merge " + h)
+		ph.Command(h)
+		lw := present.NewLineWriter(ph)
+		cmd := exec.Command("sh", "-c", h)
+		cmd.Dir = repoPath
+		cmd.Env = append(os.Environ(), extraEnv...)
+		cmd.Stdout = lw
+		cmd.Stderr = lw
+		runErr := cmd.Run()
+		lw.Flush()
+		if runErr != nil {
+			ph.FailDiag(runErr, map[string]any{
+				"severity": "warn",
+				"message":  runErr.Error(),
+				"command":  h,
+			})
+		} else {
+			ph.Done()
+		}
+	}
+}
+
 // ParseArgs splits the passthrough argv of `sc run` into a Spec. Grammar:
 //
 //	[--description D | -d D | --description=D] [--no-merge] [--no-close]
 //	[--local-only] [--allow-stale-base] [--format F | --format=F]
+//	[--post-merge H]...
 //	( -- <util> [args...] | <stdin script> )
 //
 // Flags are hand-parsed (the command uses PassthroughArgs, like `sc exec`) up
@@ -424,6 +470,15 @@ func ParseArgs(args []string, stdin io.Reader) (Spec, error) {
 			i += 2
 		case strings.HasPrefix(a, "--format="):
 			spec.Format = strings.TrimPrefix(a, "--format=")
+			i++
+		case a == "--post-merge":
+			if i+1 >= len(args) {
+				return spec, fmt.Errorf("%s requires a value", a)
+			}
+			spec.DynamicPostMergeHooks = append(spec.DynamicPostMergeHooks, args[i+1])
+			i += 2
+		case strings.HasPrefix(a, "--post-merge="):
+			spec.DynamicPostMergeHooks = append(spec.DynamicPostMergeHooks, strings.TrimPrefix(a, "--post-merge="))
 			i++
 		default:
 			return spec, fmt.Errorf("unknown flag or stray argument %q (a command must follow `--`)", a)
