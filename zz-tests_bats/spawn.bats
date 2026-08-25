@@ -92,9 +92,13 @@ EOF
   assert_output --partial '"spawned_by": "driver/bats"'
   assert_output --partial '"description": "bats worker"'
 
-  # sc list surfaces the lineage annotation.
+  # sc list surfaces the lineage annotation. Piped (non-TTY) `sc list`
+  # renders the mesa summary table in plain form (#185): the DESCRIPTION
+  # column carries the spawn-lineage hint as a "↰<driver-key>" suffix,
+  # not the old runListResult TSV's trailing `spawned-by:<key>` column
+  # (that shape is unchanged for the MCP tool / --format json/tap).
   run_sc list
-  assert_output --partial "spawned-by:driver/bats"
+  assert_output --partial "↰driver/bats"
 }
 
 @test "spawn times out without a hello and leaves the worktree for inspection" {
