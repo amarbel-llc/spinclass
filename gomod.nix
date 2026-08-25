@@ -12,8 +12,9 @@
 #
 # Modules NOT listed here continue to resolve organically through
 # gomod2nix.toml. Add an entry when its producer flake exposes go-pkgs;
-# tap/go and the purse-first modules are the open candidates (#157 —
-# gated on the go-mcp upgrade question).
+# tap/go and the other purse-first modules (go-mcp, go-mcp/command/huh)
+# are the remaining open candidates (#157 — gated on the go-mcp upgrade
+# question). purse-first/libs/dewey was promoted below (#185).
 #
 # Caveat: the vestigial `require` version must stay proxy-fetchable —
 # `just deps` (gomod2nix regen) reads go.mod with no knowledge of the
@@ -22,6 +23,7 @@
   tommy,
   crap,
   ringmaster,
+  purse-first,
   system,
 }:
 {
@@ -49,5 +51,15 @@
   # PATH (FDR 0010) — this bridge is the compile-time library half only.
   "code.linenisgreat.com/ringmaster" = {
     src = ringmaster.packages.${system}.go-pkgs;
+  };
+  # mesa (List-Table NDJSON renderer, RFC 0003) lives in purse-first's
+  # dewey package. Bridged so `sc list`'s pretty/plain rendering (#185)
+  # compiles against a purse-first rev that actually has pkgs/mesa (the
+  # transitive pin ringmaster brings in predates it — see the
+  # ringmaster.inputs.purse-first.follows override in flake.nix). Same
+  # shape as clown's gomod.nix.
+  "code.linenisgreat.com/purse-first/libs/dewey" = {
+    src = purse-first.packages.${system}.go-pkgs;
+    subPath = "libs/dewey";
   };
 }

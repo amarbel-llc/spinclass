@@ -434,13 +434,18 @@ overlay injects `-X main.version`/`-X main.commit` ldflags from the derivation's
 bash + fish completions included.
 
 `gomod.nix` is the consumer half of the flake-input-go_mod protocol (igloo RFC
-0001): it maps bridged Go modules (`tommy`, `crap`, `ringmaster`) onto their
-producer flakes' `go-pkgs` outputs, threaded as `goFlakeInputs`. Bump a bridged
-dep with `nix flake update <input>` — no gomod2nix lockstep unless the new rev
-changes the producer's own dependency graph. `ringmaster` is bridged at the
-repo-root module (no `subPath`, the tommy shape); it is *also* a checkPhase
-`nativeCheckInputs` binary and a devShell package, so the same flake rev backs
-the linked `jobwake` library, the contract-test binary, and the dev-loop CLI.
+0001): it maps bridged Go modules (`tommy`, `crap`, `ringmaster`,
+`purse-first/libs/dewey`) onto their producer flakes' `go-pkgs` outputs,
+threaded as `goFlakeInputs`. Bump a bridged dep with `nix flake update <input>`
+— no gomod2nix lockstep unless the new rev changes the producer's own
+dependency graph. `ringmaster` is bridged at the repo-root module (no
+`subPath`, the tommy shape); it is *also* a checkPhase `nativeCheckInputs`
+binary and a devShell package, so the same flake rev backs the linked
+`jobwake` library, the contract-test binary, and the dev-loop CLI.
+`purse-first` is a direct input (not just ringmaster's transitive one, which
+predates `pkgs/mesa` — hence the `ringmaster.inputs.purse-first.follows`
+override) so `sc list`'s pretty/plain rendering can bridge `libs/dewey`
+(mesa, #185); same shape as clown's `gomod.nix`.
 
 ## Dependencies
 
@@ -452,6 +457,12 @@ Module: `code.linenisgreat.com/spinclass`.
   wired in `internal/present`).
 - `code.linenisgreat.com/purse-first/libs/go-mcp` — MCP server framework
   (`command.App` does CLI dispatch + MCP serving; no cobra).
+- `code.linenisgreat.com/purse-first/libs/dewey/pkgs/mesa` — the List-Table
+  NDJSON renderer (RFC 0003), bridged via `gomod.nix`. `sc list`'s
+  pretty/plain rendering (`cmd/spinclass/list_view.go`) builds a `mesa.Table`
+  and renders it styled (`--format` unset on a TTY, and `--watch`) or plain
+  (piped / `--format tap`); `--format json` stays the original
+  `session.ListRow` array, untouched by this migration (#185).
 - `code.linenisgreat.com/tommy` — TOML library.
 - `code.linenisgreat.com/ringmaster/pkgs/jobwake` — the linked half of the
   job platform: `AcquireJobLock` (per-job liveness flock) + `ProtocolVersion`

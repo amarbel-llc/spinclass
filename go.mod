@@ -4,6 +4,7 @@ go 1.26
 
 require (
 	code.linenisgreat.com/crap/go-crap/v2 v2.3.0
+	code.linenisgreat.com/purse-first/libs/dewey v0.5.0
 	code.linenisgreat.com/purse-first/libs/go-mcp v0.5.0
 	code.linenisgreat.com/purse-first/libs/go-mcp/command/huh v0.0.5
 	code.linenisgreat.com/tap/go v0.2.0
@@ -19,7 +20,6 @@ require (
 )
 
 require (
-	code.linenisgreat.com/purse-first/libs/dewey v0.5.0 // indirect
 	code.linenisgreat.com/ringmaster v0.0.0-20260809131504-4589075aa5f4 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect

@@ -272,6 +272,29 @@
         "url": "https://code.linenisgreat.com/gomod2nix/archive/master.tar.gz"
       }
     },
+    "gomod2nix_2": {
+      "inputs": {
+        "flake-utils": [
+          "purse-first",
+          "utils"
+        ],
+        "nixpkgs-master": [
+          "purse-first",
+          "nixpkgs-master"
+        ]
+      },
+      "locked": {
+        "lastModified": 1785249242,
+        "narHash": "sha256-PYnzeRibCvHs1TLPPZxEds1KW0qYUZ4ycfeCc6bCwrk=",
+        "rev": "38d90d9cdcaca83282c78f8ce1f89414b3e0d854",
+        "type": "tarball",
+        "url": "https://code.linenisgreat.com/gomod2nix/archive/38d90d9cdcaca83282c78f8ce1f89414b3e0d854.tar.gz"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://code.linenisgreat.com/gomod2nix/archive/master.tar.gz"
+      }
+    },
     "hyphence": {
       "inputs": {
         "bats": [
@@ -691,30 +714,23 @@
         "conformist": [
           "conformist"
         ],
-        "gomod2nix": [
-          "madder",
-          "purse-first",
-          "gomod2nix"
-        ],
+        "gomod2nix": "gomod2nix_2",
         "igloo": [
-          "ringmaster",
           "igloo"
         ],
         "nixpkgs-master": [
-          "ringmaster",
           "nixpkgs-master"
         ],
         "utils": [
-          "ringmaster",
           "utils"
         ]
       },
       "locked": {
-        "lastModified": 1785456026,
-        "narHash": "sha256-/jDsMnT9aqj79OMn1YjXRFpPh3ZlxkaBSHTsnFKUtWE=",
-        "rev": "230a25a8472f0d86cda147de164b8a8e2acd400a",
+        "lastModified": 1787693286,
+        "narHash": "sha256-EImiECHAgJrFqc8HkV9KUIMsyVDyYoQTFh0kh73l4Ps=",
+        "rev": "c975a3b576d0fa6b4f1410fbe2f83557f55b6005",
         "type": "tarball",
-        "url": "https://code.linenisgreat.com/purse-first/archive/230a25a8472f0d86cda147de164b8a8e2acd400a.tar.gz"
+        "url": "https://code.linenisgreat.com/purse-first/archive/c975a3b576d0fa6b4f1410fbe2f83557f55b6005.tar.gz"
       },
       "original": {
         "type": "tarball",
@@ -732,7 +748,9 @@
         "nixpkgs-master": [
           "nixpkgs-master"
         ],
-        "purse-first": "purse-first_2",
+        "purse-first": [
+          "purse-first"
+        ],
         "utils": [
           "utils"
         ]
@@ -758,6 +776,7 @@
         "madder": "madder",
         "nixpkgs-master": "nixpkgs-master",
         "papi": "papi",
+        "purse-first": "purse-first_2",
         "ringmaster": "ringmaster",
         "tommy": "tommy",
         "utils": "utils"

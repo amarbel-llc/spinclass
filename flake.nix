@@ -139,8 +139,22 @@
         bats.follows = "bats";
       };
     };
-    ringmaster.inputs.purse-first.inputs.conformist.follows = "conformist";
-    ringmaster.inputs.purse-first.inputs.gomod2nix.follows = "madder/purse-first/gomod2nix";
+    ringmaster.inputs.purse-first.follows = "purse-first";
+
+    # purse-first: source of the mesa List-Table renderer (pkgs/mesa),
+    # bridged into go.mod via gomod.nix and used by `sc list`'s
+    # pretty/plain rendering (#185). Direct input so we get a version
+    # that includes pkgs/mesa (ringmaster's transitive pin predates it,
+    # hence the follows override above). Mirrors clown's flake.nix.
+    purse-first = {
+      url = "https://code.linenisgreat.com/purse-first/archive/master.tar.gz";
+      inputs = {
+        igloo.follows = "igloo";
+        nixpkgs-master.follows = "nixpkgs-master";
+        utils.follows = "utils";
+        conformist.follows = "conformist";
+      };
+    };
 
     # papi: the Personal API CLI. Pinned into spinclass via
     # `mkSpinclass { papi = ...; }` and burned into the default build's
@@ -177,6 +191,7 @@
       tommy,
       papi,
       ringmaster,
+      purse-first,
     }:
     let
       # version.env at repo root is the single source of truth for the release
@@ -282,6 +297,7 @@
             tommy
             crap
             ringmaster
+            purse-first
             system
             ;
         };

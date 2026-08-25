@@ -5,16 +5,15 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
 	"github.com/mattn/go-isatty"
 	"golang.org/x/term"
 
+	"code.linenisgreat.com/purse-first/libs/dewey/pkgs/mesa"
 	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sessionpick"
@@ -25,17 +24,18 @@ import (
 type listMode int
 
 const (
-	// modePlain emits the legacy tab-separated text (runListResult's text
-	// path). Selected for explicit --format tap/table and for any non-TTY
-	// stdout so pipes and command substitution stay clean.
+	// modePlain emits the mesa summary table in its plain (tab-separated,
+	// unstyled) form. Selected for explicit --format tap/table and for any
+	// non-TTY stdout so pipes and command substitution stay clean.
 	modePlain listMode = iota
-	// modePretty emits the styled lipgloss table. The interactive default:
-	// unset --format on a TTY.
+	// modePretty emits the mesa summary table styled. The interactive
+	// default: unset --format on a TTY.
 	modePretty
 	// modeJSON emits the machine-clean ListRow array (runListResult's json
 	// path), regardless of TTY.
 	modeJSON
-	// modeWatch runs the full-screen live-refreshing bubbletea table.
+	// modeWatch runs the full-screen live-refreshing bubbletea table,
+	// rendering each frame through mesa.
 	modeWatch
 )
 
@@ -57,9 +57,10 @@ func listRenderMode(format string, isTTY, watch bool) listMode {
 }
 
 // runListCLI is the `sc list` RunCLI body: it resolves the render mode and
-// dispatches. The plain/json branches reuse runListResult so their output
-// stays byte-identical to the MCP tool's; pretty and watch are the new
-// charm paths and never run for the MCP tool (which has no RunCLI).
+// dispatches. modeJSON reuses runListResult so its output stays
+// byte-identical to the MCP tool's (which never goes through this switch);
+// modePretty, modePlain, and modeWatch render through mesa (RFC 0003) — the
+// same List-Table renderer `clown list` migrated to (purse-first#185).
 func runListCLI(ctx context.Context, g globalArgs, closed, watch bool, interval string, remotes []sweatfile.Remote) error {
 	dbg := g.debugLogger()
 	isTTY := isatty.IsTerminal(os.Stdout.Fd())
@@ -76,16 +77,23 @@ func runListCLI(ctx context.Context, g globalArgs, closed, watch bool, interval 
 		if err != nil {
 			return err
 		}
-		fmt.Print(renderListTable(states, remoteRows, diags, closed, terminalWidth()))
+		fmt.Print(renderListTable(states, remoteRows, diags, closed, terminalWidth(), mesa.ForceStyle()))
 		return nil
-	default: // modePlain, modeJSON
-		// Both reuse runListResult. FormatOrDefault() already yields "json"
-		// exactly when --format json was passed (and "tap" otherwise), so one
-		// branch covers both modes. runListResult folds index failures into
-		// res.Text, so fmt.Println(res.Text) reproduces the framework's
-		// printResult exactly — keeping CLI output byte-identical to the MCP tool.
+	case modeJSON:
+		// FormatOrDefault() yields "json" exactly when --format json was
+		// passed, matching the dispatch above. runListResult folds index
+		// failures into res.Text, so fmt.Println(res.Text) reproduces the
+		// framework's printResult exactly — keeping CLI output
+		// byte-identical to the MCP tool's session.ListRow array.
 		res, _ := runListResult(ctx, closed, g.FormatOrDefault(), dbg, remotes)
 		fmt.Println(res.Text)
+		return nil
+	default: // modePlain
+		states, remoteRows, diags, err := gatherListData(ctx, dbg, remotes)
+		if err != nil {
+			return err
+		}
+		fmt.Print(renderListTable(states, remoteRows, diags, closed, 0, mesa.ForcePlain()))
 		return nil
 	}
 }
@@ -110,66 +118,69 @@ func parseWatchInterval(s string) (time.Duration, error) {
 // ---- styling ---------------------------------------------------------------
 
 var (
-	// subtleColor dims the borders, the dot legend, and other secondary text
-	// while staying legible on both light and dark terminals. A fixed ANSI "8"
-	// (bright black) renders near-invisible against a dark background — looking
-	// "all black" next to the default-foreground main text — so use an adaptive
-	// 256-color gray that tracks the detected background the way the uncolored
-	// main text already does.
+	// subtleColor dims the diagnostic lines and other secondary text (outside
+	// the mesa table itself, which owns its own palette) while staying legible
+	// on both light and dark terminals. A fixed ANSI "8" (bright black) renders
+	// near-invisible against a dark background — looking "all black" next to
+	// the default-foreground main text — so use an adaptive 256-color gray
+	// that tracks the detected background the way the uncolored main text
+	// already does.
 	subtleColor = lipgloss.AdaptiveColor{Light: "240", Dark: "245"}
 
-	// stateStyles colors the STATUS dot by resolved session state. ANSI palette
-	// indices keep the live states readable across terminal themes; abandoned
-	// reuses the adaptive subtle gray so it never disappears into the bg.
-	stateStyles = map[string]lipgloss.Style{
-		session.StateActive:          lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true), // green
-		session.StateRunningDetached: lipgloss.NewStyle().Foreground(lipgloss.Color("6")),            // cyan
-		session.StateInactive:        lipgloss.NewStyle().Foreground(lipgloss.Color("3")),            // yellow
-		session.StateAbandoned:       lipgloss.NewStyle().Foreground(subtleColor),                    // gray
-	}
-	dimStyle           = lipgloss.NewStyle().Foreground(subtleColor)
-	headerStyle        = lipgloss.NewStyle().Bold(true).Padding(0, 1)
-	cellStyle          = lipgloss.NewStyle().Padding(0, 1)
-	borderStyle        = lipgloss.NewStyle().Foreground(subtleColor)
-	remoteSessionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("5")) // magenta
-	titleStyle         = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
-	errStyle           = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	dimStyle   = lipgloss.NewStyle().Foreground(subtleColor)
+	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
+	errStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 )
 
-// statusCell renders the merged STATUS cell: a state-colored ● dot, one 🤡 per
-// live clown running under the session (so a busy session reads as "active,
-// 🤡🤡🤡" — the badge width itself shows the count at a glance), and an optional
-// dim marker suffix (main / tombstone / dangling / remote). State is carried by
-// the dot's color alone — see statusLegend for the key — which the dot+clowns
-// design trades word-legibility for a far narrower column.
-func statusCell(state string, clowns int, marker string) string {
-	st, ok := stateStyles[state]
-	if !ok {
-		st = dimStyle
+// stateSeverity maps a resolved session state to mesa's severity vocabulary,
+// carrying the STATUS dot's color — see stateLegendEntries for the key.
+// Unrecognized states (there should be none) fall back to Muted rather than
+// Neutral so an unknown state still reads as "not clearly live".
+func stateSeverity(state string) mesa.Severity {
+	switch state {
+	case session.StateActive:
+		return mesa.OK
+	case session.StateRunningDetached:
+		return mesa.Accent
+	case session.StateInactive:
+		return mesa.Warn
+	case session.StateAbandoned:
+		return mesa.Muted
+	default:
+		return mesa.Muted
 	}
-	out := st.Render("●")
-	if clowns > 0 {
-		out += " " + st.Render(strings.Repeat("🤡", clowns))
-	}
-	if marker != "" {
-		out += " " + dimStyle.Render("("+marker+")")
-	}
-	return out
 }
 
-// statusLegend is the dim key decoding the STATUS dot colors, rendered once in
-// the table's footer row (legendFooter) so the dot-only column stays
+// stateLegendEntries is the STATUS dot color key, rendered once in the
+// table's footer by mesa's styled renderer so the dot-only column stays
 // self-explanatory.
-func statusLegend() string {
-	dot := func(state, label string) string {
-		return stateStyles[state].Render("●") + dimStyle.Render(" "+label)
+func stateLegendEntries() []mesa.LegendEntry {
+	return []mesa.LegendEntry{
+		mesa.Entry(mesa.OK, "●", "active"),
+		mesa.Entry(mesa.Accent, "●", "running-detached"),
+		mesa.Entry(mesa.Warn, "●", "inactive"),
+		mesa.Entry(mesa.Muted, "●", "abandoned"),
 	}
-	return strings.Join([]string{
-		dot(session.StateActive, "active"),
-		dot(session.StateRunningDetached, "running-detached"),
-		dot(session.StateInactive, "inactive"),
-		dot(session.StateAbandoned, "abandoned"),
-	}, dimStyle.Render(" · "))
+}
+
+// clownBadge renders the STATUS badge for n live clowns under a session: one
+// 🤡 per clown, so a busy session reads as "active, 🤡🤡🤡" — the badge width
+// itself shows the count at a glance. Empty for zero.
+func clownBadge(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.Repeat("🤡", n)
+}
+
+// statusCell renders the merged STATUS cell: a severity-colored ● dot (see
+// stateSeverity/stateLegendEntries), the clown-count badge, and an optional
+// dim marker suffix (main / tombstone / dangling / remote).
+func statusCell(sev mesa.Severity, clowns int, marker string) mesa.Cell {
+	if marker != "" {
+		marker = "(" + marker + ")"
+	}
+	return mesa.Status(sev, "", mesa.WithBadge(clownBadge(clowns)), mesa.WithMarker(marker))
 }
 
 // terminalWidth reports stdout's column count for description wrapping, or 0
@@ -183,16 +194,21 @@ func terminalWidth() int {
 }
 
 // descCell renders the DESCRIPTION cell, folding the spawn-lineage hint in
-// as a dim suffix (mirrors the text path's `spawned-by:<key>` column).
-func descCell(desc, spawnedBy string) string {
+// as a dim (Muted) trailing span (mirrors the text path's
+// `spawned-by:<key>` column).
+func descCell(desc, spawnedBy string) mesa.Cell {
 	if spawnedBy == "" {
-		return desc
+		return mesa.Text(desc)
 	}
-	hint := dimStyle.Render("↰" + spawnedBy)
+	hint := "↰" + spawnedBy
 	if desc == "" {
-		return hint
+		return mesa.Styled(mesa.Muted, hint)
 	}
-	return desc + " " + hint
+	return mesa.Spans(
+		mesa.Span{Text: desc},
+		mesa.Span{Text: " "},
+		mesa.Span{Text: hint, Sev: mesa.Muted},
+	)
 }
 
 func renderDiags(diags []string) string {
@@ -203,36 +219,34 @@ func renderDiags(diags []string) string {
 	return strings.Join(lines, "\n")
 }
 
-// descColumn is the 0-based index of the DESCRIPTION column in the table
-// layout below (ID · STATUS · AGE · DESCRIPTION). It is the only column given a
-// fixed width, so it is the one that wraps.
-const descColumn = 3
-
-// listTableRow is one fully-rendered row of the summary table. id is the full
-// session key (<repo>/<branch> or <repo>/<rand> for an implicit session), shown
-// verbatim so the ID column is exactly the string `sc resume`/`sc close` take.
-type listTableRow struct{ id, status, age, desc string }
-
-// renderListTable renders the styled session table — the summary view shared
-// by the static pretty path and the --watch model. Local states are sorted
-// active-first (session.SortStates) and filtered the same way the text path
-// is: abandoned/closed entries are dropped unless closed is true. The full
-// worktree path is intentionally omitted (available via --format tap/json);
-// this is a scannable summary. width is stdout's column count (0 ⇒ unknown);
-// when known, the DESCRIPTION column is bounded so long descriptions wrap
-// inside their cell instead of overflowing and breaking the grid. Pure:
-// returns the rendered string with a trailing newline.
-func renderListTable(states []session.State, remoteRows []session.ListRow, diags []string, closed bool, width int) string {
+// renderListTable renders the session table — the summary view shared by the
+// static pretty/plain paths and the --watch model — through mesa (RFC 0003;
+// purse-first#185). Local states are sorted active-first (session.SortStates)
+// and filtered the same way the text path is: abandoned/closed entries are
+// dropped unless closed is true. The full worktree path is intentionally
+// omitted (available via --format tap/json); this is a scannable summary.
+// width is stdout's column count (0 ⇒ unknown, mesa sizes to content); opts
+// selects styled vs plain rendering (mesa.ForceStyle / mesa.ForcePlain) —
+// both modePretty and modePlain always resolve one of the two explicitly, so
+// mesa's own TTY auto-detection is never relied on here. Pure: returns the
+// rendered string.
+func renderListTable(states []session.State, remoteRows []session.ListRow, diags []string, closed bool, width int, opts ...mesa.RenderOpt) string {
 	now := time.Now()
 	session.SortStates(states)
 
 	// Clown presence (RFC-0014 §4): the 1-to-many "clowns under this session"
 	// view, grouped by decoration == the spinclass session key. The count folds
 	// into the STATUS cell — presence of live clowns IS activity — so there is
-	// no longer a separate CLOWNS column.
+	// no separate CLOWNS column.
 	presByKey := clown.PresenceByDecoration(now)
 
-	var rows []listTableRow
+	t := mesa.New().
+		Col("ID", mesa.Pin).
+		Col("STATUS", mesa.Pin).
+		Col("AGE", mesa.Pin).
+		Col("DESCRIPTION", mesa.Flex).
+		Legend(stateLegendEntries()...).
+		Empty("No sessions.")
 
 	for i := range states {
 		s := &states[i]
@@ -255,140 +269,39 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 		// spinclass PID reads running-detached, not inactive (#153) — never
 		// contradicting the 🤡 count beside it. Filter/marker stay on the base
 		// resolved state above so presence never un-abandons a row.
-		rows = append(rows, listTableRow{
-			id:     s.SessionKey,
-			status: statusCell(s.ResolveDisplayState(clowns), clowns, marker),
-			age:    sessionpick.FormatRelDate(sessionpick.LastActivity(*s), now),
-			desc:   descCell(s.Description, s.SpawnedBy),
-		})
+		t.Row(
+			mesa.Text(s.SessionKey),
+			statusCell(stateSeverity(s.ResolveDisplayState(clowns)), clowns, marker),
+			mesa.Text(sessionpick.FormatRelDate(sessionpick.LastActivity(*s), now)),
+			descCell(s.Description, s.SpawnedBy),
+		)
 	}
 	for _, r := range remoteRows {
 		// Combine the host and the repo/id session key into the single ID cell,
-		// styled magenta so remote rows still stand out. Host-first mirrors the
-		// `host:` resume-target convention (FDR 0011): <remote>:<repo>/<id>.
-		rows = append(rows, listTableRow{
-			id:     remoteSessionStyle.Render(r.Remote + ":" + r.Repo + "/" + r.ID),
-			status: statusCell(r.State, r.ClownCount, "remote"),
-			age:    "",
-			desc:   descCell(r.Description, r.SpawnedBy),
-		})
+		// styled Special (magenta) so remote rows still stand out — as is the
+		// STATUS dot, uniformly, regardless of the remote's reported state.
+		// Host-first mirrors the `host:` resume-target convention (FDR 0011):
+		// <remote>:<repo>/<id>.
+		t.Row(
+			mesa.Styled(mesa.Special, r.Remote+":"+r.Repo+"/"+r.ID),
+			statusCell(mesa.Special, r.ClownCount, "remote"),
+			mesa.Text(""),
+			descCell(r.Description, r.SpawnedBy),
+		)
 	}
 
-	if len(rows) == 0 {
-		out := dimStyle.Render("No sessions.")
-		if len(diags) > 0 {
-			out += "\n" + renderDiags(diags)
-		}
-		return out + "\n"
-	}
-
-	t := table.New().
-		Border(lipgloss.RoundedBorder()).
-		BorderStyle(borderStyle).
-		BorderBottom(false). // the legend footer (legendFooter) supplies the closing border
-		Headers("ID", "STATUS", "AGE", "DESCRIPTION").
-		StyleFunc(listTableStyleFunc(width, fixedColumnWidths(rows)))
-	// Description-column wrapping: when stdout's width is known, give
-	// the table that total width and pin the three narrow columns to their content
-	// width (below); lipgloss's resizer grows the shortest column and shrinks the
-	// biggest but skips any column already at its fixed width, so it flexes only
-	// the one unpinned column — DESCRIPTION — to the remaining space, wrapping it
-	// (table wrapping is on by default) rather than letting it overflow and break
-	// the grid. Width 0 (non-TTY / unknown) keeps the legacy content-sized layout.
+	var b strings.Builder
 	if width > 0 {
-		t = t.Width(width)
+		opts = append(opts, mesa.Width(width))
 	}
-	for _, r := range rows {
-		t.Row(r.id, r.status, r.age, r.desc)
+	if err := t.Render(&b, opts...); err != nil {
+		return "render error: " + err.Error() + "\n"
 	}
-	out := legendFooter(t.Render(), statusLegend())
+	out := b.String()
 	if len(diags) > 0 {
-		out += "\n" + renderDiags(diags)
+		out += renderDiags(diags) + "\n"
 	}
-	return out + "\n"
-}
-
-// ansiSGR matches SGR color/style escape sequences, used to measure the
-// table's border geometry from its (styled) top border line.
-var ansiSGR = regexp.MustCompile("\x1b\\[[0-9;]*m")
-
-// legendFooter attaches the status-dot color key as a footer row spanning the
-// full width of body — a table rendered WITHOUT its bottom border. It reads the
-// column geometry from the table's top border line (stripped of color) so the
-// connecting rule can drop a ┴ under each column boundary, merging the columns
-// into the spanning footer; the legend is then framed to the table's inner
-// width (lipgloss wraps it if the terminal is narrower than the key) and closed
-// by a flat bottom border. Border glyphs reuse borderStyle so the footer is the
-// same color as the rest of the grid.
-func legendFooter(body, legend string) string {
-	lines := strings.Split(body, "\n")
-	top := []rune(ansiSGR.ReplaceAllString(lines[0], ""))
-	total := len(top)
-	if total < 2 {
-		// Degenerate (no recognizable border) — fall back to a plain trailing line.
-		return body + "\n" + legend
-	}
-	inner := total - 2
-
-	connector := make([]rune, total)
-	bottom := make([]rune, total)
-	for i := range connector {
-		connector[i], bottom[i] = '─', '─'
-	}
-	connector[0], connector[total-1] = '├', '┤'
-	bottom[0], bottom[total-1] = '╰', '╯'
-	for i, r := range top {
-		if r == '┬' {
-			connector[i] = '┴'
-		}
-	}
-
-	bar := borderStyle.Render("│")
-	keyBody := lipgloss.NewStyle().Width(inner).Padding(0, 1).Align(lipgloss.Center).Render(legend)
-	out := append(lines, borderStyle.Render(string(connector)))
-	for _, ln := range strings.Split(keyBody, "\n") {
-		out = append(out, bar+ln+bar)
-	}
-	out = append(out, borderStyle.Render(string(bottom)))
-	return strings.Join(out, "\n")
-}
-
-// fixedColumnWidths returns the content width to pin each non-DESCRIPTION column
-// to: the widest cell in that column, headers included. Pinning these lets
-// lipgloss direct all of the table's flex onto the single unpinned DESCRIPTION
-// column (see renderListTable).
-func fixedColumnWidths(rows []listTableRow) [descColumn]int {
-	w := [descColumn]int{
-		lipgloss.Width("ID"),
-		lipgloss.Width("STATUS"),
-		lipgloss.Width("AGE"),
-	}
-	for _, r := range rows {
-		w[0] = max(w[0], lipgloss.Width(r.id))
-		w[1] = max(w[1], lipgloss.Width(r.status))
-		w[2] = max(w[2], lipgloss.Width(r.age))
-	}
-	return w
-}
-
-// listTableStyleFunc returns the per-cell StyleFunc. Headers get headerStyle;
-// when width is known the three leading columns are pinned to their content
-// width (fixed[c]) so DESCRIPTION is the only column lipgloss reflows. With
-// width 0 every body cell gets the plain padded cellStyle and the table sizes
-// to content.
-func listTableStyleFunc(width int, fixed [descColumn]int) table.StyleFunc {
-	return func(r, c int) lipgloss.Style {
-		if r == table.HeaderRow {
-			return headerStyle
-		}
-		if width > 0 && c < descColumn {
-			// lipgloss .Width() is the total cell width including padding, so add
-			// cellStyle's horizontal padding back onto the measured content width —
-			// otherwise the pinned column truncates its content by the padding.
-			return cellStyle.Width(fixed[c] + cellStyle.GetHorizontalPadding())
-		}
-		return cellStyle
-	}
+	return out
 }
 
 // ---- watch model -----------------------------------------------------------
@@ -465,7 +378,7 @@ func (m watchModel) View() string {
 	if m.loadErr != nil {
 		b.WriteString(errStyle.Render("reload error: "+m.loadErr.Error()) + "\n")
 	}
-	b.WriteString(renderListTable(m.states, m.remoteRows, m.diags, m.closed, m.width))
+	b.WriteString(renderListTable(m.states, m.remoteRows, m.diags, m.closed, m.width, mesa.ForceStyle()))
 	b.WriteString(dimStyle.Render(fmt.Sprintf("q quit · r refresh · every %s", m.interval)))
 	return b.String()
 }

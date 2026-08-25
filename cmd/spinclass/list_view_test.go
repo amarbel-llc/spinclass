@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"code.linenisgreat.com/purse-first/libs/dewey/pkgs/mesa"
 	"code.linenisgreat.com/spinclass/internal/session"
 )
 
@@ -98,9 +99,9 @@ func TestRenderListTable(t *testing.T) {
 	}
 	diags := []string{"lab: unreachable (no route to host)"}
 
-	// width 0 ⇒ content-sized layout (no wrapping), so the spawned-by hint
+	// width 0 ⇒ content-sized layout (no truncation), so the spawned-by hint
 	// stays contiguous in its cell for the substring assertion below.
-	out := renderListTable(states, remoteRows, diags, false, 0)
+	out := renderListTable(states, remoteRows, diags, false, 0, mesa.ForceStyle())
 
 	for _, want := range []string{
 		"ID", "STATUS", "AGE", "DESCRIPTION", // headers (REPO+NAME merged → ID)
@@ -146,7 +147,7 @@ func TestRenderListTableFoldsClownCountIntoStatus(t *testing.T) {
 		Branch:       "feat",
 		SessionKey:   "spinclass/feat",
 		StartedAt:    time.Now(),
-	}}, nil, nil, false, 0)
+	}}, nil, nil, false, 0, mesa.ForceStyle())
 
 	if strings.Contains(out, "CLOWNS") {
 		t.Errorf("CLOWNS column was merged into STATUS; header must be gone:\n%s", out)
@@ -184,7 +185,7 @@ func TestRenderListTablePresenceFoldsIntoStatus(t *testing.T) {
 		Branch:       "feat",
 		SessionKey:   "spinclass/feat",
 		StartedAt:    time.Now(),
-	}}, nil, nil, false, 0)
+	}}, nil, nil, false, 0, mesa.ForceStyle())
 
 	if !strings.Contains(out, "🤡") {
 		t.Errorf("live clown over dead PID must surface a 🤡 in STATUS:\n%s", out)
@@ -202,7 +203,7 @@ func TestRenderListTableClosedIncludesAbandoned(t *testing.T) {
 			Branch:       "ghost",
 			SessionKey:   "spinclass/ghost",
 		},
-	}, nil, nil, true, 0)
+	}, nil, nil, true, 0, mesa.ForceStyle())
 
 	if !strings.Contains(out, "ghost") {
 		t.Errorf("closed=true must include abandoned row:\n%s", out)
@@ -213,7 +214,7 @@ func TestRenderListTableClosedIncludesAbandoned(t *testing.T) {
 // still render when there are no session rows.
 func TestRenderListTableEmpty(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir()) // hermetic: no clown presence
-	out := renderListTable(nil, nil, []string{"lab: unreachable (timeout)"}, false, 0)
+	out := renderListTable(nil, nil, []string{"lab: unreachable (timeout)"}, false, 0, mesa.ForceStyle())
 	if !strings.Contains(out, "No sessions.") {
 		t.Errorf("empty list should say 'No sessions.':\n%s", out)
 	}
@@ -222,11 +223,13 @@ func TestRenderListTableEmpty(t *testing.T) {
 	}
 }
 
-// TestRenderListTableWrapsDescription verifies the DESCRIPTION column wraps to
-// the terminal width instead of overflowing and breaking the grid:
-// given a known width, no rendered line exceeds it, and the long description is
-// wrapped rather than truncated (its trailing END marker survives).
-func TestRenderListTableWrapsDescription(t *testing.T) {
+// TestRenderListTableTruncatesDescription verifies the DESCRIPTION column is
+// bounded to the terminal width instead of overflowing and breaking the
+// grid: given a known width, no rendered line exceeds it, and an overlong
+// description is ellipsized (mesa truncates a Flex column to one line rather
+// than wrapping it — RFC 0003 §7.2) so its trailing END marker does NOT
+// survive, but the truncation marker does.
+func TestRenderListTableTruncatesDescription(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir()) // hermetic: no clown presence
 	const width = 100
 	longDesc := strings.Repeat("alpha bravo charlie delta ", 12) + "END"
@@ -239,14 +242,17 @@ func TestRenderListTableWrapsDescription(t *testing.T) {
 		SessionKey:   "spinclass/wide-willow",
 		Description:  longDesc,
 		StartedAt:    time.Now(),
-	}}, nil, nil, false, width)
+	}}, nil, nil, false, width, mesa.ForceStyle())
 
 	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
 		if w := lipgloss.Width(line); w > width {
 			t.Errorf("line exceeds width %d (got %d): %q", width, w, line)
 		}
 	}
-	if !strings.Contains(out, "END") {
-		t.Errorf("wrapped description must not be truncated (missing trailing END):\n%s", out)
+	if strings.Contains(out, "END") {
+		t.Errorf("overlong description must be truncated, not preserved in full:\n%s", out)
+	}
+	if !strings.Contains(out, "…") {
+		t.Errorf("truncated description must carry the ellipsis marker:\n%s", out)
 	}
 }
