@@ -461,7 +461,7 @@ func TestTombstonePromotesSymlinkToRegularFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Tombstone(s.RepoPath, s.Branch); err != nil {
+	if err := Tombstone(s.RepoPath, s.Branch, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -500,12 +500,34 @@ func TestTombstonePromotesSymlinkToRegularFile(t *testing.T) {
 	}
 }
 
+// TestTombstoneRecordsDeletedSHA verifies the sha param (#291, `sc
+// resurrect`'s data source) round-trips into the tombstone JSON, and that an
+// empty sha leaves DeletedSHA unset rather than writing an empty-string
+// field that would misleadingly pass a `!= ""` check downstream.
+func TestTombstoneRecordsDeletedSHA(t *testing.T) {
+	s := setupTestSession(t, "to-be-resurrected")
+	if err := Write(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := Tombstone(s.RepoPath, s.Branch, "abc123deadbeef"); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := Read(s.RepoPath, s.Branch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.DeletedSHA != "abc123deadbeef" {
+		t.Errorf("DeletedSHA = %q, want %q", loaded.DeletedSHA, "abc123deadbeef")
+	}
+}
+
 func TestReadFallsBackToTombstone(t *testing.T) {
 	s := setupTestSession(t, "tomb-readback")
 	if err := Write(s); err != nil {
 		t.Fatal(err)
 	}
-	if err := Tombstone(s.RepoPath, s.Branch); err != nil {
+	if err := Tombstone(s.RepoPath, s.Branch, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -630,10 +652,10 @@ func TestGCTombstones(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := Tombstone(stale.RepoPath, stale.Branch); err != nil {
+	if err := Tombstone(stale.RepoPath, stale.Branch, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := Tombstone(fresh.RepoPath, fresh.Branch); err != nil {
+	if err := Tombstone(fresh.RepoPath, fresh.Branch, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -669,7 +691,7 @@ func TestGCTombstonesZeroRetentionIsNoOp(t *testing.T) {
 	if err := Write(s); err != nil {
 		t.Fatal(err)
 	}
-	if err := Tombstone(s.RepoPath, s.Branch); err != nil {
+	if err := Tombstone(s.RepoPath, s.Branch, ""); err != nil {
 		t.Fatal(err)
 	}
 	removed, err := GCTombstones(0)
@@ -820,7 +842,7 @@ func TestListAllClassifiesEntryShapes(t *testing.T) {
 	if err := Write(tomb); err != nil {
 		t.Fatal(err)
 	}
-	if err := Tombstone(tomb.RepoPath, tomb.Branch); err != nil {
+	if err := Tombstone(tomb.RepoPath, tomb.Branch, ""); err != nil {
 		t.Fatal(err)
 	}
 

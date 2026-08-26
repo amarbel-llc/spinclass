@@ -138,12 +138,19 @@ func RunResolved(w io.Writer, repoPath, wtPath, branch string, force bool, nixGC
 	// returns when the PID is gone or the deadline passes.
 	executor.WaitForExit(activePID, 2*time.Second)
 
+	// Capture the branch's tip commit before anything below removes the
+	// worktree/branch, so `sc resurrect` can recreate both later (#291).
+	// Best-effort: wtPath still exists and branch is still checked out here,
+	// so this normally succeeds; a failure just means DeletedSHA stays empty
+	// and resurrect refuses cleanly rather than silently losing the point.
+	sha, _ := git.RevParse(wtPath, "HEAD")
+
 	// Promote the index symlink to a tombstone (regular file) and
 	// remove the worktree-local state.json + .spinclass/ before the
 	// worktree directory is itself force-removed by git. Best effort:
 	// if the state file is gone (legacy session that never wrote one,
 	// or an external worktree removal), skip the tombstone.
-	if tombErr := session.Tombstone(repoPath, branch); tombErr != nil {
+	if tombErr := session.Tombstone(repoPath, branch, sha); tombErr != nil {
 		// Fall through to Remove for cleanup; tombstone failures don't
 		// block close.
 		_ = session.Remove(repoPath, branch)

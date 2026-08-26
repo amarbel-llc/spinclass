@@ -83,6 +83,15 @@ type State struct {
 	StartedAt   time.Time         `json:"started_at"`
 	ExitedAt    *time.Time        `json:"exited_at,omitempty"`
 
+	// DeletedSHA is the branch's tip commit, captured by close.RunResolved
+	// immediately before `sc close`/`close-child-session` force-delete the
+	// worktree and branch. `sc resurrect` uses it to recreate both from the
+	// exact last-known state. Empty for tombstones written before this field
+	// existed, or for a session closed outside spinclass (a dangling index
+	// entry never went through Tombstone at all) — resurrect refuses those
+	// cleanly rather than guessing via git reflog.
+	DeletedSHA string `json:"deleted_sha,omitempty"`
+
 	// PreMergeAttestation buffers the agent's most recent
 	// nothing-but-the-truth response. Consumed and cleared by the next
 	// merge-this-session / check-this-session call. See
@@ -530,9 +539,15 @@ func findLiveImplicitInDir(dir string) (st *State, randID string, found bool, er
 // worktree directory itself, since the read needs <worktree>/.spinclass/
 // state.json to still be present.
 //
+// sha, when non-empty, is recorded as State.DeletedSHA — the branch's tip
+// commit, captured by the caller immediately before it force-deletes the
+// worktree/branch, so `sc resurrect` can recreate both later. Pass "" when
+// no sha could be resolved (best-effort — a missing DeletedSHA just means
+// resurrect refuses cleanly with an explanatory error instead of guessing).
+//
 // Defined in slice 1 as plumbing but not yet wired up to merge/close/clean
 // — the lifecycle work in #42 picks this up.
-func Tombstone(repoPath, branch string) error {
+func Tombstone(repoPath, branch, sha string) error {
 	migrateOnce()
 	wt := worktreeFromRepoBranch(repoPath, branch)
 	from := caller(1)
@@ -542,6 +557,16 @@ func Tombstone(repoPath, branch string) error {
 	if err != nil {
 		sessionlog.Errorf("session.Tombstone read-failed path=%s from=%s err=%v", statePath, from, err)
 		return fmt.Errorf("session.Tombstone: read live state: %w", err)
+	}
+
+	if sha != "" {
+		var s State
+		if json.Unmarshal(data, &s) == nil {
+			s.DeletedSHA = sha
+			if reMarshalled, merr := json.MarshalIndent(&s, "", "  "); merr == nil {
+				data = reMarshalled
+			}
+		}
 	}
 
 	if err := os.MkdirAll(indexDir(), 0o755); err != nil {

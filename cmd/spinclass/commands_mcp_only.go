@@ -256,6 +256,27 @@ func registerMCPOnlyCommands(app *command.App) {
 		Params: closeChildSessionParamList(),
 		Run:    wrapMCPHandler("close-child-session", handleCloseChildSession),
 	})
+
+	app.AddCommand(&command.Command{
+		Name:  "resurrect",
+		Title: "Resurrect Closed Session",
+		Description: command.Description{
+			Short: "Recreate a closed session's worktree and branch from the commit captured at close time (#291) — the undo half of `sc close`/`close-child-session`. " +
+				"Target is the worktree directory name or <repo>/<branch> session key `sc list --closed` prints. Reuses the original branch name unless --new-branch names " +
+				"a different one (e.g. something else already recreated a branch with that name). Writes fresh, inactive session state carrying the original " +
+				"description/spawn-lineage forward, so `sc list` sees it again immediately; does NOT attach — run `sc resume <target>` afterward. Refuses cleanly (no " +
+				"raw git error) when the target was never a closed session, when it was closed before this feature existed or outside spinclass entirely (no commit " +
+				"was ever captured — recover via `git reflog` instead), or when the captured commit is no longer reachable (most likely local git gc).",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(false),
+			DestructiveHint: protocol.BoolPtr(false),
+			IdempotentHint:  protocol.BoolPtr(false),
+			OpenWorldHint:   protocol.BoolPtr(false),
+		},
+		Params: resurrectParamList(),
+		Run:    wrapMCPHandler("resurrect", handleResurrect),
+	})
 }
 
 // localOnlyParamDesc and defaultBranchParamDesc are shared by merge-this-session

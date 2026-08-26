@@ -147,6 +147,7 @@ Cheap per-package `go build ./internal/foo/...` checks are fine.
   `sc fork [branch]`               Fork current worktree into a new branch (`--from <dir>`); create-only (the `--brief` detached worker was removed in #262)
   `sc spawn [repo] --brief "…"`    Launch a detached worker session; `repo` optional — omitted = this repo, else a sibling (FDR 0006, #262)
   `sc close-child-session <child>` Reap a worker THIS session spawned (#249); refuses anything it did not spawn
+  `sc resurrect <target> [--new-branch]` Recreate a closed session's worktree+branch from its captured commit (#291)
   `sc pull`                        Pull repos and rebase worktrees
   `sc validate`                    Validate sweatfile hierarchy
   `sc perms list|review|edit`      Inspect or edit permission tier rules
@@ -181,6 +182,24 @@ subcommand is always available.
   PreToolUse hook and the perms-tier `RunCheck` (it judges an *invocation*, not a
   tool, since `BuildPermissionString` discards MCP args); `force` is read
   fail-closed. Elicitation could replace the flag (#254).
+- **Resurrecting a closed session** (FDR 0027, #291, `internal/resurrect`): the
+  undo half of `sc close`/`close-child-session`. Both funnel through
+  `close.RunResolved`, which now best-effort resolves the branch's tip
+  (`git.RevParse(wtPath, "HEAD")`) immediately before force-deleting the
+  worktree/branch and threads it into `session.Tombstone`'s new `sha` param
+  as `State.DeletedSHA`. `sc resurrect <target>` (+ MCP tool, no
+  spawned-lineage gate — recovery isn't the privileged operation reaping is)
+  resolves the target via `session.FindByTarget` (tombstones included, same
+  as close/resume), refuses cleanly if it's not a tombstone, has no
+  `DeletedSHA` (predates this feature, or closed outside spinclass — recover
+  via `git reflog`), or the commit is `!git.CommitExists` (likely gc'd), then
+  calls `worktree.Create(repoPath, path, "", DeletedSHA)` — the same
+  arbitrary-base-commit primitive `sc start`'s base-branch freshening
+  uses — and `session.Write` (documented to overwrite a stale tombstone) to
+  re-register it inactive, carrying the description/spawn-lineage forward.
+  Does not attach — `sc resume` afterward reuses that path unmodified.
+  `sc clean`'s merged-worktree removal does NOT capture a SHA (that content
+  already lives in the default branch).
 - **Implicit-session merge** (FDR 0014): from a main-checkout session, merge
   routes to `merge.MergeImplicit` — runs `[hooks].pre-merge` against HEAD then
   `git push` (nothing to rebase). MCP path enforces the implicit attestation

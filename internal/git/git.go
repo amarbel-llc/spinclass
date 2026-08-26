@@ -240,6 +240,14 @@ func RemoteBranchExists(repoPath, branch string) bool {
 	return err == nil
 }
 
+// CommitExists reports whether sha resolves to a reachable commit object in
+// repoPath's object database. Used by `sc resurrect` to distinguish "this
+// commit was garbage collected" from a genuine `git worktree add` failure.
+func CommitExists(repoPath, sha string) bool {
+	_, err := Run(repoPath, "rev-parse", "--verify", sha+"^{commit}")
+	return err == nil
+}
+
 // BranchWorktree returns the absolute path of the worktree that currently has
 // branch checked out, or "" when none does.
 //
