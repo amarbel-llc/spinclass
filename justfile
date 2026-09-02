@@ -191,6 +191,43 @@ explore-gcroots-spinclass:
     set -uo pipefail
     nix-store --gc --print-roots 2>/dev/null | grep -F 'spinclass' || echo "(no spinclass-rooted entries found)"
 
+# [explore] Estimate the system-prompt cost of injecting sibling repos' just
+# recipe names + doc lines (spinclass#287 / #286). For every
+# code.linenisgreat.com repo under `repos` with a justfile, dump the recipe
+# model, render the exact text a fragment would carry ("name  doc"), and report
+# per-repo recipe count / chars / estimated tokens (chars÷4 — a rough
+# heuristic, not a tokenizer) for all public recipes and for the debug/explore
+# group subset, plus fleet totals. Repos whose justfile fails to dump are
+# listed as skipped.
+#
+# estimate the prompt-token cost of injecting sibling repos' just recipe names + docs
+[group('explore')]
+explore-recipe-prompt-cost repos=(home_directory() / 'eng/repos'):
+    #!/usr/bin/env bash
+    set -uo pipefail
+    all_q='.recipes | to_entries[] | .value | select(.private|not) | "\(.name)  \(.doc // "")"'
+    dbg_q='.recipes | to_entries[] | .value | select(.private|not) | select((.attributes // []) | map(if type=="object" then (.group // "") else "" end) | any(. == "debug" or . == "explore")) | "\(.name)  \(.doc // "")"'
+    printf '%-16s %8s %8s %8s | %8s %8s %8s\n' repo recipes chars '~tokens' 'dbg/expl' chars '~tokens'
+    tr=0; tc=0; td=0; tdc=0; skipped=""
+    for d in "{{ repos }}"/*/; do
+      d=${d%/}; name=$(basename "$d")
+      [ -f "$d/justfile" ] || continue
+      url=$(git -C "$d" config --get remote.origin.url 2>/dev/null || true)
+      case "$url" in *code.linenisgreat.com*) ;; *) continue ;; esac
+      if ! dump=$(just --justfile "$d/justfile" --working-directory "$d" --dump --dump-format json 2>/dev/null); then
+        skipped="$skipped $name"; continue
+      fi
+      all=$(printf '%s' "$dump" | jq -r "$all_q"); dbg=$(printf '%s' "$dump" | jq -r "$dbg_q")
+      n=$(printf '%s\n' "$all" | grep -c . || true); c=$(printf '%s\n' "$all" | wc -c)
+      dn=$(printf '%s\n' "$dbg" | grep -c . || true); dc=$(printf '%s\n' "$dbg" | wc -c)
+      [ "$dn" -eq 0 ] && dc=0
+      printf '%-16s %8d %8d %8d | %8d %8d %8d\n' "$name" "$n" "$c" $((c/4)) "$dn" "$dc" $((dc/4))
+      tr=$((tr+n)); tc=$((tc+c)); td=$((td+dn)); tdc=$((tdc+dc))
+    done
+    printf '%-16s %8d %8d %8d | %8d %8d %8d\n' TOTAL "$tr" "$tc" $((tc/4)) "$td" "$tdc" $((tdc/4))
+    [ -n "$skipped" ] && echo "skipped (dump failed):$skipped"
+    exit 0
+
 # [explore] List ALL dangling auto-root links on the system (regardless of
 # what they used to point at). These are zero-byte symlinks with broken
 # targets — leftovers from removed checkouts/worktrees.
