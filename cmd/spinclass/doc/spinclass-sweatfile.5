@@ -930,6 +930,61 @@ silences its report there.
 is excluded entirely \(em forking means \(dqbranch from here\(dq.
 .B Merge:
 scalar override.
+.SS [auth]
+Per-session forge push credential (FDR 0028).
+When set, every worktree session created by
+.BR "sc start" ", " "sc spawn" ", or " "sc run"
+mints its own forge access token at creation, so its fetches and pushes
+\(em interactive and the
+.B merge-this-session
+landing \(em never depend on the inherited ssh-agent.
+Both commands are run via
+.B sh \-c
+in the session worktree, devshell-scoped like the lifecycle hooks, with
+.BR SPINCLASS_SESSION_ID ", " SPINCLASS_REPO ", " SPINCLASS_BRANCH ", " SPINCLASS_WORKTREE ", "
+.BR SPINCLASS_FORGE_HOST " (the origin's host), and " SPINCLASS_FORGE_REPO
+(the origin's
+.IR owner/name )
+in the environment.
+.TP
+.B mint\-command
+Prints the token on stdout.
+Spinclass stores it as a mode-600 git-credential-store file at
+.I .spinclass/git\-credentials
+(the line
+.BR https://spinclass:<token>@<host> ;
+Forgejo accepts any username when the password is an access token) and
+sets worktree-scoped git config on the session worktree \(em and, at merge
+time, on the disposable landing worktree the push runs from (FDR 0029):
+.B credential.helper
+pointing at that file, and
+.B url.https://<host>/.insteadOf
+rewriting the origin's ssh form to https for that host only, so remotes
+on other hosts (GitHub) keep ssh.
+The root checkout's config is never touched.
+A failed mint fails session creation and removes the half-built worktree:
+a session that silently pushed off the agent instead would be exactly the
+failure this exists to remove.
+.B Merge:
+scalar override.
+.TP
+.B revoke\-command
+Revokes the token by session id.
+Run at
+.B sc close
+and when
+.B sc clean
+reaps a merged worktree (a failure warns and leaves the token recorded
+unrevoked), and by the orphan sweep at the next session creation on the
+repo for sessions that ended without revoking (crashed, or removed outside
+spinclass).
+.B Merge:
+scalar override.
+.PP
+.B sc validate
+warns when only one of the two is set.
+Implicit (main-checkout) sessions are outside this: they are the operator
+in the root and keep ssh.
 .SS [session\-entry]
 Controls what command is exec'd when attaching to a session, how
 detached worker sessions are launched, what environment is injected,

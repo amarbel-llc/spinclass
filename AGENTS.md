@@ -310,6 +310,30 @@ subcommand is always available.
   default OR its remote-tracking ref): `close.RunResolved`, `clean.scanWorktrees`,
   `shop.closeShop`'s auto-close gate. This is the injection surface FDR 0028's
   worktree-scoped push credential assumes.
+- **Per-session forge push credentials** (FDR 0028, #285, `internal/auth`): a
+  sweatfile `[auth]` table (`mint-command` / `revoke-command`) gives a worktree
+  session its own forge token so pushes never ride the inherited ssh-agent.
+  `auth.Mint` runs on the `shop.createWorktree` funnel right after setup (fatal
+  on failure — the half-built worktree is torn down): runs the command
+  devshell-scoped in the worktree (`sweatfile.RunCommandCapture`) with the
+  `SPINCLASS_*` identity env + `SPINCLASS_FORGE_HOST`/`_FORGE_REPO` (parsed
+  from the CONFIGURED `remote.origin.url` — `auth.ParseForgeRemote`; never
+  `git remote get-url`, which applies insteadOf), writes the stdout token as the
+  mode-600 `.spinclass/git-credentials` line `https://spinclass:<token>@<host>`
+  (Forgejo ignores the username when the password is a token), and injects
+  worktree-scoped config (`auth.Inject`: `credential.helper = store --file=…` +
+  `url.https://<host>/.insteadOf = <origin's ssh prefix>`; guarded by
+  `sweatfile.CommonConfigHasWorktreeOverride`). The mint is recorded as
+  `session.State.Credential` (`session.Write` carries it forward; `session.
+  UpdateCredential` stamps live state OR a tombstone). `auth.MirrorInto` wires
+  the FDR 0029 landing worktree before the push; `merge.pullDefault` replaces
+  the root `git pull` with a fetch from the session worktree + a local ff of the
+  root ref, so the merge's fetch is agent-free too. `auth.Revoke` runs at
+  `close.RunResolved` and `clean.removeWorktree` (warn, non-fatal);
+  `auth.SweepOrphans` runs at the next creation on the repo for abandoned/
+  tombstoned sessions with an unrevoked record. `validate.CheckAuth` warns on a
+  lone mint/revoke. Implicit sessions, the `disable-merge-queue` path, and the
+  creation-time base-branch fetch are outside it.
 - **Stacked / queued intra-session merges** (FDR 0025, #265): a second
   `merge-this-session-async` while a gate runs ENQUEUES the next batch
   (in-process per-worktree queue, `cmd/spinclass/merge_queue.go`) rather than
@@ -439,7 +463,8 @@ dirs → repo at each level. Notable surface:
 - Arrays of tables, dedup-by-name: `[[mcps]]`, `[[start-commands]]`,
   `[[remotes]]`.
 - `[env]` (map merge); `[hooks]` (lifecycle hooks + the `disable-*` /
-  `*-timeout` / output-format knobs, scalar override);
+  `*-timeout` / output-format knobs, scalar override); `[auth]`
+  (`mint-command` / `revoke-command`, scalar override — FDR 0028);
   `[session-entry]` (start/resume/spawn-entry/spawn-window argv, per-field
   override; `model-flags` provider→CLI-flag map, merged per-key like `[env]`);
   `[sysprompt]` (`doc-index-dirs` array — **override not append**:

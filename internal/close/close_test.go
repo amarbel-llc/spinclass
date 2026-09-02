@@ -2,6 +2,7 @@ package close
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"os/exec"
@@ -10,8 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/nixgc"
 	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/testgit"
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
@@ -404,6 +407,42 @@ func TestRunResolvedNoTTYLandedOnOriginIsIntegrated(t *testing.T) {
 	}
 	if _, statErr := os.Stat(wtPath); !os.IsNotExist(statErr) {
 		t.Errorf("expected worktree to be removed, stat returned: %v", statErr)
+	}
+}
+
+// TestRunResolvedRevokesMintedCredential covers FDR 0028's revoke-at-close:
+// a session that minted a credential has its [auth].revoke-command run
+// before the worktree is torn down, and the tombstone records the revocation.
+func TestRunResolvedRevokesMintedCredential(t *testing.T) {
+	repoPath, wtPath := setupNoTTYClose(t)
+	t.Setenv("HOME", t.TempDir())
+	if out, err := exec.Command("git", "-C", repoPath, "remote", "add", "origin", "git@forge.example.com:o/r.git").CombinedOutput(); err != nil {
+		t.Fatalf("git remote add: %v\n%s", err, out)
+	}
+	marker := filepath.Join(t.TempDir(), "revoked")
+	mint, revoke := "echo tok", "echo $SPINCLASS_SESSION_ID > "+marker
+	sf := sweatfile.Sweatfile{Auth: &sweatfile.Auth{MintCommand: &mint, RevokeCommand: &revoke}}
+	if err := os.WriteFile(filepath.Join(wtPath, "sweatfile"),
+		[]byte("[auth]\nmint-command = \"echo tok\"\nrevoke-command = \""+revoke+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	id := auth.Identity{RepoPath: repoPath, WorktreePath: wtPath, Branch: "feature-x", SessionKey: "repo/feature-x"}
+	if _, err := auth.Mint(context.Background(), sf, id); err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+
+	if err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", true, nil, "tap"); err != nil {
+		t.Fatalf("RunResolved: %v", err)
+	}
+	if got, _ := os.ReadFile(marker); strings.TrimSpace(string(got)) != "repo/feature-x" {
+		t.Errorf("revoke-command did not run at close: %q", got)
+	}
+	st, err := session.Read(repoPath, "feature-x")
+	if err != nil {
+		t.Fatalf("Read tombstone: %v", err)
+	}
+	if st.Credential == nil || st.Credential.RevokedAt == nil {
+		t.Errorf("tombstone credential = %+v, want RevokedAt", st.Credential)
 	}
 }
 

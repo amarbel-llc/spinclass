@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"code.linenisgreat.com/spinclass/internal/auth"
 )
 
 // setupSyncRepo builds a bare "origin" plus a clone acting as the repo's main
@@ -81,6 +83,102 @@ func TestResolvedGitSyncLandsOnOriginWithoutAdvancingRootRef(t *testing.T) {
 	assertTestPoint(t, tests, 3, "merge feature-land", true)
 	assertTestPoint(t, tests, 4, "remove worktree feature-land", true)
 	assertTestPoint(t, tests, 5, "delete branch feature-land", true)
+}
+
+// TestResolvedGitSyncMirrorsCredentialIntoLandingWorktree covers the FDR 0028
+// injection surface: when the session worktree carries a minted credential,
+// the landing worktree the push runs from gets the same worktree-scoped
+// credential wiring — observed from the post-merge phase, which runs there.
+func TestResolvedGitSyncMirrorsCredentialIntoLandingWorktree(t *testing.T) {
+	_, repoDir := setupSyncRepo(t)
+	wtPath := setupWorktree(t, repoDir, "feature-cred")
+	if err := os.WriteFile(filepath.Join(wtPath, "c.txt"), []byte("c"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "c.txt")
+	runGit(t, wtPath, "commit", "-m", "session commit")
+
+	// What sc start's setup applies: .spinclass/ is git-excluded, so teardown's
+	// plain `git worktree remove` does not see the credential as untracked
+	// (a host's global gitignore must not be what makes this pass).
+	if err := os.WriteFile(filepath.Join(repoDir, ".git", "info", "exclude"), []byte(".spinclass/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A minted credential: the file plus the session worktree's wiring (a
+	// path origin has no ssh prefix, so only the helper is set).
+	credPath := filepath.Join(wtPath, ".spinclass", auth.CredentialFile)
+	if err := os.MkdirAll(filepath.Dir(credPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(credPath, []byte("https://spinclass:tok@example.com\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := auth.Inject(wtPath, credPath, auth.Remote{Host: "example.com"}); err != nil {
+		t.Fatalf("Inject: %v", err)
+	}
+
+	seen := filepath.Join(t.TempDir(), "helper")
+	sweatfileBody := "[hooks]\npost-merge = \"git config --get credential.helper > " + seen + "\"\n"
+	if err := os.WriteFile(filepath.Join(repoDir, "sweatfile"), []byte(sweatfileBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	recs, err := runResolved(t, &mockExecutor{}, repoDir, wtPath, "feature-cred", "main", true, false)
+	if err != nil {
+		t.Fatalf("Resolved() error: %v\n%+v", err, recs)
+	}
+	got, readErr := os.ReadFile(seen)
+	if readErr != nil {
+		t.Fatalf("post-merge hook did not run in the landing worktree: %v\n%+v", readErr, recs)
+	}
+	if want := "store --file=" + credPath; strings.TrimSpace(string(got)) != want {
+		t.Errorf("landing worktree credential.helper = %q, want %q", strings.TrimSpace(string(got)), want)
+	}
+	assertNoLandWorktrees(t, repoDir)
+}
+
+// TestResolvedGitSyncPullWithRootOffDefault covers the credentialed pull's
+// ref-move path: the root checkout is parked on another branch, so the
+// default branch is not checked out anywhere and the pull advances its ref
+// directly (a `git pull` in the root would have pulled into the parked branch).
+func TestResolvedGitSyncPullWithRootOffDefault(t *testing.T) {
+	bareDir, repoDir := setupSyncRepo(t)
+	wtPath := setupWorktree(t, repoDir, "feature-parked")
+	if err := os.WriteFile(filepath.Join(wtPath, "p.txt"), []byte("p"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "p.txt")
+	runGit(t, wtPath, "commit", "-m", "session commit")
+	runGit(t, repoDir, "checkout", "-b", "parked")
+
+	// origin moves via a second clone.
+	other := filepath.Join(filepath.Dir(repoDir), "other")
+	runGit(t, filepath.Dir(repoDir), "clone", bareDir, other)
+	runGit(t, other, "config", "user.email", "o@test.com")
+	runGit(t, other, "config", "user.name", "Other")
+	if err := os.WriteFile(filepath.Join(other, "o.txt"), []byte("o"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, other, "add", "o.txt")
+	runGit(t, other, "commit", "-m", "concurrent commit on origin")
+	runGit(t, other, "push")
+	originTip := runGit(t, bareDir, "rev-parse", "main")
+
+	recs, err := runResolved(t, &mockExecutor{}, repoDir, wtPath, "feature-parked", "main", true, false)
+	if err != nil {
+		t.Fatalf("Resolved() error: %v\n%+v", err, recs)
+	}
+	if got := runGit(t, repoDir, "rev-parse", "main"); got != originTip {
+		t.Errorf("local main = %s after the pull, want origin's pre-merge tip %s", got, originTip)
+	}
+	if got := runGit(t, repoDir, "rev-parse", "--abbrev-ref", "HEAD"); got != "parked" {
+		t.Errorf("root checkout moved off its parked branch: %s", got)
+	}
+	log := runGit(t, bareDir, "log", "--oneline", "main")
+	if !strings.Contains(log, "session commit") || !strings.Contains(log, "concurrent commit on origin") {
+		t.Errorf("origin main missing commits:\n%s", log)
+	}
 }
 
 // TestResolvedGitSyncPushFailureIsCleanNoOp pins #284's failure-symmetry

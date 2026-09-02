@@ -602,6 +602,38 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 	return err
 }
 
+// RunCommandCapture runs a sweatfile-declared command (`sh -c`) in dir,
+// devshell-scoped exactly like the lifecycle hooks (`direnv exec` when dir has
+// an .envrc), with extraEnv appended to the process env, and returns its
+// stdout. Unlike the hooks, the command's RESULT is its stdout — the
+// [auth].mint-command's token (FDR 0028) — so stdout is captured rather than
+// streamed; stderr is folded into the error on failure.
+func RunCommandCapture(ctx context.Context, dir, cmd string, extraEnv []string) (string, error) {
+	script := stripEmptyLines(cmd)
+	if script == "" {
+		return "", errors.New("empty command")
+	}
+	argv := []string{"sh", "-c", script}
+	if worktreeHasEnvrc(dir) {
+		if direnvPath, ok := direnv.Resolve(); ok {
+			argv = direnv.WrapExec(direnvPath, dir, argv)
+		}
+	}
+	c := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	c.Dir = dir
+	c.Env = append(append(os.Environ(), "WORKTREE="+dir), extraEnv...)
+	var stdout, stderr strings.Builder
+	c.Stdout = &stdout
+	c.Stderr = &stderr
+	if err := c.Run(); err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return "", fmt.Errorf("%w: %s", err, msg)
+		}
+		return "", err
+	}
+	return stdout.String(), nil
+}
+
 func stripEmptyLines(s string) string {
 	var lines []string
 	for _, line := range strings.Split(s, "\n") {

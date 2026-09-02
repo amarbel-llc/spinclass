@@ -154,6 +154,24 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		}
 	}
 
+	// [auth] — scalar override, like [hooks] (FDR 0028). Copied before the
+	// override so the receiver's table is never mutated through the shared
+	// pointer.
+	if other.Auth != nil {
+		if merged.Auth == nil {
+			merged.Auth = &Auth{}
+		} else {
+			cp := *merged.Auth
+			merged.Auth = &cp
+		}
+		if other.Auth.MintCommand != nil {
+			merged.Auth.MintCommand = other.Auth.MintCommand
+		}
+		if other.Auth.RevokeCommand != nil {
+			merged.Auth.RevokeCommand = other.Auth.RevokeCommand
+		}
+	}
+
 	// [sysprompt]
 	if other.Sysprompt != nil {
 		if merged.Sysprompt == nil {

@@ -1,21 +1,27 @@
 package close
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/huh"
 	"github.com/mattn/go-isatty"
 
+	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/executor"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/nixgc"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sessionpick"
+	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/tapblock"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 
@@ -138,6 +144,13 @@ func RunResolved(w io.Writer, repoPath, wtPath, branch string, force bool, nixGC
 	// returns when the PID is gone or the deadline passes.
 	executor.WaitForExit(activePID, 2*time.Second)
 
+	// Revoke the session's forge push credential (FDR 0028) while the
+	// worktree — its credential file and sweatfile — still exists. Non-fatal:
+	// a failed revoke is surfaced as a warning and the token stays recorded
+	// unrevoked on the tombstone, where the next session start's orphan sweep
+	// (and the issuer's TTL) pick it up.
+	revokeCredential(tw, repoPath, wtPath, branch, activeKey(repoPath, branch))
+
 	// Capture the branch's tip commit before anything below removes the
 	// worktree/branch, so `sc resurrect` can recreate both later (#291).
 	// Best-effort: wtPath still exists and branch is still checked out here,
@@ -203,6 +216,50 @@ func RunResolved(w io.Writer, repoPath, wtPath, branch string, force bool, nixGC
 	}
 
 	return nil
+}
+
+// activeKey is the session key the revoke command receives: the recorded one
+// when state is readable, else the conventional <repo>/<branch>.
+func activeKey(repoPath, branch string) string {
+	if st, err := session.Read(repoPath, branch); err == nil && st.SessionKey != "" {
+		return st.SessionKey
+	}
+	return filepath.Base(repoPath) + "/" + branch
+}
+
+// revokeCredential runs the [auth].revoke-command for the session when it
+// minted a credential, as one TAP test point. Best-effort: never blocks close.
+func revokeCredential(tw *tap.Writer, repoPath, wtPath, branch, sessionKey string) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	h, err := sweatfileio.LoadWorktreeHierarchy(home, repoPath, wtPath)
+	if err != nil {
+		return
+	}
+	var out bytes.Buffer
+	id := auth.Identity{RepoPath: repoPath, WorktreePath: wtPath, Branch: branch, SessionKey: sessionKey}
+	ran, rerr := auth.Revoke(context.Background(), h.Merged, id, &out)
+	if !ran {
+		return
+	}
+	desc := "revoke credential " + branch
+	if rerr != nil {
+		diag := map[string]string{"severity": "warn", "message": rerr.Error()}
+		if o := strings.TrimSpace(out.String()); o != "" {
+			diag["output"] = o
+		}
+		if tw != nil {
+			tw.NotOk(desc, diag)
+		} else {
+			fmt.Fprintf(os.Stderr, "spinclass: %s failed: %v\n", desc, rerr)
+		}
+		return
+	}
+	if tw != nil {
+		tw.Ok(desc)
+	}
 }
 
 // runReap executes nixgc.Reap as a single TAP test point. nix-store

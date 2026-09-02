@@ -15,6 +15,7 @@ import (
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 
+	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/basebranch"
 	"code.linenisgreat.com/spinclass/internal/close"
 	"code.linenisgreat.com/spinclass/internal/clown"
@@ -121,9 +122,60 @@ func createWorktree(worktreePath worktree.ResolvedPath, opts CreateOpts, tw *tap
 		if opts.Verbose {
 			logSweatfileResult(result)
 		}
+
+		// Per-session push credential (FDR 0028), on the same funnel as the
+		// base-branch gate so spawn/run sessions get one too. The orphan sweep
+		// runs first (best-effort; a failure is reported, not fatal — the
+		// issuer's TTL sweep is the backstop). A failed MINT is fatal: a session
+		// without the credential it was configured for would push off the
+		// inherited ssh-agent, exactly the failure this feature exists to remove,
+		// and a worker has no operator to notice. The half-built worktree is
+		// torn down so the refusal leaves nothing behind.
+		ctx := context.Background()
+		if n, errs := auth.SweepOrphans(ctx, result.Merged, worktreePath.RepoPath, os.Stderr); n > 0 || len(errs) > 0 {
+			reportCredentialSweep(tw, n, errs)
+		}
+		id := auth.Identity{
+			RepoPath:     worktreePath.RepoPath,
+			WorktreePath: worktreePath.AbsPath,
+			Branch:       worktreePath.Branch,
+			SessionKey:   worktreePath.SessionKey,
+		}
+		minted, mintErr := auth.Mint(ctx, result.Merged, id)
+		if mintErr != nil {
+			_ = git.WorktreeForceRemove(worktreePath.RepoPath, worktreePath.AbsPath)
+			if worktreePath.ExistingBranch == "" {
+				_, _ = git.BranchForceDelete(worktreePath.RepoPath, worktreePath.Branch)
+			}
+			return false, mintErr
+		}
+		if minted && tw != nil {
+			tw.Ok("mint credential " + worktreePath.Branch)
+		}
 	}
 
 	return existed, nil
+}
+
+// reportCredentialSweep emits the orphan-credential sweep's outcome: one ok
+// point for what was revoked, and a warn point per session whose revoke failed
+// (left for the next sweep).
+func reportCredentialSweep(tw *tap.Writer, revoked int, errs []error) {
+	if tw == nil {
+		for _, err := range errs {
+			log.Warn("orphaned credential revoke failed", "err", err)
+		}
+		return
+	}
+	if revoked > 0 {
+		tw.Ok(fmt.Sprintf("revoke %d orphaned credential(s)", revoked))
+	}
+	for _, err := range errs {
+		tw.NotOk("revoke orphaned credential", map[string]string{
+			"severity": "warn",
+			"message":  err.Error(),
+		})
+	}
 }
 
 // reportBase emits the base-branch step's test point. Successes and skips only:

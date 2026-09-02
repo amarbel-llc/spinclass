@@ -2,6 +2,7 @@ package clean
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,7 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/nixgc"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
 
@@ -99,6 +102,43 @@ func TestScanWorktreesOriginLandedIsMerged(t *testing.T) {
 	}
 	if !found.merged {
 		t.Errorf("landed-x scanned as unmerged; its commit is on origin/main")
+	}
+}
+
+// TestRemoveWorktreeRevokesMintedCredential closes the FDR 0028 gap: a merged
+// worktree reaped by `sc clean` has its credential revoked before removal.
+func TestRemoveWorktreeRevokesMintedCredential(t *testing.T) {
+	_, repoDir := setupRepo(t)
+	runGit(t, repoDir, "remote", "add", "origin", "git@forge.example.com:o/r.git")
+	// What sc start's setup applies: spinclass-owned paths are excluded, so
+	// the plain `git worktree remove` below does not see them as untracked.
+	if err := os.WriteFile(filepath.Join(repoDir, ".git", "info", "exclude"), []byte(".spinclass/\nsweatfile\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wtPath := filepath.Join(repoDir, ".worktrees", "merged-x")
+	runGit(t, repoDir, "worktree", "add", "-b", "merged-x", wtPath)
+
+	marker := filepath.Join(t.TempDir(), "revoked")
+	mint, revoke := "echo tok", "echo $SPINCLASS_SESSION_ID > "+marker
+	sf := sweatfile.Sweatfile{Auth: &sweatfile.Auth{MintCommand: &mint, RevokeCommand: &revoke}}
+	if err := os.WriteFile(filepath.Join(wtPath, "sweatfile"),
+		[]byte("[auth]\nmint-command = \"echo tok\"\nrevoke-command = \""+revoke+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	id := auth.Identity{RepoPath: repoDir, WorktreePath: wtPath, Branch: "merged-x", SessionKey: "repo/merged-x"}
+	if _, err := auth.Mint(context.Background(), sf, id); err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+
+	wt := worktreeInfo{repo: "repo", branch: "merged-x", repoPath: repoDir, worktreePath: wtPath, merged: true}
+	if err := removeWorktree(wt, nil); err != nil {
+		t.Fatalf("removeWorktree: %v", err)
+	}
+	if got, _ := os.ReadFile(marker); strings.TrimSpace(string(got)) != "repo/merged-x" {
+		t.Errorf("revoke-command did not run before removal: %q", got)
+	}
+	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
+		t.Errorf("worktree not removed: %v", err)
 	}
 }
 

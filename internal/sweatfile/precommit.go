@@ -219,6 +219,13 @@ func enumerateActiveHooks(dir string) []string {
 	return out
 }
 
+// CommonConfigHasWorktreeOverride is the exported form of
+// commonConfigHasWorktreeOverride for the other writer of worktree-scoped git
+// config (internal/auth, FDR 0028), so both guard the same footgun.
+func CommonConfigHasWorktreeOverride(worktreePath string) bool {
+	return commonConfigHasWorktreeOverride(worktreePath)
+}
+
 // commonConfigHasWorktreeOverride reports whether core.worktree is set in the
 // repository's COMMON config file (shared across all worktrees). When present,
 // enabling extensions.worktreeConfig is unsafe (see installPreCommitHook).

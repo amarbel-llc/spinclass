@@ -1,6 +1,8 @@
 package clean
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -14,6 +16,7 @@ import (
 	"github.com/charmbracelet/log"
 	"github.com/mattn/go-isatty"
 
+	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/check"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/merge"
@@ -128,6 +131,11 @@ func removeWorktree(wt worktreeInfo, tw *tap.Writer) error {
 	// and issue #67 for the empirical reproduction.
 	gcPlan := planNixGCForClean(wt.repoPath, wt.worktreePath)
 
+	// Revoke the session's forge push credential (FDR 0028) before the
+	// worktree goes — closing the gap where a merged worktree reaped here
+	// would orphan its token. Best-effort; the orphan sweep is the backstop.
+	revokeCredential(tw, wt)
+
 	if err := git.WorktreeRemove(wt.repoPath, wt.worktreePath); err != nil {
 		return fmt.Errorf("removing worktree %s: %w", wt.branch, err)
 	}
@@ -141,6 +149,45 @@ func removeWorktree(wt worktreeInfo, tw *tap.Writer) error {
 		runReap(tw, *gcPlan, wt.branch)
 	}
 	return nil
+}
+
+// revokeCredential runs [auth].revoke-command for a worktree that minted a
+// credential, as one TAP test point; mirrors close.revokeCredential.
+func revokeCredential(tw *tap.Writer, wt worktreeInfo) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	h, err := sweatfileio.LoadWorktreeHierarchy(home, wt.repoPath, wt.worktreePath)
+	if err != nil {
+		return
+	}
+	sessionKey := filepath.Base(wt.repoPath) + "/" + wt.branch
+	if st, rerr := session.Read(wt.repoPath, wt.branch); rerr == nil && st.SessionKey != "" {
+		sessionKey = st.SessionKey
+	}
+	var out bytes.Buffer
+	id := auth.Identity{RepoPath: wt.repoPath, WorktreePath: wt.worktreePath, Branch: wt.branch, SessionKey: sessionKey}
+	ran, rerr := auth.Revoke(context.Background(), h.Merged, id, &out)
+	if !ran {
+		return
+	}
+	desc := "revoke credential " + wt.branch
+	if rerr != nil {
+		diag := map[string]string{"severity": "warn", "message": rerr.Error()}
+		if o := strings.TrimSpace(out.String()); o != "" {
+			diag["output"] = o
+		}
+		if tw != nil {
+			tw.NotOk(desc, diag)
+		} else {
+			log.Warn("credential revoke failed", "branch", wt.branch, "err", rerr)
+		}
+		return
+	}
+	if tw != nil {
+		tw.Ok(desc)
+	}
 }
 
 // runReap executes nixgc.Reap as a single TAP test point with live

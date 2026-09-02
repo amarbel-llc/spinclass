@@ -449,6 +449,32 @@ func CheckPostMergeTargets(sf sweatfile.Sweatfile) []Issue {
 	return issues
 }
 
+// CheckAuth validates the [auth] table (FDR 0028): a mint-command without a
+// revoke-command mints tokens nothing will ever revoke, and a revoke-command
+// alone never runs — both are almost certainly a half-written config.
+func CheckAuth(sf sweatfile.Sweatfile) []Issue {
+	if sf.Auth == nil {
+		return nil
+	}
+	set := func(p *string) bool { return p != nil && strings.TrimSpace(*p) != "" }
+	mint, revoke := set(sf.Auth.MintCommand), set(sf.Auth.RevokeCommand)
+	switch {
+	case mint && !revoke:
+		return []Issue{{
+			Message:  "[auth] sets `mint-command` without `revoke-command`: minted tokens would never be revoked at close (only the issuer's own sweep would reclaim them)",
+			Severity: SeverityWarning,
+			Field:    "auth.revoke-command",
+		}}
+	case revoke && !mint:
+		return []Issue{{
+			Message:  "[auth] sets `revoke-command` without `mint-command`: nothing is minted, so it never runs",
+			Severity: SeverityWarning,
+			Field:    "auth.mint-command",
+		}}
+	}
+	return nil
+}
+
 func isShellInterpreter(cmd string) bool {
 	base := filepath.Base(cmd)
 	switch base {
@@ -672,6 +698,16 @@ func Run(w io.Writer, home, repoDir string) int {
 				}
 			} else {
 				sub.Ok("hooks valid")
+			}
+		}
+
+		if src.File.Auth != nil {
+			if issues := CheckAuth(src.File); len(issues) > 0 {
+				for _, iss := range issues {
+					sub.Ok(fmt.Sprintf("auth valid # warning: %s", iss.Message))
+				}
+			} else {
+				sub.Ok("auth valid")
 			}
 		}
 

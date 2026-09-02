@@ -19,6 +19,14 @@ import (
 	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 
+// Credential is State.Credential: the mint/revoke record of a session's forge
+// push token (FDR 0028). A nil RevokedAt on an abandoned/tombstoned session
+// marks an orphaned token for the sweeper.
+type Credential struct {
+	MintedAt  time.Time  `json:"minted_at"`
+	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+}
+
 // caller returns "file.go:N" of the call site `skip` frames up from
 // the caller of caller(). caller(1) inside session.Write returns the
 // external site that invoked session.Write. Used to tag lifecycle log
@@ -109,6 +117,15 @@ type State struct {
 	SetupFingerprint string     `json:"setup_fingerprint,omitempty"`
 	SetupScheme      int        `json:"setup_scheme,omitempty"`
 	SetupAt          *time.Time `json:"setup_at,omitempty"`
+
+	// Credential records the per-session forge push credential lifecycle
+	// (FDR 0028): set when [auth].mint-command minted a token for this
+	// session, RevokedAt filled by the revoke at close or by the orphan
+	// sweeper. It rides the tombstone so a session that died without revoking
+	// can be found and swept later. Write carries it forward from the existing
+	// worktree state when the incoming State has none, since the mint happens
+	// in the creation funnel BEFORE the attach/spawn paths write their state.
+	Credential *Credential `json:"credential,omitempty"`
 
 	// isTombstone is set when the State was loaded from a regular file in
 	// the central index (i.e. a session that was closed cleanly and whose
@@ -214,6 +231,14 @@ func Write(s State) error {
 		sessionlog.Errorf("session.Write mkdir-failed dir=%s from=%s err=%v", dir, from, err)
 		return err
 	}
+	if s.Credential == nil {
+		if data, rerr := os.ReadFile(worktreeStatePath(wt)); rerr == nil {
+			var prev State
+			if json.Unmarshal(data, &prev) == nil {
+				s.Credential = prev.Credential
+			}
+		}
+	}
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
@@ -298,6 +323,26 @@ func Read(repoPath, branch string) (*State, error) {
 	}
 	s.isTombstone = true
 	return &s, nil
+}
+
+// UpdateCredential sets State.Credential for (repoPath, branch) in whichever
+// store holds the session: the worktree-local state file for a live session,
+// or the tombstone at the index path for a closed one (the orphan sweeper's
+// case, FDR 0028). A missing session is os.ErrNotExist.
+func UpdateCredential(repoPath, branch string, c *Credential) error {
+	st, err := Read(repoPath, branch)
+	if err != nil {
+		return err
+	}
+	st.Credential = c
+	if !st.isTombstone {
+		return Write(*st)
+	}
+	data, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeTombstoneFile(worktreeFromRepoBranch(repoPath, branch), data)
 }
 
 // EnsureWorktreeState returns the State for (repoPath, branch) if one exists,
@@ -569,10 +614,22 @@ func Tombstone(repoPath, branch, sha string) error {
 		}
 	}
 
+	if err := writeTombstoneFile(wt, data); err != nil {
+		return err
+	}
+	// State file and the .spinclass dir are now redundant — clean up.
+	_ = os.Remove(statePath)
+	_ = os.Remove(filepath.Dir(statePath))
+	return nil
+}
+
+// writeTombstoneFile atomically replaces wt's central index entry with a
+// regular file holding data (temp file + rename), creating the index dir if
+// needed.
+func writeTombstoneFile(wt string, data []byte) error {
 	if err := os.MkdirAll(indexDir(), 0o755); err != nil {
 		return err
 	}
-	idx := indexPath(wt)
 	tmp, err := os.CreateTemp(indexDir(), ".tomb-*.json")
 	if err != nil {
 		return err
@@ -587,13 +644,10 @@ func Tombstone(repoPath, branch, sha string) error {
 		_ = os.Remove(tmpName)
 		return cerr
 	}
-	if err := os.Rename(tmpName, idx); err != nil {
+	if err := os.Rename(tmpName, indexPath(wt)); err != nil {
 		_ = os.Remove(tmpName)
 		return err
 	}
-	// State file and the .spinclass dir are now redundant — clean up.
-	_ = os.Remove(statePath)
-	_ = os.Remove(filepath.Dir(statePath))
 	return nil
 }
 

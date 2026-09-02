@@ -78,6 +78,17 @@ type Hooks struct {
 	AllowStaleBase             *bool   `toml:"allow-stale-base"`
 }
 
+// Auth declares how a worktree session mints and revokes its per-session forge
+// push credential (FDR 0028). Both commands run via `sh -c` in the session
+// worktree, devshell-scoped like the lifecycle hooks, with the SPINCLASS_*
+// identity env plus SPINCLASS_FORGE_HOST / SPINCLASS_FORGE_REPO (owner/name)
+// derived from the origin remote. mint-command prints the token on stdout;
+// revoke-command revokes by session id. Scalar override down the cascade.
+type Auth struct {
+	MintCommand   *string `toml:"mint-command"`
+	RevokeCommand *string `toml:"revoke-command"`
+}
+
 // Sysprompt configures the dynamic system-prompt fragment spinclass
 // contributes to a clown-launched session (internal/sysprompt, FDR 0021).
 type Sysprompt struct {
@@ -187,6 +198,7 @@ type Sweatfile struct {
 	Git            *Git            `toml:"git"`
 	Direnv         *Direnv         `toml:"direnv"`
 	Hooks          *Hooks          `toml:"hooks"`
+	Auth           *Auth           `toml:"auth"`
 	Sysprompt      *Sysprompt      `toml:"sysprompt"`
 	SessionEntry   *SessionEntry   `toml:"session-entry"`
 	StartCommands  []StartCommand  `toml:"start-commands"`
@@ -220,6 +232,23 @@ func (sf Sweatfile) PreMergeHookCommand() *string {
 		return nil
 	}
 	return sf.Hooks.PreMerge
+}
+
+// AuthMintCommand returns the [auth].mint-command, or nil when unset (no
+// per-session credential is minted). See FDR 0028.
+func (sf Sweatfile) AuthMintCommand() *string {
+	if sf.Auth == nil {
+		return nil
+	}
+	return sf.Auth.MintCommand
+}
+
+// AuthRevokeCommand returns the [auth].revoke-command, or nil when unset.
+func (sf Sweatfile) AuthRevokeCommand() *string {
+	if sf.Auth == nil {
+		return nil
+	}
+	return sf.Auth.RevokeCommand
 }
 
 // PostMergeHookCommand returns the [hooks].post-merge command, or nil when

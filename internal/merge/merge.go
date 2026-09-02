@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/mattn/go-isatty"
 
+	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/check"
 	"code.linenisgreat.com/spinclass/internal/executor"
 	"code.linenisgreat.com/spinclass/internal/git"
@@ -215,7 +216,7 @@ func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch s
 	// session start and merge leaves `git merge --ff-only` unable to
 	// fast-forward. See #29.
 	if gitSync {
-		out, pullErr := git.Pull(repoPath)
+		out, pullErr := pullDefault(context.Background(), repoPath, wtPath, defaultBranch)
 		if pullErr != nil {
 			return "", failStep(ts, "pull "+defaultBranch, pullErr, out)
 		}
@@ -381,7 +382,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	// (a) Re-pull under the lock: PrepareMerge's pull is now stale by the
 	// length of the queue wait.
 	if gitSync {
-		out, pullErr := git.Pull(repoPath)
+		out, pullErr := pullDefault(ctx, repoPath, wtPath, defaultBranch)
 		if pullErr != nil {
 			return nil, failStep(ts, "pull "+defaultBranch+" (landing)", pullErr, out)
 		}
@@ -413,6 +414,13 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	// Idempotent; the safety net for every error path below. The worktree is
 	// kept through the post-merge phase, which runs in it.
 	defer cleanupLand()
+	// The landing worktree pushes, so it needs the session's per-session push
+	// credential wiring (FDR 0028) — a no-op when the session minted none.
+	if gitSync {
+		if mErr := auth.MirrorInto(wtPath, landPath); mErr != nil {
+			return nil, failStep(ts, "land "+branch, fmt.Errorf("mirror push credential into landing worktree: %w", mErr), "")
+		}
+	}
 	if needRebase {
 		var landErr error
 		landingSha, landErr = rebaseLanding(ts, landPath, branch, defaultBranch)
@@ -512,6 +520,38 @@ func finishMergeUnqueued(ctx context.Context, rep *crap.Reporter, ts *crap.TestS
 	// unqueued path never rebases the landing.
 	runPostMergePhase(ctx, rep, ts, repoPath, wtPath, "", branch, defaultBranch, pinnedSha, gitSync, activity, postMergeTargets)
 	return blobLinks, nil
+}
+
+// pullDefault freshens defaultBranch from its remote: it fetches from credDir
+// — the session worktree, the one place a per-session push credential (FDR
+// 0028) is wired, so a dropped ssh-agent cannot fail the fetch — and then
+// fast-forwards the ROOT checkout's local ref from the remote-tracking ref
+// (through the worktree that has it checked out, or by moving the ref when
+// none does). This replaces a `git pull` in the root, which authenticated off
+// the serve process env and merged into whatever branch the root happened to
+// have checked out (#284, #285). A local ref already ahead of the remote is
+// left alone; a diverged one is an error, as the ff-only pull was.
+func pullDefault(ctx context.Context, repoPath, credDir, defaultBranch string) (string, error) {
+	remote := git.BranchRemote(repoPath, defaultBranch)
+	if out, err := git.FetchContext(ctx, credDir, remote, defaultBranch); err != nil {
+		return out, err
+	}
+	localRef := "refs/heads/" + defaultBranch
+	tracking := "refs/remotes/" + remote + "/" + defaultBranch
+	if git.IsAncestor(repoPath, tracking, localRef) {
+		return "", nil // current, or ahead (a local-only landing)
+	}
+	if !git.IsAncestor(repoPath, localRef, tracking) {
+		return "", fmt.Errorf("local %s has diverged from %s/%s; rebase or reset it in the checkout", defaultBranch, remote, defaultBranch)
+	}
+	holder, err := git.BranchWorktree(repoPath, defaultBranch)
+	if err != nil {
+		return "", err
+	}
+	if holder == "" {
+		return "", git.BranchSetTo(repoPath, defaultBranch, tracking)
+	}
+	return git.MergeFFOnly(holder, tracking)
 }
 
 // addLandingWorktree creates the transient detached landing worktree
