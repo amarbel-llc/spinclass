@@ -37,8 +37,10 @@ The credential never rides in any process environment (only the file path is ref
 sweatfile:
 
     [auth]
-    mint-command = "papi forge token mint --host $SPINCLASS_FORGE_HOST --user <forge-user> --card-login --repo $SPINCLASS_FORGE_REPO --session $SPINCLASS_SESSION_ID --ttl 12h"
-    revoke-command = "papi forge token revoke --host $SPINCLASS_FORGE_HOST --user <forge-user> --card-login --session $SPINCLASS_SESSION_ID"
+    mint-command = "papi forge token mint --host <forge-api-host> --user <forge-user> --card-login --repo $SPINCLASS_FORGE_REPO --session $SPINCLASS_SESSION_ID --ttl 12h"
+    revoke-command = "papi forge token revoke --host <forge-api-host> --user <forge-user> --card-login --session $SPINCLASS_SESSION_ID"
+
+Note the two hosts: `--host` is the forge's **API** host, which on a split-plane deployment is not the git host in the remote — the fleet's owner-less vanity plane (`$SPINCLASS_FORGE_HOST`) serves git only, while the canonical host serves `/api/v1` and the login verifier. A token minted on the API host authenticates git on the vanity host (papi verified this cross-plane against a private repo), so the credential spinclass stores, its `insteadOf` rewrite, and the push all stay keyed to `$SPINCLASS_FORGE_HOST`; only mint and revoke name the API host. papi resolving the API host from the domain itself (so the sweatfile could stay host-agnostic) is a possible papi feature, not built.
 
 (The papi#73 surface as frozen: `--repo` accepts the owner-less name a vanity remote yields and resolves the owner against the forge; the session id is reversibly encoded into the token name, so revoke and the sweep address exactly one token; revoke of an already-gone token exits 0. `--card-login` signs a challenge with the operator's card key over the inherited ssh-agent — no forge secret is stored — which means **session creation needs a live agent at mint time**; a dead agent fails creation with a mint error, by design. It also relies on the forge's reverse-proxy API auth; `--password-command` is the config-free fallback.)
 

@@ -13,6 +13,22 @@
 pre-commit = "conformist-pre-commit"
 pre-merge  = "just"
 
+# Per-session forge push credential (FDR 0028, papi#73): every worktree session
+# mints its own fine-grained per-repo Forgejo token at creation and pushes over
+# HTTPS with it, so a dropped forwarded ssh-agent can no longer kill a merge.
+# `--card-login` signs a challenge with the operator's card key through the
+# agent at MINT time only (a live agent is still needed at session creation);
+# revoke runs at close/clean and by the orphan sweep at the next start.
+#
+# `--host` is the forge's API host, NOT the git host in the remote: the vanity
+# plane ($SPINCLASS_FORGE_HOST, code.linenisgreat.com) serves git only, the
+# canonical host serves /api/v1 + the login verifier, and a token minted on the
+# latter authenticates git on the former (papi FDR-0016, verified cross-plane).
+# The credential spinclass stores stays keyed to the git host.
+[auth]
+mint-command   = "papi forge token mint --host forge.starbrandshoes.com --user sasha --card-login --repo $SPINCLASS_FORGE_REPO --session $SPINCLASS_SESSION_ID --ttl 12h"
+revoke-command = "papi forge token revoke --host forge.starbrandshoes.com --user sasha --card-login --session $SPINCLASS_SESSION_ID"
+
 # Per-worktree golangci-lint cache (conformist#34). golangci-lint replays
 # per-package diagnostics whose embedded absolute paths point at whichever
 # worktree populated the cache; a cache shared across worktrees — e.g. the

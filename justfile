@@ -228,6 +228,36 @@ explore-recipe-prompt-cost repos=(home_directory() / 'eng/repos'):
     [ -n "$skipped" ] && echo "skipped (dump failed):$skipped"
     exit 0
 
+# [debug] Run the LIVE profile's `sc` (not the devshell build) against this
+# repo from the current worktree — the escape hatch for driving fresh sessions
+# on a newly switched binary from an agent session that has no shell (e.g. the
+# FDR 0028 promotion round-trip: start/merge/close sessions whose creation
+# funnel mints a credential). Prints which binary ran first. Pass
+# `SSH_AUTH_SOCK=` in env to prove a step is agent-free.
+#
+# run the live profile's sc with the given arguments
+[group('debug')]
+debug-sc *args:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    bin="$HOME/.nix-profile/bin/sc"
+    [ -x "$bin" ] || bin=$(command -v sc)
+    echo "sc = $bin ($("$bin" --version 2>/dev/null | head -n1))" >&2
+    exec "$bin" {{ args }}
+
+# [debug] Run the live profile's `papi` — the [auth] issuer (papi#73) — to
+# inspect or clean up forge tokens around a round-trip (e.g. `forge token list`).
+#
+# run the live profile's papi with the given arguments
+[group('debug')]
+debug-papi *args:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    bin="$HOME/.nix-profile/bin/papi"
+    [ -x "$bin" ] || bin=$(command -v papi)
+    echo "papi = $bin ($("$bin" --version 2>/dev/null | head -n1))" >&2
+    exec "$bin" {{ args }}
+
 # [explore] List ALL dangling auto-root links on the system (regardless of
 # what they used to point at). These are zero-byte symlinks with broken
 # targets — leftovers from removed checkouts/worktrees.
