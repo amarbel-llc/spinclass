@@ -295,16 +295,27 @@ const LandWorktreePrefix = ".land-"
 // re-pulls the default branch (gitSync only), checks whether the default-branch
 // tip is still an ancestor of pinnedSha, rebases the pinned commits onto a
 // moved tip in a transient landing worktree when it is not, runs the pre-merge
-// hook against the exact LANDING sha, ff-only merges it, tears down, and
-// pushes — so the gate always verifies the tree that actually lands and the
-// ff-only merge can no longer lose a race to a concurrent merge. Teardown is
-// guarded by the pin contract: when the session branch tip advanced past
-// pinnedSha while this merge waited (commits "left for a later merge"), the
-// worktree and branch are KEPT — not removed/deleted — so the post-pin commits
-// stay reachable for a follow-up merge; the push still happens.
+// hook against the exact LANDING sha, lands it, and tears down — so the gate
+// always verifies the tree that actually lands and the landing can no longer
+// lose a race to a concurrent merge.
+//
+// The landing itself (spinclass#284, Alt B): a gitSync merge pushes the landing
+// sha straight to the remote's default branch from a disposable detached
+// landing worktree — the root checkout's LOCAL default ref is never advanced by
+// the merge (the self-healing pulls in PrepareMerge and step (a) catch it up
+// later), and a refused push (stale tip, dropped credential) exits having moved
+// nothing, so a failed landing is a plain retry rather than a local-ahead
+// divergence. A local-only merge (gitSync=false) still ff-only merges into the
+// root checkout: there, the local ref IS the landing.
+//
+// Teardown is guarded by the pin contract: when the session branch tip advanced
+// past pinnedSha while this merge waited (commits "left for a later merge"),
+// the worktree and branch are KEPT — not removed/deleted — so the post-pin
+// commits stay reachable for a follow-up merge; the landing still happens.
 //
 // With [hooks].disable-merge-queue the pre-#235 path runs instead: hook on
-// pinnedSha → ff-only → teardown → push, no lock.
+// pinnedSha → ff-only into the root → teardown → push from the root, no lock
+// (and none of the Alt B landing).
 //
 // The pre-merge hook runs in an isolated detached build worktree pinned to the
 // hook sha unless [hooks].disable-merge-build-worktree is set. Stages emit
@@ -379,24 +390,37 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 
 	// (b) Ancestry check: pinnedSha lands as-is iff the default-branch tip is
 	// still an ancestor of it (nothing landed since PrepareMerge pinned).
+	needRebase := !git.IsAncestor(repoPath, defaultBranch, pinnedSha)
+
+	// (c) The disposable landing worktree (#284, Alt B). A gitSync merge always
+	// lands from one: the landing sha is pushed to the remote from that detached
+	// worktree, so no local ref moves and the worktree carries whatever
+	// worktree-scoped git config a per-session push credential needs (FDR
+	// 0028). A local-only merge needs it only when the branch lost the race and
+	// the pinned commits must be rebased onto the moved tip — NOT in the session
+	// worktree, whose HEAD may have advanced past the pin (the pin contract).
 	landingSha := pinnedSha
 	rebased := false
+	landPath := ""
 	cleanupLand := func() {}
-	if !git.IsAncestor(repoPath, defaultBranch, pinnedSha) {
-		// (c) The branch lost the race: rebase the pinned commits onto the
-		// moved tip in a transient detached worktree — NOT the session
-		// worktree, whose HEAD may have advanced past the pin (that is the
-		// pin contract).
+	if gitSync || needRebase {
 		var landErr error
-		landingSha, cleanupLand, landErr = rebaseLanding(ts, repoPath, branch, defaultBranch, pinnedSha)
+		landPath, cleanupLand, landErr = addLandingWorktree(ts, repoPath, branch, pinnedSha)
+		if landErr != nil {
+			return nil, landErr
+		}
+	}
+	// Idempotent; the safety net for every error path below. The worktree is
+	// kept through the post-merge phase, which runs in it.
+	defer cleanupLand()
+	if needRebase {
+		var landErr error
+		landingSha, landErr = rebaseLanding(ts, landPath, branch, defaultBranch)
 		if landErr != nil {
 			return nil, landErr
 		}
 		rebased = true
 	}
-	// Deferred safety net for error paths below; the explicit call after the
-	// ff is the intended removal point. Idempotent.
-	defer cleanupLand()
 
 	// (d) The gate, under the lock, against the exact sha that will land.
 	// (With [hooks].disable-merge-build-worktree the hook runs in the session
@@ -408,44 +432,55 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 		return blobLinks, hookErr
 	}
 
-	// (e) ff-only merge of the landing sha, with a distinct label when the
-	// landing was rebased past a moved tip.
+	// (e) Land the landing sha, with a distinct label when the landing was
+	// rebased past a moved tip. gitSync: push it to the remote's default branch
+	// from the landing worktree — the ff check is the remote's own, so a stale
+	// or unauthenticated push fails having moved NOTHING, local or remote. Local
+	// only: the ff-only merge into the root checkout is the landing.
 	mergeLabel := "merge " + branch
 	if rebased {
 		mergeLabel = "merge " + branch + " (rebased onto moved " + defaultBranch + ")"
 	}
-	out, mergeErr := git.Run(repoPath, "merge", "--ff-only", landingSha)
-	if mergeErr != nil {
-		return blobLinks, failStep(ts, mergeLabel, mergeErr, out)
+	if gitSync {
+		out, pushErr := git.PushRef(landPath, git.BranchRemote(repoPath, defaultBranch), landingSha, defaultBranch)
+		if pushErr != nil {
+			return blobLinks, failStep(ts, mergeLabel, pushErr, out)
+		}
+	} else {
+		out, mergeErr := git.Run(repoPath, "merge", "--ff-only", landingSha)
+		if mergeErr != nil {
+			return blobLinks, failStep(ts, mergeLabel, mergeErr, out)
+		}
 	}
 	ts.Ok(mergeLabel)
 
-	// The landing commit is now reachable from defaultBranch; until here the
-	// transient landing worktree's HEAD was its only ref.
-	cleanupLand()
-
-	// (f)+(g) teardown and push, still under the lock. The pin contract allows
-	// commits to land on branch after PrepareMerge pins ("left for a later
-	// merge"), and the queue wait + gate make that window long: resolve the
-	// branch's CURRENT tip (from repoPath — worktree-independent) and only
-	// allow teardown when it still equals the pin. A RevParse failure
-	// conservatively reads as NOT matching — skip deletion rather than risk
-	// force-deleting unreachable post-pin commits.
+	// (f) Teardown, still under the lock; nothing is pushed here — a gitSync
+	// landing already pushed in (e). The pin contract allows commits to land on
+	// branch after PrepareMerge pins ("left for a later merge"), and the queue
+	// wait + gate make that window long: resolve the branch's CURRENT tip (from
+	// repoPath — worktree-independent) and only allow teardown when it still
+	// equals the pin. A RevParse failure conservatively reads as NOT matching —
+	// skip deletion rather than risk force-deleting unreachable post-pin
+	// commits.
 	tip, tipErr := git.RevParse(repoPath, "refs/heads/"+branch)
 	tipMatchesPin := tipErr == nil && tip == pinnedSha
-	if tdErr := teardownAndPush(ts, repoPath, wtPath, branch, gitSync, inSession, rebased, tipMatchesPin); tdErr != nil {
+	// A push landing leaves the local default ref behind, so `-d`'s "merged
+	// into HEAD/upstream" check cannot see the landing; force is safe because
+	// tipMatchesPin means the tip IS what just landed.
+	if tdErr := teardownAndPush(ts, repoPath, wtPath, branch, false, inSession, rebased || gitSync, tipMatchesPin); tdErr != nil {
 		return blobLinks, tdErr
 	}
 
-	// (h) The post-merge hook runs UNDER the landing lock, like every other
+	// (g) The post-merge hook runs UNDER the landing lock, like every other
 	// stage of the merge. The queue's contract (FDR 0022) is that a merge is
 	// exclusive end to end: while the lock is held no other session may
 	// perform ANY part of a merge. A post-merge deploy is part of the merge —
 	// letting a sibling session land (and deploy) while this session's deploy
 	// is still running would defeat the point of serializing in the first
 	// place, since the two deploys could interleave and the older one could
-	// win. The deferred Release above fires when FinishMerge returns.
-	runPostMergePhase(ctx, rep, ts, repoPath, wtPath, branch, defaultBranch, landingSha, gitSync, activity, postMergeTargets)
+	// win. The deferred Release above fires when FinishMerge returns. It runs in
+	// the landing worktree — the exact tree that landed.
+	runPostMergePhase(ctx, rep, ts, repoPath, wtPath, landPath, branch, defaultBranch, landingSha, gitSync, activity, postMergeTargets)
 	return blobLinks, nil
 }
 
@@ -475,27 +510,23 @@ func finishMergeUnqueued(ctx context.Context, rep *crap.Reporter, ts *crap.TestS
 	// No lock on this path at all (that is what disable-merge-queue means), so
 	// there is no exclusivity to preserve; pinnedSha is what landed, since the
 	// unqueued path never rebases the landing.
-	runPostMergePhase(ctx, rep, ts, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, activity, postMergeTargets)
+	runPostMergePhase(ctx, rep, ts, repoPath, wtPath, "", branch, defaultBranch, pinnedSha, gitSync, activity, postMergeTargets)
 	return blobLinks, nil
 }
 
-// rebaseLanding replays pinnedSha's commits onto the moved defaultBranch tip
-// in a transient detached worktree under <repo>/.worktrees/ and returns the
-// resulting landing sha plus an idempotent cleanup that force-removes the
-// worktree and prunes admin entries. Call cleanup only after the ff-only merge
-// — until then the landing commit's only ref is this worktree's HEAD.
-//
-// On rebase conflict (or any rebase failure) it best-effort aborts, removes
-// the worktree, emits a failing "land <branch>" test point, and returns an
-// error wrapping ErrIntegrationConflict.
-func rebaseLanding(ts *crap.TestStream, repoPath, branch, defaultBranch, pinnedSha string) (landingSha string, cleanup func(), err error) {
+// addLandingWorktree creates the transient detached landing worktree
+// (.land-<branch>-<shortsha>-<pid> under <repo>/.worktrees/) checked out at
+// pinnedSha and returns its path plus an idempotent cleanup that force-removes
+// it and prunes admin entries. A failure emits a failing "land <branch>" test
+// point.
+func addLandingWorktree(ts *crap.TestStream, repoPath, branch, pinnedSha string) (landPath string, cleanup func(), err error) {
 	noop := func() {}
 	landParent := filepath.Join(repoPath, ".worktrees")
 	if mkErr := os.MkdirAll(landParent, 0o755); mkErr != nil {
 		return "", noop, failStep(ts, "land "+branch, fmt.Errorf("create landing worktree parent %s: %w", landParent, mkErr), "")
 	}
 	name := LandWorktreePrefix + strings.ReplaceAll(branch, "/", "-") + "-" + shortSha(pinnedSha) + "-" + strconv.Itoa(os.Getpid())
-	landPath := filepath.Join(landParent, name)
+	landPath = filepath.Join(landParent, name)
 
 	// Clear a stale physical dir from an interrupted prior run (same guard,
 	// same rationale as check.resolveHookDir).
@@ -514,37 +545,51 @@ func rebaseLanding(ts *crap.TestStream, repoPath, branch, defaultBranch, pinnedS
 		_ = git.WorktreeForceRemove(repoPath, landPath)
 		_ = git.WorktreePrune(repoPath)
 	}
+	return landPath, cleanup, nil
+}
 
+// rebaseLanding replays the landing worktree's HEAD (the pinned commits) onto
+// the moved defaultBranch tip and returns the resulting landing sha. Until that
+// sha lands, the worktree's HEAD is its only ref — the caller owns the
+// worktree's cleanup and must not run it before then.
+//
+// On rebase conflict (or any rebase failure) it best-effort aborts, emits a
+// failing "land <branch>" test point, and returns an error wrapping
+// ErrIntegrationConflict.
+func rebaseLanding(ts *crap.TestStream, landPath, branch, defaultBranch string) (landingSha string, err error) {
 	out, rebaseErr := git.Rebase(landPath, defaultBranch)
 	if rebaseErr != nil {
 		conflicted, _ := git.UnmergedPaths(landPath)
 		_, _ = git.Run(landPath, "rebase", "--abort") // best-effort
-		cleanup()
 		guidance := "commits landed during the gate conflict with this branch; re-merge to rebase and resolve in the session worktree"
 		conflictErr := fmt.Errorf("%w: %s", ErrIntegrationConflict, guidance)
 		if len(conflicted) > 0 {
 			conflictErr = fmt.Errorf("%w (conflicting: %s): %s", ErrIntegrationConflict, strings.Join(conflicted, ", "), guidance)
 		}
-		return "", noop, failStep(ts, "land "+branch, conflictErr, out)
+		return "", failStep(ts, "land "+branch, conflictErr, out)
 	}
 
 	landingSha, shaErr := git.RevParse(landPath, "HEAD")
 	if shaErr != nil {
-		cleanup()
-		return "", noop, failStep(ts, "land "+branch, fmt.Errorf("could not resolve landing HEAD: %w", shaErr), "")
+		return "", failStep(ts, "land "+branch, fmt.Errorf("could not resolve landing HEAD: %w", shaErr), "")
 	}
-	return landingSha, cleanup, nil
+	return landingSha, nil
 }
 
 // teardownAndPush is FinishMerge's shared suffix: worktree/branch teardown
-// (skipped in-session or when run from inside the worktree), optional push,
-// and the out-of-session close request.
+// (skipped in-session or when run from inside the worktree), an optional push
+// of the root checkout's default branch, and the out-of-session close request.
+//
+// push selects the legacy post-teardown `git push` from the root checkout. The
+// queued path passes false: its landing is itself the push (#284, Alt B), and
+// there is nothing in the root to push. finishMergeUnqueued passes gitSync.
 //
 // forceBranchDelete selects `git branch -D`: after a rebased landing the
-// session branch tip is no longer an ancestor of the default branch, so `-d`
-// would refuse — force is safe because the patch-identical content just landed
-// via the rebased landing sha. The unrebased path keeps `-d` as the existing
-// safety net.
+// session branch tip is no longer an ancestor of the default branch, and after
+// a push landing (#284) the local default ref was never advanced at all, so in
+// both cases `-d` would refuse — force is safe because the content just landed
+// (patch-identical via the rebased landing sha, or exactly the tip). The
+// local-only unrebased path keeps `-d` as the existing safety net.
 //
 // tipMatchesPin gates teardown entirely: the pin contract allows commits to
 // land on branch after PrepareMerge pins, and `git worktree remove` + `-D`
@@ -552,10 +597,11 @@ func rebaseLanding(ts *crap.TestStream, repoPath, branch, defaultBranch, pinnedS
 // only checks dirtiness, not unmerged commits, and -D bypasses -d's ancestry
 // refusal). When false, both worktree removal and branch deletion are skipped
 // — the worktree and branch survive so the commits stay reachable for a later
-// merge — and an ok "keep worktree" test point records why. The push still
-// happens. finishMergeUnqueued passes true unconditionally (behavior-
-// preserving: no tip check on the pre-#235 path).
-func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, gitSync, inSession, forceBranchDelete, tipMatchesPin bool) error {
+// merge — and an ok "keep worktree" test point records why. The landing has
+// already happened (queued path) or the push still does (unqueued).
+// finishMergeUnqueued passes true unconditionally (behavior-preserving: no tip
+// check on the pre-#235 path).
+func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, push, inSession, forceBranchDelete, tipMatchesPin bool) error {
 	// Skip worktree removal when running from inside the worktree being
 	// merged (can't remove cwd) or when inside an active session.
 	insideWorktree := false
@@ -586,7 +632,7 @@ func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, gitSy
 		}
 	}
 
-	if gitSync {
+	if push {
 		out, pushErr := git.Push(repoPath)
 		if pushErr != nil {
 			return failStep(ts, "push", pushErr, out)
@@ -688,7 +734,7 @@ func MergeImplicit(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream,
 	// the same ref, and the push is unconditional — hence pushed=true. No lock
 	// is involved: implicit merges are out of the merge queue's scope entirely
 	// (FDR 0022 Limitations), so this hook carries no exclusivity guarantee.
-	runPostMergePhase(ctx, rep, ts, repoPath, checkout, branch, branch, pinnedSha, true, activity, postMergeTargets)
+	runPostMergePhase(ctx, rep, ts, repoPath, checkout, "", branch, branch, pinnedSha, true, activity, postMergeTargets)
 	return blobLinks, nil
 }
 
@@ -865,10 +911,11 @@ func runPreMergeHookContext(ctx context.Context, rep *crap.Reporter, ts *crap.Te
 // extends the exclusive region, so N racing sessions drain in
 // N × (gate + phase) time.
 //
-// The phase runs in the session worktree when it still exists — teardown may
-// have removed it — and otherwise in repoPath, which is sitting on the merged
-// tip of the default branch either way. landedSha is the sha that actually
-// landed: the LANDING sha on a rebased queued landing, not the original pin.
+// The phase runs in the landing worktree (landDir) when the merge has one —
+// the exact tree that landed (#284) — otherwise in the session worktree when it
+// still exists (teardown may have removed it), and otherwise in repoPath.
+// landedSha is the sha that actually landed: the LANDING sha on a rebased
+// queued landing, not the original pin.
 //
 // FDR 0026: when the sweatfile declares active [[post-merge]] targets they ARE
 // the phase — the legacy [hooks].post-merge string is superseded. Targets run
@@ -878,7 +925,7 @@ func runPreMergeHookContext(ctx context.Context, rep *crap.Reporter, ts *crap.Te
 // runs exactly as FDR 0023 shipped it — but only under the default (nil)
 // selection, since an explicit selection names entries the unnamed string is
 // not among.
-func runPostMergePhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch, landedSha string, pushed bool, activity io.Writer, postMergeTargets []string) {
+func runPostMergePhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, landDir, branch, defaultBranch, landedSha string, pushed bool, activity io.Writer, postMergeTargets []string) {
 	home, _ := os.UserHomeDir()
 	if home == "" {
 		return
@@ -888,11 +935,18 @@ func runPostMergePhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStr
 		return
 	}
 
-	// Teardown may have removed the session worktree; repoPath is always
-	// present and is on the merged default-branch tip.
-	runDir := wtPath
-	if info, statErr := os.Stat(runDir); statErr != nil || !info.IsDir() {
-		runDir = repoPath
+	// repoPath is always present; the landing worktree and the session
+	// worktree may not be (no landing worktree on the unqueued/implicit paths;
+	// teardown may have removed the session worktree).
+	runDir := repoPath
+	for _, candidate := range []string{landDir, wtPath} {
+		if candidate == "" {
+			continue
+		}
+		if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
+			runDir = candidate
+			break
+		}
 	}
 
 	pushedVal := "0"

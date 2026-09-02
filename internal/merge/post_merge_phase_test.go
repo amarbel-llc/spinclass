@@ -221,6 +221,7 @@ func TestPostMergeReportsPushed(t *testing.T) {
 		"[hooks]\npost-merge = \"env | grep '^SPINCLASS_MERGE_PUSHED' > %s\"\n", envFile,
 	))
 
+	featureSha := runGit(t, wtPath, "rev-parse", "HEAD")
 	if _, err := runFinish(t, repoDir, wtPath, "feature", true); err != nil {
 		t.Fatalf("FinishMerge: %v", err)
 	}
@@ -232,10 +233,10 @@ func TestPostMergeReportsPushed(t *testing.T) {
 	if got := strings.TrimSpace(string(raw)); got != "SPINCLASS_MERGE_PUSHED=1" {
 		t.Errorf("got %q, want SPINCLASS_MERGE_PUSHED=1", got)
 	}
-	// And the hook really did run after the push landed on the remote.
-	if local, remoteSha := runGit(t, repoDir, "rev-parse", "main"),
-		runGit(t, repoDir, "rev-parse", "origin/main"); local != remoteSha {
-		t.Errorf("main %s not pushed to origin/main %s", local, remoteSha)
+	// And the hook really did run after the landing reached the remote (#284:
+	// the landing is the push to origin; the local ref is not advanced).
+	if remoteSha := runGit(t, repoDir, "rev-parse", "origin/main"); remoteSha != featureSha {
+		t.Errorf("origin/main %s, want the landed feature tip %s", remoteSha, featureSha)
 	}
 }
 

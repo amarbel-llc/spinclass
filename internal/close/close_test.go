@@ -363,6 +363,50 @@ func TestRunResolvedNoTTYDirtyErrors(t *testing.T) {
 	}
 }
 
+// TestRunResolvedNoTTYLandedOnOriginIsIntegrated covers #284's must-fix
+// consumer: a merge that landed by pushing straight to origin/<default> (Alt B)
+// leaves the root's LOCAL default ref behind. Close must still classify the
+// branch as integrated — it compares against origin/<default> too, not only
+// the stale local ref — so a non-TTY close proceeds without --force.
+func TestRunResolvedNoTTYLandedOnOriginIsIntegrated(t *testing.T) {
+	testgit.RequireGit(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	root := t.TempDir()
+	bare := filepath.Join(root, "bare.git")
+	repoPath := filepath.Join(root, "repo")
+	for _, args := range [][]string{
+		{"init", "--bare", "-b", "main", bare},
+		{"clone", bare, repoPath},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	mustCommitFile(t, repoPath, "file.txt", "initial", "initial")
+	if out, err := exec.Command("git", "-C", repoPath, "push", "-u", "origin", "main").CombinedOutput(); err != nil {
+		t.Fatalf("git push: %v\n%s", err, out)
+	}
+	wtPath := filepath.Join(repoPath, ".worktrees", "feature-x")
+	testgit.MustWorktreeAdd(t, repoPath, wtPath, "feature-x")
+	mustCommitFile(t, wtPath, "change.txt", "change", "landed commit")
+
+	// The Alt B landing: origin/main advances, local main does not.
+	if out, err := exec.Command("git", "-C", wtPath, "push", "origin", "HEAD:refs/heads/main").CombinedOutput(); err != nil {
+		t.Fatalf("git push landing: %v\n%s", err, out)
+	}
+
+	orig := closeInteractive
+	closeInteractive = func() bool { return false }
+	t.Cleanup(func() { closeInteractive = orig })
+
+	if err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", false, nil, "tap"); err != nil {
+		t.Fatalf("RunResolved on an origin-landed branch: %v", err)
+	}
+	if _, statErr := os.Stat(wtPath); !os.IsNotExist(statErr) {
+		t.Errorf("expected worktree to be removed, stat returned: %v", statErr)
+	}
+}
+
 // TestRunResolvedNoTTYForceBypassesPrompt verifies that --force still
 // closes the worktree when stdin is not a TTY: force skips the
 // confirmation entirely so the TTY guard is never reached (#222).

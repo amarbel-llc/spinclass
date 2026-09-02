@@ -107,7 +107,7 @@ func RunResolved(w io.Writer, repoPath, wtPath, branch string, force bool, nixGC
 	_ = executor.RequestClose(repoPath, branch)
 
 	defaultBranch, dbErr := git.DefaultBranch(repoPath)
-	unintegrated := dbErr == nil && git.CommitsAhead(wtPath, defaultBranch, branch) > 0
+	unintegrated := dbErr == nil && git.CommitsUnintegrated(wtPath, defaultBranch, branch) > 0
 	dirty := git.StatusPorcelain(wtPath) != ""
 
 	if (unintegrated || dirty) && !force {

@@ -157,7 +157,7 @@ func registerSessionCommands(app *command.App) {
 		Name: "merge",
 		Description: command.Description{
 			Short: "Merge a worktree into main",
-			Long:  "Merge a worktree branch into the main repo with --ff-only and remove the worktree. When run from inside a worktree, merges that worktree. When run from the main repo, specify a target or choose interactively. Output formats: auto (default; live viewport on a TTY, ndjson-crap records when piped), viewport, plain (verdict lines), or ndjson. TAP is retired for merge/check.",
+			Long:  "Merge a worktree branch into the default branch and remove the worktree: by default a fast-forward landing pushed straight to origin from a disposable detached worktree (the local default ref is not advanced; a refused push moves nothing), or --ff-only into the local checkout with --local-only. When run from inside a worktree, merges that worktree. When run from the main repo, specify a target or choose interactively. Output formats: auto (default; live viewport on a TTY, ndjson-crap records when piped), viewport, plain (verdict lines), or ndjson. TAP is retired for merge/check.",
 		},
 		Params: []command.Param{
 			{Name: "target", Type: command.String, Description: "Target worktree to merge: a worktree directory name or <repo>/<branch> session key from `sc list` (interactive selection if omitted)", Completer: completeWorktreeTargets},

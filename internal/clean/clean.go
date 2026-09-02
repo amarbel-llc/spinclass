@@ -98,7 +98,7 @@ func scanWorktrees(startDir string) []worktreeInfo {
 		for _, wtPath := range worktree.ListWorktrees(repoPath) {
 			branch := filepath.Base(wtPath)
 
-			ahead := git.CommitsAhead(wtPath, defaultBranch, branch)
+			ahead := git.CommitsUnintegrated(wtPath, defaultBranch, branch)
 			porcelain := git.StatusPorcelain(wtPath)
 
 			worktrees = append(worktrees, worktreeInfo{

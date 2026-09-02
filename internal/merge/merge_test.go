@@ -468,18 +468,18 @@ func TestResolvedGitSyncRecordStream(t *testing.T) {
 	}
 
 	tests := testRecords(recs)
-	if len(tests) != 7 {
-		t.Fatalf("expected 7 test records, got %d: %+v", len(tests), tests)
+	if len(tests) != 6 {
+		t.Fatalf("expected 6 test records, got %d: %+v", len(tests), tests)
 	}
 	// Pull must come first so the rebase target is fresh; the merge queue
-	// (spinclass#235) re-pulls under the landing lock before the ff.
+	// (spinclass#235) re-pulls under the landing lock before the landing. The
+	// landing (#284) is itself the push to origin — no separate push point.
 	assertTestPoint(t, tests, 0, "pull main", true)
 	assertTestPoint(t, tests, 1, "rebase feature-sync", true)
 	assertTestPoint(t, tests, 2, "pull main (landing)", true)
 	assertTestPoint(t, tests, 3, "merge feature-sync", true)
 	assertTestPoint(t, tests, 4, "remove worktree feature-sync", true)
 	assertTestPoint(t, tests, 5, "delete branch feature-sync", true)
-	assertTestPoint(t, tests, 6, "push", true)
 	if !hasSummary(recs) {
 		t.Errorf("expected summary record (stream framing), got: %+v", recs)
 	}
@@ -565,8 +565,11 @@ func TestResolvedGitSyncPullsBeforeRebase(t *testing.T) {
 	if !strings.Contains(mainLog, "concurrent commit on origin") {
 		t.Errorf("expected concurrent origin commit on local main after pull, got log:\n%s", mainLog)
 	}
-	if !strings.Contains(mainLog, "feature commit") {
-		t.Errorf("expected feature commit on local main after merge, got log:\n%s", mainLog)
+	// The feature commit landed on origin (#284: the local ref is not advanced
+	// by the merge — only by the next pull).
+	originLog := runGit(t, repoDir, "log", "--oneline", "origin/main")
+	if !strings.Contains(originLog, "feature commit") {
+		t.Errorf("expected feature commit on origin/main after merge, got log:\n%s", originLog)
 	}
 }
 

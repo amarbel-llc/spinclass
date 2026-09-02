@@ -135,6 +135,36 @@ func CommitsAhead(worktreePath, base, branch string) int {
 	return n
 }
 
+// CommitsUnintegrated counts branch's commits reachable from NEITHER the local
+// defaultBranch NOR its remote-tracking ref (when one exists). Both count as
+// integration: a merge landed by pushing straight to the remote (#284, Alt B)
+// advances only the tracking ref and leaves the local ref behind, while a
+// local-only merge advances only the local ref. Reading just one of them
+// misclassifies the other kind of landing as unintegrated work.
+func CommitsUnintegrated(worktreePath, defaultBranch, branch string) int {
+	args := []string{"rev-list", "--count", branch, "^" + defaultBranch}
+	tracking := "refs/remotes/" + BranchRemote(worktreePath, defaultBranch) + "/" + defaultBranch
+	if _, err := Run(worktreePath, "rev-parse", "--verify", "--quiet", tracking); err == nil {
+		args = append(args, "^"+tracking)
+	}
+	out, err := Run(worktreePath, args...)
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(out)
+	return n
+}
+
+// BranchRemote returns the remote branch tracks (branch.<name>.remote), or
+// "origin" when none is configured.
+func BranchRemote(dir, branch string) string {
+	out, err := Run(dir, "config", "--get", "branch."+branch+".remote")
+	if err != nil || out == "" {
+		return "origin"
+	}
+	return out
+}
+
 func StatusPorcelain(path string) string {
 	out, err := Run(path, "status", "--porcelain")
 	if err != nil {
@@ -389,6 +419,15 @@ func Pull(repoPath string) (string, error) {
 
 func Push(repoPath string) (string, error) {
 	return Run(repoPath, "push")
+}
+
+// PushRef pushes sha to remote's branch (`git push <remote> <sha>:refs/heads/
+// <branch>`) from dir. No --force: the remote applies its own fast-forward
+// check, so a stale or refused push exits nonzero having moved nothing, and
+// dir's own branches and HEAD are untouched either way — which is what lets a
+// merge land from a detached worktree without advancing any local ref (#284).
+func PushRef(dir, remote, sha, branch string) (string, error) {
+	return Run(dir, "push", remote, sha+":refs/heads/"+branch)
 }
 
 func Rebase(repoPath, onto string) (string, error) {

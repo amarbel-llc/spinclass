@@ -445,7 +445,7 @@ func closeShop(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, fo
 		}
 	}
 
-	commitsAhead := git.CommitsAhead(rp.AbsPath, defaultBranch, rp.Branch)
+	commitsAhead := git.CommitsUnintegrated(rp.AbsPath, defaultBranch, rp.Branch)
 	desc := statusDescription(defaultBranch, commitsAhead, worktreeStatus)
 
 	if tw != nil {

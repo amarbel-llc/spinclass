@@ -291,9 +291,25 @@ subcommand is always available.
   the gate; under the lock: re-pull → ancestry check → if the tip moved, rebase
   the pinned commits in a transient `.land-*` worktree (conflict ⇒
   `merge.ErrIntegrationConflict`, resolved by a plain re-merge) → gate on the
-  LANDING sha → ff-only → teardown → push. Worktree merges only; lock is
+  LANDING sha → land (next bullet) → teardown. Worktree merges only; lock is
   host-local. `[hooks].disable-merge-queue` restores the pre-#235 fail-on-race
   path.
+- **Detached landing worktree / Alt B** (FDR 0029, #284): a gitSync worktree
+  merge on the queued path ALWAYS lands from the disposable `.land-*` worktree
+  (created at the pin, rebased there only if the tip moved): the landing is
+  `git push <remote> <landingSha>:refs/heads/<default>` run from that worktree
+  (`git.PushRef`) — the ff check is the remote's own, so a refused push (stale
+  tip, dropped credential) moves NOTHING, and the root checkout's LOCAL default
+  ref is never advanced by automation (the next pull catches it up). No
+  separate `push` point: `merge <branch>` IS the push. Branch delete is forced
+  (`-d` can't see a landing the local ref never received); the post-merge phase
+  runs in the landing worktree (the exact landed tree). `gitSync=false` still
+  ff-onlys into the root (the local ref IS that landing); implicit and
+  `disable-merge-queue` paths are unchanged. Consumers reading the local default
+  ref use `git.CommitsUnintegrated` (integrated = reachable from the local
+  default OR its remote-tracking ref): `close.RunResolved`, `clean.scanWorktrees`,
+  `shop.closeShop`'s auto-close gate. This is the injection surface FDR 0028's
+  worktree-scoped push credential assumes.
 - **Stacked / queued intra-session merges** (FDR 0025, #265): a second
   `merge-this-session-async` while a gate runs ENQUEUES the next batch
   (in-process per-worktree queue, `cmd/spinclass/merge_queue.go`) rather than

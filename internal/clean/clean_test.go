@@ -68,6 +68,40 @@ func setupRepo(t *testing.T) (root, repoDir string) {
 	return root, repoDir
 }
 
+// TestScanWorktreesOriginLandedIsMerged covers #284's must-fix consumer: a
+// worktree whose commits landed by a direct push to origin/<default> (Alt B)
+// — leaving the root's local default ref behind — must scan as merged, or
+// `sc clean` would never reap it.
+func TestScanWorktreesOriginLandedIsMerged(t *testing.T) {
+	root, repoDir := setupRepo(t)
+	bare := filepath.Join(root, "bare.git")
+	runGit(t, root, "init", "--bare", "-b", "main", bare)
+	runGit(t, repoDir, "remote", "add", "origin", bare)
+	runGit(t, repoDir, "push", "-u", "origin", "main")
+
+	wtPath := filepath.Join(repoDir, ".worktrees", "landed-x")
+	runGit(t, repoDir, "worktree", "add", "-b", "landed-x", wtPath)
+	if err := os.WriteFile(filepath.Join(wtPath, "landed.txt"), []byte("landed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "landed.txt")
+	runGit(t, wtPath, "commit", "-m", "landed commit")
+	runGit(t, wtPath, "push", "origin", "HEAD:refs/heads/main")
+
+	var found *worktreeInfo
+	for _, wt := range scanWorktrees(root) {
+		if wt.branch == "landed-x" {
+			found = &wt
+		}
+	}
+	if found == nil {
+		t.Fatal("scanWorktrees did not list landed-x")
+	}
+	if !found.merged {
+		t.Errorf("landed-x scanned as unmerged; its commit is on origin/main")
+	}
+}
+
 // makeTransientWorktreeDir creates a non-empty transient merge worktree dir
 // (.merge-* build or .land-* landing) under <repo>/.worktrees/ (mirroring the
 // #129 test's non-empty fixture so a stray git worktree remove can't silently
