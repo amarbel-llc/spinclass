@@ -126,7 +126,12 @@ func createWorktree(worktreePath worktree.ResolvedPath, opts CreateOpts, tw *tap
 		// Per-session push credential (FDR 0028), on the same funnel as the
 		// base-branch gate so spawn/run sessions get one too. The orphan sweep
 		// runs first (best-effort; a failure is reported, not fatal — the
-		// issuer's TTL sweep is the backstop). A failed MINT is fatal: a session
+		// issuer's TTL sweep is the backstop). Sweep-BEFORE-mint is load-bearing:
+		// the sweep revokes by session id, and a key reused after a tombstone
+		// (a chosen branch name) would otherwise let the stale record revoke the
+		// token minted here; sweeping first retires it before this id has a
+		// token, and the attach/spawn state write then replaces the tombstone
+		// (session.Write) so it can never be swept again. A failed MINT is fatal: a session
 		// without the credential it was configured for would push off the
 		// inherited ssh-agent, exactly the failure this feature exists to remove,
 		// and a worker has no operator to notice. The half-built worktree is
