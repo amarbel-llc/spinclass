@@ -245,6 +245,23 @@ debug-sc *args:
     echo "sc = $bin ($("$bin" --version 2>/dev/null | head -n1))" >&2
     exec "$bin" {{ args }}
 
+# [debug] Prove a session worktree's per-session credential (FDR 0028) carries
+# a push WITHOUT the ssh-agent: with SSH_AUTH_SOCK unset, push the worktree's
+# HEAD to a scratch remote branch (the worktree-scoped insteadOf + credential
+# helper must supply HTTPS + token, or the push fails), then delete that
+# remote branch again. Read-only for the default branch; the scratch branch is
+# gone by the end.
+#
+# push a session worktree's HEAD to a scratch remote branch with no ssh-agent, then delete it
+[group('debug')]
+debug-agentless-push worktree scratch='fdr-0028-probe':
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "configured origin: $(git -C "{{ worktree }}" config --get remote.origin.url)" >&2
+    echo "effective origin:  $(git -C "{{ worktree }}" remote get-url origin)" >&2
+    env -u SSH_AUTH_SOCK git -C "{{ worktree }}" push origin "HEAD:refs/heads/{{ scratch }}" || { echo "PUSH FAILED without agent" >&2; exit 1; }
+    env -u SSH_AUTH_SOCK git -C "{{ worktree }}" push origin --delete "{{ scratch }}"
+
 # [debug] Run the live profile's `papi` — the [auth] issuer (papi#73) — to
 # inspect or clean up forge tokens around a round-trip (e.g. `forge token list`).
 #
