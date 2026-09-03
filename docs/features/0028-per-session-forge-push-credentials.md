@@ -1,5 +1,5 @@
 ---
-status: experimental
+status: accepted
 date: 2026-09-01
 promotion-criteria: A working [auth] mint→inject→revoke lifecycle drives a papi-minted per-repo token through a real merge push on the forge; a crashed session's orphaned token is revoked by the sweeper; no credential is ever written to the root checkout's on-disk config.
 ---

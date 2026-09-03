@@ -228,6 +228,30 @@ explore-recipe-prompt-cost repos=(home_directory() / 'eng/repos'):
     [ -n "$skipped" ] && echo "skipped (dump failed):$skipped"
     exit 0
 
+# [explore] Inventory the sibling repos a root-level sweatfile entry would reach:
+# for each dir under `repos`, its configured origin host (what [auth] would
+# derive SPINCLASS_FORGE_HOST from) and its conformist flake-input rev (the
+# git-remotes(#8) fix, 7baec98, must be pinned before [auth] turns on there).
+# Input to the FDR 0028 fleet-placement design.
+#
+# list each sibling repo's origin host and pinned conformist rev
+[group('explore')]
+explore-repo-origins repos=(home_directory() / 'eng/repos'):
+    #!/usr/bin/env bash
+    set -uo pipefail
+    printf '%-16s %-28s %s\n' repo origin-host conformist-rev
+    for d in "{{ repos }}"/*/; do
+      d=${d%/}; name=$(basename "$d")
+      [ -d "$d/.git" ] || [ -f "$d/.git" ] || continue
+      url=$(git -C "$d" config --get remote.origin.url 2>/dev/null || echo '(no origin)')
+      host=${url#*@}; host=${host#*://}; host=${host%%[:/]*}
+      rev='-'
+      if [ -f "$d/flake.lock" ]; then
+        rev=$(jq -r '.nodes.conformist.locked.rev // "-" | .[0:7]' "$d/flake.lock" 2>/dev/null || echo '?')
+      fi
+      printf '%-16s %-28s %s\n' "$name" "$host" "$rev"
+    done
+
 # [debug] Run the LIVE profile's `sc` (not the devshell build) against this
 # repo from the current worktree — the escape hatch for driving fresh sessions
 # on a newly switched binary from an agent session that has no shell (e.g. the
