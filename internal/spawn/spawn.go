@@ -91,7 +91,8 @@ func LaunchDetached(home, repoPath, driverKey, brief, desc, model string) (Pendi
 	// driver agent must not be able to wave away its worker's stale toolchain,
 	// so only the repo's owner can opt out (spinclass#250).
 	if _, err := shop.Create(io.Discard, rp, shop.CreateOpts{
-		AllowStaleBase: merged.AllowStaleBase(),
+		AllowStaleBase:    merged.AllowStaleBase(),
+		AllowNoCredential: merged.AllowNoCredential(),
 	}, nil); err != nil {
 		return Pending{}, fmt.Errorf("creating worker worktree: %w", err)
 	}

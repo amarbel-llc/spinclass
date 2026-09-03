@@ -306,7 +306,7 @@ func TestNewTapExistingWorktree(t *testing.T) {
 
 	mock := &mockExecutor{}
 	var buf bytes.Buffer
-	err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", false, false, false, false)
+	err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", false, false, false, false, false)
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
@@ -380,7 +380,7 @@ func TestNewNoAttach(t *testing.T) {
 
 	mock := &mockExecutor{}
 	var buf bytes.Buffer
-	err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", true, true, false, false)
+	err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", true, true, false, false, false)
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
@@ -562,7 +562,7 @@ func TestAttachCallsExecutorWithCorrectArgs(t *testing.T) {
 
 	mock := &mockExecutor{}
 	var buf bytes.Buffer
-	err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", false, true, false, false)
+	err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", false, true, false, false, false)
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
@@ -640,7 +640,7 @@ func TestAttachPreservesFieldsItDoesNotOwn(t *testing.T) {
 	}
 	mock := &mockExecutor{}
 	var buf bytes.Buffer
-	if err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", false, false, false, false); err != nil {
+	if err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", false, false, false, false, false); err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
 
@@ -726,7 +726,7 @@ func TestNewMergeOnCloseCleanWorktree(t *testing.T) {
 	var buf bytes.Buffer
 
 	// mergeOnClose=true, noAttach=false (Attach returns immediately from mock)
-	err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", true, false, false, false)
+	err := Attach(&buf, mock, rp, sweatfile.Sweatfile{}, "tap", true, false, false, false, false)
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}

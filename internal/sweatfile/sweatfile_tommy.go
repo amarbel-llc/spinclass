@@ -313,6 +313,12 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				_vHooksAllowStaleBase.MarkConsumed()
 			}
 		}
+		if _vHooksAllowNoCredential, _ok := _vHooks.Get("allow-no-credential"); _ok && _vHooksAllowNoCredential.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksAllowNoCredential.Leaf); _xok {
+				hooksVal3.AllowNoCredential = &_x
+				_vHooksAllowNoCredential.MarkConsumed()
+			}
+		}
 		d.data.Hooks = hooksVal3
 	} else {
 		hooksVal3 := &Hooks{}
@@ -485,6 +491,13 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				_vAllowStaleBase.MarkConsumed()
 			}
 		}
+		if _vAllowNoCredential, _ok := model.Get("allow-no-credential"); _ok && _vAllowNoCredential.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vAllowNoCredential.Leaf); _xok {
+				hooksVal3.AllowNoCredential = &_x
+				_vAllowNoCredential.MarkConsumed()
+			}
+		}
 		if _foundHooks {
 			d.data.Hooks = hooksVal3
 		}
@@ -504,6 +517,15 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				_vAuthRevokeCommand.MarkConsumed()
 			}
 		}
+		if _vAuthForgeHosts, _ok := _vAuth.Get("forge-hosts"); _ok && _vAuthForgeHosts.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vAuthForgeHosts.Leaf); _xok {
+				authVal4.ForgeHosts = _x
+				if authVal4.ForgeHosts == nil {
+					authVal4.ForgeHosts = []string{}
+				}
+				_vAuthForgeHosts.MarkConsumed()
+			}
+		}
 		d.data.Auth = authVal4
 	} else {
 		authVal4 := &Auth{}
@@ -520,6 +542,16 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractString(_vRevokeCommand.Leaf); _xok {
 				authVal4.RevokeCommand = &_x
 				_vRevokeCommand.MarkConsumed()
+			}
+		}
+		if _vForgeHosts, _ok := model.Get("forge-hosts"); _ok && _vForgeHosts.Kind == cst.VLeaf {
+			_foundAuth = true
+			if _x, _xok := cst.ExtractStringSlice(_vForgeHosts.Leaf); _xok {
+				authVal4.ForgeHosts = _x
+				if authVal4.ForgeHosts == nil {
+					authVal4.ForgeHosts = []string{}
+				}
+				_vForgeHosts.MarkConsumed()
 			}
 		}
 		if _foundAuth {
@@ -1131,6 +1163,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
+		if d.data.Hooks.AllowNoCredential != nil {
+			if err := cst.SetAny(tableNode, "allow-no-credential", *d.data.Hooks.AllowNoCredential); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
 	}
 	if d.data.Auth != nil {
 		tableNode := cst.EnsureChildTable(d.cstDoc.Root(), d.cstDoc.Root(), "auth")
@@ -1142,6 +1179,13 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 		if d.data.Auth.RevokeCommand != nil {
 			if err := cst.SetAny(tableNode, "revoke-command", *d.data.Auth.RevokeCommand); err != nil {
 				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		{
+			if d.data.Auth.ForgeHosts != nil {
+				if err := cst.SetAny(tableNode, "forge-hosts", d.data.Auth.ForgeHosts); err != nil {
+					return nil, fmt.Errorf("%w", err)
+				}
 			}
 		}
 	}
@@ -1682,6 +1726,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vHooksAllowStaleBase.MarkConsumed()
 			}
 		}
+		if _vHooksAllowNoCredential, _ok := _vHooks.Get("allow-no-credential"); _ok && _vHooksAllowNoCredential.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksAllowNoCredential.Leaf); _xok {
+				hooksVal3.AllowNoCredential = &_x
+				_vHooksAllowNoCredential.MarkConsumed()
+			}
+		}
 		data.Hooks = hooksVal3
 	} else {
 		hooksVal3 := &Hooks{}
@@ -1854,6 +1904,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vAllowStaleBase.MarkConsumed()
 			}
 		}
+		if _vAllowNoCredential, _ok := sub.Get("allow-no-credential"); _ok && _vAllowNoCredential.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vAllowNoCredential.Leaf); _xok {
+				hooksVal3.AllowNoCredential = &_x
+				_vAllowNoCredential.MarkConsumed()
+			}
+		}
 		if _foundHooks {
 			data.Hooks = hooksVal3
 		}
@@ -1873,6 +1930,15 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vAuthRevokeCommand.MarkConsumed()
 			}
 		}
+		if _vAuthForgeHosts, _ok := _vAuth.Get("forge-hosts"); _ok && _vAuthForgeHosts.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vAuthForgeHosts.Leaf); _xok {
+				authVal4.ForgeHosts = _x
+				if authVal4.ForgeHosts == nil {
+					authVal4.ForgeHosts = []string{}
+				}
+				_vAuthForgeHosts.MarkConsumed()
+			}
+		}
 		data.Auth = authVal4
 	} else {
 		authVal4 := &Auth{}
@@ -1889,6 +1955,16 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractString(_vRevokeCommand.Leaf); _xok {
 				authVal4.RevokeCommand = &_x
 				_vRevokeCommand.MarkConsumed()
+			}
+		}
+		if _vForgeHosts, _ok := sub.Get("forge-hosts"); _ok && _vForgeHosts.Kind == cst.VLeaf {
+			_foundAuth = true
+			if _x, _xok := cst.ExtractStringSlice(_vForgeHosts.Leaf); _xok {
+				authVal4.ForgeHosts = _x
+				if authVal4.ForgeHosts == nil {
+					authVal4.ForgeHosts = []string{}
+				}
+				_vForgeHosts.MarkConsumed()
 			}
 		}
 		if _foundAuth {
@@ -2486,6 +2562,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 				return fmt.Errorf("%w", err)
 			}
 		}
+		if data.Hooks.AllowNoCredential != nil {
+			if err := cst.SetAny(tableNode, "allow-no-credential", *data.Hooks.AllowNoCredential); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
 	}
 	if data.Auth != nil {
 		tableNode := cst.EnsureChildTable(doc.Root(), container, "auth")
@@ -2497,6 +2578,13 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		if data.Auth.RevokeCommand != nil {
 			if err := cst.SetAny(tableNode, "revoke-command", *data.Auth.RevokeCommand); err != nil {
 				return fmt.Errorf("%w", err)
+			}
+		}
+		{
+			if data.Auth.ForgeHosts != nil {
+				if err := cst.SetAny(tableNode, "forge-hosts", data.Auth.ForgeHosts); err != nil {
+					return fmt.Errorf("%w", err)
+				}
 			}
 		}
 	}

@@ -152,6 +152,9 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if other.Hooks.AllowStaleBase != nil {
 			merged.Hooks.AllowStaleBase = other.Hooks.AllowStaleBase
 		}
+		if other.Hooks.AllowNoCredential != nil {
+			merged.Hooks.AllowNoCredential = other.Hooks.AllowNoCredential
+		}
 	}
 
 	// [auth] — scalar override, like [hooks] (FDR 0028). Copied before the
@@ -169,6 +172,12 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		}
 		if other.Auth.RevokeCommand != nil {
 			merged.Auth.RevokeCommand = other.Auth.RevokeCommand
+		}
+		// forge-hosts: OVERRIDE, not append (like sysprompt.doc-index-dirs) —
+		// an allow-list is replaced wholesale by a nearer level; [] clears it
+		// (= any host); nil inherits.
+		if other.Auth.ForgeHosts != nil {
+			merged.Auth.ForgeHosts = other.Auth.ForgeHosts
 		}
 	}
 

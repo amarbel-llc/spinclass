@@ -1,7 +1,10 @@
 # `[auth]` fleet placement — design for review (not a rollout)
 
-**Status:** proposal for the operator's review, 2026-09-03. Nothing here is
-implemented or rolled out; FDR 0028 is live on spinclass's own sweatfile only.
+**Status:** reviewed and approved by the operator on 2026-09-03 — all three
+decisions in §6 as recommended (C, ship the escape hatch, A2-first). The
+spinclass side (`[auth].forge-hosts`, `allow-no-credential`, the validate
+warning) is implemented; the root entry itself is NOT rolled out — that step
+waits on eng's A2 run and the pin verification in §3.
 
 **Question:** how does the FDR 0028 `[auth]` section (per-session forge push
 credentials) reach the ~29 forge-origin repos under `~/eng/repos` — one entry

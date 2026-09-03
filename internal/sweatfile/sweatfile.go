@@ -76,6 +76,7 @@ type Hooks struct {
 	PostMergeTimeout           *string `toml:"post-merge-timeout"`
 	AutoRebuildOnResume        *bool   `toml:"auto-rebuild-on-resume"`
 	AllowStaleBase             *bool   `toml:"allow-stale-base"`
+	AllowNoCredential          *bool   `toml:"allow-no-credential"`
 }
 
 // Auth declares how a worktree session mints and revokes its per-session forge
@@ -87,6 +88,14 @@ type Hooks struct {
 type Auth struct {
 	MintCommand   *string `toml:"mint-command"`
 	RevokeCommand *string `toml:"revoke-command"`
+	// ForgeHosts is the allow-list of origin hosts a credential is minted for.
+	// When non-empty, a session whose origin host is not listed skips the mint
+	// (a visible SKIP point) and keeps today's ssh behaviour — so a root-level
+	// [auth] entry can cover a whole tree of repos without a GitHub-origin
+	// repo ever trying to mint a forge token (and failing its creation).
+	// Empty/nil = mint for any host (the single-repo form). Override, not
+	// append: a non-nil value replaces the inherited list; nil inherits.
+	ForgeHosts []string `toml:"forge-hosts"`
 }
 
 // Sysprompt configures the dynamic system-prompt fragment spinclass
@@ -656,6 +665,28 @@ func (sf Sweatfile) AllowStaleBase() bool {
 	return sf.Hooks != nil &&
 		sf.Hooks.AllowStaleBase != nil &&
 		*sf.Hooks.AllowStaleBase
+}
+
+// AllowNoCredential reports whether [hooks].allow-no-credential is true: a
+// failed [auth] mint (forge API unreachable, no live agent for the card login)
+// then degrades the session to today's ssh behaviour with a warning instead of
+// failing its creation (FDR 0028). The persistent half of the override;
+// `sc start --allow-no-credential` / `sc run --allow-no-credential` are the
+// per-invocation half. Like allow-stale-base, deliberately no MCP parameter:
+// a driver must not be able to wave away its worker's missing credential.
+func (sf Sweatfile) AllowNoCredential() bool {
+	return sf.Hooks != nil &&
+		sf.Hooks.AllowNoCredential != nil &&
+		*sf.Hooks.AllowNoCredential
+}
+
+// AuthForgeHosts returns the [auth].forge-hosts allow-list (nil/empty = any
+// host). See Auth.ForgeHosts.
+func (sf Sweatfile) AuthForgeHosts() []string {
+	if sf.Auth == nil {
+		return nil
+	}
+	return sf.Auth.ForgeHosts
 }
 
 func (sf Sweatfile) DisableNixGCEnabled() bool {

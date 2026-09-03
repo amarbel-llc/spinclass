@@ -348,9 +348,18 @@ subcommand is always available.
   (the out-of-session `sc merge`/`sc run` worktree removal — no tombstone is
   written there, so the sweep could never find it) (warn, non-fatal);
   `auth.SweepOrphans` runs at the next creation on the repo for abandoned/
-  tombstoned sessions with an unrevoked record. `validate.CheckAuth` warns on a
-  lone mint/revoke. Implicit sessions, the `disable-merge-queue` path, and the
-  creation-time base-branch fetch are outside it.
+  tombstoned sessions with an unrevoked record. `[auth].forge-hosts`
+  (override array) gates the mint on the origin host: unlisted ⇒ `auth.Mint`
+  returns `MintOutcome{Skipped}` and the funnel emits a SKIP point, never a
+  failure — the mechanism behind the fleet placement (one root entry in
+  `~/eng/repos/sweatfile`, `docs/plans/2026-09-03-auth-fleet-placement-design.md`).
+  A FAILED mint is fatal by default (worktree torn down);
+  `[hooks].allow-no-credential` / `sc start|run --allow-no-credential`
+  (`CreateOpts.AllowNoCredential`, the `allow-stale-base` two-halves shape, no
+  MCP parameter) degrade it to a warn point + ssh. `validate.CheckAuth` warns
+  on a lone mint/revoke and on a mint without `forge-hosts`. Implicit sessions,
+  the `disable-merge-queue` path, and the creation-time base-branch fetch are
+  outside it.
 - **Stacked / queued intra-session merges** (FDR 0025, #265): a second
   `merge-this-session-async` while a gate runs ENQUEUES the next batch
   (in-process per-worktree queue, `cmd/spinclass/merge_queue.go`) rather than

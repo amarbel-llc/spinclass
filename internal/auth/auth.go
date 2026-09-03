@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -133,42 +134,60 @@ func originRemote(dir string) (Remote, error) {
 	return ParseForgeRemote(raw)
 }
 
+// MintOutcome reports what Mint did: Minted when a credential was written and
+// wired; Skipped (non-empty, human-readable) when a mint-command is configured
+// but this session's origin host is outside [auth].forge-hosts, so the session
+// keeps today's ssh behaviour; neither when no mint-command is configured.
+type MintOutcome struct {
+	Minted  bool
+	Skipped string
+}
+
 // Mint runs [auth].mint-command in the session worktree, writes the token it
 // prints as a mode-600 git-credential-store file, injects the worktree-scoped
-// git config, and records the mint on the session state. Returns false with a
-// nil error when no mint-command is configured.
-func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity) (bool, error) {
+// git config, and records the mint on the session state. A configured
+// [auth].forge-hosts allow-list gates it on the origin host first — the
+// mechanism that lets one root-level entry cover a tree of repos without a
+// GitHub-origin repo ever minting (and failing its creation).
+func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity) (MintOutcome, error) {
 	cmd := sf.AuthMintCommand()
 	if cmd == nil || strings.TrimSpace(*cmd) == "" {
-		return false, nil
+		return MintOutcome{}, nil
 	}
+	// No origin, or an origin that is not a forge URL (a local path): there is
+	// nothing a forge token could be scoped to, so — like an unlisted host —
+	// this is a visible skip, never a failed creation. A shared [auth] entry
+	// must not stop a remote-less scratch repo from getting a session.
 	remote, err := originRemote(id.RepoPath)
 	if err != nil {
-		return false, fmt.Errorf("[auth] mint: %w", err)
+		return MintOutcome{Skipped: "no forge origin remote: " + strings.TrimSpace(err.Error())}, nil
+	}
+	if hosts := sf.AuthForgeHosts(); len(hosts) > 0 && !slices.Contains(hosts, remote.Host) {
+		return MintOutcome{Skipped: fmt.Sprintf("origin host %s not in [auth].forge-hosts", remote.Host)}, nil
 	}
 	out, err := sweatfile.RunCommandCapture(ctx, id.WorktreePath, *cmd, id.env(remote))
 	if err != nil {
-		return false, fmt.Errorf("[auth] mint-command failed: %w", err)
+		return MintOutcome{}, fmt.Errorf("[auth] mint-command failed: %w", err)
 	}
 	token := strings.TrimSpace(out)
 	if token == "" {
-		return false, errors.New("[auth] mint-command printed no token on stdout")
+		return MintOutcome{}, errors.New("[auth] mint-command printed no token on stdout")
 	}
 	if err := writeCredential(id.WorktreePath, remote.Host, token); err != nil {
-		return false, fmt.Errorf("[auth] write credential: %w", err)
+		return MintOutcome{}, fmt.Errorf("[auth] write credential: %w", err)
 	}
 	if err := Inject(id.WorktreePath, credentialPath(id.WorktreePath), remote); err != nil {
-		return false, fmt.Errorf("[auth] inject worktree config: %w", err)
+		return MintOutcome{}, fmt.Errorf("[auth] inject worktree config: %w", err)
 	}
 	st, err := session.EnsureWorktreeState(id.RepoPath, id.Branch, id.SessionKey, 0)
 	if err != nil {
-		return false, fmt.Errorf("[auth] record mint: %w", err)
+		return MintOutcome{}, fmt.Errorf("[auth] record mint: %w", err)
 	}
 	st.Credential = &session.Credential{MintedAt: time.Now().UTC()}
 	if err := session.Write(*st); err != nil {
-		return false, fmt.Errorf("[auth] record mint: %w", err)
+		return MintOutcome{}, fmt.Errorf("[auth] record mint: %w", err)
 	}
-	return true, nil
+	return MintOutcome{Minted: true}, nil
 }
 
 func writeCredential(worktreePath, host, token string) error {

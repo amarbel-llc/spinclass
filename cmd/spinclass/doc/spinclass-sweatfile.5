@@ -1015,6 +1015,27 @@ silences its report there.
 is excluded entirely \(em forking means \(dqbranch from here\(dq.
 .B Merge:
 scalar override.
+.TP
+.B allow\-no\-credential
+Boolean.
+When true, a failed
+.B [auth]
+mint at session creation (forge API unreachable, no live agent for the card
+login) warns and creates the session WITHOUT a push credential \(em pushes
+then use the inherited ssh-agent as before FDR 0028 \(em instead of failing
+creation and removing the half-built worktree (the default).
+The persistent half of the override;
+.B sc start \-\-allow\-no\-credential
+and
+.B sc run \-\-allow\-no\-credential
+are the per-invocation half.
+Like
+.BR allow\-stale\-base ,
+deliberately no MCP tool parameter:
+.B sc spawn
+honours only this knob.
+.B Merge:
+scalar override.
 .SS [auth]
 Per-session forge push credential (FDR 0028).
 When set, every worktree session created by
@@ -1065,9 +1086,32 @@ repo for sessions that ended without revoking (crashed, or removed outside
 spinclass).
 .B Merge:
 scalar override.
+.TP
+.B forge\-hosts
+Array of origin hosts the mint applies to.
+When non-empty, a session whose origin host is not listed skips the mint
+(a visible SKIP point) and is created exactly as without
+.BR [auth] ,
+so one parent-directory entry can cover a tree of repos without a
+GitHub-origin repo ever minting a forge token and failing its creation.
+Empty or unset means any host.
+.B Merge:
+override, not append \(em a nearer level replaces the list,
+.B []
+clears it, unset inherits.
 .PP
 .B sc validate
-warns when only one of the two is set.
+warns when only one of the two commands is set, and when
+.B mint\-command
+is set without
+.BR forge\-hosts .
+A failed mint (forge API unreachable, no live agent for the card login) is
+fatal to session creation by default and the half-built worktree is removed;
+.B [hooks].allow\-no\-credential
+(or
+.BR "sc start/run --allow-no-credential" )
+instead warns and creates the session without a credential, pushing over
+the inherited ssh-agent as before.
 Implicit (main-checkout) sessions are outside this: they are the operator
 in the root and keep ssh.
 .SS [session\-entry]

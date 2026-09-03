@@ -458,21 +458,32 @@ func CheckAuth(sf sweatfile.Sweatfile) []Issue {
 	}
 	set := func(p *string) bool { return p != nil && strings.TrimSpace(*p) != "" }
 	mint, revoke := set(sf.Auth.MintCommand), set(sf.Auth.RevokeCommand)
+	var issues []Issue
 	switch {
 	case mint && !revoke:
-		return []Issue{{
+		issues = append(issues, Issue{
 			Message:  "[auth] sets `mint-command` without `revoke-command`: minted tokens would never be revoked at close (only the issuer's own sweep would reclaim them)",
 			Severity: SeverityWarning,
 			Field:    "auth.revoke-command",
-		}}
+		})
 	case revoke && !mint:
-		return []Issue{{
+		issues = append(issues, Issue{
 			Message:  "[auth] sets `revoke-command` without `mint-command`: nothing is minted, so it never runs",
 			Severity: SeverityWarning,
 			Field:    "auth.mint-command",
-		}}
+		})
 	}
-	return nil
+	// A mint-command with no host allow-list mints for EVERY origin host the
+	// entry reaches — fine for one forge repo, a session-creation failure for
+	// any GitHub-origin repo under a shared (parent-dir) sweatfile.
+	if mint && len(sf.Auth.ForgeHosts) == 0 {
+		issues = append(issues, Issue{
+			Message:  "[auth] sets `mint-command` without `forge-hosts`: every origin host this entry reaches will try to mint; set `forge-hosts = [...]` so repos on other hosts (GitHub) skip the mint instead of failing session creation",
+			Severity: SeverityWarning,
+			Field:    "auth.forge-hosts",
+		})
+	}
+	return issues
 }
 
 func isShellInterpreter(cmd string) bool {

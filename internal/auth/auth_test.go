@@ -92,12 +92,55 @@ func TestParseForgeRemote(t *testing.T) {
 
 func TestMintNoCommandIsNoop(t *testing.T) {
 	_, wtPath, id := setupRepo(t)
-	minted, err := Mint(context.Background(), sweatfile.Sweatfile{}, id)
-	if err != nil || minted {
-		t.Fatalf("Mint with no [auth]: minted=%v err=%v", minted, err)
+	outcome, err := Mint(context.Background(), sweatfile.Sweatfile{}, id)
+	if err != nil || outcome.Minted || outcome.Skipped != "" {
+		t.Fatalf("Mint with no [auth]: outcome=%+v err=%v", outcome, err)
 	}
 	if Minted(wtPath) {
 		t.Error("credential file written without a mint-command")
+	}
+}
+
+// A repo with no origin (or a path origin) has nothing to mint a forge token
+// for: a shared [auth] entry must skip it visibly, never fail its creation.
+func TestMintSkipsWithoutForgeOrigin(t *testing.T) {
+	_, wtPath, id := setupRepo(t)
+	runGit(t, id.RepoPath, "remote", "remove", "origin")
+	outcome, err := Mint(context.Background(), authSweatfile("echo tok", "true"), id)
+	if err != nil {
+		t.Fatalf("Mint without an origin must not error: %v", err)
+	}
+	if outcome.Minted || outcome.Skipped == "" {
+		t.Fatalf("outcome=%+v, want a skip", outcome)
+	}
+	if Minted(wtPath) {
+		t.Error("credential file written without an origin")
+	}
+}
+
+// [auth].forge-hosts gates the mint on the origin host: an unlisted host is
+// skipped with a reason (the session keeps today's ssh behaviour, and its
+// creation must NOT fail), a listed one mints.
+func TestMintForgeHostsAllowList(t *testing.T) {
+	_, wtPath, id := setupRepo(t) // origin host forge.example.com
+	sf := authSweatfile("echo tok", "true")
+	sf.Auth.ForgeHosts = []string{"github.com"}
+
+	outcome, err := Mint(context.Background(), sf, id)
+	if err != nil {
+		t.Fatalf("Mint on an unlisted host must not error: %v", err)
+	}
+	if outcome.Minted || !strings.Contains(outcome.Skipped, "forge.example.com") {
+		t.Fatalf("unlisted host: outcome=%+v, want a skip naming the host", outcome)
+	}
+	if Minted(wtPath) {
+		t.Error("credential file written for an unlisted host")
+	}
+
+	sf.Auth.ForgeHosts = []string{"github.com", "forge.example.com"}
+	outcome, err = Mint(context.Background(), sf, id)
+	if err != nil || !outcome.Minted {
+		t.Fatalf("listed host: outcome=%+v err=%v", outcome, err)
 	}
 }
 
@@ -106,12 +149,12 @@ func TestMintWritesCredentialInjectsConfigAndRecordsState(t *testing.T) {
 	envFile := filepath.Join(t.TempDir(), "env")
 	sf := authSweatfile("env | grep '^SPINCLASS_' | sort > "+envFile+"; echo tok/123", "true")
 
-	minted, err := Mint(context.Background(), sf, id)
+	outcome, err := Mint(context.Background(), sf, id)
 	if err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
-	if !minted {
-		t.Fatal("Mint reported nothing minted")
+	if !outcome.Minted {
+		t.Fatalf("Mint reported nothing minted: %+v", outcome)
 	}
 
 	credPath := filepath.Join(wtPath, ".spinclass", CredentialFile)

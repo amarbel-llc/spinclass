@@ -52,10 +52,13 @@ type Spec struct {
 	NoMerge        bool
 	NoClose        bool
 	LocalOnly      bool
-	AllowStaleBase bool     // --allow-stale-base: create even from an unverified default branch
-	Format         string   // global --format value (auto/viewport/plain/ndjson)
-	Util           []string // `-- <util> [args...]` form
-	Script         []byte   // stdin-script form (shebang-aware)
+	AllowStaleBase bool // --allow-stale-base: create even from an unverified default branch
+	// AllowNoCredential: --allow-no-credential — a failed [auth] mint warns and
+	// the session runs without a push credential instead of failing (FDR 0028).
+	AllowNoCredential bool
+	Format            string   // global --format value (auto/viewport/plain/ndjson)
+	Util              []string // `-- <util> [args...]` form
+	Script            []byte   // stdin-script form (shebang-aware)
 	// DynamicPostMergeHooks are shell commands passed via --post-merge; each
 	// runs after the merge lands, non-fatally, in the default-branch checkout.
 	DynamicPostMergeHooks []string
@@ -133,7 +136,7 @@ func Run(spec Spec) (exitCode int, err error) {
 		Description: rp.Description,
 		Env:         merged.SessionEnv(),
 	}
-	if aerr := shop.Attach(io.Discard, sexec, rp, merged, "", false, true /*noAttach*/, false, spec.AllowStaleBase); aerr != nil {
+	if aerr := shop.Attach(io.Discard, sexec, rp, merged, "", false, true /*noAttach*/, false, spec.AllowStaleBase, spec.AllowNoCredential); aerr != nil {
 		return 1, aerr
 	}
 
@@ -423,7 +426,7 @@ func runDynamicPostMergeHooks(rep *crap.Reporter, repoPath, defaultBranch, branc
 // ParseArgs splits the passthrough argv of `sc run` into a Spec. Grammar:
 //
 //	[--description D | -d D | --description=D] [--no-merge] [--no-close]
-//	[--local-only] [--allow-stale-base] [--format F | --format=F]
+//	[--local-only] [--allow-stale-base] [--allow-no-credential] [--format F | --format=F]
 //	[--post-merge H]...
 //	( -- <util> [args...] | <stdin script> )
 //
@@ -453,6 +456,9 @@ func ParseArgs(args []string, stdin io.Reader) (Spec, error) {
 			i++
 		case a == "--allow-stale-base":
 			spec.AllowStaleBase = true
+			i++
+		case a == "--allow-no-credential":
+			spec.AllowNoCredential = true
 			i++
 		case a == "--description" || a == "-d":
 			if i+1 >= len(args) {

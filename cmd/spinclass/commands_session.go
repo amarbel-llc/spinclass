@@ -42,6 +42,7 @@ func registerSessionCommands(app *command.App) {
 			{Name: "merge-on-close", Type: command.Bool, Description: "Auto-merge worktree into default branch on session close"},
 			{Name: "no-attach", Type: command.Bool, Description: "Create worktree but skip attaching"},
 			{Name: "allow-stale-base", Type: command.Bool, Description: "Create even when the default branch could not be confirmed current (offline, or a dirty/diverged checkout)"},
+			{Name: "allow-no-credential", Type: command.Bool, Description: "Create even when the [auth] push-credential mint fails (forge API unreachable, no live agent): warn and use the inherited ssh-agent instead"},
 		},
 		RunCLI: runStart,
 	})
@@ -545,6 +546,10 @@ type startArgs struct {
 	// The persistent equivalent is [hooks].allow-stale-base, which a repo owner
 	// sets deliberately.
 	AllowStaleBase bool `json:"allow-stale-base"`
+	// AllowNoCredential is CLI-only for the same reason (FDR 0028): a driver
+	// must not be able to wave away its worker's missing push credential. The
+	// persistent equivalent is [hooks].allow-no-credential.
+	AllowNoCredential bool `json:"allow-no-credential"`
 }
 
 func attachSession(resolvedPath worktree.ResolvedPath, args startArgs) error {
@@ -575,6 +580,7 @@ func attachSession(resolvedPath worktree.ResolvedPath, args startArgs) error {
 		args.NoAttach,
 		args.Verbose,
 		args.AllowStaleBase,
+		args.AllowNoCredential,
 	)
 }
 
@@ -742,5 +748,6 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		p.NoAttach,
 		p.Verbose,
 		false,
+		false, // no --allow-no-credential on resume either: resume never mints
 	)
 }

@@ -80,6 +80,11 @@ type CreateOpts struct {
 	// `--allow-stale-base` OR [hooks].allow-stale-base — two halves of one
 	// override — so this is already the final answer by the time it lands here.
 	AllowStaleBase bool
+	// AllowNoCredential turns a failed [auth] mint into a warning (the session
+	// is created without a credential and pushes over the inherited ssh-agent
+	// as before FDR 0028) instead of a fatal refusal. Same two-halves shape as
+	// AllowStaleBase: `--allow-no-credential` OR [hooks].allow-no-credential.
+	AllowNoCredential bool
 }
 
 func createWorktree(worktreePath worktree.ResolvedPath, opts CreateOpts, tw *tap.Writer) (bool, error) {
@@ -131,11 +136,15 @@ func createWorktree(worktreePath worktree.ResolvedPath, opts CreateOpts, tw *tap
 		// (a chosen branch name) would otherwise let the stale record revoke the
 		// token minted here; sweeping first retires it before this id has a
 		// token, and the attach/spawn state write then replaces the tombstone
-		// (session.Write) so it can never be swept again. A failed MINT is fatal: a session
-		// without the credential it was configured for would push off the
-		// inherited ssh-agent, exactly the failure this feature exists to remove,
-		// and a worker has no operator to notice. The half-built worktree is
-		// torn down so the refusal leaves nothing behind.
+		// (session.Write) so it can never be swept again. A failed MINT is fatal
+		// by default: a session without the credential it was configured for
+		// would push off the inherited ssh-agent, exactly the failure this
+		// feature exists to remove, and a worker has no operator to notice. The
+		// half-built worktree is torn down so the refusal leaves nothing behind.
+		// allow-no-credential (the --allow-stale-base shape) is the explicit
+		// escape hatch: warn and keep the credential-less session. An origin
+		// host outside [auth].forge-hosts is not a failure at all — the mint is
+		// skipped visibly and the session is created exactly as before.
 		ctx := context.Background()
 		if n, errs := auth.SweepOrphans(ctx, result.Merged, worktreePath.RepoPath, os.Stderr); n > 0 || len(errs) > 0 {
 			reportCredentialSweep(tw, n, errs)
@@ -146,16 +155,30 @@ func createWorktree(worktreePath worktree.ResolvedPath, opts CreateOpts, tw *tap
 			Branch:       worktreePath.Branch,
 			SessionKey:   worktreePath.SessionKey,
 		}
-		minted, mintErr := auth.Mint(ctx, result.Merged, id)
-		if mintErr != nil {
+		mintDesc := "mint credential " + worktreePath.Branch
+		outcome, mintErr := auth.Mint(ctx, result.Merged, id)
+		switch {
+		case mintErr != nil && !opts.AllowNoCredential:
 			_ = git.WorktreeForceRemove(worktreePath.RepoPath, worktreePath.AbsPath)
 			if worktreePath.ExistingBranch == "" {
 				_, _ = git.BranchForceDelete(worktreePath.RepoPath, worktreePath.Branch)
 			}
-			return false, mintErr
-		}
-		if minted && tw != nil {
-			tw.Ok("mint credential " + worktreePath.Branch)
+			return false, fmt.Errorf("%w\n\npass --allow-no-credential, or set [hooks].allow-no-credential, to create the session without a push credential (pushes then use the inherited ssh-agent)", mintErr)
+		case mintErr != nil:
+			msg := mintErr.Error() + " (allow-no-credential: session created without a push credential; pushes use the inherited ssh-agent)"
+			if tw != nil {
+				tw.NotOk(mintDesc, map[string]string{"severity": "warn", "message": msg})
+			} else {
+				log.Warn("credential mint failed; continuing without one", "branch", worktreePath.Branch, "err", mintErr)
+			}
+		case outcome.Skipped != "":
+			if tw != nil {
+				tw.Skip(mintDesc, outcome.Skipped)
+			}
+		case outcome.Minted:
+			if tw != nil {
+				tw.Ok(mintDesc)
+			}
 		}
 	}
 
@@ -234,20 +257,23 @@ func logSweatfileResult(result sweatfile.Hierarchy) {
 	)
 }
 
-func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sweatfile.Sweatfile, format string, mergeOnClose bool, noAttach bool, verbose bool, allowStaleBase bool) error {
+func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sweatfile.Sweatfile, format string, mergeOnClose bool, noAttach bool, verbose bool, allowStaleBase bool, allowNoCredential bool) error {
 	var tw *tap.Writer
 	if format == "tap" {
 		tw = tap.NewWriter(w)
 	}
 
-	// The CLI flag and the sweatfile knob are two spellings of one override, so
-	// resolve them here and hand the rest of the call chain a single answer.
+	// The CLI flags and the sweatfile knobs are two spellings of one override
+	// each, so resolve them here and hand the rest of the call chain a single
+	// answer.
 	allowStale := allowStaleBase || sf.AllowStaleBase()
+	allowNoCred := allowNoCredential || sf.AllowNoCredential()
 
 	existed, err := Create(w, rp, CreateOpts{
-		Verbose:        verbose,
-		Format:         format,
-		AllowStaleBase: allowStale,
+		Verbose:           verbose,
+		Format:            format,
+		AllowStaleBase:    allowStale,
+		AllowNoCredential: allowNoCred,
 	}, tw)
 	if err != nil {
 		return err
