@@ -653,6 +653,13 @@ func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, push,
 		if !tipMatchesPin {
 			ts.Ok("keep worktree " + branch + " (commits added since pin; left for a later merge)")
 		} else {
+			// The worktree is about to go, and with it the session's credential
+			// file and state — revoke the per-session forge token first (FDR
+			// 0028), or an out-of-session merge / `sc run` teardown would orphan
+			// it to the issuer's TTL sweep (no tombstone is written here for the
+			// orphan sweep to find). Non-fatal, like close and clean.
+			revokeCredential(ts, repoPath, wtPath, branch)
+
 			out, removeErr := git.Run(repoPath, "worktree", "remove", wtPath)
 			if removeErr != nil {
 				return failStep(ts, "remove worktree "+branch, removeErr, out)
@@ -695,6 +702,48 @@ func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, push,
 	// warrant; abandoned state is reaped by `sc clean`.
 	_ = executor.RequestClose(repoPath, branch)
 	return nil
+}
+
+// revokeCredential runs [auth].revoke-command for a session that minted a
+// credential (FDR 0028), as one result-family test point on ts, before the
+// merge's teardown removes its worktree. Mirrors close.revokeCredential: a
+// failure is a severity=warn point, never a merge failure — the merge has
+// landed, and the issuer's TTL sweep is the backstop for the token.
+func revokeCredential(ts *crap.TestStream, repoPath, wtPath, branch string) {
+	if !auth.Minted(wtPath) {
+		return
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	h, err := sweatfileio.LoadWorktreeHierarchy(home, repoPath, wtPath)
+	if err != nil {
+		return
+	}
+	sessionKey := filepath.Base(repoPath) + "/" + branch
+	if st, rerr := session.Read(repoPath, branch); rerr == nil && st.SessionKey != "" {
+		sessionKey = st.SessionKey
+	}
+	var out bytes.Buffer
+	id := auth.Identity{RepoPath: repoPath, WorktreePath: wtPath, Branch: branch, SessionKey: sessionKey}
+	ran, rerr := auth.Revoke(context.Background(), h.Merged, id, &out)
+	if !ran {
+		return
+	}
+	desc := "revoke credential " + branch
+	if rerr != nil {
+		diag := map[string]any{
+			"severity": "warn",
+			"message":  fmt.Sprintf("%v (the merge landed; the token is left for the issuer's sweep)", rerr),
+		}
+		if o := strings.TrimSpace(out.String()); o != "" {
+			diag["output"] = o
+		}
+		ts.NotOk(desc, diag)
+		return
+	}
+	ts.Ok(desc)
 }
 
 // MergeImplicit runs the merge path for a main-checkout (implicit) session:

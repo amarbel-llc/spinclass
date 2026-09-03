@@ -138,6 +138,55 @@ func TestResolvedGitSyncMirrorsCredentialIntoLandingWorktree(t *testing.T) {
 	assertNoLandWorktrees(t, repoDir)
 }
 
+// TestResolvedGitSyncTeardownRevokesCredential covers FDR 0028's revoke on
+// the merge's own teardown: an out-of-session merge removes the session
+// worktree, so the [auth].revoke-command must run first or the token is
+// orphaned (no tombstone is written on this path for the sweep to find).
+func TestResolvedGitSyncTeardownRevokesCredential(t *testing.T) {
+	_, repoDir := setupSyncRepo(t)
+	wtPath := setupWorktree(t, repoDir, "feature-revoke")
+	if err := os.WriteFile(filepath.Join(wtPath, "r.txt"), []byte("r"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "r.txt")
+	runGit(t, wtPath, "commit", "-m", "session commit")
+	if err := os.WriteFile(filepath.Join(repoDir, ".git", "info", "exclude"), []byte(".spinclass/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	credPath := filepath.Join(wtPath, ".spinclass", auth.CredentialFile)
+	if err := os.MkdirAll(filepath.Dir(credPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(credPath, []byte("https://spinclass:tok@example.com\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "revoked")
+	sweatfileBody := "[auth]\nmint-command = \"echo tok\"\nrevoke-command = \"echo $SPINCLASS_SESSION_ID > " + marker + "\"\n"
+	if err := os.WriteFile(filepath.Join(repoDir, "sweatfile"), []byte(sweatfileBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	recs, err := runResolved(t, &mockExecutor{}, repoDir, wtPath, "feature-revoke", "main", true, false)
+	if err != nil {
+		t.Fatalf("Resolved() error: %v\n%+v", err, recs)
+	}
+	if got, rerr := os.ReadFile(marker); rerr != nil || strings.TrimSpace(string(got)) != "repo/feature-revoke" {
+		t.Errorf("revoke-command did not run before teardown: %q (%v)", got, rerr)
+	}
+	if _, statErr := os.Stat(wtPath); !os.IsNotExist(statErr) {
+		t.Errorf("worktree not removed: %v", statErr)
+	}
+	found := false
+	for _, tr := range testRecords(recs) {
+		if tr.Description == "revoke credential feature-revoke" && tr.OK {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected an ok 'revoke credential feature-revoke' point, got %+v", testRecords(recs))
+	}
+}
+
 // TestResolvedGitSyncPullWithRootOffDefault covers the credentialed pull's
 // ref-move path: the root checkout is parked on another branch, so the
 // default branch is not checked out anywhere and the pull advances its ref

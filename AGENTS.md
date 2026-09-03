@@ -329,7 +329,9 @@ subcommand is always available.
   the FDR 0029 landing worktree before the push; `merge.pullDefault` replaces
   the root `git pull` with a fetch from the session worktree + a local ff of the
   root ref, so the merge's fetch is agent-free too. `auth.Revoke` runs at
-  `close.RunResolved` and `clean.removeWorktree` (warn, non-fatal);
+  `close.RunResolved`, `clean.removeWorktree`, and `merge.teardownAndPush`
+  (the out-of-session `sc merge`/`sc run` worktree removal — no tombstone is
+  written there, so the sweep could never find it) (warn, non-fatal);
   `auth.SweepOrphans` runs at the next creation on the repo for abandoned/
   tombstoned sessions with an unrevoked record. `validate.CheckAuth` warns on a
   lone mint/revoke. Implicit sessions, the `disable-merge-queue` path, and the

@@ -251,9 +251,12 @@ func revoke(ctx context.Context, sf sweatfile.Sweatfile, id Identity, dir string
 	if cmd == nil || strings.TrimSpace(*cmd) == "" {
 		return errors.New("[auth] a credential was minted but no revoke-command is configured")
 	}
+	// Revocation addresses the token by session id; the forge host/repo env
+	// is a convenience, so an origin that is not a forge URL (a local path)
+	// just leaves those two variables empty rather than blocking the revoke.
 	remote, err := originRemote(id.RepoPath)
 	if err != nil {
-		return fmt.Errorf("[auth] revoke: %w", err)
+		remote = Remote{}
 	}
 	out, err := sweatfile.RunCommandCapture(ctx, dir, *cmd, id.env(remote))
 	if w != nil && out != "" {
