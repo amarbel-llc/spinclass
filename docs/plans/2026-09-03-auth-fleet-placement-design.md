@@ -146,7 +146,16 @@ the ordering must be enforced by sequencing, not by the entry itself:
    is a conformist bump as its first commit — the gate runs on the committed
    `flake.lock`, so the same merge then passes. Nothing is bricked.
 
-## 4. Profile prerequisite: `0a860b7`
+## 4. Profile prerequisite: `0a860b7` — and the `forge-hosts` build itself
+
+The root entry uses `[auth].forge-hosts`, and every repo's pre-merge gate
+validates its resolved sweatfile hierarchy with the **installed** spinclass
+(`sc validate` via conformist's sweatfile lint). A binary that predates the
+key rejects the file as having an unknown field and fails the gate. So the
+profile must carry the build that introduced `forge-hosts` (the option-C
+commit) **before** the root entry — or any sweatfile — uses the key. (This
+bit spinclass's own sweatfile first: the key was dropped from it until the
+profile catches up.)
 
 Until the live profile carries spinclass ≥ `0a860b7` (merge/`sc run` teardown
 revokes the credential), every out-of-session `sc merge <target>` and default
