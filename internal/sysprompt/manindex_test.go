@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -144,13 +145,36 @@ func TestRenderManIndexDirAndGlobSourcesDedup(t *testing.T) {
 	}
 }
 
+// Pointing at a section directory rather than the manpath root above it is an
+// easy mistake whose failure mode would otherwise be silence. The fallback is
+// scoped to man*-named directories, so an unrelated directory holding
+// dot-suffixed files is not mistaken for a page source.
+func TestRenderManIndexSectionDirFallback(t *testing.T) {
+	root := t.TempDir()
+	writePage(t, root, "7", "sectioned", ".SH NAME\nsectioned \\- found via its section dir\n", true)
+
+	out := renderManIndex([]string{filepath.Join(root, "man7")}, noDeadline())
+	mustContain(t, out, "- `sectioned(7)` — found via its section dir")
+
+	notMan := filepath.Join(root, "notman")
+	if err := os.MkdirAll(notMan, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(notMan, "config.toml"), []byte("x = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out := renderManIndex([]string{notMan}, noDeadline()); out != "" {
+		t.Errorf("a non-man directory must not be scanned for pages, got:\n%s", out)
+	}
+}
+
 // The entry cap is the guardrail against a bulk selector (a whole $MANPATH is
 // ~1200 pages on this host). Past it the scan stops and says so, rather than
 // silently truncating.
 func TestRenderManIndexCapsEntries(t *testing.T) {
 	root := t.TempDir()
 	for i := 0; i < maxIndexEntries+5; i++ {
-		writePage(t, root, "1", "page"+itoaTest(i), ".SH NAME\nx \\- d\n", false)
+		writePage(t, root, "1", "page"+strconv.Itoa(i), ".SH NAME\nx \\- d\n", false)
 	}
 
 	out := renderManIndex([]string{root}, noDeadline())
@@ -167,7 +191,7 @@ func TestRenderManIndexCapsEntries(t *testing.T) {
 func TestRenderManIndexHonorsDeadline(t *testing.T) {
 	root := t.TempDir()
 	for i := 0; i < 64; i++ {
-		writePage(t, root, "1", "page"+itoaTest(i), ".SH NAME\nx \\- d\n", false)
+		writePage(t, root, "1", "page"+strconv.Itoa(i), ".SH NAME\nx \\- d\n", false)
 	}
 
 	out := renderManIndex([]string{root}, time.Now().Add(-time.Second))
@@ -192,17 +216,4 @@ func TestRenderManIndexUnsupportedCompressionWarned(t *testing.T) {
 
 	mustContain(t, out, "**⚠ not indexed**")
 	mustContain(t, out, "unsupported compression .zst")
-}
-
-// itoaTest keeps the cap tests readable without pulling strconv into the file.
-func itoaTest(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var d []byte
-	for n > 0 {
-		d = append([]byte{byte('0' + n%10)}, d...)
-		n /= 10
-	}
-	return string(d)
 }

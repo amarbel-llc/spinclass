@@ -114,6 +114,14 @@ func collectManFiles(sources []string, warnings []string) ([]string, []string) {
 		if err != nil {
 			continue
 		}
+		// Pointing at a section directory (…/share/man/man7) instead of the
+		// manpath root above it is an easy mistake, and it would otherwise
+		// contribute nothing — indistinguishable from "not configured". Only
+		// a man*-named directory gets this fallback, so an unrelated
+		// directory is not turned into a page source.
+		if len(sectionDirs) == 0 && strings.HasPrefix(filepath.Base(src), "man") {
+			sectionDirs = []string{src}
+		}
 		for _, sd := range sectionDirs {
 			pages, err := os.ReadDir(sd)
 			if err != nil {
@@ -178,7 +186,7 @@ func descriptionFromNameBlock(rest string) string {
 		}
 		if strings.HasPrefix(line, ".") {
 			// Another section began before any content line: no description.
-			if manNameHeadingRe.MatchString(line) || strings.HasPrefix(line, ".SH") || strings.HasPrefix(line, ".Sh") {
+			if strings.HasPrefix(line, ".SH") || strings.HasPrefix(line, ".Sh") {
 				return ""
 			}
 			continue // a formatting macro such as .PP — keep looking

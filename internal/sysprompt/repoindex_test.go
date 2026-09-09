@@ -3,6 +3,7 @@ package sysprompt
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -160,7 +161,7 @@ func TestRenderRepoIndexOffAndScanIfExists(t *testing.T) {
 func TestRenderRepoIndexCapsEntries(t *testing.T) {
 	repos := t.TempDir()
 	for i := 0; i < maxIndexEntries+3; i++ {
-		makeCheckout(t, repos, "repo"+itoaTest(i), "", "")
+		makeCheckout(t, repos, "repo"+strconv.Itoa(i), "", "")
 	}
 
 	out := renderRepoIndex([]string{repos}, noDeadline())
