@@ -244,12 +244,12 @@ func readPageHead(path string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		defer f.Close()
+		defer f.Close() //nolint:errcheck // read-only; a failed close cannot affect the parsed head
 		zr, err := gzip.NewReader(f)
 		if err != nil {
 			return "", err
 		}
-		defer zr.Close()
+		defer zr.Close() //nolint:errcheck // read-only; a failed close cannot affect the parsed head
 		// A truncated read of a valid stream returns ErrUnexpectedEOF, which
 		// is expected here and not a failure: we only ever want the head.
 		b, err := io.ReadAll(io.LimitReader(zr, maxNameBytes))
@@ -264,7 +264,7 @@ func readPageHead(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	b, err := io.ReadAll(io.LimitReader(f, maxNameBytes))
 	if err != nil && len(b) == 0 {
 		return "", err

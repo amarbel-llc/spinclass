@@ -218,7 +218,7 @@ func readHead(path string, n int64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck // read-only; a failed close cannot affect the parsed head
 	b, err := io.ReadAll(io.LimitReader(f, n))
 	if err != nil && len(b) == 0 {
 		return "", err
