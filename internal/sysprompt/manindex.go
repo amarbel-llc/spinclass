@@ -176,34 +176,60 @@ func manPageDescription(path string) (string, error) {
 	}
 	// mdoc(7) carries the description on its own `.Nd` macro.
 	if m := manNdRe.FindStringSubmatch(body); m != nil {
-		return cleanRoff(m[1]), nil
+		return truncateDesc(cleanRoff(m[1])), nil
 	}
 	loc := manNameHeadingRe.FindStringIndex(body)
 	if loc == nil {
 		return "", nil
 	}
-	return descriptionFromNameBlock(body[loc[1]:]), nil
+	// Truncated like a repo description: a NAME line is supposed to be a short
+	// summary, but a generator can emit an essay into it (spinclass's own
+	// section-1 pages carry whole MCP tool descriptions, up to ~1200 chars),
+	// and one such page would otherwise dominate the whole index.
+	return truncateDesc(descriptionFromNameBlock(body[loc[1]:])), nil
 }
 
 // descriptionFromNameBlock pulls `name - description` out of the lines
 // following a NAME heading, skipping the roff control lines (`.PP`, `.Pp`)
-// that scdoc-generated pages interpose. It stops at the next section heading.
+// that scdoc-generated pages interpose.
+//
+// It JOINS continuation lines. roff wraps freely, so a NAME description may
+// span several physical lines — hyphence(1) is
+//
+//	.SH NAME
+//	hyphence \- format\-only inspection and re\-emission of on\-disk
+//	hyphence documents
+//
+// and reading only the first line rendered "…re-emission of on-disk", cut
+// mid-thought. lexgrog joins them, so joining is also what keeps the index
+// agreeing with `whatis` rather than quietly disagreeing with it. Collection
+// stops at the first blank line or macro after content has begun.
 func descriptionFromNameBlock(rest string) string {
+	var content []string
 	for _, line := range strings.Split(rest, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
+			if len(content) > 0 {
+				break // a blank line ends the NAME block
+			}
 			continue
 		}
 		if strings.HasPrefix(line, ".") {
+			if len(content) > 0 {
+				break // any macro after the description ends it
+			}
 			// Another section began before any content line: no description.
 			if strings.HasPrefix(line, ".SH") || strings.HasPrefix(line, ".Sh") {
 				return ""
 			}
 			continue // a formatting macro such as .PP — keep looking
 		}
-		return splitNameDescription(line)
+		content = append(content, line)
 	}
-	return ""
+	if len(content) == 0 {
+		return ""
+	}
+	return splitNameDescription(strings.Join(content, " "))
 }
 
 // splitNameDescription splits a `name \- description` NAME line and returns

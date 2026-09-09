@@ -152,41 +152,61 @@ func repoDescription(path string) string {
 		if err != nil {
 			continue
 		}
-		if d := firstProseLine(body); d != "" {
+		if d := firstProseParagraph(body); d != "" {
 			return d
 		}
 	}
 	return ""
 }
 
-// firstProseLine returns the first line of a README that reads as a sentence
-// about the project, skipping headings, badges, HTML, blockquotes, list items
-// and code fences. Returns "" when the head contains no such line.
-func firstProseLine(body string) string {
+// isMarkdownStructure reports whether a line is document structure rather than
+// prose: headings, badges/images, link-only lines, HTML, blockquotes, list
+// items, code fences and setext underlines.
+func isMarkdownStructure(line string) bool {
+	for _, p := range []string{"#", "!", "<", ">", "```", "- ", "* ", "=", "--", "["} {
+		if strings.HasPrefix(line, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// firstProseParagraph returns the first PARAGRAPH of a README that reads as
+// prose about the project, skipping structural lines.
+//
+// A paragraph, not a line: markdown wraps, so taking one physical line cut
+// chaos's README at "…the type runtime that lets capture" and dodder's at
+// "…for creating, editing, and" — both mid-sentence, and both the third line
+// of a wrapped paragraph rather than a short first line. Lines are joined
+// until a blank line or a structural line ends the paragraph, then the result
+// is truncated on a word boundary, so the ellipsis marks a deliberate cut
+// instead of a wrap artefact.
+func firstProseParagraph(body string) string {
+	var para []string
 	for _, line := range strings.Split(body, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
+			if len(para) > 0 {
+				break // blank line ends the paragraph
+			}
 			continue
 		}
-		// Headings, badges/images, links-only lines, HTML, quotes, lists,
-		// fences and underlines are all structure rather than description.
-		if strings.HasPrefix(line, "#") || strings.HasPrefix(line, "!") ||
-			strings.HasPrefix(line, "<") || strings.HasPrefix(line, ">") ||
-			strings.HasPrefix(line, "```") || strings.HasPrefix(line, "- ") ||
-			strings.HasPrefix(line, "* ") || strings.HasPrefix(line, "=") ||
-			strings.HasPrefix(line, "--") || strings.HasPrefix(line, "[") {
-			continue
+		if isMarkdownStructure(line) {
+			if len(para) > 0 {
+				break // structure ends the paragraph
+			}
+			continue // still looking for its start
 		}
 		line = mdLinkRe.ReplaceAllString(line, "$1")
-		line = strings.NewReplacer("`", "", "**", "", "*", "", "_", "").Replace(line)
-		line = strings.Join(strings.Fields(line), " ")
-		// Very short fragments are almost always stray markup, not prose.
-		if len(line) < 10 {
-			continue
-		}
-		return truncateDesc(line)
+		para = append(para, strings.NewReplacer("`", "", "**", "", "*", "", "_", "").Replace(line))
 	}
-	return ""
+	joined := strings.Join(strings.Fields(strings.Join(para, " ")), " ")
+	// Very short fragments are almost always stray markup, not prose. Checked
+	// on the JOINED paragraph, since a wrapped line can legitimately be short.
+	if len(joined) < 10 {
+		return ""
+	}
+	return truncateDesc(joined)
 }
 
 // unescapeNixString resolves the backslash escapes a Nix double-quoted string

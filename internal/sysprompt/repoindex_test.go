@@ -93,6 +93,45 @@ func TestRenderRepoIndexReadmeFallbackSkipsStructure(t *testing.T) {
 	mustContain(t, out, "- `readme-only` — A tool that does the thing it says.")
 }
 
+// Markdown wraps, so the README fallback must take the first PARAGRAPH, not
+// the first physical line. Taking one line cut chaos's README mid-sentence at
+// "…the type runtime that lets capture". Verbatim from the real README.
+func TestRenderRepoIndexJoinsWrappedReadmeParagraph(t *testing.T) {
+	repos := t.TempDir()
+	makeCheckout(t, repos, "chaos", "",
+		"# chaos\n\n"+
+			"A shared **type-system substrate**: the type runtime that lets capture\n"+
+			"plugins express *full* types, and lets any consumer (madder, cutting-garden,\n"+
+			"dodder, …) resolve them natively — rather than each consumer re-declaring\n"+
+			"what a plugin's objects mean.\n\n"+
+			"`chaos` is the **type runtime** layer of a four-tier stack:\n")
+
+	out := renderRepoIndex([]string{repos}, defaultIndexLimit, noDeadline())
+
+	// Joined past the first line, and cut at the length bound rather than at
+	// the wrap — so the row ends in an ellipsis, not mid-sentence-by-accident.
+	mustContain(t, out, "A shared type-system substrate: the type runtime that lets capture plugins express")
+	mustContain(t, out, "…")
+	if strings.Contains(out, "four-tier stack") {
+		t.Errorf("the join must stop at the paragraph break:\n%s", out)
+	}
+}
+
+// A paragraph break is not the only terminator: structure ends it too, so a
+// short opening paragraph followed by a list does not absorb the list.
+func TestRenderRepoIndexParagraphStopsAtStructure(t *testing.T) {
+	repos := t.TempDir()
+	makeCheckout(t, repos, "listy", "",
+		"# listy\n\nA tool that does the thing.\n- not part of the description\n")
+
+	out := renderRepoIndex([]string{repos}, defaultIndexLimit, noDeadline())
+
+	mustContain(t, out, "- `listy` — A tool that does the thing.")
+	if strings.Contains(out, "not part of the description") {
+		t.Errorf("a list item must not join the paragraph:\n%s", out)
+	}
+}
+
 // A checkout with neither source still earns a row: it exists, it just has no
 // description. That is not a warning-worthy condition.
 func TestRenderRepoIndexUndescribedStillLists(t *testing.T) {

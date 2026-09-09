@@ -67,6 +67,55 @@ func TestRenderManIndexDialects(t *testing.T) {
 	mustContain(t, out, "- `mdocish(5)` — an mdoc formatted page")
 }
 
+// roff wraps freely, so a NAME description may span physical lines. Reading
+// only the first one rendered hyphence(1) as "…re-emission of on-disk", cut
+// mid-thought; lexgrog joins them, and so must this. Verbatim from the real
+// page.
+func TestRenderManIndexJoinsWrappedNameLines(t *testing.T) {
+	root := t.TempDir()
+	writePage(t, root, "1", "hyphence",
+		".SH NAME\nhyphence \\- format\\-only inspection and re\\-emission of on\\-disk\nhyphence documents\n.SH SYNOPSIS\n", true)
+
+	out := renderManIndex([]string{root}, defaultIndexLimit, noDeadline())
+
+	mustContain(t, out, "- `hyphence(1)` — format-only inspection and re-emission of on-disk hyphence documents")
+}
+
+// The join must stop at the block boundary rather than swallowing the next
+// section: a macro or a blank line after content ends the description.
+func TestRenderManIndexJoinStopsAtBlockEnd(t *testing.T) {
+	root := t.TempDir()
+	// scdoc shape: .PP before the content, another .PP after it.
+	writePage(t, root, "7", "scdocish", ".SH NAME\n.PP\nscdocish - a short summary\n.PP\n.SH DESCRIPTION\nnot part of NAME\n", true)
+	writePage(t, root, "7", "blankish", ".SH NAME\nblankish \\- ends at the blank\n\nnot part of NAME\n", true)
+
+	out := renderManIndex([]string{root}, defaultIndexLimit, noDeadline())
+
+	mustContain(t, out, "- `scdocish(7)` — a short summary")
+	mustContain(t, out, "- `blankish(7)` — ends at the blank")
+	if strings.Contains(out, "not part of NAME") {
+		t.Errorf("the join must stop at the end of the NAME block:\n%s", out)
+	}
+}
+
+// A generator can emit an essay into NAME — spinclass's own section-1 pages
+// carry whole MCP tool descriptions (~1200 chars) — and one such page would
+// otherwise dominate the index.
+func TestRenderManIndexTruncatesOverlongName(t *testing.T) {
+	root := t.TempDir()
+	writePage(t, root, "1", "verbose",
+		".SH NAME\nverbose \\- "+strings.Repeat("essay ", 100)+"\n", true)
+
+	out := renderManIndex([]string{root}, defaultIndexLimit, noDeadline())
+
+	mustContain(t, out, "…")
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "- `verbose(1)`") && len(line) > maxDescLen+40 {
+			t.Errorf("overlong NAME not truncated (%d chars): %q", len(line), line)
+		}
+	}
+}
+
 // A hyphenated word inside a description is written `agent\-backed` and must
 // not be mistaken for the ` \- ` name/description separator.
 func TestRenderManIndexHyphenInDescription(t *testing.T) {
