@@ -87,6 +87,95 @@ func closeImplicit(w io.Writer, checkout, randID string, st *session.State, form
 	return nil
 }
 
+// RunMany closes each target in order, independently: one failing does not
+// abandon the rest, every target reports its own verdict, and the returned
+// error is non-nil if any failed. Zero or one target delegates straight to
+// Run, so the no-argument (cwd / picker) and single-target paths — and their
+// exact output — are untouched; the subtest shape appears only when there is
+// more than one, where a flat point list could not say which target a failure
+// belonged to.
+//
+// The nix-gc reap runs PER TARGET rather than once at the end. Each plan is
+// worktree-scoped and must be captured before that worktree is removed but
+// reaped after (see runResolvedInto), so batching would mean carrying N plans
+// across N removals and losing the attribution of a failed reap to its
+// session. Each close stays self-contained instead.
+func RunMany(w io.Writer, targets []string, force bool, nixGCOverride *bool, format string, dbg *slog.Logger) error {
+	if len(targets) <= 1 {
+		target := ""
+		if len(targets) == 1 {
+			target = targets[0]
+		}
+		return Run(w, target, force, nixGCOverride, format, dbg)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	var tw *tap.Writer
+	if format == "tap" {
+		tw = tap.NewWriter(w)
+	}
+
+	var failed []string
+	for _, target := range targets {
+		repoPath, wtPath, branch, rerr := resolveTarget(cwd, target, dbg)
+		if rerr != nil {
+			// A target that cannot even be resolved is reported and skipped:
+			// the remaining targets are still closable, and abandoning them
+			// would leave the user to work out which ones actually ran.
+			failed = append(failed, target)
+			if tw != nil {
+				// Subtest takes a format string; pass the target as an
+				// argument so a '%' in a branch name is not interpreted.
+				sub := tw.Subtest("%s", target)
+				sub.NotOk("resolve "+target, map[string]string{"error": rerr.Error()})
+				sub.Plan()
+				tw.NotOk(target, map[string]string{"error": rerr.Error()})
+			} else {
+				fmt.Fprintf(os.Stderr, "spinclass: %s: %v\n", target, rerr)
+			}
+			continue
+		}
+
+		if tw == nil {
+			if cerr := runResolvedInto(nil, repoPath, wtPath, branch, force, nixGCOverride); cerr != nil {
+				failed = append(failed, target)
+				fmt.Fprintf(os.Stderr, "spinclass: %s: %v\n", target, cerr)
+			}
+			continue
+		}
+
+		sub := tw.Subtest("%s", target)
+		cerr := runResolvedInto(sub, repoPath, wtPath, branch, force, nixGCOverride)
+		sub.Plan()
+		// tap/go's Subtest emits the header and the indented child stream but
+		// leaves the parent verdict to us. A close that returned no error can
+		// still have failed a point inside (a non-fatal revoke warning is
+		// NotOk), so the parent reflects the subtest, not just the return.
+		switch {
+		case cerr != nil:
+			failed = append(failed, target)
+			tw.NotOk(target, map[string]string{"error": cerr.Error()})
+		case sub.HasFailures():
+			tw.NotOk(target, nil)
+		default:
+			tw.Ok(target)
+		}
+	}
+
+	if tw != nil {
+		tw.Plan()
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("failed to close %d of %d sessions: %s",
+			len(failed), len(targets), strings.Join(failed, ", "))
+	}
+	return nil
+}
+
 // errPickerDismissed signals that the user dismissed the interactive
 // session picker (q/esc/ctrl+c) — a clean cancel, not a failure.
 var errPickerDismissed = errors.New("session picker dismissed")
@@ -100,7 +189,19 @@ func RunResolved(w io.Writer, repoPath, wtPath, branch string, force bool, nixGC
 	if format == "tap" {
 		tw = tap.NewWriter(w)
 	}
+	err := runResolvedInto(tw, repoPath, wtPath, branch, force, nixGCOverride)
+	if tw != nil {
+		tw.Plan()
+	}
+	return err
+}
 
+// runResolvedInto is RunResolved's body with the TAP document owned by the
+// CALLER: it emits points into tw — which may equally be a top-level writer or
+// a subtest — and never plans. That is what lets RunMany close several
+// sessions under one document instead of concatenating N documents, which is
+// not valid TAP. tw may be nil (non-tap formats), as before.
+func runResolvedInto(tw *tap.Writer, repoPath, wtPath, branch string, force bool, nixGCOverride *bool) error {
 	// Snapshot the state's PID before any teardown so we can wait on
 	// the active spinclass process to exit before tombstoning. If the
 	// state file is missing, PID stays 0 and WaitForExit is a no-op.
@@ -132,7 +233,6 @@ func RunResolved(w io.Writer, repoPath, wtPath, branch string, force bool, nixGC
 		if !proceed {
 			if tw != nil {
 				tw.Skip("close "+branch, "user declined")
-				tw.Plan()
 			}
 			return nil
 		}
@@ -189,7 +289,6 @@ func RunResolved(w io.Writer, repoPath, wtPath, branch string, force bool, nixGC
 		diag := map[string]string{"error": err.Error()}
 		if tw != nil {
 			tw.NotOk("remove worktree "+branch, diag)
-			tw.Plan()
 		}
 		return fmt.Errorf("removing worktree %s: %w", branch, err)
 	}
@@ -198,7 +297,6 @@ func RunResolved(w io.Writer, repoPath, wtPath, branch string, force bool, nixGC
 		diag := map[string]string{"error": err.Error()}
 		if tw != nil {
 			tw.NotOk("delete branch "+branch, diag)
-			tw.Plan()
 		}
 		return fmt.Errorf("deleting branch %s: %w", branch, err)
 	}
@@ -209,10 +307,6 @@ func RunResolved(w io.Writer, repoPath, wtPath, branch string, force bool, nixGC
 
 	if gcPlan != nil {
 		runReap(tw, *gcPlan, branch)
-	}
-
-	if tw != nil {
-		tw.Plan()
 	}
 
 	return nil

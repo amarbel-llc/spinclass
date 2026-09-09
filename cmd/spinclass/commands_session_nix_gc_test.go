@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"testing"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
@@ -36,50 +35,38 @@ func TestCloseNixGCIsNotPositionallyEligible(t *testing.T) {
 	}
 }
 
-// TestClosePositionalOrder pins which params can absorb a positional argument,
-// and in what order. `target` must come first so a lone argument is the
-// session; `extra-arg` must be the only other one, so a SECOND positional is
-// captured and refused rather than silently discarded (the framework drops
-// positionals past the last non-Bool param — purse-first#190).
-func TestClosePositionalOrder(t *testing.T) {
+// TestCloseTargetIsVariadic pins the contract that replaced the old
+// single-target guard: `target` collects EVERY positional (purse-first#190),
+// so `sc close A B C D` closes four sessions and no positional can reach a
+// later param. A param declared after a variadic is not dead — it becomes
+// flag-only — which is why force and nix-gc still follow target rather than
+// being reordered ahead of it.
+func TestCloseTargetIsVariadic(t *testing.T) {
 	cmd, ok := buildApp().GetCommand("close")
 	if !ok {
 		t.Fatal("close command not registered")
 	}
 
-	var positional []string
+	var variadic []string
 	for _, p := range cmd.Params {
-		if p.Type != command.Bool {
-			positional = append(positional, p.Name)
+		if p.Variadic {
+			variadic = append(variadic, p.Name)
 		}
 	}
-
-	want := []string{"target", "extra-arg"}
-	if len(positional) != len(want) {
-		t.Fatalf("positionally-eligible params = %v, want exactly %v", positional, want)
-	}
-	for i := range want {
-		if positional[i] != want[i] {
-			t.Errorf("positional[%d] = %q, want %q (order decides what a bare argument binds to)", i, positional[i], want[i])
-		}
-	}
-}
-
-// A second positional must produce an actionable refusal, not a silent
-// partial close: reporting success while leaving sessions alive is the
-// failure mode this guard exists to prevent.
-func TestErrExtraCloseArg(t *testing.T) {
-	if err := errExtraCloseArg(""); err != nil {
-		t.Errorf("no extra argument must be accepted, got %v", err)
+	if len(variadic) != 1 || variadic[0] != "target" {
+		t.Fatalf("variadic params = %v, want exactly [target]", variadic)
 	}
 
-	err := errExtraCloseArg("madder/plain-poplar")
-	if err == nil {
-		t.Fatal("an extra argument must be refused")
-	}
-	for _, want := range []string{"madder/plain-poplar", "one target", "purse-first#190"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q missing %q", err.Error(), want)
+	// Exactly one param may be variadic, and it must be the only one that can
+	// absorb a positional; anything else non-Bool after it is flag-only.
+	for _, p := range cmd.Params {
+		if p.Name == "target" {
+			if p.Type != command.String {
+				t.Errorf("target's Type is the ELEMENT type and must stay String, got %v", p.Type)
+			}
+			if p.Completer == nil {
+				t.Error("target must keep its completer so `sc close <TAB>` completes at every position")
+			}
 		}
 	}
 }

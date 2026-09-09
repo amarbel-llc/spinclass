@@ -141,6 +141,7 @@ Cheap per-package `go build ./internal/foo/...` checks are fine.
   `sc run [flags] (-- <util> … \| <stdin>)` One-shot: start → run one command → merge + clean up (FDR 0020)
   `sc list [--watch]`              List tracked sessions (charm table on TTY, plain/JSON when piped); `--watch` live-reloads
   `sc merge [target]`              Merge worktree into main, remove session state
+  `sc close [target...]`           Close sessions without merging; N targets close independently, each with its own verdict
   `sc check`                       Run [hooks].pre-merge in the current worktree (agent-CI surface)
   `sc clean`                       Remove merged worktrees and abandoned sessions
   `sc rebuild [target] [--check]`  Re-apply a drifted worktree's setup; `--check` reports stale/fresh
@@ -275,25 +276,22 @@ subcommand is always available.
   via `[sysprompt].doc-index-dirs`; a `recover()` guarantees a broken doc never
   fails the render). Replaces the retired static
   `.clown-plugin/system-prompt-append.d/` fragments. Two further Go-composed
-  trailers ship **inert** (FDR 0030, both off until a sweatfile selects
-  sources, since the useful set is host-specific not repo-convention): a
-  **Manpage index** (`manindex.go` — `name(section)` + the description scraped
-  from the page's NAME block, parsing man(7) `.SH NAME` with either ` \- ` or
-  plain ` - ` and mdoc(7) `.Nd`; the name comes from the FILENAME, which is what
-  `man(1)` takes) and a **Repository index** (`repoindex.go` — checkout name +
-  `flake.nix` `description`, else the README's first prose line; the forge API is
-  deliberately NOT consulted, being a round-trip per repo). Both resolve
-  sweatfile **source specs** (`sources.go`: `~`/`$VAR` expanded, split on `:` so
-  a bare `$MANPATH` works, globbed if `*?[` else literal, deduped) and are
-  double-bounded by `[sysprompt].index-limit` (`defaultIndexLimit` 400; `<= 0`
-  uncaps) and `indexScanTimeout` (1.5s) — a scan that hits either bound says so
-  rather than truncating silently. Rows are ordered by RENDERED NAME, not file
-  path: path order groups man1 entirely before man7, so a corpus past the cap
-  dropped whole sections — on the fleet's 329-page first-party manpath that
-  meant every `eng-*(7)` convention page, the ones the index exists for. The
-  manpage index cannot select first-party pages by itself: the profile is one
-  home-manager `buildEnv` and records no per-package origin, so membership is
-  declared upstream by the manpath eng emits (FDR 0030's provenance finding).
+  trailers (FDR 0030) are off until a sweatfile selects sources: a **Manpage
+  index** (`manindex.go` — `name(section)` from the FILENAME, what `man(1)`
+  takes, + the NAME-block description; parses man(7) `.SH NAME` with ` \- ` or
+  plain ` - `, and mdoc(7) `.Nd`) and a **Repository index** (`repoindex.go` —
+  checkout name + `flake.nix` `description`, else the README's first prose
+  line; the forge API is NOT consulted, being a round-trip per repo). Both take
+  **source specs** (`sources.go`: `~`/`$VAR` expanded, split on `:` so a bare
+  `$MANPATH` works, globbed if `*?[` else literal, deduped), bounded by
+  `[sysprompt].index-limit` (default 400; `<= 0` uncaps) and `indexScanTimeout`
+  (1.5s) — hitting either says so rather than truncating silently. Rows sort by
+  RENDERED NAME, not path: path order groups man1 before man7, so a corpus past
+  the cap dropped whole sections (on the fleet's 329-page manpath, every
+  `eng-*(7)` page — the ones it exists for). A failed hierarchy load emits a ⚠
+  line instead of silently disabling both. The manpage index cannot select
+  first-party pages itself: the profile is one `buildEnv` recording no
+  per-package origin, so membership is declared upstream by eng's manpath.
 - **Pre-merge build worktree** (FDR 0013): by default the hook runs in a
   transient detached worktree pinned to the committed sha (`check.resolveHookDir`
   → `.merge-<branch>-<sha>-<pid>` under `.worktrees/`), freeing the session
@@ -481,6 +479,15 @@ subcommand is always available.
   closure (`nix-store --delete`; Nix liveness is the safety net). Opt out with
   `[hooks].disable-nix-gc` or `sc close --nix-gc=<bool>`. No-op without
   `nix-store` on PATH.
+- **Multi-target close** (`close.RunMany`, purse-first#190): `sc close A B C`
+  closes each independently; nonzero exit if any failed. `target` is
+  **variadic** so it takes every positional and none reaches a later param; a
+  param after a variadic is flag-only, not dead, so `force`/`nix-gc` keep their
+  positions. 0–1 targets delegate to `Run` (cwd/picker path and flat output
+  unchanged); N>1 emits one TAP doc with a subtest per target — which is why
+  `RunResolved`'s body moved to `runResolvedInto(tw, …)`, never planning, with
+  the document owned by the caller. nix-gc reaps PER TARGET: each plan is
+  worktree-scoped and captured before its removal.
 
 ## Sweatfile config quick reference
 

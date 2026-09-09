@@ -5,7 +5,7 @@ go 1.26
 require (
 	code.linenisgreat.com/crap/go-crap/v2 v2.3.0
 	code.linenisgreat.com/purse-first/libs/dewey v0.5.0
-	code.linenisgreat.com/purse-first/libs/go-mcp v0.5.0
+	code.linenisgreat.com/purse-first/libs/go-mcp v0.6.0
 	code.linenisgreat.com/purse-first/libs/go-mcp/command/huh v0.0.5
 	code.linenisgreat.com/tap/go v0.2.0
 	code.linenisgreat.com/tommy v0.5.0
