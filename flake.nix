@@ -141,6 +141,7 @@
       };
     };
     ringmaster.inputs.purse-first.follows = "purse-first";
+    ringmaster.inputs.conformist.follows = "conformist";
 
     # purse-first: source of the mesa List-Table renderer (pkgs/mesa),
     # bridged into go.mod via gomod.nix and used by `sc list`'s
