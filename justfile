@@ -312,9 +312,16 @@ explore-prompt-fragment-from dir=(home_directory() / 'eng'):
     bin="$HOME/.nix-profile/bin/sc"
     req='{"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":"system-prompt-append"}}'
     cd "{{ dir }}" || exit 1
-    printf '%s\n' "$req" \
+    frag=$(printf '%s\n' "$req" \
       | "$bin" serve 2>/dev/null \
-      | jq -r 'select(.id == 1) | .result.messages[0].content.text'
+      | jq -r 'select(.id == 1) | .result.messages[0].content.text')
+    printf '%s\n' "$frag"
+    # Size to stderr so stdout stays the fragment alone. A consumer with its
+    # own fragment size cap needs these numbers, not a line count.
+    printf '\n=== %d bytes, %d lines, ~%d tokens (chars/4 heuristic)\n' \
+      "$(printf '%s' "$frag" | wc -c)" \
+      "$(printf '%s\n' "$frag" | wc -l)" \
+      "$(( $(printf '%s' "$frag" | wc -c) / 4 ))" >&2
     exit 0
 
 # [explore] Estimate the system-prompt token cost of the FDR 0030 indexes before

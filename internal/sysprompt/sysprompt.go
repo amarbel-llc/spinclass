@@ -87,6 +87,10 @@ type Coordinates struct {
 	// Repositories is the pre-rendered "## Repository index" section (FDR
 	// 0030), or "" when [sysprompt].repo-index selects nothing.
 	Repositories string
+	// IndexWarning is a one-line ⚠ notice when the sweatfile hierarchy could
+	// not be read, so absent index sections are attributable to that failure
+	// rather than mistaken for an empty configuration. Empty on the happy path.
+	IndexWarning string
 	// CoActiveSessions is the pre-rendered one-line summary of the OTHER
 	// active sessions on the same repo ("2 other live sessions on <repo>: …",
 	// spinclass#238), or "" when there are none or the lookup failed. Resolved
@@ -152,6 +156,10 @@ type indexSections struct {
 	DesignRecords string
 	Manpages      string
 	Repositories  string
+	// Warning is a one-line ⚠ notice when the sweatfile hierarchy could not be
+	// read, so the resulting "no index sections" is attributable rather than
+	// looking like an empty configuration.
+	Warning string
 }
 
 // indexScanTimeout bounds the manpage and repository scans together. Both are
@@ -165,16 +173,35 @@ const indexScanTimeout = 1500 * time.Millisecond
 // reads the merged sweatfile hierarchy rooted at root once, then scans and
 // renders the design-record index (FDR 0021, default-on) plus the manpage and
 // repository indexes (FDR 0030, both default-off). Local file I/O only — safe
-// before `initialize` — and any failure yields an empty section.
+// before `initialize`.
+//
+// A failed hierarchy load is REPORTED, not swallowed. It degrades asymmetrically
+// and that asymmetry is a trap: the design-record index falls back to built-in
+// default dirs and keeps rendering, while both FDR 0030 indexes take their
+// sources ONLY from the sweatfile and so render empty — indistinguishable from
+// "not configured". A fragment showing Design records but neither index is
+// exactly what that looks like, so it says so instead.
 func loadIndexes(root string) indexSections {
 	if root == "" {
 		return indexSections{}
 	}
 	dirs := defaultDocIndexDirs
 	limit := defaultIndexLimit
-	var manSources, repoSources []string
-	if home, err := os.UserHomeDir(); err == nil {
-		if h, err := sweatfileio.LoadHierarchy(home, root); err == nil {
+	var (
+		manSources, repoSources []string
+		warning                 string
+	)
+	home, err := os.UserHomeDir()
+	switch {
+	case err != nil:
+		// os.UserHomeDir is $HOME on unix, so this fires when the serve
+		// process was launched without it — plausible for a plugin child.
+		warning = "could not resolve the home directory ($HOME unset?): " + err.Error()
+	default:
+		h, herr := sweatfileio.LoadHierarchy(home, root)
+		if herr != nil {
+			warning = "could not read the sweatfile hierarchy: " + herr.Error()
+		} else {
 			if configured, ok := h.Merged.SyspromptDocIndexDirs(); ok {
 				dirs = configured
 			}
@@ -186,11 +213,16 @@ func loadIndexes(root string) indexSections {
 		}
 	}
 	deadline := time.Now().Add(indexScanTimeout)
-	return indexSections{
+	sections := indexSections{
 		DesignRecords: renderDesignRecords(root, dirs),
 		Manpages:      renderManIndex(manSources, limit, deadline),
 		Repositories:  renderRepoIndex(repoSources, limit, deadline),
 	}
+	if warning != "" {
+		sections.Warning = "⚠ sweatfile-selected system-prompt indexes are unavailable: " + warning +
+			" — any [sysprompt].man-index / .repo-index selection was not applied."
+	}
+	return sections
 }
 
 // fetchRepoInfo is the production repo-enrichment fetcher: a bounded
@@ -280,6 +312,7 @@ func (c *Coordinates) applyIndexes(s indexSections) {
 	c.DesignRecords = s.DesignRecords
 	c.Manpages = s.Manpages
 	c.Repositories = s.Repositories
+	c.IndexWarning = s.Warning
 }
 
 // Render executes the embedded template for c.Mode and returns the fragment
@@ -305,6 +338,11 @@ func Render(c Coordinates) (string, error) {
 		if section != "" {
 			frag += "\n\n" + section
 		}
+	}
+	// Appended after the sections it explains: a reader seeing no index
+	// sections needs to know whether that is configuration or breakage.
+	if c.IndexWarning != "" {
+		frag += "\n\n" + c.IndexWarning
 	}
 	// The ProtocolVersion warning (#26) is prepended so the degrade is the
 	// first thing the agent reads in the fragment, not buried after the
