@@ -3,49 +3,83 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 )
 
-func TestParseNixGCFlag(t *testing.T) {
-	cases := []struct {
-		in        string
-		wantNil   bool
-		wantValue bool
-		wantErr   string
-	}{
-		{in: "", wantNil: true},
-		{in: "true", wantValue: true},
-		{in: "false", wantValue: false},
-		{in: "True", wantErr: "must be 'true' or 'false'"},
-		{in: "1", wantErr: "must be 'true' or 'false'"},
-		{in: "garbage", wantErr: "must be 'true' or 'false'"},
+// TestCloseNixGCIsNotPositionallyEligible is the regression guard for the
+// reported misparse: `sc close A B` failed with
+// `--nix-gc must be 'true' or 'false', got "B"`.
+//
+// The CLI framework assigns positional arguments one per NON-Bool param in
+// declaration order (go-mcp/command/cli.go). While --nix-gc was a String it
+// sat second in that order, so a second target was consumed as its value.
+// Declaring it Bool takes it out of positional assignment entirely; the
+// handler keeps the tri-state by reading it as *bool.
+func TestCloseNixGCIsNotPositionallyEligible(t *testing.T) {
+	cmd, ok := buildApp().GetCommand("close")
+	if !ok {
+		t.Fatal("close command not registered")
 	}
-	for _, c := range cases {
-		t.Run("in="+c.in, func(t *testing.T) {
-			got, err := parseNixGCFlag(c.in)
-			if c.wantErr != "" {
-				if err == nil {
-					t.Fatalf("expected error containing %q, got nil with %v", c.wantErr, got)
-				}
-				if !strings.Contains(err.Error(), c.wantErr) {
-					t.Fatalf("error = %q, want substring %q", err.Error(), c.wantErr)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if c.wantNil {
-				if got != nil {
-					t.Fatalf("got = %v, want nil", *got)
-				}
-				return
-			}
-			if got == nil {
-				t.Fatalf("got nil, want pointer to %v", c.wantValue)
-			}
-			if *got != c.wantValue {
-				t.Errorf("*got = %v, want %v", *got, c.wantValue)
-			}
-		})
+
+	var nixGC *command.Param
+	for i := range cmd.Params {
+		if cmd.Params[i].Name == "nix-gc" {
+			nixGC = &cmd.Params[i]
+		}
+	}
+	if nixGC == nil {
+		t.Fatal("close has no --nix-gc param")
+	}
+	if nixGC.Type != command.Bool {
+		t.Errorf("--nix-gc must be command.Bool so positional assignment skips it, got type %v", nixGC.Type)
+	}
+}
+
+// TestClosePositionalOrder pins which params can absorb a positional argument,
+// and in what order. `target` must come first so a lone argument is the
+// session; `extra-arg` must be the only other one, so a SECOND positional is
+// captured and refused rather than silently discarded (the framework drops
+// positionals past the last non-Bool param — purse-first#190).
+func TestClosePositionalOrder(t *testing.T) {
+	cmd, ok := buildApp().GetCommand("close")
+	if !ok {
+		t.Fatal("close command not registered")
+	}
+
+	var positional []string
+	for _, p := range cmd.Params {
+		if p.Type != command.Bool {
+			positional = append(positional, p.Name)
+		}
+	}
+
+	want := []string{"target", "extra-arg"}
+	if len(positional) != len(want) {
+		t.Fatalf("positionally-eligible params = %v, want exactly %v", positional, want)
+	}
+	for i := range want {
+		if positional[i] != want[i] {
+			t.Errorf("positional[%d] = %q, want %q (order decides what a bare argument binds to)", i, positional[i], want[i])
+		}
+	}
+}
+
+// A second positional must produce an actionable refusal, not a silent
+// partial close: reporting success while leaving sessions alive is the
+// failure mode this guard exists to prevent.
+func TestErrExtraCloseArg(t *testing.T) {
+	if err := errExtraCloseArg(""); err != nil {
+		t.Errorf("no extra argument must be accepted, got %v", err)
+	}
+
+	err := errExtraCloseArg("madder/plain-poplar")
+	if err == nil {
+		t.Fatal("an extra argument must be refused")
+	}
+	for _, want := range []string{"madder/plain-poplar", "one target", "purse-first#190"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
 	}
 }

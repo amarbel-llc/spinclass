@@ -229,24 +229,35 @@ func registerSessionCommands(app *command.App) {
 		Name: "close",
 		Description: command.Description{
 			Short: "Close a session without merging",
-			Long:  "Remove a worktree and its branch without merging into main. With no argument, closes the current worktree if cwd is inside one, otherwise prompts interactively when stdin is a TTY (or errors with the list of session IDs). With one argument, closes the named session; orphaned git worktrees without a spinclass state file are rejected with a hint to run `git worktree remove`. Prompts for confirmation if the branch has unintegrated commits or uncommitted changes; use --force to skip.",
+			Long:  "Remove a worktree and its branch without merging into main. With no argument, closes the current worktree if cwd is inside one, otherwise prompts interactively when stdin is a TTY (or errors with the list of session IDs). With one argument, closes the named session; orphaned git worktrees without a spinclass state file are rejected with a hint to run `git worktree remove`. Prompts for confirmation if the branch has unintegrated commits or uncommitted changes; use --force to skip. Exactly ONE target is accepted: a second positional argument is refused rather than ignored (multi-target close is blocked on purse-first#190).",
 		},
 		Params: []command.Param{
 			{Name: "target", Type: command.String, Description: "Target session (worktree directory name or <repo>/<branch> session key from `sc list`); auto-detects from cwd if omitted", Completer: completeWorktreeTargets},
 			{Name: "force", Short: 'f', Type: command.Bool, Description: "Skip confirmation for unpushed branches"},
-			{Name: "nix-gc", Type: command.String, Description: "Override [hooks].disable-nix-gc for this invocation: 'true' forces worktree-scoped Nix gc, 'false' skips it"},
+			// Bool, not String, so the CLI framework's positional assignment
+			// skips it: a String param here is positionally eligible, which is
+			// how `sc close A B` came to fail with `--nix-gc must be 'true' or
+			// 'false', got "B"`. Tri-state survives because the handler reads
+			// it as *bool — absent stays nil (defer to the sweatfile).
+			{Name: "nix-gc", Type: command.Bool, Description: "Override [hooks].disable-nix-gc for this invocation: --nix-gc forces worktree-scoped Nix gc, --nix-gc=false skips it. Explicit flag only — never filled from a positional argument"},
+			// Declared solely to catch a second positional. Without it the
+			// framework silently discards positionals past the last non-Bool
+			// param, so `sc close A B C` would close A and quietly ignore the
+			// rest — a close that reports success while leaving sessions alive.
+			// Delete this once purse-first#190 makes `target` variadic.
+			{Name: "extra-arg", Type: command.String, Description: "Not for direct use: catches a second positional argument so it is refused rather than silently discarded. Multi-target close is blocked on purse-first#190"},
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
 			var p struct {
 				globalArgs
-				Target string `json:"target"`
-				Force  bool   `json:"force"`
-				NixGC  string `json:"nix-gc"`
+				Target   string `json:"target"`
+				Force    bool   `json:"force"`
+				NixGC    *bool  `json:"nix-gc"`
+				ExtraArg string `json:"extra-arg"`
 			}
 			_ = json.Unmarshal(args, &p)
 
-			nixGCOverride, err := parseNixGCFlag(p.NixGC)
-			if err != nil {
+			if err := errExtraCloseArg(p.ExtraArg); err != nil {
 				return err
 			}
 
@@ -254,7 +265,7 @@ func registerSessionCommands(app *command.App) {
 				return err
 			}
 
-			return spinclose.Run(os.Stdout, p.Target, p.Force, nixGCOverride, p.FormatOrDefault(), p.debugLogger())
+			return spinclose.Run(os.Stdout, p.Target, p.Force, p.NixGC, p.FormatOrDefault(), p.debugLogger())
 		},
 	})
 
@@ -350,24 +361,22 @@ func runRebuild(_ context.Context, args json.RawMessage) error {
 	return nil
 }
 
-// parseNixGCFlag turns the raw --nix-gc=<value> argument into a *bool
-// override consumed by close.Run. Empty string means "defer to sweatfile"
-// (returns nil); "true"/"false" return pointers to the parsed boolean. Any
-// other value is rejected with a user-facing error so typos surface
-// immediately instead of silently falling through to default behavior.
-func parseNixGCFlag(raw string) (*bool, error) {
-	switch raw {
-	case "":
-		return nil, nil
-	case "true":
-		v := true
-		return &v, nil
-	case "false":
-		v := false
-		return &v, nil
-	default:
-		return nil, fmt.Errorf("--nix-gc must be 'true' or 'false', got %q", raw)
+// errExtraCloseArg refuses a second positional argument to `sc close`.
+//
+// The CLI framework assigns positionals one per non-Bool param in declaration
+// order and silently discards any beyond the last one (purse-first#190), so
+// `close` declares a trailing catch param purely to make that drop visible.
+// The refusal matters more than it looks: closing fewer sessions than asked,
+// while reporting success, leaves worktrees the user believes are gone.
+func errExtraCloseArg(extra string) error {
+	if extra == "" {
+		return nil
 	}
+	return fmt.Errorf(
+		"sc close accepts one target, got extra argument %q; "+
+			"multi-target close is blocked on purse-first#190 — close them one at a time for now",
+		extra,
+	)
 }
 
 // completeWorktreeTargets returns session targets keyed to descriptive

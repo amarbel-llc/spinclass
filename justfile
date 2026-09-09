@@ -175,6 +175,14 @@ update-gomod2nix:
 # `pkg` is a single package pattern. Passing several relies on go's argument
 # ordering and silently tests only some of them — use ./... or one at a time.
 #
+# CANNOT build ./cmd/spinclass, by design — not a bug to fix here. This is an
+# AMBIENT go run, and a goFlakeInputs bridge exists only inside a nix sandbox
+# (igloo FDR 0006). cmd/spinclass imports dewey/pkgs/mesa, which the organic
+# `require dewey v0.5.0` predates, so ambient go reports "no required module
+# provides package .../mesa". Internal packages resolve because their bridged
+# imports happen to exist at the required version. For cmd/spinclass use the
+# hermetic lane: `just test-nix` (spinclass#292).
+#
 # run go test for one package in the devshell (fast inner loop)
 [group('debug')]
 debug-go-test pkg='./...' run='' *args='':
