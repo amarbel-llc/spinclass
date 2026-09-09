@@ -274,7 +274,22 @@ subcommand is always available.
   indexing `docs/features`/`adrs`/`rfcs` by number·title·status (dirs overridable
   via `[sysprompt].doc-index-dirs`; a `recover()` guarantees a broken doc never
   fails the render). Replaces the retired static
-  `.clown-plugin/system-prompt-append.d/` fragments.
+  `.clown-plugin/system-prompt-append.d/` fragments. Two further Go-composed
+  trailers ship **inert** (FDR 0030, both off until a sweatfile selects
+  sources, since the useful set is host-specific not repo-convention): a
+  **Manpage index** (`manindex.go` — `name(section)` + the description scraped
+  from the page's NAME block, parsing man(7) `.SH NAME` with either ` \- ` or
+  plain ` - ` and mdoc(7) `.Nd`; the name comes from the FILENAME, which is what
+  `man(1)` takes) and a **Repository index** (`repoindex.go` — checkout name +
+  `flake.nix` `description`, else the README's first prose line; the forge API is
+  deliberately NOT consulted, being a round-trip per repo). Both resolve
+  sweatfile **source specs** (`sources.go`: `~`/`$VAR` expanded, split on `:` so
+  a bare `$MANPATH` works, globbed if `*?[` else literal, deduped) and are
+  double-bounded by `maxIndexEntries` (200) and `indexScanTimeout` (1.5s) — a
+  scan that hits either bound says so rather than truncating silently. The
+  manpage index cannot select first-party pages by itself: the profile is one
+  home-manager `buildEnv` and records no per-package origin, so membership is
+  declared upstream by the manpath eng emits (FDR 0030's provenance finding).
 - **Pre-merge build worktree** (FDR 0013): by default the hook runs in a
   transient detached worktree pinned to the committed sha (`check.resolveHookDir`
   → `.merge-<branch>-<sha>-<pid>` under `.worktrees/`), freeing the session
@@ -469,8 +484,10 @@ dirs → repo at each level. Notable surface:
   (`mint-command` / `revoke-command`, scalar override — FDR 0028);
   `[session-entry]` (start/resume/spawn-entry/spawn-window argv, per-field
   override; `model-flags` provider→CLI-flag map, merged per-key like `[env]`);
-  `[sysprompt]` (`doc-index-dirs` array — **override not append**:
-  non-empty replaces, `[]` disables, nil inherits the built-in default).
+  `[sysprompt]` (`doc-index-dirs`, `man-index`, `repo-index` arrays — all
+  **override not append**: non-empty replaces, `[]` disables, nil inherits.
+  Only `doc-index-dirs` has a built-in default; the other two are off until
+  selected — FDR 0030).
 
 **Custom start commands** (`[[start-commands]]`): each entry registers
 `sc start-<name>` with a validated positional arg + tab completion.

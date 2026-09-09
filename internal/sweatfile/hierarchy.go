@@ -185,6 +185,15 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if other.Sysprompt.DocIndexDirs != nil {
 			merged.Sysprompt.DocIndexDirs = other.Sysprompt.DocIndexDirs
 		}
+		// man-index / repo-index: OVERRIDE, same rationale as doc-index-dirs —
+		// these are scan roots, so a child replaces rather than accumulates,
+		// and an explicit [] clears an inherited fleet-root selection.
+		if other.Sysprompt.ManIndex != nil {
+			merged.Sysprompt.ManIndex = other.Sysprompt.ManIndex
+		}
+		if other.Sysprompt.RepoIndex != nil {
+			merged.Sysprompt.RepoIndex = other.Sysprompt.RepoIndex
+		}
 	}
 
 	// [session-entry]

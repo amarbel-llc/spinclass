@@ -538,6 +538,24 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				_vSyspromptDocIndexDirs.MarkConsumed()
 			}
 		}
+		if _vSyspromptManIndex, _ok := _vSysprompt.Get("man-index"); _ok && _vSyspromptManIndex.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vSyspromptManIndex.Leaf); _xok {
+				syspromptVal5.ManIndex = _x
+				if syspromptVal5.ManIndex == nil {
+					syspromptVal5.ManIndex = []string{}
+				}
+				_vSyspromptManIndex.MarkConsumed()
+			}
+		}
+		if _vSyspromptRepoIndex, _ok := _vSysprompt.Get("repo-index"); _ok && _vSyspromptRepoIndex.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vSyspromptRepoIndex.Leaf); _xok {
+				syspromptVal5.RepoIndex = _x
+				if syspromptVal5.RepoIndex == nil {
+					syspromptVal5.RepoIndex = []string{}
+				}
+				_vSyspromptRepoIndex.MarkConsumed()
+			}
+		}
 		d.data.Sysprompt = syspromptVal5
 	} else {
 		syspromptVal5 := &Sysprompt{}
@@ -550,6 +568,26 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 					syspromptVal5.DocIndexDirs = []string{}
 				}
 				_vDocIndexDirs.MarkConsumed()
+			}
+		}
+		if _vManIndex, _ok := model.Get("man-index"); _ok && _vManIndex.Kind == cst.VLeaf {
+			_foundSysprompt = true
+			if _x, _xok := cst.ExtractStringSlice(_vManIndex.Leaf); _xok {
+				syspromptVal5.ManIndex = _x
+				if syspromptVal5.ManIndex == nil {
+					syspromptVal5.ManIndex = []string{}
+				}
+				_vManIndex.MarkConsumed()
+			}
+		}
+		if _vRepoIndex, _ok := model.Get("repo-index"); _ok && _vRepoIndex.Kind == cst.VLeaf {
+			_foundSysprompt = true
+			if _x, _xok := cst.ExtractStringSlice(_vRepoIndex.Leaf); _xok {
+				syspromptVal5.RepoIndex = _x
+				if syspromptVal5.RepoIndex == nil {
+					syspromptVal5.RepoIndex = []string{}
+				}
+				_vRepoIndex.MarkConsumed()
 			}
 		}
 		if _foundSysprompt {
@@ -1112,6 +1150,20 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 		{
 			if d.data.Sysprompt.DocIndexDirs != nil {
 				if err := cst.SetAny(tableNode, "doc-index-dirs", d.data.Sysprompt.DocIndexDirs); err != nil {
+					return nil, fmt.Errorf("%w", err)
+				}
+			}
+		}
+		{
+			if d.data.Sysprompt.ManIndex != nil {
+				if err := cst.SetAny(tableNode, "man-index", d.data.Sysprompt.ManIndex); err != nil {
+					return nil, fmt.Errorf("%w", err)
+				}
+			}
+		}
+		{
+			if d.data.Sysprompt.RepoIndex != nil {
+				if err := cst.SetAny(tableNode, "repo-index", d.data.Sysprompt.RepoIndex); err != nil {
 					return nil, fmt.Errorf("%w", err)
 				}
 			}
@@ -1855,6 +1907,24 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vSyspromptDocIndexDirs.MarkConsumed()
 			}
 		}
+		if _vSyspromptManIndex, _ok := _vSysprompt.Get("man-index"); _ok && _vSyspromptManIndex.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vSyspromptManIndex.Leaf); _xok {
+				syspromptVal5.ManIndex = _x
+				if syspromptVal5.ManIndex == nil {
+					syspromptVal5.ManIndex = []string{}
+				}
+				_vSyspromptManIndex.MarkConsumed()
+			}
+		}
+		if _vSyspromptRepoIndex, _ok := _vSysprompt.Get("repo-index"); _ok && _vSyspromptRepoIndex.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vSyspromptRepoIndex.Leaf); _xok {
+				syspromptVal5.RepoIndex = _x
+				if syspromptVal5.RepoIndex == nil {
+					syspromptVal5.RepoIndex = []string{}
+				}
+				_vSyspromptRepoIndex.MarkConsumed()
+			}
+		}
 		data.Sysprompt = syspromptVal5
 	} else {
 		syspromptVal5 := &Sysprompt{}
@@ -1867,6 +1937,26 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 					syspromptVal5.DocIndexDirs = []string{}
 				}
 				_vDocIndexDirs.MarkConsumed()
+			}
+		}
+		if _vManIndex, _ok := sub.Get("man-index"); _ok && _vManIndex.Kind == cst.VLeaf {
+			_foundSysprompt = true
+			if _x, _xok := cst.ExtractStringSlice(_vManIndex.Leaf); _xok {
+				syspromptVal5.ManIndex = _x
+				if syspromptVal5.ManIndex == nil {
+					syspromptVal5.ManIndex = []string{}
+				}
+				_vManIndex.MarkConsumed()
+			}
+		}
+		if _vRepoIndex, _ok := sub.Get("repo-index"); _ok && _vRepoIndex.Kind == cst.VLeaf {
+			_foundSysprompt = true
+			if _x, _xok := cst.ExtractStringSlice(_vRepoIndex.Leaf); _xok {
+				syspromptVal5.RepoIndex = _x
+				if syspromptVal5.RepoIndex == nil {
+					syspromptVal5.RepoIndex = []string{}
+				}
+				_vRepoIndex.MarkConsumed()
 			}
 		}
 		if _foundSysprompt {
@@ -2415,6 +2505,20 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		{
 			if data.Sysprompt.DocIndexDirs != nil {
 				if err := cst.SetAny(tableNode, "doc-index-dirs", data.Sysprompt.DocIndexDirs); err != nil {
+					return fmt.Errorf("%w", err)
+				}
+			}
+		}
+		{
+			if data.Sysprompt.ManIndex != nil {
+				if err := cst.SetAny(tableNode, "man-index", data.Sysprompt.ManIndex); err != nil {
+					return fmt.Errorf("%w", err)
+				}
+			}
+		}
+		{
+			if data.Sysprompt.RepoIndex != nil {
+				if err := cst.SetAny(tableNode, "repo-index", data.Sysprompt.RepoIndex); err != nil {
 					return fmt.Errorf("%w", err)
 				}
 			}

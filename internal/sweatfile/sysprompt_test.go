@@ -36,3 +36,54 @@ func TestSyspromptDocIndexDirsMerge(t *testing.T) {
 		t.Errorf("unset should report ok=false: got %v ok=%v", dirs, ok)
 	}
 }
+
+// [sysprompt].man-index and .repo-index share doc-index-dirs' OVERRIDE merge
+// semantics — they are scan roots, so a child replaces rather than accumulates
+// and an explicit [] clears an inherited fleet-root selection. Unlike
+// doc-index-dirs they have no built-in default, so unset simply leaves the
+// index off. See FDR 0030.
+func TestSyspromptIndexSourcesMerge(t *testing.T) {
+	man := func(v []string) Sweatfile { return Sweatfile{Sysprompt: &Sysprompt{ManIndex: v}} }
+	repo := func(v []string) Sweatfile { return Sweatfile{Sysprompt: &Sysprompt{RepoIndex: v}} }
+
+	// nil child inherits the parent selection.
+	merged := man([]string{"/eng/man"}).MergeWith(Sweatfile{})
+	if got, ok := merged.SyspromptManIndex(); !ok || !reflect.DeepEqual(got, []string{"/eng/man"}) {
+		t.Errorf("man-index nil child should inherit: got %v ok=%v", got, ok)
+	}
+
+	// non-empty child replaces rather than appending.
+	merged = man([]string{"/eng/man"}).MergeWith(man([]string{"/other/man"}))
+	if got, _ := merged.SyspromptManIndex(); !reflect.DeepEqual(got, []string{"/other/man"}) {
+		t.Errorf("man-index non-empty child should replace: got %v", got)
+	}
+
+	// explicit [] clears an inherited selection — the off switch.
+	merged = man([]string{"/eng/man"}).MergeWith(man([]string{}))
+	if got, ok := merged.SyspromptManIndex(); !ok || len(got) != 0 {
+		t.Errorf("man-index empty child should clear: got %v ok=%v", got, ok)
+	}
+
+	// repo-index behaves identically.
+	merged = repo([]string{"/eng/repos"}).MergeWith(repo([]string{"/elsewhere"}))
+	if got, _ := merged.SyspromptRepoIndex(); !reflect.DeepEqual(got, []string{"/elsewhere"}) {
+		t.Errorf("repo-index non-empty child should replace: got %v", got)
+	}
+
+	// the two are independent: setting one must not disturb the other.
+	merged = man([]string{"/eng/man"}).MergeWith(repo([]string{"/eng/repos"}))
+	if got, _ := merged.SyspromptManIndex(); !reflect.DeepEqual(got, []string{"/eng/man"}) {
+		t.Errorf("repo-index child must not clobber man-index: got %v", got)
+	}
+	if got, _ := merged.SyspromptRepoIndex(); !reflect.DeepEqual(got, []string{"/eng/repos"}) {
+		t.Errorf("repo-index not carried through merge: got %v", got)
+	}
+
+	// wholly unset reports not-set, which leaves both indexes off.
+	if got, ok := (Sweatfile{}).SyspromptManIndex(); ok || got != nil {
+		t.Errorf("unset man-index should report ok=false: got %v ok=%v", got, ok)
+	}
+	if got, ok := (Sweatfile{}).SyspromptRepoIndex(); ok || got != nil {
+		t.Errorf("unset repo-index should report ok=false: got %v ok=%v", got, ok)
+	}
+}

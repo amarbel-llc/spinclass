@@ -203,6 +203,91 @@ empty array
 .RB ( "doc-index-dirs = []" )
 disables the index; nil (unset) inherits, falling back to the built-in
 default directories when unset everywhere.
+.PP
+Two further sections are available but, unlike the design-record index,
+have
+.B no
+built-in default: they render nothing until a sweatfile selects sources,
+because the useful set is host- and profile-specific rather than a
+repository convention (see FDR 0030).
+Both take an array of
+.IR "source specs" ,
+resolved identically: a leading
+.B ~
+and any
+.BI $ VAR
+are expanded, then each result is split on
+.BR : ,
+so a bare
+.B $MANPATH
+expands to its individual roots. A spec containing
+.BR * ", " ? ", or " [
+is matched as a glob; anything else is taken literally. Duplicates are
+dropped, so a path reachable from two specs is listed once, and a spec
+matching nothing contributes nothing.
+.PP
+Both indexes are bounded so a bulk selector cannot flood the prompt: at
+most 200 rows are rendered, and the scan yields after 1.5 seconds. In
+either case the section reports how many entries it skipped rather than
+truncating silently.
+.TP
+.B man-index
+Array of source specs selecting the manpages listed in the
+.B Manpage index
+section. A spec naming a directory is treated as a
+.I manpath root
+and scanned one level into its
+.I man*
+section directories; a glob names page files directly. Each page is
+listed as
+.IR name ( section )
+\(em taken from the filename, which is what
+.BR man (1)
+accepts, and which can differ from the name the page documents \(em plus
+the short description scraped from its NAME section. Both roff dialects
+are understood:
+.BR man (7)
+.RB ( ".SH NAME" ,
+with the description after a
+.B \e-
+or plain
+.B -
+separator) and
+.BR mdoc (7)
+.RB ( .Nd ).
+Gzipped and plain pages are read; another compression is reported in the
+diagnostic block rather than silently skipped. A page with no NAME
+section is still listed, without a description.
+.IP
+Prefer a purpose-built manpath containing only the pages you want over a
+broad glob or the whole
+.BR $MANPATH :
+a developer profile holds well over a thousand pages, and the entry cap
+is a guardrail, not an intended operating point.
+.B Merge:
+override, not append \(em same semantics as
+.BR doc-index-dirs .
+.TP
+.B repo-index
+Array of source specs selecting the checkouts listed in the
+.B Repository index
+section, so a session can tell which repository owns a question before
+researching it in the wrong one. A spec that is itself a git checkout is
+indexed directly; any other directory has its immediate children scanned
+for checkouts, which is what makes a directory of repositories a valid
+selector. Each is listed by directory name plus a short description taken
+from the
+.B description
+attribute of its
+.I flake.nix
+and, failing that, the first prose line of its README. The forge's own
+repository description is deliberately
+.B not
+consulted: it costs a network round-trip per repository, which a
+directory-of-checkouts selector cannot fit inside the pre-initialize
+deadline. A checkout with neither source is listed without a description.
+.B Merge:
+override, not append.
 .SS [hooks]
 Lifecycle hooks executed as shell scripts.
 .PP

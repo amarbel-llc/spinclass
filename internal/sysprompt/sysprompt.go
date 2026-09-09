@@ -80,6 +80,13 @@ type Coordinates struct {
 	// (FDR 0021), or "" when the repo has no scanned design-record dirs or the
 	// index is disabled. Render appends it after the template body.
 	DesignRecords string
+	// Manpages is the pre-rendered "## Manpage index" section (FDR 0030), or
+	// "" when [sysprompt].man-index selects nothing. Unlike DesignRecords it
+	// has no built-in default, so it is absent until a sweatfile opts in.
+	Manpages string
+	// Repositories is the pre-rendered "## Repository index" section (FDR
+	// 0030), or "" when [sysprompt].repo-index selects nothing.
+	Repositories string
 	// CoActiveSessions is the pre-rendered one-line summary of the OTHER
 	// active sessions on the same repo ("2 other live sessions on <repo>: …",
 	// spinclass#238), or "" when there are none or the lookup failed. Resolved
@@ -102,7 +109,7 @@ var fragmentTmpl = template.Must(template.ParseFS(templatesFS, "templates/*.md.t
 // Resolve discovers the current session's coordinates from the serve process's
 // environment and, for a main checkout, its cwd + git.
 func Resolve() Coordinates {
-	c := resolve(os.Getenv, os.Getwd, fetchRepoInfo, loadDocIndex, loadCoActiveLine)
+	c := resolve(os.Getenv, os.Getwd, fetchRepoInfo, loadIndexes, loadCoActiveLine)
 	// The ProtocolVersion warning is a process-global fact (from clown's
 	// memoized CheckProtocol), independent of the worktree/main-checkout split,
 	// so it is set here rather than threaded through resolve's injected
@@ -139,24 +146,47 @@ func protocolWarning(ctx context.Context) string {
 	)
 }
 
-// loadDocIndex is the production design-record index loader: it reads the
-// merged sweatfile hierarchy rooted at root for [sysprompt].doc-index-dirs
-// (falling back to the built-in default dirs when unset), then scans and
-// renders the index. Local file I/O only — safe before `initialize` — and any
-// failure yields an empty section. See FDR 0021.
-func loadDocIndex(root string) string {
+// indexSections are the sweatfile-selected markdown sections Render appends
+// after the template body, ordered most-specific-first when rendered.
+type indexSections struct {
+	DesignRecords string
+	Manpages      string
+	Repositories  string
+}
+
+// indexScanTimeout bounds the manpage and repository scans together. Both are
+// local file I/O, but their selectors accept bulk sources (a whole $MANPATH, a
+// directory of checkouts), so the walk is bounded by wall clock as well as by
+// maxIndexEntries — the pre-initialize prompts/get must never stall. Past the
+// deadline the scan stops and the section reports the shortfall.
+const indexScanTimeout = 1500 * time.Millisecond
+
+// loadIndexes is the production loader for every sweatfile-selected index: it
+// reads the merged sweatfile hierarchy rooted at root once, then scans and
+// renders the design-record index (FDR 0021, default-on) plus the manpage and
+// repository indexes (FDR 0030, both default-off). Local file I/O only — safe
+// before `initialize` — and any failure yields an empty section.
+func loadIndexes(root string) indexSections {
 	if root == "" {
-		return ""
+		return indexSections{}
 	}
 	dirs := defaultDocIndexDirs
+	var manSources, repoSources []string
 	if home, err := os.UserHomeDir(); err == nil {
 		if h, err := sweatfileio.LoadHierarchy(home, root); err == nil {
 			if configured, ok := h.Merged.SyspromptDocIndexDirs(); ok {
 				dirs = configured
 			}
+			manSources, _ = h.Merged.SyspromptManIndex()
+			repoSources, _ = h.Merged.SyspromptRepoIndex()
 		}
 	}
-	return renderDesignRecords(root, dirs)
+	deadline := time.Now().Add(indexScanTimeout)
+	return indexSections{
+		DesignRecords: renderDesignRecords(root, dirs),
+		Manpages:      renderManIndex(manSources, deadline),
+		Repositories:  renderRepoIndex(repoSources, deadline),
+	}
 }
 
 // fetchRepoInfo is the production repo-enrichment fetcher: a bounded
@@ -171,8 +201,8 @@ func fetchRepoInfo(path string) repoinfo.RepoInfo {
 }
 
 // resolve is the testable core of Resolve with the environment, cwd,
-// repo-enrichment, design-record, and co-active-session lookups injected.
-func resolve(getenv func(string) string, getwd func() (string, error), fetchRepo func(string) repoinfo.RepoInfo, renderDocs func(string) string, coActive func(Mode, string) string) Coordinates {
+// repo-enrichment, index, and co-active-session lookups injected.
+func resolve(getenv func(string) string, getwd func() (string, error), fetchRepo func(string) repoinfo.RepoInfo, renderIndexes func(string) indexSections, coActive func(Mode, string) string) Coordinates {
 	c := Coordinates{
 		SessionKey:  getenv("SPINCLASS_SESSION_ID"),
 		Repo:        getenv("SPINCLASS_REPO"),
@@ -196,7 +226,7 @@ func resolve(getenv func(string) string, getwd func() (string, error), fetchRepo
 	if c.Worktree != "" && pathWithin(cwd, c.Worktree) {
 		c.Mode = ModeWorktree
 		c.RepoInfo = fetchRepo(c.Worktree)
-		c.DesignRecords = renderDocs(c.Worktree)
+		c.applyIndexes(renderIndexes(c.Worktree))
 		c.CoActiveSessions = coActive(ModeWorktree, c.Worktree)
 		return c
 	}
@@ -236,9 +266,16 @@ func resolve(getenv func(string) string, getwd func() (string, error), fetchRepo
 		repoPath = cwd
 	}
 	c.RepoInfo = fetchRepo(repoPath)
-	c.DesignRecords = renderDocs(repoPath)
+	c.applyIndexes(renderIndexes(repoPath))
 	c.CoActiveSessions = coActive(ModeMainCheckout, repoPath)
 	return c
+}
+
+// applyIndexes copies the rendered index sections onto the coordinates.
+func (c *Coordinates) applyIndexes(s indexSections) {
+	c.DesignRecords = s.DesignRecords
+	c.Manpages = s.Manpages
+	c.Repositories = s.Repositories
 }
 
 // Render executes the embedded template for c.Mode and returns the fragment
@@ -255,11 +292,15 @@ func Render(c Coordinates) (string, error) {
 		return "", err
 	}
 	frag := strings.TrimRight(b.String(), "\n")
-	// The design-record index (FDR 0021) is composed in Go rather than in the
-	// templates: it is a Go-rendered markdown trailer, and appending it here
-	// keeps the templates free of the grouping/whitespace logic.
-	if c.DesignRecords != "" {
-		frag += "\n\n" + c.DesignRecords
+	// The index sections (FDR 0021, FDR 0030) are composed in Go rather than in
+	// the templates: they are Go-rendered markdown trailers, and appending them
+	// here keeps the templates free of the grouping/whitespace logic. Ordered
+	// most-specific-first — this repo's records, then the conventions its host
+	// documents, then the neighbouring repos.
+	for _, section := range []string{c.DesignRecords, c.Manpages, c.Repositories} {
+		if section != "" {
+			frag += "\n\n" + section
+		}
 	}
 	// The ProtocolVersion warning (#26) is prepended so the degrade is the
 	// first thing the agent reads in the fragment, not buried after the

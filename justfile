@@ -228,6 +228,87 @@ explore-recipe-prompt-cost repos=(home_directory() / 'eng/repos'):
     [ -n "$skipped" ] && echo "skipped (dump failed):$skipped"
     exit 0
 
+# [explore] Dump the raw roff around each sampled manpage's NAME section, so the
+# sysprompt manpage-index parser is designed against the formats actually on
+# this host rather than a guess. Both dialects appear in a nix profile: man(7)
+# (`.SH NAME` + `name \- desc`) and mdoc(7) (`.Sh NAME` + `.Nm`/`.Nd`). Pages may
+# be gzipped. Input to the FDR 0030 manpage-index design.
+#
+# dump raw NAME-section roff from sampled manpages to design the parser against
+[group('explore')]
+explore-manpage-name-formats glob=(home_directory() / '.nix-profile/share/man/man*/*'):
+    #!/usr/bin/env bash
+    set -uo pipefail
+    shown=0
+    for f in {{ glob }}; do
+      [ -f "$f" ] || continue
+      case "$f" in *.gz) body=$(gzip -cd "$f" 2>/dev/null) ;; *) body=$(cat "$f" 2>/dev/null) ;; esac
+      [ -n "$body" ] || continue
+      snippet=$(printf '%s\n' "$body" | grep -A3 -iE '^\.S[Hh] +"?NAME' | head -6)
+      [ -n "$snippet" ] || snippet="(no NAME section matched)"
+      echo "=== $(basename "$f")"
+      printf '%s\n' "$snippet" | sed 's/^/    /'
+      shown=$((shown+1))
+      [ "$shown" -ge 12 ] && break
+    done
+    echo
+    echo "total page files under the glob: $(ls -1 {{ glob }} 2>/dev/null | wc -l)"
+    echo
+    echo "=== dialect census (which NAME shapes the parser must handle)"
+    man_sh=0; mdoc_nd=0; none=0; esc=0; plain=0
+    for f in {{ glob }}; do
+      [ -f "$f" ] || continue
+      case "$f" in *.gz) body=$(gzip -cd "$f" 2>/dev/null) ;; *) body=$(cat "$f" 2>/dev/null) ;; esac
+      [ -n "$body" ] || continue
+      if printf '%s\n' "$body" | grep -qE '^\.Nd '; then mdoc_nd=$((mdoc_nd+1))
+      elif printf '%s\n' "$body" | grep -qiE '^\.SH +"?NAME'; then
+        man_sh=$((man_sh+1))
+        nameline=$(printf '%s\n' "$body" | grep -iA4 -E '^\.SH +"?NAME' | grep -vE '^\.|^--$' | head -1)
+        case "$nameline" in *' \- '*) esc=$((esc+1)) ;; *' - '*) plain=$((plain+1)) ;; esac
+      else none=$((none+1)); fi
+    done
+    echo "  man(7) .SH NAME : $man_sh   (of which ' \\- ' separator: $esc, plain ' - ': $plain)"
+    echo "  mdoc(7) .Nd     : $mdoc_nd"
+    echo "  no NAME found   : $none"
+    exit 0
+
+# [explore] Estimate the system-prompt token cost of the FDR 0030 indexes before
+# a sweatfile switches them on. Renders the exact row text each index emits
+# ("- `name(section)` — desc" per page, "- `repo` — desc" per checkout) and
+# reports chars / estimated tokens (chars÷4 — a rough heuristic, not a
+# tokenizer). Pass a manpage glob and a directory of checkouts.
+#
+# estimate the prompt-token cost of the sysprompt manpage and repo indexes
+[group('explore')]
+explore-index-prompt-cost glob=(home_directory() / '.nix-profile/share/man/man*/eng*') repos=(home_directory() / 'eng/repos'):
+    #!/usr/bin/env bash
+    set -uo pipefail
+    man_rows=""; n=0
+    for f in {{ glob }}; do
+      [ -f "$f" ] || continue
+      case "$f" in *.gz) body=$(gzip -cd "$f" 2>/dev/null) ;; *) body=$(cat "$f" 2>/dev/null) ;; esac
+      base=$(basename "$f"); base=${base%.gz}; sect=${base##*.}; name=${base%.*}
+      desc=$(printf '%s\n' "$body" | grep -iA4 -E '^\.SH +"?NAME' | grep -vE '^\.|^--$' | head -1 \
+             | sed -E 's/\\f[BIRP(]?[A-Za-z]?//g; s/^.* \\?- //; s/\\-/-/g')
+      man_rows="${man_rows}- \`${name}(${sect})\` — ${desc}"$'\n'; n=$((n+1))
+    done
+    repo_rows=""; r=0
+    for d in "{{ repos }}"/*/; do
+      d=${d%/}; [ -d "$d/.git" ] || continue
+      desc=$(grep -oE 'description[[:space:]]*=[[:space:]]*"[^"]*"' "$d/flake.nix" 2>/dev/null \
+             | head -1 | sed -E 's/.*"([^"]*)"/\1/')
+      repo_rows="${repo_rows}- \`$(basename "$d")\` — ${desc}"$'\n'; r=$((r+1))
+    done
+    mc=$(printf '%s' "$man_rows" | wc -c); rc=$(printf '%s' "$repo_rows" | wc -c)
+    printf '%-16s %8s %8s %8s\n' index rows chars '~tokens'
+    printf '%-16s %8d %8d %8d\n' manpage "$n" "$mc" $((mc/4))
+    printf '%-16s %8d %8d %8d\n' repository "$r" "$rc" $((rc/4))
+    printf '%-16s %8d %8d %8d\n' TOTAL $((n+r)) $((mc+rc)) $(((mc+rc)/4))
+    echo
+    echo "=== manpage rows"; printf '%s' "$man_rows"
+    echo "=== repository rows"; printf '%s' "$repo_rows"
+    exit 0
+
 # [explore] Inventory the sibling repos a root-level sweatfile entry would reach:
 # for each dir under `repos`, its configured origin host (what [auth] would
 # derive SPINCLASS_FORGE_HOST from) and its conformist flake-input rev (the

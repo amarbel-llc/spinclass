@@ -32,19 +32,20 @@ func repoStub(info repoinfo.RepoInfo, gotPath *string) func(string) repoinfo.Rep
 	}
 }
 
-// noDocs is a design-record loader stub that renders nothing.
-func noDocs(string) string { return "" }
+// noDocs is an index loader stub that renders nothing.
+func noDocs(string) indexSections { return indexSections{} }
 
 // noCoActive is a co-active-session loader stub that finds nothing.
 func noCoActive(Mode, string) string { return "" }
 
-// docsStub records the root it was called with and returns a fixed section.
-func docsStub(section string, gotRoot *string) func(string) string {
-	return func(root string) string {
+// docsStub records the root it was called with and returns a fixed
+// design-record section.
+func docsStub(section string, gotRoot *string) func(string) indexSections {
+	return func(root string) indexSections {
 		if gotRoot != nil {
 			*gotRoot = root
 		}
-		return section
+		return indexSections{DesignRecords: section}
 	}
 }
 

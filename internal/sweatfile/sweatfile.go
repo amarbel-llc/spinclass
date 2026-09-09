@@ -99,6 +99,20 @@ type Sysprompt struct {
 	// built-in default dirs apply); a non-empty value replaces the inherited
 	// list; an explicit empty list disables the index (the off switch).
 	DocIndexDirs []string `toml:"doc-index-dirs"`
+	// ManIndex selects the manpages the SEE ALSO-style manpage index lists
+	// (FDR 0030). Each entry is a source spec — a glob over page files, a
+	// manpath root directory (scanned as <dir>/man*/*), or a literal page
+	// path — with ~ and $VAR expanded and the result split on ":" so a bare
+	// "$MANPATH" expands to its roots. Same OVERRIDE semantics as
+	// DocIndexDirs, but unlike it there is NO built-in default: the index is
+	// off until a sweatfile selects sources, because the useful set is
+	// host- and profile-specific.
+	ManIndex []string `toml:"man-index"`
+	// RepoIndex selects the repositories the repository index lists (FDR
+	// 0030). Each entry is a source spec resolved like ManIndex, naming
+	// either a git checkout directly or a directory whose immediate children
+	// are checkouts. Off by default, OVERRIDE semantics.
+	RepoIndex []string `toml:"repo-index"`
 }
 
 // MCPServerDef declares an MCP server to register and auto-approve
@@ -443,6 +457,28 @@ func (sf Sweatfile) SyspromptDocIndexDirs() (dirs []string, ok bool) {
 		return nil, false
 	}
 	return sf.Sysprompt.DocIndexDirs, true
+}
+
+// SyspromptManIndex returns the configured [sysprompt].man-index source specs
+// and whether it was set. Unset (ok false) and an explicit empty list both
+// leave the manpage index off — it has no built-in default — but the two are
+// distinguished so an empty list can clear an inherited value down the
+// hierarchy. See FDR 0030.
+func (sf Sweatfile) SyspromptManIndex() (sources []string, ok bool) {
+	if sf.Sysprompt == nil || sf.Sysprompt.ManIndex == nil {
+		return nil, false
+	}
+	return sf.Sysprompt.ManIndex, true
+}
+
+// SyspromptRepoIndex returns the configured [sysprompt].repo-index source specs
+// and whether it was set, with the same off-by-default semantics as
+// SyspromptManIndex. See FDR 0030.
+func (sf Sweatfile) SyspromptRepoIndex() (sources []string, ok bool) {
+	if sf.Sysprompt == nil || sf.Sysprompt.RepoIndex == nil {
+		return nil, false
+	}
+	return sf.Sysprompt.RepoIndex, true
 }
 
 // EffectiveAllowedMCPs returns the deduplicated list of MCP server names
