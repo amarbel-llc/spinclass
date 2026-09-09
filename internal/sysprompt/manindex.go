@@ -38,7 +38,7 @@ var (
 // fragment is fetched before the agent's `initialize`, so an unreadable or
 // malformed page must never take the render down. A recover() converts any
 // unexpected panic into a warning line.
-func renderManIndex(sources []string, deadline time.Time) (section string) {
+func renderManIndex(sources []string, limit int, deadline time.Time) (section string) {
 	if len(sources) == 0 {
 		return ""
 	}
@@ -55,30 +55,40 @@ func renderManIndex(sources []string, deadline time.Time) (section string) {
 	}()
 
 	files, warnings := collectManFiles(sources, warnings)
-	sort.Strings(files)
-	if len(files) > maxIndexEntries {
-		truncated = len(files) - maxIndexEntries
-		files = files[:maxIndexEntries]
-	}
 
-	for i, f := range files {
-		// The scan is local I/O but unbounded in principle (a bulk selector
-		// can name a whole profile manpath), so it yields to the deadline
-		// rather than risk stalling the pre-initialize prompts/get.
+	// Name the pages BEFORE sorting and capping. Sorting by file path groups
+	// pages by section directory (man1 entirely before man7), so a corpus
+	// larger than the cap loses whole sections rather than a spread — on this
+	// host's first-party manpath that dropped every man5/man7 page, i.e. every
+	// convention page the index exists to surface, while keeping 200
+	// per-subcommand man1 pages. Naming is filename-only (no I/O), so ordering
+	// by the rendered label costs nothing and makes the cap uniform.
+	type page struct{ path, name string }
+	pages := make([]page, 0, len(files))
+	for _, f := range files {
+		if name, ok := manPageName(f); ok {
+			pages = append(pages, page{path: f, name: name})
+		}
+		// Anything without a section suffix is not a page (a stray README in
+		// a man dir) and is skipped silently, as before.
+	}
+	sort.Slice(pages, func(i, j int) bool { return pages[i].name < pages[j].name })
+	pages, truncated = applyIndexLimit(pages, limit)
+
+	for i, p := range pages {
+		// Reading descriptions is local I/O but unbounded in principle (a bulk
+		// selector can name a whole profile manpath), so it yields to the
+		// deadline rather than risk stalling the pre-initialize prompts/get.
 		if i%32 == 0 && !deadline.IsZero() && time.Now().After(deadline) {
-			truncated += len(files) - i
+			truncated += len(pages) - i
 			break
 		}
-		name, ok := manPageName(f)
-		if !ok {
-			continue // not a page file (a stray README in a man dir)
-		}
-		desc, err := manPageDescription(f)
+		desc, err := manPageDescription(p.path)
 		if err != nil {
-			warnings = append(warnings, name+" — "+err.Error())
+			warnings = append(warnings, p.name+" — "+err.Error())
 			continue
 		}
-		entries = append(entries, indexEntry{name: name, desc: desc})
+		entries = append(entries, indexEntry{name: p.name, desc: desc})
 	}
 	return formatIndex("Manpage index", manIndexInstruction, entries, warnings, truncated)
 }

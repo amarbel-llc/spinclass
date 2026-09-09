@@ -280,6 +280,43 @@ explore-manpage-name-formats glob=(home_directory() / '.nix-profile/share/man/ma
     echo "  no NAME found   : $none"
     exit 0
 
+# [explore] Reproduce what a session rooted at `dir` actually resolves: runs the
+# INSTALLED sc validate from there, so the sweatfile chain it prints is the one
+# a real session sees, and any `unknown field` line proves the tommy decoder
+# dropped that table. Written for the FDR 0030 report that an eng main-checkout
+# session renders no Manpage/Repository index; answers both halves at once
+# (is <dir>/sweatfile in the chain, and did [sysprompt] decode).
+#
+# run the installed sc validate from an arbitrary directory
+[group('explore')]
+explore-validate-from dir=(home_directory() / 'eng'):
+    #!/usr/bin/env bash
+    set -uo pipefail
+    bin="$HOME/.nix-profile/bin/sc"
+    echo "=== validating from {{ dir }}"
+    cd "{{ dir }}" && "$bin" validate
+    exit 0
+
+# [explore] Reproduce the dynamic system-prompt fragment a REAL session at `dir`
+# receives, using the INSTALLED sc (not `go run`, which cannot build
+# cmd/spinclass — spinclass#292). This is the counterpart to
+# debug-prompt-fragment for cases where the installed binary is the thing under
+# test. Written for the FDR 0030 report that an eng main-checkout session renders
+# no Manpage/Repository index sections.
+#
+# print the dynamic system-prompt fragment the INSTALLED sc returns for a directory
+[group('explore')]
+explore-prompt-fragment-from dir=(home_directory() / 'eng'):
+    #!/usr/bin/env bash
+    set -uo pipefail
+    bin="$HOME/.nix-profile/bin/sc"
+    req='{"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":"system-prompt-append"}}'
+    cd "{{ dir }}" || exit 1
+    printf '%s\n' "$req" \
+      | "$bin" serve 2>/dev/null \
+      | jq -r 'select(.id == 1) | .result.messages[0].content.text'
+    exit 0
+
 # [explore] Estimate the system-prompt token cost of the FDR 0030 indexes before
 # a sweatfile switches them on. Renders the exact row text each index emits
 # ("- `name(section)` — desc" per page, "- `repo` — desc" per checkout) and

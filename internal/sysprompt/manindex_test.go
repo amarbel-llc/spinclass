@@ -58,7 +58,7 @@ func TestRenderManIndexDialects(t *testing.T) {
 	// mdoc(7): the description rides its own macro.
 	writePage(t, root, "5", "mdocish", ".Sh NAME\n.Nm mdocish\n.Nd an mdoc formatted page\n", false)
 
-	out := renderManIndex([]string{root}, noDeadline())
+	out := renderManIndex([]string{root}, defaultIndexLimit, noDeadline())
 
 	mustContain(t, out, "## Manpage index")
 	mustContain(t, out, "- `acyclic(1)` — make directed graph acyclic")
@@ -74,7 +74,7 @@ func TestRenderManIndexHyphenInDescription(t *testing.T) {
 	writePage(t, root, "1", "age-plugin-piggy",
 		".SH NAME\nage\\-plugin\\-piggy \\- age plugin: PIV/agent\\-backed P\\-256 identities\n", true)
 
-	out := renderManIndex([]string{root}, noDeadline())
+	out := renderManIndex([]string{root}, defaultIndexLimit, noDeadline())
 
 	mustContain(t, out, "- `age-plugin-piggy(1)` — age plugin: PIV/agent-backed P-256 identities")
 }
@@ -86,7 +86,7 @@ func TestRenderManIndexNameFromFilename(t *testing.T) {
 	root := t.TempDir()
 	writePage(t, root, "1", "awk", ".SH NAME\ngawk \\- pattern scanning language\n", true)
 
-	out := renderManIndex([]string{root}, noDeadline())
+	out := renderManIndex([]string{root}, defaultIndexLimit, noDeadline())
 
 	mustContain(t, out, "- `awk(1)` — pattern scanning language")
 	if strings.Contains(out, "`gawk(1)`") {
@@ -100,7 +100,7 @@ func TestRenderManIndexNoNameSectionStillLists(t *testing.T) {
 	root := t.TempDir()
 	writePage(t, root, "7", "bare", ".TH bare 7\n.SH DESCRIPTION\nno name section here\n", false)
 
-	out := renderManIndex([]string{root}, noDeadline())
+	out := renderManIndex([]string{root}, defaultIndexLimit, noDeadline())
 
 	mustContain(t, out, "- `bare(7)`")
 	if strings.Contains(out, "bare(7)` — ") {
@@ -111,17 +111,17 @@ func TestRenderManIndexNoNameSectionStillLists(t *testing.T) {
 // Off by default and scan-if-exists: no sources, or sources that resolve to
 // nothing, render no section at all rather than an empty heading.
 func TestRenderManIndexOffAndScanIfExists(t *testing.T) {
-	if out := renderManIndex(nil, noDeadline()); out != "" {
+	if out := renderManIndex(nil, defaultIndexLimit, noDeadline()); out != "" {
 		t.Errorf("nil sources must render nothing, got:\n%s", out)
 	}
-	if out := renderManIndex([]string{}, noDeadline()); out != "" {
+	if out := renderManIndex([]string{}, defaultIndexLimit, noDeadline()); out != "" {
 		t.Errorf("empty sources must render nothing, got:\n%s", out)
 	}
 	missing := filepath.Join(t.TempDir(), "nope")
-	if out := renderManIndex([]string{missing}, noDeadline()); out != "" {
+	if out := renderManIndex([]string{missing}, defaultIndexLimit, noDeadline()); out != "" {
 		t.Errorf("absent source must contribute nothing, got:\n%s", out)
 	}
-	if out := renderManIndex([]string{filepath.Join(t.TempDir(), "*.7")}, noDeadline()); out != "" {
+	if out := renderManIndex([]string{filepath.Join(t.TempDir(), "*.7")}, defaultIndexLimit, noDeadline()); out != "" {
 		t.Errorf("glob matching nothing must contribute nothing, got:\n%s", out)
 	}
 }
@@ -133,13 +133,13 @@ func TestRenderManIndexDirAndGlobSourcesDedup(t *testing.T) {
 	root := t.TempDir()
 	writePage(t, root, "7", "one", ".SH NAME\none \\- the first page\n", true)
 
-	fromDir := renderManIndex([]string{root}, noDeadline())
+	fromDir := renderManIndex([]string{root}, defaultIndexLimit, noDeadline())
 	mustContain(t, fromDir, "- `one(7)` — the first page")
 
-	fromGlob := renderManIndex([]string{filepath.Join(root, "man*", "*")}, noDeadline())
+	fromGlob := renderManIndex([]string{filepath.Join(root, "man*", "*")}, defaultIndexLimit, noDeadline())
 	mustContain(t, fromGlob, "- `one(7)` — the first page")
 
-	both := renderManIndex([]string{root, filepath.Join(root, "man*", "*")}, noDeadline())
+	both := renderManIndex([]string{root, filepath.Join(root, "man*", "*")}, defaultIndexLimit, noDeadline())
 	if n := strings.Count(both, "`one(7)`"); n != 1 {
 		t.Errorf("a page reachable from two sources must be listed once, got %d:\n%s", n, both)
 	}
@@ -153,7 +153,7 @@ func TestRenderManIndexSectionDirFallback(t *testing.T) {
 	root := t.TempDir()
 	writePage(t, root, "7", "sectioned", ".SH NAME\nsectioned \\- found via its section dir\n", true)
 
-	out := renderManIndex([]string{filepath.Join(root, "man7")}, noDeadline())
+	out := renderManIndex([]string{filepath.Join(root, "man7")}, defaultIndexLimit, noDeadline())
 	mustContain(t, out, "- `sectioned(7)` — found via its section dir")
 
 	notMan := filepath.Join(root, "notman")
@@ -163,26 +163,54 @@ func TestRenderManIndexSectionDirFallback(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(notMan, "config.toml"), []byte("x = 1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if out := renderManIndex([]string{notMan}, noDeadline()); out != "" {
+	if out := renderManIndex([]string{notMan}, defaultIndexLimit, noDeadline()); out != "" {
 		t.Errorf("a non-man directory must not be scanned for pages, got:\n%s", out)
 	}
 }
 
 // The entry cap is the guardrail against a bulk selector (a whole $MANPATH is
 // ~1200 pages on this host). Past it the scan stops and says so, rather than
-// silently truncating.
+// silently truncating. A limit <= 0 opts out of capping entirely.
 func TestRenderManIndexCapsEntries(t *testing.T) {
 	root := t.TempDir()
-	for i := 0; i < maxIndexEntries+5; i++ {
+	for i := 0; i < 12; i++ {
 		writePage(t, root, "1", "page"+strconv.Itoa(i), ".SH NAME\nx \\- d\n", false)
 	}
 
-	out := renderManIndex([]string{root}, noDeadline())
-
-	if got := strings.Count(out, "\n- `"); got > maxIndexEntries {
-		t.Errorf("rendered %d rows, want at most %d", got, maxIndexEntries)
+	out := renderManIndex([]string{root}, 5, noDeadline())
+	if got := strings.Count(out, "\n- `"); got != 5 {
+		t.Errorf("rendered %d rows, want exactly the limit of 5", got)
 	}
-	mustContain(t, out, "more (not indexed; narrow the selector)")
+	mustContain(t, out, "…and 7 more (not indexed; narrow the selector)")
+
+	uncapped := renderManIndex([]string{root}, 0, noDeadline())
+	if got := strings.Count(uncapped, "\n- `"); got != 12 {
+		t.Errorf("limit 0 must not cap: rendered %d rows, want all 12", got)
+	}
+	if strings.Contains(uncapped, "not indexed") {
+		t.Errorf("an uncapped index must not report a shortfall:\n%s", uncapped)
+	}
+}
+
+// Truncation must not be biased by section directory. Sorting by file PATH
+// grouped man1 entirely before man7, so a corpus past the cap lost whole
+// sections — on the real first-party manpath that dropped every eng-*(7)
+// convention page, the ones the index exists for, while keeping 200
+// per-subcommand man1 pages. Ordering by the rendered name spreads the cut.
+func TestRenderManIndexCapIsNotSectionBiased(t *testing.T) {
+	root := t.TempDir()
+	// Two man1 pages that sort AFTER the man7 page by name, so a path-ordered
+	// cap of 2 would keep both man1 pages and drop the man7 one.
+	writePage(t, root, "1", "zeta", ".SH NAME\nzeta \\- a man1 page\n", false)
+	writePage(t, root, "1", "yankee", ".SH NAME\nyankee \\- another man1 page\n", false)
+	writePage(t, root, "7", "alpha", ".SH NAME\nalpha \\- a man7 convention page\n", false)
+
+	out := renderManIndex([]string{root}, 2, noDeadline())
+
+	mustContain(t, out, "- `alpha(7)` — a man7 convention page")
+	if strings.Contains(out, "zeta(1)") {
+		t.Errorf("cap must follow name order, not section order:\n%s", out)
+	}
 }
 
 // An already-expired deadline stops the scan rather than walking the whole
@@ -194,7 +222,7 @@ func TestRenderManIndexHonorsDeadline(t *testing.T) {
 		writePage(t, root, "1", "page"+strconv.Itoa(i), ".SH NAME\nx \\- d\n", false)
 	}
 
-	out := renderManIndex([]string{root}, time.Now().Add(-time.Second))
+	out := renderManIndex([]string{root}, defaultIndexLimit, time.Now().Add(-time.Second))
 
 	mustContain(t, out, "## Manpage index")
 	mustContain(t, out, "more (not indexed; narrow the selector)")
@@ -212,7 +240,7 @@ func TestRenderManIndexUnsupportedCompressionWarned(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out := renderManIndex([]string{root}, noDeadline())
+	out := renderManIndex([]string{root}, defaultIndexLimit, noDeadline())
 
 	mustContain(t, out, "**⚠ not indexed**")
 	mustContain(t, out, "unsupported compression .zst")

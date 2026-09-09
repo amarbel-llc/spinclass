@@ -182,9 +182,25 @@ NAME section is still listed, without a description.
 ## Bounding
 
 The selectors accept bulk sources, so both indexes are bounded twice:
-`maxIndexEntries` (200 rows) and `indexScanTimeout` (1.5s across both scans,
-checked periodically during the walk). Only the first 8 KiB of a page and 4 KiB
-of a flake/README are read.
+`[sysprompt].index-limit` (`defaultIndexLimit` 400 rows each; `<= 0` removes the
+cap) and `indexScanTimeout` (1.5s across both scans, checked periodically during
+the walk). Only the first 8 KiB of a page and 4 KiB of a flake/README are read.
+
+**Ordering is part of the bound, learned the hard way.** Pages were originally
+sorted by file path, which groups them by section directory — all of `man1/`
+before any of `man7/`. On the first real deployment (the fleet's first-party
+manpath: 329 pages, 266 of them in `man1`) a 200-row cap therefore rendered
+200 per-subcommand `man1` pages and dropped *every* `man5`/`man7` page — which
+is to say every `eng-*(7)` convention page and `spinclass-sweatfile(5)`, the
+exact pages the index was built to surface. The cap was doing its job; the
+ordering made its cut pathological. Pages are now named first (filename-only,
+no I/O) and sorted by the label they render under, so truncation takes a spread
+rather than deleting whole sections.
+
+The cap's original sizing also assumed the bulk-selector footgun was the common
+case. Under the provenance finding it is not: the intended source is a curated
+manpath, so the default is now set to clear one, and `index-limit` exists so a
+larger curated source can raise or remove it deliberately.
 
 A scan that hits either bound **says so** — `…and N more (not indexed; narrow
 the selector)` — including when it indexed nothing at all. That last case was a
@@ -251,7 +267,7 @@ The repository index has no such dependency and works today.
 
 | Lever | Current | Rationale | Change signal |
 |---|---|---|---|
-| `maxIndexEntries` | 200 | well above a curated selection (13+34 here), well below an unfiltered `$MANPATH` (1233) | a legitimate selection is truncated, or 200 rows prove too costly in practice |
+| `index-limit` | 400 (`defaultIndexLimit`), sweatfile-overridable; `<= 0` uncaps | sized to clear the fleet's 329-page first-party manpath, still far below an unfiltered `$MANPATH` (1233) | a legitimate curated source exceeds 400, or the per-session cost stops being worth it |
 | `indexScanTimeout` | 1.5s | local I/O over a bounded set should finish in tens of ms; this is a backstop, not a budget | the deadline line appears in a real render |
 | `maxDescLen` | 120 chars | fits a NAME description and a flake description without wrapping | descriptions read as clipped |
 | description sources | flake.nix → README | flake is authoritative and universal in-fleet; README is the fallback | the forge description becomes cheaply available (a local cache), or README noise dominates |

@@ -39,7 +39,7 @@ func TestRenderRepoIndexScansDirOfCheckouts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out := renderRepoIndex([]string{repos}, noDeadline())
+	out := renderRepoIndex([]string{repos}, defaultIndexLimit, noDeadline())
 
 	mustContain(t, out, "## Repository index")
 	mustContain(t, out, "- `spinclass` — git worktree session manager")
@@ -55,7 +55,7 @@ func TestRenderRepoIndexDirectCheckoutSource(t *testing.T) {
 	parent := t.TempDir()
 	repo := makeCheckout(t, parent, "solo", `{ description = "a single named repo"; }`, "")
 
-	out := renderRepoIndex([]string{repo}, noDeadline())
+	out := renderRepoIndex([]string{repo}, defaultIndexLimit, noDeadline())
 
 	mustContain(t, out, "- `solo` — a single named repo")
 }
@@ -67,7 +67,7 @@ func TestRenderRepoIndexPrefersFlakeDescription(t *testing.T) {
 		"{\n  description = \"from the flake\";\n}\n",
 		"# both\n\nfrom the readme instead\n")
 
-	out := renderRepoIndex([]string{repos}, noDeadline())
+	out := renderRepoIndex([]string{repos}, defaultIndexLimit, noDeadline())
 
 	mustContain(t, out, "- `both` — from the flake")
 	if strings.Contains(out, "from the readme") {
@@ -88,7 +88,7 @@ func TestRenderRepoIndexReadmeFallbackSkipsStructure(t *testing.T) {
 			"- a list item\n\n"+
 			"A tool that does the thing it says.\n")
 
-	out := renderRepoIndex([]string{repos}, noDeadline())
+	out := renderRepoIndex([]string{repos}, defaultIndexLimit, noDeadline())
 
 	mustContain(t, out, "- `readme-only` — A tool that does the thing it says.")
 }
@@ -99,7 +99,7 @@ func TestRenderRepoIndexUndescribedStillLists(t *testing.T) {
 	repos := t.TempDir()
 	makeCheckout(t, repos, "quiet", "", "")
 
-	out := renderRepoIndex([]string{repos}, noDeadline())
+	out := renderRepoIndex([]string{repos}, defaultIndexLimit, noDeadline())
 
 	mustContain(t, out, "- `quiet`")
 	if strings.Contains(out, "`quiet` — ") {
@@ -117,7 +117,7 @@ func TestRenderRepoIndexTruncatesLongDescription(t *testing.T) {
 	long := strings.Repeat("verbose ", 60)
 	makeCheckout(t, repos, "wordy", "", "# wordy\n\n"+long+"\n")
 
-	out := renderRepoIndex([]string{repos}, noDeadline())
+	out := renderRepoIndex([]string{repos}, defaultIndexLimit, noDeadline())
 
 	mustContain(t, out, "…")
 	for _, line := range strings.Split(out, "\n") {
@@ -132,7 +132,7 @@ func TestRenderRepoIndexUnescapesNixString(t *testing.T) {
 	repos := t.TempDir()
 	makeCheckout(t, repos, "quoted", `{ description = "a \"quoted\" thing"; }`, "")
 
-	out := renderRepoIndex([]string{repos}, noDeadline())
+	out := renderRepoIndex([]string{repos}, defaultIndexLimit, noDeadline())
 
 	mustContain(t, out, `- `+"`quoted`"+` — a "quoted" thing`)
 }
@@ -140,34 +140,38 @@ func TestRenderRepoIndexUnescapesNixString(t *testing.T) {
 // Off by default and scan-if-exists, matching the manpage and design-record
 // indexes.
 func TestRenderRepoIndexOffAndScanIfExists(t *testing.T) {
-	if out := renderRepoIndex(nil, noDeadline()); out != "" {
+	if out := renderRepoIndex(nil, defaultIndexLimit, noDeadline()); out != "" {
 		t.Errorf("nil sources must render nothing, got:\n%s", out)
 	}
-	if out := renderRepoIndex([]string{}, noDeadline()); out != "" {
+	if out := renderRepoIndex([]string{}, defaultIndexLimit, noDeadline()); out != "" {
 		t.Errorf("empty sources must render nothing, got:\n%s", out)
 	}
 	missing := filepath.Join(t.TempDir(), "nope")
-	if out := renderRepoIndex([]string{missing}, noDeadline()); out != "" {
+	if out := renderRepoIndex([]string{missing}, defaultIndexLimit, noDeadline()); out != "" {
 		t.Errorf("absent source must contribute nothing, got:\n%s", out)
 	}
 	// A directory with no checkouts under it is not an error, just empty.
-	if out := renderRepoIndex([]string{t.TempDir()}, noDeadline()); out != "" {
+	if out := renderRepoIndex([]string{t.TempDir()}, defaultIndexLimit, noDeadline()); out != "" {
 		t.Errorf("dir with no checkouts must render nothing, got:\n%s", out)
 	}
 }
 
 // The same cap guards the repo index, since a directory-of-checkouts selector
-// is equally unbounded in principle.
+// is equally unbounded in principle, and the same <= 0 opt-out applies.
 func TestRenderRepoIndexCapsEntries(t *testing.T) {
 	repos := t.TempDir()
-	for i := 0; i < maxIndexEntries+3; i++ {
+	for i := 0; i < 9; i++ {
 		makeCheckout(t, repos, "repo"+strconv.Itoa(i), "", "")
 	}
 
-	out := renderRepoIndex([]string{repos}, noDeadline())
-
-	if got := strings.Count(out, "\n- `"); got > maxIndexEntries {
-		t.Errorf("rendered %d rows, want at most %d", got, maxIndexEntries)
+	out := renderRepoIndex([]string{repos}, 4, noDeadline())
+	if got := strings.Count(out, "\n- `"); got != 4 {
+		t.Errorf("rendered %d rows, want exactly the limit of 4", got)
 	}
-	mustContain(t, out, "more (not indexed; narrow the selector)")
+	mustContain(t, out, "…and 5 more (not indexed; narrow the selector)")
+
+	uncapped := renderRepoIndex([]string{repos}, -1, noDeadline())
+	if got := strings.Count(uncapped, "\n- `"); got != 9 {
+		t.Errorf("a negative limit must not cap: rendered %d rows, want all 9", got)
+	}
 }

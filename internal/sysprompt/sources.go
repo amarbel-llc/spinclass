@@ -7,12 +7,27 @@ import (
 	"strings"
 )
 
-// maxIndexEntries caps the rows any one sweatfile-selected index renders. The
-// selectors accept bulk sources ($MANPATH, a directory of checkouts), and a
-// full profile manpath is ~1200 pages on a developer host — far past what
-// belongs in every session's system prompt. Past the cap the scan stops and
-// the section reports how many more matched. See FDR 0030.
-const maxIndexEntries = 200
+// defaultIndexLimit caps the rows any one sweatfile-selected index renders
+// when [sysprompt].index-limit is unset. The selectors accept bulk sources
+// ($MANPATH, a directory of checkouts), and a full profile manpath is ~1200
+// pages on a developer host — far past what belongs in every session's system
+// prompt. Past the cap the scan stops and the section reports how many more
+// matched.
+//
+// Sized to clear a curated first-party manpath rather than to be tight: the
+// fleet's own is 329 pages, and the original 200 truncated it — the cap is
+// meant to catch a bulk-selector mistake, not a deliberately assembled source.
+// See FDR 0030.
+const defaultIndexLimit = 400
+
+// applyIndexLimit truncates entries to limit, returning how many were dropped.
+// A limit <= 0 means the caller opted out of capping entirely.
+func applyIndexLimit[T any](items []T, limit int) (kept []T, truncated int) {
+	if limit <= 0 || len(items) <= limit {
+		return items, 0
+	}
+	return items[:limit], len(items) - limit
+}
 
 // maxNameBytes bounds how much of a page is read looking for its NAME section.
 // The section is a header block by construction, so this is generous; it keeps

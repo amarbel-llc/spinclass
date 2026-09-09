@@ -122,6 +122,14 @@ type Sysprompt struct {
 	// either a git checkout directly or a directory whose immediate children
 	// are checkouts. Off by default, OVERRIDE semantics.
 	RepoIndex []string `toml:"repo-index"`
+	// IndexLimit caps the rows EACH sweatfile-selected index renders, and is
+	// the escape hatch for a curated source larger than the built-in default:
+	// the cap exists to bound a bulk selector (a bare "$MANPATH" is ~1200
+	// pages), not to fight a deliberately assembled manpath. A value <= 0
+	// removes the cap entirely — the index then costs whatever its sources
+	// hold, in every session's system prompt. Scalar override: nil inherits,
+	// a set value replaces.
+	IndexLimit *int `toml:"index-limit"`
 }
 
 // MCPServerDef declares an MCP server to register and auto-approve
@@ -488,6 +496,17 @@ func (sf Sweatfile) SyspromptRepoIndex() (sources []string, ok bool) {
 		return nil, false
 	}
 	return sf.Sysprompt.RepoIndex, true
+}
+
+// SyspromptIndexLimit returns the configured [sysprompt].index-limit and
+// whether it was set. When ok is false the caller applies its built-in
+// default; when ok is true a value <= 0 means the caller must not cap at all.
+// See FDR 0030.
+func (sf Sweatfile) SyspromptIndexLimit() (limit int, ok bool) {
+	if sf.Sysprompt == nil || sf.Sysprompt.IndexLimit == nil {
+		return 0, false
+	}
+	return *sf.Sysprompt.IndexLimit, true
 }
 
 // EffectiveAllowedMCPs returns the deduplicated list of MCP server names

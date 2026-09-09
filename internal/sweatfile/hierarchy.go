@@ -203,6 +203,10 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if other.Sysprompt.RepoIndex != nil {
 			merged.Sysprompt.RepoIndex = other.Sysprompt.RepoIndex
 		}
+		// index-limit: scalar override, like the [hooks] knobs.
+		if other.Sysprompt.IndexLimit != nil {
+			merged.Sysprompt.IndexLimit = other.Sysprompt.IndexLimit
+		}
 	}
 
 	// [session-entry]

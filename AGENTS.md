@@ -285,8 +285,12 @@ subcommand is always available.
   deliberately NOT consulted, being a round-trip per repo). Both resolve
   sweatfile **source specs** (`sources.go`: `~`/`$VAR` expanded, split on `:` so
   a bare `$MANPATH` works, globbed if `*?[` else literal, deduped) and are
-  double-bounded by `maxIndexEntries` (200) and `indexScanTimeout` (1.5s) — a
-  scan that hits either bound says so rather than truncating silently. The
+  double-bounded by `[sysprompt].index-limit` (`defaultIndexLimit` 400; `<= 0`
+  uncaps) and `indexScanTimeout` (1.5s) — a scan that hits either bound says so
+  rather than truncating silently. Rows are ordered by RENDERED NAME, not file
+  path: path order groups man1 entirely before man7, so a corpus past the cap
+  dropped whole sections — on the fleet's 329-page first-party manpath that
+  meant every `eng-*(7)` convention page, the ones the index exists for. The
   manpage index cannot select first-party pages by itself: the profile is one
   home-manager `buildEnv` and records no per-package origin, so membership is
   declared upstream by the manpath eng emits (FDR 0030's provenance finding).
@@ -496,7 +500,8 @@ dirs → repo at each level. Notable surface:
   `[sysprompt]` (`doc-index-dirs`, `man-index`, `repo-index` arrays — all
   **override not append**: non-empty replaces, `[]` disables, nil inherits.
   Only `doc-index-dirs` has a built-in default; the other two are off until
-  selected — FDR 0030).
+  selected. `index-limit` is a scalar override capping each index's rows,
+  default 400, `<= 0` uncaps — FDR 0030).
 
 **Custom start commands** (`[[start-commands]]`): each entry registers
 `sc start-<name>` with a validated positional arg + tab completion.

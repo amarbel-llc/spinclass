@@ -171,6 +171,7 @@ func loadIndexes(root string) indexSections {
 		return indexSections{}
 	}
 	dirs := defaultDocIndexDirs
+	limit := defaultIndexLimit
 	var manSources, repoSources []string
 	if home, err := os.UserHomeDir(); err == nil {
 		if h, err := sweatfileio.LoadHierarchy(home, root); err == nil {
@@ -179,13 +180,16 @@ func loadIndexes(root string) indexSections {
 			}
 			manSources, _ = h.Merged.SyspromptManIndex()
 			repoSources, _ = h.Merged.SyspromptRepoIndex()
+			if configured, ok := h.Merged.SyspromptIndexLimit(); ok {
+				limit = configured
+			}
 		}
 	}
 	deadline := time.Now().Add(indexScanTimeout)
 	return indexSections{
 		DesignRecords: renderDesignRecords(root, dirs),
-		Manpages:      renderManIndex(manSources, deadline),
-		Repositories:  renderRepoIndex(repoSources, deadline),
+		Manpages:      renderManIndex(manSources, limit, deadline),
+		Repositories:  renderRepoIndex(repoSources, limit, deadline),
 	}
 }
 

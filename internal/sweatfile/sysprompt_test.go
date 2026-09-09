@@ -87,3 +87,40 @@ func TestSyspromptIndexSourcesMerge(t *testing.T) {
 		t.Errorf("unset repo-index should report ok=false: got %v ok=%v", got, ok)
 	}
 }
+
+// [sysprompt].index-limit is a SCALAR override (the [hooks] shape), not an
+// array: nil inherits, a set value replaces. Zero is a meaningful value —
+// it removes the cap — so it must survive the merge rather than being
+// mistaken for unset. See FDR 0030.
+func TestSyspromptIndexLimitMerge(t *testing.T) {
+	limit := func(n int) Sweatfile { return Sweatfile{Sysprompt: &Sysprompt{IndexLimit: &n}} }
+
+	// nil child inherits the parent value.
+	merged := limit(400).MergeWith(Sweatfile{})
+	if got, ok := merged.SyspromptIndexLimit(); !ok || got != 400 {
+		t.Errorf("nil child should inherit: got %v ok=%v", got, ok)
+	}
+
+	// a set child replaces.
+	merged = limit(400).MergeWith(limit(50))
+	if got, ok := merged.SyspromptIndexLimit(); !ok || got != 50 {
+		t.Errorf("set child should replace: got %v ok=%v", got, ok)
+	}
+
+	// zero is a real value (uncapped), distinct from unset.
+	merged = limit(400).MergeWith(limit(0))
+	if got, ok := merged.SyspromptIndexLimit(); !ok || got != 0 {
+		t.Errorf("zero must survive as a set value: got %v ok=%v", got, ok)
+	}
+
+	// wholly unset reports not-set so the caller applies its built-in default.
+	if got, ok := (Sweatfile{}).SyspromptIndexLimit(); ok || got != 0 {
+		t.Errorf("unset should report ok=false: got %v ok=%v", got, ok)
+	}
+
+	// index-limit and the source arrays are independent.
+	merged = limit(75).MergeWith(Sweatfile{Sysprompt: &Sysprompt{ManIndex: []string{"/m"}}})
+	if got, ok := merged.SyspromptIndexLimit(); !ok || got != 75 {
+		t.Errorf("man-index child must not clobber index-limit: got %v ok=%v", got, ok)
+	}
+}

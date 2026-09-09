@@ -588,6 +588,12 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				_vSyspromptRepoIndex.MarkConsumed()
 			}
 		}
+		if _vSyspromptIndexLimit, _ok := _vSysprompt.Get("index-limit"); _ok && _vSyspromptIndexLimit.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractInt(_vSyspromptIndexLimit.Leaf); _xok {
+				syspromptVal5.IndexLimit = &_x
+				_vSyspromptIndexLimit.MarkConsumed()
+			}
+		}
 		d.data.Sysprompt = syspromptVal5
 	} else {
 		syspromptVal5 := &Sysprompt{}
@@ -620,6 +626,13 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 					syspromptVal5.RepoIndex = []string{}
 				}
 				_vRepoIndex.MarkConsumed()
+			}
+		}
+		if _vIndexLimit, _ok := model.Get("index-limit"); _ok && _vIndexLimit.Kind == cst.VLeaf {
+			_foundSysprompt = true
+			if _x, _xok := cst.ExtractInt(_vIndexLimit.Leaf); _xok {
+				syspromptVal5.IndexLimit = &_x
+				_vIndexLimit.MarkConsumed()
 			}
 		}
 		if _foundSysprompt {
@@ -1210,6 +1223,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				if err := cst.SetAny(tableNode, "repo-index", d.data.Sysprompt.RepoIndex); err != nil {
 					return nil, fmt.Errorf("%w", err)
 				}
+			}
+		}
+		if d.data.Sysprompt.IndexLimit != nil {
+			if err := cst.SetAny(tableNode, "index-limit", *d.data.Sysprompt.IndexLimit); err != nil {
+				return nil, fmt.Errorf("%w", err)
 			}
 		}
 	}
@@ -2001,6 +2019,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vSyspromptRepoIndex.MarkConsumed()
 			}
 		}
+		if _vSyspromptIndexLimit, _ok := _vSysprompt.Get("index-limit"); _ok && _vSyspromptIndexLimit.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractInt(_vSyspromptIndexLimit.Leaf); _xok {
+				syspromptVal5.IndexLimit = &_x
+				_vSyspromptIndexLimit.MarkConsumed()
+			}
+		}
 		data.Sysprompt = syspromptVal5
 	} else {
 		syspromptVal5 := &Sysprompt{}
@@ -2033,6 +2057,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 					syspromptVal5.RepoIndex = []string{}
 				}
 				_vRepoIndex.MarkConsumed()
+			}
+		}
+		if _vIndexLimit, _ok := sub.Get("index-limit"); _ok && _vIndexLimit.Kind == cst.VLeaf {
+			_foundSysprompt = true
+			if _x, _xok := cst.ExtractInt(_vIndexLimit.Leaf); _xok {
+				syspromptVal5.IndexLimit = &_x
+				_vIndexLimit.MarkConsumed()
 			}
 		}
 		if _foundSysprompt {
@@ -2609,6 +2640,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 				if err := cst.SetAny(tableNode, "repo-index", data.Sysprompt.RepoIndex); err != nil {
 					return fmt.Errorf("%w", err)
 				}
+			}
+		}
+		if data.Sysprompt.IndexLimit != nil {
+			if err := cst.SetAny(tableNode, "index-limit", *data.Sysprompt.IndexLimit); err != nil {
+				return fmt.Errorf("%w", err)
 			}
 		}
 	}

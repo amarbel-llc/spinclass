@@ -226,10 +226,27 @@ is matched as a glob; anything else is taken literally. Duplicates are
 dropped, so a path reachable from two specs is listed once, and a spec
 matching nothing contributes nothing.
 .PP
-Both indexes are bounded so a bulk selector cannot flood the prompt: at
-most 200 rows are rendered, and the scan yields after 1.5 seconds. In
-either case the section reports how many entries it skipped rather than
-truncating silently.
+Both indexes are bounded so a bulk selector cannot flood the prompt: each
+renders at most
+.B index-limit
+rows (400 by default), and the scan yields after 1.5 seconds. In either
+case the section reports how many entries it skipped rather than
+truncating silently. Rows are ordered by the name they render under, so a
+corpus past the cap loses a spread rather than whole manpage sections.
+.TP
+.B index-limit
+Maximum rows EACH of the two indexes renders. The cap exists to bound a
+.I bulk
+selector \(em a bare
+.B $MANPATH
+is well over a thousand pages \(em not to trim a deliberately assembled
+source, so the default is set to clear a curated first-party manpath
+rather than to be tight. A value of
+.B 0
+(or negative) removes the cap entirely: the index then costs whatever its
+sources hold, in every session's system prompt.
+.B Merge:
+scalar override \(em nil inherits, a set value replaces.
 .TP
 .B man-index
 Array of source specs selecting the manpages listed in the

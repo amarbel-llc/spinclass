@@ -43,7 +43,7 @@ var (
 //
 // Best-effort with the same hard guarantee as the other indexes: a recover()
 // keeps a malformed flake or README from taking down the pre-initialize render.
-func renderRepoIndex(sources []string, deadline time.Time) (section string) {
+func renderRepoIndex(sources []string, limit int, deadline time.Time) (section string) {
 	if len(sources) == 0 {
 		return ""
 	}
@@ -61,10 +61,7 @@ func renderRepoIndex(sources []string, deadline time.Time) (section string) {
 
 	repos, warnings := collectRepos(sources, warnings)
 	sort.Strings(repos)
-	if len(repos) > maxIndexEntries {
-		truncated = len(repos) - maxIndexEntries
-		repos = repos[:maxIndexEntries]
-	}
+	repos, truncated = applyIndexLimit(repos, limit)
 
 	for i, path := range repos {
 		if i%16 == 0 && !deadline.IsZero() && time.Now().After(deadline) {
