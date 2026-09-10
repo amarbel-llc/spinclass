@@ -18,29 +18,22 @@ via configurable entrypoints, rebasing/merging back to main, and cleaning up.
 
 ## Build & Test Commands
 
-``` sh
-just build         # nix build + regen the tommy codec
-just test          # Go tests with TAP-14 output (via nix flake check)
-just verify         # version+commit ldflag burn-in + tommy-codec drift guard
-just codemod-fmt    # conformist: format Go/Nix/shell/TOML + regen tommy codec
-just lint           # conformist check (sandboxed) + golangci-lint (pure checks.lint)
-                     #   + conformist check --tree-root . (impure: git-remotes/sweatfile/agents-md/gomod2nix)
-just update-gomod2nix  # Regenerate gomod2nix.toml after dependency changes
-```
+Recipes are provided by the just-us clown plugin — the system prompt carries the
+full recipe index (name + one-line doc); use `list_recipes` / `show_recipe` to
+inspect and `run_recipe` to run them.
 
 Config is Nix-generated from `./conformist.nix` + `./conformist-impure.nix` +
 `conformist.lib.presets.{eng,eng-go,eng-impure}` (`flake.nix`), not a
 hand-written `conformist.toml`. golangci-lint runs as the pure, sandboxed
-`checks.lint` (igloo's `buildGoLint`, warm-cache seeded — `just lint-golangci`),
-NOT in the impure lane: a sandboxed golangci-lint has a per-build scratch cache
-and so can't replay stale `.merge-*` paths whose suppressions fail open
-(spinclass#294). Version
-is `version.env` (`SPINCLASS_VERSION`, eng-versioning(7)); the fork's
+`checks.lint` (igloo's `buildGoLint`, warm-cache seeded), NOT in the impure lane:
+a sandboxed golangci-lint has a per-build scratch cache and so can't replay stale
+`.merge-*` paths whose suppressions fail open (spinclass#294). Version is
+`version.env` (`SPINCLASS_VERSION`, eng-versioning(7)); the fork's
 `buildGoApplication` auto-reads it — no `version` attr is passed explicitly in
 `flake.nix`.
 
-`merge-this-session`'s pre-merge hook runs `just` (the default verification
-suite) — do NOT redundantly run `just`/`just test` right before merging.
+`merge-this-session`'s pre-merge hook runs the full verification suite (build,
+test, bats, and analyzers) — do NOT re-run that suite right before merging.
 Cheap per-package `go build ./internal/foo/...` checks are fine.
 
 ## Architecture
