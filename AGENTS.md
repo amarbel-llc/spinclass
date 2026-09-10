@@ -23,16 +23,18 @@ just build         # nix build + regen the tommy codec
 just test          # Go tests with TAP-14 output (via nix flake check)
 just verify         # version+commit ldflag burn-in + tommy-codec drift guard
 just codemod-fmt    # conformist: format Go/Nix/shell/TOML + regen tommy codec
-just lint           # conformist check (sandboxed) + conformist check --tree-root .
-                     #   (impure: git-remotes/sweatfile/agents-md/gomod2nix + golangci-lint)
+just lint           # conformist check (sandboxed) + golangci-lint (pure checks.lint)
+                     #   + conformist check --tree-root . (impure: git-remotes/sweatfile/agents-md/gomod2nix)
 just update-gomod2nix  # Regenerate gomod2nix.toml after dependency changes
 ```
 
 Config is Nix-generated from `./conformist.nix` + `./conformist-impure.nix` +
 `conformist.lib.presets.{eng,eng-go,eng-impure}` (`flake.nix`), not a
-hand-written `conformist.toml`. golangci-lint lives in the impure lane
-(`./conformist-impure.nix`) — it needs ambient `go` + a writable cache,
-unavailable in the sandboxed `checks.formatting` the pure lane builds. Version
+hand-written `conformist.toml`. golangci-lint runs as the pure, sandboxed
+`checks.lint` (igloo's `buildGoLint`, warm-cache seeded — `just lint-golangci`),
+NOT in the impure lane: a sandboxed golangci-lint has a per-build scratch cache
+and so can't replay stale `.merge-*` paths whose suppressions fail open
+(spinclass#294). Version
 is `version.env` (`SPINCLASS_VERSION`, eng-versioning(7)); the fork's
 `buildGoApplication` auto-reads it — no `version` attr is passed explicitly in
 `flake.nix`.

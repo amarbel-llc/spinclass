@@ -2,7 +2,7 @@ default: lint build test verify
 
 # --- lint ---
 
-lint: lint-fmt lint-worktree
+lint: lint-fmt lint-golangci lint-worktree
 
 # Read-only format + lint gate via the sandboxed checks.formatting
 # derivation: formatter drift (Go/Nix/shell/TOML, per ./conformist.nix) plus
@@ -19,35 +19,32 @@ lint-fmt:
     system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
     nix build ".#checks.${system}.formatting" --no-link --print-build-logs
 
-# The impure eng-convention checks (git remotes, sweatfile, agents-md;
-# gomod2nix is force-disabled here — see conformist-impure.nix) plus
-# golangci-lint (the v2 `standard` set — config in .golangci.yml —
-# relocated here from the pure lane: it needs ambient `go` + a writable
-# build cache, unavailable in the sandboxed checks.formatting) against the
-# working tree, where .git/go are available. Runs conformist from the
-# devShell PATH (direnv `use flake`).
+# Pure, sandboxed golangci-lint via the nix-native `checks.<system>.lint`
+# derivation (igloo's buildGoLint, warm-cache seeded). Replaces the golangci-lint
+# that used to run in the impure lint-worktree lane below — a sandboxed build
+# has a per-build scratch GOLANGCI_LINT_CACHE, so it can't replay stale `.merge-*`
+# cache paths whose suppressions fail open (spinclass#294). Folded into `just
+# lint`, so the pre-merge `just` hook runs it on every merge.
 #
-# golangci-lint's ambient `go` does NOT apply spinclass's goFlakeInputs
-# bridge on its own (igloo#62 — mkGoEnv's devshell parity with `nix build`
-# doesn't hold in practice, despite gomod2nix(7)'s prior claim; -modfile
-# doesn't help either, since golangci-lint's own go/packages probe runs
-# with GO111MODULE=off, which cmd/go rejects -modfile under). So this
-# recipe temporarily materializes the SAME merged go.mod `nix build` uses
-# (buildGoApplication's passthru.mergedGoMod — a plain `replace`, which
-# go/packages reads natively) over the tracked go.mod for just the
-# conformist run, then restores it — verified working end-to-end against a
-# real bridged module (purse-first/libs/dewey/pkgs/mesa, #185).
-#
-# run the impure eng checks and golangci-lint against the working tree
-lint-worktree:
+# run the pure warm-cache nix-native golangci-lint check
+lint-golangci:
     #!/usr/bin/env bash
     set -euo pipefail
     system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    nix build ".#checks.${system}.lint" --no-link --print-build-logs
+
+# The impure eng-convention checks (git remotes, git-default-branch, sweatfile,
+# agents-md; gomod2nix is force-disabled here — see conformist-impure.nix)
+# against the working tree, where .git is available. Runs conformist from the
+# devShell PATH (direnv `use flake`). golangci-lint no longer runs here — it
+# moved to the pure `lint-golangci` / `checks.lint` (spinclass#294), so this
+# lane no longer materializes the bridged go.mod.
+#
+# run the impure eng-convention checks against the working tree
+lint-worktree:
+    #!/usr/bin/env bash
+    set -euo pipefail
     cfg=$(nix build --no-link --print-out-paths '.#conformist-impure-config')
-    merged=$(nix build --no-link --print-out-paths ".#packages.${system}.default.passthru.mergedGoMod")
-    cp go.mod .go.mod.lintbak
-    trap 'mv .go.mod.lintbak go.mod' EXIT
-    cp "$merged" go.mod && chmod u+w go.mod
     conformist check --config-file "$cfg" --tree-root .
 
 # --- build ---

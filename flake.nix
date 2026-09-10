@@ -267,20 +267,14 @@
         };
 
         # Impure lane: the eng-convention git-state checks (git-remotes,
-        # git-default-branch, sweatfile, agents-md, gomod2nix — presets.eng-impure)
-        # PLUS golangci-lint, relocated here from the pure eval above. golangci-lint
-        # is a package-loading linter: it needs ambient `go` (to resolve imports)
-        # and a writable $HOME for its build cache, neither available in the
-        # sandboxed `checks.formatting` derivation (confirmed: `exec: "go":
-        # executable file not found in $PATH` + `mkdir /homeless-shelter:
-        # permission denied` when it was wired into the pure lane). This is why
-        # the OLD spinclass ran it via `nix develop --command conformist check`
-        # (an impure devShell invocation) rather than a sandboxed build — no
-        # fleet repo runs a real `golangci-lint run` inside checks.formatting
-        # (golangci-dewey, the only related preset linter, only greps for
-        # .custom-gcl.yml wiring). These checks need a live .git / a real Go
-        # toolchain, so they run against the working tree via `just lint-worktree`
-        # (crap/papi/tommy shape), not the sandboxed check.
+        # git-default-branch, sweatfile, agents-md, gomod2nix — presets.eng-impure).
+        # These need a live .git, so they run against the working tree via
+        # `just lint-worktree` (crap/papi/tommy shape), not the sandboxed check.
+        # golangci-lint USED to live here too (it needs ambient `go` + a writable
+        # build cache, absent in checks.formatting's sandbox) but has moved to the
+        # pure `checks.lint` above — igloo's buildGoLint supplies both inside a
+        # derivation, and a sandboxed golangci-lint can't poison a shared cache
+        # with dead `.merge-*` paths whose suppressions fail open (spinclass#294).
         conformistImpureEval = conformist.lib.evalModule pkgs {
           imports = [
             conformist.lib.presets.eng-impure
@@ -502,10 +496,10 @@
         packages = {
           default = mkSpinclass forgePins;
           inherit spinclass-race;
-          # The generated impure-lane config (git-state eng-convention checks
-          # + golangci-lint), consumed by `just lint-worktree` to run
-          # `conformist check` against the working tree where .git/go are
-          # available. See conformistImpureEval above.
+          # The generated impure-lane config (git-state eng-convention checks),
+          # consumed by `just lint-worktree` to run `conformist check` against
+          # the working tree where .git is available. See conformistImpureEval
+          # above. (golangci-lint moved to the pure `checks.lint` — spinclass#294.)
           conformist-impure-config = conformistImpureEval.config.build.configFile;
         }
         // batsLaneOutputs;
@@ -521,6 +515,20 @@
           # (conformist check against a /nix/store snapshot of the tracked
           # tree). `just lint-fmt` builds this. See conformistEval above.
           formatting = conformistEval.config.build.check self;
+          # Pure, sandboxed golangci-lint (the v2 `standard` set, config in
+          # .golangci.yml). Replaces the golangci-lint that used to run in the
+          # impure `lint-worktree` lane: as a nix build its GOLANGCI_LINT_CACHE
+          # is per-build scratch, so it can never replay stale `.merge-*`
+          # build-worktree paths whose suppressions then fail open (spinclass#294).
+          # igloo's buildGoLint supplies the bridged deps (goFlakeInputs) and a
+          # warm cache seeded by mkGoLintCacheEnv (~15s cold -> ~5s warm); on
+          # non-Linux builders the seed is dropped and it runs cold (igloo#65).
+          # `just lint-golangci` builds this; it is part of `just lint`.
+          lint = pkgs.buildGoLint {
+            base = mkSpinclass forgePins;
+            inherit (pkgs-master) golangci-lint;
+            warmCache = true;
+          };
         }
         // batsLaneOutputs;
 
