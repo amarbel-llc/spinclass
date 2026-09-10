@@ -1,12 +1,25 @@
 # godyn per-package build — POC results & promotion plan
 
-**Status:** parked proof-of-concept. The wiring is committed on `fast-aspen` but
-is NOT on `master` and does NOT gate any build. Promotion to a supported opt-in
-build is gated on three igloo issues shipping (below).
+**Status:** promoted. All three blocking igloo fixes shipped to igloo master
+(`11b98425`), the igloo input is bumped to it, and `.#spinclass-native` is a
+supported **opt-in** build (not the default, not in `checks`, does not gate the
+merge). Re-verified against igloo master: builds green, runs on the REAL
+`templates/*.md.tmpl` embed pattern (no probe), incremental leaf edit ~3.7 s
+(godyn) vs ~34 s (buildGoApplication). Remains on `fast-aspen`; whether to merge
+to `master` is the operator's call.
 
 **Owner split:** the spinclass consumer side is this repo's lane
-(`spinclass/fast-aspen`); the godyn backend and the three blocking fixes are
+(`spinclass/fast-aspen`); the godyn backend and the three (now-shipped) fixes are
 igloo's (`igloo/vivid-fir`). Cross-session coordination happened over chat.
+
+**Promotion applied (2026-09-10):** igloo bumped `acd1c26 → 11b98425`; the
+`debug-godyn-graph` / `-drift` recipes now use `godyn-gen -gomod <mergedGoMod>`
+(igloo#67, replacing the manual go.mod swap); `flake.nix` collapsed to a single
+`buildGoAuto { … goFlakeInputs = goFlakeInputs; }` (igloo#69, dropping the
+hand-built `godynBridges` and the `bgaArgs` goFlakeInputs); the graph was
+regenerated and now carries the per-pattern `embedPatternFiles` mapping (igloo#68)
+so the real embed pattern builds without a source change. The three "when each
+lands" sub-sections below are retained as the record of what changed.
 
 ## What this POC answers
 

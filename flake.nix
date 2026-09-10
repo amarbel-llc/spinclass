@@ -305,56 +305,42 @@
             ;
         };
 
-        # POC (parked, spinclass#284 → godyn exploration): map spinclass's four
-        # goFlakeInputs bridges onto godyn's `bridges` (approach 2, SOURCE
-        # composition — godyn(7) CROSS-MODULE). godyn keys a bridged package's
-        # source as `${bridge}/<importPath − modpath>` and has NO subPath knob,
-        # assuming the bridge store-path root IS the module root. tommy and
-        # ringmaster are whole-repo-root go-pkgs (root == module root ✓); crap's
-        # go-crap and dewey's libs/dewey live in a SUBDIR of their (polyglot /
-        # multi-module) go-pkgs tree, so we deep-reference into it (`+
-        # "/${subPath}"`) to make godyn's concatenation land on the real module
-        # root. Derived straight from gomod.nix so the bridge set stays in
-        # lockstep with the buildGoApplication build's replaces. (The missing
-        # subPath knob is the igloo gap flagged to igloo/vivid-fir/bozo; the
-        # deep-reference is the consumer-side workaround.)
-        godynBridges = lib.mapAttrs (
-          _: v: v.src + lib.optionalString (v ? subPath) "/${v.subPath}"
-        ) goFlakeInputs;
-
-        # POC (parked): spinclass built under igloo's per-package godyn backend
-        # (buildGoAuto strategy = "dev"), beside the default buildGoApplication
-        # build — the operator wants to see whether an incremental, per-package
-        # lint lane (superseding buildGoLint's deps-only warm seed) is reachable.
-        # Bare binary, no forge pins / man pages (parity with conformist-native);
-        # gated to godynSystem. Only exposed as `.#spinclass-native` (below);
-        # deliberately NOT in `checks` — it does not gate the merge. `commit` is
-        # passed explicitly because `src = ./.` is a plain path (no .rev), and
-        # the native backend uses igloo's callPackage `pkgs.go` (per-call `go` is
-        # a bga-only knob), so bgaArgs pins pkgs-master.go_1_26 for passthru.bga
-        # parity with the default build.
+        # spinclass built under igloo's per-package godyn backend (buildGoAuto
+        # strategy = "dev"), beside the default buildGoApplication build. Opt-in
+        # (`.#spinclass-native` below), gated to godynSystem; NOT in `checks` — it
+        # does not gate the merge (single-platform, content-addressed; bga stays
+        # the release/CI backend and godyn wins the incremental dev loop).
+        #
+        # buildGoAuto takes goFlakeInputs DIRECTLY (igloo#69): it threads them to
+        # the bga backend and derives godyn's `bridges` with the
+        # `mapAttrs (_: v: v.src + optionalString (v ? subPath) "/${v.subPath}")`
+        # formula folded in upstream — the subPath deep-reference that lands
+        # godyn's `${bridge}/<importPath − modpath>` concatenation on the real
+        # module roots of crap/go-crap and dewey/libs/dewey (godyn's `bridges`
+        # assumes bridge-root == module-root and has no subPath knob). An
+        # explicit `nativeArgs.bridges` would still win if ever needed.
+        #
+        # `commit` is passed explicitly (src = ./. is a plain path, no .rev); the
+        # native backend uses igloo's callPackage `pkgs.go`, so bgaArgs pins
+        # pkgs-master.go_1_26 for passthru.bga parity with the default build.
+        # Bare binary (no forge pins / man pages), parity with conformist-native.
+        # Promoted from the parked POC once igloo#67/#68/#69 shipped — see
+        # docs/plans/2026-09-10-godyn-per-package-build-poc.md.
         spinclass-native = pkgs.buildGoAuto {
           pname = "spinclass";
           src = ./.;
           graphFile = ./godyn-graph.json;
           modules = ./gomod2nix.toml;
           strategy = "dev";
+          inherit goFlakeInputs;
           nativeArgs = {
             pwd = ./.;
             commit = spinclassCommit;
-            bridges = godynBridges;
           };
           bgaArgs = {
             pwd = ./.;
             commit = spinclassCommit;
             subPackages = [ "cmd/spinclass" ];
-            # The bga backend resolves the four bridged modules via goFlakeInputs
-            # (the buildGoApplication half of the RFC-0001 bridge) — the same
-            # replaces the native backend gets through `bridges` above. Without
-            # it `passthru.bga` fails on the vestigial vendored `require`
-            # (`cannot find .../dewey/pkgs/mesa: -mod=vendor`), and the timing
-            # A/B against the native backend would not be apples-to-apples.
-            inherit goFlakeInputs;
             go = pkgs-master.go_1_26;
             GOTOOLCHAIN = "local";
             doCheck = false;

@@ -636,6 +636,13 @@
     "embedPatterns": [
       "doc/*"
     ],
+    "embedPatternFiles": {
+      "doc/*": [
+        "doc/spinclass-build-pins.7",
+        "doc/spinclass-start-commands.7",
+        "doc/spinclass-sweatfile.5"
+      ]
+    },
     "imports": [
       "code.linenisgreat.com/crap/go-crap/v2/crap",
       "code.linenisgreat.com/purse-first/libs/dewey/pkgs/mesa",
@@ -1596,6 +1603,12 @@
     "embedPatterns": [
       "templates/*.md.tmpl"
     ],
+    "embedPatternFiles": {
+      "templates/*.md.tmpl": [
+        "templates/main_checkout.md.tmpl",
+        "templates/worktree.md.tmpl"
+      ]
+    },
     "imports": [
       "code.linenisgreat.com/spinclass/internal/clown",
       "code.linenisgreat.com/spinclass/internal/git",
