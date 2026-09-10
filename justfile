@@ -185,6 +185,114 @@ update-gomod2nix:
 debug-go-test pkg='./...' run='' *args='':
     nix develop --command go test {{ if run == '' { '' } else { '-run ' + quote(run) } }} {{ args }} {{ pkg }}
 
+# POC (parked, spinclass#284 → godyn; interim per igloo#67): regenerate
+# godyn-graph.json, the Go source graph driving the opt-in per-package godyn
+# build backend (`.#spinclass-native`). godyn-gen runs `go list`, which CANNOT
+# resolve spinclass's flake-input-go_mod bridges ambiently: the go.mod `require`s
+# are vestigial and the real (newer) versions are bridged only inside the nix
+# sandbox, so an ambient `go list` hard-fails on e.g. dewey/pkgs/mesa (and, even
+# where it wouldn't fail, would resolve a bridged module at the stale proxy
+# version, skewing the recorded file set from what the build compiles from the
+# bridge). Interim fix bozo sanctioned in igloo#67: swap in buildGoApplication's
+# MERGED go.mod (the RFC-0001 single source of truth, whose `replace`s point at
+# the exact go-pkgs store paths the flake's `bridges` mapping uses) for the
+# duration of the `go list`, so bridged modules resolve at the FLAKE version —
+# fixing both the hard failure and the file-set skew. go.mod is restored on exit.
+# godyn-gen records module-root-relative dirs + file basenames, so the merged
+# go.mod's /nix/store `replace`s do NOT leak into the committed graph (grep the
+# output for /nix/store to confirm). CGO off — spinclass is pure-Go. MUST run on
+# x86_64-linux (the graph embeds linux/amd64 file selection; igloo#33). Re-run
+# when imports/deps/embeds OR a bridged producer's flake.lock rev change, then
+# commit; drift-checked by debug-godyn-graph-drift.
+#
+# regenerate godyn-graph.json for the opt-in godyn build backend
+[group('debug')]
+debug-godyn-graph:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    merged=$(nix build --no-link --print-out-paths ".#packages.${system}.default.passthru.mergedGoMod")
+    cp go.mod .go.mod.godynbak
+    trap 'mv -f .go.mod.godynbak go.mod' EXIT
+    cp "$merged" go.mod && chmod u+w go.mod
+    nix develop --command env CGO_ENABLED=0 godyn-gen . godyn-graph.json
+
+# POC (parked, spinclass#284 → godyn): drift check for the committed
+# godyn-graph.json — regenerate into a scratch file (under the same merged-go.mod
+# materialization as debug-godyn-graph, igloo#67) and diff against the committed
+# copy, failing if they differ. MUST run on x86_64-linux (on another host
+# godyn-gen emits a host-platform graph that always "differs"; igloo#33). Restores
+# go.mod and leaves the committed graph untouched.
+#
+# check the committed godyn-graph.json for drift
+[group('debug')]
+debug-godyn-graph-drift:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    merged=$(nix build --no-link --print-out-paths ".#packages.${system}.default.passthru.mergedGoMod")
+    tmp=$(mktemp)
+    cp go.mod .go.mod.godynbak
+    trap 'mv -f .go.mod.godynbak go.mod; rm -f "$tmp"' EXIT
+    cp "$merged" go.mod && chmod u+w go.mod
+    nix develop --command env CGO_ENABLED=0 godyn-gen . "$tmp"
+    if ! diff -u godyn-graph.json "$tmp"; then
+        echo "debug-godyn-graph-drift: committed godyn-graph.json is stale — run 'just debug-godyn-graph' and commit the result." >&2
+        exit 1
+    fi
+
+# POC (parked, spinclass#284 → godyn): build the opt-in per-package godyn binary
+# (`.#spinclass-native`) with full build logs. The fast inner loop / A-B target
+# for the incremental-edit timing comparison against the default buildGoApplication
+# build (`just build-nix`). x86_64-linux only (godynSystem). Content-addressed
+# per-package outputs — needs the ca-derivations experimental feature.
+#
+# build the opt-in godyn (native, per-package) spinclass binary
+[group('debug')]
+debug-godyn-build:
+    nix build .#spinclass-native --no-link --print-build-logs
+
+# POC (parked, spinclass#284 → godyn): incremental-edit rebuild timing —
+# godyn (per-package CA, `.#spinclass-native`) vs buildGoApplication (whole
+# module, `.#spinclass-native.passthru.bga`). The bga target is the native
+# build's OWN passthru — same src/subPackages, doCheck=false — so it is a pure
+# build-time A/B with no test-suite confound (unlike `.#default`, whose
+# checkPhase runs `go test ./...`). Warms both on the unedited tree, appends a
+# comment to a LEAF internal package (internal/run — imported only by
+# cmd/spinclass), git-adds it so the dirty-tree `nix build` sees the edit
+# (tracked/staged only), then times each backend's rebuild. Expectation
+# (godyn(7)): godyn recompiles only the changed cone (run + cmd relink) while bga
+# rebuilds the whole module. Restores internal/run/run.go on exit. A content-only
+# comment edit needs no graph regen. x86_64-linux only.
+#
+# time an incremental one-package edit: godyn vs buildGoApplication rebuild
+[group('debug')]
+debug-godyn-bench:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    native='.#spinclass-native'
+    bga='.#spinclass-native.passthru.bga'
+    target=internal/run/run.go
+    echo "warming both backends on the unedited tree…" >&2
+    nix build "$native" --no-link >/dev/null 2>&1
+    nix build "$bga" --no-link >/dev/null 2>&1
+    cp "$target" "$target.benchbak"
+    trap 'mv -f "$target.benchbak" "$target"; git add "$target" >/dev/null 2>&1 || true' EXIT
+    printf '\n// godyn-bench incremental-edit marker %s\n' "$(date +%s%N)" >> "$target"
+    git add "$target"
+    timeit() {
+        local t0 t1
+        t0=$(date +%s%N)
+        nix build "$1" --no-link >/dev/null 2>&1 || { echo "build failed: $1" >&2; exit 1; }
+        t1=$(date +%s%N)
+        echo $(( (t1 - t0) / 1000000 ))
+    }
+    n=$(timeit "$native")
+    b=$(timeit "$bga")
+    echo "incremental edit ($target — leaf, dependents: cmd/spinclass only), rebuild wall-clock:"
+    echo "  godyn (spinclass-native):          ${n} ms"
+    echo "  buildGoApplication (passthru.bga): ${b} ms"
+
 # [explore] Inspect nix-store --gc --print-roots output for entries pointing
 # into the spinclass repo. Used to investigate issue #67 — what does
 # print-roots show before vs after worktree removal?

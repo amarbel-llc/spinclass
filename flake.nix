@@ -218,6 +218,13 @@
         pkgs-master = import nixpkgs-master { inherit system; };
         inherit (pkgs) lib;
 
+        # Where the opt-in godyn (native, per-package) backend can build:
+        # x86_64-linux only. The committed godyn-graph.json embeds `go list`'s
+        # linux/amd64 file/import selection, so it is invalid on any other
+        # system until per-system graphs land (godyn(7) LIMITATIONS, igloo#33).
+        # Gates whether `.#spinclass-native` is exposed at all (POC, parked).
+        godynSystem = system == "x86_64-linux";
+
         # tommy fmt (*.toml) and the tommy-codegen repair linter have no
         # registry program (repo-specific) and need the `tommy` flake input,
         # so they are inlined here rather than in ./conformist.nix (a
@@ -296,6 +303,62 @@
             purse-first
             system
             ;
+        };
+
+        # POC (parked, spinclass#284 → godyn exploration): map spinclass's four
+        # goFlakeInputs bridges onto godyn's `bridges` (approach 2, SOURCE
+        # composition — godyn(7) CROSS-MODULE). godyn keys a bridged package's
+        # source as `${bridge}/<importPath − modpath>` and has NO subPath knob,
+        # assuming the bridge store-path root IS the module root. tommy and
+        # ringmaster are whole-repo-root go-pkgs (root == module root ✓); crap's
+        # go-crap and dewey's libs/dewey live in a SUBDIR of their (polyglot /
+        # multi-module) go-pkgs tree, so we deep-reference into it (`+
+        # "/${subPath}"`) to make godyn's concatenation land on the real module
+        # root. Derived straight from gomod.nix so the bridge set stays in
+        # lockstep with the buildGoApplication build's replaces. (The missing
+        # subPath knob is the igloo gap flagged to igloo/vivid-fir/bozo; the
+        # deep-reference is the consumer-side workaround.)
+        godynBridges = lib.mapAttrs (
+          _: v: v.src + lib.optionalString (v ? subPath) "/${v.subPath}"
+        ) goFlakeInputs;
+
+        # POC (parked): spinclass built under igloo's per-package godyn backend
+        # (buildGoAuto strategy = "dev"), beside the default buildGoApplication
+        # build — the operator wants to see whether an incremental, per-package
+        # lint lane (superseding buildGoLint's deps-only warm seed) is reachable.
+        # Bare binary, no forge pins / man pages (parity with conformist-native);
+        # gated to godynSystem. Only exposed as `.#spinclass-native` (below);
+        # deliberately NOT in `checks` — it does not gate the merge. `commit` is
+        # passed explicitly because `src = ./.` is a plain path (no .rev), and
+        # the native backend uses igloo's callPackage `pkgs.go` (per-call `go` is
+        # a bga-only knob), so bgaArgs pins pkgs-master.go_1_26 for passthru.bga
+        # parity with the default build.
+        spinclass-native = pkgs.buildGoAuto {
+          pname = "spinclass";
+          src = ./.;
+          graphFile = ./godyn-graph.json;
+          modules = ./gomod2nix.toml;
+          strategy = "dev";
+          nativeArgs = {
+            pwd = ./.;
+            commit = spinclassCommit;
+            bridges = godynBridges;
+          };
+          bgaArgs = {
+            pwd = ./.;
+            commit = spinclassCommit;
+            subPackages = [ "cmd/spinclass" ];
+            # The bga backend resolves the four bridged modules via goFlakeInputs
+            # (the buildGoApplication half of the RFC-0001 bridge) — the same
+            # replaces the native backend gets through `bridges` above. Without
+            # it `passthru.bga` fails on the vestigial vendored `require`
+            # (`cannot find .../dewey/pkgs/mesa: -mod=vendor`), and the timing
+            # A/B against the native backend would not be apples-to-apples.
+            inherit goFlakeInputs;
+            go = pkgs-master.go_1_26;
+            GOTOOLCHAIN = "local";
+            doCheck = false;
+          };
         };
 
         # mkSpinclass builds spinclass with optional build-time-pinned
@@ -502,7 +565,10 @@
           # above. (golangci-lint moved to the pure `checks.lint` — spinclass#294.)
           conformist-impure-config = conformistImpureEval.config.build.configFile;
         }
-        // batsLaneOutputs;
+        // batsLaneOutputs
+        # POC (parked, spinclass#284 → godyn): the opt-in per-package godyn build,
+        # only where its committed graph is valid (godynSystem = x86_64-linux).
+        // lib.optionalAttrs godynSystem { inherit spinclass-native; };
 
         # `nix flake check` exercises the unit suite (via the
         # spinclass derivation's checkPhase) plus every bats lane. The
@@ -554,6 +620,11 @@
             # gomod2nix CLI lives in the fork's overlay alongside
             # buildGoApplication / mkGoEnv — not in upstream nixpkgs.
             pkgs.gomod2nix
+            # godyn-gen: the dev-time graph generator for the opt-in per-package
+            # godyn backend (POC, parked). `just debug-godyn-graph` runs it via
+            # `nix develop --command` so `go list` sees the goFlakeInputs-bridged
+            # mkGoEnv `go` above and resolves tommy/crap/ringmaster/dewey.
+            pkgs.godyn-gen
             pkgs.bats
             # The RAW conformist binary on PATH — NOT conformistEval.config.build.wrapper.
             # The wrapper hardcodes `--tree-root-file=flake.nix` (repair mode,

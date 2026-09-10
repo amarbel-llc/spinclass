@@ -1,0 +1,3673 @@
+[
+  {
+    "importPath": "code.linenisgreat.com/crap/go-crap/v2/crap",
+    "dir": "crap",
+    "name": "crap",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "reporter.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap",
+    "dir": "ndjsoncrap",
+    "name": "ndjsoncrap",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "reader.go",
+      "record.go",
+      "writer.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/crap/go-crap/v2/viewport",
+    "dir": "viewport",
+    "name": "viewport",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "driver.go",
+      "messages.go",
+      "model.go",
+      "present.go",
+      "unnest.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap",
+      "github.com/charmbracelet/bubbles/progress",
+      "github.com/charmbracelet/bubbles/spinner",
+      "github.com/charmbracelet/bubbletea",
+      "github.com/charmbracelet/lipgloss"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/0/box_chars",
+    "dir": "internal/0/box_chars",
+    "name": "box_chars",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "main.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/0/http_statuses",
+    "dir": "internal/0/http_statuses",
+    "name": "http_statuses",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "main.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/0/interfaces",
+    "dir": "internal/0/interfaces",
+    "name": "interfaces",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "coder.go",
+      "collections.go",
+      "command.go",
+      "context.go",
+      "contextstate_string.go",
+      "directory.go",
+      "elements.go",
+      "errors.go",
+      "io.go",
+      "iter.go",
+      "keyers.go",
+      "lock.go",
+      "main.go",
+      "pools.go",
+      "printer.go",
+      "string.go",
+      "value.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/0/primordial",
+    "dir": "internal/0/primordial",
+    "name": "primordial",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "is_tty.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "golang.org/x/term"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/0/stack_frame",
+    "dir": "internal/0/stack_frame",
+    "name": "stack_frame",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "error_and_frame.go",
+      "error_tree.go",
+      "errors_and_frames.go",
+      "frame.go",
+      "main.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/alfa/mesa",
+    "dir": "internal/alfa/mesa",
+    "name": "mesa",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "cell.go",
+      "doc.go",
+      "markup.go",
+      "render.go",
+      "severity.go",
+      "table.go",
+      "width.go",
+      "wire.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/purse-first/libs/dewey/internal/0/primordial",
+      "github.com/charmbracelet/lipgloss",
+      "github.com/charmbracelet/lipgloss/table",
+      "github.com/mattn/go-runewidth",
+      "github.com/muesli/termenv",
+      "golang.org/x/term"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/alfa/pool",
+    "dir": "internal/alfa/pool",
+    "name": "pool",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "bespoke.go",
+      "common.go",
+      "fake_pool.go",
+      "main.go",
+      "repool_release.go",
+      "resetter.go",
+      "slice.go",
+      "value.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/purse-first/libs/dewey/internal/0/interfaces"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/alfa/test_ui",
+    "dir": "internal/alfa/test_ui",
+    "name": "test_ui",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "test_case.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/purse-first/libs/dewey/internal/0/stack_frame"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/bravo/errors",
+    "dir": "internal/bravo/errors",
+    "name": "errors",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "context.go",
+      "context_sentinels.go",
+      "deferred.go",
+      "group.go",
+      "group_builder.go",
+      "helpful.go",
+      "http.go",
+      "http_util.go",
+      "interfaces.go",
+      "is.go",
+      "main.go",
+      "main_release.go",
+      "normal.go",
+      "sentinels.go",
+      "signal.go",
+      "signal_cancel.go",
+      "wait_group_parallel.go",
+      "wait_group_serial.go",
+      "wrapped_helpful.go",
+      "wrapped_without_stack.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/purse-first/libs/dewey/internal/0/http_statuses",
+      "code.linenisgreat.com/purse-first/libs/dewey/internal/0/interfaces",
+      "code.linenisgreat.com/purse-first/libs/dewey/internal/0/stack_frame",
+      "code.linenisgreat.com/purse-first/libs/dewey/internal/alfa/pool",
+      "golang.org/x/xerrors"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/charlie/ui",
+    "dir": "internal/charlie/ui",
+    "name": "ui",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "bytes.go",
+      "cli_error_tree_coder.go",
+      "cli_error_tree_state.go",
+      "cli_error_tree_state_stack.go",
+      "errors.go",
+      "main.go",
+      "printer.go",
+      "printer_dev.go",
+      "printer_null.go",
+      "printer_optional.go",
+      "printer_prefix.go",
+      "priority_string.go",
+      "test_case.go",
+      "todo.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/purse-first/libs/dewey/internal/0/box_chars",
+      "code.linenisgreat.com/purse-first/libs/dewey/internal/0/interfaces",
+      "code.linenisgreat.com/purse-first/libs/dewey/internal/0/primordial",
+      "code.linenisgreat.com/purse-first/libs/dewey/internal/0/stack_frame",
+      "code.linenisgreat.com/purse-first/libs/dewey/internal/alfa/pool",
+      "code.linenisgreat.com/purse-first/libs/dewey/internal/alfa/test_ui",
+      "code.linenisgreat.com/purse-first/libs/dewey/internal/bravo/errors"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/purse-first/libs/dewey/pkgs/interfaces",
+    "dir": "pkgs/interfaces",
+    "name": "interfaces",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "main.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/purse-first/libs/dewey/internal/0/interfaces"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/purse-first/libs/dewey/pkgs/mesa",
+    "dir": "pkgs/mesa",
+    "name": "mesa",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "main.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/purse-first/libs/dewey/internal/alfa/mesa"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/purse-first/libs/dewey/pkgs/ui",
+    "dir": "pkgs/ui",
+    "name": "ui",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "main.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/purse-first/libs/dewey/internal/charlie/ui"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/purse-first/libs/go-mcp/command",
+    "dir": "command",
+    "name": "command",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "app.go",
+      "cli.go",
+      "command.go",
+      "complete.go",
+      "dev_mcp.go",
+      "generate.go",
+      "generate_completions.go",
+      "generate_hooks.go",
+      "generate_manpages.go",
+      "generate_mappings.go",
+      "generate_plugin.go",
+      "gitnormalize.go",
+      "hook.go",
+      "install_mcp.go",
+      "match.go",
+      "mcp.go",
+      "progress.go",
+      "prompter.go",
+      "result.go",
+      "schema.go",
+      "shellparse.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/purse-first/libs/go-mcp/protocol",
+      "code.linenisgreat.com/purse-first/libs/go-mcp/server",
+      "mvdan.cc/sh/v3/syntax"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/purse-first/libs/go-mcp/command/huh",
+    "dir": ".",
+    "name": "huh",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "prompter.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/charmbracelet/huh"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/purse-first/libs/go-mcp/jsonrpc",
+    "dir": "jsonrpc",
+    "name": "jsonrpc",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "conn.go",
+      "message.go",
+      "stream.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/purse-first/libs/go-mcp/protocol",
+    "dir": "protocol",
+    "name": "protocol",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "completions.go",
+      "content_v0.go",
+      "content_v1.go",
+      "elicitation.go",
+      "icons.go",
+      "initialize_v0.go",
+      "initialize_v1.go",
+      "methods_v1.go",
+      "pagination.go",
+      "progress.go",
+      "prompts_v0.go",
+      "prompts_v1.go",
+      "protocol.go",
+      "resources_v0.go",
+      "resources_v1.go",
+      "roots.go",
+      "tasks.go",
+      "tools_v0.go",
+      "tools_v1.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/purse-first/libs/go-mcp/server",
+    "dir": "server",
+    "name": "server",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "handler.go",
+      "handler_v1.go",
+      "options.go",
+      "progress.go",
+      "providers.go",
+      "providers_v1.go",
+      "registry.go",
+      "registry_v1.go",
+      "server.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/purse-first/libs/go-mcp/jsonrpc",
+      "code.linenisgreat.com/purse-first/libs/go-mcp/protocol",
+      "code.linenisgreat.com/purse-first/libs/go-mcp/transport"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/purse-first/libs/go-mcp/transport",
+    "dir": "transport",
+    "name": "transport",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "headers.go",
+      "stdio.go",
+      "transport.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/purse-first/libs/go-mcp/jsonrpc"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/ringmaster/internal/0/jobwake",
+    "dir": "internal/0/jobwake",
+    "name": "jobwake",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "cli.go",
+      "gc.go",
+      "list.go",
+      "lock.go",
+      "nudge.go",
+      "paths.go",
+      "presence.go",
+      "primitives.go",
+      "producer.go",
+      "reader.go",
+      "record.go",
+      "scope.go",
+      "status.go",
+      "wait.go",
+      "watch.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/ringmaster/pkgs/jobwake",
+    "dir": "pkgs/jobwake",
+    "name": "jobwake",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "main.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/ringmaster/internal/0/jobwake"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/cmd/spinclass",
+    "dir": "cmd/spinclass",
+    "name": "main",
+    "isMain": true,
+    "local": true,
+    "goFiles": [
+      "close_child_cmd.go",
+      "commands.go",
+      "commands_hooks.go",
+      "commands_mcp.go",
+      "commands_mcp_only.go",
+      "commands_perms.go",
+      "commands_plugin.go",
+      "commands_query.go",
+      "commands_session.go",
+      "commands_version.go",
+      "fork_cmd.go",
+      "list_view.go",
+      "main.go",
+      "merge_queue.go",
+      "resume_confirm.go",
+      "resurrect_cmd.go",
+      "spawn_async.go",
+      "spawn_cmd.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": [
+      "doc/spinclass-build-pins.7",
+      "doc/spinclass-start-commands.7",
+      "doc/spinclass-sweatfile.5"
+    ],
+    "embedPatterns": [
+      "doc/*"
+    ],
+    "imports": [
+      "code.linenisgreat.com/crap/go-crap/v2/crap",
+      "code.linenisgreat.com/purse-first/libs/dewey/pkgs/mesa",
+      "code.linenisgreat.com/purse-first/libs/go-mcp/command",
+      "code.linenisgreat.com/purse-first/libs/go-mcp/command/huh",
+      "code.linenisgreat.com/purse-first/libs/go-mcp/protocol",
+      "code.linenisgreat.com/purse-first/libs/go-mcp/server",
+      "code.linenisgreat.com/purse-first/libs/go-mcp/transport",
+      "code.linenisgreat.com/spinclass/internal/attestation",
+      "code.linenisgreat.com/spinclass/internal/check",
+      "code.linenisgreat.com/spinclass/internal/clean",
+      "code.linenisgreat.com/spinclass/internal/close",
+      "code.linenisgreat.com/spinclass/internal/clown",
+      "code.linenisgreat.com/spinclass/internal/embeds",
+      "code.linenisgreat.com/spinclass/internal/executor",
+      "code.linenisgreat.com/spinclass/internal/git",
+      "code.linenisgreat.com/spinclass/internal/hooks",
+      "code.linenisgreat.com/spinclass/internal/job",
+      "code.linenisgreat.com/spinclass/internal/merge",
+      "code.linenisgreat.com/spinclass/internal/perms",
+      "code.linenisgreat.com/spinclass/internal/present",
+      "code.linenisgreat.com/spinclass/internal/pull",
+      "code.linenisgreat.com/spinclass/internal/remote",
+      "code.linenisgreat.com/spinclass/internal/resources",
+      "code.linenisgreat.com/spinclass/internal/resurrect",
+      "code.linenisgreat.com/spinclass/internal/run",
+      "code.linenisgreat.com/spinclass/internal/servelog",
+      "code.linenisgreat.com/spinclass/internal/session",
+      "code.linenisgreat.com/spinclass/internal/sessionexec",
+      "code.linenisgreat.com/spinclass/internal/sessionlog",
+      "code.linenisgreat.com/spinclass/internal/sessionpick",
+      "code.linenisgreat.com/spinclass/internal/shop",
+      "code.linenisgreat.com/spinclass/internal/spawn",
+      "code.linenisgreat.com/spinclass/internal/sweatfile",
+      "code.linenisgreat.com/spinclass/internal/sweatfileio",
+      "code.linenisgreat.com/spinclass/internal/sysprompt",
+      "code.linenisgreat.com/spinclass/internal/validate",
+      "code.linenisgreat.com/spinclass/internal/worktree",
+      "github.com/charmbracelet/bubbles/key",
+      "github.com/charmbracelet/bubbletea",
+      "github.com/charmbracelet/huh",
+      "github.com/charmbracelet/lipgloss",
+      "github.com/mattn/go-isatty",
+      "golang.org/x/term"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/attestation",
+    "dir": "internal/attestation",
+    "name": "attestation",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "attestation.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/session",
+      "code.linenisgreat.com/spinclass/internal/sweatfile",
+      "code.linenisgreat.com/tap/go/pkgs/writer"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/auth",
+    "dir": "internal/auth",
+    "name": "auth",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "auth.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/git",
+      "code.linenisgreat.com/spinclass/internal/session",
+      "code.linenisgreat.com/spinclass/internal/sweatfile"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/basebranch",
+    "dir": "internal/basebranch",
+    "name": "basebranch",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "basebranch.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/git"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/check",
+    "dir": "internal/check",
+    "name": "check",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "check.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/crap/go-crap/v2/crap",
+      "code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap",
+      "code.linenisgreat.com/spinclass/internal/embeds",
+      "code.linenisgreat.com/spinclass/internal/git",
+      "code.linenisgreat.com/spinclass/internal/madder",
+      "code.linenisgreat.com/spinclass/internal/present",
+      "code.linenisgreat.com/spinclass/internal/sweatfile",
+      "code.linenisgreat.com/spinclass/internal/sweatfileio",
+      "code.linenisgreat.com/tap/go/pkgs/ndjson",
+      "code.linenisgreat.com/tap/go/pkgs/reader"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/claude",
+    "dir": "internal/claude",
+    "name": "claude",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "mcp.go",
+      "trust.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/clean",
+    "dir": "internal/clean",
+    "name": "clean",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "clean.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/auth",
+      "code.linenisgreat.com/spinclass/internal/check",
+      "code.linenisgreat.com/spinclass/internal/git",
+      "code.linenisgreat.com/spinclass/internal/merge",
+      "code.linenisgreat.com/spinclass/internal/nixgc",
+      "code.linenisgreat.com/spinclass/internal/session",
+      "code.linenisgreat.com/spinclass/internal/sweatfileio",
+      "code.linenisgreat.com/spinclass/internal/tapblock",
+      "code.linenisgreat.com/spinclass/internal/worktree",
+      "code.linenisgreat.com/tap/go/pkgs/writer",
+      "code.linenisgreat.com/tap/go/pkgs/yaml_diagnostic",
+      "github.com/charmbracelet/huh",
+      "github.com/charmbracelet/lipgloss",
+      "github.com/charmbracelet/log",
+      "github.com/mattn/go-isatty"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/close",
+    "dir": "internal/close",
+    "name": "close",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "close.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/auth",
+      "code.linenisgreat.com/spinclass/internal/executor",
+      "code.linenisgreat.com/spinclass/internal/git",
+      "code.linenisgreat.com/spinclass/internal/nixgc",
+      "code.linenisgreat.com/spinclass/internal/session",
+      "code.linenisgreat.com/spinclass/internal/sessionpick",
+      "code.linenisgreat.com/spinclass/internal/sweatfileio",
+      "code.linenisgreat.com/spinclass/internal/tapblock",
+      "code.linenisgreat.com/spinclass/internal/worktree",
+      "code.linenisgreat.com/tap/go/pkgs/writer",
+      "code.linenisgreat.com/tap/go/pkgs/yaml_diagnostic",
+      "github.com/charmbracelet/huh",
+      "github.com/mattn/go-isatty"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/clown",
+    "dir": "internal/clown",
+    "name": "clown",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "clown.go",
+      "presence.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/ringmaster/pkgs/jobwake"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/direnv",
+    "dir": "internal/direnv",
+    "name": "direnv",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "direnv.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/embeds"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/dodder",
+    "dir": "internal/dodder",
+    "name": "dodder",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "dodder.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/madder"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/embeds",
+    "dir": "internal/embeds",
+    "name": "embeds",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "embeds.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/executor",
+    "dir": "internal/executor",
+    "name": "executor",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "executor.go",
+      "session.go",
+      "shell.go",
+      "wait.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/session",
+      "code.linenisgreat.com/tap/go/pkgs/writer",
+      "code.linenisgreat.com/tap/go/pkgs/yaml_diagnostic"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/flake",
+    "dir": "internal/flake",
+    "name": "flake",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "flake.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/git",
+    "dir": "internal/git",
+    "name": "git",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "git.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/hooks",
+    "dir": "internal/hooks",
+    "name": "hooks",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "cmd.go",
+      "hooks.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/git",
+      "code.linenisgreat.com/spinclass/internal/perms",
+      "code.linenisgreat.com/spinclass/internal/session",
+      "code.linenisgreat.com/spinclass/internal/sessionlog",
+      "code.linenisgreat.com/spinclass/internal/spawnhandshake",
+      "code.linenisgreat.com/spinclass/internal/sweatfile",
+      "code.linenisgreat.com/spinclass/internal/sweatfileio",
+      "code.linenisgreat.com/spinclass/internal/worktree",
+      "github.com/google/shlex"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/job",
+    "dir": "internal/job",
+    "name": "job",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "job.go",
+      "runner.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/clown",
+      "code.linenisgreat.com/spinclass/internal/embeds",
+      "code.linenisgreat.com/spinclass/internal/madder"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/madder",
+    "dir": "internal/madder",
+    "name": "madder",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "madder.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/merge",
+    "dir": "internal/merge",
+    "name": "merge",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "merge.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/crap/go-crap/v2/crap",
+      "code.linenisgreat.com/spinclass/internal/auth",
+      "code.linenisgreat.com/spinclass/internal/check",
+      "code.linenisgreat.com/spinclass/internal/executor",
+      "code.linenisgreat.com/spinclass/internal/git",
+      "code.linenisgreat.com/spinclass/internal/mergelock",
+      "code.linenisgreat.com/spinclass/internal/present",
+      "code.linenisgreat.com/spinclass/internal/session",
+      "code.linenisgreat.com/spinclass/internal/sweatfile",
+      "code.linenisgreat.com/spinclass/internal/sweatfileio",
+      "code.linenisgreat.com/spinclass/internal/worktree",
+      "github.com/charmbracelet/huh",
+      "github.com/mattn/go-isatty"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/mergelock",
+    "dir": "internal/mergelock",
+    "name": "mergelock",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "mergelock.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/nixgc",
+    "dir": "internal/nixgc",
+    "name": "nixgc",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "nixgc.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/sweatfileio"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/perms",
+    "dir": "internal/perms",
+    "name": "perms",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "check.go",
+      "cmd.go",
+      "editor.go",
+      "match.go",
+      "review.go",
+      "settings.go",
+      "tiers.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/git",
+      "code.linenisgreat.com/spinclass/internal/worktree",
+      "github.com/charmbracelet/huh"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/present",
+    "dir": "internal/present",
+    "name": "present",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "present.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/crap/go-crap/v2/crap",
+      "code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap",
+      "code.linenisgreat.com/crap/go-crap/v2/viewport"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/pull",
+    "dir": "internal/pull",
+    "name": "pull",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "pull.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/git",
+      "code.linenisgreat.com/spinclass/internal/worktree",
+      "code.linenisgreat.com/tap/go/pkgs/writer"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/remote",
+    "dir": "internal/remote",
+    "name": "remote",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "cache.go",
+      "query.go",
+      "remote.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/session",
+      "code.linenisgreat.com/spinclass/internal/sweatfile"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/repoinfo",
+    "dir": "internal/repoinfo",
+    "name": "repoinfo",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "repoinfo.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/embeds",
+      "code.linenisgreat.com/spinclass/internal/git"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/resources",
+    "dir": "internal/resources",
+    "name": "resources",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "madder_provider.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/resurrect",
+    "dir": "internal/resurrect",
+    "name": "resurrect",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "resurrect.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/git",
+      "code.linenisgreat.com/spinclass/internal/session",
+      "code.linenisgreat.com/spinclass/internal/worktree",
+      "code.linenisgreat.com/tap/go/pkgs/writer"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/run",
+    "dir": "internal/run",
+    "name": "run",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "run.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/crap/go-crap/v2/crap",
+      "code.linenisgreat.com/spinclass/internal/executor",
+      "code.linenisgreat.com/spinclass/internal/git",
+      "code.linenisgreat.com/spinclass/internal/merge",
+      "code.linenisgreat.com/spinclass/internal/present",
+      "code.linenisgreat.com/spinclass/internal/session",
+      "code.linenisgreat.com/spinclass/internal/sessionexec",
+      "code.linenisgreat.com/spinclass/internal/shop",
+      "code.linenisgreat.com/spinclass/internal/sweatfileio",
+      "code.linenisgreat.com/spinclass/internal/worktree",
+      "github.com/mattn/go-isatty"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/servelog",
+    "dir": "internal/servelog",
+    "name": "servelog",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "servelog.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/session",
+    "dir": "internal/session",
+    "name": "session",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "env.go",
+      "listrow.go",
+      "session.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/sessionlog",
+      "code.linenisgreat.com/spinclass/internal/worktree"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/sessionexec",
+    "dir": "internal/sessionexec",
+    "name": "sessionexec",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "exec.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/direnv",
+      "code.linenisgreat.com/spinclass/internal/session"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/sessionlog",
+    "dir": "internal/sessionlog",
+    "name": "sessionlog",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "sessionlog.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/sessionpick",
+    "dir": "internal/sessionpick",
+    "name": "sessionpick",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "sessionpick.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/session",
+      "github.com/charmbracelet/bubbles/list",
+      "github.com/charmbracelet/bubbletea",
+      "github.com/mattn/go-isatty"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/setupfingerprint",
+    "dir": "internal/setupfingerprint",
+    "name": "setupfingerprint",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "fingerprint.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/embeds",
+      "code.linenisgreat.com/spinclass/internal/sweatfile"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/shop",
+    "dir": "internal/shop",
+    "name": "shop",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "prompt.go",
+      "shop.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/crap/go-crap/v2/crap",
+      "code.linenisgreat.com/spinclass/internal/auth",
+      "code.linenisgreat.com/spinclass/internal/basebranch",
+      "code.linenisgreat.com/spinclass/internal/close",
+      "code.linenisgreat.com/spinclass/internal/clown",
+      "code.linenisgreat.com/spinclass/internal/executor",
+      "code.linenisgreat.com/spinclass/internal/git",
+      "code.linenisgreat.com/spinclass/internal/merge",
+      "code.linenisgreat.com/spinclass/internal/present",
+      "code.linenisgreat.com/spinclass/internal/session",
+      "code.linenisgreat.com/spinclass/internal/sweatfile",
+      "code.linenisgreat.com/spinclass/internal/worktree",
+      "code.linenisgreat.com/tap/go/pkgs/writer",
+      "github.com/charmbracelet/huh",
+      "github.com/charmbracelet/log",
+      "github.com/mattn/go-isatty"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/spawn",
+    "dir": "internal/spawn",
+    "name": "spawn",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "model.go",
+      "resolve.go",
+      "spawn.go",
+      "template.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/session",
+      "code.linenisgreat.com/spinclass/internal/shop",
+      "code.linenisgreat.com/spinclass/internal/spawnhandshake",
+      "code.linenisgreat.com/spinclass/internal/sweatfile",
+      "code.linenisgreat.com/spinclass/internal/sweatfileio",
+      "code.linenisgreat.com/spinclass/internal/worktree"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/spawnhandshake",
+    "dir": "internal/spawnhandshake",
+    "name": "spawnhandshake",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "handshake.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/status",
+    "dir": "internal/status",
+    "name": "status",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "status.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/git",
+      "code.linenisgreat.com/spinclass/internal/session",
+      "code.linenisgreat.com/spinclass/internal/worktree",
+      "code.linenisgreat.com/tap/go/pkgs/writer",
+      "github.com/charmbracelet/lipgloss"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/sweatfile",
+    "dir": "internal/sweatfile",
+    "name": "sweatfile",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "apply.go",
+      "hierarchy.go",
+      "precommit.go",
+      "sweatfile.go",
+      "sweatfile_tommy.go",
+      "util.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/clown",
+      "code.linenisgreat.com/spinclass/internal/direnv",
+      "code.linenisgreat.com/spinclass/internal/git",
+      "code.linenisgreat.com/tommy/pkg/cst",
+      "code.linenisgreat.com/tommy/pkg/document",
+      "github.com/charmbracelet/log"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/sweatfileio",
+    "dir": "internal/sweatfileio",
+    "name": "sweatfileio",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "coding.go",
+      "hierarchy.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/sweatfile"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/sysprompt",
+    "dir": "internal/sysprompt",
+    "name": "sysprompt",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "coactive.go",
+      "docsindex.go",
+      "manindex.go",
+      "repoindex.go",
+      "sources.go",
+      "sysprompt.go",
+      "timezone.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": [
+      "templates/main_checkout.md.tmpl",
+      "templates/worktree.md.tmpl"
+    ],
+    "embedPatterns": [
+      "templates/*.md.tmpl"
+    ],
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/clown",
+      "code.linenisgreat.com/spinclass/internal/git",
+      "code.linenisgreat.com/spinclass/internal/repoinfo",
+      "code.linenisgreat.com/spinclass/internal/session",
+      "code.linenisgreat.com/spinclass/internal/sweatfileio"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/tap",
+    "dir": "internal/tap",
+    "name": "tap",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "tap.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/tapblock",
+    "dir": "internal/tapblock",
+    "name": "tapblock",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "linewriter.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/tap/go/pkgs/writer"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/testfs",
+    "dir": "internal/testfs",
+    "name": "testfs",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "testfs.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/testgit",
+    "dir": "internal/testgit",
+    "name": "testgit",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "testgit.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/validate",
+    "dir": "internal/validate",
+    "name": "validate",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "validate.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/sweatfile",
+      "code.linenisgreat.com/spinclass/internal/sweatfileio",
+      "code.linenisgreat.com/spinclass/internal/tap"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/spinclass/internal/worktree",
+    "dir": "internal/worktree",
+    "name": "worktree",
+    "isMain": false,
+    "local": true,
+    "goFiles": [
+      "namegen.go",
+      "sanitize.go",
+      "worktree.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/spinclass/internal/claude",
+      "code.linenisgreat.com/spinclass/internal/dodder",
+      "code.linenisgreat.com/spinclass/internal/embeds",
+      "code.linenisgreat.com/spinclass/internal/git",
+      "code.linenisgreat.com/spinclass/internal/madder",
+      "code.linenisgreat.com/spinclass/internal/setupfingerprint",
+      "code.linenisgreat.com/spinclass/internal/sweatfile",
+      "code.linenisgreat.com/spinclass/internal/sweatfileio"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/tap/go/internal/0/classify",
+    "dir": "internal/0/classify",
+    "name": "classify",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "classify.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/tap/go/internal/0/diagnostic",
+    "dir": "internal/0/diagnostic",
+    "name": "diagnostic",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "diagnostic.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/tap/go/internal/0/style",
+    "dir": "internal/0/style",
+    "name": "style",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "style.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/charmbracelet/lipgloss",
+      "github.com/muesli/termenv"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/tap/go/internal/alfa/parse",
+    "dir": "internal/alfa/parse",
+    "name": "parse",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "parse.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/tap/go/internal/0/classify",
+      "code.linenisgreat.com/tap/go/internal/0/diagnostic"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/tap/go/internal/alfa/yaml_diagnostic",
+    "dir": "internal/alfa/yaml_diagnostic",
+    "name": "yaml_diagnostic",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "yaml_diagnostic.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/tap/go/internal/0/classify"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/tap/go/internal/bravo/ndjson",
+    "dir": "internal/bravo/ndjson",
+    "name": "ndjson",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "ndjson.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/tap/go/internal/0/diagnostic"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/tap/go/internal/bravo/reader",
+    "dir": "internal/bravo/reader",
+    "name": "reader",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "reader.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/tap/go/internal/0/classify",
+      "code.linenisgreat.com/tap/go/internal/0/diagnostic",
+      "code.linenisgreat.com/tap/go/internal/alfa/parse",
+      "golang.org/x/text/language",
+      "golang.org/x/text/message",
+      "gopkg.in/yaml.v3"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/tap/go/internal/bravo/writer",
+    "dir": "internal/bravo/writer",
+    "name": "writer",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "writer.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/purse-first/libs/dewey/pkgs/interfaces",
+      "code.linenisgreat.com/purse-first/libs/dewey/pkgs/ui",
+      "code.linenisgreat.com/tap/go/internal/0/style",
+      "code.linenisgreat.com/tap/go/internal/alfa/yaml_diagnostic",
+      "golang.org/x/text/language",
+      "golang.org/x/text/message"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/tap/go/pkgs/ndjson",
+    "dir": "pkgs/ndjson",
+    "name": "ndjson",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "main.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/tap/go/internal/bravo/ndjson"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/tap/go/pkgs/reader",
+    "dir": "pkgs/reader",
+    "name": "reader",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "main.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/tap/go/internal/bravo/reader"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/tap/go/pkgs/writer",
+    "dir": "pkgs/writer",
+    "name": "writer",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "main.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/tap/go/internal/bravo/writer"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/tap/go/pkgs/yaml_diagnostic",
+    "dir": "pkgs/yaml_diagnostic",
+    "name": "yaml_diagnostic",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "main.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/tap/go/internal/alfa/yaml_diagnostic"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/tommy/internal/lexer",
+    "dir": "internal/lexer",
+    "name": "lexer",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "lexer.go",
+      "token.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/tommy/internal/ringbuf"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/tommy/internal/ringbuf",
+    "dir": "internal/ringbuf",
+    "name": "ringbuf",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "errors.go",
+      "ring_buffer.go",
+      "slice.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "code.linenisgreat.com/tommy/pkg/cst",
+    "dir": "pkg/cst",
+    "name": "cst",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "accessors.go",
+      "decompose.go",
+      "node.go",
+      "parser.go",
+      "respell.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/tommy/internal/lexer"
+    ]
+  },
+  {
+    "importPath": "code.linenisgreat.com/tommy/pkg/document",
+    "dir": "pkg/document",
+    "name": "document",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "comment.go",
+      "document.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "code.linenisgreat.com/tommy/pkg/cst"
+    ]
+  },
+  {
+    "importPath": "github.com/atotto/clipboard",
+    "dir": ".",
+    "name": "clipboard",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "clipboard.go",
+      "clipboard_unix.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "github.com/aymanbagabas/go-osc52/v2",
+    "dir": ".",
+    "name": "osc52",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "osc52.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "github.com/catppuccin/go",
+    "dir": ".",
+    "name": "catppuccingo",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "frappe.go",
+      "latte.go",
+      "macchiato.go",
+      "main.go",
+      "mocha.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "github.com/charmbracelet/bubbles/cursor",
+    "dir": "cursor",
+    "name": "cursor",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "cursor.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/charmbracelet/bubbletea",
+      "github.com/charmbracelet/lipgloss"
+    ]
+  },
+  {
+    "importPath": "github.com/charmbracelet/bubbles/filepicker",
+    "dir": "filepicker",
+    "name": "filepicker",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "filepicker.go",
+      "hidden_unix.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/charmbracelet/bubbles/key",
+      "github.com/charmbracelet/bubbletea",
+      "github.com/charmbracelet/lipgloss",
+      "github.com/dustin/go-humanize"
+    ]
+  },
+  {
+    "importPath": "github.com/charmbracelet/bubbles/help",
+    "dir": "help",
+    "name": "help",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "help.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/charmbracelet/bubbles/key",
+      "github.com/charmbracelet/bubbletea",
+      "github.com/charmbracelet/lipgloss"
+    ]
+  },
+  {
+    "importPath": "github.com/charmbracelet/bubbles/key",
+    "dir": "key",
+    "name": "key",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "key.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "github.com/charmbracelet/bubbles/list",
+    "dir": "list",
+    "name": "list",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "defaultitem.go",
+      "keys.go",
+      "list.go",
+      "style.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/charmbracelet/bubbles/help",
+      "github.com/charmbracelet/bubbles/key",
+      "github.com/charmbracelet/bubbles/paginator",
+      "github.com/charmbracelet/bubbles/spinner",
+      "github.com/charmbracelet/bubbles/textinput",
+      "github.com/charmbracelet/bubbletea",
+      "github.com/charmbracelet/lipgloss",
+      "github.com/charmbracelet/x/ansi",
+      "github.com/sahilm/fuzzy"
+    ]
+  },
+  {
+    "importPath": "github.com/charmbracelet/bubbles/paginator",
+    "dir": "paginator",
+    "name": "paginator",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "paginator.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/charmbracelet/bubbles/key",
+      "github.com/charmbracelet/bubbletea"
+    ]
+  },
+  {
+    "importPath": "github.com/charmbracelet/bubbles/progress",
+    "dir": "progress",
+    "name": "progress",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "progress.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/charmbracelet/bubbletea",
+      "github.com/charmbracelet/harmonica",
+      "github.com/charmbracelet/lipgloss",
+      "github.com/charmbracelet/x/ansi",
+      "github.com/lucasb-eyer/go-colorful",
+      "github.com/muesli/termenv"
+    ]
+  },
+  {
+    "importPath": "github.com/charmbracelet/bubbles/runeutil",
+    "dir": "runeutil",
+    "name": "runeutil",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "runeutil.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "github.com/charmbracelet/bubbles/spinner",
+    "dir": "spinner",
+    "name": "spinner",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "spinner.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/charmbracelet/bubbletea",
+      "github.com/charmbracelet/lipgloss"
+    ]
+  },
+  {
+    "importPath": "github.com/charmbracelet/bubbles/textarea",
+    "dir": "textarea",
+    "name": "textarea",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "textarea.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/atotto/clipboard",
+      "github.com/charmbracelet/bubbles/cursor",
+      "github.com/charmbracelet/bubbles/key",
+      "github.com/charmbracelet/bubbles/runeutil",
+      "github.com/charmbracelet/bubbles/textarea/memoization",
+      "github.com/charmbracelet/bubbles/viewport",
+      "github.com/charmbracelet/bubbletea",
+      "github.com/charmbracelet/lipgloss",
+      "github.com/charmbracelet/x/ansi",
+      "github.com/mattn/go-runewidth",
+      "github.com/rivo/uniseg"
+    ]
+  },
+  {
+    "importPath": "github.com/charmbracelet/bubbles/textarea/memoization",
+    "dir": "textarea/memoization",
+    "name": "memoization",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "memoization.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "github.com/charmbracelet/bubbles/textinput",
+    "dir": "textinput",
+    "name": "textinput",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "textinput.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/atotto/clipboard",
+      "github.com/charmbracelet/bubbles/cursor",
+      "github.com/charmbracelet/bubbles/key",
+      "github.com/charmbracelet/bubbles/runeutil",
+      "github.com/charmbracelet/bubbletea",
+      "github.com/charmbracelet/lipgloss",
+      "github.com/charmbracelet/x/ansi",
+      "github.com/mattn/go-runewidth",
+      "github.com/rivo/uniseg"
+    ]
+  },
+  {
+    "importPath": "github.com/charmbracelet/bubbles/viewport",
+    "dir": "viewport",
+    "name": "viewport",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "keymap.go",
+      "viewport.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/charmbracelet/bubbles/key",
+      "github.com/charmbracelet/bubbletea",
+      "github.com/charmbracelet/lipgloss",
+      "github.com/charmbracelet/x/ansi"
+    ]
+  },
+  {
+    "importPath": "github.com/charmbracelet/bubbletea",
+    "dir": ".",
+    "name": "tea",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "commands.go",
+      "exec.go",
+      "focus.go",
+      "inputreader_other.go",
+      "key.go",
+      "key_other.go",
+      "key_sequences.go",
+      "logging.go",
+      "mouse.go",
+      "nil_renderer.go",
+      "options.go",
+      "renderer.go",
+      "screen.go",
+      "signals_unix.go",
+      "standard_renderer.go",
+      "tea.go",
+      "tea_init.go",
+      "tty.go",
+      "tty_unix.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/charmbracelet/lipgloss",
+      "github.com/charmbracelet/x/ansi",
+      "github.com/charmbracelet/x/term",
+      "github.com/muesli/ansi/compressor",
+      "github.com/muesli/cancelreader"
+    ]
+  },
+  {
+    "importPath": "github.com/charmbracelet/colorprofile",
+    "dir": ".",
+    "name": "colorprofile",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "doc.go",
+      "env.go",
+      "env_other.go",
+      "profile.go",
+      "writer.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/charmbracelet/x/ansi",
+      "github.com/charmbracelet/x/term",
+      "github.com/xo/terminfo"
+    ]
+  },
+  {
+    "importPath": "github.com/charmbracelet/harmonica",
+    "dir": ".",
+    "name": "harmonica",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "harmonica.go",
+      "projectile.go",
+      "spring.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "github.com/charmbracelet/huh",
+    "dir": ".",
+    "name": "huh",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "accessor.go",
+      "clamp.go",
+      "eval.go",
+      "field_confirm.go",
+      "field_filepicker.go",
+      "field_input.go",
+      "field_multiselect.go",
+      "field_note.go",
+      "field_select.go",
+      "field_text.go",
+      "form.go",
+      "group.go",
+      "huh.go",
+      "keymap.go",
+      "layout.go",
+      "option.go",
+      "run.go",
+      "theme.go",
+      "validate.go",
+      "wrap.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/catppuccin/go",
+      "github.com/charmbracelet/bubbles/filepicker",
+      "github.com/charmbracelet/bubbles/help",
+      "github.com/charmbracelet/bubbles/key",
+      "github.com/charmbracelet/bubbles/spinner",
+      "github.com/charmbracelet/bubbles/textarea",
+      "github.com/charmbracelet/bubbles/textinput",
+      "github.com/charmbracelet/bubbles/viewport",
+      "github.com/charmbracelet/bubbletea",
+      "github.com/charmbracelet/huh/internal/accessibility",
+      "github.com/charmbracelet/huh/internal/selector",
+      "github.com/charmbracelet/lipgloss",
+      "github.com/charmbracelet/x/cellbuf",
+      "github.com/charmbracelet/x/exp/strings",
+      "github.com/mitchellh/hashstructure/v2"
+    ]
+  },
+  {
+    "importPath": "github.com/charmbracelet/huh/internal/accessibility",
+    "dir": "internal/accessibility",
+    "name": "accessibility",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "accessibility.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/charmbracelet/x/term"
+    ]
+  },
+  {
+    "importPath": "github.com/charmbracelet/huh/internal/selector",
+    "dir": "internal/selector",
+    "name": "selector",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "selector.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "github.com/charmbracelet/lipgloss",
+    "dir": ".",
+    "name": "lipgloss",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "align.go",
+      "ansi_unix.go",
+      "borders.go",
+      "color.go",
+      "get.go",
+      "join.go",
+      "position.go",
+      "ranges.go",
+      "renderer.go",
+      "runes.go",
+      "set.go",
+      "size.go",
+      "style.go",
+      "unset.go",
+      "whitespace.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/charmbracelet/x/ansi",
+      "github.com/charmbracelet/x/cellbuf",
+      "github.com/muesli/termenv",
+      "github.com/rivo/uniseg"
+    ]
+  },
+  {
+    "importPath": "github.com/charmbracelet/lipgloss/table",
+    "dir": "table",
+    "name": "table",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "resizing.go",
+      "rows.go",
+      "table.go",
+      "util.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/charmbracelet/lipgloss",
+      "github.com/charmbracelet/x/ansi"
+    ]
+  },
+  {
+    "importPath": "github.com/charmbracelet/log",
+    "dir": ".",
+    "name": "log",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "context.go",
+      "formatter.go",
+      "json.go",
+      "level.go",
+      "logfmt.go",
+      "logger.go",
+      "logger_121.go",
+      "options.go",
+      "pkg.go",
+      "stdlog.go",
+      "styles.go",
+      "text.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/charmbracelet/lipgloss",
+      "github.com/go-logfmt/logfmt",
+      "github.com/muesli/termenv"
+    ]
+  },
+  {
+    "importPath": "github.com/charmbracelet/x/ansi",
+    "dir": ".",
+    "name": "ansi",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "ansi.go",
+      "ascii.go",
+      "background.go",
+      "c0.go",
+      "c1.go",
+      "charset.go",
+      "clipboard.go",
+      "color.go",
+      "ctrl.go",
+      "cursor.go",
+      "cwd.go",
+      "doc.go",
+      "finalterm.go",
+      "focus.go",
+      "graphics.go",
+      "hyperlink.go",
+      "inband.go",
+      "iterm2.go",
+      "keypad.go",
+      "kitty.go",
+      "method.go",
+      "mode.go",
+      "mode_deprecated.go",
+      "modes.go",
+      "mouse.go",
+      "notification.go",
+      "palette.go",
+      "parser.go",
+      "parser_decode.go",
+      "parser_handler.go",
+      "parser_sync.go",
+      "passthrough.go",
+      "paste.go",
+      "progress.go",
+      "reset.go",
+      "screen.go",
+      "sgr.go",
+      "status.go",
+      "style.go",
+      "termcap.go",
+      "title.go",
+      "truncate.go",
+      "urxvt.go",
+      "util.go",
+      "width.go",
+      "winop.go",
+      "wrap.go",
+      "xterm.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/charmbracelet/x/ansi/parser",
+      "github.com/clipperhouse/displaywidth",
+      "github.com/clipperhouse/uax29/v2/graphemes",
+      "github.com/lucasb-eyer/go-colorful",
+      "github.com/mattn/go-runewidth"
+    ]
+  },
+  {
+    "importPath": "github.com/charmbracelet/x/ansi/parser",
+    "dir": "parser",
+    "name": "parser",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "const.go",
+      "seq.go",
+      "transition_table.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "github.com/charmbracelet/x/cellbuf",
+    "dir": ".",
+    "name": "cellbuf",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "buffer.go",
+      "cell.go",
+      "errors.go",
+      "geom.go",
+      "hardscroll.go",
+      "hashmap.go",
+      "link.go",
+      "pen.go",
+      "screen.go",
+      "sequence.go",
+      "style.go",
+      "tabstop.go",
+      "utils.go",
+      "wrap.go",
+      "writer.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/charmbracelet/colorprofile",
+      "github.com/charmbracelet/x/ansi",
+      "github.com/charmbracelet/x/term",
+      "github.com/mattn/go-runewidth",
+      "github.com/rivo/uniseg"
+    ]
+  },
+  {
+    "importPath": "github.com/charmbracelet/x/exp/strings",
+    "dir": ".",
+    "name": "strings",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "join.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "github.com/charmbracelet/x/term",
+    "dir": ".",
+    "name": "term",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "term.go",
+      "term_unix.go",
+      "term_unix_other.go",
+      "terminal.go",
+      "util.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "golang.org/x/sys/unix"
+    ]
+  },
+  {
+    "importPath": "github.com/clipperhouse/displaywidth",
+    "dir": ".",
+    "name": "displaywidth",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "gen.go",
+      "graphemes.go",
+      "trie.go",
+      "width.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/clipperhouse/stringish",
+      "github.com/clipperhouse/uax29/v2/graphemes"
+    ]
+  },
+  {
+    "importPath": "github.com/clipperhouse/stringish",
+    "dir": ".",
+    "name": "stringish",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "interface.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "github.com/clipperhouse/uax29/v2/graphemes",
+    "dir": "graphemes",
+    "name": "graphemes",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "iterator.go",
+      "reader.go",
+      "splitfunc.go",
+      "trie.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/clipperhouse/stringish"
+    ]
+  },
+  {
+    "importPath": "github.com/dustin/go-humanize",
+    "dir": ".",
+    "name": "humanize",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "big.go",
+      "bigbytes.go",
+      "bytes.go",
+      "comma.go",
+      "commaf.go",
+      "ftoa.go",
+      "humanize.go",
+      "number.go",
+      "ordinals.go",
+      "si.go",
+      "times.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "github.com/go-logfmt/logfmt",
+    "dir": ".",
+    "name": "logfmt",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "decode.go",
+      "doc.go",
+      "encode.go",
+      "jsonstring.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "github.com/google/shlex",
+    "dir": ".",
+    "name": "shlex",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "shlex.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "github.com/lucasb-eyer/go-colorful",
+    "dir": ".",
+    "name": "colorful",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "colorgens.go",
+      "colors.go",
+      "happy_palettegen.go",
+      "hexcolor.go",
+      "hsluv.go",
+      "rand.go",
+      "soft_palettegen.go",
+      "sort.go",
+      "warm_palettegen.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "github.com/mattn/go-isatty",
+    "dir": ".",
+    "name": "isatty",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "doc.go",
+      "isatty_tcgets.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "golang.org/x/sys/unix"
+    ]
+  },
+  {
+    "importPath": "github.com/mattn/go-runewidth",
+    "dir": ".",
+    "name": "runewidth",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "runewidth.go",
+      "runewidth_posix.go",
+      "runewidth_table.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/clipperhouse/uax29/v2/graphemes"
+    ]
+  },
+  {
+    "importPath": "github.com/mitchellh/hashstructure/v2",
+    "dir": ".",
+    "name": "hashstructure",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "errors.go",
+      "hashstructure.go",
+      "include.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "github.com/muesli/ansi",
+    "dir": ".",
+    "name": "ansi",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "ansi.go",
+      "buffer.go",
+      "writer.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/mattn/go-runewidth"
+    ]
+  },
+  {
+    "importPath": "github.com/muesli/ansi/compressor",
+    "dir": "compressor",
+    "name": "compressor",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "writer.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/muesli/ansi"
+    ]
+  },
+  {
+    "importPath": "github.com/muesli/cancelreader",
+    "dir": ".",
+    "name": "cancelreader",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "cancelreader.go",
+      "cancelreader_linux.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "golang.org/x/sys/unix"
+    ]
+  },
+  {
+    "importPath": "github.com/muesli/termenv",
+    "dir": ".",
+    "name": "termenv",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "ansicolors.go",
+      "color.go",
+      "constants_linux.go",
+      "copy.go",
+      "hyperlink.go",
+      "notification.go",
+      "output.go",
+      "profile.go",
+      "screen.go",
+      "style.go",
+      "templatehelper.go",
+      "termenv.go",
+      "termenv_posix.go",
+      "termenv_unix.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "github.com/aymanbagabas/go-osc52/v2",
+      "github.com/lucasb-eyer/go-colorful",
+      "github.com/mattn/go-isatty",
+      "github.com/rivo/uniseg",
+      "golang.org/x/sys/unix"
+    ]
+  },
+  {
+    "importPath": "github.com/rivo/uniseg",
+    "dir": ".",
+    "name": "uniseg",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "doc.go",
+      "eastasianwidth.go",
+      "emojipresentation.go",
+      "grapheme.go",
+      "graphemeproperties.go",
+      "graphemerules.go",
+      "line.go",
+      "lineproperties.go",
+      "linerules.go",
+      "properties.go",
+      "sentence.go",
+      "sentenceproperties.go",
+      "sentencerules.go",
+      "step.go",
+      "width.go",
+      "word.go",
+      "wordproperties.go",
+      "wordrules.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "github.com/sahilm/fuzzy",
+    "dir": ".",
+    "name": "fuzzy",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "fuzzy.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "github.com/xo/terminfo",
+    "dir": ".",
+    "name": "terminfo",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "caps.go",
+      "capvals.go",
+      "color.go",
+      "dec.go",
+      "load.go",
+      "param.go",
+      "stack.go",
+      "terminfo.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "golang.org/x/sys/unix",
+    "dir": "unix",
+    "name": "unix",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "affinity_linux.go",
+      "aliases.go",
+      "auxv.go",
+      "bluetooth_linux.go",
+      "constants.go",
+      "dev_linux.go",
+      "dirent.go",
+      "endian_little.go",
+      "env_unix.go",
+      "fcntl.go",
+      "fdset.go",
+      "ifreq_linux.go",
+      "ioctl_linux.go",
+      "ioctl_unsigned.go",
+      "mremap.go",
+      "pagesize_unix.go",
+      "race0.go",
+      "readdirent_getdents.go",
+      "sockcmsg_linux.go",
+      "sockcmsg_unix.go",
+      "sockcmsg_unix_other.go",
+      "syscall.go",
+      "syscall_linux.go",
+      "syscall_linux_alarm.go",
+      "syscall_linux_amd64.go",
+      "syscall_linux_amd64_gc.go",
+      "syscall_linux_gc.go",
+      "syscall_unix.go",
+      "syscall_unix_gc.go",
+      "sysvshm_linux.go",
+      "sysvshm_unix.go",
+      "timestruct.go",
+      "vgetrandom_linux.go",
+      "zerrors_linux.go",
+      "zerrors_linux_amd64.go",
+      "zptrace_x86_linux.go",
+      "zsyscall_linux.go",
+      "zsyscall_linux_amd64.go",
+      "zsysnum_linux_amd64.go",
+      "ztypes_linux.go",
+      "ztypes_linux_amd64.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": [
+      "asm_linux_amd64.s"
+    ],
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "golang.org/x/term",
+    "dir": ".",
+    "name": "term",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "term.go",
+      "term_unix.go",
+      "term_unix_other.go",
+      "terminal.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "golang.org/x/sys/unix"
+    ]
+  },
+  {
+    "importPath": "golang.org/x/text/feature/plural",
+    "dir": "feature/plural",
+    "name": "plural",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "common.go",
+      "message.go",
+      "plural.go",
+      "tables.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "golang.org/x/text/internal/catmsg",
+      "golang.org/x/text/internal/language/compact",
+      "golang.org/x/text/internal/number",
+      "golang.org/x/text/language",
+      "golang.org/x/text/message/catalog"
+    ]
+  },
+  {
+    "importPath": "golang.org/x/text/internal",
+    "dir": "internal",
+    "name": "internal",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "internal.go",
+      "match.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "golang.org/x/text/language"
+    ]
+  },
+  {
+    "importPath": "golang.org/x/text/internal/catmsg",
+    "dir": "internal/catmsg",
+    "name": "catmsg",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "catmsg.go",
+      "codec.go",
+      "varint.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "golang.org/x/text/language"
+    ]
+  },
+  {
+    "importPath": "golang.org/x/text/internal/format",
+    "dir": "internal/format",
+    "name": "format",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "format.go",
+      "parser.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "golang.org/x/text/language"
+    ]
+  },
+  {
+    "importPath": "golang.org/x/text/internal/language",
+    "dir": "internal/language",
+    "name": "language",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "common.go",
+      "compact.go",
+      "compose.go",
+      "coverage.go",
+      "language.go",
+      "lookup.go",
+      "match.go",
+      "parse.go",
+      "tables.go",
+      "tags.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "golang.org/x/text/internal/tag"
+    ]
+  },
+  {
+    "importPath": "golang.org/x/text/internal/language/compact",
+    "dir": "internal/language/compact",
+    "name": "compact",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "compact.go",
+      "language.go",
+      "parents.go",
+      "tables.go",
+      "tags.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "golang.org/x/text/internal/language"
+    ]
+  },
+  {
+    "importPath": "golang.org/x/text/internal/number",
+    "dir": "internal/number",
+    "name": "number",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "common.go",
+      "decimal.go",
+      "format.go",
+      "number.go",
+      "pattern.go",
+      "roundingmode_string.go",
+      "tables.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "golang.org/x/text/internal/language/compact",
+      "golang.org/x/text/internal/stringset",
+      "golang.org/x/text/language"
+    ]
+  },
+  {
+    "importPath": "golang.org/x/text/internal/stringset",
+    "dir": "internal/stringset",
+    "name": "stringset",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "set.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "golang.org/x/text/internal/tag",
+    "dir": "internal/tag",
+    "name": "tag",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "tag.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "golang.org/x/text/language",
+    "dir": "language",
+    "name": "language",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "coverage.go",
+      "doc.go",
+      "language.go",
+      "match.go",
+      "parse.go",
+      "tables.go",
+      "tags.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "golang.org/x/text/internal/language",
+      "golang.org/x/text/internal/language/compact"
+    ]
+  },
+  {
+    "importPath": "golang.org/x/text/message",
+    "dir": "message",
+    "name": "message",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "catalog.go",
+      "doc.go",
+      "format.go",
+      "message.go",
+      "print.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "golang.org/x/text/feature/plural",
+      "golang.org/x/text/internal/format",
+      "golang.org/x/text/internal/number",
+      "golang.org/x/text/language",
+      "golang.org/x/text/message/catalog"
+    ]
+  },
+  {
+    "importPath": "golang.org/x/text/message/catalog",
+    "dir": "message/catalog",
+    "name": "catalog",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "catalog.go",
+      "dict.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "golang.org/x/text/internal",
+      "golang.org/x/text/internal/catmsg",
+      "golang.org/x/text/language"
+    ]
+  },
+  {
+    "importPath": "golang.org/x/xerrors",
+    "dir": ".",
+    "name": "xerrors",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "adaptor.go",
+      "doc.go",
+      "errors.go",
+      "fmt.go",
+      "format.go",
+      "frame.go",
+      "wrap.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "golang.org/x/xerrors/internal"
+    ]
+  },
+  {
+    "importPath": "golang.org/x/xerrors/internal",
+    "dir": "internal",
+    "name": "internal",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "internal.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "gopkg.in/yaml.v3",
+    "dir": ".",
+    "name": "yaml",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "apic.go",
+      "decode.go",
+      "emitterc.go",
+      "encode.go",
+      "parserc.go",
+      "readerc.go",
+      "resolve.go",
+      "scannerc.go",
+      "sorter.go",
+      "writerc.go",
+      "yaml.go",
+      "yamlh.go",
+      "yamlprivateh.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "mvdan.cc/sh/v3/fileutil",
+    "dir": "fileutil",
+    "name": "fileutil",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "file.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": null
+  },
+  {
+    "importPath": "mvdan.cc/sh/v3/syntax",
+    "dir": "syntax",
+    "name": "syntax",
+    "isMain": false,
+    "local": false,
+    "goFiles": [
+      "braces.go",
+      "doc.go",
+      "lexer.go",
+      "nodes.go",
+      "parser.go",
+      "parser_arithm.go",
+      "printer.go",
+      "quote.go",
+      "simplify.go",
+      "token_string.go",
+      "tokens.go",
+      "walk.go"
+    ],
+    "cgoFiles": null,
+    "cFiles": null,
+    "hFiles": null,
+    "sFiles": null,
+    "embedFiles": null,
+    "embedPatterns": null,
+    "imports": [
+      "mvdan.cc/sh/v3/fileutil"
+    ]
+  }
+]
