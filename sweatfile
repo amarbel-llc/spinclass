@@ -26,13 +26,15 @@ pre-merge  = "just"
 # latter authenticates git on the former (papi FDR-0016, verified cross-plane).
 # The credential spinclass stores stays keyed to the git host.
 #
-# No `forge-hosts` here yet, on purpose: the pre-merge gate validates this
-# file with the INSTALLED spinclass, which must already know the key (≥ the
-# forge-hosts commit) or it rejects the file as having an unknown field. Add
-# `forge-hosts = ["code.linenisgreat.com"]` once the profile carries that
-# build (the same ordering the fleet root entry depends on — see
-# docs/plans/2026-09-03-auth-fleet-placement-design.md §4).
+# The fleet root entry (~/eng/repos/sweatfile, option C of
+# docs/plans/2026-09-03-auth-fleet-placement-design.md) carries the same
+# commands for every repos/* session; this repo-level copy keeps spinclass
+# self-sufficient outside that tree — keep the two in sync. `forge-hosts` is
+# the origin-host allow-list that makes a shared entry safe (an unlisted host
+# skips the mint); the profile must carry ≥059b3df for the gate's `sc validate`
+# to accept the key (design doc §4).
 [auth]
+forge-hosts    = ["code.linenisgreat.com"]
 mint-command   = "papi forge token mint --host forge.starbrandshoes.com --user sasha --card-login --repo $SPINCLASS_FORGE_REPO --session $SPINCLASS_SESSION_ID --ttl 12h"
 revoke-command = "papi forge token revoke --host forge.starbrandshoes.com --user sasha --card-login --session $SPINCLASS_SESSION_ID"
 
