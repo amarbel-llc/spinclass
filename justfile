@@ -185,54 +185,7 @@ update-gomod2nix:
 debug-go-test pkg='./...' run='' *args='':
     nix develop --command go test {{ if run == '' { '' } else { '-run ' + quote(run) } }} {{ args }} {{ pkg }}
 
-# POC (spinclass#284 → godyn): regenerate godyn-graph.json, the Go source graph
-# driving the opt-in per-package godyn build backend (`.#spinclass-native`).
-# godyn-gen runs `go list`, which cannot resolve spinclass's flake-input-go_mod
-# bridges ambiently (the go.mod `require`s are vestigial; the real versions are
-# bridged only inside the nix sandbox). `godyn-gen -gomod <merged-go.mod>`
-# (igloo#67) resolves them against buildGoApplication's MERGED go.mod — the
-# RFC-0001 single source of truth, whose `replace`s point at the exact go-pkgs
-# store paths the flake's bridges use — so bridged modules resolve at the FLAKE
-# version. godyn-gen records module-root-relative dirs + file basenames (and, as
-# of igloo#68, per-pattern embed files), so the merged go.mod's /nix/store
-# `replace`s do NOT leak into the committed graph (grep for /nix/store to
-# confirm). CGO off — spinclass is pure-Go. MUST run on x86_64-linux (the graph
-# embeds linux/amd64 file selection; igloo#33). Re-run when imports/deps/embeds
-# OR a bridged producer's flake.lock rev change, then commit; drift-checked by
-# debug-godyn-graph-drift.
-#
-# regenerate godyn-graph.json for the opt-in godyn build backend
-[group('debug')]
-debug-godyn-graph:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
-    merged=$(nix build --no-link --print-out-paths ".#packages.${system}.spinclass-build_go_application.passthru.mergedGoMod")
-    nix develop --command env CGO_ENABLED=0 godyn-gen -gomod "$merged" . godyn-graph.json
-
-# POC (spinclass#284 → godyn): drift check for the committed godyn-graph.json —
-# regenerate into a scratch file (same `-gomod` materialization as
-# debug-godyn-graph, igloo#67) and diff against the committed copy, failing if
-# they differ. MUST run on x86_64-linux (on another host godyn-gen emits a
-# host-platform graph that always "differs"; igloo#33). Leaves the committed
-# graph untouched.
-#
-# check the committed godyn-graph.json for drift
-[group('debug')]
-debug-godyn-graph-drift:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
-    merged=$(nix build --no-link --print-out-paths ".#packages.${system}.spinclass-build_go_application.passthru.mergedGoMod")
-    tmp=$(mktemp)
-    trap 'rm -f "$tmp"' EXIT
-    nix develop --command env CGO_ENABLED=0 godyn-gen -gomod "$merged" . "$tmp"
-    if ! diff -u godyn-graph.json "$tmp"; then
-        echo "debug-godyn-graph-drift: committed godyn-graph.json is stale — run 'just debug-godyn-graph' and commit the result." >&2
-        exit 1
-    fi
-
-# POC (parked, spinclass#284 → godyn): build the opt-in per-package godyn binary
+# POC (spinclass#284 → godyn): build the opt-in per-package godyn binary
 # (`.#spinclass-native`) with full build logs. The fast inner loop / A-B target
 # for the incremental-edit timing comparison against the default buildGoApplication
 # build (`just build-nix`). x86_64-linux only (godynSystem). Content-addressed

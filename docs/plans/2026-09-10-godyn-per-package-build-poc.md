@@ -12,6 +12,16 @@ pins) plus igloo#67/#68/#69. Verified: `.#default` (godyn) and
 `spinclass version` shows the pins burned in. The bare `.#spinclass-native`
 (no artifacts) stays for the fast dev inner loop.
 
+**No committed graph (2026-09-11, igloo#72 / FDR 0008).** spinclass is the
+tracer bullet for eval-time graph derivation: with no `graphFile`,
+`buildGodynModule` derives the per-package graph inside the bga sandbox (from
+`modules` + `goFlakeInputs`) and imports it (IFD). The committed
+`godyn-graph.json` and the `godyn-gen -gomod` regen recipes (`debug-godyn-graph`
+/ `-drift`) are gone — nothing to regenerate. Acceptance-checked before removal:
+the derived graph was byte-equal to the committed one (154 nodes, modulo the new
+`stdImports` field). Evaluating the godyn default now first builds a small graph
+derivation (one `go list` in the sandbox).
+
 The test-gate cutover to godyn (deliverable #3) is still future work, gated on a
 godyn per-package tests POC with igloo (igloo#32; per-package vet/lint +
 `buildGodynLint` have since landed on igloo master). Until then the merge gate's

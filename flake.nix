@@ -218,11 +218,13 @@
         pkgs-master = import nixpkgs-master { inherit system; };
         inherit (pkgs) lib;
 
-        # Where the opt-in godyn (native, per-package) backend can build:
-        # x86_64-linux only. The committed godyn-graph.json embeds `go list`'s
-        # linux/amd64 file/import selection, so it is invalid on any other
-        # system until per-system graphs land (godyn(7) LIMITATIONS, igloo#33).
-        # Gates whether `.#spinclass-native` is exposed at all (POC, parked).
+        # Where the godyn (native, per-package) backend can build: x86_64-linux
+        # only. The graph is now DERIVED at eval time per-system (igloo#72 / FDR
+        # 0008 — no committed graph), but godyn's per-package build itself is
+        # only validated on x86_64-linux (godyn(7) LIMITATIONS, igloo#33) and the
+        # cross-system eval IFD can't run from another host (igloo#75). Gates
+        # `packages.default` to godyn here (bga elsewhere) and whether
+        # `.#spinclass-native` is exposed.
         godynSystem = system == "x86_64-linux";
 
         # tommy fmt (*.toml) and the tommy-codegen repair linter have no
@@ -329,7 +331,8 @@
         spinclass-native = pkgs.buildGoAuto {
           pname = "spinclass";
           src = ./.;
-          graphFile = ./godyn-graph.json;
+          # No graphFile: buildGodynModule derives the graph at eval time from
+          # modules + goFlakeInputs (igloo#72 / FDR 0008).
           modules = ./gomod2nix.toml;
           strategy = "dev";
           inherit goFlakeInputs;
@@ -375,11 +378,12 @@
           pkgs.buildGoAuto {
             pname = "spinclass";
             src = ./.;
-            # godyn (native) graph; forced only for the "dev" backend (a "ci"
-            # build never touches it). version is auto-read from version.env by
-            # both backends (an explicit `version` attr would override that);
-            # commit is threaded per-backend below since src = ./. has no .rev.
-            graphFile = ./godyn-graph.json;
+            # No graphFile: with `modules` + `goFlakeInputs`, buildGodynModule
+            # DERIVES the package graph at eval time (godyn-gen in the bga
+            # sandbox — igloo#72 / FDR 0008), so nothing is committed to
+            # regenerate. version is auto-read from version.env by both backends
+            # (an explicit `version` attr would override that); commit is
+            # threaded per-backend below since src = ./. has no .rev.
             modules = ./gomod2nix.toml;
             inherit strategy goFlakeInputs;
 
@@ -549,9 +553,10 @@
         spinclass-build_go_application = mkSpinclass forgePins;
 
         # The default `nix build`: godyn (per-package, incremental) on
-        # x86_64-linux, buildGoApplication elsewhere — godyn's committed graph is
-        # single-platform (igloo#33). Both are the FULL package (binary +
-        # artifacts + plugin manifests + `sc` symlink) with the papi/gh pins. See
+        # x86_64-linux, buildGoApplication elsewhere — godyn's build is validated
+        # only there (igloo#33; the graph derives per-system at eval time). Both
+        # are the FULL package (binary + artifacts + plugin manifests + `sc`
+        # symlink) with the papi/gh pins. See
         # docs/plans/2026-09-10-godyn-per-package-build-poc.md.
         spinclass-default =
           if godynSystem then
@@ -583,7 +588,7 @@
         // batsLaneOutputs
         # The BARE godyn binary (no artifacts) for the fast dev inner loop and
         # the backend microbench — distinct from `default`, the FULL godyn
-        # package. x86_64-linux only (godynSystem; single-platform graph, igloo#33).
+        # package. x86_64-linux only (godynSystem; godyn builds only there, igloo#33).
         // lib.optionalAttrs godynSystem { inherit spinclass-native; };
 
         # `nix flake check` exercises the unit suite plus every bats lane. The
@@ -639,11 +644,6 @@
             # gomod2nix CLI lives in the fork's overlay alongside
             # buildGoApplication / mkGoEnv — not in upstream nixpkgs.
             pkgs.gomod2nix
-            # godyn-gen: the dev-time graph generator for the opt-in per-package
-            # godyn backend (POC, parked). `just debug-godyn-graph` runs it via
-            # `nix develop --command` so `go list` sees the goFlakeInputs-bridged
-            # mkGoEnv `go` above and resolves tommy/crap/ringmaster/dewey.
-            pkgs.godyn-gen
             pkgs.bats
             # The RAW conformist binary on PATH — NOT conformistEval.config.build.wrapper.
             # The wrapper hardcodes `--tree-root-file=flake.nix` (repair mode,
