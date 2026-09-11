@@ -1,12 +1,21 @@
 # godyn per-package build — POC results & promotion plan
 
-**Status:** promoted. All three blocking igloo fixes shipped to igloo master
-(`11b98425`), the igloo input is bumped to it, and `.#spinclass-native` is a
-supported **opt-in** build (not the default, not in `checks`, does not gate the
-merge). Re-verified against igloo master: builds green, runs on the REAL
-`templates/*.md.tmpl` embed pattern (no probe), incremental leaf edit ~3.7 s
-(godyn) vs ~34 s (buildGoApplication). Remains on `fast-aspen`; whether to merge
-to `master` is the operator's call.
+**Status:** godyn is the DEFAULT build. `packages.default` = godyn (full
+package) on x86_64-linux, buildGoApplication elsewhere; bga is the named escape
+hatch `.#spinclass-build_go_application` (also `checks.spinclass`, the gate's
+`go test ./...` lane). Enabled by igloo's `postInstall` on `buildGoAuto` (a
+separate install derivation over the CA link output, forwarded to both backends —
+so the godyn default carries the full artifact set: `sc` symlink, manpages,
+completions, the claude/clown plugin manifests + hooks, and the papi/gh forge
+pins) plus igloo#67/#68/#69. Verified: `.#default` (godyn) and
+`.#spinclass-build_go_application` (bga + tests) both build green on x86_64-linux;
+`spinclass version` shows the pins burned in. The bare `.#spinclass-native`
+(no artifacts) stays for the fast dev inner loop.
+
+The test-gate cutover to godyn (deliverable #3) is still future work, gated on a
+godyn per-package tests POC with igloo (igloo#32; per-package vet/lint +
+`buildGodynLint` have since landed on igloo master). Until then the merge gate's
+unit tests run on bga via `checks.spinclass`.
 
 **Owner split:** the spinclass consumer side is this repo's lane
 (`spinclass/fast-aspen`); the godyn backend and the three (now-shipped) fixes are

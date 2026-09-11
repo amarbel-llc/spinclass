@@ -347,49 +347,47 @@
           };
         };
 
-        # mkSpinclass builds spinclass with optional build-time-pinned
-        # absolute /nix/store paths for `madder` and `direnv`. The
-        # buildGoApplication overlay auto-injects -X main.version and
-        # -X main.commit from the derivation attrs and appends any
-        # ldflags supplied here.
+        # mkSpinclass builds the FULL spinclass package (binary + generated
+        # artifacts + plugin manifests + `sc` symlink) on either backend,
+        # selected by `strategy` via buildGoAuto: "ci"/"bga" =
+        # buildGoApplication (the default here), "dev"/"native" = godyn
+        # (per-package, incremental). `strategy` defaults to bga so
+        # `lib.mkSpinclass` consumers and the CI/test/bats lanes keep the proven
+        # buildGoApplication backend; `packages.default` (below) selects godyn on
+        # x86_64-linux. buildGoAuto forwards ldflags (forge pins), goFlakeInputs
+        # (RFC 0001 bridges → godyn `bridges` + bga replaces), and postInstall to
+        # BOTH backends, so one declaration drives native and bga; version is
+        # auto-read from version.env, commit is threaded per-backend below.
         #
-        # When `madder` is non-null the produced binary activates the
-        # per-worktree blob-store flow at `sc start`. When null, the
-        # feature is dormant. `direnv` falls back to PATH lookup when
-        # the input is null. When `dodder` is non-null the binary also
-        # inits a per-worktree dodder repository over the madder store
-        # (FDR 0008); dormant when null. `papi` and `gh` are pinned for
-        # the dynamic system-prompt repository line (internal/repoinfo);
-        # both fall back to PATH lookup when null.
+        # Pins (all fall back to PATH when null): `madder` activates the
+        # per-worktree blob-store flow; `direnv` the devshell exec; `dodder` the
+        # per-worktree dodder repo (FDR 0008); `papi`/`gh` the dynamic
+        # system-prompt repository line (internal/repoinfo).
         mkSpinclass =
           {
+            strategy ? "ci",
             madder ? null,
             direnv ? null,
             dodder ? null,
             papi ? null,
             gh ? null,
           }:
-          pkgs.buildGoApplication {
+          pkgs.buildGoAuto {
             pname = "spinclass";
-            # No explicit `version` here: buildGoApplication auto-reads
-            # version.env (eng-versioning(7) VERSION EMBEDDING) from `src`
-            # (pwd defaults to src when unset) and feeds both the derivation
-            # `version` attr and the `-X main.version` ldflag. An explicit
-            # `version` attr would silently override that auto-read.
-            commit = spinclassCommit;
             src = ./.;
+            # godyn (native) graph; forced only for the "dev" backend (a "ci"
+            # build never touches it). version is auto-read from version.env by
+            # both backends (an explicit `version` attr would override that);
+            # commit is threaded per-backend below since src = ./. has no .rev.
+            graphFile = ./godyn-graph.json;
             modules = ./gomod2nix.toml;
-            inherit goFlakeInputs;
-            subPackages = [ "cmd/spinclass" ];
+            inherit strategy goFlakeInputs;
 
-            # Pin Go through upstream nixpkgs and disable toolchain
-            # auto-download. Without these, `GOTOOLCHAIN=auto` can try to
-            # fetch a toolchain when go.mod's `go 1.26` requirement isn't
-            # satisfied by `pkgs.go`, which fails in the sandbox. Madder
-            # pattern.
-            go = pkgs-master.go_1_26;
-            GOTOOLCHAIN = "local";
-
+            # Forge/tool pins as `-X main.*Bin` ldflags — buildGoAuto forwards
+            # them to whichever backend builds. papi/gh drive the dynamic
+            # system-prompt repo line (internal/repoinfo); madder/direnv/dodder
+            # gate the per-worktree blob-store / dodder flows. All fall back to
+            # PATH when unpinned.
             ldflags =
               (lib.optional (madder != null) "-X main.madderBin=${madder}/bin/madder")
               ++ (lib.optional (direnv != null) "-X main.direnvBin=${direnv}/bin/direnv")
@@ -397,29 +395,44 @@
               ++ (lib.optional (papi != null) "-X main.papiBin=${papi}/bin/papi")
               ++ (lib.optional (gh != null) "-X main.ghBin=${gh}/bin/gh");
 
-            # buildGoApplication's stock checkPhase runs only the
-            # subPackages (cmd/spinclass). Override to test every package
-            # so internal/* coverage isn't silently skipped. Tests that
-            # hit pre-existing sandbox-incompatibilities (currently
-            # tracked in #65) detect the sandbox via NIX_BUILD_TOP and
-            # t.Skip themselves.
-            # ringmaster is a check-only input: it puts the real job-platform
-            # CLI on PATH so internal/clown's contract test can drive actual
-            # start/spool-path/done calls against a scratch XDG journal
-            # instead of asserting argv against a stub (#253). It stays out of
-            # the runtime closure — at run time the binary is resolved from
-            # PATH and gated on CLOWN_BIN. Kept unconditional so
-            # `packages.default` and `checks.spinclass` remain one derivation.
-            doCheck = true;
-            nativeCheckInputs = [
-              pkgs.git
-              ringmaster.packages.${system}.ringmaster
-            ];
-            checkPhase = ''
-              runHook preCheck
-              go test -p $NIX_BUILD_CORES ./...
-              runHook postCheck
-            '';
+            # godyn-only knobs (buildGodynModule).
+            nativeArgs = {
+              pwd = ./.;
+              commit = spinclassCommit;
+            };
+
+            # buildGoApplication-only knobs. Only the bga backend runs this
+            # checkPhase (`go test ./...`) — the godyn default has no tests yet
+            # (deliverable #3 / igloo#32), so the merge gate's unit tests run via
+            # checks.spinclass (bga). subPackages builds just cmd/spinclass while
+            # the overridden checkPhase tests every package so internal/* coverage
+            # isn't skipped (sandbox-incompatible tests self-skip via
+            # NIX_BUILD_TOP, #65). ringmaster on PATH lets internal/clown's
+            # contract test drive the real CLI (#253); it stays out of the runtime
+            # closure. GOTOOLCHAIN=local pins pkgs-master.go_1_26 (no sandbox
+            # toolchain fetch).
+            bgaArgs = {
+              pwd = ./.;
+              commit = spinclassCommit;
+              subPackages = [ "cmd/spinclass" ];
+              go = pkgs-master.go_1_26;
+              GOTOOLCHAIN = "local";
+              doCheck = true;
+              nativeCheckInputs = [
+                pkgs.git
+                ringmaster.packages.${system}.ringmaster
+              ];
+              checkPhase = ''
+                runHook preCheck
+                go test -p $NIX_BUILD_CORES ./...
+                runHook postCheck
+              '';
+              meta = {
+                description = "Shell-agnostic git worktree session manager";
+                homepage = "https://code.linenisgreat.com/spinclass";
+                license = pkgs.lib.licenses.mit;
+              };
+            };
 
             # Generate manpages, mappings, hooks, and shell completions from
             # the command.App definitions. The plugin manifest (and clown
@@ -474,12 +487,6 @@
               substituteInPlace "$pluginShare/hooks/handler" \
                 --replace-fail '@SPINCLASS@' "$out/bin/spinclass"
             '';
-
-            meta = {
-              description = "Shell-agnostic git worktree session manager";
-              homepage = "https://code.linenisgreat.com/spinclass";
-              license = pkgs.lib.licenses.mit;
-            };
           };
 
         # mkBatsLane wraps bats.lib.${system}.batsLane (from the
@@ -535,6 +542,23 @@
           madder = madder.packages.${system}.default;
         };
 
+        # The buildGoApplication build, named explicitly (the godyn-default
+        # flip): the escape hatch, the release/CI backend, and the
+        # non-x86_64-linux `default`. Full package + the `go test ./...`
+        # checkPhase; the same derivation backs `checks.spinclass`.
+        spinclass-build_go_application = mkSpinclass forgePins;
+
+        # The default `nix build`: godyn (per-package, incremental) on
+        # x86_64-linux, buildGoApplication elsewhere — godyn's committed graph is
+        # single-platform (igloo#33). Both are the FULL package (binary +
+        # artifacts + plugin manifests + `sc` symlink) with the papi/gh pins. See
+        # docs/plans/2026-09-10-godyn-per-package-build-poc.md.
+        spinclass-default =
+          if godynSystem then
+            mkSpinclass ({ strategy = "dev"; } // forgePins)
+          else
+            spinclass-build_go_application;
+
         batsLaneOutputs = {
           bats-default = mkBatsLane { };
           bats-race = mkBatsLane { base = spinclass-race; };
@@ -543,7 +567,12 @@
       in
       {
         packages = {
-          default = mkSpinclass forgePins;
+          # godyn on x86_64-linux, buildGoApplication elsewhere (see
+          # spinclass-default above).
+          default = spinclass-default;
+          # The buildGoApplication build under an explicit name: the escape
+          # hatch from the godyn default (`nix build .#spinclass-build_go_application`).
+          inherit spinclass-build_go_application;
           inherit spinclass-race;
           # The generated impure-lane config (git-state eng-convention checks),
           # consumed by `just lint-worktree` to run `conformist check` against
@@ -552,17 +581,19 @@
           conformist-impure-config = conformistImpureEval.config.build.configFile;
         }
         // batsLaneOutputs
-        # POC (parked, spinclass#284 → godyn): the opt-in per-package godyn build,
-        # only where its committed graph is valid (godynSystem = x86_64-linux).
+        # The BARE godyn binary (no artifacts) for the fast dev inner loop and
+        # the backend microbench — distinct from `default`, the FULL godyn
+        # package. x86_64-linux only (godynSystem; single-platform graph, igloo#33).
         // lib.optionalAttrs godynSystem { inherit spinclass-native; };
 
-        # `nix flake check` exercises the unit suite (via the
-        # spinclass derivation's checkPhase) plus every bats lane. The
-        # `spinclass` check builds the same forge-pinned variant as the
-        # default package, so `nix flake check` also verifies the papi/gh
-        # burn-in.
+        # `nix flake check` exercises the unit suite plus every bats lane. The
+        # `spinclass` check is the buildGoApplication build (its checkPhase runs
+        # `go test ./...`) — NOT the godyn `default`, which has no checkPhase yet
+        # (deliverable #3 / igloo#32). So the merge gate's unit tests + the
+        # papi/gh burn-in are verified via bga here, while `default` (godyn on
+        # x86_64-linux) is exercised as a `packages` build.
         checks = {
-          spinclass = mkSpinclass forgePins;
+          spinclass = spinclass-build_go_application;
           # Sandboxed read-only formatting + eng-convention-linter gate
           # (conformist check against a /nix/store snapshot of the tracked
           # tree). `just lint-fmt` builds this. See conformistEval above.
@@ -577,16 +608,18 @@
           # non-Linux builders the seed is dropped and it runs cold (igloo#65).
           # `just lint-golangci` builds this; it is part of `just lint`.
           lint = pkgs.buildGoLint {
-            base = mkSpinclass forgePins;
+            base = spinclass-build_go_application;
             inherit (pkgs-master) golangci-lint;
             warmCache = true;
           };
         }
         // batsLaneOutputs;
 
-        # mkSpinclass = { madder ? null, direnv ? null }: ...
-        # Consumer flakes call this to produce a spinclass binary with
-        # absolute /nix/store paths burned in.
+        # mkSpinclass = { strategy ? "ci", madder ? null, direnv ? null, ... }: ...
+        # Consumer flakes call this to produce a full spinclass package with
+        # absolute /nix/store paths burned in. `strategy` defaults to
+        # buildGoApplication, so existing pins-only callers are unaffected by the
+        # godyn-default flip.
         lib.mkSpinclass = mkSpinclass;
 
         # `nix fmt` runs the module-generated conformist wrapper (see

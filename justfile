@@ -207,7 +207,7 @@ debug-godyn-graph:
     #!/usr/bin/env bash
     set -euo pipefail
     system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
-    merged=$(nix build --no-link --print-out-paths ".#packages.${system}.default.passthru.mergedGoMod")
+    merged=$(nix build --no-link --print-out-paths ".#packages.${system}.spinclass-build_go_application.passthru.mergedGoMod")
     nix develop --command env CGO_ENABLED=0 godyn-gen -gomod "$merged" . godyn-graph.json
 
 # POC (spinclass#284 → godyn): drift check for the committed godyn-graph.json —
@@ -223,7 +223,7 @@ debug-godyn-graph-drift:
     #!/usr/bin/env bash
     set -euo pipefail
     system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
-    merged=$(nix build --no-link --print-out-paths ".#packages.${system}.default.passthru.mergedGoMod")
+    merged=$(nix build --no-link --print-out-paths ".#packages.${system}.spinclass-build_go_application.passthru.mergedGoMod")
     tmp=$(mktemp)
     trap 'rm -f "$tmp"' EXIT
     nix develop --command env CGO_ENABLED=0 godyn-gen -gomod "$merged" . "$tmp"

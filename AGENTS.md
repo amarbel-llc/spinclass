@@ -542,9 +542,9 @@ predates `pkgs/mesa` — hence the `ringmaster.inputs.purse-first.follows`
 override) so `sc list`'s pretty/plain rendering can bridge `libs/dewey`
 (mesa, #185); same shape as clown's `gomod.nix`.
 
-An opt-in per-package godyn build, `.#spinclass-native` (x86_64-linux only),
-sits beside the default `buildGoApplication` build for the incremental dev loop;
-not the default, not in `checks`. See
+The default `nix build` uses igloo's per-package godyn backend on x86_64-linux
+(buildGoApplication elsewhere and as `.#spinclass-build_go_application`); the
+merge gate's `go test ./...` stays on bga via `checks.spinclass`. See
 `docs/plans/2026-09-10-godyn-per-package-build-poc.md`.
 
 ## Dependencies
