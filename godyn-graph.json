@@ -16,7 +16,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap",
@@ -35,7 +36,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/crap/go-crap/v2/viewport",
@@ -62,7 +64,8 @@
       "github.com/charmbracelet/bubbles/spinner",
       "github.com/charmbracelet/bubbletea",
       "github.com/charmbracelet/lipgloss"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/0/box_chars",
@@ -79,7 +82,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/0/http_statuses",
@@ -96,7 +100,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/0/interfaces",
@@ -129,7 +134,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/0/primordial",
@@ -148,7 +154,8 @@
     "embedPatterns": null,
     "imports": [
       "golang.org/x/term"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/0/stack_frame",
@@ -169,7 +176,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/alfa/mesa",
@@ -200,7 +208,8 @@
       "github.com/mattn/go-runewidth",
       "github.com/muesli/termenv",
       "golang.org/x/term"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/alfa/pool",
@@ -226,7 +235,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/purse-first/libs/dewey/internal/0/interfaces"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/alfa/test_ui",
@@ -245,7 +255,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/purse-first/libs/dewey/internal/0/stack_frame"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/bravo/errors",
@@ -287,7 +298,8 @@
       "code.linenisgreat.com/purse-first/libs/dewey/internal/0/stack_frame",
       "code.linenisgreat.com/purse-first/libs/dewey/internal/alfa/pool",
       "golang.org/x/xerrors"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/purse-first/libs/dewey/internal/charlie/ui",
@@ -325,7 +337,8 @@
       "code.linenisgreat.com/purse-first/libs/dewey/internal/alfa/pool",
       "code.linenisgreat.com/purse-first/libs/dewey/internal/alfa/test_ui",
       "code.linenisgreat.com/purse-first/libs/dewey/internal/bravo/errors"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/purse-first/libs/dewey/pkgs/interfaces",
@@ -344,7 +357,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/purse-first/libs/dewey/internal/0/interfaces"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/purse-first/libs/dewey/pkgs/mesa",
@@ -363,7 +377,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/purse-first/libs/dewey/internal/alfa/mesa"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/purse-first/libs/dewey/pkgs/ui",
@@ -382,7 +397,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/purse-first/libs/dewey/internal/charlie/ui"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/purse-first/libs/go-mcp/command",
@@ -423,7 +439,8 @@
       "code.linenisgreat.com/purse-first/libs/go-mcp/protocol",
       "code.linenisgreat.com/purse-first/libs/go-mcp/server",
       "mvdan.cc/sh/v3/syntax"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/purse-first/libs/go-mcp/command/huh",
@@ -442,7 +459,8 @@
     "embedPatterns": null,
     "imports": [
       "github.com/charmbracelet/huh"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/purse-first/libs/go-mcp/jsonrpc",
@@ -461,7 +479,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/purse-first/libs/go-mcp/protocol",
@@ -496,7 +515,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/purse-first/libs/go-mcp/server",
@@ -525,7 +545,8 @@
       "code.linenisgreat.com/purse-first/libs/go-mcp/jsonrpc",
       "code.linenisgreat.com/purse-first/libs/go-mcp/protocol",
       "code.linenisgreat.com/purse-first/libs/go-mcp/transport"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/purse-first/libs/go-mcp/transport",
@@ -546,7 +567,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/purse-first/libs/go-mcp/jsonrpc"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/ringmaster/internal/0/jobwake",
@@ -577,7 +599,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.25.0"
   },
   {
     "importPath": "code.linenisgreat.com/ringmaster/pkgs/jobwake",
@@ -596,7 +619,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/ringmaster/internal/0/jobwake"
-    ]
+    ],
+    "goVersion": "1.25.0"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/cmd/spinclass",
@@ -687,7 +711,8 @@
       "github.com/charmbracelet/lipgloss",
       "github.com/mattn/go-isatty",
       "golang.org/x/term"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/attestation",
@@ -708,7 +733,8 @@
       "code.linenisgreat.com/spinclass/internal/session",
       "code.linenisgreat.com/spinclass/internal/sweatfile",
       "code.linenisgreat.com/tap/go/pkgs/writer"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/auth",
@@ -729,7 +755,8 @@
       "code.linenisgreat.com/spinclass/internal/git",
       "code.linenisgreat.com/spinclass/internal/session",
       "code.linenisgreat.com/spinclass/internal/sweatfile"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/basebranch",
@@ -748,7 +775,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/spinclass/internal/git"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/check",
@@ -776,7 +804,8 @@
       "code.linenisgreat.com/spinclass/internal/sweatfileio",
       "code.linenisgreat.com/tap/go/pkgs/ndjson",
       "code.linenisgreat.com/tap/go/pkgs/reader"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/claude",
@@ -794,7 +823,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/clean",
@@ -827,7 +857,8 @@
       "github.com/charmbracelet/lipgloss",
       "github.com/charmbracelet/log",
       "github.com/mattn/go-isatty"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/close",
@@ -858,7 +889,8 @@
       "code.linenisgreat.com/tap/go/pkgs/yaml_diagnostic",
       "github.com/charmbracelet/huh",
       "github.com/mattn/go-isatty"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/clown",
@@ -878,7 +910,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/ringmaster/pkgs/jobwake"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/direnv",
@@ -897,7 +930,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/spinclass/internal/embeds"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/dodder",
@@ -916,7 +950,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/spinclass/internal/madder"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/embeds",
@@ -933,7 +968,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/executor",
@@ -957,7 +993,8 @@
       "code.linenisgreat.com/spinclass/internal/session",
       "code.linenisgreat.com/tap/go/pkgs/writer",
       "code.linenisgreat.com/tap/go/pkgs/yaml_diagnostic"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/flake",
@@ -974,7 +1011,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/git",
@@ -991,7 +1029,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/hooks",
@@ -1019,7 +1058,8 @@
       "code.linenisgreat.com/spinclass/internal/sweatfileio",
       "code.linenisgreat.com/spinclass/internal/worktree",
       "github.com/google/shlex"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/job",
@@ -1041,7 +1081,8 @@
       "code.linenisgreat.com/spinclass/internal/clown",
       "code.linenisgreat.com/spinclass/internal/embeds",
       "code.linenisgreat.com/spinclass/internal/madder"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/madder",
@@ -1058,7 +1099,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/merge",
@@ -1089,7 +1131,8 @@
       "code.linenisgreat.com/spinclass/internal/worktree",
       "github.com/charmbracelet/huh",
       "github.com/mattn/go-isatty"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/mergelock",
@@ -1106,7 +1149,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/nixgc",
@@ -1125,7 +1169,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/spinclass/internal/sweatfileio"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/perms",
@@ -1152,7 +1197,8 @@
       "code.linenisgreat.com/spinclass/internal/git",
       "code.linenisgreat.com/spinclass/internal/worktree",
       "github.com/charmbracelet/huh"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/present",
@@ -1173,7 +1219,8 @@
       "code.linenisgreat.com/crap/go-crap/v2/crap",
       "code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap",
       "code.linenisgreat.com/crap/go-crap/v2/viewport"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/pull",
@@ -1194,7 +1241,8 @@
       "code.linenisgreat.com/spinclass/internal/git",
       "code.linenisgreat.com/spinclass/internal/worktree",
       "code.linenisgreat.com/tap/go/pkgs/writer"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/remote",
@@ -1216,7 +1264,8 @@
     "imports": [
       "code.linenisgreat.com/spinclass/internal/session",
       "code.linenisgreat.com/spinclass/internal/sweatfile"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/repoinfo",
@@ -1236,7 +1285,8 @@
     "imports": [
       "code.linenisgreat.com/spinclass/internal/embeds",
       "code.linenisgreat.com/spinclass/internal/git"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/resources",
@@ -1255,7 +1305,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/resurrect",
@@ -1277,7 +1328,8 @@
       "code.linenisgreat.com/spinclass/internal/session",
       "code.linenisgreat.com/spinclass/internal/worktree",
       "code.linenisgreat.com/tap/go/pkgs/writer"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/run",
@@ -1306,7 +1358,8 @@
       "code.linenisgreat.com/spinclass/internal/sweatfileio",
       "code.linenisgreat.com/spinclass/internal/worktree",
       "github.com/mattn/go-isatty"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/servelog",
@@ -1323,7 +1376,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/session",
@@ -1345,7 +1399,8 @@
     "imports": [
       "code.linenisgreat.com/spinclass/internal/sessionlog",
       "code.linenisgreat.com/spinclass/internal/worktree"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/sessionexec",
@@ -1365,7 +1420,8 @@
     "imports": [
       "code.linenisgreat.com/spinclass/internal/direnv",
       "code.linenisgreat.com/spinclass/internal/session"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/sessionlog",
@@ -1382,7 +1438,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/sessionpick",
@@ -1404,7 +1461,8 @@
       "github.com/charmbracelet/bubbles/list",
       "github.com/charmbracelet/bubbletea",
       "github.com/mattn/go-isatty"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/setupfingerprint",
@@ -1424,7 +1482,8 @@
     "imports": [
       "code.linenisgreat.com/spinclass/internal/embeds",
       "code.linenisgreat.com/spinclass/internal/sweatfile"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/shop",
@@ -1459,7 +1518,8 @@
       "github.com/charmbracelet/huh",
       "github.com/charmbracelet/log",
       "github.com/mattn/go-isatty"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/spawn",
@@ -1486,7 +1546,8 @@
       "code.linenisgreat.com/spinclass/internal/sweatfile",
       "code.linenisgreat.com/spinclass/internal/sweatfileio",
       "code.linenisgreat.com/spinclass/internal/worktree"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/spawnhandshake",
@@ -1503,7 +1564,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/status",
@@ -1526,7 +1588,8 @@
       "code.linenisgreat.com/spinclass/internal/worktree",
       "code.linenisgreat.com/tap/go/pkgs/writer",
       "github.com/charmbracelet/lipgloss"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/sweatfile",
@@ -1555,7 +1618,8 @@
       "code.linenisgreat.com/tommy/pkg/cst",
       "code.linenisgreat.com/tommy/pkg/document",
       "github.com/charmbracelet/log"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/sweatfileio",
@@ -1575,7 +1639,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/spinclass/internal/sweatfile"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/sysprompt",
@@ -1615,7 +1680,8 @@
       "code.linenisgreat.com/spinclass/internal/repoinfo",
       "code.linenisgreat.com/spinclass/internal/session",
       "code.linenisgreat.com/spinclass/internal/sweatfileio"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/tap",
@@ -1632,7 +1698,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/tapblock",
@@ -1651,7 +1718,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/tap/go/pkgs/writer"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/testfs",
@@ -1668,7 +1736,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/testgit",
@@ -1685,7 +1754,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/validate",
@@ -1706,7 +1776,8 @@
       "code.linenisgreat.com/spinclass/internal/sweatfile",
       "code.linenisgreat.com/spinclass/internal/sweatfileio",
       "code.linenisgreat.com/spinclass/internal/tap"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/spinclass/internal/worktree",
@@ -1734,7 +1805,8 @@
       "code.linenisgreat.com/spinclass/internal/setupfingerprint",
       "code.linenisgreat.com/spinclass/internal/sweatfile",
       "code.linenisgreat.com/spinclass/internal/sweatfileio"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/tap/go/internal/0/classify",
@@ -1751,7 +1823,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/tap/go/internal/0/diagnostic",
@@ -1768,7 +1841,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/tap/go/internal/0/style",
@@ -1788,7 +1862,8 @@
     "imports": [
       "github.com/charmbracelet/lipgloss",
       "github.com/muesli/termenv"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/tap/go/internal/alfa/parse",
@@ -1808,7 +1883,8 @@
     "imports": [
       "code.linenisgreat.com/tap/go/internal/0/classify",
       "code.linenisgreat.com/tap/go/internal/0/diagnostic"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/tap/go/internal/alfa/yaml_diagnostic",
@@ -1827,7 +1903,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/tap/go/internal/0/classify"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/tap/go/internal/bravo/ndjson",
@@ -1846,7 +1923,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/tap/go/internal/0/diagnostic"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/tap/go/internal/bravo/reader",
@@ -1870,7 +1948,8 @@
       "golang.org/x/text/language",
       "golang.org/x/text/message",
       "gopkg.in/yaml.v3"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/tap/go/internal/bravo/writer",
@@ -1894,7 +1973,8 @@
       "code.linenisgreat.com/tap/go/internal/alfa/yaml_diagnostic",
       "golang.org/x/text/language",
       "golang.org/x/text/message"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/tap/go/pkgs/ndjson",
@@ -1913,7 +1993,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/tap/go/internal/bravo/ndjson"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/tap/go/pkgs/reader",
@@ -1932,7 +2013,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/tap/go/internal/bravo/reader"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/tap/go/pkgs/writer",
@@ -1951,7 +2033,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/tap/go/internal/bravo/writer"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/tap/go/pkgs/yaml_diagnostic",
@@ -1970,7 +2053,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/tap/go/internal/alfa/yaml_diagnostic"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/tommy/internal/lexer",
@@ -1990,7 +2074,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/tommy/internal/ringbuf"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/tommy/internal/ringbuf",
@@ -2009,7 +2094,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/tommy/pkg/cst",
@@ -2032,7 +2118,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/tommy/internal/lexer"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "code.linenisgreat.com/tommy/pkg/document",
@@ -2052,7 +2139,8 @@
     "embedPatterns": null,
     "imports": [
       "code.linenisgreat.com/tommy/pkg/cst"
-    ]
+    ],
+    "goVersion": "1.26"
   },
   {
     "importPath": "github.com/atotto/clipboard",
@@ -2070,7 +2158,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.16"
   },
   {
     "importPath": "github.com/aymanbagabas/go-osc52/v2",
@@ -2087,7 +2176,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.16"
   },
   {
     "importPath": "github.com/catppuccin/go",
@@ -2108,7 +2198,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.19"
   },
   {
     "importPath": "github.com/charmbracelet/bubbles/cursor",
@@ -2128,7 +2219,8 @@
     "imports": [
       "github.com/charmbracelet/bubbletea",
       "github.com/charmbracelet/lipgloss"
-    ]
+    ],
+    "goVersion": "1.24.2"
   },
   {
     "importPath": "github.com/charmbracelet/bubbles/filepicker",
@@ -2151,7 +2243,8 @@
       "github.com/charmbracelet/bubbletea",
       "github.com/charmbracelet/lipgloss",
       "github.com/dustin/go-humanize"
-    ]
+    ],
+    "goVersion": "1.24.2"
   },
   {
     "importPath": "github.com/charmbracelet/bubbles/help",
@@ -2172,7 +2265,8 @@
       "github.com/charmbracelet/bubbles/key",
       "github.com/charmbracelet/bubbletea",
       "github.com/charmbracelet/lipgloss"
-    ]
+    ],
+    "goVersion": "1.24.2"
   },
   {
     "importPath": "github.com/charmbracelet/bubbles/key",
@@ -2189,7 +2283,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.24.2"
   },
   {
     "importPath": "github.com/charmbracelet/bubbles/list",
@@ -2219,7 +2314,8 @@
       "github.com/charmbracelet/lipgloss",
       "github.com/charmbracelet/x/ansi",
       "github.com/sahilm/fuzzy"
-    ]
+    ],
+    "goVersion": "1.24.2"
   },
   {
     "importPath": "github.com/charmbracelet/bubbles/paginator",
@@ -2239,7 +2335,8 @@
     "imports": [
       "github.com/charmbracelet/bubbles/key",
       "github.com/charmbracelet/bubbletea"
-    ]
+    ],
+    "goVersion": "1.24.2"
   },
   {
     "importPath": "github.com/charmbracelet/bubbles/progress",
@@ -2263,7 +2360,8 @@
       "github.com/charmbracelet/x/ansi",
       "github.com/lucasb-eyer/go-colorful",
       "github.com/muesli/termenv"
-    ]
+    ],
+    "goVersion": "1.24.2"
   },
   {
     "importPath": "github.com/charmbracelet/bubbles/runeutil",
@@ -2280,7 +2378,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.24.2"
   },
   {
     "importPath": "github.com/charmbracelet/bubbles/spinner",
@@ -2300,7 +2399,8 @@
     "imports": [
       "github.com/charmbracelet/bubbletea",
       "github.com/charmbracelet/lipgloss"
-    ]
+    ],
+    "goVersion": "1.24.2"
   },
   {
     "importPath": "github.com/charmbracelet/bubbles/textarea",
@@ -2329,7 +2429,8 @@
       "github.com/charmbracelet/x/ansi",
       "github.com/mattn/go-runewidth",
       "github.com/rivo/uniseg"
-    ]
+    ],
+    "goVersion": "1.24.2"
   },
   {
     "importPath": "github.com/charmbracelet/bubbles/textarea/memoization",
@@ -2346,7 +2447,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.24.2"
   },
   {
     "importPath": "github.com/charmbracelet/bubbles/textinput",
@@ -2373,7 +2475,8 @@
       "github.com/charmbracelet/x/ansi",
       "github.com/mattn/go-runewidth",
       "github.com/rivo/uniseg"
-    ]
+    ],
+    "goVersion": "1.24.2"
   },
   {
     "importPath": "github.com/charmbracelet/bubbles/viewport",
@@ -2396,7 +2499,8 @@
       "github.com/charmbracelet/bubbletea",
       "github.com/charmbracelet/lipgloss",
       "github.com/charmbracelet/x/ansi"
-    ]
+    ],
+    "goVersion": "1.24.2"
   },
   {
     "importPath": "github.com/charmbracelet/bubbletea",
@@ -2437,7 +2541,8 @@
       "github.com/charmbracelet/x/term",
       "github.com/muesli/ansi/compressor",
       "github.com/muesli/cancelreader"
-    ]
+    ],
+    "goVersion": "1.24.0"
   },
   {
     "importPath": "github.com/charmbracelet/colorprofile",
@@ -2462,7 +2567,8 @@
       "github.com/charmbracelet/x/ansi",
       "github.com/charmbracelet/x/term",
       "github.com/xo/terminfo"
-    ]
+    ],
+    "goVersion": "1.24.2"
   },
   {
     "importPath": "github.com/charmbracelet/harmonica",
@@ -2481,7 +2587,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.16"
   },
   {
     "importPath": "github.com/charmbracelet/huh",
@@ -2533,7 +2640,8 @@
       "github.com/charmbracelet/x/cellbuf",
       "github.com/charmbracelet/x/exp/strings",
       "github.com/mitchellh/hashstructure/v2"
-    ]
+    ],
+    "goVersion": "1.23.0"
   },
   {
     "importPath": "github.com/charmbracelet/huh/internal/accessibility",
@@ -2552,7 +2660,8 @@
     "embedPatterns": null,
     "imports": [
       "github.com/charmbracelet/x/term"
-    ]
+    ],
+    "goVersion": "1.23.0"
   },
   {
     "importPath": "github.com/charmbracelet/huh/internal/selector",
@@ -2569,7 +2678,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.23.0"
   },
   {
     "importPath": "github.com/charmbracelet/lipgloss",
@@ -2605,7 +2715,8 @@
       "github.com/charmbracelet/x/cellbuf",
       "github.com/muesli/termenv",
       "github.com/rivo/uniseg"
-    ]
+    ],
+    "goVersion": "1.18"
   },
   {
     "importPath": "github.com/charmbracelet/lipgloss/table",
@@ -2628,7 +2739,8 @@
     "imports": [
       "github.com/charmbracelet/lipgloss",
       "github.com/charmbracelet/x/ansi"
-    ]
+    ],
+    "goVersion": "1.18"
   },
   {
     "importPath": "github.com/charmbracelet/log",
@@ -2660,7 +2772,8 @@
       "github.com/charmbracelet/lipgloss",
       "github.com/go-logfmt/logfmt",
       "github.com/muesli/termenv"
-    ]
+    ],
+    "goVersion": "1.19"
   },
   {
     "importPath": "github.com/charmbracelet/x/ansi",
@@ -2730,7 +2843,8 @@
       "github.com/clipperhouse/uax29/v2/graphemes",
       "github.com/lucasb-eyer/go-colorful",
       "github.com/mattn/go-runewidth"
-    ]
+    ],
+    "goVersion": "1.24.2"
   },
   {
     "importPath": "github.com/charmbracelet/x/ansi/parser",
@@ -2749,7 +2863,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.24.2"
   },
   {
     "importPath": "github.com/charmbracelet/x/cellbuf",
@@ -2786,7 +2901,8 @@
       "github.com/charmbracelet/x/term",
       "github.com/mattn/go-runewidth",
       "github.com/rivo/uniseg"
-    ]
+    ],
+    "goVersion": "1.24.2"
   },
   {
     "importPath": "github.com/charmbracelet/x/exp/strings",
@@ -2803,7 +2919,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.19"
   },
   {
     "importPath": "github.com/charmbracelet/x/term",
@@ -2826,7 +2943,8 @@
     "embedPatterns": null,
     "imports": [
       "golang.org/x/sys/unix"
-    ]
+    ],
+    "goVersion": "1.24.0"
   },
   {
     "importPath": "github.com/clipperhouse/displaywidth",
@@ -2849,7 +2967,8 @@
     "imports": [
       "github.com/clipperhouse/stringish",
       "github.com/clipperhouse/uax29/v2/graphemes"
-    ]
+    ],
+    "goVersion": "1.18"
   },
   {
     "importPath": "github.com/clipperhouse/stringish",
@@ -2866,7 +2985,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.18"
   },
   {
     "importPath": "github.com/clipperhouse/uax29/v2/graphemes",
@@ -2888,7 +3008,8 @@
     "embedPatterns": null,
     "imports": [
       "github.com/clipperhouse/stringish"
-    ]
+    ],
+    "goVersion": "1.18"
   },
   {
     "importPath": "github.com/dustin/go-humanize",
@@ -2915,7 +3036,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.16"
   },
   {
     "importPath": "github.com/go-logfmt/logfmt",
@@ -2935,7 +3057,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.17"
   },
   {
     "importPath": "github.com/google/shlex",
@@ -2952,7 +3075,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.13"
   },
   {
     "importPath": "github.com/lucasb-eyer/go-colorful",
@@ -2977,7 +3101,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.12"
   },
   {
     "importPath": "github.com/mattn/go-isatty",
@@ -2997,7 +3122,8 @@
     "embedPatterns": null,
     "imports": [
       "golang.org/x/sys/unix"
-    ]
+    ],
+    "goVersion": "1.15"
   },
   {
     "importPath": "github.com/mattn/go-runewidth",
@@ -3018,7 +3144,8 @@
     "embedPatterns": null,
     "imports": [
       "github.com/clipperhouse/uax29/v2/graphemes"
-    ]
+    ],
+    "goVersion": "1.20"
   },
   {
     "importPath": "github.com/mitchellh/hashstructure/v2",
@@ -3037,7 +3164,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.14"
   },
   {
     "importPath": "github.com/muesli/ansi",
@@ -3058,7 +3186,8 @@
     "embedPatterns": null,
     "imports": [
       "github.com/mattn/go-runewidth"
-    ]
+    ],
+    "goVersion": "1.17"
   },
   {
     "importPath": "github.com/muesli/ansi/compressor",
@@ -3077,7 +3206,8 @@
     "embedPatterns": null,
     "imports": [
       "github.com/muesli/ansi"
-    ]
+    ],
+    "goVersion": "1.17"
   },
   {
     "importPath": "github.com/muesli/cancelreader",
@@ -3097,7 +3227,8 @@
     "embedPatterns": null,
     "imports": [
       "golang.org/x/sys/unix"
-    ]
+    ],
+    "goVersion": "1.17"
   },
   {
     "importPath": "github.com/muesli/termenv",
@@ -3133,7 +3264,8 @@
       "github.com/mattn/go-isatty",
       "github.com/rivo/uniseg",
       "golang.org/x/sys/unix"
-    ]
+    ],
+    "goVersion": "1.17"
   },
   {
     "importPath": "github.com/rivo/uniseg",
@@ -3167,7 +3299,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.18"
   },
   {
     "importPath": "github.com/sahilm/fuzzy",
@@ -3184,7 +3317,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.16"
   },
   {
     "importPath": "github.com/xo/terminfo",
@@ -3208,7 +3342,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.19"
   },
   {
     "importPath": "golang.org/x/sys/unix",
@@ -3267,7 +3402,8 @@
     ],
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.25.0"
   },
   {
     "importPath": "golang.org/x/term",
@@ -3289,7 +3425,8 @@
     "embedPatterns": null,
     "imports": [
       "golang.org/x/sys/unix"
-    ]
+    ],
+    "goVersion": "1.25.0"
   },
   {
     "importPath": "golang.org/x/text/feature/plural",
@@ -3315,7 +3452,8 @@
       "golang.org/x/text/internal/number",
       "golang.org/x/text/language",
       "golang.org/x/text/message/catalog"
-    ]
+    ],
+    "goVersion": "1.25.0"
   },
   {
     "importPath": "golang.org/x/text/internal",
@@ -3335,7 +3473,8 @@
     "embedPatterns": null,
     "imports": [
       "golang.org/x/text/language"
-    ]
+    ],
+    "goVersion": "1.25.0"
   },
   {
     "importPath": "golang.org/x/text/internal/catmsg",
@@ -3356,7 +3495,8 @@
     "embedPatterns": null,
     "imports": [
       "golang.org/x/text/language"
-    ]
+    ],
+    "goVersion": "1.25.0"
   },
   {
     "importPath": "golang.org/x/text/internal/format",
@@ -3376,7 +3516,8 @@
     "embedPatterns": null,
     "imports": [
       "golang.org/x/text/language"
-    ]
+    ],
+    "goVersion": "1.25.0"
   },
   {
     "importPath": "golang.org/x/text/internal/language",
@@ -3404,7 +3545,8 @@
     "embedPatterns": null,
     "imports": [
       "golang.org/x/text/internal/tag"
-    ]
+    ],
+    "goVersion": "1.25.0"
   },
   {
     "importPath": "golang.org/x/text/internal/language/compact",
@@ -3427,7 +3569,8 @@
     "embedPatterns": null,
     "imports": [
       "golang.org/x/text/internal/language"
-    ]
+    ],
+    "goVersion": "1.25.0"
   },
   {
     "importPath": "golang.org/x/text/internal/number",
@@ -3454,7 +3597,8 @@
       "golang.org/x/text/internal/language/compact",
       "golang.org/x/text/internal/stringset",
       "golang.org/x/text/language"
-    ]
+    ],
+    "goVersion": "1.25.0"
   },
   {
     "importPath": "golang.org/x/text/internal/stringset",
@@ -3471,7 +3615,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.25.0"
   },
   {
     "importPath": "golang.org/x/text/internal/tag",
@@ -3488,7 +3633,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.25.0"
   },
   {
     "importPath": "golang.org/x/text/language",
@@ -3514,7 +3660,8 @@
     "imports": [
       "golang.org/x/text/internal/language",
       "golang.org/x/text/internal/language/compact"
-    ]
+    ],
+    "goVersion": "1.25.0"
   },
   {
     "importPath": "golang.org/x/text/message",
@@ -3541,7 +3688,8 @@
       "golang.org/x/text/internal/number",
       "golang.org/x/text/language",
       "golang.org/x/text/message/catalog"
-    ]
+    ],
+    "goVersion": "1.25.0"
   },
   {
     "importPath": "golang.org/x/text/message/catalog",
@@ -3563,7 +3711,8 @@
       "golang.org/x/text/internal",
       "golang.org/x/text/internal/catmsg",
       "golang.org/x/text/language"
-    ]
+    ],
+    "goVersion": "1.25.0"
   },
   {
     "importPath": "golang.org/x/xerrors",
@@ -3588,7 +3737,8 @@
     "embedPatterns": null,
     "imports": [
       "golang.org/x/xerrors/internal"
-    ]
+    ],
+    "goVersion": "1.18"
   },
   {
     "importPath": "golang.org/x/xerrors/internal",
@@ -3605,7 +3755,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.18"
   },
   {
     "importPath": "gopkg.in/yaml.v3",
@@ -3634,7 +3785,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.16"
   },
   {
     "importPath": "mvdan.cc/sh/v3/fileutil",
@@ -3651,7 +3803,8 @@
     "sFiles": null,
     "embedFiles": null,
     "embedPatterns": null,
-    "imports": null
+    "imports": null,
+    "goVersion": "1.25.0"
   },
   {
     "importPath": "mvdan.cc/sh/v3/syntax",
@@ -3681,6 +3834,7 @@
     "embedPatterns": null,
     "imports": [
       "mvdan.cc/sh/v3/fileutil"
-    ]
+    ],
+    "goVersion": "1.25.0"
   }
 ]
