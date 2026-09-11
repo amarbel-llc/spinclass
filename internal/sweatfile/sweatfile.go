@@ -48,6 +48,15 @@ type SessionEntry struct {
 	// clown's `--` provider-args boundary). See
 	// docs/plans/2026-07-11-spawn-model-selection-design.md.
 	ModelFlags map[string]string `toml:"model-flags"`
+	// ModelIDs maps a short model alias (e.g. "opus") to the full Claude
+	// model ID spliced in its place when the resolved provider is "claude"
+	// (see spawn.SpliceModelFlag). Non-claude providers pass the alias
+	// through unrewritten — spinclass has no registry for their model
+	// namespaces. Per-key merge like ModelFlags/Env. Unlike ModelFlags, the
+	// built-in alias set ships via GetDefault(), not an inline fallback in
+	// the accessor — see GetDefault's SessionEntry.ModelIDs. See the
+	// addendum in docs/plans/2026-07-11-spawn-model-selection-design.md.
+	ModelIDs map[string]string `toml:"model-ids"`
 }
 
 type Hooks struct {
@@ -793,6 +802,19 @@ func (sf Sweatfile) SessionModelFlags() map[string]string {
 	return map[string]string{"claude": "--model"}
 }
 
+// SessionModelIDs returns the configured [session-entry.model-ids] alias->ID
+// map used to rewrite a short model alias to its full Claude model ID (see
+// spawn.SpliceModelFlag). Unlike SessionModelFlags, this accessor has no
+// inline hardcoded fallback — the built-in alias set is seeded by
+// GetDefault() and reaches callers via the usual GetDefault().MergeWith(...)
+// merge, so an unconfigured/empty SessionEntry here returns nil.
+func (sf Sweatfile) SessionModelIDs() map[string]string {
+	if sf.SessionEntry == nil {
+		return nil
+	}
+	return sf.SessionEntry.ModelIDs
+}
+
 // SessionEnv returns the user-configured environment variables to inject
 // into the session's process environment. These are exposed to
 // `[session-entry].start`/`resume` argv expansion, to lifecycle hooks,
@@ -862,6 +884,20 @@ func GetDefault() Sweatfile {
 			".envrc", ".direnv/", ".tmp/", ".claude/settings.local.json",
 		}},
 		StartCommands: defaultStartCommands(),
+		// Built-in spawn-session model-alias->full-ID map (see
+		// SessionEntry.ModelIDs and the addendum in
+		// docs/plans/2026-07-11-spawn-model-selection-design.md). A user
+		// sweatfile can add/override individual aliases via
+		// [session-entry.model-ids] without losing this default set (the
+		// usual per-key ModelFlags/Env merge semantics).
+		SessionEntry: &SessionEntry{
+			ModelIDs: map[string]string{
+				"sonnet": "claude-sonnet-5",
+				"opus":   "claude-opus-5",
+				"haiku":  "claude-haiku-4-5-20251001",
+				"fable":  "claude-fable-5-1",
+			},
+		},
 	}
 
 	if home, err := os.UserHomeDir(); err == nil && home != "" {

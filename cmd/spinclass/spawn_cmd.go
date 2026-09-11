@@ -175,15 +175,26 @@ func handleSpawnSession(_ context.Context, args json.RawMessage, _ command.Promp
 	return command.TextResult(spawnResultText(driverKey, res)), nil
 }
 
-// completeModelAliases offers the fixed set of known model aliases for
-// tab completion / MCP client hinting.
+// completeModelAliases offers the model aliases configured in the merged
+// sweatfile ([session-entry.model-ids], built-in-seeded via
+// sweatfile.GetDefault()) for tab completion / MCP client hinting, so the
+// hint can never drift from the alias->ID map SpliceModelFlag actually
+// consults. Uses cwd (via loadMergedSweatfile, same helper the plugin
+// start-commands use) — a repo/global sweatfile override is reflected here.
 func completeModelAliases() map[string]string {
-	return map[string]string{
-		"sonnet": "Claude Sonnet 5",
-		"opus":   "Claude Opus 4.8",
-		"haiku":  "Claude Haiku 4.5",
-		"fable":  "Claude Fable 5",
+	merged, _, ok := loadMergedSweatfile()
+	if !ok {
+		return nil
 	}
+	ids := merged.SessionModelIDs()
+	if len(ids) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(ids))
+	for alias, id := range ids {
+		result[alias] = id
+	}
+	return result
 }
 
 // completeSpawnRepos offers repo dirname leaves matching spawn.ResolveRepo's
@@ -234,7 +245,7 @@ func spawnParamList() []command.Param {
 		{
 			Name:        "model",
 			Type:        command.String,
-			Description: "Model alias for the worker (sonnet, opus, haiku, fable). Spliced into the resolved spawn-entry's provider-args per [session-entry.model-flags] (default: {\"claude\": \"--model\"}). Omit to use the harness's own default.",
+			Description: "Model alias for the worker (sonnet, opus, haiku, fable). For the claude provider, resolved to the full model ID via [session-entry.model-ids] (built-in default; overridable per sweatfile) before being spliced into the resolved spawn-entry's provider-args per [session-entry.model-flags] (default: {\"claude\": \"--model\"}). Omit to use the harness's own default.",
 			Completer:   completeModelAliases,
 		},
 	}

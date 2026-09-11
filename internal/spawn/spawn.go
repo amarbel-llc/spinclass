@@ -116,12 +116,15 @@ func Launch(home, repoPath, driverKey, brief, desc, model string, deadline time.
 // renderSpawn loads the WORKER repo's sweatfile hierarchy (its harness decides
 // the spawn-entry, not the driver's) and renders the detached-harness argv. It
 // also returns the hierarchy's [session-entry].env for the exec's environment.
-// When model is non-empty, the resolved provider's model flag and alias
-// (from [session-entry.model-flags]) are spliced into the entry immediately
-// after its literal "--" provider-args separator, via SpliceModelFlag,
-// BEFORE {prompt}/{dir} substitution; model == "" leaves the entry
-// unmodified. Safe to call before the worktree exists: LoadWorktreeHierarchy
-// treats a missing leaf sweatfile as an empty layer.
+// When model is non-empty, the resolved provider's model flag (from
+// [session-entry.model-flags]) and resolved model value — for the "claude"
+// provider, [session-entry.model-ids][alias] (the full model ID, built in
+// via sweatfile.GetDefault() for sonnet/opus/haiku/fable); the raw alias for
+// any other provider — are spliced into the entry immediately after its
+// literal "--" provider-args separator, via SpliceModelFlag, BEFORE
+// {prompt}/{dir} substitution; model == "" leaves the entry unmodified. Safe
+// to call before the worktree exists: LoadWorktreeHierarchy treats a missing
+// leaf sweatfile as an empty layer.
 // It also returns the merged config itself, because the caller needs the
 // worker repo's [hooks].allow-stale-base before creating the worktree and
 // re-loading the hierarchy for one boolean would be a second full walk of the
@@ -131,11 +134,17 @@ func renderSpawn(home string, rp worktree.ResolvedPath, brief, model string) (ar
 	if err != nil {
 		return nil, nil, nil, merged, fmt.Errorf("loading worker sweatfile hierarchy: %w", err)
 	}
-	merged = hierarchy.Merged
+	// GetDefault() as the base layer is what actually delivers the built-in
+	// [session-entry.model-ids] default (sonnet/opus/haiku/fable) to a spawn
+	// whose worker repo has no sweatfile override — same pattern as
+	// worktree.go/commands_plugin.go/validate.go/hooks.go. The other fields
+	// GetDefault() sets (Git, StartCommands, Claude) don't collide with
+	// anything renderSpawn/LaunchDetached reads off merged.
+	merged = sweatfile.GetDefault().MergeWith(hierarchy.Merged)
 
 	entry := merged.SessionSpawnEntry()
 	if model != "" {
-		entry, err = SpliceModelFlag(entry, model, merged.SessionModelFlags())
+		entry, err = SpliceModelFlag(entry, model, merged.SessionModelFlags(), merged.SessionModelIDs())
 		if err != nil {
 			return nil, nil, nil, merged, err
 		}

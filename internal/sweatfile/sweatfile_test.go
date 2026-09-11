@@ -1472,6 +1472,98 @@ func TestMergeSessionModelFlagsInherit(t *testing.T) {
 	}
 }
 
+// TestSessionModelIDsAccessorDefault pins the deliberate difference from
+// SessionModelFlags: this accessor has NO inline hardcoded fallback — the
+// built-in alias set is seeded by GetDefault(), not returned here.
+func TestSessionModelIDsAccessorDefault(t *testing.T) {
+	for _, sf := range []Sweatfile{
+		{},
+		{SessionEntry: &SessionEntry{}},
+	} {
+		if got := sf.SessionModelIDs(); got != nil {
+			t.Errorf("SessionModelIDs() = %v, want nil (no inline fallback, unlike SessionModelFlags)", got)
+		}
+	}
+}
+
+func TestSessionModelIDsAccessorConfigured(t *testing.T) {
+	sf := Sweatfile{
+		SessionEntry: &SessionEntry{
+			ModelIDs: map[string]string{"opus": "claude-opus-5"},
+		},
+	}
+	got := sf.SessionModelIDs()
+	if len(got) != 1 || got["opus"] != "claude-opus-5" {
+		t.Errorf("SessionModelIDs() = %v, want configured map verbatim", got)
+	}
+}
+
+func TestMergeSessionModelIDsPerKey(t *testing.T) {
+	// Mirrors TestMergeSessionModelFlagsPerKey: child adds a key without
+	// dropping the parent's, and overrides a colliding key.
+	base := Sweatfile{
+		SessionEntry: &SessionEntry{
+			ModelIDs: map[string]string{"sonnet": "claude-sonnet-5", "opus": "claude-opus-4"},
+		},
+	}
+	override := Sweatfile{
+		SessionEntry: &SessionEntry{
+			ModelIDs: map[string]string{"opus": "claude-opus-5", "haiku": "claude-haiku-4-5-20251001"},
+		},
+	}
+	merged := base.MergeWith(override)
+	want := map[string]string{
+		"sonnet": "claude-sonnet-5",
+		"opus":   "claude-opus-5",
+		"haiku":  "claude-haiku-4-5-20251001",
+	}
+	got := merged.SessionEntry.ModelIDs
+	if len(got) != len(want) {
+		t.Fatalf("merged ModelIDs = %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("merged ModelIDs[%q] = %q, want %q", k, got[k], v)
+		}
+	}
+}
+
+func TestMergeSessionModelIDsInherit(t *testing.T) {
+	base := Sweatfile{
+		SessionEntry: &SessionEntry{ModelIDs: map[string]string{"opus": "claude-opus-5"}},
+	}
+	override := Sweatfile{SessionEntry: &SessionEntry{Start: []string{"zellij"}}}
+	merged := base.MergeWith(override)
+	if got := merged.SessionEntry.ModelIDs; len(got) != 1 || got["opus"] != "claude-opus-5" {
+		t.Errorf("expected inherited ModelIDs, got %v", got)
+	}
+}
+
+// TestGetDefaultShipsModelIDs pins the built-in spawn-session model-alias
+// set, the mechanism the user asked for: sweatfile-configurable, with this
+// mapping as the compiled-in default.
+func TestGetDefaultShipsModelIDs(t *testing.T) {
+	want := map[string]string{
+		"sonnet": "claude-sonnet-5",
+		"opus":   "claude-opus-5",
+		"haiku":  "claude-haiku-4-5-20251001",
+		"fable":  "claude-fable-5-1",
+	}
+	def := GetDefault()
+	if def.SessionEntry == nil {
+		t.Fatal("expected non-nil SessionEntry in GetDefault()")
+	}
+	got := def.SessionEntry.ModelIDs
+	if len(got) != len(want) {
+		t.Fatalf("GetDefault().SessionEntry.ModelIDs = %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("GetDefault().SessionEntry.ModelIDs[%q] = %q, want %q", k, got[k], v)
+		}
+	}
+}
+
 func TestParseSessionEntryEnvSubtable(t *testing.T) {
 	input := `
 [session-entry]

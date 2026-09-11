@@ -719,6 +719,19 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				}
 			}
 		}
+		if _vSessionEntryModelIds, _ok := _vSessionEntry.Get("model-ids"); _ok && _vSessionEntryModelIds.Kind == cst.VTable {
+			_vSessionEntryModelIds.MarkSeen()
+			sessionEntryVal6.ModelIDs = make(map[string]string)
+			for _iSessionEntryModelIds := range _vSessionEntryModelIds.Fields {
+				_fSessionEntryModelIds := &_vSessionEntryModelIds.Fields[_iSessionEntryModelIds]
+				if _fSessionEntryModelIds.Val.Kind == cst.VLeaf {
+					if _s, _sok := cst.ExtractString(_fSessionEntryModelIds.Val.Leaf); _sok {
+						sessionEntryVal6.ModelIDs[_fSessionEntryModelIds.Key] = _s
+						_fSessionEntryModelIds.Val.MarkConsumed()
+					}
+				}
+			}
+		}
 		d.data.SessionEntry = sessionEntryVal6
 	} else {
 		sessionEntryVal6 := &SessionEntry{}
@@ -1286,6 +1299,15 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 			tableNode := cst.EnsureChildTable(d.cstDoc.Root(), tableNode, "model-flags")
 			cst.DeleteAllValues(tableNode)
 			for k, v := range d.data.SessionEntry.ModelFlags {
+				if err := cst.SetAny(tableNode, k, v); err != nil {
+					return nil, fmt.Errorf("%w", err)
+				}
+			}
+		}
+		if d.data.SessionEntry.ModelIDs != nil {
+			tableNode := cst.EnsureChildTable(d.cstDoc.Root(), tableNode, "model-ids")
+			cst.DeleteAllValues(tableNode)
+			for k, v := range d.data.SessionEntry.ModelIDs {
 				if err := cst.SetAny(tableNode, k, v); err != nil {
 					return nil, fmt.Errorf("%w", err)
 				}
@@ -2150,6 +2172,19 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				}
 			}
 		}
+		if _vSessionEntryModelIds, _ok := _vSessionEntry.Get("model-ids"); _ok && _vSessionEntryModelIds.Kind == cst.VTable {
+			_vSessionEntryModelIds.MarkSeen()
+			sessionEntryVal6.ModelIDs = make(map[string]string)
+			for _iSessionEntryModelIds := range _vSessionEntryModelIds.Fields {
+				_fSessionEntryModelIds := &_vSessionEntryModelIds.Fields[_iSessionEntryModelIds]
+				if _fSessionEntryModelIds.Val.Kind == cst.VLeaf {
+					if _s, _sok := cst.ExtractString(_fSessionEntryModelIds.Val.Leaf); _sok {
+						sessionEntryVal6.ModelIDs[_fSessionEntryModelIds.Key] = _s
+						_fSessionEntryModelIds.Val.MarkConsumed()
+					}
+				}
+			}
+		}
 		data.SessionEntry = sessionEntryVal6
 	} else {
 		sessionEntryVal6 := &SessionEntry{}
@@ -2703,6 +2738,15 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 			tableNode := cst.EnsureChildTable(doc.Root(), tableNode, "model-flags")
 			cst.DeleteAllValues(tableNode)
 			for k, v := range data.SessionEntry.ModelFlags {
+				if err := cst.SetAny(tableNode, k, v); err != nil {
+					return fmt.Errorf("%w", err)
+				}
+			}
+		}
+		if data.SessionEntry.ModelIDs != nil {
+			tableNode := cst.EnsureChildTable(doc.Root(), tableNode, "model-ids")
+			cst.DeleteAllValues(tableNode)
+			for k, v := range data.SessionEntry.ModelIDs {
 				if err := cst.SetAny(tableNode, k, v); err != nil {
 					return fmt.Errorf("%w", err)
 				}

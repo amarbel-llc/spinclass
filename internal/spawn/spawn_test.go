@@ -410,10 +410,14 @@ func TestLaunchSplicesModelFlag(t *testing.T) {
 	// invocation, so it is NOT part of $@ (matches happySweatfile's
 	// TestLaunchHappyPath, which likewise only sees the brief, not the
 	// leading "sh"). The recorded argv is $@ after the model splice: the
-	// "--" separator, the spliced model flag+alias, then the substituted
-	// brief. The default model-flags map ({"claude": "--model"}) applies
-	// since the entry selects no --provider (defaults to "claude").
-	want := []string{"--", "--model", "opus", "brief"}
+	// "--" separator, the spliced model flag + resolved model value, then
+	// the substituted brief. The default model-flags map
+	// ({"claude": "--model"}) applies since the entry selects no --provider
+	// (defaults to "claude"), and "opus" resolves to its full Claude model
+	// ID (claude-opus-5) via the built-in [session-entry.model-ids] default
+	// (sweatfile.GetDefault(), merged into renderSpawn's hierarchy) — this
+	// fixture's sweatfile declares no model-ids override of its own.
+	want := []string{"--", "--model", "claude-opus-5", "brief"}
 	if len(argv) != len(want) {
 		t.Fatalf("argv = %v, want %v", argv, want)
 	}

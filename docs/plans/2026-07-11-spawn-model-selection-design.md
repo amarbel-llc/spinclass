@@ -1,7 +1,7 @@
 # Model selection for spawn-session / fork-session — design
 
 **Date:** 2026-07-11
-**Status:** implemented 2026-07-12; extended 2026-07-12 (see Addendum)
+**Status:** implemented 2026-07-12; extended 2026-07-12 and 2026-09-11 (see Addenda)
 
 ## Goal
 
@@ -205,3 +205,60 @@ provider (a local/gateway LLM control plane — see `juggler(7)`, `juggler(1)`,
   report confusing failures from typo'd juggler model names that a cheap
   `juggler models`/`ResolveModel` check would have caught before spawning a
   worker.
+
+## Addendum (2026-09-11): alias→full-model-ID rewrite for the claude provider
+
+Closes the "Out of scope" item above ("Per-provider alias *value*
+translation... only the flag name varies by provider in this design; the
+alias string is passed through verbatim") — but only for the `claude`
+provider, and only as a configurable, sweatfile-backed default rather than a
+hardcoded Go constant.
+
+### What changed
+
+- New `[session-entry.model-ids]` sweatfile field (`SessionEntry.ModelIDs
+  map[string]string`), merged per-key across the hierarchy exactly like
+  `[session-entry.model-flags]`/`[session-entry.env]`.
+- Its built-in default — `{"sonnet": "claude-sonnet-5", "opus":
+  "claude-opus-5", "haiku": "claude-haiku-4-5-20251001", "fable":
+  "claude-fable-5-1"}` — ships via `sweatfile.GetDefault()` (the same
+  compiled-in-default mechanism the `gh_issue`/`gh_pr` start-commands and the
+  baseline `Git.Excludes`/`Claude.Allow` use), **not** as an inline fallback
+  in an accessor like `SessionModelFlags()` does for its default. A user
+  sweatfile can add or override individual aliases without losing the rest
+  (the usual per-key map-merge semantics).
+- `renderSpawn` now merges `sweatfile.GetDefault()` as the base layer before
+  reading `SessionSpawnEntry`/`SessionModelFlags`/`SessionModelIDs` — it
+  previously did not (unlike `worktree.go`/`commands_plugin.go`/
+  `validate.go`/`hooks.go`, which already did), so this is what actually
+  delivers the built-in `model-ids` set to a worker repo with no sweatfile
+  override.
+- `ValidateModelAlias`/`SpliceModelFlag` now take the resolved `modelIDs`
+  map as a parameter instead of consulting a package-level
+  `KnownModelAliases` constant. For the `claude` provider, `SpliceModelFlag`
+  splices `modelIDs[alias]` (the full model ID) instead of the raw alias;
+  every other provider still gets the raw alias verbatim, unaffected — the
+  Out-of-scope item's "only the flag name varies by provider" default
+  remains true for them.
+- `sc spawn`'s `model` param tab-completion (`completeModelAliases`) now
+  reads the real merged sweatfile (reusing `loadMergedSweatfile()`) instead
+  of a separately hand-maintained, previously-stale display map — so it
+  reflects any sweatfile override and can't drift from what
+  `SpliceModelFlag` actually resolves.
+
+### Why
+
+Keeps the short mnemonic aliases (`sonnet`/`opus`/`haiku`/`fable`) as the
+stable, easy-to-type user-facing surface, while the value actually passed to
+`claude --model` is Anthropic's unambiguous (often dated) model ID — the
+same IDs sessions already see in their own system prompt. Sweatfile-backed
+rather than hardcoded so the mapping can be repointed (e.g. pinning a
+specific dated snapshot, or adding a fifth alias) without a spinclass code
+change, matching how `model-flags` is already user-extensible.
+
+### Tuning lever
+
+- **The built-in alias→ID map itself.** Update
+  `sweatfile.GetDefault()`'s `SessionEntry.ModelIDs` as models are
+  renamed/added/retired. Signal to revisit: a new model ships, or an
+  existing dated ID gets superseded.

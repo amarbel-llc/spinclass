@@ -498,7 +498,9 @@ dirs → repo at each level. Notable surface:
   `*-timeout` / output-format knobs, scalar override); `[auth]`
   (`mint-command` / `revoke-command`, scalar override — FDR 0028);
   `[session-entry]` (start/resume/spawn-entry/spawn-window argv, per-field
-  override; `model-flags` provider→CLI-flag map, merged per-key like `[env]`);
+  override; `model-flags` provider→CLI-flag map and `model-ids` alias→ID
+  map, both merged per-key like `[env]`; `model-ids`' built-in default
+  ships via `GetDefault()`, not an inline accessor fallback);
   `[sysprompt]` (`doc-index-dirs`, `man-index`, `repo-index` arrays — all
   **override not append**: non-empty replaces, `[]` disables, nil inherits.
   Only `doc-index-dirs` has a built-in default; the other two are off until
