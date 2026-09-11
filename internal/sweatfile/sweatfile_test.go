@@ -1539,6 +1539,43 @@ func TestMergeSessionModelIDsInherit(t *testing.T) {
 	}
 }
 
+func TestSessionAutoModeDisabledDefault(t *testing.T) {
+	for _, sf := range []Sweatfile{
+		{},
+		{SessionEntry: &SessionEntry{}},
+		{SessionEntry: &SessionEntry{DisableAutoMode: bptr(false)}},
+	} {
+		if sf.SessionAutoModeDisabled() {
+			t.Errorf("SessionAutoModeDisabled() = true, want false (default: auto-mode enabled)")
+		}
+	}
+}
+
+func TestSessionAutoModeDisabledConfigured(t *testing.T) {
+	sf := Sweatfile{SessionEntry: &SessionEntry{DisableAutoMode: bptr(true)}}
+	if !sf.SessionAutoModeDisabled() {
+		t.Error("SessionAutoModeDisabled() = false, want true")
+	}
+}
+
+func TestMergeSessionDisableAutoModeOverride(t *testing.T) {
+	base := Sweatfile{SessionEntry: &SessionEntry{DisableAutoMode: bptr(true)}}
+	override := Sweatfile{SessionEntry: &SessionEntry{DisableAutoMode: bptr(false)}}
+	merged := base.MergeWith(override)
+	if merged.SessionAutoModeDisabled() {
+		t.Error("expected child's explicit false to override parent's true")
+	}
+}
+
+func TestMergeSessionDisableAutoModeInherit(t *testing.T) {
+	base := Sweatfile{SessionEntry: &SessionEntry{DisableAutoMode: bptr(true)}}
+	override := Sweatfile{SessionEntry: &SessionEntry{Start: []string{"zellij"}}}
+	merged := base.MergeWith(override)
+	if !merged.SessionAutoModeDisabled() {
+		t.Error("expected inherited DisableAutoMode=true, got unset/false")
+	}
+}
+
 // TestGetDefaultShipsModelIDs pins the built-in spawn-session model-alias
 // set, the mechanism the user asked for: sweatfile-configurable, with this
 // mapping as the compiled-in default.

@@ -732,6 +732,12 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				}
 			}
 		}
+		if _vSessionEntryDisableAutoMode, _ok := _vSessionEntry.Get("disable-auto-mode"); _ok && _vSessionEntryDisableAutoMode.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vSessionEntryDisableAutoMode.Leaf); _xok {
+				sessionEntryVal6.DisableAutoMode = &_x
+				_vSessionEntryDisableAutoMode.MarkConsumed()
+			}
+		}
 		d.data.SessionEntry = sessionEntryVal6
 	} else {
 		sessionEntryVal6 := &SessionEntry{}
@@ -791,6 +797,13 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 					sessionEntryVal6.SpawnWindow = []string{}
 				}
 				_vSpawnWindow.MarkConsumed()
+			}
+		}
+		if _vDisableAutoMode, _ok := model.Get("disable-auto-mode"); _ok && _vDisableAutoMode.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractBool(_vDisableAutoMode.Leaf); _xok {
+				sessionEntryVal6.DisableAutoMode = &_x
+				_vDisableAutoMode.MarkConsumed()
 			}
 		}
 		if _foundSessionEntry {
@@ -1311,6 +1324,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				if err := cst.SetAny(tableNode, k, v); err != nil {
 					return nil, fmt.Errorf("%w", err)
 				}
+			}
+		}
+		if d.data.SessionEntry.DisableAutoMode != nil {
+			if err := cst.SetAny(tableNode, "disable-auto-mode", *d.data.SessionEntry.DisableAutoMode); err != nil {
+				return nil, fmt.Errorf("%w", err)
 			}
 		}
 	}
@@ -2185,6 +2203,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				}
 			}
 		}
+		if _vSessionEntryDisableAutoMode, _ok := _vSessionEntry.Get("disable-auto-mode"); _ok && _vSessionEntryDisableAutoMode.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vSessionEntryDisableAutoMode.Leaf); _xok {
+				sessionEntryVal6.DisableAutoMode = &_x
+				_vSessionEntryDisableAutoMode.MarkConsumed()
+			}
+		}
 		data.SessionEntry = sessionEntryVal6
 	} else {
 		sessionEntryVal6 := &SessionEntry{}
@@ -2244,6 +2268,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 					sessionEntryVal6.SpawnWindow = []string{}
 				}
 				_vSpawnWindow.MarkConsumed()
+			}
+		}
+		if _vDisableAutoMode, _ok := sub.Get("disable-auto-mode"); _ok && _vDisableAutoMode.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractBool(_vDisableAutoMode.Leaf); _xok {
+				sessionEntryVal6.DisableAutoMode = &_x
+				_vDisableAutoMode.MarkConsumed()
 			}
 		}
 		if _foundSessionEntry {
@@ -2750,6 +2781,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 				if err := cst.SetAny(tableNode, k, v); err != nil {
 					return fmt.Errorf("%w", err)
 				}
+			}
+		}
+		if data.SessionEntry.DisableAutoMode != nil {
+			if err := cst.SetAny(tableNode, "disable-auto-mode", *data.SessionEntry.DisableAutoMode); err != nil {
+				return fmt.Errorf("%w", err)
 			}
 		}
 	}

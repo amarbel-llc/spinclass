@@ -249,6 +249,10 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 				merged.SessionEntry.ModelIDs[k] = v
 			}
 		}
+		// DisableAutoMode: scalar override, like the [hooks] disable-* fields.
+		if other.SessionEntry.DisableAutoMode != nil {
+			merged.SessionEntry.DisableAutoMode = other.SessionEntry.DisableAutoMode
+		}
 		if len(other.SessionEntry.LivenessProbe) > 0 {
 			merged.SessionEntry.LivenessProbe = other.SessionEntry.LivenessProbe
 		}

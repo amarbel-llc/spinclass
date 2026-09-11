@@ -116,15 +116,18 @@ func Launch(home, repoPath, driverKey, brief, desc, model string, deadline time.
 // renderSpawn loads the WORKER repo's sweatfile hierarchy (its harness decides
 // the spawn-entry, not the driver's) and renders the detached-harness argv. It
 // also returns the hierarchy's [session-entry].env for the exec's environment.
-// When model is non-empty, the resolved provider's model flag (from
-// [session-entry.model-flags]) and resolved model value — for the "claude"
-// provider, [session-entry.model-ids][alias] (the full model ID, built in
-// via sweatfile.GetDefault() for sonnet/opus/haiku/fable); the raw alias for
-// any other provider — are spliced into the entry immediately after its
-// literal "--" provider-args separator, via SpliceModelFlag, BEFORE
-// {prompt}/{dir} substitution; model == "" leaves the entry unmodified. Safe
-// to call before the worktree exists: LoadWorktreeHierarchy treats a missing
-// leaf sweatfile as an empty layer.
+// Unless [session-entry].disable-auto-mode is set, AutoModeFlag is spliced
+// into the entry (claude provider only, silently skipped otherwise — see
+// SpliceAutoModeFlag) so a spawned worker boots with claude's own auto-mode
+// enabled by default. When model is non-empty, the resolved provider's model
+// flag (from [session-entry.model-flags]) and resolved model value — for the
+// "claude" provider, [session-entry.model-ids][alias] (the full model ID,
+// built in via sweatfile.GetDefault() for sonnet/opus/haiku/fable); the raw
+// alias for any other provider — are ALSO spliced into the entry immediately
+// after its literal "--" provider-args separator, via SpliceModelFlag,
+// BEFORE {prompt}/{dir} substitution; model == "" leaves that part of the
+// entry unmodified. Safe to call before the worktree exists:
+// LoadWorktreeHierarchy treats a missing leaf sweatfile as an empty layer.
 // It also returns the merged config itself, because the caller needs the
 // worker repo's [hooks].allow-stale-base before creating the worktree and
 // re-loading the hierarchy for one boolean would be a second full walk of the
@@ -143,6 +146,9 @@ func renderSpawn(home string, rp worktree.ResolvedPath, brief, model string) (ar
 	merged = sweatfile.GetDefault().MergeWith(hierarchy.Merged)
 
 	entry := merged.SessionSpawnEntry()
+	if !merged.SessionAutoModeDisabled() {
+		entry = SpliceAutoModeFlag(entry)
+	}
 	if model != "" {
 		entry, err = SpliceModelFlag(entry, model, merged.SessionModelFlags(), merged.SessionModelIDs())
 		if err != nil {

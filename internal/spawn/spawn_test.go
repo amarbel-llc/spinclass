@@ -409,17 +409,93 @@ func TestLaunchSplicesModelFlag(t *testing.T) {
 	// The entry's fixed "sh" element becomes $0 in the "sh -c script sh -- {prompt}"
 	// invocation, so it is NOT part of $@ (matches happySweatfile's
 	// TestLaunchHappyPath, which likewise only sees the brief, not the
-	// leading "sh"). The recorded argv is $@ after the model splice: the
-	// "--" separator, the spliced model flag + resolved model value, then
-	// the substituted brief. The default model-flags map
-	// ({"claude": "--model"}) applies since the entry selects no --provider
-	// (defaults to "claude"), and "opus" resolves to its full Claude model
-	// ID (claude-opus-5) via the built-in [session-entry.model-ids] default
-	// (sweatfile.GetDefault(), merged into renderSpawn's hierarchy) — this
-	// fixture's sweatfile declares no model-ids override of its own.
-	want := []string{"--", "--model", "claude-opus-5", "brief"}
+	// leading "sh"). The recorded argv is $@ after both splices: the "--"
+	// separator, then renderSpawn's auto-mode splice (runs first, inserts
+	// --model/value right after "--" on the NEXT splice — SpliceModelFlag
+	// always inserts immediately after "--", so it lands before the
+	// already-spliced --enable-auto-mode), then the substituted brief. The
+	// default model-flags map ({"claude": "--model"}) applies since the
+	// entry selects no --provider (defaults to "claude"), and "opus"
+	// resolves to its full Claude model ID (claude-opus-5) via the built-in
+	// [session-entry.model-ids] default (sweatfile.GetDefault(), merged
+	// into renderSpawn's hierarchy) — this fixture's sweatfile declares no
+	// model-ids/disable-auto-mode override of its own.
+	want := []string{"--", "--model", "claude-opus-5", "--enable-auto-mode", "brief"}
 	if len(argv) != len(want) {
 		t.Fatalf("argv = %v, want %v", argv, want)
+	}
+	for i := range want {
+		if argv[i] != want[i] {
+			t.Errorf("argv[%d] = %q, want %q", i, argv[i], want[i])
+		}
+	}
+}
+
+// TestLaunchDefaultsToAutoMode proves a spawn with NO model requested still
+// gets --enable-auto-mode spliced in by default (renderSpawn's auto-mode
+// splice is unconditional, unlike the model splice which is gated on the
+// model param).
+func TestLaunchDefaultsToAutoMode(t *testing.T) {
+	home, repoPath := newWorkerFixture(t, modelSpawnSweatfile)
+	const driverKey = "driver/test-session"
+	stop, helloErr := helloAfterLaunch(t, repoPath, driverKey)
+
+	res, err := Launch(home, repoPath, driverKey, "brief", "", "", 15*time.Second)
+	stop()
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if herr := <-helloErr; herr != nil {
+		t.Fatalf("hello goroutine: %v", herr)
+	}
+
+	argvBytes, err := os.ReadFile(filepath.Join(res.WorktreePath, "argv.txt"))
+	if err != nil {
+		t.Fatalf("reading argv.txt: %v", err)
+	}
+	argv := strings.Split(strings.TrimRight(string(argvBytes), "\n"), "\n")
+	want := []string{"--", "--enable-auto-mode", "brief"}
+	if len(argv) != len(want) {
+		t.Fatalf("argv = %v, want %v", argv, want)
+	}
+	for i := range want {
+		if argv[i] != want[i] {
+			t.Errorf("argv[%d] = %q, want %q", i, argv[i], want[i])
+		}
+	}
+}
+
+// autoModeDisabledSweatfile mirrors modelSpawnSweatfile but opts out of the
+// default auto-mode splice.
+const autoModeDisabledSweatfile = `[session-entry]
+spawn-entry = ["sh", "-c", 'printf "%s\n" "$@" > "$PWD/argv.txt"; touch "$PWD/launched"', "sh", "--", "{prompt}"]
+disable-auto-mode = true
+`
+
+// TestLaunchAutoModeDisabled proves [session-entry].disable-auto-mode opts a
+// spawn out of the default --enable-auto-mode splice entirely.
+func TestLaunchAutoModeDisabled(t *testing.T) {
+	home, repoPath := newWorkerFixture(t, autoModeDisabledSweatfile)
+	const driverKey = "driver/test-session"
+	stop, helloErr := helloAfterLaunch(t, repoPath, driverKey)
+
+	res, err := Launch(home, repoPath, driverKey, "brief", "", "", 15*time.Second)
+	stop()
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if herr := <-helloErr; herr != nil {
+		t.Fatalf("hello goroutine: %v", herr)
+	}
+
+	argvBytes, err := os.ReadFile(filepath.Join(res.WorktreePath, "argv.txt"))
+	if err != nil {
+		t.Fatalf("reading argv.txt: %v", err)
+	}
+	argv := strings.Split(strings.TrimRight(string(argvBytes), "\n"), "\n")
+	want := []string{"--", "brief"}
+	if len(argv) != len(want) {
+		t.Fatalf("argv = %v, want %v (disable-auto-mode should suppress the splice)", argv, want)
 	}
 	for i := range want {
 		if argv[i] != want[i] {
