@@ -205,7 +205,7 @@ func registerQueryCommands(app *command.App) {
 		},
 		Params: []command.Param{
 			{Name: "new-branch", Type: command.String, Description: "Name for the forked branch (auto-generated if omitted); must not contain '.' (reserved as the fleet room-JID component separator)"},
-			{Name: "from", Type: command.String, Description: "Source worktree directory to fork from", Completer: completeWorktreeTargets},
+			{Name: "from", Type: command.String, Description: "Source to fork from: a <repo>/<branch> session key from `sc list`, or a worktree directory", Completer: completeWorktreeTargets},
 			{Name: "brief", Type: command.String, Description: "REMOVED (spinclass#262): the detached-worker fork is gone. Use `sc spawn --brief \"...\"` (repo now optional) to launch a detached worker in this repo."},
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
@@ -223,7 +223,14 @@ func registerQueryCommands(app *command.App) {
 				)
 			}
 
+			// --from completes to session keys (completeWorktreeTargets), so
+			// resolve one to its worktree before falling back to a directory.
 			sourceDir := p.From
+			if sourceDir != "" {
+				if st, err := session.FindByTarget(sourceDir); err == nil {
+					sourceDir = st.WorktreePath
+				}
+			}
 			if sourceDir == "" {
 				cwd, err := os.Getwd()
 				if err != nil {

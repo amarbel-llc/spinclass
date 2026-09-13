@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	osexec "os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -358,10 +357,11 @@ func runRebuild(_ context.Context, args json.RawMessage) error {
 // sessions plus any session whose repo sits beneath the cwd
 // (session.ListForScope — a cwd above nested repos, e.g. ~/eng over
 // ~/eng/repos/*, sees the nested repos' sessions too); outside any
-// repo it includes every non-abandoned session. Containing-repo
-// sessions are keyed by bare worktree dirname; sessions from other
-// repos by their `<repo>/<branch>` session key — the same strings
-// `sc list` prints, which FindByTarget accepts. Labels are the picker
+// repo it includes every non-abandoned session. Every session is keyed
+// by its fully-qualified `<repo>/<branch>` session key — the same string
+// `sc list` prints and FindByTarget accepts — never a bare worktree
+// dirname, even for the containing repo: a bare name is only unambiguous
+// within one repo, and a key reads the same from any cwd. Labels are the picker
 // rows' Detail strings (sessionpick.ItemForState), so completion and
 // the interactive picker read identically. Output is sorted via
 // session.SortStates so the active session shows up first.
@@ -391,13 +391,7 @@ func completeWorktreeTargets() map[string]string {
 	now := time.Now()
 	result := make(map[string]string, len(sessions))
 	for _, s := range sessions {
-		key := filepath.Base(s.WorktreePath)
-		if repoErr == nil && s.RepoPath != repoPath {
-			// Reached via cwd-prefix matching: bare dirnames are only
-			// unambiguous within one repo, so offer the session key.
-			key = s.Key()
-		}
-		result[key] = sessionpick.ItemForState(s, now).Detail
+		result[s.Key()] = sessionpick.ItemForState(s, now).Detail
 	}
 	for key, label := range completeRemoteTargets(remotesForCwd()) {
 		result[key] = label

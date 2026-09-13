@@ -70,18 +70,18 @@ func TestCompleteWorktreeTargetsInRepoSorted(t *testing.T) {
 	t.Chdir(repoA)
 	got := completeWorktreeTargets()
 
-	if _, ok := got["other"]; ok {
-		t.Errorf("completer leaked repoB session 'other' into repoA scope: %v", got)
+	if _, ok := got["beta/other"]; ok {
+		t.Errorf("completer leaked repoB session 'beta/other' into repoA scope: %v", got)
 	}
 	if len(got) != 2 {
 		t.Errorf("got %d entries, want 2: %v", len(got), got)
 	}
 
-	// Labels match the picker's Detail format:
-	// "<state> · <relative-time> · @<branch> · <repo>".
+	// Keys are fully-qualified even for the containing repo; labels match
+	// the picker's Detail format: "<state> · <relative-time> · @<branch> · <repo>".
 	want := map[string]string{
-		"active-feature": "active · just now · @active-feature · alpha",
-		"stale-feature":  "inactive · just now · @stale-feature · alpha",
+		"alpha/active-feature": "active · just now · @active-feature · alpha",
+		"alpha/stale-feature":  "inactive · just now · @stale-feature · alpha",
 	}
 	for id, label := range want {
 		if got[id] != label {
@@ -91,9 +91,9 @@ func TestCompleteWorktreeTargetsInRepoSorted(t *testing.T) {
 }
 
 // TestCompleteWorktreeTargetsOutsideRepoIncludesRepoBasenameInLabel:
-// outside any repo, every non-abandoned session is offered, with the
-// repo basename appended to the label so duplicates across repos
-// disambiguate.
+// outside any repo, every non-abandoned session is offered under its
+// session key, so two repos' sessions sharing a worktree dirname stay
+// distinct entries rather than collapsing into one.
 func TestCompleteWorktreeTargetsOutsideRepoIncludesRepoBasenameInLabel(t *testing.T) {
 	testgit.RequireGit(t)
 	root := t.TempDir()
@@ -141,8 +141,14 @@ func TestCompleteWorktreeTargetsOutsideRepoIncludesRepoBasenameInLabel(t *testin
 	t.Chdir(outside)
 
 	got := completeWorktreeTargets()
-	if len(got) != 1 {
-		t.Errorf("got %d entries, want 1 (both sessions share the worktree dirname): %v", len(got), got)
+	if len(got) != 2 {
+		t.Errorf("got %d entries, want 2 (one per session key): %v", len(got), got)
+	}
+	if _, ok := got["alpha/shared-a"]; !ok {
+		t.Errorf("alpha session missing under its session key: %v", got)
+	}
+	if _, ok := got["beta/shared-b"]; !ok {
+		t.Errorf("beta session missing under its session key: %v", got)
 	}
 	for _, label := range got {
 		if !strings.Contains(label, "· alpha") && !strings.Contains(label, "· beta") {
@@ -156,11 +162,10 @@ func repoOf(wtPath string) string {
 }
 
 // TestCompleteWorktreeTargetsNestedRepos: from a repo that contains
-// nested repos (~/eng over ~/eng/repos/*), completion offers the
-// containing repo's sessions by bare dirname and the nested repos'
-// sessions by session key — the same strings `sc list` prints, which
-// FindByTarget accepts. Bare dirnames are only unambiguous within one
-// repo, so nested-repo sessions must NOT appear under their bare name.
+// nested repos (~/eng over ~/eng/repos/*), completion offers both the
+// containing repo's and the nested repos' sessions by session key — the
+// same strings `sc list` prints, which FindByTarget accepts. No session
+// is offered under its bare worktree dirname.
 func TestCompleteWorktreeTargetsNestedRepos(t *testing.T) {
 	testgit.RequireGit(t)
 	root := t.TempDir()
@@ -205,14 +210,16 @@ func TestCompleteWorktreeTargetsNestedRepos(t *testing.T) {
 	t.Chdir(eng)
 	got := completeWorktreeTargets()
 
-	if _, ok := got["eng-feature"]; !ok {
-		t.Errorf("containing repo's session missing under bare dirname: %v", got)
+	if _, ok := got["eng/eng-feature"]; !ok {
+		t.Errorf("containing repo's session missing under session key: %v", got)
 	}
 	if _, ok := got["alpha/feature-a"]; !ok {
 		t.Errorf("nested repo's session missing under session key: %v", got)
 	}
-	if _, ok := got["feature-a"]; ok {
-		t.Errorf("nested repo's session must not be offered as a bare dirname: %v", got)
+	for _, bare := range []string{"eng-feature", "feature-a"} {
+		if _, ok := got[bare]; ok {
+			t.Errorf("session offered as bare dirname %q: %v", bare, got)
+		}
 	}
 	if len(got) != 2 {
 		t.Errorf("got %d entries, want 2: %v", len(got), got)
