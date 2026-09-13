@@ -60,9 +60,12 @@ func implicitSessionKeyCommand() *command.Command {
 func runImplicitSessionKey(stdout, stderr io.Writer, cwd, sessionID string) int {
 	key, refusal := hooks.ImplicitSessionKey(cwd, sessionID)
 	if refusal != "" {
-		fmt.Fprintf(stderr, "implicit-session-key: refused: %s\n", refusal)
+		fmt.Fprintf(stderr, "implicit-session-key: refused: %s\n", refusal) //nolint:errcheck // informational only; the exit status carries the refusal
 		return exitImplicitSessionRefused
 	}
-	fmt.Fprintln(stdout, key)
+	// A failed write must not exit 0: a launcher would read a truncated key.
+	if _, err := fmt.Fprintln(stdout, key); err != nil {
+		return 1
+	}
 	return 0
 }
