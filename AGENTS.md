@@ -146,7 +146,6 @@ Cheap per-package `go build ./internal/foo/...` checks are fine.
   `sc resurrect <target> [--new-branch]` Recreate a closed session's worktree+branch from its captured commit (#291)
   `sc pull`                        Pull repos and rebase worktrees
   `sc validate`                    Validate sweatfile hierarchy
-  `sc implicit-session-key --claude-session-id <id> [--cwd <dir>]` Pure query: the implicit (main-checkout) key the SessionStart hook would mint; exit 3 = gated (clown#236 contract, manpage is normative)
   `sc perms list|review|edit`      Inspect or edit permission tier rules
 
 `start*` and `update-description` take a single positional value (quote
