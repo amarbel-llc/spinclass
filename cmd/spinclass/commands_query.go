@@ -26,6 +26,8 @@ import (
 )
 
 func registerQueryCommands(app *command.App) {
+	app.AddCommand(implicitSessionKeyCommand())
+
 	app.AddCommand(&command.Command{
 		Name:  "list",
 		Title: "List Spinclass Sessions",

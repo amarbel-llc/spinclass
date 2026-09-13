@@ -38,15 +38,18 @@ that checkout as a first-class session, not a degraded one.
 ## Interface
 
 An **implicit session** is a spinclass session materialized for an agent
-attached to a repo's main checkout (a git repo on its default branch, *not* a
+attached to a repo's main checkout (a git repo's toplevel on any branch, *not* a
 `.worktrees/` worktree). It is created and torn down automatically by Claude
 Code lifecycle hooks — no `sc` command to run.
 
 ### Identity
 
-Session key: `<repo-dirname>/<rand>`, where `<rand> = sha256(session_id)[:8]`
-and `session_id` is the Claude Code hook payload's session id (e.g.
-`spinclass/a3f9b2c1`). The `session_id` is stable across a session's lifetime
+Session key: `<repo-dirname>/<rand>`, where `<rand>` is the hex of the first 8
+**bytes** of `sha256(session_id)` — 16 hex chars — and `session_id` is the
+Claude Code hook payload's session id (e.g. `spinclass/a3f9b2c1d4e5f607`).
+`spinclass implicit-session-key(1)` is the published, side-effect-free query for
+this derivation (clown#236): launchers that need the key before `SessionStart`
+fires call it rather than reimplementing the rule and its gates. The `session_id` is stable across a session's lifetime
 (same value at `SessionStart` and `SessionEnd`, and across `/clear`, `compact`,
 and `--resume`), so create and teardown derive the same `<rand>`. The key is
 globally unique, so it collides neither with worktree session keys nor with
@@ -229,7 +232,7 @@ Disable the feature for a repo (rollback):
 
 | Lever | Current | Rationale | Change signal |
 |---|---|---|---|
-| `<rand>` width | `sha256(session_id)[:8]` (8 hex chars) | collision-safe for realistic concurrent counts | a `<rand>` collision is observed |
+| `<rand>` width | first 8 bytes of `sha256(session_id)` (16 hex chars) | collision-safe for realistic concurrent counts | a `<rand>` collision is observed |
 | orphan-sweep trigger | every `SessionStart` | cheap (one glob + PID checks) | a checkout accumulates many `.spinclass/` files and sweep cost shows up in profiling — then gate to "sweep only if N+ state files present" |
 | `disable-implicit-sessions` default | off (feature on) | the rollback lever | flip to disabled-by-default if early usage is rocky |
 | `SessionEnd` timeout | 5s (manifest), Claude default budget 1.5s | the delete is a local unlink, well within budget | slow filesystems cause missed deletes — raise per-hook |

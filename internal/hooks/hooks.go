@@ -117,56 +117,18 @@ func runSessionStart(input hookInput) error {
 // Returns ("", false) when gated or on any failure; errors are swallowed and
 // logged — both callers treat materialization as best-effort.
 func MaterializeImplicit(cwd, randID string, pid int) (string, bool) {
-	// Gate: a git repo whose checkout root == cwd. The caller's not-a-worktree
-	// check already proved .git is a directory (main checkout), not a
-	// file/symlink (worktree), so the main checkout on ANY branch qualifies —
-	// we do NOT restrict to the default branch. Bail silently on any error.
-	// This cheap git-repo discriminator runs BEFORE the sweatfile I/O walk
-	// (the knob gate) so the common non-git-dir case (e.g. ~/Downloads)
-	// skips the hierarchy stat-walk entirely.
-	repoRoot, err := gitToplevel(cwd)
-	// gitToplevel (`git rev-parse --show-toplevel`) canonicalizes symlinks; the
-	// raw hook cwd does not. A checkout under a symlinked path (symlinked
-	// $HOME/TMPDIR, macOS /var -> /private/var) would otherwise fail this gate —
-	// filepath.Clean normalizes . / .. / separators but never resolves symlinks,
-	// so the two sides disagree. Resolve BOTH sides before comparing so the
-	// checkout still qualifies as its own toplevel. resolvePath degrades to
-	// filepath.Clean when EvalSymlinks fails (e.g. a vanished path), matching the
-	// surrounding path handling.
-	if err != nil || resolvePath(cwd) != resolvePath(repoRoot) {
+	checkout, refusal := evaluateImplicitCheckout(cwd)
+	if refusal != "" {
 		return "", false
 	}
-	branch, err := git.BranchCurrent(cwd)
-	if err != nil || branch == "" { // empty = detached HEAD: no branch hint
-		return "", false
-	}
-	// Rollback knob AND the [direnv.dotenv] source (#274). Now that we know this
-	// is a materializable main checkout, load the sweatfile hierarchy once — it
-	// gates the disable knob and provides the merged dotenv map written after
-	// state below. Stays BEFORE the sweep + write so a disabled session writes
-	// nothing. GetDefault-merged to mirror the managed-worktree Apply path; a
-	// load miss (no HOME, read error) leaves merged zero so the env write no-ops.
-	var merged sweatfile.Sweatfile
-	if home, _ := os.UserHomeDir(); home != "" {
-		if res, err := sweatfileio.LoadHierarchy(home, cwd); err == nil {
-			if res.Merged.DisableImplicitSessionsEnabled() {
-				return "", false
-			}
-			merged = sweatfile.GetDefault().MergeWith(res.Merged)
-		}
-	}
+	repoRoot, branch, merged := checkout.repoRoot, checkout.branch, checkout.merged
 
 	// Orphan sweep before our own write (backstop for missed SessionEnd).
 	if err := session.SweepDeadImplicit(cwd); err != nil {
 		sessionlog.Errorf("MaterializeImplicit SweepDeadImplicit-failed checkout=%s err=%v", cwd, err)
 	}
 
-	// Key is <repo>/<rand> — the branch is deliberately NOT part of the
-	// identity. This keeps the key stable across a mid-session branch switch
-	// and avoids slash-bearing branch names (e.g. feature/wip) leaking a
-	// second "/" into the key. Branch is captured below as a display-only
-	// hint and refreshed on every re-fire (see Branch field).
-	key := filepath.Base(repoRoot) + "/" + randID
+	key := implicitKey(repoRoot, randID)
 	s := session.State{
 		Kind:         session.KindImplicit,
 		PID:          pid,
@@ -196,6 +158,93 @@ func MaterializeImplicit(cwd, randID string, pid int) (string, bool) {
 		sessionlog.Errorf("MaterializeImplicit WriteSpinclassEnv-failed checkout=%s err=%v", cwd, err)
 	}
 	return key, true
+}
+
+// ImplicitRefusal names the gate that declined an implicit session; "" means
+// every gate passed.
+type ImplicitRefusal string
+
+const (
+	RefusedEmptyInput   ImplicitRefusal = "empty-input"
+	RefusedWorktree     ImplicitRefusal = "worktree"
+	RefusedNotToplevel  ImplicitRefusal = "not-toplevel"
+	RefusedDetachedHead ImplicitRefusal = "detached-head"
+	RefusedDisabled     ImplicitRefusal = "disabled"
+)
+
+// ImplicitSessionKey is the side-effect-free twin of the SessionStart hook: it
+// returns the key the hook WOULD materialize for (cwd, sessionID), or the gate
+// that refuses. It is the published contract behind `spinclass
+// implicit-session-key` (clown#236), so it must share every gate and the key
+// composition with MaterializeImplicit.
+func ImplicitSessionKey(cwd, sessionID string) (string, ImplicitRefusal) {
+	if cwd == "" || sessionID == "" {
+		return "", RefusedEmptyInput
+	}
+	if worktree.IsWorktree(cwd) {
+		return "", RefusedWorktree
+	}
+	checkout, refusal := evaluateImplicitCheckout(cwd)
+	if refusal != "" {
+		return "", refusal
+	}
+	return implicitKey(checkout.repoRoot, implicitRand(sessionID)), ""
+}
+
+// Key is <repo>/<rand> — the branch is deliberately NOT part of the identity.
+// This keeps the key stable across a mid-session branch switch and avoids
+// slash-bearing branch names (e.g. feature/wip) leaking a second "/" into it.
+func implicitKey(repoRoot, randID string) string {
+	return filepath.Base(repoRoot) + "/" + randID
+}
+
+type implicitCheckout struct {
+	repoRoot, branch string
+	merged           sweatfile.Sweatfile
+}
+
+// evaluateImplicitCheckout runs the read-only main-checkout gates (toplevel,
+// branch, disable knob). Callers must have already established cwd is NOT an
+// sc worktree.
+func evaluateImplicitCheckout(cwd string) (implicitCheckout, ImplicitRefusal) {
+	// Gate: a git repo whose checkout root == cwd. The caller's not-a-worktree
+	// check already proved .git is a directory (main checkout), not a
+	// file/symlink (worktree), so the main checkout on ANY branch qualifies —
+	// we do NOT restrict to the default branch. Bail silently on any error.
+	// This cheap git-repo discriminator runs BEFORE the sweatfile I/O walk
+	// (the knob gate) so the common non-git-dir case (e.g. ~/Downloads)
+	// skips the hierarchy stat-walk entirely.
+	repoRoot, err := gitToplevel(cwd)
+	// gitToplevel (`git rev-parse --show-toplevel`) canonicalizes symlinks; the
+	// raw hook cwd does not. A checkout under a symlinked path (symlinked
+	// $HOME/TMPDIR, macOS /var -> /private/var) would otherwise fail this gate —
+	// filepath.Clean normalizes . / .. / separators but never resolves symlinks,
+	// so the two sides disagree. Resolve BOTH sides before comparing so the
+	// checkout still qualifies as its own toplevel. resolvePath degrades to
+	// filepath.Clean when EvalSymlinks fails (e.g. a vanished path), matching the
+	// surrounding path handling.
+	if err != nil || resolvePath(cwd) != resolvePath(repoRoot) {
+		return implicitCheckout{}, RefusedNotToplevel
+	}
+	branch, err := git.BranchCurrent(cwd)
+	if err != nil || branch == "" { // empty = detached HEAD: no branch hint
+		return implicitCheckout{}, RefusedDetachedHead
+	}
+	// Rollback knob AND the [direnv.dotenv] source (#274). Load the sweatfile
+	// hierarchy once — it gates the disable knob and provides the merged dotenv
+	// map MaterializeImplicit writes. GetDefault-merged to mirror the
+	// managed-worktree Apply path; a load miss (no HOME, read error) counts as
+	// not disabled and leaves merged zero so the env write no-ops.
+	var merged sweatfile.Sweatfile
+	if home, _ := os.UserHomeDir(); home != "" {
+		if res, err := sweatfileio.LoadHierarchy(home, cwd); err == nil {
+			if res.Merged.DisableImplicitSessionsEnabled() {
+				return implicitCheckout{}, RefusedDisabled
+			}
+			merged = sweatfile.GetDefault().MergeWith(res.Merged)
+		}
+	}
+	return implicitCheckout{repoRoot: repoRoot, branch: branch, merged: merged}, ""
 }
 
 // maybeSendSpawnHello emits the spawn handshake (FDR 0006) when cwd is an sc

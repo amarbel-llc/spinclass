@@ -1929,3 +1929,97 @@ func TestSessionStartNoopWhenDisabled(t *testing.T) {
 		t.Fatalf("disabled knob should suppress materialization, got %v", matches)
 	}
 }
+
+// TestImplicitSessionKeyMatchesHook locks the clown#236 contract: the pure query
+// must return exactly the key the SessionStart hook materializes for the same
+// (cwd, session_id) pair, and must write nothing itself.
+func TestImplicitSessionKeyMatchesHook(t *testing.T) {
+	repo := initImplicitTestRepo(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	const sid = "0b6a1f7e-3c2d-4e5f-9a8b-7c6d5e4f3a2b"
+
+	key, refusal := ImplicitSessionKey(repo, sid)
+	if refusal != "" {
+		t.Fatalf("unexpected refusal %q", refusal)
+	}
+	if matches, _ := filepath.Glob(filepath.Join(repo, ".spinclass", "*")); len(matches) != 0 {
+		t.Fatalf("pure query wrote state: %v", matches)
+	}
+	if got := filepath.Dir(key); got != filepath.Base(repo) {
+		t.Errorf("key repo = %q, want %q", got, filepath.Base(repo))
+	}
+	if suffix := filepath.Base(key); len(suffix) != 16 {
+		t.Errorf("key suffix %q has %d chars, want 16 hex", suffix, len(suffix))
+	}
+
+	input, _ := json.Marshal(map[string]any{
+		"hook_event_name": "SessionStart", "session_id": sid, "cwd": repo, "source": "startup",
+	})
+	if err := Run(bytes.NewReader(input), &bytes.Buffer{}, "", "", false); err != nil {
+		t.Fatal(err)
+	}
+	st, _, err := session.FindImplicitAtCwd(repo)
+	if err != nil || st == nil {
+		t.Fatalf("hook did not materialize: %v", err)
+	}
+	if st.SessionKey != key {
+		t.Errorf("hook key %q != query key %q", st.SessionKey, key)
+	}
+}
+
+func TestImplicitSessionKeyRefusals(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	t.Run("empty-input", func(t *testing.T) {
+		repo := initImplicitTestRepo(t)
+		if _, r := ImplicitSessionKey(repo, ""); r != RefusedEmptyInput {
+			t.Errorf("refusal = %q, want %q", r, RefusedEmptyInput)
+		}
+		if _, r := ImplicitSessionKey("", "sid"); r != RefusedEmptyInput {
+			t.Errorf("refusal = %q, want %q", r, RefusedEmptyInput)
+		}
+	})
+
+	t.Run("worktree", func(t *testing.T) {
+		wt := initImplicitTestWorktree(t)
+		if _, r := ImplicitSessionKey(wt, "sid"); r != RefusedWorktree {
+			t.Errorf("refusal = %q, want %q", r, RefusedWorktree)
+		}
+	})
+
+	t.Run("not-toplevel", func(t *testing.T) {
+		repo := initImplicitTestRepo(t)
+		sub := filepath.Join(repo, "sub")
+		if err := os.Mkdir(sub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if _, r := ImplicitSessionKey(sub, "sid"); r != RefusedNotToplevel {
+			t.Errorf("subdir refusal = %q, want %q", r, RefusedNotToplevel)
+		}
+		if _, r := ImplicitSessionKey(t.TempDir(), "sid"); r != RefusedNotToplevel {
+			t.Errorf("non-repo refusal = %q, want %q", r, RefusedNotToplevel)
+		}
+	})
+
+	t.Run("detached-head", func(t *testing.T) {
+		repo := initImplicitTestRepo(t)
+		gitRun(t, repo, "checkout", "--detach")
+		if _, r := ImplicitSessionKey(repo, "sid"); r != RefusedDetachedHead {
+			t.Errorf("refusal = %q, want %q", r, RefusedDetachedHead)
+		}
+	})
+
+	t.Run("disabled", func(t *testing.T) {
+		repo := initImplicitTestRepo(t)
+		t.Setenv("HOME", t.TempDir())
+		if err := os.WriteFile(filepath.Join(repo, "sweatfile"),
+			[]byte("[hooks]\ndisable-implicit-sessions = true\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		key, r := ImplicitSessionKey(repo, "sid")
+		if r != RefusedDisabled || key != "" {
+			t.Errorf("got (%q, %q), want (\"\", %q)", key, r, RefusedDisabled)
+		}
+	})
+}
