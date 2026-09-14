@@ -145,7 +145,9 @@ clean-build:
 # [debug] Fast single-package Go test loop via godyn-test (igloo FDR 0008):
 # builds one package's test run from a git+file: ref (tracked files as in the
 # working tree; `git add -N` a NEW file first or it is invisible); only the
-# edited cone rebuilds. `just` is still the gate that counts.
+# edited cone rebuilds. x86_64-linux only: elsewhere `default` is the
+# buildGoApplication build, which has no passthru.testWith (igloo#33).
+# `just` is still the gate that counts.
 #
 # Pass a -run regex via `run`, NOT via flags: just interpolates variadic args
 # as raw text, so 'A|B' would reach the shell with a live pipe. Flags use the
