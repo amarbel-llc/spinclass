@@ -2,7 +2,7 @@
   description = "Spinclass: shell-agnostic git worktree session manager";
 
   inputs = {
-    # Fork: source of the buildGoApplication / buildGoRace / mkGoEnv
+    # Fork: source of the buildGoApplication / buildGoRace / godyn
     # overlay. The fork's underlying nixpkgs follows our pinned
     # `nixpkgs-master` so the overlay sits on the same base that
     # `pkgs-master` consumes, instead of pulling a second master-tracking
@@ -54,7 +54,7 @@
         utils.follows = "utils";
         bats.follows = "bats";
         # Dedupe tommy onto our top-level input (the single source of
-        # truth that backs goFlakeInputs + the codegen binary) so the
+        # truth that backs the go.nix bridge + the codegen binary) so the
         # graph resolves exactly one tommy rev.
         tommy.follows = "tommy";
         conformist.follows = "conformist";
@@ -79,7 +79,7 @@
     };
 
     # crap: source of the go-crap Go module (ndjson-crap wire format +
-    # viewport presenter), bridged into go.mod via gomod.nix. Consumed
+    # viewport presenter), bridged via go.nix flakeInputs. Consumed
     # by the `ndjson-crap` pre-merge-output-format in internal/check.
     crap = {
       url = "https://code.linenisgreat.com/crap/archive/master.tar.gz";
@@ -93,8 +93,8 @@
     };
 
     # Single source of truth for tommy (TOML library + codegen tool):
-    # the Go module is bridged into go.mod via gomod.nix and the same
-    # input's binary backs `just gen-tommy` (see the devShell packages).
+    # the Go module is bridged via go.nix flakeInputs and the same
+    # input's binary backs checks.tommy-codegen and `just build-tommy-codegen`.
     # Pinned to a release tag (not master) for reproducibility; bump the
     # tag deliberately + regen the codec when adopting a new tommy.
     tommy = {
@@ -144,7 +144,7 @@
     ringmaster.inputs.conformist.follows = "conformist";
 
     # purse-first: source of the mesa List-Table renderer (pkgs/mesa),
-    # bridged into go.mod via gomod.nix and used by `sc list`'s
+    # bridged via go.nix flakeInputs and used by `sc list`'s
     # pretty/plain rendering (#185). Direct input so we get a version
     # that includes pkgs/mesa (ringmaster's transitive pin predates it,
     # hence the follows override above). Mirrors clown's flake.nix.
@@ -181,7 +181,7 @@
   };
 
   outputs =
-    {
+    inputs@{
       self,
       igloo,
       nixpkgs-master,
@@ -189,11 +189,10 @@
       bats,
       madder,
       conformist,
-      crap,
       tommy,
       papi,
       ringmaster,
-      purse-first,
+      ...
     }:
     let
       # version.env at repo root is the single source of truth for the release
@@ -227,33 +226,18 @@
         # `.#spinclass-native` is exposed.
         godynSystem = system == "x86_64-linux";
 
-        # tommy fmt (*.toml) and the tommy-codegen repair linter have no
-        # registry program (repo-specific) and need the `tommy` flake input,
-        # so they are inlined here rather than in ./conformist.nix (a
-        # standalone module file can't see flake inputs — same shape as
-        # cutting-garden's/dodder's conformistTommyModule). getExe' with an
-        # explicit binary name: tommy lacks meta.mainProgram.
-        #
-        # command="true" / repair-command=conformist-tommy-codegen matches the
-        # old [linter.tommy-codegen] stanza exactly: run-once whole-tree
-        # (passes-files=false), check is a deliberate no-op (tommy's own
-        # --check diverges from the gofumpt'd committed codec and needs `go`
-        # on PATH), repair regenerates via the store-pinned driver. `just
-        # gen-tommy-check` (not conformist) is the separate drift-enforcing
-        # guard (#159) — no restage-repair-outputs/stage-* flags here.
+        # tommy fmt (*.toml) has no registry program and needs the `tommy`
+        # flake input, so it is inlined here rather than in ./conformist.nix (a
+        # standalone module file can't see flake inputs). getExe' with an
+        # explicit binary name: tommy lacks meta.mainProgram. No tommy-codegen
+        # repair linter: it runs `tommy generate` in the checkout, which needs
+        # a go.mod. Drift is checks.tommy-codegen; regen is
+        # `just build-tommy-codegen`.
         conformistTommyModule = _: {
           settings.formatter.tommy = {
             command = pkgs.lib.getExe' tommy.packages.${system}.default "tommy";
             options = [ "fmt" ];
             includes = [ "*.toml" ];
-          };
-          settings.linter.tommy-codegen = {
-            command = "true";
-            "repair-command" =
-              pkgs.lib.getExe' tommy.packages.${system}.conformist-tommy-codegen
-                "conformist-tommy-codegen";
-            includes = [ "*.go" ];
-            "passes-files" = false;
           };
         };
 
@@ -276,14 +260,10 @@
         };
 
         # Impure lane: the eng-convention git-state checks (git-remotes,
-        # git-default-branch, sweatfile, agents-md, gomod2nix — presets.eng-impure).
+        # git-default-branch, sweatfile, agents-md — presets.eng-impure).
         # These need a live .git, so they run against the working tree via
         # `just lint-worktree` (crap/papi/tommy shape), not the sandboxed check.
-        # golangci-lint USED to live here too (it needs ambient `go` + a writable
-        # build cache, absent in checks.formatting's sandbox) but has moved to the
-        # pure `checks.lint` above — igloo's buildGoLint supplies both inside a
-        # derivation, and a sandboxed golangci-lint can't poison a shared cache
-        # with dead `.merge-*` paths whose suppressions fail open (spinclass#294).
+        # Go lint runs in the pure `checks.lint` below (spinclass#294).
         conformistImpureEval = conformist.lib.evalModule pkgs {
           imports = [
             conformist.lib.presets.eng-impure
@@ -293,34 +273,10 @@
           projectRootFile = "flake.nix";
         };
 
-        # Consumer half of the flake-input-go_mod protocol (RFC 0001):
-        # which sibling Go modules resolve from producer go-pkgs outputs
-        # instead of the proxy. See gomod.nix for the entries and the
-        # lockstep rationale.
-        goFlakeInputs = import ./gomod.nix {
-          inherit
-            tommy
-            crap
-            ringmaster
-            purse-first
-            system
-            ;
-        };
-
-        # spinclass built under igloo's per-package godyn backend (buildGoAuto
-        # strategy = "dev"), beside the default buildGoApplication build. Opt-in
-        # (`.#spinclass-native` below), gated to godynSystem; NOT in `checks` — it
-        # does not gate the merge (single-platform, content-addressed; bga stays
-        # the release/CI backend and godyn wins the incremental dev loop).
-        #
-        # buildGoAuto takes goFlakeInputs DIRECTLY (igloo#69): it threads them to
-        # the bga backend and derives godyn's `bridges` with the
-        # `mapAttrs (_: v: v.src + optionalString (v ? subPath) "/${v.subPath}")`
-        # formula folded in upstream — the subPath deep-reference that lands
-        # godyn's `${bridge}/<importPath − modpath>` concatenation on the real
-        # module roots of crap/go-crap and dewey/libs/dewey (godyn's `bridges`
-        # assumes bridge-root == module-root and has no subPath knob). An
-        # explicit `nativeArgs.bridges` would still win if ever needed.
+        # The BARE spinclass binary on igloo's per-package godyn backend
+        # (buildGoAuto strategy = "dev"): no artifacts or forge pins. The dev
+        # inner-loop and godyn-vs-bga microbench target (`.#spinclass-native`),
+        # gated to godynSystem; not in `checks` (the full godyn `default` is).
         #
         # `commit` is passed explicitly (src = ./. is a plain path, no .rev); the
         # native backend uses igloo's callPackage `pkgs.go`, so bgaArgs pins
@@ -331,17 +287,15 @@
         spinclass-native = pkgs.buildGoAuto {
           pname = "spinclass";
           src = ./.;
-          # No graphFile: buildGodynModule derives the graph at eval time from
-          # modules + goFlakeInputs (igloo#72 / FDR 0008).
-          modules = ./gomod2nix.toml;
+          # go.nix (igloo FDR 0008) replaces go.mod/gomod2nix.toml/goFlakeInputs;
+          # its flakeInputs name entries of `inputs`.
+          manifest = ./go.nix;
           strategy = "dev";
-          inherit goFlakeInputs;
-          nativeArgs = {
-            pwd = ./.;
-            commit = spinclassCommit;
-          };
+          inherit inputs;
+          # Same test-deps graph as mkSpinclass, so both share one derivation.
+          tests = true;
+          nativeArgs.commit = spinclassCommit;
           bgaArgs = {
-            pwd = ./.;
             commit = spinclassCommit;
             subPackages = [ "cmd/spinclass" ];
             go = pkgs-master.go_1_26;
@@ -357,8 +311,8 @@
         # (per-package, incremental). `strategy` defaults to bga so
         # `lib.mkSpinclass` consumers and the CI/test/bats lanes keep the proven
         # buildGoApplication backend; `packages.default` (below) selects godyn on
-        # x86_64-linux. buildGoAuto forwards ldflags (forge pins), goFlakeInputs
-        # (RFC 0001 bridges → godyn `bridges` + bga replaces), and postInstall to
+        # x86_64-linux. buildGoAuto forwards ldflags (forge pins), the go.nix
+        # manifest (RFC 0001 bridges on both backends), and postInstall to
         # BOTH backends, so one declaration drives native and bga; version is
         # auto-read from version.env, commit is threaded per-backend below.
         #
@@ -378,14 +332,24 @@
           pkgs.buildGoAuto {
             pname = "spinclass";
             src = ./.;
-            # No graphFile: with `modules` + `goFlakeInputs`, buildGodynModule
+            # No graphFile: from the go.nix manifest, buildGodynModule
             # DERIVES the package graph at eval time (godyn-gen in the bga
             # sandbox — igloo#72 / FDR 0008), so nothing is committed to
             # regenerate. version is auto-read from version.env by both backends
             # (an explicit `version` attr would override that); commit is
             # threaded per-backend below since src = ./. has no .rev.
-            modules = ./gomod2nix.toml;
-            inherit strategy goFlakeInputs;
+            manifest = ./go.nix;
+            inherit strategy inputs;
+
+            # On PATH in every escape-hatch run (godyn-go), for go:generate.
+            goRunInputs = [ tommy.packages.${system}.default ];
+
+            # On PATH for tests on both backends: internal/clown's contract
+            # tests drive the real ringmaster CLI (#253).
+            nativeCheckInputs = [
+              pkgs.git
+              ringmaster.packages.${system}.ringmaster
+            ];
 
             # Forge/tool pins as `-X main.*Bin` ldflags — buildGoAuto forwards
             # them to whichever backend builds. papi/gh drive the dynamic
@@ -400,32 +364,23 @@
               ++ (lib.optional (gh != null) "-X main.ghBin=${gh}/bin/gh");
 
             # godyn-only knobs (buildGodynModule).
-            nativeArgs = {
-              pwd = ./.;
-              commit = spinclassCommit;
-            };
+            nativeArgs.commit = spinclassCommit;
 
-            # buildGoApplication-only knobs. Only the bga backend runs this
-            # checkPhase (`go test ./...`) — the godyn default has no tests yet
-            # (deliverable #3 / igloo#32), so the merge gate's unit tests run via
-            # checks.spinclass (bga). subPackages builds just cmd/spinclass while
-            # the overridden checkPhase tests every package so internal/* coverage
-            # isn't skipped (sandbox-incompatible tests self-skip via
-            # NIX_BUILD_TOP, #65). ringmaster on PATH lets internal/clown's
-            # contract test drive the real CLI (#253); it stays out of the runtime
-            # closure. GOTOOLCHAIN=local pins pkgs-master.go_1_26 (no sandbox
-            # toolchain fetch).
+            # Per-package go test graph derived at eval time (godyn, FDR 0008).
+            tests = true;
+
+            # buildGoApplication-only knobs: the `go test ./...` checkPhase for
+            # non-godyn systems (godyn runs per-package tests as
+            # checks.spinclass-tests). subPackages builds just cmd/spinclass while
+            # the checkPhase tests every package (sandbox-incompatible tests
+            # self-skip via NIX_BUILD_TOP, #65). GOTOOLCHAIN=local pins
+            # pkgs-master.go_1_26 (no sandbox toolchain fetch).
             bgaArgs = {
-              pwd = ./.;
               commit = spinclassCommit;
               subPackages = [ "cmd/spinclass" ];
               go = pkgs-master.go_1_26;
               GOTOOLCHAIN = "local";
               doCheck = true;
-              nativeCheckInputs = [
-                pkgs.git
-                ringmaster.packages.${system}.ringmaster
-              ];
               checkPhase = ''
                 runHook preCheck
                 go test -p $NIX_BUILD_CORES ./...
@@ -527,8 +482,8 @@
 
         # papi/gh pins for the default build's dynamic system-prompt
         # repository line (internal/repoinfo). Burned into the shipped
-        # binary so the forge lookup is deterministic; a devshell `go build`
-        # (which sets no ldflags) falls back to PATH. gh comes from
+        # binary so the forge lookup is deterministic; an unpinned build (e.g.
+        # `.#spinclass-native`) falls back to PATH. gh comes from
         # nixpkgs-master, papi from its flake input.
         forgePins = {
           papi = papi.packages.${system}.default;
@@ -549,7 +504,7 @@
         # The buildGoApplication build, named explicitly (the godyn-default
         # flip): the escape hatch, the release/CI backend, and the
         # non-x86_64-linux `default`. Full package + the `go test ./...`
-        # checkPhase; the same derivation backs `checks.spinclass`.
+        # checkPhase; off x86_64-linux it is `default` and backs `checks.spinclass`.
         spinclass-build_go_application = mkSpinclass forgePins;
 
         # The default `nix build`: godyn (per-package, incremental) on
@@ -591,34 +546,46 @@
         # package. x86_64-linux only (godynSystem; godyn builds only there, igloo#33).
         // lib.optionalAttrs godynSystem { inherit spinclass-native; };
 
-        # `nix flake check` exercises the unit suite plus every bats lane. The
-        # `spinclass` check is the buildGoApplication build (its checkPhase runs
-        # `go test ./...`) — NOT the godyn `default`, which has no checkPhase yet
-        # (deliverable #3 / igloo#32). So the merge gate's unit tests + the
-        # papi/gh burn-in are verified via bga here, while `default` (godyn on
-        # x86_64-linux) is exercised as a `packages` build.
+        # `nix flake check` exercises the unit suite plus every bats lane.
+        # `spinclass` is the default build: godyn on x86_64-linux, else
+        # buildGoApplication, whose checkPhase runs `go test ./...`.
         checks = {
-          spinclass = spinclass-build_go_application;
+          spinclass = spinclass-default;
           # Sandboxed read-only formatting + eng-convention-linter gate
           # (conformist check against a /nix/store snapshot of the tracked
           # tree). `just lint-fmt` builds this. See conformistEval above.
           formatting = conformistEval.config.build.check self;
-          # Pure, sandboxed golangci-lint (the v2 `standard` set, config in
-          # .golangci.yml). Replaces the golangci-lint that used to run in the
-          # impure `lint-worktree` lane: as a nix build its GOLANGCI_LINT_CACHE
-          # is per-build scratch, so it can never replay stale `.merge-*`
-          # build-worktree paths whose suppressions then fail open (spinclass#294).
-          # igloo's buildGoLint supplies the bridged deps (goFlakeInputs) and a
-          # warm cache seeded by mkGoLintCacheEnv (~15s cold -> ~5s warm); on
-          # non-Linux builders the seed is dropped and it runs cold (igloo#65).
-          # `just lint-golangci` builds this; it is part of `just lint`.
-          lint = pkgs.buildGoLint {
-            base = spinclass-build_go_application;
-            inherit (pkgs-master) golangci-lint;
-            warmCache = true;
+          # Codec drift guard (#159, igloo FDR 0008): `go generate` in the
+          # vendored module tree, failing on any diff. Backend-independent.
+          # `just verify-tommy-codegen` builds this.
+          tommy-codegen = spinclass-default.passthru.codegenCheck {
+            command = "go generate ./internal/sweatfile/";
+            nativeBuildInputs = [ tommy.packages.${system}.default ];
           };
         }
-        // batsLaneOutputs;
+        // batsLaneOutputs
+        # Pure, sandboxed Go lint (`just lint-golangci` builds `lint`): it can't
+        # replay stale `.merge-*` cache paths whose suppressions fail open
+        # (spinclass#294).
+        // (
+          if godynSystem then
+            {
+              # godyn lanes from go.nix: godyn-lint (vet + staticcheck defaults,
+              # //nolint honored), per-package tests, vet.
+              lint = spinclass-default.passthru.lintAll;
+              spinclass-tests = spinclass-default.passthru.checkAll;
+              vet = spinclass-default.passthru.vetAll;
+            }
+          else
+            {
+              # golangci-lint (.golangci.yml) via igloo's buildGoLint.
+              lint = pkgs.buildGoLint {
+                base = spinclass-build_go_application;
+                inherit (pkgs-master) golangci-lint;
+                warmCache = true;
+              };
+            }
+        );
 
         # mkSpinclass = { strategy ? "ci", madder ? null, direnv ? null, ... }: ...
         # Consumer flakes call this to produce a full spinclass package with
@@ -633,17 +600,8 @@
 
         devShells.default = pkgs-master.mkShell {
           packages = [
-            # gomod2nix-aware Go env; reads gomod2nix.toml for module
-            # resolution. Drop-in for `pkgs.go` once gomod2nix is in
-            # use. Madder pattern. goFlakeInputs bridges tommy so devshell
-            # `go build`/gopls resolve it identically to the nix build.
-            (pkgs.mkGoEnv {
-              pwd = ./.;
-              inherit goFlakeInputs;
-            })
-            # gomod2nix CLI lives in the fork's overlay alongside
-            # buildGoApplication / mkGoEnv — not in upstream nixpkgs.
-            pkgs.gomod2nix
+            # No ambient `go`: dependencies live in go.nix (igloo FDR 0008);
+            # go commands run through `godyn-go -- <cmd>`, tests through godyn.
             pkgs.bats
             # The RAW conformist binary on PATH — NOT conformistEval.config.build.wrapper.
             # The wrapper hardcodes `--tree-root-file=flake.nix` (repair mode,
@@ -667,10 +625,6 @@
             # bridged tommy library — so `go generate ./internal/sweatfile`
             # (//go:generate tommy generate) targets a matching cst API.
             tommy.packages.${system}.default
-            # conformist tommy-codegen repair driver ([linter.tommy-codegen]
-            # in conformistTommyModule above); so `just fmt` regenerates the
-            # codec.
-            tommy.packages.${system}.conformist-tommy-codegen
             # ringmaster CLI on the devshell PATH so `ringmaster version
             # --protocol` (the ProtocolVersion serve-start gate, #26) and the
             # flock probe resolve in the dev-loop and bats, matching the

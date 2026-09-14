@@ -24,17 +24,17 @@ inspect and `run_recipe` to run them.
 
 Config is Nix-generated from `./conformist.nix` + `./conformist-impure.nix` +
 `conformist.lib.presets.{eng,eng-go,eng-impure}` (`flake.nix`), not a
-hand-written `conformist.toml`. golangci-lint runs as the pure, sandboxed
-`checks.lint` (igloo's `buildGoLint`, warm-cache seeded), NOT in the impure lane:
-a sandboxed golangci-lint has a per-build scratch cache and so can't replay stale
-`.merge-*` paths whose suppressions fail open (spinclass#294). Version is
+hand-written `conformist.toml`. Lint runs as the pure, sandboxed
+`checks.lint` (godyn-lint on x86_64-linux, igloo's golangci `buildGoLint`
+elsewhere), NOT in the impure lane: a sandbox can't replay stale `.merge-*`
+cache paths whose suppressions fail open (spinclass#294). Version is
 `version.env` (`SPINCLASS_VERSION`, eng-versioning(7)); the fork's
 `buildGoApplication` auto-reads it — no `version` attr is passed explicitly in
 `flake.nix`.
 
 `merge-this-session`'s pre-merge hook runs the full verification suite (build,
 test, bats, and analyzers) — do NOT re-run that suite right before merging.
-Cheap per-package `go build ./internal/foo/...` checks are fine.
+Cheap per-package checks are fine: `just debug-go-test <dir>`.
 
 ## Architecture
 
@@ -115,11 +115,11 @@ Cheap per-package `go build ./internal/foo/...` checks are fine.
   from PATH). `papi` and `gh` are pinned the same way (`-X main.papiBin`/`ghBin`)
   and, unlike madder, are burned into the **default** build; they power the
   dynamic system-prompt repository line (`internal/repoinfo`) and fall back to
-  PATH lookup when unpinned (devshell `go build`). `clown` is optional, for async
+  PATH lookup when unpinned. `clown` is optional, for async
   job-wakeup emits (`internal/clown`, FDR 0010). `ringmaster` has **two** roles:
   a runtime PATH CLI (the wake emit/observe, never pinned) AND a **build-time
   linked library** — `code.linenisgreat.com/ringmaster/pkgs/jobwake`, bridged
-  via `gomod.nix` — for the per-job liveness flock and the `ProtocolVersion`
+  via `go.nix` — for the per-job liveness flock and the `ProtocolVersion`
   constant (#26). Interactive prompts use the in-process `huh` library.
 
 ## CLI Commands
@@ -236,7 +236,7 @@ subcommand is always available.
   (`jobwake.AcquireJobLock`) for an async job's life, so a crashed serve is
   detectable — the OS drops the lock, the reaper writes `interrupted` instead of
   a stuck `running`. This is why `jobwake` is build-time **LINKED** (the
-  `gomod.nix` bridge) in ADDITION to the runtime PATH CLI: the flock must be an
+  `go.nix` bridge) in ADDITION to the runtime PATH CLI: the flock must be an
   in-process fd. Gated by `clown.CheckProtocol` (memoized) comparing compiled-in
   `jobwake.ProtocolVersion` to `ringmaster version --protocol`: exact match
   enables the flock, a mismatch degrades **loudly** and skips only the flock
@@ -531,24 +531,21 @@ overlay injects `-X main.version`/`-X main.commit` ldflags from the derivation's
 `version`/`commit` attrs. Binary installs as `spinclass` with an `sc` symlink;
 bash + fish completions included.
 
-`gomod.nix` is the consumer half of the flake-input-go_mod protocol (igloo RFC
-0001): it maps bridged Go modules (`tommy`, `crap`, `ringmaster`,
-`purse-first/libs/dewey`) onto their producer flakes' `go-pkgs` outputs,
-threaded as `goFlakeInputs`. Bump a bridged dep with `nix flake update <input>`
-— no gomod2nix lockstep unless the new rev changes the producer's own
-dependency graph. `ringmaster` is bridged at the repo-root module (no
-`subPath`, the tommy shape); it is *also* a checkPhase `nativeCheckInputs`
-binary and a devShell package, so the same flake rev backs the linked
-`jobwake` library, the contract-test binary, and the dev-loop CLI.
-`purse-first` is a direct input (not just ringmaster's transitive one, which
+`go.nix` (igloo FDR 0008) is the module manifest: no go.mod, go.sum or
+gomod2nix.toml. Its `flakeInputs` bridge `tommy`, `crap`, `ringmaster` and
+`purse-first/libs/dewey` onto their producer flakes' `go-pkgs` outputs (bump
+with `nix flake update <input>`); third-party `require`s carry vendor hashes.
+`ringmaster` is also a test `nativeCheckInputs` binary and a devShell package,
+so one flake rev backs the linked `jobwake` library, the contract-test binary,
+and the CLI. `purse-first` is a direct input (ringmaster's transitive pin
 predates `pkgs/mesa` — hence the `ringmaster.inputs.purse-first.follows`
-override) so `sc list`'s pretty/plain rendering can bridge `libs/dewey`
-(mesa, #185); same shape as clown's `gomod.nix`.
+override) so `sc list` can bridge `libs/dewey` (mesa, #185).
 
-The default `nix build` uses igloo's per-package godyn backend on x86_64-linux
-(buildGoApplication elsewhere and as `.#spinclass-build_go_application`); the
-merge gate's `go test ./...` stays on bga via `checks.spinclass`. See
-`docs/plans/2026-09-10-godyn-per-package-build-poc.md`.
+On x86_64-linux the default `nix build`, `checks.spinclass-tests` (per-package
+`go test`), `checks.vet`/`lint` and `checks.tommy-codegen` run on igloo's
+godyn backend; buildGoApplication builds elsewhere and as
+`.#spinclass-build_go_application`. No ambient `go`: `just debug-go-test
+<dir>` runs `godyn-test` (`git add -N` new files first).
 
 ## Dependencies
 
@@ -561,7 +558,7 @@ Module: `code.linenisgreat.com/spinclass`.
 - `code.linenisgreat.com/purse-first/libs/go-mcp` — MCP server framework
   (`command.App` does CLI dispatch + MCP serving; no cobra).
 - `code.linenisgreat.com/purse-first/libs/dewey/pkgs/mesa` — the List-Table
-  NDJSON renderer (RFC 0003), bridged via `gomod.nix`. `sc list`'s
+  NDJSON renderer (RFC 0003), bridged via `go.nix`. `sc list`'s
   pretty/plain rendering (`cmd/spinclass/list_view.go`) builds a `mesa.Table`
   and renders it styled (`--format` unset on a TTY, and `--watch`) or plain
   (piped / `--format tap`); `--format json` stays the original

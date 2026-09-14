@@ -6,7 +6,7 @@ lint: lint-fmt lint-golangci lint-worktree
 
 # Read-only format + lint gate via the sandboxed checks.formatting
 # derivation: formatter drift (Go/Nix/shell/TOML, per ./conformist.nix) plus
-# the linters — shellcheck, statix/deadnix, tommy-codegen, and the
+# the linters — shellcheck, statix/deadnix, and the
 # eng-convention linters (eng-versioning, flake-outputs/lock, justfile-*) from
 # conformist.lib.presets.eng. `just codemod-fmt` is the corresponding write
 # mode. Folded into `just lint` → `just default`, so the pre-merge `just` hook
@@ -34,11 +34,9 @@ lint-golangci:
     nix build ".#checks.${system}.lint" --no-link --print-build-logs
 
 # The impure eng-convention checks (git remotes, git-default-branch, sweatfile,
-# agents-md; gomod2nix is force-disabled here — see conformist-impure.nix)
-# against the working tree, where .git is available. Runs conformist from the
-# devShell PATH (direnv `use flake`). golangci-lint no longer runs here — it
-# moved to the pure `lint-golangci` / `checks.lint` (spinclass#294), so this
-# lane no longer materializes the bridged go.mod.
+# agents-md) against the working tree, where .git is available. Runs conformist
+# from the devShell PATH (direnv `use flake`). Go lint runs in the pure
+# `lint-golangci` / `checks.lint` (spinclass#294).
 #
 # run the impure eng-convention checks against the working tree
 lint-worktree:
@@ -49,7 +47,7 @@ lint-worktree:
 
 # --- build ---
 
-build: build-nix build-tommy-codegen
+build: build-nix
 
 # Build the spinclass binary via nix (burns version.env + commit into the
 # binary via -ldflags — see mkSpinclass in flake.nix).
@@ -59,27 +57,23 @@ build-nix:
     nix build --show-trace
 
 # Regenerate the tommy-generated sweatfile codec (sweatfile_tommy.go) after a
-# tommy bump or a Sweatfile struct change. The devshell ships the tommy binary
-# from the flake's `tommy` input (the same rev that backs the bridged tommy
-# library), so `go generate` (//go:generate tommy generate) finds it on PATH —
-# do NOT `go build` tommy from the main module here: module graph pruning
-# drops the codegen tool's transitive deps from go.sum (#140). Run after
-# `just update-gomod2nix`. (No trailing gofumpt: tommy v0.4.6 gofumpt's its
-# generated output internally, version-matched to go.mod via #134, so an
-# extra pass is a no-op.)
+# tommy bump or a Sweatfile struct change, through godyn's escape hatch
+# (godyn-go, igloo FDR 0008; no ambient go; tommy comes from goRunInputs).
+# The codec header stamps tommy's rev, so regenerate after every tommy bump.
+# Not part of the gate: `verify-tommy-codegen` is the pure drift check.
 #
 # regenerate the tommy-generated sweatfile codec
 build-tommy-codegen:
-    nix develop --command go generate ./internal/sweatfile/
+    nix run --inputs-from . igloo#godyn-go -- -- go generate ./internal/sweatfile/
 
 # --- test ---
 
 test: test-nix
 
 # Go unit tests plus every bats integration lane via `nix flake check` (the
-# [checks] output: spinclass's `go test ./...`, bats-default, bats-race,
-# bats-madder, plus the formatting gate — the same set `lint-fmt` targets
-# individually).
+# [checks] output: the unit tests (godyn per-package `spinclass-tests` on
+# x86_64-linux, the buildGoApplication `go test ./...` elsewhere), the bats
+# lanes, lint/vet, tommy-codegen and formatting).
 #
 # run the Go unit tests and every bats lane via `nix flake check`
 test-nix:
@@ -113,16 +107,17 @@ verify-version-burnin: build
         { echo "version prefix '$prefix' != version.env '$SPINCLASS_VERSION'" >&2; exit 1; }
     echo "OK: shape, non-default, prefix match"
 
-# Drift guard (#159): regenerate the codec and fail if it differs from the
-# committed file — catches a `tommy` pin bump landed without a matching
-# `just build-tommy-codegen`. Lives here (a go-available lane) rather than
-# conformist: the [linter.tommy-codegen] check is a deliberate no-op because
-# the conformist check lane lacks `go`. The conformist stanza automates
-# regen in the repair lane; this enforces it.
+# Drift guard (#159): the pure `checks.<system>.tommy-codegen` (godyn
+# passthru.codegenCheck) runs `go generate` in the vendored module tree and
+# fails if the result differs from the committed source — catches a `tommy`
+# pin bump landed without a matching `just build-tommy-codegen`.
 #
 # fail if the committed tommy codec differs from a fresh regen
-verify-tommy-codegen: build-tommy-codegen
-    git diff --exit-code -- internal/sweatfile/sweatfile_tommy.go
+verify-tommy-codegen:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    nix build ".#checks.${system}.tommy-codegen" --no-link --print-build-logs
 
 # --- codemod ---
 
@@ -147,43 +142,64 @@ clean-build:
 
 # --- maintenance ---
 
-# Regenerate gomod2nix.toml after go.mod/go.sum changes. Deliberately NOT
-# wired into `build`: spinclass regenerates this manually after a dependency
-# change rather than on every build (unlike e.g. crap/papi's always-fresh
-# convention).
+# [debug] Fast single-package Go test loop via godyn-test (igloo FDR 0008):
+# builds one package's test run from a git+file: ref (tracked files as in the
+# working tree; `git add -N` a NEW file first or it is invisible); only the
+# edited cone rebuilds. `just` is still the gate that counts.
 #
-# regenerate gomod2nix.toml after go.mod/go.sum changes
-update-gomod2nix:
-    nix develop --command gomod2nix
-
-# [debug] Fast single-package Go test loop. `just test` runs the whole
-# `nix flake check`, which is far too slow for red/green TDD iteration and
-# only sees git-tracked files; this runs `go test` inside the devshell against
-# the working tree. Serves the agent inner dev-loop — `just` is still the
-# gate that counts (and is what the pre-merge hook runs).
+# Pass a -run regex via `run`, NOT via flags: just interpolates variadic args
+# as raw text, so 'A|B' would reach the shell with a live pipe. Flags use the
+# test binary's spelling:
 #
-# Pass a -run regex via the `run` parameter, NOT via args: just interpolates
-# variadic args as raw text, so an alternation like 'A|B' reaches the shell
-# with a live pipe and the second name is executed as a command. `run` is
-# shell-quoted here, which is the only place that can be done correctly.
+#     just debug-go-test internal/perms 'TestA|TestB' -test.v
 #
-#     just debug-go-test ./internal/perms/ 'TestA|TestB' -v
-#
-# `pkg` is a single package pattern. Passing several relies on go's argument
-# ordering and silently tests only some of them — use ./... or one at a time.
-#
-# CANNOT build ./cmd/spinclass, by design — not a bug to fix here. This is an
-# AMBIENT go run, and a goFlakeInputs bridge exists only inside a nix sandbox
-# (igloo FDR 0006). cmd/spinclass imports dewey/pkgs/mesa, which the organic
-# `require dewey v0.5.0` predates, so ambient go reports "no required module
-# provides package .../mesa". Internal packages resolve because their bridged
-# imports happen to exist at the required version. For cmd/spinclass use the
-# hermetic lane: `just test-nix` (spinclass#292).
-#
-# run go test for one package in the devshell (fast inner loop)
+# run go test for one package via godyn-test (fast inner loop)
 [group('debug')]
-debug-go-test pkg='./...' run='' *args='':
-    nix develop --command go test {{ if run == '' { '' } else { '-run ' + quote(run) } }} {{ args }} {{ pkg }}
+debug-go-test dir run='' *flags='':
+    nix run --inputs-from . igloo#godyn-test -- {{ dir }} -- {{ if run == '' { '' } else { quote('-test.run=' + run) } }} {{ flags }}
+
+# [debug] Time the godyn-test inner loop (igloo FDR 0008) on a real package:
+# a first run, a no-op rerun, then a run after appending a comment to one of
+# the package's _test.go files (restored on exit from a $TMPDIR backup).
+#
+# time the godyn-test inner loop (first, no-op, and edited runs)
+[group('debug')]
+debug-godyn-test-loop dir='internal/perms':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    target=$(find {{ dir }} -maxdepth 1 -name '*_test.go' | sort | head -1)
+    bak="${TMPDIR:-/tmp}/godyn-test-loop.bak"
+    cp "$target" "$bak"
+    trap 'cp "$bak" "$target"' EXIT
+    timeit() {
+      local t0
+      t0=$(date +%s%N)
+      just debug-go-test {{ dir }} >/dev/null 2>&1 || { echo "godyn-test failed ($1)" >&2; exit 1; }
+      echo "$1: $(( ($(date +%s%N) - t0) / 1000000 )) ms"
+    }
+    timeit first
+    timeit no-op
+    printf '\n// godyn-test-loop edit marker %s\n' "$(date +%s%N)" >> "$target"
+    timeit "edited $target"
+
+# [debug] Prove checks.<system>.tommy-codegen catches drift: append a comment
+# to the committed codec, expect the check to FAIL, restore the codec on exit.
+#
+# verify the tommy codegen check fails on a perturbed codec
+[group('debug')]
+debug-codegen-drift:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    target=internal/sweatfile/sweatfile_tommy.go
+    bak="${TMPDIR:-/tmp}/codegen-drift.bak"
+    cp "$target" "$bak"
+    trap 'cp "$bak" "$target"' EXIT
+    printf '\n// codegen-drift marker %s\n' "$(date +%s%N)" >> "$target"
+    if just verify-tommy-codegen 2>&1 | tail -n 15; then
+      echo "UNEXPECTED: codegen check passed on a perturbed codec" >&2
+      exit 1
+    fi
+    echo "OK: codegen check failed on drift"
 
 # POC (spinclass#284 → godyn): build the opt-in per-package godyn binary
 # (`.#spinclass-native`) with full build logs. The fast inner loop / A-B target
@@ -200,8 +216,7 @@ debug-godyn-build:
 # godyn (per-package CA, `.#spinclass-native`) vs buildGoApplication (whole
 # module, `.#spinclass-native.passthru.bga`). The bga target is the native
 # build's OWN passthru — same src/subPackages, doCheck=false — so it is a pure
-# build-time A/B with no test-suite confound (unlike `.#default`, whose
-# checkPhase runs `go test ./...`). Warms both on the unedited tree, appends a
+# build-time A/B with no test-suite confound. Warms both on the unedited tree, appends a
 # comment to a LEAF internal package (internal/run — imported only by
 # cmd/spinclass), git-adds it so the dirty-tree `nix build` sees the edit
 # (tracked/staged only), then times each backend's rebuild. Expectation
@@ -1027,14 +1042,13 @@ debug-issue196-scratch:
     echo "--- expected: INHERITED_KEY + PROBE_KEY both present ---"
 
 # [debug] Run the issue #196 regression test (scalar-before-subtable decode
-# drop) against the BRIDGED tommy via the devshell go — the same tommy rev the
-# nix-built binary links, unlike a raw `go test` which resolves go.mod. Delete
-# once #196 is closed.
+# drop) against the bridged tommy via godyn-test — the same tommy rev the
+# nix-built binary links. Delete once #196 is closed.
 #
 # run the issue #196 regression test against the bridged tommy
 [group('debug')]
 debug-issue196:
-    nix develop --command go test -run 'TestScalarBeforeSubtable|TestScalarBeforeSubtableWithPrecedingTable|TestScalarBeforeSubtableHierarchy|TestStandaloneDottedHeadersConsumed' -v ./internal/sweatfile/
+    just debug-go-test internal/sweatfile 'TestScalarBeforeSubtable|TestScalarBeforeSubtableWithPrecedingTable|TestScalarBeforeSubtableHierarchy|TestStandaloneDottedHeadersConsumed' -test.v
 
 # Tag a spinclass release. The "v" prefix is added for you, so pass
 # the semver without it. Usage: just tag 0.1.0 "feat: initial release"

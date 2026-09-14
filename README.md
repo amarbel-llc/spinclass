@@ -181,8 +181,15 @@ Dirty state is computed live via git.
 just build    # nix build
 just test     # Go tests with TAP-14 output
 just fmt      # conformist (format + repair)
-just lint     # conformist check (format-drift + golangci-lint + shellcheck + statix/deadnix)
-just deps     # regenerate gomod2nix.toml after dependency changes
+just lint     # conformist check (format-drift + Go lint + shellcheck + statix/deadnix)
+just build-tommy-codegen      # regenerate the sweatfile codec (godyn escape hatch)
+just debug-go-test <pkg-dir>  # one package's tests via godyn-test
+```
+
+Dependencies live in `go.nix` (igloo FDR 0008); there is no go.mod and no
+ambient `go`. Change a require through `godyn-go -- go get …`.
+
+```sh
 ```
 
 The codebase is organized under `internal/` by concern: `shop` (core
