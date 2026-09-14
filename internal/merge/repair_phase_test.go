@@ -191,6 +191,149 @@ func TestResolvedRepairNoopCompletes(t *testing.T) {
 	}
 }
 
+// repairAmendCmd mimics conformist --commit --amend: modify a tracked file and
+// fold it into HEAD. (Unsigned commits — tests don't enable gpgsign.)
+const repairAmendCmd = "printf fixed > file.txt && git add file.txt && git commit --amend --no-edit"
+
+// setupImplicitRepairCheckout builds a bare upstream plus a main checkout on
+// master whose initial commit is pushed, with repairCmd as [hooks].repair. When
+// unpushedWork is set, one more commit sits on master ahead of origin — the
+// normal implicit-merge shape. Returns (bare, checkout).
+func setupImplicitRepairCheckout(t *testing.T, repairCmd string, unpushedWork bool) (bare, checkout string) {
+	t.Helper()
+	root := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", root)
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(root, "gitconfig"))
+	t.Setenv("HOME", root)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "xdg-state"))
+
+	bare = filepath.Join(root, "upstream.git")
+	runGit(t, root, "init", "--bare", "-b", "master", bare)
+	checkout = filepath.Join(root, "checkout")
+	runGit(t, root, "clone", bare, checkout)
+	runGit(t, checkout, "config", "user.email", "test@test.com")
+	runGit(t, checkout, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(checkout, "file.txt"), []byte("initial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, checkout, "add", "file.txt")
+	runGit(t, checkout, "commit", "-m", "initial")
+	runGit(t, checkout, "push", "-u", "origin", "master")
+
+	// Untracked, so it never reads as a dirty tracked file.
+	writeRepoSweatfile(t, checkout, "[hooks]\nrepair = \""+repairCmd+"\"\n")
+
+	if unpushedWork {
+		if err := os.WriteFile(filepath.Join(checkout, "work.txt"), []byte("work"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, checkout, "add", "work.txt")
+		runGit(t, checkout, "commit", "-m", "work on master")
+	}
+	return bare, checkout
+}
+
+func runMergeImplicit(t *testing.T, checkout string) (tests []ndjsoncrap.Test, err error) {
+	t.Helper()
+	var buf bytes.Buffer
+	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
+	ts := rep.TestStream(0)
+	_, err = MergeImplicit(context.Background(), rep, ts, checkout, checkout, "master", nil, nil)
+	ts.Finish()
+	return testRecords(decodeRecords(t, buf.Bytes())), err
+}
+
+// TestMergeImplicitRepairAmendsUnpushedHead: on a main checkout with unpushed
+// work, repair amends HEAD before the hook, and the push publishes the repaired
+// content — the parity with PrepareMerge the implicit path used to lack.
+func TestMergeImplicitRepairAmendsUnpushedHead(t *testing.T) {
+	bare, checkout := setupImplicitRepairCheckout(t, repairAmendCmd, true)
+	head := runGit(t, checkout, "rev-parse", "HEAD")
+
+	tests, err := runMergeImplicit(t, checkout)
+	if err != nil {
+		t.Fatalf("MergeImplicit: %v (points: %v)", err, testDescs(tests))
+	}
+	tr, ok := findTest(tests, "repair master")
+	if !ok || !tr.OK || tr.Directive != nil || !strings.Contains(tr.Description, "amended") {
+		t.Fatalf("expected ok 'amended' repair point, got %+v (all: %v)", tr, testDescs(tests))
+	}
+	newHead := runGit(t, checkout, "rev-parse", "HEAD")
+	if newHead == head {
+		t.Fatalf("HEAD unchanged %s; expected the repair amend", head)
+	}
+	if got := runGit(t, bare, "rev-parse", "master"); got != newHead {
+		t.Errorf("upstream master = %s, want pushed repaired HEAD %s", got, newHead)
+	}
+	if got := strings.TrimSpace(runGit(t, bare, "show", "master:file.txt")); got != "fixed" {
+		t.Errorf("upstream master:file.txt = %q, want repaired %q", got, "fixed")
+	}
+}
+
+// TestMergeImplicitRepairSkippedWhenHeadPushed: with HEAD already on origin the
+// amend would rewrite published history, so repair is skipped (even a failing
+// command never runs) and the merge proceeds.
+func TestMergeImplicitRepairSkippedWhenHeadPushed(t *testing.T) {
+	_, checkout := setupImplicitRepairCheckout(t, "exit 1", false)
+	head := runGit(t, checkout, "rev-parse", "HEAD")
+
+	tests, err := runMergeImplicit(t, checkout)
+	if err != nil {
+		t.Fatalf("MergeImplicit should skip repair on a pushed HEAD, got %v (points: %v)", err, testDescs(tests))
+	}
+	assertRepairSkipped(t, tests)
+	if got := runGit(t, checkout, "rev-parse", "HEAD"); got != head {
+		t.Errorf("HEAD moved %s -> %s; a pushed HEAD must not be amended", head, got)
+	}
+}
+
+// TestMergeImplicitRepairSkippedWhenDirty: uncommitted tracked edits in the
+// checkout would be folded into HEAD by the amend, so repair is skipped.
+func TestMergeImplicitRepairSkippedWhenDirty(t *testing.T) {
+	_, checkout := setupImplicitRepairCheckout(t, "exit 1", true)
+	if err := os.WriteFile(filepath.Join(checkout, "file.txt"), []byte("in progress"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests, err := runMergeImplicit(t, checkout)
+	if err != nil {
+		t.Fatalf("MergeImplicit should skip repair on a dirty checkout, got %v (points: %v)", err, testDescs(tests))
+	}
+	assertRepairSkipped(t, tests)
+}
+
+// TestMergeImplicitRepairFailureAborts: a failing repair on unpushed work fails
+// the merge before the push, like PrepareMerge.
+func TestMergeImplicitRepairFailureAborts(t *testing.T) {
+	bare, checkout := setupImplicitRepairCheckout(t, "exit 1", true)
+	before := runGit(t, bare, "rev-parse", "master")
+
+	tests, err := runMergeImplicit(t, checkout)
+	if err == nil {
+		t.Fatalf("expected MergeImplicit to fail on repair failure (points: %v)", testDescs(tests))
+	}
+	if tr, ok := findTest(tests, "repair master"); !ok || tr.OK {
+		t.Errorf("expected not-ok repair point, got %+v (all: %v)", tr, testDescs(tests))
+	}
+	if _, ok := findTest(tests, "push"); ok {
+		t.Errorf("no push expected after a repair failure: %v", testDescs(tests))
+	}
+	if after := runGit(t, bare, "rev-parse", "master"); after != before {
+		t.Errorf("upstream master advanced %s -> %s despite repair failure", before, after)
+	}
+}
+
+func assertRepairSkipped(t *testing.T, tests []ndjsoncrap.Test) {
+	t.Helper()
+	tr, ok := findTest(tests, "repair master")
+	if !ok || tr.Directive == nil {
+		t.Fatalf("expected a skipped repair point, got %+v (all: %v)", tr, testDescs(tests))
+	}
+	if _, ok := findTest(tests, "push master"); !ok {
+		t.Errorf("merge should still push after a skipped repair: %v", testDescs(tests))
+	}
+}
+
 func testDescs(tests []ndjsoncrap.Test) []string {
 	out := make([]string, len(tests))
 	for i, tr := range tests {

@@ -401,6 +401,15 @@ func IsAncestor(dir, ancestor, commit string) bool {
 	return err == nil
 }
 
+// ReachableFromRemote reports whether rev is contained in any remote-tracking
+// ref (refs/remotes/*) — i.e. whether rewriting it would rewrite history a
+// remote already has, as far as the last fetch knows. A git error reads as
+// true: callers use this to refuse a history rewrite, so it fails closed.
+func ReachableFromRemote(dir, rev string) bool {
+	out, err := Run(dir, "for-each-ref", "--contains", rev, "--format=%(refname)", "refs/remotes/")
+	return err != nil || out != ""
+}
+
 func CommonDir(worktreePath string) (string, error) {
 	out, err := CommonGitDir(worktreePath)
 	if err != nil {

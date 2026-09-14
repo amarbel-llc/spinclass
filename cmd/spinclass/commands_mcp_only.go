@@ -437,10 +437,12 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 		return command.TextErrorResult(msg), nil
 	}
 	if gs.implicit {
-		// Implicit (main-checkout) session: hook-then-push, no rebase, no landing
+		// Implicit (main-checkout) session: repair-hook-push, no rebase, no landing
 		// lock — and no intra-session stacking (FDR 0025 scope). Refuse when busy
-		// WITHOUT consuming (D2); otherwise consume and run MergeImplicit in the
-		// job goroutine.
+		// WITHOUT consuming (D2); otherwise consume, run the prefix (gate + repair
+		// + pin) synchronously — as the worktree path does, so the repair amend
+		// is done before the agent can commit again — and the rest in the job
+		// goroutine.
 		if job.IsRunning(cwd) {
 			return jobAlreadyRunningResult(), nil
 		}
@@ -452,8 +454,17 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 		var buf bytes.Buffer
 		rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "merge " + branch, Source: "spinclass"})
 		ts := rep.TestStream(0)
+		pinnedSha, prepErr := merge.PrepareMergeImplicit(ts, repoPath, cwd, branch, params.Targets)
+		if prepErr != nil {
+			ts.Finish()
+			text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
+			if text == "" {
+				text = prepErr.Error()
+			}
+			return buildHookResult(text, nil, prepErr), nil
+		}
 		return startSessionJob(cwd, job.KindMerge, gitSync, func(ctx context.Context, w io.Writer) (string, bool) {
-			_, mergeErr := merge.MergeImplicit(ctx, rep, ts, repoPath, cwd, branch, w, params.Targets)
+			_, mergeErr := merge.FinishMergeImplicit(ctx, rep, ts, repoPath, cwd, branch, pinnedSha, w, params.Targets)
 			ts.Finish()
 			text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
 			if mergeErr != nil && text == "" {

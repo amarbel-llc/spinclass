@@ -747,11 +747,11 @@ func revokeCredential(ts *crap.TestStream, repoPath, wtPath, branch string) {
 }
 
 // MergeImplicit runs the merge path for a main-checkout (implicit) session:
-// the pre-merge hook against HEAD, then a push of the current (default) branch.
-// There is no rebase or ff-merge — the work is already on the default branch.
-// The push is surfaced as its own test point so it is never silent. Mirrors
-// FinishMerge's ts/failStep idioms; the caller owns ts.Finish(). hookSha pins
-// the exact committed sha the hook verifies.
+// the repair phase, the pre-merge hook against HEAD, then a push of the current
+// (default) branch. There is no rebase or ff-merge — the work is already on the
+// default branch. The push is surfaced as its own test point so it is never
+// silent. Mirrors PrepareMerge/FinishMerge's ts/failStep idioms; the caller owns
+// ts.Finish().
 //
 // For an implicit session repoPath == checkout == the main checkout (they are
 // the same dir): the hook runs with wtPath=checkout and the push is from
@@ -767,6 +767,20 @@ func revokeCredential(ts *crap.TestStream, repoPath, wtPath, branch string) {
 // a main checkout — check.resolveHookDir derives the parent from
 // git.CommonDir(wtPath), not filepath.Dir(wtPath) (#130).
 func MergeImplicit(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, checkout, branch string, activity io.Writer, postMergeTargets []string) (blobLinks []check.BlobLink, err error) {
+	pinnedSha, prepErr := PrepareMergeImplicit(ts, repoPath, checkout, branch, postMergeTargets)
+	if prepErr != nil {
+		return nil, prepErr
+	}
+	return FinishMergeImplicit(ctx, rep, ts, repoPath, checkout, branch, pinnedSha, activity, postMergeTargets)
+}
+
+// PrepareMergeImplicit is the implicit-session counterpart of PrepareMerge: the
+// fast, checkout-touching prefix — the disable-merge gate, post-merge target
+// validation, the REPAIR phase (FDR 0018), and the pin of the post-repair HEAD
+// the hook verifies. The async merge tool runs it synchronously so the repair
+// amend has finished before the agent gets its job id back, exactly as on the
+// worktree path.
+func PrepareMergeImplicit(ts *crap.TestStream, repoPath, checkout, branch string, postMergeTargets []string) (pinnedSha string, err error) {
 	emitCoActiveSessions(ts, repoPath, checkout)
 
 	var (
@@ -783,7 +797,7 @@ func MergeImplicit(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream,
 			"merge disabled by sweatfile (disable-merge=true at %s); use `sc check` to run the pre-merge hook without merging",
 			disableMergeSource(hierarchy),
 		)
-		return nil, failStep(ts, "merge "+branch, disableErr, "")
+		return "", failStep(ts, "merge "+branch, disableErr, "")
 	}
 
 	// Validate the post-merge target selection before anything is pushed (FDR
@@ -794,16 +808,67 @@ func MergeImplicit(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream,
 			active = hierarchy.Merged.ActivePostMergeTargets()
 		}
 		if _, selErr := selectPostMergeTargets(active, postMergeTargets); selErr != nil {
-			return nil, failStep(ts, "post-merge selection "+branch, selErr, "")
+			return "", failStep(ts, "post-merge selection "+branch, selErr, "")
+		}
+	}
+
+	// REPAIR phase (FDR 0018), before the pin so the hook verifies — and the push
+	// publishes — the post-repair tree. Skipped when repair is inactive or the
+	// hierarchy did not load, same as PrepareMerge.
+	if haveHierarchy {
+		if rErr := runImplicitRepairPhase(ts, hierarchy, checkout, branch); rErr != nil {
+			return "", rErr
 		}
 	}
 
 	// Pin HEAD; the hook verifies exactly this committed sha.
 	pinnedSha, shaErr := git.RevParse(checkout, "HEAD")
 	if shaErr != nil {
-		return nil, failStep(ts, "merge "+branch, fmt.Errorf("could not resolve HEAD: %w", shaErr), "")
+		return "", failStep(ts, "merge "+branch, fmt.Errorf("could not resolve HEAD: %w", shaErr), "")
 	}
+	return pinnedSha, nil
+}
 
+// runImplicitRepairPhase guards runRepairPhase for a main checkout, where the
+// preconditions PrepareMerge gets for free do not hold. On the worktree path the
+// rebase guarantees a clean tree and the nothing-to-merge guard guarantees an
+// unpushed session HEAD; a main checkout has neither, so repair (an amend) is
+// skipped — never failed — when:
+//
+//   - the index has unresolved conflicts or tracked files carry uncommitted
+//     edits: the formatter would stage and fold them into HEAD;
+//   - HEAD is already reachable from a remote-tracking ref (including the
+//     nothing-to-push case HEAD == origin/<branch>): the amend would rewrite
+//     published history, which `conformist --amend` refuses anyway.
+//
+// A skip degrades to exactly the pre-repair behavior (the gate verifies HEAD as
+// committed). The pushed check trusts the last fetch; a remote that advanced to
+// HEAD unfetched makes the post-amend push non-fast-forward, which fails having
+// moved nothing.
+func runImplicitRepairPhase(ts *crap.TestStream, hierarchy sweatfile.Hierarchy, checkout, branch string) error {
+	if !hierarchy.Merged.RepairActive() {
+		return nil
+	}
+	desc := "repair " + branch
+	if conflicted, cErr := git.UnmergedPaths(checkout); cErr != nil || len(conflicted) > 0 {
+		ts.Skip(desc, "checkout has unresolved conflicts")
+		return nil
+	}
+	if git.HasDirtyTracked(checkout) {
+		ts.Skip(desc, "checkout has uncommitted changes to tracked files")
+		return nil
+	}
+	if git.ReachableFromRemote(checkout, "HEAD") {
+		ts.Skip(desc, "HEAD is already pushed; amending would rewrite published history")
+		return nil
+	}
+	return runRepairPhase(ts, hierarchy, checkout, branch)
+}
+
+// FinishMergeImplicit is the implicit-session counterpart of FinishMerge: the
+// pre-merge hook against pinnedSha (the sha PrepareMergeImplicit returned), the
+// push, and the post-merge phase. The caller owns ts.Finish().
+func FinishMergeImplicit(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, checkout, branch, pinnedSha string, activity io.Writer, postMergeTargets []string) (blobLinks []check.BlobLink, err error) {
 	// Pre-merge hook (isolated build worktree pinned to pinnedSha).
 	hookLinks, hookErr := runPreMergeHookContext(ctx, rep, ts, repoPath, checkout, branch, pinnedSha, activity)
 	blobLinks = append(blobLinks, hookLinks...)

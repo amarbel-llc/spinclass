@@ -412,7 +412,8 @@ subcommand is always available.
   `PrepareMerge` runs it in the **session worktree** before the pin to fold
   mechanical fixes into the merged commit (canonical
   `conformist --commit --amend --exit-zero-on-fix`; amend detected via HEAD-sha
-  delta). Merge-only; worktree sessions only. spinclass's own sweatfile has
+  delta). Merge-only; implicit merges run it
+  (skipped if HEAD is pushed or tree dirty). spinclass's own sweatfile has
   **retired** this in favour of the per-commit hook below.
 - **Per-commit repair hook** (FDR 0019, #183, #267): `[hooks].pre-commit`
   installs a per-worktree git pre-commit hook (`internal/sweatfile/precommit.go`)

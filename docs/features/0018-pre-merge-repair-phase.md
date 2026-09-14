@@ -224,9 +224,17 @@ not ok   repair prime-pine
   the signature).
 - **Implicit / main-checkout sessions (FDR 0014).** Their HEAD is on the
   default branch and may already be pushed; conformist's amend refuses pushed
-  history. v1 does not run repair for implicit sessions (out of scope, like
-  check/#132). A future variant could use `--commit` (fresh
-  `chore: conformist fmt+fix` commit) instead of `--amend` there.
+  history. v1 did not run repair for them, which made mechanical drift a hard
+  gate failure on a main checkout that a worktree session would have folded in.
+  `PrepareMergeImplicit` now runs it in the same position (before the pin the
+  hook verifies and the push publishes), guarded because a main checkout lacks
+  the worktree path's rebase-given preconditions: repair is **skipped** (a skip
+  point, never a merge failure) when HEAD is reachable from any remote-tracking
+  ref, or the checkout has unresolved conflicts or uncommitted tracked edits.
+  The pushed check trusts the last fetch; an unfetched remote that already has
+  HEAD makes the post-amend push non-fast-forward, which moves nothing. A
+  future variant could use `--commit` (fresh `chore: conformist fmt+fix`
+  commit) instead of `--amend` to cover the already-pushed case.
 - **Multi-commit branches.** `--amend` folds fixes into the **top** commit
   only. The formatting is correct tree-wide, but it lands as one chore-fold on
   HEAD rather than distributed per-commit — fine for the squash-style worker
