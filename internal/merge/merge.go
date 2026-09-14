@@ -171,43 +171,9 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, rep *crap.Rep
 // moment the rebase lands while FinishMerge's slow pre-merge hook runs detached
 // in an isolated build worktree.
 func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch string, gitSync bool, postMergeTargets []string) (pinnedSha string, err error) {
-	emitCoActiveSessions(ts, repoPath, wtPath)
-
-	// Load the sweatfile hierarchy once for the disable-merge gate and the
-	// repair phase. An unresolvable home or load failure degrades gracefully:
-	// both the gate and repair are skipped rather than blocking the merge.
-	var (
-		hierarchy     sweatfile.Hierarchy
-		haveHierarchy bool
-	)
-	if home, _ := os.UserHomeDir(); home != "" {
-		if h, hErr := sweatfileio.LoadWorktreeHierarchy(home, repoPath, wtPath); hErr == nil {
-			hierarchy, haveHierarchy = h, true
-		}
-	}
-
-	if haveHierarchy && hierarchy.Merged.DisableMergeEnabled() {
-		disableErr := fmt.Errorf(
-			"merge disabled by sweatfile (disable-merge=true at %s); use `sc check` to run the pre-merge hook without merging",
-			disableMergeSource(hierarchy),
-		)
-		return "", failStep(ts, "merge "+branch, disableErr, "")
-	}
-
-	// Validate the post-merge target selection BEFORE anything lands (FDR 0026):
-	// a caller naming a target no [[post-merge]] stanza declares is a typo that
-	// would otherwise silently skip the deploy the caller intended, so it is the
-	// one post-merge concern that can still be fatal — nothing has shipped yet.
-	// A nil selection (deploy all) needs no validation; an empty one (deploy
-	// none) is always valid.
-	if postMergeTargets != nil {
-		var active []sweatfile.PostMergeTarget
-		if haveHierarchy {
-			active = hierarchy.Merged.ActivePostMergeTargets()
-		}
-		if _, selErr := selectPostMergeTargets(active, postMergeTargets); selErr != nil {
-			return "", failStep(ts, "post-merge selection "+branch, selErr, "")
-		}
+	preamble, gateErr := loadAndGate(ts, repoPath, wtPath, branch, postMergeTargets)
+	if gateErr != nil {
+		return "", gateErr
 	}
 
 	// Pull the default branch BEFORE rebasing, so the session branch is
@@ -257,22 +223,95 @@ func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch s
 	// REPAIR phase (FDR 0018): auto-fold mechanical fixes into the commit being
 	// merged before the VERIFY hook. Runs here — after the nothing-to-merge guard
 	// (so HEAD is an unpushed session commit conformist's --amend accepts) and
-	// before the pin (so the pin reads the post-repair HEAD). Skipped when repair
-	// is inactive or the hierarchy did not load.
-	if haveHierarchy {
-		if rErr := runRepairPhase(ts, hierarchy, wtPath, branch); rErr != nil {
-			return "", rErr
-		}
+	// before the pin (so the pin reads the post-repair HEAD). The rebase and that
+	// guard already establish repair's preconditions, so no skip check.
+	if rErr := preamble.repair(ts, wtPath, branch, nil); rErr != nil {
+		return "", rErr
 	}
 
 	// Pin the post-rebase (and post-repair) tip: FinishMerge verifies and merges
 	// exactly this sha, so work committed onto branch while the hook runs is left
 	// for a later merge.
-	pinnedSha, shaErr := git.RevParse(wtPath, "HEAD")
-	if shaErr != nil {
-		return "", failStep(ts, "merge "+branch, fmt.Errorf("could not resolve %s HEAD: %w", branch, shaErr), "")
+	return pinHead(ts, wtPath, branch)
+}
+
+// mergePreamble carries the sweatfile hierarchy loaded by loadAndGate into the
+// later prepare phases of both merge kinds (PrepareMerge, PrepareMergeImplicit).
+type mergePreamble struct {
+	hierarchy     sweatfile.Hierarchy
+	haveHierarchy bool
+}
+
+// loadAndGate is the shared head of both merge kinds: the co-active sessions
+// point, the sweatfile hierarchy load for dir, the disable-merge gate, and the
+// post-merge target validation. An unresolvable home or load failure degrades
+// gracefully — the gate and the later repair phase are skipped rather than
+// blocking the merge. Keeping this in one place is what stops the two merge
+// kinds' gating from drifting apart (parity_test.go enforces the observable
+// half).
+func loadAndGate(ts *crap.TestStream, repoPath, dir, branch string, postMergeTargets []string) (mergePreamble, error) {
+	emitCoActiveSessions(ts, repoPath, dir)
+
+	var p mergePreamble
+	if home, _ := os.UserHomeDir(); home != "" {
+		if h, hErr := sweatfileio.LoadWorktreeHierarchy(home, repoPath, dir); hErr == nil {
+			p.hierarchy, p.haveHierarchy = h, true
+		}
 	}
-	return pinnedSha, nil
+
+	if p.haveHierarchy && p.hierarchy.Merged.DisableMergeEnabled() {
+		disableErr := fmt.Errorf(
+			"merge disabled by sweatfile (disable-merge=true at %s); use `sc check` to run the pre-merge hook without merging",
+			disableMergeSource(p.hierarchy),
+		)
+		return p, failStep(ts, "merge "+branch, disableErr, "")
+	}
+
+	// Validate the post-merge target selection BEFORE anything lands (FDR 0026):
+	// a caller naming a target no [[post-merge]] stanza declares is a typo that
+	// would otherwise silently skip the deploy the caller intended, so it is the
+	// one post-merge concern that can still be fatal — nothing has shipped yet.
+	// A nil selection (deploy all) needs no validation; an empty one (deploy
+	// none) is always valid.
+	if postMergeTargets != nil {
+		var active []sweatfile.PostMergeTarget
+		if p.haveHierarchy {
+			active = p.hierarchy.Merged.ActivePostMergeTargets()
+		}
+		if _, selErr := selectPostMergeTargets(active, postMergeTargets); selErr != nil {
+			return p, failStep(ts, "post-merge selection "+branch, selErr, "")
+		}
+	}
+	return p, nil
+}
+
+// repair runs the REPAIR phase (FDR 0018) in dir for both merge kinds. It is a
+// no-op when the hierarchy did not load or repair is inactive. skipReason, when
+// non-nil, is consulted only for an active repair: a non-empty reason emits a
+// skip point instead of running the amend — how a merge kind whose
+// preconditions are not guaranteed (implicitRepairSkipReason) degrades rather
+// than fails.
+func (p mergePreamble) repair(ts *crap.TestStream, dir, branch string, skipReason func(dir string) string) error {
+	if !p.haveHierarchy || !p.hierarchy.Merged.RepairActive() {
+		return nil
+	}
+	if skipReason != nil {
+		if reason := skipReason(dir); reason != "" {
+			ts.Skip("repair "+branch, reason)
+			return nil
+		}
+	}
+	return runRepairPhase(ts, p.hierarchy, dir, branch)
+}
+
+// pinHead resolves dir's HEAD as the sha the pre-merge hook verifies and the
+// landing publishes, emitting a failing point on error.
+func pinHead(ts *crap.TestStream, dir, branch string) (string, error) {
+	sha, err := git.RevParse(dir, "HEAD")
+	if err != nil {
+		return "", failStep(ts, "merge "+branch, fmt.Errorf("could not resolve %s HEAD: %w", branch, err), "")
+	}
+	return sha, nil
 }
 
 // ErrIntegrationConflict is returned when the merge queue's landing rebase —
@@ -781,59 +820,26 @@ func MergeImplicit(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream,
 // amend has finished before the agent gets its job id back, exactly as on the
 // worktree path.
 func PrepareMergeImplicit(ts *crap.TestStream, repoPath, checkout, branch string, postMergeTargets []string) (pinnedSha string, err error) {
-	emitCoActiveSessions(ts, repoPath, checkout)
-
-	var (
-		hierarchy     sweatfile.Hierarchy
-		haveHierarchy bool
-	)
-	if home, _ := os.UserHomeDir(); home != "" {
-		if h, hErr := sweatfileio.LoadWorktreeHierarchy(home, repoPath, checkout); hErr == nil {
-			hierarchy, haveHierarchy = h, true
-		}
-	}
-	if haveHierarchy && hierarchy.Merged.DisableMergeEnabled() {
-		disableErr := fmt.Errorf(
-			"merge disabled by sweatfile (disable-merge=true at %s); use `sc check` to run the pre-merge hook without merging",
-			disableMergeSource(hierarchy),
-		)
-		return "", failStep(ts, "merge "+branch, disableErr, "")
-	}
-
-	// Validate the post-merge target selection before anything is pushed (FDR
-	// 0026), same as PrepareMerge on the worktree path.
-	if postMergeTargets != nil {
-		var active []sweatfile.PostMergeTarget
-		if haveHierarchy {
-			active = hierarchy.Merged.ActivePostMergeTargets()
-		}
-		if _, selErr := selectPostMergeTargets(active, postMergeTargets); selErr != nil {
-			return "", failStep(ts, "post-merge selection "+branch, selErr, "")
-		}
+	preamble, gateErr := loadAndGate(ts, repoPath, checkout, branch, postMergeTargets)
+	if gateErr != nil {
+		return "", gateErr
 	}
 
 	// REPAIR phase (FDR 0018), before the pin so the hook verifies — and the push
-	// publishes — the post-repair tree. Skipped when repair is inactive or the
-	// hierarchy did not load, same as PrepareMerge.
-	if haveHierarchy {
-		if rErr := runImplicitRepairPhase(ts, hierarchy, checkout, branch); rErr != nil {
-			return "", rErr
-		}
+	// publishes — the post-repair tree.
+	if rErr := preamble.repair(ts, checkout, branch, implicitRepairSkipReason); rErr != nil {
+		return "", rErr
 	}
 
 	// Pin HEAD; the hook verifies exactly this committed sha.
-	pinnedSha, shaErr := git.RevParse(checkout, "HEAD")
-	if shaErr != nil {
-		return "", failStep(ts, "merge "+branch, fmt.Errorf("could not resolve HEAD: %w", shaErr), "")
-	}
-	return pinnedSha, nil
+	return pinHead(ts, checkout, branch)
 }
 
-// runImplicitRepairPhase guards runRepairPhase for a main checkout, where the
-// preconditions PrepareMerge gets for free do not hold. On the worktree path the
-// rebase guarantees a clean tree and the nothing-to-merge guard guarantees an
-// unpushed session HEAD; a main checkout has neither, so repair (an amend) is
-// skipped — never failed — when:
+// implicitRepairSkipReason returns why repair must not amend a main checkout's
+// HEAD, or "" when it may. On the worktree path the rebase guarantees a clean
+// tree and the nothing-to-merge guard guarantees an unpushed session HEAD; a
+// main checkout has neither, so repair (an amend) is skipped — never failed —
+// when:
 //
 //   - the index has unresolved conflicts or tracked files carry uncommitted
 //     edits: the formatter would stage and fold them into HEAD;
@@ -845,24 +851,17 @@ func PrepareMergeImplicit(ts *crap.TestStream, repoPath, checkout, branch string
 // committed). The pushed check trusts the last fetch; a remote that advanced to
 // HEAD unfetched makes the post-amend push non-fast-forward, which fails having
 // moved nothing.
-func runImplicitRepairPhase(ts *crap.TestStream, hierarchy sweatfile.Hierarchy, checkout, branch string) error {
-	if !hierarchy.Merged.RepairActive() {
-		return nil
-	}
-	desc := "repair " + branch
+func implicitRepairSkipReason(checkout string) string {
 	if conflicted, cErr := git.UnmergedPaths(checkout); cErr != nil || len(conflicted) > 0 {
-		ts.Skip(desc, "checkout has unresolved conflicts")
-		return nil
+		return "checkout has unresolved conflicts"
 	}
 	if git.HasDirtyTracked(checkout) {
-		ts.Skip(desc, "checkout has uncommitted changes to tracked files")
-		return nil
+		return "checkout has uncommitted changes to tracked files"
 	}
 	if git.ReachableFromRemote(checkout, "HEAD") {
-		ts.Skip(desc, "HEAD is already pushed; amending would rewrite published history")
-		return nil
+		return "HEAD is already pushed; amending would rewrite published history"
 	}
-	return runRepairPhase(ts, hierarchy, checkout, branch)
+	return ""
 }
 
 // FinishMergeImplicit is the implicit-session counterpart of FinishMerge: the
@@ -1343,10 +1342,11 @@ func postMergeTargetNames(targets []sweatfile.PostMergeTarget) string {
 	return strings.Join(names, ", ")
 }
 
-// runRepairPhase runs the [hooks].repair command (FDR 0018) in wtPath when
-// active, emitting a test point on ts, and aborts the merge on a nonzero exit.
-// On success the HEAD-sha delta distinguishes an amend ("amended <sha>") from a
-// no-op ("already conformant"). Returns nil (no-op) when repair is inactive.
+// runRepairPhase runs the [hooks].repair command (FDR 0018) in wtPath, emitting
+// a test point on ts, and aborts the merge on a nonzero exit. On success the
+// HEAD-sha delta distinguishes an amend ("amended <sha>") from a no-op
+// ("already conformant"). Callers go through mergePreamble.repair, which owns
+// the active/skip decisions.
 //
 // Repair deliberately runs in the session worktree, not the build worktree: the
 // build worktree's pinned-sha `merge --ff-only` would discard an amend made
@@ -1355,10 +1355,6 @@ func postMergeTargetNames(targets []sweatfile.PostMergeTarget) string {
 // because PrepareMerge is the synchronous prefix — for async merge it runs
 // before the cancellable job exists, and repair is a fast formatter pass.
 func runRepairPhase(ts *crap.TestStream, hierarchy sweatfile.Hierarchy, wtPath, branch string) error {
-	if !hierarchy.Merged.RepairActive() {
-		return nil
-	}
-
 	// Pre-repair HEAD; the delta against the post-repair HEAD is the
 	// tool-agnostic "did it amend" signal (the repair command exits 0 whether or
 	// not it changed anything, e.g. conformist --exit-zero-on-fix).

@@ -195,11 +195,18 @@ func TestResolvedRepairNoopCompletes(t *testing.T) {
 // fold it into HEAD. (Unsigned commits — tests don't enable gpgsign.)
 const repairAmendCmd = "printf fixed > file.txt && git add file.txt && git commit --amend --no-edit"
 
-// setupImplicitRepairCheckout builds a bare upstream plus a main checkout on
-// master whose initial commit is pushed, with repairCmd as [hooks].repair. When
-// unpushedWork is set, one more commit sits on master ahead of origin — the
-// normal implicit-merge shape. Returns (bare, checkout).
+// setupImplicitRepairCheckout is setupImplicitCheckout with repairCmd as the
+// only sweatfile setting ([hooks].repair).
 func setupImplicitRepairCheckout(t *testing.T, repairCmd string, unpushedWork bool) (bare, checkout string) {
+	t.Helper()
+	return setupImplicitCheckout(t, "[hooks]\nrepair = \""+repairCmd+"\"\n", unpushedWork)
+}
+
+// setupImplicitCheckout builds a bare upstream plus a main checkout on master
+// whose initial commit is pushed, with sweatfileBody as its (untracked) repo
+// sweatfile. When unpushedWork is set, one more commit sits on master ahead of
+// origin — the normal implicit-merge shape. Returns (bare, checkout).
+func setupImplicitCheckout(t *testing.T, sweatfileBody string, unpushedWork bool) (bare, checkout string) {
 	t.Helper()
 	root := t.TempDir()
 	t.Setenv("GIT_CEILING_DIRECTORIES", root)
@@ -221,7 +228,7 @@ func setupImplicitRepairCheckout(t *testing.T, repairCmd string, unpushedWork bo
 	runGit(t, checkout, "push", "-u", "origin", "master")
 
 	// Untracked, so it never reads as a dirty tracked file.
-	writeRepoSweatfile(t, checkout, "[hooks]\nrepair = \""+repairCmd+"\"\n")
+	writeRepoSweatfile(t, checkout, sweatfileBody)
 
 	if unpushedWork {
 		if err := os.WriteFile(filepath.Join(checkout, "work.txt"), []byte("work"), 0o644); err != nil {
