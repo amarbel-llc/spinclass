@@ -30,6 +30,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 	"github.com/mattn/go-isatty"
@@ -41,6 +42,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sessionexec"
 	"code.linenisgreat.com/spinclass/internal/shop"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 )
@@ -62,6 +64,11 @@ type Spec struct {
 	// DynamicPostMergeHooks are shell commands passed via --post-merge; each
 	// runs after the merge lands, non-fatally, in the default-branch checkout.
 	DynamicPostMergeHooks []string
+	// PostMergeTimeout is --post-merge-timeout: a per-run override of
+	// [hooks].post-merge-timeout for the sweatfile post-merge phase of this
+	// run's merge (nil = sweatfile in force). It does not bound the dynamic
+	// --post-merge hooks, which are uncapped.
+	PostMergeTimeout *time.Duration
 }
 
 // Run executes the full lifecycle and returns the process exit code to
@@ -190,7 +197,8 @@ func Run(spec Spec) (exitCode int, err error) {
 		// (inSession=false) lets the merge remove the worktree + branch; the
 		// dangling index entry is then dropped in teardown.
 		if _, mErr := merge.Resolved(executor.ShellExecutor{}, rep, ts,
-			rp.RepoPath, rp.AbsPath, rp.Branch, defaultBranch, !spec.LocalOnly, spec.NoClose, nil); mErr != nil {
+			rp.RepoPath, rp.AbsPath, rp.Branch, defaultBranch, !spec.LocalOnly, spec.NoClose,
+			merge.PostMergeOptions{Timeout: spec.PostMergeTimeout}); mErr != nil {
 			mergeFailed = true
 			return mErr
 		}
@@ -386,19 +394,21 @@ func nonzero(code int) int {
 // runDynamicPostMergeHooks runs each --post-merge hook after a successful
 // merge, in the repo's default-branch checkout. Failures are non-fatal
 // (severity=warn): the merge is already durable.
+//
+// The env is the same SPINCLASS_* set the sweatfile post-merge phase exports
+// (merge.PostMergeEnv — one builder, so the two sites cannot drift), with the
+// timing trio reporting "0": dynamic hooks run after the merge returned and
+// under no cap. There is no pin to report here (the merge already tore down),
+// so SPINCLASS_PINNED_SHA is omitted rather than guessed.
 func runDynamicPostMergeHooks(rep *crap.Reporter, repoPath, defaultBranch, branch string, pushed bool, hooks []string) {
 	mergedSHA, _ := git.RevParse(repoPath, defaultBranch)
-	pushedStr := "false"
-	if pushed {
-		pushedStr = "true"
-	}
-	extraEnv := []string{
-		"SPINCLASS_MERGED_SHA=" + mergedSHA,
-		"SPINCLASS_MERGED_BRANCH=" + branch,
-		"SPINCLASS_DEFAULT_BRANCH=" + defaultBranch,
-		"SPINCLASS_MERGE_PUSHED=" + pushedStr,
-		"SPINCLASS_REPO_PATH=" + repoPath,
-	}
+	extraEnv := merge.PostMergeEnv(merge.PostMergeFacts{
+		LandedSha:     mergedSHA,
+		Branch:        branch,
+		DefaultBranch: defaultBranch,
+		RepoPath:      repoPath,
+		Pushed:        pushed,
+	})
 	for _, h := range hooks {
 		ph := rep.Phase("post-merge " + h)
 		ph.Command(h)
@@ -427,7 +437,7 @@ func runDynamicPostMergeHooks(rep *crap.Reporter, repoPath, defaultBranch, branc
 //
 //	[--description D | -d D | --description=D] [--no-merge] [--no-close]
 //	[--local-only] [--allow-stale-base] [--allow-no-credential] [--format F | --format=F]
-//	[--post-merge H]...
+//	[--post-merge H]... [--post-merge-timeout D | --post-merge-timeout=D]
 //	( -- <util> [args...] | <stdin script> )
 //
 // Flags are hand-parsed (the command uses PassthroughArgs, like `sc exec`) up
@@ -487,6 +497,19 @@ func ParseArgs(args []string, stdin io.Reader) (Spec, error) {
 		case strings.HasPrefix(a, "--post-merge="):
 			spec.DynamicPostMergeHooks = append(spec.DynamicPostMergeHooks, strings.TrimPrefix(a, "--post-merge="))
 			i++
+		case a == "--post-merge-timeout":
+			if i+1 >= len(args) {
+				return spec, fmt.Errorf("%s requires a value", a)
+			}
+			if err := spec.setPostMergeTimeout(args[i+1]); err != nil {
+				return spec, err
+			}
+			i += 2
+		case strings.HasPrefix(a, "--post-merge-timeout="):
+			if err := spec.setPostMergeTimeout(strings.TrimPrefix(a, "--post-merge-timeout=")); err != nil {
+				return spec, err
+			}
+			i++
 		default:
 			return spec, fmt.Errorf("unknown flag or stray argument %q (a command must follow `--`)", a)
 		}
@@ -508,4 +531,16 @@ func ParseArgs(args []string, stdin io.Reader) (Spec, error) {
 		}
 	}
 	return spec, errors.New("nothing to run: pass a command after `--` or pipe a script on stdin")
+}
+
+// setPostMergeTimeout validates a --post-merge-timeout value with the same
+// rule the sweatfile field and the MCP parameter use, so all three spellings
+// accept and reject identically.
+func (s *Spec) setPostMergeTimeout(v string) error {
+	d, err := sweatfile.ParsePostMergeTimeout(v)
+	if err != nil {
+		return fmt.Errorf("--post-merge-timeout: %w", err)
+	}
+	s.PostMergeTimeout = &d
+	return nil
 }

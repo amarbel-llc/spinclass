@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -48,16 +49,23 @@ func runFinish(t *testing.T, repoDir, wtPath, branch string, gitSync bool) ([]nd
 // (FDR 0026): nil = all, a non-nil list = that subset, empty = none.
 func runFinishTargets(t *testing.T, repoDir, wtPath, branch string, gitSync bool, postMergeTargets []string) ([]ndjsoncrap.Record, error) {
 	t.Helper()
+	return runFinishOpts(t, repoDir, wtPath, branch, gitSync, PostMergeOptions{Targets: postMergeTargets})
+}
+
+// runFinishOpts is runFinish with the full per-merge post-merge options (the
+// target selection plus the post-merge-timeout override).
+func runFinishOpts(t *testing.T, repoDir, wtPath, branch string, gitSync bool, pm PostMergeOptions) ([]ndjsoncrap.Record, error) {
+	t.Helper()
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	pinnedSha, prepErr := PrepareMerge(ts, repoDir, wtPath, branch, "main", gitSync, postMergeTargets)
+	pinnedSha, prepErr := PrepareMerge(ts, repoDir, wtPath, branch, "main", gitSync, pm)
 	if prepErr != nil {
 		ts.Finish()
 		return decodeRecords(t, buf.Bytes()), prepErr
 	}
 	_, err := FinishMerge(context.Background(), &mockExecutor{}, rep, ts,
-		repoDir, wtPath, branch, "main", pinnedSha, gitSync, true, nil, postMergeTargets)
+		repoDir, wtPath, branch, "main", pinnedSha, gitSync, true, nil, pm)
 	ts.Finish()
 	return decodeRecords(t, buf.Bytes()), err
 }
@@ -199,10 +207,181 @@ func TestPostMergeReceivesLandedFactsEnv(t *testing.T) {
 		"SPINCLASS_DEFAULT_BRANCH=main",
 		"SPINCLASS_MERGE_PUSHED=0",
 		"SPINCLASS_REPO_PATH=" + repoDir,
+		// Nothing rebased the landing, so the pin IS the landed sha.
+		"SPINCLASS_PINNED_SHA=" + mainSha,
+		// No override, no sweatfile value: the default cap is what is advertised.
+		"SPINCLASS_POST_MERGE_TIMEOUT=10m0s",
+		"SPINCLASS_POST_MERGE_TIMEOUT_SECONDS=600",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in post-merge env:\n%s", want, got)
 		}
+	}
+	// The legacy string path has no target, so it must not claim one.
+	if strings.Contains(got, "SPINCLASS_POST_MERGE_TARGET") {
+		t.Errorf("legacy [hooks].post-merge must not export SPINCLASS_POST_MERGE_TARGET:\n%s", got)
+	}
+	assertDeadlineNear(t, got, 10*time.Minute)
+}
+
+// assertDeadlineNear checks the exported SPINCLASS_POST_MERGE_DEADLINE is an
+// epoch roughly cap from now (the hook ran moments ago), so what was advertised
+// is the deadline that would be enforced.
+func assertDeadlineNear(t *testing.T, env string, cap time.Duration) {
+	t.Helper()
+	var raw string
+	for _, line := range strings.Split(env, "\n") {
+		if v, ok := strings.CutPrefix(line, "SPINCLASS_POST_MERGE_DEADLINE="); ok {
+			raw = v
+		}
+	}
+	if raw == "" {
+		t.Fatalf("SPINCLASS_POST_MERGE_DEADLINE missing from env:\n%s", env)
+	}
+	epoch, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		t.Fatalf("SPINCLASS_POST_MERGE_DEADLINE=%q is not an integer epoch: %v", raw, err)
+	}
+	want := time.Now().Add(cap)
+	if diff := want.Sub(time.Unix(epoch, 0)); diff < 0 || diff > 2*time.Minute {
+		t.Errorf("deadline %d is %s from now+%s, want within 2m", epoch, diff, cap)
+	}
+}
+
+// A per-merge post-merge-timeout override (PostMergeOptions.Timeout) beats the
+// sweatfile's [hooks].post-merge-timeout for that merge: it is what every named
+// target sees in SPINCLASS_POST_MERGE_TIMEOUT(_SECONDS)/_DEADLINE — plus its own
+// SPINCLASS_POST_MERGE_TARGET — and it is what is enforced (the lowered cap kills
+// a command the sweatfile's cap would have let finish, verdict=timeout).
+func TestPostMergeTimeoutOverrideBeatsSweatfileOnNamedTargets(t *testing.T) {
+	repoDir, wtPath := setupPostMergeRepo(t, "feature")
+	dir := t.TempDir()
+	kroneEnv := filepath.Join(dir, "krone.env")
+	nikulinEnv := filepath.Join(dir, "nikulin.env")
+	writeRepoSweatfile(t, repoDir, `
+[hooks]
+post-merge-timeout = "20m"
+
+[[post-merge]]
+name = "krone"
+command = "env | grep '^SPINCLASS_' | sort > `+kroneEnv+`"
+
+[[post-merge]]
+name = "nikulin"
+command = "env | grep '^SPINCLASS_' | sort > `+nikulinEnv+`"
+`)
+
+	recs, err := runFinishOpts(t, repoDir, wtPath, "feature", false,
+		PostMergeOptions{Timeout: dptr(45 * time.Minute)})
+	if err != nil {
+		t.Fatalf("FinishMerge: %v", err)
+	}
+	for _, name := range []string{"krone", "nikulin"} {
+		if n, ok := findNode(recs, "post-merge "+name); !ok || !n.exitOK {
+			t.Fatalf("expected ok %s node, got %+v (all: %v)", name, n, nodeNames(recs))
+		}
+	}
+	for name, file := range map[string]string{"krone": kroneEnv, "nikulin": nikulinEnv} {
+		raw, readErr := os.ReadFile(file)
+		if readErr != nil {
+			t.Fatalf("%s did not write its env: %v", name, readErr)
+		}
+		got := string(raw)
+		for _, want := range []string{
+			"SPINCLASS_POST_MERGE_TIMEOUT=45m0s",
+			"SPINCLASS_POST_MERGE_TIMEOUT_SECONDS=2700",
+			"SPINCLASS_POST_MERGE_TARGET=" + name,
+			"SPINCLASS_MERGED_BRANCH=feature",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("%s: missing %q in env:\n%s", name, want, got)
+			}
+		}
+		assertDeadlineNear(t, got, 45*time.Minute)
+	}
+}
+
+func TestPostMergeTimeoutOverrideLoweringIsEnforced(t *testing.T) {
+	repoDir, wtPath := setupPostMergeRepo(t, "feature")
+	writeRepoSweatfile(t, repoDir, `
+[hooks]
+post-merge-timeout = "10m"
+
+[[post-merge]]
+name = "slow"
+command = "sleep 30"
+`)
+	start := time.Now()
+	recs, err := runFinishOpts(t, repoDir, wtPath, "feature", false,
+		PostMergeOptions{Timeout: dptr(300 * time.Millisecond)})
+	if err != nil {
+		t.Fatalf("a timed-out target must not fail the merge, got %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 20*time.Second {
+		t.Errorf("phase ran %s; the 300ms override should have killed the 30s command", elapsed)
+	}
+	n, ok := findNode(recs, "post-merge slow")
+	if !ok || n.exitOK {
+		t.Fatalf("expected a failing slow node, got %+v (all: %v)", n, nodeNames(recs))
+	}
+	if v := diagString(n.diag, "verdict"); v != "timeout" {
+		t.Errorf("verdict = %q, want timeout (the override, not the sweatfile's 10m, must be the cap)", v)
+	}
+	if msg := diagString(n.diag, "message"); !strings.Contains(msg, "300ms") {
+		t.Errorf("timeout message should name the effective cap 300ms: %q", msg)
+	}
+}
+
+// A zero override disables the cap even when the sweatfile sets one: the env
+// says so ("0" everywhere) and a command outrunning the sweatfile's tiny cap
+// still completes.
+func TestPostMergeTimeoutOverrideZeroDisablesCap(t *testing.T) {
+	repoDir, wtPath := setupPostMergeRepo(t, "feature")
+	envFile := filepath.Join(t.TempDir(), "env")
+	writeRepoSweatfile(t, repoDir, `
+[hooks]
+post-merge-timeout = "200ms"
+post-merge = "sleep 0.6; env | grep '^SPINCLASS_POST_MERGE' | sort > `+envFile+`"
+`)
+	recs, err := runFinishOpts(t, repoDir, wtPath, "feature", false, PostMergeOptions{Timeout: dptr(0)})
+	if err != nil {
+		t.Fatalf("FinishMerge: %v", err)
+	}
+	if tr, ok := findTest(testRecords(recs), "post-merge feature"); !ok || !tr.OK {
+		t.Fatalf("with the cap disabled the 0.6s hook must complete, got %+v", tr)
+	}
+	raw, readErr := os.ReadFile(envFile)
+	if readErr != nil {
+		t.Fatalf("hook did not run to completion: %v", readErr)
+	}
+	got := strings.TrimSpace(string(raw))
+	want := "SPINCLASS_POST_MERGE_DEADLINE=0\nSPINCLASS_POST_MERGE_TIMEOUT=0\nSPINCLASS_POST_MERGE_TIMEOUT_SECONDS=0"
+	if got != want {
+		t.Errorf("uncapped env:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// Without an override the legacy string path enforces AND advertises the
+// sweatfile's cap (the same number, from one resolution).
+func TestPostMergeLegacyPathAdvertisesSweatfileCap(t *testing.T) {
+	repoDir, wtPath := setupPostMergeRepo(t, "feature")
+	envFile := filepath.Join(t.TempDir(), "env")
+	writeRepoSweatfile(t, repoDir, `
+[hooks]
+post-merge-timeout = "20m"
+post-merge = "env | grep '^SPINCLASS_POST_MERGE_TIMEOUT' | sort > `+envFile+`"
+`)
+	if _, err := runFinish(t, repoDir, wtPath, "feature", false); err != nil {
+		t.Fatalf("FinishMerge: %v", err)
+	}
+	raw, readErr := os.ReadFile(envFile)
+	if readErr != nil {
+		t.Fatalf("hook did not run: %v", readErr)
+	}
+	got := strings.TrimSpace(string(raw))
+	want := "SPINCLASS_POST_MERGE_TIMEOUT=20m0s\nSPINCLASS_POST_MERGE_TIMEOUT_SECONDS=1200"
+	if got != want {
+		t.Errorf("legacy env:\n got: %q\nwant: %q", got, want)
 	}
 }
 
@@ -323,12 +502,12 @@ func TestPostMergeRunsAfterWorktreeTeardown(t *testing.T) {
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	pinnedSha, prepErr := PrepareMerge(ts, repoDir, wtPath, "feature", "main", false, nil)
+	pinnedSha, prepErr := PrepareMerge(ts, repoDir, wtPath, "feature", "main", false, PostMergeOptions{})
 	if prepErr != nil {
 		t.Fatalf("PrepareMerge: %v", prepErr)
 	}
 	_, err := FinishMerge(context.Background(), &mockExecutor{}, rep, ts,
-		repoDir, wtPath, "feature", "main", pinnedSha, false, false, nil, nil)
+		repoDir, wtPath, "feature", "main", pinnedSha, false, false, nil, PostMergeOptions{})
 	ts.Finish()
 	if err != nil {
 		t.Fatalf("FinishMerge: %v\n%s", err, buf.String())

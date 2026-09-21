@@ -376,9 +376,13 @@ subcommand is always available.
   extends that exclusive region). Non-fatal: a nonzero exit emits a `severity=warn`
   point but does NOT fail the merge (nothing to roll back). Bounded by
   `[hooks].post-merge-timeout`, a **wall-clock** cap ON by default at 10m (#246;
-  `"0"` disables). Publishes `SPINCLASS_MERGED_SHA` (the LANDING sha on a rebased
-  landing), `_MERGED_BRANCH`, `_DEFAULT_BRANCH`, `_MERGE_PUSHED`, `_REPO_PATH`.
-  All land paths fire it; `sc check` never does. `disable-post-merge` opts out.
+  `"0"` disables), overridable per merge, no ceiling, via `post_merge_timeout` /
+  `--post-merge-timeout` (`merge.PostMergeOptions`, FDR 0026).
+  Publishes `SPINCLASS_MERGED_SHA` (landing sha), `_MERGED_BRANCH`,
+  `_DEFAULT_BRANCH`, `_MERGE_PUSHED`, `_REPO_PATH`, `_PINNED_SHA` and the cap as
+  `SPINCLASS_POST_MERGE_TIMEOUT`/`_TIMEOUT_SECONDS`/`_DEADLINE` (+ `_TARGET`) via
+  `merge.PostMergeEnv` (shared with `sc run`). All land paths fire it;
+  `sc check` never does; `disable-post-merge` opts out.
 - **Named post-merge targets + verify** (FDR 0026, #273): a top-level
   `[[post-merge]]` array (the `[[mcps]]`/`[[remotes]]` idiom; NOT `[[hooks.post-merge]]`
   — TOML can't union the `post-merge` key as both a string and an array, and

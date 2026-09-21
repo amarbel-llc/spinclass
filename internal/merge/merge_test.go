@@ -154,7 +154,7 @@ func runResolved(t *testing.T, mock *mockExecutor, repoDir, wtPath, branch, defa
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	_, err := Resolved(mock, rep, ts, repoDir, wtPath, branch, defaultBranch, gitSync, inSession, nil)
+	_, err := Resolved(mock, rep, ts, repoDir, wtPath, branch, defaultBranch, gitSync, inSession, PostMergeOptions{})
 	ts.Finish()
 	return decodeRecords(t, buf.Bytes()), err
 }
@@ -180,7 +180,7 @@ func TestPrepareMergePinsShaAcrossConcurrentCommit(t *testing.T) {
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	pinnedSha, err := PrepareMerge(ts, repoDir, wtPath, "feature-pin", "main", false, nil)
+	pinnedSha, err := PrepareMerge(ts, repoDir, wtPath, "feature-pin", "main", false, PostMergeOptions{})
 	if err != nil {
 		t.Fatalf("PrepareMerge: %v\n%s", err, buf.String())
 	}
@@ -197,7 +197,7 @@ func TestPrepareMergePinsShaAcrossConcurrentCommit(t *testing.T) {
 
 	// FinishMerge in-session (inSession=true keeps the worktree).
 	if _, err := FinishMerge(context.Background(), &mockExecutor{}, rep, ts,
-		repoDir, wtPath, "feature-pin", "main", pinnedSha, false, true, nil, nil); err != nil {
+		repoDir, wtPath, "feature-pin", "main", pinnedSha, false, true, nil, PostMergeOptions{}); err != nil {
 		t.Fatalf("FinishMerge: %v\n%s", err, buf.String())
 	}
 	ts.Finish()
@@ -253,7 +253,7 @@ func TestPrepareMergeHaltsOnPostRebaseConflict(t *testing.T) {
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	_, err := PrepareMerge(ts, repoDir, wtPath, "feature-conflict", "main", false, nil)
+	_, err := PrepareMerge(ts, repoDir, wtPath, "feature-conflict", "main", false, PostMergeOptions{})
 	if err == nil {
 		t.Fatalf("expected PrepareMerge to halt on the post-rebase conflict; stream:\n%s", buf.String())
 	}
@@ -876,7 +876,7 @@ func TestMergeImplicitRunsHookThenPushesNoRebase(t *testing.T) {
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	links, err := MergeImplicit(context.Background(), rep, ts, checkout, checkout, "master", nil, nil)
+	links, err := MergeImplicit(context.Background(), rep, ts, checkout, checkout, "master", nil, PostMergeOptions{})
 	ts.Finish()
 	if err != nil {
 		t.Fatalf("MergeImplicit: %v\nrecords:\n%s", err, buf.String())
@@ -956,7 +956,7 @@ func TestMergeImplicitDisabledByMergeFlag(t *testing.T) {
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	_, err := MergeImplicit(context.Background(), rep, ts, checkout, checkout, "master", nil, nil)
+	_, err := MergeImplicit(context.Background(), rep, ts, checkout, checkout, "master", nil, PostMergeOptions{})
 	ts.Finish()
 	if err == nil {
 		t.Fatalf("expected error when disable-merge is set, got nil\nrecords:\n%s", buf.String())
@@ -1032,7 +1032,7 @@ func TestPrepareMergeEmitsCoActiveSessionsPoint(t *testing.T) {
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	if _, err := PrepareMerge(ts, repoDir, wtPath, "feature-co", "main", false, nil); err != nil {
+	if _, err := PrepareMerge(ts, repoDir, wtPath, "feature-co", "main", false, PostMergeOptions{}); err != nil {
 		t.Fatalf("PrepareMerge: %v\n%s", err, buf.String())
 	}
 	ts.Finish()
@@ -1066,7 +1066,7 @@ func TestPrepareMergeNoCoActivePointWhenNone(t *testing.T) {
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	if _, err := PrepareMerge(ts, repoDir, wtPath, "feature-solo", "main", false, nil); err != nil {
+	if _, err := PrepareMerge(ts, repoDir, wtPath, "feature-solo", "main", false, PostMergeOptions{}); err != nil {
 		t.Fatalf("PrepareMerge: %v\n%s", err, buf.String())
 	}
 	ts.Finish()
@@ -1125,7 +1125,7 @@ func TestMergeImplicitEmitsCoActiveSessionsPoint(t *testing.T) {
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	if _, err := MergeImplicit(context.Background(), rep, ts, checkout, checkout, "master", nil, nil); err != nil {
+	if _, err := MergeImplicit(context.Background(), rep, ts, checkout, checkout, "master", nil, PostMergeOptions{}); err != nil {
 		t.Fatalf("MergeImplicit: %v\n%s", err, buf.String())
 	}
 	ts.Finish()

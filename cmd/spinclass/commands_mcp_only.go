@@ -127,6 +127,7 @@ func registerMCPOnlyCommands(app *command.App) {
 				{Name: "local_only", Type: command.Bool, Description: localOnlyParamDesc},
 				{Name: "default_branch", Type: command.String, Description: defaultBranchParamDesc},
 				{Name: "targets", Type: command.Array, Description: targetsParamDesc},
+				{Name: "post_merge_timeout", Type: command.String, Description: postMergeTimeoutParamDesc},
 			},
 			Run: wrapMCPHandler("merge-this-session", handleMergeThisSession),
 		})
@@ -147,6 +148,7 @@ func registerMCPOnlyCommands(app *command.App) {
 					{Name: "local_only", Type: command.Bool, Description: localOnlyParamDesc},
 					{Name: "default_branch", Type: command.String, Description: defaultBranchParamDesc},
 					{Name: "targets", Type: command.Array, Description: targetsParamDesc},
+					{Name: "post_merge_timeout", Type: command.String, Description: postMergeTimeoutParamDesc},
 				},
 				Run: wrapMCPHandler("merge-this-session-async", handleMergeThisSessionAsync),
 			})
@@ -289,6 +291,26 @@ const defaultBranchParamDesc = `Override the default branch when both main and m
 // 0026). Absent vs empty-array is load-bearing, so it is spelled out.
 const targetsParamDesc = `Which named [[post-merge]] deploy targets to run after this merge lands (FDR 0026). OMIT (or null) to run ALL configured targets — the default. Pass a list of target names (e.g. ["krone"]) to deploy only that subset. Pass an EMPTY list ([]) to deploy nothing — a docs-only merge that skips every deploy. A name no [[post-merge]] stanza declares fails the merge BEFORE it lands (a typo never silently skips the intended deploy). No effect on repos using the legacy single [hooks].post-merge string.`
 
+// postMergeTimeoutParamDesc is shared by merge-this-session and its -async twin.
+// It names the exported env vars so an agent wiring a verify script learns the
+// contract from the tool description alone.
+const postMergeTimeoutParamDesc = `Override [hooks].post-merge-timeout for THIS merge only — the wall-clock cap on the whole post-merge phase (every [[post-merge]] target's command + verify, or the legacy [hooks].post-merge string). A Go duration such as "25m" or "1500s"; "0" disables the cap. Raising OR lowering is allowed, with no ceiling: a deploy you know is slow is yours to wait for. Omit to use the sweatfile's value (default 10m). An unparseable or negative value is refused before anything lands. The EFFECTIVE cap is exported to every post-merge command/verify as SPINCLASS_POST_MERGE_TIMEOUT (Go duration, "0" when uncapped), SPINCLASS_POST_MERGE_TIMEOUT_SECONDS (integer) and SPINCLASS_POST_MERGE_DEADLINE (unix epoch seconds, "0" when uncapped) — size a verify poll from those instead of hard-coding one. The phase also receives SPINCLASS_POST_MERGE_TARGET (the running target's name), SPINCLASS_PINNED_SHA (the pre-landing pin; differs from SPINCLASS_MERGED_SHA only when the queued landing was rebased) alongside SPINCLASS_MERGED_SHA / _MERGED_BRANCH / _DEFAULT_BRANCH / _MERGE_PUSHED / _REPO_PATH.`
+
+// parsePostMergeTimeoutParam turns the tool's optional post_merge_timeout string
+// into a PostMergeOptions.Timeout: "" ⇒ nil (sweatfile in force); otherwise the
+// same rule the sweatfile field is validated by. Errors are refusals — nothing
+// has landed and no attestation has been consumed when this runs.
+func parsePostMergeTimeoutParam(v string) (*time.Duration, error) {
+	if v == "" {
+		return nil, nil
+	}
+	d, err := sweatfile.ParsePostMergeTimeout(v)
+	if err != nil {
+		return nil, fmt.Errorf("post_merge_timeout: %w", err)
+	}
+	return &d, nil
+}
+
 // appendNotPushedNote makes a local-only merge result say so explicitly
 // (#158): spawned workers truthfully reported "merged green" from local-only
 // merges while origin never got the work, and their drivers rebased onto
@@ -304,14 +326,20 @@ func appendNotPushedNote(text string, gitSync bool, mergeErr error) string {
 
 func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	var params struct {
-		LocalOnly     bool     `json:"local_only"`
-		DefaultBranch string   `json:"default_branch"`
-		Targets       []string `json:"targets"` // nil=all, non-nil=that subset, []=none (FDR 0026)
+		LocalOnly        bool     `json:"local_only"`
+		DefaultBranch    string   `json:"default_branch"`
+		Targets          []string `json:"targets"` // nil=all, non-nil=that subset, []=none (FDR 0026)
+		PostMergeTimeout string   `json:"post_merge_timeout"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
 	}
 	gitSync := !params.LocalOnly // push by default; local_only opts out (#126)
+	pmTimeout, err := parsePostMergeTimeoutParam(params.PostMergeTimeout)
+	if err != nil {
+		return command.TextErrorResult(err.Error()), nil
+	}
+	pm := merge.PostMergeOptions{Targets: params.Targets, Timeout: pmTimeout}
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -332,7 +360,7 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 		var buf bytes.Buffer
 		rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "merge " + gs.branch, Source: "spinclass"})
 		ts := rep.TestStream(0)
-		blobLinks, mergeErr := merge.MergeImplicit(context.Background(), rep, ts, gs.repoPath, cwd, gs.branch, nil, params.Targets)
+		blobLinks, mergeErr := merge.MergeImplicit(context.Background(), rep, ts, gs.repoPath, cwd, gs.branch, nil, pm)
 		ts.Finish()
 		text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
 		if mergeErr != nil && text == "" {
@@ -363,7 +391,7 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 		defaultBranch,
 		gitSync,
 		true,
-		params.Targets,
+		pm,
 	)
 	ts.Finish()
 	text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
@@ -408,14 +436,22 @@ func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prom
 // job_wait) using the returned id; only registered under clown.
 func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	var params struct {
-		LocalOnly     bool     `json:"local_only"`
-		DefaultBranch string   `json:"default_branch"`
-		Targets       []string `json:"targets"` // nil=all, non-nil=that subset, []=none (FDR 0026)
+		LocalOnly        bool     `json:"local_only"`
+		DefaultBranch    string   `json:"default_branch"`
+		Targets          []string `json:"targets"` // nil=all, non-nil=that subset, []=none (FDR 0026)
+		PostMergeTimeout string   `json:"post_merge_timeout"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
 	}
 	gitSync := !params.LocalOnly // push by default; local_only opts out (#126)
+	// Parsed BEFORE the gate: a bad value is a refusal that must not consume the
+	// attestation (the same D2 discipline as a busy refusal).
+	pmTimeout, err := parsePostMergeTimeoutParam(params.PostMergeTimeout)
+	if err != nil {
+		return command.TextErrorResult(err.Error()), nil
+	}
+	pm := merge.PostMergeOptions{Targets: params.Targets, Timeout: pmTimeout}
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -454,7 +490,7 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 		var buf bytes.Buffer
 		rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "merge " + branch, Source: "spinclass"})
 		ts := rep.TestStream(0)
-		pinnedSha, prepErr := merge.PrepareMergeImplicit(ts, repoPath, cwd, branch, params.Targets)
+		pinnedSha, prepErr := merge.PrepareMergeImplicit(ts, repoPath, cwd, branch, pm)
 		if prepErr != nil {
 			ts.Finish()
 			text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
@@ -464,7 +500,7 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 			return buildHookResult(text, nil, prepErr), nil
 		}
 		return startSessionJob(cwd, job.KindMerge, gitSync, func(ctx context.Context, w io.Writer) (string, bool) {
-			_, mergeErr := merge.FinishMergeImplicit(ctx, rep, ts, repoPath, cwd, branch, pinnedSha, w, params.Targets)
+			_, mergeErr := merge.FinishMergeImplicit(ctx, rep, ts, repoPath, cwd, branch, pinnedSha, w, pm)
 			ts.Finish()
 			text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
 			if mergeErr != nil && text == "" {
@@ -508,7 +544,7 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 	if busy {
 		mergeQueue[cwd] = append(mergeQueue[cwd], queuedMerge{
 			gitSync: gitSync,
-			run:     buildQueuedMergeRun(repoPath, cwd, branch, defaultBranch, gitSync, params.Targets),
+			run:     buildQueuedMergeRun(repoPath, cwd, branch, defaultBranch, gitSync, pm),
 		})
 		pos := len(mergeQueue[cwd])
 		mergeQueueMu.Unlock()
@@ -530,7 +566,7 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "merge " + branch, Source: "spinclass"})
 	ts := rep.TestStream(0)
-	pinnedSha, prepErr := merge.PrepareMerge(ts, repoPath, cwd, branch, defaultBranch, gitSync, params.Targets)
+	pinnedSha, prepErr := merge.PrepareMerge(ts, repoPath, cwd, branch, defaultBranch, gitSync, pm)
 	if prepErr != nil {
 		ts.Finish()
 		text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
@@ -543,7 +579,7 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 	return startSessionJob(cwd, job.KindMerge, gitSync, func(ctx context.Context, w io.Writer) (string, bool) {
 		_, mergeErr := merge.FinishMerge(
 			ctx, executor.ShellExecutor{}, rep, ts,
-			repoPath, cwd, branch, defaultBranch, pinnedSha, gitSync, true, w, params.Targets,
+			repoPath, cwd, branch, defaultBranch, pinnedSha, gitSync, true, w, pm,
 		)
 		ts.Finish()
 		text := present.RenderPlain(bytes.NewReader(buf.Bytes()))

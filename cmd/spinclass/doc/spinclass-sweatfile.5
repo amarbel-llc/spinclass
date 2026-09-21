@@ -506,6 +506,50 @@ A deploy trigger should gate on this.
 .IP \(bu 2
 .B SPINCLASS_REPO_PATH
 \(em the main checkout.
+.IP \(bu 2
+.B SPINCLASS_PINNED_SHA
+\(em the commit pinned before landing. Equal to
+.B SPINCLASS_MERGED_SHA
+unless the queued landing was rebased past a moved default branch, so a
+script can detect a rebased landing without consulting git.
+.IP \(bu 2
+.B SPINCLASS_POST_MERGE_TIMEOUT
+\(em the
+.B effective
+wall-clock cap on the post-merge phase as a Go duration (e.g.
+.BR 20m0s ),
+or
+.B 0
+when the cap is disabled. This is the value actually enforced: the per-merge
+override (the
+.B post_merge_timeout
+parameter of
+.BR merge\-this\-session (1)
+or
+.BR "sc merge \-\-post\-merge\-timeout" )
+when one was given, else
+.B post-merge-timeout
+below, else the 10m default.
+.IP \(bu 2
+.B SPINCLASS_POST_MERGE_TIMEOUT_SECONDS
+\(em the same cap as an integer number of seconds
+.RB ( 0
+when disabled), for shell arithmetic.
+.IP \(bu 2
+.B SPINCLASS_POST_MERGE_DEADLINE
+\(em the absolute instant the cap fires, as unix epoch seconds
+.RB ( 0
+when disabled). A verify poll that starts after a slow
+.B command
+has already spent part of the budget should size itself from this
+.RI ( "deadline \- now" ),
+not from the timeout.
+.IP \(bu 2
+.B SPINCLASS_POST_MERGE_TARGET
+\(em the name of the
+.B [[post\-merge]]
+target being run, so one script can serve several targets. Not set on this
+legacy single-string path.
 .RE
 .IP
 Applies to worktree sessions and to implicit (main-checkout) sessions, whose
@@ -944,6 +988,29 @@ runs under the per-repo landing lock \(em an unbounded hook there wedges every
 other session's merge in the repo. Set
 .B \(dq0\(dq
 to disable the cap entirely.
+.IP
+A single merge may
+.B override
+this value for itself: the
+.B post_merge_timeout
+parameter of
+.BR merge\-this\-session (1)
+and
+.BR merge\-this\-session\-async ,
+and
+.B \-\-post\-merge\-timeout
+on
+.BR "sc merge" " and " "sc run" ,
+take the same duration syntax (\(dq0\(dq disables) and win over this field
+for that merge only, raising or lowering it with no ceiling \(em a deploy the
+caller knows will outrun the repo's usual cap is the caller's to wait for.
+Whatever the source, the effective cap is exported to the hook as
+.BR SPINCLASS_POST_MERGE_TIMEOUT ", " SPINCLASS_POST_MERGE_TIMEOUT_SECONDS
+and
+.B SPINCLASS_POST_MERGE_DEADLINE
+(see
+.B post-merge
+above), so a verify poll sizes itself from the budget it actually has.
 .IP
 It is a
 .B wall-clock
@@ -1635,6 +1702,44 @@ reports
 Verdict points are emitted in declaration order after all targets
 complete, so the result ladder is deterministic regardless of finish
 order.
+A single merge may override the cap for itself \(em
+.B post_merge_timeout
+on
+.BR merge\-this\-session (1)
+/
+.BR merge\-this\-session\-async ,
+or
+.B \-\-post\-merge\-timeout
+on
+.BR "sc merge" ;
+same syntax, \(dq0\(dq disables, no ceiling.
+.PP
+.B Environment:
+every target's
+.B command
+and
+.B verify
+receive the
+.B SPINCLASS_MERGED_*
+facts of
+.B [hooks].post\-merge
+plus the effective cap as
+.B SPINCLASS_POST_MERGE_TIMEOUT
+(Go duration, \(dq0\(dq when uncapped),
+.B SPINCLASS_POST_MERGE_TIMEOUT_SECONDS
+(integer) and
+.B SPINCLASS_POST_MERGE_DEADLINE
+(unix epoch seconds of the shared deadline, \(dq0\(dq when uncapped) \(em a
+verify poll should derive its budget from the deadline, since the command
+already spent part of it \(em together with
+.B SPINCLASS_POST_MERGE_TARGET
+(this target's
+.BR name ,
+so one script can serve several targets) and
+.B SPINCLASS_PINNED_SHA
+(the pre-landing pin; differs from
+.B SPINCLASS_MERGED_SHA
+only on a rebased landing).
 .PP
 .B Merge:
 dedup-by-name (full entry replacement, same as

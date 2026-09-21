@@ -98,13 +98,37 @@ command = "just infra/hosts/trigger-redeploy-nikulin"
   goes dormant automatically) and deleting the string at leisure. With no named
   targets, the string behaves exactly as FDR 0023 shipped it.
 
+- **Per-merge timeout override** (2026-09-21 amendment): `merge-this-session`
+  / `merge-this-session-async` take an optional `post_merge_timeout` (and
+  `sc merge` / `sc run` a `--post-merge-timeout`) — a Go duration, `"0"` to
+  disable — that beats `[hooks].post-merge-timeout` **for that merge only**,
+  raising or lowering it with **no ceiling**. Precedence is arg > sweatfile >
+  default (10m). A malformed or negative value is refused before anything lands
+  (and, on the async tool, before the attestation is consumed).
+
+- **The effective cap, and the merge context, are exported to every post-merge
+  command and verify** (same amendment):
+
+  | variable | value |
+  |---|---|
+  | `SPINCLASS_POST_MERGE_TIMEOUT` | the effective cap as a Go duration (`20m0s`); `0` when uncapped |
+  | `SPINCLASS_POST_MERGE_TIMEOUT_SECONDS` | the same cap as an integer; `0` when uncapped |
+  | `SPINCLASS_POST_MERGE_DEADLINE` | the phase's shared deadline as unix epoch seconds; `0` when uncapped |
+  | `SPINCLASS_POST_MERGE_TARGET` | the running target's `name` (named-target path only) |
+  | `SPINCLASS_PINNED_SHA` | the pre-landing pin; `≠ SPINCLASS_MERGED_SHA` iff the queued landing was rebased |
+
+  alongside FDR 0023's `SPINCLASS_MERGED_SHA` / `_MERGED_BRANCH` /
+  `_DEFAULT_BRANCH` / `_MERGE_PUSHED` / `_REPO_PATH`. `sc run`'s dynamic
+  `--post-merge` hooks export the same set through the same builder (they run
+  uncapped, so the timing trio reads `0`, and they omit the pin they never had).
+
 - Everything else from FDR 0023 is unchanged: the phase runs under the per-repo
-  landing lock as the merge's last stage; the `SPINCLASS_MERGED_*` env facts;
-  the working directory (session worktree, else the main checkout); applies to
-  worktree and implicit sessions; never run by `sc check`. `disable-post-merge`
-  suppresses the whole phase. `post-merge-timeout` now bounds the **whole phase**
-  (all targets and their verifies share one wall-clock deadline), so multi-target
-  fan-out can never hold the lock past the cap.
+  landing lock as the merge's last stage; the working directory (session
+  worktree, else the main checkout); applies to worktree and implicit sessions;
+  never run by `sc check`. `disable-post-merge` suppresses the whole phase.
+  `post-merge-timeout` now bounds the **whole phase** (all targets and their
+  verifies share one wall-clock deadline), so multi-target fan-out can never
+  hold the lock past the cap.
 
 ## Design
 
@@ -179,6 +203,68 @@ verify under it; when it fires, the in-flight target is killed (`command-failed`
 / `verify-failed`) and the remainder are marked skipped. The legacy
 single-string path keeps FDR 0023's per-hook cap unchanged (one hook = one
 target, identical behaviour).
+
+### Per-merge override, and what the phase tells its scripts (2026-09-21)
+
+The motivating incident (circus/rapid-yew/krusty, 2026-09-21): circus's krone
+target has a `verify` that polls krone's self-deploy log for the merged sha's OK
+line, under a sweatfile cap of 20m. A real krone switch took ~25m; the verify
+leg gave up at the cap, the deploy's 15-minute deadman fired, and krone
+pinned-rolled-back and poisoned its redeploy key. Two things were missing: a way
+for the caller — who knows *this* switch is slow — to raise the cap for one
+merge without editing the repo's sweatfile, and a way for the verify script to
+know how long it may poll instead of hard-coding a number that drifts from the
+cap.
+
+**The override travels as `merge.PostMergeOptions{Targets, Timeout}`**, the
+struct that replaced the bare `postMergeTargets []string` parameter along the
+whole chain (`Run` → `Resolved`/`ResolvedContext` → `PrepareMerge`/`FinishMerge`,
+the `MergeImplicit` twins, the queued-merge closure, `runPostMergePhase`).
+`Timeout` is a `*time.Duration`: nil leaves the sweatfile in force, zero
+disables, positive is the cap. `EffectiveTimeout(sf)` resolves arg > sweatfile >
+default **once**, in `runPostMergePhase`, and that single value is what both the
+named-target path (the shared `context.WithDeadline`) and the legacy string path
+(`RunPostMergeHookWithCap`) enforce — the number that is advertised is the
+number that kills. No ceiling is deliberate: the cap exists to bound a *wedge*
+(#246), and a caller asking to wait longer is saying this is not one. The
+sweatfile field, the MCP parameter, `sc merge --post-merge-timeout` and
+`sc run --post-merge-timeout` share one parser (`sweatfile.ParsePostMergeTimeout`),
+so a value `sc validate` accepts is a value every surface accepts.
+
+**Exported env** — each candidate weighed, since an env var nobody reads is
+contract for nothing:
+
+- **Accepted — `SPINCLASS_POST_MERGE_TIMEOUT`** (Go duration): the effective
+  cap, for structured consumers; round-trips through `ParsePostMergeTimeout`.
+- **Accepted — `SPINCLASS_POST_MERGE_TIMEOUT_SECONDS`**: the same number as an
+  integer. A shell verify cannot parse `20m0s`; `$(( … ))` can use `1200`.
+- **Accepted — `SPINCLASS_POST_MERGE_DEADLINE`** (epoch seconds): what a poll
+  actually sizes against. `command` runs first and eats part of the budget, so
+  "timeout" overstates what `verify` has; `deadline − now` does not. This
+  replaces the "phase start timestamp" and "remaining budget" candidates, which
+  are derivable from it (and remaining-budget would be stale the moment it was
+  read).
+- **Accepted — `SPINCLASS_POST_MERGE_TARGET`**: the target's name, so one script
+  can serve several targets and branch on which host it is deploying. Unset on
+  the legacy string path (there is no name).
+- **Accepted — `SPINCLASS_PINNED_SHA`**: the pre-landing pin. It answers "was
+  this landing rebased?" (`PINNED != MERGED`) without reconstructing it from
+  git, which matters when a deploy log was keyed on the sha the agent saw
+  pinned. Omitted, not faked, where no pin exists (`sc run`'s dynamic hooks).
+- **Rejected — session key / worktree path**: the key is `basename(REPO_PATH)/MERGED_BRANCH`,
+  already exported; the worktree may be torn down by the time the phase runs
+  (out-of-session merges), and `$PWD` is already the directory the phase chose.
+  Exporting a path that may not exist invites misuse.
+- **Rejected — queued/stacked flag (#265)**: the intra-session queue lives in
+  `cmd/spinclass/merge_queue.go`; the phase does not observe it, and no deploy
+  behaves differently for a batch that waited its turn.
+- **Rejected — per-target declared timeout**: no such field exists; the cap is
+  phase-wide by design (see Whole-phase timeout above).
+
+One builder, `merge.PostMergeEnv(PostMergeFacts)`, renders the set for the
+sweatfile phase **and** for `sc run`'s dynamic `--post-merge` hooks, so the two
+sites cannot drift. That unification also normalised `sc run`'s
+`SPINCLASS_MERGE_PUSHED` from `true`/`false` to FDR 0023's documented `1`/`0`.
 
 ### Concurrent execution as reporter Phase nodes (spinclass#276)
 
@@ -301,7 +387,19 @@ A docs-only merge deploys nothing:
   not yet deploy automatically only when the diff touches its paths (#273's
   recorded nice-to-have, deferred).
 - **`verify` shares the target's working directory and env** with `command`;
-  there is no separate verify env beyond the `SPINCLASS_MERGED_*` facts.
+  there is no separate verify env beyond the `SPINCLASS_MERGED_*` /
+  `SPINCLASS_POST_MERGE_*` facts. In particular `SPINCLASS_POST_MERGE_DEADLINE`
+  is the *phase* deadline: a verify that wants its own budget subtracts the
+  time `command` already spent (which is why the deadline, not the timeout, is
+  the value to poll against).
+- **The override has no ceiling.** A caller can hold the repo's merge lock for
+  as long as it names; that is the operator's decision (a known-slow deploy is
+  not a wedge), but it means a fat-fingered `post_merge_timeout` of hours
+  blocks sibling merges for hours. `session-job-cancel` still frees the lock.
+- **The advertised deadline is computed before the hooks start.** On the legacy
+  string path the inner cap begins microseconds later, so the exported deadline
+  is at most marginally *earlier* than the enforced one — conservative, never
+  optimistic.
 
 ## Tuning Levers
 
@@ -312,6 +410,8 @@ A docs-only merge deploys nothing:
 | verify stages | exactly two (`command`, `verify`) | the ack rides verify's tail; a third stage adds no verdict fidelity | a consumer needing a verdict split verify cannot express |
 | unknown-target selection | fatal pre-landing | a typo silently skipping a deploy is worse than a hard stop before anything ships | selection becoming dynamic enough that an unknown name is routine |
 | timeout scope | whole phase | N targets under one cap keeps the FDR 0023 lock-hold bound | per-target isolation mattering more than the aggregate bound |
+| per-merge override ceiling | none (`post_merge_timeout` may raise or lower freely) | the cap bounds wedges, and a caller naming a longer wait is asserting this is not one (circus krone, 2026-09-21) | an override holding a shared repo's lock for hours by mistake, more than once |
+| exported timing | timeout + integer seconds + absolute deadline | a shell poll needs an integer, and a verify that starts after a slow command needs the deadline, not the cap | consumers settling on one form (drop the others) |
 | execution order | concurrent (max lock-hold), emit in declaration order (spinclass#276) | targets are independent hosts, so max() lock-hold beats sum() and changes no contract; ordered emit keeps the ladder deterministic | a future target needing to observe another's side effects (sequential stays the fallback) |
 
 ## More Information
@@ -324,11 +424,16 @@ A docs-only merge deploys nothing:
   under), spinclass#259 (the wake-surfacing this extends), spinclass#256
   (schema-version indicator — coordinate on config-shape changes).
 - Code: `internal/sweatfile/sweatfile.go` (`PostMergeTarget`, `PostMerge` field,
-  `ActivePostMergeTargets`, `PostMergePhaseActive`), `internal/sweatfile/apply.go`
-  (`PostMergeTarget.Run`), `internal/sweatfile/hierarchy.go` (dedup-by-name
-  merge), `internal/merge/merge.go` (`runPostMergePhase`, the `targets` thread
-  through `PrepareMerge`/`FinishMerge`/`MergeImplicit`), `internal/validate`
+  `ActivePostMergeTargets`, `PostMergePhaseActive`, `ParsePostMergeTimeout`),
+  `internal/sweatfile/apply.go` (`PostMergeTarget.Run`, `RunPostMergeHookWithCap`),
+  `internal/sweatfile/hierarchy.go` (dedup-by-name merge),
+  `internal/merge/postmerge_options.go` (`PostMergeOptions`, `EffectiveTimeout`,
+  `PostMergeFacts`/`PostMergeEnv`), `internal/merge/merge.go`
+  (`runPostMergePhase`, the `PostMergeOptions` thread through
+  `PrepareMerge`/`FinishMerge`/`MergeImplicit`), `internal/validate`
   (`CheckPostMergeTargets`), `internal/job/runner.go` (`postMergeFailureLine`
   surfacing all targets), `cmd/spinclass/commands_mcp_only.go` (the `targets`
-  tool param).
+  and `post_merge_timeout` tool params), `cmd/spinclass/commands_session.go`
+  (`sc merge --post-merge-timeout`), `internal/run/run.go` (`sc run
+  --post-merge-timeout`, dynamic hooks on the shared env builder).
 - `spinclass-sweatfile(5)` `[[post-merge]]` and `[hooks]` §§ post-merge.

@@ -52,7 +52,7 @@ func runPrepare(t *testing.T, repoDir, wtPath, branch string) (pinnedSha string,
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	pinnedSha, err = PrepareMerge(ts, repoDir, wtPath, branch, "main", false, nil)
+	pinnedSha, err = PrepareMerge(ts, repoDir, wtPath, branch, "main", false, PostMergeOptions{})
 	ts.Finish()
 	return pinnedSha, testRecords(decodeRecords(t, buf.Bytes())), err
 }
@@ -114,7 +114,7 @@ func TestPrepareMergeRepairAmend(t *testing.T) {
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
 	if _, err := FinishMerge(context.Background(), &mockExecutor{}, rep, ts,
-		repoDir, wtPath, "feature", "main", pinnedSha, false, true, nil, nil); err != nil {
+		repoDir, wtPath, "feature", "main", pinnedSha, false, true, nil, PostMergeOptions{}); err != nil {
 		t.Fatalf("FinishMerge: %v\n%s", err, buf.String())
 	}
 	ts.Finish()
@@ -245,7 +245,7 @@ func runMergeImplicit(t *testing.T, checkout string) (tests []ndjsoncrap.Test, e
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	_, err = MergeImplicit(context.Background(), rep, ts, checkout, checkout, "master", nil, nil)
+	_, err = MergeImplicit(context.Background(), rep, ts, checkout, checkout, "master", nil, PostMergeOptions{})
 	ts.Finish()
 	return testRecords(decodeRecords(t, buf.Bytes())), err
 }

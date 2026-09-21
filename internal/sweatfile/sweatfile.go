@@ -347,11 +347,30 @@ func (sf Sweatfile) PostMergeTimeoutValue() time.Duration {
 	if v == "" {
 		return DefaultPostMergeTimeout
 	}
-	d, err := time.ParseDuration(v)
-	if err != nil || d < 0 {
+	d, err := ParsePostMergeTimeout(v)
+	if err != nil {
 		return DefaultPostMergeTimeout
 	}
 	return d
+}
+
+// ParsePostMergeTimeout is the ONE validation rule for a post-merge cap,
+// wherever it is spelled: the sweatfile's [hooks].post-merge-timeout (via
+// `sc validate` and PostMergeTimeoutValue) and the per-merge override on
+// merge-this-session(-async) / `sc merge --post-merge-timeout`. A Go duration
+// such as "10m" or "600s"; "0" (any zero duration) means NO cap; negative and
+// unparseable values are errors — callers decide whether to degrade (the
+// sweatfile falls back to the default) or refuse (a per-merge override is
+// rejected before anything lands).
+func ParsePostMergeTimeout(v string) (time.Duration, error) {
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("invalid post-merge-timeout %q (want a Go duration like \"10m\" or \"600s\", or \"0\" to disable): %w", v, err)
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("post-merge-timeout %q must not be negative (use \"0\" to disable the cap)", v)
+	}
+	return d, nil
 }
 
 // PostMergeDisabled reports whether [hooks].disable-post-merge is true. It

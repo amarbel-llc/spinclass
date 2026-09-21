@@ -102,12 +102,13 @@ func registerSessionCommands(app *command.App) {
 		Description: command.Description{
 			Short: "Start a session, run a command in it, then merge + clean up (one-shot)",
 			Long: "Run a single non-interactive lifecycle as one primitive (#194): start a worktree session, run ONE command sequence inside it (the same devshell + SPINCLASS_* identity path as `sc exec`), then merge into the default branch and tear the session down. " +
-				"Usage: sc run [--description D] [--no-merge] [--no-close] [--local-only] [--post-merge H]... ( -- <util> [args...] | <stdin script> ). " +
+				"Usage: sc run [--description D] [--no-merge] [--no-close] [--local-only] [--post-merge H]... [--post-merge-timeout D] ( -- <util> [args...] | <stdin script> ). " +
 				"Two mutually-exclusive input forms: a single command after `--` (exactly `sc exec`'s grammar), or — with no `--` — a script piped on stdin (read in full; if line 1 is a #! shebang the script runs under that interpreter, else under sh). " +
 				"Success-path teardown is a 2×2 matrix over --no-merge and --no-close: default merges then tears down; --no-close merges but leaves the worktree/session; --no-merge skips the merge and closes only if no commits were produced (commits present ⇒ session left, never silently discarded); --no-merge --no-close leaves everything intact. " +
 				"An empty run (no commits ahead of the default branch) is a clean success, not a failure. Any step that exits nonzero leaves the worktree + session intact for inspection (clean up with `sc close`) and propagates a nonzero exit code. " +
 				"--local-only passes through to the merge step (skip the pull-before and push-after). " +
-				"--post-merge H runs the shell command H after the merge lands, in the default-branch checkout, with SPINCLASS_MERGED_SHA / _MERGED_BRANCH / _DEFAULT_BRANCH / _MERGE_PUSHED / _REPO_PATH set. Repeatable (multiple --post-merge flags run in order). Failures are non-fatal (severity=warn): the merge is already durable. Composes with [[post-merge]] named targets and [hooks].post-merge from the sweatfile. " +
+				"--post-merge H runs the shell command H after the merge lands, in the default-branch checkout, with SPINCLASS_MERGED_SHA / _MERGED_BRANCH / _DEFAULT_BRANCH / _MERGE_PUSHED / _REPO_PATH set (plus SPINCLASS_POST_MERGE_TIMEOUT / _TIMEOUT_SECONDS / _DEADLINE, all \"0\": dynamic hooks are uncapped). Repeatable (multiple --post-merge flags run in order). Failures are non-fatal (severity=warn): the merge is already durable. Composes with [[post-merge]] named targets and [hooks].post-merge from the sweatfile. " +
+				"--post-merge-timeout D overrides [hooks].post-merge-timeout for the sweatfile post-merge phase of this run's merge (a Go duration, or \"0\" to disable the cap; see `sc merge`). " +
 				"--allow-stale-base creates the session even when the repo's default branch could not be confirmed current (offline, or a dirty/diverged checkout). " +
 				"Output uses the merge/check present stack: --format auto (viewport on a TTY, ndjson when piped) | viewport | plain | ndjson. " +
 				"Caveats (raw passthrough, like `sc exec`): util arguments after `--` that collide with spinclass's global flags are consumed before the `--`; flags must precede the `--`.",
@@ -164,6 +165,7 @@ func registerSessionCommands(app *command.App) {
 			{Name: "local-only", Type: command.Bool, Description: "Merge into the LOCAL default branch only — skip the pull-before and push-after. Default is to pull+push so the merge reaches origin (#126)."},
 			{Name: "post-merge-targets", Type: command.String, Description: "Comma-separated named [[post-merge]] targets to deploy after landing (FDR 0026). Omit to deploy ALL configured targets (default). A name no stanza declares fails the merge before it lands."},
 			{Name: "no-post-merge", Type: command.Bool, Description: "Deploy no [[post-merge]] targets — a docs-only merge that skips every deploy (FDR 0026). Wins over --post-merge-targets."},
+			{Name: "post-merge-timeout", Type: command.String, Description: "Override [hooks].post-merge-timeout for this merge only: a Go duration (\"25m\", \"1500s\") capping the whole post-merge phase, or \"0\" to disable the cap. No ceiling. The effective cap reaches every post-merge command/verify as SPINCLASS_POST_MERGE_TIMEOUT, _TIMEOUT_SECONDS and _DEADLINE (see spinclass-sweatfile(5) [[post-merge]])."},
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
 			var p struct {
@@ -172,10 +174,15 @@ func registerSessionCommands(app *command.App) {
 				LocalOnly        bool   `json:"local-only"`
 				PostMergeTargets string `json:"post-merge-targets"`
 				NoPostMerge      bool   `json:"no-post-merge"`
+				PostMergeTimeout string `json:"post-merge-timeout"`
 			}
 			_ = json.Unmarshal(args, &p)
 
 			if err := rejectRemoteTarget(p.Target, remotesForTarget(p.Target)); err != nil {
+				return err
+			}
+			pmTimeout, err := parsePostMergeTimeoutParam(p.PostMergeTimeout)
+			if err != nil {
 				return err
 			}
 
@@ -194,7 +201,8 @@ func registerSessionCommands(app *command.App) {
 			// value ("" means auto — viewport on a TTY, ndjson when piped).
 			// git_sync now defaults ON (push by default, #126); --local-only
 			// is the explicit opt-out.
-			return merge.Run(executor.ShellExecutor{}, p.Format, p.Target, !p.LocalOnly, postMergeTargets)
+			return merge.Run(executor.ShellExecutor{}, p.Format, p.Target, !p.LocalOnly,
+				merge.PostMergeOptions{Targets: postMergeTargets, Timeout: pmTimeout})
 		},
 	})
 

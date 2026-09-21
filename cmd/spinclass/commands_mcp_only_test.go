@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"code.linenisgreat.com/spinclass/internal/attestation"
 	"code.linenisgreat.com/spinclass/internal/job"
@@ -574,6 +575,39 @@ func TestBuildMergeThisSessionDescription_WithHook(t *testing.T) {
 	}
 	if !strings.Contains(got, "do not need to pre-flight") {
 		t.Errorf("description should advise agents to skip pre-flight:\n%s", got)
+	}
+}
+
+// The MCP parameter and the sweatfile field share one validation rule: "" is
+// "unset" (nil), "0" is an explicit disable (non-nil zero), valid durations
+// parse, and negative/unparseable values are refused with the parameter named.
+func TestParsePostMergeTimeoutParam(t *testing.T) {
+	if got, err := parsePostMergeTimeoutParam(""); err != nil || got != nil {
+		t.Errorf(`"" should be unset (nil, nil), got %v %v`, got, err)
+	}
+	if got, err := parsePostMergeTimeoutParam("0"); err != nil || got == nil || *got != 0 {
+		t.Errorf(`"0" should be an explicit zero, got %v %v`, got, err)
+	}
+	if got, err := parsePostMergeTimeoutParam("25m"); err != nil || got == nil || *got != 25*time.Minute {
+		t.Errorf(`"25m" should parse, got %v %v`, got, err)
+	}
+	for _, bad := range []string{"-5m", "ten minutes"} {
+		_, err := parsePostMergeTimeoutParam(bad)
+		if err == nil {
+			t.Errorf("%q: want error, got nil", bad)
+			continue
+		}
+		if !strings.Contains(err.Error(), "post_merge_timeout") {
+			t.Errorf("%q: error should name the parameter, got %v", bad, err)
+		}
+	}
+}
+
+func TestMergeToolsRegisterPostMergeTimeoutParam(t *testing.T) {
+	if !strings.Contains(postMergeTimeoutParamDesc, "SPINCLASS_POST_MERGE_TIMEOUT") ||
+		!strings.Contains(postMergeTimeoutParamDesc, "SPINCLASS_POST_MERGE_DEADLINE") ||
+		!strings.Contains(postMergeTimeoutParamDesc, "SPINCLASS_POST_MERGE_TARGET") {
+		t.Errorf("the parameter description must advertise the exported env vars:\n%s", postMergeTimeoutParamDesc)
 	}
 }
 

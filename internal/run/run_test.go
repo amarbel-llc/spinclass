@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseArgsUtilForm(t *testing.T) {
@@ -119,6 +120,43 @@ func TestParseArgsPostMergeRepeatable(t *testing.T) {
 func TestParseArgsPostMergeDanglingIsError(t *testing.T) {
 	if _, err := ParseArgs([]string{"--post-merge"}, nil); err == nil {
 		t.Error("--post-merge with no value: want error, got nil")
+	}
+}
+
+func TestParseArgsPostMergeTimeout(t *testing.T) {
+	for _, args := range [][]string{
+		{"--post-merge-timeout", "25m", "--", "true"},
+		{"--post-merge-timeout=25m", "--", "true"},
+	} {
+		spec, err := ParseArgs(args, nil)
+		if err != nil {
+			t.Fatalf("ParseArgs(%v): %v", args, err)
+		}
+		if spec.PostMergeTimeout == nil || *spec.PostMergeTimeout != 25*time.Minute {
+			t.Errorf("ParseArgs(%v): PostMergeTimeout = %v, want 25m", args, spec.PostMergeTimeout)
+		}
+	}
+	// "0" is the documented off switch, distinct from "unset".
+	spec, err := ParseArgs([]string{"--post-merge-timeout=0", "--", "true"}, nil)
+	if err != nil {
+		t.Fatalf("ParseArgs: %v", err)
+	}
+	if spec.PostMergeTimeout == nil || *spec.PostMergeTimeout != 0 {
+		t.Errorf("--post-merge-timeout=0 should set an explicit zero, got %v", spec.PostMergeTimeout)
+	}
+	if spec, err := ParseArgs([]string{"--", "true"}, nil); err != nil || spec.PostMergeTimeout != nil {
+		t.Errorf("unset flag should leave PostMergeTimeout nil, got %v (%v)", spec.PostMergeTimeout, err)
+	}
+}
+
+func TestParseArgsPostMergeTimeoutRejectsBadValues(t *testing.T) {
+	for _, v := range []string{"ten minutes", "-5m"} {
+		if _, err := ParseArgs([]string{"--post-merge-timeout", v, "--", "true"}, nil); err == nil {
+			t.Errorf("--post-merge-timeout %q: want error, got nil", v)
+		}
+	}
+	if _, err := ParseArgs([]string{"--post-merge-timeout"}, nil); err == nil {
+		t.Error("--post-merge-timeout with no value: want error, got nil")
 	}
 }
 

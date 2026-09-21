@@ -110,7 +110,7 @@ func worktreeMergeVerdict(t *testing.T, sweatfileBody string, targets []string, 
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
 	_, _ = ResolvedContext(context.Background(), &mockExecutor{}, rep, ts,
-		repoDir, wtPath, "feature", "main", false, true, nil, targets)
+		repoDir, wtPath, "feature", "main", false, true, nil, PostMergeOptions{Targets: targets})
 	ts.Finish()
 	return verdictFor(decodeRecords(t, buf.Bytes()), phase)
 }
@@ -122,7 +122,7 @@ func implicitMergeVerdict(t *testing.T, sweatfileBody string, targets []string, 
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	_, _ = MergeImplicit(context.Background(), rep, ts, checkout, checkout, "master", nil, targets)
+	_, _ = MergeImplicit(context.Background(), rep, ts, checkout, checkout, "master", nil, PostMergeOptions{Targets: targets})
 	ts.Finish()
 	return verdictFor(decodeRecords(t, buf.Bytes()), phase)
 }

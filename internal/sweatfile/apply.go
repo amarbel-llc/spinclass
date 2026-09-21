@@ -257,12 +257,21 @@ func (sf Sweatfile) RunRepairHookContext(ctx context.Context, worktreePath strin
 // which cancels the parent ctx: the timeout message is only produced when the
 // deadline fired while the parent was still live.
 func (sf Sweatfile) RunPostMergeHookContext(ctx context.Context, dir string, extraEnv []string, w io.Writer) error {
+	return sf.RunPostMergeHookWithCap(ctx, dir, extraEnv, sf.PostMergeTimeoutValue(), w)
+}
+
+// RunPostMergeHookWithCap is RunPostMergeHookContext with the wall-clock cap
+// supplied by the caller instead of read from the sweatfile: the merge phase
+// resolves the EFFECTIVE cap (a per-merge override beats
+// [hooks].post-merge-timeout beats the default) once and hands it here, so the
+// legacy string path and the named-target path enforce — and advertise via
+// SPINCLASS_POST_MERGE_TIMEOUT — the same number. timeout <= 0 disables the cap.
+func (sf Sweatfile) RunPostMergeHookWithCap(ctx context.Context, dir string, extraEnv []string, timeout time.Duration, w io.Writer) error {
 	if !sf.PostMergeActive() {
 		return nil
 	}
 	cmd := sf.PostMergeHookCommand()
 
-	timeout := sf.PostMergeTimeoutValue()
 	if timeout <= 0 {
 		// Cap explicitly disabled: no deadline, and no WaitDelay either — the
 		// operator asked for an unbounded hook, so draining a lingering child's
@@ -282,7 +291,7 @@ func (sf Sweatfile) RunPostMergeHookContext(ctx context.Context, dir string, ext
 	case err != nil && errors.Is(hookCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil:
 		return fmt.Errorf(
 			"post-merge hook killed: exceeded post-merge-timeout %s (the merge already landed; "+
-				"set [hooks].post-merge-timeout to raise or 0 to disable the cap)",
+				"set [hooks].post-merge-timeout, or pass post_merge_timeout on the merge call, to raise or 0 to disable the cap)",
 			timeout,
 		)
 	// The hook itself finished, but left a child holding its output pipe, so

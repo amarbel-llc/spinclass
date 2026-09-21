@@ -414,6 +414,56 @@ command = "true"')
   refute_output --partial "add new file"
 }
 
+# --post-merge-timeout overrides the sweatfile's cap for this one merge, and the
+# EFFECTIVE cap reaches the target's command and verify as
+# SPINCLASS_POST_MERGE_TIMEOUT / _TIMEOUT_SECONDS / _DEADLINE, alongside the
+# target's own name. Exercises the CLI wiring end-to-end in the built binary; the
+# Go tests cover precedence and enforcement (internal/merge/post_merge_phase_test.go).
+function post_merge_timeout_flag_overrides_sweatfile_and_is_exported { # @test
+  cd "$TEST_REPO" || return
+
+  local branch
+  # shellcheck disable=SC2016
+  branch=$(post_merge_setup_landed_merge '[hooks]
+pre-merge = "true"
+post-merge-timeout = "20m"
+
+[[post-merge]]
+name = "krone"
+command = "true"
+verify = "echo \"$SPINCLASS_POST_MERGE_TIMEOUT $SPINCLASS_POST_MERGE_TIMEOUT_SECONDS $SPINCLASS_POST_MERGE_TARGET\" > \"$BATS_TEST_TMPDIR/krone.env\"; echo \"$SPINCLASS_POST_MERGE_DEADLINE\" > \"$BATS_TEST_TMPDIR/krone.deadline\""')
+
+  run_sc_crap merge "$branch" --local-only --post-merge-timeout 45m
+  assert_success
+  assert_output --partial "post-merge krone"
+
+  run cat "$BATS_TEST_TMPDIR/krone.env"
+  assert_output "45m0s 2700 krone"
+
+  # The deadline is an epoch about 45m out, not a Go duration or "0".
+  local deadline now
+  deadline=$(cat "$BATS_TEST_TMPDIR/krone.deadline")
+  now=$(date +%s)
+  [ "$deadline" -gt "$((now + 2400))" ] || fail "deadline $deadline is not ~45m past now $now"
+  [ "$deadline" -le "$((now + 2700))" ] || fail "deadline $deadline is more than 45m past now $now"
+}
+
+# A malformed --post-merge-timeout is refused before anything lands.
+function post_merge_timeout_flag_rejects_bad_value_before_landing { # @test
+  cd "$TEST_REPO" || return
+
+  local branch
+  branch=$(post_merge_setup_landed_merge '[hooks]
+pre-merge = "true"')
+
+  run_sc_crap merge "$branch" --local-only --post-merge-timeout "ten minutes"
+  assert_failure
+  assert_output --partial "post-merge-timeout"
+
+  run git -C "$TEST_REPO" log --oneline main
+  refute_output --partial "add new file"
+}
+
 # install_fakefmt_stub drops a stand-in formatter on PATH that proves the
 # pre-commit hook fired: it logs to fakefmt.log AND appends a FORMATTED marker
 # to each staged file and restages it (mimicking `conformist --staged`), so the

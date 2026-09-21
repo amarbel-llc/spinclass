@@ -224,16 +224,11 @@ func CheckHooks(sf sweatfile.Sweatfile) []Issue {
 	if sf.Hooks.PostMergeTimeout != nil {
 		v := *sf.Hooks.PostMergeTimeout
 		if v != "" {
-			if d, err := time.ParseDuration(v); err != nil {
+			// Same rule the per-merge override uses (sweatfile.ParsePostMergeTimeout),
+			// so a value `sc validate` accepts is a value a merge call accepts.
+			if _, err := sweatfile.ParsePostMergeTimeout(v); err != nil {
 				issues = append(issues, Issue{
-					Message:  fmt.Sprintf("invalid post-merge-timeout %q (want a Go duration like \"10m\" or \"600s\", or \"0\" to disable): %s", v, err),
-					Severity: SeverityError,
-					Field:    "hooks.post-merge-timeout",
-					Value:    v,
-				})
-			} else if d < 0 {
-				issues = append(issues, Issue{
-					Message:  fmt.Sprintf("post-merge-timeout %q must not be negative (use \"0\" to disable the cap)", v),
+					Message:  err.Error(),
 					Severity: SeverityError,
 					Field:    "hooks.post-merge-timeout",
 					Value:    v,
