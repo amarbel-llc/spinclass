@@ -1,4 +1,4 @@
-package sweatfile
+package apply
 
 import (
 	"fmt"
@@ -8,6 +8,7 @@ import (
 	"text/template"
 
 	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 // dispatcherName is the single dispatcher script in the worktree hooks dir;
@@ -44,10 +45,10 @@ var standardHookNames = map[string]bool{
 // shadowed. Scoped to the worktree via extensions.worktreeConfig + a
 // per-worktree core.hooksPath. When inactive it restores native-hooks-only.
 //
-// Errors are returned for the caller to log, but Apply treats them as non-fatal
+// Errors are returned for the caller to log, but Setup treats them as non-fatal
 // — a hook-install failure must never block session creation. See
 // docs/plans/2026-06-17-precommit-hook-composition-design.md.
-func (sf Sweatfile) installPreCommitHook(worktreePath string) error {
+func installPreCommitHook(sf sweatfile.Sweatfile, worktreePath string) error {
 	hooksDir := filepath.Join(worktreePath, ".spinclass", "hooks")
 	if abs, err := filepath.Abs(hooksDir); err == nil {
 		hooksDir = abs
@@ -57,11 +58,11 @@ func (sf Sweatfile) installPreCommitHook(worktreePath string) error {
 		return restorePreCommitHook(worktreePath, hooksDir)
 	}
 
-	cmd := stripEmptyLines(*sf.PreCommitHookCommand())
+	cmd := sweatfile.NormalizeCommand(*sf.PreCommitHookCommand())
 
 	// Defensive: a core.worktree set in the COMMON config is the documented
 	// extensions.worktreeConfig footgun. Refuse rather than risk the checkout.
-	if commonConfigHasWorktreeOverride(worktreePath) {
+	if git.CommonConfigHasWorktreeOverride(worktreePath) {
 		return fmt.Errorf("refusing to enable extensions.worktreeConfig: core.worktree is set in the common config")
 	}
 
@@ -157,7 +158,7 @@ func resolveOriginalHooksDir(worktreePath, hooksDir string) (string, error) {
 		}
 	}
 	if original == "" {
-		common, err := gitCommonDir(worktreePath)
+		common, err := git.CommonGitDir(worktreePath)
 		if err != nil {
 			return "", err
 		}
@@ -217,26 +218,6 @@ func enumerateActiveHooks(dir string) []string {
 		out = append(out, name)
 	}
 	return out
-}
-
-// CommonConfigHasWorktreeOverride is the exported form of
-// commonConfigHasWorktreeOverride for the other writer of worktree-scoped git
-// config (internal/auth, FDR 0028), so both guard the same footgun.
-func CommonConfigHasWorktreeOverride(worktreePath string) bool {
-	return commonConfigHasWorktreeOverride(worktreePath)
-}
-
-// commonConfigHasWorktreeOverride reports whether core.worktree is set in the
-// repository's COMMON config file (shared across all worktrees). When present,
-// enabling extensions.worktreeConfig is unsafe (see installPreCommitHook).
-func commonConfigHasWorktreeOverride(worktreePath string) bool {
-	common, err := gitCommonDir(worktreePath)
-	if err != nil {
-		return false
-	}
-	cfgFile := filepath.Join(common, "config")
-	out, err := git.Run(worktreePath, "config", "--file", cfgFile, "--get", "core.worktree")
-	return err == nil && strings.TrimSpace(out) != ""
 }
 
 // dispatcherData is the substitution set for dispatcherTemplate. Every field is

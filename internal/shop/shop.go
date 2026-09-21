@@ -21,6 +21,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/executor"
 	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/hookrun"
 	"code.linenisgreat.com/spinclass/internal/merge"
 	"code.linenisgreat.com/spinclass/internal/present"
 	"code.linenisgreat.com/spinclass/internal/session"
@@ -376,7 +377,7 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 		// Skipped for --no-attach: nothing is being attached, so the
 		// "on attach" lifecycle moment never happens.
 		if !noAttach {
-			if hookErr := sf.RunOnAttachHook(rp.AbsPath, w); hookErr != nil {
+			if hookErr := hookrun.OnAttach(sf, rp.AbsPath, w); hookErr != nil {
 				log.Warn("on-attach hook failed", "err", hookErr)
 			}
 		}
@@ -418,7 +419,7 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 
 	// Fire on-detach hook AFTER state is committed so the hook can
 	// observe the final state via $SPINCLASS_SESSION_ID + spinclass list.
-	if hookErr := sf.RunOnDetachHook(rp.AbsPath, w); hookErr != nil {
+	if hookErr := hookrun.OnDetach(sf, rp.AbsPath, w); hookErr != nil {
 		log.Warn("on-detach hook failed", "err", hookErr)
 	}
 

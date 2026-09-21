@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/hookrun"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
@@ -165,7 +166,7 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity) (MintOutcome
 	if hosts := sf.AuthForgeHosts(); len(hosts) > 0 && !slices.Contains(hosts, remote.Host) {
 		return MintOutcome{Skipped: fmt.Sprintf("origin host %s not in [auth].forge-hosts", remote.Host)}, nil
 	}
-	out, err := sweatfile.RunCommandCapture(ctx, id.WorktreePath, *cmd, id.env(remote))
+	out, err := hookrun.CommandCapture(ctx, id.WorktreePath, *cmd, id.env(remote))
 	if err != nil {
 		return MintOutcome{}, fmt.Errorf("[auth] mint-command failed: %w", err)
 	}
@@ -214,7 +215,7 @@ func writeCredential(worktreePath, host, token string) error {
 // the root checkout and every other worktree keep their own auth. Only the
 // forge host is rewritten: remotes on other hosts stay as they are.
 func Inject(dir, credFile string, r Remote) error {
-	if sweatfile.CommonConfigHasWorktreeOverride(dir) {
+	if git.CommonConfigHasWorktreeOverride(dir) {
 		return errors.New("core.worktree is set in the shared git config; extensions.worktreeConfig would break it")
 	}
 	if _, err := git.Run(dir, "config", "extensions.worktreeConfig", "true"); err != nil {
@@ -277,7 +278,7 @@ func revoke(ctx context.Context, sf sweatfile.Sweatfile, id Identity, dir string
 	if err != nil {
 		remote = Remote{}
 	}
-	out, err := sweatfile.RunCommandCapture(ctx, dir, *cmd, id.env(remote))
+	out, err := hookrun.CommandCapture(ctx, dir, *cmd, id.env(remote))
 	if w != nil && out != "" {
 		_, _ = io.WriteString(w, out)
 	}

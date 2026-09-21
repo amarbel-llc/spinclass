@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -239,7 +240,7 @@ const (
 
 // HasVerify reports whether the target declares a non-empty verify stage.
 func (t PostMergeTarget) HasVerify() bool {
-	return t.Verify != nil && stripEmptyLines(*t.Verify) != ""
+	return t.Verify != nil && NormalizeCommand(*t.Verify) != ""
 }
 
 //go:generate tommy generate
@@ -312,6 +313,20 @@ func (sf Sweatfile) PostMergeHookCommand() *string {
 		return nil
 	}
 	return sf.Hooks.PostMerge
+}
+
+// NormalizeCommand drops the empty lines from a sweatfile-declared shell
+// command (a multi-line TOML string carries them), so an "active" check and the
+// script eventually handed to `sh -c` agree on what counts as a command. Pure:
+// the runners in internal/hookrun and internal/apply call it too.
+func NormalizeCommand(s string) string {
+	var lines []string
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // DefaultPostMergeTimeout caps how long a post-merge hook may run when
@@ -391,7 +406,7 @@ func (sf Sweatfile) PostMergeActive() bool {
 		return false
 	}
 	cmd := sf.PostMergeHookCommand()
-	return cmd != nil && stripEmptyLines(*cmd) != ""
+	return cmd != nil && NormalizeCommand(*cmd) != ""
 }
 
 // PostMergeTargets returns the declared top-level [[post-merge]] targets (FDR
@@ -408,7 +423,7 @@ func (sf Sweatfile) PostMergeTargets() []PostMergeTarget {
 func (sf Sweatfile) ActivePostMergeTargets() []PostMergeTarget {
 	var active []PostMergeTarget
 	for _, t := range sf.PostMerge {
-		if stripEmptyLines(t.Command) != "" {
+		if NormalizeCommand(t.Command) != "" {
 			active = append(active, t)
 		}
 	}
@@ -428,7 +443,7 @@ func (sf Sweatfile) PostMergePhaseActive() bool {
 		return true
 	}
 	cmd := sf.PostMergeHookCommand()
-	return cmd != nil && stripEmptyLines(*cmd) != ""
+	return cmd != nil && NormalizeCommand(*cmd) != ""
 }
 
 // RepairHookCommand returns the [hooks].repair command, or nil when unset.
@@ -662,7 +677,7 @@ func (sf Sweatfile) RepairActive() bool {
 		return false
 	}
 	cmd := sf.RepairHookCommand()
-	return cmd != nil && stripEmptyLines(*cmd) != ""
+	return cmd != nil && NormalizeCommand(*cmd) != ""
 }
 
 // PreCommitHookCommand returns the [hooks].pre-commit command, or nil when
@@ -696,7 +711,7 @@ func (sf Sweatfile) PreCommitActive() bool {
 		return false
 	}
 	cmd := sf.PreCommitHookCommand()
-	return cmd != nil && stripEmptyLines(*cmd) != ""
+	return cmd != nil && NormalizeCommand(*cmd) != ""
 }
 
 // AutoRebuildOnResume reports whether [hooks].auto-rebuild-on-resume is true.

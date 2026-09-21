@@ -7,10 +7,12 @@ import (
 	"slices"
 	"strings"
 
+	"code.linenisgreat.com/spinclass/internal/apply"
 	"code.linenisgreat.com/spinclass/internal/claude"
 	"code.linenisgreat.com/spinclass/internal/dodder"
 	"code.linenisgreat.com/spinclass/internal/embeds"
 	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/hookrun"
 	"code.linenisgreat.com/spinclass/internal/madder"
 	"code.linenisgreat.com/spinclass/internal/setupfingerprint"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
@@ -53,50 +55,12 @@ func ResolvePath(
 	}, nil
 }
 
-// DetectRepo walks up from dir looking for a .git directory (must be a
-// directory, not a file — files indicate worktrees). Respects
-// GIT_CEILING_DIRECTORIES to prevent discovery above certain paths.
-// Returns the repo root.
+// DetectRepo walks up from dir to the nearest main-checkout root (a .git
+// DIRECTORY, not a worktree's .git file), honouring GIT_CEILING_DIRECTORIES.
+// The implementation is git.DetectRepo; this wrapper keeps the worktree-facing
+// name for callers that already import this package.
 func DetectRepo(dir string) (string, error) {
-	dir = filepath.Clean(dir)
-	ceilings := parseCeilingDirs()
-
-	for {
-		gitPath := filepath.Join(dir, ".git")
-		info, err := os.Lstat(gitPath)
-		if err == nil && info.IsDir() {
-			return dir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir || isCeiling(dir, ceilings) {
-			return "", fmt.Errorf("no git repository found from %s", dir)
-		}
-		dir = parent
-	}
-}
-
-func parseCeilingDirs() []string {
-	env := os.Getenv("GIT_CEILING_DIRECTORIES")
-	if env == "" {
-		return nil
-	}
-
-	var dirs []string
-	for _, d := range filepath.SplitList(env) {
-		if clean := filepath.Clean(d); filepath.IsAbs(clean) {
-			dirs = append(dirs, clean)
-		}
-	}
-	return dirs
-}
-
-func isCeiling(dir string, ceilings []string) bool {
-	for _, c := range ceilings {
-		if dir == c {
-			return true
-		}
-	}
-	return false
+	return git.DetectRepo(dir)
 }
 
 // Create creates a new git worktree and applies sweatfile configuration.
@@ -285,7 +249,7 @@ func applyWorktreeConfig(
 		return fmt.Errorf("creating .tmp directory: %w", err)
 	}
 
-	if err := sweetfile.Merged.Apply(worktreePath); err != nil {
+	if err := apply.Setup(sweetfile.Merged, worktreePath); err != nil {
 		return fmt.Errorf("applying sweatfile: %w", err)
 	}
 
@@ -329,7 +293,7 @@ func applyWorktreeConfig(
 		return fmt.Errorf("writing .mcp.json: %w", err)
 	}
 
-	if err := sweetfile.Merged.RunCreateHook(worktreePath, os.Stdout); err != nil {
+	if err := hookrun.Create(sweetfile.Merged, worktreePath, os.Stdout); err != nil {
 		_ = git.RunPassthrough(
 			repoPath,
 			"worktree",
@@ -346,7 +310,7 @@ func applyWorktreeConfig(
 	// `direnv exec`) so the session's devshell loads unblocked. Idempotent
 	// no-op when the hook left .envrc untouched or the repo has no .envrc.
 	// See spinclass#213.
-	if err := sweetfile.Merged.AllowDirenv(worktreePath); err != nil {
+	if err := apply.AllowDirenv(worktreePath); err != nil {
 		return fmt.Errorf("re-allowing direnv after create hook: %w", err)
 	}
 

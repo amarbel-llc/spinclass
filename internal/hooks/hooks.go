@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/apply"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/perms"
 	"code.linenisgreat.com/spinclass/internal/session"
@@ -154,7 +155,7 @@ func MaterializeImplicit(cwd, randID string, pid int) (string, bool) {
 	// worktree's), so the load is opt-in per repo. Best-effort and idempotent:
 	// a write failure must not fail materialization, and re-fires (resume/
 	// clear/compact) refresh the file. No-op when no dotenv entries exist.
-	if err := merged.WriteSpinclassEnv(cwd); err != nil {
+	if err := apply.SpinclassEnv(merged, cwd); err != nil {
 		sessionlog.Errorf("MaterializeImplicit WriteSpinclassEnv-failed checkout=%s err=%v", cwd, err)
 	}
 	return key, true

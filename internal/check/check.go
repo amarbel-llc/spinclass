@@ -19,6 +19,7 @@ import (
 	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
 	"code.linenisgreat.com/spinclass/internal/embeds"
 	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/hookrun"
 	"code.linenisgreat.com/spinclass/internal/madder"
 	"code.linenisgreat.com/spinclass/internal/present"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
@@ -333,7 +334,7 @@ func runHookPhase(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.H
 	// Load the devshell from the session worktree (wtPath, which has an allowed
 	// .envrc) but run the hook in hookDir (the build worktree pinned to the
 	// committed sha). They coincide in legacy in-place mode. See spinclass#198.
-	hookErr := hierarchy.Merged.RunPreMergeHookInDir(ctx, wtPath, hookDir, sink)
+	hookErr := hookrun.PreMergeInDir(ctx, hierarchy.Merged, wtPath, hookDir, sink)
 	elapsed := time.Since(start)
 	lw.Flush()
 

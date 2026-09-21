@@ -1,22 +1,16 @@
-package sweatfile
+package apply
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 	"testing"
-	"time"
 
-	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/embeds"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/testfs"
 	"code.linenisgreat.com/spinclass/internal/testgit"
 )
@@ -32,83 +26,11 @@ func gitDir(t *testing.T) string {
 	return filepath.Dir(gitPath)
 }
 
-func TestHardcodedDefaultsGitExcludes(t *testing.T) {
-	defaults := GetDefault()
-
-	if defaults.Git == nil {
-		t.Fatal("expected non-nil Git struct")
-	}
-
-	if defaults.Git.Excludes == nil {
-		t.Fatal("expected non-nil git excludes slice")
-	}
-
-	// Every path spinclass (or a tool it invokes) writes into a worktree
-	// must be excluded so it never shows as untracked / gets accidentally
-	// staged (#116, #119): .envrc and .direnv/ come from the direnv
-	// integration, .tmp/ is the session scratch dir, and
-	// .claude/settings.local.json carries the claude-allow rules. The
-	// [session-entry].env dotenv file lives inside .spinclass/ (#121).
-	want := []string{
-		".worktrees/", ".spinclass/", ".mcp.json",
-		".envrc", ".direnv/", ".tmp/", ".claude/settings.local.json",
-	}
-	if len(defaults.Git.Excludes) != len(want) {
-		t.Fatalf(
-			"expected %d git excludes, got %d: %v",
-			len(want),
-			len(defaults.Git.Excludes),
-			defaults.Git.Excludes,
-		)
-	}
-	for i, w := range want {
-		if defaults.Git.Excludes[i] != w {
-			t.Errorf("excludes[%d]: expected %q, got %q", i, w, defaults.Git.Excludes[i])
-		}
-	}
-}
-
-func TestHardcodedDefaultsClaudeAllow(t *testing.T) {
-	defaults := GetDefault()
-
-	home, _ := os.UserHomeDir()
-	if home == "" {
-		if defaults.Claude != nil {
-			t.Errorf(
-				"expected nil Claude when HOME is empty, got %v",
-				defaults.Claude,
-			)
-		}
-		return
-	}
-
-	if defaults.Claude == nil {
-		t.Fatal("expected non-nil Claude struct")
-	}
-
-	if len(defaults.Claude.Allow) != 1 {
-		t.Fatalf(
-			"expected 1 claude allow rule, got %d: %v",
-			len(defaults.Claude.Allow),
-			defaults.Claude.Allow,
-		)
-	}
-
-	wantRule := "Read(" + filepath.Join(home, ".claude") + "/*)"
-	if defaults.Claude.Allow[0] != wantRule {
-		t.Errorf(
-			"Claude.Allow[0]: got %q, want %q",
-			defaults.Claude.Allow[0],
-			wantRule,
-		)
-	}
-}
-
-func TestApplyClaudeSettings(t *testing.T) {
+func TestClaudeSettings(t *testing.T) {
 	dir := t.TempDir()
 	rules := []string{"Read", "Glob", "Bash(git *)"}
 
-	err := ApplyClaudeSettings(dir, Sweatfile{Claude: &Claude{Allow: rules}})
+	err := ClaudeSettings(dir, sweatfile.Sweatfile{Claude: &sweatfile.Claude{Allow: rules}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -176,7 +98,7 @@ func TestApplyClaudeSettings(t *testing.T) {
 func TestApplyClaudeSettingsEmpty(t *testing.T) {
 	dir := t.TempDir()
 
-	err := ApplyClaudeSettings(dir, Sweatfile{})
+	err := ClaudeSettings(dir, sweatfile.Sweatfile{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -210,7 +132,7 @@ func TestApplyClaudeSettingsOverwritesExistingKeys(t *testing.T) {
 	data, _ := json.MarshalIndent(existing, "", "  ")
 	testfs.MustWriteFile(t, filepath.Join(claudeDir, "settings.local.json"), data, 0o644)
 
-	err := ApplyClaudeSettings(dir, Sweatfile{Claude: &Claude{Allow: []string{"Read"}}})
+	err := ClaudeSettings(dir, sweatfile.Sweatfile{Claude: &sweatfile.Claude{Allow: []string{"Read"}}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -269,9 +191,9 @@ func TestApplyClaudeSettingsNeverWritesHooksKey(t *testing.T) {
 			dir := t.TempDir()
 			tc.gitFn(dir)
 
-			sf := Sweatfile{}
+			sf := sweatfile.Sweatfile{}
 			if tc.stop != "" || tc.toolUL {
-				sf.Hooks = &Hooks{}
+				sf.Hooks = &sweatfile.Hooks{}
 				if tc.stop != "" {
 					sf.Hooks.Stop = &tc.stop
 				}
@@ -280,7 +202,7 @@ func TestApplyClaudeSettingsNeverWritesHooksKey(t *testing.T) {
 				}
 			}
 
-			if err := ApplyClaudeSettings(dir, sf); err != nil {
+			if err := ClaudeSettings(dir, sf); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
@@ -308,7 +230,7 @@ func TestPrepareDirenvWritesEnvrcWithoutUseFlakeWhenNoFlakeNix(t *testing.T) {
 	t.Setenv("PATH", fakeBin+":"+gitDir(t))
 	defer func() { _ = os.Setenv("PATH", origPath) }()
 
-	err := Sweatfile{}.prepareDirenv(dir)
+	err := prepareDirenv(sweatfile.Sweatfile{}, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -365,7 +287,7 @@ func TestPrepareDirenvPrefersEmbeddedOverPath(t *testing.T) {
 	embeds.Set(prevMadder, embeddedDirenv, prevDodder)
 	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv, prevDodder) })
 
-	if err := (Sweatfile{}).prepareDirenv(dir); err != nil {
+	if err := prepareDirenv(sweatfile.Sweatfile{}, dir); err != nil {
 		t.Fatalf("prepareDirenv: %v", err)
 	}
 
@@ -385,7 +307,7 @@ func TestPrepareDirenvSkipsWhenDirenvNotInPath(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	defer func() { _ = os.Setenv("PATH", origPath) }()
 
-	err := Sweatfile{}.prepareDirenv(dir)
+	err := prepareDirenv(sweatfile.Sweatfile{}, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -410,7 +332,7 @@ func TestPrepareDirenvWritesEnvrc(t *testing.T) {
 	t.Setenv("PATH", fakeBin+":"+gitDir(t))
 	defer func() { _ = os.Setenv("PATH", origPath) }()
 
-	err := Sweatfile{}.prepareDirenv(dir)
+	err := prepareDirenv(sweatfile.Sweatfile{}, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -446,7 +368,7 @@ func TestPrepareDirenvOverwritesExistingEnvrc(t *testing.T) {
 	t.Setenv("PATH", fakeBin+":"+gitDir(t))
 	defer func() { _ = os.Setenv("PATH", origPath) }()
 
-	err := Sweatfile{}.prepareDirenv(dir)
+	err := prepareDirenv(sweatfile.Sweatfile{}, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -481,8 +403,8 @@ func TestWriteEnvrcWithDirectives(t *testing.T) {
 	)
 	t.Setenv("PATH", fakeBin+":"+gitDir(t))
 
-	sf := Sweatfile{Direnv: &Direnv{Envrc: []string{"source_up", "dotenv_if_exists"}}}
-	err := sf.prepareDirenv(dir)
+	sf := sweatfile.Sweatfile{Direnv: &sweatfile.Direnv{Envrc: []string{"source_up", "dotenv_if_exists"}}}
+	err := prepareDirenv(sf, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -515,8 +437,8 @@ func TestWriteEnvrcDefaultFallbackWithFlake(t *testing.T) {
 	)
 	t.Setenv("PATH", fakeBin+":"+gitDir(t))
 
-	sf := Sweatfile{}
-	err := sf.prepareDirenv(dir)
+	sf := sweatfile.Sweatfile{}
+	err := prepareDirenv(sf, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -545,8 +467,8 @@ func TestWriteEnvrcDefaultFallbackWithoutFlake(t *testing.T) {
 	)
 	t.Setenv("PATH", fakeBin+":"+gitDir(t))
 
-	sf := Sweatfile{}
-	err := sf.prepareDirenv(dir)
+	sf := sweatfile.Sweatfile{}
+	err := prepareDirenv(sf, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -578,15 +500,15 @@ func TestWriteSpinclassEnv(t *testing.T) {
 	)
 	t.Setenv("PATH", fakeBin+":"+gitDir(t))
 
-	sf := Sweatfile{
-		Direnv: &Direnv{
+	sf := sweatfile.Sweatfile{
+		Direnv: &sweatfile.Direnv{
 			Dotenv: map[string]string{
 				"FOO": "bar",
 				"BAZ": "qux",
 			},
 		},
 	}
-	err := sf.Apply(dir)
+	err := Setup(sf, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -615,14 +537,14 @@ func TestWriteSpinclassEnvInterpolatesWorktree(t *testing.T) {
 	)
 	t.Setenv("PATH", fakeBin+":"+gitDir(t))
 
-	sf := Sweatfile{
-		Direnv: &Direnv{
+	sf := sweatfile.Sweatfile{
+		Direnv: &sweatfile.Direnv{
 			Dotenv: map[string]string{
 				"INCLUDE_PATH": "$WORKTREE/lib:.",
 			},
 		},
 	}
-	err := sf.Apply(dir)
+	err := Setup(sf, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -651,12 +573,12 @@ func TestEnvAutoDotenvDirective(t *testing.T) {
 	)
 	t.Setenv("PATH", fakeBin+":"+gitDir(t))
 
-	sf := Sweatfile{
-		Direnv: &Direnv{
+	sf := sweatfile.Sweatfile{
+		Direnv: &sweatfile.Direnv{
 			Dotenv: map[string]string{"FOO": "bar"},
 		},
 	}
-	err := sf.Apply(dir)
+	err := Setup(sf, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -687,7 +609,7 @@ func TestApplyRemovesStaleSpinclassEnv(t *testing.T) {
 	stale := filepath.Join(dir, ".spinclass.env")
 	testfs.MustWriteFile(t, stale, []byte("FOO=bar\n"), 0o644)
 
-	if err := (Sweatfile{}).Apply(dir); err != nil {
+	if err := Setup(sweatfile.Sweatfile{}, dir); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -709,8 +631,8 @@ func TestNoEnvNoDotenvDirective(t *testing.T) {
 	)
 	t.Setenv("PATH", fakeBin+":"+gitDir(t))
 
-	sf := Sweatfile{}
-	err := sf.Apply(dir)
+	sf := sweatfile.Sweatfile{}
+	err := Setup(sf, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -725,354 +647,17 @@ func TestNoEnvNoDotenvDirective(t *testing.T) {
 	}
 }
 
-func TestRunCreateHookExecutes(t *testing.T) {
-	dir := t.TempDir()
-	marker := filepath.Join(dir, "hook-ran")
-
-	cmd := fmt.Sprintf("touch %s", marker)
-	sf := Sweatfile{Hooks: &Hooks{Create: &cmd}}
-
-	err := sf.RunCreateHook(dir, io.Discard)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if _, err := os.Stat(marker); os.IsNotExist(err) {
-		t.Error("expected create hook to run and create marker file")
-	}
-}
-
-func TestRunCreateHookReceivesWorktreeEnv(t *testing.T) {
-	dir := t.TempDir()
-	output := filepath.Join(dir, "worktree-path")
-
-	cmd := fmt.Sprintf("echo $WORKTREE > %s", output)
-	sf := Sweatfile{Hooks: &Hooks{Create: &cmd}}
-
-	err := sf.RunCreateHook(dir, io.Discard)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	data, _ := os.ReadFile(output)
-	got := strings.TrimSpace(string(data))
-	if got != dir {
-		t.Errorf("WORKTREE env: got %q, want %q", got, dir)
-	}
-}
-
-func TestRunCreateHookFailureReturnsError(t *testing.T) {
-	dir := t.TempDir()
-
-	cmd := "exit 1"
-	sf := Sweatfile{Hooks: &Hooks{Create: &cmd}}
-
-	err := sf.RunCreateHook(dir, io.Discard)
-	if err == nil {
-		t.Error("expected error from failing create hook")
-	}
-}
-
-func TestRunCreateHookNilIsNoop(t *testing.T) {
-	dir := t.TempDir()
-	sf := Sweatfile{}
-
-	err := sf.RunCreateHook(dir, io.Discard)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestRunCreateHookEmptyStringIsNoop(t *testing.T) {
-	dir := t.TempDir()
-	empty := ""
-	sf := Sweatfile{Hooks: &Hooks{Create: &empty}}
-
-	err := sf.RunCreateHook(dir, io.Discard)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestRunCreateHookMultilineWithEmptyLines(t *testing.T) {
-	dir := t.TempDir()
-	marker := filepath.Join(dir, "hook-ran")
-
-	// A multiline create hook with empty lines between commands should
-	// execute correctly — empty lines must not be fed to the shell as
-	// separate commands or cause parse failures.
-	cmd := fmt.Sprintf("echo first\n\ntouch %s\n", marker)
-	sf := Sweatfile{Hooks: &Hooks{Create: &cmd}}
-
-	err := sf.RunCreateHook(dir, io.Discard)
-	if err != nil {
-		t.Fatalf("multiline create hook with empty lines should not error: %v", err)
-	}
-
-	if _, err := os.Stat(marker); os.IsNotExist(err) {
-		t.Error("expected multiline create hook to execute and create marker file")
-	}
-}
-
-func TestRunPreMergeHookExecutes(t *testing.T) {
-	dir := t.TempDir()
-	marker := filepath.Join(dir, "pre-merge-ran")
-
-	cmd := "touch " + marker
-	sf := Sweatfile{Hooks: &Hooks{PreMerge: &cmd}}
-
-	err := sf.RunPreMergeHook(dir, io.Discard)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if _, err := os.Stat(marker); os.IsNotExist(err) {
-		t.Error("expected pre-merge hook to run and create marker file")
-	}
-}
-
-// With a job id in ctx (the pre-merge hook's #25 scope signal) but the scope
-// tier disabled, the hook must run BARE — the systemd-run wrap is a no-op when
-// ScopeArgv reports unavailable, so a host without a systemd user bus (or with
-// RINGMASTER_DISABLE_SCOPE) still runs the hook normally. Guards against a
-// scopeJobID-set path accidentally prepending a prefix that isn't runnable. The
-// wrap-active path needs a live user bus and is dogfooded, not covered here.
-func TestRunPreMergeHookScopeDisabledRunsBare(t *testing.T) {
-	t.Setenv("RINGMASTER_DISABLE_SCOPE", "1")
-	dir := t.TempDir()
-	marker := filepath.Join(dir, "pre-merge-ran")
-
-	cmd := "touch " + marker
-	sf := Sweatfile{Hooks: &Hooks{PreMerge: &cmd}}
-
-	ctx := clown.WithJobID(context.Background(), "merge-9f3c1a2b")
-	if err := sf.RunPreMergeHookContext(ctx, dir, io.Discard); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if _, err := os.Stat(marker); os.IsNotExist(err) {
-		t.Error("expected pre-merge hook to run bare (scope disabled) and create marker")
-	}
-}
-
-// TestRunPreMergeHookScopeActiveWrapsInCgroup validates the wrap-ACTIVE path on
-// a host with a systemd user bus: the pre-merge hook runs inside its
-// ringmaster-<id>.scope, so the hook process's own cgroup carries that unit
-// name. Skips when the scope tier is unavailable (the checkPhase sandbox and
-// macOS have no user bus), so it exercises the real path on a Linux dev host and
-// is a clean no-op in CI. This is the only automated coverage of the wrap
-// actually taking effect.
-func TestRunPreMergeHookScopeActiveWrapsInCgroup(t *testing.T) {
-	jobID := "merge-scopetest1"
-	if _, ok := clown.ScopeArgv(jobID); !ok {
-		t.Skip("scope tier unavailable (no systemd user bus); active-path test skipped")
-	}
-	dir := t.TempDir()
-	marker := filepath.Join(dir, "cgroup")
-
-	cmd := "cat /proc/self/cgroup > " + marker
-	sf := Sweatfile{Hooks: &Hooks{PreMerge: &cmd}}
-
-	ctx := clown.WithJobID(context.Background(), jobID)
-	if err := sf.RunPreMergeHookContext(ctx, dir, io.Discard); err != nil {
-		t.Fatalf("scoped pre-merge hook: %v", err)
-	}
-	content, err := os.ReadFile(marker)
-	if err != nil {
-		t.Fatalf("reading cgroup marker: %v", err)
-	}
-	want := clown.ScopeUnitName(jobID)
-	if !strings.Contains(string(content), want) {
-		t.Errorf("hook cgroup %q does not contain the scope unit %q",
-			strings.TrimSpace(string(content)), want)
-	}
-}
-
-// TestRunPreMergeHookScopeReapsSubtreeOnCancel is the decisive #25 test: it
-// proves the scope's control-group kill reaps a hook subtree that IGNORES
-// SIGTERM — the exact residual #188's SIGTERM + WaitDelay-SIGKILL + no-Setpgid
-// teardown leaves behind. The hook traps SIGTERM and backgrounds a `sleep` that
-// holds the inherited pipe; under #188 alone that child is reparented and
-// survives the top's SIGKILL, but #25's ScopeStop (`systemctl --user stop
-// ringmaster-<id>.scope`) reaps the whole cgroup. Self-skips without a systemd
-// user bus (checkPhase sandbox, macOS); runs for real on a Linux dev host.
-func TestRunPreMergeHookScopeReapsSubtreeOnCancel(t *testing.T) {
-	jobID := fmt.Sprintf("merge-scopekill-%d", time.Now().UnixNano())
-	if _, ok := clown.ScopeArgv(jobID); !ok {
-		t.Skip("scope tier unavailable (no systemd user bus)")
-	}
-	dir := t.TempDir()
-	pidFile := filepath.Join(dir, "child.pid")
-
-	// Top ignores SIGTERM; the backgrounded sleep is the stubborn subtree that
-	// survives #188's teardown but must not survive #25's scope reap.
-	cmd := "trap '' TERM; sleep 300 & echo $! > " + pidFile + "; wait"
-	sf := Sweatfile{Hooks: &Hooks{PreMerge: &cmd}}
-
-	ctx, cancel := context.WithCancel(clown.WithJobID(context.Background(), jobID))
-	var hookOut bytes.Buffer
-	done := make(chan error, 1)
-	go func() { done <- sf.RunPreMergeHookContext(ctx, dir, &hookOut) }()
-
-	pid := waitForChildPID(t, pidFile)
-	// Belt-and-suspenders: never leak the stubborn child (or its scope) past the
-	// test, whatever the outcome.
-	t.Cleanup(func() {
-		_ = syscall.Kill(pid, syscall.SIGKILL)
-		_ = clown.ScopeStop(context.Background(), jobID)
-	})
-	if !processAlive(pid) {
-		t.Fatalf("child %d not alive after the hook started", pid)
-	}
-
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(30 * time.Second):
-		t.Fatal("RunPreMergeHookContext did not return within 30s of cancel")
-	}
-	t.Logf("scope unit: %s\nhook output after cancel:\n%s", clown.ScopeUnitName(jobID), hookOut.String())
-
-	// The hook has returned, so ScopeStop has run; the subtree must be gone.
-	deadline := time.Now().Add(15 * time.Second)
-	for processAlive(pid) {
-		if time.Now().After(deadline) {
-			t.Fatalf("child %d survived cancel — the scope did not reap the subtree (#25 regression)", pid)
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-}
-
-// processAlive reports whether pid is a live process (a signal-0 probe).
-func processAlive(pid int) bool {
-	return pid > 0 && syscall.Kill(pid, 0) == nil
-}
-
-// waitForChildPID polls pidFile until it holds a parseable, positive pid.
-func waitForChildPID(t *testing.T, pidFile string) int {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if b, err := os.ReadFile(pidFile); err == nil {
-			if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid > 0 {
-				return pid
-			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("child pid file never appeared")
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-}
-
-func TestRunPreMergeHookReceivesWorktreeEnv(t *testing.T) {
-	dir := t.TempDir()
-	marker := filepath.Join(dir, "worktree-env")
-
-	cmd := "printenv WORKTREE > " + marker
-	sf := Sweatfile{Hooks: &Hooks{PreMerge: &cmd}}
-
-	err := sf.RunPreMergeHook(dir, io.Discard)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	content, err := os.ReadFile(marker)
-	if err != nil {
-		t.Fatalf("reading marker: %v", err)
-	}
-	if strings.TrimSpace(string(content)) != dir {
-		t.Errorf("expected WORKTREE=%s, got %q", dir, string(content))
-	}
-}
-
-func TestRunPreMergeHookFailureReturnsError(t *testing.T) {
-	dir := t.TempDir()
-
-	cmd := "exit 1"
-	sf := Sweatfile{Hooks: &Hooks{PreMerge: &cmd}}
-
-	err := sf.RunPreMergeHook(dir, io.Discard)
-	if err == nil {
-		t.Error("expected error from failing pre-merge hook")
-	}
-}
-
-func TestRunPreMergeHookNilIsNoop(t *testing.T) {
-	dir := t.TempDir()
-	sf := Sweatfile{}
-
-	err := sf.RunPreMergeHook(dir, io.Discard)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestRunPreMergeHookEmptyStringIsNoop(t *testing.T) {
-	dir := t.TempDir()
-	empty := ""
-	sf := Sweatfile{Hooks: &Hooks{PreMerge: &empty}}
-
-	err := sf.RunPreMergeHook(dir, io.Discard)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-// Regression test for spinclass#27: the hook MUST NOT write to os.Stdout.
-// In `spinclass serve` mode, os.Stdout is the JSON-RPC transport; any byte
-// the hook emits there corrupts the protocol and the MCP client closes the
-// connection. The hook must write to the caller-provided writer instead.
-func TestRunHookWritesToWriterNotStdout(t *testing.T) {
-	dir := t.TempDir()
-
-	// Swap os.Stdout for a pipe so we can observe whether anything is
-	// written to it during the hook.
-	origStdout := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("pipe: %v", err)
-	}
-	os.Stdout = w
-	t.Cleanup(func() { os.Stdout = origStdout })
-
-	var hookOut bytes.Buffer
-	cmd := "echo STDOUT_LINE; echo STDERR_LINE 1>&2"
-	sf := Sweatfile{Hooks: &Hooks{PreMerge: &cmd}}
-
-	if err := sf.RunPreMergeHook(dir, &hookOut); err != nil {
-		t.Fatalf("hook: %v", err)
-	}
-
-	if err := w.Close(); err != nil {
-		t.Fatalf("close pipe writer: %v", err)
-	}
-	leaked, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("read pipe: %v", err)
-	}
-	if len(leaked) != 0 {
-		t.Errorf("hook leaked %d bytes to os.Stdout: %q", len(leaked), string(leaked))
-	}
-
-	got := hookOut.String()
-	if !strings.Contains(got, "STDOUT_LINE") {
-		t.Errorf("writer missing STDOUT_LINE; got %q", got)
-	}
-	if !strings.Contains(got, "STDERR_LINE") {
-		t.Errorf("writer missing STDERR_LINE; got %q", got)
-	}
-}
-
 func TestApplyClaudeSettingsEnabledMCPs(t *testing.T) {
 	dir := t.TempDir()
 
-	sf := Sweatfile{
+	sf := sweatfile.Sweatfile{
 		AllowedMCPs: []string{"external-server"},
-		MCPs: []MCPServerDef{
+		MCPs: []sweatfile.MCPServerDef{
 			{Name: "my-linter", Command: "lint"},
 		},
 	}
 
-	err := ApplyClaudeSettings(dir, sf)
+	err := ClaudeSettings(dir, sf)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1103,14 +688,14 @@ func TestApplyClaudeSettingsEnabledMCPs(t *testing.T) {
 func TestApplyClaudeSettingsEnabledMCPsDedup(t *testing.T) {
 	dir := t.TempDir()
 
-	sf := Sweatfile{
+	sf := sweatfile.Sweatfile{
 		AllowedMCPs: []string{"foo", "my-linter"},
-		MCPs: []MCPServerDef{
+		MCPs: []sweatfile.MCPServerDef{
 			{Name: "my-linter", Command: "lint"},
 		},
 	}
 
-	err := ApplyClaudeSettings(dir, sf)
+	err := ClaudeSettings(dir, sf)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1135,7 +720,7 @@ func TestApplyClaudeSettingsEnabledMCPsDedup(t *testing.T) {
 func TestApplyClaudeSettingsEmptyOmitsEnabledMCPs(t *testing.T) {
 	dir := t.TempDir()
 
-	if err := ApplyClaudeSettings(dir, Sweatfile{}); err != nil {
+	if err := ClaudeSettings(dir, sweatfile.Sweatfile{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -1185,13 +770,13 @@ func TestAllowDirenvBareAndIdempotent(t *testing.T) {
 	testgit.MustInit(t, dir)
 	logPath := pinLoggingDirenv(t)
 
-	sf := Sweatfile{}
+	sf := sweatfile.Sweatfile{}
 	// Write the .envrc first (prepareDirenv does one allow), then call
 	// AllowDirenv again to mimic the post-create-hook re-allow.
-	if err := sf.prepareDirenv(dir); err != nil {
+	if err := prepareDirenv(sf, dir); err != nil {
 		t.Fatalf("prepareDirenv: %v", err)
 	}
-	if err := sf.AllowDirenv(dir); err != nil {
+	if err := AllowDirenv(dir); err != nil {
 		t.Fatalf("AllowDirenv: %v", err)
 	}
 
@@ -1214,7 +799,7 @@ func TestAllowDirenvNoEnvrcIsNoop(t *testing.T) {
 	testgit.MustInit(t, dir)
 	logPath := pinLoggingDirenv(t)
 
-	if err := (Sweatfile{}).AllowDirenv(dir); err != nil {
+	if err := AllowDirenv(dir); err != nil {
 		t.Fatalf("AllowDirenv: %v", err)
 	}
 

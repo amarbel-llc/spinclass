@@ -1,4 +1,4 @@
-package sweatfile
+package apply
 
 import (
 	"os"
@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 
@@ -107,8 +108,8 @@ func TestInstallPreCommitHookBakesFlakeLockHash(t *testing.T) {
 		t.Fatal("expected a non-empty flake.lock hash")
 	}
 
-	sf := Sweatfile{Hooks: &Hooks{PreCommit: strptr("conformist --staged")}}
-	if err := sf.installPreCommitHook(wt); err != nil {
+	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreCommit: strptr("conformist --staged")}}
+	if err := installPreCommitHook(sf, wt); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	body, _ := os.ReadFile(filepath.Join(wt, ".spinclass", "hooks", "pre-commit"))
@@ -133,8 +134,8 @@ func TestInstallPreCommitHook(t *testing.T) {
 	wt := filepath.Join(repo, ".worktrees", "feat")
 	testgit.MustWorktreeAdd(t, repo, wt, "feat")
 
-	sf := Sweatfile{Hooks: &Hooks{PreCommit: strptr("conformist --staged --exit-zero-on-fix")}}
-	if err := sf.installPreCommitHook(wt); err != nil {
+	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreCommit: strptr("conformist --staged --exit-zero-on-fix")}}
+	if err := installPreCommitHook(sf, wt); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -163,7 +164,7 @@ func TestInstallPreCommitHook(t *testing.T) {
 	}
 
 	// Idempotent: a second install (mirrors resume re-running Apply) is clean.
-	if err := sf.installPreCommitHook(wt); err != nil {
+	if err := installPreCommitHook(sf, wt); err != nil {
 		t.Fatalf("second install: %v", err)
 	}
 }
@@ -182,8 +183,8 @@ func TestInstallPreCommitHookFiresOnCommit(t *testing.T) {
 	writeExec(t, filepath.Join(binDir, "fakefmt"),
 		"#!/bin/sh\necho fired > "+shSingleQuote(marker)+"\nexit 0\n")
 
-	sf := Sweatfile{Hooks: &Hooks{PreCommit: strptr("fakefmt")}}
-	if err := sf.installPreCommitHook(wt); err != nil {
+	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreCommit: strptr("fakefmt")}}
+	if err := installPreCommitHook(sf, wt); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -213,8 +214,8 @@ func TestInstallPreCommitHookSurfacesFormatterError(t *testing.T) {
 	writeExec(t, filepath.Join(binDir, "badfmt"),
 		"#!/bin/sh\necho 'badfmt: --exit-zero-on-fix requires --commit' >&2\nexit 2\n")
 
-	sf := Sweatfile{Hooks: &Hooks{PreCommit: strptr("badfmt --staged --exit-zero-on-fix")}}
-	if err := sf.installPreCommitHook(wt); err != nil {
+	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreCommit: strptr("badfmt --staged --exit-zero-on-fix")}}
+	if err := installPreCommitHook(sf, wt); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -266,8 +267,8 @@ func TestInstallPreCommitHookReEvalsOnFlakeLockDrift(t *testing.T) {
 	writeExec(t, filepath.Join(binDir, "fakefmt"),
 		"#!/bin/sh\necho ran > "+shSingleQuote(fmtMarker)+"\nexit 0\n")
 
-	sf := Sweatfile{Hooks: &Hooks{PreCommit: strptr("fakefmt")}}
-	if err := sf.installPreCommitHook(wt); err != nil {
+	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreCommit: strptr("fakefmt")}}
+	if err := installPreCommitHook(sf, wt); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -314,8 +315,8 @@ func TestInstallPreCommitHookComposesNativeHooks(t *testing.T) {
 	writeExec(t, filepath.Join(binDir, "fmtstub"),
 		"#!/bin/sh\necho fmt >> "+shSingleQuote(events)+"\nexit 0\n")
 
-	sf := Sweatfile{Hooks: &Hooks{PreCommit: strptr("fmtstub")}}
-	if err := sf.installPreCommitHook(wt); err != nil {
+	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreCommit: strptr("fmtstub")}}
+	if err := installPreCommitHook(sf, wt); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -354,8 +355,8 @@ func TestInstallPreCommitHookDisableRestoresNative(t *testing.T) {
 	testgit.MustWorktreeAdd(t, repo, wt, "feat")
 	hooksDir := filepath.Join(wt, ".spinclass", "hooks")
 
-	active := Sweatfile{Hooks: &Hooks{PreCommit: strptr("conformist --staged")}}
-	if err := active.installPreCommitHook(wt); err != nil {
+	active := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreCommit: strptr("conformist --staged")}}
+	if err := installPreCommitHook(active, wt); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	if hp, _ := git.Run(wt, "config", "--get", "core.hooksPath"); hp == "" {
@@ -363,8 +364,8 @@ func TestInstallPreCommitHookDisableRestoresNative(t *testing.T) {
 	}
 
 	// Disable → restore: our override unset, shims and sentinel removed.
-	inactive := Sweatfile{Hooks: &Hooks{PreCommit: strptr("conformist --staged"), DisablePreCommit: boolPtr(true)}}
-	if err := inactive.installPreCommitHook(wt); err != nil {
+	inactive := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreCommit: strptr("conformist --staged"), DisablePreCommit: boolPtr(true)}}
+	if err := installPreCommitHook(inactive, wt); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
 	if hp, _ := git.Run(wt, "config", "--worktree", "--get", "core.hooksPath"); strings.TrimSpace(hp) != "" {
@@ -385,8 +386,8 @@ func TestInstallPreCommitHookInactiveIsNoop(t *testing.T) {
 	wt := filepath.Join(repo, ".worktrees", "feat")
 	testgit.MustWorktreeAdd(t, repo, wt, "feat")
 
-	sf := Sweatfile{Hooks: &Hooks{}}
-	if err := sf.installPreCommitHook(wt); err != nil {
+	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{}}
+	if err := installPreCommitHook(sf, wt); err != nil {
 		t.Fatalf("inactive install should be a no-op: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(wt, ".spinclass", "hooks", "pre-commit")); !os.IsNotExist(err) {
@@ -410,8 +411,8 @@ func TestInstallPreCommitHookRefusesCommonCoreWorktree(t *testing.T) {
 		t.Fatalf("set core.worktree: %v", err)
 	}
 
-	sf := Sweatfile{Hooks: &Hooks{PreCommit: strptr("conformist --staged")}}
-	err := sf.installPreCommitHook(wt)
+	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreCommit: strptr("conformist --staged")}}
+	err := installPreCommitHook(sf, wt)
 	if err == nil {
 		t.Fatal("expected refusal when core.worktree is set in the common config")
 	}

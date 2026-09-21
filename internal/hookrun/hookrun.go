@@ -1,250 +1,76 @@
-package sweatfile
+// Package hookrun executes the lifecycle hooks a sweatfile declares — create,
+// on-attach/on-detach, pre-merge, repair, post-merge (the legacy string and
+// the named [[post-merge]] targets) — plus the [auth] mint/revoke commands.
+//
+// It is deliberately separate from internal/sweatfile, which is the config
+// SCHEMA (structs, hierarchy merge, the tommy codec, the accessors) and
+// imports nothing else in the module. Running a hook needs clown (the #25
+// systemd scope), direnv (devshell scoping) and process plumbing, and it is
+// where the churn is; keeping that out of the schema package means a change to
+// hook execution invalidates only the packages that execute hooks under
+// godyn's per-package compile, not every package that merely reads config
+// (spinclass#309).
+//
+// Every runner takes the merged sweatfile.Sweatfile as an argument and gates on
+// the schema's own accessors (PreMergeHookCommand, RepairActive, …), so the
+// contract of each hook is unchanged from when these were methods.
+package hookrun
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
-	"github.com/charmbracelet/log"
-
 	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/direnv"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
-func (sweatfile Sweatfile) Apply(worktreePath string) error {
-	defaults := GetDefault()
-	merged := sweatfile.MergeWith(defaults)
-
-	if err := ApplyClaudeSettings(worktreePath, merged); err != nil {
-		return fmt.Errorf("applying claude settings: %w", err)
-	}
-
-	if err := sweatfile.WriteSpinclassEnv(worktreePath); err != nil {
-		return fmt.Errorf("writing .spinclass/env: %w", err)
-	}
-
-	// The dotenv file lived at the worktree top level before #121 moved
-	// it inside .spinclass/; remove the stale copy best-effort so it
-	// can't linger (and its old `dotenv .spinclass.env` .envrc directive
-	// is rewritten by prepareDirenv below).
-	_ = os.Remove(filepath.Join(worktreePath, ".spinclass.env"))
-
-	if err := sweatfile.prepareDirenv(worktreePath); err != nil {
-		return err
-	}
-
-	// Install the per-session pre-commit repair hook (best-effort): a failure
-	// here must never block session creation, so log and continue. No-op when
-	// [hooks].pre-commit is inactive. See
-	// docs/plans/2026-06-16-per-commit-repair-hook-design.md.
-	if err := merged.installPreCommitHook(worktreePath); err != nil {
-		log.Warn("pre-commit hook install skipped", "err", err)
-	}
-
-	return nil
+// Create runs the [hooks].create command in worktreePath.
+func Create(sf sweatfile.Sweatfile, worktreePath string, w io.Writer) error {
+	return runHook(sf.CreateHookCommand(), worktreePath, w)
 }
 
-func resolveSpinclassBinDir(worktreePath string) (string, error) {
-	dir, err := gitCommonDir(worktreePath)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "spinclass", "bin"), nil
+// OnAttach runs the [hooks].on-attach command in worktreePath.
+func OnAttach(sf sweatfile.Sweatfile, worktreePath string, w io.Writer) error {
+	return runHook(sf.OnAttachHookCommand(), worktreePath, w)
 }
 
-func (sf Sweatfile) writeEnvrc(worktreePath string) error {
-	file, err := os.OpenFile(
-		filepath.Join(worktreePath, ".envrc"),
-		os.O_TRUNC|os.O_CREATE|os.O_WRONLY,
-		0o644,
-	)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = file.Close() }()
-
-	bufferedWriter := bufio.NewWriter(file)
-
-	var directives []string
-	if sf.Direnv != nil && sf.Direnv.Envrc != nil {
-		directives = sf.Direnv.Envrc
-	} else {
-		directives = []string{"source_up"}
-		if _, ok := fileExists(filepath.Join(worktreePath, "flake.nix")); ok {
-			directives = append(directives, "use flake")
-		}
-	}
-
-	for _, directive := range directives {
-		if _, err := fmt.Fprintln(bufferedWriter, directive); err != nil {
-			return err
-		}
-	}
-
-	if sf.Direnv != nil && len(sf.Direnv.Dotenv) > 0 {
-		if _, err := fmt.Fprintln(bufferedWriter, "dotenv .spinclass/env"); err != nil {
-			return err
-		}
-	}
-
-	dirSpinclassBin, err := resolveSpinclassBinDir(worktreePath)
-	if err != nil {
-		return err
-	}
-	dirSpinclassBinAbs, err := filepath.Abs(dirSpinclassBin)
-	if err != nil {
-		return err
-	}
-
-	if _, err := fmt.Fprintf(
-		bufferedWriter,
-		"PATH_add \"%s\"\n",
-		dirSpinclassBinAbs,
-	); err != nil {
-		return err
-	}
-
-	return bufferedWriter.Flush()
+// OnDetach runs the [hooks].on-detach command in worktreePath.
+func OnDetach(sf sweatfile.Sweatfile, worktreePath string, w io.Writer) error {
+	return runHook(sf.OnDetachHookCommand(), worktreePath, w)
 }
 
-// WriteSpinclassEnv renders the merged [direnv.dotenv] map to
-// <worktreePath>/.spinclass/env (the file the generated `dotenv .spinclass/env`
-// .envrc line sources), expanding $WORKTREE to worktreePath and other $VARs
-// from the process env, with keys sorted for a stable file. A no-op when no
-// dotenv entries are declared. It never touches .envrc, so implicit
-// (main-checkout) sessions can call it to receive dotenv values via a committed
-// `dotenv_if_exists .spinclass/env` without their repo-owned .envrc being
-// rewritten (#274); managed worktrees reach it through Apply.
-func (sf Sweatfile) WriteSpinclassEnv(worktreePath string) error {
-	if sf.Direnv == nil || len(sf.Direnv.Dotenv) == 0 {
-		return nil
-	}
-
-	keys := make([]string, 0, len(sf.Direnv.Dotenv))
-	for k := range sf.Direnv.Dotenv {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	if err := os.MkdirAll(filepath.Join(worktreePath, ".spinclass"), 0o755); err != nil {
-		return err
-	}
-
-	file, err := os.OpenFile(
-		filepath.Join(worktreePath, ".spinclass", "env"),
-		os.O_TRUNC|os.O_CREATE|os.O_WRONLY,
-		0o644,
-	)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = file.Close() }()
-
-	expand := func(key string) string {
-		if key == "WORKTREE" {
-			return worktreePath
-		}
-		return os.Getenv(key)
-	}
-
-	for _, k := range keys {
-		expanded := os.Expand(sf.Direnv.Dotenv[k], expand)
-		if _, err := fmt.Fprintf(file, "%s=%s\n", k, expanded); err != nil {
-			return err
-		}
-	}
-
-	return nil
+// PreMerge runs the [hooks].pre-merge command in worktreePath under a
+// background context. The cancellable form is PreMergeContext.
+func PreMerge(sf sweatfile.Sweatfile, worktreePath string, w io.Writer) error {
+	return PreMergeContext(context.Background(), sf, worktreePath, w)
 }
 
-func (sf Sweatfile) prepareDirenv(worktreePath string) error {
-	if _, ok := direnv.Resolve(); !ok {
-		return nil
-	}
-
-	if err := sf.writeEnvrc(worktreePath); err != nil {
-		return err
-	}
-
-	return sf.AllowDirenv(worktreePath)
-}
-
-// AllowDirenv records a bare `direnv allow` for worktreePath's .envrc so a
-// subsequently-loaded devshell is authorized — including the create hook's own
-// `direnv exec` (runHookInDir), which refuses to load a blocked .envrc. This is
-// deliberately the plain allow subcommand run against the worktree dir, NOT
-// wrapped in `direnv exec`.
-//
-// No-op when direnv is unavailable or the worktree has no .envrc. Idempotent:
-// safe to call again after a create hook may have mutated .envrc, which is how
-// worktree.Create re-authorizes the final .envrc post-hook (fix #213).
-func (sf Sweatfile) AllowDirenv(worktreePath string) error {
-	direnvPath, ok := direnv.Resolve()
-	if !ok {
-		return nil
-	}
-	if !worktreeHasEnvrc(worktreePath) {
-		return nil
-	}
-
-	cmd := exec.Command(direnvPath, "allow")
-	cmd.Dir = worktreePath
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-
-	return cmd.Run()
-}
-
-// worktreeHasEnvrc reports whether the worktree has a regular .envrc file,
-// the precondition for devshell-scoping a hook via `direnv exec`. spinclass
-// writes one (writeEnvrc) whenever direnv resolves; gating on its presence
-// keeps the bare `sh -c` path for non-direnv repos so their hook behavior is
-// unchanged.
-func worktreeHasEnvrc(worktreePath string) bool {
-	info, ok := fileExists(filepath.Join(worktreePath, ".envrc"))
-	return ok && info.Mode().IsRegular()
-}
-
-func (sf Sweatfile) RunCreateHook(worktreePath string, w io.Writer) error {
-	cmd := sf.CreateHookCommand()
-	return runHook(cmd, worktreePath, w)
-}
-
-func (sf Sweatfile) RunPreMergeHook(worktreePath string, w io.Writer) error {
-	return sf.RunPreMergeHookContext(context.Background(), worktreePath, w)
-}
-
-// RunRepairHookContext runs the [hooks].repair command (FDR 0018) in
-// worktreePath, streaming combined stdout+stderr to w, and returns the
-// command's exit status as its error. Callers gate on RepairActive() first; if
-// repair is inactive this is a no-op returning nil. Unlike the pre-merge hook
-// there is no inactivity watchdog — repair is a fast formatter/amend pass, not
-// a minutes-long build/test hook.
-func (sf Sweatfile) RunRepairHookContext(ctx context.Context, worktreePath string, w io.Writer) error {
+// Repair runs the [hooks].repair command (FDR 0018) in worktreePath,
+// streaming combined stdout+stderr to w, and returns the command's exit status
+// as its error. Gated on RepairActive(): inactive is a no-op returning nil.
+// Unlike the pre-merge hook there is no inactivity watchdog — repair is a fast
+// formatter/amend pass, not a minutes-long build/test hook.
+func Repair(ctx context.Context, sf sweatfile.Sweatfile, worktreePath string, w io.Writer) error {
 	if !sf.RepairActive() {
 		return nil
 	}
 	return runHookContext(ctx, sf.RepairHookCommand(), worktreePath, w)
 }
 
-// RunPostMergeHookContext runs the [hooks].post-merge command (FDR 0023) in
-// dir, streaming combined stdout+stderr to w, with extraEnv (the
-// SPINCLASS_MERGED_* facts) appended to the hook's environment. Callers gate
-// on PostMergeActive() first; if post-merge is inactive this is a no-op
-// returning nil.
+// PostMerge runs the [hooks].post-merge command (FDR 0023) in dir, streaming
+// combined stdout+stderr to w, with extraEnv (the SPINCLASS_MERGED_* facts)
+// appended to the hook's environment. Gated on PostMergeActive(): inactive is
+// a no-op returning nil.
 //
 // The hook is bounded by a WALL-CLOCK cap (PostMergeTimeoutValue: 10m by
 // default, overridable via [hooks].post-merge-timeout, 0 to disable). It is
@@ -256,17 +82,17 @@ func (sf Sweatfile) RunRepairHookContext(ctx context.Context, worktreePath strin
 // A cap kill is reported distinctly from a caller cancel (session-job-cancel),
 // which cancels the parent ctx: the timeout message is only produced when the
 // deadline fired while the parent was still live.
-func (sf Sweatfile) RunPostMergeHookContext(ctx context.Context, dir string, extraEnv []string, w io.Writer) error {
-	return sf.RunPostMergeHookWithCap(ctx, dir, extraEnv, sf.PostMergeTimeoutValue(), w)
+func PostMerge(ctx context.Context, sf sweatfile.Sweatfile, dir string, extraEnv []string, w io.Writer) error {
+	return PostMergeWithCap(ctx, sf, dir, extraEnv, sf.PostMergeTimeoutValue(), w)
 }
 
-// RunPostMergeHookWithCap is RunPostMergeHookContext with the wall-clock cap
-// supplied by the caller instead of read from the sweatfile: the merge phase
-// resolves the EFFECTIVE cap (a per-merge override beats
-// [hooks].post-merge-timeout beats the default) once and hands it here, so the
-// legacy string path and the named-target path enforce — and advertise via
-// SPINCLASS_POST_MERGE_TIMEOUT — the same number. timeout <= 0 disables the cap.
-func (sf Sweatfile) RunPostMergeHookWithCap(ctx context.Context, dir string, extraEnv []string, timeout time.Duration, w io.Writer) error {
+// PostMergeWithCap is PostMerge with the wall-clock cap supplied by the caller
+// instead of read from the sweatfile: the merge phase resolves the EFFECTIVE
+// cap (a per-merge override beats [hooks].post-merge-timeout beats the
+// default) once and hands it here, so the legacy string path and the
+// named-target path enforce — and advertise via SPINCLASS_POST_MERGE_TIMEOUT —
+// the same number. timeout <= 0 disables the cap.
+func PostMergeWithCap(ctx context.Context, sf sweatfile.Sweatfile, dir string, extraEnv []string, timeout time.Duration, w io.Writer) error {
 	if !sf.PostMergeActive() {
 		return nil
 	}
@@ -308,37 +134,37 @@ func (sf Sweatfile) RunPostMergeHookWithCap(ctx context.Context, dir string, ext
 	return err
 }
 
-// Run runs one named [[post-merge]] target (FDR 0026) in dir, streaming the
+// Target runs one named [[post-merge]] target (FDR 0026) in dir, streaming the
 // combined stdout+stderr of both stages to w with extraEnv (the
 // SPINCLASS_MERGED_* facts) appended. It runs Command; only if Command exits
 // zero AND the target declares a non-empty Verify does it run Verify.
 //
-// Unlike RunPostMergeHookContext (the legacy single-string path, which derives
-// its own cap), this applies NO timeout of its own: the named-target phase
-// owns one shared wall-clock deadline across all targets (so N targets cannot
-// hold the merge lock past post-merge-timeout), and passes it in via ctx. Each
-// stage runs under that ctx with the post-merge WaitDelay/drain, so a
-// backgrounded child that forgot to redirect its output cannot hold the lock
-// for its full lifetime.
+// Unlike PostMerge (the legacy single-string path, which derives its own cap),
+// this applies NO timeout of its own: the named-target phase owns one shared
+// wall-clock deadline across all targets (so N targets cannot hold the merge
+// lock past post-merge-timeout), and passes it in via ctx. Each stage runs
+// under that ctx with the post-merge WaitDelay/drain, so a backgrounded child
+// that forgot to redirect its output cannot hold the lock for its full
+// lifetime.
 //
 // Returns the verdict — PostMergeOK, PostMergeCommandFailed, or
 // PostMergeVerifyFailed — and, for a failed stage, the underlying error (which
 // the phase inspects against the shared deadline to distinguish a genuine
 // failure from a cap kill).
-func (t PostMergeTarget) Run(ctx context.Context, dir string, extraEnv []string, w io.Writer) (PostMergeVerdict, error) {
+func Target(ctx context.Context, t sweatfile.PostMergeTarget, dir string, extraEnv []string, w io.Writer) (sweatfile.PostMergeVerdict, error) {
 	command := t.Command
 	// scopeJobID "" — post-merge is deliberately unscoped so a control-group
 	// kill never reaps the detached children FDR 0023 sanctions for slow deploys.
 	if err := runHookInDirEnv(ctx, &command, dir, dir, extraEnv, postMergeWaitDelay, "", w); err != nil {
-		return PostMergeCommandFailed, err
+		return sweatfile.PostMergeCommandFailed, err
 	}
 	if t.HasVerify() {
 		verify := *t.Verify
 		if err := runHookInDirEnv(ctx, &verify, dir, dir, extraEnv, postMergeWaitDelay, "", w); err != nil {
-			return PostMergeVerifyFailed, err
+			return sweatfile.PostMergeVerifyFailed, err
 		}
 	}
-	return PostMergeOK, nil
+	return sweatfile.PostMergeOK, nil
 }
 
 // cancelGrace is how long a cancelled hook has to exit after SIGTERM before
@@ -356,9 +182,9 @@ const cancelGrace = 10 * time.Second
 // output, short enough that a lingering child cannot hold the merge lock.
 const postMergeWaitDelay = 5 * time.Second
 
-// RunPreMergeHookContext runs the pre-merge hook bound to ctx, so a caller
-// (the async job runner) can cancel/kill the hook subprocess. The synchronous
-// path uses RunPreMergeHook, which passes a background context.
+// PreMergeContext runs the pre-merge hook bound to ctx, so a caller (the async
+// job runner) can cancel/kill the hook subprocess. The synchronous path uses
+// PreMerge, which passes a background context.
 //
 // When [hooks].inactivity-timeout is set, an activity watchdog wraps the hook:
 // every output line bumps a last-activity timestamp, and a goroutine cancels
@@ -367,16 +193,16 @@ const postMergeWaitDelay = 5 * time.Second
 // of running until the outer MCP/clown deadline. The watchdog ctx is a child of
 // the caller's ctx, so an inactivity kill is distinguishable from a user cancel
 // (e.g. session-job-cancel): only inactivity yields the dedicated error below.
-func (sf Sweatfile) RunPreMergeHookContext(ctx context.Context, worktreePath string, w io.Writer) error {
-	return sf.RunPreMergeHookInDir(ctx, worktreePath, worktreePath, w)
+func PreMergeContext(ctx context.Context, sf sweatfile.Sweatfile, worktreePath string, w io.Writer) error {
+	return PreMergeInDir(ctx, sf, worktreePath, worktreePath, w)
 }
 
-// RunPreMergeHookInDir runs the pre-merge hook with the devshell loaded from
-// envDir (the session worktree, which has an allowed .envrc) while the hook's
-// working directory is runDir (the detached build worktree pinned to the
-// committed sha). The single-dir RunPreMergeHookContext is the envDir==runDir
-// case (legacy in-place mode). See runHookInDir and FDR 0013.
-func (sf Sweatfile) RunPreMergeHookInDir(ctx context.Context, envDir, runDir string, w io.Writer) error {
+// PreMergeInDir runs the pre-merge hook with the devshell loaded from envDir
+// (the session worktree, which has an allowed .envrc) while the hook's working
+// directory is runDir (the detached build worktree pinned to the committed
+// sha). The single-dir PreMergeContext is the envDir==runDir case (legacy
+// in-place mode). See runHookInDir and FDR 0013.
+func PreMergeInDir(ctx context.Context, sf sweatfile.Sweatfile, envDir, runDir string, w io.Writer) error {
 	cmd := sf.PreMergeHookCommand()
 	timeout := sf.InactivityTimeoutValue()
 	if timeout <= 0 {
@@ -426,8 +252,8 @@ func (sf Sweatfile) RunPreMergeHookInDir(ctx context.Context, envDir, runDir str
 }
 
 // activityWriter wraps an io.Writer and records the time of the most recent
-// Write. The inactivity watchdog in RunPreMergeHookContext reads lastActivity
-// to decide whether the pre-merge hook has gone silent past its budget.
+// Write. The inactivity watchdog in PreMergeInDir reads lastActivity to decide
+// whether the pre-merge hook has gone silent past its budget.
 type activityWriter struct {
 	w    io.Writer
 	mu   sync.Mutex
@@ -447,16 +273,6 @@ func (a *activityWriter) lastActivity() time.Time {
 	return a.last
 }
 
-func (sf Sweatfile) RunOnAttachHook(worktreePath string, w io.Writer) error {
-	cmd := sf.OnAttachHookCommand()
-	return runHook(cmd, worktreePath, w)
-}
-
-func (sf Sweatfile) RunOnDetachHook(worktreePath string, w io.Writer) error {
-	cmd := sf.OnDetachHookCommand()
-	return runHook(cmd, worktreePath, w)
-}
-
 func runHook(cmd *string, worktreePath string, w io.Writer) error {
 	return runHookContext(context.Background(), cmd, worktreePath, w)
 }
@@ -472,7 +288,7 @@ func runHookContext(ctx context.Context, cmd *string, worktreePath string, w io.
 // detached build worktree (runDir) pinned to the committed sha but must load the
 // devshell from the session worktree (envDir) — the build worktree is created
 // from the tracked tree only, so it has neither the git-excluded .envrc nor a
-// `direnv allow` record, whereas the session worktree has both (writeEnvrc +
+// `direnv allow` record, whereas the session worktree has both (apply.Setup +
 // `direnv allow` at `sc start`). See spinclass#198 and FDR 0013.
 func runHookInDir(ctx context.Context, cmd *string, envDir, runDir string, w io.Writer) error {
 	// The pre-merge hook runs under the async job's ctx, which carries the job id
@@ -528,7 +344,7 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 		return nil
 	}
 
-	script := stripEmptyLines(*cmd)
+	script := sweatfile.NormalizeCommand(*cmd)
 	if script == "" {
 		return nil
 	}
@@ -549,11 +365,11 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 	// loads the .envrc from <dir> independently of cmd.Dir, which lets the
 	// pre-merge hook load the session worktree's allowed devshell while running
 	// in the build worktree.
-	// worktreeHasEnvrc (a single stat) is checked before direnv.Resolve (a PATH
+	// direnv.HasEnvrc (a single stat) is checked before direnv.Resolve (a PATH
 	// scan when direnv is not build-pinned) so the common non-direnv repo skips
 	// the lookup entirely.
 	argv := []string{"sh", "-c", script}
-	if worktreeHasEnvrc(envDir) {
+	if direnv.HasEnvrc(envDir) {
 		if direnvPath, ok := direnv.Resolve(); ok {
 			argv = direnv.WrapExec(direnvPath, envDir, argv)
 		}
@@ -611,19 +427,19 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 	return err
 }
 
-// RunCommandCapture runs a sweatfile-declared command (`sh -c`) in dir,
+// CommandCapture runs a sweatfile-declared command (`sh -c`) in dir,
 // devshell-scoped exactly like the lifecycle hooks (`direnv exec` when dir has
 // an .envrc), with extraEnv appended to the process env, and returns its
 // stdout. Unlike the hooks, the command's RESULT is its stdout — the
 // [auth].mint-command's token (FDR 0028) — so stdout is captured rather than
 // streamed; stderr is folded into the error on failure.
-func RunCommandCapture(ctx context.Context, dir, cmd string, extraEnv []string) (string, error) {
-	script := stripEmptyLines(cmd)
+func CommandCapture(ctx context.Context, dir, cmd string, extraEnv []string) (string, error) {
+	script := sweatfile.NormalizeCommand(cmd)
 	if script == "" {
 		return "", errors.New("empty command")
 	}
 	argv := []string{"sh", "-c", script}
-	if worktreeHasEnvrc(dir) {
+	if direnv.HasEnvrc(dir) {
 		if direnvPath, ok := direnv.Resolve(); ok {
 			argv = direnv.WrapExec(direnvPath, dir, argv)
 		}
@@ -641,90 +457,4 @@ func RunCommandCapture(ctx context.Context, dir, cmd string, extraEnv []string) 
 		return "", err
 	}
 	return stdout.String(), nil
-}
-
-func stripEmptyLines(s string) string {
-	var lines []string
-	for _, line := range strings.Split(s, "\n") {
-		if strings.TrimSpace(line) != "" {
-			lines = append(lines, line)
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
-func ApplyClaudeSettings(worktreePath string, sweatfile Sweatfile) error {
-	settingsPath := filepath.Join(
-		worktreePath,
-		".claude",
-		"settings.local.json",
-	)
-
-	doc := make(map[string]any)
-
-	permsMap, _ := doc["permissions"].(map[string]any)
-
-	if permsMap == nil {
-		permsMap = make(map[string]any)
-	}
-
-	var allRules []string
-	if sweatfile.Claude != nil {
-		allRules = append(allRules, sweatfile.Claude.Allow...)
-	}
-
-	// Edit(path) covers every file-editing tool (Read/Edit/Write/MultiEdit/
-	// NotebookEdit); a path-scoped Write(...) rule is redundant and newer
-	// Claude Code rejects it at startup with a validation warning.
-	allRules = append(
-		allRules,
-		fmt.Sprintf("Read(%s/*)", worktreePath),
-		fmt.Sprintf("Edit(%s/*)", worktreePath),
-	)
-
-	permsMap["defaultMode"] = "acceptEdits"
-	permsMap["allow"] = allRules
-
-	doc["permissions"] = permsMap
-
-	// Auto-approve any user-declared MCP servers from the sweatfile's
-	// effective allow-list (sweatfile [[mcps]] entries plus allowed-mcps).
-	// The spinclass MCP server itself is loaded via the clown plugin and
-	// does not need a session-local entry here.
-	var enabledMCPs []string
-	seen := map[string]bool{}
-	for _, name := range sweatfile.EffectiveAllowedMCPs() {
-		if !seen[name] {
-			seen[name] = true
-			enabledMCPs = append(enabledMCPs, name)
-		}
-	}
-	if len(enabledMCPs) > 0 {
-		doc["enabledMcpjsonServers"] = enabledMCPs
-	}
-
-	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(doc, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	if err := os.WriteFile(settingsPath, append(data, '\n'), 0o644); err != nil {
-		return err
-	}
-
-	// Create .spinclass/ directory for spinclass-owned data (tool-use log,
-	// settings snapshot) separate from Claude Code's .claude/ directory.
-	spinclassDir := filepath.Join(worktreePath, ".spinclass")
-	if err := os.MkdirAll(spinclassDir, 0o755); err != nil {
-		return err
-	}
-
-	// Write a snapshot so that `perms review` can diff against the baseline
-	// and only surface rules added during the session.
-	snapshotPath := filepath.Join(spinclassDir, ".settings-snapshot.json")
-	return os.WriteFile(snapshotPath, append(data, '\n'), 0o644)
 }

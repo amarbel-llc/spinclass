@@ -10,10 +10,21 @@
 package direnv
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 
 	"code.linenisgreat.com/spinclass/internal/embeds"
 )
+
+// HasEnvrc reports whether dir has a regular .envrc file — the precondition
+// every caller uses before devshell-scoping a command via WrapExec. spinclass
+// writes one (internal/apply) whenever direnv resolves; gating on its presence
+// keeps the bare `sh -c` path for non-direnv repos.
+func HasEnvrc(dir string) bool {
+	info, err := os.Stat(filepath.Join(dir, ".envrc"))
+	return err == nil && info.Mode().IsRegular()
+}
 
 // Resolve returns the absolute path to the direnv binary, preferring the
 // build-time pin (from `lib.mkSpinclass`) over a PATH lookup. Returns

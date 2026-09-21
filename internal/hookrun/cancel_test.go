@@ -1,4 +1,4 @@
-package sweatfile_test
+package hookrun_test
 
 import (
 	"bytes"
@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
 	"time"
 
-	. "code.linenisgreat.com/spinclass/internal/sweatfile"
+	. "code.linenisgreat.com/spinclass/internal/hookrun"
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 // Cancelling a hook must tear down its CHILDREN, not merely stop waiting on
@@ -30,7 +30,7 @@ import (
 //
 //  1. the call returns promptly, and
 //  2. the CHILD is actually gone — not merely abandoned still running.
-func TestRunPreMergeHookCancelTearsDownChildren(t *testing.T) {
+func TestPreMergeCancelTearsDownChildren(t *testing.T) {
 	dir := t.TempDir()
 	childPID := filepath.Join(dir, "child.pid")
 	started := filepath.Join(dir, "started")
@@ -53,12 +53,12 @@ touch %s
 wait $child
 `, childPID, started)
 
-	sf := Sweatfile{Hooks: &Hooks{PreMerge: sptr(script)}}
+	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreMerge: sptr(script)}}
 	ctx, cancel := context.WithCancel(context.Background())
 
 	var buf bytes.Buffer
 	done := make(chan error, 1)
-	go func() { done <- sf.RunPreMergeHookContext(ctx, dir, &buf) }()
+	go func() { done <- PreMergeContext(ctx, sf, dir, &buf) }()
 
 	waitFor(t, started, 30*time.Second, "hook never started")
 	pid := readPID(t, childPID)
@@ -88,18 +88,18 @@ wait $child
 // A hook that swallows SIGTERM must still not wedge the cancel forever: the
 // WaitDelay escalation closes its pipes and SIGKILLs it. This is the residual
 // path the doc comment calls out, so pin that it terminates rather than hangs.
-func TestRunPreMergeHookCancelEscalatesPastIgnoredSIGTERM(t *testing.T) {
+func TestPreMergeCancelEscalatesPastIgnoredSIGTERM(t *testing.T) {
 	dir := t.TempDir()
 	started := filepath.Join(dir, "started")
 
-	sf := Sweatfile{Hooks: &Hooks{PreMerge: sptr(fmt.Sprintf(
+	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreMerge: sptr(fmt.Sprintf(
 		"trap '' TERM\ntouch %s\nsleep 600\n", started,
 	))}}
 	ctx, cancel := context.WithCancel(context.Background())
 
 	var buf bytes.Buffer
 	done := make(chan error, 1)
-	go func() { done <- sf.RunPreMergeHookContext(ctx, dir, &buf) }()
+	go func() { done <- PreMergeContext(ctx, sf, dir, &buf) }()
 
 	waitFor(t, started, 30*time.Second, "hook never started")
 	cancel()
@@ -139,11 +139,4 @@ func readPID(t *testing.T, path string) int {
 		t.Fatalf("unparseable child pid %q: %v", data, err)
 	}
 	return pid
-}
-
-// processAlive reports whether pid exists. Signal 0 performs the permission
-// and existence checks without delivering anything. A zombie still counts as
-// alive here, which only makes the assertion stricter.
-func processAlive(pid int) bool {
-	return syscall.Kill(pid, 0) == nil
 }

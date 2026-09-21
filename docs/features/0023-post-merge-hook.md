@@ -195,7 +195,7 @@ The redirects are **load-bearing**. spinclass captures hook output through a
 pipe and `cmd.Wait()` blocks until every holder of its write end closes; a
 detached child inheriting that pipe keeps it open, so the hook — and the lock
 — blocks for the child's full duration regardless of the `&`. Measured, not
-assumed: `TestRunPostMergeHookContextDetachedChildOutlivesHook` asserts the
+assumed: `TestPostMergeDetachedChildOutlivesHook` (internal/hookrun) asserts the
 hook returns in <500ms and the child still completes afterwards, and was
 confirmed to fail (blocking the full child duration) with the redirects
 removed.
@@ -274,10 +274,11 @@ and when the deploy fails — note the merge still succeeds:
 - Code: `internal/merge/merge.go` (`runPostMergePhase`, and its call sites in
   `FinishMerge` / `finishMergeUnqueued` / `MergeImplicit`),
   `internal/sweatfile/sweatfile.go` (`PostMergeHookCommand`,
-  `PostMergeDisabled`, `PostMergeActive`), `internal/sweatfile/apply.go`
-  (`RunPostMergeHookContext`, `runHookInDirEnv`),
+  `PostMergeDisabled`, `PostMergeActive`), `internal/hookrun/hookrun.go`
+  (`PostMerge`, `PostMergeWithCap`, `runHookInDirEnv` — the runner split out
+  of the schema package in #309),
   `internal/merge/post_merge_phase_test.go`,
-  `internal/sweatfile/postmerge_test.go`.
+  `internal/hookrun/postmerge_test.go`.
 - Related FDRs: [FDR-0022](0022-per-repo-merge-queue.md) (the lock this hook
   runs under), [FDR-0018](0018-pre-merge-repair-phase.md) (the phase
   shape this mirrors), [FDR-0013](0013-isolated-build-worktree.md) (the

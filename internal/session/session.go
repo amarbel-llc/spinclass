@@ -15,8 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/sessionlog"
-	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 
 // Credential is State.Credential: the mint/revoke record of a session's forge
@@ -544,7 +544,7 @@ func FindImplicitAtCwd(cwd string) (*State, string, error) {
 	// more there. DetectRepo respects GIT_CEILING_DIRECTORIES and errors on a
 	// non-git dir (the legitimate not-a-session case), which we treat as
 	// "nothing here" rather than propagate.
-	root, derr := worktree.DetectRepo(cwd)
+	root, derr := git.DetectRepo(cwd)
 	if derr != nil || filepath.Clean(root) == filepath.Clean(cwd) {
 		return nil, "", nil
 	}

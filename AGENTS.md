@@ -67,9 +67,10 @@ Cheap per-package checks are fine: `just debug-go-test <dir>`.
   relative → from repo root, absolute → as-is.
 - **Sweatfile config** (`internal/sweatfile/` + `internal/sweatfileio/`):
   hierarchical TOML, merged global (`~/.config/spinclass/sweatfile`) → parent
-  dirs → repo. `sweatfile` holds the structs, `MergeWith`, `GetDefault`,
-  `Apply`, and the tommy-generated codec (`sweatfile_tommy.go`); `sweatfileio`
-  holds the decode/IO consumers (`Parse`/`Load`/`Save`/`LoadHierarchy`) — split
+  dirs → repo. `sweatfile` is the pure schema (structs, `MergeWith`,
+  `GetDefault`, accessors, tommy codec; no intra-module imports);
+  `hookrun` runs hooks, `apply` sets up a worktree (#309); `sweatfileio`
+  holds the decode/IO consumers (`Parse`/`Load`) — split
   so codegen can regenerate the codec package cleanly (dodder codegen-isolation
   pattern, tommy #93). Config surface is documented in `spinclass-sweatfile(5)`.
 - **Merge/Pull/Clean** (`internal/merge/`, `internal/pull/`, `internal/clean/`):
@@ -327,7 +328,7 @@ subcommand is always available.
   session its own forge token so pushes never ride the inherited ssh-agent.
   `auth.Mint` runs on the `shop.createWorktree` funnel right after setup (fatal
   on failure — the half-built worktree is torn down): runs the command
-  devshell-scoped in the worktree (`sweatfile.RunCommandCapture`) with the
+  devshell-scoped in the worktree (`hookrun.CommandCapture`) with the
   `SPINCLASS_*` identity env + `SPINCLASS_FORGE_HOST`/`_FORGE_REPO` (parsed
   from the CONFIGURED `remote.origin.url` — `auth.ParseForgeRemote`; never
   `git remote get-url`, which applies insteadOf), writes the stdout token as the
@@ -335,7 +336,7 @@ subcommand is always available.
   (Forgejo ignores the username when the password is a token), and injects
   worktree-scoped config (`auth.Inject`: `credential.helper = store --file=…` +
   `url.https://<host>/.insteadOf = <origin's ssh prefix>`; guarded by
-  `sweatfile.CommonConfigHasWorktreeOverride`). The mint is recorded as
+  `git.CommonConfigHasWorktreeOverride`). The mint is recorded as
   `session.State.Credential` (`session.Write` carries it forward; `session.
   UpdateCredential` stamps live state OR a tombstone). `auth.MirrorInto` wires
   the FDR 0029 landing worktree before the push; `merge.pullDefault` replaces
@@ -420,7 +421,7 @@ subcommand is always available.
   (skipped if HEAD is pushed or tree dirty). spinclass's own sweatfile has
   **retired** this in favour of the per-commit hook below.
 - **Per-commit repair hook** (FDR 0019, #183, #267): `[hooks].pre-commit`
-  installs a per-worktree git pre-commit hook (`internal/sweatfile/precommit.go`)
+  installs a per-worktree git pre-commit hook (`internal/apply/precommit.go`)
   so drift is repaired at authoring time. Canonical value is the store-pinned
   wrapper **`conformist-pre-commit`** (not a bare `conformist --staged` —
   conformist#51). `.spinclass/hooks` (via `core.hooksPath`) is a composing
@@ -435,20 +436,20 @@ subcommand is always available.
 - **Inactivity watchdog**: `[hooks].inactivity-timeout` (Go duration; unset =
   off) bounds how long the pre-merge hook may go silent. Covers
   merge/check/`sc check` + async twins (all funnel through
-  `RunPreMergeHookContext`). Distinct error message vs `session-job-cancel`.
-- **Hook cancellation** (#188, `sweatfile.runHookInDirEnv`): `cmd.Cancel` is
+  `hookrun.PreMergeInDir`). Distinct error message vs `session-job-cancel`.
+- **Hook cancellation** (#188, `hookrun.runHookInDirEnv`): `cmd.Cancel` is
   **SIGTERM** not SIGKILL, so a cancelled hook can tear down its own children
   (exec collapses the argv, so SIGKILL orphaned the `nix` below `just` still
   holding the inherited pipe — `Wait` blocks until every pipe holder closes it).
   `cancelGrace` (10s) escalates to SIGKILL. Deliberately **no `Setpgid`**: a group
   kill would reap the detached children FDR 0023 sanctions.
 - **Pre-merge hook systemd scope** (#25, ringmaster#12/RFC-0016, `internal/clown`
-  + `sweatfile.runHookInDirEnv`): to backstop the no-`Setpgid` residual (a hook
+  + `hookrun.runHookInDirEnv`): to backstop the no-`Setpgid` residual (a hook
   swallowing SIGTERM orphans descendants), the pre-merge hook runs in a transient
   systemd scope — `clown.ScopeArgv(jobID)` prepends `systemd-run --user --scope`
   (outermost), and cancel calls `clown.ScopeStop` to force-kill the whole cgroup
   (ringmaster#16 sets `TimeoutStopSec=3s` + a SIGKILL `systemctl kill`, so a
-  SIGTERM-ignoring subtree dies within the ~10s ctx; `TestRunPreMergeHookScope
+  SIGTERM-ignoring subtree dies within the ~10s ctx; `TestPreMergeScope
   ReapsSubtreeOnCancel` guards it). Scopes **only** the pre-merge hook (job id via
   the `clown.WithJobID` ctx value; post-merge passes `""` so its FDR-0023 detached
   children survive). Availability-gated by `jobwake.ScopeArgv`; unavailable ⇒ bare

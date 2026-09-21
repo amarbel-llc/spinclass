@@ -224,7 +224,7 @@ the `MergeImplicit` twins, the queued-merge closure, `runPostMergePhase`).
 disables, positive is the cap. `EffectiveTimeout(sf)` resolves arg > sweatfile >
 default **once**, in `runPostMergePhase`, and that single value is what both the
 named-target path (the shared `context.WithDeadline`) and the legacy string path
-(`RunPostMergeHookWithCap`) enforce — the number that is advertised is the
+(`hookrun.PostMergeWithCap`) enforce — the number that is advertised is the
 number that kills. No ceiling is deliberate: the cap exists to bound a *wedge*
 (#246), and a caller asking to wait longer is saying this is not one. The
 sweatfile field, the MCP parameter, `sc merge --post-merge-timeout` and
@@ -425,7 +425,8 @@ A docs-only merge deploys nothing:
   (schema-version indicator — coordinate on config-shape changes).
 - Code: `internal/sweatfile/sweatfile.go` (`PostMergeTarget`, `PostMerge` field,
   `ActivePostMergeTargets`, `PostMergePhaseActive`, `ParsePostMergeTimeout`),
-  `internal/sweatfile/apply.go` (`PostMergeTarget.Run`, `RunPostMergeHookWithCap`),
+  `internal/hookrun/hookrun.go` (`Target`, `PostMergeWithCap` — split out of
+  the schema package in #309),
   `internal/sweatfile/hierarchy.go` (dedup-by-name merge),
   `internal/merge/postmerge_options.go` (`PostMergeOptions`, `EffectiveTimeout`,
   `PostMergeFacts`/`PostMergeEnv`), `internal/merge/merge.go`

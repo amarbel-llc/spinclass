@@ -21,6 +21,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/check"
 	"code.linenisgreat.com/spinclass/internal/executor"
 	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/hookrun"
 	"code.linenisgreat.com/spinclass/internal/mergelock"
 	"code.linenisgreat.com/spinclass/internal/present"
 	"code.linenisgreat.com/spinclass/internal/session"
@@ -391,7 +392,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	// Periodic wait heartbeats go only to activity (the async job log): test
 	// points are one-shot, so the stream instead gets a single post-acquire
 	// summary point. The [hooks].inactivity-timeout watchdog wraps only the
-	// hook subprocess (sweatfile.RunPreMergeHookInDir), so time spent queued
+	// hook subprocess (hookrun.PreMergeInDir), so time spent queued
 	// here is naturally exempt from it.
 	var (
 		waited     bool
@@ -1149,7 +1150,7 @@ func runPostMergePhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStr
 		sink = io.MultiWriter(&out, activity)
 	}
 	label := "post-merge " + branch + " (" + shortSha(landedSha) + ")"
-	if hookErr := hierarchy.Merged.RunPostMergeHookWithCap(ctx, runDir, env, phaseCap, sink); hookErr != nil {
+	if hookErr := hookrun.PostMergeWithCap(ctx, hierarchy.Merged, runDir, env, phaseCap, sink); hookErr != nil {
 		diag := map[string]any{
 			"severity": "warn",
 			"message": fmt.Sprintf(
@@ -1244,7 +1245,7 @@ func runNamedPostMergeTargets(ctx context.Context, rep *crap.Reporter, active []
 			tgtEnv = append(tgtEnv, env...)
 			tgtEnv = append(tgtEnv, "SPINCLASS_POST_MERGE_TARGET="+tgt.Name)
 
-			verdict, runErr := tgt.Run(phaseCtx, runDir, tgtEnv, sink)
+			verdict, runErr := hookrun.Target(phaseCtx, tgt, runDir, tgtEnv, sink)
 			// Snapshot the deadline/cancel state now, before a sibling's later
 			// kill can move phaseCtx.Err out from under a genuine failure.
 			timedOut := runErr != nil && errors.Is(phaseCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
@@ -1390,7 +1391,7 @@ func runRepairPhase(ts *crap.TestStream, hierarchy sweatfile.Hierarchy, wtPath, 
 	sha0, _ := git.RevParse(wtPath, "HEAD")
 
 	var out bytes.Buffer
-	if hookErr := hierarchy.Merged.RunRepairHookContext(context.Background(), wtPath, &out); hookErr != nil {
+	if hookErr := hookrun.Repair(context.Background(), hierarchy.Merged, wtPath, &out); hookErr != nil {
 		return failStep(ts, "repair "+branch, fmt.Errorf("repair hook failed: %w", hookErr), out.String())
 	}
 
