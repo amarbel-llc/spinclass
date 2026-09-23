@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -54,46 +53,7 @@ func generateArtifacts(app *command.App, outDir string) error {
 	if err := app.GenerateManpages(outDir); err != nil {
 		return err
 	}
-	if err := installExtraManpages(app, outDir); err != nil {
-		return err
-	}
 	return app.GenerateCompletions(outDir)
-}
-
-// installExtraManpages reproduces the unexported InstallExtraManpages
-// from libs/go-mcp/command v0.0.8 so we can compose Generate* steps
-// without bumping the dependency.
-func installExtraManpages(app *command.App, dir string) error {
-	for i, mf := range app.ExtraManpages {
-		if mf.Source == nil {
-			return fmt.Errorf("ExtraManpages[%d]: Source is nil", i)
-		}
-		if mf.Path == "" {
-			return fmt.Errorf("ExtraManpages[%d]: Path is empty", i)
-		}
-		if mf.Section <= 0 {
-			return fmt.Errorf("ExtraManpages[%d]: Section must be > 0", i)
-		}
-		if mf.Name == "" {
-			return fmt.Errorf("ExtraManpages[%d]: Name is empty", i)
-		}
-
-		data, err := fs.ReadFile(mf.Source, mf.Path)
-		if err != nil {
-			return fmt.Errorf("ExtraManpages[%d]: reading %s: %w", i, mf.Path, err)
-		}
-
-		manDir := filepath.Join(dir, "share", "man", fmt.Sprintf("man%d", mf.Section))
-		if err := os.MkdirAll(manDir, 0o755); err != nil {
-			return fmt.Errorf("ExtraManpages[%d]: creating %s: %w", i, manDir, err)
-		}
-
-		dst := filepath.Join(manDir, mf.Name)
-		if err := os.WriteFile(dst, data, 0o644); err != nil {
-			return fmt.Errorf("ExtraManpages[%d]: writing %s: %w", i, dst, err)
-		}
-	}
-	return nil
 }
 
 func registerGenerateArtifactsCommand(app *command.App) {

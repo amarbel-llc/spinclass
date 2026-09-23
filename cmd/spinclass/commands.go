@@ -1,15 +1,11 @@
 package main
 
 import (
-	"embed"
 	"log/slog"
 	"os"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 )
-
-//go:embed doc/*
-var extraManpages embed.FS
 
 // version and commit are set at link time via -ldflags
 // "-X main.version=... -X main.commit=...", auto-injected by
@@ -42,32 +38,8 @@ func buildApp() *command.App {
 	app.PluginAuthor = "amarbel-llc"
 	app.PluginDescription = "Git worktree session manager with sweatfile-driven configuration"
 	app.MCPArgs = []string{"serve"}
-	app.ExtraManpages = []command.ManpageFile{
-		{
-			Source:  extraManpages,
-			Path:    "doc/spinclass-start-commands.7",
-			Section: 7,
-			Name:    "spinclass-start-commands.7",
-		},
-		{
-			Source:  extraManpages,
-			Path:    "doc/spinclass-sweatfile.5",
-			Section: 5,
-			Name:    "spinclass-sweatfile.5",
-		},
-		{
-			Source:  extraManpages,
-			Path:    "doc/spinclass-build-pins.7",
-			Section: 7,
-			Name:    "spinclass-build-pins.7",
-		},
-		{
-			Source:  extraManpages,
-			Path:    "doc/spinclass-local-default-ref.7",
-			Section: 7,
-			Name:    "spinclass-local-default-ref.7",
-		},
-	}
+	// Hand-written section 5/7 pages are NOT embedded here: they live as
+	// doc/*.N.scd and the flake compiles them with scdoc (spinclass#313).
 
 	app.Params = []command.Param{
 		{

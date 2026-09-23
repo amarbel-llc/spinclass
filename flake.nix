@@ -304,6 +304,27 @@
           };
         };
 
+        # Hand-written section 5/7 manpages, compiled from doc/*.N.scd with
+        # scdoc (eng-manpages(7), spinclass#313). Section 1 stays Go codegen
+        # (`generate-artifacts`); mkSpinclass's postInstall copies these in
+        # beside it, so the package's share/man is complete on its own.
+        spinclassDoc = pkgs.stdenvNoCC.mkDerivation {
+          pname = "spinclass-doc";
+          version = spinclassVersion;
+          src = ./doc;
+          nativeBuildInputs = [ pkgs.scdoc ];
+          dontUnpack = true;
+          dontBuild = true;
+          installPhase = ''
+            for f in $src/*.scd; do
+              page=$(basename "$f" .scd)
+              section=''${page##*.}
+              mkdir -p "$out/share/man/man$section"
+              scdoc < "$f" > "$out/share/man/man$section/$page"
+            done
+          '';
+        };
+
         # mkSpinclass builds the FULL spinclass package (binary + generated
         # artifacts + plugin manifests + `sc` symlink) on either backend,
         # selected by `strategy` via buildGoAuto: "ci"/"bga" =
@@ -401,6 +422,9 @@
             postInstall = ''
               $out/bin/spinclass generate-artifacts $out
               ln -s spinclass $out/bin/sc
+
+              mkdir -p "$out/share/man"
+              cp -r --no-preserve=mode ${spinclassDoc}/share/man/. "$out/share/man/"
 
               pluginShare="$out/share/purse-first/spinclass"
               mkdir -p "$pluginShare/.claude-plugin" \
