@@ -312,9 +312,8 @@ subcommand is always available.
   (created at the pin, rebased there only if the tip moved): the landing is
   `git push <remote> <landingSha>:refs/heads/<default>` run from that worktree
   (`git.PushRef`) — the ff check is the remote's own, so a refused push (stale
-  tip, dropped credential) moves NOTHING. `merge <branch>` IS the push. Branch
-  delete is forced; post-merge runs in the landing worktree. Consumers reading
-  the local default ref use
+  tip, dropped credential) moves NOTHING. `merge <branch>` IS the push.
+  Consumers reading the local default ref use
   `git.CommitsUnintegrated` (integrated = reachable from the local default OR
   its remote-tracking ref): `close.RunResolved`, `clean.scanWorktrees`,
   `shop.closeShop`'s auto-close gate. This is the injection surface FDR 0028's
@@ -324,7 +323,7 @@ subcommand is always available.
   tracking ref), never local `<default>`; only the fetch is fatal. After the
   push, `reportLocalAdvance` ff's local once (under the lock) or emits a
   `# SKIP` (`merge LANDED on …`, lifted into the async wake). Local-only =
-  `landing.Self` (landing IS the fatal ff). Metrics: `internal/statsd`.
+  `landing.Self`. Metrics: `internal/statsd`.
 - **Per-session forge push credentials** (FDR 0028, #285, `internal/auth`): a
   sweatfile `[auth]` table (`mint-command` / `revoke-command`) gives a worktree
   session its own forge token so pushes never ride the inherited ssh-agent.
