@@ -5,8 +5,8 @@ promotion-criteria: |
   experimental -> testing: a real Claude agent started in a repo's main
   checkout (a) appears in `sc list` with a `main` marker, (b) is addressable
   via cross-session chat (`chat-list-sessions` shows it; a directed `chat-send`
-  reaches it), and (c) `merge-this-session` runs the pre-merge hook against HEAD
-  and pushes the default branch with the push as a distinct TAP step. Plus one
+  reaches it), and (c) `merge-this-session` from it is refused with the #317
+  message (implicit merge was removed; see the Revised note). Plus one
   observation that `[hooks].disable-implicit-sessions = true` makes SessionStart
   a no-op.
   testing -> accepted: ~2 weeks of real main-checkout sessions across the repos
@@ -17,6 +17,19 @@ promotion-criteria: |
 ---
 
 # Implicit sessions (main-checkout agents)
+
+> **Revised 2026-09-23 (spinclass#317): implicit merge removed.** The merge
+> path described below (`merge.MergeImplicit` — hook then bare `git push`) was
+> a second landing pipeline without the worktree path's guarantees: no merge
+> lock, no landing target (#315), no exact-sha push (#298), no local-advance
+> reporting or metrics (#295/#314). Rather than unify it (#299), it was
+> removed: `merge-this-session(-async)` and `sc merge` from a live implicit
+> session now refuse (`merge.ErrImplicitMergeUnsupported`) before any
+> attestation, hook, or push. Everything else here — the hooks, state files,
+> `sc list` rows, co-active lines, `sc close`, and `sc check` /
+> `check-this-session` — stands. How a main checkout could become a real,
+> mergeable session is explored in spinclass#318. The merge sections below are
+> kept as a historical record.
 
 > **Post-cutover note (2026-06-14):** cross-session chat left spinclass
 > entirely and is now a clown construct — see

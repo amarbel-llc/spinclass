@@ -10,8 +10,8 @@ import (
 // PostMergeOptions is the per-merge configuration of the post-merge phase
 // (FDR 0023 / FDR 0026): what a single merge call may vary about the phase
 // without touching the sweatfile. It travels one hop at a time through
-// Run → Resolved/ResolvedContext → PrepareMerge/FinishMerge (and the
-// MergeImplicit twins) → runPostMergePhase, exactly where the bare targets
+// Run → Resolved/ResolvedContext → PrepareMerge/FinishMerge →
+// runPostMergePhase, exactly where the bare targets
 // selection used to.
 type PostMergeOptions struct {
 	// Targets selects which named [[post-merge]] targets deploy: nil = all

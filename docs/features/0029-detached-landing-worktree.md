@@ -88,9 +88,9 @@ landing lock:
 
 `gitSync=false` (local-only) merges fast-forward the local default branch
 (through whichever worktree has it checked out): there, the local ref IS the
-landing. Implicit main-checkout merges (FDR 0014) and the
-`[hooks].disable-merge-queue` rollback path are unchanged (unifying them is
-spinclass#299).
+landing. The `[hooks].disable-merge-queue` rollback path is unchanged.
+Implicit main-checkout merges (FDR 0014) were removed rather than unified
+(spinclass#317, superseding #299).
 
 **Consumers that read the local default ref** were fixed to count a commit as
 integrated when it is reachable from the local default branch OR its
@@ -131,8 +131,9 @@ worktree exactly as before; a re-merge is a plain retry.
 
 ## Limitations
 
-- **Worktree-session gitSync merges only.** Local-only merges and implicit
-  main-checkout sessions keep landing in the root by design; the
+- **Worktree-session gitSync merges only.** Local-only merges keep landing
+  in the root by design (implicit main-checkout merges no longer exist,
+  #317); the
   `disable-merge-queue` rollback path keeps the pre-#235 ff-then-push shape
   verbatim (it is a rollback knob, not a second maintained landing path).
 - **The root's local default ref can still lag** when the post-push advance

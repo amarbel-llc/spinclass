@@ -825,168 +825,6 @@ func TestResolvedShortCircuitsNoOpMerge(t *testing.T) {
 	}
 }
 
-// TestMergeImplicitRunsHookThenPushesNoRebase verifies the implicit-session
-// merge path: the work is already on the default branch (a main checkout, not
-// a feature worktree), so MergeImplicit runs the pre-merge hook against HEAD
-// and pushes the default branch — with no rebase and no ff-merge. The hook is
-// proven to run via a marker file it touches; the push is proven by the bare
-// upstream's master advancing to the checkout's HEAD.
-func TestMergeImplicitRunsHookThenPushesNoRebase(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("GIT_CEILING_DIRECTORIES", root)
-
-	gitConfigDir := filepath.Join(root, "gitconfig")
-	if err := os.MkdirAll(gitConfigDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(gitConfigDir, "config"))
-	t.Setenv("HOME", root)
-
-	// Bare upstream (push target).
-	bare := filepath.Join(root, "upstream.git")
-	runGit(t, root, "init", "--bare", "-b", "master", bare)
-
-	// Clone into the "main checkout" on master, with origin tracking the bare.
-	checkout := filepath.Join(root, "checkout")
-	runGit(t, root, "clone", bare, checkout)
-	runGit(t, checkout, "config", "user.email", "test@test.com")
-	runGit(t, checkout, "config", "user.name", "Test")
-	if err := os.WriteFile(filepath.Join(checkout, "file.txt"), []byte("initial"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, checkout, "add", "file.txt")
-	runGit(t, checkout, "commit", "-m", "initial")
-	runGit(t, checkout, "push", "-u", "origin", "master")
-
-	// Sweatfile with a pre-merge hook that touches a marker — proves it ran.
-	marker := filepath.Join(root, "hook-ran.marker")
-	sweatfileBody := "[hooks]\npre-merge = \"touch " + marker + "\"\n"
-	if err := os.WriteFile(filepath.Join(checkout, "sweatfile"), []byte(sweatfileBody), 0o644); err != nil {
-		t.Fatalf("write sweatfile: %v", err)
-	}
-
-	// The "work already on the default branch": a new commit on master.
-	if err := os.WriteFile(filepath.Join(checkout, "work.txt"), []byte("work"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, checkout, "add", "work.txt")
-	runGit(t, checkout, "commit", "-m", "work on master")
-
-	var buf bytes.Buffer
-	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
-	ts := rep.TestStream(0)
-	links, err := MergeImplicit(context.Background(), rep, ts, checkout, checkout, "master", nil, PostMergeOptions{})
-	ts.Finish()
-	if err != nil {
-		t.Fatalf("MergeImplicit: %v\nrecords:\n%s", err, buf.String())
-	}
-	_ = links
-
-	// Hook ran: marker exists.
-	if _, statErr := os.Stat(marker); statErr != nil {
-		t.Errorf("expected pre-merge hook marker %s to exist, stat err: %v\nrecords:\n%s", marker, statErr, buf.String())
-	}
-
-	// Push landed: bare upstream's master == checkout HEAD.
-	bareMaster := runGit(t, bare, "rev-parse", "master")
-	checkoutHead := runGit(t, checkout, "rev-parse", "HEAD")
-	if bareMaster != checkoutHead {
-		t.Errorf("push did not land: bare master = %s, checkout HEAD = %s", bareMaster, checkoutHead)
-	}
-
-	recs := decodeRecords(t, buf.Bytes())
-	tests := testRecords(recs)
-	pushed := false
-	for _, tr := range tests {
-		if tr.Description == "push master" && tr.OK {
-			pushed = true
-		}
-		if strings.Contains(tr.Description, "rebase") {
-			t.Errorf("did not expect any rebase in implicit merge, got: %+v", tr)
-		}
-	}
-	if !pushed {
-		t.Errorf("expected passing 'push master' test record, got: %+v", tests)
-	}
-}
-
-// TestMergeImplicitDisabledByMergeFlag verifies the disable-merge gate short-
-// circuits MergeImplicit before any push: an error mentioning disable-merge,
-// and the bare upstream's master left untouched.
-func TestMergeImplicitDisabledByMergeFlag(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("GIT_CEILING_DIRECTORIES", root)
-
-	gitConfigDir := filepath.Join(root, "gitconfig")
-	if err := os.MkdirAll(gitConfigDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(gitConfigDir, "config"))
-	t.Setenv("HOME", root)
-
-	bare := filepath.Join(root, "upstream.git")
-	runGit(t, root, "init", "--bare", "-b", "master", bare)
-
-	checkout := filepath.Join(root, "checkout")
-	runGit(t, root, "clone", bare, checkout)
-	runGit(t, checkout, "config", "user.email", "test@test.com")
-	runGit(t, checkout, "config", "user.name", "Test")
-	if err := os.WriteFile(filepath.Join(checkout, "file.txt"), []byte("initial"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, checkout, "add", "file.txt")
-	runGit(t, checkout, "commit", "-m", "initial")
-	runGit(t, checkout, "push", "-u", "origin", "master")
-
-	// Sweatfile disabling merge.
-	if err := os.WriteFile(filepath.Join(checkout, "sweatfile"), []byte("[hooks]\ndisable-merge = true\n"), 0o644); err != nil {
-		t.Fatalf("write sweatfile: %v", err)
-	}
-
-	// A new commit that is NOT yet on the upstream.
-	if err := os.WriteFile(filepath.Join(checkout, "work.txt"), []byte("work"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, checkout, "add", "work.txt")
-	runGit(t, checkout, "commit", "-m", "work on master")
-
-	bareMasterBefore := runGit(t, bare, "rev-parse", "master")
-
-	var buf bytes.Buffer
-	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
-	ts := rep.TestStream(0)
-	_, err := MergeImplicit(context.Background(), rep, ts, checkout, checkout, "master", nil, PostMergeOptions{})
-	ts.Finish()
-	if err == nil {
-		t.Fatalf("expected error when disable-merge is set, got nil\nrecords:\n%s", buf.String())
-	}
-	if !strings.Contains(err.Error(), "merge disabled") {
-		t.Errorf("expected 'merge disabled' in error, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "disable-merge") {
-		t.Errorf("expected 'disable-merge' in error, got: %v", err)
-	}
-
-	recs := decodeRecords(t, buf.Bytes())
-	tests := testRecords(recs)
-	if len(tests) != 1 || tests[0].OK {
-		t.Fatalf("expected exactly one failing test record, got: %+v", tests)
-	}
-	if msg, _ := tests[0].Diagnostic["message"].(string); !strings.Contains(msg, "disable-merge") {
-		t.Errorf("expected diagnostic message to mention 'disable-merge', got: %q", msg)
-	}
-	for _, tr := range tests {
-		if strings.Contains(tr.Description, "push") {
-			t.Errorf("did not expect any push step when merge is disabled, got: %+v", tr)
-		}
-	}
-
-	// No push happened: upstream master unchanged.
-	if bareMasterAfter := runGit(t, bare, "rev-parse", "master"); bareMasterAfter != bareMasterBefore {
-		t.Errorf("upstream master advanced despite disable-merge: before %s, after %s", bareMasterBefore, bareMasterAfter)
-	}
-}
-
 // writeActiveSessionState fabricates an on-disk ACTIVE session (state JSON +
 // central index entry under the test's XDG_STATE_HOME) for repoDir/branch at
 // wtPath, using this test process's PID so it resolves active.
@@ -1077,11 +915,10 @@ func TestPrepareMergeNoCoActivePointWhenNone(t *testing.T) {
 	}
 }
 
-// TestMergeImplicitEmitsCoActiveSessionsPoint (spinclass#238): the implicit
-// (main-checkout) merge path emits the co-active point too, listing worktree
-// sessions on the repo while excluding implicit sessions at the checkout
-// (indistinguishable from the one being merged).
-func TestMergeImplicitEmitsCoActiveSessionsPoint(t *testing.T) {
+// TestRunRefusesImplicitSession pins #317: `sc merge` with no target from a
+// main checkout holding a live implicit session is refused before anything
+// runs — no hook, no push, upstream untouched.
+func TestRunRefusesImplicitSession(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("GIT_CEILING_DIRECTORIES", root)
 
@@ -1106,9 +943,17 @@ func TestMergeImplicitEmitsCoActiveSessionsPoint(t *testing.T) {
 	runGit(t, checkout, "commit", "-m", "initial")
 	runGit(t, checkout, "push", "-u", "origin", "master")
 
-	// A co-active worktree session on the repo, plus an implicit session at
-	// the checkout (excluded — could be the one being merged).
-	writeActiveSessionState(t, checkout, filepath.Join(checkout, ".worktrees", "bright-olive"), "bright-olive")
+	marker := filepath.Join(root, "hook-ran.marker")
+	if err := os.WriteFile(filepath.Join(checkout, "sweatfile"), []byte("[hooks]\npre-merge = \"touch "+marker+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "work.txt"), []byte("work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, checkout, "add", "work.txt")
+	runGit(t, checkout, "commit", "-m", "work on master")
+	upstreamBefore := runGit(t, bare, "rev-parse", "master")
+
 	if err := session.WriteImplicit(session.State{
 		Kind:         session.KindImplicit,
 		PID:          os.Getpid(),
@@ -1121,16 +966,17 @@ func TestMergeImplicitEmitsCoActiveSessionsPoint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var buf bytes.Buffer
-	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
-	ts := rep.TestStream(0)
-	if _, err := MergeImplicit(context.Background(), rep, ts, checkout, checkout, "master", nil, PostMergeOptions{}); err != nil {
-		t.Fatalf("MergeImplicit: %v\n%s", err, buf.String())
+	t.Chdir(checkout)
+	err := Run(&mockExecutor{}, "ndjson", "", true, PostMergeOptions{})
+	if !errors.Is(err, ErrImplicitMergeUnsupported) {
+		t.Fatalf("Run from an implicit session = %v, want ErrImplicitMergeUnsupported", err)
 	}
-	ts.Finish()
-
-	tests := testRecords(decodeRecords(t, buf.Bytes()))
-	assertTestPoint(t, tests, 0, "1 co-active session on checkout: bright-olive", true)
+	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+		t.Error("the pre-merge hook ran on a refused implicit merge")
+	}
+	if got := runGit(t, bare, "rev-parse", "master"); got != upstreamBefore {
+		t.Errorf("upstream master moved to %s on a refused implicit merge", got)
+	}
 }
 
 func TestIsInsideSession(t *testing.T) {

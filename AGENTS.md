@@ -197,10 +197,9 @@ subcommand is always available.
   Does not attach — `sc resume` afterward reuses that path unmodified.
   `sc clean`'s merged-worktree removal does NOT capture a SHA (that content
   already lives in the default branch).
-- **Implicit-session merge** (FDR 0014): from a main-checkout session, merge
-  routes to `merge.MergeImplicit` — runs `[hooks].pre-merge` against HEAD then
-  `git push` (nothing to rebase). MCP path enforces the implicit attestation
-  gate; CLI is gate-free. `sc close` drops only `state-<rand>.json`.
+- **No implicit-session merge** (#317): merge from a main-checkout session
+  is refused (`merge.ErrImplicitMergeUnsupported`, before any gate/hook);
+  `sc check` still works. Bootstrapping one as a session: #318.
 - **`sc exec`** (`internal/sessionexec`): runs a util in a session worktree,
   devshell-scoped via `direnv exec`, with `SPINCLASS_*` identity env. No
   `--session` → auto-detect from cwd; util defaults to `$SHELL`. Explicit
@@ -418,8 +417,7 @@ subcommand is always available.
   `PrepareMerge` runs it in the **session worktree** before the pin to fold
   mechanical fixes into the merged commit (canonical
   `conformist --commit --amend --exit-zero-on-fix`; amend detected via HEAD-sha
-  delta). Merge-only; implicit merges run it
-  (skipped if HEAD is pushed or tree dirty). spinclass's own sweatfile has
+  delta). Merge-only. spinclass's own sweatfile has
   **retired** this in favour of the per-commit hook below.
 - **Per-commit repair hook** (FDR 0019, #183, #267): `[hooks].pre-commit`
   installs a per-worktree git pre-commit hook (`internal/apply/precommit.go`)

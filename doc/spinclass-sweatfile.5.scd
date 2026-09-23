@@ -371,12 +371,8 @@ does not export *WORKTREE*.
 	commit.
 
 	Repair is *merge-only* — *sc check* and *check-this-session* do not run
-	it. Implicit (main-checkout) sessions run it too, before the pre-merge
-	hook and push, but skip it (a skip point, not a failure) when their
-	*HEAD* is already reachable from a remote-tracking ref — amending it
-	would rewrite published history, which *conformist --amend* refuses —
-	or when the checkout has unresolved conflicts or uncommitted changes to
-	tracked files. Because the amend re-signs *HEAD*, a locked
+	it, and merging from an implicit (main-checkout) session is not
+	supported at all (spinclass#317). Because the amend re-signs *HEAD*, a locked
 	commit-signing agent fails repair (and thus the merge) rather than
 	producing an unsigned commit. A repair that amends before a later
 	verify failure leaves the amended commit on the session branch.

@@ -346,6 +346,12 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
 	}
 
+	// Refuse a main-checkout (implicit) session BEFORE the gate, so the refusal
+	// never consumes the attestation (#317).
+	if pre, _, pok, _ := resolveSession(cwd); pok && pre.implicit {
+		return command.TextErrorResult(merge.ErrImplicitMergeUnsupported.Error()), nil
+	}
+
 	gs, failMsg, ok, gitErr := resolveGatedSession(cwd)
 	if !ok {
 		return command.TextErrorResult(failMsg), nil
@@ -353,20 +359,6 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 	if gitErr != nil {
 		// Merge treats a git-resolution failure on the worktree path as fatal.
 		return command.TextErrorResult(gitErr.Error()), nil
-	}
-
-	if gs.implicit {
-		// Implicit (main-checkout) session: hook-then-push, no rebase.
-		var buf bytes.Buffer
-		rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "merge " + gs.branch, Source: "spinclass"})
-		ts := rep.TestStream(0)
-		blobLinks, mergeErr := merge.MergeImplicit(context.Background(), rep, ts, gs.repoPath, cwd, gs.branch, nil, pm)
-		ts.Finish()
-		text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
-		if mergeErr != nil && text == "" {
-			text = mergeErr.Error()
-		}
-		return buildHookResult(text, blobLinks, mergeErr), nil
 	}
 
 	defaultBranch := params.DefaultBranch
@@ -469,45 +461,13 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 		// Merge treats a git-resolution failure on the worktree path as fatal.
 		return command.TextErrorResult(gitErr.Error()), nil
 	}
-	if msg, gok := peekGate(gs, cwd); !gok {
-		return command.TextErrorResult(msg), nil
-	}
 	if gs.implicit {
-		// Implicit (main-checkout) session: repair-hook-push, no rebase, no landing
-		// lock — and no intra-session stacking (FDR 0025 scope). Refuse when busy
-		// WITHOUT consuming (D2); otherwise consume, run the prefix (gate + repair
-		// + pin) synchronously — as the worktree path does, so the repair amend
-		// is done before the agent can commit again — and the rest in the job
-		// goroutine.
-		if job.IsRunning(cwd) {
-			return jobAlreadyRunningResult(), nil
-		}
-		if msg, gok := consumeGate(gs, cwd); !gok {
-			return command.TextErrorResult(msg), nil
-		}
-		repoPath := gs.repoPath
-		branch := gs.branch
-		var buf bytes.Buffer
-		rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "merge " + branch, Source: "spinclass"})
-		ts := rep.TestStream(0)
-		pinnedSha, prepErr := merge.PrepareMergeImplicit(ts, repoPath, cwd, branch, pm)
-		if prepErr != nil {
-			ts.Finish()
-			text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
-			if text == "" {
-				text = prepErr.Error()
-			}
-			return buildHookResult(text, nil, prepErr), nil
-		}
-		return startSessionJob(cwd, job.KindMerge, gitSync, func(ctx context.Context, w io.Writer) (string, bool) {
-			_, mergeErr := merge.FinishMergeImplicit(ctx, rep, ts, repoPath, cwd, branch, pinnedSha, w, pm)
-			ts.Finish()
-			text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
-			if mergeErr != nil && text == "" {
-				text = mergeErr.Error()
-			}
-			return text, mergeErr != nil
-		}), nil
+		// Main-checkout merge is unsupported (#317); refused before any
+		// attestation peek or consume.
+		return command.TextErrorResult(merge.ErrImplicitMergeUnsupported.Error()), nil
+	}
+	if msg, gok := peekGate(gs); !gok {
+		return command.TextErrorResult(msg), nil
 	}
 	repoPath := gs.repoPath
 	branch := gs.branch
@@ -537,7 +497,7 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 		mergeQueueMu.Unlock()
 		return jobAlreadyRunningResult(), nil // refuse — no attestation consumed
 	}
-	if msg, gok := consumeGate(gs, cwd); !gok {
+	if msg, gok := consumeGate(gs); !gok {
 		mergeQueueMu.Unlock()
 		return command.TextErrorResult(msg), nil
 	}
@@ -763,25 +723,17 @@ func resolveSession(cwd string) (gs gatedSession, failMsg string, ok bool, gitEr
 	return gatedSession{implicit: true, repoPath: implicit.RepoPath, branch: implicit.Branch}, "", true, nil
 }
 
-// peekGate verifies a fresh pre-merge attestation exists for gs WITHOUT
-// consuming it (the non-destructive gate). Returns ("", true) when the gate is
-// dormant or satisfied; (failureText, false) when it refuses. cwd is the
-// implicit-session checkout path (ignored for worktree sessions).
-func peekGate(gs gatedSession, cwd string) (string, bool) {
+// peekGate verifies a fresh pre-merge attestation exists for the worktree
+// session gs WITHOUT consuming it (the non-destructive gate). Returns
+// ("", true) when the gate is dormant or satisfied; (failureText, false) when
+// it refuses. Merge-only, and merges from implicit sessions are refused before
+// the gate (#317).
+func peekGate(gs gatedSession) (string, bool) {
 	merged, ok := mergedSweatfileForCwd()
 	if !ok || len(merged.ActivePreMergeSkills()) == 0 {
 		return "", true
 	}
-	var (
-		gateOK bool
-		output string
-		err    error
-	)
-	if gs.implicit {
-		gateOK, output, err = attestation.PeekImplicit(merged, cwd)
-	} else {
-		gateOK, output, err = attestation.Peek(merged, gs.repoPath, gs.branch)
-	}
+	gateOK, output, err := attestation.Peek(merged, gs.repoPath, gs.branch)
 	if err != nil && !errors.Is(err, attestation.ErrAttestationRequired) {
 		return fmt.Sprintf("attestation gate error: %v", err), false
 	}
@@ -795,18 +747,12 @@ func peekGate(gs gatedSession, cwd string) (string, bool) {
 // called only once a merge is committed (dispatch or enqueue). Returns
 // ("", true) on success or a dormant gate; (errText, false) on a state write
 // failure. Peek first — a dormant gate or an already-clear buffer is a no-op.
-func consumeGate(gs gatedSession, cwd string) (string, bool) {
+func consumeGate(gs gatedSession) (string, bool) {
 	merged, ok := mergedSweatfileForCwd()
 	if !ok || len(merged.ActivePreMergeSkills()) == 0 {
 		return "", true
 	}
-	var err error
-	if gs.implicit {
-		err = attestation.ConsumeImplicit(merged, cwd)
-	} else {
-		err = attestation.Consume(merged, gs.repoPath, gs.branch)
-	}
-	if err != nil {
+	if err := attestation.Consume(merged, gs.repoPath, gs.branch); err != nil {
 		return fmt.Sprintf("attestation gate error: %v", err), false
 	}
 	return "", true

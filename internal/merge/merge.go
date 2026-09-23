@@ -53,18 +53,12 @@ func Run(execr executor.Executor, format string, target string, gitSync bool, pm
 		return err
 	}
 
-	// Implicit (main-checkout) session with no explicit target: hook-then-push,
-	// no rebase. Only a live implicit session at cwd routes here; otherwise we
-	// fall through to the normal worktree/target resolution below. The CLI is
-	// gate-free by design (see attestation.go package doc) — no attestation here.
+	// A live implicit (main-checkout) session at cwd with no explicit target is
+	// refused (#317): merging from a main checkout is unsupported. Without an
+	// implicit session we fall through to the normal worktree/target resolution.
 	if target == "" && !worktree.IsWorktree(cwd) {
 		if implicit, _, ferr := session.FindImplicitAtCwd(cwd); ferr == nil && implicit != nil {
-			return present.WithReporter(resolved, "merge "+implicit.Branch, os.Stdout, os.Stderr, func(rep *crap.Reporter) error {
-				ts := rep.TestStream(0)
-				defer ts.Finish()
-				_, mergeErr := MergeImplicit(context.Background(), rep, ts, implicit.RepoPath, cwd, implicit.Branch, nil, pm)
-				return mergeErr
-			})
+			return ErrImplicitMergeUnsupported
 		}
 	}
 
@@ -225,7 +219,7 @@ func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch s
 	// (so HEAD is an unpushed session commit conformist's --amend accepts) and
 	// before the pin (so the pin reads the post-repair HEAD). The rebase and that
 	// guard already establish repair's preconditions, so no skip check.
-	if rErr := preamble.repair(ts, wtPath, branch, nil); rErr != nil {
+	if rErr := preamble.repair(ts, wtPath, branch); rErr != nil {
 		return "", rErr
 	}
 
@@ -235,20 +229,18 @@ func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch s
 	return pinHead(ts, wtPath, branch)
 }
 
-// mergePreamble carries the sweatfile hierarchy loaded by loadAndGate into the
-// later prepare phases of both merge kinds (PrepareMerge, PrepareMergeImplicit).
+// mergePreamble carries the sweatfile hierarchy loaded by loadAndGate into
+// PrepareMerge's later phases.
 type mergePreamble struct {
 	hierarchy     sweatfile.Hierarchy
 	haveHierarchy bool
 }
 
-// loadAndGate is the shared head of both merge kinds: the co-active sessions
-// point, the sweatfile hierarchy load for dir, the disable-merge gate, and the
-// post-merge target validation. An unresolvable home or load failure degrades
-// gracefully — the gate and the later repair phase are skipped rather than
-// blocking the merge. Keeping this in one place is what stops the two merge
-// kinds' gating from drifting apart (parity_test.go enforces the observable
-// half).
+// loadAndGate is the head of a merge: the co-active sessions point, the
+// sweatfile hierarchy load for dir, the disable-merge gate, and the post-merge
+// target validation. An unresolvable home or load failure degrades gracefully —
+// the gate and the later repair phase are skipped rather than blocking the
+// merge.
 func loadAndGate(ts *crap.TestStream, repoPath, dir, branch string, postMergeTargets []string) (mergePreamble, error) {
 	emitCoActiveSessions(ts, repoPath, dir)
 
@@ -285,21 +277,11 @@ func loadAndGate(ts *crap.TestStream, repoPath, dir, branch string, postMergeTar
 	return p, nil
 }
 
-// repair runs the REPAIR phase (FDR 0018) in dir for both merge kinds. It is a
-// no-op when the hierarchy did not load or repair is inactive. skipReason, when
-// non-nil, is consulted only for an active repair: a non-empty reason emits a
-// skip point instead of running the amend — how a merge kind whose
-// preconditions are not guaranteed (implicitRepairSkipReason) degrades rather
-// than fails.
-func (p mergePreamble) repair(ts *crap.TestStream, dir, branch string, skipReason func(dir string) string) error {
+// repair runs the REPAIR phase (FDR 0018) in dir. It is a no-op when the
+// hierarchy did not load or repair is inactive.
+func (p mergePreamble) repair(ts *crap.TestStream, dir, branch string) error {
 	if !p.haveHierarchy || !p.hierarchy.Merged.RepairActive() {
 		return nil
-	}
-	if skipReason != nil {
-		if reason := skipReason(dir); reason != "" {
-			ts.Skip("repair "+branch, reason)
-			return nil
-		}
 	}
 	return runRepairPhase(ts, p.hierarchy, dir, branch)
 }
@@ -811,111 +793,18 @@ func revokeCredential(ts *crap.TestStream, repoPath, wtPath, branch string) {
 	ts.Ok(desc)
 }
 
-// MergeImplicit runs the merge path for a main-checkout (implicit) session:
-// the repair phase, the pre-merge hook against HEAD, then a push of the current
-// (default) branch. There is no rebase or ff-merge — the work is already on the
-// default branch. The push is surfaced as its own test point so it is never
-// silent. Mirrors PrepareMerge/FinishMerge's ts/failStep idioms; the caller owns
-// ts.Finish().
-//
-// For an implicit session repoPath == checkout == the main checkout (they are
-// the same dir): the hook runs with wtPath=checkout and the push is from
-// checkout. Both params are kept for clarity and signature symmetry with
-// FinishMerge even though they are equal.
-//
-// Unlike PrepareMerge/FinishMerge there is no gitSync parameter — push is
-// unconditional. For an implicit session the work is already on the default
-// branch, so there is nothing to conditionally sync; the push is always
-// performed.
-//
-// The hook's isolated build worktree lands under <repo>/.worktrees/ even for
-// a main checkout — check.resolveHookDir derives the parent from
-// git.CommonDir(wtPath), not filepath.Dir(wtPath) (#130).
-func MergeImplicit(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, checkout, branch string, activity io.Writer, pm PostMergeOptions) (blobLinks []check.BlobLink, err error) {
-	pinnedSha, prepErr := PrepareMergeImplicit(ts, repoPath, checkout, branch, pm)
-	if prepErr != nil {
-		return nil, prepErr
-	}
-	return FinishMergeImplicit(ctx, rep, ts, repoPath, checkout, branch, pinnedSha, activity, pm)
-}
-
-// PrepareMergeImplicit is the implicit-session counterpart of PrepareMerge: the
-// fast, checkout-touching prefix — the disable-merge gate, post-merge target
-// validation, the REPAIR phase (FDR 0018), and the pin of the post-repair HEAD
-// the hook verifies. The async merge tool runs it synchronously so the repair
-// amend has finished before the agent gets its job id back, exactly as on the
-// worktree path.
-func PrepareMergeImplicit(ts *crap.TestStream, repoPath, checkout, branch string, pm PostMergeOptions) (pinnedSha string, err error) {
-	preamble, gateErr := loadAndGate(ts, repoPath, checkout, branch, pm.Targets)
-	if gateErr != nil {
-		return "", gateErr
-	}
-
-	// REPAIR phase (FDR 0018), before the pin so the hook verifies — and the push
-	// publishes — the post-repair tree.
-	if rErr := preamble.repair(ts, checkout, branch, implicitRepairSkipReason); rErr != nil {
-		return "", rErr
-	}
-
-	// Pin HEAD; the hook verifies exactly this committed sha.
-	return pinHead(ts, checkout, branch)
-}
-
-// implicitRepairSkipReason returns why repair must not amend a main checkout's
-// HEAD, or "" when it may. On the worktree path the rebase guarantees a clean
-// tree and the nothing-to-merge guard guarantees an unpushed session HEAD; a
-// main checkout has neither, so repair (an amend) is skipped — never failed —
-// when:
-//
-//   - the index has unresolved conflicts or tracked files carry uncommitted
-//     edits: the formatter would stage and fold them into HEAD;
-//   - HEAD is already reachable from a remote-tracking ref (including the
-//     nothing-to-push case HEAD == origin/<branch>): the amend would rewrite
-//     published history, which `conformist --amend` refuses anyway.
-//
-// A skip degrades to exactly the pre-repair behavior (the gate verifies HEAD as
-// committed). The pushed check trusts the last fetch; a remote that advanced to
-// HEAD unfetched makes the post-amend push non-fast-forward, which fails having
-// moved nothing.
-func implicitRepairSkipReason(checkout string) string {
-	if conflicted, cErr := git.UnmergedPaths(checkout); cErr != nil || len(conflicted) > 0 {
-		return "checkout has unresolved conflicts"
-	}
-	if git.HasDirtyTracked(checkout) {
-		return "checkout has uncommitted changes to tracked files"
-	}
-	if git.ReachableFromRemote(checkout, "HEAD") {
-		return "HEAD is already pushed; amending would rewrite published history"
-	}
-	return ""
-}
-
-// FinishMergeImplicit is the implicit-session counterpart of FinishMerge: the
-// pre-merge hook against pinnedSha (the sha PrepareMergeImplicit returned), the
-// push, and the post-merge phase. The caller owns ts.Finish().
-func FinishMergeImplicit(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, checkout, branch, pinnedSha string, activity io.Writer, pm PostMergeOptions) (blobLinks []check.BlobLink, err error) {
-	// Pre-merge hook (isolated build worktree pinned to pinnedSha).
-	hookLinks, hookErr := runPreMergeHookContext(ctx, rep, ts, repoPath, checkout, branch, pinnedSha, activity)
-	blobLinks = append(blobLinks, hookLinks...)
-	if hookErr != nil {
-		return blobLinks, hookErr
-	}
-
-	// Push the default branch — outward-facing, so it's a distinct test point.
-	out, pushErr := git.Push(checkout)
-	if pushErr != nil {
-		return blobLinks, failStep(ts, "push "+branch, pushErr, out)
-	}
-	ts.Ok("push " + branch)
-
-	// Post-merge hook (FDR 0023). An implicit session's work is already ON the
-	// default branch, so the branch that merged and the branch it landed on are
-	// the same ref, and the push is unconditional — hence pushed=true. No lock
-	// is involved: implicit merges are out of the merge queue's scope entirely
-	// (FDR 0022 Limitations), so this hook carries no exclusivity guarantee.
-	runPostMergePhase(ctx, rep, ts, repoPath, checkout, "", branch, branch, pinnedSha, pinnedSha, true, activity, pm)
-	return blobLinks, nil
-}
+// ErrImplicitMergeUnsupported refuses a merge from a repo's main checkout
+// (an implicit session, FDR 0014). That path was a second landing pipeline
+// without the worktree path's guarantees (merge lock, landing target,
+// exact-sha push) and was removed (#317); bootstrapping a main checkout as a
+// real session is explored in #318. `sc check` / check-this-session still gate
+// a main checkout.
+var ErrImplicitMergeUnsupported = errors.New(
+	"merging from a repo's main checkout is not supported (spinclass#317): " +
+		"start a worktree session (`sc start`, or spawn-session) and merge from there; " +
+		"`sc check` / check-this-session still run the pre-merge gate here. " +
+		"Bootstrapping a main checkout as a mergeable session: spinclass#318",
+)
 
 // isInsideSession returns true when both SPINCLASS_SESSION_ID is set and cwd is
 // within the worktree directory. Both checks are required to avoid false
@@ -1123,7 +1012,7 @@ func runPostMergePhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStr
 	postMergeTargets := pm.Targets
 
 	// repoPath is always present; the landing worktree and the session
-	// worktree may not be (no landing worktree on the unqueued/implicit paths;
+	// worktree may not be (no landing worktree on the unqueued path;
 	// teardown may have removed the session worktree).
 	runDir := repoPath
 	for _, candidate := range []string{landDir, wtPath} {
@@ -1222,7 +1111,7 @@ func runPostMergePhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStr
 func runNamedPostMergeTargets(ctx context.Context, rep *crap.Reporter, active []sweatfile.PostMergeTarget, requested []string, runDir string, env []string, landedSha string, phaseCap time.Duration, deadline time.Time, activity io.Writer) {
 	selected, selErr := selectPostMergeTargets(active, requested)
 	if selErr != nil {
-		// Pre-landing validation (PrepareMerge/MergeImplicit) should have caught
+		// Pre-landing validation (PrepareMerge) should have caught
 		// this; surface defensively rather than silently deploying nothing.
 		ph := rep.Phase("post-merge selection (" + shortSha(landedSha) + ")")
 		ph.FailDiag(selErr, map[string]any{"severity": "warn"})
@@ -1435,11 +1324,9 @@ func runRepairPhase(ts *crap.TestStream, hierarchy sweatfile.Hierarchy, wtPath, 
 // emitCoActiveSessions emits one informational ok test point listing the OTHER
 // active sessions on the repo when a merge starts (spinclass#238), e.g.
 // "2 co-active sessions on <repo>: bright-cherry, bright-olive". The session
-// being merged is excluded by its worktree path; for an implicit merge that
-// path is the checkout, which also excludes indistinguishable implicit
-// siblings. Best-effort: a listing failure emits nothing and never fails the
-// merge. Both merge entry points (PrepareMerge and MergeImplicit) call this;
-// `sc check` / the check tools do not, so a check run stays silent.
+// being merged is excluded by its worktree path. Best-effort: a listing failure
+// emits nothing and never fails the merge. PrepareMerge calls this; `sc check`
+// / the check tools do not, so a check run stays silent.
 func emitCoActiveSessions(ts *crap.TestStream, repoPath, excludeWorktree string) {
 	others, err := session.ListActiveForRepoExcluding(repoPath, excludeWorktree)
 	if err != nil || len(others) == 0 {

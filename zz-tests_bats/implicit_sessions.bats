@@ -35,12 +35,12 @@ materialize_implicit_session() {
 EOF
 }
 
-@test "merge from implicit main-checkout session runs hook then pushes, no rebase" {
+@test "merge from implicit main-checkout session is refused and moves nothing" {
+  # spinclass#317: implicit (main-checkout) merge support was removed. The
+  # refusal must happen before the pre-merge hook or any push.
   create_origin_checkout
 
   local marker="$BATS_TEST_TMPDIR/hook-ran.marker"
-  # Pre-merge hook touches a marker so we can prove it executed. A plain
-  # `touch` needs neither nix nor just, so the real hook path runs in bats.
   # shellcheck disable=SC2016
   cat >"$TEST_CHECKOUT/sweatfile" <<EOF
 [hooks]
@@ -49,35 +49,21 @@ EOF
 
   materialize_implicit_session "$TEST_CHECKOUT"
 
-  # Commit a change on master in the checkout (work already on the default
-  # branch — the implicit session's defining property).
   echo "change" >"$TEST_CHECKOUT/file.txt"
   git -C "$TEST_CHECKOUT" add file.txt
   git -C "$TEST_CHECKOUT" commit -m "implicit work"
-  local head
-  head=$(git -C "$TEST_CHECKOUT" rev-parse HEAD)
+  local upstream_before
+  upstream_before=$(git -C "$TEST_UPSTREAM" rev-parse master)
 
-  # Merge from inside the checkout, no target → implicit route.
   cd "$TEST_CHECKOUT" || return
   run_sc_crap merge
-  assert_success
+  assert_failure
+  assert_output --partial "spinclass#317"
+  assert_output --partial "sc start"
 
-  # Hook ran.
-  assert [ -f "$marker" ]
-
-  # Pushed: bare upstream master == checkout HEAD.
-  local upstream_head
-  upstream_head=$(git -C "$TEST_UPSTREAM" rev-parse master)
-  assert [ "$upstream_head" = "$head" ]
-
-  # No failing stage on the wire: git stages are ok test records, the hook
-  # is a passing node_end (phase-only since go-crap v2.2.1 / crap#22).
-  assert_crap '([.[] | select(.type == "test")] | length > 0 and all(.ok))
-    and ([.[] | select(.type == "node_end")] | length == 1 and all(.exit_code == 0))'
-  # No rebase step in the output (implicit path is hook-then-push only).
-  refute_output --partial "rebase"
-  # Reached the push path, not the worktree-only reject.
-  refute_output --partial "not inside a worktree session"
+  # Nothing ran, nothing moved.
+  assert [ ! -f "$marker" ]
+  assert_equal "$(git -C "$TEST_UPSTREAM" rev-parse master)" "$upstream_before"
 }
 
 @test "check from implicit main-checkout session runs the hook" {

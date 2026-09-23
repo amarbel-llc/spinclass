@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
+
 	"code.linenisgreat.com/spinclass/internal/attestation"
 	"code.linenisgreat.com/spinclass/internal/job"
 	"code.linenisgreat.com/spinclass/internal/session"
@@ -492,6 +494,48 @@ func TestHandleUpdateDescriptionImplicit(t *testing.T) {
 	}
 	if got.Description != "triage the flaky test" {
 		t.Errorf("persisted description = %q, want %q", got.Description, "triage the flaky test")
+	}
+}
+
+// TestMergeToolsRefuseImplicitSession pins #317: both merge tools refuse a
+// live implicit (main-checkout) session with the removal message, before any
+// attestation peek/consume, hook, or push.
+func TestMergeToolsRefuseImplicitSession(t *testing.T) {
+	for name, handler := range map[string]func(context.Context, json.RawMessage, command.Prompter) (*command.Result, error){
+		"merge-this-session":       handleMergeThisSession,
+		"merge-this-session-async": handleMergeThisSessionAsync,
+	} {
+		t.Run(name, func(t *testing.T) {
+			testgit.RequireGit(t)
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
+			base := t.TempDir()
+			t.Setenv("HOME", base) // dormant gate — see TestResolveGatedSession
+			repo := filepath.Join(base, "repo")
+			testgit.MustInit(t, repo)
+			if err := session.WriteImplicit(session.State{
+				Kind:         session.KindImplicit,
+				PID:          os.Getpid(),
+				SessionState: session.StateActive,
+				RepoPath:     repo,
+				WorktreePath: repo,
+				Branch:       "master",
+				SessionKey:   "repo/master-cafe1234",
+			}, "cafe1234"); err != nil {
+				t.Fatalf("WriteImplicit: %v", err)
+			}
+			t.Chdir(repo)
+
+			res, err := handler(context.Background(), json.RawMessage(`{}`), nil)
+			if err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			if !res.IsErr || !strings.Contains(res.Text, "spinclass#317") {
+				t.Fatalf("%s from an implicit session = %+v, want the #317 refusal", name, res)
+			}
+			if job.IsRunning(repo) {
+				t.Errorf("%s started a job for a refused implicit merge", name)
+			}
+		})
 	}
 }
 
