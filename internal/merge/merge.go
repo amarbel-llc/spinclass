@@ -504,10 +504,12 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	// commits.
 	tip, tipErr := git.RevParse(repoPath, "refs/heads/"+branch)
 	tipMatchesPin := tipErr == nil && tip == pinnedSha
-	// A push landing leaves the local default ref behind, so `-d`'s "merged
-	// into HEAD/upstream" check cannot see the landing; force is safe because
-	// tipMatchesPin means the tip IS what just landed.
-	if tdErr := teardownAndPush(ts, repoPath, wtPath, branch, false, inSession, rebased || gitSync, tipMatchesPin); tdErr != nil {
+	// Always force: `-d` asks whether the branch is merged into the ROOT's
+	// HEAD, which need not be the default branch at all (a push landing may
+	// leave local behind; a self landing fast-forwards master even while the
+	// root is parked elsewhere). Force is safe because teardown only runs when
+	// tipMatchesPin — the tip IS what just landed.
+	if tdErr := teardownAndPush(ts, repoPath, wtPath, branch, false, inSession, true, tipMatchesPin); tdErr != nil {
 		return blobLinks, tdErr
 	}
 
@@ -667,12 +669,9 @@ func rebaseLanding(ts *crap.TestStream, landPath, branch, targetRef string) (lan
 // queued path passes false: its landing is itself the push (#284, Alt B), and
 // there is nothing in the root to push. finishMergeUnqueued passes gitSync.
 //
-// forceBranchDelete selects `git branch -D`: after a rebased landing the
-// session branch tip is no longer an ancestor of the default branch, and after
-// a push landing (#284) the local default ref was never advanced at all, so in
-// both cases `-d` would refuse — force is safe because the content just landed
-// (patch-identical via the rebased landing sha, or exactly the tip). The
-// local-only unrebased path keeps `-d` as the existing safety net.
+// forceBranchDelete selects `git branch -D`. The queued path always forces
+// (its `-d` would ask about the root's HEAD, not the landing; tipMatchesPin is
+// the real guard). finishMergeUnqueued keeps `-d` as its pre-#235 safety net.
 //
 // tipMatchesPin gates teardown entirely: the pin contract allows commits to
 // land on branch after PrepareMerge pins, and `git worktree remove` + `-D`
