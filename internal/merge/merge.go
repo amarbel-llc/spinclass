@@ -26,6 +26,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/mergelock"
 	"code.linenisgreat.com/spinclass/internal/present"
 	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/statsd"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/worktree"
@@ -484,9 +485,15 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 		mergeLabel = "merge " + branch + " (rebased onto moved " + defaultBranch + ")"
 	}
 	if out, landErr := target.Land(landPath, landingSha); landErr != nil {
+		if !target.IsSelf() {
+			statsd.Count(MetricPushRefused)
+		}
 		return blobLinks, failStep(ts, mergeLabel, landErr, out)
 	}
 	ts.Ok(mergeLabel)
+	if !target.IsSelf() {
+		statsd.Count(MetricLanded)
+	}
 
 	// (e') Advance the root's local default branch to what just landed, still
 	// under the lock (a sibling's landing moves the same ref) and before the
@@ -575,6 +582,19 @@ func fetchTarget(ctx context.Context, ts *crap.TestStream, target landing.Target
 	return nil
 }
 
+// Merge-landing counters (spinclass#314), emitted only on the queued remote
+// landing path, so local_advance.ok + local_advance.skip == landed holds by
+// construction — the invariant FDR 0029's promotion criterion checks. The
+// per-cause skip counter is a sibling name (skip_reason.<slug>), not a child
+// of skip, so graphite never has to hold skip as both a leaf and a branch.
+const (
+	MetricLanded                 = "merge.landed"
+	MetricPushRefused            = "merge.push_refused"
+	MetricLocalAdvanceOk         = "merge.local_advance.ok"
+	MetricLocalAdvanceSkip       = "merge.local_advance.skip"
+	MetricLocalAdvanceSkipReason = "merge.local_advance.skip_reason."
+)
+
 // LocalAdvanceSkipPrefix opens every local-advance skip reason, so a reader —
 // and the async completion wake, which lifts these lines — sees first that
 // the merge DID land (#295).
@@ -592,9 +612,12 @@ func reportLocalAdvance(ts *crap.TestStream, target landing.Target, landingSha s
 	label := "advance local " + target.Branch
 	adv := target.AdvanceLocal(landingSha)
 	if !adv.Skipped() {
+		statsd.Count(MetricLocalAdvanceOk)
 		ts.Ok(label + " to " + shortSha(landingSha))
 		return
 	}
+	statsd.Count(MetricLocalAdvanceSkip)
+	statsd.Count(MetricLocalAdvanceSkipReason + adv.SkipSlug())
 	ts.Skip(label, fmt.Sprintf("%s%s at %s; only local %s was not advanced: %s",
 		LocalAdvanceSkipPrefix, target.Label(), shortSha(landingSha), target.Branch, adv.SkipReason()))
 }

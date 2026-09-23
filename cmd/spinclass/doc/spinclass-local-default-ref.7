@@ -54,6 +54,27 @@ which one is your call.
 .B ahead
 The local branch has commits the remote lacks.
 Push them, or drop them.
+.SH METRICS
+Each remote landing sends statsd counters to stats-me
+.RB ( stats\-me\-clients (7)):
+.BR spinclass.merge.landed ,
+.BR spinclass.merge.push_refused ,
+.BR spinclass.merge.local_advance.ok ,
+.B spinclass.merge.local_advance.skip
+and
+.BR spinclass.merge.local_advance.skip_reason. { dirty_overlap , diverged , ahead , error }.
+.B ok
+plus
+.B skip
+always equals
+.BR landed .
+Nothing is sent unless
+.B STATSD_HOST
+or
+.B STATSD_PORT
+is set;
+.B SPINCLASS_DISABLE_STATSD=1
+turns emission off.
 .SH SEE ALSO
 .BR spinclass-merge-this-session (1),
 .BR spinclass-merge (1),

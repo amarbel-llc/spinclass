@@ -38,6 +38,10 @@ func SetHermeticEnv() (cleanup func(), err error) {
 	}
 	_ = os.Setenv("GIT_CONFIG_GLOBAL", f.Name())
 	_ = os.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	// Fixture merges must never reach the host's real stats-me (spinclass#314):
+	// they would pollute the fleet counters FDR 0029's promotion reads. A test
+	// that asserts on metrics re-enables emission against its own listener.
+	_ = os.Setenv("SPINCLASS_DISABLE_STATSD", "1")
 	return func() { _ = os.Remove(f.Name()) }, nil
 }
 

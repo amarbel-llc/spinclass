@@ -148,6 +148,17 @@ worktree exactly as before; a re-merge is a plain retry.
 None: the landing shape is not configurable beyond the existing
 `[hooks].disable-merge-queue` rollback.
 
+## Metrics (spinclass#314)
+
+The promotion criterion reads statsd counters (`internal/statsd`, emitted from
+`merge.FinishMerge`'s queued remote landing only): `spinclass.merge.landed`,
+`.push_refused`, `.local_advance.ok`, `.local_advance.skip`, and
+`.local_advance.skip_reason.<dirty_overlap|diverged|ahead|error>`. Dimensions
+live in the name (the graphite backend drops tags); `ok + skip == landed` by
+construction. Emission is opt-in (`STATSD_HOST`/`STATSD_PORT` present) and
+killed by `SPINCLASS_DISABLE_STATSD=1`, which `testgit.SetHermeticEnv` sets so
+fixture merges never reach the fleet counters.
+
 ## More Information
 
 - spinclass#295 / #315 — the revision: advance local opportunistically; target

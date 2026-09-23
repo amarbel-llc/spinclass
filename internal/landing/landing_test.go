@@ -135,8 +135,8 @@ func TestAdvanceLocalSkips(t *testing.T) {
 		local := localMain(t, clone)
 		target := Remote(clone, "main", "origin")
 		adv := target.AdvanceLocal(target.Ref())
-		if adv.Outcome != Ahead || !adv.Skipped() {
-			t.Fatalf("Outcome = %v, want Ahead", adv.Outcome)
+		if adv.Outcome != Ahead || !adv.Skipped() || adv.SkipSlug() != "ahead" {
+			t.Fatalf("Outcome = %v slug=%q, want Ahead/ahead", adv.Outcome, adv.SkipSlug())
 		}
 		if got := localMain(t, clone); got != local {
 			t.Error("an ahead local branch was moved")
@@ -150,8 +150,8 @@ func TestAdvanceLocalSkips(t *testing.T) {
 		local := localMain(t, clone)
 		target := Remote(clone, "main", "origin")
 		adv := target.AdvanceLocal(target.Ref())
-		if adv.Outcome != Diverged {
-			t.Fatalf("Outcome = %v, want Diverged", adv.Outcome)
+		if adv.Outcome != Diverged || adv.SkipSlug() != "diverged" {
+			t.Fatalf("Outcome = %v slug=%q, want Diverged/diverged", adv.Outcome, adv.SkipSlug())
 		}
 		if got := localMain(t, clone); got != local {
 			t.Error("a diverged local branch was moved")
@@ -164,8 +164,8 @@ func TestAdvanceLocalSkips(t *testing.T) {
 		mustWrite(t, filepath.Join(clone, "file.txt"), "uncommitted local edit\n")
 		target := Remote(clone, "main", "origin")
 		adv := target.AdvanceLocal(target.Ref())
-		if adv.Outcome != Blocked {
-			t.Fatalf("Outcome = %v (%s), want Blocked", adv.Outcome, adv.Reason)
+		if adv.Outcome != Blocked || adv.SkipSlug() != "dirty_overlap" {
+			t.Fatalf("Outcome = %v slug=%q (%s), want Blocked/dirty_overlap", adv.Outcome, adv.SkipSlug(), adv.Reason)
 		}
 		reason := adv.SkipReason()
 		for _, want := range []string{"uncommitted changes", "merge --ff-only", ManPage} {

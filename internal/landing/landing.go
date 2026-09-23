@@ -151,10 +151,29 @@ type Advance struct {
 	Reconcile string
 	// Detail is captured git output behind a Blocked or Failed skip.
 	Detail string
+	// Dirty marks a Blocked skip caused by uncommitted changes in Holder.
+	Dirty bool
 }
 
 // Skipped reports whether the local branch was left behind the target.
 func (a Advance) Skipped() bool { return a.Outcome >= Ahead }
+
+// SkipSlug names a skip's cause as one metric-name segment (spinclass#314):
+// dirty_overlap, diverged, ahead, or error. "" when not skipped.
+func (a Advance) SkipSlug() string {
+	switch {
+	case !a.Skipped():
+		return ""
+	case a.Outcome == Ahead:
+		return "ahead"
+	case a.Outcome == Diverged:
+		return "diverged"
+	case a.Outcome == Blocked && a.Dirty:
+		return "dirty_overlap"
+	default:
+		return "error"
+	}
+}
 
 // SkipReason renders a skip as the one-line reason for a TAP/crap `# SKIP`
 // directive: why, how to reconcile, and where the reasoning is documented.
@@ -233,6 +252,7 @@ func fastForward(repoPath, branch, rev, toLabel string) Advance {
 		adv.Detail = strings.TrimSpace(out)
 		adv.Reconcile = fmt.Sprintf("git -C %s merge --ff-only %s", holder, target)
 		if git.HasDirtyTracked(holder) {
+			adv.Dirty = true
 			adv.Reason = fmt.Sprintf("uncommitted changes in %s block the fast-forward of %s", holder, branch)
 			adv.Reconcile = "commit or stash them, then " + adv.Reconcile
 		} else {

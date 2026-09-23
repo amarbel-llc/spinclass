@@ -324,7 +324,7 @@ subcommand is always available.
   tracking ref), never local `<default>`; only the fetch is fatal. After the
   push, `reportLocalAdvance` ff's local once (under the lock) or emits a
   `# SKIP` (`merge LANDED on …`, lifted into the async wake). Local-only =
-  `landing.Self` (landing IS the fatal ff).
+  `landing.Self` (landing IS the fatal ff). Metrics: `internal/statsd`.
 - **Per-session forge push credentials** (FDR 0028, #285, `internal/auth`): a
   sweatfile `[auth]` table (`mint-command` / `revoke-command`) gives a worktree
   session its own forge token so pushes never ride the inherited ssh-agent.
