@@ -4,8 +4,8 @@ date: 2026-08-02
 promotion-criteria: |
   experimental -> testing: two weeks of ordinary use across several repos with
   (1) at least one observed refusal that was correct — a genuinely unreachable
-  remote or a dirty checkout blocking the fast-forward — and cleared by fixing
-  the repo rather than by reaching for the override, (2) no session refused
+  remote — and cleared by fixing the repo rather than by reaching for the
+  override, (2) no session refused
   for being merely ahead of upstream (the false-positive this design most
   needs to avoid, since it is the state of every repo after a --local-only
   merge), and (3) one confirmed spawn into an untouched sibling repo that
@@ -65,8 +65,19 @@ hook was stale.
 `internal/basebranch` owns the policy; `internal/git` gains only verbs.
 
 `Freshen(ctx, repoPath, allowStale, required)` resolves the default branch,
-fetches it, fast-forwards the **local** default branch when — and only when —
-that is a pure fast-forward, and returns the resulting **sha** as the base.
+fetches it, and returns the **fetched remote tip's sha** as the base — the same
+landing target a merge from the session lands on (`internal/landing`,
+spinclass#315). It then fast-forwards the **local** default branch when — and
+only when — that is a pure fast-forward, for ergonomics only.
+
+> **Revised 2026-09-23 (spinclass#315).** The base used to be the *local*
+> default branch after the fast-forward, which made the local branch
+> load-bearing: a dirty or diverged checkout refused creation, and an ahead
+> local branch cut its local-only commits into the session (which that
+> session's remote merge would then push). Now the base is always the fetched
+> tip; the local fast-forward is a reported `advance local <branch>` skip when
+> it cannot happen. Only an unverifiable base (fetch failed) refuses. See
+> `spinclass-local-default-ref(7)`.
 
 It is called from `shop.createWorktree`, inside the `IsNotExist` branch and
 before anything touches the filesystem. That location is the design: it is the
@@ -83,25 +94,19 @@ refusal cannot leave a half-built worktree behind.
 | `main` + `master`, `origin/HEAD` doesn't decide | no — falls back to HEAD |
 | Fetch failed | **yes** |
 | Already current / fast-forwarded | no |
-| Local default **ahead** of upstream | no |
-| Dirty worktree blocks the fast-forward | **yes** |
-| Local default **diverged** | **yes** |
+| Local default **ahead** of upstream | no — base is upstream; local advance skipped |
+| Dirty worktree blocks the fast-forward | no — base is upstream; local advance skipped |
+| Local default **diverged** | no — base is upstream; local advance skipped |
 
-Every refusal is overridable by `--allow-stale-base` or
+The one refusal is overridable by `--allow-stale-base` or
 `[hooks].allow-stale-base`.
 
-**Ahead is not staleness.** Local contains everything upstream has, and it is
-the state of every repo immediately after a `--local-only` merge. Treating it as
-stale would produce a routine false positive, which would train operators to set
-the override permanently and defeat the whole feature. This is why the design
-classifies with a local `IsAncestor` check in both directions rather than
-letting `git fetch <r> <d>:<d>` reject ahead, diverged and network failure
-identically.
-
-**Dirty refuses rather than warns.** The operator's call: creation demands a
-verified base. The cost is real — a stray edit in the main checkout blocks every
-new session, including non-interactive `spawn-session`, whose only way out is
-the sweatfile knob. That is the intended pressure.
+**The local branch is not the base.** (Revised, #315.) Before, dirty and
+diverged refused — "creation demands a verified base" — but the base only
+needed the local branch because the session was cut from it. Cutting from the
+fetched tip verifies the base without it, so a stray edit in the main checkout
+no longer blocks every new session; it only leaves the local branch behind,
+reported as a skip.
 
 ### No MCP parameter, deliberately
 

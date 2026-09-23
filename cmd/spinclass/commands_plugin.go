@@ -121,7 +121,7 @@ func buildPluginCommand(cmdName string, sc sweatfile.StartCommand, repoPath stri
 			{Name: "description", Type: command.String, Description: "Override the default session description"},
 			{Name: "merge-on-close", Type: command.Bool, Description: "Auto-merge worktree into default branch on session close"},
 			{Name: "no-attach", Type: command.Bool, Description: "Create worktree but skip attaching"},
-			{Name: "allow-stale-base", Type: command.Bool, Description: "Create even when the default branch could not be confirmed current (offline, or a dirty/diverged checkout)"},
+			{Name: "allow-stale-base", Type: command.Bool, Description: "Create even when the default branch could not be fetched (e.g. offline)"},
 		},
 		RunCLI: makePluginRunCLI(sc, argName),
 	}

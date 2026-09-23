@@ -559,7 +559,7 @@ func TestPostMergeRunsOnUnqueuedPath(t *testing.T) {
 		t.Errorf("post-merge point not ok: %+v", tr)
 	}
 	// Sanity: the queue really was disabled (no wait/landing-pull points).
-	if _, queued := findTest(tests, "pull main (landing)"); queued {
-		t.Error("expected the unqueued path, but saw a landing pull")
+	if _, queued := findTest(tests, "fetch origin/main (landing)"); queued {
+		t.Error("expected the unqueued path, but saw a landing fetch")
 	}
 }

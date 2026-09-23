@@ -301,7 +301,7 @@ subcommand is always available.
 - **Per-repo merge queue** (FDR 0022, #235): `FinishMerge` serializes landings on
   an advisory flock (`internal/mergelock`; `spinclass-merge.lock` in the shared
   git common dir — poll-based, ctx-cancellable, self-releasing). Acquired BEFORE
-  the gate; under the lock: re-pull → ancestry check → if the tip moved, rebase
+  the gate; under the lock: re-fetch → ancestry check → if the tip moved, rebase
   the pinned commits in a transient `.land-*` worktree (conflict ⇒
   `merge.ErrIntegrationConflict`, resolved by a plain re-merge) → gate on the
   LANDING sha → land (next bullet) → teardown. Worktree merges only; lock is
@@ -312,17 +312,30 @@ subcommand is always available.
   (created at the pin, rebased there only if the tip moved): the landing is
   `git push <remote> <landingSha>:refs/heads/<default>` run from that worktree
   (`git.PushRef`) — the ff check is the remote's own, so a refused push (stale
-  tip, dropped credential) moves NOTHING, and the root checkout's LOCAL default
-  ref is never advanced by automation (the next pull catches it up). No
-  separate `push` point: `merge <branch>` IS the push. Branch delete is forced
-  (`-d` can't see a landing the local ref never received); the post-merge phase
-  runs in the landing worktree (the exact landed tree). `gitSync=false` still
-  ff-onlys into the root (the local ref IS that landing); implicit and
-  `disable-merge-queue` paths are unchanged. Consumers reading the local default
-  ref use `git.CommitsUnintegrated` (integrated = reachable from the local
-  default OR its remote-tracking ref): `close.RunResolved`, `clean.scanWorktrees`,
+  tip, dropped credential) moves NOTHING. No separate `push` point:
+  `merge <branch>` IS the push. Branch delete is forced (the local ref may not
+  have received the landing); the post-merge phase runs in the landing worktree
+  (the exact landed tree). Implicit and `disable-merge-queue` paths are
+  unchanged. Consumers reading the local default ref use
+  `git.CommitsUnintegrated` (integrated = reachable from the local default OR
+  its remote-tracking ref): `close.RunResolved`, `clean.scanWorktrees`,
   `shop.closeShop`'s auto-close gate. This is the injection surface FDR 0028's
   worktree-scoped push credential assumes.
+- **Landing target: remote, never local** (#315, #295, FDR 0029 revised,
+  `internal/landing`): a merge targets the default REMOTE's default branch —
+  `landing.Target.Ref()` (the tracking ref) is what `PrepareMerge` rebases onto,
+  the nothing-to-merge and landing-ancestry checks read, `rebaseLanding`
+  replays onto, and `basebranch.Freshen` cuts new sessions from. The root's
+  LOCAL default branch is ergonomics only: the pre-merge/landing steps only
+  FETCH (`fetch <remote>/<branch>` points), and after a successful push
+  `reportLocalAdvance` fast-forwards local once (git ff-only semantics, under
+  the lock, before post-merge) → `advance local <b> to <sha>`, or a `# SKIP`
+  opening `merge LANDED on …` (`merge.LocalAdvanceSkipPrefix`) with a reconcile
+  hint citing `spinclass-local-default-ref(7)`; never fatal, and
+  `job.localAdvanceSkipLine` lifts it into the async wake. A local-only merge is
+  `landing.Self`: target = local branch, no fetch, and `Land` IS the (fatal)
+  ff. Only a failed fetch is fatal (and at creation, the only thing
+  `--allow-stale-base` overrides).
 - **Per-session forge push credentials** (FDR 0028, #285, `internal/auth`): a
   sweatfile `[auth]` table (`mint-command` / `revoke-command`) gives a worktree
   session its own forge token so pushes never ride the inherited ssh-agent.
@@ -339,9 +352,10 @@ subcommand is always available.
   `git.CommonConfigHasWorktreeOverride`). The mint is recorded as
   `session.State.Credential` (`session.Write` carries it forward; `session.
   UpdateCredential` stamps live state OR a tombstone). `auth.MirrorInto` wires
-  the FDR 0029 landing worktree before the push; `merge.pullDefault` replaces
-  the root `git pull` with a fetch from the session worktree + a local ff of the
-  root ref, so the merge's fetch is agent-free too. `auth.Revoke` runs at
+  the FDR 0029 landing worktree before the push; `merge.fetchTarget` replaces
+  the root `git pull` with a fetch from the session worktree (the local ref is
+  advanced only after the push, #295), so the merge's fetch is agent-free too.
+  `auth.Revoke` runs at
   `close.RunResolved`, `clean.removeWorktree`, and `merge.teardownAndPush`
   (the out-of-session `sc merge`/`sc run` worktree removal — no tombstone is
   written there, so the sweep could never find it) (warn, non-fatal);
@@ -456,14 +470,15 @@ subcommand is always available.
   hook, the #26 flock stays the liveness floor. Active path needs a systemd user
   bus (absent in the checkPhase sandbox + macOS) so it is dogfooded, not CI.
 - **Base-branch freshening at creation** (#250, `internal/basebranch`): a fresh
-  session's branch is cut from the repo's **default branch**, fetched +
-  fast-forwarded first, passed to `git worktree add -b` as an explicit sha —
-  fixing `-b`'s base-on-HEAD (a checkout parked on a feature branch) and the spawn
-  path that freshened nothing (`spawn.Launch` → `shop.Create` bypassed the old
-  main-worktree pull). Gate lives in `shop.createWorktree`, the single funnel
-  below start/spawn/run. **Ahead-of-upstream is NOT staleness** and never refuses;
-  unreachable, dirty-ff-blocked, and diverged refuse, overridable by
-  `--allow-stale-base` / `[hooks].allow-stale-base` — deliberately **no MCP
+  session's branch is cut from the repo's **fetched remote default branch**
+  (the landing target, #315), passed to `git worktree add -b` as an explicit
+  sha — fixing `-b`'s base-on-HEAD (a checkout parked on a feature branch) and
+  the spawn path that freshened nothing (`spawn.Launch` → `shop.Create` bypassed
+  the old main-worktree pull). Gate lives in `shop.createWorktree`, the single
+  funnel below start/spawn/run. The local default branch is fast-forwarded
+  opportunistically; ahead/diverged/dirty-blocked is an `advance local` skip
+  (`basebranch.LocalSkipped`), never a refusal. Only a failed fetch refuses,
+  overridable by `--allow-stale-base` / `[hooks].allow-stale-base` — deliberately **no MCP
   parameter** (a driver can't wave away a worker's stale toolchain). `sc fork` /
   `start-gh_pr` excluded. Fetch is context-bounded with `GIT_TERMINAL_PROMPT=0` +
   `ssh -o BatchMode=yes` (ssh/cred helpers read `/dev/tty`, so a nil Stdin isn't

@@ -316,6 +316,13 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 				if line := postMergeFailureLine(text); line != "" {
 					msg += "; " + line
 				}
+				// Likewise a skipped local-default-branch advance (#295): the
+				// merge landed, but an agent reading local <default> would
+				// otherwise conclude it did not. The skip line itself says it
+				// landed and how to reconcile.
+				if line := localAdvanceSkipLine(text); line != "" {
+					msg += "; " + line
+				}
 			}
 
 			// Attach the rendered verdict ladder by reference so the wake
@@ -414,6 +421,18 @@ func postMergeFailureLine(text string) string {
 		}
 	}
 	return strings.Join(lines, "; ")
+}
+
+// localAdvanceSkipLine returns the rendered "↷ advance local <branch> # SKIP …"
+// line (merge.reportLocalAdvance, as rendered by present.RenderPlain), or ""
+// when the local default branch followed the landing.
+func localAdvanceSkipLine(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "↷ advance local ") {
+			return line
+		}
+	}
+	return ""
 }
 
 // Cancel signals the in-flight job for wt to stop (cancels its context, which

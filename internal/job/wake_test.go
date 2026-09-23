@@ -310,6 +310,27 @@ func TestStartSucceededWakeSurfacesAllPostMergeTargetFailures(t *testing.T) {
 	})
 }
 
+// A skipped local-default-branch advance (#295) rides the succeeded wake, so
+// an async agent learns the merge LANDED even though local main did not move.
+func TestStartSucceededWakeSurfacesLocalAdvanceSkip(t *testing.T) {
+	wt := t.TempDir()
+	argsFile := filepath.Join(t.TempDir(), "args")
+	installStub(t, argsFile, true)
+
+	skip := "↷ advance local main # SKIP merge LANDED on origin/main at abc123def456; only local main was not advanced: dirty"
+	runWaked(t, wt, KindMerge, func(ctx context.Context, w io.Writer) (string, bool) {
+		return "✓ merge feature\n" + skip + "\n✓ remove worktree feature", false
+	})
+
+	inv := recordedInvocations(t, argsFile)
+	assertArgv(t, findInvocation(t, inv, "done"), []string{
+		"done", "job-deadbeef",
+		"--state", "succeeded",
+		"--message", "merge succeeded; " + skip,
+		"--result-ref", "ringmaster read job-deadbeef",
+	})
+}
+
 // A succeeded merge with a clean post-merge (no ✗) keeps the bare summary —
 // the #259 suffix must not fire when there is nothing to surface.
 func TestStartSucceededWakeUnchangedWhenPostMergeClean(t *testing.T) {

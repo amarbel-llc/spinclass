@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"code.linenisgreat.com/spinclass/internal/landing"
 )
 
 func mustGit(t *testing.T, dir string, args ...string) string {
@@ -186,12 +188,13 @@ func TestFreshenAdvancesDefaultHeldByAnotherWorktree(t *testing.T) {
 	}
 }
 
-// A local default branch that is AHEAD of upstream contains everything upstream
-// has, so it is not stale and must never be an error. This is not a corner
-// case: it is the state of every repo immediately after a --local-only merge,
-// so treating it as staleness would make the override knob look mandatory.
-func TestFreshenAheadIsNotStale(t *testing.T) {
+// A local default branch AHEAD of upstream is not a stale base — the base is
+// the fetched upstream tip regardless (#315), so the local-only commits are
+// NOT cut into the session (its remote merge would otherwise push them). The
+// local branch is left alone and the skip reported; never an error.
+func TestFreshenAheadCutsFromUpstream(t *testing.T) {
 	_, clone := fixture(t)
+	upstreamTip := localMain(t, clone)
 	mustGit(t, clone, "commit", "-q", "--allow-empty", "-m", "unpushed local work")
 	local := localMain(t, clone)
 
@@ -199,53 +202,38 @@ func TestFreshenAheadIsNotStale(t *testing.T) {
 	if err != nil {
 		t.Fatalf("being ahead of upstream must not be an error: %v", err)
 	}
-	if res.Action != SkippedAhead {
-		t.Errorf("Action = %v (%s), want SkippedAhead", res.Action, res.Reason)
+	if res.Action != LocalSkipped || res.Local.Outcome != landing.Ahead {
+		t.Errorf("Action = %v, Local = %v (%s), want LocalSkipped/Ahead", res.Action, res.Local.Outcome, res.Reason)
 	}
-	if res.BaseSha != local {
-		t.Errorf("BaseSha = %q, want the local tip %q", res.BaseSha, local)
+	if res.BaseSha != upstreamTip {
+		t.Errorf("BaseSha = %q, want the upstream tip %q", res.BaseSha, upstreamTip)
+	}
+	if got := localMain(t, clone); got != local {
+		t.Errorf("an ahead local main was moved to %q", got)
 	}
 }
 
-// Divergence means the base is genuinely missing upstream commits, so creation
-// refuses it — but resume tolerates it, and the override always does.
-func TestFreshenDivergedIsFatalUnlessTolerated(t *testing.T) {
+// A diverged local default branch is irrelevant to the base (#315): the
+// session is cut from the fetched upstream tip, the local branch is left
+// alone, and creation proceeds — the divergence is only a reported skip.
+func TestFreshenDivergedLocalCutsFromUpstream(t *testing.T) {
 	upstream, clone := fixture(t)
-	advanceUpstream(t, upstream)
+	want := advanceUpstream(t, upstream)
 	mustGit(t, clone, "commit", "-q", "--allow-empty", "-m", "conflicting local work")
 	local := localMain(t, clone)
 
-	for _, tc := range []struct {
-		name                string
-		allowStale, require bool
-		wantErr             bool
-	}{
-		{"creation refuses", false, true, true},
-		{"override permits", true, true, false},
-		{"resume tolerates", false, false, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			res, err := Freshen(context.Background(), clone, tc.allowStale, tc.require)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatal("expected an error")
-				}
-				if !errors.Is(err, ErrStaleBase) {
-					t.Errorf("error %v does not wrap ErrStaleBase", err)
-				}
-				if !strings.Contains(err.Error(), "allow-stale-base") {
-					t.Errorf("error %q does not name the override", err)
-				}
-			} else if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if res.Action != SkippedStale {
-				t.Errorf("Action = %v (%s), want SkippedStale", res.Action, res.Reason)
-			}
-			if res.BaseSha != local {
-				t.Errorf("BaseSha = %q, want the local tip %q", res.BaseSha, local)
-			}
-		})
+	res, err := Freshen(context.Background(), clone, false, true)
+	if err != nil {
+		t.Fatalf("a diverged local branch must not fail creation: %v", err)
+	}
+	if res.Action != LocalSkipped || res.Local.Outcome != landing.Diverged {
+		t.Errorf("Action = %v, Local = %v (%s), want LocalSkipped/Diverged", res.Action, res.Local.Outcome, res.Reason)
+	}
+	if res.BaseSha != want {
+		t.Errorf("BaseSha = %q, want the fetched tip %q", res.BaseSha, want)
+	}
+	if got := localMain(t, clone); got != local {
+		t.Errorf("a diverged local main was moved to %q", got)
 	}
 }
 
@@ -276,27 +264,26 @@ func TestFreshenUnreachableRemote(t *testing.T) {
 	}
 }
 
-// A dirty worktree holding the default branch blocks the fast-forward, and
-// that blocks creation. The failure has to name the path so the operator knows
-// which tree to clean — it need not be the checkout they invoked from.
-func TestFreshenDirtyHolderIsFatal(t *testing.T) {
+// A dirty worktree holding the default branch blocks only the local
+// fast-forward (#315): the session is still cut from the fetched tip, and the
+// skip names the path so the operator knows which tree to clean.
+func TestFreshenDirtyHolderSkipsLocalOnly(t *testing.T) {
 	upstream, clone := fixture(t)
-	advanceUpstream(t, upstream)
+	want := advanceUpstream(t, upstream)
 	mustWrite(t, filepath.Join(clone, "file.txt"), "uncommitted local edit\n")
 
-	_, err := Freshen(context.Background(), clone, false, true)
-	if err == nil {
-		t.Fatal("a dirty checkout blocking the fast-forward must fail session creation")
+	res, err := Freshen(context.Background(), clone, false, true)
+	if err != nil {
+		t.Fatalf("a dirty checkout must not fail session creation: %v", err)
 	}
-	if !errors.Is(err, ErrStaleBase) {
-		t.Errorf("error %v does not wrap ErrStaleBase", err)
+	if res.Action != LocalSkipped || res.Local.Outcome != landing.Blocked {
+		t.Errorf("Action = %v, Local = %v (%s), want LocalSkipped/Blocked", res.Action, res.Local.Outcome, res.Reason)
 	}
-	if !strings.Contains(err.Error(), "uncommitted changes") {
-		t.Errorf("error %q does not explain that the tree is dirty", err)
+	if res.BaseSha != want {
+		t.Errorf("BaseSha = %q, want the fetched tip %q", res.BaseSha, want)
 	}
-
-	if _, err := Freshen(context.Background(), clone, true, true); err != nil {
-		t.Errorf("the override must permit a dirty holder: %v", err)
+	if !strings.Contains(res.Reason, "uncommitted changes") || !strings.Contains(res.Reason, clone) {
+		t.Errorf("reason %q does not name the dirty tree", res.Reason)
 	}
 }
 

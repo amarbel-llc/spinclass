@@ -104,26 +104,42 @@ EOF
   assert_success
 }
 
-# A dirty checkout blocking the fast-forward refuses, per the operator's call
-# that creation demands a verified base. The message has to say which tree.
-function stale_base_dirty_checkout_fails { # @test
+# A dirty checkout blocking the local fast-forward does not block the start
+# (#315): the session is cut from the fetched origin tip, and only the local
+# default branch lags — reported as a skip that names the tree.
+function stale_base_dirty_checkout_skips_local_advance { # @test
   create_origin_checkout
-  advance_upstream >/dev/null
+  local tip
+  tip=$(advance_upstream)
   echo "uncommitted local edit" >"$TEST_CHECKOUT/file.txt"
   cd "$TEST_CHECKOUT" || return
 
   run_sc start --no-attach
-  assert_failure
+  assert_success
+  assert_output --partial "advance local master # SKIP"
   assert_output --partial "uncommitted changes"
+
+  local wt
+  wt=$(extract_wt_path "$output")
+  run git -C "$wt" merge-base --is-ancestor "$tip" HEAD
+  assert_success
 }
 
-# Being ahead of upstream is not staleness — it is the state of every repo
-# right after a --local-only merge, so it must never block a start.
+# Being ahead of upstream never blocks a start, and the session is cut from
+# origin (#315) — the local-only commit is not inherited, so the session's
+# remote merge cannot push it.
 function stale_base_ahead_of_upstream_still_starts { # @test
   create_origin_checkout
   git -C "$TEST_CHECKOUT" commit -q --allow-empty -m "unpushed local work"
+  local local_tip
+  local_tip=$(git -C "$TEST_CHECKOUT" rev-parse HEAD)
   cd "$TEST_CHECKOUT" || return
 
   run_sc start --no-attach
   assert_success
+
+  local wt
+  wt=$(extract_wt_path "$output")
+  run git -C "$wt" merge-base --is-ancestor "$local_tip" HEAD
+  assert_failure
 }

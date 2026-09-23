@@ -1,0 +1,62 @@
+.TH SPINCLASS-LOCAL-DEFAULT-REF 7 "" "spinclass" "Spinclass Reference"
+.SH NAME
+spinclass-local-default-ref \- why a merge may leave the local default branch behind
+.SH DESCRIPTION
+A merge targets the default
+.I remote's
+default branch (e.g.\&
+.BR origin/master ).
+It rebases onto it, gates against it, and lands by pushing to it.
+Session creation cuts new branches from the same ref.
+.PP
+The root checkout's
+.I local
+default branch is never read for correctness.
+After the landing push, spinclass fast-forwards it to the landed commit as a
+convenience \(em using git's own
+.B merge \-\-ff\-only
+semantics \(em and reports the result as an
+.B advance local <branch>
+step.
+.PP
+A local-only merge
+.RB ( local_only )
+is the exception: its remote is the checkout itself, so there the
+fast-forward of the local branch IS the landing, and a refusal fails the merge.
+.SH WHY A SKIP IS FINE
+When the fast-forward is not possible, the step is reported as
+.B # SKIP
+and the merge still succeeds.
+The operation that matters \(em the commit landing on the remote \(em has already
+happened; failing it retroactively over a convenience ref would misreport what
+occurred.
+Spinclass's own checks (close, clean, auto-close) already count a branch as
+integrated when either the local default branch or its remote-tracking ref
+contains it.
+.PP
+If you read the local default branch to decide whether work merged, read
+.B <remote>/<branch>
+instead.
+.SH RECONCILING
+The skip reason names the cause and the command:
+.TP
+.B uncommitted changes
+Your edits in the checkout overlap the incoming change.
+Commit or stash them, then run
+.BR "git merge \-\-ff\-only origin/<branch>" .
+.TP
+.B diverged
+The local branch has commits the remote lacks and vice versa.
+Rebase it onto, or reset it to,
+.BR origin/<branch> ;
+which one is your call.
+.TP
+.B ahead
+The local branch has commits the remote lacks.
+Push them, or drop them.
+.SH SEE ALSO
+.BR spinclass-merge-this-session (1),
+.BR spinclass-merge (1),
+.BR spinclass-start (1)
+.PP
+spinclass FDR 0029 (detached landing worktree), spinclass#295, spinclass#315.

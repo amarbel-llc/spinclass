@@ -468,18 +468,22 @@ func TestResolvedGitSyncRecordStream(t *testing.T) {
 	}
 
 	tests := testRecords(recs)
-	if len(tests) != 6 {
-		t.Fatalf("expected 6 test records, got %d: %+v", len(tests), tests)
+	if len(tests) != 7 {
+		t.Fatalf("expected 7 test records, got %d: %+v", len(tests), tests)
 	}
-	// Pull must come first so the rebase target is fresh; the merge queue
-	// (spinclass#235) re-pulls under the landing lock before the landing. The
-	// landing (#284) is itself the push to origin — no separate push point.
-	assertTestPoint(t, tests, 0, "pull main", true)
+	// The fetch must come first so the rebase target (origin/main, #315) is
+	// fresh; the merge queue (spinclass#235) re-fetches under the landing lock
+	// before the landing. The landing (#284) is itself the push to origin — no
+	// separate push point — followed by the local advance (#295).
+	assertTestPoint(t, tests, 0, "fetch origin/main", true)
 	assertTestPoint(t, tests, 1, "rebase feature-sync", true)
-	assertTestPoint(t, tests, 2, "pull main (landing)", true)
+	assertTestPoint(t, tests, 2, "fetch origin/main (landing)", true)
 	assertTestPoint(t, tests, 3, "merge feature-sync", true)
-	assertTestPoint(t, tests, 4, "remove worktree feature-sync", true)
-	assertTestPoint(t, tests, 5, "delete branch feature-sync", true)
+	if !strings.HasPrefix(tests[4].Description, "advance local main to ") || !tests[4].OK {
+		t.Errorf("tests[4] = %+v, want an ok 'advance local main to <sha>' point", tests[4])
+	}
+	assertTestPoint(t, tests, 5, "remove worktree feature-sync", true)
+	assertTestPoint(t, tests, 6, "delete branch feature-sync", true)
 	if !hasSummary(recs) {
 		t.Errorf("expected summary record (stream framing), got: %+v", recs)
 	}
@@ -487,12 +491,10 @@ func TestResolvedGitSyncRecordStream(t *testing.T) {
 
 // TestResolvedGitSyncPullsBeforeRebase is the #29 regression test.
 //
-// Scenario: origin has moved since the session was started. The session
-// branch is rebased onto local master, which is behind origin. Before
-// this fix, `git merge --ff-only` in the final merge step fails because
-// local master couldn't fast-forward to the post-rebase session branch
-// tip. After this fix, the upfront pull brings local master up to the
-// origin tip, the rebase targets the current ref, and the merge succeeds.
+// Scenario: origin has moved since the session was started, and the root's
+// local main is behind it. The upfront fetch refreshes origin/main, the
+// rebase targets it (#315 — never the stale local ref), and the merge lands;
+// the post-push advance (#295) then brings local main up to the landing.
 func TestResolvedGitSyncPullsBeforeRebase(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("GIT_CEILING_DIRECTORIES", root)
@@ -549,7 +551,7 @@ func TestResolvedGitSyncPullsBeforeRebase(t *testing.T) {
 	}
 
 	tests := testRecords(recs)
-	assertTestPoint(t, tests, 0, "pull main", true)
+	assertTestPoint(t, tests, 0, "fetch origin/main", true)
 	merged := false
 	for _, tr := range tests {
 		if tr.Description == "merge feature-stale" && tr.OK {
@@ -560,16 +562,13 @@ func TestResolvedGitSyncPullsBeforeRebase(t *testing.T) {
 		t.Errorf("expected merge to succeed after upfront pull, got: %+v", tests)
 	}
 
-	// And the concurrent origin commit should be present in local main now.
-	mainLog := runGit(t, repoDir, "log", "--oneline", "main")
-	if !strings.Contains(mainLog, "concurrent commit on origin") {
-		t.Errorf("expected concurrent origin commit on local main after pull, got log:\n%s", mainLog)
-	}
-	// The feature commit landed on origin (#284: the local ref is not advanced
-	// by the merge — only by the next pull).
+	// The feature commit landed on origin, and local main followed it (#295).
 	originLog := runGit(t, repoDir, "log", "--oneline", "origin/main")
 	if !strings.Contains(originLog, "feature commit") {
 		t.Errorf("expected feature commit on origin/main after merge, got log:\n%s", originLog)
+	}
+	if local, origin := runGit(t, repoDir, "rev-parse", "main"), runGit(t, bareDir, "rev-parse", "main"); local != origin {
+		t.Errorf("local main = %s, want it advanced to the landing %s", local, origin)
 	}
 }
 

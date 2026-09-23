@@ -61,6 +61,12 @@ func buildApp() *command.App {
 			Section: 7,
 			Name:    "spinclass-build-pins.7",
 		},
+		{
+			Source:  extraManpages,
+			Path:    "doc/spinclass-local-default-ref.7",
+			Section: 7,
+			Name:    "spinclass-local-default-ref.7",
+		},
 	}
 
 	app.Params = []command.Param{

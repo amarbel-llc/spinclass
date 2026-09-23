@@ -22,6 +22,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/executor"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/hookrun"
+	"code.linenisgreat.com/spinclass/internal/landing"
 	"code.linenisgreat.com/spinclass/internal/mergelock"
 	"code.linenisgreat.com/spinclass/internal/present"
 	"code.linenisgreat.com/spinclass/internal/session"
@@ -177,20 +178,17 @@ func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch s
 		return "", gateErr
 	}
 
-	// Pull the default branch BEFORE rebasing, so the session branch is
-	// rebased onto the current origin tip rather than a stale local ref.
-	// Otherwise a concurrent commit on origin/<default> arriving between
-	// session start and merge leaves `git merge --ff-only` unable to
-	// fast-forward. See #29.
-	if gitSync {
-		out, pullErr := pullDefault(context.Background(), repoPath, wtPath, defaultBranch)
-		if pullErr != nil {
-			return "", failStep(ts, "pull "+defaultBranch, pullErr, out)
-		}
-		ts.Ok("pull " + defaultBranch)
+	// Rebase onto the landing target (#315): a gitSync merge's target is the
+	// remote's default branch, freshly fetched (#29) — the root's local default
+	// ref is never read, so a stale, diverged, or dirty-blocked local branch
+	// cannot fail or skew the merge. A local-only merge targets the local
+	// branch itself.
+	target := landing.ForMerge(repoPath, defaultBranch, gitSync)
+	if err := fetchTarget(context.Background(), ts, target, wtPath, ""); err != nil {
+		return "", err
 	}
 
-	out, rebaseErr := git.RunEnv(wtPath, []string{"GIT_SEQUENCE_EDITOR=true"}, "rebase", defaultBranch, "-i")
+	out, rebaseErr := git.RunEnv(wtPath, []string{"GIT_SEQUENCE_EDITOR=true"}, "rebase", target.Ref(), "-i")
 	if rebaseErr != nil {
 		return "", failStep(ts, "rebase "+branch, rebaseErr, out)
 	}
@@ -216,8 +214,8 @@ func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch s
 	}
 
 	// Short-circuit so an empty merge doesn't pay for the pre-merge hook.
-	if git.CommitsAhead(wtPath, defaultBranch, branch) == 0 {
-		noopErr := fmt.Errorf("nothing to merge: %s has no commits ahead of %s", branch, defaultBranch)
+	if git.CommitsAhead(wtPath, target.Ref(), branch) == 0 {
+		noopErr := fmt.Errorf("nothing to merge: %s has no commits ahead of %s", branch, target.Label())
 		return "", failStep(ts, "merge "+branch, noopErr, "")
 	}
 
@@ -333,21 +331,20 @@ const LandWorktreePrefix = ".land-"
 //
 // By default (spinclass#235) it serializes on the per-repo landing lock
 // (internal/mergelock, an flock in the shared .git dir) and, under the lock:
-// re-pulls the default branch (gitSync only), checks whether the default-branch
-// tip is still an ancestor of pinnedSha, rebases the pinned commits onto a
-// moved tip in a transient landing worktree when it is not, runs the pre-merge
-// hook against the exact LANDING sha, lands it, and tears down — so the gate
-// always verifies the tree that actually lands and the landing can no longer
-// lose a race to a concurrent merge.
+// re-fetches the landing target (gitSync only), checks whether the target tip
+// is still an ancestor of pinnedSha, rebases the pinned commits onto a moved
+// tip in a transient landing worktree when it is not, runs the pre-merge hook
+// against the exact LANDING sha, lands it, and tears down — so the gate always
+// verifies the tree that actually lands and the landing can no longer lose a
+// race to a concurrent merge.
 //
-// The landing itself (spinclass#284, Alt B): a gitSync merge pushes the landing
-// sha straight to the remote's default branch from a disposable detached
-// landing worktree — the root checkout's LOCAL default ref is never advanced by
-// the merge (the self-healing pulls in PrepareMerge and step (a) catch it up
-// later), and a refused push (stale tip, dropped credential) exits having moved
-// nothing, so a failed landing is a plain retry rather than a local-ahead
-// divergence. A local-only merge (gitSync=false) still ff-only merges into the
-// root checkout: there, the local ref IS the landing.
+// The landing itself (spinclass#284, Alt B; landing.Target, #315): a gitSync
+// merge pushes the landing sha straight to the remote's default branch from a
+// disposable detached landing worktree, and a refused push (stale tip, dropped
+// credential) exits having moved nothing, so a failed landing is a plain retry.
+// The root checkout's local default branch is never read for correctness. A
+// local-only merge (gitSync=false) fast-forwards the local default branch:
+// there, the local ref IS the landing.
 //
 // Teardown is guarded by the pin contract: when the session branch tip advanced
 // past pinnedSha while this merge waited (commits "left for a later merge"),
@@ -419,19 +416,16 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 		ts.Ok(fmt.Sprintf("merge queue wait %s (behind %s)", time.Since(waitStart).Round(time.Second), lastHolder))
 	}
 
-	// (a) Re-pull under the lock: PrepareMerge's pull is now stale by the
+	// (a) Re-fetch under the lock: PrepareMerge's fetch is now stale by the
 	// length of the queue wait.
-	if gitSync {
-		out, pullErr := pullDefault(ctx, repoPath, wtPath, defaultBranch)
-		if pullErr != nil {
-			return nil, failStep(ts, "pull "+defaultBranch+" (landing)", pullErr, out)
-		}
-		ts.Ok("pull " + defaultBranch + " (landing)")
+	target := landing.ForMerge(repoPath, defaultBranch, gitSync)
+	if fErr := fetchTarget(ctx, ts, target, wtPath, " (landing)"); fErr != nil {
+		return nil, fErr
 	}
 
-	// (b) Ancestry check: pinnedSha lands as-is iff the default-branch tip is
-	// still an ancestor of it (nothing landed since PrepareMerge pinned).
-	needRebase := !git.IsAncestor(repoPath, defaultBranch, pinnedSha)
+	// (b) Ancestry check: pinnedSha lands as-is iff the target tip is still an
+	// ancestor of it (nothing landed since PrepareMerge pinned).
+	needRebase := !git.IsAncestor(repoPath, target.Ref(), pinnedSha)
 
 	// (c) The disposable landing worktree (#284, Alt B). A gitSync merge always
 	// lands from one: the landing sha is pushed to the remote from that detached
@@ -463,7 +457,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	}
 	if needRebase {
 		var landErr error
-		landingSha, landErr = rebaseLanding(ts, landPath, branch, defaultBranch)
+		landingSha, landErr = rebaseLanding(ts, landPath, branch, target.Ref())
 		if landErr != nil {
 			return nil, landErr
 		}
@@ -484,23 +478,21 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	// rebased past a moved tip. gitSync: push it to the remote's default branch
 	// from the landing worktree — the ff check is the remote's own, so a stale
 	// or unauthenticated push fails having moved NOTHING, local or remote. Local
-	// only: the ff-only merge into the root checkout is the landing.
+	// only: the fast-forward of the local default branch is the landing.
 	mergeLabel := "merge " + branch
 	if rebased {
 		mergeLabel = "merge " + branch + " (rebased onto moved " + defaultBranch + ")"
 	}
-	if gitSync {
-		out, pushErr := git.PushRef(landPath, git.BranchRemote(repoPath, defaultBranch), landingSha, defaultBranch)
-		if pushErr != nil {
-			return blobLinks, failStep(ts, mergeLabel, pushErr, out)
-		}
-	} else {
-		out, mergeErr := git.Run(repoPath, "merge", "--ff-only", landingSha)
-		if mergeErr != nil {
-			return blobLinks, failStep(ts, mergeLabel, mergeErr, out)
-		}
+	if out, landErr := target.Land(landPath, landingSha); landErr != nil {
+		return blobLinks, failStep(ts, mergeLabel, landErr, out)
 	}
 	ts.Ok(mergeLabel)
+
+	// (e') Advance the root's local default branch to what just landed, still
+	// under the lock (a sibling's landing moves the same ref) and before the
+	// post-merge phase (so deploy scripts see it). Ergonomics only (#295): a
+	// refusal is a SKIP, never a failure — the merge has already landed.
+	reportLocalAdvance(ts, target, landingSha)
 
 	// (f) Teardown, still under the lock; nothing is pushed here — a gitSync
 	// landing already pushed in (e). The pin contract allows commits to land on
@@ -562,36 +554,47 @@ func finishMergeUnqueued(ctx context.Context, rep *crap.Reporter, ts *crap.TestS
 	return blobLinks, nil
 }
 
-// pullDefault freshens defaultBranch from its remote: it fetches from credDir
-// — the session worktree, the one place a per-session push credential (FDR
-// 0028) is wired, so a dropped ssh-agent cannot fail the fetch — and then
-// fast-forwards the ROOT checkout's local ref from the remote-tracking ref
-// (through the worktree that has it checked out, or by moving the ref when
-// none does). This replaces a `git pull` in the root, which authenticated off
-// the serve process env and merged into whatever branch the root happened to
-// have checked out (#284, #285). A local ref already ahead of the remote is
-// left alone; a diverged one is an error, as the ff-only pull was.
-func pullDefault(ctx context.Context, repoPath, credDir, defaultBranch string) (string, error) {
-	remote := git.BranchRemote(repoPath, defaultBranch)
-	if out, err := git.FetchContext(ctx, credDir, remote, defaultBranch); err != nil {
-		return out, err
+// fetchTarget refreshes a remote target's tracking ref, emitting a
+// "fetch <remote>/<branch><suffix>" point; a no-op (no point) for self. It
+// fetches from credDir — the session worktree, the one place a per-session
+// push credential (FDR 0028) is wired, so a dropped ssh-agent cannot fail it.
+// It deliberately does NOT touch the root's local default branch (#315): the
+// merge reads only the tracking ref, and the local branch is advanced once,
+// opportunistically, after the landing push.
+func fetchTarget(ctx context.Context, ts *crap.TestStream, target landing.Target, credDir, suffix string) error {
+	if target.IsSelf() {
+		return nil
 	}
-	localRef := "refs/heads/" + defaultBranch
-	tracking := "refs/remotes/" + remote + "/" + defaultBranch
-	if git.IsAncestor(repoPath, tracking, localRef) {
-		return "", nil // current, or ahead (a local-only landing)
+	label := "fetch " + target.Label() + suffix
+	if out, err := target.Fetch(ctx, credDir); err != nil {
+		return failStep(ts, label, err, out)
 	}
-	if !git.IsAncestor(repoPath, localRef, tracking) {
-		return "", fmt.Errorf("local %s has diverged from %s/%s; rebase or reset it in the checkout", defaultBranch, remote, defaultBranch)
+	ts.Ok(label)
+	return nil
+}
+
+// LocalAdvanceSkipPrefix opens every local-advance skip reason, so a reader —
+// and the async completion wake, which lifts these lines — sees first that
+// the merge DID land (#295).
+const LocalAdvanceSkipPrefix = "merge LANDED on "
+
+// reportLocalAdvance opportunistically fast-forwards a remote target's local
+// default branch to landingSha and emits an "advance local <branch>" point: ok
+// when it moved (or already matched), a skip naming the landing, the reason,
+// and the reconcile command otherwise. A no-op for self, whose landing already
+// moved the local branch.
+func reportLocalAdvance(ts *crap.TestStream, target landing.Target, landingSha string) {
+	if target.IsSelf() {
+		return
 	}
-	holder, err := git.BranchWorktree(repoPath, defaultBranch)
-	if err != nil {
-		return "", err
+	label := "advance local " + target.Branch
+	adv := target.AdvanceLocal(landingSha)
+	if !adv.Skipped() {
+		ts.Ok(label + " to " + shortSha(landingSha))
+		return
 	}
-	if holder == "" {
-		return "", git.BranchSetTo(repoPath, defaultBranch, tracking)
-	}
-	return git.MergeFFOnly(holder, tracking)
+	ts.Skip(label, fmt.Sprintf("%s%s at %s; only local %s was not advanced: %s",
+		LocalAdvanceSkipPrefix, target.Label(), shortSha(landingSha), target.Branch, adv.SkipReason()))
 }
 
 // addLandingWorktree creates the transient detached landing worktree
@@ -629,15 +632,15 @@ func addLandingWorktree(ts *crap.TestStream, repoPath, branch, pinnedSha string)
 }
 
 // rebaseLanding replays the landing worktree's HEAD (the pinned commits) onto
-// the moved defaultBranch tip and returns the resulting landing sha. Until that
-// sha lands, the worktree's HEAD is its only ref — the caller owns the
-// worktree's cleanup and must not run it before then.
+// the moved landing-target tip (targetRef, landing.Target.Ref) and returns the
+// resulting landing sha. Until that sha lands, the worktree's HEAD is its only
+// ref — the caller owns the worktree's cleanup and must not run it before then.
 //
 // On rebase conflict (or any rebase failure) it best-effort aborts, emits a
 // failing "land <branch>" test point, and returns an error wrapping
 // ErrIntegrationConflict.
-func rebaseLanding(ts *crap.TestStream, landPath, branch, defaultBranch string) (landingSha string, err error) {
-	out, rebaseErr := git.Rebase(landPath, defaultBranch)
+func rebaseLanding(ts *crap.TestStream, landPath, branch, targetRef string) (landingSha string, err error) {
+	out, rebaseErr := git.Rebase(landPath, targetRef)
 	if rebaseErr != nil {
 		conflicted, _ := git.UnmergedPaths(landPath)
 		_, _ = git.Run(landPath, "rebase", "--abort") // best-effort

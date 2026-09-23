@@ -726,8 +726,9 @@ func (sf Sweatfile) AutoRebuildOnResume() bool {
 
 // AllowStaleBase reports whether [hooks].allow-stale-base is true. When set,
 // session creation proceeds even though the default branch could not be
-// confirmed current — an unreachable remote, a dirty checkout blocking the
-// fast-forward, a diverged local default (spinclass#250, internal/basebranch).
+// confirmed current — the fetch failed, e.g. an unreachable remote
+// (spinclass#250, internal/basebranch). A dirty or diverged LOCAL default
+// branch no longer refuses at all (#315): the base is the fetched remote tip.
 //
 // This is the persistent half of the override; `sc start --allow-stale-base` is
 // the per-invocation half. There is deliberately no equivalent MCP tool

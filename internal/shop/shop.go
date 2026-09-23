@@ -207,9 +207,12 @@ func reportCredentialSweep(tw *tap.Writer, revoked int, errs []error) {
 	}
 }
 
-// reportBase emits the base-branch step's test point. Successes and skips only:
-// a failure aborts creation and travels back as an error, which the caller
-// already surfaces, so a test point for it would report the same thing twice.
+// reportBase emits the base-branch step's test point(s). Successes and skips
+// only: a failure aborts creation and travels back as an error, which the
+// caller already surfaces, so a test point for it would report the same thing
+// twice. A base freshened from the remote whose local default branch could not
+// follow (#315) is an ok base point plus a separate "advance local" skip — the
+// base is fine; only the ergonomic local ref lags.
 func reportBase(tw *tap.Writer, repoPath string, res basebranch.Result) {
 	if tw == nil {
 		return
@@ -220,6 +223,11 @@ func reportBase(tw *tap.Writer, repoPath string, res basebranch.Result) {
 	}
 	if res.Action.Skipped() {
 		tw.Skip(desc, res.Reason)
+		return
+	}
+	if res.Action == basebranch.LocalSkipped {
+		tw.Ok(desc + " — from " + res.Target)
+		tw.Skip("advance local "+res.Branch, res.Reason)
 		return
 	}
 	if res.Reason != "" {

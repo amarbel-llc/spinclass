@@ -283,7 +283,7 @@ func registerMCPOnlyCommands(app *command.App) {
 
 // localOnlyParamDesc and defaultBranchParamDesc are shared by merge-this-session
 // and its -async twin so the two surfaces cannot drift (#126/#158).
-const localOnlyParamDesc = "Merge into the LOCAL default branch only — skip the pull-before and push-after. Default is to pull+push so the merge reaches origin and 'merged' means 'on origin' (#126). Set this only for a deliberate local-only merge you intend to push later; the result text flags a local-only merge as NOT pushed."
+const localOnlyParamDesc = "Merge into the LOCAL default branch only — skip the fetch-before and push-after. Default is to pull+push so the merge reaches origin and 'merged' means 'on origin' (#126). Set this only for a deliberate local-only merge you intend to push later; the result text flags a local-only merge as NOT pushed."
 
 const defaultBranchParamDesc = `Override the default branch when both main and master exist in the repo. Omit to auto-detect; pass "main" or "master" to resolve the ambiguity without an interactive terminal.`
 

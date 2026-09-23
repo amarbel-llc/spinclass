@@ -1066,25 +1066,26 @@ By default,
 .B spawn\-session
 and the
 .B [[start\-commands]]
-plugins fetch the default branch and fast\-forward the local copy before cutting
-the new branch from it, then pass that commit as an explicit start\-point.
+plugins fetch the default branch and cut the new branch from the fetched
+remote tip, passed as an explicit start\-point.
 A stale base is not merely stale source:
 .B flake.lock
 is part of the tree, so it materializes a stale devShell and every tool pinned
 below it.
 .IP
-Three conditions refuse creation, and this knob (or the per\-invocation
+Only an unverifiable base refuses creation \(em the fetch failed (e.g. the
+remote is unreachable) \(em and this knob (or the per\-invocation
 .BR \-\-allow\-stale\-base ,
 which
 .B spawn\-session
-deliberately does not expose) is the way past them: the remote is unreachable,
-a worktree holding the default branch has uncommitted changes that block the
-fast\-forward, or the local default branch has diverged from its upstream.
-A default branch that is merely
-.I ahead
-of upstream is not stale \(em it contains everything upstream has \(em and never
-refuses.
-Neither does a repo with no remote configured, nor one where
+deliberately does not expose) is the way past it.
+The local default branch is then fast\-forwarded for convenience only: when
+that is blocked (uncommitted changes in the way), or the local branch is ahead
+of or has diverged from upstream, creation proceeds and reports an
+.B advance local <branch>
+skip; see
+.BR spinclass\-local\-default\-ref (7).
+Neither does a repo with no remote configured refuse, nor one where
 .B main
 and
 .B master

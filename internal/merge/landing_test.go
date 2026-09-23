@@ -39,13 +39,12 @@ func setupSyncRepo(t *testing.T) (bareDir, repoDir string) {
 	return bareDir, repoDir
 }
 
-// TestResolvedGitSyncLandsOnOriginWithoutAdvancingRootRef is the core #284
-// (Alt B) property: a gitSync worktree merge lands by pushing the landing sha
-// straight to origin/<default> from a disposable detached worktree. The root
-// checkout's LOCAL default ref is never advanced by the merge — it stays where
-// the pre-merge pull left it — while origin (and the remote-tracking ref) carry
-// the session commit.
-func TestResolvedGitSyncLandsOnOriginWithoutAdvancingRootRef(t *testing.T) {
+// TestResolvedGitSyncLandsOnOriginThenAdvancesLocal is the core #284 (Alt B)
+// property plus #295: a gitSync worktree merge lands by pushing the landing
+// sha straight to origin/<default> from a disposable detached worktree, and
+// only AFTER that push succeeds is the root's local default ref fast-forwarded
+// to it, as its own "advance local" point.
+func TestResolvedGitSyncLandsOnOriginThenAdvancesLocal(t *testing.T) {
 	bareDir, repoDir := setupSyncRepo(t)
 	wtPath := setupWorktree(t, repoDir, "feature-land")
 	if err := os.WriteFile(filepath.Join(wtPath, "land.txt"), []byte("land"), 0o644); err != nil {
@@ -54,7 +53,6 @@ func TestResolvedGitSyncLandsOnOriginWithoutAdvancingRootRef(t *testing.T) {
 	runGit(t, wtPath, "add", "land.txt")
 	runGit(t, wtPath, "commit", "-m", "session commit")
 	sessionSha := runGit(t, wtPath, "rev-parse", "HEAD")
-	rootMainBefore := runGit(t, repoDir, "rev-parse", "main")
 
 	recs, err := runResolved(t, &mockExecutor{}, repoDir, wtPath, "feature-land", "main", true, false)
 	if err != nil {
@@ -67,22 +65,103 @@ func TestResolvedGitSyncLandsOnOriginWithoutAdvancingRootRef(t *testing.T) {
 	if got := runGit(t, repoDir, "rev-parse", "origin/main"); got != sessionSha {
 		t.Errorf("remote-tracking origin/main = %s, want %s", got, sessionSha)
 	}
-	if got := runGit(t, repoDir, "rev-parse", "main"); got != rootMainBefore {
-		t.Errorf("root local main advanced to %s; Alt B must leave it at %s", got, rootMainBefore)
+	if got := runGit(t, repoDir, "rev-parse", "main"); got != sessionSha {
+		t.Errorf("root local main = %s, want it advanced to the landing %s", got, sessionSha)
 	}
 	assertNoLandWorktrees(t, repoDir)
 
 	// The landing is the push: one "merge <branch>" point, no separate "push".
 	tests := testRecords(recs)
-	if len(tests) != 6 {
-		t.Fatalf("expected 6 test records, got %d: %+v", len(tests), tests)
+	if len(tests) != 7 {
+		t.Fatalf("expected 7 test records, got %d: %+v", len(tests), tests)
 	}
-	assertTestPoint(t, tests, 0, "pull main", true)
+	assertTestPoint(t, tests, 0, "fetch origin/main", true)
 	assertTestPoint(t, tests, 1, "rebase feature-land", true)
-	assertTestPoint(t, tests, 2, "pull main (landing)", true)
+	assertTestPoint(t, tests, 2, "fetch origin/main (landing)", true)
 	assertTestPoint(t, tests, 3, "merge feature-land", true)
-	assertTestPoint(t, tests, 4, "remove worktree feature-land", true)
-	assertTestPoint(t, tests, 5, "delete branch feature-land", true)
+	assertTestPoint(t, tests, 4, "advance local main to "+shortSha(sessionSha), true)
+	assertTestPoint(t, tests, 5, "remove worktree feature-land", true)
+	assertTestPoint(t, tests, 6, "delete branch feature-land", true)
+}
+
+// TestResolvedGitSyncDirtyRootSkipsLocalAdvance pins #295's rule: an
+// uncommitted edit in the root that overlaps the incoming change blocks the
+// local fast-forward, and that is a SKIP naming the landing — never a failed
+// merge. The operator's edit is left untouched.
+func TestResolvedGitSyncDirtyRootSkipsLocalAdvance(t *testing.T) {
+	bareDir, repoDir := setupSyncRepo(t)
+	wtPath := setupWorktree(t, repoDir, "feature-dirty")
+	if err := os.WriteFile(filepath.Join(wtPath, "file.txt"), []byte("from session"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "commit", "-am", "session edits file.txt")
+	rootMainBefore := runGit(t, repoDir, "rev-parse", "main")
+	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("operator's uncommitted edit"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	recs, err := runResolved(t, &mockExecutor{}, repoDir, wtPath, "feature-dirty", "main", true, false)
+	if err != nil {
+		t.Fatalf("a blocked local advance must not fail the merge: %v\n%+v", err, recs)
+	}
+	landed := runGit(t, bareDir, "rev-parse", "main")
+	if landed == rootMainBefore {
+		t.Fatal("the merge did not land on origin")
+	}
+	if got := runGit(t, repoDir, "rev-parse", "main"); got != rootMainBefore {
+		t.Errorf("root local main moved to %s despite the blocking edit", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(repoDir, "file.txt")); string(got) != "operator's uncommitted edit" {
+		t.Errorf("the operator's edit was touched: %q", got)
+	}
+
+	tr, ok := findTest(testRecords(recs), "advance local main")
+	if !ok {
+		t.Fatalf("no 'advance local main' point in %+v", testRecords(recs))
+	}
+	if tr.Directive == nil || tr.Directive.Kind != "skip" {
+		t.Fatalf("advance point = %+v, want a skip", tr)
+	}
+	for _, want := range []string{LocalAdvanceSkipPrefix + "origin/main at " + shortSha(landed), "uncommitted changes", "spinclass-local-default-ref(7)"} {
+		if !strings.Contains(tr.Directive.Reason, want) {
+			t.Errorf("skip reason %q lacks %q", tr.Directive.Reason, want)
+		}
+	}
+}
+
+// TestResolvedGitSyncDivergedRootStillMerges pins #315: a root local main that
+// has diverged from origin is irrelevant to a remote merge — it rebases onto
+// origin/main, lands, and reports only the local advance as skipped. (Before
+// #315 the pre-merge pull refused a diverged local and failed the merge.)
+func TestResolvedGitSyncDivergedRootStillMerges(t *testing.T) {
+	bareDir, repoDir := setupSyncRepo(t)
+	wtPath := setupWorktree(t, repoDir, "feature-div")
+	if err := os.WriteFile(filepath.Join(wtPath, "d.txt"), []byte("d"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "d.txt")
+	runGit(t, wtPath, "commit", "-m", "session commit")
+	runGit(t, repoDir, "commit", "--allow-empty", "-m", "local-only commit on root main")
+	localOnly := runGit(t, repoDir, "rev-parse", "main")
+
+	recs, err := runResolved(t, &mockExecutor{}, repoDir, wtPath, "feature-div", "main", true, false)
+	if err != nil {
+		t.Fatalf("a diverged local main must not fail a remote merge: %v\n%+v", err, recs)
+	}
+	log := runGit(t, bareDir, "log", "--format=%s", "main")
+	if !strings.Contains(log, "session commit") {
+		t.Errorf("session commit not on origin:\n%s", log)
+	}
+	if strings.Contains(log, "local-only commit") {
+		t.Errorf("the root's local-only commit was pushed:\n%s", log)
+	}
+	if got := runGit(t, repoDir, "rev-parse", "main"); got != localOnly {
+		t.Errorf("diverged local main was moved to %s", got)
+	}
+	tr, ok := findTest(testRecords(recs), "advance local main")
+	if !ok || tr.Directive == nil || tr.Directive.Kind != "skip" || !strings.Contains(tr.Directive.Reason, "diverged") {
+		t.Errorf("want a 'diverged' skip on 'advance local main', got %+v (found=%v)", tr, ok)
+	}
 }
 
 // TestResolvedGitSyncMirrorsCredentialIntoLandingWorktree covers the FDR 0028
@@ -187,9 +266,9 @@ func TestResolvedGitSyncTeardownRevokesCredential(t *testing.T) {
 	}
 }
 
-// TestResolvedGitSyncPullWithRootOffDefault covers the credentialed pull's
+// TestResolvedGitSyncPullWithRootOffDefault covers the local advance's
 // ref-move path: the root checkout is parked on another branch, so the
-// default branch is not checked out anywhere and the pull advances its ref
+// default branch is not checked out anywhere and the advance moves its ref
 // directly (a `git pull` in the root would have pulled into the parked branch).
 func TestResolvedGitSyncPullWithRootOffDefault(t *testing.T) {
 	bareDir, repoDir := setupSyncRepo(t)
@@ -212,14 +291,13 @@ func TestResolvedGitSyncPullWithRootOffDefault(t *testing.T) {
 	runGit(t, other, "add", "o.txt")
 	runGit(t, other, "commit", "-m", "concurrent commit on origin")
 	runGit(t, other, "push")
-	originTip := runGit(t, bareDir, "rev-parse", "main")
 
 	recs, err := runResolved(t, &mockExecutor{}, repoDir, wtPath, "feature-parked", "main", true, false)
 	if err != nil {
 		t.Fatalf("Resolved() error: %v\n%+v", err, recs)
 	}
-	if got := runGit(t, repoDir, "rev-parse", "main"); got != originTip {
-		t.Errorf("local main = %s after the pull, want origin's pre-merge tip %s", got, originTip)
+	if got, landed := runGit(t, repoDir, "rev-parse", "main"), runGit(t, bareDir, "rev-parse", "main"); got != landed {
+		t.Errorf("local main = %s after the merge, want the landing %s", got, landed)
 	}
 	if got := runGit(t, repoDir, "rev-parse", "--abbrev-ref", "HEAD"); got != "parked" {
 		t.Errorf("root checkout moved off its parked branch: %s", got)

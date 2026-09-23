@@ -40,7 +40,7 @@ func registerSessionCommands(app *command.App) {
 			{Name: "description", Type: command.String, Description: "Freeform session description (quote multi-word strings)"},
 			{Name: "merge-on-close", Type: command.Bool, Description: "Auto-merge worktree into default branch on session close"},
 			{Name: "no-attach", Type: command.Bool, Description: "Create worktree but skip attaching"},
-			{Name: "allow-stale-base", Type: command.Bool, Description: "Create even when the default branch could not be confirmed current (offline, or a dirty/diverged checkout)"},
+			{Name: "allow-stale-base", Type: command.Bool, Description: "Create even when the default branch could not be fetched (e.g. offline)"},
 			{Name: "allow-no-credential", Type: command.Bool, Description: "Create even when the [auth] push-credential mint fails (forge API unreachable, no live agent): warn and use the inherited ssh-agent instead"},
 		},
 		RunCLI: runStart,
@@ -109,7 +109,7 @@ func registerSessionCommands(app *command.App) {
 				"--local-only passes through to the merge step (skip the pull-before and push-after). " +
 				"--post-merge H runs the shell command H after the merge lands, in the default-branch checkout, with SPINCLASS_MERGED_SHA / _MERGED_BRANCH / _DEFAULT_BRANCH / _MERGE_PUSHED / _REPO_PATH set (plus SPINCLASS_POST_MERGE_TIMEOUT / _TIMEOUT_SECONDS / _DEADLINE, all \"0\": dynamic hooks are uncapped). Repeatable (multiple --post-merge flags run in order). Failures are non-fatal (severity=warn): the merge is already durable. Composes with [[post-merge]] named targets and [hooks].post-merge from the sweatfile. " +
 				"--post-merge-timeout D overrides [hooks].post-merge-timeout for the sweatfile post-merge phase of this run's merge (a Go duration, or \"0\" to disable the cap; see `sc merge`). " +
-				"--allow-stale-base creates the session even when the repo's default branch could not be confirmed current (offline, or a dirty/diverged checkout). " +
+				"--allow-stale-base creates the session even when the repo's default branch could not be fetched (e.g. offline). " +
 				"Output uses the merge/check present stack: --format auto (viewport on a TTY, ndjson when piped) | viewport | plain | ndjson. " +
 				"Caveats (raw passthrough, like `sc exec`): util arguments after `--` that collide with spinclass's global flags are consumed before the `--`; flags must precede the `--`.",
 		},
