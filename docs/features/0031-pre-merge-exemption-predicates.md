@@ -3,8 +3,10 @@ status: exploring
 date: 2026-09-28
 promotion-criteria: |
   exploring -> proposed: the operator accepts this draft's recommendation (or
-  picks an alternative), in particular the base-tree trust rule. The CLI
-  question is already settled by operator decision: terminal merges stay exempt.
+  picks an alternative). As of 2026-09-28 the operator has accepted: the
+  base-tree trust rule, terminal merges staying exempt, the late MCP refusal,
+  leaving the Bash `sc merge` hole open, and fixing FDR 0007 drift alongside
+  this work. What remains is the go-ahead to implement.
   proposed -> experimental: `[[pre-merge-exemptions]]` ships and circus's
   sweatfile declares its lock-only predicate. An agent-driven MCP merge of an
   input bump then lands with no attestation and an `exempt (lock-only)`
@@ -188,8 +190,11 @@ Rejected in light of that decision (recorded for a future revisit):
 - a `--skip-attestation=<reason>` two-halves flag.
 
 Both would also have closed the "agent shells out to `sc merge` via Bash" hole.
-That hole stays open by operator decision. Any mitigation belongs to
-permission tiers / PreToolUse, not to this gate.
+That hole stays open by operator decision (2026-09-28), as a known and accepted
+gap. It is low-risk in practice: fleet agents run with Bash disabled in favour
+of `develop-run` and just recipes. A workaround still exists, but agents have
+proven averse to taking it. Any future mitigation belongs to permission tiers /
+PreToolUse, not to this gate.
 
 ### Verdicts
 
@@ -280,4 +285,6 @@ handle is left for a separate issue.
   although the gate ships and spinclass's own sweatfile uses it. Its State
   section also says the attestation is cleared *after* the hook, but the code
   consumes it before `PrepareMerge` (sync) or at dispatch/enqueue (async).
-  Both should be fixed alongside this work.
+  The operator decided (2026-09-28) to fix both in the same change that
+  implements this FDR: correct the State text and promote 0007 to
+  `experimental`.
