@@ -239,6 +239,19 @@ func TestCleanPrunesOrphanedDeadPidLandWorktree(t *testing.T) {
 	}
 }
 
+// The exemption-predicate merge-base worktrees (.exempt-*, FDR 0031) are
+// orphaned the same way on a hard kill and reaped the same way.
+func TestCleanPrunesOrphanedDeadPidExemptWorktree(t *testing.T) {
+	_, repoDir := setupRepo(t)
+	orphan := makeTransientWorktreeDir(t, repoDir, ".exempt-feature-abc123-"+itoa(deadPID))
+
+	_ = captureRun(t, repoDir, false, false, true, "tap")
+
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Errorf("expected orphan exemption worktree removed, still present at %q (err=%v)", orphan, err)
+	}
+}
+
 func TestCleanKeepsLivePidLandWorktree(t *testing.T) {
 	_, repoDir := setupRepo(t)
 	live := makeTransientWorktreeDir(t, repoDir, ".land-feature-abc123-"+itoa(os.Getpid()))

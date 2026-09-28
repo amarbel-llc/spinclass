@@ -868,7 +868,9 @@ When the resolved list is non-empty, those MCP tools refuse to proceed
 until a fresh attestation has been recorded via the companion
 *nothing-but-the-truth* tool, which spinclass registers automatically
 alongside whichever of *merge-this-session* / *check-this-session* is
-active. The terminal CLI (*sc merge*, *sc check*) is unaffected.
+active. The terminal CLI (*sc merge*, *sc run*, *sc check*) is exempt from
+the gate. A terminal merge records the bypass as a SKIP point (see *Gate
+behaviour*).
 
 *name*
 	(required) Skill identifier as it appears in the Claude Code skill
@@ -888,6 +890,57 @@ list leaves merge behaviour unchanged.
 
 See *PRE-MERGE SKILL ATTESTATION* below for the *nothing-but-the-truth*
 tool's input schema, lifecycle, and gate-failure response shape.
+
+## [[pre-merge-exemptions]]
+
+Array of tables declaring named predicates that let an un-attested
+*merge-this-session* (or its *-async* twin) land when the attestation gate
+is live. A predicate exits 0 to say "this diff needs no skill attestation";
+any other exit, a spawn failure, or a timeout declines. The first predicate
+that exempts wins, in resolved declaration order. Exemptions cover every
+*[[pre-merge-skills]]* entry. They apply to the MCP merge path only:
+terminal *sc merge* / *sc run* merges are always exempt and never consult
+them (FDR 0031).
+
+*name*
+	(required) Predicate identifier, shown in the merge verdict. A
+	name-only entry (empty or absent *command*) acts as a removal sentinel.
+
+*command*
+	Run via *sh -c*. See *Trust and environment* below.
+
+*Merge:* dedup-by-name, same as *[[pre-merge-skills]]*.
+
+*Trust and environment:* a predicate must not be able to vouch for the
+branch it judges. It is therefore resolved and run from the *merge base*:
+
+- The hierarchy is loaded with the worktree layer replaced by a transient
+  detached worktree at the merge base (*.exempt-*_branch_*-*_sha_*-*_pid_
+  under _.worktrees/_), and the predicate runs with that as its cwd.
+- An exemption added only on the branch being merged never applies to its
+  own merge.
+- The devshell is NOT loaded, because it is head-controlled too. PATH is
+  the merging user's inherited environment, so predicates should need only
+  POSIX tools and *git*.
+
+The environment adds *WORKTREE* (the base worktree), *SPINCLASS\_MERGE\_BASE*,
+*SPINCLASS\_LANDING\_SHA* (the head to judge), *SPINCLASS\_PINNED\_SHA*,
+*SPINCLASS\_MERGED\_BRANCH*, *SPINCLASS\_DEFAULT\_BRANCH*,
+*SPINCLASS\_REPO\_PATH* and *SPINCLASS\_EXEMPTION* (the predicate's name).
+Judge the diff with *git diff "$SPINCLASS\_MERGE\_BASE"
+"$SPINCLASS\_LANDING\_SHA"*, from git objects only. Each predicate is capped
+at 5 minutes.
+
+*When it runs:* after the landing sha is known and before the pre-merge
+hook. On the merge-queue path that is under the landing lock, after any
+landing rebase. A merge that no predicate exempts fails there: nothing
+lands, and no attestation is consumed.
+
+```
+[[pre-merge-exemptions]]
+name    = "lock-only"
+command = 'bash -euo pipefail ci/lock-only-diff.bash "$SPINCLASS_MERGE_BASE" "$SPINCLASS_LANDING_SHA"'
+```
 
 ## [[remotes]]
 
@@ -1044,11 +1097,23 @@ tool fails before running any pre-merge hook with a TAP-14 response
 containing *required\_skills* (the full list, each entry's *name* and
 *rationale*) and *required\_tool:* nothing-but-the-truth*.*
 
-Each merge attempt consumes one attestation. After consumption the record
-is cleared; a subsequent merge requires a new attestation call against the
-current diff. There is no sticky once-per-session mode.
+A merge or check that proceeds on an attestation consumes it.
+*merge-this-session* consumes it before the rebase, and the async twin
+consumes it at dispatch or enqueue. A refusal never consumes it. After
+consumption the record is cleared; a subsequent merge requires a new
+attestation call against the current diff. There is no sticky
+once-per-session mode.
 
-The terminal CLI (*sc merge*, *sc check*) bypasses the gate entirely.
+If no attestation is buffered but *[[pre-merge-exemptions]]* are declared,
+the merge is admitted without consuming anything. The *pre-merge policy*
+stage then either lands it as *exempt (*_name_*)* or fails it before the
+hook with the attestation directive and each declined predicate's verdict.
+
+Every merge with a live gate emits one *pre-merge policy* point before the
+hook: *attested*, *exempt (*_name_*)*, a failure, or, for a terminal merge,
+the SKIP *attestation bypassed (terminal)*. The terminal CLI (*sc merge*,
+*sc run*, *sc check*) is always exempt from the gate, by policy, and no
+plugin can change that (#326).
 
 ## nothing-but-the-truth input schema
 

@@ -28,6 +28,14 @@ type PostMergeOptions struct {
 	// outruns the repo's usual cap is the caller's call to wait for. Parse
 	// caller-supplied strings with sweatfile.ParsePostMergeTimeout.
 	Timeout *time.Duration
+
+	// Gate is how the caller met the pre-merge attestation gate, consumed by
+	// FinishMerge's pre-merge policy stage (FDR 0031). The zero value is
+	// GateTerminal, so every CLI caller gets the always-exempt terminal policy
+	// without opting in; the MCP handlers set GateAttested/GateNeedsExemption.
+	// It rides here, not as another positional, because this struct is already
+	// the per-merge option that travels every hop to FinishMerge.
+	Gate AttestationGate
 }
 
 // TargetsFromFlags maps the CLI spelling of a post-merge target selection

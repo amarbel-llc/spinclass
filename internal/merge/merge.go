@@ -348,14 +348,17 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	// Merge-queue knob. Mirrors PrepareMerge's graceful-degrade hierarchy
 	// load: an unresolvable home or a load failure leaves the queue ENABLED —
 	// the knob only disables when explicitly readable as true.
-	queueDisabled := false
+	var (
+		sessionH     sweatfile.Hierarchy
+		haveSessionH bool
+	)
 	if home, _ := os.UserHomeDir(); home != "" {
 		if h, hErr := sweatfileio.LoadWorktreeHierarchy(home, repoPath, wtPath); hErr == nil {
-			queueDisabled = h.Merged.DisableMergeQueueEnabled()
+			sessionH, haveSessionH = h, true
 		}
 	}
-	if queueDisabled {
-		return finishMergeUnqueued(ctx, rep, ts, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, inSession, activity, pm)
+	if haveSessionH && sessionH.Merged.DisableMergeQueueEnabled() {
+		return finishMergeUnqueued(ctx, rep, ts, sessionH, haveSessionH, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, inSession, activity, pm)
 	}
 
 	// Acquire the per-repo landing lock BEFORE the gate, so the gate always
@@ -447,6 +450,12 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 		rebased = true
 	}
 
+	// (d0) The pre-merge policy stage (FDR 0031), under the lock, judging the
+	// exact landing diff before the expensive hook.
+	if pErr := runAttestationPolicy(ctx, ts, pm.Gate, sessionH, haveSessionH, repoPath, branch, defaultBranch, target.Ref(), pinnedSha, landingSha); pErr != nil {
+		return nil, pErr
+	}
+
 	// (d) The gate, under the lock, against the exact sha that will land.
 	// (With [hooks].disable-merge-build-worktree the hook runs in the session
 	// worktree instead — pre-existing resolveHookDir behavior, in which the
@@ -519,7 +528,14 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 // the [hooks].disable-merge-queue rollback knob: hook on pinnedSha → ff-only →
 // teardown → push, with no lock, no re-pull, and no landing rebase — a default
 // branch that moved during the hook fails the ff-only merge exactly as before.
-func finishMergeUnqueued(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch, pinnedSha string, gitSync, inSession bool, activity io.Writer, pm PostMergeOptions) (blobLinks []check.BlobLink, err error) {
+func finishMergeUnqueued(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, sessionH sweatfile.Hierarchy, haveSessionH bool, repoPath, wtPath, branch, defaultBranch, pinnedSha string, gitSync, inSession bool, activity io.Writer, pm PostMergeOptions) (blobLinks []check.BlobLink, err error) {
+	// PrepareMerge rebased onto the landing target, so it is an ancestor of the
+	// pin and the pin is exactly what lands on this path.
+	target := landing.ForMerge(repoPath, defaultBranch, gitSync)
+	if pErr := runAttestationPolicy(ctx, ts, pm.Gate, sessionH, haveSessionH, repoPath, branch, defaultBranch, target.Ref(), pinnedSha, pinnedSha); pErr != nil {
+		return nil, pErr
+	}
+
 	hookLinks, hookErr := runPreMergeHookContext(ctx, rep, ts, repoPath, wtPath, branch, pinnedSha, activity)
 	blobLinks = append(blobLinks, hookLinks...)
 	if hookErr != nil {

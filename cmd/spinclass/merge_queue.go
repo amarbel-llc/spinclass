@@ -138,15 +138,18 @@ func emitDrainWake(count int, priorJobID, priorStatus string) {
 // has NO ringmaster job id (so an agent cannot job_wait on it) and that the
 // completion wake is the only signal — the FDR 0025 ratified response contract,
 // discoverable from the response itself, not just the FDR.
-func enqueuedMergeResult(position int) *command.Result {
+func enqueuedMergeResult(position int, gate merge.AttestationGate) *command.Result {
+	attestationNote := "The pre-merge attestation (if the gate is live) was consumed and bound to this queued merge now."
+	if gate == merge.GateNeedsExemption {
+		attestationNote = "No attestation was consumed: this merge relies on a [[pre-merge-exemptions]] predicate, which is judged when it lands and fails the merge if none exempts its diff."
+	}
 	return command.TextResult(fmt.Sprintf(
 		"enqueued this merge at queue position %d behind the running gate (spinclass#265 stacked merges). "+
 			"It runs automatically when the current merge completes, re-preparing against the branch as it then "+
 			"stands. NOTE: a queued merge has NO ringmaster job id yet — you cannot job_wait on it; the completion "+
 			"wake is the only signal, so end your turn and let it arrive. If the running merge FAILS, this queued "+
-			"merge is aborted (its base assumption broke) and you are woken to resolve, re-attest, and re-merge. "+
-			"The pre-merge attestation was consumed and bound to this queued merge now.",
-		position,
+			"merge is aborted (its base assumption broke) and you are woken to resolve, re-attest, and re-merge. %s",
+		position, attestationNote,
 	))
 }
 

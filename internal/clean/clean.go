@@ -412,11 +412,13 @@ func findOrphanTransientWorktrees(startDir string) []orphanTransientWorktree {
 }
 
 // isTransientMergeWorktreeName reports whether name is a transient merge
-// worktree: a .merge-* pre-merge build worktree or a .land-* merge-queue
-// landing worktree.
+// worktree: a .merge-* pre-merge build worktree, a .land-* merge-queue
+// landing worktree, or a .exempt-* merge-base worktree for exemption
+// predicates (FDR 0031).
 func isTransientMergeWorktreeName(name string) bool {
 	return strings.HasPrefix(name, check.BuildWorktreePrefix) ||
-		strings.HasPrefix(name, merge.LandWorktreePrefix)
+		strings.HasPrefix(name, merge.LandWorktreePrefix) ||
+		strings.HasPrefix(name, merge.ExemptWorktreePrefix)
 }
 
 // pidFromTransientWorktreeName extracts the trailing <pid> from a

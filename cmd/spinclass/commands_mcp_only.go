@@ -346,19 +346,22 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
 	}
 
-	// Refuse a main-checkout (implicit) session BEFORE the gate, so the refusal
-	// never consumes the attestation (#317).
-	if pre, _, pok, _ := resolveSession(cwd); pok && pre.implicit {
-		return command.TextErrorResult(merge.ErrImplicitMergeUnsupported.Error()), nil
-	}
-
-	gs, failMsg, ok, gitErr := resolveGatedSession(cwd)
+	gs, failMsg, ok, gitErr := resolveSession(cwd)
 	if !ok {
 		return command.TextErrorResult(failMsg), nil
 	}
 	if gitErr != nil {
 		// Merge treats a git-resolution failure on the worktree path as fatal.
 		return command.TextErrorResult(gitErr.Error()), nil
+	}
+	// Refuse a main-checkout (implicit) session BEFORE the gate, so the refusal
+	// never consumes the attestation (#317).
+	if gs.implicit {
+		return command.TextErrorResult(merge.ErrImplicitMergeUnsupported.Error()), nil
+	}
+	gate, gateMsg, gok := decideMergeGate(gs)
+	if !gok {
+		return command.TextErrorResult(gateMsg), nil
 	}
 
 	defaultBranch := params.DefaultBranch
@@ -369,6 +372,15 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 			return command.TextErrorResult(fmt.Sprintf("could not determine default branch: %v", err)), nil
 		}
 	}
+
+	// Consume only once committed to the merge, and only when an attestation is
+	// what admitted it; an exemption-admitted merge leaves the buffer alone.
+	if gate == merge.GateAttested {
+		if msg, cok := consumeGate(gs); !cok {
+			return command.TextErrorResult(msg), nil
+		}
+	}
+	pm.Gate = gate
 
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "merge " + gs.branch, Source: "spinclass"})
@@ -466,9 +478,11 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 		// attestation peek or consume.
 		return command.TextErrorResult(merge.ErrImplicitMergeUnsupported.Error()), nil
 	}
-	if msg, gok := peekGate(gs); !gok {
-		return command.TextErrorResult(msg), nil
+	gate, gateMsg, gok := decideMergeGate(gs)
+	if !gok {
+		return command.TextErrorResult(gateMsg), nil
 	}
+	pm.Gate = gate
 	repoPath := gs.repoPath
 	branch := gs.branch
 	defaultBranch := params.DefaultBranch
@@ -497,9 +511,11 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 		mergeQueueMu.Unlock()
 		return jobAlreadyRunningResult(), nil // refuse — no attestation consumed
 	}
-	if msg, gok := consumeGate(gs); !gok {
-		mergeQueueMu.Unlock()
-		return command.TextErrorResult(msg), nil
+	if gate == merge.GateAttested {
+		if msg, cok := consumeGate(gs); !cok {
+			mergeQueueMu.Unlock()
+			return command.TextErrorResult(msg), nil
+		}
 	}
 	if busy {
 		mergeQueue[cwd] = append(mergeQueue[cwd], queuedMerge{
@@ -508,7 +524,7 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 		})
 		pos := len(mergeQueue[cwd])
 		mergeQueueMu.Unlock()
-		return enqueuedMergeResult(pos), nil
+		return enqueuedMergeResult(pos, gate), nil
 	}
 	mergeQueueMu.Unlock()
 
@@ -741,6 +757,27 @@ func peekGate(gs gatedSession) (string, bool) {
 		return output, false
 	}
 	return "", true
+}
+
+// decideMergeGate is the MCP merge tools' non-destructive gate decision (FDR
+// 0031): a dormant gate or a present attestation → GateAttested (the caller
+// then consumes on commit); no attestation but [[pre-merge-exemptions]]
+// declared → GateNeedsExemption (nothing is consumed — FinishMerge's policy
+// stage decides from the merge base's tree); neither → the FDR 0007 refusal.
+//
+// The exemption presence check reads the SESSION hierarchy only as a
+// fast-refuse hint. That is safe in both directions: a branch that deletes
+// its exemptions merely refuses early, and one that adds them still has to get
+// past predicates resolved from the base.
+func decideMergeGate(gs gatedSession) (gate merge.AttestationGate, failMsg string, ok bool) {
+	msg, attested := peekGate(gs)
+	if attested {
+		return merge.GateAttested, "", true
+	}
+	if merged, mok := mergedSweatfileForCwd(); mok && len(merged.ActivePreMergeExemptions()) > 0 {
+		return merge.GateNeedsExemption, "", true
+	}
+	return 0, msg, false
 }
 
 // consumeGate clears the buffered attestation for gs (the destructive half),

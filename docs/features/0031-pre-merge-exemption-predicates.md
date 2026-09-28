@@ -1,5 +1,5 @@
 ---
-status: exploring
+status: proposed
 date: 2026-09-28
 promotion-criteria: |
   exploring -> proposed: the operator accepts this draft's recommendation (or
@@ -18,11 +18,19 @@ promotion-criteria: |
 
 # Pre-merge exemption predicates (pluggable attestation policy)
 
-> **Exploring** — a design draft produced by pairing
-> spinclass/cool-chestnut/bozo with circus/firm-banyan/krusty on
-> 2026-09-28. Nothing is implemented. Addresses spinclass#327. For #326 it
-> makes the terminal bypass visible, but keeps it, per an operator decision the
-> same day. Folds in #325 as an adjacent passthrough.
+> **Proposed** — designed by pairing spinclass/cool-chestnut/bozo with
+> circus/firm-banyan/krusty on 2026-09-28, then implemented in the same
+> session. No sweatfile declares an exemption yet. Addresses spinclass#327. For
+> #326 it makes the terminal bypass visible, but keeps it, per an operator
+> decision the same day. Folds in #325 as an adjacent passthrough.
+>
+> Where the code lives:
+> - `sweatfile.PreMergeExemption` / `ActivePreMergeExemptions`;
+> - `merge.AttestationGate` (carried on `PostMergeOptions.Gate`; its zero
+>   value is `GateTerminal`);
+> - `merge.runAttestationPolicy` (`internal/merge/policy.go`);
+> - `decideMergeGate` in the MCP handlers;
+> - `validate.CheckPreMergeExemptions`.
 
 ## Problem Statement
 
@@ -104,13 +112,15 @@ The evaluation point cannot be earlier:
 
 ### Environment
 
-Everything `hookrun.CommandCapture`-style hooks get (`WORKTREE`, the
-`SPINCLASS_SESSION_ID` / `_REPO` / `_BRANCH` / `_WORKTREE` identity env), plus
-the following.
+The predicate inherits the merging user's environment (no devshell), plus
+`WORKTREE` (the base worktree) and the following. As built, it does NOT get the
+`SPINCLASS_SESSION_ID` / `_WORKTREE` identity env: the merge layer has no
+session state in hand. It gets the post-merge-style merge facts instead.
 
 | Variable | Meaning |
 |---|---|
-| `SPINCLASS_MERGE_BASE` | The default-branch tip the landing sits on (the remote-tracking ref, #315, as observed under the lock). |
+| `SPINCLASS_MERGE_BASE` | `git merge-base <landing target> <landing sha>`: the default-branch tip the landing sits on (the remote-tracking ref, #315, as observed under the lock). |
+| `SPINCLASS_MERGED_BRANCH` / `_DEFAULT_BRANCH` / `_REPO_PATH` | As for `post-merge`. |
 | `SPINCLASS_LANDING_SHA` | **The head to judge.** Equals the pinned sha unless the queue rebased the landing. |
 | `SPINCLASS_PINNED_SHA` | The pre-landing pin (same meaning as for `post-merge`). Informational: after a queue rebase it is *not* a descendant of `MERGE_BASE`. |
 | `SPINCLASS_EXEMPTION` | The predicate's `name`. |
@@ -124,16 +134,24 @@ This is the load-bearing decision. A predicate read from the branch being merged
 can vouch for itself: an agent edits the recipe to `exit 0`, and its own diff is
 then exempt. So:
 
-1. **Definition from base.** The repo layer of the sweatfile hierarchy (and
-   any in-repo parent layers) is read **at `MERGE_BASE`**, via `git show
-   <base>:sweatfile`. That read resolves `[[pre-merge-exemptions]]` only.
-   Out-of-repo layers (global, `~/eng/repos/sweatfile`) are not
-   branch-controlled and load as usual. If an exemption exists only in the
-   head's sweatfile, it does not apply to its own merge.
+1. **Definition from base.** The exemptions are resolved from
+   `sweatfileio.LoadWorktreeHierarchy(home, repoPath, <base worktree>)`. That
+   is the normal cascade (global → parent dirs → the main checkout's
+   sweatfile), with the *worktree* layer being the detached checkout at
+   `MERGE_BASE` instead of the session worktree. Only
+   `ActivePreMergeExemptions()` is read from it. None of those layers is the
+   branch being merged:
+   - the main checkout's working-tree sweatfile is not where a session
+     edits;
+   - the out-of-repo layers are not branch-controlled at all.
+
+   If an exemption exists only in the head's sweatfile, it does not apply to
+   its own merge (`TestPolicyBranchCannotVouchForItself`).
 2. **Code from base.** The command runs with cwd in a transient detached
-   worktree checked out **at `MERGE_BASE`**. It uses the `.merge-*` / `.land-*`
-   lifecycle and naming, e.g. `.exempt-<branch>-<sha>-<pid>`, torn down with
-   the build worktree. So any script or justfile the command references is
+   worktree checked out **at `MERGE_BASE`**,
+   `.exempt-<branch>-<shortsha>-<pid>`. It is created and torn down around the
+   policy stage, and reaped by `sc clean` like `.merge-*` / `.land-*` if
+   orphaned. So any script or justfile the command references is
    already-landed code.
 3. **No head-controlled devshell.** The command runs **without** `direnv exec`.
    The devshell is itself head-controlled: a bumped `flake.lock` can swap the
@@ -202,17 +220,21 @@ These are one reporter test point (phase node) per merge, emitted before the
 pre-merge hook node. They land in the ndjson stream, the job log and the async
 wake (#259 wake-surfacing lifts the `✗` and SKIP lines):
 
+As built, the labels are:
+
 - `✓ pre-merge policy: attested`
-- `✓ pre-merge policy: exempt (lock-only)`, whose diagnostic YAML carries
-  `predicate`, `merge_base`, `landing_sha`, `exit_code`
-- `✗ pre-merge policy: not exempt`, which lists each declined predicate with its
-  exit code; a `timeout` / `spawn-failed` verdict is distinct
-- `# SKIP attestation bypassed (terminal)` (terminal path, informational only)
+- `✓ pre-merge policy: exempt (lock-only) base=<short> landing=<short>`. The
+  facts ride in the label, because crap's `Ok` carries no diagnostic.
+- `✗ pre-merge policy`, whose message wraps `ErrAttestationNotExempt` and names
+  each declined predicate with its verdict (`exit N`, `timeout`,
+  `spawn-failed: …`) plus the tail of its output
+- `# SKIP attestation bypassed (terminal): …` (terminal path, informational
+  only)
 - a dormant gate emits nothing, as today
 
 No commit trailer: the landing commits are already pinned and signed, and
 rewriting them to add one is out of the question. The record lives in the merge
-output, plus a statsd counter per verdict (`internal/statsd`).
+output. A statsd counter per verdict is deferred.
 
 ### Privilege
 
@@ -268,10 +290,13 @@ handle is left for a separate issue.
 - **PATH trust.** Without a devshell, the predicate's `bash`/`git` come from the
   merging user's PATH. On the fleet that is the home-manager profile, which is
   outside the branch's control. On an arbitrary host it is whatever is there.
-- **Base-tree sweatfile read** introduces a second hierarchy-load mode. The
-  exemption loader must resolve only `[[pre-merge-exemptions]]` from the base
-  layer, or it risks diverging subtly from the normal load. The exact function
-  shape is left to implementation.
+- **Base-tree sweatfile read.** There is no second load mode: the normal
+  `LoadWorktreeHierarchy` runs with the base checkout as the worktree layer
+  (see the trust rule). A `sweatfile` that fails to parse at the base
+  therefore yields no exemptions (fail closed), not an error.
+- **Predicate cap.** Each predicate runs under a fixed 5m timeout
+  (`exemptionTimeout`). It is not configurable, and under the queue that
+  time is lock time.
 - **Late refusal on the MCP path.** A non-exempt, un-attested MCP merge now
   fails after fetch, rebase and lock acquisition, instead of at the handler.
   The cost is small because the refusal precedes the hook. Nothing lands,
@@ -286,5 +311,5 @@ handle is left for a separate issue.
   section also says the attestation is cleared *after* the hook, but the code
   consumes it before `PrepareMerge` (sync) or at dispatch/enqueue (async).
   The operator decided (2026-09-28) to fix both in the same change that
-  implements this FDR: correct the State text and promote 0007 to
-  `experimental`.
+  implements this FDR. Done (#328): the State text is corrected and 0007 is
+  promoted to `experimental`.
