@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: experimental
 date: 2026-05-24
 promotion-criteria: |
   Promote to `experimental` once the gate ships and at least one
@@ -174,6 +174,13 @@ form for the attestation step.
 The agent-facing tools (`merge-this-session`,
 `check-this-session`) are the sole enforcement surface.
 
+Since FDR 0031 the terminal exemption is explicit policy (operator
+decision 2026-09-28, #326): no plugin can change it, and a terminal merge
+with a live gate records a `pre-merge policy` SKIP point
+(`attestation bypassed (terminal)`) instead of bypassing silently. FDR
+0031 also adds `[[pre-merge-exemptions]]`, which can admit an un-attested
+MCP merge.
+
 ### State persistence — session state JSON
 
 The buffered attestation lives in the existing per-session state
@@ -195,9 +202,19 @@ under a new top-level field:
 }
 ```
 
-The field is cleared by the gated tool after a successful merge
-or check (i.e. after the pre-merge hook returns). Survives MCP
-server restarts.
+The field is cleared by the gated tool when it COMMITS to a merge or
+check, BEFORE the pre-merge hook runs:
+
+- sync `merge-this-session` clears it before `PrepareMerge`;
+- `check-this-session` clears it before the hook;
+- the async twins clear it at dispatch or enqueue (#265's peek/consume
+  split, so a refusal never burns it).
+
+A hook failure after that point therefore requires a fresh attestation
+(#219 tracks relaxing that). An exemption-admitted merge (FDR 0031)
+consumes nothing. The field survives MCP server restarts. (This text was
+corrected in #328; it previously claimed the field was cleared after the
+hook.)
 
 A `null`/absent field is equivalent to "no attestation buffered"
 and causes the gate to fail as described above.
