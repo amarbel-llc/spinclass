@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -58,6 +59,9 @@ func sptr(s string) *string { return &s }
 // The env builder is the one contract both the sweatfile phase and `sc run`'s
 // dynamic hooks export: pin every key and the "0"-when-uncapped rule.
 func TestPostMergeEnvExportsTimingAndPin(t *testing.T) {
+	runtimeDir := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	phaseTmp := filepath.Join(runtimeDir, "spinclass", "post-merge")
 	deadline := time.Unix(1_800_000_000, 0)
 	env := PostMergeEnv(PostMergeFacts{
 		LandedSha:     "landed",
@@ -79,6 +83,8 @@ func TestPostMergeEnvExportsTimingAndPin(t *testing.T) {
 		"SPINCLASS_POST_MERGE_TIMEOUT_SECONDS=1500",
 		"SPINCLASS_POST_MERGE_DEADLINE=" + strconv.FormatInt(deadline.Unix(), 10),
 		"SPINCLASS_PINNED_SHA=pinned",
+		"TMPDIR=" + phaseTmp,
+		"CLAUDE_CODE_TMPDIR=" + phaseTmp,
 	}
 	if got := strings.Join(env, "\n"); got != strings.Join(want, "\n") {
 		t.Errorf("PostMergeEnv mismatch:\n got: %v\nwant: %v", env, want)

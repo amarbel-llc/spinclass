@@ -324,6 +324,13 @@ does not export *WORKTREE*.
 	  to *SPINCLASS\_MERGED\_SHA* unless the queued landing was rebased
 	  past a moved default branch, so a script can detect a rebased landing
 	  without consulting git.
+	- *TMPDIR* / *CLAUDE\_CODE\_TMPDIR* — a per-user scratch directory that
+	  doesn't depend on any session: _$XDG\_RUNTIME\_DIR/spinclass/post-merge_,
+	  else _/tmp/spinclass-post-merge-<uid>_. It is shared across merges and
+	  never cleared, so detached children keep it. The inherited *TMPDIR* is
+	  replaced because it usually points into a session worktree, and teardown
+	  may already have removed that (#330). A command's *mktemp* output is its
+	  own to clean up.
 	- *SPINCLASS\_POST\_MERGE\_TIMEOUT* — the *effective* wall-clock cap on
 	  the post-merge phase as a Go duration (e.g. *20m0s*), or *0* when the
 	  cap is disabled. This is the value actually enforced: the per-merge

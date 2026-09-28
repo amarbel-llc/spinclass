@@ -120,6 +120,11 @@ func PostMergeEnv(f PostMergeFacts) []string {
 	if f.PinnedSha != "" {
 		env = append(env, "SPINCLASS_PINNED_SHA="+f.PinnedSha)
 	}
+	// A session-independent scratch dir (spinclass#330): the inherited
+	// TMPDIR may belong to a session torn down before post-merge runs.
+	if tmp := postMergeTmpDir(); tmp != "" {
+		env = append(env, "TMPDIR="+tmp, "CLAUDE_CODE_TMPDIR="+tmp)
+	}
 	return env
 }
 
