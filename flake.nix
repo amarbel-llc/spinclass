@@ -95,8 +95,9 @@
     # Single source of truth for tommy (TOML library + codegen tool):
     # the Go module is bridged via go.nix flakeInputs and the same
     # input's binary backs checks.tommy-codegen and `just build-tommy-codegen`.
-    # Pinned to a release tag (not master) for reproducibility; bump the
-    # tag deliberately + regen the codec when adopting a new tommy.
+    # Tracks master; flake.lock pins the exact rev. A tommy bump that restamps
+    # the codec header is repaired at pre-commit by the eng preset's
+    # codegen-repair lane (see conformistTommyModule below, spinclass#322).
     tommy = {
       url = "https://code.linenisgreat.com/tommy/archive/master.tar.gz";
       inputs = {
