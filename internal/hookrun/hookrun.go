@@ -44,9 +44,12 @@ func OnAttach(sf sweatfile.Sweatfile, worktreePath string, w io.Writer) error {
 	return runHook(sf.OnAttachHookCommand(), worktreePath, w)
 }
 
-// OnDetach runs the [hooks].on-detach command in worktreePath.
-func OnDetach(sf sweatfile.Sweatfile, worktreePath string, w io.Writer) error {
-	return runHook(sf.OnDetachHookCommand(), worktreePath, w)
+// OnDetach runs the [hooks].on-detach command in worktreePath, with
+// sessionEnv (the SPINCLASS_* identity the hook reads, e.g.
+// $SPINCLASS_SESSION_ID) appended. The session env is passed explicitly
+// because it is no longer set on the spinclass process itself (#330).
+func OnDetach(sf sweatfile.Sweatfile, worktreePath string, sessionEnv []string, w io.Writer) error {
+	return runHookInDirEnv(context.Background(), sf.OnDetachHookCommand(), worktreePath, worktreePath, sessionEnv, 0, "", w)
 }
 
 // PreMerge runs the [hooks].pre-merge command in worktreePath under a

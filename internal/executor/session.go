@@ -65,7 +65,16 @@ func (s SessionExecutor) Attach(dir string, key string, command []string, dryRun
 		return nil
 	}
 
-	cmd := exec.Command(expanded[0], expanded[1:]...)
+	// Resolve the binary against the CHILD's PATH: a [session-entry].env PATH
+	// used to take effect via os.Setenv before exec.Command's lookup, and
+	// entrypoints living there must keep resolving.
+	bin := expanded[0]
+	if p, ok := sessionEnv["PATH"]; ok && !strings.Contains(bin, "/") {
+		if resolved := lookPathIn(bin, p); resolved != "" {
+			bin = resolved
+		}
+	}
+	cmd := exec.Command(bin, expanded[1:]...)
 	cmd.Dir = dir
 	// Strip an inherited CLOWN_SESSION_ID/CLAUDE_SESSION_ID (e.g. when `sc` is
 	// run from within another clown session) so this session's clown re-derives
@@ -73,10 +82,7 @@ func (s SessionExecutor) Attach(dir string, key string, command []string, dryRun
 	// launcher's channel (#169). The session env goes ONLY to the child: setting
 	// it process-wide leaked this session's TMPDIR into everything spinclass ran
 	// afterwards, e.g. post-merge after teardown (spinclass#330).
-	cmd.Env = session.StripInheritedSessionIDs(os.Environ())
-	for k, v := range sessionEnv {
-		cmd.Env = append(cmd.Env, k+"="+v)
-	}
+	cmd.Env = append(session.StripInheritedSessionIDs(os.Environ()), s.SessionEnviron(dir, key)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -104,6 +110,32 @@ func (s SessionExecutor) Attach(dir string, key string, command []string, dryRun
 	err := cmd.Wait()
 	signal.Stop(sighup)
 	return err
+}
+
+// lookPathIn finds an executable named file in the colon-separated path, or
+// returns "" (the caller then falls back to exec.Command's own lookup).
+func lookPathIn(file, path string) string {
+	for _, dir := range filepath.SplitList(path) {
+		if dir == "" {
+			dir = "."
+		}
+		candidate := filepath.Join(dir, file)
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+			return candidate
+		}
+	}
+	return ""
+}
+
+// SessionEnviron renders sessionEnv as KEY=VALUE pairs, for callers that run
+// session-scoped work outside the entrypoint (the on-detach hook).
+func (s SessionExecutor) SessionEnviron(dir, key string) []string {
+	env := s.sessionEnv(dir, key)
+	out := make([]string, 0, len(env))
+	for k, v := range env {
+		out = append(out, k+"="+v)
+	}
+	return out
 }
 
 // sessionEnv is the environment layered over the process env for the session

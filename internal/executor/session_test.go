@@ -2,6 +2,8 @@ package executor
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
@@ -104,6 +106,35 @@ func TestSessionExecutorSpinclassEnvOverridesUserEnv(t *testing.T) {
 	for k, want := range checks {
 		if got := env[k]; got != want {
 			t.Errorf("sessionEnv[%q] = %q, want %q", k, got, want)
+		}
+	}
+}
+
+// A [session-entry].env PATH still decides which entrypoint binary runs.
+// It used to apply via os.Setenv, and now applies via an explicit lookup
+// against the child's PATH.
+func TestLookPathInResolvesAgainstSessionPath(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "only-here")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := lookPathIn("only-here", "/nonexistent:"+dir); got != bin {
+		t.Errorf("lookPathIn = %q, want %q", got, bin)
+	}
+	if got := lookPathIn("only-here", "/nonexistent"); got != "" {
+		t.Errorf("lookPathIn on a PATH without it = %q, want \"\"", got)
+	}
+}
+
+// The on-detach hook reads $SPINCLASS_SESSION_ID etc. SessionEnviron is how
+// it receives them now that Attach no longer sets them process-wide.
+func TestSessionEnvironCarriesIdentity(t *testing.T) {
+	env := SessionExecutor{Env: map[string]string{"SPINCLASS_GROUP": "g"}}.SessionEnviron("/tmp/test", "myrepo/feat-x")
+	joined := "\n" + strings.Join(env, "\n") + "\n"
+	for _, want := range []string{"SPINCLASS_SESSION_ID=myrepo/feat-x", "SPINCLASS_GROUP=g", "TMPDIR=/tmp/test/.tmp"} {
+		if !strings.Contains(joined, "\n"+want+"\n") {
+			t.Errorf("SessionEnviron lacks %q: %v", want, env)
 		}
 	}
 }

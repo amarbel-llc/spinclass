@@ -427,7 +427,15 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 
 	// Fire on-detach hook AFTER state is committed so the hook can
 	// observe the final state via $SPINCLASS_SESSION_ID + spinclass list.
-	if hookErr := hookrun.OnDetach(sf, rp.AbsPath, w); hookErr != nil {
+	// The session env reaches it explicitly: the executor no longer sets it
+	// on this process (#330).
+	var sessionEnv []string
+	if se, ok := exec.(interface {
+		SessionEnviron(dir, key string) []string
+	}); ok {
+		sessionEnv = se.SessionEnviron(rp.AbsPath, rp.SessionKey)
+	}
+	if hookErr := hookrun.OnDetach(sf, rp.AbsPath, sessionEnv, w); hookErr != nil {
 		log.Warn("on-detach hook failed", "err", hookErr)
 	}
 
