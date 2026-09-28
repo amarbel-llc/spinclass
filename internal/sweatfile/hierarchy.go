@@ -339,6 +339,27 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		}
 	}
 
+	// [[pre-merge-exemptions]] — dedup-by-name, same pattern as
+	// [[pre-merge-skills]]; a name-only entry is kept so that
+	// ActivePreMergeExemptions() filters it out as a removal sentinel.
+	if len(other.PreMergeExemptions) > 0 {
+		cp := make([]PreMergeExemption, len(merged.PreMergeExemptions))
+		copy(cp, merged.PreMergeExemptions)
+		merged.PreMergeExemptions = cp
+		index := make(map[string]int, len(merged.PreMergeExemptions))
+		for i, e := range merged.PreMergeExemptions {
+			index[e.Name] = i
+		}
+		for _, e := range other.PreMergeExemptions {
+			if i, ok := index[e.Name]; ok {
+				merged.PreMergeExemptions[i] = e
+				continue
+			}
+			index[e.Name] = len(merged.PreMergeExemptions)
+			merged.PreMergeExemptions = append(merged.PreMergeExemptions, e)
+		}
+	}
+
 	// [[remotes]] — dedup-by-name, same merge mechanics as [[mcps]], but
 	// removal is explicit: a `remove = true` entry overrides the inherited
 	// remote in place and is preserved here so that ActiveRemotes() can

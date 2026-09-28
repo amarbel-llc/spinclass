@@ -205,6 +205,17 @@ type PreMergeSkill struct {
 	Rationale string `toml:"rationale"`
 }
 
+// PreMergeExemption is one named predicate that can exempt an un-attested MCP
+// merge from [[pre-merge-skills]] (FDR 0031, spinclass#327). Command runs via
+// sh -c; exit 0 means "this diff needs no attestation". Declared as a top-level
+// [[pre-merge-exemptions]] array, merged dedup-by-name across the hierarchy; a
+// name-only entry (empty Command) is a removal sentinel filtered by
+// ActivePreMergeExemptions.
+type PreMergeExemption struct {
+	Name    string `toml:"name"`
+	Command string `toml:"command"`
+}
+
 // PostMergeTarget is one named target of the post-merge phase (FDR 0026,
 // spinclass#273): a deploy trigger (Command) and an optional remote acceptance
 // check (Verify) that runs only when Command exits zero. Targets are declared
@@ -256,7 +267,10 @@ type Sweatfile struct {
 	AllowedMCPs    []string        `toml:"allowed-mcps"`
 	MCPs           []MCPServerDef  `toml:"mcps"`
 	PreMergeSkills []PreMergeSkill `toml:"pre-merge-skills"`
-	Remotes        []Remote        `toml:"remotes"`
+	// PreMergeExemptions (FDR 0031) are only consulted on the MCP merge path,
+	// and only from the merge base's tree — never the branch being merged.
+	PreMergeExemptions []PreMergeExemption `toml:"pre-merge-exemptions"`
+	Remotes            []Remote            `toml:"remotes"`
 	// PostMerge is the top-level [[post-merge]] array of named deploy targets
 	// (FDR 0026). It is distinct from the legacy [hooks].post-merge scalar
 	// string; when any named target is active the string is superseded (see
@@ -605,6 +619,19 @@ func (sf Sweatfile) ActivePreMergeSkills() []PreMergeSkill {
 	for _, s := range sf.PreMergeSkills {
 		if s.Rationale != "" {
 			active = append(active, s)
+		}
+	}
+	return active
+}
+
+// ActivePreMergeExemptions returns [[pre-merge-exemptions]] entries with a
+// non-blank command (i.e., excluding name-only removal sentinels), in
+// resolved-hierarchy declaration order.
+func (sf Sweatfile) ActivePreMergeExemptions() []PreMergeExemption {
+	var active []PreMergeExemption
+	for _, e := range sf.PreMergeExemptions {
+		if NormalizeCommand(e.Command) != "" {
+			active = append(active, e)
 		}
 	}
 	return active

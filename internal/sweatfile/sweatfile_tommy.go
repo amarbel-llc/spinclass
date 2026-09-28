@@ -25,6 +25,9 @@ type sweatfileMCPsHandle struct {
 type sweatfilePreMergeSkillsHandle struct {
 	node *cst.Node
 }
+type sweatfilePreMergeExemptionsHandle struct {
+	node *cst.Node
+}
 type sweatfileRemotesHandle struct {
 	node *cst.Node
 }
@@ -32,14 +35,15 @@ type sweatfilePostMergeHandle struct {
 	node *cst.Node
 }
 type SweatfileDocument struct {
-	data           Sweatfile
-	cstDoc         *document.Document
-	model          *cst.Value
-	startCommands  []sweatfileStartCommandsHandle
-	mCPs           []sweatfileMCPsHandle
-	preMergeSkills []sweatfilePreMergeSkillsHandle
-	remotes        []sweatfileRemotesHandle
-	postMerge      []sweatfilePostMergeHandle
+	data               Sweatfile
+	cstDoc             *document.Document
+	model              *cst.Value
+	startCommands      []sweatfileStartCommandsHandle
+	mCPs               []sweatfileMCPsHandle
+	preMergeSkills     []sweatfilePreMergeSkillsHandle
+	preMergeExemptions []sweatfilePreMergeExemptionsHandle
+	remotes            []sweatfileRemotesHandle
+	postMerge          []sweatfilePostMergeHandle
 }
 
 func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
@@ -955,6 +959,32 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 		_eaPreMergeSkills.MarkConsumed()
 		d.data.PreMergeSkills = []PreMergeSkill{}
 	}
+	if _vPreMergeExemptions, _ok := model.Get("pre-merge-exemptions"); _ok && _vPreMergeExemptions.Kind == cst.VArray {
+		_vPreMergeExemptions.MarkSeen()
+		d.data.PreMergeExemptions = make([]PreMergeExemption, len(_vPreMergeExemptions.Items))
+		d.preMergeExemptions = make([]sweatfilePreMergeExemptionsHandle, len(_vPreMergeExemptions.Items))
+		for i := range _vPreMergeExemptions.Items {
+			_ePreMergeExemptions := &_vPreMergeExemptions.Items[i]
+			_ePreMergeExemptions.MarkSeen()
+			d.preMergeExemptions[i] = sweatfilePreMergeExemptionsHandle{node: _ePreMergeExemptions.Node}
+			if _vPreMergeExemptionsName, _ok := _ePreMergeExemptions.Get("name"); _ok && _vPreMergeExemptionsName.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vPreMergeExemptionsName.Leaf); _xok {
+					d.data.PreMergeExemptions[i].Name = _x
+					_vPreMergeExemptionsName.MarkConsumed()
+				}
+			}
+			if _vPreMergeExemptionsCommand, _ok := _ePreMergeExemptions.Get("command"); _ok && _vPreMergeExemptionsCommand.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vPreMergeExemptionsCommand.Leaf); _xok {
+					d.data.PreMergeExemptions[i].Command = _x
+					_vPreMergeExemptionsCommand.MarkConsumed()
+				}
+			}
+		}
+	}
+	if _eaPreMergeExemptions, _eaok := model.Get("pre-merge-exemptions"); _eaok && _eaPreMergeExemptions.IsEmptyArray() {
+		_eaPreMergeExemptions.MarkConsumed()
+		d.data.PreMergeExemptions = []PreMergeExemption{}
+	}
 	if _vRemotes, _ok := model.Get("remotes"); _ok && _vRemotes.Kind == cst.VArray {
 		_vRemotes.MarkSeen()
 		d.data.Remotes = make([]Remote, len(_vRemotes.Items))
@@ -1439,6 +1469,26 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 			}
 			if d.data.PreMergeSkills[i].Rationale != "" || cst.HasValue(container, "rationale") {
 				if err := cst.SetAny(container, "rationale", d.data.PreMergeSkills[i].Rationale); err != nil {
+					return nil, fmt.Errorf("%w", err)
+				}
+			}
+		}
+	}
+	{
+		for i := range d.data.PreMergeExemptions {
+			var container *cst.Node
+			if i < len(d.preMergeExemptions) {
+				container = d.preMergeExemptions[i].node
+			} else {
+				container = cst.AppendArrayTableEntryAfter(d.cstDoc.Root(), "pre-merge-exemptions")
+			}
+			if d.data.PreMergeExemptions[i].Name != "" || cst.HasValue(container, "name") {
+				if err := cst.SetAny(container, "name", d.data.PreMergeExemptions[i].Name); err != nil {
+					return nil, fmt.Errorf("%w", err)
+				}
+			}
+			if d.data.PreMergeExemptions[i].Command != "" || cst.HasValue(container, "command") {
+				if err := cst.SetAny(container, "command", d.data.PreMergeExemptions[i].Command); err != nil {
 					return nil, fmt.Errorf("%w", err)
 				}
 			}
@@ -2420,6 +2470,30 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 		_eaPreMergeSkills.MarkConsumed()
 		data.PreMergeSkills = []PreMergeSkill{}
 	}
+	if _vPreMergeExemptions, _ok := sub.Get("pre-merge-exemptions"); _ok && _vPreMergeExemptions.Kind == cst.VArray {
+		_vPreMergeExemptions.MarkSeen()
+		data.PreMergeExemptions = make([]PreMergeExemption, len(_vPreMergeExemptions.Items))
+		for i := range _vPreMergeExemptions.Items {
+			_ePreMergeExemptions := &_vPreMergeExemptions.Items[i]
+			_ePreMergeExemptions.MarkSeen()
+			if _vPreMergeExemptionsName, _ok := _ePreMergeExemptions.Get("name"); _ok && _vPreMergeExemptionsName.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vPreMergeExemptionsName.Leaf); _xok {
+					data.PreMergeExemptions[i].Name = _x
+					_vPreMergeExemptionsName.MarkConsumed()
+				}
+			}
+			if _vPreMergeExemptionsCommand, _ok := _ePreMergeExemptions.Get("command"); _ok && _vPreMergeExemptionsCommand.Kind == cst.VLeaf {
+				if _x, _xok := cst.ExtractString(_vPreMergeExemptionsCommand.Leaf); _xok {
+					data.PreMergeExemptions[i].Command = _x
+					_vPreMergeExemptionsCommand.MarkConsumed()
+				}
+			}
+		}
+	}
+	if _eaPreMergeExemptions, _eaok := sub.Get("pre-merge-exemptions"); _eaok && _eaPreMergeExemptions.IsEmptyArray() {
+		_eaPreMergeExemptions.MarkConsumed()
+		data.PreMergeExemptions = []PreMergeExemption{}
+	}
 	if _vRemotes, _ok := sub.Get("remotes"); _ok && _vRemotes.Kind == cst.VArray {
 		_vRemotes.MarkSeen()
 		data.Remotes = make([]Remote, len(_vRemotes.Items))
@@ -2902,6 +2976,28 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 			}
 			if data.PreMergeSkills[i].Rationale != "" || cst.HasValue(container, "rationale") {
 				if err := cst.SetAny(container, "rationale", data.PreMergeSkills[i].Rationale); err != nil {
+					return fmt.Errorf("%w", err)
+				}
+			}
+		}
+	}
+	{
+		_apPreMergeExemptions := container
+		_existPreMergeExemptions := cst.FindChildArrayTableNodes(doc.Root(), _apPreMergeExemptions, "pre-merge-exemptions")
+		for i := range data.PreMergeExemptions {
+			var container *cst.Node
+			if i < len(_existPreMergeExemptions) {
+				container = _existPreMergeExemptions[i]
+			} else {
+				container = cst.AppendChildArrayTableEntry(doc.Root(), _apPreMergeExemptions, "pre-merge-exemptions")
+			}
+			if data.PreMergeExemptions[i].Name != "" || cst.HasValue(container, "name") {
+				if err := cst.SetAny(container, "name", data.PreMergeExemptions[i].Name); err != nil {
+					return fmt.Errorf("%w", err)
+				}
+			}
+			if data.PreMergeExemptions[i].Command != "" || cst.HasValue(container, "command") {
+				if err := cst.SetAny(container, "command", data.PreMergeExemptions[i].Command); err != nil {
 					return fmt.Errorf("%w", err)
 				}
 			}

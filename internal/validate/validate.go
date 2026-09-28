@@ -351,6 +351,31 @@ func CheckPreMergeSkills(sf sweatfile.Sweatfile) []Issue {
 	return issues
 }
 
+func CheckPreMergeExemptions(sf sweatfile.Sweatfile) []Issue {
+	var issues []Issue
+	seen := make(map[string]bool, len(sf.PreMergeExemptions))
+	for _, e := range sf.PreMergeExemptions {
+		if e.Name == "" {
+			issues = append(issues, Issue{
+				Message:  "pre-merge-exemptions entry missing `name`",
+				Severity: SeverityError,
+				Field:    "pre-merge-exemptions.name",
+			})
+			continue
+		}
+		if seen[e.Name] {
+			issues = append(issues, Issue{
+				Message:  fmt.Sprintf("duplicate pre-merge-exemptions entry %q in this file", e.Name),
+				Severity: SeverityWarning,
+				Field:    "pre-merge-exemptions.name",
+				Value:    e.Name,
+			})
+		}
+		seen[e.Name] = true
+	}
+	return issues
+}
+
 func CheckRemotes(sf sweatfile.Sweatfile) []Issue {
 	var issues []Issue
 	seen := make(map[string]bool, len(sf.Remotes))
@@ -516,6 +541,14 @@ func CheckGitExcludes(sf sweatfile.Sweatfile) []Issue {
 
 func CheckMerged(sf sweatfile.Sweatfile) []Issue {
 	var issues []Issue
+
+	if len(sf.ActivePreMergeExemptions()) > 0 && len(sf.ActivePreMergeSkills()) == 0 {
+		issues = append(issues, Issue{
+			Message:  "pre-merge-exemptions declared but no pre-merge-skills: exemptions only apply when the attestation gate is live, so they are dead config",
+			Severity: SeverityWarning,
+			Field:    "pre-merge-exemptions",
+		})
+	}
 
 	if sf.Git != nil {
 		if dups := findDuplicates(sf.Git.Excludes); len(dups) > 0 {
@@ -798,6 +831,27 @@ func Run(w io.Writer, home, repoDir string) int {
 				}
 			} else {
 				sub.Ok("pre-merge-skills valid")
+			}
+		}
+
+		if len(src.File.PreMergeExemptions) > 0 {
+			if issues := CheckPreMergeExemptions(src.File); len(issues) > 0 {
+				for _, iss := range issues {
+					if iss.Severity == SeverityError {
+						diag := map[string]string{
+							"severity": iss.Severity,
+							"message":  iss.Message,
+						}
+						if iss.Value != "" {
+							diag["value"] = iss.Value
+						}
+						sub.NotOk("pre-merge-exemptions valid", diag)
+					} else {
+						sub.Ok(fmt.Sprintf("pre-merge-exemptions valid # warning: %s", iss.Message))
+					}
+				}
+			} else {
+				sub.Ok("pre-merge-exemptions valid")
 			}
 		}
 
