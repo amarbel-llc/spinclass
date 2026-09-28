@@ -434,8 +434,9 @@ func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prom
 
 // handleMergeThisSessionAsync starts the merge (incl. the pre-merge hook) in a
 // background goroutine and returns a job id immediately, so the call is never
-// subject to the client's MCP request timeout. Consumes the pre-merge
-// attestation at start, exactly like the synchronous merge-this-session. The
+// subject to the client's MCP request timeout. Gates like the synchronous
+// merge-this-session (decideMergeGate), consuming an attestation only once it
+// commits to dispatch or enqueue. The
 // result is retrieved via ringmaster's own surfaces (job_status/job_read/
 // job_wait) using the returned id; only registered under clown.
 func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {

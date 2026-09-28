@@ -138,6 +138,22 @@ func TestPolicyAttestedRecordsAttested(t *testing.T) {
 	}
 }
 
+// An exemption-admitted merge must not fail open when the (branch-controlled)
+// session hierarchy no longer shows the gate live by the time it lands, e.g. a
+// queued merge whose branch dropped its skills: predicates still decide.
+func TestPolicyNeedsExemptionFailsClosedOnDormantSessionGate(t *testing.T) {
+	repoDir, wtPath := setupPostMergeRepo(t, "feature") // no skills anywhere
+	before := runGit(t, repoDir, "rev-parse", "main")
+
+	_, err := runFinishOpts(t, repoDir, wtPath, "feature", false, PostMergeOptions{Gate: GateNeedsExemption})
+	if !errors.Is(err, ErrAttestationNotExempt) {
+		t.Fatalf("err = %v, want ErrAttestationNotExempt", err)
+	}
+	if after := runGit(t, repoDir, "rev-parse", "main"); after != before {
+		t.Errorf("main moved %s -> %s; a refused merge must land nothing", before, after)
+	}
+}
+
 // A dormant gate (no skills anywhere) emits no policy point on any path.
 func TestPolicyDormantGateEmitsNothing(t *testing.T) {
 	repoDir, wtPath := setupPostMergeRepo(t, "feature")

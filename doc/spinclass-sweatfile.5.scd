@@ -928,8 +928,8 @@ The environment adds *WORKTREE* (the base worktree), *SPINCLASS\_MERGE\_BASE*,
 *SPINCLASS\_MERGED\_BRANCH*, *SPINCLASS\_DEFAULT\_BRANCH*,
 *SPINCLASS\_REPO\_PATH* and *SPINCLASS\_EXEMPTION* (the predicate's name).
 Judge the diff with *git diff "$SPINCLASS\_MERGE\_BASE"
-"$SPINCLASS\_LANDING\_SHA"*, from git objects only. Each predicate is capped
-at 5 minutes.
+"$SPINCLASS\_LANDING\_SHA"*, from git objects only. All of a merge's predicates
+share one 5-minute cap.
 
 *When it runs:* after the landing sha is known and before the pre-merge
 hook. On the merge-queue path that is under the landing lock, after any

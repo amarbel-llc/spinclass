@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -348,17 +347,16 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	// Merge-queue knob. Mirrors PrepareMerge's graceful-degrade hierarchy
 	// load: an unresolvable home or a load failure leaves the queue ENABLED —
 	// the knob only disables when explicitly readable as true.
-	var (
-		sessionH     sweatfile.Hierarchy
-		haveSessionH bool
-	)
+	// An unloadable hierarchy stays the zero value (queue enabled, gate
+	// dormant for the terminal/attested policy paths).
+	var sessionH sweatfile.Hierarchy
 	if home, _ := os.UserHomeDir(); home != "" {
 		if h, hErr := sweatfileio.LoadWorktreeHierarchy(home, repoPath, wtPath); hErr == nil {
-			sessionH, haveSessionH = h, true
+			sessionH = h
 		}
 	}
-	if haveSessionH && sessionH.Merged.DisableMergeQueueEnabled() {
-		return finishMergeUnqueued(ctx, rep, ts, sessionH, haveSessionH, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, inSession, activity, pm)
+	if sessionH.Merged.DisableMergeQueueEnabled() {
+		return finishMergeUnqueued(ctx, rep, ts, sessionH, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, inSession, activity, pm)
 	}
 
 	// Acquire the per-repo landing lock BEFORE the gate, so the gate always
@@ -452,7 +450,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 
 	// (d0) The pre-merge policy stage (FDR 0031), under the lock, judging the
 	// exact landing diff before the expensive hook.
-	if pErr := runAttestationPolicy(ctx, ts, pm.Gate, sessionH, haveSessionH, repoPath, branch, defaultBranch, target.Ref(), pinnedSha, landingSha); pErr != nil {
+	if pErr := runAttestationPolicy(ctx, ts, pm.Gate, sessionH, repoPath, branch, defaultBranch, target.Ref(), pinnedSha, landingSha); pErr != nil {
 		return nil, pErr
 	}
 
@@ -528,11 +526,11 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 // the [hooks].disable-merge-queue rollback knob: hook on pinnedSha → ff-only →
 // teardown → push, with no lock, no re-pull, and no landing rebase — a default
 // branch that moved during the hook fails the ff-only merge exactly as before.
-func finishMergeUnqueued(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, sessionH sweatfile.Hierarchy, haveSessionH bool, repoPath, wtPath, branch, defaultBranch, pinnedSha string, gitSync, inSession bool, activity io.Writer, pm PostMergeOptions) (blobLinks []check.BlobLink, err error) {
+func finishMergeUnqueued(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, sessionH sweatfile.Hierarchy, repoPath, wtPath, branch, defaultBranch, pinnedSha string, gitSync, inSession bool, activity io.Writer, pm PostMergeOptions) (blobLinks []check.BlobLink, err error) {
 	// PrepareMerge rebased onto the landing target, so it is an ancestor of the
 	// pin and the pin is exactly what lands on this path.
 	target := landing.ForMerge(repoPath, defaultBranch, gitSync)
-	if pErr := runAttestationPolicy(ctx, ts, pm.Gate, sessionH, haveSessionH, repoPath, branch, defaultBranch, target.Ref(), pinnedSha, pinnedSha); pErr != nil {
+	if pErr := runAttestationPolicy(ctx, ts, pm.Gate, sessionH, repoPath, branch, defaultBranch, target.Ref(), pinnedSha, pinnedSha); pErr != nil {
 		return nil, pErr
 	}
 
@@ -626,30 +624,9 @@ func reportLocalAdvance(ts *crap.TestStream, target landing.Target, landingSha s
 // it and prunes admin entries. A failure emits a failing "land <branch>" test
 // point.
 func addLandingWorktree(ts *crap.TestStream, repoPath, branch, pinnedSha string) (landPath string, cleanup func(), err error) {
-	noop := func() {}
-	landParent := filepath.Join(repoPath, ".worktrees")
-	if mkErr := os.MkdirAll(landParent, 0o755); mkErr != nil {
-		return "", noop, failStep(ts, "land "+branch, fmt.Errorf("create landing worktree parent %s: %w", landParent, mkErr), "")
-	}
-	name := LandWorktreePrefix + strings.ReplaceAll(branch, "/", "-") + "-" + shortSha(pinnedSha) + "-" + strconv.Itoa(os.Getpid())
-	landPath = filepath.Join(landParent, name)
-
-	// Clear a stale physical dir from an interrupted prior run (same guard,
-	// same rationale as check.resolveHookDir).
-	if rmErr := os.RemoveAll(landPath); rmErr != nil {
-		return "", noop, failStep(ts, "land "+branch, fmt.Errorf("remove stale landing worktree dir %s: %w", landPath, rmErr), "")
-	}
-	if addErr := git.WorktreeAddDetached(repoPath, landPath, pinnedSha); addErr != nil {
-		return "", noop, failStep(ts, "land "+branch, fmt.Errorf("create landing worktree at %s: %w", landPath, addErr), "")
-	}
-	removed := false
-	cleanup = func() {
-		if removed {
-			return
-		}
-		removed = true
-		_ = git.WorktreeForceRemove(repoPath, landPath)
-		_ = git.WorktreePrune(repoPath)
+	landPath, cleanup, err = addTransientWorktree(repoPath, LandWorktreePrefix, branch, pinnedSha)
+	if err != nil {
+		return "", cleanup, failStep(ts, "land "+branch, fmt.Errorf("landing worktree: %w", err), "")
 	}
 	return landPath, cleanup, nil
 }

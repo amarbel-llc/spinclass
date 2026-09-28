@@ -10,8 +10,9 @@
 // consumes one buffered attestation; there is no sticky once-per-
 // session mode.
 //
-// The CLI (`sc merge` / `sc check`) does not call Check — the gate is
-// MCP-only by design.
+// The CLI (`sc merge` / `sc run` / `sc check`) does not call Check — the gate
+// is MCP-only by design; a terminal merge only records the bypass (FDR 0031's
+// pre-merge policy stage, internal/merge/policy.go).
 package attestation
 
 import (

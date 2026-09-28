@@ -48,8 +48,9 @@ var ErrAttestationNotExempt = errors.New("pre-merge skill attestation missing an
 // that exemption predicates run in: ".exempt-<branch>-<shortsha>-<pid>".
 const ExemptWorktreePrefix = ".exempt-"
 
-// exemptionTimeout bounds each predicate. A predicate is meant to be a cheap
-// git-object inspection; one that hangs must not wedge the landing lock.
+// exemptionTimeout bounds all of a merge's predicates together. A predicate
+// is meant to be a cheap git-object inspection; one that hangs must not wedge
+// the landing lock.
 const exemptionTimeout = 5 * time.Minute
 
 // PolicyTerminalBypassReason is the SKIP reason a terminal merge records when
@@ -62,8 +63,13 @@ const policyLabel = "pre-merge policy"
 // the session worktree's hierarchy (it decides whether the gate is live);
 // targetRef is the landing target the landing sits on; landingSha is the head
 // to judge. Only a GateNeedsExemption merge can fail here.
-func runAttestationPolicy(ctx context.Context, ts *crap.TestStream, gate AttestationGate, sessionH sweatfile.Hierarchy, haveSessionH bool, repoPath, branch, defaultBranch, targetRef, pinnedSha, landingSha string) error {
-	if !haveSessionH || len(sessionH.Merged.ActivePreMergeSkills()) == 0 {
+func runAttestationPolicy(ctx context.Context, ts *crap.TestStream, gate AttestationGate, sessionH sweatfile.Hierarchy, repoPath, branch, defaultBranch, targetRef, pinnedSha, landingSha string) error {
+	// GateNeedsExemption never skips: the gate was found live at admission,
+	// and the session hierarchy is branch-controlled (a queued merge's branch
+	// can drop its skills or break its sweatfile before dequeue), so letting it
+	// switch the gate off here would fail open. (An unloadable hierarchy is the
+	// zero value: no skills.)
+	if len(sessionH.Merged.ActivePreMergeSkills()) == 0 && gate != GateNeedsExemption {
 		return nil
 	}
 	switch gate {
@@ -79,7 +85,7 @@ func runAttestationPolicy(ctx context.Context, ts *crap.TestStream, gate Attesta
 	if err != nil {
 		return failStep(ts, policyLabel, fmt.Errorf("%w: could not resolve merge base of %s and %s: %v", ErrAttestationNotExempt, targetRef, shortSha(landingSha), err), "")
 	}
-	basePath, cleanup, err := addExemptWorktree(repoPath, branch, base)
+	basePath, cleanup, err := addTransientWorktree(repoPath, ExemptWorktreePrefix, branch, base)
 	if err != nil {
 		return failStep(ts, policyLabel, fmt.Errorf("%w: %v", ErrAttestationNotExempt, err), "")
 	}
@@ -104,6 +110,10 @@ func runAttestationPolicy(ctx context.Context, ts *crap.TestStream, gate Attesta
 		"SPINCLASS_DEFAULT_BRANCH=" + defaultBranch,
 		"SPINCLASS_REPO_PATH=" + repoPath,
 	}
+	// One deadline for ALL predicates, not one each: under the queue this is
+	// lock time, so N predicates must not hold the lock N times the cap.
+	ctx, cancel := context.WithTimeout(ctx, exemptionTimeout)
+	defer cancel()
 	var declined []string
 	for _, e := range exemptions {
 		verdict, out := runExemption(ctx, e, basePath, env)
@@ -129,8 +139,6 @@ func runAttestationPolicy(ctx context.Context, ts *crap.TestStream, gate Attesta
 // head-controlled. It returns "" when the predicate exempts (exit 0), else a
 // verdict ("exit N", "timeout", "spawn-failed: …") and the captured output.
 func runExemption(ctx context.Context, e sweatfile.PreMergeExemption, dir string, env []string) (verdict, output string) {
-	ctx, cancel := context.WithTimeout(ctx, exemptionTimeout)
-	defer cancel()
 	cmd := exec.CommandContext(ctx, "sh", "-c", sweatfile.NormalizeCommand(e.Command))
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), append(env, "SPINCLASS_EXEMPTION="+e.Name)...)
@@ -151,21 +159,32 @@ func runExemption(ctx context.Context, e sweatfile.PreMergeExemption, dir string
 	return "spawn-failed: " + err.Error(), output
 }
 
-// addExemptWorktree creates the transient detached worktree at base under
-// <repo>/.worktrees/ and returns its path plus an idempotent cleanup.
-func addExemptWorktree(repoPath, branch, base string) (string, func(), error) {
+// addTransientWorktree creates a detached worktree at sha named
+// <prefix><branch>-<shortsha>-<pid> under <repo>/.worktrees/ (the shape
+// sc clean's orphan reaper parses) and returns its path plus an idempotent
+// cleanup that force-removes it and prunes admin entries. Shared by the
+// landing (.land-*) and exemption (.exempt-*) worktrees.
+func addTransientWorktree(repoPath, prefix, branch, sha string) (string, func(), error) {
+	noop := func() {}
 	parent := filepath.Join(repoPath, ".worktrees")
 	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return "", func() {}, fmt.Errorf("create exemption worktree parent %s: %w", parent, err)
+		return "", noop, fmt.Errorf("create worktree parent %s: %w", parent, err)
 	}
-	path := filepath.Join(parent, ExemptWorktreePrefix+strings.ReplaceAll(branch, "/", "-")+"-"+shortSha(base)+"-"+strconv.Itoa(os.Getpid()))
+	path := filepath.Join(parent, prefix+strings.ReplaceAll(branch, "/", "-")+"-"+shortSha(sha)+"-"+strconv.Itoa(os.Getpid()))
+	// Clear a stale physical dir from an interrupted prior run (same guard,
+	// same rationale as check.resolveHookDir).
 	if err := os.RemoveAll(path); err != nil {
-		return "", func() {}, fmt.Errorf("remove stale exemption worktree dir %s: %w", path, err)
+		return "", noop, fmt.Errorf("remove stale worktree dir %s: %w", path, err)
 	}
-	if err := git.WorktreeAddDetached(repoPath, path, base); err != nil {
-		return "", func() {}, fmt.Errorf("create exemption worktree at %s: %w", path, err)
+	if err := git.WorktreeAddDetached(repoPath, path, sha); err != nil {
+		return "", noop, fmt.Errorf("create worktree at %s: %w", path, err)
 	}
+	removed := false
 	return path, func() {
+		if removed {
+			return
+		}
+		removed = true
 		_ = git.WorktreeForceRemove(repoPath, path)
 		_ = git.WorktreePrune(repoPath)
 	}, nil

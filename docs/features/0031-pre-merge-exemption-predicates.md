@@ -294,9 +294,15 @@ handle is left for a separate issue.
   `LoadWorktreeHierarchy` runs with the base checkout as the worktree layer
   (see the trust rule). A `sweatfile` that fails to parse at the base
   therefore yields no exemptions (fail closed), not an error.
-- **Predicate cap.** Each predicate runs under a fixed 5m timeout
-  (`exemptionTimeout`). It is not configurable, and under the queue that
-  time is lock time.
+- **Predicate cap.** All of a merge's predicates share one fixed 5m deadline
+  (`exemptionTimeout`), so N predicates can't hold the landing lock N times
+  over. It is not configurable, and under the queue that time is lock time.
+- **Deferred efficiency.** The `.exempt-*` checkout is created under the lock
+  even when the base declares no exemptions. Reading the base sweatfile first
+  (`git show <base>:sweatfile`) could skip it. Also deferred: a statsd counter
+  per verdict, and the fail-closed zero value for `AttestationGate`. The zero
+  value is `GateTerminal` so CLI callers need no opt-in; flipping it would
+  make every merge caller name its gate.
 - **Late refusal on the MCP path.** A non-exempt, un-attested MCP merge now
   fails after fetch, rebase and lock acquisition, instead of at the handler.
   The cost is small because the refusal precedes the hook. Nothing lands,
