@@ -1,8 +1,10 @@
 ---
-status: experimental
+status: testing
 date: 2026-06-08
 promotion-criteria: |
-  experimental -> testing: a real `merge-this-session-async` run on a
+  experimental -> testing: PROMOTED 2026-09-28 on operator confirmation. The
+  feature has been default-on since 1520353 (2026-06-08) and no fleet
+  sweatfile opts out. A real `merge-this-session-async` run on a
   nontrivial repo (e.g. a `nix build` + test-lane hook) where the agent
   edits/commits new work in the session worktree while the hook runs, and
   (1) the merge lands exactly the pinned sha, (2) the concurrent edit

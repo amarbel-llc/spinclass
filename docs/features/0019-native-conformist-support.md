@@ -1,5 +1,5 @@
 ---
-status: experimental
+status: testing
 date: 2026-06-20
 promotion-criteria: |
   proposed -> experimental: DONE — conformist shipped `lib.mkToolchainHooks`
@@ -12,7 +12,12 @@ promotion-criteria: |
 
 # Native conformist support in spinclass
 
-> **Experimental** — the conformist side (conformist#59: `mkToolchainHooks`,
+> **Testing** (promoted 2026-09-28): the hook has survived repeated conformist
+> bumps with no version, formatter-PATH or flag breakage: ab34d67, 9ef6631,
+> 31ba73e and fac9139. The last one also brought the generic codegen-repair
+> lane, which restamped a stale tommy header at pre-commit. Watch item: #311.
+>
+> Earlier status (experimental): the conformist side (conformist#59: `mkToolchainHooks`,
 > scaffold `repair`, the two-shapes guide) is merged, and the spinclass adoption
 > landed (commit `3e4c210`): `flake.nix` uses `conformist.lib.mkToolchainHooks`,
 > the sweatfile names `conformist-pre-commit`, proven end-to-end (the live hook

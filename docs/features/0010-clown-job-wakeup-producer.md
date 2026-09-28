@@ -1,7 +1,10 @@
 ---
-status: testing
+status: accepted
 date: 2026-06-06
 promotion-criteria: |
+  testing -> accepted: PROMOTED 2026-09-28 on operator confirmation of no
+  missed wakes over ~16 weeks of async merge/check/spawn traffic. #234 (a
+  cancel never confirms) is a cancel-path defect, not a missed wake.
   experimental -> testing: PROMOTED 2026-06-06. The end-to-end wake pass
   succeeded against a deployed clown >= 7fd142c — (1) a real async
   merge/check terminal event wakes the originating agent via clown

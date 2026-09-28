@@ -1,8 +1,10 @@
 ---
-status: experimental
+status: testing
 date: 2026-07-19
 promotion-criteria: |
-  experimental -> testing: one real contended landing on a busy repo (e.g.
+  experimental -> testing: PROMOTED 2026-09-28 on operator confirmation. The
+  queue is default-on since a85b9c1, and FDR 0029 lands from its `.land-*`
+  worktrees. Open watch items: #211, #316. One real contended landing on a busy repo (e.g.
   cutting-garden under parallel session activity) where (1) two concurrent
   merges serialize — the loser logs "merge queue: waiting behind <session>"
   heartbeats and emits the "merge queue wait" test point, (2) a landing whose
