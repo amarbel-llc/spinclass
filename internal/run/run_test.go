@@ -149,6 +149,31 @@ func TestParseArgsPostMergeTimeout(t *testing.T) {
 	}
 }
 
+func TestParseArgsPostMergeTargets(t *testing.T) {
+	for _, args := range [][]string{
+		{"--post-merge-targets", "krone,flac", "--", "true"},
+		{"--post-merge-targets=krone,flac", "--", "true"},
+	} {
+		spec, err := ParseArgs(args, nil)
+		if err != nil {
+			t.Fatalf("ParseArgs(%v): %v", args, err)
+		}
+		if spec.PostMergeTargets != "krone,flac" || spec.NoPostMerge {
+			t.Errorf("ParseArgs(%v): targets=%q no=%v", args, spec.PostMergeTargets, spec.NoPostMerge)
+		}
+		if len(spec.DynamicPostMergeHooks) != 0 {
+			t.Errorf("ParseArgs(%v): --post-merge-targets leaked into dynamic hooks: %v", args, spec.DynamicPostMergeHooks)
+		}
+	}
+	spec, err := ParseArgs([]string{"--no-post-merge", "--", "true"}, nil)
+	if err != nil || !spec.NoPostMerge {
+		t.Errorf("--no-post-merge: NoPostMerge=%v err=%v", spec.NoPostMerge, err)
+	}
+	if _, err := ParseArgs([]string{"--post-merge-targets"}, nil); err == nil {
+		t.Error("--post-merge-targets with no value: want error, got nil")
+	}
+}
+
 func TestParseArgsPostMergeTimeoutRejectsBadValues(t *testing.T) {
 	for _, v := range []string{"ten minutes", "-5m"} {
 		if _, err := ParseArgs([]string{"--post-merge-timeout", v, "--", "true"}, nil); err == nil {

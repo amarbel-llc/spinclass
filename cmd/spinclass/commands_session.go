@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	osexec "os/exec"
-	"strings"
 	"time"
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
@@ -102,13 +101,14 @@ func registerSessionCommands(app *command.App) {
 		Description: command.Description{
 			Short: "Start a session, run a command in it, then merge + clean up (one-shot)",
 			Long: "Run a single non-interactive lifecycle as one primitive (#194): start a worktree session, run ONE command sequence inside it (the same devshell + SPINCLASS_* identity path as `sc exec`), then merge into the default branch and tear the session down. " +
-				"Usage: sc run [--description D] [--no-merge] [--no-close] [--local-only] [--post-merge H]... [--post-merge-timeout D] ( -- <util> [args...] | <stdin script> ). " +
+				"Usage: sc run [--description D] [--no-merge] [--no-close] [--local-only] [--post-merge H]... [--post-merge-timeout D] [--post-merge-targets A,B] [--no-post-merge] ( -- <util> [args...] | <stdin script> ). " +
 				"Two mutually-exclusive input forms: a single command after `--` (exactly `sc exec`'s grammar), or — with no `--` — a script piped on stdin (read in full; if line 1 is a #! shebang the script runs under that interpreter, else under sh). " +
 				"Success-path teardown is a 2×2 matrix over --no-merge and --no-close: default merges then tears down; --no-close merges but leaves the worktree/session; --no-merge skips the merge and closes only if no commits were produced (commits present ⇒ session left, never silently discarded); --no-merge --no-close leaves everything intact. " +
 				"An empty run (no commits ahead of the default branch) is a clean success, not a failure. Any step that exits nonzero leaves the worktree + session intact for inspection (clean up with `sc close`) and propagates a nonzero exit code. " +
 				"--local-only passes through to the merge step (skip the pull-before and push-after). " +
 				"--post-merge H runs the shell command H after the merge lands, in the default-branch checkout, with SPINCLASS_MERGED_SHA / _MERGED_BRANCH / _DEFAULT_BRANCH / _MERGE_PUSHED / _REPO_PATH set (plus SPINCLASS_POST_MERGE_TIMEOUT / _TIMEOUT_SECONDS / _DEADLINE, all \"0\": dynamic hooks are uncapped). Repeatable (multiple --post-merge flags run in order). Failures are non-fatal (severity=warn): the merge is already durable. Composes with [[post-merge]] named targets and [hooks].post-merge from the sweatfile. " +
 				"--post-merge-timeout D overrides [hooks].post-merge-timeout for the sweatfile post-merge phase of this run's merge (a Go duration, or \"0\" to disable the cap; see `sc merge`). " +
+				"--post-merge-targets A,B and --no-post-merge select which named [[post-merge]] targets this run's merge deploys, exactly as on `sc merge`: omit for all, --no-post-merge for none (wins), else the comma-separated subset; an unknown name fails the merge before it lands (the session is then left for inspection). They select sweatfile targets; --post-merge H adds a dynamic hook. " +
 				"--allow-stale-base creates the session even when the repo's default branch could not be fetched (e.g. offline). " +
 				"Output uses the merge/check present stack: --format auto (viewport on a TTY, ndjson when piped) | viewport | plain | ndjson. " +
 				"Caveats (raw passthrough, like `sc exec`): util arguments after `--` that collide with spinclass's global flags are consumed before the `--`; flags must precede the `--`.",
@@ -186,16 +186,7 @@ func registerSessionCommands(app *command.App) {
 				return err
 			}
 
-			// Post-merge target selection (FDR 0026): nil = all (default),
-			// []string{} = none, a non-empty slice = that subset. --no-post-merge
-			// wins over --post-merge-targets when both are given.
-			var postMergeTargets []string
-			switch {
-			case p.NoPostMerge:
-				postMergeTargets = []string{}
-			case p.PostMergeTargets != "":
-				postMergeTargets = splitCommaList(p.PostMergeTargets)
-			}
+			postMergeTargets := merge.TargetsFromFlags(p.NoPostMerge, p.PostMergeTargets)
 
 			// merge.Run resolves the format itself: pass the RAW --format
 			// value ("" means auto — viewport on a TTY, ndjson when piped).
@@ -284,18 +275,6 @@ func registerSessionCommands(app *command.App) {
 		},
 		RunCLI: runRebuild,
 	})
-}
-
-// splitCommaList splits a comma-separated flag value into trimmed, non-empty
-// items (FDR 0026 --post-merge-targets). "a, b ,,c" -> ["a","b","c"].
-func splitCommaList(s string) []string {
-	var out []string
-	for _, part := range strings.Split(s, ",") {
-		if t := strings.TrimSpace(part); t != "" {
-			out = append(out, t)
-		}
-	}
-	return out
 }
 
 func runRebuild(_ context.Context, args json.RawMessage) error {

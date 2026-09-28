@@ -985,8 +985,8 @@ by adding stanzas (the string goes dormant) and deleting it at leisure; no
 flag-day.
 
 *Selection:* *merge-this-session* and its *-async* twin take a *targets*
-parameter, and *sc merge* takes *--post-merge-targets* (comma-separated)
-and *--no-post-merge*. Omitting the selection deploys ALL active targets; a
+parameter, and *sc merge* and *sc run* take *--post-merge-targets*
+(comma-separated) and *--no-post-merge*. Omitting the selection deploys ALL active targets; a
 subset deploys only those names; an empty selection deploys none (a
 docs-only merge). A name no target declares fails the merge BEFORE it
 lands.

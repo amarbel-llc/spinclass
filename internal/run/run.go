@@ -69,6 +69,12 @@ type Spec struct {
 	// run's merge (nil = sweatfile in force). It does not bound the dynamic
 	// --post-merge hooks, which are uncapped.
 	PostMergeTimeout *time.Duration
+	// PostMergeTargets / NoPostMerge are `sc merge`'s --post-merge-targets /
+	// --no-post-merge, passed through to this run's merge step (#325) and
+	// resolved by merge.TargetsFromFlags: nil = all, none, or the named subset.
+	// Distinct from DynamicPostMergeHooks (--post-merge H), which adds hooks.
+	PostMergeTargets string
+	NoPostMerge      bool
 }
 
 // Run executes the full lifecycle and returns the process exit code to
@@ -198,7 +204,10 @@ func Run(spec Spec) (exitCode int, err error) {
 		// dangling index entry is then dropped in teardown.
 		if _, mErr := merge.Resolved(executor.ShellExecutor{}, rep, ts,
 			rp.RepoPath, rp.AbsPath, rp.Branch, defaultBranch, !spec.LocalOnly, spec.NoClose,
-			merge.PostMergeOptions{Timeout: spec.PostMergeTimeout}); mErr != nil {
+			merge.PostMergeOptions{
+				Targets: merge.TargetsFromFlags(spec.NoPostMerge, spec.PostMergeTargets),
+				Timeout: spec.PostMergeTimeout,
+			}); mErr != nil {
 			mergeFailed = true
 			return mErr
 		}
@@ -438,6 +447,7 @@ func runDynamicPostMergeHooks(rep *crap.Reporter, repoPath, defaultBranch, branc
 //	[--description D | -d D | --description=D] [--no-merge] [--no-close]
 //	[--local-only] [--allow-stale-base] [--allow-no-credential] [--format F | --format=F]
 //	[--post-merge H]... [--post-merge-timeout D | --post-merge-timeout=D]
+//	[--post-merge-targets A,B | --post-merge-targets=A,B] [--no-post-merge]
 //	( -- <util> [args...] | <stdin script> )
 //
 // Flags are hand-parsed (the command uses PassthroughArgs, like `sc exec`) up
@@ -496,6 +506,18 @@ func ParseArgs(args []string, stdin io.Reader) (Spec, error) {
 			i += 2
 		case strings.HasPrefix(a, "--post-merge="):
 			spec.DynamicPostMergeHooks = append(spec.DynamicPostMergeHooks, strings.TrimPrefix(a, "--post-merge="))
+			i++
+		case a == "--no-post-merge":
+			spec.NoPostMerge = true
+			i++
+		case a == "--post-merge-targets":
+			if i+1 >= len(args) {
+				return spec, fmt.Errorf("%s requires a value", a)
+			}
+			spec.PostMergeTargets = args[i+1]
+			i += 2
+		case strings.HasPrefix(a, "--post-merge-targets="):
+			spec.PostMergeTargets = strings.TrimPrefix(a, "--post-merge-targets=")
 			i++
 		case a == "--post-merge-timeout":
 			if i+1 >= len(args) {

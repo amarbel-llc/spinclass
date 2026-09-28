@@ -2,6 +2,7 @@ package merge
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
@@ -27,6 +28,33 @@ type PostMergeOptions struct {
 	// outruns the repo's usual cap is the caller's call to wait for. Parse
 	// caller-supplied strings with sweatfile.ParsePostMergeTimeout.
 	Timeout *time.Duration
+}
+
+// TargetsFromFlags maps the CLI spelling of a post-merge target selection
+// (`--post-merge-targets a,b` / `--no-post-merge`) onto PostMergeOptions.Targets,
+// shared by `sc merge` and `sc run` so the two cannot drift (#325):
+// --no-post-merge wins and selects none; a non-empty list selects those names
+// (comma-separated, trimmed, empties dropped); otherwise nil selects all.
+func TargetsFromFlags(noPostMerge bool, targets string) []string {
+	switch {
+	case noPostMerge:
+		return []string{}
+	case targets != "":
+		return splitCommaList(targets)
+	}
+	return nil
+}
+
+// splitCommaList splits a comma-separated flag value into trimmed, non-empty
+// items. "a, b ,,c" -> ["a","b","c"].
+func splitCommaList(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if t := strings.TrimSpace(part); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // EffectiveTimeout resolves the wall-clock cap the phase actually enforces:

@@ -11,6 +11,21 @@ import (
 
 func dptr(d time.Duration) *time.Duration { return &d }
 
+// Absent-vs-empty is load-bearing: nil deploys all, an empty non-nil slice
+// deploys none. --no-post-merge wins over a target list (#325 shares this with
+// `sc run`).
+func TestTargetsFromFlags(t *testing.T) {
+	if got := TargetsFromFlags(false, ""); got != nil {
+		t.Errorf("no flags: got %#v, want nil (all)", got)
+	}
+	if got := TargetsFromFlags(true, "krone"); got == nil || len(got) != 0 {
+		t.Errorf("--no-post-merge: got %#v, want empty non-nil (none)", got)
+	}
+	if got := TargetsFromFlags(false, " krone, ,flac "); strings.Join(got, "|") != "krone|flac" {
+		t.Errorf("list: got %#v, want [krone flac]", got)
+	}
+}
+
 // Precedence of the effective post-merge cap: a per-merge override beats the
 // sweatfile's [hooks].post-merge-timeout, which beats the 10m default. A zero
 // override disables the cap even when the sweatfile sets one.
