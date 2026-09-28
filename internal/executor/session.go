@@ -40,39 +40,19 @@ func (s SessionExecutor) Attach(dir string, key string, command []string, dryRun
 		entrypoint = []string{shell}
 	}
 
-	tmpDir := filepath.Join(dir, ".tmp")
+	sessionEnv := s.sessionEnv(dir, key)
 
-	// Split session key ("repo/branch") into individual env vars
-	repo, branch := key, ""
-	if i := strings.Index(key, "/"); i >= 0 {
-		repo, branch = key[:i], key[i+1:]
+	// Expand env vars in entrypoint args (e.g. "$SPINCLASS_SESSION_ID" →
+	// "repo/branch") against the session env, falling back to the process env.
+	lookup := func(k string) string {
+		if v, ok := sessionEnv[k]; ok {
+			return v
+		}
+		return os.Getenv(k)
 	}
-
-	// Apply user env first so spinclass-owned vars (below) can't be
-	// clobbered by user config — the integration contract requires
-	// SPINCLASS_SESSION_ID etc. to be authoritative.
-	for k, v := range s.Env {
-		_ = os.Setenv(k, v)
-	}
-
-	// Spinclass-owned env. Set after user env so it wins on collision.
-	sessionEnv := map[string]string{
-		"SPINCLASS_SESSION_ID":  key,
-		"SPINCLASS_REPO":        repo,
-		"SPINCLASS_BRANCH":      branch,
-		"SPINCLASS_WORKTREE":    dir,
-		"SPINCLASS_DESCRIPTION": s.Description,
-		"TMPDIR":                tmpDir,
-		"CLAUDE_CODE_TMPDIR":    tmpDir,
-	}
-	for k, v := range sessionEnv {
-		_ = os.Setenv(k, v)
-	}
-
-	// Expand env vars in entrypoint args (e.g. "$SPINCLASS_SESSION_ID" → "repo/branch")
 	expanded := make([]string, len(entrypoint))
 	for i, arg := range entrypoint {
-		expanded[i] = os.ExpandEnv(arg)
+		expanded[i] = os.Expand(arg, lookup)
 	}
 
 	if dryRun {
@@ -89,9 +69,14 @@ func (s SessionExecutor) Attach(dir string, key string, command []string, dryRun
 	cmd.Dir = dir
 	// Strip an inherited CLOWN_SESSION_ID/CLAUDE_SESSION_ID (e.g. when `sc` is
 	// run from within another clown session) so this session's clown re-derives
-	// its channel from the SPINCLASS_SESSION_ID set above, rather than arming
-	// the launcher's channel (#169).
+	// its channel from the SPINCLASS_SESSION_ID below, rather than arming the
+	// launcher's channel (#169). The session env goes ONLY to the child: setting
+	// it process-wide leaked this session's TMPDIR into everything spinclass ran
+	// afterwards, e.g. post-merge after teardown (spinclass#330).
 	cmd.Env = session.StripInheritedSessionIDs(os.Environ())
+	for k, v := range sessionEnv {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -119,6 +104,35 @@ func (s SessionExecutor) Attach(dir string, key string, command []string, dryRun
 	err := cmd.Wait()
 	signal.Stop(sighup)
 	return err
+}
+
+// sessionEnv is the environment layered over the process env for the session
+// entrypoint: user [session-entry].env first, then the spinclass-owned vars,
+// which win on collision because the integration contract requires
+// SPINCLASS_SESSION_ID etc. to be authoritative.
+func (s SessionExecutor) sessionEnv(dir, key string) map[string]string {
+	repo, branch := key, ""
+	if i := strings.Index(key, "/"); i >= 0 {
+		repo, branch = key[:i], key[i+1:]
+	}
+	tmpDir := filepath.Join(dir, ".tmp")
+
+	env := make(map[string]string, len(s.Env)+7)
+	for k, v := range s.Env {
+		env[k] = v
+	}
+	for k, v := range map[string]string{
+		"SPINCLASS_SESSION_ID":  key,
+		"SPINCLASS_REPO":        repo,
+		"SPINCLASS_BRANCH":      branch,
+		"SPINCLASS_WORKTREE":    dir,
+		"SPINCLASS_DESCRIPTION": s.Description,
+		"TMPDIR":                tmpDir,
+		"CLAUDE_CODE_TMPDIR":    tmpDir,
+	} {
+		env[k] = v
+	}
+	return env
 }
 
 func (s SessionExecutor) Detach() error {

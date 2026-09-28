@@ -93,10 +93,7 @@ func TestSessionExecutorSpinclassEnvOverridesUserEnv(t *testing.T) {
 			"TMPDIR":               "/tmp/user-clobber",
 		},
 	}
-	tp := tap.TestPoint{}
-	if err := exec.Attach("/tmp/test", "myrepo/feat-x", nil, true, &tp); err != nil {
-		t.Fatal(err)
-	}
+	env := exec.sessionEnv("/tmp/test", "myrepo/feat-x")
 	checks := map[string]string{
 		"SPINCLASS_SESSION_ID": "myrepo/feat-x",
 		"SPINCLASS_REPO":       "myrepo",
@@ -105,8 +102,32 @@ func TestSessionExecutorSpinclassEnvOverridesUserEnv(t *testing.T) {
 		"TMPDIR":               "/tmp/test/.tmp",
 	}
 	for k, want := range checks {
+		if got := env[k]; got != want {
+			t.Errorf("sessionEnv[%q] = %q, want %q", k, got, want)
+		}
+	}
+}
+
+// spinclass#330: the session env belongs to the entrypoint child only. A
+// no-attach (dry-run) Attach, which is what `sc run` and `sc start --no-attach`
+// do, must not mutate the spinclass process's own env. Before the fix, the
+// session's TMPDIR leaked into every later subprocess, including post-merge
+// commands after the worktree was removed.
+func TestSessionExecutorDoesNotMutateProcessEnv(t *testing.T) {
+	t.Setenv("TMPDIR", "/sentinel/tmp")
+	t.Setenv("SPINCLASS_SESSION_ID", "sentinel/session")
+	exec := SessionExecutor{Entrypoint: []string{"echo"}, Env: map[string]string{"USER_ONLY": "x"}}
+	tp := tap.TestPoint{}
+	if err := exec.Attach("/tmp/test", "myrepo/feat-x", nil, true, &tp); err != nil {
+		t.Fatal(err)
+	}
+	for k, want := range map[string]string{
+		"TMPDIR":               "/sentinel/tmp",
+		"SPINCLASS_SESSION_ID": "sentinel/session",
+		"USER_ONLY":            "",
+	} {
 		if got := os.Getenv(k); got != want {
-			t.Errorf("os.Getenv(%q) = %q, want %q", k, got, want)
+			t.Errorf("os.Getenv(%q) = %q after Attach, want unchanged %q", k, got, want)
 		}
 	}
 }

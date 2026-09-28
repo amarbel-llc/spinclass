@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 )
 
 // postMergeTmpDir returns the TMPDIR every post-merge command runs with
@@ -32,5 +33,32 @@ func postMergeTmpDir() string {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return ""
 	}
+	if !ownedPrivateDir(dir) {
+		return ""
+	}
 	return dir
+}
+
+// ownedPrivateDir reports whether dir is a real directory (not a symlink)
+// owned by the current user with mode 0700. The /tmp fallback name is
+// predictable, and MkdirAll succeeds on a path that already exists, so another
+// local user could pre-create it. They could make it world-writable, point it
+// at a dir they control with a symlink, or lock us out of it. Any such dir is
+// refused rather than used.
+func ownedPrivateDir(dir string) bool {
+	info, err := os.Lstat(dir)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return false
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || int(st.Uid) != os.Getuid() {
+		return false
+	}
+	if info.Mode().Perm() != 0o700 {
+		// Ours but too open (e.g. a umask-widened earlier create): tighten.
+		if os.Chmod(dir, 0o700) != nil {
+			return false
+		}
+	}
+	return true
 }

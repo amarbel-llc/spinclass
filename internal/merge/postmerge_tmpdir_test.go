@@ -38,6 +38,37 @@ command = 'd=$(mktemp -d) && test -d "$d" && printf %s "$d" > `+out+`'
 	}
 }
 
+// A pre-created symlink or a too-open dir must not be adopted as the phase
+// TMPDIR (a predictable path in a shared /tmp can be planted by another user).
+func TestOwnedPrivateDirRefusesSymlinkAndTightensMode(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "elsewhere")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if ownedPrivateDir(link) {
+		t.Error("a symlink was accepted as the post-merge TMPDIR")
+	}
+
+	open := filepath.Join(root, "open")
+	if err := os.Mkdir(open, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(open, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if !ownedPrivateDir(open) {
+		t.Fatal("our own dir was refused")
+	}
+	if info, _ := os.Stat(open); info.Mode().Perm() != 0o700 {
+		t.Errorf("mode = %v, want tightened to 0700", info.Mode().Perm())
+	}
+}
+
 // The phase tmpdir never derives from the inherited TMPDIR, even a live one: a
 // live session's .tmp can still vanish under a detached post-merge child.
 func TestPostMergeEnvTmpdirIgnoresInheritedTmpdir(t *testing.T) {
