@@ -197,12 +197,8 @@ subcommand is always available.
   Does not attach — `sc resume` afterward reuses that path unmodified.
   `sc clean`'s merged-worktree removal does NOT capture a SHA (that content
   already lives in the default branch).
-- **Pre-merge exemption predicates** (FDR 0031, `internal/merge/policy.go`):
-  `[[pre-merge-exemptions]]` can admit an UN-attested MCP merge.
-  `decideMergeGate` only peeks and sets `PostMergeOptions.Gate` for
-  `FinishMerge`'s policy stage. Predicates run from a `.exempt-*` worktree at
-  the MERGE BASE, with no devshell (no self-vouching). Terminal merges are
-  `GateTerminal` (the zero value): always exempt (#326), SKIP recorded.
+- **Exemption predicates** (FDR 0031, `merge/policy.go`): run from the MERGE
+  BASE; terminal merges are the zero-value `GateTerminal`, always exempt.
 - **No implicit-session merge** (#317): merge from a main-checkout session
   is refused (`merge.ErrImplicitMergeUnsupported`, before any gate/hook);
   `sc check` still works. Bootstrapping one as a session: #318.
