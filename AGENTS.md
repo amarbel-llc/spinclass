@@ -197,27 +197,12 @@ subcommand is always available.
   Does not attach — `sc resume` afterward reuses that path unmodified.
   `sc clean`'s merged-worktree removal does NOT capture a SHA (that content
   already lives in the default branch).
-- **Pre-merge exemption predicates** (FDR 0031, #327, `internal/merge/policy.go`):
-  sweatfile `[[pre-merge-exemptions]]` `{name, command}` predicates can admit an
-  UN-attested MCP merge while `[[pre-merge-skills]]` is live. MCP-path only. The
-  MCP handlers' `decideMergeGate` behaves as follows:
-  - peeks, never consumes;
-  - an attestation present → `GateAttested`, consumed on commit;
-  - none but exemptions declared (session hierarchy, as a fast-refuse hint)
-    → `GateNeedsExemption`, nothing consumed;
-  - neither → the FDR 0007 refusal.
-
-  The gate rides `PostMergeOptions.Gate` to `FinishMerge`'s policy stage. That
-  stage runs before the pre-merge hook (under the landing lock on the queued
-  path), judges `merge-base(target, landingSha)..landingSha`, and applies a
-  **trust rule**: the exemptions are resolved and run from a detached
-  `.exempt-*` worktree at the MERGE BASE, via `LoadWorktreeHierarchy` with that
-  checkout as the worktree layer, with no devshell. So a branch cannot vouch
-  for itself. First exit 0 exempts; otherwise `ErrAttestationNotExempt` and
-  nothing lands. Terminal `sc merge`/`sc run` = `GateTerminal` (the ZERO
-  value): always exempt by operator decision (#326). Predicates are never run
-  there; the stage only records a `pre-merge policy` SKIP. A dormant gate
-  emits no point on any path.
+- **Pre-merge exemption predicates** (FDR 0031, `internal/merge/policy.go`):
+  `[[pre-merge-exemptions]]` can admit an UN-attested MCP merge.
+  `decideMergeGate` only peeks and sets `PostMergeOptions.Gate` for
+  `FinishMerge`'s policy stage. Predicates run from a `.exempt-*` worktree at
+  the MERGE BASE, with no devshell (no self-vouching). Terminal merges are
+  `GateTerminal` (the zero value): always exempt (#326), SKIP recorded.
 - **No implicit-session merge** (#317): merge from a main-checkout session
   is refused (`merge.ErrImplicitMergeUnsupported`, before any gate/hook);
   `sc check` still works. Bootstrapping one as a session: #318.
@@ -519,7 +504,7 @@ dirs → repo at each level. Notable surface:
   non-empty append): `git-excludes`, `claude-allow`, `envrc-directives`,
   `allowed-mcps`.
 - Arrays of tables, dedup-by-name: `[[mcps]]`, `[[start-commands]]`,
-  `[[remotes]]`, `[[pre-merge-skills]]`, `[[pre-merge-exemptions]]`.
+  `[[remotes]]`, `[[pre-merge-*]]`.
 - `[env]` (map merge); `[hooks]` (lifecycle hooks + the `disable-*` /
   `*-timeout` / output-format knobs, scalar override); `[auth]`
   (`mint-command` / `revoke-command`, scalar override — FDR 0028);
