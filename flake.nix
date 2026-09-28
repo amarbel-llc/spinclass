@@ -229,10 +229,13 @@
         # tommy fmt (*.toml) has no registry program and needs the `tommy`
         # flake input, so it is inlined here rather than in ./conformist.nix (a
         # standalone module file can't see flake inputs). getExe' with an
-        # explicit binary name: tommy lacks meta.mainProgram. No tommy-codegen
-        # repair linter: it runs `tommy generate` in the checkout, which needs
-        # a go.mod. Drift is checks.tommy-codegen; regen is
-        # `just build-tommy-codegen`.
+        # explicit binary name: tommy lacks meta.mainProgram. No tommy-specific
+        # repair linter here (running `tommy generate` in the checkout needs a
+        # go.mod): codegen drift is repaired at pre-commit by the eng preset's
+        # generic `codegen-repair` linter (conformist#124), which applies
+        # checks.tommy-codegen's passthru.codegenPatch (igloo#80). Drift is
+        # still gated by checks.tommy-codegen; `just build-tommy-codegen`
+        # stays as the manual escape hatch.
         conformistTommyModule = _: {
           settings.formatter.tommy = {
             command = pkgs.lib.getExe' tommy.packages.${system}.default "tommy";
