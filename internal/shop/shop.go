@@ -26,6 +26,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/present"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
@@ -130,60 +131,104 @@ func createWorktree(worktreePath worktree.ResolvedPath, opts CreateOpts, tw *tap
 		}
 
 		// Per-session push credential (FDR 0028), on the same funnel as the
-		// base-branch gate so spawn/run sessions get one too. The orphan sweep
-		// runs first (best-effort; a failure is reported, not fatal — the
-		// issuer's TTL sweep is the backstop). Sweep-BEFORE-mint is load-bearing:
-		// the sweep revokes by session id, and a key reused after a tombstone
-		// (a chosen branch name) would otherwise let the stale record revoke the
-		// token minted here; sweeping first retires it before this id has a
-		// token, and the attach/spawn state write then replaces the tombstone
-		// (session.Write) so it can never be swept again. A failed MINT is fatal
-		// by default: a session without the credential it was configured for
-		// would push off the inherited ssh-agent, exactly the failure this
-		// feature exists to remove, and a worker has no operator to notice. The
-		// half-built worktree is torn down so the refusal leaves nothing behind.
-		// allow-no-credential (the --allow-stale-base shape) is the explicit
-		// escape hatch: warn and keep the credential-less session. An origin
-		// host outside [auth].forge-hosts is not a failure at all — the mint is
-		// skipped visibly and the session is created exactly as before.
-		ctx := context.Background()
-		if n, errs := auth.SweepOrphans(ctx, result.Merged, worktreePath.RepoPath, os.Stderr); n > 0 || len(errs) > 0 {
-			reportCredentialSweep(tw, n, errs)
-		}
-		id := auth.Identity{
-			RepoPath:     worktreePath.RepoPath,
-			WorktreePath: worktreePath.AbsPath,
-			Branch:       worktreePath.Branch,
-			SessionKey:   worktreePath.SessionKey,
-		}
-		mintDesc := "mint credential " + worktreePath.Branch
-		outcome, mintErr := auth.Mint(ctx, result.Merged, id, "")
-		switch {
-		case mintErr != nil && !opts.AllowNoCredential:
-			_ = git.WorktreeForceRemove(worktreePath.RepoPath, worktreePath.AbsPath)
-			if worktreePath.ExistingBranch == "" {
-				_, _ = git.BranchForceDelete(worktreePath.RepoPath, worktreePath.Branch)
-			}
-			return false, fmt.Errorf("%w\n\npass --allow-no-credential, or set [hooks].allow-no-credential, to create the session without a push credential (pushes then use the inherited ssh-agent)", mintErr)
-		case mintErr != nil:
-			msg := mintErr.Error() + " (allow-no-credential: session created without a push credential; pushes use the inherited ssh-agent)"
-			if tw != nil {
-				tw.NotOk(mintDesc, map[string]string{"severity": "warn", "message": msg})
-			} else {
-				log.Warn("credential mint failed; continuing without one", "branch", worktreePath.Branch, "err", mintErr)
-			}
-		case outcome.Skipped != "":
-			if tw != nil {
-				tw.Skip(mintDesc, outcome.Skipped)
-			}
-		case outcome.Minted:
-			if tw != nil {
-				tw.Ok(mintDesc)
-			}
+		// base-branch gate so spawn/run sessions get one too. See
+		// ProvisionCredential for the ordering and failure semantics.
+		if err := ProvisionCredential(
+			context.Background(), tw, result, worktreePath, opts.AllowNoCredential,
+		); err != nil {
+			return false, err
 		}
 	}
 
 	return existed, nil
+}
+
+// ProvisionCredential runs the FDR 0028 credential lane for a freshly created
+// worktree. The orphan sweep runs first (best-effort; a failure is reported,
+// not fatal — the issuer's TTL sweep is the backstop). Sweep-BEFORE-mint is
+// load-bearing: the sweep revokes by session id, and a key reused after a
+// tombstone (a chosen branch name) would otherwise let the stale record revoke
+// the token minted here; sweeping first retires it before this id has a
+// token, and the attach/spawn state write then replaces the tombstone
+// (session.Write) so it can never be swept again. A failed MINT (or a failed
+// [auth].url-resolver, which Mint runs before minting) is fatal by default: a
+// session without the credential it was configured for would push off the
+// inherited ssh-agent, exactly the failure this feature exists to remove, and a
+// worker has no operator to notice. The half-built worktree is torn down so the
+// refusal leaves nothing behind. allow-no-credential (the --allow-stale-base
+// shape) is the explicit escape hatch: warn and keep the credential-less
+// session. An origin host outside [auth].forge-hosts is not a failure at all —
+// the mint is skipped visibly and the session is created exactly as before.
+//
+// The url-resolver is honoured only from sweatfile layers above the repo (#335,
+// FDR 0028); one set in an untrusted layer is ignored with a visible SKIP.
+func ProvisionCredential(
+	ctx context.Context,
+	tw *tap.Writer,
+	h sweatfile.Hierarchy,
+	worktreePath worktree.ResolvedPath,
+	allowNoCredential bool,
+) error {
+	if n, errs := auth.SweepOrphans(ctx, h.Merged, worktreePath.RepoPath, os.Stderr); n > 0 || len(errs) > 0 {
+		reportCredentialSweep(tw, n, errs)
+	}
+	id := auth.Identity{
+		RepoPath:     worktreePath.RepoPath,
+		WorktreePath: worktreePath.AbsPath,
+		Branch:       worktreePath.Branch,
+		SessionKey:   worktreePath.SessionKey,
+	}
+
+	home, homeErr := os.UserHomeDir()
+	if homeErr != nil {
+		msg := "home directory unresolvable (" + homeErr.Error() +
+			"): a global [auth].url-resolver cannot be trusted; parent-directory layers still apply"
+		if tw != nil {
+			tw.Skip("url-resolver "+worktreePath.Branch, msg)
+		} else {
+			log.Warn(msg, "branch", worktreePath.Branch)
+		}
+	}
+	resolver, untrusted := sweatfileio.TrustedURLResolver(h, home, worktreePath.RepoPath)
+	if len(untrusted) > 0 {
+		msg := "ignored [auth].url-resolver in " + strings.Join(untrusted, ", ") +
+			": only sweatfiles above the repo are trusted (FDR 0028)"
+		if tw != nil {
+			tw.Skip("url-resolver "+worktreePath.Branch, msg)
+		} else {
+			log.Warn(msg, "branch", worktreePath.Branch)
+		}
+	}
+
+	mintDesc := "mint credential " + worktreePath.Branch
+	outcome, mintErr := auth.Mint(ctx, h.Merged, id, resolver)
+	switch {
+	case mintErr != nil && !allowNoCredential:
+		_ = git.WorktreeForceRemove(worktreePath.RepoPath, worktreePath.AbsPath)
+		if worktreePath.ExistingBranch == "" {
+			_, _ = git.BranchForceDelete(worktreePath.RepoPath, worktreePath.Branch)
+		}
+		return fmt.Errorf("%w\n\npass --allow-no-credential, or set [hooks].allow-no-credential, to create the session without a push credential (pushes then use the inherited ssh-agent)", mintErr)
+	case mintErr != nil:
+		msg := mintErr.Error() + " (allow-no-credential: session created without a push credential; pushes use the inherited ssh-agent)"
+		if tw != nil {
+			tw.NotOk(mintDesc, map[string]string{"severity": "warn", "message": msg})
+		} else {
+			log.Warn("credential mint failed; continuing without one", "branch", worktreePath.Branch, "err", mintErr)
+		}
+	case outcome.Skipped != "":
+		if tw != nil {
+			tw.Skip(mintDesc, outcome.Skipped)
+		}
+	case outcome.Minted:
+		if tw != nil {
+			if outcome.Resolved != "" {
+				tw.Ok("resolve origin " + worktreePath.Branch + " " + outcome.Resolved)
+			}
+			tw.Ok(mintDesc)
+		}
+	}
+	return nil
 }
 
 // reportCredentialSweep emits the orphan-credential sweep's outcome: one ok
