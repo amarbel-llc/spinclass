@@ -2,10 +2,14 @@
 // the commit captured by internal/close.RunResolved immediately before
 // `sc close`/`close-child-session` force-delete them (#291). It is the undo
 // half of the close lifecycle: session.Tombstone records DeletedSHA at close
-// time, and Run here rebuilds a live worktree from it.
+// time, and Run here rebuilds a live worktree from it. Like a fresh start, it
+// runs the FDR 0028 credential lane (shop.ProvisionCredential), so a
+// resurrected session is re-resolved and re-minted rather than silently
+// pushing over the inherited ssh-agent (#335).
 package resurrect
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -13,6 +17,7 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/shop"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
@@ -48,8 +53,28 @@ func Run(w io.Writer, target, newBranchName, format string) error {
 	}
 	newPath := filepath.Join(st.RepoPath, worktree.WorktreesDir, branch)
 
-	if _, err := worktree.Create(st.RepoPath, newPath, "", st.DeletedSHA); err != nil {
+	var tw *tap.Writer
+	if format == "tap" {
+		tw = tap.NewWriter(w)
+	}
+
+	h, err := worktree.Create(st.RepoPath, newPath, "", st.DeletedSHA)
+	if err != nil {
 		return fmt.Errorf("recreating worktree for %s: %w", st.Key(), err)
+	}
+
+	sessionKey := filepath.Base(st.RepoPath) + "/" + branch
+	rp := worktree.ResolvedPath{
+		AbsPath:    newPath,
+		RepoPath:   st.RepoPath,
+		Branch:     branch,
+		SessionKey: sessionKey,
+	}
+	// Before session.Write: a refusal has already torn the worktree and branch
+	// down, so the tombstone is untouched and the resurrect can be retried.
+	// No CLI/MCP flag; only the sweatfile knob applies, as for `sc spawn`.
+	if err := shop.ProvisionCredential(context.Background(), tw, h, rp, h.Merged.AllowNoCredential()); err != nil {
+		return err
 	}
 
 	fresh := session.State{
@@ -57,7 +82,7 @@ func Run(w io.Writer, target, newBranchName, format string) error {
 		RepoPath:           st.RepoPath,
 		WorktreePath:       newPath,
 		Branch:             branch,
-		SessionKey:         filepath.Base(st.RepoPath) + "/" + branch,
+		SessionKey:         sessionKey,
 		Description:        st.Description,
 		SpawnedBy:          st.SpawnedBy,
 		SpawnedByPrincipal: st.SpawnedByPrincipal,
@@ -70,10 +95,9 @@ func Run(w io.Writer, target, newBranchName, format string) error {
 		return fmt.Errorf("writing resurrected session state for %s: %w", fresh.SessionKey, err)
 	}
 
-	if format == "tap" {
-		tw := tap.NewWriter(w)
-		tw.PlanAhead(1)
+	if tw != nil {
 		tw.Ok("resurrect " + fresh.SessionKey + " " + newPath)
+		tw.Plan()
 		return nil
 	}
 	_, _ = fmt.Fprintln(w, newPath)

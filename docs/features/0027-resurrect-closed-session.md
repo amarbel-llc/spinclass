@@ -46,7 +46,9 @@ closed session's worktree and branch from that captured commit:
 
 On success it writes fresh, `inactive` session state carrying the original
 description and spawn-lineage (`SpawnedBy`) forward, so `sc list` sees it
-again immediately. It does **not** attach — run `sc resume <target>`
+again immediately. Before re-registering it runs the FDR 0028 credential
+lane (#335): a failed mint or resolve refuses the resurrect and leaves the
+tombstone intact. It does **not** attach — run `sc resume <target>`
 afterward, reusing that already-hardened path unmodified.
 
 Exposed as both a CLI subcommand and an MCP tool (`resurrect`), unlike

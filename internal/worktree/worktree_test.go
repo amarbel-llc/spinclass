@@ -1018,6 +1018,54 @@ func TestCreateFreshBranchRejectsExistingBranch(t *testing.T) {
 	}
 }
 
+// TestReapplyPreservesCredentialWiring is GREEN ON ARRIVAL: it pins, rather
+// than drives, the FDR 0028 / #335 decision that `sc rebuild` and resume
+// auto-rebuild (Reapply) re-apply setup only and leave the create-time
+// credential lane's worktree config (credential.helper, url.*.insteadOf)
+// alone — the rewrite is fixed per worktree.
+func TestReapplyPreservesCredentialWiring(t *testing.T) {
+	testgit.RequireGit(t)
+	t.Setenv("HOME", t.TempDir())
+	parentDir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", parentDir)
+	repoDir := filepath.Join(parentDir, "repo")
+	testgit.MustInit(t, repoDir)
+
+	prevMadder, prevDirenv, prevDodder := embeds.MadderBin(), embeds.DirenvBin(), embeds.DodderBin()
+	embeds.Set("", "", "")
+	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv, prevDodder) })
+
+	runGit := func(dir string, args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	wt := filepath.Join(parentDir, "wt")
+	if _, err := Create(repoDir, wt, "", ""); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	runGit(wt, "config", "extensions.worktreeConfig", "true")
+	const helper = "store --file=/x"
+	const key = "url.https://vanity.test/repo.git.insteadOf"
+	const from = "git@host:owner/repo.git"
+	runGit(wt, "config", "--worktree", "credential.helper", helper)
+	runGit(wt, "config", "--worktree", key, from)
+
+	if _, err := Reapply(repoDir, wt); err != nil {
+		t.Fatalf("Reapply: %v", err)
+	}
+	if got := runGit(wt, "config", "--worktree", "--get", "credential.helper"); got != helper {
+		t.Errorf("credential.helper = %q after Reapply, want %q", got, helper)
+	}
+	if got := runGit(wt, "config", "--worktree", "--get", key); got != from {
+		t.Errorf("%s = %q after Reapply, want %q", key, got, from)
+	}
+}
+
 // TestCreateBasesFreshBranchOnExplicitBase is the mechanism-layer assertion for
 // spinclass#250. `git worktree add -b` with no start-point bases the new branch
 // on HEAD, so a checkout parked on an unrelated branch silently hands that

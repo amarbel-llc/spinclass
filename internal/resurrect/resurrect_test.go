@@ -43,6 +43,9 @@ func setupClosedSession(t *testing.T, branch string) (repoPath, wtPath string) {
 	testgit.RequireGit(t)
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	root := t.TempDir()
+	// Hermetic HOME: resurrect now runs the credential lane, which reads the
+	// global sweatfile; the developer's real one must not be able to mint.
+	t.Setenv("HOME", root)
 	repoPath = filepath.Join(root, "repo")
 	wtPath = filepath.Join(repoPath, ".worktrees", branch)
 	testgit.MustInit(t, repoPath)
@@ -137,6 +140,111 @@ func TestRunRecreatesWorktreeFromClosedSession(t *testing.T) {
 	}
 	if got.IsTombstone() {
 		t.Error("resurrected session must not still read as a tombstone")
+	}
+}
+
+// setupResolverLane adds an ssh-form origin to a closed session's repo and
+// writes the GLOBAL (trusted) sweatfile layer with a mint lane and the given
+// url-resolver shell command (#335).
+func setupResolverLane(t *testing.T, repoPath, resolver string) {
+	t.Helper()
+	if out, err := exec.Command(
+		"git", "-C", repoPath, "remote", "add", "origin", "git@forge.example.com:owner/repo.git",
+	).CombinedOutput(); err != nil {
+		t.Fatalf("git remote add: %v\n%s", err, out)
+	}
+	root := filepath.Dir(repoPath)
+	script := filepath.Join(root, "resolve.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n"+resolver+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	global := filepath.Join(root, ".config", "spinclass", "sweatfile")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "[auth]\nmint-command = \"echo tok\"\nrevoke-command = \"true\"\n" +
+		"url-resolver = \"sh " + script + "\"\n"
+	if err := os.WriteFile(global, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRunProvisionsCredentialThroughTrustedResolver: resurrect must run the
+// FDR 0028 credential lane (it used to bypass it, leaving the session on the
+// inherited ssh-agent), resolving through the trusted url-resolver.
+func TestRunProvisionsCredentialThroughTrustedResolver(t *testing.T) {
+	repoPath, wtPath := setupClosedSession(t, "feature-x")
+	setupResolverLane(t, repoPath,
+		`printf '%s\n' '{"canonical_https":"https://vanity.example.com/repo.git"}'`)
+
+	var buf bytes.Buffer
+	if err := Run(&buf, "repo/feature-x", "", "tap"); err != nil {
+		t.Fatalf("Run: %v\n%s", err, buf.String())
+	}
+
+	if _, err := os.Stat(filepath.Join(wtPath, ".spinclass", "git-credentials")); err != nil {
+		t.Errorf("git-credentials not written: %v", err)
+	}
+	out, err := exec.Command("git", "-C", wtPath, "remote", "get-url", "origin").CombinedOutput()
+	if err != nil {
+		t.Fatalf("get-url: %v\n%s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != "https://vanity.example.com/repo.git" {
+		t.Errorf("origin resolves to %q, want the canonical https URL", got)
+	}
+	got, err := session.Read(repoPath, "feature-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Credential == nil || got.Credential.Remote == nil || !got.Credential.Remote.Resolved {
+		t.Errorf("Credential.Remote.Resolved not recorded: %+v", got.Credential)
+	}
+	tap := buf.String()
+	if !strings.Contains(tap, "resolve origin feature-x") {
+		t.Errorf("output lacks resolve point:\n%s", tap)
+	}
+	if !strings.Contains(tap, "mint credential feature-x") {
+		t.Errorf("output lacks mint point:\n%s", tap)
+	}
+	lines := strings.Split(strings.TrimSpace(tap), "\n")
+	if last := strings.TrimSpace(lines[len(lines)-1]); !strings.HasPrefix(last, "1..") {
+		t.Errorf("output does not end with a plan, last line %q:\n%s", last, tap)
+	}
+}
+
+// TestRunRefusesWhenURLResolverFails: a failed resolver is a failed mint —
+// the recreated worktree and branch are torn down and the tombstone stays
+// intact so the resurrect can be retried.
+func TestRunRefusesWhenURLResolverFails(t *testing.T) {
+	repoPath, wtPath := setupClosedSession(t, "feature-x")
+	before, err := session.FindByTarget("repo/feature-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	setupResolverLane(t, repoPath, "echo no >&2; exit 1")
+
+	err = Run(io.Discard, "repo/feature-x", "", "tap")
+	if err == nil {
+		t.Fatal("expected Run to fail when the url-resolver fails")
+	}
+	if !strings.Contains(err.Error(), "url-resolver") {
+		t.Errorf("error = %q, want mention of url-resolver", err)
+	}
+	if _, serr := os.Stat(wtPath); !os.IsNotExist(serr) {
+		t.Errorf("worktree should be torn down, stat err = %v", serr)
+	}
+	if err := exec.Command(
+		"git", "-C", repoPath, "rev-parse", "--verify", "refs/heads/feature-x",
+	).Run(); err == nil {
+		t.Error("branch feature-x should have been deleted on refusal")
+	}
+	after, err := session.FindByTarget("repo/feature-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.IsTombstone() || after.DeletedSHA != before.DeletedSHA {
+		t.Errorf("tombstone changed: tombstone=%v sha=%q want %q",
+			after.IsTombstone(), after.DeletedSHA, before.DeletedSHA)
 	}
 }
 
