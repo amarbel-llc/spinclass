@@ -592,6 +592,25 @@ func TestCheckMCPsDuplicateName(t *testing.T) {
 	}
 }
 
+func TestCheckAuthWarnsRepoLayerURLResolver(t *testing.T) {
+	r := "smith repo resolve {origin}"
+	sf := sweatfile.Sweatfile{Auth: &sweatfile.Auth{URLResolver: &r}}
+	has := func(issues []Issue) bool {
+		for _, iss := range issues {
+			if iss.Field == "auth.url-resolver" && iss.Severity == SeverityWarning {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(CheckAuth(sf, false)) {
+		t.Error("repo-layer url-resolver should warn")
+	}
+	if has(CheckAuth(sf, true)) {
+		t.Error("above-repo url-resolver should not warn")
+	}
+}
+
 func TestCheckPostMergeTargetsValid(t *testing.T) {
 	verify := "check-health"
 	sf := sweatfile.Sweatfile{

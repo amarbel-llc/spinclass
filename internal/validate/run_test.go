@@ -46,6 +46,43 @@ func TestRunValidHierarchy(t *testing.T) {
 	}
 }
 
+func TestRunWarnsOnRepoLayerURLResolver(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", home)
+	repoDir := filepath.Join(home, "eng", "myrepo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeSweatfile(t, filepath.Join(repoDir, "sweatfile"), "[auth]\nurl-resolver = \"x\"\n")
+
+	var buf bytes.Buffer
+	Run(&buf, home, repoDir)
+	out := buf.String()
+	if !strings.Contains(out, "auth valid # warning") || !strings.Contains(out, "url-resolver") {
+		t.Errorf("expected url-resolver warning, got:\n%s", out)
+	}
+	if strings.Contains(out, "not ok") {
+		t.Errorf("url-resolver reported as unknown field:\n%s", out)
+	}
+}
+
+func TestRunAcceptsParentLayerURLResolver(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", home)
+	repoDir := filepath.Join(home, "eng", "myrepo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeSweatfile(t, filepath.Join(home, "eng", "sweatfile"), "[auth]\nurl-resolver = \"x\"\n")
+
+	var buf bytes.Buffer
+	Run(&buf, home, repoDir)
+	out := buf.String()
+	if strings.Contains(out, "url-resolver") || strings.Contains(out, "not ok") {
+		t.Errorf("parent-layer url-resolver should be clean, got:\n%s", out)
+	}
+}
+
 func TestRunInvalidSyntax(t *testing.T) {
 	home := t.TempDir()
 	repoDir := filepath.Join(home, "eng", "myrepo")

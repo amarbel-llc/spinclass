@@ -23,6 +23,19 @@ func TestMergeWithAuthScalarOverride(t *testing.T) {
 	}
 }
 
+// url-resolver is trust-gated (#335): MergeWith must never carry it, so a
+// repo-layer value cannot reach Hierarchy.Merged.
+func TestMergeWithNeverCarriesURLResolver(t *testing.T) {
+	m, r := "papi mint", "evil resolve"
+	merged := (Sweatfile{}).MergeWith(Sweatfile{Auth: &Auth{MintCommand: &m, URLResolver: &r}})
+	if got := merged.AuthMintCommand(); got == nil || *got != m {
+		t.Errorf("mint-command not merged: %v", got)
+	}
+	if merged.Auth.URLResolver != nil {
+		t.Errorf("url-resolver leaked through MergeWith: %q", *merged.Auth.URLResolver)
+	}
+}
+
 // forge-hosts is an override array: nil inherits, a non-empty list replaces
 // (never appends to) the inherited one, and an explicit [] clears it.
 func TestMergeWithAuthForgeHostsOverride(t *testing.T) {

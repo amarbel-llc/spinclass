@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/tap"
@@ -472,7 +473,10 @@ func CheckPostMergeTargets(sf sweatfile.Sweatfile) []Issue {
 // CheckAuth validates the [auth] table (FDR 0028): a mint-command without a
 // revoke-command mints tokens nothing will ever revoke, and a revoke-command
 // alone never runs — both are almost certainly a half-written config.
-func CheckAuth(sf sweatfile.Sweatfile) []Issue {
+//
+// layerAboveRepo says whether sf came from a layer above the repo; a
+// url-resolver anywhere else is ignored (#335) and warned about.
+func CheckAuth(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 	if sf.Auth == nil {
 		return nil
 	}
@@ -501,6 +505,13 @@ func CheckAuth(sf sweatfile.Sweatfile) []Issue {
 			Message:  "[auth] sets `mint-command` without `forge-hosts`: every origin host this entry reaches will try to mint; set `forge-hosts = [...]` so repos on other hosts (GitHub) skip the mint instead of failing session creation",
 			Severity: SeverityWarning,
 			Field:    "auth.forge-hosts",
+		})
+	}
+	if sf.Auth.URLResolver != nil && !layerAboveRepo {
+		issues = append(issues, Issue{
+			Message:  "[auth] sets `url-resolver` in a repo-level sweatfile: it is ignored — it decides where a session's token-carrying pushes go, so only sweatfiles above the repo (global, parent directories) may set it; move it up",
+			Severity: SeverityWarning,
+			Field:    "auth.url-resolver",
 		})
 	}
 	return issues
@@ -619,6 +630,14 @@ func Run(w io.Writer, home, repoDir string) int {
 		})
 		tw.Plan()
 		return 1
+	}
+
+	// A failed detection treats repoDir as the root; from a worktree dir that
+	// would misclassify the main repo's sweatfile as above the repo, which is
+	// acceptable because validate is advisory.
+	mainRoot, err := git.DetectRepo(repoDir)
+	if err != nil {
+		mainRoot = repoDir
 	}
 
 	for _, src := range result.Sources {
@@ -741,7 +760,7 @@ func Run(w io.Writer, home, repoDir string) int {
 		}
 
 		if src.File.Auth != nil {
-			if issues := CheckAuth(src.File); len(issues) > 0 {
+			if issues := CheckAuth(src.File, sweatfileio.LayerAboveRepo(src.Path, home, mainRoot)); len(issues) > 0 {
 				for _, iss := range issues {
 					sub.Ok(fmt.Sprintf("auth valid # warning: %s", iss.Message))
 				}

@@ -180,6 +180,14 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 			merged.Auth.ForgeHosts = other.Auth.ForgeHosts
 		}
 	}
+	// url-resolver is deliberately NOT merged (#335 trust rule): the result
+	// never carries it, whether it came from other or from the receiver's
+	// carried-forward table. See sweatfileio.TrustedURLResolver.
+	if merged.Auth != nil && merged.Auth.URLResolver != nil {
+		cp := *merged.Auth
+		cp.URLResolver = nil
+		merged.Auth = &cp
+	}
 
 	// [sysprompt]
 	if other.Sysprompt != nil {

@@ -530,6 +530,12 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				_vAuthForgeHosts.MarkConsumed()
 			}
 		}
+		if _vAuthUrlResolver, _ok := _vAuth.Get("url-resolver"); _ok && _vAuthUrlResolver.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vAuthUrlResolver.Leaf); _xok {
+				authVal4.URLResolver = &_x
+				_vAuthUrlResolver.MarkConsumed()
+			}
+		}
 		d.data.Auth = authVal4
 	} else {
 		authVal4 := &Auth{}
@@ -556,6 +562,13 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 					authVal4.ForgeHosts = []string{}
 				}
 				_vForgeHosts.MarkConsumed()
+			}
+		}
+		if _vUrlResolver, _ok := model.Get("url-resolver"); _ok && _vUrlResolver.Kind == cst.VLeaf {
+			_foundAuth = true
+			if _x, _xok := cst.ExtractString(_vUrlResolver.Leaf); _xok {
+				authVal4.URLResolver = &_x
+				_vUrlResolver.MarkConsumed()
 			}
 		}
 		if _foundAuth {
@@ -1255,6 +1268,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				if err := cst.SetAny(tableNode, "forge-hosts", d.data.Auth.ForgeHosts); err != nil {
 					return nil, fmt.Errorf("%w", err)
 				}
+			}
+		}
+		if d.data.Auth.URLResolver != nil {
+			if err := cst.SetAny(tableNode, "url-resolver", *d.data.Auth.URLResolver); err != nil {
+				return nil, fmt.Errorf("%w", err)
 			}
 		}
 	}
@@ -2047,6 +2065,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vAuthForgeHosts.MarkConsumed()
 			}
 		}
+		if _vAuthUrlResolver, _ok := _vAuth.Get("url-resolver"); _ok && _vAuthUrlResolver.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vAuthUrlResolver.Leaf); _xok {
+				authVal4.URLResolver = &_x
+				_vAuthUrlResolver.MarkConsumed()
+			}
+		}
 		data.Auth = authVal4
 	} else {
 		authVal4 := &Auth{}
@@ -2073,6 +2097,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 					authVal4.ForgeHosts = []string{}
 				}
 				_vForgeHosts.MarkConsumed()
+			}
+		}
+		if _vUrlResolver, _ok := sub.Get("url-resolver"); _ok && _vUrlResolver.Kind == cst.VLeaf {
+			_foundAuth = true
+			if _x, _xok := cst.ExtractString(_vUrlResolver.Leaf); _xok {
+				authVal4.URLResolver = &_x
+				_vUrlResolver.MarkConsumed()
 			}
 		}
 		if _foundAuth {
@@ -2756,6 +2787,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 				if err := cst.SetAny(tableNode, "forge-hosts", data.Auth.ForgeHosts); err != nil {
 					return fmt.Errorf("%w", err)
 				}
+			}
+		}
+		if data.Auth.URLResolver != nil {
+			if err := cst.SetAny(tableNode, "url-resolver", *data.Auth.URLResolver); err != nil {
+				return fmt.Errorf("%w", err)
 			}
 		}
 	}

@@ -116,6 +116,13 @@ type Auth struct {
 	// Empty/nil = mint for any host (the single-repo form). Override, not
 	// append: a non-nil value replaces the inherited list; nil inherits.
 	ForgeHosts []string `toml:"forge-hosts"`
+	// URLResolver is a shell string, run ambient in the repo root, that maps
+	// the origin to the forge's canonical HTTPS URL by printing
+	// {canonical_https, canonical_ssh?} JSON (#335). It decides where a
+	// session's token-carrying pushes go, so it is trusted only from sweatfile
+	// layers above the repo. Read ONLY through sweatfileio.TrustedURLResolver:
+	// MergeWith never merges it, so Merged cannot leak a repo-layer value.
+	URLResolver *string `toml:"url-resolver"`
 }
 
 // Sysprompt configures the dynamic system-prompt fragment spinclass
