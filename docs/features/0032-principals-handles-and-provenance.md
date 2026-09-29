@@ -520,6 +520,46 @@ end vision and it needs coordination across spinclass (what the unit must
 see), clown (launching it) and juggler (owning it). It is its own companion
 record, not a footnote here.
 
+### D18. Git commits carry provenance; git access goes through the principal's key or a broker
+
+Added 2026-09-29. A commit is the one artifact of an agent's work that
+outlives every session, and today it carries no link to who made it beyond a
+free-text author line.
+
+- **Commits are signed with the principal's key** over the SSH-agent seam
+  (D3): git's `gpg.format = ssh` with `user.signingkey` naming the agent-held
+  public key, so every commit an agent makes is signed by a key that chains
+  to the card. spinclass writes the worktree-scoped git config (the FDR 0028
+  `auth.Inject` mechanism) and a worktree-scoped `gpg.ssh.allowedSignersFile`
+  generated from the certificate chain troupe publishes, so
+  `git log --show-signature` verifies locally and the forge shows the key as
+  verified once registered. Tier 3 makes this card-like signing (fibby over
+  pcsc), with a virtual touch policy if a repo wants one.
+- **Commits reference the transcript.** A `Provenance:` trailer carries the
+  markl digest of the transcript checkpoint (slice 2) or attestation record
+  (D16) that covers the commit, so a commit is a node hanging off the DAG: a
+  merkle edge from git history into the signed transcript, and the thing D16's
+  gates verify against the pinned sha.
+- **Git access.** Three shapes, ranked. (a) Register the principal's certified
+  public key with the forge as the session's SSH key: cheap, but Forgejo SSH
+  auth is per-user and all-or-nothing, the finding that made FDR 0028 choose
+  tokens. (b) SSH user certificates from a card CA: native expiry, same
+  scoping problem, rejected in FDR 0028 for it. (c) **A git broker service**:
+  a separate-uid service on the same account as the tier-2 signer and the
+  record store (D14), holding the forge credential itself, accepting pushes
+  and fetches over a local socket from a principal whose ambient set contains
+  `spinclass:merge` and who holds the handle for that worktree, enforcing
+  per-repo scope in the broker. No token ever sits in a worktree; FDR 0028's
+  per-session mint and its orphan sweeper become unnecessary; this is the
+  injection surface FDR 0029 said the landing worktree assumes, made
+  concrete. Kernel analogy: the kernel doing I/O on behalf of a process that
+  holds an fd. (c) is the target; (a) is the interim wherever per-repo scope
+  is not required.
+
+Owner for the broker is not yet assigned (a sibling of piggy's signer, or
+circus infrastructure); it gets a companion record when the target is picked.
+None of this is in slices 0 to 2.
+
 ## Interface (slice 0)
 
 The only slice this record specifies at code level. Everything else is
@@ -616,6 +656,7 @@ GitHub, lacks it until added by hand).
 | circus (GitHub) | note | amarbel-llc/circus#255 | D15 | XEP-0050 admin surface (the FDR 0019 addendum); enrolled-device provisioning on the operator's Snikket account |
 | papi | change | papi#87 | D11 | 9C enrollment step and attestation publication |
 | moxy | note | moxy#443 | D13, D16 | moxins declare the rights they enforce and emit signed execution records in the D8 grammar |
+| TBD (piggy signer sibling, or circus) | record (git broker) | not yet filed | D18 | separate-uid broker holding the forge credential; per-repo scope enforced on `spinclass:merge` + handle; commit signing via the principal's key and the `Provenance:` trailer |
 | purse-first | note | purse-first#194 | D13, D16 | manifest and `go-mcp` support for declared rights and execution records |
 
 ## Limitations
