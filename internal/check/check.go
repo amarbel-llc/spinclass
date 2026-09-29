@@ -20,6 +20,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/embeds"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/hookrun"
+	"code.linenisgreat.com/spinclass/internal/landing"
 	"code.linenisgreat.com/spinclass/internal/madder"
 	"code.linenisgreat.com/spinclass/internal/present"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
@@ -108,6 +109,18 @@ func RunContext(ctx context.Context, rep *crap.Reporter, wtPath string, activity
 
 	ts := rep.TestStream(0)
 
+	// A merge driver the eventual merge needs but cannot find is a refusal
+	// the agent should learn here, not at merge time (spinclass#324). Checked
+	// against the landing target as it stands locally — check never fetches.
+	// Under disable-merge the merge happens elsewhere (a forge PR), where the
+	// local PATH is moot, so nothing is pre-flighted.
+	if !hierarchy.Merged.DisableMergeEnabled() {
+		if err := preflightCheck(ts, repoPath, wtPath, branch); err != nil {
+			ts.Finish()
+			return nil, err
+		}
+	}
+
 	cmd := hierarchy.Merged.PreMergeHookCommand()
 	if cmd == nil || *cmd == "" {
 		ts.Ok("no pre-merge hook configured")
@@ -121,6 +134,84 @@ func RunContext(ctx context.Context, rep *crap.Reporter, wtPath string, activity
 	links, hookErr := RunWithReporterContext(ctx, rep, ts, hierarchy, wtPath, branch, hookSha, activity)
 	ts.Finish()
 	return links, hookErr
+}
+
+// preflightCheck runs PreflightMergeDrivers for `sc check` against the ref a
+// merge from wtPath would rebase onto, as far as the local repo knows: the
+// default branch's remote-tracking ref when one exists (the gitSync landing
+// target, #315), else the local branch. A main+master repo (the merge would
+// prompt; check cannot) emits a skip point rather than silently passing;
+// no default branch at all is nothing to pre-flight.
+func preflightCheck(ts *crap.TestStream, repoPath, wtPath, branch string) error {
+	defaultBranch, err := git.DefaultBranch(repoPath)
+	if errors.Is(err, git.ErrAmbiguousDefaultBranch) {
+		ts.Skip(mergeDriversLabel(branch), "default branch is ambiguous (main and master); merge drivers not pre-flighted")
+		return nil
+	}
+	if err != nil {
+		return nil
+	}
+	ref := landing.ForMerge(repoPath, defaultBranch, true).Ref()
+	if _, rpErr := git.RevParse(wtPath, ref); rpErr != nil {
+		ref = landing.Self(repoPath, defaultBranch).Ref()
+	}
+	return PreflightMergeDrivers(ts, wtPath, branch, ref)
+}
+
+func mergeDriversLabel(branch string) string { return "merge drivers " + branch }
+
+// PreflightMergeDrivers refuses, before a rebase of dir's HEAD onto theirs
+// starts, when a custom merge driver that rebase would invoke does not
+// resolve (spinclass#324). Emits a failing `merge drivers <branch>` point
+// carrying each driver's git.MergeDriver.Unresolved refusal and returns the
+// error. When every driver in play resolves it emits an ok point naming them;
+// when no driver is in play it emits nothing.
+//
+// The check runs where git will: spinclass runs git with the ambient PATH,
+// not inside the repo devshell, so a devshell-only driver is invisible to it.
+// Refusing here beats letting git fall back into the silent-ours state — the
+// path is left with the ours content and no markers, only a UU status, so a
+// resolver that stages what is there drops the other side's change unseen.
+// It is a prediction of git's driver selection (git.MergeDriversInPlay), not
+// git itself, so it errs toward letting git run: a command it cannot judge
+// resolves, and histories without a merge base have nothing in play.
+func PreflightMergeDrivers(ts *crap.TestStream, dir, branch, theirs string) error {
+	label := mergeDriversLabel(branch)
+	drivers, err := git.MergeDriversInPlay(dir, theirs)
+	if err != nil {
+		return FailStep(ts, label, err, "")
+	}
+	if len(drivers) == 0 {
+		return nil
+	}
+	var names, missing []string
+	for _, d := range drivers {
+		names = append(names, d.Name)
+		if reason := d.Unresolved(dir); reason != "" {
+			missing = append(missing, reason)
+		}
+	}
+	if len(missing) == 0 {
+		ts.Ok(label + ": " + strings.Join(names, ", "))
+		return nil
+	}
+	return FailStep(ts, label, fmt.Errorf(
+		"%s; without it git keeps the \"ours\" side silently, with no conflict markers",
+		strings.Join(missing, "; ")), "")
+}
+
+// FailStep emits a failing test point for label populated from err
+// (severity=fail), including the step's captured output when non-empty.
+// Never finishes ts — the orchestrator owns stream termination so exactly one
+// summary is emitted per run. Returns err unchanged so callers can write
+// `return FailStep(...)`.
+func FailStep(ts *crap.TestStream, label string, err error, output string) error {
+	diag := map[string]any{"severity": "fail", "message": err.Error()}
+	if output != "" {
+		diag["output"] = output
+	}
+	ts.NotOk(label, diag)
+	return err
 }
 
 // RunWithReporterContext runs the configured pre-merge hook against an
@@ -160,11 +251,7 @@ func RunWithReporterContext(
 	// wtPath — only the hook's working directory relocates.
 	hookDir, cleanup, prepErr := resolveHookDir(hierarchy, wtPath, branch, hookSha)
 	if prepErr != nil {
-		ts.NotOk("pre-merge build worktree for "+branch, map[string]any{
-			"severity": "fail",
-			"message":  prepErr.Error(),
-		})
-		return nil, prepErr
+		return nil, FailStep(ts, "pre-merge build worktree for "+branch, prepErr, "")
 	}
 	defer cleanup()
 

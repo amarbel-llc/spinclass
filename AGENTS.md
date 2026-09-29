@@ -74,10 +74,13 @@ Cheap per-package checks are fine: `just debug-go-test <dir>`.
   so codegen can regenerate the codec package cleanly (dodder codegen-isolation
   pattern, tommy #93). Config surface is documented in `spinclass-sweatfile(5)`.
 - **Merge/Pull/Clean** (`internal/merge/`, `internal/pull/`, `internal/clean/`):
-  post-session workflows. Merge rebases onto the default branch then ff-only
-  merges; clean removes merged worktree branches and abandoned sessions. A
-  starting merge (all surfaces, not `sc check`) emits a best-effort
-  informational test point listing co-active sessions on the repo (#238).
+  post-session workflows. Merge pre-flights the merge drivers its rebase would
+  invoke (`check.PreflightMergeDrivers`, #324: a bound driver off the ambient
+  PATH leaves a silent-ours "conflict", so it refuses BEFORE rebasing; also at
+  `sc check`; `sc pull`: #333), rebases onto the default branch, then
+  ff-only merges; clean removes merged worktree branches and abandoned
+  sessions. A starting merge (not `sc check`) emits a point listing the
+  repo's co-active sessions (#238).
 - **Permission tiers** (`internal/perms/`): Claude Code hook integration,
   rules as JSON (`global.json` + `repos/<repo>.json`).
 - **Claude integration** (`internal/claude/`): trusts worktree paths in
@@ -483,13 +486,11 @@ subcommand is always available.
   `nix-store` on PATH.
 - **Multi-target close** (`close.RunMany`, purse-first#190): `sc close A B C`
   closes each independently; nonzero exit if any failed. `target` is
-  **variadic** so it takes every positional and none reaches a later param; a
-  param after a variadic is flag-only, not dead, so `force`/`nix-gc` keep their
-  positions. 0–1 targets delegate to `Run` (cwd/picker path and flat output
-  unchanged); N>1 emits one TAP doc with a subtest per target — which is why
-  `RunResolved`'s body moved to `runResolvedInto(tw, …)`, never planning, with
-  the document owned by the caller. nix-gc reaps PER TARGET: each plan is
-  worktree-scoped and captured before its removal.
+  **variadic** (a param after it is flag-only, so `force`/`nix-gc` keep their
+  positions). 0–1 targets delegate to `Run` (flat output unchanged); N>1 emits
+  one TAP doc with a subtest per target, so `RunResolved`'s body moved to
+  `runResolvedInto(tw, …)` with the document owned by the caller. nix-gc reaps
+  PER TARGET: each plan is captured before its worktree's removal.
 
 ## Sweatfile config quick reference
 

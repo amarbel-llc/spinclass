@@ -6,6 +6,8 @@ package testgit
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -82,4 +84,58 @@ func MustWorktreeAdd(t *testing.T, repoPath, wtPath, branch string) {
 	if err != nil {
 		t.Fatalf("git worktree add %s: %v\n%s", wtPath, err, out)
 	}
+}
+
+// MustWriteFile writes content to name under dir, creating or overwriting.
+func MustWriteFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// MustGit runs git in dir and fails the test on a non-zero exit, returning
+// trimmed combined output.
+func MustGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// MustSeedMergeDriverPath commits, on the checkout at repoDir, a base version
+// of path bound to `merge=<driver>` in .gitattributes — the spinclass#324
+// fixture's first half. Bind the driver's command with `git config
+// merge.<driver>.driver` yourself; cut any worktree AFTER this so its branch
+// carries the base.
+func MustSeedMergeDriverPath(t *testing.T, repoDir, path, driver string) {
+	t.Helper()
+	MustWriteFile(t, repoDir, ".gitattributes", path+" merge="+driver+"\n")
+	MustWriteFile(t, repoDir, path, "base\n")
+	MustGit(t, repoDir, "add", ".gitattributes", path)
+	MustGit(t, repoDir, "commit", "-m", "base "+path)
+}
+
+// MustDivergePath commits a change to path on both sides — in the worktree
+// at wtPath and on the checkout at repoDir — so a rebase of the one onto the
+// other three-way merges it: the spinclass#324 fixture's second half.
+func MustDivergePath(t *testing.T, repoDir, wtPath, path string) {
+	t.Helper()
+	MustWriteFile(t, wtPath, path, "feature\n")
+	MustGit(t, wtPath, "commit", "-am", "feature: "+path)
+	MustWriteFile(t, repoDir, path, "main\n")
+	MustGit(t, repoDir, "commit", "-am", "main: "+path)
+}
+
+// MustPutOnPath installs script as an executable named name in a fresh temp
+// dir and prepends that dir to PATH for the test's duration.
+func MustPutOnPath(t *testing.T, name, script string) {
+	t.Helper()
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }

@@ -14,17 +14,29 @@ import (
 
 var ErrAmbiguousDefaultBranch = errors.New("both main and master branches exist")
 
+// Run runs git in repoPath and returns its trimmed stdout; a failure's stderr
+// rides on the error.
 func Run(repoPath string, args ...string) (string, error) {
-	cmdArgs := append([]string{"-C", repoPath}, args...)
-	cmd := exec.Command("git", cmdArgs...)
+	out, err := RunStdin(repoPath, "", args...)
+	return strings.TrimSpace(string(out)), err
+}
+
+// RunStdin is Run with stdin and UNtrimmed stdout, for NUL-delimited output
+// (`-z`) whose first or last field may itself carry whitespace, and for
+// `--stdin` plumbing that would otherwise trip ARG_MAX on a long path list.
+func RunStdin(repoPath, stdin string, args ...string) ([]byte, error) {
+	cmd := exec.Command("git", append([]string{"-C", repoPath}, args...)...)
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			return "", fmt.Errorf("git %s: %w\n%s", strings.Join(args, " "), err, strings.TrimRight(string(exitErr.Stderr), "\n"))
+			return nil, fmt.Errorf("git %s: %w\n%s", strings.Join(args, " "), err, strings.TrimRight(string(exitErr.Stderr), "\n"))
 		}
-		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return out, nil
 }
 
 func RunEnv(repoPath string, env []string, args ...string) (string, error) {

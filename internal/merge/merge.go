@@ -182,6 +182,13 @@ func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch s
 		return "", err
 	}
 
+	// Refuse before the rebase starts if a merge driver it would invoke is not
+	// on PATH (spinclass#324): git runs here with the ambient PATH, not the
+	// devshell, and an absent driver leaves the ours side with no markers.
+	if err := check.PreflightMergeDrivers(ts, wtPath, branch, target.Ref()); err != nil {
+		return "", err
+	}
+
 	out, rebaseErr := git.RunEnv(wtPath, []string{"GIT_SEQUENCE_EDITOR=true"}, "rebase", target.Ref(), "-i")
 	if rebaseErr != nil {
 		return "", failStep(ts, "rebase "+branch, rebaseErr, out)
@@ -640,6 +647,14 @@ func addLandingWorktree(ts *crap.TestStream, repoPath, branch, pinnedSha string)
 // failing "land <branch>" test point, and returns an error wrapping
 // ErrIntegrationConflict.
 func rebaseLanding(ts *crap.TestStream, landPath, branch, targetRef string) (landingSha string, err error) {
+	// The tip moved under the gate, so this replay can hit paths the session
+	// rebase never saw: pre-flight the drivers again (spinclass#324). A refusal
+	// is an integration conflict like any other on this path (FDR 0022's one
+	// hard failure class): the plain re-merge rebases the session worktree
+	// onto the moved tip, where PrepareMerge's own pre-flight names the driver.
+	if err := check.PreflightMergeDrivers(ts, landPath, branch, targetRef); err != nil {
+		return "", fmt.Errorf("%w: %v; install the driver, then re-merge", ErrIntegrationConflict, err)
+	}
 	out, rebaseErr := git.Rebase(landPath, targetRef)
 	if rebaseErr != nil {
 		conflicted, _ := git.UnmergedPaths(landPath)
@@ -1341,18 +1356,10 @@ func shortSha(sha string) string {
 	return sha
 }
 
-// failStep emits a failing test point for label populated from err
-// (severity=fail), including the step's captured output when non-empty.
-// Never finishes ts — the merge orchestrator owns stream termination so
-// exactly one summary is emitted per run. Returns err unchanged so callers
-// can write `return failStep(...)`.
+// failStep is check.FailStep: a failing test point for label populated from
+// err, returning err unchanged so callers can write `return failStep(...)`.
 func failStep(ts *crap.TestStream, label string, err error, output string) error {
-	diag := map[string]any{"severity": "fail", "message": err.Error()}
-	if output != "" {
-		diag["output"] = output
-	}
-	ts.NotOk(label, diag)
-	return err
+	return check.FailStep(ts, label, err, output)
 }
 
 // disableMergeSource returns the path of the most-specific sweatfile in
