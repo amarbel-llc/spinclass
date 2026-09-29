@@ -175,9 +175,10 @@ subcommand is always available.
   worker's ONLY context (#258). Workers may spawn workers (the #151 always-ask
   floor, not a depth cap, guards fan-out). `internal/spawn` owns resolution +
   launch (`LaunchDetached`/`WaitHello`). **Reaping** (#249): `close-child-session`
-  tears down a worker you spawned; `authorizeChildReap` gates on
-  `spawned_by == caller`, refusing foreign/never-spawned children. Force-reap
-  discards uncommitted/unmerged work, so a clean reap auto-approves while
+  tears down a worker; `authorizeChildReap` gates on the caller's PRINCIPAL
+  holding a handle (`holders`, seeded with the spawner at spawn — FDR 0032
+  D1/D12/D13), refusing foreign/never-spawned children (`spawned_by` is now
+  display/legacy). Force-reap discards uncommitted/unmerged work, so a clean reap auto-approves while
   `force: true` is always-ask — one `perms.AlwaysAsk` predicate shared by the
   PreToolUse hook and the perms-tier `RunCheck` (it judges an *invocation*, not a
   tool, since `BuildPermissionString` discards MCP args); `force` is read

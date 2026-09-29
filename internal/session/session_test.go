@@ -391,6 +391,117 @@ func TestStateSpawnedByRoundTrips(t *testing.T) {
 	}
 }
 
+// TestStateHandleFieldsRoundTrip locks the FDR 0032 slice-0 field shapes:
+// spawned_by_principal, holders, and pending_handles serialize under those
+// exact JSON names, survive a round-trip, and are omitted (omitempty) when
+// empty.
+func TestStateHandleFieldsRoundTrip(t *testing.T) {
+	s := State{
+		SpawnedByPrincipal: "4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2",
+		Holders:            []string{"4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2", "9c2e1111-2222-3333-4444-555566667777"},
+		PendingHandles:     []string{"aaaa1111-2222-3333-4444-555566667777"},
+		WorktreePath:       "/x",
+		Branch:             "spawned-walnut",
+	}
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"spawned_by_principal":"4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2"`,
+		`"holders":["4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2","9c2e1111-2222-3333-4444-555566667777"]`,
+		`"pending_handles":["aaaa1111-2222-3333-4444-555566667777"]`,
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("JSON missing %q: %s", want, data)
+		}
+	}
+
+	var got State
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.SpawnedByPrincipal != s.SpawnedByPrincipal {
+		t.Errorf("SpawnedByPrincipal = %q, want %q", got.SpawnedByPrincipal, s.SpawnedByPrincipal)
+	}
+	if len(got.Holders) != 2 || got.Holders[0] != s.Holders[0] || got.Holders[1] != s.Holders[1] {
+		t.Errorf("Holders = %v, want %v", got.Holders, s.Holders)
+	}
+	if len(got.PendingHandles) != 1 || got.PendingHandles[0] != s.PendingHandles[0] {
+		t.Errorf("PendingHandles = %v, want %v", got.PendingHandles, s.PendingHandles)
+	}
+
+	// Absent fields ⇒ empty (a plain session, the default).
+	var plain State
+	if err := json.Unmarshal([]byte(`{"branch":"x"}`), &plain); err != nil {
+		t.Fatal(err)
+	}
+	if plain.SpawnedByPrincipal != "" || plain.Holders != nil || plain.PendingHandles != nil {
+		t.Fatalf("absent fields should be empty, got %+v", plain)
+	}
+
+	// omitempty: a plain session's JSON must not carry any of the three keys.
+	plainData, err := json.Marshal(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"spawned_by_principal", "holders", "pending_handles"} {
+		if strings.Contains(string(plainData), key) {
+			t.Fatalf("plain state JSON unexpectedly contains %q: %s", key, plainData)
+		}
+	}
+}
+
+// TestStateIsHolder covers the FDR 0032 D12/D13 authority check: a match in
+// Holders, a match via SpawnedByPrincipal even with Holders empty, and an
+// empty caller principal never matching anything (even an empty lineage).
+func TestStateIsHolder(t *testing.T) {
+	cases := []struct {
+		name      string
+		state     State
+		principal string
+		want      bool
+	}{
+		{
+			name:      "matches via Holders",
+			state:     State{Holders: []string{"a", "b"}},
+			principal: "b",
+			want:      true,
+		},
+		{
+			name:      "matches via SpawnedByPrincipal with empty Holders",
+			state:     State{SpawnedByPrincipal: "p1"},
+			principal: "p1",
+			want:      true,
+		},
+		{
+			name:      "no match",
+			state:     State{SpawnedByPrincipal: "p1", Holders: []string{"a", "b"}},
+			principal: "c",
+			want:      false,
+		},
+		{
+			name:      "empty principal never matches, even an empty lineage",
+			state:     State{},
+			principal: "",
+			want:      false,
+		},
+		{
+			name:      "empty principal never matches a non-empty lineage either",
+			state:     State{SpawnedByPrincipal: "p1", Holders: []string{"p1"}},
+			principal: "",
+			want:      false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.state.IsHolder(tc.principal); got != tc.want {
+				t.Errorf("IsHolder(%q) = %v, want %v", tc.principal, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestWriteCreatesIndexSymlink(t *testing.T) {
 	s := setupTestSession(t, "feature-x")
 	if err := Write(s); err != nil {

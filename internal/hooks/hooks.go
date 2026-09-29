@@ -249,14 +249,18 @@ func evaluateImplicitCheckout(cwd string) (implicitCheckout, ImplicitRefusal) {
 }
 
 // maybeSendSpawnHello emits the spawn handshake (FDR 0006) when cwd is an sc
-// worktree whose session state carries SpawnedBy: it sends the hello to the
-// driver, then adopts the state (PID, active, HelloSentAt dedup marker so
-// resume/clear/compact re-fires do not re-hello). The hello uses the state's
-// SessionKey VERBATIM — the driver's WaitForHello filters From == that exact
-// key, so recomputing it from git here would break the gate. Order matters:
-// send first (a state-write failure must not suppress the handshake), mark
-// only on success (a send failure must not set HelloSentAt). All failures are
-// swallowed and logged via sessionlog — a hook must never block startup.
+// worktree whose session state carries spawn lineage: it sends the hello to
+// the driver, then adopts the state (PID, active, HelloSentAt dedup marker so
+// resume/clear/compact re-fires do not re-hello). The hello targets
+// SpawnedByPrincipal (FDR 0032 D1: the authority link and the JID localpart
+// the driver's WaitForHello waits on), falling back to SpawnedBy for children
+// spawned before this change carried only that field. The hello uses the
+// state's SessionKey VERBATIM — the driver's WaitForHello filters From == that
+// exact key, so recomputing it from git here would break the gate. Order
+// matters: send first (a state-write failure must not suppress the
+// handshake), mark only on success (a send failure must not set
+// HelloSentAt). All failures are swallowed and logged via sessionlog — a hook
+// must never block startup.
 func maybeSendSpawnHello(cwd, poshSessionID string) {
 	repoPath, err := git.CommonDir(cwd)
 	if err != nil {
@@ -273,11 +277,15 @@ func maybeSendSpawnHello(cwd, poshSessionID string) {
 		// for non-sc worktrees; stay silent.
 		return
 	}
-	if st.SpawnedBy == "" || st.HelloSentAt != nil {
+	helloTarget := st.SpawnedByPrincipal
+	if helloTarget == "" {
+		helloTarget = st.SpawnedBy
+	}
+	if helloTarget == "" || st.HelloSentAt != nil {
 		return
 	}
-	if err := spawnhandshake.SendHello(st.SessionKey, st.SpawnedBy, poshSessionID); err != nil {
-		sessionlog.Errorf("maybeSendSpawnHello send-failed key=%s to=%s err=%v", st.SessionKey, st.SpawnedBy, err)
+	if err := spawnhandshake.SendHello(st.SessionKey, helloTarget, poshSessionID); err != nil {
+		sessionlog.Errorf("maybeSendSpawnHello send-failed key=%s to=%s err=%v", st.SessionKey, helloTarget, err)
 		return
 	}
 	now := time.Now().UTC()

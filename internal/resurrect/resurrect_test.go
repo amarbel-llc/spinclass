@@ -55,15 +55,18 @@ func setupClosedSession(t *testing.T, branch string) (repoPath, wtPath string) {
 	// treats this as "no active process to close" — the correct fixture
 	// shape for a session that was never actually attached.
 	s := session.State{
-		SessionState: session.StateActive,
-		RepoPath:     repoPath,
-		WorktreePath: wtPath,
-		Branch:       branch,
-		SessionKey:   "repo/" + branch,
-		Description:  "test session",
-		SpawnedBy:    "driver/other",
-		Entrypoint:   []string{"/bin/sh"},
-		StartedAt:    time.Now().UTC(),
+		SessionState:       session.StateActive,
+		RepoPath:           repoPath,
+		WorktreePath:       wtPath,
+		Branch:             branch,
+		SessionKey:         "repo/" + branch,
+		Description:        "test session",
+		SpawnedBy:          "driver/other",
+		SpawnedByPrincipal: "4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2",
+		Holders:            []string{"4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2"},
+		PendingHandles:     []string{"9c2e1111-2222-3333-4444-555566667777"},
+		Entrypoint:         []string{"/bin/sh"},
+		StartedAt:          time.Now().UTC(),
 	}
 	if err := session.Write(s); err != nil {
 		t.Fatal(err)
@@ -118,6 +121,15 @@ func TestRunRecreatesWorktreeFromClosedSession(t *testing.T) {
 	}
 	if got.SpawnedBy != "driver/other" {
 		t.Errorf("SpawnedBy = %q, want preserved from tombstone", got.SpawnedBy)
+	}
+	if got.SpawnedByPrincipal != "4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2" {
+		t.Errorf("SpawnedByPrincipal = %q, want preserved from tombstone", got.SpawnedByPrincipal)
+	}
+	if len(got.Holders) != 1 || got.Holders[0] != "4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2" {
+		t.Errorf("Holders = %v, want preserved from tombstone", got.Holders)
+	}
+	if len(got.PendingHandles) != 1 || got.PendingHandles[0] != "9c2e1111-2222-3333-4444-555566667777" {
+		t.Errorf("PendingHandles = %v, want preserved from tombstone", got.PendingHandles)
 	}
 	if got.IsTombstone() {
 		t.Error("resurrected session must not still read as a tombstone")

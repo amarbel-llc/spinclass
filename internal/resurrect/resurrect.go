@@ -53,14 +53,17 @@ func Run(w io.Writer, target, newBranchName, format string) error {
 	}
 
 	fresh := session.State{
-		SessionState: session.StateInactive,
-		RepoPath:     st.RepoPath,
-		WorktreePath: newPath,
-		Branch:       branch,
-		SessionKey:   filepath.Base(st.RepoPath) + "/" + branch,
-		Description:  st.Description,
-		SpawnedBy:    st.SpawnedBy,
-		StartedAt:    time.Now(),
+		SessionState:       session.StateInactive,
+		RepoPath:           st.RepoPath,
+		WorktreePath:       newPath,
+		Branch:             branch,
+		SessionKey:         filepath.Base(st.RepoPath) + "/" + branch,
+		Description:        st.Description,
+		SpawnedBy:          st.SpawnedBy,
+		SpawnedByPrincipal: st.SpawnedByPrincipal,
+		Holders:            st.Holders,
+		PendingHandles:     st.PendingHandles,
+		StartedAt:          time.Now(),
 	}
 	if err := session.Write(fresh); err != nil {
 		return fmt.Errorf("writing resurrected session state for %s: %w", fresh.SessionKey, err)

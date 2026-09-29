@@ -82,6 +82,18 @@ type State struct {
 	// but the field is NOT vestigial — reap authorization still turns on it.
 	// See FDR 0006.
 	SpawnedBy string `json:"spawned_by,omitempty"`
+	// SpawnedByPrincipal is the driver's PRINCIPAL (FDR 0032 D1: the clown
+	// per-instance key, or serve's per-process fallback) recorded at spawn. It is
+	// the authority link and the hello target; SpawnedBy stays the display key
+	// (empty for a driver outside any worktree, e.g. a ~/eng coordinator).
+	SpawnedByPrincipal string `json:"spawned_by_principal,omitempty"`
+	// Holders are the principals holding an accepted handle on this session
+	// (FDR 0032 D12/D13): the spawner at spawn, plus every accepted grant. A
+	// materialized view; slice 1 turns entries into grant-record digests.
+	Holders []string `json:"holders,omitempty"`
+	// PendingHandles are principals granted a handle that have not yet exercised
+	// it (accept-on-first-use, FDR 0032 D12).
+	PendingHandles []string `json:"pending_handles,omitempty"`
 	// HelloSentAt records when the SessionStart hook emitted the spawn
 	// hello to SpawnedBy, deduping re-fires (resume/clear/compact). Set
 	// only on spawned sessions (FDR 0006).
@@ -862,6 +874,26 @@ func evalOrClean(p string) string {
 // "nothing matched" (close appends a bare-git-worktree hint) from an
 // ambiguity error, which must surface to the user untouched.
 var ErrTargetNotFound = errors.New("no session found")
+
+// IsHolder reports whether principal holds a handle on this session (FDR
+// 0032 D12/D13): either it appears in Holders, or it equals
+// SpawnedByPrincipal (the spawner holds a handle from the moment of spawn,
+// before any grant record exists). An empty principal never matches — an
+// unresolvable caller identity must never fall through to "authorized".
+func (s State) IsHolder(principal string) bool {
+	if principal == "" {
+		return false
+	}
+	if principal == s.SpawnedByPrincipal {
+		return true
+	}
+	for _, h := range s.Holders {
+		if h == principal {
+			return true
+		}
+	}
+	return false
+}
 
 // Key returns the session key (`<repo-dirname>/<branch>`, the first
 // column of `sc list`), computing it from RepoPath and Branch for

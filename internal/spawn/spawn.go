@@ -26,6 +26,17 @@ import (
 // starts exceed the window in practice.
 const DefaultHelloDeadline = 60 * time.Second
 
+// Driver identifies the spawning session (FDR 0032 D1). Principal is the
+// authority link and the hello target: the driver's per-instance key, which
+// is also its chat JID localpart. SessionKey is the driver's spinclass
+// session key when it has one, recorded for display only (sc list's
+// spawned-by column) and empty for a driver outside any worktree
+// (spinclass#332).
+type Driver struct {
+	SessionKey string
+	Principal  string
+}
+
 // Result describes a successfully launched worker session.
 type Result struct {
 	SessionKey    string // <repo-dirname>/<branch> — the worker's chat target
@@ -46,7 +57,7 @@ type Pending struct {
 	Branch       string // the worker's branch (for a timeout reap)
 
 	rp         worktree.ResolvedPath
-	driverKey  string
+	driver     Driver
 	desc       string
 	startTime  time.Time
 	window     []string
@@ -64,7 +75,11 @@ type Pending struct {
 // worker's provider — spliced into the spawn-entry template via
 // renderSpawn/SpliceModelFlag; "" runs the entry unmodified. The branch name and
 // ResolvedPath are produced exactly as `sc start` does (worktree.ResolvePath).
-func LaunchDetached(home, repoPath, driverKey, brief, desc, model string) (Pending, error) {
+//
+// driver identifies the spawning session (FDR 0032 D1): its Principal is the
+// hello target and is always present; its SessionKey is display-only and may
+// be empty for a driver outside any worktree (spinclass#332).
+func LaunchDetached(home, repoPath string, driver Driver, brief, desc, model string) (Pending, error) {
 	var descArgs []string
 	if desc != "" {
 		descArgs = []string{desc}
@@ -97,7 +112,7 @@ func LaunchDetached(home, repoPath, driverKey, brief, desc, model string) (Pendi
 		return Pending{}, fmt.Errorf("creating worker worktree: %w", err)
 	}
 
-	return startDetachedEntry(rp, driverKey, desc, argv, window, sessionEnv)
+	return startDetachedEntry(rp, driver, desc, argv, window, sessionEnv)
 }
 
 // Launch is the SYNCHRONOUS spawn: LaunchDetached then WaitHello. deadline 0
@@ -105,8 +120,8 @@ func LaunchDetached(home, repoPath, driverKey, brief, desc, model string) (Pendi
 // (FDR 0006). On a hello timeout the worktree and its session state are
 // intentionally left behind for inspection (`sc close` / `close-child-session`).
 // Used by the `sc spawn` CLI and by the async tool's no-clown fallback.
-func Launch(home, repoPath, driverKey, brief, desc, model string, deadline time.Duration) (Result, error) {
-	p, err := LaunchDetached(home, repoPath, driverKey, brief, desc, model)
+func Launch(home, repoPath string, driver Driver, brief, desc, model string, deadline time.Duration) (Result, error) {
+	p, err := LaunchDetached(home, repoPath, driver, brief, desc, model)
 	if err != nil {
 		return Result{}, err
 	}
@@ -263,20 +278,24 @@ func workerEnv(rp worktree.ResolvedPath, desc string, userEnv map[string]string)
 // detached harness entry, returning a Pending (worktree booting, hello not yet
 // awaited). The SessionStart hook adopts the state (PID + HelloSentAt) when the
 // worker boots; pre-hello PID is 0 (nothing attached yet).
-func startDetachedEntry(rp worktree.ResolvedPath, driverKey, desc string, argv, window []string, sessionEnv map[string]string) (Pending, error) {
+func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, argv, window []string, sessionEnv map[string]string) (Pending, error) {
 	st := session.State{
-		PID:          0,
-		SessionState: session.StateActive,
-		RepoPath:     rp.RepoPath,
-		WorktreePath: rp.AbsPath,
-		Branch:       rp.Branch,
-		SessionKey:   rp.SessionKey,
-		Description:  desc,
-		SpawnedBy:    driverKey,
-		StartedAt:    time.Now().UTC(),
+		PID:                0,
+		SessionState:       session.StateActive,
+		RepoPath:           rp.RepoPath,
+		WorktreePath:       rp.AbsPath,
+		Branch:             rp.Branch,
+		SessionKey:         rp.SessionKey,
+		Description:        desc,
+		SpawnedBy:          driver.SessionKey,
+		SpawnedByPrincipal: driver.Principal,
+		StartedAt:          time.Now().UTC(),
 		Env: map[string]string{
 			"SPINCLASS_SESSION_ID": rp.SessionKey,
 		},
+	}
+	if driver.Principal != "" {
+		st.Holders = []string{driver.Principal}
 	}
 	if err := session.Write(st); err != nil {
 		return Pending{}, fmt.Errorf("writing worker session state: %w", err)
@@ -304,7 +323,7 @@ func startDetachedEntry(rp worktree.ResolvedPath, driverKey, desc string, argv, 
 		RepoPath:     rp.RepoPath,
 		Branch:       rp.Branch,
 		rp:           rp,
-		driverKey:    driverKey,
+		driver:       driver,
 		desc:         desc,
 		startTime:    startTime,
 		window:       window,
@@ -325,7 +344,7 @@ func WaitHello(p Pending, deadline time.Duration) (Result, error) {
 	// The window opens AFTER the hello (not before) so it can attach to the
 	// now-ready session: the posh id is a crypto-random UUID unknowable until the
 	// worker boots (direction B), so {attach-id} can only be resolved here.
-	poshID, err := spawnhandshake.WaitForHello(p.driverKey, p.rp.SessionKey, p.startTime, deadline)
+	poshID, err := spawnhandshake.WaitForHello(p.driver.Principal, p.rp.SessionKey, p.startTime, deadline)
 	if err != nil {
 		return Result{}, err
 	}

@@ -21,46 +21,70 @@ type closeChildParams struct {
 	Force bool   `json:"force"`
 }
 
-// authorizeChildReap decides whether callerKey owns child (#249). The
-// parent→child link is session.State.SpawnedBy — the driver key internal/spawn
-// records at launch. Since the #148 recursive-spawn guard was removed this is
-// the only remaining consumer of that field, so it is the sole thing keeping
-// lineage load-bearing.
-// A session may reap ONLY what it spawned, so every uncertain case is a
-// refusal: an unresolvable caller identity, a child with no lineage at all, or
-// a child belonging to a different driver. Failing open here would let any
-// session close any other session in `sc list`, which is exactly the authority
-// `sc close` deliberately reserves to the session itself and to the human.
-func authorizeChildReap(callerKey string, child session.State) error {
-	if callerKey == "" {
+// authorizeChildReap decides whether the caller may reap child (#249). The
+// authority is a HANDLE (FDR 0032 D12/D13): child.IsHolder(callerPrincipal) —
+// the spawner from the moment of spawn (SpawnedByPrincipal), plus anyone later
+// granted and accepting a handle (Holders). SpawnedBy/SpawnedByPrincipal are
+// otherwise display/legacy: SpawnedBy is the `sc list` lineage column, and a
+// child spawned before this change recorded only that session key, so a
+// legacy migration path (case 3 below) still lets its original spawner reap
+// it by session key.
+//
+// A session may reap ONLY a child it holds a handle on, so every uncertain
+// case is a refusal: an unresolvable caller principal, a child with no
+// lineage at all, or a child held by someone else. Failing open here would let
+// any session close any other session in `sc list`, which is exactly the
+// authority `sc close` deliberately reserves to the session itself and to the
+// human.
+func authorizeChildReap(callerPrincipal, callerKey string, child session.State) error {
+	if callerPrincipal == "" {
 		return fmt.Errorf(
-			"could not resolve this session's key, so ownership of %s cannot be established; "+
-				"close-child-session only reaps sessions this one spawned",
+			"could not resolve this session's principal, so ownership of %s cannot be established; "+
+				"close-child-session only reaps sessions this one holds a handle on",
 			child.Key(),
 		)
 	}
-	if child.SpawnedBy == "" {
+	if child.IsHolder(callerPrincipal) {
+		return nil
+	}
+	// Legacy migration: a child spawned before FDR 0032 carries no
+	// SpawnedByPrincipal/Holders at all, only the driver's session key. Its
+	// original spawner — identified by that session key — stays able to reap
+	// it, so nothing spawned before this change becomes unreapable.
+	if child.SpawnedByPrincipal == "" && child.SpawnedBy != "" && callerKey != "" && child.SpawnedBy == callerKey {
+		return nil
+	}
+	if child.SpawnedBy == "" && child.SpawnedByPrincipal == "" && len(child.Holders) == 0 {
+		if callerKey != "" {
+			return fmt.Errorf(
+				"session %s carries no spawned_by lineage — it was not spawned by this session "+
+					"(principal %s, session key %s) or any other; a session may only reap sessions it "+
+					"holds a handle on. Close it from inside it, or run `sc close %s`",
+				child.Key(), callerPrincipal, callerKey, child.Key(),
+			)
+		}
 		return fmt.Errorf(
-			"session %s carries no spawned_by lineage — it was not spawned by this session (%s) "+
-				"or any other; a session may only reap the workers it spawned. "+
+			"session %s carries no spawned_by lineage — it was not spawned by this session "+
+				"(principal %s) or any other; a session may only reap sessions it holds a handle on. "+
 				"Close it from inside it, or run `sc close %s`",
-			child.Key(), callerKey, child.Key(),
+			child.Key(), callerPrincipal, child.Key(),
 		)
 	}
-	if child.SpawnedBy != callerKey {
-		return fmt.Errorf(
-			"session %s was spawned by %s, not by this session (%s); "+
-				"a session may only reap the workers it spawned. "+
-				"Ask %s to reap it, or run `sc close %s`",
-			child.Key(), child.SpawnedBy, callerKey, child.SpawnedBy, child.Key(),
-		)
+	spawner := child.SpawnedByPrincipal
+	if spawner == "" {
+		spawner = child.SpawnedBy
 	}
-	return nil
+	return fmt.Errorf(
+		"session %s was spawned by %s (spawned_by=%q, spawned_by_principal=%q), not by this session "+
+			"(principal %s, session key %s); a session may only reap sessions it holds a handle on. "+
+			"Ask %s to grant a handle (grant-session-handle), or run `sc close %s`",
+		child.Key(), spawner, child.SpawnedBy, child.SpawnedByPrincipal, callerPrincipal, callerKey, spawner, child.Key(),
+	)
 }
 
 // runCloseChild is the shared close-child-session flow: resolve the caller's
-// own identity, resolve the named child, check the spawned_by link, and hand
-// the reap to internal/close.
+// own identity, resolve the named child, check the handle, and hand the reap
+// to internal/close.
 //
 // Every safety check stays with close.RunResolved — it computes the child's
 // unintegrated/dirty state itself and, finding no TTY to confirm on, refuses
@@ -71,13 +95,10 @@ func runCloseChild(p closeChildParams) (string, error) {
 		return "", errors.New("child is required")
 	}
 
-	callerKey, err := currentSessionKey()
-	if err != nil {
-		return "", fmt.Errorf(
-			"resolving this session's key (the spawned_by value a child must carry to be reapable): %w",
-			err,
-		)
-	}
+	// callerPrincipal always resolves (FDR 0032 D1); callerKey is best-effort
+	// display-only, empty for a caller outside any worktree.
+	callerPrincipal := currentPrincipal()
+	callerKey := bestEffortSessionKey()
 
 	child, err := session.FindByTarget(p.Child)
 	if errors.Is(err, session.ErrTargetNotFound) {
@@ -92,7 +113,7 @@ func runCloseChild(p closeChildParams) (string, error) {
 		return "", err
 	}
 
-	if err := authorizeChildReap(callerKey, *child); err != nil {
+	if err := authorizeChildReap(callerPrincipal, callerKey, *child); err != nil {
 		return "", err
 	}
 

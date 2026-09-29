@@ -333,6 +333,9 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 		// pre-merge attestation must survive a resume (#147).
 		if existing, err := session.Read(rp.RepoPath, rp.Branch); err == nil {
 			st.SpawnedBy = existing.SpawnedBy
+			st.SpawnedByPrincipal = existing.SpawnedByPrincipal
+			st.Holders = existing.Holders
+			st.PendingHandles = existing.PendingHandles
 			st.HelloSentAt = existing.HelloSentAt
 			st.PreMergeAttestation = existing.PreMergeAttestation
 			// Carry the recorded setup fingerprint forward by default. A

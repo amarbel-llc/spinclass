@@ -38,6 +38,13 @@ func newWorkerFixture(t *testing.T, sweatfileTOML string) (home, repoPath string
 	return home, repoPath
 }
 
+// testDriver builds a Driver whose Principal equals key, so the existing
+// hello-sender helper (which sends to a bare string) satisfies WaitHello's
+// principal-keyed wait unchanged (FDR 0032 D1).
+func testDriver(key string) Driver {
+	return Driver{SessionKey: key, Principal: key}
+}
+
 // happySweatfile's spawn-entry (exec'd directly — FDR-0017 Piece 1) records its
 // working directory (the marker proves cmd.Dir = the worktree) and its
 // positional argv (one element per line) so the test can assert {prompt}
@@ -108,7 +115,7 @@ func TestLaunchSpawnWindowFires(t *testing.T) {
 	const driverKey = "driver/window-test"
 	stop, helloErr := helloAfterLaunch(t, repoPath, driverKey)
 
-	res, err := Launch(home, repoPath, driverKey, "brief", "", "", 15*time.Second)
+	res, err := Launch(home, repoPath, testDriver(driverKey), "brief", "", "", 15*time.Second)
 	stop()
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
@@ -142,7 +149,7 @@ func TestLaunchSpawnWindowFailureDoesNotFailSpawn(t *testing.T) {
 	const driverKey = "driver/window-fail-test"
 	stop, helloErr := helloAfterLaunch(t, repoPath, driverKey)
 
-	_, err := Launch(home, repoPath, driverKey, "brief", "", "", 15*time.Second)
+	_, err := Launch(home, repoPath, testDriver(driverKey), "brief", "", "", 15*time.Second)
 	stop()
 	if err != nil {
 		t.Fatalf("Launch failed because of the window command: %v", err)
@@ -160,7 +167,7 @@ func TestLaunchHappyPath(t *testing.T) {
 
 	stop, helloErr := helloAfterLaunch(t, repoPath, driverKey)
 
-	res, err := Launch(home, repoPath, driverKey, brief, desc, "", 15*time.Second)
+	res, err := Launch(home, repoPath, testDriver(driverKey), brief, desc, "", 15*time.Second)
 	stop()
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
@@ -211,6 +218,12 @@ func TestLaunchHappyPath(t *testing.T) {
 	}
 	if st.SpawnedBy != driverKey {
 		t.Errorf("SpawnedBy: got %q, want %q", st.SpawnedBy, driverKey)
+	}
+	if st.SpawnedByPrincipal != driverKey {
+		t.Errorf("SpawnedByPrincipal: got %q, want %q", st.SpawnedByPrincipal, driverKey)
+	}
+	if len(st.Holders) != 1 || st.Holders[0] != driverKey {
+		t.Errorf("Holders: got %v, want [%q]", st.Holders, driverKey)
 	}
 	if st.Description != desc {
 		t.Errorf("Description: got %q, want %q", st.Description, desc)
@@ -265,7 +278,7 @@ func TestLaunchDetachesNonExitingEntry(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := Launch(home, repoPath, driverKey, "brief", "", "", 15*time.Second)
+		_, err := Launch(home, repoPath, testDriver(driverKey), "brief", "", "", 15*time.Second)
 		done <- err
 	}()
 
@@ -336,7 +349,7 @@ func TestLaunchExecEnvCarriesWorkerIdentity(t *testing.T) {
 	const desc = "env worker"
 	// No hello sender: Launch errors on the hello deadline, but the spawn
 	// template has already run by then and written env.txt.
-	_, err := Launch(home, repoPath, "driver/test-session", "do work", desc, "", 300*time.Millisecond)
+	_, err := Launch(home, repoPath, testDriver("driver/test-session"), "do work", desc, "", 300*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected hello-deadline error, got nil")
 	}
@@ -389,7 +402,7 @@ func TestLaunchSplicesModelFlag(t *testing.T) {
 	const driverKey = "driver/test-session"
 	stop, helloErr := helloAfterLaunch(t, repoPath, driverKey)
 
-	res, err := Launch(home, repoPath, driverKey, "brief", "", "opus", 15*time.Second)
+	res, err := Launch(home, repoPath, testDriver(driverKey), "brief", "", "opus", 15*time.Second)
 	stop()
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
@@ -440,7 +453,7 @@ func TestLaunchDefaultsToAutoMode(t *testing.T) {
 	const driverKey = "driver/test-session"
 	stop, helloErr := helloAfterLaunch(t, repoPath, driverKey)
 
-	res, err := Launch(home, repoPath, driverKey, "brief", "", "", 15*time.Second)
+	res, err := Launch(home, repoPath, testDriver(driverKey), "brief", "", "", 15*time.Second)
 	stop()
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
@@ -479,7 +492,7 @@ func TestLaunchAutoModeDisabled(t *testing.T) {
 	const driverKey = "driver/test-session"
 	stop, helloErr := helloAfterLaunch(t, repoPath, driverKey)
 
-	res, err := Launch(home, repoPath, driverKey, "brief", "", "", 15*time.Second)
+	res, err := Launch(home, repoPath, testDriver(driverKey), "brief", "", "", 15*time.Second)
 	stop()
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
@@ -509,7 +522,7 @@ func TestLaunchModelWithoutSeparatorErrors(t *testing.T) {
 	home, repoPath := newWorkerFixture(t, happySweatfile)
 	const driverKey = "driver/test-session"
 
-	_, err := Launch(home, repoPath, driverKey, "brief", "", "opus", 15*time.Second)
+	_, err := Launch(home, repoPath, testDriver(driverKey), "brief", "", "opus", 15*time.Second)
 	if err == nil {
 		t.Fatal("Launch() = nil error, want error (no \"--\" separator)")
 	}
@@ -535,7 +548,7 @@ func TestLaunchHelloTimeout(t *testing.T) {
 	const driverKey = "driver/test-session"
 	deadline := 500 * time.Millisecond
 
-	_, err := Launch(home, repoPath, driverKey, "do work", "desc", "", deadline)
+	_, err := Launch(home, repoPath, testDriver(driverKey), "do work", "desc", "", deadline)
 	if err == nil {
 		t.Fatal("expected hello-deadline error, got nil")
 	}

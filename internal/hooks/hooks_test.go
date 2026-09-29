@@ -1828,6 +1828,55 @@ func TestSessionStartSpawnHello(t *testing.T) {
 	}
 }
 
+// TestSessionStartSpawnHelloTargetsPrincipal pins FDR 0032: when the child's
+// state carries SpawnedByPrincipal (the authority link every current spawn
+// writes) and leaves the legacy SpawnedBy empty, the hello still goes out —
+// targeted at the principal, not a session key that does not exist.
+func TestSessionStartSpawnHelloTargetsPrincipal(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	const principal = "4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2"
+
+	repo, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	testgit.MustInit(t, repo)
+	wt := filepath.Join(repo, ".worktrees", "feature")
+	testgit.MustWorktreeAdd(t, repo, wt, "feature")
+	st := session.State{
+		PID:                0,
+		SessionState:       session.StateActive,
+		RepoPath:           repo,
+		WorktreePath:       wt,
+		Branch:             "feature",
+		SessionKey:         "myrepo/feature",
+		SpawnedByPrincipal: principal,
+		Holders:            []string{principal},
+		StartedAt:          time.Now(),
+	}
+	if err := session.Write(st); err != nil {
+		t.Fatalf("session.Write: %v", err)
+	}
+
+	fireSessionStart(t, wt)
+
+	poshID, err := spawnhandshake.WaitForHello(principal, "myrepo/feature", time.Now().Add(-time.Minute), time.Second)
+	if err != nil {
+		t.Fatalf("expected a spawn hello targeted at the principal: %v", err)
+	}
+	if poshID != "spawn-test-session" {
+		t.Errorf("hello posh session id = %q, want %q (the worker's session_id)", poshID, "spawn-test-session")
+	}
+
+	got, err := session.Read(repo, "feature")
+	if err != nil {
+		t.Fatalf("session.Read: %v", err)
+	}
+	if got.HelloSentAt == nil {
+		t.Error("HelloSentAt not set after hello")
+	}
+}
+
 func TestSessionStartSpawnHelloDedupes(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	repo, wt := initSpawnedWorktree(t, "driver/key")

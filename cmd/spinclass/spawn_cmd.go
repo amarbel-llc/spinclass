@@ -30,10 +30,14 @@ type spawnParams struct {
 // validate params, resolve the driver identity (the worker's hello target
 // and message-back address) and the target repo, then block in spawn.Launch
 // until the worker's SessionStart hello or the deadline (parseHelloTimeout).
-// Returns the launch result plus the driver key for the chat hint line. The
-// brief is the worker's ONLY context (spinclass#258 removed the issue-prefill
-// arg — the spawning agent references any issue in the brief and the worker
-// fetches it).
+// Returns the launch result plus the driver's PRINCIPAL for the chat hint
+// line (FDR 0032 D1: the principal is the JID localpart, so this is the
+// correct chat address, more so than the old session key). currentDriver()
+// always resolves — a driver outside any worktree (spinclass#332) still gets
+// a principal, just no session key — so there is no identity-resolution error
+// path here any more. The brief is the worker's ONLY context (spinclass#258
+// removed the issue-prefill arg — the spawning agent references any issue in
+// the brief and the worker fetches it).
 func runSpawn(p spawnParams) (spawn.Result, string, error) {
 	if p.Brief == "" {
 		return spawn.Result{}, "", errors.New("brief is required")
@@ -53,24 +57,18 @@ func runSpawn(p spawnParams) (spawn.Result, string, error) {
 		return spawn.Result{}, "", fmt.Errorf("resolving home directory: %w", err)
 	}
 
-	// The driver identity is load-bearing, not informational: the worker's
-	// hello is sent TO this key and the brief tells the worker to message it
-	// back. No identity, no spawn.
-	driverKey, err := currentSessionKey()
-	if err != nil {
-		return spawn.Result{}, "", fmt.Errorf("resolving driver session key (the worker's hello target): %w", err)
-	}
+	driver := currentDriver()
 
 	repoPath, err := resolveSpawnRepo(home, p.Repo)
 	if err != nil {
 		return spawn.Result{}, "", err
 	}
 
-	res, err := spawn.Launch(home, repoPath, driverKey, p.Brief, p.Description, p.Model, deadline)
+	res, err := spawn.Launch(home, repoPath, driver, p.Brief, p.Description, p.Model, deadline)
 	if err != nil {
 		return spawn.Result{}, "", err
 	}
-	return res, driverKey, nil
+	return res, driver.Principal, nil
 }
 
 // resolveSpawnRepo resolves a spawn target repo (spinclass#262: repo is
@@ -130,11 +128,12 @@ func driverRepoPath() string {
 
 // spawnResultText renders the launch result for both surfaces: plain lines
 // (spawn is not a merge/check command — mirror fork's plain print) plus the
-// hint that the returned session key is the worker's chat address.
-func spawnResultText(driverKey string, res spawn.Result) string {
+// hint that driverPrincipal (the driver's chat JID localpart, FDR 0032 D1) is
+// where the worker will message back.
+func spawnResultText(driverPrincipal string, res spawn.Result) string {
 	return fmt.Sprintf(
 		"session_key: %s\nworktree_path: %s\nmultiplexer_id: %s\nworker will message %s via chat",
-		res.SessionKey, res.WorktreePath, res.MultiplexerID, driverKey,
+		res.SessionKey, res.WorktreePath, res.MultiplexerID, driverPrincipal,
 	)
 }
 
@@ -146,11 +145,11 @@ func runSpawnCLI(_ context.Context, args json.RawMessage) error {
 	}
 	_ = json.Unmarshal(args, &p)
 
-	res, driverKey, err := runSpawn(p.spawnParams)
+	res, driverPrincipal, err := runSpawn(p.spawnParams)
 	if err != nil {
 		return err
 	}
-	fmt.Println(spawnResultText(driverKey, res))
+	fmt.Println(spawnResultText(driverPrincipal, res))
 	return nil
 }
 
@@ -168,11 +167,11 @@ func handleSpawnSession(_ context.Context, args json.RawMessage, _ command.Promp
 	if clown.Enabled() {
 		return handleSpawnSessionAsync(params)
 	}
-	res, driverKey, err := runSpawn(params)
+	res, driverPrincipal, err := runSpawn(params)
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
 	}
-	return command.TextResult(spawnResultText(driverKey, res)), nil
+	return command.TextResult(spawnResultText(driverPrincipal, res)), nil
 }
 
 // completeModelAliases offers the model aliases configured in the merged

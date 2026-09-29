@@ -54,10 +54,7 @@ func handleSpawnSessionAsync(params spawnParams) (*command.Result, error) {
 	if err != nil {
 		return command.TextErrorResult(fmt.Sprintf("resolving home directory: %v", err)), nil
 	}
-	driverKey, err := currentSessionKey()
-	if err != nil {
-		return command.TextErrorResult(fmt.Sprintf("resolving driver session key (the worker's hello target): %v", err)), nil
-	}
+	driver := currentDriver()
 	repoPath, err := resolveSpawnRepo(home, params.Repo)
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
@@ -65,7 +62,7 @@ func handleSpawnSessionAsync(params spawnParams) (*command.Result, error) {
 
 	// Synchronous prefix: create the worktree + exec the detached entry. After
 	// this the session key is known; the hello has NOT been awaited.
-	pending, err := spawn.LaunchDetached(home, repoPath, driverKey, params.Brief, params.Description, params.Model)
+	pending, err := spawn.LaunchDetached(home, repoPath, driver, params.Brief, params.Description, params.Model)
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
 	}
@@ -80,24 +77,26 @@ func handleSpawnSessionAsync(params spawnParams) (*command.Result, error) {
 		if werr != nil {
 			return command.TextErrorResult(werr.Error()), nil
 		}
-		return command.TextResult(spawnResultText(driverKey, res)), nil
+		return command.TextResult(spawnResultText(driver.Principal, res)), nil
 	}
 
-	go awaitSpawnHello(pending, driverKey, deadline, jobID)
+	go awaitSpawnHello(pending, driver.Principal, deadline, jobID)
 
-	return command.TextResult(asyncSpawnResultText(pending, driverKey, jobID, deadline)), nil
+	return command.TextResult(asyncSpawnResultText(pending, driver.Principal, jobID, deadline)), nil
 }
 
 // awaitSpawnHello runs in a background goroutine: block on the worker's hello,
 // then emit the terminal clown wake. On timeout it applies the reap-if-dead
 // policy — reap the never-helloed session only when it looks dead, else keep and
 // name it (spinclass#266 decision 1). The goroutine outlives the tool call
-// (serve is long-lived), mirroring the async merge goroutine.
-func awaitSpawnHello(pending spawn.Pending, driverKey string, deadline time.Duration, jobID string) {
+// (serve is long-lived), mirroring the async merge goroutine. driverPrincipal
+// is the driver's principal (FDR 0032 D1), the chat JID localpart the wake
+// message names.
+func awaitSpawnHello(pending spawn.Pending, driverPrincipal string, deadline time.Duration, jobID string) {
 	ctx := context.Background()
 
 	if res, err := spawn.WaitHello(pending, deadline); err == nil {
-		msg := fmt.Sprintf("worker %s is up; it will message %s via chat", res.SessionKey, driverKey)
+		msg := fmt.Sprintf("worker %s is up; it will message %s via chat", res.SessionKey, driverPrincipal)
 		if ferr := clown.FinishJob(ctx, jobID, job.StatusSucceeded, msg, ""); ferr != nil {
 			servelog.Errorf("spawn-async: FinishJob(succeeded) for %s failed: %v", pending.SessionKey, ferr)
 		}
@@ -142,10 +141,11 @@ func spawnTimeoutOutcome(pending spawn.Pending, deadline time.Duration) string {
 // asyncSpawnResultText is the immediate tool result for an async spawn: the
 // session key (the worker's chat address), worktree, and the ringmaster job id
 // that carries the hello outcome. It states the hello is delivered as a wake so
-// the caller ends its turn instead of polling.
-func asyncSpawnResultText(pending spawn.Pending, driverKey, jobID string, deadline time.Duration) string {
+// the caller ends its turn instead of polling. driverPrincipal is the driver's
+// principal (FDR 0032 D1), the chat JID localpart the worker will message.
+func asyncSpawnResultText(pending spawn.Pending, driverPrincipal, jobID string, deadline time.Duration) string {
 	return fmt.Sprintf(
 		"spawning worker %s (worktree %s) — returned immediately. Its SessionStart hello is delivered as a job-wakeup on ringmaster job %q (hello-timeout %s): end your turn and let the wake arrive, do not poll. On hello the worker is up and will message %s via chat. On timeout, if the worker looks dead it is auto-reaped (nothing of value existed), else the wake names the dangling session to reap with close-child-session. Inspect via ringmaster's job_status/job_read with that id.",
-		pending.SessionKey, pending.WorktreePath, jobID, deadline.Round(time.Second), driverKey,
+		pending.SessionKey, pending.WorktreePath, jobID, deadline.Round(time.Second), driverPrincipal,
 	)
 }
