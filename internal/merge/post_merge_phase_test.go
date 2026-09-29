@@ -56,6 +56,14 @@ func runFinishTargets(t *testing.T, repoDir, wtPath, branch string, gitSync bool
 // target selection plus the post-merge-timeout override).
 func runFinishOpts(t *testing.T, repoDir, wtPath, branch string, gitSync bool, pm PostMergeOptions) ([]ndjsoncrap.Record, error) {
 	t.Helper()
+	return runFinishWithMidEdit(t, repoDir, wtPath, branch, gitSync, pm, nil)
+}
+
+// runFinishWithMidEdit is runFinishOpts with a hook run after PrepareMerge and
+// before FinishMerge: the async-merge window in which the session worktree can
+// still be edited (#300). between may be nil.
+func runFinishWithMidEdit(t *testing.T, repoDir, wtPath, branch string, gitSync bool, pm PostMergeOptions, between func()) ([]ndjsoncrap.Record, error) {
+	t.Helper()
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
@@ -63,6 +71,9 @@ func runFinishOpts(t *testing.T, repoDir, wtPath, branch string, gitSync bool, p
 	if prepErr != nil {
 		ts.Finish()
 		return decodeRecords(t, buf.Bytes()), prepErr
+	}
+	if between != nil {
+		between()
 	}
 	_, err := FinishMerge(context.Background(), &mockExecutor{}, rep, ts,
 		repoDir, wtPath, branch, "main", pinnedSha, gitSync, true, nil, pm)
@@ -559,7 +570,5 @@ func TestPostMergeRunsOnUnqueuedPath(t *testing.T) {
 		t.Errorf("post-merge point not ok: %+v", tr)
 	}
 	// Sanity: the queue really was disabled (no wait/landing-pull points).
-	if _, queued := findTest(tests, "fetch origin/main (landing)"); queued {
-		t.Error("expected the unqueued path, but saw a landing fetch")
-	}
+	assertUnqueuedPath(t, recs)
 }

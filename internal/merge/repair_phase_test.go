@@ -22,6 +22,24 @@ func writeRepoSweatfile(t *testing.T, repoDir, content string) {
 	}
 }
 
+// writeGlobalSweatfile writes the global sweatfile layer ($HOME is the test
+// root under setupRepo). Global is an unversioned, live layer, so it carries
+// the knobs a test needs without touching the committed repo sweatfile.
+func writeGlobalSweatfile(t *testing.T, content string) {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(home, ".config", "spinclass")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sweatfile"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // setupRepairRepo builds a repo + worktree branch with one feature commit ahead
 // of main, and returns (repoDir, wtPath, preRepairHEAD).
 func setupRepairRepo(t *testing.T, branch string) (repoDir, wtPath, head string) {

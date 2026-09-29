@@ -970,13 +970,15 @@ func runPreMergeHookContext(ctx context.Context, rep *crap.Reporter, ts *crap.Te
 }
 
 // runPostMergePhase runs the post-merge phase after a merge has landed (FDR
-// 0023, extended by FDR 0026 named targets), emitting one test point per target
-// on ts. It is deliberately NON-FATAL: the merge already landed (and, with
-// gitSync, was pushed), so there is nothing to roll back and nothing for a
-// caller to retry. A failing target emits a not-ok point carrying severity=warn,
-// its verdict, and its output, but runPostMergePhase always returns — surfaced
-// and logged, not treated as a merge failure (spinclass#244). Returns
-// immediately when the phase is inactive or the hierarchy cannot be loaded.
+// 0023, extended by FDR 0026 named targets). Named targets are execution-family
+// Phase nodes; the legacy string is a test point on ts. It is deliberately
+// NON-FATAL: the merge already landed (and, with gitSync, was pushed), so there
+// is nothing to roll back and nothing for a caller to retry. A failing target
+// carries severity=warn, its verdict, and its output, but runPostMergePhase
+// always returns — surfaced and logged, not treated as a merge failure
+// (spinclass#244). An inactive phase returns silently; an empty home returns
+// silently too (same class as the pre-merge helper, deliberately not a point);
+// a snapshot load failure emits a warn point.
 //
 // On the queued path this runs UNDER the per-repo merge lock, as the last
 // stage before FinishMerge returns and the deferred Release fires. That is
@@ -992,6 +994,16 @@ func runPreMergeHookContext(ctx context.Context, rep *crap.Reporter, ts *crap.Te
 // still exists (teardown may have removed it), and otherwise in repoPath.
 // landedSha is the sha that actually landed: the LANDING sha on a rebased
 // queued landing, not the original pin.
+//
+// The phase's sweatfile config is a pure function of landedSha plus the
+// unversioned layers (global, parent dirs, main checkout) — never the live
+// session worktree, which an async merge lets the agent keep editing (#300;
+// the FDR 0031 rule that merge-scoped hook definitions come from a pinned
+// commit). landedSha rather than the pin or the base: the landing sha is the
+// commit that actually landed (after a queue rebase it differs from the pin),
+// and the base predates the session's own sweatfile edits, which the operator
+// reviewed as part of the landed commit. An unreadable landed sweatfile skips
+// the phase with a warn point and never falls back to the worktree.
 //
 // FDR 0026: when the sweatfile declares active [[post-merge]] targets they ARE
 // the phase — the legacy [hooks].post-merge string is superseded. Targets run
@@ -1011,10 +1023,19 @@ func runPreMergeHookContext(ctx context.Context, rep *crap.Reporter, ts *crap.Te
 func runPostMergePhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, landDir, branch, defaultBranch, pinnedSha, landedSha string, pushed bool, activity io.Writer, pm PostMergeOptions) {
 	home, _ := os.UserHomeDir()
 	if home == "" {
+		// Intentionally silent, unlike the snapshot-load failure just below.
 		return
 	}
-	hierarchy, err := sweatfileio.LoadWorktreeHierarchy(home, repoPath, wtPath)
-	if err != nil || !hierarchy.Merged.PostMergePhaseActive() {
+	hierarchy, err := loadCommitHierarchy(home, repoPath, landedSha)
+	if err != nil {
+		ts.NotOk("post-merge sweatfile ("+shortSha(landedSha)+")", map[string]any{
+			"severity": "warn",
+			"message": fmt.Sprintf("post-merge skipped: sweatfile at %s unreadable: %v (the merge already landed — nothing was rolled back)",
+				shortSha(landedSha), err),
+		})
+		return
+	}
+	if !hierarchy.Merged.PostMergePhaseActive() {
 		return
 	}
 	postMergeTargets := pm.Targets
