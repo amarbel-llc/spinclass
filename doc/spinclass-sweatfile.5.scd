@@ -669,7 +669,8 @@ does not export *WORKTREE*.
 
 *allow-no-credential*
 	Boolean. When true, a failed *[auth]* mint at session creation (forge
-	API unreachable, no live agent for the card login) warns and creates
+	API unreachable, no live agent for the card login, or a failed
+	*[auth].url-resolver*) warns and creates
 	the session WITHOUT a push credential — pushes then use the inherited
 	ssh-agent as before FDR 0028 — instead of failing creation and removing
 	the half-built worktree (the default). The persistent half of the
@@ -686,9 +687,10 @@ access token at creation, so its fetches and pushes — interactive and the
 *merge-this-session* landing — never depend on the inherited ssh-agent.
 Both commands are run via *sh -c* in the session worktree, devshell-scoped
 like the lifecycle hooks, with *SPINCLASS\_SESSION\_ID*, *SPINCLASS\_REPO*,
-*SPINCLASS\_BRANCH*, *SPINCLASS\_WORKTREE*, *SPINCLASS\_FORGE\_HOST* (the
-origin's host), and *SPINCLASS\_FORGE\_REPO* (the origin's _owner/name_) in
-the environment.
+*SPINCLASS\_BRANCH*, *SPINCLASS\_WORKTREE*, *SPINCLASS\_ORIGIN\_URL* (the
+configured origin), *SPINCLASS\_FORGE\_HOST* (the origin's host), and
+*SPINCLASS\_FORGE\_REPO* (the origin's _owner/name_) in the environment;
+with a *url-resolver* the last two are the canonical ones.
 
 *mint-command*
 	Prints the token on stdout. Spinclass stores it as a mode-600
@@ -698,8 +700,9 @@ the environment.
 	the session worktree — and, at merge time, on the disposable landing
 	worktree the push runs from (FDR 0029): *credential.helper* pointing at
 	that file, and *url.https://<host>/.insteadOf* rewriting the origin's
-	ssh form to https for that host only, so remotes on other hosts
-	(GitHub) keep ssh. The root checkout's config is never touched. A
+	ssh form to https for that host only (with a *url-resolver*, the
+	*insteadOf* key is the resolved canonical HTTPS URL instead), so
+	remotes on other hosts (GitHub) keep ssh. The root checkout's config is never touched. A
 	failed mint fails session creation and removes the half-built worktree:
 	a session that silently pushed off the agent instead would be exactly
 	the failure this exists to remove. *Merge:* scalar override.
@@ -720,13 +723,35 @@ the environment.
 	any host. *Merge:* override, not append — a nearer level replaces the
 	list, *[]* clears it, unset inherits.
 
-*sc validate* warns when only one of the two commands is set, and when
-*mint-command* is set without *forge-hosts*. A failed mint (forge API
-unreachable, no live agent for the card login) is fatal to session creation
+*url-resolver*
+	Shell string that maps the configured origin to the forge's canonical
+	HTTPS URL, replacing the built-in ssh-to-https string rewrite (which is
+	wrong on an owner-free forge plane). Run via *sh -c* in the repo root
+	with the ambient PATH (no devshell), after the *forge-hosts* gate and
+	before the mint, with a 30s cap. *{origin}* is replaced by the
+	shell-quoted origin URL: write it bare, never inside quotes, or use
+	*"$SPINCLASS\_ORIGIN\_URL"*; origins containing CR or LF are refused.
+	Example: *url-resolver = "smith repo resolve {origin} --output json"*.
+	Stdout must be one JSON object with a required *canonical\_https*
+	(lowercase *https://*, a host, no userinfo, query or fragment; a port is
+	allowed) and an optional *canonical\_ssh*. Spinclass then writes
+	*url.<canonical\_https>.insteadOf* = the origin (plus *canonical\_ssh*),
+	keys the credential on the canonical host, and gives the mint the
+	canonical *SPINCLASS\_FORGE\_HOST*/*\_REPO*. When set, *forge-hosts* must
+	list both the origin host and the canonical host. Use *.git*-suffixed
+	origins: a suffix-less origin also prefix-matches sibling remotes.
+	*Merge:* not merged — read only from the global and parent-directory
+	layers; a repo- or worktree-level value is ignored with a warning.
+
+*sc validate* warns when only one of the two commands is set, when
+*mint-command* is set without *forge-hosts*, and when *url-resolver* is set
+at the repo level (where it is ignored). A failed mint or a failed resolve
+(nonzero exit, timeout, or bad JSON) is fatal to session creation
 by default and the half-built worktree is removed;
 *[hooks].allow-no-credential* (or *sc start/run --allow-no-credential*)
 instead warns and creates the session without a credential, pushing over
-the inherited ssh-agent as before. Implicit (main-checkout) sessions are
+the inherited ssh-agent as before. *sc resurrect* runs the same lane and
+honours only *[hooks].allow-no-credential*. Implicit (main-checkout) sessions are
 outside this: they are the operator in the root and keep ssh.
 
 ## [session-entry]

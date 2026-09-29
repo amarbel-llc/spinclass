@@ -344,7 +344,12 @@ subcommand is always available.
   (no MCP parameter) degrades it to a warn + ssh fallback. `validate.CheckAuth`
   warns on a lone mint/revoke or a mint without `forge-hosts`. Implicit
   sessions, the `disable-merge-queue` path, and the creation-time base-branch
-  fetch are outside it.
+  fetch are outside it. `[auth].url-resolver` (#335) is read only from layers
+  ABOVE the repo (`sweatfileio.TrustedURLResolver`; repo-layer ⇒ SKIP +
+  validate warn): ambient `sh -c` in the repo root before the mint; its
+  `canonical_https` JSON becomes `url.<canonical_https>.insteadOf = <origin>`,
+  stored on `Credential.Remote` for `MirrorInto`. Failure = failed mint, never
+  the string rewrite; `sc resurrect` runs the lane too.
 - **Stacked / queued intra-session merges** (FDR 0025, #265): a second
   `merge-this-session-async` while a gate runs ENQUEUES the next batch
   (in-process per-worktree queue, `cmd/spinclass/merge_queue.go`) rather than
