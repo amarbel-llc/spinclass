@@ -257,6 +257,14 @@ and when the deploy fails — note the merge still succeeds:
   session-branch history need to account for that.
 - Not run by `sc check` / `check-this-session`, by a merge that fails at any
   step, or by a nothing-to-merge short-circuit.
+- **The hook config is the landed commit's (#300), with gaps.** The phase reads
+  the committed `sweatfile` at the landed sha (`merge.loadCommitHierarchy`)
+  merged over the live global, parent and main-checkout layers. That last live
+  layer can still contribute a stale entry: a target *deleted* in the landed
+  commit (rather than removed with a name-only sentinel) survives if the main
+  checkout's working copy still has it. Pre-merge gate config is still read
+  from the live session worktree (#341), and the run directory is still the
+  live worktree rather than the landed tree (#340).
 
 ## Tuning Levers
 

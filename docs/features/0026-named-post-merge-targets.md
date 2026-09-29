@@ -400,6 +400,11 @@ A docs-only merge deploys nothing:
   string path the inner cap begins microseconds later, so the exported deadline
   is at most marginally *earlier* than the enforced one — conservative, never
   optimistic.
+- **Selection validates at the pin, not at landing (#300).** `--post-merge-targets`
+  / `targets` are checked against the pinned commit's config. If a sibling
+  landing removes a selected target between the pin and this landing, the
+  landed-sha config no longer has it and this surfaces only as a warning node
+  ("post-merge selection"), not a pre-landing failure.
 
 ## Tuning Levers
 

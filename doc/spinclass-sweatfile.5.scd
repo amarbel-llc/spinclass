@@ -262,6 +262,15 @@ does not export *WORKTREE*.
 	success. Re-running the merge would find nothing to merge, so a failed
 	post-merge hook is something to act on out of band, not to retry.
 
+	*Snapshot:* the phase reads *[hooks].post-merge*, *post-merge-timeout*,
+	*disable-post-merge* and *[[post-merge]]* from the repo *sweatfile* as
+	committed at the landed sha, merged over the live global, parent-dir and
+	main-checkout layers. Uncommitted edits in the session worktree, and
+	commits made after the merge pinned, never affect a merge already in
+	flight; they apply to the next merge. An unreadable snapshot emits a
+	warn point and skips the phase. *--post-merge-targets* is validated
+	against the pinned commit (see *[[post-merge]]* below).
+
 	Crucially, post-merge runs *under the per-repo merge lock* (see
 	*disable-merge-queue* below and *FDR 0022* in the source tree), as the
 	merge's last stage. A merge is exclusive end to end: while your hook
@@ -1054,6 +1063,16 @@ parameter, and *sc merge* and *sc run* take *--post-merge-targets*
 subset deploys only those names; an empty selection deploys none (a
 docs-only merge). A name no target declares fails the merge BEFORE it
 lands.
+
+*Snapshot:* the phase reads *[hooks].post-merge*, *post-merge-timeout*,
+*disable-post-merge* and *[[post-merge]]* from the repo *sweatfile* as
+committed at the landed sha, merged over the live global, parent-dir and
+main-checkout layers. Uncommitted edits in the session worktree, and commits
+made after the merge pinned, never affect a merge already in flight; they
+apply to the next merge. An unreadable snapshot emits a warn point and skips
+the phase. *--post-merge-targets* is validated against the pinned commit; an
+unreadable pinned *sweatfile* fails the merge pre-landing with a distinct
+message.
 
 *Timeout:* *[hooks].post-merge-timeout* bounds the WHOLE phase — all
 selected targets run *concurrently* under one shared wall-clock deadline,

@@ -388,7 +388,10 @@ subcommand is always available.
   `_DEFAULT_BRANCH`, `_MERGE_PUSHED`, `_REPO_PATH`, `_PINNED_SHA` and the cap as
   `SPINCLASS_POST_MERGE_TIMEOUT`/`_TIMEOUT_SECONDS`/`_DEADLINE` (+ `_TARGET`) via
   `merge.PostMergeEnv` (shared with `sc run`). All land paths fire it;
-  `sc check` never does; `disable-post-merge` opts out.
+  `sc check` never does; `disable-post-merge` opts out. Its config is read at the
+  LANDED sha (#300, `merge.loadCommitHierarchy`: the committed `sweatfile` is the
+  worktree layer, while global, parent and root-checkout layers stay live), never
+  from the session worktree; target selection validates at the pin.
 - **Named post-merge targets + verify** (FDR 0026, #273): a top-level
   `[[post-merge]]` array (the `[[mcps]]`/`[[remotes]]` idiom; NOT `[[hooks.post-merge]]`
   — TOML can't union the `post-merge` key as both a string and an array, and
@@ -412,10 +415,7 @@ subcommand is always available.
   lifts every `✗ post-merge` line. Each target snapshots the deadline/cancel
   state at Run-return so a sibling's later timeout can't mislabel its failure.
   The legacy `[hooks].post-merge` string stays a result-family test point (the
-  superseded single-command shim). Code: `sweatfile.PostMergeTarget`/`ActivePostMergeTargets`/
-  `PostMergePhaseActive` + `PostMergeTarget.Run` (verdicts), `merge.runNamedPostMergeTargets`/
-  `merge.postMergeFailDiag`/`merge.postMergeTargetSink`/`selectPostMergeTargets`,
-  `validate.CheckPostMergeTargets`. Fields are phase-neutral
+  superseded single-command shim). Fields are phase-neutral
   (no git) — paves toward the operator's "configurable pipeline phases" direction;
   per-target `paths` filters deferred (would bake in a git-diff assumption).
 - **Pre-merge REPAIR phase** (FDR 0018): when `[hooks].repair` is set,
