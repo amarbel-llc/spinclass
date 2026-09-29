@@ -101,6 +101,48 @@ func newRepo(t *testing.T) (root, repo string) {
 	return root, repo
 }
 
+// TestFileAtRev pins that FileAtRev reads the committed blob, never the
+// working copy, and distinguishes an absent path from a bad rev.
+func TestFileAtRev(t *testing.T) {
+	_, repo := newRepo(t)
+	path := filepath.Join(repo, "sweatfile")
+	if err := os.WriteFile(path, []byte("committed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, repo, "add", "sweatfile")
+	mustRun(t, repo, "commit", "-m", "sweatfile")
+	if err := os.WriteFile(path, []byte("edited"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	data, found, err := FileAtRev(repo, "HEAD", "sweatfile")
+	if err != nil || !found || string(data) != "committed" {
+		t.Fatalf("HEAD:sweatfile = (%q, %v, %v), want (committed, true, nil)", data, found, err)
+	}
+
+	data, found, err = FileAtRev(repo, "HEAD", "nope")
+	if err != nil || found || data != nil {
+		t.Fatalf("HEAD:nope = (%q, %v, %v), want (nil, false, nil)", data, found, err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(repo, "dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "dir", "x"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, repo, "add", "dir/x")
+	mustRun(t, repo, "commit", "-m", "dir")
+	data, found, err = FileAtRev(repo, "HEAD", "dir")
+	if err != nil || found || data != nil {
+		t.Fatalf("HEAD:dir = (%q, %v, %v), want (nil, false, nil)", data, found, err)
+	}
+
+	if _, _, err = FileAtRev(repo, "no-such-rev", "sweatfile"); err == nil {
+		t.Fatal("bad rev: want an error")
+	}
+}
+
 // TestBranchWorktree pins the porcelain parse, and with it the guard that keeps
 // spinclass's own transient worktrees from being mistaken for a holder of the
 // branch they were cut from. The merge build worktree (.merge-*) and the

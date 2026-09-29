@@ -290,6 +290,26 @@ func CommitExists(repoPath, sha string) bool {
 	return err == nil
 }
 
+// FileAtRev returns the contents of path as committed at rev, never the working
+// tree. repoPath must be the repository root: ls-tree pathspecs are
+// cwd-relative while <rev>:<path> is root-relative. found is true only for a
+// regular file blob (mode 100644/100755); a path that is absent, a directory or
+// a symlink at rev yields nil, false, nil. An error means rev itself is bad.
+func FileAtRev(repoPath, rev, path string) (data []byte, found bool, err error) {
+	listed, err := Run(repoPath, "ls-tree", "--end-of-options", rev, "--", path)
+	if err != nil {
+		return nil, false, err
+	}
+	if mode, _, _ := strings.Cut(listed, " "); mode != "100644" && mode != "100755" {
+		return nil, false, nil
+	}
+	data, err = RunStdin(repoPath, "", "cat-file", "blob", rev+":"+path)
+	if err != nil {
+		return nil, false, err
+	}
+	return data, true, nil
+}
+
 // BranchWorktree returns the absolute path of the worktree that currently has
 // branch checked out, or "" when none does.
 //

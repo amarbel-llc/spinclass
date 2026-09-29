@@ -1,7 +1,9 @@
 package sweatfileio
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -174,21 +176,42 @@ func canonicalDir(dir string) string {
 func LoadWorktreeHierarchy(
 	home, mainRepoRoot, worktreeDir string,
 ) (sweatfile.Hierarchy, error) {
+	worktreePath := filepath.Join(filepath.Clean(worktreeDir), "sweatfile")
+	data, err := os.ReadFile(worktreePath)
+	found := true
+	if errors.Is(err, fs.ErrNotExist) {
+		data, found, err = nil, false, nil
+	}
+	if err != nil {
+		return sweatfile.Hierarchy{}, err
+	}
+	return LoadHierarchyWithLayer(home, mainRepoRoot, worktreePath, data, found)
+}
+
+// LoadHierarchyWithLayer is LoadHierarchy plus one caller-supplied top layer
+// whose bytes come from somewhere other than a file on disk (e.g. a committed
+// blob, #300). label names the layer in Sources. When !found the layer is inert,
+// like a missing file: it is recorded but neither parsed nor merged, so a parse
+// error surfaces only for a layer that exists.
+func LoadHierarchyWithLayer(
+	home, mainRepoRoot, label string, data []byte, found bool,
+) (sweatfile.Hierarchy, error) {
 	hierarchy, err := LoadHierarchy(home, mainRepoRoot)
 	if err != nil {
 		return sweatfile.Hierarchy{}, err
 	}
 
-	worktreePath := filepath.Join(filepath.Clean(worktreeDir), "sweatfile")
-	doc, err := Load(worktreePath)
-	if err != nil {
-		return sweatfile.Hierarchy{}, err
+	var sf sweatfile.Sweatfile
+	if found {
+		doc, err := Parse(data)
+		if err != nil {
+			return sweatfile.Hierarchy{}, fmt.Errorf("%s: %w", label, err)
+		}
+		sf = *doc.Data()
 	}
-	sf := *doc.Data()
 
-	found := fileExists(worktreePath)
 	hierarchy.Sources = append(hierarchy.Sources, sweatfile.LoadSource{
-		Path: worktreePath, Found: found, File: sf,
+		Path: label, Found: found, File: sf,
 	})
 	if found {
 		hierarchy.Merged = hierarchy.Merged.MergeWith(sf)
