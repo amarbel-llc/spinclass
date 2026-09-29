@@ -262,6 +262,27 @@ and one for the signature.
   and one cached lookup; a hundred or two bytes per stanza in MAM. Tier 3 PIV
   signing at 10 to 50 ms per operation is acceptable per stanza, and touch
   never gates a stanza.
+- **Runtime provenance (added 2026-09-29).** Neither the certificate nor any
+  body above says what the agent is made of, and a model is not a
+  certificate-stable fact: it changes mid-session (`/model`), and under
+  juggler with a router such as OpenRouter the served model can differ from
+  the requested one per request. So every transcript stanza body carries a
+  `runtime` field, signed with the stanza: platform (clown, juggler), provider,
+  model as requested, model as served when the provider reports it, source or
+  endpoint, and the upstream request id where available. A `runtime-change`
+  record kind, `prev`-linked, marks each switch so a range summary or a
+  verifier can attribute a span without reading every stanza; the certificate
+  may carry an optional `runtime-at-issue` as a hint only. Rights (D13) stay
+  model-independent, since binding authority to a model id breaks the moment a
+  router substitutes one; D16's mechanical gates may require a distinct model
+  *class* as well as a distinct principal. **Needs exploration before the
+  troupe RFC fixes it:** a model change effectively re-reads a window of the
+  transcript into a new runtime, and it is not yet decided what that re-read
+  is in the DAG (a `runtime-change` on the same head, or a fork point), how a
+  summary spanning the switch is attributed, and whether every merkle,
+  privilege, capability and trust property carries across unchanged (the
+  principal does, since it is the agent not the model; whether the ambient
+  set should, when the switch is to a weaker model, is an open question).
 - **Deniability is a non-goal.** Signal's double ratchet solves
   confidentiality, forward secrecy and post-compromise security for a
   two-party channel and is deliberately deniable; a provenance transcript needs
