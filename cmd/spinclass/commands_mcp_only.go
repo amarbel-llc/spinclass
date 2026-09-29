@@ -260,6 +260,70 @@ func registerMCPOnlyCommands(app *command.App) {
 	})
 
 	app.AddCommand(&command.Command{
+		Name:  "grant-session-handle",
+		Title: "Grant Session Handle",
+		Description: command.Description{
+			Short: "Grant another session a handle on one this session already holds a handle on (FDR 0032 D12/D13). Handles pass like SCM_RIGHTS: the grant lands in the recipient's pending set — conferring NO authority and no exit wakes — until the recipient exercises it (accept-on-first-use, via close-child-session, list-handles with accept, or granting onward). The granter keeps its own handle; delegate is the default, transfer is grant then release. `rights` is a comma-separated FDR 0032 D13 object-rights list (observe, close, grant, instruct, cap, merge, check), recorded but NOT enforced in this slice — defaults to \"observe,close\", the conservative lazy handoff. spinclass never messages the recipient itself (that's clown/troupe's job); relay the printed child session key to it via chat.",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(false),
+			DestructiveHint: protocol.BoolPtr(false),
+			IdempotentHint:  protocol.BoolPtr(false),
+			OpenWorldHint:   protocol.BoolPtr(false),
+		},
+		Params: grantSessionHandleParamList(),
+		Run:    wrapMCPHandler("grant-session-handle", handleGrantSessionHandle),
+	})
+
+	app.AddCommand(&command.Command{
+		Name:  "release-session-handle",
+		Title: "Release Session Handle",
+		Description: command.Description{
+			Short: "Release THIS session's own handle on another session (FDR 0032 D12: release is local — a session only ever removes itself, never another principal). Refuses legibly, changing nothing, when this session held no handle (accepted or pending) on the target at all. When the released handle was the last one, the child is orphaned — no accepted holder is alive — which `sc list`/`sc clean` will surface (a later commit); only a human closes an orphan.",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(false),
+			DestructiveHint: protocol.BoolPtr(false),
+			IdempotentHint:  protocol.BoolPtr(false),
+			OpenWorldHint:   protocol.BoolPtr(false),
+		},
+		Params: releaseSessionHandleParamList(),
+		Run:    wrapMCPHandler("release-session-handle", handleReleaseSessionHandle),
+	})
+
+	app.AddCommand(&command.Command{
+		Name:  "list-handles",
+		Title: "List Session Handles",
+		Description: command.Description{
+			Short: "List every session this one holds a handle on (accepted or pending, FDR 0032 D12/D13). A pending grant confers no authority until exercised; pass accept to exercise every pending one first (accept-on-first-use) so they show as held and become usable immediately.",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(true),
+			DestructiveHint: protocol.BoolPtr(false),
+			IdempotentHint:  protocol.BoolPtr(false),
+			OpenWorldHint:   protocol.BoolPtr(false),
+		},
+		Params: listHandlesParamList(),
+		Run:    wrapMCPHandler("list-handles", handleListHandles),
+	})
+
+	app.AddCommand(&command.Command{
+		Name:  "whoami",
+		Title: "Whoami",
+		Description: command.Description{
+			Short: "Print this session's principal (FDR 0032 D1: the per-instance identity, e.g. clown's CLOWN_SESSION_ID — also the chat JID localpart), its spinclass session key when it has one, and the same held/pending handle listing as list-handles.",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(true),
+			DestructiveHint: protocol.BoolPtr(false),
+			IdempotentHint:  protocol.BoolPtr(false),
+			OpenWorldHint:   protocol.BoolPtr(false),
+		},
+		Params: []command.Param{},
+		Run:    wrapMCPHandler("whoami", handleWhoami),
+	})
+
+	app.AddCommand(&command.Command{
 		Name:  "resurrect",
 		Title: "Resurrect Closed Session",
 		Description: command.Description{

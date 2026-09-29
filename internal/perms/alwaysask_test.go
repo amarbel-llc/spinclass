@@ -38,6 +38,12 @@ func TestAlwaysAsk(t *testing.T) {
 		{"string false still asks", closeChildSessionTool, map[string]any{"force": "false"}, true},
 
 		{"unrelated tool is silent", "Read", map[string]any{"force": true}, false},
+
+		{"grant always asks", grantSessionHandleTool, nil, true},
+		{"grant asks regardless of rights named", grantSessionHandleTool, map[string]any{"rights": "observe"}, true},
+
+		{"release always asks", releaseSessionHandleTool, nil, true},
+		{"release asks regardless of args", releaseSessionHandleTool, map[string]any{"child": "repo/branch"}, true},
 	}
 
 	for _, tt := range tests {

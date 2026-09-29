@@ -15,9 +15,10 @@ import (
 )
 
 // TestAuthorizeChildReapMatrix pins the FDR 0032 authorization contract: the
-// authority is a HANDLE (child.IsHolder(callerPrincipal) — a spawner's
-// implicit handle via SpawnedByPrincipal, or an accepted grant in Holders),
-// with a legacy migration path for a child spawned before this change (only
+// authority is a HANDLE (child.IsHolder(callerPrincipal): membership in
+// Holders, which spawn seeds with the spawner; SpawnedByPrincipal alone is
+// lineage and confers nothing, so a spawner that released can no longer
+// reap), with a legacy migration path for a child spawned before this change (only
 // SpawnedBy, no principal at all) whose original spawner is still identified
 // by session key. Every other combination must refuse — a fall-open here
 // would let any session close any other session in `sc list`.
@@ -49,10 +50,12 @@ func TestAuthorizeChildReapMatrix(t *testing.T) {
 			child:           child("", "", []string{"principal-a"}),
 		},
 		{
-			name:            "match via SpawnedByPrincipal with empty Holders is authorized",
+			name:            "SpawnedByPrincipal alone (a released spawner) is refused",
 			callerPrincipal: "principal-a",
 			callerKey:       "driver/main-oak",
 			child:           child("", "principal-a", nil),
+			wantErr:         true,
+			wantIn:          []string{"worker/kid", "principal-a"},
 		},
 		{
 			name:            "legacy SpawnedBy == callerKey with no principal on child is authorized",
@@ -368,5 +371,70 @@ func TestCloseChildSessionFromNonRepoCwdByHolder(t *testing.T) {
 	}
 	if got := st.ResolveState(); got != session.StateAbandoned {
 		t.Errorf("state after reap = %q, want %q (tombstone)", got, session.StateAbandoned)
+	}
+}
+
+// TestCloseChildSessionAcceptsPendingHandleFirst is the FDR 0032 D12
+// accept-on-first-use case at the close-child-session layer: the caller is
+// only PENDING (granted but never yet exercised the handle) — no
+// SpawnedByPrincipal, no literal Holders entry. The reap itself is the first
+// use, so it must accept (promoting pending -> holder) and then succeed, with
+// the tombstone recording the caller among Holders.
+func TestCloseChildSessionAcceptsPendingHandleFirst(t *testing.T) {
+	testgit.RequireGit(t)
+	const pendingPrincipal = "9c2e1111-2222-3333-4444-555566667777"
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CLOWN_SESSION_ID", pendingPrincipal)
+	t.Setenv("SPINCLASS_SESSION_ID", "")
+
+	repoPath := filepath.Join(t.TempDir(), "worker")
+	testgit.MustInit(t, repoPath)
+	sweatfile := "[hooks]\ndisable-nix-gc = true\n"
+	if err := os.WriteFile(filepath.Join(repoPath, "sweatfile"), []byte(sweatfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wtPath := filepath.Join(repoPath, ".worktrees", "kid")
+	testgit.MustWorktreeAdd(t, repoPath, wtPath, "kid")
+	excludePath := filepath.Join(repoPath, ".git", "info", "exclude")
+	if err := os.WriteFile(excludePath, []byte(".spinclass/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := session.Write(session.State{
+		SessionState:       session.StateInactive,
+		RepoPath:           repoPath,
+		WorktreePath:       wtPath,
+		Branch:             "kid",
+		SessionKey:         "worker/kid",
+		SpawnedByPrincipal: "some-other-spawner",
+		Holders:            []string{"some-other-spawner"},
+		PendingHandles:     []string{pendingPrincipal},
+		Entrypoint:         []string{"/bin/sh"},
+		StartedAt:          time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	text, isErr := callCloseChild(t, `{"child":"worker/kid","force":true}`)
+	if isErr {
+		t.Fatalf("expected the pending holder's reap to succeed (accept-on-first-use), got error result: %s", text)
+	}
+
+	st, err := session.Read(repoPath, "kid")
+	if err != nil {
+		t.Fatalf("reading tombstone: %v", err)
+	}
+	found := false
+	for _, h := range st.Holders {
+		if h == pendingPrincipal {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("tombstone Holders = %v, want to contain the accepted pending principal %q", st.Holders, pendingPrincipal)
+	}
+	if len(st.PendingHandles) != 0 {
+		t.Errorf("tombstone PendingHandles = %v, want empty after accept", st.PendingHandles)
 	}
 }

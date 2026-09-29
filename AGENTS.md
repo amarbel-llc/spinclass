@@ -147,6 +147,10 @@ Cheap per-package checks are fine: `just debug-go-test <dir>`.
   `sc fork [branch]`               Fork current worktree into a new branch (`--from <dir>`); create-only (the `--brief` detached worker was removed in #262)
   `sc spawn [repo] --brief "…"`    Launch a detached worker session; `repo` optional — omitted = this repo, else a sibling (FDR 0006, #262)
   `sc close-child-session <child>` Reap a worker THIS session spawned (#249); refuses anything it did not spawn
+  `sc grant-session-handle <child> <to> [--rights R]` Grant another principal a handle on a session this one holds (FDR 0032 D12)
+  `sc release-session-handle <child>` Release this session's own handle on a session (FDR 0032 D12)
+  `sc list-handles [--accept]`     List handles this session holds or is pending on (FDR 0032 D12)
+  `sc whoami`                      Print this session's principal, session key, and handles (FDR 0032 D1/D12)
   `sc resurrect <target> [--new-branch]` Recreate a closed session's worktree+branch from its captured commit (#291)
   `sc pull`                        Pull repos and rebase worktrees
   `sc validate`                    Validate sweatfile hierarchy
@@ -182,7 +186,15 @@ subcommand is always available.
   `force: true` is always-ask — one `perms.AlwaysAsk` predicate shared by the
   PreToolUse hook and the perms-tier `RunCheck` (it judges an *invocation*, not a
   tool, since `BuildPermissionString` discards MCP args); `force` is read
-  fail-closed. Elicitation could replace the flag (#254).
+  fail-closed. Elicitation could replace the flag (#254). **Passing a handle**
+  (FDR 0032 D12, `cmd/spinclass/handles_cmd.go`, closes spinclass#321 at the
+  no-cryptography level): `grant-session-handle`/`release-session-handle`/
+  `list-handles`/`sc whoami` let a holder delegate authority onward — grant
+  lands the recipient in `PendingHandles`, conferring nothing until it
+  exercises the handle (accept-on-first-use, via close-child-session, a
+  further grant, or `list-handles --accept`); release only ever removes the
+  caller itself. Both grant and release are unconditional always-ask
+  (`internal/perms`), since a handle pass is never silently approvable.
 - **Resurrecting a closed session** (FDR 0027, #291, `internal/resurrect`): the
   undo half of `sc close`/`close-child-session`. Both funnel through
   `close.RunResolved`, which now best-effort resolves the branch's tip

@@ -22,10 +22,10 @@ type closeChildParams struct {
 }
 
 // authorizeChildReap decides whether the caller may reap child (#249). The
-// authority is a HANDLE (FDR 0032 D12/D13): child.IsHolder(callerPrincipal) —
-// the spawner from the moment of spawn (SpawnedByPrincipal), plus anyone later
-// granted and accepting a handle (Holders). SpawnedBy/SpawnedByPrincipal are
-// otherwise display/legacy: SpawnedBy is the `sc list` lineage column, and a
+// authority is a HANDLE (FDR 0032 D12/D13): child.IsHolder(callerPrincipal),
+// membership in Holders — seeded with the spawner at spawn, extended by every
+// accepted grant, shrunk by release. SpawnedBy/SpawnedByPrincipal are
+// lineage, not authority: SpawnedBy is the `sc list` lineage column, and a
 // child spawned before this change recorded only that session key, so a
 // legacy migration path (case 3 below) still lets its original spawner reap
 // it by session key.
@@ -111,6 +111,16 @@ func runCloseChild(p closeChildParams) (string, error) {
 		// Ambiguity (or index read failure): the error already carries the
 		// disambiguating session keys.
 		return "", err
+	}
+
+	// A pending holder reaping the child exercises the handle it was granted —
+	// accept-on-first-use (FDR 0032 D12) — BEFORE the authority check, so the
+	// same call that first uses the handle is the one it authorizes.
+	if child.IsPendingHolder(callerPrincipal) {
+		child.AcceptHandle(callerPrincipal)
+		if err := session.Write(*child); err != nil {
+			return "", fmt.Errorf("accepting handle on %s: %w", child.Key(), err)
+		}
 	}
 
 	if err := authorizeChildReap(callerPrincipal, callerKey, *child); err != nil {

@@ -10,8 +10,10 @@ import (
 
 // Tool names the always-ask floor is expressed over.
 const (
-	spawnSessionTool      = "mcp__plugin_spinclass_spinclass__spawn-session"
-	closeChildSessionTool = "mcp__plugin_spinclass_spinclass__close-child-session"
+	spawnSessionTool         = "mcp__plugin_spinclass_spinclass__spawn-session"
+	closeChildSessionTool    = "mcp__plugin_spinclass_spinclass__close-child-session"
+	grantSessionHandleTool   = "mcp__plugin_spinclass_spinclass__grant-session-handle"
+	releaseSessionHandleTool = "mcp__plugin_spinclass_spinclass__release-session-handle"
 )
 
 // AlwaysAsk reports whether an invocation must prompt the human, and why. It is
@@ -57,6 +59,26 @@ func AlwaysAsk(toolName string, toolInput map[string]any) (string, bool) {
 			return "force discards the child's uncommitted changes and unmerged commits; confirm each invocation", true
 		}
 		return "", false
+
+	case grantSessionHandleTool:
+		// A grant confers authority on ANOTHER session — the FDR 0032 D12/D11
+		// contract is explicit that a handle pass is never silently approvable
+		// (D11's monotone-lattice framing treats even a delegate/subset grant as
+		// a decision worth a human's eyes, and D12 draws the SCM_RIGHTS analogy
+		// deliberately: rights transfer is the security-relevant event, not the
+		// close it eventually enables). Unconditional, regardless of rights
+		// named, mirroring spawn's unconditional ask above.
+		return "granting a handle confers authority on another session; the FDR 0032 handle-pass contract requires a human decision on every grant", true
+
+	case releaseSessionHandleTool:
+		// A release can ORPHAN a child (D12's "orphaned when no accepted holder
+		// is alive" — sc list/sc clean surface it, but only a human closes an
+		// orphan). Unlike close-child-session's force split, there is no safe
+		// subset of release to auto-approve: releasing the last handle is
+		// exactly the case that matters, and RunCheck has no way to see "is
+		// this the last holder" without doing the authority check itself, which
+		// belongs to the tool, not the perms floor.
+		return "releasing a handle can orphan the child (no accepted holder left); confirm each invocation", true
 	}
 
 	return "", false

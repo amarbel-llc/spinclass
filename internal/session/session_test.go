@@ -453,8 +453,9 @@ func TestStateHandleFieldsRoundTrip(t *testing.T) {
 }
 
 // TestStateIsHolder covers the FDR 0032 D12/D13 authority check: a match in
-// Holders, a match via SpawnedByPrincipal even with Holders empty, and an
-// empty caller principal never matching anything (even an empty lineage).
+// Holders only — SpawnedByPrincipal is lineage and confers nothing by itself
+// (spawn seeds Holders; a released spawner must not keep implicit authority)
+// — and an empty caller principal never matching anything.
 func TestStateIsHolder(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -469,10 +470,10 @@ func TestStateIsHolder(t *testing.T) {
 			want:      true,
 		},
 		{
-			name:      "matches via SpawnedByPrincipal with empty Holders",
+			name:      "SpawnedByPrincipal alone confers nothing (a released spawner)",
 			state:     State{SpawnedByPrincipal: "p1"},
 			principal: "p1",
-			want:      true,
+			want:      false,
 		},
 		{
 			name:      "no match",
@@ -500,6 +501,209 @@ func TestStateIsHolder(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGrantHandle covers FDR 0032 D12: a grant appends the recipient to
+// PendingHandles and records its rights (defaulting to "observe,close"), and
+// is a no-op — changed=false, state untouched — when the recipient already
+// holds an accepted handle or is already pending.
+func TestGrantHandle(t *testing.T) {
+	t.Run("grants with default rights", func(t *testing.T) {
+		s := &State{}
+		if changed := s.GrantHandle("p2", ""); !changed {
+			t.Fatal("expected GrantHandle to report a change")
+		}
+		if !slicesContain(s.PendingHandles, "p2") {
+			t.Errorf("PendingHandles = %v, want to contain p2", s.PendingHandles)
+		}
+		if got := s.HandleRights["p2"]; got != "observe,close" {
+			t.Errorf("HandleRights[p2] = %q, want the default", got)
+		}
+	})
+
+	t.Run("grants with named rights", func(t *testing.T) {
+		s := &State{}
+		s.GrantHandle("p2", "observe,close,grant")
+		if got := s.HandleRights["p2"]; got != "observe,close,grant" {
+			t.Errorf("HandleRights[p2] = %q, want the named rights", got)
+		}
+	})
+
+	t.Run("already a holder via Holders is a no-op", func(t *testing.T) {
+		s := &State{Holders: []string{"p2"}}
+		if changed := s.GrantHandle("p2", ""); changed {
+			t.Error("expected no-op for an already-accepted holder")
+		}
+		if slicesContain(s.PendingHandles, "p2") {
+			t.Error("an already-accepted holder must not also appear pending")
+		}
+	})
+
+	t.Run("a released spawner can be granted again", func(t *testing.T) {
+		s := &State{SpawnedByPrincipal: "p2"} // seeded Holders entry already released
+		if changed := s.GrantHandle("p2", ""); !changed {
+			t.Error("expected the spawner to be grantable once it holds nothing")
+		}
+	})
+
+	t.Run("already pending is a no-op, not a duplicate append", func(t *testing.T) {
+		s := &State{PendingHandles: []string{"p2"}, HandleRights: map[string]string{"p2": "observe"}}
+		if changed := s.GrantHandle("p2", "observe,close"); changed {
+			t.Error("expected no-op for an already-pending grant")
+		}
+		if n := countOccurrences(s.PendingHandles, "p2"); n != 1 {
+			t.Errorf("PendingHandles contains p2 %d times, want exactly 1", n)
+		}
+		if got := s.HandleRights["p2"]; got != "observe" {
+			t.Errorf("a no-op grant must not overwrite the existing rights, got %q", got)
+		}
+	})
+
+	t.Run("empty recipient is a no-op", func(t *testing.T) {
+		s := &State{}
+		if changed := s.GrantHandle("", ""); changed {
+			t.Error("expected no-op for an empty recipient")
+		}
+	})
+}
+
+// TestAcceptHandle covers accept-on-first-use (FDR 0032 D12): moving a
+// pending principal to Holders, and refusing (accepted=false, unchanged) a
+// principal that was never granted a handle.
+func TestAcceptHandle(t *testing.T) {
+	t.Run("moves a pending principal to Holders", func(t *testing.T) {
+		s := &State{PendingHandles: []string{"p2"}}
+		if accepted := s.AcceptHandle("p2"); !accepted {
+			t.Fatal("expected AcceptHandle to succeed")
+		}
+		if slicesContain(s.PendingHandles, "p2") {
+			t.Error("p2 must be removed from PendingHandles")
+		}
+		if !slicesContain(s.Holders, "p2") {
+			t.Error("p2 must be added to Holders")
+		}
+	})
+
+	t.Run("not pending is refused", func(t *testing.T) {
+		s := &State{}
+		if accepted := s.AcceptHandle("p2"); accepted {
+			t.Error("expected AcceptHandle to refuse a principal that was never granted a handle")
+		}
+	})
+
+	t.Run("already a holder does not duplicate", func(t *testing.T) {
+		s := &State{PendingHandles: []string{"p2"}, Holders: []string{"p2"}}
+		s.AcceptHandle("p2")
+		if n := countOccurrences(s.Holders, "p2"); n != 1 {
+			t.Errorf("Holders contains p2 %d times, want exactly 1", n)
+		}
+	})
+}
+
+// TestReleaseHandle covers release (FDR 0032 D12: local — the caller removes
+// only itself): removal from both Holders and PendingHandles plus HandleRights,
+// and a legible refusal (released=false) for a principal holding nothing.
+func TestReleaseHandle(t *testing.T) {
+	t.Run("removes an accepted holder", func(t *testing.T) {
+		s := &State{Holders: []string{"p1", "p2"}, HandleRights: map[string]string{"p2": "observe,close"}}
+		if released := s.ReleaseHandle("p2"); !released {
+			t.Fatal("expected ReleaseHandle to succeed")
+		}
+		if slicesContain(s.Holders, "p2") {
+			t.Error("p2 must be removed from Holders")
+		}
+		if _, ok := s.HandleRights["p2"]; ok {
+			t.Error("p2's HandleRights entry must be removed")
+		}
+	})
+
+	t.Run("removes a pending grant", func(t *testing.T) {
+		s := &State{PendingHandles: []string{"p2"}, HandleRights: map[string]string{"p2": "observe,close"}}
+		if released := s.ReleaseHandle("p2"); !released {
+			t.Fatal("expected ReleaseHandle to succeed for a pending grant")
+		}
+		if slicesContain(s.PendingHandles, "p2") {
+			t.Error("p2 must be removed from PendingHandles")
+		}
+	})
+
+	t.Run("holding nothing is a legible refusal", func(t *testing.T) {
+		s := &State{Holders: []string{"p1"}}
+		if released := s.ReleaseHandle("p2"); released {
+			t.Error("expected ReleaseHandle to refuse a principal holding nothing")
+		}
+	})
+
+	t.Run("does not touch SpawnedByPrincipal", func(t *testing.T) {
+		s := &State{SpawnedByPrincipal: "p1"}
+		s.ReleaseHandle("p1")
+		if s.SpawnedByPrincipal != "p1" {
+			t.Error("ReleaseHandle must not clear the spawner's lineage field")
+		}
+	})
+}
+
+// TestIsPendingHolder covers the pending-vs-accepted distinction (FDR 0032
+// D12): a principal is pending only until it accepts, and an empty principal
+// never matches.
+func TestIsPendingHolder(t *testing.T) {
+	s := State{PendingHandles: []string{"p2"}, Holders: []string{"p3"}}
+	if !s.IsPendingHolder("p2") {
+		t.Error("p2 should be reported pending")
+	}
+	if s.IsPendingHolder("p3") {
+		t.Error("an accepted holder must not also read as pending")
+	}
+	if s.IsPendingHolder("") {
+		t.Error("an empty principal must never match")
+	}
+}
+
+// TestHandleRightsJSONOmitempty pins the JSON shape: a plain session with no
+// grants must not carry handle_rights at all, and a session with a grant must
+// carry it round-trippably.
+func TestHandleRightsJSONOmitempty(t *testing.T) {
+	plain := State{}
+	data, err := json.Marshal(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "handle_rights") {
+		t.Fatalf("plain state JSON unexpectedly contains handle_rights: %s", data)
+	}
+
+	granted := State{}
+	granted.GrantHandle("p2", "observe,close,grant")
+	data, err = json.Marshal(granted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var round State
+	if err := json.Unmarshal(data, &round); err != nil {
+		t.Fatal(err)
+	}
+	if got := round.HandleRights["p2"]; got != "observe,close,grant" {
+		t.Errorf("round-tripped HandleRights[p2] = %q, want the granted rights", got)
+	}
+}
+
+func slicesContain(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+func countOccurrences(s []string, v string) int {
+	n := 0
+	for _, x := range s {
+		if x == v {
+			n++
+		}
+	}
+	return n
 }
 
 func TestWriteCreatesIndexSymlink(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -94,6 +95,16 @@ type State struct {
 	// PendingHandles are principals granted a handle that have not yet exercised
 	// it (accept-on-first-use, FDR 0032 D12).
 	PendingHandles []string `json:"pending_handles,omitempty"`
+	// HandleRights records, per principal in PendingHandles or Holders, the
+	// comma-separated rights (FDR 0032 D13: observe/close/grant/instruct/cap/…)
+	// a grant named for it — defaulting to "observe,close" when the grant named
+	// none. RECORDED, NOT ENFORCED in slice 0: no verifier here consults this
+	// map, it exists purely as an audit trail for `list-handles`/`sc whoami`.
+	// A parallel map, not a field on Holders/PendingHandles themselves, so
+	// those two stay the plain []string shape slice 0 committed to (D14's
+	// materialized view). Slice 1 replaces this view with signed grant-record
+	// digests, which carry rights properly.
+	HandleRights map[string]string `json:"handle_rights,omitempty"`
 	// HelloSentAt records when the SessionStart hook emitted the spawn
 	// hello to SpawnedBy, deduping re-fires (resume/clear/compact). Set
 	// only on spawned sessions (FDR 0006).
@@ -875,24 +886,95 @@ func evalOrClean(p string) string {
 // ambiguity error, which must surface to the user untouched.
 var ErrTargetNotFound = errors.New("no session found")
 
-// IsHolder reports whether principal holds a handle on this session (FDR
-// 0032 D12/D13): either it appears in Holders, or it equals
-// SpawnedByPrincipal (the spawner holds a handle from the moment of spawn,
-// before any grant record exists). An empty principal never matches — an
-// unresolvable caller identity must never fall through to "authorized".
+// IsHolder reports whether principal holds an accepted handle on this session
+// (FDR 0032 D12/D13): membership in Holders, nothing else. The spawner is a
+// holder because spawn SEEDS Holders with it, not because SpawnedByPrincipal
+// implies one — an implicit spawner handle could never be released, and
+// "transfer is grant then release" (D12) needs the spawner to be able to
+// release like anyone. SpawnedByPrincipal is lineage. An empty principal
+// never matches — an unresolvable caller identity must never fall through to
+// "authorized".
 func (s State) IsHolder(principal string) bool {
 	if principal == "" {
 		return false
 	}
-	if principal == s.SpawnedByPrincipal {
-		return true
+	return slices.Contains(s.Holders, principal)
+}
+
+// defaultHandleRights is the rights a grant carries when the granter names
+// none (FDR 0032 D13): "the lazy handoff is the conservative one".
+const defaultHandleRights = "observe,close"
+
+// GrantHandle appends `to` to PendingHandles (FDR 0032 D12: grant is a
+// message, accept is first use) and records the rights (D13) the granter
+// named for it, defaulting to defaultHandleRights when rights is "". A no-op
+// — changed=false — when `to` already holds an accepted handle (IsHolder) or
+// is already pending: a grant confers no authority the recipient didn't
+// already have or hasn't already been offered. Callers persist the mutation
+// with session.Write; the caller's OWN authority to grant at all
+// (IsHolder(caller)) is checked by the caller, not here — this method only
+// ever mutates the CHILD's state, and the child does not know who is asking.
+func (s *State) GrantHandle(to, rights string) (changed bool) {
+	if to == "" || s.IsHolder(to) || slices.Contains(s.PendingHandles, to) {
+		return false
 	}
-	for _, h := range s.Holders {
-		if h == principal {
-			return true
-		}
+	if rights == "" {
+		rights = defaultHandleRights
 	}
-	return false
+	s.PendingHandles = append(s.PendingHandles, to)
+	if s.HandleRights == nil {
+		s.HandleRights = map[string]string{}
+	}
+	s.HandleRights[to] = rights
+	return true
+}
+
+// AcceptHandle moves principal from PendingHandles to Holders — accept-on-
+// first-use (FDR 0032 D12). Returns false, changing nothing, when principal
+// was not pending (already a holder, or never granted at all): accepting is
+// idempotent, never a second grant.
+func (s *State) AcceptHandle(principal string) (accepted bool) {
+	idx := slices.Index(s.PendingHandles, principal)
+	if idx == -1 {
+		return false
+	}
+	s.PendingHandles = slices.Delete(s.PendingHandles, idx, idx+1)
+	if !slices.Contains(s.Holders, principal) {
+		s.Holders = append(s.Holders, principal)
+	}
+	return true
+}
+
+// ReleaseHandle removes principal from both Holders and PendingHandles (and
+// its HandleRights entry) — release is local (FDR 0032 D12): the caller only
+// ever removes ITSELF, never another principal. Returns false, changing
+// nothing, when principal held no handle at all (neither an accepted nor a
+// pending one) — a legible refusal for the caller to surface, not a silent
+// no-op. Never touches SpawnedByPrincipal: that is lineage, and a spawner
+// that releases its seeded Holders entry stays the recorded spawner while
+// holding no authority — exactly the hand-off shape.
+func (s *State) ReleaseHandle(principal string) (released bool) {
+	if idx := slices.Index(s.Holders, principal); idx != -1 {
+		s.Holders = slices.Delete(s.Holders, idx, idx+1)
+		released = true
+	}
+	if idx := slices.Index(s.PendingHandles, principal); idx != -1 {
+		s.PendingHandles = slices.Delete(s.PendingHandles, idx, idx+1)
+		released = true
+	}
+	if released {
+		delete(s.HandleRights, principal)
+	}
+	return released
+}
+
+// IsPendingHolder reports whether principal has been granted a handle it has
+// not yet accepted (FDR 0032 D12). An empty principal never matches.
+func (s *State) IsPendingHolder(principal string) bool {
+	if principal == "" {
+		return false
+	}
+	return slices.Contains(s.PendingHandles, principal)
 }
 
 // Key returns the session key (`<repo-dirname>/<branch>`, the first
