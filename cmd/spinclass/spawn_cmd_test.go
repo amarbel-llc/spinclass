@@ -21,7 +21,7 @@ import (
 // the driver's principal (FDR 0032 D1) — the hello target and the "worker will
 // message ..." chat address — distinct from driverKey, which stays the
 // display-only SPINCLASS_SESSION_ID / SpawnedBy session key.
-const testDriverPrincipal = "4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2"
+const testDriverPrincipal = "1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f"
 
 // TestHandleSpawnSessionValidation exercises the cheap parameter rejections:
 // they must fire as error results BEFORE any worktree/state creation, so no

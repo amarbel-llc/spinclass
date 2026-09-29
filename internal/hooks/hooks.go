@@ -32,6 +32,11 @@ type hookInput struct {
 	ToolName      string         `json:"tool_name"`
 	ToolInput     map[string]any `json:"tool_input"`
 	CWD           string         `json:"cwd"`
+	// Reason is SessionEnd-only: Claude Code's payload names why the session
+	// ended ("clear", "logout", "prompt_input_exit", "other", …). FDR 0032 D6
+	// is explicit that a `/clear` is a restart, not an exit, and must emit
+	// nothing — this is the only field that can tell the two apart.
+	Reason string `json:"reason"`
 }
 
 // RunOption configures optional Run behavior.
@@ -278,10 +283,7 @@ func maybeSendSpawnHello(cwd, poshSessionID string) {
 		// for non-sc worktrees; stay silent.
 		return
 	}
-	helloTarget := st.SpawnedByPrincipal
-	if helloTarget == "" {
-		helloTarget = st.SpawnedBy
-	}
+	helloTarget := st.EffectiveSpawner()
 	if helloTarget == "" || st.HelloSentAt != nil {
 		return
 	}
@@ -333,15 +335,26 @@ func runSessionEnd(input hookInput) error {
 	if err := session.RemoveImplicit(input.CWD, implicitRand(input.SessionID)); err != nil {
 		sessionlog.Errorf("runSessionEnd RemoveImplicit-failed checkout=%s err=%v", input.CWD, err)
 	}
-	emitWorktreeExitWake(input.CWD)
+	emitWorktreeExitWake(input.CWD, input.Reason)
 	return nil
 }
 
 // emitWorktreeExitWake resolves the sc worktree session at cwd, if any, and —
 // when it carries accepted Holders other than its own principal — emits the
 // FDR 0032 D6 "normal" wake to each. Silent on any resolution miss (not a
-// worktree, detached HEAD, no tracked session).
-func emitWorktreeExitWake(cwd string) {
+// worktree, detached HEAD, no tracked session), on a disabled clown (checked
+// FIRST, before any git subprocess — a SessionEnd hook fires on every session
+// exit, most of which never run under clown, so there is nothing to notify
+// and no reason to pay for git.CommonDir/BranchCurrent at all), and on a
+// `/clear` reason (D6: a `/clear` is a restart, not an exit, and emits
+// nothing).
+func emitWorktreeExitWake(cwd, reason string) {
+	if !clown.Enabled() {
+		return
+	}
+	if reason == "clear" {
+		return
+	}
 	repoPath, err := git.CommonDir(cwd)
 	if err != nil {
 		return
@@ -356,28 +369,13 @@ func emitWorktreeExitWake(cwd string) {
 	}
 	// A session never wakes itself about its own exit, even in the unusual
 	// case where it holds a handle on itself.
-	holders := excludeSelf(st.Holders, os.Getenv("CLOWN_SESSION_ID"))
+	holders := st.OtherHolders(os.Getenv("CLOWN_SESSION_ID"))
 	if len(holders) == 0 {
 		return
 	}
 	if err := emitExitWakes(holders, st.Key(), "normal"); err != nil {
 		sessionlog.Errorf("runSessionEnd emitExitWakes-failed key=%s err=%v", st.Key(), err)
 	}
-}
-
-// excludeSelf returns holders with selfPrincipal removed — a no-op when
-// selfPrincipal is empty. Order-preserving.
-func excludeSelf(holders []string, selfPrincipal string) []string {
-	if selfPrincipal == "" {
-		return holders
-	}
-	out := make([]string, 0, len(holders))
-	for _, h := range holders {
-		if h != selfPrincipal {
-			out = append(out, h)
-		}
-	}
-	return out
 }
 
 func runStopHook(input hookInput, w io.Writer) error {

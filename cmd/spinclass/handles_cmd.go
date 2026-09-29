@@ -18,10 +18,7 @@ import (
 // authorizeChildReap uses (#249), so every refusal in this family reads the
 // same regardless of which tool raised it.
 func noHandleMessage(callerPrincipal string, child session.State) string {
-	spawner := child.SpawnedByPrincipal
-	if spawner == "" {
-		spawner = child.SpawnedBy
-	}
+	spawner := child.EffectiveSpawner()
 	if spawner == "" {
 		return fmt.Sprintf(
 			"no handle to %s, and it carries no spawned_by lineage either — this session (principal %s) holds no handle on it",
@@ -48,6 +45,31 @@ func findHandleTarget(target string) (*session.State, error) {
 	return child, err
 }
 
+// guardHandleTarget refuses a handle operation against a session that cannot
+// sensibly hold one: session.FindByTarget/ListAll resolve live worktree
+// sessions, Kind == session.KindImplicit main-checkout sessions, tombstones,
+// and dangling entries all through the one central index, so any of the
+// handle tools (grant, release, list-handles accept) or close-child-session's
+// accept-on-first-use write can land on one of the latter two without this
+// guard. Both need a friendly, legible refusal instead of what they'd get
+// otherwise: session.Write on an implicit session writes a phantom
+// worktree-shaped state.json (it silently "succeeds" into a file nothing else
+// ever reads), and session.Write on a tombstone fails with a raw
+// "no such file or directory" error. verb names the operation for the message
+// (e.g. "grant", "release", "accept").
+func guardHandleTarget(child *session.State, verb string) error {
+	if child.Kind == session.KindImplicit {
+		return fmt.Errorf(
+			"handles apply to worktree sessions only; %s is a main-checkout (implicit) session",
+			child.Key(),
+		)
+	}
+	if child.ResolveState() == session.StateAbandoned {
+		return fmt.Errorf("%s is closed; nothing to %s", child.Key(), verb)
+	}
+	return nil
+}
+
 // grantHandleParams is the parameter set of the `grant-session-handle` tool
 // (FDR 0032 D12).
 type grantHandleParams struct {
@@ -71,20 +93,49 @@ func runGrantSessionHandle(p grantHandleParams) (string, error) {
 	}
 
 	callerPrincipal := currentPrincipal()
+	callerKey := bestEffortSessionKey()
 
 	child, err := findHandleTarget(p.Child)
 	if err != nil {
 		return "", err
 	}
+	if err := guardHandleTarget(child, "grant"); err != nil {
+		return "", err
+	}
 
+	// Accept-on-first-use: a pending caller exercises its handle by granting
+	// onward, even if the grant itself turns out to be a no-op below — track
+	// whether THIS call actually promoted the caller so a no-op grant still
+	// persists that promotion instead of dropping it on the floor.
+	callerAccepted := false
 	if child.IsPendingHolder(callerPrincipal) {
-		child.AcceptHandle(callerPrincipal)
+		callerAccepted = child.AcceptHandle(callerPrincipal)
 	}
-	if !child.IsHolder(callerPrincipal) {
-		return "", errors.New(noHandleMessage(callerPrincipal, *child))
+	// authorizeHandleUse (close_child_cmd.go) is the one authority predicate
+	// shared with close-child-session: a handle (just-accepted or already
+	// held) OR the pre-FDR #249 session-key lineage, so a legacy child's
+	// original spawner can grant onward too, not just reap.
+	if err := authorizeHandleUse(callerPrincipal, callerKey, *child); err != nil {
+		return "", err
 	}
 
-	child.GrantHandle(p.To, p.Rights)
+	changed := child.GrantHandle(p.To, p.Rights)
+	if !changed {
+		// `to` already holds (or is already pending on) a handle — GrantHandle
+		// is a no-op regardless of what rights this call named. A re-grant is
+		// NOT an escalation path in this slice (that needs D11's card-attested
+		// flow), so this is reported as success, not a refusal, but the caller's
+		// own accept-on-first-use promotion (if any) still needs to land.
+		if callerAccepted {
+			if err := session.Write(*child); err != nil {
+				return "", fmt.Errorf("writing session state: %w", err)
+			}
+		}
+		return fmt.Sprintf(
+			"%s already holds (or is already pending on) a handle to %s; nothing changed — re-granting with different rights is not an escalation path in this slice.",
+			p.To, child.Key(),
+		), nil
+	}
 	if err := session.Write(*child); err != nil {
 		return "", fmt.Errorf("writing session state: %w", err)
 	}
@@ -147,13 +198,26 @@ func runReleaseSessionHandle(p releaseHandleParams) (string, error) {
 	}
 
 	callerPrincipal := currentPrincipal()
+	callerKey := bestEffortSessionKey()
 
 	child, err := findHandleTarget(p.Child)
 	if err != nil {
 		return "", err
 	}
+	if err := guardHandleTarget(child, "release"); err != nil {
+		return "", err
+	}
 
 	if !child.ReleaseHandle(callerPrincipal) {
+		// Nothing literally in Holders/PendingHandles for this principal.
+		// authorizeHandleUse's legacy #249 session-key path never creates a
+		// Holders/PendingHandles entry to remove, so it can't turn this into a
+		// release either way — but when it ALSO refuses, its message names who
+		// actually does hold a handle, which is more useful than a bare
+		// "holds no handle" when the caller isn't even the legacy spawner.
+		if aerr := authorizeHandleUse(callerPrincipal, callerKey, *child); aerr != nil {
+			return "", aerr
+		}
 		return "", fmt.Errorf(
 			"this session (principal %s) holds no handle on %s — nothing to release",
 			callerPrincipal, child.Key(),
@@ -232,19 +296,27 @@ func runListHandles(p listHandlesParams) (string, error) {
 	for i := range all {
 		s := &all[i]
 		pending := s.IsPendingHolder(callerPrincipal)
+		note := ""
 		if pending && p.Accept {
-			if s.AcceptHandle(callerPrincipal) {
-				if err := session.Write(*s); err != nil {
-					return "", fmt.Errorf("accepting handle on %s: %w", s.Key(), err)
+			// Never persist a partial accept and then error out of the whole
+			// listing: an ineligible entry (a tombstone, or an implicit
+			// session) is skipped with a per-line note, and every other
+			// pending entry still gets its accept attempt.
+			if gerr := guardHandleTarget(s, "accept"); gerr != nil {
+				note = fmt.Sprintf(" (accept skipped: %v)", gerr)
+			} else if s.AcceptHandle(callerPrincipal) {
+				if werr := session.Write(*s); werr != nil {
+					note = fmt.Sprintf(" (accept failed: %v)", werr)
+				} else {
+					pending = false
 				}
-				pending = false
 			}
 		}
 		switch {
 		case s.IsHolder(callerPrincipal):
-			lines = append(lines, fmt.Sprintf("held    %s  rights=%s", s.Key(), displayRights(s, callerPrincipal)))
+			lines = append(lines, fmt.Sprintf("held    %s  rights=%s%s", s.Key(), displayRights(s, callerPrincipal), note))
 		case pending:
-			lines = append(lines, fmt.Sprintf("pending %s  rights=%s", s.Key(), displayRights(s, callerPrincipal)))
+			lines = append(lines, fmt.Sprintf("pending %s  rights=%s%s", s.Key(), displayRights(s, callerPrincipal), note))
 		}
 	}
 	if len(lines) == 0 {

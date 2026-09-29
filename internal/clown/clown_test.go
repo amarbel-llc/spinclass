@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // stubRingmaster writes an executable shell script that records its argv (one
@@ -208,7 +209,7 @@ func TestEmitExitWakesNotifiesEachHolder(t *testing.T) {
 		t.Fatalf("EmitExitWakes: %v", err)
 	}
 	got := recordedArgs(t, argsFile)
-	wantMsg := "session worker/kid exited (shutdown); holders: 2 remaining"
+	wantMsg := "session worker/kid exited (shutdown); notified 2 holder(s)"
 	assertArgv(t, got, []string{
 		"start", "--target", "holder-1", "--label", "exit", "--source", "spinclass",
 		"done", "exit-1", "--target", "holder-1", "--state", "succeeded", "--message", wantMsg,
@@ -255,6 +256,56 @@ func TestEmitExitWakesJoinsPerHolderErrors(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("joined error %q is missing failure for %q", err, want)
 		}
+	}
+}
+
+// TestEmitExitWakesBudgetsWholeLoopNotPerHolder pins the fix: EmitExitWakes
+// must share ONE emitTimeout budget across every holder, not grant each
+// holder its own fresh one — else a wedged ringmaster serializes N holders
+// into up to N*2*emitTimeout instead of bounding near emitTimeout overall.
+// Shrinks the package-level emitTimeout var (a wedged holder's `start` call
+// is what the shared deadline is checked AFTER, not during — run() still
+// detaches per-call) so the test doesn't have to wait out the real 10s.
+func TestEmitExitWakesBudgetsWholeLoopNotPerHolder(t *testing.T) {
+	origTimeout := emitTimeout
+	emitTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { emitTimeout = origTimeout })
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "ringmaster")
+	// Sleeps well past emitTimeout on every invocation, so every "start" call
+	// times out (exec.CommandContext kills it) rather than completing —
+	// exactly the wedged-binary case the shared budget exists for. `exec`
+	// replaces the shell process image with sleep directly (same PID) rather
+	// than forking a grandchild: killing the direct child on context
+	// expiry then actually kills sleep, instead of leaving a
+	// pipe-holding grandchild that keeps cmd.Wait() blocked until sleep
+	// exits naturally regardless of the context deadline.
+	body := "#!/bin/sh\nexec sleep 1\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatalf("write stub ringmaster: %v", err)
+	}
+	t.Setenv("RINGMASTER_BIN", script)
+	t.Setenv("CLOWN_BIN", "/some/clown")
+
+	start := time.Now()
+	err := EmitExitWakes([]string{"holder-1", "holder-2", "holder-3"}, "worker/kid", "crash")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("EmitExitWakes with a wedged ringmaster: want a joined error, got nil")
+	}
+	// Unbounded (per-holder emitTimeout), 3 holders would cost >= 3*100ms =
+	// 300ms just from timeouts on "start" alone. A shared budget costs at most
+	// ~1*100ms for the first holder plus negligible skip time for the rest.
+	// Generous margin against scheduler jitter while still well below 300ms.
+	if elapsed >= 250*time.Millisecond {
+		t.Errorf("EmitExitWakes took %s for 3 holders against a wedged ringmaster; "+
+			"want well under 3x the %s emitTimeout budget (the whole-loop share failed to bound it)",
+			elapsed, emitTimeout)
+	}
+	if !strings.Contains(err.Error(), "budget exhausted") {
+		t.Errorf("expected at least one holder skipped for budget exhaustion, got: %v", err)
 	}
 }
 

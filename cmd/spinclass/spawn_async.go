@@ -139,11 +139,7 @@ func spawnTimeoutOutcome(pending spawn.Pending, driverPrincipal string, deadline
 	// gets the "crash" reason (hello timeout / presence-stale, per D6).
 	var otherHolders []string
 	if st, serr := session.Read(pending.RepoPath, pending.Branch); serr == nil {
-		for _, h := range st.Holders {
-			if h != driverPrincipal {
-				otherHolders = append(otherHolders, h)
-			}
-		}
+		otherHolders = st.OtherHolders(driverPrincipal)
 	}
 	if rerr := spinclose.RunResolved(io.Discard, pending.RepoPath, pending.WorktreePath, pending.Branch, false, nil, "tap"); rerr != nil {
 		return fmt.Sprintf(

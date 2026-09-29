@@ -44,6 +44,13 @@ func TestAlwaysAsk(t *testing.T) {
 
 		{"release always asks", releaseSessionHandleTool, nil, true},
 		{"release asks regardless of args", releaseSessionHandleTool, map[string]any{"child": "repo/branch"}, true},
+
+		{"list-handles without accept is silent", listHandlesTool, nil, false},
+		{"list-handles with accept=false is silent", listHandlesTool, map[string]any{"accept": false}, false},
+		{"list-handles with null accept is silent", listHandlesTool, map[string]any{"accept": nil}, false},
+		{"list-handles with accept=true asks", listHandlesTool, map[string]any{"accept": true}, true},
+		{"list-handles with string accept asks", listHandlesTool, map[string]any{"accept": "true"}, true},
+		{"list-handles with numeric accept asks", listHandlesTool, map[string]any{"accept": float64(1)}, true},
 	}
 
 	for _, tt := range tests {

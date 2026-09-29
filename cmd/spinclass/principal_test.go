@@ -13,11 +13,11 @@ var uuidShape = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab]
 // TestCurrentPrincipalReadsClownKey pins FDR 0032 D1: when clown hosts the
 // serve process, its per-instance key IS the principal, returned verbatim.
 func TestCurrentPrincipalReadsClownKey(t *testing.T) {
-	t.Setenv("CLOWN_SESSION_ID", "4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2")
+	t.Setenv("CLOWN_SESSION_ID", "1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f")
 	t.Setenv("SPINCLASS_SESSION_ID", "")
 	t.Chdir(t.TempDir()) // not a git repo: identity must not depend on cwd
 
-	if got := currentPrincipal(); got != "4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2" {
+	if got := currentPrincipal(); got != "1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f" {
 		t.Fatalf("currentPrincipal() = %q, want the clown per-instance key", got)
 	}
 }

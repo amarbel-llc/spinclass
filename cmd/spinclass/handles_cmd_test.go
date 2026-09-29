@@ -16,33 +16,21 @@ import (
 
 // childHandleFixture stands up a repo with one child worktree session whose
 // Holders/PendingHandles/HandleRights are set directly (bypassing spawn), for
-// exercising the handle tools' flows against a precise starting shape. Mirrors
-// childFixture's sandboxing (HOME/XDG_STATE_HOME, git excludes so the
-// .spinclass/ state file doesn't read as an untracked dirty file — see
-// childFixture's comment) but leaves the handle fields to the caller. st's
+// exercising the handle tools' flows against a precise starting shape. Shares
+// stageChildWorktree's sandboxing (HOME/XDG_STATE_HOME, git excludes so the
+// .spinclass/ state file doesn't read as an untracked dirty file — see its
+// comment) with childFixture, but leaves the handle fields to the caller. st's
 // identity fields (RepoPath/WorktreePath/Branch/SessionKey/Entrypoint/
 // StartedAt) are overwritten; only the handle-related fields the caller set
 // survive.
 func childHandleFixture(t *testing.T, callerPrincipal string, st session.State) (repoPath, wtPath string) {
 	t.Helper()
-	testgit.RequireGit(t)
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("CLOWN_SESSION_ID", callerPrincipal)
 	t.Setenv("SPINCLASS_SESSION_ID", "")
 
-	repoPath = filepath.Join(t.TempDir(), "worker")
-	testgit.MustInit(t, repoPath)
-	sweatfile := "[hooks]\ndisable-nix-gc = true\n"
-	if err := os.WriteFile(filepath.Join(repoPath, "sweatfile"), []byte(sweatfile), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	wtPath = filepath.Join(repoPath, ".worktrees", "kid")
-	testgit.MustWorktreeAdd(t, repoPath, wtPath, "kid")
-	excludePath := filepath.Join(repoPath, ".git", "info", "exclude")
-	if err := os.WriteFile(excludePath, []byte(".spinclass/\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	repoPath, wtPath = stageChildWorktree(t)
 
 	st.SessionState = session.StateInactive
 	st.RepoPath = repoPath
@@ -142,6 +130,304 @@ func TestGrantSessionHandleByNonHolderRefused(t *testing.T) {
 	}
 	if len(st.PendingHandles) != 0 {
 		t.Errorf("PendingHandles = %v, want unchanged (empty) after a refused grant", st.PendingHandles)
+	}
+}
+
+// TestGrantSessionHandleRefusesImplicitSession pins the FDR 0032 guard:
+// handles apply to worktree sessions only, so a main-checkout (implicit)
+// target is refused with a legible message rather than session.Write
+// silently writing a phantom worktree-shaped state.json for it.
+func TestGrantSessionHandleRefusesImplicitSession(t *testing.T) {
+	testgit.RequireGit(t)
+	const caller = "caller-principal"
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CLOWN_SESSION_ID", caller)
+	t.Setenv("SPINCLASS_SESSION_ID", "")
+
+	checkout := filepath.Join(t.TempDir(), "main-checkout")
+	testgit.MustInit(t, checkout)
+	if err := session.WriteImplicit(session.State{
+		Kind:         session.KindImplicit,
+		PID:          os.Getpid(),
+		SessionState: session.StateActive,
+		RepoPath:     checkout,
+		WorktreePath: checkout,
+		Branch:       "main",
+		SessionKey:   "main-checkout/randid",
+	}, "randid"); err != nil {
+		t.Fatal(err)
+	}
+
+	text, isErr := callGrant(t, `{"child":"main-checkout/randid","to":"p9"}`)
+	if !isErr {
+		t.Fatalf("expected a refusal for an implicit-session target, got success: %s", text)
+	}
+	if !strings.Contains(text, "main-checkout (implicit) session") {
+		t.Errorf("refusal %q should name the implicit-session reason", text)
+	}
+}
+
+// TestGrantSessionHandleRefusesClosedSession pins the FDR 0032 tombstone
+// guard on grant: a session already closed refuses with a friendly message
+// ("... is closed; nothing to grant") rather than a raw session.Write error
+// ("session.Write: worktree ... no such file").
+func TestGrantSessionHandleRefusesClosedSession(t *testing.T) {
+	const caller = "caller-principal"
+	repoPath, wtPath := childHandleFixture(t, caller, session.State{Holders: []string{caller}})
+
+	if err := session.Tombstone(repoPath, "kid", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(wtPath); err != nil {
+		t.Fatal(err)
+	}
+
+	text, isErr := callGrant(t, `{"child":"worker/kid","to":"p9"}`)
+	if !isErr {
+		t.Fatalf("expected a refusal for a closed session, got success: %s", text)
+	}
+	if !strings.Contains(text, "worker/kid is closed") {
+		t.Errorf("refusal %q should say the session is closed, not surface a raw session.Write error", text)
+	}
+}
+
+// TestReleaseSessionHandleRefusesClosedSession pins the FDR 0032 tombstone
+// guard on release: a session already closed refuses with a friendly message
+// rather than a raw session.Write error.
+func TestReleaseSessionHandleRefusesClosedSession(t *testing.T) {
+	const caller = "caller-principal"
+	repoPath, wtPath := childHandleFixture(t, caller, session.State{Holders: []string{caller}})
+
+	if err := session.Tombstone(repoPath, "kid", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(wtPath); err != nil {
+		t.Fatal(err)
+	}
+
+	text, isErr := callRelease(t, `{"child":"worker/kid"}`)
+	if !isErr {
+		t.Fatalf("expected a refusal for a closed session, got success: %s", text)
+	}
+	if !strings.Contains(text, "worker/kid is closed") {
+		t.Errorf("refusal %q should say the session is closed", text)
+	}
+}
+
+// TestListHandlesAcceptSkipsClosedEntryWithoutAbortingListing pins F1's
+// list-handles contract: accept never persists a partial accept and then
+// errors out of the whole listing — an ineligible (closed) entry gets a
+// per-line skip note while every other pending entry still gets promoted.
+func TestListHandlesAcceptSkipsClosedEntryWithoutAbortingListing(t *testing.T) {
+	testgit.RequireGit(t)
+	const caller = "caller-principal"
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CLOWN_SESSION_ID", caller)
+	t.Setenv("SPINCLASS_SESSION_ID", "")
+
+	liveRepo := filepath.Join(t.TempDir(), "live-repo")
+	testgit.MustInit(t, liveRepo)
+	liveWt := filepath.Join(liveRepo, ".worktrees", "kid")
+	testgit.MustWorktreeAdd(t, liveRepo, liveWt, "kid")
+	if err := session.Write(session.State{
+		SessionState:   session.StateInactive,
+		RepoPath:       liveRepo,
+		WorktreePath:   liveWt,
+		Branch:         "kid",
+		SessionKey:     "live-repo/kid",
+		PendingHandles: []string{caller},
+		Entrypoint:     []string{"/bin/sh"},
+		StartedAt:      time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	closedRepo := filepath.Join(t.TempDir(), "closed-repo")
+	testgit.MustInit(t, closedRepo)
+	closedWt := filepath.Join(closedRepo, ".worktrees", "kid")
+	testgit.MustWorktreeAdd(t, closedRepo, closedWt, "kid")
+	if err := session.Write(session.State{
+		SessionState:   session.StateInactive,
+		RepoPath:       closedRepo,
+		WorktreePath:   closedWt,
+		Branch:         "kid",
+		SessionKey:     "closed-repo/kid",
+		PendingHandles: []string{caller},
+		Entrypoint:     []string{"/bin/sh"},
+		StartedAt:      time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.Tombstone(closedRepo, "kid", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(closedWt); err != nil {
+		t.Fatal(err)
+	}
+
+	text, isErr := callListHandles(t, `{"accept":true}`)
+	if isErr {
+		t.Fatalf("list-handles with accept must not abort over one ineligible entry, got error: %s", text)
+	}
+	if !strings.Contains(text, "held    live-repo/kid") {
+		t.Errorf("expected the eligible entry promoted to held, got: %s", text)
+	}
+	if !strings.Contains(text, "closed-repo/kid") || !strings.Contains(text, "accept skipped") {
+		t.Errorf("expected the closed entry reported with a skip note, got: %s", text)
+	}
+
+	live, err := session.Read(liveRepo, "kid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(live.Holders, caller) {
+		t.Errorf("Holders = %v, want the eligible entry promoted", live.Holders)
+	}
+}
+
+// TestListHandlesRendersImplicitRightsWhenUnrecorded covers displayRights'
+// fallback: a holder with no HandleRights entry (the spawner's own seeded
+// handle, which is never itself a "grant") renders as "(implicit)", never an
+// empty string.
+func TestListHandlesRendersImplicitRightsWhenUnrecorded(t *testing.T) {
+	testgit.RequireGit(t)
+	const caller = "caller-principal"
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CLOWN_SESSION_ID", caller)
+	t.Setenv("SPINCLASS_SESSION_ID", "")
+
+	repo := filepath.Join(t.TempDir(), "implicit-rights-repo")
+	testgit.MustInit(t, repo)
+	wt := filepath.Join(repo, ".worktrees", "kid")
+	testgit.MustWorktreeAdd(t, repo, wt, "kid")
+	if err := session.Write(session.State{
+		SessionState:       session.StateInactive,
+		RepoPath:           repo,
+		WorktreePath:       wt,
+		Branch:             "kid",
+		SessionKey:         "implicit-rights-repo/kid",
+		SpawnedByPrincipal: caller,
+		Holders:            []string{caller}, // seeded at spawn — no HandleRights entry
+		Entrypoint:         []string{"/bin/sh"},
+		StartedAt:          time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	text, isErr := callListHandles(t, `{}`)
+	if isErr {
+		t.Fatalf("list-handles failed: %s", text)
+	}
+	if !strings.Contains(text, "held    implicit-rights-repo/kid  rights=(implicit)") {
+		t.Errorf("expected rights=(implicit) for the unrecorded spawner handle, got: %s", text)
+	}
+}
+
+// TestGrantSessionHandleNoOpWhenRecipientAlreadyHasOne pins FDR 0032's grant
+// semantics: granting to a principal that already holds (or is already
+// pending) a handle changes nothing and is reported as a non-error no-op —
+// re-granting with different rights is not an escalation path in this slice.
+func TestGrantSessionHandleNoOpWhenRecipientAlreadyHasOne(t *testing.T) {
+	t.Run("recipient already an accepted holder", func(t *testing.T) {
+		const caller = "caller-principal"
+		childHandleFixture(t, caller, session.State{Holders: []string{caller, "p9"}})
+
+		text, isErr := callGrant(t, `{"child":"worker/kid","to":"p9","rights":"observe,close,grant"}`)
+		if isErr {
+			t.Fatalf("expected a non-error no-op result, got error: %s", text)
+		}
+		if !strings.Contains(text, "nothing changed") {
+			t.Errorf("expected a no-op message, got: %s", text)
+		}
+	})
+
+	t.Run("recipient already pending", func(t *testing.T) {
+		const caller = "caller-principal"
+		childHandleFixture(t, caller, session.State{
+			Holders:        []string{caller},
+			PendingHandles: []string{"p9"},
+		})
+
+		text, isErr := callGrant(t, `{"child":"worker/kid","to":"p9"}`)
+		if isErr {
+			t.Fatalf("expected a non-error no-op result, got error: %s", text)
+		}
+		if !strings.Contains(text, "nothing changed") {
+			t.Errorf("expected a no-op message, got: %s", text)
+		}
+	})
+}
+
+// TestGrantSessionHandlePendingCallerAcceptPersistsEvenOnNoOpGrant: a caller
+// that was only pending exercises its handle by granting onward — first
+// use — even when the grant itself turns out to be a no-op (the recipient
+// already holds one). The accept must still be persisted; only the grant
+// itself is skipped.
+func TestGrantSessionHandlePendingCallerAcceptPersistsEvenOnNoOpGrant(t *testing.T) {
+	const caller = "caller-principal"
+	repoPath, _ := childHandleFixture(t, caller, session.State{
+		SpawnedByPrincipal: "other-spawner",
+		Holders:            []string{"other-spawner", "p9"},
+		PendingHandles:     []string{caller},
+	})
+
+	text, isErr := callGrant(t, `{"child":"worker/kid","to":"p9"}`)
+	if isErr {
+		t.Fatalf("expected the no-op grant to succeed, got error: %s", text)
+	}
+	if !strings.Contains(text, "nothing changed") {
+		t.Errorf("expected a no-op message, got: %s", text)
+	}
+
+	st, err := session.Read(repoPath, "kid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(st.Holders, caller) {
+		t.Errorf("Holders = %v, want to contain the accepted caller %q even though the grant itself was a no-op", st.Holders, caller)
+	}
+}
+
+// TestGrantSessionHandleByLegacySpawner pins FDR 0032 D9/#7: a legacy child
+// carrying only SpawnedBy (no SpawnedByPrincipal, no Holders — the shape a
+// pre-FDR-0032 spawn recorded) is grantable by its original spawner via the
+// pre-FDR #249 session-key authority level, the same one authorizeChildReap
+// already honors — grant is not a reap-only privilege.
+func TestGrantSessionHandleByLegacySpawner(t *testing.T) {
+	const driverKey = "driver/main-oak"
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("SPINCLASS_SESSION_ID", driverKey)
+	t.Setenv("CLOWN_SESSION_ID", "")
+
+	repoPath, wtPath := stageChildWorktree(t)
+	if err := session.Write(session.State{
+		SessionState: session.StateInactive,
+		RepoPath:     repoPath,
+		WorktreePath: wtPath,
+		Branch:       "kid",
+		SessionKey:   "worker/kid",
+		SpawnedBy:    driverKey,
+		Entrypoint:   []string{"/bin/sh"},
+		StartedAt:    time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	text, isErr := callGrant(t, `{"child":"worker/kid","to":"p9"}`)
+	if isErr {
+		t.Fatalf("expected the legacy spawner's grant to succeed, got error: %s", text)
+	}
+
+	st, err := session.Read(repoPath, "kid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(st.PendingHandles, "p9") {
+		t.Errorf("PendingHandles = %v, want to contain p9", st.PendingHandles)
 	}
 }
 

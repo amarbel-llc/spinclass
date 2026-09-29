@@ -336,6 +336,7 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 			st.SpawnedByPrincipal = existing.SpawnedByPrincipal
 			st.Holders = existing.Holders
 			st.PendingHandles = existing.PendingHandles
+			st.HandleRights = existing.HandleRights
 			st.HelloSentAt = existing.HelloSentAt
 			st.PreMergeAttestation = existing.PreMergeAttestation
 			// Carry the recorded setup fingerprint forward by default. A

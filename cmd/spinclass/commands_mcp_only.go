@@ -298,7 +298,11 @@ func registerMCPOnlyCommands(app *command.App) {
 			Short: "List every session this one holds a handle on (accepted or pending, FDR 0032 D12/D13). A pending grant confers no authority until exercised; pass accept to exercise every pending one first (accept-on-first-use) so they show as held and become usable immediately.",
 		},
 		Annotations: &protocol.ToolAnnotations{
-			ReadOnlyHint:    protocol.BoolPtr(true),
+			// ReadOnlyHint is false, not true: with accept=true this mutates
+			// (accept-on-first-use promotes pending -> Holders and writes
+			// session state) — the always-ask floor below covers exactly this
+			// case, so the tool annotation must not claim otherwise.
+			ReadOnlyHint:    protocol.BoolPtr(false),
 			DestructiveHint: protocol.BoolPtr(false),
 			IdempotentHint:  protocol.BoolPtr(false),
 			OpenWorldHint:   protocol.BoolPtr(false),

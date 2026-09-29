@@ -1745,6 +1745,7 @@ func TestSessionEndNoopWhenNoState(t *testing.T) {
 // clown/ringmaster's.
 func TestSessionEndEmitsExitWakeForWorktreeHolders(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CLOWN_BIN", "/some/clown") // clown.Enabled() gates emitWorktreeExitWake first
 	repo, wt := initSpawnedWorktree(t, "driver/main-oak")
 
 	st, err := session.Read(repo, "feature")
@@ -1791,7 +1792,8 @@ func TestSessionEndEmitsExitWakeForWorktreeHolders(t *testing.T) {
 // invocation at all, not a call with an empty slice.
 func TestSessionEndSkipsExitWakeWithNoHolders(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	_, wt := initSpawnedWorktree(t, "") // no SpawnedBy, no Holders
+	t.Setenv("CLOWN_BIN", "/some/clown") // exercise the "no holders" branch, not the clown-disabled one
+	_, wt := initSpawnedWorktree(t, "")  // no SpawnedBy, no Holders
 
 	called := false
 	origEmit := emitExitWakes
@@ -1809,6 +1811,80 @@ func TestSessionEndSkipsExitWakeWithNoHolders(t *testing.T) {
 	}
 	if called {
 		t.Error("emitExitWakes must not be called for a session with no holders")
+	}
+}
+
+// TestEmitWorktreeExitWakeSkipsWhenClownDisabled pins the ordering fix: the
+// clown.Enabled() check must gate BEFORE emitWorktreeExitWake ever resolves
+// git state or reaches the emit seam — even with Holders present — so a
+// SessionEnd hook firing outside clown (the common case: most sessions never
+// run under clown) never pays for a git.CommonDir/BranchCurrent subprocess it
+// would throw away anyway.
+func TestEmitWorktreeExitWakeSkipsWhenClownDisabled(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	repo, wt := initSpawnedWorktree(t, "driver/main-oak")
+	st, err := session.Read(repo, "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Holders present so, WITHOUT the ordering fix, resolution would proceed
+	// all the way to the (stubbed) emit call — proving the early clown.Enabled()
+	// gate, not just the pre-existing "no holders" short-circuit, is what stops it.
+	st.Holders = []string{"principal-a"}
+	if err := session.Write(*st); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLOWN_BIN", "")
+	_ = os.Unsetenv("CLOWN_BIN")
+
+	called := false
+	origEmit := emitExitWakes
+	emitExitWakes = func(holders []string, childKey, reason string) error {
+		called = true
+		return nil
+	}
+	t.Cleanup(func() { emitExitWakes = origEmit })
+
+	emitWorktreeExitWake(wt, "other")
+
+	if called {
+		t.Error("emitExitWakes must not be reached when clown is disabled, even with holders present")
+	}
+}
+
+// TestEmitWorktreeExitWakeSkipsOnClearReason pins FDR 0032 D6: a `/clear` is
+// a restart, not an exit, and must emit nothing, while any other reason
+// (e.g. "prompt_input_exit") still fires the normal wake to Holders.
+func TestEmitWorktreeExitWakeSkipsOnClearReason(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CLOWN_BIN", "/some/clown")
+	repo, wt := initSpawnedWorktree(t, "driver/main-oak")
+
+	st, err := session.Read(repo, "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Holders = []string{"principal-a"}
+	if err := session.Write(*st); err != nil {
+		t.Fatal(err)
+	}
+
+	var gotReason string
+	origEmit := emitExitWakes
+	emitExitWakes = func(holders []string, childKey, reason string) error {
+		gotReason = reason
+		return nil
+	}
+	t.Cleanup(func() { emitExitWakes = origEmit })
+
+	emitWorktreeExitWake(wt, "clear")
+	if gotReason != "" {
+		t.Errorf("a /clear must emit nothing, got reason %q", gotReason)
+	}
+
+	emitWorktreeExitWake(wt, "prompt_input_exit")
+	if gotReason != "normal" {
+		t.Errorf("reason = %q, want %q for a non-clear SessionEnd", gotReason, "normal")
 	}
 }
 
@@ -1911,7 +1987,7 @@ func TestSessionStartSpawnHello(t *testing.T) {
 // targeted at the principal, not a session key that does not exist.
 func TestSessionStartSpawnHelloTargetsPrincipal(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	const principal = "4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2"
+	const principal = "1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f"
 
 	repo, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {

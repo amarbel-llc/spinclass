@@ -62,9 +62,10 @@ func setupClosedSession(t *testing.T, branch string) (repoPath, wtPath string) {
 		SessionKey:         "repo/" + branch,
 		Description:        "test session",
 		SpawnedBy:          "driver/other",
-		SpawnedByPrincipal: "4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2",
-		Holders:            []string{"4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2"},
+		SpawnedByPrincipal: "1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f",
+		Holders:            []string{"1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f"},
 		PendingHandles:     []string{"9c2e1111-2222-3333-4444-555566667777"},
+		HandleRights:       map[string]string{"9c2e1111-2222-3333-4444-555566667777": "observe"},
 		Entrypoint:         []string{"/bin/sh"},
 		StartedAt:          time.Now().UTC(),
 	}
@@ -122,14 +123,17 @@ func TestRunRecreatesWorktreeFromClosedSession(t *testing.T) {
 	if got.SpawnedBy != "driver/other" {
 		t.Errorf("SpawnedBy = %q, want preserved from tombstone", got.SpawnedBy)
 	}
-	if got.SpawnedByPrincipal != "4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2" {
+	if got.SpawnedByPrincipal != "1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f" {
 		t.Errorf("SpawnedByPrincipal = %q, want preserved from tombstone", got.SpawnedByPrincipal)
 	}
-	if len(got.Holders) != 1 || got.Holders[0] != "4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2" {
+	if len(got.Holders) != 1 || got.Holders[0] != "1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f" {
 		t.Errorf("Holders = %v, want preserved from tombstone", got.Holders)
 	}
 	if len(got.PendingHandles) != 1 || got.PendingHandles[0] != "9c2e1111-2222-3333-4444-555566667777" {
 		t.Errorf("PendingHandles = %v, want preserved from tombstone", got.PendingHandles)
+	}
+	if got := got.HandleRights["9c2e1111-2222-3333-4444-555566667777"]; got != "observe" {
+		t.Errorf("HandleRights = %v, want preserved from tombstone", got)
 	}
 	if got.IsTombstone() {
 		t.Error("resurrected session must not still read as a tombstone")

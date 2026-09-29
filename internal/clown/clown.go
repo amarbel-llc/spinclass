@@ -62,9 +62,12 @@ func Enabled() bool {
 }
 
 // emitTimeout bounds each ringmaster CLI call so a wedged binary cannot hang
-// the caller. Emits are a local journal append + optional datagram; seconds is
-// generous.
-const emitTimeout = 10 * time.Second
+// the caller, and is also the budget EmitExitWakes gives its WHOLE holder
+// loop (see there). Emits are a local journal append + optional datagram;
+// seconds is generous. A var, not a const, so tests can shrink it rather than
+// waiting out the real 10s to prove the loop-wide budget actually bounds a
+// wedged ringmaster.
+var emitTimeout = 10 * time.Second
 
 // run invokes the ringmaster CLI with args, detached from the caller's
 // cancellation (the spinclass-side state write has already happened by the
@@ -206,14 +209,28 @@ func NotifyPrincipal(ctx context.Context, targetPrincipal, from, message string)
 // inside it. Every per-holder failure is joined (errors.Join) rather than
 // short-circuiting: one holder's unreachable channel must never suppress the
 // wake to the rest. A no-op when clown is disabled or holders is empty.
+//
+// ONE emitTimeout budgets the WHOLE loop, not each holder: NotifyPrincipal is
+// two ringmaster invocations (start+done), each independently capped at
+// emitTimeout by run()'s own WithTimeout — run() deliberately detaches from
+// (context.WithoutCancel) whatever ctx it is given, so a shared deadline
+// cannot shorten an ALREADY-RUNNING call. What it CAN do is stop the loop from
+// even starting the NEXT holder once the shared budget is spent, which is
+// exactly what keeps N holders from serializing into up to N*2*emitTimeout
+// against one wedged ringmaster.
 func EmitExitWakes(holders []string, childKey, reason string) error {
 	if !Enabled() || len(holders) == 0 {
 		return nil
 	}
-	ctx := context.Background()
-	message := fmt.Sprintf("session %s exited (%s); holders: %d remaining", childKey, reason, len(holders))
+	ctx, cancel := context.WithTimeout(context.Background(), emitTimeout)
+	defer cancel()
+	message := fmt.Sprintf("session %s exited (%s); notified %d holder(s)", childKey, reason, len(holders))
 	var errs []error
 	for _, holder := range holders {
+		if err := ctx.Err(); err != nil {
+			errs = append(errs, fmt.Errorf("notify %s: exit-wake budget exhausted: %w", holder, err))
+			continue
+		}
 		if err := NotifyPrincipal(ctx, holder, "", message); err != nil {
 			errs = append(errs, fmt.Errorf("notify %s: %w", holder, err))
 		}

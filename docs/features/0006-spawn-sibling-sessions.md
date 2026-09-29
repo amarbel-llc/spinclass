@@ -229,6 +229,14 @@ set, and a driver reasoning about "my workers" may now be looking at a
 subtree. `spawned_by` still records the immediate parent, so lineage is
 reconstructible, but nothing walks it transitively today.
 
+> **Revised 2026-09-29 (FDR 0032):** reap authority is a **handle**, not
+> `spawned_by`. `close-child-session` authorizes on the caller's principal
+> holding a handle on the child (`holders`, seeded with the immediate spawner
+> at spawn), and handles pass via `grant-session-handle`, so a non-parent
+> holder (a janitor sibling, a successor coordinator) can reap too.
+> `spawned_by` stays as display lineage. The paragraph below is the
+> pre-FDR-0032 rule.
+
 `spawned_by` remains load-bearing — `close-child-session` (#249) authorizes
 a reap only when it equals the caller's key. Note the interaction: reaping
 authority is **immediate-parent only**, so a grandparent cannot reap a

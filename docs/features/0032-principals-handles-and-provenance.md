@@ -189,8 +189,9 @@ and gives every intermediate a way to keep a tree alive without a human.
 A handle without an exit wake is a handle you must poll. spinclass emits one
 reason-tagged wake to every accepted holder on the child's `SessionEnd`, on
 `close-child-session`, on hello timeout, and from the dead-PID sweep. Reasons
-map to OTP's: `normal` (merged and closed), `shutdown` (reaped by a holder),
-crash (hello timeout, presence-stale), `killed` (force-reaped). The wake
+map to OTP's: `normal` (the session's harness ended on its own; a `/clear`
+is a restart, not an exit, and emits nothing), `shutdown` (reaped by a
+holder), crash (hello timeout, presence-stale), `killed` (force-reaped). The wake
 carries the child's certificate digest so a holder wanting `one_for_one`
 re-spawns from the brief itself. Restart strategies, `MaxR`/`MaxT` and
 `temporary`/`transient`/`permanent` are holder-side policy, deferred.
@@ -296,8 +297,14 @@ and one for the signature.
 Each useful on its own, each tightening the previous rather than replacing it.
 
 - **Slice 0 (spinclass only, no cryptography).** See "Interface". Fixes #332
-  and #321. Authority is by principal membership, which is already unguessable;
-  the record states plainly that this slice has no cryptographic binding.
+  and #321. Authority is by principal membership in a same-uid state file: a
+  principal is a random UUID rather than a guessable repo/branch, but it
+  arrives via environment and the file is writable by every session, so this
+  slice has no cryptographic binding and no unforgeability, and the record
+  says so. The pre-FDR authority level (a child's `spawned_by` equal to the
+  caller's session key) is retained as a second path until slice 1 binds
+  identity cryptographically, because a `sc spawn` from a plain shell has
+  only a per-process fallback principal that dies with the process.
 - **Slice 1 (troupe + piggy tier 1).** Keypair and certificate in troupe's
   mint, card-touch root bootstrap, the hello as a troupe certificate exchange,
   `close-child-session` additionally requiring a valid chain, records move to
@@ -584,9 +591,11 @@ specified by contract in "Companion records".
   correct for chat, not less. The filesystem handshake file survives slice 0
   and is deleted in slice 1.
 - **`grant-session-handle child=… to=<principal> [rights=…]`** and
-  **`release-session-handle child=…`**, MCP and `sc` twins, always-ask,
-  variadic in `child`. Rights are recorded but not enforced until D13's
-  enforcement lands. Accept-on-first-use via `pending_handles`.
+  **`release-session-handle child=…`**, one registration each serving both
+  the MCP tool and `sc <name>`, always-ask. One `child` per call in this
+  slice; the bulk form D12 describes is a follow-up. Rights are recorded but
+  not enforced until D13's enforcement lands. Accept-on-first-use via
+  `pending_handles`.
 - **`list-handles`** (held, pending) and **`sc whoami`** (principal, session
   key, holders; grows the chain view in slice 1).
 - **Exit wakes** from three of D6's four points (`SessionEnd` → `normal`,
@@ -600,9 +609,11 @@ specified by contract in "Companion records".
   principal column. `TRUST` arrives with slice 1.
 - **Refusals name the missing thing:** "no handle to X (spawned by P; ask P to
   grant `close`)", never a bare "not authorized".
-- **Tests:** `TestCurrentSessionKeyNoSessionStillErrors` and
-  `TestHandleSpawnSessionNoDriverKey` flip (they pin the #332 defect); plus a
-  non-repo-cwd spawn and close-child end to end, and a grant-then-reap by a
+- **Tests:** `TestHandleSpawnSessionNoDriverKey`, which pinned the #332
+  defect, is replaced by `TestHandleSpawnSessionFromNonRepoCwd`;
+  `TestCurrentSessionKeyNoSessionStillErrors` stays, since
+  `currentSessionKey` itself is unchanged and still refuses outside a repo.
+  Plus a non-repo-cwd close-child end to end, and a grant-then-reap by a
   sibling.
 
 Rollback: slice 0 is additive on state and keeps `spawned_by`; removing the
@@ -616,10 +627,10 @@ worker in a sibling repo:
     # spawn-session repo=just-us brief="…"
     session_key: just-us/calm-cypress
     worktree_path: ~/eng/repos/just-us/.worktrees/calm-cypress
-    worker will message 4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2 via chat
+    worker will message 1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f via chat
 
     # close-child-session child=just-us/calm-cypress
-    ok 1 - close just-us/calm-cypress (holder 4d56b43b…, spawned_by_principal)
+    ok 1 - close just-us/calm-cypress (holder 1d3a5c7e…, spawned_by_principal)
 
 Handing the worker to a janitor sibling before exiting:
 
@@ -630,7 +641,7 @@ Handing the worker to a janitor sibling before exiting:
 
 A day in the life, once slice 1 exists: the operator opens a session at
 `~/eng`; troupe finds no parent and asks the card once ("bless root session
-`swift-elder` on `flic` for 24h", PIN, touch); every prompt typed is signed at
+`swift-elder` on `<host>` for 24h", PIN, touch); every prompt typed is signed at
 observation; `spawn-session` returns the child's certificate digest in the
 wake; forty minutes before root expiry every session in the tree gets one wake
 and the operator touches once; a worker needing `force` calls

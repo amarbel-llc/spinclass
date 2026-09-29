@@ -397,8 +397,8 @@ func TestStateSpawnedByRoundTrips(t *testing.T) {
 // empty.
 func TestStateHandleFieldsRoundTrip(t *testing.T) {
 	s := State{
-		SpawnedByPrincipal: "4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2",
-		Holders:            []string{"4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2", "9c2e1111-2222-3333-4444-555566667777"},
+		SpawnedByPrincipal: "1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f",
+		Holders:            []string{"1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f", "9c2e1111-2222-3333-4444-555566667777"},
 		PendingHandles:     []string{"aaaa1111-2222-3333-4444-555566667777"},
 		WorktreePath:       "/x",
 		Branch:             "spawned-walnut",
@@ -408,8 +408,8 @@ func TestStateHandleFieldsRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		`"spawned_by_principal":"4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2"`,
-		`"holders":["4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2","9c2e1111-2222-3333-4444-555566667777"]`,
+		`"spawned_by_principal":"1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f"`,
+		`"holders":["1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f","9c2e1111-2222-3333-4444-555566667777"]`,
 		`"pending_handles":["aaaa1111-2222-3333-4444-555566667777"]`,
 	} {
 		if !strings.Contains(string(data), want) {
@@ -639,6 +639,16 @@ func TestReleaseHandle(t *testing.T) {
 		s.ReleaseHandle("p1")
 		if s.SpawnedByPrincipal != "p1" {
 			t.Error("ReleaseHandle must not clear the spawner's lineage field")
+		}
+	})
+
+	t.Run("empty principal never matches, even against a populated state", func(t *testing.T) {
+		s := &State{Holders: []string{"p1"}, PendingHandles: []string{"p2"}}
+		if released := s.ReleaseHandle(""); released {
+			t.Error("an empty principal must never report a release")
+		}
+		if len(s.Holders) != 1 || len(s.PendingHandles) != 1 {
+			t.Error("an empty-principal release must leave Holders/PendingHandles untouched")
 		}
 	})
 }

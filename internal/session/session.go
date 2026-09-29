@@ -914,6 +914,34 @@ func (s *State) Orphan() bool {
 	return s.SpawnedByPrincipal != "" && len(s.Holders) == 0
 }
 
+// EffectiveSpawner returns SpawnedByPrincipal, falling back to the legacy
+// SpawnedBy session key for a child spawned before FDR 0032 recorded a
+// principal at all. Display/lineage only — NOT an authority check (that's
+// IsHolder); callers that need "who spawned this, for the message" want this
+// one shared answer instead of re-deriving the fallback themselves.
+func (s *State) EffectiveSpawner() string {
+	if s.SpawnedByPrincipal != "" {
+		return s.SpawnedByPrincipal
+	}
+	return s.SpawnedBy
+}
+
+// OtherHolders returns Holders with excluding removed — the FDR 0032 D6 exit-
+// wake audience once the caller (already in the know) is left out. A no-op
+// filter when excluding is empty. Order-preserving.
+func (s *State) OtherHolders(excluding string) []string {
+	if excluding == "" {
+		return s.Holders
+	}
+	out := make([]string, 0, len(s.Holders))
+	for _, h := range s.Holders {
+		if h != excluding {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
 // defaultHandleRights is the rights a grant carries when the granter names
 // none (FDR 0032 D13): "the lazy handoff is the conservative one".
 const defaultHandleRights = "observe,close"
@@ -967,6 +995,9 @@ func (s *State) AcceptHandle(principal string) (accepted bool) {
 // that releases its seeded Holders entry stays the recorded spawner while
 // holding no authority — exactly the hand-off shape.
 func (s *State) ReleaseHandle(principal string) (released bool) {
+	if principal == "" {
+		return false
+	}
 	if idx := slices.Index(s.Holders, principal); idx != -1 {
 		s.Holders = slices.Delete(s.Holders, idx, idx+1)
 		released = true

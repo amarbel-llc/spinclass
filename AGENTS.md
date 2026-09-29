@@ -169,53 +169,47 @@ subcommand is always available.
 ## Subsystems (read the cited record before changing)
 
 - **Spawned workers** (FDR 0006, #262): `sc spawn [repo] --brief` + the
-  `spawn-session` MCP tool launch a detached harness-booted worker. `repo` is
-  optional — omitted (or the current repo) spawns HERE, a sibling dirname/path
-  targets that repo; the worker always starts fresh off the target's default
-  branch with only the brief (fork-at-HEAD dropped; `fork-session` / `sc fork
-  --brief` removed, create-only `sc fork` stays). `spawn-session` is ASYNC under
-  clown (#266): returns session key + ringmaster job id, delivers the hello (or a
-  reap-if-dead timeout) as a wake; `sc spawn` CLI blocks. The brief is the
-  worker's ONLY context (#258). Workers may spawn workers (the #151 always-ask
-  floor, not a depth cap, guards fan-out). `internal/spawn` owns resolution +
-  launch (`LaunchDetached`/`WaitHello`). **Reaping** (#249): `close-child-session`
-  tears down a worker; `authorizeChildReap` gates on the caller's PRINCIPAL
-  holding a handle (`holders`, seeded with the spawner at spawn — FDR 0032
-  D1/D12/D13), refusing foreign/never-spawned children (`spawned_by` is now
-  display/legacy). Force-reap discards uncommitted/unmerged work, so a clean reap auto-approves while
-  `force: true` is always-ask — one `perms.AlwaysAsk` predicate shared by the
-  PreToolUse hook and the perms-tier `RunCheck` (it judges an *invocation*, not a
-  tool, since `BuildPermissionString` discards MCP args); `force` is read
-  fail-closed. Elicitation could replace the flag (#254). **Passing a handle**
-  (FDR 0032 D12, `cmd/spinclass/handles_cmd.go`, closes spinclass#321 at the
-  no-cryptography level): `grant-session-handle`/`release-session-handle`/
-  `list-handles`/`sc whoami` let a holder delegate authority onward — grant
-  lands the recipient in `PendingHandles`, conferring nothing until it
-  exercises the handle (accept-on-first-use, via close-child-session, a
-  further grant, or `list-handles --accept`); release only ever removes the
-  caller itself. Both grant and release are unconditional always-ask
-  (`internal/perms`), since a handle pass is never silently approvable.
-  `sc list` surfaces the resulting handle state directly: a HOLDERS count and
-  an `orphan` marker (text suffix / descCell hint) for a spawned or handled
-  session whose accepted holders have all released (FDR 0032 D12).
+  `spawn-session` MCP tool launch a detached harness-booted worker; spawning no
+  longer requires a repo-rooted cwd (spinclass#332), since the driver identity
+  is the principal, not the cwd. `repo` is optional — omitted (or the current
+  repo) spawns HERE, a sibling dirname/path targets that repo; the worker
+  always starts fresh off the target's default branch with only the brief
+  (#258; create-only `sc fork` is a separate, non-worker path). `spawn-session`
+  is ASYNC under clown (#266): returns session key + ringmaster job id,
+  delivers the hello (or a reap-if-dead timeout) as a wake; `sc spawn` CLI
+  blocks. Workers may spawn workers (the #151 always-ask floor, not a depth
+  cap, guards fan-out); `internal/spawn` owns resolution + launch. **Reaping**
+  (#249): `close-child-session` tears down a worker. Reap authority is a
+  **handle** (FDR 0032 D1/D12/D13) — `authorizeChildReap` gates on the caller's
+  principal holding one (seeded with the spawner at spawn), refusing
+  foreign/never-spawned children; `spawned_by` is now display/legacy only.
+  Force-reap discards uncommitted/unmerged work, so a clean reap auto-approves
+  while `force: true` is always-ask (`perms.AlwaysAsk`, judging the
+  *invocation* since `BuildPermissionString` discards MCP args; read
+  fail-closed). Elicitation could replace the flag (#254). **Passing a handle**
+  (FDR 0032 D12, closes spinclass#321 at the no-cryptography level):
+  `grant-session-handle`/`release-session-handle`/`list-handles`/`sc whoami`
+  let a holder delegate authority onward — grant lands the recipient in
+  `PendingHandles`, conferring nothing until it accepts (via
+  close-child-session, a further grant, or `list-handles --accept`); release
+  only ever removes the caller itself. Grant and release are both unconditional
+  always-ask (`internal/perms`) — a handle pass is never silently approvable.
+  `sc list` surfaces a HOLDERS count and an `orphan` marker for a session
+  whose accepted holders have all released (FDR 0032 D12).
 - **Resurrecting a closed session** (FDR 0027, #291, `internal/resurrect`): the
   undo half of `sc close`/`close-child-session`. Both funnel through
-  `close.RunResolved`, which now best-effort resolves the branch's tip
-  (`git.RevParse(wtPath, "HEAD")`) immediately before force-deleting the
-  worktree/branch and threads it into `session.Tombstone`'s new `sha` param
-  as `State.DeletedSHA`. `sc resurrect <target>` (+ MCP tool, no
-  spawned-lineage gate — recovery isn't the privileged operation reaping is)
-  resolves the target via `session.FindByTarget` (tombstones included, same
-  as close/resume), refuses cleanly if it's not a tombstone, has no
-  `DeletedSHA` (predates this feature, or closed outside spinclass — recover
-  via `git reflog`), or the commit is `!git.CommitExists` (likely gc'd), then
-  calls `worktree.Create(repoPath, path, "", DeletedSHA)` — the same
-  arbitrary-base-commit primitive `sc start`'s base-branch freshening
-  uses — and `session.Write` (documented to overwrite a stale tombstone) to
-  re-register it inactive, carrying the description/spawn-lineage forward.
-  Does not attach — `sc resume` afterward reuses that path unmodified.
-  `sc clean`'s merged-worktree removal does NOT capture a SHA (that content
-  already lives in the default branch).
+  `close.RunResolved`, which best-effort resolves the branch's tip before
+  force-deleting the worktree/branch, threading it into `session.Tombstone` as
+  `State.DeletedSHA`. `sc resurrect <target>` (+ MCP tool, no lineage gate —
+  recovery isn't the privileged operation reaping is) resolves via
+  `session.FindByTarget` (tombstones included), refuses cleanly if it's not a
+  tombstone, has no `DeletedSHA` (predates this feature, or closed outside
+  spinclass — recover via `git reflog`), or the commit is gc'd, then recreates
+  the worktree at that sha (the same arbitrary-base-commit primitive `sc
+  start`'s base-branch freshening uses) and re-registers it inactive, carrying
+  description/spawn-lineage forward. Does not attach — `sc resume` afterward
+  reuses that path unmodified. `sc clean`'s merged-worktree removal captures no
+  SHA (that content already lives on the default branch).
 - **Exemption predicates** (FDR 0031, `merge/policy.go`): run from the MERGE
   BASE; terminal merges are the zero-value `GateTerminal`, always exempt.
 - **No implicit-session merge** (#317): merge from a main-checkout session
@@ -277,37 +271,26 @@ subcommand is always available.
   maps to cancelRequested=true. `clearRunning` joins the observer after `cancel()`
   (which SIGKILLs its `ringmaster wait` subprocess) before closing `done`, so a
   woken caller is guaranteed the subprocess is already reaped.
-- **Dynamic system-prompt fragment** (spinclass#187, FDR 0021, clown plugin
-  protocol RFC-0002 §5, `internal/sysprompt`): `serve` answers `prompts/get` for
-  `system-prompt-append`; clown's stdio bridge fetches it **before `initialize`**
-  and appends it last. `sysprompt.Resolve` branches worktree-session vs
-  main-checkout (implicit session, FDR 0014) and `Render` picks the embedded
-  template. Both carry best-effort, **deadline-capped** (`repoFetchTimeout` 2s —
-  the pre-`initialize` fetch must never block) lines: a **repository line**
-  (`internal/repoinfo` — git remote + a PAPI/`gh`/Gitea lookup for forge kind,
-  vanity-remote owner (#221), description), a **Forge workflow** block (non-GitHub
-  forge → use `fj`/`smith`), a **co-active sessions** line (#238; local state +
-  PID only), and the Go-composed **Design records** trailer (`docsindex.go`)
-  indexing `docs/features`/`adrs`/`rfcs` by number·title·status (dirs overridable
-  via `[sysprompt].doc-index-dirs`; a `recover()` guarantees a broken doc never
-  fails the render). Replaces the retired static
-  `.clown-plugin/system-prompt-append.d/` fragments. Two further Go-composed
-  trailers (FDR 0030) are off until a sweatfile selects sources: a **Manpage
-  index** (`manindex.go` — `name(section)` from the FILENAME, what `man(1)`
-  takes, + the NAME-block description; parses man(7) `.SH NAME` with ` \- ` or
-  plain ` - `, and mdoc(7) `.Nd`) and a **Repository index** (`repoindex.go` —
-  checkout name + `flake.nix` `description`, else the README's first prose
-  line; the forge API is NOT consulted, being a round-trip per repo). Both take
-  **source specs** (`sources.go`: `~`/`$VAR` expanded, split on `:` so a bare
-  `$MANPATH` works, globbed if `*?[` else literal, deduped), bounded by
-  `[sysprompt].index-limit` (default 400; `<= 0` uncaps) and `indexScanTimeout`
-  (1.5s) — hitting either says so rather than truncating silently. Rows sort by
-  RENDERED NAME, not path: path order groups man1 before man7, so a corpus past
-  the cap dropped whole sections (on the fleet's 329-page manpath, every
-  `eng-*(7)` page — the ones it exists for). A failed hierarchy load emits a ⚠
-  line instead of silently disabling both. The manpage index cannot select
-  first-party pages itself: the profile is one `buildEnv` recording no
-  per-package origin, so membership is declared upstream by eng's manpath.
+- **Dynamic system-prompt fragment** (spinclass#187, FDR 0021, FDR 0030, clown
+  plugin protocol RFC-0002 §5, `internal/sysprompt`): `serve` answers
+  `prompts/get` for `system-prompt-append`; clown's stdio bridge fetches it
+  **before `initialize`** and appends it last, so the fetch is
+  **deadline-capped** (`repoFetchTimeout` 2s) and must never block.
+  `sysprompt.Resolve` branches worktree-session vs main-checkout (implicit
+  session, FDR 0014). Trailers: a **repository line** (`internal/repoinfo` —
+  git remote + a PAPI/`gh`/Gitea lookup for forge kind, vanity-remote owner
+  #221, description), a **Forge workflow**
+  block (non-GitHub → use `fj`/`smith`), a **co-active sessions** line (#238),
+  and the Go-composed **Design records** trailer (`docsindex.go`, dirs
+  overridable via `[sysprompt].doc-index-dirs`). Two further trailers (FDR
+  0030) are off until a sweatfile selects sources: a **Manpage index**
+  (`manindex.go`) and a **Repository index** (`repoindex.go`, no forge-API
+  round-trip), both via glob/`$VAR`-expanded **source specs** (`sources.go`),
+  bounded by `[sysprompt].index-limit` (default 400, `<= 0` uncaps) and a scan
+  timeout. Rows sort by RENDERED name, not path, so a corpus past the cap
+  doesn't drop whole sections; a failed load degrades to a ⚠ line rather than
+  disabling both. Manpage-index membership is declared upstream by eng's
+  manpath (no per-package origin in the profile).
 - **Pre-merge build worktree** (FDR 0013): by default the hook runs in a
   transient detached worktree pinned to the committed sha (`check.resolveHookDir`
   → `.merge-<branch>-<sha>-<pid>` under `.worktrees/`), freeing the session
@@ -345,40 +328,23 @@ subcommand is always available.
   `# SKIP` (`merge LANDED on …`, lifted into the async wake). Local-only =
   `landing.Self`. Metrics: `internal/statsd`.
 - **Per-session forge push credentials** (FDR 0028, #285, `internal/auth`): a
-  sweatfile `[auth]` table (`mint-command` / `revoke-command`) gives a worktree
+  sweatfile `[auth]` table (`mint-command`/`revoke-command`) gives a worktree
   session its own forge token so pushes never ride the inherited ssh-agent.
-  `auth.Mint` runs on the `shop.createWorktree` funnel right after setup (fatal
-  on failure — the half-built worktree is torn down): runs the command
-  devshell-scoped in the worktree (`hookrun.CommandCapture`) with the
-  `SPINCLASS_*` identity env + `SPINCLASS_FORGE_HOST`/`_FORGE_REPO` (parsed
-  from the CONFIGURED `remote.origin.url` — `auth.ParseForgeRemote`; never
-  `git remote get-url`, which applies insteadOf), writes the stdout token as the
-  mode-600 `.spinclass/git-credentials` line `https://spinclass:<token>@<host>`
-  (Forgejo ignores the username when the password is a token), and injects
-  worktree-scoped config (`auth.Inject`: `credential.helper = store --file=…` +
-  `url.https://<host>/.insteadOf = <origin's ssh prefix>`; guarded by
-  `git.CommonConfigHasWorktreeOverride`). The mint is recorded as
-  `session.State.Credential` (`session.Write` carries it forward; `session.
-  UpdateCredential` stamps live state OR a tombstone). `auth.MirrorInto` wires
-  the FDR 0029 landing worktree before the push; `merge.fetchTarget` fetches
-  from the session worktree, so the merge's fetch is agent-free too.
-  `auth.Revoke` runs at
-  `close.RunResolved`, `clean.removeWorktree`, and `merge.teardownAndPush`
-  (the out-of-session `sc merge`/`sc run` worktree removal — no tombstone is
-  written there, so the sweep could never find it) (warn, non-fatal);
-  `auth.SweepOrphans` runs at the next creation on the repo for abandoned/
-  tombstoned sessions with an unrevoked record. `[auth].forge-hosts`
-  (override array) gates the mint on the origin host: unlisted ⇒ `auth.Mint`
-  returns `MintOutcome{Skipped}` and the funnel emits a SKIP point, never a
-  failure — the mechanism behind the fleet placement (one root entry in
-  `~/eng/repos/sweatfile`, `docs/plans/2026-09-03-auth-fleet-placement-design.md`).
-  A FAILED mint is fatal by default (worktree torn down);
-  `[hooks].allow-no-credential` / `sc start|run --allow-no-credential`
-  (`CreateOpts.AllowNoCredential`, the `allow-stale-base` two-halves shape, no
-  MCP parameter) degrade it to a warn point + ssh. `validate.CheckAuth` warns
-  on a lone mint/revoke and on a mint without `forge-hosts`. Implicit sessions,
-  the `disable-merge-queue` path, and the creation-time base-branch fetch are
-  outside it.
+  `auth.Mint` runs on the `shop.createWorktree` funnel right after setup
+  (fatal on failure — the half-built worktree is torn down): writes the token
+  to the mode-600 `.spinclass/git-credentials` and injects worktree-scoped
+  config (`credential.helper` + `url.insteadOf`). The mint is recorded as
+  `session.State.Credential`. `auth.Revoke` runs at `close.RunResolved`,
+  `clean.removeWorktree`, and `merge.teardownAndPush` (warn, non-fatal);
+  `auth.SweepOrphans` catches abandoned/tombstoned sessions with an unrevoked
+  record at the next creation on the repo. `[auth].forge-hosts` gates the mint
+  by origin host — unlisted ⇒ skipped, never a failure (the mechanism behind
+  the fleet placement in `~/eng/repos/sweatfile`). A FAILED mint is fatal by
+  default; `[hooks].allow-no-credential` / `sc start|run --allow-no-credential`
+  (no MCP parameter) degrades it to a warn + ssh fallback. `validate.CheckAuth`
+  warns on a lone mint/revoke or a mint without `forge-hosts`. Implicit
+  sessions, the `disable-merge-queue` path, and the creation-time base-branch
+  fetch are outside it.
 - **Stacked / queued intra-session merges** (FDR 0025, #265): a second
   `merge-this-session-async` while a gate runs ENQUEUES the next batch
   (in-process per-worktree queue, `cmd/spinclass/merge_queue.go`) rather than
@@ -409,31 +375,21 @@ subcommand is always available.
   worktree layer, while global, parent and root-checkout layers stay live), never
   from the session worktree; target selection validates at the pin.
 - **Named post-merge targets + verify** (FDR 0026, #273): a top-level
-  `[[post-merge]]` array (the `[[mcps]]`/`[[remotes]]` idiom; NOT `[[hooks.post-merge]]`
-  — TOML can't union the `post-merge` key as both a string and an array, and
-  retiring the string would be a flag-day) of `{name, command, verify?}` targets.
-  `verify` runs iff `command` exits 0; per-target verdict ∈ `ok`/`command-failed`/
-  `verify-failed` (the split a human needs). Named targets SUPERSEDE the legacy
-  `[hooks].post-merge` string (dormant, not dead — stanza-by-stanza migration). A
-  name-only entry is a removal sentinel (like `[[mcps]]`). `merge-this-session(-async)`
-  gains a `targets` param (nil=all, `[]`=none, subset=those; unknown name fails
-  PRE-landing) and `sc merge` gains `--post-merge-targets`/`--no-post-merge`. Targets
-  run **concurrently** (spinclass#276), each as its own reporter **Phase node**
-  (crap's muxing model, like the pre-merge hook): output streams as node-tagged
-  `Output` records, verdict rides on the `node_end` (`✓/✗ post-merge <name>`), the
-  ndjson writer serializes the wire, and the viewport demuxes — no hand-rolled
-  prefixer. Nodes are allocated up front in declaration order (deterministic
-  ladder; `crap.Reporter`'s id counter/err field aren't goroutine-guarded, so a
-  shared mutex guards the goroutines' output/close + the raw job-log tee). One
-  shared `post-merge-timeout` (size for max(), not sum — lock-hold = slowest
-  single target); a deadline kill → `verdict=timeout`. A failed node is
-  `severity=warn` and non-fatal (merge still succeeds); #259's wake-surfacing
-  lifts every `✗ post-merge` line. Each target snapshots the deadline/cancel
-  state at Run-return so a sibling's later timeout can't mislabel its failure.
-  The legacy `[hooks].post-merge` string stays a result-family test point (the
-  superseded single-command shim). Fields are phase-neutral
-  (no git) — paves toward the operator's "configurable pipeline phases" direction;
-  per-target `paths` filters deferred (would bake in a git-diff assumption).
+  `[[post-merge]]` array (the `[[mcps]]`/`[[remotes]]` idiom; not
+  `[[hooks.post-merge]]` — TOML can't union that key as both string and array)
+  of `{name, command, verify?}` targets, SUPERSEDING the legacy
+  `[hooks].post-merge` string (dormant, not dead). `verify` runs iff `command`
+  exits 0; per-target verdict ∈ `ok`/`command-failed`/`verify-failed`. A
+  name-only entry is a removal sentinel. `merge-this-session(-async)` gains a
+  `targets` param (nil=all, `[]`=none, subset=those; unknown name fails
+  PRE-landing) and `sc merge` gains `--post-merge-targets`/`--no-post-merge`.
+  Targets run **concurrently** (spinclass#276), each its own reporter Phase
+  node (crap's muxing model, like the pre-merge hook) — verdict rides on
+  `node_end` (`✓/✗ post-merge <name>`); a failed node is `severity=warn`,
+  non-fatal (merge still succeeds; #259 lifts every `✗ post-merge` line into
+  the wake). One shared `post-merge-timeout` sizes for the slowest target, not
+  the sum; a deadline kill → `verdict=timeout`. Per-target `paths` filters are
+  deferred (would bake in a git-diff assumption).
 - **Pre-merge REPAIR phase** (FDR 0018): when `[hooks].repair` is set,
   `PrepareMerge` runs it in the **session worktree** before the pin to fold
   mechanical fixes into the merged commit (canonical

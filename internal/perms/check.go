@@ -14,6 +14,7 @@ const (
 	closeChildSessionTool    = "mcp__plugin_spinclass_spinclass__close-child-session"
 	grantSessionHandleTool   = "mcp__plugin_spinclass_spinclass__grant-session-handle"
 	releaseSessionHandleTool = "mcp__plugin_spinclass_spinclass__release-session-handle"
+	listHandlesTool          = "mcp__plugin_spinclass_spinclass__list-handles"
 )
 
 // AlwaysAsk reports whether an invocation must prompt the human, and why. It is
@@ -70,6 +71,18 @@ func AlwaysAsk(toolName string, toolInput map[string]any) (string, bool) {
 		// named, mirroring spawn's unconditional ask above.
 		return "granting a handle confers authority on another session; the FDR 0032 handle-pass contract requires a human decision on every grant", true
 
+	case listHandlesTool:
+		// Read-only by default (held/pending listing), but accept:true mutates:
+		// accept-on-first-use promotes every pending handle to Holders and
+		// writes session state — the same rights-transfer event D12/D11 treat
+		// as security-relevant for grant-session-handle above, just reached
+		// via a different tool. Only that case needs a human; a plain listing
+		// stays silent.
+		if acceptRequested(toolInput) {
+			return "accepting a pending handle confers reap/grant/release authority on this session; the FDR 0032 handle-pass contract requires a human decision on every accept", true
+		}
+		return "", false
+
 	case releaseSessionHandleTool:
 		// A release can ORPHAN a child (D12's "orphaned when no accepted holder
 		// is alive" — sc list/sc clean surface it, but only a human closes an
@@ -96,6 +109,22 @@ func forceRequested(toolInput map[string]any) bool {
 	v, present := toolInput["force"]
 	if !present || v == nil {
 		// Absent, or JSON null — both unambiguously mean "not set".
+		return false
+	}
+	if b, ok := v.(bool); ok {
+		return b
+	}
+	return true
+}
+
+// acceptRequested reads the `accept` argument for list-handles, failing
+// CLOSED exactly like forceRequested above: anything that is not
+// definitively "not accepting" counts as a request to accept, so a
+// malformed or unexpected payload shape cannot slip past the always-ask
+// floor it exists to enforce.
+func acceptRequested(toolInput map[string]any) bool {
+	v, present := toolInput["accept"]
+	if !present || v == nil {
 		return false
 	}
 	if b, ok := v.(bool); ok {

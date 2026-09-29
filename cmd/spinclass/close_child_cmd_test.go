@@ -64,6 +64,12 @@ func TestAuthorizeChildReapMatrix(t *testing.T) {
 			child:           child("driver/main-oak", "", nil),
 		},
 		{
+			name:            "SpawnedBy == callerKey is authorized even when SpawnedByPrincipal is ALSO set (FDR 0032 D9: the session-key path survives a serve restart minting a new fallback principal)",
+			callerPrincipal: "principal-a",
+			callerKey:       "driver/main-oak",
+			child:           child("driver/main-oak", "some-other-principal", nil),
+		},
+		{
 			name:            "foreign child (different principal and spawned_by) is refused, naming both",
 			callerPrincipal: "principal-a",
 			callerKey:       "driver/main-oak",
@@ -110,23 +116,26 @@ func TestAuthorizeChildReapMatrix(t *testing.T) {
 	}
 }
 
-// childFixture stands up a repo with one spawned child worktree session and
-// returns the repo path and the child's worktree path. The child carries only
-// the legacy SpawnedBy field (no SpawnedByPrincipal/Holders) — the shape a
-// pre-FDR-0032 spawn recorded. HOME/XDG_STATE_HOME are sandboxed,
-// SPINCLASS_SESSION_ID supplies the caller's session key (currentSessionKey),
-// and CLOWN_SESSION_ID is forced empty so the caller's principal resolves to
-// the per-process fallback (currentPrincipal) rather than a real clown key —
-// exercising exactly the legacy migration branch of authorizeChildReap. Nix
-// gc is disabled via the repo sweatfile — a reap is not the place to exercise
-// the store.
-func childFixture(t *testing.T, driverKey, spawnedBy string) (repoPath, wtPath string) {
+// stageChildWorktree creates a fresh repo (a tempdir named "worker") with a
+// disable-nix-gc sweatfile — a reap is not the place to exercise the store —
+// and a "kid" worktree at <repo>/.worktrees/kid. Mirrors production setup: a
+// spinclass-managed worktree gets `.spinclass/` written into
+// `.git/info/exclude` by worktree.Create -> applyGitExcludes (it is in
+// sweatfile.GetDefault's baseline excludes). This helper stages the worktree
+// with a raw `git worktree add`, bypassing that, so without the exclude the
+// session state session.Write drops at <wt>/.spinclass/state.json would read
+// as an untracked file — and close.RunResolved's porcelain check would call
+// the child dirty and refuse to reap it without --force, defeating the very
+// cases childFixture/childHandleFixture exist to cover.
+//
+// On the host a personal global core.excludesFile masks that; inside the nix
+// sandbox there is none, so omitting this passes locally and fails in the
+// gate. Same trap, same fix, as internal/shop/shop_test.go (#65). Shared by
+// childFixture and childHandleFixture, which differ only in what session
+// state they write afterward.
+func stageChildWorktree(t *testing.T) (repoPath, wtPath string) {
 	t.Helper()
 	testgit.RequireGit(t)
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	t.Setenv("SPINCLASS_SESSION_ID", driverKey)
-	t.Setenv("CLOWN_SESSION_ID", "")
 
 	repoPath = filepath.Join(t.TempDir(), "worker")
 	testgit.MustInit(t, repoPath)
@@ -138,22 +147,29 @@ func childFixture(t *testing.T, driverKey, spawnedBy string) (repoPath, wtPath s
 	wtPath = filepath.Join(repoPath, ".worktrees", "kid")
 	testgit.MustWorktreeAdd(t, repoPath, wtPath, "kid")
 
-	// Mirror production setup: a spinclass-managed worktree gets `.spinclass/`
-	// written into `.git/info/exclude` by worktree.Create -> applyGitExcludes
-	// (it is in sweatfile.GetDefault's baseline excludes). This fixture stages
-	// the worktree with a raw `git worktree add`, bypassing that, so the
-	// session state session.Write drops at <wt>/.spinclass/state.json would
-	// read as an untracked file — and close.RunResolved's porcelain check
-	// would call the child dirty and refuse to reap it without --force,
-	// defeating the very case these tests cover.
-	//
-	// On the host a personal global core.excludesFile masks that; inside the
-	// nix sandbox there is none, so omitting this passes locally and fails in
-	// the gate. Same trap, same fix, as internal/shop/shop_test.go (#65).
 	excludePath := filepath.Join(repoPath, ".git", "info", "exclude")
 	if err := os.WriteFile(excludePath, []byte(".spinclass/\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	return repoPath, wtPath
+}
+
+// childFixture stands up a repo with one spawned child worktree session and
+// returns the repo path and the child's worktree path. The child carries only
+// the legacy SpawnedBy field (no SpawnedByPrincipal/Holders) — the shape a
+// pre-FDR-0032 spawn recorded. HOME/XDG_STATE_HOME are sandboxed,
+// SPINCLASS_SESSION_ID supplies the caller's session key (currentSessionKey),
+// and CLOWN_SESSION_ID is forced empty so the caller's principal resolves to
+// the per-process fallback (currentPrincipal) rather than a real clown key —
+// exercising exactly the legacy migration branch of authorizeChildReap.
+func childFixture(t *testing.T, driverKey, spawnedBy string) (repoPath, wtPath string) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("SPINCLASS_SESSION_ID", driverKey)
+	t.Setenv("CLOWN_SESSION_ID", "")
+
+	repoPath, wtPath = stageChildWorktree(t)
 
 	if err := session.Write(session.State{
 		SessionState: session.StateInactive,
@@ -314,7 +330,7 @@ func TestCloseChildSessionRejectsMissingArgs(t *testing.T) {
 // not a worktree.
 func TestCloseChildSessionFromNonRepoCwdByHolder(t *testing.T) {
 	testgit.RequireGit(t)
-	const holderPrincipal = "4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2"
+	const holderPrincipal = "1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f"
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("CLOWN_SESSION_ID", holderPrincipal)
@@ -440,6 +456,51 @@ func TestCloseChildSessionEmitsExitWake(t *testing.T) {
 				t.Errorf("holders = %q, want %q (caller principal excluded)", got, "sibling-a,sibling-b")
 			}
 		})
+	}
+}
+
+// TestCloseChildSessionRefusesClosedChild pins the FDR 0032 tombstone guard:
+// a child that is already closed must refuse with a friendly message BEFORE
+// the accept-on-first-use write ever touches session.Write, which would
+// otherwise fail with a raw "no such file" error since the worktree is gone.
+func TestCloseChildSessionRefusesClosedChild(t *testing.T) {
+	testgit.RequireGit(t)
+	const pendingPrincipal = "9c2e1111-2222-3333-4444-555566667777"
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CLOWN_SESSION_ID", pendingPrincipal)
+	t.Setenv("SPINCLASS_SESSION_ID", "")
+
+	repoPath, wtPath := stageChildWorktree(t)
+	if err := session.Write(session.State{
+		SessionState:       session.StateInactive,
+		RepoPath:           repoPath,
+		WorktreePath:       wtPath,
+		Branch:             "kid",
+		SessionKey:         "worker/kid",
+		SpawnedByPrincipal: "some-other-spawner",
+		Holders:            []string{"some-other-spawner"},
+		PendingHandles:     []string{pendingPrincipal},
+		Entrypoint:         []string{"/bin/sh"},
+		StartedAt:          time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Tombstone the session out from under the pending holder, mirroring a
+	// close/reap that already happened before this call.
+	if err := session.Tombstone(repoPath, "kid", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(wtPath); err != nil {
+		t.Fatal(err)
+	}
+
+	text, isErr := callCloseChild(t, `{"child":"worker/kid"}`)
+	if !isErr {
+		t.Fatalf("expected a refusal for a closed child, got success: %s", text)
+	}
+	if !strings.Contains(text, "worker/kid is closed") {
+		t.Errorf("refusal %q should say the child is closed, not surface a raw session.Write error", text)
 	}
 }
 

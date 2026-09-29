@@ -63,6 +63,7 @@ func Run(w io.Writer, target, newBranchName, format string) error {
 		SpawnedByPrincipal: st.SpawnedByPrincipal,
 		Holders:            st.Holders,
 		PendingHandles:     st.PendingHandles,
+		HandleRights:       st.HandleRights,
 		StartedAt:          time.Now(),
 	}
 	if err := session.Write(fresh); err != nil {

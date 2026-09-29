@@ -622,9 +622,10 @@ func TestAttachPreservesFieldsItDoesNotOwn(t *testing.T) {
 		Branch:             "spawned-worker",
 		SessionKey:         "myrepo/spawned-worker",
 		SpawnedBy:          "myrepo/driver",
-		SpawnedByPrincipal: "4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2",
-		Holders:            []string{"4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2"},
+		SpawnedByPrincipal: "1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f",
+		Holders:            []string{"1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f"},
 		PendingHandles:     []string{"9c2e1111-2222-3333-4444-555566667777"},
+		HandleRights:       map[string]string{"9c2e1111-2222-3333-4444-555566667777": "observe"},
 		HelloSentAt:        &hello,
 		PreMergeAttestation: &session.PreMergeAttestation{
 			RecordedAt: hello,
@@ -654,14 +655,17 @@ func TestAttachPreservesFieldsItDoesNotOwn(t *testing.T) {
 	if got.SpawnedBy != "myrepo/driver" {
 		t.Errorf("SpawnedBy = %q, want %q (clobbered by attach)", got.SpawnedBy, "myrepo/driver")
 	}
-	if got.SpawnedByPrincipal != "4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2" {
+	if got.SpawnedByPrincipal != "1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f" {
 		t.Errorf("SpawnedByPrincipal = %q, want carried forward (clobbered by attach)", got.SpawnedByPrincipal)
 	}
-	if len(got.Holders) != 1 || got.Holders[0] != "4d56b43b-1b45-430d-9ed6-e3f2dc05ffe2" {
+	if len(got.Holders) != 1 || got.Holders[0] != "1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f" {
 		t.Errorf("Holders = %v, want carried forward (clobbered by attach)", got.Holders)
 	}
 	if len(got.PendingHandles) != 1 || got.PendingHandles[0] != "9c2e1111-2222-3333-4444-555566667777" {
 		t.Errorf("PendingHandles = %v, want carried forward (clobbered by attach)", got.PendingHandles)
+	}
+	if got := got.HandleRights["9c2e1111-2222-3333-4444-555566667777"]; got != "observe" {
+		t.Errorf("HandleRights = %v, want carried forward (clobbered by attach)", got)
 	}
 	if got.HelloSentAt == nil || !got.HelloSentAt.Equal(hello) {
 		t.Errorf("HelloSentAt = %v, want %v (clobbered by attach)", got.HelloSentAt, hello)

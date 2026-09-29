@@ -69,7 +69,11 @@ sc clean
 | `sc rebuild [target] [--check]` | Re-apply a drifted worktree's setup and refresh its fingerprint; `--check` reports stale/fresh (exits nonzero if stale) |
 | `sc fork [branch]` | Fork the current worktree into a new branch (supports `--from <dir>`); create-only (the `--brief` detached worker was removed in #262) |
 | `sc spawn [repo] --brief "…"` | Launch a detached, harness-booted worker session (blocks on the worker's chat hello); `repo` is optional — omit it (or name the current repo) to spawn in THIS repo, else a sibling (#262) |
-| `sc close-child-session <child>` | Close a worker session this session spawned; refuses anything it did not spawn (`--force` for a child with unmerged work) |
+| `sc close-child-session <child>` | Close a worker session this session holds a handle on (seeded at spawn, extendable via a grant); refuses anything it holds no handle on (`--force` for a child with unmerged work) |
+| `sc grant-session-handle <child> <to> [--rights R]` | Grant another principal a handle on a session this one holds a handle on |
+| `sc release-session-handle <child>` | Release this session's own handle on a session |
+| `sc list-handles [--accept]` | List handles this session holds or is pending on |
+| `sc whoami` | Print this session's principal, session key, and handles |
 | `sc pull` | Pull repos and rebase worktrees |
 | `sc validate` | Validate the sweatfile hierarchy |
 | `sc perms list\|review\|edit` | Inspect or edit permission tier rules |
