@@ -209,6 +209,85 @@ func TestResolvedRepairNoopCompletes(t *testing.T) {
 	}
 }
 
+// TestPrepareMergeRefusesDirtyWorktreeBeforeRepair (#345): an amending repair
+// would fold uncommitted tracked edits into the pinned commit, so the merge is
+// refused before repair runs and the edits are left untouched.
+func TestPrepareMergeRefusesDirtyWorktreeBeforeRepair(t *testing.T) {
+	repoDir, wtPath, head := setupRepairRepo(t, "feature")
+	writeRepoSweatfile(t, repoDir,
+		"[hooks]\nrepair = \"git add -A && git commit --amend --no-edit -q\"\n")
+	// Without autostash git's own rebase refuses a dirty tree; with it (the
+	// #200 / queued-merge scenario) the rebase succeeds and the edit survives.
+	runGit(t, wtPath, "config", "rebase.autoStash", "true")
+	dirty := filepath.Join(wtPath, "a.txt")
+	if err := os.WriteFile(dirty, []byte("edited"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pinnedSha, tests, err := runPrepare(t, repoDir, wtPath, "feature")
+	if err == nil {
+		t.Fatalf("expected refusal, got pinnedSha=%s (points: %v; HEAD %s, was %s)",
+			pinnedSha, testDescs(tests), runGit(t, wtPath, "rev-parse", "HEAD"), head)
+	}
+	if !strings.Contains(err.Error(), "uncommitted changes") || !strings.Contains(err.Error(), "a.txt") {
+		t.Errorf("err = %v, want uncommitted changes + a.txt", err)
+	}
+	if tr, ok := findTest(tests, "dirty check feature"); !ok || tr.OK {
+		t.Errorf("want failing dirty check point, got %+v (all: %v)", tr, testDescs(tests))
+	}
+	if tr, ok := findTest(tests, "repair feature"); ok {
+		t.Errorf("repair must not run, got %+v", tr)
+	}
+	if got := runGit(t, wtPath, "rev-parse", "HEAD"); got != head {
+		t.Errorf("HEAD = %s, want unchanged %s", got, head)
+	}
+	if b, _ := os.ReadFile(dirty); string(b) != "edited" {
+		t.Errorf("dirty edit lost: a.txt = %q", b)
+	}
+}
+
+// TestPrepareMergeUntrackedFilesDoNotBlockRepair: untracked files cannot be
+// amended into a commit by the guard's concern, so they do not trigger it.
+func TestPrepareMergeUntrackedFilesDoNotBlockRepair(t *testing.T) {
+	repoDir, wtPath, _ := setupRepairRepo(t, "feature")
+	writeRepoSweatfile(t, repoDir, "[hooks]\nrepair = \"true\"\n")
+	if err := os.WriteFile(filepath.Join(wtPath, "scratch.txt"), []byte("s"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, tests, err := runPrepare(t, repoDir, wtPath, "feature")
+	if err != nil {
+		t.Fatalf("PrepareMerge: %v", err)
+	}
+	if tr, ok := findTest(tests, "repair feature (already conformant)"); !ok || !tr.OK {
+		t.Errorf("want ok already-conformant repair point, got %v", testDescs(tests))
+	}
+	if tr, ok := findTest(tests, "dirty check"); ok {
+		t.Errorf("unexpected dirty check point: %+v", tr)
+	}
+}
+
+// TestPrepareMergeNoRepairSkipsDirtyCheck: without an active repair phase the
+// guard never runs, so a dirty worktree behaves exactly as before.
+func TestPrepareMergeNoRepairSkipsDirtyCheck(t *testing.T) {
+	repoDir, wtPath, _ := setupRepairRepo(t, "feature")
+	if err := os.WriteFile(filepath.Join(wtPath, "a.txt"), []byte("edited"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// autoStash lets the rebase get past the dirty tree, so the (absent) guard
+	// is what is actually under test.
+	runGit(t, wtPath, "config", "rebase.autoStash", "true")
+
+	_, tests, err := runPrepare(t, repoDir, wtPath, "feature")
+	if err != nil {
+		t.Fatalf("PrepareMerge should proceed without repair: %v (points: %v)", err, testDescs(tests))
+	}
+	if tr, ok := findTest(tests, "dirty check"); ok {
+		t.Errorf("unexpected dirty check point: %+v", tr)
+	}
+}
+
 func testDescs(tests []ndjsoncrap.Test) []string {
 	out := make([]string, len(tests))
 	for i, tr := range tests {

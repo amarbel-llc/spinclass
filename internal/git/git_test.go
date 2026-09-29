@@ -81,6 +81,46 @@ func TestUnmergedPaths(t *testing.T) {
 	}
 }
 
+// TestDirtyTrackedPaths: clean → nil; untracked-only → nil; unstaged edit and
+// staged-only edit → the path.
+func TestDirtyTrackedPaths(t *testing.T) {
+	_, repo := newRepo(t)
+	write := func(name, content string) {
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("t.txt", "base\n")
+	mustRun(t, repo, "add", "t.txt")
+	mustRun(t, repo, "commit", "-m", "track")
+
+	if got, err := DirtyTrackedPaths(repo); err != nil || len(got) != 0 {
+		t.Fatalf("clean: got %v, err %v; want nil", got, err)
+	}
+
+	write("scratch.txt", "x\n")
+	if got, err := DirtyTrackedPaths(repo); err != nil || len(got) != 0 {
+		t.Fatalf("untracked-only: got %v, err %v; want nil", got, err)
+	}
+
+	write("t.txt", "changed\n")
+	if got, err := DirtyTrackedPaths(repo); err != nil || len(got) != 1 || got[0] != "t.txt" {
+		t.Fatalf("unstaged: got %v, err %v; want [t.txt]", got, err)
+	}
+
+	mustRun(t, repo, "add", "t.txt")
+	if got, err := DirtyTrackedPaths(repo); err != nil || len(got) != 1 || got[0] != "t.txt" {
+		t.Fatalf("staged-only: got %v, err %v; want [t.txt]", got, err)
+	}
+
+	mustRun(t, repo, "reset", "--hard", "HEAD")
+	write("ita.txt", "new\n")
+	mustRun(t, repo, "add", "-N", "ita.txt")
+	if got, err := DirtyTrackedPaths(repo); err != nil || len(got) != 1 || got[0] != "ita.txt" {
+		t.Fatalf("intent-to-add: got %v, err %v; want [ita.txt]", got, err)
+	}
+}
+
 // newRepo returns a fresh repo on `main` with one commit, isolated from the
 // host's git config.
 func newRepo(t *testing.T) (root, repo string) {

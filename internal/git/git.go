@@ -202,6 +202,25 @@ func UnmergedPaths(path string) ([]string, error) {
 	return strings.Split(out, "\n"), nil
 }
 
+// DirtyTrackedPaths returns the tracked files whose worktree or index content
+// differs from HEAD (staged or unstaged), or nil when clean. Untracked files
+// are ignored: they are invisible to an amend of already-tracked content.
+// Unlike HasDirtyTracked (a bool that ignores errors), this names the paths
+// and surfaces git failures; it is NUL-delimited so paths come back exact.
+func DirtyTrackedPaths(path string) ([]string, error) {
+	out, err := RunStdin(path, "", "diff", "--name-only", "-z", "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, p := range strings.Split(string(out), "\x00") {
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
+}
+
 func RevListLeftRight(path string) (ahead, behind int) {
 	out, err := Run(path, "rev-list", "--left-right", "--count", "@{upstream}...HEAD")
 	if err != nil {
@@ -232,6 +251,9 @@ func LastCommitDate(path string) string {
 	return out
 }
 
+// HasDirtyTracked reports whether repoPath has staged or unstaged tracked
+// changes, as a bool only (git errors read as dirty). See DirtyTrackedPaths for
+// the path-naming, error-returning variant.
 func HasDirtyTracked(repoPath string) bool {
 	cmd := exec.Command("git", "-C", repoPath, "diff", "--quiet")
 	if err := cmd.Run(); err != nil {

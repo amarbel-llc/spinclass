@@ -404,8 +404,10 @@ subcommand is always available.
   `PrepareMerge` runs it in the **session worktree** before the pin to fold
   mechanical fixes into the merged commit (canonical
   `conformist --commit --amend --exit-zero-on-fix`; amend detected via HEAD-sha
-  delta). Merge-only. spinclass's own sweatfile has
-  **retired** this in favour of the per-commit hook below.
+  delta). Merge-only. A worktree with uncommitted tracked changes is refused
+  before REPAIR runs (`dirty check <branch>`, #345) — otherwise the amend would
+  fold them into the pinned commit; untracked files don't count. spinclass's
+  own sweatfile has **retired** this in favour of the per-commit hook below.
 - **Per-commit repair hook** (FDR 0019, #183, #267): `[hooks].pre-commit`
   installs a per-worktree git pre-commit hook (`internal/apply/precommit.go`)
   so drift is repaired at authoring time. Canonical value is the store-pinned

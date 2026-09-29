@@ -147,10 +147,12 @@ So REPAIR runs in the **session worktree**, inside the synchronous
 5. `git merge --ff-only pinnedSha` lands the repaired commit on the default
    branch.
 
-Because `PrepareMerge` already mutates wtPath (the rebase) and already runs
-synchronously before `merge-this-session-async` returns its job id, slotting
-repair in here adds no new concurrency hazard: the agent has not regained
-control, so nothing can race the amend. The freeze window FDR 0013 shrank from
+`PrepareMerge` already mutates wtPath (the rebase) and runs synchronously
+before `merge-this-session-async` returns its job id, but that does not make
+the amend race-free: a concurrent editor (a subagent, or the agent itself
+while a QUEUED merge re-prepares, FDR 0025) can write tracked files between
+the rebase and the amend. The dirty check (Limitations, #345) narrows this but
+cannot close it. The freeze window FDR 0013 shrank from
 "the whole hook" to "the rebase" grows to "the rebase + the format" — and
 format is seconds, not the minutes a full build/test hook costs, which still
 runs detached.
@@ -215,6 +217,18 @@ not ok   repair prime-pine
 
 ## Limitations
 
+- **Dirty worktree is refused (#345).** Repair amends HEAD in the session
+  worktree, so uncommitted edits to tracked files (staged or unstaged) would be
+  folded into the pinned commit. Immediately before repair runs, `PrepareMerge`
+  checks `git.DirtyTrackedPaths` and fails with a `dirty check <branch>` point
+  naming the paths; nothing is stashed or amended. This upholds FDR 0025's
+  promise that edits made while a merge runs are left for the next merge — a
+  queued merge re-prepares against a worktree the agent may have kept editing.
+  Untracked files are ignored, and the check only runs when repair is active.
+  The guard is check-then-act: it narrows the race window to the repair
+  command's own runtime but cannot close it. The structural fix (amend only the
+  paths the repair tool rewrote, or snapshot `git diff HEAD` before/after and
+  refuse if the amend swept more) is follow-up work: spinclass#346.
 - **GPG signing.** `git commit --amend` re-signs HEAD. Per repo policy commits
   are signed via the piggy/PIV agent; if it is locked the amend fails (exit 2,
   git's stderr), repair fails, and the merge aborts with a legible "repair

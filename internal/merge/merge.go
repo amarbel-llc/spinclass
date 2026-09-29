@@ -318,6 +318,22 @@ func (p mergePreamble) repair(ts *crap.TestStream, dir, branch string) error {
 	if !p.haveHierarchy || !p.hierarchy.Merged.RepairActive() {
 		return nil
 	}
+	// Repair amends HEAD in the session worktree, so any uncommitted tracked
+	// edit there (e.g. a queued merge re-preparing while the agent kept
+	// editing, or a rebase.autoStash pop) would be folded into the pinned
+	// commit. FDR 0025 promises "edits made while a merge runs are left for
+	// the next merge" (#345): refuse before repair, leaving them untouched.
+	// Untracked files cannot be amended in by a tracked-file check and are
+	// ignored. Only checked when repair actually runs.
+	if dirty, dErr := git.DirtyTrackedPaths(dir); dErr != nil {
+		return failStep(ts, "dirty check "+branch, dErr, "")
+	} else if len(dirty) > 0 {
+		dirtyErr := fmt.Errorf(
+			"uncommitted changes in the worktree would be amended into the merged commit by the repair phase: %s; commit or stash them, then re-merge",
+			strings.Join(dirty, ", "),
+		)
+		return failStep(ts, "dirty check "+branch, dirtyErr, "")
+	}
 	return runRepairPhase(ts, p.hierarchy, dir, branch)
 }
 

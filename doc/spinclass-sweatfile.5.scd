@@ -386,7 +386,11 @@ does not export *WORKTREE*.
 	*HEAD*, so the verify hook and fast-forward merge act on the repaired
 	commit.
 
-	Repair is *merge-only* — *sc check* and *check-this-session* do not run
+	A worktree with uncommitted changes to tracked files is refused before
+	repair runs (*dirty check*, spinclass#345), since the amend would fold
+	them into the merged commit; untracked files are ignored.
+
+	Repair is *merge-only* —*sc check* and *check-this-session* do not run
 	it, and merging from an implicit (main-checkout) session is not
 	supported at all (spinclass#317). Because the amend re-signs *HEAD*, a locked
 	commit-signing agent fails repair (and thus the merge) rather than
