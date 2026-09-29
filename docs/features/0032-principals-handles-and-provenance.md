@@ -578,18 +578,24 @@ its owning repo's session (research belongs to the owning repo), MUST cite
 FDR 0032 as its parent, and MUST satisfy the contract stated for it. A tracking
 issue is filed per record.
 
-| Repo | Record | Owns | Contract it must satisfy |
-|---|---|---|---|
-| troupe | RFC (identity, certificates, the signed-record grammar, `<prov>`, the transcript DAG) | D7 troupe row, D8, D10, D15 | the D8 grammar as normative; keypair at the existing mint; root bootstrap with one 9C touch; certificate request/ack over chat replacing the spinclass hello; presence carries the certificate; `verify-quote`, `transcript append`, enrolled devices and pre-auth windows; "no troupe = uncertified", never a software root |
-| piggy | FDR (agent tiers, 9C, fibby as holder) | D3, D11 | the SSH-agent seam with sshsig; tier 1 software keys; tier 2 separate-uid service with `SO_PEERCRED`+cgroup attribution; tier 3 fibby (phase 5 applet); 9C PIN-always/touch-always enrolled by papi with F9 attestation published; the askpass sidecar; the card/slot cleanup and defaults UX |
-| clown | note or RFC (scopes, tee, parent JID) | D7 clown row, slice 2 | agent scope vs frontend scope as transient units; `clown-hook-tee` hands byte ranges to `troupe transcript append`, durable-local-first; parent JID in the child env; whether keystrokes are observable above `claude` |
-| spinclass + clown + juggler | FDR (session confinement) | D17 | the unit shape: `ProtectHome`, bind-mounted worktree, dynamic uid, sockets passed in; `--tent` as a realization; juggler as launcher |
-| ringmaster | note | D7 ringmaster row | RFC-0019 annotation kinds for issuance, grant, accept, release, revoke, escalation; exit-wake reason tags |
-| circus | note | D15 | XEP-0050 admin surface (the FDR 0019 addendum); enrolled-device provisioning on the operator's Snikket account |
-| juggler | FDR (subagent platform) | slice 3 | a subagent under a certified principal with a `<prov>` transcript; parent instructions signed under the operator chain |
-| papi | change | D11 | 9C enrollment step and attestation publication |
-| spinclass | revisions to FDR 0007 and FDR 0031 | D16 | attestations as signed records from distinct subagent principals; exemption predicates select required record kinds |
-| moxy / purse-first | note | D13, D16 | moxins declare the rights they enforce and emit signed execution records in the D8 grammar |
+Every tracking issue carries the label `spinclass-fdr-0032` in its repo (the
+label was created in each forge repo for this purpose; circus, still on
+GitHub, lacks it until added by hand).
+
+| Repo | Record | Issue | Owns | Contract it must satisfy |
+|---|---|---|---|---|
+| troupe | RFC (identity, certificates, the signed-record grammar, `<prov>`, the transcript DAG) | troupe#39 | D7 troupe row, D8, D10, D15 | the D8 grammar as normative; keypair at the existing mint; root bootstrap with one 9C touch; certificate request/ack over chat replacing the spinclass hello; presence carries the certificate; `verify-quote`, `transcript append`, enrolled devices and pre-auth windows; "no troupe = uncertified", never a software root |
+| piggy | FDR (agent tiers, 9C, fibby as holder) | piggy#297 | D3, D11 | the SSH-agent seam with sshsig; tier 1 software keys; tier 2 separate-uid service with `SO_PEERCRED`+cgroup attribution; tier 3 fibby (phase 5 applet); 9C PIN-always/touch-always enrolled by papi with F9 attestation published; the askpass sidecar; the card/slot cleanup and defaults UX |
+| clown | note or RFC (scopes, tee, parent JID) | clown#244 | D7 clown row, slice 2 | agent scope vs frontend scope as transient units; `clown-hook-tee` hands byte ranges to `troupe transcript append`, durable-local-first; parent JID in the child env; whether keystrokes are observable above `claude` |
+| clown (juggler) | FDR (subagent platform) | clown#245 | slice 3 | a subagent under a certified principal with a `<prov>` transcript; parent instructions signed under the operator chain. juggler lives in clown (`cmd/juggler`) |
+| spinclass + clown + juggler | FDR (session confinement) | spinclass#338 | D17 | the unit shape: `ProtectHome`, bind-mounted worktree, dynamic uid, sockets passed in; `--tent` as a realization; juggler as launcher |
+| spinclass | security review | spinclass#339 | D17 | findings recorded in D17; `testing -> accepted` requires it |
+| spinclass | revisions to FDR 0007 and FDR 0031 | spinclass#337 | D16 | attestations as signed records from distinct subagent principals; exemption predicates select required record kinds |
+| ringmaster | note | ringmaster#25 | D7 ringmaster row | RFC-0019 annotation kinds for issuance, grant, accept, release, revoke, escalation; exit-wake reason tags |
+| circus (GitHub) | note | amarbel-llc/circus#255 | D15 | XEP-0050 admin surface (the FDR 0019 addendum); enrolled-device provisioning on the operator's Snikket account |
+| papi | change | papi#87 | D11 | 9C enrollment step and attestation publication |
+| moxy | note | moxy#443 | D13, D16 | moxins declare the rights they enforce and emit signed execution records in the D8 grammar |
+| purse-first | note | purse-first#194 | D13, D16 | manifest and `go-mcp` support for declared rights and execution records |
 
 ## Limitations
 
