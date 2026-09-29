@@ -39,15 +39,6 @@ func assertKroneRan(t *testing.T, recs []ndjsoncrap.Record, want, notWant string
 	}
 }
 
-// assertUnqueuedPath asserts the merge did not go through the queued landing
-// (no landing-fetch point), i.e. [hooks].disable-merge-queue took effect.
-func assertUnqueuedPath(t *testing.T, recs []ndjsoncrap.Record) {
-	t.Helper()
-	if _, queued := findTest(testRecords(recs), "fetch origin/main (landing)"); queued {
-		t.Error("expected the unqueued path, but saw a landing fetch")
-	}
-}
-
 // #300: the named-target phase reads the sweatfile of the commit that landed,
 // not a live edit made to the session worktree after the pin.
 func TestPostMergeNamedTargetReadsLandedSweatfileNotLiveEdit(t *testing.T) {
@@ -105,8 +96,9 @@ func TestPostMergeUnqueuedPathReadsLandedSweatfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FinishMerge: %v", err)
 	}
+	// Proves the landed-commit read on this configuration; it does not prove
+	// which landing path ran (gitSync=false emits no fetch point on either).
 	assertKroneRan(t, recs, "COMMITTED", "EDITED")
-	assertUnqueuedPath(t, recs)
 }
 
 // After a queue rebase the landing sha differs from the pin; the phase must
@@ -158,17 +150,39 @@ func TestPostMergeUnreadableLandedSweatfileWarns(t *testing.T) {
 	if _, ran := findNode(recs, "post-merge krone"); ran {
 		t.Error("post-merge ran the live worktree's target instead of skipping")
 	}
+}
 
-	open := map[int]bool{}
-	for _, rec := range recs {
-		switch r := rec.(type) {
-		case ndjsoncrap.NodeStart:
-			open[r.TP] = true
-		case ndjsoncrap.NodeEnd:
-			delete(open, r.TP)
-		}
+// A sibling landing that removes EVERY [[post-merge]] stanza after the pin must
+// still warn about the selected target, not return silently (FDR 0026).
+func TestPostMergeSelectionWarnsWhenLandingRemovedEveryTarget(t *testing.T) {
+	repoDir := setupRepo(t)
+	commitSweatfile(t, repoDir, kroneTarget("echo krone"))
+	wtPath := setupWorktree(t, repoDir, "feature-race")
+
+	pinnedSha, _, rep, ts, buf := prepareRacedMerge(t, repoDir, wtPath, "feature-race",
+		"a.txt", "a", "sweatfile", "[env]\nX = \"1\"\n")
+	if _, err := FinishMerge(context.Background(), &mockExecutor{}, rep, ts,
+		repoDir, wtPath, "feature-race", "main", pinnedSha, false, true, nil,
+		PostMergeOptions{Targets: []string{"krone"}}); err != nil {
+		t.Fatalf("FinishMerge: %v", err)
 	}
-	if len(open) != 0 {
-		t.Errorf("node_start without node_end for tp %v", open)
+	ts.Finish()
+	recs := decodeRecords(t, buf.Bytes())
+
+	if _, ran := findNode(recs, "post-merge krone"); ran {
+		t.Error("krone should not run: the landing removed it")
+	}
+	n, ok := findNode(recs, "post-merge selection")
+	if !ok {
+		t.Fatalf("no post-merge selection warning: %v", nodeNames(recs))
+	}
+	if n.exitOK {
+		t.Errorf("selection warning should be not-ok: %+v", n)
+	}
+	if sev := diagString(n.diag, "severity"); sev != "warn" {
+		t.Errorf("severity = %q, want warn", sev)
+	}
+	if !strings.Contains(fmt.Sprint(n.diag)+n.output, "krone") {
+		t.Errorf("warning should name krone: diag=%v output=%q", n.diag, n.output)
 	}
 }

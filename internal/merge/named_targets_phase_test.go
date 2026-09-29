@@ -1,8 +1,6 @@
 package merge
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -299,13 +297,9 @@ command = "echo krone"
 // this merge rebased onto it must fail the selection pre-landing.
 func TestPostMergeSelectionValidatesAgainstPinnedSweatfile(t *testing.T) {
 	repoDir := setupRepo(t)
-	commitSweatfile(t, repoDir, "[[post-merge]]\nname = \"krone\"\ncommand = \"echo krone\"\n")
+	commitSweatfile(t, repoDir, kroneTarget("echo krone"))
 	wtPath := setupWorktree(t, repoDir, "feature")
-	if err := os.WriteFile(filepath.Join(wtPath, "a.txt"), []byte("a"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, wtPath, "add", "a.txt")
-	runGit(t, wtPath, "commit", "-m", "feature commit")
+	commitFeature(t, wtPath)
 	commitSweatfile(t, repoDir, "[[post-merge]]\nname = \"nikulin\"\ncommand = \"echo nikulin\"\n")
 	mainBefore := runGit(t, repoDir, "rev-parse", "main")
 
@@ -330,13 +324,7 @@ func TestPostMergeSelectionValidatesAgainstPinnedSweatfile(t *testing.T) {
 // A pinned sweatfile that cannot be parsed must not read as "unknown target":
 // the selection fails pre-landing with a distinct "unreadable" message.
 func TestPostMergeSelectionUnreadablePinnedSweatfile(t *testing.T) {
-	repoDir := setupRepo(t)
-	wtPath := setupWorktree(t, repoDir, "feature")
-	if err := os.WriteFile(filepath.Join(wtPath, "a.txt"), []byte("a"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, wtPath, "add", "a.txt")
-	runGit(t, wtPath, "commit", "-m", "feature commit")
+	repoDir, wtPath := setupPostMergeRepo(t, "feature")
 	commitSweatfile(t, wtPath, "[[post-merge]\nbroken")
 	mainBefore := runGit(t, repoDir, "rev-parse", "main")
 

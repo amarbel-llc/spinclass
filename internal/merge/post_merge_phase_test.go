@@ -25,12 +25,19 @@ func setupPostMergeRepo(t *testing.T, branch string) (repoDir, wtPath string) {
 	t.Helper()
 	repoDir = setupRepo(t)
 	wtPath = setupWorktree(t, repoDir, branch)
+	commitFeature(t, wtPath)
+	return repoDir, wtPath
+}
+
+// commitFeature commits a.txt ("a") in wtPath: the one feature commit that
+// makes a merge land (see landed).
+func commitFeature(t *testing.T, wtPath string) {
+	t.Helper()
 	if err := os.WriteFile(filepath.Join(wtPath, "a.txt"), []byte("a"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	runGit(t, wtPath, "add", "a.txt")
 	runGit(t, wtPath, "commit", "-m", "feature commit")
-	return repoDir, wtPath
 }
 
 // runFinish drives PrepareMerge + FinishMerge over a buffered Reporter and
@@ -569,6 +576,4 @@ func TestPostMergeRunsOnUnqueuedPath(t *testing.T) {
 	if !tr.OK {
 		t.Errorf("post-merge point not ok: %+v", tr)
 	}
-	// Sanity: the queue really was disabled (no wait/landing-pull points).
-	assertUnqueuedPath(t, recs)
 }

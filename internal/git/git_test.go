@@ -138,6 +138,15 @@ func TestFileAtRev(t *testing.T) {
 		t.Fatalf("HEAD:dir = (%q, %v, %v), want (nil, false, nil)", data, found, err)
 	}
 
+	if err := os.Symlink("target", filepath.Join(repo, "link")); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, repo, "add", "link")
+	mustRun(t, repo, "commit", "-m", "symlink")
+	if _, found, err = FileAtRev(repo, "HEAD", "link"); err == nil || found {
+		t.Fatalf("HEAD:link (symlink) = (found=%v, err=%v), want an error", found, err)
+	}
+
 	if _, _, err = FileAtRev(repo, "no-such-rev", "sweatfile"); err == nil {
 		t.Fatal("bad rev: want an error")
 	}

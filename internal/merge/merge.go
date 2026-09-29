@@ -1064,6 +1064,21 @@ func runPostMergePhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStr
 		})
 		return
 	}
+	// Re-select against the LANDED set before the active-phase early return: a
+	// sibling landing between the pin and this landing (#300) may have removed
+	// every selected target (or every [[post-merge]] stanza), which would
+	// otherwise return silently and skip the deploy without a word.
+	active := hierarchy.Merged.ActivePostMergeTargets()
+	var selected []sweatfile.PostMergeTarget
+	if !hierarchy.Merged.PostMergeDisabled() {
+		var selErr error
+		selected, selErr = selectPostMergeTargets(active, pm.Targets)
+		if selErr != nil {
+			ph := rep.Phase("post-merge selection (" + shortSha(landedSha) + ")")
+			ph.FailDiag(selErr, map[string]any{"severity": "warn"})
+			return
+		}
+	}
 	if !hierarchy.Merged.PostMergePhaseActive() {
 		return
 	}
@@ -1105,8 +1120,8 @@ func runPostMergePhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStr
 	})
 
 	// Named targets supersede the legacy string (FDR 0026).
-	if active := hierarchy.Merged.ActivePostMergeTargets(); len(active) > 0 {
-		runNamedPostMergeTargets(ctx, rep, active, postMergeTargets, runDir, env, landedSha, phaseCap, deadline, activity)
+	if len(active) > 0 {
+		runNamedPostMergeTargets(ctx, rep, selected, runDir, env, landedSha, phaseCap, deadline, activity)
 		return
 	}
 
@@ -1166,16 +1181,7 @@ func runPostMergePhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStr
 // SPINCLASS_POST_MERGE_DEADLINE, so what is advertised is what is enforced.
 // Each target additionally gets SPINCLASS_POST_MERGE_TARGET=<its name>, so one
 // script can serve several targets.
-func runNamedPostMergeTargets(ctx context.Context, rep *crap.Reporter, active []sweatfile.PostMergeTarget, requested []string, runDir string, env []string, landedSha string, phaseCap time.Duration, deadline time.Time, activity io.Writer) {
-	selected, selErr := selectPostMergeTargets(active, requested)
-	if selErr != nil {
-		// Pre-landing validation (PrepareMerge) should have caught
-		// this; surface defensively rather than silently deploying nothing.
-		ph := rep.Phase("post-merge selection (" + shortSha(landedSha) + ")")
-		ph.FailDiag(selErr, map[string]any{"severity": "warn"})
-		return
-	}
-
+func runNamedPostMergeTargets(ctx context.Context, rep *crap.Reporter, selected []sweatfile.PostMergeTarget, runDir string, env []string, landedSha string, phaseCap time.Duration, deadline time.Time, activity io.Writer) {
 	// One shared wall-clock deadline for the whole phase (FDR 0026): with targets
 	// running concurrently (spinclass#276), this bounds lock-hold to the slowest
 	// single target rather than their sum. <=0 means the cap is disabled.
