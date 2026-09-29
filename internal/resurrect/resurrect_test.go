@@ -46,6 +46,7 @@ func setupClosedSession(t *testing.T, branch string) (repoPath, wtPath string) {
 	// Hermetic HOME: resurrect now runs the credential lane, which reads the
 	// global sweatfile; the developer's real one must not be able to mint.
 	t.Setenv("HOME", root)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, ".config"))
 	repoPath = filepath.Join(root, "repo")
 	wtPath = filepath.Join(repoPath, ".worktrees", branch)
 	testgit.MustInit(t, repoPath)
@@ -229,6 +230,12 @@ func TestRunRefusesWhenURLResolverFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "url-resolver") {
 		t.Errorf("error = %q, want mention of url-resolver", err)
+	}
+	if !strings.Contains(err.Error(), "set [hooks].allow-no-credential to resurrect without a push credential") {
+		t.Errorf("error = %q, want the resurrect-specific hint", err)
+	}
+	if strings.Contains(err.Error(), "--allow-no-credential") {
+		t.Errorf("error = %q, must not name a flag resurrect does not have", err)
 	}
 	if _, serr := os.Stat(wtPath); !os.IsNotExist(serr) {
 		t.Errorf("worktree should be torn down, stat err = %v", serr)

@@ -121,7 +121,7 @@ These were agreed with the operator on 2026-09-29. They are not open questions.
    direction: newline-delimited JSON-RPC 2.0 over stdio (juggler(7)'s framing)
    for one-shot plugins (start-commands, FDR 0031 exemptions, this resolver).
    The repo has **no `docs/rfcs/`**, so per the operator's fallback it is an
-   FDR draft, `docs/features/0032-one-shot-plugin-protocol.md` (the next free
+   FDR draft, `docs/features/0033-one-shot-plugin-protocol.md` (the next free
    number as of 2026-09-29; re-check at write time).
 6. **No detector without a resolver.** With `url-resolver` unset, the built-in
    `https://<host>/` + ssh-prefix rewrite is unchanged, and an owner-form
@@ -737,7 +737,7 @@ No behaviour changes in this task.
    interface/behaviour section saying resurrect now runs the FDR 0028
    credential lane before re-registering. A failed mint or resolve refuses the
    resurrect and leaves the tombstone intact.
-3. `docs/features/0032-one-shot-plugin-protocol.md` (verify 0032 is still
+3. `docs/features/0033-one-shot-plugin-protocol.md` (verify 0033 is still
    free). Front matter: `status: proposed`, `date: 2026-09-29`, and
    `promotion-criteria` (proposed → experimental: one of the three surfaces
    speaks it behind a declared opt-in while the legacy contracts keep

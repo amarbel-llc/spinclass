@@ -2,7 +2,6 @@ package shop
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,8 +9,6 @@ import (
 	"testing"
 
 	"code.linenisgreat.com/spinclass/internal/worktree"
-
-	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
 
 const authTestOrigin = "ssh://git@127.0.0.1:1/owner/repo.git"
@@ -219,48 +216,6 @@ func TestCreateURLResolverFailureWithAllowNoCredentialSkipsWholeLane(t *testing.
 	}
 	if _, statErr := os.Stat(filepath.Join(a.rp.AbsPath, ".spinclass", "git-credentials")); statErr == nil {
 		t.Error("git-credentials written")
-	}
-}
-
-// worktree.Create itself needs $HOME, so the worktree is made first and HOME is
-// cleared only for the ProvisionCredential call.
-func TestCreateUnresolvableHomeSkipsGlobalResolver(t *testing.T) {
-	a := setupAuthRepo(t)
-	if _, err := os.UserHomeDir(); err != nil {
-		t.Skip("UserHomeDir unexpectedly failing before the test clears HOME")
-	}
-	cmd := writeResolverScript(t, a.root, `{"canonical_https":"https://vanity.test/repo.git"}`)
-	globalDir := filepath.Join(a.root, ".config", "spinclass")
-	if err := os.MkdirAll(globalDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(globalDir, "sweatfile"),
-		"[auth]\nmint-command = \"echo tok\"\nrevoke-command = \"true\"\nurl-resolver = \""+cmd+"\"\n")
-
-	h, err := worktree.Create(a.repo, a.rp.AbsPath, "", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Setenv("HOME", "")
-	if _, err := os.UserHomeDir(); err == nil {
-		t.Skip("os.UserHomeDir does not fail on empty HOME on this platform")
-	}
-	var buf bytes.Buffer
-	tw := tap.NewWriter(&buf)
-	if err := ProvisionCredential(context.Background(), tw, h, a.rp, false); err != nil {
-		t.Fatalf("ProvisionCredential: %v\n%s", err, buf.String())
-	}
-	out := buf.String()
-	if !strings.Contains(out, "# SKIP") || !strings.Contains(out, "home directory") {
-		t.Errorf("want a SKIP mentioning the home directory:\n%s", out)
-	}
-	if _, err := os.Stat(a.resolverArg()); err == nil {
-		t.Error("global resolver ran without a trustworthy home")
-	}
-	got, err := a.wtGit(t, "config", "--worktree", "--get", "url.https://127.0.0.1/.insteadOf")
-	if err != nil || got != "ssh://git@127.0.0.1:1/" {
-		t.Errorf("built-in rewrite = %q, %v", got, err)
 	}
 }
 

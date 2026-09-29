@@ -330,11 +330,16 @@ subcommand is always available.
 - **Per-session forge push credentials** (FDR 0028, #285, `internal/auth`): a
   sweatfile `[auth]` table (`mint-command`/`revoke-command`) gives a worktree
   session its own forge token so pushes never ride the inherited ssh-agent.
-  `auth.Mint` runs on the `shop.createWorktree` funnel right after setup
-  (fatal on failure — the half-built worktree is torn down): writes the token
-  to the mode-600 `.spinclass/git-credentials` and injects worktree-scoped
-  config (`credential.helper` + `url.insteadOf`). The mint is recorded as
-  `session.State.Credential`. `auth.Revoke` runs at `close.RunResolved`,
+  `auth.Mint` runs via `shop.ProvisionCredential` (called by `createWorktree`
+  and `resurrect.Run`) right after setup (fatal on failure — the half-built
+  worktree is torn down): writes the token to the mode-600
+  `.spinclass/git-credentials` and injects worktree-scoped config
+  (`credential.helper` + `url.insteadOf`; origin via `auth.ParseForgeRemote`
+  on the CONFIGURED `remote.origin.url`, never `git remote get-url`, which
+  applies insteadOf; `git.CommonConfigHasWorktreeOverride` guards it). Recorded
+  as `session.State.Credential` (`session.Write` carries it,
+  `session.UpdateCredential` stamps it); `auth.MirrorInto` + `merge.fetchTarget`
+  make the merge's fetch agent-free. `auth.Revoke` runs at `close.RunResolved`,
   `clean.removeWorktree`, and `merge.teardownAndPush` (warn, non-fatal);
   `auth.SweepOrphans` catches abandoned/tombstoned sessions with an unrevoked
   record at the next creation on the repo. `[auth].forge-hosts` gates the mint

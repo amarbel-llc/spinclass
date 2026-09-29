@@ -85,7 +85,14 @@ raw git error:
     $ sc resurrect repo/feature-x
     Preparing worktree (new branch 'feature-x')
     HEAD is now at 48aa0b3 add marker
-    ok 1 - resurrect repo/feature-x /path/to/repo/.worktrees/feature-x
+    ok 1 - resolve origin feature-x https://forge.example.com/repo.git
+    ok 2 - mint credential feature-x
+    ok 3 - resurrect repo/feature-x /path/to/repo/.worktrees/feature-x
+    1..3
+
+With an `[auth]` mint lane configured (FDR 0028) the credential points precede
+the resurrect point and the plan is trailing; without one, only the resurrect
+point and `1..1` appear.
 
     $ sc list
     ID                    STATUS   AGE        DESCRIPTION

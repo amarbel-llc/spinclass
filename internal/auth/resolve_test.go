@@ -276,6 +276,22 @@ func TestMirrorIntoReplaysStoredRemoteNotOrigin(t *testing.T) {
 	}
 }
 
+func TestMirrorIntoMissingStateIsAnError(t *testing.T) {
+	repoPath, wtPath, id := setupRepo(t)
+	if _, err := Mint(context.Background(), authSweatfile("echo tok", "true"), id, ""); err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	if err := session.Remove(repoPath, "feature-x"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	land := addLand(t, repoPath)
+
+	err := MirrorInto(repoPath, "feature-x", wtPath, land)
+	if err == nil || !strings.Contains(err.Error(), "session state missing") {
+		t.Fatalf("MirrorInto error = %v, want a missing-state error", err)
+	}
+}
+
 func TestMirrorIntoLegacyRecordUsesBuiltinRewrite(t *testing.T) {
 	repoPath, wtPath, id := setupRepo(t)
 	if _, err := Mint(context.Background(), authSweatfile("echo tok", "true"), id, ""); err != nil {

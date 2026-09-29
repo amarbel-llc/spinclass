@@ -133,15 +133,35 @@ type Rewrite struct {
 	CredentialHost string
 	HTTPS          string
 	From           []string
-	Resolved       bool
 }
 
 // Resolution is what Resolve decided for a session's origin: the configured
-// origin URL, the forge remote the mint/revoke env names, and the rewrite.
+// origin URL, the forge remote the mint/revoke env names, the rewrite, and
+// whether a url-resolver (not the built-in mapping) produced it.
 type Resolution struct {
 	OriginURL string
 	Forge     Remote
 	Rewrite   Rewrite
+	Resolved  bool
+}
+
+// record is the persisted form of a Resolution (session.CredentialRemote).
+func (r Resolution) record() *session.CredentialRemote {
+	return &session.CredentialRemote{
+		OriginURL:      r.OriginURL,
+		ForgeHost:      r.Forge.Host,
+		ForgeRepo:      r.Forge.OwnerRepo,
+		CredentialHost: r.Rewrite.CredentialHost,
+		HTTPS:          r.Rewrite.HTTPS,
+		From:           r.Rewrite.From,
+		Resolved:       r.Resolved,
+	}
+}
+
+// rewriteFromRecord is record's inverse for the wiring: the Rewrite a stored
+// remote replays.
+func rewriteFromRecord(rec *session.CredentialRemote) Rewrite {
+	return Rewrite{CredentialHost: rec.CredentialHost, HTTPS: rec.HTTPS, From: rec.From}
 }
 
 // builtinRewrite is the pre-#335 string mapping: the origin's ssh prefix to
@@ -188,16 +208,16 @@ func Resolve(ctx context.Context, resolver string, id Identity, originURL string
 		return Resolution{OriginURL: originURL, Forge: origin, Rewrite: builtinRewrite(origin)}, nil
 	}
 	const prefix = "[auth] url-resolver"
-	// The runner re-normalizes the script (drops blank lines), which would
-	// alter a quoted origin containing one; git never yields such an origin.
+	// The runner normalizes the script (drops blank lines), which would alter a
+	// quoted origin containing one; git never yields such an origin. Normalizing
+	// after substitution is safe otherwise: it is idempotent and the quoted
+	// origin is never empty.
 	if strings.ContainsAny(originURL, "\r\n") {
 		return Resolution{}, fmt.Errorf("%s: origin URL %q contains a newline", prefix, originURL)
 	}
 	rctx, cancel := context.WithTimeout(ctx, urlResolverTimeout)
 	defer cancel()
-	// Normalize first, then substitute, so normalization never touches the
-	// (shell-quoted) origin text.
-	script := strings.ReplaceAll(sweatfile.NormalizeCommand(resolver), "{origin}", shellQuote(originURL))
+	script := strings.ReplaceAll(resolver, "{origin}", shellQuote(originURL))
 	out, err := hookrun.CommandCaptureAmbient(rctx, id.RepoPath, script, id.env(origin, originURL))
 	if err != nil {
 		switch {
@@ -255,7 +275,8 @@ func Resolve(ctx context.Context, resolver string, id Identity, originURL string
 	return Resolution{
 		OriginURL: originURL,
 		Forge:     Remote{Host: u.Hostname(), OwnerRepo: trimRepoPath(u.Path)},
-		Rewrite:   Rewrite{CredentialHost: u.Host, HTTPS: canonicalHTTPS, From: from, Resolved: true},
+		Rewrite:   Rewrite{CredentialHost: u.Host, HTTPS: canonicalHTTPS, From: from},
+		Resolved:  true,
 	}, nil
 }
 
@@ -326,21 +347,13 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 	}
 	st.Credential = &session.Credential{
 		MintedAt: time.Now().UTC(),
-		Remote: &session.CredentialRemote{
-			OriginURL:      res.OriginURL,
-			ForgeHost:      res.Forge.Host,
-			ForgeRepo:      res.Forge.OwnerRepo,
-			CredentialHost: res.Rewrite.CredentialHost,
-			HTTPS:          res.Rewrite.HTTPS,
-			From:           res.Rewrite.From,
-			Resolved:       res.Rewrite.Resolved,
-		},
+		Remote:   res.record(),
 	}
 	if err := session.Write(*st); err != nil {
 		return MintOutcome{}, fmt.Errorf("[auth] record mint: %w", err)
 	}
 	outcome := MintOutcome{Minted: true}
-	if res.Rewrite.Resolved {
+	if res.Resolved {
 		outcome.Resolved = res.Rewrite.HTTPS
 	}
 	return outcome, nil
@@ -407,18 +420,19 @@ func MirrorInto(repoPath, branch, sessionWorktree, dir string) error {
 	st, err := session.Read(repoPath, branch)
 	switch {
 	case err == nil && st.Credential != nil && st.Credential.Remote != nil:
-		r := st.Credential.Remote
-		rw = Rewrite{CredentialHost: r.CredentialHost, HTTPS: r.HTTPS, From: r.From, Resolved: r.Resolved}
+		rw = rewriteFromRecord(st.Credential.Remote)
 	case err == nil && st.Credential == nil:
 		return errors.New("session state has no credential record for a minted worktree")
-	case err == nil || errors.Is(err, os.ErrNotExist):
-		// No state at all, or a record minted before #335 (Credential without
-		// Remote): necessarily the built-in form. The helper is host-agnostic (the stored line names the host), so an
-		// origin that is not a forge URL (a local path, say) still gets it —
-		// only the ssh→https rewrite needs a parsed remote.
+	case err == nil:
+		// A record minted before #335 (Credential without Remote): necessarily
+		// the built-in form. The helper is host-agnostic (the stored line names
+		// the host), so an origin that is not a forge URL (a local path, say)
+		// still gets it — only the ssh→https rewrite needs a parsed remote.
 		if _, remote, oerr := readOrigin(sessionWorktree); oerr == nil {
 			rw = builtinRewrite(remote)
 		}
+	case errors.Is(err, os.ErrNotExist):
+		return errors.New("session state missing for a minted worktree")
 	default:
 		return fmt.Errorf("read session state for the stored credential remote: %w", err)
 	}

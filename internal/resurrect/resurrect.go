@@ -74,7 +74,7 @@ func Run(w io.Writer, target, newBranchName, format string) error {
 	// down, so the tombstone is untouched and the resurrect can be retried.
 	// No CLI/MCP flag; only the sweatfile knob applies, as for `sc spawn`.
 	if err := shop.ProvisionCredential(context.Background(), tw, h, rp, h.Merged.AllowNoCredential()); err != nil {
-		return err
+		return fmt.Errorf("%w\n\nset [hooks].allow-no-credential to resurrect without a push credential", err)
 	}
 
 	fresh := session.State{

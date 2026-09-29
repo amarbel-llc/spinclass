@@ -136,7 +136,7 @@ func createWorktree(worktreePath worktree.ResolvedPath, opts CreateOpts, tw *tap
 		if err := ProvisionCredential(
 			context.Background(), tw, result, worktreePath, opts.AllowNoCredential,
 		); err != nil {
-			return false, err
+			return false, fmt.Errorf("%w\n\npass --allow-no-credential, or set [hooks].allow-no-credential, to create the session without a push credential (pushes then use the inherited ssh-agent)", err)
 		}
 	}
 
@@ -155,7 +155,8 @@ func createWorktree(worktreePath worktree.ResolvedPath, opts CreateOpts, tw *tap
 // session without the credential it was configured for would push off the
 // inherited ssh-agent, exactly the failure this feature exists to remove, and a
 // worker has no operator to notice. The half-built worktree is torn down so the
-// refusal leaves nothing behind. allow-no-credential (the --allow-stale-base
+// refusal leaves nothing behind, and the error is returned bare so each caller
+// names the escape hatch it actually has. allow-no-credential (the --allow-stale-base
 // shape) is the explicit escape hatch: warn and keep the credential-less
 // session. An origin host outside [auth].forge-hosts is not a failure at all —
 // the mint is skipped visibly and the session is created exactly as before.
@@ -179,16 +180,9 @@ func ProvisionCredential(
 		SessionKey:   worktreePath.SessionKey,
 	}
 
-	home, homeErr := os.UserHomeDir()
-	if homeErr != nil {
-		msg := "home directory unresolvable (" + homeErr.Error() +
-			"): a global [auth].url-resolver cannot be trusted; parent-directory layers still apply"
-		if tw != nil {
-			tw.Skip("url-resolver "+worktreePath.Branch, msg)
-		} else {
-			log.Warn(msg, "branch", worktreePath.Branch)
-		}
-	}
+	// worktree.Create (both callers' first step) already failed on an
+	// unresolvable home, so the error is unreachable here.
+	home, _ := os.UserHomeDir()
 	resolver, untrusted := sweatfileio.TrustedURLResolver(h, home, worktreePath.RepoPath)
 	if len(untrusted) > 0 {
 		msg := "ignored [auth].url-resolver in " + strings.Join(untrusted, ", ") +
@@ -208,7 +202,7 @@ func ProvisionCredential(
 		if worktreePath.ExistingBranch == "" {
 			_, _ = git.BranchForceDelete(worktreePath.RepoPath, worktreePath.Branch)
 		}
-		return fmt.Errorf("%w\n\npass --allow-no-credential, or set [hooks].allow-no-credential, to create the session without a push credential (pushes then use the inherited ssh-agent)", mintErr)
+		return mintErr
 	case mintErr != nil:
 		msg := mintErr.Error() + " (allow-no-credential: session created without a push credential; pushes use the inherited ssh-agent)"
 		if tw != nil {

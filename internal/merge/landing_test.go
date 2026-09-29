@@ -5,8 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"code.linenisgreat.com/spinclass/internal/auth"
+	"code.linenisgreat.com/spinclass/internal/session"
 )
 
 // setupSyncRepo builds a bare "origin" plus a clone acting as the repo's main
@@ -22,6 +24,7 @@ func setupSyncRepo(t *testing.T) (bareDir, repoDir string) {
 	}
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(gitConfigDir, "config"))
 	t.Setenv("HOME", root)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
 
 	bareDir = filepath.Join(root, "bare.git")
 	runGit(t, root, "init", "--bare", "-b", "main", bareDir)
@@ -37,6 +40,30 @@ func setupSyncRepo(t *testing.T) (bareDir, repoDir string) {
 	runGit(t, repoDir, "commit", "-m", "initial")
 	runGit(t, repoDir, "push")
 	return bareDir, repoDir
+}
+
+// writeMintedState records the session state a real mint leaves behind (the
+// built-in remote record for a path origin), which MirrorInto requires for a
+// worktree carrying a credential.
+func writeMintedState(t *testing.T, repoDir, wtPath, branch string) {
+	t.Helper()
+	if err := session.Write(session.State{
+		SessionState: session.StateInactive,
+		RepoPath:     repoDir,
+		WorktreePath: wtPath,
+		Branch:       branch,
+		SessionKey:   "repo/" + branch,
+		StartedAt:    time.Now().UTC(),
+		Credential: &session.Credential{
+			MintedAt: time.Now().UTC(),
+			Remote: &session.CredentialRemote{
+				CredentialHost: "example.com",
+				HTTPS:          "https://example.com/",
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestResolvedGitSyncLandsOnOriginThenAdvancesLocal is the core #284 (Alt B)
@@ -196,6 +223,7 @@ func TestResolvedGitSyncMirrorsCredentialIntoLandingWorktree(t *testing.T) {
 	if err := auth.Inject(wtPath, credPath, auth.Rewrite{CredentialHost: "example.com"}); err != nil {
 		t.Fatalf("Inject: %v", err)
 	}
+	writeMintedState(t, repoDir, wtPath, "feature-cred")
 
 	seen := filepath.Join(t.TempDir(), "helper")
 	sweatfileBody := "[hooks]\npost-merge = \"git config --get credential.helper > " + seen + "\"\n"
@@ -239,6 +267,7 @@ func TestResolvedGitSyncTeardownRevokesCredential(t *testing.T) {
 	if err := os.WriteFile(credPath, []byte("https://spinclass:tok@example.com\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	writeMintedState(t, repoDir, wtPath, "feature-revoke")
 	marker := filepath.Join(t.TempDir(), "revoked")
 	sweatfileBody := "[auth]\nmint-command = \"echo tok\"\nrevoke-command = \"echo $SPINCLASS_SESSION_ID > " + marker + "\"\n"
 	if err := os.WriteFile(filepath.Join(repoDir, "sweatfile"), []byte(sweatfileBody), 0o644); err != nil {

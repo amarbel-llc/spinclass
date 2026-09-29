@@ -751,7 +751,8 @@ by default and the half-built worktree is removed;
 *[hooks].allow-no-credential* (or *sc start/run --allow-no-credential*)
 instead warns and creates the session without a credential, pushing over
 the inherited ssh-agent as before. *sc resurrect* runs the same lane and
-honours only *[hooks].allow-no-credential*. Implicit (main-checkout) sessions are
+honours only *[hooks].allow-no-credential* (it has no flag, and its
+refusal names only that setting). Implicit (main-checkout) sessions are
 outside this: they are the operator in the root and keep ssh.
 
 ## [session-entry]
