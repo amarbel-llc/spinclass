@@ -589,7 +589,13 @@ specified by contract in "Companion records".
   enforcement lands. Accept-on-first-use via `pending_handles`.
 - **`list-handles`** (held, pending) and **`sc whoami`** (principal, session
   key, holders; grows the chain view in slice 1).
-- **Exit wakes** from D6's four points, through the existing clown emit path.
+- **Exit wakes** from three of D6's four points (`SessionEnd` → `normal`,
+  reap → `shutdown` or `killed`, hello timeout → `crash`), through the
+  existing clown emit path, to accepted holders only. The fourth, a worktree
+  session that dies silently, is not emitted in slice 0: the dead-PID sweep
+  covers implicit sessions only, and worktree liveness is computed on read.
+  It arrives with presence-based liveness (FDR 0017's RFC-0014 rework) or
+  with slice 1.
 - **`sc list`** gains `HOLDERS` (count, `orphan` when zero live) and a short
   principal column. `TRUST` arrives with slice 1.
 - **Refusals name the missing thing:** "no handle to X (spawned by P; ask P to
