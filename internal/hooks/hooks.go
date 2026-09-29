@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/apply"
+	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/perms"
 	"code.linenisgreat.com/spinclass/internal/session"
@@ -300,10 +301,31 @@ func maybeSendSpawnHello(cwd, poshSessionID string) {
 	}
 }
 
-// runSessionEnd hard-deletes the implicit session for this session_id. Misses
-// (crash, kill -9, or the SessionEnd timeout) are backstopped by
-// SweepDeadImplicit on the next SessionStart. Swallows errors — a hook must
-// never block session teardown.
+// emitExitWakes is a package-level seam over clown.EmitExitWakes (FDR 0032
+// D6) so SessionEnd's own tests can assert invocation (holders, childKey,
+// reason) without a real or stubbed ringmaster on PATH: clown.EmitExitWakes
+// itself gates on clown.Enabled(), which is false by construction in a plain
+// test env, so overriding this var is the only way to observe the call.
+var emitExitWakes = clown.EmitExitWakes
+
+// runSessionEnd hard-deletes the implicit session for this session_id and, when
+// cwd is instead an sc WORKTREE whose session state carries accepted Holders,
+// emits the FDR 0032 D6 "normal" exit wake to every one of them — SessionEnd on
+// a worktree session is the merged-and-closed path in the OTP mapping D6
+// borrows. Resolution mirrors maybeSendSpawnHello's (git.CommonDir +
+// git.BranchCurrent + session.Read) and is equally silent on any miss: a plain
+// (non-worktree) checkout or a worktree spinclass doesn't track yields nothing
+// to notify, which is the common case, not a failure.
+//
+// Misses on the IMPLICIT path (crash, kill -9, the SessionEnd timeout) are
+// backstopped by SweepDeadImplicit on the next SessionStart. There is NO
+// equivalent sweep for a WORKTREE session that dies without ever firing
+// SessionEnd — worktree liveness is computed on read, not swept — so a
+// presence-stale/dead-PID worktree session gets no exit wake in this slice;
+// this is FDR 0032 D6's documented gap ("A worktree session that dies
+// silently gets no crash wake in slice 0"), arriving with presence-based
+// liveness or slice 1. Swallows every error — a hook must never block or fail
+// session teardown.
 func runSessionEnd(input hookInput) error {
 	if input.CWD == "" || input.SessionID == "" {
 		return nil
@@ -311,7 +333,51 @@ func runSessionEnd(input hookInput) error {
 	if err := session.RemoveImplicit(input.CWD, implicitRand(input.SessionID)); err != nil {
 		sessionlog.Errorf("runSessionEnd RemoveImplicit-failed checkout=%s err=%v", input.CWD, err)
 	}
+	emitWorktreeExitWake(input.CWD)
 	return nil
+}
+
+// emitWorktreeExitWake resolves the sc worktree session at cwd, if any, and —
+// when it carries accepted Holders other than its own principal — emits the
+// FDR 0032 D6 "normal" wake to each. Silent on any resolution miss (not a
+// worktree, detached HEAD, no tracked session).
+func emitWorktreeExitWake(cwd string) {
+	repoPath, err := git.CommonDir(cwd)
+	if err != nil {
+		return
+	}
+	branch, err := git.BranchCurrent(cwd)
+	if err != nil || branch == "" { // detached HEAD: no session key to read
+		return
+	}
+	st, err := session.Read(repoPath, branch)
+	if err != nil || len(st.Holders) == 0 {
+		return
+	}
+	// A session never wakes itself about its own exit, even in the unusual
+	// case where it holds a handle on itself.
+	holders := excludeSelf(st.Holders, os.Getenv("CLOWN_SESSION_ID"))
+	if len(holders) == 0 {
+		return
+	}
+	if err := emitExitWakes(holders, st.Key(), "normal"); err != nil {
+		sessionlog.Errorf("runSessionEnd emitExitWakes-failed key=%s err=%v", st.Key(), err)
+	}
+}
+
+// excludeSelf returns holders with selfPrincipal removed — a no-op when
+// selfPrincipal is empty. Order-preserving.
+func excludeSelf(holders []string, selfPrincipal string) []string {
+	if selfPrincipal == "" {
+		return holders
+	}
+	out := make([]string, 0, len(holders))
+	for _, h := range holders {
+		if h != selfPrincipal {
+			out = append(out, h)
+		}
+	}
+	return out
 }
 
 func runStopHook(input hookInput, w io.Writer) error {

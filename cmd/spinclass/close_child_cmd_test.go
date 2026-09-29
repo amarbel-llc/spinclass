@@ -374,6 +374,75 @@ func TestCloseChildSessionFromNonRepoCwdByHolder(t *testing.T) {
 	}
 }
 
+// TestCloseChildSessionEmitsExitWake pins FDR 0032 D6: a successful reap
+// emits "shutdown" (or "killed", forced) to the child's holders OTHER than
+// the caller — the caller already knows, being the one that just reaped.
+// Stubs emitExitWakesFn rather than going through clown.EmitExitWakes, which
+// would silently no-op with CLOWN_BIN unset in this test env.
+func TestCloseChildSessionEmitsExitWake(t *testing.T) {
+	cases := []struct {
+		name       string
+		force      bool
+		wantReason string
+	}{
+		{"clean reap emits shutdown", false, "shutdown"},
+		{"forced reap emits killed", true, "killed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			const driverKey = "driver/main-oak"
+			const driverPrincipal = "principal-driver"
+			repoPath, wtPath := childFixture(t, driverKey, driverKey)
+			// childFixture forces CLOWN_SESSION_ID="" (to exercise the legacy
+			// migration path); override it back AFTER, so it sticks for the
+			// actual close call below.
+			t.Setenv("CLOWN_SESSION_ID", driverPrincipal)
+			st, err := session.Read(repoPath, "kid")
+			if err != nil {
+				t.Fatal(err)
+			}
+			st.SpawnedByPrincipal = driverPrincipal
+			st.Holders = []string{driverPrincipal, "sibling-a", "sibling-b"}
+			if err := session.Write(*st); err != nil {
+				t.Fatal(err)
+			}
+			if tc.force {
+				mustCommitInWorktree(t, wtPath)
+			}
+
+			var gotHolders []string
+			var gotChildKey, gotReason string
+			orig := emitExitWakesFn
+			emitExitWakesFn = func(holders []string, childKey, reason string) error {
+				gotHolders = holders
+				gotChildKey = childKey
+				gotReason = reason
+				return nil
+			}
+			t.Cleanup(func() { emitExitWakesFn = orig })
+
+			args := `{"child":"worker/kid"}`
+			if tc.force {
+				args = `{"child":"worker/kid","force":true}`
+			}
+			text, isErr := callCloseChild(t, args)
+			if isErr {
+				t.Fatalf("expected the reap to succeed, got error result: %s", text)
+			}
+
+			if gotReason != tc.wantReason {
+				t.Errorf("reason = %q, want %q", gotReason, tc.wantReason)
+			}
+			if gotChildKey != "worker/kid" {
+				t.Errorf("childKey = %q, want %q", gotChildKey, "worker/kid")
+			}
+			if got := strings.Join(gotHolders, ","); got != "sibling-a,sibling-b" {
+				t.Errorf("holders = %q, want %q (caller principal excluded)", got, "sibling-a,sibling-b")
+			}
+		})
+	}
+}
+
 // TestCloseChildSessionAcceptsPendingHandleFirst is the FDR 0032 D12
 // accept-on-first-use case at the close-child-session layer: the caller is
 // only PENDING (granted but never yet exercised the handle) — no

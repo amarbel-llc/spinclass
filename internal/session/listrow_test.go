@@ -229,6 +229,76 @@ func TestListRowsCarriesSpawnedBy(t *testing.T) {
 	}
 }
 
+// TestListRowsCarriesHolders verifies the FDR 0032 D12/D14 handle surface
+// survives the wire shape: a session with accepted Holders carries their
+// count, a spawned session whose holders all released reads Orphan=true, and
+// a plain never-spawned session carries neither key on the wire (omitempty
+// preserves the legacy shape).
+func TestListRowsCarriesHolders(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "spinclass")
+	held := filepath.Join(repo, ".worktrees", "held-hazel")
+	orphaned := filepath.Join(repo, ".worktrees", "orphaned-oak")
+	plain := filepath.Join(repo, ".worktrees", "plain-pine")
+	for _, dir := range []string{held, orphaned, plain} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	states := []State{
+		{
+			SessionState:       StateInactive,
+			RepoPath:           repo,
+			WorktreePath:       held,
+			Branch:             "held-hazel",
+			SessionKey:         "spinclass/held-hazel",
+			SpawnedByPrincipal: "principal-a",
+			Holders:            []string{"principal-a", "principal-b"},
+		},
+		{
+			SessionState:       StateInactive,
+			RepoPath:           repo,
+			WorktreePath:       orphaned,
+			Branch:             "orphaned-oak",
+			SessionKey:         "spinclass/orphaned-oak",
+			SpawnedByPrincipal: "principal-a",
+		},
+		{
+			SessionState: StateInactive,
+			RepoPath:     repo,
+			WorktreePath: plain,
+			Branch:       "plain-pine",
+			SessionKey:   "spinclass/plain-pine",
+		},
+	}
+
+	rows := ListRows(states, false)
+	if len(rows) != 3 {
+		t.Fatalf("rows: got %d, want 3", len(rows))
+	}
+	if rows[0].Holders != 2 || rows[0].Orphan {
+		t.Errorf("held row = {Holders:%d Orphan:%v}, want {2 false}", rows[0].Holders, rows[0].Orphan)
+	}
+	if rows[1].Holders != 0 || !rows[1].Orphan {
+		t.Errorf("orphaned row = {Holders:%d Orphan:%v}, want {0 true}", rows[1].Holders, rows[1].Orphan)
+	}
+	if rows[2].Holders != 0 || rows[2].Orphan {
+		t.Errorf("plain row = {Holders:%d Orphan:%v}, want {0 false}", rows[2].Holders, rows[2].Orphan)
+	}
+
+	// The plain row's JSON must not carry "holders" or "orphan" (omitempty).
+	data, err := json.Marshal(rows[2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"holders"`, `"orphan"`} {
+		if strings.Contains(string(data), key) {
+			t.Errorf("plain row JSON unexpectedly contains %s: %s", key, data)
+		}
+	}
+}
+
 // TestListRowsEmptyMarshalsToArray guards against `null` output: an
 // empty session list must serialize as [] for remote consumers.
 func TestListRowsEmptyMarshalsToArray(t *testing.T) {

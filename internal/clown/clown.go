@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -146,6 +147,78 @@ func FinishJob(ctx context.Context, id, state, message, resultRef string, resour
 	}
 	_, err := run(ctx, args...)
 	return err
+}
+
+// NotifyPrincipal emits a standalone reason-tagged wake to targetPrincipal —
+// one holder of a handle on a session that just exited (FDR 0032 D6/D12). It
+// writes a started+terminal pair on the TARGET's OWN channel, using the
+// explicit `--target` RFC-0009 §2 documents for "a producer targeting
+// another session" on both verbs — the identical StartJob/FinishJob shape
+// this package already emits for spinclass's own merge/spawn wakes, just
+// addressed at someone else's channel instead of the caller's.
+//
+// There is deliberately no single "message" verb here. Verified 2026-09-29
+// against ringmaster's cmd/ringmaster/main.go usage() and
+// docs/rfcs/0015-ringmaster-troupe-platform-binaries.md §3: RFC-0015 promoted
+// the former `clown job message` (the standalone waking `message` record,
+// `job_message`) onto the SEPARATE `troupe` binary, not onto `ringmaster` —
+// "ringmaster therefore does NOT carry a message verb" is 0015's own words.
+// ringmaster's verb set is start/progress/done/read/spool-path/wait/whoami/
+// version/monitor/mcp; there is no message subcommand to shell out to. This
+// package's own header comment is deliberate that spinclass drives only
+// ringmaster — cross-session messaging is troupe's (FDR 0017) — so this
+// function does not shell out to troupe. A started+terminal pair on the
+// recipient's channel is the wake primitive ringmaster still carries, and it
+// IS "the existing clown emit path" D6 asks for: the exact StartJob/FinishJob
+// shape, just explicitly targeted at someone else's channel.
+//
+// from, when non-empty, is folded into the message text: unlike the retired
+// message verb, `ringmaster done` carries no wire `from` field to place it
+// in. Gated on Enabled() so a wake-less environment (no clown) is a silent
+// no-op, matching every other emit in this file.
+func NotifyPrincipal(ctx context.Context, targetPrincipal, from, message string) error {
+	if !Enabled() {
+		return nil
+	}
+	if targetPrincipal == "" {
+		return errors.New("clown.NotifyPrincipal: targetPrincipal is required")
+	}
+	if from != "" {
+		message = fmt.Sprintf("from %s: %s", from, message)
+	}
+	id, err := run(ctx, "start", "--target", targetPrincipal, "--label", "exit", "--source", Source)
+	if err != nil {
+		return err
+	}
+	if id == "" {
+		return fmt.Errorf("ringmaster start --target %s: no job id on stdout", targetPrincipal)
+	}
+	_, err = run(ctx, "done", id, "--target", targetPrincipal, "--state", "succeeded", "--message", message)
+	return err
+}
+
+// EmitExitWakes notifies every principal in holders that the session
+// childKey has exited, tagged with reason — one of "normal" (merged and
+// closed), "shutdown" (reaped by a holder), "killed" (force-reaped), or
+// "crash" (hello timeout / presence-stale) per FDR 0032 D6. Callers pass
+// exactly the holders they want notified — a caller excluding itself or a
+// driver that already got its own job wake does so before calling this, not
+// inside it. Every per-holder failure is joined (errors.Join) rather than
+// short-circuiting: one holder's unreachable channel must never suppress the
+// wake to the rest. A no-op when clown is disabled or holders is empty.
+func EmitExitWakes(holders []string, childKey, reason string) error {
+	if !Enabled() || len(holders) == 0 {
+		return nil
+	}
+	ctx := context.Background()
+	message := fmt.Sprintf("session %s exited (%s); holders: %d remaining", childKey, reason, len(holders))
+	var errs []error
+	for _, holder := range holders {
+		if err := NotifyPrincipal(ctx, holder, "", message); err != nil {
+			errs = append(errs, fmt.Errorf("notify %s: %w", holder, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // protocolCheck memoizes the one-time comparison of the ProtocolVersion this

@@ -402,13 +402,14 @@ func runListResult(ctx context.Context, closed bool, format string, dbg *slog.Lo
 		if s.ExitedAt != nil {
 			exited = s.ExitedAt.UTC().Format(time.RFC3339)
 		}
-		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%s\t%s\t%s%s\n",
+		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%s\t%s\t%s%s%s\n",
 			s.SessionKey, resolved, marker, s.Branch, exited, s.WorktreePath, s.Description,
-			spawnedBySuffix(s.SpawnedBy))
+			spawnedBySuffix(s.SpawnedBy), holdersSuffix(len(s.Holders), s.Orphan()))
 	}
 	for _, r := range remoteRows {
-		fmt.Fprintf(&b, "%s:%s\t%s\t\t%s\t\t\t%s%s\n",
-			r.Remote, r.ID, r.State, r.Branch, r.Description, spawnedBySuffix(r.SpawnedBy))
+		fmt.Fprintf(&b, "%s:%s\t%s\t\t%s\t\t\t%s%s%s\n",
+			r.Remote, r.ID, r.State, r.Branch, r.Description,
+			spawnedBySuffix(r.SpawnedBy), holdersSuffix(r.Holders, r.Orphan))
 	}
 	for _, d := range diags {
 		fmt.Fprintln(&b, d)
@@ -425,6 +426,22 @@ func spawnedBySuffix(key string) string {
 		return ""
 	}
 	return "\tspawned-by:" + key
+}
+
+// holdersSuffix renders the FDR 0032 D12 handle-holder hint appended to `sc
+// list` text rows next to spawnedBySuffix: `holders:<n>` for a row with any
+// accepted holder, else `orphan` for a spawned/handled row whose holders have
+// all released (session.State.Orphan / session.ListRow.Orphan). Non-spawned,
+// never-handled rows (holders == 0, orphan == false) keep the legacy shape.
+func holdersSuffix(holders int, orphan bool) string {
+	switch {
+	case holders > 0:
+		return fmt.Sprintf("\tholders:%d", holders)
+	case orphan:
+		return "\torphan"
+	default:
+		return ""
+	}
 }
 
 // remotesForCwd returns the [[remotes]] entries from the merged sweatfile

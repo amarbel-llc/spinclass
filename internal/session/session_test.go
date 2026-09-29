@@ -643,6 +643,29 @@ func TestReleaseHandle(t *testing.T) {
 	})
 }
 
+// TestOrphan covers the `sc list` D12 orphan predicate: spawned/handled but no
+// accepted holder remains.
+func TestOrphan(t *testing.T) {
+	cases := []struct {
+		name string
+		s    State
+		want bool
+	}{
+		{"never spawned or handled", State{}, false},
+		{"spawned, spawner still holds", State{SpawnedByPrincipal: "p1", Holders: []string{"p1"}}, false},
+		{"spawned, all holders released", State{SpawnedByPrincipal: "p1"}, true},
+		{"legacy spawned_by only is not orphaned (its spawner still reaps by key)", State{SpawnedBy: "driver/main-oak"}, false},
+		{"handled via a grant, holder still present", State{SpawnedByPrincipal: "p1", Holders: []string{"p2"}}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.s.Orphan(); got != tc.want {
+				t.Errorf("Orphan() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestIsPendingHolder covers the pending-vs-accepted distinction (FDR 0032
 // D12): a principal is pending only until it accepts, and an empty principal
 // never matches.

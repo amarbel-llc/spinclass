@@ -307,11 +307,64 @@ func TestRunListResultTextSpawnedByAnnotation(t *testing.T) {
 	if spawnedLine == "" || plainLine == "" {
 		t.Fatalf("rows missing from text output:\n%s", res.Text)
 	}
+	// FDR 0032 D12: a legacy spawned session (only SpawnedBy, no principal, no
+	// Holders ever recorded) keeps its spawned-by suffix and is NOT marked
+	// orphan — its spawner still reaps it by session key.
 	if !strings.HasSuffix(spawnedLine, "\tspawned-by:spinclass/bright-cedar") {
-		t.Errorf("spawned row missing annotation suffix: %q", spawnedLine)
+		t.Errorf("spawned row missing annotation suffix or wrongly annotated further: %q", spawnedLine)
 	}
-	if strings.Contains(plainLine, "spawned-by:") {
+	if strings.Contains(plainLine, "spawned-by:") || strings.Contains(plainLine, "orphan") || strings.Contains(plainLine, "holders:") {
 		t.Errorf("plain row unexpectedly annotated: %q", plainLine)
+	}
+}
+
+// TestRunListResultTextHoldersAnnotation covers the positive-holder-count
+// case of the FDR 0032 D12 suffix (TestRunListResultTextSpawnedByAnnotation
+// above covers the legacy spawned-by-only case, and internal/session's
+// TestListRowsCarriesHolders the orphan predicate): a session with an
+// accepted holder gets a trailing `holders:<n>`, not `orphan`.
+func TestRunListResultTextHoldersAnnotation(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	base := t.TempDir()
+	repo := filepath.Join(base, "spinclass")
+	heldWT := filepath.Join(repo, ".worktrees", "held-hazel")
+	if err := os.MkdirAll(heldWT, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.Write(session.State{
+		SessionState:       session.StateInactive,
+		RepoPath:           repo,
+		WorktreePath:       heldWT,
+		Branch:             "held-hazel",
+		SessionKey:         "spinclass/held-hazel",
+		SpawnedByPrincipal: "principal-a",
+		Holders:            []string{"principal-a", "principal-b"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := runListResult(context.Background(), false, "tap", nil, nil)
+	if err != nil {
+		t.Fatalf("runListResult: %v", err)
+	}
+	if res.IsErr {
+		t.Fatalf("runListResult: unexpected error result: %s", res.Text)
+	}
+
+	var heldLine string
+	for _, line := range strings.Split(res.Text, "\n") {
+		if strings.HasPrefix(line, "spinclass/held-hazel\t") {
+			heldLine = line
+		}
+	}
+	if heldLine == "" {
+		t.Fatalf("row missing from text output:\n%s", res.Text)
+	}
+	if !strings.HasSuffix(heldLine, "\tholders:2") {
+		t.Errorf("held row missing holders suffix: %q", heldLine)
+	}
+	if strings.Contains(heldLine, "orphan") {
+		t.Errorf("held row unexpectedly marked orphan: %q", heldLine)
 	}
 }
 

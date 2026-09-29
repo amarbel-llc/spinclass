@@ -12,6 +12,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/job"
 	"code.linenisgreat.com/spinclass/internal/servelog"
+	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/spawn"
 )
 
@@ -104,7 +105,7 @@ func awaitSpawnHello(pending spawn.Pending, driverPrincipal string, deadline tim
 	}
 
 	// Hello timeout (or handshake error): apply the reap-if-dead policy.
-	msg := spawnTimeoutOutcome(pending, deadline)
+	msg := spawnTimeoutOutcome(pending, driverPrincipal, deadline)
 	if ferr := clown.FinishJob(ctx, jobID, job.StatusAborted, msg, ""); ferr != nil {
 		servelog.Errorf("spawn-async: FinishJob(aborted) for %s failed: %v", pending.SessionKey, ferr)
 	}
@@ -114,7 +115,9 @@ func awaitSpawnHello(pending spawn.Pending, driverPrincipal string, deadline tim
 // and returns the wake message. spawn.log activity within spawnLogActiveWindow
 // means the worker is still booting (keep + name it); otherwise it looks dead
 // and is auto-reaped (no-force, clean by construction — pre-hello, no commits).
-func spawnTimeoutOutcome(pending spawn.Pending, deadline time.Duration) string {
+// driverPrincipal is excluded from the FDR 0032 D6 "crash" exit wake fired on
+// a successful auto-reap — it already learns the outcome via its own job wake.
+func spawnTimeoutOutcome(pending spawn.Pending, driverPrincipal string, deadline time.Duration) string {
 	d := deadline.Round(time.Second)
 	if spawn.SpawnLogActiveWithin(pending.WorktreePath, spawnLogActiveWindow) {
 		return fmt.Sprintf(
@@ -126,11 +129,30 @@ func spawnTimeoutOutcome(pending spawn.Pending, deadline time.Duration) string {
 	// tree, so it meets close-child-session's own no-force condition by
 	// construction; a surprise dirty/unmerged state makes RunResolved refuse and
 	// we report the session as dangling instead of discarding anything.
+	//
+	// FDR 0032 D6: read the child's Holders BEFORE the reap tears the session
+	// state down — RunResolved tombstones it, and a tombstone read afterward
+	// would still work, but reading first keeps this read independent of that
+	// implementation detail. The auto-reap driver already learns the outcome
+	// via its own job wake (asyncSpawnHello's FinishJob), so it is excluded
+	// here; every OTHER holder (a grant made before the worker ever helloed)
+	// gets the "crash" reason (hello timeout / presence-stale, per D6).
+	var otherHolders []string
+	if st, serr := session.Read(pending.RepoPath, pending.Branch); serr == nil {
+		for _, h := range st.Holders {
+			if h != driverPrincipal {
+				otherHolders = append(otherHolders, h)
+			}
+		}
+	}
 	if rerr := spinclose.RunResolved(io.Discard, pending.RepoPath, pending.WorktreePath, pending.Branch, false, nil, "tap"); rerr != nil {
 		return fmt.Sprintf(
 			"spawn hello timed out after %s and the worker looked dead, but auto-reap failed (%v). Session %q is dangling — reap it with close-child-session.",
 			d, rerr, pending.SessionKey,
 		)
+	}
+	if err := emitExitWakesFn(otherHolders, pending.SessionKey, "crash"); err != nil {
+		servelog.Errorf("spawn-async: emitExitWakesFn-failed key=%s err=%v", pending.SessionKey, err)
 	}
 	return fmt.Sprintf(
 		"spawn hello timed out after %s; the worker never helloed and looked dead, so session %q was reaped (no work existed). Re-spawn, optionally with a longer hello-timeout.",

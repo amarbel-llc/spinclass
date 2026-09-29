@@ -265,6 +265,34 @@ func TestCheckProtocolMatchesRealRingmaster(t *testing.T) {
 	}
 }
 
+// TestNotifyPrincipalAgainstRealRingmaster proves the FDR 0032 D6 wake lands
+// in the RECIPIENT's channel, not the sender's — the property a stub cannot
+// check (it would happily accept whatever --target we hand it). realRingmaster
+// resolves this process's own session to "spinclass-contract-test"; after the
+// notify, re-pointing CLOWN_SESSION_ID at the target and reading its channel
+// (ringmaster's own `read` always resolves ITS OWN current session, never an
+// explicit target) must surface the message.
+func TestNotifyPrincipalAgainstRealRingmaster(t *testing.T) {
+	realRingmaster(t)
+	// realRingmaster does not set CLOWN_BIN (StartJob/FinishJob shell out
+	// unconditionally); NotifyPrincipal additionally gates on Enabled(), so
+	// without this the call below is a silent, unerroring no-op.
+	t.Setenv("CLOWN_BIN", "/some/clown")
+	ctx := context.Background()
+
+	const target = "spinclass-contract-test-target"
+	const msg = "session worker/kid exited (normal); holders: 1 remaining"
+	if err := NotifyPrincipal(ctx, target, "", msg); err != nil {
+		t.Fatalf("NotifyPrincipal against real ringmaster: %v", err)
+	}
+
+	t.Setenv("CLOWN_SESSION_ID", target)
+	records := ringmasterOut(t, "read")
+	if !strings.Contains(records, "succeeded") || !strings.Contains(records, msg) {
+		t.Errorf("target channel %q missing the wake;\ngot:\n%s", target, records)
+	}
+}
+
 // The #22 observer contract: WaitForCancel must report true when ringmaster has
 // recorded a cancel-requested. This is the exact live behavior a stub cannot
 // prove — `ringmaster wait --on-cancel` reports the DERIVED state "running" for

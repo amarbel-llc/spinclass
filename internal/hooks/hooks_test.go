@@ -1735,6 +1735,83 @@ func TestSessionEndNoopWhenNoState(t *testing.T) {
 	}
 }
 
+// TestSessionEndEmitsExitWakeForWorktreeHolders pins FDR 0032 D6's "normal"
+// reason: SessionEnd on a worktree session that carries accepted Holders
+// fires the exit wake to each of them, excluding the session's own principal
+// (CLOWN_SESSION_ID) when it happens to appear among them. Stubs the
+// emitExitWakes seam rather than going through clown.EmitExitWakes, which
+// would silently no-op with CLOWN_BIN unset in this test env — the point is
+// to assert runSessionEnd's OWN resolution and filtering logic, not
+// clown/ringmaster's.
+func TestSessionEndEmitsExitWakeForWorktreeHolders(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	repo, wt := initSpawnedWorktree(t, "driver/main-oak")
+
+	st, err := session.Read(repo, "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Holders = []string{"principal-a", "principal-b", "self-principal"}
+	if err := session.Write(*st); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLOWN_SESSION_ID", "self-principal") // the exiting session's own principal
+
+	var gotHolders []string
+	var gotChildKey, gotReason string
+	origEmit := emitExitWakes
+	emitExitWakes = func(holders []string, childKey, reason string) error {
+		gotHolders = holders
+		gotChildKey = childKey
+		gotReason = reason
+		return nil
+	}
+	t.Cleanup(func() { emitExitWakes = origEmit })
+
+	endInput, _ := json.Marshal(map[string]any{
+		"hook_event_name": "SessionEnd", "session_id": "sid-xyz", "cwd": wt, "reason": "other",
+	})
+	if err := Run(bytes.NewReader(endInput), &bytes.Buffer{}, "", "", false); err != nil {
+		t.Fatalf("SessionEnd: %v", err)
+	}
+
+	if gotReason != "normal" {
+		t.Errorf("reason = %q, want %q", gotReason, "normal")
+	}
+	if gotChildKey != "myrepo/feature" {
+		t.Errorf("childKey = %q, want %q", gotChildKey, "myrepo/feature")
+	}
+	if got := strings.Join(gotHolders, ","); got != "principal-a,principal-b" {
+		t.Errorf("holders = %q, want %q (self-principal excluded)", got, "principal-a,principal-b")
+	}
+}
+
+// TestSessionEndSkipsExitWakeWithNoHolders covers the common case (a
+// never-spawned worktree, or one all of whose holders already released): no
+// invocation at all, not a call with an empty slice.
+func TestSessionEndSkipsExitWakeWithNoHolders(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	_, wt := initSpawnedWorktree(t, "") // no SpawnedBy, no Holders
+
+	called := false
+	origEmit := emitExitWakes
+	emitExitWakes = func(holders []string, childKey, reason string) error {
+		called = true
+		return nil
+	}
+	t.Cleanup(func() { emitExitWakes = origEmit })
+
+	endInput, _ := json.Marshal(map[string]any{
+		"hook_event_name": "SessionEnd", "session_id": "sid-abc", "cwd": wt, "reason": "other",
+	})
+	if err := Run(bytes.NewReader(endInput), &bytes.Buffer{}, "", "", false); err != nil {
+		t.Fatalf("SessionEnd: %v", err)
+	}
+	if called {
+		t.Error("emitExitWakes must not be called for a session with no holders")
+	}
+}
+
 func TestSessionStartNoopInsideWorktree(t *testing.T) {
 	wt := initImplicitTestWorktree(t)
 	t.Setenv("XDG_STATE_HOME", t.TempDir())

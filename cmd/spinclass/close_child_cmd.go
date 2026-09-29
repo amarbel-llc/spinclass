@@ -6,12 +6,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	spinclose "code.linenisgreat.com/spinclass/internal/close"
+	"code.linenisgreat.com/spinclass/internal/clown"
+	"code.linenisgreat.com/spinclass/internal/servelog"
 	"code.linenisgreat.com/spinclass/internal/session"
 )
+
+// emitExitWakesFn is a package-level seam over clown.EmitExitWakes (FDR 0032
+// D6), shared by close_child_cmd.go and spawn_async.go, so their tests can
+// assert invocation without a real or stubbed ringmaster on PATH —
+// clown.EmitExitWakes itself gates on clown.Enabled(), which is false by
+// construction in a plain test env.
+var emitExitWakesFn = clown.EmitExitWakes
 
 // closeChildParams is the parameter set of the `close-child-session` tool
 // (#249): which spawned child to reap, and whether to override the safety
@@ -132,6 +142,19 @@ func runCloseChild(p closeChildParams) (string, error) {
 		&buf, child.RepoPath, child.WorktreePath, child.Branch, p.Force, nil, "tap",
 	); err != nil {
 		return "", err
+	}
+
+	// FDR 0032 D6: a successful reap is the "shutdown" (or, forced, "killed")
+	// exit-wake reason — every accepted holder OTHER than this caller (which
+	// already knows: it is the one that just reaped). Best-effort: a wake
+	// failure must not turn a completed reap into an error result.
+	reason := "shutdown"
+	if p.Force {
+		reason = "killed"
+	}
+	otherHolders := slices.DeleteFunc(slices.Clone(child.Holders), func(h string) bool { return h == callerPrincipal })
+	if err := emitExitWakesFn(otherHolders, child.Key(), reason); err != nil {
+		servelog.Errorf("close-child-session emitExitWakesFn-failed key=%s reason=%s err=%v", child.Key(), reason, err)
 	}
 
 	text := fmt.Sprintf("closed child session %s (worktree %s)", child.Key(), child.WorktreePath)

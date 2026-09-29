@@ -44,6 +44,18 @@ type ListRow struct {
 	// backward-compatible; 0 (no clown) is indistinguishable from an older
 	// host that never sends the field, which is correct.
 	ClownCount int `json:"clown_count,omitempty"`
+
+	// Holders is the count of accepted handle holders on this session (FDR
+	// 0032 D12/D14: State.Holders is the materialized view of accepted
+	// grants; this is just its length, for `sc list`'s HOLDERS column).
+	// Appended last and omitempty to keep the remote wire shape
+	// backward-compatible.
+	Holders int `json:"holders,omitempty"`
+
+	// Orphan is true when this session was spawned or handed a handle but no
+	// accepted holder remains (FDR 0032 D12; see State.Orphan). Appended last
+	// and omitempty.
+	Orphan bool `json:"orphan,omitempty"`
 }
 
 // ListRows converts states to wire rows with no clown-presence augmentation
@@ -79,6 +91,8 @@ func ListRowsWithClowns(states []State, closed bool, clowns map[string]int) []Li
 			Branch:      s.Branch,
 			SpawnedBy:   s.SpawnedBy,
 			ClownCount:  n,
+			Holders:     len(s.Holders),
+			Orphan:      s.Orphan(),
 		})
 	}
 	return rows

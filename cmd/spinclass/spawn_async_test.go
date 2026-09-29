@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/spawn"
+	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 
 // TestAsyncSpawnResultText pins the spinclass#266 immediate-response contract:
@@ -47,7 +49,7 @@ func TestSpawnTimeoutOutcomeKeepsBootingWorker(t *testing.T) {
 	}
 
 	pending := spawn.Pending{SessionKey: "workerrepo/feat-2", WorktreePath: wt}
-	msg := spawnTimeoutOutcome(pending, 90*time.Second)
+	msg := spawnTimeoutOutcome(pending, "driver-principal", 90*time.Second)
 
 	if !strings.Contains(msg, "workerrepo/feat-2") || !strings.Contains(msg, "dangling") {
 		t.Errorf("expected a keep+name message naming the session, got: %s", msg)
@@ -55,5 +57,70 @@ func TestSpawnTimeoutOutcomeKeepsBootingWorker(t *testing.T) {
 	// The worktree must NOT have been reaped (the active-log branch never reaps).
 	if _, err := os.Stat(wt); err != nil {
 		t.Errorf("worktree should survive an active-log timeout, stat: %v", err)
+	}
+}
+
+// TestSpawnTimeoutOutcomeEmitsCrashOnAutoReap pins FDR 0032 D6: a successful
+// auto-reap of a never-helloed, looked-dead worker emits "crash" to its
+// Holders OTHER than the driver — the driver already learns via its own job
+// wake (awaitSpawnHello's FinishJob). Stubs emitExitWakesFn rather than going
+// through clown.EmitExitWakes, which would silently no-op with CLOWN_BIN
+// unset in this test env.
+func TestSpawnTimeoutOutcomeEmitsCrashOnAutoReap(t *testing.T) {
+	testgit.RequireGit(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	repoPath := filepath.Join(t.TempDir(), "worker")
+	testgit.MustInit(t, repoPath)
+	if err := os.WriteFile(filepath.Join(repoPath, "sweatfile"), []byte("[hooks]\ndisable-nix-gc = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wtPath := filepath.Join(repoPath, ".worktrees", "feat-3")
+	testgit.MustWorktreeAdd(t, repoPath, wtPath, "feat-3")
+	if err := os.WriteFile(filepath.Join(repoPath, ".git", "info", "exclude"), []byte(".spinclass/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	const driverPrincipal = "principal-driver"
+	if err := session.Write(session.State{
+		SessionState:       session.StateInactive,
+		RepoPath:           repoPath,
+		WorktreePath:       wtPath,
+		Branch:             "feat-3",
+		SessionKey:         "worker/feat-3",
+		SpawnedByPrincipal: driverPrincipal,
+		Holders:            []string{driverPrincipal, "sibling-a"},
+		Entrypoint:         []string{"/bin/sh"},
+		StartedAt:          time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var gotHolders []string
+	var gotChildKey, gotReason string
+	orig := emitExitWakesFn
+	emitExitWakesFn = func(holders []string, childKey, reason string) error {
+		gotHolders = holders
+		gotChildKey = childKey
+		gotReason = reason
+		return nil
+	}
+	t.Cleanup(func() { emitExitWakesFn = orig })
+
+	pending := spawn.Pending{SessionKey: "worker/feat-3", RepoPath: repoPath, WorktreePath: wtPath, Branch: "feat-3"}
+	msg := spawnTimeoutOutcome(pending, driverPrincipal, 90*time.Second)
+
+	if !strings.Contains(msg, "reaped") {
+		t.Fatalf("expected a reap outcome message, got: %s", msg)
+	}
+	if gotReason != "crash" {
+		t.Errorf("reason = %q, want %q", gotReason, "crash")
+	}
+	if gotChildKey != "worker/feat-3" {
+		t.Errorf("childKey = %q, want %q", gotChildKey, "worker/feat-3")
+	}
+	if got := strings.Join(gotHolders, ","); got != "sibling-a" {
+		t.Errorf("holders = %q, want %q (driver excluded)", got, "sibling-a")
 	}
 }

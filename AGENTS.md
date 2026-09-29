@@ -195,6 +195,9 @@ subcommand is always available.
   further grant, or `list-handles --accept`); release only ever removes the
   caller itself. Both grant and release are unconditional always-ask
   (`internal/perms`), since a handle pass is never silently approvable.
+  `sc list` surfaces the resulting handle state directly: a HOLDERS count and
+  an `orphan` marker (text suffix / descCell hint) for a spawned or handled
+  session whose accepted holders have all released (FDR 0032 D12).
 - **Resurrecting a closed session** (FDR 0027, #291, `internal/resurrect`): the
   undo half of `sc close`/`close-child-session`. Both funnel through
   `close.RunResolved`, which now best-effort resolves the branch's tip

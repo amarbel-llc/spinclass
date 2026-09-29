@@ -193,22 +193,41 @@ func terminalWidth() int {
 	return w
 }
 
-// descCell renders the DESCRIPTION cell, folding the spawn-lineage hint in
-// as a dim (Muted) trailing span (mirrors the text path's
-// `spawned-by:<key>` column).
-func descCell(desc, spawnedBy string) mesa.Cell {
-	if spawnedBy == "" {
+// descCell renders the DESCRIPTION cell, folding the spawn-lineage hint
+// (`↰spawned-by`) and the FDR 0032 D12 handle hint in as dim trailing spans:
+// `⚭<n>` for a positive holder count, or `orphan` — styled Warn, the same
+// severity stateSeverity gives an inactive session — for a spawned/handled
+// row whose holders have all released. Mirrors the text path's
+// `holders:<n>`/`orphan` suffixes (commands_query.go's holdersSuffix).
+func descCell(desc, spawnedBy string, holders int, orphan bool) mesa.Cell {
+	type hint struct {
+		text string
+		sev  mesa.Severity
+	}
+	var hints []hint
+	if spawnedBy != "" {
+		hints = append(hints, hint{"↰" + spawnedBy, mesa.Muted})
+	}
+	switch {
+	case holders > 0:
+		hints = append(hints, hint{fmt.Sprintf("⚭%d", holders), mesa.Muted})
+	case orphan:
+		hints = append(hints, hint{"orphan", mesa.Warn})
+	}
+	if len(hints) == 0 {
 		return mesa.Text(desc)
 	}
-	hint := "↰" + spawnedBy
-	if desc == "" {
-		return mesa.Styled(mesa.Muted, hint)
+	if desc == "" && len(hints) == 1 {
+		return mesa.Styled(hints[0].sev, hints[0].text)
 	}
-	return mesa.Spans(
-		mesa.Span{Text: desc},
-		mesa.Span{Text: " "},
-		mesa.Span{Text: hint, Sev: mesa.Muted},
-	)
+	spans := make([]mesa.Span, 0, 1+2*len(hints))
+	if desc != "" {
+		spans = append(spans, mesa.Span{Text: desc})
+	}
+	for _, h := range hints {
+		spans = append(spans, mesa.Span{Text: " "}, mesa.Span{Text: h.text, Sev: h.sev})
+	}
+	return mesa.Spans(spans...)
 }
 
 func renderDiags(diags []string) string {
@@ -273,7 +292,7 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 			mesa.Text(s.SessionKey),
 			statusCell(stateSeverity(s.ResolveDisplayState(clowns)), clowns, marker),
 			mesa.Text(sessionpick.FormatRelDate(sessionpick.LastActivity(*s), now)),
-			descCell(s.Description, s.SpawnedBy),
+			descCell(s.Description, s.SpawnedBy, len(s.Holders), s.Orphan()),
 		)
 	}
 	for _, r := range remoteRows {
@@ -286,7 +305,7 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 			mesa.Styled(mesa.Special, r.Remote+":"+r.Repo+"/"+r.ID),
 			statusCell(mesa.Special, r.ClownCount, "remote"),
 			mesa.Text(""),
-			descCell(r.Description, r.SpawnedBy),
+			descCell(r.Description, r.SpawnedBy, r.Holders, r.Orphan),
 		)
 	}
 

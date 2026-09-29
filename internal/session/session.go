@@ -901,6 +901,19 @@ func (s State) IsHolder(principal string) bool {
 	return slices.Contains(s.Holders, principal)
 }
 
+// Orphan reports whether this session is under handle management
+// (SpawnedByPrincipal set: spawned since FDR 0032 seeded Holders) but no
+// accepted holder remains (D12: "a child is orphaned when no accepted holder
+// is alive per the presence index"; slice 0 checks membership only, not
+// liveness, so this is the presence-free approximation `sc list` shows). A
+// legacy child carrying only SpawnedBy is NOT orphaned: its spawner still
+// reaps it through authorizeChildReap's session-key path, so labelling it
+// orphan would be false. A session never spawned or handed out is not
+// orphaned merely for having zero holders.
+func (s *State) Orphan() bool {
+	return s.SpawnedByPrincipal != "" && len(s.Holders) == 0
+}
+
 // defaultHandleRights is the rights a grant carries when the granter names
 // none (FDR 0032 D13): "the lazy handoff is the conservative one".
 const defaultHandleRights = "observe,close"
