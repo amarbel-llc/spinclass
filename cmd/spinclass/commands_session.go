@@ -201,7 +201,7 @@ func registerSessionCommands(app *command.App) {
 		Name: "check",
 		Description: command.Description{
 			Short: "Run the [hooks].pre-merge command without merging",
-			Long:  "Runs the configured [hooks].pre-merge command (the agent-CI hook) in the current worktree. Reports ok / not ok and exits non-zero on failure. Available regardless of [hooks].disable-merge. Output formats: auto (default; live viewport on a TTY, ndjson-crap records when piped), viewport, plain (verdict lines), or ndjson. TAP is retired for merge/check.",
+			Long:  "Runs the configured [hooks].pre-merge command (the agent-CI hook) in the current worktree. Reports ok / not ok and exits non-zero on failure. Refuses before the hook when a merge driver the eventual merge's rebase would invoke is not on PATH (#324). Available regardless of [hooks].disable-merge. Output formats: auto (default; live viewport on a TTY, ndjson-crap records when piped), viewport, plain (verdict lines), or ndjson. TAP is retired for merge/check.",
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
 			var p struct {

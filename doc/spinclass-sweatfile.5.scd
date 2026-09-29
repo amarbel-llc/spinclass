@@ -476,9 +476,13 @@ does not export *WORKTREE*.
 	gated on this flag. *check-this-session* runs the configured
 	*[hooks].pre-merge* command without merging, providing an agent-CI
 	surface for repositories where merges must go through external review
-	(e.g., protected branches that require pull requests). The *sc check*
-	CLI subcommand is available regardless of this flag. *Merge:* scalar
-	override.
+	(e.g., protected branches that require pull requests). Like a merge,
+	it first pre-flights the merge drivers the merge's rebase would invoke:
+	a *merge=<name>* attribute bound to a *merge.<name>.driver* whose
+	program is not on PATH is a refusal, not a hook run — git would
+	otherwise keep the "ours" side with no conflict markers (#324). The
+	*sc check* CLI subcommand is available regardless of this flag.
+	*Merge:* scalar override.
 
 *disable-merge-queue*
 	Boolean. When true, disables the per-repo merge serialization lock
