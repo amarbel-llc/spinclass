@@ -522,8 +522,9 @@ the tool ran under a principal, not that the principal's uid did nothing else.
 is the seam. That scope becomes a unit with `ProtectHome`, the worktree
 bind-mounted in, a dynamic uid, the tool sockets passed in, clown's existing
 `--tent` container as one realization, juggler as the eventual launcher; the
-tier-2 signer already refuses callers outside the frontend scope. This is the
-end vision and it needs coordination across spinclass (what the unit must
+tier-2 signer already refuses callers outside the frontend scope. The unit is
+also where a principal's budget (D19) becomes a CPU and memory limit. This is
+the end vision and it needs coordination across spinclass (what the unit must
 see), clown (launching it) and juggler (owning it). It is its own companion
 record, not a footnote here.
 
@@ -578,6 +579,33 @@ streams, arbitrary refs) and a per-push token via a credential helper (still a
 token in the session). piggy supplies caller attribution, troupe the record
 verifier, papi the credential mint, circus the host placement. Tracked as
 smith#68. None of this is in slices 0 to 2.
+
+### D19. Budgets are rights; scheduling is ringmaster's
+
+Added 2026-09-29. Nothing above bounds *how much* a tree may consume: N
+spawned workers are N concurrent pre-merge builds, a runaway fan-out burns
+credits before anyone notices, and ten escalation requests are ten PIN
+prompts, which pushes toward the cached PINs D2 avoids.
+
+The kernel keeps "whether" (capabilities) and "how much" (cgroups, rlimits)
+in separate subsystems that compose because limits are inherited the same
+way capabilities are. The same split here:
+
+- **Budgets are ambient rights.** A quota — spend (tokens), spawn count,
+  concurrent gate builds, live session slots — is an ambient, monotone limit
+  carried by the principal: inherited at spawn as a subset of the parent's
+  (D13), drop-only, raised only by a D11 escalation, so "I need more" takes
+  the same card path as any other raise. It is recorded in the D8 grammar
+  next to the ambient set and enforced at the same points. Once the agent
+  scope is a unit (D17), CPU and memory limits attach to that unit, and the
+  principal's budget record is what sets them.
+- **Scheduling is not this record's.** Queues, priorities, back-pressure,
+  batching escalation prompts into one touch, throttling builds across a
+  host: that is ringmaster's, as the job platform, with FDR 0022's per-repo
+  merge queue and the smith broker's push serialization (D18) as the two
+  instances that already exist. Designing it here would couple "who may"
+  to "when", which is the coupling capability systems exist to avoid.
+  Tracked as a ringmaster companion record.
 
 ## Interface (slice 0)
 
@@ -682,6 +710,7 @@ GitHub, lacks it until added by hand).
 | spinclass | security review | spinclass#339 | D17 | findings recorded in D17; `testing -> accepted` requires it |
 | spinclass | revisions to FDR 0007 and FDR 0031 | spinclass#337 | D16 | attestations as signed records from distinct subagent principals; exemption predicates select required record kinds |
 | ringmaster | note | ringmaster#25 | D7 ringmaster row | RFC-0019 annotation kinds for issuance, grant, accept, release, revoke, escalation; exit-wake reason tags |
+| ringmaster | record (scheduling and contention) | ringmaster#26 | D19 | queues, priorities and back-pressure across sessions; batching escalation prompts into one touch; admitting jobs against a principal's budget record without ever granting budget; generalizes the FDR 0022 merge queue and the broker's push serialization |
 | circus (GitHub) | note | amarbel-llc/circus#255 | D15 | XEP-0050 admin surface (the FDR 0019 addendum); enrolled-device provisioning on the operator's Snikket account |
 | papi | change | papi#87 | D11 | 9C enrollment step and attestation publication |
 | moxy | note | moxy#443 | D13, D16 | moxins declare the rights they enforce and emit signed execution records in the D8 grammar |
