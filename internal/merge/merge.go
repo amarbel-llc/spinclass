@@ -156,7 +156,8 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, rep *crap.Rep
 
 // PrepareMerge runs the fast, session-worktree-touching prefix of a merge: the
 // disable-merge gate, optional pull of defaultBranch, rebase of branch onto it,
-// and the nothing-to-merge short-circuit. On success it returns the pinned
+// the nothing-to-merge short-circuit, and validation of the post-merge
+// selection against the pin. On success it returns the pinned
 // post-rebase HEAD sha — the exact commit FinishMerge verifies and merges, so a
 // commit landing on branch after PrepareMerge returns does not change what gets
 // merged. Stages emit test points on ts; PrepareMerge never finishes the
@@ -167,7 +168,7 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, rep *crap.Rep
 // moment the rebase lands while FinishMerge's slow pre-merge hook runs detached
 // in an isolated build worktree.
 func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch string, gitSync bool, pm PostMergeOptions) (pinnedSha string, err error) {
-	preamble, gateErr := loadAndGate(ts, repoPath, wtPath, branch, pm.Targets)
+	preamble, gateErr := loadAndGate(ts, repoPath, wtPath, branch)
 	if gateErr != nil {
 		return "", gateErr
 	}
@@ -232,7 +233,21 @@ func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch s
 	// Pin the post-rebase (and post-repair) tip: FinishMerge verifies and merges
 	// exactly this sha, so work committed onto branch while the hook runs is left
 	// for a later merge.
-	return pinHead(ts, wtPath, branch)
+	pinned, err := pinHead(ts, wtPath, branch)
+	if err != nil {
+		return "", err
+	}
+
+	// Validated against the pinned commit (#300). It sits after the rebase and
+	// REPAIR because the pinned sha does not exist earlier. It is still
+	// pre-landing, but a bad selection therefore costs a fetch, rebase and repair
+	// before failing (repair may have amended the branch; re-merge after fixing
+	// the flag). A sibling landing that later removes the target is caught by
+	// runNamedPostMergeTargets's defensive re-select (a warning node).
+	if err := validatePostMergeSelection(ts, repoPath, branch, pinned, pm.Targets); err != nil {
+		return "", err
+	}
+	return pinned, nil
 }
 
 // mergePreamble carries the sweatfile hierarchy loaded by loadAndGate into
@@ -243,11 +258,11 @@ type mergePreamble struct {
 }
 
 // loadAndGate is the head of a merge: the co-active sessions point, the
-// sweatfile hierarchy load for dir, the disable-merge gate, and the post-merge
-// target validation. An unresolvable home or load failure degrades gracefully —
+// sweatfile hierarchy load for dir (used by the repair phase), and the
+// disable-merge gate. An unresolvable home or load failure degrades gracefully —
 // the gate and the later repair phase are skipped rather than blocking the
 // merge.
-func loadAndGate(ts *crap.TestStream, repoPath, dir, branch string, postMergeTargets []string) (mergePreamble, error) {
+func loadAndGate(ts *crap.TestStream, repoPath, dir, branch string) (mergePreamble, error) {
 	emitCoActiveSessions(ts, repoPath, dir)
 
 	var p mergePreamble
@@ -265,22 +280,36 @@ func loadAndGate(ts *crap.TestStream, repoPath, dir, branch string, postMergeTar
 		return p, failStep(ts, "merge "+branch, disableErr, "")
 	}
 
-	// Validate the post-merge target selection BEFORE anything lands (FDR 0026):
-	// a caller naming a target no [[post-merge]] stanza declares is a typo that
-	// would otherwise silently skip the deploy the caller intended, so it is the
-	// one post-merge concern that can still be fatal — nothing has shipped yet.
-	// A nil selection (deploy all) needs no validation; an empty one (deploy
-	// none) is always valid.
-	if postMergeTargets != nil {
-		var active []sweatfile.PostMergeTarget
-		if p.haveHierarchy {
-			active = p.hierarchy.Merged.ActivePostMergeTargets()
-		}
-		if _, selErr := selectPostMergeTargets(active, postMergeTargets); selErr != nil {
-			return p, failStep(ts, "post-merge selection "+branch, selErr, "")
-		}
-	}
 	return p, nil
+}
+
+// validatePostMergeSelection checks the caller's post-merge target selection
+// BEFORE anything lands (FDR 0026): a name no [[post-merge]] stanza declares is
+// a typo that would otherwise silently skip the deploy the caller intended, so
+// it is the one post-merge concern that can still be fatal — nothing has
+// shipped yet. It reads the sweatfile committed at pinnedSha (#300), the commit
+// the merge will land, not the live worktree. A nil selection (deploy all)
+// needs no validation; an empty one (deploy none) is always valid. An
+// unresolvable home leaves no declared targets, so any non-empty selection
+// fails as unknown; a sweatfile at the pin that cannot be read or parsed fails
+// with a distinct "unreadable" message, so it is not mistaken for a typo.
+func validatePostMergeSelection(ts *crap.TestStream, repoPath, branch, pinnedSha string, requested []string) error {
+	if requested == nil {
+		return nil
+	}
+	var active []sweatfile.PostMergeTarget
+	if home, _ := os.UserHomeDir(); home != "" {
+		h, hErr := loadCommitHierarchy(home, repoPath, pinnedSha)
+		if hErr != nil {
+			return failStep(ts, "post-merge selection "+branch,
+				fmt.Errorf("sweatfile at %s unreadable, cannot validate --post-merge-targets: %w", shortSha(pinnedSha), hErr), "")
+		}
+		active = h.Merged.ActivePostMergeTargets()
+	}
+	if _, selErr := selectPostMergeTargets(active, requested); selErr != nil {
+		return failStep(ts, "post-merge selection "+branch, selErr, "")
+	}
+	return nil
 }
 
 // repair runs the REPAIR phase (FDR 0018) in dir. It is a no-op when the

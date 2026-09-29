@@ -1,6 +1,8 @@
 package merge
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -289,6 +291,70 @@ command = "echo krone"
 	}
 	if msg := diagString(tr.Diagnostic, "message"); !strings.Contains(msg, "kron") {
 		t.Errorf("selection error should name the unknown target: %v", tr.Diagnostic)
+	}
+}
+
+// The selection is validated against the PINNED commit's sweatfile (#300), not
+// the live pre-rebase worktree: a sibling landing that renamed the target before
+// this merge rebased onto it must fail the selection pre-landing.
+func TestPostMergeSelectionValidatesAgainstPinnedSweatfile(t *testing.T) {
+	repoDir := setupRepo(t)
+	commitSweatfile(t, repoDir, "[[post-merge]]\nname = \"krone\"\ncommand = \"echo krone\"\n")
+	wtPath := setupWorktree(t, repoDir, "feature")
+	if err := os.WriteFile(filepath.Join(wtPath, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "a.txt")
+	runGit(t, wtPath, "commit", "-m", "feature commit")
+	commitSweatfile(t, repoDir, "[[post-merge]]\nname = \"nikulin\"\ncommand = \"echo nikulin\"\n")
+	mainBefore := runGit(t, repoDir, "rev-parse", "main")
+
+	recs, err := runFinishTargets(t, repoDir, wtPath, "feature", false, []string{"krone"})
+	if err == nil {
+		t.Fatal("a target the pinned commit no longer declares must fail the merge")
+	}
+	if mainAfter := runGit(t, repoDir, "rev-parse", "main"); mainAfter != mainBefore {
+		t.Errorf("merge must not land: main moved %s -> %s", mainBefore, mainAfter)
+	}
+	tests := testRecords(recs)
+	tr, ok := findTest(tests, "post-merge selection")
+	if !ok || tr.OK {
+		t.Fatalf("expected a failing 'post-merge selection' point, got %+v (%v)", tr, testDescs(tests))
+	}
+	msg := diagString(tr.Diagnostic, "message")
+	if !strings.Contains(msg, "krone") || !strings.Contains(msg, "nikulin") {
+		t.Errorf("selection error should name the requested and the declared target: %v", tr.Diagnostic)
+	}
+}
+
+// A pinned sweatfile that cannot be parsed must not read as "unknown target":
+// the selection fails pre-landing with a distinct "unreadable" message.
+func TestPostMergeSelectionUnreadablePinnedSweatfile(t *testing.T) {
+	repoDir := setupRepo(t)
+	wtPath := setupWorktree(t, repoDir, "feature")
+	if err := os.WriteFile(filepath.Join(wtPath, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "a.txt")
+	runGit(t, wtPath, "commit", "-m", "feature commit")
+	commitSweatfile(t, wtPath, "[[post-merge]\nbroken")
+	mainBefore := runGit(t, repoDir, "rev-parse", "main")
+
+	recs, err := runFinishTargets(t, repoDir, wtPath, "feature", false, []string{"krone"})
+	if err == nil {
+		t.Fatal("an unreadable pinned sweatfile must fail a non-empty selection")
+	}
+	if mainAfter := runGit(t, repoDir, "rev-parse", "main"); mainAfter != mainBefore {
+		t.Errorf("merge must not land: main moved %s -> %s", mainBefore, mainAfter)
+	}
+	tests := testRecords(recs)
+	tr, ok := findTest(tests, "post-merge selection")
+	if !ok || tr.OK {
+		t.Fatalf("expected a failing 'post-merge selection' point, got %+v (%v)", tr, testDescs(tests))
+	}
+	msg := diagString(tr.Diagnostic, "message")
+	if !strings.Contains(msg, "unreadable") || strings.Contains(msg, "unknown post-merge target") {
+		t.Errorf("want a distinct 'unreadable' message, got: %v", tr.Diagnostic)
 	}
 }
 
