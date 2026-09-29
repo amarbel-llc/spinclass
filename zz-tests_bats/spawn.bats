@@ -71,13 +71,16 @@ EOF
 @test "spawn launches a hello-gated worker in a sibling repo" {
   create_spawn_repo workerrepo "$STUB_DIR/stub-harness.sh"
 
-  SPINCLASS_SESSION_ID=driver/bats run_sc spawn workerrepo \
-    --brief "do the thing" --description "bats worker"
+  # The driver's PRINCIPAL (CLOWN_SESSION_ID, FDR 0032 D1) is the hello target
+  # and the chat address the result names; SPINCLASS_SESSION_ID is the
+  # display-only spawned_by lineage.
+  SPINCLASS_SESSION_ID=driver/bats CLOWN_SESSION_ID=1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f \
+    run_sc spawn workerrepo --brief "do the thing" --description "bats worker"
   assert_success
   assert_output --partial "session_key: workerrepo/"
   assert_output --partial "worktree_path: $WORKER_REPO/.worktrees/"
   assert_output --partial "multiplexer_id: "
-  assert_output --partial "worker will message driver/bats via chat"
+  assert_output --partial "worker will message 1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f via chat"
 
   # The brief reached the stub harness verbatim, in the worker worktree.
   local wt
@@ -90,6 +93,7 @@ EOF
   # keys and values are separated by ": ").
   run cat "$wt/.spinclass/state.json"
   assert_output --partial '"spawned_by": "driver/bats"'
+  assert_output --partial '"spawned_by_principal": "1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f"'
   assert_output --partial '"description": "bats worker"'
 
   # sc list surfaces the lineage annotation. Piped (non-TTY) `sc list`
@@ -169,12 +173,12 @@ EOF
   create_spawn_repo selfrepo "$STUB_DIR/stub-harness.sh"
 
   cd "$WORKER_REPO"
-  SPINCLASS_SESSION_ID=driver/bats run_sc spawn \
-    --brief "self spawn" --description "bats self worker"
+  SPINCLASS_SESSION_ID=driver/bats CLOWN_SESSION_ID=1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f \
+    run_sc spawn --brief "self spawn" --description "bats self worker"
   assert_success
   assert_output --partial "session_key: selfrepo/"
   assert_output --partial "worktree_path: $WORKER_REPO/.worktrees/"
-  assert_output --partial "worker will message driver/bats via chat"
+  assert_output --partial "worker will message 1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f via chat"
 
   local wt
   wt=$(echo "$output" | grep -oP 'worktree_path: \K\S+')
