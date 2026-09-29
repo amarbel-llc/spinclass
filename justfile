@@ -932,17 +932,23 @@ debug-session-env-map:
 # SPINCLASS_* identity env so the worktree variant renders; default resolves
 # whatever the cwd maps to (a git checkout -> the main-checkout variant).
 #
+# Runs the nix-built binary, not `go run`: cmd/spinclass does not build under
+# plain go tooling in the devshell (the gomod.nix-bridged dewey/pkgs/mesa
+# resolves only under nix build — spinclass#292). The dirty-tree nix build sees
+# TRACKED files only; `git add -N` a new file (or template) first.
+#
 # print the dynamic system-prompt fragment `spinclass serve` returns
 [group('debug')]
 debug-prompt-fragment mode="":
     #!/usr/bin/env bash
-    set -uo pipefail
+    set -euo pipefail
     req='{"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":"system-prompt-append"}}'
+    out=$(nix build --no-link --print-out-paths)
     if [ "{{ mode }}" = "worktree" ]; then
       export SPINCLASS_WORKTREE="$PWD" SPINCLASS_SESSION_ID="demo/branch" SPINCLASS_BRANCH="branch"
     fi
     printf '%s\n' "$req" \
-      | go run ./cmd/spinclass serve 2>/dev/null \
+      | "$out/bin/spinclass" serve 2>/dev/null \
       | jq -r 'select(.id == 1) | .result.messages[0].content.text'
 
 # [debug] Render an `sc` subcommand through a REAL PTY and dump the screen, so
