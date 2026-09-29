@@ -157,7 +157,7 @@ func createWorktree(worktreePath worktree.ResolvedPath, opts CreateOpts, tw *tap
 			SessionKey:   worktreePath.SessionKey,
 		}
 		mintDesc := "mint credential " + worktreePath.Branch
-		outcome, mintErr := auth.Mint(ctx, result.Merged, id)
+		outcome, mintErr := auth.Mint(ctx, result.Merged, id, "")
 		switch {
 		case mintErr != nil && !opts.AllowNoCredential:
 			_ = git.WorktreeForceRemove(worktreePath.RepoPath, worktreePath.AbsPath)

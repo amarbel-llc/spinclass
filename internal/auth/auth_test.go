@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -92,7 +93,7 @@ func TestParseForgeRemote(t *testing.T) {
 
 func TestMintNoCommandIsNoop(t *testing.T) {
 	_, wtPath, id := setupRepo(t)
-	outcome, err := Mint(context.Background(), sweatfile.Sweatfile{}, id)
+	outcome, err := Mint(context.Background(), sweatfile.Sweatfile{}, id, "")
 	if err != nil || outcome.Minted || outcome.Skipped != "" {
 		t.Fatalf("Mint with no [auth]: outcome=%+v err=%v", outcome, err)
 	}
@@ -106,7 +107,7 @@ func TestMintNoCommandIsNoop(t *testing.T) {
 func TestMintSkipsWithoutForgeOrigin(t *testing.T) {
 	_, wtPath, id := setupRepo(t)
 	runGit(t, id.RepoPath, "remote", "remove", "origin")
-	outcome, err := Mint(context.Background(), authSweatfile("echo tok", "true"), id)
+	outcome, err := Mint(context.Background(), authSweatfile("echo tok", "true"), id, "")
 	if err != nil {
 		t.Fatalf("Mint without an origin must not error: %v", err)
 	}
@@ -126,7 +127,7 @@ func TestMintForgeHostsAllowList(t *testing.T) {
 	sf := authSweatfile("echo tok", "true")
 	sf.Auth.ForgeHosts = []string{"github.com"}
 
-	outcome, err := Mint(context.Background(), sf, id)
+	outcome, err := Mint(context.Background(), sf, id, "")
 	if err != nil {
 		t.Fatalf("Mint on an unlisted host must not error: %v", err)
 	}
@@ -138,7 +139,7 @@ func TestMintForgeHostsAllowList(t *testing.T) {
 	}
 
 	sf.Auth.ForgeHosts = []string{"github.com", "forge.example.com"}
-	outcome, err = Mint(context.Background(), sf, id)
+	outcome, err = Mint(context.Background(), sf, id, "")
 	if err != nil || !outcome.Minted {
 		t.Fatalf("listed host: outcome=%+v err=%v", outcome, err)
 	}
@@ -149,7 +150,7 @@ func TestMintWritesCredentialInjectsConfigAndRecordsState(t *testing.T) {
 	envFile := filepath.Join(t.TempDir(), "env")
 	sf := authSweatfile("env | grep '^SPINCLASS_' | sort > "+envFile+"; echo tok/123", "true")
 
-	outcome, err := Mint(context.Background(), sf, id)
+	outcome, err := Mint(context.Background(), sf, id, "")
 	if err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
@@ -189,6 +190,7 @@ func TestMintWritesCredentialInjectsConfigAndRecordsState(t *testing.T) {
 		"SPINCLASS_WORKTREE=" + wtPath,
 		"SPINCLASS_FORGE_HOST=forge.example.com",
 		"SPINCLASS_FORGE_REPO=owner/repo",
+		"SPINCLASS_ORIGIN_URL=git@forge.example.com:owner/repo.git",
 	} {
 		if !strings.Contains(string(env), want) {
 			t.Errorf("mint env missing %q:\n%s", want, env)
@@ -202,11 +204,15 @@ func TestMintWritesCredentialInjectsConfigAndRecordsState(t *testing.T) {
 	if st.Credential == nil || st.Credential.MintedAt.IsZero() || st.Credential.RevokedAt != nil {
 		t.Errorf("state credential = %+v, want minted and unrevoked", st.Credential)
 	}
+	if r := st.Credential.Remote; r == nil || r.Resolved || !reflect.DeepEqual(r.From, []string{"git@forge.example.com:"}) ||
+		r.HTTPS != "https://forge.example.com/" || r.CredentialHost != "forge.example.com" {
+		t.Errorf("recorded Remote = %+v, want the built-in form", r)
+	}
 }
 
 func TestMintEmptyTokenFails(t *testing.T) {
 	_, wtPath, id := setupRepo(t)
-	if _, err := Mint(context.Background(), authSweatfile("true", "true"), id); err == nil {
+	if _, err := Mint(context.Background(), authSweatfile("true", "true"), id, ""); err == nil {
 		t.Fatal("expected an error for a mint-command that prints nothing")
 	}
 	if Minted(wtPath) {
@@ -218,9 +224,10 @@ func TestMintEmptyTokenFails(t *testing.T) {
 // the creation funnel minted) must not drop the mint record.
 func TestSessionWriteCarriesCredentialForward(t *testing.T) {
 	repoPath, wtPath, id := setupRepo(t)
-	if _, err := Mint(context.Background(), authSweatfile("echo tok", "true"), id); err != nil {
+	if _, err := Mint(context.Background(), authSweatfile("echo tok", "true"), id, ""); err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
+	before, _ := session.Read(repoPath, "feature-x")
 	fresh := session.State{
 		PID: 1, SessionState: session.StateActive, RepoPath: repoPath,
 		WorktreePath: wtPath, Branch: "feature-x", SessionKey: "repo/feature-x",
@@ -232,13 +239,16 @@ func TestSessionWriteCarriesCredentialForward(t *testing.T) {
 	if st.Credential == nil {
 		t.Fatal("session.Write dropped the credential record")
 	}
+	if st.Credential.Remote == nil || before.Credential.Remote == nil || !reflect.DeepEqual(st.Credential.Remote, before.Credential.Remote) {
+		t.Errorf("session.Write dropped Credential.Remote: %+v", st.Credential.Remote)
+	}
 }
 
 func TestRevokeRunsCommandRemovesFileAndRecords(t *testing.T) {
 	repoPath, wtPath, id := setupRepo(t)
 	marker := filepath.Join(t.TempDir(), "revoked")
 	sf := authSweatfile("echo tok", "echo revoking $SPINCLASS_SESSION_ID; echo $SPINCLASS_SESSION_ID > "+marker)
-	if _, err := Mint(context.Background(), sf, id); err != nil {
+	if _, err := Mint(context.Background(), sf, id, ""); err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
 
@@ -282,7 +292,7 @@ func TestSweepOrphansRevokesTombstonedSessions(t *testing.T) {
 	repoPath, _, id := setupRepo(t)
 	marker := filepath.Join(t.TempDir(), "swept")
 	sf := authSweatfile("echo tok", "echo $SPINCLASS_SESSION_ID >> "+marker)
-	if _, err := Mint(context.Background(), sf, id); err != nil {
+	if _, err := Mint(context.Background(), sf, id, ""); err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
 	// The session dies without revoking: tombstoned, worktree removed.
@@ -318,7 +328,7 @@ func TestSweepOrphansRevokesTombstonedSessions(t *testing.T) {
 func TestSweepOrphansLeavesLiveSessionsAlone(t *testing.T) {
 	repoPath, _, id := setupRepo(t)
 	sf := authSweatfile("echo tok", "false")
-	if _, err := Mint(context.Background(), sf, id); err != nil {
+	if _, err := Mint(context.Background(), sf, id, ""); err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
 	// Inactive but present (worktree exists): not an orphan.
@@ -329,13 +339,13 @@ func TestSweepOrphansLeavesLiveSessionsAlone(t *testing.T) {
 
 func TestMirrorIntoWiresAnotherWorktree(t *testing.T) {
 	repoPath, wtPath, id := setupRepo(t)
-	if _, err := Mint(context.Background(), authSweatfile("echo tok", "true"), id); err != nil {
+	if _, err := Mint(context.Background(), authSweatfile("echo tok", "true"), id, ""); err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
 	land := filepath.Join(repoPath, ".worktrees", ".land-x")
 	runGit(t, repoPath, "worktree", "add", "--detach", land, "HEAD")
 
-	if err := MirrorInto(wtPath, land); err != nil {
+	if err := MirrorInto(repoPath, "feature-x", wtPath, land); err != nil {
 		t.Fatalf("MirrorInto: %v", err)
 	}
 	credPath := filepath.Join(wtPath, ".spinclass", CredentialFile)
@@ -351,7 +361,7 @@ func TestMirrorIntoWithoutMintIsNoop(t *testing.T) {
 	repoPath, wtPath, _ := setupRepo(t)
 	land := filepath.Join(repoPath, ".worktrees", ".land-x")
 	runGit(t, repoPath, "worktree", "add", "--detach", land, "HEAD")
-	if err := MirrorInto(wtPath, land); err != nil {
+	if err := MirrorInto(repoPath, "feature-x", wtPath, land); err != nil {
 		t.Fatalf("MirrorInto: %v", err)
 	}
 	if out, err := exec.Command("git", "-C", land, "config", "--worktree", "--get", "credential.helper").CombinedOutput(); err == nil {

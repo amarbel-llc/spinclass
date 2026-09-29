@@ -8,7 +8,9 @@
 package auth
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -108,7 +110,7 @@ func Minted(worktreePath string) bool {
 	return err == nil
 }
 
-func (id Identity) env(r Remote) []string {
+func (id Identity) env(r Remote, originURL string) []string {
 	repo, branch := id.SessionKey, id.Branch
 	if i := strings.Index(id.SessionKey, "/"); i >= 0 {
 		repo, branch = id.SessionKey[:i], id.SessionKey[i+1:]
@@ -120,37 +122,168 @@ func (id Identity) env(r Remote) []string {
 		"SPINCLASS_WORKTREE=" + id.WorktreePath,
 		"SPINCLASS_FORGE_HOST=" + r.Host,
 		"SPINCLASS_FORGE_REPO=" + r.OwnerRepo,
+		"SPINCLASS_ORIGIN_URL=" + originURL,
 	}
 }
 
-// originRemote reads origin's CONFIGURED url. Not `git remote get-url`, which
+// Rewrite is the worktree-scoped url.<HTTPS>.insteadOf wiring plus the host the
+// credential-store line is keyed on. From lists the insteadOf values (empty:
+// helper only).
+type Rewrite struct {
+	CredentialHost string
+	HTTPS          string
+	From           []string
+	Resolved       bool
+}
+
+// Resolution is what Resolve decided for a session's origin: the configured
+// origin URL, the forge remote the mint/revoke env names, and the rewrite.
+type Resolution struct {
+	OriginURL string
+	Forge     Remote
+	Rewrite   Rewrite
+}
+
+// builtinRewrite is the pre-#335 string mapping: the origin's ssh prefix to
+// https://<host>/. Wrong on an owner-free forge plane, which is what
+// [auth].url-resolver exists to replace.
+func builtinRewrite(r Remote) Rewrite {
+	rw := Rewrite{CredentialHost: r.Host, HTTPS: "https://" + r.Host + "/"}
+	if r.SSHPrefix != "" {
+		rw.From = []string{r.SSHPrefix}
+	}
+	return rw
+}
+
+// readOrigin reads origin's CONFIGURED url. Not `git remote get-url`, which
 // applies url.*.insteadOf — once Inject has rewritten the forge to https in a
 // worktree, that would report the https form and hide the ssh prefix the next
 // Inject (the landing worktree's) has to rewrite.
-func originRemote(dir string) (Remote, error) {
+func readOrigin(dir string) (string, Remote, error) {
 	raw, err := git.Run(dir, "config", "--get", "remote.origin.url")
 	if err != nil {
-		return Remote{}, fmt.Errorf("resolve origin remote: %w", err)
+		return "", Remote{}, fmt.Errorf("resolve origin remote: %w", err)
 	}
-	return ParseForgeRemote(raw)
+	raw = strings.TrimSpace(raw)
+	r, err := ParseForgeRemote(raw)
+	return raw, r, err
+}
+
+// urlResolverTimeout caps one [auth].url-resolver run. A var so tests can
+// shorten it.
+var urlResolverTimeout = 30 * time.Second
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// Resolve maps the configured origin to the rewrite the token lane wires. A
+// blank resolver keeps the built-in string rewrite. Otherwise the resolver
+// (a shell string; `{origin}` is replaced by the shell-quoted origin URL) runs
+// on the ambient PATH from the repo root and must print one JSON object with
+// `canonical_https` (required) and `canonical_ssh` (optional). Every failure
+// is an error: there is deliberately no fallback to the string rewrite.
+func Resolve(ctx context.Context, resolver string, id Identity, originURL string, origin Remote) (Resolution, error) {
+	if strings.TrimSpace(resolver) == "" {
+		return Resolution{OriginURL: originURL, Forge: origin, Rewrite: builtinRewrite(origin)}, nil
+	}
+	const prefix = "[auth] url-resolver"
+	// The runner re-normalizes the script (drops blank lines), which would
+	// alter a quoted origin containing one; git never yields such an origin.
+	if strings.ContainsAny(originURL, "\r\n") {
+		return Resolution{}, fmt.Errorf("%s: origin URL %q contains a newline", prefix, originURL)
+	}
+	rctx, cancel := context.WithTimeout(ctx, urlResolverTimeout)
+	defer cancel()
+	// Normalize first, then substitute, so normalization never touches the
+	// (shell-quoted) origin text.
+	script := strings.ReplaceAll(sweatfile.NormalizeCommand(resolver), "{origin}", shellQuote(originURL))
+	out, err := hookrun.CommandCaptureAmbient(rctx, id.RepoPath, script, id.env(origin, originURL))
+	if err != nil {
+		switch {
+		case ctx.Err() != nil:
+			return Resolution{}, fmt.Errorf("%s cancelled: %v", prefix, ctx.Err())
+		case errors.Is(rctx.Err(), context.DeadlineExceeded):
+			return Resolution{}, fmt.Errorf("%s timed out after %s", prefix, urlResolverTimeout)
+		}
+		return Resolution{}, fmt.Errorf("%s failed: %w", prefix, err)
+	}
+	trimmed := bytes.TrimSpace([]byte(out))
+	if len(trimmed) == 0 {
+		return Resolution{}, fmt.Errorf("%s printed no JSON object on stdout", prefix)
+	}
+	var ans struct {
+		CanonicalHTTPS *string `json:"canonical_https"`
+		CanonicalSSH   *string `json:"canonical_ssh"`
+	}
+	if err := json.Unmarshal(trimmed, &ans); err != nil {
+		snippet := trimmed
+		if len(snippet) > 200 {
+			snippet = snippet[:200]
+		}
+		return Resolution{}, fmt.Errorf("%s printed invalid JSON: %v (stdout: %s)", prefix, err, snippet)
+	}
+	if ans.CanonicalHTTPS == nil || strings.TrimSpace(*ans.CanonicalHTTPS) == "" {
+		return Resolution{}, fmt.Errorf(`%s output has no "canonical_https"`, prefix)
+	}
+	canonicalHTTPS := strings.TrimSpace(*ans.CanonicalHTTPS)
+	u, err := url.Parse(canonicalHTTPS)
+	if err != nil || !strings.HasPrefix(canonicalHTTPS, "https://") || u.Scheme != "https" || u.Host == "" {
+		return Resolution{}, fmt.Errorf("%s canonical_https %q is not an https URL", prefix, canonicalHTTPS)
+	}
+	switch {
+	case u.User != nil:
+		return Resolution{}, fmt.Errorf("%s canonical_https %q is not an https URL: must not carry userinfo", prefix, canonicalHTTPS)
+	case strings.ContainsAny(canonicalHTTPS, "?#"):
+		return Resolution{}, fmt.Errorf("%s canonical_https %q is not an https URL: must not carry a query or fragment", prefix, canonicalHTTPS)
+	}
+	canonicalSSH := ""
+	if ans.CanonicalSSH != nil {
+		canonicalSSH = strings.TrimSpace(*ans.CanonicalSSH)
+	}
+	if canonicalSSH != "" {
+		if r, perr := ParseForgeRemote(canonicalSSH); perr != nil || r.SSHPrefix == "" {
+			return Resolution{}, fmt.Errorf("%s canonical_ssh %q is not an ssh URL", prefix, canonicalSSH)
+		}
+	}
+	var from []string
+	for _, v := range []string{originURL, canonicalSSH} {
+		if v != "" && v != canonicalHTTPS && !slices.Contains(from, v) {
+			from = append(from, v)
+		}
+	}
+	return Resolution{
+		OriginURL: originURL,
+		Forge:     Remote{Host: u.Hostname(), OwnerRepo: trimRepoPath(u.Path)},
+		Rewrite:   Rewrite{CredentialHost: u.Host, HTTPS: canonicalHTTPS, From: from, Resolved: true},
+	}, nil
 }
 
 // MintOutcome reports what Mint did: Minted when a credential was written and
-// wired; Skipped (non-empty, human-readable) when a mint-command is configured
-// but this session's origin host is outside [auth].forge-hosts, so the session
+// wired (Resolved then carries the resolver's canonical_https, if one ran);
+// Skipped (non-empty, human-readable) when a mint-command is configured but
+// this session's origin host is outside [auth].forge-hosts, so the session
 // keeps today's ssh behaviour; neither when no mint-command is configured.
 type MintOutcome struct {
-	Minted  bool
-	Skipped string
+	Minted   bool
+	Skipped  string
+	Resolved string
 }
 
 // Mint runs [auth].mint-command in the session worktree, writes the token it
 // prints as a mode-600 git-credential-store file, injects the worktree-scoped
-// git config, and records the mint on the session state. A configured
-// [auth].forge-hosts allow-list gates it on the origin host first — the
-// mechanism that lets one root-level entry cover a tree of repos without a
-// GitHub-origin repo ever minting (and failing its creation).
-func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity) (MintOutcome, error) {
+// git config, and records the mint (and the remote it wired) on the session
+// state. A configured [auth].forge-hosts allow-list gates it on the ORIGIN host
+// first — the mechanism that lets one root-level entry cover a tree of repos
+// without a GitHub-origin repo ever minting (and failing its creation). The
+// allow-list also binds the resolver: a resolved canonical_https host outside
+// it fails the mint before anything is written, so a resolver cannot widen it.
+//
+// The url-resolver (if any) runs BEFORE the mint: a refusal then happens before
+// any token exists (nothing to revoke or orphan), the credential line and the
+// insteadOf key must name the canonical host only the resolution knows, and
+// the mint-command sees the canonical SPINCLASS_FORGE_HOST/_REPO.
+func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver string) (MintOutcome, error) {
 	cmd := sf.AuthMintCommand()
 	if cmd == nil || strings.TrimSpace(*cmd) == "" {
 		return MintOutcome{}, nil
@@ -159,14 +292,21 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity) (MintOutcome
 	// nothing a forge token could be scoped to, so — like an unlisted host —
 	// this is a visible skip, never a failed creation. A shared [auth] entry
 	// must not stop a remote-less scratch repo from getting a session.
-	remote, err := originRemote(id.RepoPath)
+	originURL, origin, err := readOrigin(id.RepoPath)
 	if err != nil {
 		return MintOutcome{Skipped: "no forge origin remote: " + strings.TrimSpace(err.Error())}, nil
 	}
-	if hosts := sf.AuthForgeHosts(); len(hosts) > 0 && !slices.Contains(hosts, remote.Host) {
-		return MintOutcome{Skipped: fmt.Sprintf("origin host %s not in [auth].forge-hosts", remote.Host)}, nil
+	if hosts := sf.AuthForgeHosts(); len(hosts) > 0 && !slices.Contains(hosts, origin.Host) {
+		return MintOutcome{Skipped: fmt.Sprintf("origin host %s not in [auth].forge-hosts", origin.Host)}, nil
 	}
-	out, err := hookrun.CommandCapture(ctx, id.WorktreePath, *cmd, id.env(remote))
+	res, err := Resolve(ctx, urlResolver, id, originURL, origin)
+	if err != nil {
+		return MintOutcome{}, err
+	}
+	if hosts := sf.AuthForgeHosts(); len(hosts) > 0 && !slices.Contains(hosts, res.Forge.Host) {
+		return MintOutcome{}, fmt.Errorf("[auth] url-resolver: canonical_https host %q is not in forge-hosts %v", res.Forge.Host, hosts)
+	}
+	out, err := hookrun.CommandCapture(ctx, id.WorktreePath, *cmd, id.env(res.Forge, res.OriginURL))
 	if err != nil {
 		return MintOutcome{}, fmt.Errorf("[auth] mint-command failed: %w", err)
 	}
@@ -174,21 +314,36 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity) (MintOutcome
 	if token == "" {
 		return MintOutcome{}, errors.New("[auth] mint-command printed no token on stdout")
 	}
-	if err := writeCredential(id.WorktreePath, remote.Host, token); err != nil {
+	if err := writeCredential(id.WorktreePath, res.Rewrite.CredentialHost, token); err != nil {
 		return MintOutcome{}, fmt.Errorf("[auth] write credential: %w", err)
 	}
-	if err := Inject(id.WorktreePath, credentialPath(id.WorktreePath), remote); err != nil {
+	if err := Inject(id.WorktreePath, credentialPath(id.WorktreePath), res.Rewrite); err != nil {
 		return MintOutcome{}, fmt.Errorf("[auth] inject worktree config: %w", err)
 	}
 	st, err := session.EnsureWorktreeState(id.RepoPath, id.Branch, id.SessionKey, 0)
 	if err != nil {
 		return MintOutcome{}, fmt.Errorf("[auth] record mint: %w", err)
 	}
-	st.Credential = &session.Credential{MintedAt: time.Now().UTC()}
+	st.Credential = &session.Credential{
+		MintedAt: time.Now().UTC(),
+		Remote: &session.CredentialRemote{
+			OriginURL:      res.OriginURL,
+			ForgeHost:      res.Forge.Host,
+			ForgeRepo:      res.Forge.OwnerRepo,
+			CredentialHost: res.Rewrite.CredentialHost,
+			HTTPS:          res.Rewrite.HTTPS,
+			From:           res.Rewrite.From,
+			Resolved:       res.Rewrite.Resolved,
+		},
+	}
 	if err := session.Write(*st); err != nil {
 		return MintOutcome{}, fmt.Errorf("[auth] record mint: %w", err)
 	}
-	return MintOutcome{Minted: true}, nil
+	outcome := MintOutcome{Minted: true}
+	if res.Rewrite.Resolved {
+		outcome.Resolved = res.Rewrite.HTTPS
+	}
+	return outcome, nil
 }
 
 func writeCredential(worktreePath, host, token string) error {
@@ -214,7 +369,7 @@ func writeCredential(worktreePath, host, token string) error {
 // worktreeConfig, the same mechanism as the per-worktree pre-commit hook), so
 // the root checkout and every other worktree keep their own auth. Only the
 // forge host is rewritten: remotes on other hosts stay as they are.
-func Inject(dir, credFile string, r Remote) error {
+func Inject(dir, credFile string, rw Rewrite) error {
 	if git.CommonConfigHasWorktreeOverride(dir) {
 		return errors.New("core.worktree is set in the shared git config; extensions.worktreeConfig would break it")
 	}
@@ -224,10 +379,15 @@ func Inject(dir, credFile string, r Remote) error {
 	if _, err := git.Run(dir, "config", "--worktree", "credential.helper", "store --file="+credFile); err != nil {
 		return fmt.Errorf("setting credential.helper: %w", err)
 	}
-	if r.SSHPrefix != "" {
-		key := "url.https://" + r.Host + "/.insteadOf"
-		if _, err := git.Run(dir, "config", "--worktree", "--replace-all", key, r.SSHPrefix); err != nil {
+	if len(rw.From) > 0 {
+		key := "url." + rw.HTTPS + ".insteadOf"
+		if _, err := git.Run(dir, "config", "--worktree", "--replace-all", key, rw.From[0]); err != nil {
 			return fmt.Errorf("setting %s: %w", key, err)
+		}
+		for _, v := range rw.From[1:] {
+			if _, err := git.Run(dir, "config", "--worktree", "--add", key, v); err != nil {
+				return fmt.Errorf("adding %s: %w", key, err)
+			}
 		}
 	}
 	return nil
@@ -236,19 +396,33 @@ func Inject(dir, credFile string, r Remote) error {
 // MirrorInto applies the session worktree's credential wiring to another
 // worktree of the same repo — the disposable landing worktree the merge pushes
 // from (FDR 0029) — pointing at the session worktree's credential file. A no-op
-// when the session never minted one.
-func MirrorInto(sessionWorktree, dir string) error {
+// when the session never minted one. The rewrite replays the remote the mint
+// recorded on the session state (which may be resolver-produced), never a
+// re-parse of today's origin.
+func MirrorInto(repoPath, branch, sessionWorktree, dir string) error {
 	if !Minted(sessionWorktree) {
 		return nil
 	}
-	// The helper is host-agnostic (the stored line names the host), so an
-	// origin that is not a forge URL (a local path, say) still gets it — only
-	// the ssh→https rewrite needs a parsed remote.
-	remote, err := originRemote(sessionWorktree)
-	if err != nil {
-		remote = Remote{}
+	var rw Rewrite
+	st, err := session.Read(repoPath, branch)
+	switch {
+	case err == nil && st.Credential != nil && st.Credential.Remote != nil:
+		r := st.Credential.Remote
+		rw = Rewrite{CredentialHost: r.CredentialHost, HTTPS: r.HTTPS, From: r.From, Resolved: r.Resolved}
+	case err == nil && st.Credential == nil:
+		return errors.New("session state has no credential record for a minted worktree")
+	case err == nil || errors.Is(err, os.ErrNotExist):
+		// No state at all, or a record minted before #335 (Credential without
+		// Remote): necessarily the built-in form. The helper is host-agnostic (the stored line names the host), so an
+		// origin that is not a forge URL (a local path, say) still gets it —
+		// only the ssh→https rewrite needs a parsed remote.
+		if _, remote, oerr := readOrigin(sessionWorktree); oerr == nil {
+			rw = builtinRewrite(remote)
+		}
+	default:
+		return fmt.Errorf("read session state for the stored credential remote: %w", err)
 	}
-	return Inject(dir, credentialPath(sessionWorktree), remote)
+	return Inject(dir, credentialPath(sessionWorktree), rw)
 }
 
 // Revoke runs [auth].revoke-command for a session that minted a credential,
@@ -274,11 +448,20 @@ func revoke(ctx context.Context, sf sweatfile.Sweatfile, id Identity, dir string
 	// Revocation addresses the token by session id; the forge host/repo env
 	// is a convenience, so an origin that is not a forge URL (a local path)
 	// just leaves those two variables empty rather than blocking the revoke.
-	remote, err := originRemote(id.RepoPath)
-	if err != nil {
-		remote = Remote{}
+	// The stored record (what the mint saw) wins over a re-parse of today's
+	// origin, so mint and revoke see the same values.
+	st, rerr := session.Read(id.RepoPath, id.Branch)
+	var (
+		remote    Remote
+		originURL string
+	)
+	if rerr == nil && st.Credential != nil && st.Credential.Remote != nil {
+		r := st.Credential.Remote
+		remote, originURL = Remote{Host: r.ForgeHost, OwnerRepo: r.ForgeRepo}, r.OriginURL
+	} else if u, parsed, oerr := readOrigin(id.RepoPath); oerr == nil {
+		remote, originURL = parsed, u
 	}
-	out, err := hookrun.CommandCapture(ctx, dir, *cmd, id.env(remote))
+	out, err := hookrun.CommandCapture(ctx, dir, *cmd, id.env(remote, originURL))
 	if w != nil && out != "" {
 		_, _ = io.WriteString(w, out)
 	}
@@ -286,7 +469,7 @@ func revoke(ctx context.Context, sf sweatfile.Sweatfile, id Identity, dir string
 		return fmt.Errorf("[auth] revoke-command failed: %w", err)
 	}
 	now := time.Now().UTC()
-	if st, rerr := session.Read(id.RepoPath, id.Branch); rerr == nil && st.Credential != nil {
+	if rerr == nil && st.Credential != nil {
 		c := *st.Credential
 		c.RevokedAt = &now
 		_ = session.UpdateCredential(id.RepoPath, id.Branch, &c)

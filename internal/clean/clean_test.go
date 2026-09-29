@@ -126,7 +126,7 @@ func TestRemoveWorktreeRevokesMintedCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := auth.Identity{RepoPath: repoDir, WorktreePath: wtPath, Branch: "merged-x", SessionKey: "repo/merged-x"}
-	if _, err := auth.Mint(context.Background(), sf, id); err != nil {
+	if _, err := auth.Mint(context.Background(), sf, id, ""); err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
 

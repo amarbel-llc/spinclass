@@ -427,7 +427,7 @@ func TestRunResolvedRevokesMintedCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := auth.Identity{RepoPath: repoPath, WorktreePath: wtPath, Branch: "feature-x", SessionKey: "repo/feature-x"}
-	if _, err := auth.Mint(context.Background(), sf, id); err != nil {
+	if _, err := auth.Mint(context.Background(), sf, id, ""); err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
 

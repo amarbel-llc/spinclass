@@ -26,6 +26,21 @@ import (
 type Credential struct {
 	MintedAt  time.Time  `json:"minted_at"`
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+	// Remote is the origin rewrite the mint wired, replayed by the landing
+	// worktree's MirrorInto and by revoke. Nil on a record minted before #335
+	// (necessarily the built-in form).
+	Remote *CredentialRemote `json:"remote,omitempty"`
+}
+
+// CredentialRemote records what a mint saw and wrote about the forge remote.
+type CredentialRemote struct {
+	OriginURL      string   `json:"origin_url"`         // configured remote.origin.url at mint time
+	ForgeHost      string   `json:"forge_host"`         // SPINCLASS_FORGE_HOST the mint saw
+	ForgeRepo      string   `json:"forge_repo"`         // SPINCLASS_FORGE_REPO the mint saw
+	CredentialHost string   `json:"credential_host"`    // host[:port] in .spinclass/git-credentials
+	HTTPS          string   `json:"https"`              // url.<HTTPS>.insteadOf
+	From           []string `json:"from,omitempty"`     // that key's values
+	Resolved       bool     `json:"resolved,omitempty"` // produced by [auth].url-resolver
 }
 
 // caller returns "file.go:N" of the call site `skip` frames up from

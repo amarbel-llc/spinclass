@@ -193,7 +193,7 @@ func TestResolvedGitSyncMirrorsCredentialIntoLandingWorktree(t *testing.T) {
 	if err := os.WriteFile(credPath, []byte("https://spinclass:tok@example.com\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := auth.Inject(wtPath, credPath, auth.Remote{Host: "example.com"}); err != nil {
+	if err := auth.Inject(wtPath, credPath, auth.Rewrite{CredentialHost: "example.com"}); err != nil {
 		t.Fatalf("Inject: %v", err)
 	}
 

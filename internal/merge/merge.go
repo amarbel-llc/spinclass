@@ -471,7 +471,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	// The landing worktree pushes, so it needs the session's per-session push
 	// credential wiring (FDR 0028) — a no-op when the session minted none.
 	if gitSync {
-		if mErr := auth.MirrorInto(wtPath, landPath); mErr != nil {
+		if mErr := auth.MirrorInto(repoPath, branch, wtPath, landPath); mErr != nil {
 			return nil, failStep(ts, "land "+branch, fmt.Errorf("mirror push credential into landing worktree: %w", mErr), "")
 		}
 	}

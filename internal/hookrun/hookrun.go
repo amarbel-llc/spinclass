@@ -461,3 +461,57 @@ func CommandCapture(ctx context.Context, dir, cmd string, extraEnv []string) (st
 	}
 	return stdout.String(), nil
 }
+
+// maxAmbientCapture bounds each of CommandCaptureAmbient's captured streams.
+const maxAmbientCapture = 64 << 10
+
+// cappedBuffer keeps the first maxAmbientCapture bytes written and discards the
+// rest without failing the writer (a failed Write would kill the child).
+type cappedBuffer struct{ b []byte }
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	if room := maxAmbientCapture - len(c.b); room > 0 {
+		c.b = append(c.b, p[:min(room, len(p))]...)
+	}
+	return len(p), nil
+}
+
+func (c *cappedBuffer) String() string { return string(c.b) }
+
+// CommandCaptureAmbient is CommandCapture without the devshell: `sh -c` in dir
+// on the ambient PATH, no `direnv exec`, no WORKTREE injection. Used for
+// commands whose answer decides where a credential goes ([auth].url-resolver):
+// the devshell is head-controlled (a branch can change it), so running such a
+// command inside it would let the branch choose the resolver's tools (FDR
+// 0031's reasoning). stdout is returned, stderr is folded into errors, and
+// WaitDelay bounds a grandchild that outlives the shell holding the pipes.
+// The inherited env drops every DIRENV_* variable (so a caller running inside
+// a devshell does not leak direnv's loaded-state markers; PATH itself is still
+// inherited, that being the "ambient" decision), and stdout and stderr are each
+// captured up to 64 KiB, silently truncated beyond that.
+func CommandCaptureAmbient(ctx context.Context, dir, cmd string, extraEnv []string) (string, error) {
+	script := sweatfile.NormalizeCommand(cmd)
+	if script == "" {
+		return "", errors.New("empty command")
+	}
+	c := exec.CommandContext(ctx, "sh", "-c", script)
+	c.Dir = dir
+	env := make([]string, 0, len(os.Environ())+len(extraEnv))
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "DIRENV_") {
+			env = append(env, kv)
+		}
+	}
+	c.Env = append(env, extraEnv...)
+	c.WaitDelay = 2 * time.Second
+	stdout, stderr := &cappedBuffer{}, &cappedBuffer{}
+	c.Stdout = stdout
+	c.Stderr = stderr
+	if err := c.Run(); err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return "", fmt.Errorf("%w: %s", err, msg)
+		}
+		return "", err
+	}
+	return stdout.String(), nil
+}
