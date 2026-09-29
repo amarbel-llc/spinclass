@@ -563,9 +563,21 @@ free-text author line.
   holds an fd. (c) is the target; (a) is the interim wherever per-repo scope
   is not required.
 
-Owner for the broker is not yet assigned (a sibling of piggy's signer, or
-circus infrastructure); it gets a companion record when the target is picked.
-None of this is in slices 0 to 2.
+**Decided 2026-09-29: the broker is `smith broker`, push by request.** smith
+is the forge client (keystore, per-forge backends, `smith api`), so "push on
+behalf of a session" sits inside what it already is. The shape is (c) as a
+*request*, not a transport proxy: a session sends a signed
+`{worktree path, sha, target ref, repo}` over a local socket; the broker
+verifies the principal's `spinclass:merge` right and handle from the
+system-scoped record store, reads the objects straight from the group-readable
+worktree, and runs the one push itself, refusing any ref outside the default
+branch. spinclass's `FinishMerge` signs the request and hands it over when a
+broker is present, with `git.PushRef` from the landing worktree as the
+no-broker fallback. Rejected: a `git-remote-broker` transport proxy (pack
+streams, arbitrary refs) and a per-push token via a credential helper (still a
+token in the session). piggy supplies caller attribution, troupe the record
+verifier, papi the credential mint, circus the host placement. Tracked as
+smith#68. None of this is in slices 0 to 2.
 
 ## Interface (slice 0)
 
@@ -673,7 +685,7 @@ GitHub, lacks it until added by hand).
 | circus (GitHub) | note | amarbel-llc/circus#255 | D15 | XEP-0050 admin surface (the FDR 0019 addendum); enrolled-device provisioning on the operator's Snikket account |
 | papi | change | papi#87 | D11 | 9C enrollment step and attestation publication |
 | moxy | note | moxy#443 | D13, D16 | moxins declare the rights they enforce and emit signed execution records in the D8 grammar |
-| TBD (piggy signer sibling, or circus) | record (git broker) | not yet filed | D18 | separate-uid broker holding the forge credential; per-repo scope enforced on `spinclass:merge` + handle; commit signing via the principal's key and the `Provenance:` trailer |
+| smith | record (`smith broker`, push by request) | smith#68 | D18 | separate-uid service holding the forge credential; a signed landing request per push; scope enforced on `spinclass:merge` + handle and the default-branch ref; objects read from the group-readable worktree; `git.PushRef` stays the no-broker fallback |
 | purse-first | note | purse-first#194 | D13, D16 | manifest and `go-mcp` support for declared rights and execution records |
 
 ## Limitations
