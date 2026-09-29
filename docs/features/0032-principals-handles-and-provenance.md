@@ -409,7 +409,15 @@ Object rights on a handle, v1: `observe` (exit wakes, listing; implied by any
 handle), `close`, `grant` (may pass onward; without it the handle is
 non-transferable), `instruct` (the child treats this holder's messages as
 orders within its brief; the bit a parent would not pass to a janitor
-sibling), `cap` (D5). `merge` and `check` also exist as object rights, meaning
+sibling), `cap` (D5). Added 2026-09-29: `observe` also covers watching the
+session's live terminal once posh ships its read-only observer attach
+(posh#224), so `sc observe <session>` is the first tool gated on a right
+below `close`, and "spawned observable" is a grant of `observe` at spawn. A
+helper or assistant agent that may *type* into a live session needs a new
+**`input`** right above `observe` and below `close`, never in the default
+grant and a D11 escalation when the requester lacks it; posh's per-session
+observer and attached counts are its view of holders per right
+(spinclass#347). `merge` and `check` also exist as object rights, meaning
 "land or gate *that* session from outside", off by default, and require the
 matching ambient right: a handle never lets you do to another what you could
 not do to yourself. `force` is not a right you hold; it is a D11 escalation.
@@ -716,6 +724,8 @@ GitHub, lacks it until added by hand).
 | moxy | note | moxy#443 | D13, D16 | moxins declare the rights they enforce and emit signed execution records in the D8 grammar |
 | smith | record (`smith broker`, push by request) | smith#68 | D18 | separate-uid service holding the forge credential; a signed landing request per push; scope enforced on `spinclass:merge` + handle and the default-branch ref; objects read from the group-readable worktree; `git.PushRef` stays the no-broker fallback |
 | purse-first | note | purse-first#194 | D13, D16 | manifest and `go-mcp` support for declared rights and execution records |
+| posh | primitive (observer attach) | posh#224 | D13 | read-only, non-TTY observer attach with per-principal, per-mode (observe / input) authorization and visible counts; spinclass maintains the allow-list from its handle table, posh enforces at attach |
+| spinclass | consumer (`sc observe`, helper attach, `observable-by` at spawn) | spinclass#347 | D13 | `observe` gates the first tool below `close`; `input` is the helper right; not built until posh ships the primitive |
 
 ## Limitations
 
