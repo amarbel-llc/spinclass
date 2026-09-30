@@ -11,9 +11,6 @@
 // attestation. There is no sticky once-per-session mode. PIDs and session
 // state are host-local: a claim is only judged live or dead on its own host.
 //
-// Until #219 task 3 rewires the handlers, the interim Check/Consume shims
-// still consume at commit time, before success is known.
-//
 // The CLI (`sc merge` / `sc run` / `sc check`) does not claim — the gate
 // is MCP-only by design; a terminal merge only records the bypass (FDR 0031's
 // pre-merge policy stage, internal/merge/policy.go).
@@ -339,68 +336,6 @@ func Settle(slot Slot, t Ticket, landed bool) error {
 	default:
 		return fmt.Errorf("settle pre-merge attestation: %w", err)
 	}
-}
-
-// Check verifies a fresh attestation is buffered and consumes it.
-//
-// Interim shim: #219 task 3 removes it once the handlers claim/settle.
-func Check(merged sweatfile.Sweatfile, repoPath, branch string) (ok bool, output string, err error) {
-	if pok, output, perr := Peek(merged, WorktreeSlot(repoPath, branch)); !pok {
-		return false, output, perr
-	}
-	if cerr := Consume(merged, repoPath, branch); cerr != nil {
-		return false, "", cerr
-	}
-	return true, "", nil
-}
-
-// Consume clears any buffered attestation for (repoPath, branch).
-//
-// Interim shim: #219 task 3 removes it once the handlers claim/settle.
-func Consume(merged sweatfile.Sweatfile, repoPath, branch string) error {
-	return consumeSlot(merged, WorktreeSlot(repoPath, branch))
-}
-
-func consumeSlot(merged sweatfile.Sweatfile, slot Slot) error {
-	if len(merged.ActivePreMergeSkills()) == 0 {
-		return nil
-	}
-	st, readErr := slot.load()
-	if readErr != nil || st.PreMergeAttestation == nil {
-		return nil
-	}
-	st.PreMergeAttestation = nil
-	if writeErr := slot.store(*st); writeErr != nil {
-		return fmt.Errorf("clear pre-merge attestation: %w", writeErr)
-	}
-	return nil
-}
-
-// CheckImplicit is Check for an implicit (main-checkout) session.
-//
-// Interim shim: #219 task 3 removes it once the handlers claim/settle.
-func CheckImplicit(merged sweatfile.Sweatfile, checkout string) (ok bool, output string, err error) {
-	if pok, output, perr := Peek(merged, ImplicitSlot(checkout)); !pok {
-		return false, output, perr
-	}
-	if cerr := ConsumeImplicit(merged, checkout); cerr != nil {
-		return false, "", cerr
-	}
-	return true, "", nil
-}
-
-// PeekImplicit is Peek for an implicit (main-checkout) session.
-//
-// Interim shim: #219 task 3 removes it once the handlers claim/settle.
-func PeekImplicit(merged sweatfile.Sweatfile, checkout string) (ok bool, output string, err error) {
-	return Peek(merged, ImplicitSlot(checkout))
-}
-
-// ConsumeImplicit is Consume for an implicit (main-checkout) session.
-//
-// Interim shim: #219 task 3 removes it once the handlers claim/settle.
-func ConsumeImplicit(merged sweatfile.Sweatfile, checkout string) error {
-	return consumeSlot(merged, ImplicitSlot(checkout))
 }
 
 // renderFailure builds a self-contained TAP-14 document describing the

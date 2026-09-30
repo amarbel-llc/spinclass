@@ -446,6 +446,7 @@ func removeForWorktree(worktreeAbsPath string) error {
 	if err := os.Remove(statePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	_ = os.Remove(statePath + ".lock") // Update's flock sidecar would keep the dir non-empty
 	// Best-effort RemoveAll the .spinclass dir so it doesn't outlive the
 	// state file. Ignore "not exist" and "not empty" — slice 2's lifecycle
 	// hooks may write siblings here.
@@ -669,6 +670,7 @@ func Tombstone(repoPath, branch, sha string) error {
 	}
 	// State file and the .spinclass dir are now redundant — clean up.
 	_ = os.Remove(statePath)
+	_ = os.Remove(statePath + ".lock") // Update's flock sidecar would keep the dir non-empty
 	_ = os.Remove(filepath.Dir(statePath))
 	return nil
 }

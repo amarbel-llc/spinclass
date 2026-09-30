@@ -784,10 +784,21 @@ func TestSessionStateRemove(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Update leaves its flock sidecar behind; Remove must clear it too.
+	if err := Update(s.RepoPath, s.Branch, func(*State) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := Remove(s.RepoPath, s.Branch); err != nil {
 		t.Fatal(err)
 	}
 
+	if _, err := os.Stat(worktreeStatePath(s.WorktreePath) + ".lock"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("lock sidecar should be gone after Remove, stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(s.WorktreePath, ".spinclass")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf(".spinclass dir should be gone after Remove, stat err = %v", err)
+	}
 	if _, err := Read(s.RepoPath, s.Branch); err == nil {
 		t.Error("expected error reading removed state")
 	}
@@ -808,9 +819,16 @@ func TestTombstonePromotesSymlinkToRegularFile(t *testing.T) {
 	if err := Write(s); err != nil {
 		t.Fatal(err)
 	}
+	// Update leaves its flock sidecar behind; Tombstone must clear it too.
+	if err := Update(s.RepoPath, s.Branch, func(*State) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := Tombstone(s.RepoPath, s.Branch, ""); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(worktreeStatePath(s.WorktreePath) + ".lock"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("lock sidecar should be gone after Tombstone, stat err = %v", err)
 	}
 
 	idx := indexPath(s.WorktreePath)

@@ -367,7 +367,7 @@ const postMergeTimeoutParamDesc = `Override [hooks].post-merge-timeout for THIS 
 // parsePostMergeTimeoutParam turns the tool's optional post_merge_timeout string
 // into a PostMergeOptions.Timeout: "" ⇒ nil (sweatfile in force); otherwise the
 // same rule the sweatfile field is validated by. Errors are refusals — nothing
-// has landed and no attestation has been consumed when this runs.
+// has landed and no attestation has been claimed when this runs.
 func parsePostMergeTimeoutParam(v string) (*time.Duration, error) {
 	if v == "" {
 		return nil, nil
@@ -423,7 +423,7 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 		return command.TextErrorResult(gitErr.Error()), nil
 	}
 	// Refuse a main-checkout (implicit) session BEFORE the gate, so the refusal
-	// never consumes the attestation (#317).
+	// never claims the attestation (#317).
 	if gs.implicit {
 		return command.TextErrorResult(merge.ErrImplicitMergeUnsupported.Error()), nil
 	}
@@ -441,14 +441,22 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 		}
 	}
 
-	// Consume only once committed to the merge, and only when an attestation is
+	// Claim only once committed to the merge, and only when an attestation is
 	// what admitted it; an exemption-admitted merge leaves the buffer alone.
+	// The claim is consumed only if the merge lands, else released (#219); the
+	// deferred settle also covers a panic recovered by the MCP layer.
+	var hold attestationHold
 	if gate == merge.GateAttested {
-		if msg, cok := consumeGate(gs); !cok {
+		var msg string
+		var cok bool
+		if hold, msg, cok = holdGate(gs, cwd); !cok {
 			return command.TextErrorResult(msg), nil
 		}
 	}
+	landed := false
+	defer func() { hold.settle(landed) }()
 	pm.Gate = gate
+	pm.AttestedSha = hold.ticket.HeadSha
 
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "merge " + gs.branch, Source: "spinclass"})
@@ -466,6 +474,7 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 		pm,
 	)
 	ts.Finish()
+	landed = mergeErr == nil
 	text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
 	if mergeErr != nil && text == "" {
 		text = mergeErr.Error()
@@ -480,19 +489,17 @@ func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prom
 		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
 	}
 
-	// Check needs only the gate's ok flag, not the resolved identity — it always
-	// runs the hook against cwd. The discarded gitErr (a worktree git-resolution
-	// failure) is deliberately ignored: check tolerates it and runs the hook
-	// against cwd regardless; only an outright reject (!ok) — a genuine
-	// non-session cwd or a refused gate — stops it. (sc check, the CLI, remains
-	// the gate-free human escape hatch for an arbitrary dir.)
-	if _, failMsg, ok, _ := resolveGatedSession(cwd); !ok {
+	hold, failMsg, ok := holdCheckGate(cwd)
+	if !ok {
 		return command.TextErrorResult(failMsg), nil
 	}
+	passed := false
+	defer func() { hold.settle(passed) }()
 
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "check", Source: "spinclass"})
 	blobLinks, hookErr := check.Run(rep, cwd)
+	passed = hookErr == nil
 	text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
 	if hookErr != nil && text == "" {
 		text = hookErr.Error()
@@ -503,8 +510,8 @@ func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prom
 // handleMergeThisSessionAsync starts the merge (incl. the pre-merge hook) in a
 // background goroutine and returns a job id immediately, so the call is never
 // subject to the client's MCP request timeout. Gates like the synchronous
-// merge-this-session (decideMergeGate), consuming an attestation only once it
-// commits to dispatch or enqueue. The
+// merge-this-session (decideMergeGate), claiming an attestation only once it
+// commits to dispatch or enqueue, and consuming it only if the merge lands. The
 // result is retrieved via ringmaster's own surfaces (job_status/job_read/
 // job_wait) using the returned id; only registered under clown.
 func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
@@ -518,7 +525,7 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
 	}
 	gitSync := !params.LocalOnly // push by default; local_only opts out (#126)
-	// Parsed BEFORE the gate: a bad value is a refusal that must not consume the
+	// Parsed BEFORE the gate: a bad value is a refusal that must not claim the
 	// attestation (the same D2 discipline as a busy refusal).
 	pmTimeout, err := parsePostMergeTimeoutParam(params.PostMergeTimeout)
 	if err != nil {
@@ -530,10 +537,12 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 	if err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
 	}
-	// Resolve identity WITHOUT consuming the attestation, then verify a fresh
-	// attestation exists (peek, still no consume). The consume happens only once
+	// Resolve identity WITHOUT claiming the attestation, then verify an available
+	// attestation exists (peek, still no claim). The claim happens only once
 	// this handler commits to a merge — dispatch or enqueue — so a refusal below
-	// (busy + stacking disabled, or a start failure) never burns it (#265 D2).
+	// (busy + stacking disabled) never touches it, and a prepare or start failure
+	// releases the claim (onNotStarted / the deferred release) so it stays
+	// buffered (#265 D2, #219).
 	gs, failMsg, ok, gitErr := resolveSession(cwd)
 	if !ok {
 		return command.TextErrorResult(failMsg), nil
@@ -544,7 +553,7 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 	}
 	if gs.implicit {
 		// Main-checkout merge is unsupported (#317); refused before any
-		// attestation peek or consume.
+		// attestation peek or claim.
 		return command.TextErrorResult(merge.ErrImplicitMergeUnsupported.Error()), nil
 	}
 	gate, gateMsg, gok := decideMergeGate(gs)
@@ -566,10 +575,10 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 	// Worktree session: the stacking-aware decision (spinclass#265, FDR 0025).
 	// Under the queue lock, "busy" = a job running OR a non-empty queue (the
 	// queue term closes the window between the head clearing its slot and
-	// processMergeQueue starting the next entry). The attestation consume runs
+	// processMergeQueue starting the next entry). The attestation claim runs
 	// UNDER the lock on both commit paths, atomically with the enqueue append,
-	// so a second merge-async cannot peek the same still-present attestation and
-	// enqueue it twice.
+	// so a second merge-async cannot peek the same still-available attestation
+	// and enqueue it twice (a live claim makes it unavailable).
 	stackingDisabled := false
 	if merged, mok := mergedSweatfileForCwd(); mok {
 		stackingDisabled = merged.DisableMergeStackingEnabled()
@@ -578,24 +587,39 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 	busy := job.IsRunning(cwd) || len(mergeQueue[cwd]) > 0
 	if busy && stackingDisabled {
 		mergeQueueMu.Unlock()
-		return jobAlreadyRunningResult(), nil // refuse — no attestation consumed
+		return jobAlreadyRunningResult(), nil // refuse — no attestation claimed
 	}
+	var hold attestationHold
 	if gate == merge.GateAttested {
-		if msg, cok := consumeGate(gs); !cok {
+		var msg string
+		var cok bool
+		if hold, msg, cok = holdGate(gs, cwd); !cok {
 			mergeQueueMu.Unlock()
 			return command.TextErrorResult(msg), nil
 		}
 	}
+	pm.AttestedSha = hold.ticket.HeadSha
 	if busy {
 		mergeQueue[cwd] = append(mergeQueue[cwd], queuedMerge{
 			gitSync: gitSync,
-			run:     buildQueuedMergeRun(repoPath, cwd, branch, defaultBranch, gitSync, pm),
+			run:     buildQueuedMergeRun(repoPath, cwd, branch, defaultBranch, gitSync, pm, hold),
+			release: func() { hold.settle(false) },
 		})
 		pos := len(mergeQueue[cwd])
 		mergeQueueMu.Unlock()
 		return enqueuedMergeResult(pos, gate), nil
 	}
 	mergeQueueMu.Unlock()
+
+	// Until the job is started, this handler owns the hold: any early return or
+	// panic (PrepareMerge, NewReporter) releases it rather than stranding a
+	// live-PID claim. Once started, the job closure settles it.
+	dispatched := false
+	defer func() {
+		if !dispatched {
+			hold.settle(false)
+		}
+	}()
 
 	// Immediate dispatch (idle session). Run the fast prefix (optional pull +
 	// rebase + pin) synchronously, before
@@ -613,7 +637,7 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 	ts := rep.TestStream(0)
 	pinnedSha, prepErr := merge.PrepareMerge(ts, repoPath, cwd, branch, defaultBranch, gitSync, pm)
 	if prepErr != nil {
-		ts.Finish()
+		ts.Finish() // the deferred release keeps the attestation for the retry (#303)
 		text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
 		if text == "" {
 			text = prepErr.Error()
@@ -621,19 +645,23 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 		return buildHookResult(text, nil, prepErr), nil
 	}
 
+	dispatched = true // onNotStarted (not the defer) releases if Start refuses
 	return startSessionJob(cwd, job.KindMerge, gitSync, func(ctx context.Context, w io.Writer) (string, bool) {
+		landed := false
+		defer func() { hold.settle(landed) }()
 		_, mergeErr := merge.FinishMerge(
 			ctx, executor.ShellExecutor{}, rep, ts,
 			repoPath, cwd, branch, defaultBranch, pinnedSha, gitSync, true, w, pm,
 		)
 		ts.Finish()
+		landed = mergeErr == nil
 		text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
 		if mergeErr != nil && text == "" {
 			text = mergeErr.Error()
 		}
 		text = appendNotPushedNote(text, gitSync, mergeErr)
 		return text, mergeErr != nil
-	}), nil
+	}, func() { hold.settle(false) }), nil
 }
 
 // handleCheckThisSessionAsync is the non-blocking variant of
@@ -644,17 +672,13 @@ func handleCheckThisSessionAsync(_ context.Context, _ json.RawMessage, _ command
 	if err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
 	}
-	// Refuse an already-running session before the gate consumes the attestation
+	// Refuse an already-running session before the gate claims the attestation
 	// (spinclass#265 deliverable 2), same rationale as the async merge handler.
 	if job.IsRunning(cwd) {
 		return jobAlreadyRunningResult(), nil
 	}
-	// Check needs only the gate's ok flag, not the resolved identity — it always
-	// runs the hook against cwd. The discarded gitErr (a worktree git-resolution
-	// failure) is deliberately ignored: check tolerates it and runs the hook
-	// against cwd regardless. A cwd that is neither a worktree nor an implicit
-	// session keeps the (accurate) reject; a refused gate is fatal.
-	if _, failMsg, ok, _ := resolveGatedSession(cwd); !ok {
+	hold, failMsg, ok := holdCheckGate(cwd)
+	if !ok {
 		return command.TextErrorResult(failMsg), nil
 	}
 
@@ -663,21 +687,29 @@ func handleCheckThisSessionAsync(_ context.Context, _ json.RawMessage, _ command
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "check", Source: "spinclass"})
 	return startSessionJob(cwd, job.KindCheck, false, func(ctx context.Context, w io.Writer) (string, bool) {
+		passed := false
+		defer func() { hold.settle(passed) }()
 		_, hookErr := check.RunContext(ctx, rep, cwd, w)
+		passed = hookErr == nil
 		text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
 		if hookErr != nil && text == "" {
 			text = hookErr.Error()
 		}
 		return text, hookErr != nil
-	}), nil
+	}, func() { hold.settle(false) }), nil
 }
 
 // startSessionJob launches fn as the worktree's background job and renders the
-// MCP result (job started, or already-running / start error).
-func startSessionJob(wt, kind string, gitSync bool, fn job.Func) *command.Result {
+// MCP result (job started, or already-running / start error). onNotStarted, if
+// non-nil, runs whenever the job did NOT start (the caller's hold must then be
+// released, since fn — which would settle it — will never run).
+func startSessionJob(wt, kind string, gitSync bool, fn job.Func, onNotStarted func()) *command.Result {
 	id := fmt.Sprintf("%s-%d", kind, time.Now().Unix())
 	j, err := job.Start(wt, kind, gitSync, id, fn)
 	if err != nil {
+		if onNotStarted != nil {
+			onNotStarted()
+		}
 		if errors.Is(err, job.ErrAlreadyRunning) {
 			return jobAlreadyRunningResult()
 		}
@@ -694,8 +726,8 @@ func startSessionJob(wt, kind string, gitSync bool, fn job.Func) *command.Result
 
 // jobAlreadyRunningResult is the shared refusal for an async merge/check tool
 // invoked while a background job is already in flight for the session. It is
-// returned both by the pre-consume guard in the async handlers (which refuses
-// WITHOUT consuming the pre-merge attestation — spinclass#265 deliverable 2:
+// returned both by the pre-claim guard in the async handlers (which refuses
+// WITHOUT claiming the pre-merge attestation — spinclass#265 deliverable 2:
 // a refusal must never burn the scarce attestation token) and by
 // startSessionJob as the backstop for the near-impossible concurrent-dispatch
 // race the guard cannot see.
@@ -740,24 +772,25 @@ func buildCheckAsyncDescription(hookPreview string) string {
 }
 
 // gatedSession is the resolved identity of a worktree or implicit session,
-// after the pre-merge attestation gate has passed. Only valid when
-// resolveGatedSession returned a nil gitErr and ok=true.
+// the key the pre-merge attestation gate (peekGate/holdGate) reads and claims.
+// Only valid when resolveSession returned a nil gitErr and ok=true.
 type gatedSession struct {
 	implicit bool   // true → main-checkout (implicit) session; false → worktree session
 	repoPath string // worktree: git.CommonDir(cwd); implicit: the checkout (== cwd)
 	branch   string // worktree: git.BranchCurrent(cwd); implicit: implicit.Branch
 }
 
-// resolveGatedSession resolves the session at cwd for a gated merge/check MCP
-// tool and enforces the matching pre-merge attestation gate (enforceAttestation
-// for a worktree session, enforceAttestationImplicit for an implicit one).
+// resolveSession resolves the session identity at cwd WITHOUT touching the
+// pre-merge attestation gate; callers then peekGate (advisory) and holdGate
+// (claim) once committed to an attempt, so a refusal never touches the
+// attestation (spinclass#265, #219).
 //
 // Return contract — exactly one of three outcomes:
 //   - reject:  ok=false, failMsg set         → caller returns command.TextErrorResult(failMsg).
 //   - git-fail: ok=true, gitErr set           → worktree-path git.CommonDir/BranchCurrent
 //     failed; gs is zero. The MERGE tools treat
 //     this as fatal; the CHECK tools tolerate it
-//     (run the hook against cwd anyway).
+//     (run the hook against cwd anyway, ungated).
 //   - resolved: ok=true, gitErr=nil, gs valid → proceed with gs.implicit/repoPath/branch.
 //
 // Separating gitErr from gs (rather than carrying it inside a partially-zero
@@ -765,30 +798,6 @@ type gatedSession struct {
 // impossible to forget: a caller that ignores gitErr is visibly dropping a
 // return value. gitErr is the LAST return (per staticcheck ST1008); it is
 // non-nil only in the git-fail outcome (ok=true, gs zero).
-func resolveGatedSession(cwd string) (gs gatedSession, failMsg string, ok bool, gitErr error) {
-	gs, failMsg, ok, gitErr = resolveSession(cwd)
-	if !ok || gitErr != nil {
-		return gs, failMsg, ok, gitErr
-	}
-	var gok bool
-	if gs.implicit {
-		failMsg, gok = enforceAttestationImplicit(cwd)
-	} else {
-		failMsg, gok = enforceAttestation(gs.repoPath, gs.branch)
-	}
-	if !gok {
-		return gatedSession{}, failMsg, false, nil
-	}
-	return gs, "", true, nil
-}
-
-// resolveSession resolves the session identity at cwd WITHOUT touching the
-// pre-merge attestation gate. Same three outcomes as resolveGatedSession minus
-// the gate: resolved (ok, gitErr=nil, gs valid), git-fail (ok, gitErr set, gs
-// zero), reject (ok=false, failMsg set). The async merge tool uses this plus
-// peekGate/consumeGate so it can decide dispatch-vs-enqueue BEFORE committing
-// the scarce attestation (spinclass#265); the sync callers go through
-// resolveGatedSession, which consumes.
 func resolveSession(cwd string) (gs gatedSession, failMsg string, ok bool, gitErr error) {
 	if worktree.IsWorktree(cwd) {
 		repoPath, repoErr := git.CommonDir(cwd)
@@ -808,8 +817,9 @@ func resolveSession(cwd string) (gs gatedSession, failMsg string, ok bool, gitEr
 	return gatedSession{implicit: true, repoPath: implicit.RepoPath, branch: implicit.Branch}, "", true, nil
 }
 
-// peekGate verifies a fresh pre-merge attestation exists for the worktree
-// session gs WITHOUT consuming it (the non-destructive gate). Returns
+// peekGate verifies an available pre-merge attestation (buffered, and not held
+// by a live claim) exists for the worktree session gs WITHOUT claiming it (the
+// non-destructive gate). Returns
 // ("", true) when the gate is dormant or satisfied; (failureText, false) when
 // it refuses. Merge-only, and merges from implicit sessions are refused before
 // the gate (#317).
@@ -829,9 +839,9 @@ func peekGate(gs gatedSession) (string, bool) {
 }
 
 // decideMergeGate is the MCP merge tools' non-destructive gate decision (FDR
-// 0031): a dormant gate or a present attestation → GateAttested (the caller
-// then consumes on commit); no attestation but [[pre-merge-exemptions]]
-// declared → GateNeedsExemption (nothing is consumed — FinishMerge's policy
+// 0031): a dormant gate or an available attestation → GateAttested (the caller
+// then claims it on commit); no available attestation but [[pre-merge-exemptions]]
+// declared → GateNeedsExemption (nothing is claimed — FinishMerge's policy
 // stage decides from the merge base's tree); neither → the FDR 0007 refusal.
 //
 // The exemption presence check reads the SESSION hierarchy only as a
@@ -849,68 +859,62 @@ func decideMergeGate(gs gatedSession) (gate merge.AttestationGate, failMsg strin
 	return 0, msg, false
 }
 
-// consumeGate clears the buffered attestation for gs (the destructive half),
-// called only once a merge is committed (dispatch or enqueue). Returns
-// ("", true) on success or a dormant gate; (errText, false) on a state write
-// failure. Peek first — a dormant gate or an already-clear buffer is a no-op.
-func consumeGate(gs gatedSession) (string, bool) {
+// attestationHold is one merge/check attempt's claim on the attestation that
+// admitted it (#219): consumed if the attempt lands, released otherwise. The
+// zero value holds nothing and settling it is a no-op.
+type attestationHold struct {
+	slot   attestation.Slot
+	ticket attestation.Ticket
+}
+
+// settle consumes the held attestation when landed, else releases the claim so
+// the attestation stays buffered for the retry. A failure is logged, never
+// surfaced: by then the attempt's own verdict is what the agent needs.
+func (h attestationHold) settle(landed bool) {
+	if err := attestation.Settle(h.slot, h.ticket, landed); err != nil {
+		servelog.Errorf("attestation settle (landed=%v): %v", landed, err)
+	}
+}
+
+// holdGate claims the buffered attestation for gs (the committing half of the
+// gate), called only once an attempt is committed (dispatch, enqueue, or a
+// check about to run). Returns a zero hold with ok=true for an unloadable
+// sweatfile or a dormant gate; (zero, gateOutput, false) when the gate refuses;
+// (zero, "attestation gate error: …", false) on a state failure.
+func holdGate(gs gatedSession, cwd string) (attestationHold, string, bool) {
 	merged, ok := mergedSweatfileForCwd()
 	if !ok || len(merged.ActivePreMergeSkills()) == 0 {
-		return "", true
+		return attestationHold{}, "", true
 	}
-	if err := attestation.Consume(merged, gs.repoPath, gs.branch); err != nil {
-		return fmt.Sprintf("attestation gate error: %v", err), false
+	slot := attestation.WorktreeSlot(gs.repoPath, gs.branch)
+	if gs.implicit {
+		slot = attestation.ImplicitSlot(cwd)
 	}
-	return "", true
+	ticket, output, err := attestation.Claim(merged, slot)
+	if err != nil {
+		if errors.Is(err, attestation.ErrAttestationRequired) {
+			return attestationHold{}, output, false
+		}
+		return attestationHold{}, fmt.Sprintf("attestation gate error: %v", err), false
+	}
+	return attestationHold{slot: slot, ticket: ticket}, "", true
 }
 
-// enforceAttestation runs the pre-merge skill attestation gate for the
-// given worktree session. Returns (output, true) when the gate is
-// dormant or satisfied (output discarded by the caller). Returns
-// (failureText, false) when the gate refuses to proceed: the caller
-// ships failureText to the agent unchanged.
-//
-// On internal error (e.g. session-state write failure during consume),
-// returns the wrapped error message and false so the agent sees the
-// concrete problem rather than a silent skip.
-func enforceAttestation(repoPath, branch string) (string, bool) {
-	merged, ok := mergedSweatfileForCwd()
+// holdCheckGate resolves the session for a check tool and claims its
+// attestation. Check needs only the hold, not the resolved identity: it always
+// runs the hook against cwd. A worktree git-resolution failure (gitErr) is
+// tolerated — the hook runs ungated against cwd, as before; only an outright
+// reject (a non-session cwd) or a refused gate stops it. (sc check, the CLI,
+// remains the gate-free human escape hatch for an arbitrary dir.)
+func holdCheckGate(cwd string) (hold attestationHold, failMsg string, ok bool) {
+	gs, failMsg, ok, gitErr := resolveSession(cwd)
 	if !ok {
-		return "", true
+		return attestationHold{}, failMsg, false
 	}
-	if len(merged.ActivePreMergeSkills()) == 0 {
-		return "", true
+	if gitErr != nil {
+		return attestationHold{}, "", true
 	}
-	gateOK, output, err := attestation.Check(merged, repoPath, branch)
-	if err != nil && !errors.Is(err, attestation.ErrAttestationRequired) {
-		return fmt.Sprintf("attestation gate error: %v", err), false
-	}
-	if !gateOK {
-		return output, false
-	}
-	return "", true
-}
-
-// enforceAttestationImplicit is enforceAttestation for an implicit
-// (main-checkout) session: it consults the per-randID attestation via
-// CheckImplicit instead of the worktree-keyed Check. Same contract: ("",true)
-// when dormant/satisfied, (failureText,false) when the gate refuses.
-func enforceAttestationImplicit(checkout string) (string, bool) {
-	merged, ok := mergedSweatfileForCwd()
-	if !ok {
-		return "", true
-	}
-	if len(merged.ActivePreMergeSkills()) == 0 {
-		return "", true
-	}
-	gateOK, output, err := attestation.CheckImplicit(merged, checkout)
-	if err != nil && !errors.Is(err, attestation.ErrAttestationRequired) {
-		return fmt.Sprintf("attestation gate error: %v", err), false
-	}
-	if !gateOK {
-		return output, false
-	}
-	return "", true
+	return holdGate(gs, cwd)
 }
 
 // buildHookResult assembles a command.Result that pairs the plain-rendered

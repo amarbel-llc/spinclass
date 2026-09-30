@@ -19,8 +19,8 @@ import (
 	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 
-// TestResolveGatedSession exercises the resolved/reject outcomes of the
-// extracted merge/check session-gate preamble: a worktree session
+// TestResolveSession exercises the resolved/reject outcomes of the
+// merge/check session-identity preamble: a worktree session
 // (ok=true, gitErr=nil, implicit=false, repoPath/branch from git), a live
 // implicit main-checkout session (ok=true, gitErr=nil, implicit=true,
 // repoPath/branch from the state file), and a bare dir that is neither
@@ -41,7 +41,7 @@ import (
 // sweatfile declares [[pre-merge-skills]]. To keep the gate dormant each subtest
 // pins $HOME to the repo's own parent dir, so chainAncestors stops immediately
 // and never reaches ~/eng — independent of where t.TempDir lands.
-func TestResolveGatedSession(t *testing.T) {
+func TestResolveSession(t *testing.T) {
 	t.Run("worktree", func(t *testing.T) {
 		testgit.RequireGit(t)
 		t.Setenv("XDG_STATE_HOME", t.TempDir())
@@ -54,11 +54,11 @@ func TestResolveGatedSession(t *testing.T) {
 		testgit.MustInit(t, repo)
 		wt := filepath.Join(repo, ".worktrees", "feature")
 		testgit.MustWorktreeAdd(t, repo, wt, "feature")
-		// resolveGatedSession reads the sweatfile hierarchy from cwd; chdir into
+		// resolveSession reads the sweatfile hierarchy from cwd; chdir into
 		// the worktree so the dormant-gate path resolves there.
 		t.Chdir(wt)
 
-		gs, failMsg, ok, gitErr := resolveGatedSession(wt)
+		gs, failMsg, ok, gitErr := resolveSession(wt)
 		if !ok {
 			t.Fatalf("expected ok, got reject: %q", failMsg)
 		}
@@ -80,7 +80,7 @@ func TestResolveGatedSession(t *testing.T) {
 		testgit.RequireGit(t)
 		t.Setenv("XDG_STATE_HOME", t.TempDir())
 		base := t.TempDir()
-		t.Setenv("HOME", base) // dormant gate — see the TestResolveGatedSession doc comment
+		t.Setenv("HOME", base) // dormant gate — see the TestResolveSession doc comment
 		// `git init` (not worktree add): .git is a DIRECTORY, so
 		// worktree.IsWorktree is false and the implicit lookup fires — while
 		// git.CommonDir still resolves to this repo (not the enclosing session
@@ -101,7 +101,7 @@ func TestResolveGatedSession(t *testing.T) {
 		}
 		t.Chdir(repo)
 
-		gs, failMsg, ok, gitErr := resolveGatedSession(repo)
+		gs, failMsg, ok, gitErr := resolveSession(repo)
 		if !ok {
 			t.Fatalf("expected ok, got reject: %q", failMsg)
 		}
@@ -128,7 +128,7 @@ func TestResolveGatedSession(t *testing.T) {
 		dir := t.TempDir()
 		t.Chdir(dir)
 
-		gs, failMsg, ok, gitErr := resolveGatedSession(dir)
+		gs, failMsg, ok, gitErr := resolveSession(dir)
 		if ok {
 			t.Fatalf("expected reject, got ok (gs=%+v)", gs)
 		}
@@ -148,9 +148,9 @@ func TestResolveGatedSession(t *testing.T) {
 // that still refuses — [hooks].disable-merge-stacking = true — and asserts the
 // refusal leaves the attestation intact for a retry.
 //
-// The active gate is load-bearing: attestation.Peek/Consume only engage when
+// The active gate is load-bearing: attestation.Peek/Claim only engage when
 // [[pre-merge-skills]] is present, so a repo-root sweatfile declaring one is
-// what makes a stray consume observable. EvalSymlinks keeps the test's
+// what makes a stray claim or consume observable. EvalSymlinks keeps the test's
 // constructed paths in agreement with git's realpath output, so the attestation
 // key (git.CommonDir(cwd), branch) is the same key this test writes and reads.
 func TestMergeAsyncRefusalPreservesAttestation(t *testing.T) {
@@ -184,6 +184,9 @@ func TestMergeAsyncRefusalPreservesAttestation(t *testing.T) {
 	}
 	if got.PreMergeAttestation == nil {
 		t.Fatal("attestation was consumed by a refused merge-async (spinclass#265 deliverable 2 regression)")
+	}
+	if got.PreMergeAttestation.Claim != nil {
+		t.Errorf("a refusal must not claim the attestation: %+v", got.PreMergeAttestation.Claim)
 	}
 }
 

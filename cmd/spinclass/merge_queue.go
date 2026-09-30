@@ -40,12 +40,22 @@ var (
 
 // queuedMerge is one enqueued batch. run does the deferred PrepareMerge +
 // FinishMerge at dequeue; gitSync mirrors the tool's push default. The
-// pre-merge attestation was consumed and BOUND at enqueue, so run never
-// re-checks the gate — FinishMerge has never called it, and re-checking a live
-// buffer that has moved on would be wrong.
+// pre-merge attestation was CLAIMED at enqueue (#219), so run never re-checks
+// the gate — FinishMerge has never called it, and re-checking a live buffer
+// that has moved on would be wrong. run's closure settles the hold (consume if
+// it lands, release otherwise); release settles it for an entry that will never
+// run (drained, or failed to dispatch).
 type queuedMerge struct {
 	gitSync bool
 	run     func(ctx context.Context, w io.Writer) (text string, isErr bool)
+	release func()
+}
+
+// releaseHold releases the entry's claim on the attestation; nil-safe.
+func (q queuedMerge) releaseHold() {
+	if q.release != nil {
+		q.release()
+	}
 }
 
 // wireMergeQueue installs the job-completion hook that drives the queue. Called
@@ -79,6 +89,9 @@ func processMergeQueue(wt, kind, status, id string) {
 		drainedCount := len(q)
 		mergeQueue[wt] = nil
 		mergeQueueMu.Unlock()
+		for _, d := range q {
+			d.releaseHold()
+		}
 		emitDrainWake(drainedCount, id, status)
 		return
 	}
@@ -96,20 +109,24 @@ func processMergeQueue(wt, kind, status, id string) {
 		// counting the entry that failed to start alongside the remainder.
 		servelog.Errorf("merge queue: dequeue Start failed for %s: %v", wt, startErr)
 		mergeQueueMu.Lock()
-		drainedCount := len(mergeQueue[wt])
+		rest := mergeQueue[wt]
 		mergeQueue[wt] = nil
 		mergeQueueMu.Unlock()
-		emitDrainWake(drainedCount+1, nextID, "failed to dispatch")
+		next.releaseHold()
+		for _, d := range rest {
+			d.releaseHold()
+		}
+		emitDrainWake(len(rest)+1, nextID, "failed to dispatch")
 	}
 }
 
 // emitDrainWake fires one clown wake telling the agent that count queued
 // merge(s) did not run because the prior merge failed, naming that merge so the
-// "re-attest + re-merge" has a concrete cause to inspect. The bound
-// attestations are discarded (consumed at enqueue, never re-satisfied) — the
-// agent re-attests against the new reality. Without clown there is no wake
-// channel, so this is a no-op (a queued merge has no ringmaster id to inspect
-// either); the branch it drains is still cleared.
+// "resolve + re-merge" has a concrete cause to inspect. The drained entries'
+// claims were already released, so the buffered attestation still stands.
+// Without clown there is no wake channel, so this is a no-op (a queued merge
+// has no ringmaster id to inspect either); the branch it drains is still
+// cleared.
 func emitDrainWake(count int, priorJobID, priorStatus string) {
 	if !clown.Enabled() {
 		return
@@ -125,7 +142,7 @@ func emitDrainWake(count int, priorJobID, priorStatus string) {
 		noun = "merges"
 	}
 	msg := fmt.Sprintf(
-		"%d queued %s did not run: prior merge %s %s — its base assumption broke. Resolve the failure, re-attest with nothing-but-the-truth, and re-merge the remaining commits.",
+		"%d queued %s did not run: prior merge %s %s — its base assumption broke. Resolve the failure and re-merge the remaining commits; a failed or drained merge never consumes the attestation, so the buffered one still stands (re-record it only if your fix changed what the listed skills reviewed).",
 		count, noun, priorJobID, priorStatus,
 	)
 	if cerr := clown.FinishJob(ctx, newID, job.StatusAborted, msg, ""); cerr != nil {
@@ -139,7 +156,7 @@ func emitDrainWake(count int, priorJobID, priorStatus string) {
 // completion wake is the only signal — the FDR 0025 ratified response contract,
 // discoverable from the response itself, not just the FDR.
 func enqueuedMergeResult(position int, gate merge.AttestationGate) *command.Result {
-	attestationNote := "The pre-merge attestation (if the gate is live) was consumed and bound to this queued merge now."
+	attestationNote := "The pre-merge attestation (if the gate is live) is now claimed by this queued merge: it is consumed only if the merge lands, and released for your retry if it fails or is drained. A further batch needs a fresh nothing-but-the-truth."
 	if gate == merge.GateNeedsExemption {
 		attestationNote = "No attestation was consumed: this merge relies on a [[pre-merge-exemptions]] predicate, which is judged when it lands and fails the merge if none exempts its diff."
 	}
@@ -148,7 +165,7 @@ func enqueuedMergeResult(position int, gate merge.AttestationGate) *command.Resu
 			"It runs automatically when the current merge completes, re-preparing against the branch as it then "+
 			"stands. NOTE: a queued merge has NO ringmaster job id yet — you cannot job_wait on it; the completion "+
 			"wake is the only signal, so end your turn and let it arrive. If the running merge FAILS, this queued "+
-			"merge is aborted (its base assumption broke) and you are woken to resolve, re-attest, and re-merge. %s",
+			"merge is aborted (its base assumption broke) and you are woken to resolve and re-merge. %s",
 		position, attestationNote,
 	))
 }
@@ -160,8 +177,10 @@ func enqueuedMergeResult(position int, gate merge.AttestationGate) *command.Resu
 // backgrounding) into the job, since the base it rebases onto does not exist
 // until the prior batch lands. inSession is passed true, matching the immediate
 // MCP path (worktree removal skipped).
-func buildQueuedMergeRun(repoPath, wtPath, branch, defaultBranch string, gitSync bool, pm merge.PostMergeOptions) func(context.Context, io.Writer) (string, bool) {
+func buildQueuedMergeRun(repoPath, wtPath, branch, defaultBranch string, gitSync bool, pm merge.PostMergeOptions, hold attestationHold) func(context.Context, io.Writer) (string, bool) {
 	return func(ctx context.Context, w io.Writer) (string, bool) {
+		landed := false
+		defer func() { hold.settle(landed) }()
 		var buf bytes.Buffer
 		rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "merge " + branch, Source: "spinclass"})
 		ts := rep.TestStream(0)
@@ -179,6 +198,7 @@ func buildQueuedMergeRun(repoPath, wtPath, branch, defaultBranch string, gitSync
 			repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, true, w, pm,
 		)
 		ts.Finish()
+		landed = mergeErr == nil
 		text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
 		if mergeErr != nil && text == "" {
 			text = mergeErr.Error()
