@@ -117,7 +117,10 @@ Cheap per-package checks are fine: `just debug-go-test <dir>`.
   `direnv` are runtime deps **only** when built via `lib.mkSpinclass` with the
   matching input (paths burned in at link time — `spinclass-build-pins(7)`, FDR
   0003); the default `nix build` leaves both pins empty (madder dormant, direnv
-  from PATH). `papi` and `gh` are pinned the same way (`-X main.papiBin`/`ghBin`)
+  from PATH). A madder write failure never fails a gate: `madder.Write` targets
+  `.default` and its writer latches errors (madder decodes every sibling
+  `.madder/` store config, so a stale pin died early and broke the hook's
+  pipe — #349). `papi` and `gh` are pinned the same way (`-X main.papiBin`/`ghBin`)
   and, unlike madder, are burned into the **default** build; they power the
   dynamic system-prompt repository line (`internal/repoinfo`) and fall back to
   PATH lookup when unpinned. `clown` is optional, for async

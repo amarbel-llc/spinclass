@@ -5,6 +5,8 @@ date: 2026-04-30
 
 # Per-worktree madder blob store
 
+> **Amended 2026-09-30 (#349):** shared-tree tolerance.
+
 ## Problem Statement
 
 Spinclass has no first-class place for content-addressed, worktree-scoped
@@ -305,6 +307,15 @@ These apply once an activation model is chosen, regardless of which.
   store is fully isolated via `MADDER_CEILING_DIRECTORIES`. Sharing
   blobs with the parent repo (or with sibling worktrees) requires an
   explicit `madder sync` from the user.
+- **Shared `.madder/` tree.** Other tools (dodder) may add stores beside
+  `default/`. madder decodes every sibling config on each invocation, so a
+  pinned madder older than the writer fails every write and read here. The
+  resource_link write targets `.default` explicitly (`madder write -format
+  json .default -`) and is fail-soft: its writer latches the first error, so
+  the result is no link and a `resource_link_error` line, never a failed hook
+  or merge (#349). The cures are a current pin (the consumer's `madder` input
+  tracks master) and madder-side tolerance of undecodable sibling configs
+  (madder#293).
 
 ## More Information
 

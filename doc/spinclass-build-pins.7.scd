@@ -66,6 +66,15 @@ is stored and no resource\_link is emitted; the hook's lines still stream as
 live output records (the viewport's rolling tail), and a failure falls back to
 the inline tail.
 
+The blob is written with *madder write -format json .default -*. A failed
+write, for example when the pinned madder cannot decode a store config another
+tool added under _.madder/_, is reported as *resource\_link\_error* and never
+fails the hook, check or merge. Keep the pin current: the consumer flake's
+*madder* input should be a branch tarball (_.../archive/master.tar.gz_) so
+*nix flake update madder* and the fleet cascade move it. spinclass's own lock
+only feeds its madder-pinned test lane; the production madder is the
+consumer's (eng's) input, so rebuild the consumer after a cascade.
+
 ## direnv
 
 When the *direnv* input is supplied, spinclass invokes the pinned binary
