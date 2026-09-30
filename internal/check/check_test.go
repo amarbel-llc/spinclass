@@ -330,6 +330,59 @@ exit 0
 	return madderBin, stdinCapture
 }
 
+// withEarlyExitMadder installs a fake madder whose `write` closes stdin and
+// exits 1 before reading — the behaviour of a madder that cannot decode a
+// sibling store config (#349). `init` still creates the marker.
+func withEarlyExitMadder(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	madderBin := filepath.Join(dir, "fake-madder")
+	script := `#!/bin/sh
+case "$1" in
+  init)
+    mkdir -p "$PWD/.madder/local/share/blob_stores/default"
+    touch "$PWD/.madder/local/share/blob_stores/default/blob_store-config"
+    ;;
+  write)
+    exec 0<&-
+    echo 'madder: no coders available for type: "!toml-blob_store_config-multi-v1"' >&2
+    exit 1
+    ;;
+esac
+exit 0
+`
+	if err := os.WriteFile(madderBin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	prevMadder, prevDirenv, prevDodder := embeds.MadderBin(), embeds.DirenvBin(), embeds.DodderBin()
+	embeds.Set(madderBin, prevDirenv, prevDodder)
+	t.Cleanup(func() { embeds.Set(prevMadder, prevDirenv, prevDodder) })
+}
+
+// A madder that dies before reading must not break the hook's output pipe
+// (#349): the hook completes, its output is intact, and the madder failure
+// surfaces only as a resource_link_error line.
+func TestRunHookPhase_MadderEarlyExitDoesNotBreakHook(t *testing.T) {
+	_, _, wtPath := setupRepoWithWorktree(t, "feature-madder-dead")
+	withEarlyExitMadder(t)
+	writeSweatfile(t, wtPath, "[hooks]\npre-merge = \"seq 1 20000; echo tail-marker\"\n")
+
+	links, recs, err := runCheck(t, wtPath)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	if len(links) != 0 {
+		t.Errorf("expected no blob links, got %v", links)
+	}
+	assertNodeEndExit(t, recs, 0)
+	out := outputText(recs)
+	for _, want := range []string{"tail-marker", "20000", "resource_link_error:", "no coders available"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in phase output records", want)
+		}
+	}
+}
+
 func TestRunHookPhaseShape(t *testing.T) {
 	_, _, wtPath := setupRepoWithWorktree(t, "feature-compact")
 	_, stdinCapture := withFakeMadder(t)

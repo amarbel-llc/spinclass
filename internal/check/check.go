@@ -364,6 +364,8 @@ func sanitizeBranchForPath(branch string) string {
 // Returns a BlobLink carrying the resource_link URI and the MIME type
 // matching the resolved format. If madder produced no blob (not pinned,
 // spawn failed, or post-hook write/parse failed), the BlobLink's URI is "".
+// A madder failure never affects the hook or the returned error: the madder
+// sink is fail-soft (#349) and its error only becomes a resource_link_error.
 //
 // wtPath is the session worktree (where the madder blob store lives); hookDir is
 // where the hook actually runs (an isolated build worktree, or wtPath in the
@@ -392,6 +394,9 @@ func runHookPhase(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.H
 		hookStdoutBuf bytes.Buffer   // populated only for structured formats
 	)
 
+	// madder.Write's writer is fail-soft: a madder that dies early cannot
+	// back-pressure into this tee and kill the hook (#349). Its failure
+	// surfaces only via finishMadder as resource_link_error.
 	if !structured && madderPinned {
 		var err error
 		madderStdin, finishMadder, err = madder.Write(wtPath, embeds.MadderBin())

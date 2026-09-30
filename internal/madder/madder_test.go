@@ -264,6 +264,109 @@ exit 1
 	}
 }
 
+func TestWrite_AddressesDefaultStore(t *testing.T) {
+	worktree := t.TempDir()
+	binDir := t.TempDir()
+	binPath := filepath.Join(binDir, "fake-madder")
+	logPath := filepath.Join(binDir, "log")
+
+	script := `#!/bin/sh
+echo "$@" >>"` + logPath + `"
+cat >/dev/null
+printf '{"id":"x","size":0,"source":"-"}\n'
+`
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	w, finish, err := Write(worktree, binPath)
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	_ = w.Close()
+	if _, err := finish(); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+
+	logged, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("reading log: %v", err)
+	}
+	want := "write -format json .default -\n"
+	if string(logged) != want {
+		t.Errorf("argv: got %q, want %q", logged, want)
+	}
+}
+
+// writeLargeInto writes 256 KiB in 4 KiB chunks, failing the test if any
+// Write returns anything but (4096, nil).
+func writeLargeInto(t *testing.T, w io.Writer) {
+	t.Helper()
+	chunk := make([]byte, 4096)
+	for i := 0; i < 64; i++ {
+		n, err := w.Write(chunk)
+		if n != len(chunk) || err != nil {
+			t.Fatalf("Write #%d = (%d, %v), want (%d, nil)", i, n, err, len(chunk))
+		}
+	}
+}
+
+func TestWrite_WriterSurvivesEarlyExit(t *testing.T) {
+	worktree := t.TempDir()
+	binPath := filepath.Join(t.TempDir(), "fake-madder")
+	script := `#!/bin/sh
+exec 0<&-
+echo 'madder: no coders available for type: "!toml-blob_store_config-multi-v1"' >&2
+exit 1
+`
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	w, finish, err := Write(worktree, binPath)
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	writeLargeInto(t, w)
+	if err := w.Close(); err != nil {
+		t.Errorf("Close returned err: %v", err)
+	}
+	id, err := finish()
+	if id != "" {
+		t.Errorf("expected empty id, got %q", id)
+	}
+	if err == nil || !strings.Contains(err.Error(), "no coders available") {
+		t.Errorf("expected madder stderr in error, got: %v", err)
+	}
+}
+
+func TestWrite_TruncatedInputWithZeroExitIsAnError(t *testing.T) {
+	worktree := t.TempDir()
+	binPath := filepath.Join(t.TempDir(), "fake-madder")
+	script := `#!/bin/sh
+exec 0<&-
+printf '{"id":"sha256-partial","size":0,"source":"-"}\n'
+exit 0
+`
+	if err := os.WriteFile(binPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	w, finish, err := Write(worktree, binPath)
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	writeLargeInto(t, w)
+	_ = w.Close()
+	id, err := finish()
+	if id != "" {
+		t.Errorf("expected empty id, got %q", id)
+	}
+	if err == nil || !strings.Contains(err.Error(), "stdin closed before all bytes were written") {
+		t.Errorf("expected truncated-input error, got: %v", err)
+	}
+}
+
 func TestInit_PassesCeilingEnv(t *testing.T) {
 	worktree := t.TempDir()
 	binDir := t.TempDir()

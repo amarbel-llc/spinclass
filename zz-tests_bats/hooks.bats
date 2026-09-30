@@ -192,6 +192,35 @@ pre-merge-output-format = "tap-ndjson"
     and ($f[0].diagnostic.output | startswith("#") | not)'
 }
 
+# #349: a sibling store config the pinned madder cannot decode makes madder
+# exit before reading stdin. The hook must still finish with its output
+# intact; the madder failure is only a resource_link_error line.
+function pre_merge_raw_hook_survives_undecodable_sibling_store { # @test
+  require_madder_pinned
+  pre_merge_setup_worktree '[hooks]
+pre-merge = "seq 1 20000; echo tail-marker"
+'
+  local foreign_dir=".madder/local/share/blob_stores/zz-foreign"
+  mkdir -p "$foreign_dir"
+  printf -- '---\n! toml-blob_store_config-zz-foreign-v0\n---\n' >"$foreign_dir/blob_store-config"
+
+  # The stream is spooled to a file rather than captured by run_sc_crap: bats
+  # exports $output into every child's environment, and a 20k-record $output
+  # makes every later exec — jq, even bats' own teardown rm — fail with E2BIG.
+  local out="$BATS_TEST_TMPDIR/check.ndjson"
+  # shellcheck disable=SC2016  # $0/$1 expand in the inner sh, not here
+  run timeout --preserve-status 10s sh -c '"$0" --format ndjson check >"$1" 2>&1' \
+    "${SPINCLASS_BIN:-spinclass}" "$out"
+  assert_success
+
+  run jq -enR '[inputs | fromjson?] | [.[] | select(.type == "node_end")] | all(.exit_code == 0)' <"$out"
+  assert_success
+  run grep -q tail-marker "$out"
+  assert_success
+  run grep -Eq 'resource_link(_error)?: ' "$out"
+  assert_success
+}
+
 # By default the pre-merge hook runs in an isolated detached build worktree
 # (a .merge-* sibling under .worktrees/), not in the session worktree. The hook
 # records its working directory to a file outside the (transient) worktree so the

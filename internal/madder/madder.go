@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -67,11 +68,18 @@ func LinkInto(binDir, binPath string) error {
 	return nil
 }
 
-// Write spawns `madder write -format json -` against the per-worktree
-// store and returns a writer piped into its stdin plus a finish()
-// callback that waits on the subprocess and returns the resulting
-// blob id. Callers tee bytes into the writer (alongside an in-memory
-// tail ring), close it when the producer is done, and call finish().
+// Write spawns `madder write -format json .default -` against the
+// per-worktree store and returns a writer piped into its stdin plus a
+// finish() callback that waits on the subprocess and returns the
+// resulting blob id. Callers tee bytes into the writer (alongside an
+// in-memory tail ring), close it when the producer is done, and call
+// finish().
+//
+// The returned writer never returns an error: madder decodes every
+// store config under the tree before honouring a store id, so a sibling
+// config the pinned madder can't decode makes it exit before reading. A
+// sink error must never propagate into the hook's pipe (#349); the
+// first write error is latched and reported by finish() instead.
 //
 // No-op when binPath is empty: writer wraps io.Discard, finish()
 // returns ("", nil), no process is spawned.
@@ -82,7 +90,7 @@ func Write(worktreePath, binPath string) (io.WriteCloser, func() (string, error)
 		return discardWriteCloser{}, func() (string, error) { return "", nil }, nil
 	}
 
-	cmd := exec.Command(binPath, "write", "-format", "json", "-")
+	cmd := exec.Command(binPath, "write", "-format", "json", ".default", "-")
 	cmd.Dir = worktreePath
 	cmd.Env = append(os.Environ(), "MADDER_CEILING_DIRECTORIES="+worktreePath)
 
@@ -99,13 +107,18 @@ func Write(worktreePath, binPath string) (io.WriteCloser, func() (string, error)
 		return nil, nil, fmt.Errorf("madder write: start: %w", err)
 	}
 
+	sink := &latchingWriter{w: stdin}
+
 	finish := func() (string, error) {
 		// Caller is expected to Close stdin to signal EOF; defensively
 		// close again here so finish() is safe to call without it.
-		_ = stdin.Close()
+		_ = sink.Close()
 		if err := cmd.Wait(); err != nil {
 			msg := bytes.TrimSpace(stderr.Bytes())
 			return "", fmt.Errorf("madder write: %w\n%s", err, msg)
+		}
+		if err := sink.latched(); err != nil {
+			return "", fmt.Errorf("madder write: stdin closed before all bytes were written: %w", err)
 		}
 		var resp struct {
 			ID     string `json:"id"`
@@ -117,7 +130,39 @@ func Write(worktreePath, binPath string) (io.WriteCloser, func() (string, error)
 		}
 		return resp.ID, nil
 	}
-	return stdin, finish, nil
+	return sink, finish, nil
+}
+
+// latchingWriter forwards to w until the first error, latches it, and
+// swallows every later byte without a syscall. Write always reports
+// success so an io.MultiWriter tee is never short-circuited.
+type latchingWriter struct {
+	mu  sync.Mutex
+	w   io.WriteCloser
+	err error
+}
+
+func (l *latchingWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.err == nil {
+		if _, err := l.w.Write(p); err != nil {
+			l.err = err
+		}
+	}
+	return len(p), nil
+}
+
+func (l *latchingWriter) Close() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Close()
+}
+
+func (l *latchingWriter) latched() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.err
 }
 
 type discardWriteCloser struct{}
