@@ -94,11 +94,22 @@ func TestWriteRemoveImplicit(t *testing.T) {
 		t.Fatalf("symlink target = %q, want %q", resolved, local)
 	}
 
+	// An Update leaves its sidecar lock next to the state file.
+	if err := UpdateImplicit(checkout, rand, func(*State) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(local + ".lock"); err != nil {
+		t.Fatalf("expected sidecar lock after Update: %v", err)
+	}
+
 	if err := RemoveImplicit(checkout, rand); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(local); !os.IsNotExist(err) {
 		t.Fatalf("local state not removed: %v", err)
+	}
+	if _, err := os.Stat(local + ".lock"); !os.IsNotExist(err) {
+		t.Fatalf("sidecar lock not removed: %v", err)
 	}
 	if _, err := os.Lstat(idx); !os.IsNotExist(err) {
 		t.Fatalf("index entry not removed: %v", err)

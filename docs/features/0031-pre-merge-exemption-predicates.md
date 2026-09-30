@@ -169,13 +169,14 @@ The gate is live: skills are declared and exemptions may be declared.
 
 | Path | Attestation present | Exemptions declared | Outcome |
 |---|---|---|---|
-| MCP | yes | any | Consume as today (#265 ordering unchanged). Predicates are **not run**, and the verdict reads `attested`. |
+| MCP | yes | any | Claim; consumed only if the merge lands (#219). Predicates are **not run**, and the verdict reads `attested`. |
 | MCP | no | no | Fast refuse at the handler, exactly as today. |
 | MCP | no | yes | Handler **Peeks and does not consume**, then proceeds. `FinishMerge` runs the predicates. If one exempts, the merge continues. If none do, the merge fails **before the hook, nothing lands**, with the FDR 0007 attestation directive plus a line naming the predicates that declined. |
 | CLI (`sc merge`, `sc run`) | n/a | any | **Always lands, as today.** Predicates are **not run**. The only change is an informational record (below). |
 
 `sc check` / `check-this-session` are unchanged. A check lands nothing, so
-there is nothing to exempt. `check-this-session` keeps consuming as today.
+there is nothing to exempt. `check-this-session` now consumes the attestation
+only on a passing check (#219); a red or cancelled check leaves it buffered.
 
 ### #326: terminal merges stay exempt, visibly
 
@@ -222,7 +223,10 @@ wake (#259 wake-surfacing lifts the `✗` and SKIP lines):
 
 As built, the labels are:
 
-- `✓ pre-merge policy: attested`
+- `✓ pre-merge policy: attested`. It may carry
+  `; N commit(s) since the attestation at <sha12>: <sha12> ...` when the pinned
+  branch holds commits the attestation never saw (patch-id aware, informational;
+  #219).
 - `✓ pre-merge policy: exempt (lock-only) base=<short> landing=<short>`. The
   facts ride in the label, because crap's `Ok` carries no diagnostic.
 - `✗ pre-merge policy`, whose message wraps `ErrAttestationNotExempt` and names

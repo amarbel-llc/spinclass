@@ -534,6 +534,7 @@ func removeImplicitByPath(localStatePath string) error {
 	if err := os.Remove(localStatePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	_ = os.Remove(localStatePath + ".lock") // best effort: the Update sidecar lock
 	if err := os.Remove(implicitIndexPath(localStatePath)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}

@@ -4,7 +4,7 @@ date: 2026-08-10
 promotion-criteria: |
   experimental -> testing: one real intra-session stack on a busy repo where
   (1) a second merge-this-session-async issued while a gate runs returns
-  "enqueued at queue position N" and consumes the attestation, (2) the head
+  "enqueued at queue position N" and claims the attestation, (2) the head
   merge landing dequeues the next entry, which re-prepares fresh and lands the
   un-landed commits (the already-landed batch dropped by patch-id dedup), and
   (3) a head merge FAILING drains the queue with an aborted wake naming the
@@ -29,8 +29,8 @@ hit `job.ErrAlreadyRunning`. Two costs (observed live 2026-08-10, circus repo):
    agent noticed the wake, AND re-issued the merge — a wake + re-issue
    round-trip per batch.
 2. **The refused attempt had already consumed the pre-merge attestation
-   buffer**: `resolveGatedSession` → `attestation.Check` cleared it before the
-   handler reached the `job.Start` refusal, forcing a full re-attestation of
+   buffer**: the gate cleared it (historically `attestation.Check`, reached via
+   `resolveGatedSession`) before the handler reached the `job.Start` refusal, forcing a full re-attestation of
    unchanged content on the retry.
 
 This record covers both the safety fix (2, "deliverable 2") and the queue
@@ -48,7 +48,8 @@ This record covers both the safety fix (2, "deliverable 2") and the queue
   the branch as it then stands (see Design). Its result arrives as its own
   completion wake with a freshly-allocated ringmaster job id.
 - **If the running merge FAILS**, the queue is drained: one aborted wake naming
-  the failed prior merge tells the agent to resolve, re-attest, and re-merge.
+  the failed prior merge tells the agent to resolve and re-merge. The drained
+  entries' claims are released, and the buffered attestation still stands.
 - **A refusal never consumes the attestation.** The paths that still refuse —
   `disable-merge-stacking = true` while busy, an implicit (main-checkout)
   session while busy, and check-this-session-async while busy — return the
@@ -65,13 +66,14 @@ stack.
 
 ### The consume ordering invariant (deliverable 2)
 
-> Consume the attestation only once the merge is committed to being dispatched
+> Claim the attestation only once the merge is committed to being dispatched
 > or enqueued — never before a refusal.
 
-The async merge handler resolves identity without consuming, PEEKs the
-attestation (refusing without consuming if absent), decides dispatch/enqueue/
-refuse, and only then CONSUMEs. The attestation package split `Check` into
-`Peek` (non-destructive) + `Consume` for this.
+The async merge handler resolves identity (`resolveSession`) without touching
+the attestation, PEEKs it (refusing if absent), decides dispatch/enqueue/
+refuse, and only then CLAIMs (`holdGate`, `attestation.Claim`). The hold is
+settled (`attestation.Settle`) when the job ends: consumed on a landing,
+released otherwise (FDR 0007, #219).
 
 ### Re-prepare at dequeue, not pin at enqueue (deliverable 1)
 
@@ -101,13 +103,15 @@ call.
 ### Attestation semantics
 
 The attestation covers "the diff being merged" = the queued commits atop the
-prior batch assumed merged. It is consumed at enqueue and **bound** to the queue
-entry; when the entry runs it does not re-check the live buffer (the gate is a
-handler-level concern — `FinishMerge` has never called it). If the entry is
-drained or cancelled, its bound attestation is **discarded** — the base
-assumption broke, so the agent re-attests against the new reality. Nothing is
-stored: "bound" means the enqueue consumed the buffer and the entry carries the
-right to merge without re-check; "discarded" means that right evaporates.
+prior batch assumed merged. It is **claimed** at enqueue (not consumed) and the
+hold is bound to the queue entry; when the entry runs it does not re-check the
+live buffer (the gate is a handler-level concern — `FinishMerge` has never
+called it). A live claim makes the attestation unavailable to the next batch, so
+each batch still needs its own. The claim is consumed when that entry lands, and
+**released** if the entry is drained, fails to dispatch, or fails: the
+attestation stays buffered, since the merge it guarded never happened. The
+#219/#303 caveat is resolved, so this FDR is unblocked for its experimental ->
+testing observation (status unchanged here).
 
 ### Chaining, drain, and cancel
 
@@ -129,10 +133,11 @@ surface.
 
 ### Concurrency
 
-The decision (`job.IsRunning(cwd) || len(queue) > 0`), the attestation consume,
+The decision (`job.IsRunning(cwd) || len(queue) > 0`), the attestation claim,
 and the enqueue append happen under one `mergeQueueMu` critical section, so a
 second merge-async cannot peek the same still-present attestation and enqueue it
-twice. The dequeue's `job.Start` also runs under the lock. The immediate path's
+twice: a live claim is what makes the second peek refuse. The dequeue's
+`job.Start` also runs under the lock. The immediate path's
 `job.Start` is backstopped by `job.Start`'s own mutex (the worst a race can do is
 one spurious "already running" refusal, never a double-dispatch); MCP stdio
 processes requests sequentially, so the immediate-vs-immediate race does not
@@ -144,9 +149,9 @@ arise in practice.
   the same semantics the single-job path already has for the in-flight job's
   liveness wake. Change signal: restarts losing real queued work often enough to
   justify persisting to `job.json`.
-- **Queue depth: unbounded (v1).** Each entry is cheap (params + a bound
-  attestation). Change signal: a runaway agent loop enqueueing pathologically
-  deep — then add a cap that refuses (without consuming) beyond N.
+- **Queue depth: unbounded (v1).** Each entry is cheap (params + a held
+  attestation claim). Change signal: a runaway agent loop enqueueing
+  pathologically deep — then add a cap that refuses (without claiming) beyond N.
 - **Failure cascade: any non-success merge drains.** Simplest correct semantics.
   Change signal: transient push failures common enough that a "retry the head,
   keep the queue" policy earns its complexity.

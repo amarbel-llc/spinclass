@@ -213,6 +213,13 @@ subcommand is always available.
   SHA (that content already lives on the default branch).
 - **Exemption predicates** (FDR 0031, `merge/policy.go`): run from the MERGE
   BASE; terminal merges are the zero-value `GateTerminal`, always exempt.
+- **Attestation lifecycle** (FDR 0007, #219, `internal/attestation`): an MCP
+  merge/check `Claim`s the attestation at commit
+  (`pre_merge_attestation.claim`, PID-owned; a dead owner's claim is void, so a
+  crash never burns it); `Settle` consumes on a landed merge / green check,
+  releases on every failure, cancel, refusal or drain. A re-record supersedes
+  (a stale settle no-ops). `head_sha` rides along; the policy point appends
+  commits made since (patch-id aware) — informational, never a forced re-attest.
 - **No implicit-session merge** (#317): merge from a main-checkout session
   is refused (`merge.ErrImplicitMergeUnsupported`, before any gate/hook);
   `sc check` still works. Bootstrapping one as a session: #318.
@@ -228,7 +235,7 @@ subcommand is always available.
   passes through to merge. Builds on `sc start --no-attach` writing findable
   inactive state. CLI-only. Uses the merge/check `present` stack.
 - **Async merge/check** (`internal/job`): `merge-this-session-async` /
-  `check-this-session-async` consume the attestation, launch a background
+  `check-this-session-async` claim the attestation, launch a background
   goroutine in `serve`, return a job id immediately (output → `.spinclass/job.log`,
   meta → `.spinclass/job.json`). Registered **only under clown** — an async job
   IS a ringmaster job (#243); inspect via ringmaster's `job_status`/`job_read` or
@@ -363,9 +370,9 @@ subcommand is always available.
   `PrepareMerge`+`FinishMerge` fresh, so git patch-id dedup drops the
   already-landed prior batch. `job.OnJobDone` drives `processMergeQueue`: a
   failed merge drains the queue (aborted wake naming the culprit), a succeeded
-  merge or completed check dequeues the next. The **attestation** is consumed
-  only once a merge is committed (dispatch or enqueue), so a refusal never
-  burns it (`attestation.Peek`/`Consume` split from `Check`). Worktree sessions
+  merge or completed check dequeues the next. An enqueue **claims** the
+  attestation (a live claim makes it unavailable to the next batch); a drained
+  entry releases it. Worktree sessions
   only; queued merges carry no ringmaster job id (the wake signals);
   `[hooks].disable-merge-stacking` is the rollback.
 - **`post-merge` hook** (FDR 0023, #244): `[hooks].post-merge` runs after a merge

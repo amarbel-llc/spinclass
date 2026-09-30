@@ -168,10 +168,11 @@ else inherits existing behavior.
 
 ### Attestation
 
-`attestation.RecordImplicit` / `CheckImplicit` operate on the per-rand state
-file (via `FindImplicitAtCwd` + `WriteImplicit`), so the pre-merge
+`attestation.Record` / `Claim` / `Settle` take an `ImplicitSlot`, operating on the
+per-rand state file (via `FindImplicitAtCwd` + `WriteImplicit`), so the pre-merge
 skill-attestation gate applies to implicit sessions. The MCP merge handlers call
-`enforceAttestationImplicit` → `CheckImplicit`; `handleNothingButTheTruth`
+`resolveSession` then `holdGate` / `holdCheckGate` (`attestation.Claim`, settled
+via `attestation.Settle`); `handleNothingButTheTruth`
 admits a live implicit session when recording the attestation.
 
 ### Rollback lever
@@ -232,7 +233,7 @@ Disable the feature for a repo (rollback):
   worktree and implicit sessions land under `<repo>/.worktrees/.merge-…`.
 - **`check` parity (#132, fixed).** `check-this-session` /
   `check-this-session-async` now detect a live implicit session
-  (`FindImplicitAtCwd`) and enforce `enforceAttestationImplicit`, mirroring the
+  (`FindImplicitAtCwd`) and gate via `holdCheckGate`, mirroring the
   merge handlers. `sc check` (CLI) was already gate-free and worked.
 - **Chat unusable when the hook never fired (#141, fixed).** A session at a
   main checkout whose harness never delivered `SessionStart` had no implicit
@@ -275,7 +276,7 @@ Disable the feature for a repo (rollback):
   `SweepDeadImplicit`/`FindImplicitAtCwd`), `internal/hooks/hooks.go`
   (`runSessionStart`/`runSessionEnd`), `internal/merge/merge.go`
   (`MergeImplicit`), `internal/attestation/attestation.go`
-  (`RecordImplicit`/`CheckImplicit`), `internal/close/close.go`,
+  (`Record`/`Claim`/`Settle`), `internal/close/close.go`,
   `cmd/spinclass/commands_mcp_only.go` (`currentSessionKey` fallback, merge
   routing), `cmd/spinclass/commands_query.go` (`main` marker), `hooks/hooks.json`
   (the two event blocks).

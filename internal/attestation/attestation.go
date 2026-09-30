@@ -41,7 +41,6 @@ var ErrAttestationRequired = errors.New("pre-merge skill attestation required")
 // flock + atomic rename, session.Update); load is the unlocked read for Peek.
 type Slot struct {
 	load    func() (*session.State, error)
-	store   func(session.State) error                 // locked whole-state replace
 	update  func(fn func(*session.State) error) error // locked read-modify-write
 	missing string                                    // message when the session state cannot be loaded
 }
@@ -66,9 +65,6 @@ func WorktreeSlot(repoPath, branch string) Slot {
 			}
 			return st, nil
 		},
-		store: func(s session.State) error {
-			return session.Update(repoPath, branch, func(cur *session.State) error { *cur = s; return nil })
-		},
 		update: func(fn func(*session.State) error) error {
 			return session.Update(repoPath, branch, fn)
 		},
@@ -90,7 +86,6 @@ func ImplicitSlot(checkout string) Slot {
 	if findErr != nil {
 		return Slot{
 			load:    func() (*session.State, error) { return nil, findErr },
-			store:   func(session.State) error { return findErr },
 			update:  func(func(*session.State) error) error { return findErr },
 			missing: missing,
 		}
@@ -106,9 +101,6 @@ func ImplicitSlot(checkout string) Slot {
 			}
 			return st, nil
 		},
-		store: func(s session.State) error {
-			return session.UpdateImplicit(checkout, randID, func(cur *session.State) error { *cur = s; return nil })
-		},
 		update: func(fn func(*session.State) error) error {
 			return session.UpdateImplicit(checkout, randID, fn)
 		},
@@ -119,9 +111,8 @@ func ImplicitSlot(checkout string) Slot {
 // Ticket identifies one attempt's hold on an attestation. The zero Ticket
 // means "nothing held"; settling it is a no-op.
 type Ticket struct {
-	RecordedAt time.Time
-	HeadSha    string
-	ClaimID    string
+	HeadSha string
+	ClaimID string
 }
 
 // ValidationError describes why a nothing-but-the-truth input failed
@@ -290,7 +281,7 @@ func Claim(merged sweatfile.Sweatfile, slot Slot) (Ticket, string, error) {
 			PID:       os.Getpid(),
 			ClaimedAt: now,
 		}
-		tk = Ticket{RecordedAt: a.RecordedAt, HeadSha: a.HeadSha, ClaimID: a.Claim.ID}
+		tk = Ticket{HeadSha: a.HeadSha, ClaimID: a.Claim.ID}
 		return nil
 	})
 	switch {
@@ -318,7 +309,7 @@ func Settle(slot Slot, t Ticket, landed bool) error {
 	err := slot.update(func(st *session.State) error {
 		called = true
 		a := st.PreMergeAttestation
-		if a == nil || !a.RecordedAt.Equal(t.RecordedAt) || a.Claim == nil || a.Claim.ID != t.ClaimID {
+		if a == nil || a.Claim == nil || a.Claim.ID != t.ClaimID {
 			return errSuperseded
 		}
 		if landed {

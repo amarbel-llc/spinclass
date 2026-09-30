@@ -109,26 +109,34 @@ listing which expected names are missing and which provided
 names are unrecognised, so the agent can correct the input and
 retry without re-fetching the full list.
 
-### Lifecycle — fresh per merge call
+### Lifecycle — fresh per landing
 
-Every invocation of `merge-this-session` or
-`check-this-session` consumes one attestation. After consumption,
-the attestation record is cleared from session state — a
-subsequent merge attempt requires a new call to
-`nothing-but-the-truth` against the current diff.
+Each *landing* (a merge that lands, or a check that passes) consumes
+one attestation. A subsequent merge requires a new call to
+`nothing-but-the-truth`. The attempt that commits to a merge only
+*claims* the attestation; a failed attempt (red hook, refused fetch,
+REPAIR refusal, rebase conflict, cancel) landed nothing, so the
+"merge moment" the gate guards has not happened. Demanding a
+byte-identical re-attest there trains agents to re-paste JSON instead
+of re-reviewing (#219, #303).
 
-This is deliberate. The threat model is "agent forgets to use
-the review skills before merging." A sticky once-per-session
-attestation would degrade to a startup ritual the agent learns
-to dispatch up-front and ignore. Fresh-per-call forces the
-agent to re-examine each merge moment against the listed skills.
+The threat model is still "agent forgets to use the review skills
+before merging." A sticky once-per-session attestation would degrade
+to a startup ritual, so every landing needs its own; only failures
+are free to retry.
 
-There is no expiration on the attestation itself between the
-`nothing-but-the-truth` call and the immediately following merge
-call — the next gated tool consumes it, and only one attestation
-is buffered. If the agent attests then takes 30 minutes editing
-before calling merge, the attestation still applies, but in
-practice the merge usually follows within the same turn.
+Staleness is made visible, never blocking. `nothing-but-the-truth`
+records `head_sha`, and the *attested* verdict appends
+`; N commits since the attestation at <sha12>: ...` when the pinned
+branch carries commits the attestation never saw. The count is
+patch-id aware (`git rev-list --right-only --cherry-pick`), so a pure
+rebase reads as plain *attested*. Rejected alternatives: a strict HEAD
+pin (fails #219's own repro, a one-line test fix committed after a
+red hook, and re-imposes the five-skill re-run); a cumulative-diff
+patch-id fingerprint (flips on any conflict-resolved rebase and says
+nothing about *what* changed); a TTL (no evidence it is needed).
+There is no expiry: the lifetime ends at a landing, a re-record, or
+the end of the session.
 
 ### Gate failure shape
 
@@ -184,8 +192,8 @@ MCP merge.
 ### State persistence — session state JSON
 
 The buffered attestation lives in the existing per-session state
-file at `~/.local/state/spinclass/sessions/<hash>-state.json`,
-under a new top-level field:
+file at `<worktree>/.spinclass/state.json` (implicit sessions:
+`state-<rand>.json`), under a new top-level field:
 
 ```json
 {
@@ -193,28 +201,41 @@ under a new top-level field:
   ...
   "pre_merge_attestation": {
     "recorded_at": "2026-05-24T17:42:18Z",
+    "head_sha": "9f3c1a2b4d5e...",
     "skills": [
       { "name": "eng:code-reviewer", "used": true,  "reasoning": "..." },
       { "name": "simplify",          "used": false, "reasoning": "..." },
       { "name": "security-review",   "used": false, "reasoning": "..." }
-    ]
+    ],
+    "claim": { "id": "...", "pid": 41207, "claimed_at": "2026-05-24T17:43:02Z" }
   }
 }
 ```
 
-The field is cleared by the gated tool when it COMMITS to a merge or
-check, BEFORE the pre-merge hook runs:
+`head_sha` is the session worktree's HEAD at attest time (best effort,
+absent on error). `claim` is present only while an attempt holds the
+attestation. The gated tool **claims** it when it commits to a merge or
+check (sync `merge-this-session` before `PrepareMerge`, `check-this-session`
+before the hook, the async twins at dispatch or enqueue) and **settles** the
+claim when the attempt ends (#219):
 
-- sync `merge-this-session` clears it before `PrepareMerge`;
-- `check-this-session` clears it before the hook;
-- the async twins clear it at dispatch or enqueue (#265's peek/consume
-  split, so a refusal never burns it).
+| Outcome | Attestation |
+|---|---|
+| Merge landed (sync, async, or a queued entry's `FinishMerge` nil); a failed post-merge target or a skipped local advance still counts as landed | consumed |
+| Check passed | consumed |
+| `PrepareMerge` or `FinishMerge` failure (fetch, REPAIR, rebase conflict, red hook, timeout, refused push) | kept |
+| Cancel (`session-job-cancel` or ringmaster cancel), drained queue entry, dispatch/`job.Start` failure, red or cancelled check | kept |
+| Refusal before the claim (bad params, busy, implicit-session merge, missing attestation) | untouched |
+| Exemption-admitted or terminal merge (FDR 0031) | nothing held, nothing consumed |
 
-A hook failure after that point therefore requires a fresh attestation
-(#219 tracks relaxing that). An exemption-admitted merge (FDR 0031)
-consumes nothing. The field survives MCP server restarts. (This text was
-corrected in #328; it previously claimed the field was cleared after the
-hook.)
+While a live claim exists the attestation is unavailable to every other
+attempt, so each FDR 0025 batch still needs its own. Re-recording replaces
+the whole record (the newest wins); a settle whose hold no longer matches
+the buffered claim id is a no-op. A claim whose PID is
+dead is void, so a serve crash mid-gate never burns the attestation and
+needs no cooperation from the dead process. The field survives MCP server
+restarts. Implicit sessions store the same record in their per-rand state
+file.
 
 A `null`/absent field is equivalent to "no attestation buffered"
 and causes the gate to fail as described above.
@@ -343,12 +364,31 @@ accepted regardless of the `used` boolean.
   against the user's stated rationale will change behaviour for
   honestly-operating agents. Dishonesty is a separate problem
   addressed by the deferred transcript audit.
-- **Attestation is single-use and not re-emittable.** Once
-  consumed by a merge call, the attestation record is gone. If
-  the merge's pre-merge hook fails and the agent fixes the
-  underlying issue, a fresh attestation is required for the
-  retry. This is intentional (the diff may have changed) but may
-  feel friction-y in tight iterate-and-retry loops.
+- **Consumed per landing, not per attempt.** Commits made after
+  attesting ride on the old attestation and are only *reported*
+  (the "N commits since the attestation" suffix on the verdict),
+  never blocked. An agent that fixes a red hook and retries is not
+  re-asked; re-recording when the fix changed what the skills
+  reviewed is the agent's call.
+- **Other state writers are unlocked (#348).** Record, Claim and
+  Settle are a locked read-modify-write (`session.Update`: sidecar
+  flock + atomic rename, host-local). The other state writers
+  (update-this-session-description, attach/resume, handle grants,
+  `UpdateCredential`, `Tombstone`) still read-modify-write the whole
+  State unlocked. A stale one can drop a claim (letting that
+  attestation admit a second attempt) or resurrect a consumed one
+  (which then shows as a live claim held by this serve and blocks
+  until a re-record).
+- **PID-based staleness can misjudge.** A claim is void when its
+  owner PID is dead; a reused PID keeps a dead owner's claim alive
+  until that PID exits, and re-recording clears it.
+- **A landed-locally merge whose push fails keeps the attestation.**
+  With `[hooks].disable-merge-queue` on a gitSync repo,
+  `finishMergeUnqueued` fast-forwards the LOCAL default branch and
+  can then fail the push in `teardownAndPush`. That error settles as
+  not-landed, so the attestation is kept although the merge landed
+  locally. This is the chosen behaviour: the merge is not on origin,
+  so the retry is still the merge moment the gate guards.
 - **No way to attest for the worktree without merging.** There is
   no standalone "record attestation" CLI surface; the only way to
   invoke `nothing-but-the-truth` is via MCP from an agent

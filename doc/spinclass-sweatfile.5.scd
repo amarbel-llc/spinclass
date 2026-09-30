@@ -1153,17 +1153,22 @@ gates *merge-this-session* / *check-this-session* behind it.
 ## Gate behaviour
 
 On invocation, if no fresh attestation is buffered in the session state
-file (_~/.local/state/spinclass/sessions/<hash>-state.json_), the gated
+file (_<worktree>/.spinclass/state.json_; implicit sessions use
+_state-<rand>.json_), the gated
 tool fails before running any pre-merge hook with a TAP-14 response
 containing *required\_skills* (the full list, each entry's *name* and
 *rationale*) and *required\_tool:* nothing-but-the-truth*.*
 
-A merge or check that proceeds on an attestation consumes it.
-*merge-this-session* consumes it before the rebase, and the async twin
-consumes it at dispatch or enqueue. A refusal never consumes it. After
-consumption the record is cleared; a subsequent merge requires a new
-attestation call against the current diff. There is no sticky
-once-per-session mode.
+A merge or check that proceeds on an attestation claims it when it commits
+(the async twin claims at dispatch or enqueue). The claim is recorded in the
+session state and owned by the running server process. The attestation is
+consumed only when the merge lands or the check passes. A failure, cancel,
+refusal, drained queue entry, or a crash of the MCP server leaves it buffered
+for the retry; a claim whose owning process is dead is void. While one attempt
+holds the claim the attestation is unavailable to any other, so a second
+batch queued behind it needs a fresh attestation call. Recording again
+replaces the buffered attestation (the newest wins). There is no sticky
+once-per-session mode and no expiry.
 
 If no attestation is buffered but *[[pre-merge-exemptions]]* are declared,
 the merge is admitted without consuming anything. The *pre-merge policy*
@@ -1175,6 +1180,12 @@ hook: *attested*, *exempt (*_name_*)*, a failure, or, for a terminal merge,
 the SKIP *attestation bypassed (terminal)*. The terminal CLI (*sc merge*,
 *sc run*, *sc check*) is always exempt from the gate, by policy, and no
 plugin can change that (#326).
+
+The *attested* verdict may carry "; N commits since the attestation at
+_sha_: ..." when the merged branch holds commits the attestation never saw
+(patch-id aware, so a plain rebase reports nothing). This is informational: it
+never forces a new attestation. Record again if a fix changed what the skills
+reviewed.
 
 ## nothing-but-the-truth input schema
 

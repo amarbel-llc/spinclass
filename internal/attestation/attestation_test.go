@@ -280,7 +280,7 @@ func TestClaimThenSettleLandedConsumes(t *testing.T) {
 	if a == nil || a.Claim == nil || a.Claim.PID != os.Getpid() {
 		t.Fatalf("expected claim by this pid, got %+v", a)
 	}
-	if !tk.RecordedAt.Equal(a.RecordedAt) || tk.HeadSha != "abc123" || tk.ClaimID == "" || tk.ClaimID != a.Claim.ID {
+	if tk.HeadSha != "abc123" || tk.ClaimID == "" || tk.ClaimID != a.Claim.ID {
 		t.Errorf("ticket %+v does not match attestation %+v", tk, a)
 	}
 
@@ -360,7 +360,7 @@ func TestDeadClaimIsVoid(t *testing.T) {
 		Skills:     gateSkills,
 		Claim:      &session.AttestationClaim{ID: "x", PID: deadPID(t), ClaimedAt: time.Now().UTC()},
 	}
-	if err := slot.store(*st); err != nil {
+	if err := slot.update(func(cur *session.State) error { *cur = *st; return nil }); err != nil {
 		t.Fatal(err)
 	}
 
@@ -477,7 +477,7 @@ func TestImplicitSlotStoreRefusesWhenSessionGone(t *testing.T) {
 	if err := os.Remove(stateFile); err != nil {
 		t.Fatal(err)
 	}
-	if err := slot.store(*st); err == nil {
+	if err := slot.update(func(cur *session.State) error { *cur = *st; return nil }); err == nil {
 		t.Fatal("expected store to refuse a vanished session")
 	}
 	if _, err := os.Stat(stateFile); !os.IsNotExist(err) {
