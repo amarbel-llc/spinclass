@@ -138,6 +138,86 @@ func TestPolicyAttestedRecordsAttested(t *testing.T) {
 	}
 }
 
+func commitFile(t *testing.T, dir, name string) string {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", name)
+	runGit(t, dir, "commit", "-m", "add "+name)
+	return runGit(t, dir, "rev-parse", "HEAD")
+}
+
+func TestPolicyAttestedUnchangedTipIsPlain(t *testing.T) {
+	repoDir, wtPath := setupPolicyRepo(t, "")
+	attested := runGit(t, wtPath, "rev-parse", "HEAD")
+
+	recs, err := runFinishOpts(t, repoDir, wtPath, "feature", false, PostMergeOptions{Gate: GateAttested, AttestedSha: attested})
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if tr := policyPoint(t, recs); !tr.OK || tr.Description != policyLabel+": attested" {
+		t.Errorf("policy point = %+v, want plain ok attested", tr)
+	}
+}
+
+func TestPolicyAttestedNotesCommitsSince(t *testing.T) {
+	repoDir, wtPath := setupPolicyRepo(t, "")
+	attested := runGit(t, wtPath, "rev-parse", "HEAD")
+	fix := commitFile(t, wtPath, "b.txt")
+
+	recs, err := runFinishOpts(t, repoDir, wtPath, "feature", false, PostMergeOptions{Gate: GateAttested, AttestedSha: attested})
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	tr := policyPoint(t, recs)
+	wantPrefix := policyLabel + ": attested; 1 commit since the attestation at " + shortSha(attested)
+	if !tr.OK || !strings.HasPrefix(tr.Description, wantPrefix) || !strings.Contains(tr.Description, shortSha(fix)) {
+		t.Errorf("policy point = %+v, want prefix %q naming %s", tr, wantPrefix, shortSha(fix))
+	}
+}
+
+func TestPolicyAttestedRebaseAloneIsPlain(t *testing.T) {
+	repoDir, wtPath := setupPolicyRepo(t, "")
+	attested := runGit(t, wtPath, "rev-parse", "HEAD")
+	commitFile(t, repoDir, "other.txt")
+
+	recs, err := runFinishOpts(t, repoDir, wtPath, "feature", false, PostMergeOptions{Gate: GateAttested, AttestedSha: attested})
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if tr := policyPoint(t, recs); !tr.OK || tr.Description != policyLabel+": attested" {
+		t.Errorf("policy point = %+v, want plain ok attested after a pure rebase", tr)
+	}
+}
+
+func TestPolicyAttestedRebasePlusNewCommitCountsOne(t *testing.T) {
+	repoDir, wtPath := setupPolicyRepo(t, "")
+	attested := runGit(t, wtPath, "rev-parse", "HEAD")
+	commitFile(t, repoDir, "other.txt")
+	commitFile(t, wtPath, "b.txt")
+
+	recs, err := runFinishOpts(t, repoDir, wtPath, "feature", false, PostMergeOptions{Gate: GateAttested, AttestedSha: attested})
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if tr := policyPoint(t, recs); !tr.OK || !strings.Contains(tr.Description, "1 commit since") {
+		t.Errorf("policy point = %+v, want 1 commit since", tr)
+	}
+}
+
+func TestPolicyAttestedUnknownShaSaysSo(t *testing.T) {
+	repoDir, wtPath := setupPolicyRepo(t, "")
+
+	recs, err := runFinishOpts(t, repoDir, wtPath, "feature", false, PostMergeOptions{Gate: GateAttested, AttestedSha: "0123456789abcdef0123456789abcdef01234567"})
+	if err != nil {
+		t.Fatalf("merge must land despite an unknown attested sha: %v", err)
+	}
+	if tr := policyPoint(t, recs); !tr.OK || !strings.Contains(tr.Description, "could not compare with the attested commit 0123456789ab") {
+		t.Errorf("policy point = %+v, want the could-not-compare label", tr)
+	}
+}
+
 // An exemption-admitted merge must not fail open when the (branch-controlled)
 // session hierarchy no longer shows the gate live by the time it lands, e.g. a
 // queued merge whose branch dropped its skills: predicates still decide.

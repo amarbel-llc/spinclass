@@ -502,7 +502,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 
 	// (d0) The pre-merge policy stage (FDR 0031), under the lock, judging the
 	// exact landing diff before the expensive hook.
-	if pErr := runAttestationPolicy(ctx, ts, pm.Gate, sessionH, repoPath, branch, defaultBranch, target.Ref(), pinnedSha, landingSha); pErr != nil {
+	if pErr := runAttestationPolicy(ctx, ts, pm.Gate, sessionH, repoPath, branch, defaultBranch, target.Ref(), pinnedSha, landingSha, pm.AttestedSha); pErr != nil {
 		return nil, pErr
 	}
 
@@ -582,7 +582,7 @@ func finishMergeUnqueued(ctx context.Context, rep *crap.Reporter, ts *crap.TestS
 	// PrepareMerge rebased onto the landing target, so it is an ancestor of the
 	// pin and the pin is exactly what lands on this path.
 	target := landing.ForMerge(repoPath, defaultBranch, gitSync)
-	if pErr := runAttestationPolicy(ctx, ts, pm.Gate, sessionH, repoPath, branch, defaultBranch, target.Ref(), pinnedSha, pinnedSha); pErr != nil {
+	if pErr := runAttestationPolicy(ctx, ts, pm.Gate, sessionH, repoPath, branch, defaultBranch, target.Ref(), pinnedSha, pinnedSha, pm.AttestedSha); pErr != nil {
 		return nil, pErr
 	}
 

@@ -31,7 +31,8 @@ const (
 	// The stage only records the bypass; predicates are never run, so nothing a
 	// plugin declares can change a terminal merge's outcome.
 	GateTerminal AttestationGate = iota
-	// GateAttested: an MCP merge whose caller consumed a fresh attestation.
+	// GateAttested: an MCP merge admitted by a claimed attestation (consumed
+	// only if the merge lands, #219).
 	GateAttested
 	// GateNeedsExemption: an MCP merge with NO attestation, admitted only
 	// because exemptions may apply. A [[pre-merge-exemptions]] predicate
@@ -59,11 +60,51 @@ const PolicyTerminalBypassReason = "attestation bypassed (terminal): sc merge / 
 
 const policyLabel = "pre-merge policy"
 
+// attestedLabel is the GateAttested verdict. An attestation stays valid after
+// follow-up commits (#219), so the label names the branch commits in the pin
+// that the attestation never saw: neither on the landing target nor
+// patch-equivalent to a commit reachable from attestedSha, so a pure rebase
+// counts zero. It never fails the merge.
+func attestedLabel(repoPath, targetRef, attestedSha, pinnedSha string) string {
+	plain := policyLabel + ": attested"
+	if attestedSha == "" {
+		return plain
+	}
+	out, err := git.Run(repoPath, "rev-list", "--reverse", "--right-only", "--cherry-pick", "--no-merges",
+		attestedSha+"..."+pinnedSha, "^"+targetRef)
+	if err != nil {
+		return fmt.Sprintf("%s: attested; could not compare with the attested commit %s", policyLabel, shortSha(attestedSha))
+	}
+	var shas []string
+	for _, line := range strings.Split(out, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			shas = append(shas, line)
+		}
+	}
+	n := len(shas)
+	if n == 0 {
+		return plain
+	}
+	noun := "commits"
+	if n == 1 {
+		noun = "commit"
+	}
+	shown := shas[:min(n, 5)]
+	for i, s := range shown {
+		shown[i] = shortSha(s)
+	}
+	list := strings.Join(shown, " ")
+	if n > 5 {
+		list += " …"
+	}
+	return fmt.Sprintf("%s: attested; %d %s since the attestation at %s: %s", policyLabel, n, noun, shortSha(attestedSha), list)
+}
+
 // runAttestationPolicy is the pre-merge policy stage (FDR 0031). sessionH is
 // the session worktree's hierarchy (it decides whether the gate is live);
 // targetRef is the landing target the landing sits on; landingSha is the head
 // to judge. Only a GateNeedsExemption merge can fail here.
-func runAttestationPolicy(ctx context.Context, ts *crap.TestStream, gate AttestationGate, sessionH sweatfile.Hierarchy, repoPath, branch, defaultBranch, targetRef, pinnedSha, landingSha string) error {
+func runAttestationPolicy(ctx context.Context, ts *crap.TestStream, gate AttestationGate, sessionH sweatfile.Hierarchy, repoPath, branch, defaultBranch, targetRef, pinnedSha, landingSha, attestedSha string) error {
 	// GateNeedsExemption never skips: the gate was found live at admission,
 	// and the session hierarchy is branch-controlled (a queued merge's branch
 	// can drop its skills or break its sweatfile before dequeue), so letting it
@@ -77,7 +118,7 @@ func runAttestationPolicy(ctx context.Context, ts *crap.TestStream, gate Attesta
 		ts.Skip(policyLabel, PolicyTerminalBypassReason)
 		return nil
 	case GateAttested:
-		ts.Ok(policyLabel + ": attested")
+		ts.Ok(attestedLabel(repoPath, targetRef, attestedSha, pinnedSha))
 		return nil
 	}
 

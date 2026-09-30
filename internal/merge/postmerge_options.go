@@ -36,6 +36,11 @@ type PostMergeOptions struct {
 	// It rides here, not as another positional, because this struct is already
 	// the per-merge option that travels every hop to FinishMerge.
 	Gate AttestationGate
+
+	// AttestedSha is the session HEAD the admitting attestation was recorded
+	// at (FDR 0007, #219); "" when unknown, or when the merge was not admitted
+	// by an attestation. It is only read for GateAttested.
+	AttestedSha string
 }
 
 // TargetsFromFlags maps the CLI spelling of a post-merge target selection
