@@ -12,12 +12,18 @@ import (
 // defaultDocIndexDirs is the built-in scan set for the design-record index,
 // used when a sweatfile does not set [sysprompt].doc-index-dirs. Scan-if-
 // exists: a dir that is absent simply contributes nothing. See FDR 0021.
-var defaultDocIndexDirs = []string{"docs/features", "docs/adrs", "docs/rfcs"}
+// docs/epics leads the list as the widest genre: an epic is the vision-level
+// parent record the FDRs under it implement (docs/epics/README.md). Render order
+// is by genre TAG within a status group, not by this list, so `EPIC` lands above
+// `FDR` regardless; leading here keeps the declaration read the way the records
+// nest.
+var defaultDocIndexDirs = []string{"docs/epics", "docs/features", "docs/adrs", "docs/rfcs"}
 
 // genreTags maps a known design-record dir to its record label so numbers do
 // not collide across genres (FDR 0014 vs ADR 0014). A dir not listed here
 // falls back to its path basename as the tag.
 var genreTags = map[string]string{
+	"docs/epics":    "EPIC",
 	"docs/features": "FDR",
 	"docs/adrs":     "ADR",
 	"docs/rfcs":     "RFC",
@@ -182,15 +188,18 @@ func slugToTitle(slug string) string {
 // unrecognised but present status sorts after the known ones; the unstatused
 // bucket sorts last. The switch keys off the first token so a compound status
 // like "superseded by FDR-0021" ranks with "superseded".
+//
+// Each epic status shares the tier of the record status it matches (the epic
+// lifecycle is defined in docs/epics/README.md).
 func statusRank(status string) int {
 	switch firstToken(status) {
-	case "accepted":
+	case "accepted", "realized":
 		return 0
 	case "testing":
 		return 1
-	case "experimental":
+	case "experimental", "active":
 		return 2
-	case "proposed":
+	case "proposed", "vision":
 		return 3
 	case "exploring":
 		return 4

@@ -42,13 +42,15 @@ func writeRecord(t *testing.T, dir, name, status, title, body string) {
 
 func TestRenderDesignRecordsGroupingAndGenres(t *testing.T) {
 	root := t.TempDir()
+	epics := filepath.Join(root, "docs", "epics")
 	features := filepath.Join(root, "docs", "features")
 	adrs := filepath.Join(root, "docs", "adrs")
+	writeRecord(t, epics, "0001-trustworthy-agent-delegation.md", "active", "Trustworthy delegation between agents", "")
 	writeRecord(t, features, "0014-implicit-sessions.md", "accepted", "Implicit sessions", "")
 	writeRecord(t, features, "0021-composable.md", "proposed", "Composable dynamic system-prompt", "")
 	writeRecord(t, adrs, "0003-foo.md", "accepted", "Foo decision", "")
 
-	out := renderDesignRecords(root, []string{"docs/features", "docs/adrs", "docs/rfcs"})
+	out := renderDesignRecords(root, defaultDocIndexDirs)
 
 	mustContain(t, out, "## Design records")
 	// Groups ordered by maturity: accepted before proposed.
@@ -60,11 +62,72 @@ func TestRenderDesignRecordsGroupingAndGenres(t *testing.T) {
 	mustContain(t, out, "- ADR 0003 — Foo decision")
 	mustContain(t, out, "- FDR 0014 — Implicit sessions")
 	mustContain(t, out, "- FDR 0021 — Composable dynamic system-prompt")
+	// docs/epics renders under the EPIC genre tag, not its basename.
+	mustContain(t, out, "- EPIC 0001 — Trustworthy delegation between agents")
 	if strings.Index(out, "- ADR 0003") > strings.Index(out, "- FDR 0014") {
 		t.Errorf("ADR should sort before FDR within a status group:\n%s", out)
 	}
+	if strings.Contains(out, "- epics ") {
+		t.Errorf("docs/epics must be genre-tagged EPIC, not by basename:\n%s", out)
+	}
 	if strings.Contains(out, "RFC") {
 		t.Errorf("absent rfcs dir must contribute nothing:\n%s", out)
+	}
+}
+
+// Each epic status shares the maturity tier of the record status it matches, so
+// an `active` epic outranks the `proposed` group and a `vision` epic sits in that
+// group's own tier rather than in the unrecognised bucket after `superseded`.
+func TestRenderDesignRecordsEpicStatusTiers(t *testing.T) {
+	root := t.TempDir()
+	epics := filepath.Join(root, "docs", "epics")
+	features := filepath.Join(root, "docs", "features")
+	writeRecord(t, epics, "0001-active.md", "active", "Active epic", "")
+	writeRecord(t, epics, "0002-eventual.md", "vision", "Vision epic", "")
+	writeRecord(t, features, "0032-principals.md", "proposed", "Principals", "")
+	writeRecord(t, features, "0008-dodder.md", "exploring", "Per-worktree dodder", "")
+	writeRecord(t, features, "0005-output.md", "superseded by FDR 0015", "Merge output shape", "")
+
+	out := renderDesignRecords(root, defaultDocIndexDirs)
+
+	active := strings.Index(out, "**active**")
+	proposed := strings.Index(out, "**proposed**")
+	vision := strings.Index(out, "**vision**")
+	exploring := strings.Index(out, "**exploring**")
+	superseded := strings.Index(out, "**superseded by FDR 0015**")
+	for name, i := range map[string]int{
+		"active": active, "proposed": proposed,
+		"vision": vision, "exploring": exploring, "superseded": superseded,
+	} {
+		if i < 0 {
+			t.Fatalf("%s group missing:\n%s", name, out)
+		}
+	}
+	// active ranks with experimental, so it precedes the proposed tier.
+	if active > proposed {
+		t.Errorf("an active epic should sort above the proposed group:\n%s", out)
+	}
+	// vision ranks with proposed: after it on the alphabetical tiebreak, but
+	// still inside that tier and so ahead of exploring (and of superseded,
+	// which is where the unrecognised-status bucket used to put it).
+	if !(proposed < vision && vision < exploring && exploring < superseded) {
+		t.Errorf("a vision epic should sit in the proposed tier:\n%s", out)
+	}
+}
+
+// An epic and an FDR sharing a status group must sort EPIC first, so the
+// vision-level parent record is listed above the records that implement it.
+func TestRenderDesignRecordsEpicSortsAboveFDR(t *testing.T) {
+	root := t.TempDir()
+	writeRecord(t, filepath.Join(root, "docs", "epics"), "0001-vision.md", "active", "A vision", "")
+	writeRecord(t, filepath.Join(root, "docs", "features"), "0032-principals.md", "active", "Principals", "")
+
+	out := renderDesignRecords(root, defaultDocIndexDirs)
+
+	mustContain(t, out, "- EPIC 0001 — A vision")
+	mustContain(t, out, "- FDR 0032 — Principals")
+	if strings.Index(out, "- EPIC 0001") > strings.Index(out, "- FDR 0032") {
+		t.Errorf("EPIC should sort before FDR within a status group:\n%s", out)
 	}
 }
 

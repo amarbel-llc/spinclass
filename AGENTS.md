@@ -8,7 +8,8 @@ and the `spinclass-*(5)`/`(7)` manpages — this file orients you and points the
 rather than duplicating it. Your system prompt already staples a live **Design
 records** index (every FDR/doc by number·title·status, via FDR 0021) into
 context, so a bare `(FDR NNNN)` cite here is enough to locate the record — read
-it before changing that subsystem.
+it before changing that subsystem. `docs/epics/` is the vision-level record type
+above FDRs: cross-repo intent in plain language, with FDRs as its children.
 
 ## Overview
 

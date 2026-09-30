@@ -108,15 +108,16 @@ keys override parent keys).
 Configures the dynamic system-prompt fragment spinclass contributes to a
 clown-launched session (see FDR 0021). The fragment carries a *Design
 records* section: an index of the repository's design records —
-_docs/features_, _docs/adrs_, and _docs/rfcs_ by default — listed by
-number, title, and lifecycle *status* (read from each file's YAML
-frontmatter) and grouped by status.
+_docs/epics_, _docs/features_, _docs/adrs_, and _docs/rfcs_ by default —
+listed by number, title, and lifecycle *status* (read from each file's
+YAML frontmatter) and grouped by status.
 
 *doc-index-dirs*
 	Array of directories (relative to the worktree/checkout root) scanned
 	for _NNNN-\*.md_ design records. Records are genre-tagged by directory
-	(*docs/features* → *FDR*, *docs/adrs* → *ADR*, *docs/rfcs* → *RFC*; any
-	other directory uses its basename). Scan-if-exists: an absent directory
+	(*docs/epics* → *EPIC*, *docs/features* → *FDR*, *docs/adrs* → *ADR*,
+	*docs/rfcs* → *RFC*; any other directory uses its basename).
+	Scan-if-exists: an absent directory
 	contributes nothing, so a repository with none of the scanned
 	directories renders no *Design records* section at all. A structurally
 	broken record (unreadable, or a frontmatter block opened with *---* but

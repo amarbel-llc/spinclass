@@ -36,6 +36,8 @@ promotion-criteria: |
 > "Companion records" is downstream of the decisions here and MUST cite FDR 0032
 > as its parent. Where a companion and this record disagree, the disagreement
 > is a bug to reconcile here first, not a fork.
+>
+> Parent epic: EPIC 0001, `docs/epics/0001-trustworthy-agent-delegation.md`.
 
 ## Problem Statement
 
