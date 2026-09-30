@@ -11,7 +11,7 @@
 // attestation. There is no sticky once-per-session mode. PIDs and session
 // state are host-local: a claim is only judged live or dead on its own host.
 //
-// Until #219 task 3 rewires the handlers, the deprecated Check/Consume shims
+// Until #219 task 3 rewires the handlers, the interim Check/Consume shims
 // still consume at commit time, before success is known.
 //
 // The CLI (`sc merge` / `sc run` / `sc check`) does not claim — the gate
@@ -343,7 +343,7 @@ func Settle(slot Slot, t Ticket, landed bool) error {
 
 // Check verifies a fresh attestation is buffered and consumes it.
 //
-// Deprecated: removed in #219 task 3.
+// Interim shim: #219 task 3 removes it once the handlers claim/settle.
 func Check(merged sweatfile.Sweatfile, repoPath, branch string) (ok bool, output string, err error) {
 	if pok, output, perr := Peek(merged, WorktreeSlot(repoPath, branch)); !pok {
 		return false, output, perr
@@ -356,7 +356,7 @@ func Check(merged sweatfile.Sweatfile, repoPath, branch string) (ok bool, output
 
 // Consume clears any buffered attestation for (repoPath, branch).
 //
-// Deprecated: removed in #219 task 3.
+// Interim shim: #219 task 3 removes it once the handlers claim/settle.
 func Consume(merged sweatfile.Sweatfile, repoPath, branch string) error {
 	return consumeSlot(merged, WorktreeSlot(repoPath, branch))
 }
@@ -378,7 +378,7 @@ func consumeSlot(merged sweatfile.Sweatfile, slot Slot) error {
 
 // CheckImplicit is Check for an implicit (main-checkout) session.
 //
-// Deprecated: removed in #219 task 3.
+// Interim shim: #219 task 3 removes it once the handlers claim/settle.
 func CheckImplicit(merged sweatfile.Sweatfile, checkout string) (ok bool, output string, err error) {
 	if pok, output, perr := Peek(merged, ImplicitSlot(checkout)); !pok {
 		return false, output, perr
@@ -391,14 +391,14 @@ func CheckImplicit(merged sweatfile.Sweatfile, checkout string) (ok bool, output
 
 // PeekImplicit is Peek for an implicit (main-checkout) session.
 //
-// Deprecated: removed in #219 task 3.
+// Interim shim: #219 task 3 removes it once the handlers claim/settle.
 func PeekImplicit(merged sweatfile.Sweatfile, checkout string) (ok bool, output string, err error) {
 	return Peek(merged, ImplicitSlot(checkout))
 }
 
 // ConsumeImplicit is Consume for an implicit (main-checkout) session.
 //
-// Deprecated: removed in #219 task 3.
+// Interim shim: #219 task 3 removes it once the handlers claim/settle.
 func ConsumeImplicit(merged sweatfile.Sweatfile, checkout string) error {
 	return consumeSlot(merged, ImplicitSlot(checkout))
 }

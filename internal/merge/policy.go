@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -60,6 +61,10 @@ const PolicyTerminalBypassReason = "attestation bypassed (terminal): sc merge / 
 
 const policyLabel = "pre-merge policy"
 
+// attestedShaPattern gates what reaches git's argv: the attested sha comes from
+// persisted session state, so it must look like an object id.
+var attestedShaPattern = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
+
 // attestedLabel is the GateAttested verdict. An attestation stays valid after
 // follow-up commits (#219), so the label names the branch commits in the pin
 // that the attestation never saw: neither on the landing target nor
@@ -70,10 +75,17 @@ func attestedLabel(repoPath, targetRef, attestedSha, pinnedSha string) string {
 	if attestedSha == "" {
 		return plain
 	}
+	cannotCompare := func(cause string) string {
+		return fmt.Sprintf("%s: attested; could not compare with the attested commit %s; %s", policyLabel, shortSha(attestedSha), cause)
+	}
+	if !attestedShaPattern.MatchString(attestedSha) {
+		return cannotCompare("not a commit sha")
+	}
 	out, err := git.Run(repoPath, "rev-list", "--reverse", "--right-only", "--cherry-pick", "--no-merges",
 		attestedSha+"..."+pinnedSha, "^"+targetRef)
 	if err != nil {
-		return fmt.Sprintf("%s: attested; could not compare with the attested commit %s", policyLabel, shortSha(attestedSha))
+		cause, _, _ := strings.Cut(strings.TrimSpace(err.Error()), "\n")
+		return cannotCompare(cause)
 	}
 	var shas []string
 	for _, line := range strings.Split(out, "\n") {

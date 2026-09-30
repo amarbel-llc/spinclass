@@ -2,6 +2,7 @@ package merge
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,6 +189,43 @@ func TestPolicyAttestedRebaseAloneIsPlain(t *testing.T) {
 	}
 	if tr := policyPoint(t, recs); !tr.OK || tr.Description != policyLabel+": attested" {
 		t.Errorf("policy point = %+v, want plain ok attested after a pure rebase", tr)
+	}
+	if pinned := runGit(t, wtPath, "rev-parse", "HEAD"); pinned == attested {
+		t.Errorf("branch tip still %s: the rebase never rewrote it, so this test proves nothing", attested)
+	}
+}
+
+func TestPolicyAttestedCapsListAtFive(t *testing.T) {
+	repoDir, wtPath := setupPolicyRepo(t, "")
+	attested := runGit(t, wtPath, "rev-parse", "HEAD")
+	for i := 0; i < 6; i++ {
+		commitFile(t, wtPath, fmt.Sprintf("c%d.txt", i))
+	}
+
+	recs, err := runFinishOpts(t, repoDir, wtPath, "feature", false, PostMergeOptions{Gate: GateAttested, AttestedSha: attested})
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	tr := policyPoint(t, recs)
+	prefix := policyLabel + ": attested; 6 commits since the attestation at " + shortSha(attested) + ": "
+	if !tr.OK || !strings.HasPrefix(tr.Description, prefix) || !strings.HasSuffix(tr.Description, " …") {
+		t.Fatalf("policy point = %+v, want prefix %q and suffix ' …'", tr, prefix)
+	}
+	list := strings.TrimSuffix(strings.TrimPrefix(tr.Description, prefix), " …")
+	if got := len(strings.Fields(list)); got != 5 {
+		t.Errorf("listed %d shas (%q), want exactly 5", got, list)
+	}
+}
+
+func TestPolicyAttestedMalformedShaNeverReachesGit(t *testing.T) {
+	repoDir, wtPath := setupPolicyRepo(t, "")
+
+	recs, err := runFinishOpts(t, repoDir, wtPath, "feature", false, PostMergeOptions{Gate: GateAttested, AttestedSha: "--output=x"})
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if tr := policyPoint(t, recs); !tr.OK || !strings.HasSuffix(tr.Description, "; not a commit sha") {
+		t.Errorf("policy point = %+v, want the not-a-commit-sha cause", tr)
 	}
 }
 
