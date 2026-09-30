@@ -818,7 +818,7 @@ func peekGate(gs gatedSession) (string, bool) {
 	if !ok || len(merged.ActivePreMergeSkills()) == 0 {
 		return "", true
 	}
-	gateOK, output, err := attestation.Peek(merged, gs.repoPath, gs.branch)
+	gateOK, output, err := attestation.Peek(merged, attestation.WorktreeSlot(gs.repoPath, gs.branch))
 	if err != nil && !errors.Is(err, attestation.ErrAttestationRequired) {
 		return fmt.Sprintf("attestation gate error: %v", err), false
 	}
@@ -1162,12 +1162,12 @@ func handleNothingButTheTruth(_ context.Context, args json.RawMessage, _ command
 		return command.TextErrorResult(renderValidationError(required, verr)), nil
 	}
 
+	slot := attestation.WorktreeSlot(repoPath, branch)
 	if isImplicit {
-		err = attestation.RecordImplicit(cwd, params.Skills)
-	} else {
-		err = attestation.Record(repoPath, branch, params.Skills)
+		slot = attestation.ImplicitSlot(cwd)
 	}
-	if err != nil {
+	headSha, _ := git.RevParse(cwd, "HEAD") // best effort; "" when unknown
+	if err = attestation.Record(slot, params.Skills, headSha); err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not record attestation: %v", err)), nil
 	}
 

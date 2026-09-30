@@ -139,8 +139,9 @@ type State struct {
 	DeletedSHA string `json:"deleted_sha,omitempty"`
 
 	// PreMergeAttestation buffers the agent's most recent
-	// nothing-but-the-truth response. Consumed and cleared by the next
-	// merge-this-session / check-this-session call. See
+	// nothing-but-the-truth response. Claimed by the next merge/check
+	// attempt; consumed only when that merge lands or check passes,
+	// released otherwise. See
 	// docs/features/0007-pre-merge-skill-attestation.md.
 	PreMergeAttestation *PreMergeAttestation `json:"pre_merge_attestation,omitempty"`
 
@@ -172,12 +173,23 @@ type State struct {
 	isTombstone bool
 }
 
-// PreMergeAttestation records one nothing-but-the-truth call. Lifetime
-// is single-use: the next gated MCP tool consumes the field and clears
-// it via session.Write.
+// PreMergeAttestation records one nothing-but-the-truth call. It is claimed
+// by the merge or check attempt it admits, consumed only when that merge
+// lands or that check passes, and released (claim cleared, attestation kept)
+// otherwise (#219).
 type PreMergeAttestation struct {
-	RecordedAt time.Time       `json:"recorded_at"`
-	Skills     []AttestedSkill `json:"skills"`
+	RecordedAt time.Time         `json:"recorded_at"`
+	Skills     []AttestedSkill   `json:"skills"`
+	HeadSha    string            `json:"head_sha,omitempty"` // session HEAD at record time; "" if unknown (#219)
+	Claim      *AttestationClaim `json:"claim,omitempty"`    // non-nil while an attempt holds it (#219)
+}
+
+// AttestationClaim marks the attestation as held by one in-flight merge or
+// check. It is void once PID is dead, so a crashed serve never burns it.
+type AttestationClaim struct {
+	ID        string    `json:"id"`
+	PID       int       `json:"pid"`
+	ClaimedAt time.Time `json:"claimed_at"`
 }
 
 // AttestedSkill is one entry from the agent's response.
@@ -282,7 +294,7 @@ func Write(s State) error {
 		return err
 	}
 	statePath := worktreeStatePath(wt)
-	if err := os.WriteFile(statePath, data, 0o644); err != nil {
+	if err := writeAtomic(statePath, data); err != nil {
 		sessionlog.Errorf("session.Write writefile-failed path=%s from=%s err=%v", statePath, from, err)
 		return err
 	}
@@ -484,7 +496,7 @@ func WriteImplicit(s State, randID string) error {
 		return err
 	}
 	local := implicitStatePath(checkout, randID)
-	if err := os.WriteFile(local, data, 0o644); err != nil {
+	if err := writeAtomic(local, data); err != nil {
 		sessionlog.Errorf("session.WriteImplicit writefile-failed path=%s from=%s err=%v", local, from, err)
 		return err
 	}

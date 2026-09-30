@@ -7,12 +7,15 @@ import (
 
 func TestPreMergeAttestationRoundTrip(t *testing.T) {
 	s := setupTestSession(t, "att-branch")
+	claimedAt := time.Now().UTC().Truncate(time.Second)
 	s.PreMergeAttestation = &PreMergeAttestation{
 		RecordedAt: time.Now().UTC().Truncate(time.Second),
 		Skills: []AttestedSkill{
 			{Name: "eng:code-reviewer", Used: true, Reasoning: "Reviewed; no findings."},
 			{Name: "simplify", Used: false, Reasoning: "Single-line bugfix."},
 		},
+		HeadSha: "abc123def456",
+		Claim:   &AttestationClaim{ID: "42-1", PID: 42, ClaimedAt: claimedAt},
 	}
 
 	if err := Write(s); err != nil {
@@ -37,6 +40,13 @@ func TestPreMergeAttestationRoundTrip(t *testing.T) {
 	}
 	if loaded.PreMergeAttestation.Skills[1].Name != "simplify" || loaded.PreMergeAttestation.Skills[1].Used {
 		t.Errorf("Skills[1]: got %+v", loaded.PreMergeAttestation.Skills[1])
+	}
+	if loaded.PreMergeAttestation.HeadSha != "abc123def456" {
+		t.Errorf("HeadSha = %q", loaded.PreMergeAttestation.HeadSha)
+	}
+	c := loaded.PreMergeAttestation.Claim
+	if c == nil || c.ID != "42-1" || c.PID != 42 || !c.ClaimedAt.Equal(claimedAt) {
+		t.Errorf("Claim = %+v", c)
 	}
 }
 
