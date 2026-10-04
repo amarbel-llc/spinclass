@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/signal"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
@@ -28,8 +27,9 @@ func registerServeCommand(app *command.App) {
 			Long:  "Start a JSON-RPC MCP server on stdin/stdout. Intended to be launched by an MCP client such as Claude Code via .mcp.json.",
 		},
 		RunCLI: func(ctx context.Context, _ json.RawMessage) error {
-			sigCtx, cancel := signal.NotifyContext(ctx, os.Interrupt)
+			sigCtx, cancel := gateSignalContext(ctx, serveSignals...)
 			defer cancel()
+			defer discardSIGHUP()()
 
 			if err := servelog.Open(); err != nil {
 				// Don't fail startup: logging is best-effort. Emit a line
