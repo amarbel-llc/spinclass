@@ -343,7 +343,9 @@ func runHookInDir(ctx context.Context, cmd *string, envDir, runDir string, w io.
 // reap the DETACHED children FDR 0023 documents as the supported way to run a
 // slow post-merge deploy without holding the merge lock. Residual: a hook
 // whose top process swallows SIGTERM without propagating leaves its
-// descendants orphaned, and only the pipes are reclaimed.
+// descendants orphaned, and only the pipes are reclaimed. When that escalation
+// fires with no scope to reap the children, a warning line is written into the
+// hook output so the operator knows descendants may still be running.
 func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, extraEnv []string, waitDelay time.Duration, scopeID string, w io.Writer) error {
 	if cmd == nil || *cmd == "" {
 		return nil
@@ -416,6 +418,11 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 	}
 
 	err := c.Run()
+	if !scoped && ctx.Err() != nil && escalated(c, err) {
+		_, _ = fmt.Fprintf(w, "[spinclass] hook ignored SIGTERM for %s and was killed; "+
+			"with no systemd scope its child processes may still be running (spinclass#188)\n",
+			c.WaitDelay)
+	}
 	if scoped && ctx.Err() != nil {
 		// The hook's ctx was cancelled (inactivity watchdog, #22 observer, or
 		// session-job-cancel). SIGTERM + WaitDelay already fired at the front
@@ -430,6 +437,22 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 		}
 	}
 	return err
+}
+
+// escalated reports whether a cancelled command needed the WaitDelay escalation:
+// either the top process exited by itself but a descendant still held the pipe
+// when WaitDelay expired (exec.ErrWaitDelay), or the top process was SIGKILLed
+// (Wait then returns the ExitError, not ErrWaitDelay). Either way a descendant
+// may have survived.
+func escalated(c *exec.Cmd, err error) bool {
+	if errors.Is(err, exec.ErrWaitDelay) {
+		return true
+	}
+	if c.ProcessState == nil {
+		return false
+	}
+	ws, ok := c.ProcessState.Sys().(syscall.WaitStatus)
+	return ok && ws.Signaled() && ws.Signal() == syscall.SIGKILL
 }
 
 // CommandCapture runs a sweatfile-declared command (`sh -c`) in dir,

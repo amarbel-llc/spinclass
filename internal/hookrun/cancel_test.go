@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -82,6 +84,48 @@ wait $child
 				"abandoned, not torn down, so an orphaned build outlives the merge", pid)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+
+	// A hook that honoured SIGTERM needed no escalation, so it is not warned about.
+	if strings.Contains(buf.String(), unscopedWarning) {
+		t.Errorf("unexpected escalation warning for a hook that honoured SIGTERM: %q", buf.String())
+	}
+}
+
+// unscopedWarning is the phrase the operator-facing line carries when a
+// cancelled hook needed SIGKILL and no systemd scope reaped its children.
+const unscopedWarning = "may still be running"
+
+// With no scope tier, a hook that swallows SIGTERM is SIGKILLed alone after
+// cancelGrace and its descendants survive; the operator must be told (#188).
+func TestPreMergeCancelWarnsWhenUnscopedEscalationFires(t *testing.T) {
+	t.Setenv("RINGMASTER_DISABLE_SCOPE", "1")
+	dir := t.TempDir()
+	childPID := filepath.Join(dir, "child.pid")
+	started := filepath.Join(dir, "started")
+
+	// The background child inherits the ignored SIGTERM, so it survives the
+	// top process's SIGKILL: exactly the case the warning is about.
+	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreMerge: sptr(fmt.Sprintf(
+		"trap '' TERM\nsleep 600 &\necho $! > %s\ntouch %s\nwait\n", childPID, started,
+	))}}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	var buf bytes.Buffer
+	done := make(chan error, 1)
+	go func() { done <- PreMergeContext(ctx, sf, dir, &buf) }()
+
+	waitFor(t, started, 30*time.Second, "hook never started")
+	t.Cleanup(func() { _ = syscall.Kill(readPID(t, childPID), syscall.SIGKILL) })
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(60 * time.Second):
+		t.Fatal("a SIGTERM-ignoring hook wedged the cancel; WaitDelay escalation did not fire")
+	}
+	if !strings.Contains(buf.String(), unscopedWarning) {
+		t.Errorf("no escalation warning in hook output: %q", buf.String())
 	}
 }
 
