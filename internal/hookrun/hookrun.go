@@ -17,6 +17,7 @@
 package hookrun
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -49,7 +50,7 @@ func OnAttach(sf sweatfile.Sweatfile, worktreePath string, w io.Writer) error {
 // $SPINCLASS_SESSION_ID) appended. The session env is passed explicitly
 // because it is no longer set on the spinclass process itself (#330).
 func OnDetach(sf sweatfile.Sweatfile, worktreePath string, sessionEnv []string, w io.Writer) error {
-	return runHookInDirEnv(context.Background(), sf.OnDetachHookCommand(), worktreePath, worktreePath, sessionEnv, 0, "", w)
+	return runHookInDirEnv(context.Background(), sf.OnDetachHookCommand(), worktreePath, worktreePath, sessionEnv, 0, "", false, w)
 }
 
 // PreMerge runs the [hooks].pre-merge command in worktreePath under a
@@ -107,13 +108,13 @@ func PostMergeWithCap(ctx context.Context, sf sweatfile.Sweatfile, dir string, e
 		// output is not ours to truncate.
 		// scopeID "" — post-merge is deliberately unscoped so a control-group
 		// kill never reaps the detached children FDR 0023 sanctions for slow deploys.
-		return runHookInDirEnv(ctx, cmd, dir, dir, extraEnv, 0, "", w)
+		return runHookInDirEnv(ctx, cmd, dir, dir, extraEnv, 0, "", false, w)
 	}
 
 	hookCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	err := runHookInDirEnv(hookCtx, cmd, dir, dir, extraEnv, postMergeWaitDelay, "", w)
+	err := runHookInDirEnv(hookCtx, cmd, dir, dir, extraEnv, postMergeWaitDelay, "", false, w)
 	switch {
 	// Only OUR deadline yields the cap message: if the caller's ctx is also
 	// done, the kill is theirs (a cancelled job) and keeps its own error.
@@ -158,12 +159,12 @@ func Target(ctx context.Context, t sweatfile.PostMergeTarget, dir string, extraE
 	command := t.Command
 	// scopeID "" — post-merge is deliberately unscoped so a control-group
 	// kill never reaps the detached children FDR 0023 sanctions for slow deploys.
-	if err := runHookInDirEnv(ctx, &command, dir, dir, extraEnv, postMergeWaitDelay, "", w); err != nil {
+	if err := runHookInDirEnv(ctx, &command, dir, dir, extraEnv, postMergeWaitDelay, "", false, w); err != nil {
 		return sweatfile.PostMergeCommandFailed, err
 	}
 	if t.HasVerify() {
 		verify := *t.Verify
-		if err := runHookInDirEnv(ctx, &verify, dir, dir, extraEnv, postMergeWaitDelay, "", w); err != nil {
+		if err := runHookInDirEnv(ctx, &verify, dir, dir, extraEnv, postMergeWaitDelay, "", false, w); err != nil {
 			return sweatfile.PostMergeVerifyFailed, err
 		}
 	}
@@ -209,7 +210,7 @@ func PreMergeInDir(ctx context.Context, sf sweatfile.Sweatfile, envDir, runDir s
 	cmd := sf.PreMergeHookCommand()
 	timeout := sf.InactivityTimeoutValue()
 	if timeout <= 0 {
-		return runHookInDir(ctx, cmd, envDir, runDir, w)
+		return runHookInDir(ctx, cmd, envDir, runDir, sf.RequireHookScope(), w)
 	}
 
 	aw := &activityWriter{w: w, last: time.Now()}
@@ -244,7 +245,7 @@ func PreMergeInDir(ctx context.Context, sf sweatfile.Sweatfile, envDir, runDir s
 		}
 	}()
 
-	err := runHookInDir(hookCtx, cmd, envDir, runDir, aw)
+	err := runHookInDir(hookCtx, cmd, envDir, runDir, sf.RequireHookScope(), aw)
 	close(done)
 	// Only surface the inactivity error when the hook actually failed because
 	// of the kill; a hook that finished cleanly just before a late tick wins.
@@ -281,7 +282,8 @@ func runHook(cmd *string, worktreePath string, w io.Writer) error {
 }
 
 func runHookContext(ctx context.Context, cmd *string, worktreePath string, w io.Writer) error {
-	return runHookInDir(ctx, cmd, worktreePath, worktreePath, w)
+	// These hooks run under a ctx with no scope id, so requireScope is moot.
+	return runHookInDir(ctx, cmd, worktreePath, worktreePath, false, w)
 }
 
 // runHookInDir runs a hook command with two distinct directory roles: envDir is
@@ -293,17 +295,17 @@ func runHookContext(ctx context.Context, cmd *string, worktreePath string, w io.
 // from the tracked tree only, so it has neither the git-excluded .envrc nor a
 // `direnv allow` record, whereas the session worktree has both (apply.Setup +
 // `direnv allow` at `sc start`). See spinclass#198 and FDR 0013.
-func runHookInDir(ctx context.Context, cmd *string, envDir, runDir string, w io.Writer) error {
+func runHookInDir(ctx context.Context, cmd *string, envDir, runDir string, requireScope bool, w io.Writer) error {
 	// The pre-merge hook runs under a ctx that carries a scope id: the async job
 	// id (clown.WithJobID, set in job.Start) or a synchronous gate's local scope
 	// id (clown.WithLocalScope, #188). Reading it here scopes that hook (#25),
 	// while repair/create/attach/detach — run under context.Background — get "" and
 	// stay unscoped. Post-merge calls runHookInDirEnv directly with "" so FDR 0023
 	// detached children are not caught in a control-group scope kill.
-	return runHookInDirEnv(ctx, cmd, envDir, runDir, nil, 0, clown.ScopeIDFromContext(ctx), w)
+	return runHookInDirEnv(ctx, cmd, envDir, runDir, nil, 0, clown.ScopeIDFromContext(ctx), requireScope, w)
 }
 
-// runHookInDirEnv is runHookInDir with three extras; every hook that needs none
+// runHookInDirEnv is runHookInDir with a few extras; every hook that needs none
 // passes the zero values via runHookInDir.
 //
 // extraEnv is appended to the hook's environment (after os.Environ and
@@ -322,6 +324,11 @@ func runHookInDir(ctx context.Context, cmd *string, envDir, runDir string, w io.
 // (runHookInDir reads the async job id or a synchronous gate's local scope id
 // from ctx); post-merge passes "" so its
 // FDR-0023 detached children are not caught in the control-group kill.
+//
+// requireScope ([hooks].require-hook-scope) decides what a FAILED scope setup
+// means when the tier is available: false falls back to the bare hook with a
+// warning, true fails the hook without running it. See runHookInScope. It has
+// no effect when scopeID is "" or the tier is unavailable.
 //
 // Cancellation semantics matter more than they look, and were measured
 // (spinclass#188). exec.CommandContext's DEFAULT Cancel is Process.Kill() —
@@ -346,7 +353,7 @@ func runHookInDir(ctx context.Context, cmd *string, envDir, runDir string, w io.
 // descendants orphaned, and only the pipes are reclaimed. When that escalation
 // fires with no scope to reap the children, a warning line is written into the
 // hook output so the operator knows descendants may still be running.
-func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, extraEnv []string, waitDelay time.Duration, scopeID string, w io.Writer) error {
+func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, extraEnv []string, waitDelay time.Duration, scopeID string, requireScope bool, w io.Writer) error {
 	if cmd == nil || *cmd == "" {
 		return nil
 	}
@@ -388,36 +395,53 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 	// ScopeStop on cancel below. Prepended AFTER the direnv wrap so systemd-run is
 	// argv[0]. Unavailable (no systemd user bus, or RINGMASTER_DISABLE_SCOPE) means
 	// the hook runs bare and the #26 flock stays the liveness floor.
-	scoped := false
+	//
+	// A Cmd cannot be reused, and a failed scope setup re-runs the bare argv, so
+	// the command is built by a closure.
+	newHookCmd := func(argv []string, out io.Writer) *exec.Cmd {
+		c := exec.CommandContext(ctx, argv[0], argv[1:]...)
+		c.Dir = runDir
+		// Inherit os.Environ so SPINCLASS_* variables set by callers (or by
+		// the running session) propagate into the hook. Always append WORKTREE
+		// (the session worktree = envDir, the logical session location a hook
+		// reasons about, not the transient build worktree) for backwards
+		// compatibility with existing hook scripts.
+		c.Env = append(os.Environ(), "WORKTREE="+envDir)
+		c.Env = append(c.Env, extraEnv...)
+		c.Stdout = out
+		c.Stderr = out
+
+		// See the doc comment: SIGTERM so the hook can tear down its own process
+		// tree, with WaitDelay as the SIGKILL escalation. Every hook gets an
+		// escalation bound — a caller-supplied waitDelay only tightens it.
+		c.Cancel = func() error { return c.Process.Signal(syscall.SIGTERM) }
+		c.WaitDelay = cancelGrace
+		if waitDelay > 0 && waitDelay < cancelGrace {
+			c.WaitDelay = waitDelay
+		}
+		return c
+	}
+
+	var (
+		c      *exec.Cmd
+		err    error
+		scoped bool
+	)
 	if scopeID != "" {
-		if prefix, ok := clown.ScopeArgv(scopeID); ok {
-			argv = append(append([]string(nil), prefix...), argv...)
-			scoped = true
+		if prefix, ok := scopeArgv(scopeID); ok {
+			c, scoped, err = runHookInScope(ctx, newHookCmd, prefix, argv, requireScope, w)
+			if !scoped && err != nil {
+				return err
+			}
 		}
 	}
-
-	c := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	c.Dir = runDir
-	// Inherit os.Environ so SPINCLASS_* variables set by callers (or by
-	// the running session) propagate into the hook. Always append WORKTREE
-	// (the session worktree = envDir, the logical session location a hook
-	// reasons about, not the transient build worktree) for backwards
-	// compatibility with existing hook scripts.
-	c.Env = append(os.Environ(), "WORKTREE="+envDir)
-	c.Env = append(c.Env, extraEnv...)
-	c.Stdout = w
-	c.Stderr = w
-
-	// See the doc comment: SIGTERM so the hook can tear down its own process
-	// tree, with WaitDelay as the SIGKILL escalation. Every hook gets an
-	// escalation bound — a caller-supplied waitDelay only tightens it.
-	c.Cancel = func() error { return c.Process.Signal(syscall.SIGTERM) }
-	c.WaitDelay = cancelGrace
-	if waitDelay > 0 && waitDelay < cancelGrace {
-		c.WaitDelay = waitDelay
+	// No scope tier, or its setup failed before the hook started (already
+	// warned about): the bare hook. scoped is false, so the escalation warning
+	// below applies to it.
+	if !scoped {
+		c = newHookCmd(argv, w)
+		err = c.Run()
 	}
-
-	err := c.Run()
 	if !scoped && ctx.Err() != nil && escalated(c, err) {
 		_, _ = fmt.Fprintf(w, "[spinclass] hook ignored SIGTERM for %s and was killed; "+
 			"with no systemd scope its child processes may still be running (spinclass#188)\n",
@@ -438,6 +462,123 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 	}
 	return err
 }
+
+// scopeArgv is clown.ScopeArgv behind a seam, so tests can stand in a scope
+// prefix that fails (or works) deterministically without a systemd user bus.
+var scopeArgv = clown.ScopeArgv
+
+// runHookInScope runs argv under the scope prefix and reports whether the hook
+// ran there. ran=false with a nil error means the scope could not be set up and
+// the caller should run the hook bare (a warning has been written to w);
+// ran=false with an error means stop: the ctx was cancelled before the hook
+// started, or [hooks].require-hook-scope forbids the unscoped fallback.
+//
+// The fallback is transitional (spinclass#188): require-hook-scope is opt-in
+// now, is expected to become the default, and the fallback is then removed.
+//
+// It must never re-run a hook that started, and systemd-run exits with the
+// hook's own status, so an exit code cannot tell "scope refused" from "hook
+// failed". The scopeStartMarker does: no mark means the hook's argv was never
+// exec'd, whatever systemd-run returned (including a spawn error or exit 0).
+func runHookInScope(
+	ctx context.Context,
+	newHookCmd func(argv []string, out io.Writer) *exec.Cmd,
+	prefix, argv []string,
+	requireScope bool,
+	w io.Writer,
+) (c *exec.Cmd, ran bool, err error) {
+	marker, err := newScopeStartMarker()
+	if err == nil {
+		defer marker.discard()
+		complaint := &firstLineCapture{w: w}
+		c = newHookCmd(append(append([]string(nil), prefix...), marker.wrap(argv)...), complaint)
+		err = c.Run()
+		if marker.hookStarted() {
+			return c, true, err
+		}
+		// Everything written so far came from the scope setup, not the hook.
+		if err == nil {
+			err = errors.New("exited 0 without running the hook")
+		}
+		if line := complaint.firstLine(); line != "" {
+			err = fmt.Errorf("%w: %s", err, line)
+		}
+	}
+
+	switch {
+	case ctx.Err() != nil:
+		// A cancel that landed before the hook started leaves no mark either;
+		// it is a cancel, not a setup failure.
+		return nil, false, err
+	case requireScope:
+		return nil, false, fmt.Errorf(
+			"pre-merge hook not run: its systemd scope could not be set up and [hooks].require-hook-scope is set: %w", err)
+	}
+	_, _ = fmt.Fprintf(w, "[spinclass] hook scope unavailable (%v); running unscoped\n", err)
+	return nil, false, nil
+}
+
+// scopeStartMarker proves whether a scoped hook started. The wrapper it puts in
+// front of the hook's argv runs INSIDE the scope and appends to the marker file
+// strictly before exec'ing the hook, `&&`-chained: an unmarked file means the
+// exec was never reached. It execs, so the process the cancel signals is still
+// the hook itself (see runHookInDirEnv).
+//
+// The mark is read through the fd opened at creation, not by path: a hook that
+// wipes the temp dir unlinks the name but cannot make a started hook look
+// unstarted. For the same reason the wrapper refuses to run the hook when the
+// file is already gone (it would otherwise mark a new inode nobody reads). The
+// file lives in the system temp dir, outside the build worktree, one per run.
+type scopeStartMarker struct{ file *os.File }
+
+const scopeStartScript = `mark=$1; shift; [ -f "$mark" ] && echo started >>"$mark" && exec "$@"`
+
+func newScopeStartMarker() (*scopeStartMarker, error) {
+	file, err := os.CreateTemp("", "spinclass-hook-scope-*")
+	if err != nil {
+		return nil, fmt.Errorf("creating the scope start marker: %w", err)
+	}
+	return &scopeStartMarker{file: file}, nil
+}
+
+func (m *scopeStartMarker) wrap(argv []string) []string {
+	return append([]string{"sh", "-c", scopeStartScript, "sh", m.file.Name()}, argv...)
+}
+
+// hookStarted errs toward true: an unreadable marker must not license a re-run.
+func (m *scopeStartMarker) hookStarted() bool {
+	info, err := m.file.Stat()
+	return err != nil || info.Size() > 0
+}
+
+func (m *scopeStartMarker) discard() {
+	_ = m.file.Close()
+	_ = os.Remove(m.file.Name())
+}
+
+// firstLineCapture passes writes through to w and keeps the first line, so a
+// failed scope setup can be reported with systemd-run's own complaint.
+type firstLineCapture struct {
+	w    io.Writer
+	head []byte
+	done bool
+}
+
+const maxCapturedLine = 512
+
+func (f *firstLineCapture) Write(p []byte) (int, error) {
+	if !f.done {
+		chunk := p
+		if i := bytes.IndexByte(chunk, '\n'); i >= 0 {
+			chunk, f.done = chunk[:i], true
+		}
+		f.head = append(f.head, chunk[:min(len(chunk), maxCapturedLine-len(f.head))]...)
+		f.done = f.done || len(f.head) == maxCapturedLine
+	}
+	return f.w.Write(p)
+}
+
+func (f *firstLineCapture) firstLine() string { return strings.TrimSpace(string(f.head)) }
 
 // escalated reports whether a cancelled command needed the WaitDelay escalation:
 // either the top process exited by itself but a descendant still held the pipe

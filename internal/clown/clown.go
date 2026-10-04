@@ -388,8 +388,10 @@ func AcquireJobLock(jobID string) (func() error, error) {
 // only supplies the argv, it never decides to kill and is not in the `status`
 // path, so cancel and status stay platform-uniform. Availability is a cheap
 // best-effort pre-check (systemd-run on PATH + a reachable user manager +
-// session bus, unless RINGMASTER_DISABLE_SCOPE is set), not a guarantee — a
-// spawn failure still falls back to the bare command.
+// session bus, unless RINGMASTER_DISABLE_SCOPE is set), not a guarantee: the
+// scope can still fail to set up when the argv is run. Nothing here handles
+// that; the caller does (hookrun.runHookInScope falls back to the bare hook
+// with a warning, or fails the gate under [hooks].require-hook-scope).
 func ScopeArgv(jobID string) ([]string, bool) {
 	return jobwake.ScopeArgv(jobID)
 }
