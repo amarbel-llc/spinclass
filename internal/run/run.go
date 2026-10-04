@@ -23,6 +23,7 @@ package run
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -30,6 +31,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
@@ -82,7 +84,9 @@ type Spec struct {
 // is returned only for setup failures that aren't a step verdict (repo
 // detection, worktree creation, default-branch resolution) — the caller
 // surfaces it directly rather than via the crap stream.
-func Run(spec Spec) (exitCode int, err error) {
+//
+// ctx cancels the step (SIGTERM) and the merge's pre-merge hook (#188).
+func Run(ctx context.Context, spec Spec) (exitCode int, err error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return 1, err
@@ -175,7 +179,7 @@ func Run(spec Spec) (exitCode int, err error) {
 		defer ts.Finish()
 
 		// --- the single step ---
-		stepErr := runStep(rep, st, spec)
+		stepErr := runStep(ctx, rep, st, spec)
 		if stepErr != nil {
 			stepFailed = true
 			stepCode = exitCodeFromErr(stepErr)
@@ -202,8 +206,8 @@ func Run(spec Spec) (exitCode int, err error) {
 		// session keeps accumulating like a normal sc worktree. The default
 		// (inSession=false) lets the merge remove the worktree + branch; the
 		// dangling index entry is then dropped in teardown.
-		if _, mErr := merge.Resolved(executor.ShellExecutor{}, rep, ts,
-			rp.RepoPath, rp.AbsPath, rp.Branch, defaultBranch, !spec.LocalOnly, spec.NoClose,
+		if _, mErr := merge.ResolvedContext(ctx, executor.ShellExecutor{}, rep, ts,
+			rp.RepoPath, rp.AbsPath, rp.Branch, defaultBranch, !spec.LocalOnly, spec.NoClose, nil,
 			merge.PostMergeOptions{
 				Targets: merge.TargetsFromFlags(spec.NoPostMerge, spec.PostMergeTargets),
 				Timeout: spec.PostMergeTimeout,
@@ -241,7 +245,11 @@ func Run(spec Spec) (exitCode int, err error) {
 // runStep runs the single command/script as a crap Phase, teeing its combined
 // output into the phase via a LineWriter. Returns the command's error (an
 // *exec.ExitError carrying the code) or nil on success.
-func runStep(rep *crap.Reporter, st *session.State, spec Spec) error {
+//
+// A cancelled ctx SIGTERMs the step. The terminal still delivers Ctrl-C to the
+// step's foreground group directly; this covers SIGTERM/SIGHUP to sc, which the
+// signal handler would otherwise swallow without reaching the step.
+func runStep(ctx context.Context, rep *crap.Reporter, st *session.State, spec Spec) error {
 	util, label, cleanup, err := stepCommand(st, spec)
 	if err != nil {
 		return err
@@ -263,7 +271,7 @@ func runStep(rep *crap.Reporter, st *session.State, spec Spec) error {
 	cmd := sessionexec.CommandIn(st.WorktreePath, util, sessionexec.IdentityEnv(st))
 	cmd.Stdout = lw
 	cmd.Stderr = lw
-	if err = cmd.Run(); err != nil {
+	if err = runCancellable(ctx, cmd); err != nil {
 		lw.Flush()
 		ph.FailDiag(err, map[string]any{
 			"severity":  "fail",
@@ -275,6 +283,16 @@ func runStep(rep *crap.Reporter, st *session.State, spec Spec) error {
 	}
 	ph.Done()
 	return nil
+}
+
+// runCancellable is cmd.Run with a SIGTERM to the process once ctx is done.
+func runCancellable(ctx context.Context, cmd *exec.Cmd) error {
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	stop := context.AfterFunc(ctx, func() { _ = cmd.Process.Signal(syscall.SIGTERM) })
+	defer stop()
+	return cmd.Wait()
 }
 
 // stepCommand resolves the Spec into the argv to exec and a display label.

@@ -1,11 +1,54 @@
 package run
 
 import (
+	"bytes"
+	"context"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"code.linenisgreat.com/crap/go-crap/v2/crap"
+	"code.linenisgreat.com/spinclass/internal/session"
 )
+
+// sc run's step must die when the run is cancelled (#188), otherwise the
+// signal handler installed by the CLI would make the step unkillable.
+func TestRunStepCancelTerminatesTheStep(t *testing.T) {
+	worktree := t.TempDir()
+	started := filepath.Join(t.TempDir(), "started")
+	spec := Spec{Util: []string{"sh", "-c", "touch " + started + "; exec sleep 600"}}
+	st := &session.State{WorktreePath: worktree}
+	rep := crap.NewReporter(&bytes.Buffer{}, crap.ReporterOptions{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- runStep(ctx, rep, st, spec) }()
+
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("step never started")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("runStep returned nil for a cancelled step")
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("runStep did not return within 15s of cancel")
+	}
+}
 
 func TestParseArgsUtilForm(t *testing.T) {
 	spec, err := ParseArgs([]string{"--description", "bump", "--no-close", "--", "nix", "flake", "update"}, nil)

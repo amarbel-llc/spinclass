@@ -13,6 +13,7 @@ import (
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/check"
 	spinclose "code.linenisgreat.com/spinclass/internal/close"
+	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/executor"
 	"code.linenisgreat.com/spinclass/internal/merge"
 	"code.linenisgreat.com/spinclass/internal/present"
@@ -113,12 +114,15 @@ func registerSessionCommands(app *command.App) {
 				"Output uses the merge/check present stack: --format auto (viewport on a TTY, ndjson when piped) | viewport | plain | ndjson. " +
 				"Caveats (raw passthrough, like `sc exec`): util arguments after `--` that collide with spinclass's global flags are consumed before the `--`; flags must precede the `--`.",
 		},
-		RunCLI: func(_ context.Context, args json.RawMessage) error {
+		RunCLI: func(ctx context.Context, args json.RawMessage) error {
 			var p struct {
 				globalArgs
 				Args []string `json:"args"`
 			}
 			_ = json.Unmarshal(args, &p)
+			ctx, stop := gateSignalContext(ctx, cliGateSignals...)
+			defer stop()
+			ctx = clown.WithLocalScope(ctx, "run")
 			spec, err := run.ParseArgs(p.Args, os.Stdin)
 			if err != nil {
 				return err
@@ -129,11 +133,12 @@ func registerSessionCommands(app *command.App) {
 			if p.Format != "" {
 				spec.Format = p.Format
 			}
-			code, err := run.Run(spec)
+			code, err := run.Run(ctx, spec)
 			if err != nil {
 				return err
 			}
 			if code != 0 {
+				stop() // deferred calls do not run on os.Exit
 				os.Exit(code)
 			}
 			return nil
@@ -167,7 +172,7 @@ func registerSessionCommands(app *command.App) {
 			{Name: "no-post-merge", Type: command.Bool, Description: "Deploy no [[post-merge]] targets — a docs-only merge that skips every deploy (FDR 0026). Wins over --post-merge-targets."},
 			{Name: "post-merge-timeout", Type: command.String, Description: "Override [hooks].post-merge-timeout for this merge only: a Go duration (\"25m\", \"1500s\") capping the whole post-merge phase, or \"0\" to disable the cap. No ceiling. The effective cap reaches every post-merge command/verify as SPINCLASS_POST_MERGE_TIMEOUT, _TIMEOUT_SECONDS and _DEADLINE (see spinclass-sweatfile(5) [[post-merge]])."},
 		},
-		RunCLI: func(_ context.Context, args json.RawMessage) error {
+		RunCLI: func(ctx context.Context, args json.RawMessage) error {
 			var p struct {
 				globalArgs
 				Target           string `json:"target"`
@@ -177,6 +182,9 @@ func registerSessionCommands(app *command.App) {
 				PostMergeTimeout string `json:"post-merge-timeout"`
 			}
 			_ = json.Unmarshal(args, &p)
+			ctx, stop := gateSignalContext(ctx, cliGateSignals...)
+			defer stop()
+			ctx = clown.WithLocalScope(ctx, "merge")
 
 			if err := rejectRemoteTarget(p.Target, remotesForTarget(p.Target)); err != nil {
 				return err
@@ -192,7 +200,7 @@ func registerSessionCommands(app *command.App) {
 			// value ("" means auto — viewport on a TTY, ndjson when piped).
 			// git_sync now defaults ON (push by default, #126); --local-only
 			// is the explicit opt-out.
-			return merge.Run(executor.ShellExecutor{}, p.Format, p.Target, !p.LocalOnly,
+			return merge.RunContext(ctx, executor.ShellExecutor{}, p.Format, p.Target, !p.LocalOnly,
 				merge.PostMergeOptions{Targets: postMergeTargets, Timeout: pmTimeout})
 		},
 	})
@@ -203,11 +211,14 @@ func registerSessionCommands(app *command.App) {
 			Short: "Run the [hooks].pre-merge command without merging",
 			Long:  "Runs the configured [hooks].pre-merge command (the agent-CI hook) in the current worktree. Reports ok / not ok and exits non-zero on failure. Refuses before the hook when a merge driver the eventual merge's rebase would invoke is not on PATH (#324). Available regardless of [hooks].disable-merge. Output formats: auto (default; live viewport on a TTY, ndjson-crap records when piped), viewport, plain (verdict lines), or ndjson. TAP is retired for merge/check.",
 		},
-		RunCLI: func(_ context.Context, args json.RawMessage) error {
+		RunCLI: func(ctx context.Context, args json.RawMessage) error {
 			var p struct {
 				globalArgs
 			}
 			_ = json.Unmarshal(args, &p)
+			ctx, stop := gateSignalContext(ctx, cliGateSignals...)
+			defer stop()
+			ctx = clown.WithLocalScope(ctx, "check")
 
 			cwd, err := os.Getwd()
 			if err != nil {
@@ -218,7 +229,7 @@ func registerSessionCommands(app *command.App) {
 				return rerr
 			}
 			return present.WithReporter(resolved, "check", os.Stdout, os.Stderr, func(rep *crap.Reporter) error {
-				_, err := check.Run(rep, cwd)
+				_, err := check.RunContext(ctx, rep, cwd, nil)
 				return err
 			})
 		},

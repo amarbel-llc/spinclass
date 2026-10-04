@@ -82,6 +82,60 @@ func awaitProcessGone(t *testing.T, pid int) {
 	}
 }
 
+// The CLI entry point (sc merge) must honour its ctx the same way (#188).
+func TestRunContextCancelDuringHook(t *testing.T) {
+	repoDir := setupRepo(t)
+	wtPath := setupWorktree(t, repoDir, "feature-cli-cancel")
+	if err := os.WriteFile(filepath.Join(wtPath, "d.txt"), []byte("d"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "d.txt")
+	runGit(t, wtPath, "commit", "-m", "session commit")
+	probe := installCancelHook(t, repoDir)
+	t.Chdir(wtPath)
+
+	stdout, err := os.CreateTemp(t.TempDir(), "stdout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	realStdout := os.Stdout
+	os.Stdout = stdout
+	t.Cleanup(func() { os.Stdout = realStdout })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	var runErr error
+	go func() {
+		defer close(done)
+		runErr = RunContext(ctx, &mockExecutor{}, "ndjson", "", false, PostMergeOptions{})
+	}()
+
+	childPid := probe.awaitHookStarted(t)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("RunContext did not return within 30s of cancel")
+	}
+	os.Stdout = realStdout
+
+	if runErr == nil {
+		t.Error("RunContext returned nil after the hook was cancelled")
+	}
+	awaitProcessGone(t, childPid)
+	entries, err := os.ReadDir(filepath.Join(repoDir, ".worktrees"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), check.BuildWorktreePrefix) {
+			t.Errorf("build worktree %s left behind after cancel", e.Name())
+		}
+	}
+}
+
 // A cancel that arrives while the pre-merge hook runs must reap the hook, drop
 // the transient worktrees, and land nothing on the default branch (#188).
 func TestResolvedContext_CancelDuringHookLandsNothing(t *testing.T) {

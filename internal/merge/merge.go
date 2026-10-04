@@ -42,6 +42,13 @@ var mergeInteractive = func() bool {
 }
 
 func Run(execr executor.Executor, format string, target string, gitSync bool, pm PostMergeOptions) error {
+	return RunContext(context.Background(), execr, format, target, gitSync, pm)
+}
+
+// RunContext is Run bound to ctx: a cancel reaches the pre-merge hook (and the
+// post-merge phase) so the hook dies before its build worktree is removed
+// (#188). Prompts and PrepareMerge stay un-cancellable.
+func RunContext(ctx context.Context, execr executor.Executor, format string, target string, gitSync bool, pm PostMergeOptions) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -108,7 +115,7 @@ func Run(execr executor.Executor, format string, target string, gitSync bool, pm
 	return present.WithReporter(resolved, "merge "+branch, os.Stdout, os.Stderr, func(rep *crap.Reporter) error {
 		ts := rep.TestStream(0)
 		defer ts.Finish()
-		_, mergeErr := Resolved(execr, rep, ts, repoPath, wtPath, branch, defaultBranch, gitSync, inSession, pm)
+		_, mergeErr := ResolvedContext(ctx, execr, rep, ts, repoPath, wtPath, branch, defaultBranch, gitSync, inSession, nil, pm)
 		return mergeErr
 	})
 }
