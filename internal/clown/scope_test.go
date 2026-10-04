@@ -2,6 +2,7 @@ package clown
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -70,5 +71,54 @@ func TestJobIDContextRoundTrip(t *testing.T) {
 	ctx := WithJobID(context.Background(), "merge-9f3c1a2b")
 	if got := JobIDFromContext(ctx); got != "merge-9f3c1a2b" {
 		t.Errorf("JobIDFromContext: got %q, want %q", got, "merge-9f3c1a2b")
+	}
+}
+
+// ScopeIDFromContext prefers an explicit scope id, falls back to the async job
+// id, and keeps the synthetic id out of the job-id key.
+func TestScopeIDFromContext(t *testing.T) {
+	bg := context.Background()
+	if got := ScopeIDFromContext(bg); got != "" {
+		t.Errorf("bare ctx: got %q, want empty", got)
+	}
+	if got := ScopeIDFromContext(WithJobID(bg, "merge-9f3c1a2b")); got != "merge-9f3c1a2b" {
+		t.Errorf("job id only: got %q, want the job id", got)
+	}
+	if got := ScopeIDFromContext(WithScopeID(bg, "x")); got != "x" {
+		t.Errorf("scope id only: got %q, want %q", got, "x")
+	}
+	both := WithScopeID(WithJobID(bg, "merge-9f3c1a2b"), "x")
+	if got := ScopeIDFromContext(both); got != "x" {
+		t.Errorf("both set: got %q, want the explicit scope id", got)
+	}
+	if got := JobIDFromContext(WithScopeID(bg, "x")); got != "" {
+		t.Errorf("a scope id leaked into the job-id key: %q", got)
+	}
+}
+
+var unitSafeScopeID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
+
+func TestLocalScopeIDIsUniqueAndUnitSafe(t *testing.T) {
+	a, b := LocalScopeID("merge"), LocalScopeID("merge")
+	if a == b {
+		t.Errorf("two LocalScopeID calls returned the same id %q", a)
+	}
+	for _, id := range []string{a, b} {
+		if !unitSafeScopeID.MatchString(id) {
+			t.Errorf("%q is outside ringmaster's job-id grammar", id)
+		}
+		if !strings.HasPrefix(id, "sync-merge-") {
+			t.Errorf("%q lacks the sync-merge- prefix", id)
+		}
+	}
+}
+
+func TestWithLocalScopeKeepsAnExistingScope(t *testing.T) {
+	existing := WithJobID(context.Background(), "merge-9f3c1a2b")
+	if got := ScopeIDFromContext(WithLocalScope(existing, "check")); got != "merge-9f3c1a2b" {
+		t.Errorf("WithLocalScope replaced an async job's scope id with %q", got)
+	}
+	if got := ScopeIDFromContext(WithLocalScope(context.Background(), "check")); !strings.HasPrefix(got, "sync-check-") {
+		t.Errorf("WithLocalScope on a bare ctx: got %q, want a sync-check- id", got)
 	}
 }

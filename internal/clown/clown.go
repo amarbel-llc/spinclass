@@ -433,3 +433,39 @@ func JobIDFromContext(ctx context.Context) string {
 	id, _ := ctx.Value(jobIDKey{}).(string)
 	return id
 }
+
+// scopeIDKey carries the id of the transient systemd scope the pre-merge hook
+// runs under when the caller is NOT an async ringmaster job (spinclass#188).
+// Kept apart from jobIDKey so a synthetic id is never mistaken for a job id.
+type scopeIDKey struct{}
+
+func WithScopeID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, scopeIDKey{}, id)
+}
+
+// ScopeIDFromContext is the id the pre-merge hook's scope is named after: an
+// explicit WithScopeID, else the async job id, else "".
+func ScopeIDFromContext(ctx context.Context) string {
+	if id, _ := ctx.Value(scopeIDKey{}).(string); id != "" {
+		return id
+	}
+	return JobIDFromContext(ctx)
+}
+
+var localScopeSeq atomic.Uint64
+
+// LocalScopeID mints a scope id for a synchronous gate. Unique per call
+// (systemd refuses a duplicate unit name) and within ringmaster's job-id
+// grammar, which ScopeUnitName assumes.
+func LocalScopeID(kind string) string {
+	return fmt.Sprintf("sync-%s-%d-%d-%d", kind, os.Getpid(), time.Now().UnixNano(), localScopeSeq.Add(1))
+}
+
+// WithLocalScope gives a synchronous merge/check its own hook scope, unless
+// ctx already names one.
+func WithLocalScope(ctx context.Context, kind string) context.Context {
+	if ScopeIDFromContext(ctx) != "" {
+		return ctx
+	}
+	return WithScopeID(ctx, LocalScopeID(kind))
+}

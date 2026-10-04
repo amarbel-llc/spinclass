@@ -155,7 +155,7 @@ func TestPreMergeExecutes(t *testing.T) {
 // tier disabled, the hook must run BARE — the systemd-run wrap is a no-op when
 // ScopeArgv reports unavailable, so a host without a systemd user bus (or with
 // RINGMASTER_DISABLE_SCOPE) still runs the hook normally. Guards against a
-// scopeJobID-set path accidentally prepending a prefix that isn't runnable. The
+// scopeID-set path accidentally prepending a prefix that isn't runnable. The
 // wrap-active path needs a live user bus and is dogfooded, not covered here.
 func TestPreMergeScopeDisabledRunsBare(t *testing.T) {
 	t.Setenv("RINGMASTER_DISABLE_SCOPE", "1")
@@ -199,6 +199,33 @@ func TestPreMergeScopeActiveWrapsInCgroup(t *testing.T) {
 		t.Fatalf("reading cgroup marker: %v", err)
 	}
 	want := clown.ScopeUnitName(jobID)
+	if !strings.Contains(string(content), want) {
+		t.Errorf("hook cgroup %q does not contain the scope unit %q",
+			strings.TrimSpace(string(content)), want)
+	}
+}
+
+// A synchronous gate has no async job id; its local scope id (WithLocalScope)
+// must scope the hook just as the job id does (#188).
+func TestPreMergeScopeIDFromContextWrapsInCgroup(t *testing.T) {
+	ctx := clown.WithLocalScope(context.Background(), "check")
+	scopeID := clown.ScopeIDFromContext(ctx)
+	if _, ok := clown.ScopeArgv(scopeID); !ok {
+		t.Skip("scope tier unavailable (no systemd user bus); active-path test skipped")
+	}
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "cgroup")
+
+	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreMerge: sptr("cat /proc/self/cgroup > " + marker)}}
+
+	if err := PreMergeContext(ctx, sf, dir, io.Discard); err != nil {
+		t.Fatalf("scoped pre-merge hook: %v", err)
+	}
+	content, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("reading cgroup marker: %v", err)
+	}
+	want := clown.ScopeUnitName(scopeID)
 	if !strings.Contains(string(content), want) {
 		t.Errorf("hook cgroup %q does not contain the scope unit %q",
 			strings.TrimSpace(string(content)), want)
