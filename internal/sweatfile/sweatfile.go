@@ -97,6 +97,7 @@ type Hooks struct {
 	AutoRebuildOnResume        *bool   `toml:"auto-rebuild-on-resume"`
 	AllowStaleBase             *bool   `toml:"allow-stale-base"`
 	AllowNoCredential          *bool   `toml:"allow-no-credential"`
+	RequireHookScope           *bool   `toml:"require-hook-scope"`
 }
 
 // Auth declares how a worktree session mints and revokes its per-session forge
@@ -785,6 +786,17 @@ func (sf Sweatfile) AllowNoCredential() bool {
 	return sf.Hooks != nil &&
 		sf.Hooks.AllowNoCredential != nil &&
 		*sf.Hooks.AllowNoCredential
+}
+
+// RequireHookScope reports whether [hooks].require-hook-scope is true: a
+// pre-merge hook whose systemd scope cannot be set up then fails the gate
+// instead of running unscoped with a warning (the default, spinclass#188).
+// Transitional opt-in: expected to become the default, after which the
+// unscoped fallback is removed.
+func (sf Sweatfile) RequireHookScope() bool {
+	return sf.Hooks != nil &&
+		sf.Hooks.RequireHookScope != nil &&
+		*sf.Hooks.RequireHookScope
 }
 
 // AuthForgeHosts returns the [auth].forge-hosts allow-list (nil/empty = any

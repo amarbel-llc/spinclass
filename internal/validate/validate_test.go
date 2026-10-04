@@ -143,6 +143,13 @@ stop = "just build test"
 	}
 }
 
+func TestCheckUnknownFieldsAcceptsRequireHookScope(t *testing.T) {
+	issues := CheckUnknownFields([]byte("[hooks]\nrequire-hook-scope = true\n"))
+	if len(issues) != 0 {
+		t.Errorf("expected no issues for [hooks].require-hook-scope, got %v", issues)
+	}
+}
+
 // TestCheckUnknownFieldsDirenvDotenv is the regression guard for #96 part 1:
 // `sc validate` must NOT reject the documented [direnv.dotenv] field (the
 // shipped 0.1.15 binary did, silently dropping it at parse). Both TOML

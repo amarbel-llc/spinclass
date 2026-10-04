@@ -684,6 +684,15 @@ does not export *WORKTREE*.
 	*allow-stale-base*, deliberately no MCP tool parameter: *sc spawn*
 	honours only this knob. *Merge:* scalar override.
 
+*require-hook-scope*
+	Boolean. When true, a pre-merge hook whose systemd scope cannot be set
+	up fails the gate instead of running unscoped with a warning (the
+	default). Transitional: the unscoped fallback is deprecated, and this
+	opt-in is expected to become the default, after which the fallback is
+	removed. A host with no scope tier at all (no systemd user bus, macOS,
+	*RINGMASTER\_DISABLE\_SCOPE*) is not a setup failure: the hook runs
+	unscoped there regardless. *Merge:* scalar override.
+
 ## [auth]
 
 Per-session forge push credential (FDR 0028). When set, every worktree

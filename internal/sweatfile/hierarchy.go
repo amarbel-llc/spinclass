@@ -155,6 +155,9 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if other.Hooks.AllowNoCredential != nil {
 			merged.Hooks.AllowNoCredential = other.Hooks.AllowNoCredential
 		}
+		if other.Hooks.RequireHookScope != nil {
+			merged.Hooks.RequireHookScope = other.Hooks.RequireHookScope
+		}
 	}
 
 	// [auth] — scalar override, like [hooks] (FDR 0028). Copied before the

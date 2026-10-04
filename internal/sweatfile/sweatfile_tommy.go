@@ -323,6 +323,12 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 				_vHooksAllowNoCredential.MarkConsumed()
 			}
 		}
+		if _vHooksRequireHookScope, _ok := _vHooks.Get("require-hook-scope"); _ok && _vHooksRequireHookScope.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksRequireHookScope.Leaf); _xok {
+				hooksVal3.RequireHookScope = &_x
+				_vHooksRequireHookScope.MarkConsumed()
+			}
+		}
 		d.data.Hooks = hooksVal3
 	} else {
 		hooksVal3 := &Hooks{}
@@ -500,6 +506,13 @@ func DecodeSweatfile(input []byte) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractBool(_vAllowNoCredential.Leaf); _xok {
 				hooksVal3.AllowNoCredential = &_x
 				_vAllowNoCredential.MarkConsumed()
+			}
+		}
+		if _vRequireHookScope, _ok := model.Get("require-hook-scope"); _ok && _vRequireHookScope.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vRequireHookScope.Leaf); _xok {
+				hooksVal3.RequireHookScope = &_x
+				_vRequireHookScope.MarkConsumed()
 			}
 		}
 		if _foundHooks {
@@ -1250,6 +1263,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
+		if d.data.Hooks.RequireHookScope != nil {
+			if err := cst.SetAny(tableNode, "require-hook-scope", *d.data.Hooks.RequireHookScope); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
 	}
 	if d.data.Auth != nil {
 		tableNode := cst.EnsureChildTable(d.cstDoc.Root(), d.cstDoc.Root(), "auth")
@@ -1858,6 +1876,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vHooksAllowNoCredential.MarkConsumed()
 			}
 		}
+		if _vHooksRequireHookScope, _ok := _vHooks.Get("require-hook-scope"); _ok && _vHooksRequireHookScope.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksRequireHookScope.Leaf); _xok {
+				hooksVal3.RequireHookScope = &_x
+				_vHooksRequireHookScope.MarkConsumed()
+			}
+		}
 		data.Hooks = hooksVal3
 	} else {
 		hooksVal3 := &Hooks{}
@@ -2035,6 +2059,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractBool(_vAllowNoCredential.Leaf); _xok {
 				hooksVal3.AllowNoCredential = &_x
 				_vAllowNoCredential.MarkConsumed()
+			}
+		}
+		if _vRequireHookScope, _ok := sub.Get("require-hook-scope"); _ok && _vRequireHookScope.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vRequireHookScope.Leaf); _xok {
+				hooksVal3.RequireHookScope = &_x
+				_vRequireHookScope.MarkConsumed()
 			}
 		}
 		if _foundHooks {
@@ -2766,6 +2797,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if data.Hooks.AllowNoCredential != nil {
 			if err := cst.SetAny(tableNode, "allow-no-credential", *data.Hooks.AllowNoCredential); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.Hooks.RequireHookScope != nil {
+			if err := cst.SetAny(tableNode, "require-hook-scope", *data.Hooks.RequireHookScope); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}
