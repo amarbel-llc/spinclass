@@ -424,13 +424,12 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 	}
 
 	var (
-		c      *exec.Cmd
 		err    error
 		scoped bool
 	)
 	if scopeID != "" {
 		if prefix, ok := scopeArgv(scopeID); ok {
-			c, scoped, err = runHookInScope(ctx, newHookCmd, prefix, argv, requireScope, w)
+			_, scoped, err = runHookInScope(ctx, newHookCmd, prefix, argv, requireScope, w)
 			if !scoped && err != nil {
 				return err
 			}
@@ -442,7 +441,7 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 	if !scoped {
 		var cancelledAt atomic.Int64 // unix nanos; 0 = not cancelled
 		stopWatch := context.AfterFunc(ctx, func() { cancelledAt.Store(time.Now().UnixNano()) })
-		c = newHookCmd(argv, w)
+		c := newHookCmd(argv, w)
 		err = c.Run()
 		stopWatch()
 		var sinceCancel time.Duration
