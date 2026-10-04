@@ -127,6 +127,48 @@ func TestPreMergeCancelWarnsWhenUnscopedEscalationFires(t *testing.T) {
 	if !strings.Contains(buf.String(), unscopedWarning) {
 		t.Errorf("no escalation warning in hook output: %q", buf.String())
 	}
+	if !strings.Contains(buf.String(), "ignored SIGTERM") {
+		t.Errorf("warning does not say the hook ignored SIGTERM: %q", buf.String())
+	}
+}
+
+// The top process exits on SIGTERM but a descendant (e.g. a sanctioned FDR 0023
+// detached child) still holds the output pipe past the grace period. The hook
+// did NOT ignore SIGTERM, and the warning must not claim it did.
+func TestPreMergeCancelWarnsAccuratelyWhenOnlyAPipeHolderOutlivesTheHook(t *testing.T) {
+	t.Setenv("RINGMASTER_DISABLE_SCOPE", "1")
+	dir := t.TempDir()
+	childPID := filepath.Join(dir, "child.pid")
+	started := filepath.Join(dir, "started")
+
+	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreMerge: sptr(fmt.Sprintf(
+		"trap 'exit 0' TERM\nsleep 600 &\necho $! > %s\ntouch %s\nwait\n", childPID, started,
+	))}}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	var buf bytes.Buffer
+	done := make(chan error, 1)
+	go func() { done <- PreMergeContext(ctx, sf, dir, &buf) }()
+
+	waitFor(t, started, 30*time.Second, "hook never started")
+	t.Cleanup(func() { _ = syscall.Kill(readPID(t, childPID), syscall.SIGKILL) })
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(60 * time.Second):
+		t.Fatal("a lingering pipe holder wedged the cancel; WaitDelay did not fire")
+	}
+	out := buf.String()
+	if !strings.Contains(out, unscopedWarning) {
+		t.Errorf("no warning that descendants may still be running: %q", out)
+	}
+	if strings.Contains(out, "ignored SIGTERM") {
+		t.Errorf("warning claims the hook ignored SIGTERM, but it exited on it: %q", out)
+	}
+	if !strings.Contains(out, "output pipe") {
+		t.Errorf("warning does not name the held output pipe: %q", out)
+	}
 }
 
 // A hook that swallows SIGTERM must still not wedge the cancel forever: the

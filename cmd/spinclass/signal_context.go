@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 )
 
@@ -20,7 +21,16 @@ var (
 // orphaned (spinclass#188). The registration is dropped as soon as the ctx is
 // done, restoring the default disposition: a SECOND signal kills the process
 // outright rather than waiting on the teardown.
+//
+// A signal that was ignored at process start (`nohup sc merge`, a background
+// job) is left ignored and not registered: os/signal's Notify would un-ignore
+// it, turning the user's explicit opt-out into a cancellation.
 func gateSignalContext(parent context.Context, sigs ...os.Signal) (context.Context, context.CancelFunc) {
+	sigs = slices.DeleteFunc(slices.Clone(sigs), signal.Ignored)
+	if len(sigs) == 0 {
+		// NotifyContext with no signals means EVERY signal.
+		return context.WithCancel(parent)
+	}
 	ctx, stop := signal.NotifyContext(parent, sigs...)
 	context.AfterFunc(ctx, stop)
 	return ctx, stop
@@ -31,8 +41,12 @@ func gateSignalContext(parent context.Context, sigs ...os.Signal) (context.Conte
 // action: no cleanup, orphaned hook) nor cancel it (merges outlive the client
 // session; the stdin EOF that follows drains in-flight calls). signal.Notify to
 // a drained channel, NOT signal.Ignore: an ignored disposition is inherited
-// across exec and would make every hook ignore SIGHUP.
+// across exec and would make every hook ignore SIGHUP. An already-ignored
+// SIGHUP (nohup) is left alone: Notify would un-ignore it.
 func discardSIGHUP() (stop func()) {
+	if signal.Ignored(syscall.SIGHUP) {
+		return func() {}
+	}
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGHUP)
 	drained := make(chan struct{})

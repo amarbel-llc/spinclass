@@ -120,12 +120,16 @@ func registerSessionCommands(app *command.App) {
 				Args []string `json:"args"`
 			}
 			_ = json.Unmarshal(args, &p)
-			ctx, stop := gateSignalContext(ctx, cliGateSignals...)
-			defer stop()
 			ctx = clown.WithLocalScope(ctx, "run")
 			spec, err := run.ParseArgs(p.Args, os.Stdin)
 			if err != nil {
 				return err
+			}
+			// Installed by run.Run once the session exists: ParseArgs' stdin
+			// read and the session creation ignore ctx, so a handler before
+			// them would swallow the first Ctrl-C.
+			spec.GateSignals = func(ctx context.Context) (context.Context, context.CancelFunc) {
+				return gateSignalContext(ctx, cliGateSignals...)
 			}
 			// A global --format placed BEFORE the subcommand is parsed by the
 			// framework into p.Format; one placed after `run` is captured by
@@ -138,8 +142,7 @@ func registerSessionCommands(app *command.App) {
 				return err
 			}
 			if code != 0 {
-				stop() // deferred calls do not run on os.Exit
-				os.Exit(code)
+				os.Exit(code) // run.Run has already released its signal gate
 			}
 			return nil
 		},

@@ -63,6 +63,12 @@ type Spec struct {
 	Format            string   // global --format value (auto/viewport/plain/ndjson)
 	Util              []string // `-- <util> [args...]` form
 	Script            []byte   // stdin-script form (shebang-aware)
+	// GateSignals, when set, wraps ctx in the caller's cancel-on-signal handling.
+	// Run installs it only AFTER the session is created: everything before that
+	// (default-branch resolution, shop.Attach) ignores ctx, so a handler there
+	// would swallow the first Ctrl-C instead of letting its default action stop
+	// the run. The returned stop is called when Run returns.
+	GateSignals func(context.Context) (context.Context, context.CancelFunc)
 	// DynamicPostMergeHooks are shell commands passed via --post-merge; each
 	// runs after the merge lands, non-fatally, in the default-branch checkout.
 	DynamicPostMergeHooks []string
@@ -160,6 +166,13 @@ func Run(ctx context.Context, spec Spec) (exitCode int, err error) {
 	st, rerr := session.Read(rp.RepoPath, rp.Branch)
 	if rerr != nil {
 		return 1, fmt.Errorf("read session state after create: %w", rerr)
+	}
+
+	// From here on every phase honours ctx (the step, the pre-merge hook).
+	if spec.GateSignals != nil {
+		var stopGate context.CancelFunc
+		ctx, stopGate = spec.GateSignals(ctx)
+		defer stopGate()
 	}
 
 	// step / merge verdicts share one continuous reporter scope. The numeric

@@ -24,6 +24,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -439,13 +440,20 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 	// warned about): the bare hook. scoped is false, so the escalation warning
 	// below applies to it.
 	if !scoped {
+		var cancelledAt atomic.Int64 // unix nanos; 0 = not cancelled
+		stopWatch := context.AfterFunc(ctx, func() { cancelledAt.Store(time.Now().UnixNano()) })
 		c = newHookCmd(argv, w)
 		err = c.Run()
-	}
-	if !scoped && ctx.Err() != nil && escalated(c, err) {
-		_, _ = fmt.Fprintf(w, "[spinclass] hook ignored SIGTERM for %s and was killed; "+
-			"with no systemd scope its child processes may still be running (spinclass#188)\n",
-			c.WaitDelay)
+		stopWatch()
+		var sinceCancel time.Duration
+		if at := cancelledAt.Load(); at != 0 {
+			sinceCancel = time.Since(time.Unix(0, at))
+		}
+		if ctx.Err() != nil {
+			if notice := escalationNotice(c, err, sinceCancel); notice != "" {
+				_, _ = io.WriteString(w, notice)
+			}
+		}
 	}
 	if scoped && ctx.Err() != nil {
 		// The hook's ctx was cancelled (inactivity watchdog, #22 observer, or
@@ -529,7 +537,10 @@ func runHookInScope(
 // unstarted. For the same reason the wrapper refuses to run the hook when the
 // file is already gone (it would otherwise mark a new inode nobody reads). The
 // file lives in the system temp dir, outside the build worktree, one per run.
-type scopeStartMarker struct{ file *os.File }
+type scopeStartMarker struct {
+	file *os.File
+	path string // absolute: the wrapper sh runs in the hook's dir, not ours
+}
 
 const scopeStartScript = `mark=$1; shift; [ -f "$mark" ] && echo started >>"$mark" && exec "$@"`
 
@@ -538,11 +549,18 @@ func newScopeStartMarker() (*scopeStartMarker, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating the scope start marker: %w", err)
 	}
-	return &scopeStartMarker{file: file}, nil
+	// os.CreateTemp honours a relative $TMPDIR; resolve it against OUR cwd now.
+	path, err := filepath.Abs(file.Name())
+	if err != nil {
+		_ = file.Close()
+		_ = os.Remove(file.Name())
+		return nil, fmt.Errorf("resolving the scope start marker path: %w", err)
+	}
+	return &scopeStartMarker{file: file, path: path}, nil
 }
 
 func (m *scopeStartMarker) wrap(argv []string) []string {
-	return append([]string{"sh", "-c", scopeStartScript, "sh", m.file.Name()}, argv...)
+	return append([]string{"sh", "-c", scopeStartScript, "sh", m.path}, argv...)
 }
 
 // hookStarted errs toward true: an unreadable marker must not license a re-run.
@@ -553,7 +571,7 @@ func (m *scopeStartMarker) hookStarted() bool {
 
 func (m *scopeStartMarker) discard() {
 	_ = m.file.Close()
-	_ = os.Remove(m.file.Name())
+	_ = os.Remove(m.path)
 }
 
 // firstLineCapture passes writes through to w and keeps the first line, so a
@@ -580,20 +598,31 @@ func (f *firstLineCapture) Write(p []byte) (int, error) {
 
 func (f *firstLineCapture) firstLine() string { return strings.TrimSpace(string(f.head)) }
 
-// escalated reports whether a cancelled command needed the WaitDelay escalation:
-// either the top process exited by itself but a descendant still held the pipe
-// when WaitDelay expired (exec.ErrWaitDelay), or the top process was SIGKILLed
-// (Wait then returns the ExitError, not ErrWaitDelay). Either way a descendant
-// may have survived.
-func escalated(c *exec.Cmd, err error) bool {
-	if errors.Is(err, exec.ErrWaitDelay) {
-		return true
+// escalationNotice describes how a cancelled, unscoped command needed the
+// WaitDelay escalation, or returns "" when it did not. Either way a descendant
+// may have survived. The two cases differ in blame, so they read differently:
+//
+//   - the top process was SIGKILLed: it ignored SIGTERM for the whole grace;
+//   - the top process exited on SIGTERM but a descendant (possibly a sanctioned
+//     FDR 0023 detached child) still held the output pipe when the grace ran out.
+//
+// The second is not visible in Wait's error: after a cancel exec reports the
+// ctx error in preference to ErrWaitDelay, so it is recognised by Run having
+// taken at least WaitDelay since the cancel (the delay timer starts at the
+// cancel, so only the escalation can make a cancelled Run that slow).
+func escalationNotice(c *exec.Cmd, err error, sinceCancel time.Duration) string {
+	if c.ProcessState != nil {
+		if ws, ok := c.ProcessState.Sys().(syscall.WaitStatus); ok && ws.Signaled() && ws.Signal() == syscall.SIGKILL {
+			return fmt.Sprintf("[spinclass] hook ignored SIGTERM for %s and its top process was killed; "+
+				"with no systemd scope its child processes may still be running (spinclass#188)\n", c.WaitDelay)
+		}
 	}
-	if c.ProcessState == nil {
-		return false
+	if errors.Is(err, exec.ErrWaitDelay) || (c.WaitDelay > 0 && sinceCancel >= c.WaitDelay) {
+		return fmt.Sprintf("[spinclass] hook exited after the cancel, but a descendant still held its output pipe "+
+			"%s past the grace period; with no systemd scope that process may still be running (spinclass#188)\n",
+			c.WaitDelay)
 	}
-	ws, ok := c.ProcessState.Sys().(syscall.WaitStatus)
-	return ok && ws.Signaled() && ws.Signal() == syscall.SIGKILL
+	return ""
 }
 
 // CommandCapture runs a sweatfile-declared command (`sh -c`) in dir,

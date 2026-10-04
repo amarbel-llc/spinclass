@@ -135,6 +135,33 @@ func TestScopeSetupFailureFailsGateWhenRequireHookScope(t *testing.T) {
 	}
 }
 
+// os.CreateTemp honours a RELATIVE $TMPDIR, but the wrapper sh runs in the
+// hook's run dir, so the marker path must be absolute or `[ -f "$mark" ]`
+// fails and every scoped run silently falls back.
+func TestScopedHookWorksWithRelativeTMPDIR(t *testing.T) {
+	ctx := fakeScope(t, workingScopePrefix)
+	base := t.TempDir()
+	if err := os.Mkdir(filepath.Join(base, "rel-tmp"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(base)
+	t.Setenv("TMPDIR", "rel-tmp")
+	dir := t.TempDir()
+	runLog := filepath.Join(dir, "runs")
+
+	var buf bytes.Buffer
+	err := PreMergeContext(ctx, preMergeSweatfile("echo ran >> "+runLog, false), dir, &buf)
+	if err != nil {
+		t.Fatalf("scoped hook failed: %v\n%s", err, buf.String())
+	}
+	if got := hookRuns(t, runLog); got != 1 {
+		t.Errorf("hook ran %d times, want exactly 1", got)
+	}
+	if strings.Contains(buf.String(), fallbackWarning) {
+		t.Errorf("a relative TMPDIR forced the unscoped fallback: %q", buf.String())
+	}
+}
+
 // The invariant the fallback must never break: a hook that started is not run
 // a second time, whatever it exited with.
 func TestScopedHookFailureIsNotRetried(t *testing.T) {
