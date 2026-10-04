@@ -437,23 +437,26 @@ subcommand is always available.
   merge/check/`sc check` + async twins (all funnel through
   `hookrun.PreMergeInDir`). Distinct error message vs `session-job-cancel`.
 - **Hook cancellation** (#188, `hookrun.runHookInDirEnv`): `cmd.Cancel` is
-  **SIGTERM** not SIGKILL, so a cancelled hook can tear down its own children
-  (exec collapses the argv, so SIGKILL orphaned the `nix` below `just` still
-  holding the inherited pipe — `Wait` blocks until every pipe holder closes it).
-  `cancelGrace` (10s) escalates to SIGKILL. Deliberately **no `Setpgid`**: a group
-  kill would reap the detached children FDR 0023 sanctions.
-- **Pre-merge hook systemd scope** (#25, ringmaster#12/RFC-0016, `internal/clown`
-  + `hookrun.runHookInDirEnv`): to backstop the no-`Setpgid` residual (a hook
-  swallowing SIGTERM orphans descendants), the pre-merge hook runs in a transient
-  systemd scope — `clown.ScopeArgv(jobID)` prepends `systemd-run --user --scope`
-  (outermost), and cancel calls `clown.ScopeStop` to force-kill the whole cgroup
-  (ringmaster#16 sets `TimeoutStopSec=3s` + a SIGKILL `systemctl kill`, so a
-  SIGTERM-ignoring subtree dies within the ~10s ctx; `TestPreMergeScope
-  ReapsSubtreeOnCancel` guards it). Scopes **only** the pre-merge hook (job id via
-  the `clown.WithJobID` ctx value; post-merge passes `""` so its FDR-0023 detached
-  children survive). Availability-gated by `jobwake.ScopeArgv`; unavailable ⇒ bare
-  hook, the #26 flock stays the liveness floor. Active path needs a systemd user
-  bus (absent in the checkPhase sandbox + macOS) so it is dogfooded, not CI.
+  **SIGTERM** not SIGKILL (SIGKILL orphaned the `nix` below `just`, holding the
+  pipe `Wait` blocks on); `cancelGrace` (10s) escalates. **No `Setpgid`** (FDR
+  0023's detached children); unscoped + SIGKILL-escalated ⇒ a warn that
+  descendants may still run. Sync merge/check and `sc merge|check|run` pass a
+  ctx cancelled on SIGINT/SIGTERM (+SIGHUP for `sc`; `gateSignalContext`, 2nd
+  signal force-exits; a signal ignored at start, e.g. `nohup`, stays ignored),
+  so the hook dies before its build worktree goes; `serve`
+  cancels on INT/TERM, discards SIGHUP. Merges are session-durable: stdin EOF
+  drains, never cancels. A cancel after landing SIGTERMs the post-merge hook.
+  A client *rejecting* one call cancels nothing until purse-first#200.
+- **Pre-merge hook systemd scope** (#25, ringmaster#12/RFC-0016): the pre-merge
+  hook runs under `systemd-run --user --scope` (`clown.ScopeArgv`); cancel calls
+  `clown.ScopeStop` to SIGKILL the cgroup (`TestPreMergeScopeReapsSubtreeOnCancel`).
+  Scope id = `clown.ScopeIDFromContext`: the async job id, or a `sync-…` local id
+  (`WithLocalScope`, own ctx key, never sent to ringmaster). Post-merge passes
+  `""`. No scope tier (no user bus: sandbox, macOS) ⇒ bare hook. A scope that
+  fails to SET UP falls back once to the bare hook with a warn (a start marker
+  written inside the scope proves a started hook is never re-run);
+  `[hooks].require-hook-scope` makes that fatal (opt-in now, default later,
+  fallback eventually removed). Real scope path is dogfooded, not CI.
 - **Base-branch freshening at creation** (#250, `internal/basebranch`): a fresh
   session's branch is cut from the repo's **fetched remote default branch**
   (the landing target, #315), passed to `git worktree add -b` as an explicit

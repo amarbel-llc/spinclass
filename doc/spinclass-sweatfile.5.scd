@@ -243,8 +243,23 @@ does not export *WORKTREE*.
 	*mcp\_\_plugin\_spinclass\_spinclass\_\_merge-this-session* and
 	*mcp\_\_plugin\_spinclass\_spinclass\_\_check-this-session* tools
 	(whichever is registered — see *disable-merge* below) so Claude Code
-	does not prompt: the pre-merge hook acts as the gate instead. *Merge:*
-	scalar override.
+	does not prompt: the pre-merge hook acts as the gate instead.
+
+	A cancel stops the hook's process tree (SIGTERM, then SIGKILL after
+	10s) before the build worktree is removed. Cancel comes from
+	*session-job-cancel*, from SIGINT/SIGTERM sent to *sc merge*, *sc
+	check* or *sc run* (SIGHUP too; a second signal force-exits), or from
+	SIGINT/SIGTERM sent to the MCP server. Merges are session-durable:
+	closing the client session (stdin EOF) does not cancel an in-flight
+	synchronous merge, and the server discards SIGHUP. A client rejecting
+	one synchronous tool call does not cancel it either (pending
+	*purse-first#200*). A cancel that arrives after the merge has landed
+	also sends SIGTERM to the *post-merge* hook. Where a systemd user bus
+	is available the hook runs in a transient systemd scope so a cancel
+	reaps every descendant; if that scope cannot be set up the hook falls
+	back, with a warning, to running unscoped (see *require-hook-scope*),
+	and a hook that is SIGKILLed unscoped warns that its children may
+	still be running. *Merge:* scalar override.
 
 *post-merge*
 	Shell script run by *sc merge* *after* the merge has landed on the
@@ -304,7 +319,8 @@ does not export *WORKTREE*.
 	*setsid* additionally puts the child in its own session, so it survives
 	a process-group signal; plain *&* is enough today but is not
 	future-proof against *spinclass#188* (reaping the hook's process tree
-	on interrupt). Note that a detached deploy gives up the ordering
+	on interrupt; the post-merge hook is never run in a systemd scope, and
+	is itself sent SIGTERM if the merge is cancelled while it runs). Note that a detached deploy gives up the ordering
 	guarantee above — two deploys can then overlap — so detach only work
 	that is itself safe to run concurrently, or that serializes on its own
 	lock at the far end.

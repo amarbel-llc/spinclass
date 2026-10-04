@@ -19,6 +19,8 @@ promotion-criteria: |
 
 # Isolated build worktree for pre-merge hooks
 
+> **Amended 2026-10-04 (#188):** cancellation.
+
 ## Problem Statement
 
 The `[hooks].pre-merge` command (the merge gate / agent-CI lane) historically
@@ -123,6 +125,75 @@ disable-merge-build-worktree = true
   failures; a hard `serve` crash mid-hook leaves a `.merge-*` directory, reaped
   by `git worktree prune` (run before each add) and by `sc clean`. A dedicated
   startup sweep is a possible follow-up.
+- **Cancellation reaches the hook only from some sources (#188).** The build
+  worktree is removed only after the hook returns. A cancel reaches the hook
+  from an async job (`session-job-cancel`, the inactivity watchdog), a signal
+  to `serve`, or a signalled `sc merge|check|run`. A hard kill of spinclass
+  (SIGKILL, or a second Ctrl-C) still orphans the hook and leaves `.merge-*`
+  for `sc clean`; whether that removal is safe with live processes inside is
+  spinclass#350. **Rejecting or interrupting one sync MCP call does not cancel
+  it**: go-mcp treats `notifications/cancelled` as a no-op and runs every
+  handler under one server-wide ctx, so this waits on purse-first#200
+  (per-request cancel). #188 is therefore only partially addressed.
+- **Scope setup failure is a warn-and-fallback (transitional).** See
+  "Cancellation and scoping" below.
+
+## Cancellation and scoping (2026-10-04, #188)
+
+Every synchronous gate (`merge-this-session`, `check-this-session`, `sc merge`,
+`sc check`, `sc run`) now passes a real ctx to the pre-merge hook, so a cancel
+kills the hook's process tree before `defer cleanup()` removes the build
+worktree. `cmd.Cancel` is SIGTERM, escalating to SIGKILL after `cancelGrace`
+(10s); there is still no `Setpgid` (FDR 0023).
+
+**Scoping.** The pre-merge hook runs in a transient systemd scope
+(`systemd-run --user --scope`; #25). Its id comes from
+`clown.ScopeIDFromContext`: the async job id, or, for a synchronous gate, a
+local `sync-<kind>-<pid>-<nanos>-<seq>` id attached by `clown.WithLocalScope`.
+That is a ctx key separate from `WithJobID`, so a synthetic id is never taken
+for a ringmaster job and is never passed to ringmaster. A cancel calls
+`clown.ScopeStop` to SIGKILL the whole cgroup. The post-merge hook is never
+scoped (FDR 0023). A host with no scope tier at all (no systemd user bus,
+macOS, `RINGMASTER_DISABLE_SCOPE`) simply runs the hook bare. The real scope
+path is dogfooded, not covered by CI (no user bus in the sandbox).
+
+**Cancellation sources.**
+
+- `sc merge|check|run`: SIGINT, SIGTERM or SIGHUP cancels (`gateSignalContext`).
+  The first signal starts the teardown; a second force-exits. A signal that
+  was already ignored when `sc` started (`nohup`, a non-job-control `&`) stays
+  ignored and never cancels. `sc run` installs the gate only once the session
+  exists, so Ctrl-C during its stdin read and attach keeps the default
+  behaviour.
+- `serve`: SIGINT or SIGTERM cancels in-flight tool calls. SIGHUP is
+  discarded (a drained `signal.Notify` channel, not `signal.Ignore`, which
+  children would inherit across exec).
+- Stdin EOF does **not** cancel. Merges are session-durable: closing the
+  client session leaves an in-flight sync merge running, because go-mcp
+  drains in-flight handlers before closing the transport (purse-first
+  `server/server.go:63-68,100-105`). Only a signal to `serve`, or later
+  purse-first#200, aborts one, and then the hook tree is torn down rather than
+  orphaned. `serve` discards SIGHUP for the same reason: a dropped terminal
+  must neither kill it mid-merge nor cancel it; the EOF that follows drains.
+
+**Cancel after landing.** The ctx also reaches the post-merge phase, so a
+SIGTERM to `serve` or `sc` during a deploy SIGTERMs the post-merge command on
+the sync and CLI paths, exactly as async `session-job-cancel` does. Detached
+children survive (FDR 0023). Accepted.
+
+**Scope setup failure.** If the scope cannot be set up, the hook falls back
+ONCE to the bare hook, writing `[spinclass] hook scope unavailable (...);
+running unscoped`. `[hooks].require-hook-scope = true` makes that a hard
+failure instead. The knob governs setup failure only. Detection is a start
+marker written inside the scope immediately before `exec` of the hook: a hook
+that started is never re-run, and a cancel before it starts is never a
+fallback. The behavior is uniform across sync, CLI and async (async previously
+had no fallback). Trajectory: opt-in now, later the default (flipped to an
+opt-out), eventually the fallback is removed.
+
+**Residual.** With no scope, a hook whose top process swallows SIGTERM is
+SIGKILLed alone after `cancelGrace` and its descendants may survive; a warn
+line in the hook output says so.
 
 ## More Information
 
