@@ -392,7 +392,7 @@ func appendNotPushedNote(text string, gitSync bool, mergeErr error) string {
 	return text + "\nNOTE: NOT pushed (local_only) — this work exists on the LOCAL default branch only; origin does not have it until someone pushes."
 }
 
-func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+func handleMergeThisSession(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	var params struct {
 		LocalOnly        bool     `json:"local_only"`
 		DefaultBranch    string   `json:"default_branch"`
@@ -458,10 +458,12 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 	pm.Gate = gate
 	pm.AttestedSha = hold.ticket.HeadSha
 
+	ctx = clown.WithLocalScope(ctx, "merge")
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "merge " + gs.branch, Source: "spinclass"})
 	ts := rep.TestStream(0)
-	blobLinks, mergeErr := merge.Resolved(
+	blobLinks, mergeErr := merge.ResolvedContext(
+		ctx,
 		executor.ShellExecutor{},
 		rep,
 		ts,
@@ -471,6 +473,7 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 		defaultBranch,
 		gitSync,
 		true,
+		nil,
 		pm,
 	)
 	ts.Finish()
@@ -483,7 +486,7 @@ func handleMergeThisSession(_ context.Context, args json.RawMessage, _ command.P
 	return buildHookResult(text, blobLinks, mergeErr), nil
 }
 
-func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
+func handleCheckThisSession(ctx context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
@@ -498,7 +501,7 @@ func handleCheckThisSession(_ context.Context, _ json.RawMessage, _ command.Prom
 
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "check", Source: "spinclass"})
-	blobLinks, hookErr := check.Run(rep, cwd)
+	blobLinks, hookErr := check.RunContext(clown.WithLocalScope(ctx, "check"), rep, cwd, nil)
 	passed = hookErr == nil
 	text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
 	if hookErr != nil && text == "" {
