@@ -796,6 +796,18 @@ GitHub, lacks it until added by hand).
   clown's tee). The peer on the mint connection is therefore not the scope
   that signs. Left open deliberately until clown#244 defines the two scopes;
   open in piggy FDR 0006 as well.
+- **A candidate first production use, to assess (operator, 2026-10-05):** the
+  agent trees spawned from circus's pebble MCP and webhook. It would give
+  juggler an ingress for spawning session trees. Unanswered: how the principal
+  strategy works there. D2 roots every tree in a human-started session blessed
+  by one card touch, and a webhook-started tree has no human at its start, so
+  what its root is, who certifies it and under what expiry is not designed.
+  D15's pre-authorization windows and enrolled devices are the nearest
+  existing mechanism, but they cover renewal and escalation, not a root.
+  Likely circus records, located by title only and not yet read: circus FDR
+  0023 (ephemeral webhook clowns), amarbel-llc/circus#158 (pebble as a voice
+  front-end, MCP sandbox + webhook), amarbel-llc/circus#241 (a subagent behind
+  each ring tool).
 
 ## Non-goals
 
