@@ -163,7 +163,11 @@ grammar and every verifier never change while the holder improves:
   the service does all caller attribution); per-key enforcement inside fibby
   is deferred. A minted key's card is wiped when its bound cgroup disappears,
   when its owner retires it, or when the holder restarts; there is no
-  holder-side timer, validity stays in certificates (D5).
+  holder-side timer, validity stays in certificates (D5). The holder has a
+  capacity (16 live cards per host in piggy's first phase). **A refused mint
+  refuses the session start or spawn**, with an error naming the cap: nothing
+  runs at lower assurance, and there is no fallback to a tier-1 key or to an
+  uncertified session.
 
 Revised 2026-10-05 with piggy's session (piggy FDR 0006, piggy#297): this was
 three tiers, with the separate-uid service as tier 2 and fibby as its tier-3
@@ -483,7 +487,9 @@ Records live in a **system-scoped** madder store written only by the
 system-scoped signer service and read-only to the session uid, so an agent can
 read every record but cannot tamper with one: the store is the integrity
 boundary for records, as the tier-2 signer is for keys, and they share one
-service account. Not FDR 0003's per-worktree store, which is the wrong scope
+service account: the signer front's (the holder agent's). fibby runs as a
+second unit under its own account, and the holder agent's account is the only
+one allowed on fibby's socket (piggy FDR 0006; revised 2026-10-05). Not FDR 0003's per-worktree store, which is the wrong scope
 for identities that outlive worktrees. Content-addressed by markl-id, so a
 record fetched from MAM or another host verifies identically. The ringmaster
 journal is the index (one RFC-0019 annotation per lifecycle event). Session
@@ -780,13 +786,14 @@ GitHub, lacks it until added by hand).
   key minting, no memory hardening, no touch-policy prompt.
 - **The holder caps at 16 live cards per host** in its first phase (one per
   principal, the operator session key counted), per piggy FDR 0006. A mint
-  beyond the cap is refused, and what a refused principal does is not decided
-  here. The lift is tracked in piggy FDR 0006.
+  beyond the cap is refused, which refuses the session start or spawn (D3).
+  The lift is tracked in piggy FDR 0006.
 - **Which scope a tier-2 key binds to is open.** D7 puts troupe's connection
   owner, the natural minter, in the frontend scope, while the signers of a
   principal's key include agent-scope processes (git commit signing under D18,
   clown's tee). The peer on the mint connection is therefore not the scope
-  that signs. Open in piggy FDR 0006 as well.
+  that signs. Left open deliberately until clown#244 defines the two scopes;
+  open in piggy FDR 0006 as well.
 
 ## Non-goals
 
