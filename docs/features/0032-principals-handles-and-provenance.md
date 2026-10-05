@@ -121,6 +121,9 @@ Rejected: a spinclass-minted id (a fourth identity chat cannot address); the
 session key with a `bare/<rand>` fallback (the conflation being escaped).
 Consequence accepted: a principal's lifetime is the harness instance's, and
 `clown --resume` preserves it because the resume reuses the claude session id.
+The principal survives a resume; at tier 2 its key does not when the resume
+lands in a new systemd scope (D3), so the same principal gets a new key and a
+new certificate (D4).
 
 ### D2. Root of trust: the card, once per human-started tree
 
@@ -148,22 +151,31 @@ grammar and every verifier never change while the holder improves:
   style front as a NixOS system service) that mints keys on request and binds
   each to the requesting session's systemd scope via `SO_PEERCRED` plus the
   peer's cgroup. A session can neither read nor exfiltrate its key nor sign as
-  a sibling.
-- **Tier 3:** the service holds each intermediate in a **fibby** virtual PIV
-  card (piggy's pure-Rust pcsc-lite server), so the key gets PIV semantics and a
-  virtual touch policy becomes an operator-approval prompt. fibby's PIV applet
-  exists (as of piggy `be3da3f`, per piggy's session: VERIFY, P-256 ECDSA on
-  9A/9C/9E, ECDH on 9D, GENERATE), but fibby is still a test double: no
-  ed25519, no runtime key minting, no touch-policy prompt, no memory hardening.
-  **ed25519 is added to fibby** rather than accepting P-256 at this tier, so
-  the key type is the same at every tier. Access to the holder is by **socket
-  permissions only** (only the service uid reaches fibby's socket; the service
-  does all caller attribution); per-key enforcement inside fibby is deferred.
-  Tier 3 is a dependency on piggy, not a prerequisite.
+  a sibling. The service's only key store is **fibby** (piggy's pure-Rust
+  pcsc-lite server): one virtual PIV card per principal, so the key gets PIV
+  semantics and a virtual touch policy becomes an operator-approval prompt.
+  fibby's PIV applet exists (as of piggy `be3da3f`, per piggy's session:
+  VERIFY, P-256 ECDSA on 9A/9C/9E, ECDH on 9D, GENERATE), but fibby is still a
+  test double: no ed25519, no runtime key minting, no touch-policy prompt, no
+  memory hardening. **ed25519 is added to fibby** rather than accepting P-256
+  here, so the key type is the same at both tiers. Access to the holder is by
+  **socket permissions only** (only the service uid reaches fibby's socket;
+  the service does all caller attribution); per-key enforcement inside fibby
+  is deferred. A minted key's card is wiped when its bound cgroup disappears,
+  when its owner retires it, or when the holder restarts; there is no
+  holder-side timer, validity stays in certificates (D5).
+
+Revised 2026-10-05 with piggy's session (piggy FDR 0006, piggy#297): this was
+three tiers, with the separate-uid service as tier 2 and fibby as its tier-3
+holder. They are one step now. piggy's agent holds no key bytes (piggy#215),
+so a service without fibby would need a throwaway software keystore, and none
+is built. Consequence accepted: the separate-uid property arrives only once
+fibby has ed25519, runtime minting and guarded memory. Tier 2 is a dependency
+on piggy, not a prerequisite.
 
 ### D4. A certificate binds identity, never rights
 
-One content-addressed record per principal, named by its markl-id digest:
+One content-addressed record per principal and key, named by its markl-id digest:
 subject principal and public key; issuer (parent principal, or the card for a
 root link); the issuer's certificate digest (the merkle edge, absent on a
 root); scope (the spinclass session key launched into, informational, absent
@@ -171,6 +183,11 @@ for a `~/eng` coordinator); the brief digest for spawned children (what #293
 wanted sealed); issued-at; the issuer's signature over the canonical bytes.
 Not in it: the worktree path (changes across hosts and on resurrect), and any
 right.
+
+A principal may hold successive keys (revised 2026-10-05): a tier-2 key dies
+with its scope (D3), so a resumed principal's troupe requests a fresh
+certificate for the same principal and the new key, issued by the parent, or
+for a root by one more 9C touch.
 
 ### D5. Expiry lives at the root only, inherited transitively
 
@@ -211,7 +228,7 @@ no capabilities, so the handle layer is the addition on top of it.
 
 ### D7. Ownership across repos
 
-- **piggy** owns keys: the agent seam, the card root signature, tiers 2 and 3,
+- **piggy** owns keys: the agent seam, the card root signature, tier 2,
   the markl-id purposes for record digests and sshsig signatures, the 9C slot
   (D11) and its attestation.
 - **clown** owns the instance: mints the UUID, launches troupe's connection
@@ -268,7 +285,7 @@ and one for the signature.
 - **Cost:** one ed25519 signature per record (microseconds); large bodies are
   signed by digest and live in the RFC-0010 spool; verified certificates are
   memoized to root expiry so per-record verification is one signature check
-  and one cached lookup; a hundred or two bytes per stanza in MAM. Tier 3 PIV
+  and one cached lookup; a hundred or two bytes per stanza in MAM. Tier 2 PIV
   signing at 10 to 50 ms per operation is acceptable per stanza, and touch
   never gates a stanza.
 - **Runtime provenance (added 2026-09-29).** Neither the certificate nor any
@@ -356,15 +373,21 @@ observe keystrokes *above* `claude` is a fact to verify; if the only
 observation point is the hook, the hook hands the payload to the frontend-scope
 signer, which still authenticates the caller by cgroup.
 
-- **Tier 2 and 3:** an operator session key, blessed by the card once at root
-  start, held by the separate-uid signer with cgroup attribution, fibby as the
-  holder when it exists.
+- **Tier 2:** an operator session key, blessed by the card once at root
+  start, held by the separate-uid signer with cgroup attribution, in fibby.
 - **Tier 1 stand-in, until the separate-uid signer exists:** signing at
   observation is impossible without a touch per prompt, so tier 1 signs on
-  request with the 9C key (D11), showing the text at PIN time via the piggy
-  askpass helper (a runtime sidecar it renders above the prompt). What you see
-  is what you sign. Same record, `assurance: touch`. A child treats both as
-  authentic; the record shows which one is unforgeable without infrastructure.
+  request with the 9C key (D11) through piggy's **operator-act agent
+  extension**: the caller sends the text and an sshsig namespace, never a
+  pre-built blob; the agent builds the sshsig itself, shows that exact text on
+  the PIN prompt, and signs. What you see is what you sign. Same record,
+  `assurance: touch`. A child treats both as authentic; the record shows which
+  one is unforgeable without infrastructure.
+
+Revised 2026-10-05 (piggy FDR 0006): this was an ordinary sign request plus an
+askpass sidecar rendering the text above the prompt. Nothing tied the shown
+text to the signed bytes, so a same-uid process could show one text and have
+another signed.
 
 ### D11. The rights lattice is monotone; 9C is the single attested escalation slot
 
@@ -376,7 +399,9 @@ key for the audit trail, silently.
 
 Any step upward is an **escalation request** (a record by the requester naming
 rights and target) answered by an **escalation grant** (a record by the card
-over the request's digest), PIN and touch, request shown at PIN time.
+over the request's digest), PIN and touch, request shown at PIN time by the
+operator-act extension (D10), which refuses any slot whose attested policy is
+not PIN-always and touch-always.
 
 The slot is **9C**, the NIST Digital Signature slot whose defined role is a
 deliberate human signature, enrolled by papi with PIN-always and touch-always,
@@ -385,15 +410,15 @@ the trust anchor so a verifier can check the key was generated on that YubiKey
 and cannot have left it. 9A stays cached, for ssh: papi enrolls it with PIN
 `once` and touch `cached`, so a 9A signature inside the window needs no human
 and 9A can never be an operator-act key. D2's root certificate, D10's tier-1
-quote fallback and escalation all sign with 9C: one deliberate-act key, one
-anchor. A card and slot cleanup plus a papi/piggy UX pass for the 9C defaults
+quote fallback and escalation all sign with 9C through the same extension: one
+deliberate-act key, one anchor. A card and slot cleanup plus a papi/piggy UX pass for the 9C defaults
 is a dependency of tier 1, owned by piggy.
 
 The v1 escalation set: force-reap of a child holding unintegrated work (today
 the always-ask flag), root TTL renewal (D5), and granting a right the granter
 does not hold. **Spawn is not escalation**: passing a subset to a new principal
 is monotone. The #151 always-ask prompt stays as a harness-level speed bump for
-cost, not an authority boundary; in tier 2 and above the touch can replace the
+cost, not an authority boundary; at tier 2 the touch can replace the
 prompt for the three escalations.
 
 ### D12. Handles pass like `SCM_RIGHTS`
@@ -557,7 +582,7 @@ free-text author line.
   `auth.Inject` mechanism) and a worktree-scoped `gpg.ssh.allowedSignersFile`
   generated from the certificate chain troupe publishes, so
   `git log --show-signature` verifies locally and the forge shows the key as
-  verified once registered. Tier 3 makes this card-like signing (fibby over
+  verified once registered. Tier 2 makes this card-like signing (fibby over
   pcsc), with a virtual touch policy if a repo wants one.
 - **Commits reference the transcript.** A `Provenance:` trailer carries the
   markl digest of the transcript checkpoint (slice 2) or attestation record
@@ -701,7 +726,7 @@ A day in the life, once slice 1 exists: the operator opens a session at
 observation; `spawn-session` returns the child's certificate digest in the
 wake; forty minutes before root expiry every session in the tree gets one wake
 and the operator touches once; a worker needing `force` calls
-`request-escalation`, the askpass shows the request, PIN, touch, and the grant
+`request-escalation`, the PIN prompt shows the request, PIN, touch, and the grant
 lands as a wake. Away from the keyboard, a Snikket DM "renew" from the enrolled
 account renews the tree; a `force` waits for OMEMO.
 
@@ -719,7 +744,7 @@ GitHub, lacks it until added by hand).
 | Repo | Record | Issue | Owns | Contract it must satisfy |
 |---|---|---|---|---|
 | troupe | RFC (identity, certificates, the signed-record grammar, `<prov>`, the transcript DAG) | troupe#39 | D7 troupe row, D8, D10, D15 | the D8 grammar as normative; keypair at the existing mint; root bootstrap with one 9C touch; certificate request/ack over chat replacing the spinclass hello; presence carries the certificate; `verify-quote`, `transcript append`, enrolled devices and pre-auth windows; "no troupe = uncertified", never a software root |
-| piggy | FDR (agent tiers, 9C, fibby as holder) | piggy#297 | D3, D11 | the SSH-agent seam with sshsig; tier 1 software keys; tier 2 separate-uid service with `SO_PEERCRED`+cgroup attribution; tier 3 fibby (ed25519, runtime key minting, touch-policy prompt, memory hardening; holder access by socket permissions); 9C PIN-always/touch-always enrolled by papi with F9 attestation published; the askpass sidecar; the card/slot cleanup and defaults UX |
+| piggy | FDR 0006 (agent tiers, 9C, fibby as holder) | piggy#297 | D3, D10, D11 | the SSH-agent seam with sshsig; tier 1 software keys; tier 2 separate-uid service with `SO_PEERCRED`+cgroup attribution, fibby as its only key store (ed25519, runtime key minting, touch-policy prompt, memory hardening; holder access by socket permissions; teardown on cgroup exit); 9C PIN-always/touch-always enrolled by papi with F9 attestation published; the operator-act agent extension; the card/slot cleanup and defaults UX |
 | clown | note or RFC (scopes, tee, parent JID) | clown#244 | D7 clown row, slice 2 | agent scope vs frontend scope as transient units; `clown-hook-tee` hands byte ranges to `troupe transcript append`, durable-local-first; parent JID in the child env; whether keystrokes are observable above `claude` |
 | clown (juggler) | FDR (subagent platform) | clown#245 | slice 3 | a subagent under a certified principal with a `<prov>` transcript; parent instructions signed under the operator chain. juggler lives in clown (`cmd/juggler`) |
 | spinclass + clown + juggler | FDR (session confinement) | spinclass#338 | D17 | the unit shape: `ProtectHome`, bind-mounted worktree, dynamic uid, sockets passed in; `--tent` as a realization; juggler as launcher |
@@ -751,8 +776,17 @@ GitHub, lacks it until added by hand).
   routes adds to the upstream named by `--add-new-keys-to`. So tier 1 is
   either a stock ssh-agent upstream behind the piggy-agent front, or a small
   per-instance agent; piggy#297 picks.
-- **Tier 3 is blocked** on fibby being a test double: no ed25519, no runtime
+- **Tier 2 is blocked** on fibby being a test double: no ed25519, no runtime
   key minting, no memory hardening, no touch-policy prompt.
+- **The holder caps at 16 live cards per host** in its first phase (one per
+  principal, the operator session key counted), per piggy FDR 0006. A mint
+  beyond the cap is refused, and what a refused principal does is not decided
+  here. The lift is tracked in piggy FDR 0006.
+- **Which scope a tier-2 key binds to is open.** D7 puts troupe's connection
+  owner, the natural minter, in the frontend scope, while the signers of a
+  principal's key include agent-scope processes (git commit signing under D18,
+  clown's tee). The peer on the mint connection is therefore not the scope
+  that signs. Open in piggy FDR 0006 as well.
 
 ## Non-goals
 
