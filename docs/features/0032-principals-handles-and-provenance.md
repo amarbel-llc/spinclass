@@ -164,7 +164,8 @@ grammar and every verifier never change while the holder improves:
   is deferred. A minted key's card is wiped when its bound cgroup disappears,
   when its owner retires it, or when the holder restarts; there is no
   holder-side timer, validity stays in certificates (D5). The holder has a
-  capacity (16 live cards per host in piggy's first phase). **A refused mint
+  capacity (16 live cards per host in piggy's first phase; the number is
+  expected to change and nothing here depends on it). **A refused mint
   refuses the session start or spawn**, with an error naming the cap: nothing
   runs at lower assurance, and there is no fallback to a tier-1 key or to an
   uncertified session.
@@ -785,7 +786,8 @@ GitHub, lacks it until added by hand).
 - **Tier 2 is blocked** on fibby being a test double: no ed25519, no runtime
   key minting, no memory hardening, no touch-policy prompt.
 - **The holder caps at 16 live cards per host** in its first phase (one per
-  principal, the operator session key counted), per piggy FDR 0006. A mint
+  principal, the operator session key counted), per piggy FDR 0006. The cap
+  is a first-phase number, assumed to be raised or removed later. A mint
   beyond the cap is refused, which refuses the session start or spawn (D3).
   The lift is tracked in piggy FDR 0006.
 - **Which scope a tier-2 key binds to is open.** D7 puts troupe's connection
