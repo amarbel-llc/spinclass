@@ -134,6 +134,16 @@ gets an **uncertified** principal: it still works (spawn, reap, chat) but every
 verifier treats its whole tree as untrusted data and `sc list` shows it as
 `unverified`. There is no silent fallback to a software root.
 
+**Service principals** (added 2026-10-05) are the third kind of root, for
+trees no human starts, such as an agent tree spawned from a webhook. The card
+enrolls a long-lived service's key once, ahead of time (D15), so the chain
+still ends at 9C. The service principal is an **issuer, not a root**: each
+tree it starts gets a fresh root principal certified under it (card, then
+service, then tree root), so trees are separately auditable and expire on
+their own. Open: the enrollment's lifetime and the per-tree expiry (D5's
+budget assumes a human who returns), and which holder tier a service's key
+needs.
+
 Rejected: the card signing every principal certificate or every message. Both
 need a live card agent deep into a session, exactly where FDR 0028 observed the
 forwarded agent dying, and the second adds touch fatigue that pushes toward
@@ -389,6 +399,14 @@ signer, which still authenticates the caller by cgroup.
   `assurance: touch`. A child treats both as authentic; the record shows which
   one is unforgeable without infrastructure.
 
+**Input through a service principal** (added 2026-10-05). An operator
+utterance that reaches a service **as the webhook's payload** is signed by the
+service as an `operator-input` record at its own assurance level, below
+`touch`; D15's per-operation minimum assurance decides what such a quote may
+authorize. Text that reaches an agent implicitly, such as through an MCP
+server's system-prompt append, is never operator input: nothing observed the
+operator saying it.
+
 Revised 2026-10-05 (piggy FDR 0006): this was an ordinary sign request plus an
 askpass sidecar rendering the text above the prompt. Nothing tied the shown
 text to the signed bytes, so a same-uid process could show one text and have
@@ -516,6 +534,11 @@ Three mechanisms, same records, an `assurance` field naming which:
 - **Per-operation minimum assurance.** Root renewal at `account`; `force` and
   handle-right escalation at `device`; raising a root's ambient set beyond the
   operator's policy at `hardware` only.
+- **Service enrollment (added 2026-10-05).** The same card-signed blessing
+  enrolls a service principal (D2). Because no human sees each of its trees
+  begin, the card signs **one policy record at enrollment** naming the ambient
+  rights its trees may hold, the pre-authorization shape above; a certificate
+  still carries no right (D4). Changing the bound is a new card signature.
 
 Later surfaces, flagged only: XEP-0050 ad-hoc commands as the admin UI in
 Cheogram (the slidge-style pattern circus FDR 0019 already names); a Cheogram
@@ -798,12 +821,9 @@ GitHub, lacks it until added by hand).
   open in piggy FDR 0006 as well.
 - **A candidate first production use, to assess (operator, 2026-10-05):** the
   agent trees spawned from circus's pebble MCP and webhook. It would give
-  juggler an ingress for spawning session trees. Unanswered: how the principal
-  strategy works there. D2 roots every tree in a human-started session blessed
-  by one card touch, and a webhook-started tree has no human at its start, so
-  what its root is, who certifies it and under what expiry is not designed.
-  D15's pre-authorization windows and enrolled devices are the nearest
-  existing mechanism, but they cover renewal and escalation, not a root.
+  juggler an ingress for spawning session trees. Its principal strategy is the
+  service principal (D2, D15, D10); the expiry and holder-tier questions D2
+  leaves open are what this assessment has to answer.
   Likely circus records, located by title only and not yet read: circus FDR
   0023 (ephemeral webhook clowns), amarbel-llc/circus#158 (pebble as a voice
   front-end, MCP sandbox + webhook), amarbel-llc/circus#241 (a subagent behind
