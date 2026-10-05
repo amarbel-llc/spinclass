@@ -152,8 +152,14 @@ grammar and every verifier never change while the holder improves:
 - **Tier 3:** the service holds each intermediate in a **fibby** virtual PIV
   card (piggy's pure-Rust pcsc-lite server), so the key gets PIV semantics and a
   virtual touch policy becomes an operator-approval prompt. fibby's PIV applet
-  is unimplemented today (phase 5 of its plan); tier 3 is a dependency on piggy,
-  not a prerequisite.
+  exists (as of piggy `be3da3f`, per piggy's session: VERIFY, P-256 ECDSA on
+  9A/9C/9E, ECDH on 9D, GENERATE), but fibby is still a test double: no
+  ed25519, no runtime key minting, no touch-policy prompt, no memory hardening.
+  **ed25519 is added to fibby** rather than accepting P-256 at this tier, so
+  the key type is the same at every tier. Access to the holder is by **socket
+  permissions only** (only the service uid reaches fibby's socket; the service
+  does all caller attribution); per-key enforcement inside fibby is deferred.
+  Tier 3 is a dependency on piggy, not a prerequisite.
 
 ### D4. A certificate binds identity, never rights
 
@@ -713,7 +719,7 @@ GitHub, lacks it until added by hand).
 | Repo | Record | Issue | Owns | Contract it must satisfy |
 |---|---|---|---|---|
 | troupe | RFC (identity, certificates, the signed-record grammar, `<prov>`, the transcript DAG) | troupe#39 | D7 troupe row, D8, D10, D15 | the D8 grammar as normative; keypair at the existing mint; root bootstrap with one 9C touch; certificate request/ack over chat replacing the spinclass hello; presence carries the certificate; `verify-quote`, `transcript append`, enrolled devices and pre-auth windows; "no troupe = uncertified", never a software root |
-| piggy | FDR (agent tiers, 9C, fibby as holder) | piggy#297 | D3, D11 | the SSH-agent seam with sshsig; tier 1 software keys; tier 2 separate-uid service with `SO_PEERCRED`+cgroup attribution; tier 3 fibby (phase 5 applet); 9C PIN-always/touch-always enrolled by papi with F9 attestation published; the askpass sidecar; the card/slot cleanup and defaults UX |
+| piggy | FDR (agent tiers, 9C, fibby as holder) | piggy#297 | D3, D11 | the SSH-agent seam with sshsig; tier 1 software keys; tier 2 separate-uid service with `SO_PEERCRED`+cgroup attribution; tier 3 fibby (ed25519, runtime key minting, touch-policy prompt, memory hardening; holder access by socket permissions); 9C PIN-always/touch-always enrolled by papi with F9 attestation published; the askpass sidecar; the card/slot cleanup and defaults UX |
 | clown | note or RFC (scopes, tee, parent JID) | clown#244 | D7 clown row, slice 2 | agent scope vs frontend scope as transient units; `clown-hook-tee` hands byte ranges to `troupe transcript append`, durable-local-first; parent JID in the child env; whether keystrokes are observable above `claude` |
 | clown (juggler) | FDR (subagent platform) | clown#245 | slice 3 | a subagent under a certified principal with a `<prov>` transcript; parent instructions signed under the operator chain. juggler lives in clown (`cmd/juggler`) |
 | spinclass + clown + juggler | FDR (session confinement) | spinclass#338 | D17 | the unit shape: `ProtectHome`, bind-mounted worktree, dynamic uid, sockets passed in; `--tent` as a realization; juggler as launcher |
@@ -739,10 +745,14 @@ GitHub, lacks it until added by hand).
   certificate.
 - **Facts still to verify:** whether the Claude Code JSONL stays append-only
   across rewinds with `parentUuid` links (slice 2 depends on it); whether clown
-  or posh can observe keystrokes above `claude` (D10's observation point);
-  whether `piggy-agent` accepts an added software identity or tier 1 needs a
-  small per-instance agent.
-- **Tier 3 is blocked** on fibby's PIV applet.
+  or posh can observe keystrokes above `claude` (D10's observation point).
+- **Tier 1's agent shape is open.** Per piggy's session (reading `be3da3f`),
+  `piggy-agent` refuses an added software identity natively (piggy#215) and
+  routes adds to the upstream named by `--add-new-keys-to`. So tier 1 is
+  either a stock ssh-agent upstream behind the piggy-agent front, or a small
+  per-instance agent; piggy#297 picks.
+- **Tier 3 is blocked** on fibby being a test double: no ed25519, no runtime
+  key minting, no memory hardening, no touch-policy prompt.
 
 ## Non-goals
 
