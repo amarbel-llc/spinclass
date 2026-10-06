@@ -411,7 +411,7 @@ Each useful on its own, each tightening the previous rather than replacing it.
 - **After slice 3: unit sessions in spinclass (v2).** The lifecycle of a
   worktree-less agent moves from `juggler spawn` to a spinclass unit session,
   making spinclass the sole isolation boundary and enforcer for worktree and
-  unit agents and scripts (D7). Not scheduled.
+  unit agents and scripts (D7). Not scheduled; tracked as spinclass#354.
 - **Slice 4 (frontends).** trapeze/clown on juggler, troupe as an alternate
   frontend. Named, not designed here.
 
