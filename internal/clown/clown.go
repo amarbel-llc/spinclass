@@ -200,11 +200,29 @@ func NotifyPrincipal(ctx context.Context, targetPrincipal, from, message string)
 	return err
 }
 
+// ExitReason is the reason tag an exit wake carries (FDR 0032 D6). The string
+// values are the wire format and must not change.
+type ExitReason string
+
+const (
+	// ExitNormal: the principal's harness ended on its own. A /clear is a
+	// restart, not an exit, and emits nothing.
+	ExitNormal ExitReason = "normal"
+	// ExitFailed: the principal ended on its own without doing what it was
+	// asked, measured by the lifecycle owner and never self-reported. No
+	// worktree-session path emits it today.
+	ExitFailed ExitReason = "failed"
+	// ExitShutdown: the principal was reaped by a holder.
+	ExitShutdown ExitReason = "shutdown"
+	// ExitCrash: the principal vanished (hello timeout, presence-stale).
+	ExitCrash ExitReason = "crash"
+	// ExitKilled: the principal was force-reaped.
+	ExitKilled ExitReason = "killed"
+)
+
 // EmitExitWakes notifies every principal in holders that the session
-// childKey has exited, tagged with reason — one of "normal" (merged and
-// closed), "shutdown" (reaped by a holder), "killed" (force-reaped), or
-// "crash" (hello timeout / presence-stale) per FDR 0032 D6. Callers pass
-// exactly the holders they want notified — a caller excluding itself or a
+// childKey has exited, tagged with reason (see ExitReason, FDR 0032 D6).
+// Callers pass exactly the holders they want notified — a caller excluding itself or a
 // driver that already got its own job wake does so before calling this, not
 // inside it. Every per-holder failure is joined (errors.Join) rather than
 // short-circuiting: one holder's unreachable channel must never suppress the
@@ -218,7 +236,7 @@ func NotifyPrincipal(ctx context.Context, targetPrincipal, from, message string)
 // even starting the NEXT holder once the shared budget is spent, which is
 // exactly what keeps N holders from serializing into up to N*2*emitTimeout
 // against one wedged ringmaster.
-func EmitExitWakes(holders []string, childKey, reason string) error {
+func EmitExitWakes(holders []string, childKey string, reason ExitReason) error {
 	if !Enabled() || len(holders) == 0 {
 		return nil
 	}

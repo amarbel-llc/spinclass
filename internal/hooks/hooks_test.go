@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/spawnhandshake"
 	"code.linenisgreat.com/spinclass/internal/testfs"
@@ -1759,9 +1760,10 @@ func TestSessionEndEmitsExitWakeForWorktreeHolders(t *testing.T) {
 	t.Setenv("CLOWN_SESSION_ID", "self-principal") // the exiting session's own principal
 
 	var gotHolders []string
-	var gotChildKey, gotReason string
+	var gotChildKey string
+	var gotReason clown.ExitReason
 	origEmit := emitExitWakes
-	emitExitWakes = func(holders []string, childKey, reason string) error {
+	emitExitWakes = func(holders []string, childKey string, reason clown.ExitReason) error {
 		gotHolders = holders
 		gotChildKey = childKey
 		gotReason = reason
@@ -1776,8 +1778,8 @@ func TestSessionEndEmitsExitWakeForWorktreeHolders(t *testing.T) {
 		t.Fatalf("SessionEnd: %v", err)
 	}
 
-	if gotReason != "normal" {
-		t.Errorf("reason = %q, want %q", gotReason, "normal")
+	if gotReason != clown.ExitNormal {
+		t.Errorf("reason = %q, want %q", gotReason, clown.ExitNormal)
 	}
 	if gotChildKey != "myrepo/feature" {
 		t.Errorf("childKey = %q, want %q", gotChildKey, "myrepo/feature")
@@ -1797,7 +1799,7 @@ func TestSessionEndSkipsExitWakeWithNoHolders(t *testing.T) {
 
 	called := false
 	origEmit := emitExitWakes
-	emitExitWakes = func(holders []string, childKey, reason string) error {
+	emitExitWakes = func(holders []string, childKey string, reason clown.ExitReason) error {
 		called = true
 		return nil
 	}
@@ -1839,7 +1841,7 @@ func TestEmitWorktreeExitWakeSkipsWhenClownDisabled(t *testing.T) {
 
 	called := false
 	origEmit := emitExitWakes
-	emitExitWakes = func(holders []string, childKey, reason string) error {
+	emitExitWakes = func(holders []string, childKey string, reason clown.ExitReason) error {
 		called = true
 		return nil
 	}
@@ -1869,9 +1871,9 @@ func TestEmitWorktreeExitWakeSkipsOnClearReason(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var gotReason string
+	var gotReason clown.ExitReason
 	origEmit := emitExitWakes
-	emitExitWakes = func(holders []string, childKey, reason string) error {
+	emitExitWakes = func(holders []string, childKey string, reason clown.ExitReason) error {
 		gotReason = reason
 		return nil
 	}
@@ -1883,8 +1885,8 @@ func TestEmitWorktreeExitWakeSkipsOnClearReason(t *testing.T) {
 	}
 
 	emitWorktreeExitWake(wt, "prompt_input_exit")
-	if gotReason != "normal" {
-		t.Errorf("reason = %q, want %q for a non-clear SessionEnd", gotReason, "normal")
+	if gotReason != clown.ExitNormal {
+		t.Errorf("reason = %q, want %q for a non-clear SessionEnd", gotReason, clown.ExitNormal)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/testgit"
 )
@@ -399,10 +400,10 @@ func TestCloseChildSessionEmitsExitWake(t *testing.T) {
 	cases := []struct {
 		name       string
 		force      bool
-		wantReason string
+		wantReason clown.ExitReason
 	}{
-		{"clean reap emits shutdown", false, "shutdown"},
-		{"forced reap emits killed", true, "killed"},
+		{"clean reap emits shutdown", false, clown.ExitShutdown},
+		{"forced reap emits killed", true, clown.ExitKilled},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -427,9 +428,10 @@ func TestCloseChildSessionEmitsExitWake(t *testing.T) {
 			}
 
 			var gotHolders []string
-			var gotChildKey, gotReason string
+			var gotChildKey string
+			var gotReason clown.ExitReason
 			orig := emitExitWakesFn
-			emitExitWakesFn = func(holders []string, childKey, reason string) error {
+			emitExitWakesFn = func(holders []string, childKey string, reason clown.ExitReason) error {
 				gotHolders = holders
 				gotChildKey = childKey
 				gotReason = reason

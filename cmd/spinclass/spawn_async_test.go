@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/spawn"
 	"code.linenisgreat.com/spinclass/internal/testgit"
@@ -98,9 +99,10 @@ func TestSpawnTimeoutOutcomeEmitsCrashOnAutoReap(t *testing.T) {
 	}
 
 	var gotHolders []string
-	var gotChildKey, gotReason string
+	var gotChildKey string
+	var gotReason clown.ExitReason
 	orig := emitExitWakesFn
-	emitExitWakesFn = func(holders []string, childKey, reason string) error {
+	emitExitWakesFn = func(holders []string, childKey string, reason clown.ExitReason) error {
 		gotHolders = holders
 		gotChildKey = childKey
 		gotReason = reason
@@ -114,8 +116,8 @@ func TestSpawnTimeoutOutcomeEmitsCrashOnAutoReap(t *testing.T) {
 	if !strings.Contains(msg, "reaped") {
 		t.Fatalf("expected a reap outcome message, got: %s", msg)
 	}
-	if gotReason != "crash" {
-		t.Errorf("reason = %q, want %q", gotReason, "crash")
+	if gotReason != clown.ExitCrash {
+		t.Errorf("reason = %q, want %q", gotReason, clown.ExitCrash)
 	}
 	if gotChildKey != "worker/feat-3" {
 		t.Errorf("childKey = %q, want %q", gotChildKey, "worker/feat-3")

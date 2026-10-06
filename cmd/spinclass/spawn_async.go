@@ -147,7 +147,7 @@ func spawnTimeoutOutcome(pending spawn.Pending, driverPrincipal string, deadline
 			d, rerr, pending.SessionKey,
 		)
 	}
-	if err := emitExitWakesFn(otherHolders, pending.SessionKey, "crash"); err != nil {
+	if err := emitExitWakesFn(otherHolders, pending.SessionKey, clown.ExitCrash); err != nil {
 		servelog.Errorf("spawn-async: emitExitWakesFn-failed key=%s err=%v", pending.SessionKey, err)
 	}
 	return fmt.Sprintf(

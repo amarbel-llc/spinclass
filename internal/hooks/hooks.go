@@ -373,7 +373,7 @@ func emitWorktreeExitWake(cwd, reason string) {
 	if len(holders) == 0 {
 		return
 	}
-	if err := emitExitWakes(holders, st.Key(), "normal"); err != nil {
+	if err := emitExitWakes(holders, st.Key(), clown.ExitNormal); err != nil {
 		sessionlog.Errorf("runSessionEnd emitExitWakes-failed key=%s err=%v", st.Key(), err)
 	}
 }

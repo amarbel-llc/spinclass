@@ -205,7 +205,7 @@ func TestEmitExitWakesNotifiesEachHolder(t *testing.T) {
 	t.Setenv("RINGMASTER_BIN", stubRingmaster(t, argsFile, "exit-1", true))
 	t.Setenv("CLOWN_BIN", "/some/clown")
 
-	if err := EmitExitWakes([]string{"holder-1", "holder-2"}, "worker/kid", "shutdown"); err != nil {
+	if err := EmitExitWakes([]string{"holder-1", "holder-2"}, "worker/kid", ExitShutdown); err != nil {
 		t.Fatalf("EmitExitWakes: %v", err)
 	}
 	got := recordedArgs(t, argsFile)
@@ -218,19 +218,35 @@ func TestEmitExitWakesNotifiesEachHolder(t *testing.T) {
 	})
 }
 
+// TestExitReasonWireValues pins the FDR 0032 D6 wire strings: the reason is
+// interpolated into the wake message, so a rename must not silently change it.
+func TestExitReasonWireValues(t *testing.T) {
+	for reason, want := range map[ExitReason]string{
+		ExitNormal:   "normal",
+		ExitFailed:   "failed",
+		ExitShutdown: "shutdown",
+		ExitCrash:    "crash",
+		ExitKilled:   "killed",
+	} {
+		if string(reason) != want {
+			t.Errorf("exit reason %q, want wire value %q", reason, want)
+		}
+	}
+}
+
 // TestEmitExitWakesNoopWhenNoHoldersOrDisabled: neither an empty holder list
 // nor a disabled clown must shell out at all.
 func TestEmitExitWakesNoopWhenNoHoldersOrDisabled(t *testing.T) {
 	t.Setenv("RINGMASTER_BIN", filepath.Join(t.TempDir(), "no-such-ringmaster"))
 
 	t.Setenv("CLOWN_BIN", "/some/clown")
-	if err := EmitExitWakes(nil, "worker/kid", "normal"); err != nil {
+	if err := EmitExitWakes(nil, "worker/kid", ExitNormal); err != nil {
 		t.Fatalf("EmitExitWakes with no holders: want nil, got %v", err)
 	}
 
 	t.Setenv("CLOWN_BIN", "")
 	_ = os.Unsetenv("CLOWN_BIN")
-	if err := EmitExitWakes([]string{"holder-1"}, "worker/kid", "normal"); err != nil {
+	if err := EmitExitWakes([]string{"holder-1"}, "worker/kid", ExitNormal); err != nil {
 		t.Fatalf("EmitExitWakes with clown disabled: want nil, got %v", err)
 	}
 }
@@ -248,7 +264,7 @@ func TestEmitExitWakesJoinsPerHolderErrors(t *testing.T) {
 	t.Setenv("RINGMASTER_BIN", script)
 	t.Setenv("CLOWN_BIN", "/some/clown")
 
-	err := EmitExitWakes([]string{"holder-1", "holder-2"}, "worker/kid", "crash")
+	err := EmitExitWakes([]string{"holder-1", "holder-2"}, "worker/kid", ExitCrash)
 	if err == nil {
 		t.Fatal("EmitExitWakes with a failing ringmaster: want a joined error, got nil")
 	}
@@ -289,7 +305,7 @@ func TestEmitExitWakesBudgetsWholeLoopNotPerHolder(t *testing.T) {
 	t.Setenv("CLOWN_BIN", "/some/clown")
 
 	start := time.Now()
-	err := EmitExitWakes([]string{"holder-1", "holder-2", "holder-3"}, "worker/kid", "crash")
+	err := EmitExitWakes([]string{"holder-1", "holder-2", "holder-3"}, "worker/kid", ExitCrash)
 	elapsed := time.Since(start)
 
 	if err == nil {

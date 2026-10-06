@@ -185,9 +185,9 @@ func runCloseChild(p closeChildParams) (string, error) {
 	// exit-wake reason — every accepted holder OTHER than this caller (which
 	// already knows: it is the one that just reaped). Best-effort: a wake
 	// failure must not turn a completed reap into an error result.
-	reason := "shutdown"
+	reason := clown.ExitShutdown
 	if p.Force {
-		reason = "killed"
+		reason = clown.ExitKilled
 	}
 	otherHolders := child.OtherHolders(callerPrincipal)
 	if err := emitExitWakesFn(otherHolders, child.Key(), reason); err != nil {
