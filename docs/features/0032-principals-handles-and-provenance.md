@@ -134,8 +134,8 @@ gets an **uncertified** principal: it still works (spawn, reap, chat) but every
 verifier treats its whole tree as untrusted data and `sc list` shows it as
 `unverified`. There is no silent fallback to a software root.
 
-**Service principals** (added 2026-10-05) are the third kind of root, for
-trees no human starts, such as an agent tree spawned from a webhook. The card
+**Service principals** (added 2026-10-05) are the third way a tree gets its
+root, for trees no human starts, such as an agent tree spawned from a webhook. The card
 enrolls a long-lived service's key once, ahead of time (D15), so the chain
 still ends at 9C. The service principal is an **issuer, not a root**: each
 tree it starts gets a fresh root principal certified under it (card, then
@@ -190,8 +190,8 @@ on piggy, not a prerequisite.
 
 ### D4. A certificate binds identity, never rights
 
-One content-addressed record per principal and key, named by its markl-id digest:
-subject principal and public key; issuer (parent principal, or the card for a
+One content-addressed record per principal and key, named by its markl-id
+digest: subject principal and public key; issuer (parent principal, or the card for a
 root link); the issuer's certificate digest (the merkle edge, absent on a
 root); scope (the spinclass session key launched into, informational, absent
 for a `~/eng` coordinator); the brief digest for spawned children (what #293
@@ -434,8 +434,8 @@ and cannot have left it. 9A stays cached, for ssh: papi enrolls it with PIN
 `once` and touch `cached`, so a 9A signature inside the window needs no human
 and 9A can never be an operator-act key. D2's root certificate, D10's tier-1
 quote fallback and escalation all sign with 9C through the same extension: one
-deliberate-act key, one anchor. A card and slot cleanup plus a papi/piggy UX pass for the 9C defaults
-is a dependency of tier 1, owned by piggy.
+deliberate-act key, one anchor. A card and slot cleanup plus a papi/piggy UX
+pass for the 9C defaults is a dependency of tier 1, owned by piggy.
 
 The v1 escalation set: force-reap of a child holding unintegrated work (today
 the always-ask flag), root TTL renewal (D5), and granting a right the granter
@@ -508,8 +508,9 @@ read every record but cannot tamper with one: the store is the integrity
 boundary for records, as the tier-2 signer is for keys, and they share one
 service account: the signer front's (the holder agent's). fibby runs as a
 second unit under its own account, and the holder agent's account is the only
-one allowed on fibby's socket (piggy FDR 0006; revised 2026-10-05). Not FDR 0003's per-worktree store, which is the wrong scope
-for identities that outlive worktrees. Content-addressed by markl-id, so a
+one allowed on fibby's socket (piggy FDR 0006; revised 2026-10-05). Not FDR
+0003's per-worktree store, which is the wrong scope for identities that
+outlive worktrees. Content-addressed by markl-id, so a
 record fetched from MAM or another host verifies identically. The ringmaster
 journal is the index (one RFC-0019 annotation per lifecycle event). Session
 state carries `holders` as a **materialized view** of accepted grant digests,
