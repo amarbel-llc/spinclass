@@ -857,9 +857,10 @@ GitHub, lacks it until added by hand).
   juggler an ingress for spawning session trees. Its principal strategy is the
   service principal (D2, D15, D10); the expiry and holder-tier questions D2
   leaves open are what this assessment has to answer.
-  The circus reference is amarbel-llc/circus#288 (the webhook-only pebble
-  path), which supersedes circus FDR 0023, circus#158 and circus#241 for this
-  purpose. Per circus's session no node in that graph needs a git worktree, so
+  The circus design record is circus FDR 0039
+  (`docs/features/0039-pebble-webhook-agent-graph.md`), which supersedes
+  circus FDR 0023 and absorbs circus#241; amarbel-llc/circus#288 tracks the
+  build and circus#158 remains the umbrella. Per circus's session no node in that graph needs a git worktree, so
   this use depends on slice 3 (principals and handles for a juggler-launched
   agent with no worktree, clown#245).
 
