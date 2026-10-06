@@ -839,6 +839,12 @@ spinclass is a relocation. What slice 0 records, not what D12/D13 promise:
   is in the vocabulary and is never emitted by spinclass. The wake carries
   no certificate digest yet, which D6 describes.
 
+Where slice 0 does less than D6, D12 and D13 describe, each gap is tracked:
+rights not enforced (spinclass#355), pending grants never expire and are not
+delivered (#356), orphan ignores holder liveness (#357), the wake skips the
+actor (#358), the wake's reason is only message text and it carries no
+digest (#359), no rights recorded for the spawner (#360).
+
 Reference implementation: `internal/session/session.go`,
 `cmd/spinclass/handles_cmd.go`, `close_child_cmd.go`, `internal/spawn`,
 `internal/clown/clown.go`.
