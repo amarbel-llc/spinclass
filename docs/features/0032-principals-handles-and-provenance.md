@@ -239,7 +239,12 @@ holder), crash (hello timeout, presence-stale), `killed` (force-reaped). For a
 juggler agent these are ringmaster's terminal states: `succeeded` is `normal`,
 `failed` is `failed`, `aborted` is `shutdown`, `interrupted` is crash. `failed`
 is the signal a holder's fallback hangs on, and it is measured by the runtime,
-never reported by the agent. The wake
+never reported by the agent. **The emitter must outlive the principal it
+reports on** (added 2026-10-06): a runtime cannot report its own kill, so the
+lifecycle owner emits from something that survives the principal's death and
+derives `killed` versus crash there. A platform time limit expiring is
+`failed`, not `killed`: the limit is the principal's own. The mechanism for a
+juggler agent is in clown FDR 0019. The wake
 carries the child's certificate digest so a holder wanting `one_for_one`
 re-spawns from the brief itself. Restart strategies, `MaxR`/`MaxT` and
 `temporary`/`transient`/`permanent` are holder-side policy, deferred.
@@ -514,6 +519,12 @@ being the authority and become the *initial* ambient set the card blesses for
 a root: permissions and capabilities become one lattice with one verifier, and
 "always-ask" becomes "not in your ambient set, request escalation".
 
+A tool that enforces nothing per caller leaves the boundary to whoever wraps
+it (added 2026-10-06). cutting-garden's MCP is the first case met: per
+circus's session it exposes its whole create/patch/delete surface to any
+local caller, so the pebble graph holds its rights with narrow wrapper tools
+instead. linenisgreat/cutting-garden#303 tracks closing that gap.
+
 ### D14. Storage: a system-scoped madder store, the journal as index
 
 Records live in a **system-scoped** madder store written only by the
@@ -685,6 +696,12 @@ way capabilities are. The same split here:
   next to the ambient set and enforced at the same points. Once the agent
   scope is a unit (D17), CPU and memory limits attach to that unit, and the
   principal's budget record is what sets them.
+- **A provider key can enforce the spend quota (added 2026-10-06, later).**
+  Where a model provider mints keys with their own limits (OpenRouter's
+  per-key budgets), a spawner mints a dedicated key for each child carrying a
+  subset of its own budget and hands it down at spawn. The provider then
+  enforces the subset, so overspending is refused rather than noticed. The
+  budget record stays the authority; the key is how it is enforced for spend.
 - **Scheduling is not this record's.** Queues, priorities, back-pressure,
   batching escalation prompts into one touch, throttling builds across a
   host: that is ringmaster's, as the job platform, with FDR 0022's per-repo
@@ -800,6 +817,7 @@ GitHub, lacks it until added by hand).
 | circus (GitHub) | note | amarbel-llc/circus#255 | D15 | XEP-0050 admin surface (the FDR 0019 addendum); enrolled-device provisioning on the operator's Snikket account |
 | papi | change | papi#87 | D11 | 9C enrollment step and attestation publication |
 | moxy | note | moxy#443 | D13, D16 | moxins declare the rights they enforce and emit signed execution records in the D8 grammar |
+| cutting-garden | issue | linenisgreat/cutting-garden#303 | D13 | enforce a rights list per caller, or generate scoped tool sets for subsets of roots, node types and operations; today its MCP exposes its whole create/patch/delete surface to any local caller |
 | smith | record (`smith broker`, push by request) | smith#68 | D18 | separate-uid service holding the forge credential; a signed landing request per push; scope enforced on `spinclass:merge` + handle and the default-branch ref; objects read from the group-readable worktree; `git.PushRef` stays the no-broker fallback |
 | purse-first | note | purse-first#194 | D13, D16 | manifest and `go-mcp` support for declared rights and execution records |
 | posh | primitive (observer attach) | posh#224 | D13 | read-only, non-TTY observer attach with per-principal, per-mode (observe / input) authorization and visible counts; spinclass maintains the allow-list from its handle table, posh enforces at attach |

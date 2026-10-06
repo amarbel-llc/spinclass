@@ -334,6 +334,12 @@ human-touched escalation as any other right. Operating systems keep "whether" an
 "how much" in separate subsystems that compose, because both are inherited the
 same way. The same split applies here.
 
+For money spent on model calls, the limit can eventually be enforced by the
+provider itself. Where a provider issues keys that each carry their own budget,
+a parent creates a dedicated key for each child holding a share of its own
+allowance and hands it down at spawn. A child that overspends is then refused
+by the provider, not discovered afterwards.
+
 **Scheduling is a separate concern, deliberately.** Deciding *when* work runs
 (queues, priorities, back-pressure, batching several approval prompts into one
 touch) belongs to the job platform, not to this design. Coupling "who may" to
