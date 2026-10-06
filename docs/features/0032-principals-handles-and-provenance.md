@@ -283,6 +283,29 @@ no capabilities, so the handle layer is the addition on top of it.
   ringmaster: the job is the host-local enforcement point, and its journal
   holds the accepted grants as a rebuildable cache, never the source of truth
   (clown FDR 0019, draft).
+
+  **That split is v1. v2 moves it to spinclass** (operator, 2026-10-06). The
+  end state is spinclass as the **sole isolation boundary and enforcer** for
+  every agent and script it launches, of two kinds: **worktree sessions** (a
+  git worktree plus a harness, today's only kind) and **unit sessions** (no
+  worktree and no branch; the session is a systemd transient unit running an
+  agent or a script). In v2 spinclass mints the unit session's principal,
+  starts and stops the unit, holds its handles, emits its exit wake from a
+  hook that outlives it (D6), and is where D17's confinement attaches for
+  both kinds. `juggler spawn` then disappears and juggler keeps only the
+  agent itself.
+
+  v1 keeps `juggler spawn` because the reusable part of spinclass is small
+  and the rest is worktree-bound (surveyed 2026-10-06): principals, the
+  grant/accept/release logic, the exit-wake emitter and the hello file format
+  need no git, but every state write requires a worktree path on disk, a
+  missing worktree reads as `abandoned`, close is mostly git steps, spawn
+  creates a worktree unconditionally, and no session is launched through
+  systemd. v2 is therefore a second storage path, liveness rule, close path
+  and spawn path, plus a systemd dependency. To keep v2 a relocation and not
+  a migration, v1's handle records and exit reasons keep the same field
+  meanings as spinclass's. The first handle held across the two kinds is the
+  signal to start v2.
 - **ringmaster** owns the event log: exit wakes are wake records; issuance,
   grants, accepts, releases, revocations and escalations are RFC-0019
   non-waking annotation records.
@@ -385,6 +408,10 @@ Each useful on its own, each tightening the previous rather than replacing it.
   and the parent's instructions signed under the operator chain. The first
   agent whose transcript is ours, one level below Claude Code, which is exactly
   the delegation boundary where prompt injection crosses agents.
+- **After slice 3: unit sessions in spinclass (v2).** The lifecycle of a
+  worktree-less agent moves from `juggler spawn` to a spinclass unit session,
+  making spinclass the sole isolation boundary and enforcer for worktree and
+  unit agents and scripts (D7). Not scheduled.
 - **Slice 4 (frontends).** trapeze/clown on juggler, troupe as an alternate
   frontend. Named, not designed here.
 
