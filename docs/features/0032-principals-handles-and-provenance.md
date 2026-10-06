@@ -224,14 +224,22 @@ Rejected: per-link expiry with delegated renewal. It produces the renewal
 cascade (a child's extension needing its parent's, and so on up to the card)
 and gives every intermediate a way to keep a tree alive without a human.
 
-### D6. Exit signals in v1, spinclass-emitted, no restart policy
+### D6. Exit signals in v1, emitted by the lifecycle owner, no restart policy
 
-A handle without an exit wake is a handle you must poll. spinclass emits one
-reason-tagged wake to every accepted holder on the child's `SessionEnd`, on
-`close-child-session`, on hello timeout, and from the dead-PID sweep. Reasons
+A handle without an exit wake is a handle you must poll. Whichever platform
+owns a principal's lifecycle (D7) emits one reason-tagged wake to every
+accepted holder when it ends. For a worktree session that is spinclass, on
+the child's `SessionEnd`, on `close-child-session`, on hello timeout, and from
+the dead-PID sweep. For a juggler agent it is the runtime, from its ringmaster
+job's terminal record (clown FDR 0019, draft). Reasons
 map to OTP's: `normal` (the session's harness ended on its own; a `/clear`
-is a restart, not an exit, and emits nothing), `shutdown` (reaped by a
-holder), crash (hello timeout, presence-stale), `killed` (force-reaped). The wake
+is a restart, not an exit, and emits nothing), `failed` (ended on its own
+without doing what it was asked; added 2026-10-06), `shutdown` (reaped by a
+holder), crash (hello timeout, presence-stale), `killed` (force-reaped). For a
+juggler agent these are ringmaster's terminal states: `succeeded` is `normal`,
+`failed` is `failed`, `aborted` is `shutdown`, `interrupted` is crash. `failed`
+is the signal a holder's fallback hangs on, and it is measured by the runtime,
+never reported by the agent. The wake
 carries the child's certificate digest so a holder wanting `one_for_one`
 re-spawns from the brief itself. Restart strategies, `MaxR`/`MaxT` and
 `temporary`/`transient`/`permanent` are holder-side policy, deferred.
@@ -263,7 +271,13 @@ no capabilities, so the handle layer is the addition on top of it.
   certificate issuance being *requested* on spawn, `close-child-session`
   verification (ask troupe "is this principal certified and its chain valid",
   then check the handle table), exit-wake emission, `sc list` and `sc whoami`,
-  and the root-session bootstrap trigger.
+  and the root-session bootstrap trigger. That is for worktree sessions. The
+  rule underneath (revised 2026-10-06): **the handle table and exit-wake
+  emission live with whichever platform owns the principal's lifecycle**. For
+  a juggler agent with no worktree (slice 3) that is the juggler runtime and
+  ringmaster: the job is the host-local enforcement point, and its journal
+  holds the accepted grants as a rebuildable cache, never the source of truth
+  (clown FDR 0019, draft).
 - **ringmaster** owns the event log: exit wakes are wake records; issuance,
   grants, accepts, releases, revocations and escalations are RFC-0019
   non-waking annotation records.
@@ -777,7 +791,7 @@ GitHub, lacks it until added by hand).
 | troupe | RFC (identity, certificates, the signed-record grammar, `<prov>`, the transcript DAG) | troupe#39 | D7 troupe row, D8, D10, D15 | the D8 grammar as normative; keypair at the existing mint; root bootstrap with one 9C touch; certificate request/ack over chat replacing the spinclass hello; presence carries the certificate; `verify-quote`, `transcript append`, enrolled devices and pre-auth windows; "no troupe = uncertified", never a software root |
 | piggy | FDR 0006 (agent tiers, 9C, fibby as holder) | piggy#297 | D3, D10, D11 | the SSH-agent seam with sshsig; tier 1 software keys; tier 2 separate-uid service with `SO_PEERCRED`+cgroup attribution, fibby as its only key store (ed25519, runtime key minting, touch-policy prompt, memory hardening; holder access by socket permissions; teardown on cgroup exit); 9C PIN-always/touch-always enrolled by papi with F9 attestation published; the operator-act agent extension; the card/slot cleanup and defaults UX |
 | clown | note or RFC (scopes, tee, parent JID) | clown#244 | D7 clown row, slice 2 | agent scope vs frontend scope as transient units; `clown-hook-tee` hands byte ranges to `troupe transcript append`, durable-local-first; parent JID in the child env; whether keystrokes are observable above `claude` |
-| clown (juggler) | FDR (subagent platform) | clown#245 | slice 3 | a subagent under a certified principal with a `<prov>` transcript; parent instructions signed under the operator chain. juggler lives in clown (`cmd/juggler`) |
+| clown (juggler) | FDR 0019 (juggler agent substrate; draft, `docs/features/0019-juggler-agent-substrate.md`) | clown#245 | slice 3, D6, D7 | a subagent under a certified principal with a `<prov>` transcript; parent instructions signed under the operator chain. juggler lives in clown (`cmd/juggler`) |
 | spinclass + clown + juggler | FDR (session confinement) | spinclass#338 | D17 | the unit shape: `ProtectHome`, bind-mounted worktree, dynamic uid, sockets passed in; `--tent` as a realization; juggler as launcher |
 | spinclass | security review | spinclass#339 | D17 | findings recorded in D17; `testing -> accepted` requires it |
 | spinclass | revisions to FDR 0007 and FDR 0031 | spinclass#337 | D16 | attestations as signed records from distinct subagent principals; exemption predicates select required record kinds |
