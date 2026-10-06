@@ -887,9 +887,9 @@ GitHub, lacks it until added by hand).
   The circus design record is circus FDR 0039
   (`docs/features/0039-pebble-webhook-agent-graph.md`), which supersedes
   circus FDR 0023 and absorbs circus#241; amarbel-llc/circus#288 tracks the
-  build and circus#158 remains the umbrella. Per circus's session no node in that graph needs a git worktree, so
-  this use depends on slice 3 (principals and handles for a juggler-launched
-  agent with no worktree, clown#245).
+  build and circus#158 remains the umbrella. Per circus's session no node in
+  that graph needs a git worktree, so this use depends on slice 3 (principals
+  and handles for a juggler-launched agent with no worktree, clown#245).
 
 ## Non-goals
 
