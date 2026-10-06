@@ -789,6 +789,60 @@ specified by contract in "Companion records".
 Rollback: slice 0 is additive on state and keeps `spawned_by`; removing the
 principal fallback restores the #332 refusal exactly.
 
+### Handle-record contract (added 2026-10-06)
+
+For implementations that keep handle records for principals that are not
+spinclass sessions (clown FDR 0019's juggler agents). D7 requires their
+records and exit reasons to keep these field meanings, so a later move into
+spinclass is a relocation. What slice 0 records, not what D12/D13 promise:
+
+- A holder is a **principal**: a non-empty string, `CLOWN_SESSION_ID` when
+  the process is hosted by clown, else a random UUID v4 minted once per
+  process. An empty principal MUST never match any record or authorize.
+- The record is three fields: `holders` (JSON string list, accepted),
+  `pending_handles` (JSON string list), and `handle_rights` (JSON object,
+  principal to string). All are omitted when empty. Rights are a
+  comma-separated string, not a list.
+- A grant MUST append the recipient to `pending_handles` and record its
+  rights, defaulting to `observe,close` when none are named. A pending
+  principal confers no authority and receives no exit wakes.
+- Granting to a principal that is already accepted or already pending MUST
+  change nothing and MUST NOT error; it cannot change recorded rights.
+- First use moves a principal from pending to `holders`. Slice 0 counts
+  three uses: reaping the session, granting onward, and listing handles
+  with accept. Accepting a non-pending principal MUST do nothing.
+- Release removes only the caller, from `holders`, `pending_handles` and
+  `handle_rights`. Releasing with no entry in either list MUST refuse and
+  change nothing. Release MUST NOT touch the spawner lineage field.
+- Spawning MUST seed the spawner as the first accepted holder, only when
+  its principal is non-empty. D13 says spawn mints all five rights; slice 0
+  records no `handle_rights` entry for the spawner at all.
+- Rights are recorded, not enforced. Authority to reap, grant or release is
+  membership in `holders` alone. No `grant` or `close` right is consulted,
+  so any accepted holder may grant onward, and D13's non-transferable
+  handle does not exist yet. Rights on a pending grant are not consulted
+  at accept either.
+- A session is **orphaned** when it has a recorded spawner principal and
+  `holders` is empty. Pending entries do not count, and a session with no
+  spawner principal is never orphaned. D12 says "no accepted holder is
+  alive per the presence index"; slice 0 tests membership, not liveness.
+- An exit wake goes to each accepted holder except the principal that
+  caused the exit (the reaper, or the spawn driver on hello timeout, which
+  already knows). Pending principals get none. D6's "every accepted
+  holder" is narrower in practice for that reason.
+- A wake is a ringmaster job on the recipient's channel, labelled `exit`,
+  started then done with state `succeeded` whatever the reason. Its message
+  is `session <key> exited (<reason>); notified <N> holder(s)`, N being the
+  count after the exclusion above. The reason is only in that text.
+- Reasons emitted today: `normal` (harness SessionEnd, never `/clear`),
+  `shutdown` (reap), `killed` (force reap), `crash` (hello timeout). `failed`
+  is in the vocabulary and is never emitted by spinclass. The wake carries
+  no certificate digest yet, which D6 describes.
+
+Reference implementation: `internal/session/session.go`,
+`cmd/spinclass/handles_cmd.go`, `close_child_cmd.go`, `internal/spawn`,
+`internal/clown/clown.go`.
+
 ## Examples
 
 A coordinator at `~/eng` (not a git repository) spawns and later reaps a

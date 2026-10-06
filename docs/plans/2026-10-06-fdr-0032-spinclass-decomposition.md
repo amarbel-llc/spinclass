@@ -44,6 +44,11 @@ and not a migration (FDR 0032 D7).
 
 Parallel: 1 and 2. Then 3.
 
+**Status (2026-10-06): done.** Brief 1 is the "Handle-record contract"
+subsection of FDR 0032's slice-0 interface. Brief 2 is `clown.ExitReason`.
+Brief 3 turned out empty: brief 2 carried its own tests, and no manpage or
+generated doc mentions the exit reasons.
+
 No brief depends on another repo's binary beyond ringmaster, which the
 emitter already calls.
 
