@@ -11,9 +11,9 @@
 // The endpoint resolves once per merge into a Client (Resolve), from the
 // sweatfile's [metrics] table and the environment. Precedence: the sweatfile's
 // disable-statsd or SPINCLASS_DISABLE_STATSD=1 turn emission off outright;
-// else the sweatfile's statsd-address (host:port, or a bare host on port 8125)
-// wins; else the environment's tommy-style opt-in applies — nothing is sent
-// unless STATSD_HOST or STATSD_PORT is present (the stats-me home-manager
+// else the sweatfile's statsd-address (host:port, or a bare host on port 8125;
+// a malformed one disables emission, see ParseAddress) wins; else the
+// environment's tommy-style opt-in applies — nothing is sent unless STATSD_HOST or STATSD_PORT is present (the stats-me home-manager
 // module exports both), so a sandboxed build or test never sprays UDP. A
 // present-but-empty STATSD_HOST means 127.0.0.1; STATSD_PORT defaults to 8125.
 //
@@ -24,11 +24,14 @@ package statsd
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Prefix opens every spinclass metric name.
@@ -60,10 +63,11 @@ func Resolve(address string, disabled bool) Client {
 		return Client{}
 	}
 	if address != "" {
-		if _, _, err := net.SplitHostPort(address); err != nil {
-			address = net.JoinHostPort(address, defaultPort)
+		hostPort, err := ParseAddress(address)
+		if err != nil {
+			return Client{}
 		}
-		return Client{addr: address}
+		return Client{addr: hostPort}
 	}
 	host, hostSet := os.LookupEnv("STATSD_HOST")
 	port, portSet := os.LookupEnv("STATSD_PORT")
@@ -77,6 +81,63 @@ func Resolve(address string, disabled bool) Client {
 		port = defaultPort
 	}
 	return Client{addr: net.JoinHostPort(host, port)}
+}
+
+// ParseAddress normalises a sweatfile statsd-address into a dialable host:port,
+// or says why it is malformed. It accepts host, host:port, an IPv4 literal, a
+// bare IPv6 literal (::1) and a bracketed [::1] or [::1]:8125; a bare host gets
+// port 8125. It rejects a URL scheme, whitespace, an empty host, and a port that
+// is not an integer in 1..65535.
+//
+// Resolve uses it to normalise and `sc validate` uses it to judge, so the two
+// cannot disagree. At runtime a malformed address turns emission off (the zero
+// Client) rather than sending to a garbage endpoint.
+func ParseAddress(address string) (hostPort string, err error) {
+	if address == "" {
+		return "", errors.New("empty address")
+	}
+	if strings.Contains(address, "://") {
+		return "", errors.New("contains a URL scheme; use host or host:port")
+	}
+	if strings.IndexFunc(address, unicode.IsSpace) >= 0 {
+		return "", errors.New("contains whitespace")
+	}
+	host, port, splitErr := net.SplitHostPort(address)
+	if splitErr != nil {
+		var ok bool
+		if host, ok = bareHost(address); !ok {
+			return "", fmt.Errorf("not a host or host:port: %w", splitErr)
+		}
+		port = defaultPort
+	}
+	if host == "" {
+		return "", errors.New("empty host")
+	}
+	if !validPort(port) {
+		return "", fmt.Errorf("port %q is not an integer in 1..65535", port)
+	}
+	return net.JoinHostPort(host, port), nil
+}
+
+// bareHost extracts the host from an address with no port: a plain name or IPv4
+// literal, a bare IPv6 literal, or a bracketed IPv6 literal.
+func bareHost(address string) (string, bool) {
+	if inner, ok := strings.CutPrefix(address, "["); ok {
+		inner, ok = strings.CutSuffix(inner, "]")
+		return inner, ok && net.ParseIP(inner) != nil
+	}
+	if strings.Contains(address, ":") {
+		return address, net.ParseIP(address) != nil
+	}
+	return address, true
+}
+
+func validPort(port string) bool {
+	if port == "" || strings.IndexFunc(port, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+		return false
+	}
+	n, err := strconv.Atoi(port)
+	return err == nil && n >= 1 && n <= 65535
 }
 
 // Enabled reports whether the Client will send anything.

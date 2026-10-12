@@ -156,9 +156,11 @@ The promotion criterion reads statsd counters (`internal/statsd`, emitted from
 `.push_refused`, `.local_advance.ok`, `.local_advance.skip`, and
 `.local_advance.skip_reason.<dirty_overlap|diverged|ahead|error>`. Dimensions
 live in the name (the graphite backend drops tags); `ok + skip == landed` by
-construction. Emission is opt-in (`STATSD_HOST`/`STATSD_PORT` present) and
-killed by `SPINCLASS_DISABLE_STATSD=1`, which `testgit.SetHermeticEnv` sets so
-fixture merges never reach the fleet counters.
+construction. Emission is opt-in (`STATSD_HOST`/`STATSD_PORT` present, or the
+sweatfile's `[metrics].statsd-address`) and killed by `[metrics].disable-statsd`
+or `SPINCLASS_DISABLE_STATSD=1` (see spinclass-sweatfile(5)).
+`testgit.SetHermeticEnv` sets the environment switch so fixture merges never
+reach the fleet counters.
 
 ## More Information
 

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/statsd"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/tap"
@@ -470,6 +471,25 @@ func CheckPostMergeTargets(sf sweatfile.Sweatfile) []Issue {
 	return issues
 }
 
+// CheckMetrics warns about a [metrics].statsd-address that statsd.Resolve would
+// reject, using the same statsd.ParseAddress: at runtime such an address turns
+// emission off, so the warning says that rather than leaving it a silent no-op.
+func CheckMetrics(sf sweatfile.Sweatfile) []Issue {
+	addr := sf.MetricsStatsdAddress()
+	if addr == "" {
+		return nil
+	}
+	if _, err := statsd.ParseAddress(addr); err != nil {
+		return []Issue{{
+			Message:  fmt.Sprintf("[metrics] statsd-address %q is malformed (%v): metrics emission is disabled until it is fixed", addr, err),
+			Severity: SeverityWarning,
+			Field:    "metrics.statsd-address",
+			Value:    addr,
+		}}
+	}
+	return nil
+}
+
 // CheckAuth validates the [auth] table (FDR 0028): a mint-command without a
 // revoke-command mints tokens nothing will ever revoke, and a revoke-command
 // alone never runs — both are almost certainly a half-written config.
@@ -766,6 +786,16 @@ func Run(w io.Writer, home, repoDir string) int {
 				}
 			} else {
 				sub.Ok("auth valid")
+			}
+		}
+
+		if src.File.Metrics != nil {
+			if issues := CheckMetrics(src.File); len(issues) > 0 {
+				for _, iss := range issues {
+					sub.Ok(fmt.Sprintf("metrics valid # warning: %s", iss.Message))
+				}
+			} else {
+				sub.Ok("metrics valid")
 			}
 		}
 

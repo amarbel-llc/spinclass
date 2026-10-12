@@ -618,6 +618,33 @@ func TestCheckAuthWarnsRepoLayerURLResolver(t *testing.T) {
 	}
 }
 
+func TestCheckMetricsWarnsOnMalformedStatsdAddress(t *testing.T) {
+	check := func(addr string) []Issue {
+		return CheckMetrics(sweatfile.Sweatfile{Metrics: &sweatfile.Metrics{StatsdAddress: &addr}})
+	}
+	for _, bad := range []string{"udp://stats.example.com:8125", "stats host", "stats:0", "stats:65536", "stats:http", ":8125"} {
+		issues := check(bad)
+		if len(issues) != 1 || issues[0].Severity != SeverityWarning || issues[0].Field != "metrics.statsd-address" || issues[0].Value != bad {
+			t.Errorf("CheckMetrics(%q) = %+v; want one metrics.statsd-address warning", bad, issues)
+		}
+	}
+	for _, good := range []string{"stats.example.com", "stats.example.com:8125", "10.0.0.7", "10.0.0.7:9000", "::1", "[::1]:8125"} {
+		if issues := check(good); len(issues) != 0 {
+			t.Errorf("CheckMetrics(%q) = %+v; want none", good, issues)
+		}
+	}
+}
+
+func TestCheckMetricsAllowsUnset(t *testing.T) {
+	if issues := CheckMetrics(sweatfile.Sweatfile{}); len(issues) != 0 {
+		t.Errorf("no [metrics]: got %+v", issues)
+	}
+	disabled := true
+	if issues := CheckMetrics(sweatfile.Sweatfile{Metrics: &sweatfile.Metrics{DisableStatsd: &disabled}}); len(issues) != 0 {
+		t.Errorf("disable-statsd only: got %+v", issues)
+	}
+}
+
 func TestCheckPostMergeTargetsValid(t *testing.T) {
 	verify := "check-health"
 	sf := sweatfile.Sweatfile{

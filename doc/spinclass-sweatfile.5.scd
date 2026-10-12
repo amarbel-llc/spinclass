@@ -796,7 +796,9 @@ nothing is sent unless *STATSD\_HOST* or *STATSD\_PORT* is present
 *statsd-address*
 	The stats-me endpoint, _host:port_ or a bare host (port 8125). Beats
 	*STATSD\_HOST*/*STATSD\_PORT*, so a repo or parent directory can enable
-	emission without any environment.
+	emission without any environment. A malformed address (a URL scheme,
+	whitespace, an empty host, or a port outside 1..65535) turns emission off,
+	and *sc validate* warns about it.
 
 *disable-statsd*
 	Boolean. When true, nothing is sent, whatever else is set.

@@ -156,6 +156,50 @@ func TestResolveBareHostGetsDefaultPort(t *testing.T) {
 	}
 }
 
+func TestParseAddress(t *testing.T) {
+	valid := map[string]string{
+		"stats.example.com":      "stats.example.com:8125",
+		"stats.example.com:9000": "stats.example.com:9000",
+		"10.0.0.7":               "10.0.0.7:8125",
+		"10.0.0.7:1":             "10.0.0.7:1",
+		"::1":                    "[::1]:8125",
+		"[::1]":                  "[::1]:8125",
+		"[::1]:8125":             "[::1]:8125",
+		"localhost:65535":        "localhost:65535",
+	}
+	for in, want := range valid {
+		got, err := ParseAddress(in)
+		if err != nil || got != want {
+			t.Errorf("ParseAddress(%q) = %q, %v; want %q, nil", in, got, err, want)
+		}
+	}
+	for _, in := range []string{
+		"", "udp://stats.example.com:8125", "http://host", "host name", "host:81 25", " host", "host\t",
+		":8125", ":", "[::1]:", "host:", "host:0", "host:65536", "host:-1", "host:+80", "host:http", "host:8125x",
+		"a:b:c", "[not-an-ip]", "[::1", "[::1]x",
+	} {
+		if got, err := ParseAddress(in); err == nil {
+			t.Errorf("ParseAddress(%q) = %q, nil; want an error", in, got)
+		}
+	}
+}
+
+// A malformed sweatfile address turns emission off outright: it neither sends to
+// a garbage endpoint nor falls back to the environment opt-in.
+func TestResolveMalformedAddressDisablesEmission(t *testing.T) {
+	conn := listen(t) // the env would send here
+	for _, bad := range []string{"udp://127.0.0.1:8125", "127.0.0.1:99999", ":8125", "bad host"} {
+		c := Resolve(bad, false)
+		if c.Enabled() {
+			t.Errorf("Resolve(%q) enabled; a malformed address must disable emission", bad)
+		}
+		c.Count("a")
+		if got, ok := recv(t, conn); ok {
+			t.Errorf("Resolve(%q) sent %q", bad, got)
+		}
+	}
+}
+
 func TestResolveEnvOptIn(t *testing.T) {
 	t.Setenv("SPINCLASS_DISABLE_STATSD", "")
 	t.Setenv("STATSD_HOST", "")
