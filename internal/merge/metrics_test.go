@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -156,8 +157,13 @@ func TestMetricsCleanLandingTimers(t *testing.T) {
 	if recs, err := runResolved(t, &mockExecutor{}, repoDir, wtPath, "feature-m-timers", "main", true, false); err != nil {
 		t.Fatalf("Resolved: %v\n%+v", err, recs)
 	}
-	got := timerNames(t, drain())
+	datagrams := drain()
+	got := timerNames(t, datagrams)
 	prefix := "spinclass.merge." + filepath.Base(repoDir) + "."
+	// Nothing else is merging, so the depth found on arrival is zero.
+	if wantGauge := prefix + "queue_depth:0|g"; !slices.Contains(datagrams, wantGauge) {
+		t.Errorf("gauge %q not emitted; got %q", wantGauge, datagrams)
+	}
 	var want []string
 	for _, phase := range []string{
 		"fetch", "rebase", "prepare",

@@ -455,6 +455,13 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	}
 	holderID := filepath.Base(repoPath) + "/" + branch // the session key `sc list` prints
 
+	// Queue depth on arrival (spinclass#363): the merges already waiting for,
+	// or holding, the lock. Membership lasts until this merge is over — the
+	// deferred leave runs after the lock's deferred Release below.
+	ahead, leaveQueue := mergelock.Join(lockDir)
+	defer leaveQueue()
+	mx.client.Gauge("merge."+mx.repo+".queue_depth", ahead)
+
 	// Periodic wait heartbeats go only to activity (the async job log): test
 	// points are one-shot, so the stream instead gets a single post-acquire
 	// summary point. The [hooks].inactivity-timeout watchdog wraps only the

@@ -71,6 +71,18 @@ func TestTimingSendsWholeMilliseconds(t *testing.T) {
 	}
 }
 
+func TestGaugeSendsValue(t *testing.T) {
+	conn := listen(t)
+	Resolve("", false).Gauge("merge.repo.queue_depth", 3)
+	got, ok := recv(t, conn)
+	if !ok {
+		t.Fatal("no datagram received")
+	}
+	if want := "spinclass.merge.repo.queue_depth:3|g"; got != want {
+		t.Errorf("payload = %q, want %q", got, want)
+	}
+}
+
 func TestZeroClientEmitsNothing(t *testing.T) {
 	conn := listen(t)
 	var c Client

@@ -1,6 +1,6 @@
 // Package statsd emits best-effort spinclass telemetry to stats-me over UDP in
 // the classic statsd line protocol (stats-me-clients(7), spinclass#314,
-// spinclass#363): counters (|c) and millisecond timers (|ms).
+// spinclass#363): counters (|c), millisecond timers (|ms) and gauges (|g).
 //
 // Dimensions live in the metric NAME, never in DogStatsD tags: the fleet's
 // graphite backend drops tags (the troupe/moxy idiom). Names carry no build
@@ -91,6 +91,12 @@ func (c Client) Count(name string) {
 // Timing records d, in whole milliseconds, on the timer spinclass.<name>.
 func (c Client) Timing(name string, d time.Duration) {
 	c.send(Prefix + name + ":" + strconv.FormatInt(d.Milliseconds(), 10) + "|ms")
+}
+
+// Gauge sets the gauge spinclass.<name> to value. statsd keeps only the last
+// value per flush interval, so a gauge is a sample at the moment it is sent.
+func (c Client) Gauge(name string, value int) {
+	c.send(Prefix + name + ":" + strconv.Itoa(value) + "|g")
 }
 
 func (c Client) send(payload string) {

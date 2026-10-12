@@ -830,6 +830,11 @@ cap fired) or *cancelled* (the caller cancelled). The phases:
 - *total*: the whole merge, from the call that started it to its end. A
   failing post-merge phase is non-fatal, so it leaves *total* at *ok*.
 
+A merge also sets the gauge *spinclass.merge.*_repo_*.queue\_depth* when it
+reaches the per-repo landing lock: the number of other merges on this host
+already waiting for it or holding it (0 when uncontended). It is a sample
+taken as each merge arrives, not a continuous reading.
+
 *sc check* sends *spinclass.check.*_repo_*.pre\_merge\_hook.*_outcome_ for its
 hook run; a merge that checks does not send it.
 
