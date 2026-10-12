@@ -3,6 +3,7 @@ package hookrun_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +24,12 @@ func TestPreMergeContextInactivityKill(t *testing.T) {
 	elapsed := time.Since(start)
 	if err == nil || !strings.Contains(err.Error(), "inactivity-timeout") {
 		t.Fatalf("expected inactivity-timeout error, got %v (elapsed %v)", err, elapsed)
+	}
+	if !errors.Is(err, ErrInactivityTimeout) {
+		t.Errorf("inactivity kill must satisfy errors.Is(ErrInactivityTimeout): %v", err)
+	}
+	if want := "pre-merge hook killed: no output for 1s (inactivity-timeout)"; err.Error() != want {
+		t.Errorf("message = %q, want %q", err.Error(), want)
 	}
 	if elapsed > 5*time.Second {
 		t.Errorf("hook not killed promptly: elapsed %v", elapsed)

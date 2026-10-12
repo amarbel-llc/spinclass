@@ -23,6 +23,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/landing"
 	"code.linenisgreat.com/spinclass/internal/madder"
 	"code.linenisgreat.com/spinclass/internal/present"
+	"code.linenisgreat.com/spinclass/internal/statsd"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/tap/go/pkgs/ndjson"
@@ -131,9 +132,20 @@ func RunContext(ctx context.Context, rep *crap.Reporter, wtPath string, activity
 	// Pin HEAD so the hook verifies the committed tree in an isolated build
 	// worktree (see resolveHookDir). RevParse failure degrades to "" → in-place.
 	hookSha, _ := git.RevParse(wtPath, "HEAD")
+	start := time.Now()
 	links, hookErr := RunWithReporterContext(ctx, rep, ts, hierarchy, wtPath, branch, hookSha, activity)
+	// Standalone `sc check` only: merge calls RunWithReporterContext directly
+	// and times its own pre_merge_hook phase, so a merge never double-counts.
+	timeCheckHook(ctx, hierarchy.Merged, repoPath, start, hookErr)
 	ts.Finish()
 	return links, hookErr
+}
+
+// timeCheckHook emits check.<repo>.pre_merge_hook.<outcome> (spinclass#363).
+func timeCheckHook(ctx context.Context, sf sweatfile.Sweatfile, repoPath string, start time.Time, hookErr error) {
+	outcome := statsd.Outcome(ctx, hookErr, errors.Is(hookErr, hookrun.ErrInactivityTimeout))
+	statsd.Resolve(sf.MetricsStatsdAddress(), sf.MetricsStatsdDisabled()).
+		Timing("check."+statsd.Segment(filepath.Base(repoPath))+".pre_merge_hook."+outcome, time.Since(start))
 }
 
 // preflightCheck runs PreflightMergeDrivers for `sc check` against the ref a

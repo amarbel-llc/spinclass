@@ -41,6 +41,20 @@ type PostMergeOptions struct {
 	// at (FDR 0007, #219); "" when unknown, or when the merge was not admitted
 	// by an attestation. It is only read for GateAttested.
 	AttestedSha string
+
+	// StartedAt is when the merge call began, so the total timer
+	// (spinclass#363) spans PrepareMerge + FinishMerge across the async split
+	// where they run at different times. Zero = each emitting function's own
+	// start. Callers that run both halves stamp it with StampStartedAt.
+	StartedAt time.Time
+}
+
+// StampStartedAt returns pm with StartedAt set to now unless already set.
+func (o PostMergeOptions) StampStartedAt() PostMergeOptions {
+	if o.StartedAt.IsZero() {
+		o.StartedAt = time.Now()
+	}
+	return o
 }
 
 // TargetsFromFlags maps the CLI spelling of a post-merge target selection

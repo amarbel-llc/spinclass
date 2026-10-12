@@ -785,6 +785,54 @@ honours only *[hooks].allow-no-credential* (it has no flag, and its
 refusal names only that setting). Implicit (main-checkout) sessions are
 outside this: they are the operator in the root and keep ssh.
 
+## [metrics]
+
+Best-effort statsd telemetry to stats-me (*stats-me-clients*(7), spinclass#363).
+Emission is opt-in: with neither key set it follows the environment —
+nothing is sent unless *STATSD\_HOST* or *STATSD\_PORT* is present
+(a present-but-empty *STATSD\_HOST* means 127.0.0.1; the port defaults to
+8125). *Merge:* scalar override for both keys.
+
+*statsd-address*
+	The stats-me endpoint, _host:port_ or a bare host (port 8125). Beats
+	*STATSD\_HOST*/*STATSD\_PORT*, so a repo or parent directory can enable
+	emission without any environment.
+
+*disable-statsd*
+	Boolean. When true, nothing is sent, whatever else is set.
+	*SPINCLASS\_DISABLE\_STATSD=1* in the environment does the same and also
+	beats *statsd-address*.
+
+Telemetry never fails or slows a merge: an absent, unreachable or
+unresolvable endpoint is silently ignored (the send is a fire-and-forget UDP
+datagram with a 250ms dial bound). Dimensions live in the metric name (the
+graphite backend drops tags); a variable segment (the repository directory
+name, a post-merge target name) is lowercased and every character outside
+a-z, 0-9, underscore and hyphen becomes an underscore.
+
+Counters (remote landings only; see *spinclass-local-default-ref*(7)) are
+sent as *spinclass.merge.*_name_. Timers are in whole milliseconds, named
+*spinclass.merge.*_repo_*.*_phase_*.*_outcome_, where _outcome_ is one of
+*ok*, *failed*, *timeout* (the *inactivity-timeout* or *post-merge-timeout*
+cap fired) or *cancelled* (the caller cancelled). The phases:
+
+- *fetch*, *rebase*, *repair*, *prepare*: the prefix of a merge (*prepare*
+  is all of it; *fetch* is skipped for a local-only merge, *repair* when
+  *[hooks].repair* is unset).
+- *queue\_wait*, *landing\_fetch*, *landing\_rebase*, *policy*,
+  *pre\_merge\_hook*, *land*, *finish*: the rest of a merge under the
+  per-repo landing lock (*finish* is all of it; *landing\_rebase* only when
+  the default branch moved; *pre\_merge\_hook* only when a hook is
+  configured).
+- *post\_merge.*_target_*.command* and *post\_merge.*_target_*.verify*: each
+  named *[[post-merge]]* target's stages (*verify* only when it ran), or
+  *post\_merge\_hook* for the legacy *[hooks].post-merge* string.
+- *total*: the whole merge, from the call that started it to its end. A
+  failing post-merge phase is non-fatal, so it leaves *total* at *ok*.
+
+*sc check* sends *spinclass.check.*_repo_*.pre\_merge\_hook.*_outcome_ for its
+hook run; a merge that checks does not send it.
+
 ## [session-entry]
 
 Controls what command is exec'd when attaching to a session, how detached

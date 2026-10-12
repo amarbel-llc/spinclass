@@ -153,6 +153,7 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, rep *crap.Rep
 		return nil, errors.New("default branch not resolved: callers must resolve it (ResolveDefaultBranch) before ResolvedContext")
 	}
 
+	pm = pm.StampStartedAt()
 	pinnedSha, prepErr := PrepareMerge(ts, repoPath, wtPath, branch, defaultBranch, gitSync, pm)
 	if prepErr != nil {
 		return nil, prepErr
@@ -175,7 +176,19 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, rep *crap.Rep
 // moment the rebase lands while FinishMerge's slow pre-merge hook runs detached
 // in an isolated build worktree.
 func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch string, gitSync bool, pm PostMergeOptions) (pinnedSha string, err error) {
+	prepStart := time.Now()
+	var mx phaseMetrics
+	// A failed prepare is the whole merge failing, so it also closes out the
+	// total timer; a successful one leaves total to FinishMerge.
+	defer func() {
+		mx.observeErr(context.Background(), "prepare", prepStart, err)
+		if err != nil {
+			mx.observeErr(context.Background(), "total", startedAtOr(pm, prepStart), err)
+		}
+	}()
+
 	preamble, gateErr := loadAndGate(ts, repoPath, wtPath, branch)
+	mx = newPhaseMetrics(preamble.hierarchy.Merged, repoPath)
 	if gateErr != nil {
 		return "", gateErr
 	}
@@ -186,7 +199,7 @@ func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch s
 	// cannot fail or skew the merge. A local-only merge targets the local
 	// branch itself.
 	target := landing.ForMerge(repoPath, defaultBranch, gitSync)
-	if err := fetchTarget(context.Background(), ts, target, wtPath, ""); err != nil {
+	if err := timedFetchTarget(context.Background(), mx, "fetch", ts, target, wtPath, ""); err != nil {
 		return "", err
 	}
 
@@ -197,7 +210,9 @@ func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch s
 		return "", err
 	}
 
+	rebaseStart := time.Now()
 	out, rebaseErr := git.RunEnv(wtPath, []string{"GIT_SEQUENCE_EDITOR=true"}, "rebase", target.Ref(), "-i")
+	mx.observeErr(context.Background(), "rebase", rebaseStart, rebaseErr)
 	if rebaseErr != nil {
 		return "", failStep(ts, "rebase "+branch, rebaseErr, out)
 	}
@@ -233,7 +248,7 @@ func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch s
 	// (so HEAD is an unpushed session commit conformist's --amend accepts) and
 	// before the pin (so the pin reads the post-repair HEAD). The rebase and that
 	// guard already establish repair's preconditions, so no skip check.
-	if rErr := preamble.repair(ts, wtPath, branch); rErr != nil {
+	if rErr := preamble.repair(ts, mx, wtPath, branch); rErr != nil {
 		return "", rErr
 	}
 
@@ -321,7 +336,7 @@ func validatePostMergeSelection(ts *crap.TestStream, repoPath, branch, pinnedSha
 
 // repair runs the REPAIR phase (FDR 0018) in dir. It is a no-op when the
 // hierarchy did not load or repair is inactive.
-func (p mergePreamble) repair(ts *crap.TestStream, dir, branch string) error {
+func (p mergePreamble) repair(ts *crap.TestStream, mx phaseMetrics, dir, branch string) error {
 	if !p.haveHierarchy || !p.hierarchy.Merged.RepairActive() {
 		return nil
 	}
@@ -341,7 +356,10 @@ func (p mergePreamble) repair(ts *crap.TestStream, dir, branch string) error {
 		)
 		return failStep(ts, "dirty check "+branch, dirtyErr, "")
 	}
-	return runRepairPhase(ts, p.hierarchy, dir, branch)
+	repairStart := time.Now()
+	repairErr := runRepairPhase(ts, p.hierarchy, dir, branch)
+	mx.observeErr(context.Background(), "repair", repairStart, repairErr)
+	return repairErr
 }
 
 // pinHead resolves dir's HEAD as the sha the pre-merge hook verifies and the
@@ -402,6 +420,7 @@ const LandWorktreePrefix = ".land-"
 // ts.Finish().
 func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch, pinnedSha string, gitSync, inSession bool, activity io.Writer, pm PostMergeOptions) (blobLinks []check.BlobLink, err error) {
 	_ = execr // kept for signature stability; close requests go through executor.RequestClose
+	finishStart := time.Now()
 
 	// Merge-queue knob. Mirrors PrepareMerge's graceful-degrade hierarchy
 	// load: an unresolvable home or a load failure leaves the queue ENABLED —
@@ -414,8 +433,15 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 			sessionH = h
 		}
 	}
+	// finish and total close out here for both paths (the unqueued one included).
+	// A post-merge failure is non-fatal, so it never turns total into failed.
+	mx := newPhaseMetrics(sessionH.Merged, repoPath)
+	defer func() {
+		mx.observeErr(ctx, "finish", finishStart, err)
+		mx.observeErr(ctx, "total", startedAtOr(pm, finishStart), err)
+	}()
 	if sessionH.Merged.DisableMergeQueueEnabled() {
-		return finishMergeUnqueued(ctx, rep, ts, sessionH, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, inSession, activity, pm)
+		return finishMergeUnqueued(ctx, mx, rep, ts, sessionH, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, inSession, activity, pm)
 	}
 
 	// Acquire the per-repo landing lock BEFORE the gate, so the gate always
@@ -449,6 +475,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 			_, _ = fmt.Fprintf(activity, "merge queue: waiting behind %s (%s)\n", holder, elapsed.Round(time.Second))
 		}
 	})
+	mx.observeErr(ctx, "queue_wait", waitStart, lockErr)
 	if lockErr != nil {
 		return nil, failStep(ts, "merge queue "+branch, lockErr, "")
 	}
@@ -462,7 +489,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	// (a) Re-fetch under the lock: PrepareMerge's fetch is now stale by the
 	// length of the queue wait.
 	target := landing.ForMerge(repoPath, defaultBranch, gitSync)
-	if fErr := fetchTarget(ctx, ts, target, wtPath, " (landing)"); fErr != nil {
+	if fErr := timedFetchTarget(ctx, mx, "landing_fetch", ts, target, wtPath, " (landing)"); fErr != nil {
 		return nil, fErr
 	}
 
@@ -500,7 +527,9 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	}
 	if needRebase {
 		var landErr error
+		rebaseStart := time.Now()
 		landingSha, landErr = rebaseLanding(ts, landPath, branch, target.Ref())
+		mx.observeErr(ctx, "landing_rebase", rebaseStart, landErr)
 		if landErr != nil {
 			return nil, landErr
 		}
@@ -509,7 +538,10 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 
 	// (d0) The pre-merge policy stage (FDR 0031), under the lock, judging the
 	// exact landing diff before the expensive hook.
-	if pErr := runAttestationPolicy(ctx, ts, pm.Gate, sessionH, repoPath, branch, defaultBranch, target.Ref(), pinnedSha, landingSha, pm.AttestedSha); pErr != nil {
+	policyStart := time.Now()
+	pErr := runAttestationPolicy(ctx, ts, pm.Gate, sessionH, repoPath, branch, defaultBranch, target.Ref(), pinnedSha, landingSha, pm.AttestedSha)
+	mx.observeErr(ctx, "policy", policyStart, pErr)
+	if pErr != nil {
 		return nil, pErr
 	}
 
@@ -517,7 +549,9 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	// (With [hooks].disable-merge-build-worktree the hook runs in the session
 	// worktree instead — pre-existing resolveHookDir behavior, in which the
 	// sha it verifies is whatever that worktree has checked out.)
+	hookStart := time.Now()
 	hookLinks, hookErr := runPreMergeHookContext(ctx, rep, ts, repoPath, wtPath, branch, landingSha, activity)
+	mx.observePreMergeHook(ctx, sessionH.Merged, hookStart, hookErr)
 	blobLinks = append(blobLinks, hookLinks...)
 	if hookErr != nil {
 		return blobLinks, hookErr
@@ -532,22 +566,25 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	if rebased {
 		mergeLabel = "merge " + branch + " (rebased onto moved " + defaultBranch + ")"
 	}
-	if out, landErr := target.Land(landPath, landingSha); landErr != nil {
+	landStart := time.Now()
+	out, landErr := target.Land(landPath, landingSha)
+	mx.observeErr(ctx, "land", landStart, landErr)
+	if landErr != nil {
 		if !target.IsSelf() {
-			statsd.Count(MetricPushRefused)
+			mx.client.Count(MetricPushRefused)
 		}
 		return blobLinks, failStep(ts, mergeLabel, landErr, out)
 	}
 	ts.Ok(mergeLabel)
 	if !target.IsSelf() {
-		statsd.Count(MetricLanded)
+		mx.client.Count(MetricLanded)
 	}
 
 	// (e') Advance the root's local default branch to what just landed, still
 	// under the lock (a sibling's landing moves the same ref) and before the
 	// post-merge phase (so deploy scripts see it). Ergonomics only (#295): a
 	// refusal is a SKIP, never a failure — the merge has already landed.
-	reportLocalAdvance(ts, target, landingSha)
+	reportLocalAdvance(ts, mx.client, target, landingSha)
 
 	// (f) Teardown, still under the lock; nothing is pushed here — a gitSync
 	// landing already pushed in (e). The pin contract allows commits to land on
@@ -577,7 +614,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	// place, since the two deploys could interleave and the older one could
 	// win. The deferred Release above fires when FinishMerge returns. It runs in
 	// the landing worktree — the exact tree that landed.
-	runPostMergePhase(ctx, rep, ts, repoPath, wtPath, landPath, branch, defaultBranch, pinnedSha, landingSha, gitSync, activity, pm)
+	runPostMergePhase(ctx, mx, rep, ts, repoPath, wtPath, landPath, branch, defaultBranch, pinnedSha, landingSha, gitSync, activity, pm)
 	return blobLinks, nil
 }
 
@@ -585,21 +622,28 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 // the [hooks].disable-merge-queue rollback knob: hook on pinnedSha → ff-only →
 // teardown → push, with no lock, no re-pull, and no landing rebase — a default
 // branch that moved during the hook fails the ff-only merge exactly as before.
-func finishMergeUnqueued(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, sessionH sweatfile.Hierarchy, repoPath, wtPath, branch, defaultBranch, pinnedSha string, gitSync, inSession bool, activity io.Writer, pm PostMergeOptions) (blobLinks []check.BlobLink, err error) {
+func finishMergeUnqueued(ctx context.Context, mx phaseMetrics, rep *crap.Reporter, ts *crap.TestStream, sessionH sweatfile.Hierarchy, repoPath, wtPath, branch, defaultBranch, pinnedSha string, gitSync, inSession bool, activity io.Writer, pm PostMergeOptions) (blobLinks []check.BlobLink, err error) {
 	// PrepareMerge rebased onto the landing target, so it is an ancestor of the
 	// pin and the pin is exactly what lands on this path.
 	target := landing.ForMerge(repoPath, defaultBranch, gitSync)
-	if pErr := runAttestationPolicy(ctx, ts, pm.Gate, sessionH, repoPath, branch, defaultBranch, target.Ref(), pinnedSha, pinnedSha, pm.AttestedSha); pErr != nil {
+	policyStart := time.Now()
+	pErr := runAttestationPolicy(ctx, ts, pm.Gate, sessionH, repoPath, branch, defaultBranch, target.Ref(), pinnedSha, pinnedSha, pm.AttestedSha)
+	mx.observeErr(ctx, "policy", policyStart, pErr)
+	if pErr != nil {
 		return nil, pErr
 	}
 
+	hookStart := time.Now()
 	hookLinks, hookErr := runPreMergeHookContext(ctx, rep, ts, repoPath, wtPath, branch, pinnedSha, activity)
+	mx.observePreMergeHook(ctx, sessionH.Merged, hookStart, hookErr)
 	blobLinks = append(blobLinks, hookLinks...)
 	if hookErr != nil {
 		return blobLinks, hookErr
 	}
 
+	landStart := time.Now()
 	out, mergeErr := git.Run(repoPath, "merge", "--ff-only", pinnedSha)
+	mx.observeErr(ctx, "land", landStart, mergeErr)
 	if mergeErr != nil {
 		return blobLinks, failStep(ts, "merge "+branch, mergeErr, out)
 	}
@@ -614,7 +658,7 @@ func finishMergeUnqueued(ctx context.Context, rep *crap.Reporter, ts *crap.TestS
 	// No lock on this path at all (that is what disable-merge-queue means), so
 	// there is no exclusivity to preserve; pinnedSha is what landed, since the
 	// unqueued path never rebases the landing.
-	runPostMergePhase(ctx, rep, ts, repoPath, wtPath, "", branch, defaultBranch, pinnedSha, pinnedSha, gitSync, activity, pm)
+	runPostMergePhase(ctx, mx, rep, ts, repoPath, wtPath, "", branch, defaultBranch, pinnedSha, pinnedSha, gitSync, activity, pm)
 	return blobLinks, nil
 }
 
@@ -637,19 +681,6 @@ func fetchTarget(ctx context.Context, ts *crap.TestStream, target landing.Target
 	return nil
 }
 
-// Merge-landing counters (spinclass#314), emitted only on the queued remote
-// landing path, so local_advance.ok + local_advance.skip == landed holds by
-// construction — the invariant FDR 0029's promotion criterion checks. The
-// per-cause skip counter is a sibling name (skip_reason.<slug>), not a child
-// of skip, so graphite never has to hold skip as both a leaf and a branch.
-const (
-	MetricLanded                 = "merge.landed"
-	MetricPushRefused            = "merge.push_refused"
-	MetricLocalAdvanceOk         = "merge.local_advance.ok"
-	MetricLocalAdvanceSkip       = "merge.local_advance.skip"
-	MetricLocalAdvanceSkipReason = "merge.local_advance.skip_reason."
-)
-
 // LocalAdvanceSkipPrefix opens every local-advance skip reason, so a reader —
 // and the async completion wake, which lifts these lines — sees first that
 // the merge DID land (#295).
@@ -660,19 +691,19 @@ const LocalAdvanceSkipPrefix = "merge LANDED on "
 // when it moved (or already matched), a skip naming the landing, the reason,
 // and the reconcile command otherwise. A no-op for self, whose landing already
 // moved the local branch.
-func reportLocalAdvance(ts *crap.TestStream, target landing.Target, landingSha string) {
+func reportLocalAdvance(ts *crap.TestStream, stats statsd.Client, target landing.Target, landingSha string) {
 	if target.IsSelf() {
 		return
 	}
 	label := "advance local " + target.Branch
 	adv := target.AdvanceLocal(landingSha)
 	if !adv.Skipped() {
-		statsd.Count(MetricLocalAdvanceOk)
+		stats.Count(MetricLocalAdvanceOk)
 		ts.Ok(label + " to " + shortSha(landingSha))
 		return
 	}
-	statsd.Count(MetricLocalAdvanceSkip)
-	statsd.Count(MetricLocalAdvanceSkipReason + adv.SkipSlug())
+	stats.Count(MetricLocalAdvanceSkip)
+	stats.Count(MetricLocalAdvanceSkipReason + adv.SkipSlug())
 	ts.Skip(label, fmt.Sprintf("%s%s at %s; only local %s was not advanced: %s",
 		LocalAdvanceSkipPrefix, target.Label(), shortSha(landingSha), target.Branch, adv.SkipReason()))
 }
@@ -1072,7 +1103,7 @@ func runPreMergeHookContext(ctx context.Context, rep *crap.Reporter, ts *crap.Te
 // size itself from the budget it actually has rather than hard-coding one.
 // pinnedSha is the pre-landing pin (SPINCLASS_PINNED_SHA); it differs from
 // landedSha exactly when the queued landing was rebased past a moved tip.
-func runPostMergePhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, landDir, branch, defaultBranch, pinnedSha, landedSha string, pushed bool, activity io.Writer, pm PostMergeOptions) {
+func runPostMergePhase(ctx context.Context, mx phaseMetrics, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, landDir, branch, defaultBranch, pinnedSha, landedSha string, pushed bool, activity io.Writer, pm PostMergeOptions) {
 	home, _ := os.UserHomeDir()
 	if home == "" {
 		// Intentionally silent, unlike the snapshot-load failure just below.
@@ -1144,7 +1175,7 @@ func runPostMergePhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStr
 
 	// Named targets supersede the legacy string (FDR 0026).
 	if len(active) > 0 {
-		runNamedPostMergeTargets(ctx, rep, selected, runDir, env, landedSha, phaseCap, deadline, activity)
+		runNamedPostMergeTargets(ctx, mx, rep, selected, runDir, env, landedSha, phaseCap, deadline, activity)
 		return
 	}
 
@@ -1160,7 +1191,10 @@ func runPostMergePhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStr
 		sink = io.MultiWriter(&out, activity)
 	}
 	label := "post-merge " + branch + " (" + shortSha(landedSha) + ")"
-	if hookErr := hookrun.PostMergeWithCap(ctx, hierarchy.Merged, runDir, env, phaseCap, sink); hookErr != nil {
+	hookStart := time.Now()
+	hookErr := hookrun.PostMergeWithCap(ctx, hierarchy.Merged, runDir, env, phaseCap, sink)
+	mx.observe("post_merge_hook", hookStart, postMergeHookOutcome(ctx, hookErr))
+	if hookErr != nil {
 		diag := map[string]any{
 			"severity": "warn",
 			"message": fmt.Sprintf(
@@ -1204,7 +1238,7 @@ func runPostMergePhase(ctx context.Context, rep *crap.Reporter, ts *crap.TestStr
 // SPINCLASS_POST_MERGE_DEADLINE, so what is advertised is what is enforced.
 // Each target additionally gets SPINCLASS_POST_MERGE_TARGET=<its name>, so one
 // script can serve several targets.
-func runNamedPostMergeTargets(ctx context.Context, rep *crap.Reporter, selected []sweatfile.PostMergeTarget, runDir string, env []string, landedSha string, phaseCap time.Duration, deadline time.Time, activity io.Writer) {
+func runNamedPostMergeTargets(ctx context.Context, mx phaseMetrics, rep *crap.Reporter, selected []sweatfile.PostMergeTarget, runDir string, env []string, landedSha string, phaseCap time.Duration, deadline time.Time, activity io.Writer) {
 	// One shared wall-clock deadline for the whole phase (FDR 0026): with targets
 	// running concurrently (spinclass#276), this bounds lock-hold to the slowest
 	// single target rather than their sum. <=0 means the cap is disabled.
@@ -1246,11 +1280,13 @@ func runNamedPostMergeTargets(ctx context.Context, rep *crap.Reporter, selected 
 			tgtEnv = append(tgtEnv, env...)
 			tgtEnv = append(tgtEnv, "SPINCLASS_POST_MERGE_TARGET="+tgt.Name)
 
-			verdict, runErr := hookrun.Target(phaseCtx, tgt, runDir, tgtEnv, sink)
+			run, runErr := hookrun.Target(phaseCtx, tgt, runDir, tgtEnv, sink)
+			verdict := run.Verdict
 			// Snapshot the deadline/cancel state now, before a sibling's later
 			// kill can move phaseCtx.Err out from under a genuine failure.
 			timedOut := runErr != nil && errors.Is(phaseCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 			cancelled := runErr != nil && ctx.Err() != nil
+			mx.observePostMergeTarget(tgt.Name, run, runErr, timedOut, cancelled)
 
 			repMu.Lock()
 			defer repMu.Unlock()

@@ -57,6 +57,32 @@ func TestMergeWithAuthForgeHostsOverride(t *testing.T) {
 	}
 }
 
+func TestMergeWithMetricsScalarOverride(t *testing.T) {
+	addr, addr2 := "stats.example.com:8125", "127.0.0.1:9999"
+	yes, no := true, false
+	base := Sweatfile{Metrics: &Metrics{StatsdAddress: &addr, DisableStatsd: &yes}}
+
+	merged := base.MergeWith(Sweatfile{Metrics: &Metrics{StatsdAddress: &addr2}})
+	if got := merged.MetricsStatsdAddress(); got != addr2 {
+		t.Errorf("statsd-address not overridden: %q", got)
+	}
+	if !merged.MetricsStatsdDisabled() {
+		t.Error("disable-statsd not inherited")
+	}
+	if got := base.MergeWith(Sweatfile{Metrics: &Metrics{DisableStatsd: &no}}); got.MetricsStatsdDisabled() || got.MetricsStatsdAddress() != addr {
+		t.Errorf("child disable-statsd=false must override and keep the address: %+v", got.Metrics)
+	}
+	if got := base.MergeWith(Sweatfile{}).MetricsStatsdAddress(); got != addr {
+		t.Errorf("[metrics] not inherited: %q", got)
+	}
+	if base.MetricsStatsdAddress() != addr {
+		t.Error("receiver mutated by merge")
+	}
+	if got := (Sweatfile{}); got.MetricsStatsdAddress() != "" || got.MetricsStatsdDisabled() {
+		t.Error("no [metrics] anywhere: want zero values")
+	}
+}
+
 func TestAllowNoCredentialScalarOverride(t *testing.T) {
 	yes, no := true, false
 	base := Sweatfile{Hooks: &Hooks{AllowNoCredential: &yes}}

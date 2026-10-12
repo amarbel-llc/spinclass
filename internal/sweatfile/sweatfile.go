@@ -126,6 +126,16 @@ type Auth struct {
 	URLResolver *string `toml:"url-resolver"`
 }
 
+// Metrics configures spinclass's best-effort statsd telemetry (spinclass#363,
+// internal/statsd). Scalar override down the cascade.
+type Metrics struct {
+	// StatsdAddress is the stats-me endpoint, host:port or a bare host (port
+	// 8125). Beats the STATSD_HOST/STATSD_PORT environment opt-in.
+	StatsdAddress *string `toml:"statsd-address"`
+	// DisableStatsd turns emission off; it beats StatsdAddress and the env.
+	DisableStatsd *bool `toml:"disable-statsd"`
+}
+
 // Sysprompt configures the dynamic system-prompt fragment spinclass
 // contributes to a clown-launched session (internal/sysprompt, FDR 0021).
 type Sysprompt struct {
@@ -269,6 +279,7 @@ type Sweatfile struct {
 	Direnv         *Direnv         `toml:"direnv"`
 	Hooks          *Hooks          `toml:"hooks"`
 	Auth           *Auth           `toml:"auth"`
+	Metrics        *Metrics        `toml:"metrics"`
 	Sysprompt      *Sysprompt      `toml:"sysprompt"`
 	SessionEntry   *SessionEntry   `toml:"session-entry"`
 	StartCommands  []StartCommand  `toml:"start-commands"`
@@ -322,6 +333,19 @@ func (sf Sweatfile) AuthRevokeCommand() *string {
 		return nil
 	}
 	return sf.Auth.RevokeCommand
+}
+
+// MetricsStatsdAddress returns the [metrics].statsd-address, or "" when unset.
+func (sf Sweatfile) MetricsStatsdAddress() string {
+	if sf.Metrics == nil || sf.Metrics.StatsdAddress == nil {
+		return ""
+	}
+	return *sf.Metrics.StatsdAddress
+}
+
+// MetricsStatsdDisabled reports [metrics].disable-statsd = true.
+func (sf Sweatfile) MetricsStatsdDisabled() bool {
+	return sf.Metrics != nil && sf.Metrics.DisableStatsd != nil && *sf.Metrics.DisableStatsd
 }
 
 // PostMergeHookCommand returns the [hooks].post-merge command, or nil when

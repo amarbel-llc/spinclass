@@ -925,6 +925,27 @@ debug-session-env-map:
       echo "   $cl"
     done
 
+# [debug] Without a sweatfile [metrics].statsd-address, internal/statsd emits
+# only when STATSD_HOST or STATSD_PORT is in the emitting process's environment,
+# so a `serve` started without them is silently off (spinclass#363). Also
+# reports whether anything listens on the UDP port.
+#
+# show each live `spinclass serve` process's statsd opt-in environment
+[group('debug')]
+debug-statsd-env port="8125":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    for d in /proc/[0-9]*; do
+      pid=${d#/proc/}
+      cmd=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null) || continue
+      case "$cmd" in *spinclass*serve*|*"sc serve"*) ;; *) continue ;; esac
+      env=$(tr '\0' '\n' < "$d/environ" 2>/dev/null) || { echo "pid $pid: environ unreadable"; continue; }
+      echo "pid $pid [$(printf '%s' "$cmd" | cut -c1-70)]"
+      printf '%s\n' "$env" | grep -E '^(STATSD_HOST|STATSD_PORT|SPINCLASS_DISABLE_STATSD)=' | sed 's/^/   /' || echo "   (no STATSD_* variables: emission off)"
+    done
+    echo "--- UDP listeners on port {{ port }} ---"
+    ss -ulnp 2>/dev/null | grep -E ":{{ port }}\b" || echo "(none found)"
+
 # [debug] Pipe a cold `prompts/get` (no `initialize`) into `spinclass serve` and
 # print the dynamic system-prompt fragment it returns, extracted from the
 # JSON-RPC result. Serves the internal/sysprompt dev-loop (spinclass#187): edit a

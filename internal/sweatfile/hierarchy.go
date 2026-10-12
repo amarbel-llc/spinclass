@@ -192,6 +192,23 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		merged.Auth = &cp
 	}
 
+	// [metrics] — scalar override (spinclass#363); copied before the override
+	// so the receiver's table is never mutated through the shared pointer.
+	if other.Metrics != nil {
+		if merged.Metrics == nil {
+			merged.Metrics = &Metrics{}
+		} else {
+			cp := *merged.Metrics
+			merged.Metrics = &cp
+		}
+		if other.Metrics.StatsdAddress != nil {
+			merged.Metrics.StatsdAddress = other.Metrics.StatsdAddress
+		}
+		if other.Metrics.DisableStatsd != nil {
+			merged.Metrics.DisableStatsd = other.Metrics.DisableStatsd
+		}
+	}
+
 	// [sysprompt]
 	if other.Sysprompt != nil {
 		if merged.Sysprompt == nil {

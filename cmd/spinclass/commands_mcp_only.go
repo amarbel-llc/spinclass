@@ -638,6 +638,7 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "merge " + branch, Source: "spinclass"})
 	ts := rep.TestStream(0)
+	pm = pm.StampStartedAt() // total spans the sync prefix and the backgrounded finish
 	pinnedSha, prepErr := merge.PrepareMerge(ts, repoPath, cwd, branch, defaultBranch, gitSync, pm)
 	if prepErr != nil {
 		ts.Finish() // the deferred release keeps the attestation for the retry (#303)

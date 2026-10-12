@@ -337,7 +337,8 @@ subcommand is always available.
   tracking ref), never local `<default>`; only the fetch is fatal. After the
   push, `reportLocalAdvance` ff's local once (under the lock) or emits a
   `# SKIP` (`merge LANDED on …`, lifted into the async wake). Local-only =
-  `landing.Self`. Metrics: `internal/statsd`.
+  `landing.Self`. Metrics: `internal/statsd` (counters + per-phase timers
+  `merge.<repo>.<phase>.<outcome>`, #363; `internal/merge/metrics.go`).
 - **Per-session forge push credentials** (FDR 0028, #285, `internal/auth`): a
   sweatfile `[auth]` table (`mint-command`/`revoke-command`) gives a worktree
   session its own forge token so pushes never ride the inherited ssh-agent.
@@ -503,7 +504,8 @@ dirs → repo at each level. Notable surface:
 - `[env]` (map merge); `[hooks]` (lifecycle hooks + the `disable-*` /
   `*-timeout` / output-format knobs, scalar override); `[auth]`
   (`mint-command` / `revoke-command`, scalar override — FDR 0028);
-  `[session-entry]` (start/resume/spawn-entry/spawn-window argv, per-field
+  `[metrics]` (`statsd-address` / `disable-statsd`, scalar override, beats
+  the `STATSD_*` env — #363); `[session-entry]` (start/resume/spawn-entry/spawn-window argv, per-field
   override; `model-flags` provider→CLI-flag map and `model-ids` alias→ID
   map, both merged per-key like `[env]`; `model-ids`' built-in default
   ships via `GetDefault()`, not an inline accessor fallback);

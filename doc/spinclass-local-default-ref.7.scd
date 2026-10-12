@@ -53,8 +53,10 @@ Each remote landing sends statsd counters to stats-me (*stats-me-clients*(7)):
 *spinclass.merge.local\_advance.ok*, *spinclass.merge.local\_advance.skip* and
 *spinclass.merge.local\_advance.skip\_reason.*{*dirty\_overlap*, *diverged*,
 *ahead*, *error*}. *ok* plus *skip* always equals *landed*. Nothing is sent
-unless *STATSD\_HOST* or *STATSD\_PORT* is set; *SPINCLASS\_DISABLE\_STATSD=1*
-turns emission off.
+unless *STATSD\_HOST* or *STATSD\_PORT* is set or the sweatfile's
+*[metrics].statsd-address* is; *SPINCLASS\_DISABLE\_STATSD=1* or
+*[metrics].disable-statsd* turns emission off. Per-phase timers share the
+same switches; see *spinclass-sweatfile*(5).
 
 # SEE ALSO
 

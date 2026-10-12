@@ -3,6 +3,7 @@ package hookrun_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -99,6 +100,9 @@ func TestPostMergeEnforcesTimeout(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "post-merge-timeout") {
 		t.Errorf("error should name the knob, got %v", err)
+	}
+	if !errors.Is(err, ErrPostMergeTimeout) {
+		t.Errorf("a cap kill must satisfy errors.Is(ErrPostMergeTimeout): %v", err)
 	}
 	if elapsed > 5*time.Second {
 		t.Errorf("hook ran %s; the cap should have killed it near 150ms", elapsed)

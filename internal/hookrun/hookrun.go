@@ -120,11 +120,11 @@ func PostMergeWithCap(ctx context.Context, sf sweatfile.Sweatfile, dir string, e
 	// Only OUR deadline yields the cap message: if the caller's ctx is also
 	// done, the kill is theirs (a cancelled job) and keeps its own error.
 	case err != nil && errors.Is(hookCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil:
-		return fmt.Errorf(
+		return &kindError{kind: ErrPostMergeTimeout, msg: fmt.Sprintf(
 			"post-merge hook killed: exceeded post-merge-timeout %s (the merge already landed; "+
 				"set [hooks].post-merge-timeout, or pass post_merge_timeout on the merge call, to raise or 0 to disable the cap)",
 			timeout,
-		)
+		)}
 	// The hook itself finished, but left a child holding its output pipe, so
 	// Wait had to be cut short. Worth naming precisely: the usual cause is a
 	// backgrounded child that did not redirect stdout/stderr, which would
@@ -152,25 +152,64 @@ func PostMergeWithCap(ctx context.Context, sf sweatfile.Sweatfile, dir string, e
 // that forgot to redirect its output cannot hold the lock for its full
 // lifetime.
 //
-// Returns the verdict — PostMergeOK, PostMergeCommandFailed, or
-// PostMergeVerifyFailed — and, for a failed stage, the underlying error (which
-// the phase inspects against the shared deadline to distinguish a genuine
-// failure from a cap kill).
-func Target(ctx context.Context, t sweatfile.PostMergeTarget, dir string, extraEnv []string, w io.Writer) (sweatfile.PostMergeVerdict, error) {
+// Returns a TargetRun — the verdict (PostMergeOK, PostMergeCommandFailed, or
+// PostMergeVerifyFailed) plus each stage's wall-clock duration — and, for a
+// failed stage, the underlying error (which the phase inspects against the
+// shared deadline to distinguish a genuine failure from a cap kill).
+func Target(ctx context.Context, t sweatfile.PostMergeTarget, dir string, extraEnv []string, w io.Writer) (TargetRun, error) {
+	var run TargetRun
 	command := t.Command
 	// scopeID "" — post-merge is deliberately unscoped so a control-group
 	// kill never reaps the detached children FDR 0023 sanctions for slow deploys.
-	if err := runHookInDirEnv(ctx, &command, dir, dir, extraEnv, postMergeWaitDelay, "", false, w); err != nil {
-		return sweatfile.PostMergeCommandFailed, err
+	start := time.Now()
+	err := runHookInDirEnv(ctx, &command, dir, dir, extraEnv, postMergeWaitDelay, "", false, w)
+	run.CommandDuration = time.Since(start)
+	if err != nil {
+		run.Verdict = sweatfile.PostMergeCommandFailed
+		return run, err
 	}
 	if t.HasVerify() {
 		verify := *t.Verify
-		if err := runHookInDirEnv(ctx, &verify, dir, dir, extraEnv, postMergeWaitDelay, "", false, w); err != nil {
-			return sweatfile.PostMergeVerifyFailed, err
+		run.VerifyRan = true
+		start = time.Now()
+		err = runHookInDirEnv(ctx, &verify, dir, dir, extraEnv, postMergeWaitDelay, "", false, w)
+		run.VerifyDuration = time.Since(start)
+		if err != nil {
+			run.Verdict = sweatfile.PostMergeVerifyFailed
+			return run, err
 		}
 	}
-	return sweatfile.PostMergeOK, nil
+	run.Verdict = sweatfile.PostMergeOK
+	return run, nil
 }
+
+// TargetRun is what Target reports about one named post-merge target: its
+// verdict and how long each stage ran (VerifyRan is false when the command
+// failed first or the target declares no verify).
+type TargetRun struct {
+	Verdict         sweatfile.PostMergeVerdict
+	CommandDuration time.Duration
+	VerifyDuration  time.Duration
+	VerifyRan       bool
+}
+
+// ErrInactivityTimeout is what PreMergeInDir's error satisfies (errors.Is) when
+// the [hooks].inactivity-timeout watchdog killed the hook.
+var ErrInactivityTimeout = errors.New("pre-merge hook killed by inactivity-timeout")
+
+// ErrPostMergeTimeout is what PostMergeWithCap's error satisfies (errors.Is)
+// when its wall-clock post-merge-timeout cap killed the hook.
+var ErrPostMergeTimeout = errors.New("post-merge hook killed by post-merge-timeout")
+
+// kindError is an error with its own rendered text that also satisfies
+// errors.Is against a sentinel, so the sentinel never alters the message.
+type kindError struct {
+	msg  string
+	kind error
+}
+
+func (e *kindError) Error() string { return e.msg }
+func (e *kindError) Unwrap() error { return e.kind }
 
 // cancelGrace is how long a cancelled hook has to exit after SIGTERM before
 // exec escalates: closing its I/O pipes and sending SIGKILL. It therefore
@@ -251,7 +290,7 @@ func PreMergeInDir(ctx context.Context, sf sweatfile.Sweatfile, envDir, runDir s
 	// Only surface the inactivity error when the hook actually failed because
 	// of the kill; a hook that finished cleanly just before a late tick wins.
 	if err != nil && killedForInactivity.Load() {
-		return fmt.Errorf("pre-merge hook killed: no output for %s (inactivity-timeout)", timeout)
+		return &kindError{kind: ErrInactivityTimeout, msg: fmt.Sprintf("pre-merge hook killed: no output for %s (inactivity-timeout)", timeout)}
 	}
 	return err
 }

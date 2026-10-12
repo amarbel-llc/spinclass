@@ -17,9 +17,12 @@ func TestTargetCommandOnlyOK(t *testing.T) {
 	dir := t.TempDir()
 	tgt := sweatfile.PostMergeTarget{Name: "k", Command: "echo deployed"}
 	var buf bytes.Buffer
-	verdict, err := Target(context.Background(), tgt, dir, nil, &buf)
-	if err != nil || verdict != sweatfile.PostMergeOK {
-		t.Fatalf("got verdict=%q err=%v out=%q", verdict, err, buf.String())
+	run, err := Target(context.Background(), tgt, dir, nil, &buf)
+	if err != nil || run.Verdict != sweatfile.PostMergeOK {
+		t.Fatalf("got verdict=%q err=%v out=%q", run.Verdict, err, buf.String())
+	}
+	if run.VerifyRan || run.CommandDuration <= 0 {
+		t.Errorf("run = %+v; want command timed, verify not run", run)
 	}
 	if !strings.Contains(buf.String(), "deployed") {
 		t.Errorf("command output not streamed: %q", buf.String())
@@ -36,9 +39,12 @@ func TestTargetCommandFailedSkipsVerify(t *testing.T) {
 		Verify:  sptr("touch " + verifyMarker),
 	}
 	var buf bytes.Buffer
-	verdict, err := Target(context.Background(), tgt, dir, nil, &buf)
-	if err == nil || verdict != sweatfile.PostMergeCommandFailed {
-		t.Fatalf("got verdict=%q err=%v", verdict, err)
+	run, err := Target(context.Background(), tgt, dir, nil, &buf)
+	if err == nil || run.Verdict != sweatfile.PostMergeCommandFailed {
+		t.Fatalf("got verdict=%q err=%v", run.Verdict, err)
+	}
+	if run.VerifyRan {
+		t.Error("VerifyRan must be false when the command failed")
 	}
 	if _, statErr := os.Stat(verifyMarker); statErr == nil {
 		t.Error("verify must NOT run when the command failed")
@@ -55,9 +61,12 @@ func TestTargetVerifyOK(t *testing.T) {
 		Verify:  sptr("echo sha=$SPINCLASS_MERGED_SHA > " + out),
 	}
 	var buf bytes.Buffer
-	verdict, err := Target(context.Background(), tgt, dir, []string{"SPINCLASS_MERGED_SHA=abc123"}, &buf)
-	if err != nil || verdict != sweatfile.PostMergeOK {
-		t.Fatalf("got verdict=%q err=%v out=%q", verdict, err, buf.String())
+	run, err := Target(context.Background(), tgt, dir, []string{"SPINCLASS_MERGED_SHA=abc123"}, &buf)
+	if err != nil || run.Verdict != sweatfile.PostMergeOK {
+		t.Fatalf("got verdict=%q err=%v out=%q", run.Verdict, err, buf.String())
+	}
+	if !run.VerifyRan || run.VerifyDuration <= 0 {
+		t.Errorf("run = %+v; want verify timed", run)
 	}
 	raw, readErr := os.ReadFile(out)
 	if readErr != nil {
@@ -78,9 +87,12 @@ func TestTargetVerifyFailed(t *testing.T) {
 		Verify:  sptr("echo unhealthy >&2; exit 1"),
 	}
 	var buf bytes.Buffer
-	verdict, err := Target(context.Background(), tgt, dir, nil, &buf)
-	if err == nil || verdict != sweatfile.PostMergeVerifyFailed {
-		t.Fatalf("got verdict=%q err=%v", verdict, err)
+	run, err := Target(context.Background(), tgt, dir, nil, &buf)
+	if err == nil || run.Verdict != sweatfile.PostMergeVerifyFailed {
+		t.Fatalf("got verdict=%q err=%v", run.Verdict, err)
+	}
+	if !run.VerifyRan {
+		t.Error("VerifyRan must be true when verify ran and failed")
 	}
 	if !strings.Contains(buf.String(), "unhealthy") {
 		t.Errorf("verify output not streamed: %q", buf.String())
