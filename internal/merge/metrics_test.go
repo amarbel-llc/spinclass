@@ -271,7 +271,7 @@ func TestMetricsNamedPostMergeTargetVerifyFailed(t *testing.T) {
 	repoDir, wtPath := setupPostMergeRepo(t, "feature")
 	writeRepoSweatfile(t, repoDir, `
 [[post-merge]]
-name = "Kro.ne"
+name = "Host.A"
 command = "echo triggered"
 verify = "exit 1"
 `)
@@ -281,8 +281,8 @@ verify = "exit 1"
 	timers := timerNames(t, drain())
 	prefix := "spinclass.merge." + filepath.Base(repoDir) + "."
 	assertTimersInclude(t, timers,
-		prefix+"post_merge.kro_ne.command.ok",
-		prefix+"post_merge.kro_ne.verify.failed",
+		prefix+"post_merge.host_a.command.ok",
+		prefix+"post_merge.host_a.verify.failed",
 		prefix+"total.ok",
 		prefix+"finish.ok",
 	)
