@@ -449,6 +449,153 @@ func TestProcessMergeQueueDrainsOnFailure(t *testing.T) {
 	}
 }
 
+// installRingmasterStub enables clown and points RINGMASTER_BIN at a shell stub
+// that records each invocation's argv to its own file under the returned dir
+// (created on the first invocation) and answers `start --label L` with
+// "L-stub", so a merge job and a notice job get distinguishable ids.
+func installRingmasterStub(t *testing.T) (invocationsDir string) {
+	t.Helper()
+	dir := t.TempDir()
+	invocationsDir = filepath.Join(dir, "inv")
+	script := filepath.Join(dir, "ringmaster")
+	body := "#!/bin/sh\n" +
+		"mkdir -p " + invocationsDir + "\n" +
+		"printf '%s\\n' \"$@\" > \"$(mktemp " + invocationsDir + "/inv.XXXXXX)\"\n" +
+		"if [ \"$1\" = start ]; then echo \"$3-stub\"; fi\n" +
+		"exit 0\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatalf("write stub ringmaster: %v", err)
+	}
+	t.Setenv("CLOWN_BIN", filepath.Join(dir, "clown"))
+	t.Setenv("RINGMASTER_BIN", script)
+	return invocationsDir
+}
+
+// recordedDone returns the argv of the stub's `done <id> ...` invocation for
+// id, or nil. Empty files (an invocation killed mid-write) are skipped.
+func recordedDone(t *testing.T, invocationsDir, id string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(invocationsDir)
+	if err != nil {
+		t.Fatalf("read recorded invocations: %v", err)
+	}
+	for _, e := range entries {
+		data, err := os.ReadFile(filepath.Join(invocationsDir, e.Name()))
+		if err != nil {
+			t.Fatalf("read invocation %s: %v", e.Name(), err)
+		}
+		argv := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+		if len(argv) >= 2 && argv[0] == "done" && argv[1] == id {
+			return argv
+		}
+	}
+	return nil
+}
+
+// argAfter returns the argument following flag in argv, or "".
+func argAfter(argv []string, flag string) string {
+	for i, a := range argv {
+		if a == flag && i+1 < len(argv) {
+			return argv[i+1]
+		}
+	}
+	return ""
+}
+
+// TestProcessMergeQueueEmitsStartNotice pins spinclass#366: a dequeue emits one
+// standalone notice naming the started merge's job id and the count still
+// queued, finished "succeeded" under a label that is not the merge kind.
+func TestProcessMergeQueueEmitsStartNotice(t *testing.T) {
+	invDir := installRingmasterStub(t)
+	wt := t.TempDir()
+	entry := func() queuedMerge {
+		return queuedMerge{run: func(_ context.Context, _ io.Writer) (string, bool) { return "✓ queued merge", false }}
+	}
+	mergeQueueMu.Lock()
+	mergeQueue[wt] = []queuedMerge{entry(), entry()}
+	mergeQueueMu.Unlock()
+	t.Cleanup(func() {
+		mergeQueueMu.Lock()
+		delete(mergeQueue, wt)
+		mergeQueueMu.Unlock()
+	})
+
+	processMergeQueue(wt, job.KindMerge, job.StatusSucceeded, "prior-merge")
+	<-job.WaitDone(wt)
+
+	// The dequeued merge's job id is the stub's allocation for the merge label;
+	// the notice is its own job under startNoticeLabel.
+	done := recordedDone(t, invDir, startNoticeLabel+"-stub")
+	if done == nil {
+		t.Fatal("no start notice was finished")
+	}
+	if got := argAfter(done, "--state"); got != job.StatusSucceeded {
+		t.Errorf("notice state = %q, want %q", got, job.StatusSucceeded)
+	}
+	msg := argAfter(done, "--message")
+	for _, want := range []string{"STARTED (not finished)", "job merge-stub:", "1 more merge still queued behind it"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("notice message missing %q: %s", want, msg)
+		}
+	}
+}
+
+// TestProcessMergeQueueStartNoticeOmitsEmptyRemainder: the last queued merge's
+// notice does not claim anything is queued behind it.
+func TestProcessMergeQueueStartNoticeOmitsEmptyRemainder(t *testing.T) {
+	invDir := installRingmasterStub(t)
+
+	emitStartNotice("merge-xyz", 0)
+
+	msg := argAfter(recordedDone(t, invDir, startNoticeLabel+"-stub"), "--message")
+	if !strings.Contains(msg, "job merge-xyz:") || strings.Contains(msg, "still queued") {
+		t.Errorf("unexpected last-entry notice: %s", msg)
+	}
+}
+
+// TestProcessMergeQueueDrainWakeMessageUnchanged: the drain path still emits its
+// aborted wake under the merge label after sharing the emit helper.
+func TestProcessMergeQueueDrainWakeMessageUnchanged(t *testing.T) {
+	invDir := installRingmasterStub(t)
+	wt := t.TempDir()
+	mergeQueueMu.Lock()
+	mergeQueue[wt] = []queuedMerge{{}, {}}
+	mergeQueueMu.Unlock()
+	t.Cleanup(func() {
+		mergeQueueMu.Lock()
+		delete(mergeQueue, wt)
+		mergeQueueMu.Unlock()
+	})
+
+	processMergeQueue(wt, job.KindMerge, job.StatusFailed, "prior-merge")
+
+	done := recordedDone(t, invDir, job.KindMerge+"-stub")
+	if done == nil {
+		t.Fatal("no drain wake was finished")
+	}
+	if got := argAfter(done, "--state"); got != job.StatusAborted {
+		t.Errorf("drain state = %q, want %q", got, job.StatusAborted)
+	}
+	if msg := argAfter(done, "--message"); !strings.HasPrefix(msg, "2 queued merges did not run: prior merge prior-merge failed") {
+		t.Errorf("drain message changed: %s", msg)
+	}
+}
+
+// TestStartNoticeIsNoopWithoutClown: with clown off no ringmaster is attempted
+// (RINGMASTER_BIN points at a stub that would record it).
+func TestStartNoticeIsNoopWithoutClown(t *testing.T) {
+	invDir := installRingmasterStub(t)
+	t.Setenv("CLOWN_BIN", "")
+	_ = os.Unsetenv("CLOWN_BIN")
+
+	emitStartNotice("merge-xyz", 3)
+	emitDrainWake(2, "prior", "failed")
+
+	if _, err := os.Stat(invDir); err == nil {
+		t.Error("ringmaster invoked despite clown being disabled")
+	}
+}
+
 // readAttestation returns the buffered attestation for (repoPath, branch).
 func readAttestation(t *testing.T, repoPath, branch string) *session.PreMergeAttestation {
 	t.Helper()

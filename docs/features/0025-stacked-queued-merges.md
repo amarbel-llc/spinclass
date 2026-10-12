@@ -41,12 +41,13 @@ This record covers both the safety fix (2, "deliverable 2") and the queue
 
 - **A second `merge-this-session-async` while a merge gate runs ENQUEUES** the
   next batch instead of refusing. The tool returns "enqueued at queue position
-  N", stating explicitly that a queued merge has **no ringmaster job id** (an
-  agent cannot `job_wait` on it) and that the completion wake is the only
-  signal.
+  N", stating explicitly that a queued merge has **no ringmaster job id** until
+  it dequeues (an agent cannot `job_wait` on it yet).
 - **A queued merge runs when the current gate completes**, re-preparing against
-  the branch as it then stands (see Design). Its result arrives as its own
-  completion wake with a freshly-allocated ringmaster job id.
+  the branch as it then stands (see Design). A start notice carrying its
+  freshly-allocated ringmaster job id (and the count still queued) arrives when
+  it dequeues, so the agent can `job_wait` on it; its result arrives as its own
+  completion wake with that same id.
 - **If the running merge FAILS**, the queue is drained: one aborted wake naming
   the failed prior merge tells the agent to resolve and re-merge. The drained
   entries' claims are released, and the buffered attestation still stands.

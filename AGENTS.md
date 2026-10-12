@@ -376,7 +376,7 @@ subcommand is always available.
   merge or completed check dequeues the next. An enqueue **claims** the
   attestation (a live claim makes it unavailable to the next batch); a drained
   entry releases it. Worktree sessions
-  only; queued merges carry no ringmaster job id (the wake signals);
+  only; a dequeue emits a start-notice wake with the job id (#366);
   `[hooks].disable-merge-stacking` is the rollback.
 - **`post-merge` hook** (FDR 0023, #244): `[hooks].post-merge` runs after a merge
   fully lands (ff-only done; pushed when gitSync). On the queued path it runs

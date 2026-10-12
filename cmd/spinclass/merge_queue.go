@@ -99,10 +99,14 @@ func processMergeQueue(wt, kind, status, id string) {
 	next := q[0]
 	mergeQueue[wt] = q[1:]
 	nextID := fmt.Sprintf("%s-%d", job.KindMerge, time.Now().UnixNano())
-	_, startErr := job.Start(wt, job.KindMerge, next.gitSync, nextID, next.run)
+	started, startErr := job.Start(wt, job.KindMerge, next.gitSync, nextID, next.run)
+	remaining := len(mergeQueue[wt])
 	mergeQueueMu.Unlock()
 
-	if startErr != nil {
+	if startErr == nil {
+		// Outside the queue lock: the notice shells out to ringmaster twice.
+		emitStartNotice(started.ID, remaining)
+	} else {
 		// The dequeued merge could not be dispatched (clown allocation failed,
 		// or a racing Start already claimed the slot). Its OnJobDone will never
 		// fire, so the chain is broken: report it and drain whatever is left,
@@ -128,33 +132,65 @@ func processMergeQueue(wt, kind, status, id string) {
 // has no ringmaster id to inspect either); the branch it drains is still
 // cleared.
 func emitDrainWake(count int, priorJobID, priorStatus string) {
+	msg := fmt.Sprintf(
+		"%d queued %s did not run: prior merge %s %s — its base assumption broke. Resolve the failure and re-merge the remaining commits; a failed or drained merge never consumes the attestation, so the buffered one still stands (re-record it only if your fix changed what the listed skills reviewed).",
+		count, mergeNoun(count), priorJobID, priorStatus,
+	)
+	emitQueueWake("drain wake", job.KindMerge, job.StatusAborted, msg)
+}
+
+// startNoticeLabel is the ringmaster label of the dequeue start notice. It is
+// deliberately not job.KindMerge, so the notice's own job id never reads as a
+// merge job an agent could mistake for the one it should wait on.
+const startNoticeLabel = "merge-queue-notice"
+
+// emitStartNotice fires one clown wake telling the agent that a queued merge was
+// dequeued and is now running as jobID (the id its own completion wake will
+// carry), with remaining more merge(s) still queued behind it. The notice job
+// itself finishes "succeeded", so the message leads with STARTED (not finished)
+// to keep the "... succeeded: <message>" wake line from reading as a landing.
+func emitStartNotice(jobID string, remaining int) {
+	msg := fmt.Sprintf(
+		"queued merge STARTED (not finished) as job %s: its gate is running now; inspect it with job_status/job_read or block with job_wait on that id. Its own completion wake will carry the same id.",
+		jobID,
+	)
+	if remaining > 0 {
+		msg += fmt.Sprintf(" %d more %s still queued behind it.", remaining, mergeNoun(remaining))
+	}
+	emitQueueWake("start notice", startNoticeLabel, job.StatusSucceeded, msg)
+}
+
+func mergeNoun(count int) string {
+	if count == 1 {
+		return "merge"
+	}
+	return "merges"
+}
+
+// emitQueueWake allocates a standalone ringmaster job under label and finishes
+// it in state with msg, so clown wakes the agent with one line. Without clown
+// there is no wake channel, so it is a no-op. Failures are logged (as what) and
+// never propagated: a missing notice must not fail the queue.
+func emitQueueWake(what, label, state, msg string) {
 	if !clown.Enabled() {
 		return
 	}
 	ctx := context.Background()
-	newID, err := clown.StartJob(ctx, job.KindMerge, clown.Source)
+	id, err := clown.StartJob(ctx, label, clown.Source)
 	if err != nil {
-		servelog.Errorf("merge queue: drain wake StartJob failed: %v", err)
+		servelog.Errorf("merge queue: %s StartJob failed: %v", what, err)
 		return
 	}
-	noun := "merge"
-	if count != 1 {
-		noun = "merges"
-	}
-	msg := fmt.Sprintf(
-		"%d queued %s did not run: prior merge %s %s — its base assumption broke. Resolve the failure and re-merge the remaining commits; a failed or drained merge never consumes the attestation, so the buffered one still stands (re-record it only if your fix changed what the listed skills reviewed).",
-		count, noun, priorJobID, priorStatus,
-	)
-	if cerr := clown.FinishJob(ctx, newID, job.StatusAborted, msg, ""); cerr != nil {
-		servelog.Errorf("merge queue: drain wake FinishJob failed: %v", cerr)
+	if cerr := clown.FinishJob(ctx, id, state, msg, ""); cerr != nil {
+		servelog.Errorf("merge queue: %s FinishJob failed: %v", what, cerr)
 	}
 }
 
 // enqueuedMergeResult renders the tool result for a merge that was queued
 // behind the currently-running gate. It states explicitly that a queued merge
-// has NO ringmaster job id (so an agent cannot job_wait on it) and that the
-// completion wake is the only signal — the FDR 0025 ratified response contract,
-// discoverable from the response itself, not just the FDR.
+// has NO ringmaster job id until it dequeues (so an agent cannot job_wait on it
+// yet) and that a start notice carrying the id arrives then — the FDR 0025
+// response contract, discoverable from the response itself, not just the FDR.
 func enqueuedMergeResult(position int, gate merge.AttestationGate) *command.Result {
 	attestationNote := "The pre-merge attestation (if the gate is live) is now claimed by this queued merge: it is consumed only if the merge lands, and released for your retry if it fails or is drained. A further batch needs a fresh nothing-but-the-truth."
 	if gate == merge.GateNeedsExemption {
@@ -163,8 +199,9 @@ func enqueuedMergeResult(position int, gate merge.AttestationGate) *command.Resu
 	return command.TextResult(fmt.Sprintf(
 		"enqueued this merge at queue position %d behind the running gate (spinclass#265 stacked merges). "+
 			"It runs automatically when the current merge completes, re-preparing against the branch as it then "+
-			"stands. NOTE: a queued merge has NO ringmaster job id yet — you cannot job_wait on it; the completion "+
-			"wake is the only signal, so end your turn and let it arrive. If the running merge FAILS, this queued "+
+			"stands. NOTE: a queued merge has NO ringmaster job id yet — you cannot job_wait on it until it "+
+			"dequeues, when a start notice carrying its job id arrives (then you can job_wait on that id; its "+
+			"completion wake carries the same id), so end your turn and let it arrive. If the running merge FAILS, this queued "+
 			"merge is aborted (its base assumption broke) and you are woken to resolve and re-merge. %s",
 		position, attestationNote,
 	))
