@@ -325,6 +325,45 @@ func TestEmitExitWakesBudgetsWholeLoopNotPerHolder(t *testing.T) {
 	}
 }
 
+// TestFinishJobTreatsAlreadyTerminalAsSuccess: ringmaster#27 (ProtocolVersion
+// 3) made the monitor's liveness reaper terminalize any lock-holding job whose
+// producer looks gone. If that reaper wins the race against this producer's
+// own `done`, `ringmaster done` now exits 3 (ringmaster's exitAlreadyTerminal)
+// instead of 0 — but the job IS terminal, correctly, so FinishJob must not
+// report that as a failure (job.Start logs any non-nil FinishJob error as a
+// job.log warning that would otherwise be a false alarm on a perfectly fine
+// outcome).
+func TestFinishJobTreatsAlreadyTerminalAsSuccess(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args")
+	dir := t.TempDir()
+	script := filepath.Join(dir, "ringmaster")
+	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argsFile + "\n" +
+		"echo 'ringmaster done: job already terminal' >&2\nexit 3\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatalf("write stub ringmaster: %v", err)
+	}
+	t.Setenv("RINGMASTER_BIN", script)
+
+	if err := FinishJob(context.Background(), "merge-deadbeef", "succeeded", "merge succeeded", ""); err != nil {
+		t.Fatalf("FinishJob against an already-terminal job (exit 3): want nil, got %v", err)
+	}
+	assertArgv(t, recordedArgs(t, argsFile), []string{
+		"done", "merge-deadbeef", "--state", "succeeded", "--message", "merge succeeded",
+	})
+}
+
+// TestFinishJobOtherNonzeroExitsStillFail proves exit-3 forgiveness is
+// SPECIFIC to that code — any other nonzero `done` exit (a genuine failure)
+// must still surface as an error, exactly as before.
+func TestFinishJobOtherNonzeroExitsStillFail(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args")
+	t.Setenv("RINGMASTER_BIN", stubRingmaster(t, argsFile, "", false))
+
+	if err := FinishJob(context.Background(), "merge-deadbeef", "succeeded", "", ""); err == nil {
+		t.Fatal("FinishJob against a generic ringmaster failure (exit 1): want an error, got nil")
+	}
+}
+
 func TestFailureSurfacesStderr(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
 	dir := t.TempDir()

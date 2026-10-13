@@ -322,6 +322,30 @@ func TestWaitForCancelObservesRealCancelRequested(t *testing.T) {
 	}
 }
 
+// ringmaster#27 (ProtocolVersion 3): `ringmaster done` against an
+// already-terminal job exits 3 (exitAlreadyTerminal) rather than 0, so the
+// real binary — not a stub, which would just echo whatever exit we told it —
+// is the only thing that can prove FinishJob's isAlreadyTerminal forgiveness
+// actually matches ringmaster's contract. A second FinishJob on the same job
+// id, after the first already wrote the terminal record, is exactly that
+// race's outcome.
+func TestFinishJobToleratesRealAlreadyTerminal(t *testing.T) {
+	realRingmaster(t)
+	ctx := context.Background()
+
+	id, err := StartJob(ctx, "merge", Source)
+	if err != nil {
+		t.Fatalf("StartJob: %v", err)
+	}
+	if err := FinishJob(ctx, id, "succeeded", "first done", ""); err != nil {
+		t.Fatalf("first FinishJob: %v", err)
+	}
+	if err := FinishJob(ctx, id, "succeeded", "second done", ""); err != nil {
+		t.Fatalf("second FinishJob against an already-terminal job: want nil (ringmaster "+
+			"exits 3, which FinishJob must treat as idempotent success), got %v", err)
+	}
+}
+
 // The terminal counterpart: WaitForCancel must report false when the job ended
 // on its own, so the observer no-ops instead of firing a spurious cancel.
 func TestWaitForCancelReturnsFalseForTerminal(t *testing.T) {

@@ -135,6 +135,14 @@ func SpoolPath(ctx context.Context, id string) (string, error) {
 // `madder://blobs/<digest>` holding the rendered verdict ladder. Empty entries
 // are skipped, so a caller that failed to produce a blob can pass "" without
 // branching.
+//
+// A `ringmaster done` that lost the race for the terminal record — the
+// monitor's liveness reaper (RFC-0018 §2.3, ProtocolVersion 3) terminalized
+// the job first because this producer's advisory lock looked released —
+// exits alreadyTerminalExitCode rather than failing. That outcome is treated
+// as success: the job IS terminal either way, and the caller's own job.log
+// warning for "the completion wake failed" would otherwise be a false alarm
+// (see isAlreadyTerminal).
 func FinishJob(ctx context.Context, id, state, message, resultRef string, resources ...string) error {
 	args := []string{"done", id, "--state", state}
 	if message != "" {
@@ -149,7 +157,29 @@ func FinishJob(ctx context.Context, id, state, message, resultRef string, resour
 		}
 	}
 	_, err := run(ctx, args...)
+	if err != nil && isAlreadyTerminal(err) {
+		return nil
+	}
 	return err
+}
+
+// alreadyTerminalExitCode is `ringmaster done`'s exit status (ringmaster's own
+// exitAlreadyTerminal const) when it wrote nothing because the job already
+// carries a terminal record — distinct from the generic failure 1 so a caller
+// that can lose the race for the terminal can tell "already settled" from
+// "the write failed" without parsing stderr.
+const alreadyTerminalExitCode = 3
+
+// isAlreadyTerminal reports whether err wraps an *exec.ExitError with exactly
+// alreadyTerminalExitCode. run() wraps the subprocess error with %w, so
+// errors.As unwraps through the fmt.Errorf chain to the underlying
+// *exec.ExitError.
+func isAlreadyTerminal(err error) bool {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode() == alreadyTerminalExitCode
+	}
+	return false
 }
 
 // NotifyPrincipal emits a standalone reason-tagged wake to targetPrincipal —
