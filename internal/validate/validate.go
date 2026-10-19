@@ -537,6 +537,31 @@ func CheckAuth(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 	return issues
 }
 
+// CheckProfileRights validates the [profile-rights] table (FDR 0034). `enforce`
+// is honoured only from layers above the repo, and is reliable only from the
+// GLOBAL sweatfile: a spawner outside a non-global parent directory never
+// consults that directory's layer, so an agent choosing its cwd can sidestep it.
+func CheckProfileRights(sf sweatfile.Sweatfile, layerAboveRepo, global bool) []Issue {
+	if sf.ProfileRights == nil || sf.ProfileRights.Enforce == nil {
+		return nil
+	}
+	switch {
+	case !layerAboveRepo:
+		return []Issue{{
+			Message:  "[profile-rights] sets `enforce` in a repo-level sweatfile: it is ignored — only sweatfiles above the repo may set it; move it to the global sweatfile",
+			Severity: SeverityWarning,
+			Field:    "profile-rights.enforce",
+		}}
+	case !global:
+		return []Issue{{
+			Message:  "[profile-rights] sets `enforce` outside the global sweatfile: a spawner whose working directory is outside this directory does not consult this layer, so enforcement can be sidestepped; set it in ~/.config/spinclass/sweatfile",
+			Severity: SeverityWarning,
+			Field:    "profile-rights.enforce",
+		}}
+	}
+	return nil
+}
+
 func isShellInterpreter(cmd string) bool {
 	base := filepath.Base(cmd)
 	switch base {
@@ -786,6 +811,17 @@ func Run(w io.Writer, home, repoDir string) int {
 				}
 			} else {
 				sub.Ok("auth valid")
+			}
+		}
+
+		if src.File.ProfileRights != nil {
+			global := src.Path == filepath.Join(home, ".config", "spinclass", "sweatfile")
+			if issues := CheckProfileRights(src.File, sweatfileio.LayerAboveRepo(src.Path, home, mainRoot), global); len(issues) > 0 {
+				for _, iss := range issues {
+					sub.Ok(fmt.Sprintf("profile-rights valid # warning: %s", iss.Message))
+				}
+			} else {
+				sub.Ok("profile-rights valid")
 			}
 		}
 

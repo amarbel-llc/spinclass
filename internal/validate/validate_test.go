@@ -618,6 +618,31 @@ func TestCheckAuthWarnsRepoLayerURLResolver(t *testing.T) {
 	}
 }
 
+func TestCheckProfileRightsWarnsUnlessGlobal(t *testing.T) {
+	on := true
+	sf := sweatfile.Sweatfile{ProfileRights: &sweatfile.ProfileRights{Enforce: &on}}
+	warns := func(issues []Issue) bool {
+		for _, iss := range issues {
+			if iss.Field == "profile-rights.enforce" && iss.Severity == SeverityWarning {
+				return true
+			}
+		}
+		return false
+	}
+	if !warns(CheckProfileRights(sf, false, false)) {
+		t.Error("repo-layer enforce should warn")
+	}
+	if !warns(CheckProfileRights(sf, true, false)) {
+		t.Error("non-global above-repo enforce should warn")
+	}
+	if warns(CheckProfileRights(sf, true, true)) {
+		t.Error("global enforce should not warn")
+	}
+	if warns(CheckProfileRights(sweatfile.Sweatfile{}, false, false)) {
+		t.Error("absent table should not warn")
+	}
+}
+
 func TestCheckMetricsWarnsOnMalformedStatsdAddress(t *testing.T) {
 	check := func(addr string) []Issue {
 		return CheckMetrics(sweatfile.Sweatfile{Metrics: &sweatfile.Metrics{StatsdAddress: &addr}})

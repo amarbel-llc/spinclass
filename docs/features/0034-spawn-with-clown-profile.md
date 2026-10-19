@@ -651,7 +651,8 @@ spinclass's own, to be corrected if piggy or the operator disagrees.
     never turn it off. A driver whose hierarchy cannot be read fails closed.
     It is only robust when set in the **global** sweatfile: a non-global trusted
     layer (say `~/work/sweatfile`) is not consulted for a driver standing outside
-    it, because the driver's working directory is agent-chosen. A session-bound
+    it, because the driver's working directory is agent-chosen; `sc validate`
+    warns when `enforce` is set anywhere but the global sweatfile. A session-bound
     grant is used only when the driver's principal provably belongs to that
     session. When enforcing, a spawn-entry that already carries a clown
     `--profile` is refused unless a profile was requested, and a requested profile
