@@ -28,9 +28,13 @@ type UnitRecord struct {
 	Cgroup       string `json:"cgroup"`
 	InvocationID string `json:"invocation_id"`
 	UID          int    `json:"uid"`
-	// Pty is the st_rdev of the pty clown gave the agent, 0 if none. That
-	// pty lives on the host's devpts (a passed fd).
-	Pty uint64 `json:"pty"`
+	// Pty is the host path of the pty slave clown allocated for the agent
+	// ("/dev/pts/N"), empty if none (clown FDR 0020). The check stats it from
+	// the frontend for its device number and devpts instance.
+	Pty string `json:"pty"`
+	// Capabilities are what the clown that launched the unit reports it
+	// enforces (AgentScopeCapabilities).
+	Capabilities []string `json:"capabilities"`
 	// ServeSocket is the per-session unix socket the bridge serves this
 	// unit's MCP on (F12).
 	ServeSocket string `json:"serve_socket"`
@@ -75,8 +79,18 @@ func ParseUnitRecord(b []byte) (UnitRecord, error) {
 		return UnitRecord{}, fmt.Errorf("agent unit record cgroup %q is not a unit under %s", r.Cgroup, AgentSlice)
 	case r.ServeSocket != "" && !filepath.IsAbs(r.ServeSocket):
 		return UnitRecord{}, fmt.Errorf("agent unit record serve_socket %q is not absolute", r.ServeSocket)
+	case r.Pty != "" && (filepath.Clean(r.Pty) != r.Pty || !strings.HasPrefix(r.Pty, "/dev/pts/")):
+		return UnitRecord{}, fmt.Errorf("agent unit record pty %q is not a /dev/pts path", r.Pty)
 	}
 	return r, nil
+}
+
+// UnitSpecPath is where spinclass writes the launch spec it hands clown
+// (CLOWN_AGENT_SCOPE), beside the result and likewise outside the worktree:
+// clown re-reads it across its [attach] re-exec, so the unit must not be able
+// to edit it.
+func UnitSpecPath(stateDir, worktree string) string {
+	return strings.TrimSuffix(UnitRecordPath(stateDir, worktree), ".json") + ".spec.json"
 }
 
 // isAgentUnitCgroup accepts an absolute, clean cgroup path whose parent

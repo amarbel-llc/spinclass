@@ -10,7 +10,6 @@ import (
 	"code.linenisgreat.com/spinclass/internal/grantstore"
 	"code.linenisgreat.com/spinclass/internal/grantverify"
 	"code.linenisgreat.com/spinclass/internal/profilerights"
-	"code.linenisgreat.com/spinclass/internal/session"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -71,10 +70,16 @@ func (p productionAuthorizer) Authorize(driver Driver, profile ResolvedProfile) 
 	if err != nil {
 		return ProfileAuthorization{}, err
 	}
+	stateDir, err := confinement.DefaultStateDir()
+	if err != nil {
+		return ProfileAuthorization{}, err
+	}
 	checker := &profilerights.Checker{
-		Store:              store,
-		RootKeys:           func() ([]ssh.PublicKey, error) { return grantverify.LoadSigners(grantverify.DefaultSignersPath()) },
-		SessionOfPrincipal: session.SessionKeyOfPrincipal,
+		Store:    store,
+		RootKeys: func() ([]ssh.PublicKey, error) { return grantverify.LoadSigners(grantverify.DefaultSignersPath()) },
+		// The frontend's principal mapping, never the worktree-local session
+		// state the confined agent can rewrite (FDR 0035).
+		SessionOfPrincipal: confinement.SessionOfPrincipal(stateDir, confinement.LiveSession),
 		Confinement:        conf,
 		Now:                time.Now,
 	}

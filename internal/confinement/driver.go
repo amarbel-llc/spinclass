@@ -47,7 +47,7 @@ func InputsForDriver(sessionKey, principal string) (Inputs, error) {
 		if st.IsTombstone() {
 			continue
 		}
-		s := Session{Key: st.SessionKey, Worktree: st.WorktreePath, PID: st.PID, Principal: st.Principal}
+		s := Session{Key: st.SessionKey, Worktree: st.WorktreePath, PID: st.PID, Principal: st.Principal, RecordedPrincipal: st.Principal}
 		if st.SessionKey == sessionKey {
 			if principal != "" {
 				s.Principal = principal
@@ -69,9 +69,8 @@ func InputsForDriver(sessionKey, principal string) (Inputs, error) {
 	in.OperatorHome = home
 	in.AgentSocket = os.Getenv("SSH_AUTH_SOCK")
 	in.XAuthority = os.Getenv("XAUTHORITY")
-	in.StateDir = os.Getenv("XDG_STATE_HOME")
-	if in.StateDir == "" {
-		in.StateDir = filepath.Join(home, ".local", "state")
+	if in.StateDir, err = DefaultStateDir(); err != nil {
+		return Inputs{}, err
 	}
 	in.RuntimeAllow = RuntimeAllowFor(fmt.Sprintf("/run/user/%d", os.Getuid()), in.AgentSocket)
 
@@ -88,6 +87,26 @@ func InputsForDriver(sessionKey, principal string) (Inputs, error) {
 		in.HooksPath = hp
 	}
 	return in, nil
+}
+
+// DefaultStateDir is the XDG state base unit records, specs and principal
+// mappings live under.
+func DefaultStateDir() (string, error) {
+	if d := os.Getenv("XDG_STATE_HOME"); d != "" {
+		return d, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("finding the state directory: %w", err)
+	}
+	return filepath.Join(home, ".local", "state"), nil
+}
+
+// LiveSession reports whether sessionKey names a session that has not been
+// closed (a tombstone never vouches for a grant link).
+func LiveSession(sessionKey string) bool {
+	st, err := session.FindByTarget(sessionKey)
+	return err == nil && !st.IsTombstone()
 }
 
 // runtimeBound are the operator-runtime-dir entries clown binds into every

@@ -65,8 +65,12 @@ type Session struct {
 	// worker it is claude; for an attached session it is the `sc` process,
 	// which runs outside the unit, so F1 does not bind on it.
 	PID int
-	// Principal is the session's CLOWN_SESSION_ID (FDR 0032 D1).
+	// Principal is the session's CLOWN_SESSION_ID (FDR 0032 D1), as the
+	// frontend knows it.
 	Principal string
+	// RecordedPrincipal is what the worktree-local session state says: a
+	// display cache the agent can rewrite, compared but never trusted (F15).
+	RecordedPrincipal string
 }
 
 // Inputs is everything the probes consult besides the System.
@@ -123,5 +127,6 @@ func Run(sys System, in Inputs) Report {
 		p.f12OnlyOwnServe(),
 		p.f13PrivateNetwork(),
 		p.f14RuntimeDirBoundOnly(),
+		p.f15PrincipalMapping(),
 	}}
 }

@@ -141,11 +141,22 @@ const (
 	ptyDev    = uint64(136<<8 | 5) // pts/5
 	hostPts   = uint64(33)         // st_dev of the host's devpts
 	stateDir  = "/state"
-	recordFor = `{"version":1,"unit":"%s","cgroup":"%s","invocation_id":"x","uid":1000,"pty":%d,"serve_socket":"%s","main_pid":%d}`
+	recordFor = `{"version":1,"unit":"%s","cgroup":"%s","invocation_id":"x","uid":1000,"pty":"%s","serve_socket":"%s","main_pid":%d}`
+	ptyPath   = "/dev/pts/5"
 )
 
+// record renders a unit record; a nonzero pty means the unit's own pty, which
+// clown reports by path.
 func record(unit, cg string, pty uint64, serve string, mainPID int) string {
-	return fmt.Sprintf(recordFor, unit, cg, pty, serve, mainPID)
+	path := ""
+	if pty != 0 {
+		path = ptyPath
+	}
+	return fmt.Sprintf(recordFor, unit, cg, path, serve, mainPID)
+}
+
+func mapping(principal, key, worktree, unit string) string {
+	return fmt.Sprintf(`{"version":1,"principal":"%s","session_key":"%s","worktree":"%s","unit":"%s"}`, principal, key, worktree, unit)
 }
 
 // confinedHost is a host where every fact holds for driver session r/a.
@@ -153,21 +164,22 @@ func confinedHost() (*fakeSys, Inputs) {
 	sys := &fakeSys{
 		uid: 1000,
 		files: map[string]string{
-			UnitRecordPath(stateDir, "/wt/a"):           record("agent-a.service", unitCG, ptyDev, "/run/user/1000/clown/agent/a/serve.sock", 100),
-			UnitRecordPath(stateDir, "/wt/b"):           record("agent-b.service", otherCG, 0, "/run/user/1000/clown/agent/b/serve.sock", 0),
-			"/sys/fs/cgroup" + unitCG + "/cgroup.procs": "100\n101\n",
-			"/proc/100/cgroup":                          "0::" + unitCG + "\n",
-			"/proc/101/cgroup":                          "0::" + unitCG + "\n",
-			"/proc/50/cgroup":                           "0::/user.slice/user-1000.slice/user@1000.service/app.slice/piggy-agent.service\n",
-			"/proc/50/stat":                             "50 (piggy-agent) S 1 50 50 0 -1 0",
-			"/proc/100/stat":                            "100 (claude) S 90 100 100 34821 -1 0",
-			"/proc/101/stat":                            "101 (bash) S 100 100 100 34821 -1 0",
-			"/proc/100/environ":                         "PATH=/bin\x00HOME=/tmp/home\x00CLOWN_SESSION_ID=principal-a\x00",
-			"/proc/101/environ":                         "PATH=/bin\x00",
-			"/proc/100/comm":                            "claude\n",
-			"/proc/101/comm":                            "bash\n",
-			"/proc/50/comm":                             "piggy-agent\n",
-			"/proc/1/comm":                              "systemd\n",
+			UnitRecordPath(stateDir, "/wt/a"):             record("agent-a.service", unitCG, ptyDev, "/run/user/1000/clown/agent/a/serve.sock", 100),
+			UnitRecordPath(stateDir, "/wt/b"):             record("agent-b.service", otherCG, 0, "/run/user/1000/clown/agent/b/serve.sock", 0),
+			PrincipalMappingPath(stateDir, "principal-a"): mapping("principal-a", "r/a", "/wt/a", "agent-a.service"),
+			"/sys/fs/cgroup" + unitCG + "/cgroup.procs":   "100\n101\n",
+			"/proc/100/cgroup":                            "0::" + unitCG + "\n",
+			"/proc/101/cgroup":                            "0::" + unitCG + "\n",
+			"/proc/50/cgroup":                             "0::/user.slice/user-1000.slice/user@1000.service/app.slice/piggy-agent.service\n",
+			"/proc/50/stat":                               "50 (piggy-agent) S 1 50 50 0 -1 0",
+			"/proc/100/stat":                              "100 (claude) S 90 100 100 34821 -1 0",
+			"/proc/101/stat":                              "101 (bash) S 100 100 100 34821 -1 0",
+			"/proc/100/environ":                           "PATH=/bin\x00HOME=/tmp/home\x00CLOWN_SESSION_ID=principal-a\x00",
+			"/proc/101/environ":                           "PATH=/bin\x00",
+			"/proc/100/comm":                              "claude\n",
+			"/proc/101/comm":                              "bash\n",
+			"/proc/50/comm":                               "piggy-agent\n",
+			"/proc/1/comm":                                "systemd\n",
 			"/proc/100/mountinfo": "1 0 8:1 / / rw - ext4 /dev/sda1 rw\n" +
 				"2 1 0:40 / /home rw,nosuid - tmpfs tmpfs rw\n" +
 				"3 2 8:1 /wt/a /wt/a rw - ext4 /dev/sda1 rw\n",
@@ -206,6 +218,7 @@ func confinedHost() (*fakeSys, Inputs) {
 			"/dev/pts":     hostPts,
 		},
 		chardevs: map[string]charDev{
+			ptyPath:             {ptyDev, hostPts},
 			"/proc/100/fd/0":    {ptyDev, hostPts},
 			"/proc/101/fd/0":    {ptyDev, hostPts},
 			root + "/dev/pts/5": {ptyDev, hostPts},
@@ -214,7 +227,7 @@ func confinedHost() (*fakeSys, Inputs) {
 		env:  map[string]string{"DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus"},
 	}
 	in := Inputs{
-		Driver: Session{Key: "r/a", Worktree: "/wt/a", PID: 100, Principal: "principal-a"},
+		Driver: Session{Key: "r/a", Worktree: "/wt/a", PID: 100, Principal: "principal-a", RecordedPrincipal: "principal-a"},
 		Live: []Session{
 			{Key: "r/a", Worktree: "/wt/a", PID: 100},
 			{Key: "r/b", Worktree: "/wt/b", PID: 200},
@@ -262,10 +275,21 @@ func TestEachFactCatchesItsBreach(t *testing.T) {
 		mutate func(*fakeSys, *Inputs)
 	}{
 		{"F1", "carries the driver's principal", func(s *fakeSys, in *Inputs) {
-			in.Driver.Principal = "principal-z"
+			// A consistent mapping for a principal no unit process carries.
+			in.Driver.Principal, in.Driver.RecordedPrincipal = "principal-z", "principal-z"
+			s.files[PrincipalMappingPath(stateDir, "principal-z")] = mapping("principal-z", "r/a", "/wt/a", "agent-a.service")
 		}},
-		{"F1", "no principal", func(s *fakeSys, in *Inputs) {
-			in.Driver.Principal = ""
+		{"F15", "no frontend principal mapping", func(s *fakeSys, _ *Inputs) {
+			delete(s.files, PrincipalMappingPath(stateDir, "principal-a"))
+		}},
+		{"F15", "maps principal principal-a to session r/b", func(s *fakeSys, _ *Inputs) {
+			s.files[PrincipalMappingPath(stateDir, "principal-a")] = mapping("principal-a", "r/b", "/wt/b", "agent-a.service")
+		}},
+		{"F15", "maps principal principal-a to unit agent-b.service", func(s *fakeSys, _ *Inputs) {
+			s.files[PrincipalMappingPath(stateDir, "principal-a")] = mapping("principal-a", "r/a", "/wt/a", "agent-b.service")
+		}},
+		{"F15", "records principal principal-x, the frontend knows principal-a", func(_ *fakeSys, in *Inputs) {
+			in.Driver.RecordedPrincipal = "principal-x"
 		}},
 		{"F2", "inside an agent unit", func(s *fakeSys, _ *Inputs) {
 			s.files["/proc/50/cgroup"] = "0::" + unitCG + "/sub\n"
@@ -502,7 +526,7 @@ func TestNoUnitRecordFailsEveryUnitFact(t *testing.T) {
 	sys, in := confinedHost()
 	delete(sys.files, UnitRecordPath(stateDir, "/wt/a"))
 	r := Run(sys, in)
-	for _, id := range []string{"F1", "F3", "F4", "F5", "F6", "F7", "F8a", "F8b", "F9", "F10", "F11", "F12", "F13", "F14"} {
+	for _, id := range []string{"F1", "F3", "F4", "F5", "F6", "F7", "F8a", "F8b", "F9", "F10", "F11", "F12", "F13", "F14", "F15"} {
 		if f := factByID(t, r, id); f.OK {
 			t.Errorf("%s passed with no unit to probe", id)
 		}

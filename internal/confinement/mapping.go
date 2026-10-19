@@ -1,0 +1,186 @@
+package confinement
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// PrincipalMapping binds a principal to its session in frontend-owned state:
+// $XDG_STATE_HOME/spinclass/principals/<principal>.json, beside the unit
+// records and like them hidden from every unit by ProtectHome. The grant walk
+// joins a principal to its session through THIS, never through the
+// worktree-local session state, which the confined agent can rewrite (FDR
+// 0035, "The principal-to-session mapping"; amends FDR 0001). The frontend
+// writes it from the unit's own environment, so the agent never names itself.
+type PrincipalMapping struct {
+	Version    int    `json:"version"`
+	Principal  string `json:"principal"`
+	SessionKey string `json:"session_key"`
+	Worktree   string `json:"worktree"`
+	Unit       string `json:"unit"`
+}
+
+const principalMappingVersion = 1
+
+// PrincipalMappingPath is where a principal's mapping lives.
+func PrincipalMappingPath(stateDir, principal string) string {
+	return filepath.Join(stateDir, "spinclass", "principals", principal+".json")
+}
+
+func validPrincipalName(p string) error {
+	if p == "" || p == "." || p == ".." || strings.ContainsAny(p, "/\\\x00\n") {
+		return fmt.Errorf("principal %q cannot name a mapping file", p)
+	}
+	return nil
+}
+
+// LoadPrincipalMapping reads and validates a principal's mapping.
+func LoadPrincipalMapping(sys System, stateDir, principal string) (PrincipalMapping, error) {
+	if err := validPrincipalName(principal); err != nil {
+		return PrincipalMapping{}, err
+	}
+	b, err := sys.ReadFile(PrincipalMappingPath(stateDir, principal))
+	if err != nil {
+		return PrincipalMapping{}, fmt.Errorf("no frontend principal mapping for %s: %w", principal, err)
+	}
+	var m PrincipalMapping
+	if err := json.Unmarshal(b, &m); err != nil {
+		return PrincipalMapping{}, fmt.Errorf("principal mapping for %s does not parse: %w", principal, err)
+	}
+	switch {
+	case m.Version != principalMappingVersion:
+		return PrincipalMapping{}, fmt.Errorf("principal mapping for %s has version %d", principal, m.Version)
+	case m.Principal != principal:
+		return PrincipalMapping{}, fmt.Errorf("principal mapping file for %s names %s", principal, m.Principal)
+	case m.SessionKey == "" || m.Worktree == "" || m.Unit == "":
+		return PrincipalMapping{}, fmt.Errorf("principal mapping for %s is incomplete", principal)
+	}
+	return m, nil
+}
+
+// RecordPrincipalFromUnit writes the mapping for the session whose unit
+// record exists, reading the principal from the unit's main process
+// environment (CLOWN_SESSION_ID), not from anything the session wrote. Run
+// in the frontend once the unit is up (the spawn hello) and again on resume.
+// A session without a unit gets no mapping: its grants cannot be card-rooted
+// anyway, since the confinement check fails.
+func RecordPrincipalFromUnit(sys System, stateDir, sessionKey, worktree string) (string, error) {
+	rec, err := LoadUnitRecord(sys, stateDir, worktree)
+	if err != nil {
+		return "", err
+	}
+	if rec.MainPID <= 0 {
+		return "", fmt.Errorf("unit %s reports no main pid to read the principal from", rec.Unit)
+	}
+	p := &prober{sys: sys}
+	principal, err := p.environValue(rec.MainPID, "CLOWN_SESSION_ID")
+	if err != nil {
+		return "", fmt.Errorf("reading unit %s's principal: %w", rec.Unit, err)
+	}
+	if principal == "" {
+		return "", fmt.Errorf("unit %s's main process carries no CLOWN_SESSION_ID", rec.Unit)
+	}
+	if err := validPrincipalName(principal); err != nil {
+		return "", err
+	}
+	m := PrincipalMapping{Version: principalMappingVersion, Principal: principal, SessionKey: sessionKey, Worktree: worktree, Unit: rec.Unit}
+	return principal, writeJSONAtomic(PrincipalMappingPath(stateDir, principal), m)
+}
+
+// RemovePrincipalMapping deletes a principal's mapping when its session ends.
+func RemovePrincipalMapping(stateDir, principal string) error {
+	if err := validPrincipalName(principal); err != nil {
+		return err
+	}
+	if err := os.Remove(PrincipalMappingPath(stateDir, principal)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// SessionOfPrincipal is the grant walk's join (profilegrant.WalkOptions):
+// the session the frontend mapping names for principal, if that session is
+// still live. Only the frontend mapping is consulted.
+func SessionOfPrincipal(stateDir string, live func(sessionKey string) bool) func(string) (string, bool) {
+	return func(principal string) (string, bool) {
+		m, err := LoadPrincipalMapping(Host{}, stateDir, principal)
+		if err != nil || !live(m.SessionKey) {
+			return "", false
+		}
+		return m.SessionKey, true
+	}
+}
+
+func writeJSONAtomic(path string, v any) error {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(append(b, '\n')); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
+
+// WriteUnitSpec writes the launch spec for clown (CLOWN_AGENT_SCOPE) to
+// UnitSpecPath, atomically and mode 0600.
+func WriteUnitSpec(stateDir, worktree string, spec any) (string, error) {
+	path := UnitSpecPath(stateDir, worktree)
+	return path, writeJSONAtomic(path, spec)
+}
+
+// RequiredCapabilities are what clown must report before spinclass launches
+// a worker confined (coordinator decision, 2026-10-19): without a private
+// network the unit reaches every loopback MCP bridge; without frontend MCP
+// sockets serve is on loopback; without moxy inside the unit the worker has
+// no file tools, and a forwarded moxy is an escape.
+var RequiredCapabilities = []string{"agent-unit", "private-network", "frontend-mcp-sockets", "in-unit-moxy"}
+
+// MissingCapabilities returns the required capabilities absent from have.
+func MissingCapabilities(have []string) []string {
+	var missing []string
+	for _, c := range RequiredCapabilities {
+		found := false
+		for _, h := range have {
+			if h == c {
+				found = true
+				break
+			}
+		}
+		if !found {
+			missing = append(missing, c)
+		}
+	}
+	return missing
+}
+
+// InsideAgentUnit reports whether this process runs inside a clown agent
+// unit. A spawn from there would start the child's frontend inside the
+// parent's agent unit (FDR 0032 D7), so `sc spawn` refuses.
+func InsideAgentUnit(sys System) (bool, error) {
+	b, err := sys.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return false, err
+	}
+	cg, err := parseCgroupV2(b)
+	if err != nil {
+		return false, err
+	}
+	return strings.Contains(cg+"/", "/"+AgentSlice+"/"), nil
+}

@@ -25,8 +25,8 @@ func TestLiveHost(t *testing.T) {
 		t.Fatalf("assembling inputs: %v", err)
 	}
 	r := Run(Host{}, in)
-	if len(r.Facts) != 15 {
-		t.Fatalf("probed %d facts, want 15", len(r.Facts))
+	if len(r.Facts) != 16 {
+		t.Fatalf("probed %d facts, want 16", len(r.Facts))
 	}
 	for _, f := range r.Facts {
 		status := "pass"

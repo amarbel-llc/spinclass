@@ -20,6 +20,8 @@ type prober struct {
 	in  Inputs
 
 	rec        UnitRecord
+	ptyRdev    uint64 // the unit's own pty, stat'd from the frontend
+	ptyFsdev   uint64 // ... and the devpts instance it lives on
 	pids       []int  // every process in the unit's cgroup and its descendants
 	root       string // /proc/<pid>/root of the unit's main process
 	subjectErr error
@@ -91,6 +93,18 @@ func (p *prober) loadSubject() {
 	// so the root itself must be readable or those passes are vacuous.
 	if _, err := p.sys.ReadDir(p.root + "/"); err != nil {
 		p.subjectErr = fmt.Errorf("cannot look into unit %s through %s: %w", rec.Unit, p.root, err)
+		return
+	}
+	if rec.Pty != "" {
+		rdev, fsdev, ok, err := p.sys.CharDevice(rec.Pty)
+		switch {
+		case err != nil:
+			p.subjectErr = fmt.Errorf("the unit's reported pty %s: %w", rec.Pty, err)
+		case !ok:
+			p.subjectErr = fmt.Errorf("the unit's reported pty %s is not a character device", rec.Pty)
+		default:
+			p.ptyRdev, p.ptyFsdev = rdev, fsdev
+		}
 	}
 }
 
@@ -412,24 +426,10 @@ func sameDev(a, b uint64) bool {
 	return am == bm && an == bn
 }
 
-// hostDevpts is the st_dev of the frontend's /dev/pts: the devpts instance
-// the unit's own pty (a passed fd) lives on.
-func (p *prober) hostDevpts() (uint64, error) {
-	fi, err := p.sys.Stat("/dev/pts")
-	if err != nil {
-		return 0, fmt.Errorf("stat /dev/pts: %w", err)
-	}
-	st, ok := fi.Sys().(*syscall.Stat_t)
-	if !ok {
-		return 0, errors.New("stat /dev/pts: no device number")
-	}
-	return uint64(st.Dev), nil //nolint:unconvert // width differs by arch
-}
-
 // isOwnPty: the same device number on the same devpts instance as the pty
 // clown reported. A private devpts reuses low minors, so rdev alone collides.
-func (p *prober) isOwnPty(rdev, fsdev, hostPts uint64) bool {
-	return p.rec.Pty != 0 && sameDev(rdev, p.rec.Pty) && fsdev == hostPts
+func (p *prober) isOwnPty(rdev, fsdev uint64) bool {
+	return p.rec.Pty != "" && sameDev(rdev, p.ptyRdev) && fsdev == p.ptyFsdev
 }
 
 // F3: no unit process holds a terminal other than the unit's own pty.
@@ -437,10 +437,6 @@ func (p *prober) f3NoInheritedTTY() Fact {
 	const id, name = "F3", "no inherited tty"
 	err := func() error {
 		if err := p.needSubject(); err != nil {
-			return err
-		}
-		hostPts, err := p.hostDevpts()
-		if err != nil {
 			return err
 		}
 		for _, pid := range p.pids {
@@ -456,7 +452,7 @@ func (p *prober) f3NoInheritedTTY() Fact {
 					}
 					return fmt.Errorf("inspecting pid %d fd %s: %w", pid, fd, err)
 				}
-				if ok && isTerminal(rdev) && !p.isOwnPty(rdev, fsdev, hostPts) {
+				if ok && isTerminal(rdev) && !p.isOwnPty(rdev, fsdev) {
 					major, minor := devMajorMinor(rdev)
 					return fmt.Errorf("pid %d fd %s is terminal %d:%d, not the unit's own pty", pid, fd, major, minor)
 				}
@@ -471,7 +467,7 @@ func (p *prober) f3NoInheritedTTY() Fact {
 			}
 			// tty_nr carries no devpts instance; it must at least be the
 			// own pty's number, and F3's fd scan above covers the instance.
-			if ttyNr != 0 && (p.rec.Pty == 0 || !sameDev(ttyNr, p.rec.Pty)) {
+			if ttyNr != 0 && (p.rec.Pty == "" || !sameDev(ttyNr, p.ptyRdev)) {
 				major, minor := devMajorMinor(ttyNr)
 				return fmt.Errorf("pid %d's controlling tty is %d:%d, not the unit's own pty", pid, major, minor)
 			}
@@ -802,10 +798,6 @@ func (p *prober) f8bNoOperatorPTY() Fact {
 		if err := p.needSubject(); err != nil {
 			return err
 		}
-		hostPts, err := p.hostDevpts()
-		if err != nil {
-			return err
-		}
 		dir, err := p.at("/dev/pts")
 		if err != nil {
 			return err
@@ -830,7 +822,7 @@ func (p *prober) f8bNoOperatorPTY() Fact {
 			if err != nil {
 				return fmt.Errorf("inspecting /dev/pts/%s in the unit: %w", n, err)
 			}
-			if ok && p.isOwnPty(rdev, fsdev, hostPts) {
+			if ok && p.isOwnPty(rdev, fsdev) {
 				continue
 			}
 			werr := p.sys.Writable(node)
@@ -1067,6 +1059,36 @@ func (p *prober) f13PrivateNetwork() Fact {
 			if theirs == ours {
 				return fmt.Errorf("pid %d shares the host network namespace (%s): every loopback MCP bridge and abstract socket is reachable", pid, ours)
 			}
+		}
+		return nil
+	}()
+	return fact(id, name, err, "")
+}
+
+// F15: the frontend's principal mapping (what the grant walk trusts) names
+// the driver's session and unit, and the worktree's cached principal agrees.
+// A disagreement means one side was rewritten; both values are named.
+func (p *prober) f15PrincipalMapping() Fact {
+	const id, name = "F15", "frontend principal mapping matches"
+	err := func() error {
+		if err := p.needSubject(); err != nil {
+			return err
+		}
+		d := p.in.Driver
+		if d.Principal == "" {
+			return errors.New("the driver has no principal to look up")
+		}
+		m, err := LoadPrincipalMapping(p.sys, p.in.StateDir, d.Principal)
+		if err != nil {
+			return err
+		}
+		switch {
+		case m.SessionKey != d.Key:
+			return fmt.Errorf("the frontend maps principal %s to session %s, but the driver is session %s", d.Principal, m.SessionKey, d.Key)
+		case m.Unit != p.rec.Unit:
+			return fmt.Errorf("the frontend maps principal %s to unit %s, but the driver's unit is %s", d.Principal, m.Unit, p.rec.Unit)
+		case d.RecordedPrincipal != "" && d.RecordedPrincipal != d.Principal:
+			return fmt.Errorf("the worktree's session state records principal %s, the frontend knows %s", d.RecordedPrincipal, d.Principal)
 		}
 		return nil
 	}()
