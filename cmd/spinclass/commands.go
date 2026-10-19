@@ -61,6 +61,7 @@ func buildApp() *command.App {
 	registerHookCommand(app)
 	registerProfileGrantCommands(app)
 	registerProfileGrantImportCommand(app)
+	registerRevokeOrphansCommand(app)
 	registerVersionCommand(app)
 	registerServeCommand(app)
 	registerMCPOnlyCommands(app)
