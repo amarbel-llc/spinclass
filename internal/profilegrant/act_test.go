@@ -235,6 +235,30 @@ func TestActTextStaysWithinPiggysLineLimit(t *testing.T) {
 	}
 }
 
+// TestActTextStaysWithinPiggysCharacterBudget: real digests are long, so the
+// character budget can bind before the line budget does.
+func TestActTextStaysWithinPiggysCharacterBudget(t *testing.T) {
+	longDigest := "clown-profile-digest-v1@sha256-" + strings.Repeat("a", 52)
+	g := rootGrant()
+	g.Profiles = map[string]string{}
+	for i := 0; i < MaxActLines-actFixedLines; i++ {
+		g.Profiles[fmt.Sprintf("a-rather-long-profile-name-for-budget-%02d", i)] = longDigest
+	}
+	realDigest := "piggy-record-digest-v1@sha256-" + strings.Repeat("b", 52)
+	_, err := ActText(g, realDigest)
+	if err == nil || !strings.Contains(err.Error(), "characters") {
+		t.Fatalf("a line-legal grant over the character budget must be refused, got %v", err)
+	}
+	g.Profiles = map[string]string{"cheap": longDigest, "review": longDigest}
+	got, err := ActText(g, realDigest)
+	if err != nil {
+		t.Fatalf("two real-sized profiles must fit: %v", err)
+	}
+	if n := utf8.RuneCountInString(got); n > MaxActChars {
+		t.Errorf("rendered %d characters, over the %d budget", n, MaxActChars)
+	}
+}
+
 func TestDigestOf(t *testing.T) {
 	a, err := DigestOf("one\n")
 	if err != nil {

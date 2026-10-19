@@ -670,14 +670,16 @@ spinclass's own, to be corrected if piggy or the operator disagrees.
     passed; two unrelated roots for one grantee in a single batch are not yet
     rejected.
 
-20. **The act text must stay under piggy's line limit.** Piggy refuses operator-act
-    texts above 24 rendered lines (provisional, piggy#322). The text has 8 fixed
-    lines plus one per profile, so a single grant record carries at most 16
-    profiles. `ActText` fails above the limit (`profilegrant.MaxActLines`), and
-    because `bless` builds the text before it contacts the card, an oversize grant
-    is refused before any card act. Lines are counted by newline, not after
-    wrapping; a long profile name or digest could still wrap on the card's prompt,
-    and piggy#322 has not said which it counts.
+20. **The act text must stay within piggy's prompt budget.** Piggy's askpass
+    refuses operator-act texts above 24 rendered lines (provisional, piggy#322),
+    and the budget it gave us is about 15 lines and 1200 characters. Both are
+    treated as hard caps: `ActText` fails above `profilegrant.MaxActLines` (15)
+    or `MaxActChars` (1200), and because `bless` builds the text before it
+    contacts the card, an oversize grant is refused before any card act. The text
+    has 8 fixed lines plus one per profile, so a record carries at most 7
+    profiles by line count, fewer when names and digests are long (a real-sized
+    profile line is about 100 characters). Lines are counted by newline, not
+    after wrapping; whether piggy counts wrapped lines is not stated.
 
 ## Phasing
 

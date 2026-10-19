@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"code.linenisgreat.com/piggy/go/pkgs/markl"
 )
@@ -69,16 +70,24 @@ func ActText(g Grant, digest string) (string, error) {
 		return "", fmt.Errorf("act text is %d bytes, limit %d", len(out), maxTextBytes)
 	}
 	if lines := strings.Count(out, "\n"); lines > MaxActLines {
-		return "", fmt.Errorf("act text is %d lines, limit %d (piggy refuses longer operator-act texts, piggy#322): "+
-			"grant fewer profiles per record, at most %d", lines, MaxActLines, MaxActLines-actFixedLines)
+		return "", fmt.Errorf("act text is %d lines, budget %d (piggy's askpass shows at most 24 lines; piggy#322): "+
+			"grant fewer profiles per record, at most %d by line count", lines, MaxActLines, MaxActLines-actFixedLines)
+	}
+	if chars := utf8.RuneCountInString(out); chars > MaxActChars {
+		return "", fmt.Errorf("act text is %d characters, budget %d (piggy#322): grant fewer profiles per record", chars, MaxActChars)
 	}
 	return out, nil
 }
 
-// MaxActLines is the most lines piggy renders for an operator-act text before
-// refusing it (provisional, piggy#322). ActText fails above it, so bless
-// refuses before the card is asked anything.
-const MaxActLines = 24
+// MaxActLines and MaxActChars are the act-text budget piggy gave for the
+// operator's prompt: about 15 lines and 1200 characters, inside the 24-line
+// askpass limit it enforces (piggy#322, relayed by the coordinator). They are
+// treated as hard caps. ActText fails above either, so bless refuses before the
+// card is asked anything.
+const (
+	MaxActLines = 15
+	MaxActChars = 1200
+)
 
 // actFixedLines is the count of lines in an act text that are not profiles.
 const actFixedLines = 8
