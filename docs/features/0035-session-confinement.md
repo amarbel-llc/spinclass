@@ -253,6 +253,19 @@ hygiene (`harnessScrubbedEnvVars`) is kept in both modes. The switch is read
 from the same trusted layers as `[profile-rights]` so a repo cannot turn it off
 for a driver that set it.
 
+Until clown runs moxy inside the unit and forwards only frontend-class servers
+(ringmaster, troupe's MCP, spinclass serve) over per-session sockets, the
+switch **refuses** to launch a worker confined, naming the clown rev it waits
+for: a confined worker without folio, grit or rg cannot work, and a forwarded
+moxy is a `folio_write`-to-`~/.bashrc` escape (coordinator, 2026-10-19).
+
+troupe's password file is bound read-only into the unit as the **child's own**
+file, derived from the child's principal, never a path inherited from the
+spawner's environment. Every child launch (spawn, attach, `sc exec`) already
+drops the parent's `TROUPE_XMPP_PASSWORD_FILE`/`TROUPE_XMPP_PASSWORD`
+(`session.StripInheritedSessionIDs`, spinclass#169): the same uid can read the
+parent's file, so a child could otherwise authenticate as its parent.
+
 ## The principal across `sc resume` (FDR 0034 item 17)
 
 The check and the grant chain bind on the worker's principal (its

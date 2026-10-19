@@ -15,9 +15,17 @@ import "strings"
 // spinclass must never SET CLOWN_SESSION_ID itself — clown owns its derivation.
 // This helper only stops PROPAGATING a parent's value, so the child re-derives
 // its channel from its own (authoritative) SPINCLASS_SESSION_ID.
+//
+// The parent's troupe credentials are stripped too: a child that inherits
+// TROUPE_XMPP_PASSWORD_FILE keeps the PARENT's password path next to its own
+// user wherever clown does not re-mint it, and the same uid can read that
+// file, so the child could authenticate as its parent. The child's clown
+// mints its own (spinclass#169, FDR 0035).
 var inheritedSessionIDVars = []string{
 	"CLOWN_SESSION_ID=",
 	"CLAUDE_SESSION_ID=",
+	"TROUPE_XMPP_PASSWORD_FILE=",
+	"TROUPE_XMPP_PASSWORD=",
 }
 
 // StripInheritedSessionIDs returns env with any inherited session-identity

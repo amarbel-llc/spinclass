@@ -26,6 +26,21 @@ func TestStripInheritedSessionIDs(t *testing.T) {
 	}
 }
 
+// The parent's troupe credentials never reach a child (spinclass#169): its
+// clown mints the child's own; the child's user name is left for clown.
+func TestStripInheritedTroupeCredentials(t *testing.T) {
+	in := []string{
+		"TROUPE_XMPP_USER=child-principal",
+		"TROUPE_XMPP_PASSWORD_FILE=/run/user/1000/troupe/accounts/parent.pass",
+		"TROUPE_XMPP_PASSWORD=hunter2",
+		"PATH=/usr/bin",
+	}
+	want := []string{"TROUPE_XMPP_USER=child-principal", "PATH=/usr/bin"}
+	if got := StripInheritedSessionIDs(in); !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
 // A prefix-only match must not drop a var whose name merely starts with the
 // stripped name (e.g. CLOWN_SESSION_ID_EXTRA), and the empty input is safe.
 func TestStripInheritedSessionIDsExactPrefix(t *testing.T) {
