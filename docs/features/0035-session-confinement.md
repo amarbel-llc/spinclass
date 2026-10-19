@@ -164,7 +164,7 @@ unit and is deferred.
 |---|---|---|
 | F1 | The driver's agent runs inside an active confinement unit clown reported for its session | Read the driver session's unit record (written by clown, see Interface); `/sys/fs/cgroup/<cgroup>/cgroup.procs` is non-empty (and holds `main_pid` when reported); some process of the unit carries `CLOWN_SESSION_ID` equal to the driver's principal in `/proc/<pid>/environ`. Bound by principal, not the recorded PID: an attached session records the `sc` process, which runs outside the unit. No record, an empty cgroup or no principal match ⇒ fail ("not launched confined") |
 | F2 | piggy-agent is outside every agent unit | Connect to `$SSH_AUTH_SOCK` (from the frontend), `SO_PEERCRED` → peer pid; `/proc/<pid>/cgroup` must not equal or descend from the subject's cgroup nor from any other live session's reported cgroup. Peer pid 0 or unreadable ⇒ fail. (From the frontend the peer pid is real; the self-report extension in open question 3 is only needed for the `--inside` vantage) |
-| F3 | No inherited tty | For every pid of the unit, every `/proc/<pid>/fd` entry that is a tty character device (major 4 or 136–143, or `/dev/tty`) must be the unit's own pty, whose device number clown reports as `pty`; the controlling tty in `/proc/<pid>/stat` (tty_nr) likewise. Any other tty fd ⇒ fail |
+| F3 | No inherited tty | For every pid of the unit, every `/proc/<pid>/fd` entry that is a tty character device (major 4 or 136–143, or `/dev/tty`) must be the unit's own pty: the same device number AND devpts instance as the `pty` path clown reports, stat'd from the frontend (a private devpts reuses low minors). The controlling tty in `/proc/<pid>/stat` (tty_nr) must be its number. Any other tty fd ⇒ fail |
 | F4 | No display or bus variables | `DISPLAY`, `WAYLAND_DISPLAY`, `DBUS_SESSION_BUS_ADDRESS` absent from `/proc/<pid>/environ` of every pid of the unit (hygiene; F5/F6 are the boundary) |
 | F5 | The session bus and the user manager are unreachable | `connect(2)` in the unit to `/run/user/<uid>/bus`, to `/run/user/<uid>/systemd/private` (the user manager, which would let the agent start an unconfined unit) and to any `path=` in the operator's bus address fails with `ENOENT`/`EACCES`/`ECONNREFUSED`; success ⇒ fail |
 | F6 | The display is unusable | Under the unit's root: no `wayland-*` socket in the operator's runtime dir connects; no `/tmp/.X11-unix/X*` connects; the operator's X authority (`$XAUTHORITY` as the frontend sees it, else `~/.Xauthority`) is unreadable; and the operator's runtime dir `/run/user/<uid>` cannot be listed. A reachable **abstract** X socket alone is not a failure (accepted residual, see below) |
@@ -174,6 +174,7 @@ unit and is deferred.
 | F9 | The repo's hooks and config are not writable | In the unit, the write to `<git-common-dir>/hooks`, `<git-common-dir>/config` and the resolved `core.hooksPath` is denied (each, resolved inside the unit, so a hooks dir replaced by a symlink is judged by what the unit reaches). Renaming `hooks` away needs the common dir itself writable: open question 2 |
 | F10 | The unit cannot see or reach processes outside it | `/proc/<pid>/ns/pid` of a unit process differs from the frontend's `/proc/self/ns/pid`, and every numeric entry of the unit's own `/proc` (`/proc/<pid>/root/proc`) is a process in the unit's cgroup. Without this, a same-uid worker reads `/proc/<operator-shell>/root/…` and walks straight out of its mount namespace (that access is `PTRACE_MODE_READ`, which Yama does not restrict), and can `ptrace` or write `/proc/<pid>/mem` of frontend processes where Yama allows. `ProtectProc=invisible` does not help: it hides other uids, and the uid is the same |
 | F11 | Every live agent on the host is confined | Every live session in spinclass state has an `agent-unit.json`, and every process on the host whose `comm` names an agent runtime (`claude`, or `.claude-wrapped` under nixpkgs' wrapper) sits in some live session's unit cgroup; offenders are named by session (from their cwd). One unconfined agent anywhere could have painted the prompt the card root depends on, and an unconfined session's MCP servers are an escape hatch for every confined one |
+| F15 | The frontend principal mapping matches | The mapping the grant walk trusts (`$XDG_STATE_HOME/spinclass/principals/<principal>.json`, see "The principal-to-session mapping") exists for the driver's principal and names the driver's session and unit, and the worktree's cached principal, if any, is the same. A disagreement fails with both values named |
 | F14 | The operator's runtime dir holds only the bound sockets | Listing `/run/user/<uid>` in the unit shows nothing but the entries spinclass and clown bind there (`clown`, `ringmaster`, and the agent socket's directory if it lives there), or cannot be listed at all. It is where the bus, user manager, gpg-agent, pipewire and posh live; the allowlist catches what F5, F6 and F8a do not name |
 | F13 | The unit has a private network namespace | `/proc/<pid>/ns/net` of every unit process differs from the frontend's `/proc/self/ns/net`. In the host namespace every loopback MCP bridge (another session's moxy `folio_write` included) and every abstract unix socket is reachable. Hard requirement, same tier as F10 |
 | F12 | No serve endpoint but the unit's own is reachable | The unit record names exactly one `serve` socket (the per-session unix socket clown's bridge listens on for a confined session); for every other live session's `serve` socket, `connect(2)` under the unit's root fails. No `serve` socket in the record ⇒ fail. The bridge's own peer check (SO_PEERCRED + `/proc/<pid>/cgroup` against the bound unit) is clown's and is not probed here |
@@ -237,12 +238,23 @@ spinclass → clown (opt-in; unset means today's unconfined launch):
   ```
 
 clown → spinclass: once the unit is active, clown writes `result` atomically:
-`{version, unit, cgroup, invocation_id, uid, pty, serve_socket, main_pid}`
-(`main_pid` is in the frontend's pid namespace and becomes the probes' root;
-unknown fields are tolerated, `version` gates meaning; `pty` is
-the `st_rdev` of the pty clown gave the agent, 0 if none; `serve_socket` is
-the per-session unix socket the bridge serves this unit's MCP on, F12). The reported unit name is
-authoritative; the hint is only a hint. F1 reads it.
+`{version, unit, cgroup, invocation_id, uid, pty, serve_socket, main_pid,
+capabilities}` (`main_pid` is in the frontend's pid namespace and becomes the
+probes' root; unknown fields are tolerated, `version` gates meaning; `pty` is
+the host path of the slave clown allocated, `/dev/pts/N`, empty if none, and
+the check stats it from the frontend for its device number and devpts
+instance; `serve_socket` is the per-session unix socket the bridge serves this
+unit's MCP on, F12; `capabilities` echoes the capability query below). The
+reported unit name is authoritative; the hint is only a hint. F1 reads it.
+
+**Capability query** (agreed with koko). Before a confined launch, from the
+frontend and with the clown the spawn-entry will run, spinclass runs
+`clown agent-scope-capabilities`, which prints
+`{"version":1,"capabilities":[…]}`. spinclass requires `agent-unit`,
+`private-network`, `frontend-mcp-sockets` and `in-unit-moxy`
+(`confinement.RequiredCapabilities`). A missing command or a missing
+capability refuses the confined launch and names what is missing, so clown's
+landing flips the switch without a spinclass change.
 
 ## Spawn side
 
@@ -265,6 +277,28 @@ spawner's environment. Every child launch (spawn, attach, `sc exec`) already
 drops the parent's `TROUPE_XMPP_PASSWORD_FILE`/`TROUPE_XMPP_PASSWORD`
 (`session.StripInheritedSessionIDs`, spinclass#169): the same uid can read the
 parent's file, so a child could otherwise authenticate as its parent.
+
+## The principal-to-session mapping (decided 2026-10-19, coordinator)
+
+The grant walk joins a link's grantor principal to the grantor's session
+(FDR 0034 Phase 2). That join used `session.SessionKeyOfPrincipal`, which reads
+the worktree-local session state (FDR 0001), so a confined agent could rewrite
+its own principal and bind the walk to whatever it liked.
+
+The mapping now lives in **frontend-owned state** beside the unit records:
+`$XDG_STATE_HOME/spinclass/principals/<principal>.json`
+(`{version, principal, session_key, worktree, unit}`), hidden from every unit
+by `ProtectHome`. The frontend writes it from the **unit's own environment**
+(`CLOWN_SESSION_ID` of the unit's main process, `RecordPrincipalFromUnit`) once
+the spawn hello arrives, so the agent never names itself. It survives `sc
+resume`, which keeps the principal through `{principal}`; rewriting it at
+resume, once a resumed session launches confined, is a follow-up.
+spawn's authorizer joins through it (`confinement.SessionOfPrincipal`, live
+sessions only); it is removed when the session ends. The worktree state keeps
+its `principal` field as a display cache that nothing authorizing trusts. A
+disagreement between the two is F15. A session that was never launched
+confined has no mapping, so its session-bound grants do not join; its grants
+could not be card-rooted anyway. Amends FDR 0001.
 
 ## The principal across `sc resume` (FDR 0034 item 17)
 
@@ -357,15 +391,17 @@ entry carries no `{principal}`; otherwise it warns.
   (`prctl(PR_SET_NAME)`), and an npm-installed claude runs as `node`. It
   detects honest unconfined sessions; it is no defence against a hostile
   unconfined process, which already has the operator's uid and needs none.
+  Accepted until every agent is a unit (coordinator, 2026-10-19). The end
+  state: F11 enumerates the units under `clown-agent.slice` plus every process
+  in the login session's scope that is not the frontend, and name matching
+  goes away.
 - **F2 identifies the agent by `SO_PEERCRED`**, which names the listener: a
   socket-activated piggy-agent resolves to the user manager.
 - **Session state is worktree-local** (`<worktree>/.spinclass/state.json`,
   FDR 0001), so a confined agent can rewrite its own session's recorded PID
-  and principal. The check binds the unit by the principal in the unit's
-  process environment, not the state file, and the live-session list only
-  widens what F11 and F12 demand; but `session.SessionKeyOfPrincipal`, which
-  the grant walk uses, reads that state. Moving the principal mapping out of
-  the worktree is a follow-up.
+  and principal. Resolved for what authority depends on: see "The
+  principal-to-session mapping". The live-session list still comes from that
+  state, but it only widens what F11 and F12 demand.
 - Every path probe is check-then-use against a live unit; a unit that changes
   between the probe and the spawn is caught at the next spawn, not this one.
 - Reviewed 2026-10-19 by an independent code-review pass; its findings (record

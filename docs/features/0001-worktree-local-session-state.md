@@ -317,6 +317,20 @@ $ sc clean
   permanent diff in every spinclass worktree. No repo in current use
   tracks `.envrc`, so this is documented rather than defended against.
 
+## Amendment: worktree state is not an authority (FDR 0035, 2026-10-19)
+
+The worktree is bound read-write into a confined session's agent unit (FDR
+0035), so anything in `<worktree>/.spinclass/` can be rewritten by the agent it
+describes. Worktree-local state therefore stays the home of a session's
+*display* and lifecycle data, but nothing that authorizes may trust it:
+
+- The principal-to-session join the grant walk uses (FDR 0034) moved to
+  frontend-owned state, `$XDG_STATE_HOME/spinclass/principals/`, written by the
+  frontend from the unit's environment. The `principal` field here is a display
+  cache; the confinement check compares the two (FDR 0035 F15).
+- Clown's agent-unit record and the launch spec live in
+  `$XDG_STATE_HOME/spinclass/units/`, never in the worktree.
+
 ## More Information
 
 - Tracked under milestone `v0.1.0 — Worktree-local session state +
