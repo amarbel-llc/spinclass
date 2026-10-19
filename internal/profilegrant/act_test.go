@@ -18,6 +18,7 @@ func TestActTextGolden(t *testing.T) {
 	}
 	const want = `spinclass profile grant (escalation): initial grant
 record: piggy-record-digest-v1@sha256-example
+from: operator
 allow: root-principal (no session)
 to spawn workers with these profiles, each pinned to its content digest:
   cheap = d-cheap
@@ -40,6 +41,7 @@ Signing this is an operator grant of these rights, bounded as stated above.
 	}
 	const wantWidening = `spinclass profile grant (escalation): widening of piggy-record-digest-v1@sha256-earlier
 record: piggy-record-digest-v1@sha256-example
+from: operator
 allow: repo/branch (session repo/branch)
 to spawn workers with these profiles, each pinned to its content digest:
   cheap = d-cheap
@@ -63,7 +65,6 @@ Signing this is an operator grant of these rights, bounded as stated above.
 
 func TestActTextInvariants(t *testing.T) {
 	g := rootGrant()
-	g.Nonce = "a\tb"
 	got, err := ActText(g, mustDigest(g.CanonicalText()))
 	if err != nil {
 		t.Fatal(err)
@@ -109,6 +110,69 @@ func TestActTextRejectsBadGrants(t *testing.T) {
 	}
 }
 
+// badChars are characters outside the identity allowlist, each in a form the
+// old control-character check let through.
+var badChars = map[string]string{
+	"space":        " ",
+	"open paren":   "(",
+	"close paren":  ")",
+	"equals":       "=",
+	"comma":        ",",
+	"tab":          "\t",
+	"NEL":          "\u0085",
+	"line sep":     " ",
+	"bidi":         "‮",
+	"zero width":   "​",
+	"non-ascii":    "é",
+	"carriage ret": "\r",
+}
+
+func TestActTextRejectsDisallowedCharsInEveryField(t *testing.T) {
+	fields := map[string]func(*Grant, string){
+		"grantor": func(g *Grant, v string) { g.Grantor = "a" + v + "b" },
+		"grantee": func(g *Grant, v string) { g.Grantee = "a" + v + "b" },
+		"session": func(g *Grant, v string) { g.Session = "a" + v + "b" },
+		"widens":  func(g *Grant, v string) { g.Widens = "a" + v + "b" },
+		"profile name": func(g *Grant, v string) {
+			g.Profiles = map[string]string{"a" + v + "b": "d"}
+		},
+		"profile digest": func(g *Grant, v string) {
+			g.Profiles = map[string]string{"cheap": "a" + v + "b"}
+		},
+	}
+	for field, set := range fields {
+		for charName, c := range badChars {
+			t.Run(field+"/"+charName, func(t *testing.T) {
+				g := rootGrant()
+				set(&g, c)
+				if got, err := ActText(g, goldenDigest); err == nil {
+					t.Fatalf("accepted:\n%s", got)
+				}
+			})
+		}
+	}
+	for charName, c := range badChars {
+		t.Run("record digest/"+charName, func(t *testing.T) {
+			if got, err := ActText(rootGrant(), "a"+c+"b"); err == nil {
+				t.Fatalf("accepted:\n%s", got)
+			}
+		})
+	}
+}
+
+// The old text rendered both of these as "allow: x (session y (session z)".
+func TestActTextCollisionCannotBeConstructed(t *testing.T) {
+	a := rootGrant()
+	a.Grantee, a.Session = "x (session y", "z"
+	b := rootGrant()
+	b.Grantee, b.Session = "x", "y (session z"
+	for _, g := range []Grant{a, b} {
+		if got, err := ActText(g, goldenDigest); err == nil {
+			t.Fatalf("accepted:\n%s", got)
+		}
+	}
+}
+
 func TestActTextDiffersPerField(t *testing.T) {
 	base, err := ActText(rootGrant(), goldenDigest)
 	if err != nil {
@@ -120,6 +184,13 @@ func TestActTextDiffersPerField(t *testing.T) {
 		"expires": func(g *Grant) { g.Expires = g.Expires.Add(time.Second) },
 		"widens":  func(g *Grant) { g.Widens = "piggy-record-digest-v1@sha256-earlier" },
 		"grantee": func(g *Grant) { g.Grantee = "other" },
+		"grantor": func(g *Grant) { g.Grantor = "someone-else" },
+		"profile name": func(g *Grant) {
+			g.Profiles = map[string]string{"cheap": "d-cheap", "other": "d-review"}
+		},
+		"profile digest": func(g *Grant) {
+			g.Profiles = map[string]string{"cheap": "d-cheap", "review": "d-other"}
+		},
 	}
 	for name, f := range variants {
 		g := rootGrant()

@@ -565,6 +565,29 @@ spinclass's own, to be corrected if piggy or the operator disagrees.
 8. **Grant store.** Records are kept as files under spinclass's state directory,
    addressed by digest, with an index from grantee to its current record. The
    system-scoped store of FDR 0032 D14 is the eventual home and is not built.
+9. **What `onward` means (found by independent review).** A holder always *uses*
+   its own profiles to spawn workers; that is checked with "does the effective
+   grant hold this profile", not by creating a link. A *link* exists only to
+   give a child its own right to spawn or pass on, so it requires the parent's
+   `onward: grant`. A parent with `onward: none` therefore has **no** children
+   in the chain, and the card-signed text "may pass these on: no" is true:
+   a worker spawned by such a holder runs under the profile but holds nothing
+   to spawn with. (The earlier rule only stopped a child from *gaining*
+   `grant`, which let a `none` holder still mint any number of `none` children
+   with arbitrary grantees.)
+10. **The text the operator reads is an allowlist, not "no control
+    characters".** Every identity-like value (grantor, grantee, session, widens,
+    prev, nonce, profile names and digests) is limited to `[A-Za-z0-9._:/@+-]`.
+    The review showed that "no control characters" still let a grantee contain
+    spaces and parentheses (so two different grantee/session pairs rendered the
+    same `allow:` line) and Unicode line breaks or bidi overrides (so a prompt
+    could be made to show a forged `until:` line). The canonical text is also
+    required to be the exact re-render of what was parsed, which closes a
+    fractional-second expiry the operator could not see. The act text shows the
+    grantor (`from:`), which was otherwise visible only through the digest.
+11. **A widening must widen.** The widened record must be a card-signed root,
+    unexpired, for the same grantee, and a subset by profile name of the
+    widening (digests may differ, since a widening may re-pin a profile).
 
 ## Phasing
 

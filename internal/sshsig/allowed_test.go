@@ -71,6 +71,16 @@ func TestAllowedSignersFeedsVerify(t *testing.T) {
 	}
 }
 
+func TestAllowedSignersTabSeparated(t *testing.T) {
+	a, err := ParseAllowedSigners(strings.NewReader("alice\tnamespaces=\"ns\" " + pubLine(t, "ed25519.pub") + "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.KeysFor("alice", "ns")) != 1 {
+		t.Fatal("tab-separated principal not parsed as plain \"alice\"")
+	}
+}
+
 func TestAllowedSignersRejects(t *testing.T) {
 	ed := pubLine(t, "ed25519.pub")
 	cases := map[string]struct{ line, want string }{
@@ -89,6 +99,7 @@ func TestAllowedSignersRejects(t *testing.T) {
 		"principals only":   {"alice", "expected principals"},
 		"no key":            {"alice namespaces=\"a\"", "parsing key"},
 		"bad key":           {"alice ssh-ed25519 AAAA", "parsing key"},
+		"tab then option":   {"alice\tcert-authority " + ed, `"cert-authority"`},
 		"unsupported type":  {"alice ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQC7", "parsing key"},
 	}
 	for name, c := range cases {

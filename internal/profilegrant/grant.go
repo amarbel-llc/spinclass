@@ -130,6 +130,14 @@ func ParseCanonicalText(s string) (Grant, error) {
 			return Grant{}, fmt.Errorf("line %q: empty or space-padded value", key)
 		}
 		values[key] = value
+		switch key {
+		case "profiles", "rights", "onward", "expires":
+			// checked structurally below
+		default:
+			if err := checkIdentityValue(key, value); err != nil {
+				return Grant{}, err
+			}
+		}
 	}
 
 	g := Grant{
@@ -162,7 +170,32 @@ func ParseCanonicalText(s string) (Grant, error) {
 		return Grant{}, fmt.Errorf("expires: %w", err)
 	}
 	g.Expires = expires.UTC()
+	// Strict inverse: text that parses but would render differently (for
+	// example fractional seconds) is not what a card signs or a verifier trusts.
+	if g.CanonicalText() != s {
+		return Grant{}, errors.New("text is not in canonical form")
+	}
 	return g, nil
+}
+
+// checkIdentityValue is the allowlist for every identity-ish value (grantor,
+// grantee, session, nonce, widens, prev, profile names and digests). An
+// allowlist, not a control-character blocklist, so spaces, parentheses, '=',
+// commas and Unicode line breaks or bidi controls can never reshape the lines
+// the operator reads or make two different grants render alike.
+func checkIdentityValue(what, v string) error {
+	if v == "" {
+		return fmt.Errorf("%s is empty", what)
+	}
+	for _, r := range v {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case strings.ContainsRune("._:/@+-", r):
+		default:
+			return fmt.Errorf("%s contains disallowed character %U", what, r)
+		}
+	}
+	return nil
 }
 
 func parseProfiles(value string) (map[string]string, error) {
@@ -173,8 +206,11 @@ func parseProfiles(value string) (map[string]string, error) {
 		if !ok || name == "" || digest == "" {
 			return nil, fmt.Errorf("profile entry %q, want name=digest", field)
 		}
-		if strings.ContainsAny(digest, "= \t") || strings.ContainsAny(name, "\t") {
-			return nil, fmt.Errorf("profile entry %q contains whitespace or extra '='", field)
+		if err := checkIdentityValue("profile name", name); err != nil {
+			return nil, err
+		}
+		if err := checkIdentityValue("profile digest of "+name, digest); err != nil {
+			return nil, err
 		}
 		if name <= previous {
 			return nil, fmt.Errorf("profile %q is duplicated or out of order", name)
@@ -225,6 +261,11 @@ func (o WalkOptions) bindsGrantor(parent, child Grant) error {
 // Narrows returns nil iff child is a valid narrowing of parent, whose digest
 // is parentDigest. Narrowing is the only change a software key may sign;
 // anything wider needs the card.
+//
+// A holder may always USE its own profiles to spawn workers; that is checked
+// with Holds, not by creating a link. A link exists only to give the child its
+// own right to pass on or spawn, which requires the parent's onward: grant. So
+// a parent with onward none can have no children at all.
 func Narrows(parent Grant, parentDigest string, child Grant, opts WalkOptions) error {
 	if child.Prev != parentDigest {
 		return fmt.Errorf("child prev %q is not parent digest %q", child.Prev, parentDigest)
@@ -235,8 +276,8 @@ func Narrows(parent Grant, parentDigest string, child Grant, opts WalkOptions) e
 	if err := opts.bindsGrantor(parent, child); err != nil {
 		return err
 	}
-	if child.Onward == OnwardGrant && parent.Onward != OnwardGrant {
-		return fmt.Errorf("onward grant not permitted: parent holds %s", parent.Onward)
+	if parent.Onward != OnwardGrant {
+		return errors.New("parent may not pass these on (onward none)")
 	}
 	if child.Expires.After(parent.Expires) {
 		return fmt.Errorf("child expiry after parent expiry (child %s, parent %s)",
@@ -341,7 +382,7 @@ func Walk(now time.Time, start Record, resolve Resolver, v Verifier, opts WalkOp
 		if err != nil {
 			return Grant{}, err
 		}
-		if err := checkWidens(rec, g, resolve); err != nil {
+		if err := checkWidens(now, rec, g, resolve); err != nil {
 			return Grant{}, err
 		}
 		if depth == 1 {
@@ -365,9 +406,10 @@ func Walk(now time.Time, start Record, resolve Resolver, v Verifier, opts WalkOp
 }
 
 // checkWidens enforces that only a root record may widen, and that it widens
-// a record for the same grantee. The widened record is judged on its own card
-// signature, so its chain is not walked here.
-func checkWidens(rec Record, g Grant, resolve Resolver) error {
+// a live root record for the same grantee whose profile names it still
+// includes (digests may differ: a widening may re-pin). The widened record is
+// judged on its own card signature, so its chain is not walked here.
+func checkWidens(now time.Time, rec Record, g Grant, resolve Resolver) error {
 	if g.Widens == noValue {
 		return nil
 	}
@@ -388,9 +430,20 @@ func checkWidens(rec Record, g Grant, resolve Resolver) error {
 	if want != widened.Digest {
 		return fmt.Errorf("record %s: widened record %s: digest mismatch: text hashes to %s", rec.Digest, g.Widens, want)
 	}
+	if !widened.Root {
+		return fmt.Errorf("record %s: widened record %s is not a root record", rec.Digest, g.Widens)
+	}
 	wg, err := ParseCanonicalText(widened.Text)
 	if err != nil {
 		return fmt.Errorf("record %s: widened record %s: parse: %w", rec.Digest, g.Widens, err)
+	}
+	if !now.Before(wg.Expires) {
+		return fmt.Errorf("record %s: widened record %s expired at %s", rec.Digest, g.Widens, wg.Expires.Format(timeLayout))
+	}
+	for _, name := range wg.profileNames() {
+		if _, ok := g.Profiles[name]; !ok {
+			return fmt.Errorf("record %s: widens %s but drops profile %s", rec.Digest, g.Widens, name)
+		}
 	}
 	if wg.Grantee != g.Grantee {
 		return fmt.Errorf("record %s: widens %s but grantee %q differs from widened grantee %q", rec.Digest, g.Widens, g.Grantee, wg.Grantee)

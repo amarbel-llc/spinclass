@@ -104,18 +104,62 @@ func TestParseRejections(t *testing.T) {
 	}
 }
 
-func TestParseAcceptsTab(t *testing.T) {
+func TestParseRejectsTab(t *testing.T) {
 	g := rootGrant()
 	g.Nonce = "a\tb"
-	if _, err := ParseCanonicalText(g.CanonicalText()); err != nil {
-		t.Fatalf("tab in value rejected: %v", err)
+	if _, err := ParseCanonicalText(g.CanonicalText()); err == nil {
+		t.Fatal("tab in value accepted")
+	}
+}
+
+func TestParseRejectsDisallowedCharsInEveryField(t *testing.T) {
+	fields := map[string]func(*Grant, string){
+		"grantor": func(g *Grant, v string) { g.Grantor = "a" + v + "b" },
+		"grantee": func(g *Grant, v string) { g.Grantee = "a" + v + "b" },
+		"session": func(g *Grant, v string) { g.Session = "a" + v + "b" },
+		"nonce":   func(g *Grant, v string) { g.Nonce = "a" + v + "b" },
+		"widens":  func(g *Grant, v string) { g.Widens = "a" + v + "b" },
+		"prev":    func(g *Grant, v string) { g.Prev = "a" + v + "b" },
+		"profile name": func(g *Grant, v string) {
+			g.Profiles = map[string]string{"a" + v + "b": "d"}
+		},
+		"profile digest": func(g *Grant, v string) {
+			g.Profiles = map[string]string{"cheap": "a" + v + "b"}
+		},
+	}
+	for field, set := range fields {
+		for charName, c := range badChars {
+			t.Run(field+"/"+charName, func(t *testing.T) {
+				g := rootGrant()
+				set(&g, c)
+				if _, err := ParseCanonicalText(g.CanonicalText()); err == nil {
+					t.Fatalf("parse accepted:\n%s", g.CanonicalText())
+				}
+			})
+		}
+	}
+}
+
+func TestParseRequiresCanonicalForm(t *testing.T) {
+	valid := rootGrant().CanonicalText()
+	fractional := strings.Replace(valid, "14:00:00Z", "14:00:00.999999999Z", 1)
+	if fractional == valid {
+		t.Fatal("test setup: replacement did not apply")
+	}
+	if _, err := ParseCanonicalText(fractional); err == nil ||
+		!strings.Contains(err.Error(), "not in canonical form") {
+		t.Fatalf("fractional seconds: error %v", err)
+	}
+	unpadded := strings.Replace(valid, "T14:00:00Z", "T14:0:00Z", 1)
+	if _, err := ParseCanonicalText(unpadded); err == nil {
+		t.Fatalf("unpadded minute accepted:\n%s", unpadded)
 	}
 }
 
 func TestNarrows(t *testing.T) {
 	parent := rootGrant()
 	parent.Profiles = map[string]string{"cheap": "X", "review": "d-review"}
-	parent.Onward = OnwardNone
+	parent.Onward = OnwardGrant
 	child := func(mutate func(*Grant)) Grant {
 		c := Grant{
 			Grantor:  "root-principal",
@@ -130,8 +174,8 @@ func TestNarrows(t *testing.T) {
 		mutate(&c)
 		return c
 	}
-	grantingParent := parent
-	grantingParent.Onward = OnwardGrant
+	nonePassingParent := parent
+	nonePassingParent.Onward = OnwardNone
 
 	tests := []struct {
 		name    string
@@ -141,14 +185,16 @@ func TestNarrows(t *testing.T) {
 	}{
 		{"subset equal expiry", parent, child(func(*Grant) {}), ""},
 		{"earlier expiry", parent, child(func(c *Grant) { c.Expires = expiry.Add(-time.Hour) }), ""},
-		{"onward grant from granting parent", grantingParent, child(func(c *Grant) { c.Onward = OnwardGrant }), ""},
+		{"onward grant from granting parent", parent, child(func(c *Grant) { c.Onward = OnwardGrant }), ""},
+		{"none child of granting parent", parent, child(func(c *Grant) { c.Onward = OnwardNone }), ""},
 		{"wrong prev", parent, child(func(c *Grant) { c.Prev = "other" }), `child prev "other" is not parent digest "parent-digest"`},
 		{"grantor is not the parent's grantee", parent, child(func(c *Grant) { c.Grantor = "interloper" }), `child grantor "interloper" is not parent grantee "root-principal"`},
 		{"profile not held", parent, child(func(c *Grant) { c.Profiles = map[string]string{"expensive": "Z"} }), "profile expensive not held by parent"},
 		{"extra profile", parent, child(func(c *Grant) { c.Profiles = map[string]string{"cheap": "X", "other": "Y"} }), "profile other not held by parent"},
 		{"digest differs", parent, child(func(c *Grant) { c.Profiles = map[string]string{"cheap": "Y"} }), "profile cheap digest differs (parent X, child Y)"},
 		{"expiry later", parent, child(func(c *Grant) { c.Expires = expiry.Add(time.Second) }), "child expiry after parent expiry"},
-		{"onward widened", parent, child(func(c *Grant) { c.Onward = OnwardGrant }), "onward grant not permitted: parent holds none"},
+		{"none parent, none child", nonePassingParent, child(func(c *Grant) { c.Onward = OnwardNone }), "parent may not pass these on (onward none)"},
+		{"none parent, grant child", nonePassingParent, child(func(c *Grant) { c.Onward = OnwardGrant }), "parent may not pass these on (onward none)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -320,6 +366,76 @@ func TestWalkWidening(t *testing.T) {
 	if _, err := Walk(now, wide, store(initial, wide), v, WalkOptions{}); err == nil ||
 		!strings.Contains(err.Error(), "signed text differs") {
 		t.Fatalf("wrong form signed: error %v", err)
+	}
+}
+
+func TestWalkWideningRejections(t *testing.T) {
+	v := signedTextVerifier()
+	initial := rootRecord(rootGrant())
+	widening := func(mutate func(*Grant)) Record {
+		wg := rootGrant()
+		wg.Nonce = "wide"
+		wg.Widens = initial.Digest
+		wg.Profiles = map[string]string{"cheap": "d-cheap", "review": "d-review", "expensive": "d-exp"}
+		mutate(&wg)
+		return rootRecord(wg)
+	}
+
+	t.Run("widened record is not a root", func(t *testing.T) {
+		notRoot := initial
+		notRoot.Root = false
+		wide := widening(func(*Grant) {})
+		_, err := Walk(now, wide, store(notRoot, wide), v, WalkOptions{})
+		if err == nil || !strings.Contains(err.Error(), "widened record "+initial.Digest+" is not a root record") {
+			t.Fatalf("error %v", err)
+		}
+	})
+
+	t.Run("widened record expired", func(t *testing.T) {
+		old := rootGrant()
+		old.Expires = now.Add(-time.Minute)
+		oldRec := rootRecord(old)
+		wide := widening(func(g *Grant) { g.Widens = oldRec.Digest })
+		_, err := Walk(now, wide, store(oldRec, wide), v, WalkOptions{})
+		if err == nil || !strings.Contains(err.Error(), "widened record "+oldRec.Digest+" expired") {
+			t.Fatalf("error %v", err)
+		}
+	})
+
+	t.Run("widening drops a profile", func(t *testing.T) {
+		wide := widening(func(g *Grant) { g.Profiles = map[string]string{"cheap": "d-cheap", "other": "d-o"} })
+		_, err := Walk(now, wide, store(initial, wide), v, WalkOptions{})
+		if err == nil || !strings.Contains(err.Error(), "drops profile review") {
+			t.Fatalf("error %v", err)
+		}
+	})
+
+	t.Run("re-pinned digest is allowed", func(t *testing.T) {
+		wide := widening(func(g *Grant) {
+			g.Profiles = map[string]string{"cheap": "d-new", "review": "d-review", "expensive": "d-exp"}
+		})
+		if _, err := Walk(now, wide, store(initial, wide), v, WalkOptions{}); err != nil {
+			t.Fatalf("re-pin rejected: %v", err)
+		}
+	})
+}
+
+func TestWalkOnwardNoneAllowsNoChildren(t *testing.T) {
+	v := signedTextVerifier()
+	profiles := map[string]string{"cheap": "d-cheap"}
+	root := rootRecord(rootGrant())
+	leafNone := linkGrant("root-principal", "a", profiles)
+	leafNone.Onward = OnwardNone
+	a := linkRecord(root, leafNone)
+
+	if _, err := Walk(now, a, store(root, a), v, WalkOptions{}); err != nil {
+		t.Fatalf("none-leaf under a granting root rejected: %v", err)
+	}
+
+	b := linkRecord(a, linkGrant("a", "b", profiles))
+	_, err := Walk(now, b, store(root, a, b), v, WalkOptions{})
+	if err == nil || !strings.Contains(err.Error(), "parent may not pass these on (onward none)") {
+		t.Fatalf("child of an onward-none link: error %v", err)
 	}
 }
 

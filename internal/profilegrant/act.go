@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	"code.linenisgreat.com/piggy/go/pkgs/markl"
 )
@@ -53,6 +52,7 @@ func ActText(g Grant, digest string) (string, error) {
 	var b strings.Builder
 	b.WriteString("spinclass profile grant (escalation): " + form + "\n")
 	b.WriteString("record: " + digest + "\n")
+	b.WriteString("from: " + g.Grantor + "\n")
 	b.WriteString("allow: " + g.Grantee + " (" + session + ")\n")
 	// Each profile is shown with the content digest it is pinned to: the
 	// record id commits to them, but the operator reading the prompt must see
@@ -82,7 +82,7 @@ func validateForAct(g Grant, digest string) error {
 		return errors.New("grant has no expiry")
 	}
 	checks := []struct{ what, value string }{
-		{"record digest", digest}, {"grantee", g.Grantee}, {"session", g.Session}, {"widens", g.Widens},
+		{"record digest", digest}, {"grantor", g.Grantor}, {"grantee", g.Grantee}, {"session", g.Session}, {"widens", g.Widens},
 	}
 	for _, n := range g.profileNames() {
 		checks = append(checks,
@@ -98,19 +98,8 @@ func validateForAct(g Grant, digest string) error {
 	return nil
 }
 
-// checkActField rejects empty values and any control character, so no field
-// can inject a line into the text the operator reads.
+// checkActField applies the identity allowlist, so no field can inject a line
+// or fake the punctuation of the text the operator reads.
 func checkActField(what, v string) error {
-	if v == "" {
-		return fmt.Errorf("%s is empty", what)
-	}
-	if !utf8.ValidString(v) {
-		return fmt.Errorf("%s is not valid UTF-8", what)
-	}
-	for _, r := range v {
-		if r < 0x20 || r == 0x7f {
-			return fmt.Errorf("%s contains control character %U", what, r)
-		}
-	}
-	return nil
+	return checkIdentityValue(what, v)
 }

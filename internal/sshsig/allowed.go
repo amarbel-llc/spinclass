@@ -55,15 +55,15 @@ func ParseAllowedSigners(r io.Reader) (*AllowedSigners, error) {
 
 func parseAllowedLine(line string) (allowedEntry, error) {
 	var e allowedEntry
-	principals, rest, found := strings.Cut(line, " ")
-	if !found {
-		principals, rest, found = strings.Cut(line, "\t")
-	}
-	if !found {
+	// The first whitespace run of either kind ends the principals field; a tab
+	// must not hide an option token inside a principal.
+	split := strings.IndexAny(line, " \t")
+	if split < 0 {
 		return e, errors.New("expected principals followed by a key")
 	}
+	principals, rest := line[:split], line[split+1:]
 	for _, p := range strings.Split(principals, ",") {
-		if p == "" || (p != "*" && strings.ContainsAny(p, "*?!\"")) {
+		if p == "" || (p != "*" && strings.ContainsAny(p, "*?!\"")) || strings.ContainsAny(p, " \t") {
 			return e, fmt.Errorf("unsupported principal pattern %q", p)
 		}
 		e.principals = append(e.principals, p)
@@ -81,6 +81,9 @@ func parseAllowedLine(line string) (allowedEntry, error) {
 	e.key = key
 
 	for _, opt := range options {
+		if strings.ContainsAny(opt, " \t") {
+			return e, fmt.Errorf("unsupported option %q: contains whitespace", opt)
+		}
 		name, value, _ := strings.Cut(opt, "=")
 		if name != "namespaces" {
 			return e, fmt.Errorf("unsupported option %q", name)
