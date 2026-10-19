@@ -60,6 +60,31 @@ func TestAllowedSignersKeysFor(t *testing.T) {
 	}
 }
 
+func TestKeysForStrict(t *testing.T) {
+	ed, ec := pubLine(t, "ed25519.pub"), pubLine(t, "ecdsa.pub")
+	src := strings.Join([]string{
+		// no namespaces option, wildcard principal, the one explicit entry, wrong namespace
+		"operator " + ed,
+		"* namespaces=\"ns\" " + ec,
+		"operator,other namespaces=\"ns\" " + ec,
+		"operator namespaces=\"different\" " + ed,
+	}, "\n")
+	a, err := ParseAllowedSigners(strings.NewReader(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := a.KeysForStrict("operator", "ns")
+	if len(got) != 1 || string(got[0].Marshal()) != string(fixtureKey(t, "ecdsa.pub").Marshal()) {
+		t.Fatalf("strict match = %d keys, want exactly the explicit entry", len(got))
+	}
+	if len(a.KeysFor("operator", "ns")) < 3 {
+		t.Fatal("KeysFor must keep its permissive semantics")
+	}
+	if a.KeysForStrict("*", "ns") != nil || a.KeysForStrict("operator", "") != nil || a.KeysForStrict("stranger", "ns") != nil {
+		t.Fatal("wildcard principal, empty namespace and unknown principal match nothing")
+	}
+}
+
 func TestAllowedSignersFeedsVerify(t *testing.T) {
 	a, err := ParseAllowedSigners(strings.NewReader("op namespaces=\"" + fixtureNamespace + "\" " + pubLine(t, "ecdsa.pub") + "\n"))
 	if err != nil {

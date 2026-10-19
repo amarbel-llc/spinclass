@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -47,7 +48,16 @@ func DefaultDir() (string, error) {
 func Open(dir string) (*Store, error) {
 	s := &Store{records: dir, index: filepath.Join(dir, "index")}
 	for _, d := range []string{s.records, s.index} {
+		// A symlinked store directory would redirect every record somewhere
+		// the operator never looked.
+		if info, err := os.Lstat(d); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("grantstore: %s is a symlink; refusing to use it as the store", d)
+		}
 		if err := os.MkdirAll(d, dirMode); err != nil {
+			return nil, fmt.Errorf("grantstore: %w", err)
+		}
+		// MkdirAll leaves a pre-existing directory's mode alone.
+		if err := os.Chmod(d, dirMode); err != nil {
 			return nil, fmt.Errorf("grantstore: %w", err)
 		}
 	}
@@ -106,8 +116,15 @@ func verified(rec profilegrant.Record) (profilegrant.Grant, error) {
 	return g, nil
 }
 
-// Put stores rec. It is idempotent for identical content and an error when a
-// different record already lives under the same digest.
+// cardSigned reports whether rec is a root record carrying a signature.
+func cardSigned(rec profilegrant.Record) bool { return rec.Root && len(rec.Sig) > 0 }
+
+// Put stores rec. The digest covers the text only, so signature and root flag
+// are not part of the key: creating a record is atomic and no-clobber (a
+// first-come unsigned copy must not be able to race a genuine one), identical
+// content is idempotent, and an existing record is replaced only by an
+// UPGRADE to a card-signed root. A downgrade or lateral change is an error.
+// An existing file that fails verification counts as absent (Get ignores it).
 func (s *Store) Put(rec profilegrant.Record) error {
 	if err := checkDigestName(rec.Digest); err != nil {
 		return err
@@ -120,15 +137,34 @@ func (s *Store) Put(rec profilegrant.Record) error {
 		return err
 	}
 	path := filepath.Join(s.records, rec.Digest)
-	if existing, err := os.ReadFile(path); err == nil {
-		if string(existing) == string(data) {
-			return nil
-		}
-		return fmt.Errorf("grantstore: put %s: a different record already exists under this digest", rec.Digest)
-	} else if !errors.Is(err, os.ErrNotExist) {
+
+	tmp, err := writeTemp(s.records, data)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp)
+	// Link, not rename: link fails with EEXIST instead of replacing.
+	err = os.Link(tmp, path)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, fs.ErrExist) {
 		return fmt.Errorf("grantstore: %w", err)
 	}
-	return writeAtomic(s.records, path, data)
+
+	existing, ok := s.Get(rec.Digest)
+	if ok {
+		if existingData, rerr := json.Marshal(existing); rerr == nil && string(existingData) == string(data) {
+			return nil
+		}
+		if !cardSigned(rec) || cardSigned(existing) {
+			return fmt.Errorf("grantstore: put %s: a different record already exists under this digest and this is not an upgrade to a card-signed root", rec.Digest)
+		}
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("grantstore: %w", err)
+	}
+	return nil
 }
 
 // Get returns the record under digest, re-verified. A missing, unreadable,
@@ -217,18 +253,18 @@ func (s *Store) Unbind(grantee string) error {
 	return nil
 }
 
-// writeAtomic writes data via a temp file in dir and a rename, so a reader
-// never sees a partial file.
-func writeAtomic(dir, path string, data []byte) error {
+// writeTemp writes data to a fresh mode-0600 temp file in dir and returns its
+// name.
+func writeTemp(dir string, data []byte) (string, error) {
 	tmp, err := os.CreateTemp(dir, ".tmp-*")
 	if err != nil {
-		return fmt.Errorf("grantstore: %w", err)
+		return "", fmt.Errorf("grantstore: %w", err)
 	}
 	name := tmp.Name()
-	fail := func(err error) error {
+	fail := func(err error) (string, error) {
 		_ = tmp.Close()
 		_ = os.Remove(name)
-		return fmt.Errorf("grantstore: %w", err)
+		return "", fmt.Errorf("grantstore: %w", err)
 	}
 	if err := tmp.Chmod(fileMode); err != nil {
 		return fail(err)
@@ -238,7 +274,17 @@ func writeAtomic(dir, path string, data []byte) error {
 	}
 	if err := tmp.Close(); err != nil {
 		_ = os.Remove(name)
-		return fmt.Errorf("grantstore: %w", err)
+		return "", fmt.Errorf("grantstore: %w", err)
+	}
+	return name, nil
+}
+
+// writeAtomic writes data via a temp file in dir and a rename, so a reader
+// never sees a partial file.
+func writeAtomic(dir, path string, data []byte) error {
+	name, err := writeTemp(dir, data)
+	if err != nil {
+		return err
 	}
 	if err := os.Rename(name, path); err != nil {
 		_ = os.Remove(name)

@@ -38,13 +38,24 @@ func LoadSigners(path string) ([]ssh.PublicKey, error) {
 		return nil, fmt.Errorf("profile-grant signers file %s: %w", path, err)
 	}
 	defer f.Close()
+	// A trust anchor any other user can edit is not a trust anchor. Checked on
+	// the open handle so the file cannot be swapped between check and read.
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("profile-grant signers file %s: %w", path, err)
+	}
+	if err := checkTrustworthy(info); err != nil {
+		return nil, fmt.Errorf("profile-grant signers file %s: %w", path, err)
+	}
 	signers, err := sshsig.ParseAllowedSigners(f)
 	if err != nil {
 		return nil, fmt.Errorf("profile-grant signers file %s: %w", path, err)
 	}
-	keys := signers.KeysFor(Principal, operatoract.NamespaceEscalation)
+	// Strict: a shared file (say, a git-signing key listed for "operator" with no
+	// namespaces option, or under "*") must not make a PIN-less key a grant root.
+	keys := signers.KeysForStrict(Principal, operatoract.NamespaceEscalation)
 	if len(keys) == 0 {
-		return nil, fmt.Errorf("profile-grant signers file %s: no key for principal %q in namespace %s",
+		return nil, fmt.Errorf("profile-grant signers file %s: no entry names principal %s with namespaces=%s",
 			path, Principal, operatoract.NamespaceEscalation)
 	}
 	return keys, nil

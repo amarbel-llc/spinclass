@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,9 +71,127 @@ func TestPutIdempotentAndConflict(t *testing.T) {
 		t.Errorf("identical Put must be idempotent: %v", err)
 	}
 	other := rec
-	other.Root = false // same digest, different content
+	other.Root = false // same digest, different content, not a card-signed upgrade
 	if err := s.Put(other); err == nil {
-		t.Error("conflicting Put under the same digest must fail")
+		t.Error("lateral Put under the same digest must fail")
+	}
+	got, _ := s.Get(rec.Digest)
+	if !got.Root {
+		t.Error("a refused Put changed the stored record")
+	}
+}
+
+func signedRecord(t *testing.T, sig string) profilegrant.Record {
+	t.Helper()
+	rec := recordOf(t, grant("op", "repo/a", "n1", "-", profilegrant.OnwardGrant), true)
+	rec.Sig = []byte(sig)
+	return rec
+}
+
+func TestPutUpgradesAnUnsignedCopyToTheCardSignedRecord(t *testing.T) {
+	s, dir := openTemp(t)
+	signed := signedRecord(t, "card-signature")
+	unsigned := signed
+	unsigned.Sig = nil
+	if err := s.Put(unsigned); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Put(signed); err != nil {
+		t.Fatalf("upgrade to the card-signed record refused: %v", err)
+	}
+	got, ok := s.Get(signed.Digest)
+	if !ok || string(got.Sig) != "card-signature" {
+		t.Fatalf("stored record after upgrade: %+v ok=%v", got, ok)
+	}
+	if info, err := os.Stat(filepath.Join(dir, signed.Digest)); err != nil || info.Mode().Perm() != fileMode {
+		t.Fatalf("upgraded file mode: %v %v", info, err)
+	}
+	// Not-root with a signature is no upgrade either.
+	notRoot := signed
+	notRoot.Root = false
+	if err := s.Put(notRoot); err == nil {
+		t.Error("a non-root record must not replace anything")
+	}
+}
+
+func TestPutRefusesDowngradeAndLateralChange(t *testing.T) {
+	s, _ := openTemp(t)
+	signed := signedRecord(t, "card-signature")
+	if err := s.Put(signed); err != nil {
+		t.Fatal(err)
+	}
+	unsigned := signed
+	unsigned.Sig = nil
+	if err := s.Put(unsigned); err == nil {
+		t.Error("an unsigned copy replaced the card-signed record")
+	}
+	lateral := signed
+	lateral.Sig = []byte("another-signature")
+	if err := s.Put(lateral); err == nil {
+		t.Error("a differently signed record replaced the card-signed record")
+	}
+	got, _ := s.Get(signed.Digest)
+	if string(got.Sig) != "card-signature" {
+		t.Fatalf("stored signature changed to %q", got.Sig)
+	}
+}
+
+func TestConcurrentPutsOfOneDigest(t *testing.T) {
+	signed := signedRecord(t, "card-signature")
+	unsigned := signed
+	unsigned.Sig = nil
+
+	for round := 0; round < 50; round++ {
+		s, _ := openTemp(t)
+		var wg sync.WaitGroup
+		errs := make([]error, 3)
+		for i, rec := range []profilegrant.Record{unsigned, signed, signed} {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				errs[i] = s.Put(rec)
+			}()
+		}
+		wg.Wait()
+		if errs[1] != nil || errs[2] != nil {
+			t.Fatalf("round %d: a card-signed Put failed: %v %v", round, errs[1], errs[2])
+		}
+		// The unsigned copy may win the race (nil) or lose it (a downgrade error), never both outcomes at once.
+		got, ok := s.Get(signed.Digest)
+		if !ok || string(got.Sig) != "card-signature" {
+			t.Fatalf("round %d: the card-signed record did not end up stored: %+v ok=%v", round, got, ok)
+		}
+	}
+}
+
+func TestOpenTightensAndRefusesSymlinks(t *testing.T) {
+	base := t.TempDir()
+	loose := filepath.Join(base, "loose")
+	if err := os.Mkdir(loose, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(loose, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(loose); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{loose, filepath.Join(loose, "index")} {
+		if info, err := os.Stat(d); err != nil || info.Mode().Perm() != dirMode {
+			t.Errorf("%s not tightened to %o: %v %v", d, dirMode, info, err)
+		}
+	}
+
+	target := filepath.Join(base, "elsewhere")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(link); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("symlinked store accepted: %v", err)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -19,19 +20,68 @@ import (
 	"code.linenisgreat.com/spinclass/internal/profilegrant"
 	"code.linenisgreat.com/spinclass/internal/spawn"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/term"
 )
 
 const (
 	grantOperator = "operator"
+	minGrantTTL   = time.Minute
 	maxGrantTTL   = 7 * 24 * time.Hour
 	defaultTTL    = 24 * time.Hour
 )
 
 // Seams for command tests. Production wiring goes through the agent that holds
 // the card; tests inject a fake signer and a temp signers file.
-var profileGrantSigner = func() (operatoract.Signer, error) { return operatoract.NewAgentSigner() }
+//
+// The signer gets the card keys loaded from the signers file so it signs only
+// with an agent identity whose key is in that list, not whichever identity
+// carries a "PIV_slot_9C" comment.
+var profileGrantSigner = func(keys []ssh.PublicKey) (operatoract.Signer, error) {
+	s, err := operatoract.NewAgentSigner()
+	if err != nil {
+		return nil, err
+	}
+	s.Keys = keys
+	return s, nil
+}
 
 var profileGrantSigners = grantverify.DefaultSignersPath
+
+// Guards against an agent driving the card prompt (see requireOperatorTerminal).
+var (
+	profileGrantStdinIsTerminal  = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+	profileGrantStderrIsTerminal = func() bool { return term.IsTerminal(int(os.Stderr.Fd())) }
+	// profileGrantAgentRuntime returns the name of the first environment
+	// variable that marks an agent runtime, or "".
+	profileGrantAgentRuntime = func() string {
+		for _, v := range []string{"CLOWN_SESSION_ID", "SPINCLASS_SESSION_ID"} {
+			if os.Getenv(v) != "" {
+				return v
+			}
+		}
+		return ""
+	}
+)
+
+// requireOperatorTerminal refuses to run unless the operator is plausibly at
+// the keyboard. Being CLI-only keeps this out of MCP, but an agent with a shell
+// tool could still run it and spam the operator's PIN prompt with a grant of
+// its choosing.
+//
+// The environment check is advisory: an agent can unset the variables. The TTY
+// check is defence in depth, for the same reason a pty can be allocated. The
+// real boundary is the prompt surface: the card shows the exact act text and
+// only the operator's PIN and touch sign it (FDR 0034, "Where the card root is
+// real").
+func requireOperatorTerminal() error {
+	if v := profileGrantAgentRuntime(); v != "" {
+		return fmt.Errorf("profile-grant-bless: %s is set, so this looks like an agent runtime; a card act must be started from the operator's own terminal, because an agent-started act would put a grant of the agent's choosing in front of the operator's PIN prompt", v)
+	}
+	if !profileGrantStdinIsTerminal() || !profileGrantStderrIsTerminal() {
+		return errors.New("profile-grant-bless: stdin and stderr must both be terminals; a card act must be started from the operator's own terminal, not piped or driven by a program")
+	}
+	return nil
+}
 
 var profileGrantResolve = func(name string) (string, error) {
 	rp, err := spawn.ResolveProfile(name)
@@ -59,7 +109,7 @@ func registerProfileGrantCommands(app *command.App) {
 			{Name: "grantee", Type: command.String, Description: "Who receives the right: a session key or a principal id (required)"},
 			{Name: "session", Type: command.String, Description: "Session the grant is bound to; \"-\" for a grantee that is a service (default \"-\")"},
 			{Name: "profile", Type: command.Array, Description: "Clown profile to grant, pinned to its resolved digest; repeatable, at least one"},
-			{Name: "ttl", Type: command.String, Description: "How long the grant lasts, a Go duration (default 24h, at most 168h)"},
+			{Name: "ttl", Type: command.String, Description: "How long the grant lasts, a Go duration (default 24h, at least 1m, at most 168h)"},
 			{Name: "onward", Type: command.String, Description: "none (default) or grant: whether the grantee may pass the rights on"},
 			{Name: "widens", Type: command.String, Description: "Digest of the earlier root record this widens; omit for an initial grant"},
 			{Name: "widened-record", Type: command.String, Description: "Path to the JSON of the record named by --widens (needed to verify the widening offline)"},
@@ -83,6 +133,10 @@ type blessFlags struct {
 }
 
 func runProfileGrantBless(ctx context.Context, args json.RawMessage) error {
+	// First: before the signers file is read or the card is contacted.
+	if err := requireOperatorTerminal(); err != nil {
+		return err
+	}
 	var f blessFlags
 	if err := json.Unmarshal(args, &f); err != nil {
 		return fmt.Errorf("profile-grant-bless: %w", err)
@@ -105,7 +159,7 @@ func runProfileGrantBless(ctx context.Context, args json.RawMessage) error {
 	}
 	in.SkipVerify = f.NoVerify
 
-	signer, err := profileGrantSigner()
+	signer, err := profileGrantSigner(keys)
 	if err != nil {
 		return err
 	}
@@ -209,8 +263,11 @@ type blessInput struct {
 // blessRecord builds the root grant, has the card sign its act text, and
 // returns the record only if it verifies against signers (or SkipVerify).
 func blessRecord(ctx context.Context, signer operatoract.Signer, signers []ssh.PublicKey, in blessInput) (profilegrant.Record, error) {
-	if in.TTL <= 0 || in.TTL > maxGrantTTL {
-		return profilegrant.Record{}, fmt.Errorf("--ttl %s out of range: must be above 0 and at most %s", in.TTL, maxGrantTTL)
+	// The minimum is not cosmetic: the act text renders expiry at second
+	// precision, so a sub-minute TTL could read as expired to the post-sign
+	// verify after the card act (PIN and touch) is already spent.
+	if in.TTL < minGrantTTL || in.TTL > maxGrantTTL {
+		return profilegrant.Record{}, fmt.Errorf("--ttl %s out of range: must be at least %s and at most %s", in.TTL, minGrantTTL, maxGrantTTL)
 	}
 	if in.Onward != profilegrant.OnwardNone && in.Onward != profilegrant.OnwardGrant {
 		return profilegrant.Record{}, fmt.Errorf("--onward %q: want none or grant", in.Onward)
@@ -281,5 +338,40 @@ func emitRecord(rec profilegrant.Record, out string) error {
 		_, err = os.Stdout.Write(b)
 		return err
 	}
-	return os.WriteFile(out, b, 0o600)
+	return writeRecordFile(out, b)
+}
+
+// writeRecordFile writes atomically (temp file in the same directory, then
+// rename) with mode 0600 regardless of any existing file, and refuses a
+// symlink at the target: os.WriteFile follows links, applies the mode only on
+// create, and can leave a partial file.
+func writeRecordFile(path string, data []byte) error {
+	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("--out %s is a symlink; refusing to write through it", path)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".grant-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	fail := func(err error) error {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+		return err
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		return fail(err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		return fail(err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+	if err := os.Rename(name, path); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+	return nil
 }

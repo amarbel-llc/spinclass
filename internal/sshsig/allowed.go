@@ -119,6 +119,30 @@ func (a *AllowedSigners) KeysFor(principal, namespace string) []ssh.PublicKey {
 	return keys
 }
 
+// KeysForStrict is KeysFor without the permissive defaults: an entry counts
+// only if it lists principal by exact name (a "*" principal does not match) AND
+// carries a namespaces option that lists namespace (no option does not mean
+// "any"). Trust anchors use this, so a shared signers file cannot make an
+// unrelated key a root by omission.
+func (a *AllowedSigners) KeysForStrict(principal, namespace string) []ssh.PublicKey {
+	if principal == "" || principal == "*" || namespace == "" {
+		return nil
+	}
+	var keys []ssh.PublicKey
+	for _, e := range a.entries {
+		if e.namespaces == nil || !e.permitsNamespace(namespace) {
+			continue
+		}
+		for _, p := range e.principals {
+			if p == principal {
+				keys = append(keys, e.key)
+				break
+			}
+		}
+	}
+	return keys
+}
+
 func (e allowedEntry) matchesPrincipal(principal string) bool {
 	for _, p := range e.principals {
 		if p == "*" || p == principal {

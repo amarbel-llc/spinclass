@@ -693,21 +693,11 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		entrypoint = resume
 	}
 
-	profilePlan, err := planRecordedProfile(*state, spawn.ResolveProfile, entrypoint, p.RepinProfile)
+	entrypoint, err = applyRecordedProfile(*state, spawn.ResolveProfile, entrypoint, p.RepinProfile,
+		repinGate{NoAttach: p.NoAttach, Interactive: stdinStdoutAreTerminals(), Confirm: confirmRepinInteractively},
+		persistRepin, os.Stdout, os.Stderr)
 	if err != nil {
 		return err
-	}
-	entrypoint = profilePlan.Entry
-	if profilePlan.Warning != "" {
-		fmt.Fprintln(os.Stderr, "spinclass: "+profilePlan.Warning)
-	}
-	if profilePlan.RepinTo != "" {
-		// Persist before Attach: Attach blocks for the session's life and
-		// carries ProfileDigest forward from disk.
-		if err := persistRepin(*state, profilePlan.RepinTo); err != nil {
-			return fmt.Errorf("re-pinning profile digest: %w", err)
-		}
-		fmt.Printf("profile %s re-pinned from %s to %s\n", state.Profile, profilePlan.RepinFrom, profilePlan.RepinTo)
 	}
 
 	rp := worktree.ResolvedPath{

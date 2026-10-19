@@ -9,6 +9,7 @@
 package operatoract
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
@@ -20,6 +21,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"code.linenisgreat.com/spinclass/internal/sshsig"
+	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 )
 
@@ -57,6 +60,12 @@ type AgentSigner struct {
 	// GUID optionally narrows Slot to one card, by prefix of the comment's
 	// short GUID.
 	GUID string
+	// Keys, when non-empty, is the allow-list of the card's public keys (from
+	// the signers file). Only an agent identity whose key is in it is used: the
+	// "PIV_slot_" comment is attacker-settable by anything that can add a key
+	// to the agent, so with a list the comment is not trusted for selection.
+	// Empty (no signers, --no-verify) falls back to the comment rule.
+	Keys []ssh.PublicKey
 
 	dial func(ctx context.Context) (net.Conn, error)
 }
@@ -123,10 +132,61 @@ func (s *AgentSigner) request(conn net.Conn, namespace, text string) ([]byte, er
 	if err != nil {
 		return nil, classifyExtensionError(err)
 	}
-	return decodeReply(reply)
+	blob, err := decodeReply(reply)
+	if err != nil {
+		return nil, err
+	}
+	// The agent is not trusted to have signed what we asked: a rogue agent
+	// could return a valid signature by another key or under another namespace.
+	if err := checkReturnedSig(blob, key, namespace); err != nil {
+		return nil, err
+	}
+	return blob, nil
 }
 
-// selectKey picks the identity whose comment is "PIV_slot_<slot> [<guid>...]".
+// checkReturnedSig requires the sshsig to be under the requested namespace, by
+// exactly the key that was selected and sent, with a hash the verifier reads.
+func checkReturnedSig(blob, key []byte, namespace string) error {
+	sig, err := sshsig.Parse(armor(blob))
+	if err != nil {
+		return &ProtocolError{Reason: "returned signature does not parse: " + sanitizeDetail(err.Error())}
+	}
+	if sig.Namespace != namespace {
+		return &ProtocolError{Reason: fmt.Sprintf("returned signature is under namespace %q, not the requested %q", sanitizeDetail(sig.Namespace), namespace)}
+	}
+	if !bytes.Equal(sig.PublicKey.Marshal(), key) {
+		return &ProtocolError{Reason: "returned signature is by a different key than the one selected"}
+	}
+	if sig.HashAlgorithm != "sha256" && sig.HashAlgorithm != "sha512" {
+		return &ProtocolError{Reason: fmt.Sprintf("returned signature uses hash %q, want sha256 or sha512", sanitizeDetail(sig.HashAlgorithm))}
+	}
+	return nil
+}
+
+// maxDetailBytes caps agent-supplied text that reaches an error message.
+const maxDetailBytes = 200
+
+// sanitizeDetail makes agent-supplied text safe to print: anything but
+// printable ASCII and plain space (escape sequences, bidi controls, invalid
+// UTF-8) becomes '?', and the result is capped.
+func sanitizeDetail(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if b.Len() >= maxDetailBytes {
+			break
+		}
+		if r == ' ' || (r >= 0x21 && r <= 0x7e) {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('?')
+		}
+	}
+	return b.String()
+}
+
+// selectKey picks the identity to sign with. With an allow-list it is the
+// identity whose key is in the list; otherwise the one whose comment is
+// "PIV_slot_<slot> [<guid>...]".
 func (s *AgentSigner) selectKey(keys []*agent.Key) ([]byte, error) {
 	slot := s.Slot
 	if slot == "" {
@@ -136,9 +196,13 @@ func (s *AgentSigner) selectKey(keys []*agent.Key) ([]byte, error) {
 	var matches []*agent.Key
 	var comments []string
 	for _, k := range keys {
-		comments = append(comments, k.Comment)
+		comments = append(comments, sanitizeDetail(k.Comment))
 		fields := strings.Fields(k.Comment)
-		if len(fields) == 0 || !strings.EqualFold(fields[0], tag) {
+		if len(s.Keys) > 0 {
+			if !s.keyAllowed(k.Blob) {
+				continue
+			}
+		} else if len(fields) == 0 || !strings.EqualFold(fields[0], tag) {
 			continue
 		}
 		if s.GUID != "" && (len(fields) < 2 || !guidPrefixMatch(fields[1], s.GUID)) {
@@ -146,23 +210,40 @@ func (s *AgentSigner) selectKey(keys []*agent.Key) ([]byte, error) {
 		}
 		matches = append(matches, k)
 	}
+	want := tag
+	if len(s.Keys) > 0 {
+		want = "a key from the signers file"
+	}
 	switch len(matches) {
 	case 1:
 		return matches[0].Blob, nil
 	case 0:
-		return nil, &NoSuchKeyError{Detail: fmt.Sprintf("agent serves no key for %s (served: [%s])", tag, strings.Join(comments, ", "))}
+		return nil, &NoSuchKeyError{Detail: fmt.Sprintf("agent serves no key for %s (served: [%s])", want, sanitizeDetail(strings.Join(comments, ", ")))}
 	default:
-		return nil, &NoSuchKeyError{Detail: fmt.Sprintf("agent serves %d keys for %s; set a GUID to disambiguate (served: [%s])", len(matches), tag, strings.Join(comments, ", "))}
+		return nil, &NoSuchKeyError{Detail: fmt.Sprintf("agent serves %d keys for %s; set a GUID to disambiguate (served: [%s])", len(matches), want, sanitizeDetail(strings.Join(comments, ", ")))}
 	}
 }
 
-func guidPrefixMatch(commentGUID, hint string) bool {
-	a, b := strings.ToLower(commentGUID), strings.ToLower(hint)
-	return a != "" && b != "" && (strings.HasPrefix(a, b) || strings.HasPrefix(b, a))
+func (s *AgentSigner) keyAllowed(blob []byte) bool {
+	for _, k := range s.Keys {
+		if k != nil && bytes.Equal(k.Marshal(), blob) {
+			return true
+		}
+	}
+	return false
 }
 
-// genericExtensionFailure is x/crypto's text for SSH_AGENT_EXTENSION_FAILURE;
-// the library offers no typed error for it.
+// guidPrefixMatch: the configured hint must be a prefix of the comment's GUID.
+// The reverse direction would let a short (or empty-ish) comment GUID match any
+// longer hint.
+func guidPrefixMatch(commentGUID, hint string) bool {
+	a, b := strings.ToLower(commentGUID), strings.ToLower(hint)
+	return a != "" && b != "" && strings.HasPrefix(a, b)
+}
+
+// genericExtensionFailure is x/crypto's text for SSH_AGENT_EXTENSION_FAILURE.
+// x/crypto exposes no typed error for it (only agent.ErrExtensionUnsupported
+// for a plain SSH_AGENT_FAILURE), so a string match is the only option.
 const genericExtensionFailure = "agent: generic extension failure"
 
 // classifyExtensionError separates "this agent does not serve the extension"
@@ -274,7 +355,7 @@ func decodeReply(reply []byte) ([]byte, error) {
 	if version != requestVersion {
 		return nil, &ProtocolError{Reason: fmt.Sprintf("operator-act response version %d, want %d", version, requestVersion)}
 	}
-	detail := strings.ToValidUTF8(string(detailBytes), "�")
+	detail := sanitizeDetail(string(detailBytes))
 	if err := statusError(code, detail); err != nil {
 		return nil, err
 	}

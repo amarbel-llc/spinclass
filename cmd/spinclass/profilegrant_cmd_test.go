@@ -199,6 +199,8 @@ func TestBlessRecordBounds(t *testing.T) {
 		"injected grantee":  func(in *blessInput) { in.Grantee = "x\nallow: everyone" },
 		"widens, no record": func(in *blessInput) { in.Widens = "piggy-record-digest-v1@sha256-zzz" },
 		"no profiles":       func(in *blessInput) { in.Profiles = nil },
+		"sub-minute ttl":    func(in *blessInput) { in.TTL = 59 * time.Second },
+		"sub-second ttl":    func(in *blessInput) { in.TTL = 500 * time.Millisecond },
 	} {
 		in := testInput()
 		mutate(&in)
@@ -209,10 +211,106 @@ func TestBlessRecordBounds(t *testing.T) {
 	if card.calls != 0 {
 		t.Fatalf("the card was asked %d times for requests that were invalid up front", card.calls)
 	}
-	in := testInput()
-	in.TTL = 7 * 24 * time.Hour
-	if _, err := blessRecord(context.Background(), card, keys, in); err != nil {
-		t.Fatalf("a seven day ttl is the maximum, not over it: %v", err)
+	for _, ttl := range []time.Duration{7 * 24 * time.Hour, time.Minute} {
+		in := testInput()
+		in.TTL = ttl
+		if _, err := blessRecord(context.Background(), card, keys, in); err != nil {
+			t.Fatalf("ttl %s is within the bounds: %v", ttl, err)
+		}
+	}
+}
+
+func TestRunProfileGrantBlessRefusesAShortTTLBeforeTheCard(t *testing.T) {
+	card := newTestCard(t)
+	stubSeams(t, card, writeSignersFor(t, card.pub))
+	if err := runBless(t, blessFlags{Grantee: "g", Profile: []string{"worker"}, TTL: "30s"}); err == nil || !strings.Contains(err.Error(), "--ttl") {
+		t.Fatalf("got %v", err)
+	}
+	if card.calls != 0 {
+		t.Fatal("the card was asked for a grant that could not survive its own verification")
+	}
+}
+
+func TestRunProfileGrantBlessRefusesWhenNotDrivenByTheOperator(t *testing.T) {
+	cases := map[string]func(){
+		"stdin not a terminal":  func() { profileGrantStdinIsTerminal = func() bool { return false } },
+		"stderr not a terminal": func() { profileGrantStderrIsTerminal = func() bool { return false } },
+		"clown session":         func() { profileGrantAgentRuntime = func() string { return "CLOWN_SESSION_ID" } },
+		"spinclass session":     func() { profileGrantAgentRuntime = func() string { return "SPINCLASS_SESSION_ID" } },
+	}
+	for name, breakIt := range cases {
+		t.Run(name, func(t *testing.T) {
+			card := newTestCard(t)
+			// A signers path that would be read, and a signer that would be asked, if the guard did not fire first.
+			stubSeams(t, card, writeSignersFor(t, card.pub))
+			signersRead := false
+			profileGrantSigners = func() string { signersRead = true; return "unused" }
+			breakIt()
+			out := filepath.Join(t.TempDir(), "r.json")
+			err := runBless(t, blessFlags{Grantee: "g", Profile: []string{"worker"}, Out: out})
+			if err == nil || !strings.Contains(err.Error(), "operator's own terminal") {
+				t.Fatalf("got %v", err)
+			}
+			if signersRead || card.calls != 0 {
+				t.Fatalf("guard ran too late: signers read=%v card calls=%d", signersRead, card.calls)
+			}
+			if _, statErr := os.Stat(out); !os.IsNotExist(statErr) {
+				t.Fatal("a record was written")
+			}
+		})
+	}
+
+	// And the interactive, unmarked environment proceeds.
+	card := newTestCard(t)
+	stubSeams(t, card, writeSignersFor(t, card.pub))
+	if err := runBless(t, blessFlags{Grantee: "g", Profile: []string{"worker"}, Out: filepath.Join(t.TempDir(), "r.json")}); err != nil {
+		t.Fatalf("interactive unmarked environment refused: %v", err)
+	}
+	if card.calls != 1 {
+		t.Fatalf("card calls %d, want 1", card.calls)
+	}
+}
+
+func TestWriteRecordFile(t *testing.T) {
+	dir := t.TempDir()
+
+	// Replaces an existing looser file atomically, ending 0600.
+	existing := filepath.Join(dir, "r.json")
+	if err := os.WriteFile(existing, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeRecordFile(existing, []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(existing); string(b) != "new" {
+		t.Fatalf("content %q", b)
+	}
+	if info, _ := os.Stat(existing); info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v, want 0600 even over an existing 0644 file", info.Mode().Perm())
+	}
+
+	// Refuses a symlink at the target and leaves its destination alone.
+	victim := filepath.Join(dir, "victim")
+	if err := os.WriteFile(victim, []byte("untouched"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link.json")
+	if err := os.Symlink(victim, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeRecordFile(link, []byte("x")); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("symlink target accepted: %v", err)
+	}
+	if b, _ := os.ReadFile(victim); string(b) != "untouched" {
+		t.Fatal("wrote through the symlink")
+	}
+
+	// No temp files left behind.
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".grant-") {
+			t.Fatalf("leftover temp file %s", e.Name())
+		}
 	}
 }
 
@@ -262,10 +360,16 @@ func TestBlessRecordWidening(t *testing.T) {
 func stubSeams(t *testing.T, card *testCard, signersPath string) {
 	t.Helper()
 	oldSigner, oldSigners, oldResolve := profileGrantSigner, profileGrantSigners, profileGrantResolve
+	oldIn, oldErr, oldRT := profileGrantStdinIsTerminal, profileGrantStderrIsTerminal, profileGrantAgentRuntime
 	t.Cleanup(func() {
 		profileGrantSigner, profileGrantSigners, profileGrantResolve = oldSigner, oldSigners, oldResolve
+		profileGrantStdinIsTerminal, profileGrantStderrIsTerminal, profileGrantAgentRuntime = oldIn, oldErr, oldRT
 	})
-	profileGrantSigner = func() (operatoract.Signer, error) { return card, nil }
+	// An interactive, unmarked environment, as the operator's own terminal is.
+	profileGrantStdinIsTerminal = func() bool { return true }
+	profileGrantStderrIsTerminal = func() bool { return true }
+	profileGrantAgentRuntime = func() string { return "" }
+	profileGrantSigner = func([]ssh.PublicKey) (operatoract.Signer, error) { return card, nil }
 	profileGrantSigners = func() string { return signersPath }
 	profileGrantResolve = func(name string) (string, error) {
 		if name == "missing" {

@@ -588,6 +588,55 @@ spinclass's own, to be corrected if piggy or the operator disagrees.
 11. **A widening must widen.** The widened record must be a card-signed root,
     unexpired, for the same grantee, and a subset by profile name of the
     widening (digests may differ, since a widening may re-pin a profile).
+12. **Resume keeps the profile.** `sc resume` on a session spawned with a
+    profile splices `--profile <name>` into the resume entry (refusing, fail
+    closed, when the entry has no `--`), resolves the recorded profile, and
+    refuses when it no longer resolves or its digest differs from the recorded
+    one. The operator's decision was "refuse, and ask an authority to continue";
+    until the grant machinery can express an agent holding that authority, the
+    only authority is the human at a terminal: `--repin-profile` is CLI-only,
+    needs an interactive confirmation that shows the old and new digests, and is
+    refused with `--no-attach` or without a terminal (found by review: without
+    that gate an agent with a shell could rewrite the recorded digest).
+13. **`sc profile-grant-bless` is not drivable by an agent.** It is CLI-only (no
+    MCP tool), and it also refuses unless stdin and stderr are terminals and
+    refuses when `CLOWN_SESSION_ID` or `SPINCLASS_SESSION_ID` is set. The
+    environment check is advisory (an agent can unset variables) and the
+    terminal check is defence in depth; the real boundary is the prompt surface
+    (see "Where the card root is real"). An agent that can reach the card agent's
+    socket can always raise a prompt, which RFC 0012 accepts because the operator
+    reads the full text and can cancel.
+14. **The card's signers file is explicit and owned.** The allowed-signers file
+    that anchors trust must name the principal `operator` exactly (a `*`
+    principal does not count) and list `piggy-escalation-v1` in an explicit
+    `namespaces` option (an entry with no `namespaces` permits every namespace),
+    and it must not be group- or world-writable or owned by another user. A
+    shared signers file listing a PIN-less software key as `operator` would
+    otherwise make that key a valid grant root.
+15. **The client checks what the agent signed.** After a card act the client
+    parses the returned sshsig and requires its namespace to be the requested
+    one, its key to be the key it selected, and its hash to be sha256 or sha512,
+    before the record is even verified against the signers file; and when the
+    card's public keys are known it selects only an identity in that list, since
+    the `PIV_slot_9C` comment prefix is settable by anything that can add a key
+    to the agent. The wire framing was checked against golang.org/x/crypto
+    v0.50.0 (`Extension` appends the contents raw after the name, so the RFC's
+    single outer string is not double-framed), and a raw-connection test pins the
+    request bytes independently of x/crypto's own server.
+16. **Grant store semantics.** The record digest covers the text only, so the
+    store treats a card-signed root as an *upgrade* of an unsigned copy and never
+    the reverse, creates files atomically without clobbering, and refuses a
+    symlinked store directory. The store holds records; it grants no authority.
+17. **Assumption to verify: a worker's principal survives `sc resume`.** FDR 0032
+    D1 says the principal survives a resume because the resume reuses the claude
+    session id. The hook replaces a differing recorded principal only when the
+    recorded process is dead, and `Attach` records the long-lived `sc` process as
+    the PID, so if clown did mint a new principal on resume the mapping would keep
+    the old one and a resumed session could not be the grantor of a link (it
+    fails closed). Unverified. The hook also takes both the working directory and
+    the principal from its caller, which any same-uid process can forge; that is
+    the same bar as narrowing links being unsigned, and becomes real only when
+    links are signed.
 
 ## Phasing
 

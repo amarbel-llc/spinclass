@@ -76,18 +76,55 @@ func TestLoadSigners(t *testing.T) {
 	}
 }
 
+const noExplicitEntry = "no entry names principal operator with namespaces=piggy-escalation-v1"
+
+func TestLoadSignersAcceptsOnlyTheExplicitEntryOfAMixedFile(t *testing.T) {
+	ed, ec := strings.TrimSpace(string(read(t, "ed25519.pub"))), strings.TrimSpace(string(read(t, "ecdsa.pub")))
+	path := writeSigners(t, "operator "+ed+"\n* namespaces=\"piggy-escalation-v1\" "+ed+"\noperator namespaces=\"piggy-escalation-v1\" "+ec+"\n")
+	keys, err := LoadSigners(path)
+	if err != nil || len(keys) != 1 || string(keys[0].Marshal()) != string(key(t, "ecdsa.pub").Marshal()) {
+		t.Fatalf("got %v, %v; want only the explicit ecdsa entry", keys, err)
+	}
+}
+
+func TestLoadSignersRefusesAWritableFile(t *testing.T) {
+	pub := strings.TrimSpace(string(read(t, "ed25519.pub")))
+	path := writeSigners(t, "operator namespaces=\"piggy-escalation-v1\" "+pub+"\n")
+	for _, mode := range []os.FileMode{0o660, 0o606, 0o666} {
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+		keys, err := LoadSigners(path)
+		if err == nil || keys != nil || !strings.Contains(err.Error(), "write") || !strings.Contains(err.Error(), path) {
+			t.Fatalf("mode %o: got %v, %v; want a refusal naming the path", mode, keys, err)
+		}
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadSigners(path); err != nil {
+		t.Fatalf("a 0644 file owned by the user is fine: %v", err)
+	}
+}
+
 func TestLoadSignersFailsClosed(t *testing.T) {
 	pub := strings.TrimSpace(string(read(t, "ed25519.pub")))
 	missing := filepath.Join(t.TempDir(), "absent")
-	cases := map[string]string{
-		missing:                              "",
-		writeSigners(t, ""):                  "no key for principal",
-		writeSigners(t, "someone "+pub+"\n"): "no key for principal",
-		writeSigners(t, "operator namespaces=\"git\" "+pub+"\n"): "no key for principal",
-		writeSigners(t, "operator cert-authority "+pub+"\n"):     "unsupported option",
-		writeSigners(t, "operator not-a-key\n"):                  "parsing key",
+	ns := "namespaces=\"piggy-escalation-v1\" "
+	cases := []struct{ path, want string }{
+		{missing, ""},
+		{writeSigners(t, ""), noExplicitEntry},
+		{writeSigners(t, "someone "+pub+"\n"), noExplicitEntry},
+		{writeSigners(t, "operator namespaces=\"git\" "+pub+"\n"), noExplicitEntry},
+		{writeSigners(t, "operator cert-authority "+pub+"\n"), "unsupported option"},
+		{writeSigners(t, "operator not-a-key\n"), "parsing key"},
+		// Permissive-by-omission entries are not roots.
+		{writeSigners(t, "operator "+pub+"\n"), noExplicitEntry},
+		{writeSigners(t, "* "+ns+pub+"\n"), noExplicitEntry},
+		{writeSigners(t, "operator "+pub+"\n* "+ns+pub+"\n"), noExplicitEntry},
 	}
-	for path, want := range cases {
+	for _, c := range cases {
+		path, want := c.path, c.want
 		keys, err := LoadSigners(path)
 		if err == nil || keys != nil {
 			t.Fatalf("%s: got %v, %v; want error", path, keys, err)
