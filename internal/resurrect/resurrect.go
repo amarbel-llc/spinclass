@@ -77,6 +77,8 @@ func Run(w io.Writer, target, newBranchName, format string) error {
 		return fmt.Errorf("%w\n\nset [hooks].allow-no-credential to resurrect without a push credential", err)
 	}
 
+	// Principal is deliberately not copied: the resurrected session gets a new
+	// clown boot, hence a new principal, recorded by its SessionStart hook.
 	fresh := session.State{
 		SessionState:       session.StateInactive,
 		RepoPath:           st.RepoPath,

@@ -373,6 +373,7 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 		if existing, err := session.Read(rp.RepoPath, rp.Branch); err == nil {
 			st.SpawnedBy = existing.SpawnedBy
 			st.SpawnedByPrincipal = existing.SpawnedByPrincipal
+			st.Principal = existing.Principal
 			st.Holders = existing.Holders
 			st.PendingHandles = existing.PendingHandles
 			st.HandleRights = existing.HandleRights

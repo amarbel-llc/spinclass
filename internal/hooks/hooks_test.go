@@ -2058,6 +2058,60 @@ func TestSessionStartSpawnHelloDedupes(t *testing.T) {
 	}
 }
 
+func TestSessionStartRecordsOwnPrincipal(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	repo, wt := initSpawnedWorktree(t, "")
+
+	t.Setenv("CLOWN_SESSION_ID", "5e5e5e5e-0000-4000-8000-000000000000")
+	fireSessionStart(t, wt)
+
+	st, err := session.Read(repo, "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Principal != "5e5e5e5e-0000-4000-8000-000000000000" {
+		t.Errorf("Principal = %q, want the CLOWN_SESSION_ID", st.Principal)
+	}
+
+	// Recorded PID (0) is dead, so a fresh boot's different principal replaces it.
+	t.Setenv("CLOWN_SESSION_ID", "6f6f6f6f-0000-4000-8000-000000000000")
+	fireSessionStart(t, wt)
+	if st, _ = session.Read(repo, "feature"); st.Principal != "6f6f6f6f-0000-4000-8000-000000000000" {
+		t.Errorf("Principal = %q, want replaced after the old process died", st.Principal)
+	}
+}
+
+func TestSessionStartKeepsPrincipalWhileOldProcessAlive(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	repo, wt := initSpawnedWorktree(t, "")
+	st, err := session.Read(repo, "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Principal = "first"
+	st.PID = os.Getpid() // alive
+	if err := session.Write(*st); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("CLOWN_SESSION_ID", "second")
+	fireSessionStart(t, wt)
+	if st, _ = session.Read(repo, "feature"); st.Principal != "first" {
+		t.Errorf("Principal = %q, want kept while the recorded process lives", st.Principal)
+	}
+}
+
+func TestSessionStartIgnoresInvalidPrincipal(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	repo, wt := initSpawnedWorktree(t, "")
+
+	t.Setenv("CLOWN_SESSION_ID", "bad value\nwith newline")
+	fireSessionStart(t, wt)
+	if st, _ := session.Read(repo, "feature"); st.Principal != "" {
+		t.Errorf("Principal = %q, want an invalid value ignored", st.Principal)
+	}
+}
+
 func TestSessionStartWorktreeWithoutSpawnedByNoHello(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	repo, wt := initSpawnedWorktree(t, "")

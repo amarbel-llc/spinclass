@@ -623,6 +623,7 @@ func TestAttachPreservesFieldsItDoesNotOwn(t *testing.T) {
 		SessionKey:         "myrepo/spawned-worker",
 		SpawnedBy:          "myrepo/driver",
 		SpawnedByPrincipal: "1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f",
+		Principal:          "5e5e5e5e-0000-4000-8000-000000000000",
 		Holders:            []string{"1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f"},
 		PendingHandles:     []string{"9c2e1111-2222-3333-4444-555566667777"},
 		HandleRights:       map[string]string{"9c2e1111-2222-3333-4444-555566667777": "observe"},
@@ -660,6 +661,9 @@ func TestAttachPreservesFieldsItDoesNotOwn(t *testing.T) {
 	}
 	if got.SpawnedByPrincipal != "1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f" {
 		t.Errorf("SpawnedByPrincipal = %q, want carried forward (clobbered by attach)", got.SpawnedByPrincipal)
+	}
+	if got.Principal != "5e5e5e5e-0000-4000-8000-000000000000" {
+		t.Errorf("Principal = %q, want carried forward (clobbered by attach)", got.Principal)
 	}
 	if len(got.Holders) != 1 || got.Holders[0] != "1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f" {
 		t.Errorf("Holders = %v, want carried forward (clobbered by attach)", got.Holders)

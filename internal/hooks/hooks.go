@@ -16,6 +16,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/perms"
+	"code.linenisgreat.com/spinclass/internal/profilegrant"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sessionlog"
 	"code.linenisgreat.com/spinclass/internal/spawnhandshake"
@@ -102,6 +103,9 @@ func runSessionStart(input hookInput) error {
 	// multiplexer session name (clown mints one UUID for both) — the driver
 	// needs it to reattach, so it rides along in the hello (direction B).
 	if worktree.IsWorktree(cwd) {
+		// Before the hello: it re-reads state and rewrites PID/HelloSentAt, so
+		// the recorded principal must already be on disk to survive that write.
+		recordOwnPrincipal(cwd, os.Getenv("CLOWN_SESSION_ID"))
 		maybeSendSpawnHello(cwd, input.SessionID) // spawn handshake (FDR 0006); never blocks startup
 		return nil
 	}
@@ -252,6 +256,45 @@ func evaluateImplicitCheckout(cwd string) (implicitCheckout, ImplicitRefusal) {
 		}
 	}
 	return implicitCheckout{repoRoot: repoRoot, branch: branch, merged: merged}, ""
+}
+
+// recordOwnPrincipal stores the worker's own principal (its clown
+// CLOWN_SESSION_ID, FDR 0034 Phase 2 item 5) in the worktree session's state.
+// Spawn cannot know it, because clown mints it when the worker boots. A value
+// failing the grant identity allowlist is ignored. An already-recorded,
+// different principal is replaced only when the recorded PID is dead (the
+// session is being re-adopted by a fresh clown boot, the same condition under
+// which the hello adopts a new PID); while the old process lives it is kept.
+// Implicit (main-checkout) sessions are not recorded: they use a separate
+// state path and carry no grants. Best-effort, like the rest of the hook.
+func recordOwnPrincipal(cwd, principal string) {
+	if principal == "" {
+		return
+	}
+	if err := profilegrant.ValidIdentity("principal", principal); err != nil {
+		sessionlog.Errorf("recordOwnPrincipal invalid-principal ignored err=%v", err)
+		return
+	}
+	repoPath, err := git.CommonDir(cwd)
+	if err != nil {
+		return
+	}
+	branch, err := git.BranchCurrent(cwd)
+	if err != nil || branch == "" {
+		return
+	}
+	st, err := session.Read(repoPath, branch)
+	if err != nil || st.IsTombstone() || st.Principal == principal {
+		return
+	}
+	if st.Principal != "" && session.IsAlive(st.PID) {
+		sessionlog.Errorf("recordOwnPrincipal kept key=%s recorded principal differs and its process is alive", st.SessionKey)
+		return
+	}
+	st.Principal = principal
+	if err := session.Write(*st); err != nil {
+		sessionlog.Errorf("recordOwnPrincipal write-failed key=%s err=%v", st.SessionKey, err)
+	}
 }
 
 // maybeSendSpawnHello emits the spawn handshake (FDR 0006) when cwd is an sc

@@ -103,6 +103,12 @@ type State struct {
 	// the authority link and the hello target; SpawnedBy stays the display key
 	// (empty for a driver outside any worktree, e.g. a ~/eng coordinator).
 	SpawnedByPrincipal string `json:"spawned_by_principal,omitempty"`
+	// Principal is this session's OWN principal (its clown CLOWN_SESSION_ID),
+	// distinct from SpawnedByPrincipal, which is the driver's. Spawn cannot know
+	// it (clown mints it when the worker boots), so the SessionStart hook
+	// records it from inside the worker. Never copied into a resurrected
+	// session: that gets a new clown boot and a new principal (FDR 0034).
+	Principal string `json:"principal,omitempty"`
 	// Holders are the principals holding an accepted handle on this session
 	// (FDR 0032 D12/D13): the spawner at spawn, plus every accepted grant. A
 	// materialized view; slice 1 turns entries into grant-record digests.
@@ -1104,6 +1110,33 @@ func FindByTarget(target string) (*State, error) {
 		"target %q is ambiguous: matches %s — use a session key",
 		target, strings.Join(keys, ", "),
 	)
+}
+
+// SessionKeyOfPrincipal returns the key of the single live session whose own
+// recorded Principal equals principal. It is the intended
+// profilegrant.WalkOptions.SessionOfPrincipal. Tombstones (closed sessions) are
+// excluded so a closed session's principal can never vouch for a chain link;
+// an empty principal, no match, or more than one claimant yields ok=false
+// (ambiguity fails closed).
+func SessionKeyOfPrincipal(principal string) (sessionKey string, ok bool) {
+	if principal == "" {
+		return "", false
+	}
+	states, err := ListAll(nil)
+	if err != nil {
+		return "", false
+	}
+	for i := range states {
+		s := &states[i]
+		if s.isTombstone || s.Principal != principal {
+			continue
+		}
+		if ok {
+			return "", false
+		}
+		sessionKey, ok = s.Key(), true
+	}
+	return sessionKey, ok
 }
 
 // SortStates orders sessions in place: active first, then

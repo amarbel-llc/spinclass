@@ -349,10 +349,10 @@ func NewVerifier(root func(actText string, sig []byte) error, link LinkVerifier)
 // card's armored sshsig over ActText(grant, Digest); for a link it is empty
 // until principals have keys.
 type Record struct {
-	Digest string
-	Text   string
-	Sig    []byte
-	Root   bool
+	Digest string `json:"digest"`
+	Text   string `json:"text"`
+	Sig    []byte `json:"sig,omitempty"` // base64 in JSON
+	Root   bool   `json:"root"`
 }
 
 // Resolver looks a record up by digest.
