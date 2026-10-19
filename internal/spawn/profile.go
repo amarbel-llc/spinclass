@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"code.linenisgreat.com/clown/pkg/profilelookup"
 )
 
 // ErrProfileNotFound is the sentinel a ProfileResolver wraps (see
@@ -29,32 +31,15 @@ type ResolvedProfile struct {
 }
 
 // ProfileResolver looks a profile name up through clown's library. It is an
-// interface so the library plugs in when it exists (clown#264) and tests can
-// inject a fake.
+// interface so tests can inject a fake instead of needing a real registry.
 type ProfileResolver interface {
 	Resolve(name string) (ResolvedProfile, error)
 }
 
-// unavailableResolver is the production default until the clown library is
-// linked: it refuses every lookup, so a requested profile fails closed instead
-// of surfacing later as a hello timeout.
-type unavailableResolver struct{}
-
-func (unavailableResolver) Resolve(name string) (ResolvedProfile, error) {
-	return ResolvedProfile{}, fmt.Errorf(
-		"cannot spawn with profile %q: profile resolution is unavailable because the clown profile library is not linked yet (clown#264)",
-		name,
-	)
-}
-
 // profileResolver is the resolver LaunchDetached consults. Swapped by tests;
-// replaced by the clown-library-backed resolver once clown#264 lands.
-var profileResolver ProfileResolver = unavailableResolver{}
-
-// requiredServers are the plugin servers a worker needs to send its hello and
-// receive wakes (troupe chat, ringmaster). The exact names are to be confirmed
-// against clown#264, which defines the kept-server vocabulary.
-var requiredServers = []string{"troupe", "ringmaster"}
+// production resolves through clown's profilelookup library, which refuses an
+// unknown profile or an unvouched registry rather than guessing.
+var profileResolver ProfileResolver = newClownResolver()
 
 // RequiredServersKept errors, naming the first missing server, when kept lacks
 // any of required: a profile that drops one of those yields a worker that can
@@ -81,7 +66,7 @@ func resolveProfile(name string) (ResolvedProfile, error) {
 		rp.Name = name
 	}
 	if rp.KeptServers != nil {
-		if err := RequiredServersKept(rp.KeptServers, requiredServers); err != nil {
+		if err := RequiredServersKept(rp.KeptServers, profilelookup.RequiredServers()); err != nil {
 			return ResolvedProfile{}, fmt.Errorf("profile %q: %w", name, err)
 		}
 	}

@@ -926,10 +926,15 @@ detected after detach, and how long tombstones are retained.
 	*--profile <name>* in *spawn-entry* just before the literal *"--"*
 	separator (clown's own flags must precede it), replacing any *--profile*
 	already there; a *spawn-entry* with no *"--"* is a hard spawn error. The
-	name is resolved through clown's profile library _before_ the worker
-	worktree is created, and an unknown or unresolvable profile refuses the
-	spawn: until that library is linked (clown#264) every profile is
-	refused. The resolved profile name and content digest are recorded in
+	name is resolved in-process through clown's profile library _before_ the
+	worker worktree is created, and the spawn is refused, creating nothing,
+	when the profile is unknown, when clown's profile registry is not
+	vouched for by this build (not yet stamped by a current *clown profile*
+	save, or written by another protocol version: the message names both
+	sides and how to restamp), or when the profile drops a server the worker
+	needs to reach its driver (or excludes tools from one). The resolved
+	profile name and content digest (a *clown-profile-digest-v1* markl-id)
+	are recorded in
 	session state and shown in the *PROFILE* column of *sc list*. Selects
 	among profiles the spawner already holds; never grants one. Separately,
 	the detached worker harness (not the spawn window, and not a human

@@ -251,7 +251,7 @@ func spawnParamList() []command.Param {
 		{
 			Name:        "profile",
 			Type:        command.String,
-			Description: "Clown profile name for the worker (FDR 0034): a named bundle of provider settings and a trimmed MCP tool catalog, placed as --profile <name> among clown's flags in the spawn-entry. Omit to use [session-entry].spawn-profile, else no profile. The profile is resolved before anything is created; an unknown or unavailable profile refuses the spawn.",
+			Description: "Clown profile name for the worker (FDR 0034): a named bundle of provider settings and a trimmed MCP tool catalog, placed as --profile <name> among clown's flags in the spawn-entry. Omit to use [session-entry].spawn-profile, else no profile. The profile is resolved through clown's profile library before anything is created; the spawn is refused for an unknown profile, a profile registry this build cannot vouch for (not stamped by a current clown, or another protocol version), or a profile that drops a server the worker needs.",
 		},
 	}
 }

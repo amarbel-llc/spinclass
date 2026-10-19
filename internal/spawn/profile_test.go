@@ -5,10 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/clown/pkg/profilelookup"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 )
@@ -95,20 +97,17 @@ func TestSpliceProfileFlagEmptyProfileIsNoOp(t *testing.T) {
 	}
 }
 
+// requiredKept is every server a worker needs, in clown's own vocabulary.
+var requiredKept = profilelookup.RequiredServers()
+
 func TestRequiredServersKept(t *testing.T) {
-	if err := RequiredServersKept([]string{"troupe", "ringmaster", "extra"}, requiredServers); err != nil {
+	required := profilelookup.RequiredServers()
+	if err := RequiredServersKept(append(slices.Clone(required), "extra/server"), required); err != nil {
 		t.Errorf("all kept: unexpected error %v", err)
 	}
-	err := RequiredServersKept([]string{"troupe"}, requiredServers)
-	if err == nil || !strings.Contains(err.Error(), `"ringmaster"`) {
-		t.Errorf("err = %v, want it to name the missing ringmaster", err)
-	}
-}
-
-func TestUnavailableResolverNamesTheMissingLibrary(t *testing.T) {
-	_, err := unavailableResolver{}.Resolve("cheap")
-	if err == nil || !strings.Contains(err.Error(), "clown#264") || !strings.Contains(err.Error(), "cheap") {
-		t.Errorf("err = %v, want it to name the profile and clown#264", err)
+	err := RequiredServersKept(required[:1], required)
+	if err == nil || !strings.Contains(err.Error(), strconv.Quote(required[1])) {
+		t.Errorf("err = %v, want it to name the missing %s", err, required[1])
 	}
 }
 
@@ -140,7 +139,7 @@ func launchWithProfile(t *testing.T, sweatfileTOML, profile string) (Result, str
 
 func TestLaunchProfileSplicedAndRecorded(t *testing.T) {
 	r := &fakeResolver{profiles: map[string]ResolvedProfile{
-		"cheap": {Name: "cheap", Digest: "digest-cheap", KeptServers: []string{"troupe", "ringmaster"}},
+		"cheap": {Name: "cheap", Digest: "digest-cheap", KeptServers: requiredKept},
 	}}
 	withResolver(t, r)
 
@@ -223,21 +222,16 @@ func TestLaunchProfileRefusalsLeaveNoWorktree(t *testing.T) {
 		{
 			name: "drops a required server",
 			resolver: &fakeResolver{profiles: map[string]ResolvedProfile{
-				"cheap": {Digest: "d", KeptServers: []string{"troupe"}},
+				"cheap": {Digest: "d", KeptServers: requiredKept[:1]},
 			}},
-			wantErr: func(err error) bool { return strings.Contains(err.Error(), "ringmaster") },
+			wantErr: func(err error) bool { return strings.Contains(err.Error(), requiredKept[1]) },
 		},
 		{
 			name: "a selection that keeps nothing",
 			resolver: &fakeResolver{profiles: map[string]ResolvedProfile{
 				"cheap": {Digest: "d", KeptServers: []string{}},
 			}},
-			wantErr: func(err error) bool { return strings.Contains(err.Error(), "troupe") },
-		},
-		{
-			name:     "default resolver is unavailable",
-			resolver: unavailableResolver{},
-			wantErr:  func(err error) bool { return strings.Contains(err.Error(), "clown#264") },
+			wantErr: func(err error) bool { return strings.Contains(err.Error(), requiredKept[0]) },
 		},
 	}
 	for _, c := range cases {
@@ -259,12 +253,17 @@ func TestLaunchProfileRefusalsLeaveNoWorktree(t *testing.T) {
 	}
 }
 
-// TestProductionDefaultResolverIsUnavailable pins the fail-closed default: the
-// refusal tests inject unavailableResolver explicitly, so without this a change
-// to the package-level default would pass every other test.
-func TestProductionDefaultResolverIsUnavailable(t *testing.T) {
-	if _, ok := profileResolver.(unavailableResolver); !ok {
-		t.Fatalf("production profileResolver is %T, want unavailableResolver until clown#264 lands", profileResolver)
+// TestProductionDefaultResolverIsClown pins the production default to the real
+// clown-backed resolver, which refuses unknown profiles and unvouched
+// registries: every other test injects a fake, so without this a permissive
+// stub swapped into the package-level default would pass them all.
+func TestProductionDefaultResolverIsClown(t *testing.T) {
+	r, ok := profileResolver.(clownResolver)
+	if !ok {
+		t.Fatalf("production profileResolver is %T, want clownResolver", profileResolver)
+	}
+	if r.lookup == nil || r.registryPath != "" {
+		t.Errorf("production clownResolver = %+v, want the library lookup and the default registry path", r)
 	}
 }
 

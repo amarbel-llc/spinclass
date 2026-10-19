@@ -131,7 +131,9 @@
     # not to the extracted platform: ringmaster's four inputs (igloo,
     # nixpkgs-master, utils, bats) are a strict subset of spinclass's own, so
     # every one `follows` an existing pin and no closure grows. Tracks master
-    # like every sibling input — deliberately not rev-pinned.
+    # like every sibling input — deliberately not rev-pinned. (The `clown`
+    # input below does now exist, but only as a Go-source bridge with its
+    # inputs redirected to stand-ins, so that old concern no longer applies.)
     ringmaster = {
       url = "https://code.linenisgreat.com/ringmaster/archive/master.tar.gz";
       inputs = {
@@ -179,6 +181,38 @@
     };
     papi.inputs.hyphence.follows = "madder/hyphence";
     papi.inputs.langlang.follows = "madder/langlang";
+
+    # piggy: owner of the markl-id framework. Only its Go package
+    # (pkgs/markl, bridged via go.nix flakeInputs) is consumed, to render a
+    # profile digest as a markl-id (internal/spawn). Follows madder's pin so
+    # the lock gains no node and one piggy rev resolves across the graph.
+    piggy.follows = "madder/piggy";
+
+    # clown: consumed ONLY for its Go source (the `go-pkgs` output, bridged
+    # via go.nix flakeInputs) so spawn can resolve `--profile` through
+    # pkg/profilelookup in-process (clown#264, FDR 0034). Its heavy inputs
+    # (agent CLIs, nixpkgs forks, troupe) are redirected to cheap stand-ins
+    # here, purely to keep the lock from growing: those redirected inputs do
+    # not match what clown itself would build with, so NOTHING else may be
+    # built from this input (no packages, no checks, no binaries).
+    clown = {
+      url = "https://code.linenisgreat.com/clown/archive/master.tar.gz";
+      inputs = {
+        igloo.follows = "igloo";
+        nixpkgs-master.follows = "nixpkgs-master";
+        utils.follows = "utils";
+        bats.follows = "bats";
+        conformist.follows = "conformist";
+        ringmaster.follows = "ringmaster";
+        purse-first.follows = "purse-first";
+        tommy.follows = "tommy";
+        nixpkgs-claude-code.follows = "nixpkgs-master";
+        nixpkgs-codex.follows = "nixpkgs-master";
+        nixpkgs-llama.follows = "nixpkgs-master";
+        llm-agents.follows = "igloo";
+        troupe.follows = "ringmaster";
+      };
+    };
   };
 
   outputs =

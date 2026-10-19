@@ -60,6 +60,60 @@
         "type": "github"
       }
     },
+    "clown": {
+      "inputs": {
+        "bats": [
+          "bats"
+        ],
+        "conformist": [
+          "conformist"
+        ],
+        "igloo": [
+          "igloo"
+        ],
+        "llm-agents": [
+          "igloo"
+        ],
+        "nixpkgs-claude-code": [
+          "nixpkgs-master"
+        ],
+        "nixpkgs-codex": [
+          "nixpkgs-master"
+        ],
+        "nixpkgs-llama": [
+          "nixpkgs-master"
+        ],
+        "nixpkgs-master": [
+          "nixpkgs-master"
+        ],
+        "purse-first": [
+          "purse-first"
+        ],
+        "ringmaster": [
+          "ringmaster"
+        ],
+        "tommy": [
+          "tommy"
+        ],
+        "troupe": [
+          "ringmaster"
+        ],
+        "utils": [
+          "utils"
+        ]
+      },
+      "locked": {
+        "lastModified": 1792423517,
+        "narHash": "sha256-9/xSgEpgqf3wpsyosipXUUXoe0Pdm6sT7eMcxceb2Ao=",
+        "rev": "22f304a7d26a4ebf492976c3b2e50bd896b54da5",
+        "type": "tarball",
+        "url": "https://code.linenisgreat.com/clown/archive/22f304a7d26a4ebf492976c3b2e50bd896b54da5.tar.gz"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://code.linenisgreat.com/clown/archive/master.tar.gz"
+      }
+    },
     "conformist": {
       "inputs": {
         "igloo": [
@@ -582,12 +636,17 @@
     "root": {
       "inputs": {
         "bats": "bats",
+        "clown": "clown",
         "conformist": "conformist",
         "crap": "crap",
         "igloo": "igloo",
         "madder": "madder",
         "nixpkgs-master": "nixpkgs-master",
         "papi": "papi",
+        "piggy": [
+          "madder",
+          "piggy"
+        ],
         "purse-first": "purse-first",
         "ringmaster": "ringmaster",
         "tommy": "tommy",

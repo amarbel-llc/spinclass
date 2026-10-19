@@ -3,9 +3,15 @@
 # the escape hatch (godyn-go) or by hand.
 {
   flakeInputs = {
+    "code.linenisgreat.com/clown" = {
+      input = "clown";
+    };
     "code.linenisgreat.com/crap/go-crap/v2" = {
       input = "crap";
       subPath = "go-crap";
+    };
+    "code.linenisgreat.com/piggy/go" = {
+      input = "piggy";
     };
     "code.linenisgreat.com/purse-first/libs/dewey" = {
       input = "purse-first";
@@ -36,6 +42,12 @@
       go = "1.26";
       hash = "sha256-ifwq9+ER3gl317X0uizQkn2cYTtXiqWwPsFyfHZ91Bs=";
       version = "v0.2.0";
+    };
+    "github.com/BurntSushi/toml" = {
+      go = "1.18";
+      hash = "sha256-ptdUJvuc21ixeLt+M5way/na3aCnCO4MYHWulWp8NEY=";
+      indirect = true;
+      version = "v1.6.0";
     };
     "github.com/atotto/clipboard" = {
       hash = "sha256-ZZ7U5X0gWOu8zcjZcWbcpzGOGdycwq0TjTFh/eZHjXk=";
