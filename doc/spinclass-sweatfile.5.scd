@@ -826,8 +826,9 @@ warning, because an agent can edit those files.
 	Array of _host:port_ strings the unit may reach. The last trusted layer
 	that sets it wins; unset inherits, *[]* clears. When no layer sets it the
 	default is api.anthropic.com, claude.ai, console.anthropic.com,
-	code.linenisgreat.com, forge.starbrandshoes.com, github.com,
-	cache.nixos.org and nix.starbrandshoes.com, all on port 443.
+	code.linenisgreat.com, github.com and cache.nixos.org, all on port 443.
+	A site's own forge and binary cache go in its global sweatfile; setting
+	the key replaces the default, so list the defaults too.
 
 ## [metrics]
 

@@ -141,16 +141,16 @@ type ProfileRights struct {
 }
 
 // DefaultEgressAllow is the egress allow-list a confined spawn gets when no
-// trusted sweatfile layer sets [confinement].egress-allow (FDR 0035).
+// trusted sweatfile layer sets [confinement].egress-allow (FDR 0035): public
+// hosts only. A site's own forge and binary cache belong in its global
+// sweatfile.
 var DefaultEgressAllow = []string{
 	"api.anthropic.com:443",
 	"claude.ai:443",
 	"console.anthropic.com:443",
 	"code.linenisgreat.com:443",
-	"forge.starbrandshoes.com:443",
 	"github.com:443",
 	"cache.nixos.org:443",
-	"nix.starbrandshoes.com:443",
 }
 
 // Confinement configures launching spawned workers in a clown agent unit (FDR
