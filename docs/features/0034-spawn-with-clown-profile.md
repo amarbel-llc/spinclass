@@ -369,22 +369,27 @@ treat any grant as card-rooted until a confinement check passes.
 
 ## Open questions
 
-1. **Ambient versus object representation of a widening grant.** The accepted
-   user story says a widening grant "is an object right on the handle to a
-   particular child, so it ends when that handle is released or the child
-   closes." This record models the profile ability as an **ambient** right on
-   the grantee and binds a widening grant to the grantee's session, which ends
-   the same way. They give the same lifetime; confirm this is the intent.
-2. **Root blessing's class.** Answered in part by piggy: a standing delegation
-   fits `piggy-certificate-v1` and a one-off widening `piggy-escalation-v1`.
-   Still open: whether the root blessing of a profile set rides the root
-   certificate act (D2) or is its own act, and so which class carries it.
-3. **The verifier path.** piggy ships no verifier; the shape is `ssh-keygen -Y
-   verify` against an allowed-signers file holding the card's 9C public key, with
-   the namespace pinned. Still open: who maintains that allowed-signers file on
-   a host (PAPI enrolls the key and checks the attestation) and whether spinclass
-   shells out to `ssh-keygen` or links a Go verifier. circus has a precedent in
-   its `explore-gc-sshsig` recipe, not read here.
+1. **Ambient versus object representation of a widening grant. Decided
+   (operator, 2026-10-19, relayed by circus/eager-holly): ambient, bound to the
+   grantee's session, to start.** The profile ability is an ambient right on the
+   grantee and a widening grant ends with the grantee's session. The accepted
+   user story's other reading, an object right on the handle to a particular
+   child (which ends when that handle is released or the child closes), is
+   **kept as a flagged future exploration, not rejected.** A reason to revisit
+   it: it would scope a grant to one worker without a count limit.
+2. **Root blessing's class. Decided (operator, same date): two touches.** One
+   card act certifies the root (identity); a second, separate act blesses the
+   initial profile set, because FDR 0032 D4 says a certificate binds identity,
+   never rights. Per piggy, a standing delegation fits `piggy-certificate-v1`
+   and a one-off widening `piggy-escalation-v1`. Still to settle with piggy:
+   which class carries the initial profile-set blessing (the second touch is a
+   rights act, so it is neither obviously a certificate nor an escalation).
+3. **The verifier path. Decided (operator, same date): an in-tree sshsig parser
+   over `golang.org/x/crypto/ssh`'s signature verification.** No third-party
+   module and no `ssh-keygen` shell-out. The allowed-signers material holds the
+   card's 9C public key with the namespace pinned. Still open: who maintains
+   that file on a host (PAPI enrolls the key and checks the attestation).
+   Hand-written signature framing needs a security review.
 4. **Skew signal. Decided (operator, 2026-10-19): the registry-version stamp.**
    clown stamps its version into the registry on every write; the linked
    library compares against the last writer. The `clown --version` probe is
@@ -394,13 +399,10 @@ treat any grant as card-rooted until a confinement check passes.
    (2026-10-19): `circus update` tsorts the direct flake inputs of first-party
    repos, so clown sorts first by construction once spinclass declares it as an
    input, and no circus change is needed. There is no cycle (clown does not
-   input spinclass). **A conflict this exposes:** spinclass's `flake.nix`
-   carries a note (FDR 0010) declining a clown input because it "would drag its
-   whole input closure in", while accepting ringmaster as a small extracted
-   platform. Taking the library re-opens that. Two ways through, to be chosen:
-   ask clown (#264) to ship the profile library as a small extracted module the
-   way ringmaster was, or accept the closure and use `follows` on the shared
-   inputs as is done for ringmaster.
+   input spinclass). The conflict with spinclass's old FDR 0010 note (a clown
+   input "would drag its whole input closure in") was **resolved** by taking
+   the input with a `follows` block that redirects clown's heavy inputs; see
+   "Packaging" under The clown library.
 6. **Precedence of `model` versus profile. Decided in direction (operator):**
    the permission scheme permits upgrading a model that a profile defines, if
    the spawner has been granted that. So an explicit `model` that differs from
@@ -414,26 +416,24 @@ treat any grant as card-rooted until a confinement check passes.
 8. **Required-server set. Resolved by clown#264:** clown's library defines it
    (`RequiredServers()`), so spinclass carries no list. See "The required-server
    check" below for what it is.
-9. **Unattended spawns.** Direction from the operator, recorded under
-   "Unattended spawns". Still open: lifetime bound and holder tier.
+9. **Unattended spawns. Decided (operator, 2026-10-19): any card-enrolled
+   service principal may hold a standing certificate, with the lifetime set per
+   certificate.** Roustabout graphs still hold no authority of their own and are
+   checked against the requester's chain. Still open: the holder tier a
+   service's key needs (FDR 0032 D2) and how a graph's requester is identified
+   at spawn.
 10. **Escalation requests go to a principal, not only a human. Decided
     (operator): always ask a principal that holds the privilege needed to
     escalate, human or agent.** Which principal a given refusal asks, and how
     the request reaches it, is open and is where a handle to a privileged
     coordinator would be used.
-11. **Ambient versus object right** (item 1): the operator needs real-world
-    examples to rule. Examples and a recommendation are in the reply on the
-    draft; no decision yet.
-12. **Root blessing's class** (item 2): the operator needs a real-world example
-    to rule. Same status as 11.
-13. **The verifier. Direction (operator): a Go verifier, ideally from the
-    standard library.** Neither of us has verified this, but two independent
-    beliefs agree: `golang.org/x/crypto/ssh` has no sshsig support (sshsig is a
-    separate wire format, PROTOCOL.sshsig) and the Go implementations known to
-    circus/eager-holly are third-party. The usual answer, and the proposal
-    here, is a small in-tree sshsig parser over `x/crypto/ssh`'s signature
-    verification, which would need a security review. "Stdlib" is a preference,
-    not a requirement we can meet.
+11. **Ambient versus object right:** decided, see item 1.
+12. **Root blessing:** decided, see item 2.
+13. **The verifier:** decided, see item 3. For the record: neither the standard
+    library nor `golang.org/x/crypto/ssh` is believed to provide sshsig
+    verification (sshsig is a separate wire format, PROTOCOL.sshsig, and the Go
+    implementations known to circus/eager-holly are third-party), which is why
+    the parser is written in-tree.
 
 ## The required-server check
 
@@ -495,6 +495,65 @@ the profile, "a spawn the spawner does not hold is refused"); grant records and
 the card root; resume re-applying the recorded profile or refusing on a changed
 digest; a way to clear `spawn-profile` once a lower layer sets it; the
 model-upgrade right; `sc validate` checks for `spawn-profile`.
+
+## Phase 2 design (2026-10-19)
+
+The operator authorized Phase 2 on 2026-10-19 (decisions above). These are the
+design choices made while turning the Authority section into code, each
+spinclass's own, to be corrected if piggy or the operator disagrees.
+
+1. **What the card signs.** The signed text is *derived*, never free: it is
+   regenerated from the grant record by one function, `ActText(grant, digest)`,
+   and the verifier requires the text the card signed to be byte-equal to that
+   regeneration. So the prompt the operator read cannot differ from the record
+   it authorizes. The text satisfies piggy RFC 0012 (UTF-8, at most 4096 bytes,
+   no control characters other than newline and tab): a header line, the
+   record's markl-id, the grantee, the profile names, and the expiry, in words.
+2. **Record digest is real.** A record's digest is the markl-id of the SHA-256
+   of its canonical text, under piggy's `piggy-record-digest-v1` purpose, and
+   the chain walk checks `Record.Digest` against it. This closes the review
+   finding that digests were opaque and never checked against content.
+3. **One class for both card acts, for now: `piggy-escalation-v1`.** The root
+   blessing of the initial profile set and a later widening are both a human
+   granting a rights set, stated in words, to a named principal. The certificate
+   class (`piggy-certificate-v1`) requires naming the certified *public key*, and
+   per-principal keys do not exist until FDR 0032 slice 1, so the standing
+   delegation to a service principal (item 9) waits for them. This answers the
+   remaining part of open item 2 provisionally; piggy may rule differently.
+4. **Narrowing links are unsigned until principals have keys.** A narrowing grant
+   is derivable from its parent (subset of profiles with equal digests, no later
+   expiry, no wider `onward`, grantor equal to the parent's grantee), so authority
+   still comes only from the card-signed root and the subset relation. What is
+   missing without per-principal keys is *non-forgeability of the link*: anyone
+   able to write spinclass's grant store can add a link. That is the same bar as
+   FDR 0032 slice 0 (same-uid state, unguessable, not unforgeable), and it is
+   stated rather than hidden. A link verifier that requires an empty signature
+   documents this in code; it is replaced when per-principal keys arrive.
+5. **The child's principal is unknown at spawn.** The worker's `CLOWN_SESSION_ID`
+   is minted fresh when its clown boots, so a spawn-time narrowing grant cannot
+   name it. The grant's grantee is therefore the child's **session key**, and
+   spinclass records the worker's principal in its session state when its
+   SessionStart hook runs (the hook sees `CLOWN_SESSION_ID`). A later link whose
+   grantor is a *principal* is matched to a parent whose grantee is a *session
+   key* through that recorded mapping. Until the hook has recorded it, the worker
+   holds no spawnable profiles.
+6. **Enforcement is behind a knob and a confinement check.** Enforcing the
+   profile right changes every profile spawn from "refuse only on resolve
+   failure" to "refuse unless a chain proves the spawner holds it", and nobody
+   holds a chain yet. So: `[session-entry] enforce-profile-rights` (default
+   false) turns it on, and a grant is never treated as *card-rooted* unless the
+   confinement check passes (item "Where the card root is real"), which today
+   always fails. With enforcement on and the check failing, a spawn that names a
+   profile is refused with the reason, so enabling it early cannot silently
+   weaken anything.
+7. **Signing is injected.** The card acts go through an interface with the real
+   implementation speaking piggy's `operator-act@piggy` agent extension; it
+   stays unexercisable on a real card until piggy#303's acceptance pass and the
+   agent-scope boundary (spinclass#338, clown#244, posh) land. piggy is pinned at
+   eb98190 for the phase (a) code.
+8. **Grant store.** Records are kept as files under spinclass's state directory,
+   addressed by digest, with an index from grantee to its current record. The
+   system-scoped store of FDR 0032 D14 is the eventual home and is not built.
 
 ## Phasing
 
