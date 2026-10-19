@@ -178,9 +178,7 @@ subcommand is always available.
   is the principal, not the cwd. `repo` is optional — omitted (or the current
   repo) spawns HERE, a sibling dirname/path targets that repo; the worker
   always starts fresh off the target's default branch with only the brief
-  (#258; create-only `sc fork` is a separate, non-worker path). An optional
-  `profile`/`spawn-profile` boots a clown profile (`spinclass-sweatfile(5)`).
-  `spawn-session`
+  (#258; create-only `sc fork` is a separate, non-worker path). `spawn-session`
   is ASYNC under clown (#266): returns session key + ringmaster job id,
   delivers the hello (or a reap-if-dead timeout) as a wake; `sc spawn` CLI
   blocks. Workers may spawn workers (the #151 always-ask floor, not a depth
