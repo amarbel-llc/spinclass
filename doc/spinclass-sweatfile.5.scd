@@ -931,7 +931,12 @@ detected after detach, and how long tombstones are retained.
 	spawn: until that library is linked (clown#264) every profile is
 	refused. The resolved profile name and content digest are recorded in
 	session state and shown in the *PROFILE* column of *sc list*. Selects
-	among profiles the spawner already holds; never grants one.
+	among profiles the spawner already holds; never grants one. Separately,
+	the detached worker harness (not the spawn window, and not a human
+	*sc start*) does not inherit *DISPLAY*, *WAYLAND_DISPLAY* or
+	*DBUS_SESSION_BUS_ADDRESS*; an *[session-entry.env]* entry sets them
+	back. This is hygiene, not a security boundary, and *SSH_AUTH_SOCK* is
+	deliberately kept.
 	*Merge:* scalar override.
 
 *liveness-probe*
