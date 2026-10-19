@@ -5,7 +5,8 @@
       "command": "@SPINCLASS@",
       "args": ["serve"],
       "timeout": 900000,
-      "systemPrompt": true
+      "systemPrompt": true,
+      "scope": "frontend"
     }
   }
 }

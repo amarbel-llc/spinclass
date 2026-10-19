@@ -378,10 +378,11 @@ entry carries no `{principal}`; otherwise it warns.
 7. `.mcp.json` and `.claude-plugin/plugin.json` `mcpServers` would start a
    second `spinclass serve` as claude's child, inside the unit (koko).
    Resolved for `.mcp.json`: `internal/claude/mcp.go` no longer mirrors the
-   spinclass server there (it writes only `[[mcps]]` entries and dodder). The
-   plugin manifest's `mcpServers` entry remains for non-clown hosts; under a
-   confined clown it must be suppressed in favour of the `clown.json`
-   frontend server (`"scope": "frontend"`). Asked of clown.
+   spinclass server there (it writes only `[[mcps]]` entries and dodder).
+   Resolved for the plugin manifest: clown's compile replaces a plugin's
+   `.claude-plugin/plugin.json` `mcpServers` with its `clown.json` servers, and
+   spinclass's `clown.json` marks serve `"scope": "frontend"`, so a confined
+   clown runs it in the frontend (older clowns ignore the key).
 8. The ringmaster monitor and `troupe receive` are claude's children today, so
    agent-side; the unit binds `$XDG_STATE_HOME/ringmaster` and
    `$XDG_RUNTIME_DIR/ringmaster` until clown moves them to the frontend (FDR 0032
