@@ -160,6 +160,31 @@ clean-build:
 debug-go-test dir run='' *flags='':
     nix run --inputs-from . igloo#godyn-test -- {{ dir }} -- {{ if run == '' { '' } else { quote('-test.run=' + run) } }} {{ flags }}
 
+# regenerate internal/sshsig/testdata: real `ssh-keygen -Y sign` vectors from throwaway keys (private keys are never copied out)
+[group('debug')]
+debug-sshsig-fixtures:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out="$PWD/internal/sshsig/testdata"
+    scratch=$(mktemp -d)
+    trap 'rm -rf "$scratch"' EXIT
+    mkdir -p "$out"
+    printf 'piggy-test: grant merge to master\nrequest piggy-record-digest-v1@sha256-example\n' > "$out/message.txt"
+    for kind in ed25519 ecdsa; do
+      args=(-t "$kind")
+      [ "$kind" = ecdsa ] && args+=(-b 256)
+      ssh-keygen -q "${args[@]}" -N '' -C sshsig-fixture -f "$scratch/$kind"
+      cp "$out/message.txt" "$scratch/msg"
+      ssh-keygen -q -Y sign -f "$scratch/$kind" -n piggy-escalation-v1 "$scratch/msg"
+      cp "$scratch/$kind.pub" "$out/$kind.pub"
+      cp "$scratch/msg.sig" "$out/$kind.sig"
+      rm "$scratch/msg.sig"
+    done
+    # the default hash is sha512; also cover sha256 with the ed25519 key
+    ssh-keygen -q -Y sign -O hashalg=sha256 -f "$scratch/ed25519" -n piggy-escalation-v1 "$scratch/msg"
+    cp "$scratch/msg.sig" "$out/ed25519-sha256.sig"
+    ls -l "$out"
+
 # [debug] Time the godyn-test inner loop (igloo FDR 0008) on a real package:
 # a first run, a no-op rerun, then a run after appending a comment to one of
 # the package's _test.go files (restored on exit from a $TMPDIR backup).

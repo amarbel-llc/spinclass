@@ -1,8 +1,8 @@
 // Package profilegrant implements the pure chain rules for profile grants
 // (FDR 0034, "Authority"): the canonical record text, the narrowing relation
 // between a grant and its parent, and the walk from a presented grant to a
-// card-signed root. It does no I/O and no cryptography; signature checking is
-// injected through Verifier.
+// card-signed root. It does no I/O and no cryptography beyond hashing for the
+// record digest; signature checking is injected through Verifier.
 package profilegrant
 
 import (
@@ -18,6 +18,7 @@ const (
 	header       = "spinclass profile-grant v1"
 	rightPrefix  = "spinclass:profile:"
 	noValue      = "-"
+	noSession    = "-"
 	maxTextBytes = 4096 // piggy RFC 0012 operator-act text limit
 	timeLayout   = "2006-01-02T15:04:05Z"
 )
@@ -39,7 +40,11 @@ type Grant struct {
 	Onward   Onward
 	Expires  time.Time // UTC
 	Nonce    string
-	Prev     string // digest of the parent grant, "-" for a card root
+	// Widens is the digest of the earlier root record this one widens, "-"
+	// for none. It lets the signed act text tell an initial grant from a
+	// widening, which the sshsig namespace does not.
+	Widens string
+	Prev   string // digest of the parent grant, "-" for a card root
 }
 
 // Rights returns the sorted rights derived from the profile set.
@@ -78,13 +83,14 @@ func (g Grant) CanonicalText() string {
 	line("onward", string(g.Onward))
 	line("expires", g.Expires.UTC().Format(timeLayout))
 	line("nonce", g.Nonce)
+	line("widens", g.Widens)
 	line("prev", g.Prev)
 	return b.String()
 }
 
 var lineKeys = []string{
 	"grantor", "grantee", "session", "profiles", "rights",
-	"onward", "expires", "nonce", "prev",
+	"onward", "expires", "nonce", "widens", "prev",
 }
 
 // ParseCanonicalText is the strict inverse of CanonicalText: anything that is
@@ -131,6 +137,7 @@ func ParseCanonicalText(s string) (Grant, error) {
 		Grantee: values["grantee"],
 		Session: values["session"],
 		Nonce:   values["nonce"],
+		Widens:  values["widens"],
 		Prev:    values["prev"],
 	}
 
@@ -184,18 +191,49 @@ func Holds(effective Grant, profile string) bool {
 	return ok
 }
 
+// WalkOptions carries optional inputs to Narrows and Walk. The zero value is
+// valid and means "no principal-to-session mapping".
+type WalkOptions struct {
+	// SessionOfPrincipal maps a principal to the session key it runs in. A
+	// spawn-time grant names its grantee by session key (the child's principal
+	// is minted only when its clown boots), while the next link's grantor is a
+	// principal; this mapping joins the two.
+	SessionOfPrincipal func(principal string) (sessionKey string, ok bool)
+}
+
+// bindsGrantor reports whether child's grantor is the parent's grantee,
+// directly or through the session mapping. The error text says when a mapping
+// was consulted and what it answered.
+func (o WalkOptions) bindsGrantor(parent, child Grant) error {
+	if child.Grantor == parent.Grantee {
+		return nil
+	}
+	plain := fmt.Sprintf("child grantor %q is not parent grantee %q", child.Grantor, parent.Grantee)
+	if o.SessionOfPrincipal == nil {
+		return errors.New(plain)
+	}
+	session, ok := o.SessionOfPrincipal(child.Grantor)
+	switch {
+	case !ok:
+		return fmt.Errorf("%s (session mapping has no session for grantor %q)", plain, child.Grantor)
+	case session != parent.Grantee:
+		return fmt.Errorf("%s (session mapping puts grantor %q in session %q)", plain, child.Grantor, session)
+	}
+	return nil
+}
+
 // Narrows returns nil iff child is a valid narrowing of parent, whose digest
 // is parentDigest. Narrowing is the only change a software key may sign;
 // anything wider needs the card.
-func Narrows(parent Grant, parentDigest string, child Grant) error {
+func Narrows(parent Grant, parentDigest string, child Grant, opts WalkOptions) error {
 	if child.Prev != parentDigest {
 		return fmt.Errorf("child prev %q is not parent digest %q", child.Prev, parentDigest)
 	}
 	// Bind the chain by principal: only the parent's grantee may narrow it
 	// onward. Without this, anyone who learned a parent digest could sign a
 	// valid-looking child under it and borrow the grantee's rights.
-	if child.Grantor != parent.Grantee {
-		return fmt.Errorf("child grantor %q is not parent grantee %q", child.Grantor, parent.Grantee)
+	if err := opts.bindsGrantor(parent, child); err != nil {
+		return err
 	}
 	if child.Onward == OnwardGrant && parent.Onward != OnwardGrant {
 		return fmt.Errorf("onward grant not permitted: parent holds %s", parent.Onward)
@@ -217,15 +255,58 @@ func Narrows(parent Grant, parentDigest string, child Grant) error {
 	return nil
 }
 
-// Verifier checks signatures; the real implementation lives with the piggy
-// integration. Root grants carry a card signature, every other link a
-// software-key signature by its grantor.
-type Verifier interface {
-	VerifyRoot(text string, sig []byte) error
-	VerifyLink(grantorPrincipal string, text string, sig []byte) error
+// RootVerifier checks the operator card's signature. actText is the text
+// REGENERATED from the record by ActText, never text supplied by the signer, so
+// a signature over any other text cannot authorize the record.
+type RootVerifier interface {
+	VerifyRoot(actText string, sig []byte) error
 }
 
-// Record is a stored grant: its content address, signed text and signature.
+// LinkVerifier checks the signature on a non-root link.
+type LinkVerifier interface {
+	VerifyLink(g Grant, sig []byte) error
+}
+
+// Verifier checks both kinds of record signature.
+type Verifier interface {
+	RootVerifier
+	LinkVerifier
+}
+
+// LocalLinkVerifier accepts only unsigned links. Narrowing links carry no
+// signature until principals have keys (FDR 0034, Phase 2 design item 4):
+// authority comes from the card-signed root and the subset relation alone, so
+// a link is only as unforgeable as write access to the local grant store, the
+// same bar as FDR 0032 slice 0. Replace it when per-principal keys exist.
+type LocalLinkVerifier struct{}
+
+// VerifyLink returns nil iff sig is empty.
+func (LocalLinkVerifier) VerifyLink(_ Grant, sig []byte) error {
+	if len(sig) != 0 {
+		return errors.New("link carries a signature but no link verifier is configured")
+	}
+	return nil
+}
+
+type composedVerifier struct {
+	root func(actText string, sig []byte) error
+	link LinkVerifier
+}
+
+func (c composedVerifier) VerifyRoot(actText string, sig []byte) error { return c.root(actText, sig) }
+
+func (c composedVerifier) VerifyLink(g Grant, sig []byte) error { return c.link.VerifyLink(g, sig) }
+
+// NewVerifier composes a root-checking function and a link verifier into a
+// Verifier.
+func NewVerifier(root func(actText string, sig []byte) error, link LinkVerifier) Verifier {
+	return composedVerifier{root: root, link: link}
+}
+
+// Record is a stored grant: its content address, canonical text and signature.
+// Digest must equal DigestOf(Text). For a root record Sig is the operator
+// card's armored sshsig over ActText(grant, Digest); for a link it is empty
+// until principals have keys.
 type Record struct {
 	Digest string
 	Text   string
@@ -242,7 +323,7 @@ const maxChainDepth = 32
 // Walk verifies the chain from start up to a card-signed root and returns the
 // start grant, which is the effective one. Every failure names the record
 // digest and the check that broke.
-func Walk(now time.Time, start Record, resolve Resolver, v Verifier) (Grant, error) {
+func Walk(now time.Time, start Record, resolve Resolver, v Verifier, opts WalkOptions) (Grant, error) {
 	var effective Grant
 	var child Grant
 	visited := map[string]bool{}
@@ -260,9 +341,12 @@ func Walk(now time.Time, start Record, resolve Resolver, v Verifier) (Grant, err
 		if err != nil {
 			return Grant{}, err
 		}
+		if err := checkWidens(rec, g, resolve); err != nil {
+			return Grant{}, err
+		}
 		if depth == 1 {
 			effective = g
-		} else if err := Narrows(g, rec.Digest, child); err != nil {
+		} else if err := Narrows(g, rec.Digest, child, opts); err != nil {
 			return Grant{}, fmt.Errorf("record %s: narrowing edge from child %s: %w", rec.Digest, child.Nonce, err)
 		}
 		if rec.Root {
@@ -280,7 +364,49 @@ func Walk(now time.Time, start Record, resolve Resolver, v Verifier) (Grant, err
 	}
 }
 
+// checkWidens enforces that only a root record may widen, and that it widens
+// a record for the same grantee. The widened record is judged on its own card
+// signature, so its chain is not walked here.
+func checkWidens(rec Record, g Grant, resolve Resolver) error {
+	if g.Widens == noValue {
+		return nil
+	}
+	if !rec.Root {
+		return fmt.Errorf("record %s: non-root record has widens %q, want %q", rec.Digest, g.Widens, noValue)
+	}
+	widened, ok := resolve(g.Widens)
+	if !ok {
+		return fmt.Errorf("record %s: widened record %s not found", rec.Digest, g.Widens)
+	}
+	if widened.Digest != g.Widens {
+		return fmt.Errorf("record %s: resolver returned digest %s for widened record %s", rec.Digest, widened.Digest, g.Widens)
+	}
+	want, err := DigestOf(widened.Text)
+	if err != nil {
+		return fmt.Errorf("record %s: widened record %s: digest: %w", rec.Digest, g.Widens, err)
+	}
+	if want != widened.Digest {
+		return fmt.Errorf("record %s: widened record %s: digest mismatch: text hashes to %s", rec.Digest, g.Widens, want)
+	}
+	wg, err := ParseCanonicalText(widened.Text)
+	if err != nil {
+		return fmt.Errorf("record %s: widened record %s: parse: %w", rec.Digest, g.Widens, err)
+	}
+	if wg.Grantee != g.Grantee {
+		return fmt.Errorf("record %s: widens %s but grantee %q differs from widened grantee %q", rec.Digest, g.Widens, g.Grantee, wg.Grantee)
+	}
+	return nil
+}
+
 func verifyRecord(now time.Time, rec Record, v Verifier) (Grant, error) {
+	// A resolver must not be able to return forged text under a claimed digest.
+	want, err := DigestOf(rec.Text)
+	if err != nil {
+		return Grant{}, fmt.Errorf("record %s: digest: %w", rec.Digest, err)
+	}
+	if rec.Digest != want {
+		return Grant{}, fmt.Errorf("record %s: digest mismatch: text hashes to %s", rec.Digest, want)
+	}
 	g, err := ParseCanonicalText(rec.Text)
 	if err != nil {
 		return Grant{}, fmt.Errorf("record %s: parse: %w", rec.Digest, err)
@@ -295,9 +421,12 @@ func verifyRecord(now time.Time, rec Record, v Verifier) (Grant, error) {
 		return Grant{}, fmt.Errorf("record %s: non-root record has prev %q", rec.Digest, noValue)
 	}
 	if rec.Root {
-		err = v.VerifyRoot(rec.Text, rec.Sig)
+		var act string
+		if act, err = ActText(g, rec.Digest); err == nil {
+			err = v.VerifyRoot(act, rec.Sig)
+		}
 	} else {
-		err = v.VerifyLink(g.Grantor, rec.Text, rec.Sig)
+		err = v.VerifyLink(g, rec.Sig)
 	}
 	if err != nil {
 		return Grant{}, fmt.Errorf("record %s: signature: %w", rec.Digest, err)

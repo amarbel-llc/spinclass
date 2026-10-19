@@ -23,6 +23,7 @@ func rootGrant() Grant {
 		Onward:   OnwardGrant,
 		Expires:  expiry,
 		Nonce:    "00aa",
+		Widens:   "-",
 		Prev:     "-",
 	}
 }
@@ -39,6 +40,7 @@ rights: spinclass:profile:cheap spinclass:profile:review
 onward: grant
 expires: 2026-10-20T14:00:00Z
 nonce: 00aa
+widens: -
 prev: -
 `
 	if text != want {
@@ -88,6 +90,10 @@ func TestParseRejections(t *testing.T) {
 		{"control character", withLine(8, "nonce: 00\x07aa")},
 		{"carriage return", withLine(8, "nonce: 00aa\r")},
 		{"oversize", withLine(8, "nonce: "+strings.Repeat("a", 5000))},
+		{"missing widens", strings.Join(append(append([]string(nil), lines[:9]...), lines[10]), "\n") + "\n"},
+		{"duplicate widens", strings.Join(append(append([]string(nil), lines[:10]...), lines[9:]...), "\n") + "\n"},
+		{"widens after prev", strings.Join(append(append([]string(nil), lines[:9]...), lines[10], lines[9]), "\n") + "\n"},
+		{"empty widens", withLine(9, "widens: ")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -146,7 +152,7 @@ func TestNarrows(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := Narrows(tt.parent, "parent-digest", tt.child)
+			err := Narrows(tt.parent, "parent-digest", tt.child, WalkOptions{})
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
@@ -160,6 +166,43 @@ func TestNarrows(t *testing.T) {
 	}
 }
 
+func TestNarrowsSessionKeyBinding(t *testing.T) {
+	parent := rootGrant()
+	parent.Grantee = "repo/branch" // spawn-time grants name the child's session key
+	parent.Session = "repo/branch"
+	child := Grant{
+		Grantor: "principal-1", Grantee: "g", Session: "-",
+		Profiles: map[string]string{"cheap": "d-cheap"}, Onward: OnwardNone,
+		Expires: expiry, Nonce: "n", Prev: "pd",
+	}
+	mapTo := func(session string, ok bool) WalkOptions {
+		return WalkOptions{SessionOfPrincipal: func(p string) (string, bool) {
+			if p != "principal-1" {
+				return "", false
+			}
+			return session, ok
+		}}
+	}
+
+	if err := Narrows(parent, "pd", child, mapTo("repo/branch", true)); err != nil {
+		t.Fatalf("mapped binding rejected: %v", err)
+	}
+	err := Narrows(parent, "pd", child, mapTo("other/branch", true))
+	if err == nil || !strings.Contains(err.Error(), `not parent grantee "repo/branch"`) ||
+		!strings.Contains(err.Error(), `session "other/branch"`) {
+		t.Fatalf("different-session mapping: error %v", err)
+	}
+	err = Narrows(parent, "pd", child, mapTo("", false))
+	if err == nil || !strings.Contains(err.Error(), "session mapping has no session") {
+		t.Fatalf("unmapped principal: error %v", err)
+	}
+	err = Narrows(parent, "pd", child, WalkOptions{})
+	if err == nil || !strings.Contains(err.Error(), `child grantor "principal-1" is not parent grantee "repo/branch"`) ||
+		strings.Contains(err.Error(), "mapping") {
+		t.Fatalf("no mapping given: error %v", err)
+	}
+}
+
 func TestHolds(t *testing.T) {
 	g := rootGrant()
 	if !Holds(g, "cheap") || Holds(g, "expensive") {
@@ -167,37 +210,116 @@ func TestHolds(t *testing.T) {
 	}
 }
 
-// fakeVerifier accepts "root-sig" as the card signature and "link:<grantor>"
-// as a software-key signature.
-type fakeVerifier struct{}
-
-func (fakeVerifier) VerifyRoot(_ string, sig []byte) error {
-	if string(sig) != "root-sig" {
-		return errors.New("bad card signature")
+func TestLocalLinkVerifier(t *testing.T) {
+	var v LocalLinkVerifier
+	if err := v.VerifyLink(rootGrant(), nil); err != nil {
+		t.Fatalf("empty signature rejected: %v", err)
 	}
-	return nil
+	if err := v.VerifyLink(rootGrant(), []byte{}); err != nil {
+		t.Fatalf("zero-length signature rejected: %v", err)
+	}
+	err := v.VerifyLink(rootGrant(), []byte("sig"))
+	if err == nil || err.Error() != "link carries a signature but no link verifier is configured" {
+		t.Fatalf("error %v", err)
+	}
 }
 
-func (fakeVerifier) VerifyLink(grantor, _ string, sig []byte) error {
-	if string(sig) != "link:"+grantor {
-		return fmt.Errorf("bad signature by %s", grantor)
+func mustDigest(text string) string {
+	d, err := DigestOf(text)
+	if err != nil {
+		panic(err)
 	}
-	return nil
+	return d
+}
+
+func mustActText(g Grant, digest string) string {
+	s, err := ActText(g, digest)
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
+
+// signedTextVerifier treats the root signature as the literal text the card
+// signed, so it accepts a root iff that text equals the regenerated act text.
+func signedTextVerifier() Verifier {
+	return NewVerifier(func(actText string, sig []byte) error {
+		if string(sig) != actText {
+			return errors.New("signed text differs from the regenerated act text")
+		}
+		return nil
+	}, LocalLinkVerifier{})
 }
 
 func rootRecord(g Grant) Record {
-	return Record{Digest: "d-root", Text: g.CanonicalText(), Sig: []byte("root-sig"), Root: true}
+	text := g.CanonicalText()
+	digest := mustDigest(text)
+	return Record{Digest: digest, Text: text, Sig: []byte(mustActText(g, digest)), Root: true}
 }
 
-func linkRecord(digest, prev string, g Grant) Record {
-	g.Prev = prev
-	return Record{Digest: digest, Text: g.CanonicalText(), Sig: []byte("link:" + g.Grantor)}
+func linkRecord(parent Record, g Grant) Record {
+	g.Prev = parent.Digest
+	text := g.CanonicalText()
+	return Record{Digest: mustDigest(text), Text: text}
 }
 
 func linkGrant(grantor, grantee string, profiles map[string]string) Grant {
 	return Grant{
 		Grantor: grantor, Grantee: grantee, Session: "-",
-		Profiles: profiles, Onward: OnwardGrant, Expires: expiry, Nonce: grantee,
+		Profiles: profiles, Onward: OnwardGrant, Expires: expiry, Nonce: grantee, Widens: "-",
+	}
+}
+
+func TestWalkWidening(t *testing.T) {
+	initial := rootRecord(rootGrant())
+	wg := rootGrant()
+	wg.Nonce = "wide"
+	wg.Widens = initial.Digest
+	wg.Profiles = map[string]string{"cheap": "d-cheap", "review": "d-review", "expensive": "d-exp"}
+	wide := rootRecord(wg)
+	v := signedTextVerifier()
+
+	if _, err := Walk(now, wide, store(initial, wide), v, WalkOptions{}); err != nil {
+		t.Fatalf("widening rejected: %v", err)
+	}
+	if _, err := Walk(now, wide, store(wide), v, WalkOptions{}); err == nil ||
+		!strings.Contains(err.Error(), "widened record "+initial.Digest+" not found") {
+		t.Fatalf("missing widened record: error %v", err)
+	}
+
+	other := rootGrant()
+	other.Grantee = "someone-else"
+	otherRec := rootRecord(other)
+	wg2 := wg
+	wg2.Widens = otherRec.Digest
+	wide2 := rootRecord(wg2)
+	if _, err := Walk(now, wide2, store(otherRec, wide2), v, WalkOptions{}); err == nil ||
+		!strings.Contains(err.Error(), "grantee") {
+		t.Fatalf("grantee mismatch: error %v", err)
+	}
+
+	forged := initial
+	forged.Text = other.CanonicalText()
+	if _, err := Walk(now, wide, store(forged, wide), v, WalkOptions{}); err == nil ||
+		!strings.Contains(err.Error(), "digest mismatch") {
+		t.Fatalf("forged widened record: error %v", err)
+	}
+
+	lg := linkGrant("root-principal", "a", map[string]string{"cheap": "d-cheap"})
+	lg.Widens = initial.Digest
+	link := linkRecord(initial, lg)
+	if _, err := Walk(now, link, store(initial, link), v, WalkOptions{}); err == nil ||
+		!strings.Contains(err.Error(), "non-root record has widens") {
+		t.Fatalf("link with widens: error %v", err)
+	}
+
+	// Presenting a widening's signature as an initial grant (or vice versa) fails.
+	flipped := wg
+	flipped.Widens = "-"
+	wide.Sig = []byte(mustActText(flipped, wide.Digest))
+	if _, err := Walk(now, wide, store(initial, wide), v, WalkOptions{}); err == nil ||
+		!strings.Contains(err.Error(), "signed text differs") {
+		t.Fatalf("wrong form signed: error %v", err)
 	}
 }
 
@@ -212,15 +334,15 @@ func store(records ...Record) Resolver {
 // threeLinkChain builds root -> a -> b -> c, each narrowing the last.
 func threeLinkChain() (records []Record, leaf Record) {
 	root := rootRecord(rootGrant())
-	a := linkRecord("d-a", "d-root", linkGrant("root-principal", "a", map[string]string{"cheap": "d-cheap", "review": "d-review"}))
-	b := linkRecord("d-b", "d-a", linkGrant("a", "b", map[string]string{"cheap": "d-cheap", "review": "d-review"}))
-	c := linkRecord("d-c", "d-b", linkGrant("b", "c", map[string]string{"cheap": "d-cheap"}))
+	a := linkRecord(root, linkGrant("root-principal", "a", map[string]string{"cheap": "d-cheap", "review": "d-review"}))
+	b := linkRecord(a, linkGrant("a", "b", map[string]string{"cheap": "d-cheap", "review": "d-review"}))
+	c := linkRecord(b, linkGrant("b", "c", map[string]string{"cheap": "d-cheap"}))
 	return []Record{root, a, b, c}, c
 }
 
 func TestWalkHappyPath(t *testing.T) {
 	records, leaf := threeLinkChain()
-	got, err := Walk(now, leaf, store(records...), fakeVerifier{})
+	got, err := Walk(now, leaf, store(records...), signedTextVerifier(), WalkOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,60 +353,123 @@ func TestWalkHappyPath(t *testing.T) {
 
 func TestWalkRootAlone(t *testing.T) {
 	root := rootRecord(rootGrant())
-	if _, err := Walk(now, root, store(root), fakeVerifier{}); err != nil {
+	if _, err := Walk(now, root, store(root), signedTextVerifier(), WalkOptions{}); err != nil {
 		t.Fatal(err)
 	}
 }
 
+func TestWalkMapsSessionKeyGrantee(t *testing.T) {
+	root := rootRecord(rootGrant())
+	spawnGrant := linkGrant("root-principal", "repo/branch", map[string]string{"cheap": "d-cheap"})
+	spawnGrant.Session = "repo/branch"
+	spawn := linkRecord(root, spawnGrant)
+	// The child's own later link is signed by its principal, not its session key.
+	next := linkRecord(spawn, linkGrant("principal-1", "grandchild", map[string]string{"cheap": "d-cheap"}))
+	recs := store(root, spawn, next)
+
+	mapping := WalkOptions{SessionOfPrincipal: func(p string) (string, bool) {
+		return "repo/branch", p == "principal-1"
+	}}
+	if _, err := Walk(now, next, recs, signedTextVerifier(), mapping); err != nil {
+		t.Fatalf("mapped chain rejected: %v", err)
+	}
+
+	elsewhere := WalkOptions{SessionOfPrincipal: func(string) (string, bool) { return "other/branch", true }}
+	if _, err := Walk(now, next, recs, signedTextVerifier(), elsewhere); err == nil ||
+		!strings.Contains(err.Error(), "narrowing edge") {
+		t.Fatalf("principal in a different session: error %v", err)
+	}
+	if _, err := Walk(now, next, recs, signedTextVerifier(), WalkOptions{}); err == nil ||
+		!strings.Contains(err.Error(), `is not parent grantee "repo/branch"`) {
+		t.Fatalf("session-key grantee with no mapping: error %v", err)
+	}
+}
+
+func TestWalkRejectsForgedDigest(t *testing.T) {
+	records, leaf := threeLinkChain()
+	// A resolver hands back different (still parseable) text under a's digest.
+	forged := records[1]
+	forged.Text = linkGrant("root-principal", "evil", map[string]string{"cheap": "d-cheap"}).CanonicalText()
+	resolve := func(d string) (Record, bool) {
+		if d == forged.Digest {
+			return forged, true
+		}
+		return store(records...)(d)
+	}
+	if _, err := Walk(now, leaf, resolve, signedTextVerifier(), WalkOptions{}); err == nil ||
+		!strings.Contains(err.Error(), "digest mismatch") {
+		t.Fatalf("error %v", err)
+	}
+	// The start record is checked too.
+	start := leaf
+	start.Digest = records[1].Digest
+	if _, err := Walk(now, start, store(records...), signedTextVerifier(), WalkOptions{}); err == nil ||
+		!strings.Contains(err.Error(), "digest mismatch") {
+		t.Fatalf("start record: error %v", err)
+	}
+}
+
+func TestWalkRootSignatureMustCoverRegeneratedActText(t *testing.T) {
+	g := rootGrant()
+	root := rootRecord(g)
+	wider := g
+	wider.Profiles = map[string]string{"cheap": "d-cheap", "review": "d-review", "expensive": "d-exp"}
+	root.Sig = []byte(mustActText(wider, root.Digest)) // card signed a different grant's text
+	if _, err := Walk(now, root, store(root), signedTextVerifier(), WalkOptions{}); err == nil ||
+		!strings.Contains(err.Error(), "signed text differs from the regenerated act text") {
+		t.Fatalf("different grant text: error %v", err)
+	}
+	root.Sig = []byte(mustActText(g, "piggy-record-digest-v1@sha256-other")) // signed for another record
+	if _, err := Walk(now, root, store(root), signedTextVerifier(), WalkOptions{}); err == nil {
+		t.Fatal("act text naming another record accepted")
+	}
+}
+
 func TestWalkFailures(t *testing.T) {
+	profiles := map[string]string{"cheap": "d-cheap"}
 	tests := []struct {
 		name    string
 		build   func() (start Record, records []Record)
 		wantErr string
 	}{
 		{"expired link", func() (Record, []Record) {
-			records, leaf := threeLinkChain()
-			g := linkGrant("b", "c", map[string]string{"cheap": "d-cheap"})
+			records, _ := threeLinkChain()
+			g := linkGrant("b", "c", profiles)
 			g.Expires = now.Add(-time.Minute)
-			leaf = linkRecord("d-c", "d-b", g)
+			leaf := linkRecord(records[2], g)
 			return leaf, append(records, leaf)
-		}, "record d-c: expired"},
+		}, "expired"},
 		{"expired at the instant", func() (Record, []Record) {
-			records, leaf := threeLinkChain()
-			g := linkGrant("b", "c", map[string]string{"cheap": "d-cheap"})
+			records, _ := threeLinkChain()
+			g := linkGrant("b", "c", profiles)
 			g.Expires = now
-			leaf = linkRecord("d-c", "d-b", g)
+			leaf := linkRecord(records[2], g)
 			return leaf, append(records, leaf)
-		}, "record d-c: expired"},
-		{"bad link signature", func() (Record, []Record) {
+		}, "expired"},
+		{"signed link without a link verifier", func() (Record, []Record) {
 			records, leaf := threeLinkChain()
 			leaf.Sig = []byte("forged")
 			return leaf, append(records, leaf)
-		}, "record d-c: signature"},
+		}, "signature: link carries a signature"},
 		{"bad root signature", func() (Record, []Record) {
 			records, leaf := threeLinkChain()
 			records[0].Sig = []byte("forged")
 			return leaf, records
-		}, "record d-root: signature: bad card signature"},
+		}, "signature: signed text differs"},
 		{"missing parent", func() (Record, []Record) {
 			records, leaf := threeLinkChain()
-			return leaf, records[:2] // d-b absent
-		}, "parent d-b not found"},
+			return leaf, records[:2] // b absent
+		}, "not found"},
 		{"widened edge", func() (Record, []Record) {
 			records, _ := threeLinkChain()
-			wide := linkRecord("d-w", "d-a", linkGrant("a", "w", map[string]string{"cheap": "d-cheap", "expensive": "d-exp"}))
+			wide := linkRecord(records[1], linkGrant("a", "w", map[string]string{"cheap": "d-cheap", "expensive": "d-exp"}))
 			return wide, append(records, wide)
 		}, "profile expensive not held by parent"},
 		{"widened digest", func() (Record, []Record) {
 			records, _ := threeLinkChain()
-			wide := linkRecord("d-w", "d-a", linkGrant("a", "w", map[string]string{"cheap": "d-other"}))
+			wide := linkRecord(records[1], linkGrant("a", "w", map[string]string{"cheap": "d-other"}))
 			return wide, append(records, wide)
 		}, "profile cheap digest differs"},
-		{"cycle", func() (Record, []Record) {
-			x := linkRecord("d-x", "d-y", linkGrant("y", "x", map[string]string{"cheap": "d-cheap"}))
-			y := linkRecord("d-y", "d-x", linkGrant("x", "y", map[string]string{"cheap": "d-cheap"}))
-			return x, []Record{x, y}
-		}, "cycle"},
 		{"root with prev", func() (Record, []Record) {
 			g := rootGrant()
 			g.Prev = "d-other"
@@ -292,33 +477,25 @@ func TestWalkFailures(t *testing.T) {
 			return root, []Record{root}
 		}, "root record has prev"},
 		{"non-root with dash prev", func() (Record, []Record) {
-			g := linkGrant("p", "x", map[string]string{"cheap": "d-cheap"})
+			g := linkGrant("p", "x", profiles)
 			g.Prev = "-"
-			rec := Record{Digest: "d-x", Text: g.CanonicalText(), Sig: []byte("link:p")}
+			text := g.CanonicalText()
+			rec := Record{Digest: mustDigest(text), Text: text}
 			return rec, []Record{rec}
 		}, "non-root record has prev"},
 		{"unparseable text", func() (Record, []Record) {
-			rec := Record{Digest: "d-x", Text: "garbage\n", Sig: []byte("x")}
+			text := "garbage\n"
+			rec := Record{Digest: mustDigest(text), Text: text}
 			return rec, []Record{rec}
-		}, "record d-x: parse"},
+		}, "parse"},
 		{"depth cap", func() (Record, []Record) {
-			profiles := map[string]string{"cheap": "d-cheap"}
-			records := []Record{rootRecord(rootGrant())}
-			prev, grantor := "d-root", "root-principal"
-			var last Record
-			for i := 0; i < maxChainDepth; i++ { // root + 32 links = 33 records
-				digest, grantee := fmt.Sprintf("d-%d", i), fmt.Sprintf("g%d", i)
-				last = linkRecord(digest, prev, linkGrant(grantor, grantee, profiles))
-				records = append(records, last)
-				prev, grantor = digest, grantee
-			}
-			return last, records
+			return chainOfRecords(maxChainDepth)
 		}, "chain deeper than"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			start, records := tt.build()
-			_, err := Walk(now, start, store(records...), fakeVerifier{})
+			_, err := Walk(now, start, store(records...), signedTextVerifier(), WalkOptions{})
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("error %v, want containing %q", err, tt.wantErr)
 			}
@@ -326,18 +503,25 @@ func TestWalkFailures(t *testing.T) {
 	}
 }
 
-func TestWalkAtDepthCapSucceeds(t *testing.T) {
+// chainOfRecords returns a root followed by links narrowing nothing, and the
+// last link.
+func chainOfRecords(links int) (Record, []Record) {
 	profiles := map[string]string{"cheap": "d-cheap"}
-	records := []Record{rootRecord(rootGrant())}
-	prev, grantor := "d-root", "root-principal"
-	var last Record
-	for i := 0; i < maxChainDepth-1; i++ { // root + 31 links = 32 records
-		digest, grantee := fmt.Sprintf("d-%d", i), fmt.Sprintf("g%d", i)
-		last = linkRecord(digest, prev, linkGrant(grantor, grantee, profiles))
-		records = append(records, last)
-		prev, grantor = digest, grantee
+	prev := rootRecord(rootGrant())
+	records := []Record{prev}
+	grantor := "root-principal"
+	for i := 0; i < links; i++ {
+		grantee := fmt.Sprintf("g%d", i)
+		prev = linkRecord(prev, linkGrant(grantor, grantee, profiles))
+		records = append(records, prev)
+		grantor = grantee
 	}
-	if _, err := Walk(now, last, store(records...), fakeVerifier{}); err != nil {
+	return prev, records
+}
+
+func TestWalkAtDepthCapSucceeds(t *testing.T) {
+	last, records := chainOfRecords(maxChainDepth - 1) // root + 31 links = 32 records
+	if _, err := Walk(now, last, store(records...), signedTextVerifier(), WalkOptions{}); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -508,7 +508,9 @@ spinclass's own, to be corrected if piggy or the operator disagrees.
    regeneration. So the prompt the operator read cannot differ from the record
    it authorizes. The text satisfies piggy RFC 0012 (UTF-8, at most 4096 bytes,
    no control characters other than newline and tab): a header line, the
-   record's markl-id, the grantee, the profile names, and the expiry, in words.
+   record's markl-id, the grantee, each profile name with the content digest it
+   is pinned to, whether the grantee may pass the rights on, and the expiry, in
+   words.
 2. **Record digest is real.** A record's digest is the markl-id of the SHA-256
    of its canonical text, under piggy's `piggy-record-digest-v1` purpose, and
    the chain walk checks `Record.Digest` against it. This closes the review
@@ -518,8 +520,17 @@ spinclass's own, to be corrected if piggy or the operator disagrees.
    granting a rights set, stated in words, to a named principal. The certificate
    class (`piggy-certificate-v1`) requires naming the certified *public key*, and
    per-principal keys do not exist until FDR 0032 slice 1, so the standing
-   delegation to a service principal (item 9) waits for them. This answers the
-   remaining part of open item 2 provisionally; piggy may rule differently.
+   delegation to a service principal (item 9) waits for them. **piggy confirmed
+   this (piggy/free-larch, reading RFC 0012 §2.4):** the escalation class is
+   defined by what the act does, granting a right with a bound, and is not
+   limited to widening, so a first grant from no rights is the from-zero case;
+   it is also the strongest askpass class (GRANTING AUTHORITY banner, the
+   operator types ESCALATE). Once FDR 0032 slice 1 lands, standing delegation to
+   a service principal's key becomes a certificate act while the profile-set
+   grant itself stays an escalation. Because the namespace cannot tell an
+   initial grant from a widening, the signed text says so itself: the record
+   carries a `widens` field and the act text begins `initial grant` or
+   `widening of <markl-id>`.
 4. **Narrowing links are unsigned until principals have keys.** A narrowing grant
    is derivable from its parent (subset of profiles with equal digests, no later
    expiry, no wider `onward`, grantor equal to the parent's grantee), so authority
@@ -589,8 +600,12 @@ the standing certificate for unattended spawns.
   `internal/profile`; the clownfile and profile registry.
 - clown (forge `linenisgreat/clown`): #264, the profile lookup library request
   (resolved profile, content digest, kept-server set, registry version stamp);
-  #265, the system-prompt notice that tool categories were disabled; #176, the
-  picker's collapse/expand.
+  #265, the system-prompt notice that tool categories were disabled; #266, an
+  allowlist mode for saved cheap-context selections (exclusions are a denylist
+  per kept server, so a restricted profile silently gains tools its server adds
+  later; an allowlist makes the digest change exactly when the effective scope
+  does, and is to be exposed through `pkg/profilelookup`); #176, the picker's
+  collapse/expand.
 - godyn(7), "cross-module composition", for the library bridge.
 - The ringmaster `jobwake` bridge (`go.nix`) as the precedent.
 - Review: circus/eager-holly/clarabell, 2026-10-19.

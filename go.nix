@@ -237,6 +237,11 @@
       indirect = true;
       version = "v0.0.0-20220910002029-abceb7e1c41e";
     };
+    "golang.org/x/crypto" = {
+      go = "1.25.0";
+      hash = "sha256-vC1BJT7+3UBWLyEE5n3to0NKhMo6m2HGow2HiFgpQLo=";
+      version = "v0.50.0";
+    };
     "golang.org/x/exp" = {
       go = "1.25.0";
       hash = "sha256-JaDJGLIRoJjjvsg3dgfFuo7XApEJO2V4kUDmd58qTLI=";

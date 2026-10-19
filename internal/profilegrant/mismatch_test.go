@@ -7,9 +7,10 @@ import (
 
 func TestWalkRejectsResolverReturningWrongRecord(t *testing.T) {
 	records, leaf := threeLinkChain()
-	resolve := func(string) (Record, bool) { return records[1], true } // always d-a
-	_, err := Walk(now, leaf, resolve, fakeVerifier{})
-	if err == nil || !strings.Contains(err.Error(), "resolver returned digest d-a for parent d-b") {
+	resolve := func(string) (Record, bool) { return records[1], true } // always a
+	want := "resolver returned digest " + records[1].Digest + " for parent " + records[2].Digest
+	_, err := Walk(now, leaf, resolve, signedTextVerifier(), WalkOptions{})
+	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("error %v", err)
 	}
 }
