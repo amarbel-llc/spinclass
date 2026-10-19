@@ -59,6 +59,7 @@ func buildApp() *command.App {
 	registerSessionCommands(app)
 	registerPermsCommands(app)
 	registerHookCommand(app)
+	registerProfileGrantCommands(app)
 	registerVersionCommand(app)
 	registerServeCommand(app)
 	registerMCPOnlyCommands(app)
