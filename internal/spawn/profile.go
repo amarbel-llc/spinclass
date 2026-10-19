@@ -47,6 +47,9 @@ var profileResolver ProfileResolver = newClownResolver()
 type ProfileAuthorization struct {
 	GrantDigest string
 	IssueChild  func(childSession string) error
+	// Undo, best-effort and possibly nil, unbinds whatever IssueChild minted. A
+	// spawn calls it when a step after IssueChild fails.
+	Undo func()
 }
 
 // ProfileAuthorizer proves the driver holds the resolved profile (FDR 0034
@@ -119,9 +122,9 @@ func SpliceProfileFlag(entry []string, profile string) ([]string, error) {
 	out := make([]string, 0, len(entry)+2)
 	for i := 0; i < idx; i++ {
 		switch {
-		case entry[i] == "--profile":
+		case entry[i] == "--profile" || entry[i] == "-profile":
 			i++ // drop the flag's value too
-		case strings.HasPrefix(entry[i], "--profile="):
+		case strings.HasPrefix(entry[i], "--profile="), strings.HasPrefix(entry[i], "-profile="):
 		default:
 			out = append(out, entry[i])
 		}

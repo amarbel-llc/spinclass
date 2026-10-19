@@ -45,10 +45,13 @@ func registerProfileGrantImportCommand(app *command.App) {
 				"Every record is verified against the profile-grant signers file (there is no way to skip this) " +
 				"before anything is stored; a widening verifies only when the record it widens is in the same batch or already stored. " +
 				"Only card-signed root records can be imported: narrowing links are minted by spawn. " +
-				"Each record that no other record in the batch widens becomes its grantee's current record.",
+				"Each record that no other record in the batch widens becomes its grantee's current record, " +
+				"but only after every record in the batch is stored. A grantee that already has a different current record " +
+				"is not silently rebound: the import is refused unless the new record widens the current one or --replace is passed.",
 		},
 		Params: []command.Param{
 			{Name: "file", Type: command.String, Description: "Record JSON file, or \"-\" for stdin", Required: true},
+			{Name: "replace", Type: command.Bool, Description: "Rebind a grantee that already has a different current record (default: refuse)"},
 		},
 		RunCLI: runProfileGrantImport,
 	})
@@ -56,7 +59,8 @@ func registerProfileGrantImportCommand(app *command.App) {
 
 func runProfileGrantImport(_ context.Context, args json.RawMessage) error {
 	var f struct {
-		File string `json:"file"`
+		File    string `json:"file"`
+		Replace bool   `json:"replace"`
 	}
 	if err := json.Unmarshal(args, &f); err != nil {
 		return fmt.Errorf("profile-grant-import: %w", err)
@@ -82,7 +86,7 @@ func runProfileGrantImport(_ context.Context, args json.RawMessage) error {
 	if len(data) > maxImportBytes {
 		return fmt.Errorf("profile-grant-import: input is larger than %d bytes", maxImportBytes)
 	}
-	if err := importGrantRecords(data, profileGrantImportNow(), profileGrantImportOut()); err != nil {
+	if err := importGrantRecords(data, profileGrantImportNow(), profileGrantImportOut(), f.Replace); err != nil {
 		return fmt.Errorf("profile-grant-import: %w", err)
 	}
 	return nil
@@ -117,7 +121,11 @@ func decodeImportRecords(data []byte) ([]profilegrant.Record, error) {
 
 // importGrantRecords verifies every record before storing any, so a bad record
 // in a batch leaves the store as it was.
-func importGrantRecords(data []byte, now time.Time, out io.Writer) error {
+//
+// Order: verify all, Put all, then Bind. A grantee that already has a different
+// current record is not rebound unless replace is set (a record widening the
+// current one is the sanctioned supersession and needs no flag).
+func importGrantRecords(data []byte, now time.Time, out io.Writer, replace bool) error {
 	recs, err := decodeImportRecords(data)
 	if err != nil {
 		return err
@@ -168,17 +176,40 @@ func importGrantRecords(data []byte, now time.Time, out io.Writer) error {
 			widenedInBatch[c.grant.Widens] = true
 		}
 	}
+	var toBind []importCandidate
+	for _, c := range ordered {
+		if !widenedInBatch[c.rec.Digest] {
+			toBind = append(toBind, c)
+		}
+	}
+
+	// Refuse before writing anything if a binding would be silently replaced.
+	if !replace {
+		for _, c := range toBind {
+			cur, ok := store.Current(c.grant.Grantee)
+			if !ok || cur.Digest == c.rec.Digest || c.grant.Widens == cur.Digest {
+				continue
+			}
+			return fmt.Errorf("not importing: grantee %q is already bound to record %s, which %s does not widen; pass --replace to rebind it",
+				c.grant.Grantee, cur.Digest, c.rec.Digest)
+		}
+	}
+
+	// Store every record first; bind only once all of them are stored.
 	for _, c := range ordered {
 		if err := store.Put(c.rec); err != nil {
 			return err
 		}
-		bound := !widenedInBatch[c.rec.Digest]
-		if bound {
-			if err := store.Bind(c.grant.Grantee, c.rec.Digest); err != nil {
-				return err
-			}
+	}
+	bound := map[string]bool{}
+	for _, c := range toBind {
+		if err := store.Bind(c.grant.Grantee, c.rec.Digest); err != nil {
+			return err
 		}
-		printImported(out, c, bound)
+		bound[c.rec.Digest] = true
+	}
+	for _, c := range ordered {
+		printImported(out, c, bound[c.rec.Digest])
 	}
 	return nil
 }

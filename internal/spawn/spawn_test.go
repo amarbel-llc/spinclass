@@ -23,6 +23,11 @@ func newWorkerFixture(t *testing.T, sweatfileTOML string) (home, repoPath string
 	t.Helper()
 	testgit.RequireGit(t)
 	home = t.TempDir()
+	// Hermetic driver context: the test binary's real cwd is inside the
+	// developer's checkout, whose ancestor sweatfiles must not leak in.
+	prevCwd := driverCwd
+	driverCwd = func() (string, error) { return home, nil }
+	t.Cleanup(func() { driverCwd = prevCwd })
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
 	repoPath = filepath.Join(home, "eng", "repos", "worker")

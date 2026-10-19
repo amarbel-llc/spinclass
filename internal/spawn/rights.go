@@ -3,6 +3,7 @@ package spawn
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/grantstore"
@@ -16,20 +17,30 @@ import (
 // the child's narrowing link, returning the digest of the grant record that
 // authorized the spawn. It runs before the worker worktree exists, so a refusal
 // creates nothing.
-func enforceProfileRight(driver Driver, resolved ResolvedProfile, childSession string) (string, error) {
+//
+// The returned undo (never nil on success) unbinds the minted link; the caller
+// runs it if a later step of the spawn fails, so no link outlives a worker that
+// never started.
+func enforceProfileRight(driver Driver, resolved ResolvedProfile, childSession string) (grant string, undo func(), err error) {
 	// A principal-less driver cannot be a grantee or a link's grantor, and
 	// "who is asking" is the whole question enforcement answers.
 	if driver.Principal == "" {
-		return "", fmt.Errorf("profile %q refused: profile rights are enforced and the spawner has no principal to hold a grant", resolved.Name)
+		return "", nil, fmt.Errorf("profile %q refused: profile rights are enforced and the spawner has no principal to hold a grant", resolved.Name)
 	}
 	auth, err := newProfileAuthorizer().Authorize(driver, resolved)
 	if err != nil {
-		return "", fmt.Errorf("profile %q refused: %w", resolved.Name, err)
+		return "", nil, fmt.Errorf("profile %q refused: %w", resolved.Name, err)
+	}
+	undo = func() {
+		if auth.Undo != nil {
+			auth.Undo()
+		}
 	}
 	if err := auth.IssueChild(childSession); err != nil {
-		return "", fmt.Errorf("profile %q refused: %w", resolved.Name, err)
+		undo()
+		return "", nil, fmt.Errorf("profile %q refused: %w", resolved.Name, err)
 	}
-	return auth.GrantDigest, nil
+	return auth.GrantDigest, undo, nil
 }
 
 // productionAuthorizer is the real ProfileAuthorizer. It checks confinement
@@ -73,14 +84,27 @@ func adaptChecker(checker *profilerights.Checker, driver Driver, profile Resolve
 	if err != nil {
 		return ProfileAuthorization{}, err
 	}
+	var minted string // the session key a link was bound to, for Undo
 	return ProfileAuthorization{
 		GrantDigest: a.RecordDigest,
 		IssueChild: func(childSession string) error {
 			if childSession == "" {
 				return errors.New("no child session key to bind the link to")
 			}
-			_, _, err := checker.IssueChildLink(a, driver.Principal, childSession, profile.Name, profile.Digest)
+			_, issued, err := checker.IssueChildLink(a, driver.Principal, childSession, profile.Name, profile.Digest)
+			if err == nil && issued {
+				minted = childSession
+			}
 			return err
+		},
+		Undo: func() {
+			if minted == "" {
+				return
+			}
+			if err := checker.Store.Unbind(minted); err != nil {
+				slog.Warn("could not unbind the child link of a failed spawn", "session", minted, "err", err)
+			}
+			minted = ""
 		},
 	}, nil
 }

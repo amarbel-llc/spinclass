@@ -249,6 +249,116 @@ func TestBadChildSessionLeavesNothingBound(t *testing.T) {
 	}
 }
 
+// A session-keyed grant is only the driver's when the driver's principal maps to
+// that session; otherwise a shell could cd into another worktree and claim its
+// grant by cwd alone.
+func TestSessionGrantNeedsThePrincipalToMapToThatSession(t *testing.T) {
+	e := newEnv(t)
+	e.bless(e.card, "repo/other", map[string]string{profile: digest}, profilegrant.OnwardNone, now.Add(time.Hour))
+
+	cases := []struct {
+		name      string
+		principal string
+		mapped    string // "" = no mapping
+		wantOK    bool
+	}{
+		{"principal maps elsewhere", "intruder", "repo/mine", false},
+		{"principal has no mapping", "stranger", "", false},
+		{"principal maps to the session", "owner", "repo/other", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if c.mapped != "" {
+				e.principals[c.principal] = c.mapped
+			}
+			_, err := e.c.Authorize(c.principal, "repo/other", profile, digest)
+			if (err == nil) != c.wantOK {
+				t.Errorf("Authorize err = %v, wantOK %v", err, c.wantOK)
+			}
+		})
+	}
+
+	// With no principal the session record is never used either.
+	if _, err := e.c.Authorize("", "repo/other", profile, digest); err == nil {
+		t.Error("a session-only claim authorized without a principal")
+	}
+}
+
+func TestPrincipalBoundGrantWorksWithoutAnySession(t *testing.T) {
+	e := newEnv(t)
+	e.root(profilegrant.OnwardNone)
+	// An unrelated, unmapped session claim does not disturb the principal lookup.
+	mustAuthorize(t, e.c, driverPrincipal, "repo/anything")
+	mustAuthorize(t, e.c, driverPrincipal, "")
+}
+
+func TestIssueChildLinkRefusesAKeyThatAlreadyHasABinding(t *testing.T) {
+	e := newEnv(t)
+	e.root(profilegrant.OnwardGrant)
+	a := mustAuthorize(t, e.c, driverPrincipal, "")
+
+	first, issued, err := e.c.IssueChildLink(a, driverPrincipal, "repo/child", profile, digest)
+	if err != nil || !issued {
+		t.Fatalf("first link: issued=%v err=%v", issued, err)
+	}
+	if _, _, err := e.c.IssueChildLink(a, driverPrincipal, "repo/child", profile, digest); err == nil {
+		t.Fatal("a second link overwrote an existing binding")
+	}
+	if cur, ok := e.store.Current("repo/child"); !ok || cur.Digest != first.Digest {
+		t.Error("the original binding was disturbed")
+	}
+
+	// A key bound to something else entirely (an operator-blessed grant) is
+	// likewise not inherited or replaced.
+	e.bless(e.card, "repo/blessed", map[string]string{profile: digest}, profilegrant.OnwardNone, now.Add(time.Hour))
+	if _, _, err := e.c.IssueChildLink(a, driverPrincipal, "repo/blessed", profile, digest); err == nil {
+		t.Error("a link was minted over a blessed grant's key")
+	}
+}
+
+func TestRevokeSessionUnbindsOnlyWhenTheStoreExists(t *testing.T) {
+	e := newEnv(t)
+	e.root(profilegrant.OnwardGrant)
+	a := mustAuthorize(t, e.c, driverPrincipal, "")
+	if _, _, err := e.c.IssueChildLink(a, driverPrincipal, "repo/child", profile, digest); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RevokeSessionIn(e.dir, "repo/child"); err != nil {
+		t.Fatalf("RevokeSessionIn: %v", err)
+	}
+	if _, ok := e.store.Current("repo/child"); ok {
+		t.Error("binding survived revocation")
+	}
+	if _, ok := e.store.Current(driverPrincipal); !ok {
+		t.Error("revoking one session unbound another grantee")
+	}
+	// Idempotent.
+	if err := RevokeSessionIn(e.dir, "repo/child"); err != nil {
+		t.Errorf("second revoke: %v", err)
+	}
+}
+
+func TestRevokeSessionIsANoOpWithoutAStoreAndCreatesNothing(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "no", "grants")
+	if err := RevokeSessionIn(dir, "repo/child"); err != nil {
+		t.Fatalf("RevokeSessionIn on a missing store: %v", err)
+	}
+	if _, err := os.Stat(filepath.Dir(dir)); err == nil {
+		t.Error("revocation created directories for a store that does not exist")
+	}
+}
+
+func TestRevokeSessionReportsAnUnusableStore(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "grants")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RevokeSessionIn(file, "repo/child"); err == nil {
+		t.Error("a store path that is a file reported success")
+	}
+}
+
 func TestTamperedStoredRootCountsAsAbsent(t *testing.T) {
 	e := newEnv(t)
 	root := e.root(profilegrant.OnwardGrant)

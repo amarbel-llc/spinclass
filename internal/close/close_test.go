@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/auth"
+	"code.linenisgreat.com/spinclass/internal/grantstore"
 	"code.linenisgreat.com/spinclass/internal/nixgc"
+	"code.linenisgreat.com/spinclass/internal/profilegrant"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/testgit"
@@ -443,6 +445,65 @@ func TestRunResolvedRevokesMintedCredential(t *testing.T) {
 	}
 	if st.Credential == nil || st.Credential.RevokedAt == nil {
 		t.Errorf("tombstone credential = %+v, want RevokedAt", st.Credential)
+	}
+}
+
+// bindProfileGrantee stores a record granting profiles to grantee in the
+// default grant store and binds it, as a spawn-minted child link would be.
+func bindProfileGrantee(t *testing.T, grantee string) *grantstore.Store {
+	t.Helper()
+	dir, err := grantstore.DefaultDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := grantstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := profilegrant.Grant{
+		Grantor: "operator", Grantee: grantee, Session: "-", Profiles: map[string]string{"cheap": "sha256-aaaa"},
+		Onward: profilegrant.OnwardNone, Expires: time.Now().Add(time.Hour), Nonce: "00112233445566778899aabbccddeeff",
+		Widens: "-", Prev: "-",
+	}
+	text := g.CanonicalText()
+	d, err := profilegrant.DigestOf(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(profilegrant.Record{Digest: d, Text: text}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Bind(grantee, d); err != nil {
+		t.Fatal(err)
+	}
+	return store
+}
+
+// TestRunResolvedUnbindsTheSessionsProfileGrant ties a child's profile right
+// to the session's lifetime (FDR 0034): closing drops its binding.
+func TestRunResolvedUnbindsTheSessionsProfileGrant(t *testing.T) {
+	repoPath, wtPath := setupNoTTYClose(t)
+	key := filepath.Base(repoPath) + "/feature-x"
+	store := bindProfileGrantee(t, key)
+
+	if err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", true, nil, "tap"); err != nil {
+		t.Fatalf("RunResolved: %v", err)
+	}
+	if _, ok := store.Current(key); ok {
+		t.Error("profile binding survived close")
+	}
+}
+
+// TestRunResolvedWithoutGrantStoreCreatesNone: a machine that never enforced
+// rights is untouched by close.
+func TestRunResolvedWithoutGrantStoreCreatesNone(t *testing.T) {
+	repoPath, wtPath := setupNoTTYClose(t)
+	if err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", true, nil, "tap"); err != nil {
+		t.Fatalf("RunResolved: %v", err)
+	}
+	dir, _ := grantstore.DefaultDir()
+	if _, err := os.Stat(dir); err == nil {
+		t.Errorf("close created a grant store at %s", dir)
 	}
 }
 

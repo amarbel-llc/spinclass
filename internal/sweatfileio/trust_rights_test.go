@@ -62,10 +62,10 @@ func TestTrustedEnforceProfileRightsHonoursOnlyLayersAboveRepo(t *testing.T) {
 		t.Errorf("got (%v, %v), want (true, [%s])", on, ignored, repoFile)
 	}
 
-	// An explicit false above the repo clears an earlier true.
+	// A false above the repo cannot clear a true: the switch is sticky-on.
 	writeEnforce(t, parent, false)
-	if on, _ := resolve(); on {
-		t.Errorf("explicit false parent should clear the global true")
+	if on, _ := resolve(); !on {
+		t.Errorf("a false ancestor layer cleared the global true")
 	}
 
 	// And a repo-layer true cannot turn it on either.
@@ -138,6 +138,52 @@ func TestLoadHierarchyMergedNeverCarriesProfileRights(t *testing.T) {
 	}
 	if on, _ := TrustedEnforceProfileRights(h, home, repo); !on {
 		t.Errorf("trusted layers set enforce but it reads off")
+	}
+}
+
+// An agent picks the target repo path: a repo created outside the operator's
+// tree, with a false ancestor layer of its own, must still see the global true.
+func TestTrustedEnforceProfileRightsGlobalTrueSurvivesAnyRepoPath(t *testing.T) {
+	home := t.TempDir()
+	writeEnforce(t, filepath.Join(home, ".config", "spinclass", "sweatfile"), true)
+
+	outside := t.TempDir() // not under home
+	repo := filepath.Join(outside, "scratch", "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeEnforce(t, filepath.Join(outside, "scratch", "sweatfile"), false)
+	writeEnforce(t, filepath.Join(outside, "sweatfile"), false)
+
+	h, err := LoadHierarchy(home, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if on, _ := TrustedEnforceProfileRights(h, home, repo); !on {
+		t.Error("a repo path outside home with false ancestor layers escaped the global true")
+	}
+}
+
+// A parent-scoped true does not cover a repo outside that parent: the caller
+// must also consult another context (the driver's); this pins that boundary.
+func TestTrustedEnforceProfileRightsParentTrueDoesNotCoverOutsideRepo(t *testing.T) {
+	home := t.TempDir()
+	writeEnforce(t, filepath.Join(home, "work", "sweatfile"), true)
+	inside := filepath.Join(home, "work", "repo")
+	outside := filepath.Join(home, "elsewhere", "repo")
+	for _, d := range []string{inside, outside} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for repo, want := range map[string]bool{inside: true, outside: false} {
+		h, err := LoadHierarchy(home, repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if on, _ := TrustedEnforceProfileRights(h, home, repo); on != want {
+			t.Errorf("repo %s: got %v, want %v", repo, on, want)
+		}
 	}
 }
 

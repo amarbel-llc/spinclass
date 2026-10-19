@@ -309,6 +309,63 @@ func TestImportOfABadBatchStoresNothing(t *testing.T) {
 	requireNothingStored(t, env, good)
 }
 
+func runImportReplace(t *testing.T, file string) error {
+	t.Helper()
+	args, err := json.Marshal(map[string]any{"file": file, "replace": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runProfileGrantImport(context.Background(), args)
+}
+
+func TestImportDoesNotSilentlyReplaceAnExistingBinding(t *testing.T) {
+	card := newTestCard(t)
+	env := stubImportSeams(t, card.pub)
+	first := blessForImport(t, card, nil)
+	second := blessForImport(t, card, func(in *blessInput) { in.Nonce = "fedcba9876543210fedcba9876543210" })
+	if err := runImport(t, writeRecordsFile(t, first)); err != nil {
+		t.Fatal(err)
+	}
+
+	requireErrContaining(t, runImport(t, writeRecordsFile(t, second)), "--replace")
+	s := env.store(t)
+	if cur, ok := s.Current("swift-elder"); !ok || cur.Digest != first.Digest {
+		t.Fatal("the existing binding was disturbed")
+	}
+	if _, ok := s.Get(second.Digest); ok {
+		t.Fatal("a refused import stored its record")
+	}
+
+	if err := runImportReplace(t, writeRecordsFile(t, second)); err != nil {
+		t.Fatalf("--replace: %v", err)
+	}
+	if cur, ok := env.store(t).Current("swift-elder"); !ok || cur.Digest != second.Digest {
+		t.Fatal("--replace did not rebind")
+	}
+}
+
+func TestImportBindsOnlyAfterEveryRecordIsStored(t *testing.T) {
+	card := newTestCard(t)
+	env := stubImportSeams(t, card.pub)
+	good := blessForImport(t, card, nil)
+	other := blessForImport(t, card, func(in *blessInput) {
+		in.Grantee = "other-one"
+		in.Nonce = "00000000000000000000000000000002"
+	})
+	// A directory squatting on the second record's file makes its Put fail.
+	if err := os.MkdirAll(filepath.Join(env.dir, other.Digest, "x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	env.store(t)
+
+	if err := runImport(t, writeRecordsFile(t, []profilegrant.Record{good, other})); err == nil {
+		t.Fatal("import succeeded despite a failing Put")
+	}
+	if _, ok := env.store(t).Current("swift-elder"); ok {
+		t.Fatal("a grantee was bound before every record was stored")
+	}
+}
+
 func TestProfileGrantImportIsNotAnMCPTool(t *testing.T) {
 	app := buildApp()
 	cmd, ok := app.GetCommand("profile-grant-import")

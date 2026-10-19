@@ -19,6 +19,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/executor"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/nixgc"
+	"code.linenisgreat.com/spinclass/internal/profilerights"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sessionpick"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
@@ -250,6 +251,7 @@ func runResolvedInto(tw *tap.Writer, repoPath, wtPath, branch string, force bool
 	// unrevoked on the tombstone, where the next session start's orphan sweep
 	// (and the issuer's TTL) pick it up.
 	revokeCredential(tw, repoPath, wtPath, branch, activeKey(repoPath, branch))
+	revokeProfileBinding(tw, branch, activeKey(repoPath, branch))
 
 	// Capture the branch's tip commit before anything below removes the
 	// worktree/branch, so `sc resurrect` can recreate both later (#291).
@@ -319,6 +321,22 @@ func activeKey(repoPath, branch string) string {
 		return st.SessionKey
 	}
 	return filepath.Base(repoPath) + "/" + branch
+}
+
+// revokeProfileBinding unbinds the session's minted profile-right link (FDR
+// 0034) so the right does not outlive the session. Best-effort and silent when
+// there is nothing to do: a missing grant store is not an error.
+func revokeProfileBinding(tw *tap.Writer, branch, sessionKey string) {
+	rerr := profilerights.RevokeSession(sessionKey)
+	if rerr == nil {
+		return
+	}
+	desc := "revoke profile binding " + branch
+	if tw != nil {
+		tw.NotOk(desc, map[string]string{"severity": "warn", "message": rerr.Error()})
+		return
+	}
+	fmt.Fprintf(os.Stderr, "spinclass: %s failed: %v\n", desc, rerr)
 }
 
 // revokeCredential runs the [auth].revoke-command for the session when it

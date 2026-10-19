@@ -42,12 +42,25 @@ func strictAncestor(dir, root string) bool {
 }
 
 // TrustedEnforceProfileRights returns the [profile-rights].enforce switch
-// honoured for the repo: a scalar override across layers above the repo, last
-// one wins, an explicit false clearing an earlier true. Off when unset. Layers
-// that may not set it (repo, its realpath twin, worktree, labels) are never
-// honoured, so an agent editing its own sweatfile cannot turn enforcement off;
-// the paths of those that set the key are returned in untrusted so callers can
-// surface them. Hierarchy.Merged never carries the key.
+// honoured for the repo. The switch is STICKY-ON: it is true if ANY layer above
+// the repo says true, and a false anywhere never clears a true. That makes it
+// monotone, which matters because repoRoot is a path the caller (possibly an
+// agent) chose: an agent that relocates or symlinks its target repo under a
+// directory it controls, or outside the operator's enforcing tree, can only
+// change which ancestor layers are consulted, and a layer that says false has no
+// power to undo one that says true. Callers must still OR the result over every
+// context they can (the global sweatfile is in every hierarchy; the spawn driver
+// adds its own repo's), so the path chosen cannot shrink the set of honoured
+// trues below the global one.
+//
+// Off when unset. Layers that may not set it (repo, its realpath twin,
+// worktree, labels) are never honoured, so an agent editing its own sweatfile
+// cannot turn enforcement off; the paths of those that set the key are returned
+// in untrusted so callers can surface them. Hierarchy.Merged never carries the
+// key.
+//
+// What remains: a same-uid agent can edit the global sweatfile itself (FDR 0032
+// D17). This closes the sanctioned-tool-surface path, not that one.
 func TrustedEnforceProfileRights(h sweatfile.Hierarchy, home, repoRoot string) (enforce bool, untrusted []string) {
 	for _, src := range h.Sources {
 		if src.SkipReason != "" || !src.Found {
@@ -57,7 +70,7 @@ func TrustedEnforceProfileRights(h sweatfile.Hierarchy, home, repoRoot string) (
 			continue
 		}
 		if LayerAboveRepo(src.Path, home, repoRoot) {
-			enforce = *src.File.ProfileRights.Enforce
+			enforce = enforce || *src.File.ProfileRights.Enforce
 		} else {
 			untrusted = append(untrusted, src.Path)
 		}

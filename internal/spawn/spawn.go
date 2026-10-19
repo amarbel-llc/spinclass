@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/shop"
 	"code.linenisgreat.com/spinclass/internal/spawnhandshake"
@@ -104,26 +105,52 @@ func LaunchDetached(home, repoPath string, driver Driver, brief, desc, model, pr
 	// checked out) sweatfile layer, but that layer is the repo sweatfile
 	// checked out fresh from the default branch — same content the repo
 	// layer already contributed.
-	argv, window, sessionEnv, merged, enforce, err := renderSpawn(home, rp, brief, model, profile)
+	argv, window, sessionEnv, merged, targetEnforce, err := renderSpawn(home, rp, brief, model, profile)
 	if err != nil {
 		return Pending{}, err
+	}
+	// The target repo path is caller-chosen, so its hierarchy alone cannot decide
+	// the switch: it is on if the driver's own context says so too.
+	enforce := targetEnforce || driverContextEnforces(home)
+
+	effective := effectiveProfile(profile, merged)
+	if enforce && effective == "" {
+		// No profile was requested, so Authorize would never run; a profile the
+		// spawn-entry already carries would reach the worker unchecked.
+		if flag := embeddedProfileFlag(argv); flag != "" {
+			return Pending{}, fmt.Errorf("spawn refused: the spawn-entry carries %q but no profile was requested; "+
+				"when profile rights are enforced a profile may only be requested explicitly (the profile parameter or [session-entry].spawn-profile), so it can be authorized", flag)
+		}
 	}
 
 	var resolved ResolvedProfile
 	var authorizingGrant string
-	if effective := effectiveProfile(profile, merged); effective != "" {
+	var undoLink func()
+	if effective != "" {
 		resolved, err = resolveProfile(effective)
 		if err != nil {
 			return Pending{}, err
 		}
 		if enforce {
+			// The name that was authorized must be exactly the name that was
+			// spliced into the argv.
+			if resolved.Name != effective {
+				return Pending{}, fmt.Errorf("profile %q refused: it resolved to %q, and only the requested name may be authorized", effective, resolved.Name)
+			}
 			// Before shop.Create: a refusal litters no worktree. The child's
 			// session key is known from ResolvePath, so its link can be minted
 			// now and bound to it.
-			authorizingGrant, err = enforceProfileRight(driver, resolved, rp.SessionKey)
+			authorizingGrant, undoLink, err = enforceProfileRight(driver, resolved, rp.SessionKey)
 			if err != nil {
 				return Pending{}, err
 			}
+		}
+	}
+	// The link is minted before the worktree exists, so a later failure must not
+	// leave it bound to a session that will never run.
+	undoOnFailure := func() {
+		if undoLink != nil {
+			undoLink()
 		}
 	}
 
@@ -135,10 +162,61 @@ func LaunchDetached(home, repoPath string, driver Driver, brief, desc, model, pr
 		AllowStaleBase:    merged.AllowStaleBase(),
 		AllowNoCredential: merged.AllowNoCredential(),
 	}, nil); err != nil {
+		undoOnFailure()
 		return Pending{}, fmt.Errorf("creating worker worktree: %w", err)
 	}
 
-	return startDetachedEntry(rp, driver, desc, argv, window, sessionEnv, resolved, authorizingGrant)
+	p, err := startDetachedEntry(rp, driver, desc, argv, window, sessionEnv, resolved, authorizingGrant)
+	if err != nil {
+		undoOnFailure()
+		return Pending{}, err
+	}
+	return p, nil
+}
+
+// embeddedProfileFlag returns the first clown --profile flag in argv's clown
+// section (before the literal "--" provider-args separator), or "".
+func embeddedProfileFlag(argv []string) string {
+	for _, a := range argv {
+		switch {
+		case a == "--":
+			return ""
+		case a == "--profile", a == "-profile",
+			strings.HasPrefix(a, "--profile="), strings.HasPrefix(a, "-profile="):
+			return a
+		}
+	}
+	return ""
+}
+
+// driverCwd is the spawning process's working directory; a seam for tests.
+var driverCwd = os.Getwd
+
+// driverContextEnforces reports whether [profile-rights] enforce is on in the
+// DRIVER's own context: the hierarchy of the repo containing the driver's cwd
+// (its main checkout, found from a worktree too), or just the global and
+// home-level layers when the driver is outside any repo. Every hierarchy loads
+// the global user sweatfile, which is always a trusted layer, so a global true
+// holds whatever repo the driver names as the target. The switch is sticky-on,
+// so OR-ing this with the target's answer can only widen enforcement.
+//
+// An unreadable hierarchy fails closed (enforced): the alternative is an agent
+// that can corrupt a sweatfile to switch the check off. A cwd that is not in a
+// repo is not an error, just "no driver repo".
+func driverContextEnforces(home string) bool {
+	repo := home
+	if cwd, err := driverCwd(); err == nil {
+		if root, err := git.DetectRepo(cwd); err == nil {
+			repo = root
+		}
+	}
+	h, err := sweatfileio.LoadHierarchy(home, repo)
+	if err != nil {
+		slog.Warn("could not load the driver's sweatfile hierarchy; treating profile rights as enforced", "repo", repo, "err", err)
+		return true
+	}
+	on, _ := sweatfileio.TrustedEnforceProfileRights(h, home, repo)
+	return on
 }
 
 // effectiveProfile is the explicit profile parameter, else the merged

@@ -64,6 +64,16 @@ func Open(dir string) (*Store, error) {
 	return s, nil
 }
 
+// OpenExisting is Open for callers that must not create the store: a missing
+// dir yields an error satisfying errors.Is(err, fs.ErrNotExist) and nothing is
+// created.
+func OpenExisting(dir string) (*Store, error) {
+	if _, err := os.Lstat(dir); err != nil {
+		return nil, err
+	}
+	return Open(dir)
+}
+
 // checkDigestName admits only [A-Za-z0-9._@+-], no leading dot, so a digest can
 // never name a path outside the store.
 func checkDigestName(digest string) error {

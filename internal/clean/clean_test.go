@@ -9,9 +9,12 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"code.linenisgreat.com/spinclass/internal/auth"
+	"code.linenisgreat.com/spinclass/internal/grantstore"
 	"code.linenisgreat.com/spinclass/internal/nixgc"
+	"code.linenisgreat.com/spinclass/internal/profilegrant"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
@@ -139,6 +142,51 @@ func TestRemoveWorktreeRevokesMintedCredential(t *testing.T) {
 	}
 	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
 		t.Errorf("worktree not removed: %v", err)
+	}
+}
+
+// TestRemoveWorktreeUnbindsTheSessionsProfileGrant: a reaped worktree's minted
+// profile-right link goes with it (FDR 0034); a missing store is untouched.
+func TestRemoveWorktreeUnbindsTheSessionsProfileGrant(t *testing.T) {
+	_, repoDir := setupRepo(t)
+	if err := os.WriteFile(filepath.Join(repoDir, ".git", "info", "exclude"), []byte(".spinclass/\nsweatfile\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wtPath := filepath.Join(repoDir, ".worktrees", "merged-y")
+	runGit(t, repoDir, "worktree", "add", "-b", "merged-y", wtPath)
+
+	dir, err := grantstore.DefaultDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := grantstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "repo/merged-y"
+	g := profilegrant.Grant{
+		Grantor: "operator", Grantee: key, Session: "-", Profiles: map[string]string{"cheap": "sha256-aaaa"},
+		Onward: profilegrant.OnwardNone, Expires: time.Now().Add(time.Hour), Nonce: "00112233445566778899aabbccddeeff",
+		Widens: "-", Prev: "-",
+	}
+	text := g.CanonicalText()
+	d, err := profilegrant.DigestOf(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(profilegrant.Record{Digest: d, Text: text}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Bind(key, d); err != nil {
+		t.Fatal(err)
+	}
+
+	wt := worktreeInfo{repo: "repo", branch: "merged-y", repoPath: repoDir, worktreePath: wtPath, merged: true}
+	if err := removeWorktree(wt, nil); err != nil {
+		t.Fatalf("removeWorktree: %v", err)
+	}
+	if _, ok := store.Current(key); ok {
+		t.Error("profile binding survived clean")
 	}
 }
 

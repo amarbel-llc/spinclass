@@ -24,6 +24,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/landing"
 	"code.linenisgreat.com/spinclass/internal/mergelock"
 	"code.linenisgreat.com/spinclass/internal/present"
+	"code.linenisgreat.com/spinclass/internal/profilerights"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/statsd"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
@@ -804,6 +805,9 @@ func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, push,
 			// it to the issuer's TTL sweep (no tombstone is written here for the
 			// orphan sweep to find). Non-fatal, like close and clean.
 			revokeCredential(ts, repoPath, wtPath, branch)
+			// The minted profile-right link (FDR 0034) must not outlive the
+			// worktree either; best-effort, silent without a grant store.
+			_ = profilerights.RevokeSession(sessionKeyFor(repoPath, branch))
 
 			out, removeErr := git.Run(repoPath, "worktree", "remove", wtPath)
 			if removeErr != nil {
@@ -847,6 +851,15 @@ func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, push,
 	// warrant; abandoned state is reaped by `sc clean`.
 	_ = executor.RequestClose(repoPath, branch)
 	return nil
+}
+
+// sessionKeyFor is the recorded session key for a branch, falling back to the
+// derived <repo>/<branch> when no state is readable.
+func sessionKeyFor(repoPath, branch string) string {
+	if st, err := session.Read(repoPath, branch); err == nil && st.SessionKey != "" {
+		return st.SessionKey
+	}
+	return filepath.Base(repoPath) + "/" + branch
 }
 
 // revokeCredential runs [auth].revoke-command for a session that minted a

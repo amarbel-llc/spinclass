@@ -111,10 +111,21 @@ func (c *Checker) Authorize(driverPrincipal, driverSession, profile, pinnedDiges
 	}, nil
 }
 
+// currentRecord finds the record the driver holds. A principal-bound record is
+// always the principal's own. A session-bound record is the driver's only when
+// the principal provably belongs to that session: the session key comes from
+// the cwd and the principal from the environment, so without the join a driver
+// could claim another worktree's grant by standing in it.
+//
+// Residual: under clown the sanctioned MCP path has a fixed environment, but
+// the `sc spawn` CLI trusts its caller's environment (CLOWN_SESSION_ID), so a
+// same-uid process can still present any principal there (FDR 0032 D17).
 func (c *Checker) currentRecord(session, principal string) (profilegrant.Record, bool) {
-	if session != "" {
-		if rec, ok := c.Store.Current(session); ok {
-			return rec, true
+	if session != "" && principal != "" && c.SessionOfPrincipal != nil {
+		if mapped, ok := c.SessionOfPrincipal(principal); ok && mapped == session {
+			if rec, ok := c.Store.Current(session); ok {
+				return rec, true
+			}
 		}
 	}
 	if principal != "" {
@@ -137,13 +148,21 @@ func heldList(g profilegrant.Grant) string {
 // the right on: the child then runs under the profile but holds nothing to
 // spawn with (FDR 0034 Phase 2 design item 9). A link is stored, bound to the
 // child's session and re-verified through the same walk a later spawn would
-// make; a link that does not verify is unbound rather than left usable.
+// make; a link that does not verify is unbound rather than left usable. The
+// link's grantor is the spawner's PRINCIPAL; the walk joins it to the spawner's
+// record through SessionOfPrincipal.
 func (c *Checker) IssueChildLink(a *Authorization, driverPrincipal, childSession, profile, digest string) (profilegrant.Record, bool, error) {
 	if !a.MayPassOn {
 		return profilegrant.Record{}, false, nil
 	}
 	if driverPrincipal == "" {
 		return profilegrant.Record{}, false, errors.New("cannot issue a child link: the spawner has no principal to be its grantor")
+	}
+	// A key must not inherit or overwrite a binding: a blessed grant, a
+	// previous link, or a reused session key would otherwise be silently
+	// replaced by (or leak into) this child's authority.
+	if _, bound := c.Store.Current(childSession); bound {
+		return profilegrant.Record{}, false, fmt.Errorf("cannot issue a child link: session %q already has a grant binding", childSession)
 	}
 	nonce := make([]byte, 16)
 	if _, err := rand.Read(nonce); err != nil {

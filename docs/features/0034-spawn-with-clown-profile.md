@@ -645,6 +645,27 @@ spinclass's own, to be corrected if piggy or the operator disagrees.
     the principal from its caller, which any same-uid process can forge; that is
     the same bar as narrowing links being unsigned, and becomes real only when
     links are signed.
+18. **How enforcement is switched on, and who a spawner is.** The switch is
+    *sticky-on*: a spawn enforces if the target repo's trusted layers, the
+    driver's own context, or the global sweatfile say so, and a lower layer can
+    never turn it off. A driver whose hierarchy cannot be read fails closed.
+    It is only robust when set in the **global** sweatfile: a non-global trusted
+    layer (say `~/work/sweatfile`) is not consulted for a driver standing outside
+    it, because the driver's working directory is agent-chosen. A session-bound
+    grant is used only when the driver's principal provably belongs to that
+    session. When enforcing, a spawn-entry that already carries a clown
+    `--profile` is refused unless a profile was requested, and a requested profile
+    replaces any embedded one (both `--profile` and `-profile` forms).
+19. **Link lifecycle.** A child link is bound to the child's session key and
+    refused if that key already has a binding. It is unbound if the spawn fails
+    after minting it, and when the session ends by `sc close`, a merge
+    teardown, `sc clean`, or the removal of an abandoned session. Known
+    residual: minting is check-then-bind without a lock, narrowed by worktree
+    creation failing for a duplicate key. `sc profile-grant-import` stores every
+    record before binding any and refuses to rebind a grantee that already has a
+    different current record unless the new one widens it or `--replace` is
+    passed; two unrelated roots for one grantee in a single batch are not yet
+    rejected.
 
 ## Phasing
 

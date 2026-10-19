@@ -21,6 +21,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/merge"
 	"code.linenisgreat.com/spinclass/internal/nixgc"
+	"code.linenisgreat.com/spinclass/internal/profilerights"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/tapblock"
@@ -135,6 +136,7 @@ func removeWorktree(wt worktreeInfo, tw *tap.Writer) error {
 	// worktree goes — closing the gap where a merged worktree reaped here
 	// would orphan its token. Best-effort; the orphan sweep is the backstop.
 	revokeCredential(tw, wt)
+	revokeProfileBinding(tw, wt)
 
 	if err := git.WorktreeRemove(wt.repoPath, wt.worktreePath); err != nil {
 		return fmt.Errorf("removing worktree %s: %w", wt.branch, err)
@@ -149,6 +151,25 @@ func removeWorktree(wt worktreeInfo, tw *tap.Writer) error {
 		runReap(tw, *gcPlan, wt.branch)
 	}
 	return nil
+}
+
+// revokeProfileBinding unbinds the session's minted profile-right link (FDR
+// 0034); mirrors close.revokeProfileBinding. Best-effort, no-op without a store.
+func revokeProfileBinding(tw *tap.Writer, wt worktreeInfo) {
+	sessionKey := filepath.Base(wt.repoPath) + "/" + wt.branch
+	if st, rerr := session.Read(wt.repoPath, wt.branch); rerr == nil && st.SessionKey != "" {
+		sessionKey = st.SessionKey
+	}
+	rerr := profilerights.RevokeSession(sessionKey)
+	if rerr == nil {
+		return
+	}
+	desc := "revoke profile binding " + wt.branch
+	if tw != nil {
+		tw.NotOk(desc, map[string]string{"severity": "warn", "message": rerr.Error()})
+		return
+	}
+	log.Warn("profile binding revoke failed", "branch", wt.branch, "err", rerr)
 }
 
 // revokeCredential runs [auth].revoke-command for a worktree that minted a
@@ -358,6 +379,14 @@ func countAbandonedSessions() (int, []session.State) {
 func removeAbandonedSessions(abandoned []session.State) int {
 	removed := 0
 	for _, s := range abandoned {
+		// An abandoned session's worktree is already gone, so its minted
+		// profile-right link must be unbound here or a later session reusing
+		// the key would inherit it (FDR 0034). Best-effort.
+		key := s.SessionKey
+		if key == "" {
+			key = filepath.Base(s.RepoPath) + "/" + s.Branch
+		}
+		_ = profilerights.RevokeSession(key)
 		_ = session.Remove(s.RepoPath, s.Branch)
 		removed++
 	}

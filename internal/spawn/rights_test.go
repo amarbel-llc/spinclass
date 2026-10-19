@@ -4,11 +4,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 
 // fakeAuthorizer answers from fixed errors and records what it was asked and
@@ -19,6 +21,7 @@ type fakeAuthorizer struct {
 	grant      string
 	authorized []Driver
 	issuedFor  []string
+	undone     int
 	// worktreesAtIssue is the repo's .worktrees listing seen inside IssueChild.
 	repoPath         string
 	worktreesAtIssue []string
@@ -33,7 +36,7 @@ func (f *fakeAuthorizer) Authorize(driver Driver, _ ResolvedProfile) (ProfileAut
 		f.issuedFor = append(f.issuedFor, child)
 		f.worktreesAtIssue, _ = filepath.Glob(filepath.Join(f.repoPath, ".worktrees", "*"))
 		return f.issueErr
-	}}, nil
+	}, Undo: func() { f.undone++ }}, nil
 }
 
 func withAuthorizer(t *testing.T, a ProfileAuthorizer) {
@@ -214,6 +217,226 @@ func TestEnforcementRefusesAPrincipallessDriver(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 	noWorktrees(t, repoPath)
+}
+
+func writeSweatfile(t *testing.T, dir, body string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sweatfile"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+const enforceFalse = "[profile-rights]\nenforce = false\n"
+
+func TestAncestorLayerFalseCannotDisableTheGlobalTrue(t *testing.T) {
+	cheapResolver(t)
+	fake := &fakeAuthorizer{authErr: errors.New("nope")}
+	withAuthorizer(t, fake)
+	home, repoPath := newWorkerFixture(t, modelSpawnSweatfile)
+	enforceInGlobalSweatfile(t, home)
+	writeSweatfile(t, filepath.Dir(repoPath), enforceFalse)
+	writeSweatfile(t, filepath.Dir(filepath.Dir(repoPath)), enforceFalse)
+
+	if _, err := Launch(home, repoPath, testDriver("driver/test-session"), "brief", "", "", "cheap", 15*time.Second); err == nil {
+		t.Fatal("false ancestor layers disabled enforcement")
+	}
+	if len(fake.authorized) != 1 {
+		t.Errorf("authorizer consulted %d times, want 1", len(fake.authorized))
+	}
+}
+
+// An agent controls the target path: a symlink into a directory it owns (with
+// its own enforce = false ancestor) must not escape the global true.
+func TestRelocatedTargetRepoCannotEscapeTheGlobalTrue(t *testing.T) {
+	cheapResolver(t)
+	fake := &fakeAuthorizer{authErr: errors.New("nope")}
+	withAuthorizer(t, fake)
+	home, repoPath := newWorkerFixture(t, modelSpawnSweatfile)
+	enforceInGlobalSweatfile(t, home)
+
+	scratch := t.TempDir() // outside HOME, writable by the "agent"
+	writeSweatfile(t, scratch, enforceFalse)
+	link := filepath.Join(scratch, "relocated")
+	if err := os.Symlink(repoPath, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Launch(home, link, testDriver("driver/test-session"), "brief", "", "", "cheap", 15*time.Second); err == nil {
+		t.Fatal("a relocated target repo escaped enforcement")
+	}
+	if len(fake.authorized) != 1 {
+		t.Errorf("authorizer consulted %d times, want 1", len(fake.authorized))
+	}
+}
+
+// A parent-scoped true covers the driver's repo but not a target outside it;
+// the driver's context must carry the switch to that target.
+func TestDriverRepoInsideAScopedTrueEnforcesAnOutsideTarget(t *testing.T) {
+	cheapResolver(t)
+	fake := &fakeAuthorizer{authErr: errors.New("nope")}
+	withAuthorizer(t, fake)
+	home, repoPath := newWorkerFixture(t, modelSpawnSweatfile)
+	writeSweatfile(t, filepath.Join(home, "work"), "[profile-rights]\nenforce = true\n")
+	driverRepo := filepath.Join(home, "work", "driverrepo")
+	if err := os.MkdirAll(driverRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testgit.MustInit(t, driverRepo)
+	prev := driverCwd
+	driverCwd = func() (string, error) { return filepath.Join(driverRepo, "sub"), nil }
+	t.Cleanup(func() { driverCwd = prev })
+
+	if _, err := Launch(home, repoPath, testDriver("driver/test-session"), "brief", "", "", "cheap", 15*time.Second); err == nil {
+		t.Fatal("a target outside the scoped true was not enforced")
+	}
+	if len(fake.authorized) != 1 {
+		t.Errorf("authorizer consulted %d times, want 1", len(fake.authorized))
+	}
+}
+
+func TestDriverOutsideTheScopedTrueDoesNotEnforceAnOutsideTarget(t *testing.T) {
+	cheapResolver(t)
+	forbidAuthorizer(t)
+	home, repoPath := newWorkerFixture(t, modelSpawnSweatfile)
+	writeSweatfile(t, filepath.Join(home, "work"), "[profile-rights]\nenforce = true\n")
+	_ = repoPath // target and driver (home) are both outside work/
+	stop, helloErr := helloAfterLaunch(t, repoPath, "driver/test-session")
+	_, err := Launch(home, repoPath, testDriver("driver/test-session"), "brief", "", "", "cheap", 15*time.Second)
+	stop()
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if herr := <-helloErr; herr != nil {
+		t.Fatalf("hello goroutine: %v", herr)
+	}
+}
+
+const embeddedProfileSweatfile = `[session-entry]
+spawn-entry = ["sh", "-c", 'printf "%s\n" "$@" > "$PWD/argv.txt"; touch "$PWD/launched"', "sh", "--profile", "sneaky", "--", "{prompt}"]
+`
+
+func TestEnforcementRefusesAnEmbeddedProfileWhenNoneWasRequested(t *testing.T) {
+	cheapResolver(t)
+	forbidAuthorizer(t)
+	for _, entry := range []string{
+		`"--profile", "sneaky"`, `"--profile=sneaky"`, `"-profile", "sneaky"`, `"-profile=sneaky"`,
+	} {
+		home, repoPath := newWorkerFixture(t, `[session-entry]
+spawn-entry = ["sh", `+entry+`, "--", "{prompt}"]
+`)
+		enforceInGlobalSweatfile(t, home)
+		_, err := Launch(home, repoPath, testDriver("driver/test-session"), "brief", "", "", "", 15*time.Second)
+		if err == nil || !strings.Contains(err.Error(), "spawn-entry") || !strings.Contains(err.Error(), "explicitly") {
+			t.Fatalf("entry %s: err = %v, want a refusal naming the spawn-entry", entry, err)
+		}
+		noWorktrees(t, repoPath)
+	}
+}
+
+func TestEmbeddedProfileAfterTheSeparatorIsNotAClownFlag(t *testing.T) {
+	if got := embeddedProfileFlag([]string{"clown", "--", "--profile", "x"}); got != "" {
+		t.Errorf("a provider-arg after -- reported as %q", got)
+	}
+}
+
+func TestRequestedProfileReplacesAnEmbeddedOneInTheFinalArgv(t *testing.T) {
+	cheapResolver(t)
+	home, repoPath := newWorkerFixture(t, embeddedProfileSweatfile)
+	enforceInGlobalSweatfile(t, home)
+	fake := &fakeAuthorizer{grant: "g", repoPath: repoPath}
+	withAuthorizer(t, fake)
+
+	stop, helloErr := helloAfterLaunch(t, repoPath, "driver/test-session")
+	res, err := Launch(home, repoPath, testDriver("driver/test-session"), "brief", "", "", "cheap", 15*time.Second)
+	stop()
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if herr := <-helloErr; herr != nil {
+		t.Fatalf("hello goroutine: %v", herr)
+	}
+	// The auto-mode splice keys off the entry's provider, which the embedded
+	// profile may change, so only the profile flags are pinned here.
+	got := launchedArgv(t, res.WorktreePath)
+	if slices.Contains(got, "sneaky") {
+		t.Errorf("argv = %v, still carries the embedded profile", got)
+	}
+	if !slices.Equal(got[:3], []string{"--profile", "cheap", "--"}) {
+		t.Errorf("argv = %v, want it to lead with exactly the authorized profile", got)
+	}
+}
+
+func TestEnforcementRefusesAResolverThatRenamesTheProfile(t *testing.T) {
+	withResolver(t, &fakeResolver{profiles: map[string]ResolvedProfile{
+		"cheap": {Name: "other", Digest: "d", KeptServers: requiredKept},
+	}})
+	forbidAuthorizer(t)
+	home, repoPath := newWorkerFixture(t, modelSpawnSweatfile)
+	enforceInGlobalSweatfile(t, home)
+	_, err := Launch(home, repoPath, testDriver("driver/test-session"), "brief", "", "", "cheap", 15*time.Second)
+	if err == nil || !strings.Contains(err.Error(), `"other"`) {
+		t.Fatalf("err = %v", err)
+	}
+	noWorktrees(t, repoPath)
+}
+
+func TestFailedWorktreeCreationUndoesTheMintedLink(t *testing.T) {
+	cheapResolver(t)
+	fake := &fakeAuthorizer{grant: "g"}
+	withAuthorizer(t, fake)
+	home, repoPath := newWorkerFixture(t, modelSpawnSweatfile)
+	enforceInGlobalSweatfile(t, home)
+	// A read-only worktrees directory makes creation fail after the link has
+	// been minted. (A regular file in its place would make RandomName's
+	// os.Stat report ENOTDIR forever and hang the name search.)
+	wtDir := filepath.Join(repoPath, ".worktrees")
+	if err := os.MkdirAll(wtDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(wtDir, 0o700) })
+	if _, err := Launch(home, repoPath, testDriver("driver/test-session"), "brief", "", "", "cheap", 15*time.Second); err == nil {
+		t.Fatal("worktree creation unexpectedly succeeded")
+	}
+	if len(fake.issuedFor) != 1 || fake.undone != 1 {
+		t.Errorf("issued %v, undone %d; want one link minted and undone", fake.issuedFor, fake.undone)
+	}
+}
+
+func TestFailedEntryStartUndoesTheMintedLink(t *testing.T) {
+	cheapResolver(t)
+	fake := &fakeAuthorizer{grant: "g"}
+	withAuthorizer(t, fake)
+	home, repoPath := newWorkerFixture(t, `[session-entry]
+spawn-entry = ["/nonexistent/spawn-entry-binary", "--", "{prompt}"]
+`)
+	enforceInGlobalSweatfile(t, home)
+	if _, err := Launch(home, repoPath, testDriver("driver/test-session"), "brief", "", "", "cheap", 15*time.Second); err == nil {
+		t.Fatal("a missing entry binary unexpectedly started")
+	}
+	if len(fake.issuedFor) != 1 || fake.undone != 1 {
+		t.Errorf("issued %v, undone %d; want one link minted and undone", fake.issuedFor, fake.undone)
+	}
+}
+
+func TestSuccessfulSpawnKeepsTheMintedLink(t *testing.T) {
+	cheapResolver(t)
+	home, repoPath := newWorkerFixture(t, modelSpawnSweatfile)
+	fake := &fakeAuthorizer{grant: "g", repoPath: repoPath}
+	withAuthorizer(t, fake)
+	enforceInGlobalSweatfile(t, home)
+	stop, helloErr := helloAfterLaunch(t, repoPath, "driver/test-session")
+	_, err := Launch(home, repoPath, testDriver("driver/test-session"), "brief", "", "", "cheap", 15*time.Second)
+	stop()
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	<-helloErr
+	if fake.undone != 0 {
+		t.Errorf("link undone %d times after a successful spawn", fake.undone)
+	}
 }
 
 // TestProductionAuthorizerRefusesWhileTheCardRootIsUnestablished pins the
