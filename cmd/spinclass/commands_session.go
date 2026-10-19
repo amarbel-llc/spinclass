@@ -23,6 +23,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/sessionexec"
 	"code.linenisgreat.com/spinclass/internal/sessionpick"
 	"code.linenisgreat.com/spinclass/internal/shop"
+	"code.linenisgreat.com/spinclass/internal/spawn"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/worktree"
@@ -158,6 +159,7 @@ func registerSessionCommands(app *command.App) {
 			{Name: "id", Type: command.String, Description: "Session target (worktree directory name or <repo>/<branch> session key from `sc list`); auto-detects from cwd if omitted", Completer: completeWorktreeTargets},
 			{Name: "no-attach", Type: command.Bool, Description: "Find session but skip attaching"},
 			{Name: "yes", Short: 'y', Type: command.Bool, Description: "Skip the resume confirmation dialog"},
+			{Name: "repin-profile", Type: command.Bool, Description: "Accept a changed definition of the session's recorded clown profile and record its new digest (human authority; FDR 0034). Without it, resume refuses when the profile changed since spawn"},
 		},
 		RunCLI: runResume,
 	})
@@ -585,6 +587,10 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		ID       string `json:"id"`
 		NoAttach bool   `json:"no-attach"`
 		Yes      bool   `json:"yes"`
+		// RepinProfile accepts a changed profile definition (FDR 0034). CLI-only
+		// (resume has RunCLI, no MCP Run): the human-authority path, until an
+		// agent-held re-pin authority arrives with the grant machinery.
+		RepinProfile bool `json:"repin-profile"`
 	}
 	_ = json.Unmarshal(args, &p)
 
@@ -685,6 +691,23 @@ func runResume(_ context.Context, args json.RawMessage) error {
 	entrypoint := merged.SessionStart()
 	if resume := merged.SessionResume(); resume != nil {
 		entrypoint = resume
+	}
+
+	profilePlan, err := planRecordedProfile(*state, spawn.ResolveProfile, entrypoint, p.RepinProfile)
+	if err != nil {
+		return err
+	}
+	entrypoint = profilePlan.Entry
+	if profilePlan.Warning != "" {
+		fmt.Fprintln(os.Stderr, "spinclass: "+profilePlan.Warning)
+	}
+	if profilePlan.RepinTo != "" {
+		// Persist before Attach: Attach blocks for the session's life and
+		// carries ProfileDigest forward from disk.
+		if err := persistRepin(*state, profilePlan.RepinTo); err != nil {
+			return fmt.Errorf("re-pinning profile digest: %w", err)
+		}
+		fmt.Printf("profile %s re-pinned from %s to %s\n", state.Profile, profilePlan.RepinFrom, profilePlan.RepinTo)
 	}
 
 	rp := worktree.ResolvedPath{

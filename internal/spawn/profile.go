@@ -73,6 +73,11 @@ func resolveProfile(name string) (ResolvedProfile, error) {
 	return rp, nil
 }
 
+// ResolveProfile resolves name exactly as a spawn does (clown's library, the
+// required-server check, the markl-id digest), for callers outside this
+// package: resume, and the command that pins a profile into a grant.
+func ResolveProfile(name string) (ResolvedProfile, error) { return resolveProfile(name) }
+
 // SpliceProfileFlag places "--profile <profile>" among clown's own flags: just
 // before the literal "--" provider-args separator, since clown flags must
 // precede it. Any "--profile <x>" / "--profile=<x>" already before the
