@@ -120,6 +120,14 @@ type State struct {
 	// materialized view). Slice 1 replaces this view with signed grant-record
 	// digests, which carry rights properly.
 	HandleRights map[string]string `json:"handle_rights,omitempty"`
+	// Profile is the clown profile name this worker was spawned with (FDR 0034);
+	// ProfileDigest is the content digest of that profile's resolved definition
+	// at spawn, so a later edit is detectable. AuthorizingGrant is the digest of
+	// the grant that let the spawner use the profile (phase 2; empty in phase 1,
+	// which has no grant records). All empty for a session spawned without one.
+	Profile          string `json:"profile,omitempty"`
+	ProfileDigest    string `json:"profile_digest,omitempty"`
+	AuthorizingGrant string `json:"authorizing_grant,omitempty"`
 	// HelloSentAt records when the SessionStart hook emitted the spawn
 	// hello to SpawnedBy, deduping re-fires (resume/clear/compact). Set
 	// only on spawned sessions (FDR 0006).

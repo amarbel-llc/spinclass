@@ -89,6 +89,9 @@ func Run(w io.Writer, target, newBranchName, format string) error {
 		Holders:            st.Holders,
 		PendingHandles:     st.PendingHandles,
 		HandleRights:       st.HandleRights,
+		Profile:            st.Profile,
+		ProfileDigest:      st.ProfileDigest,
+		AuthorizingGrant:   st.AuthorizingGrant,
 		StartedAt:          time.Now(),
 	}
 	if err := session.Write(fresh); err != nil {

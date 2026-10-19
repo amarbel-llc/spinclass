@@ -281,6 +281,9 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if other.SessionEntry.DisableAutoMode != nil {
 			merged.SessionEntry.DisableAutoMode = other.SessionEntry.DisableAutoMode
 		}
+		if other.SessionEntry.SpawnProfile != "" {
+			merged.SessionEntry.SpawnProfile = other.SessionEntry.SpawnProfile
+		}
 		if len(other.SessionEntry.LivenessProbe) > 0 {
 			merged.SessionEntry.LivenessProbe = other.SessionEntry.LivenessProbe
 		}

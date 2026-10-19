@@ -299,6 +299,37 @@ func TestListRowsCarriesHolders(t *testing.T) {
 	}
 }
 
+// TestListRowsCarriesProfile verifies the FDR 0034 profile name survives the
+// wire shape and that a profile-less row omits the key (omitempty).
+func TestListRowsCarriesProfile(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "spinclass")
+	profiled := filepath.Join(repo, ".worktrees", "profiled-plum")
+	plain := filepath.Join(repo, ".worktrees", "plain-pine")
+	for _, dir := range []string{profiled, plain} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows := ListRows([]State{
+		{SessionState: StateInactive, RepoPath: repo, WorktreePath: profiled, Branch: "profiled-plum", SessionKey: "spinclass/profiled-plum", Profile: "cheap"},
+		{SessionState: StateInactive, RepoPath: repo, WorktreePath: plain, Branch: "plain-pine", SessionKey: "spinclass/plain-pine"},
+	}, false)
+	if len(rows) != 2 {
+		t.Fatalf("rows: got %d, want 2", len(rows))
+	}
+	if rows[0].Profile != "cheap" || rows[1].Profile != "" {
+		t.Errorf("profiles = %q, %q; want cheap, empty", rows[0].Profile, rows[1].Profile)
+	}
+	data, err := json.Marshal(rows[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "profile") {
+		t.Errorf("plain row JSON unexpectedly contains \"profile\": %s", data)
+	}
+}
+
 // TestListRowsEmptyMarshalsToArray guards against `null` output: an
 // empty session list must serialize as [] for remote consumers.
 func TestListRowsEmptyMarshalsToArray(t *testing.T) {

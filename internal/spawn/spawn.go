@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -79,7 +80,14 @@ type Pending struct {
 // driver identifies the spawning session (FDR 0032 D1): its Principal is the
 // hello target and is always present; its SessionKey is display-only and may
 // be empty for a driver outside any worktree (spinclass#332).
-func LaunchDetached(home, repoPath string, driver Driver, brief, desc, model string) (Pending, error) {
+//
+// profile, when non-empty, names the clown profile to boot the worker with
+// (FDR 0034); "" falls back to the merged sweatfile's [session-entry]
+// spawn-profile, and no profile at all leaves the spawn completely unchanged
+// (no resolver call). A requested profile is resolved before shop.Create, so a
+// refusal litters no worktree, and its name and digest are recorded in the
+// worker's session state.
+func LaunchDetached(home, repoPath string, driver Driver, brief, desc, model, profile string) (Pending, error) {
 	var descArgs []string
 	if desc != "" {
 		descArgs = []string{desc}
@@ -96,9 +104,17 @@ func LaunchDetached(home, repoPath string, driver Driver, brief, desc, model str
 	// checked out) sweatfile layer, but that layer is the repo sweatfile
 	// checked out fresh from the default branch — same content the repo
 	// layer already contributed.
-	argv, window, sessionEnv, merged, err := renderSpawn(home, rp, brief, model)
+	argv, window, sessionEnv, merged, err := renderSpawn(home, rp, brief, model, profile)
 	if err != nil {
 		return Pending{}, err
+	}
+
+	var resolved ResolvedProfile
+	if effective := effectiveProfile(profile, merged); effective != "" {
+		resolved, err = resolveProfile(effective)
+		if err != nil {
+			return Pending{}, err
+		}
 	}
 
 	// The worker repo's own sweatfile decides whether a stale base is
@@ -112,7 +128,16 @@ func LaunchDetached(home, repoPath string, driver Driver, brief, desc, model str
 		return Pending{}, fmt.Errorf("creating worker worktree: %w", err)
 	}
 
-	return startDetachedEntry(rp, driver, desc, argv, window, sessionEnv)
+	return startDetachedEntry(rp, driver, desc, argv, window, sessionEnv, resolved)
+}
+
+// effectiveProfile is the explicit profile parameter, else the merged
+// sweatfile's spawn-profile default, else "" (no profile).
+func effectiveProfile(explicit string, merged sweatfile.Sweatfile) string {
+	if explicit != "" {
+		return explicit
+	}
+	return merged.SessionSpawnProfile()
 }
 
 // Launch is the SYNCHRONOUS spawn: LaunchDetached then WaitHello. deadline 0
@@ -120,8 +145,8 @@ func LaunchDetached(home, repoPath string, driver Driver, brief, desc, model str
 // (FDR 0006). On a hello timeout the worktree and its session state are
 // intentionally left behind for inspection (`sc close` / `close-child-session`).
 // Used by the `sc spawn` CLI and by the async tool's no-clown fallback.
-func Launch(home, repoPath string, driver Driver, brief, desc, model string, deadline time.Duration) (Result, error) {
-	p, err := LaunchDetached(home, repoPath, driver, brief, desc, model)
+func Launch(home, repoPath string, driver Driver, brief, desc, model, profile string, deadline time.Duration) (Result, error) {
+	p, err := LaunchDetached(home, repoPath, driver, brief, desc, model, profile)
 	if err != nil {
 		return Result{}, err
 	}
@@ -147,7 +172,12 @@ func Launch(home, repoPath string, driver Driver, brief, desc, model string, dea
 // worker repo's [hooks].allow-stale-base before creating the worktree and
 // re-loading the hierarchy for one boolean would be a second full walk of the
 // sweatfile chain.
-func renderSpawn(home string, rp worktree.ResolvedPath, brief, model string) (argv, window []string, sessionEnv map[string]string, merged sweatfile.Sweatfile, err error) {
+//
+// The effective profile (explicit parameter, else [session-entry].spawn-profile)
+// is spliced LAST, after the auto-mode and model splices, via SpliceProfileFlag:
+// those two key off resolveProvider(entry), and placing the profile after them
+// keeps their behavior identical to a spawn with no profile.
+func renderSpawn(home string, rp worktree.ResolvedPath, brief, model, profile string) (argv, window []string, sessionEnv map[string]string, merged sweatfile.Sweatfile, err error) {
 	hierarchy, err := sweatfileio.LoadWorktreeHierarchy(home, rp.RepoPath, rp.AbsPath)
 	if err != nil {
 		return nil, nil, nil, merged, fmt.Errorf("loading worker sweatfile hierarchy: %w", err)
@@ -166,6 +196,12 @@ func renderSpawn(home string, rp worktree.ResolvedPath, brief, model string) (ar
 	}
 	if model != "" {
 		entry, err = SpliceModelFlag(entry, model, merged.SessionModelFlags(), merged.SessionModelIDs())
+		if err != nil {
+			return nil, nil, nil, merged, err
+		}
+	}
+	if effective := effectiveProfile(profile, merged); effective != "" {
+		entry, err = SpliceProfileFlag(entry, effective)
 		if err != nil {
 			return nil, nil, nil, merged, err
 		}
@@ -228,7 +264,7 @@ func launchSpawnWindow(argv []string, rp worktree.ResolvedPath, desc string, ses
 		return
 	}
 	logPath := filepath.Join(rp.AbsPath, ".spinclass", "spawn-window.log")
-	if err := startDetached(argv, rp.AbsPath, workerEnv(rp, desc, sessionEnv), logPath); err != nil {
+	if err := startDetached(argv, rp.AbsPath, workerEnv(rp, desc, sessionEnv, false), logPath); err != nil {
 		slog.Warn("spawn-window failed to start", "argv", argv, "err", err)
 	}
 }
@@ -244,12 +280,21 @@ func launchSpawnWindow(argv []string, rp worktree.ResolvedPath, desc string, ses
 // os/exec keeps the LAST occurrence of a duplicated key, so order encodes
 // precedence: inherited driver environ, then user [session-entry].env, then
 // the spinclass-owned identity vars (appended last — authoritative).
-func workerEnv(rp worktree.ResolvedPath, desc string, userEnv map[string]string) []string {
+//
+// scrubDesktopEnv additionally drops the display and session-bus variables
+// (harnessScrubbedEnvVars) from the inherited environ; the detached harness
+// passes true, the spawn-window launch false because a window needs a display.
+// An explicit [session-entry].env entry still sets them back, since userEnv is
+// appended after the scrub.
+func workerEnv(rp worktree.ResolvedPath, desc string, userEnv map[string]string, scrubDesktopEnv bool) []string {
 	// Strip the driver's inherited CLOWN_SESSION_ID/CLAUDE_SESSION_ID so the
 	// worker's clown re-derives its channel from the worker's own
 	// SPINCLASS_SESSION_ID (appended below). Otherwise the worker arms the
 	// driver's channel and directed chat wakes to it are dropped (#169).
 	env := session.StripInheritedSessionIDs(os.Environ())
+	if scrubDesktopEnv {
+		env = dropEnvVars(env, harnessScrubbedEnvVars)
+	}
 	for k, v := range userEnv {
 		env = append(env, k+"="+v)
 	}
@@ -274,11 +319,30 @@ func workerEnv(rp worktree.ResolvedPath, desc string, userEnv map[string]string)
 	)
 }
 
+// harnessScrubbedEnvVars are the desktop-session variables the detached
+// harness does not inherit (FDR 0034, "Where the card root is real"). This is
+// hygiene only, not a security boundary: the sockets stay reachable by path
+// under the same uid. SSH_AUTH_SOCK and SSH_ASKPASS are deliberately kept —
+// workers may reach the agent.
+var harnessScrubbedEnvVars = []string{"DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS"}
+
+// dropEnvVars returns env without any KEY=value entry whose KEY is in keys.
+func dropEnvVars(env, keys []string) []string {
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		k, _, _ := strings.Cut(e, "=")
+		if !slices.Contains(keys, k) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // startDetachedEntry writes the worker's pre-hello session state and execs the
 // detached harness entry, returning a Pending (worktree booting, hello not yet
 // awaited). The SessionStart hook adopts the state (PID + HelloSentAt) when the
 // worker boots; pre-hello PID is 0 (nothing attached yet).
-func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, argv, window []string, sessionEnv map[string]string) (Pending, error) {
+func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, argv, window []string, sessionEnv map[string]string, profile ResolvedProfile) (Pending, error) {
 	st := session.State{
 		PID:                0,
 		SessionState:       session.StateActive,
@@ -289,6 +353,8 @@ func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, ar
 		Description:        desc,
 		SpawnedBy:          driver.SessionKey,
 		SpawnedByPrincipal: driver.Principal,
+		Profile:            profile.Name,
+		ProfileDigest:      profile.Digest,
 		StartedAt:          time.Now().UTC(),
 		Env: map[string]string{
 			"SPINCLASS_SESSION_ID": rp.SessionKey,
@@ -313,7 +379,7 @@ func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, ar
 	// clown/posh attach — can no longer wedge the launcher. A well-behaved
 	// clown --clown-attach=spawn still forks the worker and exits promptly.
 	logPath := filepath.Join(rp.AbsPath, ".spinclass", "spawn.log")
-	if err := startDetached(argv, rp.AbsPath, workerEnv(rp, desc, sessionEnv), logPath); err != nil {
+	if err := startDetached(argv, rp.AbsPath, workerEnv(rp, desc, sessionEnv, true), logPath); err != nil {
 		return Pending{}, fmt.Errorf("spawn template %q failed: %w", argv, err)
 	}
 

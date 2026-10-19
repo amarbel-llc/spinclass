@@ -919,6 +919,21 @@ detected after detach, and how long tombstones are retained.
 	map merge (child wins on collision, parent-only keys survive), same as
 	*[session-entry.env]*.
 
+*spawn-profile*
+	Default clown profile name a spawned worker boots with (FDR 0034). The
+	*profile* param of *spawn-session* (or *sc spawn --profile*) overrides it
+	per call; with neither, no profile is used. The profile is placed as
+	*--profile <name>* in *spawn-entry* just before the literal *"--"*
+	separator (clown's own flags must precede it), replacing any *--profile*
+	already there; a *spawn-entry* with no *"--"* is a hard spawn error. The
+	name is resolved through clown's profile library _before_ the worker
+	worktree is created, and an unknown or unresolvable profile refuses the
+	spawn: until that library is linked (clown#264) every profile is
+	refused. The resolved profile name and content digest are recorded in
+	session state and shown in the *PROFILE* column of *sc list*. Selects
+	among profiles the spawner already holds; never grants one.
+	*Merge:* scalar override.
+
 *liveness-probe*
 	*Deprecated* (post-FDR-0017): clown owns the multiplexer attach and
 	names sessions by its own per-instance key, so this argv can no longer

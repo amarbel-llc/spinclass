@@ -24,6 +24,7 @@ type spawnParams struct {
 	Description  string `json:"description"`
 	HelloTimeout string `json:"hello-timeout"`
 	Model        string `json:"model"`
+	Profile      string `json:"profile"`
 }
 
 // runSpawn is the shared spawn flow behind both surfaces (FDR 0006):
@@ -64,7 +65,7 @@ func runSpawn(p spawnParams) (spawn.Result, string, error) {
 		return spawn.Result{}, "", err
 	}
 
-	res, err := spawn.Launch(home, repoPath, driver, p.Brief, p.Description, p.Model, deadline)
+	res, err := spawn.Launch(home, repoPath, driver, p.Brief, p.Description, p.Model, p.Profile, deadline)
 	if err != nil {
 		return spawn.Result{}, "", err
 	}
@@ -246,6 +247,11 @@ func spawnParamList() []command.Param {
 			Type:        command.String,
 			Description: "Model alias for the worker (sonnet, opus, haiku, fable). For the claude provider, resolved to the full model ID via [session-entry.model-ids] (built-in default; overridable per sweatfile) before being spliced into the resolved spawn-entry's provider-args per [session-entry.model-flags] (default: {\"claude\": \"--model\"}). Omit to use the harness's own default.",
 			Completer:   completeModelAliases,
+		},
+		{
+			Name:        "profile",
+			Type:        command.String,
+			Description: "Clown profile name for the worker (FDR 0034): a named bundle of provider settings and a trimmed MCP tool catalog, placed as --profile <name> among clown's flags in the spawn-entry. Omit to use [session-entry].spawn-profile, else no profile. The profile is resolved before anything is created; an unknown or unavailable profile refuses the spawn.",
 		},
 	}
 }

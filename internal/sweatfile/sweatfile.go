@@ -68,6 +68,10 @@ type SessionEntry struct {
 	// this is the sole knob (no GetDefault() seed needed — the zero value,
 	// nil, already means "enabled").
 	DisableAutoMode *bool `toml:"disable-auto-mode"`
+	// SpawnProfile is the default clown profile name a spawned worker boots
+	// with (FDR 0034); an explicit spawn-session `profile` parameter overrides
+	// it per call. Scalar override down the cascade; "" = no default profile.
+	SpawnProfile string `toml:"spawn-profile"`
 }
 
 type Hooks struct {
@@ -937,6 +941,15 @@ func (sf Sweatfile) SessionAutoModeDisabled() bool {
 	return sf.SessionEntry != nil &&
 		sf.SessionEntry.DisableAutoMode != nil &&
 		*sf.SessionEntry.DisableAutoMode
+}
+
+// SessionSpawnProfile returns [session-entry].spawn-profile, the default clown
+// profile for spawned workers (FDR 0034), or "" when none is configured.
+func (sf Sweatfile) SessionSpawnProfile() string {
+	if sf.SessionEntry == nil {
+		return ""
+	}
+	return sf.SessionEntry.SpawnProfile
 }
 
 // SessionEnv returns the user-configured environment variables to inject

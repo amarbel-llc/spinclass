@@ -70,6 +70,9 @@ func setupClosedSession(t *testing.T, branch string) (repoPath, wtPath string) {
 		Holders:            []string{"1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f"},
 		PendingHandles:     []string{"9c2e1111-2222-3333-4444-555566667777"},
 		HandleRights:       map[string]string{"9c2e1111-2222-3333-4444-555566667777": "observe"},
+		Profile:            "cheap",
+		ProfileDigest:      "digest-cheap",
+		AuthorizingGrant:   "grant-1",
 		Entrypoint:         []string{"/bin/sh"},
 		StartedAt:          time.Now().UTC(),
 	}
@@ -135,6 +138,10 @@ func TestRunRecreatesWorktreeFromClosedSession(t *testing.T) {
 	}
 	if len(got.PendingHandles) != 1 || got.PendingHandles[0] != "9c2e1111-2222-3333-4444-555566667777" {
 		t.Errorf("PendingHandles = %v, want preserved from tombstone", got.PendingHandles)
+	}
+	if got.Profile != "cheap" || got.ProfileDigest != "digest-cheap" || got.AuthorizingGrant != "grant-1" {
+		t.Errorf("profile fields = %q/%q/%q, want preserved from tombstone",
+			got.Profile, got.ProfileDigest, got.AuthorizingGrant)
 	}
 	if got := got.HandleRights["9c2e1111-2222-3333-4444-555566667777"]; got != "observe" {
 		t.Errorf("HandleRights = %v, want preserved from tombstone", got)

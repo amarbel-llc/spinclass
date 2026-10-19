@@ -56,6 +56,10 @@ type ListRow struct {
 	// accepted holder remains (FDR 0032 D12; see State.Orphan). Appended last
 	// and omitempty.
 	Orphan bool `json:"orphan,omitempty"`
+
+	// Profile is the clown profile name the worker was spawned with (FDR 0034),
+	// for `sc list`'s PROFILE column. Appended last and omitempty.
+	Profile string `json:"profile,omitempty"`
 }
 
 // ListRows converts states to wire rows with no clown-presence augmentation
@@ -93,6 +97,7 @@ func ListRowsWithClowns(states []State, closed bool, clowns map[string]int) []Li
 			ClownCount:  n,
 			Holders:     len(s.Holders),
 			Orphan:      s.Orphan(),
+			Profile:     s.Profile,
 		})
 	}
 	return rows

@@ -1576,6 +1576,32 @@ func TestMergeSessionDisableAutoModeInherit(t *testing.T) {
 	}
 }
 
+func TestSessionSpawnProfileAccessor(t *testing.T) {
+	for _, sf := range []Sweatfile{{}, {SessionEntry: &SessionEntry{}}} {
+		if got := sf.SessionSpawnProfile(); got != "" {
+			t.Errorf("SessionSpawnProfile() = %q, want empty", got)
+		}
+	}
+	sf := Sweatfile{SessionEntry: &SessionEntry{SpawnProfile: "cheap"}}
+	if got := sf.SessionSpawnProfile(); got != "cheap" {
+		t.Errorf("SessionSpawnProfile() = %q, want cheap", got)
+	}
+}
+
+func TestMergeSessionSpawnProfileOverrideAndInherit(t *testing.T) {
+	// Fresh bases per merge: MergeWith shares the base's *SessionEntry.
+	base := Sweatfile{SessionEntry: &SessionEntry{SpawnProfile: "cheap"}}
+	override := Sweatfile{SessionEntry: &SessionEntry{SpawnProfile: "review"}}
+	if got := base.MergeWith(override).SessionSpawnProfile(); got != "review" {
+		t.Errorf("override: got %q, want review", got)
+	}
+	base = Sweatfile{SessionEntry: &SessionEntry{SpawnProfile: "cheap"}}
+	inherit := Sweatfile{SessionEntry: &SessionEntry{Start: []string{"zellij"}}}
+	if got := base.MergeWith(inherit).SessionSpawnProfile(); got != "cheap" {
+		t.Errorf("inherit: got %q, want cheap", got)
+	}
+}
+
 // TestGetDefaultShipsModelIDs pins the built-in spawn-session model-alias
 // set, the mechanism the user asked for: sweatfile-configurable, with this
 // mapping as the compiled-in default.

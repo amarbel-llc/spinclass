@@ -6,6 +6,18 @@ import (
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
+// TestDecodeSpawnProfile pins the [session-entry].spawn-profile key through
+// the generated codec (FDR 0034).
+func TestDecodeSpawnProfile(t *testing.T) {
+	doc, err := Parse([]byte("[session-entry]\nspawn-profile = \"cheap\"\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got := doc.Data().SessionSpawnProfile(); got != "cheap" {
+		t.Errorf("SessionSpawnProfile() = %q, want cheap", got)
+	}
+}
+
 // TestDecodeEmptyVsAbsentArrays locks the behavior the deleted consumed-map
 // nil-normalization used to provide and that tommy's generated decoder now
 // provides natively: a present-but-empty array decodes to a NON-NIL empty

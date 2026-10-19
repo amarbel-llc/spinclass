@@ -63,7 +63,7 @@ func handleSpawnSessionAsync(params spawnParams) (*command.Result, error) {
 
 	// Synchronous prefix: create the worktree + exec the detached entry. After
 	// this the session key is known; the hello has NOT been awaited.
-	pending, err := spawn.LaunchDetached(home, repoPath, driver, params.Brief, params.Description, params.Model)
+	pending, err := spawn.LaunchDetached(home, repoPath, driver, params.Brief, params.Description, params.Model, params.Profile)
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
 	}

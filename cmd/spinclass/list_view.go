@@ -263,6 +263,7 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 		Col("ID", mesa.Pin).
 		Col("STATUS", mesa.Pin).
 		Col("AGE", mesa.Pin).
+		Col("PROFILE", mesa.Pin).
 		Col("DESCRIPTION", mesa.Flex).
 		Legend(stateLegendEntries()...).
 		Empty("No sessions.")
@@ -292,6 +293,7 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 			mesa.Text(s.SessionKey),
 			statusCell(stateSeverity(s.ResolveDisplayState(clowns)), clowns, marker),
 			mesa.Text(sessionpick.FormatRelDate(sessionpick.LastActivity(*s), now)),
+			mesa.Text(s.Profile),
 			descCell(s.Description, s.SpawnedBy, len(s.Holders), s.Orphan()),
 		)
 	}
@@ -305,6 +307,7 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 			mesa.Styled(mesa.Special, r.Remote+":"+r.Repo+"/"+r.ID),
 			statusCell(mesa.Special, r.ClownCount, "remote"),
 			mesa.Text(""),
+			mesa.Text(r.Profile),
 			descCell(r.Description, r.SpawnedBy, r.Holders, r.Orphan),
 		)
 	}

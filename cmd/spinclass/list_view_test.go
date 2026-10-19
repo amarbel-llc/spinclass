@@ -120,6 +120,28 @@ func TestRenderListTable(t *testing.T) {
 	}
 }
 
+// TestRenderListTableShowsProfileColumn: the PROFILE column header is present
+// and a spawned-with-profile session (local or remote) shows its profile name.
+func TestRenderListTableShowsProfileColumn(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir()) // hermetic: no clown presence
+	out := renderListTable([]session.State{{
+		SessionState: session.StateInactive,
+		WorktreePath: t.TempDir(),
+		Branch:       "cheap-cedar",
+		SessionKey:   "spinclass/cheap-cedar",
+		Profile:      "cheapctx",
+		StartedAt:    time.Now(),
+	}}, []session.ListRow{
+		{ID: "r1", State: "active", Repo: "spinclass", Remote: "devbox", Profile: "remoteprof"},
+	}, nil, false, 0, mesa.ForceStyle())
+
+	for _, want := range []string{"PROFILE", "cheapctx", "remoteprof"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("table missing %q:\n%s", want, out)
+		}
+	}
+}
+
 // TestRenderListTableFoldsClownCountIntoStatus: when clown presence exists for
 // a session's key (decoration), each live clown is rendered as a 🤡 inside the
 // merged STATUS cell — there is no longer a separate CLOWNS column.
