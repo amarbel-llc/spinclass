@@ -440,8 +440,9 @@ func TestSuccessfulSpawnKeepsTheMintedLink(t *testing.T) {
 }
 
 // TestProductionAuthorizerRefusesWhileTheCardRootIsUnestablished pins the
-// production default: turning the switch on today refuses every profile spawn,
-// with the reason, and creates nothing.
+// production default: with no confined unit (every host today, and this test's
+// driver has no session at all) turning the switch on refuses every profile
+// spawn, with the confinement reason, and creates nothing.
 func TestProductionAuthorizerRefusesWhileTheCardRootIsUnestablished(t *testing.T) {
 	cheapResolver(t)
 	home, repoPath := newWorkerFixture(t, modelSpawnSweatfile)
@@ -451,7 +452,7 @@ func TestProductionAuthorizerRefusesWhileTheCardRootIsUnestablished(t *testing.T
 	if err == nil {
 		t.Fatal("the production authorizer allowed a spawn")
 	}
-	for _, want := range []string{"cannot be card-rooted", "spinclass#338", "clown#244", "posh"} {
+	for _, want := range []string{"cannot be card-rooted", "session confinement (FDR 0035)"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error lacks %q: %v", want, err)
 		}

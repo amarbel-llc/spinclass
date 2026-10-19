@@ -61,8 +61,9 @@ type ProfileAuthorizer interface {
 
 // newProfileAuthorizer builds the authorizer a spawn consults when profile
 // rights are enforced. It is only called then, so a default spawn never touches
-// the grant store. Swapped by tests; production is confinement-gated and today
-// always refuses (profilerights.Unestablished).
+// the grant store. Swapped by tests; production is gated on the FDR 0035
+// confinement check (confinement.ForDriver), which fails on every host until
+// clown#244's agent unit lands.
 var newProfileAuthorizer = newProductionAuthorizer
 
 // RequiredServersKept errors, naming the first missing server, when kept lacks

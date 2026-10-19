@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/grantstore"
 	"code.linenisgreat.com/spinclass/internal/grantverify"
 	"code.linenisgreat.com/spinclass/internal/profilerights"
@@ -44,19 +45,22 @@ func enforceProfileRight(driver Driver, resolved ResolvedProfile, childSession s
 }
 
 // productionAuthorizer is the real ProfileAuthorizer. It checks confinement
-// BEFORE opening the grant store, so that with the boundary unestablished (the
-// only state today) turning enforcement on refuses with that reason and touches
-// nothing on disk.
+// BEFORE opening the grant store, so that while the boundary does not hold
+// (every host today) turning enforcement on refuses with the failing facts and
+// touches nothing on disk.
 type productionAuthorizer struct {
-	confinement profilerights.Confinement
+	confinementFor func(Driver) profilerights.Confinement
 }
 
 func newProductionAuthorizer() ProfileAuthorizer {
-	return productionAuthorizer{confinement: profilerights.Unestablished{}}
+	return productionAuthorizer{confinementFor: func(d Driver) profilerights.Confinement {
+		return confinement.ForDriver{SessionKey: d.SessionKey, Principal: d.Principal}
+	}}
 }
 
 func (p productionAuthorizer) Authorize(driver Driver, profile ResolvedProfile) (ProfileAuthorization, error) {
-	if err := p.confinement.Check(); err != nil {
+	conf := p.confinementFor(driver)
+	if err := conf.Check(); err != nil {
 		return ProfileAuthorization{}, fmt.Errorf("profile rights are enforced but cannot be card-rooted: %w", err)
 	}
 	dir, err := grantstore.DefaultDir()
@@ -71,7 +75,7 @@ func (p productionAuthorizer) Authorize(driver Driver, profile ResolvedProfile) 
 		Store:              store,
 		RootKeys:           func() ([]ssh.PublicKey, error) { return grantverify.LoadSigners(grantverify.DefaultSignersPath()) },
 		SessionOfPrincipal: session.SessionKeyOfPrincipal,
-		Confinement:        p.confinement,
+		Confinement:        conf,
 		Now:                time.Now,
 	}
 	return adaptChecker(checker, driver, profile)

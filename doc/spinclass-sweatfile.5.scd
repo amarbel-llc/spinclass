@@ -876,6 +876,14 @@ detected after detach, and how long tombstones are retained.
 
 *resume*
 	Argv array for resumed sessions. When nil, falls back to *start*.
+	*{principal}*, anywhere in an element, is replaced with the session's
+	recorded principal (its clown *CLOWN_SESSION_ID*), so the harness resumes
+	under the same identity, e.g. _["clown", "--", "--resume",
+	"{principal}"]_. Without it a resumed session gets a fresh principal and
+	its principal-bound profile grants stop resolving: *sc resume* warns, and
+	refuses when _[profile-rights]_ is enforced. A session with no recorded
+	or a non-UUID principal refuses to resume through *{principal}* (FDR
+	0035).
 	*Merge:* scalar override.
 
 *spawn-entry*

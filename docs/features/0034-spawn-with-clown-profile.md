@@ -641,7 +641,9 @@ spinclass's own, to be corrected if piggy or the operator disagrees.
     recorded process is dead, and `Attach` records the long-lived `sc` process as
     the PID, so if clown did mint a new principal on resume the mapping would keep
     the old one and a resumed session could not be the grantor of a link (it
-    fails closed). Unverified. The hook also takes both the working directory and
+    fails closed). Verified from code 2026-10-19 that it does NOT survive today
+    (FDR 0035, "The principal across sc resume"); fixed by the `{principal}`
+    placeholder in `[session-entry].resume`. The hook also takes both the working directory and
     the principal from its caller, which any same-uid process can forge; that is
     the same bar as narrowing links being unsigned, and becomes real only when
     links are signed.

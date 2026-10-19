@@ -997,6 +997,26 @@ debug-prompt-fragment mode="":
       | "$out/bin/spinclass" serve 2>/dev/null \
       | jq -r 'select(.id == 1) | .result.messages[0].content.text'
 
+# Runs `sc confinement-check` from a nix-built binary against THIS host: the
+# FDR 0035 session-confinement table for a session (default: this worktree's),
+# one TAP line per fact. The integration check for internal/confinement — it
+# probes the real /proc, cgroups and sockets, so most facts fail until
+# clown#244's agent unit lands. Exits nonzero while any fact fails; the
+# trailing `|| true` keeps the table visible as a recipe result. Run it from
+# outside the session's agent unit (the frontend). Tracked files only: `git
+# add -N` new sources first (spinclass#292, as debug-prompt-fragment).
+#
+# print the FDR 0035 confinement table for a session on this host
+[group('debug')]
+debug-confinement-check session="" principal="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out=$(nix build --no-link --print-out-paths)
+    args=()
+    [ -n "{{ session }}" ] && args+=(--session "{{ session }}")
+    [ -n "{{ principal }}" ] && args+=(--principal "{{ principal }}")
+    "$out/bin/spinclass" confinement-check "${args[@]}" || true
+
 # [debug] Render an `sc` subcommand through a REAL PTY and dump the screen, so
 # TTY-only output — the pretty `sc list` table's colored status dots, 🤡 clown
 # badges, and description wrapping — can be eyeballed the way color-stripped

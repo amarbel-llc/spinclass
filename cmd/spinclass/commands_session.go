@@ -700,6 +700,17 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		return err
 	}
 
+	enforced, _ := sweatfileio.TrustedEnforceProfileRights(hierarchy, os.Getenv("HOME"), state.RepoPath)
+	entrypoint, warning, err := applyRecordedPrincipal(entrypoint, state.Principal, enforced)
+	if err != nil {
+		return err
+	}
+	// Without a configured resume entry the start entry (a shell, by default)
+	// runs, which is not a harness to hand the principal to: no nag there.
+	if warning != "" && merged.SessionResume() != nil {
+		fmt.Fprintln(os.Stderr, "spinclass: "+warning)
+	}
+
 	rp := worktree.ResolvedPath{
 		AbsPath:     state.WorktreePath,
 		RepoPath:    state.RepoPath,
