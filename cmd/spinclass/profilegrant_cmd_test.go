@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -176,6 +177,22 @@ func TestBlessRecordWithoutSignersNeverAsksTheCard(t *testing.T) {
 	rec, err := blessRecord(context.Background(), card, nil, in)
 	if err != nil || len(rec.Sig) == 0 {
 		t.Fatalf("no-verify: %v %+v", err, rec)
+	}
+}
+
+func TestBlessRecordRefusesAnActTextPiggyWouldRefuseBeforeAskingTheCard(t *testing.T) {
+	card := newTestCard(t)
+	in := testInput()
+	in.Profiles = map[string]string{}
+	for i := 0; i <= profilegrant.MaxActLines; i++ {
+		in.Profiles[fmt.Sprintf("p%02d", i)] = "clown-profile-digest-v1@sha256-aaaa"
+	}
+	_, err := blessRecord(context.Background(), card, []ssh.PublicKey{card.pub}, in)
+	if err == nil || !strings.Contains(err.Error(), "piggy#322") {
+		t.Fatalf("got %v, want a refusal naming the line limit", err)
+	}
+	if card.calls != 0 {
+		t.Fatal("the card was asked to sign an act text piggy refuses")
 	}
 }
 

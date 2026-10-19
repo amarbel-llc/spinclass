@@ -1,6 +1,7 @@
 package profilegrant
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -205,6 +206,32 @@ func TestActTextDiffersPerField(t *testing.T) {
 	}
 	if other, _ := ActText(rootGrant(), "piggy-record-digest-v1@sha256-other"); other == base {
 		t.Error("changing the digest did not change the act text")
+	}
+}
+
+// TestActTextStaysWithinPiggysLineLimit pins piggy's provisional 24-line cap on
+// operator-act texts (piggy#322): the largest grant that fits is accepted, one
+// profile more is refused here, before any card act, with the profile budget.
+func TestActTextStaysWithinPiggysLineLimit(t *testing.T) {
+	withProfiles := func(n int) Grant {
+		g := rootGrant()
+		g.Profiles = map[string]string{}
+		for i := 0; i < n; i++ {
+			g.Profiles[fmt.Sprintf("p%02d", i)] = "d-x"
+		}
+		return g
+	}
+	fit := MaxActLines - actFixedLines
+	got, err := ActText(withProfiles(fit), goldenDigest)
+	if err != nil {
+		t.Fatalf("%d profiles must fit: %v", fit, err)
+	}
+	if lines := strings.Count(got, "\n"); lines != MaxActLines {
+		t.Errorf("%d profiles rendered %d lines, want exactly %d", fit, lines, MaxActLines)
+	}
+	_, err = ActText(withProfiles(fit+1), goldenDigest)
+	if err == nil || !strings.Contains(err.Error(), "piggy#322") {
+		t.Fatalf("%d profiles must be refused with the limit named, got %v", fit+1, err)
 	}
 }
 

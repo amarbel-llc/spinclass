@@ -68,8 +68,20 @@ func ActText(g Grant, digest string) (string, error) {
 	if len(out) > maxTextBytes {
 		return "", fmt.Errorf("act text is %d bytes, limit %d", len(out), maxTextBytes)
 	}
+	if lines := strings.Count(out, "\n"); lines > MaxActLines {
+		return "", fmt.Errorf("act text is %d lines, limit %d (piggy refuses longer operator-act texts, piggy#322): "+
+			"grant fewer profiles per record, at most %d", lines, MaxActLines, MaxActLines-actFixedLines)
+	}
 	return out, nil
 }
+
+// MaxActLines is the most lines piggy renders for an operator-act text before
+// refusing it (provisional, piggy#322). ActText fails above it, so bless
+// refuses before the card is asked anything.
+const MaxActLines = 24
+
+// actFixedLines is the count of lines in an act text that are not profiles.
+const actFixedLines = 8
 
 func validateForAct(g Grant, digest string) error {
 	if len(g.Profiles) == 0 {
