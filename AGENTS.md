@@ -149,7 +149,7 @@ Cheap per-package checks are fine: `just debug-go-test <dir>`.
   `sc clean`                       Remove merged worktrees and abandoned sessions
   `sc rebuild [target] [--check]`  Re-apply a drifted worktree's setup; `--check` reports stale/fresh
   `sc fork [branch]`               Fork current worktree into a new branch (`--from <dir>`); create-only (the `--brief` detached worker was removed in #262)
-  `sc spawn [repo] --brief "…"`    Launch a detached worker session; `repo` optional — omitted = this repo, else a sibling (FDR 0006, #262)
+  `sc spawn [repo] --brief "…" [--profile P]` Launch a detached worker session; `repo` optional — omitted = this repo, else a sibling (FDR 0006, #262)
   `sc close-child-session <child>` Reap a worker THIS session spawned (#249); refuses anything it did not spawn
   `sc grant-session-handle <child> <to> [--rights R]` Grant another principal a handle on a session this one holds (FDR 0032 D12)
   `sc release-session-handle <child>` Release this session's own handle on a session (FDR 0032 D12)
@@ -178,7 +178,16 @@ subcommand is always available.
   is the principal, not the cwd. `repo` is optional — omitted (or the current
   repo) spawns HERE, a sibling dirname/path targets that repo; the worker
   always starts fresh off the target's default branch with only the brief
-  (#258; create-only `sc fork` is a separate, non-worker path). `spawn-session`
+  (#258; create-only `sc fork` is a separate, non-worker path). An optional
+  `profile` (else `[session-entry].spawn-profile`) boots the worker under a
+  named clown profile: spliced as `--profile` before the `--`, resolved BEFORE
+  the worktree is created through `spawn.ProfileResolver`, whose production
+  default refuses every profile until clown's lookup library exists (clown#264).
+  Name and digest land in session state and `sc list`'s PROFILE column; the
+  detached harness (not the spawn window) no longer inherits `DISPLAY`,
+  `WAYLAND_DISPLAY` or `DBUS_SESSION_BUS_ADDRESS` (hygiene, not a boundary).
+  `internal/profilegrant` holds the pure grant chain rules (unsigned, unused so
+  far). `spawn-session`
   is ASYNC under clown (#266): returns session key + ringmaster job id,
   delivers the hello (or a reap-if-dead timeout) as a wake; `sc spawn` CLI
   blocks. Workers may spawn workers (the #151 always-ask floor, not a depth
@@ -504,7 +513,7 @@ dirs → repo at each level. Notable surface:
   `*-timeout` / output-format knobs, scalar override); `[auth]`
   (`mint-command` / `revoke-command`, scalar override — FDR 0028);
   `[metrics]` (`statsd-address` / `disable-statsd`, scalar override, beats
-  the `STATSD_*` env — #363); `[session-entry]` (start/resume/spawn-entry/spawn-window argv, per-field
+  the `STATSD_*` env — #363); `[session-entry]` (start/resume/spawn-entry/spawn-window argv, `spawn-profile` scalar, per-field
   override; `model-flags` provider→CLI-flag map and `model-ids` alias→ID
   map, both merged per-key like `[env]`; `model-ids`' built-in default
   ships via `GetDefault()`, not an inline accessor fallback);
