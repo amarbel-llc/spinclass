@@ -41,6 +41,30 @@ func strictAncestor(dir, root string) bool {
 	return true
 }
 
+// TrustedEnforceProfileRights returns the [profile-rights].enforce switch
+// honoured for the repo: a scalar override across layers above the repo, last
+// one wins, an explicit false clearing an earlier true. Off when unset. Layers
+// that may not set it (repo, its realpath twin, worktree, labels) are never
+// honoured, so an agent editing its own sweatfile cannot turn enforcement off;
+// the paths of those that set the key are returned in untrusted so callers can
+// surface them. Hierarchy.Merged never carries the key.
+func TrustedEnforceProfileRights(h sweatfile.Hierarchy, home, repoRoot string) (enforce bool, untrusted []string) {
+	for _, src := range h.Sources {
+		if src.SkipReason != "" || !src.Found {
+			continue
+		}
+		if src.File.ProfileRights == nil || src.File.ProfileRights.Enforce == nil {
+			continue
+		}
+		if LayerAboveRepo(src.Path, home, repoRoot) {
+			enforce = *src.File.ProfileRights.Enforce
+		} else {
+			untrusted = append(untrusted, src.Path)
+		}
+	}
+	return enforce, untrusted
+}
+
 // TrustedURLResolver returns the [auth].url-resolver command honoured for the
 // repo: scalar override across layers above the repo, last one wins, an
 // explicit "" clearing it. The value is TrimSpaced, so whitespace-only also

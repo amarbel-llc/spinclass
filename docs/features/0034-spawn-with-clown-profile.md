@@ -551,12 +551,20 @@ spinclass's own, to be corrected if piggy or the operator disagrees.
 6. **Enforcement is behind a knob and a confinement check.** Enforcing the
    profile right changes every profile spawn from "refuse only on resolve
    failure" to "refuse unless a chain proves the spawner holds it", and nobody
-   holds a chain yet. So: `[session-entry] enforce-profile-rights` (default
-   false) turns it on, and a grant is never treated as *card-rooted* unless the
-   confinement check passes (item "Where the card root is real"), which today
-   always fails. With enforcement on and the check failing, a spawn that names a
+   holds a chain yet. So: `[profile-rights] enforce` (default false) turns it
+   on, and a grant is never treated as *card-rooted* unless the confinement
+   check passes (item "Where the card root is real"), which today always
+   fails. With enforcement on and the check failing, a spawn that names a
    profile is refused with the reason, so enabling it early cannot silently
-   weaken anything.
+   weaken anything. **The switch is a trusted-layer setting**, read like
+   `[auth].url-resolver`: only sweatfiles above the repo are honoured, because
+   an agent can edit the repo or worktree sweatfile and a repo-layer value must
+   never be able to turn enforcement off. (This replaces the earlier plan of a
+   `[session-entry] enforce-profile-rights` key.) When enforcement is on and a
+   spawn names a profile, spawn authorizes the *spawner* against its grant chain
+   before creating anything, records the authorizing grant digest in state, and,
+   only when the spawner may pass the right on, mints the child's narrowing link
+   (grantee = the child's session key, `onward: none`).
 7. **Signing is injected.** The card acts go through an interface with the real
    implementation speaking piggy's `operator-act@piggy` agent extension; it
    stays unexercisable on a real card until piggy#303's acceptance pass and the

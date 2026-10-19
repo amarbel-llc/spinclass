@@ -192,6 +192,11 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		merged.Auth = &cp
 	}
 
+	// [profile-rights] is deliberately NOT merged (same trust rule as
+	// url-resolver): the result never carries it, so a repo-layer value cannot
+	// disable enforcement. See sweatfileio.TrustedEnforceProfileRights.
+	merged.ProfileRights = nil
+
 	// [metrics] — scalar override (spinclass#363); copied before the override
 	// so the receiver's table is never mutated through the shared pointer.
 	if other.Metrics != nil {

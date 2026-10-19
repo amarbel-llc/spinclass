@@ -104,16 +104,26 @@ func LaunchDetached(home, repoPath string, driver Driver, brief, desc, model, pr
 	// checked out) sweatfile layer, but that layer is the repo sweatfile
 	// checked out fresh from the default branch — same content the repo
 	// layer already contributed.
-	argv, window, sessionEnv, merged, err := renderSpawn(home, rp, brief, model, profile)
+	argv, window, sessionEnv, merged, enforce, err := renderSpawn(home, rp, brief, model, profile)
 	if err != nil {
 		return Pending{}, err
 	}
 
 	var resolved ResolvedProfile
+	var authorizingGrant string
 	if effective := effectiveProfile(profile, merged); effective != "" {
 		resolved, err = resolveProfile(effective)
 		if err != nil {
 			return Pending{}, err
+		}
+		if enforce {
+			// Before shop.Create: a refusal litters no worktree. The child's
+			// session key is known from ResolvePath, so its link can be minted
+			// now and bound to it.
+			authorizingGrant, err = enforceProfileRight(driver, resolved, rp.SessionKey)
+			if err != nil {
+				return Pending{}, err
+			}
 		}
 	}
 
@@ -128,7 +138,7 @@ func LaunchDetached(home, repoPath string, driver Driver, brief, desc, model, pr
 		return Pending{}, fmt.Errorf("creating worker worktree: %w", err)
 	}
 
-	return startDetachedEntry(rp, driver, desc, argv, window, sessionEnv, resolved)
+	return startDetachedEntry(rp, driver, desc, argv, window, sessionEnv, resolved, authorizingGrant)
 }
 
 // effectiveProfile is the explicit profile parameter, else the merged
@@ -177,10 +187,17 @@ func Launch(home, repoPath string, driver Driver, brief, desc, model, profile st
 // is spliced LAST, after the auto-mode and model splices, via SpliceProfileFlag:
 // those two key off resolveProvider(entry), and placing the profile after them
 // keeps their behavior identical to a spawn with no profile.
-func renderSpawn(home string, rp worktree.ResolvedPath, brief, model, profile string) (argv, window []string, sessionEnv map[string]string, merged sweatfile.Sweatfile, err error) {
+func renderSpawn(home string, rp worktree.ResolvedPath, brief, model, profile string) (argv, window []string, sessionEnv map[string]string, merged sweatfile.Sweatfile, enforce bool, err error) {
 	hierarchy, err := sweatfileio.LoadWorktreeHierarchy(home, rp.RepoPath, rp.AbsPath)
 	if err != nil {
-		return nil, nil, nil, merged, fmt.Errorf("loading worker sweatfile hierarchy: %w", err)
+		return nil, nil, nil, merged, false, fmt.Errorf("loading worker sweatfile hierarchy: %w", err)
+	}
+	// The enforcement switch is read from layers above the repo only: an agent
+	// can edit the repo's own sweatfile, and must not be able to turn it off.
+	enforce, untrusted := sweatfileio.TrustedEnforceProfileRights(hierarchy, home, rp.RepoPath)
+	if len(untrusted) > 0 {
+		slog.Warn("ignored [profile-rights] in sweatfiles that are not trusted: only sweatfiles above the repo are trusted",
+			"paths", untrusted)
 	}
 	// GetDefault() as the base layer is what actually delivers the built-in
 	// [session-entry.model-ids] default (sonnet/opus/haiku/fable) to a spawn
@@ -197,13 +214,13 @@ func renderSpawn(home string, rp worktree.ResolvedPath, brief, model, profile st
 	if model != "" {
 		entry, err = SpliceModelFlag(entry, model, merged.SessionModelFlags(), merged.SessionModelIDs())
 		if err != nil {
-			return nil, nil, nil, merged, err
+			return nil, nil, nil, merged, false, err
 		}
 	}
 	if effective := effectiveProfile(profile, merged); effective != "" {
 		entry, err = SpliceProfileFlag(entry, effective)
 		if err != nil {
-			return nil, nil, nil, merged, err
+			return nil, nil, nil, merged, false, err
 		}
 	}
 
@@ -215,7 +232,7 @@ func renderSpawn(home string, rp worktree.ResolvedPath, brief, model, profile st
 	// derives its identity from SPINCLASS_SESSION_ID in the exec env (workerEnv).
 	argv = SubstituteEntry(entry, brief, rp.AbsPath)
 	window = SubstituteWindow(merged.SessionSpawnWindow(), rp.SessionKey, rp.AbsPath)
-	return argv, window, merged.SessionEnv(), merged, nil
+	return argv, window, merged.SessionEnv(), merged, enforce, nil
 }
 
 // startDetached launches argv in its OWN session (setsid) with stdio wired to
@@ -342,7 +359,7 @@ func dropEnvVars(env, keys []string) []string {
 // detached harness entry, returning a Pending (worktree booting, hello not yet
 // awaited). The SessionStart hook adopts the state (PID + HelloSentAt) when the
 // worker boots; pre-hello PID is 0 (nothing attached yet).
-func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, argv, window []string, sessionEnv map[string]string, profile ResolvedProfile) (Pending, error) {
+func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, argv, window []string, sessionEnv map[string]string, profile ResolvedProfile, authorizingGrant string) (Pending, error) {
 	st := session.State{
 		PID:                0,
 		SessionState:       session.StateActive,
@@ -355,6 +372,7 @@ func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, ar
 		SpawnedByPrincipal: driver.Principal,
 		Profile:            profile.Name,
 		ProfileDigest:      profile.Digest,
+		AuthorizingGrant:   authorizingGrant,
 		StartedAt:          time.Now().UTC(),
 		Env: map[string]string{
 			"SPINCLASS_SESSION_ID": rp.SessionKey,

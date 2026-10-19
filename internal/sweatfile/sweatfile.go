@@ -130,6 +130,16 @@ type Auth struct {
 	URLResolver *string `toml:"url-resolver"`
 }
 
+// ProfileRights holds the switch that makes a spawn naming a profile require a
+// grant chain proving the spawner holds it (FDR 0034 Phase 2). An agent can
+// edit the repo and worktree sweatfiles, so a repo-layer value must never be
+// able to turn enforcement off: like Auth.URLResolver it is trusted only from
+// layers above the repo, read ONLY through sweatfileio.TrustedEnforceProfileRights,
+// and never merged, so Merged cannot leak a repo-layer value.
+type ProfileRights struct {
+	Enforce *bool `toml:"enforce"`
+}
+
 // Metrics configures spinclass's best-effort statsd telemetry (spinclass#363,
 // internal/statsd). Scalar override down the cascade.
 type Metrics struct {
@@ -284,6 +294,7 @@ type Sweatfile struct {
 	Hooks          *Hooks          `toml:"hooks"`
 	Auth           *Auth           `toml:"auth"`
 	Metrics        *Metrics        `toml:"metrics"`
+	ProfileRights  *ProfileRights  `toml:"profile-rights"`
 	Sysprompt      *Sysprompt      `toml:"sysprompt"`
 	SessionEntry   *SessionEntry   `toml:"session-entry"`
 	StartCommands  []StartCommand  `toml:"start-commands"`

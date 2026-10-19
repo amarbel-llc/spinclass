@@ -41,6 +41,27 @@ type ProfileResolver interface {
 // unknown profile or an unvouched registry rather than guessing.
 var profileResolver ProfileResolver = newClownResolver()
 
+// ProfileAuthorization is a granted profile right: the digest of the grant
+// record that proved it, and the step that gives the worker its own (narrower)
+// right once its session key is known.
+type ProfileAuthorization struct {
+	GrantDigest string
+	IssueChild  func(childSession string) error
+}
+
+// ProfileAuthorizer proves the driver holds the resolved profile (FDR 0034
+// Phase 2). It is an interface so tests can inject a fake instead of building
+// signed grant chains.
+type ProfileAuthorizer interface {
+	Authorize(driver Driver, profile ResolvedProfile) (ProfileAuthorization, error)
+}
+
+// newProfileAuthorizer builds the authorizer a spawn consults when profile
+// rights are enforced. It is only called then, so a default spawn never touches
+// the grant store. Swapped by tests; production is confinement-gated and today
+// always refuses (profilerights.Unestablished).
+var newProfileAuthorizer = newProductionAuthorizer
+
 // RequiredServersKept errors, naming the first missing server, when kept lacks
 // any of required: a profile that drops one of those yields a worker that can
 // never send its hello (FDR 0034 Limitations).

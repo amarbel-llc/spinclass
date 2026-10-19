@@ -785,6 +785,28 @@ honours only *[hooks].allow-no-credential* (it has no flag, and its
 refusal names only that setting). Implicit (main-checkout) sessions are
 outside this: they are the operator in the root and keep ssh.
 
+## [profile-rights]
+
+Enforcement of the profile right (FDR 0034, Phase 2). Off by default: a
+spawn that names a clown profile (the *profile* parameter or
+*[session-entry].spawn-profile*) is checked only for whether the profile
+resolves. When on, the spawn succeeds only if the SPAWNER holds that profile,
+proven by a grant chain rooted in a record signed by the operator's card, and
+the profile's current content digest equals the one the grant pinned. A spawn
+that names no profile is never affected.
+
+*enforce*
+	Boolean. When true, a profile spawn is refused unless the spawner's grant
+	chain proves it holds the profile. A grant is never treated as
+	card-rooted until the agent-scope boundary exists (spinclass#338,
+	clown#244, posh), so today turning this on refuses every profile spawn
+	with that reason: it is safe to enable early, and does not weaken
+	anything. *Merge:* not merged — read only from the global and
+	parent-directory layers, last one wins, an explicit *false* clears an
+	earlier *true*. A repo- or worktree-level value is ignored with a
+	warning, because an agent can edit those files and must not be able to
+	turn enforcement off.
+
 ## [metrics]
 
 Best-effort statsd telemetry to stats-me (*stats-me-clients*(7), spinclass#363).
