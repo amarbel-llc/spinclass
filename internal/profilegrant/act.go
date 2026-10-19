@@ -69,9 +69,9 @@ func ActText(g Grant, digest string) (string, error) {
 	if len(out) > maxTextBytes {
 		return "", fmt.Errorf("act text is %d bytes, limit %d", len(out), maxTextBytes)
 	}
-	if lines := strings.Count(out, "\n"); lines > MaxActLines {
-		return "", fmt.Errorf("act text is %d lines, budget %d (piggy's askpass shows at most 24 lines; piggy#322): "+
-			"grant fewer profiles per record, at most %d by line count", lines, MaxActLines, MaxActLines-actFixedLines)
+	if lines := renderedLines(out); lines > MaxActLines {
+		return "", fmt.Errorf("act text renders as %d lines (each line wrapped at %d columns), budget %d (piggy's askpass shows at most 24 lines; piggy#322): "+
+			"grant fewer profiles per record", lines, actWrapColumns, MaxActLines)
 	}
 	if chars := utf8.RuneCountInString(out); chars > MaxActChars {
 		return "", fmt.Errorf("act text is %d characters, budget %d (piggy#322): grant fewer profiles per record", chars, MaxActChars)
@@ -91,6 +91,21 @@ const (
 
 // actFixedLines is the count of lines in an act text that are not profiles.
 const actFixedLines = 8
+
+// actWrapColumns is the width piggy wraps an act text line at when it counts
+// rendered lines: a line takes ceil(length / 80) of them (an empty line, one).
+const actWrapColumns = 80
+
+// renderedLines counts the lines text takes on piggy's prompt, wrapped the way
+// piggy counts them, so spinclass's budget and piggy's limit agree.
+func renderedLines(text string) int {
+	total := 0
+	for _, line := range strings.Split(strings.TrimSuffix(text, "\n"), "\n") {
+		n := utf8.RuneCountInString(line)
+		total += max(1, (n+actWrapColumns-1)/actWrapColumns)
+	}
+	return total
+}
 
 func validateForAct(g Grant, digest string) error {
 	if len(g.Profiles) == 0 {

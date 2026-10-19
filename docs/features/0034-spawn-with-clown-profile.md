@@ -676,10 +676,11 @@ spinclass's own, to be corrected if piggy or the operator disagrees.
     treated as hard caps: `ActText` fails above `profilegrant.MaxActLines` (15)
     or `MaxActChars` (1200), and because `bless` builds the text before it
     contacts the card, an oversize grant is refused before any card act. The text
-    has 8 fixed lines plus one per profile, so a record carries at most 7
-    profiles by line count, fewer when names and digests are long (a real-sized
-    profile line is about 100 characters). Lines are counted by newline, not
-    after wrapping; whether piggy counts wrapped lines is not stated.
+    has 8 fixed lines plus one per profile, but lines are counted the way piggy
+    counts them: each line takes ceil(length / 80) rendered lines. Real digests
+    are longer than 80 columns, so the record line and every profile line take
+    two, and a record carries about 3 real-sized profiles (7 only with very short
+    digests).
 
 ## Phasing
 

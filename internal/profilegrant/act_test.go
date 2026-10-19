@@ -235,27 +235,53 @@ func TestActTextStaysWithinPiggysLineLimit(t *testing.T) {
 	}
 }
 
-// TestActTextStaysWithinPiggysCharacterBudget: real digests are long, so the
-// character budget can bind before the line budget does.
-func TestActTextStaysWithinPiggysCharacterBudget(t *testing.T) {
+func TestRenderedLinesWrapsAtEightyColumnsLikePiggy(t *testing.T) {
+	for _, tt := range []struct {
+		text string
+		want int
+	}{
+		{"", 1},
+		{"\n", 1},
+		{"a\n", 1},
+		{strings.Repeat("x", 80) + "\n", 1},
+		{strings.Repeat("x", 81) + "\n", 2},
+		{strings.Repeat("x", 160) + "\n", 2},
+		{strings.Repeat("x", 161) + "\nshort\n", 4},
+		{"one\n\nthree\n", 3},
+	} {
+		if got := renderedLines(tt.text); got != tt.want {
+			t.Errorf("renderedLines(%q) = %d, want %d", tt.text, got, tt.want)
+		}
+	}
+}
+
+// TestActTextCountsWrappedLinesWithRealSizedDigests: real profile and record
+// digests are longer than 80 columns, so each takes two rendered lines and
+// fewer profiles fit than the newline count alone would allow.
+func TestActTextCountsWrappedLinesWithRealSizedDigests(t *testing.T) {
 	longDigest := "clown-profile-digest-v1@sha256-" + strings.Repeat("a", 52)
-	g := rootGrant()
-	g.Profiles = map[string]string{}
-	for i := 0; i < MaxActLines-actFixedLines; i++ {
-		g.Profiles[fmt.Sprintf("a-rather-long-profile-name-for-budget-%02d", i)] = longDigest
-	}
 	realDigest := "piggy-record-digest-v1@sha256-" + strings.Repeat("b", 52)
-	_, err := ActText(g, realDigest)
-	if err == nil || !strings.Contains(err.Error(), "characters") {
-		t.Fatalf("a line-legal grant over the character budget must be refused, got %v", err)
+	withProfiles := func(names ...string) Grant {
+		g := rootGrant()
+		g.Profiles = map[string]string{}
+		for _, n := range names {
+			g.Profiles[n] = longDigest
+		}
+		return g
 	}
-	g.Profiles = map[string]string{"cheap": longDigest, "review": longDigest}
-	got, err := ActText(g, realDigest)
+	got, err := ActText(withProfiles("cheap", "review", "third"), realDigest)
 	if err != nil {
-		t.Fatalf("two real-sized profiles must fit: %v", err)
+		t.Fatalf("three real-sized profiles must fit: %v", err)
 	}
-	if n := utf8.RuneCountInString(got); n > MaxActChars {
-		t.Errorf("rendered %d characters, over the %d budget", n, MaxActChars)
+	if n := renderedLines(got); n > MaxActLines {
+		t.Errorf("rendered %d lines, over the %d budget", n, MaxActLines)
+	}
+	if strings.Count(got, "\n") >= MaxActLines {
+		t.Fatalf("the fixture must wrap to be a test of wrapping")
+	}
+	_, err = ActText(withProfiles("cheap", "review", "third", "fourth"), realDigest)
+	if err == nil || !strings.Contains(err.Error(), "wrapped") {
+		t.Fatalf("four real-sized profiles must be refused on wrapped line count, got %v", err)
 	}
 }
 
