@@ -155,7 +155,6 @@ Cheap per-package checks are fine: `just debug-go-test <dir>`.
   `sc release-session-handle <child>` Release this session's own handle on a session (FDR 0032 D12)
   `sc list-handles [--accept]`     List handles this session holds or is pending on (FDR 0032 D12)
   `sc whoami`                      Print this session's principal, session key, and handles (FDR 0032 D1/D12)
-  `sc confinement-check [--session]` Print the FDR 0035 session-confinement table for a session's agent unit
   `sc resurrect <target> [--new-branch]` Recreate a closed session's worktree+branch from its captured commit (#291)
   `sc pull`                        Pull repos and rebase worktrees
   `sc validate`                    Validate sweatfile hierarchy
@@ -215,12 +214,6 @@ subcommand is always available.
   description/spawn-lineage forward. Does not attach — `sc resume` afterward
   reuses that path unmodified. `sc clean`'s merged-worktree removal captures no
   SHA (that content already lives on the default branch).
-- **Session confinement** (FDR 0035, `internal/confinement`): the check FDR
-  0034's profile-rights gate runs before any grant counts as card-rooted
-  (`confinement.ForDriver`). Probes run from the frontend into the driver's
-  clown agent unit (`agent-unit.json`, cgroup.procs, `/proc/<pid>/root`); any
-  probe error fails its fact. `sc resume` substitutes `{principal}` so a
-  resumed worker keeps its principal.
 - **Exemption predicates** (FDR 0031, `merge/policy.go`): run from the MERGE
   BASE; terminal merges are the zero-value `GateTerminal`, always exempt.
 - **Attestation lifecycle** (FDR 0007, #219, `internal/attestation`): an MCP
