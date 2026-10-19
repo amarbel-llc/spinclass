@@ -191,6 +191,12 @@ func Narrows(parent Grant, parentDigest string, child Grant) error {
 	if child.Prev != parentDigest {
 		return fmt.Errorf("child prev %q is not parent digest %q", child.Prev, parentDigest)
 	}
+	// Bind the chain by principal: only the parent's grantee may narrow it
+	// onward. Without this, anyone who learned a parent digest could sign a
+	// valid-looking child under it and borrow the grantee's rights.
+	if child.Grantor != parent.Grantee {
+		return fmt.Errorf("child grantor %q is not parent grantee %q", child.Grantor, parent.Grantee)
+	}
 	if child.Onward == OnwardGrant && parent.Onward != OnwardGrant {
 		return fmt.Errorf("onward grant not permitted: parent holds %s", parent.Onward)
 	}

@@ -137,6 +137,7 @@ func TestNarrows(t *testing.T) {
 		{"earlier expiry", parent, child(func(c *Grant) { c.Expires = expiry.Add(-time.Hour) }), ""},
 		{"onward grant from granting parent", grantingParent, child(func(c *Grant) { c.Onward = OnwardGrant }), ""},
 		{"wrong prev", parent, child(func(c *Grant) { c.Prev = "other" }), `child prev "other" is not parent digest "parent-digest"`},
+		{"grantor is not the parent's grantee", parent, child(func(c *Grant) { c.Grantor = "interloper" }), `child grantor "interloper" is not parent grantee "root-principal"`},
 		{"profile not held", parent, child(func(c *Grant) { c.Profiles = map[string]string{"expensive": "Z"} }), "profile expensive not held by parent"},
 		{"extra profile", parent, child(func(c *Grant) { c.Profiles = map[string]string{"cheap": "X", "other": "Y"} }), "profile other not held by parent"},
 		{"digest differs", parent, child(func(c *Grant) { c.Profiles = map[string]string{"cheap": "Y"} }), "profile cheap digest differs (parent X, child Y)"},
@@ -280,8 +281,8 @@ func TestWalkFailures(t *testing.T) {
 			return wide, append(records, wide)
 		}, "profile cheap digest differs"},
 		{"cycle", func() (Record, []Record) {
-			x := linkRecord("d-x", "d-y", linkGrant("p", "x", map[string]string{"cheap": "d-cheap"}))
-			y := linkRecord("d-y", "d-x", linkGrant("p", "y", map[string]string{"cheap": "d-cheap"}))
+			x := linkRecord("d-x", "d-y", linkGrant("y", "x", map[string]string{"cheap": "d-cheap"}))
+			y := linkRecord("d-y", "d-x", linkGrant("x", "y", map[string]string{"cheap": "d-cheap"}))
 			return x, []Record{x, y}
 		}, "cycle"},
 		{"root with prev", func() (Record, []Record) {
@@ -303,13 +304,13 @@ func TestWalkFailures(t *testing.T) {
 		{"depth cap", func() (Record, []Record) {
 			profiles := map[string]string{"cheap": "d-cheap"}
 			records := []Record{rootRecord(rootGrant())}
-			prev := "d-root"
+			prev, grantor := "d-root", "root-principal"
 			var last Record
 			for i := 0; i < maxChainDepth; i++ { // root + 32 links = 33 records
-				digest := fmt.Sprintf("d-%d", i)
-				last = linkRecord(digest, prev, linkGrant("p", fmt.Sprintf("g%d", i), profiles))
+				digest, grantee := fmt.Sprintf("d-%d", i), fmt.Sprintf("g%d", i)
+				last = linkRecord(digest, prev, linkGrant(grantor, grantee, profiles))
 				records = append(records, last)
-				prev = digest
+				prev, grantor = digest, grantee
 			}
 			return last, records
 		}, "chain deeper than"},
@@ -328,13 +329,13 @@ func TestWalkFailures(t *testing.T) {
 func TestWalkAtDepthCapSucceeds(t *testing.T) {
 	profiles := map[string]string{"cheap": "d-cheap"}
 	records := []Record{rootRecord(rootGrant())}
-	prev := "d-root"
+	prev, grantor := "d-root", "root-principal"
 	var last Record
 	for i := 0; i < maxChainDepth-1; i++ { // root + 31 links = 32 records
-		digest := fmt.Sprintf("d-%d", i)
-		last = linkRecord(digest, prev, linkGrant("p", fmt.Sprintf("g%d", i), profiles))
+		digest, grantee := fmt.Sprintf("d-%d", i), fmt.Sprintf("g%d", i)
+		last = linkRecord(digest, prev, linkGrant(grantor, grantee, profiles))
 		records = append(records, last)
-		prev = digest
+		prev, grantor = digest, grantee
 	}
 	if _, err := Walk(now, last, store(records...), fakeVerifier{}); err != nil {
 		t.Fatal(err)

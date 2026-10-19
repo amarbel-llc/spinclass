@@ -228,6 +228,13 @@ func TestLaunchProfileRefusalsLeaveNoWorktree(t *testing.T) {
 			wantErr: func(err error) bool { return strings.Contains(err.Error(), "ringmaster") },
 		},
 		{
+			name: "a selection that keeps nothing",
+			resolver: &fakeResolver{profiles: map[string]ResolvedProfile{
+				"cheap": {Digest: "d", KeptServers: []string{}},
+			}},
+			wantErr: func(err error) bool { return strings.Contains(err.Error(), "troupe") },
+		},
+		{
 			name:     "default resolver is unavailable",
 			resolver: unavailableResolver{},
 			wantErr:  func(err error) bool { return strings.Contains(err.Error(), "clown#264") },
@@ -249,6 +256,15 @@ func TestLaunchProfileRefusalsLeaveNoWorktree(t *testing.T) {
 				t.Errorf("worktree(s) created despite the refusal: %v", matches)
 			}
 		})
+	}
+}
+
+// TestProductionDefaultResolverIsUnavailable pins the fail-closed default: the
+// refusal tests inject unavailableResolver explicitly, so without this a change
+// to the package-level default would pass every other test.
+func TestProductionDefaultResolverIsUnavailable(t *testing.T) {
+	if _, ok := profileResolver.(unavailableResolver); !ok {
+		t.Fatalf("production profileResolver is %T, want unavailableResolver until clown#264 lands", profileResolver)
 	}
 }
 

@@ -19,8 +19,9 @@ func ProfileNotFound(name string) error {
 
 // ResolvedProfile is what spinclass needs from clown's profile library
 // (FDR 0034 "The clown library"): the profile's name, the content digest of its
-// resolved definition, and the MCP servers it keeps. A nil/empty KeptServers
-// means the profile makes no cheap-context selection, i.e. keeps everything.
+// resolved definition, and the MCP servers it keeps. A nil KeptServers means
+// the profile makes no cheap-context selection, i.e. keeps everything; a
+// non-nil empty one means a selection that kept nothing.
 type ResolvedProfile struct {
 	Name        string
 	Digest      string
@@ -68,8 +69,9 @@ func RequiredServersKept(kept, required []string) error {
 }
 
 // resolveProfile resolves name through profileResolver and applies the
-// required-server check. An empty KeptServers skips the check: no cheap-context
-// selection means every server is kept.
+// required-server check. A nil KeptServers skips the check: no cheap-context
+// selection means every server is kept. A non-nil empty slice is a selection
+// that kept nothing, and is checked (and refused) like any other.
 func resolveProfile(name string) (ResolvedProfile, error) {
 	rp, err := profileResolver.Resolve(name)
 	if err != nil {
@@ -78,7 +80,7 @@ func resolveProfile(name string) (ResolvedProfile, error) {
 	if rp.Name == "" {
 		rp.Name = name
 	}
-	if len(rp.KeptServers) > 0 {
+	if rp.KeptServers != nil {
 		if err := RequiredServersKept(rp.KeptServers, requiredServers); err != nil {
 			return ResolvedProfile{}, fmt.Errorf("profile %q: %w", name, err)
 		}
