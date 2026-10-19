@@ -562,6 +562,30 @@ func CheckProfileRights(sf sweatfile.Sweatfile, layerAboveRepo, global bool) []I
 	return nil
 }
 
+// CheckConfinement validates the [confinement] table (FDR 0035). Both keys are
+// honoured only from layers above the repo, and `launch-unit` is reliable only
+// from the GLOBAL sweatfile, for the same reason as profile-rights.enforce.
+func CheckConfinement(sf sweatfile.Sweatfile, layerAboveRepo, global bool) []Issue {
+	if sf.Confinement == nil || (sf.Confinement.LaunchUnit == nil && sf.Confinement.EgressAllow == nil) {
+		return nil
+	}
+	switch {
+	case !layerAboveRepo:
+		return []Issue{{
+			Message:  "[confinement] is set in a repo-level sweatfile: it is ignored — only sweatfiles above the repo may set it; move it to the global sweatfile",
+			Severity: SeverityWarning,
+			Field:    "confinement",
+		}}
+	case !global && sf.Confinement.LaunchUnit != nil:
+		return []Issue{{
+			Message:  "[confinement] sets `launch-unit` outside the global sweatfile: a spawner whose working directory is outside this directory does not consult this layer, so confinement can be sidestepped; set it in ~/.config/spinclass/sweatfile",
+			Severity: SeverityWarning,
+			Field:    "confinement.launch-unit",
+		}}
+	}
+	return nil
+}
+
 func isShellInterpreter(cmd string) bool {
 	base := filepath.Base(cmd)
 	switch base {
@@ -822,6 +846,17 @@ func Run(w io.Writer, home, repoDir string) int {
 				}
 			} else {
 				sub.Ok("profile-rights valid")
+			}
+		}
+
+		if src.File.Confinement != nil {
+			global := src.Path == filepath.Join(home, ".config", "spinclass", "sweatfile")
+			if issues := CheckConfinement(src.File, sweatfileio.LayerAboveRepo(src.Path, home, mainRoot), global); len(issues) > 0 {
+				for _, iss := range issues {
+					sub.Ok(fmt.Sprintf("confinement valid # warning: %s", iss.Message))
+				}
+			} else {
+				sub.Ok("confinement valid")
 			}
 		}
 

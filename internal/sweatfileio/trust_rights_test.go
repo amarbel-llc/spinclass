@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 func writeEnforce(t *testing.T, path string, value bool) {
@@ -18,6 +20,61 @@ func writeEnforce(t *testing.T, path string, value bool) {
 	}
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestTrustedConfinement(t *testing.T) {
+	home := t.TempDir()
+	repo := filepath.Join(home, "work", "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	global := filepath.Join(home, ".config", "spinclass", "sweatfile")
+	parent := filepath.Join(home, "work", "sweatfile")
+	repoFile := filepath.Join(repo, "sweatfile")
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resolve := func() (bool, []string, []string) {
+		h, err := LoadHierarchy(home, repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return TrustedConfinement(h, home, repo)
+	}
+
+	launch, egress, untrusted := resolve()
+	if launch || len(untrusted) != 0 || !reflect.DeepEqual(egress, sweatfile.DefaultEgressAllow) {
+		t.Errorf("defaults: got (%v, %v, %v)", launch, egress, untrusted)
+	}
+
+	write(global, "[confinement]\nlaunch-unit = true\negress-allow = [\"a:1\"]\n")
+	write(parent, "[confinement]\nlaunch-unit = false\negress-allow = [\"b:2\"]\n")
+	write(repoFile, "[confinement]\nlaunch-unit = false\negress-allow = [\"evil:9\"]\n")
+	launch, egress, untrusted = resolve()
+	if !launch {
+		t.Error("a false layer cleared launch-unit")
+	}
+	if !reflect.DeepEqual(egress, []string{"b:2"}) {
+		t.Errorf("egress = %v, want the last trusted layer [b:2]", egress)
+	}
+	if !reflect.DeepEqual(untrusted, []string{repoFile}) {
+		t.Errorf("untrusted = %v, want [%s]", untrusted, repoFile)
+	}
+
+	write(parent, "[confinement]\negress-allow = []\n")
+	if _, egress, _ := resolve(); len(egress) != 0 {
+		t.Errorf("[] should clear egress, got %v", egress)
+	}
+	write(parent, "[confinement]\nlaunch-unit = false\n")
+	if _, egress, _ := resolve(); !reflect.DeepEqual(egress, []string{"a:1"}) {
+		t.Errorf("nil should inherit, got %v", egress)
 	}
 }
 

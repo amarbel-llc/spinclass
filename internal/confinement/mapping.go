@@ -91,6 +91,36 @@ func RecordPrincipalFromUnit(sys System, stateDir, sessionKey, worktree string) 
 	return principal, writeJSONAtomic(PrincipalMappingPath(stateDir, principal), m)
 }
 
+// RemovePrincipalMappingsForSession deletes every mapping that names
+// sessionKey, found by reading the mappings themselves. It never trusts the
+// session's worktree-cached principal: an agent that rewrote that could
+// otherwise have another session's mapping removed when its own ends.
+func RemovePrincipalMappingsForSession(stateDir, sessionKey string) error {
+	dir := filepath.Join(stateDir, "spinclass", "principals")
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, e := range entries {
+		principal, ok := strings.CutSuffix(e.Name(), ".json")
+		if !ok || e.IsDir() {
+			continue
+		}
+		m, err := LoadPrincipalMapping(Host{}, stateDir, principal)
+		if err != nil || m.SessionKey != sessionKey {
+			continue
+		}
+		if err := RemovePrincipalMapping(stateDir, principal); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // RemovePrincipalMapping deletes a principal's mapping when its session ends.
 func RemovePrincipalMapping(stateDir, principal string) error {
 	if err := validPrincipalName(principal); err != nil {

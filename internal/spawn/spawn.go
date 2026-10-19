@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/shop"
 	"code.linenisgreat.com/spinclass/internal/spawnhandshake"
@@ -64,6 +63,7 @@ type Pending struct {
 	startTime  time.Time
 	window     []string
 	sessionEnv map[string]string
+	confine    *confinedLaunch // nil unless the worker was launched confined (FDR 0035)
 }
 
 // LaunchDetached is the SYNCHRONOUS prefix of a spawn: validate the spawn
@@ -105,7 +105,7 @@ func LaunchDetached(home, repoPath string, driver Driver, brief, desc, model, pr
 	// checked out) sweatfile layer, but that layer is the repo sweatfile
 	// checked out fresh from the default branch — same content the repo
 	// layer already contributed.
-	argv, window, sessionEnv, merged, targetEnforce, err := renderSpawn(home, rp, brief, model, profile)
+	argv, window, sessionEnv, merged, targetEnforce, targetConfine, err := renderSpawn(home, rp, brief, model, profile)
 	if err != nil {
 		return Pending{}, err
 	}
@@ -113,6 +113,14 @@ func LaunchDetached(home, repoPath string, driver Driver, brief, desc, model, pr
 	// the switch: it is on if the driver's own context says so too.
 	enforce := targetEnforce || driverContextEnforces(home)
 
+	// Same rule for confinement (FDR 0035). Refusals come before anything is
+	// created; an unconfined spawn does none of this.
+	confined := targetConfine.launch || driverContextConfines(home)
+	if confined {
+		if err := confinedPreflight(confinementHost, agentScopeCapabilitiesArgv); err != nil {
+			return Pending{}, err
+		}
+	}
 	effective := effectiveProfile(profile, merged)
 	if enforce && effective == "" {
 		// No profile was requested, so Authorize would never run; a profile the
@@ -166,7 +174,22 @@ func LaunchDetached(home, repoPath string, driver Driver, brief, desc, model, pr
 		return Pending{}, fmt.Errorf("creating worker worktree: %w", err)
 	}
 
-	p, err := startDetachedEntry(rp, driver, desc, argv, window, sessionEnv, resolved, authorizingGrant)
+	var confine *confinedLaunch
+	if confined {
+		stateDir, err := confinementStateDir()
+		if err != nil {
+			undoOnFailure()
+			return Pending{}, err
+		}
+		scopePath, err := writeUnitSpec(rp, desc, targetConfine.egress, stateDir)
+		if err != nil {
+			undoOnFailure()
+			return Pending{}, err
+		}
+		confine = &confinedLaunch{scopePath: scopePath, stateDir: stateDir}
+	}
+
+	p, err := startDetachedEntry(rp, driver, desc, argv, window, sessionEnv, resolved, authorizingGrant, confine)
 	if err != nil {
 		undoOnFailure()
 		return Pending{}, err
@@ -204,12 +227,7 @@ var driverCwd = os.Getwd
 // that can corrupt a sweatfile to switch the check off. A cwd that is not in a
 // repo is not an error, just "no driver repo".
 func driverContextEnforces(home string) bool {
-	repo := home
-	if cwd, err := driverCwd(); err == nil {
-		if root, err := git.DetectRepo(cwd); err == nil {
-			repo = root
-		}
-	}
+	repo := driverRepo(home)
 	h, err := sweatfileio.LoadHierarchy(home, repo)
 	if err != nil {
 		slog.Warn("could not load the driver's sweatfile hierarchy; treating profile rights as enforced", "repo", repo, "err", err)
@@ -265,10 +283,17 @@ func Launch(home, repoPath string, driver Driver, brief, desc, model, profile st
 // is spliced LAST, after the auto-mode and model splices, via SpliceProfileFlag:
 // those two key off resolveProvider(entry), and placing the profile after them
 // keeps their behavior identical to a spawn with no profile.
-func renderSpawn(home string, rp worktree.ResolvedPath, brief, model, profile string) (argv, window []string, sessionEnv map[string]string, merged sweatfile.Sweatfile, enforce bool, err error) {
+func renderSpawn(home string, rp worktree.ResolvedPath, brief, model, profile string) (argv, window []string, sessionEnv map[string]string, merged sweatfile.Sweatfile, enforce bool, confine targetConfinement, err error) {
 	hierarchy, err := sweatfileio.LoadWorktreeHierarchy(home, rp.RepoPath, rp.AbsPath)
 	if err != nil {
-		return nil, nil, nil, merged, false, fmt.Errorf("loading worker sweatfile hierarchy: %w", err)
+		return nil, nil, nil, merged, false, confine, fmt.Errorf("loading worker sweatfile hierarchy: %w", err)
+	}
+	// [confinement] follows the same trust rule as [profile-rights].
+	var untrustedConfine []string
+	confine.launch, confine.egress, untrustedConfine = sweatfileio.TrustedConfinement(hierarchy, home, rp.RepoPath)
+	if len(untrustedConfine) > 0 {
+		slog.Warn("ignored [confinement] in sweatfiles that are not trusted: only sweatfiles above the repo are trusted",
+			"paths", untrustedConfine)
 	}
 	// The enforcement switch is read from layers above the repo only: an agent
 	// can edit the repo's own sweatfile, and must not be able to turn it off.
@@ -292,13 +317,13 @@ func renderSpawn(home string, rp worktree.ResolvedPath, brief, model, profile st
 	if model != "" {
 		entry, err = SpliceModelFlag(entry, model, merged.SessionModelFlags(), merged.SessionModelIDs())
 		if err != nil {
-			return nil, nil, nil, merged, false, err
+			return nil, nil, nil, merged, false, confine, err
 		}
 	}
 	if effective := effectiveProfile(profile, merged); effective != "" {
 		entry, err = SpliceProfileFlag(entry, effective)
 		if err != nil {
-			return nil, nil, nil, merged, false, err
+			return nil, nil, nil, merged, false, confine, err
 		}
 	}
 
@@ -310,7 +335,7 @@ func renderSpawn(home string, rp worktree.ResolvedPath, brief, model, profile st
 	// derives its identity from SPINCLASS_SESSION_ID in the exec env (workerEnv).
 	argv = SubstituteEntry(entry, brief, rp.AbsPath)
 	window = SubstituteWindow(merged.SessionSpawnWindow(), rp.SessionKey, rp.AbsPath)
-	return argv, window, merged.SessionEnv(), merged, enforce, nil
+	return argv, window, merged.SessionEnv(), merged, enforce, confine, nil
 }
 
 // startDetached launches argv in its OWN session (setsid) with stdio wired to
@@ -382,6 +407,32 @@ func launchSpawnWindow(argv []string, rp worktree.ResolvedPath, desc string, ses
 // An explicit [session-entry].env entry still sets them back, since userEnv is
 // appended after the scrub.
 func workerEnv(rp worktree.ResolvedPath, desc string, userEnv map[string]string, scrubDesktopEnv bool) []string {
+	return workerEnvScoped(rp, desc, userEnv, scrubDesktopEnv, "")
+}
+
+// identityVars are the spinclass-owned SPINCLASS_* identity variables of a
+// worker; a confined spawn also hands them to the unit through its launch spec.
+func identityVars(rp worktree.ResolvedPath, desc string) []string {
+	// Split session key ("repo/branch") into individual env vars — same
+	// derivation as SessionExecutor.Attach.
+	repo, branch := rp.SessionKey, ""
+	if i := strings.Index(rp.SessionKey, "/"); i >= 0 {
+		repo, branch = rp.SessionKey[:i], rp.SessionKey[i+1:]
+	}
+	return []string{
+		"SPINCLASS_SESSION_ID=" + rp.SessionKey,
+		"SPINCLASS_REPO=" + repo,
+		"SPINCLASS_BRANCH=" + branch,
+		"SPINCLASS_WORKTREE=" + rp.AbsPath,
+		"SPINCLASS_DESCRIPTION=" + desc,
+	}
+}
+
+// workerEnvScoped is workerEnv plus, when scopePath is non-empty, the
+// CLOWN_AGENT_SCOPE spec path that makes clown launch the agent in a unit
+// (FDR 0035). It is appended last so nothing inherited or configured can name
+// a different spec.
+func workerEnvScoped(rp worktree.ResolvedPath, desc string, userEnv map[string]string, scrubDesktopEnv bool, scopePath string) []string {
 	// Strip the driver's inherited CLOWN_SESSION_ID/CLAUDE_SESSION_ID so the
 	// worker's clown re-derives its channel from the worker's own
 	// SPINCLASS_SESSION_ID (appended below). Otherwise the worker arms the
@@ -394,24 +445,14 @@ func workerEnv(rp worktree.ResolvedPath, desc string, userEnv map[string]string,
 		env = append(env, k+"="+v)
 	}
 
-	// Split session key ("repo/branch") into individual env vars — same
-	// derivation as SessionExecutor.Attach.
-	repo, branch := rp.SessionKey, ""
-	if i := strings.Index(rp.SessionKey, "/"); i >= 0 {
-		repo, branch = rp.SessionKey[:i], rp.SessionKey[i+1:]
-	}
 	tmpDir := filepath.Join(rp.AbsPath, ".tmp")
 
-	return append(
-		env,
-		"SPINCLASS_SESSION_ID="+rp.SessionKey,
-		"SPINCLASS_REPO="+repo,
-		"SPINCLASS_BRANCH="+branch,
-		"SPINCLASS_WORKTREE="+rp.AbsPath,
-		"SPINCLASS_DESCRIPTION="+desc,
-		"TMPDIR="+tmpDir,
-		"CLAUDE_CODE_TMPDIR="+tmpDir,
-	)
+	env = append(env, identityVars(rp, desc)...)
+	env = append(env, "TMPDIR="+tmpDir, "CLAUDE_CODE_TMPDIR="+tmpDir)
+	if scopePath != "" {
+		env = append(env, "CLOWN_AGENT_SCOPE="+scopePath)
+	}
+	return env
 }
 
 // harnessScrubbedEnvVars are the desktop-session variables the detached
@@ -437,7 +478,7 @@ func dropEnvVars(env, keys []string) []string {
 // detached harness entry, returning a Pending (worktree booting, hello not yet
 // awaited). The SessionStart hook adopts the state (PID + HelloSentAt) when the
 // worker boots; pre-hello PID is 0 (nothing attached yet).
-func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, argv, window []string, sessionEnv map[string]string, profile ResolvedProfile, authorizingGrant string) (Pending, error) {
+func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, argv, window []string, sessionEnv map[string]string, profile ResolvedProfile, authorizingGrant string, confine *confinedLaunch) (Pending, error) {
 	st := session.State{
 		PID:                0,
 		SessionState:       session.StateActive,
@@ -475,7 +516,11 @@ func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, ar
 	// clown/posh attach — can no longer wedge the launcher. A well-behaved
 	// clown --clown-attach=spawn still forks the worker and exits promptly.
 	logPath := filepath.Join(rp.AbsPath, ".spinclass", "spawn.log")
-	if err := startDetached(argv, rp.AbsPath, workerEnv(rp, desc, sessionEnv, true), logPath); err != nil {
+	scopePath := ""
+	if confine != nil {
+		scopePath = confine.scopePath
+	}
+	if err := startDetached(argv, rp.AbsPath, workerEnvScoped(rp, desc, sessionEnv, true, scopePath), logPath); err != nil {
 		return Pending{}, fmt.Errorf("spawn template %q failed: %w", argv, err)
 	}
 
@@ -490,6 +535,7 @@ func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, ar
 		startTime:    startTime,
 		window:       window,
 		sessionEnv:   sessionEnv,
+		confine:      confine,
 	}, nil
 }
 
@@ -509,6 +555,14 @@ func WaitHello(p Pending, deadline time.Duration) (Result, error) {
 	poshID, err := spawnhandshake.WaitForHello(p.driver.Principal, p.rp.SessionKey, p.startTime, deadline)
 	if err != nil {
 		return Result{}, err
+	}
+
+	// A confined worker's principal is bound to its session from the unit's own
+	// environment, so the agent never names itself (FDR 0035).
+	if p.confine != nil {
+		if _, err := recordPrincipal(confinementHost, p.confine.stateDir, p.rp.SessionKey, p.rp.AbsPath); err != nil {
+			return Result{}, fmt.Errorf("worker %s is up but its principal is not bound to the session: %w", p.rp.SessionKey, err)
+		}
 	}
 
 	launchSpawnWindow(substituteAttachID(p.window, poshID), p.rp, p.desc, p.sessionEnv)

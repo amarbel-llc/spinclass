@@ -1,0 +1,222 @@
+package spawn
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	"code.linenisgreat.com/spinclass/internal/confinement"
+	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/worktree"
+)
+
+// Seams for tests; production values are the real host.
+var (
+	// confinementHost is how the spawn reads /proc/self/cgroup and the unit's
+	// main process environment.
+	confinementHost confinement.System = confinement.Host{}
+	// agentScopeCapabilitiesArgv is the capability query (FDR 0035, "Interface
+	// with clown"); argv[0] is resolved on PATH.
+	agentScopeCapabilitiesArgv = []string{"clown", "agent-scope-capabilities"}
+	// confinementStateDir is the XDG state base for specs, unit records and
+	// principal mappings.
+	confinementStateDir = confinement.DefaultStateDir
+	// gitCommonDir resolves the shared git dir of a worktree.
+	gitCommonDir = func(worktree string) (string, error) {
+		out, err := git.Run(worktree, "rev-parse", "--path-format=absolute", "--git-common-dir")
+		return strings.TrimSpace(out), err
+	}
+	// recordPrincipal binds the worker's principal to its session after the hello.
+	recordPrincipal = confinement.RecordPrincipalFromUnit
+)
+
+// confinedLaunch is what a confined spawn carries from the spec write to the
+// hello: the spec path handed to clown and the state dir the principal mapping
+// goes under.
+type confinedLaunch struct {
+	scopePath string
+	stateDir  string
+}
+
+// targetConfinement is the [confinement] answer for the worker repo.
+type targetConfinement struct {
+	launch bool
+	egress []string
+}
+
+// driverRepo is the repo whose hierarchy describes the DRIVER's own context:
+// the repo containing the driver's cwd, else home.
+func driverRepo(home string) string {
+	if cwd, err := driverCwd(); err == nil {
+		if root, err := git.DetectRepo(cwd); err == nil {
+			return root
+		}
+	}
+	return home
+}
+
+// driverContextConfines is the [confinement].launch-unit analogue of
+// driverContextEnforces: sticky-on, so OR-ing it with the target's answer can
+// only widen confinement, and an unreadable hierarchy fails closed.
+func driverContextConfines(home string) bool {
+	repo := driverRepo(home)
+	h, err := sweatfileio.LoadHierarchy(home, repo)
+	if err != nil {
+		slog.Warn("could not load the driver's sweatfile hierarchy; treating confinement as on", "repo", repo, "err", err)
+		return true
+	}
+	on, _, _ := sweatfileio.TrustedConfinement(h, home, repo)
+	return on
+}
+
+// confinedPreflight runs before any worktree exists, so a refusal litters
+// nothing.
+func confinedPreflight(sys confinement.System, capabilitiesArgv []string) error {
+	inside, err := confinement.InsideAgentUnit(sys)
+	if err != nil || inside {
+		return errors.New("cannot spawn confined from inside an agent unit: the child's frontend would start inside this unit (FDR 0032 D7); " +
+			"spawn through the spawn-session MCP tool, which runs in the frontend")
+	}
+	have, err := clownCapabilities(capabilitiesArgv)
+	if err != nil {
+		return fmt.Errorf("cannot spawn confined: could not query clown's agent-scope capabilities (%v); missing: %s; "+
+			"the switch waits for a clown build that reports them (FDR 0035)", err, strings.Join(confinement.RequiredCapabilities, ", "))
+	}
+	if missing := confinement.MissingCapabilities(have); len(missing) > 0 {
+		return fmt.Errorf("cannot spawn confined: clown does not report the required capabilities: %s; "+
+			"the switch waits for a clown build that reports them (FDR 0035)", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+// clownCapabilities runs the capability query and returns the reported list.
+func clownCapabilities(argv []string) ([]string, error) {
+	cmd := exec.Command(argv[0], argv[1:]...)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Version      int      `json:"version"`
+		Capabilities []string `json:"capabilities"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &resp); err != nil {
+		return nil, fmt.Errorf("unparsable output: %w", err)
+	}
+	if resp.Version != 1 {
+		return nil, fmt.Errorf("capability report version %d, want 1", resp.Version)
+	}
+	return resp.Capabilities, nil
+}
+
+// unitSocket and unitSpec are the clown FDR 0020 v1 launch spec. clown refuses
+// unknown fields, so these keys are exactly the contract.
+type unitSocket struct {
+	Path    string `json:"path"`
+	Purpose string `json:"purpose"`
+}
+
+type unitSpec struct {
+	Version      int               `json:"version"`
+	Worktree     string            `json:"worktree"`
+	OperatorHome string            `json:"operator_home"`
+	UnitNameHint string            `json:"unit_name_hint"`
+	ResultPath   string            `json:"result_path"`
+	BindsRW      []string          `json:"binds_rw"`
+	BindsRO      []string          `json:"binds_ro"`
+	Sockets      []unitSocket      `json:"sockets,omitempty"`
+	DenyPaths    []string          `json:"deny_paths"`
+	EgressAllow  []string          `json:"egress_allow"`
+	Env          map[string]string `json:"env"`
+}
+
+// unitSpecInput is everything buildUnitSpec needs, resolved by the caller so
+// the builder itself touches no host state.
+type unitSpecInput struct {
+	rp           worktree.ResolvedPath
+	operatorHome string
+	stateDir     string
+	commonDir    string
+	sshAuthSock  string
+	runtimeDir   string   // /run/user/<uid>
+	wayland      []string // existing wayland-* entries under runtimeDir
+	egress       []string
+	env          map[string]string
+}
+
+var unitNameUnsafe = regexp.MustCompile(`[^a-zA-Z0-9-]`)
+
+func buildUnitSpec(in unitSpecInput) unitSpec {
+	wt := in.rp.AbsPath
+	spec := unitSpec{
+		Version:      1,
+		Worktree:     wt,
+		OperatorHome: in.operatorHome,
+		UnitNameHint: "spinclass-agent-" + unitNameUnsafe.ReplaceAllString(in.rp.SessionKey, "-"),
+		ResultPath:   confinement.UnitRecordPath(in.stateDir, wt),
+		BindsRW: []string{
+			wt,
+			filepath.Join(in.commonDir, "objects"),
+			filepath.Join(in.commonDir, "refs"),
+			filepath.Join(in.commonDir, "logs"),
+			filepath.Join(in.commonDir, "worktrees", filepath.Base(wt)),
+		},
+		BindsRO: []string{
+			filepath.Join(in.commonDir, "config"),
+			filepath.Join(in.commonDir, "hooks"),
+		},
+		DenyPaths: append([]string{
+			filepath.Join(in.runtimeDir, "bus"),
+			filepath.Join(in.runtimeDir, "systemd"),
+			filepath.Join(in.runtimeDir, "posh"),
+			"/tmp/.X11-unix",
+		}, in.wayland...),
+		EgressAllow: append([]string{}, in.egress...),
+		Env:         in.env,
+	}
+	if in.sshAuthSock != "" {
+		spec.Sockets = []unitSocket{{Path: in.sshAuthSock, Purpose: "piggy-agent"}}
+	}
+	return spec
+}
+
+// writeUnitSpec resolves the host-dependent inputs, builds the spec and writes
+// it beside the unit record, outside the worktree. It returns the path to put
+// in CLOWN_AGENT_SCOPE.
+func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, stateDir string) (string, error) {
+	commonDir, err := gitCommonDir(rp.AbsPath)
+	if err != nil || commonDir == "" {
+		return "", fmt.Errorf("resolving the git common dir of %s: %v", rp.AbsPath, err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("finding the operator's home: %w", err)
+	}
+	runtimeDir := fmt.Sprintf("/run/user/%d", confinementHost.Getuid())
+	wayland, _ := filepath.Glob(filepath.Join(runtimeDir, "wayland-*"))
+
+	env := map[string]string{}
+	for _, kv := range identityVars(rp, desc) {
+		k, v, _ := strings.Cut(kv, "=")
+		env[k] = v
+	}
+	spec := buildUnitSpec(unitSpecInput{
+		rp: rp, operatorHome: home, stateDir: stateDir, commonDir: commonDir,
+		sshAuthSock: os.Getenv("SSH_AUTH_SOCK"), runtimeDir: runtimeDir, wayland: wayland,
+		egress: egress, env: env,
+	})
+	path, err := confinement.WriteUnitSpec(stateDir, rp.AbsPath, spec)
+	if err != nil {
+		return "", fmt.Errorf("writing the agent unit spec: %w", err)
+	}
+	return path, nil
+}

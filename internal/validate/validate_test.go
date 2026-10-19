@@ -643,6 +643,27 @@ func TestCheckProfileRightsWarnsUnlessGlobal(t *testing.T) {
 	}
 }
 
+func TestCheckConfinementWarnsUnlessGlobal(t *testing.T) {
+	on := true
+	sf := sweatfile.Sweatfile{Confinement: &sweatfile.Confinement{LaunchUnit: &on}}
+	if len(CheckConfinement(sf, false, false)) != 1 {
+		t.Error("repo-layer launch-unit should warn")
+	}
+	if len(CheckConfinement(sf, true, false)) != 1 {
+		t.Error("non-global above-repo launch-unit should warn")
+	}
+	if len(CheckConfinement(sf, true, true)) != 0 {
+		t.Error("global launch-unit should not warn")
+	}
+	egress := sweatfile.Sweatfile{Confinement: &sweatfile.Confinement{EgressAllow: []string{"a:1"}}}
+	if len(CheckConfinement(egress, true, false)) != 0 {
+		t.Error("above-repo egress-allow should not warn")
+	}
+	if len(CheckConfinement(sweatfile.Sweatfile{}, false, false)) != 0 {
+		t.Error("absent table should not warn")
+	}
+}
+
 func TestCheckMetricsWarnsOnMalformedStatsdAddress(t *testing.T) {
 	check := func(addr string) []Issue {
 		return CheckMetrics(sweatfile.Sweatfile{Metrics: &sweatfile.Metrics{StatsdAddress: &addr}})

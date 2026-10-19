@@ -807,6 +807,28 @@ that names no profile is never affected.
 	warning, because an agent can edit those files and must not be able to
 	turn enforcement off.
 
+## [confinement]
+
+Launching spawned workers inside a clown agent unit (FDR 0035). Off by
+default. Neither key is merged: both are read only from the global and
+parent-directory layers, and a repo- or worktree-level value is ignored with a
+warning, because an agent can edit those files.
+
+*launch-unit*
+	Boolean. When true, *sc spawn* and the *spawn-session* tool start the
+	worker in an agent unit. Sticky-on: a true in any trusted layer wins, and a
+	false never clears it. The spawn is also confined when the spawner's own
+	context says so. The spawn is refused when clown does not report every
+	capability confinement needs, and from inside an agent unit (use the
+	*spawn-session* tool, which runs in the frontend).
+
+*egress-allow*
+	Array of _host:port_ strings the unit may reach. The last trusted layer
+	that sets it wins; unset inherits, *[]* clears. When no layer sets it the
+	default is api.anthropic.com, claude.ai, console.anthropic.com,
+	code.linenisgreat.com, forge.starbrandshoes.com, github.com,
+	cache.nixos.org and nix.starbrandshoes.com, all on port 443.
+
 ## [metrics]
 
 Best-effort statsd telemetry to stats-me (*stats-me-clients*(7), spinclass#363).
