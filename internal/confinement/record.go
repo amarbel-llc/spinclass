@@ -40,6 +40,10 @@ type UnitRecord struct {
 	ServeSocket string `json:"serve_socket"`
 	// MainPID is the unit's main process in the frontend's pid namespace.
 	MainPID int `json:"main_pid"`
+	// Principal is the CLOWN_SESSION_ID of the clown that launched the unit,
+	// written by that (frontend) clown. claude's own environment never carries
+	// it (clown#136), so this record is where a unit's principal is read.
+	Principal string `json:"principal"`
 }
 
 // UnitRecordPath is where clown writes a session's unit record: in

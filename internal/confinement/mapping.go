@@ -15,7 +15,8 @@ import (
 // joins a principal to its session through THIS, never through the
 // worktree-local session state, which the confined agent can rewrite (FDR
 // 0035, "The principal-to-session mapping"; amends FDR 0001). The frontend
-// writes it from the unit's own environment, so the agent never names itself.
+// writes it from the unit record the launching clown wrote, so the agent never
+// names itself.
 type PrincipalMapping struct {
 	Version    int    `json:"version"`
 	Principal  string `json:"principal"`
@@ -63,9 +64,10 @@ func LoadPrincipalMapping(sys System, stateDir, principal string) (PrincipalMapp
 }
 
 // RecordPrincipalFromUnit writes the mapping for the session whose unit
-// record exists, reading the principal from the unit's main process
-// environment (CLOWN_SESSION_ID), not from anything the session wrote. Run
-// in the frontend once the unit is up (the spawn hello) and again on resume.
+// record exists, taking the principal from that record (written by the
+// launching frontend clown; claude's environment never carries it, clown#136),
+// not from anything the session wrote. Run in the frontend once the unit is up
+// (the spawn hello).
 // A session without a unit gets no mapping: its grants cannot be card-rooted
 // anyway, since the confinement check fails.
 func RecordPrincipalFromUnit(sys System, stateDir, sessionKey, worktree string) (string, error) {
@@ -73,16 +75,9 @@ func RecordPrincipalFromUnit(sys System, stateDir, sessionKey, worktree string) 
 	if err != nil {
 		return "", err
 	}
-	if rec.MainPID <= 0 {
-		return "", fmt.Errorf("unit %s reports no main pid to read the principal from", rec.Unit)
-	}
-	p := &prober{sys: sys}
-	principal, err := p.environValue(rec.MainPID, "CLOWN_SESSION_ID")
-	if err != nil {
-		return "", fmt.Errorf("reading unit %s's principal: %w", rec.Unit, err)
-	}
+	principal := rec.Principal
 	if principal == "" {
-		return "", fmt.Errorf("unit %s's main process carries no CLOWN_SESSION_ID", rec.Unit)
+		return "", fmt.Errorf("unit %s's record names no principal", rec.Unit)
 	}
 	if err := validPrincipalName(principal); err != nil {
 		return "", err

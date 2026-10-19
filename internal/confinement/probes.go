@@ -265,9 +265,10 @@ func (p *prober) cgroupOf(pid int) (string, error) {
 }
 
 // F1: the driver's agent runs inside the active unit clown reported for its
-// session. The unit is bound to the driver by principal: some process of the
-// unit carries CLOWN_SESSION_ID equal to the driver's principal. An agent
-// runtime running outside every unit is F11's.
+// session. The unit is bound to the driver by principal: the record, written
+// by the frontend clown that launched the unit and out of the unit's reach,
+// names the driver's principal (claude's environment never carries it,
+// clown#136). An agent runtime running outside every unit is F11's.
 func (p *prober) f1Unit() Fact {
 	const id, name = "F1", "driver runs inside a reported agent unit"
 	err := func() error {
@@ -278,16 +279,10 @@ func (p *prober) f1Unit() Fact {
 		if principal == "" {
 			return errors.New("the driver has no principal to bind its unit to")
 		}
-		for _, pid := range p.pids {
-			v, err := p.environValue(pid, "CLOWN_SESSION_ID")
-			if err != nil {
-				return fmt.Errorf("reading unit pid %d's environment: %w", pid, err)
-			}
-			if v == principal {
-				return nil
-			}
+		if p.rec.Principal != principal {
+			return fmt.Errorf("unit %s was launched for principal %q, not the driver's principal %s", p.rec.Unit, p.rec.Principal, principal)
 		}
-		return fmt.Errorf("no process of unit %s carries the driver's principal %s", p.rec.Unit, principal)
+		return nil
 	}()
 	return fact(id, name, err, fmt.Sprintf("unit %s, %d processes", p.rec.Unit, len(p.pids)))
 }

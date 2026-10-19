@@ -32,7 +32,7 @@ func TestRecordPrincipalFromUnitThenLookUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	if principal != "principal-a" {
-		t.Fatalf("recorded %q, want the unit's CLOWN_SESSION_ID", principal)
+		t.Fatalf("recorded %q, want the principal the unit record names", principal)
 	}
 	fi, err := os.Stat(PrincipalMappingPath(dir, principal))
 	if err != nil {
@@ -67,10 +67,11 @@ func TestRecordPrincipalFromUnitThenLookUp(t *testing.T) {
 func TestRecordPrincipalFromUnitRefusesWithoutAPrincipal(t *testing.T) {
 	dir := t.TempDir()
 	sys, _ := confinedHost()
-	sys.files[UnitRecordPath(dir, "/wt/a")] = sys.files[UnitRecordPath(stateDir, "/wt/a")]
-	sys.files["/proc/100/environ"] = "PATH=/bin\x00"
+	sys.files[UnitRecordPath(dir, "/wt/a")] = strings.Replace(sys.files[UnitRecordPath(stateDir, "/wt/a")], `"principal":"principal-a"`, `"principal":""`, 1)
+	// Even an environment that names one does not count: only the record does.
+	sys.files["/proc/100/environ"] = "CLOWN_SESSION_ID=principal-a\x00"
 	if _, err := RecordPrincipalFromUnit(sys, dir, "r/a", "/wt/a"); err == nil {
-		t.Error("recorded a mapping with no principal in the unit")
+		t.Error("recorded a mapping although the unit record names no principal")
 	}
 }
 

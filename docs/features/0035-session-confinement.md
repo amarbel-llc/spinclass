@@ -162,7 +162,7 @@ unit and is deferred.
 
 | # | Fact | Probe |
 |---|---|---|
-| F1 | The driver's agent runs inside an active confinement unit clown reported for its session | Read the driver session's unit record (written by clown, see Interface); `/sys/fs/cgroup/<cgroup>/cgroup.procs` is non-empty (and holds `main_pid` when reported); some process of the unit carries `CLOWN_SESSION_ID` equal to the driver's principal in `/proc/<pid>/environ`. Bound by principal, not the recorded PID: an attached session records the `sc` process, which runs outside the unit. No record, an empty cgroup or no principal match ⇒ fail ("not launched confined") |
+| F1 | The driver's agent runs inside an active confinement unit clown reported for its session | Read the driver session's unit record (written by clown, see Interface); `/sys/fs/cgroup/<cgroup>/cgroup.procs` is non-empty (and holds `main_pid` when reported); the record's `principal`, written by the frontend clown that launched the unit, equals the driver's principal (claude's environment never carries `CLOWN_SESSION_ID`, clown#136, so it cannot be read from the unit's processes). Bound by principal, not the recorded PID: an attached session records the `sc` process, which runs outside the unit. No record, an empty cgroup or no principal match ⇒ fail ("not launched confined") |
 | F2 | piggy-agent is outside every agent unit | Connect to `$SSH_AUTH_SOCK` (from the frontend), `SO_PEERCRED` → peer pid; `/proc/<pid>/cgroup` must not equal or descend from the subject's cgroup nor from any other live session's reported cgroup. Peer pid 0 or unreadable ⇒ fail. (From the frontend the peer pid is real; the self-report extension in open question 3 is only needed for the `--inside` vantage) |
 | F3 | No inherited tty | For every pid of the unit, every `/proc/<pid>/fd` entry that is a tty character device (major 4 or 136–143, or `/dev/tty`) must be the unit's own pty: the same device number AND devpts instance as the `pty` path clown reports, stat'd from the frontend (a private devpts reuses low minors). The controlling tty in `/proc/<pid>/stat` (tty_nr) must be its number. Any other tty fd ⇒ fail |
 | F4 | No display or bus variables | `DISPLAY`, `WAYLAND_DISPLAY`, `DBUS_SESSION_BUS_ADDRESS` absent from `/proc/<pid>/environ` of every pid of the unit (hygiene; F5/F6 are the boundary) |
@@ -239,7 +239,9 @@ spinclass → clown (opt-in; unset means today's unconfined launch):
 
 clown → spinclass: once the unit is active, clown writes `result` atomically:
 `{version, unit, cgroup, invocation_id, uid, pty, serve_socket, main_pid,
-capabilities}` (`main_pid` is in the frontend's pid namespace and becomes the
+principal, capabilities}` (`principal` is the launching clown's
+`CLOWN_SESSION_ID`, the only place it is read from; `main_pid` is in the
+frontend's pid namespace and becomes the
 probes' root; unknown fields are tolerated, `version` gates meaning; `pty` is
 the host path of the slave clown allocated, `/dev/pts/N`, empty if none, and
 the check stats it from the frontend for its device number and devpts
@@ -288,9 +290,10 @@ its own principal and bind the walk to whatever it liked.
 The mapping now lives in **frontend-owned state** beside the unit records:
 `$XDG_STATE_HOME/spinclass/principals/<principal>.json`
 (`{version, principal, session_key, worktree, unit}`), hidden from every unit
-by `ProtectHome`. The frontend writes it from the **unit's own environment**
-(`CLOWN_SESSION_ID` of the unit's main process, `RecordPrincipalFromUnit`) once
-the spawn hello arrives, so the agent never names itself. It survives `sc
+by `ProtectHome`. The frontend writes it from the **unit record**, whose
+`principal` the launching frontend clown wrote (`RecordPrincipalFromUnit`;
+claude's environment never carries `CLOWN_SESSION_ID`, clown#136), once the
+spawn hello arrives, so the agent never names itself. It survives `sc
 resume`, which keeps the principal through `{principal}`; rewriting it at
 resume, once a resumed session launches confined, is a follow-up.
 spawn's authorizer joins through it (`confinement.SessionOfPrincipal`, live

@@ -141,7 +141,7 @@ const (
 	ptyDev    = uint64(136<<8 | 5) // pts/5
 	hostPts   = uint64(33)         // st_dev of the host's devpts
 	stateDir  = "/state"
-	recordFor = `{"version":1,"unit":"%s","cgroup":"%s","invocation_id":"x","uid":1000,"pty":"%s","serve_socket":"%s","main_pid":%d}`
+	recordFor = `{"version":1,"unit":"%s","cgroup":"%s","invocation_id":"x","uid":1000,"pty":"%s","serve_socket":"%s","main_pid":%d,"principal":"%s"}`
 	ptyPath   = "/dev/pts/5"
 )
 
@@ -152,7 +152,13 @@ func record(unit, cg string, pty uint64, serve string, mainPID int) string {
 	if pty != 0 {
 		path = ptyPath
 	}
-	return fmt.Sprintf(recordFor, unit, cg, path, serve, mainPID)
+	return fmt.Sprintf(recordFor, unit, cg, path, serve, mainPID, principalOfUnit(unit))
+}
+
+// principalOfUnit is the principal the launching clown records for a fixture
+// unit: agent-a.service → principal-a.
+func principalOfUnit(unit string) string {
+	return "principal-" + strings.TrimSuffix(strings.TrimPrefix(unit, "agent-"), ".service")
 }
 
 func mapping(principal, key, worktree, unit string) string {
@@ -174,7 +180,7 @@ func confinedHost() (*fakeSys, Inputs) {
 			"/proc/50/stat":                               "50 (piggy-agent) S 1 50 50 0 -1 0",
 			"/proc/100/stat":                              "100 (claude) S 90 100 100 34821 -1 0",
 			"/proc/101/stat":                              "101 (bash) S 100 100 100 34821 -1 0",
-			"/proc/100/environ":                           "PATH=/bin\x00HOME=/tmp/home\x00CLOWN_SESSION_ID=principal-a\x00",
+			"/proc/100/environ":                           "PATH=/bin\x00HOME=/tmp/home\x00",
 			"/proc/101/environ":                           "PATH=/bin\x00",
 			"/proc/100/comm":                              "claude\n",
 			"/proc/101/comm":                              "bash\n",
@@ -274,8 +280,8 @@ func TestEachFactCatchesItsBreach(t *testing.T) {
 		want   string
 		mutate func(*fakeSys, *Inputs)
 	}{
-		{"F1", "carries the driver's principal", func(s *fakeSys, in *Inputs) {
-			// A consistent mapping for a principal no unit process carries.
+		{"F1", "not the driver's principal", func(s *fakeSys, in *Inputs) {
+			// A consistent mapping, but the unit was launched for someone else.
 			in.Driver.Principal, in.Driver.RecordedPrincipal = "principal-z", "principal-z"
 			s.files[PrincipalMappingPath(stateDir, "principal-z")] = mapping("principal-z", "r/a", "/wt/a", "agent-a.service")
 		}},

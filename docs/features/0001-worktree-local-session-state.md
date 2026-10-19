@@ -326,7 +326,7 @@ describes. Worktree-local state therefore stays the home of a session's
 
 - The principal-to-session join the grant walk uses (FDR 0034) moved to
   frontend-owned state, `$XDG_STATE_HOME/spinclass/principals/`, written by the
-  frontend from the unit's environment. The `principal` field here is a display
+  frontend from the unit record its launching clown wrote. The `principal` field here is a display
   cache; the confinement check compares the two (FDR 0035 F15).
 - Clown's agent-unit record and the launch spec live in
   `$XDG_STATE_HOME/spinclass/units/`, never in the worktree.
