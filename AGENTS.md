@@ -3,13 +3,13 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with
 code in this repository.
 
-The deep design rationale for most subsystems lives in `docs/features/` (FDRs)
-and the `spinclass-*(5)`/`(7)` manpages — this file orients you and points there
-rather than duplicating it. Your system prompt already staples a live **Design
-records** index (every FDR/doc by number·title·status, via FDR 0021) into
-context, so a bare `(FDR NNNN)` cite here is enough to locate the record — read
-it before changing that subsystem. `docs/epics/` is the vision-level record type
-above FDRs: cross-repo intent in plain language, with FDRs as its children.
+This file is an **orientation map, not a reference.** Deep design rationale
+lives in `docs/features/` (FDRs), `docs/plans/` (per-issue designs), and the
+`spinclass-*(5)`/`(7)` manpages in `doc/`. Your system prompt carries a live
+**Design records** index (FDR 0021), so a bare `(FDR NNNN)` cite here is enough
+to locate the record — read it before changing that subsystem. `docs/epics/`
+holds vision-level records above FDRs. Put new reference prose in a manpage or
+FDR, not here (the lint caps this file at 40000 bytes; keep it well under).
 
 ## Overview
 
@@ -19,559 +19,159 @@ via configurable entrypoints, rebasing/merging back to main, and cleaning up.
 
 ## Build & Test Commands
 
-Recipes are provided by the just-us clown plugin — the system prompt carries the
-full recipe index (name + one-line doc); use `list_recipes` / `show_recipe` to
-inspect and `run_recipe` to run them.
+Recipes come from the just-us clown plugin — the system prompt carries the
+recipe index; use `list_recipes` / `show_recipe` / `run_recipe`. Inner loop:
+`just debug-go-test <dir>` (godyn-test; `git add -N` new files first; no
+ambient `go`).
 
 Config is Nix-generated from `./conformist.nix` + `./conformist-impure.nix` +
 `conformist.lib.presets.{eng,eng-go,eng-impure}` (`flake.nix`), not a
-hand-written `conformist.toml`. Lint runs as the pure, sandboxed
-`checks.lint` (godyn-lint on x86_64-linux, igloo's golangci `buildGoLint`
-elsewhere), NOT in the impure lane: a sandbox can't replay stale `.merge-*`
-cache paths whose suppressions fail open (spinclass#294). Version is
-`version.env` (`SPINCLASS_VERSION`, eng-versioning(7)); the fork's
-`buildGoApplication` auto-reads it — no `version` attr is passed explicitly in
-`flake.nix`.
+hand-written `conformist.toml`. Lint runs as the pure, sandboxed `checks.lint`,
+NOT in the impure lane (spinclass#294). Version is `version.env`
+(`SPINCLASS_VERSION`, eng-versioning(7)); `buildGoApplication` auto-reads it.
 
-`merge-this-session`'s pre-merge hook runs the full verification suite (build,
-test, bats, and analyzers) — do NOT re-run that suite right before merging.
-Cheap per-package checks are fine: `just debug-go-test <dir>`.
+`merge-this-session`'s pre-merge hook runs the full verification suite — do NOT
+re-run that suite right before merging.
 
 ## Architecture
 
-- **CLI layer** (`cmd/spinclass/`): Built on purse-first `go-mcp/command.App`
-  (not cobra). `main.go` bootstraps `buildApp()` (`commands.go`) and dispatches
-  via `app.RunCLI()`. Commands split across `commands_*.go`. The same `App`
-  registers both CLI subcommands and MCP tools: commands with `Run` become MCP
-  tools via `serve`; `RunCLI` commands are CLI-only. `serve` starts the stdio
-  MCP server. Manpages, completions, and the plugin manifest are generated at
-  build time by the hidden `generate-artifacts` subcommand (`flake.nix`
-  `postInstall`).
-- **Core workflow** (`internal/shop/`): `Create()` sets up worktree + sweatfile
-  + Claude trust; `Attach()` calls Create, writes session state, delegates to an
-  `Executor`; `Fork()` branches from the current worktree.
-- **Executor** (`internal/executor/`): session-attach interface.
-  `SessionExecutor` (production; execs the entrypoint with SIGHUP forwarding),
-  `ShellExecutor` (merge), `mockExecutor` (tests).
-- **Session state** (`internal/session/`): tracks sessions in
-  `~/.local/state/spinclass/sessions/<hash>-state.json`. States: `active` (PID
-  alive + worktree), `inactive` (PID dead + worktree), `abandoned` (worktree
-  gone); dirty computed live via git. **Implicit sessions** (FDR 0014) extend
-  this to agents in a repo's **main checkout**: keyed `<repo>/<rand>`, stored
-  worktree-local at `<checkout>/.spinclass/state-<rand>.json`, materialized by
-  Claude Code `SessionStart`/`SessionEnd` hooks (`internal/hooks/`). See FDR
-  0014 for the full model.
-- **Git** (`internal/git/`): thin `git -C <dir>` wrapper. `Run()` captures,
-  `RunPassthrough()` streams.
+- **CLI layer** (`cmd/spinclass/`): purse-first `go-mcp/command.App` (not
+  cobra). `main.go` → `buildApp()` (`commands.go`) → `app.RunCLI()`; commands
+  split across `commands_*.go`. The same `App` registers CLI subcommands and MCP
+  tools (commands with `Run` become tools via `serve`; `RunCLI` are CLI-only).
+  Manpages, completions and the plugin manifest are generated at build time by
+  the hidden `generate-artifacts` subcommand; hand-written section 5/7 pages
+  are compiled from `doc/*.N.scd` (spinclass#313).
+- **Core workflow** (`internal/shop/`): `Create()` = worktree + sweatfile +
+  Claude trust; `Attach()` = Create + session state + `Executor`; `Fork()`.
+- **Executor** (`internal/executor/`): `SessionExecutor` (prod, SIGHUP
+  forwarding), `ShellExecutor` (merge), `mockExecutor` (tests).
+- **Session state** (`internal/session/`): `~/.local/state/spinclass/sessions/
+  <hash>-state.json`; `active`/`inactive`/`abandoned`, dirty computed live.
+  Implicit sessions in a main checkout: FDR 0014. Handles/principals: FDR 0032.
+- **Git** (`internal/git/`): thin `git -C <dir>` wrapper (`Run` captures,
+  `RunPassthrough` streams).
 - **Worktree resolution** (`internal/worktree/`): `ResolvePath()` is the single
-  target→absolute-path entry point. Bare name → `<repo>/.worktrees/<branch>`,
-  relative → from repo root, absolute → as-is.
-- **Sweatfile config** (`internal/sweatfile/` + `internal/sweatfileio/`):
-  hierarchical TOML, merged global (`~/.config/spinclass/sweatfile`) → parent
-  dirs → repo. `sweatfile` is the pure schema (structs, `MergeWith`,
-  `GetDefault`, accessors, tommy codec; no intra-module imports);
-  `hookrun` runs hooks, `apply` sets up a worktree (#309); `sweatfileio`
-  holds the decode/IO consumers (`Parse`/`Load`) — split
-  so codegen can regenerate the codec package cleanly (dodder codegen-isolation
-  pattern, tommy #93). Config surface is documented in `spinclass-sweatfile(5)`.
-- **Merge/Pull/Clean** (`internal/merge/`, `internal/pull/`, `internal/clean/`):
-  post-session workflows. Merge pre-flights the merge drivers its rebase would
-  invoke (`check.PreflightMergeDrivers`, #324: a bound driver off the ambient
-  PATH leaves a silent-ours "conflict", so it refuses BEFORE rebasing; also at
-  `sc check`; `sc pull`: #333), rebases onto the default branch, then
-  ff-only merges; clean removes merged worktree branches and abandoned
-  sessions. A starting merge (not `sc check`) emits a point listing the
-  repo's co-active sessions (#238).
-- **Permission tiers** (`internal/perms/`): Claude Code hook integration,
-  rules as JSON (`global.json` + `repos/<repo>.json`).
-- **Claude integration** (`internal/claude/`): trusts worktree paths in
-  `~/.claude.json`, applies `claude-allow` to `.claude/settings.local.json`.
-- **Remote sessions** (`internal/remote/`): routes `host:`-prefixed targets to
-  sweatfile `[[remotes]]` hosts; resume-only (FDR 0011).
+  target→path entry point (bare name → `<repo>/.worktrees/<branch>`).
+- **Sweatfile** (`internal/sweatfile/` pure schema + tommy codec;
+  `sweatfileio` Parse/Load; `hookrun` runs hooks; `apply` sets up a worktree,
+  #309). Split so codegen regenerates cleanly (tommy #93). Reference:
+  `spinclass-sweatfile(5)`.
+- **Merge/Pull/Clean** (`internal/merge/`, `pull/`, `clean/`): merge pre-flights
+  merge drivers (#324), rebases onto the default branch, then lands; see below.
+- **Permission tiers** (`internal/perms/`): Claude Code hook integration, rules
+  as JSON. **Claude integration** (`internal/claude/`): trust + `claude-allow`.
+- **Remote sessions** (`internal/remote/`): `host:` targets, resume-only
+  (FDR 0011).
 
 ## Key Patterns
 
-- **TAP-14 everywhere — except merge/check.** Most commands default to
-  `--format tap` with git stderr/exit-codes in YAML diagnostic blocks.
-  `sc merge`/`sc check` and the merge/check MCP tools instead emit ndjson-crap:
-  `--format` is `auto` (TTY viewport, raw ndjson when piped) | `viewport` |
-  `plain` | `ndjson` (`tap`/`table` rejected). Consumer wiring in
-  `internal/present`; see FDR 0015.
-- **Path / target resolution.** `worktree.ResolvePath()` converts targets;
-  session keys are `<repo-dirname>/<branch>`. Explicit
-  `resume`/`close`/`merge`/`update-description` targets resolve via
-  `session.FindByTarget` (worktree basename OR `<repo>/<branch>` key, the exact
-  strings `sc list` prints, from any cwd). Ambiguous bare names error; misses
-  are `session.ErrTargetNotFound`. `merge` tries the current repo's git
-  worktrees first (bare worktrees merge), then the session lookup.
-- **Session picking** (`internal/sessionpick`): `sc resume`/`sc close` source
-  from `session.ListForRepo`; tab completion (`completeWorktreeTargets`) scopes
-  via `session.ListForScope`. The resume picker also appends cached remote rows
-  (`remote.ReadAllCaches`). Non-TTY callers get an error, not a hung prompt.
-- **Resume confirmation.** Auto-detect / picker-single-match resume show a huh
-  confirm (`resumeConfirmPlan` in `cmd/spinclass/resume_confirm.go`); `-y/--yes`
-  skips it. Explicit `sc resume <id>` and multi-match selection are dialog-free.
-  An `active` session warns with default Cancel (`-y` does NOT skip that
-  variant; non-TTY always errors).
-- **External tool deps.** `git` is always required (from PATH). `madder` and
-  `direnv` are runtime deps **only** when built via `lib.mkSpinclass` with the
-  matching input (paths burned in at link time — `spinclass-build-pins(7)`, FDR
-  0003); the default `nix build` leaves both pins empty (madder dormant, direnv
-  from PATH). A madder write failure never fails a gate: `madder.Write` targets
-  `.default` and its writer latches errors (madder decodes every sibling
-  `.madder/` store config, so a stale pin died early and broke the hook's
-  pipe — #349). `papi` and `gh` are pinned the same way (`-X main.papiBin`/`ghBin`)
-  and, unlike madder, are burned into the **default** build; they power the
-  dynamic system-prompt repository line (`internal/repoinfo`) and fall back to
-  PATH lookup when unpinned. `clown` is optional, for async
-  job-wakeup emits (`internal/clown`, FDR 0010). `ringmaster` has **two** roles:
-  a runtime PATH CLI (the wake emit/observe, never pinned) AND a **build-time
-  linked library** — `code.linenisgreat.com/ringmaster/pkgs/jobwake`, bridged
-  via `go.nix` — for the per-job liveness flock and the `ProtocolVersion`
-  constant (#26). Interactive prompts use the in-process `huh` library.
+- **TAP-14 everywhere — except merge/check.** `sc merge`/`sc check` and the
+  merge/check MCP tools emit ndjson-crap (`--format auto|viewport|plain|ndjson`);
+  wiring in `internal/present` (FDR 0015).
+- **Targets.** Session keys are `<repo-dirname>/<branch>`; explicit
+  `resume/close/merge/update-description` targets resolve via
+  `session.FindByTarget` (worktree basename OR key, from any cwd; ambiguous
+  bare names error, misses are `session.ErrTargetNotFound`). `sc resume`/`close`
+  pickers: `internal/sessionpick`; resume confirmation: `resume_confirm.go`
+  (`-y` skips; an `active` session warns and `-y` does NOT skip it).
+- **External tool deps.** `git` always required. `madder`/`direnv` are runtime
+  deps only when built via `lib.mkSpinclass` (paths burned in at link time —
+  `spinclass-build-pins(7)`, FDR 0003); a madder write failure never fails a
+  gate (#349). `papi`/`gh` are pinned in the default build for the sysprompt
+  repository line. `clown` is optional (FDR 0010). `ringmaster` is both a
+  runtime PATH CLI and a build-time **linked** library (`jobwake`, via `go.nix`)
+  — see `spinclass-internals(7)`.
 
 ## CLI Commands
 
-  Command                          Description
-  -------------------------------- ---------------------------------------------------------
-  `sc start "<desc>"`              Create and start a new worktree session
-  `sc start-gh_pr <N|URL>`         Start a session from a GitHub pull request
-  `sc start-gh_issue <N>`          Start a session with GitHub issue context (config-driven)
-  `sc start-<custom> <arg>`        User-defined start commands (sweatfile `[[start-commands]]`)
-  `sc resume [id]`                 Resume a session (auto-detects from cwd; `host:id` reattaches over ssh)
-  `sc update-description "<desc>"` Update session description (--id or auto-detect)
-  `sc exec [--session <t>] [-- <util> …]` Run a util in a session's worktree (devshell + SPINCLASS_* env; defaults to $SHELL)
-  `sc run [flags] (-- <util> … \| <stdin>)` One-shot: start → run one command → merge + clean up (FDR 0020)
-  `sc list [--watch]`              List tracked sessions (charm table on TTY, plain/JSON when piped); `--watch` live-reloads
-  `sc merge [target]`              Merge worktree into main, remove session state
-  `sc close [target...]`           Close sessions without merging; N targets close independently, each with its own verdict
-  `sc check`                       Run [hooks].pre-merge in the current worktree (agent-CI surface)
-  `sc clean`                       Remove merged worktrees and abandoned sessions
-  `sc rebuild [target] [--check]`  Re-apply a drifted worktree's setup; `--check` reports stale/fresh
-  `sc fork [branch]`               Fork current worktree into a new branch (`--from <dir>`); create-only (the `--brief` detached worker was removed in #262)
-  `sc spawn [repo] --brief "…"`    Launch a detached worker session; `repo` optional — omitted = this repo, else a sibling (FDR 0006, #262)
-  `sc close-child-session <child>` Reap a worker THIS session spawned (#249); refuses anything it did not spawn
-  `sc grant-session-handle <child> <to> [--rights R]` Grant another principal a handle on a session this one holds (FDR 0032 D12)
-  `sc release-session-handle <child>` Release this session's own handle on a session (FDR 0032 D12)
-  `sc list-handles [--accept]`     List handles this session holds or is pending on (FDR 0032 D12)
-  `sc whoami`                      Print this session's principal, session key, and handles (FDR 0032 D1/D12)
-  `sc resurrect <target> [--new-branch]` Recreate a closed session's worktree+branch from its captured commit (#291)
-  `sc pull`                        Pull repos and rebase worktrees
-  `sc validate`                    Validate sweatfile hierarchy
-  `sc perms list|review|edit`      Inspect or edit permission tier rules
-
-`start*` and `update-description` take a single positional value (quote
-multi-word descriptions). Registered subcommands use hyphenated names
-(`perms-list`), but the space-separated form (`sc perms list`) is accepted.
+`sc start|start-gh_pr|start-gh_issue|start-<custom>`, `resume`,
+`update-description`, `exec`, `run` (FDR 0020), `list [--watch]`, `merge`,
+`close [target...]`, `check`, `clean`, `rebuild [--check]`, `fork`, `spawn`
+(FDR 0006), `close-child-session`, `grant-session-handle` /
+`release-session-handle` / `list-handles` / `whoami` (FDR 0032), `resurrect`
+(FDR 0027), `pull`, `validate`, `perms list|review|edit`. Per-command flags:
+the generated `spinclass-<cmd>(1)` pages or `sc <cmd> --help`. `start*` and
+`update-description` take one positional value (quote multi-word descriptions).
+Subcommands register hyphenated (`perms-list`); the spaced form is accepted.
 
 **merge/check tool gating.** `merge-this-session` and `check-this-session` are
-mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`: default
-registers `merge-this-session`; `disable-merge = true` removes it (and
-`sc merge`) and registers `check-this-session` instead. The `sc check` CLI
-subcommand is always available.
+mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
+`sc check` is always available.
 
-## Subsystems (read the cited record before changing)
+## Subsystems (one line each — read the cited record before changing)
 
-- **Spawned workers** (FDR 0006, #262): `sc spawn [repo] --brief` + the
-  `spawn-session` MCP tool launch a detached harness-booted worker; spawning no
-  longer requires a repo-rooted cwd (spinclass#332), since the driver identity
-  is the principal, not the cwd. `repo` is optional — omitted (or the current
-  repo) spawns HERE, a sibling dirname/path targets that repo; the worker
-  always starts fresh off the target's default branch with only the brief
-  (#258; create-only `sc fork` is a separate, non-worker path). `spawn-session`
-  is ASYNC under clown (#266): returns session key + ringmaster job id,
-  delivers the hello (or a reap-if-dead timeout) as a wake; `sc spawn` CLI
-  blocks. Workers may spawn workers (the #151 always-ask floor, not a depth
-  cap, guards fan-out; confined spawn: #382); `internal/spawn` owns resolution + launch. **Reaping**
-  (#249): `close-child-session` tears down a worker. Reap authority is a
-  **handle** (FDR 0032 D1/D12/D13) — `authorizeChildReap` gates on the caller's
-  principal holding one (seeded with the spawner at spawn), refusing
-  foreign/never-spawned children; `spawned_by` is now display/legacy only.
-  Force-reap discards uncommitted/unmerged work, so a clean reap auto-approves
-  while `force: true` is always-ask (`perms.AlwaysAsk`, judging the
-  *invocation* since `BuildPermissionString` discards MCP args; read
-  fail-closed). Elicitation could replace the flag (#254). **Passing a handle**
-  (FDR 0032 D12, closes spinclass#321 at the no-cryptography level):
-  `grant-session-handle`/`release-session-handle`/`list-handles`/`sc whoami`
-  let a holder delegate authority onward — grant lands the recipient in
-  `PendingHandles`, conferring nothing until it accepts (via
-  close-child-session, a further grant, or `list-handles --accept`); release
-  only ever removes the caller itself. Grant and release are both unconditional
-  always-ask (`internal/perms`) — a handle pass is never silently approvable.
-  `sc list` surfaces a HOLDERS count and an `orphan` marker for a session
-  whose accepted holders have all released (FDR 0032 D12).
-- **Resurrecting a closed session** (FDR 0027, #291, `internal/resurrect`): the
-  undo half of `sc close`/`close-child-session`. Both funnel through
-  `close.RunResolved`, which best-effort resolves the branch's tip before
-  force-deleting the worktree/branch, threading it into `session.Tombstone` as
-  `State.DeletedSHA`. `sc resurrect <target>` (+ MCP tool, no lineage gate —
-  recovery isn't the privileged operation reaping is) resolves via
-  `session.FindByTarget` (tombstones included), refuses cleanly if it's not a
-  tombstone, has no `DeletedSHA` (predates this feature, or closed outside
-  spinclass — recover via `git reflog`), or the commit is gc'd, then recreates
-  the worktree at that sha (the same arbitrary-base-commit primitive `sc
-  start`'s base-branch freshening uses) and re-registers it inactive, carrying
-  description/spawn-lineage forward. Does not attach — `sc resume` afterward
-  reuses that path unmodified. `sc clean`'s merged-worktree removal captures no
-  SHA (that content already lives on the default branch).
-- **Exemption predicates** (FDR 0031, `merge/policy.go`): run from the MERGE
-  BASE; terminal merges are the zero-value `GateTerminal`, always exempt.
-- **Attestation lifecycle** (FDR 0007, #219, `internal/attestation`): an MCP
-  merge/check `Claim`s the attestation at commit
-  (`pre_merge_attestation.claim`, PID-owned; a dead owner's claim is void, so a
-  crash never burns it); `Settle` consumes on a landed merge / green check,
-  releases on every failure, cancel, refusal or drain. A re-record supersedes
-  (a stale settle no-ops). `head_sha` rides along; the policy point appends
-  commits made since (patch-id aware) — informational, never a forced re-attest.
-- **No implicit-session merge** (#317): merge from a main-checkout session
-  is refused (`merge.ErrImplicitMergeUnsupported`, before any gate/hook);
-  `sc check` still works. Bootstrapping one as a session: #318.
-- **`sc exec`** (`internal/sessionexec`): runs a util in a session worktree,
-  devshell-scoped via `direnv exec`, with `SPINCLASS_*` identity env. No
-  `--session` → auto-detect from cwd; util defaults to `$SHELL`. Explicit
-  `--session` miss errors; cwd miss degrades (runs in cwd, strips identity).
-  Motivating consumer: posh "escape to shell". CLI-only; raw passthrough.
-- **`sc run`** (`internal/run`, FDR 0020): one-shot start → run one command (or
-  a shebang-aware stdin script) → merge + teardown. Teardown is a 2×2 matrix
-  over `--no-merge`/`--no-close`; an empty run (0 commits) is a clean success;
-  any nonzero step leaves the session intact for inspection. `--local-only`
-  passes through to merge. Builds on `sc start --no-attach` writing findable
-  inactive state. CLI-only. Uses the merge/check `present` stack.
-- **Async merge/check** (`internal/job`): `merge-this-session-async` /
-  `check-this-session-async` claim the attestation, launch a background
-  goroutine in `serve`, return a job id immediately (output → `.spinclass/job.log`,
-  meta → `.spinclass/job.json`). Registered **only under clown** — an async job
-  IS a ringmaster job (#243); inspect via ringmaster's `job_status`/`job_read` or
-  block with `job_wait`, `session-job-cancel` to stop. One active job per session.
-  **Default to the synchronous tools**; async only when you have other work while
-  the hook runs, and never hot-poll.
-- **Clown job-wakeup emits** (FDR 0010, `internal/clown`): async merge/check emit
-  `ringmaster start/done` (clown RFC-0015) so clown wakes the agent with one
-  `[clown-job]` line. The job id is allocated at dispatch, so the id returned to
-  the caller IS the id the wake carries (#243); a failed allocation under clown
-  **refuses the dispatch** (a wake-less job completes into silence). Runtime
-  ringmaster is PATH/`$RINGMASTER_BIN`, never build-pinned (the wake must land in
-  the hosting clown's journal); it IS a flake input as a **checkPhase** dep (#253)
-  so `contract_test.go` drives a real start→done lifecycle. **Self-sufficient
-  wakes** (#251): hook output tees into ringmaster's spool, and the verdict ladder
-  attaches as a `madder://blobs/<digest>` via `done --resource` (blob and
-  `result_ref` are alternatives; `ringmaster read --json` to get the URIs).
-  Rollback `CLOWN_DISABLE_JOB_WAKEUP=1`.
-- **Per-job liveness flock + ProtocolVersion gate** (#26, ringmaster RFC-0016/
-  0018, `internal/clown`): `serve` holds ringmaster's per-job advisory lock
-  (`jobwake.AcquireJobLock`) for an async job's life, so a crashed serve is
-  detectable — the OS drops the lock, the reaper writes `interrupted` instead of
-  a stuck `running`. This is why `jobwake` is build-time **LINKED** (the
-  `go.nix` bridge) in ADDITION to the runtime PATH CLI: the flock must be an
-  in-process fd. Gated by `clown.CheckProtocol` (memoized) comparing compiled-in
-  `jobwake.ProtocolVersion` to `ringmaster version --protocol`: exact match
-  enables the flock, a mismatch degrades **loudly** and skips only the flock
-  (async wakes + cancel-observe are pure CLI shell-outs, unaffected by skew — only
-  crash auto-reap is lost). `TestCheckProtocolMatchesRealRingmaster` guards the
-  drift against the checkPhase-pinned binary.
-- **Cancellation observer** (#22, ringmaster RFC-0018, `internal/job` +
-  `internal/clown`): `ringmaster cancel` is cooperative — it records a
-  non-terminal `cancel-requested` and wakes, signalling no process. So each async
-  job runs an observer goroutine (`clown.WaitForCancel`, gated on `clown.Enabled()`
-  alone so it survives a ProtocolVersion skew) that fires the job ctx cancel on a
-  cancel-requested; the producer writes the terminal itself (sole terminal-writer;
-  terminal is `StatusAborted`, reaper writes `interrupted` if serve dies
-  mid-teardown). NON-OBVIOUS (locked by
-  `TestWaitForCancelObservesRealCancelRequested`): `wait --on-cancel` reports the
-  derived state `running` for a cancel-requested job, so a non-terminal return
-  maps to cancelRequested=true. `clearRunning` joins the observer after `cancel()`
-  (which SIGKILLs its `ringmaster wait` subprocess) before closing `done`, so a
-  woken caller is guaranteed the subprocess is already reaped.
-- **Dynamic system-prompt fragment** (spinclass#187, FDR 0021, FDR 0030, clown
-  plugin protocol RFC-0002 §5, `internal/sysprompt`): `serve` answers
-  `prompts/get` for `system-prompt-append`; clown's stdio bridge fetches it
-  **before `initialize`** and appends it last, so the fetch is
-  **deadline-capped** (`repoFetchTimeout` 2s) and must never block.
-  `sysprompt.Resolve` branches worktree-session vs main-checkout (implicit
-  session, FDR 0014). Trailers: a **repository line** (`internal/repoinfo` —
-  git remote + a PAPI/`gh`/Gitea lookup for forge kind, vanity-remote owner
-  #221, description), a **Forge workflow**
-  block (non-GitHub → use `fj`/`smith`), a **co-active sessions** line (#238),
-  and the Go-composed **Design records** trailer (`docsindex.go`, dirs
-  overridable via `[sysprompt].doc-index-dirs`). Two further trailers (FDR
-  0030) are off until a sweatfile selects sources: a **Manpage index**
-  (`manindex.go`) and a **Repository index** (`repoindex.go`, no forge-API
-  round-trip), both via glob/`$VAR`-expanded **source specs** (`sources.go`),
-  bounded by `[sysprompt].index-limit` (default 400, `<= 0` uncaps) and a scan
-  timeout. Rows sort by RENDERED name, not path, so a corpus past the cap
-  doesn't drop whole sections; a failed load degrades to a ⚠ line rather than
-  disabling both. Manpage-index membership is declared upstream by eng's
-  manpath (no per-package origin in the profile).
-- **Pre-merge build worktree** (FDR 0013): by default the hook runs in a
-  transient detached worktree pinned to the committed sha (`check.resolveHookDir`
-  → `.merge-<branch>-<sha>-<pid>` under `.worktrees/`), freeing the session
-  worktree for concurrent edits. Merge splits into `merge.PrepareMerge` (gate →
-  pull → rebase → nothing-to-merge → REPAIR → pin HEAD sha) and
-  `merge.FinishMerge` (gate + landing, serialized under the merge queue by
-  default — next bullet; with `[hooks].disable-merge-queue`: hook →
-  `git merge --ff-only <pinnedSha>` → teardown → push). Async runs Prepare
-  synchronously, backgrounds Finish. Opt out with
-  `[hooks].disable-merge-build-worktree`.
-- **Per-repo merge queue** (FDR 0022, #235): `FinishMerge` serializes landings on
-  an advisory flock (`internal/mergelock`; `spinclass-merge.lock` in the shared
-  git common dir — poll-based, ctx-cancellable, self-releasing). Acquired BEFORE
-  the gate; under the lock: re-fetch → ancestry check → if the tip moved, rebase
-  the pinned commits in a transient `.land-*` worktree (conflict ⇒
-  `merge.ErrIntegrationConflict`, resolved by a plain re-merge) → gate on the
-  LANDING sha → land (next bullet) → teardown. Worktree merges only; lock is
-  host-local. `[hooks].disable-merge-queue` restores the pre-#235 fail-on-race
-  path.
-- **Detached landing worktree / Alt B** (FDR 0029, #284): a gitSync worktree
-  merge on the queued path ALWAYS lands from the disposable `.land-*` worktree
-  (created at the pin, rebased there only if the tip moved): the landing is
-  `git push <remote> <landingSha>:refs/heads/<default>` run from that worktree
-  (`git.PushRef`) — the ff check is the remote's own, so a refused push (stale
-  tip, dropped credential) moves NOTHING. `merge <branch>` IS the push; a `push` point states it (#376).
-  Consumers reading the local default ref use
-  `git.CommitsUnintegrated` (integrated = reachable from the local default OR
-  its remote-tracking ref): `close.RunResolved`, `clean.scanWorktrees`,
-  `shop.closeShop`'s auto-close gate. This is the injection surface FDR 0028's
-  worktree-scoped push credential assumes.
-- **Landing target** (#315/#295, FDR 0029 revised, `internal/landing`):
-  merges and `basebranch.Freshen` read `landing.Target.Ref()` (the remote
-  tracking ref), never local `<default>`; only the fetch is fatal. After the
-  push, `reportLocalAdvance` ff's local once (under the lock) or emits a
-  `# SKIP` (`merge LANDED on …`, lifted into the async wake). Local-only =
-  `landing.Self`. Metrics: `internal/statsd` (+ phase timers, #363).
-- **Per-session forge push credentials** (FDR 0028, #285, `internal/auth`): a
-  sweatfile `[auth]` table (`mint-command`/`revoke-command`) gives a worktree
-  session its own forge token so pushes never ride the inherited ssh-agent.
-  `auth.Mint` runs via `shop.ProvisionCredential` (called by `createWorktree`
-  and `resurrect.Run`) right after setup (fatal on failure — the half-built
-  worktree is torn down): writes the token to the mode-600
-  `.spinclass/git-credentials` and injects worktree-scoped config
-  (`credential.helper` + `url.insteadOf`; origin via `auth.ParseForgeRemote`
-  on the CONFIGURED `remote.origin.url`, never `git remote get-url`, which
-  applies insteadOf; `git.CommonConfigHasWorktreeOverride` guards it). Recorded
-  as `session.State.Credential` (`session.Write` carries it,
-  `session.UpdateCredential` stamps it); `auth.MirrorInto` + `merge.fetchTarget`
-  make the merge's fetch agent-free. `auth.Revoke` runs at `close.RunResolved`,
-  `clean.removeWorktree`, and `merge.teardownAndPush` (warn, non-fatal);
-  `auth.SweepOrphans` catches abandoned/tombstoned sessions with an unrevoked
-  record at the next creation on the repo. `[auth].forge-hosts` gates the mint
-  by origin host — unlisted ⇒ skipped, never a failure (the mechanism behind
-  the fleet placement in `~/eng/repos/sweatfile`). A FAILED mint is fatal by
-  default; `[hooks].allow-no-credential` / `sc start|run --allow-no-credential`
-  (no MCP parameter) degrades it to a warn + ssh fallback. `validate.CheckAuth`
-  warns on a lone mint/revoke or a mint without `forge-hosts`. Implicit
-  sessions, the `disable-merge-queue` path, and the creation-time base-branch
-  fetch are outside it. `[auth].url-resolver` (#335) is read only from layers
-  ABOVE the repo (`sweatfileio.TrustedURLResolver`; repo-layer ⇒ SKIP +
-  validate warn): ambient `sh -c` in the repo root before the mint; its
-  `canonical_https` JSON becomes `url.<canonical_https>.insteadOf = <origin>`,
-  stored on `Credential.Remote` for `MirrorInto`. Failure = failed mint, never
-  the string rewrite; `sc resurrect` runs the lane too.
-- **Stacked / queued intra-session merges** (FDR 0025, #265): a second
-  `merge-this-session-async` while a gate runs ENQUEUES the next batch
-  (in-process per-worktree queue, `cmd/spinclass/merge_queue.go`) rather than
-  refusing. A queued entry records **no pin**: at dequeue it re-runs
-  `PrepareMerge`+`FinishMerge` fresh, so git patch-id dedup drops the
-  already-landed prior batch. `job.OnJobDone` drives `processMergeQueue`: a
-  failed merge drains the queue (aborted wake naming the culprit), a succeeded
-  merge or completed check dequeues the next. An enqueue **claims** the
-  attestation (a live claim makes it unavailable to the next batch); a drained
-  entry releases it. Worktree sessions
-  only; a dequeue emits a start-notice wake with the job id (#366);
-  `[hooks].disable-merge-stacking` is the rollback.
-- **`post-merge` hook** (FDR 0023, #244): `[hooks].post-merge` runs after a merge
-  fully lands (ff-only done; pushed when gitSync). On the queued path it runs
-  **under the landing lock**, as the last stage before `FinishMerge` returns — a
-  merge is exclusive end to end so no sibling deploy interleaves (#244; a slow hook
-  extends that exclusive region). Non-fatal: a nonzero exit emits a `severity=warn`
-  point but does NOT fail the merge (nothing to roll back). Bounded by
-  `[hooks].post-merge-timeout`, a **wall-clock** cap ON by default at 10m (#246;
-  `"0"` disables), overridable per merge, no ceiling, via `post_merge_timeout` /
-  `--post-merge-timeout` (`merge.PostMergeOptions`, FDR 0026).
-  Publishes `SPINCLASS_MERGED_SHA` (landing sha), `_MERGED_BRANCH`,
-  `_DEFAULT_BRANCH`, `_MERGE_PUSHED`, `_REPO_PATH`, `_PINNED_SHA` and the cap as
-  `SPINCLASS_POST_MERGE_TIMEOUT`/`_TIMEOUT_SECONDS`/`_DEADLINE` (+ `_TARGET`) via
-  `merge.PostMergeEnv` (shared with `sc run`). All land paths fire it;
-  `sc check` never does; `disable-post-merge` opts out. Its config is read at the
-  LANDED sha (#300, `merge.loadCommitHierarchy`: the committed `sweatfile` is the
-  worktree layer, while global, parent and root-checkout layers stay live), never
-  from the session worktree; target selection validates at the pin.
-- **Named post-merge targets + verify** (FDR 0026, #273): a top-level
-  `[[post-merge]]` array (the `[[mcps]]`/`[[remotes]]` idiom; not
-  `[[hooks.post-merge]]` — TOML can't union that key as both string and array)
-  of `{name, command, verify?}` targets, SUPERSEDING the legacy
-  `[hooks].post-merge` string (dormant, not dead). `verify` runs iff `command`
-  exits 0; per-target verdict ∈ `ok`/`command-failed`/`verify-failed`. A
-  name-only entry is a removal sentinel. `merge-this-session(-async)` gains a
-  `targets` param (nil=all, `[]`=none, subset=those; unknown name fails
-  PRE-landing) and `sc merge` gains `--post-merge-targets`/`--no-post-merge`.
-  Targets run **concurrently** (spinclass#276), each its own reporter Phase
-  node (crap's muxing model, like the pre-merge hook) — verdict rides on
-  `node_end` (`✓/✗ post-merge <name>`); a failed node is `severity=warn`,
-  non-fatal (merge still succeeds; #259 lifts every `✗ post-merge` line into
-  the wake). One shared `post-merge-timeout` sizes for the slowest target, not
-  the sum; a deadline kill → `verdict=timeout`. Per-target `paths` filters are
-  deferred (would bake in a git-diff assumption).
-- **Pre-merge REPAIR phase** (FDR 0018): when `[hooks].repair` is set,
-  `PrepareMerge` runs it in the **session worktree** before the pin to fold
-  mechanical fixes into the merged commit (canonical
-  `conformist --commit --amend --exit-zero-on-fix`; amend detected via HEAD-sha
-  delta). Merge-only. A worktree with uncommitted tracked changes is refused
-  before REPAIR runs (`dirty check <branch>`, #345) — otherwise the amend would
-  fold them into the pinned commit; untracked files don't count. spinclass's
-  own sweatfile has **retired** this in favour of the per-commit hook below.
-- **Per-commit repair hook** (FDR 0019, #183, #267): `[hooks].pre-commit`
-  installs a per-worktree git pre-commit hook (`internal/apply/precommit.go`)
-  so drift is repaired at authoring time. Canonical value is the store-pinned
-  wrapper **`conformist-pre-commit`** (not a bare `conformist --staged` —
-  conformist#51). `.spinclass/hooks` (via `core.hooksPath`) is a composing
-  dispatcher that runs the formatter then execs the native hook. **#267**: it
-  bakes `git hash-object flake.lock` at install; on a commit, if the live lock
-  hash differs (a flake bump since the session froze) it re-evals the formatter
-  via `nix develop --command` — building the current devShell if needed (a
-  blocking commit, accepted) — so a stale toolchain can't restamp generated
-  files. The baked hash never self-updates (that would fast-path back to the
-  stale hook); `sc resume` regenerates it fresh. `disable-pre-commit` uninstalls
-  (rollback). Worktree sessions only.
-- **Inactivity watchdog**: `[hooks].inactivity-timeout` (Go duration; unset =
-  off) bounds how long the pre-merge hook may go silent. Covers
-  merge/check/`sc check` + async twins (all funnel through
-  `hookrun.PreMergeInDir`). Distinct error message vs `session-job-cancel`.
-- **Hook cancellation** (#188, `hookrun.runHookInDirEnv`): `cmd.Cancel` is
-  **SIGTERM** not SIGKILL (SIGKILL orphaned the `nix` below `just`, holding the
-  pipe `Wait` blocks on); `cancelGrace` (10s) escalates. **No `Setpgid`** (FDR
-  0023's detached children); unscoped + SIGKILL-escalated ⇒ a warn that
-  descendants may still run. Sync merge/check and `sc merge|check|run` pass a
-  ctx cancelled on SIGINT/SIGTERM (+SIGHUP for `sc`; `gateSignalContext`, 2nd
-  signal force-exits; a signal ignored at start, e.g. `nohup`, stays ignored),
-  so the hook dies before its build worktree goes; `serve`
-  cancels on INT/TERM, discards SIGHUP. Merges are session-durable: stdin EOF
-  drains, never cancels. A cancel after landing SIGTERMs the post-merge hook.
-  A client *rejecting* one call cancels nothing until purse-first#200.
-- **Pre-merge hook systemd scope** (#25, ringmaster#12/RFC-0016): the pre-merge
-  hook runs under `systemd-run --user --scope` (`clown.ScopeArgv`); cancel calls
-  `clown.ScopeStop` to SIGKILL the cgroup (`TestPreMergeScopeReapsSubtreeOnCancel`).
-  Scope id = `clown.ScopeIDFromContext`: the async job id, or a `sync-…` local id
-  (`WithLocalScope`, own ctx key, never sent to ringmaster). Post-merge passes
-  `""`. No scope tier (no user bus: sandbox, macOS) ⇒ bare hook. A scope that
-  fails to SET UP falls back once to the bare hook with a warn (a start marker
-  written inside the scope proves a started hook is never re-run);
-  `[hooks].require-hook-scope` makes that fatal (opt-in now, default later,
-  fallback eventually removed). Real scope path is dogfooded, not CI.
-- **Base-branch freshening at creation** (#250, `internal/basebranch`): a fresh
-  session's branch is cut from the repo's **fetched remote default branch**
-  (the landing target, #315), passed to `git worktree add -b` as an explicit
-  sha — fixing `-b`'s base-on-HEAD (a checkout parked on a feature branch) and
-  the spawn path that freshened nothing (`spawn.Launch` → `shop.Create` bypassed
-  the old main-worktree pull). Gate lives in `shop.createWorktree`, the single
-  funnel below start/spawn/run. A local branch that can't ff is an
-  `advance local` skip, never a refusal; only a failed fetch refuses,
-  overridable by `--allow-stale-base` / `[hooks].allow-stale-base` — deliberately **no MCP
-  parameter** (a driver can't wave away a worker's stale toolchain). `sc fork` /
-  `start-gh_pr` excluded. Fetch is context-bounded with `GIT_TERMINAL_PROMPT=0` +
-  `ssh -o BatchMode=yes` (ssh/cred helpers read `/dev/tty`, so a nil Stdin isn't
-  protection — a hang surfaces only as a spawn hello-deadline expiry).
-- **Setup staleness & `sc rebuild`** (`internal/setupfingerprint`): setup is
-  applied **once at `sc start`** (`sc resume` does NOT re-apply), so it drifts.
-  A fingerprint (`sha256(scheme · version+commit · pins · canonical-JSON(merged
-  config))`) is recorded in session state; a mismatch flags stale. `sc rebuild`
-  re-applies (`--check` reports read-only, nonzero when stale); `sc resume`
-  warns and, with `[hooks].auto-rebuild-on-resume`, re-applies.
-  **Limitation:** does not detect external-tool *version* drift behind an
-  unchanged command.
-- **Nix gc on close/clean**: `sc close`/`sc clean` gc the worktree's resolved
-  closure (`nix-store --delete`; Nix liveness is the safety net). Opt out with
-  `[hooks].disable-nix-gc` or `sc close --nix-gc=<bool>`. No-op without
-  `nix-store` on PATH.
-- **Multi-target close** (`close.RunMany`, purse-first#190): `sc close A B C`
-  closes each independently; nonzero exit if any failed. `target` is
-  **variadic** (a param after it is flag-only, so `force`/`nix-gc` keep their
-  positions). 0–1 targets delegate to `Run` (flat output unchanged); N>1 emits
-  one TAP doc with a subtest per target, so `RunResolved`'s body moved to
-  `runResolvedInto(tw, …)` with the document owned by the caller. nix-gc reaps
-  PER TARGET: each plan is captured before its worktree's removal.
+- **Spawned workers** (FDR 0006, #262; confinement FDR 0035; confined spawn: #382): `sc spawn` /
+  `spawn-session` launch a detached worker; async under clown (#266). Reap
+  authority is a **handle** (FDR 0032): `close-child-session` gates on it,
+  `force` is always-ask (`perms.AlwaysAsk`); grant/release are always-ask.
+- **Resurrect** (FDR 0027, #291): `close.RunResolved` records `DeletedSHA` in
+  the tombstone; `sc resurrect` recreates the worktree from it.
+- **Exemption predicates** (FDR 0031, `merge/policy.go`) and **attestation
+  lifecycle** (FDR 0007, #219, `internal/attestation`).
+- **No implicit-session merge** (#317): refused before any gate; `sc check`
+  still works.
+- **Async merge/check** (`internal/job`, FDR 0010, FDR 0025): registered only
+  under clown; an async job IS a ringmaster job (#243). **Default to the
+  synchronous tools**; never hot-poll. A second async merge enqueues (#265,
+  `[hooks].disable-merge-stacking`). Liveness flock, ProtocolVersion gate,
+  cancel observer, systemd scope: `spinclass-internals(7)`; hook cancellation
+  (#188): `docs/plans/2026-10-04-188-sync-hook-cancellation.md`.
+- **Dynamic system-prompt fragment** (`internal/sysprompt`; FDR 0021, FDR 0030,
+  #187): `serve` answers `prompts/get`; the fetch is **deadline-capped**
+  (`repoFetchTimeout` 2s) and must never block. Trailers: repository line
+  (`internal/repoinfo`), forge workflow, co-active sessions (#238), design
+  records, optional manpage/repo indexes (`[sysprompt]`).
+- **Pre-merge build worktree** (FDR 0013) → **merge queue** (FDR 0022, #235) →
+  **detached landing worktree / Alt B** (FDR 0029, #284) → **landing target**
+  (#315/#295, `internal/landing`; merges read the remote tracking ref, never
+  local `<default>`) → **post-merge** (FDR 0023, #244) with named targets +
+  verify (FDR 0026, #273; config read at the LANDED sha, #300). Local-default
+  caveats: `spinclass-local-default-ref(7)`.
+- **Per-session forge push credentials** (FDR 0028, #285, `internal/auth`;
+  `url-resolver` #335 is read only from layers above the repo).
+- **Pre-merge REPAIR** (FDR 0018; a dirty tracked tree is refused, #345) and
+  **per-commit hook** (FDR 0019, #183/#267; canonical value
+  `conformist-pre-commit`).
+- **Inactivity watchdog** (`[hooks].inactivity-timeout`; funnels through
+  `hookrun.PreMergeInDir`).
+- **Base-branch freshening** (FDR 0024, #250, `internal/basebranch`): fresh
+  sessions cut from the fetched remote default; `--allow-stale-base` has
+  deliberately **no MCP parameter**.
+- **Setup staleness & `sc rebuild`** (`internal/setupfingerprint`):
+  fingerprint recorded in session state; setup applies once at `sc start`.
+  Limitation: external-tool *version* drift behind an unchanged command is
+  undetected. See `spinclass-sweatfile(5)`.
+- **`sc exec`, multi-target close, nix gc on close/clean**:
+  `spinclass-internals(7)`, `spinclass-sweatfile(5)` (`disable-nix-gc`).
+- **Metrics** (`internal/statsd`, #363): `spinclass-local-default-ref(7)`.
 
-## Sweatfile config quick reference
+## Sweatfile config
 
-Full reference: `spinclass-sweatfile(5)`. The hierarchy merges global → parent
-dirs → repo at each level. Notable surface:
-
-- Arrays with nil/empty/non-empty merge semantics (nil inherit, `[]` clear,
-  non-empty append): `git-excludes`, `claude-allow`, `envrc-directives`,
-  `allowed-mcps`.
-- Arrays of tables, dedup-by-name: `[[mcps]]`, `[[start-commands]]`,
-  `[[remotes]]`, `[[pre-merge-*]]`.
-- `[env]` (map merge); `[hooks]` (lifecycle hooks + the `disable-*` /
-  `*-timeout` / output-format knobs, scalar override); `[auth]`
-  (`mint-command` / `revoke-command`, scalar override — FDR 0028);
-  `[metrics]` (`statsd-address` / `disable-statsd`, scalar override, beats
-  the `STATSD_*` env — #363); `[session-entry]` (start/resume/spawn-entry/spawn-window argv, per-field
-  override; `model-flags` provider→CLI-flag map and `model-ids` alias→ID
-  map, both merged per-key like `[env]`; `model-ids`' built-in default
-  ships via `GetDefault()`, not an inline accessor fallback);
-  `[sysprompt]` (`doc-index-dirs`, `man-index`, `repo-index` arrays — all
-  **override not append**: non-empty replaces, `[]` disables, nil inherits.
-  Only `doc-index-dirs` has a built-in default; the other two are off until
-  selected. `index-limit` is a scalar override capping each index's rows,
-  default 400, `<= 0` uncaps — FDR 0030).
-
-**Custom start commands** (`[[start-commands]]`): each entry registers
-`sc start-<name>` with a validated positional arg + tab completion.
-`exec-completions` emits `[{arg, description}]` JSON; `exec-start` emits
-`{branch?, description?, context}` JSON with `{arg}` substituted. Merges across
-the hierarchy (later wins by name); built-in subcommands always win. The
-built-in `gh_issue` ships via `GetDefault()` as a tracer bullet.
-
-**MCP servers**: `allowed-mcps` (array-append) auto-approves external servers;
-`[[mcps]]` (dedup-by-name) registers + auto-approves servers (name-only entry
-removes an inherited one; every entry with a command implicitly allow-lists).
-
-**Remotes**: `[[remotes]]` declares `host:`-prefixed resume targets (dedup-by-
-name; `remove = true` drops an inherited one). `sc list` queries each host in
-parallel and refreshes a completion cache; `close`/`merge` reject `host:`
-targets (FDR 0011).
+Full reference: `spinclass-sweatfile(5)`; custom start commands:
+`spinclass-start-commands(7)`. Merge semantics (hierarchy global → parent dirs
+→ repo): string arrays are nil=inherit, `[]`=clear, non-empty=append;
+arrays-of-tables dedup by name (`[[mcps]]`, `[[start-commands]]`, `[[remotes]]`,
+`[[post-merge]]`; a name-only entry removes an inherited one); `[sysprompt]`
+arrays **override** rather than append; scalars override.
 
 ## Nix Build
 
 Standalone flake against `amarbel-llc/nixpkgs`; the fork's `buildGoApplication`
-overlay injects `-X main.version`/`-X main.commit` ldflags from the derivation's
-`version`/`commit` attrs. Binary installs as `spinclass` with an `sc` symlink;
-bash + fish completions included.
-
-`go.nix` (igloo FDR 0008) is the module manifest: no go.mod, go.sum or
-gomod2nix.toml. Its `flakeInputs` bridge `tommy`, `crap`, `ringmaster` and
-`purse-first/libs/dewey` onto their producer flakes' `go-pkgs` outputs (bump
-with `nix flake update <input>`); third-party `require`s carry vendor hashes.
-`ringmaster` is also a test `nativeCheckInputs` binary and a devShell package,
-so one flake rev backs the linked `jobwake` library, the contract-test binary,
-and the CLI. `purse-first` is a direct input (ringmaster's transitive pin
-predates `pkgs/mesa` — hence the `ringmaster.inputs.purse-first.follows`
-override) so `sc list` can bridge `libs/dewey` (mesa, #185).
-
-On x86_64-linux the default `nix build`, `checks.spinclass-tests` (per-package
-`go test`), `checks.vet`/`lint` and `checks.tommy-codegen` run on igloo's
-godyn backend; buildGoApplication builds elsewhere and as
-`.#spinclass-build_go_application`. No ambient `go`: `just debug-go-test
-<dir>` runs `godyn-test` (`git add -N` new files first).
+injects `-X main.version`/`-X main.commit`. Binary `spinclass` with an `sc`
+symlink; bash + fish completions included. `go.nix` (igloo FDR 0008) is the
+module manifest — no go.mod/go.sum; `flakeInputs` bridge `tommy`, `crap`,
+`ringmaster` and `purse-first/libs/dewey` onto producer `go-pkgs` outputs (bump
+with `nix flake update <input>`); `purse-first` is a direct input
+(`ringmaster.inputs.purse-first.follows`). `ringmaster` is also a test
+`nativeCheckInputs` binary and devShell package (#253). On x86_64-linux the
+default build, `checks.spinclass-tests`, `vet`, `lint` and `tommy-codegen` run
+on igloo's godyn backend; `.#spinclass-build_go_application` elsewhere.
 
 ## Dependencies
 
-Module: `code.linenisgreat.com/spinclass`.
-
-- `code.linenisgreat.com/tap/go` — TAP-14 output (non-merge/check commands).
-- `code.linenisgreat.com/crap/go-crap/v2` — ndjson-crap reader + the
-  merge/check output stack (`crap.Reporter` emission, `viewport` presentation;
-  wired in `internal/present`).
-- `code.linenisgreat.com/purse-first/libs/go-mcp` — MCP server framework
-  (`command.App` does CLI dispatch + MCP serving; no cobra).
-- `code.linenisgreat.com/purse-first/libs/dewey/pkgs/mesa` — the List-Table
-  NDJSON renderer (RFC 0003), bridged via `go.nix`. `sc list`'s
-  pretty/plain rendering (`cmd/spinclass/list_view.go`) builds a `mesa.Table`
-  and renders it styled (`--format` unset on a TTY, and `--watch`) or plain
-  (piped / `--format tap`); `--format json` stays the original
-  `session.ListRow` array, untouched by this migration (#185).
-- `code.linenisgreat.com/tommy` — TOML library.
-- `code.linenisgreat.com/ringmaster/pkgs/jobwake` — the linked half of the
-  job platform: `AcquireJobLock` (per-job liveness flock) + `ProtocolVersion`
-  (the serve-start compatibility pin), consumed by `internal/clown` (#26), plus
-  the scope-tier helpers `ScopeArgv`/`ScopeStop`/`ScopeUnitName` (#25). The
-  runtime CLI is resolved from PATH, not this import.
+Module `code.linenisgreat.com/spinclass`: `tap/go` (TAP-14 output),
+`crap/go-crap/v2` (merge/check ndjson-crap + `present`), `purse-first/libs/go-mcp`
+(`command.App`), `purse-first/libs/dewey/pkgs/mesa` (`sc list` List-Table
+renderer, #185; `--format json` stays the raw `session.ListRow` array),
+`tommy` (TOML), `ringmaster/pkgs/jobwake` (linked half of the job platform).
