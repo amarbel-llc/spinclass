@@ -25,6 +25,7 @@ type prober struct {
 	pids       []int  // every process in the unit's cgroup and its descendants
 	root       string // /proc/<pid>/root of the unit's main process
 	subjectErr error
+	note       string // a defect in the record that did not stop the probes
 
 	liveUnits map[string]UnitRecord // session key -> record, for sessions that have one
 	liveErrs  map[string]error      // session key -> why it has none
@@ -63,12 +64,17 @@ func (p *prober) loadSubject() {
 	}
 	p.pids = pids
 	rootPID := pids[0]
+	// The reported main pid only picks which process to look through. It is
+	// advisory: the cgroup is the authority, and the loop below fails unless
+	// EVERY process in it shares one mount namespace, so any member speaks for
+	// the unit. A main pid that is not in the cgroup (clown reported one that
+	// was not) is ignored and noted, rather than skipping every fact.
 	if rec.MainPID > 0 {
-		if !slices.Contains(pids, rec.MainPID) {
-			p.subjectErr = fmt.Errorf("unit %s's reported main pid %d is not in its cgroup", rec.Unit, rec.MainPID)
-			return
+		if slices.Contains(pids, rec.MainPID) {
+			rootPID = rec.MainPID
+		} else {
+			p.note = fmt.Sprintf("the record's main pid %d is not in the unit's cgroup (ignored; looked through pid %d)", rec.MainPID, rootPID)
 		}
-		rootPID = rec.MainPID
 	}
 	p.root = fmt.Sprintf("/proc/%d/root", rootPID)
 	// Path facts look through one process's root; they speak for the whole
@@ -284,7 +290,11 @@ func (p *prober) f1Unit() Fact {
 		}
 		return nil
 	}()
-	return fact(id, name, err, fmt.Sprintf("unit %s, %d processes", p.rec.Unit, len(p.pids)))
+	detail := fmt.Sprintf("unit %s, %d processes", p.rec.Unit, len(p.pids))
+	if p.note != "" {
+		detail += "; " + p.note
+	}
+	return fact(id, name, err, detail)
 }
 
 // environValue returns key's value in /proc/<pid>/environ ("" when unset).

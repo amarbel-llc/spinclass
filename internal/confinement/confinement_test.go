@@ -518,11 +518,20 @@ func TestMountNamespaceMismatchFailsClosed(t *testing.T) {
 	}
 }
 
-func TestMainPIDOutsideTheCgroupFails(t *testing.T) {
+// The reported main pid is advisory: clown reported one that was not in the
+// unit's cgroup and every fact was skipped on it. The cgroup is the authority;
+// the probes look through a cgroup member (all of which must share one mount
+// namespace, see TestMountNamespaceMismatchFailsClosed) and say so.
+func TestMainPIDOutsideTheCgroupIsIgnoredAndNoted(t *testing.T) {
 	sys, in := confinedHost()
 	sys.files[UnitRecordPath(stateDir, "/wt/a")] = record("agent-a.service", unitCG, ptyDev, "/run/user/1000/clown/agent/a/serve.sock", 999)
-	if f := factByID(t, Run(sys, in), "F1"); f.OK || !strings.Contains(f.Detail, "main pid") {
-		t.Errorf("F1 = %+v", f)
+	r := Run(sys, in)
+	f := factByID(t, r, "F1")
+	if !f.OK || !strings.Contains(f.Detail, "main pid 999 is not in the unit's cgroup") {
+		t.Errorf("F1 = %+v, want ok with the main-pid note", f)
+	}
+	if f7 := factByID(t, r, "F7"); strings.Contains(f7.Detail, "no confined unit to probe") {
+		t.Errorf("F7 was skipped on the bad main pid: %+v", f7)
 	}
 }
 
