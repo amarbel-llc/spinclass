@@ -343,6 +343,26 @@ the driver reads the same path; only that one directory is writable, so a unit
 cannot write a sibling's hello. Unconfined spawns use the shared directory as
 before.
 
+## Closing a confined session stops its unit (2026-10-20)
+
+`close-child-session` reaped a confined worker but left its agent unit running
+with claude inside, its worktree removed from under it: nothing in the close
+path touched the unit. `close.RunResolved` now calls `confinement.StopUnit`
+before any teardown. It reads the unit name from the record clown wrote
+(refusing one that is not a `spinclass-agent-*.service` whose cgroup ends in that
+name, so a bad record cannot make it stop another unit), runs `systemctl --user
+stop`, waits up to 15s for the unit's cgroup to empty, then removes the record
+and the launch spec. Clown's frontend exits and removes the agent dir on its own
+once the unit is gone (confirmed by the operator on `smart-hemlock`). A
+worktree with no record was never confined and is untouched. A unit that will
+not stop fails the close before anything is torn down; `--force` warns and
+closes anyway. `sc clean`'s removal of abandoned worktrees does not stop units
+yet.
+
+The check also treats the record's `main_pid` as advisory: one outside the
+unit's cgroup is ignored and noted in F1, since every process in the cgroup
+must share one mount namespace for the path facts to hold anyway.
+
 ## The principal across `sc resume` (FDR 0034 item 17)
 
 The check and the grant chain bind on the worker's principal (its

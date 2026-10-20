@@ -16,6 +16,7 @@ import (
 	"github.com/mattn/go-isatty"
 
 	"code.linenisgreat.com/spinclass/internal/auth"
+	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/executor"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/nixgc"
@@ -245,6 +246,14 @@ func runResolvedInto(tw *tap.Writer, repoPath, wtPath, branch string, force bool
 	// returns when the PID is gone or the deadline passes.
 	executor.WaitForExit(activePID, 2*time.Second)
 
+	// A confined worker's agent unit outlives its worktree unless it is stopped
+	// (FDR 0035): the agent would keep running with its directory removed from
+	// under it. Before any teardown, so a unit that will not stop leaves the
+	// session whole; --force closes anyway and warns.
+	if err := stopConfinedUnit(tw, wtPath, branch, force); err != nil {
+		return err
+	}
+
 	// Revoke the session's forge push credential (FDR 0028) while the
 	// worktree — its credential file and sweatfile — still exists. Non-fatal:
 	// a failed revoke is surfaced as a warning and the token stays recorded
@@ -321,6 +330,40 @@ func activeKey(repoPath, branch string) string {
 		return st.SessionKey
 	}
 	return filepath.Base(repoPath) + "/" + branch
+}
+
+// stopUnit is the seam over confinement.StopUnit for tests.
+var stopUnit = func(ctx context.Context, stateDir, wtPath string) (bool, error) {
+	return confinement.StopUnit(ctx, confinement.Host{}, stateDir, wtPath)
+}
+
+// stopConfinedUnit ends the worktree's agent unit when it has one. A session
+// never launched confined has no unit record, and nothing happens. A unit that
+// cannot be stopped fails the close (the worker is still running, so tearing
+// its worktree down would be wrong) unless force, which warns and carries on.
+func stopConfinedUnit(tw *tap.Writer, wtPath, branch string, force bool) error {
+	stateDir, err := confinement.DefaultStateDir()
+	if err != nil {
+		return nil // no state dir, so no unit records either
+	}
+	stopped, serr := stopUnit(context.Background(), stateDir, wtPath)
+	desc := "stop agent unit " + branch
+	switch {
+	case serr != nil && !force:
+		if tw != nil {
+			tw.NotOk(desc, map[string]string{"error": serr.Error()})
+		}
+		return fmt.Errorf("stopping the agent unit of %s: %w (use --force to close anyway)", branch, serr)
+	case serr != nil:
+		if tw != nil {
+			tw.NotOk(desc, map[string]string{"severity": "warn", "message": serr.Error()})
+		} else {
+			fmt.Fprintf(os.Stderr, "spinclass: %s failed: %v\n", desc, serr)
+		}
+	case stopped && tw != nil:
+		tw.Ok(desc)
+	}
+	return nil
 }
 
 // revokeProfileBinding unbinds the session's minted profile-right link (FDR

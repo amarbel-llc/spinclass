@@ -3,6 +3,7 @@ package close
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -491,6 +492,62 @@ func TestRunResolvedUnbindsTheSessionsProfileGrant(t *testing.T) {
 	}
 	if _, ok := store.Current(key); ok {
 		t.Error("profile binding survived close")
+	}
+}
+
+// A confined worker's agent unit must not outlive its worktree: close stops it
+// first, and a unit that will not stop fails the close unless forced.
+func TestRunResolvedStopsTheSessionsAgentUnit(t *testing.T) {
+	repoPath, wtPath := setupNoTTYClose(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	prev := stopUnit
+	t.Cleanup(func() { stopUnit = prev })
+	var got string
+	stopUnit = func(_ context.Context, _ string, wt string) (bool, error) { got = wt; return true, nil }
+
+	if err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", true, nil, "tap"); err != nil {
+		t.Fatalf("RunResolved: %v", err)
+	}
+	if got != wtPath {
+		t.Errorf("stopUnit called for %q, want the closing worktree %q", got, wtPath)
+	}
+}
+
+// Without --force a unit that will not stop fails the close BEFORE any
+// teardown; stopConfinedUnit is the step that decides, so it is tested directly
+// (the full path needs a clean, integrated worktree to get past the earlier
+// unintegrated-work prompt).
+func TestStopConfinedUnitFailsWithoutForceAndWarnsWithIt(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	prev := stopUnit
+	t.Cleanup(func() { stopUnit = prev })
+	stopUnit = func(context.Context, string, string) (bool, error) {
+		return false, errors.New("cgroup still holds processes")
+	}
+
+	err := stopConfinedUnit(nil, "/wt/x", "feature-x", false)
+	if err == nil || !strings.Contains(err.Error(), "agent unit") || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("got %v, want a refusal naming the agent unit and --force", err)
+	}
+	if err := stopConfinedUnit(nil, "/wt/x", "feature-x", true); err != nil {
+		t.Errorf("--force must carry on: %v", err)
+	}
+}
+
+func TestRunResolvedForceClosesDespiteAUnitThatWillNotStop(t *testing.T) {
+	repoPath, wtPath := setupNoTTYClose(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	prev := stopUnit
+	t.Cleanup(func() { stopUnit = prev })
+	stopUnit = func(context.Context, string, string) (bool, error) {
+		return false, errors.New("cgroup still holds processes")
+	}
+
+	if err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", true, nil, "tap"); err != nil {
+		t.Fatalf("--force must close anyway: %v", err)
+	}
+	if _, serr := os.Stat(wtPath); serr == nil {
+		t.Error("the worktree survived a forced close")
 	}
 }
 
