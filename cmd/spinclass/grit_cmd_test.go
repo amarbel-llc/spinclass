@@ -37,8 +37,21 @@ func TestResolveGritCallerWithoutAPrincipalIsConfined(t *testing.T) {
 func TestResolveGritCallerWithAnUnrecordedPrincipalIsUnconfined(t *testing.T) {
 	t.Setenv("CLOWN_SESSION_ID", "a-principal-with-no-records")
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	removeRecord, err := registerServeRecord()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(removeRecord)
 	if got := resolveGritCaller(t.TempDir()); got.Confinement != store.ConfinementUnconfined {
 		t.Fatalf("a principal no record names must be unconfined, got %v", got.Confinement)
+	}
+}
+
+func TestResolveGritCallerWithoutAServeRecordIsConfined(t *testing.T) {
+	t.Setenv("CLOWN_SESSION_ID", "a-principal-with-no-records")
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if got := resolveGritCaller(t.TempDir()); got.Confinement != store.ConfinementConfined {
+		t.Fatalf("a serve with no record must be confined, got %v", got.Confinement)
 	}
 }
 

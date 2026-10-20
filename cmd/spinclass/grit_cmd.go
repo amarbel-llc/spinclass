@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
@@ -173,6 +174,15 @@ func gritHandler(tool string) func(context.Context, json.RawMessage, command.Pro
 // section 9). It is a variable so tests can stand in for the frontend state.
 var gritCaller = resolveGritCaller
 
+// registerServeRecord writes this serve's record under the state directory.
+func registerServeRecord() (func(), error) {
+	stateDir, err := confinement.DefaultStateDir()
+	if err != nil {
+		return func() {}, err
+	}
+	return confinement.RegisterServe(stateDir, os.Getenv("CLOWN_SESSION_ID"), os.Getpid(), os.Getppid(), time.Now())
+}
+
 // resolveGritCaller classifies the caller by the principal of the clown hosting
 // this serve, which is what the launching clown wrote into a confined unit's
 // record. Unresolved counts as confined. A confined caller works in the
@@ -182,7 +192,7 @@ func resolveGritCaller(cwd string) store.Session {
 	principal := os.Getenv("CLOWN_SESSION_ID")
 	stateDir, err := confinement.DefaultStateDir()
 	if err == nil {
-		confined, _ := confinement.ClassifyCaller(confinement.Host{}, stateDir, principal)
+		confined, _ := confinement.ClassifyServeCaller(confinement.Host{}, stateDir, principal, os.Getpid())
 		if !confined {
 			s.Confinement = store.ConfinementUnconfined
 		} else if worktree, ok := confinement.WorktreeOfPrincipal(confinement.Host{}, stateDir, principal); ok {

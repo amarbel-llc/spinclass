@@ -46,6 +46,15 @@ func registerServeCommand(app *command.App) {
 			// unconditional — a completing check/merge just finds an empty queue.
 			wireMergeQueue()
 
+			// One-serve record (FDR 0036 section 9): lets the grit caller
+			// classification detect a second serve claiming this principal.
+			// A failure leaves this serve without a record, i.e. confined.
+			if removeRecord, regErr := registerServeRecord(); regErr != nil {
+				servelog.Errorf("serve.record err=%v", regErr)
+			} else {
+				defer removeRecord()
+			}
+
 			// ProtocolVersion gate (#26, RFC-0018). Under clown, verify the
 			// jobwake this binary linked at build time matches the hosting
 			// ringmaster's observable protocol. A mismatch does NOT stop serve:
