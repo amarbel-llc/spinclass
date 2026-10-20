@@ -350,6 +350,30 @@ func TestConfinedCallersAreRefusedUnownedTargetsInTheBody(t *testing.T) {
 	}
 }
 
+// A caller whose ownership cannot be computed (no session branch, or no
+// session worktree) is refused every write: the hook's deferral for an
+// unresolved session is only safe because of this.
+func TestWritesWithoutComputableOwnershipAreRefused(t *testing.T) {
+	for name, mutate := range map[string]func(*store.Session){
+		"no branch":   func(s *store.Session) { s.Branch = "" },
+		"no worktree": func(s *store.Session) { s.Dir = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := confinedFixture(t)
+			s := f.session(store.ConfinementUnresolved, store.Identity{})
+			mutate(&s)
+			before := refState(t, f)
+			_, err := doAs(t, s, "commit", "", map[string]any{"message": "m", "allow_empty": true, "repo_path": f.worktree})
+			if !isOwnershipRefusal(err) {
+				t.Fatalf("want an ownership refusal, got %v", err)
+			}
+			if refState(t, f) != before {
+				t.Error("a refused operation must change nothing")
+			}
+		})
+	}
+}
+
 func TestUnconfinedCallersAreNeverRefusedByTheBody(t *testing.T) {
 	for _, tc := range ownershipCases {
 		t.Run(tc.name, func(t *testing.T) {

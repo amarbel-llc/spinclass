@@ -38,9 +38,11 @@ var resolveStoreSession = func() (store.Session, bool) {
 }
 
 // StoreVerdict is the PreToolUse reading of a grit store tool call (FDR 0036
-// section 2). isStore is false for any other tool. An unresolved or ambiguous
-// session, or an unreadable subcommand, yields Ask: the hook is the only gate
-// for foreign operations, so it fails closed.
+// section 2). isStore is false for any other tool. An unreadable subcommand
+// yields Ask. An unresolved or ambiguous session yields Allow: the hook cannot
+// see a confined caller's principal (clown#136), so the verdict is deferred to
+// the serve, whose classification and body ownership check refuse what the
+// caller does not own. With a resolved session Classify decides.
 func StoreVerdict(toolName string, toolInput map[string]any) (verdict store.Verdict, reason string, isStore bool) {
 	tool := strings.TrimPrefix(toolName, gritToolPrefix)
 	if tool == toolName || !storeTools[tool] {
@@ -55,7 +57,10 @@ func StoreVerdict(toolName string, toolInput map[string]any) (verdict store.Verd
 	}
 	callerSession, ok := resolveStoreSession()
 	if !ok {
-		return store.Ask, "grit " + tool + ": no unambiguous session for this caller; confirm each invocation", true
+		if forceRequested(toolInput) {
+			return store.Ask, "grit " + tool + ": force always asks, even when the session is unresolved", true
+		}
+		return store.Allow, "grit " + tool + ": session unresolved here, deferred to the serve: body ownership check applies", true
 	}
 	args, err := json.Marshal(toolInput)
 	if err != nil {
