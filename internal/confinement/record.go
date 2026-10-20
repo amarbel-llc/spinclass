@@ -49,6 +49,10 @@ type UnitRecord struct {
 	Error string `json:"error"`
 }
 
+// ErrUnitLaunchFailed marks a record clown wrote to report a failed launch.
+// It is final, not a record still being written, so callers must not retry it.
+var ErrUnitLaunchFailed = errors.New("clown reported the agent unit launch failed")
+
 // UnitRecordPath is where clown writes a session's unit record: in
 // spinclass's state directory, keyed by the worktree. Never inside the
 // worktree, which is bound read-write into the unit, so the unit could
@@ -79,7 +83,7 @@ func ParseUnitRecord(b []byte) (UnitRecord, error) {
 	}
 	switch {
 	case r.Error != "":
-		return UnitRecord{}, fmt.Errorf("clown reported the agent unit launch failed: %s", r.Error)
+		return UnitRecord{}, fmt.Errorf("%w: %s", ErrUnitLaunchFailed, r.Error)
 	case r.Version != UnitRecordVersion:
 		return UnitRecord{}, fmt.Errorf("agent unit record version %d, want %d", r.Version, UnitRecordVersion)
 	case r.Unit == "":

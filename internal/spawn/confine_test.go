@@ -3,6 +3,7 @@ package spawn
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -179,6 +180,24 @@ func TestBindPrincipalGivesUpAndReportsTheLastError(t *testing.T) {
 	err := bindPrincipalWhenRecorded(t.TempDir(), "r/b", "/w", time.Now())
 	if err == nil || !strings.Contains(err.Error(), "names no principal") {
 		t.Fatalf("got %v, want the last error", err)
+	}
+}
+
+// A record clown wrote to report a failed launch is final: the bind fails at
+// once with clown's message instead of waiting out the deadline.
+func TestBindPrincipalFailsAtOnceOnClownsLaunchError(t *testing.T) {
+	prevWait, prevPoll, prevRec := principalBindWait, principalBindPoll, recordPrincipal
+	principalBindWait, principalBindPoll = time.Minute, time.Millisecond
+	t.Cleanup(func() { principalBindWait, principalBindPoll, recordPrincipal = prevWait, prevPoll, prevRec })
+	calls := 0
+	recordPrincipal = func(confinement.System, string, string, string) (string, error) {
+		calls++
+		return "", fmt.Errorf("%w: no slirp4netns", confinement.ErrUnitLaunchFailed)
+	}
+	start := time.Now()
+	err := bindPrincipalWhenRecorded(t.TempDir(), "r/b", "/w", time.Now())
+	if err == nil || !strings.Contains(err.Error(), "no slirp4netns") || calls != 1 || time.Since(start) > 5*time.Second {
+		t.Fatalf("got err=%v after %d calls in %v, want an immediate failure with clown's message", err, calls, time.Since(start))
 	}
 }
 

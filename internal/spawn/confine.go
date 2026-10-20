@@ -55,7 +55,7 @@ func bindPrincipalWhenRecorded(stateDir, sessionKey, worktree string, since time
 	deadline := time.Now().Add(principalBindWait)
 	for {
 		err := bindPrincipalOnce(stateDir, sessionKey, worktree, since)
-		if err == nil || !time.Now().Before(deadline) {
+		if err == nil || errors.Is(err, confinement.ErrUnitLaunchFailed) || !time.Now().Before(deadline) {
 			return err
 		}
 		time.Sleep(principalBindPoll)
