@@ -457,6 +457,81 @@ from the in-unit moxyfile.
    No design is made here; recorded so the boundary in section 1 is not
    narrowed in the meantime.
 
+#### Implemented in step 8 (confined-commit slice)
+
+Built (spinclass #379); the read-write `.git` bind removal and clown's side
+stay with FDR 0035 / clown #274.
+
+- **Identity setting.** Sweatfile `[store]` with `author-name`, `author-email`,
+  `committer-name`, `committer-email`; scalar override down the cascade;
+  committer keys default to the author keys per field. Read by `runGrit` from
+  the merged hierarchy of the session worktree and carried in
+  `store.Session.Identity`. `Do` stamps it as `GIT_AUTHOR_*`/`GIT_COMMITTER_*`
+  on `commit`, `branch cherry-pick`, `revert`, `rebase` and `restack` for every
+  caller, confined or not. Unset fields add nothing, so git's own resolution
+  stays as before. Git keeps the original author of replayed commits
+  (cherry-pick, rebase, restack, amend), so for those only the committer
+  changes. Documented in `spinclass-sweatfile(5)`.
+- **Hooks.** For a confined caller every mutating verb runs as
+  `git -c core.hooksPath=/dev/null <verb>`, and `commit` also gets
+  `--no-verify`. This is broader than the commit-creating verbs on purpose: the
+  hooks directory is worker-writable, so `post-checkout` on `branch checkout`
+  would run worker code in the frontend just like `pre-commit`. Unconfined
+  callers are unchanged (the hook runs). The merge gate is the remaining check.
+- **Body ownership check.** For a confined caller `Do` refuses a write verb when
+  `writeAllowed` (the same checker `Classify` uses: canonicalized targets,
+  session-worktree binding of `repo_path`, owned current branch) rejects it,
+  ignoring the `force` flag, which only decides whether a human is asked. The
+  default-branch refusal still follows. Unconfined callers: no body check.
+  Read verbs are not checked, matching the always-allow read tier.
+- **Zero value fails closed.** `store.Session.Confinement` has an unresolved
+  zero value that counts as confined; a caller is unconfined only when
+  explicitly set so.
+- **Detection.** `confinement.ClassifyCaller(sys, stateDir, principal)`.
+  Confined unless every source positively shows otherwise: an empty or
+  unusable principal, a frontend principal mapping for it, a unit record
+  naming it (one, or several, which is reported as ambiguous), an unreadable or
+  unparsable record, an unreadable records directory, or a process inside a
+  clown agent unit all say confined. Only an absent mapping plus a records
+  directory that is absent or holds no record for the principal says
+  unconfined. The serve passes its own `CLOWN_SESSION_ID`.
+
+**Can the serve identify a confined caller?** Yes, from frontend state, not
+from the caller. The tool body runs in the frontend `serve`, which clown's
+pluginhost starts as the launching clown's child, so its environment carries
+that clown's `CLOWN_SESSION_ID`; the unit record's `principal` (written by the
+same clown) and the frontend mapping `principals/<principal>.json` (written by
+`RecordPrincipalFromUnit` from that record) are keyed by the same value. Both
+live under `$XDG_STATE_HOME/spinclass/` in the frontend's home, which the unit
+cannot see. This assumes one serve per launching clown (per session), as FDR
+0035 describes; if a single serve ever fronts several sessions, its principal
+cannot tell callers apart and everything would classify as confined.
+
+**Left open.**
+
+- The PreToolUse hook runs in the confined worker's own process, where
+  `CLOWN_SESSION_ID` is absent (clown#136) and the state directory is hidden.
+  `resolveStoreSession` therefore finds no session and the hook asks, which
+  under `dontAsk` is a deny. A confined worker can only commit once the hook
+  can allow it, so the hook needs a session source that does not depend on the
+  principal environment variable (for example the worktree path the hook runs
+  in); the body check exists so such an unauthenticated hook decision is not the
+  only gate. `ClassifyCaller` already treats a process inside an agent unit as
+  confined for that future use.
+- An empty `CLOWN_SESSION_ID` (a bare serve outside clown) counts as confined,
+  per the fail-closed ruling, so non-clown use of the grit tools gets the body
+  check and no hooks. Flip the call site in `resolveGritCaller` if that proves
+  too strict.
+- `[store]` is merged from every sweatfile layer including the worktree's own,
+  which a worker can edit, so a confined worker can choose the stamped identity.
+  It is cosmetic for authorship but could be moved to the trusted-layers-only
+  treatment `[auth].url-resolver` has.
+- A corrupt record for an unrelated session makes every caller classify as
+  confined (fail closed); repair or remove the record.
+- Reads by a confined caller are not scoped: `repo_path` on a read verb can
+  name any repository the frontend can read.
+- Not exercised against a real confined unit or a live clown.
+
 ## Interpretations
 
 - **"Prefixed allow-list"**: no session-id prefix exists on branches; I defined
