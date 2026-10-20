@@ -182,7 +182,7 @@ subcommand is always available.
   is ASYNC under clown (#266): returns session key + ringmaster job id,
   delivers the hello (or a reap-if-dead timeout) as a wake; `sc spawn` CLI
   blocks. Workers may spawn workers (the #151 always-ask floor, not a depth
-  cap, guards fan-out; a confined spawn is the carve-out, #382); `internal/spawn` owns resolution + launch. **Reaping**
+  cap, guards fan-out; confined spawn: #382); `internal/spawn` owns resolution + launch. **Reaping**
   (#249): `close-child-session` tears down a worker. Reap authority is a
   **handle** (FDR 0032 D1/D12/D13) — `authorizeChildReap` gates on the caller's
   principal holding one (seeded with the spawner at spawn), refusing
