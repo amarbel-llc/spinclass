@@ -522,14 +522,60 @@ cannot tell callers apart and everything would classify as confined.
   per the fail-closed ruling, so non-clown use of the grit tools gets the body
   check and no hooks. Flip the call site in `resolveGritCaller` if that proves
   too strict.
-- `[store]` is merged from every sweatfile layer including the worktree's own,
-  which a worker can edit, so a confined worker can choose the stamped identity.
-  It is cosmetic for authorship but could be moved to the trusted-layers-only
-  treatment `[auth].url-resolver` has.
+- (Resolved, see "Implemented: option 3 and hardening".) `[store]` was merged
+  from every layer including the worker-editable worktree sweatfile.
 - A corrupt record for an unrelated session makes every caller classify as
   confined (fail closed); repair or remove the record.
-- Reads by a confined caller are not scoped: `repo_path` on a read verb can
-  name any repository the frontend can read.
+- (Resolved, see below.) Reads by a confined caller were not scoped.
+- Not exercised against a real confined unit or a live clown.
+
+#### Implemented: option 3 and hardening
+
+Built (spinclass #379). The operator chose "option 3" for the hook problem
+above: for a caller the hook cannot resolve, the in-unit PreToolUse hook stops
+asking and the serve decides.
+
+- **Hook defers an unresolved session** (`perms.StoreVerdict`). No principal, or
+  no unambiguous session, now returns `Allow` with the reason "deferred to the
+  serve: body ownership check applies". A resolved session is unchanged
+  (`Classify` decides; owned targets allow, the rest ask). `force:true` still
+  asks even when unresolved, and the `AlwaysAsk` floors stay ahead of
+  `StoreVerdict` in `runPreToolUse`, unchanged. The deferral is safe only
+  because the body fails closed: a zero-value or unresolved `Session` counts as
+  confined, and a write verb whose ownership cannot be computed (no session
+  branch or no session worktree) is refused by `refuseUnownedForConfined`
+  (`TestWritesWithoutComputableOwnershipAreRefused`).
+- **One serve per principal** (`internal/confinement/serves.go`). At start
+  `spinclass serve` writes `{principal, pid, ppid, started}` to
+  `$XDG_STATE_HOME/spinclass/serves/<principal>-<pid>.json` (directory 0700,
+  file 0600, removed on exit; records of dead pids are pruned at the next start
+  and ignored when counting). `ClassifyServeCaller` (used by
+  `resolveGritCaller`) adds to `ClassifyCaller`: more than one live record for
+  the principal, or this serve's own record missing or mismatched, is confined.
+  An empty principal writes no record and stays confined. A failed record write
+  leaves the serve without a record, so confined.
+- **`[store]` identity from trusted layers only.** `[store]` is no longer merged;
+  `sweatfileio.TrustedStoreIdentity` reads each key from the last layer above
+  the repo (global, parent directories) that sets it, as
+  `TrustedURLResolver` does, and a repo or worktree value is ignored. `sc
+  validate` warns (`validate.CheckStore`). Documented in
+  `spinclass-sweatfile(5)`.
+- **Confined reads are scoped.** For a confined or unresolved caller a read verb
+  whose `repo_path` has a git toplevel other than the session worktree is
+  refused (`refuseReadOutsideSession`); an absent `repo_path` uses the session
+  worktree. Unconfined callers are not checked.
+
+**Still open.**
+
+- The one-serve record detects a duplicated `serve` process claiming a
+  principal. It does not detect several peers sharing one serve through the
+  clown stdio-bridge loopback port: they appear as one serve with one principal.
+  That needs a peer check in clown.
+- The hook may not see `CLOWN_SESSION_ID` even for unconfined sessions. Those
+  sessions now get no human prompt on foreign grit operations; they get a hard
+  body refusal on writes they do not own instead (operator-accepted). The
+  body derives the session from the serve's cwd and the frontend mapping when
+  the principal is unmapped.
 - Not exercised against a real confined unit or a live clown.
 
 ## Interpretations
