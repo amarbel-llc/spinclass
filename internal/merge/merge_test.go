@@ -416,13 +416,18 @@ func TestResolvedRecordStream(t *testing.T) {
 	}
 
 	tests := testRecords(recs)
-	if len(tests) != 4 {
-		t.Fatalf("expected 4 test records, got %d: %+v", len(tests), tests)
+	if len(tests) != 5 {
+		t.Fatalf("expected 5 test records, got %d: %+v", len(tests), tests)
 	}
 	assertTestPoint(t, tests, 0, "rebase feature-tap", true)
 	assertTestPoint(t, tests, 1, "merge feature-tap", true)
-	assertTestPoint(t, tests, 2, "remove worktree feature-tap", true)
-	assertTestPoint(t, tests, 3, "delete branch feature-tap", true)
+	// A local-only merge says outright that nothing was pushed (#376).
+	assertTestPoint(t, tests, 2, "push", true)
+	if d := tests[2].Directive; d == nil || d.Kind != "skip" || !strings.Contains(d.Reason, "NOT pushed") {
+		t.Errorf("push point = %+v, want a skip saying NOT pushed", tests[2])
+	}
+	assertTestPoint(t, tests, 3, "remove worktree feature-tap", true)
+	assertTestPoint(t, tests, 4, "delete branch feature-tap", true)
 	if !hasSummary(recs) {
 		t.Errorf("expected summary record (stream framing), got: %+v", recs)
 	}
@@ -468,22 +473,25 @@ func TestResolvedGitSyncRecordStream(t *testing.T) {
 	}
 
 	tests := testRecords(recs)
-	if len(tests) != 7 {
-		t.Fatalf("expected 7 test records, got %d: %+v", len(tests), tests)
+	if len(tests) != 8 {
+		t.Fatalf("expected 8 test records, got %d: %+v", len(tests), tests)
 	}
 	// The fetch must come first so the rebase target (origin/main, #315) is
 	// fresh; the merge queue (spinclass#235) re-fetches under the landing lock
-	// before the landing. The landing (#284) is itself the push to origin — no
-	// separate push point — followed by the local advance (#295).
+	// before the landing. The landing (#284) is itself the push to origin, which
+	// gets its own "push" point (#376), followed by the local advance (#295).
 	assertTestPoint(t, tests, 0, "fetch origin/main", true)
 	assertTestPoint(t, tests, 1, "rebase feature-sync", true)
 	assertTestPoint(t, tests, 2, "fetch origin/main (landing)", true)
 	assertTestPoint(t, tests, 3, "merge feature-sync", true)
-	if !strings.HasPrefix(tests[4].Description, "advance local main to ") || !tests[4].OK {
-		t.Errorf("tests[4] = %+v, want an ok 'advance local main to <sha>' point", tests[4])
+	if !strings.HasPrefix(tests[4].Description, "push origin/main ") || !tests[4].OK {
+		t.Errorf("tests[4] = %+v, want an ok 'push origin/main <sha>' point", tests[4])
 	}
-	assertTestPoint(t, tests, 5, "remove worktree feature-sync", true)
-	assertTestPoint(t, tests, 6, "delete branch feature-sync", true)
+	if !strings.HasPrefix(tests[5].Description, "advance local main to ") || !tests[5].OK {
+		t.Errorf("tests[5] = %+v, want an ok 'advance local main to <sha>' point", tests[5])
+	}
+	assertTestPoint(t, tests, 6, "remove worktree feature-sync", true)
+	assertTestPoint(t, tests, 7, "delete branch feature-sync", true)
 	if !hasSummary(recs) {
 		t.Errorf("expected summary record (stream framing), got: %+v", recs)
 	}
@@ -697,11 +705,12 @@ func TestResolvedInSessionRecordStream(t *testing.T) {
 	}
 
 	tests := testRecords(recs)
-	if len(tests) != 2 {
-		t.Fatalf("expected exactly 2 test records in session mode (no cleanup stages), got %d: %+v", len(tests), tests)
+	if len(tests) != 3 {
+		t.Fatalf("expected exactly 3 test records in session mode (no cleanup stages; the local-only push skip, #376), got %d: %+v", len(tests), tests)
 	}
 	assertTestPoint(t, tests, 0, "rebase feature-session-tap", true)
 	assertTestPoint(t, tests, 1, "merge feature-session-tap", true)
+	assertTestPoint(t, tests, 2, "push", true)
 	if !hasSummary(recs) {
 		t.Errorf("expected summary record (stream framing), got: %+v", recs)
 	}

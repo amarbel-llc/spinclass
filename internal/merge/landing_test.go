@@ -97,18 +97,20 @@ func TestResolvedGitSyncLandsOnOriginThenAdvancesLocal(t *testing.T) {
 	}
 	assertNoLandWorktrees(t, repoDir)
 
-	// The landing is the push: one "merge <branch>" point, no separate "push".
+	// The landing is the push, and it is stated explicitly (#376): a "push
+	// origin/main <sha>" point follows "merge <branch>".
 	tests := testRecords(recs)
-	if len(tests) != 7 {
-		t.Fatalf("expected 7 test records, got %d: %+v", len(tests), tests)
+	if len(tests) != 8 {
+		t.Fatalf("expected 8 test records, got %d: %+v", len(tests), tests)
 	}
 	assertTestPoint(t, tests, 0, "fetch origin/main", true)
 	assertTestPoint(t, tests, 1, "rebase feature-land", true)
 	assertTestPoint(t, tests, 2, "fetch origin/main (landing)", true)
 	assertTestPoint(t, tests, 3, "merge feature-land", true)
-	assertTestPoint(t, tests, 4, "advance local main to "+shortSha(sessionSha), true)
-	assertTestPoint(t, tests, 5, "remove worktree feature-land", true)
-	assertTestPoint(t, tests, 6, "delete branch feature-land", true)
+	assertTestPoint(t, tests, 4, "push origin/main "+shortSha(sessionSha), true)
+	assertTestPoint(t, tests, 5, "advance local main to "+shortSha(sessionSha), true)
+	assertTestPoint(t, tests, 6, "remove worktree feature-land", true)
+	assertTestPoint(t, tests, 7, "delete branch feature-land", true)
 }
 
 // TestResolvedGitSyncDirtyRootSkipsLocalAdvance pins #295's rule: an

@@ -74,8 +74,11 @@ landing lock:
 4. **Land by pushing**: `git push <remote> <landingSha>:refs/heads/<default>`
    run **from the landing worktree**. The fast-forward check is the remote's
    own (no `--force`), so a stale or unauthenticated push exits nonzero having
-   moved nothing — locally or remotely. The ladder shows this as the
-   `merge <branch>` point; there is no separate `push` point any more.
+   moved nothing — locally or remotely. A refused push fails the
+   `merge <branch>` point. A landed one is then stated outright (#376) by a
+   `push <remote>/<branch> <sha>` point right after it; a local-only merge (or a
+   repo with no remote) instead emits a `push` skip saying the merge was NOT
+   pushed. The async completion wake carries whichever of the two appears.
 5. **Advance local** (revised): fast-forward the root's local default branch to
    the landing sha — an `advance local <branch> to <sha>` point, or a skip (see
    above). Never fatal.

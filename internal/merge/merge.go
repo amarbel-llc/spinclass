@@ -587,6 +587,9 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	if !target.IsSelf() {
 		mx.client.Count(MetricLanded)
 	}
+	// The landing push said nothing of its own until now (#376): state it, so a
+	// caller can tell "on origin" from "local only" without asking the remote.
+	reportPush(ts, target, landingSha)
 
 	// (e') Advance the root's local default branch to what just landed, still
 	// under the lock (a sibling's landing moves the same ref) and before the
@@ -656,6 +659,11 @@ func finishMergeUnqueued(ctx context.Context, mx phaseMetrics, rep *crap.Reporte
 		return blobLinks, failStep(ts, "merge "+branch, mergeErr, out)
 	}
 	ts.Ok("merge " + branch)
+	// With gitSync the push is teardownAndPush's own "push" point below; a
+	// local-only merge pushes nothing and says so (#376).
+	if !gitSync {
+		reportPush(ts, target, pinnedSha)
+	}
 
 	// tipMatchesPin=true preserves the pre-#235 semantics verbatim: no tip
 	// check, teardown always attempted, plain `-d` with its natural refusal
@@ -687,6 +695,20 @@ func fetchTarget(ctx context.Context, ts *crap.TestStream, target landing.Target
 	}
 	ts.Ok(label)
 	return nil
+}
+
+// reportPush states where a landing went (#376). A remote target emits an ok
+// "push <remote>/<branch> <sha>" point: the landing IS a push of that sha, and
+// a refused push already failed the "merge" step before this runs. A self target
+// pushed nothing, so it emits a "push" skip that says so plainly; the async
+// wake lifts both lines (job.pushOutcomeLine).
+func reportPush(ts *crap.TestStream, target landing.Target, landingSha string) {
+	if target.IsSelf() {
+		ts.Skip("push", fmt.Sprintf("merge landed on local %s at %s only; NOT pushed to any remote (local-only merge, or the repo has no remote)",
+			target.Branch, shortSha(landingSha)))
+		return
+	}
+	ts.Ok("push " + target.Label() + " " + shortSha(landingSha))
 }
 
 // LocalAdvanceSkipPrefix opens every local-advance skip reason, so a reader —

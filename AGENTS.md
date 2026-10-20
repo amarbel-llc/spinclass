@@ -326,7 +326,7 @@ subcommand is always available.
   (created at the pin, rebased there only if the tip moved): the landing is
   `git push <remote> <landingSha>:refs/heads/<default>` run from that worktree
   (`git.PushRef`) — the ff check is the remote's own, so a refused push (stale
-  tip, dropped credential) moves NOTHING. `merge <branch>` IS the push.
+  tip, dropped credential) moves NOTHING. `merge <branch>` IS the push, then a `push <remote>/<branch> <sha>` point states it (local-only: a `push` skip, #376).
   Consumers reading the local default ref use
   `git.CommitsUnintegrated` (integrated = reachable from the local default OR
   its remote-tracking ref): `close.RunResolved`, `clean.scanWorktrees`,

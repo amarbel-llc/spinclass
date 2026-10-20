@@ -320,6 +320,11 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 				// merge landed, but an agent reading local <default> would
 				// otherwise conclude it did not. The skip line itself says it
 				// landed and how to reconcile.
+				// Where the landing went (#376): "merge succeeded" alone does not say
+				// whether it reached the remote.
+				if line := pushOutcomeLine(text); line != "" {
+					msg += "; " + line
+				}
 				if line := localAdvanceSkipLine(text); line != "" {
 					msg += "; " + line
 				}
@@ -429,6 +434,20 @@ func postMergeFailureLine(text string) string {
 func localAdvanceSkipLine(text string) string {
 	for _, line := range strings.Split(text, "\n") {
 		if strings.HasPrefix(line, "↷ advance local ") {
+			return line
+		}
+	}
+	return ""
+}
+
+// pushOutcomeLine returns the rendered ladder's push verdict (merge.reportPush,
+// or teardownAndPush's own "push"): "✓ push <remote>/<branch> <sha>" when the
+// landing reached the remote, "↷ push # SKIP …" when it was local only, or ""
+// when the ladder has neither (#376). "post-merge" labels never match: they do
+// not start with "push".
+func pushOutcomeLine(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if line == "✓ push" || strings.HasPrefix(line, "✓ push ") || strings.HasPrefix(line, "↷ push") {
 			return line
 		}
 	}
