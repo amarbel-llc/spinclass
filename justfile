@@ -819,6 +819,27 @@ debug-hook-pretooluse:
     echo "--- stderr ---"; cat "$err"
     rm -f "$out" "$err"
 
+# [debug] Ask the worktree build's PreToolUse hook (`sc hook`) for its verdict
+# on one synthetic store-tool call (FDR 0036 perms.StoreVerdict), as the given
+# principal against the live session store. Judges only: the hook never runs
+# the tool, so nothing changes. Pass the caller's own CLOWN_SESSION_ID.
+#
+#     just debug-store-verdict mcp__plugin_spinclass_spinclass__grit_stage '{"subcommand":"status"}' <principal>
+#
+# print the PreToolUse hook's verdict for one synthetic store-tool call
+[group('debug')]
+debug-store-verdict tool input principal:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    payload='{"hook_event_name":"PreToolUse","session_id":"synth-store-verdict","tool_name":"{{ tool }}","tool_input":{{ input }},"cwd":"'"$PWD"'"}'
+    echo "payload: $payload" >&2
+    echo "env: HOME=$HOME XDG_STATE_HOME=${XDG_STATE_HOME:-}" >&2
+    echo "--- whoami (same binary, same principal) ---" >&2
+    CLOWN_SESSION_ID='{{ principal }}' nix run --inputs-from . .#default -- whoami >&2
+    echo "--- hook verdict ---" >&2
+    printf '%s' "$payload" | CLOWN_SESSION_ID='{{ principal }}' nix run --inputs-from . .#default -- hook
+    echo "exit: $?" >&2
+
 # [debug] Map every live process that has a SPINCLASS_SESSION_ID to its
 # CLOWN_SESSION_ID vs SPINCLASS_SESSION_ID. Confirms the spawn env-leak
 # (spinclass#169): a spawned worker shows CLOWN_SESSION_ID = the DRIVER's
