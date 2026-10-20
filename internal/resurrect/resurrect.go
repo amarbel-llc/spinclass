@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -102,12 +103,19 @@ func Run(w io.Writer, target, newBranchName, format string) error {
 
 	if tw != nil {
 		tw.Ok("resurrect " + fresh.SessionKey + " " + newPath)
+		tw.Skip("restore stash shelf "+fresh.SessionKey, emptyShelfNote)
 		tw.Plan()
 		return nil
 	}
 	_, _ = fmt.Fprintln(w, newPath)
+	// Stdout stays the bare path for `cd $(sc resurrect ...)`; the note rides stderr.
+	_, _ = fmt.Fprintln(os.Stderr, "spinclass: "+emptyShelfNote)
 	return nil
 }
+
+// emptyShelfNote is the FDR 0036 section 4 consequence of the shelf living in
+// the worktree: close removes it, resurrect recreates the commit only.
+const emptyShelfNote = "the stash shelf is empty: stash entries do not survive a close, only the commit is recreated"
 
 // checkResurrectable holds the three refusal conditions Run's callers need
 // distinct, actionable errors for: not actually closed, closed with no

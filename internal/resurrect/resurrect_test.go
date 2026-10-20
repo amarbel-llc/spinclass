@@ -12,6 +12,8 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/close"
 	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/store"
+	gitstore "code.linenisgreat.com/spinclass/internal/store/git"
 	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 
@@ -39,6 +41,13 @@ func mustCommitFile(t *testing.T, dir, name, content, msg string) {
 // production path that now captures DeletedSHA), and returns the resolved
 // paths for the caller to resurrect.
 func setupClosedSession(t *testing.T, branch string) (repoPath, wtPath string) {
+	t.Helper()
+	return setupClosedSessionWith(t, branch, nil)
+}
+
+// setupClosedSessionWith is setupClosedSession with a hook run on the live
+// worktree just before the (forced) close.
+func setupClosedSessionWith(t *testing.T, branch string, beforeClose func(wtPath string)) (repoPath, wtPath string) {
 	t.Helper()
 	testgit.RequireGit(t)
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
@@ -79,6 +88,10 @@ func setupClosedSession(t *testing.T, branch string) (repoPath, wtPath string) {
 	}
 	if err := session.Write(s); err != nil {
 		t.Fatal(err)
+	}
+
+	if beforeClose != nil {
+		beforeClose(wtPath)
 	}
 
 	// force=true: the marker commit puts the branch ahead of the default
@@ -152,6 +165,34 @@ func TestRunRecreatesWorktreeFromClosedSession(t *testing.T) {
 	}
 	if got.IsTombstone() {
 		t.Error("resurrected session must not still read as a tombstone")
+	}
+}
+
+// A shelf dies with the worktree (FDR 0036 section 4): resurrect recreates the
+// commit only, and says so rather than letting the operator hunt for the stash.
+func TestRunReportsAnEmptyShelfAfterResurrectingAShelvedSession(t *testing.T) {
+	_, wtPath := setupClosedSessionWith(t, "feature-x", func(wtPath string) {
+		if err := os.WriteFile(filepath.Join(wtPath, "marker.txt"), []byte("shelved edit"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := gitstore.NewShelf().Save(wtPath, store.ShelfSaveRequest{Message: "before close"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	var buf bytes.Buffer
+	if err := Run(&buf, "repo/feature-x", "", "tap"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(buf.String(), "stash shelf is empty") {
+		t.Errorf("tap output must carry the empty-shelf note:\n%s", buf.String())
+	}
+	if n, err := gitstore.CountShelfEntries(wtPath); err != nil || n != 0 {
+		t.Errorf("resurrected shelf has %d entries (%v), want 0", n, err)
+	}
+	content, err := os.ReadFile(filepath.Join(wtPath, "marker.txt"))
+	if err != nil || string(content) != "hello from before the close" {
+		t.Errorf("only the commit is recreated; marker.txt = %q, %v", content, err)
 	}
 }
 

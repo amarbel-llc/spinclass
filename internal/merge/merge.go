@@ -27,6 +27,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/profilerights"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/statsd"
+	gitstore "code.linenisgreat.com/spinclass/internal/store/git"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/worktree"
@@ -820,6 +821,10 @@ func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, push,
 	if !inSession && !insideWorktree {
 		if !tipMatchesPin {
 			ts.Ok("keep worktree " + branch + " (commits added since pin; left for a later merge)")
+		} else if gitstore.ShelfNotEmpty(wtPath) {
+			// The stash shelf lives in the worktree (FDR 0036 section 4) and would
+			// be destroyed with it; `sc close` is the gate that names the count.
+			ts.Ok("keep worktree " + branch + " (stash shelf not empty; drop its entries or run sc close)")
 		} else {
 			// The worktree is about to go, and with it the session's credential
 			// file and state — revoke the per-session forge token first (FDR

@@ -119,6 +119,14 @@ func CountShelfEntries(worktree string) (int, error) {
 	return len(ids), err
 }
 
+// ShelfNotEmpty is true when the worktree's shelf has entries or cannot be
+// read. Teardown paths that would delete the worktree use it to fail closed:
+// a shelf they cannot prove empty is a shelf they must not destroy.
+func ShelfNotEmpty(worktree string) bool {
+	entries, err := CountShelfEntries(worktree)
+	return err != nil || entries > 0
+}
+
 func readMeta(entryDir string) (shelfMeta, error) {
 	raw, err := os.ReadFile(filepath.Join(entryDir, metaName))
 	if err != nil {

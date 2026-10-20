@@ -263,9 +263,39 @@ Costs, accepted:
   the patch directory proves lossy; it is a localized change inside the git
   backend's `Shelf` implementation.
 
-`.spinclass/` is assumed to be git-excluded in session worktrees, since
-`job.log`/`job.json` already live there; **not verified, check
-`internal/apply` excludes in step 3**.
+`.spinclass/` is git-excluded in session worktrees (verified step 4:
+`sweatfile.GetDefault` seeds it into the baseline excludes), so the shelf never
+shows as dirty or untracked work. The shelf also never shelves itself: save
+filters `.spinclass/` out of the untracked set even where no exclude exists.
+
+Implemented in step 4 (`internal/store/shelf.go`, `internal/store/git/shelf.go`),
+with these concrete choices:
+
+- Entries are numbered `1, 2, ...` as `max(existing)+1` (so the number is
+  reused only after the newest entry is dropped). `stash_ref` is `stash@{N}`
+  (Nth newest, like git) or a bare entry number; empty means the newest.
+- `index.patch` is written whenever the index differed from HEAD at save
+  (moxy's `stash` has no keep-index parameter, so there is no flag to key on);
+  apply restores exactly that staged state.
+- `list` is a fourth verb, classified like the others (session-worktree
+  binding, so a foreign `repo_path` asks).
+- Apply is `git apply --3way` (which stages), then a path reset and
+  `git apply --cached index.patch`. Conflicts leave markers, name the paths and
+  keep the entry (`store.ShelfConflictError`). git refuses the 3-way when the
+  same file has an unstaged edit ("does not match index"); that is reported
+  as a plain error, nothing changes and the entry is kept. Untracked files that
+  already exist block the apply before anything is touched.
+- Submodule changes are refused; ignored files are never shelved.
+- Teardown guards: `close.RunResolved` (so `sc close`, `close-child-session`,
+  multi-target close and the shop auto-close) refuses a non-empty or
+  unreadable shelf without force, naming the entry count, and with force warns;
+  `sc clean` skips a shelved merged worktree; an out-of-session `sc merge`
+  keeps the worktree and branch with a "keep worktree" point. `sc resurrect`
+  reports that the shelf is empty. `sc run`'s teardown is not guarded.
+- Real `git stash` is still used transiently by `rebase --autostash`
+  (`branch rebase` with `autostash`), which pushes and pops on the shared
+  `refs/stash` within one call; that is git's own rebase machinery, not the
+  stash tool.
 
 `Shelf` is a neutral interface method so a dodder backend can implement it
 natively (dodder has its own object store).

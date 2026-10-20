@@ -577,6 +577,36 @@ func TestCountShelfEntriesNeedsNoGit(t *testing.T) {
 	}
 }
 
+func TestShelfNotEmptyFailsClosed(t *testing.T) {
+	wt := t.TempDir()
+	if ShelfNotEmpty(wt) {
+		t.Fatal("no shelf directory means no shelf")
+	}
+	if err := os.MkdirAll(filepath.Join(wt, ".spinclass", "stash"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if ShelfNotEmpty(wt) {
+		t.Fatal("an empty shelf directory is an empty shelf")
+	}
+	if err := os.MkdirAll(filepath.Join(wt, ".spinclass", "stash", "1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !ShelfNotEmpty(wt) {
+		t.Fatal("one entry directory is a non-empty shelf")
+	}
+
+	broken := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(broken, ".spinclass"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(broken, ".spinclass", "stash"), []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !ShelfNotEmpty(broken) {
+		t.Fatal("an unreadable shelf must read as non-empty")
+	}
+}
+
 func TestShelfWorksFromASubdirectory(t *testing.T) {
 	repo := newShelfRepo(t)
 	if err := os.MkdirAll(filepath.Join(repo, "sub"), 0o755); err != nil {

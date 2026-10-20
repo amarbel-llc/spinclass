@@ -23,6 +23,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/profilerights"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sessionpick"
+	gitstore "code.linenisgreat.com/spinclass/internal/store/git"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/tapblock"
 	"code.linenisgreat.com/spinclass/internal/worktree"
@@ -219,8 +220,18 @@ func runResolvedInto(tw *tap.Writer, repoPath, wtPath, branch string, force bool
 	unintegrated := dbErr == nil && git.CommitsUnintegrated(wtPath, defaultBranch, branch) > 0
 	dirty := git.StatusPorcelain(wtPath) != ""
 
-	if (unintegrated || dirty) && !force {
-		reason := describeUnintegrated(branch, unintegrated, dirty)
+	// A stash shelf dies with the worktree (FDR 0036 section 4), so a non-empty
+	// one is uncommitted work: unreadable counts as non-empty, never as empty.
+	shelved, shelfErr := gitstore.CountShelfEntries(wtPath)
+	if shelfErr != nil && !force {
+		return fmt.Errorf("reading the stash shelf of %s: %w (use --force to close anyway)", branch, shelfErr)
+	}
+	if shelved > 0 && force {
+		warnShelfDiscarded(tw, branch, shelved)
+	}
+
+	if (unintegrated || dirty || shelved > 0) && !force {
+		reason := describeUnintegrated(branch, unintegrated, dirty, shelved)
 		if !closeInteractive() {
 			return fmt.Errorf("%s Close requires an interactive terminal to confirm; use --force to skip", reason)
 		}
@@ -548,15 +559,44 @@ func planNixGC(repoPath, wtPath string, override *bool) *nixgc.Plan {
 	return &plan
 }
 
-func describeUnintegrated(branch string, unintegrated, dirty bool) string {
+func describeUnintegrated(branch string, unintegrated, dirty bool, shelved int) string {
+	var base string
 	switch {
 	case unintegrated && dirty:
-		return fmt.Sprintf("Branch %q has unintegrated commits and uncommitted changes.", branch)
+		base = fmt.Sprintf("Branch %q has unintegrated commits and uncommitted changes.", branch)
 	case unintegrated:
-		return fmt.Sprintf("Branch %q has commits not yet integrated into the default branch.", branch)
-	default:
-		return fmt.Sprintf("Branch %q has uncommitted changes.", branch)
+		base = fmt.Sprintf("Branch %q has commits not yet integrated into the default branch.", branch)
+	case dirty:
+		base = fmt.Sprintf("Branch %q has uncommitted changes.", branch)
 	}
+	if shelved == 0 {
+		return base
+	}
+	lost := describeShelf(shelved)
+	if base == "" {
+		return fmt.Sprintf("Branch %q has %s.", branch, lost)
+	}
+	return base + " It also has " + lost + "."
+}
+
+func describeShelf(shelved int) string {
+	noun := "entries"
+	if shelved == 1 {
+		noun = "entry"
+	}
+	return fmt.Sprintf("%d stash %s that would be lost with the worktree", shelved, noun)
+}
+
+// warnShelfDiscarded surfaces the one thing --force throws away that git would
+// not have flagged: the worktree's stash shelf.
+func warnShelfDiscarded(tw *tap.Writer, branch string, shelved int) {
+	desc := "discard stash shelf " + branch
+	message := "discarding " + describeShelf(shelved)
+	if tw != nil {
+		tw.NotOk(desc, map[string]string{"severity": "warn", "message": message})
+		return
+	}
+	fmt.Fprintf(os.Stderr, "spinclass: %s: %s\n", desc, message)
 }
 
 func resolveTarget(cwd, target string, dbg *slog.Logger) (repoPath, wtPath, branch string, err error) {

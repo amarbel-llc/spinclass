@@ -23,6 +23,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/nixgc"
 	"code.linenisgreat.com/spinclass/internal/profilerights"
 	"code.linenisgreat.com/spinclass/internal/session"
+	gitstore "code.linenisgreat.com/spinclass/internal/store/git"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/tapblock"
 	"code.linenisgreat.com/spinclass/internal/worktree"
@@ -85,7 +86,12 @@ type worktreeInfo struct {
 	worktreePath string
 	merged       bool
 	dirty        bool
+	shelved      bool
 }
+
+// The shelf dies with the worktree (FDR 0036 section 4), so clean never reaps a
+// worktree whose shelf is not provably empty.
+const shelvedSkipReason = "stash shelf not empty (drop its entries first)"
 
 func scanWorktrees(startDir string) []worktreeInfo {
 	var worktrees []worktreeInfo
@@ -112,6 +118,7 @@ func scanWorktrees(startDir string) []worktreeInfo {
 				worktreePath: wtPath,
 				merged:       ahead == 0,
 				dirty:        porcelain != "",
+				shelved:      gitstore.ShelfNotEmpty(wtPath),
 			})
 		}
 	}
@@ -534,7 +541,7 @@ func resolveTombstoneRetention(startDir string) time.Duration {
 type cleanAction struct {
 	wt     worktreeInfo
 	label  string
-	action string // "remove", "skip-dirty", "interactive"
+	action string // "remove", "skip-dirty", "skip-shelved", "interactive"
 }
 
 func planClean(worktrees []worktreeInfo, interactive bool) []cleanAction {
@@ -544,7 +551,9 @@ func planClean(worktrees []worktreeInfo, interactive bool) []cleanAction {
 			continue
 		}
 		label := filepath.Join(wt.repo, worktree.WorktreesDir) + "/" + styleCode.Render(wt.branch)
-		if !wt.dirty {
+		if wt.shelved {
+			actions = append(actions, cleanAction{wt: wt, label: label, action: "skip-shelved"})
+		} else if !wt.dirty {
 			actions = append(actions, cleanAction{wt: wt, label: label, action: "remove"})
 		} else if interactive {
 			actions = append(actions, cleanAction{wt: wt, label: label, action: "interactive"})
@@ -584,6 +593,12 @@ func emitPlan(tw *tap.Writer, actions []cleanAction, abandonedCount int, tombsto
 				tw.Skip("remove "+a.label, "dirty worktree")
 			} else {
 				log.Warn("skipping dirty worktree", "worktree", a.label)
+			}
+		case "skip-shelved":
+			if tw != nil {
+				tw.Skip("remove "+a.label, shelvedSkipReason)
+			} else {
+				log.Warn("skipping worktree with a stash shelf", "worktree", a.label)
 			}
 		}
 	}
@@ -715,6 +730,12 @@ func executeClean(tw *tap.Writer, actions []cleanAction, abandoned []session.Sta
 				tw.Skip("remove "+a.label, "dirty worktree")
 			} else {
 				log.Warn("skipping dirty worktree", "branch", a.wt.branch)
+			}
+		case "skip-shelved":
+			if tw != nil {
+				tw.Skip("remove "+a.label, shelvedSkipReason)
+			} else {
+				log.Warn("skipping worktree with a stash shelf", "branch", a.wt.branch)
 			}
 		}
 	}
