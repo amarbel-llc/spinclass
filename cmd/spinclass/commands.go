@@ -67,6 +67,7 @@ func buildApp() *command.App {
 	registerVersionCommand(app)
 	registerServeCommand(app)
 	registerMCPOnlyCommands(app)
+	registerGritCommands(app)
 	registerGenerateArtifactsCommand(app)
 	// Plugin start-* commands must register AFTER the built-in session
 	// commands so the built-ins shadow any config entries of the same name
