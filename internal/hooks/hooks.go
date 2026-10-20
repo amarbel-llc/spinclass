@@ -523,6 +523,13 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 		return writeAsk(w, reason)
 	}
 
+	// Store (grit) tools: ownership-aware verdict (FDR 0036). Classified on the
+	// path-corrected input so a parent-checkout repo_path is judged as the
+	// session worktree it will be redirected to; an Ask leaves the call as sent.
+	if decision, isStore := storeDecision(input, mainRepoRoot, sessionWorktree, rewriteEnabled); isStore {
+		return decision(w)
+	}
+
 	switch input.ToolName {
 	case listToolName, updateDescriptionToolName, validateToolName,
 		sessionJobCancelToolName, closeChildSessionToolName:

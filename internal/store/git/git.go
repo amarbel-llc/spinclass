@@ -32,15 +32,6 @@ func (Backend) Capabilities() store.Capabilities {
 	}
 }
 
-// Owned is a placeholder until FDR 0036 step 2 (ownership classification).
-func (Backend) Owned(store.Session, store.Ref) bool { return false }
-
-// Classify returns Allow for read-class verbs and Ask otherwise; ownership-
-// aware write classification is FDR 0036 step 2.
-func (Backend) Classify(_ store.Session, op store.Op) store.Verdict {
-	return store.StaticVerdict(op)
-}
-
 // args is the union of the read verbs' parameters, named as moxy's grit tools
 // name them.
 type args struct {
