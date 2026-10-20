@@ -167,7 +167,7 @@ func TestWorktreeList(t *testing.T) {
 func TestRepoPathOverridesSession(t *testing.T) {
 	repo := newRepo(t)
 	raw, _ := json.Marshal(map[string]any{"repo_path": repo, "ref": "v1"})
-	res, err := New().Do(context.Background(), store.Session{Dir: t.TempDir()}, store.Op{Tool: "branch", Subcommand: "rev-parse", Args: raw})
+	res, err := New().Do(context.Background(), store.Session{Dir: t.TempDir(), Confinement: store.ConfinementUnconfined}, store.Op{Tool: "branch", Subcommand: "rev-parse", Args: raw})
 	if err != nil || len(res.Text) != 40 {
 		t.Fatalf("repo_path: %q, %v", res.Text, err)
 	}

@@ -374,6 +374,40 @@ func TestWritesWithoutComputableOwnershipAreRefused(t *testing.T) {
 	}
 }
 
+func TestConfinedReadsAreScopedToTheSessionWorktree(t *testing.T) {
+	const readRefusal = "may only read its session worktree"
+	for _, tc := range []struct {
+		name        string
+		args        func(f fixture) map[string]any
+		wantRefused bool
+	}{
+		{"no repo_path", withArgs(map[string]any{"oneline": true}), false},
+		{"the own worktree", func(f fixture) map[string]any { return map[string]any{"repo_path": f.worktree} }, false},
+		{"a subdirectory of the own worktree", func(f fixture) map[string]any { return map[string]any{"repo_path": f.worktree + "/."} }, false},
+		{"a foreign worktree", foreignWorktreeArgs(nil), true},
+		{"the main checkout", mainCheckoutArgs(nil), true},
+		{"a relative path leaving the worktree", withArgs(map[string]any{"repo_path": ".."}), true},
+		{"a path that is no repository", withArgs(map[string]any{"repo_path": "/nonexistent-dir"}), true},
+	} {
+		for _, confinement := range []store.Confinement{store.ConfinementConfined, store.ConfinementUnresolved} {
+			t.Run(tc.name+"/"+confinementNames[confinement], func(t *testing.T) {
+				f := confinedFixture(t)
+				_, err := doAs(t, f.session(confinement, store.Identity{}), "branch", "log", tc.args(f))
+				if got := err != nil && strings.Contains(err.Error(), readRefusal); got != tc.wantRefused {
+					t.Fatalf("read refusal = %v, want %v (err: %v)", got, tc.wantRefused, err)
+				}
+			})
+		}
+		t.Run(tc.name+"/unconfined", func(t *testing.T) {
+			f := confinedFixture(t)
+			_, err := doAs(t, f.session(store.ConfinementUnconfined, store.Identity{}), "branch", "log", tc.args(f))
+			if err != nil && strings.Contains(err.Error(), readRefusal) {
+				t.Fatalf("an unconfined read is never scoped by the body, got %v", err)
+			}
+		})
+	}
+}
+
 func TestUnconfinedCallersAreNeverRefusedByTheBody(t *testing.T) {
 	for _, tc := range ownershipCases {
 		t.Run(tc.name, func(t *testing.T) {
