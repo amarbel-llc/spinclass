@@ -183,6 +183,18 @@ type Metrics struct {
 	DisableStatsd *bool `toml:"disable-statsd"`
 }
 
+// Store configures the grit store tools (FDR 0036). The author and committer
+// identity is stamped by the frontend onto every commit those tools create, so a
+// confined worker needs no git identity of its own. Scalar override down the
+// cascade; unset leaves git's own identity resolution untouched.
+type Store struct {
+	AuthorName  *string `toml:"author-name"`
+	AuthorEmail *string `toml:"author-email"`
+	// CommitterName and CommitterEmail each default to the matching author key.
+	CommitterName  *string `toml:"committer-name"`
+	CommitterEmail *string `toml:"committer-email"`
+}
+
 // Sysprompt configures the dynamic system-prompt fragment spinclass
 // contributes to a clown-launched session (internal/sysprompt, FDR 0021).
 type Sysprompt struct {
@@ -327,6 +339,7 @@ type Sweatfile struct {
 	Hooks          *Hooks          `toml:"hooks"`
 	Auth           *Auth           `toml:"auth"`
 	Metrics        *Metrics        `toml:"metrics"`
+	Store          *Store          `toml:"store"`
 	ProfileRights  *ProfileRights  `toml:"profile-rights"`
 	Confinement    *Confinement    `toml:"confinement"`
 	Permissions    *Permissions    `toml:"permissions"`
@@ -396,6 +409,29 @@ func (sf Sweatfile) MetricsStatsdAddress() string {
 // MetricsStatsdDisabled reports [metrics].disable-statsd = true.
 func (sf Sweatfile) MetricsStatsdDisabled() bool {
 	return sf.Metrics != nil && sf.Metrics.DisableStatsd != nil && *sf.Metrics.DisableStatsd
+}
+
+// StoreIdentity returns the [store] identity with the committer keys defaulted
+// to the author keys. Every field is "" when unset.
+func (sf Sweatfile) StoreIdentity() (authorName, authorEmail, committerName, committerEmail string) {
+	if sf.Store == nil {
+		return "", "", "", ""
+	}
+	valueOf := func(p *string) string {
+		if p == nil {
+			return ""
+		}
+		return *p
+	}
+	authorName, authorEmail = valueOf(sf.Store.AuthorName), valueOf(sf.Store.AuthorEmail)
+	committerName, committerEmail = valueOf(sf.Store.CommitterName), valueOf(sf.Store.CommitterEmail)
+	if committerName == "" {
+		committerName = authorName
+	}
+	if committerEmail == "" {
+		committerEmail = authorEmail
+	}
+	return authorName, authorEmail, committerName, committerEmail
 }
 
 // PostMergeHookCommand returns the [hooks].post-merge command, or nil when

@@ -220,6 +220,29 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		}
 	}
 
+	// [store] — scalar override (FDR 0036); copied so the receiver's table is
+	// never mutated through the shared pointer.
+	if other.Store != nil {
+		if merged.Store == nil {
+			merged.Store = &Store{}
+		} else {
+			cp := *merged.Store
+			merged.Store = &cp
+		}
+		if other.Store.AuthorName != nil {
+			merged.Store.AuthorName = other.Store.AuthorName
+		}
+		if other.Store.AuthorEmail != nil {
+			merged.Store.AuthorEmail = other.Store.AuthorEmail
+		}
+		if other.Store.CommitterName != nil {
+			merged.Store.CommitterName = other.Store.CommitterName
+		}
+		if other.Store.CommitterEmail != nil {
+			merged.Store.CommitterEmail = other.Store.CommitterEmail
+		}
+	}
+
 	// [sysprompt]
 	if other.Sysprompt != nil {
 		if merged.Sysprompt == nil {

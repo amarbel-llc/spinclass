@@ -18,6 +18,19 @@ func TestDecodeSpawnProfile(t *testing.T) {
 	}
 }
 
+// TestDecodeStoreIdentity pins the [store] keys through the generated codec
+// (FDR 0036).
+func TestDecodeStoreIdentity(t *testing.T) {
+	doc, err := Parse([]byte("[store]\nauthor-name = \"Op\"\nauthor-email = \"op@x\"\ncommitter-name = \"Bot\"\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	an, ae, cn, ce := doc.Data().StoreIdentity()
+	if an != "Op" || ae != "op@x" || cn != "Bot" || ce != "op@x" {
+		t.Errorf("StoreIdentity() = (%q,%q,%q,%q)", an, ae, cn, ce)
+	}
+}
+
 // TestDecodeEmptyVsAbsentArrays locks the behavior the deleted consumed-map
 // nil-normalization used to provide and that tommy's generated decoder now
 // provides natively: a present-but-empty array decodes to a NON-NIL empty

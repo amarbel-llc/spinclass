@@ -919,6 +919,27 @@ taken as each merge arrives, not a continuous reading.
 *sc check* sends *spinclass.check.*_repo_*.pre\_merge\_hook.*_outcome_ for its
 hook run; a merge that checks does not send it.
 
+## [store]
+
+Identity for commits the grit store tools create (FDR 0036). The tools run in
+the frontend *spinclass serve*, so for a confined worker nothing is configured
+inside the unit and the worker needs no git identity. With no key set, git's own
+identity resolution (the operator's configured identity) is used unchanged.
+Applies to the commit-creating verbs: *grit\_commit*, and *grit\_branch*
+cherry-pick, revert, rebase and restack. *Merge:* scalar override for every key.
+
+*author-name*, *author-email*
+	Stamped as the author (*GIT\_AUTHOR\_NAME*, *GIT\_AUTHOR\_EMAIL*). Git keeps
+	the original author of a commit that cherry-pick, rebase, restack or
+	*commit --amend* replays.
+
+*committer-name*, *committer-email*
+	Stamped as the committer. Each defaults to the matching author key.
+
+Commits made for a confined caller skip every git hook (the per-commit hook
+included): the hooks are worker-authored code and must not run outside the
+unit. The merge gate still runs.
+
 ## [session-entry]
 
 Controls what command is exec'd when attaching to a session, how detached
