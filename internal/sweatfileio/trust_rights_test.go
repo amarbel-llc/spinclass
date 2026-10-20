@@ -188,6 +188,53 @@ func TestTrustedDenySweatfileEdits(t *testing.T) {
 	}
 }
 
+// [permissions] allow-self-close (#389) follows the same rule as
+// deny-sweatfile-edits: read only from layers above the repo, last trusted
+// layer wins, off when unset. A repo layer cannot switch it on, so a session
+// cannot give itself the right to end itself.
+func TestTrustedAllowSelfClose(t *testing.T) {
+	home := t.TempDir()
+	repo := filepath.Join(home, "work", "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	global := filepath.Join(home, ".config", "spinclass", "sweatfile")
+	parent := filepath.Join(home, "work", "sweatfile")
+	repoFile := filepath.Join(repo, "sweatfile")
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resolve := func() (bool, []string) {
+		h, err := LoadHierarchy(home, repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return TrustedAllowSelfClose(h, home, repo)
+	}
+
+	if allow, untrusted := resolve(); allow || len(untrusted) != 0 {
+		t.Errorf("unset: got (%v, %v), want (false, none)", allow, untrusted)
+	}
+	write(repoFile, "[permissions]\nallow-self-close = true\n")
+	if allow, untrusted := resolve(); allow || !reflect.DeepEqual(untrusted, []string{repoFile}) {
+		t.Errorf("repo layer: got (%v, %v), want (false, [%s])", allow, untrusted, repoFile)
+	}
+	write(global, "[permissions]\nallow-self-close = true\n")
+	if allow, _ := resolve(); !allow {
+		t.Error("a global true is not honoured")
+	}
+	write(parent, "[permissions]\nallow-self-close = false\n")
+	if allow, _ := resolve(); allow {
+		t.Error("the last trusted layer should win")
+	}
+}
+
 func TestTrustedEnforceProfileRightsDefaultsOff(t *testing.T) {
 	home := t.TempDir()
 	repo := filepath.Join(home, "work", "repo")

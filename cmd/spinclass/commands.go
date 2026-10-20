@@ -62,6 +62,7 @@ func buildApp() *command.App {
 	registerProfileGrantCommands(app)
 	registerProfileGrantImportCommand(app)
 	registerRevokeOrphansCommand(app)
+	app.AddCommand(closeSelfRunCommand())
 	registerConfinementCheckCommand(app)
 	registerConfinementBindCommand(app)
 	registerVersionCommand(app)

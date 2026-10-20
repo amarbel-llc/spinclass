@@ -815,6 +815,12 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 				_vPermissionsDenySweatfileEdits.MarkConsumed()
 			}
 		}
+		if _vPermissionsAllowSelfClose, _ok := _vPermissions.Field("allow-self-close"); _ok && _vPermissionsAllowSelfClose.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vPermissionsAllowSelfClose.Leaf); _xok {
+				permissionsVal9.AllowSelfClose = &_x
+				_vPermissionsAllowSelfClose.MarkConsumed()
+			}
+		}
 		d.data.Permissions = permissionsVal9
 	} else {
 		permissionsVal9 := &Permissions{}
@@ -824,6 +830,13 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractBool(_vDenySweatfileEdits.Leaf); _xok {
 				permissionsVal9.DenySweatfileEdits = &_x
 				_vDenySweatfileEdits.MarkConsumed()
+			}
+		}
+		if _vAllowSelfClose, _ok := model.Field("allow-self-close"); _ok && _vAllowSelfClose.Kind == cst.VLeaf {
+			_foundPermissions = true
+			if _x, _xok := cst.ExtractBool(_vAllowSelfClose.Leaf); _xok {
+				permissionsVal9.AllowSelfClose = &_x
+				_vAllowSelfClose.MarkConsumed()
 			}
 		}
 		if _foundPermissions {
@@ -1626,6 +1639,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 		tableNode := cst.EnsureChildTable(d.cstDoc.Root(), d.cstDoc.Root(), "permissions")
 		if d.data.Permissions.DenySweatfileEdits != nil {
 			if err := cst.SetAny(tableNode, "deny-sweatfile-edits", *d.data.Permissions.DenySweatfileEdits); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.Permissions.AllowSelfClose != nil {
+			if err := cst.SetAny(tableNode, "allow-self-close", *d.data.Permissions.AllowSelfClose); err != nil {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
@@ -2685,6 +2703,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vPermissionsDenySweatfileEdits.MarkConsumed()
 			}
 		}
+		if _vPermissionsAllowSelfClose, _ok := _vPermissions.Field("allow-self-close"); _ok && _vPermissionsAllowSelfClose.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vPermissionsAllowSelfClose.Leaf); _xok {
+				permissionsVal9.AllowSelfClose = &_x
+				_vPermissionsAllowSelfClose.MarkConsumed()
+			}
+		}
 		data.Permissions = permissionsVal9
 	} else {
 		permissionsVal9 := &Permissions{}
@@ -2694,6 +2718,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractBool(_vDenySweatfileEdits.Leaf); _xok {
 				permissionsVal9.DenySweatfileEdits = &_x
 				_vDenySweatfileEdits.MarkConsumed()
+			}
+		}
+		if _vAllowSelfClose, _ok := sub.Field("allow-self-close"); _ok && _vAllowSelfClose.Kind == cst.VLeaf {
+			_foundPermissions = true
+			if _x, _xok := cst.ExtractBool(_vAllowSelfClose.Leaf); _xok {
+				permissionsVal9.AllowSelfClose = &_x
+				_vAllowSelfClose.MarkConsumed()
 			}
 		}
 		if _foundPermissions {
@@ -3480,6 +3511,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		tableNode := cst.EnsureChildTable(doc.Root(), container, "permissions")
 		if data.Permissions.DenySweatfileEdits != nil {
 			if err := cst.SetAny(tableNode, "deny-sweatfile-edits", *data.Permissions.DenySweatfileEdits); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.Permissions.AllowSelfClose != nil {
+			if err := cst.SetAny(tableNode, "allow-self-close", *data.Permissions.AllowSelfClose); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}

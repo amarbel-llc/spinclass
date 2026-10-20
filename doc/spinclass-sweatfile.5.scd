@@ -864,6 +864,16 @@ worktree-level value is ignored with a warning (*sc validate* warns).
 	stopgap: the intent is for all session IO to be served by a spinclass plugin
 	that enforces permissions at its own boundary, which replaces this key.
 
+*allow-self-close*
+	Boolean. When true, a session may end itself with the *close-this-session*
+	tool (#389). Off by default, so a session cannot retire itself unless an
+	operator allowed it. The tool never forces: it is refused while a merge or
+	check job runs, while the branch has unmerged commits, uncommitted changes
+	or stashed work, and while the session is the only accepted holder of
+	another live session. It only queues the close; the teardown runs after the
+	session's last turn, from outside it (*spinclass close-self-run*), and the
+	session's other holders are told the result.
+
 ## [metrics]
 
 Best-effort statsd telemetry to stats-me (*stats-me-clients*(7), spinclass#363).

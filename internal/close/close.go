@@ -334,6 +334,26 @@ func runResolvedInto(tw *tap.Writer, repoPath, wtPath, branch string, force bool
 	return nil
 }
 
+// Blocker reports why a non-forced close of the worktree would be refused, or ""
+// when it would go through: unintegrated commits, uncommitted changes, or a
+// non-empty stash shelf. An unreadable shelf is an error, never "empty". It is
+// the read-only half of the check runResolvedInto makes before it tears
+// anything down, for callers (close-this-session, #389) that must tell the
+// agent now rather than discover it at teardown.
+func Blocker(repoPath, wtPath, branch string) (string, error) {
+	defaultBranch, dbErr := git.DefaultBranch(repoPath)
+	unintegrated := dbErr == nil && git.CommitsUnintegrated(wtPath, defaultBranch, branch) > 0
+	dirty := git.StatusPorcelain(wtPath) != ""
+	shelved, shelfErr := gitstore.CountShelfEntries(wtPath)
+	if shelfErr != nil {
+		return "", fmt.Errorf("reading the stash shelf of %s: %w", branch, shelfErr)
+	}
+	if unintegrated || dirty || shelved > 0 {
+		return describeUnintegrated(branch, unintegrated, dirty, shelved), nil
+	}
+	return "", nil
+}
+
 // activeKey is the session key the revoke command receives: the recorded one
 // when state is readable, else the conventional <repo>/<branch>.
 func activeKey(repoPath, branch string) string {

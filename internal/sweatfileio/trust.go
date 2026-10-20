@@ -200,6 +200,28 @@ func TrustedStoreIdentity(h sweatfile.Hierarchy, home, repoRoot string) (authorN
 	return authorName, authorEmail, committerName, committerEmail, untrusted
 }
 
+// TrustedAllowSelfClose returns the [permissions].allow-self-close switch
+// honoured for the repo (#389): a scalar, the last layer above the repo that
+// sets it wins, off when unset. Layers that may not set it are never honoured;
+// their paths are returned in untrusted. Hierarchy.Merged never carries the
+// table.
+func TrustedAllowSelfClose(h sweatfile.Hierarchy, home, repoRoot string) (allow bool, untrusted []string) {
+	for _, src := range h.Sources {
+		if src.SkipReason != "" || !src.Found {
+			continue
+		}
+		if src.File.Permissions == nil || src.File.Permissions.AllowSelfClose == nil {
+			continue
+		}
+		if LayerAboveRepo(src.Path, home, repoRoot) {
+			allow = *src.File.Permissions.AllowSelfClose
+		} else {
+			untrusted = append(untrusted, src.Path)
+		}
+	}
+	return allow, untrusted
+}
+
 // TrustedURLResolver returns the [auth].url-resolver command honoured for the
 // repo: scalar override across layers above the repo, last one wins, an
 // explicit "" clearing it. The value is TrimSpaced, so whitespace-only also

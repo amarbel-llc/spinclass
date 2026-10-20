@@ -609,14 +609,26 @@ func CheckConfinement(sf sweatfile.Sweatfile, layerAboveRepo, global bool) []Iss
 // CheckPermissions validates the [permissions] table: it is honoured only from
 // layers above the repo, so a repo-level value is ignored.
 func CheckPermissions(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
-	if sf.Permissions == nil || sf.Permissions.DenySweatfileEdits == nil || layerAboveRepo {
+	if sf.Permissions == nil || layerAboveRepo {
 		return nil
 	}
-	return []Issue{{
-		Message:  "[permissions] sets `deny-sweatfile-edits` in a repo-level sweatfile: it is ignored — only sweatfiles above the repo may set it; move it to the global sweatfile",
-		Severity: SeverityWarning,
-		Field:    "permissions.deny-sweatfile-edits",
-	}}
+	var issues []Issue
+	for _, key := range []struct {
+		name string
+		set  bool
+	}{
+		{"deny-sweatfile-edits", sf.Permissions.DenySweatfileEdits != nil},
+		{"allow-self-close", sf.Permissions.AllowSelfClose != nil},
+	} {
+		if key.set {
+			issues = append(issues, Issue{
+				Message:  fmt.Sprintf("[permissions] sets `%s` in a repo-level sweatfile: it is ignored — only sweatfiles above the repo may set it; move it to the global sweatfile", key.name),
+				Severity: SeverityWarning,
+				Field:    "permissions." + key.name,
+			})
+		}
+	}
+	return issues
 }
 
 // CheckStore validates the [store] table: the identity it stamps on commits is

@@ -260,6 +260,22 @@ func registerMCPOnlyCommands(app *command.App) {
 	})
 
 	app.AddCommand(&command.Command{
+		Name:  "close-this-session",
+		Title: "Close This Session",
+		Description: command.Description{
+			Short: "Ask for THIS session to be closed (#389) once your last turn is over. Off unless an operator set `allow-self-close = true` under [permissions] in a sweatfile above the repo. It never forces: it is refused while a merge/check job runs, while there are unmerged commits, uncommitted changes or stashed work, or while you are the only holder of another live session (grant a handle on it first). The call only queues the request and removes nothing; the teardown (agent unit, credential, nix gc, worktree, branch) runs afterwards from outside the session, and the holders are told the result. After it succeeds, end your turn.",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(false),
+			DestructiveHint: protocol.BoolPtr(true),
+			IdempotentHint:  protocol.BoolPtr(true),
+			OpenWorldHint:   protocol.BoolPtr(false),
+		},
+		Params: []command.Param{},
+		Run:    wrapMCPHandler("close-this-session", handleCloseThisSession),
+	})
+
+	app.AddCommand(&command.Command{
 		Name:  "grant-session-handle",
 		Title: "Grant Session Handle",
 		Description: command.Description{

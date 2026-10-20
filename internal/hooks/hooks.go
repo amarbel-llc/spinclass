@@ -496,6 +496,7 @@ const (
 	whoamiToolName                = "mcp__plugin_spinclass_spinclass__whoami"
 	permsListToolName             = "mcp__plugin_spinclass_spinclass__perms-list"
 	listHandlesToolName           = "mcp__plugin_spinclass_spinclass__list-handles"
+	closeThisSessionToolName      = "mcp__plugin_spinclass_spinclass__close-this-session"
 )
 
 func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree, rewriteEnabled, denySweatfile bool) error {
@@ -560,6 +561,12 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 		// list-handles with accept mutates, but that case was already caught by
 		// the always-ask floor above, so reaching here means a plain listing.
 		return writeAllow(w, "spinclass read-only introspection tool, safe to auto-approve")
+	case closeThisSessionToolName:
+		// The tool itself refuses unless an operator set [permissions]
+		// allow-self-close in a trusted sweatfile layer, and it only QUEUES a
+		// close (it never forces and removes nothing in the call), so the
+		// operator's setting is the gate and a prompt on top guards nothing.
+		return writeAllow(w, "close-this-session is gated by the operator's allow-self-close setting")
 	case mergeThisSessionToolName, mergeThisSessionAsyncToolName:
 		if hasPreMergeHook(input.CWD) {
 			return writeAllow(w, "sweatfile [hooks].pre-merge gates this merge")

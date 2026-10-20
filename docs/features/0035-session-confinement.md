@@ -444,6 +444,34 @@ deny. It is kept small and isolated (`internal/hooks/sweatfile_guard.go`)
 because the intended end state is all session IO served by a spinclass plugin
 that enforces permissions at its own junction, which replaces it.
 
+## A session closing itself (spinclass#389, 2026-10-20)
+
+`close-this-session` lets a session end itself. The unit cannot stop itself
+inside its own tool call, so it is two halves:
+
+- **The tool**, run inside the session, checks and then only records a
+  `CloseRequest` in the session's state; it removes nothing and returns "end
+  your turn". Authority is a scope, `[permissions] allow-self-close` in a
+  trusted layer (off by default; a repo or worktree layer is ignored), not a
+  handle: the session closes only itself, so FDR 0032 D12 (a session only ever
+  removes its own handle) is untouched. It is refused while a merge/check job
+  runs, on unmerged commits, uncommitted changes or a non-empty stash shelf
+  (`close.Blocker`, the read-only half of what `RunResolved` checks), and when
+  the caller is the only accepted holder of another live session. It accepts no
+  `force`, not even `false`.
+- **The runner**, `spinclass close-self-run [target]`, is plumbing for the
+  frontend, which must run it from OUTSIDE the agent unit once the session has
+  finished its last turn. It re-checks every condition above (the worktree may
+  have changed), then calls `close.RunResolved` (unit stop, credential revoke,
+  nix gc, worktree and branch) and wakes the other holders with `shutdown`. A
+  refusal clears the request (no retry loop), wakes the holders with `failed`,
+  and leaves the session whole. With no target it uses `CLOWN_SESSION_ID`; with
+  no session or no request it does nothing, so the frontend may run it on every
+  idle transition.
+
+The trigger is clown's frontend and is not built here; until it exists the
+request just sits in the state and an operator can run the runner by hand.
+
 ## The principal across `sc resume` (FDR 0034 item 17)
 
 The check and the grant chain bind on the worker's principal (its

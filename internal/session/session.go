@@ -180,11 +180,23 @@ type State struct {
 	// in the creation funnel BEFORE the attach/spawn paths write their state.
 	Credential *Credential `json:"credential,omitempty"`
 
+	// CloseRequest is set by close-this-session (#389): the session asked to be
+	// closed once its last turn is over. The teardown runs outside the session
+	// (`sc close-self-run`), re-checks everything, and clears it on failure.
+	CloseRequest *CloseRequest `json:"close_request,omitempty"`
+
 	// isTombstone is set when the State was loaded from a regular file in
 	// the central index (i.e. a session that was closed cleanly and whose
 	// worktree-local state.json is gone). Unexported so it does not get
 	// serialised. ResolveState honours it as StateAbandoned.
 	isTombstone bool
+}
+
+// CloseRequest records that a session asked to close itself (#389).
+type CloseRequest struct {
+	RequestedAt time.Time `json:"requested_at"`
+	// Principal is the requesting session's own principal.
+	Principal string `json:"principal"`
 }
 
 // PreMergeAttestation records one nothing-but-the-truth call. It is claimed

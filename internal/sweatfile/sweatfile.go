@@ -171,6 +171,10 @@ type Permissions struct {
 	// DenySweatfileEdits turns the hook's ask on a Write/Edit of a sweatfile into
 	// a deny. Last trusted layer that sets it wins; off when unset.
 	DenySweatfileEdits *bool `toml:"deny-sweatfile-edits"`
+	// AllowSelfClose lets a session end itself with close-this-session (#389).
+	// Last trusted layer that sets it wins; off when unset, so a session cannot
+	// retire itself unless an operator allowed it. It never allows force.
+	AllowSelfClose *bool `toml:"allow-self-close"`
 }
 
 // Metrics configures spinclass's best-effort statsd telemetry (spinclass#363,

@@ -690,6 +690,14 @@ func TestCheckPermissionsWarnsInRepoLayer(t *testing.T) {
 	if len(CheckPermissions(sweatfile.Sweatfile{}, false)) != 0 {
 		t.Error("absent table should not warn")
 	}
+
+	sc := sweatfile.Sweatfile{Permissions: &sweatfile.Permissions{AllowSelfClose: &on}}
+	if got := CheckPermissions(sc, false); len(got) != 1 || got[0].Field != "permissions.allow-self-close" {
+		t.Errorf("repo-layer allow-self-close should warn once, got %+v", got)
+	}
+	if len(CheckPermissions(sc, true)) != 0 {
+		t.Error("above-repo allow-self-close should not warn")
+	}
 }
 
 func TestCheckStoreWarnsInRepoLayer(t *testing.T) {

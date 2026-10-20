@@ -1143,6 +1143,8 @@ func TestReadOnlyIntrospectionToolsAutoApproved(t *testing.T) {
 		{"list-handles", map[string]any{"accept": false}, "allow"},
 		{"list-handles", map[string]any{"accept": true}, "ask"},
 		{"list-handles", map[string]any{"accept": "true"}, "ask"},
+		// Gated by the operator's allow-self-close setting inside the tool.
+		{"close-this-session", map[string]any{}, "allow"},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%s %v", tt.tool, tt.input), func(t *testing.T) {
