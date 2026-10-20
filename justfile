@@ -1017,6 +1017,26 @@ debug-confinement-check session="" principal="":
     [ -n "{{ principal }}" ] && args+=(--principal "{{ principal }}")
     "$out/bin/spinclass" confinement-check "${args[@]}" || true
 
+# Shows how the installed claude treats the permission-mode flags a spawn
+# splices (spinclass#385): its --permission-mode choices, whether the retired
+# --enable-auto-mode is rejected or ignored (probed with --help, so no model
+# call), and the auto-mode subcommand's help. Makes no network call.
+#
+# show the installed claude's permission-mode flags and auto-mode help
+[group('explore')]
+explore-claude-permission-modes:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    command -v claude || { echo "no claude on PATH"; exit 0; }
+    claude --version
+    echo "--- --permission-mode in --help:"
+    claude --help | grep -n -A3 -- '--permission-mode'
+    echo "--- claude --enable-auto-mode --help (exit status, first lines):"
+    claude --enable-auto-mode --help >/dev/null 2>"${TMPDIR:-/tmp}/eam.err"; echo "exit=$?"
+    head -5 "${TMPDIR:-/tmp}/eam.err"
+    echo "--- claude auto-mode --help:"
+    claude auto-mode --help 2>&1 | head -40
+
 # [debug] Render an `sc` subcommand through a REAL PTY and dump the screen, so
 # TTY-only output — the pretty `sc list` table's colored status dots, 🤡 clown
 # badges, and description wrapping — can be eyeballed the way color-stripped

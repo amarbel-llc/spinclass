@@ -16,9 +16,9 @@ var DontAskModeArgs = []string{"--permission-mode", "dontAsk"}
 
 // SpliceDontAskMode returns argv with claude's dontAsk permission mode set
 // among the provider args (just after the first "--" separator), replacing any
-// permission mode the entry already carried and dropping --enable-auto-mode
-// (dontAsk and auto mode are alternatives; auto falls back to prompting after
-// repeated classifier blocks). It fails closed: a confined launch that cannot
+// permission mode the entry already carried (AutoModeArgs included) and the
+// retired --enable-auto-mode (dontAsk and auto mode are alternatives; auto
+// falls back to prompting after repeated classifier blocks). It fails closed: a confined launch that cannot
 // be made non-prompting is refused rather than started able to hang. Does not
 // mutate argv.
 func SpliceDontAskMode(argv []string) ([]string, error) {
@@ -37,7 +37,7 @@ func SpliceDontAskMode(argv []string) ([]string, error) {
 		switch {
 		case rest[i] == "--permission-mode":
 			i++ // drop the value too
-		case strings.HasPrefix(rest[i], "--permission-mode="), rest[i] == AutoModeFlag:
+		case strings.HasPrefix(rest[i], "--permission-mode="), rest[i] == retiredAutoModeFlag:
 		default:
 			out = append(out, rest[i])
 		}

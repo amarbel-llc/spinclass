@@ -244,7 +244,13 @@ func ClaudeSettings(worktreePath string, sf sweatfile.Sweatfile) error {
 		fmt.Sprintf("Edit(%s/*)", worktreePath),
 	)
 
-	permsMap["defaultMode"] = "acceptEdits"
+	// Agrees with the spawn splice (spawn.AutoModeArgs) for a session started
+	// without a --permission-mode flag. A confined spawn passes
+	// --permission-mode dontAsk, which is meant to override this default.
+	permsMap["defaultMode"] = "auto"
+	if sf.SessionAutoModeDisabled() {
+		permsMap["defaultMode"] = "acceptEdits"
+	}
 	permsMap["allow"] = allRules
 
 	doc["permissions"] = permsMap

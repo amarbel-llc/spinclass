@@ -145,7 +145,7 @@ func TestLaunchProfileSplicedAndRecorded(t *testing.T) {
 
 	res, repoPath := launchWithProfile(t, modelSpawnSweatfile, "cheap")
 
-	want := []string{"--profile", "cheap", "--", "--enable-auto-mode", "brief"}
+	want := []string{"--profile", "cheap", "--", "--permission-mode", "auto", "brief"}
 	if got := launchedArgv(t, res.WorktreePath); !slices.Equal(got, want) {
 		t.Errorf("argv = %v, want %v", got, want)
 	}
@@ -195,7 +195,7 @@ func TestLaunchWithoutProfileNeverCallsResolver(t *testing.T) {
 	if len(r.asked) != 0 {
 		t.Errorf("resolver consulted without a profile: %v", r.asked)
 	}
-	want := []string{"--", "--enable-auto-mode", "brief"}
+	want := []string{"--", "--permission-mode", "auto", "brief"}
 	if got := launchedArgv(t, res.WorktreePath); !slices.Equal(got, want) {
 		t.Errorf("argv = %v, want %v", got, want)
 	}

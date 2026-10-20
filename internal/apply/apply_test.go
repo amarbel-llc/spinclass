@@ -26,6 +26,31 @@ func gitDir(t *testing.T) string {
 	return filepath.Dir(gitPath)
 }
 
+// [session-entry].disable-auto-mode, which keeps auto off a spawn's argv,
+// keeps it out of the generated default too (spinclass#385).
+func TestClaudeSettingsDefaultModeHonoursDisableAutoMode(t *testing.T) {
+	dir := t.TempDir()
+	off := true
+	if err := ClaudeSettings(dir, sweatfile.Sweatfile{SessionEntry: &sweatfile.SessionEntry{DisableAutoMode: &off}}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, ".claude", "settings.local.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Permissions struct {
+			DefaultMode string `json:"defaultMode"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Permissions.DefaultMode != "acceptEdits" {
+		t.Errorf("defaultMode = %q, want acceptEdits", doc.Permissions.DefaultMode)
+	}
+}
+
 func TestClaudeSettings(t *testing.T) {
 	dir := t.TempDir()
 	rules := []string{"Read", "Glob", "Bash(git *)"}
@@ -53,8 +78,8 @@ func TestClaudeSettings(t *testing.T) {
 	}
 
 	defaultMode, _ := permsMap["defaultMode"].(string)
-	if defaultMode != "acceptEdits" {
-		t.Errorf("defaultMode: got %q, want %q", defaultMode, "acceptEdits")
+	if defaultMode != "auto" {
+		t.Errorf("defaultMode: got %q, want %q", defaultMode, "auto")
 	}
 
 	allowRaw, _ := permsMap["allow"].([]any)

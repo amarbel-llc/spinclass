@@ -1,56 +1,79 @@
 package spawn
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
-func TestSpliceAutoModeFlagInsertsForClaudeProvider(t *testing.T) {
+func TestSpliceAutoModeInsertsForClaudeProvider(t *testing.T) {
 	entry := []string{"clown", "--clown-attach=spawn", "--", "{prompt}"}
-	got := SpliceAutoModeFlag(entry)
-	want := []string{"clown", "--clown-attach=spawn", "--", "--enable-auto-mode", "{prompt}"}
-	if len(got) != len(want) {
-		t.Fatalf("SpliceAutoModeFlag() = %v, want %v", got, want)
+	got := SpliceAutoMode(entry)
+	want := []string{"clown", "--clown-attach=spawn", "--", "--permission-mode", "auto", "{prompt}"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("SpliceAutoMode() = %v, want %v", got, want)
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("SpliceAutoModeFlag()[%d] = %q, want %q", i, got[i], want[i])
+}
+
+// An entry that already names a permission mode chose it on purpose; the
+// default must not override it.
+func TestSpliceAutoModeKeepsAnExplicitMode(t *testing.T) {
+	for _, entry := range [][]string{
+		{"clown", "--", "--permission-mode", "plan", "{prompt}"},
+		{"clown", "--", "--permission-mode=plan", "{prompt}"},
+	} {
+		if got := SpliceAutoMode(entry); !reflect.DeepEqual(got, entry) {
+			t.Errorf("SpliceAutoMode(%v) = %v, want it unmodified", entry, got)
 		}
 	}
 }
 
-// TestSpliceAutoModeFlagNoOpForNonClaudeProvider pins that, unlike
+// The retired --enable-auto-mode (absent from Claude Code 2.1.301's help) is
+// replaced by the real mode, not left beside it.
+func TestSpliceAutoModeReplacesTheRetiredFlag(t *testing.T) {
+	got := SpliceAutoMode([]string{"clown", "--", "--enable-auto-mode", "{prompt}"})
+	want := []string{"clown", "--", "--permission-mode", "auto", "{prompt}"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("SpliceAutoMode() = %v, want %v", got, want)
+	}
+}
+
+// TestSpliceAutoModeNoOpForNonClaudeProvider pins that, unlike
 // SpliceModelFlag, this is claude-only with no per-provider flag map: a
 // non-claude provider's entry is left completely unmodified.
-func TestSpliceAutoModeFlagNoOpForNonClaudeProvider(t *testing.T) {
+func TestSpliceAutoModeNoOpForNonClaudeProvider(t *testing.T) {
 	entry := []string{"clown", "--provider=codex", "--", "{prompt}"}
-	got := SpliceAutoModeFlag(entry)
-	if len(got) != len(entry) {
-		t.Fatalf("SpliceAutoModeFlag() = %v, want unmodified %v", got, entry)
-	}
-	for i := range entry {
-		if got[i] != entry[i] {
-			t.Errorf("SpliceAutoModeFlag()[%d] = %q, want %q", i, got[i], entry[i])
-		}
+	if got := SpliceAutoMode(entry); !reflect.DeepEqual(got, entry) {
+		t.Fatalf("SpliceAutoMode() = %v, want unmodified %v", got, entry)
 	}
 }
 
-// TestSpliceAutoModeFlagNoOpWithoutSeparator pins that, unlike
-// SpliceModelFlag, a missing "--" is a silent no-op, not an error — this is
-// an automatic default applied to every spawn, so a fully custom
-// spawn-entry (a different harness entirely) must not be broken by it.
-func TestSpliceAutoModeFlagNoOpWithoutSeparator(t *testing.T) {
+// TestSpliceAutoModeNoOpWithoutSeparator pins that, unlike SpliceModelFlag, a
+// missing "--" is a silent no-op, not an error — this is an automatic default
+// applied to every spawn, so a fully custom spawn-entry (a different harness
+// entirely) must not be broken by it.
+func TestSpliceAutoModeNoOpWithoutSeparator(t *testing.T) {
 	entry := []string{"my-harness", "{prompt}"}
-	got := SpliceAutoModeFlag(entry)
-	if len(got) != len(entry) || got[0] != entry[0] || got[1] != entry[1] {
-		t.Errorf("SpliceAutoModeFlag() = %v, want unmodified %v", got, entry)
+	if got := SpliceAutoMode(entry); !reflect.DeepEqual(got, entry) {
+		t.Errorf("SpliceAutoMode() = %v, want unmodified %v", got, entry)
 	}
 }
 
-func TestSpliceAutoModeFlagDoesNotMutateInput(t *testing.T) {
-	entry := []string{"clown", "--", "{prompt}"}
+func TestSpliceAutoModeDoesNotMutateInput(t *testing.T) {
+	entry := []string{"clown", "--", "--enable-auto-mode", "{prompt}"}
 	orig := append([]string(nil), entry...)
-	SpliceAutoModeFlag(entry)
-	for i := range orig {
-		if entry[i] != orig[i] {
-			t.Errorf("input entry mutated: entry[%d] = %q, want %q", i, entry[i], orig[i])
-		}
+	SpliceAutoMode(entry)
+	if !reflect.DeepEqual(entry, orig) {
+		t.Errorf("input entry mutated: %v, want %v", entry, orig)
+	}
+}
+
+// A confined spawn replaces the auto mode with dontAsk.
+func TestSpliceDontAskModeReplacesTheAutoSplice(t *testing.T) {
+	got, err := SpliceDontAskMode(SpliceAutoMode([]string{"clown", "--", "brief"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"clown", "--", "--permission-mode", "dontAsk", "brief"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v want %v", got, want)
 	}
 }

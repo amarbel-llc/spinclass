@@ -431,14 +431,14 @@ func TestLaunchSplicesModelFlag(t *testing.T) {
 	// separator, then renderSpawn's auto-mode splice (runs first, inserts
 	// --model/value right after "--" on the NEXT splice — SpliceModelFlag
 	// always inserts immediately after "--", so it lands before the
-	// already-spliced --enable-auto-mode), then the substituted brief. The
+	// already-spliced --permission-mode auto), then the substituted brief. The
 	// default model-flags map ({"claude": "--model"}) applies since the
 	// entry selects no --provider (defaults to "claude"), and "opus"
 	// resolves to its full Claude model ID (claude-opus-5) via the built-in
 	// [session-entry.model-ids] default (sweatfile.GetDefault(), merged
 	// into renderSpawn's hierarchy) — this fixture's sweatfile declares no
 	// model-ids/disable-auto-mode override of its own.
-	want := []string{"--", "--model", "claude-opus-5", "--enable-auto-mode", "brief"}
+	want := []string{"--", "--model", "claude-opus-5", "--permission-mode", "auto", "brief"}
 	if len(argv) != len(want) {
 		t.Fatalf("argv = %v, want %v", argv, want)
 	}
@@ -450,7 +450,7 @@ func TestLaunchSplicesModelFlag(t *testing.T) {
 }
 
 // TestLaunchDefaultsToAutoMode proves a spawn with NO model requested still
-// gets --enable-auto-mode spliced in by default (renderSpawn's auto-mode
+// gets --permission-mode auto spliced in by default (renderSpawn's auto-mode
 // splice is unconditional, unlike the model splice which is gated on the
 // model param).
 func TestLaunchDefaultsToAutoMode(t *testing.T) {
@@ -472,7 +472,7 @@ func TestLaunchDefaultsToAutoMode(t *testing.T) {
 		t.Fatalf("reading argv.txt: %v", err)
 	}
 	argv := strings.Split(strings.TrimRight(string(argvBytes), "\n"), "\n")
-	want := []string{"--", "--enable-auto-mode", "brief"}
+	want := []string{"--", "--permission-mode", "auto", "brief"}
 	if len(argv) != len(want) {
 		t.Fatalf("argv = %v, want %v", argv, want)
 	}
@@ -491,7 +491,7 @@ disable-auto-mode = true
 `
 
 // TestLaunchAutoModeDisabled proves [session-entry].disable-auto-mode opts a
-// spawn out of the default --enable-auto-mode splice entirely.
+// spawn out of the default --permission-mode auto splice entirely.
 func TestLaunchAutoModeDisabled(t *testing.T) {
 	home, repoPath := newWorkerFixture(t, autoModeDisabledSweatfile)
 	const driverKey = "driver/test-session"

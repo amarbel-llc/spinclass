@@ -290,10 +290,9 @@ func LaunchWith(home, repoPath string, driver Driver, brief, desc, model, profil
 // renderSpawn loads the WORKER repo's sweatfile hierarchy (its harness decides
 // the spawn-entry, not the driver's) and renders the detached-harness argv. It
 // also returns the hierarchy's [session-entry].env for the exec's environment.
-// Unless [session-entry].disable-auto-mode is set, AutoModeFlag is spliced
+// Unless [session-entry].disable-auto-mode is set, AutoModeArgs are spliced
 // into the entry (claude provider only, silently skipped otherwise — see
-// SpliceAutoModeFlag) so a spawned worker boots with claude's own auto-mode
-// enabled by default. When model is non-empty, the resolved provider's model
+// SpliceAutoMode) so a spawned worker starts in claude's auto permission mode. When model is non-empty, the resolved provider's model
 // flag (from [session-entry.model-flags]) and resolved model value — for the
 // "claude" provider, [session-entry.model-ids][alias] (the full model ID,
 // built in via sweatfile.GetDefault() for sonnet/opus/haiku/fable); the raw
@@ -340,7 +339,7 @@ func renderSpawn(home string, rp worktree.ResolvedPath, brief, model, profile st
 
 	entry := merged.SessionSpawnEntry()
 	if !merged.SessionAutoModeDisabled() {
-		entry = SpliceAutoModeFlag(entry)
+		entry = SpliceAutoMode(entry)
 	}
 	if model != "" {
 		entry, err = SpliceModelFlag(entry, model, merged.SessionModelFlags(), merged.SessionModelIDs())

@@ -58,11 +58,12 @@ type SessionEntry struct {
 	// the accessor — see GetDefault's SessionEntry.ModelIDs. See the
 	// addendum in docs/plans/2026-07-11-spawn-model-selection-design.md.
 	ModelIDs map[string]string `toml:"model-ids"`
-	// DisableAutoMode opts a spawned worker OUT of claude's own
-	// --enable-auto-mode flag, which spawn.SpliceAutoModeFlag splices into
+	// DisableAutoMode opts a spawned worker OUT of claude's auto permission
+	// mode: `--permission-mode auto`, which spawn.SpliceAutoMode splices into
 	// the spawn-entry's provider-args (after the literal "--") by default
-	// for the "claude" provider. nil/false (the default) = auto-mode
-	// enabled; true = spawn-entry is left unmodified. Scalar override, like
+	// for the "claude" provider, and the generated settings' defaultMode.
+	// nil/false (the default) = auto mode; true = spawn-entry is left
+	// unmodified and defaultMode is acceptEdits. Scalar override, like
 	// the [hooks] disable-* fields. Unlike ModelFlags/ModelIDs there is no
 	// per-provider flag map: splicing is unconditionally claude-only, and
 	// this is the sole knob (no GetDefault() seed needed — the zero value,
@@ -980,8 +981,8 @@ func (sf Sweatfile) SessionModelIDs() map[string]string {
 }
 
 // SessionAutoModeDisabled reports whether [session-entry].disable-auto-mode
-// is set, opting a spawned worker out of the default
-// spawn.SpliceAutoModeFlag splice.
+// is set, opting a spawned worker out of the default spawn.SpliceAutoMode
+// splice and the generated settings out of defaultMode auto.
 func (sf Sweatfile) SessionAutoModeDisabled() bool {
 	return sf.SessionEntry != nil &&
 		sf.SessionEntry.DisableAutoMode != nil &&
