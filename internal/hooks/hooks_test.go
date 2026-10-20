@@ -2134,6 +2134,67 @@ func TestSessionStartWorktreeWithoutSpawnedByNoHello(t *testing.T) {
 	}
 }
 
+// A confined unit does not share the state dir with the frontend, so a hook
+// that fails inside one used to leave nothing readable. The worktree's
+// .spinclass dir is visible from the host: the hook leaves a trace there.
+func TestSessionStartLeavesAWorktreeTraceOfTheHello(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	_, wt := initSpawnedWorktree(t, "driver/key")
+
+	fireSessionStart(t, wt)
+
+	b, err := os.ReadFile(filepath.Join(wt, ".spinclass", hookTraceName))
+	if err != nil {
+		t.Fatalf("no hook trace: %v", err)
+	}
+	got := string(b)
+	for _, want := range []string{"SessionStart hook ran", "hello: sent key=myrepo/feature to=driver/key"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("trace lacks %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestSessionStartTracesAHelloSendFailure(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	_, wt := initSpawnedWorktree(t, "driver/key")
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("not a dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_STATE_HOME", blocker)
+
+	fireSessionStart(t, wt)
+
+	b, err := os.ReadFile(filepath.Join(wt, ".spinclass", hookTraceName))
+	if err != nil {
+		t.Fatalf("no hook trace: %v", err)
+	}
+	if !strings.Contains(string(b), "hello: send failed key=myrepo/feature") {
+		t.Errorf("trace does not name the send failure:\n%s", b)
+	}
+}
+
+func TestHookTraceNeverCreatesTheSpinclassDirOrGrowsUnbounded(t *testing.T) {
+	cwd := t.TempDir()
+	hookTrace(cwd, "x") // no .spinclass dir: must not create one
+	if _, err := os.Stat(filepath.Join(cwd, ".spinclass")); err == nil {
+		t.Fatal("hookTrace created .spinclass")
+	}
+	if err := os.MkdirAll(filepath.Join(cwd, ".spinclass"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	big := make([]byte, hookTraceMaxBytes+1)
+	path := filepath.Join(cwd, ".spinclass", hookTraceName)
+	if err := os.WriteFile(path, big, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hookTrace(cwd, "more")
+	if fi, _ := os.Stat(path); fi.Size() != int64(len(big)) {
+		t.Errorf("trace grew past its cap: %d bytes", fi.Size())
+	}
+}
+
 func TestSessionStartSpawnHelloSendFailureLeavesUnmarked(t *testing.T) {
 	// Write the state under a working XDG_STATE_HOME, then point
 	// XDG_STATE_HOME at a regular FILE so spawnhandshake.SendHello's MkdirAll

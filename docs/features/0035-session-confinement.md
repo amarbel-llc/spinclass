@@ -309,6 +309,32 @@ disagreement between the two is F15. A session that was never launched
 confined has no mapping, so its session-bound grants do not join; its grants
 could not be card-rooted anyway. Amends FDR 0001.
 
+## A confined worker never blocks on a permission prompt (decided 2026-10-20, operator)
+
+No operator sits at a confined unit's tty (F8a), so a question the agent asks is
+never answered. The first real confined worker sat 30+ minutes on a Claude Code
+permission prompt for a read outside its allow list, with `--enable-auto-mode`
+in its argv. Claude's docs say auto mode pauses and resumes prompting after
+repeated classifier blocks, and start it with `--permission-mode auto`; whether
+`--enable-auto-mode` alone starts a session in it is unverified.
+
+A confined spawn therefore gets `--permission-mode dontAsk` in its provider
+args (`spawn.SpliceDontAskMode`): per the docs every call that would otherwise
+prompt is auto-denied, the session never waits for input, and allow rules and
+PreToolUse-hook approvals still run. The splice replaces any permission mode
+and `--enable-auto-mode` the spawn-entry carried, and fails closed: an entry
+with no `--` separator or a non-claude provider is refused before anything is
+created. The agent sees refusals and adapts, so its allow list and hook
+approvals must cover what it legitimately needs. Unconfined spawns are
+unchanged. Unverified: that the installed claude (2.1.301) accepts `dontAsk`;
+the docs read were current.
+
+The spawn SessionStart hook leaves a trace in `<worktree>/.spinclass/
+hook-trace.log` (the worktree is rw-bound and host-readable; the lifecycle log
+in the state dir is not shared with the unit). It records that the hook ran and
+where the hello stopped. The missing hello of that worker is a separate bug;
+the trace is the evidence path.
+
 ## The principal across `sc resume` (FDR 0034 item 17)
 
 The check and the grant chain bind on the worker's principal (its

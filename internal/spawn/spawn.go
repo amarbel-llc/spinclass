@@ -120,6 +120,13 @@ func LaunchDetached(home, repoPath string, driver Driver, brief, desc, model, pr
 		if err := confinedPreflight(confinementHost, agentScopeCapabilitiesArgv); err != nil {
 			return Pending{}, err
 		}
+		// No operator sits at a confined unit's tty (F8a), so the worker must
+		// never be able to wait on a permission prompt: dontAsk denies instead.
+		// Before anything is created, so a spawn-entry that cannot take the flag
+		// litters nothing.
+		if argv, err = SpliceDontAskMode(argv); err != nil {
+			return Pending{}, err
+		}
 	}
 	effective := effectiveProfile(profile, merged)
 	if enforce && effective == "" {

@@ -103,6 +103,8 @@ func runSessionStart(input hookInput) error {
 	// multiplexer session name (clown mints one UUID for both) — the driver
 	// needs it to reattach, so it rides along in the hello (direction B).
 	if worktree.IsWorktree(cwd) {
+		hookTrace(cwd, "SessionStart hook ran home=%q xdg_state_home=%q clown_session_id_set=%t",
+			os.Getenv("HOME"), os.Getenv("XDG_STATE_HOME"), os.Getenv("CLOWN_SESSION_ID") != "")
 		// Before the hello: it re-reads state and rewrites PID/HelloSentAt, so
 		// the recorded principal must already be on disk to survive that write.
 		recordOwnPrincipal(cwd, os.Getenv("CLOWN_SESSION_ID"))
@@ -314,26 +316,33 @@ func maybeSendSpawnHello(cwd, poshSessionID string) {
 	repoPath, err := git.CommonDir(cwd)
 	if err != nil {
 		sessionlog.Errorf("maybeSendSpawnHello common-dir-failed cwd=%s err=%v", cwd, err)
+		hookTrace(cwd, "hello: git common dir failed: %v", err)
 		return
 	}
 	branch, err := git.BranchCurrent(cwd)
 	if err != nil || branch == "" { // empty = detached HEAD: no session key to read
+		hookTrace(cwd, "hello: no current branch (err=%v branch=%q)", err, branch)
 		return
 	}
 	st, err := session.Read(repoPath, branch)
 	if err != nil {
 		// No session state — a worktree spinclass doesn't track. Expected
-		// for non-sc worktrees; stay silent.
+		// for non-sc worktrees; stay silent in the lifecycle log, but trace it
+		// where the frontend can read it.
+		hookTrace(cwd, "hello: no session state for repo=%q branch=%q: %v", repoPath, branch, err)
 		return
 	}
 	helloTarget := st.EffectiveSpawner()
 	if helloTarget == "" || st.HelloSentAt != nil {
+		hookTrace(cwd, "hello: nothing to send (spawner=%q already_sent=%t)", helloTarget, st.HelloSentAt != nil)
 		return
 	}
 	if err := spawnhandshake.SendHello(st.SessionKey, helloTarget, poshSessionID); err != nil {
 		sessionlog.Errorf("maybeSendSpawnHello send-failed key=%s to=%s err=%v", st.SessionKey, helloTarget, err)
+		hookTrace(cwd, "hello: send failed key=%s to=%s: %v", st.SessionKey, helloTarget, err)
 		return
 	}
+	hookTrace(cwd, "hello: sent key=%s to=%s", st.SessionKey, helloTarget)
 	now := time.Now().UTC()
 	st.HelloSentAt = &now
 	// os.Getppid() is best-effort, same caveat as the implicit path: the
@@ -343,6 +352,7 @@ func maybeSendSpawnHello(cwd, poshSessionID string) {
 	st.SessionState = session.StateActive
 	if err := session.Write(*st); err != nil {
 		sessionlog.Errorf("maybeSendSpawnHello write-failed key=%s err=%v", st.SessionKey, err)
+		hookTrace(cwd, "hello: state write failed key=%s: %v", st.SessionKey, err)
 	}
 }
 
