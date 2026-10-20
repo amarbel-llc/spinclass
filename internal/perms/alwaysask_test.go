@@ -55,7 +55,7 @@ func TestAlwaysAsk(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reason, ask := AlwaysAsk(tt.toolName, tt.toolInput)
+			reason, ask := AlwaysAsk(tt.toolName, tt.toolInput, "/cwd")
 			if ask != tt.wantAsk {
 				t.Fatalf("AlwaysAsk(%q, %v) ask = %v, want %v",
 					tt.toolName, tt.toolInput, ask, tt.wantAsk)
@@ -67,6 +67,48 @@ func TestAlwaysAsk(t *testing.T) {
 				t.Errorf("a non-asking verdict should carry no reason, got %q", reason)
 			}
 		})
+	}
+}
+
+// A confined spawn is the one carve-out from the spawn floor (#382). The
+// verdict comes from the installed SpawnConfined seam, which receives the tool
+// input and cwd; with no seam installed, or one that says unconfined, spawn
+// still asks.
+func TestAlwaysAskSpawnCarveOutForConfined(t *testing.T) {
+	prev := SpawnConfined
+	t.Cleanup(func() { SpawnConfined = prev })
+
+	var gotInput map[string]any
+	var gotCwd string
+	SpawnConfined = func(in map[string]any, cwd string) bool {
+		gotInput, gotCwd = in, cwd
+		return in["repo"] == "confined-repo"
+	}
+
+	if reason, ask := AlwaysAsk(spawnSessionTool, map[string]any{"repo": "confined-repo"}, "/driver"); ask || reason != "" {
+		t.Errorf("a confined spawn should not ask, got ask=%v reason=%q", ask, reason)
+	}
+	if gotCwd != "/driver" || gotInput["repo"] != "confined-repo" {
+		t.Errorf("the seam must see the invocation's input and cwd, got %v %q", gotInput, gotCwd)
+	}
+	if _, ask := AlwaysAsk(spawnSessionTool, map[string]any{"repo": "other"}, "/driver"); !ask {
+		t.Error("an unconfined spawn must still ask")
+	}
+
+	SpawnConfined = nil
+	if _, ask := AlwaysAsk(spawnSessionTool, map[string]any{"repo": "confined-repo"}, "/driver"); !ask {
+		t.Error("with no seam installed spawn must ask")
+	}
+}
+
+// The carve-out is spawn-only: another tool never consults the seam.
+func TestAlwaysAskSeamIgnoredForOtherTools(t *testing.T) {
+	prev := SpawnConfined
+	t.Cleanup(func() { SpawnConfined = prev })
+	SpawnConfined = func(map[string]any, string) bool { return true }
+
+	if _, ask := AlwaysAsk(grantSessionHandleTool, nil, "/cwd"); !ask {
+		t.Error("a confined-spawn verdict must not loosen grant-session-handle")
 	}
 }
 

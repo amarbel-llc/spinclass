@@ -17,6 +17,13 @@ const (
 	listHandlesTool          = "mcp__plugin_spinclass_spinclass__list-handles"
 )
 
+// SpawnConfined reports whether a spawn-session invocation (its tool input and
+// the driver's cwd) would launch a confined worker. It is a seam, not a
+// default: the real answer needs the spawn package's sweatfile reads, which
+// perms must not import, so the CLI layer installs it. Nil means "never
+// confined", i.e. spawn always asks.
+var SpawnConfined func(toolInput map[string]any, cwd string) bool
+
 // AlwaysAsk reports whether an invocation must prompt the human, and why. It is
 // the single source of truth for spinclass's always-ask floor, consulted by BOTH
 // enforcement surfaces: the PreToolUse hook turns a true into an `ask` decision
@@ -27,9 +34,20 @@ const (
 // Note this judges an INVOCATION, not a tool: it was a name-keyed map until
 // close-child-session needed a decision that depends on an argument (#249).
 // Callers must pass the tool input, not just the name.
-func AlwaysAsk(toolName string, toolInput map[string]any) (string, bool) {
+func AlwaysAsk(toolName string, toolInput map[string]any, cwd string) (string, bool) {
 	switch toolName {
 	case spawnSessionTool:
+		// A CONFINED spawn (FDR 0035) is the one carve-out (#382): the worker
+		// runs in a unit that bounds what it can reach and cannot wait on a
+		// prompt, so the per-call confirmation guards nothing a human would
+		// weigh. This is about the tool's permission class, not confinement's
+		// strength — an unconfined spawn, and any doubt about whether this
+		// one is confined, still asks. The hook then allows it positively.
+		// Fan-out stays bounded: a confined spawn refuses to run from inside
+		// an agent unit, so a confined worker's own spawns still prompt.
+		if SpawnConfined != nil && SpawnConfined(toolInput, cwd) {
+			return "", false
+		}
 		// Spawning launches a full harness-booted agent that immediately
 		// consumes tokens — categorically heavier than any other spinclass tool,
 		// and unconditional regardless of arguments. (spinclass#262 merged
@@ -147,7 +165,7 @@ func RunCheck(r io.Reader, w io.Writer, tiersDir string) error {
 		return fmt.Errorf("decoding hook input: %w", err)
 	}
 
-	if _, ask := AlwaysAsk(input.ToolName, input.ToolInput); ask {
+	if _, ask := AlwaysAsk(input.ToolName, input.ToolInput, input.CWD); ask {
 		return nil // defer to the always-ask PreToolUse decision
 	}
 

@@ -363,6 +363,25 @@ The check also treats the record's `main_pid` as advisory: one outside the
 unit's cgroup is ignored and noted in F1, since every process in the cgroup
 must share one mount namespace for the path facts to hold anyway.
 
+## A confined spawn is not always-ask (spinclass#382, 2026-10-20)
+
+`spawn-session` was unconditionally always-ask (#151). That floor now yields
+for a spawn that will launch a unit, since confinement bounds what the worker
+can reach and the worker never blocks on a prompt. `perms.AlwaysAsk` takes the
+driver's cwd and consults the `perms.SpawnConfined` seam; the CLI installs
+`spawn.WillConfine`, which mirrors `LaunchDetached`'s decision: the target repo's
+trusted `[confinement].launch-unit` (target = the `repo` argument, or the
+driver's own repo when omitted) OR the driver's own context. Any doubt
+(unresolvable target, unreadable hierarchy, non-string `repo`) keeps the ask.
+The PreToolUse hook then returns `allow` for it. This changes the tool's
+permission class only; it does not touch confinement or the preflight, which
+still refuses a launch that cannot be confined.
+
+Fan-out stays bounded: `confinedPreflight` refuses a confined spawn from inside
+an agent unit, so a confined worker's own spawns are unconfined and still ask.
+`RunCheck` (perms tiers) still never auto-approves spawn; the allow comes from
+the hook.
+
 ## The principal across `sc resume` (FDR 0034 item 17)
 
 The check and the grant chain bind on the worker's principal (its

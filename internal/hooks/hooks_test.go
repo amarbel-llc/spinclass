@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/clown"
+	"code.linenisgreat.com/spinclass/internal/perms"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/spawnhandshake"
 	"code.linenisgreat.com/spinclass/internal/testfs"
@@ -1140,6 +1141,31 @@ func TestSpawnSessionAsksConfirmation(t *testing.T) {
 	}
 	if reason == "" {
 		t.Error("expected a permissionDecisionReason")
+	}
+}
+
+// The one carve-out from that floor is a CONFINED spawn (#382): the hook
+// allows it outright, and still asks when the same call is unconfined.
+func TestSpawnSessionConfinedIsAllowed(t *testing.T) {
+	prev := perms.SpawnConfined
+	t.Cleanup(func() { perms.SpawnConfined = prev })
+	perms.SpawnConfined = func(in map[string]any, _ string) bool { return in["repo"] == "confined" }
+
+	cwd := t.TempDir()
+	run := func(repo string) string {
+		input := makeInput("mcp__plugin_spinclass_spinclass__spawn-session", map[string]any{"repo": repo}, cwd)
+		var stdout bytes.Buffer
+		if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		decision, _ := parseHookDecision(t, stdout.Bytes())
+		return decision
+	}
+	if got := run("confined"); got != "allow" {
+		t.Errorf("confined spawn: decision = %q, want allow", got)
+	}
+	if got := run("open"); got != "ask" {
+		t.Errorf("unconfined spawn: decision = %q, want ask", got)
 	}
 }
 

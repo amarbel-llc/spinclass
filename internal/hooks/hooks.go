@@ -519,7 +519,7 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 	// close-child-session: reversing the two lets a forcing reap match the
 	// benign case and return `allow` before the floor is ever consulted
 	// (verified — the ordering is load-bearing, not stylistic).
-	if reason, ask := perms.AlwaysAsk(input.ToolName, input.ToolInput); ask {
+	if reason, ask := perms.AlwaysAsk(input.ToolName, input.ToolInput, input.CWD); ask {
 		return writeAsk(w, reason)
 	}
 
@@ -531,6 +531,11 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 	}
 
 	switch input.ToolName {
+	case spawnSessionToolName:
+		// Only a confined spawn gets past the floor above (#382), so reaching
+		// here IS the confined case: the unit bounds the worker, and a
+		// prompt on a confined spawn guards nothing.
+		return writeAllow(w, "confined spawn: the worker runs in a bounded agent unit (FDR 0035)")
 	case listToolName, updateDescriptionToolName, validateToolName,
 		sessionJobCancelToolName, closeChildSessionToolName:
 		// Benign, session-scoped spinclass tools: list and validate are
