@@ -135,6 +135,10 @@ var verbClasses = map[verb]Class{
 	{"remote", "push"}:       ClassWrite,
 	{"remote", "push-stack"}: ClassWrite,
 
+	// list is ClassWrite, not ClassRead: a read verb allows any repo_path, and a
+	// shelf is private to its own worktree, so even listing needs the session
+	// worktree binding.
+	{"stash", "list"}:  ClassWrite,
 	{"stash", "save"}:  ClassWrite,
 	{"stash", "apply"}: ClassWrite,
 	{"stash", "drop"}:  ClassWrite,

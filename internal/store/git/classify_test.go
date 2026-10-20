@@ -169,6 +169,30 @@ func TestClassifyNoTargetOperationsBindToCheckedOutBranch(t *testing.T) {
 	})
 }
 
+// A shelf is private to its worktree, so every stash verb (list included) needs
+// only the session-worktree binding, and any other repo_path asks.
+func TestClassifyStashNeedsOnlyTheSessionWorktree(t *testing.T) {
+	f := newFixture(t)
+	var cases []classifyCase
+	for _, sub := range []string{"list", "save", "apply", "drop"} {
+		cases = append(cases,
+			classifyCase{name: sub + " in the session worktree", tool: "stash", sub: sub, args: map[string]any{}, want: store.Allow},
+			classifyCase{name: sub + " with the worktree as repo_path", tool: "stash", sub: sub, args: map[string]any{"repo_path": f.worktree}, want: store.Allow},
+			classifyCase{name: sub + " aimed at a foreign worktree", tool: "stash", sub: sub, args: map[string]any{"repo_path": f.foreignWorktree}, want: store.Ask},
+			classifyCase{name: sub + " aimed at the main checkout", tool: "stash", sub: sub, args: map[string]any{"repo_path": f.repo}, want: store.Ask},
+			classifyCase{name: sub + " repo_path wrong type", tool: "stash", sub: sub, args: map[string]any{"repo_path": 3}, want: store.Ask},
+		)
+	}
+	cases = append(cases,
+		classifyCase{name: "apply by position", tool: "stash", sub: "apply", args: map[string]any{"stash_ref": "stash@{1}"}, want: store.Allow},
+		classifyCase{name: "drop option-like ref", tool: "stash", sub: "drop", args: map[string]any{"stash_ref": "--all"}, want: store.Ask},
+		classifyCase{name: "stash_ref wrong type", tool: "stash", sub: "drop", args: map[string]any{"stash_ref": 1}, want: store.Ask},
+		classifyCase{name: "save with include_untracked and paths", tool: "stash", sub: "save", args: map[string]any{"include_untracked": true, "paths": []any{"a"}, "message": "m"}, want: store.Allow},
+		classifyCase{name: "unknown stash verb is floor", tool: "stash", sub: "pop", args: map[string]any{}, want: store.Ask},
+	)
+	runCases(t, f, cases)
+}
+
 func TestClassifyBranchCreateCheckoutAndRebase(t *testing.T) {
 	f := newFixture(t)
 	runCases(t, f, []classifyCase{

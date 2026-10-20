@@ -195,7 +195,7 @@ func (b Backend) writeAllowed(s store.Session, op store.Op, a classifyArgs) bool
 		return false
 	}
 	switch op.Tool + " " + op.Subcommand {
-	case "stash save", "stash apply", "stash drop":
+	case "stash list", "stash save", "stash apply", "stash drop":
 		return true
 	case "stage add", "stage unstage", "stage rm", "stage mv", "commit ",
 		"merge ", "remote pull", "branch reset-soft", "branch reset-hard",

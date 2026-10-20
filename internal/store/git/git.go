@@ -1,7 +1,7 @@
 // Package git is the git backend of the grit store tools (FDR 0036). It
-// implements the read verbs and the owned-branch write verbs (stage, commit,
-// branch); stash, remote, merge, tag mutation, clone and worktree remove
-// return store.ErrUnsupported.
+// implements the read verbs, the owned-branch write verbs (stage, commit,
+// branch) and the stash shelf; remote, merge, tag mutation, clone and worktree
+// remove return store.ErrUnsupported.
 package git
 
 import (
@@ -37,6 +37,7 @@ func (Backend) Capabilities() store.Capabilities {
 		"branch":   branchVerbs,
 		"tag":      {"list", "verify"},
 		"worktree": {"list"},
+		"stash":    {"list", "save", "apply", "drop"},
 	}
 }
 
@@ -84,6 +85,9 @@ type args struct {
 	Destination  string   `json:"destination"`
 	Recursive    bool     `json:"recursive"`
 	IntentToAdd  bool     `json:"intent_to_add"`
+
+	IncludeUntracked bool   `json:"include_untracked"`
+	StashRef         string `json:"stash_ref"`
 }
 
 func (b Backend) Do(ctx context.Context, s store.Session, op store.Op) (store.Result, error) {
@@ -102,6 +106,10 @@ func (b Backend) Do(ctx context.Context, s store.Session, op store.Op) (store.Re
 	}
 	if dir == "" {
 		return store.Result{}, fmt.Errorf("no repository: pass repo_path or run inside a session")
+	}
+
+	if op.Tool == "stash" {
+		return doStash(dir, op, a)
 	}
 
 	argv, err := buildArgv(op, a)
