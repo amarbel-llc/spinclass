@@ -97,6 +97,17 @@ func gritTools() []gritTool {
 			},
 		},
 		{
+			name:  "stash",
+			short: "Shelve and restore working changes in this worktree's own stash shelf (git's shared stash stack is never used, so no other session can see or pop these). Subcommands: save, list, apply, drop. Entries die with the worktree; closing it is refused while any remain.",
+			extra: []command.Param{
+				gritRepoPath,
+				gritPaths,
+				gritParam("message", command.String, "Stash message (save only)."),
+				gritParam("include_untracked", command.Bool, "Also shelve untracked files (save only)."),
+				gritParam("stash_ref", command.String, "Entry to apply or drop: stash@{N} (Nth newest) or the entry number from list. Defaults to the newest."),
+			},
+		},
+		{
 			name:  "tag",
 			short: "Inspect git tags. Supported subcommands in spinclass so far: list, verify (create, delete, push are not yet supported).",
 			extra: []command.Param{
@@ -117,7 +128,8 @@ func gritTools() []gritTool {
 }
 
 // registerGritCommands registers the grit_<tool> store tools (FDR 0036, step
-// 3: reads plus owned-branch writes; clone/merge/remote/stash are later steps).
+// 4: reads, owned-branch writes and the stash shelf; clone/merge/remote are
+// later steps).
 func registerGritCommands(app *command.App) {
 	for _, t := range gritTools() {
 		name := "grit_" + t.name
