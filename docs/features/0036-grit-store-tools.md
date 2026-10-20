@@ -359,7 +359,9 @@ Each step is a merge; moxy's grit stays live until step 7.
    on `commit`.
 4. Stash `Shelf` (patch directory) with `list/save/apply/drop`; document the
    close-time lifetime; bats test for two sessions' stashes not seeing each
-   other. Closes the stash half of spinclass #380.
+   other. Wire the shelf into `close.RunResolved` (non-empty shelf = refuse
+   without force) and `sc resurrect` (reports an empty shelf). Closes the
+   stash half of spinclass #380.
 5. Remote family and `merge`/`tag push`/`clone`, against FDR 0028
    credentials; decide moxy #390 disposition.
 6. CLI `sc grit`, `sc grit-perms`, `sc moxin-export`; `spinclass-*(5)/(7)`
@@ -395,7 +397,14 @@ Each step is a merge; moxy's grit stays live until step 7.
   read the grit moxin definitions).
 - moxy #390 (force-with-lease "stale info") and the interaction of remote verbs
   with the FDR 0028 credential/`insteadOf` lane.
-- Whether `Shelf` should keep stashes across `sc close` (resurrect parity).
+- (Settled 2026-10-20) Stashes die with the worktree, but `sc close` must not
+  lose them silently given FDR 0027: a non-empty shelf counts as uncommitted
+  work, so `close.RunResolved` refuses without `--force` and names the entry
+  count; with force it warns. `sc resurrect` recreates the commit only and
+  reports that the shelf is empty. Added to implementation step 4.
+
+Operator answers (2026-10-20) confirming the interpretations above: ownership
+is `B` and `B--<topic>`; reads auto-allow on any branch.
 
 ## Limitations
 
