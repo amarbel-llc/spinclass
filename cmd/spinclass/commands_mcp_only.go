@@ -1250,6 +1250,11 @@ func mergedSweatfileForCwd() (sweatfile.Sweatfile, bool) {
 	if err != nil {
 		return sweatfile.Sweatfile{}, false
 	}
+	return mergedSweatfileForDir(cwd)
+}
+
+// mergedSweatfileForDir is mergedSweatfileForCwd for an explicit directory.
+func mergedSweatfileForDir(cwd string) (sweatfile.Sweatfile, bool) {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return sweatfile.Sweatfile{}, false

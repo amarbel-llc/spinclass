@@ -9,6 +9,7 @@ import (
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
+	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/store"
 	gitstore "code.linenisgreat.com/spinclass/internal/store/git"
@@ -58,7 +59,7 @@ func gritTools() []gritTool {
 		},
 		{
 			name:         "commit",
-			short:        "Create a new commit from the staged changes, using the identity git itself resolves. fixup and squash are mutually exclusive and make message ignored.",
+			short:        "Create a new commit from the staged changes, using the sweatfile [store] identity when set, else the identity git itself resolves. fixup and squash are mutually exclusive and make message ignored.",
 			noSubcommand: true,
 			extra: []command.Param{
 				gritRepoPath,
@@ -168,6 +169,44 @@ func gritHandler(tool string) func(context.Context, json.RawMessage, command.Pro
 	}
 }
 
+// gritCaller resolves the calling session for a grit tool body (FDR 0036
+// section 9). It is a variable so tests can stand in for the frontend state.
+var gritCaller = resolveGritCaller
+
+// resolveGritCaller classifies the caller by the principal of the clown hosting
+// this serve, which is what the launching clown wrote into a confined unit's
+// record. Unresolved counts as confined. A confined caller works in the
+// worktree the frontend principal mapping names, falling back to the cwd.
+func resolveGritCaller(cwd string) store.Session {
+	s := store.Session{Dir: cwd, Confinement: store.ConfinementConfined}
+	principal := os.Getenv("CLOWN_SESSION_ID")
+	stateDir, err := confinement.DefaultStateDir()
+	if err == nil {
+		confined, _ := confinement.ClassifyCaller(confinement.Host{}, stateDir, principal)
+		if !confined {
+			s.Confinement = store.ConfinementUnconfined
+		} else if worktree, ok := confinement.WorktreeOfPrincipal(confinement.Host{}, stateDir, principal); ok {
+			s.Dir = worktree
+		}
+	}
+	if branch, berr := git.BranchCurrent(s.Dir); berr == nil {
+		s.Branch = branch
+	}
+	s.Identity = storeIdentityFor(s.Dir)
+	return s
+}
+
+// storeIdentityFor reads the [store] identity from the sweatfile hierarchy
+// applicable to dir; unreadable configuration leaves git's own resolution.
+func storeIdentityFor(dir string) store.Identity {
+	merged, ok := mergedSweatfileForDir(dir)
+	if !ok {
+		return store.Identity{}
+	}
+	authorName, authorEmail, committerName, committerEmail := merged.StoreIdentity()
+	return store.Identity{AuthorName: authorName, AuthorEmail: authorEmail, CommitterName: committerName, CommitterEmail: committerEmail}
+}
+
 func runGrit(ctx context.Context, tool string, args json.RawMessage) (string, error) {
 	var head struct {
 		Subcommand string `json:"subcommand"`
@@ -182,10 +221,7 @@ func runGrit(ctx context.Context, tool string, args json.RawMessage) (string, er
 	if err != nil {
 		return "", fmt.Errorf("could not get working directory: %w", err)
 	}
-	s := store.Session{Dir: cwd}
-	if branch, berr := git.BranchCurrent(cwd); berr == nil {
-		s.Branch = branch
-	}
+	s := gritCaller(cwd)
 	res, err := gritBackend.Do(ctx, s, store.Op{Tool: tool, Subcommand: head.Subcommand, Args: args})
 	if errors.Is(err, store.ErrUnsupported) {
 		return "", fmt.Errorf("grit_%s %s is not yet supported in spinclass (FDR 0036); supported: %v", tool, head.Subcommand, gritBackend.Capabilities()[tool])

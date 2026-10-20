@@ -8,9 +8,42 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/store"
 )
 
+func stubGritCallerUnconfined(t *testing.T) {
+	t.Helper()
+	original := gritCaller
+	t.Cleanup(func() { gritCaller = original })
+	gritCaller = func(cwd string) store.Session {
+		s := store.Session{Dir: cwd, Confinement: store.ConfinementUnconfined}
+		if branch, err := git.BranchCurrent(cwd); err == nil {
+			s.Branch = branch
+		}
+		return s
+	}
+}
+
+func TestResolveGritCallerWithoutAPrincipalIsConfined(t *testing.T) {
+	t.Setenv("CLOWN_SESSION_ID", "")
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if got := resolveGritCaller(t.TempDir()); got.Confinement != store.ConfinementConfined {
+		t.Fatalf("an unresolved caller must be confined, got %v", got.Confinement)
+	}
+}
+
+func TestResolveGritCallerWithAnUnrecordedPrincipalIsUnconfined(t *testing.T) {
+	t.Setenv("CLOWN_SESSION_ID", "a-principal-with-no-records")
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if got := resolveGritCaller(t.TempDir()); got.Confinement != store.ConfinementUnconfined {
+		t.Fatalf("a principal no record names must be unconfined, got %v", got.Confinement)
+	}
+}
+
 func TestGritStashToolRoundtrip(t *testing.T) {
+	stubGritCallerUnconfined(t)
 	repo := t.TempDir()
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(repo, "gitconfig"))
 	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(repo))
@@ -88,6 +121,7 @@ func TestRunGritUnsupportedAndMissingSubcommand(t *testing.T) {
 }
 
 func TestRunGritCommitNeedsNoSubcommand(t *testing.T) {
+	stubGritCallerUnconfined(t)
 	_, err := runGrit(context.Background(), "commit", json.RawMessage(`{}`))
 	if err == nil || strings.Contains(err.Error(), "subcommand is required") || strings.Contains(err.Error(), "not yet supported") {
 		t.Fatalf("commit must reach the backend (and fail on the missing message), got %v", err)
