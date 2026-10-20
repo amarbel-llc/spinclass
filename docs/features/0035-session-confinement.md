@@ -332,8 +332,16 @@ the docs read were current.
 The spawn SessionStart hook leaves a trace in `<worktree>/.spinclass/
 hook-trace.log` (the worktree is rw-bound and host-readable; the lifecycle log
 in the state dir is not shared with the unit). It records that the hook ran and
-where the hello stopped. The missing hello of that worker is a separate bug;
-the trace is the evidence path.
+where the hello stopped. The trace showed the hello failing in a unit with
+`mkdir .../.local/state/spinclass: read-only file system`: the hello is a file
+in the state dir, which a unit can neither create nor share with the driver.
+A confined spawn therefore gets a per-session handshake directory
+(`spawnhandshake.SessionDir`, a `session-<hash>` subdirectory of the shared
+one), created by the frontend, listed in the launch spec's `binds_rw` and named
+in the unit's env as `SPINCLASS_HANDSHAKE_DIR`. The worker's hello goes there and
+the driver reads the same path; only that one directory is writable, so a unit
+cannot write a sibling's hello. Unconfined spawns use the shared directory as
+before.
 
 ## The principal across `sc resume` (FDR 0034 item 17)
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/spawnhandshake"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 )
@@ -76,6 +78,9 @@ func bindPrincipalOnce(stateDir, sessionKey, worktree string, since time.Time) e
 type confinedLaunch struct {
 	scopePath string
 	stateDir  string
+	// handshakeDir is the per-session directory bound read-write into the unit
+	// for the worker's hello (spawnhandshake.SessionDir); the driver reads it.
+	handshakeDir string
 }
 
 // targetConfinement is the [confinement] answer for the worker repo.
@@ -185,6 +190,7 @@ type unitSpecInput struct {
 	wayland      []string // existing wayland-* entries under runtimeDir
 	egress       []string
 	env          map[string]string
+	handshakeDir string // per-session hello dir, bound rw; "" binds nothing
 }
 
 var unitNameUnsafe = regexp.MustCompile(`[^a-zA-Z0-9-]`)
@@ -224,6 +230,16 @@ func buildUnitSpec(in unitSpecInput) unitSpec {
 		list := append([]string{}, in.egress...)
 		spec.EgressAllow = &list
 	}
+	if in.handshakeDir != "" {
+		// The unit's state dir is not the frontend's, so the worker's hello
+		// goes to a directory of its own bound at the same path; only this one
+		// directory is writable, so a unit cannot fake a sibling's hello.
+		spec.BindsRW = append(spec.BindsRW, in.handshakeDir)
+		env := map[string]string{}
+		maps.Copy(env, in.env)
+		env[spawnhandshake.DirEnv] = in.handshakeDir
+		spec.Env = env
+	}
 	if in.sshAuthSock != "" {
 		spec.Sockets = []unitSocket{{Path: in.sshAuthSock, Purpose: "piggy-agent"}}
 	}
@@ -233,7 +249,7 @@ func buildUnitSpec(in unitSpecInput) unitSpec {
 // writeUnitSpec resolves the host-dependent inputs, builds the spec and writes
 // it beside the unit record, outside the worktree. It returns the path to put
 // in CLOWN_AGENT_SCOPE.
-func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, stateDir string) (string, error) {
+func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, stateDir, handshakeDir string) (string, error) {
 	commonDir, err := gitCommonDir(rp.AbsPath)
 	if err != nil || commonDir == "" {
 		return "", fmt.Errorf("resolving the git common dir of %s: %v", rp.AbsPath, err)
@@ -253,7 +269,7 @@ func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, state
 	spec := buildUnitSpec(unitSpecInput{
 		rp: rp, operatorHome: home, stateDir: stateDir, commonDir: commonDir,
 		sshAuthSock: os.Getenv("SSH_AUTH_SOCK"), runtimeDir: runtimeDir, wayland: wayland,
-		egress: egress, env: env,
+		egress: egress, env: env, handshakeDir: handshakeDir,
 	})
 	path, err := confinement.WriteUnitSpec(stateDir, rp.AbsPath, spec)
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/confinement"
+	"code.linenisgreat.com/spinclass/internal/spawnhandshake"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 
@@ -272,6 +273,32 @@ func TestWaitHelloFailsFastWhenTheBindFails(t *testing.T) {
 	}
 }
 
+// The first confined worker's hello failed with "mkdir ...: read-only file
+// system": the unit cannot create the shared handshake dir. A confined spec
+// binds ONE per-session dir rw and names it in the env.
+func TestBuildUnitSpecBindsAPerSessionHandshakeDir(t *testing.T) {
+	rp := worktree.ResolvedPath{AbsPath: "/w/repo/.worktrees/feat", SessionKey: "repo/feat"}
+	hs := spawnhandshake.SessionDir("/state", rp.AbsPath)
+	spec := buildUnitSpec(unitSpecInput{
+		rp: rp, commonDir: "/w/repo/.git", runtimeDir: "/run/user/1",
+		env: map[string]string{"SPINCLASS_SESSION_ID": "repo/feat"}, handshakeDir: hs,
+	})
+	if !slices.Contains(spec.BindsRW, hs) {
+		t.Errorf("binds_rw %v lacks the handshake dir %s", spec.BindsRW, hs)
+	}
+	if spec.Env[spawnhandshake.DirEnv] != hs || spec.Env["SPINCLASS_SESSION_ID"] != "repo/feat" {
+		t.Errorf("env = %v", spec.Env)
+	}
+	if strings.HasSuffix(hs, "/spawn-handshake") || !strings.Contains(hs, "/spawn-handshake/session-") {
+		t.Errorf("the dir must be a per-session subdirectory, not the shared one: %s", hs)
+	}
+	// An input without one binds and sets nothing.
+	bare := buildUnitSpec(unitSpecInput{rp: rp, runtimeDir: "/run/user/1", env: map[string]string{}})
+	if _, ok := bare.Env[spawnhandshake.DirEnv]; ok || len(bare.BindsRW) != 5 {
+		t.Errorf("no handshake dir requested but got env %v binds %v", bare.Env, bare.BindsRW)
+	}
+}
+
 func TestBuildUnitSpecKeepsAnExplicitEmptyEgressList(t *testing.T) {
 	spec := buildUnitSpec(unitSpecInput{rp: worktree.ResolvedPath{AbsPath: "/w", SessionKey: "r/b"}, runtimeDir: "/run/user/1", egress: []string{}})
 	b, _ := json.Marshal(spec)
@@ -289,7 +316,7 @@ func TestWriteUnitSpecWritesOutsideTheWorktree(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", "")
 	rp := worktree.ResolvedPath{AbsPath: wt, SessionKey: "repo/feat"}
 
-	path, err := writeUnitSpec(rp, "desc", []string{"a:1"}, state)
+	path, err := writeUnitSpec(rp, "desc", []string{"a:1"}, state, "")
 	if err != nil {
 		t.Fatal(err)
 	}

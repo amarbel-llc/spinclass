@@ -188,12 +188,19 @@ func LaunchDetached(home, repoPath string, driver Driver, brief, desc, model, pr
 			undoOnFailure()
 			return Pending{}, err
 		}
-		scopePath, err := writeUnitSpec(rp, desc, targetConfine.egress, stateDir)
+		// The frontend creates the worker's hello dir before the unit starts: a
+		// bind needs an existing source, and the unit cannot create it.
+		handshakeDir := spawnhandshake.SessionDir(stateDir, rp.AbsPath)
+		if err := os.MkdirAll(handshakeDir, 0o755); err != nil {
+			undoOnFailure()
+			return Pending{}, fmt.Errorf("creating the worker's handshake dir: %w", err)
+		}
+		scopePath, err := writeUnitSpec(rp, desc, targetConfine.egress, stateDir, handshakeDir)
 		if err != nil {
 			undoOnFailure()
 			return Pending{}, err
 		}
-		confine = &confinedLaunch{scopePath: scopePath, stateDir: stateDir}
+		confine = &confinedLaunch{scopePath: scopePath, stateDir: stateDir, handshakeDir: handshakeDir}
 	}
 
 	p, err := startDetachedEntry(rp, driver, desc, argv, window, sessionEnv, resolved, authorizingGrant, confine)
@@ -570,7 +577,11 @@ func WaitHello(p Pending, deadline time.Duration) (Result, error) {
 	// The window opens AFTER the hello (not before) so it can attach to the
 	// now-ready session: the posh id is a crypto-random UUID unknowable until the
 	// worker boots (direction B), so {attach-id} can only be resolved here.
-	poshID, err := spawnhandshake.WaitForHello(p.driver.Principal, p.rp.SessionKey, p.startTime, deadline)
+	helloDir := spawnhandshake.SharedDir()
+	if p.confine != nil && p.confine.handshakeDir != "" {
+		helloDir = p.confine.handshakeDir // the worker's own bound dir (a unit cannot write the shared one)
+	}
+	poshID, err := spawnhandshake.WaitForHelloIn(helloDir, p.driver.Principal, p.rp.SessionKey, p.startTime, deadline)
 	if err != nil {
 		return Result{}, err
 	}
