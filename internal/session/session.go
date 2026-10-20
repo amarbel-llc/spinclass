@@ -313,15 +313,30 @@ func Write(s State) error {
 		return err
 	}
 
-	if err := os.MkdirAll(indexDir(), 0o755); err != nil {
-		return err
-	}
-	if err := writeIndexSymlink(wt); err != nil {
+	if err := indexWorktree(wt); err != nil {
+		if errors.Is(err, syscall.EROFS) {
+			// A confined agent unit sees the state dir read-only (FDR 0035). The
+			// worktree-local state.json, the source of truth, is already
+			// written, and the frontend created the index entry that points at
+			// it when it made the worktree, so there is nothing left to
+			// register. Any other failure still fails the write.
+			sessionlog.Errorf("session.Write index-readonly wt=%s branch=%s from=%s err=%v (state.json written; index left as the frontend made it)", wt, s.Branch, from, err)
+			return nil
+		}
 		sessionlog.Errorf("session.Write symlink-failed wt=%s branch=%s from=%s err=%v", wt, s.Branch, from, err)
 		return err
 	}
 	sessionlog.Infof("session.Write wt=%s branch=%s state=%s pid=%d from=%s", wt, s.Branch, s.SessionState, s.PID, from)
 	return nil
+}
+
+// indexWorktree points the worktree's central index entry at its state file.
+// A seam so a read-only state dir can be simulated.
+var indexWorktree = func(wt string) error {
+	if err := os.MkdirAll(indexDir(), 0o755); err != nil {
+		return err
+	}
+	return writeIndexSymlink(wt)
 }
 
 // writeIndexSymlink atomically (re)points the central index entry for

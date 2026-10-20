@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -772,6 +773,38 @@ func TestWriteCreatesIndexSymlink(t *testing.T) {
 	want := worktreeStatePath(s.WorktreePath)
 	if target != want {
 		t.Errorf("symlink target = %s, want %s", target, want)
+	}
+}
+
+// A confined agent unit sees the state dir read-only, so the index step of a
+// hook's Write fails with EROFS. The worktree-local state.json is the source of
+// truth and is already written; the write must not report failure for it, or
+// the spawn hello's HelloSentAt looks unrecorded.
+func TestWriteSucceedsWhenOnlyTheIndexIsReadOnly(t *testing.T) {
+	s := setupTestSession(t, "feature-ro")
+	prev := indexWorktree
+	t.Cleanup(func() { indexWorktree = prev })
+	indexWorktree = func(string) error {
+		return &os.PathError{Op: "mkdir", Path: "/home/x/.local/state/spinclass/index", Err: syscall.EROFS}
+	}
+
+	if err := Write(s); err != nil {
+		t.Fatalf("Write failed on a read-only index: %v", err)
+	}
+	if _, err := os.Stat(worktreeStatePath(s.WorktreePath)); err != nil {
+		t.Errorf("state.json was not written: %v", err)
+	}
+}
+
+func TestWriteStillFailsOnOtherIndexErrors(t *testing.T) {
+	s := setupTestSession(t, "feature-eacces")
+	prev := indexWorktree
+	t.Cleanup(func() { indexWorktree = prev })
+	indexWorktree = func(string) error {
+		return &os.PathError{Op: "mkdir", Path: "/x", Err: syscall.EACCES}
+	}
+	if err := Write(s); err == nil {
+		t.Error("an index failure other than a read-only filesystem must still fail the write")
 	}
 }
 
