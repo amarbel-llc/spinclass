@@ -3,6 +3,7 @@ package hooks
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1121,6 +1122,43 @@ func TestValidateToolAutoApproved(t *testing.T) {
 	decision, _ := parseHookDecision(t, stdout.Bytes())
 	if decision != "allow" {
 		t.Errorf("expected permissionDecision allow for validate, got %q", decision)
+	}
+}
+
+// The read-only introspection tools (version, whoami, perms-list, and
+// list-handles without accept) auto-approve; list-handles with accept mutates
+// (accept-on-first-use) and stays on the always-ask floor.
+func TestReadOnlyIntrospectionToolsAutoApproved(t *testing.T) {
+	const prefix = "mcp__plugin_spinclass_spinclass__"
+	tests := []struct {
+		tool  string
+		input map[string]any
+		want  string
+	}{
+		{"version", map[string]any{}, "allow"},
+		{"whoami", map[string]any{}, "allow"},
+		{"perms-list", map[string]any{}, "allow"},
+		{"perms-list", map[string]any{"repo": "spinclass"}, "allow"},
+		{"list-handles", map[string]any{}, "allow"},
+		{"list-handles", map[string]any{"accept": false}, "allow"},
+		{"list-handles", map[string]any{"accept": true}, "ask"},
+		{"list-handles", map[string]any{"accept": "true"}, "ask"},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s %v", tt.tool, tt.input), func(t *testing.T) {
+			cwd := t.TempDir()
+			input := makeInput(prefix+tt.tool, tt.input, cwd)
+			var stdout bytes.Buffer
+			if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if stdout.Len() == 0 {
+				t.Fatalf("expected a %s decision for %s, got none (falls to the default prompt)", tt.want, tt.tool)
+			}
+			if decision, _ := parseHookDecision(t, stdout.Bytes()); decision != tt.want {
+				t.Errorf("%s %v: decision = %q, want %q", tt.tool, tt.input, decision, tt.want)
+			}
+		})
 	}
 }
 

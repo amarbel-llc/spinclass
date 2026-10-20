@@ -492,6 +492,10 @@ const (
 	validateToolName              = "mcp__plugin_spinclass_spinclass__validate"
 	spawnSessionToolName          = "mcp__plugin_spinclass_spinclass__spawn-session"
 	closeChildSessionToolName     = "mcp__plugin_spinclass_spinclass__close-child-session"
+	versionToolName               = "mcp__plugin_spinclass_spinclass__version"
+	whoamiToolName                = "mcp__plugin_spinclass_spinclass__whoami"
+	permsListToolName             = "mcp__plugin_spinclass_spinclass__perms-list"
+	listHandlesToolName           = "mcp__plugin_spinclass_spinclass__list-handles"
 )
 
 func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree, rewriteEnabled, denySweatfile bool) error {
@@ -550,6 +554,12 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 		// Auto-approve unconditionally so agents never get a permission prompt
 		// for them.
 		return writeAllow(w, "spinclass session-management tool, safe to auto-approve")
+	case versionToolName, whoamiToolName, permsListToolName, listHandlesToolName:
+		// Read-only introspection: version (build info), whoami and list-handles
+		// (the caller's own principal and handles), perms-list (the tier rules).
+		// list-handles with accept mutates, but that case was already caught by
+		// the always-ask floor above, so reaching here means a plain listing.
+		return writeAllow(w, "spinclass read-only introspection tool, safe to auto-approve")
 	case mergeThisSessionToolName, mergeThisSessionAsyncToolName:
 		if hasPreMergeHook(input.CWD) {
 			return writeAllow(w, "sweatfile [hooks].pre-merge gates this merge")
