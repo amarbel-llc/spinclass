@@ -549,20 +549,23 @@ func WaitHello(p Pending, deadline time.Duration) (Result, error) {
 		deadline = DefaultHelloDeadline
 	}
 
+	// A confined worker's principal is bound to its session from the unit record
+	// clown writes, so the agent never names itself (FDR 0035). The bind comes
+	// BEFORE the hello wait: it needs only that record, and a late or lost hello
+	// must not leave a running confined worker unbound (the first real confined
+	// spawn timed out at the hello and never bound).
+	if p.confine != nil {
+		if err := bindPrincipalWhenRecorded(p.confine.stateDir, p.rp.SessionKey, p.rp.AbsPath, p.startTime); err != nil {
+			return Result{}, fmt.Errorf("confined worker %s was launched but its principal is not bound to the session: %w", p.rp.SessionKey, err)
+		}
+	}
+
 	// The window opens AFTER the hello (not before) so it can attach to the
 	// now-ready session: the posh id is a crypto-random UUID unknowable until the
 	// worker boots (direction B), so {attach-id} can only be resolved here.
 	poshID, err := spawnhandshake.WaitForHello(p.driver.Principal, p.rp.SessionKey, p.startTime, deadline)
 	if err != nil {
 		return Result{}, err
-	}
-
-	// A confined worker's principal is bound to its session from the unit's own
-	// environment, so the agent never names itself (FDR 0035).
-	if p.confine != nil {
-		if err := bindPrincipalWhenRecorded(p.confine.stateDir, p.rp.SessionKey, p.rp.AbsPath, p.startTime); err != nil {
-			return Result{}, fmt.Errorf("worker %s is up but its principal is not bound to the session: %w", p.rp.SessionKey, err)
-		}
 	}
 
 	launchSpawnWindow(substituteAttachID(p.window, poshID), p.rp, p.desc, p.sessionEnv)

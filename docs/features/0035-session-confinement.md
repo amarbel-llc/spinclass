@@ -292,8 +292,14 @@ The mapping now lives in **frontend-owned state** beside the unit records:
 (`{version, principal, session_key, worktree, unit}`), hidden from every unit
 by `ProtectHome`. The frontend writes it from the **unit record**, whose
 `principal` the launching frontend clown wrote (`RecordPrincipalFromUnit`;
-claude's environment never carries `CLOWN_SESSION_ID`, clown#136), once the
-spawn hello arrives, so the agent never names itself. It survives `sc
+claude's environment never carries `CLOWN_SESSION_ID`, clown#136), so the agent
+never names itself. The spawn binds BEFORE it waits for the hello: the record
+is all the bind needs, and the first real confined spawn timed out at the hello
+and returned with a live unit and no mapping. The bind retries while clown is
+still writing the record (it lands from a goroutine after the unit goes
+active), ignores a record older than the launch, and stops at once on a record
+carrying clown's `error`. `sc confinement-bind --session <key>` repairs an
+already-running unit the same way (CLI-only). It survives `sc
 resume`, which keeps the principal through `{principal}`; rewriting it at
 resume, once a resumed session launches confined, is a follow-up.
 spawn's authorizer joins through it (`confinement.SessionOfPrincipal`, live

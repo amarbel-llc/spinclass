@@ -207,6 +207,10 @@ func buildUnitSpec(in unitSpecInput) unitSpec {
 		BindsRO: []string{
 			filepath.Join(in.commonDir, "config"),
 			filepath.Join(in.commonDir, "hooks"),
+			// core.hooksPath points here (the per-commit hook, FDR 0019) and
+			// sits inside the rw worktree bind: left writable, the unit could
+			// rewrite code the frontend's git later runs (F9).
+			filepath.Join(wt, ".spinclass", "hooks"),
 		},
 		DenyPaths: append([]string{
 			filepath.Join(in.runtimeDir, "bus"),

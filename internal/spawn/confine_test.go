@@ -126,7 +126,7 @@ func TestBuildUnitSpecShape(t *testing.T) {
 	if want := []string{rp.AbsPath, "/w/repo/.git/objects", "/w/repo/.git/refs", "/w/repo/.git/logs", "/w/repo/.git/worktrees/feat"}; !reflect.DeepEqual(spec.BindsRW, want) {
 		t.Errorf("binds_rw = %v", spec.BindsRW)
 	}
-	if want := []string{"/w/repo/.git/config", "/w/repo/.git/hooks"}; !reflect.DeepEqual(spec.BindsRO, want) {
+	if want := []string{"/w/repo/.git/config", "/w/repo/.git/hooks", "/w/repo/.worktrees/feat/.spinclass/hooks"}; !reflect.DeepEqual(spec.BindsRO, want) {
 		t.Errorf("binds_ro = %v", spec.BindsRO)
 	}
 	if want := []string{"/run/user/1000/bus", "/run/user/1000/systemd", "/run/user/1000/posh", "/tmp/.X11-unix", "/run/user/1000/wayland-0"}; !reflect.DeepEqual(spec.DenyPaths, want) {
@@ -224,6 +224,51 @@ func TestBindPrincipalIgnoresARecordFromAnEarlierLaunch(t *testing.T) {
 	}
 	if err := bindPrincipalWhenRecorded(state, "repo/feat", wt, time.Now()); err == nil || called {
 		t.Fatalf("a record older than the launch must not be bound (err=%v, called=%v)", err, called)
+	}
+}
+
+// The first real confined spawn timed out at the hello and never bound the
+// principal, leaving a running worker unbound. The bind must not depend on the
+// hello: it happens first, so a missing hello still leaves the worker bound.
+func TestWaitHelloBindsThePrincipalBeforeWaitingForTheHello(t *testing.T) {
+	prevWait, prevPoll, prevRec := principalBindWait, principalBindPoll, recordPrincipal
+	principalBindWait, principalBindPoll = 20*time.Millisecond, time.Millisecond
+	t.Cleanup(func() { principalBindWait, principalBindPoll, recordPrincipal = prevWait, prevPoll, prevRec })
+	bound := 0
+	recordPrincipal = func(confinement.System, string, string, string) (string, error) {
+		bound++
+		return "p", nil
+	}
+	p := Pending{
+		rp:        worktree.ResolvedPath{AbsPath: "/w/repo/.worktrees/feat", SessionKey: "repo/feat"},
+		confine:   &confinedLaunch{stateDir: t.TempDir()},
+		startTime: time.Now(),
+	}
+	if _, err := WaitHello(p, 50*time.Millisecond); err == nil {
+		t.Fatal("no hello was sent, want the hello timeout")
+	}
+	if bound != 1 {
+		t.Errorf("principal bound %d times before the hello timed out, want 1", bound)
+	}
+}
+
+// A failed bind must surface at once, not after the hello deadline.
+func TestWaitHelloFailsFastWhenTheBindFails(t *testing.T) {
+	prevWait, prevPoll, prevRec := principalBindWait, principalBindPoll, recordPrincipal
+	principalBindWait, principalBindPoll = 20*time.Millisecond, time.Millisecond
+	t.Cleanup(func() { principalBindWait, principalBindPoll, recordPrincipal = prevWait, prevPoll, prevRec })
+	recordPrincipal = func(confinement.System, string, string, string) (string, error) {
+		return "", fmt.Errorf("%w: boom", confinement.ErrUnitLaunchFailed)
+	}
+	p := Pending{
+		rp:        worktree.ResolvedPath{AbsPath: "/w/repo/.worktrees/feat", SessionKey: "repo/feat"},
+		confine:   &confinedLaunch{stateDir: t.TempDir()},
+		startTime: time.Now(),
+	}
+	start := time.Now()
+	_, err := WaitHello(p, time.Minute)
+	if err == nil || !strings.Contains(err.Error(), "boom") || time.Since(start) > 10*time.Second {
+		t.Fatalf("got %v after %v, want clown's error at once", err, time.Since(start))
 	}
 }
 
