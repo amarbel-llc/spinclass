@@ -115,8 +115,8 @@ func buildWriteArgv(op store.Op, a args) ([]string, error) {
 	return nil, store.Unsupported(op)
 }
 
-// buildCommitArgv uses whatever identity git itself resolves; there is no
-// author setting here.
+// buildCommitArgv names no identity: Do stamps the configured one through the
+// environment (identityEnv), else git resolves its own.
 func buildCommitArgv(a args) ([]string, error) {
 	if a.Fixup != "" && a.Squash != "" {
 		return nil, errors.New("fixup and squash are mutually exclusive")

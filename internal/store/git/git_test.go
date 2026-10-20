@@ -55,11 +55,16 @@ func write(t *testing.T, dir, name, content string) {
 
 func do(t *testing.T, repo, tool, sub string, a map[string]any) (string, error) {
 	t.Helper()
+	return doAs(t, store.Session{Dir: repo, Confinement: store.ConfinementUnconfined}, tool, sub, a)
+}
+
+func doAs(t *testing.T, s store.Session, tool, sub string, a map[string]any) (string, error) {
+	t.Helper()
 	raw, err := json.Marshal(a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := New().Do(context.Background(), store.Session{Dir: repo}, store.Op{Tool: tool, Subcommand: sub, Args: raw})
+	res, err := New().Do(context.Background(), s, store.Op{Tool: tool, Subcommand: sub, Args: raw})
 	return res.Text, err
 }
 

@@ -108,6 +108,10 @@ func (b Backend) Do(ctx context.Context, s store.Session, op store.Op) (store.Re
 		return store.Result{}, fmt.Errorf("no repository: pass repo_path or run inside a session")
 	}
 
+	if err := b.refuseUnownedForConfined(s, op); err != nil {
+		return store.Result{}, err
+	}
+
 	if op.Tool == "stash" {
 		return doStash(dir, op, a)
 	}
@@ -119,7 +123,8 @@ func (b Backend) Do(ctx context.Context, s store.Session, op store.Op) (store.Re
 	if err := refuseDefaultBranchOp(dir, op, a); err != nil {
 		return store.Result{}, err
 	}
-	out, err := git.RunEnvContext(ctx, dir, writeEnv(op), argv...)
+	argv = withoutHooksForConfined(s, op, argv)
+	out, err := git.RunEnvContext(ctx, dir, append(writeEnv(op), identityEnv(s, op)...), argv...)
 	if err != nil {
 		return store.Result{}, describeFailure(dir, op, err, out)
 	}

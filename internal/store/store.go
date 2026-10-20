@@ -47,12 +47,57 @@ const (
 // Ref names a line of history, mark or workspace in the backend's own syntax.
 type Ref string
 
+// Confinement is whether the caller is a confined worker (FDR 0035, FDR 0036
+// section 9). The zero value is unresolved and counts as confined, so a caller
+// nobody classified fails closed.
+type Confinement int
+
+const (
+	ConfinementUnresolved Confinement = iota
+	ConfinementConfined
+	ConfinementUnconfined
+)
+
+// Confined is true for everything but a caller positively known to be
+// unconfined.
+func (c Confinement) Confined() bool { return c != ConfinementUnconfined }
+
+// Identity is the author and committer stamped onto commits the frontend
+// creates (FDR 0036 section 9). An empty field leaves git's own resolution.
+type Identity struct {
+	AuthorName     string
+	AuthorEmail    string
+	CommitterName  string
+	CommitterEmail string
+}
+
+// Env is the GIT_AUTHOR_* and GIT_COMMITTER_* assignments for the set fields.
+func (i Identity) Env() []string {
+	var env []string
+	for _, assignment := range []struct{ key, value string }{
+		{"GIT_AUTHOR_NAME", i.AuthorName},
+		{"GIT_AUTHOR_EMAIL", i.AuthorEmail},
+		{"GIT_COMMITTER_NAME", i.CommitterName},
+		{"GIT_COMMITTER_EMAIL", i.CommitterEmail},
+	} {
+		if assignment.value != "" {
+			env = append(env, assignment.key+"="+assignment.value)
+		}
+	}
+	return env
+}
+
 // Session is the caller context an operation runs in.
 type Session struct {
 	// Dir is the worktree the operation executes in.
 	Dir string
 	// Branch is the session's own branch, empty when unknown.
 	Branch string
+	// Confinement is read by Do only: a confined caller gets hooks disabled and
+	// a body-side ownership check.
+	Confinement Confinement
+	// Identity is read by Do only, for the commit-creating verbs.
+	Identity Identity
 }
 
 // Op is one tool invocation: a tool, its subcommand, and the raw JSON
