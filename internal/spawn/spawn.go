@@ -560,7 +560,7 @@ func WaitHello(p Pending, deadline time.Duration) (Result, error) {
 	// A confined worker's principal is bound to its session from the unit's own
 	// environment, so the agent never names itself (FDR 0035).
 	if p.confine != nil {
-		if _, err := recordPrincipal(confinementHost, p.confine.stateDir, p.rp.SessionKey, p.rp.AbsPath); err != nil {
+		if err := bindPrincipalWhenRecorded(p.confine.stateDir, p.rp.SessionKey, p.rp.AbsPath, p.startTime); err != nil {
 			return Result{}, fmt.Errorf("worker %s is up but its principal is not bound to the session: %w", p.rp.SessionKey, err)
 		}
 	}

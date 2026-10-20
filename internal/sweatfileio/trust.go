@@ -2,7 +2,6 @@ package sweatfileio
 
 import (
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
@@ -82,12 +81,11 @@ func TrustedEnforceProfileRights(h sweatfile.Hierarchy, home, repoRoot string) (
 // TrustedConfinement returns the [confinement] settings honoured for the repo.
 // launch is STICKY-ON across layers above the repo (same rule and rationale as
 // TrustedEnforceProfileRights). egress is the last trusted layer that sets
-// egress-allow (nil inherits, [] clears); with none set it is
-// sweatfile.DefaultEgressAllow. Layers that may not set the table are never
+// egress-allow (nil inherits, [] clears); with none set it is nil, which the
+// launch spec leaves out so clown's own default list applies. Layers that may not set the table are never
 // honoured; their paths are returned in untrusted. Hierarchy.Merged never
 // carries the table.
 func TrustedConfinement(h sweatfile.Hierarchy, home, repoRoot string) (launch bool, egress []string, untrusted []string) {
-	var set bool
 	for _, src := range h.Sources {
 		if src.SkipReason != "" || !src.Found || src.File.Confinement == nil {
 			continue
@@ -104,11 +102,8 @@ func TrustedConfinement(h sweatfile.Hierarchy, home, repoRoot string) (launch bo
 			launch = launch || *c.LaunchUnit
 		}
 		if c.EgressAllow != nil {
-			egress, set = c.EgressAllow, true
+			egress = c.EgressAllow
 		}
-	}
-	if !set {
-		egress = slices.Clone(sweatfile.DefaultEgressAllow)
 	}
 	return launch, egress, untrusted
 }

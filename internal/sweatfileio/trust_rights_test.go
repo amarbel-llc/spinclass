@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
-
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 func writeEnforce(t *testing.T, path string, value bool) {
@@ -50,8 +48,8 @@ func TestTrustedConfinement(t *testing.T) {
 	}
 
 	launch, egress, untrusted := resolve()
-	if launch || len(untrusted) != 0 || !reflect.DeepEqual(egress, sweatfile.DefaultEgressAllow) {
-		t.Errorf("defaults: got (%v, %v, %v)", launch, egress, untrusted)
+	if launch || len(untrusted) != 0 || egress != nil {
+		t.Errorf("defaults: got (%v, %v, %v), want egress nil so clown's default applies", launch, egress, untrusted)
 	}
 
 	write(global, "[confinement]\nlaunch-unit = true\negress-allow = [\"a:1\"]\n")
@@ -69,8 +67,8 @@ func TestTrustedConfinement(t *testing.T) {
 	}
 
 	write(parent, "[confinement]\negress-allow = []\n")
-	if _, egress, _ := resolve(); len(egress) != 0 {
-		t.Errorf("[] should clear egress, got %v", egress)
+	if _, egress, _ := resolve(); egress == nil || len(egress) != 0 {
+		t.Errorf("[] should clear egress to an empty non-nil list, got %#v", egress)
 	}
 	write(parent, "[confinement]\nlaunch-unit = false\n")
 	if _, egress, _ := resolve(); !reflect.DeepEqual(egress, []string{"a:1"}) {

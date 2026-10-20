@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/git"
@@ -37,6 +38,37 @@ var (
 	// recordPrincipal binds the worker's principal to its session after the hello.
 	recordPrincipal = confinement.RecordPrincipalFromUnit
 )
+
+// principalBindWait and principalBindPoll bound how long the spawn waits for
+// clown to write the unit record. Clown writes it from a goroutine after the
+// unit goes active, so it is not guaranteed to land before claude's hello.
+var (
+	principalBindWait = 15 * time.Second
+	principalBindPoll = 200 * time.Millisecond
+)
+
+// bindPrincipalWhenRecorded binds the worker's principal once its unit record
+// exists and was written after the launch began. A record absent, still an
+// earlier launch's (older than since), or lacking a principal is retried until
+// the deadline; the last error is returned then.
+func bindPrincipalWhenRecorded(stateDir, sessionKey, worktree string, since time.Time) error {
+	deadline := time.Now().Add(principalBindWait)
+	for {
+		err := bindPrincipalOnce(stateDir, sessionKey, worktree, since)
+		if err == nil || !time.Now().Before(deadline) {
+			return err
+		}
+		time.Sleep(principalBindPoll)
+	}
+}
+
+func bindPrincipalOnce(stateDir, sessionKey, worktree string, since time.Time) error {
+	if fi, err := os.Stat(confinement.UnitRecordPath(stateDir, worktree)); err == nil && fi.ModTime().Before(since) {
+		return fmt.Errorf("the unit record predates this launch (%s): waiting for clown to rewrite it", fi.ModTime().Format(time.RFC3339))
+	}
+	_, err := recordPrincipal(confinementHost, stateDir, sessionKey, worktree)
+	return err
+}
 
 // confinedLaunch is what a confined spawn carries from the spec write to the
 // hello: the spec path handed to clown and the state dir the principal mapping
@@ -126,17 +158,19 @@ type unitSocket struct {
 }
 
 type unitSpec struct {
-	Version      int               `json:"version"`
-	Worktree     string            `json:"worktree"`
-	OperatorHome string            `json:"operator_home"`
-	UnitNameHint string            `json:"unit_name_hint"`
-	ResultPath   string            `json:"result_path"`
-	BindsRW      []string          `json:"binds_rw"`
-	BindsRO      []string          `json:"binds_ro"`
-	Sockets      []unitSocket      `json:"sockets,omitempty"`
-	DenyPaths    []string          `json:"deny_paths"`
-	EgressAllow  []string          `json:"egress_allow"`
-	Env          map[string]string `json:"env"`
+	Version      int          `json:"version"`
+	Worktree     string       `json:"worktree"`
+	OperatorHome string       `json:"operator_home"`
+	UnitNameHint string       `json:"unit_name_hint"`
+	ResultPath   string       `json:"result_path"`
+	BindsRW      []string     `json:"binds_rw"`
+	BindsRO      []string     `json:"binds_ro"`
+	Sockets      []unitSocket `json:"sockets,omitempty"`
+	DenyPaths    []string     `json:"deny_paths"`
+	// EgressAllow is a pointer so "unset" (omitted: clown's own default list
+	// applies) differs from an explicit empty list (deny everything).
+	EgressAllow *[]string         `json:"egress_allow,omitempty"`
+	Env         map[string]string `json:"env"`
 }
 
 // unitSpecInput is everything buildUnitSpec needs, resolved by the caller so
@@ -180,8 +214,11 @@ func buildUnitSpec(in unitSpecInput) unitSpec {
 			filepath.Join(in.runtimeDir, "posh"),
 			"/tmp/.X11-unix",
 		}, in.wayland...),
-		EgressAllow: append([]string{}, in.egress...),
-		Env:         in.env,
+		Env: in.env,
+	}
+	if in.egress != nil {
+		list := append([]string{}, in.egress...)
+		spec.EgressAllow = &list
 	}
 	if in.sshAuthSock != "" {
 		spec.Sockets = []unitSocket{{Path: in.sshAuthSock, Purpose: "piggy-agent"}}

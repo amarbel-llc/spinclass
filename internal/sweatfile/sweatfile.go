@@ -140,19 +140,6 @@ type ProfileRights struct {
 	Enforce *bool `toml:"enforce"`
 }
 
-// DefaultEgressAllow is the egress allow-list a confined spawn gets when no
-// trusted sweatfile layer sets [confinement].egress-allow (FDR 0035): public
-// hosts only. A site's own forge and binary cache belong in its global
-// sweatfile.
-var DefaultEgressAllow = []string{
-	"api.anthropic.com:443",
-	"claude.ai:443",
-	"console.anthropic.com:443",
-	"code.linenisgreat.com:443",
-	"github.com:443",
-	"cache.nixos.org:443",
-}
-
 // Confinement configures launching spawned workers in a clown agent unit (FDR
 // 0035). An agent can edit the repo and worktree sweatfiles, so like
 // ProfileRights it is trusted only from layers above the repo, read ONLY
@@ -161,7 +148,8 @@ type Confinement struct {
 	// LaunchUnit is sticky-on across trusted layers: any true wins.
 	LaunchUnit *bool `toml:"launch-unit"`
 	// EgressAllow is the host:port allow-list handed to the unit. The last
-	// trusted layer that sets it wins; nil inherits, [] clears.
+	// trusted layer that sets it wins; nil inherits, [] clears. When no layer
+	// sets it spinclass sends no list, so clown's own default applies.
 	EgressAllow []string `toml:"egress-allow"`
 }
 

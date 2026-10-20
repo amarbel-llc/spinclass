@@ -2,12 +2,14 @@ package spawn
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/worktree"
@@ -140,8 +142,77 @@ func TestBuildUnitSpecOmitsSocketsWithoutAgent(t *testing.T) {
 	if strings.Contains(string(b), `"sockets"`) {
 		t.Errorf("sockets present without SSH_AUTH_SOCK: %s", b)
 	}
+	if strings.Contains(string(b), `"egress_allow"`) {
+		t.Errorf("egress_allow must be omitted when no sweatfile sets one, so clown's default applies: %s", b)
+	}
+}
+
+// Clown writes the unit record from a goroutine after the unit is active, so it
+// can land after claude's hello: the bind retries instead of failing the spawn.
+func TestBindPrincipalWaitsForALateUnitRecord(t *testing.T) {
+	prevWait, prevPoll, prevRec := principalBindWait, principalBindPoll, recordPrincipal
+	principalBindWait, principalBindPoll = 2*time.Second, time.Millisecond
+	t.Cleanup(func() { principalBindWait, principalBindPoll, recordPrincipal = prevWait, prevPoll, prevRec })
+	calls := 0
+	recordPrincipal = func(confinement.System, string, string, string) (string, error) {
+		calls++
+		if calls < 3 {
+			return "", errors.New("no agent unit record yet")
+		}
+		return "p", nil
+	}
+	if err := bindPrincipalWhenRecorded(t.TempDir(), "r/b", "/w", time.Now()); err != nil {
+		t.Fatalf("got %v, want the bind to succeed once the record lands", err)
+	}
+	if calls != 3 {
+		t.Errorf("recordPrincipal called %d times, want 3", calls)
+	}
+}
+
+func TestBindPrincipalGivesUpAndReportsTheLastError(t *testing.T) {
+	prevWait, prevPoll, prevRec := principalBindWait, principalBindPoll, recordPrincipal
+	principalBindWait, principalBindPoll = 20*time.Millisecond, time.Millisecond
+	t.Cleanup(func() { principalBindWait, principalBindPoll, recordPrincipal = prevWait, prevPoll, prevRec })
+	recordPrincipal = func(confinement.System, string, string, string) (string, error) {
+		return "", errors.New("record names no principal")
+	}
+	err := bindPrincipalWhenRecorded(t.TempDir(), "r/b", "/w", time.Now())
+	if err == nil || !strings.Contains(err.Error(), "names no principal") {
+		t.Fatalf("got %v, want the last error", err)
+	}
+}
+
+func TestBindPrincipalIgnoresARecordFromAnEarlierLaunch(t *testing.T) {
+	prevWait, prevPoll, prevRec := principalBindWait, principalBindPoll, recordPrincipal
+	principalBindWait, principalBindPoll = 20*time.Millisecond, time.Millisecond
+	t.Cleanup(func() { principalBindWait, principalBindPoll, recordPrincipal = prevWait, prevPoll, prevRec })
+	called := false
+	recordPrincipal = func(confinement.System, string, string, string) (string, error) {
+		called = true
+		return "stale-principal", nil
+	}
+	state, wt := t.TempDir(), "/w/repo/.worktrees/feat"
+	rec := confinement.UnitRecordPath(state, wt)
+	if err := os.MkdirAll(filepath.Dir(rec), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rec, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(rec, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := bindPrincipalWhenRecorded(state, "repo/feat", wt, time.Now()); err == nil || called {
+		t.Fatalf("a record older than the launch must not be bound (err=%v, called=%v)", err, called)
+	}
+}
+
+func TestBuildUnitSpecKeepsAnExplicitEmptyEgressList(t *testing.T) {
+	spec := buildUnitSpec(unitSpecInput{rp: worktree.ResolvedPath{AbsPath: "/w", SessionKey: "r/b"}, runtimeDir: "/run/user/1", egress: []string{}})
+	b, _ := json.Marshal(spec)
 	if !strings.Contains(string(b), `"egress_allow":[]`) {
-		t.Errorf("egress_allow should be an empty array, not null: %s", b)
+		t.Errorf("an explicit [] must be sent as an empty array (deny all), not dropped: %s", b)
 	}
 }
 

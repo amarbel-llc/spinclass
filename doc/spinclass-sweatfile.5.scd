@@ -824,11 +824,10 @@ warning, because an agent can edit those files.
 
 *egress-allow*
 	Array of _host:port_ strings the unit may reach. The last trusted layer
-	that sets it wins; unset inherits, *[]* clears. When no layer sets it the
-	default is api.anthropic.com, claude.ai, console.anthropic.com,
-	code.linenisgreat.com, github.com and cache.nixos.org, all on port 443.
-	A site's own forge and binary cache go in its global sweatfile; setting
-	the key replaces the default, so list the defaults too.
+	that sets it wins; unset inherits, *[]* clears (the unit reaches nothing).
+	When no layer sets it spinclass sends no list at all, so clown's own default
+	applies (spinclass keeps no copy of it). Setting the key replaces clown's
+	default, so list every host the worker needs, the defaults included.
 
 ## [metrics]
 
