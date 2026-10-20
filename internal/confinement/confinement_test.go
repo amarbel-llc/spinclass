@@ -174,6 +174,9 @@ func confinedHost() (*fakeSys, Inputs) {
 			UnitRecordPath(stateDir, "/wt/b"):             record("agent-b.service", otherCG, 0, "/run/user/1000/clown/agent/b/serve.sock", 0),
 			PrincipalMappingPath(stateDir, "principal-a"): mapping("principal-a", "r/a", "/wt/a", "agent-a.service"),
 			"/sys/fs/cgroup" + unitCG + "/cgroup.procs":   "100\n101\n",
+			"/sys/fs/cgroup" + otherCG + "/cgroup.procs":  "200\n",
+			"/proc/200/cgroup":                            "0::" + otherCG + "\n",
+			"/proc/200/comm":                              "claude\n",
 			"/proc/100/cgroup":                            "0::" + unitCG + "\n",
 			"/proc/101/cgroup":                            "0::" + unitCG + "\n",
 			"/proc/50/cgroup":                             "0::/user.slice/user-1000.slice/user@1000.service/app.slice/piggy-agent.service\n",
@@ -193,18 +196,19 @@ func confinedHost() (*fakeSys, Inputs) {
 			root + "/repo/.git/config": "",
 		},
 		dirs: map[string][]string{
-			"/sys/fs/cgroup" + unitCG: {"cgroup.procs", "memory.max"},
-			root + "/":                {"bin", "dev", "home", "proc", "repo"},
-			"/proc/100/fd":            {"0", "1", "2"},
-			"/proc/101/fd":            {"0"},
-			"/run/user/1000":          {"bus", "wayland-1", "wayland-1.lock", "systemd", "clown"},
-			root + "/dev":             {"pts"},
-			root + "/dev/pts":         {"ptmx", "5"},
-			"/proc":                   {"1", "50", "100", "101", "self"},
-			root + "/proc":            {"1", "2", "self"},
-			root + "/repo":            {".git"},
-			root + "/repo/.git":       {"hooks", "config"},
-			root + "/repo/.git/hooks": {},
+			"/sys/fs/cgroup" + unitCG:  {"cgroup.procs", "memory.max"},
+			"/sys/fs/cgroup" + otherCG: {"cgroup.procs"},
+			root + "/":                 {"bin", "dev", "home", "proc", "repo"},
+			"/proc/100/fd":             {"0", "1", "2"},
+			"/proc/101/fd":             {"0"},
+			"/run/user/1000":           {"bus", "wayland-1", "wayland-1.lock", "systemd", "clown"},
+			root + "/dev":              {"pts"},
+			root + "/dev/pts":          {"ptmx", "5"},
+			"/proc":                    {"1", "50", "100", "101", "200", "self"},
+			root + "/proc":             {"1", "2", "self"},
+			root + "/repo":             {".git"},
+			root + "/repo/.git":        {"hooks", "config"},
+			root + "/repo/.git/hooks":  {},
 		},
 		links: map[string]string{
 			"/proc/self/ns/pid": "pid:[4026531836]",
@@ -303,6 +307,11 @@ func TestEachFactCatchesItsBreach(t *testing.T) {
 		{"F2", "descends from agent runtime", func(s *fakeSys, _ *Inputs) {
 			s.files["/proc/50/stat"] = "50 (piggy-agent) S 40 50 50 0 -1 0"
 			s.files["/proc/40/stat"] = "40 (claude) S 1 40 40 0 -1 0"
+		}},
+		{"F2", "descends from a process in agent unit", func(s *fakeSys, _ *Inputs) {
+			s.files["/proc/50/stat"] = "50 (piggy-agent) S 40 50 50 0 -1 0"
+			s.files["/proc/40/stat"] = "40 (sh) S 1 40 40 0 -1 0"
+			s.files["/proc/40/cgroup"] = "0::" + otherCG + "\n"
 		}},
 		{"F3", "not the unit's own pty", func(s *fakeSys, _ *Inputs) {
 			s.chardevs["/proc/100/fd/2"] = charDev{uint64(136<<8 | 1), hostPts}
@@ -478,6 +487,75 @@ func TestF11FailsForALiveSessionWithoutAUnit(t *testing.T) {
 	f := factByID(t, Run(sys, in), "F11")
 	if f.OK || !strings.Contains(f.Detail, "session r/b has no agent unit") {
 		t.Errorf("F11 = %+v, want r/b named as unconfined", f)
+	}
+}
+
+// A record whose unit is no longer running vouches for nothing: the session's
+// agent, if it has one, is not in it.
+func TestF11FailsForAStaleRecord(t *testing.T) {
+	for name, mutate := range map[string]func(*fakeSys){
+		"cgroup gone": func(s *fakeSys) {
+			delete(s.files, "/sys/fs/cgroup"+otherCG+"/cgroup.procs")
+			delete(s.dirs, "/sys/fs/cgroup"+otherCG)
+		},
+		"cgroup empty": func(s *fakeSys) { s.files["/sys/fs/cgroup"+otherCG+"/cgroup.procs"] = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			sys, in := confinedHost()
+			mutate(sys)
+			f := factByID(t, Run(sys, in), "F11")
+			if f.OK || !strings.Contains(f.Detail, "session r/b") || !strings.Contains(f.Detail, "stale") {
+				t.Errorf("F11 = %+v, want r/b's record named stale", f)
+			}
+		})
+	}
+}
+
+func TestF11FailsWhenAUnitsCgroupIsUnreadable(t *testing.T) {
+	sys, in := confinedHost()
+	sys.readErrOn = map[string]error{"/sys/fs/cgroup" + otherCG + "/cgroup.procs": syscall.EIO}
+	f := factByID(t, Run(sys, in), "F11")
+	if f.OK || !strings.Contains(f.Detail, "session r/b") {
+		t.Errorf("F11 = %+v, want r/b named", f)
+	}
+}
+
+// clown FDR 0021's headless loop runs as juggler, not claude.
+func TestF11FindsAnUnconfinedLoop(t *testing.T) {
+	sys, in := confinedHost()
+	sys.dirs["/proc"] = append(sys.dirs["/proc"], "400")
+	sys.files["/proc/400/comm"] = "juggler\n"
+	sys.files["/proc/400/cgroup"] = "0::/user.slice/user-1000.slice/session-3.scope\n"
+	f := factByID(t, Run(sys, in), "F11")
+	if f.OK || !strings.Contains(f.Detail, "agent pid 400") {
+		t.Errorf("F11 = %+v, want pid 400 named", f)
+	}
+}
+
+// A harness a unit record reports clown exec'd is searched for outside the
+// units, by its basename truncated to the kernel's 15-byte comm.
+func TestF11SearchesForTheRecordedHarness(t *testing.T) {
+	sys, in := confinedHost()
+	sys.files[UnitRecordPath(stateDir, "/wt/b")] = `{"version":1,"unit":"agent-b.service","cgroup":"` + otherCG +
+		`","invocation_id":"x","uid":1000,"serve_socket":"/run/user/1000/clown/agent/b/serve.sock","principal":"principal-b","harness":"/nix/store/x-h/bin/some-long-harness-name"}`
+	sys.files["/proc/200/comm"] = "some-long-harne\n" // in its unit: fine
+	if f := factByID(t, Run(sys, in), "F11"); !f.OK {
+		t.Fatalf("F11 failed with the harness inside its unit: %s", f.Detail)
+	}
+	sys.dirs["/proc"] = append(sys.dirs["/proc"], "400")
+	sys.files["/proc/400/comm"] = "some-long-harne\n"
+	sys.files["/proc/400/cgroup"] = "0::/user.slice/user-1000.slice/session-3.scope\n"
+	f := factByID(t, Run(sys, in), "F11")
+	if f.OK || !strings.Contains(f.Detail, "agent pid 400") {
+		t.Errorf("F11 = %+v, want the unconfined harness named", f)
+	}
+}
+
+func TestF11DetailDescribesTheCensus(t *testing.T) {
+	sys, in := confinedHost()
+	f := factByID(t, Run(sys, in), "F11")
+	if !f.OK || !strings.Contains(f.Detail, "2 live sessions in running units") {
+		t.Errorf("F11 = %+v, want the census summarised", f)
 	}
 }
 

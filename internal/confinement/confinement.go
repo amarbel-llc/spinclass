@@ -90,8 +90,11 @@ type Inputs struct {
 	// the resolved core.hooksPath, empty when unset.
 	GitCommonDir string
 	HooksPath    string
-	// ClaudeComms are the process names that identify an agent runtime (F11).
-	ClaudeComms []string
+	// AgentComms are the process names F11 searches for outside every agent
+	// unit, besides the harnesses the live unit records report. Deprecated
+	// fallback: names are spoofable; it goes once clown records every agent it
+	// launches (docs/plans/2026-10-20-agent-census-by-unit.md).
+	AgentComms []string
 	// StateDir is the XDG state base unit records live under
 	// (UnitRecordPath), outside every worktree.
 	StateDir string
@@ -100,10 +103,11 @@ type Inputs struct {
 	RuntimeAllow []string
 }
 
-// DefaultClaudeComms identifies agent runtimes by /proc/<pid>/comm (15
-// bytes at most). nixpkgs' claude-code runs as .claude-wrapped behind its
-// wrapper script, so the bare name alone finds nothing on a nix host.
-var DefaultClaudeComms = []string{"claude", ".claude-wrapped"}
+// DefaultAgentComms identifies agent runtimes by /proc/<pid>/comm (15 bytes
+// at most). nixpkgs' claude-code runs as .claude-wrapped behind its wrapper
+// script, so the bare name alone finds nothing on a nix host. juggler is clown
+// FDR 0021's headless loop.
+var DefaultAgentComms = []string{"claude", ".claude-wrapped", "juggler"}
 
 // Run probes every fact in order. Facts that need the unit fail when there
 // is no unit to look into, so a missing unit fails every such line rather

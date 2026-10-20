@@ -41,7 +41,7 @@ func InputsForDriver(sessionKey, principal string) (Inputs, error) {
 	if err != nil {
 		return Inputs{}, fmt.Errorf("listing sessions: %w", err)
 	}
-	in := Inputs{ClaudeComms: DefaultClaudeComms}
+	in := Inputs{AgentComms: DefaultAgentComms}
 	found := false
 	for _, st := range states {
 		if st.IsTombstone() {

@@ -44,6 +44,9 @@ type UnitRecord struct {
 	// written by that (frontend) clown. claude's own environment never carries
 	// it (clown#136), so this record is where a unit's principal is read.
 	Principal string `json:"principal"`
+	// Harness optionally names (or gives the path of) the process clown exec'd
+	// in the unit (clown FDR 0021). F11 searches for it outside every unit.
+	Harness string `json:"harness"`
 	// Error is set by clown when the launch failed after it began writing the
 	// record: the other fields may then be empty, and this says why.
 	Error string `json:"error"`

@@ -79,6 +79,21 @@ per target (*close.RunMany*, with *runResolvedInto* writing into the
 caller-owned document). Nix gc reaps per target, because each plan is captured
 before its worktree is removed.
 
+# CONFINEMENT AGENT CENSUS (FDR 0035 F11)
+
+*sc confinement-check* fact F11 counts agents by unit (*internal/confinement*).
+Every live session needs a unit record whose cgroup, under
+*clown-agent.slice*, holds at least one process now; a record whose cgroup is
+gone or empty is named as a *stale record*. A process is confined iff its
+cgroup lies within a running unit. Only the search for a runtime outside every
+unit still goes by */proc/<pid>/comm*: the fallback list *DefaultAgentComms*
+(*claude*, *.claude-wrapped*, *juggler*) plus every *harness* a live unit
+record reports clown exec'd, cut to 15 bytes. That search is spoofable and is
+a deprecated fallback, kept until clown records every agent it launches. F2's
+ancestry walk also refuses an ancestor inside an agent unit. The passing
+detail reads "N live sessions in running units; no <names> outside them".
+Design: *docs/plans/2026-10-20-agent-census-by-unit.md*.
+
 # SEE ALSO
 
 *spinclass-sweatfile*(5), *spinclass-build-pins*(7),

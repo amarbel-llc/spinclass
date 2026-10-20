@@ -352,8 +352,17 @@ func (p *prober) f2AgentOutside() Fact {
 			if err != nil {
 				return fmt.Errorf("walking agent pid %d's ancestry at %d: %w", pid, anc, err)
 			}
-			if anc != pid && slices.Contains(p.claudeComms(), comm) {
-				return fmt.Errorf("agent pid %d descends from agent runtime %s (pid %d)", pid, comm, anc)
+			if anc != pid {
+				if slices.Contains(p.agentComms(), comm) {
+					return fmt.Errorf("agent pid %d descends from agent runtime %s (pid %d)", pid, comm, anc)
+				}
+				acg, err := p.cgroupOf(anc)
+				if err != nil {
+					return fmt.Errorf("reading agent pid %d's ancestor %d's cgroup: %w", pid, anc, err)
+				}
+				if strings.Contains(acg, "/"+AgentSlice+"/") || p.inSomeUnit(acg) {
+					return fmt.Errorf("agent pid %d descends from a process in agent unit (pid %d, %s)", pid, anc, acg)
+				}
 			}
 			anc = ppid
 		}
@@ -363,11 +372,39 @@ func (p *prober) f2AgentOutside() Fact {
 	return fact(id, name, err, detail)
 }
 
-func (p *prober) claudeComms() []string {
-	if len(p.in.ClaudeComms) > 0 {
-		return p.in.ClaudeComms
+// agentComms are the names of agent runtimes: the fallback list plus every
+// harness a live unit record reports clown exec'd, in comm form.
+func (p *prober) agentComms() []string {
+	comms := slices.Clone(p.in.AgentComms)
+	if len(comms) == 0 {
+		comms = slices.Clone(DefaultAgentComms)
 	}
-	return DefaultClaudeComms
+	var harnesses []string
+	for _, r := range p.liveUnits {
+		if n := commOf(r.Harness); n != "" && !slices.Contains(comms, n) && !slices.Contains(harnesses, n) {
+			harnesses = append(harnesses, n)
+		}
+	}
+	sort.Strings(harnesses)
+	return append(comms, harnesses...)
+}
+
+// maxComm is the kernel's comm length (TASK_COMM_LEN less the NUL).
+const maxComm = 15
+
+// commOf reduces a harness name or path to what /proc/<pid>/comm shows for it.
+func commOf(harness string) string {
+	if harness == "" {
+		return ""
+	}
+	n := path.Base(harness)
+	if n == "/" || n == "." {
+		return ""
+	}
+	if len(n) > maxComm {
+		n = n[:maxComm]
+	}
+	return n
 }
 
 // parentAndComm reads ppid and comm from /proc/<pid>/stat.
@@ -938,11 +975,18 @@ func sameFilesystem(a, b fs.FileInfo) bool {
 
 // F11: every live agent on the host is confined. One unconfined agent could
 // paint the prompt the card root depends on, and an unconfined session's MCP
-// servers are an escape hatch for every confined one. Limit: agents are found
-// by comm, which a hostile process can rename.
+// servers are an escape hatch for every confined one.
+//
+// The census is by unit: every live session needs a record whose unit is
+// running now (a non-empty cgroup under clown-agent.slice), and a process is
+// confined iff its cgroup is within such a unit. Only the search for a runtime
+// outside every unit still goes by name (agentComms), which a hostile process
+// can evade; see docs/plans/2026-10-20-agent-census-by-unit.md.
 func (p *prober) f11EveryAgentConfined() Fact {
 	const id, name = "F11", "every live agent confined"
 	var offenders []string
+	running := 0
+	comms := p.agentComms()
 	err := func() error {
 		keys := make([]string, 0, len(p.liveErrs))
 		for k := range p.liveErrs {
@@ -952,6 +996,7 @@ func (p *prober) f11EveryAgentConfined() Fact {
 		for _, k := range keys {
 			offenders = append(offenders, "session "+k+" has no agent unit")
 		}
+		offenders = append(offenders, p.staleUnits(&running)...)
 		entries, err := p.sys.ReadDir("/proc")
 		if err != nil {
 			return fmt.Errorf("listing /proc: %w", err)
@@ -968,7 +1013,7 @@ func (p *prober) f11EveryAgentConfined() Fact {
 				}
 				return fmt.Errorf("reading pid %d's name: %w", pid, err)
 			}
-			if !slices.Contains(p.claudeComms(), strings.TrimSpace(string(comm))) {
+			if !slices.Contains(comms, strings.TrimSpace(string(comm))) {
 				continue
 			}
 			cg, err := p.cgroupOf(pid)
@@ -987,7 +1032,34 @@ func (p *prober) f11EveryAgentConfined() Fact {
 		}
 		return nil
 	}()
-	return fact(id, name, err, "")
+	return fact(id, name, err, fmt.Sprintf("%d live sessions in running units; no %s outside them", running, strings.Join(comms, ", ")))
+}
+
+// staleUnits names every live session whose recorded unit is not running: a
+// record vouches for nothing once its cgroup is gone or empty, since the
+// session's agent, if it has one, is not in it. running counts the rest.
+func (p *prober) staleUnits(running *int) []string {
+	keys := make([]string, 0, len(p.liveUnits))
+	for k := range p.liveUnits {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var stale []string
+	for _, k := range keys {
+		r := p.liveUnits[k]
+		pids, err := p.cgroupTreeProcs(r.Cgroup)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			stale = append(stale, fmt.Sprintf("session %s's unit %s is gone (no cgroup %s): stale record", k, r.Unit, r.Cgroup))
+		case err != nil:
+			stale = append(stale, fmt.Sprintf("session %s's unit %s cannot be counted: %v", k, r.Unit, err))
+		case len(pids) == 0:
+			stale = append(stale, fmt.Sprintf("session %s's unit %s has no processes: stale record", k, r.Unit))
+		default:
+			*running++
+		}
+	}
+	return stale
 }
 
 func (p *prober) inSomeUnit(cg string) bool {

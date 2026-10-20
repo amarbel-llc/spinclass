@@ -173,7 +173,7 @@ unit and is deferred.
 | F8b | No operator pty is writable | For every `/dev/pts/N` other than the unit's own `pty`: `faccessat(W_OK)` is denied (today the operator's slave is 0620 and owned by the uid, so a worker can write it and spoof the display). A private devpts instance in the unit satisfies this trivially |
 | F9 | The repo's hooks and config are not writable | In the unit, the write to `<git-common-dir>/hooks`, `<git-common-dir>/config` and the resolved `core.hooksPath` is denied (each, resolved inside the unit, so a hooks dir replaced by a symlink is judged by what the unit reaches). Renaming `hooks` away needs the common dir itself writable: open question 2 |
 | F10 | The unit cannot see or reach processes outside it | `/proc/<pid>/ns/pid` of a unit process differs from the frontend's `/proc/self/ns/pid`, and every numeric entry of the unit's own `/proc` (`/proc/<pid>/root/proc`) is a process in the unit's cgroup. Without this, a same-uid worker reads `/proc/<operator-shell>/root/…` and walks straight out of its mount namespace (that access is `PTRACE_MODE_READ`, which Yama does not restrict), and can `ptrace` or write `/proc/<pid>/mem` of frontend processes where Yama allows. `ProtectProc=invisible` does not help: it hides other uids, and the uid is the same |
-| F11 | Every live agent on the host is confined | Every live session in spinclass state has an `agent-unit.json`, and every process on the host whose `comm` names an agent runtime (`claude`, or `.claude-wrapped` under nixpkgs' wrapper) sits in some live session's unit cgroup; offenders are named by session (from their cwd). One unconfined agent anywhere could have painted the prompt the card root depends on, and an unconfined session's MCP servers are an escape hatch for every confined one |
+| F11 | Every live agent on the host is confined | Every live session in spinclass state has a unit record whose unit is running now (a non-empty cgroup under `clown-agent.slice`; a gone or empty cgroup is a stale record and fails), and every process on the host whose `comm` names an agent runtime (`claude`, `.claude-wrapped` under nixpkgs' wrapper, `juggler`, or any `harness` a live record reports) sits in some live session's unit cgroup (docs/plans/2026-10-20-agent-census-by-unit.md); offenders are named by session (from their cwd). One unconfined agent anywhere could have painted the prompt the card root depends on, and an unconfined session's MCP servers are an escape hatch for every confined one |
 | F15 | The frontend principal mapping matches | The mapping the grant walk trusts (`$XDG_STATE_HOME/spinclass/principals/<principal>.json`, see "The principal-to-session mapping") exists for the driver's principal and names the driver's session and unit, and the worktree's cached principal, if any, is the same. A disagreement fails with both values named |
 | F14 | The operator's runtime dir holds only the bound sockets | Listing `/run/user/<uid>` in the unit shows nothing but the entries spinclass and clown bind there (`clown`, `ringmaster`, and the agent socket's directory if it lives there), or cannot be listed at all. It is where the bus, user manager, gpg-agent, pipewire and posh live; the allowlist catches what F5, F6 and F8a do not name |
 | F13 | The unit has a private network namespace | `/proc/<pid>/ns/net` of every unit process differs from the frontend's `/proc/self/ns/net`. In the host namespace every loopback MCP bridge (another session's moxy `folio_write` included) and every abstract unix socket is reachable. Hard requirement, same tier as F10 |
@@ -538,10 +538,11 @@ entry carries no `{principal}`; otherwise it warns.
   (`prctl(PR_SET_NAME)`), and an npm-installed claude runs as `node`. It
   detects honest unconfined sessions; it is no defence against a hostile
   unconfined process, which already has the operator's uid and needs none.
-  Accepted until every agent is a unit (coordinator, 2026-10-19). The end
-  state: F11 enumerates the units under `clown-agent.slice` plus every process
-  in the login session's scope that is not the frontend, and name matching
-  goes away.
+  Accepted until every agent is a unit (coordinator, 2026-10-19). Since
+  2026-10-20 the session half is by unit (a record must name a running unit)
+  and the name list is a deprecated fallback that also takes each record's
+  `harness`; it goes when clown records every agent it launches, confined or
+  not (docs/plans/2026-10-20-agent-census-by-unit.md).
 - **F2 identifies the agent by `SO_PEERCRED`**, which names the listener: a
   socket-activated piggy-agent resolves to the user manager.
 - **Session state is worktree-local** (`<worktree>/.spinclass/state.json`,
