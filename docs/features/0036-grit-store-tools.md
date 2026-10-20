@@ -368,6 +368,64 @@ Each step is a merge; moxy's grit stays live until step 7.
    manpages (`spinclass-grit(7)`, sweatfile `[store]`); `perms` rewriter report.
 7. moxy side (not this repo): deprecate or keep grit per moxy #482 using the
    export as the fallback.
+8. Confined callers (section 9): the single stamping setting, the hook policy
+   for proxied commits, and the confined-caller ownership check in the tool
+   body. The read-write `.git` bind removal itself is clown/FDR 0035 work
+   (clown #274).
+
+### 9. Confined callers: grit as the proxy (clown #274)
+
+Added 2026-10-20 at the operator's request, relayed by the circus session
+(clarabell). The operator agreed to proxy git through these tools. A confined
+worker (FDR 0035) calls the grit tools; the calls reach `spinclass serve` in
+the **frontend**, which can write the main `.git`. The worker's own `.git`
+stays read-only. This is the planned answer to the read-write half of
+clown #274; clown #274 narrows to what remains for clown, mainly dropping grit
+from the in-unit moxyfile.
+
+1. **Where the tools run.** For a confined caller the tool body runs in the
+   frontend `serve`, never inside the unit. The unit needs no read-write
+   `.git` binds. Nothing in this FDR's design requires the tools to run in
+   the caller's own process; the `Backend` is told the session worktree and
+   works on it from outside.
+2. **Authorship.** The frontend stamps author and committer, so nothing is
+   staged in the unit and the worker needs no git identity. *Whose* identity
+   goes there is the open question in circus #351. This FDR makes it a single
+   spinclass-side setting, one value read at commit time (proposed home:
+   sweatfile `[store]`, key name to be chosen when step 8 lands), so the proxy
+   can ship before #351 is decided. An unset value falls back to git's own
+   resolution and fails the commit visibly, never silently under a guessed
+   name.
+3. **Hooks on proxied commits.** The per-commit hook (FDR 0019) re-evaluates
+   the worktree's devshell when the flake lock moved (#267). If the frontend
+   commits for a confined worker, that would execute **worker-authored code
+   outside the unit**. Two options, **undecided** (flagged for the operator):
+   - *Skip hooks on proxied commits* and rely on the merge gate (which runs in
+     the pre-merge build worktree, FDR 0013). Safe, loses authoring-time
+     repair for confined workers, so mechanical drift surfaces at merge.
+   - *Run hooks inside the unit* (the proxy hands the staged tree to a unit
+     process). Keeps repair, needs a unit-side hook runner and a way to carry
+     the result back.
+   The first is the conservative default if nothing is decided: it never
+   crosses the trust boundary.
+4. **Ownership in the tool body, for confined callers only.** Section 2 says
+   the hook is the only gate, because a tool cannot prompt and, once a human
+   approves a foreign operation, the tool must run it. For a confined worker
+   under `dontAsk` an `ask` is a deny, so the hook is already safe, and a body
+   check is cheap insurance against a hook misconfiguration. This does not
+   contradict section 2 if the body check is scoped: it applies only when the
+   caller is *confined* (and therefore cannot have been shown a prompt),
+   refusing any target `Owned` rejects, plus the existing default-branch
+   refusal. For unconfined callers the hook remains the sole gate. How the body
+   learns "confined" (the FDR 0035 confinement record for the principal) is to
+   be settled when step 8 lands; unresolved confinement is treated as
+   confined (fail closed).
+5. **Longer view (a later FDR, not this one).** `folio` moves into spinclass
+   with path visibility and worktree enforcement done natively there, and
+   later alternative backends (dodder-backed, cloud-backed). They should reuse
+   this FDR's `Backend` and `Classify` shape and FDR 0033's one-shot protocol.
+   No design is made here; recorded so the boundary in section 1 is not
+   narrowed in the meantime.
 
 ## Interpretations
 
@@ -395,6 +453,9 @@ Each step is a merge; moxy's grit stays live until step 7.
   not.
 - Whether moxy's current annotations match section 2's table (I could not
   read the grit moxin definitions).
+- Section 9: the author/committer identity for proxied commits (circus #351);
+  hooks on proxied commits (skip vs. run in the unit); and how the tool body
+  detects a confined caller.
 - moxy #390 (force-with-lease "stale info") and the interaction of remote verbs
   with the FDR 0028 credential/`insteadOf` lane.
 - (Settled 2026-10-20) Stashes die with the worktree, but `sc close` must not
@@ -416,5 +477,7 @@ is `B` and `B--<topic>`; reads auto-allow on any branch.
 
 FDR 0032 (principals), FDR 0028 (per-session credentials), FDR 0027
 (resurrect), FDR 0019 (per-commit hook), FDR 0033 (one-shot plugin protocol),
-FDR 0001/0014 (worktree-local state), `internal/perms`, moxin(7).
-spinclass #379, #380; moxy #482, #483, #330, #390, #48.
+FDR 0001/0014 (worktree-local state), FDR 0013 (build worktree), FDR 0035
+(session confinement), `internal/perms`, moxin(7).
+spinclass #379, #380; moxy #482, #483, #330, #390, #48; clown #274;
+circus #351.
