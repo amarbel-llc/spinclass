@@ -44,7 +44,8 @@ func TestTrustedConfinement(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return TrustedConfinement(h, home, repo)
+		p, egress, untrusted := TrustedConfinement(h, home, repo)
+		return p.DefaultConfines(), egress, untrusted
 	}
 
 	launch, egress, untrusted := resolve()
@@ -73,6 +74,117 @@ func TestTrustedConfinement(t *testing.T) {
 	write(parent, "[confinement]\nlaunch-unit = false\n")
 	if _, egress, _ := resolve(); !reflect.DeepEqual(egress, []string{"a:1"}) {
 		t.Errorf("nil should inherit, got %v", egress)
+	}
+}
+
+// [confinement] enabled (the feature) and default-spawn (the default for a
+// spawn) are plain scalars across the trusted layers: the LAST layer that sets
+// each wins, so unlike launch-unit a nearer layer can turn them off. launch-unit
+// is the deprecated alias for both true; each new key overrides the alias's
+// value for itself only; default-spawn defaults to true when unset.
+func TestTrustedConfinementPolicy(t *testing.T) {
+	const (
+		on  = "[confinement]\n"
+		yes = true
+		no  = false
+	)
+	cases := []struct {
+		name                 string
+		global, parent, repo string
+		enabled, defaultOn   bool
+	}{
+		{"nothing set", "", "", "", no, no},
+		{"launch-unit alone is both", on + "launch-unit = true\n", "", "", yes, yes},
+		{"launch-unit stays sticky-on", on + "launch-unit = true\n", on + "launch-unit = false\n", "", yes, yes},
+		{"enabled alone defaults default-spawn on", on + "enabled = true\n", "", "", yes, yes},
+		{"enabled with default-spawn off", on + "enabled = true\ndefault-spawn = false\n", "", "", yes, no},
+		{"default-spawn alone does not enable", on + "default-spawn = true\n", "", "", no, no},
+		{"enabled is not sticky: a nearer false wins", on + "enabled = true\n", on + "enabled = false\n", "", no, no},
+		{"default-spawn last layer wins", on + "enabled = true\ndefault-spawn = false\n", on + "default-spawn = true\n", "", yes, yes},
+		{"repo layer is not trusted", "", "", on + "enabled = true\n", no, no},
+		{"repo layer cannot turn the feature off", on + "enabled = true\n", "", on + "enabled = false\n", yes, yes},
+		{"default-spawn overrides the alias for itself only", on + "launch-unit = true\n", on + "default-spawn = false\n", "", yes, no},
+		{"enabled=false overrides the alias", on + "launch-unit = true\n", on + "enabled = false\n", "", no, no},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			repo := filepath.Join(home, "work", "repo")
+			if err := os.MkdirAll(repo, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for path, body := range map[string]string{
+				filepath.Join(home, ".config", "spinclass", "sweatfile"): tc.global,
+				filepath.Join(home, "work", "sweatfile"):                 tc.parent,
+				filepath.Join(repo, "sweatfile"):                         tc.repo,
+			} {
+				if body == "" {
+					continue
+				}
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			h, err := LoadHierarchy(home, repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, _, _ := TrustedConfinement(h, home, repo)
+			if p.Enabled != tc.enabled {
+				t.Errorf("Enabled = %v, want %v", p.Enabled, tc.enabled)
+			}
+			if got := p.DefaultConfines(); got != tc.defaultOn {
+				t.Errorf("DefaultConfines() = %v, want %v", got, tc.defaultOn)
+			}
+		})
+	}
+}
+
+// [permissions] deny-sweatfile-edits is read only from layers above the repo, a
+// scalar override (last trusted layer wins), off when unset.
+func TestTrustedDenySweatfileEdits(t *testing.T) {
+	home := t.TempDir()
+	repo := filepath.Join(home, "work", "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	global := filepath.Join(home, ".config", "spinclass", "sweatfile")
+	parent := filepath.Join(home, "work", "sweatfile")
+	repoFile := filepath.Join(repo, "sweatfile")
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resolve := func() (bool, []string) {
+		h, err := LoadHierarchy(home, repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return TrustedDenySweatfileEdits(h, home, repo)
+	}
+
+	if deny, untrusted := resolve(); deny || len(untrusted) != 0 {
+		t.Errorf("unset: got (%v, %v), want (false, none)", deny, untrusted)
+	}
+	write(repoFile, "[permissions]\ndeny-sweatfile-edits = true\n")
+	if deny, untrusted := resolve(); deny || !reflect.DeepEqual(untrusted, []string{repoFile}) {
+		t.Errorf("repo layer: got (%v, %v), want (false, [%s])", deny, untrusted, repoFile)
+	}
+	write(global, "[permissions]\ndeny-sweatfile-edits = true\n")
+	if deny, _ := resolve(); !deny {
+		t.Error("a global true is not honoured")
+	}
+	write(parent, "[permissions]\ndeny-sweatfile-edits = false\n")
+	if deny, _ := resolve(); deny {
+		t.Error("the last trusted layer should win")
 	}
 }
 

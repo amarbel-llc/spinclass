@@ -45,6 +45,14 @@ func AlwaysAsk(toolName string, toolInput map[string]any, cwd string) (string, b
 		// one is confined, still asks. The hook then allows it positively.
 		// Fan-out stays bounded: a confined spawn refuses to run from inside
 		// an agent unit, so a confined worker's own spawns still prompt.
+		//
+		// The one thing no confinement verdict can buy past this floor is the
+		// opt-out: a spawn passing `unconfined` always asks, whatever else is
+		// true of it. Until blessing exists (stage 2: a card-rooted grant that
+		// lets a session run unconfined children), that request needs the human.
+		if unconfinedRequested(toolInput) {
+			return "spawning an UNCONFINED worker opts out of confinement (FDR 0035); until blessing exists (stage 2) every unconfined spawn needs a human decision", true
+		}
 		if SpawnConfined != nil && SpawnConfined(toolInput, cwd) {
 			return "", false
 		}
@@ -127,6 +135,20 @@ func forceRequested(toolInput map[string]any) bool {
 	v, present := toolInput["force"]
 	if !present || v == nil {
 		// Absent, or JSON null — both unambiguously mean "not set".
+		return false
+	}
+	if b, ok := v.(bool); ok {
+		return b
+	}
+	return true
+}
+
+// unconfinedRequested reads spawn-session's `unconfined` argument, failing
+// CLOSED like forceRequested: only absent, null or a real false is "not an
+// opt-out"; any other value, including a non-bool, counts as one.
+func unconfinedRequested(toolInput map[string]any) bool {
+	v, present := toolInput["unconfined"]
+	if !present || v == nil {
 		return false
 	}
 	if b, ok := v.(bool); ok {

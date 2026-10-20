@@ -44,7 +44,8 @@ type hookInput struct {
 type RunOption func(*runOptions)
 
 type runOptions struct {
-	rewriteEnabled bool
+	rewriteEnabled     bool
+	denySweatfileEdits bool
 }
 
 // WithWorktreePathRewrite toggles the #176 parent-checkout → worktree path
@@ -75,7 +76,7 @@ func Run(r io.Reader, w io.Writer, mainRepoRoot, sessionWorktree string, disallo
 	case "SessionEnd":
 		return runSessionEnd(input)
 	default:
-		return runPreToolUse(input, w, mainRepoRoot, sessionWorktree, disallowMainWorktree, o.rewriteEnabled)
+		return runPreToolUse(input, w, mainRepoRoot, sessionWorktree, disallowMainWorktree, o.rewriteEnabled, o.denySweatfileEdits)
 	}
 }
 
@@ -493,7 +494,7 @@ const (
 	closeChildSessionToolName     = "mcp__plugin_spinclass_spinclass__close-child-session"
 )
 
-func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree, rewriteEnabled bool) error {
+func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree, rewriteEnabled, denySweatfile bool) error {
 	if input.AgentID != "" {
 		switch input.ToolName {
 		case mergeThisSessionToolName, checkThisSessionToolName,
@@ -575,9 +576,7 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 				))
 			}
 			if (input.ToolName == "Write" || input.ToolName == "Edit") && isSweatfile(fp, resolvedMain, resolvedWorktree) {
-				return writeAsk(w, fmt.Sprintf(
-					"This modifies the sweatfile at %s, which controls session configuration.", fp,
-				))
+				return sweatfileEditDecision(w, fp, denySweatfile)
 			}
 		}
 	}

@@ -566,24 +566,57 @@ func CheckProfileRights(sf sweatfile.Sweatfile, layerAboveRepo, global bool) []I
 // honoured only from layers above the repo, and `launch-unit` is reliable only
 // from the GLOBAL sweatfile, for the same reason as profile-rights.enforce.
 func CheckConfinement(sf sweatfile.Sweatfile, layerAboveRepo, global bool) []Issue {
-	if sf.Confinement == nil || (sf.Confinement.LaunchUnit == nil && sf.Confinement.EgressAllow == nil) {
+	c := sf.Confinement
+	if c == nil || (c.Enabled == nil && c.DefaultSpawn == nil && c.LaunchUnit == nil && c.EgressAllow == nil) {
 		return nil
 	}
-	switch {
-	case !layerAboveRepo:
+	if !layerAboveRepo {
 		return []Issue{{
 			Message:  "[confinement] is set in a repo-level sweatfile: it is ignored — only sweatfiles above the repo may set it; move it to the global sweatfile",
 			Severity: SeverityWarning,
 			Field:    "confinement",
 		}}
-	case !global && sf.Confinement.LaunchUnit != nil:
-		return []Issue{{
-			Message:  "[confinement] sets `launch-unit` outside the global sweatfile: a spawner whose working directory is outside this directory does not consult this layer, so confinement can be sidestepped; set it in ~/.config/spinclass/sweatfile",
+	}
+	var issues []Issue
+	if c.LaunchUnit != nil {
+		issues = append(issues, Issue{
+			Message:  "[confinement] `launch-unit` is deprecated: it means enabled = true and default-spawn = true; set `enabled` (and `default-spawn`) instead",
 			Severity: SeverityWarning,
 			Field:    "confinement.launch-unit",
-		}}
+		})
 	}
-	return nil
+	if !global {
+		for _, key := range []struct {
+			name string
+			set  bool
+		}{
+			{"enabled", c.Enabled != nil},
+			{"default-spawn", c.DefaultSpawn != nil},
+			{"launch-unit", c.LaunchUnit != nil},
+		} {
+			if key.set {
+				issues = append(issues, Issue{
+					Message:  fmt.Sprintf("[confinement] sets `%s` outside the global sweatfile: a spawner whose working directory is outside this directory does not consult this layer, so confinement can be sidestepped; set it in ~/.config/spinclass/sweatfile", key.name),
+					Severity: SeverityWarning,
+					Field:    "confinement." + key.name,
+				})
+			}
+		}
+	}
+	return issues
+}
+
+// CheckPermissions validates the [permissions] table: it is honoured only from
+// layers above the repo, so a repo-level value is ignored.
+func CheckPermissions(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
+	if sf.Permissions == nil || sf.Permissions.DenySweatfileEdits == nil || layerAboveRepo {
+		return nil
+	}
+	return []Issue{{
+		Message:  "[permissions] sets `deny-sweatfile-edits` in a repo-level sweatfile: it is ignored — only sweatfiles above the repo may set it; move it to the global sweatfile",
+		Severity: SeverityWarning,
+		Field:    "permissions.deny-sweatfile-edits",
+	}}
 }
 
 func isShellInterpreter(cmd string) bool {
@@ -857,6 +890,16 @@ func Run(w io.Writer, home, repoDir string) int {
 				}
 			} else {
 				sub.Ok("confinement valid")
+			}
+		}
+
+		if src.File.Permissions != nil {
+			if issues := CheckPermissions(src.File, sweatfileio.LayerAboveRepo(src.Path, home, mainRoot)); len(issues) > 0 {
+				for _, iss := range issues {
+					sub.Ok(fmt.Sprintf("permissions valid # warning: %s", iss.Message))
+				}
+			} else {
+				sub.Ok("permissions valid")
 			}
 		}
 

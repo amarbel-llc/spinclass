@@ -145,12 +145,31 @@ type ProfileRights struct {
 // ProfileRights it is trusted only from layers above the repo, read ONLY
 // through sweatfileio.TrustedConfinement, and never merged.
 type Confinement struct {
-	// LaunchUnit is sticky-on across trusted layers: any true wins.
+	// Enabled is the FEATURE switch: confinement is available. The last trusted
+	// layer that sets it wins. Unset, it falls back to the deprecated LaunchUnit.
+	Enabled *bool `toml:"enabled"`
+	// DefaultSpawn is whether, with the feature on, a spawn is confined unless it
+	// says otherwise. The last trusted layer that sets it wins; unset means true.
+	DefaultSpawn *bool `toml:"default-spawn"`
+	// LaunchUnit is the DEPRECATED alias for enabled = true and default-spawn =
+	// true, sticky-on across trusted layers (any true wins); each new key
+	// overrides it for itself.
 	LaunchUnit *bool `toml:"launch-unit"`
 	// EgressAllow is the host:port allow-list handed to the unit. The last
 	// trusted layer that sets it wins; nil inherits, [] clears. When no layer
 	// sets it spinclass sends no list, so clown's own default applies.
 	EgressAllow []string `toml:"egress-allow"`
+}
+
+// Permissions holds operator-only switches over what a session's own tool calls
+// may do. Like Confinement it is trusted only from layers above the repo, read
+// ONLY through sweatfileio.TrustedDenySweatfileEdits, and never merged. It is a
+// stopgap for the hook: the intent is for all IO to move behind a spinclass
+// plugin that enforces permissions at its own boundary, which replaces this.
+type Permissions struct {
+	// DenySweatfileEdits turns the hook's ask on a Write/Edit of a sweatfile into
+	// a deny. Last trusted layer that sets it wins; off when unset.
+	DenySweatfileEdits *bool `toml:"deny-sweatfile-edits"`
 }
 
 // Metrics configures spinclass's best-effort statsd telemetry (spinclass#363,
@@ -309,6 +328,7 @@ type Sweatfile struct {
 	Metrics        *Metrics        `toml:"metrics"`
 	ProfileRights  *ProfileRights  `toml:"profile-rights"`
 	Confinement    *Confinement    `toml:"confinement"`
+	Permissions    *Permissions    `toml:"permissions"`
 	Sysprompt      *Sysprompt      `toml:"sysprompt"`
 	SessionEntry   *SessionEntry   `toml:"session-entry"`
 	StartCommands  []StartCommand  `toml:"start-commands"`

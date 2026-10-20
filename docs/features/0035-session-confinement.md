@@ -7,7 +7,7 @@ promotion-criteria: |
   has a fake-backed unit test, and `sc confinement-check` prints the per-fact
   table on a real host. The check still fails today; that is expected.
   experimental -> testing: clown#244's agent unit lands, spinclass hands it the
-  required view behind `[confinement].launch-unit`, and on a host with that
+  required view behind `[confinement].enabled`, and on a host with that
   switch on every probe passes for a spawned worker; posh's attach
   authorization lands and its probe is real rather than "unverifiable".
   testing -> accepted: the D17 security review (spinclass#339) has looked at
@@ -144,7 +144,7 @@ its own process.
 
 **`sc spawn` from inside a unit.** The CLI runs agent-side. A spawn from there
 would put the child's frontend inside the parent's agent unit (setsid does not
-move cgroups), violating FDR 0032 D7. With `[confinement].launch-unit` on,
+move cgroups), violating FDR 0032 D7. With a spawn that resolves to confined,
 `sc spawn` refuses when it is inside an agent unit and names `spawn-session` as
 the route; with enforcement on, only `spawn-session` can authorize a profile.
 
@@ -261,8 +261,10 @@ landing flips the switch without a spinclass change.
 ## Spawn side
 
 `spawn-session` and `sc spawn` write the spec and set `CLOWN_AGENT_SCOPE` in the
-worker's env when `[confinement].launch-unit = true` (sweatfile, scalar,
-default **off**). Off, spawn is unchanged byte for byte. The existing env
+worker's env when the spawn resolves to confined (`[confinement].enabled` plus
+`default-spawn` or an explicit `confined` request; `launch-unit` is the
+deprecated alias for both; default **off**; see "A confined spawn is not
+always-ask"). Off, spawn is unchanged byte for byte. The existing env
 hygiene (`harnessScrubbedEnvVars`) is kept in both modes. The switch is read
 from the same trusted layers as `[profile-rights]` so a repo cannot turn it off
 for a driver that set it.
@@ -363,24 +365,84 @@ The check also treats the record's `main_pid` as advisory: one outside the
 unit's cgroup is ignored and noted in F1, since every process in the cgroup
 must share one mount namespace for the path facts to hold anyway.
 
-## A confined spawn is not always-ask (spinclass#382, 2026-10-20)
+## A confined spawn is not always-ask (spinclass#382; two switches, 2026-10-20)
 
-`spawn-session` was unconditionally always-ask (#151). That floor now yields
-for a spawn that will launch a unit, since confinement bounds what the worker
-can reach and the worker never blocks on a prompt. `perms.AlwaysAsk` takes the
-driver's cwd and consults the `perms.SpawnConfined` seam; the CLI installs
-`spawn.WillConfine`, which mirrors `LaunchDetached`'s decision: the target repo's
-trusted `[confinement].launch-unit` (target = the `repo` argument, or the
-driver's own repo when omitted) OR the driver's own context. Any doubt
-(unresolvable target, unreadable hierarchy, non-string `repo`) keeps the ask.
-The PreToolUse hook then returns `allow` for it. This changes the tool's
+`spawn-session` was unconditionally always-ask (#151). That floor yields for a
+spawn that will launch a unit, since confinement bounds what the worker can
+reach and the worker never blocks on a prompt. This changes the tool's
 permission class only; it does not touch confinement or the preflight, which
 still refuses a launch that cannot be confined.
+
+### Two switches
+
+Both live in `[confinement]`, trusted layers only (global and strict-ancestor
+sweatfiles; repo and worktree layers are ignored, `LayerAboveRepo` unchanged),
+and are plain scalars: the **last trusted layer that sets each key wins**. They
+are not sticky-on, so a nearer trusted layer can turn either off.
+
+- `enabled` is the feature switch: confinement is available or not.
+- `default-spawn` is, with the feature on, whether a spawn is confined unless it
+  says otherwise. **Unset means true**, so setting `enabled = true` alone does
+  what `launch-unit` did. `enabled = true, default-spawn = false` makes
+  confinement opt-in per spawn, so a session can be allow-listed to spawn safe
+  (confined) children while the default stays unconfined.
+- `launch-unit` is a **deprecated alias** for `enabled = true` and
+  `default-spawn = true` (`sc validate` warns). It stays sticky-on. Composition
+  is per key: `launch-unit` supplies a key's value only when no trusted layer
+  sets that key, so `launch-unit` alone behaves exactly as before,
+  `launch-unit = true` plus `default-spawn = false` is enabled and opt-in, and
+  `launch-unit = true` plus `enabled = false` is off.
+
+### The decision
+
+`spawn.resolveConfined` is the one decision, shared by `LaunchDetached` and the
+permission layer's mirror `spawn.WillConfine`. With T the target repo's policy
+(the `repo` argument, or the driver's own repo when omitted) and D the driver's
+context policy:
+
+    confined = (T.enabled || D.enabled) &&
+               (request == confined ||
+                (request != unconfined && (T.enabled && T.default-spawn ||
+                                           D.enabled && D.default-spawn)))
+
+The "driver context OR target" rule is kept for the default, so a confined
+driver context makes its children confined. `spawn-session` and `sc spawn` take
+two optional bool parameters: `confined` (request confinement; narrowing, always
+honoured when the feature is on, an error when it is off) and `unconfined` (opt
+out of the default). Passing both is an error. `unconfined` also opts out of a
+default that came from the driver's context; it is gated by the ask below, not
+by the sweatfile.
+
+### Permission
+
+`perms.AlwaysAsk` (shared by the PreToolUse hook and `RunCheck`) judges the
+invocation:
+
+1. `unconfined` passed (anything but absent, null or a real `false`: a non-bool
+   fails closed) always asks, with a reason naming the opt-out. This is the
+   operator's rule that the request needs the user unless the session is
+   blessed to run unconfined children. **Until blessing exists (stage 2)** the
+   ask is unconditional; the blessing, a card-rooted grant in the FDR 0034
+   model, is not built or stubbed here.
+2. Otherwise a spawn that resolves to confined is allowed (the hook returns
+   `allow`). `perms.SpawnConfined` is the seam the CLI installs as
+   `spawn.WillConfine`; any doubt (unresolvable target, unreadable hierarchy,
+   non-string `repo`, non-bool `confined`, a request the launch would refuse
+   such as `confined` with the feature off) keeps the ask.
+3. Everything else asks.
 
 Fan-out stays bounded: `confinedPreflight` refuses a confined spawn from inside
 an agent unit, so a confined worker's own spawns are unconfined and still ask.
 `RunCheck` (perms tiers) still never auto-approves spawn; the allow comes from
 the hook.
+
+### Sweatfile self-edits
+
+Separately, `[permissions] deny-sweatfile-edits` (trusted layers, last wins,
+off by default) turns the hook's ask on a Write/Edit of a sweatfile into a
+deny. It is kept small and isolated (`internal/hooks/sweatfile_guard.go`)
+because the intended end state is all session IO served by a spinclass plugin
+that enforces permissions at its own junction, which replaces it.
 
 ## The principal across `sc resume` (FDR 0034 item 17)
 

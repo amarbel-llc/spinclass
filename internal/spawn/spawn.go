@@ -89,6 +89,12 @@ type Pending struct {
 // refusal litters no worktree, and its name and digest are recorded in the
 // worker's session state.
 func LaunchDetached(home, repoPath string, driver Driver, brief, desc, model, profile string) (Pending, error) {
+	return LaunchDetachedWith(home, repoPath, driver, brief, desc, model, profile, ConfineDefault)
+}
+
+// LaunchDetachedWith is LaunchDetached with an explicit confinement request
+// (the spawn's `confined` / `unconfined` parameters): see resolveConfined.
+func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model, profile string, req ConfineRequest) (Pending, error) {
 	var descArgs []string
 	if desc != "" {
 		descArgs = []string{desc}
@@ -115,7 +121,10 @@ func LaunchDetached(home, repoPath string, driver Driver, brief, desc, model, pr
 
 	// Same rule for confinement (FDR 0035). Refusals come before anything is
 	// created; an unconfined spawn does none of this.
-	confined := targetConfine.launch || driverContextConfines(home)
+	confined, err := resolveConfined(targetConfine.policy, driverContextConfinement(home), req)
+	if err != nil {
+		return Pending{}, err
+	}
 	if confined {
 		if err := confinedPreflight(confinementHost, agentScopeCapabilitiesArgv); err != nil {
 			return Pending{}, err
@@ -266,7 +275,12 @@ func effectiveProfile(explicit string, merged sweatfile.Sweatfile) string {
 // intentionally left behind for inspection (`sc close` / `close-child-session`).
 // Used by the `sc spawn` CLI and by the async tool's no-clown fallback.
 func Launch(home, repoPath string, driver Driver, brief, desc, model, profile string, deadline time.Duration) (Result, error) {
-	p, err := LaunchDetached(home, repoPath, driver, brief, desc, model, profile)
+	return LaunchWith(home, repoPath, driver, brief, desc, model, profile, ConfineDefault, deadline)
+}
+
+// LaunchWith is Launch with an explicit confinement request.
+func LaunchWith(home, repoPath string, driver Driver, brief, desc, model, profile string, req ConfineRequest, deadline time.Duration) (Result, error) {
+	p, err := LaunchDetachedWith(home, repoPath, driver, brief, desc, model, profile, req)
 	if err != nil {
 		return Result{}, err
 	}
@@ -304,7 +318,7 @@ func renderSpawn(home string, rp worktree.ResolvedPath, brief, model, profile st
 	}
 	// [confinement] follows the same trust rule as [profile-rights].
 	var untrustedConfine []string
-	confine.launch, confine.egress, untrustedConfine = sweatfileio.TrustedConfinement(hierarchy, home, rp.RepoPath)
+	confine.policy, confine.egress, untrustedConfine = sweatfileio.TrustedConfinement(hierarchy, home, rp.RepoPath)
 	if len(untrustedConfine) > 0 {
 		slog.Warn("ignored [confinement] in sweatfiles that are not trusted: only sweatfiles above the repo are trusted",
 			"paths", untrustedConfine)

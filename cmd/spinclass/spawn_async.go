@@ -51,6 +51,11 @@ func handleSpawnSessionAsync(params spawnParams) (*command.Result, error) {
 		deadline = AsyncSpawnHelloDeadline // async default (sync `sc spawn` keeps 60s)
 	}
 
+	req, err := params.confineRequest()
+	if err != nil {
+		return command.TextErrorResult(err.Error()), nil
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return command.TextErrorResult(fmt.Sprintf("resolving home directory: %v", err)), nil
@@ -63,7 +68,7 @@ func handleSpawnSessionAsync(params spawnParams) (*command.Result, error) {
 
 	// Synchronous prefix: create the worktree + exec the detached entry. After
 	// this the session key is known; the hello has NOT been awaited.
-	pending, err := spawn.LaunchDetached(home, repoPath, driver, params.Brief, params.Description, params.Model, params.Profile)
+	pending, err := spawn.LaunchDetachedWith(home, repoPath, driver, params.Brief, params.Description, params.Model, params.Profile, req)
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
 	}

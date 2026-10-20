@@ -78,34 +78,89 @@ func TrustedEnforceProfileRights(h sweatfile.Hierarchy, home, repoRoot string) (
 	return enforce, untrusted
 }
 
+// ConfinementPolicy is the resolved [confinement] switches for one context.
+type ConfinementPolicy struct {
+	// Enabled is the feature switch: confinement is available at all.
+	Enabled bool
+	// DefaultSpawn is whether a spawn is confined unless it says otherwise.
+	// Resolved: true when no trusted layer sets it. Meaningless unless Enabled.
+	DefaultSpawn bool
+}
+
+// DefaultConfines reports whether a spawn that makes no request is confined.
+func (p ConfinementPolicy) DefaultConfines() bool { return p.Enabled && p.DefaultSpawn }
+
 // TrustedConfinement returns the [confinement] settings honoured for the repo.
-// launch is STICKY-ON across layers above the repo (same rule and rationale as
-// TrustedEnforceProfileRights). egress is the last trusted layer that sets
-// egress-allow (nil inherits, [] clears); with none set it is nil, which the
-// launch spec leaves out so clown's own default list applies. Layers that may not set the table are never
+//
+// enabled and default-spawn are scalars: the last trusted layer that sets each
+// wins, so a nearer layer can turn either off (unlike the sticky-on
+// profile-rights switch). launch-unit is the deprecated alias for both true: it
+// stays sticky-on across trusted layers, and supplies each key's value only
+// when no trusted layer sets that key itself. An unset default-spawn is true.
+// egress is the last trusted layer that sets egress-allow (nil inherits, []
+// clears); with none set it is nil, which the launch spec leaves out so clown's
+// own default list applies. Layers that may not set the table are never
 // honoured; their paths are returned in untrusted. Hierarchy.Merged never
 // carries the table.
-func TrustedConfinement(h sweatfile.Hierarchy, home, repoRoot string) (launch bool, egress []string, untrusted []string) {
+func TrustedConfinement(h sweatfile.Hierarchy, home, repoRoot string) (policy ConfinementPolicy, egress []string, untrusted []string) {
+	var enabled, defaultSpawn *bool
+	legacy := false
 	for _, src := range h.Sources {
 		if src.SkipReason != "" || !src.Found || src.File.Confinement == nil {
 			continue
 		}
 		c := src.File.Confinement
-		if c.LaunchUnit == nil && c.EgressAllow == nil {
+		if c.Enabled == nil && c.DefaultSpawn == nil && c.LaunchUnit == nil && c.EgressAllow == nil {
 			continue
 		}
 		if !LayerAboveRepo(src.Path, home, repoRoot) {
 			untrusted = append(untrusted, src.Path)
 			continue
 		}
+		if c.Enabled != nil {
+			enabled = c.Enabled
+		}
+		if c.DefaultSpawn != nil {
+			defaultSpawn = c.DefaultSpawn
+		}
 		if c.LaunchUnit != nil {
-			launch = launch || *c.LaunchUnit
+			legacy = legacy || *c.LaunchUnit
 		}
 		if c.EgressAllow != nil {
 			egress = c.EgressAllow
 		}
 	}
-	return launch, egress, untrusted
+	policy.Enabled = legacy
+	if enabled != nil {
+		policy.Enabled = *enabled
+	}
+	policy.DefaultSpawn = true
+	if defaultSpawn != nil {
+		policy.DefaultSpawn = *defaultSpawn
+	}
+	return policy, egress, untrusted
+}
+
+// TrustedDenySweatfileEdits returns the [permissions].deny-sweatfile-edits
+// switch honoured for the repo: a scalar, the last layer above the repo that
+// sets it wins, off when unset. Layers that may not set it are never honoured;
+// their paths are returned in untrusted. Hierarchy.Merged never carries the
+// table.
+func TrustedDenySweatfileEdits(h sweatfile.Hierarchy, home, repoRoot string) (deny bool, untrusted []string) {
+	for _, src := range h.Sources {
+		if src.SkipReason != "" || !src.Found {
+			continue
+		}
+		if src.File.Permissions == nil || src.File.Permissions.DenySweatfileEdits == nil {
+			continue
+		}
+		if LayerAboveRepo(src.Path, home, repoRoot) {
+			deny = *src.File.Permissions.DenySweatfileEdits
+		} else {
+			untrusted = append(untrusted, src.Path)
+		}
+	}
+	return deny, untrusted
 }
 
 // TrustedURLResolver returns the [auth].url-resolver command honoured for the

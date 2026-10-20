@@ -1169,6 +1169,92 @@ func TestSpawnSessionConfinedIsAllowed(t *testing.T) {
 	}
 }
 
+// A spawn that opts out of confinement asks through the hook even when the same
+// call would otherwise be confined: the opt-out needs a human until a session
+// can be blessed to run unconfined children (stage 2, not built).
+func TestSpawnSessionUnconfinedAsks(t *testing.T) {
+	prev := perms.SpawnConfined
+	t.Cleanup(func() { perms.SpawnConfined = prev })
+	perms.SpawnConfined = func(map[string]any, string) bool { return true }
+
+	cwd := t.TempDir()
+	for _, tc := range []struct {
+		name string
+		in   map[string]any
+		want string
+	}{
+		{"unconfined asks", map[string]any{"unconfined": true}, "ask"},
+		{"non-bool unconfined asks", map[string]any{"unconfined": "yes"}, "ask"},
+		{"confined stays allowed", map[string]any{"confined": true}, "allow"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := makeInput("mcp__plugin_spinclass_spinclass__spawn-session", tc.in, cwd)
+			var stdout bytes.Buffer
+			if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			decision, reason := parseHookDecision(t, stdout.Bytes())
+			if decision != tc.want {
+				t.Fatalf("decision = %q, want %q", decision, tc.want)
+			}
+			if decision == "ask" && !strings.Contains(reason, "unconfined") {
+				t.Errorf("the ask must name the opt-out, got %q", reason)
+			}
+		})
+	}
+}
+
+// [permissions] deny-sweatfile-edits turns the sweatfile-edit prompt into a
+// hard deny; without it the hook still asks. Reads are never affected.
+func TestSweatfileEditDeniedWhenConfigured(t *testing.T) {
+	worktree := t.TempDir()
+	target := filepath.Join(worktree, "sweatfile")
+	run := func(tool string, opts ...RunOption) string {
+		input := makeInput(tool, map[string]any{"file_path": target}, worktree)
+		var stdout bytes.Buffer
+		if err := Run(bytes.NewReader(input), &stdout, "", worktree, false, opts...); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if stdout.Len() == 0 {
+			return ""
+		}
+		decision, _ := parseHookDecision(t, stdout.Bytes())
+		return decision
+	}
+	for _, tool := range []string{"Write", "Edit"} {
+		if got := run(tool, WithDenySweatfileEdits(true)); got != "deny" {
+			t.Errorf("%s with the switch on: decision = %q, want deny", tool, got)
+		}
+		if got := run(tool, WithDenySweatfileEdits(false)); got != "ask" {
+			t.Errorf("%s with the switch off: decision = %q, want ask", tool, got)
+		}
+	}
+	if got := run("Read", WithDenySweatfileEdits(true)); got != "" {
+		t.Errorf("a sweatfile read must stay untouched, got %q", got)
+	}
+}
+
+// The switch is read from the trusted layers only: a repo-layer true cannot
+// lock the operator out, and a global true is honoured for a worktree whose
+// repo checkout is a strict descendant of the global layer's reach.
+func TestDenySweatfileEditsReadsTrustedLayersOnly(t *testing.T) {
+	home := t.TempDir()
+	repo := filepath.Join(home, "work", "repo")
+	wt := filepath.Join(repo, ".worktrees", "x")
+	testfs.MustMkdirAll(t, wt, 0o755)
+	repoFile := filepath.Join(repo, "sweatfile")
+	testfs.MustWriteFile(t, repoFile, []byte("[permissions]\ndeny-sweatfile-edits = true\n"), 0o644)
+	if denySweatfileEdits(home, repo, wt) {
+		t.Error("a repo-layer value must not be honoured")
+	}
+	testfs.MustMkdirAll(t, filepath.Join(home, ".config", "spinclass"), 0o755)
+	testfs.MustWriteFile(t, filepath.Join(home, ".config", "spinclass", "sweatfile"),
+		[]byte("[permissions]\ndeny-sweatfile-edits = true\n"), 0o644)
+	if !denySweatfileEdits(home, repo, wt) {
+		t.Error("a global value must be honoured")
+	}
+}
+
 // The always-ask floor applies to subagents too: the subagent-deny block does
 // not name spawn/fork, so the main switch's ask still fires.
 func TestSpawnSessionAsksEvenForSubagent(t *testing.T) {

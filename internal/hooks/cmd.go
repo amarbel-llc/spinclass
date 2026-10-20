@@ -42,6 +42,7 @@ func Handle(stdin io.Reader, stdout io.Writer) error {
 	var disallowMainWorktree bool
 	// Worktree path rewrite (#176) is on by default; the sweatfile opt-out flips it.
 	rewriteEnabled := true
+	denySweatfile := denySweatfileEdits(home, mainRepoRoot, cwd)
 	if home != "" {
 		result, err := sweatfileio.LoadWorktreeHierarchy(home, mainRepoRoot, cwd)
 		if err == nil {
@@ -50,7 +51,7 @@ func Handle(stdin io.Reader, stdout io.Writer) error {
 		}
 	}
 
-	return Run(stdin, stdout, mainRepoRoot, cwd, disallowMainWorktree, WithWorktreePathRewrite(rewriteEnabled))
+	return Run(stdin, stdout, mainRepoRoot, cwd, disallowMainWorktree, WithWorktreePathRewrite(rewriteEnabled), WithDenySweatfileEdits(denySweatfile))
 }
 
 func gitToplevel(dir string) (string, error) {

@@ -25,6 +25,14 @@ type spawnParams struct {
 	HelloTimeout string `json:"hello-timeout"`
 	Model        string `json:"model"`
 	Profile      string `json:"profile"`
+	Confined     bool   `json:"confined"`
+	Unconfined   bool   `json:"unconfined"`
+}
+
+// confineRequest folds the two confinement flags into one request; passing both
+// is an error.
+func (p spawnParams) confineRequest() (spawn.ConfineRequest, error) {
+	return spawn.ParseConfineRequest(p.Confined, p.Unconfined)
 }
 
 // runSpawn is the shared spawn flow behind both surfaces (FDR 0006):
@@ -47,6 +55,10 @@ func runSpawn(p spawnParams) (spawn.Result, string, error) {
 	if err != nil {
 		return spawn.Result{}, "", err
 	}
+	req, err := p.confineRequest()
+	if err != nil {
+		return spawn.Result{}, "", err
+	}
 	// Model alias validation is NOT done here: it's provider-conditional
 	// (spawn.ValidateModelAlias), and the provider is only knowable once the
 	// worker's sweatfile hierarchy is loaded inside spawn.Launch ->
@@ -65,7 +77,7 @@ func runSpawn(p spawnParams) (spawn.Result, string, error) {
 		return spawn.Result{}, "", err
 	}
 
-	res, err := spawn.Launch(home, repoPath, driver, p.Brief, p.Description, p.Model, p.Profile, deadline)
+	res, err := spawn.LaunchWith(home, repoPath, driver, p.Brief, p.Description, p.Model, p.Profile, req, deadline)
 	if err != nil {
 		return spawn.Result{}, "", err
 	}
@@ -252,6 +264,16 @@ func spawnParamList() []command.Param {
 			Name:        "profile",
 			Type:        command.String,
 			Description: "Clown profile name for the worker (FDR 0034): a named bundle of provider settings and a trimmed MCP tool catalog, placed as --profile <name> among clown's flags in the spawn-entry. Omit to use [session-entry].spawn-profile, else no profile. The profile is resolved through clown's profile library before anything is created; the spawn is refused for an unknown profile, a profile registry this build cannot vouch for (not stamped by a current clown, or another protocol version), or a profile that drops a server the worker needs.",
+		},
+		{
+			Name:        "confined",
+			Type:        command.Bool,
+			Description: "Request a CONFINED worker (FDR 0035): launched in a bounded agent unit. Always honoured when [confinement] enabled is on in a trusted sweatfile; an error when it is off. Narrowing only, so a confined spawn is allowed without a permission prompt. Mutually exclusive with unconfined.",
+		},
+		{
+			Name:        "unconfined",
+			Type:        command.Bool,
+			Description: "Opt OUT of confinement for this worker when [confinement] default-spawn would confine it (FDR 0035). Always prompts the human — no allow-list can approve it silently — until blessing exists (stage 2). Mutually exclusive with confined.",
 		},
 	}
 }

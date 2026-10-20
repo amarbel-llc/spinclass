@@ -85,7 +85,7 @@ type confinedLaunch struct {
 
 // targetConfinement is the [confinement] answer for the worker repo.
 type targetConfinement struct {
-	launch bool
+	policy sweatfileio.ConfinementPolicy
 	egress []string
 }
 
@@ -100,18 +100,19 @@ func driverRepo(home string) string {
 	return home
 }
 
-// driverContextConfines is the [confinement].launch-unit analogue of
-// driverContextEnforces: sticky-on, so OR-ing it with the target's answer can
-// only widen confinement, and an unreadable hierarchy fails closed.
-func driverContextConfines(home string) bool {
+// driverContextConfinement is the [confinement] policy of the DRIVER's own
+// context, the analogue of driverContextEnforces: resolveConfined ORs it with
+// the target's, so a confined driver context makes its children confined, and
+// an unreadable hierarchy fails closed (enabled, confined by default).
+func driverContextConfinement(home string) sweatfileio.ConfinementPolicy {
 	repo := driverRepo(home)
 	h, err := sweatfileio.LoadHierarchy(home, repo)
 	if err != nil {
 		slog.Warn("could not load the driver's sweatfile hierarchy; treating confinement as on", "repo", repo, "err", err)
-		return true
+		return sweatfileio.ConfinementPolicy{Enabled: true, DefaultSpawn: true}
 	}
-	on, _, _ := sweatfileio.TrustedConfinement(h, home, repo)
-	return on
+	policy, _, _ := sweatfileio.TrustedConfinement(h, home, repo)
+	return policy
 }
 
 // confinedPreflight runs before any worktree exists, so a refusal litters

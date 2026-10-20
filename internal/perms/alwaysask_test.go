@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"code.linenisgreat.com/spinclass/internal/testfs"
@@ -98,6 +99,41 @@ func TestAlwaysAskSpawnCarveOutForConfined(t *testing.T) {
 	SpawnConfined = nil
 	if _, ask := AlwaysAsk(spawnSessionTool, map[string]any{"repo": "confined-repo"}, "/driver"); !ask {
 		t.Error("with no seam installed spawn must ask")
+	}
+}
+
+// A spawn that opts out of confinement ALWAYS asks, even when the seam would
+// call it confined, until a session can be blessed to run unconfined children
+// (stage 2, not built). Any doubt about `unconfined` or `confined` asks too:
+// a non-bool is never read as "not set".
+func TestAlwaysAskSpawnUnconfinedRequest(t *testing.T) {
+	prev := SpawnConfined
+	t.Cleanup(func() { SpawnConfined = prev })
+	SpawnConfined = func(map[string]any, string) bool { return true }
+
+	for _, tc := range []struct {
+		name    string
+		in      map[string]any
+		wantAsk bool
+	}{
+		{"unconfined=true asks", map[string]any{"unconfined": true}, true},
+		{"unconfined=true asks even with confined=true", map[string]any{"unconfined": true, "confined": true}, true},
+		{"string unconfined asks", map[string]any{"unconfined": "true"}, true},
+		{"string false unconfined asks", map[string]any{"unconfined": "false"}, true},
+		{"numeric unconfined asks", map[string]any{"unconfined": float64(1)}, true},
+		{"unconfined=false is not an opt-out", map[string]any{"unconfined": false}, false},
+		{"null unconfined is not an opt-out", map[string]any{"unconfined": nil}, false},
+		{"absent unconfined is not an opt-out", map[string]any{"confined": true}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reason, ask := AlwaysAsk(spawnSessionTool, tc.in, "/driver")
+			if ask != tc.wantAsk {
+				t.Fatalf("ask = %v, want %v", ask, tc.wantAsk)
+			}
+			if ask && !strings.Contains(reason, "unconfined") {
+				t.Errorf("the reason must name the opt-out, got %q", reason)
+			}
+		})
 	}
 }
 

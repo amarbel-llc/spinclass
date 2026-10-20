@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"strings"
 	"testing"
 
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
@@ -647,19 +648,46 @@ func TestCheckConfinementWarnsUnlessGlobal(t *testing.T) {
 	on := true
 	sf := sweatfile.Sweatfile{Confinement: &sweatfile.Confinement{LaunchUnit: &on}}
 	if len(CheckConfinement(sf, false, false)) != 1 {
-		t.Error("repo-layer launch-unit should warn")
+		t.Error("repo-layer launch-unit should warn once (ignored)")
 	}
-	if len(CheckConfinement(sf, true, false)) != 1 {
-		t.Error("non-global above-repo launch-unit should warn")
+	// launch-unit is deprecated everywhere it is honoured, plus the sidestep
+	// warning outside the global layer.
+	if len(CheckConfinement(sf, true, false)) != 2 {
+		t.Error("non-global above-repo launch-unit should warn (deprecated + sidestep)")
 	}
-	if len(CheckConfinement(sf, true, true)) != 0 {
-		t.Error("global launch-unit should not warn")
+	if got := CheckConfinement(sf, true, true); len(got) != 1 || got[0].Field != "confinement.launch-unit" ||
+		!strings.Contains(got[0].Message, "deprecated") {
+		t.Errorf("global launch-unit should warn only that it is deprecated, got %+v", got)
+	}
+	enabled := sweatfile.Sweatfile{Confinement: &sweatfile.Confinement{Enabled: &on, DefaultSpawn: &on}}
+	if len(CheckConfinement(enabled, true, true)) != 0 {
+		t.Error("global enabled/default-spawn should not warn")
+	}
+	if len(CheckConfinement(enabled, true, false)) != 2 {
+		t.Error("non-global above-repo enabled/default-spawn should each warn (sidestep)")
+	}
+	if len(CheckConfinement(enabled, false, false)) != 1 {
+		t.Error("repo-layer enabled/default-spawn should warn once (ignored)")
 	}
 	egress := sweatfile.Sweatfile{Confinement: &sweatfile.Confinement{EgressAllow: []string{"a:1"}}}
 	if len(CheckConfinement(egress, true, false)) != 0 {
 		t.Error("above-repo egress-allow should not warn")
 	}
 	if len(CheckConfinement(sweatfile.Sweatfile{}, false, false)) != 0 {
+		t.Error("absent table should not warn")
+	}
+}
+
+func TestCheckPermissionsWarnsInRepoLayer(t *testing.T) {
+	on := true
+	sf := sweatfile.Sweatfile{Permissions: &sweatfile.Permissions{DenySweatfileEdits: &on}}
+	if len(CheckPermissions(sf, false)) != 1 {
+		t.Error("repo-layer deny-sweatfile-edits should warn (ignored)")
+	}
+	if len(CheckPermissions(sf, true)) != 0 {
+		t.Error("above-repo deny-sweatfile-edits should not warn")
+	}
+	if len(CheckPermissions(sweatfile.Sweatfile{}, false)) != 0 {
 		t.Error("absent table should not warn")
 	}
 }

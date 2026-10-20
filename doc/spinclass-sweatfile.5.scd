@@ -810,17 +810,40 @@ that names no profile is never affected.
 ## [confinement]
 
 Launching spawned workers inside a clown agent unit (FDR 0035). Off by
-default. Neither key is merged: both are read only from the global and
+default. No key is merged: all are read only from the global and
 parent-directory layers, and a repo- or worktree-level value is ignored with a
 warning, because an agent can edit those files.
 
+*enabled*
+	Boolean. The feature switch: confinement is available. The last trusted
+	layer that sets it wins (not sticky: a nearer layer can turn it off).
+	Unset, it takes the value of the deprecated *launch-unit*.
+
+*default-spawn*
+	Boolean. With the feature on, whether a spawn is confined unless it says
+	otherwise. The last trusted layer that sets it wins. Unset means *true*, so
+	turning *enabled* on confines every spawn; set *false* to make confinement
+	opt-in per spawn. The default is the spawner's context OR the target repo's:
+	either one saying *true* confines the child.
+
+A spawn is confined if and only if the feature is on (in the target repo's or
+the spawner's context) and either *default-spawn* applies or the spawn passes
+the *confined* parameter of *spawn-session* (*sc spawn --confined*). *confined*
+is always honoured when the feature is on and is an error when it is off.
+*unconfined* (*sc spawn --unconfined*) opts out of the default; passing both is
+an error. A confined spawn needs no permission prompt; a spawn passing
+*unconfined* always prompts, until blessing exists (stage 2, not built). The
+spawn is refused when clown does not report every capability confinement
+needs, and from inside an agent unit (use the *spawn-session* tool, which runs
+in the frontend).
+
 *launch-unit*
-	Boolean. When true, *sc spawn* and the *spawn-session* tool start the
-	worker in an agent unit. Sticky-on: a true in any trusted layer wins, and a
-	false never clears it. The spawn is also confined when the spawner's own
-	context says so. The spawn is refused when clown does not report every
-	capability confinement needs, and from inside an agent unit (use the
-	*spawn-session* tool, which runs in the frontend).
+	Boolean. DEPRECATED alias for *enabled = true* and *default-spawn = true*;
+	*sc validate* warns on it. Sticky-on across trusted layers (a true in any
+	wins). It supplies each new key's value only when no trusted layer sets
+	that key itself, so *launch-unit = true* with *default-spawn = false* means
+	enabled and opt-in, and *launch-unit = true* with *enabled = false* means
+	off.
 
 *egress-allow*
 	Array of _host:port_ strings the unit may reach. The last trusted layer
@@ -828,6 +851,18 @@ warning, because an agent can edit those files.
 	When no layer sets it spinclass sends no list at all, so clown's own default
 	applies (spinclass keeps no copy of it). Setting the key replaces clown's
 	default, so list every host the worker needs, the defaults included.
+
+## [permissions]
+
+Operator-only switches over a session's own tool calls. Not merged: read only
+from the global and parent-directory layers, last one wins, and a repo- or
+worktree-level value is ignored with a warning (*sc validate* warns).
+
+*deny-sweatfile-edits*
+	Boolean. When true, the PreToolUse hook denies a Write or Edit of a
+	sweatfile outright instead of asking. Off by default (the hook asks). A
+	stopgap: the intent is for all session IO to be served by a spinclass plugin
+	that enforces permissions at its own boundary, which replaces this key.
 
 ## [metrics]
 

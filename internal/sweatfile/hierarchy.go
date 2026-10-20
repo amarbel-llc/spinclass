@@ -200,6 +200,9 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 	// [confinement] is likewise never merged. See sweatfileio.TrustedConfinement.
 	merged.Confinement = nil
 
+	// [permissions] likewise. See sweatfileio.TrustedDenySweatfileEdits.
+	merged.Permissions = nil
+
 	// [metrics] — scalar override (spinclass#363); copied before the override
 	// so the receiver's table is never mutated through the shared pointer.
 	if other.Metrics != nil {

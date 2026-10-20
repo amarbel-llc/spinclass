@@ -101,7 +101,7 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
 
 ## Subsystems (one line each — read the cited record before changing)
 
-- **Spawned workers** (FDR 0006, #262; confinement FDR 0035; confined spawn: #382): `sc spawn` /
+- **Spawned workers** (FDR 0006, #262; confinement FDR 0035; confined spawn: #382, switches in FDR 0035): `sc spawn` /
   `spawn-session` launch a detached worker; async under clown (#266). Reap
   authority is a **handle** (FDR 0032): `close-child-session` gates on it,
   `force` is always-ask (`perms.AlwaysAsk`); grant/release are always-ask.
