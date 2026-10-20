@@ -591,6 +591,15 @@ func TestMissingServeSocketFailsF12(t *testing.T) {
 	}
 }
 
+// A record clown rewrote after a failed launch has no unit; the error it
+// carries must reach the operator instead of "names no unit".
+func TestParseUnitRecordSurfacesClownsError(t *testing.T) {
+	_, err := ParseUnitRecord([]byte(`{"version":1,"error":"private network setup failed: no slirp4netns"}`))
+	if err == nil || !strings.Contains(err.Error(), "no slirp4netns") || strings.Contains(err.Error(), "names no unit") {
+		t.Fatalf("got %v, want clown's own error text", err)
+	}
+}
+
 func TestParseUnitRecordRejects(t *testing.T) {
 	for name, body := range map[string]string{
 		"root cgroup":    `{"version":1,"unit":"u","cgroup":"/"}`,

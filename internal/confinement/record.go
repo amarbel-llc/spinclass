@@ -44,6 +44,9 @@ type UnitRecord struct {
 	// written by that (frontend) clown. claude's own environment never carries
 	// it (clown#136), so this record is where a unit's principal is read.
 	Principal string `json:"principal"`
+	// Error is set by clown when the launch failed after it began writing the
+	// record: the other fields may then be empty, and this says why.
+	Error string `json:"error"`
 }
 
 // UnitRecordPath is where clown writes a session's unit record: in
@@ -75,6 +78,8 @@ func ParseUnitRecord(b []byte) (UnitRecord, error) {
 		return UnitRecord{}, fmt.Errorf("agent unit record does not parse: %w", err)
 	}
 	switch {
+	case r.Error != "":
+		return UnitRecord{}, fmt.Errorf("clown reported the agent unit launch failed: %s", r.Error)
 	case r.Version != UnitRecordVersion:
 		return UnitRecord{}, fmt.Errorf("agent unit record version %d, want %d", r.Version, UnitRecordVersion)
 	case r.Unit == "":
