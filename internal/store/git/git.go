@@ -1,5 +1,7 @@
-// Package git is the git backend of the grit store tools (FDR 0036). This
-// step implements only the read verbs; write verbs return store.ErrUnsupported.
+// Package git is the git backend of the grit store tools (FDR 0036). It
+// implements the read verbs and the owned-branch write verbs (stage, commit,
+// branch); stash, remote, merge, tag mutation, clone and worktree remove
+// return store.ErrUnsupported.
 package git
 
 import (
@@ -23,17 +25,23 @@ var _ store.Backend = Backend{}
 
 func (Backend) Name() string { return "git" }
 
+var branchVerbs = []string{
+	"log", "rev-parse", "diff", "create", "delete", "reset-soft", "reset-hard",
+	"checkout", "rebase", "restack", "cherry-pick", "revert",
+}
+
 func (Backend) Capabilities() store.Capabilities {
 	return store.Capabilities{
-		"stage":    {"status", "diff"},
-		"branch":   {"log", "rev-parse", "diff"},
+		"stage":    {"status", "diff", "add", "unstage", "rm", "mv"},
+		"commit":   {""},
+		"branch":   branchVerbs,
 		"tag":      {"list", "verify"},
 		"worktree": {"list"},
 	}
 }
 
-// args is the union of the read verbs' parameters, named as moxy's grit tools
-// name them.
+// args is the union of the implemented verbs' parameters, named as moxy's grit
+// tools name them.
 type args struct {
 	Paths        []string `json:"paths"`
 	Staged       bool     `json:"staged"`
@@ -49,6 +57,33 @@ type args struct {
 	Sort         string   `json:"sort"`
 	Name         string   `json:"name"`
 	RepoPath     string   `json:"repo_path"`
+
+	Message      string   `json:"message"`
+	Amend        bool     `json:"amend"`
+	AllowEmpty   bool     `json:"allow_empty"`
+	Fixup        string   `json:"fixup"`
+	Squash       string   `json:"squash"`
+	StartPoint   string   `json:"start_point"`
+	Force        bool     `json:"force"`
+	NewBranch    bool     `json:"new_branch"`
+	Ours         bool     `json:"ours"`
+	Theirs       bool     `json:"theirs"`
+	Commits      []string `json:"commits"`
+	NoCommit     bool     `json:"no_commit"`
+	Upstream     string   `json:"upstream"`
+	Onto         string   `json:"onto"`
+	RebaseBranch string   `json:"rebase_branch"`
+	Autosquash   bool     `json:"autosquash"`
+	Autostash    bool     `json:"autostash"`
+	UpdateRefs   bool     `json:"update_refs"`
+	Continue     bool     `json:"continue"`
+	Abort        bool     `json:"abort"`
+	Skip         bool     `json:"skip"`
+	Root         string   `json:"root"`
+	Source       string   `json:"source"`
+	Destination  string   `json:"destination"`
+	Recursive    bool     `json:"recursive"`
+	IntentToAdd  bool     `json:"intent_to_add"`
 }
 
 func (b Backend) Do(ctx context.Context, s store.Session, op store.Op) (store.Result, error) {
@@ -73,14 +108,12 @@ func (b Backend) Do(ctx context.Context, s store.Session, op store.Op) (store.Re
 	if err != nil {
 		return store.Result{}, err
 	}
-	out, err := git.RunEnvContext(ctx, dir, nil, argv...)
-	if err != nil {
-		// RunEnvContext carries git's own output separately from the wrapped
-		// exit error; surface both.
-		if out != "" {
-			return store.Result{}, fmt.Errorf("%w\n%s", err, out)
-		}
+	if err := refuseDefaultBranchOp(dir, op, a); err != nil {
 		return store.Result{}, err
+	}
+	out, err := git.RunEnvContext(ctx, dir, writeEnv(op), argv...)
+	if err != nil {
+		return store.Result{}, describeFailure(dir, op, err, out)
 	}
 	if op.Tool == "tag" && op.Subcommand == "list" && a.MaxCount > 0 {
 		out = firstLines(out, a.MaxCount)
@@ -89,7 +122,7 @@ func (b Backend) Do(ctx context.Context, s store.Session, op store.Op) (store.Re
 }
 
 func buildArgv(op store.Op, a args) ([]string, error) {
-	for _, v := range []string{a.Ref, a.Name, a.Contains} {
+	for _, v := range a.refLikeValues() {
 		if strings.HasPrefix(v, "-") {
 			return nil, fmt.Errorf("refusing option-like value %q", v)
 		}
@@ -159,7 +192,7 @@ func buildArgv(op store.Op, a args) ([]string, error) {
 	case "worktree list":
 		return []string{"worktree", "list", "--porcelain"}, nil
 	}
-	return nil, store.Unsupported(op)
+	return buildWriteArgv(op, a)
 }
 
 func diffFlags(argv []string, a args) []string {

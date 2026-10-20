@@ -24,6 +24,8 @@ type gritTool struct {
 	name  string
 	short string
 	extra []command.Param
+	// noSubcommand marks a tool whose single verb has no `subcommand` argument.
+	noSubcommand bool
 }
 
 func gritParam(name string, typ command.ParamType, desc string) command.Param {
@@ -35,28 +37,63 @@ var (
 	gritPaths    = gritParam("paths", command.Array, "File paths to limit the operation to.")
 	gritCtx      = gritParam("context_lines", command.Int, "Context lines around each change, git --unified=N.")
 	gritStat     = gritParam("stat_only", command.Bool, "Show only a diffstat summary.")
+	gritForce    = gritParam("force", command.Bool, "Force the operation (stage rm: git rm --force; branch delete: git branch -D). Always asks for confirmation.")
 )
 
 func gritTools() []gritTool {
 	return []gritTool{
 		{
 			name:  "stage",
-			short: "Inspect the git index / working tree. Supported subcommands in spinclass so far: status, diff (the write subcommands add, unstage, rm, mv are not yet supported).",
+			short: "Inspect and mutate the git index / working tree. Subcommands: status, diff, add, unstage, rm, mv.",
 			extra: []command.Param{
-				gritPaths, gritCtx, gritStat, gritRepoPath,
+				gritPaths, gritCtx, gritStat, gritRepoPath, gritForce,
 				gritParam("staged", command.Bool, "Diff only staged changes, git diff --cached (diff only)."),
 				gritParam("untracked", command.String, "Untracked file mode (status only): no, normal (default) or all."),
 				gritParam("ignored", command.Bool, "Also show ignored files (status only)."),
+				gritParam("intent_to_add", command.Bool, "Record only the intent to add paths, git add -N (add only)."),
+				gritParam("recursive", command.Bool, "Allow recursive removal of directories (rm only)."),
+				gritParam("source", command.String, "Source path (mv only)."),
+				gritParam("destination", command.String, "Destination path (mv only)."),
+			},
+		},
+		{
+			name:         "commit",
+			short:        "Create a new commit from the staged changes, using the identity git itself resolves. fixup and squash are mutually exclusive and make message ignored.",
+			noSubcommand: true,
+			extra: []command.Param{
+				gritRepoPath,
+				gritParam("message", command.String, "Commit message. Required unless amend (reuses the old message when omitted), fixup or squash is set."),
+				gritParam("amend", command.Bool, "Amend the previous commit instead of creating a new one."),
+				gritParam("allow_empty", command.Bool, "Allow a commit that records no changes, --allow-empty."),
+				gritParam("fixup", command.String, "Create a fixup! commit targeting this commit, --fixup=<commit>."),
+				gritParam("squash", command.String, "Create a squash! commit targeting this commit, --squash=<commit>."),
 			},
 		},
 		{
 			name:  "branch",
-			short: "Inspect branches and history. Supported subcommands in spinclass so far: log, rev-parse, diff (create, delete, reset-*, checkout, rebase, restack, cherry-pick, revert are not yet supported).",
+			short: "Inspect and mutate branches and history. Subcommands: log, rev-parse, diff, create, delete, reset-soft, reset-hard, checkout, rebase, restack, cherry-pick, revert. Destructive operations on the default branch are refused.",
 			extra: []command.Param{
-				gritPaths, gritCtx, gritStat, gritRepoPath,
-				gritParam("ref", command.String, "Target ref. log: start ref (default HEAD). rev-parse: the ref to resolve (required). diff: the ref to diff against."),
+				gritPaths, gritCtx, gritStat, gritRepoPath, gritForce,
+				gritParam("ref", command.String, "Target ref. log: start ref (default HEAD). rev-parse: the ref to resolve (required). diff: the ref to diff against. reset-soft: where to move HEAD (default HEAD~1). reset-hard: where to move HEAD (required). checkout: branch/ref to switch to, the new branch's name with new_branch, or the ref to restore paths from."),
 				gritParam("max_count", command.Int, "Maximum number of commits to show, git -n (log only)."),
 				gritParam("oneline", command.Bool, "Compact one-line log format (log only)."),
+				gritParam("name", command.String, "Branch name (create, delete)."),
+				gritParam("start_point", command.String, "Starting point for the new branch: commit, branch or tag (create, checkout with new_branch; default HEAD)."),
+				gritParam("new_branch", command.Bool, "Create the branch named by ref and check it out, git checkout -b (checkout only)."),
+				gritParam("ours", command.Bool, "During a merge conflict restore our version of paths (checkout with paths only)."),
+				gritParam("theirs", command.Bool, "During a merge conflict restore their version of paths (checkout with paths only)."),
+				gritParam("commits", command.Array, "Commit hashes to apply, in order (cherry-pick and revert, required)."),
+				gritParam("no_commit", command.Bool, "Apply changes without creating commits (cherry-pick and revert only)."),
+				gritParam("upstream", command.String, "Ref to rebase onto (rebase only, required unless continuing, aborting or skipping)."),
+				gritParam("onto", command.String, "New base to graft onto, git rebase --onto. rebase: optional. restack: required."),
+				gritParam("rebase_branch", command.String, "Branch to rebase (rebase only; defaults to the current branch)."),
+				gritParam("autosquash", command.Bool, "Squash fixup!/squash! commits into their targets, non-interactively (rebase only)."),
+				gritParam("autostash", command.Bool, "Stash and unstash uncommitted changes around the rebase (rebase only)."),
+				gritParam("update_refs", command.Bool, "Reposition intermediate branch refs touched by the rebase (rebase only)."),
+				gritParam("continue", command.Bool, "Continue an in-progress rebase after resolving conflicts (rebase only)."),
+				gritParam("abort", command.Bool, "Abort an in-progress rebase (rebase only)."),
+				gritParam("skip", command.Bool, "Skip the current commit and continue the rebase (rebase only)."),
+				gritParam("root", command.String, "Inclusive lower bound of the stack to restack, typically the bottom branch (restack only, required)."),
 			},
 		},
 		{
@@ -80,16 +117,19 @@ func gritTools() []gritTool {
 }
 
 // registerGritCommands registers the grit_<tool> store tools (FDR 0036, step
-// 1: read subcommands only; clone/commit/merge/remote/stash are later steps).
+// 3: reads plus owned-branch writes; clone/merge/remote/stash are later steps).
 func registerGritCommands(app *command.App) {
 	for _, t := range gritTools() {
 		name := "grit_" + t.name
-		params := append([]command.Param{{
-			Name:        "subcommand",
-			Type:        command.String,
-			Required:    true,
-			Description: "The " + t.name + " operation to run.",
-		}}, t.extra...)
+		params := t.extra
+		if !t.noSubcommand {
+			params = append([]command.Param{{
+				Name:        "subcommand",
+				Type:        command.String,
+				Required:    true,
+				Description: "The " + t.name + " operation to run.",
+			}}, t.extra...)
+		}
 		app.AddCommand(&command.Command{
 			Name:        name,
 			Title:       "Grit " + t.name,
@@ -123,7 +163,7 @@ func runGrit(ctx context.Context, tool string, args json.RawMessage) (string, er
 	if err := json.Unmarshal(args, &head); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
-	if head.Subcommand == "" {
+	if head.Subcommand == "" && tool != "commit" {
 		return "", errors.New("subcommand is required")
 	}
 	cwd, err := os.Getwd()

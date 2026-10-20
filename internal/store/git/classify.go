@@ -156,6 +156,7 @@ func (a classifyArgs) flag(key string) bool {
 var optionScannedScalars = []string{
 	"ref", "name", "contains", "branch", "remote_branch", "root", "onto", "upstream",
 	"rebase_branch", "start_point", "pattern", "remote", "destination", "source", "stash_ref",
+	"fixup", "squash",
 }
 
 // optionFree is false when any ref-like value could be read by git as an

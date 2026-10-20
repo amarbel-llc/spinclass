@@ -173,7 +173,7 @@ func TestRepoPathOverridesSession(t *testing.T) {
 
 func TestWriteVerbsUnsupported(t *testing.T) {
 	repo := newRepo(t)
-	for _, c := range [][2]string{{"stage", "add"}, {"branch", "delete"}, {"tag", "create"}, {"worktree", "remove"}, {"stash", "save"}, {"bogus", "x"}} {
+	for _, c := range [][2]string{{"tag", "create"}, {"tag", "push"}, {"worktree", "remove"}, {"stash", "save"}, {"remote", "push"}, {"merge", ""}, {"clone", ""}, {"bogus", "x"}} {
 		_, err := do(t, repo, c[0], c[1], nil)
 		if !errors.Is(err, store.ErrUnsupported) {
 			t.Errorf("%v: want ErrUnsupported, got %v", c, err)
@@ -210,12 +210,13 @@ func TestClassify(t *testing.T) {
 	}
 }
 
-// Every capability the backend declares must be a read-class verb at this step.
-func TestCapabilitiesAreReadClass(t *testing.T) {
+// Every declared capability needs a class decision: an unclassified verb would
+// silently be floor (always ask).
+func TestCapabilitiesAreClassified(t *testing.T) {
 	for tool, subs := range New().Capabilities() {
 		for _, sub := range subs {
-			if store.ClassOf(tool, sub) != store.ClassRead {
-				t.Errorf("%s %s declared but not read class", tool, sub)
+			if store.ClassOf(tool, sub) == store.ClassFloor {
+				t.Errorf("%s %s declared but has no class", tool, sub)
 			}
 		}
 	}
