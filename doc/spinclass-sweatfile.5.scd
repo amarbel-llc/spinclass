@@ -926,7 +926,10 @@ the frontend *spinclass serve*, so for a confined worker nothing is configured
 inside the unit and the worker needs no git identity. With no key set, git's own
 identity resolution (the operator's configured identity) is used unchanged.
 Applies to the commit-creating verbs: *grit\_commit*, and *grit\_branch*
-cherry-pick, revert, rebase and restack. *Merge:* scalar override for every key.
+cherry-pick, revert, rebase and restack. *Merge:* scalar override for every key,
+read only from sweatfile layers above the repo (the global sweatfile and parent
+directories). A repo-level or worktree-level value is ignored, because an agent
+can edit those; *sc validate* warns about it.
 
 *author-name*, *author-email*
 	Stamped as the author (*GIT\_AUTHOR\_NAME*, *GIT\_AUTHOR\_EMAIL*). Git keeps

@@ -1255,24 +1255,34 @@ func mergedSweatfileForCwd() (sweatfile.Sweatfile, bool) {
 
 // mergedSweatfileForDir is mergedSweatfileForCwd for an explicit directory.
 func mergedSweatfileForDir(cwd string) (sweatfile.Sweatfile, bool) {
+	h, _, _, ok := sweatfileHierarchyForDir(cwd)
+	if !ok {
+		return sweatfile.Sweatfile{}, false
+	}
+	return h.Merged, true
+}
+
+// sweatfileHierarchyForDir loads the full hierarchy applicable to dir, with the
+// home and repo root the trusted-layer readers need.
+func sweatfileHierarchyForDir(cwd string) (h sweatfile.Hierarchy, home, repoRoot string, ok bool) {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return sweatfile.Sweatfile{}, false
+		return sweatfile.Hierarchy{}, "", "", false
 	}
 	repoPath, err := git.CommonDir(cwd)
 	if err != nil {
 		// Not a worktree (or not a git repo): load the simple hierarchy.
 		h, hErr := sweatfileio.LoadHierarchy(home, cwd)
 		if hErr != nil {
-			return sweatfile.Sweatfile{}, false
+			return sweatfile.Hierarchy{}, "", "", false
 		}
-		return h.Merged, true
+		return h, home, cwd, true
 	}
-	h, err := sweatfileio.LoadWorktreeHierarchy(home, repoPath, cwd)
+	h, err = sweatfileio.LoadWorktreeHierarchy(home, repoPath, cwd)
 	if err != nil {
-		return sweatfile.Sweatfile{}, false
+		return sweatfile.Hierarchy{}, "", "", false
 	}
-	return h.Merged, true
+	return h, home, repoPath, true
 }
 
 // mergeDisabledForCwd reports whether [hooks].disable-merge is set in the

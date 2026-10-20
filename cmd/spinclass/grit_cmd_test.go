@@ -55,6 +55,32 @@ func TestResolveGritCallerWithoutAServeRecordIsConfined(t *testing.T) {
 	}
 }
 
+func TestStoreIdentityForHonoursOnlyLayersAboveTheRepo(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := filepath.Join(home, "work", "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(repo, "sweatfile"), "[store]\nauthor-name = \"Repo\"\nauthor-email = \"repo@x\"\n")
+	if got := storeIdentityFor(repo); got != (store.Identity{}) {
+		t.Errorf("a repo-layer identity must be ignored, got %+v", got)
+	}
+	write(filepath.Join(home, ".config", "spinclass", "sweatfile"), "[store]\nauthor-name = \"Global\"\nauthor-email = \"global@x\"\n")
+	if got := storeIdentityFor(repo); got.AuthorName != "Global" || got.CommitterEmail != "global@x" {
+		t.Errorf("the global identity must apply, got %+v", got)
+	}
+}
+
 func TestGritStashToolRoundtrip(t *testing.T) {
 	stubGritCallerUnconfined(t)
 	repo := t.TempDir()

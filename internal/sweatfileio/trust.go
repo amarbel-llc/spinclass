@@ -163,6 +163,43 @@ func TrustedDenySweatfileEdits(h sweatfile.Hierarchy, home, repoRoot string) (de
 	return deny, untrusted
 }
 
+// TrustedStoreIdentity returns the [store] identity honoured for the repo: each
+// key is a scalar override across layers above the repo, the last layer that
+// sets it wins, and the committer keys default to the author keys afterwards.
+// Layers that may not set it (repo, its realpath twin, worktree) are never
+// honoured; the paths of those that set any key are returned in untrusted.
+// Hierarchy.Merged never carries the table.
+func TrustedStoreIdentity(h sweatfile.Hierarchy, home, repoRoot string) (authorName, authorEmail, committerName, committerEmail string, untrusted []string) {
+	trusted := &sweatfile.Store{}
+	for _, src := range h.Sources {
+		if src.SkipReason != "" || !src.Found || src.File.Store == nil {
+			continue
+		}
+		s := src.File.Store
+		if s.AuthorName == nil && s.AuthorEmail == nil && s.CommitterName == nil && s.CommitterEmail == nil {
+			continue
+		}
+		if !LayerAboveRepo(src.Path, home, repoRoot) {
+			untrusted = append(untrusted, src.Path)
+			continue
+		}
+		if s.AuthorName != nil {
+			trusted.AuthorName = s.AuthorName
+		}
+		if s.AuthorEmail != nil {
+			trusted.AuthorEmail = s.AuthorEmail
+		}
+		if s.CommitterName != nil {
+			trusted.CommitterName = s.CommitterName
+		}
+		if s.CommitterEmail != nil {
+			trusted.CommitterEmail = s.CommitterEmail
+		}
+	}
+	authorName, authorEmail, committerName, committerEmail = sweatfile.Sweatfile{Store: trusted}.StoreIdentity()
+	return authorName, authorEmail, committerName, committerEmail, untrusted
+}
+
 // TrustedURLResolver returns the [auth].url-resolver command honoured for the
 // repo: scalar override across layers above the repo, last one wins, an
 // explicit "" clearing it. The value is TrimSpaced, so whitespace-only also

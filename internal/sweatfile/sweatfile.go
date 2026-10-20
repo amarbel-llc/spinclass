@@ -186,7 +186,10 @@ type Metrics struct {
 // Store configures the grit store tools (FDR 0036). The author and committer
 // identity is stamped by the frontend onto every commit those tools create, so a
 // confined worker needs no git identity of its own. Scalar override down the
-// cascade; unset leaves git's own identity resolution untouched.
+// cascade; unset leaves git's own identity resolution untouched. An agent can
+// edit the repo and worktree sweatfiles, so like Auth.URLResolver it is trusted
+// only from layers above the repo, read ONLY through
+// sweatfileio.TrustedStoreIdentity, and never merged.
 type Store struct {
 	AuthorName  *string `toml:"author-name"`
 	AuthorEmail *string `toml:"author-email"`

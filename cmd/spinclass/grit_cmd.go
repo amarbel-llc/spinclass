@@ -14,6 +14,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/store"
 	gitstore "code.linenisgreat.com/spinclass/internal/store/git"
+	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 )
 
 // gritBackend is the store backend behind the grit_* tools (FDR 0036). The
@@ -206,14 +207,15 @@ func resolveGritCaller(cwd string) store.Session {
 	return s
 }
 
-// storeIdentityFor reads the [store] identity from the sweatfile hierarchy
-// applicable to dir; unreadable configuration leaves git's own resolution.
+// storeIdentityFor reads the [store] identity from the sweatfile layers above
+// the repo applicable to dir; unreadable configuration leaves git's own
+// resolution.
 func storeIdentityFor(dir string) store.Identity {
-	merged, ok := mergedSweatfileForDir(dir)
+	h, home, repoRoot, ok := sweatfileHierarchyForDir(dir)
 	if !ok {
 		return store.Identity{}
 	}
-	authorName, authorEmail, committerName, committerEmail := merged.StoreIdentity()
+	authorName, authorEmail, committerName, committerEmail, _ := sweatfileio.TrustedStoreIdentity(h, home, repoRoot)
 	return store.Identity{AuthorName: authorName, AuthorEmail: authorEmail, CommitterName: committerName, CommitterEmail: committerEmail}
 }
 

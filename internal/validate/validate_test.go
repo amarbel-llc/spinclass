@@ -692,6 +692,23 @@ func TestCheckPermissionsWarnsInRepoLayer(t *testing.T) {
 	}
 }
 
+func TestCheckStoreWarnsInRepoLayer(t *testing.T) {
+	name := "A"
+	sf := sweatfile.Sweatfile{Store: &sweatfile.Store{AuthorName: &name}}
+	if len(CheckStore(sf, false)) != 1 {
+		t.Error("repo-layer [store] identity should warn (ignored)")
+	}
+	if len(CheckStore(sf, true)) != 0 {
+		t.Error("above-repo [store] identity should not warn")
+	}
+	if len(CheckStore(sweatfile.Sweatfile{Store: &sweatfile.Store{}}, false)) != 0 {
+		t.Error("an empty table should not warn")
+	}
+	if len(CheckStore(sweatfile.Sweatfile{}, false)) != 0 {
+		t.Error("absent table should not warn")
+	}
+}
+
 func TestCheckMetricsWarnsOnMalformedStatsdAddress(t *testing.T) {
 	check := func(addr string) []Issue {
 		return CheckMetrics(sweatfile.Sweatfile{Metrics: &sweatfile.Metrics{StatsdAddress: &addr}})

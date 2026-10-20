@@ -28,16 +28,13 @@ func TestStoreIdentityDefaultsCommitterToAuthor(t *testing.T) {
 	}
 }
 
-func TestMergeWithStoreScalarOverride(t *testing.T) {
-	base := Sweatfile{Store: &Store{AuthorName: strPtr("Root"), AuthorEmail: strPtr("root@x")}}
-
-	merged := base.MergeWith(Sweatfile{Store: &Store{AuthorName: strPtr("Repo")}})
-	an, ae, _, _ := merged.StoreIdentity()
-	if an != "Repo" || ae != "root@x" {
-		t.Errorf("per-key override: got (%q,%q), want (Repo, root@x)", an, ae)
+func TestMergeWithNeverCarriesStore(t *testing.T) {
+	base := Sweatfile{Store: &Store{AuthorName: strPtr("Root")}}
+	if merged := base.MergeWith(Sweatfile{Store: &Store{AuthorName: strPtr("Repo")}}); merged.Store != nil {
+		t.Errorf("[store] leaked through MergeWith: %+v", merged.Store)
 	}
-	if an, _, _, _ := base.MergeWith(Sweatfile{}).StoreIdentity(); an != "Root" {
-		t.Errorf("[store] not inherited: %q", an)
+	if merged := (Sweatfile{}).MergeWith(base); merged.Store != nil {
+		t.Errorf("[store] leaked through MergeWith: %+v", merged.Store)
 	}
 	if *base.Store.AuthorName != "Root" {
 		t.Errorf("receiver mutated by merge: %q", *base.Store.AuthorName)

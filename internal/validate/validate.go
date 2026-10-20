@@ -619,6 +619,20 @@ func CheckPermissions(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 	}}
 }
 
+// CheckStore validates the [store] table: the identity it stamps on commits is
+// honoured only from layers above the repo, so a repo-level value is ignored.
+func CheckStore(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
+	s := sf.Store
+	if s == nil || layerAboveRepo || (s.AuthorName == nil && s.AuthorEmail == nil && s.CommitterName == nil && s.CommitterEmail == nil) {
+		return nil
+	}
+	return []Issue{{
+		Message:  "[store] sets a commit identity in a repo-level sweatfile: it is ignored — it names who commits are attributed to, so only sweatfiles above the repo (global, parent directories) may set it; move it up",
+		Severity: SeverityWarning,
+		Field:    "store",
+	}}
+}
+
 func isShellInterpreter(cmd string) bool {
 	base := filepath.Base(cmd)
 	switch base {
@@ -900,6 +914,16 @@ func Run(w io.Writer, home, repoDir string) int {
 				}
 			} else {
 				sub.Ok("permissions valid")
+			}
+		}
+
+		if src.File.Store != nil {
+			if issues := CheckStore(src.File, sweatfileio.LayerAboveRepo(src.Path, home, mainRoot)); len(issues) > 0 {
+				for _, iss := range issues {
+					sub.Ok(fmt.Sprintf("store valid # warning: %s", iss.Message))
+				}
+			} else {
+				sub.Ok("store valid")
 			}
 		}
 
