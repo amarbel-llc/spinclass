@@ -129,7 +129,18 @@ _Confined_
 	*core.hooksPath* set to */dev/null*, and *commit* also gets *\--no-verify*,
 	because the hooks directory is worker-writable and its hooks must not run
 	in the frontend; the merge gate remains the check. Pushing or deleting the
-	default branch is refused whatever *force* says.
+	default branch is refused whatever *force* says. The session worktree is
+	writable from the unit, so every git run in it names the repository
+	explicitly from session state (*GIT_DIR*, *GIT_COMMON_DIR*,
+	*GIT_WORK_TREE*), drops the system config, overrides the config keys that
+	run a command (*core.fsmonitor*, *core.sshCommand*, *core.pager*,
+	*core.editor*, *diff.external*, *protocol.ext.allow*,
+	*core.attributesFile*) and resets *credential.helper* to the one spinclass
+	injected. Per-name drivers (filter, textconv, merge drivers, aliases and
+	URL-specific credential helpers) cannot be unset by an override; the unit cannot write the
+	config that would define them (FDR 0035). Raw *git commit*, *checkout -b*
+	and *update-ref* fail inside a confined unit by design (its refs are
+	read-only): use these tools.
 
 _Unconfined_
 	A caller whose worktree is a recognised session worktree and whom no
@@ -304,6 +315,12 @@ It calls the same backend as the MCP tools, so remote verbs stay agentless.
   remove the record.
 - An unconfined session whose hook sees no principal at all (neither *CLOWN\_SESSION\_ID* nor a hook *session\_id*) gets no human
   prompt on foreign operations; the body refuses writes it does not own instead.
+- An unconfined worker can still run raw *git push* with its session
+  credential; only the confined unit lost that (read-only refs, inaccessible
+  credential). *nix flake* evaluation of git inputs and direnv hooks in a
+  confined unit are unverified against read-only refs, and so are systemd's
+  handling of nested read-only file binds and *InaccessiblePaths=* inside a
+  read-write bind (FDR 0035, "The git view").
 - Not exercised against a real confined unit, a live clown, an https push with a
   minted credential, the *allow-no-credential* ssh path, signing with a real
   key, or a real terminal run of *sc grit*.

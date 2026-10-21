@@ -387,6 +387,21 @@ func TestEachFactCatchesItsBreach(t *testing.T) {
 		{"F9", "/repo/.git/config is writable", func(s *fakeSys, _ *Inputs) {
 			s.writable = map[string]bool{root + "/repo/.git/config": true}
 		}},
+		{"F9", "/repo/.git/refs is writable", func(s *fakeSys, _ *Inputs) {
+			s.dirs[root+"/repo/.git/refs"] = []string{}
+			s.writable = map[string]bool{root + "/repo/.git/refs": true}
+		}},
+		{"F9", "/repo/.git/logs is writable", func(s *fakeSys, _ *Inputs) {
+			s.dirs[root+"/repo/.git/logs"] = []string{}
+			s.writable = map[string]bool{root + "/repo/.git/logs": true}
+		}},
+		{"F9", "session credential /wt/a/.spinclass/git-credentials is readable", func(s *fakeSys, _ *Inputs) {
+			s.files[root+"/wt/a/.spinclass/git-credentials"] = "https://x:tok@host\n"
+		}},
+		{"F9", "cannot establish that the session credential", func(s *fakeSys, _ *Inputs) {
+			s.files[root+"/wt/a/.spinclass/git-credentials"] = ""
+			s.readErrOn = map[string]error{root + "/wt/a/.spinclass/git-credentials": syscall.EIO}
+		}},
 		{"F9", "config.worktree is writable", func(s *fakeSys, _ *Inputs) {
 			s.writable = map[string]bool{root + "/repo/.git/worktrees/a/config.worktree": true}
 		}},
@@ -464,6 +479,17 @@ func TestSymlinksResolveInsideTheUnit(t *testing.T) {
 	sys.writable = map[string]bool{"/home/op/hooks": true} // the frontend's view
 	if f := factByID(t, Run(sys, in), "F9"); !f.OK {
 		t.Errorf("F9 judged the frontend's path, not the unit's: %s", f.Detail)
+	}
+}
+
+// A credential file the unit lists as inaccessible exists on the host but its
+// open is refused: that is the passing case, not a failure to establish.
+func TestF9AcceptsAnInaccessibleCredential(t *testing.T) {
+	sys, in := confinedHost()
+	sys.files[root+"/wt/a/.spinclass/git-credentials"] = "https://x:tok@host\n"
+	sys.readErrOn = map[string]error{root + "/wt/a/.spinclass/git-credentials": syscall.EACCES}
+	if f := factByID(t, Run(sys, in), "F9"); !f.OK {
+		t.Errorf("F9 = %+v, want pass for an EACCES credential", f)
 	}
 }
 

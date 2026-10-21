@@ -839,6 +839,86 @@ asking and the serve decides.
   the principal is unmapped.
 - Not exercised against a real confined unit or a live clown.
 
+#### Frontend git hardening for confined callers (section 9.5, round I)
+
+The frontend runs the tool bodies with the **session worktree as the git cwd**,
+and that worktree is writable from the unit. Git discovers the repository from
+it (the `.git` pointer file, then the gitdir's `commondir` and
+`config.worktree`) and would run whatever those name: `core.fsmonitor`,
+`core.sshCommand`, `credential.helper=!cmd`, `diff.external`, filter and
+textconv drivers, pager, editor. That is a confinement escape: worker-authored
+code running outside the unit. FDR 0035's unit spec now binds `config.worktree`
+and the `.git` pointer read-only (the first half); this is the second half, so
+the frontend does not depend on those files being intact.
+
+For a confined (or unresolved) caller, every git run in the session worktree, the
+verb itself and the helper reads around it (`rev-parse`, `remote`,
+`symbolic-ref`, `for-each-ref`, `rev-list`, shelf plumbing), runs under
+`confinedHardening` (`internal/store/git/hardening.go`), registered for the
+call through `git.Confine` (`internal/git/harden.go`); an unconfined caller is
+not registered and its git invocation is byte-for-byte what it was.
+
+- **Explicit repository, from trusted state.** `GIT_DIR`, `GIT_COMMON_DIR` and
+  `GIT_WORK_TREE` are set from the recorded session (`store.Session.Repo`,
+  computed by `trustedRepoFor` from the session's `RepoPath` and the worktree's
+  name; never read from the `.git` file). Git then reads neither the pointer
+  file nor `commondir`. If the layout does not check out on disk (or the caller
+  has no session) `Repo` stays empty and git discovers as before, with the
+  neutralisers below still applied.
+- **Config.** `GIT_CONFIG_NOSYSTEM=1`. The frontend's own global config is
+  **kept**, deliberately: it is the operator's file (not writable from the unit,
+  FDR 0035 F7) and carries commit identity, signing and the gpg program, which
+  `identityEnv` only partly replaces.
+- **Overrides** (`-c`): `core.fsmonitor=false`, `core.sshCommand=`,
+  `core.pager=cat`, `core.editor=true`, `diff.external=`,
+  `protocol.ext.allow=never`, `core.attributesFile=/dev/null`
+  (`core.hooksPath=/dev/null` stays with the mutating verbs, section 9.3).
+  Environment: `GIT_ATTR_NOSYSTEM=1`, `GIT_OPTIONAL_LOCKS=0`, `GIT_PAGER=cat`,
+  `GIT_EDITOR=true`, `GIT_CEILING_DIRECTORIES=<parent of the worktree>`. `diff`
+  also gets `--no-ext-diff --no-textconv`.
+- **Credentials.** `credential.helper=` resets the list, then exactly the helper
+  spinclass injected is set again: `store --file=<session credential file>`
+  (from `auth.CredentialPath`, only when a credential was minted). Remote verbs
+  authenticate as before; no other helper runs. With nothing minted, no helper
+  runs and the verb fails with git's own authentication error, as it already did.
+- **What cannot be neutralised by an override.** Git has no way to unset an
+  arbitrary config name, so the per-name command hooks (`filter.<name>.clean`,
+  `.smudge`, `.process`; `diff.<name>.textconv` and `.command`;
+  `merge.<name>.driver`; `credential.<url>.helper`; `alias.*`) are not touched
+  by `-c`. They are closed by where the config lives instead: the repository
+  `config` and the worktree's `config.worktree` are read-only in the unit (FDR
+  0035), `/etc/gitconfig` is dropped, and the global config is the operator's.
+  Aliases cannot shadow the builtin verbs this backend runs. A `.gitattributes`
+  in the worktree can only name drivers the config defines.
+- **Scope.** The explicit repository applies to the session worktree and
+  directories beneath it. A `repo_path` outside it (about to be refused by the
+  ownership checks) gets only the neutralisers, never the session repo, so those
+  checks still see the path they were asked about. The registration is
+  directory-scoped and in-process: other frontend git on the same worktree in the
+  same `serve` process during the call (for example a merge) runs hardened too.
+- **Residual.** The credential file sits inside the rw worktree bind until FDR
+  0035's `deny_paths` entry hides it from the unit; a symlink swapped in before
+  that is the reason the entry exists. The pre-commit hook is unchanged
+  (section 9.3). Hook-side `Classify` git calls run in the caller's process, not
+  the frontend, and are not hardened here.
+
+Tested with real git: a `core.fsmonitor` and a `diff.external` script placed in a
+temp repo's `config.worktree`, and a `.git` file repointed at another admin dir
+whose config carries the script, leave a marker file for an unconfined call and
+no marker for a confined one. Argv/env shapes are asserted in
+`hardening_test.go`. Not exercised in a real unit or against a live
+`credential-store` push.
+
+#### Raw git in the unit (round I, FDR 0035 "The git view")
+
+The unit's `refs/` and `logs/` are now read-only and the session credential is
+inaccessible, so the unit can no longer mint refs and push them with raw git:
+`git commit`, `git checkout -b` and `git update-ref` in a confined unit fail by
+design, and ref writes go through these tools. An **unconfined** worker has the
+same raw-push capability it always had; this change does not alter it.
+Unverified until a live canary: `nix flake` evaluation of git inputs and direnv
+hooks in the unit against read-only refs.
+
 ## Interpretations
 
 - **"Prefixed allow-list"**: no session-id prefix exists on branches; I defined

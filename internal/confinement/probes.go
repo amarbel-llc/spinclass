@@ -884,7 +884,7 @@ func (p *prober) f8bNoOperatorPTY() Fact {
 // runs code on the next git command). Paths resolve inside the unit, so a
 // hooks dir replaced by a symlink is judged by what the unit reaches.
 func (p *prober) f9HooksNotWritable() Fact {
-	const id, name = "F9", "git hooks and config not writable"
+	const id, name = "F9", "git hooks, config, refs and logs not writable; session credential unreadable"
 	err := func() error {
 		if err := p.needSubject(); err != nil {
 			return err
@@ -892,7 +892,13 @@ func (p *prober) f9HooksNotWritable() Fact {
 		if p.in.GitCommonDir == "" {
 			return errors.New("the driver repo's git common dir is unknown")
 		}
-		targets := []string{filepath.Join(p.in.GitCommonDir, "hooks"), filepath.Join(p.in.GitCommonDir, "config")}
+		// refs and logs are read-only too: a ref the unit could create or move
+		// is a ref the unit could push with the session's credential, and the
+		// frontend (grit) is the only writer of refs.
+		targets := []string{
+			filepath.Join(p.in.GitCommonDir, "hooks"), filepath.Join(p.in.GitCommonDir, "config"),
+			filepath.Join(p.in.GitCommonDir, "refs"), filepath.Join(p.in.GitCommonDir, "logs"),
+		}
 		if p.in.HooksPath != "" {
 			targets = append(targets, p.in.HooksPath)
 		}
@@ -913,9 +919,37 @@ func (p *prober) f9HooksNotWritable() Fact {
 				return err
 			}
 		}
-		return nil
+		return p.mustNotReadCredential()
 	}()
 	return fact(id, name, err, "")
+}
+
+// CredentialRelPath is the session's minted credential under its worktree
+// (auth.CredentialFile; a test in the spawn package pins the two together).
+const CredentialRelPath = ".spinclass/git-credentials"
+
+// mustNotReadCredential: the unit lists the session credential as an
+// inaccessible path, so reading it must be refused (or the file be absent when
+// no credential was minted). Raw git in the unit could otherwise push with it.
+func (p *prober) mustNotReadCredential() error {
+	wt := p.in.Driver.Worktree
+	if wt == "" {
+		return nil
+	}
+	unitPath := filepath.Join(wt, CredentialRelPath)
+	host, err := p.at(unitPath)
+	if err != nil {
+		return err
+	}
+	_, err = p.sys.ReadFile(host)
+	switch {
+	case err == nil:
+		return fmt.Errorf("the session credential %s is readable from the unit", unitPath)
+	case unreachable(err):
+		return nil
+	default:
+		return fmt.Errorf("cannot establish that the session credential %s is unreadable: %w", unitPath, err)
+	}
 }
 
 // F10: the unit has its own pid namespace and its own procfs showing only its

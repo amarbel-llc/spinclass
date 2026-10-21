@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/spawnhandshake"
@@ -207,13 +208,16 @@ func buildUnitSpec(in unitSpecInput) unitSpec {
 		BindsRW: []string{
 			wt,
 			filepath.Join(in.commonDir, "objects"),
-			filepath.Join(in.commonDir, "refs"),
-			filepath.Join(in.commonDir, "logs"),
 			filepath.Join(in.commonDir, "worktrees", filepath.Base(wt)),
 		},
 		BindsRO: []string{
 			filepath.Join(in.commonDir, "config"),
 			filepath.Join(in.commonDir, "hooks"),
+			// refs and logs are readable (git must resolve refs) but not
+			// writable: a ref the unit creates could be pushed by raw git with
+			// the session credential. Ref writes go through grit (the frontend).
+			filepath.Join(in.commonDir, "refs"),
+			filepath.Join(in.commonDir, "logs"),
 			// core.hooksPath points here (the per-commit hook, FDR 0019) and
 			// sits inside the rw worktree bind: left writable, the unit could
 			// rewrite code the frontend's git later runs (F9).
@@ -236,6 +240,10 @@ func buildUnitSpec(in unitSpecInput) unitSpec {
 		}, in.wayland...),
 		Env: in.env,
 	}
+	// The minted credential sits inside the rw worktree bind; listing it as
+	// inaccessible keeps raw git in the unit from reading it to push. The
+	// frontend reads it (grit's pinned credential helper), outside the unit.
+	spec.DenyPaths = append(spec.DenyPaths, filepath.Join(wt, ".spinclass", auth.CredentialFile))
 	if in.egress != nil {
 		list := append([]string{}, in.egress...)
 		spec.EgressAllow = &list

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/spawnhandshake"
 	"code.linenisgreat.com/spinclass/internal/worktree"
@@ -124,13 +125,13 @@ func TestBuildUnitSpecShape(t *testing.T) {
 	if want := confinement.UnitRecordPath("/state", rp.AbsPath); spec.ResultPath != want || strings.HasPrefix(spec.ResultPath, rp.AbsPath) {
 		t.Errorf("result_path = %q, want %q outside the worktree", spec.ResultPath, want)
 	}
-	if want := []string{rp.AbsPath, "/w/repo/.git/objects", "/w/repo/.git/refs", "/w/repo/.git/logs", "/w/repo/.git/worktrees/feat"}; !reflect.DeepEqual(spec.BindsRW, want) {
+	if want := []string{rp.AbsPath, "/w/repo/.git/objects", "/w/repo/.git/worktrees/feat"}; !reflect.DeepEqual(spec.BindsRW, want) {
 		t.Errorf("binds_rw = %v", spec.BindsRW)
 	}
-	if want := []string{"/w/repo/.git/config", "/w/repo/.git/hooks", "/w/repo/.worktrees/feat/.spinclass/hooks", "/w/repo/.git/worktrees/feat/config.worktree", "/w/repo/.worktrees/feat/.git"}; !reflect.DeepEqual(spec.BindsRO, want) {
+	if want := []string{"/w/repo/.git/config", "/w/repo/.git/hooks", "/w/repo/.git/refs", "/w/repo/.git/logs", "/w/repo/.worktrees/feat/.spinclass/hooks", "/w/repo/.git/worktrees/feat/config.worktree", "/w/repo/.worktrees/feat/.git"}; !reflect.DeepEqual(spec.BindsRO, want) {
 		t.Errorf("binds_ro = %v", spec.BindsRO)
 	}
-	if want := []string{"/run/user/1000/bus", "/run/user/1000/systemd", "/run/user/1000/posh", "/tmp/.X11-unix", "/run/user/1000/wayland-0"}; !reflect.DeepEqual(spec.DenyPaths, want) {
+	if want := []string{"/run/user/1000/bus", "/run/user/1000/systemd", "/run/user/1000/posh", "/tmp/.X11-unix", "/run/user/1000/wayland-0", "/w/repo/.worktrees/feat/.spinclass/git-credentials"}; !reflect.DeepEqual(spec.DenyPaths, want) {
 		t.Errorf("deny_paths = %v", spec.DenyPaths)
 	}
 	if want := []unitSocket{{Path: "/run/user/1000/piggy.sock", Purpose: "piggy-agent"}}; !reflect.DeepEqual(spec.Sockets, want) {
@@ -294,7 +295,7 @@ func TestBuildUnitSpecBindsAPerSessionHandshakeDir(t *testing.T) {
 	}
 	// An input without one binds and sets nothing.
 	bare := buildUnitSpec(unitSpecInput{rp: rp, runtimeDir: "/run/user/1", env: map[string]string{}})
-	if _, ok := bare.Env[spawnhandshake.DirEnv]; ok || len(bare.BindsRW) != 5 {
+	if _, ok := bare.Env[spawnhandshake.DirEnv]; ok || len(bare.BindsRW) != 3 {
 		t.Errorf("no handshake dir requested but got env %v binds %v", bare.Env, bare.BindsRW)
 	}
 }
@@ -337,6 +338,34 @@ func TestWriteUnitSpecWritesOutsideTheWorktree(t *testing.T) {
 	}
 	if spec.Env["SPINCLASS_WORKTREE"] != wt || spec.Env["SPINCLASS_DESCRIPTION"] != "desc" || len(spec.Env) != 5 {
 		t.Errorf("env = %v, want the five SPINCLASS_* identity vars", spec.Env)
+	}
+}
+
+// The unit sees the shared refs and logs read-only and the credential as an
+// inaccessible path (commit-3 shape); nothing under refs/logs stays writable.
+func TestBuildUnitSpecRefsLogsReadOnlyAndCredentialDenied(t *testing.T) {
+	spec := buildUnitSpec(unitSpecInput{
+		rp:        worktree.ResolvedPath{AbsPath: "/w/repo/.worktrees/feat", SessionKey: "repo/feat"},
+		commonDir: "/w/repo/.git", runtimeDir: "/run/user/1000",
+	})
+	for _, p := range []string{"/w/repo/.git/refs", "/w/repo/.git/logs"} {
+		if slices.Contains(spec.BindsRW, p) || !slices.Contains(spec.BindsRO, p) {
+			t.Errorf("%s must be read-only only: rw=%v ro=%v", p, spec.BindsRW, spec.BindsRO)
+		}
+	}
+	for _, p := range []string{"/w/repo/.git/objects", "/w/repo/.git/worktrees/feat"} {
+		if !slices.Contains(spec.BindsRW, p) {
+			t.Errorf("%s must stay rw: %v", p, spec.BindsRW)
+		}
+	}
+	if !slices.Contains(spec.DenyPaths, "/w/repo/.worktrees/feat/.spinclass/git-credentials") {
+		t.Errorf("credential not denied: %v", spec.DenyPaths)
+	}
+}
+
+func TestProbeCredentialPathMatchesAuth(t *testing.T) {
+	if confinement.CredentialRelPath != ".spinclass/"+auth.CredentialFile {
+		t.Errorf("probe path %q drifted from auth.CredentialFile %q", confinement.CredentialRelPath, auth.CredentialFile)
 	}
 }
 
