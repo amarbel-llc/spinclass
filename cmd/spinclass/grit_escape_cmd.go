@@ -15,6 +15,7 @@ import (
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/confinement"
+	gitpkg "code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/store"
 	"golang.org/x/term"
 )
@@ -141,6 +142,11 @@ func runGritEscape(ctx context.Context, raw json.RawMessage) error {
 		return runErr
 	}
 
+	if refusal := refuseEscapeDefaultBranchPush(s.Dir, f.Tool, subcommand, args); refusal != nil {
+		fmt.Fprintln(gritEscapeStderr(), refusal.Error())
+		return finish(refusal)
+	}
+
 	if rec.ConfirmRequired {
 		fmt.Fprintf(gritEscapeStderr(), "grit %s %s %s\nverdict: ask (not plainly allowed here)\nrun it? type y to confirm: ", f.Tool, subcommand, rec.Args)
 		line, _ := bufio.NewReader(gritEscapeConfirmIn()).ReadString('\n')
@@ -159,6 +165,104 @@ func runGritEscape(ctx context.Context, raw json.RawMessage) error {
 		fmt.Fprint(gritEscapeStdout(), text)
 	}
 	return finish(runErr)
+}
+
+const gritEscapeDefaultBranchRule = "the escape hatch never force-pushes, deletes, or rewrites the default branch"
+
+type gritEscapePushArgs struct {
+	Remote         string   `json:"remote"`
+	Branch         string   `json:"branch"`
+	Branches       []string `json:"branches"`
+	RemoteBranch   string   `json:"remote_branch"`
+	Force          bool     `json:"force"`
+	ForceWithLease bool     `json:"force_with_lease"`
+	Delete         bool     `json:"delete"`
+}
+
+// refuseEscapeDefaultBranchPush refuses, whatever --yes or a typed y, a push
+// that would force, delete or rewrite the default branch (main, master or
+// origin's HEAD branch). A plain fast-forward push of it is left to the normal
+// Ask. A local equivalent of the store's default-branch resolution, kept here so
+// the store package stays untouched.
+func refuseEscapeDefaultBranchPush(dir, tool, subcommand string, raw json.RawMessage) error {
+	if tool != "remote" || (subcommand != "push" && subcommand != "push-stack") {
+		return nil
+	}
+	var a gritEscapePushArgs
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return nil
+	}
+	refuse := func(why string) error {
+		return fmt.Errorf("refusing remote %s: %s; %s", subcommand, why, gritEscapeDefaultBranchRule)
+	}
+	if subcommand == "push-stack" {
+		for _, name := range a.Branches {
+			if escapeTouchesDefaultBranch(dir, name) {
+				return refuse(fmt.Sprintf("push-stack includes the default branch %q", name))
+			}
+		}
+		return nil
+	}
+	source := a.Branch
+	if source == "" {
+		source = "HEAD"
+	}
+	destination := strings.TrimPrefix(a.RemoteBranch, "refs/heads/")
+	if destination == "" {
+		if full, err := gitpkg.Run(dir, "rev-parse", "--symbolic-full-name", source); err == nil && strings.HasPrefix(full, "refs/heads/") {
+			destination = strings.TrimPrefix(full, "refs/heads/")
+		} else {
+			destination = strings.TrimPrefix(source, "refs/heads/")
+		}
+	}
+	if !escapeTouchesDefaultBranch(dir, source) && !escapeTouchesDefaultBranch(dir, destination) {
+		return nil
+	}
+	switch {
+	case a.Delete:
+		return refuse("it deletes the default branch")
+	case a.Force:
+		return refuse("it force-pushes the default branch")
+	case a.ForceWithLease:
+		return refuse("it force-pushes (with lease) the default branch")
+	}
+	remote := a.Remote
+	if remote == "" {
+		remote = "origin"
+	}
+	tip, err := gitpkg.Run(dir, "rev-parse", "--verify", "-q", "refs/remotes/"+remote+"/"+destination)
+	if err != nil || tip == "" {
+		return refuse(fmt.Sprintf("the remote-tracking ref %s/%s is missing, so a non-fast-forward update cannot be ruled out", remote, destination))
+	}
+	if _, err := gitpkg.Run(dir, "rev-parse", "--verify", "-q", source+"^{commit}"); err != nil {
+		return refuse(fmt.Sprintf("%q does not resolve to a commit, so a non-fast-forward update cannot be ruled out", source))
+	}
+	if _, err := gitpkg.Run(dir, "merge-base", "--is-ancestor", tip, source); err != nil {
+		return refuse(fmt.Sprintf("the push would not be a fast-forward of %s/%s", remote, destination))
+	}
+	return nil
+}
+
+// escapeTouchesDefaultBranch resolves name (empty means HEAD) to its branch and
+// also checks the literal name, as the store does.
+func escapeTouchesDefaultBranch(dir, name string) bool {
+	if name == "" {
+		name = "HEAD"
+	}
+	if full, err := gitpkg.Run(dir, "rev-parse", "--symbolic-full-name", name); err == nil && strings.HasPrefix(full, "refs/heads/") {
+		if escapeIsDefaultBranch(dir, strings.TrimPrefix(full, "refs/heads/")) {
+			return true
+		}
+	}
+	return escapeIsDefaultBranch(dir, strings.TrimPrefix(name, "refs/heads/"))
+}
+
+func escapeIsDefaultBranch(dir, short string) bool {
+	if short == "main" || short == "master" {
+		return true
+	}
+	out, err := gitpkg.Run(dir, "symbolic-ref", "-q", "refs/remotes/origin/HEAD")
+	return err == nil && strings.TrimPrefix(out, "refs/remotes/origin/") == short
 }
 
 func knownGritTool(name string) bool {

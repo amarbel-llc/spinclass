@@ -225,6 +225,102 @@ func TestGritEscapeTakesArgsOnlyFromArgvAndNeverReadsStdin(t *testing.T) {
 	}
 }
 
+// escapeRemoteRepo is isolatedGitRepo plus a bare file remote "origin" that
+// already holds main, with the cwd set to the repo.
+func escapeRemoteRepo(t *testing.T) (repo, remote string) {
+	t.Helper()
+	repo = isolatedGitRepo(t)
+	remote = filepath.Join(filepath.Dir(repo), "remote.git")
+	mustGitIn(t, filepath.Dir(repo), "init", "--bare", "-b", "main", remote)
+	mustGitIn(t, repo, "remote", "add", "origin", remote)
+	mustGitIn(t, repo, "push", "origin", "main")
+	t.Chdir(repo)
+	return repo, remote
+}
+
+func assertEscapePushRefused(t *testing.T, err error, remote, wantTip string) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), "the escape hatch never force-pushes, deletes, or rewrites the default branch") {
+		t.Fatalf("want the named refusal, got %v", err)
+	}
+	if got := gitOut(t, remote, "rev-parse", "main"); got != wantTip {
+		t.Errorf("remote main moved: %q, want %q", got, wantTip)
+	}
+	records := readEscapeLog(t)
+	last := records[len(records)-1]
+	if last["outcome"] != "error" || !strings.Contains(last["error"].(string), "never force-pushes") {
+		t.Errorf("the refusal must be logged as an error with its text: %v", last)
+	}
+}
+
+func TestGritEscapeRefusesForcePushOfDefaultBranchEvenWithYes(t *testing.T) {
+	repo, remote := escapeRemoteRepo(t)
+	forceEscapeTerminal(t, "y\n")
+	tip := gitOut(t, remote, "rev-parse", "main")
+	mustGitIn(t, repo, "commit", "--allow-empty", "-m", "second")
+	err := runEscape("remote", `{"subcommand":"push","branch":"main","force":true}`, true)
+	assertEscapePushRefused(t, err, remote, tip)
+}
+
+func TestGritEscapeRefusesForceWithLeasePushOfDefaultBranch(t *testing.T) {
+	repo, remote := escapeRemoteRepo(t)
+	forceEscapeTerminal(t, "y\n")
+	tip := gitOut(t, remote, "rev-parse", "main")
+	mustGitIn(t, repo, "commit", "--allow-empty", "-m", "second")
+	err := runEscape("remote", `{"subcommand":"push","branch":"main","force_with_lease":true}`, true)
+	assertEscapePushRefused(t, err, remote, tip)
+}
+
+func TestGritEscapeRefusesDeleteOfDefaultBranch(t *testing.T) {
+	_, remote := escapeRemoteRepo(t)
+	forceEscapeTerminal(t, "y\n")
+	tip := gitOut(t, remote, "rev-parse", "main")
+	err := runEscape("remote", `{"subcommand":"push","branch":"main","delete":true}`, true)
+	assertEscapePushRefused(t, err, remote, tip)
+}
+
+func TestGritEscapeRefusesNonFastForwardPushOfDefaultBranch(t *testing.T) {
+	repo, remote := escapeRemoteRepo(t)
+	forceEscapeTerminal(t, "y\n")
+	// Rewrite local main so the remote tip is no ancestor of it.
+	mustGitIn(t, repo, "commit", "--allow-empty", "--amend", "-m", "rewritten")
+	tip := gitOut(t, remote, "rev-parse", "main")
+	err := runEscape("remote", `{"subcommand":"push","branch":"main"}`, true)
+	assertEscapePushRefused(t, err, remote, tip)
+}
+
+func TestGritEscapeRefusesPushStackIncludingDefaultBranch(t *testing.T) {
+	repo, remote := escapeRemoteRepo(t)
+	forceEscapeTerminal(t, "y\n")
+	tip := gitOut(t, remote, "rev-parse", "main")
+	mustGitIn(t, repo, "branch", "feature")
+	err := runEscape("remote", `{"subcommand":"push-stack","branches":["feature","main"]}`, true)
+	assertEscapePushRefused(t, err, remote, tip)
+}
+
+func TestGritEscapeAllowsFastForwardPushOfDefaultBranchAfterTypedY(t *testing.T) {
+	repo, remote := escapeRemoteRepo(t)
+	mustGitIn(t, repo, "commit", "--allow-empty", "-m", "second")
+	want := gitOut(t, repo, "rev-parse", "main")
+	args := `{"subcommand":"push","branch":"main"}`
+
+	forceEscapeTerminal(t, "n\n")
+	if err := runEscape("remote", args, false); err == nil || !strings.Contains(err.Error(), "declined") {
+		t.Fatalf("a fast-forward push of main must still ask, got %v", err)
+	}
+	if gitOut(t, remote, "rev-parse", "main") == want {
+		t.Fatal("a declined push still ran")
+	}
+
+	forceEscapeTerminal(t, "y\n")
+	if err := runEscape("remote", args, false); err != nil {
+		t.Fatalf("a confirmed fast-forward push of main must run: %v", err)
+	}
+	if got := gitOut(t, remote, "rev-parse", "main"); got != want {
+		t.Errorf("remote main = %q, want %q", got, want)
+	}
+}
+
 func TestGritEscapeIsNotAnMCPTool(t *testing.T) {
 	app := buildApp()
 	cmd, ok := app.GetCommand("grit")
