@@ -445,6 +445,17 @@ Design:
 Decision 6 said they "do NOT need to work outside a session"; this export
 makes them work (conservatively) there, which I read as the intended backup.
 
+**Amended in step 5 (operator ruling, 2026-10-21).** The MCP tools are
+read-only for a caller outside a recognised session worktree (section 5), so
+the paragraph above no longer describes the MCP path. The backup path is a
+human-run CLI escape hatch in `sc grit` (step 6): it runs grit operations for
+an operator outside any session, or when the rules misfire, so recovery is
+never lost. It is not reachable from the MCP tools or the hook path, it
+refuses without a TTY, and every use is logged. **Hard dependency:** moxy's
+grit moxin must not be deprecated or removed (moxy #482, step 7) until this CLI
+exists. moxy's grit stays untouched until then, so merging the MCP tools
+loses no recovery today.
+
 ### 8. Implementation steps
 
 Each step is a merge; moxy's grit stays live until step 7.
@@ -471,8 +482,10 @@ Each step is a merge; moxy's grit stays live until step 7.
    credentials; decide moxy #390 disposition.
 6. CLI `sc grit`, `sc grit-perms`, `sc moxin-export`; `spinclass-*(5)/(7)`
    manpages (`spinclass-grit(7)`, sweatfile `[store]`); `perms` rewriter report.
+   `sc grit` includes the human-run escape hatch (section 7): TTY required,
+   every use logged, never reachable from the MCP or hook path.
 7. moxy side (not this repo): deprecate or keep grit per moxy #482 using the
-   export as the fallback.
+   export as the fallback. **Blocked until step 6's escape-hatch CLI exists.**
 8. Confined callers (section 9): the single stamping setting, the hook policy
    for proxied commits, and the confined-caller ownership check in the tool
    body. The read-write `.git` bind removal itself is clown/FDR 0035 work
@@ -698,6 +711,25 @@ is `B` and `B--<topic>`; reads auto-allow on any branch.
 - Design only: nothing here is implemented or verified by running code.
 - No out-of-process store backends; the dodder plugin is a design target only.
 - The stash emulation is not byte-for-byte `git stash` (see Costs).
+- **Key-file ssh (step 5).** Remote verbs strip the ambient ssh-agent and pin
+  ssh to `IdentityAgent=none`, but ssh key files it finds itself (default
+  `~/.ssh/id_*`, `IdentityFile` in config) are not an agent and are not
+  blocked. The operator ruled to leave ssh remotes allowed (2026-10-21).
+- **Owned-branch force pushes are unprompted (step 5).** A `push` with
+  `force` or `force_with_lease` of an owned branch classifies Allow, as this
+  FDR says; only non-owned refs and remote deletes ask. Flagged for the
+  operator.
+- **No-session callers are read-only (step 5).** Outside a recognised session
+  worktree every write is refused, with no in-band escape; recovery is the
+  step 6 CLI (section 7), which does not exist yet. Until it does, moxy's grit
+  is the fallback.
+- **`reset-hard` discards uncommitted work (step 5).** On an owned branch, in
+  the session's own worktree, `branch reset-hard` classifies Allow (operator
+  ruling, 2026-10-21): it never prompts, and it throws away uncommitted
+  changes and any commits not reachable from the new ref. The default branch
+  and unowned branches still ask or are refused.
+- A manager provisioning git credentials for the workers it spawns is not
+  covered here; see spinclass #390 (an `[auth].spawn-grant` design) and papi #88.
 
 ## More Information
 

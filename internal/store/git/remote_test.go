@@ -495,6 +495,82 @@ func TestClassifyRemoteVerdicts(t *testing.T) {
 	})
 }
 
+// A repo_path naming some other checkout whose current branch would be owned
+// must not let a write verdict reach Allow: ownership is judged against the
+// session worktree, not the checkout the call is aimed at.
+func TestClassifyRepoPathAtAnotherCheckoutNeverAllowsWrites(t *testing.T) {
+	r := newRemoteFixture(t)
+	topicWorktree := filepath.Join(r.repo, ".worktrees", "topic")
+	mustRun(t, r.repo, "worktree", "add", topicWorktree, sessionBranch+"--topic")
+
+	// A second worktree of the same repo, on an owned-looking branch.
+	peerWorktree := filepath.Join(r.repo, ".worktrees", "peer")
+	mustRun(t, r.repo, "worktree", "add", "-b", sessionBranch+"--peer", peerWorktree)
+
+	// A separate repository whose current branch is the session branch itself.
+	otherRepo := filepath.Join(r.root, "other-repo")
+	if err := os.MkdirAll(otherRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, otherRepo, "init", "-b", sessionBranch)
+	mustRun(t, otherRepo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "--allow-empty", "-m", "c0")
+
+	ownedTag := sessionBranch + "--v1"
+	cases := []struct {
+		name      string
+		tool, sub string
+		args      map[string]any
+	}{
+		{"remote push", "remote", "push", map[string]any{"remote": "origin"}},
+		{"remote pull", "remote", "pull", map[string]any{"remote": "origin", "branch": "main"}},
+		{"tag push", "tag", "push", map[string]any{"name": ownedTag, "remote": "origin"}},
+		{"merge", "merge", "", map[string]any{"branch": "B2"}},
+		{"stage add", "stage", "add", map[string]any{"paths": []string{"."}}},
+		{"commit", "commit", "", map[string]any{"message": "m", "allow_empty": true}},
+		{"worktree remove", "worktree", "remove", map[string]any{"path": topicWorktree}},
+		{"clone", "clone", "", map[string]any{"source": r.remote, "destination": "c"}},
+	}
+	withRepoPath := func(args map[string]any, dir string) map[string]any {
+		out := map[string]any{"repo_path": dir}
+		for k, v := range args {
+			out[k] = v
+		}
+		return out
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := r.own()
+			if got := New().Classify(s, op(t, tc.tool, tc.sub, tc.args)); got != store.Allow {
+				t.Fatalf("baseline without repo_path = %v, want allow (test would be vacuous)", got)
+			}
+			if got := New().Classify(s, op(t, tc.tool, tc.sub, withRepoPath(tc.args, r.worktree))); got != store.Allow {
+				t.Errorf("repo_path = the session worktree = %v, want allow", got)
+			}
+			for dirName, dir := range map[string]string{
+				"another worktree of the repo":          peerWorktree,
+				"a worktree on an owned branch":         topicWorktree,
+				"a separate repo on the session branch": otherRepo,
+			} {
+				if tc.tool == "clone" {
+					// clone ignores repo_path entirely: its destination is judged
+					// against the session worktree, so repo_path cannot widen it.
+					if got := New().Classify(s, op(t, tc.tool, tc.sub, withRepoPath(tc.args, dir))); got != store.Allow {
+						t.Errorf("clone with repo_path at %s = %v, want allow (repo_path ignored)", dirName, got)
+					}
+					escaping := withRepoPath(map[string]any{"source": r.remote, "destination": "../c"}, dir)
+					if got := New().Classify(s, op(t, tc.tool, tc.sub, escaping)); got != store.Ask {
+						t.Errorf("clone leaving the worktree with repo_path at %s = %v, want ask", dirName, got)
+					}
+					continue
+				}
+				if got := New().Classify(s, op(t, tc.tool, tc.sub, withRepoPath(tc.args, dir))); got != store.Ask {
+					t.Errorf("repo_path at %s (%s) = %v, want ask", dirName, dir, got)
+				}
+			}
+		})
+	}
+}
+
 func TestCloneDestinationMustResolveInsideTheWorktree(t *testing.T) {
 	r := newRemoteFixture(t)
 	outside := filepath.Join(r.root, "outside")

@@ -223,6 +223,50 @@ func TestClassifyBranchCreateCheckoutAndRebase(t *testing.T) {
 	})
 }
 
+// Operator ruling: rebases and resets of owned branches never prompt; anything
+// aimed at the default branch, an unowned branch or another checkout does.
+func TestClassifyRebaseAndResetOfOwnedBranchesNeverPrompt(t *testing.T) {
+	f := newFixture(t)
+	runGit(t, f.repo, "update-ref", "refs/remotes/origin/main", "main")
+	runCases(t, f, []classifyCase{
+		{name: "reset-soft owned current", tool: "branch", sub: "reset-soft", args: map[string]any{}, want: store.Allow},
+		{name: "reset-soft owned current with ref", tool: "branch", sub: "reset-soft", args: map[string]any{"ref": "HEAD~1"}, want: store.Allow},
+		{name: "reset-soft aimed at the main checkout", tool: "branch", sub: "reset-soft", args: map[string]any{"repo_path": f.repo}, want: store.Ask},
+		{name: "reset-soft aimed at a foreign worktree", tool: "branch", sub: "reset-soft", args: map[string]any{"repo_path": f.foreignWorktree}, want: store.Ask},
+		{name: "reset-soft on an unowned current branch", tool: "branch", sub: "reset-soft", args: map[string]any{}, want: store.Ask, foreignDir: true},
+		{name: "reset-hard aimed at the main checkout", tool: "branch", sub: "reset-hard", args: map[string]any{"ref": "main", "repo_path": f.repo}, want: store.Ask},
+		{name: "reset-hard on an unowned current branch", tool: "branch", sub: "reset-hard", args: map[string]any{"ref": "main"}, want: store.Ask, foreignDir: true},
+		{name: "rebase onto the default remote-tracking ref", tool: "branch", sub: "rebase", args: map[string]any{"upstream": "origin/main"}, want: store.Allow},
+		{name: "rebase with onto and an owned rebase_branch", tool: "branch", sub: "rebase", args: map[string]any{"upstream": "main", "onto": "origin/main", "rebase_branch": "glad-buckeye--topic"}, want: store.Allow},
+		{name: "rebase abort", tool: "branch", sub: "rebase", args: map[string]any{"abort": true}, want: store.Allow},
+		{name: "rebase skip", tool: "branch", sub: "rebase", args: map[string]any{"skip": true}, want: store.Allow},
+		{name: "rebase continue on an unowned current branch", tool: "branch", sub: "rebase", args: map[string]any{"continue": true}, want: store.Ask, foreignDir: true},
+		{name: "rebase abort on an unowned current branch", tool: "branch", sub: "rebase", args: map[string]any{"abort": true}, want: store.Ask, foreignDir: true},
+		{name: "rebase skip on an unowned current branch", tool: "branch", sub: "rebase", args: map[string]any{"skip": true}, want: store.Ask, foreignDir: true},
+		{name: "restack with the default branch as root", tool: "branch", sub: "restack", args: map[string]any{"root": "main", "onto": "main"}, want: store.Ask},
+		{name: "restack on an unowned current branch", tool: "branch", sub: "restack", args: map[string]any{"root": "glad-buckeye", "onto": "main"}, want: store.Ask, foreignDir: true},
+	})
+
+	// The session's current branch is the default branch: its checkout is the
+	// main one, so a session bound there owns nothing it is standing on.
+	onDefault := store.Session{Dir: f.repo, Branch: sessionBranch}
+	for _, tc := range []struct {
+		name, sub string
+		args      map[string]any
+	}{
+		{"reset-hard", "reset-hard", map[string]any{"ref": "HEAD~1"}},
+		{"reset-soft", "reset-soft", map[string]any{}},
+		{"rebase continue", "rebase", map[string]any{"continue": true}},
+		{"restack", "restack", map[string]any{"root": "glad-buckeye", "onto": "main"}},
+	} {
+		t.Run("current branch is the default: "+tc.name, func(t *testing.T) {
+			if got := New().Classify(onDefault, op(t, "branch", tc.sub, tc.args)); got != store.Ask {
+				t.Errorf("Classify = %v, want ask", got)
+			}
+		})
+	}
+}
+
 func TestClassifyTagsAndRemotes(t *testing.T) {
 	f := newFixture(t)
 	runCases(t, f, []classifyCase{
