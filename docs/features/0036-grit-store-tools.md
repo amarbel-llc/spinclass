@@ -335,9 +335,10 @@ create|delete|push`, `merge`, `clone` and `worktree remove`, registered as
 
 - **No agent.** All remote verbs and `clone` run through `remoteRunner`
   (`git` with `cmd.Dir` = the session worktree, ambient ssh-agent variables
-  dropped, `GIT_TERMINAL_PROMPT=0` last). `GIT_SSH_COMMAND` is not set, so
-  an `IdentityAgent` in the operator's ssh config could still reach an agent;
-  only the environment path is closed.
+  dropped, `GIT_TERMINAL_PROMPT=0` last). `GIT_SSH`/`GIT_SSH_COMMAND` are
+  dropped and `GIT_SSH_COMMAND` is then pinned to `ssh -o IdentityAgent=none
+  -o IdentitiesOnly=yes -o BatchMode=yes`, so neither the environment nor an
+  `IdentityAgent` in the operator's ssh config reaches an agent.
 - **Remote names only.** `remote` must be a configured remote name or empty
   (git's default, `origin` for pull/push). A URL is refused by the body for
   every caller and classifies `Ask`, so the worktree's credentials cannot be
@@ -492,7 +493,27 @@ loses no recovery today.
 Built (spinclass #379): `sc grit <tool> [json]` (`cmd/spinclass/grit_escape_cmd.go`),
 the human-run CLI described in the amendment above. The `sc grit-perms` helper,
 `sc moxin-export`, the `spinclass-grit(7)` page and the `perms` rewriter report
-are not part of this slice.
+are not part of this slice (see "Implemented in step 6 (rest)" below).
+
+#### Implemented in step 6 (rest)
+
+- `spinclass-grit(7)` and the `[store]` table in `spinclass-sweatfile(5)`.
+- `sc grit-perms <tool>` (`cmd/spinclass/grit_perms_cmd.go`): CLI-only; reads the
+  invocation JSON on stdin, prints `allow` or `ask`; exit 0 = allow, non-zero =
+  ask (moxy's dynamic-perms convention). It fails closed on an unknown tool,
+  malformed JSON or a missing subcommand. The session is resolved from
+  `CLOWN_SESSION_ID` the way the hook does; unresolved falls back to
+  `NoSession` (reads allow, writes ask). Whether moxy can feed a
+  `[dynamic-perms]` helper the full JSON on stdin, and whether the helper sees
+  the principal variable, is unverified.
+- Perms migration report (`internal/perms/grit_migration.go`): `perms-list`
+  appends the tier rules naming `moxy__grit_*` with the equivalent spinclass
+  tool name; it never rewrites. `claude-allow` entries in sweatfile layers are
+  not scanned, and `perms-review` does not use it.
+- **`sc moxin-export` is NOT built.** Section 7 says the exported tools shell out
+  to `sc grit ...`, but `sc grit` refuses without a TTY and is not meant to be
+  reachable from MCP or hook paths, so a moxin tool could never run it. The FDR
+  names no non-TTY entry point; this needs a ruling before it can be built.
 
 - **CLI-only.** `RunCLI` and no `Run`, so it is not an MCP tool and the hook path
   never reaches it; a test pins both. It is not `Hidden`, so the generated
@@ -806,9 +827,9 @@ is `B` and `B--<topic>`; reads auto-allow on any branch.
   `~/.ssh/id_*`, `IdentityFile` in config) are not an agent and are not
   blocked. The operator ruled to leave ssh remotes allowed (2026-10-21).
 - **Owned-branch force pushes are unprompted (step 5).** A `push` with
-  `force` or `force_with_lease` of an owned branch classifies Allow, as this
-  FDR says; only non-owned refs and remote deletes ask. Flagged for the
-  operator.
+  `force_with_lease` of an owned branch classifies Allow; plain `force` asks
+  (`Classify` asks on any `force` flag). Non-owned refs and remote deletes
+  ask. Flagged for the operator.
 - **No-session callers are read-only (step 5).** Outside a recognised session
   worktree every write is refused, with no in-band escape; recovery is the
   step 6 CLI (section 7), which does not exist yet. Until it does, moxy's grit

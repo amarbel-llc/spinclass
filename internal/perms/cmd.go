@@ -18,6 +18,17 @@ import (
 // RunListWriter writes the global tier and either a single repo's tier (if
 // repo != "") or every non-empty repo tier under TiersDir() to w.
 func RunListWriter(w io.Writer, repo string) error {
+	if err := writeTierListing(w, repo); err != nil {
+		return err
+	}
+	// A failure to read the tiers for the report must not hide the listing.
+	if findings, err := GritMigrationReport(TiersDir()); err == nil {
+		writeGritMigrationReport(w, findings)
+	}
+	return nil
+}
+
+func writeTierListing(w io.Writer, repo string) error {
 	tiersDir := TiersDir()
 
 	globalPath := filepath.Join(tiersDir, "global.json")

@@ -935,11 +935,14 @@ Identity for commits the grit store tools create (FDR 0036). The tools run in
 the frontend *spinclass serve*, so for a confined worker nothing is configured
 inside the unit and the worker needs no git identity. With no key set, git's own
 identity resolution (the operator's configured identity) is used unchanged.
-Applies to the commit-creating verbs: *grit\_commit*, and *grit\_branch*
-cherry-pick, revert, rebase and restack. *Merge:* scalar override for every key,
-read only from sweatfile layers above the repo (the global sweatfile and parent
-directories). A repo-level or worktree-level value is ignored, because an agent
-can edit those; *sc validate* warns about it.
+Applies to the commit-creating verbs: *grit\_commit*, *grit\_merge*,
+*grit\_tag* create, *grit\_remote* pull, and *grit\_branch* cherry-pick, revert,
+rebase and restack (see *spinclass-grit*(7)). *Merge:* the table is never merged
+into the hierarchy; each key is read on its own from the last sweatfile layer
+above the repo (the global sweatfile and parent directories) that sets it. A
+repo-level or worktree-level value is ignored, because an agent can edit those;
+*sc validate* warns about it. The keys are exactly *author-name*,
+*author-email*, *committer-name* and *committer-email*.
 
 *author-name*, *author-email*
 	Stamped as the author (*GIT\_AUTHOR\_NAME*, *GIT\_AUTHOR\_EMAIL*). Git keeps
@@ -1541,4 +1544,5 @@ _.mcp.json_
 
 # SEE ALSO
 
-*spinclass*(1), *spinclass-start-commands*(7), *spinclass-validate*(1)
+*spinclass*(1), *spinclass-start-commands*(7), *spinclass-validate*(1),
+*spinclass-grit*(7)

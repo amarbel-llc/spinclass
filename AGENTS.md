@@ -149,6 +149,10 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
 - **`sc exec`, multi-target close, nix gc on close/clean**:
   `spinclass-internals(7)`, `spinclass-sweatfile(5)` (`disable-nix-gc`).
 - **Metrics** (`internal/statsd`, #363): `spinclass-local-default-ref(7)`.
+- **Grit store tools** (FDR 0036, #379; `internal/store`, `internal/store/git`,
+  `cmd/spinclass/grit*_cmd.go`): the nine `grit_*` MCP tools, their
+  ownership-based verdicts, agentless remote lane and the `sc grit` escape
+  hatch: `spinclass-grit(7)`; `[store]` identity: `spinclass-sweatfile(5)`.
 
 ## Sweatfile config
 
