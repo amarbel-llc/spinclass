@@ -529,6 +529,13 @@
                   inherit base;
                   name = "spinclass";
                 };
+                # The host service (`ringmaster serve`) a bats test starts so
+                # clown presence is observable (lifecycle.bats; S7: every
+                # jobwake call is a socket call to it).
+                RINGMASTER_BIN = {
+                  base = ringmaster.packages.${system}.ringmaster;
+                  name = "ringmaster";
+                };
               };
               batsLibPath = [ bats.packages.${system}.bats-libs.batsLibPath ];
               extraEnv = {

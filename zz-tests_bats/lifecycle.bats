@@ -23,6 +23,10 @@ setup() {
   create_repo
 }
 
+teardown() {
+  stop_ringmaster_service
+}
+
 function spinclass_start_creates_worktree { # @test
   cd "$TEST_REPO" || return
   run_sc start --no-attach
@@ -118,12 +122,12 @@ function spinclass_list_presence_marks_session_live { # @test
   branch=$(basename "$wt")
   key="$(basename "$TEST_REPO")/$branch"
 
-  # Forge clown's presence file: decoration is the spinclass session key, a
-  # fresh lastSeen keeps it inside the 2-minute staleness window.
-  local pres_dir="$XDG_STATE_HOME/clown/presence"
-  mkdir -p "$pres_dir"
-  printf '{"sessionKey":"uuid-x","channelId":"chan-x","decoration":"%s","lastSeen":"%s"}\n' \
-    "$key" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$pres_dir/chan-x.json"
+  # A real ringmaster host service holds presence (RFC-0020 §6.4): run one,
+  # then subscribe a clown whose decoration is the spinclass session key.
+  start_ringmaster_service
+  start_clown_presence "$key"
+  # The subscription registers asynchronously; wait until the listing shows it.
+  wait_until 10 sc_list_shows_clown "$bin" "$key"
 
   run timeout --preserve-status 10s "$bin" --format json list
   assert_success

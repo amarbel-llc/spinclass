@@ -68,6 +68,89 @@ STUB
   chmod +x "$BATS_TEST_TMPDIR/stubs/direnv"
 }
 
+# Block until the given command succeeds (deadline in seconds, polled every
+# 100 ms); print a diagnostic and return 1 if the deadline passes first.
+# Usage: wait_until <deadline-seconds> <cmd...>
+wait_until() {
+  local deadline="$1" elapsed=0
+  shift
+  until "$@"; do
+    sleep 0.1
+    elapsed=$((elapsed + 1))
+    if [[ $elapsed -ge $((deadline * 10)) ]]; then
+      echo "wait_until: timed out after ${deadline}s: $*" >&2
+      return 1
+    fi
+  done
+}
+
+# Start ringmaster's host service (`ringmaster serve`, RFC-0020) for this test
+# and block until its "listening at" readiness line appears. Since the S7 flag
+# day every jobwake client call — including `sc list`'s clown presence lookup —
+# is a socket call to this service, so a test that needs clown presence must
+# run one. Uses a SHORT XDG_RUNTIME_DIR under /tmp: bats roots its own deep
+# runtime dir past the ~108-byte AF_UNIX path limit. The binary is
+# $RINGMASTER_BIN (the nix bats lane injects it), else `ringmaster` on PATH.
+# Sets RINGMASTER_SERVICE_PID. Pair with stop_ringmaster_service in teardown().
+start_ringmaster_service() {
+  local bin="${RINGMASTER_BIN:-ringmaster}"
+  command -v "$bin" >/dev/null || fail "no ringmaster binary (RINGMASTER_BIN=${RINGMASTER_BIN:-unset}, not on PATH)"
+  RINGMASTER_SHORT_RUNTIME_DIR="$(mktemp -d /tmp/rm.XXXXXX)"
+  export XDG_RUNTIME_DIR="$RINGMASTER_SHORT_RUNTIME_DIR"
+  # A stray ambient value would turn every jobwake call into a no-op.
+  unset CLOWN_DISABLE_JOB_WAKEUP
+  local err="$BATS_TEST_TMPDIR/ringmaster-serve.err"
+  : >"$err"
+  # 3>&- keeps bats' fd 3 out of the long-lived child, or bats would wait on it.
+  "$bin" serve >/dev/null 2>"$err" 3>&- &
+  RINGMASTER_SERVICE_PID=$!
+  if ! wait_until 10 grep -q 'listening at' "$err"; then
+    cat "$err" >&2
+    return 1
+  fi
+}
+
+# Announce a live clown for <session-key> to the service started by
+# start_ringmaster_service: a `ringmaster monitor` subscription whose
+# CLOWN_GROUP_ID (the presence decoration) is the spinclass session key — the
+# same way a clown under a spinclass session presents. A subscribed session is
+# present for as long as it runs, so no staleness window applies. Sets
+# RINGMASTER_MONITOR_PID; stop_ringmaster_service ends it.
+# Usage: start_clown_presence <session-key> [<clown-session-id>]
+start_clown_presence() {
+  local key="$1" clown_id="${2:-uuid-x}"
+  local bin="${RINGMASTER_BIN:-ringmaster}"
+  CLOWN_GROUP_ID="$key" "$bin" monitor --session "$clown_id" \
+    >/dev/null 2>"$BATS_TEST_TMPDIR/ringmaster-monitor.err" 3>&- &
+  RINGMASTER_MONITOR_PID=$!
+}
+
+# Succeeds when `sc list --format json` shows a clown on <session-key>. Poll
+# target for start_clown_presence (the subscription lands asynchronously).
+# Usage: sc_list_shows_clown <sc-bin> <session-key>
+sc_list_shows_clown() {
+  timeout 10s "$1" --format json list 2>/dev/null |
+    jq -e --arg k "$2" 'any(.[]; .session_key == $k and .clown_count >= 1)' >/dev/null
+}
+
+# Stop what start_ringmaster_service / start_clown_presence started and remove
+# the short runtime dir. A no-op when nothing was started.
+stop_ringmaster_service() {
+  local pid
+  for pid in "${RINGMASTER_MONITOR_PID:-}" "${RINGMASTER_SERVICE_PID:-}"; do
+    if [[ -n $pid ]]; then
+      kill -TERM "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+    fi
+  done
+  RINGMASTER_MONITOR_PID=
+  RINGMASTER_SERVICE_PID=
+  if [[ -n ${RINGMASTER_SHORT_RUNTIME_DIR:-} ]]; then
+    rm -rf "$RINGMASTER_SHORT_RUNTIME_DIR"
+    RINGMASTER_SHORT_RUNTIME_DIR=
+  fi
+}
+
 # Create a git repo with an initial commit.
 # Sets TEST_REPO to the repo path.
 create_repo() {
