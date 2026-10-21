@@ -59,11 +59,16 @@ Each verb belongs to one class:
 
 The verdict is computed by one function shared by the permission hook and the
 tool body. The PreToolUse hook consults it for these tools after the *AlwaysAsk*
-floors. When the hook cannot resolve the caller to a single session (no
-principal, or an ambiguous one), it returns Allow with the reason "deferred to
-the serve: body ownership check applies", except that a call with *force* set
-still asks. That deferral is safe only because the tool body fails closed, see
-CONFINED, UNCONFINED AND NO-SESSION CALLERS.
+floors. The hook's principal is *CLOWN\_SESSION\_ID* when set, else the hook's
+*session\_id* (clown does not export *CLOWN\_SESSION\_ID* to the hook); if both
+are set and differ the principal is known but unusable. A principal that
+resolves to one recorded session lets *Classify* decide. A principal that is
+known but does not resolve (no recorded session, an ambiguous one, or
+conflicting sources) always asks, *force* or not, because ownership cannot be
+judged. Only when the hook sees no principal at all does it return Allow with
+the reason "deferred to the serve: body ownership check applies", except that
+a call with *force* set still asks. That deferral is safe only because the tool
+body fails closed, see CONFINED, UNCONFINED AND NO-SESSION CALLERS.
 
 # OWNERSHIP
 
@@ -281,7 +286,7 @@ It calls the same backend as the MCP tools, so remote verbs stay agentless.
   one principal and are not distinguished. A corrupt unit record for an unrelated
   session makes every caller classify as confined (fail closed); repair or
   remove the record.
-- An unconfined session whose hook cannot see *CLOWN\_SESSION\_ID* gets no human
+- An unconfined session whose hook sees no principal at all (neither *CLOWN\_SESSION\_ID* nor a hook *session\_id*) gets no human
   prompt on foreign operations; the body refuses writes it does not own instead.
 - Not exercised against a real confined unit, a live clown, an https push with a
   minted credential, the *allow-no-credential* ssh path, signing with a real

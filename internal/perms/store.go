@@ -2,7 +2,6 @@ package perms
 
 import (
 	"encoding/json"
-	"os"
 	"strings"
 
 	"code.linenisgreat.com/spinclass/internal/session"
@@ -25,8 +24,8 @@ var storeBackend store.Backend = gitstore.New()
 
 // resolveStoreSession finds the calling session from its principal. It is a
 // variable so tests can stand in for the session index.
-var resolveStoreSession = func() (store.Session, bool) {
-	key, ok := session.SessionKeyOfPrincipal(os.Getenv("CLOWN_SESSION_ID"))
+var resolveStoreSession = func(principal string) (store.Session, bool) {
+	key, ok := session.SessionKeyOfPrincipal(principal)
 	if !ok {
 		return store.Session{}, false
 	}
@@ -39,11 +38,20 @@ var resolveStoreSession = func() (store.Session, bool) {
 
 // StoreVerdict is the PreToolUse reading of a grit store tool call (FDR 0036
 // section 2). isStore is false for any other tool. An unreadable subcommand
-// yields Ask. An unresolved or ambiguous session yields Allow: the hook cannot
-// see a confined caller's principal (clown#136), so the verdict is deferred to
-// the serve, whose classification and body ownership check refuse what the
-// caller does not own. With a resolved session Classify decides.
-func StoreVerdict(toolName string, toolInput map[string]any) (verdict store.Verdict, reason string, isStore bool) {
+// yields Ask.
+//
+// principal is the caller's principal as the hook sees it (CLOWN_SESSION_ID
+// when set, else the hook's session_id; see hooks.principalForHook), and
+// principalKnown says the hook saw one at all. principalKnown with an empty
+// principal means the sources disagreed. A known principal that resolves to a
+// recorded session lets Classify decide. A known principal that does not
+// resolve (no recorded session, ambiguous, or conflicting sources) yields Ask,
+// force included: ownership cannot be judged. With no principal at all the
+// caller is a confined one whose principal the hook cannot see (clown#136), so
+// a non-force call yields Allow, deferred to the serve, whose classification
+// and body ownership check refuse what the caller does not own; force yields
+// Ask.
+func StoreVerdict(toolName string, toolInput map[string]any, principal string, principalKnown bool) (verdict store.Verdict, reason string, isStore bool) {
 	tool := strings.TrimPrefix(toolName, gritToolPrefix)
 	if tool == toolName || !storeTools[tool] {
 		return store.Ask, "", false
@@ -55,10 +63,13 @@ func StoreVerdict(toolName string, toolInput map[string]any) (verdict store.Verd
 			return store.Ask, "grit " + tool + ": subcommand is missing or not a string", true
 		}
 	}
-	callerSession, ok := resolveStoreSession()
+	callerSession, ok := resolveStoreSession(principal)
 	if !ok {
 		if forceRequested(toolInput) {
 			return store.Ask, "grit " + tool + ": force always asks, even when the session is unresolved", true
+		}
+		if principalKnown {
+			return store.Ask, "grit " + tool + ": the session could not be resolved from its principal, so ownership cannot be judged; confirm", true
 		}
 		return store.Allow, "grit " + tool + ": session unresolved here, deferred to the serve: body ownership check applies", true
 	}

@@ -3,6 +3,7 @@ package hooks
 import (
 	"fmt"
 	"io"
+	"os"
 
 	"code.linenisgreat.com/spinclass/internal/perms"
 	"code.linenisgreat.com/spinclass/internal/store"
@@ -19,7 +20,10 @@ func storeDecision(input hookInput, mainRepoRoot, sessionWorktree string, rewrit
 			toolInput, rewritten, summary = updated, updated, changedKeys
 		}
 	}
-	verdict, reason, isStore := perms.StoreVerdict(input.ToolName, toolInput)
+	envPrincipal := os.Getenv("CLOWN_SESSION_ID")
+	principal, _, _ := principalForHook(envPrincipal, input.SessionID)
+	principalKnown := envPrincipal != "" || input.SessionID != ""
+	verdict, reason, isStore := perms.StoreVerdict(input.ToolName, toolInput, principal, principalKnown)
 	if !isStore {
 		return nil, false
 	}

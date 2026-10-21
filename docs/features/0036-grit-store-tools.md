@@ -144,8 +144,15 @@ the same PreToolUse hook that consults `AlwaysAsk`:
    `session.SessionKeyOfPrincipal`), call `Backend.Classify`.
    - `Allow` -> `permissionDecision: allow`.
    - `Ask` -> no decision / explicit `ask`: the human is prompted.
-   - Session unresolved (no session, ambiguous principal) -> `Ask`, fail
-     closed, matching `SessionKeyOfPrincipal`'s ambiguity behaviour.
+   - The hook's principal is `CLOWN_SESSION_ID` when set, else the hook JSON
+     `session_id` (`hooks.principalForHook`, the same source
+     `recordOwnPrincipal` uses); both set and different is a known but
+     unusable principal. Principal known but session unresolved (no recorded
+     session, ambiguous, conflicting sources) -> `Ask`, fail closed, force
+     included, matching `SessionKeyOfPrincipal`'s ambiguity behaviour. No
+     principal at all (a confined caller the hook cannot see) -> a non-force
+     call is deferred to the serve (`Allow`); force still asks (see "Hook defers an
+     unresolved session" below).
 3. Everything else -> existing tier-file logic.
 
 The enforcement seam is therefore the hook, with one shared `Classify`. The
@@ -734,11 +741,21 @@ Built (spinclass #379). The operator chose "option 3" for the hook problem
 above: for a caller the hook cannot resolve, the in-unit PreToolUse hook stops
 asking and the serve decides.
 
-- **Hook defers an unresolved session** (`perms.StoreVerdict`). No principal, or
-  no unambiguous session, now returns `Allow` with the reason "deferred to the
-  serve: body ownership check applies". A resolved session is unchanged
-  (`Classify` decides; owned targets allow, the rest ask). `force:true` still
-  asks even when unresolved, and the `AlwaysAsk` floors stay ahead of
+- **Hook defers an unresolved session only when no principal is visible**
+  (`perms.StoreVerdict`; refined by #392). If the session cannot be resolved and
+  the hook sees no principal at all (a confined caller, clown#136), a non-force
+  call returns `Allow` with the reason "deferred to the serve: body ownership
+  check applies". The hook's principal is `CLOWN_SESSION_ID` when set, else the
+  hook JSON `session_id` (clown does not export `CLOWN_SESSION_ID` to the
+  hook; `hooks.principalForHook`, the same source `recordOwnPrincipal` records
+  from); if both are set and differ, the principal is known but unusable.
+  `hooks.storeDecision` passes `perms.StoreVerdict` that principal plus whether
+  one was seen. A principal that is known but maps to no recorded session, maps
+  ambiguously, or conflicts returns `Ask` ("could not be resolved from its
+  principal, so ownership cannot be judged; confirm"): the deferral is not
+  justified because the principal is known. A resolved session is unchanged
+  (`Classify` decides; owned targets allow, the rest ask). `force:true` asks in
+  both unresolved cases, and the `AlwaysAsk` floors stay ahead of
   `StoreVerdict` in `runPreToolUse`, unchanged. The deferral is safe only
   because the body fails closed: a zero-value or unresolved `Session` counts as
   confined, and a write verb whose ownership cannot be computed (no session
