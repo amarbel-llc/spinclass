@@ -456,6 +456,54 @@ grit moxin must not be deprecated or removed (moxy #482, step 7) until this CLI
 exists. moxy's grit stays untouched until then, so merging the MCP tools
 loses no recovery today.
 
+#### Implemented in step 6 (escape hatch)
+
+Built (spinclass #379): `sc grit <tool> [json]` (`cmd/spinclass/grit_escape_cmd.go`),
+the human-run CLI described in the amendment above. The `sc grit-perms` helper,
+`sc moxin-export`, the `spinclass-grit(7)` page and the `perms` rewriter report
+are not part of this slice.
+
+- **CLI-only.** `RunCLI` and no `Run`, so it is not an MCP tool and the hook path
+  never reaches it; a test pins both. It is not `Hidden`, so the generated
+  `spinclass-grit(1)` page exists.
+- **Same code.** `runGrit` was split: `runGritAs` takes an already-resolved
+  `store.Session` and calls the same `gritBackend.Do`, so remote verbs keep their
+  agentless `remoteRunner`.
+- **Terminal required.** Refuses unless stdin and stdout are both terminals
+  (`golang.org/x/term`, behind the `gritEscapeIsTerminal` seam). Arguments come
+  only from argv (one JSON object, default `{}`); stdin is never read for
+  arguments, only for the typed confirmation.
+- **Caller.** Unconfined. The session is the recognised session worktree when the
+  cwd is in one, otherwise `Dir` is the cwd, `Branch` is empty and `NoSession` is
+  false, so the read-only refusal does not apply. The `[store]` identity is
+  stamped as for the MCP path.
+- **Confirmation.** The verdict is `Classify` on that session. A non-`Allow`
+  verdict prints the verb and arguments to stderr and needs a typed `y`; `--yes`
+  skips the typing (a terminal is still required). A declined confirmation runs
+  nothing and is logged. Outside a session every write classifies `Ask` (no owned
+  branch), so every write there needs `y` or `--yes`.
+- **Log.** One JSON line per invocation that gets past the argument checks
+  (`time` UTC, `cwd`, `tool`, `subcommand`, `args`, `verdict`, `confirm_required`,
+  `confirmed`, `outcome`, `error`) appended to
+  `$XDG_STATE_HOME/spinclass/grit-escape.log` (default
+  `~/.local/state/spinclass/`), directory 0700, file 0600. The file is opened
+  before anything runs, so an unwritable log refuses the operation; a failure to
+  write the final line after the operation ran is reported as an error (the
+  operation cannot be undone). A run refused for lack of a terminal, or for
+  malformed arguments or an unknown tool, is not logged: nothing was attempted.
+- **Protections that still apply.** The body's default-branch refusals
+  (`refuseDefaultBranchOp`: reset-hard, rebase, restack, merge, delete on
+  main/master/origin HEAD) run for this caller too, `--yes` or not. The force-push
+  and delete refusals of `refuseDefaultBranchPush` are scoped to a confined or
+  unresolved caller, so for this unconfined caller a push of the default branch is
+  an `Ask` the operator answers at the terminal, not a refusal. Deviation from
+  the brief's wording; a stricter rule would be a change to that function.
+
+Not tested: a real terminal run (the test environment has none; the terminal check
+is exercised through its seam), the generated manpage, and a push over a real
+remote. `--yes` is only checked through the flag struct; positional parsing is
+checked through `App.RunCLI`.
+
 ### 8. Implementation steps
 
 Each step is a merge; moxy's grit stays live until step 7.

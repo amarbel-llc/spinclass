@@ -90,7 +90,8 @@ re-run that suite right before merging.
 `close [target...]`, `check`, `clean`, `rebuild [--check]`, `fork`, `spawn`
 (FDR 0006), `close-child-session`, `grant-session-handle` /
 `release-session-handle` / `list-handles` / `whoami` (FDR 0032), `resurrect`
-(FDR 0027), `pull`, `validate`, `perms list|review|edit`. Per-command flags:
+(FDR 0027), `grit <tool> [json]` (CLI-only, TTY-required, logged operator escape
+hatch for the grit store tools, FDR 0036), `pull`, `validate`, `perms list|review|edit`. Per-command flags:
 the generated `spinclass-<cmd>(1)` pages or `sc <cmd> --help`. `start*` and
 `update-description` take one positional value (quote multi-word descriptions).
 Subcommands register hyphenated (`perms-list`); the spaced form is accepted.

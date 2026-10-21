@@ -309,7 +309,9 @@ func storeIdentityFor(dir string) store.Identity {
 	return store.Identity{AuthorName: authorName, AuthorEmail: authorEmail, CommitterName: committerName, CommitterEmail: committerEmail}
 }
 
-func runGrit(ctx context.Context, tool string, args json.RawMessage) (string, error) {
+// gritSubcommand reads the subcommand out of a tool's JSON arguments and checks
+// the tool needs one.
+func gritSubcommand(tool string, args json.RawMessage) (string, error) {
 	var head struct {
 		Subcommand string `json:"subcommand"`
 	}
@@ -319,14 +321,30 @@ func runGrit(ctx context.Context, tool string, args json.RawMessage) (string, er
 	if head.Subcommand == "" && !gritToolsWithoutSubcommand[tool] {
 		return "", errors.New("subcommand is required")
 	}
+	return head.Subcommand, nil
+}
+
+func runGrit(ctx context.Context, tool string, args json.RawMessage) (string, error) {
+	if _, err := gritSubcommand(tool, args); err != nil {
+		return "", err
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", fmt.Errorf("could not get working directory: %w", err)
 	}
-	s := gritCaller(cwd)
-	res, err := gritBackend.Do(ctx, s, store.Op{Tool: tool, Subcommand: head.Subcommand, Args: args})
+	return runGritAs(ctx, tool, args, gritCaller(cwd))
+}
+
+// runGritAs runs one grit tool for an already-resolved caller. The MCP path and
+// the `sc grit` escape hatch share it, so both reach the same backend Do.
+func runGritAs(ctx context.Context, tool string, args json.RawMessage, s store.Session) (string, error) {
+	subcommand, err := gritSubcommand(tool, args)
+	if err != nil {
+		return "", err
+	}
+	res, err := gritBackend.Do(ctx, s, store.Op{Tool: tool, Subcommand: subcommand, Args: args})
 	if errors.Is(err, store.ErrUnsupported) {
-		return "", fmt.Errorf("grit_%s %s is not yet supported in spinclass (FDR 0036); supported: %v", tool, head.Subcommand, gritBackend.Capabilities()[tool])
+		return "", fmt.Errorf("grit_%s %s is not yet supported in spinclass (FDR 0036); supported: %v", tool, subcommand, gritBackend.Capabilities()[tool])
 	}
 	if err != nil {
 		return "", err
