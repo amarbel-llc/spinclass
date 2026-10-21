@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
@@ -223,10 +224,22 @@ func gritHandler(tool string) func(context.Context, json.RawMessage, command.Pro
 	return func(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 		text, err := runGrit(ctx, tool, args)
 		if err != nil {
-			return command.TextErrorResult(err.Error()), nil
+			return command.TextErrorResult(nonEmptyText(err.Error(), "grit: the operation failed with no message")), nil
 		}
-		return command.TextResult(text), nil
+		return command.TextResult(nonEmptyText(text, gritNoOutput)), nil
 	}
+}
+
+// gritNoOutput stands in for the empty output of a git verb that succeeds
+// silently (stage add, branch checkout). The V1 content block omits an empty
+// `text`, which a client rejects as "content[0] missing text".
+const gritNoOutput = "ok (git printed no output)"
+
+func nonEmptyText(text, fallback string) string {
+	if strings.TrimSpace(text) == "" {
+		return fallback
+	}
+	return text
 }
 
 // gritCaller resolves the calling session for a grit tool body (FDR 0036

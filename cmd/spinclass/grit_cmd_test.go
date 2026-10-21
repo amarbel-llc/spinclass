@@ -113,6 +113,37 @@ func TestResolveGritCallerInASessionWorktreeOwnsItsBranch(t *testing.T) {
 	}
 }
 
+// A silent git success (stage add) and an empty error must still carry text:
+// the V1 content block drops an empty `text` and clients reject the result as
+// "content[0] missing text" (seen from the nikulin canary).
+func TestGritHandlerNeverReturnsEmptyText(t *testing.T) {
+	stubGritCallerUnconfined(t)
+	repo := isolatedGitRepo(t)
+	t.Chdir(repo)
+	if err := os.WriteFile(filepath.Join(repo, "new.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, tool, args string
+	}{
+		{"stage add (silent success)", "stage", `{"subcommand":"add","paths":["new.txt"]}`},
+		{"unsupported verb", "branch", `{"subcommand":"no-such-verb"}`},
+		{"missing subcommand", "tag", `{}`},
+		{"read with output", "stage", `{"subcommand":"status"}`},
+	} {
+		res, err := gritHandler(tc.tool)(context.Background(), json.RawMessage(tc.args), nil)
+		if err != nil || res == nil {
+			t.Fatalf("%s: handler returned (%v, %v)", tc.name, res, err)
+		}
+		if strings.TrimSpace(res.Text) == "" {
+			t.Errorf("%s: empty text, the client would see a malformed result", tc.name)
+		}
+	}
+	if got := nonEmptyText("  \n", "fallback"); got != "fallback" {
+		t.Errorf("blank text must fall back, got %q", got)
+	}
+}
+
 func TestRunGritRefusesWritesOutsideASessionWorktree(t *testing.T) {
 	repo := isolatedGitRepo(t)
 	t.Chdir(repo)
