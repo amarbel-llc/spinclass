@@ -53,6 +53,7 @@ require_pty() {
 # Print one observed-result line on fd 3 (the bats live-output channel).
 record() {
   local label="$1" err="${2-}"
+  # shellcheck disable=SC2154  # $status is set by bats' run
   printf '# CASE %s | exit=%s | stdout=%q | stderr=%q\n' "$label" "$status" "$output" "$err" >&3
 }
 
