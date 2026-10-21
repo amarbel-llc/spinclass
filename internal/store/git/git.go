@@ -149,6 +149,8 @@ func (b Backend) Do(ctx context.Context, s store.Session, op store.Op) (store.Re
 		return store.Result{}, fmt.Errorf("no repository: pass repo_path or run inside a session")
 	}
 
+	// Every git run below, helper reads included, runs under the hardening.
+	defer confineGit(s, dir)()
 	if err := refuseWithoutSession(s, op); err != nil {
 		return store.Result{}, err
 	}
@@ -176,6 +178,7 @@ func (b Backend) Do(ctx context.Context, s store.Session, op store.Op) (store.Re
 	if err := refuseDefaultBranchOp(dir, op, a); err != nil {
 		return store.Result{}, err
 	}
+	argv = withoutExternalDiffForConfined(s, argv)
 	argv = withoutHooksForConfined(s, op, argv)
 	env := append(writeEnv(op), identityEnv(s, op)...)
 	var out string

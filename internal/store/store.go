@@ -102,6 +102,24 @@ type Session struct {
 	// recognised spinclass session worktree. Do refuses every write for it and
 	// Classify asks: such a caller owns nothing (FDR 0036 section 5).
 	NoSession bool
+	// Repo is the repository layout taken from spinclass's own session state,
+	// never from files in the worktree. A confined caller's git runs with it
+	// given explicitly, so git does not discover the repository through
+	// unit-writable files (FDR 0036 section 9.5). The zero value leaves
+	// discovery to git (the backend then applies only the neutralisers).
+	Repo Repo
+}
+
+// Repo locates a session's repository from trusted state.
+type Repo struct {
+	// CommonDir is the shared git directory (<repo>/.git).
+	CommonDir string
+	// GitDir is the session worktree's own git directory
+	// (<CommonDir>/worktrees/<worktree name>).
+	GitDir string
+	// CredentialFile is the session's minted credential file, empty when none
+	// was minted.
+	CredentialFile string
 }
 
 // Op is one tool invocation: a tool, its subcommand, and the raw JSON

@@ -60,6 +60,10 @@ var remoteRunner = runRemoteGit
 // runRemoteGit runs git with the session worktree as its working directory, so
 // the worktree-scoped credential.helper and url.insteadOf apply.
 func runRemoteGit(ctx context.Context, dir string, env []string, argv ...string) (string, error) {
+	if h, ok := git.HardeningFor(dir); ok {
+		argv = append(append([]string{}, h.Args...), argv...)
+		env = append(append([]string{}, env...), h.Env...)
+	}
 	cmd := exec.CommandContext(ctx, "git", argv...)
 	cmd.Dir = dir
 	cmd.Env = remoteEnv(os.Environ(), env)

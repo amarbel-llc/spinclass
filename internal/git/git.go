@@ -25,7 +25,9 @@ func Run(repoPath string, args ...string) (string, error) {
 // (`-z`) whose first or last field may itself carry whitespace, and for
 // `--stdin` plumbing that would otherwise trip ARG_MAX on a long path list.
 func RunStdin(repoPath, stdin string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", append([]string{"-C", repoPath}, args...)...)
+	argv, env := invocation(repoPath, nil, args)
+	cmd := exec.Command("git", argv...)
+	cmd.Env = env
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
@@ -40,11 +42,9 @@ func RunStdin(repoPath, stdin string, args ...string) ([]byte, error) {
 }
 
 func RunEnv(repoPath string, env []string, args ...string) (string, error) {
-	cmdArgs := append([]string{"-C", repoPath}, args...)
+	cmdArgs, cmdEnv := invocation(repoPath, env, args)
 	cmd := exec.Command("git", cmdArgs...)
-	if len(env) > 0 {
-		cmd.Env = append(os.Environ(), env...)
-	}
+	cmd.Env = cmdEnv
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return strings.TrimSpace(string(out)), fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
@@ -57,11 +57,9 @@ func RunEnv(repoPath string, env []string, args ...string) (string, error) {
 // fine for local plumbing but not for anything that talks to a remote — see
 // FetchContext.
 func RunEnvContext(ctx context.Context, repoPath string, env []string, args ...string) (string, error) {
-	cmdArgs := append([]string{"-C", repoPath}, args...)
+	cmdArgs, cmdEnv := invocation(repoPath, env, args)
 	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
-	if len(env) > 0 {
-		cmd.Env = append(os.Environ(), env...)
-	}
+	cmd.Env = cmdEnv
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return strings.TrimSpace(string(out)), fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
@@ -74,14 +72,12 @@ func RunPassthrough(repoPath string, args ...string) error {
 }
 
 func RunPassthroughEnv(repoPath string, env []string, args ...string) error {
-	cmdArgs := append([]string{"-C", repoPath}, args...)
+	cmdArgs, cmdEnv := invocation(repoPath, env, args)
 	cmd := exec.Command("git", cmdArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
-	if len(env) > 0 {
-		cmd.Env = append(os.Environ(), env...)
-	}
+	cmd.Env = cmdEnv
 	return cmd.Run()
 }
 

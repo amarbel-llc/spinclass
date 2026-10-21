@@ -104,6 +104,9 @@ func credentialPath(worktreePath string) string {
 	return filepath.Join(worktreePath, ".spinclass", CredentialFile)
 }
 
+// CredentialPath is where worktreePath's minted credential lives.
+func CredentialPath(worktreePath string) string { return credentialPath(worktreePath) }
+
 // Minted reports whether worktreePath carries a minted credential.
 func Minted(worktreePath string) bool {
 	_, err := os.Stat(credentialPath(worktreePath))

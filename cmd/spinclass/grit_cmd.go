@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
+	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/session"
@@ -276,6 +278,7 @@ func resolveGritCaller(cwd string) store.Session {
 	}
 	if worktree, branch, ok := recognisedSessionWorktree(s.Dir); ok {
 		s.Dir, s.Branch = worktree, branch
+		s.Repo = trustedRepoFor(worktree)
 	} else {
 		s.NoSession = true
 	}
@@ -295,6 +298,30 @@ func recognisedSessionWorktree(dir string) (worktree, branch string, ok bool) {
 		return "", "", false
 	}
 	return st.WorktreePath, st.Branch, true
+}
+
+// trustedRepoFor computes the session's repository layout from the recorded
+// session state (the main checkout's RepoPath and the worktree's name), never
+// from the worktree's .git pointer file, which a confined unit could rewrite.
+// A layout that does not check out on disk yields the zero value, which leaves
+// git's own discovery (with the config neutralisers still applied).
+func trustedRepoFor(worktree string) store.Repo {
+	st, err := session.FindByWorktreePath(worktree)
+	if err != nil || st.RepoPath == "" {
+		return store.Repo{}
+	}
+	common := filepath.Join(st.RepoPath, ".git")
+	gitDir := filepath.Join(common, "worktrees", filepath.Base(worktree))
+	for _, d := range []string{common, gitDir} {
+		if fi, err := os.Stat(d); err != nil || !fi.IsDir() {
+			return store.Repo{}
+		}
+	}
+	repo := store.Repo{CommonDir: common, GitDir: gitDir}
+	if auth.Minted(worktree) {
+		repo.CredentialFile = auth.CredentialPath(worktree)
+	}
+	return repo
 }
 
 // storeIdentityFor reads the [store] identity from the sweatfile layers above
