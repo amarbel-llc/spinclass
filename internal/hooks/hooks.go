@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -38,6 +39,10 @@ type hookInput struct {
 	// is explicit that a `/clear` is a restart, not an exit, and must emit
 	// nothing — this is the only field that can tell the two apart.
 	Reason string `json:"reason"`
+	// PermissionMode is Claude Code's common hook-input permission_mode
+	// (default, plan, acceptEdits, dontAsk, bypassPermissions, …). Only "dontAsk"
+	// is acted on: PreToolUse asks become denies (see writeDontAskVerdict).
+	PermissionMode string `json:"permission_mode"`
 }
 
 // RunOption configures optional Run behavior.
@@ -76,8 +81,44 @@ func Run(r io.Reader, w io.Writer, mainRepoRoot, sessionWorktree string, disallo
 	case "SessionEnd":
 		return runSessionEnd(input)
 	default:
-		return runPreToolUse(input, w, mainRepoRoot, sessionWorktree, disallowMainWorktree, o.rewriteEnabled, o.denySweatfileEdits)
+		if input.PermissionMode != permissionModeDontAsk {
+			return runPreToolUse(input, w, mainRepoRoot, sessionWorktree, disallowMainWorktree, o.rewriteEnabled, o.denySweatfileEdits)
+		}
+		var buf bytes.Buffer
+		if err := runPreToolUse(input, &buf, mainRepoRoot, sessionWorktree, disallowMainWorktree, o.rewriteEnabled, o.denySweatfileEdits); err != nil {
+			return err
+		}
+		return writeDontAskVerdict(w, buf.Bytes())
 	}
+}
+
+// permissionModeDontAsk is Claude Code's hook-input permission_mode for a
+// session that cannot answer prompts. The value is taken from Claude Code's
+// documented hook input and is unverified in this repo.
+const permissionModeDontAsk = "dontAsk"
+
+const dontAskDenySuffix = " — denied because this session cannot answer prompts (permission mode dontAsk)"
+
+// writeDontAskVerdict forwards the PreToolUse output produced by
+// runPreToolUse, converting an `ask` decision into a `deny` carrying the
+// original reason plus dontAskDenySuffix. It is the single conversion point, so
+// no ask path can reach a dontAsk session. Any other output (allow, rewrite,
+// deny, or none) is forwarded byte-for-byte.
+func writeDontAskVerdict(w io.Writer, out []byte) error {
+	if len(bytes.TrimSpace(out)) == 0 {
+		return nil
+	}
+	var parsed struct {
+		HookSpecificOutput struct {
+			PermissionDecision       string `json:"permissionDecision"`
+			PermissionDecisionReason string `json:"permissionDecisionReason"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal(out, &parsed); err != nil || parsed.HookSpecificOutput.PermissionDecision != "ask" {
+		_, err := w.Write(out)
+		return err
+	}
+	return writeDeny(w, parsed.HookSpecificOutput.PermissionDecisionReason+dontAskDenySuffix)
 }
 
 // implicitRand derives the per-session suffix from the Claude session id:

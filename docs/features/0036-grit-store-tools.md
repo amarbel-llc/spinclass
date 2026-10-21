@@ -155,6 +155,16 @@ the same PreToolUse hook that consults `AlwaysAsk`:
      unresolved session" below).
 3. Everything else -> existing tier-file logic.
 
+**dontAsk sessions.** A session spawned with `--permission-mode dontAsk` cannot
+answer prompts. The hook input's `permission_mode` field is read into
+`hookInput.PermissionMode`; when it is `dontAsk`, `Run` post-processes the
+single PreToolUse output so every `ask` (store verdicts, the `AlwaysAsk`
+floor, the sweatfile-edit guard) becomes a `deny` whose reason is the original
+reason plus " — denied because this session cannot answer prompts (permission
+mode dontAsk)". Allow decisions and every other mode (or an absent field) are
+unchanged. The set of `permission_mode` values is taken from Claude Code's hook
+input and is unverified in this repo.
+
 The enforcement seam is therefore the hook, with one shared `Classify`. The
 tool body does **not** re-check ownership and refuse: a tool cannot prompt
 (elicitation is #254, not available), and after a human approves a foreign

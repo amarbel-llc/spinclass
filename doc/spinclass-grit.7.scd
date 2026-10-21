@@ -70,6 +70,14 @@ the reason "deferred to the serve: body ownership check applies", except that
 a call with *force* set still asks. That deferral is safe only because the tool
 body fails closed, see CONFINED, UNCONFINED AND NO-SESSION CALLERS.
 
+A session whose hook input carries *permission\_mode* *dontAsk* is never
+prompted: the hook turns every *ask* it would emit, from this verdict and from
+every other PreToolUse path, into a *deny* whose reason is the original reason
+followed by " -- denied because this session cannot answer prompts (permission
+mode dontAsk)" (an em dash in the output). Allow decisions are unchanged, as is
+every other mode or an absent field. The *permission\_mode* values are taken
+from Claude Code's hook input and are unverified in this repository.
+
 # OWNERSHIP
 
 A session whose branch is _B_ owns:
