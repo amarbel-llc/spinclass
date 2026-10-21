@@ -1084,6 +1084,29 @@ debug-render-tty cols="100" *args="list":
     sleep 2
     posh history "$sess"
 
+# [debug] Drive the `sc grit` escape hatch (FDR 0036 section 7) end to end
+# under a pty so isatty(stdin/stdout) is true: runs zz-tests_bats/grit_escape.bats
+# against the nix-built binary of this worktree (`just build-nix`'s .#default),
+# printing one `# CASE ... exit=... stdout=... stderr=...` line per case on fd 3.
+# Everything runs in a bats throwaway repo with HOME, XDG_*, GIT_CONFIG_GLOBAL
+# redirected into the test tmpdir, a LOCAL bare remote, no network, no real
+# sessions. The pty is util-linux `script`, NOT the operator's real terminal.
+# Optional <filter> is a bats --filter regex, e.g. `just debug-grit-escape-pty
+# 'stash|tags'`. Serves the sc-grit dev loop.
+#
+# run the sc grit escape hatch end to end under a pty
+[group('debug')]
+debug-grit-escape-pty filter="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v script >/dev/null || { echo "debug-grit-escape-pty needs util-linux 'script' on PATH"; exit 1; }
+    out=$(nix build --no-link --print-out-paths .#default)
+    export SPINCLASS_BIN="$out/bin/spinclass"
+    echo "SPINCLASS_BIN=$SPINCLASS_BIN" >&2
+    cd zz-tests_bats
+    filter={{ quote(filter) }}
+    BATS_TEST_TIMEOUT=10 bats --jobs 1 ${filter:+--filter "$filter"} grit_escape.bats
+
 # [debug] Scaffold a throwaway repo wired (via direnv PATH_add) to a
 # devshell-built spinclass binary, then drop into $SHELL inside it — a
 # real-worktree-free sandbox for manually exercising `sc start`/etc. against

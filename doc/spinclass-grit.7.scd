@@ -209,7 +209,9 @@ same JSON as the error. *lease\_ref\_sha* does not apply to it. *push-stack* and
 A git verb that succeeds silently would give an MCP client a content block with
 no text, which clients reject. When a tool produces no output, the result text
 is the fixed sentence *ok (git printed no output)*. *branch* verbs return their
-own confirmation instead (for example *deleted branch <name>*).
+own confirmation instead (for example *deleted branch <name>*). The sentence is
+added on the MCP path only; *sc grit* prints nothing for a silent success and
+exits 0.
 
 # STASH
 

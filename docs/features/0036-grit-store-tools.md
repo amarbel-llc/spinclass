@@ -495,7 +495,8 @@ MOXIN_PATH entries (moxin(7)).
 Design:
 
 - spinclass gets CLI-only subcommands `sc grit <tool> [json]` (run one tool:
-  same code as the MCP path, args as JSON on stdin or argv, JSON result) and
+  same code as the MCP path; as built, args come from argv only and the result
+  is text, see "Implemented in step 6 (escape hatch)") and
   `sc grit-perms <tool>` (reads the invocation JSON on stdin, prints
   `allow`/`ask`; the `dynamic-perms` helper).
 - `sc moxin-export <dir>` writes a ready moxin directory (manifest plus nine
