@@ -127,7 +127,7 @@ func TestBuildUnitSpecShape(t *testing.T) {
 	if want := []string{rp.AbsPath, "/w/repo/.git/objects", "/w/repo/.git/refs", "/w/repo/.git/logs", "/w/repo/.git/worktrees/feat"}; !reflect.DeepEqual(spec.BindsRW, want) {
 		t.Errorf("binds_rw = %v", spec.BindsRW)
 	}
-	if want := []string{"/w/repo/.git/config", "/w/repo/.git/hooks", "/w/repo/.worktrees/feat/.spinclass/hooks"}; !reflect.DeepEqual(spec.BindsRO, want) {
+	if want := []string{"/w/repo/.git/config", "/w/repo/.git/hooks", "/w/repo/.worktrees/feat/.spinclass/hooks", "/w/repo/.git/worktrees/feat/config.worktree", "/w/repo/.worktrees/feat/.git"}; !reflect.DeepEqual(spec.BindsRO, want) {
 		t.Errorf("binds_ro = %v", spec.BindsRO)
 	}
 	if want := []string{"/run/user/1000/bus", "/run/user/1000/systemd", "/run/user/1000/posh", "/tmp/.X11-unix", "/run/user/1000/wayland-0"}; !reflect.DeepEqual(spec.DenyPaths, want) {
@@ -310,8 +310,12 @@ func TestBuildUnitSpecKeepsAnExplicitEmptyEgressList(t *testing.T) {
 func TestWriteUnitSpecWritesOutsideTheWorktree(t *testing.T) {
 	state := t.TempDir()
 	wt := filepath.Join(t.TempDir(), "repo", ".worktrees", "feat")
+	common := filepath.Join(t.TempDir(), ".git")
+	if err := os.MkdirAll(filepath.Join(common, "worktrees", "feat"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	prev := gitCommonDir
-	gitCommonDir = func(string) (string, error) { return "/c/.git", nil }
+	gitCommonDir = func(string) (string, error) { return common, nil }
 	t.Cleanup(func() { gitCommonDir = prev })
 	t.Setenv("SSH_AUTH_SOCK", "")
 	rp := worktree.ResolvedPath{AbsPath: wt, SessionKey: "repo/feat"}
@@ -333,6 +337,33 @@ func TestWriteUnitSpecWritesOutsideTheWorktree(t *testing.T) {
 	}
 	if spec.Env["SPINCLASS_WORKTREE"] != wt || spec.Env["SPINCLASS_DESCRIPTION"] != "desc" || len(spec.Env) != 5 {
 		t.Errorf("env = %v, want the five SPINCLASS_* identity vars", spec.Env)
+	}
+}
+
+func TestEnsureWorktreeConfigFileCreatesEmptyAndKeepsExisting(t *testing.T) {
+	common := t.TempDir()
+	dir := filepath.Join(common, "worktrees", "feat")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(dir, "config.worktree")
+	if err := ensureWorktreeConfigFile(common, "/x/.worktrees/feat"); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(cfg); err != nil || len(b) != 0 {
+		t.Fatalf("want an empty created file, got %q, %v", b, err)
+	}
+	if err := os.WriteFile(cfg, []byte("[credential]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureWorktreeConfigFile(common, "/x/.worktrees/feat"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(cfg); string(b) != "[credential]\n" {
+		t.Errorf("existing config.worktree was altered: %q", b)
+	}
+	if err := ensureWorktreeConfigFile(common, "/x/.worktrees/missing"); err == nil {
+		t.Error("a missing worktrees/<name> dir must be an error, not silently created")
 	}
 }
 

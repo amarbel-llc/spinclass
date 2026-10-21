@@ -218,6 +218,15 @@ func buildUnitSpec(in unitSpecInput) unitSpec {
 			// sits inside the rw worktree bind: left writable, the unit could
 			// rewrite code the frontend's git later runs (F9).
 			filepath.Join(wt, ".spinclass", "hooks"),
+			// The frontend runs grit's git with the session worktree as its
+			// cwd, so git discovers the repo through these two unit-writable
+			// files and would run whatever commands they configure
+			// (core.fsmonitor, core.sshCommand, credential.helper=!cmd, ...)
+			// outside the unit. config.worktree is nested RO over the rw
+			// worktrees/<name> dir; the .git pointer file over the rw worktree.
+			// Both must exist when the unit starts (writeUnitSpec ensures it).
+			filepath.Join(in.commonDir, "worktrees", filepath.Base(wt), "config.worktree"),
+			filepath.Join(wt, ".git"),
 		},
 		DenyPaths: append([]string{
 			filepath.Join(in.runtimeDir, "bus"),
@@ -247,6 +256,20 @@ func buildUnitSpec(in unitSpecInput) unitSpec {
 	return spec
 }
 
+// ensureWorktreeConfigFile creates <common>/worktrees/<name>/config.worktree
+// (empty) when absent. auth.Inject writes it when a credential is minted, but a
+// session that never minted has none, and the unit spec binds that path
+// read-only: a bind source that does not exist would fail the unit start. An
+// existing file is left untouched (O_APPEND without truncation).
+func ensureWorktreeConfigFile(commonDir, wt string) error {
+	dir := filepath.Join(commonDir, "worktrees", filepath.Base(wt))
+	f, err := os.OpenFile(filepath.Join(dir, "config.worktree"), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Errorf("ensuring the worktree's config.worktree exists for its read-only bind: %w", err)
+	}
+	return f.Close()
+}
+
 // writeUnitSpec resolves the host-dependent inputs, builds the spec and writes
 // it beside the unit record, outside the worktree. It returns the path to put
 // in CLOWN_AGENT_SCOPE.
@@ -258,6 +281,9 @@ func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, state
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("finding the operator's home: %w", err)
+	}
+	if err := ensureWorktreeConfigFile(commonDir, rp.AbsPath); err != nil {
+		return "", err
 	}
 	runtimeDir := fmt.Sprintf("/run/user/%d", confinementHost.Getuid())
 	wayland, _ := filepath.Glob(filepath.Join(runtimeDir, "wayland-*"))

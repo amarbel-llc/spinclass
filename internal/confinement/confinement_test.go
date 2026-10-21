@@ -236,6 +236,8 @@ func confinedHost() (*fakeSys, Inputs) {
 		peer: map[string]int{"/run/user/1000/agent.sock": 50},
 		env:  map[string]string{"DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus"},
 	}
+	sys.files[root+"/repo/.git/worktrees/a/config.worktree"] = ""
+	sys.files[root+"/wt/a/.git"] = "gitdir: /repo/.git/worktrees/a\n"
 	in := Inputs{
 		Driver: Session{Key: "r/a", Worktree: "/wt/a", PID: 100, Principal: "principal-a", RecordedPrincipal: "principal-a"},
 		Live: []Session{
@@ -384,6 +386,12 @@ func TestEachFactCatchesItsBreach(t *testing.T) {
 		}},
 		{"F9", "/repo/.git/config is writable", func(s *fakeSys, _ *Inputs) {
 			s.writable = map[string]bool{root + "/repo/.git/config": true}
+		}},
+		{"F9", "config.worktree is writable", func(s *fakeSys, _ *Inputs) {
+			s.writable = map[string]bool{root + "/repo/.git/worktrees/a/config.worktree": true}
+		}},
+		{"F9", "/wt/a/.git is writable", func(s *fakeSys, _ *Inputs) {
+			s.writable = map[string]bool{root + "/wt/a/.git": true}
 		}},
 		{"F9", "/repo/.git/hooks is writable", func(s *fakeSys, _ *Inputs) {
 			// hooks replaced by a symlink: judged by where it leads INSIDE the unit.

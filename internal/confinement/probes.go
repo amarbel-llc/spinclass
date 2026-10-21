@@ -896,6 +896,18 @@ func (p *prober) f9HooksNotWritable() Fact {
 		if p.in.HooksPath != "" {
 			targets = append(targets, p.in.HooksPath)
 		}
+		// The frontend's git discovers the repo through the worktree's .git
+		// pointer file and reads its config.worktree, both inside binds the
+		// unit can otherwise write; a write to either runs code in the
+		// frontend. A writable file is also a replaceable one (the rw worktree
+		// bind it sits in would let the unit swap it), so an unwritable result
+		// here means the read-only file bind is in force.
+		if wt := p.in.Driver.Worktree; wt != "" {
+			targets = append(targets,
+				filepath.Join(p.in.GitCommonDir, "worktrees", filepath.Base(wt), "config.worktree"),
+				filepath.Join(wt, ".git"),
+			)
+		}
 		for _, t := range targets {
 			if err := p.mustBeUnwritable(t, t); err != nil {
 				return err
