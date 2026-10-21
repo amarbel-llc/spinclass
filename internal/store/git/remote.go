@@ -31,19 +31,26 @@ func talksToRemote(op store.Op) bool {
 // worktree-scoped credential helper FDR 0028 wrote; where none was minted the
 // verb fails with git's own auth error rather than borrowing the operator's
 // agent.
-var agentEnvVars = map[string]bool{"SSH_AUTH_SOCK": true, "SSH_AGENT_PID": true}
+var agentEnvVars = map[string]bool{"SSH_AUTH_SOCK": true, "SSH_AGENT_PID": true, "GIT_SSH": true, "GIT_SSH_COMMAND": true}
+
+// agentlessSSHCommand is the ssh git runs for a remote verb. Command-line -o
+// options beat ~/.ssh/config, so an IdentityAgent set there cannot reach an
+// agent; BatchMode keeps it from prompting. Key files ssh finds on its own
+// (default identities, IdentityFile entries in the config) are not an agent
+// and are not blocked here.
+const agentlessSSHCommand = "ssh -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes"
 
 // remoteEnv is base without the ssh-agent variables, plus extra, with git's
-// terminal prompting off.
+// terminal prompting off and ssh pinned to agentlessSSHCommand.
 func remoteEnv(base, extra []string) []string {
-	env := make([]string, 0, len(base)+len(extra)+1)
+	env := make([]string, 0, len(base)+len(extra)+2)
 	for _, assignment := range base {
 		name, _, _ := strings.Cut(assignment, "=")
 		if !agentEnvVars[name] {
 			env = append(env, assignment)
 		}
 	}
-	return append(append(env, extra...), "GIT_TERMINAL_PROMPT=0")
+	return append(append(env, extra...), "GIT_SSH_COMMAND="+agentlessSSHCommand, "GIT_TERMINAL_PROMPT=0")
 }
 
 // remoteRunner runs git for a remote verb. It is a variable so a test can

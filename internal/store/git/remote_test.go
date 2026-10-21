@@ -393,11 +393,17 @@ func TestRemoteVerbsRunInTheSessionWorktreeThroughTheRemoteRunner(t *testing.T) 
 
 func TestRemoteEnvDropsTheAmbientAgent(t *testing.T) {
 	got := remoteEnv(
-		[]string{"A=1", "SSH_AUTH_SOCK=/run/agent", "SSH_AGENT_PID=7", "SSH_AUTH_SOCK_LIKE=keep", "GIT_TERMINAL_PROMPT=1"},
+		[]string{
+			"A=1", "SSH_AUTH_SOCK=/run/agent", "SSH_AGENT_PID=7", "SSH_AUTH_SOCK_LIKE=keep", "GIT_TERMINAL_PROMPT=1",
+			"GIT_SSH_COMMAND=ssh -o IdentityAgent=/run/agent", "GIT_SSH=/bin/ssh",
+		},
 		[]string{"GIT_EDITOR=true"},
 	)
 	joined := strings.Join(got, "\n")
-	for _, banned := range []string{"SSH_AUTH_SOCK=", "SSH_AGENT_PID="} {
+	if !strings.Contains("\n"+joined+"\n", "\nGIT_SSH_COMMAND="+agentlessSSHCommand+"\n") || strings.Count(joined, "GIT_SSH_COMMAND=") != 1 {
+		t.Errorf("ssh must be pinned to the agentless command exactly once, got %q", got)
+	}
+	for _, banned := range []string{"SSH_AUTH_SOCK=", "SSH_AGENT_PID=", "GIT_SSH=", "GIT_SSH_COMMAND=ssh -o IdentityAgent=/run"} {
 		if strings.Contains("\n"+joined, "\n"+banned) {
 			t.Errorf("%s survived in %q", banned, got)
 		}
