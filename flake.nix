@@ -135,7 +135,7 @@
     # input below does now exist, but only as a Go-source bridge with its
     # inputs redirected to stand-ins, so that old concern no longer applies.)
     ringmaster = {
-      url = "https://code.linenisgreat.com/ringmaster/archive/s7-flag-day.tar.gz";
+      url = "https://code.linenisgreat.com/ringmaster/archive/master.tar.gz";
       inputs = {
         igloo.follows = "igloo";
         nixpkgs-master.follows = "nixpkgs-master";
