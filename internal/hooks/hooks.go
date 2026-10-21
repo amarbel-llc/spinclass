@@ -109,12 +109,10 @@ func runSessionStart(input hookInput) error {
 			os.Getenv("HOME"), os.Getenv("XDG_STATE_HOME"), envPrincipal != "")
 		// Before the hello: it re-reads state and rewrites PID/HelloSentAt, so
 		// the recorded principal must already be on disk to survive that write.
+		logPrincipalMismatch(cwd, envPrincipal, input.SessionID)
 		if principal, source, ok := principalForHook(envPrincipal, input.SessionID); ok {
 			hookTrace(cwd, "SessionStart principal source=%s principal=%q", source, principal)
 			recordOwnPrincipal(cwd, principal)
-		} else if envPrincipal != "" {
-			hookTrace(cwd, "SessionStart principal not recorded: CLOWN_SESSION_ID=%q disagrees with hook session_id=%q", envPrincipal, input.SessionID)
-			sessionlog.Errorf("principal not recorded: CLOWN_SESSION_ID=%q disagrees with hook session_id=%q", envPrincipal, input.SessionID)
 		}
 		maybeSendSpawnHello(cwd, input.SessionID) // spawn handshake (FDR 0006); never blocks startup
 		return nil
@@ -269,20 +267,29 @@ func evaluateImplicitCheckout(cwd string) (implicitCheckout, ImplicitRefusal) {
 }
 
 // principalForHook picks the principal to record: CLOWN_SESSION_ID when set,
-// else the hook's session_id (clown does not export CLOWN_SESSION_ID to the
-// hook, #392). When both are set and differ it records nothing (ok=false);
-// both empty is also ok=false. source names which input supplied it.
+// always (it is THE principal; a differing hook session_id is only logged, see
+// logPrincipalMismatch), else the hook's session_id as a fallback (clown does
+// not export CLOWN_SESSION_ID to the hook, #392). Both empty is ok=false.
+// source names which input supplied it.
 func principalForHook(envPrincipal, hookSessionID string) (principal, source string, ok bool) {
 	switch {
-	case envPrincipal == "" && hookSessionID == "":
-		return "", "", false
-	case envPrincipal == "":
-		return hookSessionID, "hook-session-id", true
-	case hookSessionID == "" || hookSessionID == envPrincipal:
+	case envPrincipal != "":
 		return envPrincipal, "env", true
+	case hookSessionID != "":
+		return hookSessionID, "hook-session-id", true
 	default:
 		return "", "", false
 	}
+}
+
+// logPrincipalMismatch records, without refusing anything, that the env
+// principal and the hook session_id are both set and differ.
+func logPrincipalMismatch(cwd, envPrincipal, hookSessionID string) {
+	if envPrincipal == "" || hookSessionID == "" || envPrincipal == hookSessionID {
+		return
+	}
+	hookTrace(cwd, "principal mismatch: using CLOWN_SESSION_ID=%q over hook session_id=%q", envPrincipal, hookSessionID)
+	sessionlog.Errorf("principal mismatch: using CLOWN_SESSION_ID=%q over hook session_id=%q", envPrincipal, hookSessionID)
 }
 
 // recordOwnPrincipal stores the worker's own principal (see principalForHook;

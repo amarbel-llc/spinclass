@@ -144,11 +144,11 @@ the same PreToolUse hook that consults `AlwaysAsk`:
    `session.SessionKeyOfPrincipal`), call `Backend.Classify`.
    - `Allow` -> `permissionDecision: allow`.
    - `Ask` -> no decision / explicit `ask`: the human is prompted.
-   - The hook's principal is `CLOWN_SESSION_ID` when set, else the hook JSON
-     `session_id` (`hooks.principalForHook`, the same source
-     `recordOwnPrincipal` uses); both set and different is a known but
-     unusable principal. Principal known but session unresolved (no recorded
-     session, ambiguous, conflicting sources) -> `Ask`, fail closed, force
+   - The hook's principal is `CLOWN_SESSION_ID` whenever it is set (it wins;
+     a differing hook `session_id` is logged, not refused), else the hook JSON
+     `session_id` as a fallback (`hooks.principalForHook`, the same source
+     `recordOwnPrincipal` uses). Principal known but session unresolved (no
+     recorded session, ambiguous) -> `Ask`, fail closed, force
      included, matching `SessionKeyOfPrincipal`'s ambiguity behaviour. No
      principal at all (a confined caller the hook cannot see) -> a non-force
      call is deferred to the serve (`Allow`); force still asks (see "Hook defers an
@@ -775,13 +775,17 @@ asking and the serve decides.
   (`perms.StoreVerdict`; refined by #392). If the session cannot be resolved and
   the hook sees no principal at all (a confined caller, clown#136), a non-force
   call returns `Allow` with the reason "deferred to the serve: body ownership
-  check applies". The hook's principal is `CLOWN_SESSION_ID` when set, else the
-  hook JSON `session_id` (clown does not export `CLOWN_SESSION_ID` to the
-  hook; `hooks.principalForHook`, the same source `recordOwnPrincipal` records
-  from); if both are set and differ, the principal is known but unusable.
-  `hooks.storeDecision` passes `perms.StoreVerdict` that principal plus whether
-  one was seen. A principal that is known but maps to no recorded session, maps
-  ambiguously, or conflicts returns `Ask` ("could not be resolved from its
+  check applies". The hook's principal is `CLOWN_SESSION_ID` whenever it is set,
+  else the hook JSON `session_id` as a fallback (clown does not export
+  `CLOWN_SESSION_ID` to the hook; `hooks.principalForHook`, the same source
+  `recordOwnPrincipal` records from). The env wins: when both are set and
+  differ the mismatch is logged (hook trace and session log, both ids) but
+  neither refused nor turned into an Ask; the env principal is recorded and
+  resolved. Residual: with the env empty, a `/clear` changes the hook
+  `session_id`, so the recorded principal no longer matches and the hook asks
+  (fail closed). `hooks.storeDecision` passes `perms.StoreVerdict` that
+  principal plus whether one was seen. A principal that is known but maps to no
+  recorded session or maps ambiguously returns `Ask` ("could not be resolved from its
   principal, so ownership cannot be judged; confirm"): the deferral is not
   justified because the principal is known. A resolved session is unchanged
   (`Classify` decides; owned targets allow, the rest ask). `force:true` asks in

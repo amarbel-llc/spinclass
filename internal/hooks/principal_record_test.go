@@ -19,7 +19,8 @@ func TestPrincipalForHook(t *testing.T) {
 		{"env empty, hook set", "", a, a, "hook-session-id", true},
 		{"env set, hook empty", a, "", a, "env", true},
 		{"both equal", a, a, a, "env", true},
-		{"both differ", a, b, "", "", false},
+		{"both differ, env wins", a, b, a, "env", true},
+		{"both differ swapped, env wins", b, a, b, "env", true},
 		{"both empty", "", "", "", "", false},
 	}
 	for _, tc := range tests {
@@ -56,11 +57,13 @@ func TestSessionStartWithoutClownSessionIDRecordsHookSessionID(t *testing.T) {
 	}
 }
 
-// When CLOWN_SESSION_ID and the hook session_id disagree nothing is recorded,
-// but the spawn hello still goes out.
-func TestSessionStartDisagreeingPrincipalSourcesRecordNothing(t *testing.T) {
+// When CLOWN_SESSION_ID and the hook session_id disagree CLOWN_SESSION_ID is
+// still THE principal and is recorded (the mismatch is only logged), and the
+// spawn hello still goes out.
+func TestSessionStartDisagreeingPrincipalSourcesRecordTheEnv(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	t.Setenv("CLOWN_SESSION_ID", "6f6f6f6f-0000-4000-8000-000000000000")
+	const envID = "6f6f6f6f-0000-4000-8000-000000000000"
+	t.Setenv("CLOWN_SESSION_ID", envID)
 	repo, wt := initSpawnedWorktree(t, "driver/key")
 
 	fireSessionStartWithID(t, wt, "5e5e5e5e-0000-4000-8000-000000000000")
@@ -69,8 +72,8 @@ func TestSessionStartDisagreeingPrincipalSourcesRecordNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Principal != "" {
-		t.Errorf("Principal = %q, want empty when the sources disagree", st.Principal)
+	if st.Principal != envID {
+		t.Errorf("Principal = %q, want the env principal %q when the sources disagree", st.Principal, envID)
 	}
 	if st.HelloSentAt == nil {
 		t.Error("the hello must still go out and adopt the state")

@@ -21,8 +21,8 @@ func storeDecision(input hookInput, mainRepoRoot, sessionWorktree string, rewrit
 		}
 	}
 	envPrincipal := os.Getenv("CLOWN_SESSION_ID")
-	principal, _, _ := principalForHook(envPrincipal, input.SessionID)
-	principalKnown := envPrincipal != "" || input.SessionID != ""
+	logPrincipalMismatch(input.CWD, envPrincipal, input.SessionID)
+	principal, _, principalKnown := principalForHook(envPrincipal, input.SessionID)
 	verdict, reason, isStore := perms.StoreVerdict(input.ToolName, toolInput, principal, principalKnown)
 	if !isStore {
 		return nil, false

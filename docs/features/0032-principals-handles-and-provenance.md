@@ -121,7 +121,12 @@ The SessionStart hook records the worker's principal in its session state
 (#392): `CLOWN_SESSION_ID` when set, else the hook's `session_id` (claude
 provider). clown does not export `CLOWN_SESSION_ID` to the hook; that the two
 are equal was verified by the operator on one session's paths, not by a code
-read. When both are set and differ, nothing is recorded.
+read. `CLOWN_SESSION_ID` is THE principal whenever it is set; the hook
+`session_id` is only a fallback when it is empty. When both are set and differ
+the mismatch is logged (both ids), not refused: the env principal is recorded.
+Residual: with the env empty, a `/clear` changes the hook `session_id`, so the
+recorded principal no longer matches and the grit PreToolUse hook asks (fail
+closed).
 
 Rejected: a spinclass-minted id (a fourth identity chat cannot address); the
 session key with a `bare/<rand>` fallback (the conflation being escaped).

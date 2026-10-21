@@ -36,14 +36,16 @@ func storeDecisionFor(t *testing.T, env, hookSessionID, cwd string, toolInput ma
 	return decision
 }
 
-// With CLOWN_SESSION_ID unset in the hook (a real worker), the hook session_id
-// is the principal: a recorded one resolves to its session and Classify decides
-// (own worktree allows, foreign repo_path asks); an unrecorded one asks; no
-// principal at all defers to the serve.
+// CLOWN_SESSION_ID is THE principal when set (a differing hook session_id is
+// only logged); with it unset (a real worker) the hook session_id is the
+// fallback principal. A recorded principal resolves to its session and Classify
+// decides (own worktree allows, foreign repo_path asks); an unrecorded one
+// asks; no principal at all defers to the serve.
 func TestStoreToolResolvesTheHookSessionID(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	repo, wt := initSpawnedWorktree(t, "driver/key")
 	const hookID = "5e5e5e5e-0000-4000-8000-000000000000"
+	const otherID = "6f6f6f6f-0000-4000-8000-000000000000"
 	st, err := session.Read(repo, "feature")
 	if err != nil {
 		t.Fatal(err)
@@ -62,8 +64,11 @@ func TestStoreToolResolvesTheHookSessionID(t *testing.T) {
 	}{
 		{"recorded hook id, foreign repo_path", "", hookID, foreign, "ask"},
 		{"recorded hook id, own worktree", "", hookID, wt, "allow"},
-		{"unrecorded hook id", "", "6f6f6f6f-0000-4000-8000-000000000000", wt, "ask"},
-		{"env and hook id disagree", "6f6f6f6f-0000-4000-8000-000000000000", hookID, wt, "ask"},
+		{"unrecorded hook id", "", otherID, wt, "ask"},
+		{"env not recorded, differing hook id recorded: env wins, unresolved asks", otherID, hookID, wt, "ask"},
+		{"env recorded, differing hook id: env resolves, own worktree", hookID, otherID, wt, "allow"},
+		{"env recorded, differing hook id: env resolves, foreign repo_path", hookID, otherID, foreign, "ask"},
+		{"env recorded, no hook id, own worktree", hookID, "", wt, "allow"},
 		{"no principal at all defers", "", "", foreign, "allow"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
