@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"code.linenisgreat.com/ringmaster/pkgs/jobwake"
+
+	"code.linenisgreat.com/spinclass/internal/testringmaster"
 )
 
 // resetProtocolCheck clears the memoized CheckProtocol verdict. CheckProtocol is
@@ -123,16 +125,19 @@ func TestFlockEnabledFlag(t *testing.T) {
 	}
 }
 
-// TestAcquireJobLockLifecycle drives clown.AcquireJobLock against real jobwake
-// path resolution in an isolated state dir (no ringmaster binary needed — the
-// flock is a pure in-process library call). It proves the wrapper acquires,
-// refuses a concurrent second holder, and re-acquires after release — the flock
-// contract #26 relies on to make a live producer distinguishable from a dead one.
+// TestAcquireJobLockLifecycle drives clown.AcquireJobLock against ringmaster's
+// in-process host service (RFC-0020 §7.3: the hold is a service call, so the
+// job must exist — Start it first, as the producer does). It proves the wrapper
+// acquires, refuses a concurrent second holder, and re-acquires after release
+// while the job is still open — the hold contract #26 relies on to make a live
+// producer distinguishable from a dead one.
 func TestAcquireJobLockLifecycle(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("CLOWN_SESSION_ID", "spinclass-flock-test")
-	t.Setenv("CLOWN_DISABLE_JOB_WAKEUP", "")
-	jobID := "merge-deadbeef"
+	testringmaster.Start(t)
+	jobID, err := jobwake.Start(jobwake.StartOpts{Label: "merge", Source: "spinclass"})
+	if err != nil {
+		t.Fatalf("jobwake.Start: %v", err)
+	}
 
 	release, err := AcquireJobLock(jobID)
 	if err != nil {
@@ -150,7 +155,7 @@ func TestAcquireJobLockLifecycle(t *testing.T) {
 	}
 
 	// After release the lock is free (the explicit-release counterpart of the
-	// OS releasing it on crash) — a re-acquire must succeed.
+	// hold ending on crash) — a re-acquire must succeed.
 	release2, err := AcquireJobLock(jobID)
 	if err != nil {
 		t.Fatalf("re-acquire after release: %v", err)

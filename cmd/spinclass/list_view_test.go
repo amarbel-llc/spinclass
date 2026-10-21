@@ -10,7 +10,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"code.linenisgreat.com/purse-first/libs/dewey/pkgs/mesa"
+	"code.linenisgreat.com/ringmaster/pkgs/jobwake"
 	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/testringmaster"
 )
 
 // TestListRenderMode locks the CLI render-mode decision: --watch wins over
@@ -142,25 +144,27 @@ func TestRenderListTableShowsProfileColumn(t *testing.T) {
 	}
 }
 
+// registerClownPresence stands up ringmaster's in-process host service and
+// announces one live clown per session key under the given decoration (the
+// spinclass session key), the way clown's CLOWN_GROUP_ID does. The decoration
+// is read from the environment when the shared client is built, so it is set
+// before the first jobwake call.
+func registerClownPresence(t *testing.T, decoration string, sessionKeys ...string) {
+	t.Helper()
+	t.Setenv("CLOWN_GROUP_ID", decoration)
+	testringmaster.Start(t)
+	for _, key := range sessionKeys {
+		if err := jobwake.RegisterPresenceKey(key, time.Now()); err != nil {
+			t.Fatalf("RegisterPresenceKey(%q): %v", key, err)
+		}
+	}
+}
+
 // TestRenderListTableFoldsClownCountIntoStatus: when clown presence exists for
 // a session's key (decoration), each live clown is rendered as a 🤡 inside the
 // merged STATUS cell — there is no longer a separate CLOWNS column.
 func TestRenderListTableFoldsClownCountIntoStatus(t *testing.T) {
-	state := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", state)
-	dir := filepath.Join(state, "clown", "presence")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	// Two live clowns on the same session key → two presence records → two 🤡.
-	for _, ch := range []string{"abcd", "efgh"} {
-		rec := `{"sessionKey":"uuid-` + ch + `","channelId":"` + ch +
-			`","decoration":"spinclass/feat","lastSeen":"` +
-			time.Now().Format(time.RFC3339Nano) + `"}`
-		if err := os.WriteFile(filepath.Join(dir, ch+".json"), []byte(rec), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
+	registerClownPresence(t, "spinclass/feat", "uuid-abcd", "uuid-efgh")
 
 	out := renderListTable([]session.State{{
 		SessionState: session.StateActive,
@@ -189,17 +193,7 @@ func TestRenderListTableFoldsClownCountIntoStatus(t *testing.T) {
 // 🤡 badge; the inactive→running-detached promotion itself is covered by
 // session.TestResolveDisplayState.
 func TestRenderListTablePresenceFoldsIntoStatus(t *testing.T) {
-	state := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", state)
-	dir := filepath.Join(state, "clown", "presence")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	rec := `{"sessionKey":"uuid","channelId":"abcd","decoration":"spinclass/feat","lastSeen":"` +
-		time.Now().Format(time.RFC3339Nano) + `"}`
-	if err := os.WriteFile(filepath.Join(dir, "abcd.json"), []byte(rec), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	registerClownPresence(t, "spinclass/feat", "uuid")
 
 	out := renderListTable([]session.State{{
 		SessionState: session.StateInactive, // recorded PID dead → base inactive

@@ -4,11 +4,12 @@ import (
 	"context"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"code.linenisgreat.com/ringmaster/pkgs/jobwake"
+
+	"code.linenisgreat.com/spinclass/internal/testringmaster"
 )
 
 // These tests drive the REAL ringmaster binary rather than the shell stubs the
@@ -54,24 +55,15 @@ func realRingmaster(t *testing.T) string {
 			"(nix provides it via nativeCheckInputs)")
 	}
 
-	root := t.TempDir()
-	state := filepath.Join(root, "state")
-	run := filepath.Join(root, "run")
-	for _, d := range []string{state, run} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", d, err)
-		}
-	}
-
 	t.Setenv("RINGMASTER_BIN", bin)
-	t.Setenv("XDG_STATE_HOME", state)
-	t.Setenv("XDG_RUNTIME_DIR", run)
 	t.Setenv("CLOWN_SESSION_ID", "spinclass-contract-test")
-	// A stray CLOWN_DISABLE_JOB_WAKEUP in the ambient environment would turn
-	// every emit into an exit-0 no-op and quietly hollow out the assertions.
-	t.Setenv("CLOWN_DISABLE_JOB_WAKEUP", "")
-
-	return state
+	// Since the S7 flag day the CLI is a client of ringmaster's host service
+	// (RFC-0020), so the real binary needs one to talk to. The in-process
+	// service runs in this test's isolated state/runtime dirs, which the
+	// spawned CLI inherits through the environment. testringmaster.Start also
+	// clears CLOWN_DISABLE_JOB_WAKEUP: a stray ambient value would turn every
+	// emit into an exit-0 no-op and quietly hollow out the assertions.
+	return testringmaster.Start(t)
 }
 
 // ringmasterOut runs the real binary with the test's isolated env and returns

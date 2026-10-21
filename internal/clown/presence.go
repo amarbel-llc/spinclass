@@ -1,21 +1,16 @@
 package clown
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"time"
+
+	"code.linenisgreat.com/ringmaster/pkgs/jobwake"
 )
 
-// presenceStale mirrors clown's RFC-0014 §4.2 staleness window: a presence
-// record not refreshed within this span is treated as dead. Liveness derived
-// from presence MUST degrade a stale/missing record to dead, never false-alive.
-const presenceStale = 2 * time.Minute
-
-// Presence is one clown instance's presence record (clown RFC-0014 §4.1,
-// mirroring clown's internal/jobwake/presence.go). spinclass consumes the index
-// read-only for session liveness and the `sc list` 1-to-many view; Decoration
-// is the spinclass session key (clown's CLOWN_GROUP_ID = ${SPINCLASS_SESSION_ID}).
+// Presence is one clown instance's presence record (RFC-0013 §3.3), as
+// ringmaster's host service keeps it (RFC-0020 §6.4). spinclass consumes the
+// listing read-only for session liveness and the `sc list` 1-to-many view;
+// Decoration is the spinclass session key (clown's CLOWN_GROUP_ID =
+// ${SPINCLASS_SESSION_ID}).
 type Presence struct {
 	SessionKey  string `json:"sessionKey"`
 	ChannelID   string `json:"channelId"`
@@ -24,54 +19,26 @@ type Presence struct {
 	LastSeen    string `json:"lastSeen"`
 }
 
-// presenceDir is clown's presence index directory:
-// $XDG_STATE_HOME/clown/presence/ (XDG_STATE_HOME defaults to ~/.local/state
-// per the basedir spec). Returns "" when no home can be resolved.
-func presenceDir() string {
-	base := os.Getenv("XDG_STATE_HOME")
-	if base == "" {
-		home, err := os.UserHomeDir()
-		if err != nil || home == "" {
-			return ""
-		}
-		base = filepath.Join(home, ".local", "state")
-	}
-	return filepath.Join(base, "clown", "presence")
-}
-
-// ReadPresence returns the live (non-stale) clown presence records — the
-// clown→spinclass consumer half of the RFC-0014 awareness seam. It is read-only
-// and best-effort: a missing directory (bare spinclass, or no clown) or an
-// unreadable/unparseable record yields fewer/zero records, never an error.
-// Records whose lastSeen is older than the staleness window, or unparseable,
-// are dropped (degrade stale → dead, never false-alive).
+// ReadPresence returns the live clown presence records from ringmaster's host
+// service (jobwake.ListPresence) — the clown→spinclass consumer half of the
+// awareness seam. The service owns staleness (RFC-0020 §6.4), so every record
+// it lists is live. Best-effort: an unreachable service (bare spinclass, no
+// clown, no ringmaster service) yields zero records, never an error — liveness
+// degrades to dead, never false-alive.
 func ReadPresence(now time.Time) []Presence {
-	dir := presenceDir()
-	if dir == "" {
-		return nil
-	}
-	entries, err := os.ReadDir(dir)
+	listed, err := jobwake.ListPresence(now)
 	if err != nil {
 		return nil
 	}
-	var out []Presence
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
-		if err != nil {
-			continue
-		}
-		var p Presence
-		if json.Unmarshal(data, &p) != nil {
-			continue
-		}
-		t, err := time.Parse(time.RFC3339Nano, p.LastSeen)
-		if err != nil || now.Sub(t) > presenceStale {
-			continue
-		}
-		out = append(out, p)
+	out := make([]Presence, 0, len(listed))
+	for _, p := range listed {
+		out = append(out, Presence{
+			SessionKey:  p.SessionKey,
+			ChannelID:   p.ChannelID,
+			Decoration:  p.Decoration,
+			Description: p.Description,
+			LastSeen:    p.LastSeen,
+		})
 	}
 	return out
 }

@@ -1,95 +1,71 @@
 package clown
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/testfs"
+	"code.linenisgreat.com/ringmaster/pkgs/jobwake"
+
+	"code.linenisgreat.com/spinclass/internal/testringmaster"
 )
 
-func writePresence(t *testing.T, dir string, p Presence) {
+// registerPresence announces key to the in-process service. The descriptive
+// fields (decoration, description) come from the environment the shared client
+// was built under, so callers set CLOWN_GROUP_ID / CLOWN_GROUP_DESCRIPTION
+// BEFORE the first jobwake call of the test (testringmaster.Start does none).
+func registerPresence(t *testing.T, key string) {
 	t.Helper()
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	data, _ := json.Marshal(p)
-	if err := os.WriteFile(filepath.Join(dir, p.ChannelID+".json"), data, 0o600); err != nil {
-		t.Fatal(err)
+	if err := jobwake.RegisterPresenceKey(key, time.Now()); err != nil {
+		t.Fatalf("RegisterPresenceKey(%q): %v", key, err)
 	}
 }
 
-func TestReadPresenceDropsStale(t *testing.T) {
-	state := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", state)
-	dir := filepath.Join(state, "clown", "presence")
-	now := time.Now()
+func TestReadPresenceMapsServiceRecords(t *testing.T) {
+	t.Setenv("CLOWN_GROUP_ID", "repo/feat")
+	t.Setenv("CLOWN_GROUP_DESCRIPTION", "a feature")
+	testringmaster.Start(t)
+	registerPresence(t, "uuid-a")
 
-	writePresence(t, dir, Presence{SessionKey: "uuid-a", ChannelID: "aaaa", Decoration: "repo/feat", LastSeen: now.Format(time.RFC3339Nano)})
-	writePresence(t, dir, Presence{SessionKey: "uuid-b", ChannelID: "bbbb", Decoration: "repo/feat", LastSeen: now.Add(-5 * time.Minute).Format(time.RFC3339Nano)})
-	writePresence(t, dir, Presence{SessionKey: "uuid-c", ChannelID: "cccc", Decoration: "repo/other", LastSeen: now.Format(time.RFC3339Nano)})
-
-	got := ReadPresence(now)
-	if len(got) != 2 {
-		t.Fatalf("ReadPresence = %d records, want 2 (stale dropped): %+v", len(got), got)
+	got := ReadPresence(time.Now())
+	if len(got) != 1 {
+		t.Fatalf("ReadPresence = %d records, want 1: %+v", len(got), got)
+	}
+	p := got[0]
+	if p.SessionKey != "uuid-a" || p.ChannelID != jobwake.ChannelID("uuid-a") ||
+		p.Decoration != "repo/feat" || p.Description != "a feature" || p.LastSeen == "" {
+		t.Errorf("record not mapped 1:1 from the service: %+v", p)
 	}
 }
 
-// TestReadPresenceAcceptsRFC3339WithoutFraction guards the bats fixture path:
-// a lastSeen with no fractional seconds (what `date -u +%Y-%m-%dT%H:%M:%SZ`
-// emits) must still parse against RFC3339Nano and count as live.
-func TestReadPresenceAcceptsRFC3339WithoutFraction(t *testing.T) {
-	state := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", state)
-	dir := filepath.Join(state, "clown", "presence")
-	now := time.Now()
-	writePresence(t, dir, Presence{ChannelID: "nf", Decoration: "repo/feat", LastSeen: now.UTC().Format("2006-01-02T15:04:05Z")})
-	if got := ReadPresence(now); len(got) != 1 {
-		t.Errorf("ReadPresence = %d, want 1 (no-fraction RFC3339 must parse)", len(got))
-	}
-}
-
-func TestReadPresenceMissingDirIsEmpty(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir()) // no clown/presence subdir
+func TestReadPresenceNoServiceIsEmpty(t *testing.T) {
+	// A runtime dir with no service listening: bare spinclass, no clown.
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 	if got := ReadPresence(time.Now()); len(got) != 0 {
-		t.Errorf("ReadPresence with no dir = %+v, want empty", got)
+		t.Errorf("ReadPresence with no service = %+v, want empty", got)
 	}
 }
 
-func TestReadPresenceSkipsUnparseable(t *testing.T) {
-	state := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", state)
-	dir := filepath.Join(state, "clown", "presence")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now()
-	// Garbage file + a record with a bad timestamp — both dropped, no error.
-	testfs.MustWriteFile(t, filepath.Join(dir, "garbage.json"), []byte("not json"), 0o600)
-	writePresence(t, dir, Presence{ChannelID: "bad", Decoration: "repo/x", LastSeen: "not-a-time"})
-	writePresence(t, dir, Presence{ChannelID: "ok", Decoration: "repo/x", LastSeen: now.Format(time.RFC3339Nano)})
+func TestPresenceByDecorationGroups(t *testing.T) {
+	t.Setenv("CLOWN_GROUP_ID", "repo/feat")
+	testringmaster.Start(t)
+	registerPresence(t, "uuid-a")
+	registerPresence(t, "uuid-b")
 
-	if got := ReadPresence(now); len(got) != 1 {
-		t.Errorf("ReadPresence = %d, want 1 (garbage + bad-timestamp dropped)", len(got))
-	}
-}
-
-func TestPresenceByDecorationGroupsAndSkipsUngrouped(t *testing.T) {
-	state := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", state)
-	dir := filepath.Join(state, "clown", "presence")
-	now := time.Now()
-	writePresence(t, dir, Presence{ChannelID: "a", Decoration: "repo/feat", LastSeen: now.Format(time.RFC3339Nano)})
-	writePresence(t, dir, Presence{ChannelID: "b", Decoration: "repo/feat", LastSeen: now.Format(time.RFC3339Nano)})
-	writePresence(t, dir, Presence{ChannelID: "c", Decoration: "", LastSeen: now.Format(time.RFC3339Nano)}) // ungrouped
-
-	byKey := PresenceByDecoration(now)
+	byKey := PresenceByDecoration(time.Now())
 	if len(byKey) != 1 {
-		t.Errorf("groups = %d, want 1 (ungrouped skipped)", len(byKey))
+		t.Errorf("groups = %d, want 1", len(byKey))
 	}
 	if len(byKey["repo/feat"]) != 2 {
 		t.Errorf("repo/feat = %d clowns, want 2", len(byKey["repo/feat"]))
+	}
+}
+
+func TestPresenceByDecorationSkipsUngrouped(t *testing.T) {
+	t.Setenv("CLOWN_GROUP_ID", "")
+	testringmaster.Start(t)
+	registerPresence(t, "uuid-c")
+
+	if byKey := PresenceByDecoration(time.Now()); len(byKey) != 0 {
+		t.Errorf("groups = %+v, want none (ungrouped skipped)", byKey)
 	}
 }

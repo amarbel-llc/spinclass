@@ -13,6 +13,7 @@ import (
 	"code.linenisgreat.com/ringmaster/pkgs/jobwake"
 
 	"code.linenisgreat.com/spinclass/internal/clown"
+	"code.linenisgreat.com/spinclass/internal/testringmaster"
 )
 
 // TestMain strips CLOWN_BIN for the whole package: the dev/CI environment
@@ -31,6 +32,14 @@ func TestMain(m *testing.M) {
 // reports true (the emit gate). ok=false makes every call exit 1.
 func installStub(t *testing.T, argsFile string, ok bool) {
 	t.Helper()
+	installStubWithJobID(t, argsFile, ok, "job-deadbeef")
+}
+
+// installStubWithJobID is installStub with the id `ringmaster start` prints
+// chosen by the caller — for tests whose job must exist in a real (in-process)
+// ringmaster service so the liveness hold (a service call) can find it.
+func installStubWithJobID(t *testing.T, argsFile string, ok bool, jobID string) {
+	t.Helper()
 	dir := t.TempDir()
 	script := filepath.Join(dir, "ringmaster")
 	exit := "1"
@@ -47,7 +56,7 @@ func installStub(t *testing.T, argsFile string, ok bool) {
 	body := "#!/bin/sh\n" +
 		"mkdir -p " + argsFile + " 2>/dev/null\n" +
 		"printf '%s\\n' \"$@\" > \"$(mktemp " + argsFile + "/inv.XXXXXX)\"\n" +
-		"if [ \"$1\" = start ]; then echo job-deadbeef; fi\n" +
+		"if [ \"$1\" = start ]; then echo " + jobID + "; fi\n" +
 		"exit " + exit + "\n"
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatalf("write stub ringmaster: %v", err)
@@ -164,13 +173,21 @@ func runWaked(t *testing.T, wt, kind string, fn Func) {
 func TestStartHoldsLivenessFlockWhenEnabled(t *testing.T) {
 	wt := t.TempDir()
 	argsFile := filepath.Join(t.TempDir(), "args")
-	installStub(t, argsFile, true)
 
-	// Isolate the flock's on-disk world and turn on the flag job.Start reads
-	// (the serve-start ProtocolVersion verdict). Reset the process-global flag
-	// after so the other job tests keep the default-off behaviour.
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	// The hold is a call to ringmaster's host service (RFC-0020 §5), so run the
+	// in-process service and open a real job on it; the stub then hands that
+	// id back for `ringmaster start`. Reset the process-global flag after so
+	// the other job tests keep the default-off behaviour.
 	t.Setenv("CLOWN_SESSION_ID", "spinclass-job-flock-test")
+	testringmaster.Start(t)
+	jobID, err := jobwake.Start(jobwake.StartOpts{Label: "merge", Source: "spinclass"})
+	if err != nil {
+		t.Fatalf("jobwake.Start: %v", err)
+	}
+	installStubWithJobID(t, argsFile, true, jobID)
+
+	// Turn on the flag job.Start reads (the serve-start ProtocolVersion
+	// verdict).
 	clown.SetFlockEnabled(true)
 	t.Cleanup(func() { clown.SetFlockEnabled(false) })
 
@@ -184,10 +201,10 @@ func TestStartHoldsLivenessFlockWhenEnabled(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	// Mid-run, serve holds job-deadbeef's flock (the id the stub's `start`
-	// returns), so an independent acquire must be refused.
+	// Mid-run, serve holds the job (the id the stub's `start` returns), so an
+	// independent acquire must be refused.
 	<-running
-	if _, err := clown.AcquireJobLock("job-deadbeef"); !errors.Is(err, jobwake.ErrAlreadyLocked) {
+	if _, err := clown.AcquireJobLock(jobID); !errors.Is(err, jobwake.ErrAlreadyLocked) {
 		t.Errorf("during the job: AcquireJobLock got %v, want ErrAlreadyLocked (serve should hold the flock)", err)
 	}
 
@@ -200,7 +217,7 @@ func TestStartHoldsLivenessFlockWhenEnabled(t *testing.T) {
 
 	// The terminal record is durable and the flock released (clearRunning frees
 	// it before closing done) — a re-acquire must now succeed.
-	rel, err := clown.AcquireJobLock("job-deadbeef")
+	rel, err := clown.AcquireJobLock(jobID)
 	if err != nil {
 		t.Fatalf("after the job: AcquireJobLock should succeed (flock released), got %v", err)
 	}
