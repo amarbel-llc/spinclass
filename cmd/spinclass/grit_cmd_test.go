@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/store"
 )
 
@@ -52,6 +53,80 @@ func TestResolveGritCallerWithoutAServeRecordIsConfined(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	if got := resolveGritCaller(t.TempDir()); got.Confinement != store.ConfinementConfined {
 		t.Fatalf("a serve with no record must be confined, got %v", got.Confinement)
+	}
+}
+
+func mustGitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func isolatedGitRepo(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", root)
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(root, "gitconfig"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
+	t.Setenv("CLOWN_SESSION_ID", "a-principal-with-no-records")
+	repo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustGitIn(t, repo, "init", "-b", "main")
+	mustGitIn(t, repo, "commit", "--allow-empty", "-m", "first")
+	return repo
+}
+
+func TestResolveGritCallerOutsideASessionWorktreeOwnsNothing(t *testing.T) {
+	repo := isolatedGitRepo(t)
+	got := resolveGritCaller(repo)
+	if !got.NoSession || got.Branch != "" {
+		t.Fatalf("a plain checkout is no session worktree: NoSession=%v Branch=%q (the cwd's branch must not be borrowed)", got.NoSession, got.Branch)
+	}
+	if got := resolveGritCaller(t.TempDir()); !got.NoSession {
+		t.Error("a directory that is no repository is no session worktree")
+	}
+}
+
+func TestResolveGritCallerInASessionWorktreeOwnsItsBranch(t *testing.T) {
+	repo := isolatedGitRepo(t)
+	worktree := filepath.Join(repo, ".worktrees", "glad-buckeye")
+	mustGitIn(t, repo, "worktree", "add", "-b", "glad-buckeye", worktree)
+	if err := session.Write(session.State{RepoPath: repo, WorktreePath: worktree, Branch: "glad-buckeye", SessionKey: "repo/glad-buckeye", SessionState: session.StateInactive}); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(worktree, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustGitIn(t, worktree, "checkout", "-b", "glad-buckeye--topic")
+
+	got := resolveGritCaller(sub)
+	if got.NoSession || got.Dir != worktree || got.Branch != "glad-buckeye" {
+		t.Fatalf("got Dir=%q Branch=%q NoSession=%v, want the session worktree and the session branch (not the checked-out topic)", got.Dir, got.Branch, got.NoSession)
+	}
+}
+
+func TestRunGritRefusesWritesOutsideASessionWorktree(t *testing.T) {
+	repo := isolatedGitRepo(t)
+	t.Chdir(repo)
+	before, _ := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	_, err := runGrit(context.Background(), "commit", json.RawMessage(`{"message":"m","allow_empty":true}`))
+	if err == nil || !strings.Contains(err.Error(), "sc start") {
+		t.Fatalf("want a refusal pointing at sc start, got %v", err)
+	}
+	after, _ := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	if string(before) != string(after) {
+		t.Error("the refused commit moved HEAD")
+	}
+	if _, err := runGrit(context.Background(), "branch", json.RawMessage(`{"subcommand":"log","oneline":true}`)); err != nil {
+		t.Errorf("reads still work: %v", err)
 	}
 }
 
@@ -137,20 +212,15 @@ func TestGritStashToolRoundtrip(t *testing.T) {
 
 func TestGritToolsRegistered(t *testing.T) {
 	app := buildApp()
-	for _, n := range []string{"grit_stage", "grit_branch", "grit_commit", "grit_tag", "grit_worktree", "grit_stash"} {
+	for _, n := range []string{"grit_stage", "grit_branch", "grit_commit", "grit_tag", "grit_worktree", "grit_stash", "grit_remote", "grit_merge", "grit_clone"} {
 		if _, ok := app.GetCommand(n); !ok {
 			t.Errorf("%s not registered", n)
-		}
-	}
-	for _, n := range []string{"grit_clone", "grit_merge", "grit_remote"} {
-		if _, ok := app.GetCommand(n); ok {
-			t.Errorf("%s must not be registered yet", n)
 		}
 	}
 }
 
 func TestRunGritUnsupportedAndMissingSubcommand(t *testing.T) {
-	_, err := runGrit(context.Background(), "tag", json.RawMessage(`{"subcommand":"create"}`))
+	_, err := runGrit(context.Background(), "tag", json.RawMessage(`{"subcommand":"rename"}`))
 	if err == nil || !strings.Contains(err.Error(), "not yet supported") {
 		t.Fatalf("want not-yet-supported error, got %v", err)
 	}

@@ -326,6 +326,24 @@ var ownershipCases = []ownershipCase{
 	{"stash list of a foreign worktree", "stash", "list", foreignWorktreeArgs(nil), true},
 	{"stash list of the own worktree", "stash", "list", withArgs(nil), false},
 
+	{"merge in the own worktree", "merge", "", withArgs(map[string]any{"branch": "main"}), false},
+	{"merge in a foreign worktree", "merge", "", foreignWorktreeArgs(map[string]any{"branch": "main"}), true},
+	{"merge in the main checkout", "merge", "", mainCheckoutArgs(map[string]any{"branch": sessionBranch}), true},
+	{"tag create own", "tag", "create", withArgs(map[string]any{"name": sessionBranch + "--v", "lightweight": true}), false},
+	{"tag create foreign", "tag", "create", withArgs(map[string]any{"name": "v9", "lightweight": true}), true},
+	{"tag create lookalike", "tag", "create", withArgs(map[string]any{"name": sessionBranch + "-v", "lightweight": true}), true},
+	{"tag delete foreign", "tag", "delete", withArgs(map[string]any{"name": "foo"}), true},
+	{"tag push foreign", "tag", "push", withArgs(map[string]any{"name": "foo"}), true},
+	{"push a foreign branch", "remote", "push", withArgs(map[string]any{"branch": "B2"}), true},
+	{"push onto a foreign remote branch", "remote", "push", withArgs(map[string]any{"remote_branch": "B2"}), true},
+	{"push in a foreign worktree", "remote", "push", foreignWorktreeArgs(nil), true},
+	{"delete a remote branch", "remote", "push", withArgs(map[string]any{"branch": sessionBranch + "--topic", "delete": true}), true},
+	{"push-stack with a foreign branch", "remote", "push-stack", withArgs(map[string]any{"branches": []string{sessionBranch, "B2"}}), true},
+	{"pull in the main checkout", "remote", "pull", mainCheckoutArgs(nil), true},
+	{"pull in a foreign worktree", "remote", "pull", foreignWorktreeArgs(nil), true},
+	{"worktree remove of a foreign worktree", "worktree", "remove", func(f fixture) map[string]any { return map[string]any{"path": f.foreignWorktree} }, true},
+	{"worktree remove of the own worktree", "worktree", "remove", func(f fixture) map[string]any { return map[string]any{"path": f.worktree} }, true},
+
 	{"read of a foreign branch is not an ownership matter", "branch", "log", withArgs(map[string]any{"ref": "B2", "oneline": true}), false},
 }
 

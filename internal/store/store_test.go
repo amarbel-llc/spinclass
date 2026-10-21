@@ -9,7 +9,7 @@ func TestClassOfFailsClosed(t *testing.T) {
 	if ClassOf("nope", "nope") != ClassFloor {
 		t.Fatal("unknown verb must be ClassFloor")
 	}
-	if ClassOf("stage", "status") != ClassRead || ClassOf("stage", "add") != ClassWrite || ClassOf("worktree", "remove") != ClassFloor {
+	if ClassOf("stage", "status") != ClassRead || ClassOf("stage", "add") != ClassWrite || ClassOf("worktree", "remove") != ClassWrite {
 		t.Fatal("verb class table mismatch")
 	}
 }

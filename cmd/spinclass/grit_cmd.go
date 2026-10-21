@@ -12,6 +12,7 @@ import (
 	"code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
 	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/store"
 	gitstore "code.linenisgreat.com/spinclass/internal/store/git"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
@@ -112,10 +113,16 @@ func gritTools() []gritTool {
 		},
 		{
 			name:  "tag",
-			short: "Inspect git tags. Supported subcommands in spinclass so far: list, verify (create, delete, push are not yet supported).",
+			short: "Inspect and mutate git tags. Subcommands: list, verify, create, delete, push. A session owns tags named <session branch>--*. create signs by default; the signature needs a key this session may not have (git's error is returned), so pass sign=false or lightweight=true to opt out. Pushes never use the ambient ssh-agent.",
 			extra: []command.Param{
-				gritRepoPath,
-				gritParam("name", command.String, "Tag name (verify)."),
+				gritRepoPath, gritForce,
+				gritParam("name", command.String, "Tag name (verify, create, delete, push)."),
+				gritParam("ref", command.String, "Commit to tag (create only; default HEAD)."),
+				gritParam("message", command.String, "Tag message (create only; required unless lightweight)."),
+				gritParam("sign", command.Bool, "Sign the tag, git tag --sign (create only; default true unless lightweight). false makes an annotated, unsigned tag."),
+				gritParam("lightweight", command.Bool, "Create a lightweight tag with no message or signature (create only)."),
+				gritParam("remote", command.String, "A configured remote name (push only; default origin)."),
+				gritParam("delete", command.Bool, "Delete the tag on the remote instead of pushing it (push only). Always asks."),
 				gritParam("pattern", command.String, "Glob to filter tag names (list only)."),
 				gritParam("contains", command.String, "Only show tags reachable from this commit/ref (list only)."),
 				gritParam("sort", command.String, "Sort key passed to git tag --sort (list only; default -creatordate)."),
@@ -124,15 +131,66 @@ func gritTools() []gritTool {
 		},
 		{
 			name:  "worktree",
-			short: "Inspect git worktrees. Supported subcommands in spinclass so far: list (remove is not yet supported).",
-			extra: []command.Param{gritRepoPath},
+			short: "Inspect and remove git worktrees. Subcommands: list, remove. remove never removes the worktree the call runs in, and is auto-allowed only for another worktree whose branch the session owns.",
+			extra: []command.Param{
+				gritRepoPath, gritForce,
+				gritParam("path", command.String, "Worktree to remove (remove only)."),
+			},
+		},
+		{
+			name:  "remote",
+			short: "Talk to a configured remote. Subcommands: fetch, pull, push, push-stack. Runs in the session worktree with its own credentials and never the ambient ssh-agent; a session with no minted credential gets git's own auth error. Pushing or deleting the default branch is refused for a confined caller and always asks otherwise. push-stack force-pushes branches bottom to top with --force-with-lease after a dry run of all of them and returns a JSON {phase, results} report; it never touches the default branch.",
+			extra: []command.Param{
+				gritRepoPath, gritForce,
+				gritParam("remote", command.String, "A configured remote name (default origin). URLs are refused."),
+				gritParam("branch", command.String, "pull: remote branch to pull. push: local branch to push (default the current branch)."),
+				gritParam("branches", command.Array, "Branches to push, ordered bottom to top (push-stack only)."),
+				gritParam("remote_branch", command.String, "Destination branch on the remote (push only; default the local branch's name)."),
+				gritParam("set_upstream", command.Bool, "Set the upstream tracking reference (push only)."),
+				gritParam("force_with_lease", command.Bool, "Force-push only if the remote ref is where this repository last saw it (push only)."),
+				gritParam("lease_ref_sha", command.String, "With force_with_lease: the commit the remote branch is expected to be at, the explicit --force-with-lease=<branch>:<sha> form that needs no remote-tracking ref (push only)."),
+				gritParam("force_if_includes", command.Bool, "Also require the pushed commit to include the remote tip, --force-if-includes (push only; needs force_with_lease)."),
+				gritParam("delete", command.Bool, "Delete the remote branch named by branch or remote_branch (push only). Always asks."),
+				gritParam("all", command.Bool, "Fetch from all remotes (fetch only)."),
+				gritParam("prune", command.Bool, "Prune remote-tracking branches that no longer exist on the remote (fetch only)."),
+				gritParam("tags", command.Bool, "Fetch all tags (fetch only)."),
+				gritParam("rebase", command.Bool, "Rebase instead of merge (pull only)."),
+			},
+		},
+		{
+			name:         "merge",
+			short:        "Merge a branch into the current branch. Refused on the default branch. Auto-allowed only when the current branch is owned by the session.",
+			noSubcommand: true,
+			extra: []command.Param{
+				gritRepoPath,
+				gritParam("branch", command.String, "Branch to merge. Required unless abort or continue is set."),
+				gritParam("no_ff", command.Bool, "Create a merge commit even if a fast-forward is possible."),
+				gritParam("squash", command.Bool, "Squash the branch's commits into the working tree without committing."),
+				gritParam("abort", command.Bool, "Abort an in-progress merge."),
+				gritParam("continue", command.Bool, "Continue a merge after resolving conflicts."),
+			},
+		},
+		{
+			name:         "clone",
+			short:        "Clone a repository into destination. Auto-allowed only into the session worktree (its .tmp included); anywhere else asks. A confined caller may not clone. The source is not gated; the clone never uses the ambient ssh-agent.",
+			noSubcommand: true,
+			extra: []command.Param{
+				gritParam("source", command.String, "Repository to clone: a local path or URL."),
+				gritParam("destination", command.String, "Target directory, relative to the session worktree."),
+				gritParam("branch", command.String, "Branch or tag to check out, --branch."),
+				gritParam("depth", command.Int, "Create a shallow clone with this many commits, --depth."),
+				gritParam("bare", command.Bool, "Create a bare repository, --bare."),
+			},
 		},
 	}
 }
 
-// registerGritCommands registers the grit_<tool> store tools (FDR 0036, step
-// 4: reads, owned-branch writes and the stash shelf; clone/merge/remote are
-// later steps).
+// gritToolsWithoutSubcommand are the tools whose single verb has no
+// `subcommand` argument.
+var gritToolsWithoutSubcommand = map[string]bool{"commit": true, "merge": true, "clone": true}
+
+// registerGritCommands registers the grit_<tool> store tools (FDR 0036): all
+// nine of moxy's grit tools.
 func registerGritCommands(app *command.App) {
 	for _, t := range gritTools() {
 		name := "grit_" + t.name
@@ -187,7 +245,10 @@ func registerServeRecord() (func(), error) {
 // resolveGritCaller classifies the caller by the principal of the clown hosting
 // this serve, which is what the launching clown wrote into a confined unit's
 // record. Unresolved counts as confined. A confined caller works in the
-// worktree the frontend principal mapping names, falling back to the cwd.
+// worktree the frontend principal mapping names, falling back to the cwd. A
+// caller whose worktree is no recognised session worktree owns nothing
+// (store.Session.NoSession): its branch is not read from the cwd, and the body
+// refuses every write.
 func resolveGritCaller(cwd string) store.Session {
 	s := store.Session{Dir: cwd, Confinement: store.ConfinementConfined}
 	principal := os.Getenv("CLOWN_SESSION_ID")
@@ -200,11 +261,27 @@ func resolveGritCaller(cwd string) store.Session {
 			s.Dir = worktree
 		}
 	}
-	if branch, berr := git.BranchCurrent(s.Dir); berr == nil {
-		s.Branch = branch
+	if worktree, branch, ok := recognisedSessionWorktree(s.Dir); ok {
+		s.Dir, s.Branch = worktree, branch
+	} else {
+		s.NoSession = true
 	}
 	s.Identity = storeIdentityFor(s.Dir)
 	return s
+}
+
+// recognisedSessionWorktree reports the worktree root and session branch when
+// dir lies in a live, non-implicit spinclass session worktree.
+func recognisedSessionWorktree(dir string) (worktree, branch string, ok bool) {
+	top, err := git.Run(dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", "", false
+	}
+	st, err := session.FindByWorktreePath(top)
+	if err != nil || st.IsTombstone() || st.Kind == session.KindImplicit || st.WorktreePath == "" || st.Branch == "" {
+		return "", "", false
+	}
+	return st.WorktreePath, st.Branch, true
 }
 
 // storeIdentityFor reads the [store] identity from the sweatfile layers above
@@ -226,7 +303,7 @@ func runGrit(ctx context.Context, tool string, args json.RawMessage) (string, er
 	if err := json.Unmarshal(args, &head); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
-	if head.Subcommand == "" && tool != "commit" {
+	if head.Subcommand == "" && !gritToolsWithoutSubcommand[tool] {
 		return "", errors.New("subcommand is required")
 	}
 	cwd, err := os.Getwd()

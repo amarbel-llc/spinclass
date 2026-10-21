@@ -163,8 +163,9 @@ func TestClassifyNoTargetOperationsBindToCheckedOutBranch(t *testing.T) {
 		{name: "repo_path wrong type", tool: "stage", sub: "add", args: map[string]any{"repo_path": 3}, want: store.Ask},
 		{name: "cherry-pick", tool: "branch", sub: "cherry-pick", args: map[string]any{"commits": []any{"main"}}, want: store.Allow},
 		{name: "cherry-pick option-like", tool: "branch", sub: "cherry-pick", args: map[string]any{"commits": []any{"--abort"}}, want: store.Ask},
-		{name: "clone always asks", tool: "clone", args: map[string]any{"source": "x", "destination": "y"}, want: store.Ask},
-		{name: "worktree remove always asks", tool: "worktree", sub: "remove", args: map[string]any{"path": f.worktree}, want: store.Ask},
+		{name: "clone into the session worktree allows", tool: "clone", args: map[string]any{"source": "x", "destination": "y"}, want: store.Allow},
+		{name: "clone outside the session worktree asks", tool: "clone", args: map[string]any{"source": "x", "destination": "/elsewhere/y"}, want: store.Ask},
+		{name: "worktree remove of the own worktree asks", tool: "worktree", sub: "remove", args: map[string]any{"path": f.worktree}, want: store.Ask},
 		{name: "unknown verb is floor", tool: "branch", sub: "obliterate", args: map[string]any{}, want: store.Ask},
 	})
 }

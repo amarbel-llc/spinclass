@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"code.linenisgreat.com/spinclass/internal/store"
+	gitstore "code.linenisgreat.com/spinclass/internal/store/git"
 )
 
 // recordingBackend records the session and op Classify was called with.
@@ -146,6 +147,31 @@ func TestStoreVerdictToolsWithoutSubcommand(t *testing.T) {
 		}
 		if recorder.op.Tool != tool || recorder.op.Subcommand != "" {
 			t.Errorf("%s: op = %+v", tool, recorder.op)
+		}
+	}
+}
+
+// The remote family and the tag and worktree mutations reach the backend's
+// Classify with their subcommand, and the real git backend asks for the
+// default branch, a delete and a force.
+func TestStoreVerdictRemoteFamilyThroughTheGitBackend(t *testing.T) {
+	stubStore(t, gitstore.New(), &store.Session{Dir: t.TempDir(), Branch: "glad-buckeye"})
+	for _, tc := range []struct {
+		tool  string
+		input map[string]any
+		want  store.Verdict
+	}{
+		{"remote", map[string]any{"subcommand": "push", "force": true}, store.Ask},
+		{"remote", map[string]any{"subcommand": "push", "delete": true, "branch": "glad-buckeye"}, store.Ask},
+		{"remote", map[string]any{"subcommand": "push", "branch": "main"}, store.Ask},
+		{"remote", map[string]any{"subcommand": "push-stack", "branches": []any{}}, store.Ask},
+		{"worktree", map[string]any{"subcommand": "remove", "path": "/elsewhere"}, store.Ask},
+		{"tag", map[string]any{"subcommand": "create", "name": "v1"}, store.Ask},
+		{"clone", map[string]any{"source": "x", "destination": "/elsewhere/y"}, store.Ask},
+		{"remote", map[string]any{"subcommand": "fetch"}, store.Allow},
+	} {
+		if verdict, _, isStore := StoreVerdict(gritToolPrefix+tc.tool, tc.input); !isStore || verdict != tc.want {
+			t.Errorf("%s %v: got (%v, store=%v), want %v", tc.tool, tc.input, verdict, isStore, tc.want)
 		}
 	}
 }

@@ -93,6 +93,9 @@ func (b Backend) Classify(s store.Session, op store.Op) store.Verdict {
 	}
 	switch store.ClassOf(op.Tool, op.Subcommand) {
 	case store.ClassRead:
+		if op.Tool == "remote" && !(checker{session: s, args: a}).readRemoteConfigured() {
+			return store.Ask
+		}
 		return store.Allow
 	case store.ClassWrite:
 		if b.writeAllowed(s, op, a) {
@@ -156,7 +159,7 @@ func (a classifyArgs) flag(key string) bool {
 var optionScannedScalars = []string{
 	"ref", "name", "contains", "branch", "remote_branch", "root", "onto", "upstream",
 	"rebase_branch", "start_point", "pattern", "remote", "destination", "source", "stash_ref",
-	"fixup", "squash",
+	"fixup", "path",
 }
 
 // optionFree is false when any ref-like value could be read by git as an
@@ -165,6 +168,18 @@ func (a classifyArgs) optionFree() bool {
 	for _, key := range optionScannedScalars {
 		v, ok := a.str(key)
 		if !ok || strings.HasPrefix(v, "-") {
+			return false
+		}
+	}
+	// squash is a commit for commit and a flag for merge.
+	if v, present := a["squash"]; present && v != nil {
+		switch squashValue := v.(type) {
+		case string:
+			if strings.HasPrefix(squashValue, "-") {
+				return false
+			}
+		case bool:
+		default:
 			return false
 		}
 	}
@@ -191,6 +206,12 @@ type checker struct {
 
 func (b Backend) writeAllowed(s store.Session, op store.Op, a classifyArgs) bool {
 	c := checker{session: s, args: a}
+	if s.NoSession {
+		return false
+	}
+	if op.Tool == "clone" {
+		return c.cloneDestinationInSession()
+	}
 	if !c.bindsToSessionWorktree() {
 		return false
 	}
@@ -198,9 +219,13 @@ func (b Backend) writeAllowed(s store.Session, op store.Op, a classifyArgs) bool
 	case "stash list", "stash save", "stash apply", "stash drop":
 		return true
 	case "stage add", "stage unstage", "stage rm", "stage mv", "commit ",
-		"merge ", "remote pull", "branch reset-soft", "branch reset-hard",
+		"merge ", "branch reset-soft", "branch reset-hard",
 		"branch cherry-pick", "branch revert":
 		return c.currentBranchOwned()
+	case "remote pull":
+		return c.remoteConfigured() && c.currentBranchOwned()
+	case "worktree remove":
+		return c.worktreeRemoveOwned()
 	case "branch create":
 		return c.newBranchOwned("name")
 	case "branch delete":
@@ -214,11 +239,11 @@ func (b Backend) writeAllowed(s store.Session, op store.Op, a classifyArgs) bool
 	case "tag create", "tag delete":
 		return c.tagOwned()
 	case "tag push":
-		return c.tagOwned() && !a.flag("delete")
+		return c.remoteConfigured() && c.tagOwned() && !a.flag("delete")
 	case "remote push":
-		return c.pushOwned()
+		return c.remoteConfigured() && c.pushOwned()
 	case "remote push-stack":
-		return c.pushStackOwned()
+		return c.remoteConfigured() && c.pushStackOwned()
 	}
 	return false
 }
@@ -227,9 +252,16 @@ func (b Backend) writeAllowed(s store.Session, op store.Op, a classifyArgs) bool
 // worktree: no-target operations bind to its checked-out branch, so any other
 // directory would let them act on someone else's.
 func (c *checker) bindsToSessionWorktree() bool {
-	if c.session.Dir == "" || c.session.Branch == "" {
+	if c.session.Dir == "" || c.session.Branch == "" || !c.resolveDir() {
 		return false
 	}
+	top, err := git.Run(c.dir, "rev-parse", "--show-toplevel")
+	return err == nil && sameDir(top, c.session.Dir)
+}
+
+// resolveDir sets dir to the directory the call runs in: repo_path, resolved
+// against the session worktree, else the worktree itself.
+func (c *checker) resolveDir() bool {
 	repoPath, ok := c.args.str("repo_path")
 	if !ok {
 		return false
@@ -240,8 +272,91 @@ func (c *checker) bindsToSessionWorktree() bool {
 	} else if !filepath.IsAbs(c.dir) {
 		c.dir = filepath.Join(c.session.Dir, c.dir)
 	}
-	top, err := git.Run(c.dir, "rev-parse", "--show-toplevel")
-	return err == nil && sameDir(top, c.session.Dir)
+	return true
+}
+
+// remoteConfigured is true when no remote is named (git's default) or the name
+// is a configured remote. A URL is never one.
+func (c checker) remoteConfigured() bool {
+	remote, ok := c.args.str("remote")
+	return ok && (remote == "" || configuredRemote(c.dir, remote))
+}
+
+// readRemoteConfigured is remoteConfigured for a read verb, which is judged
+// without the session-worktree binding.
+func (c checker) readRemoteConfigured() bool {
+	remote, ok := c.args.str("remote")
+	if !ok {
+		return false
+	}
+	return remote == "" || (c.resolveDir() && c.dir != "" && configuredRemote(c.dir, remote))
+}
+
+// cloneDestinationInSession is true when the clone lands inside the session
+// worktree (its .tmp included); anywhere else is a human's call.
+func (c checker) cloneDestinationInSession() bool {
+	destination, ok := c.args.str("destination")
+	if !ok || destination == "" || c.session.Dir == "" {
+		return false
+	}
+	return withinDir(c.session.Dir, absoluteUnder(c.session.Dir, destination))
+}
+
+// withinDir is true when path, which need not exist yet, lies under root once
+// symlinks in the part that exists are resolved.
+func withinDir(root, path string) bool {
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(resolvedRoot, resolveExistingPrefix(filepath.Clean(path)))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func resolveExistingPrefix(path string) string {
+	rest := ""
+	for p := path; ; p = filepath.Dir(p) {
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			return filepath.Join(resolved, rest)
+		}
+		rest = filepath.Join(filepath.Base(p), rest)
+		if filepath.Dir(p) == p {
+			return path
+		}
+	}
+}
+
+// worktreeRemoveOwned is true when the target is another worktree whose
+// checked-out branch the session owns. The session's own worktree is never
+// removable through the tool.
+func (c checker) worktreeRemoveOwned() bool {
+	path, ok := c.args.str("path")
+	if !ok || path == "" {
+		return false
+	}
+	path = absoluteUnder(c.dir, path)
+	if sameDir(path, c.session.Dir) {
+		return false
+	}
+	list, err := git.Run(c.dir, "worktree", "list", "--porcelain")
+	if err != nil {
+		return false
+	}
+	for _, stanza := range strings.Split(list, "\n\n") {
+		var worktree, branch string
+		for _, line := range strings.Split(stanza, "\n") {
+			if rest, found := strings.CutPrefix(line, "worktree "); found {
+				worktree = rest
+			}
+			if rest, found := strings.CutPrefix(line, "branch "); found {
+				branch = rest
+			}
+		}
+		if worktree != "" && sameDir(worktree, path) {
+			return strings.HasPrefix(branch, "refs/heads/") && c.owned(branch)
+		}
+	}
+	return false
 }
 
 func (c checker) owned(fullRef string) bool {

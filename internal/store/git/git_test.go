@@ -176,9 +176,9 @@ func TestRepoPathOverridesSession(t *testing.T) {
 	}
 }
 
-func TestWriteVerbsUnsupported(t *testing.T) {
+func TestUnknownVerbsUnsupported(t *testing.T) {
 	repo := newRepo(t)
-	for _, c := range [][2]string{{"tag", "create"}, {"tag", "push"}, {"worktree", "remove"}, {"remote", "push"}, {"merge", ""}, {"clone", ""}, {"bogus", "x"}} {
+	for _, c := range [][2]string{{"worktree", "add"}, {"remote", "set-url"}, {"tag", "rename"}, {"bogus", "x"}} {
 		_, err := do(t, repo, c[0], c[1], nil)
 		if !errors.Is(err, store.ErrUnsupported) {
 			t.Errorf("%v: want ErrUnsupported, got %v", c, err)
@@ -204,6 +204,7 @@ func TestClassify(t *testing.T) {
 		{"stage", "add", store.Ask},
 		{"branch", "delete", store.Ask},
 		{"worktree", "remove", store.Ask},
+		{"remote", "push", store.Ask},
 		{"stash", "save", store.Ask},
 		{"commit", "", store.Ask},
 		{"unknown", "verb", store.Ask},

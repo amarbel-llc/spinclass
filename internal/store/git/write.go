@@ -17,10 +17,12 @@ import (
 // `--`.
 func (a args) refLikeValues() []string {
 	values := []string{
-		a.Ref, a.Name, a.Contains, a.Fixup, a.Squash, a.StartPoint,
+		a.Ref, a.Name, a.Contains, a.Fixup, a.Squash.target, a.StartPoint,
 		a.Upstream, a.Onto, a.RebaseBranch, a.Root,
+		a.Remote, a.Branch, a.RemoteBranch, a.Path,
 	}
-	return append(values, a.Commits...)
+	values = append(values, a.Commits...)
+	return append(values, a.Branches...)
 }
 
 func buildWriteArgv(op store.Op, a args) ([]string, error) {
@@ -118,7 +120,7 @@ func buildWriteArgv(op store.Op, a args) ([]string, error) {
 // buildCommitArgv names no identity: Do stamps the configured one through the
 // environment (identityEnv), else git resolves its own.
 func buildCommitArgv(a args) ([]string, error) {
-	if a.Fixup != "" && a.Squash != "" {
+	if a.Fixup != "" && a.Squash.target != "" {
 		return nil, errors.New("fixup and squash are mutually exclusive")
 	}
 	argv := []string{"commit"}
@@ -126,14 +128,14 @@ func buildCommitArgv(a args) ([]string, error) {
 		argv = append(argv, "--allow-empty")
 	}
 	switch {
-	case a.Fixup != "" || a.Squash != "":
+	case a.Fixup != "" || a.Squash.target != "":
 		if a.Amend {
 			return nil, errors.New("amend cannot be combined with fixup or squash")
 		}
 		if a.Fixup != "" {
 			return append(argv, "--fixup="+a.Fixup), nil
 		}
-		return append(argv, "--squash="+a.Squash), nil
+		return append(argv, "--squash="+a.Squash.target), nil
 	case a.Amend:
 		argv = append(argv, "--amend")
 		if a.Message == "" {
@@ -245,6 +247,11 @@ func refuseDefaultBranchOp(dir string, op store.Op, a args) error {
 		targets = []string{a.RebaseBranch}
 	case "branch restack":
 		targets = []string{"HEAD", a.Root}
+	case "merge ":
+		if a.Continue || a.Abort {
+			return nil
+		}
+		targets = []string{"HEAD"}
 	default:
 		return nil
 	}
@@ -298,6 +305,8 @@ func (e *ConflictError) Error() string {
 	switch e.Operation {
 	case "branch rebase", "branch restack":
 		b.WriteString("\nresolve and stage the paths, then run branch rebase with continue=true (or abort=true / skip=true).")
+	case "merge ", "remote pull":
+		b.WriteString("\nresolve and stage the paths, then commit (or abandon the merge with merge abort=true).")
 	default:
 		b.WriteString("\nresolve and stage the paths, then commit.")
 	}
@@ -314,6 +323,8 @@ var inProgressMarkers = map[string][]string{
 	"branch restack":     {"rebase-merge", "rebase-apply"},
 	"branch cherry-pick": {"CHERRY_PICK_HEAD"},
 	"branch revert":      {"REVERT_HEAD"},
+	"merge ":             {"MERGE_HEAD"},
+	"remote pull":        {"MERGE_HEAD", "rebase-merge", "rebase-apply"},
 }
 
 // describeFailure turns a failed git run into an error carrying git's own

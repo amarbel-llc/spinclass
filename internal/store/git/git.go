@@ -1,7 +1,8 @@
 // Package git is the git backend of the grit store tools (FDR 0036). It
 // implements the read verbs, the owned-branch write verbs (stage, commit,
-// branch) and the stash shelf; remote, merge, tag mutation, clone and worktree
-// remove return store.ErrUnsupported.
+// branch, merge, tag, worktree remove), the stash shelf and the remote family
+// (fetch, pull, push, push-stack, tag push, clone). Remote verbs run without
+// the ambient ssh-agent (remote.go).
 package git
 
 import (
@@ -35,9 +36,12 @@ func (Backend) Capabilities() store.Capabilities {
 		"stage":    {"status", "diff", "add", "unstage", "rm", "mv"},
 		"commit":   {""},
 		"branch":   branchVerbs,
-		"tag":      {"list", "verify"},
-		"worktree": {"list"},
+		"tag":      {"list", "verify", "create", "delete", "push"},
+		"worktree": {"list", "remove"},
 		"stash":    {"list", "save", "apply", "drop"},
+		"remote":   {"fetch", "pull", "push", "push-stack"},
+		"merge":    {""},
+		"clone":    {""},
 	}
 }
 
@@ -63,7 +67,7 @@ type args struct {
 	Amend        bool     `json:"amend"`
 	AllowEmpty   bool     `json:"allow_empty"`
 	Fixup        string   `json:"fixup"`
-	Squash       string   `json:"squash"`
+	Squash       squash   `json:"squash"`
 	StartPoint   string   `json:"start_point"`
 	Force        bool     `json:"force"`
 	NewBranch    bool     `json:"new_branch"`
@@ -88,6 +92,43 @@ type args struct {
 
 	IncludeUntracked bool   `json:"include_untracked"`
 	StashRef         string `json:"stash_ref"`
+
+	Remote          string   `json:"remote"`
+	Branch          string   `json:"branch"`
+	Branches        []string `json:"branches"`
+	RemoteBranch    string   `json:"remote_branch"`
+	SetUpstream     bool     `json:"set_upstream"`
+	ForceWithLease  bool     `json:"force_with_lease"`
+	LeaseRefSHA     string   `json:"lease_ref_sha"`
+	ForceIfIncludes bool     `json:"force_if_includes"`
+	All             bool     `json:"all"`
+	Prune           bool     `json:"prune"`
+	Tags            bool     `json:"tags"`
+	Rebase          bool     `json:"rebase"`
+	Delete          bool     `json:"delete"`
+	NoFF            bool     `json:"no_ff"`
+	Lightweight     bool     `json:"lightweight"`
+	Sign            *bool    `json:"sign"`
+	Path            string   `json:"path"`
+	Bare            bool     `json:"bare"`
+	Depth           int      `json:"depth"`
+}
+
+// squash is the `squash` argument: a commit to squash into for commit, a flag
+// for merge (moxy's two tools share the name).
+type squash struct {
+	target string
+	on     bool
+}
+
+func (q *squash) UnmarshalJSON(raw []byte) error {
+	if err := json.Unmarshal(raw, &q.target); err == nil {
+		return nil
+	}
+	if err := json.Unmarshal(raw, &q.on); err != nil {
+		return fmt.Errorf("squash must be a string or a boolean")
+	}
+	return nil
 }
 
 func (b Backend) Do(ctx context.Context, s store.Session, op store.Op) (store.Result, error) {
@@ -101,13 +142,19 @@ func (b Backend) Do(ctx context.Context, s store.Session, op store.Op) (store.Re
 		}
 	}
 	dir := a.RepoPath
-	if dir == "" {
+	if dir == "" || op.Tool == "clone" {
 		dir = s.Dir
 	}
 	if dir == "" {
 		return store.Result{}, fmt.Errorf("no repository: pass repo_path or run inside a session")
 	}
 
+	if err := refuseWithoutSession(s, op); err != nil {
+		return store.Result{}, err
+	}
+	if err := refuseDefaultBranchPush(s, dir, op, a); err != nil {
+		return store.Result{}, err
+	}
 	if err := b.refuseUnownedForConfined(s, op); err != nil {
 		return store.Result{}, err
 	}
@@ -115,8 +162,11 @@ func (b Backend) Do(ctx context.Context, s store.Session, op store.Op) (store.Re
 	if op.Tool == "stash" {
 		return doStash(dir, op, a)
 	}
+	if op.Tool == "remote" && op.Subcommand == "push-stack" {
+		return pushStack(ctx, s, dir, op, a)
+	}
 
-	argv, err := buildArgv(op, a)
+	argv, err := buildAnyArgv(dir, s, op, a)
 	if err != nil {
 		return store.Result{}, err
 	}
@@ -124,7 +174,13 @@ func (b Backend) Do(ctx context.Context, s store.Session, op store.Op) (store.Re
 		return store.Result{}, err
 	}
 	argv = withoutHooksForConfined(s, op, argv)
-	out, err := git.RunEnvContext(ctx, dir, append(writeEnv(op), identityEnv(s, op)...), argv...)
+	env := append(writeEnv(op), identityEnv(s, op)...)
+	var out string
+	if talksToRemote(op) {
+		out, err = remoteRunner(ctx, dir, env, argv...)
+	} else {
+		out, err = git.RunEnvContext(ctx, dir, env, argv...)
+	}
 	if err != nil {
 		return store.Result{}, describeFailure(dir, op, err, out)
 	}

@@ -98,6 +98,10 @@ type Session struct {
 	Confinement Confinement
 	// Identity is read by Do only, for the commit-creating verbs.
 	Identity Identity
+	// NoSession is set by the serve when the caller's worktree is not a
+	// recognised spinclass session worktree. Do refuses every write for it and
+	// Classify asks: such a caller owns nothing (FDR 0036 section 5).
+	NoSession bool
 }
 
 // Op is one tool invocation: a tool, its subcommand, and the raw JSON
@@ -173,7 +177,7 @@ var verbClasses = map[verb]Class{
 	{"tag", "delete"}: ClassWrite,
 
 	{"worktree", "list"}:   ClassRead,
-	{"worktree", "remove"}: ClassFloor,
+	{"worktree", "remove"}: ClassWrite,
 
 	{"remote", "fetch"}:      ClassRead,
 	{"remote", "pull"}:       ClassWrite,

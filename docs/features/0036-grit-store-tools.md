@@ -311,14 +311,89 @@ spinclass #380 / moxy #483 payoff.
 
 Push/fetch/pull/push-stack/tag push interact with FDR 0028's per-session
 credentials. Auto-allow applies only to owned refs and only through the
-session's worktree-scoped credential helper, never an ambient ssh-agent.
-Where no credential was minted (`allow-no-credential` or non-`forge-hosts`
-origins) pushes of owned refs still classify `Allow` but use whatever the
-worktree config provides; **interaction with `url.insteadOf` rewriting and
-moxy #390 (force-with-lease "stale info") needs a look at implementation and is
-not settled here**. `push` of a non-owned ref, `--delete` on any remote ref
-and `clone` stay `Ask`. Landing the session branch to the default branch stays
-the merge tool's job (FDR 0029); `remote push` of the default branch is `Ask`.
+session's worktree-scoped credential helper, never an ambient ssh-agent. The
+remote verbs run git with the session worktree as its working directory (so the
+worktree-scoped `credential.helper` and `url.insteadOf` apply), with
+`SSH_AUTH_SOCK` and `SSH_AGENT_PID` removed from the environment and
+`GIT_TERMINAL_PROMPT=0`. Where no credential was minted (`allow-no-credential`
+or non-`forge-hosts` origins) there is no fallback: the verb fails with git's
+own auth error. moxy #390 (force-with-lease "stale info") is settled by
+carrying `force_with_lease` and `lease_ref_sha` as given: both set is the
+explicit `--force-with-lease=<branch>:<sha>` form, `force_with_lease` alone the
+boolean form. `push` of a non-owned ref, `--delete` on any remote ref and a
+`push --force` of a non-owned ref stay `Ask`. Landing the session branch to the
+default branch stays the merge tool's job (FDR 0029); `remote push` of the
+default branch is `Ask` for a resolved caller and refused outright by the body
+for a confined or unresolved one.
+
+#### Implemented in step 5
+
+Built (spinclass #379): `remote fetch|pull|push|push-stack`, `tag
+create|delete|push`, `merge`, `clone` and `worktree remove`, registered as
+`grit_remote`, `grit_merge`, `grit_clone` and extended `grit_tag` and
+`grit_worktree` (`internal/store/git/remote.go`).
+
+- **No agent.** All remote verbs and `clone` run through `remoteRunner`
+  (`git` with `cmd.Dir` = the session worktree, ambient ssh-agent variables
+  dropped, `GIT_TERMINAL_PROMPT=0` last). `GIT_SSH_COMMAND` is not set, so
+  an `IdentityAgent` in the operator's ssh config could still reach an agent;
+  only the environment path is closed.
+- **Remote names only.** `remote` must be a configured remote name or empty
+  (git's default, `origin` for pull/push). A URL is refused by the body for
+  every caller and classifies `Ask`, so the worktree's credentials cannot be
+  sent to a host nobody configured. This also means an approved fetch of an
+  arbitrary URL is not possible through the tool.
+- **Verdicts.** `fetch` is read class (`Allow`; a non-configured remote name
+  asks). `pull`, `push`, `push-stack`, `tag push` are write class: `Allow` iff
+  the remote is configured and the targets are owned (`pull`: the current
+  branch). `delete`, `force` and anything non-owned ask. `merge` is owned iff
+  the current branch is. `tag create|delete` iff the name is `<B>--*`.
+- **Push.** The refspec is always explicit, `refs/heads/<src>:refs/heads/<dst>`
+  with `src` canonicalized (default the current branch). `force`,
+  `force_with_lease`, `lease_ref_sha`, `force_if_includes`, `set_upstream` and
+  `delete` are supported; `lease_ref_sha` or `force_if_includes` without
+  `force_with_lease`, and `force` with `force_with_lease`, are errors.
+  `push-stack` takes `--force-with-lease` (boolean form, per branch) after a
+  dry run of every branch and returns `{"phase","results":[{branch,status,
+  output}]}`; a failure returns the same JSON as the error, and nothing is
+  pushed unless the whole dry run passed. `lease_ref_sha` does not apply to it.
+- **Default branch.** A confined or unresolved caller pushing or deleting
+  `main`/`master`/origin's HEAD (as source or destination) is refused by the
+  body regardless of `force`; a resolved caller is asked by the hook.
+  `push-stack` and `merge` into the default branch are refused for every
+  caller (`push-stack` always force-pushes). Remote verbs' hooks are disabled
+  for confined callers like the other write verbs, and `fetch` is added to that
+  set (it fires `reference-transaction`).
+- **Unrecognised caller (ruling b).** `resolveGritCaller` no longer borrows the
+  cwd's branch. A caller owns something only when its worktree resolves to a
+  live, non-implicit session (`session.FindByWorktreePath` on the git
+  toplevel); otherwise `store.Session.NoSession` is set, `Branch` stays empty,
+  and the body refuses every write (any confinement) with an error pointing at
+  `sc start`; `Classify` asks. Reads are unaffected. This also applies to an
+  unconfined plain checkout: the section 7 "works outside a session" backup
+  path now reads only, until the export in step 6 decides otherwise. The
+  session branch is now the recorded one, not the checked-out branch, so a
+  worktree sitting on `<B>--topic` still owns `<B>`.
+- **`worktree remove`** moved from floor to write class: `Allow` iff the target
+  is another worktree whose checked-out branch is owned and `force` is unset;
+  the body always refuses the worktree the call runs in.
+- **`clone`**: `Allow` iff the destination (symlinks resolved on the part that
+  exists) lies inside the session worktree, `.tmp` included; a confined or
+  unresolved caller is refused outright. The source is not gated. Clone is also
+  run without the ambient agent, which the ruling did not name.
+- **`tag create`** honours `sign` (default true) and `lightweight`; signing
+  failures surface as git's own error. `pull` always passes `--no-rebase` or
+  `--rebase` explicitly, since git refuses a diverged pull otherwise. The merge,
+  pull and tag-create verbs stamp the `[store]` identity.
+- **moxy #390 disposition.** Carried as given (above). The "stale info" failure
+  of the boolean form was not reproduced: with no remote-tracking ref git let
+  the boolean lease through, so the boolean form gives no protection there,
+  while the explicit form does (tested).
+
+Not exercised: any https push with a minted credential (no forge), the
+`allow-no-credential` ssh path, a real confined unit or clown, and signing
+with a real key (the tests only see the no-key failure). `lease_ref_sha`
+validation accepts 4 to 64 hex characters.
 
 ### 6. Names and migration
 
@@ -607,8 +682,8 @@ asking and the serve decides.
 - Section 9: the author/committer identity for proxied commits (circus #351);
   hooks on proxied commits (skip vs. run in the unit); and how the tool body
   detects a confined caller.
-- moxy #390 (force-with-lease "stale info") and the interaction of remote verbs
-  with the FDR 0028 credential/`insteadOf` lane.
+- (Settled in step 5) moxy #390 and the interaction of remote verbs with the
+  FDR 0028 credential/`insteadOf` lane: see section 5.
 - (Settled 2026-10-20) Stashes die with the worktree, but `sc close` must not
   lose them silently given FDR 0027: a non-empty shelf counts as uncommitted
   work, so `close.RunResolved` refuses without `--force` and names the entry

@@ -21,6 +21,9 @@ func (b Backend) refuseUnownedForConfined(s store.Session, op store.Op) error {
 	if store.ClassOf(op.Tool, op.Subcommand) != store.ClassWrite {
 		return refuseReadOutsideSession(s, op)
 	}
+	if op.Tool == "clone" {
+		return fmt.Errorf("refusing clone: a confined caller may not clone; it has no place to put a clone the frontend would write")
+	}
 	args, ok := decodeClassifyArgs(op.Args)
 	if !ok || !args.optionFree() || !b.writeAllowed(s, op, args) {
 		return fmt.Errorf("refusing %s: a confined caller may only touch refs and the worktree its session owns (the session branch and %s%s*)", verbLabel(op), s.Branch, ownershipSeparator)
@@ -55,6 +58,16 @@ func refuseReadOutsideSession(s store.Session, op store.Op) error {
 	return nil
 }
 
+// refuseWithoutSession refuses every write for a caller whose worktree is not a
+// recognised spinclass session worktree (FDR 0036 section 5): it owns nothing,
+// so there is no namespace to check against. Reads are unaffected.
+func refuseWithoutSession(s store.Session, op store.Op) error {
+	if !s.NoSession || store.ClassOf(op.Tool, op.Subcommand) == store.ClassRead {
+		return nil
+	}
+	return fmt.Errorf("refusing %s: this worktree is not a recognised spinclass session worktree, so the caller owns nothing and every write is refused; start a session with `sc start` and run the tool from its worktree", verbLabel(op))
+}
+
 func verbLabel(op store.Op) string {
 	if op.Subcommand == "" {
 		return op.Tool
@@ -73,7 +86,10 @@ var noHooksConfig = []string{"-c", "core.hooksPath=/dev/null"}
 // section 9.3); the merge gate is the check that remains. commit also gets an
 // explicit --no-verify so the intent survives a hooks path override.
 func withoutHooksForConfined(s store.Session, op store.Op, argv []string) []string {
-	if !s.Confinement.Confined() || store.ClassOf(op.Tool, op.Subcommand) != store.ClassWrite {
+	// fetch is a read verb, but it still updates refs and so fires
+	// reference-transaction from the worker-writable hooks directory.
+	mutates := store.ClassOf(op.Tool, op.Subcommand) == store.ClassWrite || (op.Tool == "remote" && op.Subcommand == "fetch")
+	if !s.Confinement.Confined() || !mutates {
 		return argv
 	}
 	if op.Tool == "commit" && len(argv) > 0 && argv[0] == "commit" {
@@ -88,6 +104,9 @@ var commitCreatingVerbs = map[string]bool{
 	"branch revert":      true,
 	"branch rebase":      true,
 	"branch restack":     true,
+	"merge ":             true,
+	"remote pull":        true,
+	"tag create":         true,
 }
 
 // identityEnv stamps the configured identity onto the verbs that create
