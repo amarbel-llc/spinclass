@@ -229,7 +229,7 @@ func (b Backend) writeAllowed(s store.Session, op store.Op, a classifyArgs) bool
 	case "branch create":
 		return c.newBranchOwned("name")
 	case "branch delete":
-		return c.existingBranchOwned("name")
+		return c.deleteBranchOwned()
 	case "branch checkout":
 		return c.checkoutOwned()
 	case "branch rebase":
@@ -391,10 +391,50 @@ func (c checker) existingBranchOwned(key string) bool {
 	return ok && strings.HasPrefix(full, "refs/heads/") && c.owned(full)
 }
 
-// newBranchOwned judges a branch that may not exist yet by its literal name.
+// deleteBranchOwned judges a delete target on the ref git deletes: the name,
+// normalised the way Do normalises it, as an existing refs/heads/ branch.
+func (c checker) deleteBranchOwned() bool {
+	name, ok := c.args.str("name")
+	if !ok || name == "" {
+		return false
+	}
+	short, err := normalizeBranchDeleteName(name)
+	if err != nil {
+		return false
+	}
+	if short == "HEAD" || short == "@" {
+		return c.existingBranchOwned("name") && name == short
+	}
+	if !plainRefName(short) {
+		return false
+	}
+	full := "refs/heads/" + short
+	if _, err := git.Run(c.dir, "rev-parse", "--verify", "-q", full); err != nil {
+		return false
+	}
+	return c.owned(full)
+}
+
+// newBranchOwned judges a branch that may not exist yet by its literal name. A
+// remote-tracking lookalike is never a new branch.
 func (c checker) newBranchOwned(key string) bool {
 	name, ok := c.args.str(key)
-	return ok && plainRefName(name) && c.owned("refs/heads/"+name)
+	return ok && plainRefName(name) && !strings.HasPrefix(name, refsPrefix) &&
+		remoteTrackingShape(c.dir, name) == "" && c.owned("refs/heads/"+name)
+}
+
+// newBranchCheckoutOwned judges checkout new_branch on the new branch's name:
+// name, or in the legacy form ref. Giving both is refused by Do, so it asks.
+func (c checker) newBranchCheckoutOwned() bool {
+	name, ok := c.args.str("name")
+	if !ok {
+		return false
+	}
+	if name == "" {
+		return c.newBranchOwned("ref")
+	}
+	ref, ok := c.args.str("ref")
+	return ok && ref == "" && c.newBranchOwned("name")
 }
 
 func (c checker) checkoutOwned() bool {
@@ -406,7 +446,7 @@ func (c checker) checkoutOwned() bool {
 		return c.currentBranchOwned()
 	}
 	if c.args.flag("new_branch") {
-		return c.newBranchOwned("ref")
+		return c.newBranchCheckoutOwned()
 	}
 	return c.existingBranchOwned("ref")
 }

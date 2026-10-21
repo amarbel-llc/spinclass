@@ -395,6 +395,37 @@ Not exercised: any https push with a minted credential (no forge), the
 with a real key (the tests only see the no-key failure). `lease_ref_sha`
 validation accepts 4 to 64 hex characters.
 
+#### Accepted forms for branch create/checkout/delete (#393)
+
+A canary against moxy's grit showed `branch checkout ref=origin/master
+new_branch=true` creating a local branch literally named `origin/master`, and
+`branch delete name=refs/heads/x` reporting not found where the short form
+worked. The accepted forms are now one each:
+
+- **create**: `name` is the new branch (short name), `start_point` the optional
+  start (default HEAD). Returns `created branch <name> at <sha>`.
+- **checkout** of an existing branch: `ref`. **checkout with `new_branch`**:
+  `name` is the new branch, `start_point` the start. The legacy form (`ref`
+  alone names the new branch) still works only when `ref` is a plain
+  local-style name; otherwise it is refused with a pointer to
+  `name`/`start_point`. `name` and `ref` together with `new_branch` is refused,
+  as is `name`/`start_point` without `new_branch`.
+- **new-branch names** (create and checkout) are refused when they begin with
+  `refs/`, resolve as `refs/remotes/<name>`, or begin with a configured remote's
+  name plus `/`. Nothing is created on refusal.
+- **delete**: the short name or `refs/heads/<name>`, normalised to the short
+  name before `git branch -d/-D`; any other `refs/` prefix is refused. `heads/x`
+  is not an accepted alias (git would look for `refs/heads/heads/x`).
+- **Ownership** (Classify, and so the confined body check) is judged on the same
+  ref: the new branch's name for create and checkout `new_branch` (`name`, else
+  legacy `ref`), the normalised `refs/heads/<short>` for delete, which must
+  exist. `start_point` never affects ownership.
+- Every branch verb returns non-empty text: git's own output, else the
+  confirmation above (`deleted branch <name>` for delete). The handler keeps its
+  generic fallback for the remaining silent verbs. The JSON parse error seen on
+  moxy's `create` was not reproduced here: this port never emitted anything
+  JSON-shaped for these verbs (only `push-stack` returns JSON).
+
 ### 6. Names and migration
 
 "Stable" is read as: tool leaf names (`branch`, `clone`, `commit`, `merge`,
@@ -495,9 +526,20 @@ are not part of this slice.
   (`refuseDefaultBranchOp`: reset-hard, rebase, restack, merge, delete on
   main/master/origin HEAD) run for this caller too, `--yes` or not. The force-push
   and delete refusals of `refuseDefaultBranchPush` are scoped to a confined or
-  unresolved caller, so for this unconfined caller a push of the default branch is
-  an `Ask` the operator answers at the terminal, not a refusal. Deviation from
-  the brief's wording; a stricter rule would be a change to that function.
+  unresolved caller, so the hatch adds its own rule in `grit_escape_cmd.go`
+  (operator ruling): "the escape hatch never force-pushes, deletes, or rewrites
+  the default branch". Before the verb runs, and regardless of `--yes` or a typed
+  `y`, it refuses (and logs `outcome` error with the refusal text) a `remote push`
+  of main, master or origin's HEAD branch (source or `remote_branch`
+  destination) with `force` or `force_with_lease`, with `delete`, or that is not a
+  fast-forward (the remote-tracking ref is not an ancestor of the pushed commit,
+  by `git merge-base --is-ancestor`; a missing remote-tracking ref counts as
+  unknown and is refused), and any `remote push-stack` naming it. A plain
+  fast-forward push of the default branch is unaffected: it is an `Ask` answered
+  with a typed `y`. `tag push` is unaffected. The default-branch resolution is a
+  small local copy of the store's (`internal/git.Run`), not an export.
+  The fast-forward check reads the local remote-tracking ref without fetching, so
+  a stale ref can pass it; git itself still rejects a real non-fast-forward.
 
 Not tested: a real terminal run (the test environment has none; the terminal check
 is exercised through its seam), the generated manpage, and a push over a real

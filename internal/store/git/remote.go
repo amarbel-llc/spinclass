@@ -92,6 +92,15 @@ func buildAnyArgv(dir string, s store.Session, op store.Op, a args) ([]string, e
 		}
 		return buildRemoteFamilyArgv(dir, s, op, a)
 	}
+	if op.Tool == "branch" {
+		switch op.Subcommand {
+		case "create", "delete", "checkout":
+			if err := rejectOptionLike(a); err != nil {
+				return nil, err
+			}
+			return buildBranchFormsArgv(dir, op.Subcommand, a)
+		}
+	}
 	return buildArgv(op, a)
 }
 

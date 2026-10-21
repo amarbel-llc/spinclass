@@ -187,6 +187,9 @@ func (b Backend) Do(ctx context.Context, s store.Session, op store.Op) (store.Re
 	if op.Tool == "tag" && op.Subcommand == "list" && a.MaxCount > 0 {
 		out = firstLines(out, a.MaxCount)
 	}
+	if op.Tool == "branch" {
+		out = branchConfirmation(dir, op.Subcommand, a, out)
+	}
 	return store.Result{Text: out}, nil
 }
 

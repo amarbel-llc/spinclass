@@ -106,7 +106,8 @@ func TestClassifyBranchDeleteLaundering(t *testing.T) {
 		del("glad-buckeye", store.Allow),
 		del("glad-buckeye--topic", store.Allow),
 		del("refs/heads/glad-buckeye--topic", store.Allow),
-		del("heads/glad-buckeye--topic", store.Allow),
+		// git branch -d heads/x deletes refs/heads/heads/x, which does not exist.
+		del("heads/glad-buckeye--topic", store.Ask),
 		del("glad-buckeye-topic", store.Ask),
 		del("B2", store.Ask),
 		del("refs/heads/B2", store.Ask),

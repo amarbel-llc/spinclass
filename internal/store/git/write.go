@@ -57,24 +57,6 @@ func buildWriteArgv(op store.Op, a args) ([]string, error) {
 		return []string{"mv", "--", a.Source, a.Destination}, nil
 	case "commit ":
 		return buildCommitArgv(a)
-	case "branch create":
-		if a.Name == "" {
-			return nil, errors.New("name is required for create")
-		}
-		argv := []string{"branch", a.Name}
-		if a.StartPoint != "" {
-			argv = append(argv, a.StartPoint)
-		}
-		return argv, nil
-	case "branch delete":
-		if a.Name == "" {
-			return nil, errors.New("name is required for delete")
-		}
-		deleteFlag := "-d"
-		if a.Force {
-			deleteFlag = "-D"
-		}
-		return []string{"branch", deleteFlag, a.Name}, nil
 	case "branch reset-soft":
 		ref := a.Ref
 		if ref == "" {
@@ -86,8 +68,6 @@ func buildWriteArgv(op store.Op, a args) ([]string, error) {
 			return nil, errors.New("ref is required for reset-hard")
 		}
 		return []string{"reset", "--hard", a.Ref}, nil
-	case "branch checkout":
-		return buildCheckoutArgv(a)
 	case "branch rebase":
 		return buildRebaseArgv(a)
 	case "branch restack":
@@ -147,7 +127,7 @@ func buildCommitArgv(a args) ([]string, error) {
 	return append(argv, "-m", a.Message), nil
 }
 
-func buildCheckoutArgv(a args) ([]string, error) {
+func buildCheckoutArgv(dir string, a args) ([]string, error) {
 	if a.Ours && a.Theirs {
 		return nil, errors.New("ours and theirs are mutually exclusive")
 	}
@@ -167,17 +147,50 @@ func buildCheckoutArgv(a args) ([]string, error) {
 	if a.Ours || a.Theirs {
 		return nil, errors.New("ours and theirs need paths")
 	}
+	if a.NewBranch {
+		return buildNewBranchCheckoutArgv(dir, a)
+	}
+	if a.Name != "" || a.StartPoint != "" {
+		return nil, errors.New("name and start_point are only used with new_branch; to check out an existing branch pass ref")
+	}
 	if a.Ref == "" {
 		return nil, errors.New("ref is required for checkout")
 	}
-	if a.NewBranch {
-		argv := []string{"checkout", "-b", a.Ref}
-		if a.StartPoint != "" {
-			argv = append(argv, a.StartPoint)
-		}
-		return argv, nil
-	}
 	return []string{"checkout", a.Ref, "--"}, nil
+}
+
+// buildNewBranchCheckoutArgv: name (else, in the legacy form, ref) is the new
+// branch and start_point where it starts.
+func buildNewBranchCheckoutArgv(dir string, a args) ([]string, error) {
+	if a.Name != "" && a.Ref != "" {
+		return nil, errors.New("with new_branch pass the new branch as name and its start as start_point; ref is not used")
+	}
+	name := a.newBranchName()
+	if name == "" {
+		return nil, errors.New("name is required for checkout with new_branch")
+	}
+	if a.Name == "" {
+		if err := refuseLegacyNewBranchRef(dir, name); err != nil {
+			return nil, err
+		}
+	}
+	if err := refuseBadNewBranchName(dir, name); err != nil {
+		return nil, err
+	}
+	argv := []string{"checkout", "-b", name}
+	if a.StartPoint != "" {
+		argv = append(argv, a.StartPoint)
+	}
+	return argv, nil
+}
+
+// refuseLegacyNewBranchRef keeps the old new_branch-with-ref-only form working
+// for a plain local-style name and points everything else at name/start_point.
+func refuseLegacyNewBranchRef(dir, ref string) error {
+	if !plainRefName(ref) || remoteTrackingShape(dir, ref) != "" || strings.HasPrefix(ref, refsPrefix) {
+		return fmt.Errorf("with new_branch, ref %q is not a plain new branch name; pass the new branch as name and the ref to start from as start_point", ref)
+	}
+	return nil
 }
 
 func buildRebaseArgv(a args) ([]string, error) {
