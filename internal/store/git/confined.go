@@ -68,6 +68,33 @@ func refuseWithoutSession(s store.Session, op store.Op) error {
 	return fmt.Errorf("refusing %s: this worktree is not a recognised spinclass session worktree, so the caller owns nothing and every write is refused; start a session with `sc start` and run the tool from its worktree", verbLabel(op))
 }
 
+const stashSessionLocalRefusal = "stashes are session-local: grit_stash only touches this session's own shelf (refusing repo_path outside this session's worktree)"
+
+// refuseStashOutsideSession makes the shelf session-local for every caller
+// (spinclass#395): the shelf worktree is always the session's own, and a
+// repo_path whose git toplevel is anything else, or that git cannot resolve, is
+// refused whether or not the caller is confined.
+func refuseStashOutsideSession(s store.Session, op store.Op, a args) error {
+	if op.Tool != "stash" {
+		return nil
+	}
+	if s.Dir == "" {
+		return fmt.Errorf("%s", stashSessionLocalRefusal)
+	}
+	if a.RepoPath == "" {
+		return nil
+	}
+	repoPath := a.RepoPath
+	if !filepath.IsAbs(repoPath) {
+		repoPath = filepath.Join(s.Dir, repoPath)
+	}
+	top, err := git.Run(repoPath, "rev-parse", "--show-toplevel")
+	if err != nil || !sameDir(top, s.Dir) {
+		return fmt.Errorf("%s", stashSessionLocalRefusal)
+	}
+	return nil
+}
+
 func verbLabel(op store.Op) string {
 	if op.Subcommand == "" {
 		return op.Tool

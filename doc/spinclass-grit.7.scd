@@ -215,7 +215,13 @@ own confirmation instead (for example *deleted branch <name>*).
 
 *stash* does not use git's repository-wide stash stack, which every worktree
 shares. Entries live in a per-worktree shelf at *<worktree>/.spinclass/stash/*,
-so another session cannot address them. Subcommands are save, list, apply and
+so another session cannot address them. grit never reads or writes *refs/stash*,
+so a plain *git stash* made by hand is untouched. Stash is session-local for
+every caller, confined or not: the shelf is always this session's own, and a
+*repo\_path* whose git toplevel is not the session worktree (or that git cannot
+resolve) is refused with _stashes are session-local: grit\_stash only touches
+this session's own shelf_. A worktree reused by a later session shows that
+session the earlier shelf entries. Subcommands are save, list, apply and
 drop. *stash\_ref* is *stash@{N}* (the Nth newest) or a bare entry number; empty
 means the newest. Apply is *git apply --3way*; on a conflict the entry is kept
 and the paths are named. Submodule changes are refused and ignored files are

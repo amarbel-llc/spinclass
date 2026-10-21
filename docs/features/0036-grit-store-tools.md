@@ -307,6 +307,36 @@ with these concrete choices:
 `Shelf` is a neutral interface method so a dodder backend can implement it
 natively (dodder has its own object store).
 
+grit never reads or writes `refs/stash` (the one transient exception is
+`rebase --autostash` above), so a plain `git stash` made by a human in any
+checkout is untouched by the stash tool and invisible to it.
+
+#### Stash is session-local (#395)
+
+The operator ruled `grit_stash` session-local for every caller: confined,
+unconfined, resolved and hook-unresolved. The tool body enforces it
+(`refuseStashOutsideSession`, `internal/store/git/confined.go`), independent of
+the hook verdict:
+
+- the shelf worktree is always the session's own `Dir`; `repo_path` never
+  selects another worktree's shelf;
+- a call with no session `Dir` is refused (and a no-session caller is already
+  refused every write, stash included);
+- an empty `repo_path` means the session worktree. A non-empty `repo_path`
+  (relative paths resolve against the session worktree) whose git toplevel is
+  not the session worktree, or that git cannot resolve, is refused with:
+  `stashes are session-local: grit_stash only touches this session's own shelf
+  (refusing repo_path outside this session's worktree)`. A subdirectory of the
+  session worktree is accepted.
+
+Classification is unchanged: a foreign `repo_path` still classifies Ask, so an
+operator sees the prompt; approving it does not widen what the body will do.
+
+Known limitation: the shelf belongs to the worktree directory, not to a session.
+A worktree reused by a later session (for example after `sc resurrect`
+recreates it at the same path) shows that session the earlier session's shelf
+entries, if any survived.
+
 Stash and rebase classes: stash operations act only on the session's own
 shelf and so are `Allow` with no ownership argument needed. Rebase/restack are
 `write` class: auto-allowed iff the target branch and `--onto` are owned (a
@@ -830,6 +860,12 @@ asking and the serve decides.
   work, so `close.RunResolved` refuses without `--force` and names the entry
   count; with force it warns. `sc resurrect` recreates the commit only and
   reports that the shelf is empty. Added to implementation step 4.
+
+- The serve body cannot tell an operator-approved Ask from a hook Allow, so it
+  cannot re-run `Classify` for unconfined callers (it only sees the call).
+  Fixing that needs a signed hook-to-serve approval channel, which is its own
+  design. Until then the body enforces fixed rules that do not depend on the
+  verdict, as stash does (#395).
 
 Operator answers (2026-10-20) confirming the interpretations above: ownership
 is `B` and `B--<topic>`; reads auto-allow on any branch.

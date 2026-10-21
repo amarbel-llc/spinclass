@@ -323,7 +323,8 @@ var ownershipCases = []ownershipCase{
 	{"revert in the main checkout", "branch", "revert", mainCheckoutArgs(map[string]any{"commits": []string{"HEAD"}}), true},
 	{"stage add in a foreign worktree", "stage", "add", foreignWorktreeArgs(map[string]any{"paths": []string{"a.txt"}}), true},
 	{"stage add in the own worktree", "stage", "add", withArgs(map[string]any{"paths": []string{"a.txt"}}), false},
-	{"stash list of a foreign worktree", "stash", "list", foreignWorktreeArgs(nil), true},
+	// a foreign stash repo_path is refused with the session-local text, for every
+	// caller: TestStashIsSessionLocalForEveryCaller
 	{"stash list of the own worktree", "stash", "list", withArgs(nil), false},
 
 	{"merge in the own worktree", "merge", "", withArgs(map[string]any{"branch": "main"}), false},

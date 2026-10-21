@@ -152,6 +152,9 @@ func (b Backend) Do(ctx context.Context, s store.Session, op store.Op) (store.Re
 	if err := refuseWithoutSession(s, op); err != nil {
 		return store.Result{}, err
 	}
+	if err := refuseStashOutsideSession(s, op, a); err != nil {
+		return store.Result{}, err
+	}
 	if err := refuseDefaultBranchPush(s, dir, op, a); err != nil {
 		return store.Result{}, err
 	}
@@ -160,7 +163,7 @@ func (b Backend) Do(ctx context.Context, s store.Session, op store.Op) (store.Re
 	}
 
 	if op.Tool == "stash" {
-		return doStash(dir, op, a)
+		return doStash(s.Dir, op, a)
 	}
 	if op.Tool == "remote" && op.Subcommand == "push-stack" {
 		return pushStack(ctx, s, dir, op, a)
