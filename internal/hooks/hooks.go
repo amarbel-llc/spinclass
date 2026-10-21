@@ -104,11 +104,18 @@ func runSessionStart(input hookInput) error {
 	// multiplexer session name (clown mints one UUID for both) — the driver
 	// needs it to reattach, so it rides along in the hello (direction B).
 	if worktree.IsWorktree(cwd) {
+		envPrincipal := os.Getenv("CLOWN_SESSION_ID")
 		hookTrace(cwd, "SessionStart hook ran home=%q xdg_state_home=%q clown_session_id_set=%t",
-			os.Getenv("HOME"), os.Getenv("XDG_STATE_HOME"), os.Getenv("CLOWN_SESSION_ID") != "")
+			os.Getenv("HOME"), os.Getenv("XDG_STATE_HOME"), envPrincipal != "")
 		// Before the hello: it re-reads state and rewrites PID/HelloSentAt, so
 		// the recorded principal must already be on disk to survive that write.
-		recordOwnPrincipal(cwd, os.Getenv("CLOWN_SESSION_ID"))
+		if principal, source, ok := principalForHook(envPrincipal, input.SessionID); ok {
+			hookTrace(cwd, "SessionStart principal source=%s principal=%q", source, principal)
+			recordOwnPrincipal(cwd, principal)
+		} else if envPrincipal != "" {
+			hookTrace(cwd, "SessionStart principal not recorded: CLOWN_SESSION_ID=%q disagrees with hook session_id=%q", envPrincipal, input.SessionID)
+			sessionlog.Errorf("principal not recorded: CLOWN_SESSION_ID=%q disagrees with hook session_id=%q", envPrincipal, input.SessionID)
+		}
 		maybeSendSpawnHello(cwd, input.SessionID) // spawn handshake (FDR 0006); never blocks startup
 		return nil
 	}
@@ -261,8 +268,25 @@ func evaluateImplicitCheckout(cwd string) (implicitCheckout, ImplicitRefusal) {
 	return implicitCheckout{repoRoot: repoRoot, branch: branch, merged: merged}, ""
 }
 
-// recordOwnPrincipal stores the worker's own principal (its clown
-// CLOWN_SESSION_ID, FDR 0034 Phase 2 item 5) in the worktree session's state.
+// principalForHook picks the principal to record: CLOWN_SESSION_ID when set,
+// else the hook's session_id (clown does not export CLOWN_SESSION_ID to the
+// hook, #392). When both are set and differ it records nothing (ok=false);
+// both empty is also ok=false. source names which input supplied it.
+func principalForHook(envPrincipal, hookSessionID string) (principal, source string, ok bool) {
+	switch {
+	case envPrincipal == "" && hookSessionID == "":
+		return "", "", false
+	case envPrincipal == "":
+		return hookSessionID, "hook-session-id", true
+	case hookSessionID == "" || hookSessionID == envPrincipal:
+		return envPrincipal, "env", true
+	default:
+		return "", "", false
+	}
+}
+
+// recordOwnPrincipal stores the worker's own principal (see principalForHook;
+// FDR 0034 Phase 2 item 5) in the worktree session's state.
 // Spawn cannot know it, because clown mints it when the worker boots. A value
 // failing the grant identity allowlist is ignored. An already-recorded,
 // different principal is replaced only when the recorded PID is dead (the

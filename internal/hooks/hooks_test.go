@@ -2088,12 +2088,25 @@ func initSpawnedWorktree(t *testing.T, spawnedBy string) (repo, wt string) {
 	return repo, wt
 }
 
-// fireSessionStart runs the hook entrypoint with a SessionStart payload.
+// fireSessionStart runs the hook entrypoint with a SessionStart payload whose
+// session_id is CLOWN_SESSION_ID when the test set it (so the two agree, as in
+// a real session), else "spawn-test-session".
 func fireSessionStart(t *testing.T, cwd string) {
+	t.Helper()
+	id := os.Getenv("CLOWN_SESSION_ID")
+	if id == "" {
+		id = "spawn-test-session"
+	}
+	fireSessionStartWithID(t, cwd, id)
+}
+
+// fireSessionStartWithID runs the hook entrypoint with a SessionStart payload
+// carrying the given hook session_id.
+func fireSessionStartWithID(t *testing.T, cwd, sessionID string) {
 	t.Helper()
 	input, _ := json.Marshal(map[string]any{
 		"hook_event_name": "SessionStart",
-		"session_id":      "spawn-test-session",
+		"session_id":      sessionID,
 		"cwd":             cwd,
 		"source":          "startup",
 	})

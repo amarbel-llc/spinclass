@@ -7,24 +7,70 @@ import (
 	"code.linenisgreat.com/spinclass/internal/session"
 )
 
-// The hook can only record what its own environment carries: with
-// CLOWN_SESSION_ID unset it records nothing, and the spawn hello then still
-// rewrites the state without inventing a principal (#392: every real worker's
-// hook-trace.log shows clown_session_id_set=false).
-func TestSessionStartWithoutClownSessionIDRecordsNoPrincipal(t *testing.T) {
+func TestPrincipalForHook(t *testing.T) {
+	const a = "5e5e5e5e-0000-4000-8000-000000000000"
+	const b = "6f6f6f6f-0000-4000-8000-000000000000"
+	tests := []struct {
+		name, env, hook string
+		want            string
+		wantSource      string
+		wantOK          bool
+	}{
+		{"env empty, hook set", "", a, a, "hook-session-id", true},
+		{"env set, hook empty", a, "", a, "env", true},
+		{"both equal", a, a, a, "env", true},
+		{"both differ", a, b, "", "", false},
+		{"both empty", "", "", "", "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, source, ok := principalForHook(tc.env, tc.hook)
+			if got != tc.want || source != tc.wantSource || ok != tc.wantOK {
+				t.Errorf("principalForHook(%q, %q) = (%q, %q, %t), want (%q, %q, %t)",
+					tc.env, tc.hook, got, source, ok, tc.want, tc.wantSource, tc.wantOK)
+			}
+		})
+	}
+}
+
+// clown does not export CLOWN_SESSION_ID to the hook (#392), so with it unset
+// the principal is the hook's session_id.
+func TestSessionStartWithoutClownSessionIDRecordsHookSessionID(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("CLOWN_SESSION_ID", "")
 	_ = os.Unsetenv("CLOWN_SESSION_ID")
 	repo, wt := initSpawnedWorktree(t, "driver/key")
+	const hookID = "5e5e5e5e-0000-4000-8000-000000000000"
 
-	fireSessionStart(t, wt)
+	fireSessionStartWithID(t, wt, hookID)
+
+	st, err := session.Read(repo, "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Principal != hookID {
+		t.Errorf("Principal = %q, want the hook session_id %q", st.Principal, hookID)
+	}
+	if st.HelloSentAt == nil {
+		t.Error("the hello must still go out and adopt the state")
+	}
+}
+
+// When CLOWN_SESSION_ID and the hook session_id disagree nothing is recorded,
+// but the spawn hello still goes out.
+func TestSessionStartDisagreeingPrincipalSourcesRecordNothing(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CLOWN_SESSION_ID", "6f6f6f6f-0000-4000-8000-000000000000")
+	repo, wt := initSpawnedWorktree(t, "driver/key")
+
+	fireSessionStartWithID(t, wt, "5e5e5e5e-0000-4000-8000-000000000000")
 
 	st, err := session.Read(repo, "feature")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if st.Principal != "" {
-		t.Errorf("Principal = %q, want empty without CLOWN_SESSION_ID", st.Principal)
+		t.Errorf("Principal = %q, want empty when the sources disagree", st.Principal)
 	}
 	if st.HelloSentAt == nil {
 		t.Error("the hello must still go out and adopt the state")

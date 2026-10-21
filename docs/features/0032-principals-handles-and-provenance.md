@@ -117,6 +117,12 @@ downstream can tell them apart. `currentSessionKey()` remains for the
 operations that genuinely need a worktree: merge, check, attestation,
 description.
 
+The SessionStart hook records the worker's principal in its session state
+(#392): `CLOWN_SESSION_ID` when set, else the hook's `session_id` (claude
+provider). clown does not export `CLOWN_SESSION_ID` to the hook; that the two
+are equal was verified by the operator on one session's paths, not by a code
+read. When both are set and differ, nothing is recorded.
+
 Rejected: a spinclass-minted id (a fourth identity chat cannot address); the
 session key with a `bare/<rand>` fallback (the conflation being escaped).
 Consequence accepted: a principal's lifetime is the harness instance's, and
