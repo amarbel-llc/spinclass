@@ -1273,36 +1273,41 @@ func (p *prober) f13PrivateNetwork() Fact {
 // troupeBeyondOwnAccount lists what the unit sees under the operator's troupe
 // runtime dir beyond the one thing clown binds there: the child's own account
 // password file, troupe/accounts/<principal>.pass (FDR 0035 "Spawn side").
-// Another account's file, or anything else, is named.
-func (p *prober) troupeBeyondOwnAccount(dir string) ([]string, error) {
+// Another account's file, or anything else, is named; readable counts the
+// other accounts' files the unit can read (round O: all of them were).
+func (p *prober) troupeBeyondOwnAccount(dir string) (extra []string, readable int, err error) {
 	own := p.in.Driver.Principal + ".pass"
 	names, err := p.sys.ReadDir(dir)
 	if err != nil {
 		if unreachable(err) {
-			return nil, nil
+			return nil, 0, nil
 		}
-		return nil, fmt.Errorf("listing the troupe runtime dir in the unit: %w", err)
+		return nil, 0, fmt.Errorf("listing the troupe runtime dir in the unit: %w", err)
 	}
-	var extra []string
 	for _, n := range names {
 		if n != "accounts" {
 			extra = append(extra, "troupe/"+n)
 			continue
 		}
-		accounts, err := p.sys.ReadDir(filepath.Join(dir, n))
+		accountsDir := filepath.Join(dir, n)
+		accounts, err := p.sys.ReadDir(accountsDir)
 		if err != nil {
 			if unreachable(err) {
 				continue
 			}
-			return nil, fmt.Errorf("listing the troupe accounts dir in the unit: %w", err)
+			return nil, 0, fmt.Errorf("listing the troupe accounts dir in the unit: %w", err)
 		}
 		for _, a := range accounts {
-			if p.in.Driver.Principal == "" || a != own {
-				extra = append(extra, "troupe/accounts/"+a)
+			if p.in.Driver.Principal != "" && a == own {
+				continue
+			}
+			extra = append(extra, "troupe/accounts/"+a)
+			if _, rerr := p.sys.ReadFile(filepath.Join(accountsDir, a)); rerr == nil {
+				readable++
 			}
 		}
 	}
-	return extra, nil
+	return extra, readable, nil
 }
 
 // F15: the frontend's principal mapping (what the grant walk trusts) names
@@ -1361,9 +1366,12 @@ func (p *prober) f14RuntimeDirBoundOnly() Fact {
 			switch {
 			case slices.Contains(p.in.RuntimeAllow, n):
 			case n == "troupe":
-				more, err := p.troupeBeyondOwnAccount(filepath.Join(dir, n))
+				more, readable, err := p.troupeBeyondOwnAccount(filepath.Join(dir, n))
 				if err != nil {
 					return err
+				}
+				if readable > 0 {
+					return fmt.Errorf("%d other session(s)' troupe account password file(s) are READABLE from the unit (troupe/accounts): the worker could authenticate as them", readable)
 				}
 				extra = append(extra, more...)
 				note = "accepted troupe holding only this session's own account file; the strict allowlist would have named troupe"

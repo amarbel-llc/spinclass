@@ -195,6 +195,28 @@ exercised on a real unit, and so **unverified until a live canary**:
     could authenticate to troupe as any session on the host (inferred from the
     uid and the file modes; no file was read). Reported for clown.
   - F12 still fails (loopback serve; clown).
+- O, worker canary/bright-banyan (nikulin, spinclass e8bede1, clown c0ec56b,
+  2026-10-22): **33 of 33 troupe account password files are readable from the
+  confined unit.** `troupe/accounts` is mode 0700 and each file 0600, all
+  owned by the operator, which is the uid the unit runs as, so the modes
+  isolate nothing. Only counts and modes were taken; no contents were read.
+  - Cause, per the coordinator: clown binds the whole troupe runtime
+    directory read-write into the unit (clown `agentscope.go:345-360`), not
+    the child's own file as "Spawn side" requires.
+  - Fix: clown's (bind the own pass file read-only and the own socket only if
+    dialled, never the directory).
+  - Until that fix is deployed and verified, no new confined spawns are
+    made, and the two open canary workers count as exposed.
+  - The same round listed `$XDG_RUNTIME_DIR/ringmaster`,
+    `$XDG_STATE_HOME/ringmaster` (bound read-write by the spec's
+    `binds_rw_platform`) and `$XDG_STATE_HOME/troupe` (cursors) from the
+    unit. Writability was not tested.
+  - **Regression check:** F14 now fails with the count when any other
+    session's account file is *readable* in the unit, ahead of merely naming
+    visible entries (`TestF14FailsWhenAnotherSessionsTroupeAccountIsReadable`).
+    The live form of the check is "another session's pass file is absent or
+    unreadable inside the unit". It is unit-tested only until the clown fix's
+    round.
 - **F10 and F14 were check gaps, not cut failures (inferred, 2026-10-22).**
   - F10 counted every numeric `/proc` entry in the unit against the unit's
     cgroup. The overcount grew over the rounds (+2, +3, +5), which fits

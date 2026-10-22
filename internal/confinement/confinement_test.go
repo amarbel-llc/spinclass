@@ -615,6 +615,33 @@ func TestF14AcceptsOnlyTheChildsOwnTroupeAccount(t *testing.T) {
 	}
 }
 
+// Round O: another session's troupe account file readable from the unit lets
+// the worker authenticate as it. F14 fails with the count, ahead of the
+// visible-entries listing; a visible but unreadable one is still named.
+func TestF14FailsWhenAnotherSessionsTroupeAccountIsReadable(t *testing.T) {
+	sys, in := confinedHost()
+	sys.dirs[root+"/run"] = []string{"user"}
+	sys.dirs[root+"/run/user"] = []string{"1000"}
+	sys.dirs[root+"/run/user/1000"] = []string{"clown", "troupe"}
+	sys.dirs[root+"/run/user/1000/troupe"] = []string{"accounts"}
+	sys.dirs[root+"/run/user/1000/troupe/accounts"] = []string{"principal-a.pass", "principal-b.pass", "principal-c.pass"}
+	sys.files[root+"/run/user/1000/troupe/accounts/principal-a.pass"] = "own"
+	sys.files[root+"/run/user/1000/troupe/accounts/principal-b.pass"] = "secret"
+	sys.files[root+"/run/user/1000/troupe/accounts/principal-c.pass"] = "secret"
+	f := factByID(t, Run(sys, in), "F14")
+	if f.OK || !strings.Contains(f.Detail, "2 other session(s)' troupe account password file(s) are READABLE") {
+		t.Errorf("F14 = %+v, want the readable count", f)
+	}
+	sys.readErrOn = map[string]error{
+		root + "/run/user/1000/troupe/accounts/principal-b.pass": syscall.EACCES,
+		root + "/run/user/1000/troupe/accounts/principal-c.pass": syscall.EACCES,
+	}
+	f = factByID(t, Run(sys, in), "F14")
+	if f.OK || strings.Contains(f.Detail, "READABLE") || !strings.Contains(f.Detail, "troupe/accounts/principal-b.pass") {
+		t.Errorf("F14 = %+v, want the unreadable ones named as visible", f)
+	}
+}
+
 // unitRunning is the liveness a confined session's ResolveState uses: a record
 // that loads and a cgroup that holds a process.
 func TestUnitRunning(t *testing.T) {
