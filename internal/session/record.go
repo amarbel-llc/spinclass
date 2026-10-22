@@ -56,7 +56,9 @@ func InUnit() bool { return os.Getenv("CLOWN_UNIT") != "" }
 
 // report says, on stderr and in the lifecycle log, that the frontend refused or
 // distrusted something a worker could have written. Every message names the
-// record, the field and both values. The default sink prints each distinct
+// record and the field. A refused identity names the path values involved; a
+// worktree copy's disagreement names only which side sets the field, never a
+// value (it may be a secret). The default sink prints each distinct
 // message once per process, so a watching `sc list` does not repeat itself.
 var report = defaultReport
 
@@ -290,6 +292,28 @@ func jsonString(v any) string {
 	return string(b)
 }
 
+// whichSideSets says which copy sets a disagreeing field, given each copy's JSON
+// form, without the values: an authority field can carry a secret (a pinned
+// credential's revoke command, an entry's env) and the report goes to stderr and
+// the lifecycle log.
+func whichSideSets(frontend, worktree string) string {
+	unset := func(j string) bool {
+		switch j {
+		case "null", `""`, "[]", "{}", "0", "false":
+			return true
+		}
+		return false
+	}
+	switch {
+	case unset(frontend):
+		return "the worktree copy sets it, the frontend record does not"
+	case unset(worktree):
+		return "the frontend record sets it, the worktree copy does not"
+	default:
+		return "both copies set it, to different values"
+	}
+}
+
 // compareDisplay reports every authority field on which the worktree copy of rec
 // disagrees with the frontend record. The frontend record is what is used; the
 // copy is never trusted. Inside a unit there is nothing to compare against.
@@ -309,8 +333,8 @@ func compareDisplay(rec *State) {
 	}
 	for _, f := range authorityFields {
 		if want, got := f.get(rec), f.get(&shown); !reflect.DeepEqual(want, got) && jsonString(want) != jsonString(got) {
-			report(fmt.Sprintf("worktree copy %s of session record %s disagrees with the frontend record on %s: worktree copy has %s, frontend record has %s; the frontend record is used",
-				path, rec.Key(), f.name, jsonString(got), jsonString(want)))
+			report(fmt.Sprintf("worktree copy %s of session record %s disagrees with the frontend record on %s: %s; the frontend record is used",
+				path, rec.Key(), f.name, whichSideSets(jsonString(want), jsonString(got))))
 		}
 	}
 }

@@ -1226,9 +1226,14 @@ What changed:
   WorktreePath hashes to the key, equals `<repo>/.worktrees/<branch>` (implicit
   sessions are keyed by checkout), and Branch is a clean relative path with no
   `..`. A disagreeing record or tombstone is refused and reported, naming the
-  record, the field and both values. Remove, Tombstone and Write target
-  locations derived from the key, never from a path in the worktree copy. A
-  worktree copy that disagrees is reported and ignored. Tests:
+  record, the identity field and the path values involved. Remove, Tombstone
+  and Write target locations derived from the key, never from a path in the
+  worktree copy. A worktree copy that disagrees is reported and ignored; that
+  report names the field and which copy sets it, never a value, because an
+  authority field can carry a secret (a pinned credential's revoke command, an
+  entry's env) and the report goes to stderr and the lifecycle log
+  (`TestDisagreementReportNamesTheFieldNotItsValues`,
+  `TestDisagreementSecretsReachNeitherStderrNorTheLog`). Tests:
   `TestRecordUnderTheWrongKeyIsRefused`,
   `TestDisagreeingWorktreeCopyIsReportedAndTheFrontendRecordUsed`,
   `TestForgedWorktreeCopyDoesNotRedirectRead`, the tombstone tests above; these

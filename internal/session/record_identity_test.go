@@ -64,8 +64,11 @@ func TestDisagreeingWorktreeCopyIsReportedAndTheFrontendRecordUsed(t *testing.T)
 	if got.Principal != "" {
 		t.Errorf("principal = %q, want the frontend record's (empty)", got.Principal)
 	}
-	if !anyContains(*msgs, "principal", `"evil-principal"`, w1.Key(), "frontend record") {
-		t.Errorf("the disagreement was not reported with record, field and both values: %q", *msgs)
+	if !anyContains(*msgs, "principal", w1.Key(), "frontend record") {
+		t.Errorf("the disagreement was not reported with record and field: %q", *msgs)
+	}
+	if anyContains(*msgs, "evil-principal") {
+		t.Errorf("the disagreement report carries the forged value: %q", *msgs)
 	}
 }
 
