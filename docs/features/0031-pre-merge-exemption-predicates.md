@@ -140,10 +140,10 @@ can vouch for itself: an agent edits the recipe to `exit 0`, and its own diff is
 then exempt. So:
 
 1. **Definition from base.** The exemptions are resolved from
-   `sweatfileio.LoadWorktreeHierarchy(home, repoPath, <base worktree>)`. That
-   is the normal cascade (global → parent dirs → the main checkout's
-   sweatfile), with the *worktree* layer being the detached checkout at
-   `MERGE_BASE` instead of the session worktree. Only
+   `loadCommitHierarchy(home, repoPath, MERGE_BASE)`. That is the normal
+   cascade (global → parent dirs → the main checkout's sweatfile), with the
+   top layer being the `sweatfile` committed at `MERGE_BASE` (read with
+   `git.FileAtRev`, never a worktree on disk). Only
    `ActivePreMergeExemptions()` is read from it. None of those layers is the
    branch being merged:
    - the main checkout's working-tree sweatfile is not where a session
@@ -424,8 +424,8 @@ handle is left for a separate issue.
   merging user's PATH. On the fleet that is the home-manager profile, which is
   outside the branch's control. On an arbitrary host it is whatever is there.
 - **Base-tree sweatfile read.** There is no second load mode: the normal
-  `LoadWorktreeHierarchy` runs with the base checkout as the worktree layer
-  (see the trust rule). A `sweatfile` that fails to parse at the base
+  `loadCommitHierarchy` layers the `sweatfile` committed at the merge base
+  over the normal cascade (see the trust rule). A `sweatfile` that fails to parse at the base
   therefore yields no exemptions (fail closed), not an error.
 - **Predicate cap.** All of a merge's predicates share one fixed 5m deadline
   (`exemptionTimeout`), so N predicates can't hold the landing lock N times

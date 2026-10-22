@@ -1008,6 +1008,28 @@ deny. It is kept small and isolated (`internal/hooks/sweatfile_guard.go`)
 because the intended end state is all session IO served by a spinclass plugin
 that enforces permissions at its own junction, which replaces it.
 
+### The worktree sweatfile is not read
+
+The worktree is bind-mounted read-write, so a confined worker can write
+`<worktree>/sweatfile`. The frontend used to read it as the top layer of the
+sweatfile hierarchy, and used the result to exec commands (pre-merge, repair,
+the session entrypoint), read paths and set policy outside the unit; a corrupt
+one also made loads fail, and callers fell back to their weakest policy. It is
+no longer read for any exec, path or policy purpose: `sweatfileio.LoadHierarchy`
+resolves any linked worktree (or directory inside one) to the main checkout
+first, so only the global, ancestor and main-checkout layers count and a bad
+worktree file cannot change or fail a load. Only the allow-listed pure-data
+settings in `sweatfileio.WorktreeOverrides` (today `[hooks] disable-nix-gc`)
+are read from it, best-effort. The `[session-entry]` start, resume and env are
+resolved from those layers when the session is created and pinned on the
+session state (`session.State.Entry`), which `sc resume` replays. The pin lives
+in the worktree-local `.spinclass/state.json`, which is inside the read-write
+bind, so it is as tamper-resistant as that file and no more (FDR 0032 D9).
+
+An adjacent route remains: the worktree's `.mcp.json` and
+`.claude/settings.local.json` are also worker-writable files the frontend and
+the harness consume. That is tracked as a separate issue.
+
 ## A session closing itself (spinclass#389, 2026-10-20)
 
 `close-this-session` lets a session end itself. The unit cannot stop itself

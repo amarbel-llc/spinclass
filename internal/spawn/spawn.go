@@ -109,10 +109,8 @@ func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model
 	// Validate the spawn templates BEFORE creating anything: bad config
 	// (missing spawn-entry, no {entry} splice, or — with a model requested —
 	// no "--" separator to splice the model flag into) must not litter a
-	// worktree. Rendering pre-create skips the worktree's own (not yet
-	// checked out) sweatfile layer, but that layer is the repo sweatfile
-	// checked out fresh from the default branch — same content the repo
-	// layer already contributed.
+	// worktree. Rendering never reads the worktree's own sweatfile (a worker
+	// can write it): only the global, ancestor and main-checkout layers.
 	argv, window, sessionEnv, merged, targetEnforce, targetConfine, err := renderSpawn(home, rp, brief, model, profile)
 	if err != nil {
 		return Pending{}, err
@@ -234,7 +232,7 @@ func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model
 		confine = &confinedLaunch{scopePath: scopePath, stateDir: stateDir, handshakeDir: handshakeDir}
 	}
 
-	p, err := startDetachedEntry(rp, driver, desc, argv, window, sessionEnv, resolved, authorizingGrant, narrowing, confine)
+	p, err := startDetachedEntry(rp, driver, desc, argv, window, sessionEnv, resolved, authorizingGrant, narrowing, shop.PinEntry(merged), confine)
 	if err != nil {
 		undoOnFailure()
 		return Pending{}, err
@@ -322,7 +320,8 @@ func LaunchWith(home, repoPath string, driver Driver, brief, desc, model, profil
 // after its literal "--" provider-args separator, via SpliceModelFlag,
 // BEFORE {prompt}/{dir} substitution; model == "" leaves that part of the
 // entry unmodified. Safe to call before the worktree exists:
-// LoadWorktreeHierarchy treats a missing leaf sweatfile as an empty layer.
+// the hierarchy is the global, ancestor and main-checkout layers only, never the
+// worker's own worktree sweatfile.
 // It also returns the merged config itself, because the caller needs the
 // worker repo's [hooks].allow-stale-base before creating the worktree and
 // re-loading the hierarchy for one boolean would be a second full walk of the
@@ -333,7 +332,7 @@ func LaunchWith(home, repoPath string, driver Driver, brief, desc, model, profil
 // those two key off resolveProvider(entry), and placing the profile after them
 // keeps their behavior identical to a spawn with no profile.
 func renderSpawn(home string, rp worktree.ResolvedPath, brief, model, profile string) (argv, window []string, sessionEnv map[string]string, merged sweatfile.Sweatfile, enforce bool, confine targetConfinement, err error) {
-	hierarchy, err := sweatfileio.LoadWorktreeHierarchy(home, rp.RepoPath, rp.AbsPath)
+	hierarchy, err := sweatfileio.LoadHierarchy(home, rp.RepoPath)
 	if err != nil {
 		return nil, nil, nil, merged, false, confine, fmt.Errorf("loading worker sweatfile hierarchy: %w", err)
 	}
@@ -569,8 +568,12 @@ func newWorkerState(rp worktree.ResolvedPath, driver Driver, desc string, profil
 // detached harness entry, returning a Pending (worktree booting, hello not yet
 // awaited). The SessionStart hook adopts the state (PID + HelloSentAt) when the
 // worker boots; pre-hello PID is 0 (nothing attached yet).
-func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, argv, window []string, sessionEnv map[string]string, profile ResolvedProfile, authorizingGrant string, narrowing *narrowingBase, confine *confinedLaunch) (Pending, error) {
-	if err := session.Write(newWorkerState(rp, driver, desc, profile, authorizingGrant, narrowing)); err != nil {
+func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, argv, window []string, sessionEnv map[string]string, profile ResolvedProfile, authorizingGrant string, narrowing *narrowingBase, entry *session.PinnedEntry, confine *confinedLaunch) (Pending, error) {
+	st := newWorkerState(rp, driver, desc, profile, authorizingGrant, narrowing)
+	// The worker's own `sc resume` replays the entry resolved here, at creation,
+	// from the operator-controlled layers; it never re-reads a sweatfile.
+	st.Entry = entry
+	if err := session.Write(st); err != nil {
 		return Pending{}, fmt.Errorf("writing worker session state: %w", err)
 	}
 

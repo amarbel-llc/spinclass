@@ -153,8 +153,8 @@ func CreateFrom(
 // worktree, WITHOUT a `git worktree add`. It is the seam `sc rebuild` and
 // resume auto-rebuild use to refresh a worktree whose installed setup has
 // drifted from current config/binary/pins. It loads the same repo-level
-// hierarchy `Create` does (LoadHierarchy — NOT the worktree-leaf-inclusive
-// LoadWorktreeHierarchy), so a rebuild reproduces exactly what `sc start`
+// hierarchy `Create` does (LoadHierarchy, which never reads the worktree's own
+// sweatfile), so a rebuild reproduces exactly what `sc start`
 // applied and the setup fingerprint stays comparable across the two. Returns
 // the merged hierarchy so the caller can compute and record the fresh
 // fingerprint.

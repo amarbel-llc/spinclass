@@ -1332,7 +1332,7 @@ func sweatfileHierarchyForDir(cwd string) (h sweatfile.Hierarchy, home, repoRoot
 		}
 		return h, home, cwd, true
 	}
-	h, err = sweatfileio.LoadWorktreeHierarchy(home, repoPath, cwd)
+	h, err = sweatfileio.LoadHierarchy(home, repoPath)
 	if err != nil {
 		return sweatfile.Hierarchy{}, "", "", false
 	}

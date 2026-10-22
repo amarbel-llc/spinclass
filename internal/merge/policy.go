@@ -16,7 +16,6 @@ import (
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
-	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 )
 
 // AttestationGate is how the caller of a merge satisfied — or did not need to
@@ -144,12 +143,13 @@ func runAttestationPolicy(ctx context.Context, ts *crap.TestStream, gate Attesta
 	}
 	defer cleanup()
 
-	// Trust rule: the predicates' DEFINITION comes from the base tree (the
-	// worktree layer of the hierarchy is the base checkout, never the branch),
-	// and their CODE runs with cwd in it, so a branch cannot vouch for itself.
+	// Trust rule: the predicates' DEFINITION comes from the sweatfile committed
+	// at the merge base (never the branch, and never a file read off a worktree
+	// on disk), and their CODE runs with cwd in the base checkout, so a branch
+	// cannot vouch for itself.
 	var exemptions []sweatfile.PreMergeExemption
 	if home, _ := os.UserHomeDir(); home != "" {
-		if h, hErr := sweatfileio.LoadWorktreeHierarchy(home, repoPath, basePath); hErr == nil {
+		if h, hErr := loadCommitHierarchy(home, repoPath, base); hErr == nil {
 			exemptions = h.Merged.ActivePreMergeExemptions()
 		}
 	}

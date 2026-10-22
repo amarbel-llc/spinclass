@@ -249,8 +249,9 @@ EOF
   refute_output --partial '$SPINCLASS_BRANCH'
 }
 
-# Create a worktree, drop a sweatfile with the given body at its root,
-# and cd into it. Used by the sc-check tests below.
+# Create a worktree, drop a sweatfile with the given body in the main checkout
+# (a worktree's own sweatfile is not a layer), and cd into the worktree. Used
+# by the sc-check tests below.
 sc_check_setup_worktree() {
   local sweatfile_body="$1"
   local wt_path
@@ -268,7 +269,7 @@ sc_check_setup_worktree() {
   # command actually execs instead of being swallowed by the logger.
   install_passthrough_direnv
 
-  printf '%s' "$sweatfile_body" >"$wt_path/sweatfile"
+  printf '%s' "$sweatfile_body" >"$TEST_REPO/sweatfile"
   cd "$wt_path" || return
 }
 

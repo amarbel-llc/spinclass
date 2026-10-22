@@ -50,6 +50,20 @@ type CredentialRemote struct {
 	Resolved       bool     `json:"resolved,omitempty"` // produced by [auth].url-resolver
 }
 
+// PinnedEntry is State.Entry: the [session-entry] start, resume and env
+// resolved from the operator-controlled sweatfile layers (global, ancestor
+// directories, the main checkout) when the session was CREATED, and replayed by
+// `sc resume` instead of re-reading any sweatfile. A worktree is writable by the
+// worker it hosts, so nothing resolved later from a path the worker can write
+// may decide what the frontend execs. Nil on a session created before the pin
+// (legacy). Env values are persisted as resolved, like the process environment
+// the session itself receives.
+type PinnedEntry struct {
+	Start  []string          `json:"start"`
+	Resume []string          `json:"resume,omitempty"`
+	Env    map[string]string `json:"env,omitempty"`
+}
+
 // ProfileNarrowingLink is State.ProfileNarrowing: the record that a user-registry
 // profile was accepted for a confined spawn because it is a catalog-level
 // narrowing of a declared base builtin (FDR 0035 "Tier 1: a user profile that
@@ -181,6 +195,10 @@ type State struct {
 	Env         map[string]string `json:"env"`
 	StartedAt   time.Time         `json:"started_at"`
 	ExitedAt    *time.Time        `json:"exited_at,omitempty"`
+
+	// Entry is the session-entry start/resume/env pinned at creation; see
+	// PinnedEntry. Attach carries it across resumes; nil means a legacy session.
+	Entry *PinnedEntry `json:"entry,omitempty"`
 
 	// DeletedSHA is the branch's tip commit, captured by close.RunResolved
 	// immediately before `sc close`/`close-child-session` force-delete the

@@ -24,14 +24,14 @@ func WithDenySweatfileEdits(deny bool) RunOption {
 
 // denySweatfileEdits reads the switch for the session's repo from the trusted
 // layers only. The trust boundary is the MAIN repo root, never the worktree:
-// the repo's own sweatfile is a strict ancestor of the worktree, so rooting the
-// check at the worktree would honour a value the agent itself can write. An
+// the worktree's own sweatfile is not a layer at all (sweatfileio.LoadHierarchy
+// never reads it), so nothing the agent itself can write is honoured. An
 // unreadable hierarchy is off, which leaves the ask in place.
-func denySweatfileEdits(home, mainRepoRoot, sessionWorktree string) bool {
+func denySweatfileEdits(home, mainRepoRoot string) bool {
 	if home == "" || mainRepoRoot == "" {
 		return false
 	}
-	h, err := sweatfileio.LoadWorktreeHierarchy(home, mainRepoRoot, sessionWorktree)
+	h, err := sweatfileio.LoadHierarchy(home, mainRepoRoot)
 	if err != nil {
 		return false
 	}

@@ -236,7 +236,7 @@ func TestCreatePinsTheRevokeCommandAndIgnoresTheWorktreeLayer(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(a.rp.AbsPath, "sweatfile"),
 		"[auth]\nmint-command = \"touch "+worktreeMarker+"; echo evil\"\nrevoke-command = \"touch "+worktreeMarker+"\"\n")
-	h, err := sweatfileio.LoadWorktreeHierarchy(a.root, a.repo, a.rp.AbsPath)
+	h, err := sweatfileio.LoadHierarchy(a.root, a.rp.AbsPath)
 	if err != nil {
 		t.Fatal(err)
 	}

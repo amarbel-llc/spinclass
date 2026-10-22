@@ -8,8 +8,9 @@ setup() {
   create_repo
 }
 
-# Create a worktree, drop a sweatfile with the given body at its root,
-# and cd into it. Mirrors sc_check_setup_worktree in sweatfile.bats so
+# Create a worktree, drop a sweatfile with the given body in the main checkout
+# (a worktree's own sweatfile is not a layer), and cd into the worktree.
+# Mirrors sc_check_setup_worktree in sweatfile.bats so
 # the pre-merge-output-format tests below match the existing sc_check_*
 # pattern.
 pre_merge_setup_worktree() {
@@ -29,7 +30,7 @@ pre_merge_setup_worktree() {
   # command actually execs instead of being swallowed by the logger.
   install_passthrough_direnv
 
-  printf '%s' "$sweatfile_body" >"$wt_path/sweatfile"
+  printf '%s' "$sweatfile_body" >"$TEST_REPO/sweatfile"
   cd "$wt_path" || return
 }
 

@@ -318,6 +318,18 @@ func logSweatfileResult(result sweatfile.Hierarchy) {
 	)
 }
 
+// PinEntry resolves the [session-entry] start, resume and env of sf (the merged
+// global, ancestor and main-checkout layers) into the record stored on a new
+// session's state, so a later `sc resume` replays it without reading any
+// sweatfile again.
+func PinEntry(sf sweatfile.Sweatfile) *session.PinnedEntry {
+	return &session.PinnedEntry{
+		Start:  sf.SessionStart(),
+		Resume: sf.SessionResume(),
+		Env:    sf.SessionEnv(),
+	}
+}
+
 func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sweatfile.Sweatfile, format string, mergeOnClose bool, noAttach bool, verbose bool, allowStaleBase bool, allowNoCredential bool) error {
 	var tw *tap.Writer
 	if format == "tap" {
@@ -380,6 +392,12 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 		if sexec, ok := exec.(executor.SessionExecutor); ok {
 			st.Entrypoint = sexec.Entrypoint
 		}
+		// A fresh worktree pins the entry its operator-controlled layers resolve
+		// to; a resume carries the existing pin forward (below), so a legacy
+		// session stays unpinned rather than being blessed after the fact.
+		if !existed {
+			st.Entry = PinEntry(sf)
+		}
 		// Attach owns the lifecycle fields (PID, state, entrypoint,
 		// timestamps) but not these: FDR 0006 lineage and a buffered
 		// pre-merge attestation must survive a resume (#147).
@@ -395,6 +413,9 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 			st.AuthorizingGrant = existing.AuthorizingGrant
 			st.HelloSentAt = existing.HelloSentAt
 			st.PreMergeAttestation = existing.PreMergeAttestation
+			if existed {
+				st.Entry = existing.Entry
+			}
 			// Carry the recorded setup fingerprint forward by default. A
 			// resume (existed) did NOT re-apply setup (createWorktree only
 			// applies on a fresh worktree), so a stale fingerprint must stay

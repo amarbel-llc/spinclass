@@ -85,7 +85,7 @@ func TestFinishMergeQueueRebasesLandingAndGatesOnLandingSha(t *testing.T) {
 	// hook sha FinishMerge gates on.
 	hookShaFile := filepath.Join(root, "hook-sha")
 	sweatfileBody := "[hooks]\npre-merge = \"git rev-parse HEAD > " + hookShaFile + "\"\n"
-	if err := os.WriteFile(filepath.Join(wtPath, "sweatfile"), []byte(sweatfileBody), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repoDir, "sweatfile"), []byte(sweatfileBody), 0o644); err != nil {
 		t.Fatalf("write sweatfile: %v", err)
 	}
 
@@ -202,7 +202,7 @@ func TestFinishMergeQueueDisabledKnobFailsAtFF(t *testing.T) {
 	repoDir := setupRepo(t)
 	wtPath := setupWorktree(t, repoDir, "feature-knob")
 
-	if err := os.WriteFile(filepath.Join(wtPath, "sweatfile"), []byte("[hooks]\ndisable-merge-queue = true\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repoDir, "sweatfile"), []byte("[hooks]\ndisable-merge-queue = true\n"), 0o644); err != nil {
 		t.Fatalf("write sweatfile: %v", err)
 	}
 

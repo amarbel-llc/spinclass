@@ -1284,13 +1284,13 @@ func TestDenySweatfileEditsReadsTrustedLayersOnly(t *testing.T) {
 	testfs.MustMkdirAll(t, wt, 0o755)
 	repoFile := filepath.Join(repo, "sweatfile")
 	testfs.MustWriteFile(t, repoFile, []byte("[permissions]\ndeny-sweatfile-edits = true\n"), 0o644)
-	if denySweatfileEdits(home, repo, wt) {
+	if denySweatfileEdits(home, repo) {
 		t.Error("a repo-layer value must not be honoured")
 	}
 	testfs.MustMkdirAll(t, filepath.Join(home, ".config", "spinclass"), 0o755)
 	testfs.MustWriteFile(t, filepath.Join(home, ".config", "spinclass", "sweatfile"),
 		[]byte("[permissions]\ndeny-sweatfile-edits = true\n"), 0o644)
-	if !denySweatfileEdits(home, repo, wt) {
+	if !denySweatfileEdits(home, repo) {
 		t.Error("a global value must be honoured")
 	}
 }

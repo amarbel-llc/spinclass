@@ -45,7 +45,7 @@ func selfCloseScope(st *session.State) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("resolving the home directory to read sweatfiles: %w", err)
 	}
-	h, err := sweatfileio.LoadWorktreeHierarchy(home, st.RepoPath, st.WorktreePath)
+	h, err := sweatfileio.LoadHierarchy(home, st.RepoPath)
 	if err != nil {
 		return false, fmt.Errorf("reading the sweatfile hierarchy: %w", err)
 	}

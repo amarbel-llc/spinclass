@@ -733,8 +733,9 @@ func TestResolvedDisabledByMergeFlag(t *testing.T) {
 	runGit(t, wtPath, "add", "disabled.txt")
 	runGit(t, wtPath, "commit", "-m", "disabled commit")
 
-	// Drop a sweatfile in the worktree that disables merge.
-	sweatfilePath := filepath.Join(wtPath, "sweatfile")
+	// Disable merge in the repo's own sweatfile (the main checkout): a worktree's
+	// own sweatfile is not a layer.
+	sweatfilePath := filepath.Join(repoDir, "sweatfile")
 	if err := os.WriteFile(sweatfilePath, []byte("[hooks]\ndisable-merge = true\n"), 0o644); err != nil {
 		t.Fatalf("write sweatfile: %v", err)
 	}

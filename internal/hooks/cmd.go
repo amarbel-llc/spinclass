@@ -39,19 +39,34 @@ func Handle(stdin io.Reader, stdout io.Writer) error {
 	}
 
 	home, _ := os.UserHomeDir()
-	var disallowMainWorktree bool
-	// Worktree path rewrite (#176) is on by default; the sweatfile opt-out flips it.
-	rewriteEnabled := true
-	denySweatfile := denySweatfileEdits(home, mainRepoRoot, cwd)
+	policy := resolveWorktreePolicy(home, mainRepoRoot)
+
+	return Run(stdin, stdout, mainRepoRoot, cwd, policy.disallowMainWorktree, WithWorktreePathRewrite(policy.rewriteEnabled), WithDenySweatfileEdits(policy.denySweatfileEdits))
+}
+
+// worktreePolicy is the PreToolUse policy resolved for a worktree session.
+type worktreePolicy struct {
+	disallowMainWorktree bool
+	rewriteEnabled       bool
+	denySweatfileEdits   bool
+}
+
+// resolveWorktreePolicy reads the policy from the main checkout's hierarchy;
+// the worktree's own sweatfile is not a layer, so a corrupt or hostile one
+// changes nothing. Worktree path rewrite (#176) is on by default; the sweatfile
+// opt-out flips it.
+func resolveWorktreePolicy(home, mainRepoRoot string) worktreePolicy {
+	policy := worktreePolicy{
+		rewriteEnabled:     true,
+		denySweatfileEdits: denySweatfileEdits(home, mainRepoRoot),
+	}
 	if home != "" {
-		result, err := sweatfileio.LoadWorktreeHierarchy(home, mainRepoRoot, cwd)
-		if err == nil {
-			disallowMainWorktree = result.Merged.DisallowMainWorktreeEnabled()
-			rewriteEnabled = !result.Merged.WorktreePathRewriteDisabled()
+		if result, err := sweatfileio.LoadHierarchy(home, mainRepoRoot); err == nil {
+			policy.disallowMainWorktree = result.Merged.DisallowMainWorktreeEnabled()
+			policy.rewriteEnabled = !result.Merged.WorktreePathRewriteDisabled()
 		}
 	}
-
-	return Run(stdin, stdout, mainRepoRoot, cwd, disallowMainWorktree, WithWorktreePathRewrite(rewriteEnabled), WithDenySweatfileEdits(denySweatfile))
+	return policy
 }
 
 func gitToplevel(dir string) (string, error) {

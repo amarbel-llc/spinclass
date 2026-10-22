@@ -161,7 +161,10 @@ Full reference: `spinclass-sweatfile(5)`; custom start commands:
 → repo): string arrays are nil=inherit, `[]`=clear, non-empty=append;
 arrays-of-tables dedup by name (`[[mcps]]`, `[[start-commands]]`, `[[remotes]]`,
 `[[post-merge]]`; a name-only entry removes an inherited one); `[sysprompt]`
-arrays **override** rather than append; scalars override.
+arrays **override** rather than append; scalars override. A worktree's own
+sweatfile is NOT a layer (`LoadHierarchy` resolves to the main checkout; only
+`sweatfileio.WorktreeOverrides` data fields are read); `[session-entry]`
+start/resume/env are pinned in `session.State.Entry` at creation.
 
 ## Nix Build
 

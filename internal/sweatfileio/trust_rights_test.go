@@ -297,8 +297,9 @@ func TestTrustedEnforceProfileRightsIgnoresWorktreeLayer(t *testing.T) {
 	writeEnforce(t, filepath.Join(home, "work", "sweatfile"), true)
 	wtFile := filepath.Join(wt, "sweatfile")
 	writeEnforce(t, wtFile, false)
+	linkedWorktree(t, repo, wt)
 
-	h, err := LoadWorktreeHierarchy(home, repo, wt)
+	h, err := LoadHierarchy(home, wt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,8 +307,8 @@ func TestTrustedEnforceProfileRightsIgnoresWorktreeLayer(t *testing.T) {
 	if !on {
 		t.Errorf("worktree layer turned enforcement off")
 	}
-	if !reflect.DeepEqual(ignored, []string{wtFile}) {
-		t.Errorf("ignored = %v, want [%s]", ignored, wtFile)
+	if len(ignored) != 0 {
+		t.Errorf("ignored = %v, want none: the worktree file is not loaded at all", ignored)
 	}
 }
 

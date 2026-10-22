@@ -1,11 +1,10 @@
 package sweatfileio
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
@@ -43,7 +42,11 @@ func LoadDefaultHierarchy() (sweatfile.Hierarchy, error) {
 // paths in either chain resolve to the same canonical directory, only the
 // first is loaded; the second is recorded with SkipReason set so callers
 // (e.g. validate) can surface the dedup decision.
+//
+// repoDir inside a linked git worktree is first resolved to the MAIN checkout
+// (mainCheckoutRoot), so a worktree's own sweatfile is never a layer.
 func LoadHierarchy(home, repoDir string) (sweatfile.Hierarchy, error) {
+	repoDir = mainCheckoutRoot(filepath.Clean(repoDir))
 	var sources []sweatfile.LoadSource
 	merged := sweatfile.Sweatfile{}
 	seenCanonical := make(map[string]bool)
@@ -170,22 +173,95 @@ func canonicalDir(dir string) string {
 	return resolved
 }
 
-// LoadWorktreeHierarchy loads the sweatfile cascade for a worktree context.
-// It delegates to LoadHierarchy for global → intermediate dirs → main repo,
-// then appends the worktree's own sweatfile as the highest-priority layer.
-func LoadWorktreeHierarchy(
-	home, mainRepoRoot, worktreeDir string,
-) (sweatfile.Hierarchy, error) {
-	worktreePath := filepath.Join(filepath.Clean(worktreeDir), "sweatfile")
-	data, err := os.ReadFile(worktreePath)
-	found := true
-	if errors.Is(err, fs.ErrNotExist) {
-		data, found, err = nil, false, nil
+// mainCheckoutRoot resolves dir to the main checkout root when dir is, or sits
+// inside, a LINKED git worktree; any other dir (a plain directory, a main
+// checkout or a subdirectory of one) comes back unchanged.
+//
+// A worktree is writable by the worker it hosts, including a confined one, so
+// nothing a worker can write may be read as sweatfile policy: the worktree's own
+// `sweatfile` and its `.worktrees/` ancestor chain must never become layers.
+// Resolving here, in the loader every caller funnels through, closes that for
+// all of them at once, from any cwd. Only the filesystem is consulted (no git
+// subprocess) so the answer needs nothing a corrupt worktree could break; a
+// `.git` pointer that does not resolve to a `<main>/.git` common dir (a
+// submodule, say) leaves dir as it was.
+func mainCheckoutRoot(dir string) string {
+	for d := dir; ; {
+		info, err := os.Lstat(filepath.Join(d, ".git"))
+		if err == nil {
+			if info.IsDir() {
+				return dir
+			}
+			if root, ok := commonCheckoutRoot(d); ok {
+				return root
+			}
+			return dir
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			return dir
+		}
+		d = parent
 	}
+}
+
+// commonCheckoutRoot follows the `gitdir:` pointer in <worktree>/.git to the
+// worktree's admin dir, then to the repo's common `.git`, and returns the main
+// checkout root above it.
+func commonCheckoutRoot(worktree string) (string, bool) {
+	pointer, err := os.ReadFile(filepath.Join(worktree, ".git"))
 	if err != nil {
-		return sweatfile.Hierarchy{}, err
+		return "", false
 	}
-	return LoadHierarchyWithLayer(home, mainRepoRoot, worktreePath, data, found)
+	gitdir, ok := strings.CutPrefix(strings.TrimSpace(string(pointer)), "gitdir:")
+	if !ok {
+		return "", false
+	}
+	gitdir = strings.TrimSpace(gitdir)
+	if !filepath.IsAbs(gitdir) {
+		gitdir = filepath.Join(worktree, gitdir)
+	}
+	gitdir = filepath.Clean(gitdir)
+
+	// The admin dir must be <common>/worktrees/<name>. Its commondir file is
+	// NOT consulted: a confined unit binds worktrees/<name> read-write, so the
+	// worker could point commondir at a `.git` it made inside its own tree and
+	// turn its sweatfile back into a layer. The .git pointer file is bound
+	// read-only, so the layout it names is the trustworthy answer.
+	if filepath.Base(filepath.Dir(gitdir)) != "worktrees" {
+		return "", false
+	}
+	common := filepath.Dir(filepath.Dir(gitdir))
+	if filepath.Base(common) != ".git" {
+		return "", false
+	}
+	return filepath.Dir(common), true
+}
+
+// Overrides are the worktree-local settings a worktree's own sweatfile may still
+// carry. It is an allow-list: a field belongs here only if it is pure data that
+// cannot exec a command, name a path or weaken a policy, because the worktree is
+// writable by the worker it hosts. Everything else a worktree sweatfile says is
+// ignored; see mainCheckoutRoot.
+type Overrides struct {
+	// DisableNixGC overrides [hooks].disable-nix-gc for this worktree's own
+	// close-time gc. A worker choosing to keep its own gc roots is harmless.
+	DisableNixGC *bool
+}
+
+// WorktreeOverrides reads the allow-listed Overrides from <dir>/sweatfile,
+// best-effort: a missing, unreadable or unparseable file yields zero Overrides
+// (never an error), so a corrupt worktree file cannot change anything.
+func WorktreeOverrides(dir string) Overrides {
+	doc, err := Load(filepath.Join(dir, "sweatfile"))
+	if err != nil {
+		return Overrides{}
+	}
+	var o Overrides
+	if hooks := doc.Data().Hooks; hooks != nil {
+		o.DisableNixGC = hooks.DisableNixGC
+	}
+	return o
 }
 
 // LoadHierarchyWithLayer is LoadHierarchy plus one caller-supplied top layer

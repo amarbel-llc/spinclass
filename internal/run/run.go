@@ -146,18 +146,17 @@ func Run(ctx context.Context, spec Spec) (exitCode int, err error) {
 	// the worktree setup once and writes inactive/PID-0 state without exec'ing
 	// an entrypoint. format="" + io.Discard keeps its own output off the crap
 	// stream (the reporter owns stdout).
-	hierarchy, herr := sweatfileio.LoadWorktreeHierarchy(os.Getenv("HOME"), repoPath, rp.AbsPath)
+	hierarchy, herr := sweatfileio.LoadHierarchy(os.Getenv("HOME"), repoPath)
 	if herr != nil {
-		hierarchy, herr = sweatfileio.LoadHierarchy(os.Getenv("HOME"), repoPath)
-		if herr != nil {
-			return 1, herr
-		}
+		return 1, herr
 	}
 	merged := hierarchy.Merged
+	// The entry Attach pins on the session it is about to create (same source).
+	entry := shop.PinEntry(merged)
 	sexec := executor.SessionExecutor{
-		Entrypoint:  merged.SessionStart(),
+		Entrypoint:  entry.Start,
 		Description: rp.Description,
-		Env:         merged.SessionEnv(),
+		Env:         entry.Env,
 	}
 	if aerr := shop.Attach(io.Discard, sexec, rp, merged, "", false, true /*noAttach*/, false, spec.AllowStaleBase, spec.AllowNoCredential); aerr != nil {
 		return 1, aerr

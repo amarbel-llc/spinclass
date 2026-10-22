@@ -291,7 +291,7 @@ func loadAndGate(ts *crap.TestStream, repoPath, dir, branch string) (mergePreamb
 
 	var p mergePreamble
 	if home, _ := os.UserHomeDir(); home != "" {
-		if h, hErr := sweatfileio.LoadWorktreeHierarchy(home, repoPath, dir); hErr == nil {
+		if h, hErr := sweatfileio.LoadHierarchy(home, repoPath); hErr == nil {
 			p.hierarchy, p.haveHierarchy = h, true
 		}
 	}
@@ -431,7 +431,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	// dormant for the terminal/attested policy paths).
 	var sessionH sweatfile.Hierarchy
 	if home, _ := os.UserHomeDir(); home != "" {
-		if h, hErr := sweatfileio.LoadWorktreeHierarchy(home, repoPath, wtPath); hErr == nil {
+		if h, hErr := sweatfileio.LoadHierarchy(home, repoPath); hErr == nil {
 			sessionH = h
 		}
 	}
@@ -1091,7 +1091,7 @@ func runPreMergeHookContext(ctx context.Context, rep *crap.Reporter, ts *crap.Te
 	if home == "" {
 		return nil, nil
 	}
-	hierarchy, err := sweatfileio.LoadWorktreeHierarchy(home, repoPath, wtPath)
+	hierarchy, err := sweatfileio.LoadHierarchy(home, repoPath)
 	if err != nil {
 		return nil, nil
 	}

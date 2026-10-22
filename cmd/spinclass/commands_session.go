@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	osexec "os/exec"
+	"path/filepath"
 	"time"
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
@@ -522,25 +524,54 @@ type startArgs struct {
 	AllowNoCredential bool `json:"allow-no-credential"`
 }
 
+// attachSessionFn is shop.Attach, a seam so tests can capture the executor a
+// start or resume builds without exec'ing it.
+var attachSessionFn = shop.Attach
+
+// entryFor returns the entrypoint inputs a session start or resume must use:
+// the entry pinned on the session at creation, or, for a legacy session that
+// has none, the merged global, ancestor and main-checkout sweatfiles, which it
+// reports on stderr. A worktree's own sweatfile is never a source: the worker
+// that lives there can write it.
+func entryFor(state *session.State, repoPath string, merged sweatfile.Sweatfile, stderr io.Writer) session.PinnedEntry {
+	if state != nil && state.Entry != nil {
+		return *state.Entry
+	}
+	fmt.Fprintln(stderr, "spinclass: no session entrypoint pinned at creation; using the global/ancestor sweatfiles and "+filepath.Join(repoPath, "sweatfile"))
+	return *shop.PinEntry(merged)
+}
+
+// startEntry is entryFor for `sc start`. A worktree that does not exist yet is
+// created by this very call, which pins merged (shop.Attach), so merged is the
+// entry; an existing one uses the pin it already has.
+func startEntry(rp worktree.ResolvedPath, merged sweatfile.Sweatfile, stderr io.Writer) session.PinnedEntry {
+	if _, err := os.Stat(rp.AbsPath); err != nil {
+		return *shop.PinEntry(merged)
+	}
+	state, err := session.Read(rp.RepoPath, rp.Branch)
+	if err != nil {
+		state = nil
+	}
+	return entryFor(state, rp.RepoPath, merged, stderr)
+}
+
 func attachSession(resolvedPath worktree.ResolvedPath, args startArgs) error {
 	repoPath := resolvedPath.RepoPath
 
-	hierarchy, err := sweatfileio.LoadWorktreeHierarchy(os.Getenv("HOME"), repoPath, resolvedPath.AbsPath)
+	hierarchy, err := sweatfileio.LoadHierarchy(os.Getenv("HOME"), repoPath)
 	if err != nil {
-		hierarchy, err = sweatfileio.LoadHierarchy(os.Getenv("HOME"), repoPath)
-		if err != nil {
-			return err
-		}
+		return err
 	}
 
 	merged := hierarchy.Merged
+	entry := startEntry(resolvedPath, merged, os.Stderr)
 	exec := executor.SessionExecutor{
-		Entrypoint:  merged.SessionStart(),
+		Entrypoint:  entry.Start,
 		Description: resolvedPath.Description,
-		Env:         merged.SessionEnv(),
+		Env:         entry.Env,
 	}
 
-	return shop.Attach(
+	return attachSessionFn(
 		os.Stdout,
 		exec,
 		resolvedPath,
@@ -679,18 +710,18 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		}
 	}
 
-	hierarchy, err := sweatfileio.LoadWorktreeHierarchy(os.Getenv("HOME"), state.RepoPath, state.WorktreePath)
+	hierarchy, err := sweatfileio.LoadHierarchy(os.Getenv("HOME"), state.RepoPath)
 	if err != nil {
-		hierarchy, err = sweatfileio.LoadHierarchy(os.Getenv("HOME"), state.RepoPath)
-		if err != nil {
-			return err
-		}
+		return err
 	}
 
+	// The entrypoint and env are the ones pinned when the session was created,
+	// not a fresh load: see entryFor.
 	merged := hierarchy.Merged
-	entrypoint := merged.SessionStart()
-	if resume := merged.SessionResume(); resume != nil {
-		entrypoint = resume
+	entry := entryFor(state, state.RepoPath, merged, os.Stderr)
+	entrypoint := entry.Start
+	if len(entry.Resume) > 0 {
+		entrypoint = entry.Resume
 	}
 
 	entrypoint, err = applyRecordedProfile(*state, spawn.ResolveProfile, entrypoint, p.RepinProfile,
@@ -707,7 +738,7 @@ func runResume(_ context.Context, args json.RawMessage) error {
 	}
 	// Without a configured resume entry the start entry (a shell, by default)
 	// runs, which is not a harness to hand the principal to: no nag there.
-	if warning != "" && merged.SessionResume() != nil {
+	if warning != "" && len(entry.Resume) > 0 {
 		fmt.Fprintln(os.Stderr, "spinclass: "+warning)
 	}
 
@@ -722,7 +753,7 @@ func runResume(_ context.Context, args json.RawMessage) error {
 	exec := executor.SessionExecutor{
 		Entrypoint:  entrypoint,
 		Description: state.Description,
-		Env:         merged.SessionEnv(),
+		Env:         entry.Env,
 	}
 
 	// No --allow-stale-base on resume: the worktree already exists, so the
@@ -730,7 +761,7 @@ func runResume(_ context.Context, args json.RawMessage) error {
 	// There is nothing for an override to override. The sweatfile knob is still
 	// honoured inside Attach, which is enough to silence the step entirely for
 	// a deliberately offline repo.
-	return shop.Attach(
+	return attachSessionFn(
 		os.Stdout,
 		exec,
 		rp,

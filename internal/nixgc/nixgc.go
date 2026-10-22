@@ -75,20 +75,27 @@ var ErrNixUnavailable = errors.New("nix-store not on PATH")
 // removed, just without the gc cleanup pass for that invocation.
 var ErrPlanTimedOut = errors.New("nix-store plan step timed out")
 
-// Disabled reports whether [hooks].disable-nix-gc is set in the sweatfile
-// cascade for the given worktree. Returns false on any sweatfile-load error
-// (a broken sweatfile shouldn't silently disable the feature; a real error
-// would already surface elsewhere).
+// Disabled reports whether [hooks].disable-nix-gc is set for the given
+// worktree: the global/ancestor/main-checkout cascade decides, and the
+// worktree's own sweatfile may override it (the one allow-listed worktree-local
+// field, sweatfileio.WorktreeOverrides). Returns false when the cascade cannot
+// be loaded (a broken sweatfile shouldn't silently disable the feature; a real
+// error would already surface elsewhere); an unreadable worktree file is no
+// override.
 func Disabled(repoPath, worktreePath string) bool {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return false
 	}
-	h, err := sweatfileio.LoadWorktreeHierarchy(home, repoPath, worktreePath)
+	h, err := sweatfileio.LoadHierarchy(home, repoPath)
 	if err != nil {
 		return false
 	}
-	return h.Merged.DisableNixGCEnabled()
+	disabled := h.Merged.DisableNixGCEnabled()
+	if override := sweatfileio.WorktreeOverrides(worktreePath).DisableNixGC; override != nil {
+		disabled = *override
+	}
+	return disabled
 }
 
 // Root is a gc root whose symlink chain resolves into the worktree.

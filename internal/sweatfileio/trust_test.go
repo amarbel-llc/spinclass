@@ -82,18 +82,21 @@ func TestTrustedSpawnProfileHonoursOnlyLayersAboveRepo(t *testing.T) {
 		}
 	}
 	repoFile, wtFile := filepath.Join(repo, "sweatfile"), filepath.Join(wt, "sweatfile")
+	linkedWorktree(t, repo, wt)
 	write(filepath.Join(home, ".config", "spinclass", "sweatfile"), "global")
 	write(filepath.Join(home, "work", "sweatfile"), "parent")
 	write(repoFile, "repo")
 	write(wtFile, "wt")
 
-	h, err := LoadWorktreeHierarchy(home, repo, wt)
+	// LoadHierarchy rooted at the worktree resolves to the main checkout, so the
+	// worktree's own file is not even a source to be ignored.
+	h, err := LoadHierarchy(home, wt)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got, ignored := TrustedSpawnProfile(h, home, repo)
-	if got != "parent" || !reflect.DeepEqual(ignored, []string{repoFile, wtFile}) {
-		t.Errorf("got (%q, %v), want (parent, [%s %s])", got, ignored, repoFile, wtFile)
+	if got != "parent" || !reflect.DeepEqual(ignored, []string{repoFile}) {
+		t.Errorf("got (%q, %v), want (parent, [%s])", got, ignored, repoFile)
 	}
 }
 
@@ -104,8 +107,9 @@ func TestTrustedURLResolverIgnoresWorktreeLayer(t *testing.T) {
 	writeResolver(t, filepath.Join(home, "work", "sweatfile"), "parent")
 	wtFile := filepath.Join(wt, "sweatfile")
 	writeResolver(t, wtFile, "wt")
+	linkedWorktree(t, repo, wt)
 
-	h, err := LoadWorktreeHierarchy(home, repo, wt)
+	h, err := LoadHierarchy(home, wt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,8 +117,8 @@ func TestTrustedURLResolverIgnoresWorktreeLayer(t *testing.T) {
 	if cmd != "parent" {
 		t.Errorf("got %q, want parent", cmd)
 	}
-	if !reflect.DeepEqual(ignored, []string{wtFile}) {
-		t.Errorf("ignored = %v, want [%s]", ignored, wtFile)
+	if len(ignored) != 0 {
+		t.Errorf("ignored = %v, want none: the worktree file is not loaded at all", ignored)
 	}
 }
 

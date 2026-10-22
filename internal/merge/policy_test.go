@@ -84,6 +84,23 @@ func TestPolicyExemptionFromBaseLands(t *testing.T) {
 	}
 }
 
+// The predicates are defined by the sweatfile COMMITTED at the merge base: a
+// same-named predicate edited (uncommitted) in the main checkout on disk does
+// not displace it, and nothing is read from the base checkout the predicate
+// runs in.
+func TestPolicyExemptionsReadFromMergeBaseCommit(t *testing.T) {
+	repoDir, wtPath := setupPolicyRepo(t, fileTxtUntouched)
+	writeRepoSweatfile(t, repoDir, "[[pre-merge-exemptions]]\nname = \"not-file-txt\"\ncommand = \"exit 3\"\n")
+
+	recs, err := runFinishOpts(t, repoDir, wtPath, "feature", false, PostMergeOptions{Gate: GateNeedsExemption})
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if tr := policyPoint(t, recs); !tr.OK || !strings.Contains(tr.Description, "exempt (not-file-txt)") {
+		t.Errorf("policy point = %+v, want the committed predicate to exempt", tr)
+	}
+}
+
 // The trust rule: an exemption that exists only on the branch being merged
 // cannot vouch for its own merge.
 func TestPolicyBranchCannotVouchForItself(t *testing.T) {
