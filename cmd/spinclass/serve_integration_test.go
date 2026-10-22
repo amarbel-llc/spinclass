@@ -54,6 +54,10 @@ func TestServeMergeThisSessionStdioIntegrity(t *testing.T) {
 		// Neutralize clown job-wakeup emits: the dev/CI env runs under clown,
 		// and the spawned serve must not wake the developer's real session.
 		"CLOWN_BIN=",
+		// An operator serve: with a principal it writes its serve record and
+		// classifies as unconfined. Without one the confined-caller gate
+		// refuses every state-changing tool (FDR 0035).
+		"CLOWN_SESSION_ID=serve-integration-operator",
 		"HOME="+filepath.Dir(repoDir),
 		"GIT_CEILING_DIRECTORIES="+filepath.Dir(repoDir),
 		"XDG_STATE_HOME="+t.TempDir(),
@@ -252,6 +256,10 @@ func TestServeCheckThisSession(t *testing.T) {
 		// Neutralize clown job-wakeup emits: the dev/CI env runs under clown,
 		// and the spawned serve must not wake the developer's real session.
 		"CLOWN_BIN=",
+		// An operator serve: with a principal it writes its serve record and
+		// classifies as unconfined. Without one the confined-caller gate
+		// refuses every state-changing tool (FDR 0035).
+		"CLOWN_SESSION_ID=serve-integration-operator",
 		"HOME="+filepath.Dir(repoDir),
 		"GIT_CEILING_DIRECTORIES="+filepath.Dir(repoDir),
 		"XDG_STATE_HOME="+t.TempDir(),
@@ -483,6 +491,10 @@ func TestServeMergeThisSessionHiddenWhenDisabled(t *testing.T) {
 		// Neutralize clown job-wakeup emits: the dev/CI env runs under clown,
 		// and the spawned serve must not wake the developer's real session.
 		"CLOWN_BIN=",
+		// An operator serve: with a principal it writes its serve record and
+		// classifies as unconfined. Without one the confined-caller gate
+		// refuses every state-changing tool (FDR 0035).
+		"CLOWN_SESSION_ID=serve-integration-operator",
 		"HOME="+filepath.Dir(repoDir),
 		"GIT_CEILING_DIRECTORIES="+filepath.Dir(repoDir),
 		"XDG_STATE_HOME="+t.TempDir(),
@@ -658,6 +670,10 @@ func TestServeCheckThisSessionHiddenByDefault(t *testing.T) {
 		// Neutralize clown job-wakeup emits: the dev/CI env runs under clown,
 		// and the spawned serve must not wake the developer's real session.
 		"CLOWN_BIN=",
+		// An operator serve: with a principal it writes its serve record and
+		// classifies as unconfined. Without one the confined-caller gate
+		// refuses every state-changing tool (FDR 0035).
+		"CLOWN_SESSION_ID=serve-integration-operator",
 		"HOME="+filepath.Dir(repoDir),
 		"GIT_CEILING_DIRECTORIES="+filepath.Dir(repoDir),
 		"XDG_STATE_HOME="+t.TempDir(),
