@@ -19,7 +19,13 @@ func catalogWidenings(base, child ResolvedProfile) []string {
 	if child.Backend != base.Backend {
 		out = append(out, fmt.Sprintf("changes backend %s to %s", base.Backend, child.Backend))
 	}
-	if child.Model != "" && child.Model != base.Model {
+	// A base is declared, not inherited (clown), so a child with no model runs
+	// clown's default rather than the base's: absent is a widening when the
+	// base names a model (coordinator ruling, strict).
+	switch {
+	case child.Model == "" && base.Model != "":
+		out = append(out, fmt.Sprintf("leaves the model unset (base names %s; clown would run its default)", base.Model))
+	case child.Model != base.Model:
 		out = append(out, fmt.Sprintf("changes model %s to %s", base.Model, child.Model))
 	}
 	out = append(out, serverWidenings(base, child)...)

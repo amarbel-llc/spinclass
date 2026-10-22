@@ -64,9 +64,15 @@ func TestCatalogWidenings(t *testing.T) {
 			want:  []string{"changes model opus to haiku"},
 		},
 		{
-			name:  "empty child model is not a change",
+			name:  "an unset child model widens a base that names one",
 			child: with(func(c *ResolvedProfile) { c.Model = "" }),
 			base:  base,
+			want:  []string{"leaves the model unset (base names opus; clown would run its default)"},
+		},
+		{
+			name:  "an unset model on both is no change",
+			child: with(func(c *ResolvedProfile) { c.Model = "" }),
+			base:  func() ResolvedProfile { b := base; b.Model = ""; return b }(),
 		},
 		{
 			name:  "changes provider and backend",

@@ -782,7 +782,9 @@ because that would be a claim, not a fact (principle 4).
 - `catalogWidenings(base, child)` (`internal/spawn/narrows.go`) lists every way
   the child widens the base, and any item refuses the spawn, naming the whole
   diff (`profile "X" widens base "B" by: ...`) rather than just "not approved"
-  (principle 9). It checks: provider, backend and model changes; a child that
+  (principle 9). It checks: provider, backend and model changes (strict: a
+  child with no model widens a base that names one, since a base is declared,
+  not inherited, so clown would run its default model); a child that
   keeps every server under a selective base, or keeps a server the base does
   not; a per-tool exclusion of the base that the child lifts on a server it
   keeps; and env (a key the child adds, or a value it changes, compared by
