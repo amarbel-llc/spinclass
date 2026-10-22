@@ -6,7 +6,9 @@ promotion-criteria: |
   picks an alternative). As of 2026-09-28 the operator has accepted: the
   base-tree trust rule, terminal merges staying exempt, the late MCP refusal,
   leaving the Bash `sc merge` hole open, and fixing FDR 0007 drift alongside
-  this work. What remains is the go-ahead to implement.
+  this work. What remains is the go-ahead to implement. The 2026-09-28
+  acceptance of "terminal merges staying exempt" was superseded on 2026-10-22
+  (see #326 below).
   proposed -> experimental: `[[pre-merge-exemptions]]` ships and circus's
   sweatfile declares its lock-only predicate. An agent-driven MCP merge of an
   input bump then lands with no attestation and an `exempt (lock-only)`
@@ -22,7 +24,10 @@ promotion-criteria: |
 > circus/firm-banyan/krusty on 2026-09-28, then implemented in the same
 > session. No sweatfile declares an exemption yet. Addresses spinclass#327. For
 > #326 it makes the terminal bypass visible, but keeps it, per an operator
-> decision the same day. Folds in #325 as an adjacent passthrough.
+> decision the same day. Superseded on 2026-10-22 (operator go; circus EPIC 0001
+> decision 12): the terminal path is brought under the same predicates once
+> enforcement is on. Not changed yet; enforcement is off. Folds in #325 as an
+> adjacent passthrough.
 >
 > Where the code lives:
 > - `sweatfile.PreMergeExemption` / `ActivePreMergeExemptions`;
@@ -172,13 +177,18 @@ The gate is live: skills are declared and exemptions may be declared.
 | MCP | yes | any | Claim; consumed only if the merge lands (#219). Predicates are **not run**, and the verdict reads `attested`. |
 | MCP | no | no | Fast refuse at the handler, exactly as today. |
 | MCP | no | yes | Handler **Peeks and does not consume**, then proceeds. `FinishMerge` runs the predicates. If one exempts, the merge continues. If none do, the merge fails **before the hook, nothing lands**, with the FDR 0007 attestation directive plus a line naming the predicates that declined. |
-| CLI (`sc merge`, `sc run`) | n/a | any | **Always lands, as today.** Predicates are **not run**. The only change is an informational record (below). |
+| CLI (`sc merge`, `sc run`) | n/a | any | **Always lands, as today.** Predicates are **not run**. The only change is an informational record (below). (Superseded for the enforcement-on state, 2026-10-22; see the amended #326 table.) |
 
 `sc check` / `check-this-session` are unchanged. A check lands nothing, so
 there is nothing to exempt. `check-this-session` now consumes the attestation
 only on a passing check (#219); a red or cancelled check leaves it buffered.
 
-### #326: terminal merges stay exempt, visibly
+### #326: terminal merges stay exempt, visibly (SUPERSEDED 2026-10-22)
+
+**Superseded 2026-10-22** by the section "#326 (amended 2026-10-22): one rule
+for both paths" below, per an operator ruling recorded in circus EPIC 0001
+decision 12. The text in this section is the 2026-09-28 decision and is kept as
+history. It describes what the code does today; the code has not changed.
 
 **Operator decision (2026-09-28, relayed via circus/firm-banyan/krusty):**
 "terminal sc-merges are always exempt from attestation for now, plugins cannot
@@ -197,7 +207,8 @@ change that". Therefore:
   is live (skills declared) and is never `severity=fail`. It replaces today's
   *silent* bypass and changes no one's workflow.
 
-Consequences for circus. `circus update` is a terminal merge, so it gets no
+Consequences for circus (as of 2026-09-28; superseded, see the amended
+section). `circus update` is a terminal merge, so it gets no
 enforcement from spinclass. circus keeps its own lock-only pre-check inside
 `circus update` as circus policy. Its `lock-only` predicate is still useful in
 circus's sweatfile, but for **agent-driven** MCP merges of input bumps, which it
@@ -213,7 +224,120 @@ That hole stays open by operator decision (2026-09-28), as a known and accepted
 gap. It is low-risk in practice: fleet agents run with Bash disabled in favour
 of `develop-run` and just recipes. A workaround still exists, but agents have
 proven averse to taking it. Any future mitigation belongs to permission tiers /
-PreToolUse, not to this gate.
+PreToolUse, not to this gate. (Amended 2026-10-22: once enforcement is on, the
+terminal path is gated, so the hole stops being a bypass.)
+
+### #326 (amended 2026-10-22): one rule for both paths
+
+**Operator ruling (2026-10-22, operator go; circus EPIC 0001 decision 12).**
+The terminal-merge exemption is gone once attestation enforcement is on.
+**Not changed yet; enforcement is off.** The rule:
+
+1. **Predicates run on both paths.** `[[pre-merge-exemptions]]` predicates
+   (lock-only, docs-only, and any a repo declares) are evaluated for an MCP
+   merge and for a terminal `sc merge` / `sc run`, at the same evaluation
+   point (in `FinishMerge`, after the landing sha is known and before the
+   pre-merge hook), from the same base tree, with the same trust rule. The
+   trust rule section is unchanged. `sc run` takes the same rule as `sc merge`.
+2. **A merge matching a predicate needs no record.** The verdict is
+   `exempt (<name>)` on either path. `circus update`'s lock-only bump is a
+   terminal merge and passes through the lock-only predicate, so it keeps
+   landing without a record.
+3. **A merge matching no predicate needs a record.** Once enforcement is on,
+   a terminal merge that no predicate exempts needs a signed attestation
+   record for the patch digest, exactly as an MCP merge does (FDR 0032 D16).
+   It refuses before the hook with nothing landed, naming the predicates that
+   declined, as for the MCP path today.
+4. **The only other exemption is a card escalation.** A merge that matches
+   no predicate and has no record can land only with a physical-card
+   escalation (FDR 0032 D11, class `piggy-escalation-v1`) that names the
+   merge: the patch digest and the findings or reason waived. The escalation
+   is bound to the PATCH DIGEST, the diff content against the merge base, and
+   is single-use per digest, so a rebase that changes a hunk voids it exactly
+   as it voids an attestation. The escalation is recorded, and the record is
+   in the merge output. No flag, no knob, no environment variable, and no
+   plugin can substitute for it.
+5. **Who requests the run.** For a terminal merge, the terminal `sc merge`
+   (and `sc run`, the same rule) requests the attestation run itself, in the
+   same FinishMerge step, synchronously, from roustabout on the merge host,
+   because the operator is present (roustabout to confirm the request shape).
+   A cloud session without a card can request a run but cannot escalate, so a
+   non-exempt merge with no record refuses there (EPIC 0001 principle 9).
+6. **Before enforcement, nothing changes.** While enforcement is off, the
+   terminal path stays as in the superseded section: it lands and emits the
+   informational `# SKIP attestation bypassed (terminal)` point. Enforcement
+   is a per-repo sweatfile switch (EPIC 0001 decision 12: circus first, then
+   the eng root sweatfile). The switch's name and layer are not determined
+   (a `[hooks]` key, a `[[pre-merge-skills]]` field or a new table; the
+   sweatfile owner decides).
+7. **What this does not change.** `sc check` still lands nothing and needs
+   nothing. The Bash `sc merge` hole (agents shelling out) is no longer a
+   bypass once enforcement is on, because the terminal path is gated;
+   before that it stays open. The card is touched before anything is at
+   stake: the escalation is obtained before the merge starts, never during
+   or after (EPIC 0001 principle 10).
+
+Consequences for circus. `circus update` is a terminal merge and its
+`lock-only` predicate covers it directly once enforcement is on. circus's own
+lock-only pre-check inside `circus update` (circus policy) may stay as defence
+in depth; it is no longer the only gate. Until enforcement is on, nothing
+changes for it. The circus terminal callers that rely on the exemption today
+(circus review, 2026-10-22):
+
+- `circus deploy`'s bump merges (`sc merge --post-merge-targets HOST` after
+  `sc run --no-merge`);
+- `circus update`'s cascade merges;
+- the `debug-spinclass-merge-worktree` recipe.
+
+The lock-only predicate covers the first two. The third is an operator action.
+
+Policy decision table once enforcement exists (replaces the table above for
+that state):
+
+| Path | Enforcement | Attestation record | Predicate matches | Outcome |
+|---|---|---|---|---|
+| MCP or terminal | off | (self-asserted claim, FDR 0007, MCP only) | n/a | As today: MCP per the previous table; terminal lands with the SKIP point. |
+| MCP or terminal | on | valid for the patch digest | n/a | Lands. Verdict `attested`. Predicates are not run. |
+| MCP or terminal | on | none | yes | Lands. Verdict `exempt (<name>)`. |
+| MCP or terminal | on | none | no | Refuses before the hook, nothing lands, unless a recorded card escalation names the merge. |
+
+The "MCP, no attestation, no exemptions declared" fast-refuse row at the
+handler stays for the MCP path while the self-asserted claim exists.
+
+Where the code would change later (NOT changed; line numbers will drift):
+
+- `internal/merge/policy.go`: `AttestationGate` and its zero value
+  `GateTerminal`, documented as the superseded rule. The terminal path needs
+  `GateNeedsExemption` semantics when enforcement is on, so the zero value can
+  no longer mean "exempt". Changing it affects every caller that leaves
+  `PostMergeOptions.Gate` unset.
+- `PolicyTerminalBypassReason` (the SKIP text) and `runAttestationPolicy`,
+  whose `case GateTerminal:` emits the SKIP and returns nil. Its liveness test
+  (`len(ActivePreMergeSkills()) == 0 && gate != GateNeedsExemption`) assumes
+  "gate live" means "skills declared"; enforcement needs its own.
+- `ErrAttestationNotExempt` names `nothing-but-the-truth`; it changes once the
+  record replaces the claim.
+- `decideMergeGate` in `cmd/spinclass/commands_mcp_only.go` is MCP-only; the
+  terminal callers have no equivalent (call sites not enumerated; not
+  determined).
+- `internal/sweatfile`: the enforcement switch, and
+  `validate.CheckPreMergeExemptions`, which should stop calling exemptions
+  "dead config" when enforcement is on without skills.
+- The card-escalation path (rule 4) has no code today. It depends on FDR 0032
+  slice 1 and piggy's escalation class.
+
+**Open asks (asks to those repos' sessions, not facts about them).**
+
+- **piggy**: confirm the `piggy-escalation-v1` operator-act text can name a
+  merge (patch digest plus waived findings) within the 4096-byte limit, and
+  define the text shape.
+- **roustabout**: confirm the request shape for a synchronous attestation run
+  requested from FinishMerge on the merge host (rule 5).
+- **circus**: confirm `circus update` is the only terminal-merge caller that
+  relies on the exemption beyond the three listed, and that its lock-only
+  predicate script runs from the base tree with POSIX tools only.
+- **spinclass FDR 0032 slice 1** (this repo): the signed record and the
+  escalation need the signing principal; enforcement cannot be on before that.
 
 ### Verdicts
 
@@ -233,7 +357,9 @@ As built, the labels are:
   each declined predicate with its verdict (`exit N`, `timeout`,
   `spawn-failed: …`) plus the tail of its output
 - `# SKIP attestation bypassed (terminal): …` (terminal path, informational
-  only)
+  only; emitted only while enforcement is off. Once on, the terminal path
+  emits `exempt (<name>)`, `attested`, or the policy refusal, as the MCP path
+  does.)
 - a dormant gate emits nothing, as today
 
 No commit trailer: the landing commits are already pinned and signed, and
@@ -288,6 +414,9 @@ handle is left for a separate issue.
    change that.
 6. **Chosen:** named base-tree predicates evaluated in `FinishMerge` on the MCP
    path only, plus an informational bypass point on the terminal path.
+   (Superseded 2026-10-22, see "#326 (amended 2026-10-22)": one rule for both
+   paths once enforcement is on. The rejected knobs of option 5 stay recorded;
+   the new rule is not a knob.)
 
 ## Limitations and open questions
 

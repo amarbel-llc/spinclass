@@ -634,8 +634,15 @@ FDR 0007's pre-merge attestation is self-reported prose: the merging agent
 asserts it invoked each skill, and `nothing-but-the-truth` is "strict on
 presence, lenient on content". With D8 and D13 in place a gate can demand
 evidence instead of a claim. An **attestation is a signed record** whose issuer
-is the principal that performed the step, `prev`-linked to the transcript
-checkpoint (slice 2) or subagent transcript (slice 3) in which it happened. A
+is the principal that performed the step. Its `prev` set holds the digest of the
+**ringmaster job record** of the run that produced it (the run's terminal
+record, see "What the attestation chains to" below). It does not chain to a
+transcript checkpoint. The transcript (slice 2, slice 3) stays valuable
+evidence, but no gate depends on it. Slice 1 is the earliest slice that can
+carry the attestation: the record needs a signing principal (D1-D3) and a
+certificate chain (D4), and nothing more. (Amended 2026-10-22, operator go;
+circus EPIC 0001 decision 7 and the M5 row. M5 keeps its target behind slice 1.
+Code is unchanged.) A
 gate then checks, mechanically: was the required skill run by a **distinct
 subagent principal** whose certificate chains to this session (so the merging
 agent cannot attest for itself); did a required tool actually run (its
@@ -646,10 +653,126 @@ on missing prose. FDR 0031's exemption predicates stay as the policy layer on
 top: they decide *which* records a merge base requires, and the D13 ambient
 right `spinclass:merge` decides who may ask at all.
 
+**What the attestation chains to.** The run that performs an attestation is a
+roustabout graph run. Each agent node is its own juggler run under a
+roustabout-owned PARENT ringmaster job (circus FDR 0043 decisions 9 and 11;
+FDR 0041: the result is the run's ringmaster job). The attestation record's
+`prev` holds a **job reference** to that parent: the job id and the digest of
+the parent job's terminal record, as one markl-addressed value. The parent's
+terminal record carries roustabout's run record (graph digest, each node's
+digest and job id, the verdict) as a by-reference resource, so a verifier
+never walks the node jobs. The gate resolves the reference and checks, in
+order:
+
+1. the parent job record exists and is terminal (any terminal state: a run
+   that finds P0-P2 issues fails yet still carries a valid, signed, negative
+   attestation);
+2. its digest equals the digest in `prev`;
+3. the job's producer is the run-root principal whose certificate chains to
+   the REQUESTING session's grant chain AND is not the requesting session's own
+   principal (EPIC 0001 decision 7; FDR 0034, 2026-10-19). Both halves are
+   required: chains-to, and distinct-from;
+4. the attestation's subject equals the digest of the DIFF content,
+   `git diff <merge-base>..HEAD`, that the gate recomputes for the pinned
+   landing sha at FDR 0031's evaluation point inside FinishMerge, after the
+   landing sha is known. It is the diff-content digest, not a sha.
+
+Then the gate reads the verdict in the attestation body. A record whose
+verdict is fail refuses with its findings named, which is a different refusal
+from "no record". Any failed check above refuses the merge, naming the
+broken check.
+
+**Retention.** The journal an attestation references is pinned for as long as
+the merge it gated is reachable from the default branch. In practice it is
+pinned on attestation, and GC skips pinned journals (the ringmaster ask
+below). A failed attestation's journal follows normal retention. A host with
+no ringmaster service fails closed (EPIC 0001 principle 9).
+
+**Limits, stated plainly.** A ringmaster job record is not a signed record
+today (not determined: whether ringmaster signs or can sign; see "Open asks"
+below). The attestation's signature is what carries authority. The job
+reference gives it a durable, content-addressed anchor and ties it to a real
+run with a start, a terminal state and an output spool. It does not by itself
+prove the run did what the attestation says. D17's limit applies unchanged.
+
+**What spinclass has today (inference marked).** Spinclass creates ringmaster
+jobs for async merge and check and writes the terminal record itself
+(`internal/job/runner.go` calls `clown.FinishJob`, which shells
+`ringmaster done`). The primary result is a `madder://blobs/<digest>` resource,
+already content-addressed. Nothing in `internal/profilegrant`,
+`internal/attestation` or `internal/merge` reads a job record's digest or
+chains to a job record. The ringmaster journal is local to one host and user,
+and a terminal record is append-only by design (inference; not verified that
+nothing rewrites the file). The ringmaster(1) CAVEATS say a journal of a dead
+producer without a lock is garbage-collected after a retention window; the
+window length is not determined.
+
 This is the same mechanism as D10's quotes (a claim is a retrieval of a record
 someone else signed) applied to workflow rather than speech. It is specified
-here, implemented no earlier than slice 2, and named as a revision target for
-FDR 0007 and FDR 0031.
+here and implemented after slice 1, not slice 2: the attestation chains to a
+job record, which exists today, and needs no transcript. Revision targets are
+FDR 0007 (the self-asserted claim, retired at enforcement) and FDR 0031 (the
+predicates, see its #326 amendment). A slice 2 transcript checkpoint MAY be
+added to `prev` later as a second parent; D8 allows a parent set.
+
+**Open asks (asks to those repos' sessions, not facts about them).**
+
+From **ringmaster**:
+
+1. A job-reference value: a stable string naming one job record, job id plus a
+   content digest of the terminal record, in markl form. Today a job id
+   exists; a digest of the terminal record is not determined.
+2. A defined digest input: the terminal JSONL line as written, a canonical
+   re-encoding, or the whole journal up to and including the terminal record.
+   Two independent readers must compute the same bytes.
+3. Pinning and immutability: whether the journal is append-only at the
+   filesystem level, and whether the retention GC can delete a journal an
+   attestation references. If it can, the journal is pinned on attestation, or
+   the terminal record is copied into the madder store by reference.
+4. A read API for a verifier: a `ringmaster read --json <id>` form with a
+   stable schema, or `job_read`, and whether a record can be fetched by digest
+   rather than by id. The gate and the roustabout run share the merge host
+   (EPIC 0001 decision 10), so a local read may suffice for M5.
+5. Who can write it: which principals can append to a job's journal (the
+   producer, anything running as the same uid, the host service only). The
+   attestation relies on the run root being the only writer of its own job.
+   Same-uid write access would defeat that (D17); say what `job_run` and
+   confined units (EPIC 0001 M5 dependency) change.
+6. Producer identity in the record: whether the started or terminal record
+   carries the producer's principal (D1) or certificate digest, so the gate can
+   check item 3 above. Today the visible fields are label, source and target.
+7. Optional: signed terminal records, with the host service key, so the gate
+   can verify the job independently of the attestation signature.
+8. Protocol version: a change to terminal-record content is a
+   `jobwake.ProtocolVersion` change (`internal/sysprompt/sysprompt.go` warns on
+   mismatch). Name the version that carries the reference.
+
+From **roustabout** and **circus** (inference, from EPIC 0001 decision 7): the
+run-root principal is minted under the requesting session's grant chain and
+its principal is recorded where the gate can read it; the graph attaches the
+attestation record's markl id to the job as a `--resource`.
+
+From **troupe** (D8 owner): the `prev` field's allowed value types. D8 says
+`prev` is a set of parent digests. A job reference is not a record digest in
+the troupe grammar. Either the grammar admits a typed job reference, or the
+job's terminal record is wrapped as a troupe record of kind `job-terminal`
+whose body is the ringmaster record and whose digest is the `prev` value.
+Troupe's decision; not determined.
+
+**Open questions.**
+
+- Typed `prev` value or wrapper record (see the troupe ask)? It affects D8, not
+  only D16.
+- Does `prev` hold the terminal record only, or the started record as well?
+  Recommendation, inference: terminal only, since it implies the started
+  record exists on the same journal.
+- Verdict versus job state: a failed job can carry a valid negative
+  attestation, so the gate decides on the attestation's verdict field, not the
+  job state. Check 1 is therefore "terminal". The verdict field's definition in
+  the attestation body is open.
+- Retention: the window length, and who extends it for a referenced job.
+- Non-ringmaster hosts (a laptop) cannot produce a job reference. Recommendation:
+  fail closed, as FDR 0031's present rule does.
 
 ### D17. Security posture, stated plainly
 

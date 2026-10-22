@@ -149,7 +149,8 @@ one record kind and changes nothing else in that model.
 `spinclass:profile:<name>` is an **ambient right** in the FDR 0032 D13 sense:
 it says which profiles a principal may spawn with. It is inherited at spawn as
 a **subset** of the parent's ambient set, drop-only, and raised only by a D11
-escalation. Passing the ability onward is governed by the existing `grant`
+escalation. Instance predicates on a right are not subsets; they stack (see
+"Verification and revocation"). Passing the ability onward is governed by the existing `grant`
 object right, not by a new mechanism: a worker spawned with `cheap` holds
 use-of-`cheap` and not `grant`, unless the driver says so.
 
@@ -173,11 +174,13 @@ touch, and that is this record's recommendation. The human therefore holds
 every profile they have blessed, with no further step per spawn; everything
 below the root can only shrink that set.
 
-- **Narrowing needs no card.** A grant that gives a child a subset of what the
-  grantor holds (same or fewer profiles, same or earlier expiry, no `grant`
-  unless the grantor has it) is signed by the grantor's own software key and is
-  **derivable from the parent record**: a verifier recomputes the subset
-  relation and needs no further act. This is FDR 0032 D11's "rights only shrink
+- **Narrowing needs no card.** A grant that gives a child less than the
+  grantor holds is signed by the grantor's own software key. For catalog
+  nodes (same or fewer profiles, same or earlier expiry, no `grant` unless the
+  grantor has it) the child is **derivable from the parent record** by the
+  subset relation. For instance predicates the child binds a narrowing profile
+  whose predicates stack on its parent profile's, and the enforcer conjoins the
+  chain; no comparison is made. This is FDR 0032 D11's "rights only shrink
   without the card".
 - **Widening needs the card.** Any grant that gives a principal a profile it
   does not hold is a D11 **escalation**: an escalation request by the requester
@@ -236,7 +239,7 @@ carries and a signature made for one purpose cannot be replayed as another:
 | Root blessing of the profile set (with the root certificate) | `piggy-certificate-v1` | card |
 | Widening a principal beyond its set | `piggy-escalation-v1` | card |
 | Standing delegation to a service principal | `piggy-certificate-v1` | card |
-| Narrowing a grant to a child | none: the grantor's software key, D8 grammar | grantor |
+| Narrowing a grant to a child | none: the grantor's software key, D8 grammar (see the 2026-10-22 amendment under Verification) | grantor |
 
 Per piggy/free-larch (relayed by circus/eager-holly): a standing delegation that
 certifies a delegate's key fits the certificate class and a one-off widening
@@ -246,9 +249,112 @@ certificate class is spinclass's proposal, not piggy's statement.
 ### Verification and revocation
 
 At spawn, spinclass walks `prev` from the grant presented to a card-signed
-record, checking at every edge: the signature, that the child grant is a subset
-of its parent (profiles, expiry, `onward`), and that no record is expired. Only
-then does it proceed. A walk that fails is a refusal naming the broken edge.
+record, checking at every edge: the signature, that no record is expired, and
+the edge rule for the node kind below. Only then does it proceed. A walk that
+fails is a refusal naming the broken edge.
+
+**Amended 2026-10-22, operator go** (circus EPIC 0001 decision 3, "narrowing is
+stacking", and decision 4, the catalog/instance split). **Not changed yet:**
+the verifier in `internal/profilegrant` keeps checking subsets for the ground
+fields it has, and the grant record has no predicate field today. The wording
+below is the design for when instance predicates enter.
+
+**Two kinds of node, two edge rules.**
+
+- **Catalog (ground) nodes**: profile names, servers, tools, recipe names,
+  `onward`, expiry. The universe is a catalog, so the child's set is checked
+  to be a subset of the parent's at the edge (equal digests for a locked
+  name, a name the parent holds, no later expiry, no wider `onward`). Across
+  profiles, the check compares the bound profiles' catalog nodes. This is the
+  check this record has always made, and it stays correct for the grant's
+  ground fields.
+- **Instance (predicate) nodes**: paths, node ids, argument values. The
+  universe is open, so no edge compares a child's predicate with its
+  parent's. Narrowing is stacking, and the stack is over **profiles** (next
+  subsection). The enforcer evaluates every predicate on the chain for the
+  request and the **most restrictive answer wins**: the request is allowed
+  only if every predicate allows it, and a `deny` anywhere denies it. A
+  predicate that errors counts as deny (recommended; depends on the evaluator,
+  see the asks). Narrowing is therefore never verified by comparing two
+  predicates, and a predicate a verifier cannot compare is not rejected for
+  that reason.
+
+A node with both a catalog name and a predicate takes the catalog rule for the
+name and stacking for the predicate (circus review; a conformance vector).
+
+**Where predicates live (operator ruling, 2026-10-22).** In the **profile
+document**, on its instance nodes (EPIC 0001 decision 4). The **grant carries
+no predicate field**: only `profile = NAME@<digest>` and the FDR 0032 rights
+(decision 5; authority lives in the grant, principle 2). Stacking is over the
+chain of profiles that the chain of grants binds:
+
+- each grant on `prev` binds one profile digest;
+- a narrowing profile names its parent profile by `_base`;
+- `Walk` returns the ordered list of bound-profile digests, root to leaf;
+- the enforcer (the frontend, EPIC 0001 principle 7) conjoins the predicates
+  of those profiles for the request, and the most restrictive answer wins.
+
+**This is a cascade, like the sweatfile, clownfile and moxyfile cascades.** The
+profile chain is a layered hierarchy in the same sense as spinclass's sweatfile
+layers (global above repo above worktree; a lower layer may only narrow, never
+widen; trusted layers win) and as moxy FDR 0013's narrowing (a child moxyfile
+only shrinks its parent). A profile's `_base` is its parent layer. Evaluation
+walks root to leaf. Each layer may add predicates on nodes or omit nodes. It
+may never add a node its parent lacks. The effective profile is the cascade's
+result, as `moxy show-effective-moxyfile` is for moxyfiles. A
+`show-effective-profile` view is the natural debugging surface for it:
+**proposed, not built, owner clown.**
+
+Consequences of the cascade reading:
+
+- A child cannot widen by writing a looser predicate, because the parent
+  profile's predicates stay in the conjunction. A child's omission of a node
+  its parent holds is not widening; absent still means forbidden for the
+  enumerated tree (principle 1). A predicate on a present node that a child
+  profile does not mention is inherited unchanged.
+- The chain is walked from the presented grant to the root on every
+  enforcement decision, or its evaluation is cached against the head grant's
+  digest and invalidated when any record on the chain expires. The depth bound
+  is `maxChainDepth` (32).
+- Phase 1 grants (no predicates) stay valid unchanged; no migration is wanted
+  (inference; to confirm).
+
+**Signing.** Narrowing, which here includes binding a narrower profile in a
+child grant, is signed by the grantor's software key. Widening is not available
+through a child record at all: it needs a D11 escalation signed by the card
+(class `piggy-escalation-v1`), after which the root record is re-issued
+(`widens`, in Phase 2 design item 3). A link whose bound profile, taken alone,
+would allow more than its parent's still verifies for the conjunction removes
+the excess; the link must still be signed by the parent's grantee.
+
+**Where the code would change later (NOT changed; line numbers will drift).**
+`profilegrant.Narrows` is the per-edge subset check and stays for catalog
+nodes. `Walk` calls it at each edge and returns the start grant as the
+effective one; under stacking it would return the ordered bound-profile
+digests for the frontend to conjoin. `Holds` stays correct for catalog nodes.
+`checkWidens` is consistent with the ruling. `Grant`, `CanonicalText` and
+`ParseCanonicalText` need no predicate field, since predicates live in the
+profile. `LocalLinkVerifier` accepts only unsigned links (the Phase 2 item 4
+stopgap); "narrowing is signed by the grantor's software key" needs the
+per-principal link verifier (FDR 0032 slice 1) and changes the unsigned-link
+tests. Nothing in spinclass evaluates an instance predicate today; the
+enforcer is outside `internal/profilegrant`.
+
+**Open asks (asks to those repos' sessions, not facts about them).**
+
+- **cutting-garden**: the constrained fragment of trellis for instance
+  predicates and its evaluator (EPIC 0001 decisions 2 and 3 work). It needs a
+  defined result for allow, deny and not-applicable so "most restrictive wins"
+  is well defined, the operator set, and whether an erroring predicate counts
+  as deny (recommended: yes).
+- **clown / moxy**: the enforcer that evaluates the profile chain per request;
+  `_base` resolution for profiles; the `show-effective-profile` view.
+- **hyphence**: the canonical form of the profile document's predicates, if it
+  moves to a hyphence record (decision 5).
+- **piggy**: the signature class for software-key narrowing is "none" in the
+  namespace table today; EPIC 0001 decision 3 wants "grantor's software key".
+  Confirm whether a namespace is needed for it (piggy RFC 0012).
+- **troupe**: link signing by per-principal keys (FDR 0032 slice 1).
 
 piggy ships **no verifier** (piggy/free-larch, relayed). The card record is an
 armored sshsig written by `piggy operator-sign --namespace NS`, verified with
@@ -534,7 +640,11 @@ spinclass's own, to be corrected if piggy or the operator disagrees.
 4. **Narrowing links are unsigned until principals have keys.** A narrowing grant
    is derivable from its parent (subset of profiles with equal digests, no later
    expiry, no wider `onward`, grantor equal to the parent's grantee), so authority
-   still comes only from the card-signed root and the subset relation. What is
+   still comes only from the card-signed root and the subset relation. (Amended
+   2026-10-22, operator go: once instance predicates exist, a link is valid for
+   those nodes by conjunction over the bound profile chain, not by a subset
+   test; see "Verification and revocation". Phase 1 shipped ground checks
+   only.) What is
    missing without per-principal keys is *non-forgeability of the link*: anyone
    able to write spinclass's grant store can add a link. That is the same bar as
    FDR 0032 slice 0 (same-uid state, unguessable, not unforgeable), and it is

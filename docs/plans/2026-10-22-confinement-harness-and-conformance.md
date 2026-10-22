@@ -125,7 +125,10 @@ that runs only those four tests, run by the recipe `debug-serve-integration`.
 It is a package, not a check, so it stays outside the gate. Option (x),
 running the tests natively through `godyn-go`, is not used: one attempt
 rewrote the tracked `go.nix` (golang.org/x/text v0.36.0 to v0.37.0) and ran no
-test. The question of a frozen, no-resolve invocation went to igloo's owner.
+test. Open ask: a frozen, no-resolve `godyn-go` mode for `go test`, filed as
+igloo#88 (forge.starbrandshoes.com/linenisgreat/igloo/issues/88). Until it
+lands, `debug-serve-integration` is the lane. Measured on flic at 19f6f0c: 70 s
+wall clock, of which the buildPhase took 39 s and the four tests 4.2 s.
 
 Dependency: both shapes use clown's real agent-scope launcher as a binary, so
 the harness must pin the clown that ships the launcher under test.
