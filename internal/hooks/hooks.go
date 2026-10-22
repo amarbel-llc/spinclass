@@ -420,8 +420,13 @@ func maybeSendSpawnHello(cwd, poshSessionID string) {
 	st.HelloSentAt = &now
 	// os.Getppid() is best-effort, same caveat as the implicit path: the
 	// hook handler is a short-lived subprocess whose parent may be the
-	// Claude process or a transient shell wrapper.
-	st.PID = os.Getppid()
+	// Claude process or a transient shell wrapper. Inside a confined unit
+	// (CLOWN_UNIT) it is a pid in the unit's own namespace, meaningless to
+	// the frontend, so none is recorded there (FDR 0035 "Session PIDs are
+	// untrusted").
+	if os.Getenv("CLOWN_UNIT") == "" {
+		st.PID = os.Getppid()
+	}
 	st.SessionState = session.StateActive
 	if err := session.Write(*st); err != nil {
 		sessionlog.Errorf("maybeSendSpawnHello write-failed key=%s err=%v", st.SessionKey, err)

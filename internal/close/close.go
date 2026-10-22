@@ -205,17 +205,6 @@ func RunResolved(w io.Writer, repoPath, wtPath, branch string, force bool, nixGC
 // sessions under one document instead of concatenating N documents, which is
 // not valid TAP. tw may be nil (non-tap formats), as before.
 func runResolvedInto(tw *tap.Writer, repoPath, wtPath, branch string, force bool, nixGCOverride *bool) error {
-	// Snapshot the state's PID before any teardown so we can wait on
-	// the active spinclass process to exit before tombstoning. If the
-	// state file is missing, PID stays 0 and WaitForExit is a no-op.
-	var activePID int
-	if st, rerr := session.Read(repoPath, branch); rerr == nil {
-		activePID = st.PID
-	}
-
-	// Request graceful close if session is active (best-effort signal).
-	_ = executor.RequestClose(repoPath, branch)
-
 	defaultBranch, dbErr := git.DefaultBranch(repoPath)
 	unintegrated := dbErr == nil && git.CommitsUnintegrated(wtPath, defaultBranch, branch) > 0
 	dirty := git.StatusPorcelain(wtPath) != ""
@@ -251,11 +240,21 @@ func runResolvedInto(tw *tap.Writer, repoPath, wtPath, branch string, force bool
 		}
 	}
 
-	// Wait briefly for the spinclass session to wind down so its final
-	// state write lands before we tombstone (and then for the worktree
-	// dir to be free for git to remove). Best-effort: WaitForExit
-	// returns when the PID is gone or the deadline passes.
-	executor.WaitForExit(activePID, 2*time.Second)
+	// Only now, with the close decided, ask the session's process to exit, and
+	// only if the recorded PID is provably that process (FDR 0035 "Session
+	// PIDs are untrusted"). Then wait briefly for it to wind down so its final
+	// state write lands before we tombstone (and then for the worktree dir to
+	// be free for git to remove). Best-effort: WaitForExit returns when the PID
+	// is gone or the deadline passes; a declined signal waits on nothing.
+	signalled, note := executor.RequestClose(repoPath, branch)
+	if note != "" {
+		if tw != nil {
+			tw.Comment("close " + branch + ": " + note)
+		} else {
+			fmt.Fprintf(os.Stderr, "spinclass: close %s: %s\n", branch, note)
+		}
+	}
+	executor.WaitForExit(signalled, 2*time.Second)
 
 	// A confined worker's agent unit outlives its worktree unless it is stopped
 	// (FDR 0035): the agent would keep running with its directory removed from

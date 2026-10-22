@@ -170,15 +170,3 @@ func (s SessionExecutor) sessionEnv(dir, key string) map[string]string {
 func (s SessionExecutor) Detach() error {
 	return nil
 }
-
-// RequestClose sends SIGHUP to the PID in the session state file.
-func RequestClose(repoPath, branch string) error {
-	st, err := session.Read(repoPath, branch)
-	if err != nil {
-		return nil
-	}
-	if !session.IsAlive(st.PID) {
-		return nil
-	}
-	return syscall.Kill(st.PID, syscall.SIGHUP)
-}

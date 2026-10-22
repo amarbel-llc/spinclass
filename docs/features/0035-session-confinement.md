@@ -162,7 +162,15 @@ exercised on a real unit, and so **unverified until a live canary**:
   - after the round, with the worker's principal, F1–F8b, F13 and F15 passed. F9 failed (below), and F10, F11, F12 and F14 failed as open items;
   - grit add, commit and push through the frontend worked with the minted credential (the first credential-store push);
   - the stash refusal and the force deny arrived as written (FDR 0036).
-- Round K's P2–P6 (pointer and `config.worktree` replace/unlink, nix and direnv) did not run: `just` found its runtime dir read-only. They remain unverified.
+- Round K's P2–P6 (pointer and `config.worktree` replace/unlink, nix and direnv) did not run: `just` found its runtime dir read-only.
+- L, worker canary/quick-magnolia on spinclass 41ce553 (the get-only helper):
+  - **nested RO file binds hold**. On the `.git` pointer and `config.worktree`: writes fail with `Read-only file system`; `mv`, `rm` and `ln -sf` over them fail with `Device or resource busy`; `git config --worktree` fails with EBUSY. That settles the first three items of the list above.
+  - the credential still stats (InaccessiblePaths mounts a mode-000 inode) but `cat` fails with `Permission denied`, before and after a push;
+  - F9 stayed ok after a grit push with `set_upstream`;
+  - raw `update-ref`, `checkout -b` and commit fail on the read-only refs, while `status`, `log` and `diff` work;
+  - with the canary-grit profile the worker's tool list had no moxy `grit_*` and no `chix_build`. Absent, so never called.
+  - Still unverified: `nix` flake evaluation and direnv in the unit. The canary fixture has no `flake.nix` and its `.envrc` is not allowed.
+  - Still failing: F10, F11 (see below), F12, F14.
 
 ### Frontend rewrites detach file mounts (round K, open)
 
@@ -215,6 +223,43 @@ dependence:
   never rewrites, or an overlay.
 
 Not decided; for the coordinator and operator.
+
+### Session PIDs are untrusted (round L, 2026-10-22)
+
+`State.PID` lives in `<worktree>/.spinclass/state.json`, which the session's
+own agent can write, confined or not. A confined worker's spawn-hello hook ran
+inside its unit and recorded `os.Getppid()` from the unit's private pid
+namespace. That number is meaningless to the frontend. F11 then misjudged the
+worker as dead and reported its agent "runs unconfined" inside its own unit.
+Worse, `sc close` sent SIGHUP to that number on the host, and did so before it
+had decided to close at all (a refused close still signalled). Like the
+principal, the PID is now untrusted input:
+
+- the hello records no PID when `CLOWN_UNIT` is set (`hooks.go`
+  `maybeSendSpawnHello`);
+- `executor.RequestClose` never signals a session with a unit record or spec
+  (its unit is stopped instead). It signals any other session only when the
+  process provably belongs to it: its cwd is inside the worktree, or its
+  environment carries `SPINCLASS_SESSION_ID=<key>`. A PID it cannot prove is
+  not signalled, and close says so. Tests cover a foreign PID, a reused PID,
+  PID 0, a dead PID, and a confined record (valid or not);
+- close signals only after the unintegrated/dirty refusal and the
+  confirmation.
+
+Audit of every reader of a recorded PID (file:line at the time of this change):
+
+| Reader | Use | Needs |
+|---|---|---|
+| `internal/close/close.go` (RequestClose call, WaitForExit) | signal, then wait | fixed: signal only a proven PID, never for confined; wait only on the signalled PID |
+| `internal/executor/close_signal.go` `RequestClose` (was `executor/session.go:174-183`) | SIGHUP | fixed |
+| `internal/merge/merge.go:879` | RequestClose after an outside-session merge | fixed by RequestClose |
+| `internal/confinement/driver.go:57` | `Live` = `IsAlive(st.PID)` for the check | unit-based liveness: a confined session is live when its unit's cgroup holds processes (separate F11 change) |
+| `internal/session/session.go:844` `ResolveState` | active vs inactive in `sc list` | unit-based liveness for confined sessions. Today a confined worker reads inactive, and `ResolveDisplayState` shows it running-detached only when clown presence is fresh |
+| `internal/session/session.go:605-613, 665` | implicit-session sweep and lookup | main checkouts are never confined; the PID is agent-writable, but used only for liveness, never signalled |
+| `internal/hooks/hooks.go:365` `recordOwnPrincipal` | keeps a differing recorded principal while its PID is alive | for a confined session PID is 0, so a new principal is recorded. Acceptable: the frontend mapping, not this field, is trusted |
+| `internal/clean/clean.go:437` | transient merge worktree PID, taken from the directory name | frontend-created, not from state.json; unaffected |
+| `internal/executor/wait.go:22` `WaitForExit` | polls a PID | fed only by close's signalled PID now |
+| `internal/attestation/attestation.go:220` | claim liveness | written by the serve, not the agent. Unaffected by namespaces; its storage location was not audited here |
 
 ## The confinement check
 

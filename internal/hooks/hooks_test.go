@@ -2148,6 +2148,31 @@ func TestSessionStartSpawnHello(t *testing.T) {
 	}
 }
 
+// Inside a confined unit (CLOWN_UNIT set) the hook's parent pid is a number in
+// the unit's own pid namespace, so the hello records none; the hello itself
+// and the active state are unchanged.
+func TestSessionStartSpawnHelloInAUnitRecordsNoPID(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CLOWN_UNIT", "spinclass-agent-myrepo-feature.service")
+	repo, wt := initSpawnedWorktree(t, "driver/key")
+
+	fireSessionStart(t, wt)
+
+	st, err := session.Read(repo, "feature")
+	if err != nil {
+		t.Fatalf("session.Read: %v", err)
+	}
+	if st.HelloSentAt == nil {
+		t.Error("HelloSentAt not set after hello")
+	}
+	if st.PID != 0 {
+		t.Errorf("PID = %d, want 0: a pid from the unit's namespace must not be recorded", st.PID)
+	}
+	if st.SessionState != session.StateActive {
+		t.Errorf("state = %q, want active", st.SessionState)
+	}
+}
+
 // TestSessionStartSpawnHelloTargetsPrincipal pins FDR 0032: when the child's
 // state carries SpawnedByPrincipal (the authority link every current spawn
 // writes) and leaves the legacy SpawnedBy empty, the hello still goes out —
