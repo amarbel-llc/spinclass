@@ -581,6 +581,20 @@
         # checkPhase; off x86_64-linux it is `default` and backs `checks.spinclass`.
         spinclass-build_go_application = mkSpinclass forgePins;
 
+        # Harness B's fast lane: the buildGoApplication build with a checkPhase
+        # that runs only the four serve integration tests. They `go build` a
+        # real binary and drive `spinclass serve`, so godyn's per-package test
+        # graph skips them (no `go` on PATH) and only the full pre-merge lane
+        # ran them. A package, not a check: opt-in, outside the gate
+        # (docs/plans/2026-10-22-confinement-harness-and-conformance.md).
+        spinclass-serve-integration = spinclass-build_go_application.overrideAttrs (_: {
+          checkPhase = ''
+            runHook preCheck
+            go test -count=1 -v -run '^TestServe(MergeThisSession|CheckThisSession)' ./cmd/spinclass
+            runHook postCheck
+          '';
+        });
+
         # The default `nix build`: godyn (per-package, incremental) on
         # x86_64-linux, buildGoApplication elsewhere — godyn's build is validated
         # only there (igloo#33; the graph derives per-system at eval time). Both
@@ -607,6 +621,7 @@
           # The buildGoApplication build under an explicit name: the escape
           # hatch from the godyn default (`nix build .#spinclass-build_go_application`).
           inherit spinclass-build_go_application;
+          inherit spinclass-serve-integration;
           inherit spinclass-race;
           # The generated impure-lane config (git-state eng-convention checks),
           # consumed by `just lint-worktree` to run `conformist check` against

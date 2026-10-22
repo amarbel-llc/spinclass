@@ -155,6 +155,18 @@ clean-build:
 #
 #     just debug-go-test internal/perms 'TestA|TestB' -test.v
 #
+# [debug] Harness B, fast local lane: build .#spinclass-serve-integration,
+# whose checkPhase runs only the four serve integration tests
+# (cmd/spinclass/serve_integration_test.go). godyn's inner loop skips them (no
+# `go` on PATH), so this catches a serve-path regression before the pre-merge
+# lane does. Opt-in, outside the gate. An unchanged tree is a store hit and
+# runs nothing; add `--rebuild` by hand to rerun the tests.
+#
+# run the serve integration tests in the sandbox (harness B)
+[group('debug')]
+debug-serve-integration:
+    nix build .#spinclass-serve-integration --print-build-logs --no-link
+
 # run go test for one package via godyn-test (fast inner loop)
 [group('debug')]
 debug-go-test dir run='' *flags='':

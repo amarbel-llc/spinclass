@@ -108,7 +108,8 @@ debugging.
 virtualization. nix.conf has `builders =` empty. A NixOS VM test would run
 under qemu TCG; its run time was not measured. By the coordinator's ruling the
 harness falls back to **shape B**, with the test-only runtime-path seam, and
-stays opt-in.
+stays opt-in. **Shape A is dropped** (coordinator, 2026-10-22: no `/dev/kvm` on
+flic, measured).
 
 Shape B must also carry a fast local lane for the serve integration tests
 (`TestServeMergeThisSessionStdioIntegrity`, `TestServeCheckThisSession`,
@@ -117,6 +118,14 @@ Shape B must also carry a fast local lane for the serve integration tests
 `cmd/spinclass/serve_integration_test.go`). They need a `go` toolchain on PATH,
 so godyn's inner loop skips them and only the pre-merge lane runs them. That
 is how merge-7be3acab found the gate regression d56307e fixed.
+
+That lane is built as option (y): the flake package
+`.#spinclass-serve-integration`, the buildGoApplication build with a checkPhase
+that runs only those four tests, run by the recipe `debug-serve-integration`.
+It is a package, not a check, so it stays outside the gate. Option (x),
+running the tests natively through `godyn-go`, is not used: one attempt
+rewrote the tracked `go.nix` (golang.org/x/text v0.36.0 to v0.37.0) and ran no
+test. The question of a frozen, no-resolve invocation went to igloo's owner.
 
 Dependency: both shapes use clown's real agent-scope launcher as a binary, so
 the harness must pin the clown that ships the launcher under test.
