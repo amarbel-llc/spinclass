@@ -15,6 +15,9 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+	// Handler tests run as an unconfined caller by default; the gate tests in
+	// serve_caller_gate_test.go put the real classifier back (useRealServeClassifier).
+	serveCallerConfined = func() (bool, string) { return false, "test default: unconfined" }
 	code := m.Run()
 	cleanup()
 	os.Exit(code)

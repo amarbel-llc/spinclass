@@ -12,11 +12,12 @@ import (
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 )
 
-func stubServeCallerUnconfined(t *testing.T) {
+// useRealServeClassifier undoes TestMain's unconfined default for one test.
+func useRealServeClassifier(t *testing.T) {
 	t.Helper()
 	original := serveCallerConfined
 	t.Cleanup(func() { serveCallerConfined = original })
-	serveCallerConfined = func() (bool, string) { return false, "stubbed unconfined" }
+	serveCallerConfined = classifyServeCaller
 }
 
 // writeUnitRecordNaming plants a frontend unit record naming principal, which
@@ -37,6 +38,7 @@ func writeUnitRecordNaming(t *testing.T, stateDir, principal string) {
 // principal a unit record names, so the real classifier says "confined".
 func asConfinedServeCaller(t *testing.T, principal string) {
 	t.Helper()
+	useRealServeClassifier(t)
 	stateDir := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", stateDir)
 	t.Setenv("CLOWN_SESSION_ID", principal)
@@ -64,6 +66,15 @@ type gatedServeHandler struct {
 var gatedServeHandlers = []gatedServeHandler{
 	{"spawn-session", "sc spawn", handleSpawnSession, `{"brief":"do"}`, `{"repo":"somewhere"}`, "brief is required"},
 	{"resurrect", "sc resurrect", handleResurrect, `{"target":"worker/kid"}`, `{}`, "target is required"},
+	{"close-child-session", "sc close", handleCloseChildSession, `{"child":"worker/kid","force":true}`, `{}`, "child is required"},
+}
+
+func TestCloseChildCLIIsNotServeGated(t *testing.T) {
+	asConfinedServeCaller(t, "a-confined-principal")
+	err := runCloseChildCLI(context.Background(), json.RawMessage(`{}`))
+	if err == nil || strings.Contains(err.Error(), "classifies as confined") || !strings.Contains(err.Error(), "child is required") {
+		t.Fatalf("sc close-child-session must reach its own validation, got %v", err)
+	}
 }
 
 // The operator's terminal path is not the serve, so it is not gated: a
@@ -79,6 +90,7 @@ func TestResurrectCLIIsNotServeGated(t *testing.T) {
 func TestGatedServeHandlersLetAnUnconfinedCallerThrough(t *testing.T) {
 	for _, h := range gatedServeHandlers {
 		t.Run(h.tool, func(t *testing.T) {
+			useRealServeClassifier(t)
 			t.Setenv("HOME", t.TempDir())
 			t.Setenv("XDG_STATE_HOME", t.TempDir())
 			t.Setenv("CLOWN_SESSION_ID", "an-operator-principal")
@@ -125,6 +137,7 @@ func TestGatedServeHandlersRefuseAnUnclassifiableCaller(t *testing.T) {
 	for _, principal := range []string{"", "a-principal-with-no-records"} {
 		for _, h := range gatedServeHandlers {
 			t.Run(h.tool+"/"+principal, func(t *testing.T) {
+				useRealServeClassifier(t)
 				t.Setenv("XDG_STATE_HOME", t.TempDir())
 				t.Setenv("CLOWN_SESSION_ID", principal)
 				res, err := h.handle(context.Background(), json.RawMessage(h.args), nil)

@@ -257,6 +257,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		},
 		Params: closeChildSessionParamList(),
 		Run:    wrapMCPHandler("close-child-session", handleCloseChildSession),
+		RunCLI: runCloseChildCLI,
 	})
 
 	app.AddCommand(&command.Command{

@@ -30,7 +30,6 @@ func TestHandleSpawnSessionValidation(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("SPINCLASS_SESSION_ID", "driver/test-session")
-	stubServeCallerUnconfined(t)
 
 	cases := []struct {
 		name string
@@ -150,7 +149,6 @@ func newSpawnCmdFixture(t *testing.T, sweatfileTOML, driverKey string) (home, re
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
 	t.Setenv("SPINCLASS_SESSION_ID", driverKey)
 	t.Setenv("CLOWN_SESSION_ID", testDriverPrincipal)
-	stubServeCallerUnconfined(t)
 	repoPath = filepath.Join(home, "eng", "repos", "worker")
 	if err := os.MkdirAll(repoPath, 0o755); err != nil {
 		t.Fatal(err)

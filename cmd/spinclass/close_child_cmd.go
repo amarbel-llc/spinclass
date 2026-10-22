@@ -201,8 +201,13 @@ func runCloseChild(p closeChildParams) (string, error) {
 	return text, nil
 }
 
-// handleCloseChildSession is the `close-child-session` MCP tool handler.
+// handleCloseChildSession is the `close-child-session` MCP tool handler. Its
+// authority is a handle read from agent-writable session state, and `force`
+// discards work, so a confined caller is refused before anything else.
 func handleCloseChildSession(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller("close-child-session", "sc close"); refusal != nil {
+		return refusal, nil
+	}
 	var p closeChildParams
 	if err := json.Unmarshal(args, &p); err != nil {
 		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
@@ -212,6 +217,21 @@ func handleCloseChildSession(_ context.Context, args json.RawMessage, _ command.
 		return command.TextErrorResult(err.Error()), nil
 	}
 	return command.TextResult(text), nil
+}
+
+// runCloseChildCLI is `sc close-child-session` at a terminal, which is not the
+// serve and so not serve-gated.
+func runCloseChildCLI(_ context.Context, args json.RawMessage) error {
+	var p closeChildParams
+	if err := json.Unmarshal(args, &p); err != nil {
+		return fmt.Errorf("invalid arguments: %w", err)
+	}
+	text, err := runCloseChild(p)
+	if err != nil {
+		return err
+	}
+	fmt.Println(text)
+	return nil
 }
 
 // closeChildSessionParamList declares the `close-child-session` parameters.
