@@ -347,8 +347,9 @@ func (p mergePreamble) repair(ts *crap.TestStream, mx phaseMetrics, dir, branch 
 	// editing, or a rebase.autoStash pop) would be folded into the pinned
 	// commit. FDR 0025 promises "edits made while a merge runs are left for
 	// the next merge" (#345): refuse before repair, leaving them untouched.
-	// Untracked files cannot be amended in by a tracked-file check and are
-	// ignored. Only checked when repair actually runs.
+	// Untracked files are not refused: conformist --commit amends only what its
+	// run changed, and left untracked files present at its start alone (#402).
+	// Only checked when repair actually runs.
 	if dirty, dErr := git.DirtyTrackedPaths(dir); dErr != nil {
 		return failStep(ts, "dirty check "+branch, dErr, "")
 	} else if len(dirty) > 0 {
@@ -1485,6 +1486,22 @@ func runRepairPhase(ts *crap.TestStream, hierarchy sweatfile.Hierarchy, wtPath, 
 	if sha1 == sha0 {
 		ts.Ok("repair " + branch + " (already conformant)")
 		return nil
+	}
+	// A formatter pass rewrites paths the commit already has. An amend that adds
+	// or removes a path folded in something else, such as a file a concurrent
+	// writer created during the repair run (#402): undo it, keeping the worktree
+	// as it is, and refuse rather than pin content nobody committed. Interim: a
+	// concurrent edit to a path the commit already has looks like a formatter
+	// fix and is NOT caught here.
+	if changed, cErr := git.AddedOrRemovedPaths(wtPath, sha0, sha1); cErr != nil || len(changed) > 0 {
+		reason := fmt.Errorf("repair added or removed paths in the commit: %s", strings.Join(changed, ", "))
+		if cErr != nil {
+			reason = fmt.Errorf("could not compare the repaired commit with %s: %w", shortSha(sha0), cErr)
+		}
+		if _, rErr := git.Run(wtPath, "reset", "-q", "--mixed", sha0); rErr != nil {
+			return failStep(ts, "repair "+branch, fmt.Errorf("%w; undoing the amend also failed, HEAD is still %s: %v", reason, shortSha(sha1), rErr), out.String())
+		}
+		return failStep(ts, "repair "+branch, fmt.Errorf("%w; the amend was undone (HEAD back to %s, worktree kept), nothing was merged", reason, shortSha(sha0)), out.String())
 	}
 	ts.Ok("repair " + branch + " (amended " + shortSha(sha1) + ")")
 	return nil

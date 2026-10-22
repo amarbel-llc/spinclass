@@ -217,6 +217,23 @@ func DirtyTrackedPaths(path string) ([]string, error) {
 	return paths, nil
 }
 
+// AddedOrRemovedPaths returns the paths present in exactly one of the commits
+// from and to (renames count as one removal and one addition), or nil when the
+// two commits track the same set of paths.
+func AddedOrRemovedPaths(path, from, to string) ([]string, error) {
+	out, err := RunStdin(path, "", "diff", "--name-only", "-z", "--no-renames", "--diff-filter=AD", from, to, "--")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, p := range strings.Split(string(out), "\x00") {
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
+}
+
 func RevListLeftRight(path string) (ahead, behind int) {
 	out, err := Run(path, "rev-list", "--left-right", "--count", "@{upstream}...HEAD")
 	if err != nil {

@@ -416,7 +416,11 @@ does not export *WORKTREE*.
 
 	A worktree with uncommitted changes to tracked files is refused before
 	repair runs (*dirty check*, spinclass#345), since the amend would fold
-	them into the merged commit; untracked files are ignored.
+	them into the merged commit; untracked files are ignored. A file written
+	into the worktree while repair runs can still be amended in (spinclass#402):
+	an amend that adds or removes a path is undone (*HEAD* back to the
+	pre-repair commit, worktree kept) and the merge fails naming the paths, but
+	a concurrent edit to a path the commit already has is not caught.
 
 	Repair is *merge-only* —*sc check* and *check-this-session* do not run
 	it, and merging from an implicit (main-checkout) session is not

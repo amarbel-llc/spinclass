@@ -224,11 +224,20 @@ not ok   repair prime-pine
   naming the paths; nothing is stashed or amended. This upholds FDR 0025's
   promise that edits made while a merge runs are left for the next merge — a
   queued merge re-prepares against a worktree the agent may have kept editing.
-  Untracked files are ignored, and the check only runs when repair is active.
-  The guard is check-then-act: it narrows the race window to the repair
-  command's own runtime but cannot close it. The structural fix (amend only the
-  paths the repair tool rewrote, or snapshot `git diff HEAD` before/after and
-  refuse if the amend swept more) is follow-up work: spinclass#346.
+  Untracked files are not refused; the check only runs when repair is active.
+  The guard is check-then-act, and the repair run itself is the window: on
+  2026-10-22 an agent wrote two files into a session worktree during a merge's
+  prefix and conformist's `--commit --amend` folded both (one new file, one
+  tracked edit) into the session's docs-only commit, while untracked files
+  that existed before repair started were left alone (#402). As an interim
+  guard, an amend that adds or removes a path (`git diff --no-renames
+  --diff-filter=AD` pre-repair..post-repair) is undone with
+  `git reset --mixed` back to the pre-repair commit, keeping the worktree, and
+  the merge fails naming the paths. It does NOT catch a concurrent edit to a
+  path the commit already has, which looks like a formatter fix. Do not write
+  into a session worktree while its merge prefix runs. The structural fix
+  (repair in an isolated worktree, or amend only the paths the repair tool
+  rewrote) is follow-up work: spinclass#346.
 - **GPG signing.** `git commit --amend` re-signs HEAD. Per repo policy commits
   are signed via the piggy/PIV agent; if it is locked the amend fails (exit 2,
   git's stderr), repair fails, and the merge aborts with a legible "repair

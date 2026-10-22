@@ -246,8 +246,9 @@ func TestPrepareMergeRefusesDirtyWorktreeBeforeRepair(t *testing.T) {
 	}
 }
 
-// TestPrepareMergeUntrackedFilesDoNotBlockRepair: untracked files cannot be
-// amended into a commit by the guard's concern, so they do not trigger it.
+// TestPrepareMergeUntrackedFilesDoNotBlockRepair: untracked files present when
+// repair starts are not refused; conformist --commit amends only what its run
+// changed (#402).
 func TestPrepareMergeUntrackedFilesDoNotBlockRepair(t *testing.T) {
 	repoDir, wtPath, _ := setupRepairRepo(t, "feature")
 	writeRepoSweatfile(t, repoDir, "[hooks]\nrepair = \"true\"\n")
@@ -264,6 +265,50 @@ func TestPrepareMergeUntrackedFilesDoNotBlockRepair(t *testing.T) {
 	}
 	if tr, ok := findTest(tests, "dirty check"); ok {
 		t.Errorf("unexpected dirty check point: %+v", tr)
+	}
+}
+
+// TestPrepareMergeRefusesARepairThatAddsAPath (#402): a file a concurrent writer
+// creates during the repair run, and that repair then amends in, is caught after
+// repair: an amend may only rewrite paths the commit already has. The amend is
+// undone (HEAD and index back to the pre-repair commit) and the new file is left
+// in the worktree, untracked.
+func TestPrepareMergeRefusesARepairThatAddsAPath(t *testing.T) {
+	repoDir, wtPath, head := setupRepairRepo(t, "feature")
+	writeRepoSweatfile(t, repoDir,
+		"[hooks]\nrepair = \"printf late > late.go && git add late.go && git commit --amend --no-edit -q\"\n")
+
+	pinnedSha, tests, err := runPrepare(t, repoDir, wtPath, "feature")
+	if err == nil {
+		t.Fatalf("expected refusal, got pinnedSha=%s (points: %v)", pinnedSha, testDescs(tests))
+	}
+	if !strings.Contains(err.Error(), "late.go") {
+		t.Errorf("err = %v, want it to name late.go", err)
+	}
+	if tr, ok := findTest(tests, "repair feature"); !ok || tr.OK {
+		t.Errorf("want failing repair point, got %+v (all: %v)", tr, testDescs(tests))
+	}
+	if got := runGit(t, wtPath, "rev-parse", "HEAD"); got != head {
+		t.Errorf("HEAD = %s, want the pre-repair %s", got, head)
+	}
+	if got := runGit(t, wtPath, "status", "--porcelain", "--", "late.go"); got != "?? late.go" {
+		t.Errorf("late.go status = %q, want it left untracked", got)
+	}
+}
+
+// TestPrepareMergeRefusesARepairThatDeletesAPath (#402): likewise an amend that
+// drops a path from the commit is not a formatter pass.
+func TestPrepareMergeRefusesARepairThatDeletesAPath(t *testing.T) {
+	repoDir, wtPath, head := setupRepairRepo(t, "feature")
+	writeRepoSweatfile(t, repoDir,
+		"[hooks]\nrepair = \"git rm -q file.txt && git commit --amend --no-edit -q\"\n")
+
+	_, tests, err := runPrepare(t, repoDir, wtPath, "feature")
+	if err == nil || !strings.Contains(err.Error(), "file.txt") {
+		t.Fatalf("err = %v, want a refusal naming file.txt (points: %v)", err, testDescs(tests))
+	}
+	if got := runGit(t, wtPath, "rev-parse", "HEAD"); got != head {
+		t.Errorf("HEAD = %s, want the pre-repair %s", got, head)
 	}
 }
 
