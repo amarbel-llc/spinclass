@@ -228,6 +228,12 @@ func runReleaseSessionHandle(p releaseHandleParams) (string, error) {
 			callerPrincipal, child.Key(),
 		)
 	}
+	// A release by the spawner (a transfer is grant then release) ends its
+	// authority through the session-key path too, not just its Holders entry.
+	if (child.SpawnedByPrincipal != "" && callerPrincipal == child.SpawnedByPrincipal) ||
+		(callerKey != "" && callerKey == child.SpawnedBy) {
+		child.SpawnerReleased = true
+	}
 	if err := session.Write(*child); err != nil {
 		return "", fmt.Errorf("writing session state: %w", err)
 	}

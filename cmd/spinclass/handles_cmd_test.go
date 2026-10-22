@@ -524,6 +524,100 @@ func TestReleaseSessionHandleByNonHolderRefused(t *testing.T) {
 	}
 }
 
+// TestSpawnerReleaseEndsKeyPathReap: a spawner that releases its handle can no
+// longer reap through the session-key path (audit row 32-12), the refusal says
+// so, the child survives, and the marker is persisted.
+func TestSpawnerReleaseEndsKeyPathReap(t *testing.T) {
+	const caller = "caller-principal"
+	const callerKey = "driver/main-oak"
+	repoPath, wtPath := childHandleFixture(t, caller, session.State{
+		SpawnedBy:          callerKey,
+		SpawnedByPrincipal: caller,
+		Holders:            []string{caller},
+	})
+	t.Setenv("SPINCLASS_SESSION_ID", callerKey)
+
+	if text, isErr := callRelease(t, `{"child":"worker/kid"}`); isErr {
+		t.Fatalf("release failed: %s", text)
+	}
+	text, isErr := callCloseChild(t, `{"child":"worker/kid"}`)
+	if !isErr {
+		t.Fatalf("expected the reap to be refused after release, got success: %s", text)
+	}
+	for _, want := range []string{"released its handle", "session-key path no longer authorizes", "none", "sc close worker/kid"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("refusal %q is missing %q", text, want)
+		}
+	}
+	if _, err := os.Stat(wtPath); err != nil {
+		t.Errorf("refused reap must leave the worktree intact: %v", err)
+	}
+	st, err := session.Read(repoPath, "kid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.SpawnerReleased {
+		t.Error("SpawnerReleased not persisted after the spawner released")
+	}
+}
+
+// TestSpawnerTransferEndsKeyPathGrant: grant then release (a transfer) by the
+// spawner leaves it unable to grant again through the session-key path.
+func TestSpawnerTransferEndsKeyPathGrant(t *testing.T) {
+	const caller = "caller-principal"
+	const callerKey = "driver/main-oak"
+	repoPath, _ := childHandleFixture(t, caller, session.State{
+		SpawnedBy:          callerKey,
+		SpawnedByPrincipal: caller,
+		Holders:            []string{caller},
+	})
+	t.Setenv("SPINCLASS_SESSION_ID", callerKey)
+
+	if text, isErr := callGrant(t, `{"child":"worker/kid","to":"p9"}`); isErr {
+		t.Fatalf("grant failed: %s", text)
+	}
+	if text, isErr := callRelease(t, `{"child":"worker/kid"}`); isErr {
+		t.Fatalf("release failed: %s", text)
+	}
+	text, isErr := callGrant(t, `{"child":"worker/kid","to":"p10"}`)
+	if !isErr {
+		t.Fatalf("expected the second grant to be refused, got success: %s", text)
+	}
+	for _, want := range []string{"released its handle", "session-key path no longer authorizes", "sc close worker/kid"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("refusal %q is missing %q", text, want)
+		}
+	}
+	st, err := session.Read(repoPath, "kid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(st.PendingHandles, "p10") {
+		t.Errorf("refused grant must not record p10, PendingHandles = %v", st.PendingHandles)
+	}
+}
+
+// TestPlainShellSpawnerNeverReleasedStillReapsByKey: the key path survives for
+// a spawner whose recorded fallback principal is dead, as long as it never
+// released.
+func TestPlainShellSpawnerNeverReleasedStillReapsByKey(t *testing.T) {
+	const callerKey = "driver/main-oak"
+	_, wtPath := childHandleFixture(t, "caller-principal", session.State{
+		SpawnedBy:          callerKey,
+		SpawnedByPrincipal: "dead-fallback-principal",
+		Holders:            []string{"dead-fallback-principal"},
+	})
+	t.Setenv("SPINCLASS_SESSION_ID", callerKey)
+
+	text, isErr := callCloseChild(t, `{"child":"worker/kid"}`)
+	if isErr {
+		t.Fatalf("expected the key-path reap to succeed, got error: %s", text)
+	}
+	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
+		t.Errorf("worktree %s still present after reap (stat err = %v)", wtPath, err)
+	}
+}
+
 // TestListHandlesShowsHeldAndPendingAndAcceptPromotes covers list-handles
 // across two DIFFERENT sessions — one where the caller is an accepted holder,
 // one where it is only pending — and that accept:true promotes the pending

@@ -103,6 +103,13 @@ type State struct {
 	// the authority link and the hello target; SpawnedBy stays the display key
 	// (empty for a driver outside any worktree, e.g. a ~/eng coordinator).
 	SpawnedByPrincipal string `json:"spawned_by_principal,omitempty"`
+	// SpawnerReleased records that the spawner (SpawnedByPrincipal or the
+	// SpawnedBy session key) released its handle, so a release or a transfer
+	// (grant then release, FDR 0032 D12) really ends its authority: the
+	// session-key path of authorizeHandleUse no longer matches once it is set.
+	// Holders membership is unaffected, so a spawner granted a handle again
+	// still holds it. Agent-writable like the rest of this file (FDR 0032 D9).
+	SpawnerReleased bool `json:"spawner_released,omitempty"`
 	// Principal is this session's OWN principal (its clown CLOWN_SESSION_ID),
 	// distinct from SpawnedByPrincipal, which is the driver's. Spawn cannot know
 	// it (clown mints it when the worker boots), so the SessionStart hook

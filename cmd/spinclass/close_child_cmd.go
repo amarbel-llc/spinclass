@@ -50,6 +50,14 @@ type closeChildParams struct {
 // identity cryptographically (a certificate chain, not an ambient env var) —
 // see FDR 0032 D9.
 //
+// The session-key path ends when the spawner gives up its authority: a
+// release (or a transfer, grant then release — FDR 0032 D12) by the spawner
+// sets child.SpawnerReleased (runReleaseSessionHandle), and the key path then
+// no longer authorizes. Holders membership is separate, so a spawner granted a
+// handle again later still holds it. The marker lives in agent-writable
+// state.json, so it binds only callers that cannot write the child's state
+// (FDR 0032 D9).
+//
 // Returns a legible refusal naming the actual holder (noHandleMessage) when
 // unauthorized, nil when authorized. Callers that want a richer,
 // context-specific refusal (authorizeChildReap) use this only as an
@@ -66,10 +74,35 @@ func authorizeHandleUse(callerPrincipal, callerKey string, child session.State) 
 	if child.IsHolder(callerPrincipal) {
 		return nil
 	}
-	if callerKey != "" && child.SpawnedBy == callerKey {
+	if keyPathMatches(callerKey, child) {
+		if child.SpawnerReleased {
+			return errors.New(spawnerReleasedMessage(callerPrincipal, callerKey, child))
+		}
 		return nil
 	}
 	return errors.New(noHandleMessage(callerPrincipal, child))
+}
+
+// keyPathMatches reports whether the caller's session key is the child's
+// recorded spawner key, the (releasable) session-key authority path.
+func keyPathMatches(callerKey string, child session.State) bool {
+	return callerKey != "" && child.SpawnedBy == callerKey
+}
+
+// spawnerReleasedMessage is the refusal for a caller whose only claim is the
+// session-key path, which child.SpawnerReleased has ended: it says what the
+// caller holds (nothing), who does hold the child, and the ways forward.
+func spawnerReleasedMessage(callerPrincipal, callerKey string, child session.State) string {
+	holders := "none"
+	if len(child.Holders) > 0 {
+		holders = strings.Join(child.Holders, ", ")
+	}
+	return fmt.Sprintf(
+		"this session (principal %s, session key %s) released its handle on %s as its spawner, so the "+
+			"session-key path no longer authorizes it; current holders: %s. "+
+			"Ask a holder to grant a handle (grant-session-handle), or run `sc close %s`",
+		callerPrincipal, callerKey, child.Key(), holders, child.Key(),
+	)
 }
 
 // authorizeChildReap decides whether the caller may reap child (#249),
@@ -95,6 +128,9 @@ func authorizeChildReap(callerPrincipal, callerKey string, child session.State) 
 	}
 	if authorizeHandleUse(callerPrincipal, callerKey, child) == nil {
 		return nil
+	}
+	if keyPathMatches(callerKey, child) && child.SpawnerReleased {
+		return errors.New(spawnerReleasedMessage(callerPrincipal, callerKey, child))
 	}
 	if child.SpawnedBy == "" && child.SpawnedByPrincipal == "" && len(child.Holders) == 0 {
 		if callerKey != "" {

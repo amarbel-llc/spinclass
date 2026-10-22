@@ -732,6 +732,34 @@ func TestHandleRightsJSONOmitempty(t *testing.T) {
 	}
 }
 
+// TestSpawnerReleasedJSONOmitempty pins that the marker is unset by default,
+// absent from the JSON when false, and round-trips when set.
+func TestSpawnerReleasedJSONOmitempty(t *testing.T) {
+	var plain State
+	if plain.SpawnerReleased {
+		t.Fatal("SpawnerReleased should default to false")
+	}
+	data, err := json.Marshal(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "spawner_released") {
+		t.Fatalf("plain state JSON unexpectedly contains spawner_released: %s", data)
+	}
+
+	data, err = json.Marshal(State{SpawnerReleased: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var round State
+	if err := json.Unmarshal(data, &round); err != nil {
+		t.Fatal(err)
+	}
+	if !round.SpawnerReleased || !strings.Contains(string(data), `"spawner_released":true`) {
+		t.Errorf("SpawnerReleased did not round-trip: %s", data)
+	}
+}
+
 func slicesContain(s []string, v string) bool {
 	for _, x := range s {
 		if x == v {

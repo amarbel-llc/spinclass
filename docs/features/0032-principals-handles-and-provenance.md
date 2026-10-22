@@ -397,7 +397,15 @@ Each useful on its own, each tightening the previous rather than replacing it.
   says so. The pre-FDR authority level (a child's `spawned_by` equal to the
   caller's session key) is retained as a second path until slice 1 binds
   identity cryptographically, because a `sc spawn` from a plain shell has
-  only a per-process fallback principal that dies with the process.
+  only a per-process fallback principal that dies with the process. The key
+  path is a bridge, not a standing design: revisit it when slice 1 lands or
+  when fallback principals become durable. A release or transfer (grant then
+  release, D12) by the spawner sets `spawner_released` in the child's state,
+  which ends the key path; holder membership is separate, so a spawner granted
+  a handle again holds it normally. `state.json` is agent-writable, so the
+  marker binds only callers that cannot write the child's state: after the FDR
+  0035 serve gates (67fe972, f5ef379, 1eb6cdc) a confined caller never reaches
+  these handlers, and an unconfined agent is outside the model.
 - **Slice 1 (troupe + piggy tier 1).** Keypair and certificate in troupe's
   mint, card-touch root bootstrap, the hello as a troupe certificate exchange,
   `close-child-session` additionally requiring a valid chain, records move to
