@@ -714,9 +714,20 @@ its own running binary (`os.Executable`, symlinks resolved; a collected binary
 keeps its ` (deleted)` marker) and the `spinclass` on its PATH (symlinks
 resolved, so a profile link to the same store path is not a false positive),
 and refuses when they differ, naming both, or when either cannot be resolved
-(`refuseStaleServe`, `internal/spawn/servefresh.go`). The `version` MCP tool, run in a
-serve, adds a `serve binary: current|STALE|unknown` line; the CLI table is
-unchanged. Unverified: that the serve's PATH resolves `spinclass` to the
+(`refuseStaleServe`, `internal/spawn/servefresh.go`). Differing paths are not
+by themselves stale: the clown plugin builds spinclass as its own derivation
+(`lib.mkSpinclass`, with pins), so one commit has two store paths. When the
+paths differ the check also compares build identity (version plus commit): the
+running side is the serve's own `main.version`/`main.commit`, the on-PATH side
+is read by running `<onPath> version` (5s timeout) and parsing the
+`spinclass-<ver>/spinclass` row's `<ver>+<commit>` column. Same known identity
+is "same build, different path" and the spawn proceeds (logged at info).
+A different identity, a commit of `unknown`/`dev` on either side, or an
+identity that cannot be read (the refusal then says "cannot read the build
+identity of <path>") is stale and refuses, naming both paths and both builds.
+The `version` MCP tool, run in a serve, adds a
+`serve binary: current|same build, different path|STALE|unknown` line; the CLI
+table is unchanged. Unverified: that the serve's PATH resolves `spinclass` to the
 operator's profile rather than a plugin-private bin dir; if it does not, the
 check passes a stale serve, and the live round's `version` line is the proof.
 

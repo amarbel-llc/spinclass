@@ -15,6 +15,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/embeds"
 	"code.linenisgreat.com/spinclass/internal/resources"
 	"code.linenisgreat.com/spinclass/internal/servelog"
+	"code.linenisgreat.com/spinclass/internal/spawn"
 	"code.linenisgreat.com/spinclass/internal/sysprompt"
 )
 
@@ -40,6 +41,7 @@ func registerServeCommand(app *command.App) {
 			defer func() { _ = servelog.Close() }()
 			servelog.Infof("serve.start version=%s pid=%d", app.Version, os.Getpid())
 			inServe = true
+			spawn.SetRunningBuild(version, commit)
 
 			// Install the intra-session merge-queue completion hook (spinclass#265,
 			// FDR 0025) before any async job can run. Harmless without clown (the

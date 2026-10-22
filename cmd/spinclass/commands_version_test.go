@@ -1,8 +1,11 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
+
+	"code.linenisgreat.com/spinclass/internal/spawn"
 )
 
 func TestParseStorePathBinary_StandardPath(t *testing.T) {
@@ -80,6 +83,62 @@ func TestFormatVersionTable_OnlyMadderPinned(t *testing.T) {
 	requireLine(t, out, "direnv", "-", "dormant")
 	requireLine(t, out, "papi", "-", "dormant")
 	requireLine(t, out, "gh", "-", "dormant")
+}
+
+func TestFormatServeBinaryLine(t *testing.T) {
+	run := spawn.Build{Version: "1.0", Commit: "abc1234"}
+	for name, tc := range map[string]struct {
+		b    spawn.ServeBinary
+		err  error
+		want []string
+	}{
+		"same path": {
+			b:    spawn.ServeBinary{Running: "/s/a", OnPath: "/s/a", RunningBuild: run},
+			want: []string{"serve binary: current", "/s/a"},
+		},
+		"same build, different path": {
+			b:    spawn.ServeBinary{Running: "/s/a", OnPath: "/s/b", RunningBuild: run, OnPathBuild: run},
+			want: []string{"same build, different path", "/s/a", "/s/b", "1.0+abc1234"},
+		},
+		"different commit": {
+			b: spawn.ServeBinary{
+				Running: "/s/a", OnPath: "/s/b", RunningBuild: run,
+				OnPathBuild: spawn.Build{Version: "1.0", Commit: "def5678"},
+			},
+			want: []string{"STALE", "/s/a", "/s/b", "1.0+abc1234", "1.0+def5678"},
+		},
+		"unknown commit": {
+			b: spawn.ServeBinary{
+				Running: "/s/a", OnPath: "/s/b", RunningBuild: run,
+				OnPathBuild: spawn.Build{Version: "dev", Commit: "unknown"},
+			},
+			want: []string{"STALE", "dev+unknown"},
+		},
+		"identity read error": {
+			b: spawn.ServeBinary{
+				Running: "/s/a", OnPath: "/s/b", RunningBuild: run,
+				IdentityErr: errors.New("timed out"),
+			},
+			want: []string{"STALE", "cannot read the build identity of /s/b: timed out"},
+		},
+		"unresolvable": {
+			err:  errors.New("boom"),
+			want: []string{"serve binary: unknown", "boom"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := formatServeBinaryLine(tc.b, tc.err)
+			for _, w := range tc.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("line %q lacks %q", got, w)
+				}
+			}
+			if name != "different commit" && name != "unknown commit" && name != "identity read error" &&
+				strings.Contains(got, "STALE") {
+				t.Errorf("line %q must not say STALE", got)
+			}
+		})
+	}
 }
 
 type pinTriple struct {

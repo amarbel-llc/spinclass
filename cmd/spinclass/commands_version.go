@@ -66,11 +66,24 @@ func serveBinaryLine() string {
 		return ""
 	}
 	b, err := spawn.CurrentServeBinary()
+	return formatServeBinaryLine(b, err)
+}
+
+// formatServeBinaryLine renders the freshness verdict. Two paths that are one
+// known build (the clown plugin builds spinclass as its own derivation) are
+// not stale.
+func formatServeBinaryLine(b spawn.ServeBinary, err error) string {
 	switch {
 	case err != nil:
 		return fmt.Sprintf("serve binary: unknown (%v)\n", err)
+	case b.SameBuildDifferentPath():
+		return fmt.Sprintf("serve binary: same build, different path: running %s, spinclass on PATH is %s (both %s)\n", b.Running, b.OnPath, b.RunningBuild)
+	case b.IdentityErr != nil:
+		return fmt.Sprintf("serve binary: STALE: running %s (%s), spinclass on PATH is %s; cannot read the build identity of %s: %v; restart the session (spinclass#399)\n",
+			b.Running, b.RunningBuild, b.OnPath, b.OnPath, b.IdentityErr)
 	case b.Stale():
-		return fmt.Sprintf("serve binary: STALE: running %s, spinclass on PATH is %s; restart the session (spinclass#399)\n", b.Running, b.OnPath)
+		return fmt.Sprintf("serve binary: STALE: running %s (%s), spinclass on PATH is %s (%s); restart the session (spinclass#399)\n",
+			b.Running, b.RunningBuild, b.OnPath, b.OnPathBuild)
 	default:
 		return "serve binary: current (" + b.Running + ")\n"
 	}
