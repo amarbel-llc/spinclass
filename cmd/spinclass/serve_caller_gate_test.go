@@ -92,6 +92,18 @@ var gatedServeHandlers = []gatedServeHandler{
 		args: `{"accept":true}`, harmlessArgs: `{"accept":true}`, harmlessRefusal: "no handles",
 		cliArgs: []string{"list-handles", "--accept"},
 	},
+	{
+		tool: "merge-this-session", operatorCommand: "sc merge <target>", handle: handleMergeThisSession,
+		args: `{}`, harmlessArgs: `not json`, harmlessRefusal: "invalid arguments",
+	},
+	{
+		tool: "merge-this-session-async", operatorCommand: "sc merge <target>", handle: handleMergeThisSessionAsync,
+		args: `{}`, harmlessArgs: `not json`, harmlessRefusal: "invalid arguments",
+	},
+	{
+		tool: "nothing-but-the-truth", operatorCommand: "sc merge <target>", handle: handleNothingButTheTruth,
+		args: `{"skills":[]}`, harmlessArgs: `not json`, harmlessRefusal: "invalid arguments",
+	},
 }
 
 // Plain list-handles reads only the caller's own handles, so it stays open

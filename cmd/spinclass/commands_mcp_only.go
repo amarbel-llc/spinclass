@@ -412,7 +412,13 @@ func appendNotPushedNote(text string, gitSync bool, mergeErr error) string {
 	return text + "\nNOTE: NOT pushed (local_only) — this work exists on the LOCAL default branch only; origin does not have it until someone pushes."
 }
 
+// handleMergeThisSession lands and pushes the serve's session. A confined
+// worker does not merge itself (EPIC 0001: engineer-builder cannot merge); the
+// operator or coordinator lands it with `sc merge <target>`.
 func handleMergeThisSession(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller("merge-this-session", "sc merge <target>"); refusal != nil {
+		return refusal, nil
+	}
 	var params struct {
 		LocalOnly        bool     `json:"local_only"`
 		DefaultBranch    string   `json:"default_branch"`
@@ -538,6 +544,9 @@ func handleCheckThisSession(ctx context.Context, _ json.RawMessage, _ command.Pr
 // result is retrieved via ringmaster's own surfaces (job_status/job_read/
 // job_wait) using the returned id; only registered under clown.
 func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller("merge-this-session-async", "sc merge <target>"); refusal != nil {
+		return refusal, nil
+	}
 	var params struct {
 		LocalOnly        bool     `json:"local_only"`
 		DefaultBranch    string   `json:"default_branch"`
@@ -1144,7 +1153,13 @@ func lazyImplicitRand() string {
 	return fmt.Sprintf("%x", b)
 }
 
+// handleNothingButTheTruth records the self-attestation a merge or check
+// claims. Its content is not checked for truth, so a confined caller, which
+// may not merge, may not attest either.
 func handleNothingButTheTruth(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller("nothing-but-the-truth", "sc merge <target>"); refusal != nil {
+		return refusal, nil
+	}
 	var params struct {
 		Skills []session.AttestedSkill `json:"skills"`
 	}
