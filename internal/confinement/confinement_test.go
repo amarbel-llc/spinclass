@@ -165,6 +165,11 @@ func mapping(principal, key, worktree, unit string) string {
 	return fmt.Sprintf(`{"version":1,"principal":"%s","session_key":"%s","worktree":"%s","unit":"%s"}`, principal, key, worktree, unit)
 }
 
+// fileBindMounts are the unit's read-only file mounts on the .git pointer and
+// config.worktree (F9).
+const fileBindMounts = "4 3 8:1 /wt/a/.git /wt/a/.git ro - ext4 /dev/sda1 rw\n" +
+	"5 1 8:1 /repo/.git/worktrees/a/config.worktree /repo/.git/worktrees/a/config.worktree ro - ext4 /dev/sda1 rw\n"
+
 // confinedHost is a host where every fact holds for driver session r/a.
 func confinedHost() (*fakeSys, Inputs) {
 	sys := &fakeSys{
@@ -191,7 +196,7 @@ func confinedHost() (*fakeSys, Inputs) {
 			"/proc/1/comm":                                "systemd\n",
 			"/proc/100/mountinfo": "1 0 8:1 / / rw - ext4 /dev/sda1 rw\n" +
 				"2 1 0:40 / /home rw,nosuid - tmpfs tmpfs rw\n" +
-				"3 2 8:1 /wt/a /wt/a rw - ext4 /dev/sda1 rw\n",
+				"3 2 8:1 /wt/a /wt/a rw - ext4 /dev/sda1 rw\n" + fileBindMounts,
 			"/proc/self/mountinfo":     "1 0 8:1 / / rw - ext4 /dev/sda1 rw\n",
 			root + "/repo/.git/config": "",
 		},
@@ -355,7 +360,7 @@ func TestEachFactCatchesItsBreach(t *testing.T) {
 			s.files[root+"/home/op/.Xauthority"] = "cookie"
 		}},
 		{"F7", "writable from the unit", func(s *fakeSys, _ *Inputs) {
-			s.files["/proc/100/mountinfo"] = "1 0 8:1 / / rw - ext4 /dev/sda1 rw\n"
+			s.files["/proc/100/mountinfo"] = "1 0 8:1 / / rw - ext4 /dev/sda1 rw\n" + fileBindMounts
 			s.dirs[root+"/home"] = []string{"op"}
 			s.dirs[root+"/home/op"] = []string{".bashrc"}
 			s.files[root+"/home/op/.bashrc"] = ""
@@ -479,6 +484,40 @@ func TestSymlinksResolveInsideTheUnit(t *testing.T) {
 	sys.writable = map[string]bool{"/home/op/hooks": true} // the frontend's view
 	if f := factByID(t, Run(sys, in), "F9"); !f.OK {
 		t.Errorf("F9 judged the frontend's path, not the unit's: %s", f.Detail)
+	}
+}
+
+// The credential lives in frontend state; a unit that can read it there fails
+// F9 like one that can read a copy in its own tree.
+func TestF9FailsWhenTheFrontendCredentialIsReadable(t *testing.T) {
+	sys, in := confinedHost()
+	sys.files[root+CredentialPath(stateDir, "/wt/a")] = "https://x:tok@host\n"
+	if f := factByID(t, Run(sys, in), "F9"); f.OK || !strings.Contains(f.Detail, "is readable from the unit") {
+		t.Errorf("F9 = %+v, want the frontend credential named", f)
+	}
+}
+
+// A read-only file mount whose parent the unit holds read-write is lost when
+// the frontend renames over the file; F9 names it even if the new file happens
+// to be unwritable.
+func TestF9FailsWhenAFileBindIsGone(t *testing.T) {
+	for name, line := range map[string]string{
+		"config.worktree mount gone": "5 1 8:1 /repo/.git/worktrees/a/config.worktree",
+		".git mount gone":            "4 3 8:1 /wt/a/.git",
+	} {
+		t.Run(name, func(t *testing.T) {
+			sys, in := confinedHost()
+			var kept []string
+			for _, l := range strings.Split(sys.files["/proc/100/mountinfo"], "\n") {
+				if !strings.HasPrefix(l, line) {
+					kept = append(kept, l)
+				}
+			}
+			sys.files["/proc/100/mountinfo"] = strings.Join(kept, "\n")
+			if f := factByID(t, Run(sys, in), "F9"); f.OK || !strings.Contains(f.Detail, "is gone in the unit") {
+				t.Errorf("F9 = %+v, want the lost mount named", f)
+			}
+		})
 	}
 }
 

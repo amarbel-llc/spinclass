@@ -495,6 +495,29 @@ func TestRunResolvedUnbindsTheSessionsProfileGrant(t *testing.T) {
 	}
 }
 
+// The credential lives in frontend state, outside the worktree, so close must
+// remove it itself; it goes even with no [auth] configuration to revoke it.
+func TestCloseRemovesTheFrontendCredential(t *testing.T) {
+	repoPath, wtPath := setupNoTTYClose(t)
+	t.Setenv("HOME", t.TempDir())
+	cred, err := auth.StateCredentialPath(wtPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(cred), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cred, []byte("https://spinclass:tok@example.com\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", true, nil, "tap"); err != nil {
+		t.Fatalf("RunResolved: %v", err)
+	}
+	if _, err := os.Stat(cred); !os.IsNotExist(err) {
+		t.Errorf("frontend credential survived close: %v", err)
+	}
+}
+
 // A refused close asks no process to exit: the signal comes only after the
 // refusal and the confirmation (FDR 0035 "Session PIDs are untrusted"). A
 // forced close of the same session does ask.

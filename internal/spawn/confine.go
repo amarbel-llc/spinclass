@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/spawnhandshake"
@@ -240,10 +239,11 @@ func buildUnitSpec(in unitSpecInput) unitSpec {
 		}, in.wayland...),
 		Env: in.env,
 	}
-	// The minted credential sits inside the rw worktree bind; listing it as
-	// inaccessible keeps raw git in the unit from reading it to push. The
-	// frontend reads it (grit's pinned credential helper), outside the unit.
-	spec.DenyPaths = append(spec.DenyPaths, filepath.Join(wt, ".spinclass", auth.CredentialFile))
+	// The minted credential is not in the unit's tree at all: auth writes it
+	// to frontend state (confinement.CredentialPath), hidden by ProtectHome, and
+	// only grit's helper in the frontend reads it. A deny entry on a file inside
+	// the rw worktree bind was lost when the frontend replaced that file (round
+	// K, FDR 0035), so there is none.
 	if in.egress != nil {
 		list := append([]string{}, in.egress...)
 		spec.EgressAllow = &list

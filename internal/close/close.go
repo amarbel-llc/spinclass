@@ -270,6 +270,9 @@ func runResolvedInto(tw *tap.Writer, repoPath, wtPath, branch string, force bool
 	// unrevoked on the tombstone, where the next session start's orphan sweep
 	// (and the issuer's TTL) pick it up.
 	revokeCredential(tw, repoPath, wtPath, branch, activeKey(repoPath, branch))
+	// The credential now lives in frontend state, which the worktree removal
+	// below does not reach: remove it whatever the revoke did.
+	auth.RemoveCredential(wtPath)
 	revokeProfileBinding(tw, branch, activeKey(repoPath, branch))
 
 	// Capture the branch's tip commit before anything below removes the

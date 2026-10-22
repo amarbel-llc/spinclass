@@ -916,48 +916,84 @@ func (p *prober) f9HooksNotWritable() Fact {
 		// frontend. A writable file is also a replaceable one (the rw worktree
 		// bind it sits in would let the unit swap it), so an unwritable result
 		// here means the read-only file bind is in force.
+		var fileBinds []string
 		if wt := p.in.Driver.Worktree; wt != "" {
-			targets = append(targets,
+			fileBinds = []string{
 				filepath.Join(p.in.GitCommonDir, "worktrees", filepath.Base(wt), "config.worktree"),
 				filepath.Join(wt, ".git"),
-			)
+			}
+			targets = append(targets, fileBinds...)
 		}
 		for _, t := range targets {
 			if err := p.mustBeUnwritable(t, t); err != nil {
 				return err
 			}
 		}
+		if err := p.fileBindsInForce(fileBinds); err != nil {
+			return err
+		}
 		return p.mustNotReadCredential()
 	}()
 	return fact(id, name, err, "")
 }
 
-// CredentialRelPath is the session's minted credential under its worktree
-// (auth.CredentialFile; a test in the spawn package pins the two together).
+// fileBindsInForce: each read-only file bind whose parent the unit holds as a
+// read-write bind must still be a read-only mount point in the unit. A
+// frontend rename over the file removes that mount, and the unit then sees
+// the new file through the read-write parent (round K, FDR 0035).
+func (p *prober) fileBindsInForce(paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	b, err := p.sys.ReadFile(strings.TrimSuffix(p.root, "/root") + "/mountinfo")
+	if err != nil {
+		return fmt.Errorf("reading the unit's mountinfo: %w", err)
+	}
+	ms, err := parseMountinfo(b)
+	if err != nil {
+		return err
+	}
+	for _, path := range paths {
+		m, ok := covering(ms, path)
+		switch {
+		case !ok || m.point != path:
+			return fmt.Errorf("the read-only file mount on %s is gone in the unit (a frontend rewrite of the file removes it)", path)
+		case !m.readOnly:
+			return fmt.Errorf("the file mount on %s is not read-only in the unit", path)
+		}
+	}
+	return nil
+}
+
+// CredentialRelPath is where a session's credential lived inside its worktree
+// before it moved to frontend state (auth.LegacyCredentialPath; a test in the
+// spawn package pins the two together).
 const CredentialRelPath = ".spinclass/git-credentials"
 
-// mustNotReadCredential: the unit lists the session credential as an
-// inaccessible path, so reading it must be refused (or the file be absent when
-// no credential was minted). Raw git in the unit could otherwise push with it.
+// mustNotReadCredential: the session credential lives in frontend state
+// (CredentialPath), which the unit must not be able to read, and no
+// credential file may be readable in the unit's own tree. Raw git in the unit
+// could otherwise push with it.
 func (p *prober) mustNotReadCredential() error {
 	wt := p.in.Driver.Worktree
 	if wt == "" {
 		return nil
 	}
-	unitPath := filepath.Join(wt, CredentialRelPath)
-	host, err := p.at(unitPath)
-	if err != nil {
-		return err
+	for _, unitPath := range []string{CredentialPath(p.in.StateDir, wt), filepath.Join(wt, CredentialRelPath)} {
+		host, err := p.at(unitPath)
+		if err != nil {
+			return err
+		}
+		_, err = p.sys.ReadFile(host)
+		switch {
+		case err == nil:
+			return fmt.Errorf("the session credential %s is readable from the unit", unitPath)
+		case unreachable(err):
+		default:
+			return fmt.Errorf("cannot establish that the session credential %s is unreadable: %w", unitPath, err)
+		}
 	}
-	_, err = p.sys.ReadFile(host)
-	switch {
-	case err == nil:
-		return fmt.Errorf("the session credential %s is readable from the unit", unitPath)
-	case unreachable(err):
-		return nil
-	default:
-		return fmt.Errorf("cannot establish that the session credential %s is unreadable: %w", unitPath, err)
-	}
+	return nil
 }
 
 // F10: the unit has its own pid namespace and its own procfs showing only its

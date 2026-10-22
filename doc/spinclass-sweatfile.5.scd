@@ -724,7 +724,10 @@ with a *url-resolver* the last two are the canonical ones.
 
 *mint-command*
 	Prints the token on stdout. Spinclass stores it as a mode-600
-	git-credential-store file at _.spinclass/git-credentials_ (the line
+	git-credential-store file in its state directory,
+	_$XDG_STATE_HOME/spinclass/credentials/<hash of the worktree path>_,
+	never inside the worktree (a session minted before that change keeps
+	its _.spinclass/git-credentials_ until it is closed) (the line
 	*https://spinclass:<token>@<host>*; Forgejo accepts any username when
 	the password is an access token) and sets worktree-scoped git config on
 	the session worktree — and, at merge time, on the disposable landing

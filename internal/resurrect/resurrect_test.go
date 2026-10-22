@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/close"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/store"
@@ -235,8 +236,8 @@ func TestRunProvisionsCredentialThroughTrustedResolver(t *testing.T) {
 		t.Fatalf("Run: %v\n%s", err, buf.String())
 	}
 
-	if _, err := os.Stat(filepath.Join(wtPath, ".spinclass", "git-credentials")); err != nil {
-		t.Errorf("git-credentials not written: %v", err)
+	if _, ok := auth.MintedStatePath(wtPath); !ok {
+		t.Error("credential not written to frontend state")
 	}
 	out, err := exec.Command("git", "-C", wtPath, "remote", "get-url", "origin").CombinedOutput()
 	if err != nil {

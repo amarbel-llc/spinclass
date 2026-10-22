@@ -65,6 +65,15 @@ func UnitRecordPath(stateDir, worktree string) string {
 	return filepath.Join(stateDir, "spinclass", "units", fmt.Sprintf("%x.json", h[:8]))
 }
 
+// CredentialPath is where a session's minted forge credential lives: in the
+// frontend state directory, keyed by the worktree, never inside the worktree
+// (FDR 0035 "Frontend rewrites detach file mounts", option (b)). auth writes
+// it; F9 checks the unit cannot read it.
+func CredentialPath(stateDir, worktree string) string {
+	h := sha256.Sum256([]byte(filepath.Clean(worktree)))
+	return filepath.Join(stateDir, "spinclass", "credentials", fmt.Sprintf("%x", h[:8]))
+}
+
 // LoadUnitRecord reads and validates a session's unit record. Every defect is
 // an error: the check fails closed on a record it cannot trust the shape of.
 func LoadUnitRecord(sys System, stateDir, worktree string) (UnitRecord, error) {

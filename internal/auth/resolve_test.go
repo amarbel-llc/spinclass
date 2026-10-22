@@ -58,7 +58,7 @@ func TestMintWithURLResolverRewritesOriginToCanonical(t *testing.T) {
 	if got := runGit(t, wtPath, "remote", "get-url", "origin"); got != "https://vanity.example.com/repo.git" {
 		t.Errorf("effective origin = %q", got)
 	}
-	raw, _ := os.ReadFile(filepath.Join(wtPath, ".spinclass", CredentialFile))
+	raw, _ := os.ReadFile(CredentialPath(wtPath))
 	if got := strings.TrimSpace(string(raw)); got != "https://spinclass:tok@vanity.example.com" {
 		t.Errorf("credential line = %q", got)
 	}
@@ -240,7 +240,7 @@ func TestURLResolverCanonicalEqualsHTTPSOriginWritesHelperOnly(t *testing.T) {
 	if _, err := Mint(context.Background(), authSweatfile("echo tok", "true"), id, `printf '{"canonical_https":"`+https+`"}'`); err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
-	credPath := filepath.Join(wtPath, ".spinclass", CredentialFile)
+	credPath := CredentialPath(wtPath)
 	if got := runGit(t, wtPath, "config", "--worktree", "--get", "credential.helper"); got != "store --file="+credPath {
 		t.Errorf("credential.helper = %q", got)
 	}

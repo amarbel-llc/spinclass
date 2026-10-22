@@ -131,7 +131,7 @@ func TestBuildUnitSpecShape(t *testing.T) {
 	if want := []string{"/w/repo/.git/config", "/w/repo/.git/hooks", "/w/repo/.git/refs", "/w/repo/.git/logs", "/w/repo/.worktrees/feat/.spinclass/hooks", "/w/repo/.git/worktrees/feat/config.worktree", "/w/repo/.worktrees/feat/.git"}; !reflect.DeepEqual(spec.BindsRO, want) {
 		t.Errorf("binds_ro = %v", spec.BindsRO)
 	}
-	if want := []string{"/run/user/1000/bus", "/run/user/1000/systemd", "/run/user/1000/posh", "/tmp/.X11-unix", "/run/user/1000/wayland-0", "/w/repo/.worktrees/feat/.spinclass/git-credentials"}; !reflect.DeepEqual(spec.DenyPaths, want) {
+	if want := []string{"/run/user/1000/bus", "/run/user/1000/systemd", "/run/user/1000/posh", "/tmp/.X11-unix", "/run/user/1000/wayland-0"}; !reflect.DeepEqual(spec.DenyPaths, want) {
 		t.Errorf("deny_paths = %v", spec.DenyPaths)
 	}
 	if want := []unitSocket{{Path: "/run/user/1000/piggy.sock", Purpose: "piggy-agent"}}; !reflect.DeepEqual(spec.Sockets, want) {
@@ -358,14 +358,23 @@ func TestBuildUnitSpecRefsLogsReadOnlyAndCredentialDenied(t *testing.T) {
 			t.Errorf("%s must stay rw: %v", p, spec.BindsRW)
 		}
 	}
-	if !slices.Contains(spec.DenyPaths, "/w/repo/.worktrees/feat/.spinclass/git-credentials") {
-		t.Errorf("credential not denied: %v", spec.DenyPaths)
+	// The credential is not in the unit's tree, so nothing inside the rw
+	// worktree bind needs (or gets) a deny mount (FDR 0035 option (b)).
+	for _, d := range spec.DenyPaths {
+		if strings.HasPrefix(d, "/w/repo/.worktrees/feat/") {
+			t.Errorf("deny path inside the worktree: %s", d)
+		}
 	}
 }
 
-func TestProbeCredentialPathMatchesAuth(t *testing.T) {
-	if confinement.CredentialRelPath != ".spinclass/"+auth.CredentialFile {
-		t.Errorf("probe path %q drifted from auth.CredentialFile %q", confinement.CredentialRelPath, auth.CredentialFile)
+func TestProbeCredentialPathsMatchAuth(t *testing.T) {
+	if got := auth.LegacyCredentialPath("/wt"); got != filepath.Join("/wt", confinement.CredentialRelPath) {
+		t.Errorf("probe legacy path %q drifted from auth's %q", confinement.CredentialRelPath, got)
+	}
+	t.Setenv("XDG_STATE_HOME", "/state")
+	got, err := auth.StateCredentialPath("/wt")
+	if err != nil || got != confinement.CredentialPath("/state", "/wt") {
+		t.Errorf("auth state path %q (%v) drifted from the probe's %q", got, err, confinement.CredentialPath("/state", "/wt"))
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/store"
@@ -110,6 +111,55 @@ func TestResolveGritCallerInASessionWorktreeOwnsItsBranch(t *testing.T) {
 	got := resolveGritCaller(sub)
 	if got.NoSession || got.Dir != worktree || got.Branch != "glad-buckeye" {
 		t.Fatalf("got Dir=%q Branch=%q NoSession=%v, want the session worktree and the session branch (not the checked-out topic)", got.Dir, got.Branch, got.NoSession)
+	}
+}
+
+// A confined caller's remote verbs use only the frontend-state credential. A
+// file in the worktree could have been planted by the unit, so with the
+// frontend copy gone it gets no credential at all (and git fails on its own
+// authentication error); an unconfined caller may still use a legacy copy.
+func TestTrustedRepoCredentialForConfinedCallersIsFrontendOnly(t *testing.T) {
+	repo := isolatedGitRepo(t)
+	worktree := filepath.Join(repo, ".worktrees", "glad-buckeye")
+	mustGitIn(t, repo, "worktree", "add", "-b", "glad-buckeye", worktree)
+	if err := session.Write(session.State{RepoPath: repo, WorktreePath: worktree, Branch: "glad-buckeye", SessionKey: "repo/glad-buckeye", SessionState: session.StateInactive}); err != nil {
+		t.Fatal(err)
+	}
+	legacy := auth.LegacyCredentialPath(worktree)
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte("https://spinclass:planted@evil.example\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := trustedRepoFor(worktree, true).CredentialFile; got != "" {
+		t.Errorf("confined, frontend copy absent: credential %q, want none", got)
+	}
+	if got := trustedRepoFor(worktree, false).CredentialFile; got != legacy {
+		t.Errorf("unconfined: credential %q, want the legacy copy %q", got, legacy)
+	}
+
+	state, err := auth.StateCredentialPath(worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(state), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(state, []byte("https://spinclass:tok@forge.example\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, confined := range []bool{true, false} {
+		if got := trustedRepoFor(worktree, confined).CredentialFile; got != state {
+			t.Errorf("confined=%v with a frontend copy: credential %q, want %q", confined, got, state)
+		}
+	}
+	if err := os.Remove(state); err != nil {
+		t.Fatal(err)
+	}
+	if got := trustedRepoFor(worktree, true).CredentialFile; got != "" {
+		t.Errorf("confined after deleting the frontend copy: credential %q, want none", got)
 	}
 }
 

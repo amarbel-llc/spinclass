@@ -278,7 +278,7 @@ func resolveGritCaller(cwd string) store.Session {
 	}
 	if worktree, branch, ok := recognisedSessionWorktree(s.Dir); ok {
 		s.Dir, s.Branch = worktree, branch
-		s.Repo = trustedRepoFor(worktree)
+		s.Repo = trustedRepoFor(worktree, s.Confinement.Confined())
 	} else {
 		s.NoSession = true
 	}
@@ -305,7 +305,12 @@ func recognisedSessionWorktree(dir string) (worktree, branch string, ok bool) {
 // from the worktree's .git pointer file, which a confined unit could rewrite.
 // A layout that does not check out on disk yields the zero value, which leaves
 // git's own discovery (with the config neutralisers still applied).
-func trustedRepoFor(worktree string) store.Repo {
+//
+// A confined caller gets only the frontend-state credential: a file in the
+// worktree could have been planted by the unit, so with no frontend copy the
+// remote verb fails with git's own authentication error. An unconfined caller
+// may still use a legacy worktree credential minted before the move.
+func trustedRepoFor(worktree string, confined bool) store.Repo {
 	st, err := session.FindByWorktreePath(worktree)
 	if err != nil || st.RepoPath == "" {
 		return store.Repo{}
@@ -318,7 +323,12 @@ func trustedRepoFor(worktree string) store.Repo {
 		}
 	}
 	repo := store.Repo{CommonDir: common, GitDir: gitDir}
-	if auth.Minted(worktree) {
+	switch {
+	case confined:
+		if p, ok := auth.MintedStatePath(worktree); ok {
+			repo.CredentialFile = p
+		}
+	case auth.Minted(worktree):
 		repo.CredentialFile = auth.CredentialPath(worktree)
 	}
 	return repo

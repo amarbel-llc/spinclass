@@ -1,6 +1,7 @@
 // Package auth implements per-session forge push credentials (FDR 0028): a
 // token minted by [auth].mint-command at worktree creation, stored mode-600
-// under .spinclass/, wired into the worktree via worktree-scoped git config
+// in frontend state ($XDG_STATE_HOME/spinclass/credentials/, outside the
+// worktree; FDR 0035), wired into the worktree via worktree-scoped git config
 // (a credential helper plus a forge-host-scoped ssh→https URL rewrite), mirrored
 // onto the disposable landing worktree at merge time (FDR 0029), revoked by
 // [auth].revoke-command at close, and swept for sessions that died without
@@ -21,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/hookrun"
 	"code.linenisgreat.com/spinclass/internal/session"
@@ -100,17 +102,69 @@ func trimRepoPath(p string) string {
 	return strings.TrimSuffix(p, ".git")
 }
 
-func credentialPath(worktreePath string) string {
+// The minted credential lives in frontend state, never in the worktree: a
+// confined unit's tree holds no copy, so no mount over it can come undone
+// (FDR 0035 "Frontend rewrites detach file mounts", option (b)). A session
+// minted before the move keeps its legacy <worktree>/.spinclass/git-credentials
+// until it is closed.
+
+// Seams for tests: the XDG state base, and whether a worktree's agent unit is
+// running.
+var (
+	stateDir    = confinement.DefaultStateDir
+	unitRunning = confinement.UnitRunningForWorktree
+)
+
+// StateCredentialPath is where worktreePath's credential is minted: a 0600
+// file under $XDG_STATE_HOME/spinclass/credentials/, named by the worktree.
+func StateCredentialPath(worktreePath string) (string, error) {
+	base, err := stateDir()
+	if err != nil {
+		return "", err
+	}
+	return confinement.CredentialPath(base, worktreePath), nil
+}
+
+// LegacyCredentialPath is where a credential minted before the move lives.
+func LegacyCredentialPath(worktreePath string) string {
 	return filepath.Join(worktreePath, ".spinclass", CredentialFile)
 }
 
-// CredentialPath is where worktreePath's minted credential lives.
-func CredentialPath(worktreePath string) string { return credentialPath(worktreePath) }
+// MintedStatePath returns the frontend-state credential when it exists.
+func MintedStatePath(worktreePath string) (string, bool) {
+	p, err := StateCredentialPath(worktreePath)
+	if err != nil {
+		return "", false
+	}
+	if _, err := os.Stat(p); err != nil {
+		return "", false
+	}
+	return p, true
+}
 
-// Minted reports whether worktreePath carries a minted credential.
+// CredentialPath is the minted credential an unconfined caller uses: the
+// frontend-state file, else a legacy worktree file. A confined caller must use
+// MintedStatePath only, never a file the unit could have planted.
+func CredentialPath(worktreePath string) string {
+	if p, ok := MintedStatePath(worktreePath); ok {
+		return p
+	}
+	return LegacyCredentialPath(worktreePath)
+}
+
+// Minted reports whether worktreePath has a minted credential.
 func Minted(worktreePath string) bool {
-	_, err := os.Stat(credentialPath(worktreePath))
+	_, err := os.Stat(CredentialPath(worktreePath))
 	return err == nil
+}
+
+// RemoveCredential deletes both the frontend-state and any legacy credential.
+// Close calls it unconditionally, so a frontend file never outlives its session.
+func RemoveCredential(worktreePath string) {
+	if p, err := StateCredentialPath(worktreePath); err == nil {
+		_ = os.Remove(p)
+	}
+	_ = os.Remove(LegacyCredentialPath(worktreePath))
 }
 
 func (id Identity) env(r Remote, originURL string) []string {
@@ -312,6 +366,12 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 	if cmd == nil || strings.TrimSpace(*cmd) == "" {
 		return MintOutcome{}, nil
 	}
+	// A mint rewrites the worktree's config.worktree, which a running unit
+	// holds as a read-only file mount whose parent is a read-write bind: a
+	// rewrite from here would remove that mount (FDR 0035).
+	if unitRunning(id.WorktreePath) {
+		return MintOutcome{}, fmt.Errorf("[auth] refusing to mint for %s: its agent unit is running, and the mint would rewrite the unit's read-only config.worktree", id.WorktreePath)
+	}
 	// No origin, or an origin that is not a forge URL (a local path): there is
 	// nothing a forge token could be scoped to, so — like an unlisted host —
 	// this is a visible skip, never a failed creation. A shared [auth] entry
@@ -338,10 +398,11 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 	if token == "" {
 		return MintOutcome{}, errors.New("[auth] mint-command printed no token on stdout")
 	}
-	if err := writeCredential(id.WorktreePath, res.Rewrite.CredentialHost, token); err != nil {
+	credFile, err := writeCredential(id.WorktreePath, res.Rewrite.CredentialHost, token)
+	if err != nil {
 		return MintOutcome{}, fmt.Errorf("[auth] write credential: %w", err)
 	}
-	if err := Inject(id.WorktreePath, credentialPath(id.WorktreePath), res.Rewrite); err != nil {
+	if err := Inject(id.WorktreePath, credFile, res.Rewrite); err != nil {
 		return MintOutcome{}, fmt.Errorf("[auth] inject worktree config: %w", err)
 	}
 	st, err := session.EnsureWorktreeState(id.RepoPath, id.Branch, id.SessionKey, 0)
@@ -362,21 +423,31 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 	return outcome, nil
 }
 
-func writeCredential(worktreePath, host, token string) error {
-	path := credentialPath(worktreePath)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+// writeCredential writes the token into frontend state (0600, in a 0700
+// directory), removes any legacy worktree copy, and returns the path. It
+// writes in place (O_TRUNC, same inode).
+func writeCredential(worktreePath, host, token string) (string, error) {
+	path, err := StateCredentialPath(worktreePath)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", err
 	}
 	line := "https://" + credentialUser + ":" + url.PathEscape(token) + "@" + host + "\n"
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if _, werr := f.WriteString(line); werr != nil {
 		_ = f.Close()
-		return werr
+		return "", werr
 	}
-	return f.Close()
+	if err := f.Close(); err != nil {
+		return "", err
+	}
+	_ = os.Remove(LegacyCredentialPath(worktreePath))
+	return path, nil
 }
 
 // Inject points dir's worktree-scoped git config at credFile and rewrites the
@@ -439,7 +510,7 @@ func MirrorInto(repoPath, branch, sessionWorktree, dir string) error {
 	default:
 		return fmt.Errorf("read session state for the stored credential remote: %w", err)
 	}
-	return Inject(dir, credentialPath(sessionWorktree), rw)
+	return Inject(dir, CredentialPath(sessionWorktree), rw)
 }
 
 // Revoke runs [auth].revoke-command for a session that minted a credential,
@@ -450,11 +521,11 @@ func Revoke(ctx context.Context, sf sweatfile.Sweatfile, id Identity, w io.Write
 	if !Minted(id.WorktreePath) {
 		return false, nil
 	}
-	if err := revoke(ctx, sf, id, id.WorktreePath, w); err != nil {
-		return true, err
-	}
-	_ = os.Remove(credentialPath(id.WorktreePath))
-	return true, nil
+	// The file goes whatever the revoke's outcome: a failed revoke is recorded
+	// on the tombstone and retried by session id, which needs no file.
+	err := revoke(ctx, sf, id, id.WorktreePath, w)
+	RemoveCredential(id.WorktreePath)
+	return true, err
 }
 
 func revoke(ctx context.Context, sf sweatfile.Sweatfile, id Identity, dir string, w io.Writer) error {
@@ -524,6 +595,7 @@ func SweepOrphans(ctx context.Context, sf sweatfile.Sweatfile, repoPath string, 
 			errs = append(errs, fmt.Errorf("%s: %w", s.SessionKey, rerr))
 			continue
 		}
+		RemoveCredential(s.WorktreePath)
 		revoked++
 	}
 	return revoked, errs

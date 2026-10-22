@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -158,13 +159,25 @@ func TestMintWritesCredentialInjectsConfigAndRecordsState(t *testing.T) {
 		t.Fatalf("Mint reported nothing minted: %+v", outcome)
 	}
 
-	credPath := filepath.Join(wtPath, ".spinclass", CredentialFile)
+	credPath, ok := MintedStatePath(wtPath)
+	if !ok {
+		t.Fatal("no credential file in frontend state")
+	}
+	if strings.HasPrefix(credPath, wtPath) {
+		t.Errorf("credential %s is inside the worktree", credPath)
+	}
+	if _, err := os.Stat(LegacyCredentialPath(wtPath)); err == nil {
+		t.Error("a credential file was written into the worktree")
+	}
 	info, err := os.Stat(credPath)
 	if err != nil {
 		t.Fatalf("credential file: %v", err)
 	}
 	if perm := info.Mode().Perm(); perm != 0o600 {
 		t.Errorf("credential file mode %o, want 0600", perm)
+	}
+	if dir, err := os.Stat(filepath.Dir(credPath)); err != nil || dir.Mode().Perm() != 0o700 {
+		t.Errorf("credential dir: %v %v, want 0700", dir, err)
 	}
 	raw, _ := os.ReadFile(credPath)
 	if got, want := strings.TrimSpace(string(raw)), "https://spinclass:tok%2F123@forge.example.com"; got != want {
@@ -337,6 +350,65 @@ func TestSweepOrphansLeavesLiveSessionsAlone(t *testing.T) {
 	}
 }
 
+// A session minted before the credential moved keeps working from its legacy
+// worktree file; the next mint moves it into frontend state and removes the
+// worktree copy.
+func TestLegacyWorktreeCredentialStillResolvesAndAMintMovesIt(t *testing.T) {
+	_, wtPath, id := setupRepo(t)
+	legacy := LegacyCredentialPath(wtPath)
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte("https://spinclass:old@forge.example.com\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !Minted(wtPath) || CredentialPath(wtPath) != legacy {
+		t.Fatalf("legacy credential not resolved: minted=%v path=%s", Minted(wtPath), CredentialPath(wtPath))
+	}
+	if _, ok := MintedStatePath(wtPath); ok {
+		t.Fatal("no frontend-state credential exists yet")
+	}
+	if _, err := Mint(context.Background(), authSweatfile("echo tok", "true"), id, ""); err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	if _, err := os.Stat(legacy); err == nil {
+		t.Error("the legacy worktree copy survived the mint")
+	}
+	if p, ok := MintedStatePath(wtPath); !ok || CredentialPath(wtPath) != p {
+		t.Errorf("after mint: state path %q ok=%v, CredentialPath %q", p, ok, CredentialPath(wtPath))
+	}
+}
+
+// A mint while the worktree's agent unit runs would rewrite the unit's
+// read-only config.worktree; it is refused before anything is written.
+func TestMintRefusesWhileTheAgentUnitRuns(t *testing.T) {
+	_, wtPath, id := setupRepo(t)
+	prev := unitRunning
+	t.Cleanup(func() { unitRunning = prev })
+	unitRunning = func(w string) bool { return w == wtPath }
+	if _, err := Mint(context.Background(), authSweatfile("echo tok", "true"), id, ""); err == nil || !strings.Contains(err.Error(), "agent unit is running") {
+		t.Fatalf("got %v, want a refusal", err)
+	}
+	if Minted(wtPath) {
+		t.Error("a credential was written despite the refusal")
+	}
+}
+
+// Revoke removes the credential whatever the revoke command's outcome.
+func TestRevokeRemovesTheCredentialEvenWhenTheRevokeFails(t *testing.T) {
+	_, wtPath, id := setupRepo(t)
+	if _, err := Mint(context.Background(), authSweatfile("echo tok", "false"), id, ""); err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	ran, err := Revoke(context.Background(), authSweatfile("echo tok", "false"), id, io.Discard)
+	if !ran || err == nil {
+		t.Fatalf("Revoke: ran=%v err=%v, want a failed revoke", ran, err)
+	}
+	if Minted(wtPath) {
+		t.Error("credential file survived Revoke")
+	}
+}
+
 func TestMirrorIntoWiresAnotherWorktree(t *testing.T) {
 	repoPath, wtPath, id := setupRepo(t)
 	if _, err := Mint(context.Background(), authSweatfile("echo tok", "true"), id, ""); err != nil {
@@ -348,7 +420,7 @@ func TestMirrorIntoWiresAnotherWorktree(t *testing.T) {
 	if err := MirrorInto(repoPath, "feature-x", wtPath, land); err != nil {
 		t.Fatalf("MirrorInto: %v", err)
 	}
-	credPath := filepath.Join(wtPath, ".spinclass", CredentialFile)
+	credPath, _ := MintedStatePath(wtPath)
 	if got := runGit(t, land, "config", "--worktree", "--get", "credential.helper"); got != "store --file="+credPath {
 		t.Errorf("landing credential.helper = %q", got)
 	}

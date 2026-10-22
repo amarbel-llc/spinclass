@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 
@@ -214,8 +215,8 @@ func TestCreateURLResolverFailureWithAllowNoCredentialSkipsWholeLane(t *testing.
 	if got, err := a.wtGit(t, "config", "--worktree", "--get", "credential.helper"); err == nil {
 		t.Errorf("credential.helper present: %q", got)
 	}
-	if _, statErr := os.Stat(filepath.Join(a.rp.AbsPath, ".spinclass", "git-credentials")); statErr == nil {
-		t.Error("git-credentials written")
+	if auth.Minted(a.rp.AbsPath) {
+		t.Error("a credential was written")
 	}
 }
 

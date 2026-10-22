@@ -120,7 +120,7 @@ pager, editor) in the frontend, outside the unit. The unit spec now says:
 | `<common>/refs`, `<common>/logs` | `binds_ro` (were `binds_rw`) | Git still resolves refs; only the frontend creates or moves them, so a raw push of a unit-made ref is no longer possible |
 | `<common>/worktrees/<name>/config.worktree` | `binds_ro`, nested over the rw `worktrees/<name>` | Closes the frontend escape through the worktree-scoped config. `writeUnitSpec` creates it empty when absent: `auth.Inject` writes it only when a credential was minted, and a bind source that does not exist would fail the unit start |
 | `<worktree>/.git` (the pointer file) | `binds_ro`, nested over the rw worktree bind | Keeps the unit from repointing the frontend's discovery |
-| `<worktree>/.spinclass/git-credentials` | `deny_paths` (clown renders `InaccessiblePaths=-`) | Raw git in the unit cannot read the token; grit (frontend) reads it through its pinned credential helper |
+| the minted credential | none: not in the unit's tree (since 2026-10-22; it was a `deny_paths` entry on `<worktree>/.spinclass/git-credentials`) | It lives in frontend state, `$XDG_STATE_HOME/spinclass/credentials/<hash>`, hidden by `ProtectHome`; grit (frontend) reads it through its get-only helper. See "Frontend rewrites detach file mounts" |
 
 Raw `git commit`, `git checkout -b` and `git update-ref` inside a confined unit
 now fail by design; use grit. This changes nothing for an **unconfined** worker:
@@ -219,14 +219,14 @@ Frontend operations that rewrite a file-mounted path while a unit runs:
 
 | Bound path | Parent in the unit | Frontend writers | Status |
 |---|---|---|---|
-| `<worktree>/.spinclass/git-credentials` (`deny_paths`) | rw worktree bind | credential-store `store`/`erase` on push/fetch | fixed (get-only helper); F9 ok after a push in rounds L and M |
+| `<worktree>/.spinclass/git-credentials` (was `deny_paths`) | rw worktree bind | credential-store `store`/`erase` on push/fetch | fixed twice: the get-only helper (F9 ok after a push in rounds L and M), then the file moved to frontend state (option (b), below) |
 | `<common>/config` (`binds_ro`) | tmpfs stub | every common-scope `git config`: each mint in the repo (`extensions.worktreeConfig true`), `set_upstream` pushes, branch tracking setup | holds, but stale (round M) |
 | `<common>/worktrees/<name>/config.worktree` (`binds_ro`) | rw `worktrees/<name>` bind | `git config --worktree` (`auth.Inject`, at mint only, before the unit) | safe today. A re-mint or re-inject while the unit runs would detach it: a frontend escape through per-name config hooks |
 | `<worktree>/.git` (`binds_ro`) | rw worktree bind | `git worktree repair` and `move` | safe unless someone repairs a running worker. Close it instead |
 
-**Open design question.** File mounts inside an rw bind make the cut depend
-on no frontend operation ever renaming over the bound file. Two options to
-remove that dependence:
+**Design question.** File mounts inside an rw bind make the cut depend on no
+frontend operation ever renaming over the bound file. There were two options
+to remove that dependence:
 
 - (a) bind directories instead of files, e.g. a dedicated credential directory
   that is not inside the worktree, made inaccessible as a directory;
@@ -234,7 +234,42 @@ remove that dependence:
   in the frontend state dir. For config, use a repository config the frontend
   never rewrites, or an overlay.
 
-Not decided; for the coordinator and operator.
+**Decided (coordinator, 2026-10-22): option (b) for the credential.**
+- The minted credential is written to `confinement.CredentialPath`:
+  `$XDG_STATE_HOME/spinclass/credentials/<sha256(worktree)[:8]>`, 0600 in a
+  0700 directory, beside the unit records the unit already cannot see.
+- `auth.Inject` points the worktree's `credential.helper` there, so unconfined
+  raw git keeps working.
+- A confined caller's grit uses only that file. A copy in the worktree could
+  have been planted by the unit, so it is never used: with the frontend file
+  gone, the remote verb fails on git's own authentication error (`trustedRepoFor`).
+- An unconfined session minted before the move keeps its legacy worktree file
+  until it is closed.
+- Close removes the frontend file whatever the revoke does, and so does the
+  orphan sweep after a revoke.
+- The spec no longer lists a credential `deny_paths` entry.
+- F9 checks that neither the frontend file nor a copy in the unit's tree is
+  readable from the unit.
+
+Why not (a):
+- a directory bind keeps the secret inside the unit's mount namespace, one
+  bind away, and still needs an inaccessible mount to hold;
+- the frontend already owns a state directory the unit cannot see, so moving
+  the file there removes the mount entirely;
+- nothing in the unit needs the credential: raw git in a confined unit is
+  meant to have none.
+
+**Not movable: `config.worktree` and the `.git` pointer.** git reads them from
+the worktree layout, so they keep their read-only file mounts, under two
+guards:
+- `auth.Mint` refuses while the worktree's unit runs, since a mint rewrites
+  `config.worktree`;
+- F9 now checks that each of these is still a read-only mount point in the
+  unit's mountinfo (`fileBindsInForce`), so a lost mount is reported rather
+  than hidden behind a file that happens to be unwritable.
+
+`git worktree repair` and `move` on a running worker remain the operator's to
+avoid; close the worker instead.
 
 ### Session PIDs are untrusted (round L, 2026-10-22)
 
@@ -347,7 +382,7 @@ unit and is deferred.
 | F7 | The operator's home is not writable | For each escape target under the operator's home (shell rc and profile files, `.gitconfig`, `.config` and `.config/git`, the global sweatfile, `.ssh`, `.gnupg`, `.local/bin`, `.local/state`, `.local/share`): skipped only when the mount covering it in the unit is `tmpfs` or read-only **and** is not the mount covering it on the host (same `major:minor` in both mountinfos, as on an impermanence host whose real home is a tmpfs, proves nothing); otherwise the write to the target, or its nearest existing ancestor, in the unit must be denied |
 | F8a | No posh attach socket is reachable | `${POSH_DIR:-$XDG_RUNTIME_DIR/posh}` and the operator's `/run/user/<uid>/posh`: `stat` fails with `ENOENT`/`EACCES` (per posh/smooth-maple/bobo; today a same-uid worker reaches it and `posh run <session> -- cmd` writes to the operator's pty). When posh's own refusal (`POSH_CONFINE`) lands, the probe additionally checks posh reports the refusal; the message string is posh's to fix |
 | F8b | No operator pty is writable | For every `/dev/pts/N` other than the unit's own `pty`: `faccessat(W_OK)` is denied (today the operator's slave is 0620 and owned by the uid, so a worker can write it and spoof the display). A private devpts instance in the unit satisfies this trivially |
-| F9 | The repo's hooks, config, refs and logs are not writable, the worktree's git entry points are not writable, and the session credential is unreadable | In the unit, the write to `<git-common-dir>/hooks`, `<git-common-dir>/config`, `<git-common-dir>/refs`, `<git-common-dir>/logs`, `<git-common-dir>/worktrees/<name>/config.worktree`, the worktree's `.git` pointer file and the resolved `core.hooksPath` is denied (each, resolved inside the unit, so a hooks dir replaced by a symlink is judged by what the unit reaches; a writable file is also a replaceable one, so the writable test stands for both). Reading `<worktree>/.spinclass/git-credentials` is refused, or the file is absent (nothing minted). Renaming `hooks` away needs the common dir itself writable: open question 2 |
+| F9 | The repo's hooks, config, refs and logs are not writable, the worktree's git entry points are not writable, and the session credential is unreadable | In the unit, the write to `<git-common-dir>/hooks`, `<git-common-dir>/config`, `<git-common-dir>/refs`, `<git-common-dir>/logs`, `<git-common-dir>/worktrees/<name>/config.worktree`, the worktree's `.git` pointer file and the resolved `core.hooksPath` is denied (each, resolved inside the unit, so a hooks dir replaced by a symlink is judged by what the unit reaches; a writable file is also a replaceable one, so the writable test stands for both). `config.worktree` and the `.git` pointer are still read-only mount points in the unit's mountinfo (a frontend rename over either would remove the mount). Reading the frontend credential (`confinement.CredentialPath`) or `<worktree>/.spinclass/git-credentials` is refused, or the file is absent. Renaming `hooks` away needs the common dir itself writable: open question 2 |
 | F10 | The unit cannot see or reach processes outside it | `/proc/<pid>/ns/pid` of a unit process differs from the frontend's `/proc/self/ns/pid`, and every numeric entry of the unit's own `/proc` (`/proc/<pid>/root/proc`) is a process in the unit's cgroup. Without this, a same-uid worker reads `/proc/<operator-shell>/root/…` and walks straight out of its mount namespace (that access is `PTRACE_MODE_READ`, which Yama does not restrict), and can `ptrace` or write `/proc/<pid>/mem` of frontend processes where Yama allows. `ProtectProc=invisible` does not help: it hides other uids, and the uid is the same |
 | F11 | Every live agent on the host is confined | Every live session in spinclass state has a unit record whose unit is running now (a non-empty cgroup under `clown-agent.slice`; a gone or empty cgroup is a stale record and fails), and every process on the host whose `comm` names an agent runtime (`claude`, `.claude-wrapped` under nixpkgs' wrapper, `juggler`, or any `harness` a live record reports) sits in some live session's unit cgroup (docs/plans/2026-10-20-agent-census-by-unit.md); offenders are named by session (from their cwd). One unconfined agent anywhere could have painted the prompt the card root depends on, and an unconfined session's MCP servers are an escape hatch for every confined one |
 | F15 | The frontend principal mapping matches | The mapping the grant walk trusts (`$XDG_STATE_HOME/spinclass/principals/<principal>.json`, see "The principal-to-session mapping") exists for the driver's principal and names the driver's session and unit, and the worktree's cached principal, if any, is the same. A disagreement fails with both values named |
@@ -414,8 +449,7 @@ spinclass → clown (opt-in; unset means today's unconfined launch):
                 {"path": "<frontend egress proxy>", "purpose": "egress"}],
     "egress_allow": ["api.anthropic.com:443", "<forges>:443", "..."],
     "deny_paths": ["$XDG_RUNTIME_DIR/bus", "$XDG_RUNTIME_DIR/wayland-*",
-                   "/tmp/.X11-unix", "$XDG_RUNTIME_DIR/posh",
-                   "<worktree>/.spinclass/git-credentials"],
+                   "/tmp/.X11-unix", "$XDG_RUNTIME_DIR/posh"],
     "env": {"SPINCLASS_SESSION_ID": "...", "SPINCLASS_WORKTREE": "..."},
     "result_path": "$XDG_STATE_HOME/spinclass/units/<sha256(worktree)[:8]>.json"
   }
