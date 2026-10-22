@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/confinement"
+	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 
 // confinedGlobalSweatfile turns confinement on from the global (trusted) layer.
@@ -71,7 +73,11 @@ func TestCheckConfinedProfile(t *testing.T) {
 		wantErr []string // substrings; nil means accepted
 	}{
 		{name: "moxy dropped and just-us kept", rp: goodConfinedProfile()},
-		{name: "user source is known", rp: ResolvedProfile{Name: "locked", Source: "user", KeptServers: kept(justUsServer)}},
+		{
+			name:    "user source without a base is refused",
+			rp:      ResolvedProfile{Name: "locked", Source: "user", KeptServers: kept(justUsServer)},
+			wantErr: []string{"declares no base builtin"},
+		},
 		{
 			name:    "non-selective keeps everything",
 			rp:      ResolvedProfile{Name: "locked", Digest: "d1", Source: "builtin"},
@@ -105,8 +111,12 @@ func TestCheckConfinedProfile(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := checkConfinedProfile("locked", c.rp)
+			withResolver(t, &fakeResolver{})
+			link, err := checkConfinedProfile("locked", c.rp)
 			if c.wantErr == nil {
+				if link != nil {
+					t.Errorf("a builtin profile returned a narrowing link %+v", link)
+				}
 				if err != nil {
 					t.Fatalf("checkConfinedProfile = %v, want accepted", err)
 				}
@@ -121,6 +131,163 @@ func TestCheckConfinedProfile(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// narrowableBase is a builtin that keeps moxy, just-us and an extra server, so a
+// user profile can narrow it by dropping moxy whole (R3).
+func narrowableBase() ResolvedProfile {
+	return ResolvedProfile{
+		Name: "base-b", Digest: "digest-base", Source: "builtin", Provider: "claude", Model: "opus",
+		KeptServers: append(slices.Clone(requiredKept), moxyServer, justUsServer, "extra/extra"),
+		EnvKnown:    true,
+	}
+}
+
+func narrowingUserProfile() ResolvedProfile {
+	return ResolvedProfile{
+		Name: "mine", Digest: "digest-mine", Source: "user", Base: "base-b", Provider: "claude", Model: "opus",
+		KeptServers: append(slices.Clone(requiredKept), justUsServer),
+		EnvKnown:    true,
+	}
+}
+
+func TestCheckConfinedProfileUserNarrowing(t *testing.T) {
+	const wantNoBase = `spawn refused for a confined worker: profile "mine" (digest digest-mine, source "user") declares no base builtin, ` +
+		`so it cannot be checked as a narrowing of one; a user profile is accepted for a confined spawn only when it narrows ` +
+		`a builtin it names as its base (clown does not record a base yet)`
+	cases := []struct {
+		name     string
+		child    func(*ResolvedProfile)
+		base     func(*ResolvedProfile)
+		wantErr  []string
+		wantExac string
+	}{
+		{name: "no base", child: func(c *ResolvedProfile) { c.Base = "" }, wantExac: wantNoBase},
+		{name: "narrows its base", child: func(*ResolvedProfile) {}},
+		{
+			name:  "widens its base",
+			child: func(c *ResolvedProfile) { c.KeptServers = append(c.KeptServers, "other/other") },
+			wantExac: `spawn refused for a confined worker: profile "mine" widens base "base-b" by: ` +
+				`adds server other/other`,
+		},
+		{
+			name:  "several widenings are all named",
+			child: func(c *ResolvedProfile) { c.Model = "haiku"; c.KeptServers = append(c.KeptServers, "other/other") },
+			wantExac: `spawn refused for a confined worker: profile "mine" widens base "base-b" by: ` +
+				`changes model opus to haiku; adds server other/other`,
+		},
+		{
+			name:    "base is not a builtin",
+			base:    func(b *ResolvedProfile) { b.Source = "user" },
+			wantErr: []string{`base "base-b"`, `source "user"`},
+		},
+		{
+			name:    "narrows but still keeps moxy (R3)",
+			child:   func(c *ResolvedProfile) { c.KeptServers = append(c.KeptServers, moxyServer) },
+			wantErr: []string{"keeps the " + `"moxy/moxy"`},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			base, child := narrowableBase(), narrowingUserProfile()
+			if c.base != nil {
+				c.base(&base)
+			}
+			if c.child != nil {
+				c.child(&child)
+			}
+			r := &fakeResolver{profiles: map[string]ResolvedProfile{"base-b": base}}
+			withResolver(t, r)
+			link, err := checkConfinedProfile("mine", child)
+			if c.wantExac == "" && c.wantErr == nil {
+				if err != nil {
+					t.Fatalf("checkConfinedProfile = %v, want accepted", err)
+				}
+				if link == nil || link.Name != "base-b" || link.Digest != "digest-base" {
+					t.Errorf("link = %+v, want base-b / digest-base", link)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("checkConfinedProfile = nil, want a refusal")
+			}
+			if link != nil {
+				t.Errorf("a refusal returned a link %+v", link)
+			}
+			if c.wantExac != "" && err.Error() != c.wantExac {
+				t.Errorf("refusal\n got: %q\nwant: %q", err, c.wantExac)
+			}
+			for _, want := range c.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("refusal %q does not contain %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+// TestConfinedLaunchUserProfileNarrowing: through LaunchDetachedWith, a widening
+// or base-less user profile is refused before any worktree exists, and a
+// narrowing one gets past the profile checks (to the stubbed preflight).
+func TestConfinedLaunchUserProfileNarrowing(t *testing.T) {
+	cases := []struct {
+		name    string
+		child   func(*ResolvedProfile)
+		wantErr string
+		wantOK  bool
+	}{
+		{name: "no base", child: func(c *ResolvedProfile) { c.Base = "" }, wantErr: "declares no base builtin"},
+		{name: "widens", child: func(c *ResolvedProfile) { c.Model = "haiku" }, wantErr: `widens base "base-b" by: changes model opus to haiku`},
+		{name: "narrows", wantOK: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			child := narrowingUserProfile()
+			if c.child != nil {
+				c.child(&child)
+			}
+			r := &fakeResolver{profiles: map[string]ResolvedProfile{"mine": child, "base-b": narrowableBase()}}
+			withResolver(t, r)
+			stopAtPreflight(t)
+			home, repoPath := newWorkerFixture(t, modelSpawnSweatfile)
+			writeGlobalSweatfile(t, home, confinedGlobalSweatfile)
+
+			_, err := LaunchDetachedWith(home, repoPath, testDriver("driver/test-session"), "brief", "", "", "mine", ConfineRequire)
+			if err == nil {
+				t.Fatal("LaunchDetachedWith = nil error, want a refusal")
+			}
+			if c.wantOK {
+				if !strings.Contains(err.Error(), "inside an agent unit") {
+					t.Fatalf("err = %v, want the stubbed preflight refusal (the profile checks passed)", err)
+				}
+			} else {
+				if strings.Contains(err.Error(), "inside an agent unit") || !strings.Contains(err.Error(), c.wantErr) {
+					t.Fatalf("err = %v, want a profile refusal containing %q", err, c.wantErr)
+				}
+			}
+			noWorktree(t, repoPath)
+		})
+	}
+}
+
+// TestNewWorkerStateRecordsTheNarrowingLink: the accepted narrowing is recorded,
+// unsigned, in the worker's pre-hello state; without one the field is absent.
+func TestNewWorkerStateRecordsTheNarrowingLink(t *testing.T) {
+	rp := worktree.ResolvedPath{SessionKey: "worker/w", RepoPath: "/r", AbsPath: "/r/.worktrees/w", Branch: "w"}
+	child := narrowingUserProfile()
+
+	st := newWorkerState(rp, testDriver("driver/d"), "desc", child, "", &narrowingBase{Name: "base-b", Digest: "digest-base"})
+	want := &session.ProfileNarrowingLink{
+		Grantee: "worker/w", Profile: "mine", ProfileDigest: "digest-mine",
+		Base: "base-b", Prev: "digest-base", Unsigned: true,
+	}
+	if st.ProfileNarrowing == nil || *st.ProfileNarrowing != *want {
+		t.Errorf("ProfileNarrowing = %+v, want %+v", st.ProfileNarrowing, want)
+	}
+
+	if st := newWorkerState(rp, testDriver("driver/d"), "desc", goodConfinedProfile(), "", nil); st.ProfileNarrowing != nil {
+		t.Errorf("a builtin profile recorded a narrowing link: %+v", st.ProfileNarrowing)
 	}
 }
 

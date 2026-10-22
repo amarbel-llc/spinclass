@@ -43,6 +43,27 @@ type CredentialRemote struct {
 	Resolved       bool     `json:"resolved,omitempty"` // produced by [auth].url-resolver
 }
 
+// ProfileNarrowingLink is State.ProfileNarrowing: the record that a user-registry
+// profile was accepted for a confined spawn because it is a catalog-level
+// narrowing of a declared base builtin (FDR 0035 "Tier 1: a user profile that
+// narrows a builtin"). Grantee is the worker's session key, Profile and
+// ProfileDigest the narrowing profile, Base the builtin it declares as its base,
+// and Prev the digest of that base.
+//
+// HONESTY NOTE: with no per-principal key yet, the narrowing link is a recorded
+// claim, not a signature; the unit boundary (FDR 0035) is the containment.
+// Unsigned is therefore always true today. Tier 2 (widening) is not built: it is
+// a D11 escalation naming `profiles: NAME=<digest>`, grantee, session, expires,
+// onward: none, and waits for the FDR 0034 phase 2 verifier.
+type ProfileNarrowingLink struct {
+	Grantee       string `json:"grantee"`
+	Profile       string `json:"profile"`
+	ProfileDigest string `json:"profile_digest"`
+	Base          string `json:"base"`
+	Prev          string `json:"prev"`
+	Unsigned      bool   `json:"unsigned"`
+}
+
 // caller returns "file.go:N" of the call site `skip` frames up from
 // the caller of caller(). caller(1) inside session.Write returns the
 // external site that invoked session.Write. Used to tag lifecycle log
@@ -141,6 +162,10 @@ type State struct {
 	Profile          string `json:"profile,omitempty"`
 	ProfileDigest    string `json:"profile_digest,omitempty"`
 	AuthorizingGrant string `json:"authorizing_grant,omitempty"`
+	// ProfileNarrowing records that Profile, a user-registry profile, was
+	// accepted for a confined spawn because it narrows a declared base builtin
+	// (FDR 0035 "Tier 1"). Nil for every other session.
+	ProfileNarrowing *ProfileNarrowingLink `json:"profile_narrowing,omitempty"`
 	// HelloSentAt records when the SessionStart hook emitted the spawn
 	// hello to SpawnedBy, deduping re-fires (resume/clear/compact). Set
 	// only on spawned sessions (FDR 0006).

@@ -64,7 +64,12 @@ func (r clownResolver) Resolve(name string) (ResolvedProfile, error) {
 		)
 	}
 
-	return ResolvedProfile{Name: res.Name, Digest: digest, Provider: res.Provider, KeptServers: keptServers(res.Selection), Source: string(res.Source)}, nil
+	// Base, EnvKnown and Env stay zero: clown's Resolved reports neither a declared
+	// base nor a secrets-safe env view yet (see ResolvedProfile).
+	return ResolvedProfile{
+		Name: res.Name, Digest: digest, Provider: res.Provider, Backend: res.Backend, Model: res.Model,
+		KeptServers: keptServers(res.Selection), Excluded: res.Selection.Excluded, Source: string(res.Source),
+	}, nil
 }
 
 // keptServers maps a Selection onto ResolvedProfile.KeptServers: nil when the

@@ -43,6 +43,22 @@ type ResolvedProfile struct {
 	// ("builtin", "user"). Empty means the resolver could not say, which a
 	// confined spawn treats as unknown and refuses (confineprofile.go).
 	Source string
+	// Backend and Model are the profile's backend and model selections, "" when
+	// it makes none.
+	Backend string
+	Model   string
+	// Excluded is the per-tool exclusion set of a selective profile, keyed by
+	// server in the same vocabulary as KeptServers.
+	Excluded map[string][]string
+	// Base is the builtin this profile declares as its base. clownResolver leaves
+	// it empty: clown does not report a base yet. While empty, no user profile
+	// can be checked as a narrowing (confineprofile.go).
+	Base string
+	// EnvKnown reports whether Env is populated. clownResolver leaves it false:
+	// clown does not expose a secrets-safe env view yet. Env maps each env key to
+	// a digest of its value, never the value itself.
+	EnvKnown bool
+	Env      map[string]string
 }
 
 // ProfileResolver looks a profile name up through clown's library. It is an

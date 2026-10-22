@@ -464,6 +464,36 @@ func TestStateHandleFieldsRoundTrip(t *testing.T) {
 	}
 }
 
+// TestStateProfileNarrowingRoundTrip locks the unsigned narrowing link's JSON
+// names, its round-trip, and that a session without one omits the key.
+func TestStateProfileNarrowingRoundTrip(t *testing.T) {
+	link := ProfileNarrowingLink{
+		Grantee: "worker/w", Profile: "mine", ProfileDigest: "dm", Base: "base-b", Prev: "db", Unsigned: true,
+	}
+	data, err := json.Marshal(State{Branch: "w", ProfileNarrowing: &link})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `"profile_narrowing":{"grantee":"worker/w","profile":"mine","profile_digest":"dm","base":"base-b","prev":"db","unsigned":true}`
+	if !strings.Contains(string(data), want) {
+		t.Fatalf("JSON missing %s: %s", want, data)
+	}
+	var got State
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ProfileNarrowing == nil || *got.ProfileNarrowing != link {
+		t.Errorf("ProfileNarrowing = %+v, want %+v", got.ProfileNarrowing, link)
+	}
+	plain, err := json.Marshal(State{Branch: "w"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(plain), "profile_narrowing") {
+		t.Fatalf("plain state JSON unexpectedly contains profile_narrowing: %s", plain)
+	}
+}
+
 // TestStateIsHolder covers the FDR 0032 D12/D13 authority check: a match in
 // Holders only — SpawnedByPrincipal is lineage and confers nothing by itself
 // (spawn seeds Holders; a released spawner must not keep implicit authority)

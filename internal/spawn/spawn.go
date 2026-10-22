@@ -129,6 +129,7 @@ func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model
 	}
 	effective := effectiveProfile(profile, merged)
 	var resolved ResolvedProfile
+	var narrowing *narrowingBase
 	if confined {
 		// A confined worker needs a profile that leaves no grit tool reachable
 		// (FDR 0035). Config-only and read-only, so it comes first: nothing below
@@ -137,7 +138,7 @@ func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model
 			slog.Warn("ignored [session-entry] spawn-profile in sweatfiles that are not trusted: a confined spawn reads it only from sweatfiles above the repo",
 				"paths", targetConfine.ignoredSpawnProfile)
 		}
-		if effective, resolved, err = requireConfinedProfile(profile, targetConfine.spawnProfile); err != nil {
+		if effective, resolved, narrowing, err = requireConfinedProfile(profile, targetConfine.spawnProfile); err != nil {
 			return Pending{}, err
 		}
 		// renderSpawn spliced the merged default; the confined profile may differ.
@@ -233,7 +234,7 @@ func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model
 		confine = &confinedLaunch{scopePath: scopePath, stateDir: stateDir, handshakeDir: handshakeDir}
 	}
 
-	p, err := startDetachedEntry(rp, driver, desc, argv, window, sessionEnv, resolved, authorizingGrant, confine)
+	p, err := startDetachedEntry(rp, driver, desc, argv, window, sessionEnv, resolved, authorizingGrant, narrowing, confine)
 	if err != nil {
 		undoOnFailure()
 		return Pending{}, err
@@ -523,11 +524,10 @@ func dropEnvVars(env, keys []string) []string {
 	return out
 }
 
-// startDetachedEntry writes the worker's pre-hello session state and execs the
-// detached harness entry, returning a Pending (worktree booting, hello not yet
-// awaited). The SessionStart hook adopts the state (PID + HelloSentAt) when the
-// worker boots; pre-hello PID is 0 (nothing attached yet).
-func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, argv, window []string, sessionEnv map[string]string, profile ResolvedProfile, authorizingGrant string, confine *confinedLaunch) (Pending, error) {
+// newWorkerState builds the worker's pre-hello session state. A non-nil
+// narrowing (a user profile accepted as a narrowing of its base builtin) is
+// recorded as an unsigned link: a claim, not a signature (session.ProfileNarrowingLink).
+func newWorkerState(rp worktree.ResolvedPath, driver Driver, desc string, profile ResolvedProfile, authorizingGrant string, narrowing *narrowingBase) session.State {
 	st := session.State{
 		PID:                0,
 		SessionState:       session.StateActive,
@@ -546,13 +546,31 @@ func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, ar
 			"SPINCLASS_SESSION_ID": rp.SessionKey,
 		},
 	}
+	if narrowing != nil {
+		st.ProfileNarrowing = &session.ProfileNarrowingLink{
+			Grantee:       rp.SessionKey,
+			Profile:       profile.Name,
+			ProfileDigest: profile.Digest,
+			Base:          narrowing.Name,
+			Prev:          narrowing.Digest,
+			Unsigned:      true,
+		}
+	}
 	if driver.Principal != "" {
 		st.Holders = []string{driver.Principal}
 		// The spawner holds every right (FDR 0032 D13); record it so the
 		// record is explicit rather than leaning on the implicit-spawner rule.
 		st.HandleRights = map[string]string{driver.Principal: session.AllHandleRights}
 	}
-	if err := session.Write(st); err != nil {
+	return st
+}
+
+// startDetachedEntry writes the worker's pre-hello session state and execs the
+// detached harness entry, returning a Pending (worktree booting, hello not yet
+// awaited). The SessionStart hook adopts the state (PID + HelloSentAt) when the
+// worker boots; pre-hello PID is 0 (nothing attached yet).
+func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, argv, window []string, sessionEnv map[string]string, profile ResolvedProfile, authorizingGrant string, narrowing *narrowingBase, confine *confinedLaunch) (Pending, error) {
+	if err := session.Write(newWorkerState(rp, driver, desc, profile, authorizingGrant, narrowing)); err != nil {
 		return Pending{}, fmt.Errorf("writing worker session state: %w", err)
 	}
 

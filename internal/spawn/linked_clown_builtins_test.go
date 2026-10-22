@@ -34,7 +34,7 @@ func TestCanarySpinclassPassesTheConfinedProfileRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolving canary-spinclass: %v", err)
 	}
-	if err := checkConfinedProfile("canary-spinclass", rp); err != nil {
+	if _, err := checkConfinedProfile("canary-spinclass", rp); err != nil {
 		t.Fatalf("canary-spinclass must be accepted for a confined spawn: %v", err)
 	}
 }

@@ -765,7 +765,48 @@ the host (`internal/spawn/confineprofile.go`).
 - **R4** (ruling F). A profile whose source is `dynamic`, or unknown (the
   resolver reports none), is refused until a verified grant names its digest.
   Clown's library reports `builtin` and `user` today, never `dynamic`, so today
-  only an unknown source trips R4.
+  only an unknown source trips R4. A `user` source no longer passes R4 by
+  itself: see Tier 1 below.
+
+#### Tier 1: a user profile that narrows a builtin
+
+A profile from the user registry (`profiles.toml`) is accepted for a confined
+spawn if and only if it is a catalog-level narrowing of a declared **base**
+builtin. The base is read from the profile's own definition and resolved through
+the same resolver; there is deliberately no caller-supplied base parameter,
+because that would be a claim, not a fact (principle 4).
+
+- The profile must declare a base (`ResolvedProfile.Base`), and the base must
+  itself be a `builtin`; otherwise the spawn is refused, naming the held profile
+  and what is missing or where the base came from.
+- `catalogWidenings(base, child)` (`internal/spawn/narrows.go`) lists every way
+  the child widens the base, and any item refuses the spawn, naming the whole
+  diff (`profile "X" widens base "B" by: ...`) rather than just "not approved"
+  (principle 9). It checks: provider, backend and model changes; a child that
+  keeps every server under a selective base, or keeps a server the base does
+  not; a per-tool exclusion of the base that the child lifts on a server it
+  keeps; and env (a key the child adds, or a value it changes, compared by
+  digest, never by value).
+- R3 (moxy dropped whole, just-us kept) then applies to the child as for any
+  profile.
+- On acceptance the worker's session state records an unsigned
+  `profile_narrowing` link (`session.ProfileNarrowingLink`): grantee (the
+  worker's session key), the profile and its digest, the base and its digest
+  (`prev`), and `unsigned: true`.
+
+**Honesty note.** With no per-principal key yet, the narrowing link is a
+recorded claim, not a signature; the unit boundary (FDR 0035) is the
+containment. Tier 2 (widening) is not built: it is a D11 escalation naming
+`profiles: NAME=<digest>`, grantee, session, expires, onward: none, and waits
+for the FDR 0034 phase 2 verifier.
+
+**Today every user profile refuses.** Clown's `profilelookup.Resolved` records
+neither a `base` nor a secrets-safe env view, so `clownResolver` leaves `Base`
+empty and `EnvKnown` false. Until clown records `base`, every user profile is
+refused with "declares no base builtin"; until it exposes an env view, even a
+profile with a base would be refused with "env cannot be compared". The readback
+after launch (comparing the servers the worker actually started with the
+profile) is clown's, and is routed to clown, not built here.
 
 Not covered: an unattended spawn's standing grant (FDR 0034), and confined
 resume. A full confined spawn past the preflight is not tested; it would need a
