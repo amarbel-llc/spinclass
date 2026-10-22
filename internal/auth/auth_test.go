@@ -340,6 +340,34 @@ func TestSweepOrphansRevokesTombstonedSessions(t *testing.T) {
 	}
 }
 
+// The revoke runs outside the devshell (hookrun.CommandCaptureAmbient): a
+// blocked .envrc made the orphan sweep's revoke fail in round P, and a
+// head-controlled devshell must not steer a revocation. A tracked .envrc that
+// direnv would refuse cannot stop it.
+func TestRevokeRunsOutsideTheDevshell(t *testing.T) {
+	_, wtPath, id := setupRepo(t)
+	if _, err := Mint(context.Background(), authSweatfile("echo tok", "true"), id, ""); err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, ".envrc"), []byte("exit 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prev := commandCaptureAmbient
+	t.Cleanup(func() { commandCaptureAmbient = prev })
+	var dirs []string
+	commandCaptureAmbient = func(ctx context.Context, dir, cmd string, env []string) (string, error) {
+		dirs = append(dirs, dir)
+		return prev(ctx, dir, cmd, env)
+	}
+	ran, err := Revoke(context.Background(), authSweatfile("echo tok", "true"), id, io.Discard)
+	if !ran || err != nil {
+		t.Fatalf("Revoke: ran=%v err=%v", ran, err)
+	}
+	if len(dirs) != 1 || dirs[0] != wtPath {
+		t.Errorf("revoke-command did not run through the ambient runner: %v", dirs)
+	}
+}
+
 func TestSweepOrphansLeavesLiveSessionsAlone(t *testing.T) {
 	repoPath, _, id := setupRepo(t)
 	sf := authSweatfile("echo tok", "false")

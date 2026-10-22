@@ -745,7 +745,10 @@ with a *url-resolver* the last two are the canonical ones.
 	reaps a merged worktree (a failure warns and leaves the token recorded
 	unrevoked), and by the orphan sweep at the next session creation on the
 	repo for sessions that ended without revoking (crashed, or removed
-	outside spinclass). *Merge:* scalar override.
+	outside spinclass). It runs on the ambient *PATH*, outside the
+	worktree's devshell (no *direnv exec*), like *url-resolver*: a blocked or
+	head-edited *.envrc* can neither stop nor steer a revocation, so its tools
+	must be on the operator's own *PATH*. *Merge:* scalar override.
 
 *forge-hosts*
 	Array of origin hosts the mint applies to. When non-empty, a session

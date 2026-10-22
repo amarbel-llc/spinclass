@@ -111,8 +111,9 @@ func trimRepoPath(p string) string {
 // Seams for tests: the XDG state base, and whether a worktree's agent unit is
 // running.
 var (
-	stateDir    = confinement.DefaultStateDir
-	unitRunning = confinement.UnitRunningForWorktree
+	stateDir              = confinement.DefaultStateDir
+	unitRunning           = confinement.UnitRunningForWorktree
+	commandCaptureAmbient = hookrun.CommandCaptureAmbient
 )
 
 // StateCredentialPath is where worktreePath's credential is minted: a 0600
@@ -576,7 +577,10 @@ func revoke(ctx context.Context, sf sweatfile.Sweatfile, id Identity, dir string
 	} else if u, parsed, oerr := readOrigin(id.RepoPath); oerr == nil {
 		remote, originURL = parsed, u
 	}
-	out, err := hookrun.CommandCapture(ctx, dir, *cmd, id.env(remote, originURL))
+	// Outside the devshell, like the url-resolver: a blocked .envrc made the
+	// orphan sweep's revoke fail (round P), and the devshell is head-controlled,
+	// so it must not be able to stop or steer a revocation either.
+	out, err := commandCaptureAmbient(ctx, dir, *cmd, id.env(remote, originURL))
 	if w != nil && out != "" {
 		_, _ = io.WriteString(w, out)
 	}
