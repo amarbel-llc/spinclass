@@ -143,6 +143,9 @@ func removeWorktree(wt worktreeInfo, tw *tap.Writer) error {
 	// worktree goes — closing the gap where a merged worktree reaped here
 	// would orphan its token. Best-effort; the orphan sweep is the backstop.
 	revokeCredential(tw, wt)
+	// The credential file is in frontend state, which the worktree removal
+	// does not reach: remove it whatever the revoke did.
+	auth.RemoveCredential(wt.worktreePath)
 	revokeProfileBinding(tw, wt)
 
 	if err := git.WorktreeRemove(wt.repoPath, wt.worktreePath); err != nil {
@@ -394,6 +397,8 @@ func removeAbandonedSessions(abandoned []session.State) int {
 			key = filepath.Base(s.RepoPath) + "/" + s.Branch
 		}
 		_ = profilerights.RevokeSession(key)
+		// Its credential file lives in frontend state and outlived the worktree.
+		auth.RemoveCredential(s.WorktreePath)
 		_ = session.Remove(s.RepoPath, s.Branch)
 		removed++
 	}

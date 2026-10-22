@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"code.linenisgreat.com/spinclass/internal/confinement"
+
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/testgit"
@@ -376,6 +378,53 @@ func TestLegacyWorktreeCredentialStillResolvesAndAMintMovesIt(t *testing.T) {
 	}
 	if p, ok := MintedStatePath(wtPath); !ok || CredentialPath(wtPath) != p {
 		t.Errorf("after mint: state path %q ok=%v, CredentialPath %q", p, ok, CredentialPath(wtPath))
+	}
+}
+
+// A worktree launched confined (a frontend unit record or spec exists) never
+// resolves to a credential file in its own tree: the unit could have planted
+// it. Minted is false and CredentialPath names the frontend file.
+func TestConfinedWorktreeIgnoresAPlantedLegacyCredential(t *testing.T) {
+	_, wtPath, _ := setupRepo(t)
+	legacy := LegacyCredentialPath(wtPath)
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte("https://spinclass:planted@evil.example\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	base, _ := stateDir()
+	spec := confinement.UnitSpecPath(base, wtPath)
+	if err := os.MkdirAll(filepath.Dir(spec), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(spec, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if Minted(wtPath) {
+		t.Error("a planted worktree file counted as minted for a confined worktree")
+	}
+	if p := CredentialPath(wtPath); p == legacy {
+		t.Errorf("CredentialPath = the planted file %s", p)
+	}
+}
+
+// A symlink at the legacy path is not a credential file.
+func TestLegacyCredentialMustBeARegularFile(t *testing.T) {
+	_, wtPath, _ := setupRepo(t)
+	legacy := LegacyCredentialPath(wtPath)
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "elsewhere")
+	if err := os.WriteFile(target, []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if Minted(wtPath) {
+		t.Error("a symlink at the legacy path counted as minted")
 	}
 }
 

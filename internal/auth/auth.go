@@ -142,14 +142,41 @@ func MintedStatePath(worktreePath string) (string, bool) {
 	return p, true
 }
 
-// CredentialPath is the minted credential an unconfined caller uses: the
-// frontend-state file, else a legacy worktree file. A confined caller must use
-// MintedStatePath only, never a file the unit could have planted.
+// CredentialPath is the minted credential: the frontend-state file, else, for
+// a worktree that was never launched confined, a legacy worktree file. A
+// confined worktree's tree is the unit's to write, so a legacy-looking file
+// there may be planted and is never used: its path is the frontend one even
+// when that does not exist.
 func CredentialPath(worktreePath string) string {
-	if p, ok := MintedStatePath(worktreePath); ok {
-		return p
+	p, err := StateCredentialPath(worktreePath)
+	if err == nil {
+		if _, serr := os.Stat(p); serr == nil || launchedConfined(worktreePath) {
+			return p
+		}
 	}
-	return LegacyCredentialPath(worktreePath)
+	legacy := LegacyCredentialPath(worktreePath)
+	if fi, lerr := os.Lstat(legacy); lerr == nil && fi.Mode().IsRegular() {
+		return legacy
+	}
+	if err != nil {
+		return legacy
+	}
+	return p
+}
+
+// launchedConfined reports whether the worktree has (or had) an agent unit:
+// a frontend-owned unit record or spec. Unknowable counts as confined.
+func launchedConfined(worktreePath string) bool {
+	base, err := stateDir()
+	if err != nil {
+		return true
+	}
+	for _, f := range []string{confinement.UnitRecordPath(base, worktreePath), confinement.UnitSpecPath(base, worktreePath)} {
+		if _, err := os.Lstat(f); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // Minted reports whether worktreePath has a minted credential.
@@ -591,11 +618,13 @@ func SweepOrphans(ctx context.Context, sf sweatfile.Sweatfile, repoPath string, 
 			continue
 		}
 		id := Identity{RepoPath: s.RepoPath, WorktreePath: s.WorktreePath, Branch: s.Branch, SessionKey: s.SessionKey}
-		if rerr := revoke(ctx, sf, id, repoPath, w); rerr != nil {
+		// The retry addresses the token by session id, so the file goes either way.
+		rerr := revoke(ctx, sf, id, repoPath, w)
+		RemoveCredential(s.WorktreePath)
+		if rerr != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", s.SessionKey, rerr))
 			continue
 		}
-		RemoveCredential(s.WorktreePath)
 		revoked++
 	}
 	return revoked, errs
