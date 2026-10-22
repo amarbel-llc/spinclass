@@ -217,6 +217,11 @@ exercised on a real unit, and so **unverified until a live canary**:
     The live form of the check is "another session's pass file is absent or
     unreadable inside the unit". It is unit-tested only until the clown fix's
     round.
+- P (per the round P report, 2026-10-22): clown's troupe fix closed the
+  account-file exposure. F10's zombie count grew from 2 to 6 across the
+  rounds; they are counted apart (below) and are a clown hygiene item, not a
+  cut failure. F11 (the genuinely unconfined driver) and F12 (loopback serve,
+  clown) remain the open failures.
 - **F10 and F14 were check gaps, not cut failures (inferred, 2026-10-22).**
   - F10 counted every numeric `/proc` entry in the unit against the unit's
     cgroup. The overcount grew over the rounds (+2, +3, +5), which fits
@@ -229,6 +234,41 @@ exercised on a real unit, and so **unverified until a live canary**:
     names any other account or entry under `troupe`.
   - Both readings wait on a live round: a probe listing the unit's runtime
     dir, and F10's note or failure detail.
+
+### Serve handlers and the caller (FDR divergence audit, 2026-10-22)
+
+These were found by the audit (`docs/plans/2026-10-22-fdr-divergence-audit.md`),
+not by a live round. They are inferred from the code and were not exploited.
+The shared root is F12: while the serve is reachable on loopback, a process in
+the unit can call any serve tool directly, so the agent-side PreToolUse hook is
+no gate.
+
+- **Fixed: `spawn-session` (audit row 183).** The serve classifies its caller
+  with `ClassifyServeCaller` before reading any parameter and refuses a
+  confined caller, whatever it asks for. An unclassifiable caller counts as
+  confined. Before, the `unconfined` ask lived only in the hook.
+- **Fixed: `close-self-run` (audit row 195).** The runner never reads
+  `CloseRequest.Principal`, which the agent can rewrite. It takes the
+  principal from the frontend mapping. A session launched confined with no
+  mapping is refused. An unconfined one falls back to the runner's own
+  principal, then the recorded one.
+- **Open: no other serve tool classifies its caller.** Only the grit tools
+  (`grit_cmd.go:272`) and `spawn-session` (`spawn_cmd.go:188`) call
+  `ClassifyServeCaller`. This is a list, not a verdict on each tool's risk:
+
+| Tool | Handler | Authority it relies on today |
+|---|---|---|
+| `merge-this-session`, `-async` | `commands_mcp_only.go:411`, `:536` | the serve's own session; not audited per handler |
+| `check-this-session`, `-async` | `commands_mcp_only.go:505`, `:690` | as above |
+| `session-job-cancel` | `commands_mcp_only.go:759` | as above |
+| `update-this-session-description` | `commands_mcp_only.go:971` | as above |
+| `nothing-but-the-truth` | `commands_mcp_only.go:1143` | as above |
+| `close-child-session` | `close_child_cmd.go:205` | a handle (`authorizeHandleUse`); see audit rows 32-12, 32-23 |
+| `close-this-session` | `close_self_cmd.go:175` | the self-close scope; caller resolved through worktree state (audit row 159) |
+| `grant-session-handle`, `release-session-handle` | `handles_cmd.go:150`, `:240` | a handle; rights not consulted (audit row 32-23) |
+| `list-handles`, `whoami` | `handles_cmd.go:330`, `:374` | none (read; `list-handles accept` writes) |
+| `resurrect` | `resurrect_cmd.go:45` | not audited per handler |
+| `perms-list`, `list`, `validate`, `version` | `commands_perms.go:87`, `commands_query.go:65`, `:98`, `commands_version.go:31` | none (read-only) |
 
 ### Frontend rewrites detach file mounts (round K, open)
 
