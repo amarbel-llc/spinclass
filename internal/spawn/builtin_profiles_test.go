@@ -18,7 +18,7 @@ func TestClownBuiltinTaskTemplatesResolve(t *testing.T) {
 		registryPath: filepath.Join(t.TempDir(), "absent-profiles.toml"),
 	}
 
-	for _, name := range []string{"reviewer", "porter", "canary"} {
+	for _, name := range []string{"reviewer", "porter", "canary", "canary-grit"} {
 		t.Run(name, func(t *testing.T) {
 			rp, err := resolveProfile(name)
 			if err != nil {
