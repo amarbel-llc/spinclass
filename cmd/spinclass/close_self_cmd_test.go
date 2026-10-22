@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/clown"
+	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/job"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/testgit"
@@ -326,6 +328,101 @@ func TestCloseSelfRunRefusesWhenScopeWasRevoked(t *testing.T) {
 	}
 	if readKid(t, repoPath).CloseRequest != nil {
 		t.Error("the request must be cleared")
+	}
+}
+
+// forgeCloseRequestPrincipal rewrites the queued request the way an agent that
+// can write its own worktree state could.
+func forgeCloseRequestPrincipal(t *testing.T, repoPath, forged string, alsoSessionPrincipal bool) {
+	t.Helper()
+	st := readKid(t, repoPath)
+	st.CloseRequest.Principal = forged
+	if alsoSessionPrincipal {
+		st.Principal = forged
+	}
+	if err := session.Write(*st); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeFrontendMapping plants the frontend principal mapping the launching
+// frontend writes for a confined session.
+func writeFrontendMapping(t *testing.T, principal, sessionKey, worktree string) {
+	t.Helper()
+	path := confinement.PrincipalMappingPath(os.Getenv("XDG_STATE_HOME"), principal)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	raw := fmt.Sprintf(`{"version":1,"principal":%q,"session_key":%q,"worktree":%q,"unit":"agent-test.service"}`, principal, sessionKey, worktree)
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertCloseRefusedAndSessionWhole(t *testing.T, repoPath, wtPath string) {
+	t.Helper()
+	if err := runCloseSelfRun("worker/kid"); err == nil {
+		t.Fatal("expected the runner to refuse")
+	}
+	if _, err := os.Stat(wtPath); err != nil {
+		t.Errorf("a refused teardown must leave the worktree: %v", err)
+	}
+	if readKid(t, repoPath).CloseRequest != nil {
+		t.Error("a refused request must be cleared")
+	}
+}
+
+// A forged CloseRequest.Principal must not let the runner skip the orphan
+// check: the runner takes the principal from the session's own record (an
+// unconfined session), not from the request (found by the FDR divergence
+// audit, FDR 0035).
+func TestCloseSelfRunIgnoresAForgedRequestPrincipal(t *testing.T) {
+	stubExitWakes(t)
+	repoPath, wtPath := requestClose(t)
+	addHeldChild(t, repoPath, []string{selfPrincipal})
+	forgeCloseRequestPrincipal(t, repoPath, "a-forged-principal", false)
+
+	assertCloseRefusedAndSessionWhole(t, repoPath, wtPath)
+}
+
+// For a confined session the frontend mapping decides, even when the agent
+// rewrote both the request and its session's recorded principal.
+func TestCloseSelfRunUsesTheFrontendMappingForAConfinedSession(t *testing.T) {
+	stubExitWakes(t)
+	repoPath, wtPath := requestClose(t)
+	addHeldChild(t, repoPath, []string{selfPrincipal})
+	writeFrontendMapping(t, selfPrincipal, "worker/kid", wtPath)
+	forgeCloseRequestPrincipal(t, repoPath, "a-forged-principal", true)
+
+	assertCloseRefusedAndSessionWhole(t, repoPath, wtPath)
+}
+
+func TestCloseSelfRunRefusesAConfinedSessionWithoutAMapping(t *testing.T) {
+	stubExitWakes(t)
+	repoPath, wtPath := requestClose(t)
+	spec := confinement.UnitSpecPath(os.Getenv("XDG_STATE_HOME"), wtPath)
+	if err := os.MkdirAll(filepath.Dir(spec), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(spec, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	assertCloseRefusedAndSessionWhole(t, repoPath, wtPath)
+}
+
+// The mapping is honoured in the other direction too: a confined session the
+// mapping names closes normally.
+func TestCloseSelfRunClosesAConfinedSessionItsMappingNames(t *testing.T) {
+	stubExitWakes(t)
+	repoPath, wtPath := requestClose(t)
+	writeFrontendMapping(t, selfPrincipal, "worker/kid", wtPath)
+
+	if err := runCloseSelfRun("worker/kid"); err != nil {
+		t.Fatalf("runCloseSelfRun: %v", err)
+	}
+	if got := readKid(t, repoPath).ResolveState(); got != session.StateAbandoned {
+		t.Errorf("state = %q, want a tombstone", got)
 	}
 }
 

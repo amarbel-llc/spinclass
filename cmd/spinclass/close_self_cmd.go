@@ -13,6 +13,7 @@ import (
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	spinclose "code.linenisgreat.com/spinclass/internal/close"
 	"code.linenisgreat.com/spinclass/internal/clown"
+	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/job"
 	"code.linenisgreat.com/spinclass/internal/servelog"
 	"code.linenisgreat.com/spinclass/internal/session"
@@ -190,8 +191,10 @@ func handleCloseThisSession(_ context.Context, args json.RawMessage, _ command.P
 // A refusal or failure clears the request (so it is not retried forever), tells
 // the holders with an ExitFailed wake, and leaves the session whole.
 func runCloseSelfRun(target string) error {
+	implied := ""
 	if target == "" {
-		key, ok := session.SessionKeyOfPrincipal(currentPrincipal())
+		implied = currentPrincipal()
+		key, ok := session.SessionKeyOfPrincipal(implied)
 		if !ok {
 			return nil
 		}
@@ -207,7 +210,7 @@ func runCloseSelfRun(target string) error {
 	if st.CloseRequest == nil || st.Kind == session.KindImplicit || st.ResolveState() == session.StateAbandoned {
 		return nil
 	}
-	principal := st.CloseRequest.Principal
+	principal, principalErr := closeRunnerPrincipal(st, implied)
 
 	fail := func(reason error) error {
 		st.CloseRequest = nil
@@ -218,6 +221,9 @@ func runCloseSelfRun(target string) error {
 			servelog.Errorf("close-self-run emitExitWakesFn-failed key=%s err=%v", st.Key(), werr)
 		}
 		return reason
+	}
+	if principalErr != nil {
+		return fail(principalErr)
 	}
 
 	obstacle, err := selfCloseObstacle(st, principal)
@@ -238,6 +244,39 @@ func runCloseSelfRun(target string) error {
 		servelog.Errorf("close-self-run emitExitWakesFn-failed key=%s err=%v", key, err)
 	}
 	return nil
+}
+
+// closeRunnerPrincipal is whose close the runner carries out. It never reads
+// st.CloseRequest.Principal: the session state lives in the worktree, which a
+// confined agent can rewrite, and the principal decides the orphan check and
+// who is woken. A frontend principal mapping naming the session wins. A
+// session that was launched confined but has no mapping is refused. Only an
+// unconfined session (no unit record or spec) falls back, first to the
+// principal the runner itself resolved the session from (implied, its own
+// CLOWN_SESSION_ID), then to the session's recorded principal; an unconfined
+// agent is not inside any boundary that state could cross.
+func closeRunnerPrincipal(st *session.State, implied string) (string, error) {
+	stateDir, err := confinement.DefaultStateDir()
+	if err != nil {
+		return "", fmt.Errorf("resolving the frontend state directory: %w", err)
+	}
+	p, found, err := confinement.PrincipalOfSession(confinement.Host{}, stateDir, st.Key(), st.WorktreePath)
+	if err != nil {
+		return "", err
+	}
+	if found {
+		return p, nil
+	}
+	if confinement.LaunchedConfined(stateDir, st.WorktreePath) {
+		return "", fmt.Errorf("%s was launched confined but no frontend principal mapping names it, so whose close this is cannot be told; refusing", st.Key())
+	}
+	if implied != "" {
+		return implied, nil
+	}
+	if st.Principal != "" {
+		return st.Principal, nil
+	}
+	return "", fmt.Errorf("%s records no principal, so whose close this is cannot be told; refusing", st.Key())
 }
 
 // closeSelfRunCommand registers the runner as a hidden, CLI-only command: it is

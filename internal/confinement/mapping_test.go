@@ -20,6 +20,43 @@ func TestDriverWithoutPrincipalFailsF1AndF15(t *testing.T) {
 	}
 }
 
+func TestPrincipalOfSessionReadsTheMappingsBackwards(t *testing.T) {
+	dir := t.TempDir()
+	write := func(principal, key, wt string) {
+		t.Helper()
+		m := PrincipalMapping{Version: principalMappingVersion, Principal: principal, SessionKey: key, Worktree: wt, Unit: "u.service"}
+		if err := writeJSONAtomic(PrincipalMappingPath(dir, principal), m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, found, err := PrincipalOfSession(Host{}, dir, "r/a", "/wt/a"); found || err != nil {
+		t.Fatalf("no mappings: found=%v err=%v", found, err)
+	}
+	write("principal-a", "r/a", "/wt/a")
+	write("principal-b", "r/b", "/wt/b")
+	write("principal-moved", "r/a", "/wt/elsewhere")
+	if p, found, err := PrincipalOfSession(Host{}, dir, "r/a", "/wt/a/"); !found || err != nil || p != "principal-a" {
+		t.Fatalf("got %q found=%v err=%v, want principal-a", p, found, err)
+	}
+	write("principal-dup", "r/a", "/wt/a")
+	if _, _, err := PrincipalOfSession(Host{}, dir, "r/a", "/wt/a"); err == nil {
+		t.Fatal("two mappings naming one session must be an error, not a pick")
+	}
+}
+
+func TestLaunchedConfinedSeesARecordOrASpec(t *testing.T) {
+	dir := t.TempDir()
+	if LaunchedConfined(dir, "/wt/a") {
+		t.Fatal("nothing written yet")
+	}
+	if _, err := WriteUnitSpec(dir, "/wt/a", map[string]string{}); err != nil {
+		t.Fatal(err)
+	}
+	if !LaunchedConfined(dir, "/wt/a") {
+		t.Fatal("a spec means the worktree was launched confined")
+	}
+}
+
 // The frontend writes the mapping from the unit's own environment, and the
 // grant walk's join reads only that, never the worktree state.
 func TestRecordPrincipalFromUnitThenLookUp(t *testing.T) {

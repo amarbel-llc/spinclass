@@ -172,12 +172,7 @@ func launchedConfined(worktreePath string) bool {
 	if err != nil {
 		return true
 	}
-	for _, f := range []string{confinement.UnitRecordPath(base, worktreePath), confinement.UnitSpecPath(base, worktreePath)} {
-		if _, err := os.Lstat(f); err == nil {
-			return true
-		}
-	}
-	return false
+	return confinement.LaunchedConfined(base, worktreePath)
 }
 
 // Minted reports whether worktreePath has a minted credential.

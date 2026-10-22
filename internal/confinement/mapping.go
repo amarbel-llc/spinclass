@@ -116,6 +116,52 @@ func RemovePrincipalMappingsForSession(stateDir, sessionKey string) error {
 	return errors.Join(errs...)
 }
 
+// PrincipalOfSession is the principal the frontend mappings bind to sessionKey
+// at worktree, found by reading the mappings themselves (the reverse of
+// LoadPrincipalMapping). found is false when no mapping names the session. More
+// than one mapping naming it, or a mapping directory that cannot be read, is an
+// error: the caller must fail closed rather than pick one.
+func PrincipalOfSession(sys System, stateDir, sessionKey, worktree string) (principal string, found bool, err error) {
+	dir := filepath.Join(stateDir, "spinclass", "principals")
+	names, err := sys.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("principal mappings unreadable: %w", err)
+	}
+	var matches []string
+	for _, name := range names {
+		p, ok := strings.CutSuffix(name, ".json")
+		if !ok {
+			continue
+		}
+		m, err := LoadPrincipalMapping(sys, stateDir, p)
+		if err != nil || m.SessionKey != sessionKey || filepath.Clean(m.Worktree) != filepath.Clean(worktree) {
+			continue
+		}
+		matches = append(matches, p)
+	}
+	switch len(matches) {
+	case 0:
+		return "", false, nil
+	case 1:
+		return matches[0], true, nil
+	}
+	return "", false, fmt.Errorf("ambiguous: %d principal mappings name session %s", len(matches), sessionKey)
+}
+
+// LaunchedConfined reports whether worktree has (or had) an agent unit: a
+// frontend-owned unit record or spec exists for it.
+func LaunchedConfined(stateDir, worktree string) bool {
+	for _, f := range []string{UnitRecordPath(stateDir, worktree), UnitSpecPath(stateDir, worktree)} {
+		if _, err := os.Lstat(f); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // RemovePrincipalMapping deletes a principal's mapping when its session ends.
 func RemovePrincipalMapping(stateDir, principal string) error {
 	if err := validPrincipalName(principal); err != nil {
