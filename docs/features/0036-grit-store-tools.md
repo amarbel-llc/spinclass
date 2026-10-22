@@ -881,9 +881,13 @@ not registered and its git invocation is byte-for-byte what it was.
   Environment: `GIT_ATTR_NOSYSTEM=1`, `GIT_OPTIONAL_LOCKS=0`, `GIT_PAGER=cat`,
   `GIT_EDITOR=true`, `GIT_CEILING_DIRECTORIES=<parent of the worktree>`. `diff`
   also gets `--no-ext-diff --no-textconv`.
-- **Credentials.** `credential.helper=` resets the list, then exactly the helper
-  spinclass injected is set again: `store --file=<session credential file>`
-  (from `auth.CredentialPath`, only when a credential was minted). Remote verbs
+- **Credentials.** `credential.helper=` resets the list, then one get-only
+  reader of the session credential file is set (`getOnlyCredentialHelper`:
+  `git credential-store --file=<file> get`, with store and erase ignored;
+  from `auth.CredentialPath`, only when a credential was minted). It was
+  `store --file=`, which rewrote the file as a new inode after every
+  successful push and detached the unit's mount over it (round K, FDR 0035
+  "Frontend rewrites detach file mounts"). Remote verbs
   authenticate as before; no other helper runs. With nothing minted, no helper
   runs and the verb fails with git's own authentication error, as it already did.
 - **What cannot be neutralised by an override.** Git has no way to unset an

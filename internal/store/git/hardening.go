@@ -2,6 +2,7 @@ package git
 
 import (
 	"path/filepath"
+	"strings"
 
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/store"
@@ -24,10 +25,10 @@ import (
 //   - -c overrides neutralise the config keys that run a command from a single
 //     fixed name: core.fsmonitor, core.sshCommand, core.pager, core.editor,
 //     protocol.ext.allow, core.attributesFile.
-//   - credential.helper is reset and then set to the one helper spinclass
-//     itself injected (store --file=<session credential file>), so a remote
-//     verb still authenticates exactly as before and no other helper runs. With
-//     no minted credential no helper runs and the verb fails with git's own
+//   - credential.helper is reset and then set to a get-only reader of the
+//     session credential file (getOnlyCredentialHelper), so a remote verb
+//     still authenticates as before and no other helper runs. With no minted
+//     credential no helper runs and the verb fails with git's own
 //     authentication error, as it already did.
 //   - Pagers, editors, system attributes and optional index locks are turned
 //     off through the environment.
@@ -41,6 +42,16 @@ import (
 // the global config is the operator's. diff and the shelf's diffs also pass
 // --no-ext-diff --no-textconv. Aliases cannot shadow the builtin verbs this
 // backend runs.
+// getOnlyCredentialHelper answers git's get from the credential file and
+// ignores store and erase. A plain `store --file` helper rewrites the file
+// after every successful push (lockfile and rename); the unit's
+// InaccessiblePaths mount sits on the old inode, so a rewrite from the frontend
+// would leave the new, readable file in the unit's view (round K, FDR 0035).
+func getOnlyCredentialHelper(credFile string) string {
+	quoted := "'" + strings.ReplaceAll(credFile, "'", `'\''`) + "'"
+	return `!f() { test "$1" = get && exec git credential-store --file=` + quoted + ` get; }; f`
+}
+
 func confinedHardening(s store.Session) (git.Hardening, bool) {
 	if !s.Confinement.Confined() {
 		return git.Hardening{}, false
@@ -65,7 +76,7 @@ func confinedHardening(s store.Session) (git.Hardening, bool) {
 		},
 	}
 	if s.Repo.CredentialFile != "" {
-		h.Args = append(h.Args, "-c", "credential.helper=store --file="+s.Repo.CredentialFile)
+		h.Args = append(h.Args, "-c", "credential.helper="+getOnlyCredentialHelper(s.Repo.CredentialFile))
 	}
 	if s.Dir != "" {
 		h.Env = append(h.Env, "GIT_CEILING_DIRECTORIES="+filepath.Dir(s.Dir))

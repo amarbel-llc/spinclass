@@ -41,14 +41,14 @@ func TestConfinedHardeningShape(t *testing.T) {
 	for _, want := range []string{
 		"core.fsmonitor=false", "core.sshCommand=", "core.pager=cat", "core.editor=true",
 		"diff.external=", "protocol.ext.allow=never", "core.attributesFile=/dev/null",
-		"credential.helper= -c credential.helper=store --file=/r/.worktrees/feat/.spinclass/git-credentials",
+		"credential.helper= -c credential.helper=!f() { test \"$1\" = get && exec git credential-store --file='/r/.worktrees/feat/.spinclass/git-credentials' get; }; f",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("args lack %s: %s", want, joined)
 		}
 	}
 	// the reset must come before the pinned helper
-	if strings.Index(joined, "credential.helper= ") > strings.Index(joined, "credential.helper=store") {
+	if strings.Index(joined, "credential.helper= ") > strings.Index(joined, "credential.helper=!") {
 		t.Errorf("credential.helper reset must precede the pinned helper: %s", joined)
 	}
 }
@@ -61,7 +61,7 @@ func TestConfinedHardeningWithoutRepoLeavesDiscoveryAlone(t *testing.T) {
 	if slices.ContainsFunc(h.Env, func(e string) bool { return strings.HasPrefix(e, "GIT_DIR=") }) {
 		t.Errorf("no trusted repo, yet GIT_DIR set: %v", h.Env)
 	}
-	if strings.Contains(strings.Join(h.Args, " "), "store --file") {
+	if strings.Contains(strings.Join(h.Args, " "), "credential-store") {
 		t.Error("no credential minted, yet a store helper is pinned")
 	}
 }

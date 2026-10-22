@@ -150,6 +150,72 @@ exercised on a real unit, and so **unverified until a live canary**:
 - clown's spec parser accepting the fields: no new field was added, only
   existing `binds_ro`/`binds_rw`/`deny_paths` entries changed.
 
+**Live evidence (rounds J3 and K, nikulin canary, 2026-10-22).**
+
+- J3, worker canary/noble-hazel on spinclass 55b46c8:
+  - a raw ref create failed with `Read-only file system`;
+  - a raw https push found no credential;
+  - all four `.git` marker paths were blocked.
+- K, worker canary/swift-teak on spinclass 4bd1590:
+  - the spec carried every row of the table above;
+  - `sc confinement-check` passed F9 before any push; that run used the driver's principal, so its F1 and F15 failures came from the wrong principal, not the cut;
+  - after the round, with the worker's principal, F1–F8b, F13 and F15 passed. F9 failed (below), and F10, F11, F12 and F14 failed as open items;
+  - grit add, commit and push through the frontend worked with the minted credential (the first credential-store push);
+  - the stash refusal and the force deny arrived as written (FDR 0036).
+- Round K's P2–P6 (pointer and `config.worktree` replace/unlink, nix and direnv) did not run: `just` found its runtime dir read-only. They remain unverified.
+
+### Frontend rewrites detach file mounts (round K, open)
+
+After the worker's grit push, F9 failed: the credential file was readable from
+the unit, though it had been unreadable before the push. The file had existed
+since mint (`auth.writeCredential`) and the spec's `deny_paths` named exactly
+that path. Cause, part measured and part theory:
+
+- **Measured** (`TestHardenedCredentialHelperNeverRewritesTheFile`, run against
+  the old helper). The frontend's pinned `store --file=<cred>` helper makes git
+  run the `store` action after a successful auth and `erase` after a rejected
+  one. `git-credential-store` rewrites the file as a new inode, so a rejected
+  auth also drops the token from it.
+- **Theory, not verified on a unit.** A mount whose mountpoint is renamed over in
+  another mount namespace is detached (Linux 3.18 and later). The unit's
+  `InaccessiblePaths=` mount sat on the old inode, so after the rewrite the unit
+  sees the new, readable file.
+
+Fixed for the credential: the confined frontend helper is get-only
+(`getOnlyCredentialHelper`, FDR 0036 section 9.5), so no push or fetch rewrites
+the file. A re-mint writes in place (`O_TRUNC`, same inode).
+
+The same mechanism applies to every **file** mount in the spec; directory
+mounts are not affected by renames inside them. Frontend operations that would
+rewrite a file-mounted path while a unit runs:
+
+| Bound path | Frontend writers | Status |
+|---|---|---|
+| `<worktree>/.spinclass/git-credentials` (`deny_paths`) | credential-store `store`/`erase` on push/fetch | fixed (get-only helper) |
+| `<common>/config` (`binds_ro`) | any common-scope `git config`. Examples: `auth.Inject`'s `extensions.worktreeConfig true` at **every mint in the same repo**, i.e. spawning a sibling session (theory: git rewrites the file even when the value is unchanged), a push with `set_upstream`, branch tracking setup | open |
+| `<common>/worktrees/<name>/config.worktree` (`binds_ro`) | `git config --worktree` (`auth.Inject`, at mint only, before the unit) | safe today; a re-mint or re-inject while the unit runs would detach it |
+| `<worktree>/.git` (`binds_ro`) | `git worktree repair` and `move` | safe unless the operator repairs a running worker. Close it instead |
+
+Once `<common>/config` is detached, what the unit sees depends on the mount
+underneath (the path under `ProtectHome=tmpfs`). That is not known. Probes for
+the next round:
+
+- F9 after a grit push;
+- `<common>/config` writability after a sibling spawn in the same repo;
+- after a frontend `git config` on the session.
+
+**Open design question.** File mounts make the cut depend on no frontend
+operation ever renaming over a bound file. Two options to remove that
+dependence:
+
+- (a) bind directories instead of files, e.g. a dedicated credential directory
+  that is not inside the worktree, made inaccessible as a directory;
+- (b) keep secrets and config out of the unit's tree entirely. Put the credential
+  in the frontend state dir. For config, use a repository config the frontend
+  never rewrites, or an overlay.
+
+Not decided; for the coordinator and operator.
+
 ## The confinement check
 
 `profilerights.Confinement.Check()` gets a real implementation,
@@ -260,8 +326,12 @@ network for loopback to serve.
 
 spinclass → clown (opt-in; unset means today's unconfined launch):
 
-- `CLOWN_AGENT_SCOPE=<path>` names a spec file spinclass writes into
-  `<worktree>/.spinclass/agent-scope.json`:
+- `CLOWN_AGENT_SCOPE=<path>` names a spec file spinclass writes beside the
+  unit record, outside the worktree so the unit cannot edit it
+  (`confinement.UnitSpecPath`:
+  `$XDG_STATE_HOME/spinclass/units/<sha256(worktree)[:8]>.spec.json`; this
+  example shows the original shape, see the current fields in
+  `internal/spawn/confine.go` `unitSpec`):
 
   ```json
   {
