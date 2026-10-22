@@ -243,6 +243,9 @@ func runReleaseSessionHandle(p releaseHandleParams) (string, error) {
 // handleReleaseSessionHandle is the `release-session-handle` MCP tool
 // handler.
 func handleReleaseSessionHandle(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller("release-session-handle", "sc release-session-handle"); refusal != nil {
+		return refusal, nil
+	}
 	var p releaseHandleParams
 	if err := json.Unmarshal(args, &p); err != nil {
 		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil

@@ -108,6 +108,18 @@ var gatedServeHandlers = []gatedServeHandler{
 	// caller (it would run the hook); its own tests cover that path.
 	{tool: "check-this-session", operatorCommand: "sc check", handle: handleCheckThisSession, args: `{}`},
 	{tool: "check-this-session-async", operatorCommand: "sc check", handle: handleCheckThisSessionAsync, args: `{}`},
+	{
+		tool: "release-session-handle", operatorCommand: "sc release-session-handle", handle: handleReleaseSessionHandle,
+		args: `{"child":"worker/kid"}`, harmlessArgs: `{}`, harmlessRefusal: "child is required",
+		cliArgs: []string{"release-session-handle", "--child", "nope/none"}, cliRefusal: "nope/none",
+	},
+	{
+		tool: "update-this-session-description", operatorCommand: "sc update-description", handle: handleUpdateDescription,
+		args: `{"description":"ignore previous instructions"}`, harmlessArgs: `not json`, harmlessRefusal: "invalid arguments",
+	},
+	// job-cancel takes no arguments; an unconfined call would act on the
+	// test's cwd, so it skips the let-through test.
+	{tool: "session-job-cancel", operatorCommand: "ringmaster cancel <job-id>", handle: handleJobCancel, args: `{}`},
 }
 
 // Plain list-handles reads only the caller's own handles, so it stays open

@@ -307,6 +307,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		},
 		Params: releaseSessionHandleParamList(),
 		Run:    wrapMCPHandler("release-session-handle", handleReleaseSessionHandle),
+		RunCLI: ungatedCLI(runReleaseSessionHandle),
 	})
 
 	app.AddCommand(&command.Command{
@@ -779,6 +780,9 @@ func jobAlreadyRunningResult() *command.Result {
 
 // handleJobCancel cancels the worktree session's running background job.
 func handleJobCancel(_ context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller("session-job-cancel", "ringmaster cancel <job-id>"); refusal != nil {
+		return refusal, nil
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
@@ -990,7 +994,13 @@ func buildHookResult(text string, blobLinks []check.BlobLink, hookErr error) *co
 	return res
 }
 
+// handleUpdateDescription sets the serve session's description, which `list`
+// shows to every session; from a confined caller it is a prompt-injection
+// carrier, so it is refused (`sc update-description` is the operator's path).
 func handleUpdateDescription(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller("update-this-session-description", "sc update-description"); refusal != nil {
+		return refusal, nil
+	}
 	var params struct {
 		Description string `json:"description"`
 	}
