@@ -11,6 +11,7 @@ import (
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
+	"code.linenisgreat.com/spinclass/internal/spawn"
 )
 
 func registerVersionCommand(app *command.App) {
@@ -19,7 +20,7 @@ func registerVersionCommand(app *command.App) {
 		Title: "Print Spinclass Version",
 		Description: command.Description{
 			Short: "Print spinclass version and any build-time-pinned tools",
-			Long:  "Print a table of components: spinclass itself plus any binaries pinned via lib.mkSpinclass (madder, direnv, papi, gh). Empty pins display as `dormant`. Version and commit are injected at build time as `<version>+<commit>`; a devshell `go build` reports `dev+unknown`.",
+			Long:  "Print a table of components: spinclass itself plus any binaries pinned via lib.mkSpinclass (madder, direnv, papi, gh). Empty pins display as `dormant`. Version and commit are injected at build time as `<version>+<commit>`; a devshell `go build` reports `dev+unknown`. Called as the MCP tool (in a long-lived serve), a last line says whether the serve still runs the spinclass on PATH or is stale after a deploy (spinclass#399).",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			ReadOnlyHint:    protocol.BoolPtr(true),
@@ -28,7 +29,7 @@ func registerVersionCommand(app *command.App) {
 			OpenWorldHint:   protocol.BoolPtr(false),
 		},
 		Run: func(_ context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
-			return command.TextResult(formatVersionTable(version, commit, madderBin, direnvBin, papiBin, ghBin)), nil
+			return command.TextResult(formatVersionTable(version, commit, madderBin, direnvBin, papiBin, ghBin) + serveBinaryLine()), nil
 		},
 	})
 }
@@ -52,6 +53,27 @@ func formatVersionTable(spinclassVersion, spinclassCommit, madder, direnv, papi,
 
 	_ = tw.Flush()
 	return sb.String()
+}
+
+// inServe is set when this process runs `spinclass serve`.
+var inServe bool
+
+// serveBinaryLine says, in a serve only, whether this process still runs the
+// spinclass on PATH (spinclass#399): a long-lived serve's table is the binary
+// it started with, which a deploy does not replace. The CLI table is unchanged.
+func serveBinaryLine() string {
+	if !inServe {
+		return ""
+	}
+	b, err := spawn.CurrentServeBinary()
+	switch {
+	case err != nil:
+		return fmt.Sprintf("serve binary: unknown (%v)\n", err)
+	case b.Stale():
+		return fmt.Sprintf("serve binary: STALE: running %s, spinclass on PATH is %s; restart the session (spinclass#399)\n", b.Running, b.OnPath)
+	default:
+		return "serve binary: current (" + b.Running + ")\n"
+	}
 }
 
 func writePinRow(tw *tabwriter.Writer, name, binPath string) {

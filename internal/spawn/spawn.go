@@ -129,6 +129,9 @@ func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model
 		if err := confinedPreflight(confinementHost, agentScopeCapabilitiesArgv); err != nil {
 			return Pending{}, err
 		}
+		if err := refuseStaleServe(); err != nil {
+			return Pending{}, err
+		}
 		// No operator sits at a confined unit's tty (F8a), so the worker must
 		// never be able to wait on a permission prompt: dontAsk denies instead.
 		// Before anything is created, so a spawn-entry that cannot take the flag

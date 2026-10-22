@@ -39,6 +39,7 @@ func registerServeCommand(app *command.App) {
 			}
 			defer func() { _ = servelog.Close() }()
 			servelog.Infof("serve.start version=%s pid=%d", app.Version, os.Getpid())
+			inServe = true
 
 			// Install the intra-session merge-queue completion hook (spinclass#265,
 			// FDR 0025) before any async job can run. Harmless without clown (the

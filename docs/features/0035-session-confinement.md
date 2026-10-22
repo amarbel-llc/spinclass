@@ -361,6 +361,20 @@ hygiene (`harnessScrubbedEnvVars`) is kept in both modes. The switch is read
 from the same trusted layers as `[profile-rights]` so a repo cannot turn it off
 for a driver that set it.
 
+**A stale serve refuses (spinclass#399, 2026-10-22).** A session's `spinclass
+serve` keeps the binary it started with; after a deploy it kept writing unit
+specs with the old code (nikulin canary: a 14-hour-old serve wrote a spec
+without the round-I binds). Before writing a spec a confined spawn resolves
+its own running binary (`os.Executable`, symlinks resolved; a collected binary
+keeps its ` (deleted)` marker) and the `spinclass` on its PATH (symlinks
+resolved, so a profile link to the same store path is not a false positive),
+and refuses when they differ, naming both, or when either cannot be resolved
+(`refuseStaleServe`, `internal/spawn/servefresh.go`). The `version` MCP tool, run in a
+serve, adds a `serve binary: current|STALE|unknown` line; the CLI table is
+unchanged. Unverified: that the serve's PATH resolves `spinclass` to the
+operator's profile rather than a plugin-private bin dir; if it does not, the
+check passes a stale serve, and the live round's `version` line is the proof.
+
 Until clown runs moxy inside the unit and forwards only frontend-class servers
 (ringmaster, troupe's MCP, spinclass serve) over per-session sockets, the
 switch **refuses** to launch a worker confined, naming the clown rev it waits
