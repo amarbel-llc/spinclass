@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -34,20 +35,22 @@ func (r clownResolver) Resolve(name string) (ResolvedProfile, error) {
 	res, err := r.lookup(name, profilelookup.Options{RegistryPath: r.registryPath})
 	if err != nil {
 		var skew *profilelookup.SkewError
+		var baseErr *profilelookup.BaseError
 		switch {
 		case errors.Is(err, profilelookup.ErrNotFound):
 			return ResolvedProfile{}, ProfileNotFound(name)
 		case errors.As(err, &skew):
 			// The library's message already names both sides and the fix.
 			return ResolvedProfile{}, fmt.Errorf("cannot spawn with profile %q: %s", name, skew.Error())
+		case errors.As(err, &baseErr):
+			// Likewise: it names the profile, the base, and the pinned and current digests.
+			return ResolvedProfile{}, fmt.Errorf("cannot spawn with profile %q: %s", name, baseErr.Error())
 		default:
 			return ResolvedProfile{}, fmt.Errorf("resolving clown profile %q: %w", name, err)
 		}
 	}
 
-	// Never put res.Canonical in an error or log: it carries env values and
-	// the url verbatim. Only the digest leaves this function.
-	digest, err := profileDigestMarklID(res.DigestSHA256)
+	rp, err := resolvedProfileOf(res)
 	if err != nil {
 		return ResolvedProfile{}, fmt.Errorf("clown profile %q: %w", name, err)
 	}
@@ -64,12 +67,32 @@ func (r clownResolver) Resolve(name string) (ResolvedProfile, error) {
 		)
 	}
 
-	// Base, EnvKnown and Env stay zero: clown's Resolved reports neither a declared
-	// base nor a secrets-safe env view yet (see ResolvedProfile).
-	return ResolvedProfile{
+	return rp, nil
+}
+
+// resolvedProfileOf maps clown's Resolved onto a ResolvedProfile, recursing into
+// the base clown resolved as a builtin. The required-server check is the caller's.
+func resolvedProfileOf(res *profilelookup.Resolved) (ResolvedProfile, error) {
+	// Never put res.Canonical in an error or log: it carries the url verbatim.
+	// Only the digest leaves this function.
+	digest, err := profileDigestMarklID(res.DigestSHA256)
+	if err != nil {
+		return ResolvedProfile{}, err
+	}
+	rp := ResolvedProfile{
 		Name: res.Name, Digest: digest, Provider: res.Provider, Backend: res.Backend, Model: res.Model,
 		KeptServers: keptServers(res.Selection), Excluded: res.Selection.Excluded, Source: string(res.Source),
-	}, nil
+		EnvKnown: true, Env: maps.Clone(res.Env),
+	}
+	if res.Base != nil {
+		base, err := resolvedProfileOf(res.Base)
+		if err != nil {
+			return ResolvedProfile{}, fmt.Errorf("base %q: %w", res.Base.Name, err)
+		}
+		rp.Base = res.Base.Name
+		rp.BaseProfile = &base
+	}
+	return rp, nil
 }
 
 // keptServers maps a Selection onto ResolvedProfile.KeptServers: nil when the

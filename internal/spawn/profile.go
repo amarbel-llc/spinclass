@@ -50,13 +50,17 @@ type ResolvedProfile struct {
 	// Excluded is the per-tool exclusion set of a selective profile, keyed by
 	// server in the same vocabulary as KeptServers.
 	Excluded map[string][]string
-	// Base is the builtin this profile declares as its base. clownResolver leaves
-	// it empty: clown does not report a base yet. While empty, no user profile
-	// can be checked as a narrowing (confineprofile.go).
+	// Base is the name of the builtin this profile declares as its base, "" when
+	// it declares none. clown reports it (profile protocol 2); without one, no
+	// user profile can be checked as a narrowing (confineprofile.go).
 	Base string
-	// EnvKnown reports whether Env is populated. clownResolver leaves it false:
-	// clown does not expose a secrets-safe env view yet. Env maps each env key to
-	// a digest of its value, never the value itself.
+	// BaseProfile is the base builtin as clown resolved it: its own definition,
+	// never a user profile that shadows the name. nil when Base is "" (or when a
+	// resolver did not report it, which a confined spawn refuses).
+	BaseProfile *ResolvedProfile
+	// EnvKnown reports whether Env is populated. clown reports env digests
+	// (protocol 2), so it is true for anything clownResolver returns. Env maps
+	// each env key to a digest of its value, never the value itself.
 	EnvKnown bool
 	Env      map[string]string
 }

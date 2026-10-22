@@ -145,8 +145,9 @@ func narrowableBase() ResolvedProfile {
 }
 
 func narrowingUserProfile() ResolvedProfile {
+	base := narrowableBase()
 	return ResolvedProfile{
-		Name: "mine", Digest: "digest-mine", Source: "user", Base: "base-b", Provider: "claude", Model: "opus",
+		Name: "mine", Digest: "digest-mine", Source: "user", Base: "base-b", BaseProfile: &base, Provider: "claude", Model: "opus",
 		KeptServers: append(slices.Clone(requiredKept), justUsServer),
 		EnvKnown:    true,
 	}
@@ -155,7 +156,7 @@ func narrowingUserProfile() ResolvedProfile {
 func TestCheckConfinedProfileUserNarrowing(t *testing.T) {
 	const wantNoBase = `spawn refused for a confined worker: profile "mine" (digest digest-mine, source "user") declares no base builtin, ` +
 		`so it cannot be checked as a narrowing of one; a user profile is accepted for a confined spawn only when it narrows ` +
-		`a builtin it names as its base (clown does not record a base yet)`
+		`a builtin it names as its base`
 	cases := []struct {
 		name     string
 		child    func(*ResolvedProfile)
@@ -183,6 +184,11 @@ func TestCheckConfinedProfileUserNarrowing(t *testing.T) {
 			wantErr: []string{`base "base-b"`, `source "user"`},
 		},
 		{
+			name:    "base named but the resolver reported no definition",
+			child:   func(c *ResolvedProfile) { c.BaseProfile = nil },
+			wantErr: []string{`"mine"`, "digest-mine", `source "user"`, `base "base-b"`, "did not report the base's resolved definition"},
+		},
+		{
 			name:    "narrows but still keeps moxy (R3)",
 			child:   func(c *ResolvedProfile) { c.KeptServers = append(c.KeptServers, moxyServer) },
 			wantErr: []string{"keeps the " + `"moxy/moxy"`},
@@ -197,9 +203,15 @@ func TestCheckConfinedProfileUserNarrowing(t *testing.T) {
 			if c.child != nil {
 				c.child(&child)
 			}
-			r := &fakeResolver{profiles: map[string]ResolvedProfile{"base-b": base}}
+			if child.BaseProfile != nil {
+				child.BaseProfile = &base
+			}
+			r := &fakeResolver{}
 			withResolver(t, r)
 			link, err := checkConfinedProfile("mine", child)
+			if len(r.asked) != 0 {
+				t.Errorf("resolver consulted for %v; the base comes from BaseProfile", r.asked)
+			}
 			if c.wantExac == "" && c.wantErr == nil {
 				if err != nil {
 					t.Fatalf("checkConfinedProfile = %v, want accepted", err)
@@ -227,6 +239,29 @@ func TestCheckConfinedProfileUserNarrowing(t *testing.T) {
 	}
 }
 
+// TestCheckConfinedProfileUsesTheReportedBaseNotAShadow: a user profile named
+// like the base would widen it, but the decision rests on the base clown reported
+// with the profile (BaseProfile), and the resolver is not asked for it by name.
+func TestCheckConfinedProfileUsesTheReportedBaseNotAShadow(t *testing.T) {
+	shadow := narrowableBase()
+	shadow.Source = "user"
+	shadow.Digest = "digest-shadow"
+	shadow.KeptServers = []string{"nothing/nothing"} // child would "add" every server
+	r := &fakeResolver{profiles: map[string]ResolvedProfile{"base-b": shadow}}
+	withResolver(t, r)
+
+	link, err := checkConfinedProfile("mine", narrowingUserProfile())
+	if err != nil {
+		t.Fatalf("checkConfinedProfile = %v, want accepted against the reported builtin base", err)
+	}
+	if link == nil || link.Name != "base-b" || link.Digest != "digest-base" {
+		t.Errorf("link = %+v, want base-b / digest-base (the BaseProfile digest, not the shadow's)", link)
+	}
+	if len(r.asked) != 0 {
+		t.Errorf("resolver consulted for %v", r.asked)
+	}
+}
+
 // TestConfinedLaunchUserProfileNarrowing: through LaunchDetachedWith, a widening
 // or base-less user profile is refused before any worktree exists, and a
 // narrowing one gets past the profile checks (to the stubbed preflight).
@@ -247,7 +282,7 @@ func TestConfinedLaunchUserProfileNarrowing(t *testing.T) {
 			if c.child != nil {
 				c.child(&child)
 			}
-			r := &fakeResolver{profiles: map[string]ResolvedProfile{"mine": child, "base-b": narrowableBase()}}
+			r := &fakeResolver{profiles: map[string]ResolvedProfile{"mine": child}}
 			withResolver(t, r)
 			stopAtPreflight(t)
 			home, repoPath := newWorkerFixture(t, modelSpawnSweatfile)

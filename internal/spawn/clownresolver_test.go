@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -152,6 +153,61 @@ func TestClownResolverMapsErrors(t *testing.T) {
 	_, err = clownResolver{lookup: fakeLookup(nil, errors.New("boom"))}.Resolve("cheap")
 	if err == nil || !strings.Contains(err.Error(), "boom") || !strings.Contains(err.Error(), `"cheap"`) {
 		t.Errorf("err = %v, want the cause wrapped with the profile name", err)
+	}
+}
+
+func TestClownResolverMapsEnvAndBase(t *testing.T) {
+	baseDigest := make([]byte, 32)
+	baseDigest[0] = 0xff
+	res := resolvedWith(profilelookup.Selection{})
+	res.Name = "mine"
+	res.Source = profilelookup.SourceUser
+	res.Env = map[string]string{"KEY": "aa"}
+	res.Base = &profilelookup.Resolved{
+		Name: "base-b", Source: profilelookup.SourceBuiltin, Model: "opus",
+		Env:          map[string]string{"KEY": "aa"},
+		DigestSHA256: hex.EncodeToString(baseDigest),
+	}
+
+	got, err := clownResolver{lookup: fakeLookup(res, nil)}.Resolve("mine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.EnvKnown || !maps.Equal(got.Env, res.Env) {
+		t.Errorf("EnvKnown=%v Env=%v, want true and %v", got.EnvKnown, got.Env, res.Env)
+	}
+	got.Env["KEY"] = "mutated"
+	if res.Env["KEY"] != "aa" {
+		t.Error("Env aliases the library's map; it must be cloned")
+	}
+	wantBaseDigest, err := profileDigestMarklID(hex.EncodeToString(baseDigest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Base != "base-b" || got.BaseProfile == nil {
+		t.Fatalf("Base=%q BaseProfile=%v, want base-b and a resolved base", got.Base, got.BaseProfile)
+	}
+	if got.BaseProfile.Digest != wantBaseDigest || got.BaseProfile.Source != "builtin" ||
+		got.BaseProfile.Model != "opus" || !got.BaseProfile.EnvKnown {
+		t.Errorf("BaseProfile = %+v, want digest %s, source builtin, model opus, env known", got.BaseProfile, wantBaseDigest)
+	}
+}
+
+func TestClownResolverNoBase(t *testing.T) {
+	got, err := clownResolver{lookup: fakeLookup(resolvedWith(profilelookup.Selection{}), nil)}.Resolve("cheap")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Base != "" || got.BaseProfile != nil {
+		t.Errorf("Base=%q BaseProfile=%v, want neither", got.Base, got.BaseProfile)
+	}
+}
+
+func TestClownResolverRefusesABrokenBase(t *testing.T) {
+	baseErr := &profilelookup.BaseError{Profile: "mine", Base: "gone", Reason: `no builtin profile is named "gone"`}
+	_, err := clownResolver{lookup: fakeLookup(nil, baseErr)}.Resolve("mine")
+	if err == nil || !strings.Contains(err.Error(), `"mine"`) || !strings.Contains(err.Error(), baseErr.Error()) {
+		t.Errorf("err = %v, want a refusal naming the profile and carrying %q", err, baseErr.Error())
 	}
 }
 

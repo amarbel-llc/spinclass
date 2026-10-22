@@ -69,7 +69,7 @@ func exclusionWidenings(base, child ResolvedProfile) []string {
 
 func envWidenings(base, child ResolvedProfile) []string {
 	if !base.EnvKnown || !child.EnvKnown {
-		return []string{"env cannot be compared (clown does not expose a secrets-safe env view yet)"}
+		return []string{"env cannot be compared (the resolver reported no env digests)"}
 	}
 	var out []string
 	for _, key := range slices.Sorted(maps.Keys(child.Env)) {

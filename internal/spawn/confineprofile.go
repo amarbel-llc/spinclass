@@ -88,17 +88,20 @@ func checkConfinedProfile(name string, rp ResolvedProfile) (*narrowingBase, erro
 }
 
 // checkUserNarrowing accepts a user-registry profile only when it declares a
-// base builtin and catalogWidenings finds nothing the child adds to it.
+// base builtin and catalogWidenings finds nothing the child adds to it. The base
+// is the one clown resolved with the profile (rp.BaseProfile), never looked up
+// again by name: a user profile may shadow a builtin's name.
 func checkUserNarrowing(name, held string, rp ResolvedProfile) (*narrowingBase, error) {
 	if rp.Base == "" {
 		return nil, fmt.Errorf("spawn refused for a confined worker: %s declares no base builtin, "+
 			"so it cannot be checked as a narrowing of one; a user profile is accepted for a confined spawn only when it narrows "+
-			"a builtin it names as its base (clown does not record a base yet)", held)
+			"a builtin it names as its base", held)
 	}
-	base, err := resolveProfile(rp.Base)
-	if err != nil {
-		return nil, fmt.Errorf("spawn refused for a confined worker: base %q of %s: %w", rp.Base, held, err)
+	if rp.BaseProfile == nil {
+		return nil, fmt.Errorf("spawn refused for a confined worker: %s names base %q, but the resolver did not report the base's resolved definition, "+
+			"so the narrowing cannot be checked", held, rp.Base)
 	}
+	base := *rp.BaseProfile
 	if base.Source != profileSourceBuiltin {
 		return nil, fmt.Errorf("spawn refused for a confined worker: %s names base %q whose source is %q, and only a builtin can be a base",
 			held, rp.Base, base.Source)

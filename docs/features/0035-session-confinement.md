@@ -776,8 +776,8 @@ builtin. The base is read from the profile's own definition and resolved through
 the same resolver; there is deliberately no caller-supplied base parameter,
 because that would be a claim, not a fact (principle 4).
 
-- The profile must declare a base (`ResolvedProfile.Base`), and the base must
-  itself be a `builtin`; otherwise the spawn is refused, naming the held profile
+- The profile must declare a base (`ResolvedProfile.Base`, with the resolved
+  definition in `BaseProfile`), and the base must itself be a `builtin`; otherwise the spawn is refused, naming the held profile
   and what is missing or where the base came from.
 - `catalogWidenings(base, child)` (`internal/spawn/narrows.go`) lists every way
   the child widens the base, and any item refuses the spawn, naming the whole
@@ -802,13 +802,16 @@ containment. Tier 2 (widening) is not built: it is a D11 escalation naming
 `profiles: NAME=<digest>`, grantee, session, expires, onward: none, and waits
 for the FDR 0034 phase 2 verifier.
 
-**Today every user profile refuses.** Clown's `profilelookup.Resolved` records
-neither a `base` nor a secrets-safe env view, so `clownResolver` leaves `Base`
-empty and `EnvKnown` false. Until clown records `base`, every user profile is
-refused with "declares no base builtin"; until it exposes an env view, even a
-profile with a base would be refused with "env cannot be compared". The readback
-after launch (comparing the servers the worker actually started with the
-profile) is clown's, and is routed to clown, not built here.
+**What clown reports.** Clown profile protocol 2 (clown 4d8d5ad) reports the
+declared base as the builtin's own resolved definition (never a user profile
+that shadows the name) and env as per-key sha256 digests. `clownResolver` maps
+them to `BaseProfile` and `Env`, and the narrowing is checked against that
+resolved base, not a by-name lookup. A base clown reports as broken
+(`*profilelookup.BaseError`: unknown, non-builtin, malformed or stale pin) is
+refused with clown's own message. A user profile with no base, or one whose
+resolver reports no base definition, still refuses. The readback after launch
+(comparing the servers the worker actually started with the profile) is clown's,
+and is routed to clown, not built here.
 
 Not covered: an unattended spawn's standing grant (FDR 0034), and confined
 resume. A full confined spawn past the preflight is not tested; it would need a

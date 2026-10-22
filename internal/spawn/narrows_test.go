@@ -101,13 +101,13 @@ func TestCatalogWidenings(t *testing.T) {
 			name:  "env unknown on the child",
 			child: with(func(c *ResolvedProfile) { c.EnvKnown = false; c.Env = nil }),
 			base:  base,
-			want:  []string{"env cannot be compared (clown does not expose a secrets-safe env view yet)"},
+			want:  []string{"env cannot be compared (the resolver reported no env digests)"},
 		},
 		{
 			name:  "env unknown on the base",
 			child: with(func(*ResolvedProfile) {}),
 			base:  func() ResolvedProfile { b := base; b.EnvKnown = false; return b }(),
-			want:  []string{"env cannot be compared (clown does not expose a secrets-safe env view yet)"},
+			want:  []string{"env cannot be compared (the resolver reported no env digests)"},
 		},
 	}
 	for _, c := range cases {
