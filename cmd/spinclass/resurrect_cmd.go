@@ -41,8 +41,13 @@ func runResurrect(p resurrectParams) (string, error) {
 	return buf.String(), nil
 }
 
-// handleResurrect is the `resurrect` MCP tool handler.
+// handleResurrect is the `resurrect` MCP tool handler. resurrect checks no
+// caller identity and re-mints a forge credential for the session it
+// recreates, so a confined caller is refused before anything else.
 func handleResurrect(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller("resurrect", "sc resurrect"); refusal != nil {
+		return refusal, nil
+	}
 	var p resurrectParams
 	if err := json.Unmarshal(args, &p); err != nil {
 		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
@@ -52,6 +57,22 @@ func handleResurrect(_ context.Context, args json.RawMessage, _ command.Prompter
 		return command.TextErrorResult(err.Error()), nil
 	}
 	return command.TextResult(text), nil
+}
+
+// runResurrectCLI is `sc resurrect`, the operator's path. It skips the serve
+// caller gate, which classifies a serve's principal and would refuse a
+// terminal that has none.
+func runResurrectCLI(_ context.Context, args json.RawMessage) error {
+	var p resurrectParams
+	if err := json.Unmarshal(args, &p); err != nil {
+		return fmt.Errorf("invalid arguments: %w", err)
+	}
+	text, err := runResurrect(p)
+	if err != nil {
+		return err
+	}
+	fmt.Print(text)
+	return nil
 }
 
 // resurrectParamList declares the `resurrect` parameters.

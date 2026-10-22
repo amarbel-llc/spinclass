@@ -268,7 +268,7 @@ func closeRunnerPrincipal(st *session.State, implied string) (string, error) {
 		return p, nil
 	}
 	if confinement.LaunchedConfined(stateDir, st.WorktreePath) {
-		return "", fmt.Errorf("%s was launched confined but no frontend principal mapping names it, so whose close this is cannot be told; refusing", st.Key())
+		return "", fmt.Errorf("%s was launched confined but no frontend principal mapping names it, so whose close this is cannot be told; refusing. Its holders (%s) are told; the operator can close it with `sc close %s`", st.Key(), holdersOrNone(st.Holders), st.Key())
 	}
 	if implied != "" {
 		return implied, nil
@@ -276,7 +276,14 @@ func closeRunnerPrincipal(st *session.State, implied string) (string, error) {
 	if st.Principal != "" {
 		return st.Principal, nil
 	}
-	return "", fmt.Errorf("%s records no principal, so whose close this is cannot be told; refusing", st.Key())
+	return "", fmt.Errorf("%s records no principal, so whose close this is cannot be told; refusing. Its holders (%s) are told; the operator can close it with `sc close %s`", st.Key(), holdersOrNone(st.Holders), st.Key())
+}
+
+func holdersOrNone(holders []string) string {
+	if len(holders) == 0 {
+		return "none"
+	}
+	return strings.Join(holders, ", ")
 }
 
 // closeSelfRunCommand registers the runner as a hidden, CLI-only command: it is

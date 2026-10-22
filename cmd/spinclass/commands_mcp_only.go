@@ -362,6 +362,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		},
 		Params: resurrectParamList(),
 		Run:    wrapMCPHandler("resurrect", handleResurrect),
+		RunCLI: runResurrectCLI,
 	})
 }
 
