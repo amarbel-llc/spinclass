@@ -11,6 +11,14 @@ import (
 	"code.linenisgreat.com/spinclass/internal/perms"
 )
 
+type permsListParams struct {
+	Repo string `json:"repo"`
+}
+
+func runPermsList(p permsListParams) (string, error) {
+	return perms.RunListString(p.Repo)
+}
+
 func registerPermsCommands(app *command.App) {
 	app.AddCommand(&command.Command{
 		Name:   "perms-check",
@@ -84,17 +92,21 @@ func registerPermsCommands(app *command.App) {
 		Params: []command.Param{
 			{Name: "repo", Type: command.String, Description: "Show rules for a specific repo only"},
 		},
+		// The tool lists every repo's allow rules, so a confined caller is
+		// refused; `sc perms-list` (RunCLI) is the operator's path.
 		Run: func(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-			var p struct {
-				Repo string `json:"repo"`
+			if refusal := refuseConfinedServeCaller("perms-list", "sc perms-list"); refusal != nil {
+				return refusal, nil
 			}
+			var p permsListParams
 			_ = json.Unmarshal(args, &p)
-			out, err := perms.RunListString(p.Repo)
+			out, err := runPermsList(p)
 			if err != nil {
 				return command.TextErrorResult(err.Error()), nil
 			}
 			return command.TextResult(out), nil
 		},
+		RunCLI: ungatedCLI(runPermsList),
 	})
 
 	app.AddCommand(&command.Command{

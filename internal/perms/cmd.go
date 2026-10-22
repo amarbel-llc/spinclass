@@ -28,6 +28,15 @@ func RunListWriter(w io.Writer, repo string) error {
 	return nil
 }
 
+// validTierRepoName refuses a repo name that is not one path segment, so it
+// can only name a file directly under the repos tier directory.
+func validTierRepoName(repo string) error {
+	if repo == "." || repo == ".." || strings.ContainsAny(repo, "/\\\x00") {
+		return fmt.Errorf("repo %q is not a repo name: it must be one path segment, with no separators", repo)
+	}
+	return nil
+}
+
 func writeTierListing(w io.Writer, repo string) error {
 	tiersDir := TiersDir()
 
@@ -47,6 +56,9 @@ func writeTierListing(w io.Writer, repo string) error {
 	}
 
 	if repo != "" {
+		if err := validTierRepoName(repo); err != nil {
+			return err
+		}
 		repoPath := filepath.Join(tiersDir, "repos", repo+".json")
 		repoTier, err := LoadTierFile(repoPath)
 		if err != nil {

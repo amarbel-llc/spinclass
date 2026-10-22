@@ -98,6 +98,22 @@ func TestRunListWriterAppendsGritMigrationReport(t *testing.T) {
 	}
 }
 
+// A repo name is one path segment; anything else could name a file outside
+// the repos tier directory.
+func TestRunListWriterRefusesARepoThatIsNotOneSegment(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SWEATSHOP_PERMS_DIR", dir)
+	if err := SaveTierFile(filepath.Join(dir, "global.json"), Tier{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, repo := range []string{"../global", "a/b", "..", ".", `a\b`} {
+		var buf bytes.Buffer
+		if err := RunListWriter(&buf, repo); err == nil || !strings.Contains(err.Error(), "one path segment") {
+			t.Errorf("repo %q: got %v, want a one-segment refusal", repo, err)
+		}
+	}
+}
+
 func TestRunListWriterOmitsReportWithoutMatches(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("SWEATSHOP_PERMS_DIR", dir)

@@ -62,7 +62,13 @@ func registerQueryCommands(app *command.App) {
 			{Name: "watch", Short: 'w', Type: command.Bool, Description: "Continuously reload and re-render the session table (CLI only; requires a TTY)"},
 			{Name: "interval", Type: command.String, Description: "Watch refresh interval as a Go duration, e.g. 5s (CLI only; default 2s)"},
 		},
+		// The tool returns every session's key, path, description and
+		// spawner, so a confined caller is refused; the CLI (RunCLI below) is
+		// the operator's path.
 		Run: func(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+			if refusal := refuseConfinedServeCaller("list", "sc list"); refusal != nil {
+				return refusal, nil
+			}
 			var p struct {
 				globalArgs
 				Closed bool `json:"closed"`
