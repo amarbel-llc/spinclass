@@ -116,6 +116,27 @@ func TestClownResolverRefusesCrippledRequiredServer(t *testing.T) {
 	}
 }
 
+func TestProfileNotFoundNamesLinkedClownRev(t *testing.T) {
+	prev := LinkedClownRev
+	t.Cleanup(func() { LinkedClownRev = prev })
+	LinkedClownRev = "8a2b9fe"
+
+	err := ProfileNotFound("canary-grit")
+	if !errors.Is(err, ErrProfileNotFound) {
+		t.Fatalf("err = %v, want ErrProfileNotFound", err)
+	}
+	want := `clown profile not found: "canary-grit" (spinclass links clown 8a2b9fe; the clown that runs the spawn may be newer)`
+	if err.Error() != want {
+		t.Errorf("err = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestLinkedClownRevDevFallback(t *testing.T) {
+	if LinkedClownRev == "" {
+		t.Error("LinkedClownRev must never be empty; dev builds read 'unknown (not a nix build)'")
+	}
+}
+
 func TestClownResolverMapsErrors(t *testing.T) {
 	notFound := fakeLookup(nil, errors.Join(profilelookup.ErrNotFound, errors.New("known: a, b")))
 	if _, err := (clownResolver{lookup: notFound}).Resolve("nope"); !errors.Is(err, ErrProfileNotFound) {

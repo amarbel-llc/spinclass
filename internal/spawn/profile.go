@@ -13,10 +13,18 @@ import (
 // ProfileNotFound) when the named clown profile does not exist.
 var ErrProfileNotFound = errors.New("clown profile not found")
 
-// ProfileNotFound wraps ErrProfileNotFound with the requested name, so a
-// refusal names the missing thing (FDR 0034 "Fail closed").
+// LinkedClownRev is the clown revision spinclass was built against, set at
+// link time by flake.nix (-X ...internal/spawn.LinkedClownRev=<rev>) from the
+// locked clown input. Profiles resolve through that linked library, so a
+// profile newer than this rev is "not found" even when the host's clown has it.
+var LinkedClownRev = "unknown (not a nix build)"
+
+// ProfileNotFound wraps ErrProfileNotFound with the requested name and the
+// linked clown rev, so a refusal names the missing thing (FDR 0034 "Fail
+// closed") and the likely cause of a version mismatch.
 func ProfileNotFound(name string) error {
-	return fmt.Errorf("%w: %q", ErrProfileNotFound, name)
+	return fmt.Errorf("%w: %q (spinclass links clown %s; the clown that runs the spawn may be newer)",
+		ErrProfileNotFound, name, LinkedClownRev)
 }
 
 // ResolvedProfile is what spinclass needs from clown's profile library

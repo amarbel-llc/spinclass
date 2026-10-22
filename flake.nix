@@ -241,6 +241,16 @@
       # shortRev for clean builds, dirtyShortRev for dirty trees so devshell
       # builds visibly read `dirty-abcdef` instead of impersonating a release.
       spinclassCommit = self.shortRev or self.dirtyShortRev or "unknown";
+      # The clown rev the Go source bridge is locked to. The clown input is a
+      # tarball URL, which carries no .rev/.shortRev, so read it off the locked
+      # archive URL (.../clown/archive/<sha>.tar.gz). Linked into
+      # internal/spawn so a "profile not found" names what spinclass links.
+      clownLockedUrl = (builtins.fromJSON (builtins.readFile ./flake.lock)).nodes.clown.locked.url or "";
+      clownLinkedRev =
+        let
+          m = builtins.match ".*/clown/archive/([0-9a-f]{40})\\.tar\\.gz.*" clownLockedUrl;
+        in
+        if m == null then "unknown" else builtins.substring 0 7 (builtins.head m);
     in
     utils.lib.eachDefaultSystem (
       system:
@@ -415,12 +425,14 @@
             # system-prompt repo line (internal/repoinfo); madder/direnv/dodder
             # gate the per-worktree blob-store / dodder flows. All fall back to
             # PATH when unpinned.
-            ldflags =
-              (lib.optional (madder != null) "-X main.madderBin=${madder}/bin/madder")
-              ++ (lib.optional (direnv != null) "-X main.direnvBin=${direnv}/bin/direnv")
-              ++ (lib.optional (dodder != null) "-X main.dodderBin=${dodder}/bin/dodder")
-              ++ (lib.optional (papi != null) "-X main.papiBin=${papi}/bin/papi")
-              ++ (lib.optional (gh != null) "-X main.ghBin=${gh}/bin/gh");
+            ldflags = [
+              "-X code.linenisgreat.com/spinclass/internal/spawn.LinkedClownRev=${clownLinkedRev}"
+            ]
+            ++ (lib.optional (madder != null) "-X main.madderBin=${madder}/bin/madder")
+            ++ (lib.optional (direnv != null) "-X main.direnvBin=${direnv}/bin/direnv")
+            ++ (lib.optional (dodder != null) "-X main.dodderBin=${dodder}/bin/dodder")
+            ++ (lib.optional (papi != null) "-X main.papiBin=${papi}/bin/papi")
+            ++ (lib.optional (gh != null) "-X main.ghBin=${gh}/bin/gh");
 
             # godyn-only knobs (buildGodynModule).
             nativeArgs.commit = spinclassCommit;
