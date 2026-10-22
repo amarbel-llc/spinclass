@@ -12,6 +12,7 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/operatoract"
 	"code.linenisgreat.com/spinclass/internal/sshsig"
+	"code.linenisgreat.com/spinclass/internal/trustedhome"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -59,6 +60,13 @@ func LoadSigners(path string) ([]ssh.PublicKey, error) {
 			path, Principal, operatoract.NamespaceEscalation)
 	}
 	return keys, nil
+}
+
+// TrustedSignersPath is the signers file enforcement reads: under the passwd
+// home's .config, never the caller's environment, and refusing an
+// XDG_CONFIG_HOME that points elsewhere (trustedhome, audit row 34-31).
+func TrustedSignersPath() (string, error) {
+	return trustedhome.Resolve("XDG_CONFIG_HOME", ".config", "spinclass", "profile-grant-signers")
 }
 
 // DefaultSignersPath is $XDG_CONFIG_HOME/spinclass/profile-grant-signers,

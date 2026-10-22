@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"code.linenisgreat.com/spinclass/internal/profilegrant"
+	"code.linenisgreat.com/spinclass/internal/trustedhome"
 )
 
 const (
@@ -29,6 +30,13 @@ const (
 type Store struct {
 	records string
 	index   string
+}
+
+// TrustedDir is the grant store enforcement reads: under the passwd home's
+// .local/state, never the caller's environment, and refusing an
+// XDG_STATE_HOME that points elsewhere (trustedhome, audit row 34-31).
+func TrustedDir() (string, error) {
+	return trustedhome.Resolve("XDG_STATE_HOME", filepath.Join(".local", "state"), "spinclass", "grants")
 }
 
 // DefaultDir is $XDG_STATE_HOME/spinclass/grants, falling back to

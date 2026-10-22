@@ -62,7 +62,13 @@ func (p productionAuthorizer) Authorize(driver Driver, profile ResolvedProfile) 
 	if err := conf.Check(); err != nil {
 		return ProfileAuthorization{}, fmt.Errorf("profile rights are enforced but cannot be card-rooted: %w", err)
 	}
-	dir, err := grantstore.DefaultDir()
+	// The trust anchors come from the passwd home, never the spawner's env
+	// (audit row 34-31): `sc spawn` runs with whatever env its caller has.
+	dir, err := grantstore.TrustedDir()
+	if err != nil {
+		return ProfileAuthorization{}, err
+	}
+	signersPath, err := grantverify.TrustedSignersPath()
 	if err != nil {
 		return ProfileAuthorization{}, err
 	}
@@ -76,7 +82,7 @@ func (p productionAuthorizer) Authorize(driver Driver, profile ResolvedProfile) 
 	}
 	checker := &profilerights.Checker{
 		Store:    store,
-		RootKeys: func() ([]ssh.PublicKey, error) { return grantverify.LoadSigners(grantverify.DefaultSignersPath()) },
+		RootKeys: func() ([]ssh.PublicKey, error) { return grantverify.LoadSigners(signersPath) },
 		// The frontend's principal mapping, never the worktree-local session
 		// state the confined agent can rewrite (FDR 0035).
 		SessionOfPrincipal: confinement.SessionOfPrincipal(stateDir, confinement.LiveSession),
