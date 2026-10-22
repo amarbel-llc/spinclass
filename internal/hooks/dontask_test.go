@@ -38,7 +38,7 @@ func TestDontAskTurnsAsksIntoDenies(t *testing.T) {
 		name, tool string
 		input      map[string]any
 	}{
-		{"grit store, unresolved session", "mcp__plugin_spinclass_spinclass__grit_commit", map[string]any{"message": "m"}},
+		{"grit store, unresolved session with force", "mcp__plugin_spinclass_spinclass__grit_branch", map[string]any{"subcommand": "delete", "name": "x", "force": true}},
 		{"non-grit always-ask", closeChildSessionToolName, map[string]any{"child": "x", "force": true}},
 	}
 	for _, a := range asks {

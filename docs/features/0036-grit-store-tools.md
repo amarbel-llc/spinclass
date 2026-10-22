@@ -147,12 +147,10 @@ the same PreToolUse hook that consults `AlwaysAsk`:
    - The hook's principal is `CLOWN_SESSION_ID` whenever it is set (it wins;
      a differing hook `session_id` is logged, not refused), else the hook JSON
      `session_id` as a fallback (`hooks.principalForHook`, the same source
-     `recordOwnPrincipal` uses). Principal known but session unresolved (no
-     recorded session, ambiguous) -> `Ask`, fail closed, force
-     included, matching `SessionKeyOfPrincipal`'s ambiguity behaviour. No
-     principal at all (a confined caller the hook cannot see) -> a non-force
-     call is deferred to the serve (`Allow`); force still asks (see "Hook defers an
-     unresolved session" below).
+     `recordOwnPrincipal` uses). Session unresolved (principal unknown, no
+     recorded session, ambiguous, or conflicting sources) -> a non-force call is
+     deferred to the serve (`Allow`) in every case; force still asks (see "Hook
+     defers an unresolved session" below).
 3. Everything else -> existing tier-file logic.
 
 **dontAsk sessions.** A session spawned with `--permission-mode dontAsk` cannot
@@ -782,25 +780,29 @@ Built (spinclass #379). The operator chose "option 3" for the hook problem
 above: for a caller the hook cannot resolve, the in-unit PreToolUse hook stops
 asking and the serve decides.
 
-- **Hook defers an unresolved session only when no principal is visible**
-  (`perms.StoreVerdict`; refined by #392). If the session cannot be resolved and
-  the hook sees no principal at all (a confined caller, clown#136), a non-force
-  call returns `Allow` with the reason "deferred to the serve: body ownership
-  check applies". The hook's principal is `CLOWN_SESSION_ID` whenever it is set,
-  else the hook JSON `session_id` as a fallback (clown does not export
-  `CLOWN_SESSION_ID` to the hook; `hooks.principalForHook`, the same source
-  `recordOwnPrincipal` records from). The env wins: when both are set and
-  differ the mismatch is logged (hook trace and session log, both ids) but
-  neither refused nor turned into an Ask; the env principal is recorded and
-  resolved. Residual: with the env empty, a `/clear` changes the hook
-  `session_id`, so the recorded principal no longer matches and the hook asks
-  (fail closed). `hooks.storeDecision` passes `perms.StoreVerdict` that
-  principal plus whether one was seen. A principal that is known but maps to no
-  recorded session or maps ambiguously returns `Ask` ("could not be resolved from its
-  principal, so ownership cannot be judged; confirm"): the deferral is not
-  justified because the principal is known. A resolved session is unchanged
-  (`Classify` decides; owned targets allow, the rest ask). `force:true` asks in
-  both unresolved cases, and the `AlwaysAsk` floors stay ahead of
+- **Hook defers an unresolved session in every case**
+  (`perms.StoreVerdict`; hotfix after #392). Since clown#289 `CLOWN_SESSION_ID`
+  is set in the hook environment inside a confined unit too, where the hook
+  cannot resolve the session, so a known principal no longer implies the hook
+  can judge ownership. If the session cannot be resolved, a non-force call
+  returns `Allow` with the reason "deferred to the serve: body ownership check
+  applies". Ownership of a confined caller is enforced by the serve body
+  (`internal/store/git/confined.go`). For an unconfined hook-unresolved caller
+  this reopens non-force writes on refs it does not own: a speed bump rather than
+  a boundary, since an unconfined worker holds the same account and token and can
+  raw-push. The stash case is closed in the body (session-local). A later change
+  will let the hook ask again for unconfined callers once clown exports a
+  unit-scope marker (not decided). The hook's principal is `CLOWN_SESSION_ID`
+  whenever it is set, else the hook JSON `session_id` as a fallback
+  (`hooks.principalForHook`, the same source `recordOwnPrincipal` records from).
+  The env wins: when both are set and differ the mismatch is logged (hook trace
+  and session log, both ids) but neither refused nor turned into an Ask; the env
+  principal is recorded and resolved. With the env empty, a `/clear` changes the
+  hook `session_id`, so the recorded principal no longer matches and the call is
+  deferred to the serve. `hooks.storeDecision` passes `perms.StoreVerdict` that
+  principal plus whether one was seen (the flag no longer changes the verdict;
+  it is kept for logging). A resolved session is unchanged (`Classify` decides;
+  owned targets allow, the rest ask). `force:true` asks when unresolved, and the `AlwaysAsk` floors stay ahead of
   `StoreVerdict` in `runPreToolUse`, unchanged. The deferral is safe only
   because the body fails closed: a zero-value or unresolved `Session` counts as
   confined, and a write verb whose ownership cannot be computed (no session

@@ -122,33 +122,39 @@ func TestStoreVerdictDefersAnUnresolvedSessionToTheServe(t *testing.T) {
 }
 
 // A principal the hook saw (CLOWN_SESSION_ID or the hook session_id) that maps
-// to no recorded session is never deferred; conflicting sources arrive as a
-// known but empty principal.
-func TestStoreVerdictAsksWhenAKnownPrincipalMapsToNoSession(t *testing.T) {
+// to no recorded session is deferred to the serve like any unresolved session
+// (a confined worker's hook sees CLOWN_SESSION_ID but cannot resolve the
+// session, clown#289); force still asks. Conflicting sources arrive as a known
+// but empty principal.
+func TestStoreVerdictDefersWhenAKnownPrincipalMapsToNoSession(t *testing.T) {
 	for name, call := range map[string]struct {
 		tool  string
 		input map[string]any
+		want  store.Verdict
 	}{
-		"stash with a foreign repo_path": {"stash", map[string]any{"subcommand": "save", "repo_path": "/foreign/repo"}},
-		"plain commit":                   {"commit", map[string]any{"message": "m"}},
-		"force":                          {"branch", map[string]any{"subcommand": "delete", "name": "x", "force": true}},
+		"stash with a foreign repo_path": {"stash", map[string]any{"subcommand": "save", "repo_path": "/foreign/repo"}, store.Allow},
+		"plain commit":                   {"commit", map[string]any{"message": "m"}, store.Allow},
+		"force":                          {"branch", map[string]any{"subcommand": "delete", "name": "x", "force": true}, store.Ask},
 	} {
 		t.Run(name, func(t *testing.T) {
 			recorder := &recordingBackend{verdict: store.Allow}
 			stubStore(t, recorder, nil)
 			verdict, reason, isStore := StoreVerdict(gritToolPrefix+call.tool, call.input, "some-principal", true)
-			if !isStore || verdict != store.Ask || reason == "" {
-				t.Errorf("got (%v, %q, store=%v), want ask with a reason", verdict, reason, isStore)
+			if !isStore || verdict != call.want || reason == "" {
+				t.Errorf("got (%v, %q, store=%v), want %v with a reason", verdict, reason, isStore, call.want)
+			}
+			if call.want == store.Allow && !strings.Contains(reason, "deferred to the serve") {
+				t.Errorf("reason = %q, want deferred", reason)
 			}
 			if recorder.op.Tool != "" {
 				t.Error("backend must not be consulted without a session")
 			}
 		})
 	}
-	t.Run("conflicting principal sources ask", func(t *testing.T) {
+	t.Run("conflicting principal sources defer", func(t *testing.T) {
 		stubStore(t, &recordingBackend{verdict: store.Allow}, nil)
-		if verdict, _, _ := StoreVerdict(gritToolPrefix+"commit", map[string]any{"message": "m"}, "", true); verdict != store.Ask {
-			t.Errorf("got %v, want ask", verdict)
+		if verdict, _, _ := StoreVerdict(gritToolPrefix+"commit", map[string]any{"message": "m"}, "", true); verdict != store.Allow {
+			t.Errorf("got %v, want allow", verdict)
 		}
 	})
 	t.Run("a resolved session is unchanged by the principal", func(t *testing.T) {

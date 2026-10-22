@@ -41,16 +41,13 @@ var resolveStoreSession = func(principal string) (store.Session, bool) {
 // yields Ask.
 //
 // principal is the caller's principal as the hook sees it (CLOWN_SESSION_ID
-// when set, else the hook's session_id; see hooks.principalForHook), and
-// principalKnown says the hook saw one at all. principalKnown with an empty
-// principal means the sources disagreed. A known principal that resolves to a
-// recorded session lets Classify decide. A known principal that does not
-// resolve (no recorded session, ambiguous, or conflicting sources) yields Ask,
-// force included: ownership cannot be judged. With no principal at all the
-// caller is a confined one whose principal the hook cannot see (clown#136), so
-// a non-force call yields Allow, deferred to the serve, whose classification
-// and body ownership check refuse what the caller does not own; force yields
-// Ask.
+// when set, else the hook's session_id; see hooks.principalForHook).
+// principalKnown no longer changes the verdict; kept for logging. A principal
+// that resolves to a recorded session lets Classify decide. An unresolved
+// session (unknown, ambiguous, conflicting sources, or a confined caller whose
+// hook runs in the unit, clown#289) yields Allow for a non-force call, deferred
+// to the serve, whose classification and body ownership check refuse what the
+// caller does not own; force yields Ask.
 func StoreVerdict(toolName string, toolInput map[string]any, principal string, principalKnown bool) (verdict store.Verdict, reason string, isStore bool) {
 	tool := strings.TrimPrefix(toolName, gritToolPrefix)
 	if tool == toolName || !storeTools[tool] {
@@ -67,9 +64,6 @@ func StoreVerdict(toolName string, toolInput map[string]any, principal string, p
 	if !ok {
 		if forceRequested(toolInput) {
 			return store.Ask, "grit " + tool + ": force always asks, even when the session is unresolved", true
-		}
-		if principalKnown {
-			return store.Ask, "grit " + tool + ": the session could not be resolved from its principal, so ownership cannot be judged; confirm", true
 		}
 		return store.Allow, "grit " + tool + ": session unresolved here, deferred to the serve: body ownership check applies", true
 	}

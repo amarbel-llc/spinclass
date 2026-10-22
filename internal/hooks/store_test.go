@@ -39,8 +39,8 @@ func storeDecisionFor(t *testing.T, env, hookSessionID, cwd string, toolInput ma
 // CLOWN_SESSION_ID is THE principal when set (a differing hook session_id is
 // only logged); with it unset (a real worker) the hook session_id is the
 // fallback principal. A recorded principal resolves to its session and Classify
-// decides (own worktree allows, foreign repo_path asks); an unrecorded one
-// asks; no principal at all defers to the serve.
+// decides (own worktree allows, foreign repo_path asks); an unrecorded one or
+// no principal at all defers to the serve.
 func TestStoreToolResolvesTheHookSessionID(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	repo, wt := initSpawnedWorktree(t, "driver/key")
@@ -64,8 +64,8 @@ func TestStoreToolResolvesTheHookSessionID(t *testing.T) {
 	}{
 		{"recorded hook id, foreign repo_path", "", hookID, foreign, "ask"},
 		{"recorded hook id, own worktree", "", hookID, wt, "allow"},
-		{"unrecorded hook id", "", otherID, wt, "ask"},
-		{"env not recorded, differing hook id recorded: env wins, unresolved asks", otherID, hookID, wt, "ask"},
+		{"unrecorded hook id defers", "", otherID, wt, "allow"},
+		{"env not recorded, differing hook id recorded: env wins, unresolved defers", otherID, hookID, wt, "allow"},
 		{"env recorded, differing hook id: env resolves, own worktree", hookID, otherID, wt, "allow"},
 		{"env recorded, differing hook id: env resolves, foreign repo_path", hookID, otherID, foreign, "ask"},
 		{"env recorded, no hook id, own worktree", hookID, "", wt, "allow"},
@@ -74,6 +74,45 @@ func TestStoreToolResolvesTheHookSessionID(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := storeDecisionFor(t, tc.env, tc.hookID, wt, drop(tc.repoPath)); got != tc.want {
 				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// A hook with a known principal that resolves to no session (a confined
+// worker: clown#289 sets CLOWN_SESSION_ID inside the unit, where the hook cannot
+// resolve the session) passes a non-force grit call with a foreign repo_path
+// through to the serve, which enforces ownership. It must not ask, and so must
+// not be denied under dontAsk. Force still asks, and is denied under dontAsk.
+func TestHookWithKnownButUnresolvablePrincipalDefersToTheServe(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	foreign := t.TempDir()
+	for _, tc := range []struct {
+		name, tool, mode, want string
+		input                  map[string]any
+	}{
+		{"commit, default mode", "commit", "default", "allow", map[string]any{"message": "m", "repo_path": foreign}},
+		{"commit, dontAsk", "commit", "dontAsk", "allow", map[string]any{"message": "m", "repo_path": foreign}},
+		{"stash save, dontAsk", "stash", "dontAsk", "allow", map[string]any{"subcommand": "save", "repo_path": foreign}},
+		{"force, default mode", "branch", "default", "ask", map[string]any{"subcommand": "delete", "name": "x", "force": true, "repo_path": foreign}},
+		{"force, dontAsk", "branch", "dontAsk", "deny", map[string]any{"subcommand": "delete", "name": "x", "force": true, "repo_path": foreign}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CLOWN_SESSION_ID", "7a7a7a7a-0000-4000-8000-000000000000")
+			data, _ := json.Marshal(map[string]any{
+				"hook_event_name": "PreToolUse",
+				"tool_name":       "mcp__plugin_spinclass_spinclass__grit_" + tc.tool,
+				"tool_input":      tc.input,
+				"cwd":             foreign,
+				"permission_mode": tc.mode,
+			})
+			var stdout bytes.Buffer
+			if err := Run(bytes.NewReader(data), &stdout, "", foreign, false); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			decision, reason := parseHookDecision(t, stdout.Bytes())
+			if decision != tc.want || reason == "" {
+				t.Errorf("got %q (%q), want %q", decision, reason, tc.want)
 			}
 		})
 	}
