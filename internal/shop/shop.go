@@ -170,7 +170,7 @@ func ProvisionCredential(
 	worktreePath worktree.ResolvedPath,
 	allowNoCredential bool,
 ) error {
-	if n, errs := auth.SweepOrphans(ctx, h.Merged, worktreePath.RepoPath, os.Stderr); n > 0 || len(errs) > 0 {
+	if n, errs := auth.SweepOrphans(ctx, worktreePath.RepoPath, os.Stderr); n > 0 || len(errs) > 0 {
 		reportCredentialSweep(tw, n, errs)
 	}
 	id := auth.Identity{
@@ -195,7 +195,20 @@ func ProvisionCredential(
 	}
 
 	mintDesc := "mint credential " + worktreePath.Branch
-	outcome, mintErr := auth.Mint(ctx, h.Merged, id, resolver)
+	// [auth].mint-command and revoke-command run on the frontend, so they are
+	// resolved from the default branch's committed sweatfile (plus the global and
+	// ancestor layers), never from the new worktree's own copy: a resurrected
+	// worktree is rebuilt from a commit the worker authored. The resolved
+	// revoke-command is pinned on the session record by Mint.
+	var (
+		outcome auth.MintOutcome
+		mintErr error
+	)
+	if ah, _, herr := auth.DefaultBranchHierarchy(home, worktreePath.RepoPath); herr != nil {
+		mintErr = fmt.Errorf("[auth] loading sweatfiles: %w", herr)
+	} else {
+		outcome, mintErr = auth.Mint(ctx, ah.Merged, id, resolver)
+	}
 	switch {
 	case mintErr != nil && !allowNoCredential:
 		_ = git.WorktreeForceRemove(worktreePath.RepoPath, worktreePath.AbsPath)

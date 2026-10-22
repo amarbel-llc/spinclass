@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
 	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/session"
 )
@@ -47,6 +48,13 @@ func setupSyncRepo(t *testing.T) (bareDir, repoDir string) {
 // worktree carrying a credential.
 func writeMintedState(t *testing.T, repoDir, wtPath, branch string) {
 	t.Helper()
+	writeMintedStatePinned(t, repoDir, wtPath, branch, nil)
+}
+
+// writeMintedStatePinned is writeMintedState with the revoke-command pinned on
+// the record, as auth.Mint leaves it (nil: a record minted before the pin).
+func writeMintedStatePinned(t *testing.T, repoDir, wtPath, branch string, revoke *string) {
+	t.Helper()
 	if err := session.Write(session.State{
 		SessionState: session.StateInactive,
 		RepoPath:     repoDir,
@@ -55,7 +63,8 @@ func writeMintedState(t *testing.T, repoDir, wtPath, branch string) {
 		SessionKey:   "repo/" + branch,
 		StartedAt:    time.Now().UTC(),
 		Credential: &session.Credential{
-			MintedAt: time.Now().UTC(),
+			MintedAt:      time.Now().UTC(),
+			RevokeCommand: revoke,
 			Remote: &session.CredentialRemote{
 				CredentialHost: "example.com",
 				HTTPS:          "https://example.com/",
@@ -100,8 +109,8 @@ func TestResolvedGitSyncLandsOnOriginThenAdvancesLocal(t *testing.T) {
 	// The landing is the push, and it is stated explicitly (#376): a "push
 	// origin/main <sha>" point follows "merge <branch>".
 	tests := testRecords(recs)
-	if len(tests) != 8 {
-		t.Fatalf("expected 8 test records, got %d: %+v", len(tests), tests)
+	if len(tests) != 9 {
+		t.Fatalf("expected 9 test records, got %d: %+v", len(tests), tests)
 	}
 	assertTestPoint(t, tests, 0, "fetch origin/main", true)
 	assertTestPoint(t, tests, 1, "rebase feature-land", true)
@@ -109,8 +118,9 @@ func TestResolvedGitSyncLandsOnOriginThenAdvancesLocal(t *testing.T) {
 	assertTestPoint(t, tests, 3, "merge feature-land", true)
 	assertTestPoint(t, tests, 4, "push origin/main "+shortSha(sessionSha), true)
 	assertTestPoint(t, tests, 5, "advance local main to "+shortSha(sessionSha), true)
-	assertTestPoint(t, tests, 6, "remove worktree feature-land", true)
-	assertTestPoint(t, tests, 7, "delete branch feature-land", true)
+	assertTestPoint(t, tests, 6, "revoke credential feature-land", true)
+	assertTestPoint(t, tests, 7, "remove worktree feature-land", true)
+	assertTestPoint(t, tests, 8, "delete branch feature-land", true)
 }
 
 // TestResolvedGitSyncDirtyRootSkipsLocalAdvance pins #295's rule: an
@@ -269,12 +279,9 @@ func TestResolvedGitSyncTeardownRevokesCredential(t *testing.T) {
 	if err := os.WriteFile(credPath, []byte("https://spinclass:tok@example.com\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	writeMintedState(t, repoDir, wtPath, "feature-revoke")
 	marker := filepath.Join(t.TempDir(), "revoked")
-	sweatfileBody := "[auth]\nmint-command = \"echo tok\"\nrevoke-command = \"echo $SPINCLASS_SESSION_ID > " + marker + "\"\n"
-	if err := os.WriteFile(filepath.Join(repoDir, "sweatfile"), []byte(sweatfileBody), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	pinned := "echo $SPINCLASS_SESSION_ID > " + marker
+	writeMintedStatePinned(t, repoDir, wtPath, "feature-revoke", &pinned)
 
 	recs, err := runResolved(t, &mockExecutor{}, repoDir, wtPath, "feature-revoke", "main", true, false)
 	if err != nil {
@@ -295,6 +302,76 @@ func TestResolvedGitSyncTeardownRevokesCredential(t *testing.T) {
 	if !found {
 		t.Errorf("expected an ok 'revoke credential feature-revoke' point, got %+v", testRecords(recs))
 	}
+}
+
+// teardownWithWorktreeSweatfile runs an out-of-session merge of a session whose
+// worktree carries a sweatfile with the given [auth] revoke-command (written
+// after the mint, as a worker could), recording the credential as pinned.
+func teardownWithWorktreeSweatfile(t *testing.T, branch string, pinned *string, worktreeRevoke string) []ndjsoncrap.Record {
+	t.Helper()
+	_, repoDir := setupSyncRepo(t)
+	wtPath := setupWorktree(t, repoDir, branch)
+	if err := os.WriteFile(filepath.Join(wtPath, "r.txt"), []byte("r"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wtPath, "add", "r.txt")
+	runGit(t, wtPath, "commit", "-m", "session commit")
+	if err := os.WriteFile(filepath.Join(repoDir, ".git", "info", "exclude"), []byte(".spinclass/\nsweatfile\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	credPath := filepath.Join(wtPath, ".spinclass", auth.CredentialFile)
+	if err := os.MkdirAll(filepath.Dir(credPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(credPath, []byte("https://spinclass:tok@example.com\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeMintedStatePinned(t, repoDir, wtPath, branch, pinned)
+	if err := os.WriteFile(filepath.Join(wtPath, "sweatfile"),
+		[]byte("[auth]\nrevoke-command = \""+worktreeRevoke+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	recs, err := runResolved(t, &mockExecutor{}, repoDir, wtPath, branch, "main", true, false)
+	if err != nil {
+		t.Fatalf("Resolved() error: %v\n%+v", err, recs)
+	}
+	return recs
+}
+
+// A revoke-command a worker wrote into its worktree sweatfile must not run at
+// the merge teardown: the command pinned at mint does.
+func TestTeardownRunsThePinnedRevokeCommandNotTheWorktreeSweatfile(t *testing.T) {
+	dir := t.TempDir()
+	good, evil := filepath.Join(dir, "good"), filepath.Join(dir, "evil")
+	pinned := "touch " + good
+	teardownWithWorktreeSweatfile(t, "feature-pinned", &pinned, "touch "+evil)
+	if _, err := os.Stat(good); err != nil {
+		t.Errorf("the pinned revoke-command did not run: %v", err)
+	}
+	if _, err := os.Stat(evil); err == nil {
+		t.Error("the worktree sweatfile's revoke-command ran at the merge teardown")
+	}
+}
+
+// With nothing pinned (none configured at mint) the worktree's value is still
+// not consulted, and the teardown reports why no revoke ran.
+func TestTeardownReportsASkipWhenNoRevokeCommandIsPinned(t *testing.T) {
+	dir := t.TempDir()
+	evil := filepath.Join(dir, "evil")
+	none := ""
+	recs := teardownWithWorktreeSweatfile(t, "feature-nopin", &none, "touch "+evil)
+	if _, err := os.Stat(evil); err == nil {
+		t.Error("the worktree sweatfile's revoke-command ran at the merge teardown")
+	}
+	for _, tr := range testRecords(recs) {
+		if tr.Description == "revoke credential feature-nopin" {
+			if tr.Directive == nil || tr.Directive.Kind != "skip" || !strings.Contains(tr.Directive.Reason, "no revoke-command") {
+				t.Errorf("revoke point = %+v, want a skip naming the missing revoke-command", tr)
+			}
+			return
+		}
+	}
+	t.Errorf("no 'revoke credential' point in %+v", testRecords(recs))
 }
 
 // TestResolvedGitSyncPullWithRootOffDefault covers the local advance's

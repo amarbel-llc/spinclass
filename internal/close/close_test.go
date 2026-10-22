@@ -450,6 +450,100 @@ func TestRunResolvedRevokesMintedCredential(t *testing.T) {
 	}
 }
 
+// mintForClose mints a credential for the setupNoTTYClose session, pinning
+// revoke (empty: none configured) on the record, and returns the session's
+// identity. HOME is a fresh dir so no real global sweatfile applies.
+func mintForClose(t *testing.T, repoPath, wtPath, revoke string) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	if out, err := exec.Command("git", "-C", repoPath, "remote", "add", "origin", "git@forge.example.com:o/r.git").CombinedOutput(); err != nil {
+		t.Fatalf("git remote add: %v\n%s", err, out)
+	}
+	mint := "echo tok"
+	a := &sweatfile.Auth{MintCommand: &mint}
+	if revoke != "" {
+		a.RevokeCommand = &revoke
+	}
+	id := auth.Identity{RepoPath: repoPath, WorktreePath: wtPath, Branch: "feature-x", SessionKey: "repo/feature-x"}
+	if _, err := auth.Mint(context.Background(), sweatfile.Sweatfile{Auth: a}, id, ""); err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+}
+
+// Neither the worktree's sweatfile (a worker can write it) nor the repo's
+// sweatfile may change what close runs: the revoke-command pinned at mint runs,
+// and the others do not.
+func TestCloseRunsThePinnedRevokeCommandNotAnySweatfile(t *testing.T) {
+	repoPath, wtPath := setupNoTTYClose(t)
+	dir := t.TempDir()
+	good, evilWt, evilRepo := filepath.Join(dir, "good"), filepath.Join(dir, "evil-wt"), filepath.Join(dir, "evil-repo")
+	mintForClose(t, repoPath, wtPath, "touch "+good)
+	if err := os.WriteFile(filepath.Join(wtPath, "sweatfile"),
+		[]byte("[auth]\nrevoke-command = \"touch "+evilWt+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoPath, "sweatfile"),
+		[]byte("[auth]\nrevoke-command = \"touch "+evilRepo+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", true, nil, "tap"); err != nil {
+		t.Fatalf("RunResolved: %v", err)
+	}
+	if _, err := os.Stat(good); err != nil {
+		t.Errorf("the pinned revoke-command did not run: %v", err)
+	}
+	for _, evil := range []string{evilWt, evilRepo} {
+		if _, err := os.Stat(evil); err == nil {
+			t.Errorf("an untrusted sweatfile's revoke-command ran: %s", evil)
+		}
+	}
+}
+
+// The revoke decision comes from the session record (Credential set, RevokedAt
+// nil), not from the credential file: with the file gone, close still revokes.
+func TestCloseRevokesFromTheRecordWhenTheCredentialFileIsAbsent(t *testing.T) {
+	repoPath, wtPath := setupNoTTYClose(t)
+	marker := filepath.Join(t.TempDir(), "revoked")
+	mintForClose(t, repoPath, wtPath, "touch "+marker)
+	auth.RemoveCredential(wtPath)
+	if auth.Minted(wtPath) {
+		t.Fatal("precondition: the credential file must be absent")
+	}
+
+	if err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", true, nil, "tap"); err != nil {
+		t.Fatalf("RunResolved: %v", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("revoke-command did not run from the record: %v", err)
+	}
+}
+
+// Every reason close does not revoke is reported, never silent.
+func TestCloseReportsWhyNothingWasRevoked(t *testing.T) {
+	t.Run("nothing minted", func(t *testing.T) {
+		repoPath, wtPath := setupNoTTYClose(t)
+		var out bytes.Buffer
+		if err := RunResolved(&out, repoPath, wtPath, "feature-x", true, nil, "tap"); err != nil {
+			t.Fatalf("RunResolved: %v", err)
+		}
+		if got := out.String(); !strings.Contains(got, "revoke credential feature-x") || !strings.Contains(got, "# SKIP no ") {
+			t.Errorf("TAP output lacks the skip reason:\n%s", got)
+		}
+	})
+	t.Run("no revoke-command pinned", func(t *testing.T) {
+		repoPath, wtPath := setupNoTTYClose(t)
+		mintForClose(t, repoPath, wtPath, "")
+		var out bytes.Buffer
+		if err := RunResolved(&out, repoPath, wtPath, "feature-x", true, nil, "tap"); err != nil {
+			t.Fatalf("RunResolved: %v", err)
+		}
+		if got := out.String(); !strings.Contains(got, "revoke credential feature-x") || !strings.Contains(got, "no revoke-command") {
+			t.Errorf("TAP output lacks the skip reason:\n%s", got)
+		}
+	})
+}
+
 // bindProfileGrantee stores a record granting profiles to grantee in the
 // default grant store and binds it, as a spawn-minted child link would be.
 func bindProfileGrantee(t *testing.T, grantee string) *grantstore.Store {

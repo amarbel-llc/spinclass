@@ -145,6 +145,78 @@ func TestRemoveWorktreeRevokesMintedCredential(t *testing.T) {
 	}
 }
 
+// A revoke-command written into the worktree's sweatfile after the mint (a
+// worker can write it) must not run when `sc clean` reaps the worktree; the one
+// pinned at mint does. The unpinned case is reported as a skip, not run.
+func TestRemoveWorktreeIgnoresTheWorktreeSweatfileRevokeCommand(t *testing.T) {
+	_, repoDir := setupRepo(t)
+	runGit(t, repoDir, "remote", "add", "origin", "git@forge.example.com:o/r.git")
+	if err := os.WriteFile(filepath.Join(repoDir, ".git", "info", "exclude"), []byte(".spinclass/\nsweatfile\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wtPath := filepath.Join(repoDir, ".worktrees", "merged-z")
+	runGit(t, repoDir, "worktree", "add", "-b", "merged-z", wtPath)
+
+	dir := t.TempDir()
+	good, evil := filepath.Join(dir, "good"), filepath.Join(dir, "evil")
+	mint, revoke := "echo tok", "touch "+good
+	sf := sweatfile.Sweatfile{Auth: &sweatfile.Auth{MintCommand: &mint, RevokeCommand: &revoke}}
+	id := auth.Identity{RepoPath: repoDir, WorktreePath: wtPath, Branch: "merged-z", SessionKey: "repo/merged-z"}
+	if _, err := auth.Mint(context.Background(), sf, id, ""); err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "sweatfile"),
+		[]byte("[auth]\nrevoke-command = \"touch "+evil+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	wt := worktreeInfo{repo: "repo", branch: "merged-z", repoPath: repoDir, worktreePath: wtPath, merged: true}
+	if err := removeWorktree(wt, nil); err != nil {
+		t.Fatalf("removeWorktree: %v", err)
+	}
+	if _, err := os.Stat(good); err != nil {
+		t.Errorf("the pinned revoke-command did not run: %v", err)
+	}
+	if _, err := os.Stat(evil); err == nil {
+		t.Error("the worktree sweatfile's revoke-command ran at clean")
+	}
+}
+
+func TestRemoveWorktreeReportsWhyNoRevokeRan(t *testing.T) {
+	_, repoDir := setupRepo(t)
+	runGit(t, repoDir, "remote", "add", "origin", "git@forge.example.com:o/r.git")
+	if err := os.WriteFile(filepath.Join(repoDir, ".git", "info", "exclude"), []byte(".spinclass/\nsweatfile\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wtPath := filepath.Join(repoDir, ".worktrees", "merged-w")
+	runGit(t, repoDir, "worktree", "add", "-b", "merged-w", wtPath)
+
+	evil := filepath.Join(t.TempDir(), "evil")
+	mint := "echo tok"
+	sf := sweatfile.Sweatfile{Auth: &sweatfile.Auth{MintCommand: &mint}} // no revoke-command at mint
+	id := auth.Identity{RepoPath: repoDir, WorktreePath: wtPath, Branch: "merged-w", SessionKey: "repo/merged-w"}
+	if _, err := auth.Mint(context.Background(), sf, id, ""); err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "sweatfile"),
+		[]byte("[auth]\nrevoke-command = \"touch "+evil+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	tw := tap.NewWriter(&buf)
+	wt := worktreeInfo{repo: "repo", branch: "merged-w", repoPath: repoDir, worktreePath: wtPath, merged: true}
+	if err := removeWorktree(wt, tw); err != nil {
+		t.Fatalf("removeWorktree: %v", err)
+	}
+	if _, err := os.Stat(evil); err == nil {
+		t.Error("the worktree sweatfile's revoke-command ran at clean")
+	}
+	if got := buf.String(); !strings.Contains(got, "revoke credential merged-w") || !strings.Contains(got, "SKIP") || !strings.Contains(got, "no revoke-command") {
+		t.Errorf("TAP output lacks the skip and its reason:\n%s", got)
+	}
+}
+
 // TestRemoveWorktreeUnbindsTheSessionsProfileGrant: a reaped worktree's minted
 // profile-right link goes with it (FDR 0034); a missing store is untouched.
 func TestRemoveWorktreeUnbindsTheSessionsProfileGrant(t *testing.T) {

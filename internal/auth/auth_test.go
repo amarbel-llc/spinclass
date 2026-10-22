@@ -268,12 +268,12 @@ func TestRevokeRunsCommandRemovesFileAndRecords(t *testing.T) {
 	}
 
 	var out strings.Builder
-	ran, err := Revoke(context.Background(), sf, id, &out)
+	outcome, err := Revoke(context.Background(), id, &out)
 	if err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
-	if !ran {
-		t.Fatal("Revoke reported nothing to revoke")
+	if !outcome.Ran {
+		t.Fatalf("Revoke reported nothing to revoke: %+v", outcome)
 	}
 	if got, _ := os.ReadFile(marker); strings.TrimSpace(string(got)) != "repo/feature-x" {
 		t.Errorf("revoke-command did not run with the session id: %q", got)
@@ -290,16 +290,105 @@ func TestRevokeRunsCommandRemovesFileAndRecords(t *testing.T) {
 	}
 
 	// Idempotent: nothing left to revoke.
-	if ran, err := Revoke(context.Background(), sf, id, nil); ran || err != nil {
-		t.Errorf("second Revoke: ran=%v err=%v", ran, err)
+	if o, err := Revoke(context.Background(), id, nil); o.Ran || o.Skipped == "" || err != nil {
+		t.Errorf("second Revoke: %+v err=%v, want a skip", o, err)
 	}
 }
 
 func TestRevokeWithoutMintedIsNoop(t *testing.T) {
 	_, _, id := setupRepo(t)
-	ran, err := Revoke(context.Background(), authSweatfile("echo tok", "false"), id, nil)
-	if ran || err != nil {
-		t.Fatalf("ran=%v err=%v", ran, err)
+	o, err := Revoke(context.Background(), id, nil)
+	if o.Ran || err != nil || o.Skipped == "" {
+		t.Fatalf("outcome=%+v err=%v, want a reported skip", o, err)
+	}
+}
+
+// Mint pins the revoke-command it resolved on the session record; a later
+// Revoke runs that string, not whatever the worktree's sweatfile says by then.
+func TestRevokeRunsThePinnedCommandNotTheWorktreeSweatfile(t *testing.T) {
+	repoPath, wtPath, id := setupRepo(t)
+	dir := t.TempDir()
+	good, evil := filepath.Join(dir, "good"), filepath.Join(dir, "evil")
+	if _, err := Mint(context.Background(), authSweatfile("echo tok", "touch "+good), id, ""); err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	st, _ := session.Read(repoPath, "feature-x")
+	if st.Credential == nil || st.Credential.RevokeCommand == nil || *st.Credential.RevokeCommand != "touch "+good {
+		t.Fatalf("revoke-command not pinned on the record: %+v", st.Credential)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "sweatfile"),
+		[]byte("[auth]\nrevoke-command = \"touch "+evil+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if o, err := Revoke(context.Background(), id, io.Discard); !o.Ran || err != nil {
+		t.Fatalf("Revoke: %+v err=%v", o, err)
+	}
+	if _, err := os.Stat(good); err != nil {
+		t.Errorf("the pinned command did not run: %v", err)
+	}
+	if _, err := os.Stat(evil); err == nil {
+		t.Error("the worktree sweatfile's revoke-command ran")
+	}
+}
+
+// The decision comes from the session record, not the credential file: a token
+// whose state file is gone is still revoked by session id.
+func TestRevokeRunsWithoutTheCredentialFile(t *testing.T) {
+	_, wtPath, id := setupRepo(t)
+	marker := filepath.Join(t.TempDir(), "revoked")
+	if _, err := Mint(context.Background(), authSweatfile("echo tok", "touch "+marker), id, ""); err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	RemoveCredential(wtPath)
+	if Minted(wtPath) {
+		t.Fatal("precondition: credential file must be gone")
+	}
+	if o, err := Revoke(context.Background(), id, io.Discard); !o.Ran || err != nil {
+		t.Fatalf("Revoke: %+v err=%v", o, err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("revoke-command did not run: %v", err)
+	}
+}
+
+// A record minted before the pin falls back to the global and ancestor layers
+// plus the repo layer COMMITTED at the default branch; the worktree's copy is
+// never read, and the fallback is reported.
+func TestLegacyRecordFallsBackToTheDefaultBranchNotTheWorktree(t *testing.T) {
+	repoPath, wtPath, id := setupRepo(t)
+	dir := t.TempDir()
+	good, evil := filepath.Join(dir, "good"), filepath.Join(dir, "evil")
+	if err := os.WriteFile(filepath.Join(repoPath, "sweatfile"),
+		[]byte("[auth]\nrevoke-command = \"touch "+good+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoPath, "add", "sweatfile")
+	runGit(t, repoPath, "commit", "-m", "add sweatfile")
+	if _, err := Mint(context.Background(), authSweatfile("echo tok", "true"), id, ""); err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	st, _ := session.Read(repoPath, "feature-x")
+	legacy := *st.Credential
+	legacy.RevokeCommand = nil // as minted before the pin
+	if err := session.UpdateCredential(repoPath, "feature-x", &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "sweatfile"),
+		[]byte("[auth]\nrevoke-command = \"touch "+evil+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o, err := Revoke(context.Background(), id, io.Discard)
+	if !o.Ran || err != nil {
+		t.Fatalf("Revoke: %+v err=%v", o, err)
+	}
+	if !strings.Contains(o.Note, "no revoke command stored at mint") {
+		t.Errorf("legacy fallback not reported: %q", o.Note)
+	}
+	if _, err := os.Stat(good); err != nil {
+		t.Errorf("the default-branch command did not run: %v", err)
+	}
+	if _, err := os.Stat(evil); err == nil {
+		t.Error("the worktree sweatfile's revoke-command ran")
 	}
 }
 
@@ -316,7 +405,7 @@ func TestSweepOrphansRevokesTombstonedSessions(t *testing.T) {
 	}
 	runGit(t, repoPath, "worktree", "remove", "--force", id.WorktreePath)
 
-	revoked, errs := SweepOrphans(context.Background(), sf, repoPath, nil)
+	revoked, errs := SweepOrphans(context.Background(), repoPath, nil)
 	if len(errs) > 0 {
 		t.Fatalf("SweepOrphans errors: %v", errs)
 	}
@@ -335,7 +424,7 @@ func TestSweepOrphansRevokesTombstonedSessions(t *testing.T) {
 	}
 
 	// Already swept: a second sweep finds nothing.
-	if n, errs := SweepOrphans(context.Background(), sf, repoPath, nil); n != 0 || len(errs) > 0 {
+	if n, errs := SweepOrphans(context.Background(), repoPath, nil); n != 0 || len(errs) > 0 {
 		t.Errorf("second sweep: n=%d errs=%v", n, errs)
 	}
 }
@@ -359,9 +448,9 @@ func TestRevokeRunsOutsideTheDevshell(t *testing.T) {
 		dirs = append(dirs, dir)
 		return prev(ctx, dir, cmd, env)
 	}
-	ran, err := Revoke(context.Background(), authSweatfile("echo tok", "true"), id, io.Discard)
-	if !ran || err != nil {
-		t.Fatalf("Revoke: ran=%v err=%v", ran, err)
+	o, err := Revoke(context.Background(), id, io.Discard)
+	if !o.Ran || err != nil {
+		t.Fatalf("Revoke: %+v err=%v", o, err)
 	}
 	if len(dirs) != 1 || dirs[0] != wtPath {
 		t.Errorf("revoke-command did not run through the ambient runner: %v", dirs)
@@ -375,7 +464,7 @@ func TestSweepOrphansLeavesLiveSessionsAlone(t *testing.T) {
 		t.Fatalf("Mint: %v", err)
 	}
 	// Inactive but present (worktree exists): not an orphan.
-	if n, errs := SweepOrphans(context.Background(), sf, repoPath, nil); n != 0 || len(errs) > 0 {
+	if n, errs := SweepOrphans(context.Background(), repoPath, nil); n != 0 || len(errs) > 0 {
 		t.Errorf("sweep touched a live session: n=%d errs=%v", n, errs)
 	}
 }
@@ -477,9 +566,9 @@ func TestRevokeRemovesTheCredentialEvenWhenTheRevokeFails(t *testing.T) {
 	if _, err := Mint(context.Background(), authSweatfile("echo tok", "false"), id, ""); err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
-	ran, err := Revoke(context.Background(), authSweatfile("echo tok", "false"), id, io.Discard)
-	if !ran || err == nil {
-		t.Fatalf("Revoke: ran=%v err=%v, want a failed revoke", ran, err)
+	o, err := Revoke(context.Background(), id, io.Discard)
+	if !o.Ran || err == nil {
+		t.Fatalf("Revoke: %+v err=%v, want a failed revoke", o, err)
 	}
 	if Minted(wtPath) {
 		t.Error("credential file survived Revoke")

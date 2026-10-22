@@ -30,6 +30,13 @@ type Credential struct {
 	// worktree's MirrorInto and by revoke. Nil on a record minted before #335
 	// (necessarily the built-in form).
 	Remote *CredentialRemote `json:"remote,omitempty"`
+	// RevokeCommand is the [auth].revoke-command resolved when the credential
+	// was minted, pinned here (frontend state, outside every worktree) so close,
+	// clean, the merge teardown and the orphan sweep revoke with the command the
+	// operator-controlled layers produced at mint, never one a worker later wrote
+	// into its own worktree's sweatfile. nil marks a record minted before the pin
+	// (legacy); a pointer to "" records that no revoke-command was configured.
+	RevokeCommand *string `json:"revoke_command,omitempty"`
 }
 
 // CredentialRemote records what a mint saw and wrote about the forge remote.

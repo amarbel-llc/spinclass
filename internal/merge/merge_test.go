@@ -416,8 +416,8 @@ func TestResolvedRecordStream(t *testing.T) {
 	}
 
 	tests := testRecords(recs)
-	if len(tests) != 5 {
-		t.Fatalf("expected 5 test records, got %d: %+v", len(tests), tests)
+	if len(tests) != 6 {
+		t.Fatalf("expected 6 test records, got %d: %+v", len(tests), tests)
 	}
 	assertTestPoint(t, tests, 0, "rebase feature-tap", true)
 	assertTestPoint(t, tests, 1, "merge feature-tap", true)
@@ -426,8 +426,13 @@ func TestResolvedRecordStream(t *testing.T) {
 	if d := tests[2].Directive; d == nil || d.Kind != "skip" || !strings.Contains(d.Reason, "NOT pushed") {
 		t.Errorf("push point = %+v, want a skip saying NOT pushed", tests[2])
 	}
-	assertTestPoint(t, tests, 3, "remove worktree feature-tap", true)
-	assertTestPoint(t, tests, 4, "delete branch feature-tap", true)
+	// The teardown always says why no credential was revoked.
+	assertTestPoint(t, tests, 3, "revoke credential feature-tap", true)
+	if d := tests[3].Directive; d == nil || d.Kind != "skip" {
+		t.Errorf("revoke point = %+v, want a skip", tests[3])
+	}
+	assertTestPoint(t, tests, 4, "remove worktree feature-tap", true)
+	assertTestPoint(t, tests, 5, "delete branch feature-tap", true)
 	if !hasSummary(recs) {
 		t.Errorf("expected summary record (stream framing), got: %+v", recs)
 	}
@@ -473,8 +478,8 @@ func TestResolvedGitSyncRecordStream(t *testing.T) {
 	}
 
 	tests := testRecords(recs)
-	if len(tests) != 8 {
-		t.Fatalf("expected 8 test records, got %d: %+v", len(tests), tests)
+	if len(tests) != 9 {
+		t.Fatalf("expected 9 test records, got %d: %+v", len(tests), tests)
 	}
 	// The fetch must come first so the rebase target (origin/main, #315) is
 	// fresh; the merge queue (spinclass#235) re-fetches under the landing lock
@@ -490,8 +495,9 @@ func TestResolvedGitSyncRecordStream(t *testing.T) {
 	if !strings.HasPrefix(tests[5].Description, "advance local main to ") || !tests[5].OK {
 		t.Errorf("tests[5] = %+v, want an ok 'advance local main to <sha>' point", tests[5])
 	}
-	assertTestPoint(t, tests, 6, "remove worktree feature-sync", true)
-	assertTestPoint(t, tests, 7, "delete branch feature-sync", true)
+	assertTestPoint(t, tests, 6, "revoke credential feature-sync", true)
+	assertTestPoint(t, tests, 7, "remove worktree feature-sync", true)
+	assertTestPoint(t, tests, 8, "delete branch feature-sync", true)
 	if !hasSummary(recs) {
 		t.Errorf("expected summary record (stream framing), got: %+v", recs)
 	}

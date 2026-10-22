@@ -24,7 +24,6 @@ import (
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sessionpick"
 	gitstore "code.linenisgreat.com/spinclass/internal/store/git"
-	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/tapblock"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 
@@ -418,24 +417,30 @@ func revokeProfileBinding(tw *tap.Writer, branch, sessionKey string) {
 	fmt.Fprintf(os.Stderr, "spinclass: %s failed: %v\n", desc, rerr)
 }
 
-// revokeCredential runs the [auth].revoke-command for the session when it
-// minted a credential, as one TAP test point. Best-effort: never blocks close.
+// revokeCredential revokes the session's forge credential when its session
+// record says one is outstanding, as one TAP test point. The revoke-command is
+// the one pinned at mint (auth.Revoke); the worktree's sweatfile is never read.
+// Every reason for not revoking is reported. Best-effort: never blocks close.
 func revokeCredential(tw *tap.Writer, repoPath, wtPath, branch, sessionKey string) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-	h, err := sweatfileio.LoadWorktreeHierarchy(home, repoPath, wtPath)
-	if err != nil {
-		return
-	}
 	var out bytes.Buffer
 	id := auth.Identity{RepoPath: repoPath, WorktreePath: wtPath, Branch: branch, SessionKey: sessionKey}
-	ran, rerr := auth.Revoke(context.Background(), h.Merged, id, &out)
-	if !ran {
+	outcome, rerr := auth.Revoke(context.Background(), id, &out)
+	desc := "revoke credential " + branch
+	if outcome.Note != "" {
+		if tw != nil {
+			tw.Comment("%s: %s", desc, outcome.Note)
+		} else {
+			fmt.Fprintf(os.Stderr, "spinclass: %s: %s\n", desc, outcome.Note)
+		}
+	}
+	if !outcome.Ran {
+		if tw != nil {
+			tw.Skip(desc, outcome.Skipped)
+		} else {
+			fmt.Fprintf(os.Stderr, "spinclass: %s skipped: %s\n", desc, outcome.Skipped)
+		}
 		return
 	}
-	desc := "revoke credential " + branch
 	if rerr != nil {
 		diag := map[string]string{"severity": "warn", "message": rerr.Error()}
 		if o := strings.TrimSpace(out.String()); o != "" {

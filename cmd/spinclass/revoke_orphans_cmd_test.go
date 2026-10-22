@@ -9,18 +9,13 @@ import (
 	"testing"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/server"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
-
-func withRevokeCommand(cmd string) sweatfile.Sweatfile {
-	return sweatfile.Sweatfile{Auth: &sweatfile.Auth{RevokeCommand: &cmd}}
-}
 
 func stubSweep(t *testing.T, revoked int, errs []error) *string {
 	t.Helper()
 	var gotRepo string
 	old := revokeOrphansSweep
-	revokeOrphansSweep = func(_ context.Context, _ sweatfile.Sweatfile, repoPath string, _ io.Writer) (int, []error) {
+	revokeOrphansSweep = func(_ context.Context, repoPath string, _ io.Writer) (int, []error) {
 		gotRepo = repoPath
 		return revoked, errs
 	}
@@ -31,7 +26,7 @@ func stubSweep(t *testing.T, revoked int, errs []error) *string {
 func TestRevokeOrphansReportsRevokedCount(t *testing.T) {
 	got := stubSweep(t, 2, nil)
 	var out bytes.Buffer
-	if err := reportRevokeOrphans(context.Background(), withRevokeCommand("revoke"), "/r/posh", &out); err != nil {
+	if err := reportRevokeOrphans(context.Background(), "/r/posh", &out); err != nil {
 		t.Fatal(err)
 	}
 	if *got != "/r/posh" || !strings.Contains(out.String(), "revoked 2 orphaned credential(s)") {
@@ -42,23 +37,12 @@ func TestRevokeOrphansReportsRevokedCount(t *testing.T) {
 func TestRevokeOrphansFailsAndNamesWhatRemains(t *testing.T) {
 	stubSweep(t, 0, []error{errors.New("posh/smooth-maple: agent down")})
 	var out bytes.Buffer
-	err := reportRevokeOrphans(context.Background(), withRevokeCommand("revoke"), "/r/posh", &out)
+	err := reportRevokeOrphans(context.Background(), "/r/posh", &out)
 	if err == nil {
 		t.Fatal("a failed revoke must exit nonzero")
 	}
 	if !strings.Contains(out.String(), "posh/smooth-maple: agent down") {
 		t.Errorf("output %q does not name the failed session", out.String())
-	}
-}
-
-func TestRevokeOrphansWithoutRevokeCommandDoesNotSweep(t *testing.T) {
-	got := stubSweep(t, 9, nil)
-	var out bytes.Buffer
-	if err := reportRevokeOrphans(context.Background(), sweatfile.Sweatfile{}, "/r/posh", &out); err != nil {
-		t.Fatal(err)
-	}
-	if *got != "" || !strings.Contains(out.String(), "no [auth].revoke-command") {
-		t.Errorf("swept %q, output %q", *got, out.String())
 	}
 }
 

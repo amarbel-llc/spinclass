@@ -182,28 +182,34 @@ func revokeProfileBinding(tw *tap.Writer, wt worktreeInfo) {
 	log.Warn("profile binding revoke failed", "branch", wt.branch, "err", rerr)
 }
 
-// revokeCredential runs [auth].revoke-command for a worktree that minted a
-// credential, as one TAP test point; mirrors close.revokeCredential.
+// revokeCredential revokes the credential of a worktree whose session record
+// says one is outstanding, as one TAP test point, with the revoke-command
+// pinned at mint (the worktree's sweatfile is never read); mirrors
+// close.revokeCredential.
 func revokeCredential(tw *tap.Writer, wt worktreeInfo) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-	h, err := sweatfileio.LoadWorktreeHierarchy(home, wt.repoPath, wt.worktreePath)
-	if err != nil {
-		return
-	}
 	sessionKey := filepath.Base(wt.repoPath) + "/" + wt.branch
 	if st, rerr := session.Read(wt.repoPath, wt.branch); rerr == nil && st.SessionKey != "" {
 		sessionKey = st.SessionKey
 	}
 	var out bytes.Buffer
 	id := auth.Identity{RepoPath: wt.repoPath, WorktreePath: wt.worktreePath, Branch: wt.branch, SessionKey: sessionKey}
-	ran, rerr := auth.Revoke(context.Background(), h.Merged, id, &out)
-	if !ran {
+	outcome, rerr := auth.Revoke(context.Background(), id, &out)
+	desc := "revoke credential " + wt.branch
+	if outcome.Note != "" {
+		if tw != nil {
+			tw.Comment("%s: %s", desc, outcome.Note)
+		} else {
+			log.Warn(outcome.Note, "branch", wt.branch)
+		}
+	}
+	if !outcome.Ran {
+		if tw != nil {
+			tw.Skip(desc, outcome.Skipped)
+		} else {
+			log.Info("credential not revoked", "branch", wt.branch, "reason", outcome.Skipped)
+		}
 		return
 	}
-	desc := "revoke credential " + wt.branch
 	if rerr != nil {
 		diag := map[string]string{"severity": "warn", "message": rerr.Error()}
 		if o := strings.TrimSpace(out.String()); o != "" {

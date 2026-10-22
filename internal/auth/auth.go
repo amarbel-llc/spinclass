@@ -25,8 +25,10 @@ import (
 	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/hookrun"
+	"code.linenisgreat.com/spinclass/internal/landing"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 )
 
 // CredentialFile is the git-credential-store file under <worktree>/.spinclass/.
@@ -371,7 +373,11 @@ type MintOutcome struct {
 	Resolved string
 }
 
-// Mint runs [auth].mint-command in the session worktree, writes the token it
+// Mint runs [auth].mint-command (and pins [auth].revoke-command on the session
+// record, see session.Credential.RevokeCommand) from sf, which the caller must
+// have loaded WITHOUT the session worktree's own sweatfile: a worker can write
+// that file (see DefaultBranchHierarchy). It runs the command in the session
+// worktree, writes the token it
 // prints as a mode-600 git-credential-store file, injects the worktree-scoped
 // git config, and records the mint (and the remote it wired) on the session
 // state. A configured [auth].forge-hosts allow-list gates it on the ORIGIN host
@@ -432,9 +438,16 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 	if err != nil {
 		return MintOutcome{}, fmt.Errorf("[auth] record mint: %w", err)
 	}
+	// Pin the revoke-command resolved NOW, from the layers the caller vetted for
+	// this mint. Every later revoke runs this string and re-reads no sweatfile.
+	pinned := ""
+	if rc := sf.AuthRevokeCommand(); rc != nil {
+		pinned = strings.TrimSpace(*rc)
+	}
 	st.Credential = &session.Credential{
-		MintedAt: time.Now().UTC(),
-		Remote:   res.record(),
+		MintedAt:      time.Now().UTC(),
+		Remote:        res.record(),
+		RevokeCommand: &pinned,
 	}
 	if err := session.Write(*st); err != nil {
 		return MintOutcome{}, fmt.Errorf("[auth] record mint: %w", err)
@@ -536,37 +549,122 @@ func MirrorInto(repoPath, branch, sessionWorktree, dir string) error {
 	return Inject(dir, CredentialPath(sessionWorktree), rw)
 }
 
-// Revoke runs [auth].revoke-command for a session that minted a credential,
-// then removes the credential file and records the revocation. Command output
-// streams to w. Returns false with a nil error when there is nothing to revoke
-// (no revoke-command, or no credential was minted).
-func Revoke(ctx context.Context, sf sweatfile.Sweatfile, id Identity, w io.Writer) (bool, error) {
-	if !Minted(id.WorktreePath) {
-		return false, nil
-	}
-	// The file goes whatever the revoke's outcome: a failed revoke is recorded
-	// on the tombstone and retried by session id, which needs no file.
-	err := revoke(ctx, sf, id, id.WorktreePath, w)
-	RemoveCredential(id.WorktreePath)
-	return true, err
+// RevokeOutcome reports what Revoke did. Ran: the revoke-command ran (its error,
+// if any, is Revoke's error). Skipped (human-readable) is why nothing ran.
+// Note is a non-fatal remark worth surfacing, e.g. a legacy fallback.
+type RevokeOutcome struct {
+	Ran     bool
+	Skipped string
+	Note    string
 }
 
-func revoke(ctx context.Context, sf sweatfile.Sweatfile, id Identity, dir string, w io.Writer) error {
-	cmd := sf.AuthRevokeCommand()
-	if cmd == nil || strings.TrimSpace(*cmd) == "" {
-		return errors.New("[auth] a credential was minted but no revoke-command is configured")
+// Revoke revokes the session's forge credential, deciding from the session
+// RECORD (State.Credential set, RevokedAt nil), not from the credential file:
+// revocation addresses the token by session id and needs no file. The command
+// is the one pinned on the record at mint (see revokeCommandFor); no sweatfile
+// of the session worktree is ever read. Command output streams to w. The state
+// credential file is removed when the command ran, whatever its outcome (a
+// failed revoke is recorded on the tombstone and retried by session id).
+func Revoke(ctx context.Context, id Identity, w io.Writer) (RevokeOutcome, error) {
+	st, err := session.Read(id.RepoPath, id.Branch)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return RevokeOutcome{Skipped: "no session record, so no credential to revoke"}, nil
+	case err != nil:
+		return RevokeOutcome{Skipped: "session record unreadable: " + err.Error()}, nil
+	case st.Credential == nil:
+		return RevokeOutcome{Skipped: "no credential was minted for this session"}, nil
+	case st.Credential.RevokedAt != nil:
+		return RevokeOutcome{Skipped: "credential already revoked"}, nil
 	}
+	var rr revokeResolver
+	cmd, note, rerr := rr.command(st.Credential, id.RepoPath)
+	if rerr != nil {
+		return RevokeOutcome{Skipped: "revoke-command could not be resolved: " + rerr.Error()}, nil
+	}
+	if cmd == "" {
+		return RevokeOutcome{Skipped: "a credential was minted but no revoke-command is pinned or configured above the worktree", Note: note}, nil
+	}
+	err = revoke(ctx, id, st, cmd, id.WorktreePath, w)
+	RemoveCredential(id.WorktreePath)
+	return RevokeOutcome{Ran: true, Note: note}, err
+}
+
+// revokeResolver resolves the revoke-command for credential records. A record
+// with the command pinned at mint answers from the record. A legacy record
+// (minted before the pin) falls back to the global and ancestor sweatfiles plus
+// the repo layer read from the default branch (DefaultBranchHierarchy), never
+// the worktree's copy; that lookup is made at most once per resolver.
+type revokeResolver struct {
+	legacyDone bool
+	legacyCmd  string
+	legacyNote string
+	legacyErr  error
+}
+
+func (r *revokeResolver) command(c *session.Credential, repoPath string) (cmd, note string, err error) {
+	if c.RevokeCommand != nil {
+		return strings.TrimSpace(*c.RevokeCommand), "", nil
+	}
+	if !r.legacyDone {
+		r.legacyDone = true
+		home, herr := os.UserHomeDir()
+		if herr != nil {
+			r.legacyErr = herr
+		} else if h, src, lerr := DefaultBranchHierarchy(home, repoPath); lerr != nil {
+			r.legacyErr = lerr
+		} else {
+			if rc := h.Merged.AuthRevokeCommand(); rc != nil {
+				r.legacyCmd = strings.TrimSpace(*rc)
+			}
+			r.legacyNote = "no revoke command stored at mint; using the global/ancestor sweatfiles and " + src
+		}
+	}
+	return r.legacyCmd, r.legacyNote, r.legacyErr
+}
+
+// DefaultBranchHierarchy loads the sweatfile cascade for repoPath (global,
+// ancestor directories, the main checkout's sweatfile) with the repo layer
+// overlaid from the sweatfile COMMITTED at the default branch's landing ref,
+// never from any session worktree: a worker can write its own worktree's
+// sweatfile, and [auth] commands run on the frontend. The ref is the one merges
+// land on and sessions are cut from: the default branch's remote-tracking ref
+// when it exists, else the local branch (landing.ForMerge). src names the
+// committed layer for reports. With no default branch there is no overlay.
+func DefaultBranchHierarchy(home, repoPath string) (h sweatfile.Hierarchy, src string, err error) {
+	var (
+		data  []byte
+		found bool
+	)
+	src = "the main checkout (no default branch to read)"
+	if name, derr := git.DefaultBranch(repoPath); derr == nil {
+		ref := landing.ForMerge(repoPath, name, true).Ref()
+		if _, rpErr := git.RevParse(repoPath, ref); rpErr != nil {
+			ref = landing.Self(repoPath, name).Ref()
+		}
+		data, found, err = git.FileAtRev(repoPath, ref, "sweatfile")
+		if err != nil {
+			return sweatfile.Hierarchy{}, "", fmt.Errorf("read sweatfile at %s: %w", ref, err)
+		}
+		src = "the repo sweatfile at " + ref
+		h, err = sweatfileio.LoadHierarchyWithLayer(home, repoPath, ref+":sweatfile", data, found)
+		return h, src, err
+	}
+	h, err = sweatfileio.LoadHierarchy(home, repoPath)
+	return h, src, err
+}
+
+func revoke(ctx context.Context, id Identity, st *session.State, cmd, dir string, w io.Writer) error {
 	// Revocation addresses the token by session id; the forge host/repo env
 	// is a convenience, so an origin that is not a forge URL (a local path)
 	// just leaves those two variables empty rather than blocking the revoke.
 	// The stored record (what the mint saw) wins over a re-parse of today's
 	// origin, so mint and revoke see the same values.
-	st, rerr := session.Read(id.RepoPath, id.Branch)
 	var (
 		remote    Remote
 		originURL string
 	)
-	if rerr == nil && st.Credential != nil && st.Credential.Remote != nil {
+	if st.Credential != nil && st.Credential.Remote != nil {
 		r := st.Credential.Remote
 		remote, originURL = Remote{Host: r.ForgeHost, OwnerRepo: r.ForgeRepo}, r.OriginURL
 	} else if u, parsed, oerr := readOrigin(id.RepoPath); oerr == nil {
@@ -575,7 +673,7 @@ func revoke(ctx context.Context, sf sweatfile.Sweatfile, id Identity, dir string
 	// Outside the devshell, like the url-resolver: a blocked .envrc made the
 	// orphan sweep's revoke fail (round P), and the devshell is head-controlled,
 	// so it must not be able to stop or steer a revocation either.
-	out, err := commandCaptureAmbient(ctx, dir, *cmd, id.env(remote, originURL))
+	out, err := commandCaptureAmbient(ctx, dir, cmd, id.env(remote, originURL))
 	if w != nil && out != "" {
 		_, _ = io.WriteString(w, out)
 	}
@@ -583,7 +681,7 @@ func revoke(ctx context.Context, sf sweatfile.Sweatfile, id Identity, dir string
 		return fmt.Errorf("[auth] revoke-command failed: %w", err)
 	}
 	now := time.Now().UTC()
-	if rerr == nil && st.Credential != nil {
+	if st.Credential != nil {
 		c := *st.Credential
 		c.RevokedAt = &now
 		_ = session.UpdateCredential(id.RepoPath, id.Branch, &c)
@@ -597,10 +695,12 @@ func revoke(ctx context.Context, sf sweatfile.Sweatfile, id Identity, dir string
 // spinclass). Runs at the next session creation, best-effort per session: a
 // failed revoke is reported and left for the next sweep (and for the issuer's
 // own TTL sweep). Returns how many were revoked.
-func SweepOrphans(ctx context.Context, sf sweatfile.Sweatfile, repoPath string, w io.Writer) (int, []error) {
-	if cmd := sf.AuthRevokeCommand(); cmd == nil || strings.TrimSpace(*cmd) == "" {
-		return 0, nil
-	}
+//
+// Each session is revoked with the command pinned on its record at mint; a
+// session with none configured is left alone. A legacy record (no pin) is
+// resolved once per sweep from the default branch (see revokeResolver), and a
+// remark saying so goes to w. No worktree sweatfile is read.
+func SweepOrphans(ctx context.Context, repoPath string, w io.Writer) (int, []error) {
 	states, err := session.ListAll(nil)
 	if err != nil {
 		return 0, []error{err}
@@ -608,17 +708,30 @@ func SweepOrphans(ctx context.Context, sf sweatfile.Sweatfile, repoPath string, 
 	var (
 		revoked int
 		errs    []error
+		rr      revokeResolver
 	)
-	for _, s := range states {
+	for i := range states {
+		s := &states[i]
 		if s.RepoPath != repoPath || s.Credential == nil || s.Credential.RevokedAt != nil {
 			continue
 		}
 		if s.ResolveState() != session.StateAbandoned {
 			continue
 		}
+		cmd, note, cerr := rr.command(s.Credential, repoPath)
+		if cerr != nil {
+			errs = append(errs, fmt.Errorf("%s: revoke-command could not be resolved: %w", s.SessionKey, cerr))
+			continue
+		}
+		if cmd == "" {
+			continue
+		}
+		if note != "" && w != nil {
+			_, _ = fmt.Fprintf(w, "spinclass: %s: %s\n", s.SessionKey, note)
+		}
 		id := Identity{RepoPath: s.RepoPath, WorktreePath: s.WorktreePath, Branch: s.Branch, SessionKey: s.SessionKey}
 		// The retry addresses the token by session id, so the file goes either way.
-		rerr := revoke(ctx, sf, id, repoPath, w)
+		rerr := revoke(ctx, id, s, cmd, repoPath, w)
 		RemoveCredential(s.WorktreePath)
 		if rerr != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", s.SessionKey, rerr))

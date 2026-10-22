@@ -2,6 +2,7 @@ package shop
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 	"testing"
 
 	"code.linenisgreat.com/spinclass/internal/auth"
+	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 
@@ -217,6 +220,39 @@ func TestCreateURLResolverFailureWithAllowNoCredentialSkipsWholeLane(t *testing.
 	}
 	if auth.Minted(a.rp.AbsPath) {
 		t.Error("a credential was written")
+	}
+}
+
+// The creation funnel pins the resolved revoke-command on the session record,
+// and resolves it without the new worktree's own sweatfile: a worktree layer
+// that disagrees with the trusted one changes neither the mint nor the pin.
+func TestCreatePinsTheRevokeCommandAndIgnoresTheWorktreeLayer(t *testing.T) {
+	a := setupAuthRepo(t)
+	writeFile(t, a.parentLayer(), "[auth]\nmint-command = \"echo tok\"\nrevoke-command = \"true\"\n")
+
+	worktreeMarker := filepath.Join(a.root, "worktree-mint")
+	if out, err := exec.Command("git", "-C", a.repo, "worktree", "add", "-b", "feature-x", a.rp.AbsPath).CombinedOutput(); err != nil {
+		t.Fatalf("worktree add: %v\n%s", err, out)
+	}
+	writeFile(t, filepath.Join(a.rp.AbsPath, "sweatfile"),
+		"[auth]\nmint-command = \"touch "+worktreeMarker+"; echo evil\"\nrevoke-command = \"touch "+worktreeMarker+"\"\n")
+	h, err := sweatfileio.LoadWorktreeHierarchy(a.root, a.repo, a.rp.AbsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ProvisionCredential(context.Background(), nil, h, a.rp, false); err != nil {
+		t.Fatalf("ProvisionCredential: %v", err)
+	}
+	if _, err := os.Stat(worktreeMarker); err == nil {
+		t.Error("the worktree sweatfile's mint-command ran")
+	}
+	st, err := session.Read(a.repo, "feature-x")
+	if err != nil || st.Credential == nil {
+		t.Fatalf("session record: %+v, %v", st, err)
+	}
+	if st.Credential.RevokeCommand == nil || *st.Credential.RevokeCommand != "true" {
+		t.Errorf("pinned revoke-command = %v, want the trusted layer's \"true\"", st.Credential.RevokeCommand)
 	}
 }
 

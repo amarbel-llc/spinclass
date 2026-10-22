@@ -121,7 +121,7 @@ func TestRunManySingleTargetKeepsFlatOutput(t *testing.T) {
 	if strings.Contains(out, "# Subtest:") {
 		t.Errorf("a single target must not be wrapped in a subtest:\n%s", out)
 	}
-	if !strings.Contains(out, "ok 1 - close solo") {
+	if !strings.Contains(out, "ok 2 - close solo") {
 		t.Errorf("output missing the flat close point:\n%s", out)
 	}
 }

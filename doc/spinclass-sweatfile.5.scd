@@ -750,6 +750,26 @@ with a *url-resolver* the last two are the canonical ones.
 	head-edited *.envrc* can neither stop nor steer a revocation, so its tools
 	must be on the operator's own *PATH*. *Merge:* scalar override.
 
+	The command is *pinned at mint*: the value resolved for the session
+	is stored in the session's credential record (frontend state, outside
+	every worktree), and *sc close*, *sc clean*, the merge teardown and the
+	orphan sweep all run that stored string. None of them reloads the
+	session worktree's sweatfile, which a worker can write and which would
+	otherwise make the frontend run a command of the worker's choosing. At
+	mint, spinclass resolves *[auth]* from the global sweatfile, the parent
+	directories, and the repo sweatfile as committed at the default branch
+	(the fetched remote-tracking ref when there is one), never from the
+	new worktree's own copy (a resurrected worktree is rebuilt from a
+	commit the worker authored). The decision to revoke comes from the
+	session record (a credential recorded and not yet revoked), not from the
+	credential file, and every reason nothing was revoked is reported as a
+	SKIP point. A session minted before the pin has no stored command: it
+	falls back to the global and parent-directory layers plus the repo
+	sweatfile at the default branch, and says so. Residual: a worker can
+	still change the revoke-command of the _next_ session by getting a
+	sweatfile change merged; that path is the merge gate's (attestation),
+	not this pin's.
+
 *forge-hosts*
 	Array of origin hosts the mint applies to. When non-empty, a session
 	whose origin host is not listed skips the mint (a visible SKIP point)

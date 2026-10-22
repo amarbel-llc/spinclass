@@ -266,6 +266,39 @@ func TestRunProvisionsCredentialThroughTrustedResolver(t *testing.T) {
 	}
 }
 
+// The worktree is rebuilt from a commit the worker authored, so resurrect's
+// mint must not read the sweatfile in it: the mint-command and revoke-command
+// come from the global/ancestor layers and the default branch, and the revoke
+// command is pinned from those.
+func TestRunMintDoesNotReadAWorktreeModifiedSweatfile(t *testing.T) {
+	evil := filepath.Join(t.TempDir(), "evil")
+	repoPath, wtPath := setupClosedSessionWith(t, "feature-x", func(wtPath string) {
+		mustCommitFile(t, wtPath, "sweatfile",
+			"[auth]\nmint-command = \"touch "+evil+"; echo evil-token\"\nrevoke-command = \"touch "+evil+"\"\n",
+			"worker-authored sweatfile")
+	})
+	setupResolverLane(t, repoPath,
+		`printf '%s\n' '{"canonical_https":"https://vanity.example.com/repo.git"}'`)
+
+	var buf bytes.Buffer
+	if err := Run(&buf, "repo/feature-x", "", "tap"); err != nil {
+		t.Fatalf("Run: %v\n%s", err, buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(wtPath, "sweatfile")); err != nil {
+		t.Fatalf("precondition: the worker's sweatfile must be in the resurrected worktree: %v", err)
+	}
+	if _, err := os.Stat(evil); err == nil {
+		t.Error("the worktree sweatfile's [auth] command ran at resurrect")
+	}
+	got, err := session.Read(repoPath, "feature-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Credential == nil || got.Credential.RevokeCommand == nil || *got.Credential.RevokeCommand != "true" {
+		t.Errorf("revoke-command pinned from the wrong layer: %+v", got.Credential)
+	}
+}
+
 // TestRunRefusesWhenURLResolverFails: a failed resolver is a failed mint —
 // the recreated worktree and branch are torn down and the tombstone stays
 // intact so the resurrect can be retried.

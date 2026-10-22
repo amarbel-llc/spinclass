@@ -891,32 +891,31 @@ func sessionKeyFor(repoPath, branch string) string {
 
 // revokeCredential runs [auth].revoke-command for a session that minted a
 // credential (FDR 0028), as one result-family test point on ts, before the
-// merge's teardown removes its worktree. Mirrors close.revokeCredential: a
-// failure is a severity=warn point, never a merge failure — the merge has
-// landed, and the issuer's TTL sweep is the backstop for the token.
+// merge's teardown removes its worktree. Mirrors close.revokeCredential: the
+// decision comes from the session record and the command is the one pinned at
+// mint (never the worktree's sweatfile); a failure is a severity=warn point,
+// never a merge failure — the merge has landed, and the issuer's TTL sweep is
+// the backstop for the token.
 func revokeCredential(ts *crap.TestStream, repoPath, wtPath, branch string) {
-	if !auth.Minted(wtPath) {
-		return
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-	h, err := sweatfileio.LoadWorktreeHierarchy(home, repoPath, wtPath)
-	if err != nil {
-		return
-	}
 	sessionKey := filepath.Base(repoPath) + "/" + branch
 	if st, rerr := session.Read(repoPath, branch); rerr == nil && st.SessionKey != "" {
 		sessionKey = st.SessionKey
 	}
 	var out bytes.Buffer
 	id := auth.Identity{RepoPath: repoPath, WorktreePath: wtPath, Branch: branch, SessionKey: sessionKey}
-	ran, rerr := auth.Revoke(context.Background(), h.Merged, id, &out)
-	if !ran {
+	outcome, rerr := auth.Revoke(context.Background(), id, &out)
+	desc := "revoke credential " + branch
+	if !outcome.Ran {
+		reason := outcome.Skipped
+		if outcome.Note != "" {
+			reason += " (" + outcome.Note + ")"
+		}
+		ts.Skip(desc, reason)
 		return
 	}
-	desc := "revoke credential " + branch
+	if outcome.Note != "" {
+		desc += " (" + outcome.Note + ")"
+	}
 	if rerr != nil {
 		diag := map[string]any{
 			"severity": "warn",
