@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -26,6 +28,26 @@ func classifyServeCaller() (bool, string) {
 		return true, fmt.Sprintf("state directory unresolved: %v", err)
 	}
 	return confinement.ClassifyServeCaller(confinement.Host{}, stateDir, os.Getenv("CLOWN_SESSION_ID"), os.Getpid())
+}
+
+// ungatedCLI adapts a tool body to RunCLI, the terminal path, which is not the
+// serve and so skips refuseConfinedServeCaller: a terminal has no serve
+// principal and would be refused as unclassifiable.
+func ungatedCLI[P any](run func(P) (string, error)) func(context.Context, json.RawMessage) error {
+	return func(_ context.Context, args json.RawMessage) error {
+		var p P
+		if len(args) > 0 {
+			if err := json.Unmarshal(args, &p); err != nil {
+				return fmt.Errorf("invalid arguments: %w", err)
+			}
+		}
+		text, err := run(p)
+		if err != nil {
+			return err
+		}
+		fmt.Println(text)
+		return nil
+	}
 }
 
 // refuseConfinedServeCaller returns the refusal for tool when this serve's

@@ -59,31 +59,73 @@ type gatedServeHandler struct {
 	// caller is shown to get past the gate without the tool doing anything.
 	harmlessArgs    string
 	harmlessRefusal string
+	// cliArgs run the same command through the CLI (`sc <cliArgs...>`), which
+	// must not be serve-gated; nil when the operator path is another command.
+	cliArgs    []string
+	cliRefusal string
 }
 
 // gatedServeHandlers lists every serve tool a confined caller may not use
 // (FDR 0035, "Serve handlers and the caller"). Each gets the same refusal.
 var gatedServeHandlers = []gatedServeHandler{
-	{"spawn-session", "sc spawn", handleSpawnSession, `{"brief":"do"}`, `{"repo":"somewhere"}`, "brief is required"},
-	{"resurrect", "sc resurrect", handleResurrect, `{"target":"worker/kid"}`, `{}`, "target is required"},
-	{"close-child-session", "sc close", handleCloseChildSession, `{"child":"worker/kid","force":true}`, `{}`, "child is required"},
+	{
+		tool: "spawn-session", operatorCommand: "sc spawn", handle: handleSpawnSession,
+		args: `{"brief":"do"}`, harmlessArgs: `{"repo":"somewhere"}`, harmlessRefusal: "brief is required",
+	},
+	{
+		tool: "resurrect", operatorCommand: "sc resurrect", handle: handleResurrect,
+		args: `{"target":"worker/kid"}`, harmlessArgs: `{}`, harmlessRefusal: "target is required",
+		cliArgs: []string{"resurrect", "--target", "nope/none"}, cliRefusal: "no spinclass session for target",
+	},
+	{
+		tool: "close-child-session", operatorCommand: "sc close", handle: handleCloseChildSession,
+		args: `{"child":"worker/kid","force":true}`, harmlessArgs: `{}`, harmlessRefusal: "child is required",
+		cliArgs: []string{"close-child-session", "--child", "nope/none"}, cliRefusal: "no spinclass session for child",
+	},
+	{
+		tool: "grant-session-handle", operatorCommand: "sc grant-session-handle", handle: handleGrantSessionHandle,
+		args: `{"child":"worker/kid","to":"someone"}`, harmlessArgs: `{}`, harmlessRefusal: "child is required",
+		cliArgs: []string{"grant-session-handle", "--child", "nope/none", "--to", "someone"}, cliRefusal: "nope/none",
+	},
+	{
+		tool: "list-handles accept", operatorCommand: "sc list-handles --accept", handle: handleListHandles,
+		args: `{"accept":true}`, harmlessArgs: `{"accept":true}`, harmlessRefusal: "no handles",
+		cliArgs: []string{"list-handles", "--accept"},
+	},
 }
 
-func TestCloseChildCLIIsNotServeGated(t *testing.T) {
+// Plain list-handles reads only the caller's own handles, so it stays open
+// to a confined caller; only accept is gated.
+func TestListHandlesWithoutAcceptIsOpenToAConfinedCaller(t *testing.T) {
 	asConfinedServeCaller(t, "a-confined-principal")
-	err := runCloseChildCLI(context.Background(), json.RawMessage(`{}`))
-	if err == nil || strings.Contains(err.Error(), "classifies as confined") || !strings.Contains(err.Error(), "child is required") {
-		t.Fatalf("sc close-child-session must reach its own validation, got %v", err)
+	res, err := handleListHandles(context.Background(), json.RawMessage(`{}`), nil)
+	if err != nil || res.IsErr || res.Text != "no handles" {
+		t.Fatalf("got err=%v %+v, want the plain listing", err, res)
 	}
 }
 
-// The operator's terminal path is not the serve, so it is not gated: a
-// terminal has no serve principal and would otherwise be refused.
-func TestResurrectCLIIsNotServeGated(t *testing.T) {
-	asConfinedServeCaller(t, "a-confined-principal")
-	err := runResurrectCLI(context.Background(), json.RawMessage(`{}`))
-	if err == nil || strings.Contains(err.Error(), "classifies as confined") || !strings.Contains(err.Error(), "target is required") {
-		t.Fatalf("sc resurrect must reach its own validation, got %v", err)
+// The terminal path is not the serve, so it is not gated: a terminal has no
+// serve principal and would otherwise be refused. Run through buildApp so the
+// RunCLI wiring itself is what is tested.
+func TestGatedServeToolsCLIIsNotServeGated(t *testing.T) {
+	for _, h := range gatedServeHandlers {
+		if h.cliArgs == nil {
+			continue
+		}
+		t.Run(h.tool, func(t *testing.T) {
+			asConfinedServeCaller(t, "a-confined-principal")
+			t.Setenv("HOME", t.TempDir())
+			err := buildApp().RunCLI(context.Background(), h.cliArgs, nil)
+			if h.cliRefusal == "" {
+				if err != nil {
+					t.Fatalf("sc %s must succeed ungated, got %v", strings.Join(h.cliArgs, " "), err)
+				}
+				return
+			}
+			if err == nil || strings.Contains(err.Error(), "classifies as confined") || !strings.Contains(err.Error(), h.cliRefusal) {
+				t.Fatalf("sc %s must reach its own validation (%q), got %v", strings.Join(h.cliArgs, " "), h.cliRefusal, err)
+			}
+		})
 	}
 }
 

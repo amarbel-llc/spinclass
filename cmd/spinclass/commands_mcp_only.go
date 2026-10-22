@@ -257,7 +257,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		},
 		Params: closeChildSessionParamList(),
 		Run:    wrapMCPHandler("close-child-session", handleCloseChildSession),
-		RunCLI: runCloseChildCLI,
+		RunCLI: ungatedCLI(runCloseChild),
 	})
 
 	app.AddCommand(&command.Command{
@@ -290,6 +290,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		},
 		Params: grantSessionHandleParamList(),
 		Run:    wrapMCPHandler("grant-session-handle", handleGrantSessionHandle),
+		RunCLI: ungatedCLI(runGrantSessionHandle),
 	})
 
 	app.AddCommand(&command.Command{
@@ -326,6 +327,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		},
 		Params: listHandlesParamList(),
 		Run:    wrapMCPHandler("list-handles", handleListHandles),
+		RunCLI: ungatedCLI(runListHandles),
 	})
 
 	app.AddCommand(&command.Command{
@@ -363,7 +365,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		},
 		Params: resurrectParamList(),
 		Run:    wrapMCPHandler("resurrect", handleResurrect),
-		RunCLI: runResurrectCLI,
+		RunCLI: ungatedCLI(runResurrect),
 	})
 }
 

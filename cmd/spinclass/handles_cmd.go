@@ -146,8 +146,13 @@ func runGrantSessionHandle(p grantHandleParams) (string, error) {
 	), nil
 }
 
-// handleGrantSessionHandle is the `grant-session-handle` MCP tool handler.
+// handleGrantSessionHandle is the `grant-session-handle` MCP tool handler. A
+// grant hands reap and grant authority to any principal named in `to`, so a
+// confined caller is refused before anything else.
 func handleGrantSessionHandle(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller("grant-session-handle", "sc grant-session-handle"); refusal != nil {
+		return refusal, nil
+	}
 	var p grantHandleParams
 	if err := json.Unmarshal(args, &p); err != nil {
 		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
@@ -326,11 +331,22 @@ func runListHandles(p listHandlesParams) (string, error) {
 	return strings.Join(lines, "\n"), nil
 }
 
-// handleListHandles is the `list-handles` MCP tool handler.
+// handleListHandles is the `list-handles` MCP tool handler. Listing reads only
+// the caller's own handles and stays open; `accept` turns pending grants into
+// authority, so with it a confined caller is refused. Arguments that do not
+// parse are refused like an accept.
 func handleListHandles(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	var p listHandlesParams
 	if err := json.Unmarshal(args, &p); err != nil {
+		if refusal := refuseConfinedServeCaller("list-handles accept", "sc list-handles --accept"); refusal != nil {
+			return refusal, nil
+		}
 		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+	}
+	if p.Accept {
+		if refusal := refuseConfinedServeCaller("list-handles accept", "sc list-handles --accept"); refusal != nil {
+			return refusal, nil
+		}
 	}
 	text, err := runListHandles(p)
 	if err != nil {

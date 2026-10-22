@@ -59,22 +59,6 @@ func handleResurrect(_ context.Context, args json.RawMessage, _ command.Prompter
 	return command.TextResult(text), nil
 }
 
-// runResurrectCLI is `sc resurrect`, the operator's path. It skips the serve
-// caller gate, which classifies a serve's principal and would refuse a
-// terminal that has none.
-func runResurrectCLI(_ context.Context, args json.RawMessage) error {
-	var p resurrectParams
-	if err := json.Unmarshal(args, &p); err != nil {
-		return fmt.Errorf("invalid arguments: %w", err)
-	}
-	text, err := runResurrect(p)
-	if err != nil {
-		return err
-	}
-	fmt.Print(text)
-	return nil
-}
-
 // resurrectParamList declares the `resurrect` parameters.
 func resurrectParamList() []command.Param {
 	return []command.Param{
