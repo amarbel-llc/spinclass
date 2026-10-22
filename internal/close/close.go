@@ -246,10 +246,10 @@ func runResolvedInto(tw *tap.Writer, repoPath, wtPath, branch string, force bool
 	// state write lands before we tombstone (and then for the worktree dir to
 	// be free for git to remove). Best-effort: WaitForExit returns when the PID
 	// is gone or the deadline passes; a declined signal waits on nothing.
-	signalled, note := executor.RequestClose(repoPath, branch)
+	signalled, note := requestClose(repoPath, branch)
 	if note != "" {
 		if tw != nil {
-			tw.Comment("close " + branch + ": " + note)
+			tw.Comment("close %s: %s", branch, note)
 		} else {
 			fmt.Fprintf(os.Stderr, "spinclass: close %s: %s\n", branch, note)
 		}
@@ -361,6 +361,9 @@ func activeKey(repoPath, branch string) string {
 	}
 	return filepath.Base(repoPath) + "/" + branch
 }
+
+// requestClose is the seam over executor.RequestClose for tests.
+var requestClose = executor.RequestClose
 
 // stopUnit is the seam over confinement.StopUnit for tests.
 var stopUnit = func(ctx context.Context, stateDir, wtPath string) (bool, error) {

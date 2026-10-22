@@ -495,6 +495,30 @@ func TestRunResolvedUnbindsTheSessionsProfileGrant(t *testing.T) {
 	}
 }
 
+// A refused close asks no process to exit: the signal comes only after the
+// refusal and the confirmation (FDR 0035 "Session PIDs are untrusted"). A
+// forced close of the same session does ask.
+func TestRefusedCloseSendsNoSignal(t *testing.T) {
+	repoPath, wtPath := setupNoTTYClose(t)
+	prev := requestClose
+	t.Cleanup(func() { requestClose = prev })
+	calls := 0
+	requestClose = func(string, string) (int, string) { calls++; return 0, "" }
+
+	if err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", false, nil, "tap"); err == nil {
+		t.Fatal("precondition: an unintegrated close without a terminal must be refused")
+	}
+	if calls != 0 {
+		t.Fatalf("a refused close requested a signal %d time(s)", calls)
+	}
+	if err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", true, nil, "tap"); err != nil {
+		t.Fatalf("forced close: %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("a forced close requested a signal %d time(s), want 1", calls)
+	}
+}
+
 // A confined worker's agent unit must not outlive its worktree: close stops it
 // first, and a unit that will not stop fails the close unless forced.
 func TestRunResolvedStopsTheSessionsAgentUnit(t *testing.T) {

@@ -243,8 +243,12 @@ principal, the PID is now untrusted input:
   environment carries `SPINCLASS_SESSION_ID=<key>`. A PID it cannot prove is
   not signalled, and close says so. Tests cover a foreign PID, a reused PID,
   PID 0, a dead PID, and a confined record (valid or not);
-- close signals only after the unintegrated/dirty refusal and the
-  confirmation.
+- **a refusal precedes any signal.** Close signals only after the
+  unintegrated/dirty/shelf refusal and the confirmation, so a refused or
+  declined close sends nothing (`TestRefusedCloseSendsNoSignal`). Before this
+  fix the signal came first. On flic, refused `close-child-session` calls on
+  two unconfined sessions were followed by those sessions exiting (the
+  coordinator's observation, 2026-10-22).
 
 Audit of every reader of a recorded PID (file:line at the time of this change):
 
