@@ -1169,8 +1169,7 @@ entry carries no `{principal}`; otherwise it warns.
 Until this landed, a confined worker could destroy or hijack ANOTHER session
 through its own record, because the frontend acted on the content of the
 worker-writable `state.json`. The routes, each with the forged-record test that
-shows it closed. **Tests pending** marks a route the change addresses but no
-test yet exercises; treat those as unproven.
+shows it closed:
 
 - **`sc clean`**: the abandoned-session sweep took RepoPath/Branch from the
   record and `session.Remove` derived the path to delete from them, so a forged
@@ -1182,8 +1181,10 @@ test yet exercises; treat those as unproven.
   session layer, `TestForgedWorktreeCopyCannotRemoveAnotherSession` and
   `TestForgedWorktreeCopyCannotTombstoneAnotherSession`;
   `close-child-session`, `TestCloseChildIgnoresAForgedWorktreeRecord`;
-  `close-self-run`, `TestCloseSelfRunIgnoresAForgedRequestPrincipal`. **Tests
-  pending**: `sc close` at the command level, and merge teardown.
+  `close-self-run`, `TestCloseSelfRunIgnoresAForgedRequestPrincipal`; `sc close`
+  at the command level, `TestScCloseIgnoresAForgedWorktreeRecord`; merge
+  teardown, through the whole Resolved path,
+  `TestMergeTeardownIgnoresAForgedWorktreeRecord`.
 - **handle accept/grant writes**: `session.Write` wrote to the record's own
   WorktreePath, so accepting or granting on the worker wrote the victim's record.
   Tests: `TestHandlesIgnoreAForgedWorktreeRecord`,
@@ -1193,8 +1194,8 @@ test yet exercises; treat those as unproven.
   `TestResumeIgnoresAForgedWorktreeRecord`.
 - **revoke**: `credential.revoke_command` in the record ran on the frontend at
   close and in the orphan sweep. Test: the orphan sweep,
-  `TestSweepOrphansIgnoresAForgedWorktreeRecord`. **Tests pending**: a forged
-  revoke command at close.
+  `TestSweepOrphansIgnoresAForgedWorktreeRecord`; at close,
+  `TestScCloseDoesNotRunAForgedRevokeCommand`.
 - **principal scan**: tests `TestSessionKeyOfPrincipalWithoutAMappingFailsClosed`
   and `TestWorktreeOfPrincipalReadsOnlyTheFrontendMapping`.
 - **resurrect** trusting a tombstone copied from a worker-writable file: tests
@@ -1205,8 +1206,16 @@ test yet exercises; treat those as unproven.
   spawn.log and spawn-window.log, `TestStartDetachedDoesNotFollowAPlantedLogSymlink`;
   the lock, `TestUpdateLockDoesNotFollowPlantedSymlink`; the directory,
   `TestSymlinkedSpinclassDirIsNeverFollowed`.
-- **Tests pending**: `FindByTarget` collisions on forged keys, and attestation
-  presence.
+- **`FindByTarget` collisions on forged keys**: tests
+  `TestFindByTargetIgnoresAForgedKeyCollision` and
+  `TestFindByTargetDoesNotResolveAKeyOnlyAForgedCopyNames`.
+- **attestation presence**: the attestation lives in the frontend record, so a
+  forged copy cannot fabricate, release or resurrect one: tests
+  `TestForgedWorktreeCopyCannotFabricateAnAttestation`,
+  `TestForgedWorktreeCopyCannotReleaseALiveClaim`,
+  `TestForgedWorktreeCopyCannotResurrectAConsumedAttestation`. Not covered:
+  an implicit (main-checkout) session's attestation lives in a file under its
+  checkout's `.spinclass/`, outside this model.
 
 What changed:
 
@@ -1233,16 +1242,19 @@ What changed:
 - Inside a unit the record is unreachable: the SessionStart hook writes only the
   display copy and never fails. For a confined session the frontend adopts
   HelloSentAt, SessionState and Principal when its hello wait receives the
-  hello (`spawn.adoptConfinedWorker`; **tests pending**; the principal bind
-  before the wait is tested, `TestWaitHelloBindsThePrincipalBeforeWaitingForTheHello`).
+  hello (`spawn.adoptConfinedWorker`, tested directly, not through the full
+  hello wait: `TestAdoptConfinedWorkerRecordsOnlyWhatTheFrontendKnows` and two
+  variants; the principal bind before the wait,
+  `TestWaitHelloBindsThePrincipalBeforeWaitingForTheHello`).
   In-unit reads (EffectiveSpawner, OtherHolders) are not authority.
 - `session.SessionKeyOfPrincipal` (the record scan) is gone. A principal
   resolves only through a frontend mapping file; with none, callers fail closed
   naming the principal and the mapping path. Unconfined sessions get a
   frontend-written mapping from the SessionStart hook
-  (`hooks.bindUnconfinedPrincipal`; **tests pending** for the hook path; the
-  mapping write itself is tested,
-  `TestSessionKeyOfPrincipalResolvesAnUnconfinedMapping`).
+  (`hooks.bindUnconfinedPrincipal`, through SessionStart:
+  `TestSessionStartBindsAnUnconfinedPrincipalMapping`; none inside a unit or
+  for a confined launch, `TestSessionStartInsideAUnitWritesNoPrincipalMapping`,
+  `TestSessionStartForAConfinedLaunchWritesNoUnconfinedMapping`).
 - Frontend writes under `<wt>/.spinclass` use `O_NOFOLLOW` (`internal/safeio`).
 
 **UNCONFINED workers can still write their own record, and the frontend
