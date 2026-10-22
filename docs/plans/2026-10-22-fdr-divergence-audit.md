@@ -36,21 +36,30 @@ All five are "security". The first two were found by the audit, not by a live
 round. They are inferred from the code, were not exploited, and are now fixed.
 
 1. **0035 row 183: the `unconfined` ask could be bypassed.** The ask lived
-   only in the agent-side PreToolUse hook. `handleSpawnSession` did not
-   classify its caller, so a process in the unit that reached the serve's MCP
-   (F12) could spawn an unconfined worker as the operator.
-   - Fixed in 029c3c8: the serve refuses any spawn from a confined or
-     unclassifiable caller.
+   only in the agent-side PreToolUse hook, and `handleSpawnSession` did not
+   classify its caller. So a confined worker's call to its own frontend serve
+   could spawn an unconfined worker as the operator.
+   - Fixed in 029c3c8 for that case (vantage A): the serve refuses any spawn
+     from a confined or unclassifiable caller.
+   - **Correction.** This entry first said the fix covered "a process that
+     reached the serve's MCP (F12)". It does not: the classification sees the
+     serve's own principal, so a process dialling another session's serve
+     (vantage B) is classified as that session. B is inferred, not observed;
+     see `2026-10-22-fdr-divergence-audit/serve-handler-risk.md`.
 2. **0035 row 195: close-self-run trusted a forged principal.**
    `close_self_cmd.go:210` took the principal from `CloseRequest.Principal`
    in agent-writable session state, so a forged value skipped the orphan
    check.
    - Fixed in 8446b92: the principal comes from the frontend mapping, and a
      confined session with no mapping is refused.
-3. **0035 rows 82/125 (F12): the serve is reachable on loopback.** This is
-   the shared root of rows 183 and 195, and of the open item below: no other
-   serve tool classifies its caller. The handler list is in FDR 0035, "Serve
-   handlers and the caller". F12 is clown's to fix.
+3. **0035 rows 82/125 (F12): no per-session serve socket.** F12 fails
+   because the unit record names no `serve_socket` (`probes.go:1224`). It
+   never connected to anything, so "the serve is reachable from the unit" was
+   an inference, and F13 (private network namespace) passing argues against
+   it. Until a round measures it (FDR 0035 lists the probes), cross-serve
+   reachability (vantage B) is open and unproven. The per-handler gates cover
+   vantage A; ranks and gates are in `serve-handler-risk.md`. Per-session
+   sockets are clown's.
 4. **0032 row 32-23 (D13): handle rights are recorded, not enforced.** An
    `observe`-only holder can reap, grant and release.
    - Evidence: `close_child_cmd.go:59-73`, `handles_cmd.go:118-122`.

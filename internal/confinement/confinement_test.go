@@ -878,8 +878,10 @@ func TestAmbiguousErrorsFailClosed(t *testing.T) {
 func TestMissingServeSocketFailsF12(t *testing.T) {
 	sys, in := confinedHost()
 	sys.files[UnitRecordPath(stateDir, "/wt/a")] = record("agent-a.service", unitCG, ptyDev, "", 100)
-	if f := factByID(t, Run(sys, in), "F12"); f.OK || !strings.Contains(f.Detail, "loopback") {
-		t.Errorf("F12 = %+v, want a failure naming loopback", f)
+	// The failure says what F12 could not check; it must not claim the other
+	// serves are reachable, which nothing measured.
+	if f := factByID(t, Run(sys, in), "F12"); f.OK || !strings.Contains(f.Detail, "no per-session serve socket") || !strings.Contains(f.Detail, "not measured") {
+		t.Errorf("F12 = %+v, want a failure naming the missing socket and saying nothing was measured", f)
 	}
 }
 

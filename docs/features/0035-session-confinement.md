@@ -194,7 +194,8 @@ exercised on a real unit, and so **unverified until a live canary**:
     not only the child's own file, as "Spawn side" requires. A confined worker
     could authenticate to troupe as any session on the host (inferred from the
     uid and the file modes; no file was read). Reported for clown.
-  - F12 still fails (loopback serve; clown).
+  - F12 still fails: the record names no `serve_socket` (clown). Nothing was
+    connected to, so this says nothing about reachability.
 - O, worker canary/bright-banyan (nikulin, spinclass e8bede1, clown c0ec56b,
   2026-10-22): **33 of 33 troupe account password files are readable from the
   confined unit.** `troupe/accounts` is mode 0700 and each file 0600, all
@@ -220,8 +221,8 @@ exercised on a real unit, and so **unverified until a live canary**:
 - P (per the round P report, 2026-10-22): clown's troupe fix closed the
   account-file exposure. F10's zombie count grew from 2 to 6 across the
   rounds; they are counted apart (below) and are a clown hygiene item, not a
-  cut failure. F11 (the genuinely unconfined driver) and F12 (loopback serve,
-  clown) remain the open failures.
+  cut failure. F11 (the genuinely unconfined driver) and F12 (no `serve_socket` in
+  the record, clown) remain the open failures.
 - **F10 and F14 were check gaps, not cut failures (inferred, 2026-10-22).**
   - F10 counted every numeric `/proc` entry in the unit against the unit's
     cgroup. The overcount grew over the rounds (+2, +3, +5), which fits
@@ -239,22 +240,58 @@ exercised on a real unit, and so **unverified until a live canary**:
 
 These were found by the audit (`docs/plans/2026-10-22-fdr-divergence-audit.md`),
 not by a live round. They are inferred from the code and were not exploited.
-The shared root is F12: while the serve is reachable on loopback, a process in
-the unit can call any serve tool directly, so the agent-side PreToolUse hook is
-no gate.
+The agent-side PreToolUse hook is no boundary (EPIC 0001 principle 7), so
+each serve tool must decide for itself. A caller reaches a serve tool from
+two vantages:
 
-- **Fixed: `spawn-session` (audit row 183).** The serve classifies its caller
-  with `ClassifyServeCaller` before reading any parameter and refuses a
-  confined caller, whatever it asks for. An unclassifiable caller counts as
-  confined. Before, the `unconfined` ask lived only in the hook.
+- **A, the worker's own frontend serve.** That serve's principal is the one
+  the unit record names, so `ClassifyServeCaller` (which classifies the
+  serve's own principal, not whoever dialled it) says "confined", and a
+  handler gate refuses. Gated so far:
+  - `spawn-session` (audit row 183): 029c3c8, then the shared
+    `refuseConfinedServeCaller` (819a3d4);
+  - `resurrect`: 819a3d4.
+- **B, another session's serve.** That serve classifies itself as
+  unconfined, so a handler gate does not help. B is **inferred, not
+  observed.**
+  - Units run `PrivateNetwork=yes` (F13 passed in rounds K and N), so the
+    host's 127.0.0.1 is not the unit's loopback.
+  - The remaining paths are clown's: a peer-checked forward to the wrong
+    target, or the egress proxy if a spec's `egress_allow` or
+    `ANTHROPIC_BASE_URL` allowlists a loopback port.
+  - The next confined round probes both (below).
+  - **F12 never measured reachability.** It fails when the unit record names
+    no `serve_socket`, before any connect (`probes.go:1224`). Earlier wording
+    here and in the probe text said "every unit can reach every session's
+    serve"; that was an inference and is corrected.
+
+Probes for the next confined round, to turn B into a measured fact:
+- from the unit, a raw TCP connect to `127.0.0.1:<the driver's serve bridge
+  port>` (the port is clown's to publish). "Refused" is `ECONNREFUSED` on the
+  unit's own loopback; "reached" is a handshake that answers MCP `initialize`
+  with `serverInfo` spinclass;
+- the same target through the egress proxy: "refused" is a non-2xx
+  `CONNECT`; "reached" is `CONNECT` 200 and the same MCP answer;
+- each peer-checked forward: it reaches only the unit's own session;
+- whether any live spec's `egress_allow` or `ANTHROPIC_BASE_URL` names a
+  loopback address.
+
+The findings:
+
+- **Fixed: `spawn-session` (audit row 183), vantage A.** The serve classifies
+  its caller with `ClassifyServeCaller` before reading any parameter and
+  refuses a confined caller, whatever it asks for. An unclassifiable caller
+  counts as confined. Before, the `unconfined` ask lived only in the hook.
 - **Fixed: `close-self-run` (audit row 195).** The runner never reads
   `CloseRequest.Principal`, which the agent can rewrite. It takes the
   principal from the frontend mapping. A session launched confined with no
   mapping is refused. An unconfined one falls back to the runner's own
   principal, then the recorded one.
-- **Open: no other serve tool classifies its caller.** Only the grit tools
-  (`grit_cmd.go:272`) and `spawn-session` (`spawn_cmd.go:188`) call
-  `ClassifyServeCaller`. This is a list, not a verdict on each tool's risk:
+- **Being gated, in rank order:** the serve tools below. The ranking and the
+  worst case for each are in
+  `docs/plans/2026-10-22-fdr-divergence-audit/serve-handler-risk.md`.
+  Before the gates, only the grit tools (`grit_cmd.go:272`) classified their
+  caller:
 
 | Tool | Handler | Authority it relies on today |
 |---|---|---|

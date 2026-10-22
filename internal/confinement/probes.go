@@ -1222,7 +1222,7 @@ func (p *prober) f12OnlyOwnServe() Fact {
 			return err
 		}
 		if p.rec.ServeSocket == "" {
-			return errors.New("the unit record names no per-session serve socket; serve is still on loopback, where every unit can reach every session's serve")
+			return errors.New("the unit record names no per-session serve socket, so F12 cannot check that no other session's serve is reachable from the unit (not measured either way)")
 		}
 		keys := make([]string, 0, len(p.liveUnits))
 		for k := range p.liveUnits {
