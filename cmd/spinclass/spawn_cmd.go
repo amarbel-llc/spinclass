@@ -11,6 +11,7 @@ import (
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/clown"
+	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/spawn"
 )
@@ -173,13 +174,32 @@ func runSpawnCLI(_ context.Context, args json.RawMessage) error {
 	return nil
 }
 
-// handleSpawnSession is the `spawn-session` MCP tool handler. It is async-only
+// spawnServeCallerConfined classifies the caller of this serve the way the
+// grit tools do (ClassifyServeCaller) and fails closed: an unresolvable state
+// directory or principal counts as confined. It is a variable so tests can
+// stand in for the frontend state.
+var spawnServeCallerConfined = classifySpawnServeCaller
+
+func classifySpawnServeCaller() (bool, string) {
+	stateDir, err := confinement.DefaultStateDir()
+	if err != nil {
+		return true, fmt.Sprintf("state directory unresolved: %v", err)
+	}
+	return confinement.ClassifyServeCaller(confinement.Host{}, stateDir, os.Getenv("CLOWN_SESSION_ID"), os.Getpid())
+}
+
+// handleSpawnSession is the `spawn-session` MCP tool handler. A caller that
+// classifies as confined is refused before anything else, whatever it asks for
+// (FDR 0035): the serve, not the client, decides who may spawn. It is async-only
 // by design (spinclass#266): under clown it returns the session key + a
 // ringmaster job id immediately and delivers the worker's SessionStart hello as
 // a job-wakeup (handleSpawnSessionAsync). Without clown there is no wake
 // channel, so it falls back to the synchronous spawn (block on the hello and
 // return the result inline) — the same path the `sc spawn` CLI uses.
 func handleSpawnSession(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if confined, why := spawnServeCallerConfined(); confined {
+		return command.TextErrorResult(fmt.Sprintf("spawn-session refused: the caller classifies as confined (%s); a confined session may not spawn workers", why)), nil
+	}
 	var params spawnParams
 	if err := json.Unmarshal(args, &params); err != nil {
 		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil

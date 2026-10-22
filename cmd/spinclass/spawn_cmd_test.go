@@ -30,6 +30,7 @@ func TestHandleSpawnSessionValidation(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("SPINCLASS_SESSION_ID", "driver/test-session")
+	stubSpawnCallerUnconfined(t)
 
 	cases := []struct {
 		name string
@@ -59,6 +60,111 @@ func TestHandleSpawnSessionValidation(t *testing.T) {
 				t.Errorf("error text = %q, want it to contain %q", res.Text, tc.want)
 			}
 		})
+	}
+}
+
+func stubSpawnCallerUnconfined(t *testing.T) {
+	t.Helper()
+	original := spawnServeCallerConfined
+	t.Cleanup(func() { spawnServeCallerConfined = original })
+	spawnServeCallerConfined = func() (bool, string) { return false, "stubbed unconfined" }
+}
+
+// writeUnitRecordNaming plants a frontend unit record naming principal, which
+// is what makes ClassifyServeCaller call that principal confined.
+func writeUnitRecordNaming(t *testing.T, stateDir, principal string) {
+	t.Helper()
+	dir := filepath.Join(stateDir, "spinclass", "units")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	raw := fmt.Sprintf(`{"principal":%q}`, principal)
+	if err := os.WriteFile(filepath.Join(dir, "deadbeef.json"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A caller the serve classifies as confined is refused whatever it asks for,
+// and before any parameter is even read (FDR 0035; found by the FDR
+// divergence audit). These use the real classifier, not the stub.
+func TestHandleSpawnSessionRefusesAConfinedCaller(t *testing.T) {
+	const principal = "a-confined-principal"
+	cases := []struct {
+		name string
+		args string
+	}{
+		{"asking for unconfined", `{"brief":"do","unconfined":true}`},
+		{"asking for confined", `{"brief":"do","confined":true}`},
+		{"asking for a plain spawn", `{"brief":"do"}`},
+		{"with arguments that do not even parse", `not json`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := t.TempDir()
+			t.Setenv("XDG_STATE_HOME", stateDir)
+			t.Setenv("CLOWN_SESSION_ID", principal)
+			removeRecord, err := registerServeRecord()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(removeRecord)
+			writeUnitRecordNaming(t, stateDir, principal)
+
+			res, err := handleSpawnSession(context.Background(), json.RawMessage(tc.args), nil)
+			if err != nil {
+				t.Fatalf("handleSpawnSession: %v", err)
+			}
+			if !res.IsErr || !strings.Contains(res.Text, "classifies as confined") {
+				t.Fatalf("a confined caller must be refused, got IsErr=%v %q", res.IsErr, res.Text)
+			}
+		})
+	}
+}
+
+func TestHandleSpawnSessionRefusesAnUnclassifiableCaller(t *testing.T) {
+	cases := []struct {
+		name      string
+		principal string
+	}{
+		{"no principal", ""},
+		{"a principal with no serve record", "a-principal-with-no-records"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
+			t.Setenv("CLOWN_SESSION_ID", tc.principal)
+			res, err := handleSpawnSession(context.Background(), json.RawMessage(`{"brief":"do"}`), nil)
+			if err != nil {
+				t.Fatalf("handleSpawnSession: %v", err)
+			}
+			if !res.IsErr || !strings.Contains(res.Text, "classifies as confined") {
+				t.Fatalf("an unclassifiable caller must be refused, got IsErr=%v %q", res.IsErr, res.Text)
+			}
+		})
+	}
+}
+
+// An operator caller (a recorded serve whose principal no unit record names)
+// passes the gate and reaches ordinary parameter validation.
+func TestHandleSpawnSessionLetsAnUnconfinedCallerThrough(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CLOWN_SESSION_ID", "an-operator-principal")
+	removeRecord, err := registerServeRecord()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(removeRecord)
+
+	res, err := handleSpawnSession(context.Background(), json.RawMessage(`{"repo":"somewhere"}`), nil)
+	if err != nil {
+		t.Fatalf("handleSpawnSession: %v", err)
+	}
+	if strings.Contains(res.Text, "classifies as confined") {
+		t.Fatalf("an unconfined caller must not be refused by the gate: %q", res.Text)
+	}
+	if !strings.Contains(res.Text, "brief is required") {
+		t.Fatalf("want ordinary validation to run, got %q", res.Text)
 	}
 }
 
@@ -120,6 +226,7 @@ func newSpawnCmdFixture(t *testing.T, sweatfileTOML, driverKey string) (home, re
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
 	t.Setenv("SPINCLASS_SESSION_ID", driverKey)
 	t.Setenv("CLOWN_SESSION_ID", testDriverPrincipal)
+	stubSpawnCallerUnconfined(t)
 	repoPath = filepath.Join(home, "eng", "repos", "worker")
 	if err := os.MkdirAll(repoPath, 0o755); err != nil {
 		t.Fatal(err)
