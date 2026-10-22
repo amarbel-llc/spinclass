@@ -3,6 +3,7 @@ package confinement
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -96,6 +97,91 @@ func TestStopUnitSucceedsWhenStopFailsButTheUnitIsAlreadyGone(t *testing.T) {
 	ok, err := StopUnit(context.Background(), sys, stateDir, "/wt/a")
 	if err != nil || !ok || len(*removed) != 2 {
 		t.Errorf("got (%v, %v) removed=%v, want success for an already-gone unit", ok, err, *removed)
+	}
+}
+
+// A record clown rewrote to report a failed launch must not block close/clean.
+func TestStopUnitErrorRecordWithoutAUnitIsClearedWithoutStopping(t *testing.T) {
+	sys, stopped, removed := stopFixture(t, stopUnit, stopCG)
+	sys.files[UnitRecordPath(stateDir, "/wt/a")] = `{"version":1,"error":"unit did not start its provider within 2m"}`
+	ok, err := StopUnit(context.Background(), sys, stateDir, "/wt/a")
+	if err != nil || ok || len(*stopped) != 0 {
+		t.Fatalf("got (%v, %v) stopped=%v, want (false, nil) and no stop call", ok, err, *stopped)
+	}
+	want := []string{UnitRecordPath(stateDir, "/wt/a"), UnitSpecPath(stateDir, "/wt/a")}
+	if strings.Join(*removed, ",") != strings.Join(want, ",") {
+		t.Errorf("removed %v, want %v", *removed, want)
+	}
+}
+
+func TestStopUnitErrorRecordWithAUnitStopsItAndRemovesTheRecords(t *testing.T) {
+	sys, stopped, removed := stopFixture(t, stopUnit, stopCG)
+	sys.files[UnitRecordPath(stateDir, "/wt/a")] = `{"version":1,"unit":"` + stopUnit + `","cgroup":"` + stopCG + `","error":"shim refused"}`
+	ok, err := StopUnit(context.Background(), sys, stateDir, "/wt/a")
+	if err != nil || !ok {
+		t.Fatalf("got (%v, %v), want stopped", ok, err)
+	}
+	if len(*stopped) != 1 || (*stopped)[0] != stopUnit {
+		t.Errorf("systemctl stop called with %v, want [%s]", *stopped, stopUnit)
+	}
+	if len(*removed) != 2 {
+		t.Errorf("removed %v, want the record and the spec", *removed)
+	}
+}
+
+func TestStopUnitErrorRecordNamingAForeignUnitIsRefused(t *testing.T) {
+	sys, stopped, removed := stopFixture(t, stopUnit, stopCG)
+	sys.files[UnitRecordPath(stateDir, "/wt/a")] = `{"version":1,"unit":"dbus.service","cgroup":"` + slice + `/dbus.service","error":"x"}`
+	ok, err := StopUnit(context.Background(), sys, stateDir, "/wt/a")
+	if err == nil || ok || len(*stopped) != 0 || len(*removed) != 0 {
+		t.Errorf("got (%v, %v) stopped=%v removed=%v, want a refusal", ok, err, *stopped, *removed)
+	}
+}
+
+func TestStopUnitGarbageRecordIsRefusedAndNothingIsRemoved(t *testing.T) {
+	sys, stopped, removed := stopFixture(t, stopUnit, stopCG)
+	sys.files[UnitRecordPath(stateDir, "/wt/a")] = `{not json`
+	ok, err := StopUnit(context.Background(), sys, stateDir, "/wt/a")
+	if err == nil || ok || len(*stopped) != 0 || len(*removed) != 0 {
+		t.Errorf("got (%v, %v) stopped=%v removed=%v, want a refusal that removes nothing", ok, err, *stopped, *removed)
+	}
+}
+
+// An exited unit's record (exit_code set, no error) stops like any other.
+func TestStopUnitAcceptsARecordWithAnExitCode(t *testing.T) {
+	sys, _, removed := stopFixture(t, stopUnit, stopCG)
+	sys.files[UnitRecordPath(stateDir, "/wt/a")] = strings.TrimSuffix(record(stopUnit, stopCG, 0, "", 0), "}") + `,"exit_code":2}`
+	sys.files[stopProc] = ""
+	systemctlStop = func(context.Context, string) error { return errors.New("Unit not loaded") }
+	ok, err := StopUnit(context.Background(), sys, stateDir, "/wt/a")
+	if err != nil || !ok || len(*removed) != 2 {
+		t.Errorf("got (%v, %v) removed=%v, want success", ok, err, *removed)
+	}
+}
+
+func TestUnitExitCodeAndRunning(t *testing.T) {
+	sys, _ := confinedHost()
+	wt := "/wt/b"
+	orig := sys.files[UnitRecordPath(stateDir, wt)]
+	if _, exited := unitExitCode(sys, stateDir, wt); exited {
+		t.Error("record without exit_code: want not exited")
+	}
+	if !unitRunning(sys, stateDir, wt) {
+		t.Error("record without exit_code and a populated cgroup: want running")
+	}
+	for name, tc := range map[string]int{"zero": 0, "nonzero": 3} {
+		sys.files[UnitRecordPath(stateDir, wt)] = strings.TrimSuffix(orig, "}") + `,"exit_code":` + strconv.Itoa(tc) + `}`
+		code, exited := unitExitCode(sys, stateDir, wt)
+		if !exited || code != tc {
+			t.Errorf("%s: got (%d, %v), want (%d, true)", name, code, exited, tc)
+		}
+		// the cgroup still lists processes, yet the recorded exit wins
+		if unitRunning(sys, stateDir, wt) {
+			t.Errorf("%s: exit_code set: want not running without reading the cgroup", name)
+		}
+	}
+	if _, exited := unitExitCode(sys, stateDir, "/wt/none"); exited {
+		t.Error("no record: want not exited")
 	}
 }
 

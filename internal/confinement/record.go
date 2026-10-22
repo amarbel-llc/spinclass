@@ -50,6 +50,10 @@ type UnitRecord struct {
 	// Error is set by clown when the launch failed after it began writing the
 	// record: the other fields may then be empty, and this says why.
 	Error string `json:"error"`
+	// ExitCode is set by clown when the unit has exited, rewriting the record
+	// once more: the provider's exit status, also for a nonzero exit (which sets
+	// no Error). A pointer so an absent field (still running) differs from 0.
+	ExitCode *int `json:"exit_code"`
 }
 
 // ErrUnitLaunchFailed marks a record clown wrote to report a failed launch.

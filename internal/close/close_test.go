@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/auth"
+	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/grantstore"
 	"code.linenisgreat.com/spinclass/internal/nixgc"
 	"code.linenisgreat.com/spinclass/internal/profilegrant"
@@ -557,6 +558,31 @@ func TestRunResolvedStopsTheSessionsAgentUnit(t *testing.T) {
 	}
 	if got != wtPath {
 		t.Errorf("stopUnit called for %q, want the closing worktree %q", got, wtPath)
+	}
+}
+
+// A record clown rewrote to report a failed launch (error, no unit) must not
+// block the close: the real confinement.StopUnit clears it and the close lands.
+func TestRunResolvedClosesASessionWhoseUnitRecordReportsALaunchError(t *testing.T) {
+	repoPath, wtPath := setupNoTTYClose(t)
+	stateDir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateDir)
+	recPath := confinement.UnitRecordPath(stateDir, wtPath)
+	if err := os.MkdirAll(filepath.Dir(recPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(recPath, []byte(`{"version":1,"error":"unit did not start its provider within 2m"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", true, nil, "tap"); err != nil {
+		t.Fatalf("RunResolved: %v", err)
+	}
+	if _, serr := os.Stat(recPath); serr == nil {
+		t.Error("the error record survived the close")
+	}
+	if _, serr := os.Stat(wtPath); serr == nil {
+		t.Error("the worktree survived the close")
 	}
 }
 

@@ -108,8 +108,30 @@ func unitRunning(sys System, stateDir, worktree string) bool {
 	if err != nil {
 		return false
 	}
+	if rec.ExitCode != nil {
+		return false // clown recorded the unit's exit; its cgroup need not be read
+	}
 	pids, err := (&prober{sys: sys}).cgroupTreeProcs(rec.Cgroup)
 	return err == nil && len(pids) > 0
+}
+
+// UnitExitCode reports the exit code clown recorded for the worktree's agent
+// unit, and whether the unit has exited. A missing, unreadable or still-running
+// record is (0, false).
+func UnitExitCode(worktree string) (code int, exited bool) {
+	stateDir, err := DefaultStateDir()
+	if err != nil {
+		return 0, false
+	}
+	return unitExitCode(Host{}, stateDir, worktree)
+}
+
+func unitExitCode(sys System, stateDir, worktree string) (code int, exited bool) {
+	rec, err := LoadUnitRecord(sys, stateDir, worktree)
+	if err != nil || rec.ExitCode == nil {
+		return 0, false
+	}
+	return *rec.ExitCode, true
 }
 
 // DefaultStateDir is the XDG state base unit records, specs and principal

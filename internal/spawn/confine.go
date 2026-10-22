@@ -43,9 +43,12 @@ var (
 
 // principalBindWait and principalBindPoll bound how long the spawn waits for
 // clown to write the unit record. Clown writes it from a goroutine after the
-// unit goes active, so it is not guaranteed to land before claude's hello.
+// provider has started inside the unit, so it is not guaranteed to land before
+// claude's hello.
 var (
-	principalBindWait = 15 * time.Second
+	// Clown waits up to 2 minutes for the provider to start before it writes the
+	// record (or an error record); the extra 30s is margin for the rename.
+	principalBindWait = 150 * time.Second
 	principalBindPoll = 200 * time.Millisecond
 )
 

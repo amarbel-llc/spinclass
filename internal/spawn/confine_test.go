@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -169,6 +170,28 @@ func TestBindPrincipalWaitsForALateUnitRecord(t *testing.T) {
 	}
 	if calls != 3 {
 		t.Errorf("recordPrincipal called %d times, want 3", calls)
+	}
+}
+
+// Clown waits up to 2 minutes for the provider before it writes the record, so
+// the real bind window must outlast that; a record landing past the old 15s
+// still binds. The test scales the window down 1000x (15ms ~ 15s).
+func TestBindPrincipalWaitWindowOutlastsClownsProviderWait(t *testing.T) {
+	if principalBindWait < 150*time.Second {
+		t.Errorf("principalBindWait = %v, want at least 2m30s", principalBindWait)
+	}
+	prevWait, prevPoll, prevRec := principalBindWait, principalBindPoll, recordPrincipal
+	principalBindWait, principalBindPoll = 150*time.Millisecond, 200*time.Microsecond
+	t.Cleanup(func() { principalBindWait, principalBindPoll, recordPrincipal = prevWait, prevPoll, prevRec })
+	appears := time.Now().Add(30 * time.Millisecond) // "past 15s" at 1/1000 scale, inside the window
+	recordPrincipal = func(confinement.System, string, string, string) (string, error) {
+		if time.Now().Before(appears) {
+			return "", fmt.Errorf("no agent unit record yet: %w", fs.ErrNotExist)
+		}
+		return "p", nil
+	}
+	if err := bindPrincipalWhenRecorded(t.TempDir(), "r/b", "/w", time.Now()); err != nil {
+		t.Fatalf("got %v, want the bind to succeed once the late record lands", err)
 	}
 }
 

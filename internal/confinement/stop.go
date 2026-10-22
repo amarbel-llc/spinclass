@@ -2,6 +2,7 @@ package confinement
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -42,12 +43,23 @@ const unitNamePrefix = "spinclass-agent-"
 // launched confined: stopped is false and err nil. A record naming a unit that
 // is not one of ours is refused rather than stopped.
 func StopUnit(ctx context.Context, sys System, stateDir, worktree string) (stopped bool, err error) {
-	rec, lerr := LoadUnitRecord(sys, stateDir, worktree)
-	if lerr != nil {
-		if isMissingRecord(lerr) {
+	path := UnitRecordPath(stateDir, worktree)
+	b, rerr := sys.ReadFile(path)
+	if rerr != nil {
+		if isMissingRecord(rerr) {
 			return false, nil
 		}
+		return false, fmt.Errorf("reading the agent unit record: %w", rerr)
+	}
+	rec, lerr := parseUnitRecordForStop(b)
+	if lerr != nil {
 		return false, fmt.Errorf("reading the agent unit record: %w", lerr)
+	}
+	if rec.Error != "" && rec.Unit == "" {
+		// Clown reported a failed launch before any unit existed: nothing to
+		// stop, only the leftovers to clear.
+		removeUnitFiles(stateDir, worktree)
+		return false, nil
 	}
 	if !strings.HasPrefix(rec.Unit, unitNamePrefix) || !strings.HasSuffix(rec.Unit, ".service") || strings.ContainsAny(rec.Unit, "/ \n") {
 		return false, fmt.Errorf("the record names unit %q, which is not a spinclass agent unit; not stopping it", rec.Unit)
@@ -92,6 +104,25 @@ func cgroupHasProcesses(sys System, cgroup string) bool {
 func removeUnitFiles(stateDir, worktree string) {
 	_ = removeFile(UnitRecordPath(stateDir, worktree))
 	_ = removeFile(UnitSpecPath(stateDir, worktree))
+}
+
+// parseUnitRecordForStop decodes a unit record for the stop path. Unlike
+// ParseUnitRecord it accepts a record clown wrote to report a failed launch
+// (Error set): that record may still name a unit that has to be stopped, or
+// none, and refusing it would block close and clean forever. Every other
+// defect, including a record that is not JSON, is still an error.
+func parseUnitRecordForStop(b []byte) (UnitRecord, error) {
+	rec, err := ParseUnitRecord(b)
+	if err == nil {
+		return rec, nil
+	}
+	if !errors.Is(err, ErrUnitLaunchFailed) {
+		return UnitRecord{}, err
+	}
+	if uerr := json.Unmarshal(b, &rec); uerr != nil {
+		return UnitRecord{}, fmt.Errorf("agent unit record does not parse: %w", uerr)
+	}
+	return rec, nil
 }
 
 // isMissingRecord reports whether LoadUnitRecord failed only because no record
