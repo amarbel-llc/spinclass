@@ -193,28 +193,40 @@ Fixed for the credential: the confined frontend helper is get-only
 (`getOnlyCredentialHelper`, FDR 0036 section 9.5), so no push or fetch rewrites
 the file. A re-mint writes in place (`O_TRUNC`, same inode).
 
-The same mechanism applies to every **file** mount in the spec; directory
-mounts are not affected by renames inside them. Frontend operations that would
-rewrite a file-mounted path while a unit runs:
+**Round M (workers canary/fast-hazel and its sibling, 41ce553), measured by
+the driver.** The frontend's `<common>/config` got a new inode four times:
+twice from spawns (`auth.Inject`'s `git config`, the content unchanged), once
+from a sibling spawn, and once from a push with `set_upstream` (+70 bytes).
+The unit's view stayed on the inode it started with at every step, with the
+old content. It was never detached, never missing, and every write
+(`append`, `git config`, `mv`) failed with `Read-only file system`.
 
-| Bound path | Frontend writers | Status |
-|---|---|---|
-| `<worktree>/.spinclass/git-credentials` (`deny_paths`) | credential-store `store`/`erase` on push/fetch | fixed (get-only helper) |
-| `<common>/config` (`binds_ro`) | any common-scope `git config`. Examples: `auth.Inject`'s `extensions.worktreeConfig true` at **every mint in the same repo**, i.e. spawning a sibling session (theory: git rewrites the file even when the value is unchanged), a push with `set_upstream`, branch tracking setup | open |
-| `<common>/worktrees/<name>/config.worktree` (`binds_ro`) | `git config --worktree` (`auth.Inject`, at mint only, before the unit) | safe today; a re-mint or re-inject while the unit runs would detach it |
-| `<worktree>/.git` (`binds_ro`) | `git worktree repair` and `move` | safe unless the operator repairs a running worker. Close it instead |
+So not every file mount detaches. What decides it is the mount point's
+**parent directory**. This reading is inferred, and it is consistent with
+rounds K and M:
 
-Once `<common>/config` is detached, what the unit sees depends on the mount
-underneath (the path under `ProtectHome=tmpfs`). That is not known. Probes for
-the next round:
+- **The unit does not share the parent.** `<common>` in the unit is systemd's
+  stub under `ProtectHome=tmpfs`; only its children are bound. A host rename
+  in the real `<common>` never touches the unit's mount point, so the mount
+  holds. Its content goes stale: the unit's git does not see the upstream
+  config its own push wrote. That is functional, not a security issue.
+- **The parent is an rw bind of the real directory**, i.e. the worktree or
+  `worktrees/<name>`. Host and unit share the parent dentry, so a host rename
+  replaces the mount point itself and the mount is lost. That is round K's
+  readable credential.
 
-- F9 after a grit push;
-- `<common>/config` writability after a sibling spawn in the same repo;
-- after a frontend `git config` on the session.
+Frontend operations that rewrite a file-mounted path while a unit runs:
 
-**Open design question.** File mounts make the cut depend on no frontend
-operation ever renaming over a bound file. Two options to remove that
-dependence:
+| Bound path | Parent in the unit | Frontend writers | Status |
+|---|---|---|---|
+| `<worktree>/.spinclass/git-credentials` (`deny_paths`) | rw worktree bind | credential-store `store`/`erase` on push/fetch | fixed (get-only helper); F9 ok after a push in rounds L and M |
+| `<common>/config` (`binds_ro`) | tmpfs stub | every common-scope `git config`: each mint in the repo (`extensions.worktreeConfig true`), `set_upstream` pushes, branch tracking setup | holds, but stale (round M) |
+| `<common>/worktrees/<name>/config.worktree` (`binds_ro`) | rw `worktrees/<name>` bind | `git config --worktree` (`auth.Inject`, at mint only, before the unit) | safe today. A re-mint or re-inject while the unit runs would detach it: a frontend escape through per-name config hooks |
+| `<worktree>/.git` (`binds_ro`) | rw worktree bind | `git worktree repair` and `move` | safe unless someone repairs a running worker. Close it instead |
+
+**Open design question.** File mounts inside an rw bind make the cut depend
+on no frontend operation ever renaming over the bound file. Two options to
+remove that dependence:
 
 - (a) bind directories instead of files, e.g. a dedicated credential directory
   that is not inside the worktree, made inaccessible as a directory;
@@ -257,8 +269,8 @@ Audit of every reader of a recorded PID (file:line at the time of this change):
 | `internal/close/close.go` (RequestClose call, WaitForExit) | signal, then wait | fixed: signal only a proven PID, never for confined; wait only on the signalled PID |
 | `internal/executor/close_signal.go` `RequestClose` (was `executor/session.go:174-183`) | SIGHUP | fixed |
 | `internal/merge/merge.go:879` | RequestClose after an outside-session merge | fixed by RequestClose |
-| `internal/confinement/driver.go:57` | `Live` = `IsAlive(st.PID)` for the check | unit-based liveness: a confined session is live when its unit's cgroup holds processes (separate F11 change) |
-| `internal/session/session.go:844` `ResolveState` | active vs inactive in `sc list` | unit-based liveness for confined sessions. Today a confined worker reads inactive, and `ResolveDisplayState` shows it running-detached only when clown presence is fresh |
+| `internal/confinement/driver.go:57` | `Live` = `IsAlive(st.PID)` for the check | fixed: a session whose PID is dead goes into `Inputs.Recorded`, and the probes count it live while `unitRunning` holds (its record loads and its cgroup holds a process). F11 no longer reports a worker's own agent as "runs unconfined" inside its own unit |
+| `internal/session/session.go:844` `ResolveState` | active vs inactive in `sc list` | fixed: an active session with no live PID stays active while `session.ConfinedUnitRunning` (set by the binary to `confinement.UnitRunningForWorktree`) reports its unit running |
 | `internal/session/session.go:605-613, 665` | implicit-session sweep and lookup | main checkouts are never confined; the PID is agent-writable, but used only for liveness, never signalled |
 | `internal/hooks/hooks.go:365` `recordOwnPrincipal` | keeps a differing recorded principal while its PID is alive | for a confined session PID is 0, so a new principal is recorded. Acceptable: the frontend mapping, not this field, is trusted |
 | `internal/clean/clean.go:437` | transient merge worktree PID, taken from the directory name | frontend-created, not from state.json; unaffected |

@@ -77,8 +77,13 @@ type Session struct {
 type Inputs struct {
 	// Driver is the spawning session whose own agent unit is the subject.
 	Driver Session
-	// Live is every live session on the host, the driver included (F11, F12).
+	// Live is every live session on the host, the driver included (F11, F12):
+	// those whose recorded PID is alive.
 	Live []Session
+	// Recorded is every other session that is not closed. Its recorded PID is
+	// dead or unknown, but it is still live when its agent unit is running: a
+	// confined worker records no PID (FDR 0035 "Session PIDs are untrusted").
+	Recorded []Session
 	// OperatorHome is the operator's real home directory.
 	OperatorHome string
 	// AgentSocket is the piggy-agent socket (SSH_AUTH_SOCK) as the frontend

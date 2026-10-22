@@ -56,6 +56,8 @@ func InputsForDriver(sessionKey, principal string) (Inputs, error) {
 		}
 		if session.IsAlive(st.PID) {
 			in.Live = append(in.Live, s)
+		} else {
+			in.Recorded = append(in.Recorded, s)
 		}
 	}
 	if !found {
@@ -87,6 +89,27 @@ func InputsForDriver(sessionKey, principal string) (Inputs, error) {
 		in.HooksPath = hp
 	}
 	return in, nil
+}
+
+// UnitRunningForWorktree reports whether the worktree's agent unit is running:
+// its frontend-owned record loads and its cgroup holds a process. It is the
+// liveness of a confined session, which records no PID (FDR 0035 "Session
+// PIDs are untrusted").
+func UnitRunningForWorktree(worktree string) bool {
+	stateDir, err := DefaultStateDir()
+	if err != nil {
+		return false
+	}
+	return unitRunning(Host{}, stateDir, worktree)
+}
+
+func unitRunning(sys System, stateDir, worktree string) bool {
+	rec, err := LoadUnitRecord(sys, stateDir, worktree)
+	if err != nil {
+		return false
+	}
+	pids, err := (&prober{sys: sys}).cgroupTreeProcs(rec.Cgroup)
+	return err == nil && len(pids) > 0
 }
 
 // DefaultStateDir is the XDG state base unit records, specs and principal

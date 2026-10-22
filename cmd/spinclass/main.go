@@ -10,7 +10,9 @@ import (
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	commandhuh "code.linenisgreat.com/purse-first/libs/go-mcp/command/huh"
 
+	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/embeds"
+	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sessionlog"
 )
 
@@ -18,6 +20,8 @@ func main() {
 	embeds.Set(madderBin, direnvBin, dodderBin)
 	embeds.SetForges(papiBin, ghBin)
 	embeds.SetVersion(version, commit)
+	// A confined session records no PID; its liveness is its unit's (FDR 0035).
+	session.ConfinedUnitRunning = confinement.UnitRunningForWorktree
 
 	// Open the lifecycle log early so session.Write/Remove/Tombstone
 	// calls from any subcommand land in $XDG_LOG_HOME/spinclass/lifecycle.log.

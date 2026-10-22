@@ -834,6 +834,9 @@ func GCTombstones(retention time.Duration) (int, error) {
 // StateRunningDetached is returned as-is — the spinclass PID is
 // expected to be dead, but the multiplexer group is alive (the post-
 // Attach liveness probe verified that before the state was written).
+//
+// A confined session records no PID (FDR 0035 "Session PIDs are untrusted"),
+// so it stays active while its agent unit runs (ConfinedUnitRunning).
 func (s *State) ResolveState() string {
 	if s.isTombstone {
 		return StateAbandoned
@@ -841,10 +844,19 @@ func (s *State) ResolveState() string {
 	if _, err := os.Stat(s.WorktreePath); os.IsNotExist(err) {
 		return StateAbandoned
 	}
-	if s.SessionState == StateActive && !IsAlive(s.PID) {
+	if s.SessionState == StateActive && !IsAlive(s.PID) && !confinedUnitRunning(s.WorktreePath) {
 		return StateInactive
 	}
 	return s.SessionState
+}
+
+// ConfinedUnitRunning reports whether the worktree's agent unit is running.
+// It is set by the binary (to confinement.UnitRunningForWorktree), since this
+// package cannot import confinement; nil means no session is confined.
+var ConfinedUnitRunning func(worktree string) bool
+
+func confinedUnitRunning(worktree string) bool {
+	return ConfinedUnitRunning != nil && ConfinedUnitRunning(worktree)
 }
 
 // ResolveDisplayState augments ResolveState with clown-presence liveness for

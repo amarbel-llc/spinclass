@@ -515,6 +515,63 @@ func TestF11NamesTheOffendingSession(t *testing.T) {
 	}
 }
 
+// A confined worker records no PID, or one from its unit's own pid namespace
+// that is dead on the host (FDR 0035 "Session PIDs are untrusted"). While its
+// unit runs it is still live, so its agent inside the unit is confined, not an
+// offender.
+func TestF11CountsARecordedSessionWhoseUnitRuns(t *testing.T) {
+	sys, in := confinedHost()
+	in.Live = in.Live[:1] // r/b's recorded pid is dead on the host ...
+	in.Recorded = []Session{{Key: "r/b", Worktree: "/wt/b", PID: 12}}
+	if f := factByID(t, Run(sys, in), "F11"); !f.OK {
+		t.Errorf("F11 = %+v, want ok: r/b's agent runs inside its own running unit", f)
+	}
+}
+
+// unitRunning is the liveness a confined session's ResolveState uses: a record
+// that loads and a cgroup that holds a process.
+func TestUnitRunning(t *testing.T) {
+	sys, _ := confinedHost()
+	if !unitRunning(sys, stateDir, "/wt/b") {
+		t.Error("r/b's unit holds pid 200: want running")
+	}
+	sys.files["/sys/fs/cgroup"+otherCG+"/cgroup.procs"] = ""
+	if unitRunning(sys, stateDir, "/wt/b") {
+		t.Error("empty cgroup: want not running")
+	}
+	if unitRunning(sys, stateDir, "/wt/none") {
+		t.Error("no record: want not running")
+	}
+}
+
+// Once a recorded session's unit is gone its record vouches for nothing: an
+// agent process that claims its cwd is an offender again, and the session
+// itself is simply not live.
+func TestF11RecordedSessionWhoseUnitIsGoneVouchesForNothing(t *testing.T) {
+	for name, mutate := range map[string]func(*fakeSys){
+		"cgroup gone": func(s *fakeSys) {
+			delete(s.files, "/sys/fs/cgroup"+otherCG+"/cgroup.procs")
+			delete(s.dirs, "/sys/fs/cgroup"+otherCG)
+		},
+		"cgroup empty": func(s *fakeSys) { s.files["/sys/fs/cgroup"+otherCG+"/cgroup.procs"] = "" },
+		"no record":    func(s *fakeSys) { delete(s.files, UnitRecordPath(stateDir, "/wt/b")) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			sys, in := confinedHost()
+			mutate(sys)
+			in.Live = in.Live[:1]
+			in.Recorded = []Session{{Key: "r/b", Worktree: "/wt/b", PID: 12}}
+			f := factByID(t, Run(sys, in), "F11")
+			if f.OK || !strings.Contains(f.Detail, "runs unconfined") {
+				t.Errorf("F11 = %+v, want pid 200 named as unconfined", f)
+			}
+			if strings.Contains(f.Detail, "session r/b has no agent unit") || strings.Contains(f.Detail, "stale record") {
+				t.Errorf("F11 = %+v: a session that is not live must not be reported as one", f)
+			}
+		})
+	}
+}
+
 func TestF11FailsForALiveSessionWithoutAUnit(t *testing.T) {
 	sys, in := confinedHost()
 	delete(sys.files, UnitRecordPath(stateDir, "/wt/b"))

@@ -964,6 +964,28 @@ func TestResolveStateAbandoned(t *testing.T) {
 	}
 }
 
+// A confined session records no PID; it reads active while its agent unit
+// runs, and inactive once the unit is gone (FDR 0035).
+func TestResolveStateConfinedSessionFollowsItsUnit(t *testing.T) {
+	wt := t.TempDir()
+	prev := ConfinedUnitRunning
+	t.Cleanup(func() { ConfinedUnitRunning = prev })
+	running := true
+	ConfinedUnitRunning = func(w string) bool { return w == wt && running }
+	s := &State{PID: 0, SessionState: StateActive, WorktreePath: wt}
+	if got := s.ResolveState(); got != StateActive {
+		t.Errorf("unit running: ResolveState() = %s, want active", got)
+	}
+	running = false
+	if got := s.ResolveState(); got != StateInactive {
+		t.Errorf("unit gone: ResolveState() = %s, want inactive", got)
+	}
+	ConfinedUnitRunning = nil
+	if got := s.ResolveState(); got != StateInactive {
+		t.Errorf("no unit lookup: ResolveState() = %s, want inactive", got)
+	}
+}
+
 func TestResolveStateRunningDetachedReturnsAsIs(t *testing.T) {
 	wt := t.TempDir()
 	s := &State{

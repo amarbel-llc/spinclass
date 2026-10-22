@@ -42,6 +42,14 @@ func (p *prober) loadSubject() {
 		}
 		p.liveUnits[s.Key] = rec
 	}
+	// A session with no live PID is live while its unit runs: its record loads
+	// and its cgroup holds a process. Anything less leaves it out, as before.
+	for _, s := range p.in.Recorded {
+		if unitRunning(p.sys, p.in.StateDir, s.Worktree) {
+			rec, _ := LoadUnitRecord(p.sys, p.in.StateDir, s.Worktree)
+			p.liveUnits[s.Key] = rec
+		}
+	}
 	if err := p.sharedRecords(); err != nil {
 		p.subjectErr = err
 		return
