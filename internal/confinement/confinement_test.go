@@ -574,7 +574,7 @@ func TestF10CountsZombiesApart(t *testing.T) {
 	sys.dirs[root+"/proc"] = []string{"1", "2", "3", "self"}
 	sys.files[root+"/proc/3/stat"] = "3 (sh) Z 1 1 1 0 -1 0"
 	f := factByID(t, Run(sys, in), "F10")
-	if !f.OK || !strings.Contains(f.Detail, "1 zombie") {
+	if !f.OK || !strings.Contains(f.Detail, "1 zombie") || !strings.Contains(f.Detail, "strict count would have failed") {
 		t.Errorf("F10 = %+v, want ok with a zombie note", f)
 	}
 	sys.files[root+"/proc/3/stat"] = "3 (sh) S 1 1 1 0 -1 0"
@@ -607,6 +607,9 @@ func TestF14AcceptsOnlyTheChildsOwnTroupeAccount(t *testing.T) {
 			f := factByID(t, Run(sys, in), "F14")
 			if f.OK != tc.wantOK || (tc.want != "" && !strings.Contains(f.Detail, tc.want)) {
 				t.Errorf("F14 = %+v, want ok=%v naming %q", f, tc.wantOK, tc.want)
+			}
+			if f.OK && !strings.Contains(f.Detail, "strict allowlist would have named troupe") {
+				t.Errorf("F14 = %+v, want the strict verdict in the note", f)
 			}
 		})
 	}

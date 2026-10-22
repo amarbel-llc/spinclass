@@ -1064,6 +1064,9 @@ func (p *prober) f10PrivatePIDs() Fact {
 		}
 		if zombies > 0 {
 			note = fmt.Sprintf("%d zombie(s) in the unit's /proc beyond its cgroup (exited, not yet reaped by their parent)", zombies)
+			if visible > len(p.pids) {
+				note += fmt.Sprintf("; the strict count would have failed: %d listed, %d held", visible, len(p.pids))
+			}
 		}
 		return nil
 	}()
@@ -1337,6 +1340,7 @@ func (p *prober) f15PrincipalMapping() Fact {
 // pipewire and posh live; an allowlist catches the ones not named above.
 func (p *prober) f14RuntimeDirBoundOnly() Fact {
 	const id, name = "F14", "operator runtime dir holds only bound sockets"
+	var note string
 	err := func() error {
 		if err := p.needSubject(); err != nil {
 			return err
@@ -1362,6 +1366,7 @@ func (p *prober) f14RuntimeDirBoundOnly() Fact {
 					return err
 				}
 				extra = append(extra, more...)
+				note = "accepted troupe holding only this session's own account file; the strict allowlist would have named troupe"
 			default:
 				extra = append(extra, n)
 			}
@@ -1373,5 +1378,5 @@ func (p *prober) f14RuntimeDirBoundOnly() Fact {
 		}
 		return nil
 	}()
-	return fact(id, name, err, "")
+	return fact(id, name, err, note)
 }
