@@ -523,6 +523,24 @@ invocation:
    such as `confined` with the feature off) keeps the ask.
 3. Everything else asks.
 
+**The CLI opt-out (2026-10-22).** That floor lives on the PreToolUse path, so
+it covers only the `spawn-session` MCP tool. `sc spawn --unconfined` never meets
+it: a recipe running `spinclass spawn --unconfined` with stdin `/dev/null` spawned
+an unconfined worker with no prompt (nikulin canary, spinclass 8997df5). The
+CLI therefore asks itself (`confirmUnconfinedSpawn`,
+`cmd/spinclass/spawn_unconfined_gate.go`), before anything is resolved or
+created. It refuses unless stdin and stdout are both terminals ("--unconfined
+needs a human at a terminal"), then prompts on stderr and requires the operator
+to type the word `unconfined` (a `y` or an empty line declines). It appends
+every attempt (refused, declined, confirmed) as one JSON line to
+`$XDG_STATE_HOME/spinclass/spawn-unconfined.log` (0600, in a 0700 directory),
+and refuses when that log cannot be written. Under the same uid this is a speed
+bump, not a boundary: a program that allocates a pty and types the word passes
+it, and anything that can run `sc` could equally edit the sweatfile or exec
+clown directly. What it stops is a paved recipe or a pipe opting out silently.
+A CLI spawn that is unconfined only because no policy confines it is not gated;
+it is the operator's ordinary spawn.
+
 Fan-out stays bounded: `confinedPreflight` refuses a confined spawn from inside
 an agent unit, so a confined worker's own spawns are unconfined and still ask.
 `RunCheck` (perms tiers) still never auto-approves spawn; the allow comes from

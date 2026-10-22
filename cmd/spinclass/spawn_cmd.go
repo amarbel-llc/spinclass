@@ -158,6 +158,13 @@ func runSpawnCLI(_ context.Context, args json.RawMessage) error {
 	}
 	_ = json.Unmarshal(args, &p)
 
+	// The MCP tool's unconfined opt-out asks through the hook; the CLI is not on
+	// that path, so it asks the human itself, before anything is created.
+	if p.Unconfined && !p.Confined {
+		if err := confirmUnconfinedSpawn(p.Repo); err != nil {
+			return err
+		}
+	}
 	res, driverPrincipal, err := runSpawn(p.spawnParams)
 	if err != nil {
 		return err
@@ -273,7 +280,7 @@ func spawnParamList() []command.Param {
 		{
 			Name:        "unconfined",
 			Type:        command.Bool,
-			Description: "Opt OUT of confinement for this worker when [confinement] default-spawn would confine it (FDR 0035). Always prompts the human — no allow-list can approve it silently — until blessing exists (stage 2). Mutually exclusive with confined.",
+			Description: "Opt OUT of confinement for this worker when [confinement] default-spawn would confine it (FDR 0035). Always needs the human until blessing exists (stage 2): the spawn-session tool asks through the permission hook, which no allow-list can approve silently; `sc spawn --unconfined` refuses unless stdin and stdout are terminals and the operator types \"unconfined\", and logs every attempt to $XDG_STATE_HOME/spinclass/spawn-unconfined.log. Mutually exclusive with confined.",
 		},
 	}
 }
