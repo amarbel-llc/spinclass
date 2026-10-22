@@ -790,6 +790,97 @@ func direnvInvocations(t *testing.T, logPath string) []string {
 // asserts AllowDirenv (a) invokes a bare `allow` subcommand — NOT wrapped in
 // `direnv exec` — and (b) can be called repeatedly (the post-create-hook
 // re-allow is a second call over a possibly-mutated .envrc).
+// commitTrackedEnvrc makes dir a repo whose committed .envrc is content.
+func commitTrackedEnvrc(t *testing.T, dir, content string) {
+	t.Helper()
+	testgit.MustInit(t, dir)
+	testfs.MustWriteFile(t, filepath.Join(dir, ".envrc"), []byte(content), 0o644)
+	for _, args := range [][]string{
+		{"add", ".envrc"},
+		{"-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "envrc"},
+	} {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
+func gitStatus(t *testing.T, dir string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "status", "--porcelain").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status: %v\n%s", err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// A tracked, unmodified .envrc is left exactly as committed (the worktree stays
+// clean, so a no-force close is not refused) and is allowed (round P).
+func TestPrepareDirenvLeavesATrackedEnvrcAndAllowsItWhenUnmodified(t *testing.T) {
+	dir := t.TempDir()
+	const committed = "use flake\n"
+	commitTrackedEnvrc(t, dir, committed)
+	logPath := pinLoggingDirenv(t)
+
+	if err := prepareDirenv(sweatfile.Sweatfile{Direnv: &sweatfile.Direnv{Dotenv: map[string]string{"A": "b"}}}, dir); err != nil {
+		t.Fatalf("prepareDirenv: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, ".envrc")); string(got) != committed {
+		t.Errorf(".envrc rewritten: %q", got)
+	}
+	if st := gitStatus(t, dir); st != "" {
+		t.Errorf("worktree dirty after setup: %q", st)
+	}
+	if calls, _ := os.ReadFile(logPath); !strings.Contains(string(calls), "allow") {
+		t.Errorf("an unmodified tracked .envrc was not allowed: %q", calls)
+	}
+}
+
+// A tracked .envrc that differs from HEAD is never allowed, and spinclass
+// leaves the modification alone.
+func TestPrepareDirenvNeverAllowsAModifiedTrackedEnvrc(t *testing.T) {
+	dir := t.TempDir()
+	commitTrackedEnvrc(t, dir, "use flake\n")
+	const modified = "use flake\nexport EXTRA=1\n"
+	testfs.MustWriteFile(t, filepath.Join(dir, ".envrc"), []byte(modified), 0o644)
+	logPath := pinLoggingDirenv(t)
+
+	if err := prepareDirenv(sweatfile.Sweatfile{}, dir); err != nil {
+		t.Fatalf("prepareDirenv: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, ".envrc")); string(got) != modified {
+		t.Errorf("modified tracked .envrc touched: %q", got)
+	}
+	if calls, err := os.ReadFile(logPath); err == nil && strings.Contains(string(calls), "allow") {
+		t.Errorf("a modified tracked .envrc was allowed: %q", calls)
+	}
+}
+
+// The post-create-hook re-allow follows the same rule: a tracked .envrc a hook
+// changed is not re-allowed; an untracked one is.
+func TestReallowDirenvAfterAHookChangedATrackedEnvrc(t *testing.T) {
+	dir := t.TempDir()
+	commitTrackedEnvrc(t, dir, "use flake\n")
+	testfs.MustWriteFile(t, filepath.Join(dir, ".envrc"), []byte("use flake\nexport FROM_HOOK=1\n"), 0o644)
+	logPath := pinLoggingDirenv(t)
+	if err := ReallowDirenv(dir); err != nil {
+		t.Fatal(err)
+	}
+	if calls, err := os.ReadFile(logPath); err == nil && strings.Contains(string(calls), "allow") {
+		t.Errorf("a hook-modified tracked .envrc was re-allowed: %q", calls)
+	}
+
+	untracked := t.TempDir()
+	testgit.MustInit(t, untracked)
+	testfs.MustWriteFile(t, filepath.Join(untracked, ".envrc"), []byte("use flake\n"), 0o644)
+	if err := ReallowDirenv(untracked); err != nil {
+		t.Fatal(err)
+	}
+	if calls, _ := os.ReadFile(logPath); !strings.Contains(string(calls), "allow") {
+		t.Errorf("an untracked .envrc was not re-allowed: %q", calls)
+	}
+}
+
 func TestAllowDirenvBareAndIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	testgit.MustInit(t, dir)

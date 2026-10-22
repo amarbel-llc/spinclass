@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/charmbracelet/log"
 
@@ -68,7 +69,36 @@ func resolveSpinclassBinDir(worktreePath string) (string, error) {
 	return filepath.Join(dir, "spinclass", "bin"), nil
 }
 
+// envrcDirectives are the lines spinclass writes into a worktree's .envrc.
+func envrcDirectives(sf sweatfile.Sweatfile, worktreePath string) ([]string, error) {
+	var directives []string
+	if sf.Direnv != nil && sf.Direnv.Envrc != nil {
+		directives = append(directives, sf.Direnv.Envrc...)
+	} else {
+		directives = []string{"source_up"}
+		if _, err := os.Stat(filepath.Join(worktreePath, "flake.nix")); err == nil {
+			directives = append(directives, "use flake")
+		}
+	}
+	if sf.Direnv != nil && len(sf.Direnv.Dotenv) > 0 {
+		directives = append(directives, "dotenv .spinclass/env")
+	}
+	dirSpinclassBin, err := resolveSpinclassBinDir(worktreePath)
+	if err != nil {
+		return nil, err
+	}
+	dirSpinclassBinAbs, err := filepath.Abs(dirSpinclassBin)
+	if err != nil {
+		return nil, err
+	}
+	return append(directives, fmt.Sprintf("PATH_add \"%s\"", dirSpinclassBinAbs)), nil
+}
+
 func writeEnvrc(sf sweatfile.Sweatfile, worktreePath string) error {
+	directives, err := envrcDirectives(sf, worktreePath)
+	if err != nil {
+		return err
+	}
 	file, err := os.OpenFile(
 		filepath.Join(worktreePath, ".envrc"),
 		os.O_TRUNC|os.O_CREATE|os.O_WRONLY,
@@ -80,47 +110,57 @@ func writeEnvrc(sf sweatfile.Sweatfile, worktreePath string) error {
 	defer func() { _ = file.Close() }()
 
 	bufferedWriter := bufio.NewWriter(file)
-
-	var directives []string
-	if sf.Direnv != nil && sf.Direnv.Envrc != nil {
-		directives = sf.Direnv.Envrc
-	} else {
-		directives = []string{"source_up"}
-		if _, err := os.Stat(filepath.Join(worktreePath, "flake.nix")); err == nil {
-			directives = append(directives, "use flake")
-		}
-	}
-
 	for _, directive := range directives {
 		if _, err := fmt.Fprintln(bufferedWriter, directive); err != nil {
 			return err
 		}
 	}
-
-	if sf.Direnv != nil && len(sf.Direnv.Dotenv) > 0 {
-		if _, err := fmt.Fprintln(bufferedWriter, "dotenv .spinclass/env"); err != nil {
-			return err
-		}
-	}
-
-	dirSpinclassBin, err := resolveSpinclassBinDir(worktreePath)
-	if err != nil {
-		return err
-	}
-	dirSpinclassBinAbs, err := filepath.Abs(dirSpinclassBin)
-	if err != nil {
-		return err
-	}
-
-	if _, err := fmt.Fprintf(
-		bufferedWriter,
-		"PATH_add \"%s\"\n",
-		dirSpinclassBinAbs,
-	); err != nil {
-		return err
-	}
-
 	return bufferedWriter.Flush()
+}
+
+// envrcTracked reports whether the repo tracks the worktree's .envrc.
+func envrcTracked(worktreePath string) bool {
+	_, err := git.Run(worktreePath, "ls-files", "--error-unmatch", "--", ".envrc")
+	return err == nil
+}
+
+// keepTrackedEnvrc handles a .envrc the repo tracks. Spinclass never rewrites
+// it: a spawn must not dirty a tracked file (round P, where the rewrite made a
+// no-force close refuse). It is allowed only when the checked-out bytes equal
+// the committed blob at HEAD (the freshened default branch at creation); a
+// modified one is never allowed. This extends the trust the pre-merge hook
+// already gives the repo's own flake and justfile (FDR 0035).
+func keepTrackedEnvrc(sf sweatfile.Sweatfile, worktreePath string) error {
+	if skipped, err := envrcDirectives(sf, worktreePath); err == nil {
+		log.Warn("tracked .envrc left as checked out; spinclass's own directives were not added (the repo's .envrc can `dotenv_if_exists .spinclass/env`)",
+			"skipped", strings.Join(skipped, "; "))
+	}
+	return allowTrackedEnvrcIfUnmodified(worktreePath)
+}
+
+// ReallowDirenv re-records `direnv allow` after a create hook may have changed
+// .envrc (spinclass#213), under the same rule as setup: a tracked .envrc is
+// allowed only while it is identical to HEAD.
+func ReallowDirenv(worktreePath string) error {
+	if envrcTracked(worktreePath) {
+		return allowTrackedEnvrcIfUnmodified(worktreePath)
+	}
+	return AllowDirenv(worktreePath)
+}
+
+func allowTrackedEnvrcIfUnmodified(worktreePath string) error {
+	head, herr := git.Run(worktreePath, "rev-parse", "--verify", "-q", "HEAD:.envrc")
+	work, werr := git.Run(worktreePath, "hash-object", "--no-filters", "--", ".envrc")
+	switch {
+	case herr != nil || werr != nil:
+		log.Warn("tracked .envrc: not allowed (its blob could not be compared with HEAD)", "decision", "skipped")
+	case strings.TrimSpace(head) != strings.TrimSpace(work):
+		log.Warn("tracked .envrc: not allowed (it differs from HEAD)", "decision", "modified", "head", strings.TrimSpace(head), "worktree", strings.TrimSpace(work))
+	default:
+		log.Info("tracked .envrc: allowed (identical to HEAD)", "decision", "allowed", "blob", strings.TrimSpace(work))
+		return AllowDirenv(worktreePath)
+	}
+	return nil
 }
 
 // SpinclassEnv renders the merged [direnv.dotenv] map to
@@ -176,6 +216,9 @@ func SpinclassEnv(sf sweatfile.Sweatfile, worktreePath string) error {
 func prepareDirenv(sf sweatfile.Sweatfile, worktreePath string) error {
 	if _, ok := direnv.Resolve(); !ok {
 		return nil
+	}
+	if envrcTracked(worktreePath) {
+		return keepTrackedEnvrc(sf, worktreePath)
 	}
 
 	if err := writeEnvrc(sf, worktreePath); err != nil {

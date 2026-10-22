@@ -329,6 +329,22 @@ guards:
 `git worktree repair` and `move` on a running worker remain the operator's to
 avoid; close the worker instead.
 
+**A tracked `.envrc` is never rewritten (round P, coordinator's option (A)).**
+Spawn used to overwrite the worktree's `.envrc` with spinclass's directives
+(`apply.writeEnvrc`). For a repo that tracks `.envrc` that dirtied the tree,
+so a no-force close was refused.
+- Now a tracked `.envrc` is left exactly as checked out. A warning names the
+  skipped directives; the repo's own `.envrc` can
+  `dotenv_if_exists .spinclass/env`.
+- It is `direnv allow`ed only while its bytes equal the blob at `HEAD` (the
+  freshened default branch at creation). A modified one is never allowed.
+- The post-create-hook re-allow (`apply.ReallowDirenv`) follows the same rule.
+- The decision (allowed, modified or skipped) is logged with the blob hash.
+
+This extends the trust the pre-merge hook already gives the repo's own flake
+and justfile (evaluated in the frontend) to the repo's own `.envrc`. It is one
+more item for the D17 review.
+
 ### Session PIDs are untrusted (round L, 2026-10-22)
 
 `State.PID` lives in `<worktree>/.spinclass/state.json`, which the session's

@@ -309,8 +309,9 @@ func applyWorktreeConfig(
 	// Apply. Re-authorize the final .envrc with a bare `direnv allow` (outside
 	// `direnv exec`) so the session's devshell loads unblocked. Idempotent
 	// no-op when the hook left .envrc untouched or the repo has no .envrc.
-	// See spinclass#213.
-	if err := apply.AllowDirenv(worktreePath); err != nil {
+	// See spinclass#213. A tracked .envrc the hook changed is not re-allowed
+	// (it no longer matches HEAD).
+	if err := apply.ReallowDirenv(worktreePath); err != nil {
 		return fmt.Errorf("re-allowing direnv after create hook: %w", err)
 	}
 
