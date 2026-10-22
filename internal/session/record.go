@@ -44,6 +44,10 @@ func recordPath(worktreeAbsPath string) string {
 	return filepath.Join(recordsDir(), indexFilename(worktreeAbsPath))
 }
 
+// RecordPath is recordPath for callers outside the package (tests that need
+// to damage the authoritative record rather than its display copy).
+func RecordPath(worktreeAbsPath string) string { return recordPath(worktreeAbsPath) }
+
 // InUnit reports whether this process runs inside a confined agent unit (clown
 // sets CLOWN_UNIT there and nowhere else, FDR 0035 "CLOWN_UNIT"). Such a process
 // cannot reach the frontend record: it reads and writes only the display copy,

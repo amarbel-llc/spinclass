@@ -80,10 +80,11 @@ func TestLoadCoActiveLineOmittedWhenNoneOrUnreadable(t *testing.T) {
 		t.Errorf("expected no line with no co-active sessions, got %q", line)
 	}
 
-	// A corrupt sibling state file contributes nothing (skipped by the index
-	// walk), so the line stays omitted rather than erroring.
+	// A corrupt sibling record contributes nothing (skipped by the index
+	// walk), so the line stays omitted rather than erroring. The authoritative
+	// record is the frontend one; the worktree copy is display-only.
 	corruptWt := writeSessionState(t, repo, "corrupt", os.Getpid(), "")
-	if err := os.WriteFile(filepath.Join(corruptWt, ".spinclass", "state.json"), []byte("{not json"), 0o644); err != nil {
+	if err := os.WriteFile(session.RecordPath(corruptWt), []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if line := loadCoActiveLine(ModeWorktree, self); line != "" {
@@ -93,7 +94,7 @@ func TestLoadCoActiveLineOmittedWhenNoneOrUnreadable(t *testing.T) {
 	// An unreadable CURRENT state degrades to omission even when another
 	// active session exists (the repo anchor cannot be resolved).
 	writeSessionState(t, repo, "bright-cherry", os.Getpid(), "")
-	if err := os.WriteFile(filepath.Join(self, ".spinclass", "state.json"), []byte("{not json"), 0o644); err != nil {
+	if err := os.WriteFile(session.RecordPath(self), []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if line := loadCoActiveLine(ModeWorktree, self); line != "" {
