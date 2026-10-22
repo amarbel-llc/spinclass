@@ -1074,6 +1074,13 @@ detected after detach, and how long tombstones are retained.
 	deliberately kept.
 	*Merge:* scalar override.
 
+	For a CONFINED spawn (FDR 0035, "A confined spawn requires a profile"),
+	the default is read only from the global sweatfile and layers above the
+	repo; a repo or worktree value is ignored with a warning. A confined
+	spawn with no profile is refused, and the profile must be selective,
+	drop *moxy/moxy* whole and keep *just-us/just-us*; a profile with an
+	unknown or *dynamic* source is refused.
+
 *disable-auto-mode*
 	Boolean. By default a spawned worker whose provider is claude starts in
 	claude's auto permission mode: *--permission-mode auto* is placed in

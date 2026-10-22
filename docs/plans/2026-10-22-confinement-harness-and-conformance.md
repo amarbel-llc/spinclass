@@ -102,6 +102,22 @@ Proposal: build A first as an opt-in check (`checks.confinement-vm`), not part
 of `just`'s default gate until its run time is known. Use B only for
 debugging.
 
+**Update (2026-10-22, measured on flic): shape A is not feasible here.**
+`/dev/kvm` does not exist and no kvm module is loaded. `/proc/cpuinfo` has the
+`hypervisor` flag but no svm/vmx, so flic is itself a VM without nested
+virtualization. nix.conf has `builders =` empty. A NixOS VM test would run
+under qemu TCG; its run time was not measured. By the coordinator's ruling the
+harness falls back to **shape B**, with the test-only runtime-path seam, and
+stays opt-in.
+
+Shape B must also carry a fast local lane for the serve integration tests
+(`TestServeMergeThisSessionStdioIntegrity`, `TestServeCheckThisSession`,
+`TestServeMergeThisSessionHiddenWhenDisabled`,
+`TestServeCheckThisSessionHiddenByDefault` in
+`cmd/spinclass/serve_integration_test.go`). They need a `go` toolchain on PATH,
+so godyn's inner loop skips them and only the pre-merge lane runs them. That
+is how merge-7be3acab found the gate regression d56307e fixed.
+
 Dependency: both shapes use clown's real agent-scope launcher as a binary, so
 the harness must pin the clown that ships the launcher under test.
 

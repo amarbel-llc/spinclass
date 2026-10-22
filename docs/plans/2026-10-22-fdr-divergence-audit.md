@@ -78,6 +78,34 @@ Next by severity:
 - **0035 rows 16/149/150: the troupe account exposure.** It was found live in
   rounds N and O and closed by clown in round P.
 
+## Fixed after the audit
+
+- 0035-183, spawn: 029c3c8 and 819a3d4, vantage A.
+- 0035-195, close-self-run: 8446b92.
+- The serve-handler gates: 819a3d4, 67fe972, f5ef379, 3b9a5cb, e4fbcd8,
+  1eb6cdc and a9f2b72. The table is in FDR 0035, "Serve handlers and the
+  caller".
+- 34-31, enforcement-path trust anchors: 11afb3d. Both now come from the
+  passwd home, and an XDG override that points elsewhere is refused.
+
+## Deferred, with the trigger to revisit
+
+- **34-31b: the frontend state dir follows XDG_STATE_HOME.**
+  - What: `confinement.DefaultStateDir` (unit records, principal mappings,
+    serve records), and the env-derived grant-store and signers paths in the
+    profile-grant CLI and `profilerights.RevokeSession`.
+  - Deferred by the coordinator on 2026-10-22, for two reasons:
+    - a confined worker has no `sc` CLI path to the frontend, because its
+      state dirs are the unit's own tmpfs;
+    - an unconfined agent's raw capabilities are outside the model.
+  - Moving all frontend state to the passwd home touches every test that sets
+    `XDG_STATE_HOME`, for no live gain today.
+  - The CLI and RevokeSession were not switched either: in tests they run
+    under a temp `XDG_STATE_HOME`, which the trusted resolver would refuse, so
+    each switch is more than one line.
+  - Revisit when unconfined workers are brought into the model, or when
+    profile-rights enforcement is turned on for them.
+
 ## Rows verified by hand
 
 - 0035 row 183: `spawn_cmd.go:50-85`, `:175-188`; `check.go:53-55`.

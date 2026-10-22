@@ -287,25 +287,54 @@ The findings:
   principal from the frontend mapping. A session launched confined with no
   mapping is refused. An unconfined one falls back to the runner's own
   principal, then the recorded one.
-- **Being gated, in rank order:** the serve tools below. The ranking and the
-  worst case for each are in
-  `docs/plans/2026-10-22-fdr-divergence-audit/serve-handler-risk.md`.
-  Before the gates, only the grit tools (`grit_cmd.go:272`) classified their
-  caller:
+- **Gated (vantage A), in rank order.** The ranking and the worst case for
+  each are in `docs/plans/2026-10-22-fdr-divergence-audit/serve-handler-risk.md`.
+  Each tool calls `refuseConfinedServeCaller` (`cmd/spinclass/serve_caller_gate.go`)
+  before reading any parameter, and fails closed: a caller that cannot be
+  classified counts as confined. The refusal names:
+  - the serve's principal and why it classified as confined;
+  - that a confined session holds no right to the tool;
+  - the operator path, at a terminal outside the unit (EPIC 0001
+    principle 9).
 
-| Tool | Handler | Authority it relies on today |
-|---|---|---|
-| `merge-this-session`, `-async` | `commands_mcp_only.go:411`, `:536` | the serve's own session; not audited per handler |
-| `check-this-session`, `-async` | `commands_mcp_only.go:505`, `:690` | as above |
-| `session-job-cancel` | `commands_mcp_only.go:759` | as above |
-| `update-this-session-description` | `commands_mcp_only.go:971` | as above |
-| `nothing-but-the-truth` | `commands_mcp_only.go:1143` | as above |
-| `close-child-session` | `close_child_cmd.go:205` | a handle (`authorizeHandleUse`); see audit rows 32-12, 32-23 |
-| `close-this-session` | `close_self_cmd.go:175` | the self-close scope; caller resolved through worktree state (audit row 159) |
-| `grant-session-handle`, `release-session-handle` | `handles_cmd.go:150`, `:240` | a handle; rights not consulted (audit row 32-23) |
-| `list-handles`, `whoami` | `handles_cmd.go:330`, `:374` | none (read; `list-handles accept` writes) |
-| `resurrect` | `resurrect_cmd.go:45` | not audited per handler |
-| `perms-list`, `list`, `validate`, `version` | `commands_perms.go:87`, `commands_query.go:65`, `:98`, `commands_version.go:31` | none (read-only) |
+  Wherever a tool's `sc` CLI shared its MCP `Run`, it gets its own `RunCLI`
+  (`ungatedCLI`), so the operator's terminal is not refused.
+
+| Rank | Tool | Operator path | Commit |
+|---|---|---|---|
+| — | `spawn-session` | `sc spawn` | 029c3c8, 819a3d4 |
+| 1 | `resurrect` | `sc resurrect` | 819a3d4 |
+| 2 | `close-child-session` | `sc close` | 67fe972 |
+| 3 | `grant-session-handle`, `list-handles` with `accept` | `sc grant-session-handle`, `sc list-handles --accept` | f5ef379 |
+| 4 | `merge-this-session`, `-async`, `nothing-but-the-truth` | `sc merge <target>` | 3b9a5cb |
+| 5 | `check-this-session`, `-async` | `sc check` | e4fbcd8 |
+| 6–8 | `release-session-handle`, `update-this-session-description`, `session-job-cancel` | `sc release-session-handle`, `sc update-description`, `ringmaster cancel <job-id>` | 1eb6cdc |
+| read | `list`, `perms-list` (and `repo` must be one path segment) | `sc list`, `sc perms-list` | a9f2b72 |
+
+  So a confined worker cannot merge, check, attest, list or perms-list through
+  MCP. Its landing goes through the operator or the coordinator with
+  `sc merge <target>`. That is the coordinator's ruling, and it matches EPIC
+  0001's engineer-builder ("cannot ... merge").
+
+- **Open to a confined caller, each with a reason.** These are declared in
+  `openServeTools` (`serve_caller_gate_test.go`).
+  `TestEveryServeToolIsGatedOrDeclaredOpen` walks every registered MCP tool
+  and fails on one that is neither gated nor declared, so a new tool is
+  forbidden until someone decides (principle 1). The `grit_*` tools classify
+  their caller themselves (FDR 0036 section 9).
+
+| Tool | Why it stays open |
+|---|---|
+| `whoami` | returns only the serve's own principal and its own handles |
+| `version` | build versions and store paths; no session data |
+| `validate` | the serve's own sweatfile hierarchy |
+| `list-handles` without `accept` | only the caller's own held and pending handles |
+| `close-this-session` | the self-close path. It needs `allow-self-close` from a trusted layer, never forces, and only queues a request. The teardown runs outside the unit, and the runner takes the principal from the frontend mapping (8446b92). The caller's resolution in the tool itself still goes through worktree state (audit row 0035-159, next). |
+
+  `close-this-session` is reachable by a confined worker only if its profile
+  keeps the spinclass server, and it acts only where the operator set
+  `allow-self-close`. Confined spawns are paused, so this is read from code,
+  not from a live round.
 
 ### Frontend rewrites detach file mounts (round K, open)
 
@@ -703,6 +732,44 @@ spawner's environment. Every child launch (spawn, attach, `sc exec`) already
 drops the parent's `TROUPE_XMPP_PASSWORD_FILE`/`TROUPE_XMPP_PASSWORD`
 (`session.StripInheritedSessionIDs`, spinclass#169): the same uid can read the
 parent's file, so a child could otherwise authenticate as its parent.
+
+### A confined spawn requires a profile (R1–R4, 2dd4b4e, 2026-10-22)
+
+These checks apply only to a spawn that resolves to confined; unconfined spawns
+are unchanged. They are enforced in `spawn.LaunchDetachedWith`, which serves
+both `spawn-session` and `sc spawn`. They run before the preflight, the
+stale-serve check, `enforceProfileRight` and `shop.Create`, and read only config
+and the profile registry, so a refusal creates nothing and does not depend on
+the host (`internal/spawn/confineprofile.go`).
+
+- **R1.** A confined spawn with no effective profile is refused, naming both
+  fixes: pass `profile`, or set `[session-entry] spawn-profile` above the repo.
+  There is no hard-coded fallback.
+- **R2.** For a confined spawn the `spawn-profile` default is read only from
+  layers above the repo (`sweatfileio.TrustedSpawnProfile`). A repo or worktree
+  value is ignored with a warning naming its paths. Unconfined spawns keep the
+  merged read.
+- **R3**, the grit tool-kind right, is the first hard-coded instance of the
+  rights the moxy frontend will enforce. The resolved profile must leave no
+  moxy `grit_*` tool reachable.
+  - Form (i) is the only one accepted today: a selective profile that drops
+    `moxy/moxy` whole and keeps `just-us/just-us`, so `run_recipe` works.
+  - Such a worker has no moxy `folio`, `rg`, `jq` or `grit`. It uses the
+    harness's native file tools where the profile allows them, spinclass's
+    `grit_*` for git, and `run_recipe`.
+  - A non-selective profile, one that keeps moxy (even with per-tool
+    exclusions), and one that drops just-us are each refused, naming what the
+    profile kept.
+  - Form (ii), a readback-confirmed exclusion, is not built. It waits on the
+    frontend proxy: in-unit exclusions are policy, not a boundary.
+- **R4** (ruling F). A profile whose source is `dynamic`, or unknown (the
+  resolver reports none), is refused until a verified grant names its digest.
+  Clown's library reports `builtin` and `user` today, never `dynamic`, so today
+  only an unknown source trips R4.
+
+Not covered: an unattended spawn's standing grant (FDR 0034), and confined
+resume. A full confined spawn past the preflight is not tested; it would need a
+faked systemd and clown.
 
 ## The principal-to-session mapping (decided 2026-10-19, coordinator)
 
