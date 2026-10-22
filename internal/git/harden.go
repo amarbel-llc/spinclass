@@ -91,8 +91,9 @@ func HardeningFor(repoPath string) (Hardening, bool) {
 }
 
 // invocation is the argument list after the program name and the environment
-// to use for a git run in repoPath. An unregistered repoPath yields exactly
-// what the runners always built: no env override unless the caller gave one.
+// to use for a git run in repoPath. An unregistered repoPath outside any linked
+// worktree yields exactly what the runners always built: no env override unless
+// the caller gave one.
 func invocation(repoPath string, env, args []string) (argv, cmdEnv []string) {
 	h, ok := HardeningFor(repoPath)
 	argv = []string{"-C", repoPath}
@@ -100,11 +101,78 @@ func invocation(repoPath string, env, args []string) (argv, cmdEnv []string) {
 		argv = append(argv, h.Args...)
 	}
 	argv = append(argv, args...)
-	if len(env) > 0 || (ok && len(h.Env) > 0) {
+	pin := commonDirPin(repoPath)
+	if len(env) > 0 || len(pin) > 0 || (ok && len(h.Env) > 0) {
 		cmdEnv = append(os.Environ(), env...)
+		cmdEnv = append(cmdEnv, pin...)
 		if ok {
 			cmdEnv = append(cmdEnv, h.Env...)
 		}
 	}
 	return argv, cmdEnv
+}
+
+// commonDirPin is GIT_COMMON_DIR for a repoPath inside a linked worktree, taken
+// from the layout the worktree's .git pointer names (<common>/worktrees/<name>),
+// or nil anywhere else.
+//
+// git otherwise reads the common dir from <common>/worktrees/<name>/commondir. A
+// confined unit binds that admin dir read-write (FDR 0035), so the worker can
+// point commondir at a repository it made, and that repository's config (a
+// core.fsmonitor, a filter or diff driver, a hooks path) then runs commands in
+// every frontend git call in the worktree. The .git pointer is bound read-only,
+// so its layout is the trustworthy answer; the environment variable wins over
+// the file. Repository discovery is left alone, so a call from a subdirectory
+// still resolves its work tree as before.
+func commonDirPin(repoPath string) []string {
+	if common, ok := LayoutCommonDir(repoPath); ok {
+		return []string{"GIT_COMMON_DIR=" + common}
+	}
+	return nil
+}
+
+// LayoutCommonDir returns the common git dir of the linked worktree containing
+// dir, read from the worktree's .git pointer file alone: the pointer must name
+// <common>/worktrees/<name>, and <common> is the answer. The commondir file is
+// never consulted. A dir whose nearest .git is a directory (a main checkout), is
+// not a gitdir pointer, or names another layout (a submodule) yields false.
+func LayoutCommonDir(dir string) (string, bool) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", false
+	}
+	for d := abs; ; {
+		info, err := os.Lstat(filepath.Join(d, ".git"))
+		if err == nil {
+			if !info.Mode().IsRegular() {
+				return "", false
+			}
+			return pointerCommonDir(d)
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			return "", false
+		}
+		d = parent
+	}
+}
+
+func pointerCommonDir(worktree string) (string, bool) {
+	pointer, err := os.ReadFile(filepath.Join(worktree, ".git"))
+	if err != nil {
+		return "", false
+	}
+	gitdir, ok := strings.CutPrefix(strings.TrimSpace(string(pointer)), "gitdir:")
+	if !ok {
+		return "", false
+	}
+	gitdir = strings.TrimSpace(gitdir)
+	if !filepath.IsAbs(gitdir) {
+		gitdir = filepath.Join(worktree, gitdir)
+	}
+	gitdir = filepath.Clean(gitdir)
+	if filepath.Base(filepath.Dir(gitdir)) != "worktrees" {
+		return "", false
+	}
+	return filepath.Dir(filepath.Dir(gitdir)), true
 }

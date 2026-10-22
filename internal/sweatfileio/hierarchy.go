@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
+	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
@@ -182,60 +182,15 @@ func canonicalDir(dir string) string {
 // `sweatfile` and its `.worktrees/` ancestor chain must never become layers.
 // Resolving here, in the loader every caller funnels through, closes that for
 // all of them at once, from any cwd. Only the filesystem is consulted (no git
-// subprocess) so the answer needs nothing a corrupt worktree could break; a
-// `.git` pointer that does not resolve to a `<main>/.git` common dir (a
-// submodule, say) leaves dir as it was.
+// subprocess) so the answer needs nothing a corrupt worktree could break. The
+// common dir comes from the read-only .git pointer's layout, never the
+// worker-writable commondir file (git.LayoutCommonDir); a pointer that does not
+// resolve to a `<main>/.git` common dir (a submodule, say) leaves dir as it was.
 func mainCheckoutRoot(dir string) string {
-	for d := dir; ; {
-		info, err := os.Lstat(filepath.Join(d, ".git"))
-		if err == nil {
-			if info.IsDir() {
-				return dir
-			}
-			if root, ok := commonCheckoutRoot(d); ok {
-				return root
-			}
-			return dir
-		}
-		parent := filepath.Dir(d)
-		if parent == d {
-			return dir
-		}
-		d = parent
+	if common, ok := git.LayoutCommonDir(dir); ok && filepath.Base(common) == ".git" {
+		return filepath.Dir(common)
 	}
-}
-
-// commonCheckoutRoot follows the `gitdir:` pointer in <worktree>/.git to the
-// worktree's admin dir, then to the repo's common `.git`, and returns the main
-// checkout root above it.
-func commonCheckoutRoot(worktree string) (string, bool) {
-	pointer, err := os.ReadFile(filepath.Join(worktree, ".git"))
-	if err != nil {
-		return "", false
-	}
-	gitdir, ok := strings.CutPrefix(strings.TrimSpace(string(pointer)), "gitdir:")
-	if !ok {
-		return "", false
-	}
-	gitdir = strings.TrimSpace(gitdir)
-	if !filepath.IsAbs(gitdir) {
-		gitdir = filepath.Join(worktree, gitdir)
-	}
-	gitdir = filepath.Clean(gitdir)
-
-	// The admin dir must be <common>/worktrees/<name>. Its commondir file is
-	// NOT consulted: a confined unit binds worktrees/<name> read-write, so the
-	// worker could point commondir at a `.git` it made inside its own tree and
-	// turn its sweatfile back into a layer. The .git pointer file is bound
-	// read-only, so the layout it names is the trustworthy answer.
-	if filepath.Base(filepath.Dir(gitdir)) != "worktrees" {
-		return "", false
-	}
-	common := filepath.Dir(filepath.Dir(gitdir))
-	if filepath.Base(common) != ".git" {
-		return "", false
-	}
-	return filepath.Dir(common), true
+	return dir
 }
 
 // Overrides are the worktree-local settings a worktree's own sweatfile may still

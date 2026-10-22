@@ -251,12 +251,10 @@ func LastCommitDate(path string) string {
 // changes, as a bool only (git errors read as dirty). See DirtyTrackedPaths for
 // the path-naming, error-returning variant.
 func HasDirtyTracked(repoPath string) bool {
-	cmd := exec.Command("git", "-C", repoPath, "diff", "--quiet")
-	if err := cmd.Run(); err != nil {
+	if _, err := Run(repoPath, "diff", "--quiet"); err != nil {
 		return true
 	}
-	cmd = exec.Command("git", "-C", repoPath, "diff", "--cached", "--quiet")
-	if err := cmd.Run(); err != nil {
+	if _, err := Run(repoPath, "diff", "--cached", "--quiet"); err != nil {
 		return true
 	}
 	return false
