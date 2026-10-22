@@ -89,6 +89,35 @@ func keyPathMatches(callerKey string, child session.State) bool {
 	return callerKey != "" && child.SpawnedBy == callerKey
 }
 
+// callerHandleRights resolves the rights the caller holds on child (FDR 0032
+// D13), assuming authorizeHandleUse already passed: a holder's resolved rights,
+// else — the unreleased session-key spawner path — every right.
+func callerHandleRights(callerPrincipal string, child session.State) session.HandleRightSet {
+	if r, ok := child.RightsOf(callerPrincipal); ok && child.IsHolder(callerPrincipal) {
+		return r
+	}
+	all, _ := session.ParseHandleRights(session.AllHandleRights)
+	return all
+}
+
+// requireHandleRight refuses (principle 9: say what you hold, what is needed,
+// who can grant it) unless the caller holds right on child. tool names the
+// refusing tool in the message.
+func requireHandleRight(tool, right, callerPrincipal string, child session.State) error {
+	held := callerHandleRights(callerPrincipal, child)
+	if held.Has(right) {
+		return nil
+	}
+	with := "none"
+	if h := child.HoldersWith(right); len(h) > 0 {
+		with = strings.Join(h, ", ")
+	}
+	return fmt.Errorf(
+		"%s refused: you hold %s on %s; %s needs %s; holders with it: %s; ask one to grant it, or run `sc close %s`",
+		tool, held, child.Key(), tool, right, with, child.Key(),
+	)
+}
+
 // spawnerReleasedMessage is the refusal for a caller whose only claim is the
 // session-key path, which child.SpawnerReleased has ended: it says what the
 // caller holds (nothing), who does hold the child, and the ways forward.
@@ -127,7 +156,7 @@ func authorizeChildReap(callerPrincipal, callerKey string, child session.State) 
 		)
 	}
 	if authorizeHandleUse(callerPrincipal, callerKey, child) == nil {
-		return nil
+		return requireHandleRight("close-child-session", "close", callerPrincipal, child)
 	}
 	if keyPathMatches(callerKey, child) && child.SpawnerReleased {
 		return errors.New(spawnerReleasedMessage(callerPrincipal, callerKey, child))

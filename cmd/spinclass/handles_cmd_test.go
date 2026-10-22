@@ -87,7 +87,10 @@ func callWhoami(t *testing.T) (text string, isErr bool) {
 // rights.
 func TestGrantSessionHandleByHolder(t *testing.T) {
 	const caller = "caller-principal"
-	repoPath, _ := childHandleFixture(t, caller, session.State{Holders: []string{caller}})
+	repoPath, _ := childHandleFixture(t, caller, session.State{
+		Holders:      []string{caller},
+		HandleRights: map[string]string{caller: "observe,close,grant"},
+	})
 
 	text, isErr := callGrant(t, `{"child":"worker/kid","to":"p9"}`)
 	if isErr {
@@ -288,9 +291,9 @@ func TestListHandlesAcceptSkipsClosedEntryWithoutAbortingListing(t *testing.T) {
 }
 
 // TestListHandlesRendersImplicitRightsWhenUnrecorded covers displayRights'
-// fallback: a holder with no HandleRights entry (the spawner's own seeded
-// handle, which is never itself a "grant") renders as "(implicit)", never an
-// empty string.
+// fallback: a spawner with no HandleRights entry (a record written before
+// spawn recorded one) renders every right marked "(spawner)", never an empty
+// string.
 func TestListHandlesRendersImplicitRightsWhenUnrecorded(t *testing.T) {
 	testgit.RequireGit(t)
 	const caller = "caller-principal"
@@ -321,8 +324,9 @@ func TestListHandlesRendersImplicitRightsWhenUnrecorded(t *testing.T) {
 	if isErr {
 		t.Fatalf("list-handles failed: %s", text)
 	}
-	if !strings.Contains(text, "held    implicit-rights-repo/kid  rights=(implicit)") {
-		t.Errorf("expected rights=(implicit) for the unrecorded spawner handle, got: %s", text)
+	want := "held    implicit-rights-repo/kid  rights=" + session.AllHandleRights + " (spawner)"
+	if !strings.Contains(text, want) {
+		t.Errorf("expected %q for the unrecorded spawner handle, got: %s", want, text)
 	}
 }
 
@@ -333,7 +337,10 @@ func TestListHandlesRendersImplicitRightsWhenUnrecorded(t *testing.T) {
 func TestGrantSessionHandleNoOpWhenRecipientAlreadyHasOne(t *testing.T) {
 	t.Run("recipient already an accepted holder", func(t *testing.T) {
 		const caller = "caller-principal"
-		childHandleFixture(t, caller, session.State{Holders: []string{caller, "p9"}})
+		childHandleFixture(t, caller, session.State{
+			Holders:      []string{caller, "p9"},
+			HandleRights: map[string]string{caller: "observe,close,grant"},
+		})
 
 		text, isErr := callGrant(t, `{"child":"worker/kid","to":"p9","rights":"observe,close,grant"}`)
 		if isErr {
@@ -349,6 +356,7 @@ func TestGrantSessionHandleNoOpWhenRecipientAlreadyHasOne(t *testing.T) {
 		childHandleFixture(t, caller, session.State{
 			Holders:        []string{caller},
 			PendingHandles: []string{"p9"},
+			HandleRights:   map[string]string{caller: "observe,close,grant"},
 		})
 
 		text, isErr := callGrant(t, `{"child":"worker/kid","to":"p9"}`)
@@ -372,6 +380,7 @@ func TestGrantSessionHandlePendingCallerAcceptPersistsEvenOnNoOpGrant(t *testing
 		SpawnedByPrincipal: "other-spawner",
 		Holders:            []string{"other-spawner", "p9"},
 		PendingHandles:     []string{caller},
+		HandleRights:       map[string]string{caller: "observe,close,grant"},
 	})
 
 	text, isErr := callGrant(t, `{"child":"worker/kid","to":"p9"}`)
@@ -440,6 +449,7 @@ func TestGrantSessionHandleByPendingHolderAcceptsFirst(t *testing.T) {
 		SpawnedByPrincipal: "other-spawner",
 		Holders:            []string{"other-spawner"},
 		PendingHandles:     []string{caller},
+		HandleRights:       map[string]string{caller: "observe,close,grant"},
 	})
 
 	text, isErr := callGrant(t, `{"child":"worker/kid","to":"p9"}`)
@@ -752,6 +762,182 @@ func TestSiblingReapsGrantedHandle(t *testing.T) {
 	}
 	if !slices.Contains(st.Holders, principalB) {
 		t.Errorf("tombstone Holders = %v, want to contain %q", st.Holders, principalB)
+	}
+}
+
+// TestReapWithoutCloseRightRefused: a holder whose rights lack `close` cannot
+// reap; the refusal says what it holds, what is needed and who has it, and the
+// child survives.
+func TestReapWithoutCloseRightRefused(t *testing.T) {
+	const caller = "caller-principal"
+	_, wtPath := childHandleFixture(t, caller, session.State{
+		SpawnedByPrincipal: "boss",
+		Holders:            []string{"boss", caller},
+		HandleRights:       map[string]string{caller: "observe"},
+	})
+
+	text, isErr := callCloseChild(t, `{"child":"worker/kid"}`)
+	if !isErr {
+		t.Fatalf("expected the reap to be refused, got success: %s", text)
+	}
+	want := "close-child-session refused: you hold observe on worker/kid; close-child-session needs close; " +
+		"holders with it: boss; ask one to grant it, or run `sc close worker/kid`"
+	if text != want {
+		t.Errorf("refusal = %q, want %q", text, want)
+	}
+	if _, err := os.Stat(wtPath); err != nil {
+		t.Errorf("refused reap must leave the worktree intact: %v", err)
+	}
+}
+
+// TestGrantWithoutGrantRightRefused: the default observe,close holder cannot
+// grant onward.
+func TestGrantWithoutGrantRightRefused(t *testing.T) {
+	const caller = "caller-principal"
+	repoPath, _ := childHandleFixture(t, caller, session.State{
+		HandleRights: map[string]string{caller: "observe,close"},
+		Holders:      []string{caller},
+	})
+
+	text, isErr := callGrant(t, `{"child":"worker/kid","to":"p9"}`)
+	if !isErr {
+		t.Fatalf("expected the grant to be refused, got success: %s", text)
+	}
+	want := "grant-session-handle refused: you hold observe,close on worker/kid; grant-session-handle needs grant; " +
+		"holders with it: none; ask one to grant it, or run `sc close worker/kid`"
+	if text != want {
+		t.Errorf("refusal = %q, want %q", text, want)
+	}
+	st, err := session.Read(repoPath, "kid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.PendingHandles) != 0 {
+		t.Errorf("PendingHandles = %v, want unchanged after a refused grant", st.PendingHandles)
+	}
+}
+
+// TestGrantMoreThanHeldRefused: a grant can only narrow (EPIC 0001 principle
+// 3).
+func TestGrantMoreThanHeldRefused(t *testing.T) {
+	const caller = "caller-principal"
+	repoPath, _ := childHandleFixture(t, caller, session.State{
+		Holders:      []string{caller},
+		HandleRights: map[string]string{caller: "observe,close,grant"},
+	})
+
+	text, isErr := callGrant(t, `{"child":"worker/kid","to":"p9","rights":"observe,close,merge"}`)
+	if !isErr {
+		t.Fatalf("expected the grant to be refused, got success: %s", text)
+	}
+	want := "grant-session-handle refused: you hold observe,close,grant on worker/kid and cannot grant merge, " +
+		"which you do not hold; a grant can only narrow (EPIC 0001 principle 3)"
+	if text != want {
+		t.Errorf("refusal = %q, want %q", text, want)
+	}
+	st, err := session.Read(repoPath, "kid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.PendingHandles) != 0 {
+		t.Errorf("PendingHandles = %v, want unchanged after a refused grant", st.PendingHandles)
+	}
+}
+
+// TestGrantNarrowingSubsetSucceeds: granting a subset of what the granter
+// holds works, and the normalized rights are what is recorded.
+func TestGrantNarrowingSubsetSucceeds(t *testing.T) {
+	const caller = "caller-principal"
+	repoPath, _ := childHandleFixture(t, caller, session.State{
+		Holders:      []string{caller},
+		HandleRights: map[string]string{caller: "observe,close,grant"},
+	})
+
+	if text, isErr := callGrant(t, `{"child":"worker/kid","to":"p9","rights":" close , observe "}`); isErr {
+		t.Fatalf("expected the narrowing grant to succeed, got error: %s", text)
+	}
+	st, err := session.Read(repoPath, "kid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := st.HandleRights["p9"]; got != "observe,close" {
+		t.Errorf("HandleRights[p9] = %q, want %q", got, "observe,close")
+	}
+}
+
+// TestSpawnerWithNoEntryHoldsEveryRight: the spawner with no recorded rights
+// resolves to all seven — it can grant any subset and reap.
+func TestSpawnerWithNoEntryHoldsEveryRight(t *testing.T) {
+	const caller = "caller-principal"
+	repoPath, wtPath := childHandleFixture(t, caller, session.State{
+		SpawnedByPrincipal: caller,
+		Holders:            []string{caller},
+	})
+
+	if text, isErr := callGrant(t, `{"child":"worker/kid","to":"p9","rights":"`+session.AllHandleRights+`"}`); isErr {
+		t.Fatalf("expected the spawner to grant every right, got error: %s", text)
+	}
+	st, err := session.Read(repoPath, "kid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := st.HandleRights["p9"]; got != session.AllHandleRights {
+		t.Errorf("HandleRights[p9] = %q, want %q", got, session.AllHandleRights)
+	}
+
+	if text, isErr := callCloseChild(t, `{"child":"worker/kid"}`); isErr {
+		t.Fatalf("expected the spawner to reap, got error: %s", text)
+	}
+	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
+		t.Errorf("worktree %s still present after reap", wtPath)
+	}
+}
+
+// TestPreRightsHolderKeepsObserveClose: a holder with no HandleRights entry
+// that is not the spawner resolves to the default grant — it can reap but not
+// grant onward.
+func TestPreRightsHolderKeepsObserveClose(t *testing.T) {
+	const caller = "caller-principal"
+	childHandleFixture(t, caller, session.State{
+		SpawnedByPrincipal: "boss",
+		Holders:            []string{"boss", caller},
+	})
+
+	text, isErr := callGrant(t, `{"child":"worker/kid","to":"p9"}`)
+	if !isErr || !strings.Contains(text, "you hold observe,close on worker/kid") ||
+		!strings.Contains(text, "needs grant") || !strings.Contains(text, "holders with it: boss") {
+		t.Fatalf("expected a needs-grant refusal naming boss, got isErr=%v: %s", isErr, text)
+	}
+
+	if text, isErr := callCloseChild(t, `{"child":"worker/kid"}`); isErr {
+		t.Fatalf("expected the pre-rights holder to reap, got error: %s", text)
+	}
+}
+
+// TestGrantUnknownRightRefused: names outside the seven are refused, naming
+// the unknown ones and the valid set.
+func TestGrantUnknownRightRefused(t *testing.T) {
+	const caller = "caller-principal"
+	repoPath, _ := childHandleFixture(t, caller, session.State{
+		SpawnedByPrincipal: caller,
+		Holders:            []string{caller},
+	})
+
+	text, isErr := callGrant(t, `{"child":"worker/kid","to":"p9","rights":"observe,frobnicate"}`)
+	if !isErr {
+		t.Fatalf("expected the grant to be refused, got success: %s", text)
+	}
+	for _, want := range []string{"frobnicate", session.AllHandleRights} {
+		if !strings.Contains(text, want) {
+			t.Errorf("refusal %q is missing %q", text, want)
+		}
+	}
+	st, err := session.Read(repoPath, "kid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.PendingHandles) != 0 {
+		t.Errorf("PendingHandles = %v, want unchanged after a refused grant", st.PendingHandles)
 	}
 }
 

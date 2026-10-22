@@ -230,6 +230,9 @@ func TestLaunchHappyPath(t *testing.T) {
 	if len(st.Holders) != 1 || st.Holders[0] != driverKey {
 		t.Errorf("Holders: got %v, want [%q]", st.Holders, driverKey)
 	}
+	if got := st.HandleRights[driverKey]; got != session.AllHandleRights {
+		t.Errorf("HandleRights[spawner]: got %q, want every right %q", got, session.AllHandleRights)
+	}
 	if st.Description != desc {
 		t.Errorf("Description: got %q, want %q", st.Description, desc)
 	}

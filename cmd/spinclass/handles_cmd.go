@@ -119,7 +119,30 @@ func runGrantSessionHandle(p grantHandleParams) (string, error) {
 		return "", err
 	}
 
-	changed := child.GrantHandle(p.To, p.Rights)
+	// FDR 0032 D13 enforcement: granting needs `grant`, only names from the
+	// vocabulary are accepted, and a grant can only narrow (EPIC 0001
+	// principle 3) — the granted rights must be a subset of the granter's own.
+	if err := requireHandleRight("grant-session-handle", "grant", callerPrincipal, *child); err != nil {
+		return "", err
+	}
+	granting := p.Rights
+	if granting == "" {
+		granting = session.DefaultHandleRights
+	}
+	wanted, err := session.ParseHandleRights(granting)
+	if err != nil {
+		return "", fmt.Errorf("grant-session-handle refused: %w", err)
+	}
+	held := callerHandleRights(callerPrincipal, *child)
+	if extra := held.Missing(wanted); len(extra) > 0 {
+		return "", fmt.Errorf(
+			"grant-session-handle refused: you hold %s on %s and cannot grant %s, which you do not hold; "+
+				"a grant can only narrow (EPIC 0001 principle 3)",
+			held, child.Key(), strings.Join(extra, ","),
+		)
+	}
+
+	changed := child.GrantHandle(p.To, wanted.String())
 	if !changed {
 		// `to` already holds (or is already pending on) a handle — GrantHandle
 		// is a no-op regardless of what rights this call named. A re-grant is
@@ -183,7 +206,7 @@ func grantSessionHandleParamList() []command.Param {
 		{
 			Name:        "rights",
 			Type:        command.String,
-			Description: "Comma-separated object rights to record (FDR 0032 D13: observe, close, grant, instruct, cap, merge, check). Recorded but NOT enforced in this slice — slice 1 replaces this view with signed grant-record digests. Defaults to \"observe,close\" when omitted, the conservative lazy handoff.",
+			Description: "Comma-separated object rights to record (FDR 0032 D13: observe, close, grant, instruct, cap, merge, check). Enforced: granting needs the grant right, and you can only grant rights you hold yourself. Defaults to \"observe,close\" when omitted, the conservative lazy handoff.",
 		},
 	}
 }
@@ -282,15 +305,21 @@ type listHandlesParams struct {
 	Accept bool `json:"accept"`
 }
 
-// displayRights renders the recorded rights (FDR 0032 D13) for principal on
-// s, or "(implicit)" when principal holds via the spawner's implicit handle
-// (SpawnedByPrincipal) with no recorded grant — the spawner's own handle at
-// spawn time is never itself a "grant", so it never gets a HandleRights entry.
+// displayRights renders the resolved rights (FDR 0032 D13) for principal on s:
+// the recorded entry, or — with none — what RightsOf resolves (every right,
+// marked "(spawner)", for the spawner; the default grant's rights otherwise).
 func displayRights(s *session.State, principal string) string {
 	if r, ok := s.HandleRights[principal]; ok {
 		return r
 	}
-	return "(implicit)"
+	rights, ok := s.RightsOf(principal)
+	if !ok {
+		return session.DefaultHandleRights
+	}
+	if principal == s.SpawnedByPrincipal {
+		return rights.String() + " (spawner)"
+	}
+	return rights.String()
 }
 
 // runListHandles is the shared list-handles flow: scan every session

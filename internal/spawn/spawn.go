@@ -548,6 +548,9 @@ func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, ar
 	}
 	if driver.Principal != "" {
 		st.Holders = []string{driver.Principal}
+		// The spawner holds every right (FDR 0032 D13); record it so the
+		// record is explicit rather than leaning on the implicit-spawner rule.
+		st.HandleRights = map[string]string{driver.Principal: session.AllHandleRights}
 	}
 	if err := session.Write(st); err != nil {
 		return Pending{}, fmt.Errorf("writing worker session state: %w", err)

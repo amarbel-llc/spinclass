@@ -519,6 +519,55 @@ func TestStateIsHolder(t *testing.T) {
 // PendingHandles and records its rights (defaulting to "observe,close"), and
 // is a no-op — changed=false, state untouched — when the recipient already
 // holds an accepted handle or is already pending.
+func TestParseHandleRights(t *testing.T) {
+	set, err := ParseHandleRights(" merge , observe,,check ")
+	if err != nil {
+		t.Fatalf("ParseHandleRights: %v", err)
+	}
+	if got := set.String(); got != "observe,merge,check" {
+		t.Errorf("String() = %q, want vocabulary order %q", got, "observe,merge,check")
+	}
+	if _, err := ParseHandleRights("observe,nope,zip"); err == nil ||
+		!strings.Contains(err.Error(), "nope, zip") || !strings.Contains(err.Error(), AllHandleRights) {
+		t.Errorf("unknown names: err = %v, want one naming nope, zip and the valid set", err)
+	}
+}
+
+func TestRightsOf(t *testing.T) {
+	s := State{
+		SpawnedByPrincipal: "spawner",
+		Holders:            []string{"spawner", "legacy", "narrow"},
+		PendingHandles:     []string{"pending"},
+		HandleRights:       map[string]string{"narrow": "close", "pending": "grant"},
+	}
+	cases := []struct {
+		principal string
+		want      string
+		wantOK    bool
+	}{
+		{"spawner", AllHandleRights, true},
+		{"legacy", DefaultHandleRights, true},
+		{"narrow", "observe,close", true}, // observe is implied by holding
+		{"pending", "observe,grant", true},
+		{"stranger", "", false},
+		{"", "", false},
+	}
+	for _, tc := range cases {
+		got, ok := s.RightsOf(tc.principal)
+		if ok != tc.wantOK || got.String() != tc.want {
+			t.Errorf("RightsOf(%q) = %q, %v; want %q, %v", tc.principal, got, ok, tc.want, tc.wantOK)
+		}
+	}
+
+	released := State{SpawnedByPrincipal: "spawner", SpawnerReleased: true}
+	if _, ok := released.RightsOf("spawner"); ok {
+		t.Error("a released spawner with no entry must hold nothing")
+	}
+	if got := s.HoldersWith("grant"); len(got) != 1 || got[0] != "spawner" {
+		t.Errorf("HoldersWith(grant) = %v, want [spawner]", got)
+	}
+}
+
 func TestGrantHandle(t *testing.T) {
 	t.Run("grants with default rights", func(t *testing.T) {
 		s := &State{}

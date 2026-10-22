@@ -1032,13 +1032,108 @@ func (s *State) OtherHolders(excluding string) []string {
 	return out
 }
 
-// defaultHandleRights is the rights a grant carries when the granter names
+// DefaultHandleRights is the rights a grant carries when the granter names
 // none (FDR 0032 D13): "the lazy handoff is the conservative one".
-const defaultHandleRights = "observe,close"
+const DefaultHandleRights = "observe,close"
+
+// HandleRightNames is the closed vocabulary of handle rights (FDR 0032 D13),
+// in display order. merge and check match the per-session merge/check verbs.
+var HandleRightNames = []string{"observe", "close", "grant", "instruct", "cap", "merge", "check"}
+
+// AllHandleRights is every right, comma-joined: the spawner's full set, which
+// spawn records so a record never leaves it implicit.
+var AllHandleRights = strings.Join(HandleRightNames, ",")
+
+// HandleRightSet is a parsed set of handle rights.
+type HandleRightSet map[string]bool
+
+// Has reports whether the set contains right.
+func (r HandleRightSet) Has(right string) bool { return r[right] }
+
+// String renders the set in vocabulary order, comma-joined ("" when empty).
+func (r HandleRightSet) String() string {
+	var names []string
+	for _, n := range HandleRightNames {
+		if r[n] {
+			names = append(names, n)
+		}
+	}
+	return strings.Join(names, ",")
+}
+
+// Missing returns the rights in want that r lacks, in vocabulary order.
+func (r HandleRightSet) Missing(want HandleRightSet) []string {
+	var out []string
+	for _, n := range HandleRightNames {
+		if want[n] && !r[n] {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// ParseHandleRights splits a comma-separated rights string, trimming blanks
+// and ignoring empty entries, and refuses names outside HandleRightNames.
+func ParseHandleRights(s string) (HandleRightSet, error) {
+	set := HandleRightSet{}
+	var unknown []string
+	for _, name := range strings.Split(s, ",") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if !slices.Contains(HandleRightNames, name) {
+			unknown = append(unknown, name)
+			continue
+		}
+		set[name] = true
+	}
+	if len(unknown) > 0 {
+		return nil, fmt.Errorf(
+			"unknown handle right(s) %s; valid rights: %s",
+			strings.Join(unknown, ", "), AllHandleRights,
+		)
+	}
+	return set, nil
+}
+
+// RightsOf resolves the rights principal holds on this session (FDR 0032
+// D13): an explicit HandleRights entry; else, for the unreleased spawner
+// (SpawnedByPrincipal), every right; else, for any other holder, the default
+// grant's rights (a pre-rights holder keeps what a default grant gave). observe
+// is implied by holding. ok is false when principal holds nothing.
+func (s State) RightsOf(principal string) (rights HandleRightSet, ok bool) {
+	if principal == "" {
+		return nil, false
+	}
+	switch raw, explicit := s.HandleRights[principal]; {
+	case explicit && (s.IsHolder(principal) || slices.Contains(s.PendingHandles, principal)):
+		rights, _ = ParseHandleRights(raw)
+	case principal == s.SpawnedByPrincipal && (s.IsHolder(principal) || !s.SpawnerReleased):
+		rights, _ = ParseHandleRights(AllHandleRights)
+	case s.IsHolder(principal):
+		rights, _ = ParseHandleRights(DefaultHandleRights)
+	default:
+		return nil, false
+	}
+	rights["observe"] = true
+	return rights, true
+}
+
+// HoldersWith returns the accepted holders whose resolved rights include right.
+func (s State) HoldersWith(right string) []string {
+	var out []string
+	for _, h := range s.Holders {
+		if r, ok := s.RightsOf(h); ok && r.Has(right) {
+			out = append(out, h)
+		}
+	}
+	return out
+}
 
 // GrantHandle appends `to` to PendingHandles (FDR 0032 D12: grant is a
 // message, accept is first use) and records the rights (D13) the granter
-// named for it, defaulting to defaultHandleRights when rights is "". A no-op
+// named for it, defaulting to DefaultHandleRights when rights is "". A no-op
 // — changed=false — when `to` already holds an accepted handle (IsHolder) or
 // is already pending: a grant confers no authority the recipient didn't
 // already have or hasn't already been offered. Callers persist the mutation
@@ -1050,7 +1145,7 @@ func (s *State) GrantHandle(to, rights string) (changed bool) {
 		return false
 	}
 	if rights == "" {
-		rights = defaultHandleRights
+		rights = DefaultHandleRights
 	}
 	s.PendingHandles = append(s.PendingHandles, to)
 	if s.HandleRights == nil {

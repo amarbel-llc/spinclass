@@ -543,8 +543,19 @@ observer and attached counts are its view of holders per right
 matching ambient right: a handle never lets you do to another what you could
 not do to yourself. `force` is not a right you hold; it is a D11 escalation.
 
-Spawning mints the spawner all five. A grant defaults to `observe,close`
-unless rights are named, so the lazy handoff is the conservative one.
+Spawning mints the spawner every right: the five above plus `merge` and
+`check`, the set `grant-session-handle` accepts, which mirror the per-session
+merge and check verbs. A grant defaults to `observe,close` unless rights are
+named, so the lazy handoff is the conservative one.
+
+Rights are **enforced** on handle tools (spinclass#355, #360). Reaping needs
+`close`. Granting needs `grant` and may only narrow (EPIC 0001 principle 3):
+the rights named must be a subset of the granter's own, and a name outside the
+seven is refused. Releasing needs none, since it removes only the caller. The
+spawner's full set is recorded at spawn in `handle_rights`; a holder with no
+entry (a record written before rights were enforced) keeps `observe,close`,
+and `observe` is implied by holding at all. `instruct` and `cap` are
+vocabulary only until their consumers exist.
 
 **Ambient rights** on the principal are what it may do at all, granted at
 spawn as a subset of the parent's, drop-only, raised only by escalation. Every
@@ -782,8 +793,8 @@ specified by contract in "Companion records".
 - **`grant-session-handle child=… to=<principal> [rights=…]`** and
   **`release-session-handle child=…`**, one registration each serving both
   the MCP tool and `sc <name>`, always-ask. One `child` per call in this
-  slice; the bulk form D12 describes is a follow-up. Rights are recorded but
-  not enforced until D13's enforcement lands. Accept-on-first-use via
+  slice; the bulk form D12 describes is a follow-up. Rights are enforced as D13
+  describes. Accept-on-first-use via
   `pending_handles`.
 - **`list-handles`** (held, pending) and **`sc whoami`** (principal, session
   key, holders; grows the chain view in slice 1).
@@ -834,13 +845,12 @@ spinclass is a relocation. What slice 0 records, not what D12/D13 promise:
   `handle_rights`. Releasing with no entry in either list MUST refuse and
   change nothing. Release MUST NOT touch the spawner lineage field.
 - Spawning MUST seed the spawner as the first accepted holder, only when
-  its principal is non-empty. D13 says spawn mints all five rights; slice 0
-  records no `handle_rights` entry for the spawner at all.
-- Rights are recorded, not enforced. Authority to reap, grant or release is
-  membership in `holders` alone. No `grant` or `close` right is consulted,
-  so any accepted holder may grant onward, and D13's non-transferable
-  handle does not exist yet. Rights on a pending grant are not consulted
-  at accept either.
+  its principal is non-empty, and record that spawner's `handle_rights` entry
+  as every right (a record without one resolves the spawner to the same set).
+- Rights are enforced. Reaping is membership in `holders` plus `close`;
+  granting is membership plus `grant`, narrowing only; releasing is
+  membership alone. A holder with no `handle_rights` entry resolves to
+  `observe,close`. Rights on a pending grant are not consulted at accept.
 - A session is **orphaned** when it has a recorded spawner principal and
   `holders` is empty. Pending entries do not count, and a session with no
   spawner principal is never orphaned. D12 says "no accepted holder is
@@ -859,10 +869,10 @@ spinclass is a relocation. What slice 0 records, not what D12/D13 promise:
   no certificate digest yet, which D6 describes.
 
 Where slice 0 does less than D6, D12 and D13 describe, each gap is tracked:
-rights not enforced (spinclass#355), pending grants never expire and are not
-delivered (#356), orphan ignores holder liveness (#357), the wake skips the
-actor (#358), the wake's reason is only message text and it carries no
-digest (#359), no rights recorded for the spawner (#360).
+pending grants never expire and are not delivered (#356), orphan ignores
+holder liveness (#357), the wake skips the actor (#358), the wake's reason is
+only message text and it carries no digest (#359). Rights enforcement (#355)
+and the spawner's recorded rights (#360) are closed.
 
 Reference implementation: `internal/session/session.go`,
 `cmd/spinclass/handles_cmd.go`, `close_child_cmd.go`, `internal/spawn`,
