@@ -311,6 +311,45 @@ frontend and with the clown the spawn-entry will run, spinclass runs
 capability refuses the confined launch and names what is missing, so clown's
 landing flips the switch without a spinclass change.
 
+### CLOWN_UNIT: the in-unit marker (agreed 2026-10-22; clown side 508839d)
+
+Contract, agreed with the clown session and landed there in clown 508839d:
+clown sets `CLOWN_UNIT=<full .service unit name>` in the environment of the
+confined unit only. It is the last entry clown's launch environment applies, so
+nothing inherited or configured can override it, and clown scrubs it from every
+other source (a frontend process never carries one). It is a **hint, not a
+boundary**: an unconfined process can set it on itself, and gains only a
+different refusal (below).
+
+spinclass reads it in one place, the PreToolUse hook's grit store verdict
+(`hooks.storeDecision` → `perms.StoreVerdict`, FDR 0036 section 2):
+
+| CLOWN_UNIT | session resolved from the principal | non-force verdict |
+|------------|-------------------------------------|-------------------|
+| set        | yes                                 | `Classify` decides |
+| set        | no (known principal or none)        | `Allow`, deferred to the serve |
+| empty      | yes                                 | `Classify` decides |
+| empty      | no (unknown, ambiguous, conflicting, or no principal) | `Ask` |
+
+`force: true` asks in every row; under `--permission-mode dontAsk` every `Ask`
+becomes a deny. The deferred row is safe for the same reason the earlier
+blanket deferral was: the serve resolves the caller itself, a confined or
+unresolved caller is refused any write it does not own, and the hint grants
+nothing the serve would refuse. Setting the marker on an unconfined process
+turns a human prompt into that body refusal; it opens nothing.
+
+**Not inherited.** `session.StripInheritedSessionIDs` drops `CLOWN_UNIT` from
+every child spinclass launches (spawn, attach, `sc exec`), so a worker the
+frontend serve spawns never inherits one even if the launching process carried
+it (`TestLaunchExecEnvCarriesWorkerIdentity`). A confined worker gets its own
+from its own unit's clown. Dropping it fails closed: an unmarked hook asks.
+
+**Older clown.** A clown older than 508839d sets no marker inside a unit, so
+its confined workers' hooks see `CLOWN_UNIT` empty and an unresolved session,
+and ask; with `dontAsk` the call is denied. That is the fail-closed direction
+and is accepted for now: the hosts running confined workers have clown
+8a2b9fe or newer (coordinator, 2026-10-22).
+
 ## Spawn side
 
 `spawn-session` and `sc spawn` write the spec and set `CLOWN_AGENT_SCOPE` in the

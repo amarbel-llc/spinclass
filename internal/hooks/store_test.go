@@ -9,15 +9,25 @@ import (
 	"code.linenisgreat.com/spinclass/internal/session"
 )
 
-// storeDecisionFor runs a grit stash PreToolUse hook call carrying the given
-// hook session_id (empty omits it) with CLOWN_SESSION_ID set to env (empty
-// unsets it, as in a real worker, #392).
-func storeDecisionFor(t *testing.T, env, hookSessionID, cwd string, toolInput map[string]any) string {
+const testUnit = "clown-agent-test.service"
+
+// setEnvOrUnset sets name to value for the test, or unsets it when value is
+// empty (as in a real worker, #392, or a hook outside a unit).
+func setEnvOrUnset(t *testing.T, name, value string) {
 	t.Helper()
-	t.Setenv("CLOWN_SESSION_ID", env)
-	if env == "" {
-		_ = os.Unsetenv("CLOWN_SESSION_ID")
+	t.Setenv(name, value)
+	if value == "" {
+		_ = os.Unsetenv(name)
 	}
+}
+
+// storeDecisionFor runs a grit stash PreToolUse hook call carrying the given
+// hook session_id (empty omits it) with CLOWN_SESSION_ID set to env and
+// CLOWN_UNIT to unit (empty unsets either).
+func storeDecisionFor(t *testing.T, env, unit, hookSessionID, cwd string, toolInput map[string]any) string {
+	t.Helper()
+	setEnvOrUnset(t, "CLOWN_SESSION_ID", env)
+	setEnvOrUnset(t, "CLOWN_UNIT", unit)
 	payload := map[string]any{
 		"hook_event_name": "PreToolUse",
 		"tool_name":       "mcp__plugin_spinclass_spinclass__grit_stash",
@@ -39,8 +49,9 @@ func storeDecisionFor(t *testing.T, env, hookSessionID, cwd string, toolInput ma
 // CLOWN_SESSION_ID is THE principal when set (a differing hook session_id is
 // only logged); with it unset (a real worker) the hook session_id is the
 // fallback principal. A recorded principal resolves to its session and Classify
-// decides (own worktree allows, foreign repo_path asks); an unrecorded one or
-// no principal at all defers to the serve.
+// decides (own worktree allows, foreign repo_path asks), with or without
+// CLOWN_UNIT. An unrecorded principal or none at all asks outside a unit and
+// defers to the serve inside one (FDR 0035 "CLOWN_UNIT").
 func TestStoreToolResolvesTheHookSessionID(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	repo, wt := initSpawnedWorktree(t, "driver/key")
@@ -60,45 +71,53 @@ func TestStoreToolResolvesTheHookSessionID(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name, env, hookID, repoPath, want string
+		name, env, hookID, repoPath, want, wantInUnit string
 	}{
-		{"recorded hook id, foreign repo_path", "", hookID, foreign, "ask"},
-		{"recorded hook id, own worktree", "", hookID, wt, "allow"},
-		{"unrecorded hook id defers", "", otherID, wt, "allow"},
-		{"env not recorded, differing hook id recorded: env wins, unresolved defers", otherID, hookID, wt, "allow"},
-		{"env recorded, differing hook id: env resolves, own worktree", hookID, otherID, wt, "allow"},
-		{"env recorded, differing hook id: env resolves, foreign repo_path", hookID, otherID, foreign, "ask"},
-		{"env recorded, no hook id, own worktree", hookID, "", wt, "allow"},
-		{"no principal at all defers", "", "", foreign, "allow"},
+		{"recorded hook id, foreign repo_path", "", hookID, foreign, "ask", "ask"},
+		{"recorded hook id, own worktree", "", hookID, wt, "allow", "allow"},
+		{"unrecorded hook id", "", otherID, wt, "ask", "allow"},
+		{"env not recorded, differing hook id recorded: env wins, unresolved", otherID, hookID, wt, "ask", "allow"},
+		{"env recorded, differing hook id: env resolves, own worktree", hookID, otherID, wt, "allow", "allow"},
+		{"env recorded, differing hook id: env resolves, foreign repo_path", hookID, otherID, foreign, "ask", "ask"},
+		{"env recorded, no hook id, own worktree", hookID, "", wt, "allow", "allow"},
+		{"no principal at all", "", "", foreign, "ask", "allow"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := storeDecisionFor(t, tc.env, tc.hookID, wt, drop(tc.repoPath)); got != tc.want {
-				t.Errorf("got %q, want %q", got, tc.want)
+			if got := storeDecisionFor(t, tc.env, "", tc.hookID, wt, drop(tc.repoPath)); got != tc.want {
+				t.Errorf("outside a unit: got %q, want %q", got, tc.want)
+			}
+			if got := storeDecisionFor(t, tc.env, testUnit, tc.hookID, wt, drop(tc.repoPath)); got != tc.wantInUnit {
+				t.Errorf("in a unit: got %q, want %q", got, tc.wantInUnit)
 			}
 		})
 	}
 }
 
-// A hook with a known principal that resolves to no session (a confined
-// worker: clown#289 sets CLOWN_SESSION_ID inside the unit, where the hook cannot
-// resolve the session) passes a non-force grit call with a foreign repo_path
-// through to the serve, which enforces ownership. It must not ask, and so must
-// not be denied under dontAsk. Force still asks, and is denied under dontAsk.
-func TestHookWithKnownButUnresolvablePrincipalDefersToTheServe(t *testing.T) {
+// A confined worker's hook (CLOWN_UNIT set; clown#289 sets CLOWN_SESSION_ID in
+// the unit, where the hook cannot resolve the session) passes a non-force grit
+// call with a foreign repo_path through to the serve, which enforces ownership.
+// It must not ask, and so must not be denied under dontAsk (the f154e30
+// regression). The same principal outside a unit asks, and is denied under
+// dontAsk. Force asks in both, and is denied under dontAsk.
+func TestHookWithKnownButUnresolvablePrincipal(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	foreign := t.TempDir()
 	for _, tc := range []struct {
-		name, tool, mode, want string
-		input                  map[string]any
+		name, tool, mode, unit, want string
+		input                        map[string]any
 	}{
-		{"commit, default mode", "commit", "default", "allow", map[string]any{"message": "m", "repo_path": foreign}},
-		{"commit, dontAsk", "commit", "dontAsk", "allow", map[string]any{"message": "m", "repo_path": foreign}},
-		{"stash save, dontAsk", "stash", "dontAsk", "allow", map[string]any{"subcommand": "save", "repo_path": foreign}},
-		{"force, default mode", "branch", "default", "ask", map[string]any{"subcommand": "delete", "name": "x", "force": true, "repo_path": foreign}},
-		{"force, dontAsk", "branch", "dontAsk", "deny", map[string]any{"subcommand": "delete", "name": "x", "force": true, "repo_path": foreign}},
+		{"in unit: commit, default mode", "commit", "default", testUnit, "allow", map[string]any{"message": "m", "repo_path": foreign}},
+		{"in unit: commit, dontAsk", "commit", "dontAsk", testUnit, "allow", map[string]any{"message": "m", "repo_path": foreign}},
+		{"in unit: stash save, dontAsk", "stash", "dontAsk", testUnit, "allow", map[string]any{"subcommand": "save", "repo_path": foreign}},
+		{"in unit: force, default mode", "branch", "default", testUnit, "ask", map[string]any{"subcommand": "delete", "name": "x", "force": true, "repo_path": foreign}},
+		{"in unit: force, dontAsk", "branch", "dontAsk", testUnit, "deny", map[string]any{"subcommand": "delete", "name": "x", "force": true, "repo_path": foreign}},
+		{"no unit: commit, default mode", "commit", "default", "", "ask", map[string]any{"message": "m", "repo_path": foreign}},
+		{"no unit: commit, dontAsk", "commit", "dontAsk", "", "deny", map[string]any{"message": "m", "repo_path": foreign}},
+		{"no unit: force, dontAsk", "branch", "dontAsk", "", "deny", map[string]any{"subcommand": "delete", "name": "x", "force": true, "repo_path": foreign}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("CLOWN_SESSION_ID", "7a7a7a7a-0000-4000-8000-000000000000")
+			setEnvOrUnset(t, "CLOWN_UNIT", tc.unit)
 			data, _ := json.Marshal(map[string]any{
 				"hook_event_name": "PreToolUse",
 				"tool_name":       "mcp__plugin_spinclass_spinclass__grit_" + tc.tool,
@@ -119,19 +138,24 @@ func TestHookWithKnownButUnresolvablePrincipalDefersToTheServe(t *testing.T) {
 }
 
 // A grit store call from a caller with no principal visible to the hook
-// (CLOWN_SESSION_ID empty, a confined caller) is deferred to the serve (allow,
-// with the reason saying so); force still prompts.
-func TestStoreToolWithoutSessionDefersToTheServe(t *testing.T) {
-	t.Setenv("CLOWN_SESSION_ID", "")
+// (CLOWN_SESSION_ID empty) is deferred to the serve inside a unit and asks
+// outside one; force asks in both. Every decision carries a reason.
+func TestStoreToolWithoutSession(t *testing.T) {
+	setEnvOrUnset(t, "CLOWN_SESSION_ID", "")
 	for _, tc := range []struct {
+		unit       string
 		subcommand string
 		force      bool
 		want       string
 	}{
-		{"log", false, "allow"},
-		{"delete", false, "allow"},
-		{"delete", true, "ask"},
+		{testUnit, "log", false, "allow"},
+		{testUnit, "delete", false, "allow"},
+		{testUnit, "delete", true, "ask"},
+		{"", "log", false, "ask"},
+		{"", "delete", false, "ask"},
+		{"", "delete", true, "ask"},
 	} {
+		setEnvOrUnset(t, "CLOWN_UNIT", tc.unit)
 		cwd := t.TempDir()
 		input := makeInput(
 			"mcp__plugin_spinclass_spinclass__grit_branch",
@@ -143,7 +167,7 @@ func TestStoreToolWithoutSessionDefersToTheServe(t *testing.T) {
 		}
 		decision, reason := parseHookDecision(t, stdout.Bytes())
 		if decision != tc.want || reason == "" {
-			t.Errorf("%s force=%v: got decision %q reason %q, want %s with a reason", tc.subcommand, tc.force, decision, reason, tc.want)
+			t.Errorf("unit=%q %s force=%v: got decision %q reason %q, want %s with a reason", tc.unit, tc.subcommand, tc.force, decision, reason, tc.want)
 		}
 	}
 }

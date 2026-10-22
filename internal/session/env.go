@@ -21,9 +21,16 @@ import "strings"
 // user wherever clown does not re-mint it, and the same uid can read that
 // file, so the child could authenticate as its parent. The child's clown
 // mints its own (spinclass#169, FDR 0035).
+//
+// CLOWN_UNIT marks a process inside a confined unit. A child session is not
+// in its launcher's unit (a confined one gets its own, and its own marker,
+// from clown), and an inherited marker would make the child's hook defer grit
+// calls it should ask about. Dropping it fails closed: an unmarked hook asks
+// (FDR 0035 "CLOWN_UNIT").
 var inheritedSessionIDVars = []string{
 	"CLOWN_SESSION_ID=",
 	"CLAUDE_SESSION_ID=",
+	"CLOWN_UNIT=",
 	"TROUPE_XMPP_PASSWORD_FILE=",
 	"TROUPE_XMPP_PASSWORD=",
 }

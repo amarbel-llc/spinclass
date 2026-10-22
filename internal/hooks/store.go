@@ -22,8 +22,11 @@ func storeDecision(input hookInput, mainRepoRoot, sessionWorktree string, rewrit
 	}
 	envPrincipal := os.Getenv("CLOWN_SESSION_ID")
 	logPrincipalMismatch(input.CWD, envPrincipal, input.SessionID)
-	principal, _, principalKnown := principalForHook(envPrincipal, input.SessionID)
-	verdict, reason, isStore := perms.StoreVerdict(input.ToolName, toolInput, principal, principalKnown)
+	principal, _, _ := principalForHook(envPrincipal, input.SessionID)
+	// CLOWN_UNIT is a hint, not a boundary: an unconfined caller that sets it
+	// only gets the serve's body refusal instead of a prompt (FDR 0035).
+	inUnit := os.Getenv("CLOWN_UNIT") != ""
+	verdict, reason, isStore := perms.StoreVerdict(input.ToolName, toolInput, principal, inUnit)
 	if !isStore {
 		return nil, false
 	}

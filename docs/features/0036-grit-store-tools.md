@@ -148,9 +148,11 @@ the same PreToolUse hook that consults `AlwaysAsk`:
      a differing hook `session_id` is logged, not refused), else the hook JSON
      `session_id` as a fallback (`hooks.principalForHook`, the same source
      `recordOwnPrincipal` uses). Session unresolved (principal unknown, no
-     recorded session, ambiguous, or conflicting sources) -> a non-force call is
-     deferred to the serve (`Allow`) in every case; force still asks (see "Hook
-     defers an unresolved session" below).
+     recorded session, ambiguous, conflicting sources, or no principal at all)
+     -> a non-force call is deferred to the serve (`Allow`) only when
+     `CLOWN_UNIT` is set (the hook runs in a confined unit, FDR 0035
+     "CLOWN_UNIT"), and asks otherwise; force always asks (see "Hook defers an
+     unresolved session in a unit" below).
 3. Everything else -> existing tier-file logic.
 
 **dontAsk sessions.** A session spawned with `--permission-mode dontAsk` cannot
@@ -754,15 +756,13 @@ cannot tell callers apart and everything would classify as confined.
 
 **Left open.**
 
-- The PreToolUse hook runs in the confined worker's own process, where
-  `CLOWN_SESSION_ID` is absent (clown#136) and the state directory is hidden.
-  `resolveStoreSession` therefore finds no session and the hook asks, which
-  under `dontAsk` is a deny. A confined worker can only commit once the hook
-  can allow it, so the hook needs a session source that does not depend on the
-  principal environment variable (for example the worktree path the hook runs
-  in); the body check exists so such an unauthenticated hook decision is not the
-  only gate. `ClassifyCaller` already treats a process inside an agent unit as
-  confined for that future use.
+- (Resolved, see "Implemented: option 3 and hardening" and its `CLOWN_UNIT`
+  follow-up.) The PreToolUse hook runs in the confined worker's own process,
+  where the state directory is hidden, so `resolveStoreSession` finds no
+  session; at this step the hook then asked, which under `dontAsk` is a deny,
+  and a confined worker could not commit. The hook now defers such a call to
+  the serve when clown's in-unit marker `CLOWN_UNIT` is set; the body check is
+  the gate. `ClassifyCaller` treats a process inside an agent unit as confined.
 - An empty `CLOWN_SESSION_ID` (a bare serve outside clown) counts as confined,
   per the fail-closed ruling, so non-clown use of the grit tools gets the body
   check and no hooks. Flip the call site in `resolveGritCaller` if that proves
@@ -780,28 +780,32 @@ Built (spinclass #379). The operator chose "option 3" for the hook problem
 above: for a caller the hook cannot resolve, the in-unit PreToolUse hook stops
 asking and the serve decides.
 
-- **Hook defers an unresolved session in every case**
-  (`perms.StoreVerdict`; hotfix after #392). Since clown#289 `CLOWN_SESSION_ID`
-  is set in the hook environment inside a confined unit too, where the hook
-  cannot resolve the session, so a known principal no longer implies the hook
-  can judge ownership. If the session cannot be resolved, a non-force call
-  returns `Allow` with the reason "deferred to the serve: body ownership check
-  applies". Ownership of a confined caller is enforced by the serve body
-  (`internal/store/git/confined.go`). For an unconfined hook-unresolved caller
-  this reopens non-force writes on refs it does not own: a speed bump rather than
-  a boundary, since an unconfined worker holds the same account and token and can
-  raw-push. The stash case is closed in the body (session-local). A later change
-  will let the hook ask again for unconfined callers once clown exports a
-  unit-scope marker (not decided). The hook's principal is `CLOWN_SESSION_ID`
+- **Hook defers an unresolved session in a unit** (`perms.StoreVerdict`;
+  hotfix f154e30 after #392, narrowed by the `CLOWN_UNIT` marker, FDR 0035
+  "CLOWN_UNIT"). Since clown#289 `CLOWN_SESSION_ID` is set in the hook
+  environment inside a confined unit too, where the hook cannot resolve the
+  session, so a known principal does not imply the hook can judge ownership.
+  The hotfix deferred every unresolved session; that reopened non-force writes
+  on refs an unconfined hook-unresolved caller does not own (a speed bump rather
+  than a boundary, since an unconfined worker holds the same account and token
+  and can raw-push). Now: with `CLOWN_UNIT` set (clown sets it in the confined
+  unit only, clown 508839d) an unresolved non-force call returns `Allow` with the
+  reason "confined unit, session unresolved here, deferred to the serve: body
+  ownership check applies", and ownership is enforced by the serve body
+  (`internal/store/git/confined.go`); with `CLOWN_UNIT` empty an unresolved
+  call asks (a deny under `dontAsk`), whether or not a principal was seen. The
+  marker is a hint, not a boundary: setting it on an unconfined process only
+  swaps the prompt for the body refusal. The stash case is closed in the body
+  (session-local) either way. The hook's principal is `CLOWN_SESSION_ID`
   whenever it is set, else the hook JSON `session_id` as a fallback
   (`hooks.principalForHook`, the same source `recordOwnPrincipal` records from).
   The env wins: when both are set and differ the mismatch is logged (hook trace
   and session log, both ids) but neither refused nor turned into an Ask; the env
   principal is recorded and resolved. With the env empty, a `/clear` changes the
   hook `session_id`, so the recorded principal no longer matches and the call is
-  deferred to the serve. `hooks.storeDecision` passes `perms.StoreVerdict` that
-  principal plus whether one was seen (the flag no longer changes the verdict;
-  it is kept for logging). A resolved session is unchanged (`Classify` decides;
+  unresolved (asks outside a unit, deferred inside one). `hooks.storeDecision`
+  passes `perms.StoreVerdict` that principal plus whether `CLOWN_UNIT` is set.
+  A resolved session is unchanged (`Classify` decides;
   owned targets allow, the rest ask). `force:true` asks when unresolved, and the `AlwaysAsk` floors stay ahead of
   `StoreVerdict` in `runPreToolUse`, unchanged. The deferral is safe only
   because the body fails closed: a zero-value or unresolved `Session` counts as
@@ -834,11 +838,10 @@ asking and the serve decides.
   principal. It does not detect several peers sharing one serve through the
   clown stdio-bridge loopback port: they appear as one serve with one principal.
   That needs a peer check in clown.
-- The hook may not see `CLOWN_SESSION_ID` even for unconfined sessions. Those
-  sessions now get no human prompt on foreign grit operations; they get a hard
-  body refusal on writes they do not own instead (operator-accepted). The
-  body derives the session from the serve's cwd and the frontend mapping when
-  the principal is unmapped.
+- The hook may not see `CLOWN_SESSION_ID` even for unconfined sessions (since
+  clown#289 it normally does, through clown's settings env). Such a session
+  has no `CLOWN_UNIT`, so its grit calls ask again, as they did before the
+  f154e30 hotfix (a deny under `dontAsk`).
 - Not exercised against a real confined unit or a live clown.
 
 #### Frontend git hardening for confined callers (section 9.5, round I)

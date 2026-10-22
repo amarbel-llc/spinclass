@@ -60,16 +60,17 @@ Each verb belongs to one class:
 The verdict is computed by one function shared by the permission hook and the
 tool body. The PreToolUse hook consults it for these tools after the *AlwaysAsk*
 floors. The hook's principal is *CLOWN\_SESSION\_ID* when set, else the hook's
-*session\_id* (clown does not export *CLOWN\_SESSION\_ID* to the hook); if both
-are set and differ the principal is known but unusable. A principal that
-resolves to one recorded session lets *Classify* decide. When the session does
-not resolve (no principal, no recorded session, an ambiguous one, or
-conflicting sources; a confined worker's hook sees its principal but cannot
-resolve the session) the hook returns Allow with the reason "deferred to the
-serve: body ownership check applies", except that a call with *force* set
-still asks. A later change may let the hook ask again for unconfined callers
-once clown exports a unit-scope marker (not decided). That deferral is safe only because the tool
-body fails closed, see CONFINED, UNCONFINED AND NO-SESSION CALLERS.
+*session\_id*; if both are set and differ, *CLOWN\_SESSION\_ID* wins and the
+mismatch is logged. A principal that resolves to one recorded session lets
+*Classify* decide. When the session does not resolve (no principal, no recorded
+session, an ambiguous one, or conflicting sources) the verdict depends on
+*CLOWN\_UNIT*, which clown sets inside a confined unit only (a confined
+worker's hook sees its principal but cannot resolve the session). With it set
+the hook returns Allow with the reason "confined unit, session unresolved here,
+deferred to the serve: body ownership check applies"; with it empty the hook
+asks. A call with *force* set asks either way. The marker is a hint, not a
+boundary: the deferral is safe only because the tool body fails closed, see
+CONFINED, UNCONFINED AND NO-SESSION CALLERS.
 
 A session whose hook input carries *permission\_mode* *dontAsk* is never
 prompted: the hook turns every *ask* it would emit, from this verdict and from
@@ -314,8 +315,11 @@ It calls the same backend as the MCP tools, so remote verbs stay agentless.
   one principal and are not distinguished. A corrupt unit record for an unrelated
   session makes every caller classify as confined (fail closed); repair or
   remove the record.
-- An unconfined session whose hook cannot resolve its session gets no human
-  prompt on foreign operations; the body refuses writes it does not own instead.
+- An unconfined session whose hook cannot resolve its session is asked about
+  every grit call (denied under *dontAsk*). *CLOWN\_UNIT* is a hint, not a
+  boundary: a process that sets it on itself gets the body refusal of writes
+  it does not own instead of the prompt. A clown that predates the marker sets
+  none in its units, so their hooks ask (or deny) too.
 - An unconfined worker can still run raw *git push* with its session
   credential; only the confined unit lost that (read-only refs, inaccessible
   credential). *nix flake* evaluation of git inputs and direnv hooks in a

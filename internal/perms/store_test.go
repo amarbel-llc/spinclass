@@ -69,98 +69,64 @@ func TestStoreVerdictFailsClosed(t *testing.T) {
 	})
 }
 
-func TestStoreVerdictDefersAnUnresolvedSessionToTheServe(t *testing.T) {
+// An unresolved session inside a confined unit (CLOWN_UNIT set) is deferred to
+// the serve; outside a unit it asks. Force asks either way, and the backend is
+// never consulted without a session.
+func TestStoreVerdictUnresolvedSessionDependsOnTheUnitMarker(t *testing.T) {
 	const tool = gritToolPrefix + "branch"
-	t.Run("stubbed unresolved session", func(t *testing.T) {
-		recorder := &recordingBackend{verdict: store.Ask}
-		stubStore(t, recorder, nil)
-		verdict, reason, isStore := StoreVerdict(tool, map[string]any{"subcommand": "delete", "name": "foreign"}, "", false)
-		if !isStore || verdict != store.Allow {
-			t.Errorf("got (%v, store=%v), want allow", verdict, isStore)
-		}
-		if !strings.Contains(reason, "deferred to the serve") {
-			t.Errorf("reason = %q", reason)
-		}
-		if recorder.op.Tool != "" {
-			t.Error("backend must not be consulted without a session")
-		}
-	})
-	t.Run("empty principal through the real resolver", func(t *testing.T) {
-		verdict, _, isStore := StoreVerdict(tool, map[string]any{"subcommand": "log"}, "", false)
-		if !isStore || verdict != store.Allow {
-			t.Errorf("got (%v, store=%v), want allow", verdict, isStore)
-		}
-	})
-	t.Run("a resolved session still asks for foreign targets", func(t *testing.T) {
-		stubStore(t, &recordingBackend{verdict: store.Ask}, &store.Session{Dir: "/w", Branch: "b"})
-		if verdict, _, _ := StoreVerdict(tool, map[string]any{"subcommand": "delete", "name": "foreign"}, "p", true); verdict != store.Ask {
-			t.Errorf("got %v, want ask", verdict)
-		}
-	})
-	t.Run("force still asks for an unresolved caller", func(t *testing.T) {
-		stubStore(t, &recordingBackend{verdict: store.Allow}, nil)
-		input := map[string]any{"subcommand": "delete", "name": "x", "force": true}
-		if verdict, _, _ := StoreVerdict(tool, input, "", false); verdict != store.Ask {
-			t.Errorf("got %v, want ask", verdict)
-		}
-	})
-	t.Run("empty principal defers reads and non-force writes", func(t *testing.T) {
-		stubStore(t, &recordingBackend{verdict: store.Ask}, nil)
-		for name, call := range map[string]struct {
-			tool  string
-			input map[string]any
-		}{
-			"read":         {"stage", map[string]any{"subcommand": "status"}},
-			"stash write":  {"stash", map[string]any{"subcommand": "save", "repo_path": "/foreign/repo"}},
-			"plain commit": {"commit", map[string]any{"message": "m"}},
-		} {
-			if verdict, _, _ := StoreVerdict(gritToolPrefix+call.tool, call.input, "", false); verdict != store.Allow {
-				t.Errorf("%s: got %v, want allow", name, verdict)
-			}
-		}
-	})
-}
-
-// A principal the hook saw (CLOWN_SESSION_ID or the hook session_id) that maps
-// to no recorded session is deferred to the serve like any unresolved session
-// (a confined worker's hook sees CLOWN_SESSION_ID but cannot resolve the
-// session, clown#289); force still asks. Conflicting sources arrive as a known
-// but empty principal.
-func TestStoreVerdictDefersWhenAKnownPrincipalMapsToNoSession(t *testing.T) {
-	for name, call := range map[string]struct {
+	calls := map[string]struct {
 		tool  string
 		input map[string]any
-		want  store.Verdict
 	}{
-		"stash with a foreign repo_path": {"stash", map[string]any{"subcommand": "save", "repo_path": "/foreign/repo"}, store.Allow},
-		"plain commit":                   {"commit", map[string]any{"message": "m"}, store.Allow},
-		"force":                          {"branch", map[string]any{"subcommand": "delete", "name": "x", "force": true}, store.Ask},
-	} {
-		t.Run(name, func(t *testing.T) {
-			recorder := &recordingBackend{verdict: store.Allow}
-			stubStore(t, recorder, nil)
-			verdict, reason, isStore := StoreVerdict(gritToolPrefix+call.tool, call.input, "some-principal", true)
-			if !isStore || verdict != call.want || reason == "" {
-				t.Errorf("got (%v, %q, store=%v), want %v with a reason", verdict, reason, isStore, call.want)
-			}
-			if call.want == store.Allow && !strings.Contains(reason, "deferred to the serve") {
-				t.Errorf("reason = %q, want deferred", reason)
-			}
-			if recorder.op.Tool != "" {
-				t.Error("backend must not be consulted without a session")
-			}
-		})
+		"read":                           {"stage", map[string]any{"subcommand": "status"}},
+		"stash with a foreign repo_path": {"stash", map[string]any{"subcommand": "save", "repo_path": "/foreign/repo"}},
+		"plain commit":                   {"commit", map[string]any{"message": "m"}},
+		"foreign branch delete":          {"branch", map[string]any{"subcommand": "delete", "name": "foreign"}},
 	}
-	t.Run("conflicting principal sources defer", func(t *testing.T) {
-		stubStore(t, &recordingBackend{verdict: store.Allow}, nil)
-		if verdict, _, _ := StoreVerdict(gritToolPrefix+"commit", map[string]any{"message": "m"}, "", true); verdict != store.Allow {
-			t.Errorf("got %v, want allow", verdict)
+	for _, principal := range []string{"", "some-principal"} {
+		for name, call := range calls {
+			t.Run(name+" principal="+principal, func(t *testing.T) {
+				recorder := &recordingBackend{verdict: store.Allow}
+				stubStore(t, recorder, nil)
+				verdict, reason, isStore := StoreVerdict(gritToolPrefix+call.tool, call.input, principal, true)
+				if !isStore || verdict != store.Allow || !strings.Contains(reason, "deferred to the serve") {
+					t.Errorf("in unit: got (%v, %q, store=%v), want allow deferred", verdict, reason, isStore)
+				}
+				verdict, reason, _ = StoreVerdict(gritToolPrefix+call.tool, call.input, principal, false)
+				if verdict != store.Ask || !strings.Contains(reason, "not in a confined unit") {
+					t.Errorf("outside a unit: got (%v, %q), want ask", verdict, reason)
+				}
+				if recorder.op.Tool != "" {
+					t.Error("backend must not be consulted without a session")
+				}
+			})
+		}
+	}
+	t.Run("empty principal through the real resolver", func(t *testing.T) {
+		if verdict, _, _ := StoreVerdict(tool, map[string]any{"subcommand": "log"}, "", true); verdict != store.Allow {
+			t.Errorf("in unit: got %v, want allow", verdict)
+		}
+		if verdict, _, _ := StoreVerdict(tool, map[string]any{"subcommand": "log"}, "", false); verdict != store.Ask {
+			t.Errorf("outside a unit: got %v, want ask", verdict)
 		}
 	})
-	t.Run("a resolved session is unchanged by the principal", func(t *testing.T) {
-		stubStore(t, &recordingBackend{verdict: store.Allow}, &store.Session{Dir: "/w", Branch: "b"})
-		if verdict, _, _ := StoreVerdict(gritToolPrefix+"commit", map[string]any{"message": "m"}, "some-principal", true); verdict != store.Allow {
-			t.Errorf("got %v, want allow", verdict)
+	t.Run("force asks for an unresolved caller, in a unit or not", func(t *testing.T) {
+		stubStore(t, &recordingBackend{verdict: store.Allow}, nil)
+		input := map[string]any{"subcommand": "delete", "name": "x", "force": true}
+		for _, inUnit := range []bool{true, false} {
+			if verdict, _, _ := StoreVerdict(tool, input, "p", inUnit); verdict != store.Ask {
+				t.Errorf("inUnit=%v: got %v, want ask", inUnit, verdict)
+			}
+		}
+	})
+	t.Run("a resolved session is decided by Classify, marker or not", func(t *testing.T) {
+		for _, backendVerdict := range []store.Verdict{store.Allow, store.Ask} {
+			stubStore(t, &recordingBackend{verdict: backendVerdict}, &store.Session{Dir: "/w", Branch: "b"})
+			for _, inUnit := range []bool{true, false} {
+				if verdict, _, _ := StoreVerdict(tool, map[string]any{"subcommand": "delete", "name": "foreign"}, "p", inUnit); verdict != backendVerdict {
+					t.Errorf("backend %v inUnit=%v: got %v", backendVerdict, inUnit, verdict)
+				}
+			}
 		}
 	})
 	t.Run("an AlwaysAsk floor stays ahead of the store verdict", func(t *testing.T) {
@@ -175,7 +141,7 @@ func TestStoreVerdictPassesSessionAndOpToBackend(t *testing.T) {
 	resolved := store.Session{Dir: "/w", Branch: "glad-buckeye"}
 	stubStore(t, recorder, &resolved)
 
-	verdict, _, isStore := StoreVerdict(gritToolPrefix+"branch", map[string]any{"subcommand": "delete", "name": "x"}, "p", true)
+	verdict, _, isStore := StoreVerdict(gritToolPrefix+"branch", map[string]any{"subcommand": "delete", "name": "x"}, "p", false)
 	if !isStore || verdict != store.Allow {
 		t.Fatalf("got (%v, store=%v), want allow", verdict, isStore)
 	}
@@ -191,7 +157,7 @@ func TestStoreVerdictPassesSessionAndOpToBackend(t *testing.T) {
 	}
 
 	recorder.verdict = store.Ask
-	if verdict, _, _ := StoreVerdict(gritToolPrefix+"branch", map[string]any{"subcommand": "delete", "name": "x"}, "p", true); verdict != store.Ask {
+	if verdict, _, _ := StoreVerdict(gritToolPrefix+"branch", map[string]any{"subcommand": "delete", "name": "x"}, "p", false); verdict != store.Ask {
 		t.Errorf("backend ask must stay ask, got %v", verdict)
 	}
 }
@@ -200,7 +166,7 @@ func TestStoreVerdictToolsWithoutSubcommand(t *testing.T) {
 	recorder := &recordingBackend{verdict: store.Allow}
 	stubStore(t, recorder, &store.Session{Dir: "/w", Branch: "b"})
 	for _, tool := range []string{"commit", "merge", "clone"} {
-		if verdict, _, isStore := StoreVerdict(gritToolPrefix+tool, map[string]any{"message": "m"}, "p", true); !isStore || verdict != store.Allow {
+		if verdict, _, isStore := StoreVerdict(gritToolPrefix+tool, map[string]any{"message": "m"}, "p", false); !isStore || verdict != store.Allow {
 			t.Errorf("%s: got (%v, store=%v)", tool, verdict, isStore)
 		}
 		if recorder.op.Tool != tool || recorder.op.Subcommand != "" {
@@ -228,7 +194,7 @@ func TestStoreVerdictRemoteFamilyThroughTheGitBackend(t *testing.T) {
 		{"clone", map[string]any{"source": "x", "destination": "/elsewhere/y"}, store.Ask},
 		{"remote", map[string]any{"subcommand": "fetch"}, store.Allow},
 	} {
-		if verdict, _, isStore := StoreVerdict(gritToolPrefix+tc.tool, tc.input, "p", true); !isStore || verdict != tc.want {
+		if verdict, _, isStore := StoreVerdict(gritToolPrefix+tc.tool, tc.input, "p", false); !isStore || verdict != tc.want {
 			t.Errorf("%s %v: got (%v, store=%v), want %v", tc.tool, tc.input, verdict, isStore, tc.want)
 		}
 	}

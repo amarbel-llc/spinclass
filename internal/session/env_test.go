@@ -11,6 +11,7 @@ func TestStripInheritedSessionIDs(t *testing.T) {
 		"CLOWN_SESSION_ID=driver/key",
 		"SPINCLASS_SESSION_ID=worker/key",
 		"CLAUDE_SESSION_ID=abc-123",
+		"CLOWN_UNIT=clown-agent-driver.service",
 		"CLOWN_BIN=/nix/store/x/bin/clown",
 		"HOME=/home/u",
 	}
