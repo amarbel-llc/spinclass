@@ -185,15 +185,20 @@ assert_session_state() {
   assert [ "$count" -gt 0 ]
 }
 
-# Echo the path of the worktree-local state.json (or tombstone fallback)
-# for the first index entry found. Used by tests that need to grep the
-# state JSON for a description or other field.
+# Echo the path of the authoritative session record for the first index entry
+# found: the frontend record under records/ (same name as the index entry),
+# else the tombstone, else the worktree copy. Used by tests that read or edit
+# the state JSON; an edit must hit the record, since the worktree state.json is
+# a display copy the frontend never acts on.
 # Usage: first_session_state_path
 first_session_state_path() {
   local index_dir="$XDG_STATE_HOME/spinclass/index"
+  local records_dir="$XDG_STATE_HOME/spinclass/records"
   for entry in "$index_dir"/*.json; do
     [ -e "$entry" ] || continue
-    if [ -L "$entry" ]; then
+    if [ -f "$records_dir/$(basename "$entry")" ]; then
+      echo "$records_dir/$(basename "$entry")"
+    elif [ -L "$entry" ]; then
       readlink -f "$entry"
     else
       echo "$entry"
