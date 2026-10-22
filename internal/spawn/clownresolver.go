@@ -64,7 +64,7 @@ func (r clownResolver) Resolve(name string) (ResolvedProfile, error) {
 		)
 	}
 
-	return ResolvedProfile{Name: res.Name, Digest: digest, Provider: res.Provider, KeptServers: keptServers(res.Selection)}, nil
+	return ResolvedProfile{Name: res.Name, Digest: digest, Provider: res.Provider, KeptServers: keptServers(res.Selection), Source: string(res.Source)}, nil
 }
 
 // keptServers maps a Selection onto ResolvedProfile.KeptServers: nil when the

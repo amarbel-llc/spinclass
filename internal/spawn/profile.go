@@ -39,6 +39,10 @@ type ResolvedProfile struct {
 	// the resolver does not record one, which callers read as clown's default.
 	Provider    string
 	KeptServers []string
+	// Source is which layer the profile came from, as clown's library reports it
+	// ("builtin", "user"). Empty means the resolver could not say, which a
+	// confined spawn treats as unknown and refuses (confineprofile.go).
+	Source string
 }
 
 // ProfileResolver looks a profile name up through clown's library. It is an

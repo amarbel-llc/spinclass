@@ -68,6 +68,35 @@ func TestTrustedURLResolverHonoursOnlyLayersAboveRepo(t *testing.T) {
 	}
 }
 
+func TestTrustedSpawnProfileHonoursOnlyLayersAboveRepo(t *testing.T) {
+	home := t.TempDir()
+	repo := filepath.Join(home, "work", "repo")
+	wt := filepath.Join(repo, ".worktrees", "x")
+	write := func(path, profile string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("[session-entry]\nspawn-profile = \""+profile+"\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repoFile, wtFile := filepath.Join(repo, "sweatfile"), filepath.Join(wt, "sweatfile")
+	write(filepath.Join(home, ".config", "spinclass", "sweatfile"), "global")
+	write(filepath.Join(home, "work", "sweatfile"), "parent")
+	write(repoFile, "repo")
+	write(wtFile, "wt")
+
+	h, err := LoadWorktreeHierarchy(home, repo, wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ignored := TrustedSpawnProfile(h, home, repo)
+	if got != "parent" || !reflect.DeepEqual(ignored, []string{repoFile, wtFile}) {
+		t.Errorf("got (%q, %v), want (parent, [%s %s])", got, ignored, repoFile, wtFile)
+	}
+}
+
 func TestTrustedURLResolverIgnoresWorktreeLayer(t *testing.T) {
 	home := t.TempDir()
 	repo := filepath.Join(home, "work", "repo")

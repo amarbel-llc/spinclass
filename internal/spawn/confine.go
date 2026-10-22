@@ -87,6 +87,11 @@ type confinedLaunch struct {
 type targetConfinement struct {
 	policy sweatfileio.ConfinementPolicy
 	egress []string
+	// spawnProfile is [session-entry].spawn-profile read from layers above the
+	// repo only, the default a confined spawn may use; ignoredSpawnProfile are
+	// the repo/worktree layers that set it and were not honoured.
+	spawnProfile        string
+	ignoredSpawnProfile []string
 }
 
 // driverRepo is the repo whose hierarchy describes the DRIVER's own context:

@@ -87,7 +87,9 @@ type Pending struct {
 // spawn-profile, and no profile at all leaves the spawn completely unchanged
 // (no resolver call). A requested profile is resolved before shop.Create, so a
 // refusal litters no worktree, and its name and digest are recorded in the
-// worker's session state.
+// worker's session state. A confined spawn instead requires a profile, reads
+// the spawn-profile default only from layers above the repo, and accepts only a
+// profile that leaves no grit tool reachable (requireConfinedProfile).
 func LaunchDetached(home, repoPath string, driver Driver, brief, desc, model, profile string) (Pending, error) {
 	return LaunchDetachedWith(home, repoPath, driver, brief, desc, model, profile, ConfineDefault)
 }
@@ -125,7 +127,23 @@ func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model
 	if err != nil {
 		return Pending{}, err
 	}
+	effective := effectiveProfile(profile, merged)
+	var resolved ResolvedProfile
 	if confined {
+		// A confined worker needs a profile that leaves no grit tool reachable
+		// (FDR 0035). Config-only and read-only, so it comes first: nothing below
+		// writes state, and a refusal here does not depend on the host.
+		if len(targetConfine.ignoredSpawnProfile) > 0 {
+			slog.Warn("ignored [session-entry] spawn-profile in sweatfiles that are not trusted: a confined spawn reads it only from sweatfiles above the repo",
+				"paths", targetConfine.ignoredSpawnProfile)
+		}
+		if effective, resolved, err = requireConfinedProfile(profile, targetConfine.spawnProfile); err != nil {
+			return Pending{}, err
+		}
+		// renderSpawn spliced the merged default; the confined profile may differ.
+		if argv, err = SpliceProfileFlag(argv, effective); err != nil {
+			return Pending{}, err
+		}
 		if err := confinedPreflight(confinementHost, agentScopeCapabilitiesArgv); err != nil {
 			return Pending{}, err
 		}
@@ -140,7 +158,6 @@ func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model
 			return Pending{}, err
 		}
 	}
-	effective := effectiveProfile(profile, merged)
 	if enforce && effective == "" {
 		// No profile was requested, so Authorize would never run; a profile the
 		// spawn-entry already carries would reach the worker unchecked.
@@ -150,13 +167,14 @@ func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model
 		}
 	}
 
-	var resolved ResolvedProfile
 	var authorizingGrant string
 	var undoLink func()
 	if effective != "" {
-		resolved, err = resolveProfile(effective)
-		if err != nil {
-			return Pending{}, err
+		if !confined { // a confined spawn resolved its profile above
+			resolved, err = resolveProfile(effective)
+			if err != nil {
+				return Pending{}, err
+			}
 		}
 		if enforce {
 			// The name that was authorized must be exactly the name that was
@@ -325,6 +343,7 @@ func renderSpawn(home string, rp worktree.ResolvedPath, brief, model, profile st
 		slog.Warn("ignored [confinement] in sweatfiles that are not trusted: only sweatfiles above the repo are trusted",
 			"paths", untrustedConfine)
 	}
+	confine.spawnProfile, confine.ignoredSpawnProfile = sweatfileio.TrustedSpawnProfile(hierarchy, home, rp.RepoPath)
 	// The enforcement switch is read from layers above the repo only: an agent
 	// can edit the repo's own sweatfile, and must not be able to turn it off.
 	enforce, untrusted := sweatfileio.TrustedEnforceProfileRights(hierarchy, home, rp.RepoPath)

@@ -222,6 +222,31 @@ func TrustedAllowSelfClose(h sweatfile.Hierarchy, home, repoRoot string) (allow 
 	return allow, untrusted
 }
 
+// TrustedSpawnProfile returns the [session-entry].spawn-profile default honoured
+// for a CONFINED spawn into the repo (FDR 0035): a scalar, the last layer above
+// the repo that sets a non-empty value wins, "" when none does. A confined
+// worker's profile decides which tools it can reach, so a value an agent can
+// write into the repo's own sweatfile must not choose it; the paths of the
+// layers that set the key and may not are returned in untrusted so callers can
+// surface them. An unconfined spawn keeps the merged read
+// (Sweatfile.SessionSpawnProfile).
+func TrustedSpawnProfile(h sweatfile.Hierarchy, home, repoRoot string) (profile string, untrusted []string) {
+	for _, src := range h.Sources {
+		if src.SkipReason != "" || !src.Found {
+			continue
+		}
+		if src.File.SessionEntry == nil || src.File.SessionEntry.SpawnProfile == "" {
+			continue
+		}
+		if LayerAboveRepo(src.Path, home, repoRoot) {
+			profile = src.File.SessionEntry.SpawnProfile
+		} else {
+			untrusted = append(untrusted, src.Path)
+		}
+	}
+	return profile, untrusted
+}
+
 // TrustedURLResolver returns the [auth].url-resolver command honoured for the
 // repo: scalar override across layers above the repo, last one wins, an
 // explicit "" clearing it. The value is TrimSpaced, so whitespace-only also
