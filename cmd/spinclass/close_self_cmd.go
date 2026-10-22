@@ -37,7 +37,7 @@ import (
 
 // errNoSelfSession is returned when the caller's principal maps to no session.
 var errNoSelfSession = errors.New(
-	"could not tie this call to a spinclass session (its principal is not recorded on any session), so there is nothing to close")
+	"could not tie this call to a spinclass session, so there is nothing to close")
 
 // selfCloseScope reports whether the operator allowed st to close itself.
 func selfCloseScope(st *session.State) (bool, error) {
@@ -143,9 +143,9 @@ func runCloseThisSession(args json.RawMessage) (string, error) {
 		return "", err
 	}
 	principal := currentPrincipal()
-	key, ok := confinement.SessionKeyOfPrincipal(principal)
-	if !ok {
-		return "", errNoSelfSession
+	key, err := confinement.SessionKeyOfPrincipal(principal)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", errNoSelfSession, err)
 	}
 	st, err := session.FindByTarget(key)
 	if err != nil {
@@ -194,8 +194,11 @@ func runCloseSelfRun(target string) error {
 	implied := ""
 	if target == "" {
 		implied = currentPrincipal()
-		key, ok := confinement.SessionKeyOfPrincipal(implied)
-		if !ok {
+		key, kerr := confinement.SessionKeyOfPrincipal(implied)
+		if kerr != nil {
+			// The runner fires on every idle transition, mostly for sessions with
+			// nothing queued; say why it did nothing, but do not fail the caller.
+			servelog.Errorf("close-self-run: %v", kerr)
 			return nil
 		}
 		target = key

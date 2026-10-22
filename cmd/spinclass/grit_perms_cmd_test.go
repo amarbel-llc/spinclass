@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -20,11 +21,11 @@ func runGritPermsWith(t *testing.T, tool, stdin string, s *store.Session) (stdou
 	t.Cleanup(func() { gritPermsStdin, gritPermsStdout, gritPermsSession = oldIn, oldOut, oldSession })
 	gritPermsStdin = func() io.Reader { return strings.NewReader(stdin) }
 	gritPermsStdout = func() io.Writer { return out }
-	gritPermsSession = func() (store.Session, bool) {
+	gritPermsSession = func() (store.Session, error) {
 		if s == nil {
-			return store.Session{}, false
+			return store.Session{}, errors.New("no frontend principal mapping")
 		}
-		return *s, true
+		return *s, nil
 	}
 	raw, _ := json.Marshal(gritPermsFlags{Tool: tool})
 	err = runGritPerms(context.Background(), raw)

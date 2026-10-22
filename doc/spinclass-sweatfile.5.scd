@@ -1448,7 +1448,8 @@ gates *merge-this-session* / *check-this-session* behind it.
 ## Gate behaviour
 
 On invocation, if no fresh attestation is buffered in the session state
-file (_<worktree>/.spinclass/state.json_; implicit sessions use
+record (_$XDG_STATE_HOME/spinclass/records/<hash>.json_, the frontend
+record; the worktree's _.spinclass/state.json_ is a display-only mirror; implicit sessions use
 _state-<rand>.json_), the gated
 tool fails before running any pre-merge hook with a TAP-14 response
 containing *required\_skills* (the full list, each entry's *name* and

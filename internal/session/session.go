@@ -340,11 +340,14 @@ func legacyStatePath(repoPath, branch string) string {
 	return filepath.Join(legacyStateDir(), legacyStateFilename(repoPath, branch))
 }
 
-// Write persists a session state. The worktree must exist on disk; the
-// `.spinclass/` directory inside it is created on demand. The central
-// index entry is written atomically as a symlink pointing at the
-// worktree-local file, replacing whatever was previously at that path
-// (including a stale tombstone if the session is reactivating).
+// Write persists a session state. The worktree must exist on disk. The
+// authoritative frontend record is written first, at the location derived from
+// s.WorktreePath's key (and only when s is consistent with that location); the
+// display copy in `<worktree>/.spinclass/` follows; then the central index
+// entry is written atomically as a symlink pointing at the display copy,
+// replacing whatever was previously at that path (including a stale tombstone if
+// the session is reactivating). Inside a confined unit only the display copy is
+// written, because the frontend record is unreachable there (record.go).
 func Write(s State) error {
 	migrateOnce()
 
@@ -359,39 +362,38 @@ func Write(s State) error {
 		return fmt.Errorf("session.Write: worktree %q: %w", wt, err)
 	}
 
-	dir := filepath.Join(wt, ".spinclass")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		sessionlog.Errorf("session.Write mkdir-failed dir=%s from=%s err=%v", dir, from, err)
-		return err
-	}
-	if s.Credential == nil {
-		if data, rerr := os.ReadFile(worktreeStatePath(wt)); rerr == nil {
-			var prev State
-			if json.Unmarshal(data, &prev) == nil {
-				s.Credential = prev.Credential
-			}
+	if InUnit() {
+		// A confined unit cannot reach the frontend record (FDR 0035): it writes
+		// only the display copy, which nothing the frontend acts on reads. The
+		// frontend adopts what it needs from the unit (the spawn's hello wait).
+		if err := writeDisplayCopy(wt, s); err != nil {
+			sessionlog.Errorf("session.Write display-copy-failed wt=%s from=%s err=%v", wt, from, err)
+			return err
 		}
-	}
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
-	statePath := worktreeStatePath(wt)
-	if err := writeAtomic(statePath, data); err != nil {
-		sessionlog.Errorf("session.Write writefile-failed path=%s from=%s err=%v", statePath, from, err)
-		return err
+		sessionlog.Infof("session.Write wt=%s branch=%s state=%s (display copy only: inside a unit) from=%s", wt, s.Branch, s.SessionState, from)
+		return nil
 	}
 
-	if err := indexWorktree(wt); err != nil {
-		if errors.Is(err, syscall.EROFS) {
-			// A confined agent unit sees the state dir read-only (FDR 0035). The
-			// worktree-local state.json, the source of truth, is already
-			// written, and the frontend created the index entry that points at
-			// it when it made the worktree, so there is nothing left to
-			// register. Any other failure still fails the write.
-			sessionlog.Errorf("session.Write index-readonly wt=%s branch=%s from=%s err=%v (state.json written; index left as the frontend made it)", wt, s.Branch, from, err)
-			return nil
+	// The record is written at the location derived from the worktree's own
+	// key, and only a state that is consistent with that location is written.
+	if err := checkIdentity(&s, wt); err != nil {
+		sessionlog.Errorf("session.Write rejected wt=%s branch=%s from=%s err=%v", wt, s.Branch, from, err)
+		return fmt.Errorf("session.Write: %w", err)
+	}
+	if s.Credential == nil {
+		if prev, rerr := readRecordFile(recordPath(wt)); rerr == nil {
+			s.Credential = prev.Credential
 		}
+	}
+	if err := writeRecordFile(wt, &s); err != nil {
+		sessionlog.Errorf("session.Write record-failed wt=%s from=%s err=%v", wt, from, err)
+		return err
+	}
+	if err := writeDisplayCopy(wt, s); err != nil {
+		// Display-only: the worker owns that directory and can make this fail.
+		report(fmt.Sprintf("could not write the display copy of session record %s in %s: %v", s.Key(), wt, err))
+	}
+	if err := indexWorktree(wt); err != nil {
 		sessionlog.Errorf("session.Write symlink-failed wt=%s branch=%s from=%s err=%v", wt, s.Branch, from, err)
 		return err
 	}
@@ -432,50 +434,24 @@ func writeIndexSymlink(worktreeAbsPath string) error {
 }
 
 // Read returns the State for (repoPath, branch). Live sessions resolve via
-// the worktree-local state.json. If that file is missing but a tombstone
-// exists in the central index, Read returns the tombstone with isTombstone
-// set. Returns os.ErrNotExist (or a wrapping thereof) when neither source
-// has data.
+// the frontend record (record.go); a cleanly-closed session resolves to its
+// tombstone in the central index, with isTombstone set. The worktree-local
+// state.json is never read except to migrate a legacy session once. Returns
+// os.ErrNotExist (or a wrapping thereof) when there is no such session, and an
+// error naming the record, field and values for one that fails its identity
+// checks.
 func Read(repoPath, branch string) (*State, error) {
 	migrateOnce()
 
-	wt := worktreeFromRepoBranch(repoPath, branch)
-	if data, err := os.ReadFile(worktreeStatePath(wt)); err == nil {
-		var s State
-		if jerr := json.Unmarshal(data, &s); jerr != nil {
-			return nil, jerr
-		}
-		return &s, nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
+	if err := validBranch(branch); err != nil {
+		return nil, fmt.Errorf("no session for branch %q (%v): %w", branch, err, os.ErrNotExist)
 	}
-
-	// Fall back to a tombstone at the index path. This lets tooling read
-	// final state of cleanly-closed sessions via the same API.
-	idx := indexPath(wt)
-	info, err := os.Lstat(idx)
-	if err != nil {
-		return nil, err
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		// Symlink — would have resolved above if live. Treat as missing.
-		return nil, os.ErrNotExist
-	}
-	data, err := os.ReadFile(idx)
-	if err != nil {
-		return nil, err
-	}
-	var s State
-	if jerr := json.Unmarshal(data, &s); jerr != nil {
-		return nil, jerr
-	}
-	s.isTombstone = true
-	return &s, nil
+	return loadByWorktree(worktreeFromRepoBranch(repoPath, branch))
 }
 
 // UpdateCredential sets State.Credential for (repoPath, branch) in whichever
-// store holds the session: the worktree-local state file for a live session,
-// or the tombstone at the index path for a closed one (the orphan sweeper's
+// store holds the session: the frontend record for a live session, or the
+// tombstone at the index path for a closed one (the orphan sweeper's
 // case, FDR 0028). A missing session is os.ErrNotExist.
 func UpdateCredential(repoPath, branch string, c *Credential) error {
 	st, err := Read(repoPath, branch)
@@ -483,14 +459,20 @@ func UpdateCredential(repoPath, branch string, c *Credential) error {
 		return err
 	}
 	st.Credential = c
-	if !st.isTombstone {
-		return Write(*st)
+	wt := worktreeFromRepoBranch(repoPath, branch)
+	if st.isTombstone {
+		data, err := json.MarshalIndent(st, "", "  ")
+		if err != nil {
+			return err
+		}
+		return writeTombstoneFile(wt, data)
 	}
-	data, err := json.MarshalIndent(st, "", "  ")
-	if err != nil {
-		return err
+	if _, serr := os.Stat(wt); serr != nil {
+		// A live record whose worktree vanished (removed outside spinclass) still
+		// owes its credential's revoke status to the sweeper: record it frontend-side.
+		return writeRecordFile(wt, st)
 	}
-	return writeTombstoneFile(worktreeFromRepoBranch(repoPath, branch), data)
+	return Write(*st)
 }
 
 // EnsureWorktreeState returns the State for (repoPath, branch) if one exists,
@@ -527,28 +509,30 @@ func EnsureWorktreeState(repoPath, branch, sessionKey string, pid int) (*State, 
 	}, nil
 }
 
-// Remove deletes both the worktree-local state file and the central index
-// entry. Tolerates missing files. Used by callers that have torn down the
-// worktree (sc close, sc clean) and by abandoned-session reaping. To
-// preserve close history, callers should call Tombstone instead before
+// Remove deletes the frontend record, the display copy and the central index
+// entry of the session at <repoPath>/.worktrees/<branch>. Tolerates missing
+// files. Used by callers that have torn down the worktree (sc close, sc clean)
+// and by abandoned-session reaping. The target is derived from (repoPath,
+// branch) alone, and a branch that is not a plain relative path is refused.
+// To preserve close history, callers should call Tombstone instead before
 // removing the worktree.
 func Remove(repoPath, branch string) error {
 	migrateOnce()
+	if err := validBranch(branch); err != nil {
+		return fmt.Errorf("session.Remove: branch %q: %w", branch, err)
+	}
 	wt := worktreeFromRepoBranch(repoPath, branch)
 	sessionlog.Infof("session.Remove wt=%s branch=%s from=%s", wt, branch, caller(1))
 	return removeForWorktree(wt)
 }
 
 func removeForWorktree(worktreeAbsPath string) error {
-	statePath := worktreeStatePath(worktreeAbsPath)
-	if err := os.Remove(statePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+	rec := recordPath(worktreeAbsPath)
+	if err := os.Remove(rec); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	_ = os.Remove(statePath + ".lock") // Update's flock sidecar would keep the dir non-empty
-	// Best-effort RemoveAll the .spinclass dir so it doesn't outlive the
-	// state file. Ignore "not exist" and "not empty" — slice 2's lifecycle
-	// hooks may write siblings here.
-	_ = os.Remove(filepath.Dir(statePath))
+	_ = os.Remove(rec + ".lock") // Update's flock lives beside the record
+	removeDisplayCopy(worktreeAbsPath)
 
 	idx := indexPath(worktreeAbsPath)
 	if err := os.Remove(idx); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -727,12 +711,10 @@ func findLiveImplicitInDir(dir string) (st *State, randID string, found bool, er
 	return nil, "", false, nil
 }
 
-// Tombstone marks the session as cleanly closed: reads the live state,
+// Tombstone marks the session as cleanly closed: reads the frontend record,
 // atomically replaces the central index symlink with a regular file
-// containing the same JSON (the tombstone), and removes the worktree-local
-// .spinclass directory. Callers must invoke Tombstone BEFORE deleting the
-// worktree directory itself, since the read needs <worktree>/.spinclass/
-// state.json to still be present.
+// containing the same JSON (the tombstone), and removes the frontend record and
+// the worktree-local display copy.
 //
 // sha, when non-empty, is recorded as State.DeletedSHA — the branch's tip
 // commit, captured by the caller immediately before it force-deletes the
@@ -744,33 +726,37 @@ func findLiveImplicitInDir(dir string) (st *State, randID string, found bool, er
 // — the lifecycle work in #42 picks this up.
 func Tombstone(repoPath, branch, sha string) error {
 	migrateOnce()
+	if err := validBranch(branch); err != nil {
+		return fmt.Errorf("session.Tombstone: branch %q: %w", branch, err)
+	}
 	wt := worktreeFromRepoBranch(repoPath, branch)
 	from := caller(1)
 	sessionlog.Infof("session.Tombstone wt=%s branch=%s from=%s", wt, branch, from)
-	statePath := worktreeStatePath(wt)
-	data, err := os.ReadFile(statePath)
+	// The tombstone is made from the frontend record at the location derived
+	// from (repoPath, branch), never from the worktree's copy.
+	s, err := loadByWorktree(wt)
 	if err != nil {
-		sessionlog.Errorf("session.Tombstone read-failed path=%s from=%s err=%v", statePath, from, err)
+		sessionlog.Errorf("session.Tombstone read-failed wt=%s from=%s err=%v", wt, from, err)
 		return fmt.Errorf("session.Tombstone: read live state: %w", err)
 	}
-
-	if sha != "" {
-		var s State
-		if json.Unmarshal(data, &s) == nil {
-			s.DeletedSHA = sha
-			if reMarshalled, merr := json.MarshalIndent(&s, "", "  "); merr == nil {
-				data = reMarshalled
-			}
-		}
+	if s.isTombstone {
+		return fmt.Errorf("session.Tombstone: %s is already closed: %w", s.Key(), os.ErrNotExist)
 	}
-
+	if sha != "" {
+		s.DeletedSHA = sha
+	}
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return err
+	}
 	if err := writeTombstoneFile(wt, data); err != nil {
 		return err
 	}
-	// State file and the .spinclass dir are now redundant — clean up.
-	_ = os.Remove(statePath)
-	_ = os.Remove(statePath + ".lock") // Update's flock sidecar would keep the dir non-empty
-	_ = os.Remove(filepath.Dir(statePath))
+	// The record and the display copy are now redundant — clean up.
+	rec := recordPath(wt)
+	_ = os.Remove(rec)
+	_ = os.Remove(rec + ".lock")
+	removeDisplayCopy(wt)
 	return nil
 }
 
@@ -969,34 +955,14 @@ func FindByWorktreePath(path string) (*State, error) {
 // from worktreeAbsPath, returning (state, true) only if the entry exists
 // and resolves successfully (live or tombstone).
 func readDirectIfMatches(worktreeAbsPath string) (*State, bool) {
-	idx := indexPath(worktreeAbsPath)
-	info, err := os.Lstat(idx)
+	if _, err := os.Lstat(indexPath(worktreeAbsPath)); err != nil {
+		return nil, false
+	}
+	s, err := loadByWorktree(worktreeAbsPath)
 	if err != nil {
 		return nil, false
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		// Live symlink — try to read through it.
-		data, rerr := os.ReadFile(idx)
-		if rerr != nil {
-			return nil, false
-		}
-		var s State
-		if jerr := json.Unmarshal(data, &s); jerr != nil {
-			return nil, false
-		}
-		return &s, true
-	}
-	// Regular file: tombstone.
-	data, rerr := os.ReadFile(idx)
-	if rerr != nil {
-		return nil, false
-	}
-	var s State
-	if jerr := json.Unmarshal(data, &s); jerr != nil {
-		return nil, false
-	}
-	s.isTombstone = true
-	return &s, true
+	return s, true
 }
 
 // pathInsideResolved reports whether path is exactly root or sits
@@ -1303,33 +1269,6 @@ func FindByTarget(target string) (*State, error) {
 	)
 }
 
-// SessionKeyOfPrincipal returns the key of the single live session whose own
-// recorded Principal equals principal. It is the intended
-// profilegrant.WalkOptions.SessionOfPrincipal. Tombstones (closed sessions) are
-// excluded so a closed session's principal can never vouch for a chain link;
-// an empty principal, no match, or more than one claimant yields ok=false
-// (ambiguity fails closed).
-func SessionKeyOfPrincipal(principal string) (sessionKey string, ok bool) {
-	if principal == "" {
-		return "", false
-	}
-	states, err := ListAll(nil)
-	if err != nil {
-		return "", false
-	}
-	for i := range states {
-		s := &states[i]
-		if s.isTombstone || s.Principal != principal {
-			continue
-		}
-		if ok {
-			return "", false
-		}
-		sessionKey, ok = s.Key(), true
-	}
-	return sessionKey, ok
-}
-
 // SortStates orders sessions in place: active first, then
 // running-detached, then everything else (inactive, abandoned), with
 // alphabetical-by-branch tie-breaking inside each tier. Both completer
@@ -1517,68 +1456,118 @@ func ListAll(dbg *slog.Logger) ([]State, error) {
 		}
 		full := filepath.Join(dir, e.Name())
 
-		info, lerr := os.Lstat(full)
-		if lerr != nil {
+		info, statErr := os.Lstat(full)
+		if statErr != nil {
 			log.Debug(
 				"session.ListAll: skipped index entry",
 				"reason", "lstat_error",
 				"name", e.Name(),
-				"error", lerr.Error(),
+				"error", statErr.Error(),
 			)
 			continue
 		}
 
-		isSymlink := info.Mode()&os.ModeSymlink != 0
-		isTomb := !isSymlink
-
-		// Read through the entry. For dangling symlinks, ReadFile errors
-		// — we still want to surface those entries (callers may want to
-		// reap them). Synthesise a minimal abandoned State from the
-		// (now-broken) target path.
-		data, rerr := os.ReadFile(full)
-		if rerr != nil {
-			if isSymlink {
-				if target, terr := os.Readlink(full); terr == nil {
-					log.Debug(
-						"session.ListAll: dangling symlink",
-						"name", e.Name(),
-						"target", target,
-						"read_error", rerr.Error(),
-					)
-					states = append(states, danglingStateFromTarget(target))
-				} else {
-					log.Debug(
-						"session.ListAll: skipped index entry",
-						"reason", "unreadable_dangling_symlink",
-						"name", e.Name(),
-						"read_error", rerr.Error(),
-						"readlink_error", terr.Error(),
-					)
-				}
-			} else {
+		if info.Mode()&os.ModeSymlink == 0 {
+			// A regular file is a tombstone. It is a copy of a record a worker
+			// could write, so it is checked against the key it sits under.
+			s, terr := readTombstone(full, e.Name())
+			if terr != nil {
 				log.Debug(
 					"session.ListAll: skipped index entry",
-					"reason", "readfile_error",
+					"reason", "tombstone_unusable",
 					"name", e.Name(),
-					"error", rerr.Error(),
+					"error", terr.Error(),
 				)
+				continue
 			}
+			states = append(states, *s)
 			continue
 		}
-		var s State
-		if jerr := json.Unmarshal(data, &s); jerr != nil {
+
+		target, terr := os.Readlink(full)
+		if terr != nil {
 			log.Debug(
 				"session.ListAll: skipped index entry",
-				"reason", "unmarshal_error",
+				"reason", "unreadable_symlink",
 				"name", e.Name(),
-				"error", jerr.Error(),
+				"readlink_error", terr.Error(),
 			)
 			continue
 		}
-		s.isTombstone = isTomb
-		states = append(states, s)
+		var s *State
+		var lerr error
+		if strings.HasPrefix(filepath.Base(target), "state-") {
+			s, lerr = readImplicitEntry(full, e.Name(), target)
+		} else {
+			s, lerr = loadLiveEntry(e.Name(), target)
+		}
+		switch {
+		case lerr == nil:
+			states = append(states, *s)
+		case errors.Is(lerr, os.ErrNotExist):
+			// A dangling symlink: surface it (callers may want to reap it) as a
+			// minimal abandoned State from the (now-broken) target path.
+			log.Debug(
+				"session.ListAll: dangling symlink",
+				"name", e.Name(),
+				"target", target,
+				"read_error", lerr.Error(),
+			)
+			states = append(states, danglingStateFromTarget(target))
+		default:
+			log.Debug(
+				"session.ListAll: skipped index entry",
+				"reason", "record_unusable",
+				"name", e.Name(),
+				"error", lerr.Error(),
+			)
+		}
 	}
 	return states, nil
+}
+
+// loadLiveEntry resolves a live (symlink) index entry named `name`, whose
+// target is the worktree display copy, to the session's frontend record. The
+// record is found by the entry's key; the target is used only to find a legacy
+// session's worktree, and only when its shape and hash match the key.
+func loadLiveEntry(name, target string) (*State, error) {
+	rec, err := readRecordFile(filepath.Join(recordsDir(), name))
+	switch {
+	case err == nil:
+		if cerr := checkRecordLocation(rec, name); cerr != nil {
+			return nil, refusal(filepath.Join(recordsDir(), name), cerr)
+		}
+		compareDisplay(rec)
+		return rec, nil
+	case !errors.Is(err, os.ErrNotExist):
+		return nil, err
+	}
+	wt := filepath.Dir(filepath.Dir(target))
+	if filepath.Base(target) != "state.json" || filepath.Base(filepath.Dir(target)) != ".spinclass" || indexFilename(wt) != name {
+		return nil, refusal(filepath.Join(indexDir(), name), fmt.Errorf("index entry points at %q, which is not the display copy of the worktree it is keyed for", target))
+	}
+	return legacyLoad(wt)
+}
+
+// readImplicitEntry reads an implicit (main-checkout) session through its index
+// symlink. Implicit sessions are keyed by their per-randID state file and live
+// in an operator's own checkout, not in a worker's worktree, so they have no
+// frontend record; the content is pinned to the location it was found at.
+func readImplicitEntry(full, name, target string) (*State, error) {
+	if indexFilename(target) != name {
+		return nil, refusal(full, fmt.Errorf("index entry points at %q, which hashes to key %s, not %s", target, indexFilename(target), name))
+	}
+	data, err := os.ReadFile(full)
+	if err != nil {
+		return nil, err
+	}
+	var s State
+	if err := json.Unmarshal(data, &s); err != nil {
+		return nil, err
+	}
+	s.Kind = KindImplicit
+	s.WorktreePath = filepath.Dir(filepath.Dir(target))
+	return &s, nil
 }
 
 // danglingStateFromTarget builds a synthetic State for a dangling-symlink
@@ -1681,15 +1670,13 @@ func runMigration() error {
 // migrateOne mirrors Write's storage steps without re-entering migrateOnce.
 func migrateOne(s State) error {
 	wt := s.WorktreePath
-	dir := filepath.Join(wt, ".spinclass")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := checkIdentity(&s, wt); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
+	if err := writeRecordFile(wt, &s); err != nil {
 		return err
 	}
-	if err := os.WriteFile(worktreeStatePath(wt), data, 0o644); err != nil {
+	if err := writeDisplayCopy(wt, s); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(indexDir(), 0o755); err != nil {

@@ -15,6 +15,7 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/apply"
 	"code.linenisgreat.com/spinclass/internal/clown"
+	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/perms"
 	"code.linenisgreat.com/spinclass/internal/profilegrant"
@@ -334,7 +335,10 @@ func logPrincipalMismatch(cwd, envPrincipal, hookSessionID string) {
 }
 
 // recordOwnPrincipal stores the worker's own principal (see principalForHook;
-// FDR 0034 Phase 2 item 5) in the worktree session's state.
+// FDR 0034 Phase 2 item 5) in the worktree session's state. Inside a confined
+// unit that write reaches only the display copy and is not authority: the
+// frontend binds a confined worker's principal itself, from the unit record,
+// when it adopts the worker's hello (spawn.WaitHello).
 // Spawn cannot know it, because clown mints it when the worker boots. A value
 // failing the grant identity allowlist is ignored. An already-recorded,
 // different principal is replaced only when the recorded PID is dead (the
@@ -359,16 +363,38 @@ func recordOwnPrincipal(cwd, principal string) {
 		return
 	}
 	st, err := session.Read(repoPath, branch)
-	if err != nil || st.IsTombstone() || st.Principal == principal {
+	if err != nil || st.IsTombstone() {
 		return
 	}
-	if st.Principal != "" && session.IsAlive(st.PID) {
-		sessionlog.Errorf("recordOwnPrincipal kept key=%s recorded principal differs and its process is alive", st.SessionKey)
+	if st.Principal != principal {
+		if st.Principal != "" && session.IsAlive(st.PID) {
+			sessionlog.Errorf("recordOwnPrincipal kept key=%s recorded principal differs and its process is alive", st.SessionKey)
+			return
+		}
+		st.Principal = principal
+		if err := session.Write(*st); err != nil {
+			sessionlog.Errorf("recordOwnPrincipal write-failed key=%s err=%v", st.SessionKey, err)
+		}
+	}
+	bindUnconfinedPrincipal(st, principal)
+}
+
+// bindUnconfinedPrincipal writes the frontend principal mapping for an
+// UNCONFINED worktree session, the only source a principal resolves to a session
+// through (confinement.SessionKeyOfPrincipal; no record scan). A hook inside a
+// unit never writes one, and neither does one for a worktree that was launched
+// confined: that mapping comes from the unit record clown wrote, not from here.
+// Inside a unit the state dir is unreachable anyway. Best-effort.
+func bindUnconfinedPrincipal(st *session.State, principal string) {
+	if session.InUnit() || st.Kind == session.KindImplicit {
 		return
 	}
-	st.Principal = principal
-	if err := session.Write(*st); err != nil {
-		sessionlog.Errorf("recordOwnPrincipal write-failed key=%s err=%v", st.SessionKey, err)
+	stateDir, err := confinement.DefaultStateDir()
+	if err != nil || confinement.LaunchedConfined(stateDir, st.WorktreePath) {
+		return
+	}
+	if err := confinement.RecordUnconfinedPrincipal(stateDir, principal, st.Key(), st.WorktreePath); err != nil {
+		sessionlog.Errorf("bindUnconfinedPrincipal write-failed key=%s err=%v", st.Key(), err)
 	}
 }
 
@@ -385,6 +411,14 @@ func recordOwnPrincipal(cwd, principal string) {
 // handshake), mark only on success (a send failure must not set
 // HelloSentAt). All failures are swallowed and logged via sessionlog — a hook
 // must never block startup.
+//
+// Inside a confined unit the state it Reads and Writes is only the display copy
+// (the frontend record is unreachable there), so none of it is authority: the
+// frontend owns HelloSentAt, SessionState, PID and Principal for a confined
+// session and sets them when its hello wait receives this very hello
+// (spawn.WaitHello). What this hook reads (EffectiveSpawner, Holders) is
+// whatever the display copy says; it only addresses the hello and the exit wakes,
+// and the frontend re-derives who may act from its own record.
 func maybeSendSpawnHello(cwd, poshSessionID string) {
 	repoPath, err := git.CommonDir(cwd)
 	if err != nil {

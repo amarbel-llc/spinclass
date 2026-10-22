@@ -2353,6 +2353,10 @@ func TestSessionStartTracesAHelloSendFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("XDG_STATE_HOME", blocker)
+	// The send fails because the state dir is unusable, which is the shape of a
+	// confined unit (CLOWN_UNIT): there the frontend record is unreachable and the
+	// hook must still run to the hello, from the display copy.
+	t.Setenv("CLOWN_UNIT", "spinclass-agent-myrepo-feature.service")
 
 	fireSessionStart(t, wt)
 
@@ -2389,8 +2393,10 @@ func TestSessionStartSpawnHelloSendFailureLeavesUnmarked(t *testing.T) {
 	// Write the state under a working XDG_STATE_HOME, then point
 	// XDG_STATE_HOME at a regular FILE so spawnhandshake.SendHello's MkdirAll
 	// fails.
-	// session.Read/Write key off the worktree-local state.json, so the
-	// post-hook state assertions still work.
+	// The blocked state dir is also where the frontend record lives, so the
+	// hook runs as it does in a confined unit (CLOWN_UNIT), where the record is
+	// unreachable and session.Read/Write see only the display copy; the
+	// post-hook state assertions read that copy.
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	repo, wt := initSpawnedWorktree(t, "driver/key")
 
@@ -2399,6 +2405,7 @@ func TestSessionStartSpawnHelloSendFailureLeavesUnmarked(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("XDG_STATE_HOME", blocker)
+	t.Setenv("CLOWN_UNIT", "spinclass-agent-myrepo-feature.service")
 
 	fireSessionStart(t, wt) // must swallow the send failure
 

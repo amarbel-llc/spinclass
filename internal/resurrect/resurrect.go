@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/git"
@@ -53,6 +54,11 @@ func Run(w io.Writer, target, newBranchName, format string) error {
 		branch = newBranchName
 	}
 	newPath := filepath.Join(st.RepoPath, worktree.WorktreesDir, branch)
+	// The tombstone was verified on read (session.FindByTarget); this is the
+	// last line of defence for the one path resurrect creates.
+	if rel, rerr := filepath.Rel(filepath.Join(st.RepoPath, worktree.WorktreesDir), newPath); rerr != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("refusing to resurrect %s: branch %q does not stay under %s", st.Key(), branch, worktree.WorktreesDir)
+	}
 
 	var tw *tap.Writer
 	if format == "tap" {

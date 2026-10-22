@@ -24,6 +24,7 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/direnv"
 	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/safeio"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
@@ -182,11 +183,13 @@ func SpinclassEnv(sf sweatfile.Sweatfile, worktreePath string) error {
 	}
 	sort.Strings(keys)
 
-	if err := os.MkdirAll(filepath.Join(worktreePath, ".spinclass"), 0o755); err != nil {
+	// A rebuild re-renders this into a worktree whose worker can write
+	// .spinclass: never follow a link planted there (FDR 0035).
+	if err := safeio.RealDir(filepath.Join(worktreePath, ".spinclass")); err != nil {
 		return err
 	}
 
-	file, err := os.OpenFile(
+	file, err := safeio.OpenFile(
 		filepath.Join(worktreePath, ".spinclass", "env"),
 		os.O_TRUNC|os.O_CREATE|os.O_WRONLY,
 		0o644,
@@ -330,12 +333,12 @@ func ClaudeSettings(worktreePath string, sf sweatfile.Sweatfile) error {
 	// Create .spinclass/ directory for spinclass-owned data (tool-use log,
 	// settings snapshot) separate from Claude Code's .claude/ directory.
 	spinclassDir := filepath.Join(worktreePath, ".spinclass")
-	if err := os.MkdirAll(spinclassDir, 0o755); err != nil {
+	if err := safeio.RealDir(spinclassDir); err != nil {
 		return err
 	}
 
 	// Write a snapshot so that `perms review` can diff against the baseline
 	// and only surface rules added during the session.
 	snapshotPath := filepath.Join(spinclassDir, ".settings-snapshot.json")
-	return os.WriteFile(snapshotPath, append(data, '\n'), 0o644)
+	return safeio.WriteFile(snapshotPath, append(data, '\n'), 0o644)
 }

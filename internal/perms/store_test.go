@@ -3,6 +3,7 @@ package perms
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -32,11 +33,11 @@ func stubStore(t *testing.T, backend store.Backend, resolved *store.Session) {
 	oldBackend, oldResolve := storeBackend, resolveStoreSession
 	t.Cleanup(func() { storeBackend, resolveStoreSession = oldBackend, oldResolve })
 	storeBackend = backend
-	resolveStoreSession = func(string) (store.Session, bool) {
+	resolveStoreSession = func(string) (store.Session, error) {
 		if resolved == nil {
-			return store.Session{}, false
+			return store.Session{}, errors.New("no frontend principal mapping")
 		}
-		return *resolved, true
+		return *resolved, nil
 	}
 }
 

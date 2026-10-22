@@ -13,6 +13,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/embeds"
 	"code.linenisgreat.com/spinclass/internal/madder"
+	"code.linenisgreat.com/spinclass/internal/safeio"
 )
 
 // Func is the unit of work a background job runs. It receives a context that
@@ -170,7 +171,8 @@ func Start(wt, kind string, gitSync bool, id string, fn Func) (*Job, error) {
 		return nil, err
 	}
 
-	logf, err := os.Create(LogPath(wt))
+	// job.log sits in the worker-writable .spinclass: never follow a planted link.
+	logf, err := safeio.Create(LogPath(wt))
 	if err != nil {
 		clearRunning()
 		return nil, err

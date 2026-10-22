@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/confinement"
+	"code.linenisgreat.com/spinclass/internal/safeio"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/shop"
 	"code.linenisgreat.com/spinclass/internal/spawnhandshake"
@@ -400,10 +402,12 @@ func renderSpawn(home string, rp worktree.ResolvedPath, brief, model, profile st
 // launcher closes its copy; the reaper goroutine prevents a zombie in the
 // long-lived serve process.
 func startDetached(argv []string, dir string, env []string, logPath string) error {
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+	// logPath sits in the worker-writable .spinclass directory: refuse a symlinked
+	// directory and never follow a symlink planted at the log itself.
+	if err := safeio.RealDir(filepath.Dir(logPath)); err != nil {
 		return fmt.Errorf("creating spawn log dir: %w", err)
 	}
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	logFile, err := safeio.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return fmt.Errorf("opening spawn log %s: %w", logPath, err)
 	}
@@ -644,6 +648,9 @@ func WaitHello(p Pending, deadline time.Duration) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if p.confine != nil {
+		adoptConfinedWorker(p)
+	}
 
 	launchSpawnWindow(substituteAttachID(p.window, poshID), p.rp, p.desc, p.sessionEnv)
 
@@ -653,6 +660,34 @@ func WaitHello(p Pending, deadline time.Duration) (Result, error) {
 		MultiplexerID: p.rp.SessionKey,
 		PoshSessionID: poshID,
 	}, nil
+}
+
+// adoptConfinedWorker records, in the frontend record, what a confined worker's
+// own SessionStart hook cannot: inside its unit the hook reaches only the display
+// copy (FDR 0035). The hello this wait just received IS the proof the worker
+// booted, so the frontend sets the hello marker, the active state and the
+// principal the frontend mapping bound from the unit record. No PID is recorded
+// (a unit pid means nothing to the frontend). Best-effort: the spawn has
+// succeeded, and a failed adoption is logged.
+func adoptConfinedWorker(p Pending) {
+	principal, found, perr := confinement.PrincipalOfSession(confinementHost, p.confine.stateDir, p.rp.SessionKey, p.rp.AbsPath)
+	if perr != nil || !found {
+		principal = ""
+	}
+	err := session.Update(p.rp.RepoPath, p.rp.Branch, func(st *session.State) error {
+		if st.HelloSentAt == nil {
+			now := time.Now().UTC()
+			st.HelloSentAt = &now
+		}
+		st.SessionState = session.StateActive
+		if principal != "" {
+			st.Principal = principal
+		}
+		return nil
+	})
+	if err != nil {
+		slog.Warn("could not record the confined worker's hello in its frontend record", "session", p.rp.SessionKey, "err", err)
+	}
 }
 
 // SpawnLogActiveWithin reports whether the worker's spawn.log was written within

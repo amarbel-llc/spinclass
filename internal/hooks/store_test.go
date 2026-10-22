@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/session"
 )
 
@@ -61,8 +62,13 @@ func TestStoreToolResolvesTheHookSessionID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Principal = hookID
-	if err := session.Write(*st); err != nil {
+	// A principal resolves to its session only through the frontend mapping,
+	// never through a record's own principal field.
+	stateDir, err := confinement.DefaultStateDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := confinement.RecordUnconfinedPrincipal(stateDir, hookID, st.Key(), st.WorktreePath); err != nil {
 		t.Fatal(err)
 	}
 	foreign := t.TempDir()

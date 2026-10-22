@@ -2,6 +2,7 @@ package perms
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"code.linenisgreat.com/spinclass/internal/confinement"
@@ -23,18 +24,23 @@ var storeTools = map[string]bool{
 
 var storeBackend store.Backend = gitstore.New()
 
-// resolveStoreSession finds the calling session from its principal. It is a
-// variable so tests can stand in for the session index.
-var resolveStoreSession = func(principal string) (store.Session, bool) {
-	key, ok := confinement.SessionKeyOfPrincipal(principal)
-	if !ok {
-		return store.Session{}, false
+// resolveStoreSession finds the calling session from its principal through the
+// frontend principal mapping only (never a session record's own principal
+// field). The error says why a session could not be found. It is a variable so
+// tests can stand in for the session index.
+var resolveStoreSession = func(principal string) (store.Session, error) {
+	key, err := confinement.SessionKeyOfPrincipal(principal)
+	if err != nil {
+		return store.Session{}, err
 	}
 	st, err := session.FindByTarget(key)
-	if err != nil || st.Kind == session.KindImplicit || st.WorktreePath == "" || st.Branch == "" {
-		return store.Session{}, false
+	if err != nil {
+		return store.Session{}, err
 	}
-	return store.Session{Dir: st.WorktreePath, Branch: st.Branch}, true
+	if st.Kind == session.KindImplicit || st.WorktreePath == "" || st.Branch == "" {
+		return store.Session{}, fmt.Errorf("session %s is not a worktree session", key)
+	}
+	return store.Session{Dir: st.WorktreePath, Branch: st.Branch}, nil
 }
 
 // StoreVerdict is the PreToolUse reading of a grit store tool call (FDR 0036
@@ -64,15 +70,15 @@ func StoreVerdict(toolName string, toolInput map[string]any, principal string, i
 			return store.Ask, "grit " + tool + ": subcommand is missing or not a string", true
 		}
 	}
-	callerSession, ok := resolveStoreSession(principal)
-	if !ok {
+	callerSession, resolveErr := resolveStoreSession(principal)
+	if resolveErr != nil {
 		if forceRequested(toolInput) {
 			return store.Ask, "grit " + tool + ": force always asks, even when the session is unresolved", true
 		}
 		if inUnit {
 			return store.Allow, "grit " + tool + ": confined unit, session unresolved here, deferred to the serve: body ownership check applies", true
 		}
-		return store.Ask, "grit " + tool + ": session unresolved and the caller is not in a confined unit; confirm", true
+		return store.Ask, "grit " + tool + ": session unresolved (" + resolveErr.Error() + ") and the caller is not in a confined unit; confirm", true
 	}
 	args, err := json.Marshal(toolInput)
 	if err != nil {

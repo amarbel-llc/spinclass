@@ -1159,11 +1159,67 @@ entry carries no `{principal}`; otherwise it warns.
   not (docs/plans/2026-10-20-agent-census-by-unit.md).
 - **F2 identifies the agent by `SO_PEERCRED`**, which names the listener: a
   socket-activated piggy-agent resolves to the user manager.
-- **Session state is worktree-local** (`<worktree>/.spinclass/state.json`,
-  FDR 0001), so a confined agent can rewrite its own session's recorded PID
-  and principal. Resolved for what authority depends on: see "The
-  principal-to-session mapping". The live-session list still comes from that
-  state, but it only widens what F11 and F12 demand.
+- **Session state was worktree-local** (`<worktree>/.spinclass/state.json`,
+  FDR 0001), so a confined agent could rewrite its own session's record. See
+  "The frontend record" below, which supersedes this.
+
+### The frontend record
+
+Until this landed, a confined worker could destroy or hijack ANOTHER session
+through its own record, because the frontend acted on the content of the
+worker-writable `state.json`. The routes:
+
+- **`sc clean`**: the abandoned-session sweep took RepoPath/Branch from the
+  record and `session.Remove` derived the path to delete from them, so a forged
+  record removed another session's state and index entry.
+- **close** (`sc close`, `close-child-session`, `close-this-session`, merge
+  teardown): RepoPath/WorktreePath/Branch from the record drove
+  `git worktree remove --force`, `branch -D` and the credential revoke, so a
+  forged record destroyed another session's worktree and branch.
+- **handle accept/grant writes**: `session.Write` wrote to the record's own
+  WorktreePath, so accepting or granting on the worker wrote the victim's record.
+- **resume**: the pinned Entry, Profile and Principal in the record were
+  replayed on the frontend, so a forged entry ran arbitrary commands.
+- **revoke**: `credential.revoke_command` in the record ran on the frontend at
+  close and in the orphan sweep.
+- Also: the principal-to-session record scan, `FindByTarget` collisions on
+  forged keys, attestation presence, a forged CloseRequest, and resurrect
+  trusting a tombstone copied from a worker-writable file; and frontend writes
+  under `<wt>/.spinclass` (job.log, spawn.log, spawn-window.log, the lock)
+  followed symlinks the worker planted.
+
+What changed:
+
+- The authoritative record is `$XDG_STATE_HOME/spinclass/records/<hash>.json`,
+  keyed by the same hash of the worktree path as the index entry; its lock sits
+  beside it. The worktree `state.json` is a display-only mirror.
+- Every reader finds a record by its key and verifies it: WorktreePath hashes to
+  the key, equals `<repo>/.worktrees/<branch>` (implicit sessions are keyed by
+  checkout), and Branch is a clean relative path with no `..`. A disagreeing
+  record or tombstone is refused and reported, naming the record, the field and
+  both values. Remove, Tombstone and Write target locations derived from the
+  key, never from a path in the worktree copy. A worktree copy that disagrees is
+  reported and ignored.
+- Sessions recorded before this (worktree record only) are read once, identity
+  checked, migrated at the next frontend touch and reported as trusted once.
+- Inside a unit the record is unreachable: the SessionStart hook writes only the
+  display copy and never fails. For a confined session the frontend adopts
+  HelloSentAt, SessionState and Principal when its hello wait receives the
+  hello. In-unit reads (EffectiveSpawner, OtherHolders) are not authority.
+- `session.SessionKeyOfPrincipal` (the record scan) is gone. A principal
+  resolves only through a frontend mapping file; with none, callers fail closed
+  naming the principal and the mapping path. Unconfined sessions get a
+  frontend-written mapping from the SessionStart hook.
+- Frontend writes under `<wt>/.spinclass` use `O_NOFOLLOW` (`internal/safeio`).
+
+**UNCONFINED workers can still write their own record, and the frontend
+mapping file for their principal, and are outside this model by decision.**
+
+Residual worker-writable setup-time writes not covered here: `.claude/settings`
+files written at start/rebuild, the pre-commit shim in `.spinclass/hooks`, the
+hooktrace log, and the stash shelf under `.spinclass/stash`. A worker that
+swaps a directory for a symlink between a safeio check and the open can still
+win that race.
 - Every path probe is check-then-use against a live unit; a unit that changes
   between the probe and the spawn is caught at the next spawn, not this one.
 - Reviewed 2026-10-19 by an independent code-review pass; its findings (record

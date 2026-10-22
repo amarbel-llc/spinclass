@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"code.linenisgreat.com/spinclass/internal/session"
 )
 
 // PrincipalMapping binds a principal to its session in frontend-owned state:
@@ -118,30 +116,51 @@ func RemovePrincipalMappingsForSession(stateDir, sessionKey string) error {
 	return errors.Join(errs...)
 }
 
-// SessionKeyOfPrincipal resolves a caller's principal to its session key,
-// preferring the frontend principal mapping, which the session's agent cannot
-// write, over the worktree state's recorded principal, which it can (audit row
-// 0035-159). Only when no mapping exists (a session never launched confined)
-// does it fall back to session.SessionKeyOfPrincipal. A mapping that exists but
-// cannot be read or validated, or names a session that is no longer live,
-// resolves nothing: the caller fails closed rather than fall back.
-func SessionKeyOfPrincipal(principal string) (string, bool) {
+// UnconfinedUnit is the Unit a mapping carries when the frontend wrote it for a
+// session that was never launched in an agent unit.
+const UnconfinedUnit = "unconfined"
+
+// RecordUnconfinedPrincipal binds an UNCONFINED session's principal to its
+// session in frontend state, so close-this-session and the grit permission
+// hooks resolve it through the same mapping a confined session has. It is run by
+// the SessionStart hook, which for an unconfined session runs in the frontend;
+// the principal comes from the hook's own environment. An unconfined worker can
+// write this file as it can write everything else the frontend owns: outside the
+// confinement model by decision (FDR 0035). Never call it from inside a unit.
+func RecordUnconfinedPrincipal(stateDir, principal, sessionKey, worktree string) error {
+	if err := validPrincipalName(principal); err != nil {
+		return err
+	}
+	m := PrincipalMapping{Version: principalMappingVersion, Principal: principal, SessionKey: sessionKey, Worktree: worktree, Unit: UnconfinedUnit}
+	return writeJSONAtomic(PrincipalMappingPath(stateDir, principal), m)
+}
+
+// SessionKeyOfPrincipal resolves a caller's principal to its session key through
+// the frontend principal mapping, which the session's agent cannot write, and
+// nowhere else. A session record that merely claims the principal is not a
+// source: the record scan is gone (FDR 0035, audit row 0035-159). A principal
+// with no mapping, a mapping that cannot be read or validated, or one that names
+// a session that is no longer live resolves nothing, and the error names the
+// principal and the mapping path so the caller can surface it.
+func SessionKeyOfPrincipal(principal string) (string, error) {
+	if principal == "" {
+		return "", errors.New("no principal to resolve (CLOWN_SESSION_ID is unset)")
+	}
 	stateDir, err := DefaultStateDir()
 	if err != nil {
-		return "", false
+		return "", fmt.Errorf("principal %s: %w", principal, err)
 	}
+	path := PrincipalMappingPath(stateDir, principal)
 	m, err := LoadPrincipalMapping(Host{}, stateDir, principal)
 	switch {
-	case err == nil:
-		if !LiveSession(m.SessionKey) {
-			return "", false
-		}
-		return m.SessionKey, true
 	case errors.Is(err, os.ErrNotExist):
-		return session.SessionKeyOfPrincipal(principal)
-	default:
-		return "", false
+		return "", fmt.Errorf("principal %s resolves to no session: there is no frontend principal mapping at %s", principal, path)
+	case err != nil:
+		return "", fmt.Errorf("principal %s resolves to no session: its frontend principal mapping %s is unusable: %w", principal, path, err)
+	case !LiveSession(m.SessionKey):
+		return "", fmt.Errorf("principal %s resolves to no session: its frontend principal mapping %s names %s, which is not a live session", principal, path, m.SessionKey)
 	}
+	return m.SessionKey, nil
 }
 
 // PrincipalOfSession is the principal the frontend mappings bind to sessionKey

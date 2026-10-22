@@ -107,14 +107,16 @@ func TestCompleteWorktreeTargetsOutsideRepoIncludesRepoBasenameInLabel(t *testin
 
 	wtA := filepath.Join(repoA, ".worktrees", "shared-name")
 	wtB := filepath.Join(repoB, ".worktrees", "shared-name")
-	testgit.MustWorktreeAdd(t, repoA, wtA, "shared-a")
-	testgit.MustWorktreeAdd(t, repoB, wtB, "shared-b")
+	// The frontend record pins a worktree to <repo>/.worktrees/<branch>, so the
+	// shared dirname is also the shared branch name.
+	testgit.MustWorktreeAdd(t, repoA, wtA, "shared-name")
+	testgit.MustWorktreeAdd(t, repoB, wtB, "shared-name")
 
 	for _, st := range []session.State{
 		{
 			RepoPath:     repoA,
 			WorktreePath: wtA,
-			Branch:       "shared-a",
+			Branch:       "shared-name",
 			Description:  "alpha description",
 			SessionState: session.StateInactive,
 			Entrypoint:   []string{"/bin/sh"},
@@ -123,7 +125,7 @@ func TestCompleteWorktreeTargetsOutsideRepoIncludesRepoBasenameInLabel(t *testin
 		{
 			RepoPath:     repoB,
 			WorktreePath: wtB,
-			Branch:       "shared-b",
+			Branch:       "shared-name",
 			SessionState: session.StateInactive,
 			Entrypoint:   []string{"/bin/sh"},
 			StartedAt:    time.Now().UTC(),
@@ -144,10 +146,10 @@ func TestCompleteWorktreeTargetsOutsideRepoIncludesRepoBasenameInLabel(t *testin
 	if len(got) != 2 {
 		t.Errorf("got %d entries, want 2 (one per session key): %v", len(got), got)
 	}
-	if _, ok := got["alpha/shared-a"]; !ok {
+	if _, ok := got["alpha/shared-name"]; !ok {
 		t.Errorf("alpha session missing under its session key: %v", got)
 	}
-	if _, ok := got["beta/shared-b"]; !ok {
+	if _, ok := got["beta/shared-name"]; !ok {
 		t.Errorf("beta session missing under its session key: %v", got)
 	}
 	for _, label := range got {

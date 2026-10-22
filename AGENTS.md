@@ -46,8 +46,10 @@ re-run that suite right before merging.
   Claude trust; `Attach()` = Create + session state + `Executor`; `Fork()`.
 - **Executor** (`internal/executor/`): `SessionExecutor` (prod, SIGHUP
   forwarding), `ShellExecutor` (merge), `mockExecutor` (tests).
-- **Session state** (`internal/session/`): `~/.local/state/spinclass/sessions/
-  <hash>-state.json`; `active`/`inactive`/`abandoned`, dirty computed live.
+- **Session state** (`internal/session/`): authoritative frontend record
+  `$XDG_STATE_HOME/spinclass/records/<hash>.json` (FDR 0035); the worktree's
+  `.spinclass/state.json` is a display-only mirror; `active`/`inactive`/
+  `abandoned`, dirty computed live.
   Implicit sessions in a main checkout: FDR 0014. Handles/principals: FDR 0032.
 - **Git** (`internal/git/`): thin `git -C <dir>` wrapper (`Run` captures,
   `RunPassthrough` streams).

@@ -18,18 +18,22 @@ import (
 var (
 	gritPermsStdin  = func() io.Reader { return os.Stdin }
 	gritPermsStdout = func() io.Writer { return os.Stdout }
-	// gritPermsSession resolves the calling session from its principal, as the
-	// PreToolUse hook does. False means none could be resolved.
-	gritPermsSession = func() (store.Session, bool) {
-		key, ok := confinement.SessionKeyOfPrincipal(os.Getenv("CLOWN_SESSION_ID"))
-		if !ok {
-			return store.Session{}, false
+	// gritPermsSession resolves the calling session from its principal through
+	// the frontend principal mapping, as the PreToolUse hook does. An error says
+	// why none could be resolved.
+	gritPermsSession = func() (store.Session, error) {
+		key, err := confinement.SessionKeyOfPrincipal(os.Getenv("CLOWN_SESSION_ID"))
+		if err != nil {
+			return store.Session{}, err
 		}
 		st, err := session.FindByTarget(key)
-		if err != nil || st.Kind == session.KindImplicit || st.WorktreePath == "" || st.Branch == "" {
-			return store.Session{}, false
+		if err != nil {
+			return store.Session{}, err
 		}
-		return store.Session{Dir: st.WorktreePath, Branch: st.Branch}, true
+		if st.Kind == session.KindImplicit || st.WorktreePath == "" || st.Branch == "" {
+			return store.Session{}, fmt.Errorf("session %s is not a worktree session", key)
+		}
+		return store.Session{Dir: st.WorktreePath, Branch: st.Branch}, nil
 	}
 )
 
@@ -90,8 +94,9 @@ func gritPermsVerdict(tool string) (store.Verdict, error) {
 	if err != nil {
 		return store.Ask, err
 	}
-	s, ok := gritPermsSession()
-	if !ok {
+	s, serr := gritPermsSession()
+	if serr != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "grit-perms: calling session not resolved (%v); the static classification applies\n", serr)
 		s = store.Session{NoSession: true}
 	}
 	return gritBackend.Classify(s, store.Op{Tool: tool, Subcommand: subcommand, Args: input}), nil

@@ -49,6 +49,12 @@ func selfCloseFixture(t *testing.T, allow bool) (repoPath, wtPath string) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// A principal resolves to its session only through a frontend mapping, never
+	// through the record's own principal field. This is the mapping the SessionStart
+	// hook writes for an unconfined session; tests of a confined one replace it.
+	if err := confinement.RecordUnconfinedPrincipal(os.Getenv("XDG_STATE_HOME"), selfPrincipal, "worker/kid", wtPath); err != nil {
+		t.Fatal(err)
+	}
 	return repoPath, wtPath
 }
 
@@ -400,6 +406,10 @@ func TestCloseSelfRunUsesTheFrontendMappingForAConfinedSession(t *testing.T) {
 func TestCloseSelfRunRefusesAConfinedSessionWithoutAMapping(t *testing.T) {
 	stubExitWakes(t)
 	repoPath, wtPath := requestClose(t)
+	// requestClose's fixture bound an unconfined mapping; this session has none.
+	if err := os.Remove(confinement.PrincipalMappingPath(os.Getenv("XDG_STATE_HOME"), selfPrincipal)); err != nil {
+		t.Fatal(err)
+	}
 	spec := confinement.UnitSpecPath(os.Getenv("XDG_STATE_HOME"), wtPath)
 	if err := os.MkdirAll(filepath.Dir(spec), 0o700); err != nil {
 		t.Fatal(err)

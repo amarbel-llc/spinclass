@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"code.linenisgreat.com/spinclass/internal/safeio"
 )
 
 // Status values for a Job.
@@ -70,7 +72,8 @@ func Write(wt string, j *Job) error {
 		return errors.New("job.Write: worktree path required")
 	}
 	dir := filepath.Join(wt, ".spinclass")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	// The worker can write .spinclass: refuse a symlink planted in place of it.
+	if err := safeio.RealDir(dir); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(j, "", "  ")

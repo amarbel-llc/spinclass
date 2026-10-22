@@ -13,6 +13,13 @@ promotion-criteria: |
 
 # Worktree-local session state with attach/detach lifecycle
 
+> **Amended by FDR 0035 (frontend record).** The authoritative copy of a
+> session's state moved to frontend state the confined unit cannot see,
+> `$XDG_STATE_HOME/spinclass/records/<hash>.json` (same key as the index entry).
+> `<worktree>/.spinclass/state.json`, described below, is now a DISPLAY-ONLY
+> mirror that no frontend decision reads, except once to migrate a session
+> recorded before the move. Read the layout below with that substitution.
+
 ## Problem Statement
 
 Spinclass currently tracks sessions in two disconnected places: the worktree

@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+
+	"code.linenisgreat.com/spinclass/internal/safeio"
 )
 
 // writeAtomic replaces path with data via a temp file in the same directory
@@ -38,34 +40,41 @@ func writeAtomic(path string, data []byte) error {
 	return nil
 }
 
-// withStateLock runs fn holding an exclusive, blocking flock on the sidecar
-// <statePath>.lock. flock is per open file description, so it serializes
-// goroutines in one process as well as separate processes. The lock is
-// host-local. A missing state directory is os.ErrNotExist: the lock never
-// creates one.
-func withStateLock(statePath string, fn func() error) error {
-	lf, err := os.OpenFile(statePath+".lock", os.O_CREATE|os.O_RDWR, 0o644)
+// withStateLock runs fn holding an exclusive, blocking flock on lockPath. flock
+// is per open file description, so it serializes goroutines in one process as
+// well as separate processes. The lock is host-local. A missing directory is
+// os.ErrNotExist: the lock never creates one. The open refuses a symlink at
+// lockPath (a worker-writable directory could plant one).
+func withStateLock(lockPath string, fn func() error) error {
+	lf, err := safeio.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return err
 	}
 	defer lf.Close()
 	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX); err != nil {
-		return fmt.Errorf("lock %s: %w", statePath, err)
+		return fmt.Errorf("lock %s: %w", lockPath, err)
 	}
 	defer func() { _ = syscall.Flock(int(lf.Fd()), syscall.LOCK_UN) }()
 	return fn()
 }
 
 // Update is a locked read-modify-write of a live worktree session's state:
-// it takes the sidecar flock, Reads, calls fn, and writes atomically. An error
+// it takes the flock that sits beside the frontend record (frontend state, not
+// the worker-writable worktree), Reads, calls fn, and writes atomically. An error
 // from fn aborts without writing. A missing or closed (tombstoned) session is
 // os.ErrNotExist; fn is not called. Only the pre-merge attestation is routed
 // through it so far; migrating every other read-modify-write caller is
 // tracked in #348.
 func Update(repoPath, branch string, fn func(*State) error) error {
 	migrateOnce()
-	statePath := worktreeStatePath(worktreeFromRepoBranch(repoPath, branch))
-	return withStateLock(statePath, func() error {
+	if err := validBranch(branch); err != nil {
+		return fmt.Errorf("session.Update: branch %q (%v): %w", branch, err, os.ErrNotExist)
+	}
+	if err := os.MkdirAll(recordsDir(), 0o700); err != nil {
+		return err
+	}
+	lockPath := recordPath(worktreeFromRepoBranch(repoPath, branch)) + ".lock"
+	return withStateLock(lockPath, func() error {
 		st, err := Read(repoPath, branch)
 		if err != nil {
 			return err
@@ -85,7 +94,7 @@ func Update(repoPath, branch string, fn func(*State) error) error {
 // (os.ErrNotExist) when that file is gone rather than recreating it.
 func UpdateImplicit(checkout, randID string, fn func(*State) error) error {
 	statePath := implicitStatePath(checkout, randID)
-	return withStateLock(statePath, func() error {
+	return withStateLock(statePath+".lock", func() error {
 		data, err := os.ReadFile(statePath)
 		if err != nil {
 			return err

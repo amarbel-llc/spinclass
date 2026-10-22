@@ -883,23 +883,44 @@ func TestWriteCreatesIndexSymlink(t *testing.T) {
 	}
 }
 
-// A confined agent unit sees the state dir read-only, so the index step of a
-// hook's Write fails with EROFS. The worktree-local state.json is the source of
-// truth and is already written; the write must not report failure for it, or
-// the spawn hello's HelloSentAt looks unrecorded.
-func TestWriteSucceedsWhenOnlyTheIndexIsReadOnly(t *testing.T) {
+// A confined agent unit cannot reach the frontend state dir, so a hook's Write
+// from inside it must not need the frontend record: it writes the display copy
+// only and succeeds (the hook must never fail on it). Nothing lands in frontend
+// state.
+func TestWriteInsideAUnitWritesOnlyTheDisplayCopy(t *testing.T) {
 	s := setupTestSession(t, "feature-ro")
-	prev := indexWorktree
-	t.Cleanup(func() { indexWorktree = prev })
-	indexWorktree = func(string) error {
-		return &os.PathError{Op: "mkdir", Path: "/home/x/.local/state/spinclass/index", Err: syscall.EROFS}
+	// The state dir is a regular file, so nothing can be created beneath it.
+	stateFile := filepath.Join(t.TempDir(), "state-is-a-file")
+	if err := os.WriteFile(stateFile, nil, 0o644); err != nil {
+		t.Fatal(err)
 	}
+	t.Setenv("XDG_STATE_HOME", stateFile)
+	t.Setenv("CLOWN_UNIT", "spinclass-agent-repo-feature-ro.service")
 
 	if err := Write(s); err != nil {
-		t.Fatalf("Write failed on a read-only index: %v", err)
+		t.Fatalf("Write failed inside a unit with an unreachable state dir: %v", err)
 	}
 	if _, err := os.Stat(worktreeStatePath(s.WorktreePath)); err != nil {
-		t.Errorf("state.json was not written: %v", err)
+		t.Errorf("the display copy was not written: %v", err)
+	}
+	got, err := Read(s.RepoPath, s.Branch)
+	if err != nil || got.Branch != s.Branch {
+		t.Errorf("an in-unit read should see the display copy: %+v, %v", got, err)
+	}
+}
+
+// Outside a unit the frontend record is required: a write that cannot make it
+// fails rather than leaving a session only a worker-writable file knows.
+func TestWriteOutsideAUnitFailsWithoutTheFrontendRecord(t *testing.T) {
+	s := setupTestSession(t, "feature-norec")
+	stateFile := filepath.Join(t.TempDir(), "state-is-a-file")
+	if err := os.WriteFile(stateFile, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_STATE_HOME", stateFile)
+	t.Setenv("CLOWN_UNIT", "")
+	if err := Write(s); err == nil {
+		t.Error("Write succeeded without being able to write the frontend record")
 	}
 }
 
@@ -1453,13 +1474,15 @@ func TestFindByWorktreePath(t *testing.T) {
 
 func TestFindByTargetBareID(t *testing.T) {
 	s := setupTestSession(t, "plain-spruce")
-	s.Branch = "different-branch"
-	s.SessionKey = "repo/different-branch"
+	// The frontend record pins WorktreePath to <repo>/.worktrees/<branch>, so a
+	// branch that differs from the directory name is no longer a valid state;
+	// the key is what can differ.
+	s.SessionKey = "repo/different-key"
 	if err := Write(s); err != nil {
 		t.Fatal(err)
 	}
 
-	// Match by worktree directory name, not branch.
+	// Match by worktree directory name, not key.
 	found, err := FindByTarget("plain-spruce")
 	if err != nil {
 		t.Fatal(err)
