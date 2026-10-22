@@ -171,6 +171,30 @@ exercised on a real unit, and so **unverified until a live canary**:
   - with the canary-grit profile the worker's tool list had no moxy `grit_*` and no `chix_build`. Absent, so never called.
   - Still unverified: `nix` flake evaluation and direnv in the unit. The canary fixture has no `flake.nix` and its `.envrc` is not allowed.
   - Still failing: F10, F11 (see below), F12, F14.
+- N, worker canary/sunny-oak on spinclass e8bede1 (2026-10-22, nikulin):
+  - **The `sc spawn --unconfined` CLI gate is proven.** With stdin
+    `/dev/null` it was refused with its exact text and exit 1, logged
+    `refused: no terminal`, and created nothing.
+  - **No credential in the unit's tree.** `.spinclass/git-credentials` is
+    ENOENT before and after a grit push, and the push authenticated through
+    the frontend helper. F9 was ok before and after.
+  - The pointer and `config.worktree` binds hold as in round L, refs stay
+    read-only, and `<common>/config` is the stale snapshot round M found.
+  - **F10's zombie reading is confirmed.** It passed with "2 zombie(s)", and
+    the unit's `/proc` shows both are `dbus-launch` (state `Z`).
+  - **F11 and `sc list` are fixed.** F11 no longer flags the worker's own
+    agent, only the genuinely unconfined driver, and `sc list` shows the
+    confined worker `active`.
+  - `nix flake metadata` and `nix eval` work in the unit with read-only refs
+    (fixture flake). direnv was blocked because the worktree's `.envrc` was
+    not allowed, so direnv itself is still untested.
+  - **F14 found a real exposure (clown's bind).** The unit sees the operator's
+    whole troupe directory: every session's `troupe/accounts/<uuid>.pass` (32,
+    mode 600, same uid, so readable) and the driver's troupe socket. This is
+    not only the child's own file, as "Spawn side" requires. A confined worker
+    could authenticate to troupe as any session on the host (inferred from the
+    uid and the file modes; no file was read). Reported for clown.
+  - F12 still fails (loopback serve; clown).
 - **F10 and F14 were check gaps, not cut failures (inferred, 2026-10-22).**
   - F10 counted every numeric `/proc` entry in the unit against the unit's
     cgroup. The overcount grew over the rounds (+2, +3, +5), which fits
