@@ -512,7 +512,13 @@ func handleMergeThisSession(ctx context.Context, args json.RawMessage, _ command
 	return buildHookResult(text, blobLinks, mergeErr), nil
 }
 
+// handleCheckThisSession runs the pre-merge hook in the frontend and burns a
+// buffered attestation on a pass; a confined caller is refused (`sc check` is
+// the operator's path).
 func handleCheckThisSession(ctx context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller("check-this-session", "sc check"); refusal != nil {
+		return refusal, nil
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil
@@ -701,6 +707,9 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 // check-this-session: it runs the pre-merge hook in the background and returns
 // a job id immediately.
 func handleCheckThisSessionAsync(_ context.Context, _ json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	if refusal := refuseConfinedServeCaller("check-this-session-async", "sc check"); refusal != nil {
+		return refusal, nil
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not get working directory: %v", err)), nil

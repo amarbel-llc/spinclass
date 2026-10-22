@@ -104,6 +104,10 @@ var gatedServeHandlers = []gatedServeHandler{
 		tool: "nothing-but-the-truth", operatorCommand: "sc merge <target>", handle: handleNothingButTheTruth,
 		args: `{"skills":[]}`, harmlessArgs: `not json`, harmlessRefusal: "invalid arguments",
 	},
+	// check takes no arguments, so no call is harmless for an unconfined
+	// caller (it would run the hook); its own tests cover that path.
+	{tool: "check-this-session", operatorCommand: "sc check", handle: handleCheckThisSession, args: `{}`},
+	{tool: "check-this-session-async", operatorCommand: "sc check", handle: handleCheckThisSessionAsync, args: `{}`},
 }
 
 // Plain list-handles reads only the caller's own handles, so it stays open
@@ -143,6 +147,9 @@ func TestGatedServeToolsCLIIsNotServeGated(t *testing.T) {
 
 func TestGatedServeHandlersLetAnUnconfinedCallerThrough(t *testing.T) {
 	for _, h := range gatedServeHandlers {
+		if h.harmlessRefusal == "" {
+			continue
+		}
 		t.Run(h.tool, func(t *testing.T) {
 			useRealServeClassifier(t)
 			t.Setenv("HOME", t.TempDir())
