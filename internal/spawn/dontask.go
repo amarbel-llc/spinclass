@@ -14,6 +14,30 @@ import (
 // never answered; the first real confined worker sat on one for 30+ minutes.
 var DontAskModeArgs = []string{"--permission-mode", "dontAsk"}
 
+// effectiveProvider is the provider clown will launch for the clown flags in
+// front of the "--" separator: an explicit --provider wins; else the provider
+// of the --profile, looked up through clown's library (a profile selects the
+// provider indirectly, so its name is not a provider); else clown's default,
+// claude. A profile that records no provider is clown's default too. An
+// unresolvable profile is an error: the caller fails closed.
+func effectiveProvider(clownFlags []string) (string, error) {
+	provider, profile := clownProviderFlags(clownFlags)
+	if provider != "" {
+		return provider, nil
+	}
+	if profile == "" {
+		return "claude", nil
+	}
+	rp, err := profileResolver.Resolve(profile)
+	if err != nil {
+		return "", err
+	}
+	if rp.Provider == "" {
+		return "claude", nil
+	}
+	return rp.Provider, nil
+}
+
 // SpliceDontAskMode returns argv with claude's dontAsk permission mode set
 // among the provider args (just after the first "--" separator), replacing any
 // permission mode the entry already carried (AutoModeArgs included) and the
@@ -26,7 +50,11 @@ func SpliceDontAskMode(argv []string) ([]string, error) {
 	if sep == -1 {
 		return nil, fmt.Errorf("a confined spawn must not prompt, but this spawn-entry has no \"--\" provider-args separator to place --permission-mode dontAsk after: %v", argv)
 	}
-	if resolveProvider(argv[:sep]) != "claude" {
+	provider, err := effectiveProvider(argv[:sep])
+	if err != nil {
+		return nil, fmt.Errorf("a confined spawn must not prompt, but the provider of this spawn-entry cannot be determined, so dontAsk mode cannot be set: %w: %v", err, argv)
+	}
+	if provider != "claude" {
 		return nil, fmt.Errorf("a confined spawn must not prompt, but this spawn-entry's provider is not claude, so dontAsk mode cannot be set: %v", argv)
 	}
 	out := make([]string, 0, len(argv)+2)

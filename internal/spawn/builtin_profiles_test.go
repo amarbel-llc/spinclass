@@ -27,6 +27,10 @@ func TestClownBuiltinTaskTemplatesResolve(t *testing.T) {
 			if rp.Name != name {
 				t.Errorf("Name = %q, want %q", rp.Name, name)
 			}
+			// A confined spawn of these must pass SpliceDontAskMode.
+			if _, err := SpliceDontAskMode([]string{"clown", "--clown-attach=spawn", "--profile", name, "--", "--permission-mode", "auto", "brief"}); err != nil {
+				t.Errorf("SpliceDontAskMode with profile %q: %v", name, err)
+			}
 			if rp.Digest == "" {
 				t.Error("empty digest")
 			}

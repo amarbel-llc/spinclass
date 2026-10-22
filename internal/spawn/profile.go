@@ -25,8 +25,11 @@ func ProfileNotFound(name string) error {
 // the profile makes no cheap-context selection, i.e. keeps everything; a
 // non-nil empty one means a selection that kept nothing.
 type ResolvedProfile struct {
-	Name        string
-	Digest      string
+	Name   string
+	Digest string
+	// Provider is the provider the profile selects ("claude", ...); empty when
+	// the resolver does not record one, which callers read as clown's default.
+	Provider    string
 	KeptServers []string
 }
 

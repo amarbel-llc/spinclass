@@ -45,16 +45,29 @@ func ValidateModelAlias(alias, provider string, modelIDs map[string]string) erro
 // when neither is present. A --provider/--profile occurring AFTER "--" is a
 // provider-arg, not a clown flag, and is ignored.
 func resolveProvider(entry []string) string {
-	var profile string
+	provider, profile := clownProviderFlags(entry)
+	switch {
+	case provider != "":
+		return provider
+	case profile != "":
+		return profile
+	}
+	return "claude"
+}
+
+// clownProviderFlags returns the explicit --provider value and the first
+// --profile value found among clown's own flags (before the literal "--"), "" for
+// each one absent. An explicit --provider is returned as soon as it is seen.
+func clownProviderFlags(entry []string) (provider, profile string) {
 	for i, e := range entry {
 		if e == "--" {
 			break
 		}
 		if e == "--provider" && i+1 < len(entry) {
-			return entry[i+1]
+			return entry[i+1], profile
 		}
 		if v, ok := strings.CutPrefix(e, "--provider="); ok {
-			return v
+			return v, profile
 		}
 		if profile == "" && e == "--profile" && i+1 < len(entry) {
 			profile = entry[i+1]
@@ -65,10 +78,7 @@ func resolveProvider(entry []string) string {
 			}
 		}
 	}
-	if profile != "" {
-		return profile
-	}
-	return "claude"
+	return "", profile
 }
 
 // SpliceModelFlag validates alias against the resolved provider (see
