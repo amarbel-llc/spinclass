@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
+	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/store"
 )
@@ -20,7 +21,7 @@ var (
 	// gritPermsSession resolves the calling session from its principal, as the
 	// PreToolUse hook does. False means none could be resolved.
 	gritPermsSession = func() (store.Session, bool) {
-		key, ok := session.SessionKeyOfPrincipal(os.Getenv("CLOWN_SESSION_ID"))
+		key, ok := confinement.SessionKeyOfPrincipal(os.Getenv("CLOWN_SESSION_ID"))
 		if !ok {
 			return store.Session{}, false
 		}

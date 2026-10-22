@@ -426,6 +426,56 @@ func TestCloseSelfRunClosesAConfinedSessionItsMappingNames(t *testing.T) {
 	}
 }
 
+// The tool resolves its caller through the frontend mapping, not the worktree
+// state's recorded principal, which the agent can rewrite (audit row 0035-159).
+func TestCloseThisSessionResolvesTheCallerThroughTheFrontendMapping(t *testing.T) {
+	repoPath, wtPath := selfCloseFixture(t, true)
+	st := readKid(t, repoPath)
+	st.Principal = "a-principal-the-agent-wrote"
+	if err := session.Write(*st); err != nil {
+		t.Fatal(err)
+	}
+	writeFrontendMapping(t, selfPrincipal, "worker/kid", wtPath)
+
+	if text, isErr := callCloseThis(t, `{}`); isErr {
+		t.Fatalf("the mapping names this session, so the request must be accepted: %q", text)
+	}
+	if readKid(t, repoPath).CloseRequest == nil {
+		t.Error("expected a recorded close request")
+	}
+}
+
+// A mapping that exists wins outright: if it names no live session, or does
+// not parse, the caller resolves to nothing, even though the worktree state
+// still claims the principal.
+func TestCloseThisSessionNeverFallsBackPastAMapping(t *testing.T) {
+	for name, write := range map[string]func(t *testing.T, wtPath string){
+		"mapping names a session that is not live": func(t *testing.T, wtPath string) {
+			writeFrontendMapping(t, selfPrincipal, "worker/gone", wtPath)
+		},
+		"mapping does not parse": func(t *testing.T, _ string) {
+			path := confinement.PrincipalMappingPath(os.Getenv("XDG_STATE_HOME"), selfPrincipal)
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("not json"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repoPath, wtPath := selfCloseFixture(t, true)
+			write(t, wtPath)
+			if _, isErr := callCloseThis(t, `{}`); !isErr {
+				t.Fatal("a mapping that resolves nothing must refuse, not fall back to the worktree state")
+			}
+			if readKid(t, repoPath).CloseRequest != nil {
+				t.Error("must not record a request")
+			}
+		})
+	}
+}
+
 func TestCloseSelfRunWithAnUnknownTargetIsANoOp(t *testing.T) {
 	selfCloseFixture(t, true)
 	if err := runCloseSelfRun("nope/nothing"); err != nil {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/store"
 	gitstore "code.linenisgreat.com/spinclass/internal/store/git"
@@ -25,7 +26,7 @@ var storeBackend store.Backend = gitstore.New()
 // resolveStoreSession finds the calling session from its principal. It is a
 // variable so tests can stand in for the session index.
 var resolveStoreSession = func(principal string) (store.Session, bool) {
-	key, ok := session.SessionKeyOfPrincipal(principal)
+	key, ok := confinement.SessionKeyOfPrincipal(principal)
 	if !ok {
 		return store.Session{}, false
 	}

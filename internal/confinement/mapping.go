@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"code.linenisgreat.com/spinclass/internal/session"
 )
 
 // PrincipalMapping binds a principal to its session in frontend-owned state:
@@ -114,6 +116,32 @@ func RemovePrincipalMappingsForSession(stateDir, sessionKey string) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// SessionKeyOfPrincipal resolves a caller's principal to its session key,
+// preferring the frontend principal mapping, which the session's agent cannot
+// write, over the worktree state's recorded principal, which it can (audit row
+// 0035-159). Only when no mapping exists (a session never launched confined)
+// does it fall back to session.SessionKeyOfPrincipal. A mapping that exists but
+// cannot be read or validated, or names a session that is no longer live,
+// resolves nothing: the caller fails closed rather than fall back.
+func SessionKeyOfPrincipal(principal string) (string, bool) {
+	stateDir, err := DefaultStateDir()
+	if err != nil {
+		return "", false
+	}
+	m, err := LoadPrincipalMapping(Host{}, stateDir, principal)
+	switch {
+	case err == nil:
+		if !LiveSession(m.SessionKey) {
+			return "", false
+		}
+		return m.SessionKey, true
+	case errors.Is(err, os.ErrNotExist):
+		return session.SessionKeyOfPrincipal(principal)
+	default:
+		return "", false
+	}
 }
 
 // PrincipalOfSession is the principal the frontend mappings bind to sessionKey

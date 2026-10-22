@@ -143,7 +143,7 @@ func runCloseThisSession(args json.RawMessage) (string, error) {
 		return "", err
 	}
 	principal := currentPrincipal()
-	key, ok := session.SessionKeyOfPrincipal(principal)
+	key, ok := confinement.SessionKeyOfPrincipal(principal)
 	if !ok {
 		return "", errNoSelfSession
 	}
@@ -194,7 +194,7 @@ func runCloseSelfRun(target string) error {
 	implied := ""
 	if target == "" {
 		implied = currentPrincipal()
-		key, ok := session.SessionKeyOfPrincipal(implied)
+		key, ok := confinement.SessionKeyOfPrincipal(implied)
 		if !ok {
 			return nil
 		}
