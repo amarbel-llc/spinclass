@@ -567,6 +567,51 @@ func TestF11CountsARecordedSessionWhoseUnitRuns(t *testing.T) {
 	}
 }
 
+// A zombie keeps its /proc entry after leaving its cgroup; F10 passes with a
+// note when the only extras are zombies, and fails naming a live extra.
+func TestF10CountsZombiesApart(t *testing.T) {
+	sys, in := confinedHost()
+	sys.dirs[root+"/proc"] = []string{"1", "2", "3", "self"}
+	sys.files[root+"/proc/3/stat"] = "3 (sh) Z 1 1 1 0 -1 0"
+	f := factByID(t, Run(sys, in), "F10")
+	if !f.OK || !strings.Contains(f.Detail, "1 zombie") {
+		t.Errorf("F10 = %+v, want ok with a zombie note", f)
+	}
+	sys.files[root+"/proc/3/stat"] = "3 (sh) S 1 1 1 0 -1 0"
+	f = factByID(t, Run(sys, in), "F10")
+	if f.OK || !strings.Contains(f.Detail, "3(sh)") {
+		t.Errorf("F10 = %+v, want a failure naming the live extra", f)
+	}
+}
+
+// clown binds the child's own troupe account file into the unit's runtime dir;
+// F14 accepts exactly that and names anything else under troupe.
+func TestF14AcceptsOnlyTheChildsOwnTroupeAccount(t *testing.T) {
+	for name, tc := range map[string]struct {
+		accounts []string
+		top      []string
+		wantOK   bool
+		want     string
+	}{
+		"own account only":   {[]string{"principal-a.pass"}, []string{"accounts"}, true, ""},
+		"another account":    {[]string{"principal-a.pass", "principal-b.pass"}, []string{"accounts"}, false, "troupe/accounts/principal-b.pass"},
+		"something else too": {[]string{"principal-a.pass"}, []string{"accounts", "ipc.sock"}, false, "troupe/ipc.sock"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			sys, in := confinedHost()
+			sys.dirs[root+"/run"] = []string{"user"}
+			sys.dirs[root+"/run/user"] = []string{"1000"}
+			sys.dirs[root+"/run/user/1000"] = []string{"clown", "troupe"}
+			sys.dirs[root+"/run/user/1000/troupe"] = tc.top
+			sys.dirs[root+"/run/user/1000/troupe/accounts"] = tc.accounts
+			f := factByID(t, Run(sys, in), "F14")
+			if f.OK != tc.wantOK || (tc.want != "" && !strings.Contains(f.Detail, tc.want)) {
+				t.Errorf("F14 = %+v, want ok=%v naming %q", f, tc.wantOK, tc.want)
+			}
+		})
+	}
+}
+
 // unitRunning is the liveness a confined session's ResolveState uses: a record
 // that loads and a cgroup that holds a process.
 func TestUnitRunning(t *testing.T) {

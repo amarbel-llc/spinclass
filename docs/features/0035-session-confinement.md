@@ -171,6 +171,18 @@ exercised on a real unit, and so **unverified until a live canary**:
   - with the canary-grit profile the worker's tool list had no moxy `grit_*` and no `chix_build`. Absent, so never called.
   - Still unverified: `nix` flake evaluation and direnv in the unit. The canary fixture has no `flake.nix` and its `.envrc` is not allowed.
   - Still failing: F10, F11 (see below), F12, F14.
+- **F10 and F14 were check gaps, not cut failures (inferred, 2026-10-22).**
+  - F10 counted every numeric `/proc` entry in the unit against the unit's
+    cgroup. The overcount grew over the rounds (+2, +3, +5), which fits
+    zombies: an exited task leaves `cgroup.procs` at exit, but keeps its
+    `/proc` entry until reaped. F10 now counts zombies (state `Z` in the
+    unit's `/proc/<pid>/stat`) apart, passes with a note when they are the
+    only extras, and names each live extra.
+  - F14 did not know that clown binds the child's own troupe account file
+    (`troupe/accounts/<principal>.pass`). It now accepts exactly that, and
+    names any other account or entry under `troupe`.
+  - Both readings wait on a live round: a probe listing the unit's runtime
+    dir, and F10's note or failure detail.
 
 ### Frontend rewrites detach file mounts (round K, open)
 

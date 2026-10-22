@@ -1001,6 +1001,7 @@ func (p *prober) mustNotReadCredential() error {
 // requirement).
 func (p *prober) f10PrivatePIDs() Fact {
 	const id, name = "F10", "private pid namespace and procfs"
+	var note string
 	err := func() error {
 		if err := p.needSubject(); err != nil {
 			return err
@@ -1040,18 +1041,52 @@ func (p *prober) f10PrivatePIDs() Fact {
 		if err != nil {
 			return fmt.Errorf("listing the unit's /proc: %w", err)
 		}
-		visible := 0
+		// A zombie has left its cgroup at exit but keeps its /proc entry until
+		// its parent reaps it, so zombies are counted apart: they can act on
+		// nothing. Every other entry beyond the unit's own processes fails.
+		visible, zombies := 0, 0
+		var comms []string
 		for _, e := range entries {
-			if _, err := strconv.Atoi(e); err == nil {
-				visible++
+			if _, err := strconv.Atoi(e); err != nil {
+				continue
 			}
+			visible++
+			comm, state := p.procCommState(filepath.Join(procDir, e))
+			if state == "Z" {
+				zombies++
+				continue
+			}
+			comms = append(comms, e+"("+comm+")")
 		}
-		if visible > len(p.pids) {
-			return fmt.Errorf("the unit's /proc lists %d processes but the unit holds %d: it shows processes outside the unit", visible, len(p.pids))
+		if live := visible - zombies; live > len(p.pids) {
+			return fmt.Errorf("the unit's /proc lists %d live processes (%d zombies apart) but the unit holds %d: it shows processes outside the unit; unit-namespace pids: %s",
+				live, zombies, len(p.pids), strings.Join(comms, ", "))
+		}
+		if zombies > 0 {
+			note = fmt.Sprintf("%d zombie(s) in the unit's /proc beyond its cgroup (exited, not yet reaped by their parent)", zombies)
 		}
 		return nil
 	}()
-	return fact(id, name, err, "")
+	return fact(id, name, err, note)
+}
+
+// procCommState reads a /proc/<pid>/stat for its command name and one-letter
+// state. Unreadable or unparsable yields "?" for both.
+func (p *prober) procCommState(dir string) (comm, state string) {
+	b, err := p.sys.ReadFile(filepath.Join(dir, "stat"))
+	if err != nil {
+		return "?", "?"
+	}
+	s := string(b)
+	open, closeIdx := strings.IndexByte(s, '('), strings.LastIndexByte(s, ')')
+	if open < 0 || closeIdx < open {
+		return "?", "?"
+	}
+	rest := strings.Fields(s[closeIdx+1:])
+	if len(rest) == 0 {
+		return s[open+1 : closeIdx], "?"
+	}
+	return s[open+1 : closeIdx], rest[0]
 }
 
 func sameFilesystem(a, b fs.FileInfo) bool {
@@ -1232,6 +1267,41 @@ func (p *prober) f13PrivateNetwork() Fact {
 	return fact(id, name, err, "")
 }
 
+// troupeBeyondOwnAccount lists what the unit sees under the operator's troupe
+// runtime dir beyond the one thing clown binds there: the child's own account
+// password file, troupe/accounts/<principal>.pass (FDR 0035 "Spawn side").
+// Another account's file, or anything else, is named.
+func (p *prober) troupeBeyondOwnAccount(dir string) ([]string, error) {
+	own := p.in.Driver.Principal + ".pass"
+	names, err := p.sys.ReadDir(dir)
+	if err != nil {
+		if unreachable(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("listing the troupe runtime dir in the unit: %w", err)
+	}
+	var extra []string
+	for _, n := range names {
+		if n != "accounts" {
+			extra = append(extra, "troupe/"+n)
+			continue
+		}
+		accounts, err := p.sys.ReadDir(filepath.Join(dir, n))
+		if err != nil {
+			if unreachable(err) {
+				continue
+			}
+			return nil, fmt.Errorf("listing the troupe accounts dir in the unit: %w", err)
+		}
+		for _, a := range accounts {
+			if p.in.Driver.Principal == "" || a != own {
+				extra = append(extra, "troupe/accounts/"+a)
+			}
+		}
+	}
+	return extra, nil
+}
+
 // F15: the frontend's principal mapping (what the grant walk trusts) names
 // the driver's session and unit, and the worktree's cached principal agrees.
 // A disagreement means one side was rewritten; both values are named.
@@ -1284,7 +1354,15 @@ func (p *prober) f14RuntimeDirBoundOnly() Fact {
 		}
 		var extra []string
 		for _, n := range names {
-			if !slices.Contains(p.in.RuntimeAllow, n) {
+			switch {
+			case slices.Contains(p.in.RuntimeAllow, n):
+			case n == "troupe":
+				more, err := p.troupeBeyondOwnAccount(filepath.Join(dir, n))
+				if err != nil {
+					return err
+				}
+				extra = append(extra, more...)
+			default:
 				extra = append(extra, n)
 			}
 		}
