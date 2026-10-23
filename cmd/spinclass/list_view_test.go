@@ -214,6 +214,68 @@ func TestRenderListTablePresenceFoldsIntoStatus(t *testing.T) {
 	}
 }
 
+// The SERVE column flags a session whose live serve runs a build other than
+// the sc running the list, including a serve whose record predates the build
+// field; a session with no live serve shows nothing there.
+func TestRenderListTableFlagsAServeRunningAnotherBuild(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir()) // hermetic: no clown presence
+	stubServes := func(serves map[string][]string, own string) {
+		prevServes, prevOwn := liveServeBuilds, listBuild
+		liveServeBuilds = func() map[string][]string { return serves }
+		listBuild = func() string { return own }
+		t.Cleanup(func() { liveServeBuilds, listBuild = prevServes, prevOwn })
+	}
+	row := func(branch, principal string) session.State {
+		return session.State{
+			SessionState: session.StateInactive,
+			WorktreePath: t.TempDir(),
+			Branch:       branch,
+			SessionKey:   "spinclass/" + branch,
+			Principal:    principal,
+			StartedAt:    time.Now(),
+		}
+	}
+	stubServes(map[string][]string{
+		"p-current": {"0.2.1+new1234"},
+		"p-stale":   {"0.2.1+old9876"},
+		"p-legacy":  {""},
+	}, "0.2.1+new1234")
+
+	out := renderListTable([]session.State{
+		row("current", "p-current"), row("stale", "p-stale"), row("legacy", "p-legacy"), row("none", "p-none"),
+	}, nil, nil, false, 0, mesa.ForcePlain())
+
+	lines := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		for _, b := range []string{"current", "stale", "legacy", "none"} {
+			if strings.HasPrefix(line, "spinclass/"+b) {
+				lines[b] = strings.TrimPrefix(line, "spinclass/"+b) // the cells after ID
+			}
+		}
+	}
+	if !strings.Contains(out, "SERVE") {
+		t.Errorf("no SERVE column:\n%s", out)
+	}
+	if !strings.Contains(lines["current"], "current") || strings.Contains(lines["current"], "differs") {
+		t.Errorf("a serve on the listing build must read current: %q", lines["current"])
+	}
+	if !strings.Contains(lines["stale"], "differs: 0.2.1+old9876") {
+		t.Errorf("an older serve must be flagged with its build: %q", lines["stale"])
+	}
+	if !strings.Contains(lines["legacy"], "differs: predates build records") {
+		t.Errorf("a record without a build must be flagged: %q", lines["legacy"])
+	}
+	if strings.Contains(lines["none"], "differs") || strings.Contains(lines["none"], "current") {
+		t.Errorf("no live serve must leave SERVE empty: %q", lines["none"])
+	}
+
+	stubServes(map[string][]string{"p-stale": {"0.2.1+old9876"}}, "0.2.1+unknown")
+	out = renderListTable([]session.State{row("stale", "p-stale")}, nil, nil, false, 0, mesa.ForcePlain())
+	if strings.Contains(out, "differs") {
+		t.Errorf("a listing build of unknown commit cannot judge, must not claim differs:\n%s", out)
+	}
+}
+
 // TestRenderListTableClosedIncludesAbandoned confirms the closed flag flips
 // the abandoned-row filter on, mirroring the text path's --closed semantics.
 func TestRenderListTableClosedIncludesAbandoned(t *testing.T) {

@@ -740,7 +740,13 @@ the serve) keep running the code they started with, with no warning, against a
 confined worker's worktree too. Until every frontend surface checks its own
 freshness the mitigation is operational: **restart discipline**, i.e. after a
 deploy every live session restarts its serve (or reconnects its MCP servers)
-before it is trusted with a confined worker.
+before it is trusted with a confined worker. `sc list` shows it: each serve
+records its version+commit in its serve record
+(`$XDG_STATE_HOME/spinclass/serves/`), and the SERVE column reads `current`
+when every live serve of the session's principal runs the build of the `sc`
+running the list, `differs: <build>` when one does not, `differs: predates
+build records` for a serve started before the field existed, and `?` when the
+listing build itself has no known commit.
 
 **Cross-session reads are refused (2026-10-23).** For unconfined callers the
 grit store tools' reads were unscoped by decision (FDR 0036 section 2: a read

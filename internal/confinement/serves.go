@@ -20,6 +20,10 @@ type ServeRecord struct {
 	PID       int    `json:"pid"`
 	PPID      int    `json:"ppid"`
 	Started   string `json:"started"`
+	// Build is the serve's version+commit, so `sc list` can flag a serve still
+	// running an older build than the installed one (spinclass#399's residual).
+	// Records written before the field existed lack it.
+	Build string `json:"build,omitempty"`
 }
 
 func servesDir(stateDir string) string {
@@ -41,7 +45,7 @@ func pidAlive(sys System, pid int) bool {
 // RegisterServe records this serve and returns the function that removes the
 // record. An empty principal writes nothing: such a serve stays confined
 // whatever the records say. Records of dead serves are pruned on the way.
-func RegisterServe(stateDir, principal string, pid, ppid int, now time.Time) (func(), error) {
+func RegisterServe(stateDir, principal, build string, pid, ppid int, now time.Time) (func(), error) {
 	noop := func() {}
 	if principal == "" {
 		return noop, nil
@@ -54,7 +58,7 @@ func RegisterServe(stateDir, principal string, pid, ppid int, now time.Time) (fu
 		return noop, fmt.Errorf("creating the serve records directory: %w", err)
 	}
 	pruneDeadServeRecords(Host{}, dir)
-	raw, err := json.Marshal(ServeRecord{Principal: principal, PID: pid, PPID: ppid, Started: now.UTC().Format(time.RFC3339)})
+	raw, err := json.Marshal(ServeRecord{Principal: principal, PID: pid, PPID: ppid, Started: now.UTC().Format(time.RFC3339), Build: build})
 	if err != nil {
 		return noop, err
 	}
@@ -89,6 +93,33 @@ func pruneDeadServeRecords(sys System, dir string) {
 		}
 		_ = os.Remove(filepath.Join(dir, name))
 	}
+}
+
+// LiveServeBuilds maps each principal to the builds of its live serves, read
+// from the serve records; a record without a build maps to "". Unreadable or
+// unparseable records and dead serves are skipped: the result is display-only.
+func LiveServeBuilds(sys System, stateDir string) map[string][]string {
+	dir := servesDir(stateDir)
+	names, err := sys.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	builds := map[string][]string{}
+	for _, name := range names {
+		if !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		raw, err := sys.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			continue
+		}
+		var rec ServeRecord
+		if json.Unmarshal(raw, &rec) != nil || rec.Principal == "" || !pidAlive(sys, rec.PID) {
+			continue
+		}
+		builds[rec.Principal] = append(builds[rec.Principal], rec.Build)
+	}
+	return builds
 }
 
 // ClassifyServeCaller is ClassifyCaller plus the one-serve check: a caller the

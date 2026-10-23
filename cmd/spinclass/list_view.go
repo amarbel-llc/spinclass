@@ -15,6 +15,7 @@ import (
 
 	"code.linenisgreat.com/purse-first/libs/dewey/pkgs/mesa"
 	"code.linenisgreat.com/spinclass/internal/clown"
+	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sessionpick"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
@@ -230,6 +231,58 @@ func descCell(desc, spawnedBy string, holders int, orphan bool) mesa.Cell {
 	return mesa.Spans(spans...)
 }
 
+// Seams for tests: the builds of each principal's live serves, and the build
+// of the sc running this list (the installed one, when sc is run from PATH).
+var (
+	liveServeBuilds = func() map[string][]string {
+		stateDir, err := confinement.DefaultStateDir()
+		if err != nil {
+			return nil
+		}
+		return confinement.LiveServeBuilds(confinement.Host{}, stateDir)
+	}
+	listBuild = func() string { return version + "+" + commit }
+)
+
+// knownBuild reports whether a version+commit names a real commit; a devshell
+// build ("unknown") or "dev" cannot be compared.
+func knownBuild(build string) bool {
+	i := strings.LastIndex(build, "+")
+	if i <= 0 {
+		return false
+	}
+	switch build[i+1:] {
+	case "", "unknown", "dev":
+		return false
+	}
+	return true
+}
+
+// serveCell is the SERVE cell: whether the session's live serves run the build
+// of the sc running this list. A serve keeps the binary it started with, so
+// after a deploy its grit tools and hooks run old code with no warning
+// (spinclass#399's residual, FDR 0035); this is where an operator sees it.
+// Empty when the session has no live serve record.
+func serveCell(builds []string, own string) mesa.Cell {
+	if len(builds) == 0 {
+		return mesa.Text("")
+	}
+	if !knownBuild(own) {
+		return mesa.Styled(mesa.Muted, "?")
+	}
+	for _, b := range builds {
+		switch b {
+		case own:
+			continue
+		case "":
+			return mesa.Styled(mesa.Warn, "differs: predates build records")
+		default:
+			return mesa.Styled(mesa.Warn, "differs: "+b)
+		}
+	}
+	return mesa.Text("current")
+}
+
 func renderDiags(diags []string) string {
 	lines := make([]string, len(diags))
 	for i, d := range diags {
@@ -258,12 +311,14 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 	// into the STATUS cell — presence of live clowns IS activity — so there is
 	// no separate CLOWNS column.
 	presByKey := clown.PresenceByDecoration(now)
+	serves, own := liveServeBuilds(), listBuild()
 
 	t := mesa.New().
 		Col("ID", mesa.Pin).
 		Col("STATUS", mesa.Pin).
 		Col("AGE", mesa.Pin).
 		Col("PROFILE", mesa.Pin).
+		Col("SERVE", mesa.Pin).
 		Col("DESCRIPTION", mesa.Flex).
 		Legend(stateLegendEntries()...).
 		Empty("No sessions.")
@@ -294,6 +349,7 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 			statusCell(stateSeverity(s.ResolveDisplayState(clowns)), clowns, marker),
 			mesa.Text(sessionpick.FormatRelDate(sessionpick.LastActivity(*s), now)),
 			mesa.Text(s.Profile),
+			serveCell(serves[s.Principal], own),
 			descCell(s.Description, s.SpawnedBy, len(s.Holders), s.Orphan()),
 		)
 	}
@@ -308,6 +364,7 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 			statusCell(mesa.Special, r.ClownCount, "remote"),
 			mesa.Text(""),
 			mesa.Text(r.Profile),
+			mesa.Text(""),
 			descCell(r.Description, r.SpawnedBy, r.Holders, r.Orphan),
 		)
 	}

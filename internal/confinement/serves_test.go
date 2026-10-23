@@ -94,7 +94,7 @@ func TestRegisterServeWritesAndRemovesTheRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	remove, err := RegisterServe(state, "principal-a", os.Getpid(), os.Getppid(), time.Now())
+	remove, err := RegisterServe(state, "principal-a", "0.2.1+abc1234", os.Getpid(), os.Getppid(), time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestRegisterServeWritesAndRemovesTheRecord(t *testing.T) {
 
 func TestRegisterServeDirectoryIsPrivate(t *testing.T) {
 	state := t.TempDir()
-	if _, err := RegisterServe(state, "principal-a", os.Getpid(), 1, time.Now()); err != nil {
+	if _, err := RegisterServe(state, "principal-a", "", os.Getpid(), 1, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(servesDir(state))
@@ -134,7 +134,7 @@ func TestRegisterServeDirectoryIsPrivate(t *testing.T) {
 
 func TestRegisterServeEmptyPrincipalWritesNothing(t *testing.T) {
 	state := t.TempDir()
-	remove, err := RegisterServe(state, "", os.Getpid(), 1, time.Now())
+	remove, err := RegisterServe(state, "", "", os.Getpid(), 1, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,5 +144,35 @@ func TestRegisterServeEmptyPrincipalWritesNothing(t *testing.T) {
 	}
 	if confined, _ := ClassifyServeCaller(Host{}, state, "", os.Getpid()); !confined {
 		t.Error("an empty principal must stay confined")
+	}
+}
+
+// sc list reads each live serve's build from its record; a record written
+// before the field existed reads as "", and a dead serve is not listed.
+func TestLiveServeBuildsReadsLiveRecordsOnly(t *testing.T) {
+	state := t.TempDir()
+	if _, err := RegisterServe(state, "principal-a", "0.2.1+abc1234", os.Getpid(), 1, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	dir := servesDir(state)
+	for name, body := range map[string]string{
+		serveRecordName("principal-b", os.Getppid()): serveRecordBody("principal-b", os.Getppid()),
+		serveRecordName("principal-c", 999999999):    serveRecordBody("principal-c", 999999999),
+		"garbage.json": "{",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := LiveServeBuilds(Host{}, state)
+	if b := got["principal-a"]; len(b) != 1 || b[0] != "0.2.1+abc1234" {
+		t.Errorf("principal-a builds = %q, want [0.2.1+abc1234]", b)
+	}
+	if b, ok := got["principal-b"]; !ok || len(b) != 1 || b[0] != "" {
+		t.Errorf("principal-b builds = %q (present %v), want one record without a build", b, ok)
+	}
+	if b, ok := got["principal-c"]; ok {
+		t.Errorf("a dead serve was listed: %q", b)
 	}
 }

@@ -254,7 +254,7 @@ func registerServeRecord() (func(), error) {
 	if err != nil {
 		return func() {}, err
 	}
-	return confinement.RegisterServe(stateDir, os.Getenv("CLOWN_SESSION_ID"), os.Getpid(), os.Getppid(), time.Now())
+	return confinement.RegisterServe(stateDir, os.Getenv("CLOWN_SESSION_ID"), version+"+"+commit, os.Getpid(), os.Getppid(), time.Now())
 }
 
 // resolveGritCaller classifies the caller by the principal of the clown hosting
