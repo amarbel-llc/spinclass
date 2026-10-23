@@ -2,11 +2,14 @@ package sysprompt
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	"code.linenisgreat.com/spinclass/internal/safeio"
 )
 
 // defaultDocIndexDirs is the built-in scan set for the design-record index,
@@ -79,22 +82,45 @@ func renderDesignRecords(root string, dirs []string) (section string) {
 		}
 	}()
 
+	// The scan runs in the serve, outside any confinement unit, over a session
+	// worktree the worker can write: it reads only inside root. A configured dir
+	// must be relative without "..", must resolve inside root, and a record must
+	// be a regular file, so a planted symlink cannot point the serve elsewhere.
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		realRoot = root
+	}
 	for _, dir := range dirs {
 		genre := genreTags[dir]
 		if genre == "" {
 			genre = filepath.Base(dir)
 		}
-		entries, err := os.ReadDir(filepath.Join(root, dir))
+		if filepath.IsAbs(dir) || !filepath.IsLocal(dir) {
+			warnings = append(warnings, dir+" — outside the repository (a doc-index dir must be a relative path inside it); not read")
+			continue
+		}
+		realDir, err := filepath.EvalSymlinks(filepath.Join(root, dir))
 		if err != nil {
-			// Absent dir is scan-if-exists (silent); any other read failure
-			// (e.g. a permission error) is a diagnostic, not a silent drop.
+			// Absent dir is scan-if-exists (silent); any other failure is a
+			// diagnostic, not a silent drop.
+			if !os.IsNotExist(err) {
+				warnings = append(warnings, dir+" — unreadable directory: "+err.Error())
+			}
+			continue
+		}
+		if !pathWithin(realDir, realRoot) {
+			warnings = append(warnings, dir+" — resolves outside the repository (a symlink); not read")
+			continue
+		}
+		entries, err := os.ReadDir(realDir)
+		if err != nil {
 			if !os.IsNotExist(err) {
 				warnings = append(warnings, dir+" — unreadable directory: "+err.Error())
 			}
 			continue
 		}
 		for _, e := range entries {
-			if e.IsDir() {
+			if !e.Type().IsRegular() {
 				continue
 			}
 			m := recordFileRe.FindStringSubmatch(e.Name())
@@ -102,7 +128,7 @@ func renderDesignRecords(root string, dirs []string) (section string) {
 				continue // not a design record — silently ignored (README, etc.)
 			}
 			rel := filepath.Join(dir, e.Name())
-			data, err := os.ReadFile(filepath.Join(root, dir, e.Name()))
+			data, err := readNoFollow(filepath.Join(realDir, e.Name()))
 			if err != nil {
 				warnings = append(warnings, rel+" — unreadable: "+err.Error())
 				continue
@@ -125,6 +151,17 @@ func renderDesignRecords(root string, dirs []string) (section string) {
 		}
 	}
 	return formatRecords(records, warnings)
+}
+
+// readNoFollow reads path refusing a symlink at its final element, so a record
+// swapped for a symlink after the directory listing is not followed.
+func readNoFollow(path string) ([]byte, error) {
+	f, err := safeio.OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(f)
 }
 
 // extractHeading returns the first level-1 markdown heading, or "" if none.

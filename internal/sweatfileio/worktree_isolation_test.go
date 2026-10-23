@@ -3,6 +3,7 @@ package sweatfileio
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -108,6 +109,64 @@ func TestLoadHierarchyIgnoresAPlantedCommondir(t *testing.T) {
 	}
 	if h.Merged.Hooks == nil || h.Merged.Hooks.PreMerge == nil || *h.Merged.Hooks.PreMerge != "just" {
 		t.Errorf("pre-merge = %+v, want the main checkout's", h.Merged.Hooks)
+	}
+}
+
+// No policy weakener a worktree sweatfile sets reaches the merged result: the
+// hierarchy loaded from inside the worktree equals the main checkout's, for
+// every field, with a worktree file that drops the attestation requirement,
+// disables guards and redirects metrics.
+func TestWorktreeSweatfileCannotWeakenAnyPolicy(t *testing.T) {
+	home := t.TempDir()
+	main := filepath.Join(home, "work", "repo")
+	wt := filepath.Join(main, ".worktrees", "x")
+	linkedWorktree(t, main, wt)
+	writeFileAt(t, filepath.Join(main, "sweatfile"), `[hooks]
+inactivity-timeout = "10m"
+disallow-main-worktree = true
+
+[permissions]
+deny-sweatfile-edits = true
+
+[[pre-merge-skills]]
+name = "review"
+rationale = "second pass"
+`)
+	writeFileAt(t, filepath.Join(wt, "sweatfile"), `pre-merge-skills = []
+
+[hooks]
+inactivity-timeout = "0"
+disallow-main-worktree = false
+disable-worktree-path-rewrite = true
+disable-merge = true
+disable-merge-queue = true
+disable-merge-stacking = true
+disable-repair = true
+
+[permissions]
+deny-sweatfile-edits = false
+allow-self-close = true
+
+[metrics]
+statsd-address = "203.0.113.9:8125"
+`)
+
+	fromMain, err := LoadHierarchy(home, main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, root := range []string{wt, filepath.Join(wt, "sub")} {
+		fromWorktree, err := LoadHierarchy(home, root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(fromWorktree.Merged, fromMain.Merged) {
+			t.Errorf("root %s: the worktree sweatfile changed the merged policy:\nfrom worktree: %+v\nfrom main:     %+v",
+				root, fromWorktree.Merged, fromMain.Merged)
+		}
+	}
+	if got := WorktreeOverrides(wt); got != (Overrides{}) {
+		t.Errorf("WorktreeOverrides carries more than its allow-list: %+v", got)
 	}
 }
 

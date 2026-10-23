@@ -149,7 +149,13 @@ YAML frontmatter) and grouped by status.
 	broken record (unreadable, or a frontmatter block opened with *---* but
 	never closed) is reported in a trailing diagnostic block instead of
 	being silently dropped — the fragment renders best-effort and never
-	fails on a malformed doc. *Merge:* override, not append — unlike the
+	fails on a malformed doc. The scan reads only inside the root: an
+	entry that is absolute or contains *..* is not read, a directory that
+	resolves outside the root (through a symlink) is not read, and both
+	are reported in the diagnostic block; only regular files are read as
+	records, so a symlinked record is silently skipped. The scan runs in the
+	serve, outside any confinement unit, over a worktree the worker can
+	write. *Merge:* override, not append — unlike the
 	other array fields. A non-empty value replaces the inherited list
 	(override-wins down the cascade); an explicit empty array
 	(*doc-index-dirs = []*) disables the index; nil (unset) inherits,
