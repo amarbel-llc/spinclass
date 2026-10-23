@@ -178,6 +178,8 @@ func registerSessionCommands(app *command.App) {
 			{Name: "post-merge-targets", Type: command.String, Description: "Comma-separated named [[post-merge]] targets to deploy after landing (FDR 0026). Omit to deploy ALL configured targets (default). A name no stanza declares fails the merge before it lands."},
 			{Name: "no-post-merge", Type: command.Bool, Description: "Deploy no [[post-merge]] targets — a docs-only merge that skips every deploy (FDR 0026). Wins over --post-merge-targets."},
 			{Name: "post-merge-timeout", Type: command.String, Description: "Override [hooks].post-merge-timeout for this merge only: a Go duration (\"25m\", \"1500s\") capping the whole post-merge phase, or \"0\" to disable the cap. No ceiling. The effective cap reaches every post-merge command/verify as SPINCLASS_POST_MERGE_TIMEOUT, _TIMEOUT_SECONDS and _DEADLINE (see spinclass-sweatfile(5) [[post-merge]])."},
+			{Name: "accept-post-merge", Type: command.String, Description: "Operator only, terminal only: accept a changed post-merge section by its digest (sha256:...). A merge that changes the post-merge section (targets, commands, verify, legacy hook, timeout, disable flag) from the default branch tip is refused before landing unless this digest matches the new section. Prints the section first. Review it with --show-post-merge."},
+			{Name: "show-post-merge", Type: command.Bool, Description: "Dry run: print the post-merge section on the default branch tip and at the session branch HEAD, with both digests, and exit without merging."},
 		},
 		RunCLI: func(ctx context.Context, args json.RawMessage) error {
 			var p struct {
@@ -187,6 +189,8 @@ func registerSessionCommands(app *command.App) {
 				PostMergeTargets string `json:"post-merge-targets"`
 				NoPostMerge      bool   `json:"no-post-merge"`
 				PostMergeTimeout string `json:"post-merge-timeout"`
+				AcceptPostMerge  string `json:"accept-post-merge"`
+				ShowPostMerge    bool   `json:"show-post-merge"`
 			}
 			_ = json.Unmarshal(args, &p)
 			ctx, stop := gateSignalContext(ctx, cliGateSignals...)
@@ -207,8 +211,12 @@ func registerSessionCommands(app *command.App) {
 			// value ("" means auto — viewport on a TTY, ndjson when piped).
 			// git_sync now defaults ON (push by default, #126); --local-only
 			// is the explicit opt-out.
-			return merge.RunContext(ctx, executor.ShellExecutor{}, p.Format, p.Target, !p.LocalOnly,
-				merge.PostMergeOptions{Targets: postMergeTargets, Timeout: pmTimeout})
+			pm, err := postMergeOperatorOptions(p.AcceptPostMerge, p.ShowPostMerge)
+			if err != nil {
+				return err
+			}
+			pm.Targets, pm.Timeout = postMergeTargets, pmTimeout
+			return merge.RunContext(ctx, executor.ShellExecutor{}, p.Format, p.Target, !p.LocalOnly, pm)
 		},
 	})
 

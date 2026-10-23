@@ -308,9 +308,15 @@ does not export *WORKTREE*.
 	*disable-post-merge* and *[[post-merge]]* from the repo *sweatfile* as
 	committed at the landed sha, merged over the live global and parent-dir
 	layers (the main checkout's file on disk is not read). The landed sha
-	includes the merged branch's own commits, so a branch that adds a
-	post-merge command runs it at its own merge (spinclass FDR 0035,
-	residuals). Uncommitted edits in the session worktree, and
+	includes the merged branch's own commits, so a merge whose post-merge
+	section (these keys and every *[[post-merge]]* target) differs from the
+	default branch tip's is refused before landing, unless an operator
+	accepts the new section's digest at a terminal: review it with
+	*sc merge --show-post-merge*, then *sc merge --accept-post-merge <digest>*. Agent
+	merges (*merge-this-session* and its *-async* twin) have no such
+	parameter and are always refused, so any post-merge change (a new
+	deploy target, a changed command or verify) needs an operator-run merge
+	(spinclass FDR 0035). Uncommitted edits in the session worktree, and
 	commits made after the merge pinned, never affect a merge already in
 	flight; they apply to the next merge. An unreadable snapshot emits a
 	warn point and skips the phase. *--post-merge-targets* is validated
@@ -1415,7 +1421,13 @@ lands.
 *Snapshot:* the phase reads *[hooks].post-merge*, *post-merge-timeout*,
 *disable-post-merge* and *[[post-merge]]* from the repo *sweatfile* as
 committed at the landed sha, merged over the live global and parent-dir
-layers (the main checkout's file on disk is not read). Uncommitted edits in
+layers (the main checkout's file on disk is not read). A merge whose
+post-merge section differs from the default branch tip's is refused before
+landing unless an operator runs *sc merge --accept-post-merge <digest>* at a
+terminal (preview with *sc merge --show-post-merge*); the digest is
+"sha256:" plus the hex SHA-256 of the section's canonical JSON. Agent
+merges cannot, so any change here (a new target, a changed command or
+verify) needs an operator-run merge. Uncommitted edits in
 the session worktree, and commits
 made after the merge pinned, never affect a merge already in flight; they
 apply to the next merge. An unreadable snapshot emits a warn point and skips

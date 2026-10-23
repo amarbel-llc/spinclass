@@ -147,20 +147,21 @@ func TestMergePreMergeSkillsComeFromCommittedDefaultBranch(t *testing.T) {
 	})
 }
 
-// Known residual, not to be fixed: post-merge runs from the sweatfile of the
-// commit that LANDED (#300), which is the session's own commit.
+// Post-merge runs from the sweatfile of the commit that LANDED (#300), which
+// includes the session's own commits; a merge that changes the post-merge
+// section is therefore refused before landing unless an operator confirmed the
+// new section's digest at a terminal.
 func TestMergePostMergeCannotRunSessionBranchCommand(t *testing.T) {
-	t.Skip("residual: post-merge runs from the landed sha by design (#300); see FDR 0035/0018 residual")
-
 	m := newTrustedLayerMarkers(t)
 	repoDir, wtPath := setupPostMergeRepo(t, "feature")
 	commitSweatfile(t, wtPath, kroneTarget("touch "+m.session))
+	mainBefore := runGit(t, repoDir, "rev-parse", "main")
 
-	if _, err := runFinish(t, repoDir, wtPath, "feature", false); err != nil {
-		t.Logf("merge: %v", err)
+	if _, err := runFinish(t, repoDir, wtPath, "feature", false); err == nil {
+		t.Fatal("the merge must be refused before landing")
 	}
-	if !landed(t, repoDir) {
-		t.Fatal("merge did not land; the probe proves nothing")
+	if landed(t, repoDir) || runGit(t, repoDir, "rev-parse", "main") != mainBefore {
+		t.Error("the default branch tip moved: nothing may land")
 	}
 	if markerExists(m.session) {
 		t.Errorf("a [[post-merge]] command from the SESSION branch's sweatfile ran (%s exists)", m.session)

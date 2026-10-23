@@ -45,7 +45,7 @@ func TestPostMergeNamedTargetReadsLandedSweatfileNotLiveEdit(t *testing.T) {
 	repoDir, wtPath := setupPostMergeRepo(t, "feature")
 	commitSweatfile(t, wtPath, kroneTarget("echo COMMITTED"))
 
-	recs, err := runFinishWithMidEdit(t, repoDir, wtPath, "feature", false, PostMergeOptions{},
+	recs, err := runFinishWithMidEdit(t, repoDir, wtPath, "feature", false, acceptHeadSection(t, repoDir, wtPath),
 		midMergeSweatfileEdit(t, wtPath, kroneTarget("echo EDITED")))
 	if err != nil {
 		t.Fatalf("FinishMerge: %v", err)
@@ -64,7 +64,7 @@ func TestPostMergeLegacyHookAndTimeoutReadLandedSweatfile(t *testing.T) {
 	}
 	commitSweatfile(t, wtPath, sweatfile("COMMITTED", "7m"))
 
-	recs, err := runFinishWithMidEdit(t, repoDir, wtPath, "feature", false, PostMergeOptions{},
+	recs, err := runFinishWithMidEdit(t, repoDir, wtPath, "feature", false, acceptHeadSection(t, repoDir, wtPath),
 		midMergeSweatfileEdit(t, wtPath, sweatfile("EDITED", "3m")))
 	if err != nil {
 		t.Fatalf("FinishMerge: %v", err)
@@ -91,7 +91,7 @@ func TestPostMergeUnqueuedPathReadsLandedSweatfile(t *testing.T) {
 	writeGlobalSweatfile(t, "[hooks]\ndisable-merge-queue = true\n")
 	commitSweatfile(t, wtPath, kroneTarget("echo COMMITTED"))
 
-	recs, err := runFinishWithMidEdit(t, repoDir, wtPath, "feature", false, PostMergeOptions{},
+	recs, err := runFinishWithMidEdit(t, repoDir, wtPath, "feature", false, acceptHeadSection(t, repoDir, wtPath),
 		midMergeSweatfileEdit(t, wtPath, kroneTarget("echo EDITED")))
 	if err != nil {
 		t.Fatalf("FinishMerge: %v", err)

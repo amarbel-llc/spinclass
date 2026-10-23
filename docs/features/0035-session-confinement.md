@@ -1282,18 +1282,27 @@ instead of overlaying it. Tests: `TestMergePreMergeHookComesFromCommittedDefault
 uncommitted edit of the main checkout's sweatfile no longer applies to merges
 or checks; committing it to the default branch applies it.
 
-**Residual, post-merge.** Post-merge reads the sweatfile committed at the
-LANDED sha (#300), which includes the merged branch's own commits. A branch
-that adds a `[[post-merge]]` command (or `[hooks].post-merge`) therefore runs it
-on the frontend at its own merge, outside any unit
-(`TestMergePostMergeCannotRunSessionBranchCommand`, red, skipped as this
-residual). Confined workers cannot merge over MCP; the route needs someone to
-merge such a branch. Planned fix (step ii-b): post-merge commands come from
-the default branch tip, and a merge whose post-merge section differs runs the
-old commands unless the operator confirms the new section's digest at a
-terminal. Meanwhile, recommended: a merge whose diff changes exec-bearing
-sweatfile keys (`[hooks]`, `[auth]`, `[[post-merge]]`, spawn keys) is flagged
-in its own report.
+**Post-merge (step ii-b).** Post-merge reads the sweatfile committed at the
+LANDED sha (#300), which includes the merged branch's own commits, so a branch
+that adds a `[[post-merge]]` command (or `[hooks].post-merge`) would run it on
+the frontend at its own merge. A merge whose landed post-merge section differs
+from the section on the default branch tip it lands on is therefore refused
+before anything lands, unless the operator confirms the new section's digest at
+a terminal (`TestMergePostMergeCannotRunSessionBranchCommand`). The section is
+the legacy `[hooks].post-merge` string, `post-merge-timeout`,
+`disable-post-merge` and every active `[[post-merge]]` target (name, command,
+verify); its digest is `sha256:` plus the hex SHA-256 of its canonical JSON.
+The check runs in `PrepareMerge` (early, against the pin) and again in
+`FinishMerge` on the final landing sha, before the attestation policy, on both
+the queued and unqueued paths. The operator runs `sc merge --show-post-merge
+<branch>`, then `sc merge --accept-post-merge <digest> <branch>`; accepting
+needs stdin and stdout to be terminals and prints the section first. The MCP
+merge tools have no parameter for it. Cost: any post-merge change (a new deploy
+target, a changed command or verify) needs an operator-run merge at a terminal;
+coordinator and worker (agent) merges cannot land it. An unchanged section
+behaves as before. Still recommended: a merge whose diff changes other
+exec-bearing sweatfile keys (`[hooks]`, `[auth]`, spawn keys) is flagged in its
+own report.
 
 Residual worker-writable setup-time writes not covered here: `.claude/settings`
 files written at start/rebuild, the pre-commit shim in `.spinclass/hooks`, the

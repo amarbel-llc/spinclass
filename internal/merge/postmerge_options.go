@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +42,23 @@ type PostMergeOptions struct {
 	// at (FDR 0007, #219); "" when unknown, or when the merge was not admitted
 	// by an attestation. It is only read for GateAttested.
 	AttestedSha string
+
+	// AcceptPostMergeDigest is the operator's confirmation, given at a terminal
+	// (`sc merge --accept-post-merge <digest>`), of the exact post-merge section
+	// this merge lands. A merge whose landed section differs from the default
+	// branch tip's is refused before landing unless this equals the landed
+	// section's digest (PostMergeSection.Digest). No MCP tool sets it.
+	AcceptPostMergeDigest string
+
+	// ShowPostMerge, when non-nil, turns RunContext into the
+	// `--show-post-merge` dry run: it prints the tip's and the session HEAD's
+	// post-merge sections there and merges nothing. CLI only.
+	ShowPostMerge io.Writer
+
+	// AnnounceAccept, when non-nil, receives the exact section about to be
+	// accepted (RunContext prints it before merging with AcceptPostMergeDigest).
+	// CLI only: the terminal check lives in cmd/spinclass.
+	AnnounceAccept io.Writer
 
 	// StartedAt is when the merge call began, so the total timer
 	// (spinclass#363) spans PrepareMerge + FinishMerge across the async split

@@ -113,6 +113,15 @@ func RunContext(ctx context.Context, execr executor.Executor, format string, tar
 		return err
 	}
 
+	if pm.ShowPostMerge != nil {
+		return WriteShowPostMerge(ctx, pm.ShowPostMerge, repoPath, wtPath, branch, defaultBranch, gitSync)
+	}
+	if pm.AnnounceAccept != nil && pm.AcceptPostMergeDigest != "" {
+		if err := writeAcceptedSection(pm.AnnounceAccept, wtPath, repoPath, branch, pm.AcceptPostMergeDigest); err != nil {
+			return err
+		}
+	}
+
 	return present.WithReporter(resolved, "merge "+branch, os.Stdout, os.Stderr, func(rep *crap.Reporter) error {
 		ts := rep.TestStream(0)
 		defer ts.Finish()
@@ -272,6 +281,11 @@ func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch s
 	// the flag). A sibling landing that later removes the target is caught by
 	// runNamedPostMergeTargets's defensive re-select (a warning node).
 	if err := validatePostMergeSelection(ts, repoPath, branch, pinned, pm.Targets); err != nil {
+		return "", err
+	}
+	// Early view of the post-merge section rule: an agent learns before the slow
+	// gate that this merge will be refused. FinishMerge decides authoritatively.
+	if err := requirePostMergeSectionAccepted(ts, branch, repoPath, target.Ref(), pinned, pm.AcceptPostMergeDigest, false); err != nil {
 		return "", err
 	}
 	return pinned, nil
@@ -545,7 +559,13 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 		rebased = true
 	}
 
-	// (d0) The pre-merge policy stage (FDR 0031), under the lock, judging the
+	// (d00) The post-merge section rule, on the final landing sha and before
+	// anything lands: a changed section needs the operator's digest.
+	if sErr := requirePostMergeSectionAccepted(ts, branch, repoPath, target.Ref(), landingSha, pm.AcceptPostMergeDigest, true); sErr != nil {
+		return nil, sErr
+	}
+
+	// (d0)The pre-merge policy stage (FDR 0031), under the lock, judging the
 	// exact landing diff before the expensive hook.
 	policyStart := time.Now()
 	pErr := runAttestationPolicy(ctx, ts, pm.Gate, sessionH, repoPath, branch, defaultBranch, target.Ref(), pinnedSha, landingSha, pm.AttestedSha)
@@ -638,6 +658,9 @@ func finishMergeUnqueued(ctx context.Context, mx phaseMetrics, rep *crap.Reporte
 	// PrepareMerge rebased onto the landing target, so it is an ancestor of the
 	// pin and the pin is exactly what lands on this path.
 	target := landing.ForMerge(repoPath, defaultBranch, gitSync)
+	if sErr := requirePostMergeSectionAccepted(ts, branch, repoPath, target.Ref(), pinnedSha, pm.AcceptPostMergeDigest, true); sErr != nil {
+		return nil, sErr
+	}
 	policyStart := time.Now()
 	pErr := runAttestationPolicy(ctx, ts, pm.Gate, sessionH, repoPath, branch, defaultBranch, target.Ref(), pinnedSha, pinnedSha, pm.AttestedSha)
 	mx.observeErr(ctx, "policy", policyStart, pErr)
