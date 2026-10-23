@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -126,9 +127,50 @@ func awaitSyncHookChildGone(t *testing.T, pid int) {
 	deadline := time.Now().Add(10 * time.Second)
 	for !syncHookProcessGone(pid) {
 		if time.Now().After(deadline) {
-			t.Fatalf("hook child %d still alive after cancel", pid)
+			t.Fatalf("hook child %d still alive 10s after cancel; %s", pid, describeSurvivingProcess(pid))
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// describeSurvivingProcess says what a process that outlived its reap is, so a
+// flake tells slow reaping from an escaped child (#397): its state, parent,
+// process group and cgroup as /proc shows them, against the test's own.
+func describeSurvivingProcess(pid int) string {
+	stat, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return fmt.Sprintf("no /proc entry to describe it (%v)", err)
+	}
+	// After the ")" closing comm: state ppid pgrp ...
+	fields := []string{}
+	if i := bytes.LastIndexByte(stat, ')'); i >= 0 {
+		fields = strings.Fields(string(stat[i+1:]))
+	}
+	state, ppid, pgrp := "?", "?", "?"
+	if len(fields) >= 3 {
+		state, ppid, pgrp = fields[0], fields[1], fields[2]
+	}
+	cgroup := func(p string) string {
+		raw, err := os.ReadFile("/proc/" + p + "/cgroup")
+		if err != nil {
+			return "unreadable: " + err.Error()
+		}
+		return strings.TrimSpace(string(raw))
+	}
+	return fmt.Sprintf("state=%s ppid=%s pgrp=%s (test pid=%d pgrp=%d) cgroup=%q (test cgroup=%q)",
+		state, ppid, pgrp, os.Getpid(), syscall.Getpgrp(), cgroup(strconv.Itoa(pid)), cgroup("self"))
+}
+
+// The #397 diagnostic names the fields that tell a slow reap from an escape.
+func TestDescribeSurvivingProcessNamesStateParentGroupAndCgroup(t *testing.T) {
+	got := describeSurvivingProcess(os.Getpid())
+	for _, want := range []string{"state=", "ppid=" + strconv.Itoa(os.Getppid()), "pgrp=" + strconv.Itoa(syscall.Getpgrp()), "cgroup="} {
+		if !strings.Contains(got, want) {
+			t.Errorf("description %q lacks %q", got, want)
+		}
+	}
+	if got := describeSurvivingProcess(1 << 30); !strings.Contains(got, "no /proc entry") {
+		t.Errorf("a missing process: %q", got)
 	}
 }
 
