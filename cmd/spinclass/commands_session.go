@@ -745,7 +745,7 @@ func runResume(_ context.Context, args json.RawMessage) error {
 
 	// Built only when a re-pin is needed, so an ordinary resume never reads the
 	// signers file or the grant store (#407).
-	approve := func(profile, from, to string) (session.ProfileRebind, error) {
+	approve := func(profile, from, to string, diff []string) (session.ProfileRebind, error) {
 		ttl, untrusted, err := sweatfileio.TrustedTransitionTTL(hierarchy, os.Getenv("HOME"), state.RepoPath)
 		if err != nil {
 			return session.ProfileRebind{}, err
@@ -759,7 +759,7 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		if err != nil {
 			return session.ProfileRebind{}, err
 		}
-		return a.Approve(profile, from, to)
+		return a.Approve(profile, from, to, diff)
 	}
 	entrypoint, profileEnv, err := applyRecordedProfile(*state, spawn.ResolveProfile, entrypoint, p.RepinProfile, shellFallback,
 		repinGate{NoAttach: p.NoAttach, Interactive: stdinStdoutAreTerminals(), Approve: approve},

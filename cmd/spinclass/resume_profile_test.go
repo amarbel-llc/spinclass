@@ -158,10 +158,13 @@ func TestPlanRecordedProfileDigestMismatch(t *testing.T) {
 // gateWith stands in for the transition approver: approved returns a rebind
 // for the change it was asked about, otherwise the card act fails.
 func gateWith(noAttach, interactive bool, approved bool, asked *int) repinGate {
-	return repinGate{NoAttach: noAttach, Interactive: interactive, Approve: func(profile, from, to string) (session.ProfileRebind, error) {
+	return repinGate{NoAttach: noAttach, Interactive: interactive, Approve: func(profile, from, to string, diff []string) (session.ProfileRebind, error) {
 		*asked++
 		if profile != "lean" || from != "old" || to != "new" {
 			return session.ProfileRebind{}, errors.New("approver was not given the profile and both digests")
+		}
+		if len(diff) == 0 {
+			return session.ProfileRebind{}, errors.New("approver was given no diff lines for the act text")
 		}
 		if !approved {
 			return session.ProfileRebind{}, errors.New("card act cancelled")
@@ -185,7 +188,7 @@ func TestAuthorizeRepin(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			asked := 0
-			_, err := authorizeRepin("lean", "old", "new", gateWith(c.noAttach, c.interactive, c.approved, &asked))
+			_, err := authorizeRepin("lean", "old", "new", missingDiff, gateWith(c.noAttach, c.interactive, c.approved, &asked))
 			if c.wantErr == "" && err != nil || c.wantErr != "" && (err == nil || !strings.Contains(err.Error(), c.wantErr)) {
 				t.Fatalf("err=%v, want %q", err, c.wantErr)
 			}

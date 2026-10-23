@@ -26,6 +26,9 @@ type profileResumePlan struct {
 	// RepinFrom/RepinTo are set only when --repin-profile accepted a digest
 	// mismatch; the caller persists RepinTo after the attach decision.
 	RepinFrom, RepinTo string
+	// RepinToForm is the new definition's redacted form, for the re-pin's
+	// field diff only (spawn.ResolvedProfile.RedactedForm).
+	RepinToForm []byte
 	// Warning is a non-fatal note for stderr (e.g. no digest recorded).
 	Warning string
 	// Notes are informational lines for stderr (e.g. the profile a shell
@@ -87,7 +90,7 @@ func planRecordedProfile(
 				st.Profile, st.ProfileDigest, rp.Digest,
 			)
 		}
-		plan.RepinFrom, plan.RepinTo = st.ProfileDigest, rp.Digest
+		plan.RepinFrom, plan.RepinTo, plan.RepinToForm = st.ProfileDigest, rp.Digest, rp.RedactedForm
 	}
 
 	// rp is now the definition this resume accepts, so clown is pinned to its
@@ -120,9 +123,10 @@ type repinGate struct {
 	NoAttach bool
 	// Interactive: stdin and stdout are terminals.
 	Interactive bool
-	// Approve obtains the card-signed profile transition for the change and
-	// returns the rebind to record (transitionApprover.Approve, #407).
-	Approve func(profile, from, to string) (session.ProfileRebind, error)
+	// Approve obtains the card-signed profile transition for the change, whose
+	// act text shows diff, and returns the rebind to record
+	// (transitionApprover.Approve, #407).
+	Approve func(profile, from, to string, diff []string) (session.ProfileRebind, error)
 }
 
 // authorizeRepin decides whether an accepted digest mismatch may be recorded.
@@ -130,14 +134,14 @@ type repinGate struct {
 // otherwise silently re-pin a profile whose definition changed. A re-pin
 // therefore needs an attached, interactive terminal and a card-signed profile
 // transition for exactly this change, already stored or signed now.
-func authorizeRepin(profile, from, to string, g repinGate) (session.ProfileRebind, error) {
+func authorizeRepin(profile, from, to string, diff []string, g repinGate) (session.ProfileRebind, error) {
 	if g.NoAttach {
 		return session.ProfileRebind{}, errors.New("--repin-profile cannot be combined with --no-attach: a re-pin needs the operator at a terminal")
 	}
 	if !g.Interactive {
 		return session.ProfileRebind{}, errors.New("--repin-profile needs an interactive terminal (stdin and stdout); refusing to re-pin unattended")
 	}
-	rb, err := g.Approve(profile, from, to)
+	rb, err := g.Approve(profile, from, to, diff)
 	if err != nil {
 		return session.ProfileRebind{}, fmt.Errorf("profile %s re-pin not approved, resume refused: %w", profile, err)
 	}
@@ -169,7 +173,7 @@ func applyRecordedProfile(
 		fmt.Fprintln(stderr, "spinclass: "+note)
 	}
 	if plan.RepinTo != "" {
-		rb, err := authorizeRepin(st.Profile, plan.RepinFrom, plan.RepinTo, gate)
+		rb, err := authorizeRepin(st.Profile, plan.RepinFrom, plan.RepinTo, transitionDiffLines(plan.RepinFrom, plan.RepinToForm), gate)
 		if err != nil {
 			return nil, nil, err
 		}

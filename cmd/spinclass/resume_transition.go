@@ -11,19 +11,57 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"code.linenisgreat.com/clown/pkg/profilelookup"
 	"code.linenisgreat.com/spinclass/internal/grantstore"
 	"code.linenisgreat.com/spinclass/internal/grantverify"
 	"code.linenisgreat.com/spinclass/internal/operatoract"
 	"code.linenisgreat.com/spinclass/internal/profilegrant"
 	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/spawn"
 )
 
-// missingDiff stands in the act text's diff lines until spinclass can show a
-// real field diff (#407 item 2): clown's profilelookup.Diff needs the OLD
-// definition, which nothing records yet (clown#298 will keep redacted
-// canonical forms by digest). The operator is told rather than left to infer
-// it from two bare digests.
+// missingDiff stands in the act text's diff lines when no field diff can be
+// shown: clown stored no redacted form for the old digest (a pin from before
+// clown#298, a form over its size cap, another state dir) or it could not be
+// read. The operator is told rather than left to infer it from two digests.
 var missingDiff = []string{"field diff unavailable: the old definition is not recorded"}
+
+// transitionDiffNote heads a real field diff. The forms are clown's redacted
+// forms, read from a file anyone who can write clown's state dir could forge,
+// and they hold no env values, URL paths or URL credentials, so such changes
+// cannot show (clown#298). The diff is display only and never decides.
+const transitionDiffNote = "diff of recorded forms, unverified; env values, url paths/creds not shown"
+
+// noVisibleChanges is the diff line when the forms show no difference: the
+// digests still differ, so the change is one the forms cannot hold.
+const noVisibleChanges = "no field change is visible in the recorded forms"
+
+// lookupRedactedForm reads the redacted form clown stored with a session pin
+// of a digest, from the caller's $XDG_STATE_HOME. A variable for tests.
+var lookupRedactedForm = profilelookup.RedactedFormByDigest
+
+// transitionDiffLines is the act text's diff for re-pinning from the recorded
+// digest from to a definition whose redacted form is toForm (#407 item 2):
+// the note, then clown's DiffRedacted lines, within MaxTransitionDiffLines.
+// Anything missing or unreadable yields missingDiff.
+func transitionDiffLines(from string, toForm []byte) []string {
+	fromHex, err := spawn.ProfileDigestHexOf(from)
+	if err != nil || len(toForm) == 0 {
+		return missingDiff
+	}
+	oldForm, ok, err := lookupRedactedForm(fromHex)
+	if err != nil || !ok {
+		return missingDiff
+	}
+	lines, _, err := profilelookup.DiffRedacted(oldForm, toForm, profilegrant.MaxTransitionDiffLines-1)
+	if err != nil {
+		return missingDiff
+	}
+	if len(lines) == 0 {
+		lines = []string{noVisibleChanges}
+	}
+	return append([]string{transitionDiffNote}, lines...)
+}
 
 // rebindBy names who redeems a transition: --repin-profile runs only for the
 // human at a terminal (repinGate), so it is the operator.
@@ -49,8 +87,12 @@ type transitionApprover struct {
 	ActOut io.Writer
 }
 
-// Approve returns the rebind to record for the session.
-func (a transitionApprover) Approve(profile, from, to string) (session.ProfileRebind, error) {
+// Approve returns the rebind to record for the session. diff is the act text's
+// field diff (transitionDiffLines); empty means missingDiff.
+func (a transitionApprover) Approve(profile, from, to string, diff []string) (session.ProfileRebind, error) {
+	if len(diff) == 0 {
+		diff = missingDiff
+	}
 	if len(a.Signers) == 0 {
 		return session.ProfileRebind{}, errors.New("no card signers to verify a profile transition against; refusing")
 	}
@@ -79,7 +121,7 @@ func (a transitionApprover) Approve(profile, from, to string) (session.ProfileRe
 	if err != nil {
 		return session.ProfileRebind{}, err
 	}
-	act, err := profilegrant.TransitionActText(tr, digest, missingDiff)
+	act, err := profilegrant.TransitionActText(tr, digest, diff)
 	if err != nil {
 		return session.ProfileRebind{}, err
 	}
@@ -94,7 +136,7 @@ func (a transitionApprover) Approve(profile, from, to string) (session.ProfileRe
 	if err != nil {
 		return session.ProfileRebind{}, err
 	}
-	rec := profilegrant.TransitionRecord{Digest: digest, Text: text, Diff: missingDiff, Sig: sig}
+	rec := profilegrant.TransitionRecord{Digest: digest, Text: text, Diff: diff, Sig: sig}
 	if _, err := profilegrant.VerifyTransition(now, rec, root); err != nil {
 		return session.ProfileRebind{}, fmt.Errorf("the signed profile transition does not verify, not using it: %w", err)
 	}

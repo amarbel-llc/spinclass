@@ -751,11 +751,19 @@ spinclass's own, to be corrected if piggy or the operator disagrees.
     - Redeeming appends a rebind {from, to, transition, by, at} to the
       session's `profile_rebinds` and moves `profile_digest` to `to`. The
       window bounds redemption, not the session.
-    - The signed text shows both digests. clown FDR 0022 decision 4 also wants
-      a field diff, which needs the OLD definition, and nothing records it
-      yet. Until clown keeps redacted canonical forms by digest (clown#298),
-      the text carries one line instead: "field diff unavailable: the old
-      definition is not recorded".
+    - The signed text shows both digests and a field diff (clown FDR 0022
+      decision 4). The old side is the redacted form clown stored with a
+      session pin of the old digest (`profilelookup.RedactedFormByDigest`,
+      clown#298, read from the caller's `$XDG_STATE_HOME`); the new side is the
+      freshly resolved profile's `RedactedForm`; `DiffRedacted` compares them
+      under the act text's line cap. The diff opens with "diff of recorded
+      forms, unverified; env values, url paths/creds not shown": the stored
+      form is display only, forgeable by anyone who can write clown's state
+      dir and never feeds the decision, and env value, URL path and URL
+      credential changes cannot show. Forms showing no difference print "no
+      field change is visible in the recorded forms". With no stored form,
+      or one that does not read, the text keeps the line "field diff
+      unavailable: the old definition is not recorded".
     - Open, pinned by a test: a rebound session's grant still pins the old
       digest, so under enforced `[profile-rights]` its spawns are refused
       (D1 open item "rebound session spawning children").

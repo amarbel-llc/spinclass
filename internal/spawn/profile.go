@@ -68,6 +68,12 @@ type ResolvedProfile struct {
 	// each env key to a digest of its value, never the value itself.
 	EnvKnown bool
 	Env      map[string]string
+	// RedactedForm is clown's redacted form of the definition
+	// (profilelookup.Resolved.RedactedForm, clown#298): no secrets, no env
+	// values, no URL path. It is for display only, the new side of a re-pin's
+	// field diff, and never decides anything. nil when clown could not render
+	// one.
+	RedactedForm []byte
 }
 
 // ProfileResolver looks a profile name up through clown's library. It is an

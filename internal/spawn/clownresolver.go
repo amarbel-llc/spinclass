@@ -105,6 +105,9 @@ func resolvedProfileOf(res *profilelookup.Resolved) (ResolvedProfile, error) {
 		KeptServers: keptServers(res.Selection), Excluded: res.Selection.Excluded, Source: string(res.Source),
 		EnvKnown: true, Env: maps.Clone(res.Env),
 	}
+	if form, err := res.RedactedForm(); err == nil {
+		rp.RedactedForm = form
+	}
 	if res.Base != nil {
 		base, err := resolvedProfileOf(res.Base)
 		if err != nil {
@@ -125,6 +128,22 @@ func keptServers(sel profilelookup.Selection) []string {
 		return nil
 	}
 	return append([]string{}, sel.Kept...)
+}
+
+// ProfileDigestHexOf is the inverse of the recorded digest form: the bare hex
+// clown keys its stored pins by, for a clown-profile-digest-v1 markl-id. It
+// refuses any id that does not render back to exactly itself, so another
+// purpose or format never passes as a profile digest.
+func ProfileDigestHexOf(digest string) (string, error) {
+	var id markl.Id
+	if err := id.Set(digest); err != nil {
+		return "", fmt.Errorf("profile digest %q: %w", digest, err)
+	}
+	hexDigest := hex.EncodeToString(id.GetBytes())
+	if back, err := profileDigestMarklID(hexDigest); err != nil || back != digest {
+		return "", fmt.Errorf("profile digest %q is not a %s sha256 id", digest, ProfileDigestPurpose)
+	}
+	return hexDigest, nil
 }
 
 // profileDigestMarklID renders the hex sha256 clown reports as a markl-id,

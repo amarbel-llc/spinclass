@@ -63,6 +63,24 @@ func TestProfileDigestMarklIDRoundTrips(t *testing.T) {
 	}
 }
 
+// The recorded digest maps back to the hex clown keys its stored pins by
+// (#407 item 2), and nothing but a profile digest does.
+func TestProfileDigestHexOfInvertsTheRecordedDigest(t *testing.T) {
+	want := hex.EncodeToString(fixedDigest())
+	text, err := profileDigestMarklID(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ProfileDigestHexOf(text); err != nil || got != want {
+		t.Errorf("ProfileDigestHexOf(%q) = %q, %v; want %q", text, got, err, want)
+	}
+	for _, bad := range []string{"", want, "clown-profile-digest-v1@sha256-old", strings.Replace(text, "clown-profile-digest-v1", "other-purpose-v1", 1)} {
+		if got, err := ProfileDigestHexOf(bad); err == nil {
+			t.Errorf("ProfileDigestHexOf(%q) = %q, want an error", bad, got)
+		}
+	}
+}
+
 func TestProfileDigestMarklIDRejectsBadInput(t *testing.T) {
 	for _, in := range []string{"zz", "00ff", ""} {
 		if got, err := profileDigestMarklID(in); err == nil {
@@ -99,6 +117,24 @@ func TestClownResolverCarriesClownsHexDigest(t *testing.T) {
 	}
 	if want := hex.EncodeToString(fixedDigest()); rp.DigestHex != want {
 		t.Errorf("DigestHex = %q, want %q", rp.DigestHex, want)
+	}
+}
+
+// The resolver carries clown's redacted form of the definition (#407 item 2,
+// display only): the new side of a re-pin's field diff. It never holds an env
+// value.
+func TestClownResolverCarriesTheRedactedForm(t *testing.T) {
+	res := resolvedWith(profilelookup.Selection{})
+	want, err := res.RedactedForm()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rp, err := clownResolver{lookup: fakeLookup(res, nil)}.Resolve("cheap")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(rp.RedactedForm, want) || bytes.Contains(rp.RedactedForm, []byte("hunter2")) {
+		t.Errorf("RedactedForm = %s, want %s", rp.RedactedForm, want)
 	}
 }
 
