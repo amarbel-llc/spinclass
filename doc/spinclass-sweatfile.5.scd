@@ -525,7 +525,10 @@ does not export *WORKTREE*.
 	background helpers (e.g. a tmux side-pane, a watcher process), or emit
 	a session-start log line. A failing *on-attach* script is logged as a
 	warning but never blocks session start — it must not gate attach.
-	*Merge:* scalar override.
+	Pinned when the session is created, like the session entry: a later
+	*sc resume* runs the command recorded then, not whatever the sweatfile
+	says now (a session created before the pin uses the layers it is
+	handed). *Merge:* scalar override.
 
 *on-detach*
 	Script run when the session detaches from the worktree, fired by *sc
@@ -534,7 +537,8 @@ does not export *WORKTREE*.
 	*[session].liveness-probe* result). Typical use: tear down on-attach
 	side processes, post a session-end notification, or rotate logs. A
 	failing *on-detach* script is logged as a warning; spinclass continues
-	with cleanup either way. *Merge:* scalar override.
+	with cleanup either way. Pinned at creation, like *on-attach*.
+	*Merge:* scalar override.
 
 *disallow-main-worktree*
 	Boolean. When true, *sc resume* refuses to attach to the main worktree.

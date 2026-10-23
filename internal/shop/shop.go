@@ -318,16 +318,27 @@ func logSweatfileResult(result sweatfile.Hierarchy) {
 	)
 }
 
-// PinEntry resolves the [session-entry] start, resume and env of sf (the merged
-// global, ancestor and main-checkout layers) into the record stored on a new
-// session's state, so a later `sc resume` replays it without reading any
-// sweatfile again.
+// PinEntry resolves the [session-entry] start, resume and env, and the
+// on-attach and on-detach hooks, of sf (the merged global, ancestor and
+// main-checkout layers) into the record stored on a new session's state, so a
+// later `sc resume` replays it without reading any sweatfile again.
 func PinEntry(sf sweatfile.Sweatfile) *session.PinnedEntry {
 	return &session.PinnedEntry{
-		Start:  sf.SessionStart(),
-		Resume: sf.SessionResume(),
-		Env:    sf.SessionEnv(),
+		Start:    sf.SessionStart(),
+		Resume:   sf.SessionResume(),
+		Env:      sf.SessionEnv(),
+		OnAttach: sf.OnAttachHookCommand(),
+		OnDetach: sf.OnDetachHookCommand(),
 	}
+}
+
+// lifecycleHooks is the sweatfile the on-attach and on-detach hooks run from:
+// the pinned commands for a pinned session, sf itself for a legacy one.
+func lifecycleHooks(sf sweatfile.Sweatfile, entry *session.PinnedEntry) sweatfile.Sweatfile {
+	if entry == nil {
+		return sf
+	}
+	return sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{OnAttach: entry.OnAttach, OnDetach: entry.OnDetach}}
 }
 
 func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sweatfile.Sweatfile, format string, mergeOnClose bool, noAttach bool, verbose bool, allowStaleBase bool, allowNoCredential bool) error {
@@ -367,6 +378,9 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 		Description: "attach " + rp.Branch,
 		Ok:          true,
 	}
+
+	// hooks is where on-attach and on-detach come from (lifecycleHooks).
+	var hooks sweatfile.Sweatfile
 
 	// Write session state. With --no-attach no entrypoint is exec'd, so the
 	// session is recorded as inactive (PID 0) rather than active — but it IS
@@ -465,8 +479,9 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 		// fatal — a failing hook should never block session start.
 		// Skipped for --no-attach: nothing is being attached, so the
 		// "on attach" lifecycle moment never happens.
+		hooks = lifecycleHooks(sf, st.Entry)
 		if !noAttach {
-			if hookErr := hookrun.OnAttach(sf, rp.AbsPath, w); hookErr != nil {
+			if hookErr := hookrun.OnAttach(hooks, rp.AbsPath, w); hookErr != nil {
 				log.Warn("on-attach hook failed", "err", hookErr)
 			}
 		}
@@ -516,7 +531,7 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 	}); ok {
 		sessionEnv = se.SessionEnviron(rp.AbsPath, rp.SessionKey)
 	}
-	if hookErr := hookrun.OnDetach(sf, rp.AbsPath, sessionEnv, w); hookErr != nil {
+	if hookErr := hookrun.OnDetach(hooks, rp.AbsPath, sessionEnv, w); hookErr != nil {
 		log.Warn("on-detach hook failed", "err", hookErr)
 	}
 

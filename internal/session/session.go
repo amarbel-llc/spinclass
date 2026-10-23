@@ -50,18 +50,21 @@ type CredentialRemote struct {
 	Resolved       bool     `json:"resolved,omitempty"` // produced by [auth].url-resolver
 }
 
-// PinnedEntry is State.Entry: the [session-entry] start, resume and env
-// resolved from the operator-controlled sweatfile layers (global, ancestor
-// directories, the main checkout) when the session was CREATED, and replayed by
-// `sc resume` instead of re-reading any sweatfile. A worktree is writable by the
-// worker it hosts, so nothing resolved later from a path the worker can write
-// may decide what the frontend execs. Nil on a session created before the pin
-// (legacy). Env values are persisted as resolved, like the process environment
-// the session itself receives.
+// PinnedEntry is State.Entry: the [session-entry] start, resume and env, and the
+// [hooks].on-attach and on-detach commands, resolved from the
+// operator-controlled sweatfile layers (global, ancestor directories, the main
+// checkout) when the session was CREATED, and replayed by `sc resume` instead of
+// re-reading any sweatfile. A worktree is writable by the worker it hosts, so
+// nothing resolved later from a path the worker can write may decide what the
+// frontend execs. Nil on a session created before the pin (legacy). Env values
+// are persisted as resolved, like the process environment the session itself
+// receives.
 type PinnedEntry struct {
-	Start  []string          `json:"start"`
-	Resume []string          `json:"resume,omitempty"`
-	Env    map[string]string `json:"env,omitempty"`
+	Start    []string          `json:"start"`
+	Resume   []string          `json:"resume,omitempty"`
+	Env      map[string]string `json:"env,omitempty"`
+	OnAttach *string           `json:"on_attach,omitempty"`
+	OnDetach *string           `json:"on_detach,omitempty"`
 }
 
 // ProfileNarrowingLink is State.ProfileNarrowing: the record that a user-registry
