@@ -204,6 +204,14 @@ func RunResolved(w io.Writer, repoPath, wtPath, branch string, force bool, nixGC
 // sessions under one document instead of concatenating N documents, which is
 // not valid TAP. tw may be nil (non-tap formats), as before.
 func runResolvedInto(tw *tap.Writer, repoPath, wtPath, branch string, force bool, nixGCOverride *bool) error {
+	// A worktree git no longer has (#409: removed under a live session) has no
+	// work left to protect, and every git command run in its leftover directory
+	// would resolve to the MAIN checkout that contains .worktrees/. So skip the
+	// work checks and judge the leftovers instead.
+	if vanished := !git.IsWorktree(wtPath); vanished {
+		return closeVanished(tw, repoPath, wtPath, branch, force)
+	}
+
 	defaultBranch, dbErr := git.DefaultBranch(repoPath)
 	unintegrated := dbErr == nil && git.CommitsUnintegrated(wtPath, defaultBranch, branch) > 0
 	dirty := git.StatusPorcelain(wtPath) != ""
@@ -332,6 +340,91 @@ func runResolvedInto(tw *tap.Writer, repoPath, wtPath, branch string, force bool
 		runReap(tw, *gcPlan, branch)
 	}
 
+	return nil
+}
+
+// vanishedLeftoversOK are the entries a vanished worktree's directory may keep
+// and still be removed without --force: the session's own scratch space, which
+// a still-running agent recreates (#409), and spinclass's state directory.
+var vanishedLeftoversOK = map[string]bool{".tmp": true, ".spinclass": true}
+
+// closeVanished closes a session whose worktree git no longer has: stop its
+// agent, revoke its credential and grant binding, tombstone it (DeletedSHA is
+// the surviving branch's tip, else empty and `sc resurrect` refuses cleanly),
+// remove the leftover directory, prune git's record and drop the branch if it
+// survived. Anything left in the directory besides vanishedLeftoversOK, or a
+// surviving branch with unintegrated commits, is refused unless forced.
+func closeVanished(tw *tap.Writer, repoPath, wtPath, branch string, force bool) error {
+	// Never delete anything that is not a spinclass worktree slot: the path must
+	// sit strictly under <repo>/.worktrees/ and hold no .git entry of any kind
+	// (a main checkout has a .git directory, a live worktree a .git file).
+	slots := filepath.Join(filepath.Clean(repoPath), ".worktrees") + string(filepath.Separator)
+	if !strings.HasPrefix(filepath.Clean(wtPath), slots) {
+		return fmt.Errorf("%s is not a git worktree and not under %s; refusing to close it as a vanished worktree", wtPath, slots)
+	}
+	if _, err := os.Lstat(filepath.Join(wtPath, ".git")); err == nil {
+		return fmt.Errorf("%s has a .git entry but is not a linked worktree; refusing to delete it", wtPath)
+	}
+	if st, err := session.Read(repoPath, branch); err != nil || st.IsTombstone() {
+		return fmt.Errorf("%s is not a git worktree and %s has no live session to close (already closed, or never recorded)", wtPath, branch)
+	}
+	entries, err := os.ReadDir(wtPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("reading the leftover directory of %s: %w", branch, err)
+	}
+	var unexpected []string
+	for _, e := range entries {
+		if !vanishedLeftoversOK[e.Name()] {
+			unexpected = append(unexpected, e.Name())
+		}
+	}
+	if len(unexpected) > 0 && !force {
+		return fmt.Errorf("the worktree of %s is already gone from git, but %s still holds %s; inspect it, then use --force to close and delete it",
+			branch, wtPath, strings.Join(unexpected, ", "))
+	}
+	// A surviving branch can still carry work the worktree no longer shows.
+	tip := ""
+	if git.BranchExists(repoPath, branch) {
+		tip, _ = git.Run(repoPath, "rev-parse", "--verify", "-q", "refs/heads/"+branch)
+		defaultBranch, dbErr := git.DefaultBranch(repoPath)
+		if !force && (dbErr != nil || git.CommitsUnintegrated(repoPath, defaultBranch, branch) > 0) {
+			return fmt.Errorf("the worktree of %s is already gone from git, but its branch still has commits not on the default branch; merge them, or use --force to close and delete it", branch)
+		}
+	}
+
+	signalled, note := requestClose(repoPath, branch)
+	if note != "" && tw != nil {
+		tw.Comment("close %s: %s", branch, note)
+	}
+	executor.WaitForExit(signalled, 2*time.Second)
+	if err := stopConfinedUnit(tw, wtPath, branch, force); err != nil {
+		return err
+	}
+	revokeCredential(tw, repoPath, wtPath, branch, activeKey(repoPath, branch))
+	auth.RemoveCredential(wtPath)
+	revokeProfileBinding(tw, branch, activeKey(repoPath, branch))
+
+	if tombErr := session.Tombstone(repoPath, branch, tip); tombErr != nil {
+		_ = session.Remove(repoPath, branch)
+	}
+	if err := os.RemoveAll(wtPath); err != nil {
+		if tw != nil {
+			tw.NotOk("remove leftover directory "+branch, map[string]string{"error": err.Error()})
+		}
+		return fmt.Errorf("removing the leftover directory of %s: %w", branch, err)
+	}
+	_ = git.WorktreePrune(repoPath)
+	if git.BranchExists(repoPath, branch) {
+		if out, err := git.BranchForceDelete(repoPath, branch); err != nil {
+			if tw != nil {
+				tw.NotOk("delete branch "+branch, map[string]string{"error": err.Error(), "output": out})
+			}
+			return fmt.Errorf("deleting branch %s: %w", branch, err)
+		}
+	}
+	if tw != nil {
+		tw.Ok("close " + branch + " (worktree already removed)")
+	}
 	return nil
 }
 
