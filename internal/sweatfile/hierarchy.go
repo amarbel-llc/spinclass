@@ -73,9 +73,14 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 	}
 
 	// [hooks]
+	// Copy the table before applying the override, as for [auth], so the
+	// receiver's [hooks] is never mutated through the shared pointer (#351).
 	if other.Hooks != nil {
 		if merged.Hooks == nil {
 			merged.Hooks = &Hooks{}
+		} else {
+			cp := *merged.Hooks
+			merged.Hooks = &cp
 		}
 		if other.Hooks.Create != nil {
 			merged.Hooks.Create = other.Hooks.Create
