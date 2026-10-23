@@ -40,7 +40,15 @@ var resolveStoreSession = func(principal string) (store.Session, error) {
 	if st.Kind == session.KindImplicit || st.WorktreePath == "" || st.Branch == "" {
 		return store.Session{}, fmt.Errorf("session %s is not a worktree session", key)
 	}
-	return store.Session{Dir: st.WorktreePath, Branch: st.Branch}, nil
+	return ScopedStoreSession(st.WorktreePath, st.Branch, principal), nil
+}
+
+// ScopedStoreSession is the session a permission reading classifies against:
+// the worktree and branch, plus the cross-session scoping (store.Session
+// SessionAt and Held), so a call aimed at another session's worktree asks
+// before any git runs there.
+func ScopedStoreSession(dir, branch, principal string) store.Session {
+	return store.Session{Dir: dir, Branch: branch, SessionAt: session.KeyAtWorktree, Held: session.HeldKeys(principal)}
 }
 
 // StoreVerdict is the PreToolUse reading of a grit store tool call (FDR 0036

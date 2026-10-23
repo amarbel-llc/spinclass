@@ -10,6 +10,7 @@ import (
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/confinement"
+	"code.linenisgreat.com/spinclass/internal/perms"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/store"
 )
@@ -22,7 +23,8 @@ var (
 	// the frontend principal mapping, as the PreToolUse hook does. An error says
 	// why none could be resolved.
 	gritPermsSession = func() (store.Session, error) {
-		key, err := confinement.SessionKeyOfPrincipal(os.Getenv("CLOWN_SESSION_ID"))
+		principal := os.Getenv("CLOWN_SESSION_ID")
+		key, err := confinement.SessionKeyOfPrincipal(principal)
 		if err != nil {
 			return store.Session{}, err
 		}
@@ -33,7 +35,7 @@ var (
 		if st.Kind == session.KindImplicit || st.WorktreePath == "" || st.Branch == "" {
 			return store.Session{}, fmt.Errorf("session %s is not a worktree session", key)
 		}
-		return store.Session{Dir: st.WorktreePath, Branch: st.Branch}, nil
+		return perms.ScopedStoreSession(st.WorktreePath, st.Branch, principal), nil
 	}
 )
 

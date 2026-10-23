@@ -167,7 +167,9 @@ caller holds an accepted handle on that session (FDR 0032). The path is
 resolved from the filesystem alone (symlinks, then the *.git* pointer's layout)
 before any git runs, and an unresolvable path or a pointer of unknown layout is
 refused. The refusal names the target session and the handles held. Plain
-repositories and main checkouts are unaffected. *sc grit* is exempt.
+repositories and main checkouts are unaffected. *sc grit* is exempt. The
+PreToolUse hook and *sc grit-perms* apply the same check before classifying, so
+such a call asks rather than allows, and no git runs in that worktree to decide.
 
 # THE AGENTLESS REMOTE LANE
 

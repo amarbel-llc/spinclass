@@ -164,6 +164,21 @@ func TestStoreVerdictPassesSessionAndOpToBackend(t *testing.T) {
 	}
 }
 
+// The hook's session carries the cross-session scoping, so Classify asks for a
+// call aimed at another session's worktree before any git runs there.
+func TestScopedStoreSessionCarriesCrossSessionScoping(t *testing.T) {
+	s := ScopedStoreSession("/w", "b", "")
+	if s.Dir != "/w" || s.Branch != "b" {
+		t.Errorf("session = %+v", s)
+	}
+	if s.SessionAt == nil {
+		t.Error("SessionAt is nil: Classify would not scope calls aimed at another session's worktree")
+	}
+	if s.Held != nil {
+		t.Errorf("an empty principal holds no handles, got %v", s.Held)
+	}
+}
+
 func TestStoreVerdictToolsWithoutSubcommand(t *testing.T) {
 	recorder := &recordingBackend{verdict: store.Allow}
 	stubStore(t, recorder, &store.Session{Dir: "/w", Branch: "b"})

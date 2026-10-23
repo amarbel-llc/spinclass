@@ -283,38 +283,9 @@ func resolveGritCaller(cwd string) store.Session {
 		s.NoSession = true
 	}
 	s.Identity = storeIdentityFor(s.Dir)
-	s.SessionAt = sessionKeyAtWorktree
-	s.Held = heldSessionKeys(principal)
+	s.SessionAt = session.KeyAtWorktree
+	s.Held = session.HeldKeys(principal)
 	return s
-}
-
-// sessionKeyAtWorktree is store.Session.SessionAt: the key of the live,
-// non-implicit session whose worktree root is root, from frontend records.
-func sessionKeyAtWorktree(root string) (string, bool) {
-	st, err := session.FindByWorktreePath(root)
-	if err != nil || st.IsTombstone() || st.Kind == session.KindImplicit || st.WorktreePath == "" {
-		return "", false
-	}
-	return st.Key(), true
-}
-
-// heldSessionKeys is store.Session.Held: the sessions principal holds an
-// accepted handle on (FDR 0032). An empty principal holds none.
-func heldSessionKeys(principal string) []string {
-	if principal == "" {
-		return nil
-	}
-	all, err := session.ListAll(nil)
-	if err != nil {
-		return nil
-	}
-	var keys []string
-	for _, st := range all {
-		if st.IsHolder(principal) {
-			keys = append(keys, st.Key())
-		}
-	}
-	return keys
 }
 
 // recognisedSessionWorktree reports the worktree root and session branch when

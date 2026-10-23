@@ -104,6 +104,33 @@ func TestGritRefusesAnUnresolvableRepoPath(t *testing.T) {
 	}
 }
 
+// The PreToolUse reading applies the same scoping before any git runs: a call
+// aimed at another session's worktree asks unless the caller holds a handle.
+func TestClassifyAsksForAnotherSessionsWorktreeWithoutAHandle(t *testing.T) {
+	_, w1, w2, sentinel, sessionAt := twoSessionWorktrees(t)
+	for _, tc := range []struct {
+		tool, sub string
+		args      map[string]any
+	}{
+		{"stage", "status", map[string]any{"repo_path": w1}},
+		{"remote", "fetch", map[string]any{"repo_path": w1}},
+		{"branch", "create", map[string]any{"repo_path": w1, "name": "w2--x"}},
+	} {
+		if got := New().Classify(callerIn(w2, sessionAt), op(t, tc.tool, tc.sub, tc.args)); got != store.Ask {
+			t.Errorf("Classify(%s %s) on another session's worktree = %v, want ask", tc.tool, tc.sub, got)
+		}
+	}
+	if _, err := os.Stat(sentinel); err == nil {
+		t.Error("Classify ran git in W1 on behalf of S2 (the planted commondir's hook fired)")
+	}
+	if got := New().Classify(callerIn(w2, sessionAt, "repo/w1"), op(t, "stage", "status", map[string]any{"repo_path": w1})); got != store.Allow {
+		t.Errorf("a handle holder's read = %v, want allow", got)
+	}
+	if got := New().Classify(callerIn(w2, sessionAt), op(t, "stage", "status", map[string]any{"repo_path": w2})); got != store.Allow {
+		t.Errorf("a read of the caller's own worktree = %v, want allow", got)
+	}
+}
+
 // A symlink pointing into another session's worktree is resolved first.
 func TestGritRefusesASymlinkIntoAnotherSessionsWorktree(t *testing.T) {
 	_, w1, w2, sentinel, sessionAt := twoSessionWorktrees(t)

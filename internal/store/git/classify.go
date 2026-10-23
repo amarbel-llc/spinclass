@@ -85,10 +85,21 @@ func sameDir(a, b string) bool {
 // Classify is the permission reading of an invocation (FDR 0036 section 2):
 // read verbs allow, write verbs allow iff every target is session-owned,
 // floor verbs and anything force-flagged ask. It fails closed on any argument
-// it cannot interpret and performs no side effect.
+// it cannot interpret and performs no side effect. A call aimed at another
+// session's worktree without a handle on it asks before any git runs there.
 func (b Backend) Classify(s store.Session, op store.Op) store.Verdict {
 	a, ok := decodeClassifyArgs(op.Args)
 	if !ok || a.flag("force") || !a.optionFree() {
+		return store.Ask
+	}
+	dir, ok := a.str("repo_path")
+	if !ok {
+		return store.Ask
+	}
+	if dir == "" || op.Tool == "clone" {
+		dir = s.Dir
+	}
+	if dir != "" && refuseOtherSessionWorktree(s, op, dir) != nil {
 		return store.Ask
 	}
 	switch store.ClassOf(op.Tool, op.Subcommand) {
