@@ -26,10 +26,12 @@ const (
 	maxNameLen = 200
 )
 
-// Store is a directory of grant records and a grantee index.
+// Store is a directory of grant records and a grantee index, plus the
+// profile transition approvals (spinclass#407) in a transitions subdirectory.
 type Store struct {
-	records string
-	index   string
+	records     string
+	index       string
+	transitions string
 }
 
 // TrustedDir is the grant store enforcement reads: under the passwd home's
@@ -54,8 +56,8 @@ func DefaultDir() (string, error) {
 
 // Open creates dir (and its index subdirectory) if needed and returns a Store.
 func Open(dir string) (*Store, error) {
-	s := &Store{records: dir, index: filepath.Join(dir, "index")}
-	for _, d := range []string{s.records, s.index} {
+	s := &Store{records: dir, index: filepath.Join(dir, "index"), transitions: filepath.Join(dir, "transitions")}
+	for _, d := range []string{s.records, s.index, s.transitions} {
 		// A symlinked store directory would redirect every record somewhere
 		// the operator never looked.
 		if info, err := os.Lstat(d); err == nil && info.Mode()&os.ModeSymlink != 0 {
@@ -269,6 +271,86 @@ func (s *Store) Unbind(grantee string) error {
 		return fmt.Errorf("grantstore: %w", err)
 	}
 	return nil
+}
+
+// PutTransition stores a profile transition approval under its digest. Like
+// Put it is no-clobber: identical content is idempotent and any other record
+// under an existing digest is refused. Only internal consistency is checked;
+// the signature and redemption window are checked by
+// profilegrant.VerifyTransition on use.
+func (s *Store) PutTransition(rec profilegrant.TransitionRecord) error {
+	if err := checkDigestName(rec.Digest); err != nil {
+		return err
+	}
+	if _, err := profilegrant.CheckTransitionRecord(rec); err != nil {
+		return fmt.Errorf("grantstore: put transition %s: %w", rec.Digest, err)
+	}
+	data, err := json.Marshal(rec)
+	if err != nil {
+		return err
+	}
+	tmp, err := writeTemp(s.transitions, data)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp)
+	err = os.Link(tmp, filepath.Join(s.transitions, rec.Digest))
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, fs.ErrExist) {
+		return fmt.Errorf("grantstore: %w", err)
+	}
+	if existing, ok := s.getTransition(rec.Digest); ok {
+		if existingData, merr := json.Marshal(existing); merr == nil && string(existingData) == string(data) {
+			return nil
+		}
+	}
+	return fmt.Errorf("grantstore: put transition %s: a different record already exists under this digest", rec.Digest)
+}
+
+// FindTransitions returns the stored approvals for exactly this change, each
+// re-checked for consistency (a tampered file is skipped). The caller verifies
+// signature and redemption window.
+func (s *Store) FindTransitions(profile, from, to string) []profilegrant.TransitionRecord {
+	entries, err := os.ReadDir(s.transitions)
+	if err != nil {
+		return nil
+	}
+	var out []profilegrant.TransitionRecord
+	for _, e := range entries {
+		if !e.Type().IsRegular() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		rec, ok := s.getTransition(e.Name())
+		if !ok {
+			continue
+		}
+		if tr, err := profilegrant.CheckTransitionRecord(rec); err == nil && tr.Covers(profile, from, to) {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
+func (s *Store) getTransition(digest string) (profilegrant.TransitionRecord, bool) {
+	if err := checkDigestName(digest); err != nil {
+		return profilegrant.TransitionRecord{}, false
+	}
+	data, err := os.ReadFile(filepath.Join(s.transitions, digest))
+	if err != nil {
+		return profilegrant.TransitionRecord{}, false
+	}
+	var rec profilegrant.TransitionRecord
+	if err := json.Unmarshal(data, &rec); err != nil || rec.Digest != digest {
+		slog.Debug("grantstore: unreadable transition record", "digest", digest, "err", err)
+		return profilegrant.TransitionRecord{}, false
+	}
+	if _, err := profilegrant.CheckTransitionRecord(rec); err != nil {
+		slog.Debug("grantstore: transition record failed verification", "digest", digest, "err", err)
+		return profilegrant.TransitionRecord{}, false
+	}
+	return rec, true
 }
 
 // writeTemp writes data to a fresh mode-0600 temp file in dir and returns its
