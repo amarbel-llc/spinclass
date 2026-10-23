@@ -226,11 +226,11 @@ function hatch_in_a_session_asks_for_an_unowned_branch_and_honours_the_answer { 
   assert_failure
   [[ $ERR == *"verdict: ask (not plainly allowed here)"* ]] || fail "no ask prompt: $ERR"
   [[ $ERR == *"run it? type y to confirm: "* ]] || fail "no confirm prompt: $ERR"
-  [[ $ERR == *"declined; nothing ran"* ]] || fail "not declined: $ERR"
+  [[ $ERR == *"declined by the operator; nothing ran"* ]] || fail "not declined: $ERR"
   # A non-y answer: declined, nothing ran.
   pty_sc "ask: typed n" $'n\n' grit branch "$args"
   assert_failure
-  [[ $ERR == *"declined; nothing ran"* ]] || fail "n not declined: $ERR"
+  [[ $ERR == *"declined by the operator; nothing ran"* ]] || fail "n not declined: $ERR"
   run git -C "$WT" branch --list foreign-one
   assert_output ""
   # Typed y: runs.
@@ -325,7 +325,7 @@ function hatch_default_branch_fast_forward_push_is_an_ask_answered_with_y { # @t
   args="{\"subcommand\":\"push\",\"remote\":\"origin\",\"branch\":\"$B\",\"remote_branch\":\"main\"}"
   pty_sc "default-branch ff push: typed n" $'n\n' grit remote "$args"
   assert_failure
-  [[ $ERR == *"declined; nothing ran"* ]] || fail "n not declined: $ERR"
+  [[ $ERR == *"declined by the operator; nothing ran"* ]] || fail "n not declined: $ERR"
   assert_equal "$(bare_tip main)" "$before"
   pty_sc "default-branch ff push: typed y" $'y\n' grit remote "$args"
   assert_success

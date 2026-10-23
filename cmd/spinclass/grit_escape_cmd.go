@@ -142,16 +142,21 @@ func runGritEscape(ctx context.Context, raw json.RawMessage) error {
 		return runErr
 	}
 
+	// Refusals and declines are returned, not printed: the command runner
+	// prints a returned error, and printing it here too doubled it (#396).
 	if refusal := refuseEscapeDefaultBranchPush(s.Dir, f.Tool, subcommand, args); refusal != nil {
-		fmt.Fprintln(gritEscapeStderr(), refusal.Error())
 		return finish(refusal)
 	}
 
 	if rec.ConfirmRequired {
 		fmt.Fprintf(gritEscapeStderr(), "grit %s %s %s\nverdict: ask (not plainly allowed here)\nrun it? type y to confirm: ", f.Tool, subcommand, rec.Args)
 		line, _ := bufio.NewReader(gritEscapeConfirmIn()).ReadString('\n')
+		if !strings.HasSuffix(line, "\n") {
+			// An answer ended by EOF brings no newline of its own; end the prompt
+			// line so what follows starts on a fresh one.
+			fmt.Fprintln(gritEscapeStderr())
+		}
 		if strings.ToLower(strings.TrimSpace(line)) != "y" {
-			fmt.Fprintln(gritEscapeStderr(), "declined; nothing ran")
 			return finish(errors.New("declined by the operator; nothing ran"))
 		}
 		rec.Confirmed = true

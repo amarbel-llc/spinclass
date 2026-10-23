@@ -321,6 +321,41 @@ func TestGritEscapeAllowsFastForwardPushOfDefaultBranchAfterTypedY(t *testing.T)
 	}
 }
 
+// #396: the command runner prints a returned error, so the hatch must not also
+// print it: a refusal and a decline each appear exactly once, and the prompt
+// line is ended even when the answer brings no newline (EOF).
+func TestGritEscapePrintsARefusalOnce(t *testing.T) {
+	escapeRemoteRepo(t)
+	h := forceEscapeTerminal(t, "y\n")
+	err := runEscape("remote", `{"subcommand":"push","branch":"main","delete":true}`, true)
+	if err == nil {
+		t.Fatal("a delete of the default branch ran")
+	}
+	if strings.Contains(h.stderr.String(), "refusing remote") {
+		t.Errorf("the hatch printed the refusal itself as well as returning it:\n%s", h.stderr.String())
+	}
+}
+
+func TestGritEscapeReportsADeclineOnceAndEndsThePromptLine(t *testing.T) {
+	repo := isolatedGitRepo(t)
+	t.Chdir(repo)
+	if err := os.WriteFile(filepath.Join(repo, "new.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := forceEscapeTerminal(t, "n") // no newline: EOF after the answer
+	err := runEscape("stage", `{"subcommand":"add","paths":["new.txt"]}`, false)
+	if err == nil || !strings.Contains(err.Error(), "declined") {
+		t.Fatalf("err = %v, want the decline", err)
+	}
+	stderr := h.stderr.String()
+	if strings.Contains(stderr, "declined") {
+		t.Errorf("the decline is printed by the hatch as well as returned:\n%q", stderr)
+	}
+	if !strings.HasSuffix(stderr, "type y to confirm: \n") {
+		t.Errorf("the prompt line is not ended when the answer has no newline:\n%q", stderr)
+	}
+}
+
 func TestGritEscapeIsNotAnMCPTool(t *testing.T) {
 	app := buildApp()
 	cmd, ok := app.GetCommand("grit")
