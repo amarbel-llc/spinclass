@@ -1,5 +1,7 @@
 package sweatfile
 
+import "slices"
+
 // LoadSource records one sweatfile in a resolved Hierarchy: where it was looked
 // for, whether it existed, its parsed contents, and (when deduplicated away) the
 // reason it was skipped. The hierarchy loaders live in internal/sweatfileio; the
@@ -21,17 +23,21 @@ type Hierarchy struct {
 func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 	merged := sf
 
-	// [claude]
+	// [claude]: copied, and appended into a fresh array, so neither the
+	// receiver's table nor its slice's spare capacity is written (#351).
 	if other.Claude != nil {
 		if merged.Claude == nil {
 			merged.Claude = &Claude{}
+		} else {
+			cp := *merged.Claude
+			merged.Claude = &cp
 		}
 		// allow: nil=inherit, empty=clear, non-empty=append
 		if other.Claude.Allow != nil {
 			if len(other.Claude.Allow) == 0 {
 				merged.Claude.Allow = []string{}
 			} else {
-				merged.Claude.Allow = append(merged.Claude.Allow, other.Claude.Allow...)
+				merged.Claude.Allow = slices.Concat(merged.Claude.Allow, other.Claude.Allow)
 			}
 		}
 	}

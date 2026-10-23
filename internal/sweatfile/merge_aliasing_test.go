@@ -1,6 +1,9 @@
 package sweatfile
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // #351: merging one base with two different overrides must leave the base's
 // [hooks] untouched and must not carry the first override into the second
@@ -23,5 +26,24 @@ func TestMergeWithDoesNotMutateTheBaseHooks(t *testing.T) {
 	}
 	if second.Hooks.PreMerge == nil || *second.Hooks.PreMerge != "just" {
 		t.Errorf("second merge lost the base pre-merge: %+v", *second.Hooks)
+	}
+}
+
+// withSpare returns items in a slice with spare capacity, so an append that
+// reuses the backing array, rather than a struct shared through a pointer,
+// shows up as one merge overwriting another's element (#351).
+func withSpare(items ...string) []string {
+	return append(make([]string, 0, len(items)+4), items...)
+}
+
+// The other sections' appended string arrays and per-key maps must not reach
+// back into the base or into each other's results either. One section per
+// test (#351).
+func TestMergeWithDoesNotMutateTheBaseClaude(t *testing.T) {
+	base := Sweatfile{Claude: &Claude{Allow: withSpare("a")}}
+	first := base.MergeWith(Sweatfile{Claude: &Claude{Allow: []string{"b"}}})
+	second := base.MergeWith(Sweatfile{Claude: &Claude{Allow: []string{"c"}}})
+	if !slices.Equal(base.Claude.Allow, []string{"a"}) || !slices.Equal(first.Claude.Allow, []string{"a", "b"}) || !slices.Equal(second.Claude.Allow, []string{"a", "c"}) {
+		t.Errorf("allow: base %v, first %v, second %v", base.Claude.Allow, first.Claude.Allow, second.Claude.Allow)
 	}
 }
