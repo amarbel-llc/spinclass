@@ -322,6 +322,13 @@ func TestRemoteResumeArgv(t *testing.T) {
 		{Name: "lab", Attach: []string{"mosh", "{ssh}", "--", "spinclass", "resume", "{id}"}},
 	}
 
+	// A configured remote whose destination is option-like is matched and
+	// refused, never exec'd.
+	if argv, handled, err := remoteAttachPlan("evil:crisp-catalpa", false,
+		[]sweatfile.Remote{{Name: "evil", SSH: "-oProxyCommand=touch SENTINEL"}}); !handled || err == nil || argv != nil {
+		t.Errorf("option-like destination: argv=%v handled=%v err=%v, want handled with a refusal and no argv", argv, handled, err)
+	}
+
 	cases := []struct {
 		name    string
 		target  string
@@ -333,7 +340,7 @@ func TestRemoteResumeArgv(t *testing.T) {
 			name:    "match with default template uses Dest()",
 			target:  "devbox:crisp-catalpa",
 			remotes: remotes,
-			want:    []string{"ssh", "-t", "sasha@devbox.lan", "spinclass", "resume", "crisp-catalpa"},
+			want:    []string{"ssh", "-t", "--", "sasha@devbox.lan", "spinclass", "resume", "crisp-catalpa"},
 			wantOK:  true,
 		},
 		{
@@ -364,7 +371,10 @@ func TestRemoteResumeArgv(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := remoteResumeArgv(tc.target, tc.remotes)
+			got, ok, err := remoteResumeArgv(tc.target, tc.remotes)
+			if err != nil {
+				t.Fatalf("remoteResumeArgv: %v", err)
+			}
 			if ok != tc.wantOK {
 				t.Fatalf("ok: got %v, want %v (argv %v)", ok, tc.wantOK, got)
 			}

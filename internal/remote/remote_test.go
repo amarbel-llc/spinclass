@@ -72,13 +72,13 @@ func TestAttachArgv(t *testing.T) {
 			name: "default template uses Dest()=Name",
 			r:    sweatfile.Remote{Name: "devbox"},
 			id:   "crisp-catalpa",
-			want: []string{"ssh", "-t", "devbox", "spinclass", "resume", "crisp-catalpa"},
+			want: []string{"ssh", "-t", "--", "devbox", "spinclass", "resume", "crisp-catalpa"},
 		},
 		{
 			name: "default template uses explicit ssh destination",
 			r:    sweatfile.Remote{Name: "devbox", SSH: "sasha@devbox.lan"},
 			id:   "crisp-catalpa",
-			want: []string{"ssh", "-t", "sasha@devbox.lan", "spinclass", "resume", "crisp-catalpa"},
+			want: []string{"ssh", "-t", "--", "sasha@devbox.lan", "spinclass", "resume", "crisp-catalpa"},
 		},
 		{
 			name: "explicit template substitutes every element",
@@ -102,7 +102,10 @@ func TestAttachArgv(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := AttachArgv(tt.r, tt.id)
+			got, err := AttachArgv(tt.r, tt.id)
+			if err != nil {
+				t.Fatalf("AttachArgv(%+v, %q): %v", tt.r, tt.id, err)
+			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("AttachArgv(%+v, %q) = %v, want %v", tt.r, tt.id, got, tt.want)
 			}

@@ -407,6 +407,14 @@ func CheckRemotes(sf sweatfile.Sweatfile) []Issue {
 			})
 		}
 		seen[r.Name] = true
+		if dest := r.Dest(); !r.Remove && strings.HasPrefix(dest, "-") {
+			issues = append(issues, Issue{
+				Message:  fmt.Sprintf("remote %q: ssh destination %q begins with \"-\", which ssh would read as an option (spinclass refuses to run it)", r.Name, dest),
+				Severity: SeverityError,
+				Field:    "remotes.ssh",
+				Value:    r.Name,
+			})
+		}
 		if r.Remove && (r.SSH != "" || len(r.Attach) > 0) {
 			issues = append(issues, Issue{
 				Message:  fmt.Sprintf("remote %q sets `remove = true` alongside ssh/attach fields (the fields are ignored; intent is unclear)", r.Name),

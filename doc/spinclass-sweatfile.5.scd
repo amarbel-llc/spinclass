@@ -1331,13 +1331,18 @@ per-host cache refreshed by each *sc list* — completion never networks.
 *ssh*
 	ssh destination substituted for the attach template's *{ssh}*
 	placeholder. Defaults to *name* when empty, so a name-only entry is a
-	valid all-defaults remote and _~/.ssh/config_ does the work.
+	valid all-defaults remote and _~/.ssh/config_ does the work. A
+	destination (the *ssh* value, or the *name* it defaults to) that begins
+	with *-* is refused: ssh would read it as an option, and options such as
+	*-oProxyCommand* run a command on this machine. *sc list* and *sc resume*
+	refuse to run ssh for it, and *sc validate* reports it as an error.
 
 *attach*
 	Argv template exec'd by *sc resume* for _host_*:* targets. *{ssh}* and
 	*{id}* are substituted literally in every element; the argv is exec'd
-	directly (no shell). Defaults to *["ssh", "-t", "{ssh}", "spinclass",
-	"resume", "{id}"]*. An empty element is an *sc validate* error.
+	directly (no shell). Defaults to *["ssh", "-t", "--", "{ssh}",
+	"spinclass", "resume", "{id}"]*; the *--* ends ssh's option parsing before
+	the destination. An empty element is an *sc validate* error.
 
 *remove*
 	Boolean. When true, the entry is an explicit removal sentinel that
@@ -1358,7 +1363,7 @@ Example:
 name = "devbox"           # the <host>: prefix users type
 ssh  = "sasha@devbox.lan" # optional; defaults to name
 # attach defaults to:
-# ["ssh", "-t", "{ssh}", "spinclass", "resume", "{id}"]
+# ["ssh", "-t", "--", "{ssh}", "spinclass", "resume", "{id}"]
 
 # name-only = all-defaults remote; ~/.ssh/config does the work
 [[remotes]]

@@ -24,10 +24,13 @@ const queryTimeout = 3 * time.Second
 // json support) yields an error carrying any stderr detail — never partial
 // rows. Error shape mirrors internal/clown's run().
 func QueryHost(ctx context.Context, r sweatfile.Remote) ([]session.ListRow, error) {
+	if err := CheckDest(r); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "ssh", r.Dest(), "spinclass", "list", "--format", "json")
+	cmd := exec.CommandContext(ctx, "ssh", "--", r.Dest(), "spinclass", "list", "--format", "json")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

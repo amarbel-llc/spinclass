@@ -60,15 +60,16 @@ const remoteCannedJSON = `[{"id":"crisp-catalpa","session_key":"spinclass/crisp-
 
 // stubSSHPerDest writes an executable `ssh` script into a temp dir
 // prepended to PATH (mirroring internal/remote/query_test.go's stubSSH).
-// The script serves canned ListRow JSON when its destination ($1) is
-// healthyDest and fails with stderr noise otherwise, so one stub covers
-// both the healthy and the unreachable host of a fan-out test.
+// The script serves canned ListRow JSON when its destination ($2, after the
+// "--" that ends ssh's options) is healthyDest and fails with stderr noise
+// otherwise, so one stub covers both the healthy and the unreachable host of a
+// fan-out test.
 func stubSSHPerDest(t *testing.T, healthyDest string) {
 	t.Helper()
 	dir := t.TempDir()
 	script := filepath.Join(dir, "ssh")
 	content := "#!/bin/sh\n" +
-		"if [ \"$1\" = \"" + healthyDest + "\" ]; then\n" +
+		"if [ \"$1\" = \"--\" ] && [ \"$2\" = \"" + healthyDest + "\" ]; then\n" +
 		"  echo '" + remoteCannedJSON + "'\n" +
 		"  exit 0\n" +
 		"fi\n" +

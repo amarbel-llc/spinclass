@@ -437,13 +437,16 @@ func completeRemoteTargets(remotes []sweatfile.Remote) map[string]string {
 // argv ({ssh}/{id} substituted) and true. Everything else — plain local
 // targets, prefixes matching no configured remote — returns false so the
 // caller falls through to local resolution unchanged (a bare name
-// containing ':' that isn't a configured remote behaves exactly as today).
-func remoteResumeArgv(target string, remotes []sweatfile.Remote) ([]string, bool) {
+// containing ':' that isn't a configured remote behaves exactly as today). A
+// configured remote whose destination remote.CheckDest refuses returns true
+// with the refusal.
+func remoteResumeArgv(target string, remotes []sweatfile.Remote) ([]string, bool, error) {
 	r, id, ok := matchRemoteTarget(target, remotes)
 	if !ok {
-		return nil, false
+		return nil, false, nil
 	}
-	return remote.AttachArgv(r, id), true
+	argv, err := remote.AttachArgv(r, id)
+	return argv, true, err
 }
 
 // rejectRemoteTarget guards verbs that don't support remote targets in v1
@@ -474,9 +477,12 @@ func remotesForTarget(target string) []sweatfile.Remote {
 // meaning — there is nothing local to skip attaching to); handled=true with
 // argv means exec the remote attach.
 func remoteAttachPlan(target string, noAttach bool, remotes []sweatfile.Remote) (argv []string, handled bool, err error) {
-	argv, ok := remoteResumeArgv(target, remotes)
+	argv, ok, err := remoteResumeArgv(target, remotes)
 	if !ok {
 		return nil, false, nil
+	}
+	if err != nil {
+		return nil, true, err
 	}
 	if noAttach {
 		return nil, true, errors.New("--no-attach is not supported for remote targets")

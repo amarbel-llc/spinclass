@@ -75,7 +75,7 @@ func TestQueryHostParsesRowsAndArgv(t *testing.T) {
 		t.Errorf("rows: got %+v, want %+v", rows, want)
 	}
 	// The stub records everything after argv[0], i.e. ssh's arguments.
-	want := []string{"sasha@devbox.lan", "spinclass", "list", "--format", "json"}
+	want := []string{"--", "sasha@devbox.lan", "spinclass", "list", "--format", "json"}
 	if got := recordedArgs(t, argsFile); !reflect.DeepEqual(got, want) {
 		t.Errorf("ssh argv: got %q, want %q", got, want)
 	}
@@ -88,7 +88,7 @@ func TestQueryHostDestDefaultsToName(t *testing.T) {
 	if _, err := QueryHost(context.Background(), sweatfile.Remote{Name: "devbox"}); err != nil {
 		t.Fatalf("QueryHost: %v", err)
 	}
-	want := []string{"devbox", "spinclass", "list", "--format", "json"}
+	want := []string{"--", "devbox", "spinclass", "list", "--format", "json"}
 	if got := recordedArgs(t, argsFile); !reflect.DeepEqual(got, want) {
 		t.Errorf("ssh argv: got %q, want %q", got, want)
 	}

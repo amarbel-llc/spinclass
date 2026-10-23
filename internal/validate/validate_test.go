@@ -473,6 +473,26 @@ func TestCheckRemotesValid(t *testing.T) {
 	}
 }
 
+// A remote name or ssh destination beginning with "-" would reach ssh as an
+// option (-oProxyCommand runs a local command): an error.
+func TestCheckRemotesRefusesAnOptionLikeDestination(t *testing.T) {
+	for _, r := range []sweatfile.Remote{
+		{Name: "devbox", SSH: "-oProxyCommand=evil"},
+		{Name: "-oProxyCommand=evil"},
+	} {
+		issues := CheckRemotes(sweatfile.Sweatfile{Remotes: []sweatfile.Remote{r}})
+		found := false
+		for _, is := range issues {
+			if is.Severity == SeverityError && strings.Contains(is.Message, `begins with "-"`) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("remote %+v: want an error naming the leading \"-\", got %v", r, issues)
+		}
+	}
+}
+
 func TestCheckRemotesMissingName(t *testing.T) {
 	sf := sweatfile.Sweatfile{
 		Remotes: []sweatfile.Remote{
