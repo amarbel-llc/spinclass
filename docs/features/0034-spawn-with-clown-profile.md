@@ -751,6 +751,11 @@ spinclass's own, to be corrected if piggy or the operator disagrees.
     - Redeeming appends a rebind {from, to, transition, by, at} to the
       session's `profile_rebinds` and moves `profile_digest` to `to`. The
       window bounds redemption, not the session.
+    - The signed text shows both digests. clown FDR 0022 decision 4 also wants
+      a field diff, which needs the OLD definition, and nothing records it
+      yet. Until clown keeps redacted canonical forms by digest (clown#298),
+      the text carries one line instead: "field diff unavailable: the old
+      definition is not recorded".
     - Open, pinned by a test: a rebound session's grant still pins the old
       digest, so under enforced `[profile-rights]` its spawns are refused
       (D1 open item "rebound session spawning children").

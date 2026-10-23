@@ -18,6 +18,13 @@ import (
 	"code.linenisgreat.com/spinclass/internal/session"
 )
 
+// missingDiff stands in the act text's diff lines until spinclass can show a
+// real field diff (#407 item 2): clown's profilelookup.Diff needs the OLD
+// definition, which nothing records yet (clown#298 will keep redacted
+// canonical forms by digest). The operator is told rather than left to infer
+// it from two bare digests.
+var missingDiff = []string{"field diff unavailable: the old definition is not recorded"}
+
 // rebindBy names who redeems a transition: --repin-profile runs only for the
 // human at a terminal (repinGate), so it is the operator.
 const rebindBy = "operator"
@@ -72,9 +79,7 @@ func (a transitionApprover) Approve(profile, from, to string) (session.ProfileRe
 	if err != nil {
 		return session.ProfileRebind{}, err
 	}
-	// The field diff (clown's profilelookup.Diff) is added once spinclass links
-	// a clown that has it (#407 item 2); until then the text shows the digests.
-	act, err := profilegrant.TransitionActText(tr, digest, nil)
+	act, err := profilegrant.TransitionActText(tr, digest, missingDiff)
 	if err != nil {
 		return session.ProfileRebind{}, err
 	}
@@ -89,7 +94,7 @@ func (a transitionApprover) Approve(profile, from, to string) (session.ProfileRe
 	if err != nil {
 		return session.ProfileRebind{}, err
 	}
-	rec := profilegrant.TransitionRecord{Digest: digest, Text: text, Sig: sig}
+	rec := profilegrant.TransitionRecord{Digest: digest, Text: text, Diff: missingDiff, Sig: sig}
 	if _, err := profilegrant.VerifyTransition(now, rec, root); err != nil {
 		return session.ProfileRebind{}, fmt.Errorf("the signed profile transition does not verify, not using it: %w", err)
 	}

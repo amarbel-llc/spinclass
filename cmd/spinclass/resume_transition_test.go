@@ -62,6 +62,11 @@ func TestApproverSignsStoresAndThenRedeemsWithoutATap(t *testing.T) {
 	if !strings.HasPrefix(card.text, "spinclass profile transition (escalation): fable-design\n") {
 		t.Errorf("the card was shown %q, want the transition act text", card.text)
 	}
+	// Interim until clown keeps old canonical forms (clown#298): the operator
+	// is told the diff is missing rather than shown digests alone silently.
+	if !strings.Contains(card.text, "\nfield diff unavailable: the old definition is not recorded\n") {
+		t.Errorf("the card text lacks the missing-diff line:\n%s", card.text)
+	}
 	if rb.From != trFrom || rb.To != trTo || rb.Transition == "" || rb.By == "" || !rb.At.Equal(testNow) {
 		t.Errorf("rebind = %+v", rb)
 	}
