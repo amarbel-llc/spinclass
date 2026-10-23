@@ -182,7 +182,7 @@ var validPreMergeOutputFormats = map[string]bool{
 
 // CheckHooks validates fields in the [hooks] table: the
 // pre-merge-output-format enum and the inactivity-timeout /
-// post-merge-timeout durations. Extend here as more constrained hook fields
+// post-merge-timeout / repair-timeout durations. Extend here as more constrained hook fields
 // land.
 func CheckHooks(sf sweatfile.Sweatfile) []Issue {
 	var issues []Issue
@@ -233,6 +233,19 @@ func CheckHooks(sf sweatfile.Sweatfile) []Issue {
 					Message:  err.Error(),
 					Severity: SeverityError,
 					Field:    "hooks.post-merge-timeout",
+					Value:    v,
+				})
+			}
+		}
+	}
+	// repair-timeout degrades to its default the same way.
+	if sf.Hooks.RepairTimeout != nil {
+		if v := *sf.Hooks.RepairTimeout; v != "" {
+			if _, err := sweatfile.ParseRepairTimeout(v); err != nil {
+				issues = append(issues, Issue{
+					Message:  err.Error(),
+					Severity: SeverityError,
+					Field:    "hooks.repair-timeout",
 					Value:    v,
 				})
 			}

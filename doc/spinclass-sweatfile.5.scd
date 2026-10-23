@@ -452,7 +452,8 @@ does not export *WORKTREE*.
 	pre-repair commit, worktree kept) and the merge fails naming the paths, but
 	a concurrent edit to a path the commit already has is not caught.
 
-	Repair is bounded by a 10-minute wall-clock cap (spinclass#401). It runs
+	Repair is bounded by a wall-clock cap, *repair-timeout* (below; 10
+	minutes by default, spinclass#401). It runs
 	in its own process group, and when the cap fires the whole group gets
 	SIGTERM, then SIGKILL 10 seconds later, so a descendant that ignores
 	SIGTERM is still killed. The merge then fails, which releases the
@@ -707,6 +708,18 @@ does not export *WORKTREE*.
 	the opposite of *inactivity-timeout*, whose default is off, so
 	degrading a bad value to off changes nothing there.) *Merge:* scalar
 	override.
+
+*repair-timeout*
+	String (a Go duration such as *"10m"* or *"600s"*). Wall-clock cap on
+	the *repair* hook, *on by default* at *10m*; *"0"* disables it. Repair
+	runs in the merge's synchronous prefix with the pre-merge attestation
+	already claimed, so an unbounded repair hangs the merge call and keeps
+	the claim (spinclass#401). When the cap fires, the repair's whole
+	process group is stopped (see *repair* above) and the merge fails with
+	an error naming this knob, which releases the claim. Unlike
+	*post-merge-timeout* there is no per-merge override. An unparseable or
+	negative value is a *sc validate* error and at runtime falls back to
+	the default, as for *post-merge-timeout*. *Merge:* scalar override.
 
 *auto-rebuild-on-resume*
 	Boolean. When true, *sc resume* re-applies a worktree's setup (as *sc

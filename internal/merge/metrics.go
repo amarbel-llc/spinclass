@@ -117,7 +117,8 @@ func (m phaseMetrics) observePostMergeTarget(name string, run hookrun.TargetRun,
 }
 
 // outcomeOf classifies a finished phase: nil error is ok, a done ctx is
-// cancelled, an inactivity-watchdog kill is timeout, anything else is failed.
+// cancelled, an inactivity-watchdog or repair-timeout kill is timeout, anything
+// else is failed.
 func outcomeOf(ctx context.Context, err error) string {
-	return statsd.Outcome(ctx, err, errors.Is(err, hookrun.ErrInactivityTimeout))
+	return statsd.Outcome(ctx, err, errors.Is(err, hookrun.ErrInactivityTimeout) || errors.Is(err, hookrun.ErrRepairTimeout))
 }

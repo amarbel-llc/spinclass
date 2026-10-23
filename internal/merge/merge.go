@@ -1474,10 +1474,6 @@ func postMergeTargetNames(targets []sweatfile.PostMergeTarget) string {
 	return strings.Join(names, ", ")
 }
 
-// repairTimeout is the repair hook's wall-clock cap. A variable so tests can
-// shorten it.
-var repairTimeout = hookrun.DefaultRepairTimeout
-
 // withLeftoverIndexLock names the worktree's git index.lock, when a killed
 // repair left one behind, so the operator can check that no other git process
 // owns it before removing it. It is never removed here: spinclass cannot tell
@@ -1506,7 +1502,7 @@ func withLeftoverIndexLock(err error, wtPath string) error {
 // replay-conflict on the next merge (see FDR 0018). It uses context.Background
 // because PrepareMerge is the synchronous prefix — for async merge it runs
 // before the cancellable job exists — so the repair hook's own wall-clock cap
-// (repairTimeout) is what bounds it (spinclass#401).
+// ([hooks].repair-timeout) is what bounds it (spinclass#401).
 func runRepairPhase(ts *crap.TestStream, hierarchy sweatfile.Hierarchy, wtPath, branch string) error {
 	// Pre-repair HEAD; the delta against the post-repair HEAD is the
 	// tool-agnostic "did it amend" signal (the repair command exits 0 whether or
@@ -1514,7 +1510,7 @@ func runRepairPhase(ts *crap.TestStream, hierarchy sweatfile.Hierarchy, wtPath, 
 	sha0, _ := git.RevParse(wtPath, "HEAD")
 
 	var out bytes.Buffer
-	if hookErr := hookrun.RepairWithCap(context.Background(), hierarchy.Merged, wtPath, repairTimeout, &out); hookErr != nil {
+	if hookErr := hookrun.Repair(context.Background(), hierarchy.Merged, wtPath, &out); hookErr != nil {
 		err := fmt.Errorf("repair hook failed: %w", hookErr)
 		if errors.Is(hookErr, hookrun.ErrRepairTimeout) {
 			err = withLeftoverIndexLock(err, wtPath)

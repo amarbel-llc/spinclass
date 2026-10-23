@@ -146,6 +146,9 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if other.Hooks.PostMergeTimeout != nil {
 			merged.Hooks.PostMergeTimeout = other.Hooks.PostMergeTimeout
 		}
+		if other.Hooks.RepairTimeout != nil {
+			merged.Hooks.RepairTimeout = other.Hooks.RepairTimeout
+		}
 		if other.Hooks.AutoRebuildOnResume != nil {
 			merged.Hooks.AutoRebuildOnResume = other.Hooks.AutoRebuildOnResume
 		}

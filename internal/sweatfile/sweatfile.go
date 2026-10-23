@@ -99,6 +99,7 @@ type Hooks struct {
 	PreMergeOutputFormat       *string `toml:"pre-merge-output-format"`
 	InactivityTimeout          *string `toml:"inactivity-timeout"`
 	PostMergeTimeout           *string `toml:"post-merge-timeout"`
+	RepairTimeout              *string `toml:"repair-timeout"`
 	AutoRebuildOnResume        *bool   `toml:"auto-rebuild-on-resume"`
 	AllowStaleBase             *bool   `toml:"allow-stale-base"`
 	AllowNoCredential          *bool   `toml:"allow-no-credential"`
@@ -517,12 +518,47 @@ func (sf Sweatfile) PostMergeTimeoutValue() time.Duration {
 // sweatfile falls back to the default) or refuse (a per-merge override is
 // rejected before anything lands).
 func ParsePostMergeTimeout(v string) (time.Duration, error) {
+	return parseHookCap("post-merge-timeout", v)
+}
+
+// DefaultRepairTimeout caps how long the repair hook may run when
+// [hooks].repair-timeout is unset. Repair runs in the merge's synchronous
+// prefix with the pre-merge attestation already claimed, so an uncapped wedge
+// hangs the merge call and keeps the claim (spinclass#401). 10m because a
+// repair on a cold nix cache can legitimately run long, and a false kill fails
+// a merge that would have landed.
+const DefaultRepairTimeout = 10 * time.Minute
+
+// RepairTimeoutValue returns the repair hook's wall-clock cap with the same
+// rules as PostMergeTimeoutValue: DefaultRepairTimeout when unset, empty,
+// unparseable or negative (a typo must not strip a default-on cap; `sc
+// validate` reports it), and 0 (NO cap) when explicitly a zero duration.
+func (sf Sweatfile) RepairTimeoutValue() time.Duration {
+	if sf.Hooks == nil || sf.Hooks.RepairTimeout == nil || *sf.Hooks.RepairTimeout == "" {
+		return DefaultRepairTimeout
+	}
+	d, err := ParseRepairTimeout(*sf.Hooks.RepairTimeout)
+	if err != nil {
+		return DefaultRepairTimeout
+	}
+	return d
+}
+
+// ParseRepairTimeout is the validation rule for [hooks].repair-timeout, shared
+// by `sc validate` and RepairTimeoutValue.
+func ParseRepairTimeout(v string) (time.Duration, error) {
+	return parseHookCap("repair-timeout", v)
+}
+
+// parseHookCap parses a hook's wall-clock cap: a Go duration, "0" for no cap,
+// never negative. knob names the key in the error.
+func parseHookCap(knob, v string) (time.Duration, error) {
 	d, err := time.ParseDuration(v)
 	if err != nil {
-		return 0, fmt.Errorf("invalid post-merge-timeout %q (want a Go duration like \"10m\" or \"600s\", or \"0\" to disable): %w", v, err)
+		return 0, fmt.Errorf("invalid %s %q (want a Go duration like \"10m\" or \"600s\", or \"0\" to disable): %w", knob, v, err)
 	}
 	if d < 0 {
-		return 0, fmt.Errorf("post-merge-timeout %q must not be negative (use \"0\" to disable the cap)", v)
+		return 0, fmt.Errorf("%s %q must not be negative (use \"0\" to disable the cap)", knob, v)
 	}
 	return d, nil
 }

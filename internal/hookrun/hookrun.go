@@ -60,16 +60,11 @@ func PreMerge(sf sweatfile.Sweatfile, worktreePath string, w io.Writer) error {
 	return PreMergeContext(context.Background(), sf, worktreePath, w)
 }
 
-// Repair runs the [hooks].repair command (FDR 0018) in worktreePath under
-// DefaultRepairTimeout; see RepairWithCap.
+// Repair runs the [hooks].repair command (FDR 0018) in worktreePath under the
+// [hooks].repair-timeout cap (sweatfile.RepairTimeoutValue); see RepairWithCap.
 func Repair(ctx context.Context, sf sweatfile.Sweatfile, worktreePath string, w io.Writer) error {
-	return RepairWithCap(ctx, sf, worktreePath, DefaultRepairTimeout, w)
+	return RepairWithCap(ctx, sf, worktreePath, sf.RepairTimeoutValue(), w)
 }
-
-// DefaultRepairTimeout is the repair hook's wall-clock cap. Generous because a
-// repair on a cold nix cache can legitimately run long, and a false kill fails
-// a merge that would have landed.
-const DefaultRepairTimeout = 10 * time.Minute
 
 // ErrRepairTimeout is what RepairWithCap's error satisfies (errors.Is) when
 // its wall-clock cap killed the hook.
@@ -106,7 +101,8 @@ func RepairWithCap(ctx context.Context, sf sweatfile.Sweatfile, worktreePath str
 	// Only OUR deadline yields the cap message; a cancelled caller keeps its own.
 	if err != nil && errors.Is(hookCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
 		return &kindError{kind: ErrRepairTimeout, msg: fmt.Sprintf(
-			"repair hook killed: exceeded repair-timeout %s; its whole process group was stopped",
+			"repair hook killed: exceeded repair-timeout %s; its whole process group was stopped "+
+				"(set [hooks].repair-timeout to raise the cap, or \"0\" to disable it)",
 			timeout,
 		)}
 	}

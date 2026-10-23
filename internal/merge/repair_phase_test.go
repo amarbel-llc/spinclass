@@ -204,10 +204,7 @@ func TestPrepareMergeRepairFailureAborts(t *testing.T) {
 // git index.lock the killed repair left behind is named, not deleted.
 func TestPrepareMergeRepairTimeoutReportsIndexLock(t *testing.T) {
 	repoDir, wtPath, head := setupRepairRepoWithSweatfile(t, "feature",
-		"[hooks]\nrepair = 'touch \"$(git rev-parse --git-path index.lock)\"; sleep 600'\n")
-	old := repairTimeout
-	repairTimeout = 300 * time.Millisecond
-	t.Cleanup(func() { repairTimeout = old })
+		"[hooks]\nrepair = 'touch \"$(git rev-parse --git-path index.lock)\"; sleep 600'\nrepair-timeout = \"300ms\"\n")
 	lock := strings.TrimSpace(runGit(t, wtPath, "rev-parse", "--path-format=absolute", "--git-path", "index.lock"))
 
 	start := time.Now()
@@ -229,12 +226,6 @@ func TestPrepareMergeRepairTimeoutReportsIndexLock(t *testing.T) {
 	}
 	if got := runGit(t, wtPath, "rev-parse", "HEAD"); got != head {
 		t.Errorf("HEAD = %s, want unchanged %s", got, head)
-	}
-}
-
-func TestRepairTimeoutDefaultsToTheHookrunDefault(t *testing.T) {
-	if repairTimeout != hookrun.DefaultRepairTimeout {
-		t.Errorf("repairTimeout = %s, want %s", repairTimeout, hookrun.DefaultRepairTimeout)
 	}
 }
 

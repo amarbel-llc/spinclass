@@ -375,6 +375,26 @@ func TestCheckHooksAcceptsPostMergeTimeoutValues(t *testing.T) {
 	}
 }
 
+// repair-timeout degrades to its default like post-merge-timeout, so
+// validation is where a typo surfaces (#401).
+func TestCheckHooksRejectsBadRepairTimeout(t *testing.T) {
+	for _, val := range []string{"ten minutes", "-5m"} {
+		v := val
+		sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{RepairTimeout: &v}}
+		issues := CheckHooks(sf)
+		if len(issues) != 1 || issues[0].Severity != SeverityError || issues[0].Field != "hooks.repair-timeout" {
+			t.Errorf("repair-timeout %q: expected one error issue, got %+v", val, issues)
+		}
+	}
+	for _, val := range []string{"0", "30s", "20m"} {
+		v := val
+		sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{RepairTimeout: &v}}
+		if issues := CheckHooks(sf); len(issues) != 0 {
+			t.Errorf("repair-timeout %q produced unexpected issues: %+v", val, issues)
+		}
+	}
+}
+
 func TestCheckSessionEntrySpawnEntryMissingPromptPlaceholder(t *testing.T) {
 	sf := sweatfile.Sweatfile{
 		SessionEntry: &sweatfile.SessionEntry{

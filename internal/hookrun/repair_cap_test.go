@@ -127,8 +127,20 @@ func TestRepairCallerCancelIsNotATimeout(t *testing.T) {
 	}
 }
 
-func TestRepairCapDefaultIsTenMinutes(t *testing.T) {
-	if DefaultRepairTimeout != 10*time.Minute {
-		t.Errorf("DefaultRepairTimeout = %s, want 10m", DefaultRepairTimeout)
+// Repair reads its cap from [hooks].repair-timeout, and the kill names the knob.
+func TestRepairHonoursTheRepairTimeoutKey(t *testing.T) {
+	cap := "200ms"
+	cmd := "sleep 600"
+	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{Repair: &cmd, RepairTimeout: &cap}}
+	start := time.Now()
+	err := Repair(context.Background(), sf, t.TempDir(), nil)
+	if !errors.Is(err, ErrRepairTimeout) {
+		t.Fatalf("err = %v, want ErrRepairTimeout", err)
+	}
+	if !strings.Contains(err.Error(), "[hooks].repair-timeout") {
+		t.Errorf("the error should name the knob, got %q", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("repair ran %s; repair-timeout 200ms should have stopped it", elapsed)
 	}
 }
