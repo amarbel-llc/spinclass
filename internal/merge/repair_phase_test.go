@@ -3,6 +3,7 @@ package merge
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,8 @@ import (
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
+
+	"code.linenisgreat.com/spinclass/internal/hookrun"
 )
 
 // writeRepoSweatfile commits content as the repo-root sweatfile on the default
@@ -193,6 +196,45 @@ func TestPrepareMergeRepairFailureAborts(t *testing.T) {
 	}
 	if tr.OK {
 		t.Errorf("repair point should be not-ok on failure: %+v", tr)
+	}
+}
+
+// TestPrepareMergeRepairTimeoutReportsIndexLock (#401): a repair that outruns
+// its cap fails the merge with ErrRepairTimeout instead of hanging it, and a
+// git index.lock the killed repair left behind is named, not deleted.
+func TestPrepareMergeRepairTimeoutReportsIndexLock(t *testing.T) {
+	repoDir, wtPath, head := setupRepairRepoWithSweatfile(t, "feature",
+		"[hooks]\nrepair = 'touch \"$(git rev-parse --git-path index.lock)\"; sleep 600'\n")
+	old := repairTimeout
+	repairTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { repairTimeout = old })
+	lock := strings.TrimSpace(runGit(t, wtPath, "rev-parse", "--path-format=absolute", "--git-path", "index.lock"))
+
+	start := time.Now()
+	pinnedSha, tests, err := runPrepare(t, repoDir, wtPath, "feature")
+	if elapsed := time.Since(start); elapsed > 20*time.Second {
+		t.Errorf("PrepareMerge took %s; the repair cap should have bounded it", elapsed)
+	}
+	if !errors.Is(err, hookrun.ErrRepairTimeout) {
+		t.Fatalf("err = %v, want ErrRepairTimeout (pinnedSha=%q)", err, pinnedSha)
+	}
+	if !strings.Contains(err.Error(), lock) {
+		t.Errorf("err = %q, want it to name the leftover %s", err, lock)
+	}
+	if _, statErr := os.Stat(lock); statErr != nil {
+		t.Errorf("the index.lock must be reported, not removed: %v", statErr)
+	}
+	if tr, ok := findTest(tests, "repair feature"); !ok || tr.OK {
+		t.Errorf("want a failing repair point, got %+v (all: %v)", tr, testDescs(tests))
+	}
+	if got := runGit(t, wtPath, "rev-parse", "HEAD"); got != head {
+		t.Errorf("HEAD = %s, want unchanged %s", got, head)
+	}
+}
+
+func TestRepairTimeoutDefaultsToTheHookrunDefault(t *testing.T) {
+	if repairTimeout != hookrun.DefaultRepairTimeout {
+		t.Errorf("repairTimeout = %s, want %s", repairTimeout, hookrun.DefaultRepairTimeout)
 	}
 }
 

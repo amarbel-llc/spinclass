@@ -51,7 +51,7 @@ func OnAttach(sf sweatfile.Sweatfile, worktreePath string, w io.Writer) error {
 // $SPINCLASS_SESSION_ID) appended. The session env is passed explicitly
 // because it is no longer set on the spinclass process itself (#330).
 func OnDetach(sf sweatfile.Sweatfile, worktreePath string, sessionEnv []string, w io.Writer) error {
-	return runHookInDirEnv(context.Background(), sf.OnDetachHookCommand(), worktreePath, worktreePath, sessionEnv, 0, "", false, w)
+	return runHookInDirEnv(context.Background(), sf.OnDetachHookCommand(), worktreePath, worktreePath, sessionEnv, 0, "", false, 0, w)
 }
 
 // PreMerge runs the [hooks].pre-merge command in worktreePath under a
@@ -60,16 +60,57 @@ func PreMerge(sf sweatfile.Sweatfile, worktreePath string, w io.Writer) error {
 	return PreMergeContext(context.Background(), sf, worktreePath, w)
 }
 
-// Repair runs the [hooks].repair command (FDR 0018) in worktreePath,
+// Repair runs the [hooks].repair command (FDR 0018) in worktreePath under
+// DefaultRepairTimeout; see RepairWithCap.
+func Repair(ctx context.Context, sf sweatfile.Sweatfile, worktreePath string, w io.Writer) error {
+	return RepairWithCap(ctx, sf, worktreePath, DefaultRepairTimeout, w)
+}
+
+// DefaultRepairTimeout is the repair hook's wall-clock cap. Generous because a
+// repair on a cold nix cache can legitimately run long, and a false kill fails
+// a merge that would have landed.
+const DefaultRepairTimeout = 10 * time.Minute
+
+// ErrRepairTimeout is what RepairWithCap's error satisfies (errors.Is) when
+// its wall-clock cap killed the hook.
+var ErrRepairTimeout = errors.New("repair hook killed by repair-timeout")
+
+// repairKillGrace is how long a cancelled repair's process group has between
+// SIGTERM and SIGKILL. A variable so tests can shorten it.
+var repairKillGrace = cancelGrace
+
+// RepairWithCap runs the [hooks].repair command (FDR 0018) in worktreePath,
 // streaming combined stdout+stderr to w, and returns the command's exit status
 // as its error. Gated on RepairActive(): inactive is a no-op returning nil.
-// Unlike the pre-merge hook there is no inactivity watchdog — repair is a fast
-// formatter/amend pass, not a minutes-long build/test hook.
-func Repair(ctx context.Context, sf sweatfile.Sweatfile, worktreePath string, w io.Writer) error {
+//
+// The hook is bounded by a wall-clock cap (timeout <= 0 disables it). Repair
+// runs in the merge's synchronous prefix, while the pre-merge attestation is
+// already claimed, so a wedged repair child would otherwise hang the merge call
+// and keep the claim (spinclass#401). Unlike every other hook, repair runs in
+// its own process group and a cap or cancel signals the whole group: SIGTERM,
+// then SIGKILL after repairKillGrace. A repair has no sanctioned detached
+// children (those are post-merge's, FDR 0023), so a group kill loses nothing.
+func RepairWithCap(ctx context.Context, sf sweatfile.Sweatfile, worktreePath string, timeout time.Duration, w io.Writer) error {
 	if !sf.RepairActive() {
 		return nil
 	}
-	return runHookContext(ctx, sf.RepairHookCommand(), worktreePath, w)
+	cmd := sf.RepairHookCommand()
+	if timeout <= 0 {
+		return runHookInDirEnv(ctx, cmd, worktreePath, worktreePath, nil, 0, "", false, repairKillGrace, w)
+	}
+
+	hookCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	err := runHookInDirEnv(hookCtx, cmd, worktreePath, worktreePath, nil, 0, "", false, repairKillGrace, w)
+	// Only OUR deadline yields the cap message; a cancelled caller keeps its own.
+	if err != nil && errors.Is(hookCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+		return &kindError{kind: ErrRepairTimeout, msg: fmt.Sprintf(
+			"repair hook killed: exceeded repair-timeout %s; its whole process group was stopped",
+			timeout,
+		)}
+	}
+	return err
 }
 
 // PostMerge runs the [hooks].post-merge command (FDR 0023) in dir, streaming
@@ -109,13 +150,13 @@ func PostMergeWithCap(ctx context.Context, sf sweatfile.Sweatfile, dir string, e
 		// output is not ours to truncate.
 		// scopeID "" — post-merge is deliberately unscoped so a control-group
 		// kill never reaps the detached children FDR 0023 sanctions for slow deploys.
-		return runHookInDirEnv(ctx, cmd, dir, dir, extraEnv, 0, "", false, w)
+		return runHookInDirEnv(ctx, cmd, dir, dir, extraEnv, 0, "", false, 0, w)
 	}
 
 	hookCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	err := runHookInDirEnv(hookCtx, cmd, dir, dir, extraEnv, postMergeWaitDelay, "", false, w)
+	err := runHookInDirEnv(hookCtx, cmd, dir, dir, extraEnv, postMergeWaitDelay, "", false, 0, w)
 	switch {
 	// Only OUR deadline yields the cap message: if the caller's ctx is also
 	// done, the kill is theirs (a cancelled job) and keeps its own error.
@@ -162,7 +203,7 @@ func Target(ctx context.Context, t sweatfile.PostMergeTarget, dir string, extraE
 	// scopeID "" — post-merge is deliberately unscoped so a control-group
 	// kill never reaps the detached children FDR 0023 sanctions for slow deploys.
 	start := time.Now()
-	err := runHookInDirEnv(ctx, &command, dir, dir, extraEnv, postMergeWaitDelay, "", false, w)
+	err := runHookInDirEnv(ctx, &command, dir, dir, extraEnv, postMergeWaitDelay, "", false, 0, w)
 	run.CommandDuration = time.Since(start)
 	if err != nil {
 		run.Verdict = sweatfile.PostMergeCommandFailed
@@ -172,7 +213,7 @@ func Target(ctx context.Context, t sweatfile.PostMergeTarget, dir string, extraE
 		verify := *t.Verify
 		run.VerifyRan = true
 		start = time.Now()
-		err = runHookInDirEnv(ctx, &verify, dir, dir, extraEnv, postMergeWaitDelay, "", false, w)
+		err = runHookInDirEnv(ctx, &verify, dir, dir, extraEnv, postMergeWaitDelay, "", false, 0, w)
 		run.VerifyDuration = time.Since(start)
 		if err != nil {
 			run.Verdict = sweatfile.PostMergeVerifyFailed
@@ -339,10 +380,11 @@ func runHookInDir(ctx context.Context, cmd *string, envDir, runDir string, requi
 	// The pre-merge hook runs under a ctx that carries a scope id: the async job
 	// id (clown.WithJobID, set in job.Start) or a synchronous gate's local scope
 	// id (clown.WithLocalScope, #188). Reading it here scopes that hook (#25),
-	// while repair/create/attach/detach — run under context.Background — get "" and
-	// stay unscoped. Post-merge calls runHookInDirEnv directly with "" so FDR 0023
-	// detached children are not caught in a control-group scope kill.
-	return runHookInDirEnv(ctx, cmd, envDir, runDir, nil, 0, clown.ScopeIDFromContext(ctx), requireScope, w)
+	// while create/attach/detach — run under context.Background — get "" and stay
+	// unscoped. Repair is unscoped too, but signals its own process group.
+	// Post-merge calls runHookInDirEnv directly with "" so FDR 0023 detached
+	// children are not caught in a control-group scope kill.
+	return runHookInDirEnv(ctx, cmd, envDir, runDir, nil, 0, clown.ScopeIDFromContext(ctx), requireScope, 0, w)
 }
 
 // runHookInDirEnv is runHookInDir with a few extras; every hook that needs none
@@ -386,14 +428,20 @@ func runHookInDir(ctx context.Context, cmd *string, envDir, runDir string, requi
 // exec closes the pipes and sends SIGKILL, so an ill-behaved hook still cannot
 // wedge a cancel forever.
 //
-// Deliberately NO Setpgid/process-group signalling: a group kill would also
+// By default NO Setpgid/process-group signalling: a group kill would also
 // reap the DETACHED children FDR 0023 documents as the supported way to run a
 // slow post-merge deploy without holding the merge lock. Residual: a hook
 // whose top process swallows SIGTERM without propagating leaves its
 // descendants orphaned, and only the pipes are reclaimed. When that escalation
 // fires with no scope to reap the children, a warning line is written into the
 // hook output so the operator knows descendants may still be running.
-func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, extraEnv []string, waitDelay time.Duration, scopeID string, requireScope bool, w io.Writer) error {
+//
+// groupKillGrace, when non-zero, opts a hook with no sanctioned detached
+// children (only repair, spinclass#401) into its own process group: a cancel
+// SIGTERMs the whole group and SIGKILLs it groupKillGrace later, so a
+// descendant that ignores SIGTERM is still killed. WaitDelay is pushed past
+// that grace so the group kill lands before exec gives up on the pipes.
+func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, extraEnv []string, waitDelay time.Duration, scopeID string, requireScope bool, groupKillGrace time.Duration, w io.Writer) error {
 	if cmd == nil || *cmd == "" {
 		return nil
 	}
@@ -458,6 +506,16 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 		c.WaitDelay = cancelGrace
 		if waitDelay > 0 && waitDelay < cancelGrace {
 			c.WaitDelay = waitDelay
+		}
+		if groupKillGrace > 0 {
+			c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			c.Cancel = func() error {
+				pgid := c.Process.Pid
+				// A group that is already gone makes Kill return ESRCH, ignored.
+				time.AfterFunc(groupKillGrace, func() { _ = syscall.Kill(-pgid, syscall.SIGKILL) })
+				return syscall.Kill(-pgid, syscall.SIGTERM)
+			}
+			c.WaitDelay = groupKillGrace + time.Second
 		}
 		return c
 	}

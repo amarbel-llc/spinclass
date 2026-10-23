@@ -452,6 +452,14 @@ does not export *WORKTREE*.
 	pre-repair commit, worktree kept) and the merge fails naming the paths, but
 	a concurrent edit to a path the commit already has is not caught.
 
+	Repair is bounded by a 10-minute wall-clock cap (spinclass#401). It runs
+	in its own process group, and when the cap fires the whole group gets
+	SIGTERM, then SIGKILL 10 seconds later, so a descendant that ignores
+	SIGTERM is still killed. The merge then fails, which releases the
+	pre-merge attestation the merge had claimed. If the killed repair left a
+	git *index.lock* behind, the failure names it; spinclass does not remove
+	it, because it cannot tell a stale lock from one a live git process holds.
+
 	Repair is *merge-only* —*sc check* and *check-this-session* do not run
 	it, and merging from an implicit (main-checkout) session is not
 	supported at all (spinclass#317). Because the amend re-signs *HEAD*, a locked

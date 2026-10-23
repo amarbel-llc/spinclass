@@ -238,6 +238,16 @@ not ok   repair prime-pine
   into a session worktree while its merge prefix runs. The structural fix
   (repair in an isolated worktree, or amend only the paths the repair tool
   rewrote) is follow-up work: spinclass#346.
+- **A hung repair (#401).** "Format is seconds" does not always hold: on
+  2026-10-22 a repair child sat about 18 minutes in a lock wait, and because
+  repair runs in the synchronous prefix with the attestation already claimed,
+  the merge call hung and the claim stayed live. Repair now has a 10-minute
+  wall-clock cap and runs in its own process group; the cap SIGTERMs the
+  group, then SIGKILLs it after 10 seconds. The failed merge releases the
+  claim through the ordinary error path. A git `index.lock` the kill left
+  behind is named in the failure, not removed. Not yet done: a
+  `[hooks].repair-timeout` knob, and threading the MCP call's cancellation
+  into repair. A claim held by a handler that hangs elsewhere is #408.
 - **GPG signing.** `git commit --amend` re-signs HEAD. Per repo policy commits
   are signed via the piggy/PIV agent; if it is locked the amend fails (exit 2,
   git's stderr), repair fails, and the merge aborts with a legible "repair
