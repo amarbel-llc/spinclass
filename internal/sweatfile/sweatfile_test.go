@@ -1602,7 +1602,6 @@ func TestSessionSpawnProfileAccessor(t *testing.T) {
 }
 
 func TestMergeSessionSpawnProfileOverrideAndInherit(t *testing.T) {
-	// Fresh bases per merge: MergeWith shares the base's *SessionEntry.
 	base := Sweatfile{SessionEntry: &SessionEntry{SpawnProfile: "cheap"}}
 	override := Sweatfile{SessionEntry: &SessionEntry{SpawnProfile: "review"}}
 	if got := base.MergeWith(override).SessionSpawnProfile(); got != "review" {
@@ -1620,9 +1619,9 @@ func TestMergeSessionSpawnProfileOverrideAndInherit(t *testing.T) {
 // mapping as the compiled-in default.
 func TestGetDefaultShipsModelIDs(t *testing.T) {
 	want := map[string]string{
-		"sonnet": "claude-sonnet-5",
-		"opus":   "claude-opus-5",
-		"haiku":  "claude-haiku-4-5-20251001",
+		"sonnet": "claude-sonnet-5-5",
+		"opus":   "claude-opus-5-5",
+		"haiku":  "claude-haiku-5-5",
 		"fable":  "claude-fable-5-1",
 	}
 	def := GetDefault()

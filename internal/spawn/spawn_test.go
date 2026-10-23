@@ -444,11 +444,11 @@ func TestLaunchSplicesModelFlag(t *testing.T) {
 	// already-spliced --permission-mode auto), then the substituted brief. The
 	// default model-flags map ({"claude": "--model"}) applies since the
 	// entry selects no --provider (defaults to "claude"), and "opus"
-	// resolves to its full Claude model ID (claude-opus-5) via the built-in
+	// resolves to its full Claude model ID (claude-opus-5-5) via the built-in
 	// [session-entry.model-ids] default (sweatfile.GetDefault(), merged
 	// into renderSpawn's hierarchy) — this fixture's sweatfile declares no
 	// model-ids/disable-auto-mode override of its own.
-	want := []string{"--", "--model", "claude-opus-5", "--permission-mode", "auto", "brief"}
+	want := []string{"--", "--model", "claude-opus-5-5", "--permission-mode", "auto", "brief"}
 	if len(argv) != len(want) {
 		t.Fatalf("argv = %v, want %v", argv, want)
 	}

@@ -87,7 +87,7 @@ func clownProviderFlags(entry []string) (provider, profile string) {
 // provider-args separator (before {prompt}/{dir} substitution —
 // SubstituteEntry runs on the result). For the "claude" provider the
 // resolved value is modelIDs[alias] (the full Claude model ID, e.g.
-// "claude-opus-5") rather than the raw alias; every other provider gets the
+// "claude-opus-5-5") rather than the raw alias; every other provider gets the
 // raw alias verbatim, since modelIDs is a Claude-only alias->ID map. Does
 // not mutate entry. Hard errors — no silent fallback — when entry has no
 // "--" element, the alias is invalid for the resolved provider, or the

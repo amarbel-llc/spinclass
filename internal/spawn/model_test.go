@@ -10,9 +10,9 @@ import (
 // tests don't need to import internal/sweatfile just to exercise the
 // alias->ID rewrite.
 var testClaudeModelIDs = map[string]string{
-	"sonnet": "claude-sonnet-5",
-	"opus":   "claude-opus-5",
-	"haiku":  "claude-haiku-4-5-20251001",
+	"sonnet": "claude-sonnet-5-5",
+	"opus":   "claude-opus-5-5",
+	"haiku":  "claude-haiku-5-5",
 	"fable":  "claude-fable-5-1",
 }
 
@@ -116,7 +116,7 @@ func TestSpliceModelFlagInsertsAfterSeparator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SpliceModelFlag: %v", err)
 	}
-	want := []string{"clown", "--clown-attach=spawn", "--", "--model", "claude-opus-5", "{prompt}"}
+	want := []string{"clown", "--clown-attach=spawn", "--", "--model", "claude-opus-5-5", "{prompt}"}
 	if len(got) != len(want) {
 		t.Fatalf("SpliceModelFlag() = %v, want %v", got, want)
 	}

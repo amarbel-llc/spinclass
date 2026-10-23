@@ -219,9 +219,11 @@ hardcoded Go constant.
 - New `[session-entry.model-ids]` sweatfile field (`SessionEntry.ModelIDs
   map[string]string`), merged per-key across the hierarchy exactly like
   `[session-entry.model-flags]`/`[session-entry.env]`.
-- Its built-in default — `{"sonnet": "claude-sonnet-5", "opus":
-  "claude-opus-5", "haiku": "claude-haiku-4-5-20251001", "fable":
-  "claude-fable-5-1"}` — ships via `sweatfile.GetDefault()` (the same
+- Its built-in default — `{"sonnet": "claude-sonnet-5-5", "opus":
+  "claude-opus-5-5", "haiku": "claude-haiku-5-5", "fable":
+  "claude-fable-5-1"}` (the 5.5 IDs since spinclass#323; the design shipped
+  with `claude-sonnet-5`, `claude-opus-5` and `claude-haiku-4-5-20251001`) —
+  ships via `sweatfile.GetDefault()` (the same
   compiled-in-default mechanism the `gh_issue`/`gh_pr` start-commands and the
   baseline `Git.Excludes`/`Claude.Allow` use), **not** as an inline fallback
   in an accessor like `SessionModelFlags()` does for its default. A user

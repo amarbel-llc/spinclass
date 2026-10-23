@@ -1176,9 +1176,9 @@ func GetDefault() Sweatfile {
 		// usual per-key ModelFlags/Env merge semantics).
 		SessionEntry: &SessionEntry{
 			ModelIDs: map[string]string{
-				"sonnet": "claude-sonnet-5",
-				"opus":   "claude-opus-5",
-				"haiku":  "claude-haiku-4-5-20251001",
+				"sonnet": "claude-sonnet-5-5",
+				"opus":   "claude-opus-5-5",
+				"haiku":  "claude-haiku-5-5",
 				"fable":  "claude-fable-5-1",
 			},
 		},
