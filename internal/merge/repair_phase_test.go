@@ -104,10 +104,15 @@ func findTest(tests []ndjsoncrap.Test, prefix string) (ndjsoncrap.Test, bool) {
 
 func runPrepare(t *testing.T, repoDir, wtPath, branch string) (pinnedSha string, tests []ndjsoncrap.Test, err error) {
 	t.Helper()
+	return runPrepareWith(t, repoDir, wtPath, branch, PostMergeOptions{})
+}
+
+func runPrepareWith(t *testing.T, repoDir, wtPath, branch string, pm PostMergeOptions) (pinnedSha string, tests []ndjsoncrap.Test, err error) {
+	t.Helper()
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	pinnedSha, err = PrepareMerge(context.Background(), ts, repoDir, wtPath, branch, "main", false, PostMergeOptions{})
+	pinnedSha, err = PrepareMerge(context.Background(), ts, repoDir, wtPath, branch, "main", false, pm)
 	ts.Finish()
 	return pinnedSha, testRecords(decodeRecords(t, buf.Bytes())), err
 }
@@ -314,7 +319,9 @@ func TestPrepareMergeRefusesDirtyWorktreeBeforeRepair(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pinnedSha, tests, err := runPrepare(t, repoDir, wtPath, "feature")
+	// With spinclass's autostash (#416) the edit is shelved before repair; this
+	// is the refusal that guards a merge with it off.
+	pinnedSha, tests, err := runPrepareWith(t, repoDir, wtPath, "feature", PostMergeOptions{NoAutostash: true})
 	if err == nil {
 		t.Fatalf("expected refusal, got pinnedSha=%s (points: %v; HEAD %s, was %s)",
 			pinnedSha, testDescs(tests), runGit(t, wtPath, "rev-parse", "HEAD"), head)

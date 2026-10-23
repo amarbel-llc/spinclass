@@ -225,6 +225,17 @@ func PrepareMerge(ctx context.Context, ts *crap.TestStream, repoPath, wtPath, br
 		return "", err
 	}
 
+	// Autostash (#416): shelve uncommitted tracked changes so they cannot block
+	// the rebase or be amended by repair, and put them back on every exit from
+	// here, the moment the synchronous prefix is done.
+	if !pm.NoAutostash {
+		restore, stashErr := autostash(ts, wtPath, branch)
+		if stashErr != nil {
+			return "", stashErr
+		}
+		defer restore()
+	}
+
 	rebaseStart := time.Now()
 	out, rebaseErr := git.RunEnv(wtPath, []string{"GIT_SEQUENCE_EDITOR=true"}, "rebase", target.Ref(), "-i")
 	mx.observeErr(context.Background(), "rebase", rebaseStart, rebaseErr)
@@ -862,6 +873,10 @@ func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, push,
 			// The stash shelf lives in the worktree (FDR 0036 section 4) and would
 			// be destroyed with it; `sc close` is the gate that names the count.
 			ts.Ok("keep worktree " + branch + " (stash shelf not empty; drop its entries or run sc close)")
+		} else if dirty, _ := git.DirtyTrackedPaths(wtPath); len(dirty) > 0 {
+			// The autostash (#416) put uncommitted edits back after the prefix;
+			// removing the tree would take them with it (and git refuses to).
+			ts.Ok("keep worktree " + branch + " (uncommitted changes: " + strings.Join(dirty, ", ") + "; commit them or run sc close)")
 		} else {
 			// The worktree is about to go, and with it the session's credential
 			// file and state — revoke the per-session forge token first (FDR

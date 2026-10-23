@@ -625,6 +625,28 @@ func TestBuildMergeThisSessionDescription_WithHook(t *testing.T) {
 	}
 }
 
+// #416: both merge tools say autostash is the default and that untracked files
+// are never stashed; the parameter is on unless explicitly false.
+func TestMergeToolsDescribeTheDefaultAutostash(t *testing.T) {
+	for name, desc := range map[string]string{
+		"merge-this-session":       buildMergeThisSessionDescription(""),
+		"merge-this-session-async": buildMergeAsyncDescription(""),
+	} {
+		if !strings.Contains(desc, autostashToolNote) {
+			t.Errorf("%s description lacks the autostash note:\n%s", name, desc)
+		}
+	}
+	for _, want := range []string{"default true", "own stash shelf", "Untracked files are never stashed", "false restores"} {
+		if !strings.Contains(autostashParamDesc, want) {
+			t.Errorf("autostash parameter description lacks %q", want)
+		}
+	}
+	on, off := true, false
+	if autostashOff(nil) || autostashOff(&on) || !autostashOff(&off) {
+		t.Error("autostash must be on when absent or true, off only when false")
+	}
+}
+
 // The MCP parameter and the sweatfile field share one validation rule: "" is
 // "unset" (nil), "0" is an explicit disable (non-nil zero), valid durations
 // parse, and negative/unparseable values are refused with the parameter named.

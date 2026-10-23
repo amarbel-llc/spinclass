@@ -253,7 +253,10 @@ func TestPrepareMergeHaltsOnPostRebaseConflict(t *testing.T) {
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	_, err := PrepareMerge(context.Background(), ts, repoDir, wtPath, "feature-conflict", "main", false, PostMergeOptions{})
+	// spinclass's own autostash (#416) would shelve the edit before git sees
+	// it; this guards git's rebase.autoStash path, which is what runs with ours
+	// off.
+	_, err := PrepareMerge(context.Background(), ts, repoDir, wtPath, "feature-conflict", "main", false, PostMergeOptions{NoAutostash: true})
 	if err == nil {
 		t.Fatalf("expected PrepareMerge to halt on the post-rebase conflict; stream:\n%s", buf.String())
 	}

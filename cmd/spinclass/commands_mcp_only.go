@@ -129,6 +129,7 @@ func registerMCPOnlyCommands(app *command.App) {
 				{Name: "default_branch", Type: command.String, Description: defaultBranchParamDesc},
 				{Name: "targets", Type: command.Array, Description: targetsParamDesc},
 				{Name: "post_merge_timeout", Type: command.String, Description: postMergeTimeoutParamDesc},
+				{Name: "autostash", Type: command.Bool, Description: autostashParamDesc},
 			},
 			Run: wrapMCPHandler("merge-this-session", handleMergeThisSession),
 		})
@@ -150,6 +151,7 @@ func registerMCPOnlyCommands(app *command.App) {
 					{Name: "default_branch", Type: command.String, Description: defaultBranchParamDesc},
 					{Name: "targets", Type: command.Array, Description: targetsParamDesc},
 					{Name: "post_merge_timeout", Type: command.String, Description: postMergeTimeoutParamDesc},
+					{Name: "autostash", Type: command.Bool, Description: autostashParamDesc},
 				},
 				Run: wrapMCPHandler("merge-this-session-async", handleMergeThisSessionAsync),
 			})
@@ -371,9 +373,21 @@ func registerMCPOnlyCommands(app *command.App) {
 	})
 }
 
+// autostashOff reads the autostash parameter: absent means on (#416).
+func autostashOff(autostash *bool) bool {
+	return autostash != nil && !*autostash
+}
+
 // localOnlyParamDesc and defaultBranchParamDesc are shared by merge-this-session
 // and its -async twin so the two surfaces cannot drift (#126/#158).
 const localOnlyParamDesc = "Merge into the LOCAL default branch only — skip the fetch-before and push-after. Default is to pull+push so the merge reaches origin and 'merged' means 'on origin' (#126). Set this only for a deliberate local-only merge you intend to push later; the result text flags a local-only merge as NOT pushed."
+
+// autostashToolNote is the default-autostash sentence both merge tools'
+// descriptions carry (#416).
+const autostashToolNote = "Uncommitted tracked changes do not block the merge: by default they are shelved in the session's own stash shelf before the rebase and restored right after it (see the autostash parameter); untracked files are never stashed and never block."
+
+// autostashParamDesc is shared by merge-this-session and its -async twin.
+const autostashParamDesc = "Shelve uncommitted TRACKED changes in the session worktree around the merge (default true; #416). They go to the session's own stash shelf (grit_stash, never git's shared stash stack) before the rebase and come back right after the synchronous prefix (rebase and repair), before the gate runs; the result names what was stashed and restored (counts and paths, not contents). Untracked files are never stashed: they do not block the rebase, so they stay where they are. If the restore conflicts, the merge still lands (its commit is already pinned), the conflict is left in the worktree and the entry is kept and named, to resolve then grit_stash drop. false restores the old behaviour: a dirty tracked tree refuses the merge at the rebase."
 
 const defaultBranchParamDesc = `Override the default branch when both main and master exist in the repo. Omit to auto-detect; pass "main" or "master" to resolve the ambiguity without an interactive terminal.`
 
@@ -426,6 +440,7 @@ func handleMergeThisSession(ctx context.Context, args json.RawMessage, _ command
 		DefaultBranch    string   `json:"default_branch"`
 		Targets          []string `json:"targets"` // nil=all, non-nil=that subset, []=none (FDR 0026)
 		PostMergeTimeout string   `json:"post_merge_timeout"`
+		Autostash        *bool    `json:"autostash"` // nil = on (#416)
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
@@ -435,7 +450,7 @@ func handleMergeThisSession(ctx context.Context, args json.RawMessage, _ command
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
 	}
-	pm := merge.PostMergeOptions{Targets: params.Targets, Timeout: pmTimeout}
+	pm := merge.PostMergeOptions{Targets: params.Targets, Timeout: pmTimeout, NoAutostash: autostashOff(params.Autostash)}
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -560,6 +575,7 @@ func handleMergeThisSessionAsync(ctx context.Context, args json.RawMessage, _ co
 		DefaultBranch    string   `json:"default_branch"`
 		Targets          []string `json:"targets"` // nil=all, non-nil=that subset, []=none (FDR 0026)
 		PostMergeTimeout string   `json:"post_merge_timeout"`
+		Autostash        *bool    `json:"autostash"` // nil = on (#416)
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
@@ -571,7 +587,7 @@ func handleMergeThisSessionAsync(ctx context.Context, args json.RawMessage, _ co
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
 	}
-	pm := merge.PostMergeOptions{Targets: params.Targets, Timeout: pmTimeout}
+	pm := merge.PostMergeOptions{Targets: params.Targets, Timeout: pmTimeout, NoAutostash: autostashOff(params.Autostash)}
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -805,7 +821,7 @@ func handleJobCancel(_ context.Context, _ json.RawMessage, _ command.Prompter) (
 // contract is always in force here — there is no clown-absent variant, and
 // inspection is via ringmaster's own surfaces (job_status/job_read/job_wait).
 func buildMergeAsyncDescription(hookPreview string) string {
-	base := "Non-blocking variant of merge-this-session: starts the merge (including the pre-merge hook) in the background and returns a job id immediately, so the call is never cut off by the MCP request timeout no matter how long the hook runs. Claims the pre-merge attestation when it commits to the merge (dispatch OR enqueue) and consumes it only if that merge lands; a refusal, failure, cancel or drained queue leaves it buffered. While one merge holds it, a further batch needs a fresh attestation. If a merge is ALREADY running for this session, this ENQUEUES the next batch (spinclass#265 stacked merges) instead of refusing: it returns \"enqueued at position N\" with NO ringmaster job id yet — you cannot job_wait on a queued merge until it dequeues, when a start notice carrying its job id arrives (job_wait on that id then; its completion wake carries the same id), so end your turn and let the wake arrive. A queued merge runs when the current gate completes, re-preparing against the branch as it then stands; if the running merge FAILS, the queued merge is aborted (its base assumption broke) and you are woken to resolve and re-merge. [hooks].disable-merge-stacking = true restores the old already-running refusal. The pre-merge hook runs in a dedicated build worktree, not yours, so the session worktree stays free — keep editing and committing there while the job runs; your concurrent edits are simply left for the next merge (never lost, never half-merged). While queued behind the per-repo merge queue (concurrent sessions' merges serialize; FDR 0022), the job log carries `merge queue: waiting behind <session>` heartbeats. This session runs under clown, so a job-wakeup notification ([clown-job] spinclass <job-id> <state>: ...) arrives when the job finishes — start the job, then make progress on other work or simply end your turn; do not poll. Your task list is the test: pending items ⇒ async; empty board ⇒ sync or async-then-end-turn. Inspect on demand with ringmaster's job_status/job_read using the returned job id (a spinclass async job IS a ringmaster job); to block on the result instead, use ringmaster's job_wait; session-job-cancel to abort."
+	base := "Non-blocking variant of merge-this-session: starts the merge (including the pre-merge hook) in the background and returns a job id immediately, so the call is never cut off by the MCP request timeout no matter how long the hook runs. Claims the pre-merge attestation when it commits to the merge (dispatch OR enqueue) and consumes it only if that merge lands; a refusal, failure, cancel or drained queue leaves it buffered. While one merge holds it, a further batch needs a fresh attestation. If a merge is ALREADY running for this session, this ENQUEUES the next batch (spinclass#265 stacked merges) instead of refusing: it returns \"enqueued at position N\" with NO ringmaster job id yet — you cannot job_wait on a queued merge until it dequeues, when a start notice carrying its job id arrives (job_wait on that id then; its completion wake carries the same id), so end your turn and let the wake arrive. " + autostashToolNote + " A queued merge runs when the current gate completes, re-preparing against the branch as it then stands; if the running merge FAILS, the queued merge is aborted (its base assumption broke) and you are woken to resolve and re-merge. [hooks].disable-merge-stacking = true restores the old already-running refusal. The pre-merge hook runs in a dedicated build worktree, not yours, so the session worktree stays free — keep editing and committing there while the job runs; your concurrent edits are simply left for the next merge (never lost, never half-merged). While queued behind the per-repo merge queue (concurrent sessions' merges serialize; FDR 0022), the job log carries `merge queue: waiting behind <session>` heartbeats. This session runs under clown, so a job-wakeup notification ([clown-job] spinclass <job-id> <state>: ...) arrives when the job finishes — start the job, then make progress on other work or simply end your turn; do not poll. Your task list is the test: pending items ⇒ async; empty board ⇒ sync or async-then-end-turn. Inspect on demand with ringmaster's job_status/job_read using the returned job id (a spinclass async job IS a ringmaster job); to block on the result instead, use ringmaster's job_wait; session-job-cancel to abort."
 	if hookPreview == "" {
 		return base
 	}
@@ -1275,7 +1291,7 @@ func buildNothingButTheTruthDescription(skills []sweatfile.PreMergeSkill) string
 // command so agents know what tests/checks the merge will run before
 // invoking it (and skip redundant pre-flight runs of the same suite).
 func buildMergeThisSessionDescription(hookPreview string) string {
-	base := "Merge the current session's worktree into the default branch and clean up. Pushes to origin by default (#126); pass local_only to keep the merge on the LOCAL default branch (the result then flags it NOT pushed). A non-error return means the merge (and push, unless local_only) succeeded; the result text is plain verdict lines (✓/✗ per stage) and is informational — it does not need to be read or parsed to confirm success. This blocks until the pre-merge hook and merge finish (including any wait on the per-repo merge queue — concurrent sessions' merges serialize; FDR 0022), then returns — the right choice when you have nothing else to do (no polling needed). Reach for merge-this-session-async only when you have other independent work to make progress on while the hook runs. When madder is pinned at build time, the response also carries a real MCP `resource_link` content block (URI scheme `madder://blobs/<digest>`) pointing to the full pre-merge hook output. MCP-aware agents fetch via `resources/read`; inspect only on failure. When [[pre-merge-skills]] is live, the buffered attestation is consumed only if this merge lands; any failure leaves it buffered for the retry."
+	base := "Merge the current session's worktree into the default branch and clean up. Pushes to origin by default (#126); pass local_only to keep the merge on the LOCAL default branch (the result then flags it NOT pushed). A non-error return means the merge (and push, unless local_only) succeeded; the result text is plain verdict lines (✓/✗ per stage) and is informational — it does not need to be read or parsed to confirm success. This blocks until the pre-merge hook and merge finish (including any wait on the per-repo merge queue — concurrent sessions' merges serialize; FDR 0022), then returns — the right choice when you have nothing else to do (no polling needed). Reach for merge-this-session-async only when you have other independent work to make progress on while the hook runs. When madder is pinned at build time, the response also carries a real MCP `resource_link` content block (URI scheme `madder://blobs/<digest>`) pointing to the full pre-merge hook output. MCP-aware agents fetch via `resources/read`; inspect only on failure. When [[pre-merge-skills]] is live, the buffered attestation is consumed only if this merge lands; any failure leaves it buffered for the retry. " + autostashToolNote
 	if hookPreview == "" {
 		return base
 	}

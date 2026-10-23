@@ -22,6 +22,14 @@ type PostMergeOptions struct {
 	// lands. Absent-vs-empty is load-bearing.
 	Targets []string
 
+	// NoAutostash turns off the default autostash (#416): with it false,
+	// uncommitted TRACKED changes in the session worktree are shelved (the
+	// session's own stash shelf, never git's shared stack) before the rebase
+	// and restored right after the synchronous prefix. Untracked files are
+	// never stashed: they do not block the rebase. true restores the old
+	// refusal of a dirty tree. Inverted so the zero value is the default.
+	NoAutostash bool
+
 	// Timeout overrides [hooks].post-merge-timeout for THIS merge only: nil
 	// leaves the sweatfile (or its 10m default) in force; a zero duration
 	// disables the cap; any positive duration is the cap, raising OR lowering

@@ -330,6 +330,16 @@ shelf without *--force*, and *sc resurrect* restores the commit only.
 *branch* rebase with *autostash* still uses git's own transient stash within a
 single call.
 
+A merge (*merge-this-session*, its *-async* twin and *sc merge*) uses this
+shelf for its own autostash (spinclass#416), on by default: uncommitted tracked
+changes become an entry labelled _spinclass merge autostash (#416)_ before the
+rebase, and that entry, by its number, is applied and dropped right after the
+rebase and repair. Untracked files are left in place, since they do not block
+the rebase. A conflicting restore keeps the entry, leaves the conflict in the
+worktree, and the merge result names the entry; resolve the conflict, then
+*grit\_stash drop* it. *autostash: false* (*sc merge --no-autostash*) restores
+the refusal of a dirty tree.
+
 # THE sc grit ESCAPE HATCH
 
 *sc grit* _tool_ ['_json_'] runs one grit tool by hand, as an unconfined
