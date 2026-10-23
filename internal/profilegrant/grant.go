@@ -235,7 +235,27 @@ type WalkOptions struct {
 	// is minted only when its clown boots), while the next link's grantor is a
 	// principal; this mapping joins the two.
 	SessionOfPrincipal func(principal string) (sessionKey string, ok bool)
+
+	// BaseChain returns the _base chain of a profile definition, profile@digest
+	// excluded, nearest base first, as clown resolved it with the profile (never
+	// re-resolved by name: a user profile may shadow a builtin's). Each link
+	// carries how the step below it widens that base; an error means the
+	// definition cannot be checked (its live digest is no longer digest, or it
+	// does not resolve). nil keeps the pre-stacking rule: a child profile must
+	// be held by the parent (D1 stacking, FDR 0034 "Verification").
+	BaseChain func(profile, digest string) ([]BaseLink, error)
 }
+
+// BaseLink is one step up a profile's _base chain: the base's name and
+// digest, and every way the profile one step down widens it (empty for a
+// narrowing).
+type BaseLink struct {
+	Name, Digest string
+	Widenings    []string
+}
+
+// maxBaseDepth bounds a _base chain, as maxChainDepth bounds a grant chain.
+const maxBaseDepth = 8
 
 // bindsGrantor reports whether child's grantor is the parent's grantee,
 // directly or through the session mapping. The error text says when a mapping
@@ -284,16 +304,55 @@ func Narrows(parent Grant, parentDigest string, child Grant, opts WalkOptions) e
 			child.Expires.UTC().Format(timeLayout), parent.Expires.UTC().Format(timeLayout))
 	}
 	for _, name := range child.profileNames() {
+		childDigest := child.Profiles[name]
 		parentDigestOfProfile, held := parent.Profiles[name]
 		if !held {
-			return fmt.Errorf("profile %s not held by parent", name)
+			if err := opts.reachesHeldBase(parent, name, childDigest); err != nil {
+				return err
+			}
+			continue
 		}
-		if childDigest := child.Profiles[name]; childDigest != parentDigestOfProfile {
+		if childDigest != parentDigestOfProfile {
 			return fmt.Errorf("profile %s digest differs (parent %s, child %s)",
 				name, parentDigestOfProfile, childDigest)
 		}
 	}
 	return nil
+}
+
+// reachesHeldBase is the D1 stacking rule for a child profile the parent does
+// not hold: its _base chain must reach a profile the parent holds, at the
+// digest the parent holds it, and no edge on the way may widen its base (the
+// per-edge catalog check, V-D1-6/V-D1-10). Rights stay derived from profile
+// names and are judged along that chain (D1 interim, FDR 0034
+// "Verification"): the child gains nothing the held base does not grant.
+func (o WalkOptions) reachesHeldBase(parent Grant, name, digest string) error {
+	if o.BaseChain == nil {
+		return fmt.Errorf("profile %s not held by parent", name)
+	}
+	chain, err := o.BaseChain(name, digest)
+	if err != nil {
+		return fmt.Errorf("profile %s not held by parent; its base chain cannot be checked: %w", name, err)
+	}
+	if len(chain) > maxBaseDepth {
+		return fmt.Errorf("profile %s: base chain longer than %d", name, maxBaseDepth)
+	}
+	names := make([]string, 0, len(chain))
+	for _, link := range chain {
+		if len(link.Widenings) > 0 {
+			return fmt.Errorf("profile %s widens base %s by: %s", name, link.Name, strings.Join(link.Widenings, "; "))
+		}
+		if heldDigest, held := parent.Profiles[link.Name]; held {
+			if heldDigest != link.Digest {
+				return fmt.Errorf("profile %s: the parent holds base %s at digest %s, but %s's base chain reaches it at %s",
+					name, link.Name, heldDigest, name, link.Digest)
+			}
+			return nil
+		}
+		names = append(names, link.Name)
+	}
+	return fmt.Errorf("profile %s not held by parent, and its base chain (%s) reaches no profile the parent holds",
+		name, strings.Join(names, ", "))
 }
 
 // RootVerifier checks the operator card's signature. actText is the text

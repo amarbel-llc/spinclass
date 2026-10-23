@@ -327,6 +327,29 @@ through a child record at all: it needs a D11 escalation signed by the card
 would allow more than its parent's still verifies for the conjunction removes
 the excess; the link must still be signed by the parent's grantee.
 
+**Stacking by `_base` in `Narrows` (built 2026-10-23, D1 vector V-D1-2).**
+A child profile the parent does not hold is accepted when its `_base` chain,
+as clown resolved it with the profile and never re-resolved by name, reaches a
+profile the parent holds at the digest the parent holds it, and no edge on the
+way widens its base (the per-edge catalog check: provider, backend, model,
+kept servers, per-tool exclusions, env; V-D1-6 and V-D1-10). A base reached
+at another digest, a chain that reaches nothing held, an unresolvable
+definition, or a chain longer than 8 is refused; `WalkOptions.BaseChain` nil
+keeps the old rule (the child's profile must be held). Each refusal names the
+profile and the edge.
+
+INTERIM (sprint 1): a grant's rights are derived from its profile names and
+judged on the _base chain. Rights as explicit record lines (D1 section 4) are
+the target design, arriving with the hyphence carrier change. This is not the
+final design.
+
+- rights subset = derived-rights subset along `_base`;
+- rights stay a cap: a child's rights are its base chain's rights
+  intersected with the parent's, so nothing outside the chain is derivable;
+- a rights line that differs from the profiles' derived rights is a parse
+  refusal (V-D1-2b, "same profile, fewer rights", stays refused until the
+  record carries rights lines).
+
 **Where the code would change later (NOT changed; line numbers will drift).**
 `profilegrant.Narrows` is the per-edge subset check and stays for catalog
 nodes. `Walk` calls it at each edge and returns the start grant as the
