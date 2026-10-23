@@ -164,7 +164,7 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, rep *crap.Rep
 	}
 
 	pm = pm.StampStartedAt()
-	pinnedSha, prepErr := PrepareMerge(ts, repoPath, wtPath, branch, defaultBranch, gitSync, pm)
+	pinnedSha, prepErr := PrepareMerge(ctx, ts, repoPath, wtPath, branch, defaultBranch, gitSync, pm)
 	if prepErr != nil {
 		return nil, prepErr
 	}
@@ -185,7 +185,11 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, rep *crap.Rep
 // synchronously (before returning the job id), freeing the session worktree the
 // moment the rebase lands while FinishMerge's slow pre-merge hook runs detached
 // in an isolated build worktree.
-func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch string, gitSync bool, pm PostMergeOptions) (pinnedSha string, err error) {
+//
+// ctx reaches only the REPAIR phase (spinclass#401): a cancel stops a hung
+// repair and its process group. The other stages are short git commands and
+// keep running to completion.
+func PrepareMerge(ctx context.Context, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch string, gitSync bool, pm PostMergeOptions) (pinnedSha string, err error) {
 	prepStart := time.Now()
 	var mx phaseMetrics
 	// A failed prepare is the whole merge failing, so it also closes out the
@@ -262,7 +266,7 @@ func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch s
 	if h, ok := trustedHierarchy(repoPath, defaultBranch, gitSync); ok {
 		preamble.hierarchy, preamble.haveHierarchy = h, true
 	}
-	if rErr := preamble.repair(ts, mx, wtPath, branch); rErr != nil {
+	if rErr := preamble.repair(ctx, ts, mx, wtPath, branch); rErr != nil {
 		return "", rErr
 	}
 
@@ -353,7 +357,7 @@ func validatePostMergeSelection(ts *crap.TestStream, repoPath, branch, pinnedSha
 
 // repair runs the REPAIR phase (FDR 0018) in dir. It is a no-op when the
 // hierarchy did not load or repair is inactive.
-func (p mergePreamble) repair(ts *crap.TestStream, mx phaseMetrics, dir, branch string) error {
+func (p mergePreamble) repair(ctx context.Context, ts *crap.TestStream, mx phaseMetrics, dir, branch string) error {
 	if !p.haveHierarchy || !p.hierarchy.Merged.RepairActive() {
 		return nil
 	}
@@ -375,8 +379,8 @@ func (p mergePreamble) repair(ts *crap.TestStream, mx phaseMetrics, dir, branch 
 		return failStep(ts, "dirty check "+branch, dirtyErr, "")
 	}
 	repairStart := time.Now()
-	repairErr := runRepairPhase(ts, p.hierarchy, dir, branch)
-	mx.observeErr(context.Background(), "repair", repairStart, repairErr)
+	repairErr := runRepairPhase(ctx, ts, p.hierarchy, dir, branch)
+	mx.observeErr(ctx, "repair", repairStart, repairErr)
 	return repairErr
 }
 
@@ -1499,18 +1503,17 @@ func withLeftoverIndexLock(err error, wtPath string) error {
 // Repair deliberately runs in the session worktree, not the build worktree: the
 // build worktree's pinned-sha `merge --ff-only` would discard an amend made
 // there, and threading the repaired sha out would strand the session branch and
-// replay-conflict on the next merge (see FDR 0018). It uses context.Background
-// because PrepareMerge is the synchronous prefix — for async merge it runs
-// before the cancellable job exists — so the repair hook's own wall-clock cap
-// ([hooks].repair-timeout) is what bounds it (spinclass#401).
-func runRepairPhase(ts *crap.TestStream, hierarchy sweatfile.Hierarchy, wtPath, branch string) error {
+// replay-conflict on the next merge (see FDR 0018). It is bounded twice
+// (spinclass#401): by the caller's ctx (a cancelled merge call or job) and by
+// the repair hook's own wall-clock cap, [hooks].repair-timeout.
+func runRepairPhase(ctx context.Context, ts *crap.TestStream, hierarchy sweatfile.Hierarchy, wtPath, branch string) error {
 	// Pre-repair HEAD; the delta against the post-repair HEAD is the
 	// tool-agnostic "did it amend" signal (the repair command exits 0 whether or
 	// not it changed anything, e.g. conformist --exit-zero-on-fix).
 	sha0, _ := git.RevParse(wtPath, "HEAD")
 
 	var out bytes.Buffer
-	if hookErr := hookrun.Repair(context.Background(), hierarchy.Merged, wtPath, &out); hookErr != nil {
+	if hookErr := hookrun.Repair(ctx, hierarchy.Merged, wtPath, &out); hookErr != nil {
 		err := fmt.Errorf("repair hook failed: %w", hookErr)
 		if errors.Is(hookErr, hookrun.ErrRepairTimeout) {
 			err = withLeftoverIndexLock(err, wtPath)

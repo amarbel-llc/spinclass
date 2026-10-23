@@ -107,7 +107,7 @@ func runPrepare(t *testing.T, repoDir, wtPath, branch string) (pinnedSha string,
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	pinnedSha, err = PrepareMerge(ts, repoDir, wtPath, branch, "main", false, PostMergeOptions{})
+	pinnedSha, err = PrepareMerge(context.Background(), ts, repoDir, wtPath, branch, "main", false, PostMergeOptions{})
 	ts.Finish()
 	return pinnedSha, testRecords(decodeRecords(t, buf.Bytes())), err
 }
@@ -223,6 +223,32 @@ func TestPrepareMergeRepairTimeoutReportsIndexLock(t *testing.T) {
 	}
 	if tr, ok := findTest(tests, "repair feature"); !ok || tr.OK {
 		t.Errorf("want a failing repair point, got %+v (all: %v)", tr, testDescs(tests))
+	}
+	if got := runGit(t, wtPath, "rev-parse", "HEAD"); got != head {
+		t.Errorf("HEAD = %s, want unchanged %s", got, head)
+	}
+}
+
+// TestPrepareMergeCancelStopsRepair (#401): the caller's ctx reaches repair, so
+// a cancel stops a hung repair at once and is not reported as a cap kill.
+func TestPrepareMergeCancelStopsRepair(t *testing.T) {
+	repoDir, wtPath, head := setupRepairRepoWithSweatfile(t, "feature",
+		"[hooks]\nrepair = \"sleep 600\"\n")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	time.AfterFunc(300*time.Millisecond, cancel)
+
+	var buf bytes.Buffer
+	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
+	ts := rep.TestStream(0)
+	start := time.Now()
+	_, err := PrepareMerge(ctx, ts, repoDir, wtPath, "feature", "main", false, PostMergeOptions{})
+	ts.Finish()
+	if elapsed := time.Since(start); elapsed > 20*time.Second {
+		t.Errorf("PrepareMerge took %s after a cancel at 300ms", elapsed)
+	}
+	if err == nil || errors.Is(err, hookrun.ErrRepairTimeout) {
+		t.Fatalf("err = %v, want a cancel failure that is not ErrRepairTimeout", err)
 	}
 	if got := runGit(t, wtPath, "rev-parse", "HEAD"); got != head {
 		t.Errorf("HEAD = %s, want unchanged %s", got, head)

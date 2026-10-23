@@ -33,7 +33,7 @@ func prepareRacedMerge(t *testing.T, repoDir, wtPath, branch, sessionFile, sessi
 	rep = crap.NewReporter(buf, crap.ReporterOptions{})
 	ts = rep.TestStream(0)
 	var err error
-	pinnedSha, err = PrepareMerge(ts, repoDir, wtPath, branch, "main", false, PostMergeOptions{})
+	pinnedSha, err = PrepareMerge(context.Background(), ts, repoDir, wtPath, branch, "main", false, PostMergeOptions{})
 	if err != nil {
 		t.Fatalf("PrepareMerge: %v\n%s", err, buf.String())
 	}

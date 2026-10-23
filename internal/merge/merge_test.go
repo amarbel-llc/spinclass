@@ -180,7 +180,7 @@ func TestPrepareMergePinsShaAcrossConcurrentCommit(t *testing.T) {
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	pinnedSha, err := PrepareMerge(ts, repoDir, wtPath, "feature-pin", "main", false, PostMergeOptions{})
+	pinnedSha, err := PrepareMerge(context.Background(), ts, repoDir, wtPath, "feature-pin", "main", false, PostMergeOptions{})
 	if err != nil {
 		t.Fatalf("PrepareMerge: %v\n%s", err, buf.String())
 	}
@@ -253,7 +253,7 @@ func TestPrepareMergeHaltsOnPostRebaseConflict(t *testing.T) {
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	_, err := PrepareMerge(ts, repoDir, wtPath, "feature-conflict", "main", false, PostMergeOptions{})
+	_, err := PrepareMerge(context.Background(), ts, repoDir, wtPath, "feature-conflict", "main", false, PostMergeOptions{})
 	if err == nil {
 		t.Fatalf("expected PrepareMerge to halt on the post-rebase conflict; stream:\n%s", buf.String())
 	}
@@ -883,7 +883,7 @@ func TestPrepareMergeEmitsCoActiveSessionsPoint(t *testing.T) {
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	if _, err := PrepareMerge(ts, repoDir, wtPath, "feature-co", "main", false, PostMergeOptions{}); err != nil {
+	if _, err := PrepareMerge(context.Background(), ts, repoDir, wtPath, "feature-co", "main", false, PostMergeOptions{}); err != nil {
 		t.Fatalf("PrepareMerge: %v\n%s", err, buf.String())
 	}
 	ts.Finish()
@@ -917,7 +917,7 @@ func TestPrepareMergeNoCoActivePointWhenNone(t *testing.T) {
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	if _, err := PrepareMerge(ts, repoDir, wtPath, "feature-solo", "main", false, PostMergeOptions{}); err != nil {
+	if _, err := PrepareMerge(context.Background(), ts, repoDir, wtPath, "feature-solo", "main", false, PostMergeOptions{}); err != nil {
 		t.Fatalf("PrepareMerge: %v\n%s", err, buf.String())
 	}
 	ts.Finish()

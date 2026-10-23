@@ -225,7 +225,7 @@ func TestFinishMergeChecksPostMergeSectionAuthoritatively(t *testing.T) {
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	pinned, err := PrepareMerge(ts, repoDir, wtPath, "feature", "main", false, pm)
+	pinned, err := PrepareMerge(context.Background(), ts, repoDir, wtPath, "feature", "main", false, pm)
 	if err != nil {
 		t.Fatalf("PrepareMerge with the digest: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestMergeRefusesChangedPostMergeSectionOnUnqueuedPath(t *testing.T) {
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	pinned, err := PrepareMerge(ts, repoDir, wtPath, "feature", "main", false, acceptHeadSection(t, repoDir, wtPath))
+	pinned, err := PrepareMerge(context.Background(), ts, repoDir, wtPath, "feature", "main", false, acceptHeadSection(t, repoDir, wtPath))
 	if err != nil {
 		t.Fatalf("PrepareMerge: %v", err)
 	}

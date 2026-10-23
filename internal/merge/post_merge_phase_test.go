@@ -74,7 +74,7 @@ func runFinishWithMidEdit(t *testing.T, repoDir, wtPath, branch string, gitSync 
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	pinnedSha, prepErr := PrepareMerge(ts, repoDir, wtPath, branch, "main", gitSync, pm)
+	pinnedSha, prepErr := PrepareMerge(context.Background(), ts, repoDir, wtPath, branch, "main", gitSync, pm)
 	if prepErr != nil {
 		ts.Finish()
 		return decodeRecords(t, buf.Bytes()), prepErr
@@ -526,7 +526,7 @@ func TestPostMergeRunsAfterWorktreeTeardown(t *testing.T) {
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	pinnedSha, prepErr := PrepareMerge(ts, repoDir, wtPath, "feature", "main", false, PostMergeOptions{})
+	pinnedSha, prepErr := PrepareMerge(context.Background(), ts, repoDir, wtPath, "feature", "main", false, PostMergeOptions{})
 	if prepErr != nil {
 		t.Fatalf("PrepareMerge: %v", prepErr)
 	}

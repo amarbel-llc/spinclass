@@ -222,7 +222,7 @@ func buildQueuedMergeRun(repoPath, wtPath, branch, defaultBranch string, gitSync
 		rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "merge " + branch, Source: "spinclass"})
 		ts := rep.TestStream(0)
 		pm := pm.StampStartedAt() // the total timer starts at dequeue, not enqueue
-		pinnedSha, prepErr := merge.PrepareMerge(ts, repoPath, wtPath, branch, defaultBranch, gitSync, pm)
+		pinnedSha, prepErr := merge.PrepareMerge(ctx, ts, repoPath, wtPath, branch, defaultBranch, gitSync, pm)
 		if prepErr != nil {
 			ts.Finish()
 			text := present.RenderPlain(bytes.NewReader(buf.Bytes()))

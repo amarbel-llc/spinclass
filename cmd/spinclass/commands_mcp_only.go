@@ -551,7 +551,7 @@ func handleCheckThisSession(ctx context.Context, _ json.RawMessage, _ command.Pr
 // commits to dispatch or enqueue, and consuming it only if the merge lands. The
 // result is retrieved via ringmaster's own surfaces (job_status/job_read/
 // job_wait) using the returned id; only registered under clown.
-func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+func handleMergeThisSessionAsync(ctx context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	if refusal := refuseConfinedServeCaller("merge-this-session-async", "sc merge <target>"); refusal != nil {
 		return refusal, nil
 	}
@@ -676,7 +676,9 @@ func handleMergeThisSessionAsync(_ context.Context, args json.RawMessage, _ comm
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "merge " + branch, Source: "spinclass"})
 	ts := rep.TestStream(0)
 	pm = pm.StampStartedAt() // total spans the sync prefix and the backgrounded finish
-	pinnedSha, prepErr := merge.PrepareMerge(ts, repoPath, cwd, branch, defaultBranch, gitSync, pm)
+	// The request ctx reaches only repair (#401); whether go-mcp cancels it on a
+	// client cancel or timeout is purse-first#219. The repair cap bounds it either way.
+	pinnedSha, prepErr := merge.PrepareMerge(ctx, ts, repoPath, cwd, branch, defaultBranch, gitSync, pm)
 	if prepErr != nil {
 		ts.Finish() // the deferred release keeps the attestation for the retry (#303)
 		text := present.RenderPlain(bytes.NewReader(buf.Bytes()))

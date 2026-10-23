@@ -246,9 +246,12 @@ not ok   repair prime-pine
   runs in its own process group; the cap SIGTERMs the group, then SIGKILLs
   it after 10 seconds. The failed merge releases the claim through the
   ordinary error path. A git `index.lock` the kill left behind is named in
-  the failure, not removed. Not yet done: threading the MCP call's
-  cancellation into repair. A claim held by a handler that hangs elsewhere
-  is #408.
+  the failure, not removed. The caller's ctx also reaches repair:
+  `session-job-cancel` of a dequeued (queued) merge, a cancelled `sc merge`,
+  and the MCP request ctx of `merge-this-session(-async)` all stop it the
+  same way. Whether go-mcp cancels that request ctx on a client cancel or
+  timeout is purse-first#219, so the cap stays the guaranteed bound. A claim
+  held by a handler that hangs elsewhere is #408.
 - **GPG signing.** `git commit --amend` re-signs HEAD. Per repo policy commits
   are signed via the piggy/PIV agent; if it is locked the amend fails (exit 2,
   git's stderr), repair fails, and the merge aborts with a legible "repair

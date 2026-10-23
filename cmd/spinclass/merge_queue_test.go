@@ -281,6 +281,54 @@ func TestQueuedRunSettlesByOutcome(t *testing.T) {
 	}
 }
 
+// TestQueuedRunCancelStopsRepair (#401): cancelling a dequeued merge's job ctx
+// (session-job-cancel) stops a hung repair at once, not at the repair cap, and
+// the failed run releases the attestation.
+func TestQueuedRunCancelStopsRepair(t *testing.T) {
+	cwd, repoPath, branch := gatedWorktreeFixture(t, "[hooks]\npre-merge = \"true\"\nrepair = \"sleep 600\"\n\n"+gateSweat)
+	commitFile(t, cwd, "x.txt")
+	gs, failMsg, ok, gitErr := resolveSession(cwd)
+	if !ok || gitErr != nil {
+		t.Fatalf("resolveSession: ok=%v msg=%q err=%v", ok, failMsg, gitErr)
+	}
+	hold, msg, hok := holdGate(gs, cwd)
+	if !hok {
+		t.Fatalf("holdGate refused: %s", msg)
+	}
+	defaultBranch, err := merge.ResolveDefaultBranch(repoPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := buildQueuedMergeRun(repoPath, cwd, branch, defaultBranch, false, merge.PostMergeOptions{Gate: merge.GateAttested}, hold)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	time.AfterFunc(500*time.Millisecond, cancel)
+	type outcome struct {
+		text  string
+		isErr bool
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		text, isErr := run(ctx, io.Discard)
+		done <- outcome{text, isErr}
+	}()
+	select {
+	case o := <-done:
+		if !o.isErr {
+			t.Fatalf("a cancelled run must fail, got: %s", o.text)
+		}
+		if strings.Contains(o.text, "repair-timeout") {
+			t.Errorf("a cancel must not read as a repair-timeout kill: %s", o.text)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the cancelled run did not return within 30s: the job ctx does not reach repair")
+	}
+	if a := readAttestation(t, repoPath, branch); a == nil || a.Claim != nil {
+		t.Errorf("a cancelled run should leave an unclaimed attestation, got %+v", a)
+	}
+}
+
 // TestCheckAsyncConsumesOnlyOnGreen mirrors the sync check test for the async
 // twin.
 func TestCheckAsyncConsumesOnlyOnGreen(t *testing.T) {
