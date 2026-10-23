@@ -18,8 +18,10 @@ import (
 //
 // It fails closed. The caller counts as confined unless every source positively
 // shows it is not: the principal must be resolvable, the frontend principal
-// mapping must be absent (not merely unreadable), and the unit records directory
-// must either not exist or hold no record naming the principal. An unreadable
+// mapping must be absent (not merely unreadable) or the one the SessionStart
+// hook writes for an unconfined session (unit UnconfinedUnit), and the unit
+// records directory must either not exist or hold no record naming the
+// principal. An unreadable
 // or unparsable record, a launch-failed record naming the principal, and
 // several records naming it are all "confined". A process that runs inside a
 // clown agent unit is confined whatever the records say: from there the state
@@ -31,8 +33,10 @@ func ClassifyCaller(sys System, stateDir, principal string) (confined bool, why 
 	if err := validPrincipalName(principal); err != nil {
 		return true, fmt.Sprintf("caller principal unresolved: %v", err)
 	}
-	if _, err := LoadPrincipalMapping(sys, stateDir, principal); err == nil {
-		return true, fmt.Sprintf("the frontend maps principal %s to a confined session", principal)
+	if m, err := LoadPrincipalMapping(sys, stateDir, principal); err == nil {
+		if m.Unit != UnconfinedUnit {
+			return true, fmt.Sprintf("the frontend maps principal %s to a confined session", principal)
+		}
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return true, fmt.Sprintf("principal mapping unreadable: %v", err)
 	}

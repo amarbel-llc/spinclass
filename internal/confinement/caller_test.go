@@ -25,6 +25,10 @@ func callerMapping(principal string) string {
 	return `{"version":1,"principal":"` + principal + `","session_key":"r/b","worktree":"/r/.worktrees/b","unit":"agent-a.service"}`
 }
 
+func callerUnconfinedMapping(principal string) string {
+	return `{"version":1,"principal":"` + principal + `","session_key":"r/b","worktree":"/r/.worktrees/b","unit":"` + UnconfinedUnit + `"}`
+}
+
 func callerHost(units map[string]string) *fakeSys {
 	sys := &fakeSys{files: map[string]string{}, dirs: map[string][]string{}}
 	if units == nil {
@@ -125,6 +129,29 @@ func TestClassifyCaller(t *testing.T) {
 			},
 			wantConfined: true,
 			wantWhy:      "maps principal principal-a",
+		},
+		{
+			// The SessionStart hook writes this for every unconfined worktree
+			// session (hooks.bindUnconfinedPrincipal); it must not confine.
+			name:      "unconfined mapping and no unit record",
+			principal: me,
+			build: func() *fakeSys {
+				sys := callerHost(nil)
+				sys.files[callerState+"/spinclass/principals/"+me+".json"] = callerUnconfinedMapping(me)
+				return sys
+			},
+			wantWhy: "no unit records exist",
+		},
+		{
+			name:      "unconfined mapping but a unit record names the principal",
+			principal: me,
+			build: func() *fakeSys {
+				sys := callerHost(map[string]string{"1.json": callerUnitRecord(me)})
+				sys.files[callerState+"/spinclass/principals/"+me+".json"] = callerUnconfinedMapping(me)
+				return sys
+			},
+			wantConfined: true,
+			wantWhy:      "names principal principal-a",
 		},
 		{
 			name:      "mapping unparsable",
