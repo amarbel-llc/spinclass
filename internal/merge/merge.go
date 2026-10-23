@@ -18,6 +18,7 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/check"
+	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/executor"
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/hookrun"
@@ -845,7 +846,16 @@ func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, push,
 		insideWorktree = isInsideWorktree(cwd, wtPath)
 	}
 
-	if !inSession && !insideWorktree {
+	// A merge run from outside the session (a terminal `sc merge <target>`)
+	// must not remove the tree under an agent that is still running in it
+	// (#409). Such a session is treated as in-session: the work lands, the
+	// worktree, branch and state stay, and `sc close` remains the teardown.
+	live := !inSession && !insideWorktree && sessionIsLive(repoPath, branch)
+	if live {
+		ts.Ok("keep worktree " + branch + " (its session is live; run sc close once its agent is done)")
+	}
+
+	if !inSession && !insideWorktree && !live {
 		if !tipMatchesPin {
 			ts.Ok("keep worktree " + branch + " (commits added since pin; left for a later merge)")
 		} else if gitstore.ShelfNotEmpty(wtPath) {
@@ -890,7 +900,7 @@ func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, push,
 		ts.Ok("push")
 	}
 
-	if inSession {
+	if inSession || live {
 		// Session state stays put. spinclass worktrees are workers — they
 		// host many sequences of work separated by `merge-this-session`,
 		// and tearing down state.json + the central index symlink here
@@ -905,6 +915,20 @@ func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, push,
 	// warrant; abandoned state is reaped by `sc clean`.
 	_, _ = executor.RequestClose(repoPath, branch)
 	return nil
+}
+
+// sessionIsLive reports whether the session on branch still has a running
+// agent: a fresh clown presence record for its key (clown RFC-0014; a stale or
+// missing record is dead), or a recorded active state whose PID is alive. The
+// PID is worker-writable, but this answer only ever KEEPS a worktree, so a
+// forged one cannot cause a removal.
+func sessionIsLive(repoPath, branch string) bool {
+	key := sessionKeyFor(repoPath, branch)
+	if len(clown.PresenceByDecoration(time.Now().UTC())[key]) > 0 {
+		return true
+	}
+	st, err := session.Read(repoPath, branch)
+	return err == nil && st.SessionState == session.StateActive && session.IsAlive(st.PID)
 }
 
 // sessionKeyFor is the recorded session key for a branch, falling back to the
