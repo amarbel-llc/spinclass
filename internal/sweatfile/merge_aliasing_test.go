@@ -87,3 +87,27 @@ func TestMergeWithDoesNotMutateTheBaseSysprompt(t *testing.T) {
 		t.Errorf("second merge lost the base man-index: %+v", *second.Sysprompt)
 	}
 }
+
+func TestMergeWithDoesNotMutateTheBaseSessionEntry(t *testing.T) {
+	base := Sweatfile{SessionEntry: &SessionEntry{
+		Start: []string{"base"}, Env: map[string]string{"G": "base"},
+		ModelFlags: map[string]string{"claude": "--model"}, ModelIDs: map[string]string{"opus": "base"},
+	}}
+	first := base.MergeWith(Sweatfile{SessionEntry: &SessionEntry{Start: []string{"one"}, Env: map[string]string{"ONE": "1"}}})
+	second := base.MergeWith(Sweatfile{SessionEntry: &SessionEntry{
+		ModelIDs: map[string]string{"opus": "two"}, ModelFlags: map[string]string{"other": "-m"},
+	}})
+	if !slices.Equal(base.SessionEntry.Start, []string{"base"}) ||
+		!maps.Equal(base.SessionEntry.Env, map[string]string{"G": "base"}) ||
+		!maps.Equal(base.SessionEntry.ModelFlags, map[string]string{"claude": "--model"}) ||
+		!maps.Equal(base.SessionEntry.ModelIDs, map[string]string{"opus": "base"}) {
+		t.Errorf("the base was mutated: %+v", *base.SessionEntry)
+	}
+	if !slices.Equal(second.SessionEntry.Start, []string{"base"}) || !maps.Equal(second.SessionEntry.Env, map[string]string{"G": "base"}) {
+		t.Errorf("the second merge carries the first override: %+v", *second.SessionEntry)
+	}
+	if !maps.Equal(first.SessionEntry.ModelIDs, map[string]string{"opus": "base"}) ||
+		!maps.Equal(first.SessionEntry.ModelFlags, map[string]string{"claude": "--model"}) {
+		t.Errorf("the first merge carries the second override: %+v", *first.SessionEntry)
+	}
+}

@@ -283,9 +283,13 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 	}
 
 	// [session-entry]
+	// Copied, and each per-key map cloned before its writes (#351).
 	if other.SessionEntry != nil {
 		if merged.SessionEntry == nil {
 			merged.SessionEntry = &SessionEntry{}
+		} else {
+			cp := *merged.SessionEntry
+			merged.SessionEntry = &cp
 		}
 		if len(other.SessionEntry.Start) > 0 {
 			merged.SessionEntry.Start = other.SessionEntry.Start
@@ -299,6 +303,8 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if len(other.SessionEntry.Env) > 0 {
 			if merged.SessionEntry.Env == nil {
 				merged.SessionEntry.Env = make(map[string]string, len(other.SessionEntry.Env))
+			} else {
+				merged.SessionEntry.Env = maps.Clone(merged.SessionEntry.Env)
 			}
 			for k, v := range other.SessionEntry.Env {
 				merged.SessionEntry.Env[k] = v
@@ -308,6 +314,8 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if len(other.SessionEntry.ModelFlags) > 0 {
 			if merged.SessionEntry.ModelFlags == nil {
 				merged.SessionEntry.ModelFlags = make(map[string]string, len(other.SessionEntry.ModelFlags))
+			} else {
+				merged.SessionEntry.ModelFlags = maps.Clone(merged.SessionEntry.ModelFlags)
 			}
 			for k, v := range other.SessionEntry.ModelFlags {
 				merged.SessionEntry.ModelFlags[k] = v
@@ -317,6 +325,8 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if len(other.SessionEntry.ModelIDs) > 0 {
 			if merged.SessionEntry.ModelIDs == nil {
 				merged.SessionEntry.ModelIDs = make(map[string]string, len(other.SessionEntry.ModelIDs))
+			} else {
+				merged.SessionEntry.ModelIDs = maps.Clone(merged.SessionEntry.ModelIDs)
 			}
 			for k, v := range other.SessionEntry.ModelIDs {
 				merged.SessionEntry.ModelIDs[k] = v
