@@ -42,16 +42,19 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		}
 	}
 
-	// [git]
+	// [git]: copied and concatenated, as [claude] (#351).
 	if other.Git != nil {
 		if merged.Git == nil {
 			merged.Git = &Git{}
+		} else {
+			cp := *merged.Git
+			merged.Git = &cp
 		}
 		if other.Git.Excludes != nil {
 			if len(other.Git.Excludes) == 0 {
 				merged.Git.Excludes = []string{}
 			} else {
-				merged.Git.Excludes = append(merged.Git.Excludes, other.Git.Excludes...)
+				merged.Git.Excludes = slices.Concat(merged.Git.Excludes, other.Git.Excludes)
 			}
 		}
 	}

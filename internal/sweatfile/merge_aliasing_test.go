@@ -47,3 +47,12 @@ func TestMergeWithDoesNotMutateTheBaseClaude(t *testing.T) {
 		t.Errorf("allow: base %v, first %v, second %v", base.Claude.Allow, first.Claude.Allow, second.Claude.Allow)
 	}
 }
+
+func TestMergeWithDoesNotMutateTheBaseGit(t *testing.T) {
+	base := Sweatfile{Git: &Git{Excludes: withSpare("a")}}
+	first := base.MergeWith(Sweatfile{Git: &Git{Excludes: []string{"b"}}})
+	second := base.MergeWith(Sweatfile{Git: &Git{Excludes: []string{"c"}}})
+	if !slices.Equal(base.Git.Excludes, []string{"a"}) || !slices.Equal(first.Git.Excludes, []string{"a", "b"}) || !slices.Equal(second.Git.Excludes, []string{"a", "c"}) {
+		t.Errorf("excludes: base %v, first %v, second %v", base.Git.Excludes, first.Git.Excludes, second.Git.Excludes)
+	}
+}
