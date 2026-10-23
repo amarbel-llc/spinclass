@@ -86,6 +86,28 @@ func TestRunResolvedRefusesAWorktreeWithAShelf(t *testing.T) {
 	}
 }
 
+// #416: the refusal names each kept entry (as grit_stash list shows it) and
+// the way out, so a merge's kept autostash is recoverable from the message.
+func TestRunResolvedShelfRefusalNamesTheEntriesAndTheWayOut(t *testing.T) {
+	repoPath := newShelfCloseRepo(t)
+	wtPath := makeSession(t, repoPath, "feature-x")
+	if err := os.WriteFile(filepath.Join(wtPath, "tracked.txt"), []byte("edit"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitstore.NewShelf().Save(wtPath, store.ShelfSaveRequest{Message: "spinclass merge autostash (#416)"}); err != nil {
+		t.Fatal(err)
+	}
+	err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", false, boolPtr(false), "tap")
+	if err == nil {
+		t.Fatal("a shelved worktree closed without --force")
+	}
+	for _, want := range []string{"entry 1", "spinclass merge autostash (#416)", "grit_stash apply stash_ref=1", "grit_stash drop stash_ref=1"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q lacks %q", err, want)
+		}
+	}
+}
+
 func TestRunResolvedNamesBothDirtAndShelf(t *testing.T) {
 	repoPath := newShelfCloseRepo(t)
 	wtPath := makeSession(t, repoPath, "feature-x")

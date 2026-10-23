@@ -227,7 +227,7 @@ func runResolvedInto(tw *tap.Writer, repoPath, wtPath, branch string, force bool
 	}
 
 	if (unintegrated || dirty || shelved > 0) && !force {
-		reason := describeUnintegrated(branch, unintegrated, dirty, shelved)
+		reason := describeUnintegrated(branch, unintegrated, dirty, shelved) + shelfRecovery(wtPath)
 		if !closeInteractive() {
 			return fmt.Errorf("%s Close requires an interactive terminal to confirm; use --force to skip", reason)
 		}
@@ -443,7 +443,7 @@ func Blocker(repoPath, wtPath, branch string) (string, error) {
 		return "", fmt.Errorf("reading the stash shelf of %s: %w", branch, shelfErr)
 	}
 	if unintegrated || dirty || shelved > 0 {
-		return describeUnintegrated(branch, unintegrated, dirty, shelved), nil
+		return describeUnintegrated(branch, unintegrated, dirty, shelved) + shelfRecovery(wtPath), nil
 	}
 	return "", nil
 }
@@ -708,6 +708,24 @@ func describeShelf(shelved int) string {
 		noun = "entry"
 	}
 	return fmt.Sprintf("%d stash %s that would be lost with the worktree", shelved, noun)
+}
+
+// shelfRecovery names each stash entry in the worktree's shelf (as grit_stash
+// list numbers them) and the way out, so a refusal is actionable (#416): a
+// merge's kept autostash, for one, is recognisable by its message. Empty when
+// the shelf is empty or unreadable (the count already says why).
+func shelfRecovery(wtPath string) string {
+	entries, err := gitstore.NewShelf().List(wtPath)
+	if err != nil || len(entries) == 0 {
+		return ""
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = fmt.Sprintf("entry %d (%s)", e.ID, e.Message)
+	}
+	first := entries[0].ID
+	return fmt.Sprintf(" Stash: %s. Recover one with grit_stash apply stash_ref=%d, then grit_stash drop stash_ref=%d; or drop it if it is not needed.",
+		strings.Join(names, ", "), first, first)
 }
 
 // warnShelfDiscarded surfaces the one thing --force throws away that git would
