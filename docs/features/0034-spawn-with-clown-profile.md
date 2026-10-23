@@ -449,7 +449,7 @@ treat any grant as card-rooted until a confinement check passes.
       held by:  <driver principal>
 
     # sc resume just-us/calm-cypress, after cheap was edited
-    warning: profile cheap changed since spawn (4f1c… -> 9ad2…)
+    profile cheap changed since this session was spawned (recorded 4f1c…, now 9ad2…); resume refused until an authority re-pins it
 
 ## Limitations
 
@@ -470,7 +470,7 @@ treat any grant as card-rooted until a confinement check passes.
 | Lever | Current | Rationale | Change signal |
 |---|---|---|---|
 | Grant expiry default | one working day | matches D5's unattended budget order of magnitude | grants routinely expire mid-task |
-| Resume on digest mismatch | warn | the worker already loaded the old definition; refusing a resume loses work | a changed profile causes a bad resumed session |
+| Resume on digest mismatch | refuse until re-pinned (open question 7, decision 12); the re-pin is `sc resume --repin-profile`, human at a terminal only | a changed profile can widen what the resumed worker may do, so continuing needs an authority's approval | refusals routinely block resumes the operator would always approve (a signed re-pin approval is spinclass#407) |
 | Required-server set | troupe chat and ringmaster | the two a worker needs for hello and wake | a new harness dependency appears |
 
 ## Open questions
