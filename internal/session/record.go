@@ -279,6 +279,7 @@ var authorityFields = []struct {
 	{"handle_rights", func(s *State) any { return s.HandleRights }},
 	{"profile", func(s *State) any { return s.Profile }},
 	{"profile_digest", func(s *State) any { return s.ProfileDigest }},
+	{"profile_rebinds", func(s *State) any { return s.ProfileRebinds }},
 	{"entry", func(s *State) any { return s.Entry }},
 	{"credential", func(s *State) any { return s.Credential }},
 	{"close_request", func(s *State) any { return s.CloseRequest }},

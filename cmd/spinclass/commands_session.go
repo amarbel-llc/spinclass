@@ -8,7 +8,9 @@ import (
 	"io"
 	"os"
 	osexec "os/exec"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
@@ -741,8 +743,26 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		entrypoint = entry.Resume
 	}
 
+	// Built only when a re-pin is needed, so an ordinary resume never reads the
+	// signers file or the grant store (#407).
+	approve := func(profile, from, to string) (session.ProfileRebind, error) {
+		ttl, untrusted, err := sweatfileio.TrustedTransitionTTL(hierarchy, os.Getenv("HOME"), state.RepoPath)
+		if err != nil {
+			return session.ProfileRebind{}, err
+		}
+		for _, path := range untrusted {
+			fmt.Fprintf(os.Stderr, "spinclass: ignoring [profile-rights].transition-ttl in %s: only layers above the repo may set it\n", path)
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		a, err := newProductionApprover(ctx, ttl)
+		if err != nil {
+			return session.ProfileRebind{}, err
+		}
+		return a.Approve(profile, from, to)
+	}
 	entrypoint, profileEnv, err := applyRecordedProfile(*state, spawn.ResolveProfile, entrypoint, p.RepinProfile, shellFallback,
-		repinGate{NoAttach: p.NoAttach, Interactive: stdinStdoutAreTerminals(), Confirm: confirmRepinInteractively},
+		repinGate{NoAttach: p.NoAttach, Interactive: stdinStdoutAreTerminals(), Approve: approve},
 		persistRepin, os.Stdout, os.Stderr)
 	if err != nil {
 		return err

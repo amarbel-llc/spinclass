@@ -425,6 +425,7 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 			st.Profile = existing.Profile
 			st.ProfileDigest = existing.ProfileDigest
 			st.AuthorizingGrant = existing.AuthorizingGrant
+			st.ProfileRebinds = existing.ProfileRebinds
 			st.HelloSentAt = existing.HelloSentAt
 			st.PreMergeAttestation = existing.PreMergeAttestation
 			if existed {

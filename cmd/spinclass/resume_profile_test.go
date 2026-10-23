@@ -155,32 +155,37 @@ func TestPlanRecordedProfileDigestMismatch(t *testing.T) {
 	}
 }
 
-func gateWith(noAttach, interactive bool, answer bool, asked *int) repinGate {
-	return repinGate{NoAttach: noAttach, Interactive: interactive, Confirm: func(profile, from, to string) (bool, error) {
+// gateWith stands in for the transition approver: approved returns a rebind
+// for the change it was asked about, otherwise the card act fails.
+func gateWith(noAttach, interactive bool, approved bool, asked *int) repinGate {
+	return repinGate{NoAttach: noAttach, Interactive: interactive, Approve: func(profile, from, to string) (session.ProfileRebind, error) {
 		*asked++
 		if profile != "lean" || from != "old" || to != "new" {
-			return false, errors.New("confirm was not shown the profile and both digests")
+			return session.ProfileRebind{}, errors.New("approver was not given the profile and both digests")
 		}
-		return answer, nil
+		if !approved {
+			return session.ProfileRebind{}, errors.New("card act cancelled")
+		}
+		return session.ProfileRebind{From: from, To: to, Transition: "tr-1", By: "operator"}, nil
 	}}
 }
 
 func TestAuthorizeRepin(t *testing.T) {
 	cases := []struct {
-		name                          string
-		noAttach, interactive, answer bool
-		wantErr                       string
-		wantAsked                     int
+		name                            string
+		noAttach, interactive, approved bool
+		wantErr                         string
+		wantAsked                       int
 	}{
 		{"no-attach refused", true, true, true, "--no-attach", 0},
 		{"non-interactive refused", false, false, true, "interactive terminal", 0},
-		{"declined refused", false, true, false, "declined", 1},
-		{"accepted proceeds", false, true, true, "", 1},
+		{"not approved refused", false, true, false, "not approved", 1},
+		{"approved proceeds", false, true, true, "", 1},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			asked := 0
-			err := authorizeRepin("lean", "old", "new", gateWith(c.noAttach, c.interactive, c.answer, &asked))
+			_, err := authorizeRepin("lean", "old", "new", gateWith(c.noAttach, c.interactive, c.approved, &asked))
 			if c.wantErr == "" && err != nil || c.wantErr != "" && (err == nil || !strings.Contains(err.Error(), c.wantErr)) {
 				t.Fatalf("err=%v, want %q", err, c.wantErr)
 			}
@@ -199,22 +204,25 @@ func TestApplyRecordedProfilePersistsOnlyAnAuthorizedRepin(t *testing.T) {
 		calls := 0
 		var stdout, stderr strings.Builder
 		entry, _, err = applyRecordedProfile(st, fakeResolve("new", nil, &calls), testEntry, repin, false, gate,
-			func(_ session.State, to string) error { persisted = append(persisted, to); return nil }, &stdout, &stderr)
+			func(_ session.State, rb session.ProfileRebind) error {
+				persisted = append(persisted, rb.To+"@"+rb.Transition)
+				return nil
+			}, &stdout, &stderr)
 		return entry, persisted, stdout.String(), err
 	}
 	asked := 0
 
-	// Accepted: the new digest is persisted and the profile is spliced in.
+	// Approved: the rebind is persisted and the profile is spliced in.
 	entry, persisted, out, err := run(true, gateWith(false, true, true, &asked))
-	if err != nil || !slices.Equal(persisted, []string{"new"}) || !slices.Contains(entry, "lean") || !strings.Contains(out, "re-pinned from old to new") {
-		t.Fatalf("accepted: entry=%v persisted=%v out=%q err=%v", entry, persisted, out, err)
+	if err != nil || !slices.Equal(persisted, []string{"new@tr-1"}) || !slices.Contains(entry, "lean") || !strings.Contains(out, "re-pinned from old to new (transition tr-1)") {
+		t.Fatalf("approved: entry=%v persisted=%v out=%q err=%v", entry, persisted, out, err)
 	}
 
 	// Each refusal persists nothing and yields no entry.
 	for name, gate := range map[string]repinGate{
 		"no-attach":       gateWith(true, true, true, &asked),
 		"non-interactive": gateWith(false, false, true, &asked),
-		"declined":        gateWith(false, true, false, &asked),
+		"not approved":    gateWith(false, true, false, &asked),
 	} {
 		entry, persisted, _, err := run(true, gate)
 		if err == nil || persisted != nil || entry != nil {
@@ -232,7 +240,7 @@ func TestApplyRecordedProfilePersistsOnlyAnAuthorizedRepin(t *testing.T) {
 	match := session.State{Profile: "lean", ProfileDigest: "new"}
 	calls := 0
 	got, gotEnv, err := applyRecordedProfile(match, fakeResolve("new", nil, &calls), testEntry, false, false, repinGate{NoAttach: true},
-		func(session.State, string) error { t.Error("persisted without a re-pin"); return nil }, io.Discard, io.Discard)
+		func(session.State, session.ProfileRebind) error { t.Error("persisted without a re-pin"); return nil }, io.Discard, io.Discard)
 	if err != nil || !slices.Contains(got, "lean") {
 		t.Fatalf("matching digest: %v %v", got, err)
 	}

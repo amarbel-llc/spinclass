@@ -140,6 +140,28 @@ type Auth struct {
 // and never merged, so Merged cannot leak a repo-layer value.
 type ProfileRights struct {
 	Enforce *bool `toml:"enforce"`
+	// TransitionTTL is how long a card-signed profile transition stays
+	// redeemable (#407), a Go duration; read ONLY through
+	// sweatfileio.TrustedTransitionTTL.
+	TransitionTTL *string `toml:"transition-ttl"`
+}
+
+// DefaultTransitionTTL is a profile transition's redemption window when no
+// trusted layer sets [profile-rights].transition-ttl.
+const DefaultTransitionTTL = 24 * time.Hour
+
+// ParseTransitionTTL accepts a Go duration from 1m to 168h: the window is
+// signed into the act text at second precision, so a shorter one could close
+// before the card act finishes, and the cap matches a profile grant's.
+func ParseTransitionTTL(v string) (time.Duration, error) {
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("invalid transition-ttl %q (want a Go duration like \"24h\"): %w", v, err)
+	}
+	if d < time.Minute || d > 168*time.Hour {
+		return 0, fmt.Errorf("transition-ttl %q out of range: must be at least 1m and at most 168h", v)
+	}
+	return d, nil
 }
 
 // Confinement configures launching spawned workers in a clown agent unit (FDR

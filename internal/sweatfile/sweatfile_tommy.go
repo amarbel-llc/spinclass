@@ -735,6 +735,12 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 				_vProfileRightsEnforce.MarkConsumed()
 			}
 		}
+		if _vProfileRightsTransitionTtl, _ok := _vProfileRights.Field("transition-ttl"); _ok && _vProfileRightsTransitionTtl.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vProfileRightsTransitionTtl.Leaf); _xok {
+				profileRightsVal7.TransitionTTL = &_x
+				_vProfileRightsTransitionTtl.MarkConsumedString()
+			}
+		}
 		d.data.ProfileRights = profileRightsVal7
 	} else {
 		profileRightsVal7 := &ProfileRights{}
@@ -744,6 +750,13 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractBool(_vEnforce.Leaf); _xok {
 				profileRightsVal7.Enforce = &_x
 				_vEnforce.MarkConsumed()
+			}
+		}
+		if _vTransitionTtl, _ok := model.Field("transition-ttl"); _ok && _vTransitionTtl.Kind == cst.VLeaf {
+			_foundProfileRights = true
+			if _x, _xok := cst.ExtractString(_vTransitionTtl.Leaf); _xok {
+				profileRightsVal7.TransitionTTL = &_x
+				_vTransitionTtl.MarkConsumedString()
 			}
 		}
 		if _foundProfileRights {
@@ -1624,6 +1637,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 		tableNode := cst.EnsureChildTable(d.cstDoc.Root(), d.cstDoc.Root(), "profile-rights")
 		if d.data.ProfileRights.Enforce != nil {
 			if err := cst.SetAny(tableNode, "enforce", *d.data.ProfileRights.Enforce); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.ProfileRights.TransitionTTL != nil {
+			if err := cst.SetAny(tableNode, "transition-ttl", *d.data.ProfileRights.TransitionTTL); err != nil {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
@@ -2641,6 +2659,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vProfileRightsEnforce.MarkConsumed()
 			}
 		}
+		if _vProfileRightsTransitionTtl, _ok := _vProfileRights.Field("transition-ttl"); _ok && _vProfileRightsTransitionTtl.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vProfileRightsTransitionTtl.Leaf); _xok {
+				profileRightsVal7.TransitionTTL = &_x
+				_vProfileRightsTransitionTtl.MarkConsumedString()
+			}
+		}
 		data.ProfileRights = profileRightsVal7
 	} else {
 		profileRightsVal7 := &ProfileRights{}
@@ -2650,6 +2674,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractBool(_vEnforce.Leaf); _xok {
 				profileRightsVal7.Enforce = &_x
 				_vEnforce.MarkConsumed()
+			}
+		}
+		if _vTransitionTtl, _ok := sub.Field("transition-ttl"); _ok && _vTransitionTtl.Kind == cst.VLeaf {
+			_foundProfileRights = true
+			if _x, _xok := cst.ExtractString(_vTransitionTtl.Leaf); _xok {
+				profileRightsVal7.TransitionTTL = &_x
+				_vTransitionTtl.MarkConsumedString()
 			}
 		}
 		if _foundProfileRights {
@@ -3514,6 +3545,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		tableNode := cst.EnsureChildTable(doc.Root(), container, "profile-rights")
 		if data.ProfileRights.Enforce != nil {
 			if err := cst.SetAny(tableNode, "enforce", *data.ProfileRights.Enforce); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.ProfileRights.TransitionTTL != nil {
+			if err := cst.SetAny(tableNode, "transition-ttl", *data.ProfileRights.TransitionTTL); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}

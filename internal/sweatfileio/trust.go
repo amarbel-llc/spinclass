@@ -1,8 +1,10 @@
 package sweatfileio
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
@@ -76,6 +78,34 @@ func TrustedEnforceProfileRights(h sweatfile.Hierarchy, home, repoRoot string) (
 		}
 	}
 	return enforce, untrusted
+}
+
+// TrustedTransitionTTL returns the [profile-rights].transition-ttl honoured for
+// the repo (#407): the last layer above the repo that sets it wins, and
+// sweatfile.DefaultTransitionTTL applies when none does. A trusted value that
+// does not parse is an error, not a silent default, because it is the
+// operator's own setting. Layers that may not set the key are never honoured;
+// their paths are returned in untrusted.
+func TrustedTransitionTTL(h sweatfile.Hierarchy, home, repoRoot string) (ttl time.Duration, untrusted []string, err error) {
+	ttl = sweatfile.DefaultTransitionTTL
+	for _, src := range h.Sources {
+		if src.SkipReason != "" || !src.Found {
+			continue
+		}
+		if src.File.ProfileRights == nil || src.File.ProfileRights.TransitionTTL == nil {
+			continue
+		}
+		if !LayerAboveRepo(src.Path, home, repoRoot) {
+			untrusted = append(untrusted, src.Path)
+			continue
+		}
+		d, perr := sweatfile.ParseTransitionTTL(*src.File.ProfileRights.TransitionTTL)
+		if perr != nil {
+			return 0, untrusted, fmt.Errorf("%s: %w", src.Path, perr)
+		}
+		ttl = d
+	}
+	return ttl, untrusted, nil
 }
 
 // ConfinementPolicy is the resolved [confinement] switches for one context.

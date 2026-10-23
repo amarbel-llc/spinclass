@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -8,11 +9,12 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/huh"
 	"golang.org/x/term"
 
+	"code.linenisgreat.com/spinclass/internal/grantstore"
+	"code.linenisgreat.com/spinclass/internal/grantverify"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/spawn"
 )
@@ -118,30 +120,28 @@ type repinGate struct {
 	NoAttach bool
 	// Interactive: stdin and stdout are terminals.
 	Interactive bool
-	// Confirm asks the operator; it must default to No.
-	Confirm func(profile, from, to string) (bool, error)
+	// Approve obtains the card-signed profile transition for the change and
+	// returns the rebind to record (transitionApprover.Approve, #407).
+	Approve func(profile, from, to string) (session.ProfileRebind, error)
 }
 
 // authorizeRepin decides whether an accepted digest mismatch may be recorded.
 // The flag alone is not authority: an agent that can run `sc resume` could
 // otherwise silently re-pin a profile whose definition changed. A re-pin
-// therefore needs an attached, interactive terminal and an explicit yes that
-// shows what is being accepted.
-func authorizeRepin(profile, from, to string, g repinGate) error {
+// therefore needs an attached, interactive terminal and a card-signed profile
+// transition for exactly this change, already stored or signed now.
+func authorizeRepin(profile, from, to string, g repinGate) (session.ProfileRebind, error) {
 	if g.NoAttach {
-		return errors.New("--repin-profile cannot be combined with --no-attach: a re-pin needs the operator to confirm at a terminal")
+		return session.ProfileRebind{}, errors.New("--repin-profile cannot be combined with --no-attach: a re-pin needs the operator at a terminal")
 	}
 	if !g.Interactive {
-		return errors.New("--repin-profile needs an interactive terminal (stdin and stdout) to confirm; refusing to re-pin unattended")
+		return session.ProfileRebind{}, errors.New("--repin-profile needs an interactive terminal (stdin and stdout); refusing to re-pin unattended")
 	}
-	ok, err := g.Confirm(profile, from, to)
+	rb, err := g.Approve(profile, from, to)
 	if err != nil {
-		return fmt.Errorf("confirming profile re-pin: %w", err)
+		return session.ProfileRebind{}, fmt.Errorf("profile %s re-pin not approved, resume refused: %w", profile, err)
 	}
-	if !ok {
-		return fmt.Errorf("profile %s re-pin declined; resume refused", profile)
-	}
-	return nil
+	return rb, nil
 }
 
 // applyRecordedProfile is the resume path between loading the sweatfile and
@@ -155,7 +155,7 @@ func applyRecordedProfile(
 	entry []string,
 	repin, shellFallback bool,
 	gate repinGate,
-	persist func(session.State, string) error,
+	persist func(session.State, session.ProfileRebind) error,
 	stdout, stderr io.Writer,
 ) (attachEntry, env []string, err error) {
 	plan, err := planRecordedProfile(st, resolve, entry, repin, shellFallback)
@@ -169,13 +169,14 @@ func applyRecordedProfile(
 		fmt.Fprintln(stderr, "spinclass: "+note)
 	}
 	if plan.RepinTo != "" {
-		if err := authorizeRepin(st.Profile, plan.RepinFrom, plan.RepinTo, gate); err != nil {
+		rb, err := authorizeRepin(st.Profile, plan.RepinFrom, plan.RepinTo, gate)
+		if err != nil {
 			return nil, nil, err
 		}
-		if err := persist(st, plan.RepinTo); err != nil {
+		if err := persist(st, rb); err != nil {
 			return nil, nil, fmt.Errorf("re-pinning profile digest: %w", err)
 		}
-		fmt.Fprintf(stdout, "profile %s re-pinned from %s to %s\n", st.Profile, plan.RepinFrom, plan.RepinTo)
+		fmt.Fprintf(stdout, "profile %s re-pinned from %s to %s (transition %s)\n", st.Profile, plan.RepinFrom, plan.RepinTo, rb.Transition)
 	}
 	return plan.Entry, plan.Env, nil
 }
@@ -201,31 +202,37 @@ func stdinStdoutAreTerminals() bool {
 	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
 }
 
-// confirmRepinInteractively shows the profile and both digests and asks, with
-// No as the default.
-func confirmRepinInteractively(profile, from, to string) (bool, error) {
-	ok := false
-	confirm := huh.NewConfirm().
-		Title(fmt.Sprintf("Re-pin profile %q?", profile)).
-		Description(fmt.Sprintf("The profile definition changed since this session was spawned.\n\n  recorded: %s\n  now:      %s\n\nAccepting trusts the new definition for this session.", from, to)).
-		Affirmative("Re-pin").
-		Negative("Cancel").
-		Value(&ok)
-	km := huh.NewDefaultKeyMap()
-	km.Quit = key.NewBinding(key.WithKeys("esc", "ctrl+c"))
-	if err := huh.NewForm(huh.NewGroup(confirm)).WithKeyMap(km).WithShowHelp(false).Run(); err != nil {
-		if errors.Is(err, huh.ErrUserAborted) {
-			return false, nil
-		}
-		return false, err
-	}
-	return ok, nil
-}
-
-// persistRepin records the accepted digest in the session state.
-func persistRepin(st session.State, to string) error {
+// persistRepin records the redeemed transition in the session state: the new
+// digest, and the rebind entry that is the session's lasting record of it.
+func persistRepin(st session.State, rb session.ProfileRebind) error {
 	return session.Update(st.RepoPath, st.Branch, func(s *session.State) error {
-		s.ProfileDigest = to
+		s.ProfileDigest = rb.To
+		s.ProfileRebinds = append(s.ProfileRebinds, rb)
 		return nil
 	})
+}
+
+// newProductionApprover wires transitionApprover to the operator's card, the
+// trusted signers file and the grant store, with ttl the trusted
+// [profile-rights].transition-ttl.
+func newProductionApprover(ctx context.Context, ttl time.Duration) (transitionApprover, error) {
+	keys, err := grantverify.LoadSigners(profileGrantSigners())
+	if err != nil {
+		return transitionApprover{}, fmt.Errorf("profile transitions are verified against the card's signers file: %w", err)
+	}
+	dir, err := profileGrantImportStoreDir()
+	if err != nil {
+		return transitionApprover{}, err
+	}
+	store, err := grantstore.Open(dir)
+	if err != nil {
+		return transitionApprover{}, err
+	}
+	return transitionApprover{
+		Ctx: ctx, Now: time.Now, TTL: ttl, Store: store, Signers: keys,
+		Signer:          profileGrantSigner,
+		RequireOperator: func() error { return requireOperatorTerminalFor("sc resume --repin-profile") },
+		Nonce:           randomNonce,
+		ActOut:          os.Stderr,
+	}, nil
 }

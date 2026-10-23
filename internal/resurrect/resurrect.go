@@ -101,6 +101,7 @@ func Run(w io.Writer, target, newBranchName, format string) error {
 		Profile:            st.Profile,
 		ProfileDigest:      st.ProfileDigest,
 		AuthorizingGrant:   st.AuthorizingGrant,
+		ProfileRebinds:     st.ProfileRebinds,
 		Entry:              shop.PinEntry(h.Merged),
 		StartedAt:          time.Now(),
 	}

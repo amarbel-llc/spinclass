@@ -211,6 +211,33 @@ func TestChangedDigestIsAHardError(t *testing.T) {
 	}
 }
 
+// PINNED, deliberately (#407, coordinator ruling (iii)): a profile transition
+// approves resuming a session on the new definition, not spawning children
+// under a grant that pins the old one. Even with a transition for exactly
+// this change in the store, Authorize still refuses. "A rebound session
+// spawning children" is an open D1 item; change this test only with that
+// design.
+func TestAStoredTransitionDoesNotAuthorizeSpawningUnderTheOldGrant(t *testing.T) {
+	e := newEnv(t)
+	e.root(profilegrant.OnwardGrant)
+	tr := profilegrant.Transition{
+		Profile: profile, From: "sha256-aaaa", To: "sha256-new",
+		Expires: e.c.Now().Add(time.Hour), Nonce: "pinned-refusal",
+	}
+	text := tr.CanonicalText()
+	digest, err := profilegrant.DigestOf(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.c.Store.PutTransition(profilegrant.TransitionRecord{Digest: digest, Text: text, Sig: []byte("sig")}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.c.Authorize(driverPrincipal, "", profile, "sha256-new")
+	if err == nil || !strings.Contains(err.Error(), "changed since it was granted") {
+		t.Fatalf("got %v, want the changed-digest refusal regardless of the stored transition", err)
+	}
+}
+
 func TestOnwardNoneGivesNoLinkAndNoChildAuthority(t *testing.T) {
 	e := newEnv(t)
 	e.root(profilegrant.OnwardNone)

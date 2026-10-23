@@ -88,6 +88,19 @@ type ProfileNarrowingLink struct {
 	Unsigned      bool   `json:"unsigned"`
 }
 
+// ProfileRebind is one entry of State.ProfileRebinds: this session's profile
+// digest moved From -> To by redeeming the card-signed transition record
+// Transition (#407). The transition's own expiry bounds only when it may be
+// redeemed; this entry is the session's lasting record of the rebind, so a
+// long-lived session outlives the approval. By is who redeemed it; At is when.
+type ProfileRebind struct {
+	From       string    `json:"from"`
+	To         string    `json:"to"`
+	Transition string    `json:"transition"`
+	By         string    `json:"by"`
+	At         time.Time `json:"at"`
+}
+
 // caller returns "file.go:N" of the call site `skip` frames up from
 // the caller of caller(). caller(1) inside session.Write returns the
 // external site that invoked session.Write. Used to tag lifecycle log
@@ -190,6 +203,9 @@ type State struct {
 	// accepted for a confined spawn because it narrows a declared base builtin
 	// (FDR 0035 "Tier 1"). Nil for every other session.
 	ProfileNarrowing *ProfileNarrowingLink `json:"profile_narrowing,omitempty"`
+	// ProfileRebinds logs every redeemed profile transition, oldest first;
+	// ProfileDigest is always the last entry's To (#407).
+	ProfileRebinds []ProfileRebind `json:"profile_rebinds,omitempty"`
 	// HelloSentAt records when the SessionStart hook emitted the spawn
 	// hello to SpawnedBy, deduping re-fires (resume/clear/compact). Set
 	// only on spawned sessions (FDR 0006).

@@ -737,6 +737,23 @@ spinclass's own, to be corrected if piggy or the operator disagrees.
       builds (`session.StripInheritedSessionIDs`), so a parent's pin never
       reaches a child.
     - A resolved profile without a clown digest is refused.
+    Amended 2026-10-23 (spinclass#407 item 3, D1 review by circus/solid-olive):
+    `--repin-profile` no longer takes a y/N answer. It needs a card-signed
+    profile transition for exactly (profile, recorded digest, current digest).
+    - The transition is not a grant: it has no grantor, grantee, rights or
+      prev, so it never enters a chain and never adds rights. It is signed
+      under `piggy-escalation-v1` over a derived act text.
+    - It is not bound to a session (clown FDR 0022 decision 5). It is stored in
+      the grant store's `transitions/`, and any session pinned to the old
+      digest redeems it inside its window, `[profile-rights].transition-ttl`
+      (24h by default), with no second card act. A fresh card act refuses an
+      agent-looking environment like `profile-grant-bless` does.
+    - Redeeming appends a rebind {from, to, transition, by, at} to the
+      session's `profile_rebinds` and moves `profile_digest` to `to`. The
+      window bounds redemption, not the session.
+    - Open, pinned by a test: a rebound session's grant still pins the old
+      digest, so under enforced `[profile-rights]` its spawns are refused
+      (D1 open item "rebound session spawning children").
 13. **`sc profile-grant-bless` is not drivable by an agent.** It is CLI-only (no
     MCP tool), and it also refuses unless stdin and stderr are terminals and
     refuses when `CLOWN_SESSION_ID` or `SPINCLASS_SESSION_ID` is set. The

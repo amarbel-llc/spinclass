@@ -73,12 +73,16 @@ var (
 // real boundary is the prompt surface: the card shows the exact act text and
 // only the operator's PIN and touch sign it (FDR 0034, "Where the card root is
 // real").
-func requireOperatorTerminal() error {
+func requireOperatorTerminal() error { return requireOperatorTerminalFor("profile-grant-bless") }
+
+// requireOperatorTerminalFor is requireOperatorTerminal for any command that
+// asks the card for an act (also `sc resume --repin-profile`, #407).
+func requireOperatorTerminalFor(command string) error {
 	if v := profileGrantAgentRuntime(); v != "" {
-		return fmt.Errorf("profile-grant-bless: %s is set, so this looks like an agent runtime; a card act must be started from the operator's own terminal, because an agent-started act would put a grant of the agent's choosing in front of the operator's PIN prompt", v)
+		return fmt.Errorf("%s: %s is set, so this looks like an agent runtime; a card act must be started from the operator's own terminal, because an agent-started act would put an approval of the agent's choosing in front of the operator's PIN prompt", command, v)
 	}
 	if !profileGrantStdinIsTerminal() || !profileGrantStderrIsTerminal() {
-		return errors.New("profile-grant-bless: stdin and stderr must both be terminals; a card act must be started from the operator's own terminal, not piped or driven by a program")
+		return fmt.Errorf("%s: stdin and stderr must both be terminals; a card act must be started from the operator's own terminal, not piped or driven by a program", command)
 	}
 	return nil
 }

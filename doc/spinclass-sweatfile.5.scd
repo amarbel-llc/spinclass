@@ -903,6 +903,20 @@ that names no profile is never affected.
 	warning, because an agent can edit those files and must not be able to
 	turn enforcement off.
 
+*transition-ttl*
+	String (a Go duration, at least *"1m"* and at most *"168h"*; default
+	*"24h"*). How long a card-signed profile transition stays redeemable
+	(spinclass#407). *sc resume --repin-profile* on a session whose profile
+	changed asks the operator's card to sign a transition for exactly that
+	change, (profile, old digest, new digest), with this window in the signed
+	text. Any session pinned to the old digest then redeems the stored
+	transition inside the window without a second card act. The window bounds
+	redemption only: a redeemed session keeps its own record of the rebind
+	and does not expire. *Merge:* not merged — read only from the global and
+	parent-directory layers, the nearest one that sets it wins. A repo- or
+	worktree-level value is ignored with a warning. A trusted value out of
+	range refuses the re-pin.
+
 ## [confinement]
 
 Launching spawned workers inside a clown agent unit (FDR 0035). Off by

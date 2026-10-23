@@ -630,6 +630,7 @@ func TestAttachPreservesFieldsItDoesNotOwn(t *testing.T) {
 		Profile:            "cheap",
 		ProfileDigest:      "digest-cheap",
 		AuthorizingGrant:   "grant-1",
+		ProfileRebinds:     []session.ProfileRebind{{From: "digest-old", To: "digest-cheap", Transition: "tr-1", By: "operator", At: hello}},
 		HelloSentAt:        &hello,
 		PreMergeAttestation: &session.PreMergeAttestation{
 			RecordedAt: hello,
@@ -677,6 +678,11 @@ func TestAttachPreservesFieldsItDoesNotOwn(t *testing.T) {
 	if got.Profile != "cheap" || got.ProfileDigest != "digest-cheap" || got.AuthorizingGrant != "grant-1" {
 		t.Errorf("profile fields = %q/%q/%q, want carried forward (clobbered by attach)",
 			got.Profile, got.ProfileDigest, got.AuthorizingGrant)
+	}
+	// The rebind log is the session's lasting record of a redeemed transition
+	// (#407); a resume must not drop it.
+	if len(got.ProfileRebinds) != 1 || got.ProfileRebinds[0].Transition != "tr-1" {
+		t.Errorf("ProfileRebinds = %+v, want carried forward (clobbered by attach)", got.ProfileRebinds)
 	}
 	if got.HelloSentAt == nil || !got.HelloSentAt.Equal(hello) {
 		t.Errorf("HelloSentAt = %v, want %v (clobbered by attach)", got.HelloSentAt, hello)
