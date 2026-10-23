@@ -86,8 +86,11 @@ func (p productionAuthorizer) Authorize(driver Driver, profile ResolvedProfile) 
 		// The frontend's principal mapping, never the worktree-local session
 		// state the confined agent can rewrite (FDR 0035).
 		SessionOfPrincipal: confinement.SessionOfPrincipal(stateDir, confinement.LiveSession),
-		Confinement:        conf,
-		Now:                time.Now,
+		// D1 stacking: a profile narrowing one the driver holds is authorized
+		// by that grant (FDR 0034 "Verification").
+		BaseChain:   baseChainVia(resolveProfile),
+		Confinement: conf,
+		Now:         time.Now,
 	}
 	return adaptChecker(checker, driver, profile)
 }

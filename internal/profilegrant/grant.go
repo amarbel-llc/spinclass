@@ -320,6 +320,14 @@ func Narrows(parent Grant, parentDigest string, child Grant, opts WalkOptions) e
 	return nil
 }
 
+// ReachesHeldBase is the stacking rule of Narrows applied to a USE of a
+// profile rather than a link: nil iff holder does not hold profile itself but
+// profile@digest stacks on a profile it holds (see reachesHeldBase). A spawn
+// under such a profile is authorized by the holder's own grant.
+func ReachesHeldBase(holder Grant, profile, digest string, opts WalkOptions) error {
+	return opts.reachesHeldBase(holder, profile, digest)
+}
+
 // reachesHeldBase is the D1 stacking rule for a child profile the parent does
 // not hold: its _base chain must reach a profile the parent holds, at the
 // digest the parent holds it, and no edge on the way may widen its base (the

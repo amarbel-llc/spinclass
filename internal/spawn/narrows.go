@@ -5,6 +5,8 @@ import (
 	"maps"
 	"slices"
 	"strings"
+
+	"code.linenisgreat.com/spinclass/internal/profilegrant"
 )
 
 // catalogWidenings lists every way child widens base at the catalog level
@@ -82,6 +84,32 @@ func envWidenings(base, child ResolvedProfile) []string {
 		}
 	}
 	return out
+}
+
+// baseChainVia is the D1 stacking input for grant verification
+// (profilegrant.WalkOptions.BaseChain): profile@digest's _base chain, nearest
+// base first, each link with the profile one step down's catalog widenings of
+// it. The profile is resolved by name through resolve and must still be at
+// digest, or nothing about it can be trusted (fail closed); its bases are the
+// ones clown resolved WITH it, never looked up again by name.
+func baseChainVia(resolve func(string) (ResolvedProfile, error)) func(name, digest string) ([]profilegrant.BaseLink, error) {
+	return func(name, digest string) ([]profilegrant.BaseLink, error) {
+		rp, err := resolve(name)
+		if err != nil {
+			return nil, err
+		}
+		if rp.Digest != digest {
+			return nil, fmt.Errorf("its live definition is %s, not %s", rp.Digest, digest)
+		}
+		var chain []profilegrant.BaseLink
+		for cur := rp; cur.Base != ""; cur = *cur.BaseProfile {
+			if cur.BaseProfile == nil {
+				return nil, fmt.Errorf("profile %s names base %q but the resolver did not report its definition", cur.Name, cur.Base)
+			}
+			chain = append(chain, profilegrant.BaseLink{Name: cur.Base, Digest: cur.BaseProfile.Digest, Widenings: catalogWidenings(*cur.BaseProfile, cur)})
+		}
+		return chain, nil
+	}
 }
 
 func sortedCopy(s []string) []string {

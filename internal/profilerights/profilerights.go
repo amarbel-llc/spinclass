@@ -46,8 +46,11 @@ type Checker struct {
 	// SessionOfPrincipal joins a link naming a session key as grantee to the
 	// next link whose grantor is that session's principal.
 	SessionOfPrincipal func(principal string) (sessionKey string, ok bool)
-	Confinement        Confinement
-	Now                func() time.Time
+	// BaseChain resolves a profile definition's _base chain (D1 stacking,
+	// profilegrant.WalkOptions.BaseChain). nil: only held profiles authorize.
+	BaseChain   func(profile, digest string) ([]profilegrant.BaseLink, error)
+	Confinement Confinement
+	Now         func() time.Time
 }
 
 // Authorization is the outcome of a successful Authorize.
@@ -63,7 +66,7 @@ type Authorization struct {
 }
 
 func (c *Checker) walkOptions() profilegrant.WalkOptions {
-	return profilegrant.WalkOptions{SessionOfPrincipal: c.SessionOfPrincipal}
+	return profilegrant.WalkOptions{SessionOfPrincipal: c.SessionOfPrincipal, BaseChain: c.BaseChain}
 }
 
 func (c *Checker) verifier(keys []ssh.PublicKey) profilegrant.Verifier {
@@ -97,9 +100,15 @@ func (c *Checker) Authorize(driverPrincipal, driverSession, profile, pinnedDiges
 		return nil, fmt.Errorf("profile grant chain does not verify: %w", err)
 	}
 	if !profilegrant.Holds(effective, profile) {
-		return nil, fmt.Errorf("profile %q is not held; this spawner holds: %s", profile, heldList(effective))
-	}
-	if granted := effective.Profiles[profile]; granted != pinnedDigest {
+		if c.BaseChain == nil {
+			return nil, fmt.Errorf("profile %q is not held; this spawner holds: %s", profile, heldList(effective))
+		}
+		// D1 stacking: a profile that narrows one the spawner holds is authorized
+		// by that grant; its link then verifies through the same chain.
+		if err := profilegrant.ReachesHeldBase(effective, profile, pinnedDigest, c.walkOptions()); err != nil {
+			return nil, fmt.Errorf("profile %q is not held and does not stack on a held one (this spawner holds: %s): %w", profile, heldList(effective), err)
+		}
+	} else if granted := effective.Profiles[profile]; granted != pinnedDigest {
 		return nil, fmt.Errorf("profile %s changed since it was granted (granted %s, now %s): an authority must re-pin it",
 			profile, granted, pinnedDigest)
 	}
