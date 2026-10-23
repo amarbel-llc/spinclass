@@ -722,6 +722,21 @@ spinclass's own, to be corrected if piggy or the operator disagrees.
     needs an interactive confirmation that shows the old and new digests, and is
     refused with `--no-attach` or without a terminal (found by review: without
     that gate an agent with a shell could rewrite the recorded digest).
+    Amended 2026-10-23 (spinclass#407, clown FDR 0022 slice 2): spinclass also
+    pins the digest for clown, which enforces it at launch.
+    - Spawn and resume, including the shell fallback, set
+      `CLOWN_PROFILE_DIGEST` to the digest just accepted, in clown's own hex
+      (the resolver carries `profilelookup.Resolved.DigestSHA256` verbatim as
+      `DigestHex`).
+    - Resume also sets `CLOWN_PROFILE_SESSION` to the recorded principal, the
+      id the resume entry passes as `--resume`.
+    - `CLOWN_PROFILE` is deliberately not set: `--profile` names the profile,
+      and clown keeps `CLOWN_PROFILE` in its environment, where every
+      descendant would inherit it.
+    - All three variables are stripped from every child environment spinclass
+      builds (`session.StripInheritedSessionIDs`), so a parent's pin never
+      reaches a child.
+    - A resolved profile without a clown digest is refused.
 13. **`sc profile-grant-bless` is not drivable by an agent.** It is CLI-only (no
     MCP tool), and it also refuses unless stdin and stderr are terminals and
     refuses when `CLOWN_SESSION_ID` or `SPINCLASS_SESSION_ID` is set. The

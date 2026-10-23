@@ -42,6 +42,24 @@ func TestStripInheritedTroupeCredentials(t *testing.T) {
 	}
 }
 
+// A parent's profile pin never reaches a child (#407): CLOWN_PROFILE_DIGEST is
+// an approval and CLOWN_PROFILE_SESSION binds it to one session, and an
+// inherited CLOWN_PROFILE would apply the parent's profile to a child that
+// asked for none. The launcher sets the child's own pin explicitly.
+func TestStripInheritedProfilePins(t *testing.T) {
+	in := []string{
+		"CLOWN_PROFILE=fable-design",
+		"CLOWN_PROFILE_DIGEST=00ff",
+		"CLOWN_PROFILE_SESSION=1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f",
+		"CLOWN_PROFILES_PATH=/keep",
+		"PATH=/usr/bin",
+	}
+	want := []string{"CLOWN_PROFILES_PATH=/keep", "PATH=/usr/bin"}
+	if got := StripInheritedSessionIDs(in); !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
 // A prefix-only match must not drop a var whose name merely starts with the
 // stripped name (e.g. CLOWN_SESSION_ID_EXTRA), and the empty input is safe.
 func TestStripInheritedSessionIDsExactPrefix(t *testing.T) {

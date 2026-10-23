@@ -14,10 +14,31 @@ import (
 )
 
 // ProfileDigestPurpose is the markl-id purpose a resolved profile's digest is
-// rendered under. Unregistered purposes are legal and carried opaquely by
-// markl; clown should own or confirm this name, since the digest is clown's
-// canonical-form hash.
+// recorded under in session state. spinclass owns this purpose (clown FDR 0022
+// decision 7); the hashed bytes are clown's canonical-form sha256. clown itself
+// pins and compares that digest as the library's bare hex string, which the
+// resolver carries verbatim as ResolvedProfile.DigestHex.
 const ProfileDigestPurpose = "clown-profile-digest-v1"
+
+// ProfileLaunchEnv is the profile pin spinclass hands a clown launch (clown FDR
+// 0022, #407): CLOWN_PROFILE_DIGEST, the digest in clown's own hex, which clown
+// requires the applied profile to match and then unsets; and, when the launch
+// resumes a session, CLOWN_PROFILE_SESSION, the claude --resume id the approval
+// is bound to. It returns nil when there is no profile (digestHex ""). Callers
+// that hold a profile with no digest must refuse rather than call this.
+// CLOWN_PROFILE is never set: the --profile flag names the profile, and clown
+// keeps CLOWN_PROFILE in its environment, where every descendant would inherit
+// it.
+func ProfileLaunchEnv(digestHex, resumeID string) []string {
+	if digestHex == "" {
+		return nil
+	}
+	env := []string{"CLOWN_PROFILE_DIGEST=" + digestHex}
+	if resumeID != "" {
+		env = append(env, "CLOWN_PROFILE_SESSION="+resumeID)
+	}
+	return env
+}
 
 // clownResolver resolves profiles in-process through clown's profilelookup
 // library (clown#264, FDR 0034). lookup is a seam so tests need no registry.
@@ -80,7 +101,7 @@ func resolvedProfileOf(res *profilelookup.Resolved) (ResolvedProfile, error) {
 		return ResolvedProfile{}, err
 	}
 	rp := ResolvedProfile{
-		Name: res.Name, Digest: digest, Provider: res.Provider, Backend: res.Backend, Model: res.Model,
+		Name: res.Name, Digest: digest, DigestHex: res.DigestSHA256, Provider: res.Provider, Backend: res.Backend, Model: res.Model,
 		KeptServers: keptServers(res.Selection), Excluded: res.Selection.Excluded, Source: string(res.Source),
 		EnvKnown: true, Env: maps.Clone(res.Env),
 	}

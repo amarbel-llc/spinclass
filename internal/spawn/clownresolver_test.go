@@ -71,6 +71,48 @@ func TestProfileDigestMarklIDRejectsBadInput(t *testing.T) {
 	}
 }
 
+// The pin spinclass hands clown (#407, clown FDR 0022): the recorded digest as
+// clown's hex, and on a resume the session it is bound to. CLOWN_PROFILE is
+// deliberately absent: --profile names the profile.
+func TestProfileLaunchEnv(t *testing.T) {
+	hexDigest := hex.EncodeToString(fixedDigest())
+	const resumeID = "1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f"
+
+	if want, got := []string{"CLOWN_PROFILE_DIGEST=" + hexDigest, "CLOWN_PROFILE_SESSION=" + resumeID}, ProfileLaunchEnv(hexDigest, resumeID); !slices.Equal(got, want) {
+		t.Errorf("resume env = %v, want %v", got, want)
+	}
+	if want, got := []string{"CLOWN_PROFILE_DIGEST=" + hexDigest}, ProfileLaunchEnv(hexDigest, ""); !slices.Equal(got, want) {
+		t.Errorf("fresh-launch env = %v, want %v", got, want)
+	}
+	if got := ProfileLaunchEnv("", resumeID); got != nil {
+		t.Errorf("no profile: got %v, want nil", got)
+	}
+}
+
+// The resolver carries clown's own digest verbatim beside the recorded markl
+// form: that string is what clown compares CLOWN_PROFILE_DIGEST with.
+func TestClownResolverCarriesClownsHexDigest(t *testing.T) {
+	r := clownResolver{lookup: fakeLookup(resolvedWith(profilelookup.Selection{}), nil)}
+	rp, err := r.Resolve("cheap")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := hex.EncodeToString(fixedDigest()); rp.DigestHex != want {
+		t.Errorf("DigestHex = %q, want %q", rp.DigestHex, want)
+	}
+}
+
+// A profile without clown's digest cannot be pinned, so resolution refuses it
+// rather than letting a worker launch unpinned (#407).
+func TestResolveProfileRefusesAProfileWithoutAClownDigest(t *testing.T) {
+	withResolver(t, profileResolverFunc(func(name string) (ResolvedProfile, error) {
+		return ResolvedProfile{Name: name, Digest: "digest-x", DigestHex: ""}, nil
+	}))
+	if _, err := resolveProfile("cheap"); err == nil || !strings.Contains(err.Error(), "clown digest") {
+		t.Fatalf("err = %v, want a refusal naming the missing clown digest", err)
+	}
+}
+
 func TestClownResolverMapsSelection(t *testing.T) {
 	required := profilelookup.RequiredServers()
 	cases := []struct {

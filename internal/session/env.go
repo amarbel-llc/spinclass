@@ -27,12 +27,21 @@ import "strings"
 // from clown), and an inherited marker would make the child's hook defer grit
 // calls it should ask about. Dropping it fails closed: an unmarked hook asks
 // (FDR 0035 "CLOWN_UNIT").
+//
+// The profile pin variables (clown FDR 0022, #407) are per-launch too:
+// CLOWN_PROFILE_DIGEST is an approval and CLOWN_PROFILE_SESSION binds it to one
+// session, and clown keeps CLOWN_PROFILE in its environment, so an inherited
+// one would apply the parent's profile to a child that asked for none. The
+// launcher sets a child's own pin explicitly (spawn.ProfileLaunchEnv).
 var inheritedSessionIDVars = []string{
 	"CLOWN_SESSION_ID=",
 	"CLAUDE_SESSION_ID=",
 	"CLOWN_UNIT=",
 	"TROUPE_XMPP_PASSWORD_FILE=",
 	"TROUPE_XMPP_PASSWORD=",
+	"CLOWN_PROFILE=",
+	"CLOWN_PROFILE_DIGEST=",
+	"CLOWN_PROFILE_SESSION=",
 }
 
 // StripInheritedSessionIDs returns env with any inherited session-identity

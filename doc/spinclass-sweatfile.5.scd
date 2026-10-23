@@ -1086,7 +1086,11 @@ readable by others.
 	spliced in before the entry's *"--"*, and an entry without one refuses
 	(FDR 0034). When *resume* is unset, the start entry (a shell) runs
 	untouched. Its profile is still checked: a changed definition refuses, and
-	stderr names the profile to start the harness with.
+	stderr names the profile to start the harness with. Either way the
+	harness (or the shell) gets *CLOWN\_PROFILE\_DIGEST*, the accepted digest
+	in clown's hex, and *CLOWN\_PROFILE\_SESSION*, the recorded principal;
+	clown refuses to start on any other profile definition (spinclass#407).
+	*CLOWN\_PROFILE* is not set.
 	*Merge:* scalar override.
 
 *spawn-entry*
@@ -1168,7 +1172,12 @@ readable by others.
 	needs to reach its driver (or excludes tools from one). The resolved
 	profile name and content digest (a *clown-profile-digest-v1* markl-id)
 	are recorded in
-	session state and shown in the *PROFILE* column of *sc list*. Selects
+	session state and shown in the *PROFILE* column of *sc list*. The worker's
+	clown is handed the same digest, in clown's hex, as
+	*CLOWN\_PROFILE\_DIGEST*, and refuses to start if the profile it resolves
+	differs (spinclass#407). A parent's *CLOWN\_PROFILE*,
+	*CLOWN\_PROFILE\_DIGEST* and *CLOWN\_PROFILE\_SESSION* are never
+	inherited. Selects
 	among profiles the spawner already holds; never grants one. Separately,
 	the detached worker harness (not the spawn window, and not a human
 	*sc start*) does not inherit *DISPLAY*, *WAYLAND_DISPLAY* or

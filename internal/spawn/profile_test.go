@@ -1,6 +1,8 @@
 package spawn
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -26,6 +28,12 @@ func (f *fakeResolver) Resolve(name string) (ResolvedProfile, error) {
 	p, ok := f.profiles[name]
 	if !ok {
 		return ResolvedProfile{}, ProfileNotFound(name)
+	}
+	// Fixtures name their digests by placeholder; give each a stable clown-hex
+	// twin so a spawn can pin it, unless the fixture set one on purpose.
+	if p.DigestHex == "" {
+		sum := sha256.Sum256([]byte(name + "\x00" + p.Digest))
+		p.DigestHex = hex.EncodeToString(sum[:])
 	}
 	return p, nil
 }
@@ -157,6 +165,74 @@ func TestLaunchProfileSplicedAndRecorded(t *testing.T) {
 		t.Errorf("state profile = %q/%q, want cheap/digest-cheap", st.Profile, st.ProfileDigest)
 	}
 }
+
+// profileEnvSweatfile dumps the worker's environment and has the "--"
+// separator a profile splices before.
+const profileEnvSweatfile = `[session-entry]
+spawn-entry = ["sh", "-c", 'env > "$PWD/env.txt"; touch "$PWD/launched"', "sh", "--", "{prompt}"]
+`
+
+// A profiled spawn pins the digest for clown (#407, clown FDR 0022): the
+// worker's clown refuses to start unless the profile it resolves has exactly
+// that digest. CLOWN_PROFILE is not set (--profile names it), a fresh spawn
+// binds no session, and a driver's own profile pin is never inherited.
+func TestLaunchProfilePinsTheDigestForClown(t *testing.T) {
+	const pinned = "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
+	withResolver(t, &fakeResolver{profiles: map[string]ResolvedProfile{
+		"cheap": {Name: "cheap", Digest: "digest-cheap", DigestHex: pinned, KeptServers: requiredKept},
+	}})
+	t.Setenv("CLOWN_PROFILE", "drivers-profile")
+	t.Setenv("CLOWN_PROFILE_DIGEST", "drivers-digest")
+	t.Setenv("CLOWN_PROFILE_SESSION", "drivers-session")
+
+	res, _ := launchWithProfile(t, profileEnvSweatfile, "cheap")
+	data, err := os.ReadFile(filepath.Join(res.WorktreePath, "env.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	envTxt := string(data)
+	if got := envValue(t, envTxt, "CLOWN_PROFILE_DIGEST"); got != pinned {
+		t.Errorf("CLOWN_PROFILE_DIGEST = %q, want %q", got, pinned)
+	}
+	for _, k := range []string{"CLOWN_PROFILE", "CLOWN_PROFILE_SESSION"} {
+		if got, found := envLookup(envTxt, k); found {
+			t.Errorf("%s = %q reached the worker; want it absent", k, got)
+		}
+	}
+}
+
+// A spawn without a profile hands clown no pin, and strips the driver's.
+func TestLaunchWithoutProfileSetsNoPin(t *testing.T) {
+	t.Setenv("CLOWN_PROFILE", "drivers-profile")
+	t.Setenv("CLOWN_PROFILE_DIGEST", "drivers-digest")
+	res, _ := launchWithProfile(t, profileEnvSweatfile, "")
+	data, err := os.ReadFile(filepath.Join(res.WorktreePath, "env.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"CLOWN_PROFILE", "CLOWN_PROFILE_DIGEST", "CLOWN_PROFILE_SESSION"} {
+		if got, found := envLookup(string(data), k); found {
+			t.Errorf("%s = %q reached an unprofiled worker; want it absent", k, got)
+		}
+	}
+}
+
+// A resolver that yields a profile without clown's digest cannot be pinned, so
+// the spawn refuses instead of launching the worker unpinned.
+func TestLaunchProfileWithoutAClownDigestRefuses(t *testing.T) {
+	withResolver(t, profileResolverFunc(func(name string) (ResolvedProfile, error) {
+		return ResolvedProfile{Name: name, Digest: "digest-x", KeptServers: requiredKept}, nil
+	}))
+	home, repoPath := newWorkerFixture(t, profileEnvSweatfile)
+	_, err := Launch(home, repoPath, testDriver("driver/test-session"), "brief", "", "", "cheap", 2*time.Second)
+	if err == nil || !strings.Contains(err.Error(), "digest") {
+		t.Fatalf("err = %v, want a refusal naming the missing digest", err)
+	}
+}
+
+type profileResolverFunc func(string) (ResolvedProfile, error)
+
+func (f profileResolverFunc) Resolve(name string) (ResolvedProfile, error) { return f(name) }
 
 const spawnProfileDefaultSweatfile = modelSpawnSweatfile + `spawn-profile = "review"
 `

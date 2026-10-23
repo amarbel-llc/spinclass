@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/huh"
@@ -27,6 +29,10 @@ type profileResumePlan struct {
 	// Notes are informational lines for stderr (e.g. the profile a shell
 	// fallback cannot carry).
 	Notes []string
+	// Env is the profile pin for clown (spawn.ProfileLaunchEnv, #407): the
+	// digest this resume approved and the session it is bound to. nil for a
+	// session with no profile.
+	Env []string
 }
 
 // planRecordedProfile decides how a session spawned with a clown profile
@@ -82,6 +88,14 @@ func planRecordedProfile(
 		plan.RepinFrom, plan.RepinTo = st.ProfileDigest, rp.Digest
 	}
 
+	// rp is now the definition this resume accepts, so clown is pinned to its
+	// digest and refuses to start on anything else. The resume entry passes the
+	// recorded principal as --resume, the id the approval is bound to.
+	if rp.DigestHex == "" {
+		return profileResumePlan{}, fmt.Errorf("cannot resume: recorded profile %q resolved without a clown digest, so clown cannot be pinned to it", st.Profile)
+	}
+	plan.Env = spawn.ProfileLaunchEnv(rp.DigestHex, st.Principal)
+
 	if shellFallback {
 		plan.Entry = entry
 		plan.Notes = append(plan.Notes, fmt.Sprintf(
@@ -133,7 +147,8 @@ func authorizeRepin(profile, from, to string, g repinGate) error {
 // applyRecordedProfile is the resume path between loading the sweatfile and
 // attaching: plan the profile, and when the plan carries a re-pin, get it
 // authorized and persist it before returning the entry to attach with.
-// Persisting precedes Attach because Attach blocks for the session's life.
+// Persisting precedes Attach because Attach blocks for the session's life. env
+// is the profile pin to add to the harness environment (profileResumePlan.Env).
 func applyRecordedProfile(
 	st session.State,
 	resolve func(string) (spawn.ResolvedProfile, error),
@@ -142,10 +157,10 @@ func applyRecordedProfile(
 	gate repinGate,
 	persist func(session.State, string) error,
 	stdout, stderr io.Writer,
-) ([]string, error) {
+) (attachEntry, env []string, err error) {
 	plan, err := planRecordedProfile(st, resolve, entry, repin, shellFallback)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if plan.Warning != "" {
 		fmt.Fprintln(stderr, "spinclass: "+plan.Warning)
@@ -155,14 +170,30 @@ func applyRecordedProfile(
 	}
 	if plan.RepinTo != "" {
 		if err := authorizeRepin(st.Profile, plan.RepinFrom, plan.RepinTo, gate); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := persist(st, plan.RepinTo); err != nil {
-			return nil, fmt.Errorf("re-pinning profile digest: %w", err)
+			return nil, nil, fmt.Errorf("re-pinning profile digest: %w", err)
 		}
 		fmt.Fprintf(stdout, "profile %s re-pinned from %s to %s\n", st.Profile, plan.RepinFrom, plan.RepinTo)
 	}
-	return plan.Entry, nil
+	return plan.Entry, plan.Env, nil
+}
+
+// withEnvPairs returns a copy of base with the KEY=VALUE pairs added, later
+// pairs winning; base itself (the session's pinned env) is never modified.
+func withEnvPairs(base map[string]string, pairs []string) map[string]string {
+	if len(pairs) == 0 {
+		return base
+	}
+	out := make(map[string]string, len(base)+len(pairs))
+	maps.Copy(out, base)
+	for _, kv := range pairs {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // stdinStdoutAreTerminals: a re-pin confirmation must be visible and answerable.

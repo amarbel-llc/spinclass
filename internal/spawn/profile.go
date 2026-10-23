@@ -33,8 +33,13 @@ func ProfileNotFound(name string) error {
 // the profile makes no cheap-context selection, i.e. keeps everything; a
 // non-nil empty one means a selection that kept nothing.
 type ResolvedProfile struct {
-	Name   string
+	Name string
+	// Digest is the content digest as spinclass records it, a
+	// clown-profile-digest-v1 markl-id.
 	Digest string
+	// DigestHex is the same digest in clown's own bare hex, verbatim from the
+	// library: the string clown compares CLOWN_PROFILE_DIGEST with (#407).
+	DigestHex string
 	// Provider is the provider the profile selects ("claude", ...); empty when
 	// the resolver does not record one, which callers read as clown's default.
 	Provider    string
@@ -124,6 +129,11 @@ func resolveProfile(name string) (ResolvedProfile, error) {
 	}
 	if rp.Name == "" {
 		rp.Name = name
+	}
+	// Without clown's digest the launch cannot be pinned (CLOWN_PROFILE_DIGEST,
+	// #407), and an unpinned worker is exactly what the pin exists to prevent.
+	if rp.DigestHex == "" {
+		return ResolvedProfile{}, fmt.Errorf("profile %q resolved without a clown digest; refusing to launch a worker that clown cannot pin", name)
 	}
 	if rp.KeptServers != nil {
 		if err := RequiredServersKept(rp.KeptServers, profilelookup.RequiredServers()); err != nil {

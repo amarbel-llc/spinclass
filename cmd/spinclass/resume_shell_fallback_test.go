@@ -21,7 +21,7 @@ func TestShellFallbackWithARecordedProfileResumes(t *testing.T) {
 	calls := 0
 	st := session.State{Profile: "fable-design", ProfileDigest: "d1"}
 	var stderr strings.Builder
-	got, err := applyRecordedProfile(st, fakeResolve("d1", nil, &calls), shellEntry, false, true, repinGate{},
+	got, _, err := applyRecordedProfile(st, fakeResolve("d1", nil, &calls), shellEntry, false, true, repinGate{},
 		func(session.State, string) error { t.Error("persisted without a re-pin"); return nil }, &stderr, &stderr)
 	if err != nil {
 		t.Fatalf("shell fallback refused: %v", err)
@@ -40,7 +40,7 @@ func TestShellFallbackWithARecordedProfileResumes(t *testing.T) {
 func TestShellFallbackWithAChangedDigestRefuses(t *testing.T) {
 	calls := 0
 	st := session.State{Profile: "fable-design", ProfileDigest: "old"}
-	_, err := applyRecordedProfile(st, fakeResolve("new", nil, &calls), shellEntry, false, true, repinGate{},
+	_, _, err := applyRecordedProfile(st, fakeResolve("new", nil, &calls), shellEntry, false, true, repinGate{},
 		func(session.State, string) error { t.Error("persisted"); return nil }, &strings.Builder{}, &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "changed since this session was spawned") {
 		t.Fatalf("err = %v, want the changed-definition refusal", err)

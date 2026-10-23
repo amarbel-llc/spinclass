@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -19,7 +20,85 @@ func fakeResolve(digest string, err error, calls *int) func(string) (spawn.Resol
 		if err != nil {
 			return spawn.ResolvedProfile{}, err
 		}
-		return spawn.ResolvedProfile{Name: name, Digest: digest}, nil
+		return spawn.ResolvedProfile{Name: name, Digest: digest, DigestHex: "hex-" + digest}, nil
+	}
+}
+
+// The resume pins the digest it just approved for clown (#407): the recorded
+// one on a match, the re-pin target after --repin-profile, bound to the
+// recorded principal, the id the resume entry passes as --resume.
+func TestPlanRecordedProfilePinsTheApprovedDigestForClown(t *testing.T) {
+	calls := 0
+	st := session.State{Profile: "lean", ProfileDigest: "d1", Principal: recordedPrincipal}
+	plan, err := planRecordedProfile(st, fakeResolve("d1", nil, &calls), testEntry, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"CLOWN_PROFILE_DIGEST=hex-d1", "CLOWN_PROFILE_SESSION=" + recordedPrincipal}
+	if !slices.Equal(plan.Env, want) {
+		t.Errorf("match: Env = %v, want %v", plan.Env, want)
+	}
+
+	st.ProfileDigest = "old"
+	plan, err = planRecordedProfile(st, fakeResolve("new", nil, &calls), testEntry, true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"CLOWN_PROFILE_DIGEST=hex-new", "CLOWN_PROFILE_SESSION=" + recordedPrincipal}; !slices.Equal(plan.Env, want) {
+		t.Errorf("re-pin: Env = %v, want %v", plan.Env, want)
+	}
+
+	// The shell fallback carries the pin too, for the clown the operator starts.
+	st.ProfileDigest = "d1"
+	plan, err = planRecordedProfile(st, fakeResolve("d1", nil, &calls), []string{"zsh"}, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"CLOWN_PROFILE_DIGEST=hex-d1", "CLOWN_PROFILE_SESSION=" + recordedPrincipal}; !slices.Equal(plan.Env, want) {
+		t.Errorf("shell fallback: Env = %v, want %v", plan.Env, want)
+	}
+
+	// No recorded principal: the digest is pinned, no session is bound.
+	st.Principal = ""
+	plan, err = planRecordedProfile(st, fakeResolve("d1", nil, &calls), testEntry, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"CLOWN_PROFILE_DIGEST=hex-d1"}; !slices.Equal(plan.Env, want) {
+		t.Errorf("no principal: Env = %v, want %v", plan.Env, want)
+	}
+}
+
+func TestWithEnvPairsAddsThePinWithoutTouchingThePinnedEnv(t *testing.T) {
+	pinned := map[string]string{"SPINCLASS_GROUP": "workers"}
+	got := withEnvPairs(pinned, []string{"CLOWN_PROFILE_DIGEST=abc", "CLOWN_PROFILE_SESSION=s"})
+	want := map[string]string{"SPINCLASS_GROUP": "workers", "CLOWN_PROFILE_DIGEST": "abc", "CLOWN_PROFILE_SESSION": "s"}
+	if !maps.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if len(pinned) != 1 {
+		t.Errorf("the session's pinned env was modified: %v", pinned)
+	}
+	if got := withEnvPairs(pinned, nil); !maps.Equal(got, pinned) {
+		t.Errorf("no pairs: got %v, want %v", got, pinned)
+	}
+}
+
+func TestPlanRecordedProfileWithoutAProfileHandsClownNoPin(t *testing.T) {
+	calls := 0
+	plan, err := planRecordedProfile(session.State{Principal: recordedPrincipal}, fakeResolve("d", nil, &calls), testEntry, false, false)
+	if err != nil || plan.Env != nil {
+		t.Fatalf("Env = %v, err = %v; want nil, nil", plan.Env, err)
+	}
+}
+
+func TestPlanRecordedProfileWithoutAClownDigestRefuses(t *testing.T) {
+	st := session.State{Profile: "lean", ProfileDigest: "d1"}
+	resolve := func(name string) (spawn.ResolvedProfile, error) {
+		return spawn.ResolvedProfile{Name: name, Digest: "d1"}, nil
+	}
+	if _, err := planRecordedProfile(st, resolve, testEntry, false, false); err == nil || !strings.Contains(err.Error(), "digest") {
+		t.Fatalf("err = %v, want a refusal naming the missing clown digest", err)
 	}
 }
 
@@ -119,7 +198,7 @@ func TestApplyRecordedProfilePersistsOnlyAnAuthorizedRepin(t *testing.T) {
 	run := func(repin bool, gate repinGate) (entry []string, persisted []string, out string, err error) {
 		calls := 0
 		var stdout, stderr strings.Builder
-		entry, err = applyRecordedProfile(st, fakeResolve("new", nil, &calls), testEntry, repin, false, gate,
+		entry, _, err = applyRecordedProfile(st, fakeResolve("new", nil, &calls), testEntry, repin, false, gate,
 			func(_ session.State, to string) error { persisted = append(persisted, to); return nil }, &stdout, &stderr)
 		return entry, persisted, stdout.String(), err
 	}
@@ -152,10 +231,13 @@ func TestApplyRecordedProfilePersistsOnlyAnAuthorizedRepin(t *testing.T) {
 	// A matching digest needs no gate at all, even with --no-attach.
 	match := session.State{Profile: "lean", ProfileDigest: "new"}
 	calls := 0
-	got, err := applyRecordedProfile(match, fakeResolve("new", nil, &calls), testEntry, false, false, repinGate{NoAttach: true},
+	got, gotEnv, err := applyRecordedProfile(match, fakeResolve("new", nil, &calls), testEntry, false, false, repinGate{NoAttach: true},
 		func(session.State, string) error { t.Error("persisted without a re-pin"); return nil }, io.Discard, io.Discard)
 	if err != nil || !slices.Contains(got, "lean") {
 		t.Fatalf("matching digest: %v %v", got, err)
+	}
+	if !slices.Equal(gotEnv, []string{"CLOWN_PROFILE_DIGEST=hex-new"}) {
+		t.Errorf("matching digest: env = %v, want the clown pin", gotEnv)
 	}
 }
 

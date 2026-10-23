@@ -597,7 +597,10 @@ func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, ar
 	if confine != nil {
 		scopePath = confine.scopePath
 	}
-	if err := startDetached(argv, rp.AbsPath, workerEnvScoped(rp, desc, sessionEnv, true, scopePath), logPath); err != nil {
+	// A fresh spawn pins the digest only: it resumes no session, so there is no
+	// CLOWN_PROFILE_SESSION to bind (#407).
+	env := append(workerEnvScoped(rp, desc, sessionEnv, true, scopePath), ProfileLaunchEnv(profile.DigestHex, "")...)
+	if err := startDetached(argv, rp.AbsPath, env, logPath); err != nil {
 		return Pending{}, fmt.Errorf("spawn template %q failed: %w", argv, err)
 	}
 

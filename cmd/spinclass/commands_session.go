@@ -741,7 +741,7 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		entrypoint = entry.Resume
 	}
 
-	entrypoint, err = applyRecordedProfile(*state, spawn.ResolveProfile, entrypoint, p.RepinProfile, shellFallback,
+	entrypoint, profileEnv, err := applyRecordedProfile(*state, spawn.ResolveProfile, entrypoint, p.RepinProfile, shellFallback,
 		repinGate{NoAttach: p.NoAttach, Interactive: stdinStdoutAreTerminals(), Confirm: confirmRepinInteractively},
 		persistRepin, os.Stdout, os.Stderr)
 	if err != nil {
@@ -768,7 +768,7 @@ func runResume(_ context.Context, args json.RawMessage) error {
 	exec := executor.SessionExecutor{
 		Entrypoint:  entrypoint,
 		Description: state.Description,
-		Env:         entry.Env,
+		Env:         withEnvPairs(entry.Env, profileEnv),
 	}
 
 	// No --allow-stale-base on resume: the worktree already exists, so the
