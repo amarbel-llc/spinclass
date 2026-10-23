@@ -732,6 +732,33 @@ table is unchanged. Unverified: that the serve's PATH resolves `spinclass` to th
 operator's profile rather than a plugin-private bin dir; if it does not, the
 check passes a stale serve, and the live round's `version` line is the proof.
 
+**Residual: the stale-serve refusal guards only the confined spawn.**
+`refuseStaleServe` runs in the confined-spawn path and nowhere else. A stale
+serve's `grit_*` tools, `sc list` and the PreToolUse hooks (the hooks handler
+execs the store path baked into the plugin, so it is inferred to be as old as
+the serve) keep running the code they started with, with no warning, against a
+confined worker's worktree too. Until every frontend surface checks its own
+freshness the mitigation is operational: **restart discipline**, i.e. after a
+deploy every live session restarts its serve (or reconnects its MCP servers)
+before it is trusted with a confined worker.
+
+**Cross-session reads are refused (2026-10-23).** For unconfined callers the
+grit store tools' reads were unscoped by decision (FDR 0036 section 2: a read
+verb allows any `repo_path`). That is narrowed for **session worktrees only**:
+for every caller, confined or not, a `grit_*` call whose `repo_path` resolves
+(symlinks followed, then the `.git` pointer's layout, before any git runs) into
+ANOTHER spinclass session's worktree is refused unless the caller holds an
+accepted handle on that session (FDR 0032). The refusal names the target session
+and the handles the caller holds. A session worktree is writable by the worker
+it hosts, so git run there on someone else's behalf can be steered by what the
+worker planted (a `commondir`, a config); a serve built before the commondir pin
+would run a planted hook outright. A `repo_path` that cannot be resolved, or a
+`.git` pointer of unknown layout, is refused (fail closed). Plain repositories
+and main checkouts stay readable for unconfined callers as before. The
+operator's `sc grit` escape hatch (TTY-only, logged) is exempt.
+(`refuseOtherSessionWorktree`, `internal/store/git/confined.go`; the serve
+supplies the session map and held handles in `resolveGritCaller`.)
+
 Until clown runs moxy inside the unit and forwards only frontend-class servers
 (ringmaster, troupe's MCP, spinclass serve) over per-session sockets, the
 switch **refuses** to launch a worker confined, naming the clown rev it waits

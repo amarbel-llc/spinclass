@@ -108,6 +108,15 @@ type Session struct {
 	// unit-writable files (FDR 0036 section 9.5). The zero value leaves
 	// discovery to git (the backend then applies only the neutralisers).
 	Repo Repo
+	// SessionAt maps a linked worktree's root to the key of the spinclass
+	// session living there, from frontend state. When set, Do refuses a call
+	// whose repo_path lies in ANOTHER session's worktree unless that session's
+	// key is in Held, for every caller. Nil (the operator's `sc grit` hatch)
+	// skips the check.
+	SessionAt func(worktreeRoot string) (key string, ok bool)
+	// Held is the keys of the sessions the caller holds an accepted handle on
+	// (FDR 0032), read by the SessionAt check and named in its refusal.
+	Held []string
 }
 
 // Repo locates a session's repository from trusted state.

@@ -137,21 +137,31 @@ func commonDirPin(repoPath string) []string {
 // never consulted. A dir whose nearest .git is a directory (a main checkout), is
 // not a gitdir pointer, or names another layout (a submodule) yields false.
 func LayoutCommonDir(dir string) (string, bool) {
+	_, common, ok := LinkedWorktree(dir)
+	return common, ok
+}
+
+// LinkedWorktree returns the root of the linked worktree containing dir (the
+// directory holding its .git pointer file) and the worktree's common git dir,
+// both read from the pointer file's layout alone, with no git run. ok is false
+// when dir is not inside a linked worktree.
+func LinkedWorktree(dir string) (root, common string, ok bool) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return "", false
+		return "", "", false
 	}
 	for d := abs; ; {
 		info, err := os.Lstat(filepath.Join(d, ".git"))
 		if err == nil {
 			if !info.Mode().IsRegular() {
-				return "", false
+				return "", "", false
 			}
-			return pointerCommonDir(d)
+			common, ok := pointerCommonDir(d)
+			return d, common, ok
 		}
 		parent := filepath.Dir(d)
 		if parent == d {
-			return "", false
+			return "", "", false
 		}
 		d = parent
 	}

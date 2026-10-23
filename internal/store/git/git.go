@@ -149,6 +149,12 @@ func (b Backend) Do(ctx context.Context, s store.Session, op store.Op) (store.Re
 		return store.Result{}, fmt.Errorf("no repository: pass repo_path or run inside a session")
 	}
 
+	// Before any git runs: no grit call works in another session's worktree
+	// without a handle on it.
+	if err := refuseOtherSessionWorktree(s, op, dir); err != nil {
+		return store.Result{}, err
+	}
+
 	// Every git run below, helper reads included, runs under the hardening.
 	defer confineGit(s, dir)()
 	if err := refuseWithoutSession(s, op); err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -146,7 +147,7 @@ func TestStoreVerdictPassesSessionAndOpToBackend(t *testing.T) {
 	if !isStore || verdict != store.Allow {
 		t.Fatalf("got (%v, store=%v), want allow", verdict, isStore)
 	}
-	if recorder.session != resolved {
+	if !reflect.DeepEqual(recorder.session, resolved) {
 		t.Errorf("session = %+v, want %+v", recorder.session, resolved)
 	}
 	if recorder.op.Tool != "branch" || recorder.op.Subcommand != "delete" {

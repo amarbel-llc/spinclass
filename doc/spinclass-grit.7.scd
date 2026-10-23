@@ -161,6 +161,14 @@ For every caller the body refuses, without exception, *branch* delete,
 reset-hard, rebase and restack whose target is the default branch, and *merge*
 into it (*merge* abort and continue excepted). Nothing is approvable into these.
 
+For every caller, read or write, the body also refuses a call whose
+*repo\_path* resolves into another spinclass session's worktree unless the
+caller holds an accepted handle on that session (FDR 0032). The path is
+resolved from the filesystem alone (symlinks, then the *.git* pointer's layout)
+before any git runs, and an unresolvable path or a pointer of unknown layout is
+refused. The refusal names the target session and the handles held. Plain
+repositories and main checkouts are unaffected. *sc grit* is exempt.
+
 # THE AGENTLESS REMOTE LANE
 
 *remote* fetch, pull, push, push-stack, *tag* push and *clone* run git with the

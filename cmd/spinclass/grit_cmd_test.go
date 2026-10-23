@@ -95,6 +95,40 @@ func TestResolveGritCallerOutsideASessionWorktreeOwnsNothing(t *testing.T) {
 	}
 }
 
+// The serve wires the cross-session refusal for every caller: SessionAt maps a
+// worktree to its session from frontend records, and Held lists the sessions
+// the caller's principal holds an accepted handle on.
+func TestResolveGritCallerWiresTheCrossSessionCheck(t *testing.T) {
+	repo := isolatedGitRepo(t)
+	t.Setenv("CLOWN_SESSION_ID", "holder-principal")
+	other := filepath.Join(repo, ".worktrees", "other")
+	held := filepath.Join(repo, ".worktrees", "held")
+	mustGitIn(t, repo, "worktree", "add", "-b", "other", other)
+	mustGitIn(t, repo, "worktree", "add", "-b", "held", held)
+	for _, st := range []session.State{
+		{RepoPath: repo, WorktreePath: other, Branch: "other", SessionKey: "repo/other", SessionState: session.StateInactive},
+		{RepoPath: repo, WorktreePath: held, Branch: "held", SessionKey: "repo/held", SessionState: session.StateInactive, Holders: []string{"holder-principal"}},
+	} {
+		if err := session.Write(st); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := resolveGritCaller(repo)
+	if got.SessionAt == nil {
+		t.Fatal("SessionAt not wired: the cross-session refusal would never run")
+	}
+	if key, ok := got.SessionAt(other); !ok || key != "repo/other" {
+		t.Errorf("SessionAt(other) = %q, %v; want repo/other", key, ok)
+	}
+	if _, ok := got.SessionAt(repo); ok {
+		t.Error("the main checkout was taken for a session worktree")
+	}
+	if len(got.Held) != 1 || got.Held[0] != "repo/held" {
+		t.Errorf("Held = %v, want [repo/held]", got.Held)
+	}
+}
+
 func TestResolveGritCallerInASessionWorktreeOwnsItsBranch(t *testing.T) {
 	repo := isolatedGitRepo(t)
 	worktree := filepath.Join(repo, ".worktrees", "glad-buckeye")

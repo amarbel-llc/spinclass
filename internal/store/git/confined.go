@@ -3,6 +3,8 @@ package git
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/store"
@@ -66,6 +68,46 @@ func refuseWithoutSession(s store.Session, op store.Op) error {
 		return nil
 	}
 	return fmt.Errorf("refusing %s: this worktree is not a recognised spinclass session worktree, so the caller owns nothing and every write is refused; start a session with `sc start` and run the tool from its worktree", verbLabel(op))
+}
+
+// refuseOtherSessionWorktree refuses, for every caller, a call whose dir lies in
+// ANOTHER spinclass session's worktree unless the caller holds a handle on that
+// session (FDR 0032). A session worktree is writable by the worker it hosts, so
+// git run there on someone else's behalf can be steered by what the worker
+// planted (a commondir, a config); a serve built before the commondir pin runs
+// such a planted hook outright. The worktree is found from the filesystem alone
+// (symlinks resolved, then the .git pointer's layout, git.LinkedWorktree), so
+// nothing runs in it before the check. A dir that cannot be resolved, or a .git
+// pointer of unknown layout, is refused. Plain repositories and the main
+// checkout stay open to unconfined callers as before.
+func refuseOtherSessionWorktree(s store.Session, op store.Op, dir string) error {
+	if s.SessionAt == nil {
+		return nil
+	}
+	path := dir
+	if !filepath.IsAbs(path) && s.Dir != "" {
+		path = filepath.Join(s.Dir, path)
+	}
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return fmt.Errorf("refusing %s: cannot resolve repo_path %q (%v), so cannot tell whose worktree it is", verbLabel(op), dir, err)
+	}
+	root, _, linked := git.LinkedWorktree(real)
+	if root != "" && !linked {
+		return fmt.Errorf("refusing %s: cannot resolve the worktree layout of repo_path %q (its .git pointer names no <common>/worktrees/<name>)", verbLabel(op), dir)
+	}
+	if !linked {
+		return nil
+	}
+	key, ok := s.SessionAt(root)
+	if !ok || (s.Dir != "" && sameDir(root, s.Dir)) || slices.Contains(s.Held, key) {
+		return nil
+	}
+	held := "none"
+	if len(s.Held) > 0 {
+		held = strings.Join(s.Held, ", ")
+	}
+	return fmt.Errorf("refusing %s: repo_path %s is in session %s's worktree, and this caller holds no handle on that session (handles held: %s); act on another session only through a handle on it (grant-session-handle)", verbLabel(op), dir, key, held)
 }
 
 const stashSessionLocalRefusal = "stashes are session-local: grit_stash only touches this session's own shelf (refusing repo_path outside this session's worktree)"
