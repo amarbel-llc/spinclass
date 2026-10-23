@@ -71,3 +71,19 @@ func TestMergeWithDoesNotMutateTheBaseDirenv(t *testing.T) {
 		t.Errorf("dotenv: base %v, first %v, second %v", base.Direnv.Dotenv, first.Direnv.Dotenv, second.Direnv.Dotenv)
 	}
 }
+
+func TestMergeWithDoesNotMutateTheBaseSysprompt(t *testing.T) {
+	intp := func(n int) *int { return &n }
+	base := Sweatfile{Sysprompt: &Sysprompt{ManIndex: []string{"base"}}}
+	first := base.MergeWith(Sweatfile{Sysprompt: &Sysprompt{IndexLimit: intp(5)}})
+	second := base.MergeWith(Sweatfile{Sysprompt: &Sysprompt{RepoIndex: []string{"r"}}})
+	if base.Sysprompt.IndexLimit != nil || base.Sysprompt.RepoIndex != nil {
+		t.Errorf("the base was mutated: %+v", *base.Sysprompt)
+	}
+	if second.Sysprompt.IndexLimit != nil || first.Sysprompt.RepoIndex != nil {
+		t.Errorf("one merge carries the other's override: first %+v, second %+v", *first.Sysprompt, *second.Sysprompt)
+	}
+	if !slices.Equal(second.Sysprompt.ManIndex, []string{"base"}) {
+		t.Errorf("second merge lost the base man-index: %+v", *second.Sysprompt)
+	}
+}

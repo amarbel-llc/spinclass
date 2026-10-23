@@ -250,10 +250,14 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 	// only from layers above the repo. See sweatfileio.TrustedStoreIdentity.
 	merged.Store = nil
 
-	// [sysprompt]
+	// [sysprompt]: copied before the overrides (#351); its arrays are replaced
+	// whole, never appended, so the copy is enough.
 	if other.Sysprompt != nil {
 		if merged.Sysprompt == nil {
 			merged.Sysprompt = &Sysprompt{}
+		} else {
+			cp := *merged.Sysprompt
+			merged.Sysprompt = &cp
 		}
 		// doc-index-dirs: OVERRIDE, not append. A non-nil value — including an
 		// explicit [] — replaces the inherited list (override-wins down the
