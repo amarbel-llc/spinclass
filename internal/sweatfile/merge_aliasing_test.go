@@ -1,6 +1,7 @@
 package sweatfile
 
 import (
+	"maps"
 	"slices"
 	"testing"
 )
@@ -54,5 +55,19 @@ func TestMergeWithDoesNotMutateTheBaseGit(t *testing.T) {
 	second := base.MergeWith(Sweatfile{Git: &Git{Excludes: []string{"c"}}})
 	if !slices.Equal(base.Git.Excludes, []string{"a"}) || !slices.Equal(first.Git.Excludes, []string{"a", "b"}) || !slices.Equal(second.Git.Excludes, []string{"a", "c"}) {
 		t.Errorf("excludes: base %v, first %v, second %v", base.Git.Excludes, first.Git.Excludes, second.Git.Excludes)
+	}
+}
+
+func TestMergeWithDoesNotMutateTheBaseDirenv(t *testing.T) {
+	base := Sweatfile{Direnv: &Direnv{Envrc: withSpare("a"), Dotenv: map[string]string{"K": "base"}}}
+	first := base.MergeWith(Sweatfile{Direnv: &Direnv{Envrc: []string{"b"}, Dotenv: map[string]string{"ONE": "1"}}})
+	second := base.MergeWith(Sweatfile{Direnv: &Direnv{Envrc: []string{"c"}, Dotenv: map[string]string{"K": "two"}}})
+	if !slices.Equal(base.Direnv.Envrc, []string{"a"}) || !slices.Equal(first.Direnv.Envrc, []string{"a", "b"}) || !slices.Equal(second.Direnv.Envrc, []string{"a", "c"}) {
+		t.Errorf("envrc: base %v, first %v, second %v", base.Direnv.Envrc, first.Direnv.Envrc, second.Direnv.Envrc)
+	}
+	if !maps.Equal(base.Direnv.Dotenv, map[string]string{"K": "base"}) ||
+		!maps.Equal(first.Direnv.Dotenv, map[string]string{"K": "base", "ONE": "1"}) ||
+		!maps.Equal(second.Direnv.Dotenv, map[string]string{"K": "two"}) {
+		t.Errorf("dotenv: base %v, first %v, second %v", base.Direnv.Dotenv, first.Direnv.Dotenv, second.Direnv.Dotenv)
 	}
 }

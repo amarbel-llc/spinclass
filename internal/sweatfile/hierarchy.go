@@ -1,6 +1,9 @@
 package sweatfile
 
-import "slices"
+import (
+	"maps"
+	"slices"
+)
 
 // LoadSource records one sweatfile in a resolved Hierarchy: where it was looked
 // for, whether it existed, its parsed contents, and (when deduplicated away) the
@@ -59,21 +62,27 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		}
 	}
 
-	// [direnv]
+	// [direnv]: copied, concatenated, and the dotenv map cloned before the
+	// per-key writes (#351).
 	if other.Direnv != nil {
 		if merged.Direnv == nil {
 			merged.Direnv = &Direnv{}
+		} else {
+			cp := *merged.Direnv
+			merged.Direnv = &cp
 		}
 		if other.Direnv.Envrc != nil {
 			if len(other.Direnv.Envrc) == 0 {
 				merged.Direnv.Envrc = []string{}
 			} else {
-				merged.Direnv.Envrc = append(merged.Direnv.Envrc, other.Direnv.Envrc...)
+				merged.Direnv.Envrc = slices.Concat(merged.Direnv.Envrc, other.Direnv.Envrc)
 			}
 		}
 		if other.Direnv.Dotenv != nil {
 			if merged.Direnv.Dotenv == nil {
 				merged.Direnv.Dotenv = make(map[string]string)
+			} else {
+				merged.Direnv.Dotenv = maps.Clone(merged.Direnv.Dotenv)
 			}
 			for k, v := range other.Direnv.Dotenv {
 				merged.Direnv.Dotenv[k] = v
