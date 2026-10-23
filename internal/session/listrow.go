@@ -10,7 +10,7 @@ import "path/filepath"
 type ListRow struct {
 	ID          string `json:"id"`          // worktree dir basename
 	SessionKey  string `json:"session_key"` // <repo>/<branch>
-	State       string `json:"state"`       // resolved: active|inactive|running-detached|abandoned
+	State       string `json:"state"`       // resolved: active|inactive|running-detached|abandoned|worktree-gone
 	Description string `json:"description"`
 	Repo        string `json:"repo"` // repo dir basename
 

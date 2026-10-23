@@ -1133,7 +1133,7 @@ func TestResolveStateRunningDetachedReturnsAsIs(t *testing.T) {
 // base with live clowns reads running-detached (#153); every other base is
 // returned unchanged, and presence never rescues an abandoned session.
 func TestResolveDisplayState(t *testing.T) {
-	live := t.TempDir()
+	live := mkLinkedWorktreeDir(t, t.TempDir())
 	gone := filepath.Join(t.TempDir(), "missing")
 	cases := []struct {
 		name   string

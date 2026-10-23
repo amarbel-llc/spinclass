@@ -132,6 +132,11 @@ const (
 	// multiplexer group (or equivalent) is still attachable. Set by
 	// shop.Attach after cmd.Wait returns when the probe exits 0.
 	StateRunningDetached = "running-detached"
+	// StateWorktreeGone is display-only (ResolveDisplayState, never
+	// ResolveState): the worktree directory still exists but git no longer has
+	// it (no .git entry), as when a worktree is removed under a running agent
+	// that recreates .tmp (#409). The session needs `sc close`.
+	StateWorktreeGone = "worktree-gone"
 )
 
 // KindImplicit marks a session materialized for a repo's main checkout (no
@@ -931,12 +936,32 @@ func confinedUnitRunning(worktree string) bool {
 // this session's key), the session is shown running-detached: harness alive, no
 // attached spinclass client. Presence never rescues an abandoned session
 // (worktree gone / tombstone) — callers keep filtering on the base ResolveState.
+//
+// A worktree session whose directory survives but holds no .git entry (git
+// removed the worktree under it, #409) reads StateWorktreeGone, whatever its
+// PID or clowns say: no work can happen there until it is closed.
 func (s *State) ResolveDisplayState(liveClowns int) string {
 	base := s.ResolveState()
+	if base != StateAbandoned && s.Kind != KindImplicit && worktreeVanished(s.WorktreePath) {
+		return StateWorktreeGone
+	}
 	if base == StateInactive && liveClowns > 0 {
 		return StateRunningDetached
 	}
 	return base
+}
+
+// worktreeVanished is true when dir exists but has no .git entry: a linked
+// worktree always has a .git file, so git no longer knows this one.
+func worktreeVanished(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	if _, err := os.Stat(dir); err != nil {
+		return false
+	}
+	_, err := os.Lstat(filepath.Join(dir, ".git"))
+	return os.IsNotExist(err)
 }
 
 // FindByWorktreePath returns the session whose WorktreePath is path or

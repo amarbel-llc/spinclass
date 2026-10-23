@@ -18,9 +18,7 @@ func listRowFixtures(t *testing.T) []State {
 	active := filepath.Join(repo, ".worktrees", "crisp-catalpa")
 	inactive := filepath.Join(repo, ".worktrees", "mellow-mango")
 	for _, dir := range []string{active, inactive} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
+		mkLinkedWorktreeDir(t, dir)
 	}
 	return []State{
 		{
@@ -144,9 +142,7 @@ func TestListRowsWithClowns(t *testing.T) {
 	withClown := filepath.Join(repo, ".worktrees", "with-clown")
 	noClown := filepath.Join(repo, ".worktrees", "no-clown")
 	for _, dir := range []string{withClown, noClown} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
+		mkLinkedWorktreeDir(t, dir)
 	}
 	states := []State{
 		{SessionState: StateInactive, RepoPath: repo, WorktreePath: withClown, Branch: "with-clown", SessionKey: "spinclass/with-clown"},

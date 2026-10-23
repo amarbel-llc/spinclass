@@ -147,6 +147,8 @@ func stateSeverity(state string) mesa.Severity {
 		return mesa.Warn
 	case session.StateAbandoned:
 		return mesa.Muted
+	case session.StateWorktreeGone:
+		return mesa.Error
 	default:
 		return mesa.Muted
 	}
@@ -161,6 +163,7 @@ func stateLegendEntries() []mesa.LegendEntry {
 		mesa.Entry(mesa.Accent, "●", "running-detached"),
 		mesa.Entry(mesa.Warn, "●", "inactive"),
 		mesa.Entry(mesa.Muted, "●", "abandoned"),
+		mesa.Entry(mesa.Error, "●", "worktree-gone (sc close it)"),
 	}
 }
 
