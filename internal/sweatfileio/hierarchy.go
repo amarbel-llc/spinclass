@@ -46,6 +46,12 @@ func LoadDefaultHierarchy() (sweatfile.Hierarchy, error) {
 // repoDir inside a linked git worktree is first resolved to the MAIN checkout
 // (mainCheckoutRoot), so a worktree's own sweatfile is never a layer.
 func LoadHierarchy(home, repoDir string) (sweatfile.Hierarchy, error) {
+	return loadHierarchy(home, repoDir, true)
+}
+
+// loadHierarchy is LoadHierarchy; withRepo false stops before step 4, leaving
+// the repo layer to a caller that supplies it from a committed blob.
+func loadHierarchy(home, repoDir string, withRepo bool) (sweatfile.Hierarchy, error) {
 	repoDir = mainCheckoutRoot(filepath.Clean(repoDir))
 	var sources []sweatfile.LoadSource
 	merged := sweatfile.Sweatfile{}
@@ -122,12 +128,14 @@ func LoadHierarchy(home, repoDir string) (sweatfile.Hierarchy, error) {
 
 	// 4. Repo sweatfile (lexical and realpath — dedup collapses when the
 	// repo dir itself is a symlink to its realpath).
-	if err := addSource(cleanRepo); err != nil {
-		return sweatfile.Hierarchy{}, err
-	}
-	if realRepo != cleanRepo {
-		if err := addSource(realRepo); err != nil {
+	if withRepo {
+		if err := addSource(cleanRepo); err != nil {
 			return sweatfile.Hierarchy{}, err
+		}
+		if realRepo != cleanRepo {
+			if err := addSource(realRepo); err != nil {
+				return sweatfile.Hierarchy{}, err
+			}
 		}
 	}
 
@@ -219,6 +227,25 @@ func WorktreeOverrides(dir string) Overrides {
 	return o
 }
 
+// LoadCommittedHierarchy loads the cascade for mainRepoRoot with its REPO layer
+// taken from the sweatfile committed at rev, INSTEAD of the main checkout's
+// sweatfile on disk. Global and parent layers stay live: they are the
+// operator's files, outside the repository. A live, uncommitted edit of the
+// main checkout's sweatfile does not apply. label names the committed layer in
+// Sources. A rev with no sweatfile leaves the repo layer empty; a rev that
+// cannot be read is an error.
+func LoadCommittedHierarchy(home, mainRepoRoot, rev, label string) (sweatfile.Hierarchy, error) {
+	data, found, err := git.FileAtRev(mainRepoRoot, rev, "sweatfile")
+	if err != nil {
+		return sweatfile.Hierarchy{}, fmt.Errorf("read sweatfile at %s: %w", label, err)
+	}
+	hierarchy, err := loadHierarchy(home, mainRepoRoot, false)
+	if err != nil {
+		return sweatfile.Hierarchy{}, err
+	}
+	return withTopLayer(hierarchy, label+":sweatfile", data, found)
+}
+
 // LoadHierarchyWithLayer is LoadHierarchy plus one caller-supplied top layer
 // whose bytes come from somewhere other than a file on disk (e.g. a committed
 // blob, #300). label names the layer in Sources. When !found the layer is inert,
@@ -231,7 +258,10 @@ func LoadHierarchyWithLayer(
 	if err != nil {
 		return sweatfile.Hierarchy{}, err
 	}
+	return withTopLayer(hierarchy, label, data, found)
+}
 
+func withTopLayer(hierarchy sweatfile.Hierarchy, label string, data []byte, found bool) (sweatfile.Hierarchy, error) {
 	var sf sweatfile.Sweatfile
 	if found {
 		doc, err := Parse(data)

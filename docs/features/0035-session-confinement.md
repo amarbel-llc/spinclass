@@ -1265,6 +1265,36 @@ What changed:
 **UNCONFINED workers can still write their own record, and the frontend
 mapping file for their principal, and are outside this model by decision.**
 
+### Merge and check configuration
+
+Merges, `sc check` and the merge gate read the repo layer of the sweatfile
+from the copy committed on the default branch tip
+(`sweatfileio.LoadCommittedHierarchy`), not the main checkout's live file and
+never a session's own commits. That covers the pre-merge hook and its knobs,
+repair, the merge knobs, `[[pre-merge-skills]]`, the exemptions (at the merge
+base) and `[[remotes]]`. The committed loader replaces the live repo layer
+instead of overlaying it. Tests: `TestMergePreMergeHookComesFromCommittedDefaultBranch`,
+`TestMergeRepairComesFromCommittedDefaultBranch`,
+`TestMergeDisableMergeComesFromCommittedDefaultBranch`,
+`TestMergePreMergeSkillsComeFromCommittedDefaultBranch`,
+`TestRunPreMergeHookComesFromCommittedDefaultBranch` (check),
+`TestGateSkillsComeFromCommittedDefaultBranch` (MCP gate). An operator's
+uncommitted edit of the main checkout's sweatfile no longer applies to merges
+or checks; committing it to the default branch applies it.
+
+**Residual, post-merge.** Post-merge reads the sweatfile committed at the
+LANDED sha (#300), which includes the merged branch's own commits. A branch
+that adds a `[[post-merge]]` command (or `[hooks].post-merge`) therefore runs it
+on the frontend at its own merge, outside any unit
+(`TestMergePostMergeCannotRunSessionBranchCommand`, red, skipped as this
+residual). Confined workers cannot merge over MCP; the route needs someone to
+merge such a branch. Planned fix (step ii-b): post-merge commands come from
+the default branch tip, and a merge whose post-merge section differs runs the
+old commands unless the operator confirms the new section's digest at a
+terminal. Meanwhile, recommended: a merge whose diff changes exec-bearing
+sweatfile keys (`[hooks]`, `[auth]`, `[[post-merge]]`, spawn keys) is flagged
+in its own report.
+
 Residual worker-writable setup-time writes not covered here: `.claude/settings`
 files written at start/rebuild, the pre-commit shim in `.spinclass/hooks`, the
 hooktrace log, and the stash shelf under `.spinclass/stash`. A worker that

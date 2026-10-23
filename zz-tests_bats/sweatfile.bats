@@ -269,7 +269,9 @@ sc_check_setup_worktree() {
   # command actually execs instead of being swallowed by the logger.
   install_passthrough_direnv
 
-  printf '%s' "$sweatfile_body" >"$TEST_REPO/sweatfile"
+  # Committed on the default branch: `sc check` reads the repo layer from there,
+  # not from the live file.
+  commit_repo_sweatfile "$TEST_REPO" "$sweatfile_body"
   cd "$wt_path" || return
 }
 

@@ -105,6 +105,9 @@ func setupRepo(t *testing.T) (root, repoDir string) {
 // writeSweatfile writes the repo sweatfile of the session at wtPath: the MAIN
 // checkout's, because a worktree's own sweatfile is not a layer (a worker can
 // write it). For an implicit session (wtPath is the main checkout) that is wtPath.
+// The file is COMMITTED on the main checkout's branch: `sc check` reads the repo
+// layer from the sweatfile committed on the default branch tip, never from the
+// live file.
 func writeSweatfile(t *testing.T, wtPath, contents string) {
 	t.Helper()
 	dir := wtPath
@@ -114,6 +117,11 @@ func writeSweatfile(t *testing.T, wtPath, contents string) {
 	if err := os.WriteFile(filepath.Join(dir, "sweatfile"), []byte(contents), 0o644); err != nil {
 		t.Fatalf("write sweatfile: %v", err)
 	}
+	runGit(t, dir, "add", "sweatfile")
+	if runGit(t, dir, "status", "--porcelain", "--", "sweatfile") == "" {
+		return
+	}
+	runGit(t, dir, "commit", "-m", "sweatfile")
 }
 
 // decodeRecords parses a buffered ndjson-crap stream into its records.

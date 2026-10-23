@@ -90,7 +90,7 @@ func TestPolicyExemptionFromBaseLands(t *testing.T) {
 // runs in.
 func TestPolicyExemptionsReadFromMergeBaseCommit(t *testing.T) {
 	repoDir, wtPath := setupPolicyRepo(t, fileTxtUntouched)
-	writeRepoSweatfile(t, repoDir, "[[pre-merge-exemptions]]\nname = \"not-file-txt\"\ncommand = \"exit 3\"\n")
+	writeLiveRepoSweatfile(t, repoDir, "[[pre-merge-exemptions]]\nname = \"not-file-txt\"\ncommand = \"exit 3\"\n")
 
 	recs, err := runFinishOpts(t, repoDir, wtPath, "feature", false, PostMergeOptions{Gate: GateNeedsExemption})
 	if err != nil {

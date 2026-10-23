@@ -624,34 +624,20 @@ func (r *revokeResolver) command(c *session.Credential, repoPath string) (cmd, n
 }
 
 // DefaultBranchHierarchy loads the sweatfile cascade for repoPath (global,
-// ancestor directories, the main checkout's sweatfile) with the repo layer
-// overlaid from the sweatfile COMMITTED at the default branch's landing ref,
-// never from any session worktree: a worker can write its own worktree's
+// ancestor directories) with the repo layer taken from the sweatfile COMMITTED
+// at the default branch's landing ref, instead of the main checkout's file on
+// disk, and never from any session worktree: a worker can write its own worktree's
 // sweatfile, and [auth] commands run on the frontend. The ref is the one merges
 // land on and sessions are cut from: the default branch's remote-tracking ref
 // when it exists, else the local branch (landing.ForMerge). src names the
 // committed layer for reports. With no default branch there is no overlay.
 func DefaultBranchHierarchy(home, repoPath string) (h sweatfile.Hierarchy, src string, err error) {
-	var (
-		data  []byte
-		found bool
-	)
-	src = "the main checkout (no default branch to read)"
-	if name, derr := git.DefaultBranch(repoPath); derr == nil {
-		ref := landing.ForMerge(repoPath, name, true).Ref()
-		if _, rpErr := git.RevParse(repoPath, ref); rpErr != nil {
-			ref = landing.Self(repoPath, name).Ref()
-		}
-		data, found, err = git.FileAtRev(repoPath, ref, "sweatfile")
-		if err != nil {
-			return sweatfile.Hierarchy{}, "", fmt.Errorf("read sweatfile at %s: %w", ref, err)
-		}
-		src = "the repo sweatfile at " + ref
-		h, err = sweatfileio.LoadHierarchyWithLayer(home, repoPath, ref+":sweatfile", data, found)
-		return h, src, err
+	if ref, ok := landing.DefaultBranchRef(repoPath); ok {
+		h, err = sweatfileio.LoadCommittedHierarchy(home, repoPath, ref, ref)
+		return h, "the repo sweatfile at " + ref, err
 	}
 	h, err = sweatfileio.LoadHierarchy(home, repoPath)
-	return h, src, err
+	return h, "the main checkout (no default branch to read)", err
 }
 
 func revoke(ctx context.Context, id Identity, st *session.State, cmd, dir string, w io.Writer) error {

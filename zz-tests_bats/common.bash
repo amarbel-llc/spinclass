@@ -79,6 +79,28 @@ create_repo() {
   git -C "$TEST_REPO" commit -m "initial commit"
 }
 
+# Commit a repo-root sweatfile with the given body on the main checkout's
+# current (default) branch. Merge, check, pre-merge, repair, post-merge and the
+# attestation gate read the repo layer of the sweatfile hierarchy from the
+# sweatfile COMMITTED on the default branch tip (the remote-tracking ref when the
+# repo has an origin), never from the live <repo>/sweatfile, so a test that wants
+# that config to take effect must commit it. When the repo has an origin the
+# commit is pushed so the remote-tracking ref carries it too. Features that read
+# the live hierarchy (start, apply, validate) do not need this.
+# Usage: commit_repo_sweatfile <repo> <sweatfile-body>
+commit_repo_sweatfile() {
+  local repo="$1"
+  local body="$2"
+  printf '%s\n' "$body" >"$repo/sweatfile"
+  git -C "$repo" add sweatfile >&2
+  if [ -n "$(git -C "$repo" status --porcelain -- sweatfile)" ]; then
+    git -C "$repo" commit -m "sweatfile" >&2
+  fi
+  if [ -n "$(git -C "$repo" remote)" ]; then
+    git -C "$repo" push origin HEAD >&2
+  fi
+}
+
 # Create a bare upstream and a clone checked out on master, with origin
 # tracking. Sets TEST_UPSTREAM (bare) and TEST_CHECKOUT (working clone on
 # master). Only master exists, so the default branch resolves unambiguously.

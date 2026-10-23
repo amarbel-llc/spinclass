@@ -30,7 +30,9 @@ pre_merge_setup_worktree() {
   # command actually execs instead of being swallowed by the logger.
   install_passthrough_direnv
 
-  printf '%s' "$sweatfile_body" >"$TEST_REPO/sweatfile"
+  # Committed on the default branch: `sc check`/`sc merge` read the repo layer
+  # from there, not from the live file.
+  commit_repo_sweatfile "$TEST_REPO" "$sweatfile_body"
   cd "$wt_path" || return
 }
 
@@ -271,9 +273,10 @@ function repair_phase_runs_on_merge { # @test
   # pre-merge = "true" overrides the ancestor sweatfile's slow CI hook
   # (the hierarchy climbs past the sandbox to the real repo) so the merge
   # exercises only the REPAIR phase, not a full `just` build.
-  printf '%s\n' '[hooks]
+  # Committed on the default branch: merge reads the repo layer from there.
+  commit_repo_sweatfile "$TEST_REPO" '[hooks]
 repair = "true"
-pre-merge = "true"' >"$TEST_REPO/sweatfile"
+pre-merge = "true"'
 
   local attach_output wt branch
   attach_output=$("$bin" --format tap start --no-attach 2>&1)
@@ -306,7 +309,9 @@ post_merge_setup_landed_merge() {
   local hooks_body="$1"
   local bin="${SPINCLASS_BIN:-spinclass}"
 
-  printf '%s\n' "$hooks_body" >"$TEST_REPO/sweatfile"
+  # Committed on the default branch: merge and post-merge read the repo layer
+  # from there (post-merge from the landed sha, which descends from it).
+  commit_repo_sweatfile "$TEST_REPO" "$hooks_body" >&2
 
   local attach_output wt branch
   attach_output=$("$bin" --format tap start --no-attach 2>&1)

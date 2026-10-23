@@ -239,9 +239,7 @@ func TestResolvedGitSyncMirrorsCredentialIntoLandingWorktree(t *testing.T) {
 
 	seen := filepath.Join(t.TempDir(), "helper")
 	sweatfileBody := "[hooks]\npost-merge = \"git config --get credential.helper > " + seen + "\"\n"
-	if err := os.WriteFile(filepath.Join(repoDir, "sweatfile"), []byte(sweatfileBody), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeRepoSweatfile(t, repoDir, sweatfileBody)
 
 	recs, err := runResolved(t, &mockExecutor{}, repoDir, wtPath, "feature-cred", "main", true, false)
 	if err != nil {

@@ -103,7 +103,15 @@ func RunContext(ctx context.Context, rep *crap.Reporter, wtPath string, activity
 	if err != nil || home == "" {
 		return nil, errors.New("could not resolve home directory")
 	}
-	hierarchy, err := sweatfileio.LoadHierarchy(home, repoPath)
+	// The hook comes from the repo sweatfile committed on the default branch
+	// tip, as a merge's does, never the main checkout's live file or the
+	// session's own commits.
+	var hierarchy sweatfile.Hierarchy
+	if ref, ok := landing.DefaultBranchRef(repoPath); ok {
+		hierarchy, err = sweatfileio.LoadCommittedHierarchy(home, repoPath, ref, ref)
+	} else {
+		hierarchy, err = sweatfileio.LoadHierarchy(home, repoPath)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("load sweatfile hierarchy: %w", err)
 	}

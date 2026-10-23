@@ -19,6 +19,7 @@ import (
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
 	"code.linenisgreat.com/spinclass/internal/attestation"
+	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/check"
 	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/executor"
@@ -1307,10 +1308,26 @@ func mergedSweatfileForCwd() (sweatfile.Sweatfile, bool) {
 	return mergedSweatfileForDir(cwd)
 }
 
-// mergedSweatfileForDir is mergedSweatfileForCwd for an explicit directory.
+// mergedSweatfileForDir is mergedSweatfileForCwd for an explicit directory. Its
+// readers are merge and attestation policy (gate skills, stacking, exemption
+// hints, the catalog's merge gating) and [[remotes]], so inside a repository the
+// repo layer is the sweatfile committed on the default branch tip, never the
+// main checkout's live file or a session's commits.
 func mergedSweatfileForDir(cwd string) (sweatfile.Sweatfile, bool) {
-	h, _, _, ok := sweatfileHierarchyForDir(cwd)
-	if !ok {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return sweatfile.Sweatfile{}, false
+	}
+	repoPath, err := git.CommonDir(cwd)
+	if err != nil {
+		h, hErr := sweatfileio.LoadHierarchy(home, cwd)
+		if hErr != nil {
+			return sweatfile.Sweatfile{}, false
+		}
+		return h.Merged, true
+	}
+	h, _, err := auth.DefaultBranchHierarchy(home, repoPath)
+	if err != nil {
 		return sweatfile.Sweatfile{}, false
 	}
 	return h.Merged, true

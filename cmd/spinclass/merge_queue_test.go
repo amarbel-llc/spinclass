@@ -51,11 +51,11 @@ func gatedWorktreeFixture(t *testing.T, sweatBody string) (cwd, repoPath, branch
 		t.Fatalf("mkdir repo: %v", err)
 	}
 	testgit.MustInit(t, repo)
+	// Committed on the default branch before the session is cut: the gate reads
+	// the repo layer from there, not from a live file.
+	writeSweatfile(t, repo, sweatBody)
 	wt := filepath.Join(repo, ".worktrees", "feature")
 	testgit.MustWorktreeAdd(t, repo, wt, "feature")
-	if err := os.WriteFile(filepath.Join(repo, "sweatfile"), []byte(sweatBody), 0o644); err != nil {
-		t.Fatalf("write sweatfile: %v", err)
-	}
 
 	t.Chdir(wt)
 	cwd, err = os.Getwd()
@@ -614,9 +614,18 @@ func commitFile(t *testing.T, dir, name string) {
 	testgit.MustGit(t, dir, "commit", "-q", "-m", "add "+name)
 }
 
+// writeSweatfile COMMITS body as the repo sweatfile on the main checkout's
+// branch: merge, check and the attestation gate read the repo layer from the
+// sweatfile committed on the default branch tip, never the live file. A
+// sweatfile already committed with identical content is left alone.
 func writeSweatfile(t *testing.T, repoPath, body string) {
 	t.Helper()
-	testgit.MustWriteFile(t, filepath.Dir(repoPath), "repo/sweatfile", body)
+	testgit.MustWriteFile(t, repoPath, "sweatfile", body)
+	testgit.MustGit(t, repoPath, "add", "sweatfile")
+	if testgit.MustGit(t, repoPath, "status", "--porcelain", "--", "sweatfile") == "" {
+		return
+	}
+	testgit.MustGit(t, repoPath, "commit", "-q", "-m", "sweatfile")
 }
 
 // TestMergeSyncHookFailureKeepsAttestation is the #219 repro: a red pre-merge

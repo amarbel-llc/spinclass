@@ -42,10 +42,10 @@ EOF
 
   local marker="$BATS_TEST_TMPDIR/hook-ran.marker"
   # shellcheck disable=SC2016
-  cat >"$TEST_CHECKOUT/sweatfile" <<EOF
-[hooks]
-pre-merge = "touch '$marker'"
-EOF
+  # Committed (and pushed): the hook is genuinely configured, so "it did not
+  # run" below is proof of the refusal, not of an ignored live file.
+  commit_repo_sweatfile "$TEST_CHECKOUT" "[hooks]
+pre-merge = \"touch '$marker'\""
 
   materialize_implicit_session "$TEST_CHECKOUT"
 
@@ -71,10 +71,10 @@ EOF
 
   local marker="$BATS_TEST_TMPDIR/check-hook-ran.marker"
   # shellcheck disable=SC2016
-  cat >"$TEST_CHECKOUT/sweatfile" <<EOF
-[hooks]
-pre-merge = "touch '$marker'"
-EOF
+  # Committed (and pushed): `sc check` reads the repo layer from the sweatfile
+  # committed on the default branch tip, not from the live file.
+  commit_repo_sweatfile "$TEST_CHECKOUT" "[hooks]
+pre-merge = \"touch '$marker'\""
 
   materialize_implicit_session "$TEST_CHECKOUT"
 

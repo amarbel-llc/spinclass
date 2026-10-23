@@ -28,6 +28,21 @@ per worktree; today that is only *[hooks].disable-nix-gc*, which overrides the
 cascade's value for that worktree's own nix gc at close. Put every other
 setting in the repository sweatfile (or a layer above it).
 
+*Merges, checks and the merge gate read the committed repo layer.* For
+*sc merge*, *sc check*, *merge-this-session*, *check-this-session* and the
+attestation gate, the repository layer is the _sweatfile_ as *committed on the
+default branch tip* (the landing target, as last fetched), not the main
+checkout's file on disk. The global and parent-directory layers are still read
+live. This covers *[hooks].pre-merge* and its timeouts, *repair* and
+*disable-repair*, *disable-merge* and the other merge knobs,
+*[[pre-merge-skills]]*, the pre-merge exemptions (read at the merge base) and
+*[[remotes]]*. Two consequences: a session cannot change any of these by
+committing a _sweatfile_ edit on its own branch (the change applies to merges
+after it lands), and an *uncommitted* edit to the main checkout's _sweatfile_
+no longer applies to merges or checks at all; commit it to the default branch
+to apply it. Post-merge is read from the landed commit instead (see
+*[hooks].post-merge*).
+
 Intermediate parent directories are walked along *two* chains: the lexical
 ancestors of the working directory, and the ancestors of its
 symlink-resolved (_realpath_) form. Both chains are inspected in root-first
@@ -291,8 +306,11 @@ does not export *WORKTREE*.
 
 	*Snapshot:* the phase reads *[hooks].post-merge*, *post-merge-timeout*,
 	*disable-post-merge* and *[[post-merge]]* from the repo *sweatfile* as
-	committed at the landed sha, merged over the live global, parent-dir and
-	main-checkout layers. Uncommitted edits in the session worktree, and
+	committed at the landed sha, merged over the live global and parent-dir
+	layers (the main checkout's file on disk is not read). The landed sha
+	includes the merged branch's own commits, so a branch that adds a
+	post-merge command runs it at its own merge (spinclass FDR 0035,
+	residuals). Uncommitted edits in the session worktree, and
 	commits made after the merge pinned, never affect a merge already in
 	flight; they apply to the next merge. An unreadable snapshot emits a
 	warn point and skips the phase. *--post-merge-targets* is validated
@@ -1396,8 +1414,9 @@ lands.
 
 *Snapshot:* the phase reads *[hooks].post-merge*, *post-merge-timeout*,
 *disable-post-merge* and *[[post-merge]]* from the repo *sweatfile* as
-committed at the landed sha, merged over the live global, parent-dir and
-main-checkout layers. Uncommitted edits in the session worktree, and commits
+committed at the landed sha, merged over the live global and parent-dir
+layers (the main checkout's file on disk is not read). Uncommitted edits in
+the session worktree, and commits
 made after the merge pinned, never affect a merge already in flight; they
 apply to the next merge. An unreadable snapshot emits a warn point and skips
 the phase. *--post-merge-targets* is validated against the pinned commit; an

@@ -441,9 +441,13 @@ func setupWorktreeWithSweatfile(t *testing.T, branchName, sweatfileBody string) 
 	run(repoDir, "add", "file.txt")
 	run(repoDir, "commit", "-m", "initial")
 
+	// Committed on the default branch: merge and check read the repo layer from
+	// there, not from a live file.
 	if err := os.WriteFile(filepath.Join(repoDir, "sweatfile"), []byte(sweatfileBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	run(repoDir, "add", "sweatfile")
+	run(repoDir, "commit", "-m", "sweatfile")
 
 	wtPath = filepath.Join(repoDir, ".worktrees", branchName)
 	if err := os.MkdirAll(filepath.Dir(wtPath), 0o755); err != nil {

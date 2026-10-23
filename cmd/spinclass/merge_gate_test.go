@@ -83,9 +83,7 @@ func TestDecideMergeGate(t *testing.T) {
 			}
 			testgit.MustInit(t, repo)
 			if tc.sweatfile != "" {
-				if err := os.WriteFile(filepath.Join(repo, "sweatfile"), []byte(tc.sweatfile), 0o644); err != nil {
-					t.Fatal(err)
-				}
+				writeSweatfile(t, repo, tc.sweatfile) // committed on the default branch
 			}
 			wt := filepath.Join(repo, ".worktrees", "feature")
 			testgit.MustWorktreeAdd(t, repo, wt, "feature")

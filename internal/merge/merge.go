@@ -29,7 +29,6 @@ import (
 	"code.linenisgreat.com/spinclass/internal/statsd"
 	gitstore "code.linenisgreat.com/spinclass/internal/store/git"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
-	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 
@@ -189,7 +188,7 @@ func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch s
 		}
 	}()
 
-	preamble, gateErr := loadAndGate(ts, repoPath, wtPath, branch)
+	preamble, gateErr := loadAndGate(ts, repoPath, wtPath, branch, defaultBranch, gitSync)
 	mx = newPhaseMetrics(preamble.hierarchy.Merged, repoPath)
 	if gateErr != nil {
 		return "", gateErr
@@ -249,7 +248,11 @@ func PrepareMerge(ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch s
 	// merged before the VERIFY hook. Runs here — after the nothing-to-merge guard
 	// (so HEAD is an unpushed session commit conformist's --amend accepts) and
 	// before the pin (so the pin reads the post-repair HEAD). The rebase and that
-	// guard already establish repair's preconditions, so no skip check.
+	// guard already establish repair's preconditions, so no skip check. The
+	// repair command is re-read from the target tip as just fetched.
+	if h, ok := trustedHierarchy(repoPath, defaultBranch, gitSync); ok {
+		preamble.hierarchy, preamble.haveHierarchy = h, true
+	}
 	if rErr := preamble.repair(ts, mx, wtPath, branch); rErr != nil {
 		return "", rErr
 	}
@@ -282,18 +285,16 @@ type mergePreamble struct {
 }
 
 // loadAndGate is the head of a merge: the co-active sessions point, the
-// sweatfile hierarchy load for dir (used by the repair phase), and the
-// disable-merge gate. An unresolvable home or load failure degrades gracefully —
-// the gate and the later repair phase are skipped rather than blocking the
-// merge.
-func loadAndGate(ts *crap.TestStream, repoPath, dir, branch string) (mergePreamble, error) {
+// sweatfile hierarchy load (trustedHierarchy: the repo layer as committed on the
+// landing target's tip, before this merge's fetch), and the disable-merge gate.
+// An unresolvable home or load failure degrades gracefully — the gate and the
+// later repair phase are skipped rather than blocking the merge.
+func loadAndGate(ts *crap.TestStream, repoPath, dir, branch, defaultBranch string, gitSync bool) (mergePreamble, error) {
 	emitCoActiveSessions(ts, repoPath, dir)
 
 	var p mergePreamble
-	if home, _ := os.UserHomeDir(); home != "" {
-		if h, hErr := sweatfileio.LoadHierarchy(home, repoPath); hErr == nil {
-			p.hierarchy, p.haveHierarchy = h, true
-		}
+	if h, ok := trustedHierarchy(repoPath, defaultBranch, gitSync); ok {
+		p.hierarchy, p.haveHierarchy = h, true
 	}
 
 	if p.haveHierarchy && p.hierarchy.Merged.DisableMergeEnabled() {
@@ -431,10 +432,8 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	// An unloadable hierarchy stays the zero value (queue enabled, gate
 	// dormant for the terminal/attested policy paths).
 	var sessionH sweatfile.Hierarchy
-	if home, _ := os.UserHomeDir(); home != "" {
-		if h, hErr := sweatfileio.LoadHierarchy(home, repoPath); hErr == nil {
-			sessionH = h
-		}
+	if h, ok := trustedHierarchy(repoPath, defaultBranch, gitSync); ok {
+		sessionH = h
 	}
 	// finish and total close out here for both paths (the unqueued one included).
 	// A post-merge failure is non-fatal, so it never turns total into failed.
@@ -560,7 +559,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	// worktree instead — pre-existing resolveHookDir behavior, in which the
 	// sha it verifies is whatever that worktree has checked out.)
 	hookStart := time.Now()
-	hookLinks, hookErr := runPreMergeHookContext(ctx, rep, ts, repoPath, wtPath, branch, landingSha, activity)
+	hookLinks, hookErr := runPreMergeHookContext(ctx, rep, ts, repoPath, wtPath, branch, defaultBranch, landingSha, gitSync, activity)
 	mx.observePreMergeHook(ctx, sessionH.Merged, hookStart, hookErr)
 	blobLinks = append(blobLinks, hookLinks...)
 	if hookErr != nil {
@@ -647,7 +646,7 @@ func finishMergeUnqueued(ctx context.Context, mx phaseMetrics, rep *crap.Reporte
 	}
 
 	hookStart := time.Now()
-	hookLinks, hookErr := runPreMergeHookContext(ctx, rep, ts, repoPath, wtPath, branch, pinnedSha, activity)
+	hookLinks, hookErr := runPreMergeHookContext(ctx, rep, ts, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, activity)
 	mx.observePreMergeHook(ctx, sessionH.Merged, hookStart, hookErr)
 	blobLinks = append(blobLinks, hookLinks...)
 	if hookErr != nil {
@@ -1087,13 +1086,9 @@ func promptDefaultBranch() (string, error) {
 // configured). Returns (nil, nil) silently when home is not resolvable or the
 // hierarchy fails to load. Returned BlobLinks are the resource_link blobs
 // emitted for hook output.
-func runPreMergeHookContext(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, hookSha string, activity io.Writer) ([]check.BlobLink, error) {
-	home, _ := os.UserHomeDir()
-	if home == "" {
-		return nil, nil
-	}
-	hierarchy, err := sweatfileio.LoadHierarchy(home, repoPath)
-	if err != nil {
+func runPreMergeHookContext(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch, hookSha string, gitSync bool, activity io.Writer) ([]check.BlobLink, error) {
+	hierarchy, ok := trustedHierarchy(repoPath, defaultBranch, gitSync)
+	if !ok {
 		return nil, nil
 	}
 	return check.RunWithReporterContext(ctx, rep, ts, hierarchy, wtPath, branch, hookSha, activity)

@@ -418,7 +418,10 @@ func TestPostMergeReportsPushed(t *testing.T) {
 		"[hooks]\npost-merge = \"env | grep '^SPINCLASS_MERGE_PUSHED' > %s\"\n", envFile,
 	))
 
-	featureSha := runGit(t, wtPath, "rev-parse", "HEAD")
+	// The committed (and pushed) sweatfile moved origin/main past the point the
+	// session was cut from, so the feature commit is rebased on landing: assert
+	// the push by origin/main moving to a feature-commit tip, not by sha equality.
+	originBefore := runGit(t, repoDir, "rev-parse", "origin/main")
 	if _, err := runFinish(t, repoDir, wtPath, "feature", true); err != nil {
 		t.Fatalf("FinishMerge: %v", err)
 	}
@@ -432,8 +435,11 @@ func TestPostMergeReportsPushed(t *testing.T) {
 	}
 	// And the hook really did run after the landing reached the remote (#284:
 	// the landing is the push to origin; the local ref is not advanced).
-	if remoteSha := runGit(t, repoDir, "rev-parse", "origin/main"); remoteSha != featureSha {
-		t.Errorf("origin/main %s, want the landed feature tip %s", remoteSha, featureSha)
+	if remoteSha := runGit(t, repoDir, "rev-parse", "origin/main"); remoteSha == originBefore {
+		t.Errorf("origin/main still %s, want the landed feature tip", remoteSha)
+	}
+	if subject := runGit(t, repoDir, "log", "-1", "--format=%s", "origin/main"); subject != "feature commit" {
+		t.Errorf("origin/main tip subject = %q, want the landed feature commit", subject)
 	}
 }
 

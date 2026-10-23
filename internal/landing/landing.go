@@ -57,6 +57,21 @@ func ForMerge(repoPath, branch string, gitSync bool) Target {
 	return Remote(repoPath, branch, git.BranchRemote(repoPath, branch))
 }
 
+// DefaultBranchRef is the ref a merge of repoPath lands on and a session is cut
+// from: the default branch's remote-tracking ref when it resolves, else the
+// local branch. ok is false when there is no default branch.
+func DefaultBranchRef(repoPath string) (ref string, ok bool) {
+	name, err := git.DefaultBranch(repoPath)
+	if err != nil {
+		return "", false
+	}
+	ref = ForMerge(repoPath, name, true).Ref()
+	if _, err := git.RevParse(repoPath, ref); err != nil {
+		ref = Self(repoPath, name).Ref()
+	}
+	return ref, true
+}
+
 func (t Target) IsSelf() bool { return t.Remote == "" }
 
 // LocalRef is the local default branch's full ref name.

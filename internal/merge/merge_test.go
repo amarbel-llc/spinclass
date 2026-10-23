@@ -735,10 +735,8 @@ func TestResolvedDisabledByMergeFlag(t *testing.T) {
 
 	// Disable merge in the repo's own sweatfile (the main checkout): a worktree's
 	// own sweatfile is not a layer.
-	sweatfilePath := filepath.Join(repoDir, "sweatfile")
-	if err := os.WriteFile(sweatfilePath, []byte("[hooks]\ndisable-merge = true\n"), 0o644); err != nil {
-		t.Fatalf("write sweatfile: %v", err)
-	}
+	// Committed on the default branch: merges read the repo layer from there.
+	writeRepoSweatfile(t, repoDir, "[hooks]\ndisable-merge = true\n")
 
 	// Snapshot main and feature-disabled state before the call so we can
 	// verify nothing happened.

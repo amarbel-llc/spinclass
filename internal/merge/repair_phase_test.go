@@ -13,9 +13,31 @@ import (
 	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
 )
 
-// writeRepoSweatfile writes a repo-root sweatfile (loaded as the repo layer of
-// the hierarchy) without dirtying the worktree.
+// writeRepoSweatfile commits content as the repo-root sweatfile on the default
+// branch of the main checkout. Merges read the repo layer of the hierarchy from
+// the sweatfile COMMITTED on the default branch tip, so a fixture that wants the
+// config to take effect must commit it (and push it, when the repo has a
+// remote). A sweatfile already committed with identical content is left alone.
 func writeRepoSweatfile(t *testing.T, repoDir, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(repoDir, "sweatfile"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", "sweatfile")
+	if status := runGit(t, repoDir, "status", "--porcelain", "--", "sweatfile"); status == "" {
+		return
+	}
+	runGit(t, repoDir, "commit", "-m", "sweatfile")
+	// A git-sync merge reads the remote-tracking ref, so publish the commit when
+	// the repo has a remote.
+	if runGit(t, repoDir, "remote") != "" {
+		runGit(t, repoDir, "push", "origin", "HEAD")
+	}
+}
+
+// writeLiveRepoSweatfile writes the main checkout's sweatfile on disk WITHOUT
+// committing it: the live, uncommitted file that merges deliberately ignore.
+func writeLiveRepoSweatfile(t *testing.T, repoDir, content string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(repoDir, "sweatfile"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
@@ -44,7 +66,19 @@ func writeGlobalSweatfile(t *testing.T, content string) {
 // of main, and returns (repoDir, wtPath, preRepairHEAD).
 func setupRepairRepo(t *testing.T, branch string) (repoDir, wtPath, head string) {
 	t.Helper()
+	return setupRepairRepoWithSweatfile(t, branch, "")
+}
+
+// setupRepairRepoWithSweatfile is setupRepairRepo with sweatfile committed on
+// main BEFORE the worktree is cut (when non-empty), so the session starts at the
+// default branch tip and the merge's rebase is a no-op: tests that assert the
+// pinned sha or branch HEAD stay exact.
+func setupRepairRepoWithSweatfile(t *testing.T, branch, sweatfile string) (repoDir, wtPath, head string) {
+	t.Helper()
 	repoDir = setupRepo(t)
+	if sweatfile != "" {
+		writeRepoSweatfile(t, repoDir, sweatfile)
+	}
 	wtPath = setupWorktree(t, repoDir, branch)
 	if err := os.WriteFile(filepath.Join(wtPath, "a.txt"), []byte("a"), 0o644); err != nil {
 		t.Fatal(err)
@@ -78,8 +112,7 @@ func runPrepare(t *testing.T, repoDir, wtPath, branch string) (pinnedSha string,
 // TestPrepareMergeRepairNoop: a repair command that changes nothing leaves the
 // pinned sha at the pre-repair HEAD and emits an "already conformant" point.
 func TestPrepareMergeRepairNoop(t *testing.T) {
-	repoDir, wtPath, head := setupRepairRepo(t, "feature")
-	writeRepoSweatfile(t, repoDir, "[hooks]\nrepair = \"true\"\n")
+	repoDir, wtPath, head := setupRepairRepoWithSweatfile(t, "feature", "[hooks]\nrepair = \"true\"\n")
 
 	pinnedSha, tests, err := runPrepare(t, repoDir, wtPath, "feature")
 	if err != nil {
@@ -166,8 +199,7 @@ func TestPrepareMergeRepairFailureAborts(t *testing.T) {
 // TestPrepareMergeRepairDisabled: disable-repair suppresses the phase even with
 // a (failing) repair command set — no repair point, merge proceeds.
 func TestPrepareMergeRepairDisabled(t *testing.T) {
-	repoDir, wtPath, head := setupRepairRepo(t, "feature")
-	writeRepoSweatfile(t, repoDir,
+	repoDir, wtPath, head := setupRepairRepoWithSweatfile(t, "feature",
 		"[hooks]\nrepair = \"exit 1\"\ndisable-repair = true\n")
 
 	pinnedSha, tests, err := runPrepare(t, repoDir, wtPath, "feature")
@@ -213,8 +245,7 @@ func TestResolvedRepairNoopCompletes(t *testing.T) {
 // would fold uncommitted tracked edits into the pinned commit, so the merge is
 // refused before repair runs and the edits are left untouched.
 func TestPrepareMergeRefusesDirtyWorktreeBeforeRepair(t *testing.T) {
-	repoDir, wtPath, head := setupRepairRepo(t, "feature")
-	writeRepoSweatfile(t, repoDir,
+	repoDir, wtPath, head := setupRepairRepoWithSweatfile(t, "feature",
 		"[hooks]\nrepair = \"git add -A && git commit --amend --no-edit -q\"\n")
 	// Without autostash git's own rebase refuses a dirty tree; with it (the
 	// #200 / queued-merge scenario) the rebase succeeds and the edit survives.
@@ -274,8 +305,7 @@ func TestPrepareMergeUntrackedFilesDoNotBlockRepair(t *testing.T) {
 // undone (HEAD and index back to the pre-repair commit) and the new file is left
 // in the worktree, untracked.
 func TestPrepareMergeRefusesARepairThatAddsAPath(t *testing.T) {
-	repoDir, wtPath, head := setupRepairRepo(t, "feature")
-	writeRepoSweatfile(t, repoDir,
+	repoDir, wtPath, head := setupRepairRepoWithSweatfile(t, "feature",
 		"[hooks]\nrepair = \"printf late > late.go && git add late.go && git commit --amend --no-edit -q\"\n")
 
 	pinnedSha, tests, err := runPrepare(t, repoDir, wtPath, "feature")
@@ -299,8 +329,7 @@ func TestPrepareMergeRefusesARepairThatAddsAPath(t *testing.T) {
 // TestPrepareMergeRefusesARepairThatDeletesAPath (#402): likewise an amend that
 // drops a path from the commit is not a formatter pass.
 func TestPrepareMergeRefusesARepairThatDeletesAPath(t *testing.T) {
-	repoDir, wtPath, head := setupRepairRepo(t, "feature")
-	writeRepoSweatfile(t, repoDir,
+	repoDir, wtPath, head := setupRepairRepoWithSweatfile(t, "feature",
 		"[hooks]\nrepair = \"git rm -q file.txt && git commit --amend --no-edit -q\"\n")
 
 	_, tests, err := runPrepare(t, repoDir, wtPath, "feature")
