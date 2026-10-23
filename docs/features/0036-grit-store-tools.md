@@ -151,8 +151,9 @@ the same PreToolUse hook that consults `AlwaysAsk`:
      recorded session, ambiguous, conflicting sources, or no principal at all)
      -> a non-force call is deferred to the serve (`Allow`) only when
      `CLOWN_UNIT` is set (the hook runs in a confined unit, FDR 0035
-     "CLOWN_UNIT"), and asks otherwise; force always asks (see "Hook defers an
-     unresolved session in a unit" below).
+     "CLOWN_UNIT"); otherwise the session is resolved from the hook's `cwd`
+     (spinclass#415, below) and asks only if that fails too; force always asks
+     while unresolved (see "Hook defers an unresolved session in a unit" below).
 3. Everything else -> existing tier-file logic.
 
 **dontAsk sessions.** A session spawned with `--permission-mode dontAsk` cannot
@@ -792,8 +793,13 @@ asking and the serve decides.
   unit only, clown 508839d) an unresolved non-force call returns `Allow` with the
   reason "confined unit, session unresolved here, deferred to the serve: body
   ownership check applies", and ownership is enforced by the serve body
-  (`internal/store/git/confined.go`); with `CLOWN_UNIT` empty an unresolved
-  call asks (a deny under `dontAsk`), whether or not a principal was seen. The
+  (`internal/store/git/confined.go`); with `CLOWN_UNIT` empty the session is
+  resolved from the hook input's `cwd` (`session.FindByWorktreePath`, a live
+  non-implicit worktree session, spinclass#415: the principal mapping exists
+  only for confined workers, so before this every unconfined grit call asked),
+  and only a call whose `cwd` is in no session asks (a deny under `dontAsk`).
+  The per-subcommand result is the table in spinclass-grit(7) "DEFAULT
+  PERMISSIONS". The
   marker is a hint, not a boundary: setting it on an unconfined process only
   swaps the prompt for the body refusal. The stash case is closed in the body
   (session-local) either way. The hook's principal is `CLOWN_SESSION_ID`
@@ -803,8 +809,9 @@ asking and the serve decides.
   and session log, both ids) but neither refused nor turned into an Ask; the env
   principal is recorded and resolved. With the env empty, a `/clear` changes the
   hook `session_id`, so the recorded principal no longer matches and the call is
-  unresolved (asks outside a unit, deferred inside one). `hooks.storeDecision`
-  passes `perms.StoreVerdict` that principal plus whether `CLOWN_UNIT` is set.
+  unresolved (resolved from `cwd` outside a unit, deferred inside one).
+  `hooks.storeDecision` passes `perms.StoreVerdict` that principal, the hook's
+  `cwd` and whether `CLOWN_UNIT` is set.
   A resolved session is unchanged (`Classify` decides;
   owned targets allow, the rest ask). `force:true` asks when unresolved, and the `AlwaysAsk` floors stay ahead of
   `StoreVerdict` in `runPreToolUse`, unchanged. The deferral is safe only

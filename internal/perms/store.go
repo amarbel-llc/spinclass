@@ -2,6 +2,7 @@ package perms
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -43,6 +44,25 @@ var resolveStoreSession = func(principal string) (store.Session, error) {
 	return ScopedStoreSession(st.WorktreePath, st.Branch, principal), nil
 }
 
+// resolveStoreSessionAtCwd finds the calling session from the directory the
+// call is made in, with no principal (#415). It is how an UNCONFINED caller is
+// resolved: the principal mapping is a confinement concept, written only for
+// confined workers, and outside a unit there is no boundary for it to defend.
+// A variable so tests can stand in for the session index.
+var resolveStoreSessionAtCwd = func(cwd, principal string) (store.Session, error) {
+	if cwd == "" {
+		return store.Session{}, errors.New("no working directory to resolve the session from")
+	}
+	st, err := session.FindByWorktreePath(cwd)
+	if err != nil {
+		return store.Session{}, fmt.Errorf("no session has %s in its worktree: %w", cwd, err)
+	}
+	if st.IsTombstone() || st.Kind == session.KindImplicit || st.WorktreePath == "" || st.Branch == "" {
+		return store.Session{}, fmt.Errorf("%s is not inside a live worktree session", cwd)
+	}
+	return ScopedStoreSession(st.WorktreePath, st.Branch, principal), nil
+}
+
 // ScopedStoreSession is the session a permission reading classifies against:
 // the worktree and branch, plus the cross-session scoping (store.Session
 // SessionAt and Held), so a call aimed at another session's worktree asks
@@ -63,10 +83,12 @@ func ScopedStoreSession(dir, branch, principal string) store.Session {
 // CLOWN_UNIT there and nowhere else, FDR 0035 "CLOWN_UNIT"). There the hook
 // cannot resolve the session, so an unresolved non-force call yields Allow,
 // deferred to the serve, whose classification and body ownership check refuse
-// what the caller does not own. Outside a unit an unresolved session (unknown,
-// ambiguous, conflicting sources, or no principal at all) yields Ask. Force
-// asks either way.
-func StoreVerdict(toolName string, toolInput map[string]any, principal string, inUnit bool) (verdict store.Verdict, reason string, isStore bool) {
+// what the caller does not own. Outside a unit a principal with no mapping is
+// the normal case (only confined workers have one), so the session is resolved
+// from cwd, the hook payload's working directory, and Classify decides as for
+// any session (#415). Only when neither resolves does the call ask. Force asks
+// whenever the session is unresolved.
+func StoreVerdict(toolName string, toolInput map[string]any, principal, cwd string, inUnit bool) (verdict store.Verdict, reason string, isStore bool) {
 	tool := strings.TrimPrefix(toolName, gritToolPrefix)
 	if tool == toolName || !storeTools[tool] {
 		return store.Ask, "", false
@@ -79,6 +101,13 @@ func StoreVerdict(toolName string, toolInput map[string]any, principal string, i
 		}
 	}
 	callerSession, resolveErr := resolveStoreSession(principal)
+	if resolveErr != nil && !inUnit {
+		if atCwd, cwdErr := resolveStoreSessionAtCwd(cwd, principal); cwdErr == nil {
+			callerSession, resolveErr = atCwd, nil
+		} else {
+			resolveErr = fmt.Errorf("%v; and from the working directory: %v", resolveErr, cwdErr)
+		}
+	}
 	if resolveErr != nil {
 		if forceRequested(toolInput) {
 			return store.Ask, "grit " + tool + ": force always asks, even when the session is unresolved", true

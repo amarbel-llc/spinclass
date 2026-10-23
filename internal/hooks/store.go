@@ -26,7 +26,7 @@ func storeDecision(input hookInput, mainRepoRoot, sessionWorktree string, rewrit
 	// CLOWN_UNIT is a hint, not a boundary: an unconfined caller that sets it
 	// only gets the serve's body refusal instead of a prompt (FDR 0035).
 	inUnit := os.Getenv("CLOWN_UNIT") != ""
-	verdict, reason, isStore := perms.StoreVerdict(input.ToolName, toolInput, principal, inUnit)
+	verdict, reason, isStore := perms.StoreVerdict(input.ToolName, toolInput, principal, input.CWD, inUnit)
 	if !isStore {
 		return nil, false
 	}

@@ -51,8 +51,9 @@ func storeDecisionFor(t *testing.T, env, unit, hookSessionID, cwd string, toolIn
 // only logged); with it unset (a real worker) the hook session_id is the
 // fallback principal. A recorded principal resolves to its session and Classify
 // decides (own worktree allows, foreign repo_path asks), with or without
-// CLOWN_UNIT. An unrecorded principal or none at all asks outside a unit and
-// defers to the serve inside one (FDR 0035 "CLOWN_UNIT").
+// CLOWN_UNIT. Outside a unit an unrecorded principal or none at all resolves
+// the session from the hook's cwd (#415), so Classify decides as well; inside
+// one it defers to the serve (FDR 0035 "CLOWN_UNIT").
 func TestStoreToolResolvesTheHookSessionID(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	repo, wt := initSpawnedWorktree(t, "driver/key")
@@ -81,8 +82,9 @@ func TestStoreToolResolvesTheHookSessionID(t *testing.T) {
 	}{
 		{"recorded hook id, foreign repo_path", "", hookID, foreign, "ask", "ask"},
 		{"recorded hook id, own worktree", "", hookID, wt, "allow", "allow"},
-		{"unrecorded hook id", "", otherID, wt, "ask", "allow"},
-		{"env not recorded, differing hook id recorded: env wins, unresolved", otherID, hookID, wt, "ask", "allow"},
+		{"unrecorded hook id, resolved from cwd", "", otherID, wt, "allow", "allow"},
+		{"unrecorded hook id, resolved from cwd, foreign repo_path", "", otherID, foreign, "ask", "allow"},
+		{"env not recorded, differing hook id recorded: env wins, resolved from cwd", otherID, hookID, wt, "allow", "allow"},
 		{"env recorded, differing hook id: env resolves, own worktree", hookID, otherID, wt, "allow", "allow"},
 		{"env recorded, differing hook id: env resolves, foreign repo_path", hookID, otherID, foreign, "ask", "ask"},
 		{"env recorded, no hook id, own worktree", hookID, "", wt, "allow", "allow"},

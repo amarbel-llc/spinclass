@@ -62,13 +62,18 @@ tool body. The PreToolUse hook consults it for these tools after the *AlwaysAsk*
 floors. The hook's principal is *CLOWN\_SESSION\_ID* when set, else the hook's
 *session\_id*; if both are set and differ, *CLOWN\_SESSION\_ID* wins and the
 mismatch is logged. A principal that resolves to one recorded session lets
-*Classify* decide. When the session does not resolve (no principal, no recorded
-session, an ambiguous one, or conflicting sources) the verdict depends on
+*Classify* decide. A principal resolves only through the frontend principal
+mapping, which is written for confined workers alone, so an unconfined
+caller's principal normally does not resolve. When it does not (no principal,
+no mapping, an ambiguous one, or conflicting sources) the verdict depends on
 *CLOWN\_UNIT*, which clown sets inside a confined unit only (a confined
 worker's hook sees its principal but cannot resolve the session). With it set
 the hook returns Allow with the reason "confined unit, session unresolved here,
-deferred to the serve: body ownership check applies"; with it empty the hook
-asks. A call with *force* set asks either way. The marker is a hint, not a
+deferred to the serve: body ownership check applies". With it empty the hook
+resolves the session from the hook input's *cwd* instead (the live, non-implicit
+worktree session containing it, spinclass#415) and *Classify* decides; only when
+that fails too does it ask. A call with *force* set asks whenever the session is
+unresolved. The marker is a hint, not a
 boundary: the deferral is safe only because the tool body fails closed, see
 CONFINED, UNCONFINED AND NO-SESSION CALLERS.
 
@@ -113,6 +118,68 @@ owned and with *force* unset; the tool body always refuses the worktree the call
 runs in. *clone* is Allow only when the destination, with symlinks resolved on
 the part that exists, lies inside the session worktree (its *.tmp* included);
 the source is not gated.
+
+# DEFAULT PERMISSIONS
+
+The hook's verdict per call, for a session on branch _B_ (spinclass#415). The
+*unconfined* column is a caller in its own session worktree with no principal
+mapping, resolved from *cwd*. The *unit hook* column is the hook inside a unit,
+where the session does not resolve: every call without *force* is Allow and
+the serve's body check (CONFINED, UNCONFINED AND NO-SESSION CALLERS) is the
+boundary. From a *cwd* in no session, every call is Ask. The test
+*TestGritDefaultPermissionsForAnUnconfinedSession* (internal/hooks) asserts
+every row; keep the two in step.
+
+```
+call                                    unconfined  unit hook why
+stage status, diff                      allow       allow     read
+branch log, rev-parse, diff             allow       allow     read
+tag list, verify                        allow       allow     read
+worktree list                           allow       allow     read
+remote fetch (configured remote)        allow       allow     read
+remote fetch (a URL)                    ask         allow     not a remote
+stage add, unstage, rm, mv              allow       allow     on B's checkout
+stage rm force                          ask         ask       force
+commit, commit amend, merge             allow       allow     on B's checkout
+stash list, save, apply, drop           allow       allow     B's own shelf
+stash with a foreign repo_path          ask         allow     not B's worktree
+branch create B--x                      allow       allow     owned name
+branch create other, main/master        ask         allow     not owned
+branch checkout B--x, paths, new B--x   allow       allow     owned
+branch checkout main/master             ask         allow     default branch
+branch delete B--x                      allow       allow     owned, exists
+branch delete other, main/master        ask         allow     not owned
+branch delete force                     ask         ask       force
+branch reset-soft, reset-hard           allow       allow     on B's checkout
+branch rebase (B onto upstream)         allow       allow     B is rewritten
+branch rebase rebase_branch=main        ask         allow     default branch
+branch restack root=B                   allow       allow     owned range
+branch restack moving a foreign branch  ask         allow     foreign in range
+branch cherry-pick, revert              allow       allow     on B's checkout
+tag create, delete B--v                 allow       allow     owned tag
+tag create, delete v (other names)      ask         allow     not owned
+tag create force                        ask         ask       force
+tag push B--v                           allow       allow     owned tag
+tag push v, tag push delete             ask         allow     not owned/delete
+remote pull                             allow       allow     on B's checkout
+remote push (B or B--x)                 allow       allow     owned branch
+remote push force_with_lease (owned)    allow       allow     owned branch
+remote push main/master, remote_branch  ask         allow     default branch
+remote push delete                      ask         allow     remote delete
+remote push force                       ask         ask       force
+remote push-stack (all owned)           allow       allow     owned branches
+remote push-stack (any not owned)       ask         allow     not owned
+worktree remove (a B--x worktree)       allow       allow     owned worktree
+worktree remove (own, main checkout)    ask         allow     not removable
+clone into the worktree (.tmp)          allow       allow     inside B's tree
+clone anywhere else                     ask         allow     outside the tree
+```
+
+Remote talk about the session's own refs is Allow for an unconfined session
+(FDR 0036). A stricter policy for confined and profile-gated sessions (no remote
+access by default, except rebasing against upstream) is planned but not built;
+it would hook in at the body's confined check, *refuseUnownedForConfined* in
+*internal/store/git/confined.go*, where the confined column is enforced.
 
 # CONFINED, UNCONFINED AND NO-SESSION CALLERS
 
@@ -325,8 +392,9 @@ It calls the same backend as the MCP tools, so remote verbs stay agentless.
   one principal and are not distinguished. A corrupt unit record for an unrelated
   session makes every caller classify as confined (fail closed); repair or
   remove the record.
-- An unconfined session whose hook cannot resolve its session is asked about
-  every grit call (denied under *dontAsk*). *CLOWN\_UNIT* is a hint, not a
+- An unconfined caller whose hook *cwd* is in no session worktree (and whose
+  principal has no mapping) is asked about every grit call (denied under
+  *dontAsk*). *CLOWN\_UNIT* is a hint, not a
   boundary: a process that sets it on itself gets the body refusal of writes
   it does not own instead of the prompt. A clown that predates the marker sets
   none in its units, so their hooks ask (or deny) too.
