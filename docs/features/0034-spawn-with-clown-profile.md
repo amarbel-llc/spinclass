@@ -77,9 +77,9 @@ profile than it was itself given.
   three fields.
 - `sc resume` and `sc resurrect` re-apply the recorded profile. If the
   profile's current digest differs from the recorded one, they **refuse and ask
-  an authority to continue** (operator decision, 2026-10-19). **Not implemented
-  yet:** today the digest is recorded and carried forward, resume does not
-  re-apply the profile, and nothing compares digests on resume.
+  an authority to continue** (operator decision, 2026-10-19). `sc resume`
+  implements this (decision 12). `sc resurrect` carries the profile forward
+  but does not re-check its digest.
 
 ### The clown library
 
@@ -710,7 +710,13 @@ spinclass's own, to be corrected if piggy or the operator disagrees.
     profile splices `--profile <name>` into the resume entry (refusing, fail
     closed, when the entry has no `--`), resolves the recorded profile, and
     refuses when it no longer resolves or its digest differs from the recorded
-    one. The operator's decision was "refuse, and ask an authority to continue";
+    one. Amended 2026-10-23 (operator flow `sc resume` into the shell, then
+    `clown resume`): when no `[session-entry].resume` is configured, the start
+    entry (a shell) runs untouched. It has no `--` and launches no harness. The
+    profile is still resolved and a changed digest still refuses, and stderr
+    names the profile to start the harness with. The enforced `{principal}`
+    refusal (FDR 0035) skips the shell fallback for the same reason. A
+    configured resume entry stays strict. The operator's decision was "refuse, and ask an authority to continue";
     until the grant machinery can express an agent holding that authority, the
     only authority is the human at a terminal: `--repin-profile` is CLI-only,
     needs an interactive confirmation that shows the old and new digests, and is

@@ -24,7 +24,14 @@ var uuidShaped = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 // under a fresh one: a warning, or a refusal when profile rights are enforced,
 // because its principal-bound grants and the links it granted would stop
 // resolving. With the placeholder, a missing or non-UUID principal refuses.
-func applyRecordedPrincipal(entry []string, principal string, enforced bool) ([]string, string, error) {
+//
+// shellFallback (no [session-entry].resume, so the start entry, a shell, runs)
+// is left untouched with no warning or refusal: a shell is not a harness to
+// hand the principal to, and the operator resumes the harness from it.
+func applyRecordedPrincipal(entry []string, principal string, enforced, shellFallback bool) ([]string, string, error) {
+	if shellFallback {
+		return entry, "", nil
+	}
 	uses := slices.ContainsFunc(entry, func(a string) bool { return strings.Contains(a, principalPlaceholder) })
 	if !uses {
 		if principal == "" {

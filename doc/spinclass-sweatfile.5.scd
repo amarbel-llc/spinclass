@@ -1061,7 +1061,11 @@ readable by others.
 	its principal-bound profile grants stop resolving: *sc resume* warns, and
 	refuses when _[profile-rights]_ is enforced. A session with no recorded
 	or a non-UUID principal refuses to resume through *{principal}* (FDR
-	0035).
+	0035). For a session spawned with a clown profile, *--profile <name>* is
+	spliced in before the entry's *"--"*, and an entry without one refuses
+	(FDR 0034). When *resume* is unset, the start entry (a shell) runs
+	untouched. Its profile is still checked: a changed definition refuses, and
+	stderr names the profile to start the harness with.
 	*Merge:* scalar override.
 
 *spawn-entry*

@@ -12,7 +12,7 @@ const recordedPrincipal = "1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f"
 // --resume id, so the resumed worker keeps its principal.
 func TestResumeEntrySubstitutesRecordedPrincipal(t *testing.T) {
 	entry := []string{"direnv", "exec", "/wt", "clown", "--", "--resume", "{principal}"}
-	got, warning, err := applyRecordedPrincipal(entry, recordedPrincipal, true)
+	got, warning, err := applyRecordedPrincipal(entry, recordedPrincipal, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestResumeEntrySubstitutesRecordedPrincipal(t *testing.T) {
 }
 
 func TestResumeEntrySubstitutesInsideAnArgument(t *testing.T) {
-	got, _, err := applyRecordedPrincipal([]string{"clown", "resume", "clown://claude/{principal}"}, recordedPrincipal, false)
+	got, _, err := applyRecordedPrincipal([]string{"clown", "resume", "clown://claude/{principal}"}, recordedPrincipal, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,17 +40,17 @@ func TestResumeEntrySubstitutesInsideAnArgument(t *testing.T) {
 
 func TestResumeWithoutPlaceholderWarnsUnenforcedAndRefusesEnforced(t *testing.T) {
 	entry := []string{"clown"}
-	got, warning, err := applyRecordedPrincipal(entry, recordedPrincipal, false)
+	got, warning, err := applyRecordedPrincipal(entry, recordedPrincipal, false, false)
 	if err != nil || !slices.Equal(got, entry) || !strings.Contains(warning, "fresh principal") {
 		t.Errorf("unenforced: got %v, warning %q, err %v", got, warning, err)
 	}
-	if _, _, err := applyRecordedPrincipal(entry, recordedPrincipal, true); err == nil || !strings.Contains(err.Error(), "enforced") {
+	if _, _, err := applyRecordedPrincipal(entry, recordedPrincipal, true, false); err == nil || !strings.Contains(err.Error(), "enforced") {
 		t.Errorf("enforced: err = %v, want a refusal", err)
 	}
 }
 
 func TestResumeWithoutPrincipalOrPlaceholderIsUnchanged(t *testing.T) {
-	got, warning, err := applyRecordedPrincipal([]string{"zsh"}, "", true)
+	got, warning, err := applyRecordedPrincipal([]string{"zsh"}, "", true, false)
 	if err != nil || warning != "" || !slices.Equal(got, []string{"zsh"}) {
 		t.Errorf("got %v, %q, %v", got, warning, err)
 	}
@@ -58,10 +58,10 @@ func TestResumeWithoutPrincipalOrPlaceholderIsUnchanged(t *testing.T) {
 
 func TestResumePlaceholderRefusesMissingOrMalformedPrincipal(t *testing.T) {
 	entry := []string{"clown", "--", "--resume", "{principal}"}
-	if _, _, err := applyRecordedPrincipal(entry, "", false); err == nil {
+	if _, _, err := applyRecordedPrincipal(entry, "", false, false); err == nil {
 		t.Error("substituted an empty principal")
 	}
-	if _, _, err := applyRecordedPrincipal(entry, "not-a-uuid; rm -rf", false); err == nil {
+	if _, _, err := applyRecordedPrincipal(entry, "not-a-uuid; rm -rf", false, false); err == nil {
 		t.Error("substituted a non-UUID principal")
 	}
 }

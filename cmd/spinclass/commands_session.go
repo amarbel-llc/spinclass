@@ -734,11 +734,14 @@ func runResume(_ context.Context, args json.RawMessage) error {
 	merged := hierarchy.Merged
 	entry := entryFor(state, state.RepoPath, merged, os.Stderr)
 	entrypoint := entry.Start
-	if len(entry.Resume) > 0 {
+	// Without a configured resume entry the start entry (a shell, by default)
+	// runs, which is not a harness to hand the profile or principal to.
+	shellFallback := len(entry.Resume) == 0
+	if !shellFallback {
 		entrypoint = entry.Resume
 	}
 
-	entrypoint, err = applyRecordedProfile(*state, spawn.ResolveProfile, entrypoint, p.RepinProfile,
+	entrypoint, err = applyRecordedProfile(*state, spawn.ResolveProfile, entrypoint, p.RepinProfile, shellFallback,
 		repinGate{NoAttach: p.NoAttach, Interactive: stdinStdoutAreTerminals(), Confirm: confirmRepinInteractively},
 		persistRepin, os.Stdout, os.Stderr)
 	if err != nil {
@@ -746,13 +749,11 @@ func runResume(_ context.Context, args json.RawMessage) error {
 	}
 
 	enforced, _ := sweatfileio.TrustedEnforceProfileRights(hierarchy, os.Getenv("HOME"), state.RepoPath)
-	entrypoint, warning, err := applyRecordedPrincipal(entrypoint, state.Principal, enforced)
+	entrypoint, warning, err := applyRecordedPrincipal(entrypoint, state.Principal, enforced, shellFallback)
 	if err != nil {
 		return err
 	}
-	// Without a configured resume entry the start entry (a shell, by default)
-	// runs, which is not a harness to hand the principal to: no nag there.
-	if warning != "" && len(entry.Resume) > 0 {
+	if warning != "" {
 		fmt.Fprintln(os.Stderr, "spinclass: "+warning)
 	}
 

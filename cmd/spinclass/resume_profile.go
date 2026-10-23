@@ -24,6 +24,9 @@ type profileResumePlan struct {
 	RepinFrom, RepinTo string
 	// Warning is a non-fatal note for stderr (e.g. no digest recorded).
 	Warning string
+	// Notes are informational lines for stderr (e.g. the profile a shell
+	// fallback cannot carry).
+	Notes []string
 }
 
 // planRecordedProfile decides how a session spawned with a clown profile
@@ -35,11 +38,17 @@ type profileResumePlan struct {
 // repin is the human-authority override for a digest mismatch only; it must
 // stay a CLI flag (an agent-held authority to re-pin arrives with the grant
 // machinery in a later slice). Resolution failures always refuse.
+//
+// shellFallback is true when no [session-entry].resume is configured and the
+// start entry (a shell, by default) runs. A shell is not a harness, has no "--"
+// to carry --profile, and the operator starts the harness from it; so the entry
+// is left untouched and the plan names the profile instead. The definition
+// check still applies.
 func planRecordedProfile(
 	st session.State,
 	resolve func(string) (spawn.ResolvedProfile, error),
 	entry []string,
-	repin bool,
+	repin, shellFallback bool,
 ) (profileResumePlan, error) {
 	if st.Profile == "" {
 		return profileResumePlan{Entry: entry}, nil
@@ -47,7 +56,7 @@ func planRecordedProfile(
 
 	// Check the separator first so the refusal names the resume entry rather
 	// than a spawn-entry (SpliceProfileFlag's message is spawn-worded).
-	if !slices.Contains(entry, "--") {
+	if !shellFallback && !slices.Contains(entry, "--") {
 		return profileResumePlan{}, fmt.Errorf(
 			"session was spawned with profile %q but the resume entry %v has no \"--\" provider-args separator to place --profile before; the recorded profile cannot be re-applied, refusing to resume without it",
 			st.Profile, entry,
@@ -71,6 +80,14 @@ func planRecordedProfile(
 			)
 		}
 		plan.RepinFrom, plan.RepinTo = st.ProfileDigest, rp.Digest
+	}
+
+	if shellFallback {
+		plan.Entry = entry
+		plan.Notes = append(plan.Notes, fmt.Sprintf(
+			"session was spawned with profile %q (digest %s); no [session-entry].resume is configured, so the start entry %v runs as is: start the harness with --profile %s",
+			st.Profile, rp.Digest, entry, st.Profile))
+		return plan, nil
 	}
 
 	plan.Entry, err = spawn.SpliceProfileFlag(entry, st.Profile)
@@ -121,17 +138,20 @@ func applyRecordedProfile(
 	st session.State,
 	resolve func(string) (spawn.ResolvedProfile, error),
 	entry []string,
-	repin bool,
+	repin, shellFallback bool,
 	gate repinGate,
 	persist func(session.State, string) error,
 	stdout, stderr io.Writer,
 ) ([]string, error) {
-	plan, err := planRecordedProfile(st, resolve, entry, repin)
+	plan, err := planRecordedProfile(st, resolve, entry, repin, shellFallback)
 	if err != nil {
 		return nil, err
 	}
 	if plan.Warning != "" {
 		fmt.Fprintln(stderr, "spinclass: "+plan.Warning)
+	}
+	for _, note := range plan.Notes {
+		fmt.Fprintln(stderr, "spinclass: "+note)
 	}
 	if plan.RepinTo != "" {
 		if err := authorizeRepin(st.Profile, plan.RepinFrom, plan.RepinTo, gate); err != nil {

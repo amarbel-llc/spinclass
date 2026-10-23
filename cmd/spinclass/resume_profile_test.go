@@ -25,7 +25,7 @@ func fakeResolve(digest string, err error, calls *int) func(string) (spawn.Resol
 
 func TestPlanRecordedProfileNoProfileUntouched(t *testing.T) {
 	calls := 0
-	plan, err := planRecordedProfile(session.State{}, fakeResolve("d", nil, &calls), testEntry, false)
+	plan, err := planRecordedProfile(session.State{}, fakeResolve("d", nil, &calls), testEntry, false, false)
 	if err != nil || calls != 0 || !slices.Equal(plan.Entry, testEntry) {
 		t.Fatalf("plan=%v err=%v calls=%d", plan, err, calls)
 	}
@@ -34,7 +34,7 @@ func TestPlanRecordedProfileNoProfileUntouched(t *testing.T) {
 func TestPlanRecordedProfileSplicesOnMatch(t *testing.T) {
 	calls := 0
 	st := session.State{Profile: "lean", ProfileDigest: "d1"}
-	plan, err := planRecordedProfile(st, fakeResolve("d1", nil, &calls), testEntry, false)
+	plan, err := planRecordedProfile(st, fakeResolve("d1", nil, &calls), testEntry, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestPlanRecordedProfileSplicesOnMatch(t *testing.T) {
 func TestPlanRecordedProfileNoSeparatorRefuses(t *testing.T) {
 	calls := 0
 	st := session.State{Profile: "lean", ProfileDigest: "d1"}
-	_, err := planRecordedProfile(st, fakeResolve("d1", nil, &calls), []string{"clown"}, false)
+	_, err := planRecordedProfile(st, fakeResolve("d1", nil, &calls), []string{"clown"}, false, false)
 	if err == nil || !strings.Contains(err.Error(), "resume entry") {
 		t.Fatalf("err=%v", err)
 	}
@@ -57,7 +57,7 @@ func TestPlanRecordedProfileResolveFailureRefusesEvenWithRepin(t *testing.T) {
 	calls := 0
 	st := session.State{Profile: "lean", ProfileDigest: "d1"}
 	boom := errors.New("registry skew")
-	_, err := planRecordedProfile(st, fakeResolve("", boom, &calls), testEntry, true)
+	_, err := planRecordedProfile(st, fakeResolve("", boom, &calls), testEntry, true, false)
 	if err == nil || !strings.Contains(err.Error(), "registry skew") {
 		t.Fatalf("err=%v", err)
 	}
@@ -66,11 +66,11 @@ func TestPlanRecordedProfileResolveFailureRefusesEvenWithRepin(t *testing.T) {
 func TestPlanRecordedProfileDigestMismatch(t *testing.T) {
 	calls := 0
 	st := session.State{Profile: "lean", ProfileDigest: "old"}
-	_, err := planRecordedProfile(st, fakeResolve("new", nil, &calls), testEntry, false)
+	_, err := planRecordedProfile(st, fakeResolve("new", nil, &calls), testEntry, false, false)
 	if err == nil || !strings.Contains(err.Error(), "profile lean changed since this session was spawned (recorded old, now new); resume refused until an authority re-pins it") {
 		t.Fatalf("err=%v", err)
 	}
-	plan, err := planRecordedProfile(st, fakeResolve("new", nil, &calls), testEntry, true)
+	plan, err := planRecordedProfile(st, fakeResolve("new", nil, &calls), testEntry, true, false)
 	if err != nil || plan.RepinFrom != "old" || plan.RepinTo != "new" {
 		t.Fatalf("plan=%+v err=%v", plan, err)
 	}
@@ -119,7 +119,7 @@ func TestApplyRecordedProfilePersistsOnlyAnAuthorizedRepin(t *testing.T) {
 	run := func(repin bool, gate repinGate) (entry []string, persisted []string, out string, err error) {
 		calls := 0
 		var stdout, stderr strings.Builder
-		entry, err = applyRecordedProfile(st, fakeResolve("new", nil, &calls), testEntry, repin, gate,
+		entry, err = applyRecordedProfile(st, fakeResolve("new", nil, &calls), testEntry, repin, false, gate,
 			func(_ session.State, to string) error { persisted = append(persisted, to); return nil }, &stdout, &stderr)
 		return entry, persisted, stdout.String(), err
 	}
@@ -152,7 +152,7 @@ func TestApplyRecordedProfilePersistsOnlyAnAuthorizedRepin(t *testing.T) {
 	// A matching digest needs no gate at all, even with --no-attach.
 	match := session.State{Profile: "lean", ProfileDigest: "new"}
 	calls := 0
-	got, err := applyRecordedProfile(match, fakeResolve("new", nil, &calls), testEntry, false, repinGate{NoAttach: true},
+	got, err := applyRecordedProfile(match, fakeResolve("new", nil, &calls), testEntry, false, false, repinGate{NoAttach: true},
 		func(session.State, string) error { t.Error("persisted without a re-pin"); return nil }, io.Discard, io.Discard)
 	if err != nil || !slices.Contains(got, "lean") {
 		t.Fatalf("matching digest: %v %v", got, err)
@@ -162,7 +162,7 @@ func TestApplyRecordedProfilePersistsOnlyAnAuthorizedRepin(t *testing.T) {
 func TestPlanRecordedProfileEmptyDigestWarns(t *testing.T) {
 	calls := 0
 	st := session.State{Profile: "lean"}
-	plan, err := planRecordedProfile(st, fakeResolve("d", nil, &calls), testEntry, false)
+	plan, err := planRecordedProfile(st, fakeResolve("d", nil, &calls), testEntry, false, false)
 	if err != nil || plan.Warning == "" || plan.RepinTo != "" || !slices.Contains(plan.Entry, "lean") {
 		t.Fatalf("plan=%+v err=%v", plan, err)
 	}
