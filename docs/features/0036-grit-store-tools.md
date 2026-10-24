@@ -10,7 +10,8 @@ promotion-criteria: |
 # Grit store tools in spinclass
 
 This is STEP 0 of spinclass #379, "Move the grit tools from Moxie to Spin
-Class": design only, no code. It settles the questions the sequencing plan
+Class": design only, no code. (Update 2026-10-24: the implementation has since
+landed; see "Implementation steps" and spinclass-grit(7).) It settles the questions the sequencing plan
 (Google Doc "Moving grit from moxy to spinclass: sequencing plan") listed under
 "Step 0", using the operator's decisions recorded as comments on that doc.
 Related: moxy #482 (grit moxin hand-off), moxy #483 (worktree-aware
@@ -983,7 +984,10 @@ is `B` and `B--<topic>`; reads auto-allow on any branch.
 
 ## Limitations
 
-- Design only: nothing here is implemented or verified by running code.
+- Implemented per "Implementation steps" except `sc moxin-export` (steps 6/7);
+  see spinclass-grit(7) KNOWN LIMITATIONS for what has not been exercised live.
+  (Originally: "Design only: nothing here is implemented or verified by running
+  code.")
 - No out-of-process store backends; the dodder plugin is a design target only.
 - The stash emulation is not byte-for-byte `git stash` (see Costs).
 - **Key-file ssh (step 5).** Remote verbs strip the ambient ssh-agent and pin

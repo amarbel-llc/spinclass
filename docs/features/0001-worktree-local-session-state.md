@@ -212,9 +212,9 @@ writes into a managed worktree, and how each stays out of git status
 
 | Path | Writer | Excluded |
 |------|--------|----------|
-| `.spinclass/` (`state.json`, `job.json`, `job.log`, `env`, `.settings-snapshot.json`) | `internal/session`, `internal/job`, `sweatfile.Apply` | default |
+| `.spinclass/` (`state.json`, `job.json`, `job.log`, `env`, `.settings-snapshot.json`) | `internal/session`, `internal/job`, `apply.Setup` | default |
 | `.mcp.json` | `claude.WriteMCPConfig` (sweatfile `[[mcps]]` entries) | default |
-| `.envrc` | `sweatfile.writeEnvrc` (truncate-rewrite whenever direnv resolves) | default |
+| `.envrc` | `apply.writeEnvrc` (truncate-rewrite whenever direnv resolves) | default |
 | `.direnv/` | direnv itself, triggered by the spinclass-written `.envrc` | default |
 | `.tmp/` | worktree create + executors (session scratch, `$TMPDIR`) | default |
 | `.claude/settings.local.json` | `sweatfile.ApplyClaudeSettings` (claude-allow rules) | default |
@@ -355,11 +355,11 @@ describes. Worktree-local state therefore stays the home of a session's
   `sc close <id>` regression that motivated revisiting this area;
   expected to be resolved by slice 1.
 - Existing sweatfile hooks (`create` / `stop` / `pre-merge`) documented in
-  `cmd/spinclass/doc/spinclass-sweatfile.5` — `on-attach` / `on-detach`
+  `doc/spinclass-sweatfile.5.scd` — `on-attach` / `on-detach`
   follow the same merging and override semantics.
-- Current state struct at `internal/session/session.go:21-33`.
-- Current executor lifecycle at `internal/executor/session.go:21-102`
-  (`Detach()` is presently a no-op stub at line 104).
+- Current state struct: `session.State` in `internal/session/session.go`.
+- Current executor lifecycle: `executor.SessionExecutor` in
+  `internal/executor/session.go`.
 
 ---
 

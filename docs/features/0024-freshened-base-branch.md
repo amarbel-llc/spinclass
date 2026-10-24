@@ -133,8 +133,8 @@ update a checked-out branch can never apply.
 (`GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=/bin/false`, `SSH_ASKPASS=/bin/false`,
 `GIT_SSH_COMMAND="ssh -o BatchMode=yes"`). An ssh passphrase prompt and a git
 credential helper both read `/dev/tty`, not stdin, so a nil `Stdin` is not
-protection. Under `spawn-session` — stdio pointed at a log file, a 60s hello
-deadline — a hang there surfaces as a spawn timeout with nothing to explain it.
+protection. Under `spawn-session` — stdio pointed at a log file, a hello
+deadline (5m default for `spawn-session`, 60s for `sc spawn`) — a hang there surfaces as a spawn timeout with nothing to explain it.
 `internal/git` had no context-bounded runner at all before this.
 
 **Never prompt.** `merge.ResolveDefaultBranch` huh-prompts on an ambiguous

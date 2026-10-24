@@ -107,6 +107,10 @@ builds a fresh renderer scope per merge attempt (`runMergeOnClose`).
 bubbletea was already a direct dependency (huh dialogs), so the viewport
 adds no new terminal-probe exposure.
 
+Non-record diagnostics (session-record warnings, #405) are routed onto the
+stream by `routeSessionReports` (`internal/present`), so stdout carries only
+records in ndjson mode and the viewport is not torn.
+
 ## Examples
 
 ```sh

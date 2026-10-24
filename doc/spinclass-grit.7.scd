@@ -386,9 +386,7 @@ It calls the same backend as the MCP tools, so remote verbs stay agentless.
   The operator ruled to leave ssh remotes allowed.
 - Owned-branch lease pushes are unprompted: a *push* with *force\_with\_lease*
   of an owned branch is Allow; only non-owned refs, remote deletes and the
-  *force* flag ask. (The design record says *force* and *force\_with\_lease* both
-  classify Allow on an owned branch; the classifier asks for *force* because it
-  treats any set *force* argument as Ask.)
+  *force* flag ask. (FDR 0036 agrees: plain *force* asks.)
 - No-session callers are read-only: outside a recognised session worktree every
   write is refused with no in-band escape. Recovery is *sc grit*, or moxy's
   grit.

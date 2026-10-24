@@ -69,6 +69,16 @@ step that mutates `wtPath`) completes before the agent is told the job started,
 so it cannot race the agent's next edits, and rebase conflicts / nothing-to-merge
 surface immediately instead of as an orphan job.
 
+(Amended 2026-10-24, superseded in part by FDR 0022 and FDR 0029: under the
+default merge queue the hook runs against the landing sha under a per-repo
+lock and lands via push from a detached landing worktree; the
+`merge --ff-only <pinnedSha>` step survives only on the
+`disable-merge-queue` path. `PrepareMerge` now also runs, in order:
+disable-merge gate, landing-target fetch (#315), merge-driver preflight
+(#324), autostash (#416), rebase, unmerged-paths guard (#200),
+nothing-to-merge short-circuit, repair (FDR 0018), then the pin. See
+`internal/merge/merge.go`.)
+
 The build-worktree lifecycle lives at the shared hook chokepoint
 (`check.resolveHookDir` + `git.WorktreeAddDetached`/`WorktreeForceRemove`); madder
 still targets `wtPath` (the session worktree's blob store) — only the hook's

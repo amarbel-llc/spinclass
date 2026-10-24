@@ -152,11 +152,12 @@ resource_link in the response.
 
 ## Limitations
 
-- **Speculative scope.** This FDR is exploratory; none of the four ideas
-  has a working implementation. Limitations specific to each idea will
+- **Speculative scope.** This FDR is exploratory; idea 2 shipped as
+  FDR 0003 and ideas 1, 3 and 4 remain unimplemented. Limitations specific to each idea will
   move into the per-idea FDR when one is promoted to `proposed`.
-- **Madder is new to spinclass.** Spinclass currently has zero madder
-  references. Any integration introduces a new external tool dependency
+- **Madder is new to spinclass.** (Historical, 2026-10-24: idea 2 has
+  since shipped as FDR 0003; madder is an optional build-time pin, see
+  spinclass-build-pins(7).) Any integration introduces a new external tool dependency
   (binary on PATH or pinned via the flake) and a new permission story
   (`madder` invocations under `claude-allow`).
 - **No format guarantees crossed.** None of the ideas commit spinclass

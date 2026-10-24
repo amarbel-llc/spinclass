@@ -132,7 +132,8 @@ removes dead-PID siblings the next time any agent starts in that checkout.
 The `Kind == implicit` discriminator drives the few divergences; everything
 else inherits existing behavior.
 
-- **`merge-this-session` / `sc merge`** — materially different path:
+- **`merge-this-session` / `sc merge`** — (removed, #317; the text below is
+  historical and `merge.MergeImplicit` no longer exists) materially different path:
   **no rebase, no ff-merge.** From a main checkout the work is already on the
   default branch, so merge means *verify then publish*: `merge.MergeImplicit`
   runs `[hooks].pre-merge` against HEAD (in the isolated build worktree) and, if
@@ -194,7 +195,8 @@ materializes the session, which then shows up in `sc list`:
     spinclass/a3f9b2c1     active    main     feature/wip
     spinclass/sleek-locust active
 
-Merge from the main checkout — hook then push, no rebase/ff:
+Merge from the main checkout — hook then push, no rebase/ff (removed, #317;
+now refused with `merge.ErrImplicitMergeUnsupported`):
 
     # (invoked as the merge-this-session MCP tool, or `sc merge`)
     ok 1 - pre-merge hook
@@ -275,7 +277,7 @@ Disable the feature for a repo (rollback):
 - `internal/session/session.go` (`Kind`, `WriteImplicit`/`RemoveImplicit`/
   `SweepDeadImplicit`/`FindImplicitAtCwd`), `internal/hooks/hooks.go`
   (`runSessionStart`/`runSessionEnd`), `internal/merge/merge.go`
-  (`MergeImplicit`), `internal/attestation/attestation.go`
+  (`MergeImplicit`, removed in #317), `internal/attestation/attestation.go`
   (`Record`/`Claim`/`Settle`), `internal/close/close.go`,
   `cmd/spinclass/commands_mcp_only.go` (`currentSessionKey` fallback, merge
   routing), `cmd/spinclass/commands_query.go` (`main` marker), `hooks/hooks.json`

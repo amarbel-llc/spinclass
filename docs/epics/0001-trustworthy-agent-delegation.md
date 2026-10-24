@@ -7,6 +7,8 @@ promotion-criteria: |
   because a required signed attestation was missing or unverifiable.
 children:
   - spinclass FDR 0032, docs/features/0032-principals-handles-and-provenance.md
+  - spinclass FDR 0034, docs/features/0034-spawn-with-clown-profile.md
+  - spinclass FDR 0035, docs/features/0035-session-confinement.md
   - troupe#39 (identity, certificates, signed-record grammar, transcript)
   - piggy#297 (key holders and tiers)
   - papi#87 (hardware-key slot enrollment and attestation)
@@ -426,7 +428,7 @@ specifies the decisions in full for readers inside the ecosystem.
 | event log and scheduling | ringmaster, the job platform | ringmaster#25; ringmaster#26 |
 | version-control broker | smith, the forge client, pushing on a session's behalf | smith#68 |
 | observer attach | posh, the terminal multiplexer, with spinclass as consumer | posh#224; spinclass#347 |
-| confinement | spinclass, clown and the model runtime together | spinclass#338 |
+| confinement | spinclass, clown and the model runtime together | spinclass#338; spinclass FDR 0035 |
 | security review | spinclass | spinclass#339 |
 | mechanical gates | spinclass, revising its attestation and exemption records | spinclass#337 |
 | rights declarations by tools | moxy and purse-first | moxy#443; purse-first#194 |

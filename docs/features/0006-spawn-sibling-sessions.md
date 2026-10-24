@@ -108,7 +108,7 @@ cascade-merged sweatfile argv template, mirroring the `[[remotes]]`
 attach template pattern, with zmx as the shipped default:
 
 ```toml
-[session]
+[session-entry]
 spawn = ["zmx", "attach", "{id}", "--detach", "{entry}"]
 ```
 
@@ -134,7 +134,7 @@ not a worker: the spawned session must come up with a **harness**
 brief. The mechanism is a sweatfile argv template:
 
 ```toml
-[session]
+[session-entry]
 spawn-entry = ["clown", "--", "{prompt}"]
 ```
 
@@ -148,7 +148,7 @@ injection: the spawned zmx session execs the harness directly with the
 driver's brief as its first input. After the harness exits, the session
 behaves like any other (attach, resume, close).
 
-`spawn-entry` is distinct from `[session].start` deliberately:
+`spawn-entry` is distinct from `[session-entry].start` deliberately:
 human-started sessions keep their interactive-shell entrypoint;
 spawned workers boot straight into the harness.
 
@@ -260,7 +260,8 @@ kind, which is precisely why removing #148 was safe.
 Enforced server-side across both spinclass-owned auto-approve surfaces:
 
 - The **PreToolUse hook** (`internal/hooks`) returns `permissionDecision:
-  "ask"` for both tools. A hook `ask` overrides any allow-list, so the
+  "ask"` for both tools (historical: `fork-session` was removed in #262;
+  only `spawn-session` remains). A hook `ask` overrides any allow-list, so the
   decision fires before settings are ever consulted.
 - **`perms.RunCheck`** (`internal/perms`) refuses to emit an allow for these
   tool names even if a tier rule lists them — so the perms surface can't
@@ -301,8 +302,8 @@ stale outer title (#154).
 
 ### The same machinery powers `sc fork`
 
-The launch half of spawn — the `[session].spawn` multiplexer template,
-the `[session].spawn-entry` harness boot, the hello gate, and
+The launch half of spawn — the `[session-entry].spawn` multiplexer template,
+the `[session-entry].spawn-entry` harness boot, the hello gate, and
 `spawned_by` lineage — is deliberately not cross-repo-specific.
 `sc fork` briefly gained the same detached-launch path (a fork booting
 as a harness-booted, chat-addressable worker on a branch of this repo).
@@ -345,11 +346,17 @@ Effects:
    same repo, or nested worktree).
 2. Create the worker session as `sc start` would (worktree, sweatfile,
    trust), with `spawned_by` set to the driver's session key.
-3. Exec the `[session].spawn` template, which launches the
-   `[session].spawn-entry` harness with the brief.
+3. Exec the `[session-entry].spawn` template, which launches the
+   `[session-entry].spawn-entry` harness with the brief.
 4. Block until the worker's hello chat message (60s default deadline;
    error on timeout).
 5. Return `{session_key, worktree_path, multiplexer_session}`.
+
+(Historical, 2026-10-24: post-#266 `spawn-session` is async under clown.
+It returns `session_key`, `worktree_path` and a ringmaster job id
+immediately; the hello arrives as a job wake. The MCP default hello
+timeout is 5m, the `sc spawn` CLI default 60s. The multiplexer template
+and chat hello were removed by FDR 0017.)
 
 ## Tuning Levers
 
@@ -393,7 +400,7 @@ Effects:
 - FDR 0012 (draft) — session presence; the designated failure-detection
   upgrade path.
 - `[[remotes]]` attach templates (FDR 0011) — the sweatfile argv-template
-  pattern `[session].spawn` mirrors.
+  pattern `[session-entry].spawn` mirrors.
 - Issue #59 — tracking issue with the 2026-06-11 decision log.
 
 ---

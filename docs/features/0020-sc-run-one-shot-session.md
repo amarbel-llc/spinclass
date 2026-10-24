@@ -56,9 +56,15 @@ sequence above; #194 asks for a single primitive that collapses it.
 ## Interface
 
 ```
-sc run [--description D] [--no-merge] [--no-close] [--local-only] \
+sc run [--description D | -d D] [--no-merge] [--no-close] [--local-only] \
+       [--format F] [--allow-stale-base] [--allow-no-credential] \
+       [--post-merge H]... [--post-merge-timeout D] \
+       [--post-merge-targets A,B] [--no-post-merge] \
        ( -- <util> [args...] | <stdin script> )
 ```
+
+(Amended 2026-10-24: the post-merge flags are specified in FDR 0026 and
+`--allow-stale-base` in FDR 0024.)
 
 CLI-only (no MCP tool): it execs a command sequence and reads stdin, neither of
 which fits the MCP request/response shape. Output uses the merge/check

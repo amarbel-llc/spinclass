@@ -2,9 +2,9 @@
 status: experimental
 date: 2026-05-24
 promotion-criteria: |
-  Promote to `experimental` once the gate ships and at least one
-  repo's sweatfile declares a non-empty `[[pre-merge-skills]]` list
-  exercised across multiple merge cycles. Promote to `accepted`
+  Promoted to `experimental` (gate shipped; at least one repo's
+  sweatfile declares a non-empty `[[pre-merge-skills]]` list exercised
+  across multiple merge cycles). Promote to `accepted`
   once operating experience shows the articulation step actually
   changes which skills agents invoke before merge — measured by
   comparing pre-attestation vs post-attestation transcript samples
@@ -193,7 +193,10 @@ MCP merge.
 
 The buffered attestation lives in the existing per-session state
 file at `<worktree>/.spinclass/state.json` (implicit sessions:
-`state-<rand>.json`), under a new top-level field:
+`state-<rand>.json`), under a new top-level field. (Amended by FDR 0035:
+the authoritative copy now lives in the frontend record
+`$XDG_STATE_HOME/spinclass/records/<hash>.json`; the worktree file is a
+display-only mirror.)
 
 ```json
 {
@@ -409,13 +412,13 @@ accepted regardless of the `used` boolean.
 - `internal/sweatfile/` — TOML schema and merge logic that gains
   the `[[pre-merge-skills]]` array. The existing `[[mcps]]` and
   `[[start-commands]]` arrays-of-tables are the template.
-- `internal/session/state.go` — session state JSON serialisation
+- `internal/session/session.go` and `record.go` — session state JSON serialisation
   that gains the `pre_merge_attestation` field.
 - `cmd/spinclass/commands_mcp_only.go` — current
   `merge-this-session` / `check-this-session` registration gated
   on `[hooks].disable-merge`. The new `nothing-but-the-truth`
   tool registers in the same place under the same conditional.
-- `cmd/spinclass/doc/spinclass-sweatfile.5` — manpage update
+- `doc/spinclass-sweatfile.5.scd` — manpage update
   documenting the new schema entry.
 
 ---

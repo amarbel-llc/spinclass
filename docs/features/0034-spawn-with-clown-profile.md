@@ -22,10 +22,13 @@ promotion-criteria: |
 > review by circus/eager-holly/clarabell. Where this record and FDR 0032
 > disagree, FDR 0032 wins and the disagreement is a bug to reconcile there.
 >
-> **Implementation status (2026-10-19):** phase 1 and the clown library wiring
-> are on `master` (7b74d7c, 292309e); phase 2 (grant records, the card root) is
-> not started. See "Implementation status" below for exactly what runs and what
-> has not been exercised.
+> **Implementation status (2026-10-19, updated 2026-10-24):** phase 1 and the
+> clown library wiring landed on `master` (7b74d7c, 292309e). As of 2026-10-24
+> phase 2 code is also on `master`: the profile right (`[profile-rights]
+> enforce`), grant records (`sc profile-grant-bless`, `sc profile-grant-import`)
+> and the resume digest check with `sc resume --repin-profile`. See
+> "Implementation status" below (written 2026-10-19) for what was exercised at
+> that time.
 
 ## Problem Statement
 
@@ -62,7 +65,7 @@ profile than it was itself given.
   Asking is allowed only in an interactive `sc spawn`; the MCP tool has no TTY.
   (Today's code refuses an unknown profile, a skewed registry and a dropped
   required server; the "does not hold" refusal needs the profile right and is
-  phase 2.)
+  phase 2, since landed behind `[profile-rights] enforce`.)
 - **Hello is unchanged.** A worker that cannot start its hello is still a
   timeout; the checks above exist so that this is no longer the way a bad
   profile is discovered.
@@ -441,8 +444,8 @@ the unverified parts marked:
 |---|---|---|
 | 1. Agent outside every worker cgroup | **unverified.** A worker inherits its launcher's cgroup: `startDetached` uses `setsid`, which starts a new session but does not move the process between cgroups. This session's own cgroup is the user's login-session scope (`user.slice/user-<uid>.slice/session-<n>.scope`), not a dedicated agent scope. Where piggy-agent runs relative to it was not determined | `internal/spawn/spawn.go` `startDetached`; `/proc/self/cgroup` |
 | 2a. No inherited tty/pty fd | **holds for stdio.** The worker is started with stdin `/dev/null` and stdout/stderr on a log file | `startDetached` |
-| 2b. No display socket | **not enforced.** `workerEnv` builds the worker environment from `os.Environ()` and strips only `CLOWN_SESSION_ID` and `CLAUDE_SESSION_ID`, so display variables pass through when set (unset in this session's environment). Removing a variable is hygiene, not a boundary: the sockets stay reachable by path under the same uid | `internal/session/env.go`; `env` of this session |
-| 2c. No session D-Bus | **fails.** `DBUS_SESSION_BUS_ADDRESS` is inherited (`unix:path=/run/user/<uid>/bus` in this session), and that socket is reachable by path regardless of the variable | `env` of this session |
+| 2b. No display socket | **scrubbed from the detached harness (hygiene only).** `harnessScrubbedEnvVars` removes `DISPLAY` and `WAYLAND_DISPLAY` from the worker environment (`workerEnv`/`workerEnvScoped`). Removing a variable is not a boundary: the sockets stay reachable by path under the same uid | `internal/spawn/spawn.go` |
+| 2c. No session D-Bus | **fails (variable scrubbed, socket still reachable).** `DBUS_SESSION_BUS_ADDRESS` is removed from the worker environment by `harnessScrubbedEnvVars`, but the socket (`/run/user/<uid>/bus`) is reachable by path regardless of the variable | `env` of this session |
 | 2d. No writable posh attach | **unverified.** posh's attach authorization (posh#224) is not shipped | not examined |
 | 3. No keystroke observation | **unverified.** FDR 0032 already lists whether keystrokes are observable above `claude` as a fact to verify | FDR 0032 Limitations |
 
@@ -480,7 +483,8 @@ treat any grant as card-rooted until a confinement check passes.
   provider or backend per worker is a non-goal (story 2, rejected).
 - Subagents using the same framework through juggler are out of scope.
 - Phase 1 has no cryptography: it is naming, validation and record. The grant
-  records and the card root arrive in phase 2 and depend on piggy.
+  records and the card root arrive in phase 2 and depend on piggy. (Update
+  2026-10-24: phase 2 grant records and verification are now in code.)
 - A cheap selection that removes the harness's own plugin (troupe chat,
   ringmaster) yields a worker that cannot send its hello. The required-server
   check catches this only if the clown library exposes the kept-server set.
@@ -618,6 +622,10 @@ unstamped temporary registry and fakes; no `spawn-session` call has gone
 through it end to end. On the machine where this was developed there is no user
 `profiles.toml` at all, so there is no saved cheap-context profile to spawn with
 yet.
+
+(Historical, 2026-10-24: everything in the next paragraph except the
+model-upgrade right and possibly the `spawn-profile` clearing and `sc validate`
+items has since landed in phase 2; see the banner at the top.)
 
 **Not implemented:** the profile right and its enforcement (a spawner holding
 the profile, "a spawn the spawner does not hold is refused"); grant records and

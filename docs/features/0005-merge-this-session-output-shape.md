@@ -227,7 +227,7 @@ with the upgrade.
 Once FDR 0003 lands, the spinclass-side change is contained to
 `internal/merge/merge.go`, `internal/check/check.go`,
 `cmd/spinclass/commands_mcp_only.go`, and the manpage
-`cmd/spinclass/doc/spinclass-sweatfile.5`.
+`doc/spinclass-sweatfile.5.scd`.
 
 ## Out of scope
 

@@ -177,7 +177,7 @@ reach the fleet counters.
   freshening).
 - FDR 0028 — per-session forge push credentials: the consumer this landing
   shape exists to enable (worktree-scoped `credential.helper` +
-  `pushInsteadOf` on the landing worktree reach the merge push).
+  `insteadOf` on the landing worktree reach the merge push).
 - FDR 0013 (the detached-worktree pattern), FDR 0022 (the merge queue whose
   landing this record reshapes), FDR 0023/0026 (the post-merge phase now
   running in the landing worktree).

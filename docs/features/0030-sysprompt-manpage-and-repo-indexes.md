@@ -280,7 +280,9 @@ Both indexes are **off by default**, so landing this changes no rendered
 fragment. Rollback of an enabled index is removing its sweatfile key, or setting
 it to `[]` to clear an inherited selection — one line, no revert. The static
 eng manpage fragment remains as-is until whoever owns it retires it, so the two
-approaches can coexist; nothing here removes it.
+approaches can coexist; nothing here removes it. (Historical, 2026-10-24: the
+static fragment `00-eng-manpages.md` has since been removed from this repo, so
+the two approaches no longer coexist here.)
 
 ## More Information
 

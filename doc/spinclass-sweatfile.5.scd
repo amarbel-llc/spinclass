@@ -415,9 +415,8 @@ does not export *WORKTREE*.
 	  target being run, so one script can serve several targets. Not set on
 	  this legacy single-string path.
 
-	Applies to worktree sessions and to implicit (main-checkout) sessions,
-	whose push is unconditional — there *SPINCLASS\_MERGED\_BRANCH* and
-	*SPINCLASS\_DEFAULT\_BRANCH* are the same ref. *sc check* and
+	Applies to worktree sessions (merging from an implicit main-checkout
+	session is not supported). *sc check* and
 	*check-this-session* never run it: nothing lands. *Merge:* scalar
 	override.
 
@@ -509,7 +508,7 @@ does not export *WORKTREE*.
 	override.
 
 *pre-merge-output-format*
-	String. One of *raw* (default) or *tap-ndjson*. Controls how spinclass
+	String. One of *raw* (default), *tap-ndjson* or *ndjson-crap*. Controls how spinclass
 	interprets the *pre-merge* hook's stdout when assembling the
 	*merge-this-session* / *check-this-session* response. When set to
 	*tap-ndjson*, spinclass parses the hook's stdout as a TAP-14 ndjson
@@ -522,14 +521,16 @@ does not export *WORKTREE*.
 	parse failure (the hook didn't actually emit TAP, or emitted zero
 	parseable records), the response falls back to a 15-line *tail:* of raw
 	stdout so degenerate output is still visible. The *tail:* field remains
-	the default visibility signal when *format*=*raw*. *sc validate* rejects
-	any value outside the closed set *{*raw, tap-ndjson*}*. *Merge:* scalar
+	the default visibility signal when *format*=*raw*. With *ndjson-crap*
+	the hook is expected to emit canonical ndjson-crap already, and its
+	stdout is stored verbatim. *sc validate* rejects any value outside the
+	closed set *{*raw, tap-ndjson, ndjson-crap*}*. *Merge:* scalar
 	override.
 
 *on-attach*
 	Script run when a session attaches to the worktree, fired by *sc start*
 	or *sc resume* after the session state file has been written but before
-	the configured session entrypoint (_[session].start or [session].resume_)
+	the configured session entrypoint (_[session-entry].start or [session-entry].resume_)
 	is exec'd. Typical use: warm caches, kick off
 	background helpers (e.g. a tmux side-pane, a watcher process), or emit
 	a session-start log line. A failing *on-attach* script is logged as a
@@ -542,8 +543,8 @@ does not export *WORKTREE*.
 *on-detach*
 	Script run when the session detaches from the worktree, fired by *sc
 	start* or *sc resume* after the entrypoint exits and the session state
-	has been updated to *running-detached* or *inactive* (per the
-	*[session].liveness-probe* result). Typical use: tear down on-attach
+	has been updated to *running-detached* or *inactive* (decided from
+	clown presence). Typical use: tear down on-attach
 	side processes, post a session-end notification, or rotate logs. A
 	failing *on-detach* script is logged as a warning; spinclass continues
 	with cleanup either way. Pinned at creation, like *on-attach*.
@@ -639,10 +640,10 @@ does not export *WORKTREE*.
 	handler is a no-op, leaving the main checkout without a session
 	identity (the pre-feature behavior). By default (or when this flag is
 	unset) a Claude Code agent attached to a repo's main checkout — a git
-	repository on its default branch, not an *sc start* worktree — becomes
-	a first-class implicit session, visible in *sc list* (marked *main*),
-	addressable in cross-session chat, and mergeable via
-	*merge-this-session* (hook-then-push, no rebase). This is the rollback
+	repository's main checkout on any branch (not a detached HEAD), not an
+	*sc start* worktree — becomes a first-class implicit session, visible
+	in *sc list* (marked *main*). Merging from it is not supported
+	(spinclass#317); *sc check* still works. This is the rollback
 	lever for the implicit-sessions feature. *Merge:* scalar override.
 
 *inactivity-timeout*
@@ -1109,7 +1110,7 @@ readable by others.
 
 *spawn-entry*
 	Argv array for the detached-harness a spawned worker session boots
-	into, exec'd *directly* by *sc spawn* and detached *sc fork --brief*
+	into, exec'd *directly* by *sc spawn*
 	(FDR-0017 Piece 1: spinclass no longer wraps the worker in a
 	multiplexer — the harness self-detaches and returns promptly, e.g.
 	clown's *--clown-attach=spawn*). *{prompt}* is replaced by the driver's
@@ -1154,9 +1155,8 @@ readable by others.
 	resolve which provider it implies (that requires querying clown's own
 	profile registry), so the profile name itself is used as the lookup
 	key — a *model-flags* entry may be keyed by profile name instead of
-	provider name for this case. Consulted when the (*spawn-session* /
-	*fork-session*) *model* param, or the equivalent (*sc spawn --model* /
-	*sc fork --brief --model*) CLI flag, is set: the flag and the requested
+	provider name for this case. Consulted when the *spawn-session*
+	*model* param, or the equivalent *sc spawn --model* CLI flag, is set: the flag and the requested
 	model (_alias_) are spliced into *spawn-entry* immediately after its
 	literal *"--"* provider-args separator. The requested value is
 	validated against a fixed alias set (*sonnet*, *opus*, *haiku*, or
@@ -1233,10 +1233,8 @@ readable by others.
 
 *tombstone-retention*
 	Duration string (e.g. *30d*, *0* to keep forever) controlling how long
-	*sc clean* preserves tombstone entries before reaping. The same
-	retention also governs the cross-session chatroom: messages older than
-	this window, and stale per-session read cursors, are reaped by *sc
-	clean* (see *chat-send*(), *chat-read*()). *Merge:* scalar override.
+	*sc clean* preserves tombstone entries before reaping. *Merge:* scalar
+	override.
 
 ## [session-entry.env]
 

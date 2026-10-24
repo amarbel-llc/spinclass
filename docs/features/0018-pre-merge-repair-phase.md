@@ -224,6 +224,9 @@ not ok   repair prime-pine
   naming the paths; nothing is stashed or amended. This upholds FDR 0025's
   promise that edits made while a merge runs are left for the next merge — a
   queued merge re-prepares against a worktree the agent may have kept editing.
+  (Amended 2026-10-24, #416: by default `PrepareMerge` autostashes tracked
+  edits before the rebase, so this refusal fires only with `--no-autostash` /
+  `autostash: false`; see spinclass-grit(7).)
   Untracked files are not refused; the check only runs when repair is active.
   The guard is check-then-act, and the repair run itself is the window: on
   2026-10-22 an agent wrote two files into a session worktree during a merge's
@@ -259,7 +262,10 @@ not ok   repair prime-pine
   as any commit, but now on the merge path — must be surfaced clearly so the
   agent knows to ask the user to unlock the agent (per CLAUDE.md, never strip
   the signature).
-- **Implicit / main-checkout sessions (FDR 0014).** Their HEAD is on the
+- **Implicit / main-checkout sessions (FDR 0014).** (Historical, 2026-10-24:
+  implicit merge was removed in spinclass#317 and `PrepareMergeImplicit` no
+  longer exists; repair never runs for implicit sessions, and merging from one
+  is refused. The text below describes the superseded design.) Their HEAD is on the
   default branch and may already be pushed; conformist's amend refuses pushed
   history. v1 did not run repair for them, which made mechanical drift a hard
   gate failure on a main checkout that a worktree session would have folded in.

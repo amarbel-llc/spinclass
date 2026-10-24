@@ -112,6 +112,11 @@ creation:
 - *Bash(dodder:\*)* is appended to the worktree's Claude Code allow list in
   _.claude/settings.local.json_.
 
+A *dodder* MCP server (*dodder mcp*, with both ceiling variables set to the
+worktree) is also registered in the worktree's _.mcp.json_, unless the
+sweatfile declares its own *[[mcps]]* entry named *dodder*, which takes
+precedence.
+
 When the *dodder* input is null (the default *packages.default*), none of the
 above happens. The feature is fully dormant; no _.dodder/_ directory is created
 and no dodder-related allow rule is added.

@@ -60,6 +60,9 @@ call, not require the human to drop into a terminal. Unlike
 authorization gate: recovering a closed session is not the privileged action
 tearing one down is.
 
+Refused when the caller is a confined session (`refuseConfinedServeCaller`,
+FDR 0035).
+
 Three refusal conditions, each with a message naming the fix rather than a
 raw git error:
 

@@ -112,9 +112,10 @@ Phase 1 open fork in #169 in favor of call-`whoami`-for-authority.)
 ## Job structure (consumer view)
 
 spinclass rides clown's job/channel model for two things:
-- **async merge/check** (FDR 0010): `clown job start|progress|done`, woken on
-  terminal records.
-- **cross-session chat** (FDR 0009): today spinclass keeps its own chatroom
+- **async merge/check** (FDR 0010): `ringmaster job start|progress|done`
+  (formerly `clown job`), woken on terminal records.
+- **cross-session chat** (FDR 0009; historical, 2026-10-24: the chat store
+  and tools were removed, see FDR 0017): today spinclass keeps its own chatroom
   store and only emits a wake; #170 (Phase 2) converges the store onto clown's
   journal so the journal is the single source of truth and the addressing
   divergence cannot recur — the chat analogue of the moxy async→journal

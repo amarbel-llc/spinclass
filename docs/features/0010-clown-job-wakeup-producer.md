@@ -75,8 +75,9 @@ plumbing.
 ## Interface
 
 `internal/clown` is the producer-side integration; everything funnels
-through the clown CLI located via `$CLOWN_BIN` (exported by clown into
-every plugin MCP server) with a `PATH` fallback. Spinclass's `job.json`
+through the `ringmaster` CLI (`$RINGMASTER_BIN`, else `PATH`); `$CLOWN_BIN`
+set (exported by clown into every plugin MCP server) means "running under
+clown, may emit". Spinclass's `job.json`
 remains the durable local record of a job's *result*; the clown journal is
 the wake layer — but see the **id adoption** and **pull-surface retirement**
 amendments below: the first makes the start emit load-bearing rather than
@@ -206,6 +207,7 @@ the terminal wake now carries its own result (the rendered verdict ladder as a
 `madder://blobs/<digest>` resource, *Piece 2* below), so the retired
 `result_ref: "spinclass session-job-status"` self-pointer is gone with it.
 
+(Historical, 2026-10-24: the chat tools were removed; see FDR 0017.)
 **Chat wake emits**: gated on **presence** like the job emits —
 `CLOWN_BIN` set means emit; presence-gating is the only gate (the
 legacy chat-watch monitor and its `SPINCLASS_CHAT_WAKE` receive-side
@@ -230,7 +232,8 @@ A failing check wakes the agent with the first failure:
 
     [clown-job] spinclass check-3a1b2c4d failed: check failed: not ok 2 - pre-merge hook · 1 resource(s)
 
-A directed chat message:
+A directed chat message (historical, 2026-10-24: the chat tools were
+removed; see FDR 0017):
 
     chat-send to="clown/sleek-sumac" message="rebase landed"
     # the target session is woken:
@@ -329,8 +332,8 @@ paragraph gated have both shipped; see the amendment above.
   history, and the executed promotion/deletion record.
 - spinclass#107 — promoting `SPINCLASS_CHAT_WAKE` into the sweatfile
   cascade (obsolete: the variable was deleted with the legacy monitor).
-- `internal/clown` — the producer package (`Source`, `Bin`, `Enabled`,
-  `SendMessage`, `StartJob`, `FinishJob`); `internal/job/runner.go` —
+- `internal/clown` — the producer package (`Enabled`, `StartJob`,
+  `SpoolPath`, `FinishJob`, `NotifyPrincipal`, `EmitExitWakes`); `internal/job/runner.go` —
   the start allocation ahead of the job goroutine and the terminal emit
   inside it.
 - spinclass#243 — the id-adoption amendment above (dispatch-time

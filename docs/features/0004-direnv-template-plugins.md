@@ -39,7 +39,7 @@ them as opaque shell-emitting plugins.
 
 The proposal mirrors the existing `[[start-commands]]` plugin model
 (see `internal/sweatfile/sweatfile.go` `defaultStartCommands` and the
-discussion in `CLAUDE.md` "Custom start commands"). The schema below is
+discussion in `doc/spinclass-start-commands.7.scd`). The schema below is
 illustrative, not final — the open questions are listed afterwards.
 
 ### Declaring a template
@@ -196,12 +196,11 @@ not a flag in the binary.
 
 - FDR 0003 (`docs/features/0003-per-worktree-madder-blob-store.md`) —
   parallel "spinclass exposes a plugin point, doesn't bake in the
-  detail" pattern; that one chose Candidate A (auto-on when a binary
-  is on PATH), this one is closer in shape to Candidate C
+  detail" pattern; that one chose Candidate F (build-time pin), this one is closer in shape to Candidate C
   (sweatfile-declared opt-in).
 - `internal/sweatfile/sweatfile.go` `defaultStartCommands()` — the
   existing plugin shape this design mirrors.
-- `CLAUDE.md` — "Custom start commands" — the prior art for
+- `doc/spinclass-start-commands.7.scd` — the prior art for
   user-extensible plugin schemas in spinclass.
 - Origin conversation: per-worktree GOCACHE forcing-function design
   thread, May 2026; concluded that baking the language matrix into

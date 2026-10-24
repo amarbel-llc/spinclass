@@ -32,7 +32,7 @@ in the global sweatfile):
 [[remotes]]
 name   = "devbox"                  # the <host>: prefix users type
 ssh    = "sasha@devbox.lan"        # optional; Dest() falls back to name
-attach = ["ssh", "-t", "{ssh}", "spinclass", "resume", "{id}"]  # optional; shown value is the default
+attach = ["ssh", "-t", "--", "{ssh}", "spinclass", "resume", "{id}"]  # optional; shown value is the default
 ```
 
 - A **name-only entry is a valid all-defaults remote**: the ssh
@@ -56,7 +56,7 @@ matching no remote) resolves locally exactly as before.
 **Listing**: `sc list --format json` emits a `session.ListRow` array
 (`id`, `session_key`, `state`, `description`, `repo`) — both the local
 machine format and the remote wire format. For each configured remote,
-`sc list` runs `ssh <dest> spinclass list --format json` in parallel
+`sc list` runs `ssh -- <dest> spinclass list --format json` in parallel
 with a 3s per-host timeout, renders remote rows prefixed
 (`devbox:crisp-catalpa`) after local rows, and writes each healthy
 host's rows to `$XDG_STATE_HOME/spinclass/remotes/<name>.json`. An
@@ -97,7 +97,7 @@ Reattach to the remote session (completion offers `devbox:sleek-sumac`
 from the cache):
 
     $ sc resume devbox:sleek-sumac
-    # execs: ssh -t sasha@devbox.lan spinclass resume sleek-sumac
+    # execs: ssh -t -- sasha@devbox.lan spinclass resume sleek-sumac
 
 Drop an inherited remote in a child sweatfile:
 
@@ -131,8 +131,11 @@ Drop an inherited remote in a child sweatfile:
   and filtering (non-abandoned only) are whatever the remote spinclass
   reports about itself; the local side adds only the `<name>:` prefix.
 - **Custom attach templates own their argv safety.** The default
-  template places `{id}` after ssh's option boundary, so an id from a
-  compromised remote's list output cannot become an ssh flag. A custom
+  template places `--` before `{ssh}` and `{id}` after ssh's option
+  boundary, so an id from a compromised remote's list output cannot
+  become an ssh flag. A destination (ssh value or defaulted name)
+  starting with `-` is refused for list and resume, and `sc validate`
+  reports it. A custom
   `attach` template that puts `{id}` where its command parses options
   (e.g. before a `--`) takes on that risk itself — ids in the
   completion cache are remote-controlled data.

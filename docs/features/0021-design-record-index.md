@@ -4,7 +4,7 @@ date: 2026-07-02
 promotion-criteria: |
   proposed -> experimental: DONE — the docs-index renders in spinclass's OWN
   clown sessions (a live cold `prompts/get` shows the `## Design records` block
-  listing all 21 FDRs grouped by status, `docs/adrs`/`docs/rfcs` absent →
+  listing all 21 FDRs (at the time; there are now 36) grouped by status, `docs/adrs`/`docs/rfcs` absent →
   omitted), backed by `internal/sysprompt/docsindex.go` +
   `[sysprompt].doc-index-dirs` (override/`[]`-disable proven by unit tests).
   proposed -> experimental (original): the docs-index renders in spinclass's OWN clown
@@ -82,8 +82,11 @@ fixed session-orientation preamble the templates already emit:
 
 ### Config — `[sysprompt].doc-index-dirs`
 
-The default dir list (`docs/features`, `docs/adrs`, `docs/rfcs`) is a built-in
-constant. One sweatfile knob overrides it:
+The default dir list (`docs/features`, `docs/adrs`, `docs/rfcs`; since
+extended with `docs/epics`, genre tag `EPIC`, listed above FDRs) is a built-in
+constant. (Amended 2026-10-24: the scan is also bounded by
+`indexScanTimeout`, 1500ms, in `internal/sysprompt/sysprompt.go`; FDR 0030
+adds opt-in manpage and repo indexes via `[sysprompt]`.) One sweatfile knob overrides it:
 
     [sysprompt]
     doc-index-dirs = ["design", "specs"]
@@ -159,7 +162,7 @@ Turn the index off entirely:
 
 | Lever | Current | Rationale | Change signal |
 |---|---|---|---|
-| default dirs | `docs/features`, `docs/adrs`, `docs/rfcs` | the three lifecycle-tracked design-record conventions | a fourth conventional dir emerges across repos |
+| default dirs | `docs/epics` (`EPIC`), `docs/features`, `docs/adrs`, `docs/rfcs` | the three lifecycle-tracked design-record conventions | a fourth conventional dir emerges across repos |
 | section entry cap | none | a few dozen records is cheap; premature to cap | a real repo's index bloats the prompt past usefulness |
 | grouping | by `status` | surfaces in-flight vs settled at a glance | users prefer flat numeric order, or per-genre grouping |
 | render shape | number · title · status | minimal high-signal triple | agents repeatedly need one more field (e.g. date) |

@@ -105,19 +105,18 @@ sessions can call madder without a permission prompt.
 ### Manpage
 
 The chosen activation model (Candidate F — build-time pin) introduces
-no sweatfile section, so `cmd/spinclass/doc/spinclass-sweatfile.5` is
-unchanged. Instead, `cmd/spinclass/doc/spinclass.1` grows a
-**BUILD-TIME PINS** section that documents the `madderBin` /
+no sweatfile section, so `doc/spinclass-sweatfile.5.scd` is
+unchanged. Instead, `doc/spinclass-build-pins.7.scd` documents the `madderBin` /
 `direnvBin` link-time strings and their effect on session creation,
 with pointers to madder(1) and blob-store(7).
 
 The manpage is the user-facing source of truth; the FDR documents
 intent. Both stay in sync.
 
-## Open question: activation model
+## Activation model (decided: Candidate F)
 
 How does spinclass decide whether to manage a `.madder/` store for a
-given worktree? This is the only undecided piece. The candidates
+given worktree? Decided below (Candidate F). The candidates
 below are not exhaustive; combining them is also possible (e.g. C
 plus D). Each candidate is followed by what it implies for the
 "binary discovery" and "missing-binary handling" sub-questions, since
@@ -216,7 +215,8 @@ file, or any sibling worktree that already has a store.
 ### Candidate F — Build-time pin via Nix derivation **(selected)**
 
 Spinclass exposes `lib.mkSpinclass = { madder ? null, direnv ? null }: ...`
-from its flake, mirroring `lib.mkCircus` from
+(since extended with `dodder` and further pins; see
+spinclass-build-pins(7)) from its flake, mirroring `lib.mkCircus` from
 [clown](https://github.com/amarbel-llc/clown). When a consumer flake
 calls it with a non-null `madder`, the absolute /nix/store path of
 the resulting binary is baked into spinclass at link time via

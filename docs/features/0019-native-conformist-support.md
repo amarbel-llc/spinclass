@@ -154,8 +154,10 @@ downstream users" endgame.
   `build.{preCommit,repair,devShell}` (`module-options.nix`, #47/#51/#54),
   `flake-module.nix` (formatter+checks only today), `cmd/conform/`. The
   `mkToolchainHooks` deliverable (A) is in progress (conformist/live-alder).
-- spinclass: `flake.nix` (`conformistFmt`), `./conformist.toml` (5 formatters /
-  5 linters — handed to live-alder as the test case), `sweatfile`
+- spinclass: `flake.nix` (`conformistFmt`, since replaced by the
+  `conformistEval` module path), `./conformist.toml` (5 formatters /
+  5 linters — handed to live-alder as the test case; since replaced by
+  `./conformist.nix`), `sweatfile`
   (`pre-commit`), FDR 0018 (`[hooks].repair`).
 - The `sc rebuild`/setup-fingerprint feature (prior) — why a name-based hook is
   invisible to its fingerprint, and why that's fine.

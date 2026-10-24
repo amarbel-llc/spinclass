@@ -28,10 +28,10 @@ promotion-criteria: |
 > **Update 2026-06-15:** Piece 1's design is settled — **clown RFC-0014**
 > (awareness seam: `group-id` + presence) is **merged** (clown `c71c2dc`) and
 > ratified here (§ RFC-0014 ratification); the framing call is **spinclass exits
-> multiplexing entirely**. Remaining: the clown implementation of RFC-0014
-> §2/§3/§5, then the spinclass mux-template removal + presence-wired
-> liveness/`sc list` (#175); `experimental → testing` also wants the ~1-week soak
-> and a multi-clown group-send exercised. This is the spinclass-side
+> multiplexing entirely**. (Landed, 2026-10-24: mux templates dropped,
+> `sc spawn` execs `clown --clown-attach=spawn`, liveness and the `sc list`
+> count read clown presence. Still open: the ~1-week soak and a multi-clown
+> group-send exercise, which `experimental → testing` wants.) This is the spinclass-side
 > half of a two-document
 > contract. The clown-owned design — the clownfile schema, the **per-instance
 > key derivation**, the **chat construct**, and the **spinclass-session
@@ -156,6 +156,9 @@ liveness join") still holds. This FDR **moves two whole features to clown** and
 ## Piece 1 — multiplexer attach moves to clown
 
 ### spinclass current state (the seam is already clean)
+
+(Historical, 2026-10-24: this subsection describes the pre-cutover state; the
+zmx spawn default and the mux templates below have since been removed.)
 
 spinclass hardcodes nothing about `zmx`/`posh`. **All** multiplexer coupling
 flows through `[session-entry]` argv templates + env vars:
@@ -402,10 +405,11 @@ this FDR**. RFC-0014 §6 states the var names normatively and references that do
 for producer-side semantics.
 
 **Status.** Piece 1 design is **settled** (RFC-0014 merged; clown#146 shipped the
-`[attach]` self-wrap + burned-in defaults). Remaining spinclass implementation
-(gated on clown shipping RFC-0014 §2/§3/§5): drop the mux templates, pass
-`--clown-attach=spawn` from `sc spawn`, and wire liveness + `sc list` onto
-presence (#175 item 1 + item 2).
+`[attach]` self-wrap + burned-in defaults). Spinclass implementation (landed,
+2026-10-24): the mux templates were dropped, `sc spawn` passes
+`--clown-attach=spawn`, and liveness + `sc list` read clown presence
+(#175 item 1 + item 2). Remaining: soak and the multi-clown group-send
+exercise.
 
 ## Migration sequencing
 
