@@ -72,6 +72,29 @@ func TestWithReporterPlain(t *testing.T) {
 	}
 }
 
+// #405: a routed session-record warning is visible in the default plain
+// rendering (a successful phase's output would be collapsed, so the text must
+// be the phase name), and it does not mark the run failed.
+func TestWarningPhaseIsVisibleInPlainOutput(t *testing.T) {
+	var out strings.Builder
+	err := WithReporter(FormatPlain, "title", &out, &out, func(rep *crap.Reporter) error {
+		warningPhase(rep, "spinclass: worktree copy disagrees with the frontend record on principal")
+		ts := rep.TestStream(1)
+		ts.Ok("rebase feature")
+		ts.Finish()
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("WithReporter: %v", err)
+	}
+	if !strings.Contains(out.String(), "warning: spinclass: worktree copy disagrees with the frontend record on principal") {
+		t.Errorf("plain output does not show the warning:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "✗") {
+		t.Errorf("a warning must not render as a failure:\n%s", out.String())
+	}
+}
+
 // RenderPlain converts a buffered record stream to verdict lines.
 func TestRenderPlain(t *testing.T) {
 	var rec strings.Builder

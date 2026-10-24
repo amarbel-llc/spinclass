@@ -99,10 +99,15 @@ func WithReporter(format, title string, stdout, tty io.Writer, fn func(rep *crap
 // phase's name with its verdict, while a successful phase's output would be
 // collapsed out of view. The warning is not a failure, so it changes no
 // verdict or exit code.
+//
+// INTERIM (#405): crap has no standalone warning record; once it does, emit
+// that instead.
 func routeSessionReports(rep *crap.Reporter) (restore func()) {
-	return session.RouteReports(func(line string) {
-		rep.Phase("warning: " + line).Done()
-	})
+	return session.RouteReports(func(line string) { warningPhase(rep, line) })
+}
+
+func warningPhase(rep *crap.Reporter, line string) {
+	rep.Phase("warning: " + line).Done()
 }
 
 // RenderPlain renders a buffered ndjson-crap stream as plain verdict lines
