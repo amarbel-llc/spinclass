@@ -13,6 +13,7 @@ import (
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
 	"code.linenisgreat.com/crap/go-crap/v2/viewport"
+	"code.linenisgreat.com/spinclass/internal/session"
 )
 
 // Resolved format names. "auto" and "" resolve to viewport on a TTY and
@@ -48,11 +49,16 @@ func ResolveFormat(format string, stdoutIsTTY bool) (string, error) {
 // os.Stderr as tty so the TTY-mode viewport never fights stdout
 // redirection). fn's error is returned; a renderer error is joined only if
 // fn succeeded.
+//
+// While fn runs, session-record warnings that would print to stderr ride the
+// stream instead (see routeSessionReports), so ndjson stays records only and
+// the viewport is not torn by a stray line (#405).
 func WithReporter(format, title string, stdout, tty io.Writer, fn func(rep *crap.Reporter) error) error {
 	opts := crap.ReporterOptions{Title: title, Source: "spinclass"}
 
 	if format == FormatNdjson {
 		rep := crap.NewReporter(stdout, opts)
+		defer routeSessionReports(rep)()
 		return fn(rep)
 	}
 
@@ -74,7 +80,9 @@ func WithReporter(format, title string, stdout, tty io.Writer, fn func(rep *crap
 	// terminates (Close is idempotent; the explicit Close below stands).
 	defer func() { _ = pw.Close() }()
 	rep := crap.NewReporter(pw, opts)
+	restoreReports := routeSessionReports(rep)
 	err := fn(rep)
+	restoreReports()
 	// Close pw now (before <-done) so the renderer goroutine sees EOF and
 	// returns from Present — removing this Close would deadlock the join.
 	// The deferred Close above is only a panic-safety net (no-op here).
@@ -84,6 +92,17 @@ func WithReporter(format, title string, stdout, tty io.Writer, fn func(rep *crap
 		return err
 	}
 	return renderErr
+}
+
+// routeSessionReports makes each session-record warning a one-line phase named
+// by the warning itself, closed at once with success: every renderer prints a
+// phase's name with its verdict, while a successful phase's output would be
+// collapsed out of view. The warning is not a failure, so it changes no
+// verdict or exit code.
+func routeSessionReports(rep *crap.Reporter) (restore func()) {
+	return session.RouteReports(func(line string) {
+		rep.Phase("warning: " + line).Done()
+	})
 }
 
 // RenderPlain renders a buffered ndjson-crap stream as plain verdict lines

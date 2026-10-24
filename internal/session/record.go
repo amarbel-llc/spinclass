@@ -64,12 +64,36 @@ var report = defaultReport
 
 var reported sync.Map
 
+var (
+	reportPrintMu sync.Mutex
+	reportPrint   = func(line string) { fmt.Fprintln(os.Stderr, line) }
+)
+
 func defaultReport(msg string) {
 	sessionlog.Errorf("%s", msg)
 	if _, dup := reported.LoadOrStore(msg, true); dup {
 		return
 	}
-	fmt.Fprintln(os.Stderr, "spinclass: "+msg)
+	reportPrintMu.Lock()
+	defer reportPrintMu.Unlock()
+	reportPrint("spinclass: " + msg)
+}
+
+// RouteReports sends the default sink's printed lines to print instead of
+// stderr until restore runs, for a command whose terminal or stdout belongs to
+// a renderer (#405: an ndjson-crap stream must carry nothing but records).
+// Logging and the once-per-process dedup are unchanged. print runs under a
+// lock, one line at a time.
+func RouteReports(print func(line string)) (restore func()) {
+	reportPrintMu.Lock()
+	defer reportPrintMu.Unlock()
+	prev := reportPrint
+	reportPrint = print
+	return func() {
+		reportPrintMu.Lock()
+		defer reportPrintMu.Unlock()
+		reportPrint = prev
+	}
 }
 
 // SetReportSink replaces where reports go and returns a function restoring the
