@@ -280,10 +280,44 @@ func registerMCPOnlyCommands(app *command.App) {
 	})
 
 	app.AddCommand(&command.Command{
+		Name:  "restart-this-session",
+		Title: "Restart This Session",
+		Description: command.Description{
+			Short: "Ask for THIS session to be stopped and relaunched by its harness frontend (#419, FDR 0037) once your current turn is over. Refused unless an operator set `restart` under [session-entry] in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored), while a merge/check job runs, and for an implicit session. spinclass only authorizes and records the request and runs that hand-off command; the frontend performs the restart after this turn ends. It never forces. After it succeeds, end your turn.",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(false),
+			DestructiveHint: protocol.BoolPtr(false),
+			IdempotentHint:  protocol.BoolPtr(false),
+			OpenWorldHint:   protocol.BoolPtr(false),
+		},
+		Params: restartThisSessionParamList(),
+		Run:    wrapMCPHandler("restart-this-session", handleRestartThisSession),
+		RunCLI: ungatedCLI(runRestartThisSession),
+	})
+
+	app.AddCommand(&command.Command{
+		Name:  "restart-child-session",
+		Title: "Restart Child Session",
+		Description: command.Description{
+			Short: "Ask for a session you hold a handle on to be stopped and relaunched by its harness frontend (#419, FDR 0037). Needs the `restart` right on the child (the spawner has it; the default grant `observe,close` does not): a child you hold no handle on, or hold without that right, is refused, naming who can grant it. Same refusals as restart-this-session, evaluated on the child: no trusted `[session-entry].restart` hand-off, a running merge/check job, an implicit session. It never forces. The restart happens when the child's current turn ends.",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(false),
+			DestructiveHint: protocol.BoolPtr(false),
+			IdempotentHint:  protocol.BoolPtr(false),
+			OpenWorldHint:   protocol.BoolPtr(false),
+		},
+		Params: restartChildSessionParamList(),
+		Run:    wrapMCPHandler("restart-child-session", handleRestartChildSession),
+		RunCLI: ungatedCLI(runRestartChild),
+	})
+
+	app.AddCommand(&command.Command{
 		Name:  "grant-session-handle",
 		Title: "Grant Session Handle",
 		Description: command.Description{
-			Short: "Grant another session a handle on one this session already holds a handle on (FDR 0032 D12/D13). Handles pass like SCM_RIGHTS: the grant lands in the recipient's pending set — conferring NO authority and no exit wakes — until the recipient exercises it (accept-on-first-use, via close-child-session, list-handles with accept, or granting onward). The granter keeps its own handle; delegate is the default, transfer is grant then release. `rights` is a comma-separated FDR 0032 D13 object-rights list (observe, close, grant, instruct, cap, merge, check), enforced: granting needs the grant right and may only narrow (grant a subset of the rights you hold) — defaults to \"observe,close\", the conservative lazy handoff. spinclass never messages the recipient itself (that's clown/troupe's job); relay the printed child session key to it via chat.",
+			Short: "Grant another session a handle on one this session already holds a handle on (FDR 0032 D12/D13). Handles pass like SCM_RIGHTS: the grant lands in the recipient's pending set — conferring NO authority and no exit wakes — until the recipient exercises it (accept-on-first-use, via close-child-session, list-handles with accept, or granting onward). The granter keeps its own handle; delegate is the default, transfer is grant then release. `rights` is a comma-separated FDR 0032 D13 object-rights list (observe, close, grant, instruct, cap, merge, check, restart), enforced: granting needs the grant right and may only narrow (grant a subset of the rights you hold) — defaults to \"observe,close\", the conservative lazy handoff. spinclass never messages the recipient itself (that's clown/troupe's job); relay the printed child session key to it via chat.",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			ReadOnlyHint:    protocol.BoolPtr(false),

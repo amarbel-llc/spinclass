@@ -598,6 +598,51 @@ func TestRightsOf(t *testing.T) {
 	}
 }
 
+// restart (#419) joins the FDR 0032 D13 vocabulary: the spawner holds it, the
+// default grant does not.
+func TestRestartIsAHandleRight(t *testing.T) {
+	set, err := ParseHandleRights("observe,restart")
+	if err != nil || !set.Has("restart") {
+		t.Fatalf("ParseHandleRights(observe,restart) = %v, %v; want restart accepted", set, err)
+	}
+	if def, _ := ParseHandleRights(DefaultHandleRights); def.Has("restart") {
+		t.Errorf("the default grant %q must not carry restart", DefaultHandleRights)
+	}
+	if all, _ := ParseHandleRights(AllHandleRights); !all.Has("restart") {
+		t.Errorf("AllHandleRights %q must carry restart", AllHandleRights)
+	}
+	s := State{SpawnedByPrincipal: "spawner", Holders: []string{"spawner", "legacy"}}
+	if r, _ := s.RightsOf("spawner"); !r.Has("restart") {
+		t.Errorf("the spawner's rights %q must include restart", r)
+	}
+	if r, _ := s.RightsOf("legacy"); r.Has("restart") {
+		t.Errorf("a default holder's rights %q must not include restart", r)
+	}
+	if got := s.HoldersWith("restart"); len(got) != 1 || got[0] != "spawner" {
+		t.Errorf("HoldersWith(restart) = %v, want [spawner]", got)
+	}
+}
+
+func TestRestartRequestJSONRoundTrip(t *testing.T) {
+	want := &RestartRequest{RequestedAt: time.Date(2026, 10, 24, 1, 2, 3, 0, time.UTC), Requester: "p1", Reason: "r", When: "idle"}
+	raw, err := json.Marshal(State{RestartRequest: want})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"restart_request"`, `"requested_at"`, `"requester"`, `"reason"`, `"when"`} {
+		if !strings.Contains(string(raw), key) {
+			t.Errorf("state JSON lacks %s: %s", key, raw)
+		}
+	}
+	var got State
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.RestartRequest == nil || *got.RestartRequest != *want {
+		t.Errorf("round trip = %+v, want %+v", got.RestartRequest, want)
+	}
+}
+
 func TestGrantHandle(t *testing.T) {
 	t.Run("grants with default rights", func(t *testing.T) {
 		s := &State{}

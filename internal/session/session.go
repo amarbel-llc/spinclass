@@ -189,8 +189,10 @@ type State struct {
 	// HandleRights records, per principal in PendingHandles or Holders, the
 	// comma-separated rights (FDR 0032 D13: observe/close/grant/instruct/cap/…)
 	// a grant named for it — defaulting to "observe,close" when the grant named
-	// none. RECORDED, NOT ENFORCED in slice 0: no verifier here consults this
-	// map, it exists purely as an audit trail for `list-handles`/`sc whoami`.
+	// none. Enforced per verb where a verb requires a right (RightsOf resolves
+	// it; close-child-session needs close, restart-child-session needs restart,
+	// grant-session-handle needs grant); the others are recorded for
+	// `list-handles`/`sc whoami`.
 	// A parallel map, not a field on Holders/PendingHandles themselves, so
 	// those two stay the plain []string shape slice 0 committed to (D14's
 	// materialized view). Slice 1 replaces this view with signed grant-record
@@ -266,6 +268,12 @@ type State struct {
 	// (`sc close-self-run`), re-checks everything, and clears it on failure.
 	CloseRequest *CloseRequest `json:"close_request,omitempty"`
 
+	// RestartRequest is set by restart-this-session / restart-child-session
+	// (#419): a restart of this session was authorized and handed off to the
+	// harness frontend. The frontend asks `sc restart-preflight` at its next idle
+	// transition, which consumes (clears) the request.
+	RestartRequest *RestartRequest `json:"restart_request,omitempty"`
+
 	// isTombstone is set when the State was loaded from a regular file in
 	// the central index (i.e. a session that was closed cleanly and whose
 	// worktree-local state.json is gone). Unexported so it does not get
@@ -278,6 +286,17 @@ type CloseRequest struct {
 	RequestedAt time.Time `json:"requested_at"`
 	// Principal is the requesting session's own principal.
 	Principal string `json:"principal"`
+}
+
+// RestartRequest records that a restart of a session was authorized (#419).
+type RestartRequest struct {
+	RequestedAt time.Time `json:"requested_at"`
+	// Requester is the principal that asked: the session itself, or a holder
+	// restarting it. Notification only; never an authority.
+	Requester string `json:"requester"`
+	Reason    string `json:"reason"`
+	// When is "idle" (after the session's current turn) or "now".
+	When string `json:"when"`
 }
 
 // PreMergeAttestation records one nothing-but-the-truth call. It is claimed
@@ -1097,8 +1116,10 @@ func (s *State) OtherHolders(excluding string) []string {
 const DefaultHandleRights = "observe,close"
 
 // HandleRightNames is the closed vocabulary of handle rights (FDR 0032 D13),
-// in display order. merge and check match the per-session merge/check verbs.
-var HandleRightNames = []string{"observe", "close", "grant", "instruct", "cap", "merge", "check"}
+// in display order. merge and check match the per-session merge/check verbs;
+// restart (#419) gates restart-child-session. It is not in DefaultHandleRights,
+// so a default grant never confers it; the spawner holds every right.
+var HandleRightNames = []string{"observe", "close", "grant", "instruct", "cap", "merge", "check", "restart"}
 
 // AllHandleRights is every right, comma-joined: the spawner's full set, which
 // spawn records so a record never leaves it implicit.

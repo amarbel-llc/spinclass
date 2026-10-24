@@ -277,6 +277,32 @@ func TrustedSpawnProfile(h sweatfile.Hierarchy, home, repoRoot string) (profile 
 	return profile, untrusted
 }
 
+// TrustedRestartHandoff returns the [session-entry].restart argv honoured for
+// the repo (#419): an argv, the last layer above the repo that sets it wins, an
+// explicit [] clearing it, nil when none does. It is code spinclass execs, so a
+// value an agent can write into the repo's own sweatfile must not choose it;
+// the paths of the layers that set the key and may not are returned in
+// untrusted. Hierarchy.Merged never carries the key.
+func TrustedRestartHandoff(h sweatfile.Hierarchy, home, repoRoot string) (argv []string, untrusted []string) {
+	for _, src := range h.Sources {
+		if src.SkipReason != "" || !src.Found {
+			continue
+		}
+		if src.File.SessionEntry == nil || src.File.SessionEntry.Restart == nil {
+			continue
+		}
+		if LayerAboveRepo(src.Path, home, repoRoot) {
+			argv = src.File.SessionEntry.Restart
+		} else {
+			untrusted = append(untrusted, src.Path)
+		}
+	}
+	if len(argv) == 0 {
+		return nil, untrusted
+	}
+	return argv, untrusted
+}
+
 // TrustedURLResolver returns the [auth].url-resolver command honoured for the
 // repo: scalar override across layers above the repo, last one wins, an
 // explicit "" clearing it. The value is TrimSpaced, so whitespace-only also

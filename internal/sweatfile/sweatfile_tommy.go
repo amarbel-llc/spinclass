@@ -1058,6 +1058,15 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 				_vSessionEntrySpawnProfile.MarkConsumedString()
 			}
 		}
+		if _vSessionEntryRestart, _ok := _vSessionEntry.Field("restart"); _ok && _vSessionEntryRestart.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vSessionEntryRestart.Leaf); _xok {
+				sessionEntryVal11.Restart = _x
+				if sessionEntryVal11.Restart == nil {
+					sessionEntryVal11.Restart = []string{}
+				}
+				_vSessionEntryRestart.MarkConsumed()
+			}
+		}
 		d.data.SessionEntry = sessionEntryVal11
 	} else {
 		sessionEntryVal11 := &SessionEntry{}
@@ -1131,6 +1140,16 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractString(_vSpawnProfile.Leaf); _xok {
 				sessionEntryVal11.SpawnProfile = _x
 				_vSpawnProfile.MarkConsumedString()
+			}
+		}
+		if _vRestart, _ok := model.Field("restart"); _ok && _vRestart.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractStringSlice(_vRestart.Leaf); _xok {
+				sessionEntryVal11.Restart = _x
+				if sessionEntryVal11.Restart == nil {
+					sessionEntryVal11.Restart = []string{}
+				}
+				_vRestart.MarkConsumed()
 			}
 		}
 		if _foundSessionEntry {
@@ -1790,6 +1809,13 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 		if d.data.SessionEntry.SpawnProfile != "" || cst.HasValue(tableNode, "spawn-profile") {
 			if err := cst.SetAny(tableNode, "spawn-profile", d.data.SessionEntry.SpawnProfile); err != nil {
 				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		{
+			if d.data.SessionEntry.Restart != nil {
+				if err := cst.SetAny(tableNode, "restart", d.data.SessionEntry.Restart); err != nil {
+					return nil, fmt.Errorf("%w", err)
+				}
 			}
 		}
 	}
@@ -2982,6 +3008,15 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vSessionEntrySpawnProfile.MarkConsumedString()
 			}
 		}
+		if _vSessionEntryRestart, _ok := _vSessionEntry.Field("restart"); _ok && _vSessionEntryRestart.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vSessionEntryRestart.Leaf); _xok {
+				sessionEntryVal11.Restart = _x
+				if sessionEntryVal11.Restart == nil {
+					sessionEntryVal11.Restart = []string{}
+				}
+				_vSessionEntryRestart.MarkConsumed()
+			}
+		}
 		data.SessionEntry = sessionEntryVal11
 	} else {
 		sessionEntryVal11 := &SessionEntry{}
@@ -3055,6 +3090,16 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractString(_vSpawnProfile.Leaf); _xok {
 				sessionEntryVal11.SpawnProfile = _x
 				_vSpawnProfile.MarkConsumedString()
+			}
+		}
+		if _vRestart, _ok := sub.Field("restart"); _ok && _vRestart.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractStringSlice(_vRestart.Leaf); _xok {
+				sessionEntryVal11.Restart = _x
+				if sessionEntryVal11.Restart == nil {
+					sessionEntryVal11.Restart = []string{}
+				}
+				_vRestart.MarkConsumed()
 			}
 		}
 		if _foundSessionEntry {
@@ -3698,6 +3743,13 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		if data.SessionEntry.SpawnProfile != "" || cst.HasValue(tableNode, "spawn-profile") {
 			if err := cst.SetAny(tableNode, "spawn-profile", data.SessionEntry.SpawnProfile); err != nil {
 				return fmt.Errorf("%w", err)
+			}
+		}
+		{
+			if data.SessionEntry.Restart != nil {
+				if err := cst.SetAny(tableNode, "restart", data.SessionEntry.Restart); err != nil {
+					return fmt.Errorf("%w", err)
+				}
 			}
 		}
 	}

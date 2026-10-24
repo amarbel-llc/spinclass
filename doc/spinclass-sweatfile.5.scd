@@ -1207,6 +1207,26 @@ readable by others.
 	drop *moxy/moxy* whole and keep *just-us/just-us*; a profile with an
 	unknown or *dynamic* source is refused.
 
+*restart*
+	Array of strings: the hand-off argv that *restart-this-session* and
+	*restart-child-session* exec to ask the harness frontend to stop and
+	relaunch a session (FDR 0037, #419). spinclass authorizes, refuses and
+	records the restart; the frontend (clown) performs it. Each element has
+	*{principal}* (the restarted session's principal, which must be
+	UUID-shaped), *{session-key}*, *{when}* (*idle* or *now*) and *{reason}*
+	replaced; replacement is one pass, so a reason cannot smuggle in another
+	placeholder. The command runs in the session's worktree with a 15 second
+	bound; a failure clears the request and is returned to the caller. Unset,
+	both tools refuse and name this key.
+
+	Read live, at restart time, only from the global sweatfile and layers above
+	the repo, and never pinned into session state, so sessions that already
+	exist get it. A repo or worktree value is ignored: it
+	is a command spinclass runs, so the agent must not be able to choose it.
+	The last layer above the repo that sets it wins, and an explicit *[]*
+	clears an inherited value. *Merge:* never merged; read through the trusted
+	layers only.
+
 *disable-auto-mode*
 	Boolean. By default a spawned worker whose provider is claude starts in
 	claude's auto permission mode: *--permission-mode auto* is placed in

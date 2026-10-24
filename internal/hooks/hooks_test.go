@@ -1145,6 +1145,11 @@ func TestReadOnlyIntrospectionToolsAutoApproved(t *testing.T) {
 		{"list-handles", map[string]any{"accept": "true"}, "ask"},
 		// Gated by the operator's allow-self-close setting inside the tool.
 		{"close-this-session", map[string]any{}, "allow"},
+		// Gated by the operator's trusted restart hand-off (and, for the child
+		// form, by the restart handle right) inside the tool; a restart removes
+		// nothing and is refused while a job runs (#419).
+		{"restart-this-session", map[string]any{"reason": "x"}, "allow"},
+		{"restart-child-session", map[string]any{"child": "r/b"}, "allow"},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%s %v", tt.tool, tt.input), func(t *testing.T) {

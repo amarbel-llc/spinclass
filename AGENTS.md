@@ -90,7 +90,8 @@ re-run that suite right before merging.
 `sc start|start-gh_pr|start-gh_issue|start-<custom>`, `resume`,
 `update-description`, `exec`, `run` (FDR 0020), `list [--watch]`, `merge`,
 `close [target...]`, `check`, `clean`, `rebuild [--check]`, `fork`, `spawn`
-(FDR 0006), `close-child-session`, `grant-session-handle` /
+(FDR 0006), `close-child-session`, `restart-this-session` /
+`restart-child-session` (FDR 0037; hidden `restart-preflight`), `grant-session-handle` /
 `release-session-handle` / `list-handles` / `whoami` (FDR 0032), `resurrect`
 (FDR 0027), `grit <tool> [json]` (CLI-only, TTY-required, logged operator escape
 hatch for the grit store tools, FDR 0036), `pull`, `validate`, `perms list|review|edit`. Per-command flags:
@@ -111,6 +112,8 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
 - **Self-close** (#389, FDR 0035): `close-this-session` queues a close
   (`[permissions] allow-self-close`, trusted layers only, never forces); the
   teardown is `close-self-run`, run from outside the unit.
+- **Restart** (#419, FDR 0037): spinclass authorizes/records, clown relaunches;
+  the `[session-entry].restart` hand-off is trusted-layers-only, read live.
 - **Resurrect** (FDR 0027, #291): `close.RunResolved` records `DeletedSHA` in
   the tombstone; `sc resurrect` recreates the worktree from it.
 - **Exemption predicates** (FDR 0031, `merge/policy.go`) and **attestation

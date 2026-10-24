@@ -125,16 +125,7 @@ type closeThisSessionParams struct{}
 // rejectForce fails closed on any force argument, including false: the tool has
 // no such parameter, and accepting one would invite a later wiring of it.
 func rejectForce(args json.RawMessage) error {
-	var raw map[string]any
-	if len(args) > 0 {
-		if err := json.Unmarshal(args, &raw); err != nil {
-			return fmt.Errorf("invalid arguments: %w", err)
-		}
-	}
-	if _, present := raw["force"]; present {
-		return errors.New("close-this-session takes no force argument and never discards work; only the operator can, with `sc close --force`")
-	}
-	return nil
+	return rejectForceFor(args, "close-this-session takes no force argument and never discards work; only the operator can, with `sc close --force`")
 }
 
 // runCloseThisSession is the tool body.
@@ -259,6 +250,16 @@ func runCloseSelfRun(target string) error {
 // CLOWN_SESSION_ID), then to the session's recorded principal; an unconfined
 // agent is not inside any boundary that state could cross.
 func closeRunnerPrincipal(st *session.State, implied string) (string, error) {
+	return ownerPrincipal(st, implied, "close", fmt.Sprintf(
+		"Its holders (%s) are told; the operator can close it with `sc close %s`",
+		holdersOrNone(st.Holders), st.Key()))
+}
+
+// ownerPrincipal is closeRunnerPrincipal's resolution, shared with the restart
+// verbs (#419): act names what is being done ("close", "restart") and refusal
+// is the closing sentence of the two refusals, saying who is told and what the
+// operator can do instead.
+func ownerPrincipal(st *session.State, implied, act, refusal string) (string, error) {
 	stateDir, err := confinement.DefaultStateDir()
 	if err != nil {
 		return "", fmt.Errorf("resolving the frontend state directory: %w", err)
@@ -271,7 +272,7 @@ func closeRunnerPrincipal(st *session.State, implied string) (string, error) {
 		return p, nil
 	}
 	if confinement.LaunchedConfined(stateDir, st.WorktreePath) {
-		return "", fmt.Errorf("%s was launched confined but no frontend principal mapping names it, so whose close this is cannot be told; refusing. Its holders (%s) are told; the operator can close it with `sc close %s`", st.Key(), holdersOrNone(st.Holders), st.Key())
+		return "", fmt.Errorf("%s was launched confined but no frontend principal mapping names it, so whose %s this is cannot be told; refusing. %s", st.Key(), act, refusal)
 	}
 	if implied != "" {
 		return implied, nil
@@ -279,7 +280,7 @@ func closeRunnerPrincipal(st *session.State, implied string) (string, error) {
 	if st.Principal != "" {
 		return st.Principal, nil
 	}
-	return "", fmt.Errorf("%s records no principal, so whose close this is cannot be told; refusing. Its holders (%s) are told; the operator can close it with `sc close %s`", st.Key(), holdersOrNone(st.Holders), st.Key())
+	return "", fmt.Errorf("%s records no principal, so whose %s this is cannot be told; refusing. %s", st.Key(), act, refusal)
 }
 
 func holdersOrNone(holders []string) string {

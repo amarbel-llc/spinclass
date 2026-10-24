@@ -352,6 +352,14 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 			merged.SessionEntry.SpawnWindow = other.SessionEntry.SpawnWindow
 		}
 	}
+	// restart is deliberately NOT merged (#419 trust rule): the result never
+	// carries it, whether it came from other or from the receiver's
+	// carried-forward table. See sweatfileio.TrustedRestartHandoff.
+	if merged.SessionEntry != nil && merged.SessionEntry.Restart != nil {
+		cp := *merged.SessionEntry
+		cp.Restart = nil
+		merged.SessionEntry = &cp
+	}
 
 	// [[start-commands]] — append across levels, then dedupe by Name with
 	// the most-specific (last) definition winning. Entries within a single

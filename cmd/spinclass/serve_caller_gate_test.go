@@ -83,6 +83,11 @@ var gatedServeHandlers = []gatedServeHandler{
 		cliArgs: []string{"close-child-session", "--child", "nope/none"}, cliRefusal: "no spinclass session for child",
 	},
 	{
+		tool: "restart-child-session", operatorCommand: "sc restart-child-session", handle: handleRestartChildSession,
+		args: `{"child":"worker/kid"}`, harmlessArgs: `{}`, harmlessRefusal: "child is required",
+		cliArgs: []string{"restart-child-session", "--child", "nope/none"}, cliRefusal: "no spinclass session for child",
+	},
+	{
 		tool: "grant-session-handle", operatorCommand: "sc grant-session-handle", handle: handleGrantSessionHandle,
 		args: `{"child":"worker/kid","to":"someone"}`, harmlessArgs: `{}`, harmlessRefusal: "child is required",
 		cliArgs: []string{"grant-session-handle", "--child", "nope/none", "--to", "someone"}, cliRefusal: "nope/none",
@@ -153,6 +158,8 @@ var openServeTools = map[string]string{
 	"validate":           "the serve's own sweatfile hierarchy",
 	"list-handles":       "only the caller's own handles; accept is gated (row above)",
 	"close-this-session": "scope-gated self-close; caller resolution is audit row 0035-159",
+	"restart-this-session": "hand-off-gated self-restart, resolved like close-this-session (audit row 0035-159); " +
+		"the hand-off command comes from a trusted sweatfile layer, never from the caller",
 }
 
 func TestEveryServeToolIsGatedOrDeclaredOpen(t *testing.T) {

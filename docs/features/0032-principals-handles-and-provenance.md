@@ -548,10 +548,16 @@ Spawning mints the spawner every right: the five above plus `merge` and
 merge and check verbs. A grant defaults to `observe,close` unless rights are
 named, so the lazy handoff is the conservative one.
 
+Added 2026-10-24: a **`restart`** object right, "have *that* session stopped
+and relaunched by its harness frontend" (`restart-child-session`, FDR 0037).
+The spawner gets it with the rest; the default grant does not carry it, so a
+holder of `observe,close` cannot restart a child. It is the eighth name in the
+vocabulary.
+
 Rights are **enforced** on handle tools (spinclass#355, #360). Reaping needs
 `close`. Granting needs `grant` and may only narrow (EPIC 0001 principle 3):
 the rights named must be a subset of the granter's own, and a name outside the
-seven is refused. Releasing needs none, since it removes only the caller. The
+vocabulary (seven names until `restart`, 2026-10-24) is refused. Releasing needs none, since it removes only the caller. The
 spawner's full set is recorded at spawn in `handle_rights`; a holder with no
 entry (a record written before rights were enforced) keeps `observe,close`,
 and `observe` is implied by holding at all. `instruct` and `cap` are

@@ -206,7 +206,7 @@ func grantSessionHandleParamList() []command.Param {
 		{
 			Name:        "rights",
 			Type:        command.String,
-			Description: "Comma-separated object rights to record (FDR 0032 D13: observe, close, grant, instruct, cap, merge, check). Enforced: granting needs the grant right, and you can only grant rights you hold yourself. Defaults to \"observe,close\" when omitted, the conservative lazy handoff.",
+			Description: "Comma-separated object rights to record (FDR 0032 D13: observe, close, grant, instruct, cap, merge, check, restart). Enforced: granting needs the grant right, and you can only grant rights you hold yourself. Defaults to \"observe,close\" when omitted, the conservative lazy handoff.",
 		},
 	}
 }

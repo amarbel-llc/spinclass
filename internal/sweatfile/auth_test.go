@@ -36,6 +36,28 @@ func TestMergeWithNeverCarriesURLResolver(t *testing.T) {
 	}
 }
 
+// restart is trust-gated (#419) like url-resolver: MergeWith must never carry
+// it, whether it sits on the receiver or on the layer merged in.
+func TestMergeWithNeverCarriesRestart(t *testing.T) {
+	argv := []string{"clown", "restart"}
+	withRestart := Sweatfile{SessionEntry: &SessionEntry{Start: []string{"zsh"}, Restart: argv}}
+
+	fromOther := (Sweatfile{}).MergeWith(withRestart)
+	if fromOther.SessionEntry == nil || fromOther.SessionEntry.Restart != nil {
+		t.Errorf("restart leaked from the merged-in layer: %+v", fromOther.SessionEntry)
+	}
+	fromReceiver := withRestart.MergeWith(Sweatfile{})
+	if fromReceiver.SessionEntry == nil || fromReceiver.SessionEntry.Restart != nil {
+		t.Errorf("restart leaked from the receiver: %+v", fromReceiver.SessionEntry)
+	}
+	if fromOther.SessionEntry.Start[0] != "zsh" {
+		t.Errorf("the rest of [session-entry] must still merge: %+v", fromOther.SessionEntry)
+	}
+	if withRestart.SessionEntry.Restart == nil {
+		t.Error("the receiver's own table was mutated")
+	}
+}
+
 // forge-hosts is an override array: nil inherits, a non-empty list replaces
 // (never appends to) the inherited one, and an explicit [] clears it.
 func TestMergeWithAuthForgeHostsOverride(t *testing.T) {

@@ -73,6 +73,17 @@ type SessionEntry struct {
 	// with (FDR 0034); an explicit spawn-session `profile` parameter overrides
 	// it per call. Scalar override down the cascade; "" = no default profile.
 	SpawnProfile string `toml:"spawn-profile"`
+	// Restart is the hand-off argv restart-this-session / restart-child-session
+	// exec to ask the harness frontend to stop and relaunch a session (#419):
+	// spinclass authorizes, refuses and records, the frontend performs.
+	// {principal}, {session-key}, {when} and {reason} are substituted per
+	// element. Trusted only from layers above the repo, read live at restart
+	// time and never pinned into session state: a restart command is code
+	// spinclass runs, so a value the agent can write into its own repo's
+	// sweatfile must not choose it. Read ONLY through
+	// sweatfileio.TrustedRestartHandoff; MergeWith never carries it. An explicit
+	// [] in a later trusted layer clears an inherited one.
+	Restart []string `toml:"restart"`
 }
 
 type Hooks struct {

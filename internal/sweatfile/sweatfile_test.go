@@ -1316,6 +1316,26 @@ func TestMergeSessionNilInherit(t *testing.T) {
 	}
 }
 
+// restart (#419) parses as an argv, and an explicit [] stays non-nil so a
+// trusted layer can clear an inherited hand-off.
+func TestParseSessionEntryRestart(t *testing.T) {
+	parse := func(body string) *SessionEntry {
+		t.Helper()
+		doc, err := sweatfileio.Parse([]byte(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return doc.Data().SessionEntry
+	}
+	got := parse("[session-entry]\nrestart = [\"clown\", \"restart\", \"--session\", \"{principal}\"]\n")
+	if got == nil || len(got.Restart) != 4 || got.Restart[0] != "clown" || got.Restart[3] != "{principal}" {
+		t.Errorf("Restart = %+v, want [clown restart --session {principal}]", got)
+	}
+	if cleared := parse("[session-entry]\nrestart = []\n"); cleared == nil || cleared.Restart == nil || len(cleared.Restart) != 0 {
+		t.Errorf("an explicit [] must parse to an empty non-nil slice, got %+v", cleared)
+	}
+}
+
 func TestParseSessionEntrySpawnEntry(t *testing.T) {
 	input := `
 [session-entry]
