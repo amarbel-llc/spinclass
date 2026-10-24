@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -911,6 +912,41 @@ func TestResolveHookDirClearsStaleDir(t *testing.T) {
 	// The returned dir must be a usable worktree (has a .git file).
 	if _, err := os.Stat(filepath.Join(buildPath2, ".git")); err != nil {
 		t.Errorf("expected usable build worktree at %q: %v", buildPath2, err)
+	}
+}
+
+// #350: the stale dir at buildPath may still be a live process's cwd (a hook
+// grandchild of an earlier run under a reused pid). resolveHookDir must refuse,
+// naming the pid, rather than delete the directory under it.
+func TestResolveHookDirRefusesAStaleDirThatALiveProcessIsIn(t *testing.T) {
+	_, _, wtPath := setupRepoWithWorktree(t, "feature-occupied")
+	hookSha := runGit(t, wtPath, "rev-parse", "HEAD")
+
+	buildPath, cleanup, err := resolveHookDir(sweatfile.Hierarchy{}, wtPath, "feature-occupied", hookSha)
+	if err != nil {
+		t.Fatalf("first resolveHookDir: %v", err)
+	}
+	cleanup()
+	if err := os.MkdirAll(buildPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	occupant := exec.Command("sleep", "60")
+	occupant.Dir = buildPath
+	if err := occupant.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = occupant.Process.Kill(); _ = occupant.Wait() }()
+
+	_, cleanup2, err := resolveHookDir(sweatfile.Hierarchy{}, wtPath, "feature-occupied", hookSha)
+	if err == nil {
+		cleanup2()
+		t.Fatal("resolveHookDir must refuse a stale dir a live process is in")
+	}
+	if pid := strconv.Itoa(occupant.Process.Pid); !strings.Contains(err.Error(), pid) {
+		t.Errorf("refusal %q should name the occupying pid %s", err, pid)
+	}
+	if _, statErr := os.Stat(buildPath); statErr != nil {
+		t.Fatalf("occupied stale dir must survive: %v", statErr)
 	}
 }
 

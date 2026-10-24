@@ -21,6 +21,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/merge"
 	"code.linenisgreat.com/spinclass/internal/nixgc"
+	"code.linenisgreat.com/spinclass/internal/proccwd"
 	"code.linenisgreat.com/spinclass/internal/profilerights"
 	"code.linenisgreat.com/spinclass/internal/session"
 	gitstore "code.linenisgreat.com/spinclass/internal/store/git"
@@ -490,8 +491,13 @@ func pidFromTransientWorktreeName(name string) (int, bool) {
 // removeOrphanTransientWorktree force-removes one orphaned transient worktree and
 // prunes the repo's stale admin entries. Best-effort: force-remove the git
 // worktree (clears the registration if any), then RemoveAll the physical dir
-// in case it was unregistered (the crash-orphan case), then prune.
+// in case it was unregistered (the crash-orphan case), then prune. A dir that is
+// still some live process's cwd (a hook grandchild that outlived its merge) is
+// refused with a *proccwd.InUseError and left whole (#350).
 func removeOrphanTransientWorktree(o orphanTransientWorktree) error {
+	if err := proccwd.RefuseIfInUse(o.path); err != nil {
+		return err
+	}
 	// ForceRemove clears the git admin entry (and the dir, if it was a
 	// registered worktree); ignored because a crash-orphan is typically
 	// unregistered. RemoveAll then guarantees the physical dir is gone — a
@@ -762,6 +768,15 @@ func executeClean(tw *tap.Writer, actions []cleanAction, abandoned []session.Sta
 		pruned := 0
 		for _, o := range orphans {
 			if err := removeOrphanTransientWorktree(o); err != nil {
+				var inUse *proccwd.InUseError
+				if errors.As(err, &inUse) {
+					if tw != nil {
+						tw.Skip("prune orphaned transient worktree "+o.name, inUse.Error())
+					} else {
+						log.Warn("skipping orphaned transient worktree in use", "name", o.name, "pids", inUse.Pids)
+					}
+					continue
+				}
 				if tw != nil {
 					tw.NotOk("prune orphaned transient worktree "+o.name, map[string]string{
 						"error": err.Error(),

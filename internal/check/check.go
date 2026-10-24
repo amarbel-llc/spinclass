@@ -23,6 +23,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/landing"
 	"code.linenisgreat.com/spinclass/internal/madder"
 	"code.linenisgreat.com/spinclass/internal/present"
+	"code.linenisgreat.com/spinclass/internal/proccwd"
 	"code.linenisgreat.com/spinclass/internal/statsd"
 	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
@@ -337,7 +338,12 @@ func resolveHookDir(hierarchy sweatfile.Hierarchy, wtPath, branch, hookSha strin
 	// stale tree) is propagated rather than swallowed — otherwise buildPath
 	// survives and the add below fails with a confusing "already exists" that
 	// hides the real cause, violating this function's no-silent-degradation
-	// principle.
+	// principle. A stale dir that is still a live process's cwd (a hook
+	// grandchild of an earlier run under a reused pid) is refused instead of
+	// deleted from under it (#350).
+	if err := proccwd.RefuseIfInUse(buildPath); err != nil {
+		return "", noop, fmt.Errorf("stale build worktree dir: %w", err)
+	}
 	if err := os.RemoveAll(buildPath); err != nil {
 		return "", noop, fmt.Errorf("remove stale build worktree dir %s: %w", buildPath, err)
 	}
