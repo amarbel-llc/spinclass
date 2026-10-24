@@ -217,6 +217,22 @@ func DirtyTrackedPaths(path string) ([]string, error) {
 	return paths, nil
 }
 
+// IntentToAddPaths returns the files staged intent-to-add (`git add -N`): the
+// only index entries an index-to-worktree diff can report as added.
+func IntentToAddPaths(path string) ([]string, error) {
+	out, err := RunStdin(path, "", "diff", "--name-only", "-z", "--diff-filter=A")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, p := range strings.Split(string(out), "\x00") {
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
+}
+
 // AddedOrRemovedPaths returns the paths present in exactly one of the commits
 // from and to (renames count as one removal and one addition), or nil when the
 // two commits track the same set of paths.

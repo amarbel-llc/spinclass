@@ -28,20 +28,26 @@ func autostash(ts *crap.TestStream, wtPath, branch string) (restore func(), err 
 	if len(dirty) == 0 {
 		return func() {}, nil
 	}
+	// The shelf brings an intent-to-add file back untracked, which a nix build
+	// of the dirty tree would then miss (#418); mark them again after restore.
+	intentToAdd, err := git.IntentToAddPaths(wtPath)
+	if err != nil {
+		return nil, failStep(ts, "autostash "+branch, err, "")
+	}
 	shelf := gitstore.NewShelf()
 	entry, err := shelf.Save(wtPath, store.ShelfSaveRequest{Message: autostashMessage})
 	if err != nil {
 		return nil, failStep(ts, "autostash "+branch, err, "")
 	}
 	ts.Ok(fmt.Sprintf("autostash %s: %s as stash entry %d", branch, describePaths(dirty), entry.ID))
-	return func() { restoreAutostash(ts, shelf, wtPath, branch, entry.ID, dirty) }, nil
+	return func() { restoreAutostash(ts, shelf, wtPath, branch, entry.ID, dirty, intentToAdd) }, nil
 }
 
 // restoreAutostash applies the merge's own shelf entry (by ID, so an entry made
 // meanwhile is never taken for it) and drops it. A conflicting apply keeps the
 // entry and says how to recover; the merge goes on, since the commit it lands
 // is already pinned or the merge has already failed for its own reason.
-func restoreAutostash(ts *crap.TestStream, shelf gitstore.Shelf, wtPath, branch string, id int, paths []string) {
+func restoreAutostash(ts *crap.TestStream, shelf gitstore.Shelf, wtPath, branch string, id int, paths, intentToAdd []string) {
 	label := "restore autostash " + branch
 	ref := strconv.Itoa(id)
 	if _, err := shelf.Apply(wtPath, ref); err != nil {
@@ -57,6 +63,13 @@ func restoreAutostash(ts *crap.TestStream, shelf gitstore.Shelf, wtPath, branch 
 	if _, err := shelf.Drop(wtPath, ref); err != nil {
 		ts.Skip(label, fmt.Sprintf("restored %s but could not drop stash entry %d: %v; grit_stash drop stash_ref=%d", describePaths(paths), id, err, id))
 		return
+	}
+	if len(intentToAdd) > 0 {
+		if _, err := git.Run(wtPath, append([]string{"add", "-N", "--"}, intentToAdd...)...); err != nil {
+			ts.Skip(label, fmt.Sprintf("restored %s but could not mark %s intent-to-add again: %v; git add -N them, or a nix build of this tree will miss them",
+				describePaths(paths), strings.Join(intentToAdd, ", "), err))
+			return
+		}
 	}
 	ts.Ok(label + ": " + describePaths(paths))
 }

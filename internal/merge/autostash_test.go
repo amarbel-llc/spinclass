@@ -137,6 +137,35 @@ func TestMergeAutostashKeepsUncommittedEditsOutOfRepair(t *testing.T) {
 	}
 }
 
+// #418: a file staged intent-to-add (`git add -N`, which nix builds of a dirty
+// tree need) used to stop the rebase with "Cannot autostash"; the merge must
+// land and the file come back, still intent-to-add.
+func TestMergeAutostashCarriesAnIntentToAddFile(t *testing.T) {
+	repoDir, wtPath := autostashRepo(t)
+	writeFile(t, wtPath, "new_test.go", "package x")
+	runGit(t, wtPath, "add", "-N", "new_test.go")
+
+	recs, err := runResolved(t, &mockExecutor{}, repoDir, wtPath, "feat", "main", false, true)
+	if err != nil {
+		t.Fatalf("merge failed: %v (points %v)", err, testDescs(testRecords(recs)))
+	}
+	if log := runGit(t, repoDir, "log", "--oneline", "main"); !strings.Contains(log, "work") {
+		t.Errorf("the merge did not land: %s", log)
+	}
+	if files := runGit(t, repoDir, "show", "--name-only", "--format=", "main"); strings.Contains(files, "new_test.go") {
+		t.Errorf("the intent-to-add file was committed: %s", files)
+	}
+	if got := readFile(t, wtPath, "new_test.go"); got != "package x" {
+		t.Errorf("new_test.go = %q, want it back", got)
+	}
+	if tracked := runGit(t, wtPath, "ls-files", "--", "new_test.go"); tracked != "new_test.go" {
+		t.Errorf("new_test.go is no longer intent-to-add (ls-files %q)", tracked)
+	}
+	if n := shelfCount(t, wtPath); n != 0 {
+		t.Errorf("%d shelf entries left", n)
+	}
+}
+
 // A clean worktree emits no autostash points at all.
 func TestMergeWithACleanWorktreeDoesNotAutostash(t *testing.T) {
 	repoDir, wtPath := autostashRepo(t)
