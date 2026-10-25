@@ -340,7 +340,11 @@ debug-dagnabit-move-level level:
           git init -q . && git add -A
           dagnabit -initial -n internal > $TMPDIR/plan.ndjson
           cat $TMPDIR/plan.ndjson >&2
-          jq -r --arg lvl ${level} 'select(.event == "would-move") | select(.dst | startswith("internal/" + $lvl + "/")) | "\(.src) \(.dst)"' $TMPDIR/plan.ndjson > $TMPDIR/moves
+          # Never a level directory itself: on a partly tiered tree -initial
+          # trims internal/0/<pkg> to the node internal/0 and plans
+          # `internal/0 -> internal/0/0` (purse-first#220); only a flat
+          # internal/<pkg> source (two path components) is a package move.
+          jq -r --arg lvl ${level} 'select(.event == "would-move") | select(.dst | startswith("internal/" + $lvl + "/")) | select(.src | split("/") | length == 2) | select(.src | test("^internal/(0|alfa|bravo|charlie|delta|echo|foxtrot)$") | not) | "\(.src) \(.dst)"' $TMPDIR/plan.ndjson > $TMPDIR/moves
           [ -s $TMPDIR/moves ] || { echo "no moves planned into internal/${level}/" >&2; exit 1; }
           while read -r src dst; do
             echo "moving $src -> $dst" >&2
@@ -412,6 +416,42 @@ explore-dagnabit-plan mode='initial':
     in check.passthru.codegenPatch
     EOF
     nix build --impure --no-link --print-build-logs --expr "$expr" 2>&1 | grep -F '{"' || true
+
+# [explore] Report which of the given repo paths exist in godyn's rendered
+# module tree (the src codegenCheck/codegenPatch run in), and how many .go and
+# _test.go files it holds per top directory. Tests purse-first#220's theory that
+# the dagnabit level moves missed imports in files absent from that tree. A
+# time nonce defeats the cache so every run prints.
+#
+# list which paths godyn's rendered codegenCheck tree contains
+[group('explore')]
+explore-codegen-src paths="cmd/spinclass/close_child_cmd.go cmd/spinclass/resurrect_cmd.go internal/foxtrot/resurrect/resurrect_test.go":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export CODEGEN_PATHS={{ quote(paths) }} CODEGEN_TOP="$(git rev-parse --show-toplevel)"
+    read -r -d '' expr <<'EOF' || true
+    let
+      f = builtins.getFlake "git+file:${builtins.getEnv "CODEGEN_TOP"}";
+      s = builtins.currentSystem;
+      check = f.packages.${s}.default.passthru.codegenCheck {
+        command = ''
+          for p in ${builtins.getEnv "CODEGEN_PATHS"}; do
+            if [ -e "$p" ]; then echo "SRC present $p" >&2; else echo "SRC MISSING $p" >&2; fi
+          done
+          for d in cmd internal; do
+            echo "SRC count $d go=$(find $d -name '*.go' ! -name '*_test.go' | wc -l) test=$(find $d -name '*_test.go' | wc -l)" >&2
+          done
+          # ${toString builtins.currentTime}
+        '';
+      };
+    in check.passthru.codegenPatch
+    EOF
+    nix build --impure --no-link --print-build-logs --expr "$expr" 2>&1 | grep -F 'SRC ' || true
+    for d in cmd internal; do
+        printf 'GIT count %s go=%s test=%s\n' "$d" \
+            "$(git ls-files "$d" | grep '\.go$' | grep -vc '_test\.go$')" \
+            "$(git ls-files "$d" | grep -c '_test\.go$')"
+    done
 
 # [explore] Inspect nix-store --gc --print-roots output for entries pointing
 # into the spinclass repo. Used to investigate issue #67 — what does
