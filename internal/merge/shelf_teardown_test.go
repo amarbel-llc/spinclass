@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
-	"code.linenisgreat.com/spinclass/internal/store"
-	gitstore "code.linenisgreat.com/spinclass/internal/store/git"
+	"code.linenisgreat.com/spinclass/internal/alfa/store"
+	gitstore "code.linenisgreat.com/spinclass/internal/alfa/store/git"
 )
 
 // The stash shelf lives inside the worktree (FDR 0036 section 4), so a

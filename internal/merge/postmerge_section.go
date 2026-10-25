@@ -13,7 +13,7 @@ import (
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
-	"code.linenisgreat.com/spinclass/internal/landing"
+	"code.linenisgreat.com/spinclass/internal/alfa/landing"
 )
 
 // The post-merge section is everything a sweatfile says about what runs on the

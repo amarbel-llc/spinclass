@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"code.linenisgreat.com/spinclass/internal/store"
+	"code.linenisgreat.com/spinclass/internal/alfa/store"
 )
 
 const sessionBranch = "glad-buckeye"

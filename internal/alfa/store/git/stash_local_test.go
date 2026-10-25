@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"code.linenisgreat.com/spinclass/internal/store"
+	"code.linenisgreat.com/spinclass/internal/alfa/store"
 )
 
 // stashLocalFixture is confinedFixture with a tracked file committed in the

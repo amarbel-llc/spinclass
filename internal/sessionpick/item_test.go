@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 )
 
 // fixture returns a State whose worktree dir exists (so ResolveState

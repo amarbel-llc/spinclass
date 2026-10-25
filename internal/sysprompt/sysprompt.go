@@ -14,7 +14,7 @@
 // checkout has no executor, so coordinates come from cwd + git instead.
 //
 // Both shapes additionally carry a best-effort repository line (provider,
-// owner, link, description) resolved by internal/repoinfo from the git remote
+// owner, link, description) resolved by internal/alfa/repoinfo from the git remote
 // plus a bounded live forge lookup (papi for the forge kind, gh / the
 // Gitea-Forgejo API for the description). The lookup is deadline-capped
 // (repoFetchTimeout) so it can never stall the pre-initialize prompts/get, and
@@ -33,8 +33,8 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/0/clown"
 	"code.linenisgreat.com/spinclass/internal/0/git"
-	"code.linenisgreat.com/spinclass/internal/repoinfo"
-	"code.linenisgreat.com/spinclass/internal/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/alfa/repoinfo"
+	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 )
 
 // repoFetchTimeout bounds the live forge enrichment (papi/gh/HTTP) so the

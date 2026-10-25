@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/confinement"
-	"code.linenisgreat.com/spinclass/internal/session"
 )
 
 // fakeProc stands in for /proc, a state dir and the signal; alive lists the

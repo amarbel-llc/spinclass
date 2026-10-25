@@ -25,7 +25,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/0/safeio"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
-	"code.linenisgreat.com/spinclass/internal/direnv"
+	"code.linenisgreat.com/spinclass/internal/alfa/direnv"
 )
 
 // Setup applies sf (merged with the built-in defaults) to worktreePath: Claude

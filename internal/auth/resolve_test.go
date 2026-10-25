@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 )
 
 const vanityResolver = `printf '%s' '{"canonical_https":"https://vanity.example.com/repo.git","canonical_ssh":"ssh://git@vanity.example.com/repo.git","owner":"x"}'`

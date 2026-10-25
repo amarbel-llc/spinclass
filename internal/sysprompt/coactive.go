@@ -3,7 +3,7 @@ package sysprompt
 import (
 	"path/filepath"
 
-	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 )
 
 // loadCoActiveLine is the production co-active-sessions loader (spinclass#238):

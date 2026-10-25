@@ -8,8 +8,8 @@ import (
 	"fmt"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/resurrect"
-	"code.linenisgreat.com/spinclass/internal/session"
 )
 
 // resurrectParams is the parameter set of the `resurrect` tool (#291): the

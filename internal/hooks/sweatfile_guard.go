@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"code.linenisgreat.com/spinclass/internal/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 )
 
 // The sweatfile-edit guard: a Write/Edit of a sweatfile asks by default, and

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"code.linenisgreat.com/spinclass/internal/store"
+	"code.linenisgreat.com/spinclass/internal/alfa/store"
 )
 
 // runGritPermsWith drives `sc grit-perms` with stdin as the invocation JSON and

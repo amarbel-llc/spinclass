@@ -46,7 +46,7 @@ re-run that suite right before merging.
   Claude trust; `Attach()` = Create + session state + `Executor`; `Fork()`.
 - **Executor** (`internal/executor/`): `SessionExecutor` (prod, SIGHUP
   forwarding), `ShellExecutor` (merge), `mockExecutor` (tests).
-- **Session state** (`internal/session/`): authoritative frontend record
+- **Session state** (`internal/alfa/session/`): authoritative frontend record
   `$XDG_STATE_HOME/spinclass/records/<hash>.json` (FDR 0035); the worktree's
   `.spinclass/state.json` is a display-only mirror; `active`/`inactive`/
   `abandoned`, dirty computed live.
@@ -121,7 +121,7 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
   lifecycle** (FDR 0007, #219, `internal/attestation`).
 - **No implicit-session merge** (#317): refused before any gate; `sc check`
   still works.
-- **Async merge/check** (`internal/job`, FDR 0010, FDR 0025): registered only
+- **Async merge/check** (`internal/alfa/job`, FDR 0010, FDR 0025): registered only
   under clown; an async job IS a ringmaster job (#243). **Default to the
   synchronous tools**; never hot-poll. A second async merge enqueues (#265,
   `[hooks].disable-merge-stacking`). Liveness flock, ProtocolVersion gate,
@@ -130,11 +130,11 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
 - **Dynamic system-prompt fragment** (`internal/sysprompt`; FDR 0021, FDR 0030,
   #187): `serve` answers `prompts/get`; the fetch is **deadline-capped**
   (`repoFetchTimeout` 2s) and must never block. Trailers: repository line
-  (`internal/repoinfo`), forge workflow, co-active sessions (#238), design
+  (`internal/alfa/repoinfo`), forge workflow, co-active sessions (#238), design
   records, optional manpage/repo indexes (`[sysprompt]`).
 - **Pre-merge build worktree** (FDR 0013) → **merge queue** (FDR 0022, #235) →
   **detached landing worktree / Alt B** (FDR 0029, #284) → **landing target**
-  (#315/#295, `internal/landing`; merges read the remote tracking ref, never
+  (#315/#295, `internal/alfa/landing`; merges read the remote tracking ref, never
   local `<default>`) → **post-merge** (FDR 0023, #244) with named targets +
   verify (FDR 0026, #273; config read at the LANDED sha, #300). Local-default
   caveats: `spinclass-local-default-ref(7)`.
@@ -148,14 +148,14 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
 - **Base-branch freshening** (FDR 0024, #250, `internal/basebranch`): fresh
   sessions cut from the fetched remote default; `--allow-stale-base` has
   deliberately **no MCP parameter**.
-- **Setup staleness & `sc rebuild`** (`internal/setupfingerprint`):
+- **Setup staleness & `sc rebuild`** (`internal/alfa/setupfingerprint`):
   fingerprint recorded in session state; setup applies once at `sc start`.
   Limitation: external-tool *version* drift behind an unchanged command is
   undetected. See `spinclass-sweatfile(5)`.
 - **`sc exec`, multi-target close, nix gc on close/clean**:
   `spinclass-internals(7)`, `spinclass-sweatfile(5)` (`disable-nix-gc`).
 - **Metrics** (`internal/0/statsd`, #363): `spinclass-local-default-ref(7)`.
-- **Grit store tools** (FDR 0036, #379; `internal/store`, `internal/store/git`,
+- **Grit store tools** (FDR 0036, #379; `internal/alfa/store`, `internal/alfa/store/git`,
   `cmd/spinclass/grit*_cmd.go`): the nine `grit_*` MCP tools, their
   ownership-based verdicts, agentless remote lane and the `sc grit` escape
   hatch: `spinclass-grit(7)`; `[store]` identity: `spinclass-sweatfile(5)`.

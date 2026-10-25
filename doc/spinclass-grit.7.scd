@@ -12,8 +12,8 @@ spinclass serves nine git tools as MCP tools, named *grit\_stage*,
 and argument shapes are those of moxy's grit moxin; only the qualified MCP name
 differs. They replace moxy's per-tool permission annotations with a model that
 knows which session, worktree and branch the caller owns. Design record: FDR
-0036 (*docs/features/0036-grit-store-tools.md*). Code: *internal/store* (the
-backend-neutral layer), *internal/store/git* (the git backend) and
+0036 (*docs/features/0036-grit-store-tools.md*). Code: *internal/alfa/store* (the
+backend-neutral layer), *internal/alfa/store/git* (the git backend) and
 *cmd/spinclass/grit\_cmd.go*.
 
 The tools run in the frontend *spinclass serve*, not in the caller. For a
@@ -179,7 +179,7 @@ Remote talk about the session's own refs is Allow for an unconfined session
 (FDR 0036). A stricter policy for confined and profile-gated sessions (no remote
 access by default, except rebasing against upstream) is planned but not built;
 it would hook in at the body's confined check, *refuseUnownedForConfined* in
-*internal/store/git/confined.go*, where the confined column is enforced.
+*internal/alfa/store/git/confined.go*, where the confined column is enforced.
 
 # CONFINED, UNCONFINED AND NO-SESSION CALLERS
 

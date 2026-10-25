@@ -33,7 +33,7 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/0/clown"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
-	"code.linenisgreat.com/spinclass/internal/direnv"
+	"code.linenisgreat.com/spinclass/internal/alfa/direnv"
 )
 
 // Create runs the [hooks].create command in worktreePath.

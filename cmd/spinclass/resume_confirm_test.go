@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 )
 
 // TestResumeConfirmPlan tables the confirmation decision: which dialog

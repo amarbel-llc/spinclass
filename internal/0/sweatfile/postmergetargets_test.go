@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	. "code.linenisgreat.com/spinclass/internal/0/sweatfile"
-	"code.linenisgreat.com/spinclass/internal/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 )
 
 // A top-level [[post-merge]] array decodes to named targets with an optional

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"code.linenisgreat.com/spinclass/internal/store"
+	"code.linenisgreat.com/spinclass/internal/alfa/store"
 )
 
 // Two sessions in one repo. W1's admin dir commondir is planted to name a

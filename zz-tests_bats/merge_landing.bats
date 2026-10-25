@@ -6,7 +6,7 @@
 # branch is fast-forwarded opportunistically — a refusal is a SKIP that says the
 # merge LANDED, never a failed merge). FDR 0029 (revised).
 #
-# internal/landing and internal/merge's Go tests own the policy matrix; these
+# internal/alfa/landing and internal/merge's Go tests own the policy matrix; these
 # own the wiring through the real `sc` binary against a real bare origin. Every
 # other bats merge runs --local-only, so this file is the only end-to-end cover
 # for the default merge path.

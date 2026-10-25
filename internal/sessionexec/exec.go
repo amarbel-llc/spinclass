@@ -17,8 +17,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"code.linenisgreat.com/spinclass/internal/direnv"
-	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/alfa/direnv"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 )
 
 // Run resolves a spinclass session and execs util in its worktree,

@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
-	"code.linenisgreat.com/spinclass/internal/store"
+	"code.linenisgreat.com/spinclass/internal/alfa/store"
 )
 
 // ownershipSeparator joins a session branch to a topic suffix; generated

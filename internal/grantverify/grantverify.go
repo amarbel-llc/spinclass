@@ -12,7 +12,7 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/0/sshsig"
 	"code.linenisgreat.com/spinclass/internal/0/trustedhome"
-	"code.linenisgreat.com/spinclass/internal/operatoract"
+	"code.linenisgreat.com/spinclass/internal/alfa/operatoract"
 	"golang.org/x/crypto/ssh"
 )
 

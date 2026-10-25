@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/merge"
-	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 

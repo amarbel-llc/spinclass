@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
-	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 
@@ -55,7 +55,7 @@ func TestRunUpdateDescriptionHealsUntrackedWorktree(t *testing.T) {
 }
 
 // remoteCannedJSON is the wire payload the healthy stub host serves —
-// the session.ListRow array shape locked by internal/session's tests.
+// the session.ListRow array shape locked by internal/alfa/session's tests.
 const remoteCannedJSON = `[{"id":"crisp-catalpa","session_key":"spinclass/crisp-catalpa","state":"active","description":"fix login bug","repo":"spinclass"},{"id":"molten-mango","session_key":"clown/molten-mango","state":"inactive","description":"","repo":"clown"}]`
 
 // stubSSHPerDest writes an executable `ssh` script into a temp dir
@@ -321,7 +321,7 @@ func TestRunListResultTextSpawnedByAnnotation(t *testing.T) {
 
 // TestRunListResultTextHoldersAnnotation covers the positive-holder-count
 // case of the FDR 0032 D12 suffix (TestRunListResultTextSpawnedByAnnotation
-// above covers the legacy spawned-by-only case, and internal/session's
+// above covers the legacy spawned-by-only case, and internal/alfa/session's
 // TestListRowsCarriesHolders the orphan predicate): a session with an
 // accepted holder gets a trailing `holders:<n>`, not `orphan`.
 func TestRunListResultTextHoldersAnnotation(t *testing.T) {

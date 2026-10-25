@@ -12,11 +12,11 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/0/madder"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/alfa/dodder"
+	"code.linenisgreat.com/spinclass/internal/alfa/setupfingerprint"
+	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/apply"
-	"code.linenisgreat.com/spinclass/internal/dodder"
 	"code.linenisgreat.com/spinclass/internal/hookrun"
-	"code.linenisgreat.com/spinclass/internal/setupfingerprint"
-	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 )
 
 const WorktreesDir = ".worktrees"

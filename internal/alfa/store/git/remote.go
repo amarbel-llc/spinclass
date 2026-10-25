@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
-	"code.linenisgreat.com/spinclass/internal/store"
+	"code.linenisgreat.com/spinclass/internal/alfa/store"
 )
 
 // talksToRemote is true for the verbs that contact a remote. They run through

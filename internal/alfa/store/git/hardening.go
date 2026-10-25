@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
-	"code.linenisgreat.com/spinclass/internal/store"
+	"code.linenisgreat.com/spinclass/internal/alfa/store"
 )
 
 // confinedHardening is how the frontend runs git for a confined caller (FDR

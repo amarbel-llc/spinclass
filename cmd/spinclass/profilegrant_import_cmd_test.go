@@ -13,7 +13,7 @@ import (
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/server"
 	"code.linenisgreat.com/spinclass/internal/0/profilegrant"
-	"code.linenisgreat.com/spinclass/internal/grantstore"
+	"code.linenisgreat.com/spinclass/internal/alfa/grantstore"
 	"golang.org/x/crypto/ssh"
 )
 

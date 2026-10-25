@@ -12,7 +12,7 @@ import (
 // Returns the repo root.
 //
 // It lives here, not in internal/worktree, because it is pure path-walking
-// with no dependency on worktree setup: internal/session needs it to climb
+// with no dependency on worktree setup: internal/alfa/session needs it to climb
 // from a checkout subdirectory to the main-checkout root, and importing
 // worktree for that one call dragged the whole config-and-setup stack under
 // every package that touches session state (spinclass#307).

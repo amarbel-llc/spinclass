@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"code.linenisgreat.com/spinclass/internal/landing"
+	"code.linenisgreat.com/spinclass/internal/alfa/landing"
 )
 
 func mustGit(t *testing.T, dir string, args ...string) string {

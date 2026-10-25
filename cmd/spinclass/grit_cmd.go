@@ -13,12 +13,12 @@ import (
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
 	"code.linenisgreat.com/spinclass/internal/0/git"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
+	"code.linenisgreat.com/spinclass/internal/alfa/store"
+	gitstore "code.linenisgreat.com/spinclass/internal/alfa/store/git"
+	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/confinement"
-	"code.linenisgreat.com/spinclass/internal/session"
-	"code.linenisgreat.com/spinclass/internal/store"
-	gitstore "code.linenisgreat.com/spinclass/internal/store/git"
-	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 )
 
 // gritBackend is the store backend behind the grit_* tools (FDR 0036). The

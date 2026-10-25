@@ -164,7 +164,7 @@
     # papi: the Personal API CLI. Pinned into spinclass via
     # `mkSpinclass { papi = ...; }` and burned into the default build's
     # binary (-X main.papiBin). The dynamic system-prompt fragment
-    # (internal/repoinfo) shells out to it to resolve the forge kind of a
+    # (internal/alfa/repoinfo) shells out to it to resolve the forge kind of a
     # non-github.com remote against the operator's published PAPI forges.
     # gh (the other repo-line dependency) is not a standalone flake — it
     # is pinned from nixpkgs-master (`pkgs-master.gh`).
@@ -388,7 +388,7 @@
         # Pins (all fall back to PATH when null): `madder` activates the
         # per-worktree blob-store flow; `direnv` the devshell exec; `dodder` the
         # per-worktree dodder repo (FDR 0008); `papi`/`gh` the dynamic
-        # system-prompt repository line (internal/repoinfo).
+        # system-prompt repository line (internal/alfa/repoinfo).
         mkSpinclass =
           {
             strategy ? "ci",
@@ -422,7 +422,7 @@
 
             # Forge/tool pins as `-X main.*Bin` ldflags — buildGoAuto forwards
             # them to whichever backend builds. papi/gh drive the dynamic
-            # system-prompt repo line (internal/repoinfo); madder/direnv/dodder
+            # system-prompt repo line (internal/alfa/repoinfo); madder/direnv/dodder
             # gate the per-worktree blob-store / dodder flows. All fall back to
             # PATH when unpinned.
             ldflags = [
@@ -555,7 +555,7 @@
           );
 
         # papi/gh pins for the default build's dynamic system-prompt
-        # repository line (internal/repoinfo). Burned into the shipped
+        # repository line (internal/alfa/repoinfo). Burned into the shipped
         # binary so the forge lookup is deterministic; an unpinned build (e.g.
         # `.#spinclass-native`) falls back to PATH. gh comes from
         # nixpkgs-master, papi from its flake input.

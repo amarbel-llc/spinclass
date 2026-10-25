@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/auth"
-	"code.linenisgreat.com/spinclass/internal/session"
 )
 
 // setupSyncRepo builds a bare "origin" plus a clone acting as the repo's main

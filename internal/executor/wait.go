@@ -3,7 +3,7 @@ package executor
 import (
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 )
 
 // WaitForExit polls every 50ms until either the PID has exited (kill -0

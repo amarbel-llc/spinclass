@@ -8,8 +8,8 @@ import (
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 	"code.linenisgreat.com/spinclass/internal/0/git"
-	"code.linenisgreat.com/spinclass/internal/store"
-	gitstore "code.linenisgreat.com/spinclass/internal/store/git"
+	"code.linenisgreat.com/spinclass/internal/alfa/store"
+	gitstore "code.linenisgreat.com/spinclass/internal/alfa/store/git"
 )
 
 // autostashMessage labels the shelf entries a merge makes, so a kept one is

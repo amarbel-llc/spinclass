@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
-	"code.linenisgreat.com/spinclass/internal/repoinfo"
+	"code.linenisgreat.com/spinclass/internal/alfa/repoinfo"
 )
 
 // envFunc builds a getenv stub from a map.

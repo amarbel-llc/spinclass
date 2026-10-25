@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"code.linenisgreat.com/spinclass/internal/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 )
 
 func writeSweatfileAt(t *testing.T, path, body string) {

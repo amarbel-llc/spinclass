@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/alfa/job"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/confinement"
-	"code.linenisgreat.com/spinclass/internal/job"
-	"code.linenisgreat.com/spinclass/internal/session"
 )
 
 // restartHandoffTOML is the trusted-layer hand-off every test that expects a

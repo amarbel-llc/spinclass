@@ -10,7 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"code.linenisgreat.com/purse-first/libs/dewey/pkgs/mesa"
-	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 )
 
 // TestListRenderMode locks the CLI render-mode decision: --watch wins over

@@ -13,10 +13,10 @@ import (
 
 	"code.linenisgreat.com/clown/pkg/profilelookup"
 	"code.linenisgreat.com/spinclass/internal/0/profilegrant"
-	"code.linenisgreat.com/spinclass/internal/grantstore"
+	"code.linenisgreat.com/spinclass/internal/alfa/grantstore"
+	"code.linenisgreat.com/spinclass/internal/alfa/operatoract"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/grantverify"
-	"code.linenisgreat.com/spinclass/internal/operatoract"
-	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/spawn"
 )
 

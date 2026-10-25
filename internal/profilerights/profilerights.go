@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/0/profilegrant"
-	"code.linenisgreat.com/spinclass/internal/grantstore"
+	"code.linenisgreat.com/spinclass/internal/alfa/grantstore"
 	"code.linenisgreat.com/spinclass/internal/grantverify"
 	"golang.org/x/crypto/ssh"
 )

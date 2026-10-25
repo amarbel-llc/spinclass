@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
-	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 )
 
 // xdgStateBase returns $XDG_STATE_HOME or its fallback. Mirrors the
-// unexported helper in internal/chat (itself mirroring internal/session)
+// unexported helper in internal/chat (itself mirroring internal/alfa/session)
 // so the remotes cache lands as a sibling of the session index under the
 // same root.
 func xdgStateBase() string {

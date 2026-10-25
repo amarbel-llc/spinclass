@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"code.linenisgreat.com/spinclass/internal/store"
-	gitstore "code.linenisgreat.com/spinclass/internal/store/git"
+	"code.linenisgreat.com/spinclass/internal/alfa/store"
+	gitstore "code.linenisgreat.com/spinclass/internal/alfa/store/git"
 	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 

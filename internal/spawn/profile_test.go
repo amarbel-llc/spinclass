@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/clown/pkg/profilelookup"
-	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 

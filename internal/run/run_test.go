@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
-	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 )
 
 // sc run's step must die when the run is cancelled (#188), otherwise the

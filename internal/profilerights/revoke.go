@@ -4,8 +4,8 @@ import (
 	"errors"
 	"io/fs"
 
+	"code.linenisgreat.com/spinclass/internal/alfa/grantstore"
 	"code.linenisgreat.com/spinclass/internal/confinement"
-	"code.linenisgreat.com/spinclass/internal/grantstore"
 )
 
 // RevokeSession drops the default grant store's binding for sessionKey, tying a

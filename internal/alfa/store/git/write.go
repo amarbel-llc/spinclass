@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
-	"code.linenisgreat.com/spinclass/internal/store"
+	"code.linenisgreat.com/spinclass/internal/alfa/store"
 )
 
 // refLikeValues are the arguments git could read as an option or revision; they

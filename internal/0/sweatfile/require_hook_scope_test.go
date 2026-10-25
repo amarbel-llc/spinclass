@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	. "code.linenisgreat.com/spinclass/internal/0/sweatfile"
-	"code.linenisgreat.com/spinclass/internal/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 )
 
 func TestRequireHookScopeDefaultsFalse(t *testing.T) {

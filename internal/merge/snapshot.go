@@ -4,8 +4,8 @@ import (
 	"os"
 
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
-	"code.linenisgreat.com/spinclass/internal/landing"
-	"code.linenisgreat.com/spinclass/internal/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/alfa/landing"
+	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 )
 
 // loadCommitHierarchy loads the sweatfile hierarchy with the repo layer taken

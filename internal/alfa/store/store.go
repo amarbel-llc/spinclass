@@ -1,7 +1,7 @@
 // Package store is the backend-neutral layer of the grit store tools (FDR
 // 0036): the verb vocabulary, the verb-class table that drives permission
 // classification, and the Backend interface a backing store implements. It
-// knows nothing about git; internal/store/git is the one backend.
+// knows nothing about git; internal/alfa/store/git is the one backend.
 package store
 
 import (

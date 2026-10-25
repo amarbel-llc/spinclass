@@ -835,7 +835,7 @@ func TestServeCheckThisSessionHiddenByDefault(t *testing.T) {
 }
 
 // The async lifecycle (start → succeed / fail / cancel → aborted, hook
-// subprocess kill) is covered at the unit level in internal/job (wake_test.go,
+// subprocess kill) is covered at the unit level in internal/alfa/job (wake_test.go,
 // job_test.go) with a stubbed ringmaster. The former serve-level async tests
 // were dropped in #23: the *-async tools are now registered only under clown,
 // so a clown-absent serve (as these tests ran) no longer registers them, and

@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
-	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 )
 
 // noHandleMessage renders the FDR 0032 D12/D13 refusal wording shared by

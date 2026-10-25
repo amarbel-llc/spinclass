@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"code.linenisgreat.com/spinclass/internal/store"
+	"code.linenisgreat.com/spinclass/internal/alfa/store"
 )
 
 // remoteFix is a confinedFixture whose main checkout has a bare "origin" on disk

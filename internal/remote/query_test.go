@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
-	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 )
 
 // stubSSH writes an executable `ssh` shell script into a temp dir prepended

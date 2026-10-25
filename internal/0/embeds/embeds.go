@@ -8,7 +8,7 @@
 // PATH lookup. See FDR 0003 (madder, direnv) and FDR 0008 (dodder).
 //
 // papiBin and ghBin pin the papi and gh binaries the dynamic
-// system-prompt fragment (internal/repoinfo, internal/sysprompt) shells
+// system-prompt fragment (internal/alfa/repoinfo, internal/sysprompt) shells
 // out to for forge-kind resolution and repo-description lookup. Empty
 // means "not pinned": callers fall back to a PATH lookup, so a devshell
 // `go build` (which sets no ldflags) still resolves papi/gh from PATH.
@@ -46,7 +46,7 @@ func SetForges(papi, gh string) {
 // SetVersion records the build-time spinclass version and commit (the
 // main.version/main.commit ldflags values). Kept separate from Set so the
 // pinned-binary callers stay untouched. Callers that need the values for the
-// setup fingerprint (internal/setupfingerprint) read them via Version/Commit;
+// setup fingerprint (internal/alfa/setupfingerprint) read them via Version/Commit;
 // tests may call SetVersion to override per-test.
 func SetVersion(v, c string) {
 	version = v

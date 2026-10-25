@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
-	"code.linenisgreat.com/spinclass/internal/store"
+	"code.linenisgreat.com/spinclass/internal/alfa/store"
 )
 
 // Shelf is the git backend's stash emulation (FDR 0036 section 4): one

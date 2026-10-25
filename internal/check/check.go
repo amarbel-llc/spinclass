@@ -23,10 +23,10 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/proccwd"
 	"code.linenisgreat.com/spinclass/internal/0/statsd"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/alfa/landing"
+	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/hookrun"
-	"code.linenisgreat.com/spinclass/internal/landing"
 	"code.linenisgreat.com/spinclass/internal/present"
-	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/tap/go/pkgs/ndjson"
 	"code.linenisgreat.com/tap/go/pkgs/reader"
 )

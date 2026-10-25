@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	gitpkg "code.linenisgreat.com/spinclass/internal/0/git"
-	"code.linenisgreat.com/spinclass/internal/store"
+	"code.linenisgreat.com/spinclass/internal/alfa/store"
 )
 
 func TestConfinedHardeningShape(t *testing.T) {

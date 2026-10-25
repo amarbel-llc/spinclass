@@ -16,8 +16,8 @@ import (
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/0/profilegrant"
+	"code.linenisgreat.com/spinclass/internal/alfa/operatoract"
 	"code.linenisgreat.com/spinclass/internal/grantverify"
-	"code.linenisgreat.com/spinclass/internal/operatoract"
 	"code.linenisgreat.com/spinclass/internal/spawn"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/term"

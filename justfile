@@ -352,6 +352,34 @@ debug-dagnabit-move-level level:
     git apply -p2 --index "$out/patch"
     git diff --cached --stat | tail -n 3
 
+# [debug] After debug-dagnabit-move-level, rewrite the non-Go references
+# (docs, manpages, recipes, flake comments, bats, Go comments) to the packages
+# that level just moved: the package list is read from the staged renames into
+# internal/<level>/, and every `internal/<pkg>` path naming one of them becomes
+# `internal/<level>/<pkg>`. FDRs, plans and epics keep the old paths as history
+# (#414 ruling). Prints the files it touched; the edits are staged.
+#
+# rewrite references to the packages one dagnabit level moved
+[group('debug')]
+debug-dagnabit-rewrite-refs level:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    level={{ quote(level) }}
+    mapfile -t pkgs < <(git diff --cached -M --name-status |
+        awk -v pre="internal/$level/" '$1 ~ /^R/ && index($3, pre) == 1 { split($2, a, "/"); print a[2] }' | sort -u)
+    [ "${#pkgs[@]}" -gt 0 ] || { echo "no staged renames into internal/$level/" >&2; exit 1; }
+    alt=$(IFS='|'; echo "${pkgs[*]}")
+    echo "packages: ${pkgs[*]}" >&2
+    # Symlinks are skipped: `sed -i` would replace the link (CLAUDE.md ->
+    # AGENTS.md) with a regular copy; their targets are rewritten directly.
+    mapfile -t files < <(git ls-files -s -- . ':!docs/features' ':!docs/plans' ':!docs/epics' |
+        awk '$1 != "120000" { sub(/^[^\t]*\t/, ""); print }' |
+        xargs grep -lE "(^|[^[:alnum:]_.-])internal/($alt)([^[:alnum:]_-]|$)" || true)
+    [ "${#files[@]}" -gt 0 ] || { echo "no references to rewrite" >&2; exit 0; }
+    sed -E -i "s#(^|[^[:alnum:]_.-])internal/($alt)([^[:alnum:]_-]|\$)#\1internal/$level/\2\3#g" "${files[@]}"
+    git add -- "${files[@]}"
+    printf '%s\n' "${files[@]}"
+
 # [explore] Print dagnabit's plan (one NDJSON would-move line per package) for
 # the internal/ tree, in godyn's rendered module tree (#414): `mode=initial`
 # runs `dagnabit -initial -n internal` (the flat-layout plan the per-level

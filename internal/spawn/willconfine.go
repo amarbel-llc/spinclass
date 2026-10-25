@@ -4,7 +4,7 @@ import (
 	"errors"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
-	"code.linenisgreat.com/spinclass/internal/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 )
 
 // ConfineRequest is what a spawn explicitly asks for about confinement.

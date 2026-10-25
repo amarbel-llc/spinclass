@@ -64,7 +64,7 @@ func registerServeCommand(app *command.App) {
 			// async wakes and cancel-observe are pure `ringmaster` CLI
 			// shell-outs, self-consistent with the running binary, so they keep
 			// working. It DOES disable the in-process liveness flock
-			// (internal/job consults the same memoized CheckProtocol), so warn
+			// (internal/alfa/job consults the same memoized CheckProtocol), so warn
 			// loudly here and via the system-prompt fragment. Silent on a clean
 			// match; only skew (or an old ringmaster with no `--protocol`)
 			// surfaces.

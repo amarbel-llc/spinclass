@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 )
 
 // writeSessionState fabricates an on-disk worktree session for repo/branch

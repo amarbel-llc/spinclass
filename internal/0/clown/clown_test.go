@@ -21,7 +21,7 @@ func stubRingmaster(t *testing.T, argsFile, stdout string, ok bool) string {
 		exit = "0"
 	}
 	// Append (>>) so a future multi-invocation test cannot silently lose
-	// earlier calls — same contract as internal/job's stub.
+	// earlier calls — same contract as internal/alfa/job's stub.
 	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + argsFile + "\n"
 	if stdout != "" {
 		body += "echo " + stdout + "\n"

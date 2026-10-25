@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 	"code.linenisgreat.com/tap/go/pkgs/yaml_diagnostic"
 )

@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
+	"code.linenisgreat.com/spinclass/internal/alfa/store"
+	gitstore "code.linenisgreat.com/spinclass/internal/alfa/store/git"
 	"code.linenisgreat.com/spinclass/internal/confinement"
-	"code.linenisgreat.com/spinclass/internal/session"
-	"code.linenisgreat.com/spinclass/internal/store"
-	gitstore "code.linenisgreat.com/spinclass/internal/store/git"
 )
 
 const gritToolPrefix = "mcp__plugin_spinclass_spinclass__grit_"

@@ -4,7 +4,7 @@
 // signals readiness to its driver by writing a small file keyed by the
 // (worker, driver) pair; the driver polls for it during launch.
 //
-// Deliberately stdlib-only — no chat, no clown, no internal/session import — so
+// Deliberately stdlib-only — no chat, no clown, no internal/alfa/session import — so
 // it is a leaf that both internal/hooks (the worker's SessionStart sender) and
 // internal/spawn (the driver's waiter) can depend on without an import cycle.
 package spawnhandshake
@@ -37,7 +37,7 @@ type hello struct {
 
 // xdgStateBase returns $XDG_STATE_HOME or its fallback, so the handshake dir
 // lands under the same root as the session index (and tests isolate it by
-// pinning XDG_STATE_HOME). Mirrors the unexported helper in internal/session;
+// pinning XDG_STATE_HOME). Mirrors the unexported helper in internal/alfa/session;
 // inlined to keep this package a stdlib-only leaf.
 func xdgStateBase() string {
 	if v := os.Getenv("XDG_STATE_HOME"); v != "" {

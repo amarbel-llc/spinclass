@@ -7,7 +7,7 @@ import (
 
 // LoadSource records one sweatfile in a resolved Hierarchy: where it was looked
 // for, whether it existed, its parsed contents, and (when deduplicated away) the
-// reason it was skipped. The hierarchy loaders live in internal/sweatfileio; the
+// reason it was skipped. The hierarchy loaders live in internal/alfa/sweatfileio; the
 // type stays here because it's the public shape callers consume.
 type LoadSource struct {
 	Path       string
@@ -17,7 +17,7 @@ type LoadSource struct {
 }
 
 // Hierarchy is the merged result of the sweatfile cascade plus the per-level
-// sources that produced it. Built by internal/sweatfileio's loaders.
+// sources that produced it. Built by internal/alfa/sweatfileio's loaders.
 type Hierarchy struct {
 	Sources []LoadSource
 	Merged  Sweatfile

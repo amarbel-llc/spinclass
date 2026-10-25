@@ -10,9 +10,9 @@ import (
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/0/clown"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	spinclose "code.linenisgreat.com/spinclass/internal/close"
 	"code.linenisgreat.com/spinclass/internal/servelog"
-	"code.linenisgreat.com/spinclass/internal/session"
 )
 
 // emitExitWakesFn is a package-level seam over clown.EmitExitWakes (FDR 0032

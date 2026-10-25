@@ -12,7 +12,7 @@
 //
 // Freshen is the answer: resolve the default branch, fetch it, and return the
 // fetched remote tip as the start-point — the same landing target a merge
-// from the session will land on (internal/landing, #315). The local default
+// from the session will land on (internal/alfa/landing, #315). The local default
 // branch is then fast-forwarded opportunistically, for ergonomics only: a
 // local branch that is ahead, diverged, or blocked by a dirty checkout is a
 // reported skip, never a reason to refuse the session. Only a base that could
@@ -32,7 +32,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
-	"code.linenisgreat.com/spinclass/internal/landing"
+	"code.linenisgreat.com/spinclass/internal/alfa/landing"
 )
 
 // ErrStaleBase reports that the default branch could not be verified current

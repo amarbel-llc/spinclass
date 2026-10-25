@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
-	gitstore "code.linenisgreat.com/spinclass/internal/store/git"
+	gitstore "code.linenisgreat.com/spinclass/internal/alfa/store/git"
 )
 
 // autostashRepo is a repo whose session worktree "feat" has one commit ahead

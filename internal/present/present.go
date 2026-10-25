@@ -13,7 +13,7 @@ import (
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
 	"code.linenisgreat.com/crap/go-crap/v2/viewport"
-	"code.linenisgreat.com/spinclass/internal/session"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 )
 
 // Resolved format names. "auto" and "" resolve to viewport on a TTY and
