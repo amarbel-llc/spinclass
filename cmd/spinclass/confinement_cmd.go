@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
-	"code.linenisgreat.com/spinclass/internal/confinement"
+	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 )
 
 // confinementCheckOut is the command's output stream (a seam for tests).

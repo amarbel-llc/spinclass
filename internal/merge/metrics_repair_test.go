@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"code.linenisgreat.com/spinclass/internal/0/statsd"
-	"code.linenisgreat.com/spinclass/internal/hookrun"
+	"code.linenisgreat.com/spinclass/internal/bravo/hookrun"
 )
 
 // A repair killed by its own cap reads merge.<repo>.repair.timeout, not failed

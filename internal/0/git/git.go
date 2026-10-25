@@ -500,7 +500,7 @@ func ReachableFromRemote(dir, rev string) bool {
 // CommonConfigHasWorktreeOverride reports whether core.worktree is set in the
 // repository's COMMON config file (shared across all worktrees). When present,
 // enabling extensions.worktreeConfig is unsafe, so the two writers of
-// worktree-scoped config — the pre-commit hook installer (internal/apply) and
+// worktree-scoped config — the pre-commit hook installer (internal/bravo/apply) and
 // the per-session push credential (internal/auth, FDR 0028) — both refuse.
 func CommonConfigHasWorktreeOverride(worktreePath string) bool {
 	common, err := CommonGitDir(worktreePath)

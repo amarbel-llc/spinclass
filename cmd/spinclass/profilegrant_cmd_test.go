@@ -19,7 +19,7 @@ import (
 	"code.linenisgreat.com/purse-first/libs/go-mcp/server"
 	"code.linenisgreat.com/spinclass/internal/0/profilegrant"
 	"code.linenisgreat.com/spinclass/internal/alfa/operatoract"
-	"code.linenisgreat.com/spinclass/internal/grantverify"
+	"code.linenisgreat.com/spinclass/internal/bravo/grantverify"
 	"golang.org/x/crypto/ssh"
 )
 

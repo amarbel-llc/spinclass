@@ -20,11 +20,11 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	gitstore "code.linenisgreat.com/spinclass/internal/alfa/store/git"
 	"code.linenisgreat.com/spinclass/internal/auth"
-	"code.linenisgreat.com/spinclass/internal/confinement"
+	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
+	"code.linenisgreat.com/spinclass/internal/bravo/nixgc"
+	"code.linenisgreat.com/spinclass/internal/bravo/sessionpick"
 	"code.linenisgreat.com/spinclass/internal/executor"
-	"code.linenisgreat.com/spinclass/internal/nixgc"
 	"code.linenisgreat.com/spinclass/internal/profilerights"
-	"code.linenisgreat.com/spinclass/internal/sessionpick"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
@@ -631,7 +631,7 @@ func writeReapSummary(ob *tap.OutputBlockWriter, extras map[string]any) {
 }
 
 // nixgcDisabled and nixgcNewPlan are package-level seams for tests. The
-// production path simply forwards to internal/nixgc; tests override these
+// production path simply forwards to internal/bravo/nixgc; tests override these
 // to exercise planNixGC without a real Nix store. See close_test.go's
 // override-precedence matrix.
 var (

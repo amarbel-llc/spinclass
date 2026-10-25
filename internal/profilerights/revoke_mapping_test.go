@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"code.linenisgreat.com/spinclass/internal/confinement"
+	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 )
 
 func writeMapping(t *testing.T, state, principal, key string) string {

@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/alfa/grantstore"
-	"code.linenisgreat.com/spinclass/internal/confinement"
-	"code.linenisgreat.com/spinclass/internal/grantverify"
+	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
+	"code.linenisgreat.com/spinclass/internal/bravo/grantverify"
 	"code.linenisgreat.com/spinclass/internal/profilerights"
 	"golang.org/x/crypto/ssh"
 )

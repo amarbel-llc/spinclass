@@ -16,7 +16,7 @@ import (
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	gitpkg "code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/alfa/store"
-	"code.linenisgreat.com/spinclass/internal/confinement"
+	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 	"golang.org/x/term"
 )
 

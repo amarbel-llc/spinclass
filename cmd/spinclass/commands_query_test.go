@@ -59,7 +59,7 @@ func TestRunUpdateDescriptionHealsUntrackedWorktree(t *testing.T) {
 const remoteCannedJSON = `[{"id":"crisp-catalpa","session_key":"spinclass/crisp-catalpa","state":"active","description":"fix login bug","repo":"spinclass"},{"id":"molten-mango","session_key":"clown/molten-mango","state":"inactive","description":"","repo":"clown"}]`
 
 // stubSSHPerDest writes an executable `ssh` script into a temp dir
-// prepended to PATH (mirroring internal/remote/query_test.go's stubSSH).
+// prepended to PATH (mirroring internal/bravo/remote/query_test.go's stubSSH).
 // The script serves canned ListRow JSON when its destination ($2, after the
 // "--" that ends ssh's options) is healthyDest and fails with stderr noise
 // otherwise, so one stub covers both the healthy and the unreachable host of a

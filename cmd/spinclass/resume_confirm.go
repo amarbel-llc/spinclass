@@ -13,7 +13,7 @@ import (
 	"github.com/mattn/go-isatty"
 
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
-	"code.linenisgreat.com/spinclass/internal/sessionpick"
+	"code.linenisgreat.com/spinclass/internal/bravo/sessionpick"
 )
 
 // resumeConfirmKind names which confirmation dialog (if any) resume

@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
-	"code.linenisgreat.com/spinclass/internal/confinement"
+	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 )
 
 const testUnit = "clown-agent-test.service"

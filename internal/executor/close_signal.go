@@ -9,7 +9,7 @@ import (
 	"syscall"
 
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
-	"code.linenisgreat.com/spinclass/internal/confinement"
+	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 )
 
 // The session's recorded PID lives in <worktree>/.spinclass/state.json, which

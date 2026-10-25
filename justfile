@@ -1124,7 +1124,7 @@ debug-statsd-env port="8125":
 
 # [debug] Pipe a cold `prompts/get` (no `initialize`) into `spinclass serve` and
 # print the dynamic system-prompt fragment it returns, extracted from the
-# JSON-RPC result. Serves the internal/sysprompt dev-loop (spinclass#187): edit a
+# JSON-RPC result. Serves the internal/bravo/sysprompt dev-loop (spinclass#187): edit a
 # template, re-run, eyeball the rendered markdown. With mode=worktree, sets the
 # SPINCLASS_* identity env so the worktree variant renders; default resolves
 # whatever the cwd maps to (a git checkout -> the main-checkout variant).
@@ -1150,7 +1150,7 @@ debug-prompt-fragment mode="":
 
 # Runs `sc confinement-check` from a nix-built binary against THIS host: the
 # FDR 0035 session-confinement table for a session (default: this worktree's),
-# one TAP line per fact. The integration check for internal/confinement — it
+# one TAP line per fact. The integration check for internal/bravo/confinement — it
 # probes the real /proc, cgroups and sockets, so most facts fail until
 # clown#244's agent unit lands. Exits nonzero while any fact fails; the
 # trailing `|| true` keeps the table visible as a recipe result. Run it from

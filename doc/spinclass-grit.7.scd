@@ -187,7 +187,7 @@ The tool body, which runs in *serve*, resolves the caller:
 
 _Confined_
 	A caller is confined unless frontend state positively shows otherwise
-	(*internal/confinement*): an unresolved principal, a unit record, a
+	(*internal/bravo/confinement*): an unresolved principal, a unit record, a
 	frontend principal mapping, an unreadable record, or more than one live
 	*serve* record for the principal all say confined. Nothing is staged in
 	the unit. For a confined caller the body re-applies the write-verb

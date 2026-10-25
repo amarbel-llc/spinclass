@@ -1,7 +1,7 @@
 // Package repoinfo resolves a git repository's forge identity — provider,
 // owner, name, web link, and one-line description — from a worktree or
 // checkout path. It backs the repository line the dynamic system-prompt
-// fragment contributes (internal/sysprompt).
+// fragment contributes (internal/bravo/sysprompt).
 //
 // Resolution is best-effort and bounded by the caller's context: the local
 // git remote yields host/owner/name/link with no network; the precise forge

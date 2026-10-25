@@ -63,19 +63,19 @@ re-run that suite right before merging.
   merge drivers (#324), rebases onto the default branch, then lands; see below.
 - **Permission tiers** (`internal/perms/`): Claude Code hook integration, rules
   as JSON. **Claude integration** (`internal/0/claude/`): trust + `claude-allow`.
-- **Remote sessions** (`internal/remote/`): `host:` targets, resume-only
+- **Remote sessions** (`internal/bravo/remote/`): `host:` targets, resume-only
   (FDR 0011).
 
 ## Key Patterns
 
 - **TAP-14 everywhere — except merge/check.** `sc merge`/`sc check` and the
   merge/check MCP tools emit ndjson-crap (`--format auto|viewport|plain|ndjson`);
-  wiring in `internal/present` (FDR 0015).
+  wiring in `internal/bravo/present` (FDR 0015).
 - **Targets.** Session keys are `<repo-dirname>/<branch>`; explicit
   `resume/close/merge/update-description` targets resolve via
   `session.FindByTarget` (worktree basename OR key, from any cwd; ambiguous
   bare names error, misses are `session.ErrTargetNotFound`). `sc resume`/`close`
-  pickers: `internal/sessionpick`; resume confirmation: `resume_confirm.go`
+  pickers: `internal/bravo/sessionpick`; resume confirmation: `resume_confirm.go`
   (`-y` skips; an `active` session warns and `-y` does NOT skip it).
 - **External tool deps.** `git` always required. `madder`/`direnv` are runtime
   deps only when built via `lib.mkSpinclass` (paths burned in at link time —
@@ -118,7 +118,7 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
 - **Resurrect** (FDR 0027, #291): `close.RunResolved` records `DeletedSHA` in
   the tombstone; `sc resurrect` recreates the worktree from it.
 - **Exemption predicates** (FDR 0031, `merge/policy.go`) and **attestation
-  lifecycle** (FDR 0007, #219, `internal/attestation`).
+  lifecycle** (FDR 0007, #219, `internal/bravo/attestation`).
 - **No implicit-session merge** (#317): refused before any gate; `sc check`
   still works.
 - **Async merge/check** (`internal/alfa/job`, FDR 0010, FDR 0025): registered only
@@ -127,7 +127,7 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
   `[hooks].disable-merge-stacking`). Liveness flock, ProtocolVersion gate,
   cancel observer, systemd scope: `spinclass-internals(7)`; hook cancellation
   (#188): `docs/plans/2026-10-04-188-sync-hook-cancellation.md`.
-- **Dynamic system-prompt fragment** (`internal/sysprompt`; FDR 0021, FDR 0030,
+- **Dynamic system-prompt fragment** (`internal/bravo/sysprompt`; FDR 0021, FDR 0030,
   #187): `serve` answers `prompts/get`; the fetch is **deadline-capped**
   (`repoFetchTimeout` 2s) and must never block. Trailers: repository line
   (`internal/alfa/repoinfo`), forge workflow, co-active sessions (#238), design
@@ -145,7 +145,7 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
   `conformist-pre-commit`).
 - **Inactivity watchdog** (`[hooks].inactivity-timeout`; funnels through
   `hookrun.PreMergeInDir`).
-- **Base-branch freshening** (FDR 0024, #250, `internal/basebranch`): fresh
+- **Base-branch freshening** (FDR 0024, #250, `internal/bravo/basebranch`): fresh
   sessions cut from the fetched remote default; `--allow-stale-base` has
   deliberately **no MCP parameter**.
 - **Setup staleness & `sc rebuild`** (`internal/alfa/setupfingerprint`):

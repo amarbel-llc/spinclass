@@ -11,7 +11,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/statsd"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/alfa/landing"
-	"code.linenisgreat.com/spinclass/internal/hookrun"
+	"code.linenisgreat.com/spinclass/internal/bravo/hookrun"
 )
 
 // Merge-landing counters (spinclass#314), emitted only on the queued remote

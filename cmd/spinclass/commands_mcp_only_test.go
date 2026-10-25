@@ -15,7 +15,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/alfa/job"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
-	"code.linenisgreat.com/spinclass/internal/attestation"
+	"code.linenisgreat.com/spinclass/internal/bravo/attestation"
 	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 

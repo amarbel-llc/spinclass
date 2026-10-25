@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"code.linenisgreat.com/spinclass/internal/confinement"
+	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 )
 
 const bindTestPrincipal = "5e5e5e5e-0000-4000-8000-000000000000"

@@ -62,7 +62,7 @@ dogfooded, not CI. Signal and SIGTERM-versus-SIGKILL details:
 
 # sc exec
 
-*sc exec [--session <t>] [-- <util> ...]* (*internal/sessionexec*) runs a util
+*sc exec [--session <t>] [-- <util> ...]* (*internal/bravo/sessionexec*) runs a util
 in a session worktree, devshell-scoped via *direnv exec*, with the
 *SPINCLASS* identity env vars. With no *--session* it auto-detects from the cwd; the util
 defaults to *$SHELL*. An explicit *--session* miss is an error; a cwd miss
@@ -81,7 +81,7 @@ before its worktree is removed.
 
 # CONFINEMENT AGENT CENSUS (FDR 0035 F11)
 
-*sc confinement-check* fact F11 counts agents by unit (*internal/confinement*).
+*sc confinement-check* fact F11 counts agents by unit (*internal/bravo/confinement*).
 Every live session needs a unit record whose cgroup, under
 *clown-agent.slice*, holds at least one process now; a record whose cgroup is
 gone or empty is named as a *stale record*. A process is confined iff its

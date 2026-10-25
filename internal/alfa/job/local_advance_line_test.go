@@ -7,7 +7,7 @@ import (
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 
-	"code.linenisgreat.com/spinclass/internal/present"
+	"code.linenisgreat.com/spinclass/internal/bravo/present"
 )
 
 // pushOutcomeLine matches hard-coded rendering prefixes too (#376): lock it to

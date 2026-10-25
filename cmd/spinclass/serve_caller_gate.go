@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
-	"code.linenisgreat.com/spinclass/internal/confinement"
+	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 )
 
 // serveCallerConfined classifies this serve's caller the way the grit tools do

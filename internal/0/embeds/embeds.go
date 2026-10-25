@@ -8,7 +8,7 @@
 // PATH lookup. See FDR 0003 (madder, direnv) and FDR 0008 (dodder).
 //
 // papiBin and ghBin pin the papi and gh binaries the dynamic
-// system-prompt fragment (internal/alfa/repoinfo, internal/sysprompt) shells
+// system-prompt fragment (internal/alfa/repoinfo, internal/bravo/sysprompt) shells
 // out to for forge-kind resolution and repo-description lookup. Empty
 // means "not pinned": callers fall back to a PATH lookup, so a devshell
 // `go build` (which sets no ldflags) still resolves papi/gh from PATH.

@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
-	. "code.linenisgreat.com/spinclass/internal/hookrun"
+	. "code.linenisgreat.com/spinclass/internal/bravo/hookrun"
 )
 
 func TestPostMergeRuns(t *testing.T) {

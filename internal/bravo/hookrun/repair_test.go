@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
-	. "code.linenisgreat.com/spinclass/internal/hookrun"
+	. "code.linenisgreat.com/spinclass/internal/bravo/hookrun"
 )
 
 func TestRepairRuns(t *testing.T) {

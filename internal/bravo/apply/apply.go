@@ -2,7 +2,7 @@
 // Code settings, the .spinclass/env dotenv file, the direnv .envrc (and its
 // allow record), and the per-worktree pre-commit repair hook (FDR 0019).
 //
-// Like internal/hookrun, it is split out of internal/0/sweatfile so the config
+// Like internal/bravo/hookrun, it is split out of internal/0/sweatfile so the config
 // SCHEMA package imports nothing else in the module: applying setup needs
 // direnv and git, and under godyn's per-package compile a change here would
 // otherwise invalidate every package that merely reads config

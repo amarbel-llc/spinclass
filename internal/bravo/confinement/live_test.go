@@ -13,7 +13,7 @@ import (
 // that is the expected state, not a test failure. Opt-in, since a build
 // sandbox has no sessions, cgroups or agent to look at:
 //
-//	SPINCLASS_CONFINEMENT_LIVE=1 go test -run TestLiveHost -v ./internal/confinement
+//	SPINCLASS_CONFINEMENT_LIVE=1 go test -run TestLiveHost -v ./internal/bravo/confinement
 //
 // `just debug-confinement-check` prints the same table from the built binary.
 func TestLiveHost(t *testing.T) {

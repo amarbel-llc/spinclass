@@ -13,7 +13,7 @@ import (
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
 
-	"code.linenisgreat.com/spinclass/internal/hookrun"
+	"code.linenisgreat.com/spinclass/internal/bravo/hookrun"
 )
 
 // writeRepoSweatfile commits content as the repo-root sweatfile on the default

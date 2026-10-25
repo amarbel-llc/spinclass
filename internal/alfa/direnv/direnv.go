@@ -1,7 +1,7 @@
 // Package direnv centralizes how spinclass locates and invokes direnv, so the
 // resolution rule and the `direnv exec` argv shape live in one place rather than
 // being hand-mirrored across the packages that devshell-scope a command
-// (internal/0/sweatfile hooks, internal/sessionexec). See spinclass#199.
+// (internal/0/sweatfile hooks, internal/bravo/sessionexec). See spinclass#199.
 //
 // Caller-specific policy stays with the caller: whether to wrap at all (e.g.
 // sweatfile gates on a real .envrc), and which directory's devshell to load
@@ -19,7 +19,7 @@ import (
 
 // HasEnvrc reports whether dir has a regular .envrc file — the precondition
 // every caller uses before devshell-scoping a command via WrapExec. spinclass
-// writes one (internal/apply) whenever direnv resolves; gating on its presence
+// writes one (internal/bravo/apply) whenever direnv resolves; gating on its presence
 // keeps the bare `sh -c` path for non-direnv repos.
 func HasEnvrc(dir string) bool {
 	info, err := os.Stat(filepath.Join(dir, ".envrc"))

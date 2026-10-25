@@ -15,8 +15,8 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/dodder"
 	"code.linenisgreat.com/spinclass/internal/alfa/setupfingerprint"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
-	"code.linenisgreat.com/spinclass/internal/apply"
-	"code.linenisgreat.com/spinclass/internal/hookrun"
+	"code.linenisgreat.com/spinclass/internal/bravo/apply"
+	"code.linenisgreat.com/spinclass/internal/bravo/hookrun"
 )
 
 const WorktreesDir = ".worktrees"
@@ -72,7 +72,7 @@ func DetectRepo(dir string) (string, error) {
 // therefore whatever branch that checkout happens to be sitting on — fine for a
 // checkout parked on the default branch, silently wrong for one parked
 // anywhere else (spinclass#250). Callers that care resolve a base via
-// internal/basebranch and pass it here; "" remains the correct fallback for
+// internal/bravo/basebranch and pass it here; "" remains the correct fallback for
 // every case where no default branch could be resolved. Ignored entirely when
 // existingBranch is set, since that path adopts a branch rather than cutting
 // one.

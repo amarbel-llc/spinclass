@@ -237,7 +237,7 @@ type Store struct {
 }
 
 // Sysprompt configures the dynamic system-prompt fragment spinclass
-// contributes to a clown-launched session (internal/sysprompt, FDR 0021).
+// contributes to a clown-launched session (internal/bravo/sysprompt, FDR 0021).
 type Sysprompt struct {
 	// DocIndexDirs overrides the dirs the design-record index scans (relative
 	// to the worktree/checkout root). Tri-state, but with OVERRIDE semantics
@@ -491,7 +491,7 @@ func (sf Sweatfile) PostMergeHookCommand() *string {
 // NormalizeCommand drops the empty lines from a sweatfile-declared shell
 // command (a multi-line TOML string carries them), so an "active" check and the
 // script eventually handed to `sh -c` agree on what counts as a command. Pure:
-// the runners in internal/hookrun and internal/apply call it too.
+// the runners in internal/bravo/hookrun and internal/bravo/apply call it too.
 func NormalizeCommand(s string) string {
 	var lines []string
 	for _, line := range strings.Split(s, "\n") {
@@ -686,7 +686,7 @@ func (sf Sweatfile) InactivityTimeoutValue() time.Duration {
 // PreMergeOutputFormatValue returns the configured format for the
 // pre-merge hook's output, defaulting to "raw" when unset or empty.
 // Valid values: "raw", "tap-ndjson", "ndjson-crap". Validation lives in
-// internal/validate.
+// internal/bravo/validate.
 func (sf Sweatfile) PreMergeOutputFormatValue() string {
 	if sf.Hooks == nil || sf.Hooks.PreMergeOutputFormat == nil {
 		return "raw"
@@ -948,7 +948,7 @@ func (sf Sweatfile) AutoRebuildOnResume() bool {
 // AllowStaleBase reports whether [hooks].allow-stale-base is true. When set,
 // session creation proceeds even though the default branch could not be
 // confirmed current — the fetch failed, e.g. an unreachable remote
-// (spinclass#250, internal/basebranch). A dirty or diverged LOCAL default
+// (spinclass#250, internal/bravo/basebranch). A dirty or diverged LOCAL default
 // branch no longer refuses at all (#315): the base is the fetched remote tip.
 //
 // This is the persistent half of the override; `sc start --allow-stale-base` is

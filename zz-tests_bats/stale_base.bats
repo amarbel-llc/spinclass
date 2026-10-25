@@ -3,7 +3,7 @@
 # End-to-end coverage for spinclass#250: a new session must be cut from the
 # repo's default branch, freshened from its remote first.
 #
-# internal/basebranch's unit tests own the policy matrix (ahead, diverged,
+# internal/bravo/basebranch's unit tests own the policy matrix (ahead, diverged,
 # dirty, ambiguous, ...). What these tests own is the wiring: that `sc start`
 # actually reaches the gate, that the refusal surfaces as a failed command, and
 # that both halves of the override are honoured.

@@ -506,7 +506,7 @@
               # session orientation is contributed dynamically at launch by
               # `spinclass serve` (clown plugin protocol RFC-0002 §5; the
               # `systemPrompt: true` opt-in in clown.json above). See
-              # internal/sysprompt and spinclass#187.
+              # internal/bravo/sysprompt and spinclass#187.
 
               # Plugin-level hook registration. Clown auto-discovers
               # ${"\${CLAUDE_PLUGIN_ROOT}"}/hooks/hooks.json and wires the listed

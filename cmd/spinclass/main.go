@@ -13,7 +13,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/embeds"
 	"code.linenisgreat.com/spinclass/internal/0/sessionlog"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
-	"code.linenisgreat.com/spinclass/internal/confinement"
+	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 )
 
 func main() {
@@ -45,7 +45,7 @@ func main() {
 // version. The Nix build copies those files into share/purse-first/spinclass/
 // in postInstall and substitutes @VERSION@ at install time. Session
 // orientation is contributed dynamically by `spinclass serve` (see
-// internal/sysprompt), so no static system-prompt fragments are installed.
+// internal/bravo/sysprompt), so no static system-prompt fragments are installed.
 func generateArtifacts(app *command.App, outDir string) error {
 	purseDir := filepath.Join(outDir, "share", "purse-first")
 	if err := app.GenerateMappings(purseDir); err != nil {
