@@ -41,8 +41,13 @@ who is allowed to ask.
    configures it.
 4. **`when=idle` queueing lives in clown.** Spinclass records the request with
    `when: idle` and hands off immediately; clown holds it until the session's
-   current turn ends. `when: now` is what a forced restart records (decision 8);
-   clown restarts on it without waiting for the turn.
+   current turn ends. `when: now` is what a forced restart is meant to record
+   (decision 8), for clown to restart on without waiting for the turn. **Not
+   yet:** clown's `restart` accepts only `--when idle` and exits 2 on `now`, so
+   until it ships `now` (a clown design, then a spinclass flip) a forced
+   restart is refused after the other checks, with nothing recorded or handed
+   off (agreed with clown, 2026-10-25). `cmd/spinclass/restart_contract_test.go`
+   pins the hand-off against a fake of clown's verb.
 5. **`restart-preflight` is the contract between the halves.** Clown runs
    `sc restart-preflight` at the idle transition, before it restarts. Spinclass
    re-checks everything (a job may have started since the request) and consumes
@@ -57,7 +62,8 @@ who is allowed to ask.
    agent sets silently. On both restart tools, `force=true` is always-ask
    (`perms.AlwaysAsk`, enforced by the PreToolUse hook and mirrored in
    `RunCheck`, failing closed on any non-boolean, like `close-child-session`'s
-   `force`); the unforced call stays auto-allowed. A forced restart records
+   `force`); the unforced call stays auto-allowed. (Refused for now; see
+   decision 4.) Once clown accepts `now`, a forced restart records
    `when: now`, expands `{when}` to `now`, and skips the running-job obstacle at
    request time (`restartPlan(..., force)`) and again in the preflight, which
    treats a `when: now` request as already approved to kill the job. So it kills

@@ -18,9 +18,11 @@ import (
 )
 
 // restartHandoffTOML is the trusted-layer hand-off every test that expects a
-// restart to go through writes into the global sweatfile.
+// restart to go through writes into the global sweatfile: the documented
+// template, which clown's `restart` verb accepts as is (it refuses unknown
+// flags such as --key with exit 2).
 const restartHandoffTOML = "[session-entry]\n" +
-	`restart = ["clown", "restart", "--session", "{principal}", "--key", "{session-key}", "--when", "{when}", "--reason", "{reason}"]` + "\n"
+	`restart = ["clown", "restart", "--session", "{principal}", "--when", "{when}", "--reason", "{reason}"]` + "\n"
 
 // childPrincipal is the principal of the restarted child in the child tests.
 const childPrincipal = "9c1d7e44-2b60-4f0a-8e35-6a1b0c2d3e4f"
@@ -88,7 +90,7 @@ func callRestartChild(t *testing.T, args string) (text string, isErr bool) {
 }
 
 func wantSelfArgv(reason string) []string {
-	return []string{"clown", "restart", "--session", selfPrincipal, "--key", "worker/kid", "--when", "idle", "--reason", reason}
+	return []string{"clown", "restart", "--session", selfPrincipal, "--when", "idle", "--reason", reason}
 }
 
 func TestExpandRestartHandoff(t *testing.T) {
@@ -236,10 +238,17 @@ func writeRunningJob(t *testing.T, wtPath string) {
 	}
 }
 
-func wantSelfArgvWhen(when, reason string) []string {
-	argv := wantSelfArgv(reason)
-	argv[7] = when
-	return argv
+// seedForcedRequest records a when=now RestartRequest directly: the request a
+// forced restart is meant to leave once clown accepts `--when now`. The tools
+// refuse force until then, so the preflight's when=now handling is tested from
+// recorded state.
+func seedForcedRequest(t *testing.T, repoPath string) {
+	t.Helper()
+	st := readKid(t, repoPath)
+	st.RestartRequest = &session.RestartRequest{RequestedAt: time.Now().UTC(), Requester: selfPrincipal, Reason: "wedged", When: "now"}
+	if err := session.Write(*st); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // force=false is the same as no force: a running job still refuses.
@@ -258,23 +267,20 @@ func TestRestartThisSessionUnforcedStillRefusedOverAJob(t *testing.T) {
 	}
 }
 
-// A forced restart is queued as when=now and does not stop for a running job.
-func TestRestartThisSessionForceSkipsTheJobCheckAndAsksForNow(t *testing.T) {
+// #419: clown's `restart` accepts only --when idle, so a forced restart, which
+// would hand off --when now, is refused up front with nothing recorded and no
+// hand-off, rather than failing at the hand-off.
+func TestRestartThisSessionForceIsRefusedUntilClownAcceptsNow(t *testing.T) {
 	calls := stubRestartHandoff(t, "", nil)
 	repoPath, wtPath := restartSelfFixture(t, true)
 	writeRunningJob(t, wtPath)
 
 	text, isErr := callRestartThis(t, `{"force":true,"reason":"wedged"}`)
-	if isErr {
-		t.Fatalf("a forced restart must go through over a running job: %q", text)
+	if !isErr || !strings.Contains(text, "--when idle") {
+		t.Fatalf("want a refusal naming that only --when idle is accepted, got isErr=%v %q", isErr, text)
 	}
-	req := readKid(t, repoPath).RestartRequest
-	if req == nil || req.When != "now" || req.Requester != selfPrincipal || req.Reason != "wedged" {
-		t.Fatalf("restart request = %+v, want one by %s, when now", req, selfPrincipal)
-	}
-	want := wantSelfArgvWhen("now", "wedged")
-	if len(*calls) != 1 || !reflect.DeepEqual((*calls)[0].argv, want) {
-		t.Fatalf("hand-off calls = %+v, want one with argv %q", *calls, want)
+	if readKid(t, repoPath).RestartRequest != nil || len(*calls) != 0 {
+		t.Errorf("a refused forced restart must record nothing and run no hand-off: calls=%+v", *calls)
 	}
 }
 
@@ -336,7 +342,7 @@ func restartChildFixture(t *testing.T, caller string, st session.State) (repoPat
 }
 
 func wantChildArgv(reason string) []string {
-	return []string{"clown", "restart", "--session", childPrincipal, "--key", "worker/kid", "--when", "idle", "--reason", reason}
+	return []string{"clown", "restart", "--session", childPrincipal, "--when", "idle", "--reason", reason}
 }
 
 func TestRestartChildSessionRefusedWithoutAHandle(t *testing.T) {
@@ -440,7 +446,7 @@ func TestRestartChildSessionRefusesAConfinedCaller(t *testing.T) {
 	}
 }
 
-func TestRestartChildSessionForceSkipsTheJobCheckForAHolderWithTheRight(t *testing.T) {
+func TestRestartChildSessionForceIsRefusedUntilClownAcceptsNow(t *testing.T) {
 	calls := stubRestartHandoff(t, "", nil)
 	repoPath, wtPath := restartChildFixture(t, "holder", session.State{
 		Holders: []string{"holder"}, HandleRights: map[string]string{"holder": "observe,restart"},
@@ -452,17 +458,11 @@ func TestRestartChildSessionForceSkipsTheJobCheckForAHolderWithTheRight(t *testi
 		t.Fatalf("unforced: want a refusal naming the job, got isErr=%v %q", isErr, text)
 	}
 	text, isErr := callRestartChild(t, `{"child":"worker/kid","force":true,"reason":"wedged"}`)
-	if isErr {
-		t.Fatalf("a forced restart must go through over a running job: %q", text)
+	if !isErr || !strings.Contains(text, "--when idle") {
+		t.Fatalf("want a refusal naming that only --when idle is accepted, got isErr=%v %q", isErr, text)
 	}
-	req := readKid(t, repoPath).RestartRequest
-	if req == nil || req.When != "now" || req.Requester != "holder" {
-		t.Fatalf("restart request = %+v, want one by holder, when now", req)
-	}
-	want := wantChildArgv("wedged")
-	want[7] = "now"
-	if len(*calls) != 1 || !reflect.DeepEqual((*calls)[0].argv, want) {
-		t.Fatalf("hand-off calls = %+v, want one with argv %q", *calls, want)
+	if readKid(t, repoPath).RestartRequest != nil || len(*calls) != 0 {
+		t.Errorf("a refused forced restart must record nothing and run no hand-off: calls=%+v", *calls)
 	}
 }
 
@@ -618,9 +618,7 @@ func TestRestartPreflightOfAForcedRequestIgnoresARunningJob(t *testing.T) {
 	stubRestartHandoff(t, "", nil)
 	notified := stubNotifyPrincipal(t)
 	repoPath, wtPath := restartSelfFixture(t, true)
-	if text, isErr := callRestartThis(t, `{"force":true}`); isErr {
-		t.Fatalf("setup: %q", text)
-	}
+	seedForcedRequest(t, repoPath)
 	writeRunningJob(t, wtPath)
 
 	v, err := runRestartPreflight("worker/kid")
@@ -639,10 +637,8 @@ func TestRestartPreflightOfAForcedRequestIgnoresARunningJob(t *testing.T) {
 func TestRestartPreflightOfAForcedRequestStillRefusesWhenTheHandoffWasRevoked(t *testing.T) {
 	stubRestartHandoff(t, "", nil)
 	stubNotifyPrincipal(t)
-	restartSelfFixture(t, true)
-	if text, isErr := callRestartThis(t, `{"force":true}`); isErr {
-		t.Fatalf("setup: %q", text)
-	}
+	repoPath, _ := restartSelfFixture(t, true)
+	seedForcedRequest(t, repoPath)
 	writeGlobalSweatfile(t, os.Getenv("HOME"), "")
 	v, err := runRestartPreflight("worker/kid")
 	if err != nil || v.Verdict != "refused" || v.When != "now" {

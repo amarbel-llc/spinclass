@@ -35,10 +35,11 @@ import (
 //
 // An unforced restart waits for the turn to end and is refused while a job
 // runs. `force` is the operator-gated escalation (perms.AlwaysAsk makes the
-// tool call prompt the human; the CLI caller is the operator): it records
-// when=now and skips the running-job obstacle, at request time and in the
-// preflight, so it kills the current turn and any running job. cancel-restart
-// removes a queued request.
+// tool call prompt the human; the CLI caller is the operator). It is meant to
+// record when=now and skip the running-job obstacle, at request time and in
+// the preflight, killing the current turn and any running job; until clown
+// accepts `--when now` it is refused after the other checks
+// (errForceRestartUnsupported). cancel-restart removes a queued request.
 
 const (
 	restartWhenIdle           = "idle"
@@ -48,6 +49,14 @@ const (
 	defaultSelfRestartReason  = "requested by the session itself"
 	defaultChildRestartReason = "requested by a holder"
 )
+
+// errForceRestartUnsupported refuses a forced restart before anything is
+// recorded or handed off: clown's `restart` accepts only `--when idle` today
+// (exit 2 on `now`), so a forced hand-off could only fail (#419, agreed with
+// clown). The operator's always-ask prompt still comes first. Remove this
+// once clown ships `--when now`; the when=now paths below are kept for it.
+var errForceRestartUnsupported = errors.New(
+	"a forced restart is not available yet: the frontend (clown restart) accepts only --when idle, so nothing was recorded or handed off; restart without force to wait for the turn to end")
 
 // errNoRestartSession is returned when the caller's principal maps to no session.
 var errNoRestartSession = errors.New(
@@ -145,6 +154,9 @@ func queueRestart(st *session.State, requester, principal, reason string, force 
 	}
 	if obstacle != "" {
 		return "", errors.New(obstacle)
+	}
+	if force {
+		return "", errForceRestartUnsupported
 	}
 
 	when := restartWhenIdle
@@ -363,7 +375,7 @@ func forceRestartParam() command.Param {
 	return command.Param{
 		Name:        "force",
 		Type:        command.Bool,
-		Description: "Restart NOW instead of when the turn ends, and even while a merge/check job runs. Forcing kills the session's current turn and any running job, and always prompts the human — no allow-list can approve it silently — so reach for it only when waiting is not an option.",
+		Description: "Restart NOW instead of when the turn ends, and even while a merge/check job runs. NOT AVAILABLE YET: the frontend accepts only idle restarts, so a forced call is refused after the other checks, with nothing recorded. Forcing always prompts the human first — no allow-list can approve it silently.",
 	}
 }
 

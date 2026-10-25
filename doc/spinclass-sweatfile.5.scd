@@ -1237,9 +1237,13 @@ readable by others.
 	relaunch a session (FDR 0037, #419). spinclass authorizes, refuses and
 	records the restart; the frontend (clown) performs it. Each element has
 	*{principal}* (the restarted session's principal, which must be
-	UUID-shaped), *{session-key}*, *{when}* (*idle* or *now*) and *{reason}*
-	replaced; replacement is one pass, so a reason cannot smuggle in another
-	placeholder. The command runs in the session's worktree with a 15 second
+	UUID-shaped), *{session-key}*, *{when}* and *{reason}* replaced;
+	replacement is one pass, so a reason cannot smuggle in another
+	placeholder. *{when}* is always *idle* today: clown's *restart* accepts
+	only *--when idle* (and refuses unknown flags), so a forced restart, which
+	would hand off *now*, is refused before anything is recorded. For clown the
+	template is *["clown", "restart", "--session", "{principal}", "--when",
+	"{when}", "--reason", "{reason}"]*. The command runs in the session's worktree with a 15 second
 	bound; a failure clears the request and is returned to the caller. Unset,
 	both tools refuse and name this key.
 
