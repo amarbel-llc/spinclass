@@ -290,6 +290,22 @@ and pushes nothing unless the whole dry run passed. It returns JSON,
 same JSON as the error. *lease\_ref\_sha* does not apply to it. *push-stack* and
 *merge* into the default branch are refused for every caller.
 
+# COMMIT SIGNATURES (spinclass#426)
+
+Commits the grit tools create are accepted unsigned (operator ruling,
+2026-10-25). No commit-creating verb (*grit\_commit*, *grit\_merge*,
+*grit\_remote* pull, *grit\_branch* cherry-pick, revert, rebase and restack)
+adds a signing option, and nothing in spinclass verifies a signature. A commit
+is signed only if the git configuration these tools run under asks for it
+(*commit.gpgsign* in the operator's global configuration, which a confined
+caller's hardening keeps, FDR 0036 section 9.5) and the signer can reach its
+key. So a session commit carries no guarantee of a signature, and a rule that
+only signed commits may land does not apply to it: do not stall a merge on a
+missing signature. *merge-this-session* neither signs nor checks signatures; its
+rebase re-creates commits under the same git configuration. The exception is
+*grit\_tag* create, which signs by default (*sign=false* or *lightweight* opts
+out). Pinned by *TestCommitCreatingVerbsAddNoSigningOption*.
+
 # ACCEPTED BRANCH FORMS (spinclass#393)
 
 *branch* create, checkout and delete each accept one form:
