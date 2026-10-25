@@ -6,7 +6,7 @@
 //
 // Deliberately stdlib-only — no chat, no clown, no internal/alfa/session import — so
 // it is a leaf that both internal/echo/hooks (the worker's SessionStart sender) and
-// internal/spawn (the driver's waiter) can depend on without an import cycle.
+// internal/foxtrot/spawn (the driver's waiter) can depend on without an import cycle.
 package spawnhandshake
 
 import (

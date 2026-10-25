@@ -14,9 +14,9 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/clown"
 	"code.linenisgreat.com/spinclass/internal/0/embeds"
 	"code.linenisgreat.com/spinclass/internal/bravo/sysprompt"
+	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 	"code.linenisgreat.com/spinclass/internal/resources"
 	"code.linenisgreat.com/spinclass/internal/servelog"
-	"code.linenisgreat.com/spinclass/internal/spawn"
 )
 
 func registerServeCommand(app *command.App) {

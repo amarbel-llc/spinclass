@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
-	"code.linenisgreat.com/spinclass/internal/spawn"
+	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 )
 
 var testEntry = []string{"clown", "--flag", "--", "claude"}

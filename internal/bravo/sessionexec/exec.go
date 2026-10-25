@@ -87,7 +87,7 @@ func stripSpinclassEnv(env []string) []string {
 
 // IdentityEnv returns the SPINCLASS_* identity environment for st, layered
 // over the current process env. It is the exported entry point for callers
-// (e.g. internal/run) that build their own *exec.Cmd via CommandIn rather
+// (e.g. internal/foxtrot/run) that build their own *exec.Cmd via CommandIn rather
 // than going through Run; identityEnv remains the internal implementation.
 func IdentityEnv(st *session.State) []string { return identityEnv(st) }
 
@@ -123,7 +123,7 @@ func identityEnv(st *session.State) []string {
 // wrapped as `direnv exec <dir> <util>...` so the worktree devshell is loaded.
 // The caller owns the command's Stdin/Stdout/Stderr — execIn inherits this
 // process's stdio (an interactive shell takes over the terminal), while
-// callers that capture output (e.g. internal/run, teeing into a crap
+// callers that capture output (e.g. internal/foxtrot/run, teeing into a crap
 // LineWriter) set their own writers.
 func CommandIn(dir string, util []string, env []string) *exec.Cmd {
 	if len(util) == 0 {

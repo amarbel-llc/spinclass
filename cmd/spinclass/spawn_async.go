@@ -12,8 +12,8 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/job"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	spinclose "code.linenisgreat.com/spinclass/internal/delta/close"
+	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 	"code.linenisgreat.com/spinclass/internal/servelog"
-	"code.linenisgreat.com/spinclass/internal/spawn"
 )
 
 // AsyncSpawnHelloDeadline is the default hello-timeout for the async

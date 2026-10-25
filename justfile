@@ -2,7 +2,7 @@ default: lint build test verify
 
 # --- lint ---
 
-lint: lint-fmt lint-golangci lint-worktree
+lint: lint-fmt lint-golangci lint-layout lint-worktree
 
 # Read-only format + lint gate via the sandboxed checks.formatting
 # derivation: formatter drift (Go/Nix/shell/TOML, per ./conformist.nix) plus
@@ -35,12 +35,16 @@ lint-golangci:
 
 # The dagnabit package-layout check (#414): fails, listing the would-move
 # lines, when a package under internal/ sits at a level other than the one its
-# imports put it at. NOT yet in `just lint`: it joins the gate once the
-# per-level moves have landed (circus's lint-layout-circus-cli is the model).
+# imports put it at. Part of `just lint`, so the pre-merge gate runs it
+# (circus's lint-layout-circus-cli is the model). A new package goes at the
+# level this prints; `just debug-dagnabit-move-level <level>` applies a move.
 #
 # check the internal/ package layout with dagnabit
 lint-layout:
-    nix build .#layout-check --no-link --print-build-logs
+    #!/usr/bin/env bash
+    set -euo pipefail
+    system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    nix build ".#checks.${system}.layout" --no-link --print-build-logs
 
 # The impure eng-convention checks (git remotes, git-default-branch, sweatfile,
 # agents-md) against the working tree, where .git is available. Runs conformist
@@ -265,11 +269,11 @@ debug-godyn-build:
 # module, `.#spinclass-native.passthru.bga`). The bga target is the native
 # build's OWN passthru — same src/subPackages, doCheck=false — so it is a pure
 # build-time A/B with no test-suite confound. Warms both on the unedited tree, appends a
-# comment to a LEAF internal package (internal/run — imported only by
+# comment to a LEAF internal package (internal/foxtrot/run — imported only by
 # cmd/spinclass), git-adds it so the dirty-tree `nix build` sees the edit
 # (tracked/staged only), then times each backend's rebuild. Expectation
 # (godyn(7)): godyn recompiles only the changed cone (run + cmd relink) while bga
-# rebuilds the whole module. Restores internal/run/run.go on exit. A content-only
+# rebuilds the whole module. Restores internal/foxtrot/run/run.go on exit. A content-only
 # comment edit needs no graph regen. x86_64-linux only.
 #
 # time an incremental one-package edit: godyn vs buildGoApplication rebuild
@@ -279,7 +283,7 @@ debug-godyn-bench:
     set -euo pipefail
     native='.#spinclass-native'
     bga='.#spinclass-native.passthru.bga'
-    target=internal/run/run.go
+    target=internal/foxtrot/run/run.go
     echo "warming both backends on the unedited tree…" >&2
     nix build "$native" --no-link >/dev/null 2>&1
     nix build "$bga" --no-link >/dev/null 2>&1

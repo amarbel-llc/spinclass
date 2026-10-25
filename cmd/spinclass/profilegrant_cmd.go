@@ -18,7 +18,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/profilegrant"
 	"code.linenisgreat.com/spinclass/internal/alfa/operatoract"
 	"code.linenisgreat.com/spinclass/internal/bravo/grantverify"
-	"code.linenisgreat.com/spinclass/internal/spawn"
+	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/term"
 )

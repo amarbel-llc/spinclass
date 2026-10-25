@@ -99,7 +99,7 @@ func TestHandleSpawnSessionRefusesAConfinedCaller(t *testing.T) {
 // TestAuthorizeChildReap (a handle still governs who may reap whom, so the
 // field remains load-bearing even though it no longer gates spawning).
 
-// spawnCmdHappySweatfile mirrors internal/spawn's happy-path fixture: the
+// spawnCmdHappySweatfile mirrors internal/foxtrot/spawn's happy-path fixture: the
 // stub spawn-entry (exec'd directly — FDR-0017 Piece 1) just drops a marker in
 // the worktree; the test plays the worker's SessionStart hook by sending the
 // chat hello itself.
@@ -264,7 +264,7 @@ func TestHandleSpawnSessionHappyPath(t *testing.T) {
 
 // TestHandleSpawnSessionBadModelForClaudeProvider proves the provider-aware
 // model validation actually rejects a bad Claude alias end to end (not just
-// at the internal/spawn unit level), and that the failure happens BEFORE any
+// at the internal/foxtrot/spawn unit level), and that the failure happens BEFORE any
 // worktree is created — renderSpawn (which now does this validation) still
 // runs before shop.Create on the spawn path.
 func TestHandleSpawnSessionBadModelForClaudeProvider(t *testing.T) {

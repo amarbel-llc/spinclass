@@ -9,7 +9,7 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/0/clown"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
-	"code.linenisgreat.com/spinclass/internal/spawn"
+	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 

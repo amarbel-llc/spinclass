@@ -29,8 +29,8 @@ import (
 	spinclose "code.linenisgreat.com/spinclass/internal/delta/close"
 	"code.linenisgreat.com/spinclass/internal/delta/merge"
 	"code.linenisgreat.com/spinclass/internal/echo/shop"
-	"code.linenisgreat.com/spinclass/internal/run"
-	"code.linenisgreat.com/spinclass/internal/spawn"
+	"code.linenisgreat.com/spinclass/internal/foxtrot/run"
+	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 	"github.com/mattn/go-isatty"
 )
 

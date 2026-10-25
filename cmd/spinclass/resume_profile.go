@@ -16,7 +16,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/grantstore"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/bravo/grantverify"
-	"code.linenisgreat.com/spinclass/internal/spawn"
+	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 )
 
 // profileResumePlan is the outcome of planRecordedProfile.

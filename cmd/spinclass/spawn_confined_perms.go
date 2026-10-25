@@ -4,7 +4,7 @@ import (
 	"os"
 
 	"code.linenisgreat.com/spinclass/internal/delta/perms"
-	"code.linenisgreat.com/spinclass/internal/spawn"
+	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 )
 
 // The spawn-session always-ask floor yields for a confined spawn (spinclass#382).

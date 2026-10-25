@@ -184,7 +184,7 @@
 
     # piggy: owner of the markl-id framework. Only its Go package
     # (pkgs/markl, bridged via go.nix flakeInputs) is consumed, to render a
-    # profile digest as a markl-id (internal/spawn). Follows madder's pin so
+    # profile digest as a markl-id (internal/foxtrot/spawn). Follows madder's pin so
     # the lock gains no node and one piggy rev resolves across the graph.
     piggy.follows = "madder/piggy";
 
@@ -244,7 +244,7 @@
       # The clown rev the Go source bridge is locked to. The clown input is a
       # tarball URL, which carries no .rev/.shortRev, so read it off the locked
       # archive URL (.../clown/archive/<sha>.tar.gz). Linked into
-      # internal/spawn so a "profile not found" names what spinclass links.
+      # internal/foxtrot/spawn so a "profile not found" names what spinclass links.
       clownLockedUrl = (builtins.fromJSON (builtins.readFile ./flake.lock)).nodes.clown.locked.url or "";
       clownLinkedRev =
         let
@@ -426,7 +426,7 @@
             # gate the per-worktree blob-store / dodder flows. All fall back to
             # PATH when unpinned.
             ldflags = [
-              "-X code.linenisgreat.com/spinclass/internal/spawn.LinkedClownRev=${clownLinkedRev}"
+              "-X code.linenisgreat.com/spinclass/internal/foxtrot/spawn.LinkedClownRev=${clownLinkedRev}"
             ]
             ++ (lib.optional (madder != null) "-X main.madderBin=${madder}/bin/madder")
             ++ (lib.optional (direnv != null) "-X main.direnvBin=${direnv}/bin/direnv")
@@ -623,22 +623,6 @@
           inherit spinclass-build_go_application;
           inherit spinclass-serve-integration;
           inherit spinclass-race;
-          # The dagnabit package-layout check (#414), hand-wired to mirror
-          # conformist's lib.mkLayoutCheck (conformist >= bd23d33) without a
-          # conformist bump: `dagnabit -n internal` in the module godyn renders
-          # from go.nix, failing on any would-move line. A package, not a check,
-          # until the per-level moves land; `just lint-layout` builds it.
-          layout-check = spinclass-default.passthru.codegenCheck {
-            command = ''
-              moves=$(dagnabit -n internal)
-              if [ -n "$moves" ]; then
-                echo "$moves"
-                echo "FAIL: dagnabit would move packages (above); move them by hand to the level shown." >&2
-                exit 1
-              fi
-            '';
-            nativeBuildInputs = [ inputs.purse-first.packages.${system}.dagnabit ];
-          };
           # The generated impure-lane config (git-state eng-convention checks),
           # consumed by `just lint-worktree` to run `conformist check` against
           # the working tree where .git is available. See conformistImpureEval
@@ -666,6 +650,24 @@
           tommy-codegen = spinclass-default.passthru.codegenCheck {
             command = "go generate ./internal/0/sweatfile/";
             nativeBuildInputs = [ tommy.packages.${system}.default ];
+          };
+          # Package-layout lane (#414; circus's circus-cli-layout is the
+          # model): every package under internal/<level>/<pkg> must sit at the
+          # level dagnabit computes from its imports. Hand-wired to mirror
+          # conformist's lib.mkLayoutCheck (conformist >= bd23d33) without a
+          # conformist bump: `dagnabit -n internal` in the module godyn renders
+          # from go.nix, failing on any would-move line. It does not see a
+          # package with no import edges. `just lint-layout` builds this.
+          layout = spinclass-default.passthru.codegenCheck {
+            command = ''
+              moves=$(dagnabit -n internal)
+              if [ -n "$moves" ]; then
+                echo "$moves"
+                echo "FAIL: dagnabit would move packages (above); move them by hand to the level shown." >&2
+                exit 1
+              fi
+            '';
+            nativeBuildInputs = [ inputs.purse-first.packages.${system}.dagnabit ];
           };
         }
         // batsLaneOutputs

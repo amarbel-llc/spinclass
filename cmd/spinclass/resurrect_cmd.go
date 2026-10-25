@@ -9,7 +9,7 @@ import (
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
-	"code.linenisgreat.com/spinclass/internal/resurrect"
+	"code.linenisgreat.com/spinclass/internal/foxtrot/resurrect"
 )
 
 // resurrectParams is the parameter set of the `resurrect` tool (#291): the
@@ -21,7 +21,7 @@ type resurrectParams struct {
 
 // runResurrect resolves the shared errors resurrect.Run's callers need
 // distinct wording for (target not found vs. ambiguous — the same shapes
-// close/resume already use) and hands the rest to internal/resurrect.
+// close/resume already use) and hands the rest to internal/foxtrot/resurrect.
 func runResurrect(p resurrectParams) (string, error) {
 	if p.Target == "" {
 		return "", errors.New("target is required")

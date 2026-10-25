@@ -11,7 +11,7 @@ import (
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
-	"code.linenisgreat.com/spinclass/internal/spawn"
+	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 )
 
 func registerVersionCommand(app *command.App) {

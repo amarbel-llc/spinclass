@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"code.linenisgreat.com/spinclass/internal/spawn"
+	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 )
 
 func TestParseStorePathBinary_StandardPath(t *testing.T) {

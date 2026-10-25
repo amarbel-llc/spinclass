@@ -17,7 +17,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/operatoract"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/bravo/grantverify"
-	"code.linenisgreat.com/spinclass/internal/spawn"
+	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 )
 
 // missingDiff stands in the act text's diff lines when no field diff can be

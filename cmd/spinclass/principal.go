@@ -6,7 +6,7 @@ import (
 	"os"
 	"sync"
 
-	"code.linenisgreat.com/spinclass/internal/spawn"
+	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 )
 
 var (
