@@ -342,9 +342,12 @@ keeps the old rule (the child's profile must be held). Each refusal names the
 profile and the edge.
 
 INTERIM (sprint 1): a grant's rights are derived from its profile names and
-judged on the _base chain. Rights as explicit record lines (D1 section 4) are
-the target design, arriving with the hyphence carrier change. This is not the
-final design.
+judged on the _base chain, with the per-edge catalog subset check above.
+Rights as explicit record lines (D1 section 4) are the target design, arriving
+with the hyphence carrier change. This is not the final design. Under this
+interim, V-D1-2 and V-D1-10 are green and V-D1-2b is refused (circus D1 doc,
+docs/plans/2026-10-22-d1-capability-artifact-and-grant-chain.md, ruling
+2026-10-23, as relayed by circus/solid-olive on 2026-10-25).
 
 - rights subset = derived-rights subset along `_base`;
 - rights stay a cap: a child's rights are its base chain's rights
