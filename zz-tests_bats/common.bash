@@ -192,16 +192,32 @@ extract_wt_path() {
   echo "$1" | grep -oP 'ok \d+ - create \S+ \K\S+'
 }
 
-# Check that at least one session is tracked in the central index.
-# Counts both live entries (resolving symlinks) and tombstones (regular
-# files); does NOT count dangling symlinks (externally-closed sessions).
+# Check that at least one LIVE session is tracked in the central index: an
+# index entry that is a symlink resolving to the session's state. A cleanly
+# closed session's tombstone (a regular file, kept for tombstone-retention) and
+# a dangling symlink (an externally removed worktree) do not count (#52); use
+# assert_closed_session_state for the tombstone case.
 # Usage: assert_session_state
 assert_session_state() {
   local index_dir="$XDG_STATE_HOME/spinclass/index"
   assert [ -d "$index_dir" ]
   local count=0
   for entry in "$index_dir"/*.json; do
-    [ -e "$entry" ] || continue
+    [ -L "$entry" ] && [ -e "$entry" ] || continue
+    count=$((count + 1))
+  done
+  assert [ "$count" -gt 0 ]
+}
+
+# Check that at least one cleanly closed session's tombstone (a regular file in
+# the central index) is present.
+# Usage: assert_closed_session_state
+assert_closed_session_state() {
+  local index_dir="$XDG_STATE_HOME/spinclass/index"
+  assert [ -d "$index_dir" ]
+  local count=0
+  for entry in "$index_dir"/*.json; do
+    [ -f "$entry" ] && [ ! -L "$entry" ] || continue
     count=$((count + 1))
   done
   assert [ "$count" -gt 0 ]

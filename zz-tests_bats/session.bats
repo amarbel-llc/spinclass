@@ -8,6 +8,24 @@ setup() {
   create_repo
 }
 
+function assert_session_state_rejects_a_closed_sessions_tombstone { # @test
+  # #52: a cleanly closed session leaves a tombstone (a regular file in the
+  # index) for tombstone-retention. assert_session_state means "a live session
+  # is tracked", so it must not pass on the tombstone alone;
+  # assert_closed_session_state is the tombstone assertion.
+  cd "$TEST_REPO" || return
+  run_sc start --no-attach
+  assert_success
+  local wt_path
+  wt_path=$(extract_wt_path "$output")
+  run_sc close --force "$(basename "$wt_path")"
+  assert_success
+
+  run assert_session_state
+  assert_failure
+  assert_closed_session_state
+}
+
 function spinclass_start_writes_session_state { # @test
   cd "$TEST_REPO" || return
   run_sc_session start
