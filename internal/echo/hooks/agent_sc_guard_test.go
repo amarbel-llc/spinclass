@@ -58,6 +58,17 @@ func TestBashScVerbPolicy(t *testing.T) {
 		{"unparseable but sc-looking", `sc merge "unterminated`, "operator"},
 		{"help flag after other args", "sc close-child-session x --force -h", mcp + "close-child-session"},
 		{"help flag after a positional", "sc merge foo --help", mcp + "merge-this-session"},
+		{"command wrapper", "command sc merge", mcp + "merge-this-session"},
+		{"exec wrapper", "exec spinclass merge", mcp + "merge-this-session"},
+		{"time wrapper", "time sc merge", mcp + "merge-this-session"},
+		{"nice with a value flag", "nice -n 10 sc merge", mcp + "merge-this-session"},
+		{"sudo with a user", "sudo -u someone sc merge", mcp + "merge-this-session"},
+		{"quoted binary", `"sc" merge`, mcp + "merge-this-session"},
+		{"single-quoted verb", `sc 'merge'`, mcp + "merge-this-session"},
+		{"quoted store path", `'/nix/store/abc-spinclass-0.2.1/bin/spinclass' restart-this-session`, mcp + "restart-this-session"},
+		{"in a subshell", "(cd /tmp && sc merge)", mcp + "merge-this-session"},
+		{"in backticks", "echo `sc merge`", mcp + "merge-this-session"},
+		{"background job", "sc merge &", mcp + "merge-this-session"},
 	}
 	for _, tc := range denied {
 		for _, disallow := range []bool{false, true} {
