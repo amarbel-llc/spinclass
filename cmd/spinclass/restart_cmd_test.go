@@ -781,6 +781,43 @@ func TestCancelRestartChildNeedsTheRestartRight(t *testing.T) {
 	}
 }
 
+// The missing-right refusal's operator alternative is per verb: a restart
+// refusal must not point at `sc close` (#420).
+func TestRestartVerbsRefuseWithoutTheRightNamingARestartAlternative(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		call func(*testing.T, string) (string, bool)
+		tool string
+	}{
+		{"restart-child-session", callRestartChild, "restart-child-session"},
+		{"cancel-restart", callCancel, "cancel-restart"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stubRestartHandoff(t, "", nil)
+			stubNotifyPrincipal(t)
+			restartChildFixture(t, "holder", session.State{
+				Holders:      []string{"holder"},
+				HandleRights: map[string]string{"holder": "observe,close"},
+				RestartRequest: &session.RestartRequest{
+					RequestedAt: time.Now().UTC(), Requester: "someone", Reason: "r", When: "idle",
+				},
+			})
+			text, isErr := tc.call(t, `{"child":"worker/kid"}`)
+			if !isErr {
+				t.Fatalf("expected a refusal, got %q", text)
+			}
+			if strings.Contains(text, "sc close") {
+				t.Errorf("restart refusal must not suggest `sc close`: %q", text)
+			}
+			for _, want := range []string{tc.tool + " needs restart", "from a terminal outside the session"} {
+				if !strings.Contains(text, want) {
+					t.Errorf("refusal %q missing %q", text, want)
+				}
+			}
+		})
+	}
+}
+
 func TestCancelRestartChildRefusedWithoutAHandle(t *testing.T) {
 	stubNotifyPrincipal(t)
 	repoPath, _ := restartChildFixture(t, "stranger", session.State{

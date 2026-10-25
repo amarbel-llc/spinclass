@@ -83,6 +83,43 @@ func TestRunAcceptsParentLayerURLResolver(t *testing.T) {
 	}
 }
 
+func TestRunWarnsOnRepoLayerRestart(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", home)
+	repoDir := filepath.Join(home, "eng", "myrepo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeSweatfile(t, filepath.Join(repoDir, "sweatfile"), "[session-entry]\nrestart = [\"clown\", \"restart\"]\n")
+
+	var buf bytes.Buffer
+	Run(&buf, home, repoDir)
+	out := buf.String()
+	if !strings.Contains(out, "session-entry valid # warning") || !strings.Contains(out, "restart") {
+		t.Errorf("expected restart warning, got:\n%s", out)
+	}
+	if strings.Contains(out, "not ok") {
+		t.Errorf("restart reported as an error:\n%s", out)
+	}
+}
+
+func TestRunAcceptsParentLayerRestart(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", home)
+	repoDir := filepath.Join(home, "eng", "myrepo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeSweatfile(t, filepath.Join(home, "eng", "sweatfile"), "[session-entry]\nrestart = [\"clown\", \"restart\"]\n")
+
+	var buf bytes.Buffer
+	Run(&buf, home, repoDir)
+	out := buf.String()
+	if strings.Contains(out, "warning") || strings.Contains(out, "not ok") {
+		t.Errorf("parent-layer restart should be clean, got:\n%s", out)
+	}
+}
+
 func TestRunInvalidSyntax(t *testing.T) {
 	home := t.TempDir()
 	repoDir := filepath.Join(home, "eng", "myrepo")

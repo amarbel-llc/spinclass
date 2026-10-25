@@ -558,6 +558,21 @@ func CheckAuth(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 	return issues
 }
 
+// CheckRestartHandoff warns about a [session-entry].restart set in a layer that
+// may not set it (#420): it is a command spinclass execs, so
+// sweatfileio.TrustedRestartHandoff ignores it outside the global sweatfile and
+// layers above the repo.
+func CheckRestartHandoff(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
+	if sf.SessionEntry == nil || sf.SessionEntry.Restart == nil || layerAboveRepo {
+		return nil
+	}
+	return []Issue{{
+		Message:  "[session-entry] sets `restart` in a repo-level sweatfile: it is ignored — it is a command spinclass runs, so only the global sweatfile or one above the repo (parent directories) may set it; move it up",
+		Severity: SeverityWarning,
+		Field:    "session-entry.restart",
+	}}
+}
+
 // CheckProfileRights validates the [profile-rights] table (FDR 0034). `enforce`
 // is honoured only from layers above the repo, and is reliable only from the
 // GLOBAL sweatfile: a spawner outside a non-global parent directory never
@@ -971,7 +986,9 @@ func Run(w io.Writer, home, repoDir string) int {
 		}
 
 		if src.File.SessionEntry != nil {
-			if issues := CheckSessionEntry(src.File); len(issues) > 0 {
+			issues := CheckSessionEntry(src.File)
+			issues = append(issues, CheckRestartHandoff(src.File, sweatfileio.LayerAboveRepo(src.Path, home, mainRoot))...)
+			if len(issues) > 0 {
 				for _, iss := range issues {
 					if iss.Severity == SeverityError {
 						diag := map[string]string{

@@ -102,7 +102,7 @@ func callerHandleRights(callerPrincipal string, child session.State) session.Han
 
 // requireHandleRight refuses (principle 9: say what you hold, what is needed,
 // who can grant it) unless the caller holds right on child. tool names the
-// refusing tool in the message.
+// refusing tool in the message and picks the operator alternative that ends it.
 func requireHandleRight(tool, right, callerPrincipal string, child session.State) error {
 	held := callerHandleRights(callerPrincipal, child)
 	if held.Has(right) {
@@ -113,9 +113,22 @@ func requireHandleRight(tool, right, callerPrincipal string, child session.State
 		with = strings.Join(h, ", ")
 	}
 	return fmt.Errorf(
-		"%s refused: you hold %s on %s; %s needs %s; holders with it: %s; ask one to grant it, or run `sc close %s`",
-		tool, held, child.Key(), tool, right, with, child.Key(),
+		"%s refused: you hold %s on %s; %s needs %s; holders with it: %s; ask one to grant it, or %s",
+		tool, held, child.Key(), tool, right, with, operatorAlternative(tool, child),
 	)
+}
+
+// operatorAlternative is the refusal's closing "or ..." clause: what the human
+// operator can do without the missing right. Restart verbs must not point at
+// `sc close` (#420), which would destroy the session the caller wanted to
+// restart.
+func operatorAlternative(tool string, child session.State) string {
+	switch tool {
+	case "restart-child-session", "cancel-restart":
+		return fmt.Sprintf("the operator can restart %s from a terminal outside the session", child.Key())
+	default:
+		return fmt.Sprintf("run `sc close %s`", child.Key())
+	}
 }
 
 // spawnerReleasedMessage is the refusal for a caller whose only claim is the

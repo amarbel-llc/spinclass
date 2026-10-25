@@ -1221,7 +1221,8 @@ readable by others.
 
 	Read live, at restart time, only from the global sweatfile and layers above
 	the repo, and never pinned into session state, so sessions that already
-	exist get it. A repo or worktree value is ignored: it
+	exist get it. A repo or worktree value is ignored (*sc validate* warns
+	about a repo-level one): it
 	is a command spinclass runs, so the agent must not be able to choose it.
 	The last layer above the repo that sets it wins, and an explicit *[]*
 	clears an inherited value. *Merge:* never merged; read through the trusted

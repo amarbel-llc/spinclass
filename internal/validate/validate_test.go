@@ -659,6 +659,27 @@ func TestCheckAuthWarnsRepoLayerURLResolver(t *testing.T) {
 	}
 }
 
+func TestCheckRestartHandoffWarnsRepoLayer(t *testing.T) {
+	sf := sweatfile.Sweatfile{SessionEntry: &sweatfile.SessionEntry{Restart: []string{"clown", "restart"}}}
+	has := func(issues []Issue) bool {
+		for _, iss := range issues {
+			if iss.Field == "session-entry.restart" && iss.Severity == SeverityWarning {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(CheckRestartHandoff(sf, false)) {
+		t.Error("repo-layer restart should warn")
+	}
+	if has(CheckRestartHandoff(sf, true)) {
+		t.Error("above-repo restart should not warn")
+	}
+	if has(CheckRestartHandoff(sweatfile.Sweatfile{SessionEntry: &sweatfile.SessionEntry{}}, false)) {
+		t.Error("an unset restart should not warn")
+	}
+}
+
 func TestCheckProfileRightsWarnsUnlessGlobal(t *testing.T) {
 	on := true
 	sf := sweatfile.Sweatfile{ProfileRights: &sweatfile.ProfileRights{Enforce: &on}}
