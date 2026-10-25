@@ -857,9 +857,11 @@ spinclass's own, to be corrected if piggy or the operator disagrees.
 19. **Link lifecycle.** A child link is bound to the child's session key and
     refused if that key already has a binding. It is unbound if the spawn fails
     after minting it, and when the session ends by `sc close`, a merge
-    teardown, `sc clean`, or the removal of an abandoned session. Known
-    residual: minting is check-then-bind without a lock, narrowed by worktree
-    creation failing for a duplicate key. `sc profile-grant-import` stores every
+    teardown, `sc clean`, or the removal of an abandoned session. The binding
+    is an atomic create-if-absent (`grantstore.BindNew`, spinclass#377), so
+    of concurrent spawns minting a link for one key exactly one wins; any
+    index file for the key, even a stale one, counts as a binding.
+    `sc profile-grant-import` stores every
     record before binding any and refuses to rebind a grantee that already has a
     different current record unless the new one widens it or `--replace` is
     passed; two unrelated roots for one grantee in a single batch are not yet

@@ -152,6 +152,10 @@ func heldList(g profilegrant.Grant) string {
 	return strings.Join(names, ", ")
 }
 
+func alreadyBoundError(childSession string) error {
+	return fmt.Errorf("cannot issue a child link: session %q already has a grant binding", childSession)
+}
+
 // IssueChildLink mints the narrowing link that gives the child its own right
 // to the profile, or reports (zero, false, nil) when the spawner may not pass
 // the right on: the child then runs under the profile but holds nothing to
@@ -169,9 +173,10 @@ func (c *Checker) IssueChildLink(a *Authorization, driverPrincipal, childSession
 	}
 	// A key must not inherit or overwrite a binding: a blessed grant, a
 	// previous link, or a reused session key would otherwise be silently
-	// replaced by (or leak into) this child's authority.
+	// replaced by (or leak into) this child's authority. Checked early for a
+	// clear refusal; BindNew below enforces it atomically (spinclass#377).
 	if _, bound := c.Store.Current(childSession); bound {
-		return profilegrant.Record{}, false, fmt.Errorf("cannot issue a child link: session %q already has a grant binding", childSession)
+		return profilegrant.Record{}, false, alreadyBoundError(childSession)
 	}
 	nonce := make([]byte, 16)
 	if _, err := rand.Read(nonce); err != nil {
@@ -197,7 +202,10 @@ func (c *Checker) IssueChildLink(a *Authorization, driverPrincipal, childSession
 	if err := c.Store.Put(rec); err != nil {
 		return profilegrant.Record{}, false, fmt.Errorf("cannot issue a child link: %w", err)
 	}
-	if err := c.Store.Bind(childSession, recDigest); err != nil {
+	if err := c.Store.BindNew(childSession, recDigest); err != nil {
+		if errors.Is(err, grantstore.ErrAlreadyBound) {
+			return profilegrant.Record{}, false, alreadyBoundError(childSession)
+		}
 		return profilegrant.Record{}, false, fmt.Errorf("cannot issue a child link: %w", err)
 	}
 	if _, err := profilegrant.Walk(c.Now(), rec, c.Store.Resolver(), c.verifier(a.keys), c.walkOptions()); err != nil {

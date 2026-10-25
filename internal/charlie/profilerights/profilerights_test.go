@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -340,6 +341,46 @@ func TestIssueChildLinkRefusesAKeyThatAlreadyHasABinding(t *testing.T) {
 	e.bless(e.card, "repo/blessed", map[string]string{profile: digest}, profilegrant.OnwardNone, now.Add(time.Hour))
 	if _, _, err := e.c.IssueChildLink(a, driverPrincipal, "repo/blessed", profile, digest); err == nil {
 		t.Error("a link was minted over a blessed grant's key")
+	}
+}
+
+// spinclass#377: concurrent spawns minting a link for one child key; exactly
+// one is issued and stays bound.
+func TestConcurrentIssueChildLinkOneWinner(t *testing.T) {
+	e := newEnv(t)
+	e.root(profilegrant.OnwardGrant)
+	a := mustAuthorize(t, e.c, driverPrincipal, "")
+
+	const n = 8
+	type result struct {
+		rec    profilegrant.Record
+		issued bool
+		err    error
+	}
+	results := make([]result, n)
+	var wg sync.WaitGroup
+	for i := range results {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rec, issued, err := e.c.IssueChildLink(a, driverPrincipal, "repo/child", profile, digest)
+			results[i] = result{rec, issued, err}
+		}()
+	}
+	wg.Wait()
+	var winner profilegrant.Record
+	wins := 0
+	for _, r := range results {
+		if r.issued && r.err == nil {
+			wins++
+			winner = r.rec
+		}
+	}
+	if wins != 1 {
+		t.Fatalf("%d links issued for one key, want exactly 1: %+v", wins, results)
+	}
+	if cur, ok := e.store.Current("repo/child"); !ok || cur.Digest != winner.Digest {
+		t.Errorf("the bound record is not the issued link")
 	}
 }
 

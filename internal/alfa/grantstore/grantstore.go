@@ -220,22 +220,60 @@ func (s *Store) Resolver() profilegrant.Resolver { return s.Get }
 // Bind records digest as grantee's current record. The record must already be
 // in the store and name grantee as its grantee.
 func (s *Store) Bind(grantee, digest string) error {
-	name, err := granteeFilename(grantee)
+	path, err := s.bindingPath(grantee, digest)
 	if err != nil {
 		return err
 	}
+	return writeAtomic(s.index, path, []byte(digest))
+}
+
+// bindingPath checks that digest may be bound to grantee and returns
+// grantee's index file.
+func (s *Store) bindingPath(grantee, digest string) (string, error) {
+	name, err := granteeFilename(grantee)
+	if err != nil {
+		return "", err
+	}
 	rec, ok := s.Get(digest)
 	if !ok {
-		return fmt.Errorf("grantstore: bind %s: record %s not in store", grantee, digest)
+		return "", fmt.Errorf("grantstore: bind %s: record %s not in store", grantee, digest)
 	}
 	g, err := profilegrant.ParseCanonicalText(rec.Text)
 	if err != nil {
-		return fmt.Errorf("grantstore: bind %s: %w", grantee, err)
+		return "", fmt.Errorf("grantstore: bind %s: %w", grantee, err)
 	}
 	if g.Grantee != grantee {
-		return fmt.Errorf("grantstore: bind %s: record %s is granted to %q", grantee, digest, g.Grantee)
+		return "", fmt.Errorf("grantstore: bind %s: record %s is granted to %q", grantee, digest, g.Grantee)
 	}
-	return writeAtomic(s.index, filepath.Join(s.index, name), []byte(digest))
+	return filepath.Join(s.index, name), nil
+}
+
+// ErrAlreadyBound is what BindNew's error satisfies when grantee already has
+// a binding.
+var ErrAlreadyBound = errors.New("grantee already has a binding")
+
+// BindNew is Bind for a grantee that must not have a binding yet: an atomic
+// create-if-absent, so of concurrent callers exactly one wins (spinclass#377).
+// Any existing index file counts as a binding, even one Current would ignore
+// as stale or tampered, because the key has been used.
+func (s *Store) BindNew(grantee, digest string) error {
+	path, err := s.bindingPath(grantee, digest)
+	if err != nil {
+		return err
+	}
+	tmp, err := writeTemp(s.index, []byte(digest))
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp)
+	// Link, not rename: link fails with EEXIST instead of replacing.
+	if err := os.Link(tmp, path); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("grantstore: bind %s: %w", grantee, ErrAlreadyBound)
+		}
+		return fmt.Errorf("grantstore: %w", err)
+	}
+	return nil
 }
 
 // Current returns grantee's bound record, re-verified like Get.
