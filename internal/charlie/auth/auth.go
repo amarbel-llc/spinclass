@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/0/agentretry"
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/alfa/landing"
@@ -419,7 +420,15 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 	if hosts := sf.AuthForgeHosts(); len(hosts) > 0 && !slices.Contains(hosts, res.Forge.Host) {
 		return MintOutcome{}, fmt.Errorf("[auth] url-resolver: canonical_https host %q is not in forge-hosts %v", res.Forge.Host, hosts)
 	}
-	out, err := hookrun.CommandCapture(ctx, id.WorktreePath, *cmd, id.env(res.Forge, res.OriginURL))
+	// The mint usually signs with the operator's card through the ssh-agent,
+	// which can be briefly unreachable (a forwarded agent on a lossy link): ride
+	// that out, and name it when it persists (spinclass#411).
+	var out string
+	err = agentretry.Do(ctx, func() (string, error) {
+		var runErr error
+		out, runErr = hookrun.CommandCapture(ctx, id.WorktreePath, *cmd, id.env(res.Forge, res.OriginURL))
+		return out, runErr
+	})
 	if err != nil {
 		return MintOutcome{}, fmt.Errorf("[auth] mint-command failed: %w", err)
 	}

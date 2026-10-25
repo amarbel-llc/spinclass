@@ -31,6 +31,7 @@ import (
 	"strings"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/0/agentretry"
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/alfa/landing"
 )
@@ -167,9 +168,25 @@ func Freshen(ctx context.Context, repoPath string, allowStale, required bool) (R
 		return res, nil
 	}
 
-	fctx, cancel := context.WithTimeout(ctx, fetchTimeout)
-	defer cancel()
-	if out, err := target.Fetch(fctx, repoPath); err != nil {
+	// An ssh remote reaches the forge through the operator's agent, which can
+	// be briefly unreachable: on session creation, retry that and name it when
+	// it persists (spinclass#411). A resume only skips on a failed fetch, so it
+	// does not wait. Each attempt gets its own fetchTimeout.
+	var out string
+	fetch := func() (string, error) {
+		fctx, cancel := context.WithTimeout(ctx, fetchTimeout)
+		defer cancel()
+		var ferr error
+		out, ferr = target.Fetch(fctx, repoPath)
+		return out, ferr
+	}
+	var err error
+	if required {
+		err = agentretry.Do(ctx, fetch)
+	} else {
+		_, err = fetch()
+	}
+	if err != nil {
 		return stale(fmt.Sprintf("could not fetch %s from %s: %v%s",
 			branch, remote, err, indentDetail(out)))
 	}
