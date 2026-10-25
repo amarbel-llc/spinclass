@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/0/git"
 )
 
 // ValidateName rejects a session/worktree name that would break fleet MUC

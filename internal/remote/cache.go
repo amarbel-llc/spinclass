@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/session"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 // xdgStateBase returns $XDG_STATE_HOME or its fallback. Mirrors the

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 )
 
 // A destination beginning with "-" is an ssh option, and options such as

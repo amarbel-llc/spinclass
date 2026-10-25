@@ -3,7 +3,7 @@ package sweatfileio
 import (
 	"testing"
 
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 )
 
 // TestDecodeSpawnProfile pins the [session-entry].spawn-profile key through

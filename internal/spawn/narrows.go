@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"code.linenisgreat.com/spinclass/internal/profilegrant"
+	"code.linenisgreat.com/spinclass/internal/0/profilegrant"
 )
 
 // catalogWidenings lists every way child widens base at the catalog level

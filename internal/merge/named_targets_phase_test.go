@@ -6,7 +6,7 @@ import (
 
 	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
 
-	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/0/git"
 )
 
 // landed reports whether the feature merge reached main (a.txt is present).

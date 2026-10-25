@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/store"
 )
 

@@ -2,7 +2,7 @@
 // on-attach/on-detach, pre-merge, repair, post-merge (the legacy string and
 // the named [[post-merge]] targets) — plus the [auth] mint/revoke commands.
 //
-// It is deliberately separate from internal/sweatfile, which is the config
+// It is deliberately separate from internal/0/sweatfile, which is the config
 // SCHEMA (structs, hierarchy merge, the tommy codec, the accessors) and
 // imports nothing else in the module. Running a hook needs clown (the #25
 // systemd scope), direnv (devshell scoping) and process plumbing, and it is
@@ -31,9 +31,9 @@ import (
 	"syscall"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/clown"
+	"code.linenisgreat.com/spinclass/internal/0/clown"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/direnv"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 // Create runs the [hooks].create command in worktreePath.

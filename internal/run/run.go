@@ -37,14 +37,14 @@ import (
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 	"github.com/mattn/go-isatty"
 
+	"code.linenisgreat.com/spinclass/internal/0/git"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/executor"
-	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/merge"
 	"code.linenisgreat.com/spinclass/internal/present"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sessionexec"
 	"code.linenisgreat.com/spinclass/internal/shop"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 )

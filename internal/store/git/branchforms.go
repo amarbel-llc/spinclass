@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/0/git"
 )
 
 // Accepted forms for branch create, checkout and delete (FDR 0036, #393).

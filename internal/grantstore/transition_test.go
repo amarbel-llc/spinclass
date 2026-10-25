@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/profilegrant"
+	"code.linenisgreat.com/spinclass/internal/0/profilegrant"
 )
 
 func transitionRecord(t *testing.T, profile, from, to string) profilegrant.TransitionRecord {

@@ -16,8 +16,8 @@ import (
 	"syscall"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/git"
-	"code.linenisgreat.com/spinclass/internal/sessionlog"
+	"code.linenisgreat.com/spinclass/internal/0/git"
+	"code.linenisgreat.com/spinclass/internal/0/sessionlog"
 )
 
 // Credential is State.Credential: the mint/revoke record of a session's forge

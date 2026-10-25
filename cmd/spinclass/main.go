@@ -10,10 +10,10 @@ import (
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	commandhuh "code.linenisgreat.com/purse-first/libs/go-mcp/command/huh"
 
+	"code.linenisgreat.com/spinclass/internal/0/embeds"
+	"code.linenisgreat.com/spinclass/internal/0/sessionlog"
 	"code.linenisgreat.com/spinclass/internal/confinement"
-	"code.linenisgreat.com/spinclass/internal/embeds"
 	"code.linenisgreat.com/spinclass/internal/session"
-	"code.linenisgreat.com/spinclass/internal/sessionlog"
 )
 
 func main() {

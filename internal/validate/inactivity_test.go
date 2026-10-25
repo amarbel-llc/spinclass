@@ -3,7 +3,7 @@ package validate
 import (
 	"testing"
 
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 )
 
 func TestCheckHooksInactivityTimeout(t *testing.T) {

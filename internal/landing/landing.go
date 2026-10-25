@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"strings"
 
-	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/0/git"
 )
 
 // ManPage is cited by every local-advance skip so the reader learns why the

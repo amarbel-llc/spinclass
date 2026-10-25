@@ -14,11 +14,11 @@ import (
 	"golang.org/x/term"
 
 	"code.linenisgreat.com/purse-first/libs/dewey/pkgs/mesa"
-	"code.linenisgreat.com/spinclass/internal/clown"
+	"code.linenisgreat.com/spinclass/internal/0/clown"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sessionpick"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 // listMode is the resolved rendering for a CLI `sc list` invocation.

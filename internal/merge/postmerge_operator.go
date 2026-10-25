@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/0/git"
 )
 
 // The operator-facing side of the post-merge section rule: what `sc merge

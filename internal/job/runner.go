@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/clown"
-	"code.linenisgreat.com/spinclass/internal/embeds"
-	"code.linenisgreat.com/spinclass/internal/madder"
-	"code.linenisgreat.com/spinclass/internal/safeio"
+	"code.linenisgreat.com/spinclass/internal/0/clown"
+	"code.linenisgreat.com/spinclass/internal/0/embeds"
+	"code.linenisgreat.com/spinclass/internal/0/madder"
+	"code.linenisgreat.com/spinclass/internal/0/safeio"
 )
 
 // Func is the unit of work a background job runs. It receives a context that

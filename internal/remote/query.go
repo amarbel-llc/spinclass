@@ -8,8 +8,8 @@ import (
 	"os/exec"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/session"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 // queryTimeout bounds each per-host list query. Tuning lever (see the
@@ -22,7 +22,7 @@ const queryTimeout = 3 * time.Second
 // the session.ListRow wire array the remote spinclass serves. Non-zero
 // exit, timeout, or unparseable output (e.g. an old remote binary without
 // json support) yields an error carrying any stderr detail — never partial
-// rows. Error shape mirrors internal/clown's run().
+// rows. Error shape mirrors internal/0/clown's run().
 func QueryHost(ctx context.Context, r sweatfile.Remote) ([]session.ListRow, error) {
 	if err := CheckDest(r); err != nil {
 		return nil, err

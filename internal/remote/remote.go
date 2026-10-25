@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 )
 
 // CheckDest refuses a remote whose ssh destination begins with "-": ssh would

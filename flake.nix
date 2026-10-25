@@ -116,11 +116,11 @@
 
     # ringmaster: clown's job platform (durable job journal +
     # wake-on-completion channel), extracted standalone from clown and now
-    # upstream of both troupe and clown. internal/clown shells out to its CLI
+    # upstream of both troupe and clown. internal/0/clown shells out to its CLI
     # to emit async-job lifecycle events (FDR 0010).
     #
     # Consumed ONLY as a checkPhase input: it puts a real `ringmaster` on PATH
-    # inside the sandbox so internal/clown's contract test exercises the actual
+    # inside the sandbox so internal/0/clown's contract test exercises the actual
     # argv + journal behaviour instead of the stub it had to settle for before
     # (#253). This is deliberately NOT a runtime pin — the binary still
     # resolves from PATH at run time, gated on CLOWN_BIN, so the shipped
@@ -413,7 +413,7 @@
             # On PATH in every escape-hatch run (godyn-go), for go:generate.
             goRunInputs = [ tommy.packages.${system}.default ];
 
-            # On PATH for tests on both backends: internal/clown's contract
+            # On PATH for tests on both backends: internal/0/clown's contract
             # tests drive the real ringmaster CLI (#253).
             nativeCheckInputs = [
               pkgs.git
@@ -623,6 +623,22 @@
           inherit spinclass-build_go_application;
           inherit spinclass-serve-integration;
           inherit spinclass-race;
+          # The dagnabit package-layout check (#414), hand-wired to mirror
+          # conformist's lib.mkLayoutCheck (conformist >= bd23d33) without a
+          # conformist bump: `dagnabit -n internal` in the module godyn renders
+          # from go.nix, failing on any would-move line. A package, not a check,
+          # until the per-level moves land; `just lint-layout` builds it.
+          layout-check = spinclass-default.passthru.codegenCheck {
+            command = ''
+              moves=$(dagnabit -n internal)
+              if [ -n "$moves" ]; then
+                echo "$moves"
+                echo "FAIL: dagnabit would move packages (above); move them by hand to the level shown." >&2
+                exit 1
+              fi
+            '';
+            nativeBuildInputs = [ inputs.purse-first.packages.${system}.dagnabit ];
+          };
           # The generated impure-lane config (git-state eng-convention checks),
           # consumed by `just lint-worktree` to run `conformist check` against
           # the working tree where .git is available. See conformistImpureEval
@@ -648,7 +664,7 @@
           # vendored module tree, failing on any diff. Backend-independent.
           # `just verify-tommy-codegen` builds this.
           tommy-codegen = spinclass-default.passthru.codegenCheck {
-            command = "go generate ./internal/sweatfile/";
+            command = "go generate ./internal/0/sweatfile/";
             nativeBuildInputs = [ tommy.packages.${system}.default ];
           };
         }
@@ -711,7 +727,7 @@
             pkgs.statix
             pkgs.deadnix
             # tommy codegen tool, from the same flake input that backs the
-            # bridged tommy library — so `go generate ./internal/sweatfile`
+            # bridged tommy library — so `go generate ./internal/0/sweatfile`
             # (//go:generate tommy generate) targets a matching cst API.
             tommy.packages.${system}.default
             # ringmaster CLI on the devshell PATH so `ringmaster version

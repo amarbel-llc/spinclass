@@ -7,15 +7,15 @@ import (
 	"slices"
 	"strings"
 
+	"code.linenisgreat.com/spinclass/internal/0/claude"
+	"code.linenisgreat.com/spinclass/internal/0/embeds"
+	"code.linenisgreat.com/spinclass/internal/0/git"
+	"code.linenisgreat.com/spinclass/internal/0/madder"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/apply"
-	"code.linenisgreat.com/spinclass/internal/claude"
 	"code.linenisgreat.com/spinclass/internal/dodder"
-	"code.linenisgreat.com/spinclass/internal/embeds"
-	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/hookrun"
-	"code.linenisgreat.com/spinclass/internal/madder"
 	"code.linenisgreat.com/spinclass/internal/setupfingerprint"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 )
 

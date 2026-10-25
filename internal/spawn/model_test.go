@@ -7,7 +7,7 @@ import (
 
 // testClaudeModelIDs mirrors sweatfile.GetDefault()'s built-in
 // [session-entry.model-ids] seed, kept as a local fixture so this package's
-// tests don't need to import internal/sweatfile just to exercise the
+// tests don't need to import internal/0/sweatfile just to exercise the
 // alias->ID rewrite.
 var testClaudeModelIDs = map[string]string{
 	"sonnet": "claude-sonnet-5-5",

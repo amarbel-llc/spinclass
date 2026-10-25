@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"testing"
 
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/session"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 

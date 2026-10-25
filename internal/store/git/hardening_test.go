@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	gitpkg "code.linenisgreat.com/spinclass/internal/git"
+	gitpkg "code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/store"
 )
 

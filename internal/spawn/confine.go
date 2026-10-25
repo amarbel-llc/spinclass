@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/0/git"
+	"code.linenisgreat.com/spinclass/internal/0/spawnhandshake"
 	"code.linenisgreat.com/spinclass/internal/confinement"
-	"code.linenisgreat.com/spinclass/internal/git"
-	"code.linenisgreat.com/spinclass/internal/spawnhandshake"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 )

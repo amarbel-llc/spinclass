@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"code.linenisgreat.com/spinclass/internal/embeds"
-	"code.linenisgreat.com/spinclass/internal/madder"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/0/embeds"
+	"code.linenisgreat.com/spinclass/internal/0/madder"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/testfs"
 	"code.linenisgreat.com/spinclass/internal/testgit"
 )

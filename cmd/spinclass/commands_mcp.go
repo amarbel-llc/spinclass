@@ -11,8 +11,8 @@ import (
 	"code.linenisgreat.com/purse-first/libs/go-mcp/server"
 	"code.linenisgreat.com/purse-first/libs/go-mcp/transport"
 
-	"code.linenisgreat.com/spinclass/internal/clown"
-	"code.linenisgreat.com/spinclass/internal/embeds"
+	"code.linenisgreat.com/spinclass/internal/0/clown"
+	"code.linenisgreat.com/spinclass/internal/0/embeds"
 	"code.linenisgreat.com/spinclass/internal/resources"
 	"code.linenisgreat.com/spinclass/internal/servelog"
 	"code.linenisgreat.com/spinclass/internal/spawn"

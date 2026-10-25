@@ -10,7 +10,7 @@ import (
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
-	"code.linenisgreat.com/spinclass/internal/clown"
+	"code.linenisgreat.com/spinclass/internal/0/clown"
 	"code.linenisgreat.com/spinclass/internal/executor"
 	"code.linenisgreat.com/spinclass/internal/job"
 	"code.linenisgreat.com/spinclass/internal/merge"

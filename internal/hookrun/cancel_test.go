@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	. "code.linenisgreat.com/spinclass/internal/hookrun"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 // Cancelling a hook must tear down its CHILDREN, not merely stop waiting on

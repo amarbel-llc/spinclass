@@ -1,5 +1,5 @@
 // Package dodder wraps the per-worktree dodder repository init flow.
-// The dodder binary path is supplied at build time via internal/embeds
+// The dodder binary path is supplied at build time via internal/0/embeds
 // + lib.mkSpinclass; when empty, every operation here is a no-op.
 //
 // A dodder repository is layered over the per-worktree madder blob
@@ -17,10 +17,10 @@ import (
 	"strings"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/madder"
+	"code.linenisgreat.com/spinclass/internal/0/madder"
 )
 
-// Public contract knobs, mirroring internal/madder. ExcludePattern
+// Public contract knobs, mirroring internal/0/madder.ExcludePattern
 // lands in `.git/info/exclude` and AllowRule lands in Claude Code's
 // permission allow-list when dodder activation runs.
 const (

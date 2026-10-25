@@ -15,9 +15,10 @@ import (
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
+	"code.linenisgreat.com/spinclass/internal/0/clown"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/check"
 	spinclose "code.linenisgreat.com/spinclass/internal/close"
-	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/executor"
 	"code.linenisgreat.com/spinclass/internal/merge"
 	"code.linenisgreat.com/spinclass/internal/present"
@@ -28,7 +29,6 @@ import (
 	"code.linenisgreat.com/spinclass/internal/sessionpick"
 	"code.linenisgreat.com/spinclass/internal/shop"
 	"code.linenisgreat.com/spinclass/internal/spawn"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 	"github.com/mattn/go-isatty"
@@ -53,7 +53,7 @@ func registerSessionCommands(app *command.App) {
 
 	// `start-gh_pr` and `start-gh_issue` are registered dynamically from
 	// sweatfile.GetDefault()'s baked-in [[start-commands]] entries via
-	// registerPluginStartCommands(). See internal/sweatfile/sweatfile.go
+	// registerPluginStartCommands(). See internal/0/sweatfile/sweatfile.go
 	// defaultStartCommands().
 
 	app.AddCommand(&command.Command{

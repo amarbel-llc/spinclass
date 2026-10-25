@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 )
 
 func dptr(d time.Duration) *time.Duration { return &d }

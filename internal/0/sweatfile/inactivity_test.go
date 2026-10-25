@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	. "code.linenisgreat.com/spinclass/internal/sweatfile"
+	. "code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 )
 

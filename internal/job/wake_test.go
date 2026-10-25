@@ -12,7 +12,7 @@ import (
 
 	"code.linenisgreat.com/ringmaster/pkgs/jobwake"
 
-	"code.linenisgreat.com/spinclass/internal/clown"
+	"code.linenisgreat.com/spinclass/internal/0/clown"
 )
 
 // TestMain strips CLOWN_BIN for the whole package: the dev/CI environment

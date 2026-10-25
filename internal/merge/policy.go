@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
-	"code.linenisgreat.com/spinclass/internal/git"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/0/git"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 )
 
 // AttestationGate is how the caller of a merge satisfied — or did not need to

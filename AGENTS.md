@@ -51,18 +51,18 @@ re-run that suite right before merging.
   `.spinclass/state.json` is a display-only mirror; `active`/`inactive`/
   `abandoned`, dirty computed live.
   Implicit sessions in a main checkout: FDR 0014. Handles/principals: FDR 0032.
-- **Git** (`internal/git/`): thin `git -C <dir>` wrapper (`Run` captures,
+- **Git** (`internal/0/git/`): thin `git -C <dir>` wrapper (`Run` captures,
   `RunPassthrough` streams).
 - **Worktree resolution** (`internal/worktree/`): `ResolvePath()` is the single
   target→path entry point (bare name → `<repo>/.worktrees/<branch>`).
-- **Sweatfile** (`internal/sweatfile/` pure schema + tommy codec;
+- **Sweatfile** (`internal/0/sweatfile/` pure schema + tommy codec;
   `sweatfileio` Parse/Load; `hookrun` runs hooks; `apply` sets up a worktree,
   #309). Split so codegen regenerates cleanly (tommy #93). Reference:
   `spinclass-sweatfile(5)`.
 - **Merge/Pull/Clean** (`internal/merge/`, `pull/`, `clean/`): merge pre-flights
   merge drivers (#324), rebases onto the default branch, then lands; see below.
 - **Permission tiers** (`internal/perms/`): Claude Code hook integration, rules
-  as JSON. **Claude integration** (`internal/claude/`): trust + `claude-allow`.
+  as JSON. **Claude integration** (`internal/0/claude/`): trust + `claude-allow`.
 - **Remote sessions** (`internal/remote/`): `host:` targets, resume-only
   (FDR 0011).
 
@@ -154,7 +154,7 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
   undetected. See `spinclass-sweatfile(5)`.
 - **`sc exec`, multi-target close, nix gc on close/clean**:
   `spinclass-internals(7)`, `spinclass-sweatfile(5)` (`disable-nix-gc`).
-- **Metrics** (`internal/statsd`, #363): `spinclass-local-default-ref(7)`.
+- **Metrics** (`internal/0/statsd`, #363): `spinclass-local-default-ref(7)`.
 - **Grit store tools** (FDR 0036, #379; `internal/store`, `internal/store/git`,
   `cmd/spinclass/grit*_cmd.go`): the nine `grit_*` MCP tools, their
   ownership-based verdicts, agentless remote lane and the `sc grit` escape

@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/sshsig"
+	"code.linenisgreat.com/spinclass/internal/0/sshsig"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 )

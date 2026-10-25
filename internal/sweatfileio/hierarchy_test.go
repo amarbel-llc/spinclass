@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 )
 
 const layerLabel = "abc1234:sweatfile"

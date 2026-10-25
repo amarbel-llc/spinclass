@@ -1,5 +1,5 @@
 // Package madder wraps the per-worktree madder blob-store init flow.
-// The madder binary path is supplied at build time via internal/embeds
+// The madder binary path is supplied at build time via internal/0/embeds
 // + lib.mkSpinclass; when empty, every operation here is a no-op.
 package madder
 

@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/safeio"
+	"code.linenisgreat.com/spinclass/internal/0/safeio"
 )
 
 // Status values for a Job.

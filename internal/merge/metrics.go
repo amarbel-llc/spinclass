@@ -8,10 +8,10 @@ import (
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 
+	"code.linenisgreat.com/spinclass/internal/0/statsd"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/hookrun"
 	"code.linenisgreat.com/spinclass/internal/landing"
-	"code.linenisgreat.com/spinclass/internal/statsd"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 // Merge-landing counters (spinclass#314), emitted only on the queued remote

@@ -11,8 +11,8 @@ import (
 	"strings"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
-	"code.linenisgreat.com/spinclass/internal/git"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/0/git"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 )

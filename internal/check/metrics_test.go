@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/statsd"
+	"code.linenisgreat.com/spinclass/internal/0/statsd"
 )
 
 // statsdSink points STATSD_HOST/STATSD_PORT at a loopback UDP listener and

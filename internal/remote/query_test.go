@@ -9,15 +9,15 @@ import (
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/session"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 // stubSSH writes an executable `ssh` shell script into a temp dir prepended
 // to PATH, so QueryHost's exec resolves to it. The script records its argv
 // (one element per line, appended) into argsFile, then runs body — canned
 // JSON on stdout, stderr noise, non-zero exits, or a sleep, per test case.
-// Mirrors internal/clown/clown_test.go's stubClown.
+// Mirrors internal/0/clown/clown_test.go's stubClown.
 func stubSSH(t *testing.T, argsFile, body string) {
 	t.Helper()
 	dir := t.TempDir()

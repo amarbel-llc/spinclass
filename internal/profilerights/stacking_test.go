@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/profilegrant"
+	"code.linenisgreat.com/spinclass/internal/0/profilegrant"
 )
 
 // D1 V-D1-2 at spawn: a driver holding manager-builder may spawn a worker

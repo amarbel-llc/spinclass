@@ -5,7 +5,7 @@ import (
 	"crypto/rand"
 	"testing"
 
-	"code.linenisgreat.com/spinclass/internal/sshsig"
+	"code.linenisgreat.com/spinclass/internal/0/sshsig"
 	"golang.org/x/crypto/ssh"
 )
 

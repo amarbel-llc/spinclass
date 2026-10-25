@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
+	"code.linenisgreat.com/spinclass/internal/0/profilegrant"
 	"code.linenisgreat.com/spinclass/internal/grantstore"
 	"code.linenisgreat.com/spinclass/internal/grantverify"
-	"code.linenisgreat.com/spinclass/internal/profilegrant"
 )
 
 // Seams for command tests: the store location, the signers file, the clock and

@@ -15,8 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"code.linenisgreat.com/spinclass/internal/profilegrant"
-	"code.linenisgreat.com/spinclass/internal/trustedhome"
+	"code.linenisgreat.com/spinclass/internal/0/profilegrant"
+	"code.linenisgreat.com/spinclass/internal/0/trustedhome"
 )
 
 const (

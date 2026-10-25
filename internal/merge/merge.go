@@ -16,20 +16,20 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/mattn/go-isatty"
 
+	"code.linenisgreat.com/spinclass/internal/0/clown"
+	"code.linenisgreat.com/spinclass/internal/0/git"
+	"code.linenisgreat.com/spinclass/internal/0/mergelock"
+	"code.linenisgreat.com/spinclass/internal/0/statsd"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/check"
-	"code.linenisgreat.com/spinclass/internal/clown"
 	"code.linenisgreat.com/spinclass/internal/executor"
-	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/hookrun"
 	"code.linenisgreat.com/spinclass/internal/landing"
-	"code.linenisgreat.com/spinclass/internal/mergelock"
 	"code.linenisgreat.com/spinclass/internal/present"
 	"code.linenisgreat.com/spinclass/internal/profilerights"
 	"code.linenisgreat.com/spinclass/internal/session"
-	"code.linenisgreat.com/spinclass/internal/statsd"
 	gitstore "code.linenisgreat.com/spinclass/internal/store/git"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 
@@ -423,7 +423,7 @@ const LandWorktreePrefix = ".land-"
 // (the sha PrepareMerge returned).
 //
 // By default (spinclass#235) it serializes on the per-repo landing lock
-// (internal/mergelock, an flock in the shared .git dir) and, under the lock:
+// (internal/0/mergelock, an flock in the shared .git dir) and, under the lock:
 // re-fetches the landing target (gitSync only), checks whether the target tip
 // is still an ancestor of pinnedSha, rebases the pinned commits onto a moved
 // tip in a transient landing worktree when it is not, runs the pre-merge hook

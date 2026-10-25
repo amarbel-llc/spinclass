@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 )
 
 // PostMergeOptions is the per-merge configuration of the post-merge phase

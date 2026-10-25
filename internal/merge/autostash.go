@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
-	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/store"
 	gitstore "code.linenisgreat.com/spinclass/internal/store/git"
 )

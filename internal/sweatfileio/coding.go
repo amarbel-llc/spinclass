@@ -1,6 +1,6 @@
 // Package sweatfileio holds the decode/encode/IO consumers of the generated
 // sweatfile codec: Parse/Load/Save and the hierarchy loaders. These live in a
-// package separate from internal/sweatfile so that the codegen package — the
+// package separate from internal/0/sweatfile so that the codegen package — the
 // struct definitions plus tommy's generated *_tommy.go — contains no
 // hand-written references to the generated Decode/Encode API. That keeps the
 // codegen package type-checkable with the generated file absent, which is what
@@ -14,7 +14,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 )
 
 // Parse decodes sweatfile TOML bytes into a document. tommy's generated decoder

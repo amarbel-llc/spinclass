@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/profilegrant"
+	"code.linenisgreat.com/spinclass/internal/0/profilegrant"
 )
 
 func openTemp(t *testing.T) (*Store, string) {

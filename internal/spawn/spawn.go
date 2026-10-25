@@ -12,12 +12,12 @@ import (
 	"syscall"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/0/safeio"
+	"code.linenisgreat.com/spinclass/internal/0/spawnhandshake"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/confinement"
-	"code.linenisgreat.com/spinclass/internal/safeio"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/shop"
-	"code.linenisgreat.com/spinclass/internal/spawnhandshake"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 )

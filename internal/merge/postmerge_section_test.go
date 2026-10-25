@@ -11,7 +11,7 @@ import (
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 )
 
 // A merge whose landed post-merge section differs from the one on the default

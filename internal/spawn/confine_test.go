@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/0/spawnhandshake"
 	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/confinement"
-	"code.linenisgreat.com/spinclass/internal/spawnhandshake"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 

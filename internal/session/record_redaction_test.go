@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/sessionlog"
+	"code.linenisgreat.com/spinclass/internal/0/sessionlog"
 )
 
 const (

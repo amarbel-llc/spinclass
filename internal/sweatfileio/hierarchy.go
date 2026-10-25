@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"code.linenisgreat.com/spinclass/internal/git"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/0/git"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 )
 
 func LoadDefaultHierarchy() (sweatfile.Hierarchy, error) {

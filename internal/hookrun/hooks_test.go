@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/clown"
-	"code.linenisgreat.com/spinclass/internal/embeds"
+	"code.linenisgreat.com/spinclass/internal/0/clown"
+	"code.linenisgreat.com/spinclass/internal/0/embeds"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	. "code.linenisgreat.com/spinclass/internal/hookrun"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 func sptr(s string) *string { return &s }

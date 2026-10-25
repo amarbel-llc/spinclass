@@ -33,6 +33,15 @@ lint-golangci:
     system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
     nix build ".#checks.${system}.lint" --no-link --print-build-logs
 
+# The dagnabit package-layout check (#414): fails, listing the would-move
+# lines, when a package under internal/ sits at a level other than the one its
+# imports put it at. NOT yet in `just lint`: it joins the gate once the
+# per-level moves have landed (circus's lint-layout-circus-cli is the model).
+#
+# check the internal/ package layout with dagnabit
+lint-layout:
+    nix build .#layout-check --no-link --print-build-logs
+
 # The impure eng-convention checks (git remotes, git-default-branch, sweatfile,
 # agents-md) against the working tree, where .git is available. Runs conformist
 # from the devShell PATH (direnv `use flake`). Go lint runs in the pure
@@ -64,7 +73,7 @@ build-nix:
 #
 # regenerate the tommy-generated sweatfile codec
 build-tommy-codegen:
-    nix run --inputs-from . igloo#godyn-go -- -- go generate ./internal/sweatfile/
+    nix run --inputs-from . igloo#godyn-go -- -- go generate ./internal/0/sweatfile/
 
 # --- test ---
 
@@ -172,12 +181,12 @@ debug-serve-integration:
 debug-go-test dir run='' *flags='':
     nix run --inputs-from . igloo#godyn-test -- {{ dir }} -- {{ if run == '' { '' } else { quote('-test.run=' + run) } }} {{ flags }}
 
-# regenerate internal/sshsig/testdata: real `ssh-keygen -Y sign` vectors from throwaway keys (private keys are never copied out)
+# regenerate internal/0/sshsig/testdata: real `ssh-keygen -Y sign` vectors from throwaway keys (private keys are never copied out)
 [group('debug')]
 debug-sshsig-fixtures:
     #!/usr/bin/env bash
     set -euo pipefail
-    out="$PWD/internal/sshsig/testdata"
+    out="$PWD/internal/0/sshsig/testdata"
     scratch=$(mktemp -d)
     trap 'rm -rf "$scratch"' EXIT
     mkdir -p "$out"
@@ -229,7 +238,7 @@ debug-godyn-test-loop dir='internal/perms':
 debug-codegen-drift:
     #!/usr/bin/env bash
     set -euo pipefail
-    target=internal/sweatfile/sweatfile_tommy.go
+    target=internal/0/sweatfile/sweatfile_tommy.go
     bak="${TMPDIR:-/tmp}/codegen-drift.bak"
     cp "$target" "$bak"
     trap 'cp "$bak" "$target"' EXIT
@@ -290,6 +299,87 @@ debug-godyn-bench:
     echo "incremental edit ($target — leaf, dependents: cmd/spinclass only), rebuild wall-clock:"
     echo "  godyn (spinclass-native):          ${n} ms"
     echo "  buildGoApplication (passthru.bga): ${b} ms"
+
+# [explore] Run the flake-pinned dagnabit (purse-first) with arbitrary args, to
+# learn its CLI and dry-run package-layout moves (#414).
+#
+# run the pinned dagnabit with arbitrary args
+[group('explore')]
+explore-dagnabit *args:
+    nix run --inputs-from . purse-first#dagnabit -- {{ args }}
+
+# [debug] Apply ONE level of the dagnabit -initial layout move (#414) without a
+# go.mod in the checkout: in godyn's rendered module tree (codegenCheck's
+# passthru.codegenPatch, igloo FDR 0008) git-init the tree (dagnabit's mover
+# shells out to `git mv`, purse-first#196), plan with `dagnabit -initial -n
+# internal`, run `dagnabit move` (git mv + import rewrite + gofmt) for each
+# package planned into internal/<level>/, and apply the resulting patch here
+# with `git apply --index` (staged). Run levels in order: 0, alfa, bravo, ...
+#
+# move the packages dagnabit plans for one level into internal/<level>/
+[group('debug')]
+debug-dagnabit-move-level level:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export DAGNABIT_LEVEL={{ quote(level) }} DAGNABIT_TOP="$(git rev-parse --show-toplevel)"
+    read -r -d '' expr <<'EOF' || true
+    let
+      f = builtins.getFlake "git+file:${builtins.getEnv "DAGNABIT_TOP"}";
+      s = builtins.currentSystem;
+      p = f.inputs.nixpkgs-master.legacyPackages.${s};
+      level = builtins.getEnv "DAGNABIT_LEVEL";
+      check = f.packages.${s}.default.passthru.codegenCheck {
+        nativeBuildInputs = [ f.inputs.purse-first.packages.${s}.dagnabit p.git p.jq ];
+        exclude = [ ".git" ];
+        command = ''
+          export HOME=$TMPDIR
+          git init -q . && git add -A
+          dagnabit -initial -n internal > $TMPDIR/plan.ndjson
+          cat $TMPDIR/plan.ndjson >&2
+          jq -r --arg lvl ${level} 'select(.event == "would-move") | select(.dst | startswith("internal/" + $lvl + "/")) | "\(.src) \(.dst)"' $TMPDIR/plan.ndjson > $TMPDIR/moves
+          [ -s $TMPDIR/moves ] || { echo "no moves planned into internal/${level}/" >&2; exit 1; }
+          while read -r src dst; do
+            echo "moving $src -> $dst" >&2
+            dagnabit move -module code.linenisgreat.com/spinclass "$src" "$dst"
+          done < $TMPDIR/moves
+          rm -rf .git
+        '';
+      };
+    in check.passthru.codegenPatch
+    EOF
+    out=$(nix build --impure --no-link --print-out-paths --print-build-logs --expr "$expr")
+    echo "patch: $out/patch" >&2
+    git apply -p2 --index "$out/patch"
+    git diff --cached --stat | tail -n 3
+
+# [explore] Print dagnabit's plan (one NDJSON would-move line per package) for
+# the internal/ tree, in godyn's rendered module tree (#414): `mode=initial`
+# runs `dagnabit -initial -n internal` (the flat-layout plan the per-level
+# moves follow), `mode=layout` the plain `-n internal` that lint-layout gates.
+# A time nonce in the command defeats the cache so every run prints its plan.
+#
+# print dagnabit's internal/ move plan (initial or layout mode)
+[group('explore')]
+explore-dagnabit-plan mode='initial':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case {{ quote(mode) }} in
+      initial) export DAGNABIT_FLAGS="-initial -n" ;;
+      layout) export DAGNABIT_FLAGS="-n" ;;
+      *) echo "mode must be initial or layout" >&2; exit 2 ;;
+    esac
+    export DAGNABIT_TOP="$(git rev-parse --show-toplevel)"
+    read -r -d '' expr <<'EOF' || true
+    let
+      f = builtins.getFlake "git+file:${builtins.getEnv "DAGNABIT_TOP"}";
+      s = builtins.currentSystem;
+      check = f.packages.${s}.default.passthru.codegenCheck {
+        nativeBuildInputs = [ f.inputs.purse-first.packages.${s}.dagnabit ];
+        command = "dagnabit ${builtins.getEnv "DAGNABIT_FLAGS"} internal >&2 # ${toString builtins.currentTime}";
+      };
+    in check.passthru.codegenPatch
+    EOF
+    nix build --impure --no-link --print-build-logs --expr "$expr" 2>&1 | grep -F '{"' || true
 
 # [explore] Inspect nix-store --gc --print-roots output for entries pointing
 # into the spinclass repo. Used to investigate issue #67 — what does
@@ -983,7 +1073,7 @@ debug-session-env-map:
       echo "   $cl"
     done
 
-# [debug] Without a sweatfile [metrics].statsd-address, internal/statsd emits
+# [debug] Without a sweatfile [metrics].statsd-address, internal/0/statsd emits
 # only when STATSD_HOST or STATSD_PORT is in the emitting process's environment,
 # so a `serve` started without them is silently off (spinclass#363). Also
 # reports whether anything listens on the UDP port.
@@ -1217,7 +1307,7 @@ debug-issue196-scratch:
 # run the issue #196 regression test against the bridged tommy
 [group('debug')]
 debug-issue196:
-    just debug-go-test internal/sweatfile 'TestScalarBeforeSubtable|TestScalarBeforeSubtableWithPrecedingTable|TestScalarBeforeSubtableHierarchy|TestStandaloneDottedHeadersConsumed' -test.v
+    just debug-go-test internal/0/sweatfile 'TestScalarBeforeSubtable|TestScalarBeforeSubtableWithPrecedingTable|TestScalarBeforeSubtableHierarchy|TestStandaloneDottedHeadersConsumed' -test.v
 
 # Tag a spinclass release. The "v" prefix is added for you, so pass
 # the semver without it. Usage: just tag 0.1.0 "feat: initial release"

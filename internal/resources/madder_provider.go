@@ -85,7 +85,7 @@ func (p *MadderProvider) ListResourceTemplatesV1(_ context.Context, _ string) (*
 // ReadResource shells out to `madder cat .default <digest>` with cwd
 // scoped to the worktree and MADDER_CEILING_DIRECTORIES preventing
 // store discovery from walking out of the worktree (mirrors
-// internal/madder.Init/Write). The URI's host slot is a fixed `blobs`
+// internal/0/madder.Init/Write). The URI's host slot is a fixed `blobs`
 // namespace marker matching `madder mcp serve`'s template; the local
 // store name (`.default`) is supplied internally.
 func (p *MadderProvider) ReadResource(ctx context.Context, uri string) (*protocol.ResourceReadResult, error) {

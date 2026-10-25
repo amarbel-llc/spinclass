@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 )
 
 // LayerAboveRepo reports whether the sweatfile layer at layerPath sits above

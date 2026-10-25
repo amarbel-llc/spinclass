@@ -31,8 +31,8 @@ import (
 	"text/template"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/clown"
-	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/0/clown"
+	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/repoinfo"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 )

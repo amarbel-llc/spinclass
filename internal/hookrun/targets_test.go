@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	. "code.linenisgreat.com/spinclass/internal/hookrun"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
 )
 
 // Target: command succeeds, no verify => ok (opaque-command / graceful degradation).

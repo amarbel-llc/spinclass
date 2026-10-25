@@ -212,7 +212,7 @@ type Permissions struct {
 }
 
 // Metrics configures spinclass's best-effort statsd telemetry (spinclass#363,
-// internal/statsd). Scalar override down the cascade.
+// internal/0/statsd). Scalar override down the cascade.
 type Metrics struct {
 	// StatsdAddress is the stats-me endpoint, host:port or a bare host (port
 	// 8125). Beats the STATSD_HOST/STATSD_PORT environment opt-in.
@@ -1134,7 +1134,7 @@ func (sf Sweatfile) SessionEnv() map[string]string {
 // Deprecated: post-FDR-0017 clown owns the multiplexer attach and names
 // sessions by its own per-instance key, so a `posh -g … list | grep
 // $SPINCLASS_SESSION_ID`-style probe can never match. Liveness now derives from
-// clown's presence index (internal/clown.PresenceByDecoration). No production
+// clown's presence index (internal/0/clown.PresenceByDecoration). No production
 // code consults this accessor; it (and the `liveness-probe` field) are retained
 // only until the eng home/spinclass.nix probe is dropped, then removed. See #201.
 func (sf Sweatfile) SessionLivenessProbe() []string {

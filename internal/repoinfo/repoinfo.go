@@ -26,8 +26,8 @@ import (
 	"os/exec"
 	"strings"
 
-	"code.linenisgreat.com/spinclass/internal/embeds"
-	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/0/embeds"
+	"code.linenisgreat.com/spinclass/internal/0/git"
 )
 
 // RepoInfo is the resolved forge identity of a repository. Every field is

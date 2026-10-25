@@ -18,7 +18,7 @@
 // reported skip, never a reason to refuse the session. Only a base that could
 // not be verified at all (the fetch failed) is.
 //
-// All the policy lives here; internal/git holds only verbs. The package
+// All the policy lives here; internal/0/git holds only verbs. The package
 // deliberately has no sweatfile dependency — the override arrives as a plain
 // bool the caller has already resolved — which is what keeps every branch of
 // this decision testable against a bare git fixture.
@@ -31,7 +31,7 @@ import (
 	"strings"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/landing"
 )
 

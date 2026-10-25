@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/0/profilegrant"
+	"code.linenisgreat.com/spinclass/internal/0/sshsig/sshsigtest"
 	"code.linenisgreat.com/spinclass/internal/grantstore"
 	"code.linenisgreat.com/spinclass/internal/operatoract"
-	"code.linenisgreat.com/spinclass/internal/profilegrant"
-	"code.linenisgreat.com/spinclass/internal/sshsig/sshsigtest"
 	"golang.org/x/crypto/ssh"
 )
 

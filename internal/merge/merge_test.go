@@ -14,7 +14,7 @@ import (
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
-	"code.linenisgreat.com/spinclass/internal/git"
+	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/session"
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )

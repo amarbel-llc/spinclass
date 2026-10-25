@@ -30,8 +30,8 @@ import (
 	"strings"
 	"sync"
 
-	"code.linenisgreat.com/spinclass/internal/safeio"
-	"code.linenisgreat.com/spinclass/internal/sessionlog"
+	"code.linenisgreat.com/spinclass/internal/0/safeio"
+	"code.linenisgreat.com/spinclass/internal/0/sessionlog"
 )
 
 // recordsDir is the frontend-only directory of authoritative session records.

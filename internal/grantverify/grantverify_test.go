@@ -9,7 +9,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// Copies of internal/sshsig/testdata (a real ssh-keygen -Y sign over
+// Copies of internal/0/sshsig/testdata (a real ssh-keygen -Y sign over
 // message.txt under piggy-escalation-v1); the test sandbox sees only a
 // package's own testdata.
 const fixtures = "testdata/"

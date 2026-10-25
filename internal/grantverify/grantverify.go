@@ -10,9 +10,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"code.linenisgreat.com/spinclass/internal/0/sshsig"
+	"code.linenisgreat.com/spinclass/internal/0/trustedhome"
 	"code.linenisgreat.com/spinclass/internal/operatoract"
-	"code.linenisgreat.com/spinclass/internal/sshsig"
-	"code.linenisgreat.com/spinclass/internal/trustedhome"
 	"golang.org/x/crypto/ssh"
 )
 

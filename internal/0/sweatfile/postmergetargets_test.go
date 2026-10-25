@@ -3,7 +3,7 @@ package sweatfile_test
 import (
 	"testing"
 
-	. "code.linenisgreat.com/spinclass/internal/sweatfile"
+	. "code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
 )
 

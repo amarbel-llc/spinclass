@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"code.linenisgreat.com/spinclass/internal/safeio"
+	"code.linenisgreat.com/spinclass/internal/0/safeio"
 )
 
 // writeAtomic replaces path with data via a temp file in the same directory

@@ -15,16 +15,16 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/mattn/go-isatty"
 
+	"code.linenisgreat.com/spinclass/internal/0/git"
+	"code.linenisgreat.com/spinclass/internal/0/tapblock"
 	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/confinement"
 	"code.linenisgreat.com/spinclass/internal/executor"
-	"code.linenisgreat.com/spinclass/internal/git"
 	"code.linenisgreat.com/spinclass/internal/nixgc"
 	"code.linenisgreat.com/spinclass/internal/profilerights"
 	"code.linenisgreat.com/spinclass/internal/session"
 	"code.linenisgreat.com/spinclass/internal/sessionpick"
 	gitstore "code.linenisgreat.com/spinclass/internal/store/git"
-	"code.linenisgreat.com/spinclass/internal/tapblock"
 	"code.linenisgreat.com/spinclass/internal/worktree"
 
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"

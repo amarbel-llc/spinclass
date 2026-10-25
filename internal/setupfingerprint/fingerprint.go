@@ -17,8 +17,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"code.linenisgreat.com/spinclass/internal/embeds"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/0/embeds"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 )
 
 // Scheme is the fingerprint scheme version. Bump it whenever the SET of hashed
@@ -29,7 +29,7 @@ const Scheme = 1
 
 // Compute returns the setup fingerprint for the given merged sweatfile config
 // plus the current binary's version/commit and pinned tool paths (read from
-// internal/embeds). The hash is stable across struct-field reordering — the
+// internal/0/embeds). The hash is stable across struct-field reordering — the
 // config is canonicalized via a sorted-key JSON round-trip — and changes when
 // any setup-affecting input changes. The returned scheme is always Scheme;
 // callers store it alongside the hash so IsStale can detect scheme changes.

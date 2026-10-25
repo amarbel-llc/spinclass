@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/git"
-	"code.linenisgreat.com/spinclass/internal/statsd"
-	"code.linenisgreat.com/spinclass/internal/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/0/git"
+	"code.linenisgreat.com/spinclass/internal/0/statsd"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/0/tap"
 	"code.linenisgreat.com/spinclass/internal/sweatfileio"
-	"code.linenisgreat.com/spinclass/internal/tap"
 )
 
 var startCommandNameRE = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)

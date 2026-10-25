@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"code.linenisgreat.com/spinclass/internal/safeio"
+	"code.linenisgreat.com/spinclass/internal/0/safeio"
 )
 
 // defaultDocIndexDirs is the built-in scan set for the design-record index,

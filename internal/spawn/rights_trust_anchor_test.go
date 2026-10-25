@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"code.linenisgreat.com/spinclass/internal/0/trustedhome"
 	"code.linenisgreat.com/spinclass/internal/profilerights"
-	"code.linenisgreat.com/spinclass/internal/trustedhome"
 )
 
 type passingConfinement struct{}
