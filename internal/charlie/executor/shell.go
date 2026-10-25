@@ -42,7 +42,3 @@ func (s ShellExecutor) Attach(dir string, key string, command []string, dryRun b
 	cmd.Stdin = os.Stdin
 	return cmd.Run()
 }
-
-func (s ShellExecutor) Detach() error {
-	return nil
-}

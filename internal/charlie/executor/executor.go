@@ -6,5 +6,4 @@ import (
 
 type Executor interface {
 	Attach(dir string, key string, command []string, dryRun bool, tp *tap.TestPoint) error
-	Detach() error
 }

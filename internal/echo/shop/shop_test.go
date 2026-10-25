@@ -248,7 +248,6 @@ type mockExecutor struct {
 	attachDir    string
 	attachKey    string
 	attachCmd    []string
-	detachCalled bool
 }
 
 func (m *mockExecutor) Attach(dir string, key string, command []string, dryRun bool, tp *tap.TestPoint) error {
@@ -262,11 +261,6 @@ func (m *mockExecutor) Attach(dir string, key string, command []string, dryRun b
 			Extras: map[string]any{"command": "mock-command"},
 		}
 	}
-	return nil
-}
-
-func (m *mockExecutor) Detach() error {
-	m.detachCalled = true
 	return nil
 }
 

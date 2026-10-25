@@ -166,7 +166,3 @@ func (s SessionExecutor) sessionEnv(dir, key string) map[string]string {
 	}
 	return env
 }
-
-func (s SessionExecutor) Detach() error {
-	return nil
-}

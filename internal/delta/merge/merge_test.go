@@ -19,16 +19,9 @@ import (
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
 
-type mockExecutor struct {
-	detachCalled bool
-}
+type mockExecutor struct{}
 
 func (m *mockExecutor) Attach(dir string, key string, command []string, dryRun bool, tp *tap.TestPoint) error {
-	return nil
-}
-
-func (m *mockExecutor) Detach() error {
-	m.detachCalled = true
 	return nil
 }
 
@@ -689,11 +682,6 @@ func TestResolvedInSessionSkipsCleanup(t *testing.T) {
 	branchCheck := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", "refs/heads/feature-insession")
 	if err := branchCheck.Run(); err != nil {
 		t.Error("expected branch to still exist in session mode")
-	}
-
-	// Detach should NOT have been called
-	if mock.detachCalled {
-		t.Error("expected Detach() to NOT be called in session mode")
 	}
 }
 
