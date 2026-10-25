@@ -9,7 +9,7 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
-	"code.linenisgreat.com/spinclass/internal/worktree"
+	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
 )
 
 // adoptFixture writes the frontend record of a freshly spawned confined worker

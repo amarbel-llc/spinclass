@@ -18,7 +18,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/spawnhandshake"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
-	"code.linenisgreat.com/spinclass/internal/worktree"
+	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
 )
 
 // Seams for tests; production values are the real host.

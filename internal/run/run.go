@@ -43,10 +43,10 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/bravo/present"
 	"code.linenisgreat.com/spinclass/internal/bravo/sessionexec"
-	"code.linenisgreat.com/spinclass/internal/executor"
+	"code.linenisgreat.com/spinclass/internal/charlie/executor"
+	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
 	"code.linenisgreat.com/spinclass/internal/merge"
 	"code.linenisgreat.com/spinclass/internal/shop"
-	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 
 // Spec is the fully-parsed `sc run` invocation. Exactly one of Util / Script

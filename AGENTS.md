@@ -44,7 +44,7 @@ re-run that suite right before merging.
   are compiled from `doc/*.N.scd` (spinclass#313).
 - **Core workflow** (`internal/shop/`): `Create()` = worktree + sweatfile +
   Claude trust; `Attach()` = Create + session state + `Executor`; `Fork()`.
-- **Executor** (`internal/executor/`): `SessionExecutor` (prod, SIGHUP
+- **Executor** (`internal/charlie/executor/`): `SessionExecutor` (prod, SIGHUP
   forwarding), `ShellExecutor` (merge), `mockExecutor` (tests).
 - **Session state** (`internal/alfa/session/`): authoritative frontend record
   `$XDG_STATE_HOME/spinclass/records/<hash>.json` (FDR 0035); the worktree's
@@ -53,7 +53,7 @@ re-run that suite right before merging.
   Implicit sessions in a main checkout: FDR 0014. Handles/principals: FDR 0032.
 - **Git** (`internal/0/git/`): thin `git -C <dir>` wrapper (`Run` captures,
   `RunPassthrough` streams).
-- **Worktree resolution** (`internal/worktree/`): `ResolvePath()` is the single
+- **Worktree resolution** (`internal/charlie/worktree/`): `ResolvePath()` is the single
   target→path entry point (bare name → `<repo>/.worktrees/<branch>`).
 - **Sweatfile** (`internal/0/sweatfile/` pure schema + tommy codec;
   `sweatfileio` Parse/Load; `hookrun` runs hooks; `apply` sets up a worktree,
@@ -138,7 +138,7 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
   local `<default>`) → **post-merge** (FDR 0023, #244) with named targets +
   verify (FDR 0026, #273; config read at the LANDED sha, #300). Local-default
   caveats: `spinclass-local-default-ref(7)`.
-- **Per-session forge push credentials** (FDR 0028, #285, `internal/auth`;
+- **Per-session forge push credentials** (FDR 0028, #285, `internal/charlie/auth`;
   `url-resolver` #335 is read only from layers above the repo).
 - **Pre-merge REPAIR** (FDR 0018; a dirty tracked tree is refused, #345) and
   **per-commit hook** (FDR 0019, #183/#267; canonical value

@@ -14,8 +14,8 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/profilegrant"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/alfa/grantstore"
-	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/bravo/nixgc"
+	"code.linenisgreat.com/spinclass/internal/charlie/auth"
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
 

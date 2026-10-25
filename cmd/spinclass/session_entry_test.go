@@ -14,9 +14,9 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
-	"code.linenisgreat.com/spinclass/internal/executor"
+	"code.linenisgreat.com/spinclass/internal/charlie/executor"
+	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
 	"code.linenisgreat.com/spinclass/internal/testgit"
-	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 
 // attachCapture records what a resume/start handed shop.Attach, so a test can

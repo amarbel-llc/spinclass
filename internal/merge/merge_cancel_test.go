@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
-	"code.linenisgreat.com/spinclass/internal/check"
+	"code.linenisgreat.com/spinclass/internal/charlie/check"
 )
 
 // cancelHookProbe is a pre-merge hook whose long-lived child runs from the hook's

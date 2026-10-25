@@ -24,13 +24,13 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/landing"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	gitstore "code.linenisgreat.com/spinclass/internal/alfa/store/git"
-	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/bravo/hookrun"
 	"code.linenisgreat.com/spinclass/internal/bravo/present"
-	"code.linenisgreat.com/spinclass/internal/check"
-	"code.linenisgreat.com/spinclass/internal/executor"
-	"code.linenisgreat.com/spinclass/internal/profilerights"
-	"code.linenisgreat.com/spinclass/internal/worktree"
+	"code.linenisgreat.com/spinclass/internal/charlie/auth"
+	"code.linenisgreat.com/spinclass/internal/charlie/check"
+	"code.linenisgreat.com/spinclass/internal/charlie/executor"
+	"code.linenisgreat.com/spinclass/internal/charlie/profilerights"
+	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
 )
 
 // mergeInteractive reports whether both stdin and stderr are TTYs. huh renders

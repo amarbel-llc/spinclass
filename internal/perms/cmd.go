@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/huh"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
-	"code.linenisgreat.com/spinclass/internal/worktree"
+	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
 )
 
 // RunListWriter writes the global tier and either a single repo's tier (if

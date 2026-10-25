@@ -9,7 +9,7 @@ import (
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/0/git"
-	"code.linenisgreat.com/spinclass/internal/auth"
+	"code.linenisgreat.com/spinclass/internal/charlie/auth"
 	"code.linenisgreat.com/spinclass/internal/spawn"
 )
 

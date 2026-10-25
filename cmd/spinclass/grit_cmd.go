@@ -17,8 +17,8 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/store"
 	gitstore "code.linenisgreat.com/spinclass/internal/alfa/store/git"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
-	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
+	"code.linenisgreat.com/spinclass/internal/charlie/auth"
 )
 
 // gritBackend is the store backend behind the grit_* tools (FDR 0036). The

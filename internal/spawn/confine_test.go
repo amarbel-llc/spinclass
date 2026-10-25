@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/0/spawnhandshake"
-	"code.linenisgreat.com/spinclass/internal/auth"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
-	"code.linenisgreat.com/spinclass/internal/worktree"
+	"code.linenisgreat.com/spinclass/internal/charlie/auth"
+	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
 )
 
 // cgroupSystem answers only /proc/self/cgroup; any other call panics on the nil

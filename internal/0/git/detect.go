@@ -11,7 +11,7 @@ import (
 // GIT_CEILING_DIRECTORIES to prevent discovery above certain paths.
 // Returns the repo root.
 //
-// It lives here, not in internal/worktree, because it is pure path-walking
+// It lives here, not in internal/charlie/worktree, because it is pure path-walking
 // with no dependency on worktree setup: internal/alfa/session needs it to climb
 // from a checkout subdirectory to the main-checkout root, and importing
 // worktree for that one call dragged the whole config-and-setup stack under

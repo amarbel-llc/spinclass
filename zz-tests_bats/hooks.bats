@@ -38,7 +38,7 @@ pre_merge_setup_worktree() {
 
 # The pre-merge-output-format tests below assert blob behavior (the
 # `resource_link: madder://blobs/...` output record emitted by
-# internal/check/check.go runHookPhase), which is gated on
+# internal/charlie/check/check.go runHookPhase), which is gated on
 # `embeds.MadderBin() != ""` — i.e. spinclass was built via
 # `lib.mkSpinclass { madder = ...; }`. The default `just test-bats` lane
 # builds `mkSpinclass {}` with no madder pin, so these tests skip there

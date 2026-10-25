@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
-	"code.linenisgreat.com/spinclass/internal/worktree"
+	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
 

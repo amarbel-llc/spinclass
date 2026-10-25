@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
-	"code.linenisgreat.com/spinclass/internal/worktree"
+	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
 )
 
 // The worker's own worktree sweatfile (which it can write) must not decide the

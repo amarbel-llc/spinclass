@@ -10,7 +10,7 @@
 //
 // The single branch that matters: a spinclass-managed WORKTREE session vs the
 // repo's MAIN CHECKOUT (an implicit session, FDR-0014). The worktree path sets
-// SPINCLASS_* env vars via the executor (internal/executor/session.go); a main
+// SPINCLASS_* env vars via the executor (internal/charlie/executor/session.go); a main
 // checkout has no executor, so coordinates come from cwd + git instead.
 //
 // Both shapes additionally carry a best-effort repository line (provider,

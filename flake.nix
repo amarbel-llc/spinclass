@@ -41,7 +41,7 @@
     # Source of the madder binary the `bats-madder` lane pins into
     # spinclass via `mkSpinclass { madder = ...; }`. The pin flips
     # `embeds.MadderBin()` from "" to an absolute /nix/store path, which
-    # activates internal/check/check.go:runHookPhase's blob-storage /
+    # activates internal/charlie/check/check.go:runHookPhase's blob-storage /
     # resource_link path so the format-aware tap-ndjson tests in
     # zz-tests_bats/hooks.bats run in CI instead of skipping via
     # require_madder_pinned (see #85, FDR 0003/0015). The default
@@ -80,7 +80,7 @@
 
     # crap: source of the go-crap Go module (ndjson-crap wire format +
     # viewport presenter), bridged via go.nix flakeInputs. Consumed
-    # by the `ndjson-crap` pre-merge-output-format in internal/check.
+    # by the `ndjson-crap` pre-merge-output-format in internal/charlie/check.
     crap = {
       url = "https://code.linenisgreat.com/crap/archive/master.tar.gz";
       inputs = {

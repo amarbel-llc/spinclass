@@ -18,8 +18,8 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
+	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
 	"code.linenisgreat.com/spinclass/internal/shop"
-	"code.linenisgreat.com/spinclass/internal/worktree"
 )
 
 // DefaultHelloDeadline bounds how long Launch waits for the worker's
@@ -443,7 +443,7 @@ func launchSpawnWindow(argv []string, rp worktree.ResolvedPath, desc string, ses
 }
 
 // workerEnv builds the spawn exec's process environment. It MIRRORS
-// executor.SessionExecutor.Attach's env construction (internal/executor/
+// executor.SessionExecutor.Attach's env construction (internal/charlie/executor/
 // session.go) — keep the var list in sync. Deliberately duplicated rather
 // than shared: the executor mutates the driver process env via os.Setenv
 // (it execs in-place), while spawn must scope the worker identity to

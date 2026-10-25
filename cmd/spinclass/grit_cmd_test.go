@@ -12,7 +12,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/store"
-	"code.linenisgreat.com/spinclass/internal/auth"
+	"code.linenisgreat.com/spinclass/internal/charlie/auth"
 )
 
 func stubGritCallerUnconfined(t *testing.T) {
