@@ -1398,7 +1398,7 @@ func runNamedPostMergeTargets(ctx context.Context, mx phaseMetrics, rep *crap.Re
 				ph.Done()
 				return
 			}
-			ph.FailDiag(nil, postMergeFailDiag(tgt, verdict, runErr, timedOut, cancelled, phaseCap))
+			ph.FailDiag(nil, withOutputTail(postMergeFailDiag(tgt, verdict, runErr, timedOut, cancelled, phaseCap), sink.tail.String()))
 		}(i)
 	}
 	wg.Wait()
@@ -1407,8 +1407,8 @@ func runNamedPostMergeTargets(ctx context.Context, mx phaseMetrics, rep *crap.Re
 // postMergeFailDiag builds the node_end diagnostic for a failed post-merge target
 // (FDR 0026): severity=warn (a landed merge is never a failure), the verdict
 // (command-failed / verify-failed / timeout / cancelled), the stage it failed at,
-// and an operator-facing message. The target's output is NOT duplicated here — it
-// already streamed as Output records on the node.
+// and an operator-facing message. The target's full output streamed as Output
+// records on the node; withOutputTail adds only a bounded tail of it.
 func postMergeFailDiag(tgt sweatfile.PostMergeTarget, verdict sweatfile.PostMergeVerdict, runErr error, timedOut, cancelled bool, phaseCap time.Duration) map[string]any {
 	stage := "command"
 	if verdict == sweatfile.PostMergeVerifyFailed {
@@ -1443,6 +1443,52 @@ func postMergeFailDiag(tgt sweatfile.PostMergeTarget, verdict sweatfile.PostMerg
 	return diag
 }
 
+// Bounds on the output tail a failed post-merge target's diagnostic carries
+// (spinclass#305): enough for the reason, never the whole log, which stays on
+// the node and in the job spool.
+const (
+	outputTailLines = 10
+	outputTailBytes = 2048
+)
+
+// outputTail keeps the last outputTailLines lines of what it is written,
+// capped at outputTailBytes, by retaining at most twice the cap of raw bytes.
+type outputTail struct{ buf []byte }
+
+func (o *outputTail) write(p []byte) {
+	o.buf = append(o.buf, p...)
+	if over := len(o.buf) - 2*outputTailBytes; over > 0 {
+		o.buf = append(o.buf[:0], o.buf[over:]...)
+	}
+}
+
+func (o *outputTail) String() string {
+	lines := strings.Split(strings.TrimRight(string(o.buf), "\n"), "\n")
+	if len(lines) > outputTailLines {
+		lines = lines[len(lines)-outputTailLines:]
+	}
+	s := strings.Join(lines, "\n")
+	if len(s) > outputTailBytes {
+		s = s[len(s)-outputTailBytes:]
+	}
+	return strings.TrimSpace(s)
+}
+
+// withOutputTail adds the failing target's output tail to diag, as the
+// output_tail field and at the end of the message, so the compact result and
+// the async wake carry why it failed (spinclass#305). Lines join with " | " in
+// the message because the wake is one line.
+func withOutputTail(diag map[string]any, tail string) map[string]any {
+	if tail == "" {
+		return diag
+	}
+	diag["output_tail"] = tail
+	if msg, ok := diag["message"].(string); ok {
+		diag["message"] = msg + "; last output: " + strings.ReplaceAll(tail, "\n", " | ")
+	}
+	return diag
+}
+
 // postMergeTargetSink streams one concurrent post-merge target's output to its
 // reporter node (via lw, which forwards complete lines as Output records) and,
 // when non-nil, tees the raw bytes to the async job log. One mutex — shared
@@ -1453,6 +1499,7 @@ type postMergeTargetSink struct {
 	mu       *sync.Mutex
 	lw       *present.LineWriter // wraps this target's Phase; used only under mu
 	activity io.Writer           // raw job-log tee; may be nil
+	tail     outputTail          // used only under mu
 }
 
 func (s *postMergeTargetSink) Write(p []byte) (int, error) {
@@ -1461,6 +1508,7 @@ func (s *postMergeTargetSink) Write(p []byte) (int, error) {
 	if s.activity != nil {
 		_, _ = s.activity.Write(p)
 	}
+	s.tail.write(p)
 	return s.lw.Write(p)
 }
 

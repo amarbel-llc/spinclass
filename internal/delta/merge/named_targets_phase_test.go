@@ -161,6 +161,36 @@ verify = "echo unhealthy >&2; exit 1"
 	}
 }
 
+// spinclass#305: the failure's message and output_tail carry a bounded tail
+// of what the failing target wrote, so the compact result says why.
+func TestNamedPostMergeTargetFailDiagCarriesOutputTail(t *testing.T) {
+	repoDir, wtPath := setupPostMergeRepo(t, "feature")
+	writeRepoSweatfile(t, repoDir, `
+[[post-merge]]
+name = "krone"
+command = "echo triggered"
+verify = "for i in $(seq 1 40); do echo noise-$i >&2; done; echo final-reason >&2; exit 1"
+`)
+	recs, err := runFinishTargets(t, repoDir, wtPath, "feature", false, nil)
+	if err != nil {
+		t.Fatalf("a verify failure must not fail the merge, got %v", err)
+	}
+	n, ok := findNode(recs, "post-merge krone")
+	if !ok {
+		t.Fatalf("no post-merge krone node: %v", nodeNames(recs))
+	}
+	tail := diagString(n.diag, "output_tail")
+	msg := diagString(n.diag, "message")
+	for name, s := range map[string]string{"output_tail": tail, "message": msg} {
+		if !strings.Contains(s, "final-reason") {
+			t.Errorf("%s lacks the last output line: %q", name, s)
+		}
+		if strings.Contains(s, "noise-1\n") || strings.Contains(s, "noise-1 ") || strings.HasSuffix(s, "noise-1") {
+			t.Errorf("%s is not bounded, it still has the first line: %q", name, s)
+		}
+	}
+}
+
 // A command failure is verdict=command-failed, and the verify is not reached.
 func TestNamedPostMergeTargetCommandFailed(t *testing.T) {
 	repoDir, wtPath := setupPostMergeRepo(t, "feature")
