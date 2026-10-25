@@ -14,11 +14,11 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/log"
-	"github.com/mattn/go-isatty"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/0/proccwd"
 	"code.linenisgreat.com/spinclass/internal/0/tapblock"
+	"code.linenisgreat.com/spinclass/internal/0/tty"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	gitstore "code.linenisgreat.com/spinclass/internal/alfa/store/git"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
@@ -34,15 +34,9 @@ import (
 
 var styleCode = lipgloss.NewStyle().Foreground(lipgloss.Color("#E88388")).Background(lipgloss.Color("#1D1F21")).Padding(0, 1)
 
-// cleanInteractive reports whether both stdin and stderr are TTYs. huh renders
-// via stderr (tea.WithOutput(os.Stderr)), so both fds must be terminals before
-// we invoke any interactive prompt. Overridable in tests.
-var cleanInteractive = func() bool {
-	stdin := os.Stdin.Fd()
-	stderr := os.Stderr.Fd()
-	return (isatty.IsTerminal(stdin) || isatty.IsCygwinTerminal(stdin)) &&
-		(isatty.IsTerminal(stderr) || isatty.IsCygwinTerminal(stderr))
-}
+// cleanInteractive reports whether a prompt can be shown (tty.Interactive:
+// stdin and stderr both terminals). Overridable in tests.
+var cleanInteractive = tty.Interactive
 
 type FileChange struct {
 	Code string

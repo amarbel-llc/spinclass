@@ -10,8 +10,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/huh"
-	"github.com/mattn/go-isatty"
 
+	"code.linenisgreat.com/spinclass/internal/0/tty"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/bravo/sessionpick"
 )
@@ -144,6 +144,5 @@ func runResumeConfirm(title, description string, defaultYes bool) (bool, error) 
 // isInteractiveTerminal reports whether stdin is a TTY, matching the
 // check the sessionpick picker uses.
 func isInteractiveTerminal() bool {
-	fd := os.Stdin.Fd()
-	return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
+	return tty.Terminal(os.Stdin)
 }

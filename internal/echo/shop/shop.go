@@ -18,6 +18,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/clown"
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/0/tty"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/bravo/basebranch"
@@ -536,7 +537,7 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 		log.Warn("on-detach hook failed", "err", hookErr)
 	}
 
-	interactive := isatty.IsTerminal(os.Stdin.Fd()) || isatty.IsCygwinTerminal(os.Stdin.Fd())
+	interactive := tty.Terminal(os.Stdin)
 
 	return closeShop(w, exec, rp, format, mergeOnClose, tw, interactive, noAttach)
 }

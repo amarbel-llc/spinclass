@@ -21,6 +21,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/mergelock"
 	"code.linenisgreat.com/spinclass/internal/0/statsd"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/0/tty"
 	"code.linenisgreat.com/spinclass/internal/alfa/landing"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	gitstore "code.linenisgreat.com/spinclass/internal/alfa/store/git"
@@ -33,15 +34,9 @@ import (
 	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
 )
 
-// mergeInteractive reports whether both stdin and stderr are TTYs. huh renders
-// via stderr (tea.WithOutput(os.Stderr)), so both fds must be terminals before
-// we invoke any interactive prompt. Overridable in tests.
-var mergeInteractive = func() bool {
-	stdin := os.Stdin.Fd()
-	stderr := os.Stderr.Fd()
-	return (isatty.IsTerminal(stdin) || isatty.IsCygwinTerminal(stdin)) &&
-		(isatty.IsTerminal(stderr) || isatty.IsCygwinTerminal(stderr))
-}
+// mergeInteractive reports whether a prompt can be shown (tty.Interactive:
+// stdin and stderr both terminals). Overridable in tests.
+var mergeInteractive = tty.Interactive
 
 func Run(execr executor.Executor, format string, target string, gitSync bool, pm PostMergeOptions) error {
 	return RunContext(context.Background(), execr, format, target, gitSync, pm)

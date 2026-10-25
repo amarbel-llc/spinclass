@@ -17,8 +17,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/mattn/go-isatty"
 
+	"code.linenisgreat.com/spinclass/internal/0/tty"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 )
 
@@ -219,8 +219,7 @@ func choose(repoPath, cmdName string, dbg *slog.Logger, autoSingle bool, remoteR
 }
 
 func interactive() bool {
-	fd := os.Stdin.Fd()
-	return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
+	return tty.Terminal(os.Stdin)
 }
 
 // pickerModel is the thin bubbletea glue around the bubbles list,
