@@ -2,10 +2,12 @@ package pull
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
+	"code.linenisgreat.com/spinclass/internal/charlie/check"
 	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
@@ -85,7 +87,11 @@ func scanWorktrees(repos []repoInfo) []worktreeInfo {
 }
 
 func Run(startDir string, dirty bool, format string) error {
-	tw := tap.NewWriter(os.Stdout)
+	return run(os.Stdout, startDir, dirty)
+}
+
+func run(w io.Writer, startDir string, dirty bool) error {
+	tw := tap.NewWriter(w)
 
 	repos := scanRepos(startDir)
 	worktrees := scanWorktrees(repos)
@@ -136,10 +142,23 @@ func Run(startDir string, dirty bool, format string) error {
 			continue
 		}
 
-		_, err = git.Rebase(wt.worktreePath, defaultBranch)
-		if err != nil {
+		// A bound merge driver git cannot run leaves the ours side with no
+		// markers; refuse before the rebase starts (spinclass#333).
+		if _, rerr := check.MergeDriverRefusal(wt.worktreePath, defaultBranch); rerr != nil {
 			tw.NotOk("rebase "+label, map[string]string{
-				"message":  err.Error(),
+				"message":  rerr.Error(),
+				"severity": "fail",
+			})
+			failed = true
+			continue
+		}
+
+		out, err := git.Rebase(wt.worktreePath, defaultBranch)
+		if err != nil {
+			// git.Rebase carries stderr, where the shell's not-found line
+			// goes, on the error; the output is stdout.
+			tw.NotOk("rebase "+label, map[string]string{
+				"message":  git.ExplainDriverNotFound(err, err.Error()+"\n"+out).Error(),
 				"severity": "fail",
 			})
 			failed = true

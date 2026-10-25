@@ -235,7 +235,7 @@ func PrepareMerge(ctx context.Context, ts *crap.TestStream, repoPath, wtPath, br
 	out, rebaseErr := git.RunEnv(wtPath, []string{"GIT_SEQUENCE_EDITOR=true"}, "rebase", target.Ref(), "-i")
 	mx.observeErr(context.Background(), "rebase", rebaseStart, rebaseErr)
 	if rebaseErr != nil {
-		return "", failStep(ts, "rebase "+branch, withDriverNotFound(rebaseErr, out), out)
+		return "", failStep(ts, "rebase "+branch, git.ExplainDriverNotFound(rebaseErr, out), out)
 	}
 	ts.Ok("rebase " + branch)
 
@@ -1656,20 +1656,6 @@ func shortSha(sha string) string {
 		return sha[:12]
 	}
 	return sha
-}
-
-// withDriverNotFound puts a merge driver's shell not-found report from a failed
-// rebase's output into the error (spinclass#334). The pre-flight (#324)
-// catches an absent driver it can judge, but not one it cannot or one that
-// vanishes before the rebase. The resulting "conflict" leaves the ours side
-// with no markers, and resolving it by staging the file drops the other side.
-func withDriverNotFound(err error, out string) error {
-	lines := git.DriverNotFoundLines(out)
-	if len(lines) == 0 {
-		return err
-	}
-	return fmt.Errorf("%w; a merge driver did not run (%s): the rebase's conflict is not a content conflict, the path holds the \"ours\" side with no conflict markers, so staging it as resolved drops the other side. Abort the rebase, put the driver on PATH, and re-merge",
-		err, strings.Join(lines, "; "))
 }
 
 // failStep is check.FailStep: a failing test point for label populated from

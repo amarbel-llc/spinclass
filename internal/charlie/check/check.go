@@ -198,27 +198,38 @@ func mergeDriversLabel(branch string) string { return "merge drivers " + branch 
 // resolves, and histories without a merge base have nothing in play.
 func PreflightMergeDrivers(ts *crap.TestStream, dir, branch, theirs string) error {
 	label := mergeDriversLabel(branch)
-	drivers, err := git.MergeDriversInPlay(dir, theirs)
+	names, err := MergeDriverRefusal(dir, theirs)
 	if err != nil {
 		return FailStep(ts, label, err, "")
 	}
-	if len(drivers) == 0 {
-		return nil
+	if len(names) > 0 {
+		ts.Ok(label + ": " + strings.Join(names, ", "))
 	}
-	var names, missing []string
+	return nil
+}
+
+// MergeDriverRefusal is PreflightMergeDrivers without the reporting, for
+// callers that report another way (sc pull, spinclass#333): the names of the
+// drivers in play, and an error naming each one that does not resolve and the
+// remedy, or failing to work out which drivers are in play.
+func MergeDriverRefusal(dir, theirs string) (names []string, err error) {
+	drivers, err := git.MergeDriversInPlay(dir, theirs)
+	if err != nil {
+		return nil, err
+	}
+	var missing []string
 	for _, d := range drivers {
 		names = append(names, d.Name)
 		if reason := d.Unresolved(dir); reason != "" {
 			missing = append(missing, reason)
 		}
 	}
-	if len(missing) == 0 {
-		ts.Ok(label + ": " + strings.Join(names, ", "))
-		return nil
+	if len(missing) > 0 {
+		return names, fmt.Errorf(
+			"%s; without it git keeps the \"ours\" side silently, with no conflict markers",
+			strings.Join(missing, "; "))
 	}
-	return FailStep(ts, label, fmt.Errorf(
-		"%s; without it git keeps the \"ours\" side silently, with no conflict markers",
-		strings.Join(missing, "; ")), "")
+	return names, nil
 }
 
 // FailStep emits a failing test point for label populated from err
