@@ -899,8 +899,10 @@ that names no profile is never affected.
 	clown#244, posh), so today turning this on refuses every profile spawn
 	with that reason: it is safe to enable early, and does not weaken
 	anything. *Merge:* not merged — read only from the global and
-	parent-directory layers, last one wins, an explicit *false* clears an
-	earlier *true*. A repo- or worktree-level value is ignored with a
+	parent-directory layers, and *sticky-on*: it is on if any of those layers
+	sets *true*, and a *false* in another layer never clears it (the repo
+	root is a path the caller may choose, so a nearer layer must not be able
+	to undo a trusted *true*). A repo- or worktree-level value is ignored with a
 	warning, because an agent can edit those files and must not be able to
 	turn enforcement off.
 
