@@ -372,6 +372,47 @@ type restartVerdict struct {
 	Verdict string `json:"verdict"`
 	Reason  string `json:"reason"`
 	When    string `json:"when"`
+	// State is set only by --peek: "closed" or "live".
+	State string `json:"state,omitempty"`
+}
+
+const (
+	peekStateClosed = "closed"
+	peekStateLive   = "live"
+)
+
+// runRestartPeek is `restart-preflight --peek`: the frontend's last check just
+// before it relaunches an agent it already stopped (#419). It reads, never
+// writes: no request is consumed or cleared. A session that is not found,
+// tombstoned, abandoned, or marked closing (session.State.ClosingAt, set by
+// close before it signals the agent) is "closed", and the frontend must not
+// relaunch it; anything else is "live". The verdict is always "none": the
+// request was consumed by the preflight that started the restart.
+func runRestartPeek(target string) (restartVerdict, error) {
+	closed := func(reason string) (restartVerdict, error) {
+		return restartVerdict{Verdict: "none", Reason: reason, State: peekStateClosed}, nil
+	}
+	if target == "" {
+		key, err := confinement.SessionKeyOfPrincipal(currentPrincipal())
+		if err != nil {
+			return closed("no live spinclass session is tied to this principal")
+		}
+		target = key
+	}
+	st, err := session.FindByTarget(target)
+	if errors.Is(err, session.ErrTargetNotFound) {
+		return closed("no spinclass session " + target)
+	}
+	if err != nil {
+		return restartVerdict{}, err
+	}
+	switch {
+	case st.IsTombstone(), st.ResolveState() == session.StateAbandoned:
+		return closed(st.Key() + " is closed")
+	case st.ClosingAt != nil:
+		return closed(st.Key() + " is being closed")
+	}
+	return restartVerdict{Verdict: "none", Reason: st.Key() + " is live", State: peekStateLive}, nil
 }
 
 func noRestart(reason string) restartVerdict {
@@ -577,17 +618,23 @@ func restartPreflightCommand() *command.Command {
 		},
 		Params: []command.Param{
 			{Name: "target", Type: command.String, Description: "Session key or worktree name; defaults to the session of CLOWN_SESSION_ID"},
+			{Name: "peek", Type: command.Bool, Description: "Read-only liveness check before a relaunch: never consumes or writes; adds \"state\": \"closed\"|\"live\""},
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
 			var p struct {
 				Target string `json:"target"`
+				Peek   bool   `json:"peek"`
 			}
 			if len(args) > 0 {
 				if err := json.Unmarshal(args, &p); err != nil {
 					return fmt.Errorf("invalid arguments: %w", err)
 				}
 			}
-			v, err := runRestartPreflight(p.Target)
+			run := runRestartPreflight
+			if p.Peek {
+				run = runRestartPeek
+			}
+			v, err := run(p.Target)
 			if err != nil {
 				return err
 			}

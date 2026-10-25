@@ -117,6 +117,18 @@ who is allowed to ask.
   request is cleared (consumed). `when` is the requested timing, empty for `none`.
   The principal is resolved by `closeRunnerPrincipal`'s rules (the frontend mapping
   first, a confined session with no mapping refused), never from the request.
+- `restart-preflight --peek [--target T]` (added 2026-10-25, with clown's
+  restart at 720ffd7). Read-only: it never consumes, clears or writes. It prints
+  the same one JSON line with `"verdict":"none"` and an added
+  `"state":"closed"|"live"`. Clown calls it just before relaunching an agent it
+  has already stopped, and aborts on `closed`; a failing or unparsable peek is
+  logged and treated as unknown (clown's choice: it relaunches as before).
+  `closed` means not found, tombstoned, abandoned, or **marked closing**: close
+  sets `session.State.ClosingAt` once the close is decided and before it signals
+  the agent, and clears it again if the close fails before the tombstone. Without
+  the mark, a close that had signalled the agent but not yet tombstoned would
+  still read as live, and a racing restart could relaunch into a worktree about
+  to be removed.
 
 ## Requirement on clown and troupe
 

@@ -180,6 +180,32 @@ function restart_preflight_refuses_once_the_hand_off_is_revoked { # @test
   echo "$output" | jq -e '.verdict == "none"'
 }
 
+function restart_preflight_peek_reports_live_and_consumes_nothing { # @test
+  write_global_sweatfile "$RESTART_HANDOFF"
+  start_bound_session
+
+  CLOWN_SESSION_ID=$PRINCIPAL run_sc restart-this-session --reason r
+  assert_success
+
+  CLOWN_SESSION_ID=$PRINCIPAL run --separate-stderr "$SPINCLASS_BIN" restart-preflight --peek
+  assert_success
+  echo "$output" | jq -e '.state == "live" and .verdict == "none"'
+
+  # The peek left the queued request in place for the real preflight.
+  CLOWN_SESSION_ID=$PRINCIPAL run --separate-stderr "$SPINCLASS_BIN" restart-preflight
+  assert_success
+  echo "$output" | jq -e '.verdict == "restart"'
+}
+
+function restart_preflight_peek_outside_any_session_is_closed { # @test
+  write_global_sweatfile "$RESTART_HANDOFF"
+  cd "$TEST_REPO" || return
+
+  run --separate-stderr "$SPINCLASS_BIN" restart-preflight --peek
+  assert_success
+  echo "$output" | jq -e '.state == "closed" and .verdict == "none"'
+}
+
 function restart_preflight_outside_any_session_is_none { # @test
   write_global_sweatfile "$RESTART_HANDOFF"
   cd "$TEST_REPO" || return

@@ -268,6 +268,13 @@ type State struct {
 	// (`sc close-self-run`), re-checks everything, and clears it on failure.
 	CloseRequest *CloseRequest `json:"close_request,omitempty"`
 
+	// ClosingAt is set by close once the close is decided, before the session's
+	// agent is signalled, and cleared again if the close then fails before the
+	// tombstone. `restart-preflight --peek` reports a session carrying it as
+	// closed, so a frontend restart racing a close does not relaunch the agent
+	// into a worktree about to be removed (#419).
+	ClosingAt *time.Time `json:"closing_at,omitempty"`
+
 	// RestartRequest is set by restart-this-session / restart-child-session
 	// (#419): a restart of this session was authorized and handed off to the
 	// harness frontend. The frontend asks `sc restart-preflight` at its next idle

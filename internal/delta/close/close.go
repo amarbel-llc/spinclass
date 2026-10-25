@@ -253,6 +253,17 @@ func runResolvedInto(tw *tap.Writer, repoPath, wtPath, branch string, force bool
 	// state write lands before we tombstone (and then for the worktree dir to
 	// be free for git to remove). Best-effort: WaitForExit returns when the PID
 	// is gone or the deadline passes; a declined signal waits on nothing.
+	//
+	// First mark the session closing, so a frontend restart racing this close
+	// sees it as closed (`restart-preflight --peek`, #419) from before the agent
+	// is signalled; a failure before the tombstone clears the mark again.
+	tombstoned := false
+	markClosing(repoPath, branch, true)
+	defer func() {
+		if !tombstoned {
+			markClosing(repoPath, branch, false)
+		}
+	}()
 	signalled, note := requestClose(repoPath, branch)
 	if note != "" {
 		if tw != nil {
@@ -294,6 +305,7 @@ func runResolvedInto(tw *tap.Writer, repoPath, wtPath, branch string, force bool
 	// worktree directory is itself force-removed by git. Best effort:
 	// if the state file is gone (legacy session that never wrote one,
 	// or an external worktree removal), skip the tombstone.
+	tombstoned = true
 	if tombErr := session.Tombstone(repoPath, branch, sha); tombErr != nil {
 		// Fall through to Remove for cleanup; tombstone failures don't
 		// block close.
@@ -459,6 +471,27 @@ func activeKey(repoPath, branch string) string {
 
 // requestClose is the seam over executor.RequestClose for tests.
 var requestClose = executor.RequestClose
+
+// markClosing sets (on) or clears session.State.ClosingAt. Best-effort: a
+// session with no readable state has nothing for a racing restart to read.
+func markClosing(repoPath, branch string, on bool) {
+	st, err := session.Read(repoPath, branch)
+	if err != nil || st.IsTombstone() {
+		return
+	}
+	if on {
+		now := time.Now().UTC()
+		st.ClosingAt = &now
+	} else {
+		if st.ClosingAt == nil {
+			return
+		}
+		st.ClosingAt = nil
+	}
+	if err := session.Write(*st); err != nil {
+		slog.Debug("close: recording closing mark failed", "branch", branch, "on", on, "err", err)
+	}
+}
 
 // stopUnit is the seam over confinement.StopUnit for tests.
 var stopUnit = func(ctx context.Context, stateDir, wtPath string) (bool, error) {
