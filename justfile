@@ -1192,6 +1192,68 @@ explore-claude-permission-modes:
     echo "--- claude auto-mode --help:"
     claude auto-mode --help 2>&1 | head -40
 
+# [explore] Observe, in throwaway `claude -p` sessions, how Claude Code orders a
+# PreToolUse hook's deny against a settings allow rule (#422 Layer 1 relies on
+# the hook's deny winning). Each case runs in its own temp git repo with ONLY
+# project settings (--setting-sources project: no user plugins, so neither the
+# spinclass nor any other plugin hook is loaded), --permission-mode dontAsk (an
+# unallowed tool is denied, never prompted), and a probe hook that logs every
+# Bash call and denies any command containing HOOKDENY. A case "ran" iff its
+# sentinel file exists afterwards. Allow rules are passed with --allowedTools,
+# since an untrusted temp workspace's project permissions.allow is ignored.
+# Cases:
+#   D  allow Bash(touch:*); `touch CONTROL_D`, no deny  (control: the allow works)
+#   A  allow Bash(touch:*); hook denies `touch HOOKDENY_A`        (deny vs allow)
+#   B  allow Bash(git status:*) only; no hook deny;
+#      `git status && touch COMPOUND_B`        (does a first-word allow cover a chain?)
+#   C  allow Bash(git status:*) and Bash(touch:*); hook denies
+#      `git status && touch HOOKDENY_C`        (deny vs allow on a chain)
+# Makes real model calls (haiku), one per case. Leaves the temp dirs for
+# inspection and prints their paths.
+#
+# observe hook deny vs settings allow ordering in throwaway claude sessions
+[group('explore')]
+explore-hook-deny-vs-allow model="haiku":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    command -v claude >/dev/null || { echo "no claude on PATH"; exit 1; }
+    claude --help | grep -q -- '--setting-sources' || { echo "this claude has no --setting-sources; refusing (user plugins would load)"; exit 1; }
+    run_case() {
+        local name=$1 allow=$2 cmd=$3 sentinel=$4 dir
+        dir=$(mktemp -d "${TMPDIR:-/tmp}/hookprec-$name.XXXXXX")
+        git -C "$dir" init -q
+        mkdir -p "$dir/.claude"
+        cat >"$dir/deny-hook.sh" <<'EOF'
+    #!/bin/sh
+    input=$(cat)
+    printf '%s\n' "$input" >>"$(dirname "$0")/hook.log"
+    case "$input" in
+    *HOOKDENY*) printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"probe hook deny"}}' ;;
+    esac
+    EOF
+        chmod +x "$dir/deny-hook.sh"
+        printf '{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"%s"}]}]}}\n' \
+            "$dir/deny-hook.sh" >"$dir/.claude/settings.json"
+        # The allow rules go on --allowedTools: an untrusted temp workspace's
+        # project permissions.allow is ignored (observed), its hooks are not.
+        # The prompt comes right after -p: --allowedTools is variadic and would
+        # swallow a trailing positional.
+        (cd "$dir" && env -u CLOWN_SESSION_ID -u SPINCLASS_SESSION_ID claude \
+            -p "Run exactly this one Bash command, once, verbatim, and nothing else: $cmd" \
+            --setting-sources project --permission-mode dontAsk --model {{ quote(model) }} \
+            --allowedTools "$allow" \
+            >"$dir/claude.out" 2>&1)
+        local ran=no hooked=no
+        [ -e "$dir/$sentinel" ] && ran=yes
+        [ -s "$dir/hook.log" ] && hooked=yes
+        printf 'case %s: allow=%s cmd=%q -> ran=%s hook_called=%s dir=%s\n' "$name" "$allow" "$cmd" "$ran" "$hooked" "$dir"
+    }
+    claude --version
+    run_case D 'Bash(touch:*)' 'touch CONTROL_D' CONTROL_D
+    run_case A 'Bash(touch:*)' 'touch HOOKDENY_A' HOOKDENY_A
+    run_case B 'Bash(git status:*)' 'git status && touch COMPOUND_B' COMPOUND_B
+    run_case C 'Bash(git status:*) Bash(touch:*)' 'git status && touch HOOKDENY_C' HOOKDENY_C
+
 # [debug] Render an `sc` subcommand through a REAL PTY and dump the screen, so
 # TTY-only output — the pretty `sc list` table's colored status dots, 🤡 clown
 # badges, and description wrapping — can be eyeballed the way color-stripped
