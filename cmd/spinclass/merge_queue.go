@@ -5,12 +5,15 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/0/clown"
+	"code.linenisgreat.com/spinclass/internal/0/statsd"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/alfa/job"
 	"code.linenisgreat.com/spinclass/internal/bravo/present"
 	"code.linenisgreat.com/spinclass/internal/charlie/executor"
@@ -49,6 +52,40 @@ type queuedMerge struct {
 	gitSync bool
 	run     func(ctx context.Context, w io.Writer) (text string, isErr bool)
 	release func()
+	stack   stackMetrics
+}
+
+// stackMetrics times one entry's stay in the intra-session stack (#365). The
+// per-phase merge timers (#363) start at dequeue, so without it the wait is
+// invisible. The zero value emits nothing.
+type stackMetrics struct {
+	client     statsd.Client
+	repo       string // statsd.Segment of the repo dirname
+	enqueuedAt time.Time
+}
+
+// stackOutcomeDrained is the stack_wait outcome of an entry that never ran
+// because the merge ahead of it failed: a sibling of ok, so a drained wait does
+// not pull the dequeue-wait percentiles.
+const stackOutcomeDrained = "drained"
+
+func newStackMetrics(sf sweatfile.Sweatfile, repoPath string) stackMetrics {
+	return stackMetrics{
+		client:     statsd.Resolve(sf.MetricsStatsdAddress(), sf.MetricsStatsdDisabled()),
+		repo:       statsd.Segment(filepath.Base(repoPath)),
+		enqueuedAt: time.Now(),
+	}
+}
+
+// observeWait times enqueue until now. Call it outside the queue lock: a send
+// dials.
+func (m stackMetrics) observeWait(outcome string) {
+	m.client.Timing("merge."+m.repo+".stack_wait."+outcome, time.Since(m.enqueuedAt))
+}
+
+// observeDepth gauges the queue position an entry was enqueued at.
+func (m stackMetrics) observeDepth(position int) {
+	m.client.Gauge("merge."+m.repo+".stack_depth", position)
 }
 
 // releaseHold releases the entry's claim on the attestation; nil-safe.
@@ -91,6 +128,7 @@ func processMergeQueue(wt, kind, status, id string) {
 		mergeQueueMu.Unlock()
 		for _, d := range q {
 			d.releaseHold()
+			d.stack.observeWait(stackOutcomeDrained)
 		}
 		emitDrainWake(drainedCount, id, status)
 		return
@@ -104,9 +142,11 @@ func processMergeQueue(wt, kind, status, id string) {
 	mergeQueueMu.Unlock()
 
 	if startErr == nil {
+		next.stack.observeWait(statsd.OutcomeOK)
 		// Outside the queue lock: the notice shells out to ringmaster twice.
 		emitStartNotice(started.ID, remaining)
 	} else {
+		next.stack.observeWait(statsd.OutcomeFailed)
 		// The dequeued merge could not be dispatched (clown allocation failed,
 		// or a racing Start already claimed the slot). Its OnJobDone will never
 		// fire, so the chain is broken: report it and drain whatever is left,
@@ -119,6 +159,7 @@ func processMergeQueue(wt, kind, status, id string) {
 		next.releaseHold()
 		for _, d := range rest {
 			d.releaseHold()
+			d.stack.observeWait(stackOutcomeDrained)
 		}
 		emitDrainWake(len(rest)+1, nextID, "failed to dispatch")
 	}

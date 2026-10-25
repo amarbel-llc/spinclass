@@ -686,10 +686,8 @@ func handleMergeThisSessionAsync(ctx context.Context, args json.RawMessage, _ co
 	// UNDER the lock on both commit paths, atomically with the enqueue append,
 	// so a second merge-async cannot peek the same still-available attestation
 	// and enqueue it twice (a live claim makes it unavailable).
-	stackingDisabled := false
-	if merged, mok := mergedSweatfileForCwd(); mok {
-		stackingDisabled = merged.DisableMergeStackingEnabled()
-	}
+	merged, _ := mergedSweatfileForCwd() // zero Sweatfile when it did not load
+	stackingDisabled := merged.DisableMergeStackingEnabled()
 	mergeQueueMu.Lock()
 	busy := job.IsRunning(cwd) || len(mergeQueue[cwd]) > 0
 	if busy && stackingDisabled {
@@ -707,13 +705,16 @@ func handleMergeThisSessionAsync(ctx context.Context, args json.RawMessage, _ co
 	}
 	pm.AttestedSha = hold.ticket.HeadSha
 	if busy {
+		stack := newStackMetrics(merged, repoPath)
 		mergeQueue[cwd] = append(mergeQueue[cwd], queuedMerge{
 			gitSync: gitSync,
 			run:     buildQueuedMergeRun(repoPath, cwd, branch, defaultBranch, gitSync, pm, hold),
 			release: func() { hold.settle(false) },
+			stack:   stack,
 		})
 		pos := len(mergeQueue[cwd])
 		mergeQueueMu.Unlock()
+		stack.observeDepth(pos)
 		return enqueuedMergeResult(pos, gate), nil
 	}
 	mergeQueueMu.Unlock()

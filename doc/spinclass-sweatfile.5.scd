@@ -1051,6 +1051,16 @@ reaches the per-repo landing lock: the number of other merges on this host
 already waiting for it or holding it (0 when uncontended). It is a sample
 taken as each merge arrives, not a continuous reading.
 
+A merge stacked behind its own session's running gate (FDR 0025) waits before
+any of the timers above start; a queued merge's *total* starts when it
+dequeues. That wait is the timer *spinclass.merge.*_repo_*.stack\_wait.*_outcome_,
+from enqueue to dequeue, where _outcome_ is *ok* (dequeued and started),
+*drained* (never ran because the merge ahead of it failed) or *failed* (could
+not be started). Each enqueue also sets the gauge
+*spinclass.merge.*_repo_*.stack\_depth* to the queue position it was given
+(1 when it is the only one waiting). Like *queue\_depth* it is a sample taken
+at each enqueue.
+
 *sc check* sends *spinclass.check.*_repo_*.pre\_merge\_hook.*_outcome_ for its
 hook run; a merge that checks does not send it.
 
