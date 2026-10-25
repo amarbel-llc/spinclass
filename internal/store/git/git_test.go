@@ -13,6 +13,19 @@ import (
 	"code.linenisgreat.com/spinclass/internal/store"
 )
 
+// TestMain turns auto maintenance off for every git this package's tests run
+// (fixture setup and the code under test alike, which both inherit the
+// environment). Left on, the commits, fetches, merges and receive-packs the
+// fixtures make each spawn `git maintenance run --auto --detach`, which
+// daemonizes and goes on writing into the fixture's TempDir after the test has
+// returned, failing its RemoveAll with "directory not empty" (#421).
+func TestMain(m *testing.M) {
+	_ = os.Setenv("GIT_CONFIG_COUNT", "1")
+	_ = os.Setenv("GIT_CONFIG_KEY_0", "maintenance.auto")
+	_ = os.Setenv("GIT_CONFIG_VALUE_0", "false")
+	os.Exit(m.Run())
+}
+
 func mustRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)

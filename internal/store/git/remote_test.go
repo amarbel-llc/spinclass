@@ -303,6 +303,33 @@ func TestPullMergesTheRemoteBranch(t *testing.T) {
 	}
 }
 
+// No git run by these tests may leave a detached process behind: one that
+// outlives its command keeps writing into the fixture's TempDir after the test
+// returns, and its RemoveAll then fails with "directory not empty" (#421). Auto
+// maintenance is the one git detaches by default, after the commits, fetches
+// and merges a pull makes. git's trace2 events record the detach from the
+// process that does it, before the command that spawned it returns, so the
+// trace shows it without racing the background process.
+func TestFixtureGitLeavesNoDetachedMaintenance(t *testing.T) {
+	r := newRemoteFixture(t)
+	r.pushFromElsewhere(t, "main", "upstream work")
+	trace := filepath.Join(t.TempDir(), "trace2.json")
+	t.Setenv("GIT_TRACE2_EVENT", trace)
+	if _, err := doAs(t, r.confined(), "remote", "pull", map[string]any{"remote": "origin", "branch": "main"}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatalf("git wrote no trace2 events: %v", err)
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		detachedChild := strings.Contains(line, `"event":"child_start"`) && strings.Contains(line, `"maintenance"`) && strings.Contains(line, `"--detach"`)
+		if detachedChild || strings.Contains(line, `"label":"detach"`) {
+			t.Errorf("git detached background maintenance: %s", line)
+		}
+	}
+}
+
 func TestRemoteVerbsAcceptOnlyConfiguredRemoteNames(t *testing.T) {
 	r := newRemoteFixture(t)
 	for _, tc := range []struct{ tool, sub string }{

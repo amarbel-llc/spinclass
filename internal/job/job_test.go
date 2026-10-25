@@ -206,17 +206,24 @@ func TestWriteIsAtomicUnderConcurrentReads(t *testing.T) {
 	}
 }
 
-// waitStatus polls Read until the job reaches want or the deadline passes.
+// waitStatus waits for the job to finish and checks it ended in want. It joins
+// on WaitDone rather than polling for the terminal record: the record is
+// written before the clown `done` emit and the rest of the job's teardown, so a
+// caller that woke on the record could return while that teardown is still
+// running and writing into the test's TempDirs (#417).
 func waitStatus(t *testing.T, wt, want string) *Job {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		j, err := Read(wt)
-		if err == nil && j.Status == want {
-			return j
-		}
-		time.Sleep(20 * time.Millisecond)
+	select {
+	case <-WaitDone(wt):
+	case <-time.After(5 * time.Second):
+		t.Fatalf("job did not finish in time (want status %q)", want)
 	}
-	t.Fatalf("job did not reach status %q in time", want)
-	return nil
+	j, err := Read(wt)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if j.Status != want {
+		t.Fatalf("job ended %q, want %q", j.Status, want)
+	}
+	return j
 }

@@ -398,7 +398,13 @@ func installStubObservesCancel(t *testing.T, argsFile string) {
 	// isn't in dash — the assumption that failed the eng build). mktemp gives
 	// each concurrent invocation a unique filename; recordedInvocations reads
 	// the directory back, one file per invocation.
+	//
+	// `done` sleeps first. The terminal emit runs AFTER the aborted record is
+	// durable, so a test that wakes on the record alone (not WaitDone) returns
+	// with the emit still running and its write still to come (#417); the delay
+	// makes that gap certain rather than load-dependent.
 	body := "#!/bin/sh\n" +
+		"if [ \"$1\" = done ]; then sleep 0.3; fi\n" +
 		"mkdir -p " + argsFile + " 2>/dev/null\n" +
 		"printf '%s\\n' \"$@\" > \"$(mktemp " + argsFile + "/inv.XXXXXX)\"\n" +
 		"if [ \"$1\" = start ]; then echo job-deadbeef; fi\n" +
@@ -409,6 +415,22 @@ func installStubObservesCancel(t *testing.T, argsFile string) {
 	}
 	t.Setenv("CLOWN_BIN", filepath.Join(dir, "clown"))
 	t.Setenv("RINGMASTER_BIN", script)
+	requireNoJobOutlivesTest(t)
+}
+
+// requireNoJobOutlivesTest fails the test if a job is still in flight when it
+// ends. Registered after the stub's argsFile TempDir, so (cleanups run LIFO) it
+// runs BEFORE that RemoveAll: a job still running then is a job whose stub
+// invocations may yet write into the dir being removed (#417).
+func requireNoJobOutlivesTest(t *testing.T) {
+	t.Helper()
+	t.Cleanup(func() {
+		mu.Lock()
+		defer mu.Unlock()
+		for wt := range running {
+			t.Errorf("job for %s still in flight after the test returned", wt)
+		}
+	})
 }
 
 // TestStartObservesExternalCancel proves the #22 observer end to end: a
