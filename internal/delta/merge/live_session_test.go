@@ -12,10 +12,10 @@ import (
 )
 
 // writePresence writes a clown presence record for decoration (the spinclass
-// session key) under $XDG_STATE_HOME/clown/presence, lastSeen at seen.
+// session key) under $XDG_STATE_HOME/ringmaster/presence, lastSeen at seen.
 func writePresence(t *testing.T, stateHome, decoration string, seen time.Time) {
 	t.Helper()
-	dir := filepath.Join(stateHome, "clown", "presence")
+	dir := filepath.Join(stateHome, "ringmaster", "presence")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}

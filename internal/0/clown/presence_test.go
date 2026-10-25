@@ -10,6 +10,13 @@ import (
 	"code.linenisgreat.com/spinclass/internal/testfs"
 )
 
+// ringmasterPresenceDir is where ringmaster's presence index lives under a
+// given XDG_STATE_HOME. Spelled out literally, not via jobwake.PresenceDir, so
+// the tests pin the on-disk location writers actually use (#371).
+func ringmasterPresenceDir(state string) string {
+	return filepath.Join(state, "ringmaster", "presence")
+}
+
 func writePresence(t *testing.T, dir string, p Presence) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -24,7 +31,7 @@ func writePresence(t *testing.T, dir string, p Presence) {
 func TestReadPresenceDropsStale(t *testing.T) {
 	state := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", state)
-	dir := filepath.Join(state, "clown", "presence")
+	dir := ringmasterPresenceDir(state)
 	now := time.Now()
 
 	writePresence(t, dir, Presence{SessionKey: "uuid-a", ChannelID: "aaaa", Decoration: "repo/feat", LastSeen: now.Format(time.RFC3339Nano)})
@@ -43,7 +50,7 @@ func TestReadPresenceDropsStale(t *testing.T) {
 func TestReadPresenceAcceptsRFC3339WithoutFraction(t *testing.T) {
 	state := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", state)
-	dir := filepath.Join(state, "clown", "presence")
+	dir := ringmasterPresenceDir(state)
 	now := time.Now()
 	writePresence(t, dir, Presence{ChannelID: "nf", Decoration: "repo/feat", LastSeen: now.UTC().Format("2006-01-02T15:04:05Z")})
 	if got := ReadPresence(now); len(got) != 1 {
@@ -52,7 +59,7 @@ func TestReadPresenceAcceptsRFC3339WithoutFraction(t *testing.T) {
 }
 
 func TestReadPresenceMissingDirIsEmpty(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir()) // no clown/presence subdir
+	t.Setenv("XDG_STATE_HOME", t.TempDir()) // no ringmaster/presence subdir
 	if got := ReadPresence(time.Now()); len(got) != 0 {
 		t.Errorf("ReadPresence with no dir = %+v, want empty", got)
 	}
@@ -61,7 +68,7 @@ func TestReadPresenceMissingDirIsEmpty(t *testing.T) {
 func TestReadPresenceSkipsUnparseable(t *testing.T) {
 	state := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", state)
-	dir := filepath.Join(state, "clown", "presence")
+	dir := ringmasterPresenceDir(state)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +86,7 @@ func TestReadPresenceSkipsUnparseable(t *testing.T) {
 func TestPresenceByDecorationGroupsAndSkipsUngrouped(t *testing.T) {
 	state := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", state)
-	dir := filepath.Join(state, "clown", "presence")
+	dir := ringmasterPresenceDir(state)
 	now := time.Now()
 	writePresence(t, dir, Presence{ChannelID: "a", Decoration: "repo/feat", LastSeen: now.Format(time.RFC3339Nano)})
 	writePresence(t, dir, Presence{ChannelID: "b", Decoration: "repo/feat", LastSeen: now.Format(time.RFC3339Nano)})

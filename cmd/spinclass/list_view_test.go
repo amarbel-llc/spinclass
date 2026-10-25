@@ -148,7 +148,7 @@ func TestRenderListTableShowsProfileColumn(t *testing.T) {
 func TestRenderListTableFoldsClownCountIntoStatus(t *testing.T) {
 	state := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", state)
-	dir := filepath.Join(state, "clown", "presence")
+	dir := filepath.Join(state, "ringmaster", "presence")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestRenderListTableFoldsClownCountIntoStatus(t *testing.T) {
 func TestRenderListTablePresenceFoldsIntoStatus(t *testing.T) {
 	state := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", state)
-	dir := filepath.Join(state, "clown", "presence")
+	dir := filepath.Join(state, "ringmaster", "presence")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}

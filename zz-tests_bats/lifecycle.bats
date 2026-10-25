@@ -118,9 +118,10 @@ function spinclass_list_presence_marks_session_live { # @test
   branch=$(basename "$wt")
   key="$(basename "$TEST_REPO")/$branch"
 
-  # Forge clown's presence file: decoration is the spinclass session key, a
-  # fresh lastSeen keeps it inside the 2-minute staleness window.
-  local pres_dir="$XDG_STATE_HOME/clown/presence"
+  # Forge a presence file in ringmaster's index (#371): decoration is the
+  # spinclass session key, a fresh lastSeen keeps it inside the 2-minute
+  # staleness window.
+  local pres_dir="$XDG_STATE_HOME/ringmaster/presence"
   mkdir -p "$pres_dir"
   printf '{"sessionKey":"uuid-x","channelId":"chan-x","decoration":"%s","lastSeen":"%s"}\n' \
     "$key" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$pres_dir/chan-x.json"

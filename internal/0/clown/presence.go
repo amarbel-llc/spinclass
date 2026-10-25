@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"code.linenisgreat.com/ringmaster/pkgs/jobwake"
 )
 
 // presenceStale mirrors clown's RFC-0014 §4.2 staleness window: a presence
@@ -24,20 +26,11 @@ type Presence struct {
 	LastSeen    string `json:"lastSeen"`
 }
 
-// presenceDir is clown's presence index directory:
-// $XDG_STATE_HOME/clown/presence/ (XDG_STATE_HOME defaults to ~/.local/state
-// per the basedir spec). Returns "" when no home can be resolved.
-func presenceDir() string {
-	base := os.Getenv("XDG_STATE_HOME")
-	if base == "" {
-		home, err := os.UserHomeDir()
-		if err != nil || home == "" {
-			return ""
-		}
-		base = filepath.Join(home, ".local", "state")
-	}
-	return filepath.Join(base, "clown", "presence")
-}
+// presenceDir is the presence index directory, owned by ringmaster since the
+// job platform's extraction from clown ($XDG_STATE_HOME/ringmaster/presence/).
+// The path comes from the linked jobwake package so it cannot drift again
+// (#371); jobwake resolves the environment per call.
+func presenceDir() string { return jobwake.PresenceDir() }
 
 // ReadPresence returns the live (non-stale) clown presence records — the
 // clown→spinclass consumer half of the RFC-0014 awareness seam. It is read-only
@@ -47,9 +40,6 @@ func presenceDir() string {
 // are dropped (degrade stale → dead, never false-alive).
 func ReadPresence(now time.Time) []Presence {
 	dir := presenceDir()
-	if dir == "" {
-		return nil
-	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
