@@ -923,7 +923,7 @@ func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, push,
 	// running. State cleanup is delegated to the close path
 	// (closeShop → close.RunResolved → session.Tombstone) when conditions
 	// warrant; abandoned state is reaped by `sc clean`.
-	_, _ = executor.RequestClose(repoPath, branch)
+	_ = executor.RequestClose(repoPath, branch)
 	return nil
 }
 

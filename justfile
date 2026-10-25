@@ -1171,6 +1171,24 @@ debug-session-env-map:
       echo "   $cl"
     done
 
+# list every live process whose environment names session KEY, with its ppid,
+# process group, session id, cwd and command (spinclass#270: what a close of
+# KEY leaves running)
+[group("debug")]
+debug-session-procs key:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    want="SPINCLASS_SESSION_ID={{key}}"
+    for d in /proc/[0-9]*; do
+      pid=${d#/proc/}
+      { tr '\0' '\n' < "$d/environ"; } 2>/dev/null | grep -qxF "$want" || continue
+      stat=$(cat "$d/stat" 2>/dev/null) || continue
+      read -r _state ppid pgid sid _rest <<<"${stat##*) }"
+      cwd=$(readlink "$d/cwd" 2>/dev/null || echo '?')
+      cmd=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null | cut -c1-80)
+      echo "pid=$pid ppid=$ppid pgid=$pgid sid=$sid cwd=$cwd cmd=[$cmd]"
+    done
+
 # [debug] Without a sweatfile [metrics].statsd-address, internal/0/statsd emits
 # only when STATSD_HOST or STATSD_PORT is in the emitting process's environment,
 # so a `serve` started without them is silently off (spinclass#363). Also

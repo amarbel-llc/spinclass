@@ -61,6 +61,32 @@ func stateWithPID(pid int) session.State {
 	return session.State{PID: pid, WorktreePath: testWorktree, SessionKey: testKey}
 }
 
+func requestClosePair(st session.State) (int, string) {
+	r := requestCloseOf(st)
+	return r.Signalled, r.Note
+}
+
+// spinclass#270: a live recorded process that is not signalled (it could not
+// be proven to be the session's) is reported as left running, so close can
+// say so loudly instead of reporting a clean close. A confined session's
+// process is the unit's to stop, and a dead or unset PID left nothing.
+func TestRequestCloseReportsALiveProcessItLeftRunning(t *testing.T) {
+	f := newFakeProc(t, 777)
+	f.process(t, 777, "/home/op")
+	if r := requestCloseOf(stateWithPID(777)); !r.Unstopped || r.Signalled != 0 {
+		t.Errorf("unprovable live pid: got %+v, want Unstopped", r)
+	}
+	f.process(t, 4242, testWorktree)
+	if r := requestCloseOf(stateWithPID(4242)); r.Unstopped {
+		t.Errorf("a pid it could not see alive is not left running: %+v", r)
+	}
+	for _, p := range []int{0, 4242} {
+		if r := requestCloseOf(stateWithPID(p)); r.Unstopped {
+			t.Errorf("pid %d: got %+v, want nothing left running", p, r)
+		}
+	}
+}
+
 func TestRequestCloseSignalsTheSessionsOwnProcess(t *testing.T) {
 	for name, setup := range map[string]func(*fakeProc, *testing.T){
 		"cwd inside the worktree": func(f *fakeProc, t *testing.T) { f.process(t, 4242, testWorktree+"/sub") },
@@ -69,7 +95,7 @@ func TestRequestCloseSignalsTheSessionsOwnProcess(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f := newFakeProc(t, 4242)
 			setup(f, t)
-			pid, note := requestCloseOf(stateWithPID(4242))
+			pid, note := requestClosePair(stateWithPID(4242))
 			if pid != 4242 || note != "" || len(f.signalled) != 1 {
 				t.Fatalf("got pid %d note %q signalled %v, want 4242 signalled", pid, note, f.signalled)
 			}
@@ -82,7 +108,7 @@ func TestRequestCloseSignalsTheSessionsOwnProcess(t *testing.T) {
 func TestRequestCloseNeverSignalsAForeignPID(t *testing.T) {
 	f := newFakeProc(t, 777)
 	f.process(t, 777, "/home/op", "SPINCLASS_SESSION_ID=other/session", "SPINCLASS_SESSION_IDX="+testKey)
-	pid, note := requestCloseOf(stateWithPID(777))
+	pid, note := requestClosePair(stateWithPID(777))
 	if pid != 0 || len(f.signalled) != 0 || !strings.Contains(note, "not provably") {
 		t.Fatalf("got pid %d note %q signalled %v, want a declined signal", pid, note, f.signalled)
 	}
@@ -93,7 +119,7 @@ func TestRequestCloseNeverSignalsAForeignPID(t *testing.T) {
 func TestRequestCloseNeverSignalsAReusedPID(t *testing.T) {
 	f := newFakeProc(t, 4242)
 	f.process(t, 4242, "/var/lib/something") // the new owner of the number
-	if pid, _ := requestCloseOf(stateWithPID(4242)); pid != 0 || len(f.signalled) != 0 {
+	if pid, _ := requestClosePair(stateWithPID(4242)); pid != 0 || len(f.signalled) != 0 {
 		t.Fatalf("got pid %d signalled %v, want nothing", pid, f.signalled)
 	}
 }
@@ -101,7 +127,7 @@ func TestRequestCloseNeverSignalsAReusedPID(t *testing.T) {
 func TestRequestCloseNeverSignalsPIDZeroOrADeadPID(t *testing.T) {
 	f := newFakeProc(t)
 	for _, p := range []int{0, -1, 4242} {
-		if pid, note := requestCloseOf(stateWithPID(p)); pid != 0 || note != "" {
+		if pid, note := requestClosePair(stateWithPID(p)); pid != 0 || note != "" {
 			t.Errorf("pid %d: got %d %q", p, pid, note)
 		}
 	}
@@ -123,7 +149,7 @@ func TestRequestCloseNeverSignalsAConfinedSession(t *testing.T) {
 		if err := os.WriteFile(rec, []byte("{not even valid"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		pid, note := requestCloseOf(stateWithPID(12))
+		pid, note := requestClosePair(stateWithPID(12))
 		if pid != 0 || len(f.signalled) != 0 || !strings.Contains(note, "confined session") {
 			t.Fatalf("%s: got pid %d note %q signalled %v", rec, pid, note, f.signalled)
 		}

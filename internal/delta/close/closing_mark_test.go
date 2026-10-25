@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
+	"code.linenisgreat.com/spinclass/internal/charlie/executor"
 	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 
@@ -39,10 +40,10 @@ func TestCloseMarksTheSessionClosingBeforeSignallingTheAgent(t *testing.T) {
 	prev := requestClose
 	t.Cleanup(func() { requestClose = prev })
 	var markedAtSignal bool
-	requestClose = func(repo, branch string) (int, string) {
+	requestClose = func(repo, branch string) executor.CloseSignal {
 		st, err := session.Read(repo, branch)
 		markedAtSignal = err == nil && st.ClosingAt != nil
-		return 0, ""
+		return executor.CloseSignal{}
 	}
 
 	if err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", true, nil, "tap"); err != nil {
@@ -97,7 +98,7 @@ func TestCloseRefusesWhileARestartIsInFlight(t *testing.T) {
 	prev := requestClose
 	t.Cleanup(func() { requestClose = prev })
 	signalled := false
-	requestClose = func(string, string) (int, string) { signalled = true; return 0, "" }
+	requestClose = func(string, string) executor.CloseSignal { signalled = true; return executor.CloseSignal{} }
 
 	err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", false, nil, "tap")
 	if err == nil || !strings.Contains(err.Error(), "restart") {
@@ -119,7 +120,7 @@ func TestCloseProceedsOnceTheRestartWindowHasPassed(t *testing.T) {
 	markRestarting(t, repoPath, time.Now().UTC().Add(-time.Hour))
 	prev := requestClose
 	t.Cleanup(func() { requestClose = prev })
-	requestClose = func(string, string) (int, string) { return 0, "" }
+	requestClose = func(string, string) executor.CloseSignal { return executor.CloseSignal{} }
 
 	if err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", false, nil, "tap"); err != nil {
 		t.Fatalf("a stale restart mark must not block the close: %v", err)
@@ -132,7 +133,7 @@ func TestForcedCloseIgnoresARestartInFlight(t *testing.T) {
 	markRestarting(t, repoPath, time.Now().UTC())
 	prev := requestClose
 	t.Cleanup(func() { requestClose = prev })
-	requestClose = func(string, string) (int, string) { return 0, "" }
+	requestClose = func(string, string) executor.CloseSignal { return executor.CloseSignal{} }
 
 	if err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", true, nil, "tap"); err != nil {
 		t.Fatalf("a forced close must go through: %v", err)
@@ -149,7 +150,7 @@ func TestAFailedCloseClearsTheClosingMark(t *testing.T) {
 	}
 	prev := requestClose
 	t.Cleanup(func() { requestClose = prev })
-	requestClose = func(string, string) (int, string) { return 0, "" }
+	requestClose = func(string, string) executor.CloseSignal { return executor.CloseSignal{} }
 
 	err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", false, nil, "tap")
 	if err == nil || !strings.Contains(err.Error(), "agent unit") {

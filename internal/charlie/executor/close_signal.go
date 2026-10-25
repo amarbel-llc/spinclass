@@ -26,35 +26,44 @@ var (
 	pidAliveForStop = session.IsAlive
 )
 
+// CloseSignal is what RequestClose did. Signalled is the PID it signalled (0
+// when none); Note, when non-empty, says why it declined. Unstopped reports a
+// live recorded process that was neither signalled nor left to a unit stop: if
+// it is the session's, the session keeps running after the close (spinclass#270).
+type CloseSignal struct {
+	Signalled int
+	Note      string
+	Unstopped bool
+}
+
 // RequestClose asks the session's process to exit with SIGHUP, but only when
 // the recorded PID is provably that session's process. A confined session (one
 // with a unit record or spec) is never signalled: its unit is stopped instead.
-// It returns the PID it signalled (0 when none) and, when it declined, why.
-func RequestClose(repoPath, branch string) (signalled int, note string) {
+func RequestClose(repoPath, branch string) CloseSignal {
 	st, err := session.Read(repoPath, branch)
 	if err != nil {
-		return 0, ""
+		return CloseSignal{}
 	}
 	return requestCloseOf(*st)
 }
 
-func requestCloseOf(st session.State) (signalled int, note string) {
+func requestCloseOf(st session.State) CloseSignal {
 	if st.PID <= 0 {
-		return 0, ""
+		return CloseSignal{}
 	}
 	if hasUnitRecord(st.WorktreePath) {
-		return 0, fmt.Sprintf("confined session: recorded pid %d not signalled; its agent unit is stopped instead", st.PID)
+		return CloseSignal{Note: fmt.Sprintf("confined session: recorded pid %d not signalled; its agent unit is stopped instead", st.PID)}
 	}
 	if !pidAliveForStop(st.PID) {
-		return 0, ""
+		return CloseSignal{}
 	}
 	if !pidBelongsToSession(st.PID, st.WorktreePath, st.SessionKey) {
-		return 0, fmt.Sprintf("recorded pid %d is not provably this session's process (cwd outside the worktree, no session key in its environment); not signalled", st.PID)
+		return CloseSignal{Unstopped: true, Note: fmt.Sprintf("recorded pid %d is not provably this session's process (cwd outside the worktree, no session key in its environment); not signalled", st.PID)}
 	}
 	if err := signalHangup(st.PID); err != nil {
-		return 0, fmt.Sprintf("signalling pid %d: %v", st.PID, err)
+		return CloseSignal{Unstopped: true, Note: fmt.Sprintf("signalling pid %d: %v", st.PID, err)}
 	}
-	return st.PID, ""
+	return CloseSignal{Signalled: st.PID}
 }
 
 // hasUnitRecord reports whether the worktree was launched confined. Any record

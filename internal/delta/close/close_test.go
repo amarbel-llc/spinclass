@@ -19,6 +19,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 	"code.linenisgreat.com/spinclass/internal/bravo/nixgc"
 	"code.linenisgreat.com/spinclass/internal/charlie/auth"
+	"code.linenisgreat.com/spinclass/internal/charlie/executor"
 	"code.linenisgreat.com/spinclass/internal/testgit"
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
@@ -613,6 +614,31 @@ func TestCloseRemovesTheFrontendCredential(t *testing.T) {
 	}
 }
 
+// spinclass#270: a close that leaves the session's recorded process running
+// (alive, but not provably the session's, so not signalled) says so with a
+// warn point instead of only a comment beside "ok - close". The close itself
+// still completes.
+func TestCloseWarnsWhenItLeavesTheSessionsProcessRunning(t *testing.T) {
+	repoPath, wtPath := setupNoTTYClose(t)
+	prev := requestClose
+	t.Cleanup(func() { requestClose = prev })
+	requestClose = func(string, string) executor.CloseSignal {
+		return executor.CloseSignal{Note: "recorded pid 1170101 is not provably this session's process; not signalled", Unstopped: true}
+	}
+
+	var out bytes.Buffer
+	if err := RunResolved(&out, repoPath, wtPath, "feature-x", true, nil, "tap"); err != nil {
+		t.Fatalf("the close itself must still complete: %v", err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "not ok") || !strings.Contains(text, "stop session process feature-x") || !strings.Contains(text, "1170101") {
+		t.Fatalf("want a not-ok 'stop session process' point naming the pid, got:\n%s", text)
+	}
+	if !strings.Contains(text, "severity: warn") {
+		t.Errorf("the point must be a warning, not a failure of the close:\n%s", text)
+	}
+}
+
 // A refused close asks no process to exit: the signal comes only after the
 // refusal and the confirmation (FDR 0035 "Session PIDs are untrusted"). A
 // forced close of the same session does ask.
@@ -621,7 +647,7 @@ func TestRefusedCloseSendsNoSignal(t *testing.T) {
 	prev := requestClose
 	t.Cleanup(func() { requestClose = prev })
 	calls := 0
-	requestClose = func(string, string) (int, string) { calls++; return 0, "" }
+	requestClose = func(string, string) executor.CloseSignal { calls++; return executor.CloseSignal{} }
 
 	if err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", false, nil, "tap"); err == nil {
 		t.Fatal("precondition: an unintegrated close without a terminal must be refused")

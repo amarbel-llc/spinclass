@@ -266,15 +266,7 @@ func runResolvedInto(tw *tap.Writer, repoPath, wtPath, branch string, force bool
 			clearClosing(repoPath, branch)
 		}
 	}()
-	signalled, note := requestClose(repoPath, branch)
-	if note != "" {
-		if tw != nil {
-			tw.Comment("close %s: %s", branch, note)
-		} else {
-			fmt.Fprintf(os.Stderr, "spinclass: close %s: %s\n", branch, note)
-		}
-	}
-	executor.WaitForExit(signalled, 2*time.Second)
+	signalSessionProcess(tw, repoPath, branch)
 
 	// A confined worker's agent unit outlives its worktree unless it is stopped
 	// (FDR 0035): the agent would keep running with its directory removed from
@@ -406,11 +398,7 @@ func closeVanished(tw *tap.Writer, repoPath, wtPath, branch string, force bool) 
 		}
 	}
 
-	signalled, note := requestClose(repoPath, branch)
-	if note != "" && tw != nil {
-		tw.Comment("close %s: %s", branch, note)
-	}
-	executor.WaitForExit(signalled, 2*time.Second)
+	signalSessionProcess(tw, repoPath, branch)
 	if err := stopConfinedUnit(tw, wtPath, branch, force); err != nil {
 		return err
 	}
@@ -473,6 +461,30 @@ func activeKey(repoPath, branch string) string {
 
 // requestClose is the seam over executor.RequestClose for tests.
 var requestClose = executor.RequestClose
+
+// signalSessionProcess asks the session's recorded process to exit and waits
+// briefly for it. A live process it had to leave running is a warn point, not
+// just a comment: the close completes, but the session may live on with no
+// worktree behind it (bodyless, spinclass#270).
+func signalSessionProcess(tw *tap.Writer, repoPath, branch string) {
+	sig := requestClose(repoPath, branch)
+	if sig.Unstopped {
+		desc := "stop session process " + branch
+		message := sig.Note + "; if it is the session's agent or frontend it is still running, so stop it by hand"
+		if tw != nil {
+			tw.NotOk(desc, map[string]string{"severity": "warn", "message": message})
+		} else {
+			fmt.Fprintf(os.Stderr, "spinclass: %s: %s\n", desc, message)
+		}
+	} else if sig.Note != "" {
+		if tw != nil {
+			tw.Comment("close %s: %s", branch, sig.Note)
+		} else {
+			fmt.Fprintf(os.Stderr, "spinclass: close %s: %s\n", branch, sig.Note)
+		}
+	}
+	executor.WaitForExit(sig.Signalled, 2*time.Second)
+}
 
 // errRestartInFlight refuses a close that would race a relaunch.
 var errRestartInFlight = errors.New("a restart of this session is in flight")
