@@ -552,6 +552,46 @@ func requestRestart(t *testing.T) (repoPath, wtPath string) {
 	return repoPath, wtPath
 }
 
+// #419 ordering: a restart verdict marks the session restarting, so a close
+// that begins after it (while the frontend relaunches) is refused.
+func TestRestartPreflightMarksTheSessionRestarting(t *testing.T) {
+	stubNotifyPrincipal(t)
+	repoPath, _ := requestRestart(t)
+
+	v, err := runRestartPreflight("worker/kid")
+	if err != nil || v.Verdict != "restart" {
+		t.Fatalf("got %+v, %v; want restart", v, err)
+	}
+	st := readKid(t, repoPath)
+	if st.RestartingAt == nil || time.Since(*st.RestartingAt) > time.Minute {
+		t.Errorf("RestartingAt = %v, want set to about now", st.RestartingAt)
+	}
+	if st.RestartRequest != nil {
+		t.Error("the request is consumed")
+	}
+}
+
+// A session a close has already marked closing is not restarted, even with a
+// request queued: the close won the race.
+func TestRestartPreflightOfAClosingSessionIsNone(t *testing.T) {
+	stubNotifyPrincipal(t)
+	repoPath, _ := requestRestart(t)
+	st := readKid(t, repoPath)
+	now := time.Now().UTC()
+	st.ClosingAt = &now
+	if err := session.Write(*st); err != nil {
+		t.Fatal(err)
+	}
+
+	v, err := runRestartPreflight("worker/kid")
+	if err != nil || v.Verdict != "none" || !strings.Contains(v.Reason, "closed") {
+		t.Fatalf("got %+v, %v; want none naming the close", v, err)
+	}
+	if readKid(t, repoPath).RestartingAt != nil {
+		t.Error("a closing session must not be marked restarting")
+	}
+}
+
 func TestRestartPreflightWithoutARequestIsNone(t *testing.T) {
 	restartSelfFixture(t, true)
 	v, err := runRestartPreflight("worker/kid")

@@ -258,10 +258,12 @@ func runResolvedInto(tw *tap.Writer, repoPath, wtPath, branch string, force bool
 	// sees it as closed (`restart-preflight --peek`, #419) from before the agent
 	// is signalled; a failure before the tombstone clears the mark again.
 	tombstoned := false
-	markClosing(repoPath, branch, true)
+	if err := beginClosing(repoPath, branch, force); err != nil {
+		return err
+	}
 	defer func() {
 		if !tombstoned {
-			markClosing(repoPath, branch, false)
+			clearClosing(repoPath, branch)
 		}
 	}()
 	signalled, note := requestClose(repoPath, branch)
@@ -472,24 +474,46 @@ func activeKey(repoPath, branch string) string {
 // requestClose is the seam over executor.RequestClose for tests.
 var requestClose = executor.RequestClose
 
-// markClosing sets (on) or clears session.State.ClosingAt. Best-effort: a
-// session with no readable state has nothing for a racing restart to read.
-func markClosing(repoPath, branch string, on bool) {
-	st, err := session.Read(repoPath, branch)
-	if err != nil || st.IsTombstone() {
-		return
-	}
-	if on {
+// errRestartInFlight refuses a close that would race a relaunch.
+var errRestartInFlight = errors.New("a restart of this session is in flight")
+
+// beginClosing sets session.State.ClosingAt, under the session lock so it
+// cannot interleave with restart-preflight consuming a restart (#419). Unless
+// force, it refuses while a restart the preflight already consumed is in
+// flight (State.RestartInFlight): the frontend is about to relaunch the agent,
+// and closing under it could leave the relaunched session revived over a
+// torn-down one. Any other failure is best-effort, as before: a session with no
+// readable state has nothing for a racing restart to read.
+func beginClosing(repoPath, branch string, force bool) error {
+	var inFlightSince time.Time
+	err := session.Update(repoPath, branch, func(st *session.State) error {
 		now := time.Now().UTC()
-		st.ClosingAt = &now
-	} else {
-		if st.ClosingAt == nil {
-			return
+		if !force && st.RestartInFlight(now) {
+			inFlightSince = *st.RestartingAt
+			return errRestartInFlight
 		}
-		st.ClosingAt = nil
+		st.ClosingAt = &now
+		return nil
+	})
+	if errors.Is(err, errRestartInFlight) {
+		return fmt.Errorf("close %s: %w (the frontend took it at %s); retry after %s, or close with --force",
+			branch, err, inFlightSince.Format(time.RFC3339), inFlightSince.Add(session.RestartInFlightWindow).Format(time.RFC3339))
 	}
-	if err := session.Write(*st); err != nil {
-		slog.Debug("close: recording closing mark failed", "branch", branch, "on", on, "err", err)
+	if err != nil {
+		slog.Debug("close: recording closing mark failed", "branch", branch, "err", err)
+	}
+	return nil
+}
+
+// clearClosing clears session.State.ClosingAt after a close that failed before
+// the tombstone (best-effort).
+func clearClosing(repoPath, branch string) {
+	err := session.Update(repoPath, branch, func(st *session.State) error {
+		st.ClosingAt = nil
+		return nil
+	})
+	if err != nil {
+		slog.Debug("close: clearing closing mark failed", "branch", branch, "err", err)
 	}
 }
 

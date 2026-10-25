@@ -275,6 +275,14 @@ type State struct {
 	// into a worktree about to be removed (#419).
 	ClosingAt *time.Time `json:"closing_at,omitempty"`
 
+	// RestartingAt is set when restart-preflight consumes a restart (verdict
+	// "restart"): the frontend is about to stop and relaunch the session. A close
+	// is refused while it is recent (RestartInFlightWindow), so a late close
+	// cannot race the relaunch (#419). It is never cleared: the window bounds it,
+	// because a confined session's SessionStart reaches only the display copy and
+	// could not clear the frontend record.
+	RestartingAt *time.Time `json:"restarting_at,omitempty"`
+
 	// RestartRequest is set by restart-this-session / restart-child-session
 	// (#419): a restart of this session was authorized and handed off to the
 	// harness frontend. The frontend asks `sc restart-preflight` at its next idle
@@ -852,6 +860,17 @@ func IsAlive(pid int) bool {
 // closed sessions specially.
 func (s *State) IsTombstone() bool {
 	return s.isTombstone
+}
+
+// RestartInFlightWindow bounds State.RestartingAt: how long after
+// restart-preflight consumed a restart a close is refused (#419). It covers the
+// frontend's pre-relaunch countdown (30 s, clown) plus the stop and relaunch.
+const RestartInFlightWindow = 2 * time.Minute
+
+// RestartInFlight reports whether a consumed restart is still within
+// RestartInFlightWindow at now.
+func (s *State) RestartInFlight(now time.Time) bool {
+	return s.RestartingAt != nil && now.Sub(*s.RestartingAt) < RestartInFlightWindow
 }
 
 // DefaultTombstoneRetention is the fallback retention window used by

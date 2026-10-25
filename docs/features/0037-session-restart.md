@@ -135,6 +135,18 @@ who is allowed to ask.
   the mark, a close that had signalled the agent but not yet tombstoned would
   still read as live, and a racing restart could relaunch into a worktree about
   to be removed.
+- **Close and restart are ordered** (added 2026-10-25, with clown/pure-teak).
+  The preflight answers `none` for a session marked closing, even with a
+  request queued. A `restart` verdict consumes the request and stamps
+  `session.State.RestartingAt` in one locked update (`session.Update`) that
+  re-checks the closing mark, and close sets `ClosingAt` under the same lock.
+  So a close that begins after the frontend took the restart is refused while
+  `RestartingAt` is under `session.RestartInFlightWindow` (2 minutes: clown's
+  30 s countdown plus the stop and relaunch), unless `--force`. Otherwise the
+  relaunched agent's idempotent `troupe mint` could revive a principal the
+  late close just revoked. The mark is never cleared, only aged out: a
+  confined session's SessionStart reaches only the display copy, so it could
+  not clear the frontend record.
 
 ## Requirement on clown and troupe
 

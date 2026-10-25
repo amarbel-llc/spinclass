@@ -58,6 +58,10 @@ const (
 var errForceRestartUnsupported = errors.New(
 	"a forced restart is not available yet: the frontend (clown restart) accepts only --when idle, so nothing was recorded or handed off; restart without force to wait for the turn to end")
 
+// errRestartLostToClose aborts the preflight's consume when a close marked the
+// session closing between its read and its locked write.
+var errRestartLostToClose = errors.New("the session is being closed")
+
 // errNoRestartSession is returned when the caller's principal maps to no session.
 var errNoRestartSession = errors.New(
 	"could not tie this call to a spinclass session, so there is nothing to restart")
@@ -465,6 +469,8 @@ func runRestartPreflight(target string) (restartVerdict, error) {
 		return noRestart(st.Key() + " is an implicit session"), nil
 	case st.ResolveState() == session.StateAbandoned:
 		return noRestart(st.Key() + " is closed"), nil
+	case st.ClosingAt != nil:
+		return noRestart(st.Key() + " is being closed"), nil
 	}
 	req := *st.RestartRequest
 
@@ -493,7 +499,22 @@ func runRestartPreflight(target string) (restartVerdict, error) {
 	if obstacle != "" {
 		return refuse(obstacle)
 	}
-	if err := consume(); err != nil {
+	// Consume and mark restarting under the session lock, re-checking the
+	// closing mark there: a close that began since the read above wins, and one
+	// that begins after this is refused while the mark is recent (#419).
+	err = session.Update(st.RepoPath, st.Branch, func(cur *session.State) error {
+		if cur.ClosingAt != nil {
+			return errRestartLostToClose
+		}
+		now := time.Now().UTC()
+		cur.RestartRequest = nil
+		cur.RestartingAt = &now
+		return nil
+	})
+	if errors.Is(err, errRestartLostToClose) {
+		return noRestart(st.Key() + " is being closed"), nil
+	}
+	if err != nil {
 		return restartVerdict{}, fmt.Errorf("consuming the restart request: %w", err)
 	}
 	return restartVerdict{

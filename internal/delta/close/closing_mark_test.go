@@ -56,13 +56,14 @@ func TestCloseMarksTheSessionClosingBeforeSignallingTheAgent(t *testing.T) {
 // A close that fails after the mark (here: an agent unit that will not stop,
 // without --force) clears it again, so the still-live session is not reported
 // closed to a later restart.
-func TestAFailedCloseClearsTheClosingMark(t *testing.T) {
-	// A clean, integrated worktree, so the unforced close gets past the
-	// unintegrated-work check and fails only at the unit stop.
+// setupCleanClose is a clean, integrated worktree with a live session, so an
+// unforced close gets past the unintegrated-work check.
+func setupCleanClose(t *testing.T) (repoPath, wtPath string) {
+	t.Helper()
 	testgit.RequireGit(t)
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	repoPath := filepath.Join(t.TempDir(), "repo")
-	wtPath := filepath.Join(repoPath, ".worktrees", "feature-x")
+	repoPath = filepath.Join(t.TempDir(), "repo")
+	wtPath = filepath.Join(repoPath, ".worktrees", "feature-x")
 	testgit.MustInit(t, repoPath)
 	testgit.MustWorktreeAdd(t, repoPath, wtPath, "feature-x")
 	// The session's own .spinclass/ state must not make the worktree dirty.
@@ -70,6 +71,77 @@ func TestAFailedCloseClearsTheClosingMark(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeClosingTestSession(t, repoPath, wtPath)
+	return repoPath, wtPath
+}
+
+// markRestarting stamps the session as having had a restart consumed by
+// restart-preflight at the given time.
+func markRestarting(t *testing.T, repoPath string, at time.Time) {
+	t.Helper()
+	st, err := session.Read(repoPath, "feature-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.RestartingAt = &at
+	if err := session.Write(*st); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// #419: a close that begins while a restart the preflight already consumed is
+// in flight is refused, before the agent is signalled, so the relaunched
+// session cannot revive what the close just tore down.
+func TestCloseRefusesWhileARestartIsInFlight(t *testing.T) {
+	repoPath, wtPath := setupCleanClose(t)
+	markRestarting(t, repoPath, time.Now().UTC())
+	prev := requestClose
+	t.Cleanup(func() { requestClose = prev })
+	signalled := false
+	requestClose = func(string, string) (int, string) { signalled = true; return 0, "" }
+
+	err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", false, nil, "tap")
+	if err == nil || !strings.Contains(err.Error(), "restart") {
+		t.Fatalf("want a refusal naming the restart in flight, got %v", err)
+	}
+	if signalled {
+		t.Error("the agent was signalled despite the refusal")
+	}
+	st, rerr := session.Read(repoPath, "feature-x")
+	if rerr != nil || st.IsTombstone() || st.ClosingAt != nil {
+		t.Errorf("the session must stay live and unmarked: %+v, %v", st, rerr)
+	}
+}
+
+// The in-flight window is bounded: a restart consumed long ago no longer
+// blocks a close.
+func TestCloseProceedsOnceTheRestartWindowHasPassed(t *testing.T) {
+	repoPath, wtPath := setupCleanClose(t)
+	markRestarting(t, repoPath, time.Now().UTC().Add(-time.Hour))
+	prev := requestClose
+	t.Cleanup(func() { requestClose = prev })
+	requestClose = func(string, string) (int, string) { return 0, "" }
+
+	if err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", false, nil, "tap"); err != nil {
+		t.Fatalf("a stale restart mark must not block the close: %v", err)
+	}
+}
+
+// --force closes anyway.
+func TestForcedCloseIgnoresARestartInFlight(t *testing.T) {
+	repoPath, wtPath := setupCleanClose(t)
+	markRestarting(t, repoPath, time.Now().UTC())
+	prev := requestClose
+	t.Cleanup(func() { requestClose = prev })
+	requestClose = func(string, string) (int, string) { return 0, "" }
+
+	if err := RunResolved(io.Discard, repoPath, wtPath, "feature-x", true, nil, "tap"); err != nil {
+		t.Fatalf("a forced close must go through: %v", err)
+	}
+}
+
+func TestAFailedCloseClearsTheClosingMark(t *testing.T) {
+	// Fails only at the unit stop.
+	repoPath, wtPath := setupCleanClose(t)
 	prevUnit := stopUnit
 	t.Cleanup(func() { stopUnit = prevUnit })
 	stopUnit = func(context.Context, string, string) (bool, error) {
