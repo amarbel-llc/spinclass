@@ -31,7 +31,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/charlie/executor"
 	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
 	"code.linenisgreat.com/spinclass/internal/delta/merge"
-	"code.linenisgreat.com/spinclass/internal/hooks"
+	"code.linenisgreat.com/spinclass/internal/echo/hooks"
 	"code.linenisgreat.com/spinclass/internal/servelog"
 )
 

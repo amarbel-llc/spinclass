@@ -42,7 +42,7 @@ re-run that suite right before merging.
   Manpages, completions and the plugin manifest are generated at build time by
   the hidden `generate-artifacts` subcommand; hand-written section 5/7 pages
   are compiled from `doc/*.N.scd` (spinclass#313).
-- **Core workflow** (`internal/shop/`): `Create()` = worktree + sweatfile +
+- **Core workflow** (`internal/echo/shop/`): `Create()` = worktree + sweatfile +
   Claude trust; `Attach()` = Create + session state + `Executor`; `Fork()`.
 - **Executor** (`internal/charlie/executor/`): `SessionExecutor` (prod, SIGHUP
   forwarding), `ShellExecutor` (merge), `mockExecutor` (tests).

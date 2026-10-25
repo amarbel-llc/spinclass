@@ -184,7 +184,7 @@ var errPickerDismissed = errors.New("session picker dismissed")
 
 // RunResolved closes a session whose paths have already been resolved
 // by the caller. Equivalent to Run minus the cwd/target lookup; callers
-// that already know the worktree (e.g. internal/shop's exit handler)
+// that already know the worktree (e.g. internal/echo/shop's exit handler)
 // delegate cleanup here without re-resolving.
 func RunResolved(w io.Writer, repoPath, wtPath, branch string, force bool, nixGCOverride *bool, format string) error {
 	var tw *tap.Writer

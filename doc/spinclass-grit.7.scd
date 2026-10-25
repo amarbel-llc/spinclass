@@ -127,7 +127,7 @@ mapping, resolved from *cwd*. The *unit hook* column is the hook inside a unit,
 where the session does not resolve: every call without *force* is Allow and
 the serve's body check (CONFINED, UNCONFINED AND NO-SESSION CALLERS) is the
 boundary. From a *cwd* in no session, every call is Ask. The test
-*TestGritDefaultPermissionsForAnUnconfinedSession* (internal/hooks) asserts
+*TestGritDefaultPermissionsForAnUnconfinedSession* (internal/echo/hooks) asserts
 every row; keep the two in step.
 
 ```

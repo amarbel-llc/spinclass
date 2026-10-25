@@ -28,8 +28,8 @@ import (
 	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
 	spinclose "code.linenisgreat.com/spinclass/internal/delta/close"
 	"code.linenisgreat.com/spinclass/internal/delta/merge"
+	"code.linenisgreat.com/spinclass/internal/echo/shop"
 	"code.linenisgreat.com/spinclass/internal/run"
-	"code.linenisgreat.com/spinclass/internal/shop"
 	"code.linenisgreat.com/spinclass/internal/spawn"
 	"github.com/mattn/go-isatty"
 )

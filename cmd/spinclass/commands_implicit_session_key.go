@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
-	"code.linenisgreat.com/spinclass/internal/hooks"
+	"code.linenisgreat.com/spinclass/internal/echo/hooks"
 )
 
 const exitImplicitSessionRefused = 3

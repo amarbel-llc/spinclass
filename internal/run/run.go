@@ -46,7 +46,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/charlie/executor"
 	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
 	"code.linenisgreat.com/spinclass/internal/delta/merge"
-	"code.linenisgreat.com/spinclass/internal/shop"
+	"code.linenisgreat.com/spinclass/internal/echo/shop"
 )
 
 // Spec is the fully-parsed `sc run` invocation. Exactly one of Util / Script

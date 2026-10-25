@@ -19,7 +19,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
-	"code.linenisgreat.com/spinclass/internal/shop"
+	"code.linenisgreat.com/spinclass/internal/echo/shop"
 )
 
 // DefaultHelloDeadline bounds how long Launch waits for the worker's

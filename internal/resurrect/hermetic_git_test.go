@@ -8,7 +8,7 @@ import (
 )
 
 // TestMain sandboxes $HOME once for the package. Run exercises
-// worktree.Create's full applyWorktreeConfig path (same as internal/shop),
+// worktree.Create's full applyWorktreeConfig path (same as internal/echo/shop),
 // which reaches claude.TrustWorkspace — that mkdirs under HOME and fails
 // inside the nix sandbox where the default HOME (/homeless-shelter) is
 // read-only. It also isolates every git invocation from the host git

@@ -131,7 +131,7 @@ func TestAuthorizeChildReapMatrix(t *testing.T) {
 //
 // On the host a personal global core.excludesFile masks that; inside the nix
 // sandbox there is none, so omitting this passes locally and fails in the
-// gate. Same trap, same fix, as internal/shop/shop_test.go (#65). Shared by
+// gate. Same trap, same fix, as internal/echo/shop/shop_test.go (#65). Shared by
 // childFixture and childHandleFixture, which differ only in what session
 // state they write afterward.
 func stageChildWorktree(t *testing.T) (repoPath, wtPath string) {

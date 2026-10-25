@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
-	"code.linenisgreat.com/spinclass/internal/hooks"
+	"code.linenisgreat.com/spinclass/internal/echo/hooks"
 )
 
 func registerHookCommand(app *command.App) {
