@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 
@@ -58,6 +59,29 @@ func TestPrepareMergeRefusesWhenMergeDriverMissing(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(repoDir, ".git", "worktrees", "feature", "rebase-merge")); statErr == nil {
 		t.Error("a rebase was left in progress")
+	}
+}
+
+// spinclass#334: a driver the pre-flight cannot judge (an env-assignment
+// prefix) passes it, and the rebase then stops on a "conflict" because the
+// shell could not find the driver. The failure must say so, not read as a
+// content conflict, since the path holds the ours side with no markers.
+func TestPrepareMergeNamesDriverNotFoundBehindRebaseConflict(t *testing.T) {
+	repoDir, wtPath := setupMissingDriverRepo(t, "feature")
+	runGit(t, repoDir, "config", "--global", "merge.codegen-header.driver", "SPINCLASS_TEST=1 spinclass-test-absent-driver %O %A %B %L %P")
+	t.Cleanup(func() { _, _ = git.Run(wtPath, "rebase", "--abort") })
+
+	_, tests, err := runPrepare(t, repoDir, wtPath, "feature")
+	if err == nil {
+		t.Fatalf("PrepareMerge succeeded; points: %v", testDescs(tests))
+	}
+	if _, ok := findTest(tests, "rebase feature"); !ok {
+		t.Fatalf("expected the rebase to run and fail; points: %v", testDescs(tests))
+	}
+	for _, want := range []string{"spinclass-test-absent-driver: command not found", "not a content conflict", "no conflict markers"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q lacks %q", err.Error(), want)
+		}
 	}
 }
 
