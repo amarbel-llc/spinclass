@@ -1,11 +1,14 @@
 bats_timeout := "10"
 
+[group("post-build")]
 test-targets *targets="*.bats":
   BATS_TEST_TIMEOUT="{{bats_timeout}}" \
     bats --jobs {{num_cpus()}} {{targets}}
 
+[group("post-build")]
 test-tags *tags:
   BATS_TEST_TIMEOUT="{{bats_timeout}}" \
     bats --jobs {{num_cpus()}} --filter-tags {{tags}} *.bats
 
+[group("post-build")]
 test: (test-targets "*.bats")

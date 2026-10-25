@@ -2,6 +2,7 @@ default: lint build test verify
 
 # --- lint ---
 
+[group("pre-build")]
 lint: lint-fmt lint-golangci lint-layout lint-worktree
 
 # Read-only format + lint gate via the sandboxed checks.formatting
@@ -13,6 +14,7 @@ lint: lint-fmt lint-golangci lint-layout lint-worktree
 # enforces it on every merge.
 #
 # check formatting and the eng-convention lints, read-only
+[group("pre-build")]
 lint-fmt:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -27,6 +29,7 @@ lint-fmt:
 # lint`, so the pre-merge `just` hook runs it on every merge.
 #
 # run the pure warm-cache nix-native golangci-lint check
+[group("pre-build")]
 lint-golangci:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -40,6 +43,7 @@ lint-golangci:
 # level this prints; `just debug-dagnabit-move-level <level>` applies a move.
 #
 # check the internal/ package layout with dagnabit
+[group("pre-build")]
 lint-layout:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -52,6 +56,7 @@ lint-layout:
 # `lint-golangci` / `checks.lint` (spinclass#294).
 #
 # run the impure eng-convention checks against the working tree
+[group("pre-build")]
 lint-worktree:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -60,12 +65,14 @@ lint-worktree:
 
 # --- build ---
 
+[group("build")]
 build: build-nix
 
 # Build the spinclass binary via nix (burns version.env + commit into the
 # binary via -ldflags — see mkSpinclass in flake.nix).
 #
 # build the spinclass binary via nix
+[group("build")]
 build-nix:
     nix build --show-trace
 
@@ -76,11 +83,13 @@ build-nix:
 # Not part of the gate: `verify-tommy-codegen` is the pure drift check.
 #
 # regenerate the tommy-generated sweatfile codec
+[group("build")]
 build-tommy-codegen:
     nix run --inputs-from . igloo#godyn-go -- -- go generate ./internal/0/sweatfile/
 
 # --- test ---
 
+[group("post-build")]
 test: test-nix
 
 # Go unit tests plus every bats integration lane via `nix flake check` (the
@@ -89,11 +98,13 @@ test: test-nix
 # lanes, lint/vet, tommy-codegen and formatting).
 #
 # run the Go unit tests and every bats lane via `nix flake check`
+[group("post-build")]
 test-nix:
     nix flake check --print-build-logs
 
 # --- verify ---
 
+[group("post-build")]
 verify: verify-version-burnin verify-tommy-codegen
 
 # Verify that the nix-built binary has version+commit burnt in via the
@@ -104,6 +115,7 @@ verify: verify-version-burnin verify-tommy-codegen
 # is the VERSION column of the first `spinclass-*` row, not raw stdout.
 #
 # verify version and commit are burnt into the nix-built binary
+[group("post-build")]
 verify-version-burnin: build
     #!/usr/bin/env bash
     set -euo pipefail
@@ -126,6 +138,7 @@ verify-version-burnin: build
 # pin bump landed without a matching `just build-tommy-codegen`.
 #
 # fail if the committed tommy codec differs from a fresh regen
+[group("post-build")]
 verify-tommy-codegen:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -134,6 +147,7 @@ verify-tommy-codegen:
 
 # --- codemod ---
 
+[group("codemod")]
 codemod-fmt: codemod-fmt-tree
 
 # Format the tree in place (repair mode) via `nix fmt`: Go (goimports →
@@ -142,14 +156,17 @@ codemod-fmt: codemod-fmt-tree
 # counterpart is `lint-fmt`.
 #
 # format the tree in place via `nix fmt`
+[group("codemod")]
 codemod-fmt-tree:
     nix fmt
 
 # --- clean ---
 
+[group("maintenance")]
 clean: clean-build
 
 # remove the nix build result symlink
+[group("maintenance")]
 clean-build:
     rm -rf result
 
@@ -176,17 +193,17 @@ clean-build:
 # runs nothing; add `--rebuild` by hand to rerun the tests.
 #
 # run the serve integration tests in the sandbox (harness B)
-[group('debug')]
+[group("debug")]
 debug-serve-integration:
     nix build .#spinclass-serve-integration --print-build-logs --no-link
 
 # run go test for one package via godyn-test (fast inner loop)
-[group('debug')]
+[group("debug")]
 debug-go-test dir run='' *flags='':
     nix run --inputs-from . igloo#godyn-test -- {{ dir }} -- {{ if run == '' { '' } else { quote('-test.run=' + run) } }} {{ flags }}
 
 # regenerate internal/0/sshsig/testdata: real `ssh-keygen -Y sign` vectors from throwaway keys (private keys are never copied out)
-[group('debug')]
+[group("debug")]
 debug-sshsig-fixtures:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -215,7 +232,7 @@ debug-sshsig-fixtures:
 # the package's _test.go files (restored on exit from a $TMPDIR backup).
 #
 # time the godyn-test inner loop (first, no-op, and edited runs)
-[group('debug')]
+[group("debug")]
 debug-godyn-test-loop dir='internal/delta/perms':
     #!/usr/bin/env bash
     set -euo pipefail
@@ -238,7 +255,7 @@ debug-godyn-test-loop dir='internal/delta/perms':
 # to the committed codec, expect the check to FAIL, restore the codec on exit.
 #
 # verify the tommy codegen check fails on a perturbed codec
-[group('debug')]
+[group("debug")]
 debug-codegen-drift:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -260,7 +277,7 @@ debug-codegen-drift:
 # per-package outputs — needs the ca-derivations experimental feature.
 #
 # build the opt-in godyn (native, per-package) spinclass binary
-[group('debug')]
+[group("debug")]
 debug-godyn-build:
     nix build .#spinclass-native --no-link --print-build-logs
 
@@ -277,7 +294,7 @@ debug-godyn-build:
 # comment edit needs no graph regen. x86_64-linux only.
 #
 # time an incremental one-package edit: godyn vs buildGoApplication rebuild
-[group('debug')]
+[group("debug")]
 debug-godyn-bench:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -308,7 +325,7 @@ debug-godyn-bench:
 # learn its CLI and dry-run package-layout moves (#414).
 #
 # run the pinned dagnabit with arbitrary args
-[group('explore')]
+[group("explore")]
 explore-dagnabit *args:
     nix run --inputs-from . purse-first#dagnabit -- {{ args }}
 
@@ -321,7 +338,7 @@ explore-dagnabit *args:
 # with `git apply --index` (staged). Run levels in order: 0, alfa, bravo, ...
 #
 # move the packages dagnabit plans for one level into internal/<level>/
-[group('debug')]
+[group("debug")]
 debug-dagnabit-move-level level:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -368,7 +385,7 @@ debug-dagnabit-move-level level:
 # (#414 ruling). Prints the files it touched; the edits are staged.
 #
 # rewrite references to the packages one dagnabit level moved
-[group('debug')]
+[group("debug")]
 debug-dagnabit-rewrite-refs level:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -395,7 +412,7 @@ debug-dagnabit-rewrite-refs level:
 # A time nonce in the command defeats the cache so every run prints its plan.
 #
 # print dagnabit's internal/ move plan (initial or layout mode)
-[group('explore')]
+[group("explore")]
 explore-dagnabit-plan mode='initial':
     #!/usr/bin/env bash
     set -euo pipefail
@@ -424,7 +441,7 @@ explore-dagnabit-plan mode='initial':
 # time nonce defeats the cache so every run prints.
 #
 # list which paths godyn's rendered codegenCheck tree contains
-[group('explore')]
+[group("explore")]
 explore-codegen-src paths="cmd/spinclass/close_child_cmd.go cmd/spinclass/resurrect_cmd.go internal/foxtrot/resurrect/resurrect_test.go":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -458,7 +475,7 @@ explore-codegen-src paths="cmd/spinclass/close_child_cmd.go cmd/spinclass/resurr
 # print-roots show before vs after worktree removal?
 #
 # list nix gc roots pointing into the spinclass repo
-[group('explore')]
+[group("explore")]
 explore-gcroots-spinclass:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -474,7 +491,7 @@ explore-gcroots-spinclass:
 # listed as skipped.
 #
 # estimate the prompt-token cost of injecting sibling repos' just recipe names + docs
-[group('explore')]
+[group("explore")]
 explore-recipe-prompt-cost repos=(home_directory() / 'eng/repos'):
     #!/usr/bin/env bash
     set -uo pipefail
@@ -508,7 +525,7 @@ explore-recipe-prompt-cost repos=(home_directory() / 'eng/repos'):
 # be gzipped. Input to the FDR 0030 manpage-index design.
 #
 # dump raw NAME-section roff from sampled manpages to design the parser against
-[group('explore')]
+[group("explore")]
 explore-manpage-name-formats glob=(home_directory() / '.nix-profile/share/man/man*/*'):
     #!/usr/bin/env bash
     set -uo pipefail
@@ -553,7 +570,7 @@ explore-manpage-name-formats glob=(home_directory() / '.nix-profile/share/man/ma
 # (is <dir>/sweatfile in the chain, and did [sysprompt] decode).
 #
 # run the installed sc validate from an arbitrary directory
-[group('explore')]
+[group("explore")]
 explore-validate-from dir=(home_directory() / 'eng'):
     #!/usr/bin/env bash
     set -uo pipefail
@@ -570,7 +587,7 @@ explore-validate-from dir=(home_directory() / 'eng'):
 # no Manpage/Repository index sections.
 #
 # print the dynamic system-prompt fragment the INSTALLED sc returns for a directory
-[group('explore')]
+[group("explore")]
 explore-prompt-fragment-from dir=(home_directory() / 'eng'):
     #!/usr/bin/env bash
     set -uo pipefail
@@ -596,7 +613,7 @@ explore-prompt-fragment-from dir=(home_directory() / 'eng'):
 # tokenizer). Pass a manpage glob and a directory of checkouts.
 #
 # estimate the prompt-token cost of the sysprompt manpage and repo indexes
-[group('explore')]
+[group("explore")]
 explore-index-prompt-cost glob=(home_directory() / '.nix-profile/share/man/man*/eng*') repos=(home_directory() / 'eng/repos'):
     #!/usr/bin/env bash
     set -uo pipefail
@@ -633,7 +650,7 @@ explore-index-prompt-cost glob=(home_directory() / '.nix-profile/share/man/man*/
 # Input to the FDR 0028 fleet-placement design.
 #
 # list each sibling repo's origin host and pinned conformist rev
-[group('explore')]
+[group("explore")]
 explore-repo-origins repos=(home_directory() / 'eng/repos'):
     #!/usr/bin/env bash
     set -uo pipefail
@@ -658,7 +675,7 @@ explore-repo-origins repos=(home_directory() / 'eng/repos'):
 # `SSH_AUTH_SOCK=` in env to prove a step is agent-free.
 #
 # run the live profile's sc with the given arguments
-[group('debug')]
+[group("debug")]
 debug-sc *args:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -675,7 +692,7 @@ debug-sc *args:
 # gone by the end.
 #
 # push a session worktree's HEAD to a scratch remote branch with no ssh-agent, then delete it
-[group('debug')]
+[group("debug")]
 debug-agentless-push worktree scratch='fdr-0028-probe':
     #!/usr/bin/env bash
     set -uo pipefail
@@ -688,7 +705,7 @@ debug-agentless-push worktree scratch='fdr-0028-probe':
 # inspect or clean up forge tokens around a round-trip (e.g. `forge token list`).
 #
 # run the live profile's papi with the given arguments
-[group('debug')]
+[group("debug")]
 debug-papi *args:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -702,7 +719,7 @@ debug-papi *args:
 # targets — leftovers from removed checkouts/worktrees.
 #
 # list all dangling auto gc-root links on the system
-[group('explore')]
+[group("explore")]
 explore-gcroots-auto-dangling:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -724,7 +741,7 @@ explore-gcroots-auto-dangling:
 # indirect roots — a known nix side-effect that bears on issue #67.
 #
 # probe how print-roots treats a dangling indirect auto-root
-[group('explore')]
+[group("explore")]
 explore-print-roots-dangling:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -776,7 +793,7 @@ explore-print-roots-dangling:
 # "are dangling auto-roots visible to print-roots?" question.
 #
 # list auto gc-root symlinks resolving into the spinclass repo
-[group('explore')]
+[group("explore")]
 explore-gcroots-auto-spinclass:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -809,7 +826,7 @@ explore-gcroots-auto-spinclass:
 # resolve from PATH; override with DODDER_BIN / MADDER_BIN.
 #
 # probe dodder reuse of a CWD-local `.default` madder store
-[group('explore')]
+[group("explore")]
 explore-dodder-reuse-cwd:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -850,7 +867,7 @@ explore-dodder-reuse-cwd:
 # pair, the .default failure is dodder genesis discovery, not version skew.
 #
 # probe dodder reuse of an XDG-named madder store
-[group('explore')]
+[group("explore")]
 explore-dodder-reuse-xdg store="shared":
     #!/usr/bin/env bash
     set -uo pipefail
@@ -898,7 +915,7 @@ explore-dodder-reuse-xdg store="shared":
 # reuse-vs-collision question sharp.
 #
 # show what a plain `dodder init` creates on its own
-[group('explore')]
+[group("explore")]
 explore-dodder-init-plain:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -927,7 +944,7 @@ explore-dodder-init-plain:
 # Requires pivy-agent UNLOCKED. See examples/dodder-consumer/README.md.
 #
 # run the dodder-consumer example's end-to-end harness
-[group('explore')]
+[group("explore")]
 explore-dodder-e2e:
     examples/dodder-consumer/e2e.sh
 
@@ -938,7 +955,7 @@ explore-dodder-e2e:
 # plugins resolve. See examples/dodder-consumer.
 #
 # build the clown circus from the dodder-consumer example
-[group('explore')]
+[group("explore")]
 explore-dodder-circus:
     cd examples/dodder-consumer && nix build .#circus --print-build-logs
 
@@ -949,7 +966,7 @@ explore-dodder-circus:
 # debug-bats-nix-tag).
 #
 # build just the bats-default lane
-[group('debug')]
+[group("debug")]
 debug-bats-default:
     nix build .#bats-default --no-link --print-build-logs
 
@@ -959,7 +976,7 @@ debug-bats-default:
 # `just`/`just test` stays fast, matching this repo's other opt-in slow lanes.
 #
 # build just the race-instrumented bats lane
-[group('debug')]
+[group("debug")]
 debug-bats-race:
     nix build .#bats-race --no-link --print-build-logs
 
@@ -969,7 +986,7 @@ debug-bats-race:
 # bats-madder flake check; this is the single-lane drill-down.
 #
 # build just the madder-pinned bats lane
-[group('debug')]
+[group("debug")]
 debug-bats-madder:
     nix build .#bats-madder --no-link --print-build-logs
 
@@ -977,7 +994,7 @@ debug-bats-madder:
 # the installed plugin handler, then print exit code, stdout, and stderr.
 #
 # pipe a synthetic PreToolUse payload through the installed plugin handler
-[group('debug')]
+[group("debug")]
 debug-hook-pretooluse:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -1001,7 +1018,7 @@ debug-hook-pretooluse:
 #     just debug-store-verdict mcp__plugin_spinclass_spinclass__grit_stage '{"subcommand":"status"}' <principal>
 #
 # print the PreToolUse hook's verdict for one synthetic store-tool call
-[group('debug')]
+[group("debug")]
 debug-store-verdict tool input principal:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -1015,7 +1032,7 @@ debug-store-verdict tool input principal:
     echo "exit: $?" >&2
 
 # print the last n (default 20) PreToolUse verdicts this worktree's hook logged (jq-pretty when available)
-[group('debug')]
+[group("debug")]
 debug-hook-verdicts n='20':
     #!/usr/bin/env bash
     set -uo pipefail
@@ -1038,7 +1055,7 @@ debug-hook-verdicts n='20':
 # upstream commit twice over. Everything lives under .tmp/ and is removed after.
 #
 # verify #250's freshened base end-to-end against the installed sc
-[group('debug')]
+[group("debug")]
 debug-stale-base:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -1111,7 +1128,7 @@ debug-stale-base:
 # actually resolves rather than merely being recorded.
 #
 # inspect a ringmaster job: spool tail, journal records, and any attached blobs
-[group('debug')]
+[group("debug")]
 debug-ringmaster-job job tail="20":
     #!/usr/bin/env bash
     set -uo pipefail
@@ -1137,7 +1154,7 @@ debug-ringmaster-job job tail="20":
     done
 
 # map live processes' SPINCLASS_SESSION_ID against their CLOWN_SESSION_ID
-[group('debug')]
+[group("debug")]
 debug-session-env-map:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -1160,7 +1177,7 @@ debug-session-env-map:
 # reports whether anything listens on the UDP port.
 #
 # show each live `spinclass serve` process's statsd opt-in environment
-[group('debug')]
+[group("debug")]
 debug-statsd-env port="8125":
     #!/usr/bin/env bash
     set -uo pipefail
@@ -1188,7 +1205,7 @@ debug-statsd-env port="8125":
 # TRACKED files only; `git add -N` a new file (or template) first.
 #
 # print the dynamic system-prompt fragment `spinclass serve` returns
-[group('debug')]
+[group("debug")]
 debug-prompt-fragment mode="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1211,7 +1228,7 @@ debug-prompt-fragment mode="":
 # add -N` new sources first (spinclass#292, as debug-prompt-fragment).
 #
 # print the FDR 0035 confinement table for a session on this host
-[group('debug')]
+[group("debug")]
 debug-confinement-check session="" principal="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1227,7 +1244,7 @@ debug-confinement-check session="" principal="":
 # call), and the auto-mode subcommand's help. Makes no network call.
 #
 # show the installed claude's permission-mode flags and auto-mode help
-[group('explore')]
+[group("explore")]
 explore-claude-permission-modes:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -1261,7 +1278,7 @@ explore-claude-permission-modes:
 # inspection and prints their paths.
 #
 # observe hook deny vs settings allow ordering in throwaway claude sessions
-[group('explore')]
+[group("explore")]
 explore-hook-deny-vs-allow model="haiku":
     #!/usr/bin/env bash
     set -uo pipefail
@@ -1314,7 +1331,7 @@ explore-hook-deny-vs-allow model="haiku":
 # Serves the cmd/spinclass/list_view rendering dev-loop. Requires `posh` on PATH.
 #
 # render an `sc` subcommand through a real PTY and dump the screen
-[group('debug')]
+[group("debug")]
 debug-render-tty cols="100" *args="list":
     #!/usr/bin/env bash
     set -uo pipefail
@@ -1340,7 +1357,7 @@ debug-render-tty cols="100" *args="list":
 # 'stash|tags'`. Serves the sc-grit dev loop.
 #
 # run the sc grit escape hatch end to end under a pty
-[group('debug')]
+[group("debug")]
 debug-grit-escape-pty filter="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1359,7 +1376,7 @@ debug-grit-escape-pty filter="":
 # BATS_TEST_TIMEOUT is unset so a slow test reports its time instead of dying.
 #
 # time one bats file against the race build
-[group('debug')]
+[group("debug")]
 debug-bats-race-timing file filter="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1377,7 +1394,7 @@ debug-bats-race-timing file filter="":
 # uncommitted spinclass changes.
 #
 # scaffold a throwaway repo on a devshell-built binary and drop into $SHELL
-[group('debug')]
+[group("debug")]
 debug-dev-repo:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1402,7 +1419,7 @@ debug-dev-repo:
 # Delete once #196 is closed.
 #
 # reproduce issue #196 end-to-end against the installed sc binary
-[group('debug')]
+[group("debug")]
 debug-issue196-scratch:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -1448,7 +1465,7 @@ debug-issue196-scratch:
 # nix-built binary links. Delete once #196 is closed.
 #
 # run the issue #196 regression test against the bridged tommy
-[group('debug')]
+[group("debug")]
 debug-issue196:
     just debug-go-test internal/0/sweatfile 'TestScalarBeforeSubtable|TestScalarBeforeSubtableWithPrecedingTable|TestScalarBeforeSubtableHierarchy|TestStandaloneDottedHeadersConsumed' -test.v
 
@@ -1456,6 +1473,7 @@ debug-issue196:
 # the semver without it. Usage: just tag 0.1.0 "feat: initial release"
 #
 # sign and push a spinclass release tag
+[group("maintenance")]
 tag version $message:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1477,6 +1495,7 @@ tag version $message:
 # if already at the target version. Usage: just bump-version 0.1.1
 #
 # rewrite SPINCLASS_VERSION in version.env to the given semver
+[group("maintenance")]
 bump-version new_version:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1498,6 +1517,7 @@ bump-version new_version:
 # the commit message yourself without bumping.
 #
 # cut a release: bump version.env, commit, push master, then sign and push the tag
+[group("maintenance")]
 release version:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1534,7 +1554,7 @@ release version:
 # Scratch repo, marker hook, six checks. Delete once the installer lands.
 #
 # verify a per-worktree core.hooksPath confines a pre-commit hook to one worktree
-[group('explore')]
+[group("explore")]
 explore-worktree-hooks:
     #!/usr/bin/env bash
     set -uo pipefail
