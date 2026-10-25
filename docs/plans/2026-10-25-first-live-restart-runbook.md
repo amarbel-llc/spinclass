@@ -31,9 +31,13 @@ or I (inferred).
    `--peek` call resolves. Check `spinclass version`, then run
    `spinclass restart-preflight --peek` from any directory. It should print one
    JSON line with `"state":"closed"`.
-3. **pennywise's `--peek` wiring in clown**, if the run is meant to cover the
-   close race. Without it, clown checks only that the worktree directory
-   exists. (R)
+3. **pennywise's `--peek` wiring in clown**, merged at clown 613bf9a. That
+   makes the clown prerequisite 613bf9a or later, which includes 720ffd7.
+   Clown runs `--peek` just before the relaunch exec and skips the exec on
+   `state: closed`. Anything else (live, an error, a timeout, unparsable
+   output, or no spinclass on PATH) is logged as unknown and it relaunches.
+   (R, pennywise.) Against a spinclass without `--peek` it therefore takes the
+   unknown path, so prerequisite 2 matters for the race check.
 4. **The global `[session-entry].restart` hand-off.** It goes in a sweatfile
    layer above the repo; the global `~/.config/spinclass/sweatfile` is the
    natural one. A repo or worktree value is ignored, and `sc validate` warns
