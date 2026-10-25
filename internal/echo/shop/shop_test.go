@@ -625,6 +625,7 @@ func TestAttachPreservesFieldsItDoesNotOwn(t *testing.T) {
 		ProfileDigest:      "digest-cheap",
 		AuthorizingGrant:   "grant-1",
 		ProfileRebinds:     []session.ProfileRebind{{From: "digest-old", To: "digest-cheap", Transition: "tr-1", By: "operator", At: hello}},
+		ProfileNarrowing:   &session.ProfileNarrowingLink{Grantee: "myrepo/spawned-worker", Profile: "cheap", ProfileDigest: "digest-cheap", Base: "base-b", Prev: "db", Unsigned: true},
 		HelloSentAt:        &hello,
 		PreMergeAttestation: &session.PreMergeAttestation{
 			RecordedAt: hello,
@@ -677,6 +678,9 @@ func TestAttachPreservesFieldsItDoesNotOwn(t *testing.T) {
 	// (#407); a resume must not drop it.
 	if len(got.ProfileRebinds) != 1 || got.ProfileRebinds[0].Transition != "tr-1" {
 		t.Errorf("ProfileRebinds = %+v, want carried forward (clobbered by attach)", got.ProfileRebinds)
+	}
+	if got.ProfileNarrowing == nil || got.ProfileNarrowing.Base != "base-b" {
+		t.Errorf("ProfileNarrowing = %+v, want carried forward (clobbered by attach, #413)", got.ProfileNarrowing)
 	}
 	if got.HelloSentAt == nil || !got.HelloSentAt.Equal(hello) {
 		t.Errorf("HelloSentAt = %v, want %v (clobbered by attach)", got.HelloSentAt, hello)

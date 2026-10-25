@@ -85,6 +85,7 @@ func setupClosedSessionWith(t *testing.T, branch string, beforeClose func(wtPath
 		ProfileDigest:      "digest-cheap",
 		AuthorizingGrant:   "grant-1",
 		ProfileRebinds:     []session.ProfileRebind{{From: "digest-old", To: "digest-cheap", Transition: "tr-1", By: "operator", At: time.Now().UTC()}},
+		ProfileNarrowing:   &session.ProfileNarrowingLink{Grantee: "repo/" + branch, Profile: "cheap", ProfileDigest: "digest-cheap", Base: "base-b", Prev: "db", Unsigned: true},
 		Entrypoint:         []string{"/bin/sh"},
 		StartedAt:          time.Now().UTC(),
 	}
@@ -164,6 +165,9 @@ func TestRunRecreatesWorktreeFromClosedSession(t *testing.T) {
 	}
 	if len(got.ProfileRebinds) != 1 || got.ProfileRebinds[0].Transition != "tr-1" {
 		t.Errorf("ProfileRebinds = %+v, want preserved from tombstone (#407)", got.ProfileRebinds)
+	}
+	if got.ProfileNarrowing == nil || got.ProfileNarrowing.Base != "base-b" {
+		t.Errorf("ProfileNarrowing = %+v, want preserved from tombstone (#413)", got.ProfileNarrowing)
 	}
 	if got := got.HandleRights["9c2e1111-2222-3333-4444-555566667777"]; got != "observe" {
 		t.Errorf("HandleRights = %v, want preserved from tombstone", got)

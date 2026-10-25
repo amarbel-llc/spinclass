@@ -304,6 +304,7 @@ var authorityFields = []struct {
 	{"profile", func(s *State) any { return s.Profile }},
 	{"profile_digest", func(s *State) any { return s.ProfileDigest }},
 	{"profile_rebinds", func(s *State) any { return s.ProfileRebinds }},
+	{"profile_narrowing", func(s *State) any { return s.ProfileNarrowing }},
 	{"entry", func(s *State) any { return s.Entry }},
 	{"credential", func(s *State) any { return s.Credential }},
 	{"close_request", func(s *State) any { return s.CloseRequest }},
