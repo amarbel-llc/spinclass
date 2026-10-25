@@ -41,8 +41,8 @@ who is allowed to ask.
    configures it.
 4. **`when=idle` queueing lives in clown.** Spinclass records the request with
    `when: idle` and hands off immediately; clown holds it until the session's
-   current turn ends. `now` is part of the vocabulary and the verdict, but no tool
-   asks for it yet.
+   current turn ends. `when: now` is what a forced restart records (decision 8);
+   clown restarts on it without waiting for the turn.
 5. **`restart-preflight` is the contract between the halves.** Clown runs
    `sc restart-preflight` at the idle transition, before it restarts. Spinclass
    re-checks everything (a job may have started since the request) and consumes
@@ -53,16 +53,30 @@ who is allowed to ask.
    the session's own act, gated by the operator's hand-off.
 7. **A running merge or check job refuses the restart**, at request time and
    again in the preflight. Restarting would kill the job's owner mid-landing.
-8. **Planned follow-ups, not built here:** a `force` parameter (an escalation, so
-   always-ask, like `close-child-session`'s) and a cancel-restart verb. Both tools
-   reject a `force` argument today.
-9. **A 30 second countdown before the relaunch is an operator ruling owned by
-   clown and posh.** Spinclass has no part in it and implements none.
+8. **`force` is an operator-gated escalation** (operator ruling), never a flag an
+   agent sets silently. On both restart tools, `force=true` is always-ask
+   (`perms.AlwaysAsk`, enforced by the PreToolUse hook and mirrored in
+   `RunCheck`, failing closed on any non-boolean, like `close-child-session`'s
+   `force`); the unforced call stays auto-allowed. A forced restart records
+   `when: now`, expands `{when}` to `now`, and skips the running-job obstacle at
+   request time (`restartPlan(..., force)`) and again in the preflight, which
+   treats a `when: now` request as already approved to kill the job. So it kills
+   the session's current turn and any running merge/check job. Nothing else is
+   skipped: an implicit session, a non-UUID principal, a missing hand-off and (for
+   a child) the `restart` right still refuse. At a terminal (`sc restart-this-session
+   --force`, `sc restart-child-session --force`) the caller is the operator, so
+   nothing prompts, as for `sc close-child-session --force`.
+9. **`cancel-restart` withdraws a queued request.** It only clears the recorded
+   `RestartRequest`; it does not call the hand-off. The frontend drops its pending
+   restart the next time `restart-preflight` answers `none`. See Interface.
+10. **A 30 second countdown before the relaunch is an operator ruling owned by
+    clown and posh.** Spinclass has no part in it and implements none.
 
 ## Interface
 
 - `restart-this-session` (MCP tool, `sc restart-this-session`): optional
-  `reason` (default "requested by the session itself"). The caller is resolved
+  `reason` (default "requested by the session itself") and `force` (decision 8:
+  always-ask, when `now`, skips the job obstacle only). The caller is resolved
   like `close-this-session` (principal, frontend mapping, session). Refused, with
   nothing recorded, when no trusted hand-off is configured, a job is running, the
   session is implicit, or its principal is not UUID-shaped (the same check
@@ -71,12 +85,23 @@ who is allowed to ask.
   runs the hand-off, and tells the agent to end its turn. If the hand-off fails,
   the request is cleared and its output returned.
 - `restart-child-session` (MCP tool, `sc restart-child-session`): `child` and
-  optional `reason` (default "requested by a holder"). Refused for a confined
-  serve caller. Authorized as `close-child-session` is (handle or spawner key,
+  optional `reason` (default "requested by a holder") and `force` (as above; it
+  does not buy the `restart` right). Refused for a confined serve caller. Authorized as `close-child-session` is (handle or spawner key,
   accept-on-first-use) plus the `restart` right. The obstacles apply to the
   child, and the hand-off is read from the child's repo hierarchy and run in the
   child's worktree. The child's principal comes from the frontend mapping, not
   from state the agent can write.
+- `cancel-restart` (MCP tool, `sc cancel-restart`): optional `child`. Without it,
+  cancels the caller's own session's queued restart (resolved like
+  `restart-this-session`; open to a confined caller, since it only removes a
+  request and needs no hand-off). With it, the same authorization as
+  `restart-child-session` (confined serve caller refused, handle with
+  accept-on-first-use, the `restart` right). It clears `RestartRequest` and
+  writes state; nothing queued is a success saying so (idempotent). It does not
+  run the hand-off: the frontend drops its pending restart when
+  `restart-preflight` next returns `none`. The original requester, when it is
+  neither the caller nor the session itself, is told, best effort. Auto-allowed
+  by the hook: it only removes a queued request.
 - `restart-preflight [--target T]` (hidden, CLI only; target defaults to the
   session of `CLOWN_SESSION_ID`). Prints exactly one JSON line and exits 0 (non-zero
   only on an internal error):
@@ -87,7 +112,8 @@ who is allowed to ask.
 
   `none`: no session, no request, an implicit or closed session. `refused`: the
   obstacles fail now; the request is cleared and the holders are told, best
-  effort, through `clown.NotifyPrincipal`. `restart`: every check passes; the
+  effort, through `clown.NotifyPrincipal`. A `when: now` request skips the
+  running-job obstacle (the operator approved killing the job). `restart`: every check passes; the
   request is cleared (consumed). `when` is the requested timing, empty for `none`.
   The principal is resolved by `closeRunnerPrincipal`'s rules (the frontend mapping
   first, a confined session with no mapping refused), never from the request.
@@ -110,7 +136,9 @@ close revokes.
 - The request lives in session state, which an agent in an unconfined session can
   write. It carries no authority: the preflight re-checks everything and takes the
   principal from the frontend mapping. A forged request can at worst cause a
-  restart the hand-off already allowed.
+  restart the hand-off already allowed, except that a forged `when: now` also
+  skips the running-job check in the preflight (the always-ask on `force` guards
+  the tool, not a hand-edited state file).
 
 ## More Information
 

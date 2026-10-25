@@ -283,7 +283,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		Name:  "restart-this-session",
 		Title: "Restart This Session",
 		Description: command.Description{
-			Short: "Ask for THIS session to be stopped and relaunched by its harness frontend (#419, FDR 0037) once your current turn is over. Refused unless an operator set `restart` under [session-entry] in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored), while a merge/check job runs, and for an implicit session. spinclass only authorizes and records the request and runs that hand-off command; the frontend performs the restart after this turn ends. It never forces. After it succeeds, end your turn.",
+			Short: "Ask for THIS session to be stopped and relaunched by its harness frontend (#419, FDR 0037) once your current turn is over. Refused unless an operator set `restart` under [session-entry] in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored), while a merge/check job runs, and for an implicit session. spinclass only authorizes and records the request and runs that hand-off command; the frontend performs the restart after this turn ends. `force` restarts NOW and even over a running job: forcing kills your current turn and any running merge/check job, and ALWAYS prompts the human, so use it only when waiting is not an option. A queued restart can be withdrawn with cancel-restart. After it succeeds, end your turn.",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			ReadOnlyHint:    protocol.BoolPtr(false),
@@ -300,7 +300,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		Name:  "restart-child-session",
 		Title: "Restart Child Session",
 		Description: command.Description{
-			Short: "Ask for a session you hold a handle on to be stopped and relaunched by its harness frontend (#419, FDR 0037). Needs the `restart` right on the child (the spawner has it; the default grant `observe,close` does not): a child you hold no handle on, or hold without that right, is refused, naming who can grant it. Same refusals as restart-this-session, evaluated on the child: no trusted `[session-entry].restart` hand-off, a running merge/check job, an implicit session. It never forces. The restart happens when the child's current turn ends.",
+			Short: "Ask for a session you hold a handle on to be stopped and relaunched by its harness frontend (#419, FDR 0037). Needs the `restart` right on the child (the spawner has it; the default grant `observe,close` does not): a child you hold no handle on, or hold without that right, is refused, naming who can grant it. Same refusals as restart-this-session, evaluated on the child: no trusted `[session-entry].restart` hand-off, a running merge/check job, an implicit session. `force` restarts the child NOW and even over a running job: forcing kills the child's current turn and any running merge/check job, and ALWAYS prompts the human (it still needs the `restart` right). Otherwise the restart happens when the child's current turn ends. A queued restart can be withdrawn with cancel-restart.",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			ReadOnlyHint:    protocol.BoolPtr(false),
@@ -311,6 +311,23 @@ func registerMCPOnlyCommands(app *command.App) {
 		Params: restartChildSessionParamList(),
 		Run:    wrapMCPHandler("restart-child-session", handleRestartChildSession),
 		RunCLI: ungatedCLI(runRestartChild),
+	})
+
+	app.AddCommand(&command.Command{
+		Name:  "cancel-restart",
+		Title: "Cancel Queued Restart",
+		Description: command.Description{
+			Short: "Cancel a queued session restart (#419, FDR 0037) before it happens. With no `child`, cancels THIS session's own queued restart; with `child`, cancels the child's, which needs the `restart` right on it, like restart-child-session. It only clears the recorded request: it does not call the restart hand-off, so the harness frontend drops its pending restart when its next restart-preflight answers \"none\". Nothing queued is a success, not an error. The requester, when it is neither you nor the session itself, is told.",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(false),
+			DestructiveHint: protocol.BoolPtr(false),
+			IdempotentHint:  protocol.BoolPtr(true),
+			OpenWorldHint:   protocol.BoolPtr(false),
+		},
+		Params: cancelRestartParamList(),
+		Run:    wrapMCPHandler("cancel-restart", handleCancelRestart),
+		RunCLI: ungatedCLI(runCancelRestart),
 	})
 
 	app.AddCommand(&command.Command{

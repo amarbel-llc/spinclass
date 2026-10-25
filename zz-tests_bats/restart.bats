@@ -69,6 +69,43 @@ function restart_this_session_hands_off_the_expanded_argv { # @test
   assert_output "argv: <restart> <--session> <$PRINCIPAL> <--when> <idle> <--reason> <need new tools>"
 }
 
+function restart_this_session_force_hands_off_when_now { # @test
+  write_global_sweatfile "$RESTART_HANDOFF"
+  start_bound_session
+
+  CLOWN_SESSION_ID=$PRINCIPAL run_sc restart-this-session --force --reason wedged
+  assert_success
+  assert_output --partial "FORCED"
+
+  run cat "$CLOWN_LOG"
+  assert_output "argv: <restart> <--session> <$PRINCIPAL> <--when> <now> <--reason> <wedged>"
+
+  CLOWN_SESSION_ID=$PRINCIPAL run --separate-stderr "$SPINCLASS_BIN" restart-preflight
+  assert_success
+  echo "$output" | jq -e '.verdict == "restart" and .when == "now"'
+}
+
+function cancel_restart_makes_the_preflight_report_none { # @test
+  write_global_sweatfile "$RESTART_HANDOFF"
+  start_bound_session
+
+  CLOWN_SESSION_ID=$PRINCIPAL run_sc restart-this-session --reason r
+  assert_success
+
+  CLOWN_SESSION_ID=$PRINCIPAL run_sc cancel-restart
+  assert_success
+  assert_output --partial "cancelled"
+
+  CLOWN_SESSION_ID=$PRINCIPAL run --separate-stderr "$SPINCLASS_BIN" restart-preflight
+  assert_success
+  echo "$output" | jq -e '.verdict == "none"'
+
+  # Idempotent: nothing is queued any more.
+  CLOWN_SESSION_ID=$PRINCIPAL run_sc cancel-restart
+  assert_success
+  assert_output --partial "nothing to cancel"
+}
+
 function restart_this_session_refuses_without_a_hand_off { # @test
   write_global_sweatfile
   start_bound_session

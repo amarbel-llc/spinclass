@@ -91,7 +91,8 @@ re-run that suite right before merging.
 `update-description`, `exec`, `run` (FDR 0020), `list [--watch]`, `merge`,
 `close [target...]`, `check`, `clean`, `rebuild [--check]`, `fork`, `spawn`
 (FDR 0006), `close-child-session`, `restart-this-session` /
-`restart-child-session` (FDR 0037; hidden `restart-preflight`), `grant-session-handle` /
+`restart-child-session` (`--force` is always-ask) / `cancel-restart` (FDR 0037;
+hidden `restart-preflight`), `grant-session-handle` /
 `release-session-handle` / `list-handles` / `whoami` (FDR 0032), `resurrect`
 (FDR 0027), `grit <tool> [json]` (CLI-only, TTY-required, logged operator escape
 hatch for the grit store tools, FDR 0036), `pull`, `validate`, `perms list|review|edit`. Per-command flags:

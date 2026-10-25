@@ -69,7 +69,8 @@ sc clean
 | `sc rebuild [target] [--check]` | Re-apply a drifted worktree's setup and refresh its fingerprint; `--check` reports stale/fresh (exits nonzero if stale) |
 | `sc fork [branch]` | Fork the current worktree into a new branch (supports `--from <dir>`); create-only (the `--brief` detached worker was removed in #262) |
 | `sc spawn [repo] --brief "…"` | Launch a detached, harness-booted worker session (blocks on the worker's chat hello); `repo` is optional — omit it (or name the current repo) to spawn in THIS repo, else a sibling (#262) |
-| `sc restart-this-session [--reason R]` / `sc restart-child-session <child>` | Ask for a session to be stopped and relaunched by its harness frontend (FDR 0037). Needs the operator's `[session-entry].restart` hand-off in a global or above-repo sweatfile; the child form needs the `restart` handle right |
+| `sc restart-this-session [--reason R] [--force]` / `sc restart-child-session <child> [--force]` | Ask for a session to be stopped and relaunched by its harness frontend (FDR 0037). Needs the operator's `[session-entry].restart` hand-off in a global or above-repo sweatfile; the child form needs the `restart` handle right. `--force` restarts now and kills the current turn and any running job (the MCP tool always prompts the human for it) |
+| `sc cancel-restart [--child C]` | Withdraw a queued restart (the child form needs the `restart` handle right); the frontend drops it when `restart-preflight` next says `none` |
 | `sc close-child-session <child>` | Close a worker session this session holds a handle on (seeded at spawn, extendable via a grant); refuses anything it holds no handle on (`--force` for a child with unmerged work) |
 | `sc grant-session-handle <child> <to> [--rights R]` | Grant another principal a handle on a session this one holds a handle on |
 | `sc release-session-handle <child>` | Release this session's own handle on a session |

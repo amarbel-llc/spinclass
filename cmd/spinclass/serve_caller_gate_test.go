@@ -87,6 +87,16 @@ var gatedServeHandlers = []gatedServeHandler{
 		args: `{"child":"worker/kid"}`, harmlessArgs: `{}`, harmlessRefusal: "child is required",
 		cliArgs: []string{"restart-child-session", "--child", "nope/none"}, cliRefusal: "no spinclass session for child",
 	},
+	// cancel-restart is mixed like list-handles: cancelling the caller's own
+	// request (no child) is open, since it only removes a request the caller
+	// could make; naming a child rests on a handle read from agent-writable state,
+	// so that form is gated. TestCancelRestartOfOneselfIsOpenToAConfinedCaller
+	// covers the open half.
+	{
+		tool: "cancel-restart", operatorCommand: "sc cancel-restart", handle: handleCancelRestart,
+		args: `{"child":"worker/kid"}`, harmlessArgs: `{"child":"nope/none"}`, harmlessRefusal: "no spinclass session for child",
+		cliArgs: []string{"cancel-restart", "--child", "nope/none"}, cliRefusal: "no spinclass session for child",
+	},
 	{
 		tool: "grant-session-handle", operatorCommand: "sc grant-session-handle", handle: handleGrantSessionHandle,
 		args: `{"child":"worker/kid","to":"someone"}`, harmlessArgs: `{}`, harmlessRefusal: "child is required",
@@ -191,6 +201,19 @@ func TestListHandlesWithoutAcceptIsOpenToAConfinedCaller(t *testing.T) {
 	res, err := handleListHandles(context.Background(), json.RawMessage(`{}`), nil)
 	if err != nil || res.IsErr || res.Text != "no handles" {
 		t.Fatalf("got err=%v %+v, want the plain listing", err, res)
+	}
+}
+
+// Cancelling one's own restart names no child and rests on no handle, so a
+// confined caller may do it (unlike the child form, which is gated above).
+func TestCancelRestartOfOneselfIsOpenToAConfinedCaller(t *testing.T) {
+	asConfinedServeCaller(t, "a-confined-principal")
+	res, err := handleCancelRestart(context.Background(), json.RawMessage(`{}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Text, "classifies as confined") {
+		t.Fatalf("self-cancel must not be serve-gated, got %q", res.Text)
 	}
 }
 

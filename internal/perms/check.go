@@ -15,6 +15,8 @@ const (
 	grantSessionHandleTool   = "mcp__plugin_spinclass_spinclass__grant-session-handle"
 	releaseSessionHandleTool = "mcp__plugin_spinclass_spinclass__release-session-handle"
 	listHandlesTool          = "mcp__plugin_spinclass_spinclass__list-handles"
+	restartThisSessionTool   = "mcp__plugin_spinclass_spinclass__restart-this-session"
+	restartChildSessionTool  = "mcp__plugin_spinclass_spinclass__restart-child-session"
 )
 
 // SpawnConfined reports whether a spawn-session invocation (its tool input and
@@ -84,6 +86,18 @@ func AlwaysAsk(toolName string, toolInput map[string]any, cwd string) (string, b
 		// force too.
 		if forceRequested(toolInput) {
 			return "force discards the child's uncommitted changes and unmerged commits; confirm each invocation", true
+		}
+		return "", false
+
+	case restartThisSessionTool, restartChildSessionTool:
+		// An unforced restart only QUEUES a request: it waits for the session's
+		// turn to end and is refused while a merge/check job runs, so the
+		// operator's hand-off and the restart handle right are the gate. force is
+		// the escalation (FDR 0037): it restarts now and skips the job check, so
+		// it kills the current turn and any running job. Prompt on exactly that,
+		// failing closed on any non-boolean like close-child-session's force.
+		if forceRequested(toolInput) {
+			return "a forced restart kills the session's current turn and any running merge/check job; confirm each invocation", true
 		}
 		return "", false
 

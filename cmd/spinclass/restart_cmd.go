@@ -31,10 +31,18 @@ import (
 //
 // The hand-off is [session-entry].restart in a sweatfile layer above the repo,
 // read live and never pinned, so an agent cannot choose the command spinclass
-// runs and sessions that already exist get it. Force does not exist yet.
+// runs and sessions that already exist get it.
+//
+// An unforced restart waits for the turn to end and is refused while a job
+// runs. `force` is the operator-gated escalation (perms.AlwaysAsk makes the
+// tool call prompt the human; the CLI caller is the operator): it records
+// when=now and skips the running-job obstacle, at request time and in the
+// preflight, so it kills the current turn and any running job. cancel-restart
+// removes a queued request.
 
 const (
 	restartWhenIdle           = "idle"
+	restartWhenNow            = "now"
 	restartHandoffTimeout     = 15 * time.Second
 	restartNotifyTimeout      = 15 * time.Second
 	defaultSelfRestartReason  = "requested by the session itself"
@@ -92,8 +100,9 @@ func expandRestartHandoff(argv []string, principal, key, when, reason string) []
 // restarted right now ("" when it may). It is the checks both tools and the
 // preflight share, so a request that passes here is one the preflight also
 // accepts unless something changed in between. principal is the session's own
-// principal, the one {principal} expands to and clown restarts it by.
-func restartPlan(st *session.State, principal string) (argv []string, obstacle string, err error) {
+// principal, the one {principal} expands to and clown restarts it by. force
+// skips the running-job obstacle and nothing else.
+func restartPlan(st *session.State, principal string, force bool) (argv []string, obstacle string, err error) {
 	if st.Kind == session.KindImplicit {
 		return nil, fmt.Sprintf("%s is a main-checkout (implicit) session; only worktree sessions can be restarted", st.Key()), nil
 	}
@@ -116,8 +125,11 @@ func restartPlan(st *session.State, principal string) (argv []string, obstacle s
 			st.Key()), nil
 	}
 
-	if j, jerr := job.Read(st.WorktreePath); jerr == nil && j.Status == job.StatusRunning {
-		return nil, fmt.Sprintf("a %s job (%s) is still running in %s; a restart would kill it, so let it finish or cancel it first", j.Kind, j.ID, st.Key()), nil
+	// force is the operator-approved escalation (always-ask in perms.AlwaysAsk,
+	// FDR 0037): it accepts killing a running job, and only that. Every check
+	// above still stands.
+	if j, jerr := job.Read(st.WorktreePath); !force && jerr == nil && j.Status == job.StatusRunning {
+		return nil, fmt.Sprintf("a %s job (%s) is still running in %s; a restart would kill it, so let it finish or cancel it first (or restart with force, which asks the operator)", j.Kind, j.ID, st.Key()), nil
 	}
 	return argv, "", nil
 }
@@ -126,8 +138,8 @@ func restartPlan(st *session.State, principal string) (argv []string, obstacle s
 // is the principal that asked; principal is st's own. A failed hand-off clears
 // the request again, so the frontend never restarts on a request that was not
 // handed off.
-func queueRestart(st *session.State, requester, principal, reason string) (string, error) {
-	argv, obstacle, err := restartPlan(st, principal)
+func queueRestart(st *session.State, requester, principal, reason string, force bool) (string, error) {
+	argv, obstacle, err := restartPlan(st, principal, force)
 	if err != nil {
 		return "", err
 	}
@@ -135,23 +147,32 @@ func queueRestart(st *session.State, requester, principal, reason string) (strin
 		return "", errors.New(obstacle)
 	}
 
+	when := restartWhenIdle
+	if force {
+		when = restartWhenNow
+	}
 	st.RestartRequest = &session.RestartRequest{
 		RequestedAt: time.Now().UTC(),
 		Requester:   requester,
 		Reason:      reason,
-		When:        restartWhenIdle,
+		When:        when,
 	}
 	if err := session.Write(*st); err != nil {
 		return "", fmt.Errorf("recording the restart request: %w", err)
 	}
 
-	expanded := expandRestartHandoff(argv, principal, st.Key(), restartWhenIdle, reason)
+	expanded := expandRestartHandoff(argv, principal, st.Key(), when, reason)
 	if out, herr := restartHandoffFn(st.WorktreePath, expanded); herr != nil {
 		st.RestartRequest = nil
 		if werr := session.Write(*st); werr != nil {
 			servelog.Errorf("restart clear-request-failed key=%s err=%v", st.Key(), werr)
 		}
 		return "", fmt.Errorf("the restart hand-off %q failed (%v), so nothing was queued: %s", expanded[0], herr, out)
+	}
+	if force {
+		return fmt.Sprintf(
+			"FORCED restart queued for %s (%s). The frontend restarts the session without waiting for the turn to end and without waiting for a running merge/check job, which it kills, so end your turn now and do not start new work.",
+			st.Key(), reason), nil
 	}
 	return fmt.Sprintf(
 		"restart queued for %s (%s). Nothing has been stopped yet: the frontend restarts the session once its current turn ends and the checks still pass, so end your turn now and do not start new work.",
@@ -161,6 +182,7 @@ func queueRestart(st *session.State, requester, principal, reason string) (strin
 // restartThisSessionParams is the parameter set of restart-this-session.
 type restartThisSessionParams struct {
 	Reason string `json:"reason"`
+	Force  bool   `json:"force"`
 }
 
 // rejectForceFor fails closed on any force argument, including false: the tool
@@ -178,32 +200,39 @@ func rejectForceFor(args json.RawMessage, msg string) error {
 	return nil
 }
 
-// runRestartThisSession is the restart-this-session tool body.
-func runRestartThisSession(p restartThisSessionParams) (string, error) {
-	principal := currentPrincipal()
+// callerSession resolves the caller's own session the way close-this-session
+// does (principal, frontend mapping, session record) and guards it.
+func callerSession() (principal string, st *session.State, err error) {
+	principal = currentPrincipal()
 	key, err := confinement.SessionKeyOfPrincipal(principal)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", errNoRestartSession, err)
+		return "", nil, fmt.Errorf("%w: %v", errNoRestartSession, err)
 	}
-	st, err := session.FindByTarget(key)
+	st, err = session.FindByTarget(key)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if err := guardHandleTarget(st, "restart"); err != nil {
+		return "", nil, err
+	}
+	return principal, st, nil
+}
+
+// runRestartThisSession is the restart-this-session tool body.
+func runRestartThisSession(p restartThisSessionParams) (string, error) {
+	principal, st, err := callerSession()
+	if err != nil {
 		return "", err
 	}
 	reason := p.Reason
 	if reason == "" {
 		reason = defaultSelfRestartReason
 	}
-	return queueRestart(st, principal, principal, reason)
+	return queueRestart(st, principal, principal, reason, p.Force)
 }
 
 // handleRestartThisSession is the `restart-this-session` MCP tool handler.
 func handleRestartThisSession(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
-	if err := rejectForceFor(args, "restart-this-session takes no force argument yet; it waits for the session to be idle and is refused while a job runs"); err != nil {
-		return command.TextErrorResult(err.Error()), nil
-	}
 	var p restartThisSessionParams
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &p); err != nil {
@@ -224,6 +253,7 @@ func restartThisSessionParamList() []command.Param {
 			Type:        command.String,
 			Description: "Why the restart is wanted; passed to the frontend and shown to the holders. Defaults to \"" + defaultSelfRestartReason + "\".",
 		},
+		forceRestartParam(),
 	}
 }
 
@@ -231,6 +261,7 @@ func restartThisSessionParamList() []command.Param {
 type restartChildParams struct {
 	Child  string `json:"child"`
 	Reason string `json:"reason"`
+	Force  bool   `json:"force"`
 }
 
 // runRestartChild is the shared restart-child-session flow, shaped like
@@ -241,30 +272,10 @@ func runRestartChild(p restartChildParams) (string, error) {
 	if p.Child == "" {
 		return "", errors.New("child is required")
 	}
-	callerPrincipal := currentPrincipal()
-	callerKey := bestEffortSessionKey()
-
-	child, err := findHandleTarget(p.Child)
+	child, callerPrincipal, err := authorizeRestartChild("restart-child-session", p.Child)
 	if err != nil {
 		return "", err
 	}
-	// FDR 0032 handle guard, before the accept-on-first-use write below.
-	if err := guardHandleTarget(child, "accept"); err != nil {
-		return "", err
-	}
-	if child.IsPendingHolder(callerPrincipal) {
-		child.AcceptHandle(callerPrincipal)
-		if err := session.Write(*child); err != nil {
-			return "", fmt.Errorf("accepting handle on %s: %w", child.Key(), err)
-		}
-	}
-	if err := authorizeHandleUse(callerPrincipal, callerKey, *child); err != nil {
-		return "", err
-	}
-	if err := requireHandleRight("restart-child-session", "restart", callerPrincipal, *child); err != nil {
-		return "", err
-	}
-
 	// The child's principal comes from the frontend mapping, not from state the
 	// agent can write.
 	childPrincipal, err := ownerPrincipal(child, "", "restart",
@@ -276,7 +287,38 @@ func runRestartChild(p restartChildParams) (string, error) {
 	if reason == "" {
 		reason = defaultChildRestartReason
 	}
-	return queueRestart(child, callerPrincipal, childPrincipal, reason)
+	return queueRestart(child, callerPrincipal, childPrincipal, reason, p.Force)
+}
+
+// authorizeRestartChild resolves target and checks the caller may act on its
+// restart: a handle (accept-on-first-use) that carries the restart right. tool
+// names the verb in the refusal. It is shared by restart-child-session and
+// cancel-restart with a child.
+func authorizeRestartChild(tool, target string) (child *session.State, callerPrincipal string, err error) {
+	callerPrincipal = currentPrincipal()
+	callerKey := bestEffortSessionKey()
+
+	child, err = findHandleTarget(target)
+	if err != nil {
+		return nil, "", err
+	}
+	// FDR 0032 handle guard, before the accept-on-first-use write below.
+	if err := guardHandleTarget(child, "accept"); err != nil {
+		return nil, "", err
+	}
+	if child.IsPendingHolder(callerPrincipal) {
+		child.AcceptHandle(callerPrincipal)
+		if err := session.Write(*child); err != nil {
+			return nil, "", fmt.Errorf("accepting handle on %s: %w", child.Key(), err)
+		}
+	}
+	if err := authorizeHandleUse(callerPrincipal, callerKey, *child); err != nil {
+		return nil, "", err
+	}
+	if err := requireHandleRight(tool, "restart", callerPrincipal, *child); err != nil {
+		return nil, "", err
+	}
+	return child, callerPrincipal, nil
 }
 
 // handleRestartChildSession is the `restart-child-session` MCP tool handler.
@@ -285,9 +327,6 @@ func runRestartChild(p restartChildParams) (string, error) {
 func handleRestartChildSession(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
 	if refusal := refuseConfinedServeCaller("restart-child-session", "sc restart-child-session"); refusal != nil {
 		return refusal, nil
-	}
-	if err := rejectForceFor(args, "restart-child-session takes no force argument yet; it waits for the child to be idle and is refused while a job runs"); err != nil {
-		return command.TextErrorResult(err.Error()), nil
 	}
 	var p restartChildParams
 	if err := json.Unmarshal(args, &p); err != nil {
@@ -314,6 +353,17 @@ func restartChildSessionParamList() []command.Param {
 			Type:        command.String,
 			Description: "Why the restart is wanted; passed to the frontend and shown to the holders. Defaults to \"" + defaultChildRestartReason + "\".",
 		},
+		forceRestartParam(),
+	}
+}
+
+// forceRestartParam is the escalation both restart tools share. It is
+// always-ask in perms.AlwaysAsk, so no allow-list approves it silently.
+func forceRestartParam() command.Param {
+	return command.Param{
+		Name:        "force",
+		Type:        command.Bool,
+		Description: "Restart NOW instead of when the turn ends, and even while a merge/check job runs. Forcing kills the session's current turn and any running job, and always prompts the human — no allow-list can approve it silently — so reach for it only when waiting is not an option.",
 	}
 }
 
@@ -381,7 +431,9 @@ func runRestartPreflight(target string) (restartVerdict, error) {
 	if principalErr != nil {
 		return refuse(principalErr.Error())
 	}
-	_, obstacle, err := restartPlan(st, principal)
+	// A when=now request was force-approved by the operator at request time,
+	// which included killing a running job, so the job check is skipped again.
+	_, obstacle, err := restartPlan(st, principal, req.When == restartWhenNow)
 	if err != nil {
 		return restartVerdict{}, err
 	}
@@ -417,6 +469,94 @@ func notifyRestartRefused(st *session.State, principal string, req session.Resta
 			servelog.Errorf("restart-preflight notify-failed key=%s target=%s err=%v", st.Key(), t, err)
 		}
 	}
+}
+
+// cancelRestartParams is the parameter set of cancel-restart.
+type cancelRestartParams struct {
+	Child string `json:"child"`
+}
+
+func cancelRestartParamList() []command.Param {
+	return []command.Param{
+		{
+			Name:        "child",
+			Type:        command.String,
+			Description: "The session whose queued restart to cancel, as its <repo>/<branch> session key or its worktree directory name. Omit it to cancel THIS session's own queued restart. Naming a child needs the `restart` right on it, like restart-child-session.",
+			Completer:   completeWorktreeTargets,
+		},
+	}
+}
+
+// runCancelRestart clears a queued RestartRequest, on the caller's own session
+// (no child) or on a child the caller holds the restart right on. It does not
+// call the hand-off: the frontend drops its pending restart when restart-preflight
+// next answers "none". Nothing queued is a success, so the call is idempotent.
+func runCancelRestart(p cancelRestartParams) (string, error) {
+	var st *session.State
+	var caller, sessionsOwnID string
+	var err error
+	if p.Child == "" {
+		caller, st, err = callerSession()
+		sessionsOwnID = caller
+	} else {
+		st, caller, err = authorizeRestartChild("cancel-restart", p.Child)
+	}
+	if err != nil {
+		return "", err
+	}
+	if p.Child != "" {
+		// Best effort: only used to avoid telling the session about its own
+		// request, so a failure here just means it may be told.
+		sessionsOwnID, _ = ownerPrincipal(st, "", "restart", "")
+	}
+	if st.RestartRequest == nil {
+		return fmt.Sprintf("no restart is queued for %s, so there is nothing to cancel", st.Key()), nil
+	}
+	req := *st.RestartRequest
+	st.RestartRequest = nil
+	if err := session.Write(*st); err != nil {
+		return "", fmt.Errorf("clearing the restart request: %w", err)
+	}
+	notifyRestartCancelled(st, req, caller, sessionsOwnID)
+	return fmt.Sprintf(
+		"cancelled the queued restart of %s (%s). The frontend drops it when its next restart-preflight answers \"none\".",
+		st.Key(), req.Reason), nil
+}
+
+// notifyRestartCancelled tells the original requester, when it is neither the
+// canceller nor the session itself, that its restart was cancelled. Best-effort.
+func notifyRestartCancelled(st *session.State, req session.RestartRequest, caller, sessionsOwnID string) {
+	if req.Requester == "" || req.Requester == caller || req.Requester == sessionsOwnID {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), restartNotifyTimeout)
+	defer cancel()
+	msg := fmt.Sprintf("the restart of %s that you requested (%s) was cancelled by %s", st.Key(), req.Reason, caller)
+	if err := notifyPrincipalFn(ctx, req.Requester, "", msg); err != nil {
+		servelog.Errorf("cancel-restart notify-failed key=%s target=%s err=%v", st.Key(), req.Requester, err)
+	}
+}
+
+// handleCancelRestart is the `cancel-restart` MCP tool handler. Cancelling the
+// caller's own restart is open; naming a child rests on a handle read from
+// agent-writable session state, so that form refuses a confined caller.
+func handleCancelRestart(_ context.Context, args json.RawMessage, _ command.Prompter) (*command.Result, error) {
+	var p cancelRestartParams
+	if len(args) > 0 {
+		if err := json.Unmarshal(args, &p); err != nil {
+			return command.TextErrorResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+		}
+	}
+	if p.Child != "" {
+		if refusal := refuseConfinedServeCaller("cancel-restart", "sc cancel-restart"); refusal != nil {
+			return refusal, nil
+		}
+	}
+	text, err := runCancelRestart(p)
+	if err != nil {
+		return command.TextErrorResult(err.Error()), nil
+	}
+	return command.TextResult(text), nil
 }
 
 // printRestartVerdict writes v as exactly one JSON line.

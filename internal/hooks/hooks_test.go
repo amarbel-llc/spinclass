@@ -1150,6 +1150,17 @@ func TestReadOnlyIntrospectionToolsAutoApproved(t *testing.T) {
 		// nothing and is refused while a job runs (#419).
 		{"restart-this-session", map[string]any{"reason": "x"}, "allow"},
 		{"restart-child-session", map[string]any{"child": "r/b"}, "allow"},
+		{"restart-this-session", map[string]any{"force": false}, "allow"},
+		{"restart-child-session", map[string]any{"child": "r/b", "force": false}, "allow"},
+		// A forced restart kills the turn and any running job: always-ask,
+		// ahead of the auto-allow above.
+		{"restart-this-session", map[string]any{"force": true}, "ask"},
+		{"restart-this-session", map[string]any{"force": "true"}, "ask"},
+		{"restart-child-session", map[string]any{"child": "r/b", "force": true}, "ask"},
+		{"restart-child-session", map[string]any{"child": "r/b", "force": "false"}, "ask"},
+		// cancel-restart only removes a queued request.
+		{"cancel-restart", map[string]any{}, "allow"},
+		{"cancel-restart", map[string]any{"child": "r/b"}, "allow"},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%s %v", tt.tool, tt.input), func(t *testing.T) {

@@ -40,6 +40,22 @@ func TestAlwaysAsk(t *testing.T) {
 
 		{"unrelated tool is silent", "Read", map[string]any{"force": true}, false},
 
+		// A forced restart kills the current turn and any running job.
+		{"restart-this without force is silent", restartThisSessionTool, map[string]any{"reason": "x"}, false},
+		{"restart-this nil input is silent", restartThisSessionTool, nil, false},
+		{"restart-this force=false is silent", restartThisSessionTool, map[string]any{"force": false}, false},
+		{"restart-this null force is silent", restartThisSessionTool, map[string]any{"force": nil}, false},
+		{"restart-this force=true asks", restartThisSessionTool, map[string]any{"force": true}, true},
+		{"restart-this string force asks", restartThisSessionTool, map[string]any{"force": "true"}, true},
+		{"restart-this string false still asks", restartThisSessionTool, map[string]any{"force": "false"}, true},
+		{"restart-this numeric force asks", restartThisSessionTool, map[string]any{"force": float64(1)}, true},
+		{"restart-child without force is silent", restartChildSessionTool, map[string]any{"child": "r/b"}, false},
+		{"restart-child force=false is silent", restartChildSessionTool, map[string]any{"child": "r/b", "force": false}, false},
+		{"restart-child null force is silent", restartChildSessionTool, map[string]any{"force": nil}, false},
+		{"restart-child force=true asks", restartChildSessionTool, map[string]any{"child": "r/b", "force": true}, true},
+		{"restart-child string force asks", restartChildSessionTool, map[string]any{"force": "true"}, true},
+		{"restart-child numeric force asks", restartChildSessionTool, map[string]any{"force": float64(1)}, true},
+
 		{"grant always asks", grantSessionHandleTool, nil, true},
 		{"grant asks regardless of rights named", grantSessionHandleTool, map[string]any{"rights": "observe"}, true},
 
@@ -170,6 +186,43 @@ func TestCheckNeverAutoApprovesForcedReap(t *testing.T) {
 	if out.Len() != 0 {
 		t.Errorf("a tier rule auto-approved a forced reap, so unmerged work would be "+
 			"discarded with no prompt; got %q", out.String())
+	}
+}
+
+// The forced-restart prompt names what a forced restart destroys.
+func TestAlwaysAskForcedRestartReasonNamesTheCost(t *testing.T) {
+	for _, tool := range []string{restartThisSessionTool, restartChildSessionTool} {
+		reason, ask := AlwaysAsk(tool, map[string]any{"force": true}, "/cwd")
+		if !ask || !strings.Contains(reason, "turn") || !strings.Contains(reason, "job") {
+			t.Errorf("%s: want an ask whose reason names the turn and the job, got ask=%v %q", tool, ask, reason)
+		}
+	}
+}
+
+// A tier rule cannot buy its way past the floor for a forced restart either.
+func TestCheckNeverAutoApprovesForcedRestart(t *testing.T) {
+	for _, tool := range []string{restartThisSessionTool, restartChildSessionTool} {
+		tiersDir := t.TempDir()
+		data, _ := json.MarshalIndent(Tier{Allow: []string{tool}}, "", "  ")
+		testfs.MustWriteFile(t, filepath.Join(tiersDir, "global.json"), data, 0o644)
+
+		run := func(in map[string]any) string {
+			input, _ := json.Marshal(map[string]any{
+				"tool_name": tool, "tool_input": in,
+				"cwd": "/home/user/eng/worktrees/myrepo/feature",
+			})
+			var out bytes.Buffer
+			if err := RunCheck(bytes.NewReader(input), &out, tiersDir); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			return out.String()
+		}
+		if got := run(map[string]any{"force": true}); got != "" {
+			t.Errorf("%s: a tier rule auto-approved a forced restart: %q", tool, got)
+		}
+		if got := run(map[string]any{"reason": "x"}); got == "" {
+			t.Errorf("%s: an allow-listed unforced restart was not auto-approved", tool)
+		}
 	}
 }
 

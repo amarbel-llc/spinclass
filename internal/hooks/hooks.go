@@ -610,6 +610,7 @@ const (
 	closeThisSessionToolName      = "mcp__plugin_spinclass_spinclass__close-this-session"
 	restartThisSessionToolName    = "mcp__plugin_spinclass_spinclass__restart-this-session"
 	restartChildSessionToolName   = "mcp__plugin_spinclass_spinclass__restart-child-session"
+	cancelRestartToolName         = "mcp__plugin_spinclass_spinclass__cancel-restart"
 )
 
 func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree, rewriteEnabled, denySweatfile bool) error {
@@ -684,9 +685,14 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 		// The tools refuse unless an operator set [session-entry].restart in a
 		// trusted sweatfile layer (and, for a child, the caller holds the restart
 		// right), and they only QUEUE a restart the frontend performs after the
-		// turn, never forcing and removing nothing, so the operator's hand-off and
-		// the handle are the gate and a prompt on top guards nothing.
+		// turn, removing nothing, so the operator's hand-off and the handle are the
+		// gate and a prompt on top guards nothing. The forced form never reaches
+		// here: the always-ask floor above caught it.
 		return writeAllow(w, "restart is gated by the operator's trusted restart hand-off and the restart handle right")
+	case cancelRestartToolName:
+		// Only removes a queued restart request; naming a child needs the restart
+		// right, checked inside the tool.
+		return writeAllow(w, "cancel-restart only removes a queued restart request")
 	case mergeThisSessionToolName, mergeThisSessionAsyncToolName:
 		if hasPreMergeHook(input.CWD) {
 			return writeAllow(w, "sweatfile [hooks].pre-merge gates this merge")

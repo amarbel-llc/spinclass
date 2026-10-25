@@ -172,7 +172,7 @@ func TestRestartThisSessionRefusesANonUUIDPrincipal(t *testing.T) {
 
 func TestRestartObstacleRefusesAnImplicitSession(t *testing.T) {
 	st := &session.State{Kind: session.KindImplicit, RepoPath: t.TempDir(), SessionKey: "r/main"}
-	_, obstacle, err := restartPlan(st, selfPrincipal)
+	_, obstacle, err := restartPlan(st, selfPrincipal, false)
 	if err != nil || !strings.Contains(obstacle, "implicit") {
 		t.Fatalf("restartPlan = %q, %v; want an obstacle naming implicit", obstacle, err)
 	}
@@ -226,17 +226,93 @@ func TestRestartThisSessionHandoffFailureClearsTheRequest(t *testing.T) {
 	}
 }
 
-func TestRestartThisSessionHasNoForce(t *testing.T) {
-	for _, args := range []string{`{"force":true}`, `{"force":false}`} {
+// writeRunningJob plants a running merge/check job in wtPath.
+func writeRunningJob(t *testing.T, wtPath string) {
+	t.Helper()
+	if err := job.Write(wtPath, &job.Job{
+		ID: "j1", Kind: "merge", Status: job.StatusRunning, ServePID: os.Getpid(), StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func wantSelfArgvWhen(when, reason string) []string {
+	argv := wantSelfArgv(reason)
+	argv[7] = when
+	return argv
+}
+
+// force=false is the same as no force: a running job still refuses.
+func TestRestartThisSessionUnforcedStillRefusedOverAJob(t *testing.T) {
+	for _, args := range []string{`{}`, `{"force":false}`} {
 		calls := stubRestartHandoff(t, "", nil)
-		repoPath, _ := restartSelfFixture(t, true)
+		repoPath, wtPath := restartSelfFixture(t, true)
+		writeRunningJob(t, wtPath)
 		text, isErr := callRestartThis(t, args)
-		if !isErr || !strings.Contains(text, "force") {
-			t.Errorf("%s: want a refusal naming force, got isErr=%v %q", args, isErr, text)
+		if !isErr || !strings.Contains(text, "job") {
+			t.Errorf("%s: want a refusal naming the job, got isErr=%v %q", args, isErr, text)
 		}
 		if readKid(t, repoPath).RestartRequest != nil || len(*calls) != 0 {
 			t.Errorf("%s: must not record a request or run the hand-off", args)
 		}
+	}
+}
+
+// A forced restart is queued as when=now and does not stop for a running job.
+func TestRestartThisSessionForceSkipsTheJobCheckAndAsksForNow(t *testing.T) {
+	calls := stubRestartHandoff(t, "", nil)
+	repoPath, wtPath := restartSelfFixture(t, true)
+	writeRunningJob(t, wtPath)
+
+	text, isErr := callRestartThis(t, `{"force":true,"reason":"wedged"}`)
+	if isErr {
+		t.Fatalf("a forced restart must go through over a running job: %q", text)
+	}
+	req := readKid(t, repoPath).RestartRequest
+	if req == nil || req.When != "now" || req.Requester != selfPrincipal || req.Reason != "wedged" {
+		t.Fatalf("restart request = %+v, want one by %s, when now", req, selfPrincipal)
+	}
+	want := wantSelfArgvWhen("now", "wedged")
+	if len(*calls) != 1 || !reflect.DeepEqual((*calls)[0].argv, want) {
+		t.Fatalf("hand-off calls = %+v, want one with argv %q", *calls, want)
+	}
+}
+
+// Force skips the job obstacle only: every other refusal stands.
+func TestRestartThisSessionForceStillRefusesWithoutAHandoff(t *testing.T) {
+	calls := stubRestartHandoff(t, "", nil)
+	repoPath, _ := restartSelfFixture(t, false)
+	text, isErr := callRestartThis(t, `{"force":true}`)
+	if !isErr || !strings.Contains(text, "[session-entry]") {
+		t.Fatalf("want a refusal naming [session-entry], got isErr=%v %q", isErr, text)
+	}
+	if readKid(t, repoPath).RestartRequest != nil || len(*calls) != 0 {
+		t.Error("nothing may be recorded or run")
+	}
+}
+
+func TestRestartThisSessionForceStillRefusesANonUUIDPrincipal(t *testing.T) {
+	calls := stubRestartHandoff(t, "", nil)
+	repoPath, wtPath := restartSelfFixture(t, true)
+	const odd = "not-a-uuid"
+	t.Setenv("CLOWN_SESSION_ID", odd)
+	if err := confinement.RecordUnconfinedPrincipal(os.Getenv("XDG_STATE_HOME"), odd, "worker/kid", wtPath); err != nil {
+		t.Fatal(err)
+	}
+	text, isErr := callRestartThis(t, `{"force":true}`)
+	if !isErr || !strings.Contains(text, "UUID") {
+		t.Fatalf("want a refusal naming UUID, got isErr=%v %q", isErr, text)
+	}
+	if readKid(t, repoPath).RestartRequest != nil || len(*calls) != 0 {
+		t.Error("nothing may be recorded or run")
+	}
+}
+
+func TestRestartPlanForceStillRefusesAnImplicitSession(t *testing.T) {
+	st := &session.State{Kind: session.KindImplicit, RepoPath: t.TempDir(), SessionKey: "r/main"}
+	_, obstacle, err := restartPlan(st, selfPrincipal, true)
+	if err != nil || !strings.Contains(obstacle, "implicit") {
+		t.Fatalf("restartPlan = %q, %v; want an obstacle naming implicit", obstacle, err)
 	}
 }
 
@@ -364,17 +440,46 @@ func TestRestartChildSessionRefusesAConfinedCaller(t *testing.T) {
 	}
 }
 
-func TestRestartChildSessionHasNoForce(t *testing.T) {
+func TestRestartChildSessionForceSkipsTheJobCheckForAHolderWithTheRight(t *testing.T) {
 	calls := stubRestartHandoff(t, "", nil)
-	repoPath, _ := restartChildFixture(t, "holder", session.State{
+	repoPath, wtPath := restartChildFixture(t, "holder", session.State{
 		Holders: []string{"holder"}, HandleRights: map[string]string{"holder": "observe,restart"},
 	})
+	writeRunningJob(t, wtPath)
+
+	// Unforced stays refused over the job.
+	if text, isErr := callRestartChild(t, `{"child":"worker/kid"}`); !isErr || !strings.Contains(text, "job") {
+		t.Fatalf("unforced: want a refusal naming the job, got isErr=%v %q", isErr, text)
+	}
+	text, isErr := callRestartChild(t, `{"child":"worker/kid","force":true,"reason":"wedged"}`)
+	if isErr {
+		t.Fatalf("a forced restart must go through over a running job: %q", text)
+	}
+	req := readKid(t, repoPath).RestartRequest
+	if req == nil || req.When != "now" || req.Requester != "holder" {
+		t.Fatalf("restart request = %+v, want one by holder, when now", req)
+	}
+	want := wantChildArgv("wedged")
+	want[7] = "now"
+	if len(*calls) != 1 || !reflect.DeepEqual((*calls)[0].argv, want) {
+		t.Fatalf("hand-off calls = %+v, want one with argv %q", *calls, want)
+	}
+}
+
+// Force does not buy the restart right.
+func TestRestartChildSessionForceStillNeedsTheRestartRight(t *testing.T) {
+	calls := stubRestartHandoff(t, "", nil)
+	repoPath, wtPath := restartChildFixture(t, "holder", session.State{
+		Holders:      []string{"holder"},
+		HandleRights: map[string]string{"holder": "observe,close"},
+	})
+	writeRunningJob(t, wtPath)
 	text, isErr := callRestartChild(t, `{"child":"worker/kid","force":true}`)
-	if !isErr || !strings.Contains(text, "force") {
-		t.Fatalf("want a refusal naming force, got isErr=%v %q", isErr, text)
+	if !isErr || !strings.Contains(text, "restart") || !strings.Contains(text, "observe,close") {
+		t.Fatalf("want a refusal naming the missing restart right, got isErr=%v %q", isErr, text)
 	}
 	if readKid(t, repoPath).RestartRequest != nil || len(*calls) != 0 {
-		t.Error("must not record a request or run the hand-off")
+		t.Error("nothing may be recorded or run")
 	}
 }
 
@@ -507,6 +612,44 @@ func TestRestartPreflightRefusesAJobStartedSinceTheRequest(t *testing.T) {
 	}
 }
 
+// The operator already approved killing the job when the forced request was
+// made, so the preflight of a when=now request does not stop for one.
+func TestRestartPreflightOfAForcedRequestIgnoresARunningJob(t *testing.T) {
+	stubRestartHandoff(t, "", nil)
+	notified := stubNotifyPrincipal(t)
+	repoPath, wtPath := restartSelfFixture(t, true)
+	if text, isErr := callRestartThis(t, `{"force":true}`); isErr {
+		t.Fatalf("setup: %q", text)
+	}
+	writeRunningJob(t, wtPath)
+
+	v, err := runRestartPreflight("worker/kid")
+	if err != nil || v.Verdict != "restart" || v.When != "now" {
+		t.Fatalf("got %+v, %v; want restart/now", v, err)
+	}
+	if readKid(t, repoPath).RestartRequest != nil {
+		t.Error("the request is consumed")
+	}
+	if len(*notified) != 0 {
+		t.Errorf("a restart verdict notifies nobody: %+v", *notified)
+	}
+}
+
+// Everything else is still re-checked for a when=now request.
+func TestRestartPreflightOfAForcedRequestStillRefusesWhenTheHandoffWasRevoked(t *testing.T) {
+	stubRestartHandoff(t, "", nil)
+	stubNotifyPrincipal(t)
+	restartSelfFixture(t, true)
+	if text, isErr := callRestartThis(t, `{"force":true}`); isErr {
+		t.Fatalf("setup: %q", text)
+	}
+	writeGlobalSweatfile(t, os.Getenv("HOME"), "")
+	v, err := runRestartPreflight("worker/kid")
+	if err != nil || v.Verdict != "refused" || v.When != "now" {
+		t.Fatalf("got %+v, %v; want refused/now", v, err)
+	}
+}
+
 func TestRestartPreflightRefusesWhenTheHandoffWasRevoked(t *testing.T) {
 	stubNotifyPrincipal(t)
 	repoPath, _ := requestRestart(t)
@@ -543,6 +686,148 @@ func TestRestartPreflightRefusesAConfinedSessionWithoutAMapping(t *testing.T) {
 	}
 	if readKid(t, repoPath).RestartRequest != nil {
 		t.Error("the request must be cleared")
+	}
+}
+
+func callCancel(t *testing.T, args string) (text string, isErr bool) {
+	t.Helper()
+	res, err := handleCancelRestart(context.Background(), json.RawMessage(args), nil)
+	if err != nil {
+		t.Fatalf("handleCancelRestart: %v", err)
+	}
+	return res.Text, res.IsErr
+}
+
+func TestCancelRestartSelfClearsTheRequest(t *testing.T) {
+	notified := stubNotifyPrincipal(t)
+	calls := stubRestartHandoff(t, "", nil)
+	repoPath, _ := requestRestart(t)
+	handoffs := len(*calls)
+
+	text, isErr := callCancel(t, `{}`)
+	if isErr || !strings.Contains(text, "worker/kid") {
+		t.Fatalf("want a success naming the session, got isErr=%v %q", isErr, text)
+	}
+	if readKid(t, repoPath).RestartRequest != nil {
+		t.Error("the request must be cleared")
+	}
+	if len(*calls) != handoffs {
+		t.Errorf("cancel does not call the hand-off: %+v", *calls)
+	}
+	if len(*notified) != 0 {
+		t.Errorf("the session cancelled its own request; nobody to tell: %+v", *notified)
+	}
+	// The frontend learns of the cancel from the next preflight.
+	if v, err := runRestartPreflight("worker/kid"); err != nil || v.Verdict != "none" {
+		t.Errorf("preflight after cancel = %+v, %v; want none", v, err)
+	}
+}
+
+func TestCancelRestartWithNothingQueuedSucceeds(t *testing.T) {
+	restartSelfFixture(t, true)
+	text, isErr := callCancel(t, `{}`)
+	if isErr || !strings.Contains(strings.ToLower(text), "nothing") {
+		t.Fatalf("want an idempotent success saying nothing was queued, got isErr=%v %q", isErr, text)
+	}
+}
+
+func TestCancelRestartSelfWorksWithoutAHandoffConfigured(t *testing.T) {
+	repoPath, _ := restartSelfFixture(t, false)
+	st := readKid(t, repoPath)
+	st.RestartRequest = &session.RestartRequest{RequestedAt: time.Now().UTC(), Requester: selfPrincipal, Reason: "r", When: "idle"}
+	if err := session.Write(*st); err != nil {
+		t.Fatal(err)
+	}
+	if text, isErr := callCancel(t, `{}`); isErr {
+		t.Fatalf("cancelling only removes a request and needs no hand-off: %q", text)
+	}
+	if readKid(t, repoPath).RestartRequest != nil {
+		t.Error("the request must be cleared")
+	}
+}
+
+func TestCancelRestartTellsARequesterWhoIsNeitherTheCallerNorTheSession(t *testing.T) {
+	notified := stubNotifyPrincipal(t)
+	repoPath, _ := restartSelfFixture(t, true)
+	st := readKid(t, repoPath)
+	st.RestartRequest = &session.RestartRequest{RequestedAt: time.Now().UTC(), Requester: "spawner", Reason: "r", When: "idle"}
+	if err := session.Write(*st); err != nil {
+		t.Fatal(err)
+	}
+
+	if text, isErr := callCancel(t, `{}`); isErr {
+		t.Fatalf("refused: %q", text)
+	}
+	if len(*notified) != 1 || (*notified)[0].target != "spawner" || !strings.Contains((*notified)[0].message, "worker/kid") {
+		t.Errorf("notifications = %+v, want one to spawner naming the session", *notified)
+	}
+}
+
+func TestCancelRestartChildNeedsTheRestartRight(t *testing.T) {
+	stubNotifyPrincipal(t)
+	repoPath, _ := restartChildFixture(t, "holder", session.State{
+		Holders:      []string{"holder"},
+		HandleRights: map[string]string{"holder": "observe,close"},
+		RestartRequest: &session.RestartRequest{
+			RequestedAt: time.Now().UTC(), Requester: "someone", Reason: "r", When: "idle",
+		},
+	})
+	text, isErr := callCancel(t, `{"child":"worker/kid"}`)
+	if !isErr || !strings.Contains(text, "restart") || !strings.Contains(text, "observe,close") {
+		t.Fatalf("want a refusal naming the missing restart right, got isErr=%v %q", isErr, text)
+	}
+	if readKid(t, repoPath).RestartRequest == nil {
+		t.Error("a refused cancel must leave the request in place")
+	}
+}
+
+func TestCancelRestartChildRefusedWithoutAHandle(t *testing.T) {
+	stubNotifyPrincipal(t)
+	repoPath, _ := restartChildFixture(t, "stranger", session.State{
+		Holders: []string{"someone-else"},
+		RestartRequest: &session.RestartRequest{
+			RequestedAt: time.Now().UTC(), Requester: "someone", Reason: "r", When: "idle",
+		},
+	})
+	text, isErr := callCancel(t, `{"child":"worker/kid"}`)
+	if !isErr || !strings.Contains(text, "no handle") {
+		t.Fatalf("want authorizeHandleUse's no-handle refusal, got isErr=%v %q", isErr, text)
+	}
+	if readKid(t, repoPath).RestartRequest == nil {
+		t.Error("a refused cancel must leave the request in place")
+	}
+}
+
+func TestCancelRestartChildWithTheRestartRightClearsAndTellsTheRequester(t *testing.T) {
+	notified := stubNotifyPrincipal(t)
+	calls := stubRestartHandoff(t, "", nil)
+	repoPath, _ := restartChildFixture(t, "holder", session.State{
+		Holders:      []string{"holder"},
+		HandleRights: map[string]string{"holder": "observe,restart"},
+		RestartRequest: &session.RestartRequest{
+			RequestedAt: time.Now().UTC(), Requester: "someone", Reason: "r", When: "idle",
+		},
+	})
+	text, isErr := callCancel(t, `{"child":"worker/kid"}`)
+	if isErr {
+		t.Fatalf("a holder with restart must be allowed: %q", text)
+	}
+	if readKid(t, repoPath).RestartRequest != nil {
+		t.Error("the request must be cleared")
+	}
+	if len(*calls) != 0 {
+		t.Errorf("cancel does not call the hand-off: %+v", *calls)
+	}
+	if len(*notified) != 1 || (*notified)[0].target != "someone" {
+		t.Errorf("notifications = %+v, want one to the requester", *notified)
+	}
+}
+
+func TestCancelRestartChildRefusesAConfinedCaller(t *testing.T) {
+	asConfinedServeCaller(t, "a-confined-principal")
+	text, isErr := callCancel(t, `{"child":"worker/kid"}`)
+	if !isErr || !strings.Contains(text, "confined") {
+		t.Fatalf("want a confined refusal, got isErr=%v %q", isErr, text)
 	}
 }
 
