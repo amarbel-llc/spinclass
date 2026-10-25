@@ -1014,6 +1014,15 @@ debug-store-verdict tool input principal:
     printf '%s' "$payload" | CLOWN_SESSION_ID='{{ principal }}' nix run --inputs-from . .#default -- hook
     echo "exit: $?" >&2
 
+# print the last n (default 20) PreToolUse verdicts this worktree's hook logged (jq-pretty when available)
+[group('debug')]
+debug-hook-verdicts n='20':
+    #!/usr/bin/env bash
+    set -uo pipefail
+    f=.spinclass/hook-verdicts.ndjson
+    [ -f "$f" ] || { echo "no $f (no spinclass tool call decided here yet)" >&2; exit 0; }
+    if command -v jq >/dev/null 2>&1; then tail -n {{ n }} "$f" | jq .; else tail -n {{ n }} "$f"; fi
+
 # [debug] Map every live process that has a SPINCLASS_SESSION_ID to its
 # CLOWN_SESSION_ID vs SPINCLASS_SESSION_ID. Confirms the spawn env-leak
 # (spinclass#169): a spawned worker shows CLOWN_SESSION_ID = the DRIVER's

@@ -181,6 +181,17 @@ access by default, except rebasing against upstream) is planned but not built;
 it would hook in at the body's confined check, *refuseUnownedForConfined* in
 *internal/alfa/store/git/confined.go*, where the confined column is enforced.
 
+"Ran" does not mean "allowed": an *ask* the operator approves completes exactly
+like an *allow*, which is how a probe of this table (spinclass#415) could not
+tell the two apart. The hook logs its own verdict for every spinclass MCP tool
+call to *.spinclass/hook-verdicts.ndjson* in the session worktree, one JSON line
+per decision (*ts*, *tool*, *decision* of allow, ask, deny or none, *reason*,
+*input* truncated to 512 bytes, and *tool_use_id* when present). Read it, or run
+*just debug-hook-verdicts [n]*, to see the verdict instead of whether a prompt
+appeared. The log is for honest test sessions only: the agent can write its own
+worktree, so it proves nothing against a hostile one. It is capped at 256 KiB and
+is never created in a worktree without a *.spinclass* directory.
+
 # CONFINED, UNCONFINED AND NO-SESSION CALLERS
 
 The tool body, which runs in *serve*, resolves the caller:

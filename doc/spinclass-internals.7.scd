@@ -94,6 +94,16 @@ ancestry walk also refuses an ancestor inside an agent unit. The passing
 detail reads "N live sessions in running units; no <names> outside them".
 Design: *docs/plans/2026-10-20-agent-census-by-unit.md*.
 
+# PRETOOLUSE VERDICT LOG
+
+*Run* in *internal/echo/hooks* captures what the PreToolUse handler writes and
+appends one NDJSON line per spinclass MCP tool decision to
+*.spinclass/hook-verdicts.ndjson* before copying the bytes to Claude Code
+unchanged (other tools are never logged; their inputs may carry secrets). It is
+best-effort, capped at 256 KiB, and never creates *.spinclass*. It is an
+observability aid, not an authority: the agent can write its own worktree. See
+*spinclass-grit*(7) DEFAULT PERMISSIONS; *just debug-hook-verdicts* prints it.
+
 # SEE ALSO
 
 *spinclass-sweatfile*(5), *spinclass-build-pins*(7),

@@ -32,6 +32,7 @@ type hookInput struct {
 	HookEventName string         `json:"hook_event_name"`
 	SessionID     string         `json:"session_id"`
 	AgentID       string         `json:"agent_id"`
+	ToolUseID     string         `json:"tool_use_id"`
 	ToolName      string         `json:"tool_name"`
 	ToolInput     map[string]any `json:"tool_input"`
 	CWD           string         `json:"cwd"`
@@ -82,14 +83,31 @@ func Run(r io.Reader, w io.Writer, mainRepoRoot, sessionWorktree string, disallo
 	case "SessionEnd":
 		return runSessionEnd(input)
 	default:
-		if input.PermissionMode != permissionModeDontAsk {
-			return runPreToolUse(input, w, mainRepoRoot, sessionWorktree, disallowMainWorktree, o.rewriteEnabled, o.denySweatfileEdits)
-		}
+		// Capture the output so the verdict can be logged at the one place
+		// that sees every outcome; the bytes reach w unchanged.
 		var buf bytes.Buffer
-		if err := runPreToolUse(input, &buf, mainRepoRoot, sessionWorktree, disallowMainWorktree, o.rewriteEnabled, o.denySweatfileEdits); err != nil {
+		runErr := runPreToolUse(input, &buf, mainRepoRoot, sessionWorktree, disallowMainWorktree, o.rewriteEnabled, o.denySweatfileEdits)
+		if input.PermissionMode != permissionModeDontAsk {
+			// As when runPreToolUse wrote to w directly: whatever it wrote
+			// before an error still reaches w.
+			if runErr == nil {
+				logVerdict(input, buf.Bytes())
+			}
+			if _, err := w.Write(buf.Bytes()); err != nil {
+				return err
+			}
+			return runErr
+		}
+		if runErr != nil {
+			return runErr
+		}
+		var final bytes.Buffer
+		if err := writeDontAskVerdict(&final, buf.Bytes()); err != nil {
 			return err
 		}
-		return writeDontAskVerdict(w, buf.Bytes())
+		logVerdict(input, final.Bytes())
+		_, err := w.Write(final.Bytes())
+		return err
 	}
 }
 
