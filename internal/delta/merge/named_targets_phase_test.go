@@ -1,9 +1,12 @@
 package merge
 
 import (
+	"bytes"
+	"context"
 	"strings"
 	"testing"
 
+	"code.linenisgreat.com/crap/go-crap/v2/crap"
 	"code.linenisgreat.com/crap/go-crap/v2/ndjsoncrap"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
@@ -187,6 +190,40 @@ verify = "for i in $(seq 1 40); do echo noise-$i >&2; done; echo final-reason >&
 		}
 		if strings.Contains(s, "noise-1\n") || strings.Contains(s, "noise-1 ") || strings.HasSuffix(s, "noise-1") {
 			t.Errorf("%s is not bounded, it still has the first line: %q", name, s)
+		}
+	}
+}
+
+// spinclass#280: each named target's output also reaches the activity tee
+// (the async job log and ringmaster spool live tail), not only the reporter.
+func TestNamedPostMergeTargetsTeeOutputToActivity(t *testing.T) {
+	repoDir, wtPath := setupPostMergeRepo(t, "feature")
+	writeRepoSweatfile(t, repoDir, `
+[[post-merge]]
+name = "host-a"
+command = "echo marker-from-a"
+
+[[post-merge]]
+name = "host-b"
+command = "echo marker-from-b"
+verify = "echo verify-marker-b"
+`)
+	var buf bytes.Buffer
+	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
+	ts := rep.TestStream(0)
+	pinnedSha, err := PrepareMerge(context.Background(), ts, repoDir, wtPath, "feature", "main", false, PostMergeOptions{})
+	if err != nil {
+		t.Fatalf("PrepareMerge: %v", err)
+	}
+	var activity bytes.Buffer
+	if _, err := FinishMerge(context.Background(), &mockExecutor{}, rep, ts,
+		repoDir, wtPath, "feature", "main", pinnedSha, false, true, &activity, PostMergeOptions{}); err != nil {
+		t.Fatalf("FinishMerge: %v", err)
+	}
+	ts.Finish()
+	for _, marker := range []string{"marker-from-a", "marker-from-b", "verify-marker-b"} {
+		if !strings.Contains(activity.String(), marker) {
+			t.Errorf("activity tee lacks %q:\n%s", marker, activity.String())
 		}
 	}
 }
