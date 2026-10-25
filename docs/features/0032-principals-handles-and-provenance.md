@@ -1108,6 +1108,11 @@ GitHub, lacks it until added by hand).
   build and circus#158 remains the umbrella. Per circus's session no node in
   that graph needs a git worktree, so this use depends on slice 3 (principals
   and handles for a juggler-launched agent with no worktree, clown#245).
+- 2026-10-25 (#422): the handle verbs (`sc grant-session-handle`,
+  `release-session-handle`, `close-child-session`) are the operator's CLI; an
+  agent's Bash use of them is denied by the PreToolUse hook and its surface is the
+  MCP tools. A guard against habit, not a boundary (spinclass-sweatfile(5),
+  `[permissions]`); confinement is the boundary.
 
 ## Non-goals
 

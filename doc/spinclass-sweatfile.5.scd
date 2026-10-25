@@ -985,6 +985,18 @@ worktree-level value is ignored with a warning (*sc validate* warns).
 	session's last turn, from outside it (*spinclass close-self-run*), and the
 	session's other holders are told the result.
 
+Agent surface (#422): the session verbs (merge, close, spawn, restart, grant and
+the rest) are MCP tools for an agent; the *sc* / *spinclass* CLI is for explicit
+operator execution. The PreToolUse hook denies an agent's Bash use of any
+*sc* or *spinclass* verb that is not read-only (*list*, *version*, *validate*,
+*whoami*, *list-handles*, *perms list*, *implicit-session-key*, and *--help*),
+whether or not *disallow-main-worktree* is set, and the reason names the
+matching MCP tool. The hook fires only on an agent's tool calls, so the
+operator's own terminal is unaffected. It is a guard against accidental or
+habitual use, not a security boundary: an alias, a generated command or a
+copied binary gets past it. The boundary for an untrusted agent is
+confinement (FDR 0035).
+
 ## [metrics]
 
 Best-effort statsd telemetry to stats-me (*stats-me-clients*(7), spinclass#363).

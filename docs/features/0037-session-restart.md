@@ -139,6 +139,10 @@ close revokes.
   restart the hand-off already allowed, except that a forged `when: now` also
   skips the running-job check in the preflight (the always-ask on `force` guards
   the tool, not a hand-edited state file).
+- 2026-10-25 (#422): the forced CLI forms (`sc restart-*`, `sc close-child-session
+  --force`) get no Bash-side always-ask gate; instead the PreToolUse hook denies an
+  agent's Bash use of non-read-only `sc` verbs, so the MCP tools are the agent
+  surface and the CLI is the operator's (spinclass-sweatfile(5), `[permissions]`).
 
 ## More Information
 

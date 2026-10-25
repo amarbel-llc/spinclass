@@ -623,6 +623,18 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 		}
 	}
 
+	// #422: an agent drives session verbs through the MCP tools, never the sc
+	// CLI via Bash. First among the Bash checks so no later allow (the
+	// worktree-path rewrite, the main-worktree guards) can pre-empt it, and
+	// independent of disallowMainWorktree and of whether a main checkout exists.
+	if input.ToolName == "Bash" {
+		if cmd, ok := input.ToolInput["command"].(string); ok {
+			if reason := checkBashScVerb(cmd); reason != "" {
+				return writeDeny(w, reason)
+			}
+		}
+	}
+
 	// The always-ask floor, shared verbatim with the perms-tier surface
 	// (perms.AlwaysAsk is the single source of truth for both). An `ask`
 	// decision overrides every allow-list — claude-allow, perms tier,
