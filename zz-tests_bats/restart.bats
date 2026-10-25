@@ -99,8 +99,15 @@ function cancel_restart_makes_the_preflight_report_none { # @test
   CLOWN_SESSION_ID=$PRINCIPAL run --separate-stderr "$SPINCLASS_BIN" restart-preflight
   assert_success
   echo "$output" | jq -e '.verdict == "none"'
+}
 
-  # Idempotent: nothing is queued any more.
+# Each test is kept to the few sc calls its one claim needs: a race-built sc
+# call costs about a second on the gate host, and BATS_TEST_TIMEOUT (10s)
+# covers the whole test.
+function cancel_restart_with_nothing_queued_is_a_no_op { # @test
+  write_global_sweatfile "$RESTART_HANDOFF"
+  start_bound_session
+
   CLOWN_SESSION_ID=$PRINCIPAL run_sc cancel-restart
   assert_success
   assert_output --partial "nothing to cancel"
@@ -130,13 +137,18 @@ function a_repo_layer_hand_off_is_never_run { # @test
   assert_output ""
 }
 
-function restart_preflight_reports_none_then_restart_then_none { # @test
+function restart_preflight_with_nothing_queued_is_none { # @test
   write_global_sweatfile "$RESTART_HANDOFF"
   start_bound_session
 
   CLOWN_SESSION_ID=$PRINCIPAL run --separate-stderr "$SPINCLASS_BIN" restart-preflight
   assert_success
   echo "$output" | jq -e '.verdict == "none" and .when == ""'
+}
+
+function restart_preflight_reports_restart_once_then_none { # @test
+  write_global_sweatfile "$RESTART_HANDOFF"
+  start_bound_session
 
   CLOWN_SESSION_ID=$PRINCIPAL run_sc restart-this-session --reason r
   assert_success

@@ -1119,6 +1119,25 @@ debug-grit-escape-pty filter="":
     filter={{ quote(filter) }}
     BATS_TEST_TIMEOUT=10 bats --jobs 1 ${filter:+--filter "$filter"} grit_escape.bats
 
+# [debug] Time one zz-tests_bats file against the race-instrumented binary
+# (.#spinclass-race), outside the sandbox and without the gate's parallel
+# lanes, so a race-lane BATS_TEST_TIMEOUT failure can be measured rather than
+# guessed at (#419's restart.bats). Per-test durations come from bats --timing;
+# BATS_TEST_TIMEOUT is unset so a slow test reports its time instead of dying.
+#
+# time one bats file against the race build
+[group('debug')]
+debug-bats-race-timing file filter="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out=$(nix build --no-link --print-out-paths .#spinclass-race)
+    export SPINCLASS_BIN="$out/bin/spinclass"
+    echo "SPINCLASS_BIN=$SPINCLASS_BIN" >&2
+    cd zz-tests_bats
+    filter={{ quote(filter) }}
+    unset BATS_TEST_TIMEOUT
+    bats --timing --jobs 1 ${filter:+--filter "$filter"} {{ quote(file) }}
+
 # [debug] Scaffold a throwaway repo wired (via direnv PATH_add) to a
 # devshell-built spinclass binary, then drop into $SHELL inside it — a
 # real-worktree-free sandbox for manually exercising `sc start`/etc. against
