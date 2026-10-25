@@ -44,6 +44,9 @@ func SetHermeticEnv() (cleanup func(), err error) {
 	// they would pollute the fleet counters FDR 0029's promotion reads. A test
 	// that asserts on metrics re-enables emission against its own listener.
 	_ = os.Setenv("SPINCLASS_DISABLE_STATSD", "1")
+	// Auto maintenance detaches out of fixture commits and fetches and outlives
+	// the test's TempDir (#423).
+	DisableAutoMaintenance()
 	return func() { _ = os.Remove(f.Name()) }, nil
 }
 
