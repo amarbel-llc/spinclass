@@ -124,7 +124,12 @@ function spinclass_resume_from_main_repo_by_id { # @test
 }
 
 function spinclass_resume_from_main_repo_no_args_lists_ids { # @test
-  skip 'pre-existing failure — see #45 (assertion text "available sessions" drifted in 03a9265)'
+  # #45: a no-args, non-TTY `resume` from the main repo now stops at the
+  # confirmation gate ("resume requires an interactive terminal (or pass -y
+  # to skip confirmation)", observed 2026-10-25) before any picker could list
+  # IDs, so what this test claims no longer matches the behaviour. Which
+  # behaviour is wanted is open on #45.
+  skip 'see #45: no-args non-TTY resume now refuses at the confirmation gate, not the picker'
   cd "$TEST_REPO" || return
   local bin="${SPINCLASS_BIN:-spinclass}"
 
@@ -140,7 +145,9 @@ function spinclass_resume_from_main_repo_no_args_lists_ids { # @test
   cd "$TEST_REPO" || return
   run_sc_session resume
   assert_failure
-  assert_output --partial "available sessions"
+  # The non-TTY picker refusal (internal/bravo/sessionpick): its copy changed
+  # from "available sessions" in 03a9265 (#45).
+  assert_output --partial "no session selected; available:"
   assert_output --partial "$wt_id"
 }
 

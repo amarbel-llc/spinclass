@@ -59,8 +59,10 @@ require_madder_pinned() {
 }
 
 function tool_use_log_writes_to_xdg_log_home { # @test
-  skip "pre-existing failure — see #45"
   local bin="${SPINCLASS_BIN:-spinclass}"
+  # The default path is under test, so an XDG_LOG_HOME inherited from the
+  # lane or the operator's environment must not redirect the log (#45).
+  unset XDG_LOG_HOME
 
   # Create a worktree so hooks can detect worktree context
   cd "$TEST_REPO" || return
