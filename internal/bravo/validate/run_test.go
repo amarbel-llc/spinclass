@@ -120,6 +120,67 @@ func TestRunAcceptsParentLayerRestart(t *testing.T) {
 	}
 }
 
+func runInheritedHooks(t *testing.T, parentBody, repoBody string) (string, string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", home)
+	repoDir := filepath.Join(home, "eng", "myrepo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	parentPath := filepath.Join(home, "eng", "sweatfile")
+	if parentBody != "" {
+		writeSweatfile(t, parentPath, parentBody)
+	}
+	if repoBody != "" {
+		writeSweatfile(t, filepath.Join(repoDir, "sweatfile"), repoBody)
+	}
+	var buf bytes.Buffer
+	Run(&buf, home, repoDir)
+	return buf.String(), parentPath
+}
+
+func TestRunWarnsOnInheritedCreateHook(t *testing.T) {
+	out, parentPath := runInheritedHooks(t,
+		"[hooks]\ncreate = \"parent-create\"\n",
+		"[git]\nexcludes = [\".direnv/\"]\n")
+	if !strings.Contains(out, "hooks inherited # warning") ||
+		!strings.Contains(out, "`create`") ||
+		!strings.Contains(out, parentPath) {
+		t.Errorf("expected inherited create warning naming %s, got:\n%s", parentPath, out)
+	}
+	if strings.Contains(out, "not ok") {
+		t.Errorf("inherited hook reported as an error:\n%s", out)
+	}
+}
+
+func TestRunNoInheritedHookWarningWhenRepoSetsCreate(t *testing.T) {
+	out, _ := runInheritedHooks(t,
+		"[hooks]\ncreate = \"parent-create\"\n",
+		"[hooks]\ncreate = \"repo-create\"\n")
+	if strings.Contains(out, "hooks inherited") {
+		t.Errorf("repo sets create; expected no inherited warning, got:\n%s", out)
+	}
+}
+
+func TestRunNoInheritedHookWarningWhenRepoClearsCreate(t *testing.T) {
+	out, _ := runInheritedHooks(t,
+		"[hooks]\ncreate = \"parent-create\"\n",
+		"[hooks]\ncreate = \"\"\n")
+	if strings.Contains(out, "hooks inherited") {
+		t.Errorf("repo clears create with \"\"; expected no inherited warning, got:\n%s", out)
+	}
+}
+
+func TestRunNoInheritedHookWarningWhenNoLayerSetsCreate(t *testing.T) {
+	out, _ := runInheritedHooks(t,
+		"[git]\nexcludes = [\".envrc\"]\n",
+		"[git]\nexcludes = [\".direnv/\"]\n")
+	if strings.Contains(out, "hooks inherited") {
+		t.Errorf("no layer sets create; expected no inherited warning, got:\n%s", out)
+	}
+}
+
 func TestRunInvalidSyntax(t *testing.T) {
 	home := t.TempDir()
 	repoDir := filepath.Join(home, "eng", "myrepo")

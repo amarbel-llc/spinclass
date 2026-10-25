@@ -558,6 +558,48 @@ func CheckAuth(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 	return issues
 }
 
+// CheckInheritedHooks is an informational diagnostic (#215): a repo-level
+// sweatfile that leaves a scalar-override [hooks] command unset silently
+// inherits the nearest ancestor layer's value, so an absent key and "no hook"
+// look identical in the repo's own file. ancestors are the found layers above
+// the repo, lowest precedence first. A key the repo sets explicitly (even to ""
+// -- a deliberate clear, non-nil pointer) is never reported, and neither is one
+// whose nearest setter in the cascade sets "" (the effective hook is empty).
+func CheckInheritedHooks(sf sweatfile.Sweatfile, ancestors []sweatfile.LoadSource) []Issue {
+	hookKeys := []struct {
+		name string
+		get  func(*sweatfile.Hooks) *string
+	}{
+		{"create", func(h *sweatfile.Hooks) *string { return h.Create }},
+		{"stop", func(h *sweatfile.Hooks) *string { return h.Stop }},
+		{"pre-merge", func(h *sweatfile.Hooks) *string { return h.PreMerge }},
+		{"repair", func(h *sweatfile.Hooks) *string { return h.Repair }},
+		{"on-attach", func(h *sweatfile.Hooks) *string { return h.OnAttach }},
+		{"on-detach", func(h *sweatfile.Hooks) *string { return h.OnDetach }},
+	}
+	var issues []Issue
+	for _, key := range hookKeys {
+		if sf.Hooks != nil && key.get(sf.Hooks) != nil {
+			continue
+		}
+		for i := len(ancestors) - 1; i >= 0; i-- {
+			h := ancestors[i].File.Hooks
+			if h == nil || key.get(h) == nil {
+				continue
+			}
+			if *key.get(h) != "" {
+				issues = append(issues, Issue{
+					Message:  fmt.Sprintf("[hooks] this repo-level sweatfile does not set `%s`, so it inherits the value from %s (nearest ancestor layer that sets it); set `%s` here to override, or \"\" to clear", key.name, ancestors[i].Path, key.name),
+					Severity: SeverityWarning,
+					Field:    "hooks." + key.name,
+				})
+			}
+			break
+		}
+	}
+	return issues
+}
+
 // CheckRestartHandoff warns about a [session-entry].restart set in a layer that
 // may not set it (#420): it is a command spinclass execs, so
 // sweatfileio.TrustedRestartHandoff ignores it outside the global sweatfile and
@@ -804,7 +846,7 @@ func Run(w io.Writer, home, repoDir string) int {
 		mainRoot = repoDir
 	}
 
-	for _, src := range result.Sources {
+	for i, src := range result.Sources {
 		if src.SkipReason != "" {
 			tw.Skip(src.Path, src.SkipReason)
 			continue
@@ -920,6 +962,18 @@ func Run(w io.Writer, home, repoDir string) int {
 				}
 			} else {
 				sub.Ok("hooks valid")
+			}
+		}
+
+		if !sweatfileio.LayerAboveRepo(src.Path, home, mainRoot) {
+			var ancestors []sweatfile.LoadSource
+			for _, prior := range result.Sources[:i] {
+				if prior.Found && prior.SkipReason == "" && sweatfileio.LayerAboveRepo(prior.Path, home, mainRoot) {
+					ancestors = append(ancestors, prior)
+				}
+			}
+			for _, iss := range CheckInheritedHooks(src.File, ancestors) {
+				sub.Ok(fmt.Sprintf("hooks inherited # warning: %s", iss.Message))
 			}
 		}
 
