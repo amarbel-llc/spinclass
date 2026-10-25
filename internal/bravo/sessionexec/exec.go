@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"code.linenisgreat.com/spinclass/internal/alfa/direnv"
@@ -91,31 +90,16 @@ func stripSpinclassEnv(env []string) []string {
 // than going through Run; identityEnv remains the internal implementation.
 func IdentityEnv(st *session.State) []string { return identityEnv(st) }
 
-// identityEnv mirrors executor.SessionExecutor.Attach and spawn.workerEnv
-// (keep the var list in sync). It strips the launcher's inherited
+// identityEnv builds on session.IdentityEnv and session.TmpDirEnv, the one
+// var list executor.SessionExecutor and spawn.workerEnv share (#192). It
+// strips the launcher's inherited
 // CLOWN_SESSION_ID/CLAUDE_SESSION_ID (#169) then appends the spinclass-owned
 // SPINCLASS_* vars last so they win on collision (os/exec keeps the last
 // occurrence of a duplicated key).
 func identityEnv(st *session.State) []string {
 	env := session.StripInheritedSessionIDs(os.Environ())
-
-	key := st.Key()
-	repo, branch := key, ""
-	if i := strings.Index(key, "/"); i >= 0 {
-		repo, branch = key[:i], key[i+1:]
-	}
-	tmpDir := filepath.Join(st.WorktreePath, ".tmp")
-
-	return append(
-		env,
-		"SPINCLASS_SESSION_ID="+key,
-		"SPINCLASS_REPO="+repo,
-		"SPINCLASS_BRANCH="+branch,
-		"SPINCLASS_WORKTREE="+st.WorktreePath,
-		"SPINCLASS_DESCRIPTION="+st.Description,
-		"TMPDIR="+tmpDir,
-		"CLAUDE_CODE_TMPDIR="+tmpDir,
-	)
+	env = append(env, session.IdentityEnv(st.Key(), st.WorktreePath, st.Description)...)
+	return append(env, session.TmpDirEnv(st.WorktreePath)...)
 }
 
 // CommandIn builds the *exec.Cmd that runs util in dir with env. An empty

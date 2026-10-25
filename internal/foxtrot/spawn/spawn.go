@@ -466,19 +466,7 @@ func workerEnv(rp worktree.ResolvedPath, desc string, userEnv map[string]string,
 // identityVars are the spinclass-owned SPINCLASS_* identity variables of a
 // worker; a confined spawn also hands them to the unit through its launch spec.
 func identityVars(rp worktree.ResolvedPath, desc string) []string {
-	// Split session key ("repo/branch") into individual env vars — same
-	// derivation as SessionExecutor.Attach.
-	repo, branch := rp.SessionKey, ""
-	if i := strings.Index(rp.SessionKey, "/"); i >= 0 {
-		repo, branch = rp.SessionKey[:i], rp.SessionKey[i+1:]
-	}
-	return []string{
-		"SPINCLASS_SESSION_ID=" + rp.SessionKey,
-		"SPINCLASS_REPO=" + repo,
-		"SPINCLASS_BRANCH=" + branch,
-		"SPINCLASS_WORKTREE=" + rp.AbsPath,
-		"SPINCLASS_DESCRIPTION=" + desc,
-	}
+	return session.IdentityEnv(rp.SessionKey, rp.AbsPath, desc)
 }
 
 // workerEnvScoped is workerEnv plus, when scopePath is non-empty, the
@@ -498,10 +486,8 @@ func workerEnvScoped(rp worktree.ResolvedPath, desc string, userEnv map[string]s
 		env = append(env, k+"="+v)
 	}
 
-	tmpDir := filepath.Join(rp.AbsPath, ".tmp")
-
 	env = append(env, identityVars(rp, desc)...)
-	env = append(env, "TMPDIR="+tmpDir, "CLAUDE_CODE_TMPDIR="+tmpDir)
+	env = append(env, session.TmpDirEnv(rp.AbsPath)...)
 	if scopePath != "" {
 		env = append(env, "CLOWN_AGENT_SCOPE="+scopePath)
 	}

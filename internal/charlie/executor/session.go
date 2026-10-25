@@ -143,25 +143,12 @@ func (s SessionExecutor) SessionEnviron(dir, key string) []string {
 // which win on collision because the integration contract requires
 // SPINCLASS_SESSION_ID etc. to be authoritative.
 func (s SessionExecutor) sessionEnv(dir, key string) map[string]string {
-	repo, branch := key, ""
-	if i := strings.Index(key, "/"); i >= 0 {
-		repo, branch = key[:i], key[i+1:]
-	}
-	tmpDir := filepath.Join(dir, ".tmp")
-
 	env := make(map[string]string, len(s.Env)+7)
 	for k, v := range s.Env {
 		env[k] = v
 	}
-	for k, v := range map[string]string{
-		"SPINCLASS_SESSION_ID":  key,
-		"SPINCLASS_REPO":        repo,
-		"SPINCLASS_BRANCH":      branch,
-		"SPINCLASS_WORKTREE":    dir,
-		"SPINCLASS_DESCRIPTION": s.Description,
-		"TMPDIR":                tmpDir,
-		"CLAUDE_CODE_TMPDIR":    tmpDir,
-	} {
+	for _, kv := range append(session.IdentityEnv(key, dir, s.Description), session.TmpDirEnv(dir)...) {
+		k, v, _ := strings.Cut(kv, "=")
 		env[k] = v
 	}
 	return env
