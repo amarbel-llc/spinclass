@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
@@ -240,6 +242,41 @@ func completeSpawnRepos() map[string]string {
 	return result
 }
 
+const modelParamBaseDescription = "Model alias for the worker (sonnet, opus, haiku, fable). For the claude provider, resolved to the full model ID via [session-entry.model-ids] (built-in default; overridable per sweatfile) before being spliced into the resolved spawn-entry's provider-args per [session-entry.model-flags] (default: {\"claude\": \"--model\"}). Omit to use the harness's own default."
+
+// modelParamDescription is the model description with each alias's resolved
+// ID appended, sorted by alias (spinclass#329).
+func modelParamDescription(ids map[string]string) string {
+	if len(ids) == 0 {
+		return modelParamBaseDescription
+	}
+	aliases := make([]string, 0, len(ids))
+	for alias := range ids {
+		aliases = append(aliases, alias)
+	}
+	sort.Strings(aliases)
+	pairs := make([]string, len(aliases))
+	for i, alias := range aliases {
+		pairs[i] = alias + " → " + ids[alias]
+	}
+	return modelParamBaseDescription + " In this session's sweatfile hierarchy: " + strings.Join(pairs, ", ") +
+		". A sibling `repo` resolves its own hierarchy, so for one these are only a hint."
+}
+
+// spawnSessionParams is spawnParamList for the spawn-session MCP tool, with
+// the model description rendered from the session's resolved alias map. The
+// CLI keeps the static text so generated manpages do not depend on the build
+// host's sweatfiles.
+func spawnSessionParams() []command.Param {
+	params := spawnParamList()
+	for i := range params {
+		if params[i].Name == "model" {
+			params[i].Description = modelParamDescription(completeModelAliases())
+		}
+	}
+	return params
+}
+
 // spawnParamList declares the shared parameter schema of `sc spawn` and
 // `spawn-session` — one definition so the two surfaces cannot drift.
 func spawnParamList() []command.Param {
@@ -269,7 +306,7 @@ func spawnParamList() []command.Param {
 		{
 			Name:        "model",
 			Type:        command.String,
-			Description: "Model alias for the worker (sonnet, opus, haiku, fable). For the claude provider, resolved to the full model ID via [session-entry.model-ids] (built-in default; overridable per sweatfile) before being spliced into the resolved spawn-entry's provider-args per [session-entry.model-flags] (default: {\"claude\": \"--model\"}). Omit to use the harness's own default.",
+			Description: modelParamBaseDescription,
 			Completer:   completeModelAliases,
 		},
 		{

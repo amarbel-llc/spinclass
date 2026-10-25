@@ -242,7 +242,7 @@ func registerMCPOnlyCommands(app *command.App) {
 			IdempotentHint:  protocol.BoolPtr(false),
 			OpenWorldHint:   protocol.BoolPtr(false),
 		},
-		Params: spawnParamList(),
+		Params: spawnSessionParams(),
 		Run:    wrapMCPHandler("spawn-session", handleSpawnSession),
 	})
 
