@@ -1,5 +1,5 @@
 // Package resurrect recreates a closed session's worktree and branch from
-// the commit captured by internal/close.RunResolved immediately before
+// the commit captured by internal/delta/close.RunResolved immediately before
 // `sc close`/`close-child-session` force-delete them (#291). It is the undo
 // half of the close lifecycle: session.Tombstone records DeletedSHA at close
 // time, and Run here rebuilds a live worktree from it. Like a fresh start, it

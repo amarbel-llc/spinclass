@@ -16,7 +16,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
-	spinclose "code.linenisgreat.com/spinclass/internal/close"
+	spinclose "code.linenisgreat.com/spinclass/internal/delta/close"
 	"code.linenisgreat.com/spinclass/internal/servelog"
 )
 

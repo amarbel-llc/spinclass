@@ -11,7 +11,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/clown"
 	"code.linenisgreat.com/spinclass/internal/alfa/job"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
-	spinclose "code.linenisgreat.com/spinclass/internal/close"
+	spinclose "code.linenisgreat.com/spinclass/internal/delta/close"
 	"code.linenisgreat.com/spinclass/internal/servelog"
 	"code.linenisgreat.com/spinclass/internal/spawn"
 )

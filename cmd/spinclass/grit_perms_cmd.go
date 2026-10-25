@@ -12,7 +12,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/store"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
-	"code.linenisgreat.com/spinclass/internal/perms"
+	"code.linenisgreat.com/spinclass/internal/delta/perms"
 )
 
 // Seams for command tests.

@@ -11,7 +11,7 @@ import (
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/0/clown"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
-	spinclose "code.linenisgreat.com/spinclass/internal/close"
+	spinclose "code.linenisgreat.com/spinclass/internal/delta/close"
 	"code.linenisgreat.com/spinclass/internal/servelog"
 )
 
@@ -201,7 +201,7 @@ func authorizeChildReap(callerPrincipal, callerKey string, child session.State) 
 
 // runCloseChild is the shared close-child-session flow: resolve the caller's
 // own identity, resolve the named child, check the handle, and hand the reap
-// to internal/close.
+// to internal/delta/close.
 //
 // Every safety check stays with close.RunResolved — it computes the child's
 // unintegrated/dirty state itself and, finding no TTY to confirm on, refuses

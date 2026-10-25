@@ -26,8 +26,8 @@ import (
 	"code.linenisgreat.com/spinclass/internal/charlie/auth"
 	"code.linenisgreat.com/spinclass/internal/charlie/executor"
 	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
-	"code.linenisgreat.com/spinclass/internal/close"
-	"code.linenisgreat.com/spinclass/internal/merge"
+	"code.linenisgreat.com/spinclass/internal/delta/close"
+	"code.linenisgreat.com/spinclass/internal/delta/merge"
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
 

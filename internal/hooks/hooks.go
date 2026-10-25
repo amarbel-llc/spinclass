@@ -24,7 +24,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/bravo/apply"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
-	"code.linenisgreat.com/spinclass/internal/perms"
+	"code.linenisgreat.com/spinclass/internal/delta/perms"
 	"github.com/google/shlex"
 )
 

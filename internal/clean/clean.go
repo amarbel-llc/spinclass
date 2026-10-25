@@ -27,7 +27,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/charlie/check"
 	"code.linenisgreat.com/spinclass/internal/charlie/profilerights"
 	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
-	"code.linenisgreat.com/spinclass/internal/merge"
+	"code.linenisgreat.com/spinclass/internal/delta/merge"
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 	"code.linenisgreat.com/tap/go/pkgs/yaml_diagnostic"
 )
@@ -231,7 +231,7 @@ func revokeCredential(tw *tap.Writer, wt worktreeInfo) {
 // runReap executes nixgc.Reap as a single TAP test point with live
 // stdout/stderr streaming into the OutputBlock so the operator can
 // see per-path progress (and notice if a path stalls). Mirrors
-// internal/close/close.go runReap; duplicated rather than shared so
+// internal/delta/close/close.go runReap; duplicated rather than shared so
 // each command's output handling stays self-contained.
 func runReap(tw *tap.Writer, plan nixgc.Plan, branch string) {
 	desc := fmt.Sprintf("nix-gc reap %s", branch)

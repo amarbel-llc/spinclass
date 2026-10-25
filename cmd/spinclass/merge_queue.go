@@ -14,7 +14,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/job"
 	"code.linenisgreat.com/spinclass/internal/bravo/present"
 	"code.linenisgreat.com/spinclass/internal/charlie/executor"
-	"code.linenisgreat.com/spinclass/internal/merge"
+	"code.linenisgreat.com/spinclass/internal/delta/merge"
 	"code.linenisgreat.com/spinclass/internal/servelog"
 )
 

@@ -30,8 +30,8 @@ import (
 	"code.linenisgreat.com/spinclass/internal/charlie/check"
 	"code.linenisgreat.com/spinclass/internal/charlie/executor"
 	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
+	"code.linenisgreat.com/spinclass/internal/delta/merge"
 	"code.linenisgreat.com/spinclass/internal/hooks"
-	"code.linenisgreat.com/spinclass/internal/merge"
 	"code.linenisgreat.com/spinclass/internal/servelog"
 )
 

@@ -13,7 +13,7 @@
 //
 // The CLI (`sc merge` / `sc run` / `sc check`) does not claim — the gate
 // is MCP-only by design; a terminal merge only records the bypass (FDR 0031's
-// pre-merge policy stage, internal/merge/policy.go).
+// pre-merge policy stage, internal/delta/merge/policy.go).
 package attestation
 
 import (

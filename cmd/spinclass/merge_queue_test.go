@@ -14,7 +14,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/alfa/job"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
-	"code.linenisgreat.com/spinclass/internal/merge"
+	"code.linenisgreat.com/spinclass/internal/delta/merge"
 	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 

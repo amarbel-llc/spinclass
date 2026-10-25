@@ -14,12 +14,12 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/store"
 	gitstore "code.linenisgreat.com/spinclass/internal/alfa/store/git"
 	"code.linenisgreat.com/spinclass/internal/charlie/auth"
-	"code.linenisgreat.com/spinclass/internal/close"
+	"code.linenisgreat.com/spinclass/internal/delta/close"
 	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 
 // mustCommitFile adds and commits a new file in dir, mirroring
-// internal/close's helper of the same name (unexported, so duplicated here
+// internal/delta/close's helper of the same name (unexported, so duplicated here
 // rather than shared across package boundaries).
 func mustCommitFile(t *testing.T, dir, name, content, msg string) {
 	t.Helper()

@@ -7,7 +7,7 @@ import (
 
 	"golang.org/x/term"
 
-	"code.linenisgreat.com/spinclass/internal/merge"
+	"code.linenisgreat.com/spinclass/internal/delta/merge"
 )
 
 // Seams for command tests.

@@ -250,7 +250,7 @@ function spinclass_close_by_id_removes_worktree { # @test
   # path, distinct from cwd auto-detect and the interactive picker) must
   # resolve the session via session.FindByID and tear the worktree down.
   # This path regressed once after the session-resolution unification
-  # (commit 03a9265) and is now wired in internal/close: resolveCloseTarget
+  # (commit 03a9265) and is now wired in internal/delta/close: resolveCloseTarget
   # -> FindByID(target) -> closeShop. Drive it end-to-end so the regression
   # cannot return unnamed. Uses a real `start` (not --no-attach) so a
   # session state entry exists for FindByID to match on.

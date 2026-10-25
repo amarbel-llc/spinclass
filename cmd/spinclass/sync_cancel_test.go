@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/merge"
+	"code.linenisgreat.com/spinclass/internal/delta/merge"
 	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 

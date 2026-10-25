@@ -59,9 +59,9 @@ re-run that suite right before merging.
   `sweatfileio` Parse/Load; `hookrun` runs hooks; `apply` sets up a worktree,
   #309). Split so codegen regenerates cleanly (tommy #93). Reference:
   `spinclass-sweatfile(5)`.
-- **Merge/Pull/Clean** (`internal/merge/`, `pull/`, `clean/`): merge pre-flights
+- **Merge/Pull/Clean** (`internal/delta/merge/`, `pull/`, `clean/`): merge pre-flights
   merge drivers (#324), rebases onto the default branch, then lands; see below.
-- **Permission tiers** (`internal/perms/`): Claude Code hook integration, rules
+- **Permission tiers** (`internal/delta/perms/`): Claude Code hook integration, rules
   as JSON. **Claude integration** (`internal/0/claude/`): trust + `claude-allow`.
 - **Remote sessions** (`internal/bravo/remote/`): `host:` targets, resume-only
   (FDR 0011).

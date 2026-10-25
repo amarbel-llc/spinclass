@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"code.linenisgreat.com/spinclass/internal/alfa/store"
-	"code.linenisgreat.com/spinclass/internal/perms"
+	"code.linenisgreat.com/spinclass/internal/delta/perms"
 )
 
 // storeDecision classifies a grit store tool call. isStore is false for any

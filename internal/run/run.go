@@ -45,7 +45,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/bravo/sessionexec"
 	"code.linenisgreat.com/spinclass/internal/charlie/executor"
 	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
-	"code.linenisgreat.com/spinclass/internal/merge"
+	"code.linenisgreat.com/spinclass/internal/delta/merge"
 	"code.linenisgreat.com/spinclass/internal/shop"
 )
 

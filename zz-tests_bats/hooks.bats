@@ -331,7 +331,7 @@ post_merge_setup_landed_merge() {
 # sc merge runs the post-merge hook after the merge lands, handing it the sha
 # that actually landed. Exercises the cmd/spinclass merge wiring end-to-end in
 # the built binary; the Go tests cover the lock-release ordering and the
-# non-fatal semantics directly (internal/merge/post_merge_phase_test.go).
+# non-fatal semantics directly (internal/delta/merge/post_merge_phase_test.go).
 # FDR 0023, #244.
 function post_merge_hook_runs_after_merge_lands { # @test
   cd "$TEST_REPO" || return
@@ -378,7 +378,7 @@ post-merge = "echo deploy-broke >&2; exit 7"')
 # A named [[post-merge]] target runs its command then its verify, reporting a
 # per-target verdict labeled "post-merge <name>". Exercises the FDR 0026 CLI
 # wiring end-to-end in the built binary. The Go tests cover the verdict matrix
-# and selection directly (internal/merge/named_targets_phase_test.go).
+# and selection directly (internal/delta/merge/named_targets_phase_test.go).
 function named_post_merge_target_runs_command_and_verify { # @test
   cd "$TEST_REPO" || return
 
@@ -453,7 +453,7 @@ command = "true"')
 # EFFECTIVE cap reaches the target's command and verify as
 # SPINCLASS_POST_MERGE_TIMEOUT / _TIMEOUT_SECONDS / _DEADLINE, alongside the
 # target's own name. Exercises the CLI wiring end-to-end in the built binary; the
-# Go tests cover precedence and enforcement (internal/merge/post_merge_phase_test.go).
+# Go tests cover precedence and enforcement (internal/delta/merge/post_merge_phase_test.go).
 function post_merge_timeout_flag_overrides_sweatfile_and_is_exported { # @test
   cd "$TEST_REPO" || return
 

@@ -611,7 +611,7 @@ func TestParsePorcelainStagedDeleted(t *testing.T) {
 // surrounding OutputBlock must render "ok" — not "not ok". Pre-fix,
 // the success path returned a non-nil *yaml_diagnostic.YAMLDiagnostic carrying only
 // summary extras, which tap-go interprets as "not ok". Mirrors the
-// twin test in internal/close.
+// twin test in internal/delta/close.
 func TestRunReapEmptyClosureEmitsOk(t *testing.T) {
 	var buf bytes.Buffer
 	tw := tap.NewWriter(&buf)

@@ -8,7 +8,7 @@ import (
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
-	"code.linenisgreat.com/spinclass/internal/perms"
+	"code.linenisgreat.com/spinclass/internal/delta/perms"
 )
 
 type permsListParams struct {

@@ -21,7 +21,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/bravo/validate"
 	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
 	"code.linenisgreat.com/spinclass/internal/clean"
-	"code.linenisgreat.com/spinclass/internal/pull"
+	"code.linenisgreat.com/spinclass/internal/delta/pull"
 	"code.linenisgreat.com/spinclass/internal/shop"
 )
 
