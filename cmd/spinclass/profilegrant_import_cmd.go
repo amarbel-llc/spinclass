@@ -177,10 +177,19 @@ func importGrantRecords(data []byte, now time.Time, out io.Writer, replace bool)
 		}
 	}
 	var toBind []importCandidate
+	bindingFor := map[string]string{}
 	for _, c := range ordered {
-		if !widenedInBatch[c.rec.Digest] {
-			toBind = append(toBind, c)
+		if widenedInBatch[c.rec.Digest] {
+			continue
 		}
+		// Two records for one grantee that do not widen one another would both
+		// become its current record, the last silently winning (#378).
+		if other, ok := bindingFor[c.grant.Grantee]; ok {
+			return fmt.Errorf("not importing: grantee %q gets two records in this batch, %s and %s, and neither widens the other; import one of them",
+				c.grant.Grantee, other, c.rec.Digest)
+		}
+		bindingFor[c.grant.Grantee] = c.rec.Digest
+		toBind = append(toBind, c)
 	}
 
 	// Refuse before writing anything if a binding would be silently replaced.
@@ -201,15 +210,55 @@ func importGrantRecords(data []byte, now time.Time, out io.Writer, replace bool)
 			return err
 		}
 	}
+	if err := bindAll(store, toBind); err != nil {
+		return err
+	}
 	bound := map[string]bool{}
 	for _, c := range toBind {
-		if err := store.Bind(c.grant.Grantee, c.rec.Digest); err != nil {
-			return err
-		}
 		bound[c.rec.Digest] = true
 	}
 	for _, c := range ordered {
 		printImported(out, c, bound[c.rec.Digest])
+	}
+	return nil
+}
+
+// bindAll binds every candidate or none: when a Bind fails, the bindings made
+// before it are put back as they were, a grantee's previous record rebound and
+// a grantee that had none unbound (#378). The stored records stay; unbound,
+// they grant nothing. A rollback that itself fails is named in the error.
+func bindAll(store *grantstore.Store, toBind []importCandidate) error {
+	type previous struct {
+		grantee, digest string // digest "" when the grantee had no binding
+	}
+	var done []previous
+	for _, c := range toBind {
+		prev := previous{grantee: c.grant.Grantee}
+		if cur, ok := store.Current(c.grant.Grantee); ok {
+			prev.digest = cur.Digest
+		}
+		err := store.Bind(c.grant.Grantee, c.rec.Digest)
+		if err == nil {
+			done = append(done, prev)
+			continue
+		}
+		var failed []string
+		for i := len(done) - 1; i >= 0; i-- {
+			p := done[i]
+			var rerr error
+			if p.digest == "" {
+				rerr = store.Unbind(p.grantee)
+			} else {
+				rerr = store.Bind(p.grantee, p.digest)
+			}
+			if rerr != nil {
+				failed = append(failed, fmt.Sprintf("%s (%v)", p.grantee, rerr))
+			}
+		}
+		if len(failed) > 0 {
+			return fmt.Errorf("%w; rolling back the earlier bindings also failed for %s", err, strings.Join(failed, ", "))
+		}
+		return fmt.Errorf("%w; the earlier bindings in this batch were rolled back", err)
 	}
 	return nil
 }

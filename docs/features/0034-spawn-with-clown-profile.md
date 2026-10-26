@@ -864,8 +864,11 @@ spinclass's own, to be corrected if piggy or the operator disagrees.
     `sc profile-grant-import` stores every
     record before binding any and refuses to rebind a grantee that already has a
     different current record unless the new one widens it or `--replace` is
-    passed; two unrelated roots for one grantee in a single batch are not yet
-    rejected.
+    passed. Two records for one grantee in a single batch that do not widen
+    one another are refused, `--replace` or not, before anything is stored.
+    Binding is all or nothing: a Bind that fails partway restores the earlier
+    grantees' previous records, or unbinds the ones that had none
+    (spinclass#378). The stored records stay, granting nothing while unbound.
 
 20. **The act text must stay within piggy's prompt budget.** Piggy's askpass
     refuses operator-act texts above 24 rendered lines (provisional, piggy#322),
