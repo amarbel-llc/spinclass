@@ -398,6 +398,38 @@ func TestPoolRepoMatchingToleratesAnOwnerlessOrigin(t *testing.T) {
 	}
 }
 
+// A revoke --host that differs from the manifest host does not excuse it.
+func TestPoolRefusesAManifestHostThatTheRevokeHostDoesNotName(t *testing.T) {
+	_, _, id := setupRepo(t)
+	writePool(t, "https://api.example.net", testSlot{session: "pool/spinclass/01", repo: "owner/repo"})
+	sf := poolSweatfile("", "papi forge token revoke --host other.example --session s")
+	if _, err := Mint(context.Background(), sf, id, ""); err == nil {
+		t.Fatal("a manifest host that is neither in forge-hosts nor the revoke --host must be refused")
+	}
+}
+
+// An owner-less session repo that matches slots of two different owners is
+// ambiguous: refuse rather than guess which owner the vanity plane serves.
+func TestPoolRefusesAnAmbiguousOwnerlessRepo(t *testing.T) {
+	setupRepo(t) // points the pool at a temp state dir
+	dir := writePool(t, "https://forge.example.com",
+		testSlot{session: "pool/a/01", repo: "alice/tool", deadline: future()},
+		testSlot{session: "pool/b/01", repo: "bob/tool", deadline: future()},
+	)
+	dest := filepath.Join(t.TempDir(), "claim")
+	c, err := claimPoolSlot(dir, "tool", []string{"forge.example.com"}, "", time.Now(), dest)
+	if err == nil || c != nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("claim=%v err=%v, want an ambiguity refusal", c, err)
+	}
+	if !exists(filepath.Join(dir, "pool_2Fa_2F01.token")) || !exists(filepath.Join(dir, "pool_2Fb_2F01.token")) {
+		t.Error("a slot was taken despite the ambiguity")
+	}
+	// An owner-qualified repo is exact and still claims.
+	if c, err := claimPoolSlot(dir, "bob/tool", []string{"forge.example.com"}, "", time.Now(), dest); err != nil || c == nil {
+		t.Fatalf("exact owner/name must claim: %v %v", c, err)
+	}
+}
+
 func TestPoolRevokeHostOf(t *testing.T) {
 	for in, want := range map[string]string{
 		"papi forge token revoke --host h.example --user u --card-login --session s": "h.example",

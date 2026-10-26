@@ -127,9 +127,10 @@ func checkPoolDir(dir string) error {
 }
 
 // readPoolManifest parses and validates the manifest. It holds no secrets, so
-// its parse errors may be shown. forge-hosts must be set and list the
-// manifest's host: a pool is a standing bearer credential, so unlike the mint
-// gate an empty allow-list does not mean "any host".
+// its parse errors may be shown. forge-hosts must be set (a pool is a standing
+// bearer credential, so unlike the mint gate an empty allow-list does not mean
+// "any host") and the manifest's host must be in it or be the --host of the
+// pinned revoke-command (papi's API host is not the git plane forge-hosts lists).
 func readPoolManifest(dir string, hosts []string, revokeHost string) (poolManifest, string, error) {
 	path := filepath.Join(dir, poolManifestName)
 	raw, err := os.ReadFile(path)
@@ -177,6 +178,19 @@ func claimPoolSlot(dir, repo string, hosts []string, revokeHost string, now time
 	m, apiHost, err := readPoolManifest(dir, hosts, revokeHost)
 	if err != nil {
 		return nil, err
+	}
+	// An owner-less repo matches by last segment; slots of two different owners
+	// under that name make the match a guess, so refuse it.
+	if !strings.Contains(repo, "/") {
+		owners := map[string]bool{}
+		for _, s := range m.Tokens {
+			if s.Repo != repo && poolRepoMatches(s.Repo, repo) {
+				owners[s.Repo[:strings.LastIndex(s.Repo, "/")]] = true
+			}
+		}
+		if len(owners) > 1 {
+			return nil, fmt.Errorf("[auth] token-pool: repo %q is ambiguous: slots exist under %d different owners; the session's origin is owner-less, so give the pool rows for one owner only", repo, len(owners))
+		}
 	}
 	for _, s := range m.Tokens {
 		if !poolRepoMatches(s.Repo, repo) {
