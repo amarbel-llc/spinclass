@@ -66,12 +66,17 @@ runbook), dc78e34 / 102d235 (hung-session note), c3ddbbf (coordinator page).
    `session-health` tool for held children, and a bounded coordinator forced
    restart (operator ruled yes: at most once per child per day, only with the
    `restart` right, logged and woken to holders). About 3 batches (I).
-6. The restart-verdict gap with clown. On 2026-10-26 circus/solid-elm was restarted
-   through `restart-child-session`, yet clown logged "frontend (61fa71c2…) exiting
-   with a restart queued and never asked about" and never called
-   `restart-preflight`: `restarting_at` stayed null, so no wake and no watchdog
-   fired (V). I asked pure-teak (chat-ec53944c: when does clown call the
-   preflight, and who cleared the request?). Wait for the answer; do not guess.
+6. The restart-verdict gap. Answered by pure-teak (2026-10-26 15:58, R from clown's
+   code plus its log): `clown restart --when idle` only queues in memory, and the
+   preflight runs only when the frontend receives a Stop event. An already-idle
+   session gets no Stop, so `restart-child-session` on an idle child never
+   reaches `restart-preflight`: circus/solid-elm logged "exiting with a restart
+   queued and never asked about", `restarting_at` stayed null, and no wake or
+   watchdog fired (V). The relaunch was the fleet restart through the resume
+   entry, not this request (I). The fix is clown's (queue on an idle frontend runs
+   the idle path at once, about 2-3 h, not built). Spinclass side, still open:
+   reword the queue message, which says "once its current turn ends", for an idle
+   child; and when testing live, make the child run a turn first.
 7. Follow-ups filed: #427 (store retention), #428 (`sc run` attestation env, handler
    test), #429 (five unenforced rights), #432 (confined landing, after the trip),
    #435 (who granted a handle and when), #157 (go-mcp/huh bridge: igloo e178fea is
