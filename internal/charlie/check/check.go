@@ -407,6 +407,16 @@ func sanitizeBranchForPath(branch string) string {
 // wtPath is the session worktree (where the madder blob store lives); hookDir is
 // where the hook actually runs (an isolated build worktree, or wtPath in the
 // legacy path). They differ only when the build-worktree feature is active.
+// emitHookNotices surfaces each hook notice (#352) as a one-line `warning:`
+// phase closed with success, as session-record warnings are (present #405):
+// every renderer prints it, and it never reads as a failure, so neither the
+// verdict nor an async wake's first ✗ line changes.
+func emitHookNotices(rep *crap.Reporter, notices []string) {
+	for _, n := range notices {
+		rep.Phase("warning: " + n).Done()
+	}
+}
+
 func runHookPhase(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.Hierarchy, wtPath, hookDir, cmd, desc string, activity io.Writer) (BlobLink, error) {
 	format := hierarchy.Merged.PreMergeOutputFormatValue()
 	madderPinned := embeds.MadderBin() != ""
@@ -463,7 +473,11 @@ func runHookPhase(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.H
 	// Load the devshell from the session worktree (wtPath, which has an allowed
 	// .envrc) but run the hook in hookDir (the build worktree pinned to the
 	// committed sha). They coincide in legacy in-place mode. See spinclass#198.
-	hookErr := hookrun.PreMergeInDir(ctx, hierarchy.Merged, wtPath, hookDir, sink)
+	// Notices go out after the hook's own node closes, whichever way it ends.
+	var notices []string
+	defer func() { emitHookNotices(rep, notices) }()
+	hookCtx := hookrun.WithNotices(ctx, func(n string) { notices = append(notices, n) })
+	hookErr := hookrun.PreMergeInDir(hookCtx, hierarchy.Merged, wtPath, hookDir, sink)
 	elapsed := time.Since(start)
 	lw.Flush()
 

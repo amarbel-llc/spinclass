@@ -278,6 +278,26 @@ func PreMergeContext(ctx context.Context, sf sweatfile.Sweatfile, worktreePath s
 	return PreMergeInDir(ctx, sf, worktreePath, worktreePath, w)
 }
 
+type noticesKey struct{}
+
+// WithNotices returns ctx carrying fn, which the hook runner calls with each
+// operator notice, as a bare line (#352): the hook ran without its systemd
+// scope, or a cancelled unscoped hook may have left processes running. A
+// passing gate otherwise shows those only in the hook's own output, which the
+// verdicts collapse, so the caller surfaces them itself.
+func WithNotices(ctx context.Context, fn func(string)) context.Context {
+	return context.WithValue(ctx, noticesKey{}, fn)
+}
+
+// notice writes msg to the hook's output, as before #352, and hands it to the
+// ctx's notifier if one is set.
+func notice(ctx context.Context, w io.Writer, msg string) {
+	_, _ = fmt.Fprintf(w, "[spinclass] %s\n", msg)
+	if fn, ok := ctx.Value(noticesKey{}).(func(string)); ok && fn != nil {
+		fn(msg)
+	}
+}
+
 // PreMergeInDir runs the pre-merge hook with the devshell loaded from envDir
 // (the session worktree, which has an allowed .envrc) while the hook's working
 // directory is runDir (the detached build worktree pinned to the committed
@@ -542,8 +562,8 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 			sinceCancel = time.Since(time.Unix(0, at))
 		}
 		if ctx.Err() != nil {
-			if notice := escalationNotice(c, err, sinceCancel); notice != "" {
-				_, _ = io.WriteString(w, notice)
+			if msg := escalationNotice(c, err, sinceCancel); msg != "" {
+				notice(ctx, w, msg)
 			}
 		}
 	}
@@ -614,7 +634,7 @@ func runHookInScope(
 		return nil, false, fmt.Errorf(
 			"pre-merge hook not run: its systemd scope could not be set up and [hooks].require-hook-scope is set: %w", err)
 	}
-	_, _ = fmt.Fprintf(w, "[spinclass] hook scope unavailable (%v); running unscoped\n", err)
+	notice(ctx, w, fmt.Sprintf("hook scope unavailable (%v); running unscoped", err))
 	return nil, false, nil
 }
 
@@ -705,13 +725,13 @@ func (f *firstLineCapture) firstLine() string { return strings.TrimSpace(string(
 func escalationNotice(c *exec.Cmd, err error, sinceCancel time.Duration) string {
 	if c.ProcessState != nil {
 		if ws, ok := c.ProcessState.Sys().(syscall.WaitStatus); ok && ws.Signaled() && ws.Signal() == syscall.SIGKILL {
-			return fmt.Sprintf("[spinclass] hook ignored SIGTERM for %s and its top process was killed; "+
-				"with no systemd scope its child processes may still be running (spinclass#188)\n", c.WaitDelay)
+			return fmt.Sprintf("hook ignored SIGTERM for %s and its top process was killed; "+
+				"with no systemd scope its child processes may still be running (spinclass#188)", c.WaitDelay)
 		}
 	}
 	if errors.Is(err, exec.ErrWaitDelay) || (c.WaitDelay > 0 && sinceCancel >= c.WaitDelay) {
-		return fmt.Sprintf("[spinclass] hook exited after the cancel, but a descendant still held its output pipe "+
-			"%s past the grace period; with no systemd scope that process may still be running (spinclass#188)\n",
+		return fmt.Sprintf("hook exited after the cancel, but a descendant still held its output pipe "+
+			"%s past the grace period; with no systemd scope that process may still be running (spinclass#188)",
 			c.WaitDelay)
 	}
 	return ""
