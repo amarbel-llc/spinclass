@@ -427,6 +427,25 @@ func AcquireJobLock(jobID string) (func() error, error) {
 	return jobwake.AcquireJobLock("", jobID)
 }
 
+// HoldJobLock is AcquireJobLock for a producer that holds jobID's lock for the
+// job's lifetime, gated as job.Start gates it (#26, #368): nothing is taken for
+// an empty id or while FlockEnabled is off (a ProtocolVersion skew). release is
+// never nil, so the caller can defer it; it must run after the terminal
+// FinishJob, or the reaper could terminalize a job whose producer is alive. A
+// failed acquire is returned for the caller to log: the job still runs and
+// wakes, just without a liveness signal.
+func HoldJobLock(jobID string) (release func(), err error) {
+	noop := func() {}
+	if jobID == "" || !FlockEnabled() {
+		return noop, nil
+	}
+	rel, err := AcquireJobLock(jobID)
+	if err != nil {
+		return noop, err
+	}
+	return func() { _ = rel() }, nil
+}
+
 // ScopeArgv returns the `systemd-run --user --scope --unit=… --property=
 // KillMode=control-group --` prefix a producer prepends to its own hook command
 // to run it inside the job's transient scope (RFC-0016 §3/§4), together with

@@ -33,6 +33,10 @@ const AsyncSpawnHelloDeadline = 5 * time.Minute
 // linger.
 const spawnLogActiveWindow = 30 * time.Second
 
+// waitHelloFn is the seam over spawn.WaitHello, so a test can hold the hello
+// open while it inspects the dispatcher.
+var waitHelloFn = spawn.WaitHello
+
 // handleSpawnSessionAsync is the async spawn-session path (spinclass#266), used
 // when serve runs under clown. It runs the synchronous prefix (create worktree +
 // exec the detached entry) inline — so the session key is known — then hands the
@@ -101,7 +105,15 @@ func handleSpawnSessionAsync(params spawnParams) (*command.Result, error) {
 func awaitSpawnHello(pending spawn.Pending, driverPrincipal string, deadline time.Duration, jobID string) {
 	ctx := context.Background()
 
-	if res, err := spawn.WaitHello(pending, deadline); err == nil {
+	// RFC-0018 liveness (#368): held across the wait, released after the
+	// terminal FinishJob below, so a crashed dispatcher is reaped.
+	release, lerr := clown.HoldJobLock(jobID)
+	if lerr != nil {
+		servelog.Errorf("spawn-async: liveness lock for %s not acquired (job runs without a liveness signal): %v", jobID, lerr)
+	}
+	defer release()
+
+	if res, err := waitHelloFn(pending, deadline); err == nil {
 		msg := fmt.Sprintf("worker %s is up; it will message %s via chat", res.SessionKey, driverPrincipal)
 		if ferr := clown.FinishJob(ctx, jobID, job.StatusSucceeded, msg, ""); ferr != nil {
 			servelog.Errorf("spawn-async: FinishJob(succeeded) for %s failed: %v", pending.SessionKey, ferr)

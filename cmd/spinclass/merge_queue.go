@@ -222,6 +222,11 @@ func emitQueueWake(what, label, state, msg string) {
 		servelog.Errorf("merge queue: %s StartJob failed: %v", what, err)
 		return
 	}
+	release, lerr := clown.HoldJobLock(id)
+	if lerr != nil {
+		servelog.Errorf("merge queue: %s liveness lock not acquired: %v", what, lerr)
+	}
+	defer release()
 	if cerr := clown.FinishJob(ctx, id, state, msg, ""); cerr != nil {
 		servelog.Errorf("merge queue: %s FinishJob failed: %v", what, cerr)
 	}

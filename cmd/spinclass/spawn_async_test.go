@@ -1,12 +1,14 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/ringmaster/pkgs/jobwake"
 	"code.linenisgreat.com/spinclass/internal/0/clown"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
@@ -32,6 +34,50 @@ func TestAsyncSpawnResultText(t *testing.T) {
 			t.Errorf("asyncSpawnResultText missing %q:\n%s", want, got)
 		}
 	}
+}
+
+// #368: the async spawn dispatcher holds its job's RFC-0018 liveness lock while
+// it waits for the hello, so a crashed dispatcher is reaped instead of leaving
+// the job running forever, and lets it go once the job is finished.
+func TestAwaitSpawnHelloHoldsTheJobLockWhileItWaits(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CLOWN_SESSION_ID", "spinclass-spawn-lock-test")
+	clown.SetFlockEnabled(true)
+	t.Cleanup(func() { clown.SetFlockEnabled(false) })
+
+	waiting, hello := make(chan struct{}), make(chan struct{})
+	orig := waitHelloFn
+	waitHelloFn = func(p spawn.Pending, _ time.Duration) (spawn.Result, error) {
+		close(waiting)
+		<-hello
+		return spawn.Result{SessionKey: p.SessionKey}, nil
+	}
+	t.Cleanup(func() { waitHelloFn = orig })
+
+	done := make(chan struct{})
+	go func() {
+		awaitSpawnHello(spawn.Pending{SessionKey: "worker/feat-4"}, "driver", time.Minute, "job-spawnlock")
+		close(done)
+	}()
+
+	<-waiting
+	if rel, err := clown.AcquireJobLock("job-spawnlock"); !errors.Is(err, jobwake.ErrAlreadyLocked) {
+		if err == nil {
+			_ = rel()
+		}
+		t.Errorf("while waiting for the hello: AcquireJobLock got %v, want ErrAlreadyLocked", err)
+	}
+	close(hello)
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("awaitSpawnHello did not return")
+	}
+	rel, err := clown.AcquireJobLock("job-spawnlock")
+	if err != nil {
+		t.Fatalf("after the job finished: AcquireJobLock got %v, want the lock released", err)
+	}
+	_ = rel()
 }
 
 // TestSpawnTimeoutOutcomeKeepsBootingWorker: when the worker's spawn.log shows
