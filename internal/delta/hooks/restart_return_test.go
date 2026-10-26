@@ -121,6 +121,71 @@ func TestSessionStartAfterARestartWakesOnlyOnce(t *testing.T) {
 	}
 }
 
+// After a restart (or a hand `clown restart`) the recorded pid is the old sc
+// launcher, which close cannot prove is the session's. The relaunch's
+// SessionStart re-records the agent process so close can stop it.
+func TestSessionStartReRecordsTheRelaunchedProcessPID(t *testing.T) {
+	stubReturnWakes(t)
+	repo, wt := restartingWorktree(t)
+	orig := hookParentPID
+	hookParentPID = func() int { return 424242 }
+	t.Cleanup(func() { hookParentPID = orig })
+
+	fireSessionStart(t, wt)
+
+	st, err := session.Read(repo, "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.PID != 424242 {
+		t.Fatalf("PID = %d, want the relaunched hook parent 424242", st.PID)
+	}
+}
+
+// A relaunch with no restart in flight (a hand `clown restart`) re-records too.
+func TestSessionStartWithoutARestartRecordInFlightStillReRecordsThePID(t *testing.T) {
+	stubReturnWakes(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	repo, wt := initSpawnedWorktree(t, "")
+	orig := hookParentPID
+	hookParentPID = func() int { return 515151 }
+	t.Cleanup(func() { hookParentPID = orig })
+
+	fireSessionStart(t, wt)
+
+	st, err := session.Read(repo, "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.PID != 515151 {
+		t.Fatalf("PID = %d, want 515151", st.PID)
+	}
+}
+
+// Inside a unit the pid is in the unit's namespace and is not authority.
+func TestSessionStartInAUnitDoesNotRecordAPID(t *testing.T) {
+	stubReturnWakes(t)
+	repo, wt := restartingWorktree(t)
+	t.Setenv("CLOWN_UNIT", "spinclass-agent-myrepo-feature.service")
+	before, err := session.Read(repo, "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := hookParentPID
+	hookParentPID = func() int { return 424242 }
+	t.Cleanup(func() { hookParentPID = orig })
+
+	fireSessionStart(t, wt)
+
+	st, err := session.Read(repo, "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.PID != before.PID {
+		t.Fatalf("PID = %d, want unchanged %d inside a unit", st.PID, before.PID)
+	}
+}
+
 // A hook inside a confined unit reaches only the display copy, so it must not
 // pretend to mark a return the frontend record cannot see.
 func TestSessionStartInAUnitAfterARestartDoesNothing(t *testing.T) {

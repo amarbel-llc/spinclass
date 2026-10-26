@@ -182,6 +182,7 @@ func runSessionStart(input hookInput) error {
 			recordOwnPrincipal(cwd, principal)
 		}
 		maybeSendSpawnHello(cwd, input.SessionID) // spawn handshake (FDR 0006); never blocks startup
+		recordRelaunchedPID(cwd)
 		markRestartReturn(cwd, envPrincipal)
 		return nil
 	}
@@ -402,6 +403,43 @@ func recordOwnPrincipal(cwd, principal string) {
 		}
 	}
 	bindUnconfinedPrincipal(st, principal)
+}
+
+// hookParentPID is a seam over os.Getppid for recordRelaunchedPID.
+var hookParentPID = os.Getppid
+
+// recordRelaunchedPID re-records the process of a (re)launched unconfined
+// worktree session on every SessionStart. After a restart, by clown or by hand,
+// the recorded pid is the old `sc` launcher, which close cannot prove is the
+// session's, so the live agent would survive a close. The hook's parent is the
+// agent (best-effort, as for the hello). Inside a unit the pid is in the unit's
+// namespace and not authority (FDR 0035), so none is recorded there.
+func recordRelaunchedPID(cwd string) {
+	if session.InUnit() || os.Getenv("CLOWN_UNIT") != "" {
+		return
+	}
+	repoPath, err := git.CommonDir(cwd)
+	if err != nil {
+		return
+	}
+	branch, err := git.BranchCurrent(cwd)
+	if err != nil || branch == "" {
+		return
+	}
+	ppid := hookParentPID()
+	if ppid <= 1 {
+		return
+	}
+	err = session.Update(repoPath, branch, func(cur *session.State) error {
+		if cur.IsTombstone() || cur.PID == ppid {
+			return errNoRestartToMark
+		}
+		cur.PID = ppid
+		return nil
+	})
+	if err != nil && !errors.Is(err, errNoRestartToMark) {
+		sessionlog.Errorf("recordRelaunchedPID update-failed cwd=%s err=%v", cwd, err)
+	}
 }
 
 // notifyPrincipal is a seam over clown.NotifyPrincipal so the restart return

@@ -1430,7 +1430,7 @@ _explore-live-restart-snapshot target label:
     jq --slurpfile procs "$pf" --arg peek "$peek" --arg onpath "$onpath" --arg taken "$(date -u +%FT%TZ)" --arg label "$label" '{
       label: $label, taken_at: $taken,
       session_key: .session_key, principal: (.principal // ""), worktree: .worktree_path,
-      state: .state, kind: (.kind // ""),
+      state: .state, kind: (.kind // ""), recorded_pid: (.pid // 0),
       restarting_at: .restarting_at, restarted_at: .restarted_at, restarting_by: .restarting_by,
       restart_request_queued: (.restart_request != null),
       profile: (.profile // ""), profile_digest: (.profile_digest // ""),
@@ -1478,6 +1478,31 @@ explore-live-restart-baseline target:
     if [ "$fails" -gt 0 ]; then echo "SUMMARY: $fails FAIL"; exit 1; fi
     echo "SUMMARY: baseline PASS (MANUAL: note the troupe credential and send the nonce DM now)"
 
+# [explore] After `close-child-session` on a restarted worker: fail while ANY
+# process still carries the session key (SPINCLASS_SESSION_ID) in its
+# environment (claude, clown, ringmaster, moxy, the MCP children...). Allow a few
+# seconds for the tree to exit. Read-only.
+#
+# fail if any process of a closed session survives
+[group("explore")]
+explore-live-close-leftovers key:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    pat="SPINCLASS_SESSION_ID={{ key }}"
+    for attempt in 1 2 3 4 5 6; do
+      left=""
+      for d in /proc/[0-9]*; do
+        pid=${d#/proc/}
+        [ "$pid" = "$$" ] && continue
+        { tr '\0' '\n' < "$d/environ"; } 2>/dev/null | grep -xF -e "$pat" >/dev/null || continue
+        left="$left $pid:$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null | cut -c1-80)"$'\n'
+      done
+      [ -z "$left" ] && { echo "PASS    no process carries $pat"; exit 0; }
+      sleep 2
+    done
+    printf 'FAIL    processes of the closed session survive:\n%s' "$left"
+    exit 1
+
 # [explore] The same snapshot AFTER the relaunch, compared with baseline.json.
 # The troupe credential and the conversation resuming cannot be observed from
 # the process table or the record; those stay MANUAL. The serve-binary check
@@ -1514,6 +1539,10 @@ explore-live-restart-verify target:
     elif [ -n "$ra" ] && awk -v a="$(date -d "$rd" +%s.%N)" -v b="$(date -d "$ra" +%s.%N)" 'BEGIN { exit !(a >= b) }'; then pass "RestartedAt ($rd) >= RestartingAt"
     else fail "RestartedAt ($rd) is older than RestartingAt ($ra)"; fi
     check "restart-preflight --peek reports state live" '.peek.state == "live"'
+    # Close-after-restart gap: the relaunch's SessionStart must re-record the pid, or
+    # close-child-session cannot prove the recorded pid is the session's and leaves it running.
+    check "the recorded pid is one of the session's live processes (close can stop it)" '.recorded_pid as $r | $r > 0 and any(.procs[]; .pid == $r)'
+    check "the recorded pid is not a pid from the baseline (re-recorded on relaunch)" '.recorded_pid as $r | all($b[0].procs[]; .pid != $r)'
     check "a NEW agent process exists (no agent pid or start time survived from the baseline)" '[.procs[] | select(.kind == "agent")] as $a | ($a | length) >= 1 and all($a[]; . as $n | all($b[0].procs[] | select(.kind == "agent"); .pid != $n.pid or .start_ticks != $n.start_ticks))'
     if jq -e --slurpfile b "$base" 'any($b[0].procs[]; .kind == "agent" and .unattended)' "$after" >/dev/null; then
       check "relaunched agent environment has CLOWN_UNATTENDED=1" 'any(.procs[]; .kind == "agent" and .unattended)'
