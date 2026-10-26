@@ -36,11 +36,8 @@ setup() {
     SPINCLASS_DESCRIPTION CLOWN_SESSION_ID CLOWN_GROUP_ID
   ESCAPE_LOG="$XDG_STATE_HOME/spinclass/grit-escape.log"
   export ESCAPE_LOG
-  # On a tty, `sc` writes a terminal background/cursor query (OSC 11 + CPR) to
-  # stdout at startup and waits (~5s) for a reply; nothing answers on this
-  # pty, which also leaks the query bytes into captured stdout. A dumb TERM
-  # stops it. A real terminal answers the query, so this is a pty artifact.
-  PTY_ENV='export TERM=dumb; '
+  # A real, query-capable TERM: sc must not query the pty (#398).
+  export TERM=xterm-256color
 }
 
 require_pty() {
@@ -66,7 +63,7 @@ pty_sh() {
   local label="$1" input="$2" snippet="$3"
   local errf="$BATS_TEST_TMPDIR/pty.stderr"
   : >"$errf"
-  run bash -c '{ printf "%s" "$1"; sleep 0.3; } | timeout 20 script -qefc "{ $2 ; } 2>\"$3\"" /dev/null' _ "$input" "${PTY_ENV-}$snippet" "$errf"
+  run bash -c '{ printf "%s" "$1"; sleep 0.3; } | timeout 20 script -qefc "{ $2 ; } 2>\"$3\"" /dev/null' _ "$input" "$snippet" "$errf"
   output="${output//$'\r'/}"
   ERR="$(cat "$errf")"
   record "$label" "$ERR"
@@ -162,6 +159,23 @@ function hatch_refuses_when_only_one_of_stdin_stdout_is_a_terminal { # @test
   assert_output ""
   [[ $ERR == *"$REFUSAL"* ]] || fail "stdin-not-a-tty was not refused: $ERR"
   assert [ ! -e "$ESCAPE_LOG" ]
+}
+
+# No terminal query (#398)
+
+# A command that renders nothing interactive must not write a terminal query
+# (OSC 11 background colour, CPR) at startup: a pty that never answers would
+# stall it ~5s and the query bytes leak into stdout.
+function hatch_emits_no_terminal_query_on_a_tty { # @test
+  require_pty
+  cd "$TEST_REPO" || return
+  local began=$SECONDS
+  pty_sc "no terminal query" "" grit stage '{"subcommand":"status"}'
+  local took=$((SECONDS - began))
+  assert_success
+  [[ $output != *$'\e]11;?'* ]] || fail "OSC 11 background query written to the tty: $(printf %q "$output")"
+  [[ $output != *$'\e[6n'* ]] || fail "CPR query written to the tty: $(printf %q "$output")"
+  [[ $took -lt 4 ]] || fail "startup stalled ${took}s waiting for a terminal reply"
 }
 
 # Session worktree, read verbs (case 2)

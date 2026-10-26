@@ -12,6 +12,10 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/0/embeds"
 	"code.linenisgreat.com/spinclass/internal/0/sessionlog"
+
+	// Settles lipgloss's background guess before bubbletea's init can query the
+	// terminal (#398); see the package doc for the init-order requirement.
+	_ "code.linenisgreat.com/spinclass/internal/0/termbg"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 )

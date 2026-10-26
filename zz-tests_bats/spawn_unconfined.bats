@@ -17,7 +17,6 @@ setup() {
   unset SPINCLASS_SESSION_ID CLOWN_SESSION_ID CLOWN_UNIT
   SPAWN_LOG="$XDG_STATE_HOME/spinclass/spawn-unconfined.log"
   export SPAWN_LOG
-  PTY_ENV='export TERM=dumb; '
 }
 
 require_pty() {
@@ -41,7 +40,7 @@ function unconfined_spawn_at_a_pty_with_a_wrong_answer_is_refused { # @test
   local errf="$BATS_TEST_TMPDIR/pty.stderr"
   local cmd
   cmd="$(printf '%q ' "$SPINCLASS_BIN" spawn --repo no-such-repo --brief b --unconfined)"
-  run bash -c '{ printf "y\n"; sleep 0.3; } | timeout 20 script -qefc "{ $1 ; } 2>\"$2\"" /dev/null' _ "${PTY_ENV}$cmd" "$errf"
+  run bash -c '{ printf "y\n"; sleep 0.3; } | timeout 20 script -qefc "{ $1 ; } 2>\"$2\"" /dev/null' _ "$cmd" "$errf"
   assert_failure
   run cat "$errf"
   assert_output --partial "type unconfined to confirm"
