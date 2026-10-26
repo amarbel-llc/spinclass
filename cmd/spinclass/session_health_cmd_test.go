@@ -56,7 +56,7 @@ func TestSessionHealthShowsAClownCancelledRestart(t *testing.T) {
 		At: healthNow.Add(-time.Minute), Kind: "profile-gate", Text: "pinned profile changed\x00",
 	}}
 	_, why := sessionHealth(st, fakeHealthDeps(status, hungstatus.FrontendLive, false))
-	for _, want := range []string{"last restart cancelled by clown (profile-gate)", "pinned profile changed"} {
+	for _, want := range []string{"clown's record of a cancelled restart", "untrusted data", `kind "profile-gate"`, "pinned profile changed"} {
 		if !strings.Contains(why, want) {
 			t.Errorf("why %q lacks %q", why, want)
 		}
