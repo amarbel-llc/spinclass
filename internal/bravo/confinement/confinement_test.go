@@ -241,6 +241,7 @@ func confinedHost() (*fakeSys, Inputs) {
 		peer: map[string]int{"/run/user/1000/agent.sock": 50},
 		env:  map[string]string{"DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus"},
 	}
+	sys.files[UnitSpecPath(stateDir, "/wt/a")] = unitSpecWith("/wt/a")
 	sys.files[root+"/repo/.git/worktrees/a/config.worktree"] = ""
 	sys.files[root+"/wt/a/.git"] = "gitdir: /repo/.git/worktrees/a\n"
 	in := Inputs{
@@ -256,6 +257,66 @@ func confinedHost() (*fakeSys, Inputs) {
 		RuntimeAllow: RuntimeAllowFor("/run/user/1000", "/run/user/1000/agent.sock"),
 	}
 	return sys, in
+}
+
+// unitSpecWith renders a recorded launch spec binding the worktree plus extra
+// rw paths.
+func unitSpecWith(wt string, extraRW ...string) string {
+	rw := append([]string{`"` + wt + `"`, `"/repo/.git/objects"`}, quoteAll(extraRW)...)
+	return `{"version":1,"worktree":"` + wt + `","binds_rw":[` + strings.Join(rw, ",") +
+		`],"binds_ro":["/repo/.git/config"],"sockets":[{"path":"/run/user/1000/agent.sock","purpose":"piggy-agent"}]}`
+}
+
+func quoteAll(ss []string) []string {
+	out := make([]string, len(ss))
+	for i, s := range ss {
+		out[i] = `"` + s + `"`
+	}
+	return out
+}
+
+// F16 (spinclass#431): no bind of the recorded spec exposes the protected
+// $XDG_STATE_HOME/circus, and the unit cannot see it.
+func TestF16ProtectedStateNotBound(t *testing.T) {
+	sys, in := confinedHost()
+	if f := factByID(t, Run(sys, in), "F16"); !f.OK {
+		t.Fatalf("default F16 = %+v, want ok", f)
+	}
+	for name, extra := range map[string]string{
+		"inside circus": stateDir + "/circus/issue-filer",
+		"circus":        stateDir + "/circus",
+		"state base":    stateDir,
+	} {
+		sys, in := confinedHost()
+		sys.files[UnitSpecPath(stateDir, "/wt/a")] = unitSpecWith("/wt/a", extra)
+		f := factByID(t, Run(sys, in), "F16")
+		if f.OK || !strings.Contains(f.Detail, extra) || !strings.Contains(f.Detail, stateDir+"/circus") {
+			t.Errorf("%s: F16 = %+v, want a failure naming the bind and the protected dir", name, f)
+		}
+	}
+	for _, extra := range []string{stateDir + "/ringmaster", stateDir + "/circus-other"} {
+		sys, in := confinedHost()
+		sys.files[UnitSpecPath(stateDir, "/wt/a")] = unitSpecWith("/wt/a", extra)
+		if f := factByID(t, Run(sys, in), "F16"); !f.OK {
+			t.Errorf("%s: F16 = %+v, want ok", extra, f)
+		}
+	}
+}
+
+func TestF16FailsWhenTheUnitCanSeeCircus(t *testing.T) {
+	sys, in := confinedHost()
+	sys.dirs[root+stateDir+"/circus"] = []string{"issue-filer"}
+	if f := factByID(t, Run(sys, in), "F16"); f.OK {
+		t.Errorf("F16 = %+v, want a failure: the unit lists circus", f)
+	}
+}
+
+func TestF16FailsClosedWithoutASpec(t *testing.T) {
+	sys, in := confinedHost()
+	delete(sys.files, UnitSpecPath(stateDir, "/wt/a"))
+	if f := factByID(t, Run(sys, in), "F16"); f.OK {
+		t.Errorf("F16 = %+v, want a failure with no recorded spec", f)
+	}
 }
 
 func factByID(t *testing.T, r Report, id string) Fact {
@@ -824,7 +885,7 @@ func TestNoUnitRecordFailsEveryUnitFact(t *testing.T) {
 	sys, in := confinedHost()
 	delete(sys.files, UnitRecordPath(stateDir, "/wt/a"))
 	r := Run(sys, in)
-	for _, id := range []string{"F1", "F3", "F4", "F5", "F6", "F7", "F8a", "F8b", "F9", "F10", "F11", "F12", "F13", "F14", "F15"} {
+	for _, id := range []string{"F1", "F3", "F4", "F5", "F6", "F7", "F8a", "F8b", "F9", "F10", "F11", "F12", "F13", "F14", "F15", "F16"} {
 		if f := factByID(t, r, id); f.OK {
 			t.Errorf("%s passed with no unit to probe", id)
 		}

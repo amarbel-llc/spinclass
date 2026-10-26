@@ -137,5 +137,6 @@ func Run(sys System, in Inputs) Report {
 		p.f13PrivateNetwork(),
 		p.f14RuntimeDirBoundOnly(),
 		p.f15PrincipalMapping(),
+		p.f16ProtectedStateNotBound(),
 	}}
 }

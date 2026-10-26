@@ -331,6 +331,63 @@ func TestBuildUnitSpecKeepsAnExplicitEmptyEgressList(t *testing.T) {
 	}
 }
 
+// spinclass#431: circus keeps the issue-filer service credential under
+// $XDG_STATE_HOME/circus; no bind of a unit spec may expose it.
+func TestRefuseProtectedBinds(t *testing.T) {
+	rp := worktree.ResolvedPath{AbsPath: "/w/repo/.worktrees/feat", SessionKey: "repo/feat"}
+	specWith := func(state, handshake string) unitSpec {
+		return buildUnitSpec(unitSpecInput{
+			rp: rp, stateDir: state, commonDir: "/w/repo/.git", runtimeDir: "/run/user/1",
+			sshAuthSock: "/run/user/1/piggy.sock",
+			env:         map[string]string{}, handshakeDir: handshake,
+		})
+	}
+	state := "/state"
+	if err := refuseProtectedBinds(specWith(state, spawnhandshake.SessionDir(state, rp.AbsPath)), state); err != nil {
+		t.Errorf("the default spec was refused: %v", err)
+	}
+	for name, bind := range map[string]string{
+		"inside circus":        "/state/circus/issue-filer",
+		"circus itself":        "/state/circus",
+		"the state base":       "/state",
+		"the state base's dir": "/state/",
+		"dotdot into circus":   "/state/ringmaster/../circus/issue-filer",
+	} {
+		err := refuseProtectedBinds(specWith(state, bind), state)
+		if err == nil || !strings.Contains(err.Error(), bind) || !strings.Contains(err.Error(), "/state/circus") {
+			t.Errorf("%s: got %v, want a refusal naming the bind and /state/circus", name, err)
+		}
+	}
+	for name, bind := range map[string]string{
+		"a sibling":          "/state/ringmaster",
+		"a shared prefix":    "/state/circus-other",
+		"a shared prefix in": "/state/circus-other/x",
+	} {
+		if err := refuseProtectedBinds(specWith(state, bind), state); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+func TestRefuseProtectedBindsFollowsSymlinks(t *testing.T) {
+	state := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(state, "circus", "issue-filer"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "innocent")
+	if err := os.Symlink(filepath.Join(state, "circus", "issue-filer"), link); err != nil {
+		t.Fatal(err)
+	}
+	rp := worktree.ResolvedPath{AbsPath: "/w/repo/.worktrees/feat", SessionKey: "repo/feat"}
+	spec := buildUnitSpec(unitSpecInput{
+		rp: rp, stateDir: state, commonDir: "/w/repo/.git", runtimeDir: "/run/user/1",
+		env: map[string]string{}, handshakeDir: link,
+	})
+	if err := refuseProtectedBinds(spec, state); err == nil {
+		t.Error("a symlink into circus was accepted")
+	}
+}
+
 func TestWriteUnitSpecWritesOutsideTheWorktree(t *testing.T) {
 	state := t.TempDir()
 	wt := filepath.Join(t.TempDir(), "repo", ".worktrees", "feat")

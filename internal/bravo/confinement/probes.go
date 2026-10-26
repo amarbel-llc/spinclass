@@ -1388,3 +1388,47 @@ func (p *prober) f14RuntimeDirBoundOnly() Fact {
 	}()
 	return fact(id, name, err, note)
 }
+
+// F16 (spinclass#431): the protected state directories (ProtectedStateDirs,
+// $XDG_STATE_HOME/circus, which holds the issue-filer service credential) are
+// neither bound by the session's recorded unit spec nor visible from the unit.
+// A bind of one, inside it, or an ancestor of it (the state base, the home)
+// fails; a deny_paths entry does not excuse it. A missing spec fails closed.
+func (p *prober) f16ProtectedStateNotBound() Fact {
+	const id, name = "F16", "protected state dirs not bound or visible"
+	err := func() error {
+		if err := p.needSubject(); err != nil {
+			return err
+		}
+		if p.in.StateDir == "" {
+			return errors.New("no state dir to derive the protected paths from")
+		}
+		specPath := UnitSpecPath(p.in.StateDir, p.in.Driver.Worktree)
+		b, err := p.sys.ReadFile(specPath)
+		if err != nil {
+			return fmt.Errorf("reading the recorded unit spec (%s): %w", specPath, err)
+		}
+		binds, err := UnitSpecBinds(b)
+		if err != nil {
+			return err
+		}
+		if err := RefuseProtectedBinds(p.in.StateDir, binds); err != nil {
+			return err
+		}
+		for _, prot := range ProtectedPaths(p.in.StateDir) {
+			host, err := p.at(prot)
+			if err != nil {
+				return err
+			}
+			_, err = p.sys.Lstat(host)
+			if err == nil {
+				return fmt.Errorf("the protected %s is visible from the unit", prot)
+			}
+			if !unreachable(err) {
+				return fmt.Errorf("cannot establish that %s is hidden: %w", prot, err)
+			}
+		}
+		return nil
+	}()
+	return fact(id, name, err, "")
+}

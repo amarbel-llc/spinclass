@@ -278,6 +278,18 @@ func buildUnitSpec(in unitSpecInput) unitSpec {
 	return spec
 }
 
+// refuseProtectedBinds fails a spec that binds or exposes a protected state
+// directory (confinement.ProtectedStateDirs, spinclass#431): the unit keeps
+// the operator's uid, so only an absent bind keeps it out of, for example,
+// the issue-filer credential. A deny_paths entry does not excuse a bind.
+func refuseProtectedBinds(spec unitSpec, stateDir string) error {
+	binds := append(append([]string{}, spec.BindsRW...), spec.BindsRO...)
+	for _, s := range spec.Sockets {
+		binds = append(binds, s.Path)
+	}
+	return confinement.RefuseProtectedBinds(stateDir, binds)
+}
+
 // ensureWorktreeConfigFile creates <common>/worktrees/<name>/config.worktree
 // (empty) when absent. auth.Inject writes it when a credential is minted, but a
 // session that never minted has none, and the unit spec binds that path
@@ -320,6 +332,9 @@ func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, state
 		sshAuthSock: os.Getenv("SSH_AUTH_SOCK"), runtimeDir: runtimeDir, wayland: wayland,
 		egress: egress, env: env, handshakeDir: handshakeDir,
 	})
+	if err := refuseProtectedBinds(spec, stateDir); err != nil {
+		return "", err
+	}
 	path, err := confinement.WriteUnitSpec(stateDir, rp.AbsPath, spec)
 	if err != nil {
 		return "", fmt.Errorf("writing the agent unit spec: %w", err)
