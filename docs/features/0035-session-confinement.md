@@ -858,9 +858,33 @@ resolver reports no base definition, still refuses. The readback after launch
 (comparing the servers the worker actually started with the profile) is clown's,
 and is routed to clown, not built here.
 
-Not covered: an unattended spawn's standing grant (FDR 0034), and confined
-resume. A full confined spawn past the preflight is not tested; it would need a
-faked systemd and clown.
+Not covered: an unattended spawn's standing grant (FDR 0034). A full confined
+spawn past the preflight is not tested; it would need a faked systemd and clown.
+
+### Resume of a once-confined session (spinclass#400)
+
+A session launched confined resumes confined, and nothing of its worktree runs
+unconfined (the worker can plant harness config, `.envrc` and project tooling
+there). `sc resume` treats a worktree as once-confined when a frontend unit
+record or spec exists for it (`confinement.LaunchedConfined`) and then:
+
+- refuses unless the unit spec exists and is readable (`<key> was launched
+  confined, but its unit spec ... is missing`); the way out is `sc close <key>`
+  or resurrecting it as a fresh session. It never rewrites the spec;
+- adds `CLOWN_AGENT_SCOPE=<spec path>` to the harness environment, set last so no
+  configured value can name another spec; clown re-applies the recorded unit
+  (it refuses a spec path that differs from the one it recorded, or a changed
+  boundary; R, clown code, not run live);
+- refuses the shell fallback (no `[session-entry].resume`) and a resume entry
+  carrying `-c`, `--continue`, `--fork-session` or `--from-pr` (clown refuses
+  those for a confined session);
+- fails closed when the state directory cannot be determined.
+
+`sc exec` refuses a once-confined session's worktree the same way. There is no
+opt-out flag; the refusals name the session key and the way out (`sc resume
+<key>` with a harness resume entry, or `sc close <key>`). A session confined by
+an older clown has no clown record and would resume unconfined unless the
+variable is given; the variable is always given here.
 
 ## The principal-to-session mapping (decided 2026-10-19, coordinator)
 

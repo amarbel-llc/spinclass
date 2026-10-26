@@ -1,7 +1,9 @@
 # #400: a confined worker can plant harness config an unconfined resume loads
 
 2026-10-26, spinclass/firm-mulberry. Options for the operator to choose from;
-no code. Evidence labels: V verified (code read), R reported, I inferred.
+no code. **Status: option 4 built as a fail-closed refusal with no override,
+covering `sc resume` and `sc exec` (FDR 0035, "Resume of a once-confined
+session").** Evidence labels: V verified (code read), R reported, I inferred.
 
 ## The problem
 

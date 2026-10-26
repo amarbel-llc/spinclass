@@ -20,6 +20,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
+	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 	"code.linenisgreat.com/spinclass/internal/bravo/present"
 	"code.linenisgreat.com/spinclass/internal/bravo/remote"
 	"code.linenisgreat.com/spinclass/internal/bravo/sessionexec"
@@ -751,6 +752,14 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		entrypoint = entry.Resume
 	}
 
+	// A session launched confined resumes confined; nothing of its worktree runs
+	// unconfined, and there is no opt-out (spinclass#400).
+	stateDir, stateDirErr := confinement.DefaultStateDir()
+	scopeSpec, err := confinedResumeScope(stateDir, stateDirErr, state, entry.Resume, shellFallback)
+	if err != nil {
+		return err
+	}
+
 	// Built only when a re-pin is needed, so an ordinary resume never reads the
 	// signers file or the grant store (#407).
 	approve := func(profile, from, to string, diff []string) (session.ProfileRebind, error) {
@@ -793,10 +802,15 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		Description: state.Description,
 	}
 
+	env := withEnvPairs(entry.Env, profileEnv)
+	if scopeSpec != "" {
+		// Applied last so nothing configured can name another spec.
+		env = withScope(env, scopeSpec)
+	}
 	exec := executor.SessionExecutor{
 		Entrypoint:  entrypoint,
 		Description: state.Description,
-		Env:         withEnvPairs(entry.Env, profileEnv),
+		Env:         env,
 	}
 
 	// No --allow-stale-base on resume: the worktree already exists, so the

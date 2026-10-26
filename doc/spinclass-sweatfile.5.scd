@@ -1148,6 +1148,11 @@ readable by others.
 	in clown's hex, and *CLOWN\_PROFILE\_SESSION*, the recorded principal;
 	clown refuses to start on any other profile definition (spinclass#407).
 	*CLOWN\_PROFILE* is not set.
+	A session launched confined (FDR 0035) resumes confined: *sc resume*
+	passes *CLOWN\_AGENT\_SCOPE* naming its unit spec, and refuses when the
+	spec is missing, when *resume* is unset (it would open an unconfined
+	shell), or when the entry carries *-c*, *--continue*, *--fork-session* or
+	*--from-pr*. *sc exec* refuses such a worktree too (spinclass#400).
 	*Merge:* scalar override.
 
 *spawn-entry*

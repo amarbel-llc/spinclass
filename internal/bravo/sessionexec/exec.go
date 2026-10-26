@@ -49,6 +49,9 @@ func resolve(target string) (dir string, env []string, err error) {
 		if ferr != nil {
 			return "", nil, ferr // ErrTargetNotFound or ambiguity — surface as-is
 		}
+		if cerr := checkNotOnceConfined(st); cerr != nil {
+			return "", nil, cerr
+		}
 		return st.WorktreePath, identityEnv(st), nil
 	}
 
@@ -57,6 +60,9 @@ func resolve(target string) (dir string, env []string, err error) {
 		return "", nil, gerr
 	}
 	if st, ferr := session.FindByWorktreePath(cwd); ferr == nil {
+		if cerr := checkNotOnceConfined(st); cerr != nil {
+			return "", nil, cerr
+		}
 		return st.WorktreePath, identityEnv(st), nil
 	}
 
