@@ -1,6 +1,7 @@
 # A madder store that outlives the session worktree
 
-Status: draft for the operator's confirmation; nothing implemented.
+Status: implemented (retention knob `[madder].retain` deferred as a follow-up:
+it needs tommy codegen; for now entries and blobs are kept forever).
 Trigger: #373 follow-up. The operator ruled that the attestation blob must
 outlive the session worktree, and that circus needs madder stores outside
 spinclass sessions generally.

@@ -395,6 +395,20 @@ does not export *WORKTREE*.
 	  to *SPINCLASS\_MERGED\_SHA* unless the queued landing was rebased
 	  past a moved default branch, so a script can detect a rebased landing
 	  without consulting git.
+	- *SPINCLASS\_ATTESTATION\_BLOB* — a *madder://blobs/<id>* URI for the
+	  pre-merge attestation that admitted the merge (claim id, head sha,
+	  recorded\_at and skills, as JSON in the per-user madder store),
+	  which outlives the attestation itself, which is consumed when the
+	  merge lands, and outlives the session worktree (#373). Absent for an
+	  exemption-admitted merge, a terminal merge, when madder is not
+	  pinned, or when the write failed.
+	- *SPINCLASS\_ATTESTATION\_STORE* — the id of the madder store holding
+	  that blob (always *spinclass*, an unprefixed per-user store under
+	  _$XDG\_DATA\_HOME/madder/blob\_stores/_); set whenever
+	  *SPINCLASS\_ATTESTATION\_BLOB* is. Once the merge lands a claim index
+	  entry is written to _$XDG\_STATE\_HOME/spinclass/attestations/<claim\_id>.json_;
+	  print it with *sc attestation <claim\_id>*. Entries and blobs are
+	  kept forever (no retention knob yet).
 	- *TMPDIR* / *CLAUDE\_CODE\_TMPDIR* — a per-user scratch directory that
 	  doesn't depend on any session: _$XDG\_RUNTIME\_DIR/spinclass/post-merge_,
 	  else _/tmp/spinclass-post-merge-<uid>_. It is shared across merges and
@@ -1569,7 +1583,9 @@ deadline, "0" when uncapped) — a verify poll should derive its budget from
 the deadline, since the command already spent part of it — together with
 *SPINCLASS\_POST\_MERGE\_TARGET* (this target's *name*, so one script can
 serve several targets) and *SPINCLASS\_PINNED\_SHA* (the pre-landing pin;
-differs from *SPINCLASS\_MERGED\_SHA* only on a rebased landing).
+differs from *SPINCLASS\_MERGED\_SHA* only on a rebased landing) and
+*SPINCLASS\_ATTESTATION\_BLOB* and *SPINCLASS\_ATTESTATION\_STORE* (the admitting attestation and its madder store; see
+*[hooks].post-merge*).
 
 *Merge:* dedup-by-name (full entry replacement, same as *[[mcps]]*).
 Suppressed entirely by *[hooks].disable-post-merge*.

@@ -24,7 +24,7 @@ import (
 func isReadOnlyScVerb(verb string) bool {
 	switch verb {
 	case "list", "version", "validate", "whoami", "list-handles", "perms-list",
-		"host-load", "implicit-session-key":
+		"host-load", "implicit-session-key", "attestation":
 		return true
 	}
 	return false

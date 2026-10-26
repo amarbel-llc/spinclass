@@ -6,6 +6,12 @@ date: 2026-04-30
 # Per-worktree madder blob store
 
 > **Amended 2026-09-30 (#349):** shared-tree tolerance.
+>
+> **Amended 2026-10-26:** records that must outlive the session worktree (the
+> pre-merge attestation blob, #373) go to a separate per-user `spinclass`
+> store, not this one; see `docs/plans/2026-10-26-durable-madder-store.md`.
+> This per-worktree store keeps its scratch role. Retention of the per-user
+> store is keep-forever; a sweatfile retention knob is a follow-up.
 
 ## Problem Statement
 

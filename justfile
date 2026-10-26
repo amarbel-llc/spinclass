@@ -1189,6 +1189,27 @@ debug-session-procs key:
       echo "pid=$pid ppid=$ppid pgid=$pgid sid=$sid cwd=$cwd cmd=[$cmd]"
     done
 
+# [debug] internal/0/madder.UserStoreReady assumes an unprefixed store id lands
+# at $XDG_DATA_HOME/madder/blob_stores/<id>/blob_store-config (madder(1) FILES).
+# This inits and writes the durable `spinclass` store against a throwaway
+# XDG_DATA_HOME, exactly as InitUserStore/WriteUserStore invoke madder, and
+# shows where the config landed.
+#
+# run the pinned madder's user-store init + write in a throwaway XDG tree
+[group("debug")]
+debug-madder-user-store:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root=$(mktemp -d "${TMPDIR:-/tmp}/madder-user-store.XXXXXX")
+    export HOME="$root/home" XDG_DATA_HOME="$root/data" XDG_STATE_HOME="$root/state" XDG_CACHE_HOME="$root/cache" XDG_CONFIG_HOME="$root/config" XDG_LOG_HOME="$root/log"
+    mkdir -p "$HOME" "$root/cwd"
+    cd "$root/cwd"
+    MADDER_XDG_USER_LOCATION_ONLY=1 madder init -encryption none spinclass
+    printf 'probe' | MADDER_XDG_USER_LOCATION_ONLY=1 madder write -format json spinclass -
+    echo "--- blob_store-config files under $root ---"
+    find "$root" -name blob_store-config
+    test -f "$XDG_DATA_HOME/madder/blob_stores/spinclass/blob_store-config" && echo "OK: config at the path UserStoreReady checks"
+
 # [debug] Without a sweatfile [metrics].statsd-address, internal/0/statsd emits
 # only when STATSD_HOST or STATSD_PORT is in the emitting process's environment,
 # so a `serve` started without them is silently off (spinclass#363). Also

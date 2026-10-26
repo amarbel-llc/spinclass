@@ -334,7 +334,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		Name:  "grant-session-handle",
 		Title: "Grant Session Handle",
 		Description: command.Description{
-			Short: "Grant another session a handle on one this session already holds a handle on (FDR 0032 D12/D13). Handles pass like SCM_RIGHTS: the grant lands in the recipient's pending set — conferring NO authority and no exit wakes — until the recipient exercises it (accept-on-first-use, via close-child-session, list-handles with accept, or granting onward). The granter keeps its own handle; delegate is the default, transfer is grant then release. `rights` is a comma-separated FDR 0032 D13 object-rights list (observe, close, grant, instruct, cap, merge, check, restart), enforced: granting needs the grant right and may only narrow (grant a subset of the rights you hold) — defaults to \"observe,close\", the conservative lazy handoff. spinclass never messages the recipient itself (that's clown/troupe's job); relay the printed child session key to it via chat.",
+			Short: "Grant another session a handle on one or more children this session already holds a handle on (FDR 0032 D12/D13; several `child` are granted independently, #342). Handles pass like SCM_RIGHTS: the grant lands in the recipient's pending set — conferring NO authority and no exit wakes — until the recipient exercises it (accept-on-first-use, via close-child-session, list-handles with accept, or granting onward). The granter keeps its own handle; delegate is the default, transfer is grant then release. `rights` is a comma-separated FDR 0032 D13 object-rights list (observe, close, grant, instruct, cap, merge, check, restart), enforced: granting needs the grant right and may only narrow (grant a subset of the rights you hold) — defaults to \"observe,close\", the conservative lazy handoff. spinclass never messages the recipient itself (that's clown/troupe's job); relay the printed child session key to it via chat.",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			ReadOnlyHint:    protocol.BoolPtr(false),
@@ -449,7 +449,7 @@ const targetsParamDesc = `Which named [[post-merge]] deploy targets to run after
 // postMergeTimeoutParamDesc is shared by merge-this-session and its -async twin.
 // It names the exported env vars so an agent wiring a verify script learns the
 // contract from the tool description alone.
-const postMergeTimeoutParamDesc = `Override [hooks].post-merge-timeout for THIS merge only — the wall-clock cap on the whole post-merge phase (every [[post-merge]] target's command + verify, or the legacy [hooks].post-merge string). A Go duration such as "25m" or "1500s"; "0" disables the cap. Raising OR lowering is allowed, with no ceiling: a deploy you know is slow is yours to wait for. Omit to use the sweatfile's value (default 10m). An unparseable or negative value is refused before anything lands. The EFFECTIVE cap is exported to every post-merge command/verify as SPINCLASS_POST_MERGE_TIMEOUT (Go duration, "0" when uncapped), SPINCLASS_POST_MERGE_TIMEOUT_SECONDS (integer) and SPINCLASS_POST_MERGE_DEADLINE (unix epoch seconds, "0" when uncapped) — size a verify poll from those instead of hard-coding one. The phase also receives SPINCLASS_POST_MERGE_TARGET (the running target's name), SPINCLASS_PINNED_SHA (the pre-landing pin; differs from SPINCLASS_MERGED_SHA only when the queued landing was rebased) alongside SPINCLASS_MERGED_SHA / _MERGED_BRANCH / _DEFAULT_BRANCH / _MERGE_PUSHED / _REPO_PATH.`
+const postMergeTimeoutParamDesc = `Override [hooks].post-merge-timeout for THIS merge only — the wall-clock cap on the whole post-merge phase (every [[post-merge]] target's command + verify, or the legacy [hooks].post-merge string). A Go duration such as "25m" or "1500s"; "0" disables the cap. Raising OR lowering is allowed, with no ceiling: a deploy you know is slow is yours to wait for. Omit to use the sweatfile's value (default 10m). An unparseable or negative value is refused before anything lands. The EFFECTIVE cap is exported to every post-merge command/verify as SPINCLASS_POST_MERGE_TIMEOUT (Go duration, "0" when uncapped), SPINCLASS_POST_MERGE_TIMEOUT_SECONDS (integer) and SPINCLASS_POST_MERGE_DEADLINE (unix epoch seconds, "0" when uncapped) — size a verify poll from those instead of hard-coding one. The phase also receives SPINCLASS_POST_MERGE_TARGET (the running target's name), SPINCLASS_PINNED_SHA (the pre-landing pin; differs from SPINCLASS_MERGED_SHA only when the queued landing was rebased) alongside SPINCLASS_MERGED_SHA / _MERGED_BRANCH / _DEFAULT_BRANCH / _MERGE_PUSHED / _REPO_PATH. When an attestation admitted the merge, SPINCLASS_ATTESTATION_BLOB is a madder://blobs/<id> URI for a copy of it (#373), which outlives the attestation consumed on landing, and SPINCLASS_ATTESTATION_STORE names the per-user madder store holding it (look the claim up with ` + "`sc attestation <claim_id>`" + `).`
 
 // parsePostMergeTimeoutParam turns the tool's optional post_merge_timeout string
 // into a PostMergeOptions.Timeout: "" ⇒ nil (sweatfile in force); otherwise the
@@ -551,7 +551,7 @@ func handleMergeThisSession(ctx context.Context, args json.RawMessage, _ command
 	defer func() { hold.settle(landed) }()
 	pm.Gate = gate
 	pm.AttestedSha = hold.ticket.HeadSha
-	pm.AttestationBlob = attestationBlob(cwd, hold.ticket)
+	applyAttestationBlob(&pm, hold.ticket, gs)
 
 	ctx = clown.WithLocalScope(ctx, "merge")
 	var buf bytes.Buffer
@@ -705,7 +705,7 @@ func handleMergeThisSessionAsync(ctx context.Context, args json.RawMessage, _ co
 		}
 	}
 	pm.AttestedSha = hold.ticket.HeadSha
-	pm.AttestationBlob = attestationBlob(cwd, hold.ticket)
+	applyAttestationBlob(&pm, hold.ticket, gs)
 	if busy {
 		stack := newStackMetrics(merged, repoPath)
 		mergeQueue[cwd] = append(mergeQueue[cwd], queuedMerge{

@@ -1300,6 +1300,11 @@ func isDir(path string) bool {
 }
 
 func runPostMergePhase(ctx context.Context, mx phaseMetrics, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, landDir, branch, defaultBranch, pinnedSha, landedSha string, pushed bool, activity io.Writer, pm PostMergeOptions) {
+	// The merge has landed: record it before any early return below, so a
+	// merge with no post-merge phase is still indexed.
+	if pm.OnLanded != nil {
+		pm.OnLanded(landedSha)
+	}
 	home, _ := os.UserHomeDir()
 	if home == "" {
 		// Intentionally silent, unlike the snapshot-load failure just below.
@@ -1348,15 +1353,16 @@ func runPostMergePhase(ctx context.Context, mx phaseMetrics, rep *crap.Reporter,
 		deadline = time.Now().Add(phaseCap)
 	}
 	env := PostMergeEnv(PostMergeFacts{
-		LandedSha:       landedSha,
-		PinnedSha:       pinnedSha,
-		Branch:          branch,
-		DefaultBranch:   defaultBranch,
-		RepoPath:        repoPath,
-		Pushed:          pushed,
-		Timeout:         phaseCap,
-		Deadline:        deadline,
-		AttestationBlob: pm.AttestationBlob,
+		LandedSha:        landedSha,
+		PinnedSha:        pinnedSha,
+		Branch:           branch,
+		DefaultBranch:    defaultBranch,
+		RepoPath:         repoPath,
+		Pushed:           pushed,
+		Timeout:          phaseCap,
+		Deadline:         deadline,
+		AttestationBlob:  pm.AttestationBlob,
+		AttestationStore: pm.AttestationStore,
 	})
 
 	// Named targets supersede the legacy string (FDR 0026).

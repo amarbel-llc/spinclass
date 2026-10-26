@@ -86,13 +86,20 @@ func LinkInto(binDir, binPath string) error {
 //
 // MADDER_CEILING_DIRECTORIES is scoped to this invocation only.
 func Write(worktreePath, binPath string) (io.WriteCloser, func() (string, error), error) {
+	return writeStore(binPath, ".default", worktreePath, "MADDER_CEILING_DIRECTORIES="+worktreePath)
+}
+
+// writeStore is the shared body of Write and WriteUserStore: it pipes stdin
+// into `madder write -format json <storeID> -` run in dir with extraEnv added
+// to that invocation's environment only.
+func writeStore(binPath, storeID, dir, extraEnv string) (io.WriteCloser, func() (string, error), error) {
 	if binPath == "" {
 		return discardWriteCloser{}, func() (string, error) { return "", nil }, nil
 	}
 
-	cmd := exec.Command(binPath, "write", "-format", "json", ".default", "-")
-	cmd.Dir = worktreePath
-	cmd.Env = append(os.Environ(), "MADDER_CEILING_DIRECTORIES="+worktreePath)
+	cmd := exec.Command(binPath, "write", "-format", "json", storeID, "-")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), extraEnv)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -169,6 +176,54 @@ type discardWriteCloser struct{}
 
 func (discardWriteCloser) Write(p []byte) (int, error) { return len(p), nil }
 func (discardWriteCloser) Close() error                { return nil }
+
+// UserStoreID is the id of the per-user madder store spinclass owns for
+// records that must outlive any session worktree (docs/plans/2026-10-26-
+// durable-madder-store.md). Unprefixed, so madder keeps it under
+// $XDG_DATA_HOME/madder/blob_stores/<id>/ (madder(1) FILES).
+const UserStoreID = "spinclass"
+
+// userLocationOnlyEnv stops madder's walk-up from finding a CWD .madder/
+// override (madder(1) ENVIRONMENT); scoped to each user-store invocation.
+const userLocationOnlyEnv = "MADDER_XDG_USER_LOCATION_ONLY=1"
+
+func userStoreConfigPath() string {
+	data := os.Getenv("XDG_DATA_HOME")
+	if data == "" {
+		home, _ := os.UserHomeDir()
+		data = filepath.Join(home, ".local", "share")
+	}
+	return filepath.Join(data, "madder", "blob_stores", UserStoreID, "blob_store-config")
+}
+
+// UserStoreReady reports whether the per-user store has been initialised.
+func UserStoreReady() bool {
+	_, err := os.Stat(userStoreConfigPath())
+	return err == nil
+}
+
+// InitUserStore initialises the per-user store with `madder init -encryption
+// none spinclass`, guarded by UserStoreReady (init is not idempotent). No-op
+// when binPath is empty.
+func InitUserStore(binPath string) error {
+	if binPath == "" || UserStoreReady() {
+		return nil
+	}
+	cmd := exec.Command(binPath, "init", "-encryption", "none", UserStoreID)
+	cmd.Dir = os.TempDir()
+	cmd.Env = append(os.Environ(), userLocationOnlyEnv)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("madder init %s: %w\n%s", UserStoreID, err, out)
+	}
+	return nil
+}
+
+// WriteUserStore is Write against the per-user store, run from a neutral cwd.
+// No-op (discarding writer, empty id) when binPath is empty.
+func WriteUserStore(binPath string) (io.WriteCloser, func() (string, error), error) {
+	return writeStore(binPath, UserStoreID, os.TempDir(), userLocationOnlyEnv)
+}
 
 // Init initialises the per-worktree blob store at worktreePath using
 // binPath as the madder binary. Skipped if binPath is empty or the

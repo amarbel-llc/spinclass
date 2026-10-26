@@ -27,6 +27,7 @@ import (
 
 func registerQueryCommands(app *command.App) {
 	app.AddCommand(implicitSessionKeyCommand())
+	app.AddCommand(attestationCommand())
 
 	app.AddCommand(&command.Command{
 		Name:  "list",
@@ -137,7 +138,7 @@ func registerQueryCommands(app *command.App) {
 		Name: "clean",
 		Description: command.Description{
 			Short: "Remove merged worktrees",
-			Long:  "Scan all worktrees, identify those whose branches are fully merged into the main branch, and remove them. A merged worktree whose session is still running (its agent present or its recorded PID alive) is skipped, as is one with a non-empty stash shelf. Use -i to interactively handle dirty worktrees.",
+			Long:  "Scan all worktrees, identify those whose branches are fully merged into the main branch, and remove them. A merged worktree whose session is still running (its agent present or its recorded PID alive) is skipped, as is one with a non-empty stash shelf. Session records whose worktree has vanished (abandoned) are reaped too; the tombstones of cleanly closed sessions are not, and are kept until [session-entry].tombstone-retention expires (#79; they back `sc resurrect` and `sc list --closed`). Use -i to interactively handle dirty worktrees.",
 		},
 		Params: []command.Param{
 			{

@@ -98,6 +98,7 @@ func TestBashScVerbPolicy(t *testing.T) {
 		{"perms list spaced", "sc perms list"},
 		{"perms list hyphenated", "sc perms-list"},
 		{"implicit-session-key", "sc implicit-session-key --claude-session-id abc"},
+		{"attestation", "sc attestation some-claim-id"},
 		{"merge help", "sc merge --help"},
 		{"bare sc", "sc"},
 		{"top-level help flag", "sc --help"},

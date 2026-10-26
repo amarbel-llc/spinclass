@@ -35,6 +35,14 @@ type PostMergeOptions struct {
 	// SPINCLASS_ATTESTATION_BLOB; "" otherwise.
 	AttestationBlob string
 
+	// AttestationStore is the madder store id holding AttestationBlob, passed
+	// as SPINCLASS_ATTESTATION_STORE whenever AttestationBlob is set.
+	AttestationStore string
+
+	// OnLanded, when non-nil, is called exactly once with the landed sha after
+	// the merge has landed, before and independent of the post-merge targets.
+	OnLanded func(landedSha string)
+
 	// ExpectSha is `sc merge --expect`: the commit the caller reviewed, full or
 	// abbreviated (#353). When set, the merge is refused with ErrBranchMoved
 	// before the rebase if the branch tip is any other commit. "" checks nothing.
@@ -146,6 +154,8 @@ type PostMergeFacts struct {
 	// AttestationBlob is the madder URI of the pre-merge attestation that
 	// admitted the merge (#373); "" when none did.
 	AttestationBlob string
+	// AttestationStore is the madder store id holding AttestationBlob.
+	AttestationStore string
 }
 
 // PostMergeEnv renders the facts as KEY=VALUE pairs for a hook's environment.
@@ -182,6 +192,9 @@ func PostMergeEnv(f PostMergeFacts) []string {
 	// exemption-admitted or terminal merge, which had none.
 	if f.AttestationBlob != "" {
 		env = append(env, "SPINCLASS_ATTESTATION_BLOB="+f.AttestationBlob)
+		if f.AttestationStore != "" {
+			env = append(env, "SPINCLASS_ATTESTATION_STORE="+f.AttestationStore)
+		}
 	}
 	// A session-independent scratch dir (spinclass#330): the inherited
 	// TMPDIR may belong to a session torn down before post-merge runs.
