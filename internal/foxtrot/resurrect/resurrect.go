@@ -20,6 +20,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
+	"code.linenisgreat.com/spinclass/internal/charlie/worktreesetup"
 	"code.linenisgreat.com/spinclass/internal/echo/shop"
 
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
@@ -65,7 +66,7 @@ func Run(w io.Writer, target, newBranchName, format string) error {
 		tw = tap.NewWriter(w)
 	}
 
-	h, err := worktree.Create(st.RepoPath, newPath, "", st.DeletedSHA)
+	h, err := worktreesetup.Create(st.RepoPath, newPath, "", st.DeletedSHA)
 	if err != nil {
 		return fmt.Errorf("recreating worktree for %s: %w", st.Key(), err)
 	}

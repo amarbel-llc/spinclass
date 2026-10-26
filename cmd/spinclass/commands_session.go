@@ -26,6 +26,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/charlie/check"
 	"code.linenisgreat.com/spinclass/internal/charlie/executor"
 	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
+	"code.linenisgreat.com/spinclass/internal/charlie/worktreesetup"
 	spinclose "code.linenisgreat.com/spinclass/internal/delta/close"
 	"code.linenisgreat.com/spinclass/internal/delta/merge"
 	"code.linenisgreat.com/spinclass/internal/echo/shop"
@@ -343,7 +344,7 @@ func runRebuild(_ context.Context, args json.RawMessage) error {
 	}
 
 	if p.Check {
-		stale, reason, serr := worktree.SetupStale(home, state.RepoPath, state.SetupFingerprint, state.SetupScheme)
+		stale, reason, serr := worktreesetup.SetupStale(home, state.RepoPath, state.SetupFingerprint, state.SetupScheme)
 		if serr != nil {
 			return serr
 		}
@@ -354,10 +355,10 @@ func runRebuild(_ context.Context, args json.RawMessage) error {
 		return nil
 	}
 
-	if _, err := worktree.Reapply(state.RepoPath, state.WorktreePath); err != nil {
+	if _, err := worktreesetup.Reapply(state.RepoPath, state.WorktreePath); err != nil {
 		return fmt.Errorf("re-applying worktree setup: %w", err)
 	}
-	hash, scheme, ferr := worktree.SetupFingerprint(home, state.RepoPath)
+	hash, scheme, ferr := worktreesetup.SetupFingerprint(home, state.RepoPath)
 	if ferr != nil {
 		return ferr
 	}

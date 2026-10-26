@@ -440,7 +440,7 @@ func TestRunRefusesMissingDeletedSHA(t *testing.T) {
 // TestRunRefusesUnreachableCommit covers a captured SHA that no longer
 // resolves in the repo's object database (e.g. locally garbage collected):
 // Run must fail with a clear message instead of a raw git error from
-// worktree.Create.
+// worktreesetup.Create.
 func TestRunRefusesUnreachableCommit(t *testing.T) {
 	testgit.RequireGit(t)
 	t.Setenv("XDG_STATE_HOME", t.TempDir())

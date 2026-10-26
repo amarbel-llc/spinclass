@@ -909,7 +909,7 @@ func TestAllowDirenvBareAndIdempotent(t *testing.T) {
 
 // TestAllowDirenvNoEnvrcIsNoop asserts AllowDirenv does not invoke direnv when
 // the worktree has no .envrc (a non-direnv repo), so the guard keeps it safe to
-// call unconditionally from worktree.Create.
+// call unconditionally from worktreesetup.Create.
 func TestAllowDirenvNoEnvrcIsNoop(t *testing.T) {
 	dir := t.TempDir()
 	testgit.MustInit(t, dir)

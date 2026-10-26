@@ -27,6 +27,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/charlie/auth"
 	"code.linenisgreat.com/spinclass/internal/charlie/executor"
 	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
+	"code.linenisgreat.com/spinclass/internal/charlie/worktreesetup"
 	"code.linenisgreat.com/spinclass/internal/delta/close"
 	"code.linenisgreat.com/spinclass/internal/delta/merge"
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
@@ -121,7 +122,7 @@ func createWorktree(worktreePath worktree.ResolvedPath, opts CreateOpts, tw *tap
 			base = res.BaseSha
 		}
 
-		result, err := worktree.Create(
+		result, err := worktreesetup.Create(
 			worktreePath.RepoPath, worktreePath.AbsPath, worktreePath.ExistingBranch, base,
 		)
 		if err != nil {
@@ -181,7 +182,7 @@ func ProvisionCredential(
 		SessionKey:   worktreePath.SessionKey,
 	}
 
-	// worktree.Create (both callers' first step) already failed on an
+	// worktreesetup.Create (both callers' first step) already failed on an
 	// unresolvable home, so the error is unreachable here.
 	home, _ := os.UserHomeDir()
 	resolver, untrusted := sweatfileio.TrustedURLResolver(h, home, worktreePath.RepoPath)
@@ -445,7 +446,7 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 			if !existed {
 				// A freshly-created worktree just had its setup applied —
 				// record the current fingerprint, overriding any carry-forward.
-				if hash, scheme, ferr := worktree.SetupFingerprint(home, rp.RepoPath); ferr == nil {
+				if hash, scheme, ferr := worktreesetup.SetupFingerprint(home, rp.RepoPath); ferr == nil {
 					now := time.Now().UTC()
 					st.SetupFingerprint, st.SetupScheme, st.SetupAt = hash, scheme, &now
 				} else {
@@ -457,11 +458,11 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 				// is stale, and — when [hooks].auto-rebuild-on-resume is set —
 				// re-apply now and refresh the fingerprint before attaching.
 				// Warnings go to stderr so they never corrupt TAP stdout.
-				if stale, reason, serr := worktree.SetupStale(home, rp.RepoPath, st.SetupFingerprint, st.SetupScheme); serr == nil && stale {
+				if stale, reason, serr := worktreesetup.SetupStale(home, rp.RepoPath, st.SetupFingerprint, st.SetupScheme); serr == nil && stale {
 					if sf.AutoRebuildOnResume() {
-						if _, rerr := worktree.Reapply(rp.RepoPath, rp.AbsPath); rerr != nil {
+						if _, rerr := worktreesetup.Reapply(rp.RepoPath, rp.AbsPath); rerr != nil {
 							fmt.Fprintf(os.Stderr, "spinclass: auto-rebuild failed: %v\n", rerr)
-						} else if hash, scheme, ferr := worktree.SetupFingerprint(home, rp.RepoPath); ferr == nil {
+						} else if hash, scheme, ferr := worktreesetup.SetupFingerprint(home, rp.RepoPath); ferr == nil {
 							now := time.Now().UTC()
 							st.SetupFingerprint, st.SetupScheme, st.SetupAt = hash, scheme, &now
 							fmt.Fprintln(os.Stderr, "spinclass: worktree setup was stale — auto-rebuilt")
@@ -735,7 +736,7 @@ func Fork(
 
 	newPath := filepath.Join(worktreePath.RepoPath, worktree.WorktreesDir, newBranch)
 
-	if _, err := worktree.CreateFrom(
+	if _, err := worktreesetup.CreateFrom(
 		worktreePath.RepoPath,
 		worktreePath.AbsPath,
 		newPath,

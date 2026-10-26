@@ -1,0 +1,406 @@
+// Package worktreesetup applies a sweatfile's setup to a git worktree: it
+// creates the worktree and runs the madder/dodder, excludes, trust, MCP and
+// hook setup over it. It is split from package worktree (spinclass#308) so
+// path-only callers don't rebuild when setup dependencies change.
+package worktreesetup
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+
+	"code.linenisgreat.com/spinclass/internal/0/claude"
+	"code.linenisgreat.com/spinclass/internal/0/embeds"
+	"code.linenisgreat.com/spinclass/internal/0/git"
+	"code.linenisgreat.com/spinclass/internal/0/madder"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/alfa/dodder"
+	"code.linenisgreat.com/spinclass/internal/alfa/setupfingerprint"
+	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/bravo/apply"
+	"code.linenisgreat.com/spinclass/internal/bravo/hookrun"
+)
+
+// Create creates a new git worktree and applies sweatfile configuration.
+// If existingBranch is non-empty, the worktree checks out that branch
+// instead of creating a new one from the directory name.
+//
+// base, when non-empty, is the commit-ish the new branch is created at. Empty
+// means repoPath's HEAD, which is git's own default for `worktree add -b` and
+// therefore whatever branch that checkout happens to be sitting on — fine for a
+// checkout parked on the default branch, silently wrong for one parked
+// anywhere else (spinclass#250). Callers that care resolve a base via
+// internal/bravo/basebranch and pass it here; "" remains the correct fallback for
+// every case where no default branch could be resolved. Ignored entirely when
+// existingBranch is set, since that path adopts a branch rather than cutting
+// one.
+func Create(
+	repoPath, worktreePath, existingBranch, base string,
+) (sweatfile.Hierarchy, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return sweatfile.Hierarchy{}, fmt.Errorf(
+			"getting home directory: %w",
+			err,
+		)
+	}
+
+	sweetfile, err := sweatfileio.LoadHierarchy(home, repoPath)
+	if err != nil {
+		return sweetfile, fmt.Errorf("loading sweatfile: %w", err)
+	}
+
+	if existingBranch != "" {
+		if err := git.RunPassthrough(repoPath, "worktree", "add", worktreePath, existingBranch); err != nil {
+			return sweatfile.Hierarchy{}, fmt.Errorf(
+				"git worktree add: %w",
+				err,
+			)
+		}
+	} else {
+		// Pass -b explicitly so a name matching a pre-existing branch is a
+		// hard error rather than a silent checkout of that branch. Adopting an
+		// existing branch is reserved for the existingBranch != "" path above;
+		// under the fresh-session path it would replay stale (possibly
+		// unmerged) history in a supposedly new worktree (#207).
+		branch := filepath.Base(worktreePath)
+		args := []string{"worktree", "add", "-b", branch, worktreePath}
+		if base != "" {
+			args = append(args, base)
+		}
+		if err := git.RunPassthrough(repoPath, args...); err != nil {
+			return sweatfile.Hierarchy{}, fmt.Errorf("git worktree add: %w", err)
+		}
+	}
+
+	return sweetfile, applyWorktreeConfig(
+		home,
+		sweetfile,
+		repoPath,
+		worktreePath,
+	)
+}
+
+// CreateFrom creates a new worktree branched from fromPath's current HEAD.
+// It runs git worktree add -b from fromPath, then applies sweatfile and
+// trusts the workspace, same as Create.
+func CreateFrom(
+	repoPath, fromPath, newPath, newBranch string,
+) (sweatfile.Hierarchy, error) {
+	if err := git.WorktreeAddFrom(fromPath, newBranch, newPath); err != nil {
+		return sweatfile.Hierarchy{}, fmt.Errorf("git worktree add: %w", err)
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return sweatfile.Hierarchy{}, fmt.Errorf(
+			"getting home directory: %w",
+			err,
+		)
+	}
+
+	sweetfile, err := sweatfileio.LoadHierarchy(home, repoPath)
+	if err != nil {
+		return sweetfile, fmt.Errorf("loading sweatfile: %w", err)
+	}
+
+	return sweetfile, applyWorktreeConfig(home, sweetfile, repoPath, newPath)
+}
+
+// Reapply re-runs the worktree setup (applyWorktreeConfig) on an EXISTING
+// worktree, WITHOUT a `git worktree add`. It is the seam `sc rebuild` and
+// resume auto-rebuild use to refresh a worktree whose installed setup has
+// drifted from current config/binary/pins. It loads the same repo-level
+// hierarchy `Create` does (LoadHierarchy, which never reads the worktree's own
+// sweatfile), so a rebuild reproduces exactly what `sc start`
+// applied and the setup fingerprint stays comparable across the two. Returns
+// the merged hierarchy so the caller can compute and record the fresh
+// fingerprint.
+func Reapply(repoPath, worktreePath string) (sweatfile.Hierarchy, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return sweatfile.Hierarchy{}, fmt.Errorf("getting home directory: %w", err)
+	}
+
+	sweetfile, err := sweatfileio.LoadHierarchy(home, repoPath)
+	if err != nil {
+		return sweetfile, fmt.Errorf("loading sweatfile: %w", err)
+	}
+
+	return sweetfile, applyWorktreeConfig(home, sweetfile, repoPath, worktreePath)
+}
+
+// SetupFingerprint computes the current setup fingerprint for repoPath, using
+// the same repo-level hierarchy (LoadHierarchy) that Create/Reapply apply, so
+// the value is directly comparable to one recorded at apply time.
+func SetupFingerprint(home, repoPath string) (hash string, scheme int, err error) {
+	h, err := sweatfileio.LoadHierarchy(home, repoPath)
+	if err != nil {
+		return "", 0, fmt.Errorf("loading sweatfile: %w", err)
+	}
+	hash, scheme = setupfingerprint.Compute(h.Merged)
+	return hash, scheme, nil
+}
+
+// SetupStale reports whether a worktree's recorded setup fingerprint/scheme is
+// stale relative to the current repo config + binary + pins, with a reason.
+func SetupStale(home, repoPath, recordedHash string, recordedScheme int) (stale bool, reason string, err error) {
+	h, err := sweatfileio.LoadHierarchy(home, repoPath)
+	if err != nil {
+		return false, "", fmt.Errorf("loading sweatfile: %w", err)
+	}
+	stale, reason = setupfingerprint.IsStale(recordedHash, recordedScheme, h.Merged)
+	return stale, reason, nil
+}
+
+// applyWorktreeConfig excludes .worktrees from git, loads and applies
+// sweatfile, and trusts worktreePath in Claude. When the binary has
+// a build-time-pinned madder (and/or dodder), also initialises the
+// per-worktree blob store (and/or dodder repository over it) and adds
+// the matching ignore + allow rules.
+//
+// The rule extensions are gated on the *pin*, not on whether the store
+// exists — that way a user who pre-initialised it manually still gets
+// the rules. Dodder runs after madder so the .default store exists for
+// dodder to reuse.
+func applyWorktreeConfig(
+	home string,
+	sweetfile sweatfile.Hierarchy,
+	repoPath string,
+	worktreePath string,
+) error {
+	if embeds.MadderBin() != "" {
+		if err := madder.Init(worktreePath, embeds.MadderBin()); err != nil {
+			return fmt.Errorf("initialising madder blob store: %w", err)
+		}
+		shimBinDir, err := spinclassShimBinDir(worktreePath)
+		if err != nil {
+			return fmt.Errorf("resolving spinclass shim bin dir: %w", err)
+		}
+		if err := madder.LinkInto(shimBinDir, embeds.MadderBin()); err != nil {
+			return fmt.Errorf("linking madder into shim bin dir: %w", err)
+		}
+		sweetfile.Merged = withMadderEntries(sweetfile.Merged)
+	}
+
+	if embeds.DodderBin() != "" {
+		if err := dodder.Init(worktreePath, embeds.DodderBin(), embeds.MadderBin()); err != nil {
+			return fmt.Errorf("initialising dodder repository: %w", err)
+		}
+		shimBinDir, err := spinclassShimBinDir(worktreePath)
+		if err != nil {
+			return fmt.Errorf("resolving spinclass shim bin dir: %w", err)
+		}
+		if err := dodder.LinkInto(shimBinDir, embeds.DodderBin()); err != nil {
+			return fmt.Errorf("linking dodder into shim bin dir: %w", err)
+		}
+		sweetfile.Merged = withDodderEntries(sweetfile.Merged)
+	}
+
+	merged := sweatfile.GetDefault().MergeWith(sweetfile.Merged)
+	if err := applyGitExcludes(repoPath, merged.GitExcludes()); err != nil {
+		return fmt.Errorf("applying git excludes: %w", err)
+	}
+
+	tmpDir := filepath.Join(worktreePath, ".tmp")
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+		return fmt.Errorf("creating .tmp directory: %w", err)
+	}
+
+	if err := apply.Setup(sweetfile.Merged, worktreePath); err != nil {
+		return fmt.Errorf("applying sweatfile: %w", err)
+	}
+
+	claudeJSONPath := filepath.Join(home, ".claude.json")
+	if err := claude.TrustWorkspace(claudeJSONPath, worktreePath); err != nil {
+		return fmt.Errorf("trusting workspace in claude: %w", err)
+	}
+
+	// Build MCP server entries from sweatfile
+	var mcpEntries []claude.MCPServerEntry
+	for _, mcp := range sweetfile.Merged.ActiveMCPs() {
+		mcpEntries = append(mcpEntries, claude.MCPServerEntry{
+			Name:    mcp.Name,
+			Command: mcp.Command,
+			Args:    mcp.Args,
+			Env:     mcp.Env,
+		})
+	}
+
+	// Auto-register dodder's MCP server when the dodder pin is active,
+	// scoped to the per-worktree repository via the ceiling vars so the
+	// session's agent sees this worktree's .dodder, not an ancestor's
+	// (FDR 0008). A sweatfile [[mcps]] entry named "dodder" takes
+	// precedence: WriteMCPConfig keys servers by name and last-wins, so
+	// skip the auto entry when the user already declared one.
+	if embeds.DodderBin() != "" && !slices.ContainsFunc(mcpEntries, func(e claude.MCPServerEntry) bool {
+		return e.Name == "dodder"
+	}) {
+		mcpEntries = append(mcpEntries, claude.MCPServerEntry{
+			Name:    "dodder",
+			Command: embeds.DodderBin(),
+			Args:    []string{"mcp"},
+			Env: map[string]string{
+				"DODDER_CEILING_DIRECTORIES": worktreePath,
+				"MADDER_CEILING_DIRECTORIES": worktreePath,
+			},
+		})
+	}
+
+	if err := claude.WriteMCPConfig(worktreePath, mcpEntries); err != nil {
+		return fmt.Errorf("writing .mcp.json: %w", err)
+	}
+
+	if err := hookrun.Create(sweetfile.Merged, worktreePath, os.Stdout); err != nil {
+		_ = git.RunPassthrough(
+			repoPath,
+			"worktree",
+			"remove",
+			"--force",
+			worktreePath,
+		)
+		return fmt.Errorf("create hook failed: %w", err)
+	}
+
+	// The create hook may have mutated .envrc (e.g. an inherited envrc-patch
+	// hook appending directives), invalidating the `direnv allow` recorded by
+	// Apply. Re-authorize the final .envrc with a bare `direnv allow` (outside
+	// `direnv exec`) so the session's devshell loads unblocked. Idempotent
+	// no-op when the hook left .envrc untouched or the repo has no .envrc.
+	// See spinclass#213. A tracked .envrc the hook changed is not re-allowed
+	// (it no longer matches HEAD).
+	if err := apply.ReallowDirenv(worktreePath); err != nil {
+		return fmt.Errorf("re-allowing direnv after create hook: %w", err)
+	}
+
+	return nil
+}
+
+// withMadderEntries returns sf with the madder ignore + allow rules
+// appended. Git/Claude sub-structs and their inner slices are cloned
+// so subsequent appends here cannot clobber the caller's backing
+// arrays even when cap > len.
+func withMadderEntries(sf sweatfile.Sweatfile) sweatfile.Sweatfile {
+	if sf.Git == nil {
+		sf.Git = &sweatfile.Git{}
+	} else {
+		gitCopy := *sf.Git
+		gitCopy.Excludes = slices.Clone(sf.Git.Excludes)
+		sf.Git = &gitCopy
+	}
+	if !slices.Contains(sf.Git.Excludes, madder.ExcludePattern) {
+		sf.Git.Excludes = append(sf.Git.Excludes, madder.ExcludePattern)
+	}
+
+	if sf.Claude == nil {
+		sf.Claude = &sweatfile.Claude{}
+	} else {
+		claudeCopy := *sf.Claude
+		claudeCopy.Allow = slices.Clone(sf.Claude.Allow)
+		sf.Claude = &claudeCopy
+	}
+	if !slices.Contains(sf.Claude.Allow, madder.AllowRule) {
+		sf.Claude.Allow = append(sf.Claude.Allow, madder.AllowRule)
+	}
+
+	return sf
+}
+
+// withDodderEntries returns sf with the dodder ignore + allow rules
+// appended, cloning the Git/Claude sub-structs and their inner slices
+// the same way withMadderEntries does so appends here cannot clobber the
+// caller's backing arrays.
+func withDodderEntries(sf sweatfile.Sweatfile) sweatfile.Sweatfile {
+	if sf.Git == nil {
+		sf.Git = &sweatfile.Git{}
+	} else {
+		gitCopy := *sf.Git
+		gitCopy.Excludes = slices.Clone(sf.Git.Excludes)
+		sf.Git = &gitCopy
+	}
+	if !slices.Contains(sf.Git.Excludes, dodder.ExcludePattern) {
+		sf.Git.Excludes = append(sf.Git.Excludes, dodder.ExcludePattern)
+	}
+
+	if sf.Claude == nil {
+		sf.Claude = &sweatfile.Claude{}
+	} else {
+		claudeCopy := *sf.Claude
+		claudeCopy.Allow = slices.Clone(sf.Claude.Allow)
+		sf.Claude = &claudeCopy
+	}
+	if !slices.Contains(sf.Claude.Allow, dodder.AllowRule) {
+		sf.Claude.Allow = append(sf.Claude.Allow, dodder.AllowRule)
+	}
+
+	return sf
+}
+
+// spinclassShimBinDir is the per-repo dir that writeEnvrc adds to
+// session PATH. Lives under the git common dir so all worktrees of a
+// repo share one shim dir.
+func spinclassShimBinDir(worktreePath string) (string, error) {
+	rel, err := git.Run(worktreePath, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(rel) {
+		rel = filepath.Join(worktreePath, rel)
+	}
+	return filepath.Join(filepath.Clean(rel), "spinclass", "bin"), nil
+}
+
+const (
+	excludeMarkerStart = "# --- spinclass-managed ---"
+	excludeMarkerEnd   = "# --- spinclass-managed-end ---"
+)
+
+// applyGitExcludes writes all excludes into a fenced block in
+// .git/info/exclude. The block is replaced on each call, making it
+// idempotent. Lines outside the fenced block are preserved.
+func applyGitExcludes(repoPath string, excludes []string) error {
+	excludePath := filepath.Join(repoPath, ".git", "info", "exclude")
+
+	if err := os.MkdirAll(filepath.Dir(excludePath), 0o755); err != nil {
+		return err
+	}
+
+	var preserved []string
+	if data, err := os.ReadFile(excludePath); err == nil {
+		lines := strings.Split(string(data), "\n")
+		inBlock := false
+		for _, line := range lines {
+			switch {
+			case line == excludeMarkerStart:
+				inBlock = true
+			case line == excludeMarkerEnd:
+				inBlock = false
+			case !inBlock:
+				preserved = append(preserved, line)
+			}
+		}
+		// strings.Split produces an empty final element from a trailing
+		// newline — drop it so we don't accumulate blank lines.
+		if len(preserved) > 0 && preserved[len(preserved)-1] == "" {
+			preserved = preserved[:len(preserved)-1]
+		}
+	}
+
+	var buf strings.Builder
+	for _, line := range preserved {
+		buf.WriteString(line)
+		buf.WriteByte('\n')
+	}
+	buf.WriteString(excludeMarkerStart)
+	buf.WriteByte('\n')
+	for _, exc := range excludes {
+		buf.WriteString(exc)
+		buf.WriteByte('\n')
+	}
+	buf.WriteString(excludeMarkerEnd)
+	buf.WriteByte('\n')
+
+	return os.WriteFile(excludePath, []byte(buf.String()), 0o644)
+}

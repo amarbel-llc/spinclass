@@ -726,7 +726,7 @@ func TestNewMergeOnCloseCleanWorktree(t *testing.T) {
 
 	// Mirror production setup: spinclass-managed worktrees get
 	// `.spinclass/` written into `.git/info/exclude` by
-	// `worktree.Create` -> `applyGitExcludes`. This test bypasses that
+	// `worktreesetup.Create` -> `applyGitExcludes`. This test bypasses that
 	// path (it pre-stages the worktree via raw `git worktree add` so a
 	// feature commit can be added before Attach runs), so the porcelain
 	// status check inside closeShop would otherwise see the session-

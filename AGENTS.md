@@ -54,7 +54,9 @@ re-run that suite right before merging.
 - **Git** (`internal/0/git/`): thin `git -C <dir>` wrapper (`Run` captures,
   `RunPassthrough` streams).
 - **Worktree resolution** (`internal/charlie/worktree/`): `ResolvePath()` is the single
-  target→path entry point (bare name → `<repo>/.worktrees/<branch>`).
+  target→path entry point (bare name → `<repo>/.worktrees/<branch>`). Path logic
+  only, over `git`; applying a sweatfile's setup (`Create`, `Reapply`, the setup
+  fingerprint) is `internal/charlie/worktreesetup` (#308).
 - **Sweatfile** (`internal/0/sweatfile/` pure schema + tommy codec;
   `sweatfileio` Parse/Load; `hookrun` runs hooks; `apply` sets up a worktree,
   #309). Split so codegen regenerates cleanly (tommy #93). Reference:

@@ -936,7 +936,7 @@ func (sf Sweatfile) PreCommitActive() bool {
 }
 
 // AutoRebuildOnResume reports whether [hooks].auto-rebuild-on-resume is true.
-// When set, `sc resume` re-applies a stale worktree's setup (worktree.Reapply)
+// When set, `sc resume` re-applies a stale worktree's setup (worktreesetup.Reapply)
 // before attaching, instead of only warning. Default false keeps resume
 // side-effect-free. See the rebuild/staleness design.
 func (sf Sweatfile) AutoRebuildOnResume() bool {

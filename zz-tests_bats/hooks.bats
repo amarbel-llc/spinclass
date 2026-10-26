@@ -521,7 +521,7 @@ STUB
 }
 
 # A repo-root sweatfile with [hooks].pre-commit is installed as a per-worktree
-# git pre-commit hook at `sc start` time (worktree.Create → Apply →
+# git pre-commit hook at `sc start` time (worktreesetup.Create → Apply →
 # installPreCommitHook). The sweatfile must exist BEFORE start so the hierarchy
 # carries it into the worktree (mirrors repair_phase_runs_on_merge). The hook
 # repairs staged content at authoring time, so the committed blob carries the

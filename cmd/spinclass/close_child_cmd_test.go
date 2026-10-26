@@ -121,7 +121,7 @@ func TestAuthorizeChildReapMatrix(t *testing.T) {
 // disable-nix-gc sweatfile — a reap is not the place to exercise the store —
 // and a "kid" worktree at <repo>/.worktrees/kid. Mirrors production setup: a
 // spinclass-managed worktree gets `.spinclass/` written into
-// `.git/info/exclude` by worktree.Create -> applyGitExcludes (it is in
+// `.git/info/exclude` by worktreesetup.Create -> applyGitExcludes (it is in
 // sweatfile.GetDefault's baseline excludes). This helper stages the worktree
 // with a raw `git worktree add`, bypassing that, so without the exclude the
 // session state session.Write drops at <wt>/.spinclass/state.json would read

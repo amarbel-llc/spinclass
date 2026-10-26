@@ -6,7 +6,7 @@
 // SCHEMA package imports nothing else in the module: applying setup needs
 // direnv and git, and under godyn's per-package compile a change here would
 // otherwise invalidate every package that merely reads config
-// (spinclass#309). The next step (spinclass#308) is to pull worktree.Create's
+// (spinclass#309). The next step (spinclass#308) is to pull worktreesetup.Create's
 // setup orchestration down to this layer too.
 package apply
 
@@ -239,7 +239,7 @@ func prepareDirenv(sf sweatfile.Sweatfile, worktreePath string) error {
 //
 // No-op when direnv is unavailable or the worktree has no .envrc. Idempotent:
 // safe to call again after a create hook may have mutated .envrc, which is how
-// worktree.Create re-authorizes the final .envrc post-hook (fix #213).
+// worktreesetup.Create re-authorizes the final .envrc post-hook (fix #213).
 func AllowDirenv(worktreePath string) error {
 	direnvPath, ok := direnv.Resolve()
 	if !ok {

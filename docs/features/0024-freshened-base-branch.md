@@ -83,7 +83,7 @@ It is called from `shop.createWorktree`, inside the `IsNotExist` branch and
 before anything touches the filesystem. That location is the design: it is the
 single funnel below `sc start`, `sc run`, `spawn-session` and the
 `[[start-commands]]` plugins, so the spawn gap closes *by construction* rather
-than by remembering to add a call. Running before `worktree.Create` means a
+than by remembering to add a call. Running before `worktreesetup.Create` means a
 refusal cannot leave a half-built worktree behind.
 
 ### The outcome table
