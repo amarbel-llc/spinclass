@@ -19,6 +19,10 @@ crashed *serve* is detectable: the OS drops the lock and the reaper writes
 *interrupted* instead of leaving a stuck *running*. The lock must be an
 in-process file descriptor, which is why *jobwake* is _linked_ at build time
 (the *go.nix* bridge) in addition to the runtime *ringmaster* CLI on PATH.
+The other jobs *serve* starts hold it the same way (#368): the async
+*spawn-session* dispatcher while it waits for the worker's hello, and the
+merge-queue notice job (*clown.HoldJobLock*, which also skips the lock for an
+empty job id).
 
 *clown.CheckProtocol* (memoized) compares the compiled-in
 *jobwake.ProtocolVersion* with *ringmaster version --protocol*. An exact match

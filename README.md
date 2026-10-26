@@ -63,7 +63,7 @@ sc clean
 | `sc update-description "<desc>"` | Update a session's description |
 | `sc exec [--session <t>] [-- <util> …]` | Run a util in a session's worktree (devshell + `SPINCLASS_*` env; defaults to `$SHELL`) |
 | `sc list [--watch]` | List tracked sessions (styled table on a TTY; `--watch` live-reloads), plus sessions on `[[remotes]]` hosts |
-| `sc merge [target]` | Merge a worktree into main, remove session state |
+| `sc merge [target] [--expect SHA]` | Merge a worktree into main, remove session state; `--expect` refuses the merge if the branch tip is not the commit you reviewed (#353) |
 | `sc check` | Run `[hooks].pre-merge` in the current worktree |
 | `sc clean` | Remove merged worktrees and abandoned sessions |
 | `sc rebuild [target] [--check]` | Re-apply a drifted worktree's setup and refresh its fingerprint; `--check` reports stale/fresh (exits nonzero if stale) |
@@ -72,8 +72,8 @@ sc clean
 | `sc restart-this-session [--reason R] [--force]` / `sc restart-child-session <child> [--force]` | Ask for a session to be stopped and relaunched by its harness frontend (FDR 0037). Needs the operator's `[session-entry].restart` hand-off in a global or above-repo sweatfile; the child form needs the `restart` handle right. `--force` restarts now and kills the current turn and any running job (the MCP tool always prompts the human for it) |
 | `sc cancel-restart [--child C]` | Withdraw a queued restart (the child form needs the `restart` handle right); the frontend drops it when `restart-preflight` next says `none` |
 | `sc close-child-session <child>` | Close a worker session this session holds a handle on (seeded at spawn, extendable via a grant); refuses anything it holds no handle on (`--force` for a child with unmerged work) |
-| `sc grant-session-handle <child> <to> [--rights R]` | Grant another principal a handle on a session this one holds a handle on |
-| `sc release-session-handle <child>` | Release this session's own handle on a session |
+| `sc grant-session-handle <child>… --to <P> [--rights R]` | Grant another principal a handle on each of several sessions this one holds a handle on (#342) |
+| `sc release-session-handle <child>…` | Release this session's own handle on each named session (#342) |
 | `sc list-handles [--accept]` | List handles this session holds or is pending on |
 | `sc whoami` | Print this session's principal, session key, and handles |
 | `sc host-load [--top N] [--sample_ms MS] [--threshold T]` | Host CPU load and busiest processes by session |
