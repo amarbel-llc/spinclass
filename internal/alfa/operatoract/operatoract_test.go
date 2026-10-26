@@ -470,7 +470,7 @@ func TestGUIDHintMustBeAPrefixOfTheCommentGUID(t *testing.T) {
 }
 
 func TestAgentDetailIsSanitized(t *testing.T) {
-	if got := sanitizeDetail("a\x1b[2Jb‮c\xffd é"); got != "a?[2Jb?c?d ?" {
+	if got := sanitizeDetail("a\x1b[2Jb\u202ec\xffd é"); got != "a?[2Jb?c?d ?" {
 		t.Fatalf("sanitizeDetail = %q", got)
 	}
 	if got := sanitizeDetail(strings.Repeat("x", 500)); len(got) != maxDetailBytes {

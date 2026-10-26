@@ -122,7 +122,7 @@ var badChars = map[string]string{
 	"tab":          "\t",
 	"NEL":          "\u0085",
 	"line sep":     " ",
-	"bidi":         "‮",
+	"bidi":         "\u202e",
 	"zero width":   "​",
 	"non-ascii":    "é",
 	"carriage ret": "\r",
