@@ -753,6 +753,11 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 			}
 		}
 	}
+	if fp, ok := moxySpinclassPathArg(input, resolvedMain, resolvedWorktree); ok {
+		return writeDeny(w, fmt.Sprintf(
+			"Path %s is inside the .spinclass directory, which is managed by spinclass.", fp,
+		))
+	}
 
 	// #176: rewrite a parent-checkout path into the session worktree. Runs after
 	// the session-config guards (which win for .spinclass/sweatfile) and before
@@ -839,6 +844,39 @@ func hasPreMergeSkills(cwd string) bool {
 		return false
 	}
 	return len(result.Merged.ActivePreMergeSkills()) > 0
+}
+
+// moxySpinclassPathArg returns the first absolute path a moxy tool names, under
+// the #176 rewrite's pathArgKeys, that lies inside a .spinclass directory
+// (#177). A space-separated "paths" string (folio_rm) is split. Relative values
+// are skipped: they resolve against the tool's cwd, which this hook cannot see.
+func moxySpinclassPathArg(input hookInput, mainRepoRoot, sessionWorktree string) (string, bool) {
+	if !strings.HasPrefix(input.ToolName, "mcp__plugin_moxy_moxy__") {
+		return "", false
+	}
+	for key := range pathArgKeys {
+		var values []string
+		switch v := input.ToolInput[key].(type) {
+		case string:
+			if key == "paths" {
+				values = strings.Fields(v)
+			} else {
+				values = []string{v}
+			}
+		case []any:
+			for _, e := range v {
+				if s, ok := e.(string); ok {
+					values = append(values, s)
+				}
+			}
+		}
+		for _, p := range values {
+			if filepath.IsAbs(p) && isInsideSpinclassDir(p, mainRepoRoot, sessionWorktree) {
+				return p, true
+			}
+		}
+	}
+	return "", false
 }
 
 func isInsideSpinclassDir(path, mainRepoRoot, sessionWorktree string) bool {
