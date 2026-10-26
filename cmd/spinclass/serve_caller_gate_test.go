@@ -78,6 +78,11 @@ var gatedServeHandlers = []gatedServeHandler{
 		cliArgs: []string{"resurrect", "--target", "nope/none"}, cliRefusal: "no spinclass session for target",
 	},
 	{
+		tool: "session-health", operatorCommand: "sc session-health", handle: handleSessionHealth,
+		args: `{}`, harmlessArgs: `{"child":"nope/none"}`, harmlessRefusal: "no held session matches",
+		cliArgs: []string{"session-health", "--child", "nope/none"}, cliRefusal: "no held session matches",
+	},
+	{
 		tool: "close-child-session", operatorCommand: "sc close", handle: handleCloseChildSession,
 		args: `{"child":"worker/kid","force":true}`, harmlessArgs: `{}`, harmlessRefusal: "child is required",
 		cliArgs: []string{"close-child-session", "--child", "nope/none"}, cliRefusal: "no spinclass session for child",

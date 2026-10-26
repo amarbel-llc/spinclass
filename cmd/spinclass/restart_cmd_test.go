@@ -191,6 +191,9 @@ func TestRestartThisSessionQueuesAndRunsTheHandoff(t *testing.T) {
 	if !strings.Contains(text, "end your turn") {
 		t.Errorf("the result must tell the agent to end its turn: %q", text)
 	}
+	if !strings.Contains(text, "idle") || !strings.Contains(text, "nudge") {
+		t.Errorf("the result must say an idle session needs a nudge: %q", text)
+	}
 	req := readKid(t, repoPath).RestartRequest
 	if req == nil || req.Requester != selfPrincipal || req.When != "idle" || req.Reason != "need new tools" || req.RequestedAt.IsZero() {
 		t.Fatalf("restart request = %+v, want one by %s, idle, reason given", req, selfPrincipal)

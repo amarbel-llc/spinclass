@@ -300,7 +300,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		Name:  "restart-child-session",
 		Title: "Restart Child Session",
 		Description: command.Description{
-			Short: "Ask for a session you hold a handle on to be stopped and relaunched by its harness frontend (#419, FDR 0037). Needs the `restart` right on the child (the spawner has it; the default grant `observe,close` does not): a child you hold no handle on, or hold without that right, is refused, naming who can grant it. Same refusals as restart-this-session, evaluated on the child: no trusted `[session-entry].restart` hand-off, a running merge/check job, an implicit session. `force` restarts the child NOW and even over a running job: forcing kills the child's current turn and any running merge/check job, and ALWAYS prompts the human (it still needs the `restart` right). Otherwise the restart happens when the child's current turn ends. A queued restart can be withdrawn with cancel-restart.",
+			Short: "Ask for a session you hold a handle on to be stopped and relaunched by its harness frontend (#419, FDR 0037). Needs the `restart` right on the child (the spawner has it; the default grant `observe,close` does not): a child you hold no handle on, or hold without that right, is refused, naming who can grant it. Same refusals as restart-this-session, evaluated on the child: no trusted `[session-entry].restart` hand-off, a running merge/check job, an implicit session. `force` restarts the child NOW and even over a running job: forcing kills the child's current turn and any running merge/check job, and ALWAYS prompts the human (it still needs the `restart` right). Otherwise the restart happens when the child next ends a turn: a busy child restarts when its current turn ends, but an IDLE child ends no turn, so it restarts only after it next gets a message and finishes a turn (send it a short message to nudge it until clown#327 is deployed). A queued restart can be withdrawn with cancel-restart.",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			ReadOnlyHint:    protocol.BoolPtr(false),
@@ -383,6 +383,23 @@ func registerMCPOnlyCommands(app *command.App) {
 		Params: listHandlesParamList(),
 		Run:    wrapMCPHandler("list-handles", handleListHandles),
 		RunCLI: ungatedCLI(runListHandles),
+	})
+
+	app.AddCommand(&command.Command{
+		Name:  "session-health",
+		Title: "Session Health",
+		Description: command.Description{
+			Short: "Report whether the sessions this one holds a handle on look hung, from clown's per-session status file (clown#322): ok (idle, or busy within the [health] busy-bound, default 60m), busy-too-long (a turn past the bound with no hook or transcript progress and no merge/check job running), frontend-dead, or unknown (no status file: unarmed, not started, or exited cleanly — never healthy). Read-only; the bound is set in a trusted [health] sweatfile section.",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(true),
+			DestructiveHint: protocol.BoolPtr(false),
+			IdempotentHint:  protocol.BoolPtr(true),
+			OpenWorldHint:   protocol.BoolPtr(false),
+		},
+		Params: sessionHealthParamList(),
+		Run:    wrapMCPHandler("session-health", handleSessionHealth),
+		RunCLI: ungatedCLI(runSessionHealth),
 	})
 
 	app.AddCommand(&command.Command{
