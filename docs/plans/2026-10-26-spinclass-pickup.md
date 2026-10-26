@@ -4,6 +4,54 @@ Written by spinclass/firm-mulberry (the session being replaced). Labels: V
 verified on this host, R read in code or docs, I inferred. The brief is the
 operator's unattended-trip goal: restarts, confinement and permissions.
 
+## Update by spinclass/light-cedar (replaces firm-mulberry), 2026-10-26
+
+Labels as above. Landed on origin/master, each with tests first (red seen unless
+noted) and an attestation that names the skills not run:
+
+- **9b7dab5, close after restart (queue item 6, last paragraph).** The
+  SessionStart hook (`recordRelaunchedPID`, `internal/delta/hooks`) re-records its
+  parent pid for an unconfined worktree session on every start, but only when that
+  pid provably is the session's (`executor.PIDBelongsToSession`: cwd in the
+  worktree or the key in its environment) and never over a recorded pid that
+  already proves out; inside a unit nothing is recorded. Read-only review done.
+  `explore-live-restart-verify` now checks the recorded pid is one of the
+  session's live processes and is not a baseline pid; `explore-live-close-leftovers
+  <key>` fails while any process still carries `SPINCLASS_SESSION_ID=<key>`.
+  NOT proven live. Unverified (I): that SIGHUP to the agent also ends clown, ringmaster
+  and the MCP children; the leftovers recipe will say.
+- **7c1b143, hung-session reader.** `internal/0/hungstatus` reads clown's status
+  file (lstat, no follow, never opens the transcript), `FrontendState` compares pid
+  and start ticks, `Classify` is pure: idle, ok, busy-too-long, frontend-dead,
+  unknown. A merge/check job, a hook within the bound or a transcript mtime within
+  the bound excuses a busy turn. `[health] busy-bound` (default 60m, trusted
+  layers only, validated).
+- **6d0574c, `session-health`** (serve-gated, held sessions, read-only) and the
+  restart queue text now says an idle child needs a nudge until clown#327 is
+  deployed (item 3's wording; the runbook is still to update after that deploy).
+- **f3b3d21 + f88433f, `restart-hung-child`** (operator ruling: forced restart of
+  a busy-too-long child; needs the `restart` right, re-checks the verdict, once per
+  child per 24h under the session lock with rollback on a failed hand-off, logged
+  and woken to the holders, confined callers and self-restart refused; the hook
+  allows it). Reviewed independently. Honest limits: the verdict inputs (status file,
+  job record) are forgeable by an unconfined holder, so the real bounds are the
+  restart right and the confined refusal; a synchronous merge/check writes no job
+  record, so only the 60m default keeps a long gate from looking hung; there is no
+  periodic or push detector yet (the coordinator pulls `session-health`).
+  clown's doc 0023 says hung recovery is operator-only; I followed the note's
+  operator ruling. Reconcile the doc.
+- **Pool follow-up: sticky agent socket** (`stickyAgentSocket`,
+  `internal/foxtrot/spawn/confine.go`): a respawn of a worktree with no
+  `SSH_AUTH_SOCK` keeps the first spec's `piggy-agent` socket.
+
+Still open from the brief: which clear-site cleared solid-elm's RestartRequest
+(read the servelog for that key; not done); pool revoke command form and papi
+format check (item 4), `allow-stale-base` interaction and a safe dry run; the live
+proofs (item 5) once a deploy is announced: start/back wakes in the requester's
+inbox, an idle restart without a nudge, a pool spawn without the agent, and the
+restart-then-close proof (`explore-live-restart-verify` then `close-child-session`
+then `explore-live-close-leftovers`). Do not restart sessions you do not own.
+
 ## Standing rules
 
 - Report each landed SHA to the coordinator (circus/eager-holly) by chat. One gate

@@ -421,6 +421,60 @@ func TestWriteUnitSpecWritesOutsideTheWorktree(t *testing.T) {
 	}
 }
 
+// A respawn of the same worktree without SSH_AUTH_SOCK keeps the agent socket the
+// first spec declared, so the launch boundary clown recorded does not change
+// (unattended-spawn-without-agent note, item 4). A set SSH_AUTH_SOCK still wins.
+func TestWriteUnitSpecKeepsTheFirstSocketWhenTheAgentIsGone(t *testing.T) {
+	state := t.TempDir()
+	wt := filepath.Join(t.TempDir(), "repo", ".worktrees", "feat")
+	common := filepath.Join(t.TempDir(), ".git")
+	if err := os.MkdirAll(filepath.Join(common, "worktrees", "feat"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	prev := gitCommonDir
+	gitCommonDir = func(string) (string, error) { return common, nil }
+	t.Cleanup(func() { gitCommonDir = prev })
+	rp := worktree.ResolvedPath{AbsPath: wt, SessionKey: "repo/feat"}
+	socketsOf := func(path string) []unitSocket {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var spec unitSpec
+		if err := json.Unmarshal(b, &spec); err != nil {
+			t.Fatal(err)
+		}
+		return spec.Sockets
+	}
+
+	t.Setenv("SSH_AUTH_SOCK", "/run/user/1000/piggy-agent.sock")
+	path, err := writeUnitSpec(rp, "desc", nil, state, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := socketsOf(path); len(got) != 1 || got[0].Path != "/run/user/1000/piggy-agent.sock" {
+		t.Fatalf("first spec sockets = %+v", got)
+	}
+
+	t.Setenv("SSH_AUTH_SOCK", "")
+	path, err = writeUnitSpec(rp, "desc", nil, state, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := socketsOf(path); len(got) != 1 || got[0].Path != "/run/user/1000/piggy-agent.sock" || got[0].Purpose != "piggy-agent" {
+		t.Errorf("respawn without the agent sockets = %+v, want the first one kept", got)
+	}
+
+	t.Setenv("SSH_AUTH_SOCK", "/run/user/1000/other.sock")
+	path, err = writeUnitSpec(rp, "desc", nil, state, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := socketsOf(path); len(got) != 1 || got[0].Path != "/run/user/1000/other.sock" {
+		t.Errorf("a set SSH_AUTH_SOCK must win, got %+v", got)
+	}
+}
+
 // The unit sees the shared refs and logs read-only and the credential as an
 // inaccessible path (commit-3 shape); nothing under refs/logs stays writable.
 func TestBuildUnitSpecRefsLogsReadOnlyAndCredentialDenied(t *testing.T) {

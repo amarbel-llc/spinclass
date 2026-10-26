@@ -304,6 +304,27 @@ func ensureWorktreeConfigFile(commonDir, wt string) error {
 	return f.Close()
 }
 
+// stickyAgentSocket is the agent socket an earlier spec for this worktree
+// declared ("" when none), read from the frontend state dir the unit cannot
+// write. A respawn with no SSH_AUTH_SOCK (the agent is down) keeps it, so the
+// launch boundary clown recorded for the worktree does not change.
+func stickyAgentSocket(stateDir, wt string) string {
+	b, err := os.ReadFile(confinement.UnitSpecPath(stateDir, wt))
+	if err != nil {
+		return ""
+	}
+	var prior unitSpec
+	if json.Unmarshal(b, &prior) != nil {
+		return ""
+	}
+	for _, s := range prior.Sockets {
+		if s.Purpose == "piggy-agent" {
+			return s.Path
+		}
+	}
+	return ""
+}
+
 // writeUnitSpec resolves the host-dependent inputs, builds the spec and writes
 // it beside the unit record, outside the worktree. It returns the path to put
 // in CLOWN_AGENT_SCOPE.
@@ -327,9 +348,13 @@ func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, state
 		k, v, _ := strings.Cut(kv, "=")
 		env[k] = v
 	}
+	sshAuthSock := os.Getenv("SSH_AUTH_SOCK")
+	if sshAuthSock == "" {
+		sshAuthSock = stickyAgentSocket(stateDir, rp.AbsPath)
+	}
 	spec := buildUnitSpec(unitSpecInput{
 		rp: rp, operatorHome: home, stateDir: stateDir, commonDir: commonDir,
-		sshAuthSock: os.Getenv("SSH_AUTH_SOCK"), runtimeDir: runtimeDir, wayland: wayland,
+		sshAuthSock: sshAuthSock, runtimeDir: runtimeDir, wayland: wayland,
 		egress: egress, env: env, handshakeDir: handshakeDir,
 	})
 	if err := refuseProtectedBinds(spec, stateDir); err != nil {
