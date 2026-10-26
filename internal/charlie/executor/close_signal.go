@@ -108,6 +108,12 @@ func pidBelongsToSession(pid int, worktree, key string) bool {
 	return false
 }
 
+// PIDBelongsToSession reports whether pid provably is the session's process
+// (see pidBelongsToSession); a dead or unreadable pid is not.
+func PIDBelongsToSession(pid int, worktree, key string) bool {
+	return pid > 0 && pidBelongsToSession(pid, worktree, key)
+}
+
 func pathWithin(p, dir string) bool {
 	rel, err := filepath.Rel(filepath.Clean(dir), filepath.Clean(p))
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, "../")

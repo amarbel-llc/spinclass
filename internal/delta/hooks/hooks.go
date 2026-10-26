@@ -26,6 +26,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
 	"code.linenisgreat.com/spinclass/internal/bravo/apply"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
+	"code.linenisgreat.com/spinclass/internal/charlie/executor"
 	"code.linenisgreat.com/spinclass/internal/charlie/perms"
 	"github.com/google/shlex"
 )
@@ -408,6 +409,9 @@ func recordOwnPrincipal(cwd, principal string) {
 // hookParentPID is a seam over os.Getppid for recordRelaunchedPID.
 var hookParentPID = os.Getppid
 
+// pidIsSessions is a seam over executor.PIDBelongsToSession.
+var pidIsSessions = executor.PIDBelongsToSession
+
 // recordRelaunchedPID re-records the process of a (re)launched unconfined
 // worktree session on every SessionStart. After a restart, by clown or by hand,
 // the recorded pid is the old `sc` launcher, which close cannot prove is the
@@ -432,6 +436,12 @@ func recordRelaunchedPID(cwd string) {
 	}
 	err = session.Update(repoPath, branch, func(cur *session.State) error {
 		if cur.IsTombstone() || cur.PID == ppid {
+			return errNoRestartToMark
+		}
+		// Only a parent that provably is the session's (a transient shell
+		// wrapper or a nested claude elsewhere is not), and never over a
+		// recorded pid that already proves out.
+		if !pidIsSessions(ppid, cur.WorktreePath, cur.SessionKey) || pidIsSessions(cur.PID, cur.WorktreePath, cur.SessionKey) {
 			return errNoRestartToMark
 		}
 		cur.PID = ppid

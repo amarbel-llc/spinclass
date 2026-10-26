@@ -121,15 +121,56 @@ func TestSessionStartAfterARestartWakesOnlyOnce(t *testing.T) {
 	}
 }
 
+// stubHookParent makes the hook's parent pid `parent` and treats only the pids
+// in `provable` as provably the session's.
+func stubHookParent(t *testing.T, parent int, provable ...int) {
+	t.Helper()
+	origP, origB := hookParentPID, pidIsSessions
+	hookParentPID = func() int { return parent }
+	pidIsSessions = func(pid int, _, _ string) bool { return slices.Contains(provable, pid) }
+	t.Cleanup(func() { hookParentPID, pidIsSessions = origP, origB })
+}
+
+// A parent that is not provably the session's (a transient shell wrapper) is
+// never recorded, and a recorded pid that already proves out is kept.
+func TestSessionStartKeepsAProvablePIDAndSkipsAnUnprovableParent(t *testing.T) {
+	stubReturnWakes(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	repo, wt := initSpawnedWorktree(t, "")
+	st, err := session.Read(repo, "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.PID = 777
+	if err := session.Write(*st); err != nil {
+		t.Fatal(err)
+	}
+
+	stubHookParent(t, 888) // 888 unprovable
+	fireSessionStart(t, wt)
+	if got, _ := session.Read(repo, "feature"); got.PID == 888 {
+		t.Fatalf("recorded an unprovable parent")
+	}
+
+	stubHookParent(t, 999, 777, 999) // recorded 777 provable, new parent 999 too
+	got0, _ := session.Read(repo, "feature")
+	got0.PID = 777
+	if err := session.Write(*got0); err != nil {
+		t.Fatal(err)
+	}
+	fireSessionStart(t, wt)
+	if got, _ := session.Read(repo, "feature"); got.PID != 777 {
+		t.Fatalf("PID = %d, want the already-provable 777 kept", got.PID)
+	}
+}
+
 // After a restart (or a hand `clown restart`) the recorded pid is the old sc
 // launcher, which close cannot prove is the session's. The relaunch's
 // SessionStart re-records the agent process so close can stop it.
 func TestSessionStartReRecordsTheRelaunchedProcessPID(t *testing.T) {
 	stubReturnWakes(t)
 	repo, wt := restartingWorktree(t)
-	orig := hookParentPID
-	hookParentPID = func() int { return 424242 }
-	t.Cleanup(func() { hookParentPID = orig })
+	stubHookParent(t, 424242, 424242)
 
 	fireSessionStart(t, wt)
 
@@ -147,9 +188,7 @@ func TestSessionStartWithoutARestartRecordInFlightStillReRecordsThePID(t *testin
 	stubReturnWakes(t)
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	repo, wt := initSpawnedWorktree(t, "")
-	orig := hookParentPID
-	hookParentPID = func() int { return 515151 }
-	t.Cleanup(func() { hookParentPID = orig })
+	stubHookParent(t, 515151, 515151)
 
 	fireSessionStart(t, wt)
 
@@ -171,9 +210,7 @@ func TestSessionStartInAUnitDoesNotRecordAPID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orig := hookParentPID
-	hookParentPID = func() int { return 424242 }
-	t.Cleanup(func() { hookParentPID = orig })
+	stubHookParent(t, 424242, 424242)
 
 	fireSessionStart(t, wt)
 
