@@ -1213,6 +1213,350 @@ debug-restart-watch-timer:
     journalctl --user -u "$unit.service" --no-pager -n 20 || true
     exit 1
 
+# [explore] Prerequisites for the first live restart of an UNCONFINED throwaway
+# worker run unattended (docs/plans/2026-10-26-first-live-restart-unattended-
+# runbook.md). Read-only: it reads versions and config and runs
+# `restart-preflight --peek`, which never writes. The clown commit checks need a
+# clown checkout (CLOWN_REPO, default ~/eng/repos/clown) to test ancestry; without
+# one they print MANUAL. A global-sweatfile read prints only whether a key is set.
+#
+# check the clown/spinclass/config/systemd prerequisites for the first live restart
+[group("explore")]
+explore-live-restart-prereqs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    fails=0
+    pass() { printf 'PASS    %s\n' "$*"; }
+    fail() { printf 'FAIL    %s\n' "$*"; fails=$((fails + 1)); }
+    info() { printf 'INFO    %s\n' "$*"; }
+    manual() { printf 'MANUAL  %s\n' "$*"; }
+
+    command -v jq >/dev/null 2>&1 && pass "jq on PATH" || fail "jq not on PATH (the baseline and verify recipes need it)"
+
+    # clown: version, the restart verb, and the two required commits.
+    if command -v clown >/dev/null 2>&1; then
+      cv=$(clown --version 2>&1 | head -n1) || cv=""
+      if [ -z "$cv" ] || ! clown --version >/dev/null 2>&1; then cv=$(clown version 2>&1 | head -n1) || cv=""; fi
+      [ -n "$cv" ] || cv="(neither clown --version nor clown version printed anything)"
+      pass "clown on PATH: $cv"
+      if clown restart --help >/dev/null 2>&1; then pass "clown restart --help exists"; else fail "clown restart --help failed: this clown predates the restart verb"; fi
+      commit=$(printf '%s' "$cv" | grep -oE '[0-9a-f]{7,40}' | tail -n1 || true)
+      clown_repo=${CLOWN_REPO:-$HOME/eng/repos/clown}
+      if [ -n "$commit" ] && git -C "$clown_repo" cat-file -e "$commit^{commit}" 2>/dev/null; then
+        for need in 613bf9a 1f5e57c5; do
+          if git -C "$clown_repo" merge-base --is-ancestor "$need" "$commit" 2>/dev/null; then
+            pass "clown $commit contains $need"
+          else
+            fail "clown $commit does not contain $need ($( [ "$need" = 613bf9a ] && echo 'restart verb and --peek wiring' || echo 'CLOWN_UNATTENDED, clown#323' ))"
+          fi
+        done
+      else
+        manual "cannot test clown ancestry from '$cv' (no checkout at $clown_repo or no commit in the version): confirm the build contains 613bf9a (restart verb, --peek) and 1f5e57c5 (CLOWN_UNATTENDED, #323)"
+      fi
+    else
+      fail "clown not on PATH"
+    fi
+
+    # spinclass: version and the read-only peek.
+    if command -v spinclass >/dev/null 2>&1; then
+      pass "spinclass on PATH: $(spinclass version 2>&1 | sed -n 2p)"
+      peek=$(spinclass restart-preflight --peek 2>/dev/null) || peek=""
+      if [ "$(printf '%s\n' "$peek" | wc -l)" -eq 1 ] && printf '%s' "$peek" | jq -e 'has("state")' >/dev/null 2>&1; then
+        pass "restart-preflight --peek prints one JSON line: $peek"
+      else
+        fail "restart-preflight --peek did not print exactly one JSON line with a state key (got: ${peek:-nothing}); this spinclass predates --peek"
+      fi
+    else
+      fail "spinclass not on PATH"
+    fi
+
+    # sweatfile layers: global first, then each ancestor of the main checkout,
+    # outermost first. The repo's own sweatfile is not a trusted layer.
+    global="$HOME/.config/spinclass/sweatfile"
+    layers="$global"
+    common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+    if [ -n "$common" ]; then
+      d=$(dirname "$(dirname "$common")")
+      above=""
+      while [ "$d" != / ]; do above="$d/sweatfile"$'\n'"$above"; d=$(dirname "$d"); done
+      layers="$layers"$'\n'"$above"
+    fi
+    last_value() { # key regex of the form key = "value"; prints the last trusted layer's value
+      printf '%s\n' "$layers" | while IFS= read -r f; do
+        [ -f "$f" ] && sed -nE "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\"([^\"]*)\".*/\1/p" "$f"
+      done | tail -n1
+    }
+    if [ -f "$global" ] && grep -Eq '^[[:space:]]*restart[[:space:]]*=' "$global"; then
+      pass "trusted [session-entry] restart hand-off is set in the global sweatfile (value not printed)"
+    else
+      fail "no 'restart =' in the global sweatfile: every restart is refused with 'no restart hand-off is configured' (a repo-level value is ignored)"
+    fi
+    mode=$(last_value unattended-permission-mode || true)
+    if [ "$mode" = dontAsk ]; then
+      pass "[session-entry] unattended-permission-mode = dontAsk (global or a layer above the repo)"
+    else
+      fail "[session-entry] unattended-permission-mode is '${mode:-unset}', want dontAsk: spawn-session would launch the worker in auto mode with no CLOWN_UNATTENDED marker"
+    fi
+
+    # systemd user manager: the restart-watch watchdog arms a user timer.
+    sysd=$(systemctl --user is-system-running 2>&1 || true)
+    case "$sysd" in
+      running|degraded) pass "systemd user manager reachable ($sysd)" ;;
+      *) fail "systemd user manager not usable (is-system-running: ${sysd:-no output}): no restart-watch watchdog would be armed" ;;
+    esac
+    command -v systemd-run >/dev/null 2>&1 && pass "systemd-run on PATH" || fail "systemd-run not on PATH"
+
+    manual "troupe credential: spinclass cannot observe it; see the runbook's manual step"
+    echo
+    if [ "$fails" -gt 0 ]; then echo "SUMMARY: $fails FAIL"; exit 1; fi
+    echo "SUMMARY: all automated prerequisites PASS (MANUAL lines remain)"
+
+# [explore] Shared by explore-live-restart-baseline and -verify. TARGET is a
+# session key (<repo>/<branch>), a worktree basename, or an absolute worktree
+# path. Finds the frontend record by the same hash the session package uses
+# (sha256 of the cleaned worktree path, first 8 bytes, hex) or, for a key, by
+# scanning the record files for a matching session_key (only the match is read
+# into the snapshot). Never prints credentials; the troupe credential is not
+# something spinclass can see. Writes .tmp/live-restart/<sanitized-key>/LABEL.json
+# and prints that path on its last line.
+#
+# write a JSON snapshot of one session's restart-relevant state and processes
+[group("explore")]
+_explore-live-restart-snapshot target label:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    target='{{ target }}'
+    label='{{ label }}'
+    command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 2; }
+    records="${XDG_STATE_HOME:-$HOME/.local/state}/spinclass/records"
+    rec=""
+    case "$target" in
+      /*)
+        h=$(printf '%s' "$(realpath -sm "$target")" | sha256sum | cut -c1-16)
+        rec="$records/$h.json"
+        ;;
+      *)
+        for f in "$records"/*.json; do
+          [ -f "$f" ] || continue
+          if jq -e --arg t "$target" '[.session_key, (.worktree_path | split("/") | last)] | any(.[]; . == $t)' "$f" >/dev/null 2>&1; then rec=$f; break; fi
+        done
+        ;;
+    esac
+    [ -f "$rec" ] || { echo "no frontend record for '$target' under $records (live sessions only)" >&2; exit 1; }
+    key=$(jq -r '.session_key' "$rec")
+    principal=$(jq -r '.principal // ""' "$rec")
+    dir=".tmp/live-restart/$(printf '%s' "$key" | sed 's#[^A-Za-z0-9._-]#_#g')"
+    mkdir -p "$dir"
+    peek=$(spinclass restart-preflight --peek --target "$key" 2>&1 || true)
+    onpath=$(readlink -f "$(command -v spinclass)")
+    pf=$(mktemp)
+    trap 'rm -f "$pf"' EXIT
+    pat_c="CLOWN_SESSION_ID=${principal:-__no_principal_recorded__}"
+    pat_s="SPINCLASS_SESSION_ID=$key"
+    for d in /proc/[0-9]*; do
+      pid=${d#/proc/}
+      env=$(tr '\0' '\n' < "$d/environ" 2>/dev/null) || continue
+      printf '%s\n' "$env" | grep -xF -e "$pat_c" -e "$pat_s" >/dev/null || continue
+      args=$(tr '\0' '\n' < "$d/cmdline" 2>/dev/null) || continue
+      [ -n "$args" ] || continue
+      exe=$(readlink "$d/exe" 2>/dev/null || echo '?')
+      exe_real=$(readlink -f "$d/exe" 2>/dev/null || echo '?')
+      argv0=$(printf '%s\n' "$args" | head -n1)
+      kind=other
+      if printf '%s\n' "$args" | grep -xF serve >/dev/null; then kind=serve
+      elif [ "$(basename "$exe")" = clown ]; then kind=clown
+      elif printf '%s\n' "$args" | grep -E '^--permission-mode' >/dev/null; then kind=agent
+      else case "$exe $argv0" in *claude*) kind=agent ;; esac
+      fi
+      [ "$kind" != other ] || continue
+      unatt=false
+      printf '%s\n' "$env" | grep -xF 'CLOWN_UNATTENDED=1' >/dev/null && unatt=true
+      dontask=false
+      printf '%s\n' "$args" | awk '$0 == "--permission-mode=dontAsk" { f = 1 } prev == "--permission-mode" && $0 == "dontAsk" { f = 1 } { prev = $0 } END { exit !f }' && dontask=true
+      profile=$(printf '%s\n' "$args" | awk 'prev == "--profile" { print; exit } /^--profile=/ { sub(/^--profile=/, ""); print; exit } { prev = $0 }')
+      start=$(sed 's/.*) //' "$d/stat" 2>/dev/null | cut -d' ' -f20 || true)
+      jq -nc --argjson pid "$pid" --arg kind "$kind" --arg exe "$exe" --arg exe_real "$exe_real" --arg start "$start" \
+        --argjson unattended "$unatt" --argjson dontask "$dontask" --arg profile "$profile" \
+        '{pid: $pid, kind: $kind, exe: $exe, exe_real: $exe_real, start_ticks: $start, unattended: $unattended, dontask: $dontask, profile_argv: $profile}' >> "$pf"
+    done
+    jq --slurpfile procs "$pf" --arg peek "$peek" --arg onpath "$onpath" --arg taken "$(date -u +%FT%TZ)" --arg label "$label" '{
+      label: $label, taken_at: $taken,
+      session_key: .session_key, principal: (.principal // ""), worktree: .worktree_path,
+      state: .state, kind: (.kind // ""),
+      restarting_at: .restarting_at, restarted_at: .restarted_at, restarting_by: .restarting_by,
+      profile: (.profile // ""), profile_digest: (.profile_digest // ""),
+      spawned_by: (.spawned_by // ""),
+      peek: ($peek | try fromjson catch $peek),
+      spinclass_on_path: $onpath,
+      procs: $procs,
+      troupe_credential: "not observable by spinclass: check manually (runbook)"
+    }' "$rec" > "$dir/$label.json"
+    echo "$dir/$label.json"
+
+# [explore] Read-only snapshot of the throwaway worker BEFORE the restart, plus
+# the preconditions the unattended run needs. Writes
+# .tmp/live-restart/<key>/baseline.json (no credential contents; processes whose
+# environment names the worker's principal or key, by pid/exe/flags only). A
+# stale serve binary is INFO here: the STALE check after the restart is only
+# meaningful if the spinclass on PATH changes between this baseline and the
+# restart (the runbook says how to arrange that).
+#
+# snapshot a worker before restarting it and check the unattended preconditions
+[group("explore")]
+explore-live-restart-baseline target:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    snap=$("{{ just_executable() }}" --quiet --justfile "{{ justfile() }}" _explore-live-restart-snapshot '{{ target }}' baseline | tail -n1)
+    echo "snapshot: $snap"
+    fails=0
+    pass() { printf 'PASS    %s\n' "$*"; }
+    fail() { printf 'FAIL    %s\n' "$*"; fails=$((fails + 1)); }
+    info() { printf 'INFO    %s\n' "$*"; }
+    check() { if jq -e "$2" "$snap" >/dev/null; then pass "$1"; else fail "$1"; fi; }
+    jq -r '"INFO    key=\(.session_key) principal=\(.principal) state=\(.state) profile=\(.profile)", "INFO    restarting_at=\(.restarting_at) restarted_at=\(.restarted_at)", "INFO    peek=\(.peek | tojson)", (.procs[] | "INFO    \(.kind) pid=\(.pid) unattended=\(.unattended) dontAsk=\(.dontask) profile_argv=\(.profile_argv) exe=\(.exe)")' "$snap"
+    check "principal recorded and UUID-shaped (restart refuses otherwise)" '.principal | test("^[0-9a-fA-F-]{36}$")'
+    check "restart-preflight --peek reports state live" '.peek.state == "live"'
+    check "a worker agent process was found by its principal/key" 'any(.procs[]; .kind == "agent")'
+    check "agent environment has CLOWN_UNATTENDED=1" 'any(.procs[]; .kind == "agent" and .unattended)'
+    check "agent argv has --permission-mode dontAsk" 'any(.procs[]; .kind == "agent" and .dontask)'
+    check "a spinclass serve process was found" 'any(.procs[]; .kind == "serve")'
+    if jq -e '.spinclass_on_path as $p | all(.procs[] | select(.kind == "serve"); .exe_real == $p and (.exe | endswith("(deleted)") | not))' "$snap" >/dev/null; then
+      info "serve binary is the spinclass on PATH now: the post-restart STALE check is vacuous unless you change the spinclass on PATH before restarting"
+    else
+      info "serve binary already differs from the spinclass on PATH (STALE before the restart); the worker's own version tool is authoritative (it also recognises same-build-different-path)"
+    fi
+    echo
+    if [ "$fails" -gt 0 ]; then echo "SUMMARY: $fails FAIL"; exit 1; fi
+    echo "SUMMARY: baseline PASS (MANUAL: note the troupe credential and send the nonce DM now)"
+
+# [explore] The same snapshot AFTER the relaunch, compared with baseline.json.
+# The troupe credential and the conversation resuming cannot be observed from
+# the process table or the record; those stay MANUAL. The serve-binary check
+# compares the resolved exe with the spinclass on PATH and can false-FAIL when
+# the clown plugin runs its own build of the same revision ("same build,
+# different path"): the worker's own version tool is the authority there.
+#
+# snapshot a restarted worker and compare it with its baseline
+[group("explore")]
+explore-live-restart-verify target:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    after=$("{{ just_executable() }}" --quiet --justfile "{{ justfile() }}" _explore-live-restart-snapshot '{{ target }}' after | tail -n1)
+    base="$(dirname "$after")/baseline.json"
+    [ -f "$base" ] || { echo "no baseline at $base: run explore-live-restart-baseline before the restart" >&2; exit 1; }
+    echo "baseline: $base"
+    echo "after:    $after"
+    fails=0
+    pass() { printf 'PASS    %s\n' "$*"; }
+    fail() { printf 'FAIL    %s\n' "$*"; fails=$((fails + 1)); }
+    info() { printf 'INFO    %s\n' "$*"; }
+    manual() { printf 'MANUAL  %s\n' "$*"; }
+    check() { if jq -e --slurpfile b "$base" "$2" "$after" >/dev/null; then pass "$1"; else fail "$1"; fi; }
+    jq -r '"INFO    restarting_by=\(.restarting_by) restarting_at=\(.restarting_at) restarted_at=\(.restarted_at)", "INFO    peek=\(.peek | tojson)", (.procs[] | "INFO    \(.kind) pid=\(.pid) unattended=\(.unattended) dontAsk=\(.dontask) profile_argv=\(.profile_argv) exe=\(.exe)")' "$after"
+
+    check "same session key" '.session_key == $b[0].session_key'
+    check "same principal (the troupe identity the restart exists to keep)" '.principal != "" and .principal == $b[0].principal'
+    check "same worktree" '.worktree == $b[0].worktree'
+    ra=$(jq -r '.restarting_at // ""' "$after"); rd=$(jq -r '.restarted_at // ""' "$after"); rb=$(jq -r '.restarting_at // ""' "$base")
+    if [ -z "$ra" ]; then fail "RestartingAt is unset: restart-preflight never returned a restart verdict"
+    elif [ -n "$rb" ] && [ "$(date -d "$ra" +%s.%N)" = "$(date -d "$rb" +%s.%N)" ]; then fail "RestartingAt did not move since the baseline: this is not a new restart"
+    else pass "RestartingAt set ($ra)"; fi
+    if [ -z "$rd" ]; then fail "RestartedAt is unset: the relaunched session's SessionStart did not mark its return (or it has not come back)"
+    elif [ -n "$ra" ] && awk -v a="$(date -d "$rd" +%s.%N)" -v b="$(date -d "$ra" +%s.%N)" 'BEGIN { exit !(a >= b) }'; then pass "RestartedAt ($rd) >= RestartingAt"
+    else fail "RestartedAt ($rd) is older than RestartingAt ($ra)"; fi
+    check "restart-preflight --peek reports state live" '.peek.state == "live"'
+    check "a NEW agent process exists (no agent pid or start time survived from the baseline)" '[.procs[] | select(.kind == "agent")] as $a | ($a | length) >= 1 and all($a[]; . as $n | all($b[0].procs[] | select(.kind == "agent"); .pid != $n.pid or .start_ticks != $n.start_ticks))'
+    if jq -e --slurpfile b "$base" 'any($b[0].procs[]; .kind == "agent" and .unattended)' "$after" >/dev/null; then
+      check "relaunched agent environment has CLOWN_UNATTENDED=1" 'any(.procs[]; .kind == "agent" and .unattended)'
+    else info "baseline agent had no CLOWN_UNATTENDED=1: unattended check skipped (the baseline recipe FAILs this)"; fi
+    if jq -e --slurpfile b "$base" 'any($b[0].procs[]; .kind == "agent" and .dontask)' "$after" >/dev/null; then
+      check "relaunched agent argv has --permission-mode dontAsk" 'any(.procs[]; .kind == "agent" and .dontask)'
+    else info "baseline agent was not dontAsk: dontAsk check skipped"; fi
+    check "a spinclass serve process exists after the relaunch" 'any(.procs[]; .kind == "serve")'
+    check "serve binary is the spinclass on PATH (no STALE)" '.spinclass_on_path as $p | any(.procs[]; .kind == "serve") and all(.procs[] | select(.kind == "serve"); .exe_real == $p and (.exe | endswith("(deleted)") | not))'
+    check "profile pin intact in the record (name and digest)" '.profile == $b[0].profile and .profile_digest == $b[0].profile_digest'
+    if [ -n "$(jq -r '.profile' "$base")" ]; then
+      check "relaunched agent argv carries the same --profile as before" '([.procs[] | select(.kind == "agent") | .profile_argv] | unique) == ([$b[0].procs[] | select(.kind == "agent") | .profile_argv] | unique)'
+    else info "no profile pinned: argv --profile check skipped"; fi
+    manual "conversation resumed: ask the worker to recall the nonce sent before the restart"
+    manual "troupe credential not revoked: spinclass cannot observe it; confirm the worker still chats as the same JID (chat_list) and per the runbook"
+    echo
+    if [ "$fails" -gt 0 ]; then echo "SUMMARY: $fails FAIL"; exit 1; fi
+    echo "SUMMARY: verify PASS (MANUAL lines remain)"
+
+# [explore] Spinclass#372 auto-allows read-only moxy folio/grit tools on the
+# caller's own and held children's worktrees. The hook's verdict log
+# (<worktree>/.spinclass/hook-verdicts.ndjson) only records spinclass's OWN tools
+# (internal/delta/hooks/verdictlog.go, verdictToolPrefix), never moxy ones, so a
+# folio_read allow leaves no line there. This therefore (1) greps the DRIVER's
+# log for lines naming the child (restart-child-session and friends; an allow
+# whose reason names "held child KEY" would appear here only if the log's scope
+# changes) and (2) replays synthetic moxy PreToolUse payloads through the
+# installed `spinclass hook` as the driver's principal against the live session
+# store, with controls that must NOT be allowed. Judges only; it runs no tool.
+# Replaying may append a line to the driver's hook-trace.log. The driver's
+# principal comes from $CLOWN_SESSION_ID, else the driver's frontend record.
+#
+# show what the hook decides for moxy reads of a held child's worktree, live
+[group("explore")]
+explore-live-moxy-allow driver-worktree child-key:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    driver=$(realpath -sm '{{ driver-worktree }}')
+    child_key='{{ child-key }}'
+    records="${XDG_STATE_HOME:-$HOME/.local/state}/spinclass/records"
+    log="$driver/.spinclass/hook-verdicts.ndjson"
+    echo "=== driver verdict log lines naming $child_key ==="
+    if [ -f "$log" ]; then
+      jq -r --arg k "$child_key" 'select((.reason | contains("held child " + $k)) or (.input | contains($k))) | [.ts, .tool, .decision, (.reason | .[0:80]), (try (.input | fromjson | keys | join(",")) catch "(input truncated)")] | @tsv' "$log" || true
+      echo "allow lines whose reason names 'held child $child_key': $(jq -r --arg k "$child_key" 'select(.reason | contains("held child " + $k)) | .tool' "$log" | wc -l)"
+    else
+      echo "(no $log)"
+    fi
+    echo
+    echo "=== replay through the installed spinclass hook ==="
+    child_rec=""
+    for f in "$records"/*.json; do
+      [ -f "$f" ] || continue
+      if jq -e --arg t "$child_key" '.session_key == $t' "$f" >/dev/null 2>&1; then child_rec=$f; break; fi
+    done
+    [ -n "$child_rec" ] || { echo "no frontend record for child '$child_key'" >&2; exit 1; }
+    child_wt=$(jq -r '.worktree_path' "$child_rec")
+    principal=${CLOWN_SESSION_ID:-}
+    if [ -z "$principal" ]; then
+      h=$(printf '%s' "$driver" | sha256sum | cut -c1-16)
+      principal=$(jq -r '.principal // ""' "$records/$h.json" 2>/dev/null || true)
+    fi
+    [ -n "$principal" ] || { echo "no driver principal: set CLOWN_SESSION_ID or point at a driver worktree with a record" >&2; exit 1; }
+    echo "child worktree: $child_wt"
+    fails=0
+    replay() { # label tool input-json expect (allow|none)
+      payload=$(jq -nc --arg tool "mcp__plugin_moxy_moxy__$2" --argjson input "$3" --arg cwd "$driver" '{hook_event_name: "PreToolUse", session_id: "synth-moxy-allow", tool_name: $tool, tool_input: $input, cwd: $cwd}')
+      out=$(printf '%s' "$payload" | CLOWN_SESSION_ID="$principal" spinclass hook 2>/dev/null || true)
+      got=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision // empty' 2>/dev/null || true)
+      reason=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty' 2>/dev/null || true)
+      [ -n "$got" ] || got=none
+      keys=$(printf '%s' "$3" | jq -r 'keys | join(",")')
+      # expect "none" means any verdict but allow (the hook may ask or stay silent).
+      if { [ "$4" = allow ] && [ "$got" = allow ] && printf '%s' "$reason" | grep -F "held child $child_key" >/dev/null; } || { [ "$4" = none ] && [ "$got" != allow ]; }; then
+        printf 'PASS    %s: %s [args: %s] -> %s %s\n' "$1" "$2" "$keys" "$got" "$reason"
+      else
+        printf 'FAIL    %s: %s [args: %s] -> %s %s (wanted %s)\n' "$1" "$2" "$keys" "$got" "$reason" "$4"
+        fails=$((fails + 1))
+      fi
+    }
+    replay "ls child worktree" folio_ls "$(jq -nc --arg p "$child_wt" '{path: $p}')" allow
+    replay "read inside child worktree" folio_read "$(jq -nc --arg p "$child_wt/.git" '{file_path: $p}')" allow
+    replay "glob inside child worktree" folio_glob "$(jq -nc --arg p "$child_wt" '{pattern: "*", path: $p}')" allow
+    replay "grit_branch log of child" grit_branch "$(jq -nc --arg p "$child_wt" '{subcommand: "log", repo_path: $p, max_count: 1}')" allow
+    replay "grit_stage status of child" grit_stage "$(jq -nc --arg p "$child_wt" '{subcommand: "status", repo_path: $p}')" allow
+    replay "CONTROL child .spinclass" folio_read "$(jq -nc --arg p "$child_wt/.spinclass/state.json" '{file_path: $p}')" none
+    replay "CONTROL outside any worktree" folio_ls '{"path":"/etc"}' none
+    replay "CONTROL mutating grit_branch" grit_branch "$(jq -nc --arg p "$child_wt" '{subcommand: "reset-hard", repo_path: $p, ref: "HEAD"}')" none
+    echo
+    if [ "$fails" -gt 0 ]; then echo "SUMMARY: $fails FAIL (the driver must hold an ACCEPTED handle on the child: spawn mints one; list-handles with accept exercises pending grants)"; exit 1; fi
+    echo "SUMMARY: the installed hook allows the read-only moxy shapes on the held child and refuses the controls"
+
 # [debug] internal/0/madder.UserStoreReady assumes an unprefixed store id lands
 # at $XDG_DATA_HOME/madder/blob_stores/<id>/blob_store-config (madder(1) FILES).
 # This inits and writes the durable `spinclass` store against a throwaway
