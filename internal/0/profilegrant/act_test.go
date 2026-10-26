@@ -121,9 +121,9 @@ var badChars = map[string]string{
 	"comma":        ",",
 	"tab":          "\t",
 	"NEL":          "\u0085",
-	"line sep":     " ",
+	"line sep":     "\u2028",
 	"bidi":         "\u202e",
-	"zero width":   "​",
+	"zero width":   "\u200b",
 	"non-ascii":    "é",
 	"carriage ret": "\r",
 }

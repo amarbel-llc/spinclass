@@ -3,7 +3,28 @@ default: lint build test verify
 # --- lint ---
 
 [group("pre-build")]
-lint: lint-fmt lint-golangci lint-layout lint-worktree
+lint: lint-fmt lint-golangci lint-layout lint-worktree lint-invisible-chars
+
+# Fail on any literal invisible or control character in a tracked text file:
+# Unicode category Cf (bidi overrides, zero-width spaces, BOM, soft hyphen, ...),
+# C0/C1 controls other than tab, newline and CR, and U+2028/U+2029. Downstream
+# linters in the update cascade flag these in Go sources, so they halted it
+# twice (U+202E, then U+200B and U+2028). Write them as escapes ("\u200b") instead.
+# Repo-owned, so it does not depend on which linters the conformist preset enables.
+# ripgrep comes from the flake's nixpkgs, because the pre-merge hook may run
+# outside the devShell.
+#
+# fail on literal invisible (Unicode Cf) or control characters in tracked files
+[group("pre-build")]
+lint-invisible-chars:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    pattern='[\p{Cf}\x{00}-\x{08}\x{0B}\x{0C}\x{0E}-\x{1F}\x{7F}\x{80}-\x{9F}\x{2028}\x{2029}]'
+    if git ls-files -z | xargs -0 nix shell --inputs-from . nixpkgs#ripgrep -c rg --no-heading --line-number --max-columns 120 -- "$pattern"; then
+      echo "literal invisible/control characters found (above): write them as escape sequences" >&2
+      exit 1
+    fi
+    echo "no literal invisible or control characters in tracked files"
 
 # Read-only format + lint gate via the sandboxed checks.formatting
 # derivation: formatter drift (Go/Nix/shell/TOML, per ./conformist.nix) plus
