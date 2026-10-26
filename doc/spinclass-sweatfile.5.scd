@@ -1030,6 +1030,20 @@ habitual use, not a security boundary: an alias, a generated command or a
 copied binary gets past it. The boundary for an untrusted agent is
 confinement (FDR 0035).
 
+## [health]
+
+Hung-session bounds, read from clown's status file
+(docs/plans/2026-10-26-hung-session-detection.md). Not merged: read only from
+the global and parent-directory layers, last valid one wins; a repo- or
+worktree-level value is ignored with a warning (*sc validate* warns), because
+an agent could otherwise raise its own bound.
+
+*busy-bound*
+	Go duration, for example *"60m"*. A turn running longer than this with a
+	live frontend, and no hook or transcript progress within the same bound, is
+	busy too long. A merge or check job running for the session excuses it. Unset,
+	unparseable or non-positive means 60m.
+
 ## [metrics]
 
 Best-effort statsd telemetry to stats-me (*stats-me-clients*(7), spinclass#363).

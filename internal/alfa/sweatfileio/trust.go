@@ -252,6 +252,36 @@ func TrustedAllowSelfClose(h sweatfile.Hierarchy, home, repoRoot string) (allow 
 	return allow, untrusted
 }
 
+// DefaultHealthBusyBound is the busy bound when no trusted layer sets one
+// (operator ruling, 2026-10-26).
+const DefaultHealthBusyBound = 60 * time.Minute
+
+// TrustedHealthBusyBound returns the [health].busy-bound honoured for the repo:
+// a scalar, the last layer above the repo that sets a valid positive duration
+// wins, DefaultHealthBusyBound otherwise. An unparseable or non-positive value
+// is ignored (the previous value stands) so a typo cannot disable detection.
+// Layers that may not set it are never honoured; their paths are returned in
+// untrusted. Hierarchy.Merged never carries the table.
+func TrustedHealthBusyBound(h sweatfile.Hierarchy, home, repoRoot string) (bound time.Duration, untrusted []string) {
+	bound = DefaultHealthBusyBound
+	for _, src := range h.Sources {
+		if src.SkipReason != "" || !src.Found {
+			continue
+		}
+		if src.File.Health == nil || src.File.Health.BusyBound == nil {
+			continue
+		}
+		if !LayerAboveRepo(src.Path, home, repoRoot) {
+			untrusted = append(untrusted, src.Path)
+			continue
+		}
+		if d, err := time.ParseDuration(strings.TrimSpace(*src.File.Health.BusyBound)); err == nil && d > 0 {
+			bound = d
+		}
+	}
+	return bound, untrusted
+}
+
 // TrustedSpawnProfile returns the [session-entry].spawn-profile default honoured
 // for a CONFINED spawn into the repo (FDR 0035): a scalar, the last layer above
 // the repo that sets a non-empty value wins, "" when none does. A confined

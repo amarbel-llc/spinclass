@@ -737,6 +737,30 @@ func CheckPermissions(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 	return issues
 }
 
+// CheckHealth validates the [health] table: busy-bound must be a positive Go
+// duration, and is honoured only from layers above the repo.
+func CheckHealth(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
+	if sf.Health == nil || sf.Health.BusyBound == nil {
+		return nil
+	}
+	var issues []Issue
+	if d, err := time.ParseDuration(strings.TrimSpace(*sf.Health.BusyBound)); err != nil || d <= 0 {
+		issues = append(issues, Issue{
+			Message:  fmt.Sprintf("[health] busy-bound %q is not a positive duration such as \"60m\": it is ignored and the default 60m applies", *sf.Health.BusyBound),
+			Severity: SeverityWarning,
+			Field:    "health.busy-bound",
+		})
+	}
+	if !layerAboveRepo {
+		issues = append(issues, Issue{
+			Message:  "[health] sets `busy-bound` in a repo-level sweatfile: it is ignored — only sweatfiles above the repo may set it; move it to the global sweatfile",
+			Severity: SeverityWarning,
+			Field:    "health.busy-bound",
+		})
+	}
+	return issues
+}
+
 // CheckStore validates the [store] table: the identity it stamps on commits is
 // honoured only from layers above the repo, so a repo-level value is ignored.
 func CheckStore(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
@@ -1044,6 +1068,16 @@ func Run(w io.Writer, home, repoDir string) int {
 				}
 			} else {
 				sub.Ok("permissions valid")
+			}
+		}
+
+		if src.File.Health != nil {
+			if issues := CheckHealth(src.File, sweatfileio.LayerAboveRepo(src.Path, home, mainRoot)); len(issues) > 0 {
+				for _, iss := range issues {
+					sub.Ok(fmt.Sprintf("health valid # warning: %s", iss.Message))
+				}
+			} else {
+				sub.Ok("health valid")
 			}
 		}
 

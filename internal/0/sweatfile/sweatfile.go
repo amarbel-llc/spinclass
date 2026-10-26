@@ -222,6 +222,17 @@ type Permissions struct {
 	AllowSelfClose *bool `toml:"allow-self-close"`
 }
 
+// Health holds the hung-session bounds (docs/plans/2026-10-26-hung-session-detection.md).
+// Like Permissions it is trusted only from layers above the repo (an agent that
+// can edit the repo sweatfile could otherwise raise its own bound), read ONLY
+// through sweatfileio.TrustedHealthBusyBound, and never merged.
+type Health struct {
+	// BusyBound is a Go duration ("60m"): a turn running longer than this, with a
+	// live frontend, is busy too long. Last trusted layer that sets it wins; unset
+	// or unparseable means 60m.
+	BusyBound *string `toml:"busy-bound"`
+}
+
 // Metrics configures spinclass's best-effort statsd telemetry (spinclass#363,
 // internal/0/statsd). Scalar override down the cascade.
 type Metrics struct {
@@ -395,6 +406,7 @@ type Sweatfile struct {
 	ProfileRights  *ProfileRights  `toml:"profile-rights"`
 	Confinement    *Confinement    `toml:"confinement"`
 	Permissions    *Permissions    `toml:"permissions"`
+	Health         *Health         `toml:"health"`
 	Sysprompt      *Sysprompt      `toml:"sysprompt"`
 	SessionEntry   *SessionEntry   `toml:"session-entry"`
 	StartCommands  []StartCommand  `toml:"start-commands"`
