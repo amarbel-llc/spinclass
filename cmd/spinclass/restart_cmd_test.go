@@ -238,10 +238,9 @@ func writeRunningJob(t *testing.T, wtPath string) {
 	}
 }
 
-// seedForcedRequest records a when=now RestartRequest directly: the request a
-// forced restart is meant to leave once clown accepts `--when now`. The tools
-// refuse force until then, so the preflight's when=now handling is tested from
-// recorded state.
+// seedForcedRequest records a when=now RestartRequest directly, the request a
+// forced restart leaves, so the preflight's when=now handling is tested from
+// recorded state without a hand-off.
 func seedForcedRequest(t *testing.T, repoPath string) {
 	t.Helper()
 	st := readKid(t, repoPath)
@@ -267,20 +266,23 @@ func TestRestartThisSessionUnforcedStillRefusedOverAJob(t *testing.T) {
 	}
 }
 
-// #419: clown's `restart` accepts only --when idle, so a forced restart, which
-// would hand off --when now, is refused up front with nothing recorded and no
-// hand-off, rather than failing at the hand-off.
-func TestRestartThisSessionForceIsRefusedUntilClownAcceptsNow(t *testing.T) {
+// #419: a forced self-restart skips the running-job obstacle, records when=now
+// and hands off --when now.
+func TestRestartThisSessionForceQueuesNowOverARunningJob(t *testing.T) {
 	calls := stubRestartHandoff(t, "", nil)
 	repoPath, wtPath := restartSelfFixture(t, true)
 	writeRunningJob(t, wtPath)
 
 	text, isErr := callRestartThis(t, `{"force":true,"reason":"wedged"}`)
-	if !isErr || !strings.Contains(text, "--when idle") {
-		t.Fatalf("want a refusal naming that only --when idle is accepted, got isErr=%v %q", isErr, text)
+	if isErr || !strings.Contains(text, "FORCED") {
+		t.Fatalf("want a forced restart queued, got isErr=%v %q", isErr, text)
 	}
-	if readKid(t, repoPath).RestartRequest != nil || len(*calls) != 0 {
-		t.Errorf("a refused forced restart must record nothing and run no hand-off: calls=%+v", *calls)
+	if req := readKid(t, repoPath).RestartRequest; req == nil || req.When != restartWhenNow || req.Reason != "wedged" {
+		t.Errorf("restart request = %+v, want one queued for now", req)
+	}
+	want := "clown restart --session " + selfPrincipal + " --when now --reason wedged"
+	if len(*calls) != 1 || strings.Join((*calls)[0].argv, " ") != want {
+		t.Errorf("hand-off calls = %+v, want one with argv %q", *calls, want)
 	}
 }
 
@@ -446,7 +448,9 @@ func TestRestartChildSessionRefusesAConfinedCaller(t *testing.T) {
 	}
 }
 
-func TestRestartChildSessionForceIsRefusedUntilClownAcceptsNow(t *testing.T) {
+// Force queues when=now over a running job and hands off `--when now`, which
+// clown accepts since clown 011db3c (#419).
+func TestRestartChildSessionForceQueuesNowOverARunningJob(t *testing.T) {
 	calls := stubRestartHandoff(t, "", nil)
 	repoPath, wtPath := restartChildFixture(t, "holder", session.State{
 		Holders: []string{"holder"}, HandleRights: map[string]string{"holder": "observe,restart"},
@@ -458,11 +462,15 @@ func TestRestartChildSessionForceIsRefusedUntilClownAcceptsNow(t *testing.T) {
 		t.Fatalf("unforced: want a refusal naming the job, got isErr=%v %q", isErr, text)
 	}
 	text, isErr := callRestartChild(t, `{"child":"worker/kid","force":true,"reason":"wedged"}`)
-	if !isErr || !strings.Contains(text, "--when idle") {
-		t.Fatalf("want a refusal naming that only --when idle is accepted, got isErr=%v %q", isErr, text)
+	if isErr || !strings.Contains(text, "FORCED") {
+		t.Fatalf("want a forced restart queued, got isErr=%v %q", isErr, text)
 	}
-	if readKid(t, repoPath).RestartRequest != nil || len(*calls) != 0 {
-		t.Errorf("a refused forced restart must record nothing and run no hand-off: calls=%+v", *calls)
+	if req := readKid(t, repoPath).RestartRequest; req == nil || req.When != restartWhenNow {
+		t.Errorf("restart request = %+v, want one queued for now", req)
+	}
+	want := []string{"clown", "restart", "--session", childPrincipal, "--when", "now", "--reason", "wedged"}
+	if len(*calls) != 1 || strings.Join((*calls)[0].argv, " ") != strings.Join(want, " ") {
+		t.Errorf("hand-off calls = %+v, want one with argv %q", *calls, want)
 	}
 }
 

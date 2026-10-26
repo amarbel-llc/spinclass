@@ -11,12 +11,12 @@ import (
 )
 
 // fakeClownRestart mirrors the argument contract of clown's `restart` verb as
-// clown/pure-teak stated it from cmd/clown/restart.go (2026-10-25, #419):
-// `clown restart --session KEY [--when idle] [--reason TEXT]`. Each flag
-// consumes the next token as its value; a missing value, an unknown argument, a
-// missing --session, or any --when other than idle exits 2. On success it
-// records the session it was given and exits 0. Update it when clown's verb
-// changes (e.g. when it accepts --when now).
+// clown/pure-teak stated it (2026-10-25, #419; `now` since clown 011db3c,
+// 2026-10-26): `clown restart --session KEY [--when idle|now] [--reason TEXT]`.
+// Each flag consumes the next token as its value; a missing value, an unknown
+// argument, a missing --session, or any --when other than exactly idle or now
+// (NOW, "now ", empty) exits 2. On success it records the session it was given
+// and exits 0. Update it when clown's verb changes.
 const fakeClownRestart = `#!/bin/sh
 [ "$1" = restart ] || { echo "clown: unknown verb $1" >&2; exit 2; }
 shift
@@ -26,8 +26,11 @@ while [ $# -gt 0 ]; do
     --session|--when|--reason)
       [ $# -ge 2 ] || { echo "clown restart: $1 needs a value" >&2; exit 2; }
       if [ "$1" = --session ]; then session=$2; fi
-      if [ "$1" = --when ] && [ "$2" != idle ]; then
-        echo "clown restart: --when \"$2\" is not supported; only idle" >&2; exit 2
+      if [ "$1" = --when ]; then
+        case "$2" in
+          idle|now) ;;
+          *) echo "clown restart: --when \"$2\" is not supported; only idle or now" >&2; exit 2 ;;
+        esac
       fi
       shift 2 ;;
     *) echo "clown restart: unknown argument \"$1\"" >&2; exit 2 ;;
@@ -84,16 +87,32 @@ func TestRestartHandoffMeetsClownContractForChild(t *testing.T) {
 	}
 }
 
-// A forced restart never reaches clown while clown accepts only idle.
-func TestForcedRestartNeverReachesClown(t *testing.T) {
+// A forced restart hands off `--when now`, which clown accepts.
+func TestForcedRestartMeetsClownContract(t *testing.T) {
 	accepted := installFakeClown(t)
-	restartSelfFixture(t, true)
+	repoPath, _ := restartSelfFixture(t, true)
 
-	if text, isErr := callRestartThis(t, `{"force":true}`); !isErr {
-		t.Fatalf("a forced restart must be refused, got %q", text)
+	if text, isErr := callRestartThis(t, `{"force":true}`); isErr {
+		t.Fatalf("clown refused the forced hand-off: %q", text)
 	}
-	if got := accepted(); len(got) != 0 {
-		t.Errorf("clown was handed a forced restart: %q", got)
+	if got := accepted(); len(got) != 1 || got[0] != selfPrincipal {
+		t.Errorf("clown accepted sessions %q, want [%s]", got, selfPrincipal)
+	}
+	if req := readKid(t, repoPath).RestartRequest; req == nil || req.When != "now" {
+		t.Errorf("restart request = %+v, want one queued for now", req)
+	}
+}
+
+// The fake holds clown's exact-match rule for --when: NOW is refused.
+func TestFakeClownRefusesAnInexactWhen(t *testing.T) {
+	installFakeClown(t)
+	restartSelfFixture(t, false)
+	writeGlobalSweatfile(t, os.Getenv("HOME"), "[session-entry]\n"+
+		`restart = ["clown", "restart", "--session", "{principal}", "--when", "NOW"]`+"\n")
+
+	text, isErr := callRestartThis(t, `{}`)
+	if !isErr || !strings.Contains(text, `--when "NOW" is not supported`) {
+		t.Fatalf("want the hand-off to fail on --when NOW, got isErr=%v %q", isErr, text)
 	}
 }
 

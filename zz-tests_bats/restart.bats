@@ -69,21 +69,22 @@ function restart_this_session_hands_off_the_expanded_argv { # @test
   assert_output "argv: <restart> <--session> <$PRINCIPAL> <--when> <idle> <--reason> <need new tools>"
 }
 
-# #419: clown's restart accepts only --when idle, so --force is refused before
-# anything is recorded or handed off, until clown ships --when now.
-function restart_this_session_force_is_refused_until_clown_accepts_now { # @test
+# #419: --force hands off --when now (clown accepts it since clown 011db3c), and
+# the preflight's verdict carries when=now.
+function restart_this_session_force_hands_off_when_now { # @test
   write_global_sweatfile "$RESTART_HANDOFF"
   start_bound_session
 
   CLOWN_SESSION_ID=$PRINCIPAL run_sc restart-this-session --force --reason wedged
-  assert_failure
-  assert_output --partial "--when idle"
+  assert_success
+  assert_output --partial "FORCED"
 
-  [ ! -s "$CLOWN_LOG" ]
+  run cat "$CLOWN_LOG"
+  assert_output "argv: <restart> <--session> <$PRINCIPAL> <--when> <now> <--reason> <wedged>"
 
   CLOWN_SESSION_ID=$PRINCIPAL run --separate-stderr "$SPINCLASS_BIN" restart-preflight
   assert_success
-  echo "$output" | jq -e '.verdict == "none"'
+  echo "$output" | jq -e '.verdict == "restart" and .when == "now"'
 }
 
 function cancel_restart_makes_the_preflight_report_none { # @test

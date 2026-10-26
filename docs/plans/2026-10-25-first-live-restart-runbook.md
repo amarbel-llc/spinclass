@@ -16,10 +16,10 @@ or I (inferred).
   - The closing mark: close sets ClosingAt before it signals the agent
     (249eb17).
   - Design: FDR 0037. (R)
-- clown side: `clown restart --session <principal> [--when idle] [--reason
-  <text>]`. `--when now` and unknown flags exit 2, so spinclass refuses a
-  forced restart up front until clown ships `now` (agreed with
-  clown/pure-teak/pennywise, 2026-10-25). It calls `spinclass restart-preflight` at idle and does not revoke
+- clown side: `clown restart --session <principal> [--when idle|now] [--reason
+  <text>]`. Unknown flags and any other `--when` exit 2. `now` landed at clown
+  011db3c (2026-10-26), and spinclass's forced restart now hands it off. Only
+  the fakes have run it, never a live session. It calls `spinclass restart-preflight` at idle and does not revoke
   the troupe account on a restart exit. Merged at clown 720ffd7, tested only
   against fakes. (R, clown/pure-teak/pennywise)
 - Deployed on flic: spinclass 22e43a0 and clown ca610b0, neither of which has
