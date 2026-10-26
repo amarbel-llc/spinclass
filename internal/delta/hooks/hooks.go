@@ -144,16 +144,21 @@ func isBackgroundShellCall(in hookInput) bool {
 	if backgroundShellTools[in.ToolName] {
 		return true
 	}
-	if in.ToolName != "Bash" {
+	if in.ToolName != "Bash" && in.ToolName != "PowerShell" {
 		return false
 	}
+	// Fail closed: anything present that is not clearly false (a number, "1",
+	// "yes", a nested value) counts as a background request.
 	switch v := in.ToolInput["run_in_background"].(type) {
+	case nil:
+		return false
 	case bool:
 		return v
 	case string:
-		return strings.EqualFold(strings.TrimSpace(v), "true")
+		s := strings.ToLower(strings.TrimSpace(v))
+		return s != "" && s != "false"
 	}
-	return false
+	return true
 }
 
 // permissionModeDontAsk is Claude Code's hook-input permission_mode for a

@@ -25,10 +25,20 @@ func TestDontAskDeniesBackgroundShellToolNames(t *testing.T) {
 	}
 }
 
+func TestDontAskDeniesPowerShellRunInBackground(t *testing.T) {
+	d, r := runWithMode(t, "dontAsk", "PowerShell", map[string]any{"command": "date", "run_in_background": true})
+	if d != "deny" || !strings.Contains(r, backgroundShellMarker) {
+		t.Fatalf("got %q %q, want the background-shell deny", d, r)
+	}
+}
+
 func TestDontAskDeniesBashRunInBackground(t *testing.T) {
 	for name, in := range map[string]map[string]any{
 		"bool true":   {"command": "date", "run_in_background": true},
 		"string true": {"command": "date", "run_in_background": "true"},
+		"mixed case":  {"command": "date", "run_in_background": " True "},
+		"number":      {"command": "date", "run_in_background": 1},
+		"string one":  {"command": "date", "run_in_background": "1"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			d, r := runWithMode(t, "dontAsk", "Bash", in)
@@ -51,6 +61,8 @@ func TestBackgroundShellFloorLeavesEverythingElseAlone(t *testing.T) {
 		{"default mode Monitor", "default", "Monitor", map[string]any{"command": "date"}},
 		{"no mode Monitor", "", "Monitor", map[string]any{"command": "date"}},
 		{"dontAsk foreground Bash", "dontAsk", "Bash", map[string]any{"command": "date", "run_in_background": false}},
+		{"dontAsk foreground Bash, string false", "dontAsk", "Bash", map[string]any{"command": "date", "run_in_background": "false"}},
+		{"dontAsk TaskStop (a worker may stop its own task; policy call, not this floor)", "dontAsk", "TaskStop", map[string]any{"task_id": "x"}},
 		{"dontAsk ringmaster job tool", "dontAsk", "mcp__plugin_clown-builtin-jobs_ringmaster__job_status", map[string]any{"job_id": "x"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
