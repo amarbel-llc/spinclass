@@ -161,6 +161,11 @@
       };
     };
 
+    # tap: code.linenisgreat.com/tap/go (TAP-14 output), bridged via go.nix
+    # flakeInputs (#157). Follows madder's pin, which tommy already follows,
+    # so the lock carries one tap.
+    tap.follows = "madder/tap";
+
     # papi: the Personal API CLI. Pinned into spinclass via
     # `mkSpinclass { papi = ...; }` and burned into the default build's
     # binary (-X main.papiBin). The dynamic system-prompt fragment

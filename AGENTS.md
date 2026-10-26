@@ -181,7 +181,8 @@ Standalone flake against `amarbel-llc/nixpkgs`; the fork's `buildGoApplication`
 injects `-X main.version`/`-X main.commit`. Binary `spinclass` with an `sc`
 symlink; bash + fish completions included. `go.nix` (igloo FDR 0008) is the
 module manifest — no go.mod/go.sum; `flakeInputs` bridge `tommy`, `crap`,
-`ringmaster` and `purse-first/libs/dewey` onto producer `go-pkgs` outputs (bump
+`ringmaster`, `tap/go` (input `tap` follows `madder/tap`, #157) and
+`purse-first/libs/dewey` onto producer `go-pkgs` outputs (bump
 with `nix flake update <input>`); `purse-first` is a direct input
 (`ringmaster.inputs.purse-first.follows`). `ringmaster` is also a test
 `nativeCheckInputs` binary and devShell package (#253). On x86_64-linux the

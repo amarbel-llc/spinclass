@@ -653,6 +653,10 @@
         ],
         "purse-first": "purse-first",
         "ringmaster": "ringmaster",
+        "tap": [
+          "madder",
+          "tap"
+        ],
         "tommy": "tommy",
         "utils": "utils"
       }

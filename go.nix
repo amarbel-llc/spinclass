@@ -20,6 +20,10 @@
     "code.linenisgreat.com/ringmaster" = {
       input = "ringmaster";
     };
+    "code.linenisgreat.com/tap/go" = {
+      input = "tap";
+      subPath = "go";
+    };
     "code.linenisgreat.com/tommy" = {
       input = "tommy";
     };
@@ -37,11 +41,6 @@
       go = "1.26";
       hash = "sha256-nZcZldhbxdD43F424KrFsfowPN3HTzoIqVmiAJovQjw=";
       version = "v0.0.5";
-    };
-    "code.linenisgreat.com/tap/go" = {
-      go = "1.26";
-      hash = "sha256-ifwq9+ER3gl317X0uizQkn2cYTtXiqWwPsFyfHZ91Bs=";
-      version = "v0.2.0";
     };
     "github.com/BurntSushi/toml" = {
       go = "1.18";
