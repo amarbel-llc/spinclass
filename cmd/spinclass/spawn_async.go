@@ -158,6 +158,11 @@ func spawnTimeoutOutcome(pending spawn.Pending, driverPrincipal string, deadline
 	if st, serr := session.Read(pending.RepoPath, pending.Branch); serr == nil {
 		otherHolders = st.OtherHolders(driverPrincipal)
 	}
+	// The reap deletes spawn.log, the only record of why the worker died (#180).
+	logTail := ""
+	if tail := spawn.SpawnLogTail(pending.WorktreePath); tail != "" {
+		logTail = "\nLast lines of the worker's spawn.log (deleted with the worktree):\n" + tail
+	}
 	if rerr := spinclose.RunResolved(io.Discard, pending.RepoPath, pending.WorktreePath, pending.Branch, false, nil, "tap"); rerr != nil {
 		return fmt.Sprintf(
 			"spawn hello timed out after %s and the worker looked dead, but auto-reap failed (%v). Session %q is dangling — reap it with close-child-session.",
@@ -168,8 +173,8 @@ func spawnTimeoutOutcome(pending spawn.Pending, driverPrincipal string, deadline
 		servelog.Errorf("spawn-async: emitExitWakesFn-failed key=%s err=%v", pending.SessionKey, err)
 	}
 	return fmt.Sprintf(
-		"spawn hello timed out after %s; the worker never helloed and looked dead, so session %q was reaped (no work existed). Re-spawn, optionally with a longer hello-timeout.",
-		d, pending.SessionKey,
+		"spawn hello timed out after %s; the worker never helloed and looked dead, so session %q was reaped (no work existed). Re-spawn, optionally with a longer hello-timeout.%s",
+		d, pending.SessionKey, logTail,
 	)
 }
 

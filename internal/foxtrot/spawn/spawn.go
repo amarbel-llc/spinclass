@@ -694,3 +694,29 @@ func SpawnLogActiveWithin(worktreePath string, within time.Duration) bool {
 	}
 	return time.Since(info.ModTime()) <= within
 }
+
+// spawnLogTailLines and spawnLogTailBytes bound SpawnLogTail.
+const (
+	spawnLogTailLines = 10
+	spawnLogTailBytes = 2048
+)
+
+// SpawnLogTail returns the last few lines of the worker's spawn.log (at most
+// spawnLogTailLines and spawnLogTailBytes), or "" when there is none. It is read
+// before a dead worker is reaped, because the reap deletes the log and it is the
+// only record of why the harness died (#180). The log is worker-written: callers
+// show it as data.
+func SpawnLogTail(worktreePath string) string {
+	data, err := os.ReadFile(filepath.Join(worktreePath, ".spinclass", "spawn.log"))
+	if err != nil {
+		return ""
+	}
+	if len(data) > spawnLogTailBytes {
+		data = data[len(data)-spawnLogTailBytes:]
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) > spawnLogTailLines {
+		lines = lines[len(lines)-spawnLogTailLines:]
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -170,5 +171,56 @@ func TestSpawnTimeoutOutcomeEmitsCrashOnAutoReap(t *testing.T) {
 	}
 	if got := strings.Join(gotHolders, ","); got != "sibling-a" {
 		t.Errorf("holders = %q, want %q (driver excluded)", got, "sibling-a")
+	}
+}
+
+// #180: the auto-reap deletes the worktree and with it spawn.log, the only
+// record of why the worker died (the harness's stderr), so the wake carries the
+// log's tail instead of a bare "looked dead".
+func TestSpawnTimeoutOutcomeCarriesTheDeadWorkersLogTail(t *testing.T) {
+	testgit.RequireGit(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	repoPath := filepath.Join(t.TempDir(), "worker")
+	testgit.MustInit(t, repoPath)
+	if err := os.WriteFile(filepath.Join(repoPath, "sweatfile"), []byte("[hooks]\ndisable-nix-gc = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wtPath := filepath.Join(repoPath, ".worktrees", "feat-4")
+	testgit.MustWorktreeAdd(t, repoPath, wtPath, "feat-4")
+	if err := os.WriteFile(filepath.Join(repoPath, ".git", "info", "exclude"), []byte(".spinclass/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.Write(session.State{
+		SessionState: session.StateInactive, RepoPath: repoPath, WorktreePath: wtPath, Branch: "feat-4",
+		SessionKey: "worker/feat-4", Entrypoint: []string{"/bin/sh"}, StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(wtPath, ".spinclass", "spawn.log")
+	var log strings.Builder
+	for i := 0; i < 40; i++ {
+		fmt.Fprintf(&log, "early line %d\n", i)
+	}
+	log.WriteString("clown: profile \"worker\" not found\n")
+	if err := os.WriteFile(logPath, []byte(log.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(logPath, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	orig := emitExitWakesFn
+	emitExitWakesFn = func([]string, string, clown.ExitReason) error { return nil }
+	t.Cleanup(func() { emitExitWakesFn = orig })
+
+	msg := spawnTimeoutOutcome(spawn.Pending{SessionKey: "worker/feat-4", RepoPath: repoPath, WorktreePath: wtPath, Branch: "feat-4"}, "driver", 90*time.Second)
+
+	if !strings.Contains(msg, "reaped") || !strings.Contains(msg, `clown: profile "worker" not found`) {
+		t.Fatalf("the reap message lacks the log's last line:\n%s", msg)
+	}
+	if strings.Contains(msg, "early line 0\n") {
+		t.Errorf("the whole log was included, want a bounded tail:\n%s", msg)
 	}
 }
