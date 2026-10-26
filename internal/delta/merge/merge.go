@@ -856,7 +856,7 @@ func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, push,
 	// must not remove the tree under an agent that is still running in it
 	// (#409). Such a session is treated as in-session: the work lands, the
 	// worktree, branch and state stay, and `sc close` remains the teardown.
-	live := !inSession && !insideWorktree && sessionIsLive(repoPath, branch)
+	live := !inSession && !insideWorktree && SessionIsLive(repoPath, branch)
 	if live {
 		ts.Ok("keep worktree " + branch + " (its session is live; run sc close once its agent is done)")
 	}
@@ -927,12 +927,12 @@ func teardownAndPush(ts *crap.TestStream, repoPath, wtPath, branch string, push,
 	return nil
 }
 
-// sessionIsLive reports whether the session on branch still has a running
+// SessionIsLive reports whether the session on branch still has a running
 // agent: a fresh clown presence record for its key (clown RFC-0014; a stale or
 // missing record is dead), or a recorded active state whose PID is alive. The
-// PID is worker-writable, but this answer only ever KEEPS a worktree, so a
-// forged one cannot cause a removal.
-func sessionIsLive(repoPath, branch string) bool {
+// PID is worker-writable, but this answer only ever KEEPS a worktree (here and
+// in `sc clean`, #231), so a forged one cannot cause a removal.
+func SessionIsLive(repoPath, branch string) bool {
 	key := sessionKeyFor(repoPath, branch)
 	if len(clown.PresenceByDecoration(time.Now().UTC())[key]) > 0 {
 		return true

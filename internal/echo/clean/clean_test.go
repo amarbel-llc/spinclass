@@ -14,6 +14,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/profilegrant"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/alfa/grantstore"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/bravo/nixgc"
 	"code.linenisgreat.com/spinclass/internal/charlie/auth"
 	tap "code.linenisgreat.com/tap/go/pkgs/writer"
@@ -105,6 +106,38 @@ func TestScanWorktreesOriginLandedIsMerged(t *testing.T) {
 	}
 	if !found.merged {
 		t.Errorf("landed-x scanned as unmerged; its commit is on origin/main")
+	}
+}
+
+// #231: a merged worktree whose session is active with a live PID scans as
+// live, so clean skips it; one with no live agent does not.
+func TestScanWorktreesMarksALiveSession(t *testing.T) {
+	root, repoDir := setupRepo(t)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
+	for _, b := range []string{"live-x", "idle-x"} {
+		wtPath := filepath.Join(repoDir, ".worktrees", b)
+		runGit(t, repoDir, "worktree", "add", "-b", b, wtPath)
+		st := session.State{
+			SessionState: session.StateActive, RepoPath: repoDir, WorktreePath: wtPath,
+			Branch: b, SessionKey: filepath.Base(repoDir) + "/" + b, StartedAt: time.Now().UTC(),
+		}
+		if b == "live-x" {
+			st.PID = os.Getpid()
+		}
+		if err := session.Write(st); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	live := map[string]bool{}
+	for _, wt := range scanWorktrees(root) {
+		live[wt.branch] = wt.live
+	}
+	if !live["live-x"] {
+		t.Error("live-x (active, live PID) did not scan as live")
+	}
+	if live["idle-x"] {
+		t.Error("idle-x (no live PID, no presence) scanned as live")
 	}
 }
 

@@ -82,11 +82,16 @@ type worktreeInfo struct {
 	merged       bool
 	dirty        bool
 	shelved      bool
+	live         bool // its session's agent still runs (#231)
 }
 
 // The shelf dies with the worktree (FDR 0036 section 4), so clean never reaps a
 // worktree whose shelf is not provably empty.
 const shelvedSkipReason = "stash shelf not empty (drop its entries first)"
+
+// A merged worktree whose agent still runs is a session between merge cycles,
+// not litter (#231).
+const liveSkipReason = "session still running (close it first)"
 
 func scanWorktrees(startDir string) []worktreeInfo {
 	var worktrees []worktreeInfo
@@ -104,6 +109,7 @@ func scanWorktrees(startDir string) []worktreeInfo {
 			branch := filepath.Base(wtPath)
 
 			ahead := git.CommitsUnintegrated(wtPath, defaultBranch, branch)
+			merged := ahead == 0
 			porcelain := git.StatusPorcelain(wtPath)
 
 			worktrees = append(worktrees, worktreeInfo{
@@ -111,9 +117,10 @@ func scanWorktrees(startDir string) []worktreeInfo {
 				branch:       branch,
 				repoPath:     repoPath,
 				worktreePath: wtPath,
-				merged:       ahead == 0,
+				merged:       merged,
 				dirty:        porcelain != "",
 				shelved:      gitstore.ShelfNotEmpty(wtPath),
+				live:         merged && merge.SessionIsLive(repoPath, branch),
 			})
 		}
 	}
@@ -552,7 +559,7 @@ func resolveTombstoneRetention(startDir string) time.Duration {
 type cleanAction struct {
 	wt     worktreeInfo
 	label  string
-	action string // "remove", "skip-dirty", "skip-shelved", "interactive"
+	action string // "remove", "skip-dirty", "skip-shelved", "skip-live", "interactive"
 }
 
 func planClean(worktrees []worktreeInfo, interactive bool) []cleanAction {
@@ -562,7 +569,9 @@ func planClean(worktrees []worktreeInfo, interactive bool) []cleanAction {
 			continue
 		}
 		label := filepath.Join(wt.repo, worktree.WorktreesDir) + "/" + styleCode.Render(wt.branch)
-		if wt.shelved {
+		if wt.live {
+			actions = append(actions, cleanAction{wt: wt, label: label, action: "skip-live"})
+		} else if wt.shelved {
 			actions = append(actions, cleanAction{wt: wt, label: label, action: "skip-shelved"})
 		} else if !wt.dirty {
 			actions = append(actions, cleanAction{wt: wt, label: label, action: "remove"})
@@ -610,6 +619,12 @@ func emitPlan(tw *tap.Writer, actions []cleanAction, abandonedCount int, tombsto
 				tw.Skip("remove "+a.label, shelvedSkipReason)
 			} else {
 				log.Warn("skipping worktree with a stash shelf", "worktree", a.label)
+			}
+		case "skip-live":
+			if tw != nil {
+				tw.Skip("remove "+a.label, liveSkipReason)
+			} else {
+				log.Warn("skipping worktree of a running session", "worktree", a.label)
 			}
 		}
 	}
@@ -747,6 +762,12 @@ func executeClean(tw *tap.Writer, actions []cleanAction, abandoned []session.Sta
 				tw.Skip("remove "+a.label, shelvedSkipReason)
 			} else {
 				log.Warn("skipping worktree with a stash shelf", "branch", a.wt.branch)
+			}
+		case "skip-live":
+			if tw != nil {
+				tw.Skip("remove "+a.label, liveSkipReason)
+			} else {
+				log.Warn("skipping worktree of a running session", "branch", a.wt.branch)
 			}
 		}
 	}
