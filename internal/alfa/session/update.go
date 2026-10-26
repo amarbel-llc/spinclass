@@ -62,9 +62,10 @@ func withStateLock(lockPath string, fn func() error) error {
 // it takes the flock that sits beside the frontend record (frontend state, not
 // the worker-writable worktree), Reads, calls fn, and writes atomically. An error
 // from fn aborts without writing. A missing or closed (tombstoned) session is
-// os.ErrNotExist; fn is not called. Only the pre-merge attestation is routed
-// through it so far; migrating every other read-modify-write caller is
-// tracked in #348.
+// os.ErrNotExist; fn is not called. Every read-modify-write of a live session
+// goes through it (#348), so concurrent writers of different fields cannot drop
+// each other's update. Write stays for creating a session from scratch and for
+// the tombstone and legacy-migration paths.
 func Update(repoPath, branch string, fn func(*State) error) error {
 	migrateOnce()
 	if err := validBranch(branch); err != nil {

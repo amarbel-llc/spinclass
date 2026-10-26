@@ -389,12 +389,28 @@ func recordOwnPrincipal(cwd, principal string) {
 			sessionlog.Errorf("recordOwnPrincipal kept key=%s recorded principal differs and its process is alive", st.SessionKey)
 			return
 		}
-		st.Principal = principal
-		if err := session.Write(*st); err != nil {
+		if err := updateSessionState(st, func(cur *session.State) { cur.Principal = principal }); err != nil {
 			sessionlog.Errorf("recordOwnPrincipal write-failed key=%s err=%v", st.SessionKey, err)
 		}
 	}
 	bindUnconfinedPrincipal(st, principal)
+}
+
+// updateSessionState applies mutate to st's session under the session lock
+// (#348), so a concurrent writer of another field is not overwritten by st's
+// stale copy; st is refreshed from what was written. Inside a confined unit the
+// frontend record (and its lock) is unreachable and Write touches only the
+// display copy, so mutate is applied to st and written without the lock there.
+func updateSessionState(st *session.State, mutate func(cur *session.State)) error {
+	if session.InUnit() {
+		mutate(st)
+		return session.Write(*st)
+	}
+	return session.Update(st.RepoPath, st.Branch, func(cur *session.State) error {
+		mutate(cur)
+		*st = *cur
+		return nil
+	})
 }
 
 // bindUnconfinedPrincipal writes the frontend principal mapping for an
@@ -469,18 +485,21 @@ func maybeSendSpawnHello(cwd, poshSessionID string) {
 	}
 	hookTrace(cwd, "hello: sent key=%s to=%s", st.SessionKey, helloTarget)
 	now := time.Now().UTC()
-	st.HelloSentAt = &now
 	// os.Getppid() is best-effort, same caveat as the implicit path: the
 	// hook handler is a short-lived subprocess whose parent may be the
 	// Claude process or a transient shell wrapper. Inside a confined unit
 	// (CLOWN_UNIT) it is a pid in the unit's own namespace, meaningless to
 	// the frontend, so none is recorded there (FDR 0035 "Session PIDs are
 	// untrusted").
-	if os.Getenv("CLOWN_UNIT") == "" {
-		st.PID = os.Getppid()
-	}
-	st.SessionState = session.StateActive
-	if err := session.Write(*st); err != nil {
+	recordPID := os.Getenv("CLOWN_UNIT") == ""
+	ppid := os.Getppid()
+	if err := updateSessionState(st, func(cur *session.State) {
+		cur.HelloSentAt = &now
+		if recordPID {
+			cur.PID = ppid
+		}
+		cur.SessionState = session.StateActive
+	}); err != nil {
 		sessionlog.Errorf("maybeSendSpawnHello write-failed key=%s err=%v", st.SessionKey, err)
 		hookTrace(cwd, "hello: state write failed key=%s: %v", st.SessionKey, err)
 	}

@@ -243,7 +243,9 @@ func runCloseChild(p closeChildParams) (string, error) {
 	// same call that first uses the handle is the one it authorizes.
 	if child.IsPendingHolder(callerPrincipal) {
 		child.AcceptHandle(callerPrincipal)
-		if err := session.Write(*child); err != nil {
+		if err := updateLoadedSession(child, func(cur *session.State) bool {
+			return cur.AcceptHandle(callerPrincipal)
+		}); err != nil {
 			return "", fmt.Errorf("accepting handle on %s: %w", child.Key(), err)
 		}
 	}

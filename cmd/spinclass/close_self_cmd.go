@@ -154,8 +154,11 @@ func runCloseThisSession(args json.RawMessage) (string, error) {
 		return "", errors.New(obstacle)
 	}
 
-	st.CloseRequest = &session.CloseRequest{RequestedAt: time.Now().UTC(), Principal: principal}
-	if err := session.Write(*st); err != nil {
+	request := &session.CloseRequest{RequestedAt: time.Now().UTC(), Principal: principal}
+	if err := updateLoadedSession(st, func(cur *session.State) bool {
+		cur.CloseRequest = request
+		return true
+	}); err != nil {
 		return "", fmt.Errorf("recording the close request: %w", err)
 	}
 	return fmt.Sprintf(
@@ -207,8 +210,10 @@ func runCloseSelfRun(target string) error {
 	principal, principalErr := closeRunnerPrincipal(st, implied)
 
 	fail := func(reason error) error {
-		st.CloseRequest = nil
-		if werr := session.Write(*st); werr != nil {
+		if werr := updateLoadedSession(st, func(cur *session.State) bool {
+			cur.CloseRequest = nil
+			return true
+		}); werr != nil {
 			servelog.Errorf("close-self-run clear-request-failed key=%s err=%v", st.Key(), werr)
 		}
 		if werr := emitExitWakesFn(st.OtherHolders(principal), st.Key(), clown.ExitFailed); werr != nil {

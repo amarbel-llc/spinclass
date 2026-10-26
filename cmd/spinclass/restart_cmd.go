@@ -155,20 +155,25 @@ func queueRestart(st *session.State, requester, principal, reason string, force 
 	if force {
 		when = restartWhenNow
 	}
-	st.RestartRequest = &session.RestartRequest{
+	request := &session.RestartRequest{
 		RequestedAt: time.Now().UTC(),
 		Requester:   requester,
 		Reason:      reason,
 		When:        when,
 	}
-	if err := session.Write(*st); err != nil {
+	if err := updateLoadedSession(st, func(cur *session.State) bool {
+		cur.RestartRequest = request
+		return true
+	}); err != nil {
 		return "", fmt.Errorf("recording the restart request: %w", err)
 	}
 
 	expanded := expandRestartHandoff(argv, principal, st.Key(), when, reason)
 	if out, herr := restartHandoffFn(st.WorktreePath, expanded); herr != nil {
-		st.RestartRequest = nil
-		if werr := session.Write(*st); werr != nil {
+		if werr := updateLoadedSession(st, func(cur *session.State) bool {
+			cur.RestartRequest = nil
+			return true
+		}); werr != nil {
 			servelog.Errorf("restart clear-request-failed key=%s err=%v", st.Key(), werr)
 		}
 		return "", fmt.Errorf("the restart hand-off %q failed (%v), so nothing was queued: %s", expanded[0], herr, out)
@@ -312,7 +317,9 @@ func authorizeRestartChild(tool, target string) (child *session.State, callerPri
 	}
 	if child.IsPendingHolder(callerPrincipal) {
 		child.AcceptHandle(callerPrincipal)
-		if err := session.Write(*child); err != nil {
+		if err := updateLoadedSession(child, func(cur *session.State) bool {
+			return cur.AcceptHandle(callerPrincipal)
+		}); err != nil {
 			return nil, "", fmt.Errorf("accepting handle on %s: %w", child.Key(), err)
 		}
 	}
@@ -463,8 +470,10 @@ func runRestartPreflight(target string) (restartVerdict, error) {
 	req := *st.RestartRequest
 
 	consume := func() error {
-		st.RestartRequest = nil
-		return session.Write(*st)
+		return updateLoadedSession(st, func(cur *session.State) bool {
+			cur.RestartRequest = nil
+			return true
+		})
 	}
 	principal, principalErr := ownerPrincipal(st, implied, "restart",
 		fmt.Sprintf("Its holders (%s) are told; the operator can restart it from a terminal outside the session.", holdersOrNone(st.Holders)))
@@ -575,8 +584,11 @@ func runCancelRestart(p cancelRestartParams) (string, error) {
 		return fmt.Sprintf("no restart is queued for %s, so there is nothing to cancel", st.Key()), nil
 	}
 	req := *st.RestartRequest
-	st.RestartRequest = nil
-	if err := session.Write(*st); err != nil {
+	if err := updateLoadedSession(st, func(cur *session.State) bool {
+		cleared := cur.RestartRequest != nil
+		cur.RestartRequest = nil
+		return cleared
+	}); err != nil {
 		return "", fmt.Errorf("clearing the restart request: %w", err)
 	}
 	notifyRestartCancelled(st, req, caller, sessionsOwnID)

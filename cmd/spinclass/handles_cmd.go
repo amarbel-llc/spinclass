@@ -133,6 +133,28 @@ func guardHandleTarget(child *session.State, verb string) error {
 	return nil
 }
 
+// errNoStateChange aborts a session.Update without writing.
+var errNoStateChange = errors.New("no state change")
+
+// updateLoadedSession is a locked read-modify-write (#348) of the worktree
+// session st was loaded from: mutate runs on the freshly read record under the
+// session lock, so a concurrent writer of another field is not overwritten by
+// st's stale copy. mutate reports whether it changed anything; if not, nothing
+// is written. On a write st is refreshed from the record that was written.
+func updateLoadedSession(st *session.State, mutate func(cur *session.State) (changed bool)) error {
+	err := session.Update(st.RepoPath, st.Branch, func(cur *session.State) error {
+		if !mutate(cur) {
+			return errNoStateChange
+		}
+		*st = *cur
+		return nil
+	})
+	if errors.Is(err, errNoStateChange) {
+		return nil
+	}
+	return err
+}
+
 // grantHandleParams is the parameter set of the `grant-session-handle` tool
 // (FDR 0032 D12).
 type grantHandleParams struct {
@@ -219,7 +241,9 @@ func grantSessionHandle(target, to, rights string) (string, error) {
 		// flow), so this is reported as success, not a refusal, but the caller's
 		// own accept-on-first-use promotion (if any) still needs to land.
 		if callerAccepted {
-			if err := session.Write(*child); err != nil {
+			if err := updateLoadedSession(child, func(cur *session.State) bool {
+				return cur.AcceptHandle(callerPrincipal)
+			}); err != nil {
 				return "", fmt.Errorf("writing session state: %w", err)
 			}
 		}
@@ -228,7 +252,11 @@ func grantSessionHandle(target, to, rights string) (string, error) {
 			to, child.Key(),
 		), nil
 	}
-	if err := session.Write(*child); err != nil {
+	if err := updateLoadedSession(child, func(cur *session.State) bool {
+		accepted := callerAccepted && cur.AcceptHandle(callerPrincipal)
+		granted := cur.GrantHandle(to, wanted.String())
+		return accepted || granted
+	}); err != nil {
 		return "", fmt.Errorf("writing session state: %w", err)
 	}
 
@@ -325,11 +353,16 @@ func releaseSessionHandle(target string) (string, error) {
 	}
 	// A release by the spawner (a transfer is grant then release) ends its
 	// authority through the session-key path too, not just its Holders entry.
-	if (child.SpawnedByPrincipal != "" && callerPrincipal == child.SpawnedByPrincipal) ||
-		(callerKey != "" && callerKey == child.SpawnedBy) {
-		child.SpawnerReleased = true
-	}
-	if err := session.Write(*child); err != nil {
+	spawnerReleased := (child.SpawnedByPrincipal != "" && callerPrincipal == child.SpawnedByPrincipal) ||
+		(callerKey != "" && callerKey == child.SpawnedBy)
+	if err := updateLoadedSession(child, func(cur *session.State) bool {
+		released := cur.ReleaseHandle(callerPrincipal)
+		if spawnerReleased && !cur.SpawnerReleased {
+			cur.SpawnerReleased = true
+			released = true
+		}
+		return released
+	}); err != nil {
 		return "", fmt.Errorf("writing session state: %w", err)
 	}
 
@@ -421,7 +454,9 @@ func runListHandles(p listHandlesParams) (string, error) {
 			if gerr := guardHandleTarget(s, "accept"); gerr != nil {
 				note = fmt.Sprintf(" (accept skipped: %v)", gerr)
 			} else if s.AcceptHandle(callerPrincipal) {
-				if werr := session.Write(*s); werr != nil {
+				if werr := updateLoadedSession(s, func(cur *session.State) bool {
+					return cur.AcceptHandle(callerPrincipal)
+				}); werr != nil {
 					note = fmt.Sprintf(" (accept failed: %v)", werr)
 				} else {
 					pending = false

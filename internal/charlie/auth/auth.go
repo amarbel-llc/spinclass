@@ -453,12 +453,23 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 	if rc := sf.AuthRevokeCommand(); rc != nil {
 		pinned = strings.TrimSpace(*rc)
 	}
-	st.Credential = &session.Credential{
+	cred := &session.Credential{
 		MintedAt:      time.Now().UTC(),
 		Remote:        res.record(),
 		RevokeCommand: &pinned,
 	}
-	if err := session.Write(*st); err != nil {
+	// A locked update (#348) so a concurrent writer of another field survives;
+	// a session with nothing persisted yet (EnsureWorktreeState synthesized st)
+	// is created instead.
+	err = session.Update(id.RepoPath, id.Branch, func(cur *session.State) error {
+		cur.Credential = cred
+		return nil
+	})
+	if errors.Is(err, os.ErrNotExist) {
+		st.Credential = cred
+		err = session.Write(*st)
+	}
+	if err != nil {
 		return MintOutcome{}, fmt.Errorf("[auth] record mint: %w", err)
 	}
 	outcome := MintOutcome{Minted: true}

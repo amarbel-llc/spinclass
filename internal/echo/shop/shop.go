@@ -512,7 +512,10 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 	// match — presence (decoration == session key) is the liveness source now.
 	// A missing/stale presence record degrades to inactive (never false-alive).
 	now := time.Now().UTC()
-	if existing, err := session.Read(rp.RepoPath, rp.Branch); err == nil {
+	// A locked update (#348): a handle grant or restart request landing while
+	// the entrypoint ran must survive this write. A session with no record is
+	// skipped, as it was when the read failed.
+	writeErr := session.Update(rp.RepoPath, rp.Branch, func(existing *session.State) error {
 		existing.PID = 0
 		existing.ExitedAt = &now
 		if len(clown.PresenceByDecoration(now)[existing.SessionKey]) > 0 {
@@ -520,9 +523,10 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 		} else {
 			existing.SessionState = session.StateInactive
 		}
-		if writeErr := session.Write(*existing); writeErr != nil {
-			log.Warn("failed to update session state", "err", writeErr)
-		}
+		return nil
+	})
+	if writeErr != nil && !errors.Is(writeErr, os.ErrNotExist) {
+		log.Warn("failed to update session state", "err", writeErr)
 	}
 
 	// Fire on-detach hook AFTER state is committed so the hook can

@@ -295,8 +295,10 @@ func runUpdateDescription(description, id string) error {
 		if !worktree.IsWorktree(cwd) {
 			implicit, randID, ferr := session.FindImplicitAtCwd(cwd)
 			if ferr == nil && implicit != nil {
-				implicit.Description = description
-				return session.WriteImplicit(*implicit, randID)
+				return session.UpdateImplicit(implicit.WorktreePath, randID, func(cur *session.State) error {
+					cur.Description = description
+					return nil
+				})
 			}
 		}
 		state, err = session.FindByWorktreePath(cwd)
@@ -328,8 +330,22 @@ func runUpdateDescription(description, id string) error {
 		)
 	}
 
-	state.Description = description
-	return session.Write(*state)
+	return setWorktreeDescription(state, description)
+}
+
+// setWorktreeDescription is a locked update (#348) of st's description. A state
+// with nothing persisted to update (one synthesized for an untracked worktree,
+// #161) is created instead.
+func setWorktreeDescription(st *session.State, description string) error {
+	err := session.Update(st.RepoPath, st.Branch, func(cur *session.State) error {
+		cur.Description = description
+		return nil
+	})
+	if errors.Is(err, os.ErrNotExist) {
+		st.Description = description
+		return session.Write(*st)
+	}
+	return err
 }
 
 // gatherListData collects the raw inputs every `sc list` renderer shares:

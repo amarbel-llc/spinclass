@@ -1091,8 +1091,10 @@ func handleUpdateDescription(_ context.Context, args json.RawMessage, _ command.
 		if ferr != nil || implicit == nil {
 			return command.TextErrorResult("not inside a worktree session"), nil
 		}
-		implicit.Description = params.Description
-		if err := session.WriteImplicit(*implicit, randID); err != nil {
+		if err := session.UpdateImplicit(implicit.WorktreePath, randID, func(cur *session.State) error {
+			cur.Description = params.Description
+			return nil
+		}); err != nil {
 			return command.TextErrorResult(fmt.Sprintf("could not write session state: %v", err)), nil
 		}
 		return command.TextResult(fmt.Sprintf("description updated to: %s", params.Description)), nil
@@ -1117,8 +1119,7 @@ func handleUpdateDescription(_ context.Context, args json.RawMessage, _ command.
 		return command.TextErrorResult(fmt.Sprintf("could not read session state: %v", err)), nil
 	}
 
-	st.Description = params.Description
-	if err := session.Write(*st); err != nil {
+	if err := setWorktreeDescription(st, params.Description); err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not write session state: %v", err)), nil
 	}
 

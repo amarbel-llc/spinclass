@@ -511,11 +511,33 @@ func Read(repoPath, branch string) (*State, error) {
 // store holds the session: the frontend record for a live session, or the
 // tombstone at the index path for a closed one (the orphan sweeper's
 // case, FDR 0028). A missing session is os.ErrNotExist.
+//
+// A live session is updated under the same lock as Update (#348), so a
+// concurrent writer of another field is not overwritten. A tombstone is
+// written unlocked: closing is final and takes the record (and its lock) away.
 func UpdateCredential(repoPath, branch string, c *Credential) error {
 	st, err := Read(repoPath, branch)
 	if err != nil {
 		return err
 	}
+	if st.isTombstone {
+		return storeCredential(repoPath, branch, st, c)
+	}
+	if err := os.MkdirAll(recordsDir(), 0o700); err != nil {
+		return err
+	}
+	wt := worktreeFromRepoBranch(repoPath, branch)
+	return withStateLock(recordPath(wt)+".lock", func() error {
+		cur, err := Read(repoPath, branch)
+		if err != nil {
+			return err
+		}
+		return storeCredential(repoPath, branch, cur, c)
+	})
+}
+
+// storeCredential sets st.Credential and writes st to whichever store holds it.
+func storeCredential(repoPath, branch string, st *State, c *Credential) error {
 	st.Credential = c
 	wt := worktreeFromRepoBranch(repoPath, branch)
 	if st.isTombstone {

@@ -363,10 +363,12 @@ func runRebuild(_ context.Context, args json.RawMessage) error {
 		return ferr
 	}
 	now := time.Now().UTC()
-	state.SetupFingerprint = hash
-	state.SetupScheme = scheme
-	state.SetupAt = &now
-	if err := session.Write(*state); err != nil {
+	if err := updateLoadedSession(state, func(cur *session.State) bool {
+		cur.SetupFingerprint = hash
+		cur.SetupScheme = scheme
+		cur.SetupAt = &now
+		return true
+	}); err != nil {
 		return fmt.Errorf("updating session state: %w", err)
 	}
 	_, _ = fmt.Fprintf(os.Stdout, "rebuilt %s\n", state.Key())
