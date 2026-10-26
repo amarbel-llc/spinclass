@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/0/hungstatus"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 )
@@ -273,6 +274,65 @@ func TestRestartWatchWakesRequesterAndHoldersWhenNotBack(t *testing.T) {
 		if !strings.Contains(msg, want) {
 			t.Errorf("message %q lacks %q", msg, want)
 		}
+	}
+}
+
+func stubRestartRefusal(t *testing.T, r *hungstatus.RestartRefusal) {
+	t.Helper()
+	orig := restartRefusalOf
+	restartRefusalOf = func(*session.State) *hungstatus.RestartRefusal { return r }
+	t.Cleanup(func() { restartRefusalOf = orig })
+}
+
+// A restart clown dropped at its profile gate leaves the old session running: the
+// watchdog says so instead of "has not come back".
+func TestRestartWatchSaysWhenClownCancelledTheRestart(t *testing.T) {
+	notified := stubNotifyPrincipal(t)
+	repoPath, _ := restartSelfFixture(t, true)
+	since := time.Now().UTC().Add(-6 * time.Minute)
+	seedRestarting(t, repoPath, since, func(st *session.State) { st.Holders = []string{"spawner", selfPrincipal} })
+	stubRestartRefusal(t, &hungstatus.RestartRefusal{
+		At: since.Add(30 * time.Second), Kind: "profile-gate", Profile: "scratch",
+		Text: "pinned profile changed\nsince the grant",
+	})
+	if err := runRestartWatch("worker/kid", since.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if len(*notified) == 0 {
+		t.Fatal("no wake")
+	}
+	msg := (*notified)[0].message
+	for _, want := range []string{"worker/kid", "CANCELLED", "profile-gate", "profile scratch", "pinned profile changed since the grant", "ask again", "re-pin", "still running"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message %q lacks %q", msg, want)
+		}
+	}
+	if strings.Contains(msg, "has not come back") || strings.ContainsAny(msg, "\n") {
+		t.Errorf("message must be the cancellation, on one line: %q", msg)
+	}
+}
+
+// A refusal record left over from an earlier restart (older than this one) is
+// not this restart's explanation.
+func TestRestartWatchIgnoresAStaleRefusal(t *testing.T) {
+	notified := stubNotifyPrincipal(t)
+	repoPath, _ := restartSelfFixture(t, true)
+	since := time.Now().UTC().Add(-6 * time.Minute)
+	seedRestarting(t, repoPath, since, nil)
+	stubRestartRefusal(t, &hungstatus.RestartRefusal{At: since.Add(-time.Hour), Kind: "profile-gate", Text: "old"})
+	if err := runRestartWatch("worker/kid", since.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if len(*notified) == 0 || !strings.Contains((*notified)[0].message, "has not come back") {
+		t.Errorf("a stale refusal must not replace the not-back wake: %+v", *notified)
+	}
+}
+
+func TestRestartRefusalMessageBoundsTheText(t *testing.T) {
+	long := strings.Repeat("x", 1000)
+	msg := restartRefusalMessage("r/b", &hungstatus.RestartRefusal{At: time.Unix(0, 0), Kind: "resume", Text: long})
+	if len(msg) > 700 || !strings.Contains(msg, "...") {
+		t.Errorf("text not bounded (len %d)", len(msg))
 	}
 }
 

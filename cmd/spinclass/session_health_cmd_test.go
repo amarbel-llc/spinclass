@@ -50,6 +50,22 @@ func TestSessionHealthVerdicts(t *testing.T) {
 	}
 }
 
+func TestSessionHealthShowsAClownCancelledRestart(t *testing.T) {
+	st := &session.State{SessionKey: "r/w"}
+	status := &hungstatus.Status{SessionKey: "r/w", RestartRefusal: &hungstatus.RestartRefusal{
+		At: healthNow.Add(-time.Minute), Kind: "profile-gate", Text: "pinned profile changed\x00",
+	}}
+	_, why := sessionHealth(st, fakeHealthDeps(status, hungstatus.FrontendLive, false))
+	for _, want := range []string{"last restart cancelled by clown (profile-gate)", "pinned profile changed"} {
+		if !strings.Contains(why, want) {
+			t.Errorf("why %q lacks %q", why, want)
+		}
+	}
+	if strings.ContainsRune(why, 0) {
+		t.Error("control characters must be stripped")
+	}
+}
+
 func TestUnitNote(t *testing.T) {
 	start := healthNow.Add(-2 * 24 * time.Hour)
 	for name, tc := range map[string]struct {

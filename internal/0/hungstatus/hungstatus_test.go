@@ -50,6 +50,25 @@ func TestReadParsesTheContractFields(t *testing.T) {
 	}
 }
 
+// clown 66e0642f4a9c: an optional, frontend-written restart_refusal record; the
+// status version stays 1 and the field is omitted when there is none.
+func TestReadParsesTheRestartRefusal(t *testing.T) {
+	state := t.TempDir()
+	writeStatus(t, state, "p", fmt.Sprintf(`{"version":1,"restart_refusal":{"at":%q,"kind":"profile-gate","profile":"scratch","pinned_digest":"","current_digest":"","text":"the pinned profile changed"}}`, t0.Format(stamp)))
+	s, err := Read(state, "p")
+	if err != nil || s == nil || s.RestartRefusal == nil {
+		t.Fatalf("got %+v, %v", s, err)
+	}
+	r := s.RestartRefusal
+	if !r.At.Equal(t0) || r.Kind != "profile-gate" || r.Profile != "scratch" || r.Text != "the pinned profile changed" {
+		t.Errorf("refusal = %+v", r)
+	}
+	writeStatus(t, state, "q", `{"version":1}`)
+	if s, _ := Read(state, "q"); s == nil || s.RestartRefusal != nil {
+		t.Errorf("no restart_refusal must read as nil, got %+v", s)
+	}
+}
+
 func TestReadAbsentIsNilNotAnError(t *testing.T) {
 	if s, err := Read(t.TempDir(), "nobody"); s != nil || err != nil {
 		t.Fatalf("got %+v, %v; want nil, nil", s, err)

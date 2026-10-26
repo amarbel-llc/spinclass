@@ -15,6 +15,7 @@ import (
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/0/clown"
+	"code.linenisgreat.com/spinclass/internal/0/hungstatus"
 	"code.linenisgreat.com/spinclass/internal/alfa/job"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
@@ -628,6 +629,33 @@ func armRestartWatchdog(st *session.State, restartingAt time.Time) {
 	}
 }
 
+// restartRefusalOf reads the frontend's restart_refusal record for st from clown's
+// status file (a seam for tests). nil when there is none or it cannot be read.
+var restartRefusalOf = func(st *session.State) *hungstatus.RestartRefusal {
+	d := productionHealthDeps()
+	principal, err := d.Principal(st)
+	if err != nil {
+		return nil
+	}
+	status, err := d.ReadStatus(principal)
+	if err != nil || status == nil || (status.SessionKey != "" && status.SessionKey != st.Key()) {
+		return nil
+	}
+	return status.RestartRefusal
+}
+
+// restartRefusalMessage is the holders' wake for a restart clown cancelled. The
+// text comes from clown's record: bounded and stripped of control characters.
+func restartRefusalMessage(key string, r *hungstatus.RestartRefusal) string {
+	text := restartRefusalText(r.Text)
+	what := r.Kind
+	if r.Profile != "" {
+		what += ", profile " + r.Profile
+	}
+	return fmt.Sprintf("the restart of %s was CANCELLED by clown (%s) at %s: %s. The session is still running on its old process; the requester must ask again, and an operator re-pin may be needed if the profile changed",
+		key, what, r.At.UTC().Format(time.RFC3339), text)
+}
+
 // runRestartWatch is `restart-watch`, run by the watchdog timer: it tells the
 // requester and holders when the restart that began at sinceRaw never produced a
 // return mark. Silent (nil) when the session came back, is gone or closing, or a
@@ -657,6 +685,11 @@ func runRestartWatch(target, sinceRaw string) error {
 	own, _ := ownerPrincipal(st, "", "restart", "")
 	msg := fmt.Sprintf("%s has not come back %s after its restart began at %s; check the session (sc list) and its clown log",
 		st.Key(), restartWatchdogDelay, since.Format(time.RFC3339Nano))
+	// A restart clown dropped (its profile gate, a resume refusal...) leaves the OLD
+	// session running and is the likelier reason nothing came back: say so.
+	if r := restartRefusalOf(st); r != nil && !r.At.Before(since) {
+		msg = restartRefusalMessage(st.Key(), r)
+	}
 	wakeRestartAudience(st, "restart-watch", st.RestartWakeTargets(st.RestartingBy, own), msg)
 	return nil
 }

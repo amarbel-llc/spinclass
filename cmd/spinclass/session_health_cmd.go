@@ -114,7 +114,26 @@ func sessionHealth(st *session.State, d healthDeps) (hungstatus.Verdict, string)
 		in.Frontend = d.Frontend(status)
 		in.TranscriptMTime = d.Transcript(status.TranscriptPath)
 	}
-	return hungstatus.Classify(in)
+	v, why := hungstatus.Classify(in)
+	if status != nil && status.RestartRefusal != nil {
+		r := status.RestartRefusal
+		why += fmt.Sprintf("; last restart cancelled by clown (%s) at %s: %s", r.Kind, r.At.UTC().Format(time.RFC3339), restartRefusalText(r.Text))
+	}
+	return v, why
+}
+
+// restartRefusalText bounds clown's one-line summary and strips control characters.
+func restartRefusalText(s string) string {
+	s = strings.Map(func(c rune) rune {
+		if c < ' ' || c == 0x7f {
+			return ' '
+		}
+		return c
+	}, s)
+	if len(s) > 300 {
+		s = s[:300] + "..."
+	}
+	return s
 }
 
 // sessionHealthParams is the parameter set of the `session-health` tool.

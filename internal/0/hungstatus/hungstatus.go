@@ -36,22 +36,49 @@ type Status struct {
 	Unit               string
 	MainPID            int
 	TranscriptPath     string
+	// RestartRefusal is the frontend's record that a consumed restart was
+	// dropped (profile gate, resume, countdown, turn-started; an unknown kind
+	// means a consumed restart was dropped for a reason clown has no name for).
+	// Frontend-written, so trusted like the pids; nil when there is none.
+	RestartRefusal *RestartRefusal
+}
+
+// RestartRefusal mirrors clown's restart_refusal (FDR 0023, additive in status
+// version 1). The digests are empty today. Cancelled restarts keep the old
+// session running.
+type RestartRefusal struct {
+	At            time.Time
+	Kind          string
+	Profile       string
+	PinnedDigest  string
+	CurrentDigest string
+	Text          string
+}
+
+type wireRefusal struct {
+	At            string `json:"at"`
+	Kind          string `json:"kind"`
+	Profile       string `json:"profile"`
+	PinnedDigest  string `json:"pinned_digest"`
+	CurrentDigest string `json:"current_digest"`
+	Text          string `json:"text"`
 }
 
 type wire struct {
-	Version            int    `json:"version"`
-	Principal          string `json:"principal"`
-	SessionKey         string `json:"spinclass_session_key"`
-	ClaudeSessionID    string `json:"claude_session_id"`
-	TurnRunning        bool   `json:"turn_running"`
-	TurnStartedAt      string `json:"turn_started_at"`
-	LastHookAt         string `json:"last_hook_at"`
-	WrittenAt          string `json:"written_at"`
-	FrontendPID        int    `json:"frontend_pid"`
-	FrontendStartTicks uint64 `json:"frontend_start_ticks"`
-	Unit               string `json:"unit"`
-	MainPID            int    `json:"main_pid"`
-	TranscriptPath     string `json:"transcript_path"`
+	RestartRefusal     *wireRefusal `json:"restart_refusal"`
+	Version            int          `json:"version"`
+	Principal          string       `json:"principal"`
+	SessionKey         string       `json:"spinclass_session_key"`
+	ClaudeSessionID    string       `json:"claude_session_id"`
+	TurnRunning        bool         `json:"turn_running"`
+	TurnStartedAt      string       `json:"turn_started_at"`
+	LastHookAt         string       `json:"last_hook_at"`
+	WrittenAt          string       `json:"written_at"`
+	FrontendPID        int          `json:"frontend_pid"`
+	FrontendStartTicks uint64       `json:"frontend_start_ticks"`
+	Unit               string       `json:"unit"`
+	MainPID            int          `json:"main_pid"`
+	TranscriptPath     string       `json:"transcript_path"`
 }
 
 // Path is where clown writes the status of the session with this principal.
@@ -99,6 +126,12 @@ func Read(stateHome, principal string) (*Status, error) {
 		Principal: w.Principal, SessionKey: w.SessionKey, ClaudeSessionID: w.ClaudeSessionID,
 		TurnRunning: w.TurnRunning, FrontendPID: w.FrontendPID, FrontendStartTicks: w.FrontendStartTicks,
 		Unit: w.Unit, MainPID: w.MainPID, TranscriptPath: w.TranscriptPath,
+	}
+	if r := w.RestartRefusal; r != nil {
+		s.RestartRefusal = &RestartRefusal{
+			At: parseTime(r.At), Kind: r.Kind, Profile: r.Profile,
+			PinnedDigest: r.PinnedDigest, CurrentDigest: r.CurrentDigest, Text: r.Text,
+		}
 	}
 	s.TurnStartedAt = parseTime(w.TurnStartedAt)
 	s.LastHookAt = parseTime(w.LastHookAt)
