@@ -92,12 +92,17 @@ round is secondhand to this page: R that it is recorded, V per FDR 0035 that it 
    list-handles, perms list. There is no MCP tool that merges another session. I: so a
    coordinator agent cannot land a child either. A changed `[[post-merge]]` section also
    needs a terminal-typed digest (1cb83c5, R). Permission aspects: permissions page.
-2. **Credential lifetime.** R: FDR 0028 documents a 12 h token (`--ttl 12h` in the example
-   mint-command), "mint once; resume and rebuild do not re-mint; a session whose token
-   expired needs a close and a fresh start" (FDR 0028:88), and a papi TTL sweep as
-   backstop. R: `auth.Mint` is refused while the worktree's unit runs (3ae2255). I: a
-   confined session older than the TTL has no way to get a fresh token without closing.
-   Whether the deployed mint-command uses 12 h is the operator's config, not read here.
+2. **Credential lifetime** (corrected 2026-10-26; the first version of this page
+   wrongly treated 12 h as the token's lifetime). R: the token is minted once, at
+   session creation (`shop.Create` is `auth.Mint`'s only caller). The merge neither
+   mints nor refreshes; `auth.MirrorInto` points the landing worktree at the same
+   credential file. R: `--ttl 12h` in the mint-command (spinclass's own sweatfile sets
+   it) is papi's sweep TTL, and FDR 0028:95 says "Forgejo tokens have no native expiry
+   today". The token stays valid until revoke or a papi sweep. V: spinclass/firm-mulberry
+   minted 2026-10-22T02:09Z and its merges pushed through that credential on 2026-10-26
+   (bdb34e6 through 913484b), about 4.4 days later. So 12 h is not a limit in practice
+   today. I: it becomes one if papi's TTL sweep (papi#73, papi's lane) is enforced, and
+   then a re-mint is refused while the unit runs (3ae2255).
 3. **Spawn needs a live ssh-agent at mint time.** R: FDR 0028 ("session creation needs a
    live agent at mint time"). V per #411 (flic, 2026-10-23): forwarded agent flapped,
    spawn failed twice, merge fetch failed `Permission denied (publickey)`. 8ec4808
@@ -150,9 +155,10 @@ round is secondhand to this page: R that it is recorded, V per FDR 0035 that it 
    idle, land by operator, close; run `sc confinement-check` at start and end. None yet.
    spinclass (recipe) with clown (unit); doubles as the first live check of dd1e022,
    8ec4808, 7000be2, c743a1d. Also settles items 4, 7, 12 of section 2.
-3. Credential longevity: either a TTL covering the session, or a frontend re-mint that
-   does not touch the unit's `config.worktree` (the reason it is refused). None yet.
-   spinclass, with papi for TTL and sweep. Related #390 (open, spinclass).
+3. Credential longevity: confirm with papi whether its TTL sweep is enforced (V above:
+   a 4.4-day-old token still pushes). If it is, either a sweep TTL covering the run or a
+   frontend re-mint that does not touch the unit's `config.worktree` (the reason a
+   re-mint is refused). None yet. papi (sweep), spinclass (re-mint). Related #390 (open).
 4. Finish #411: a longer bounded retry window and the "no key" versus "rejected" split.
    #411 (open). spinclass.
 5. Find the credential leak: #394 (open). spinclass, with papi#89 sweep.
@@ -181,8 +187,8 @@ round is secondhand to this page: R that it is recorded, V per FDR 0035 that it 
    coordinator land children through an MCP tool (needs a new tool and a ruling)?
 2. **#400.** Sticky confined resume (refuse or always-ask an unconfined resume of a
    once-confined session), or one of the other four options? Does it also cover `sc exec`?
-3. **Credentials.** Token TTL for a multi-day session, whether a re-mint while the unit
-   runs is allowed, and whether an unattended spawn may depend on your forwarded agent
+3. **Credentials.** Whether papi's TTL sweep stays unenforced for the run (tokens then
+   live until revoke), whether a re-mint while the unit runs is allowed, and whether an unattended spawn may depend on your forwarded agent
    (#411) or needs the #390 spawn-grant (which widens what a manager can push).
 4. **Scope of the run.** Which hosts run confined sessions for the two weeks (the canary
    host had it enabled; flic's setting was not read), and whether `[confinement]
