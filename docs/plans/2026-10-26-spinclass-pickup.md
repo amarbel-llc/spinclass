@@ -44,6 +44,22 @@ noted) and an attestation that names the skills not run:
   `internal/foxtrot/spawn/confine.go`): a respawn of a worktree with no
   `SSH_AUTH_SOCK` keeps the first spec's `piggy-agent` socket.
 
+- **Also landed or written**: `explore-pool-check [dir]` (read-only pool check),
+  `docs/plans/2026-10-26-live-proofs-plan.md`, FDR 0037's hung-child section with
+  its caveats, and a section 5 in the confinement plan (clown's limits, the dead-man
+  socket, and that an unattended unit ends at `RuntimeMaxSec` 7 days, shorter than
+  the trip).
+- **Pool findings (R)**: papi's format matches `internal/charlie/auth/pool.go` and the
+  revoke form matches papi's runbook; but papi's runbook uses `--out
+  ~/.local/state/spinclass/pool` while the fixed path is
+  `$XDG_STATE_HOME/spinclass/token-pool` (told the coordinator).
+- **Linked clown has no `worker` builtin** (observed): `TestLinkedClownWorkerPassesTheConfinedProfileRules`
+  skips until the operator bumps the clown flake input; grants for `worker` must be
+  re-issued after the bump (they pin the digest). `frontend-deadman` is not yet
+  required in `RequiredCapabilities` (wait for the deployed clown).
+- **Review of clown 7504d6e869ad** sent to clown/rare-walnut: a writable bind
+  inside the vetted moxin dir is unchecked.
+
 Still open from the brief: which clear-site cleared solid-elm's RestartRequest
 (read the servelog for that key; not done); pool revoke command form and papi
 format check (item 4), `allow-stale-base` interaction and a safe dry run; the live

@@ -206,3 +206,29 @@ round is secondhand to this page: R that it is recorded, V per FDR 0035 that it 
    per-session uid), abstract unix sockets reachable, `ssh` key files not blocked for
    remote verbs (ruled 2026-10-21), grit commits unsigned (ruled 2026-10-25, #426
    closed).
+
+## 5. Update 2026-10-26 (spinclass/light-cedar): clown's limits and dead-man socket
+
+Read from clown's docs (R; clown FDR 0020 and its unattended confinement note,
+which record host tests as V on clown's side; not re-run here):
+
+- **Decision 7 (limits) is answered clown-side, partly closing #387.** Every agent
+  unit carries `MemoryHigh=6G`, `MemoryMax=8G`, `MemorySwapMax=2G`,
+  `TasksMax=4096`, `CPUQuota=400%`, `IOWeight=50`, `OOMPolicy=stop`, `Restart=no`;
+  an unattended unit (`CLOWN_UNATTENDED=1`) also `RuntimeMaxSec=604800`. The
+  admission threshold and load units (#387) stay open; spinclass's `host-load`
+  is the read-only view.
+- **7 days is shorter than the trip.** An unattended unit ends at 7 days and
+  nothing relaunches a stopped unit (I, from "nothing restarts a hung unit
+  (ruled)" and the transient-unit note). A two-week run needs each confined
+  session restarted (FDR 0037) at least weekly, or the operator's ruling on a
+  longer `RuntimeMaxSec`. Raised with the coordinator.
+- **Dead-man socket (clown#319).** The frontend's death by any signal ends the
+  unit within about 10 s (plus up to 5 s); the result file then has no
+  `exit_code`. Residual: a hung frontend that stays alive is not frontend death
+  (spinclass's `session-health` and `restart-hung-child` are the answer, FDR
+  0037), and a host reboot or logout ends the unit with nothing relaunching it.
+- **Not done yet (deliberately):** requiring the `frontend-deadman` capability in
+  `confinement.RequiredCapabilities`. It must wait until the deployed clown
+  reports it, or every confined spawn is refused; check with the clown on PATH
+  before turning it on.
