@@ -52,6 +52,9 @@ import (
 // Spec is the fully-parsed `sc run` invocation. Exactly one of Util / Script
 // is non-empty (ParseArgs enforces this).
 type Spec struct {
+	// RepoDir is --repo-dir (#320): the repo to start the session in, instead of
+	// the one containing the current directory.
+	RepoDir        string
 	Description    string
 	NoMerge        bool
 	NoClose        bool
@@ -93,11 +96,15 @@ type Spec struct {
 //
 // ctx cancels the step (SIGTERM) and the merge's pre-merge hook (#188).
 func Run(ctx context.Context, spec Spec) (exitCode int, err error) {
-	cwd, err := os.Getwd()
-	if err != nil {
+	startDir := spec.RepoDir
+	if startDir == "" {
+		if startDir, err = os.Getwd(); err != nil {
+			return 1, err
+		}
+	} else if startDir, err = filepath.Abs(startDir); err != nil {
 		return 1, err
 	}
-	repoPath, err := worktree.DetectRepo(cwd)
+	repoPath, err := worktree.DetectRepo(startDir)
 	if err != nil {
 		return 1, err
 	}
@@ -474,7 +481,7 @@ func runDynamicPostMergeHooks(rep *crap.Reporter, repoPath, defaultBranch, branc
 
 // ParseArgs splits the passthrough argv of `sc run` into a Spec. Grammar:
 //
-//	[--description D | -d D | --description=D] [--no-merge] [--no-close]
+//	[--repo-dir P | --repo-dir=P] [--description D | -d D | --description=D] [--no-merge] [--no-close]
 //	[--local-only] [--allow-stale-base] [--allow-no-credential] [--format F | --format=F]
 //	[--post-merge H]... [--post-merge-timeout D | --post-merge-timeout=D]
 //	[--post-merge-targets A,B | --post-merge-targets=A,B] [--no-post-merge]
@@ -509,6 +516,15 @@ func ParseArgs(args []string, stdin io.Reader) (Spec, error) {
 			i++
 		case a == "--allow-no-credential":
 			spec.AllowNoCredential = true
+			i++
+		case a == "--repo-dir":
+			if i+1 >= len(args) {
+				return spec, fmt.Errorf("%s requires a value", a)
+			}
+			spec.RepoDir = args[i+1]
+			i += 2
+		case strings.HasPrefix(a, "--repo-dir="):
+			spec.RepoDir = strings.TrimPrefix(a, "--repo-dir=")
 			i++
 		case a == "--description" || a == "-d":
 			if i+1 >= len(args) {

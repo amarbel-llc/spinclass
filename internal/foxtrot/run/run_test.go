@@ -118,6 +118,25 @@ func TestParseArgsUtilWinsOverStdin(t *testing.T) {
 	}
 }
 
+// #320: --repo-dir names the repo to start the session in, both spellings.
+func TestParseArgsRepoDir(t *testing.T) {
+	for _, args := range [][]string{
+		{"--repo-dir", "/r/clown", "--", "true"},
+		{"--repo-dir=/r/clown", "--", "true"},
+	} {
+		spec, err := ParseArgs(args, nil)
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if spec.RepoDir != "/r/clown" {
+			t.Errorf("%v: RepoDir = %q, want /r/clown", args, spec.RepoDir)
+		}
+	}
+	if _, err := ParseArgs([]string{"--repo-dir"}, nil); err == nil {
+		t.Error("a dangling --repo-dir must be an error")
+	}
+}
+
 func TestParseArgsUnknownFlag(t *testing.T) {
 	if _, err := ParseArgs([]string{"--bogus", "--", "true"}, nil); err == nil {
 		t.Error("unknown flag: want error, got nil")

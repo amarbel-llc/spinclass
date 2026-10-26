@@ -64,6 +64,17 @@ worktree_count() {
   assert_no_session_state
 }
 
+# #320: --repo-dir starts the session in that repo, from any cwd.
+@test "run: --repo-dir targets a repo without cd'ing into it" {
+  cd "$BATS_TEST_TMPDIR" || return
+  run_sc_run --repo-dir "$TEST_REPO" --local-only -- sh -c 'echo hi > far.txt && git add far.txt && git commit -qm "add far"'
+  assert_success
+
+  run git -C "$TEST_REPO" log --oneline main
+  assert_output --partial "add far"
+  assert_equal "$(worktree_count)" "0"
+}
+
 @test "run: empty run (no commits) is a clean success" {
   cd "$TEST_REPO" || return
   run_sc_run --local-only -- true
