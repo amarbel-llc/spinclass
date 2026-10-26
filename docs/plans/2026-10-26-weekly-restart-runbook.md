@@ -39,14 +39,14 @@ read, I inferred, V observed live (none yet).
    dontAsk, and it kills the current turn and any job). The tool queues the request
    and runs the operator's hand-off (`clown restart --session <principal> --when idle
    --reason ...`); a success reply means queued, not restarted.
-4. **Idle children need a nudge** until clown#327 (idle-request fix, on clown
-   master, abe4b084be10) is deployed: an idle child ends no turn, so clown's idle
-   runner never asks the preflight (clown logged "exiting with a restart queued and
-   never asked about" for circus/solid-elm). Right after the tool call send the child
-   one short message with `chat_send` (JID from `chat_list`), for example "weekly
-   restart queued: reply ok" so it runs one turn that ends, which triggers the
-   restart. After #327 is deployed no message is needed (V pending; the live proof
-   is in `live-proofs-plan.md` item 2).
+4. **Idle children need no nudge now (V, 2026-10-26).** clown#327 (idle-request
+   fix) is deployed: a request on an idle child was consumed by the preflight within
+   a second and the child restarted and returned (circus/light-beech, 38 s from
+   verdict to return). Before #327 an idle child ended no turn, so clown's idle runner
+   never asked the preflight (clown logged "exiting with a restart queued and never
+   asked about" for circus/solid-elm). Only if a child has not restarted within a
+   minute or two, send it one short message with `chat_send` (JID from `chat_list`)
+   so a turn ends.
 5. Confirm: the requester gets "<key> is restarting now" and later "<key> is back
    after its restart" (the wakes fixed in 8d9ae0c; V pending a deploy). Then
    `session-health` again: the child's `unit age` should have dropped to minutes.

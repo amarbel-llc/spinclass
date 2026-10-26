@@ -1552,7 +1552,29 @@ explore-live-close-leftovers key:
     printf 'FAIL    processes of the closed session survive:\n%s' "$left"
     exit 1
 
-# [explore] The same snapshot AFTER the relaunch, compared with baseline.json.
+# [explore] Poll a worker's record every few seconds and print ONE line per change
+# (UTC time, request queued, restarting_at, restarted_at, claude pid, recorded pid,
+# peek state) until restarted_at is set after restarting_at, or `limit` seconds
+# pass. The timeline for a mid-turn restart drill (how long a queued restart
+# waited for the turn to end). Read-only.
+#
+# print a timeline of a worker's restart state until it returns or the limit passes
+[group("explore")]
+explore-live-restart-watch target limit='600' every='5':
+    #!/usr/bin/env bash
+    set -uo pipefail
+    prev=""
+    end=$(( $(date +%s) + {{ limit }} ))
+    while [ "$(date +%s)" -lt "$end" ]; do
+      snap=$("{{ just_executable() }}" --quiet --justfile "{{ justfile() }}" _explore-live-restart-snapshot '{{ target }}' watch 2>/dev/null | tail -n1) || snap=""
+      if [ -n "$snap" ] && [ -f "$snap" ]; then
+        line=$(jq -r '"queued=\(.restart_request_queued) restarting_at=\(.restarting_at // "-") restarted_at=\(.restarted_at // "-") claude=\([.procs[] | select(.kind == "agent" and (.exe | test("claude"))) | .pid] | join(",")) recorded_pid=\(.recorded_pid) peek=\(.peek.state // "?")"' "$snap")
+        if [ "$line" != "$prev" ]; then printf '%s %s\n' "$(date -u +%FT%TZ)" "$line"; prev=$line; fi
+        if jq -e '.restarting_at != null and .restarted_at != null and (.restarted_at >= .restarting_at)' "$snap" >/dev/null; then echo "returned"; exit 0; fi
+      fi
+      sleep {{ every }}
+    done
+    echo "limit reached"
 # The troupe credential and the conversation resuming cannot be observed from
 # the process table or the record; those stay MANUAL. The serve-binary check
 # compares the resolved exe with the spinclass on PATH and can false-FAIL when
