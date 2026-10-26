@@ -1283,7 +1283,34 @@ readable by others.
 	to agree, for sessions started without the flag. *true* leaves
 	*spawn-entry* unmodified and sets *defaultMode* to *acceptEdits*. A
 	confined spawn ignores this and uses *--permission-mode dontAsk*.
-	*Merge:* scalar override.
+	*unattended-permission-mode*, when set, wins over this for a detached
+	spawn. *Merge:* scalar override.
+
+*unattended-permission-mode*
+	String, *"dontAsk"* or *"auto"*: the permission mode of an UNCONFINED
+	detached spawned worker (*spawn-session*, *sc spawn*).
+	*"dontAsk"* places *--permission-mode dontAsk* in *spawn-entry* (replacing
+	any other mode, as for a confined spawn) and sets *CLOWN_UNATTENDED=1* in
+	the worker's launch environment and in its pinned resume environment,
+	because clown reads that marker from the frontend environment at launch
+	and on *clown resume* to apply its dontAsk settings. A spawn-entry that
+	cannot take the flag (no *"--"* separator, or a non-claude provider)
+	refuses the spawn. *"auto"* is today's behaviour, *--permission-mode
+	auto*, with no marker (clown would otherwise apply dontAsk settings while
+	the argv says auto). Unset is also today's behaviour: auto unless
+	*disable-auto-mode*, no marker. When set, the key wins over
+	*disable-auto-mode* for these spawns; *disable-auto-mode* keeps governing
+	the generated interactive settings. A CONFINED spawn is always *dontAsk*
+	and always carries the marker, whatever this key says. The default may
+	flip to *dontAsk* later, once clown#323 lands and a live check passes.
+
+	Any other value refuses the spawn (*sc validate* reports an error). Read
+	live, at spawn time, only from the global sweatfile and layers above the
+	repo, and never pinned into session state: a repo or worktree value is
+	ignored with a warning (*sc validate* warns about a repo-level one),
+	because the agent must not be able to loosen a child. The last layer
+	above the repo that sets it wins. *Merge:* never merged; read through the
+	trusted layers only.
 
 *liveness-probe*
 	*Deprecated* (post-FDR-0017): clown owns the multiplexer attach and

@@ -680,6 +680,37 @@ func TestCheckRestartHandoffWarnsRepoLayer(t *testing.T) {
 	}
 }
 
+func TestCheckUnattendedPermissionMode(t *testing.T) {
+	withMode := func(v string) sweatfile.Sweatfile {
+		return sweatfile.Sweatfile{SessionEntry: &sweatfile.SessionEntry{UnattendedPermissionMode: &v}}
+	}
+	has := func(issues []Issue, sev string) bool {
+		for _, iss := range issues {
+			if iss.Field == "session-entry.unattended-permission-mode" && iss.Severity == sev {
+				return true
+			}
+		}
+		return false
+	}
+	for _, ok := range []string{"dontAsk", "auto"} {
+		if got := CheckUnattendedPermissionMode(withMode(ok), true); len(got) != 0 {
+			t.Errorf("%q above the repo: unexpected issues %v", ok, got)
+		}
+	}
+	if !has(CheckUnattendedPermissionMode(withMode("bypassPermissions"), true), SeverityError) {
+		t.Error("an unknown value should be an error")
+	}
+	if !has(CheckUnattendedPermissionMode(withMode("auto"), false), SeverityWarning) {
+		t.Error("a repo-level value should warn that it is ignored")
+	}
+	if got := CheckUnattendedPermissionMode(withMode("auto"), false); has(got, SeverityError) {
+		t.Errorf("a valid repo-level value should only warn: %v", got)
+	}
+	if got := CheckUnattendedPermissionMode(sweatfile.Sweatfile{SessionEntry: &sweatfile.SessionEntry{}}, false); len(got) != 0 {
+		t.Errorf("an unset value should not report: %v", got)
+	}
+}
+
 func TestCheckProfileRightsWarnsUnlessGlobal(t *testing.T) {
 	on := true
 	sf := sweatfile.Sweatfile{ProfileRights: &sweatfile.ProfileRights{Enforce: &on}}

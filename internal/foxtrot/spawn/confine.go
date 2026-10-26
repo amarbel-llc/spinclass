@@ -95,6 +95,12 @@ type targetConfinement struct {
 	// the repo/worktree layers that set it and were not honoured.
 	spawnProfile        string
 	ignoredSpawnProfile []string
+	// unattendedMode is [session-entry].unattended-permission-mode read live
+	// from layers above the repo only ("" = unset); an unconfined detached
+	// worker's permission mode. ignoredUnattendedMode are the repo/worktree
+	// layers that set it and were not honoured.
+	unattendedMode        string
+	ignoredUnattendedMode []string
 }
 
 // driverRepo is the repo whose hierarchy describes the DRIVER's own context:

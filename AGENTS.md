@@ -114,6 +114,7 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
   `spawn-session` launch a detached worker; async under clown (#266). Reap
   authority is a **handle** (FDR 0032): `close-child-session` gates on it,
   `force` is always-ask (`perms.AlwaysAsk`); grant/release are always-ask.
+  Unconfined permission mode: trusted `[session-entry].unattended-permission-mode`.
 - **Self-close** (#389, FDR 0035): `close-this-session` queues a close
   (`[permissions] allow-self-close`, trusted layers only, never forces); the
   teardown is `close-self-run`, run from outside the unit.

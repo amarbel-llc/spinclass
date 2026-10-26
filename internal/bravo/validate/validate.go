@@ -615,6 +615,34 @@ func CheckRestartHandoff(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 	}}
 }
 
+// CheckUnattendedPermissionMode validates [session-entry]
+// unattended-permission-mode: only "dontAsk" and "auto" are accepted (a spawn
+// refuses any other value), and a repo-level value is ignored because
+// sweatfileio.TrustedUnattendedPermissionMode reads it only from the global
+// sweatfile and layers above the repo.
+func CheckUnattendedPermissionMode(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
+	if sf.SessionEntry == nil || sf.SessionEntry.UnattendedPermissionMode == nil || *sf.SessionEntry.UnattendedPermissionMode == "" {
+		return nil
+	}
+	const field = "session-entry.unattended-permission-mode"
+	var issues []Issue
+	if mode := *sf.SessionEntry.UnattendedPermissionMode; !sweatfile.ValidUnattendedPermissionMode(mode) {
+		issues = append(issues, Issue{
+			Message:  fmt.Sprintf("[session-entry] `unattended-permission-mode` is %q: must be %q or %q (a spawn refuses any other value)", mode, sweatfile.UnattendedModeDontAsk, sweatfile.UnattendedModeAuto),
+			Severity: SeverityError,
+			Field:    field,
+		})
+	}
+	if !layerAboveRepo {
+		issues = append(issues, Issue{
+			Message:  "[session-entry] sets `unattended-permission-mode` in a repo-level sweatfile: it is ignored — it decides how loosely an unconfined worker runs, so only the global sweatfile or one above the repo (parent directories) may set it; move it up",
+			Severity: SeverityWarning,
+			Field:    field,
+		})
+	}
+	return issues
+}
+
 // CheckProfileRights validates the [profile-rights] table (FDR 0034). `enforce`
 // is honoured only from layers above the repo, and is reliable only from the
 // GLOBAL sweatfile: a spawner outside a non-global parent directory never
@@ -1041,7 +1069,9 @@ func Run(w io.Writer, home, repoDir string) int {
 
 		if src.File.SessionEntry != nil {
 			issues := CheckSessionEntry(src.File)
-			issues = append(issues, CheckRestartHandoff(src.File, sweatfileio.LayerAboveRepo(src.Path, home, mainRoot))...)
+			layerAbove := sweatfileio.LayerAboveRepo(src.Path, home, mainRoot)
+			issues = append(issues, CheckRestartHandoff(src.File, layerAbove)...)
+			issues = append(issues, CheckUnattendedPermissionMode(src.File, layerAbove)...)
 			if len(issues) > 0 {
 				for _, iss := range issues {
 					if iss.Severity == SeverityError {

@@ -1067,6 +1067,12 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 				_vSessionEntryRestart.MarkConsumed()
 			}
 		}
+		if _vSessionEntryUnattendedPermissionMode, _ok := _vSessionEntry.Field("unattended-permission-mode"); _ok && _vSessionEntryUnattendedPermissionMode.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vSessionEntryUnattendedPermissionMode.Leaf); _xok {
+				sessionEntryVal11.UnattendedPermissionMode = &_x
+				_vSessionEntryUnattendedPermissionMode.MarkConsumedString()
+			}
+		}
 		d.data.SessionEntry = sessionEntryVal11
 	} else {
 		sessionEntryVal11 := &SessionEntry{}
@@ -1150,6 +1156,13 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 					sessionEntryVal11.Restart = []string{}
 				}
 				_vRestart.MarkConsumed()
+			}
+		}
+		if _vUnattendedPermissionMode, _ok := model.Field("unattended-permission-mode"); _ok && _vUnattendedPermissionMode.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractString(_vUnattendedPermissionMode.Leaf); _xok {
+				sessionEntryVal11.UnattendedPermissionMode = &_x
+				_vUnattendedPermissionMode.MarkConsumedString()
 			}
 		}
 		if _foundSessionEntry {
@@ -1816,6 +1829,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				if err := cst.SetAny(tableNode, "restart", d.data.SessionEntry.Restart); err != nil {
 					return nil, fmt.Errorf("%w", err)
 				}
+			}
+		}
+		if d.data.SessionEntry.UnattendedPermissionMode != nil {
+			if err := cst.SetAny(tableNode, "unattended-permission-mode", *d.data.SessionEntry.UnattendedPermissionMode); err != nil {
+				return nil, fmt.Errorf("%w", err)
 			}
 		}
 	}
@@ -3017,6 +3035,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vSessionEntryRestart.MarkConsumed()
 			}
 		}
+		if _vSessionEntryUnattendedPermissionMode, _ok := _vSessionEntry.Field("unattended-permission-mode"); _ok && _vSessionEntryUnattendedPermissionMode.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vSessionEntryUnattendedPermissionMode.Leaf); _xok {
+				sessionEntryVal11.UnattendedPermissionMode = &_x
+				_vSessionEntryUnattendedPermissionMode.MarkConsumedString()
+			}
+		}
 		data.SessionEntry = sessionEntryVal11
 	} else {
 		sessionEntryVal11 := &SessionEntry{}
@@ -3100,6 +3124,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 					sessionEntryVal11.Restart = []string{}
 				}
 				_vRestart.MarkConsumed()
+			}
+		}
+		if _vUnattendedPermissionMode, _ok := sub.Field("unattended-permission-mode"); _ok && _vUnattendedPermissionMode.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractString(_vUnattendedPermissionMode.Leaf); _xok {
+				sessionEntryVal11.UnattendedPermissionMode = &_x
+				_vUnattendedPermissionMode.MarkConsumedString()
 			}
 		}
 		if _foundSessionEntry {
@@ -3750,6 +3781,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 				if err := cst.SetAny(tableNode, "restart", data.SessionEntry.Restart); err != nil {
 					return fmt.Errorf("%w", err)
 				}
+			}
+		}
+		if data.SessionEntry.UnattendedPermissionMode != nil {
+			if err := cst.SetAny(tableNode, "unattended-permission-mode", *data.SessionEntry.UnattendedPermissionMode); err != nil {
+				return fmt.Errorf("%w", err)
 			}
 		}
 	}

@@ -355,9 +355,12 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 	// restart is deliberately NOT merged (#419 trust rule): the result never
 	// carries it, whether it came from other or from the receiver's
 	// carried-forward table. See sweatfileio.TrustedRestartHandoff.
-	if merged.SessionEntry != nil && merged.SessionEntry.Restart != nil {
+	// unattended-permission-mode follows the same rule; see
+	// sweatfileio.TrustedUnattendedPermissionMode.
+	if merged.SessionEntry != nil && (merged.SessionEntry.Restart != nil || merged.SessionEntry.UnattendedPermissionMode != nil) {
 		cp := *merged.SessionEntry
 		cp.Restart = nil
+		cp.UnattendedPermissionMode = nil
 		merged.SessionEntry = &cp
 	}
 

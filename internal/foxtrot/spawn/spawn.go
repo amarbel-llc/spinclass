@@ -130,6 +130,7 @@ func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model
 	effective := effectiveProfile(profile, merged)
 	var resolved ResolvedProfile
 	var narrowing *narrowingBase
+	var unattended bool // dontAsk applied: the worker carries CLOWN_UNATTENDED=1
 	if confined {
 		// A confined worker needs a profile that leaves no grit tool reachable
 		// (FDR 0035). Config-only and read-only, so it comes first: nothing below
@@ -155,9 +156,13 @@ func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model
 		// never be able to wait on a permission prompt: dontAsk denies instead.
 		// Before anything is created, so a spawn-entry that cannot take the flag
 		// litters nothing.
-		if argv, err = SpliceDontAskMode(argv); err != nil {
+		if argv, unattended, err = applyUnattendedMode(argv, true, targetConfine.unattendedMode); err != nil {
 			return Pending{}, err
 		}
+	} else if argv, unattended, err = applyUnattendedMode(argv, false, targetConfine.unattendedMode); err != nil {
+		// An unconfined spawn whose trusted key says dontAsk is refused, like a
+		// confined one, when the entry cannot take it.
+		return Pending{}, err
 	}
 	if enforce && effective == "" {
 		// No profile was requested, so Authorize would never run; a profile the
@@ -234,7 +239,12 @@ func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model
 		confine = &confinedLaunch{scopePath: scopePath, stateDir: stateDir, handshakeDir: handshakeDir}
 	}
 
-	p, err := startDetachedEntry(rp, driver, desc, argv, window, sessionEnv, resolved, authorizingGrant, narrowing, shop.PinEntry(merged), confine)
+	// clown reads the marker from the frontend env at launch and on `clown
+	// resume`, so it goes into the spawn env and the pinned resume env alike.
+	pinned := shop.PinEntry(merged)
+	sessionEnv = setUnattendedMarker(sessionEnv, unattended)
+	pinned.Env = setUnattendedMarker(pinned.Env, unattended)
+	p, err := startDetachedEntry(rp, driver, desc, argv, window, sessionEnv, resolved, authorizingGrant, narrowing, pinned, confine)
 	if err != nil {
 		undoOnFailure()
 		return Pending{}, err
@@ -346,6 +356,17 @@ func renderSpawn(home string, rp worktree.ResolvedPath, brief, model, profile st
 			"paths", untrustedConfine)
 	}
 	confine.spawnProfile, confine.ignoredSpawnProfile = sweatfileio.TrustedSpawnProfile(hierarchy, home, rp.RepoPath)
+	// The unattended permission mode is read live, from trusted layers only: an
+	// agent-writable sweatfile must not loosen a child. An invalid value
+	// refuses the spawn rather than guessing.
+	confine.unattendedMode, confine.ignoredUnattendedMode = sweatfileio.TrustedUnattendedPermissionMode(hierarchy, home, rp.RepoPath)
+	if len(confine.ignoredUnattendedMode) > 0 {
+		slog.Warn("ignored [session-entry] unattended-permission-mode in sweatfiles that are not trusted: only the global sweatfile and sweatfiles above the repo may set it",
+			"paths", confine.ignoredUnattendedMode)
+	}
+	if err := validateUnattendedMode(confine.unattendedMode); err != nil {
+		return nil, nil, nil, merged, false, confine, err
+	}
 	// The enforcement switch is read from layers above the repo only: an agent
 	// can edit the repo's own sweatfile, and must not be able to turn it off.
 	enforce, untrusted := sweatfileio.TrustedEnforceProfileRights(hierarchy, home, rp.RepoPath)
@@ -362,8 +383,15 @@ func renderSpawn(home string, rp worktree.ResolvedPath, brief, model, profile st
 	merged = sweatfile.GetDefault().MergeWith(hierarchy.Merged)
 
 	entry := merged.SessionSpawnEntry()
-	if !merged.SessionAutoModeDisabled() {
+	// The trusted unattended key, when set, wins over disable-auto-mode; "dontAsk"
+	// is spliced later (applyUnattendedMode, once the profile is in the argv).
+	switch confine.unattendedMode {
+	case sweatfile.UnattendedModeAuto:
 		entry = SpliceAutoMode(entry)
+	case "":
+		if !merged.SessionAutoModeDisabled() {
+			entry = SpliceAutoMode(entry)
+		}
 	}
 	if model != "" {
 		entry, err = SpliceModelFlag(entry, model, merged.SessionModelFlags(), merged.SessionModelIDs())
@@ -479,6 +507,9 @@ func workerEnvScoped(rp worktree.ResolvedPath, desc string, userEnv map[string]s
 	// SPINCLASS_SESSION_ID (appended below). Otherwise the worker arms the
 	// driver's channel and directed chat wakes to it are dropped (#169).
 	env := session.StripInheritedSessionIDs(os.Environ())
+	// An unattended driver's CLOWN_UNATTENDED=1 must not reach a child whose argv
+	// is not dontAsk; the spawn sets the marker itself via userEnv when it applies.
+	env = dropEnvVars(env, []string{unattendedEnvVar})
 	if scrubDesktopEnv {
 		env = dropEnvVars(env, harnessScrubbedEnvVars)
 	}

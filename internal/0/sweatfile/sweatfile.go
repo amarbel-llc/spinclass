@@ -84,6 +84,17 @@ type SessionEntry struct {
 	// sweatfileio.TrustedRestartHandoff; MergeWith never carries it. An explicit
 	// [] in a later trusted layer clears an inherited one.
 	Restart []string `toml:"restart"`
+	// UnattendedPermissionMode is the permission mode of UNCONFINED detached
+	// spawned workers: "dontAsk" (spawn.SpliceDontAskMode plus the
+	// CLOWN_UNATTENDED=1 marker, in the spawn env and the pinned resume env) or
+	// "auto" (today's spawn.SpliceAutoMode, no marker). Unset keeps today's
+	// behaviour (auto unless disable-auto-mode). When set it wins over
+	// disable-auto-mode for these spawns; a confined spawn is always dontAsk.
+	// Trusted only from layers above the repo and read live at spawn time,
+	// never pinned: a value the agent can write into its own repo's sweatfile
+	// must not loosen a child. Read ONLY through
+	// sweatfileio.TrustedUnattendedPermissionMode; MergeWith never carries it.
+	UnattendedPermissionMode *string `toml:"unattended-permission-mode"`
 }
 
 type Hooks struct {
@@ -1099,6 +1110,18 @@ func (sf Sweatfile) SessionAutoModeDisabled() bool {
 	return sf.SessionEntry != nil &&
 		sf.SessionEntry.DisableAutoMode != nil &&
 		*sf.SessionEntry.DisableAutoMode
+}
+
+// The values [session-entry].unattended-permission-mode accepts.
+const (
+	UnattendedModeDontAsk = "dontAsk"
+	UnattendedModeAuto    = "auto"
+)
+
+// ValidUnattendedPermissionMode reports whether mode is a value
+// [session-entry].unattended-permission-mode accepts.
+func ValidUnattendedPermissionMode(mode string) bool {
+	return mode == UnattendedModeDontAsk || mode == UnattendedModeAuto
 }
 
 // SessionSpawnProfile returns [session-entry].spawn-profile, the default clown
