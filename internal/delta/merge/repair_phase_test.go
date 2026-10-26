@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -389,6 +390,52 @@ func TestPrepareMergeRefusesARepairThatAddsAPath(t *testing.T) {
 	}
 	if got := runGit(t, wtPath, "status", "--porcelain", "--", "late.go"); got != "?? late.go" {
 		t.Errorf("late.go status = %q, want it left untracked", got)
+	}
+}
+
+// TestPrepareMergeDoesNotAmendAConcurrentEditToACommittedPath (#402, the gap
+// the added/removed-path guard leaves): another writer edits a path the commit
+// already has while repair runs, and a repair that stages its run's changes
+// (as conformist --commit --amend was observed to) folds that edit into the
+// pinned commit. Safe outcomes are a refusal, or a pinned commit without the
+// edit; either way the edit itself must survive in the worktree.
+func TestPrepareMergeDoesNotAmendAConcurrentEditToACommittedPath(t *testing.T) {
+	t.Skip("red, spinclass#402: observed 2026-10-26, the pinned commit carries the concurrent edit. " +
+		"The fix (repair in an isolated worktree) changes FDR 0018 and waits on a design decision: " +
+		"docs/plans/2026-10-26-402-repair-isolation-options.md")
+	sync := t.TempDir()
+	started, proceed := filepath.Join(sync, "started"), filepath.Join(sync, "proceed")
+	repoDir, wtPath, _ := setupRepairRepoWithSweatfile(t, "feature", fmt.Sprintf(
+		"[hooks]\nrepair = '''touch %q; while [ ! -f %q ]; do sleep 0.05; done; printf fixed > file.txt; git add -A; git commit --amend --no-edit -q'''\n",
+		started, proceed))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			if _, err := os.Stat(started); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		_ = os.WriteFile(filepath.Join(wtPath, "a.txt"), []byte("concurrent"), 0o644)
+		_ = os.WriteFile(proceed, nil, 0o644)
+	}()
+
+	pinnedSha, tests, err := runPrepare(t, repoDir, wtPath, "feature")
+	<-done
+	if err == nil {
+		if got := runGit(t, wtPath, "show", pinnedSha+":a.txt"); got == "concurrent" {
+			t.Errorf("the pinned commit %s carries the concurrent edit to a.txt (points: %v)", pinnedSha, testDescs(tests))
+		}
+	}
+	data, rerr := os.ReadFile(filepath.Join(wtPath, "a.txt"))
+	if rerr != nil || string(data) != "concurrent" {
+		t.Errorf("the concurrent edit was lost from the worktree: %q, %v", data, rerr)
 	}
 }
 
