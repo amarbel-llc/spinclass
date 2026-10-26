@@ -387,7 +387,11 @@ func countAbandonedSessions() (int, []session.State) {
 	}
 	var abandoned []session.State
 	for _, s := range states {
-		if s.ResolveState() == session.StateAbandoned {
+		// A tombstone reads as abandoned too, but it is a closed session's
+		// record, kept until tombstone-retention expires (GCTombstones, below)
+		// for `sc resurrect` (FDR 0027) and `sc list --closed`. Only live
+		// records whose worktree vanished are reaped here (#79).
+		if s.ResolveState() == session.StateAbandoned && !s.IsTombstone() {
 			abandoned = append(abandoned, s)
 		}
 	}
