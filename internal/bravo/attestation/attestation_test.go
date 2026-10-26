@@ -295,6 +295,30 @@ func TestClaimThenSettleLandedConsumes(t *testing.T) {
 	}
 }
 
+// #373: the ticket carries a copy of what was claimed, so the merge can
+// publish it before Settle consumes it.
+func TestClaimTicketCarriesTheClaimedAttestation(t *testing.T) {
+	repo, branch := setupGateSession(t)
+	slot := WorktreeSlot(repo, branch)
+	if err := Record(slot, gateSkills, "abc123"); err != nil {
+		t.Fatal(err)
+	}
+	tk, output, err := Claim(liveGate(), slot)
+	if err != nil {
+		t.Fatalf("Claim: %v (%s)", err, output)
+	}
+	c := tk.Claimed
+	if c == nil || c.HeadSha != "abc123" || c.RecordedAt.IsZero() || len(c.Skills) != len(gateSkills) || c.Skills[0] != gateSkills[0] {
+		t.Fatalf("ticket.Claimed = %+v, want the recorded attestation", c)
+	}
+	if err := Settle(slot, tk, true); err != nil {
+		t.Fatal(err)
+	}
+	if len(tk.Claimed.Skills) != len(gateSkills) {
+		t.Error("consuming the attestation must not empty the ticket's copy")
+	}
+}
+
 func TestClaimThenSettleReleasedKeeps(t *testing.T) {
 	repo, branch := setupGateSession(t)
 	slot := WorktreeSlot(repo, branch)

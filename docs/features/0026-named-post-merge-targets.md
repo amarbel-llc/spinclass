@@ -116,6 +116,7 @@ command = "just infra/hosts/trigger-redeploy-nikulin"
   | `SPINCLASS_POST_MERGE_DEADLINE` | the phase's shared deadline as unix epoch seconds; `0` when uncapped |
   | `SPINCLASS_POST_MERGE_TARGET` | the running target's `name` (named-target path only) |
   | `SPINCLASS_PINNED_SHA` | the pre-landing pin; `≠ SPINCLASS_MERGED_SHA` iff the queued landing was rebased |
+  | `SPINCLASS_ATTESTATION_BLOB` | `madder://blobs/<id>` of the pre-merge attestation that admitted the merge (claim id, head sha, recorded_at, skills), as JSON in the session worktree's madder store; absent for exemption-admitted and terminal merges, or when madder is not pinned or the write failed (#373) |
 
   alongside FDR 0023's `SPINCLASS_MERGED_SHA` / `_MERGED_BRANCH` /
   `_DEFAULT_BRANCH` / `_MERGE_PUSHED` / `_REPO_PATH`. `sc run`'s dynamic

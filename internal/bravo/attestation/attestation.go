@@ -113,6 +113,10 @@ func ImplicitSlot(checkout string) Slot {
 type Ticket struct {
 	HeadSha string
 	ClaimID string
+	// Claimed is a copy of the attestation this ticket holds (its Claim left
+	// nil), nil for the zero ticket, so the attempt can publish it after Settle
+	// has consumed the stored one (#373).
+	Claimed *session.PreMergeAttestation
 }
 
 // ValidationError describes why a nothing-but-the-truth input failed
@@ -281,7 +285,12 @@ func Claim(merged sweatfile.Sweatfile, slot Slot) (Ticket, string, error) {
 			PID:       os.Getpid(),
 			ClaimedAt: now,
 		}
-		tk = Ticket{HeadSha: a.HeadSha, ClaimID: a.Claim.ID}
+		claimed := session.PreMergeAttestation{
+			RecordedAt: a.RecordedAt,
+			Skills:     append([]session.AttestedSkill(nil), a.Skills...),
+			HeadSha:    a.HeadSha,
+		}
+		tk = Ticket{HeadSha: a.HeadSha, ClaimID: a.Claim.ID, Claimed: &claimed}
 		return nil
 	})
 	switch {

@@ -30,6 +30,11 @@ type PostMergeOptions struct {
 	// refusal of a dirty tree. Inverted so the zero value is the default.
 	NoAutostash bool
 
+	// AttestationBlob is the madder URI of the claimed pre-merge attestation
+	// when the merge was admitted by one (#373), passed to post-merge as
+	// SPINCLASS_ATTESTATION_BLOB; "" otherwise.
+	AttestationBlob string
+
 	// ExpectSha is `sc merge --expect`: the commit the caller reviewed, full or
 	// abbreviated (#353). When set, the merge is refused with ErrBranchMoved
 	// before the rebase if the branch tip is any other commit. "" checks nothing.
@@ -138,6 +143,9 @@ type PostMergeFacts struct {
 	Pushed        bool   // whether the landing reached the remote
 	Timeout       time.Duration
 	Deadline      time.Time // zero when Timeout <= 0 (uncapped)
+	// AttestationBlob is the madder URI of the pre-merge attestation that
+	// admitted the merge (#373); "" when none did.
+	AttestationBlob string
 }
 
 // PostMergeEnv renders the facts as KEY=VALUE pairs for a hook's environment.
@@ -169,6 +177,11 @@ func PostMergeEnv(f PostMergeFacts) []string {
 	}
 	if f.PinnedSha != "" {
 		env = append(env, "SPINCLASS_PINNED_SHA="+f.PinnedSha)
+	}
+	// The attestation that admitted the merge (#373): absent for an
+	// exemption-admitted or terminal merge, which had none.
+	if f.AttestationBlob != "" {
+		env = append(env, "SPINCLASS_ATTESTATION_BLOB="+f.AttestationBlob)
 	}
 	// A session-independent scratch dir (spinclass#330): the inherited
 	// TMPDIR may belong to a session torn down before post-merge runs.

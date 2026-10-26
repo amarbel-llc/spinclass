@@ -551,6 +551,7 @@ func handleMergeThisSession(ctx context.Context, args json.RawMessage, _ command
 	defer func() { hold.settle(landed) }()
 	pm.Gate = gate
 	pm.AttestedSha = hold.ticket.HeadSha
+	pm.AttestationBlob = attestationBlob(cwd, hold.ticket)
 
 	ctx = clown.WithLocalScope(ctx, "merge")
 	var buf bytes.Buffer
@@ -704,6 +705,7 @@ func handleMergeThisSessionAsync(ctx context.Context, args json.RawMessage, _ co
 		}
 	}
 	pm.AttestedSha = hold.ticket.HeadSha
+	pm.AttestationBlob = attestationBlob(cwd, hold.ticket)
 	if busy {
 		stack := newStackMetrics(merged, repoPath)
 		mergeQueue[cwd] = append(mergeQueue[cwd], queuedMerge{
