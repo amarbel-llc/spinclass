@@ -44,9 +44,9 @@ read, I inferred, V observed live (none yet).
    a second and the child restarted and returned (circus/light-beech, 38 s from
    verdict to return). Before #327 an idle child ended no turn, so clown's idle runner
    never asked the preflight (clown logged "exiting with a restart queued and never
-   asked about" for circus/solid-elm). Only if a child has not restarted within a
-   minute or two, send it one short message with `chat_send` (JID from `chat_list`)
-   so a turn ends.
+   asked about" for circus/solid-elm). That holds on clown >= d3645fac9ff1; on an
+   older clown build, or if a child has not restarted within a minute or two, send
+   it one short message with `chat_send` (JID from `chat_list`) so a turn ends.
 5. Confirm: the requester gets "<key> is restarting now" and later "<key> is back
    after its restart" (the wakes fixed in 8d9ae0c; V pending a deploy). Then
    `session-health` again: the child's `unit age` should have dropped to minutes.

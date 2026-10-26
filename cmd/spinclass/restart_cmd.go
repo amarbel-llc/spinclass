@@ -187,7 +187,7 @@ func queueRestart(st *session.State, requester, principal, reason string, force 
 			st.Key(), reason), nil
 	}
 	return fmt.Sprintf(
-		"restart queued for %s (%s). Nothing has been stopped yet: the frontend restarts the session when it next ends a turn and the checks still pass. If the session is busy, it restarts once that turn ends (if you are restarting yourself, end your turn now and start no new work). If the session is idle right now, the frontend acts on the request at once (clown#327, observed live 2026-10-26: the preflight consumed an idle request within a second), so no nudge should be needed; only if it has not restarted within a minute or two, send it one short message to nudge it.",
+		"restart queued for %s (%s). Nothing has been stopped yet: the frontend restarts the session when it next ends a turn and the checks still pass. If the session is busy, it restarts once that turn ends (if you are restarting yourself, end your turn now and start no new work). If the session is idle right now, the frontend acts on the request at once (clown#327, observed live 2026-10-26: the preflight consumed an idle request within a second), so no nudge is needed on clown >= d3645fac9ff1; on an older clown build, or if it has not restarted within a minute or two, send it one short message to nudge it.",
 		st.Key(), reason), nil
 }
 
