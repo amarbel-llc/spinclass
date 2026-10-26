@@ -49,7 +49,8 @@ re-run that suite right before merging.
 - **Session state** (`internal/alfa/session/`): authoritative frontend record
   `$XDG_STATE_HOME/spinclass/records/<hash>.json` (FDR 0035); the worktree's
   `.spinclass/state.json` is a display-only mirror; `active`/`inactive`/
-  `abandoned`, dirty computed live.
+  `abandoned`. No dirty flag is stored (nor shown by `sc list`): commands
+  that care (clean, close, merge's autostash) run `git status` when they act.
   Implicit sessions in a main checkout: FDR 0014. Handles/principals: FDR 0032.
 - **Git** (`internal/0/git/`): thin `git -C <dir>` wrapper (`Run` captures,
   `RunPassthrough` streams).

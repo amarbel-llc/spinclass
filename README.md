@@ -173,15 +173,18 @@ registered depends on the `[hooks].disable-merge` flag.
 
 ## Session state
 
-Sessions are tracked in
-`~/.local/state/spinclass/sessions/<hash>-state.json`. A session is one of:
+Sessions are tracked in a frontend record,
+`$XDG_STATE_HOME/spinclass/records/<hash>.json` (FDR 0035); the worktree's
+`.spinclass/state.json` is a display-only mirror. A session is one of:
 
 - **active** — PID alive and worktree exists
 - **running-detached** — the spinclass attach exited, but a live clown harness is present for the session (matched via clown's presence index, `decoration == <repo>/<branch>`)
 - **inactive** — PID dead and no live clown harness, but worktree still exists
 - **abandoned** — worktree gone
 
-Dirty state is computed live via git.
+No dirty flag is stored, and `sc list` does not show one. Commands that care
+whether a worktree has uncommitted changes (`sc clean`, `sc close`, the merge's
+autostash) run `git status` at the moment they act.
 
 ## Development
 
