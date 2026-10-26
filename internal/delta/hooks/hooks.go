@@ -86,6 +86,18 @@ func Run(r io.Reader, w io.Writer, mainRepoRoot, sessionWorktree string, disallo
 	case "SessionEnd":
 		return runSessionEnd(input)
 	default:
+		// clown#330 floor: under dontAsk, refuse a background-shell / monitor
+		// style call outright (open-world bash that streams output back).
+		if input.PermissionMode == permissionModeDontAsk && isBackgroundShellCall(input) {
+			var denied bytes.Buffer
+			if err := writeDeny(&denied, "the background shell / monitor tools are not available to an unattended session (permission mode dontAsk, clown#330)"); err != nil {
+				return err
+			}
+			perms.CountPermissionEvent(input.CWD, perms.EventUnattendedDeny, input.AgentID, input.ToolName)
+			logVerdict(input, denied.Bytes())
+			_, err := w.Write(denied.Bytes())
+			return err
+		}
 		// Capture the output so the verdict can be logged at the one place
 		// that sees every outcome; the bytes reach w unchanged.
 		var buf bytes.Buffer
@@ -116,6 +128,32 @@ func Run(r io.Reader, w io.Writer, mainRepoRoot, sessionWorktree string, disallo
 		_, err = w.Write(final.Bytes())
 		return err
 	}
+}
+
+// backgroundShellTools are the tool names of Claude Code's monitor / background
+// shell family. None is in an unattended worker's tool list today (observed
+// 2026-10-26); the names are denied by name so a future release cannot add one
+// silently.
+var backgroundShellTools = map[string]bool{
+	"Monitor": true, "BashOutput": true, "KillShell": true, "KillBash": true, "BashBackground": true,
+}
+
+// isBackgroundShellCall reports whether the call is a background-shell tool or a
+// Bash call with run_in_background set (a bool or the string "true").
+func isBackgroundShellCall(in hookInput) bool {
+	if backgroundShellTools[in.ToolName] {
+		return true
+	}
+	if in.ToolName != "Bash" {
+		return false
+	}
+	switch v := in.ToolInput["run_in_background"].(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(strings.TrimSpace(v), "true")
+	}
+	return false
 }
 
 // permissionModeDontAsk is Claude Code's hook-input permission_mode for a
