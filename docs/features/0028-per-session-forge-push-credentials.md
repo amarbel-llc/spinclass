@@ -65,6 +65,22 @@ The built-in rewrite maps the origin's ssh form to `https://<host>/<same path>`.
 
 The credential never rides in any process environment (only the file path is referenced by the helper). An absent or expired credential is a clean no-op rather than a divergence: under FDR 0029 the merge push is `git push origin <landingSha>:refs/heads/<default>`, whose ff-check mutates nothing on an auth failure.
 
+### Token pool
+
+For an operator who will be away from the card, `papi forge token mint --batch <rows> --out <dir> --ttl <dur>` (papi#80) mints a set of per-repo tokens in one card interaction. Spinclass takes a token from that pool at session creation instead of running `mint-command`, so a coordinator can spawn with the ssh-agent down. Plan: `docs/plans/2026-10-26-unattended-spawn-without-agent.md` (item 3).
+
+**Location, no key.** The pool is the fixed directory `$XDG_STATE_HOME/spinclass/token-pool` (the operator passes it as `--out`). There is deliberately no sweatfile key: a key would need the trusted-layers-only rule of `url-resolver`, and a fixed frontend-state path needs none because no sweatfile layer and no worker-writable file can redirect it. `confinement.ProtectedStateDirs` lists it, so a unit spec that binds it (or an ancestor) is refused and fact F16 fails.
+
+**Contract (papi).** `<dir>` mode 0700; per slot `<escaped-session>.token` (mode 0600, the secret on one line), the stem being the slot session with every byte outside `[A-Za-z0-9.]` as `_XX` uppercase hex; `manifest.json` (no secrets) `{"version":1,"forge":"https://H","user":"U","tokens":[{"session","repo","id","deadline"?,"file"}]}`.
+
+**Intake.** In `auth.Mint`, after the `forge-hosts` gate and the resolve, and before the mint-command: the first manifest slot whose `repo` equals the session's canonical `SPINCLASS_FORGE_REPO` and whose `deadline` (if any) is in the future is claimed by `os.Rename` of its token file into frontend state beside the session's credential, so of two concurrent spawns exactly one rename succeeds and the other moves to the next slot. The token is then written, injected and recorded exactly as a minted one; the claimed file is removed (or renamed back if wiring fails). The pool is preferred over `mint-command` when both exist. No matching slot falls through to the mint-command, or, with none configured, to a visible SKIP point. No card is involved.
+
+**Binding and revoke.** The slot session is the token's forge-side session. The record's pinned revoke command is `papi forge token revoke --host <manifest host> --user <manifest user> --card-login --session '<slot session>'`, never `$SPINCLASS_SESSION_ID`. Revoke still needs the card: while the operator is away it fails, is recorded on the tombstone, and is retried by the orphan sweep; papi's TTL sweep is the backstop.
+
+**Refusals (errors, not fallbacks).** A pool directory open to group or other, a token file that is not a regular 0600 file, a manifest that does not parse, has another version, names a non-https forge, whose host is not in `[auth].forge-hosts` (an unset list is refused too: a pool is a standing bearer credential), or a slot whose `file` is not the escaped session name. Errors name paths and slot sessions, never token contents.
+
+**Limits.** Unlike `mint-command`, a pool token is not scoped by a fresh per-spawn authorization: any spawn whose repo matches a slot may take it. The creation-time base fetch still needs the agent (`allow-stale-base`, or plan item 8).
+
 ## Examples
 
 sweatfile:

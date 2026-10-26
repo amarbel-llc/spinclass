@@ -15,7 +15,9 @@ import (
 // credential under circus/. A confined unit keeps the operator's uid, so file
 // modes do not keep it out; ProtectHome hiding the home and the spec not binding
 // the directory does. Add a name here to protect another directory.
-var ProtectedStateDirs = []string{"circus"}
+// spinclass/token-pool holds the pre-minted forge token pool (FDR 0028 "Token
+// pool"): bearer tokens for every repo in the batch.
+var ProtectedStateDirs = []string{"circus", "spinclass/token-pool"}
 
 // ProtectedPaths returns the protected directories under stateDir.
 func ProtectedPaths(stateDir string) []string {

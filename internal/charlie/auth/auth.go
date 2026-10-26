@@ -189,6 +189,7 @@ func Minted(worktreePath string) bool {
 func RemoveCredential(worktreePath string) {
 	if p, err := StateCredentialPath(worktreePath); err == nil {
 		_ = os.Remove(p)
+		_ = os.Remove(p + poolClaimSuffix)
 	}
 	_ = os.Remove(LegacyCredentialPath(worktreePath))
 }
@@ -393,7 +394,9 @@ type MintOutcome struct {
 // the mint-command sees the canonical SPINCLASS_FORGE_HOST/_REPO.
 func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver string) (MintOutcome, error) {
 	cmd := sf.AuthMintCommand()
-	if cmd == nil || strings.TrimSpace(*cmd) == "" {
+	hasCmd := cmd != nil && strings.TrimSpace(*cmd) != ""
+	poolDir, hasPool := poolPresent()
+	if !hasCmd && !hasPool {
 		return MintOutcome{}, nil
 	}
 	// A mint rewrites the worktree's config.worktree, which a running unit
@@ -420,21 +423,53 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 	if hosts := sf.AuthForgeHosts(); len(hosts) > 0 && !slices.Contains(hosts, res.Forge.Host) {
 		return MintOutcome{}, fmt.Errorf("[auth] url-resolver: canonical_https host %q is not in forge-hosts %v", res.Forge.Host, hosts)
 	}
-	// The mint usually signs with the operator's card through the ssh-agent,
-	// which can be briefly unreachable (a forwarded agent on a lossy link): ride
-	// that out, and name it when it persists (spinclass#411).
-	var out string
-	err = agentretry.Do(ctx, func() (string, error) {
-		var runErr error
-		out, runErr = hookrun.CommandCapture(ctx, id.WorktreePath, *cmd, id.env(res.Forge, res.OriginURL))
-		return out, runErr
-	})
-	if err != nil {
-		return MintOutcome{}, fmt.Errorf("[auth] mint-command failed: %w", err)
+	// A pre-minted pool slot is preferred over the mint-command: the pool exists
+	// for when the card's agent is away. No matching slot falls through to the
+	// mint-command; a pool that is itself unusable is an error, never a quiet
+	// fallback.
+	var (
+		token string
+		claim *poolClaim
+	)
+	if hasPool {
+		claim, err = claimFromPool(poolDir, sf.AuthForgeHosts(), res.Forge.OwnerRepo, id.WorktreePath)
+		if err != nil {
+			return MintOutcome{}, err
+		}
 	}
-	token := strings.TrimSpace(out)
-	if token == "" {
-		return MintOutcome{}, errors.New("[auth] mint-command printed no token on stdout")
+	switch {
+	case claim != nil:
+		token = claim.token
+	case !hasCmd:
+		return MintOutcome{Skipped: fmt.Sprintf("token pool has no unclaimed, unexpired slot for %s", res.Forge.OwnerRepo)}, nil
+	default:
+		// The mint usually signs with the operator's card through the ssh-agent,
+		// which can be briefly unreachable (a forwarded agent on a lossy link): ride
+		// that out, and name it when it persists (spinclass#411).
+		var out string
+		err = agentretry.Do(ctx, func() (string, error) {
+			var runErr error
+			out, runErr = hookrun.CommandCapture(ctx, id.WorktreePath, *cmd, id.env(res.Forge, res.OriginURL))
+			return out, runErr
+		})
+		if err != nil {
+			return MintOutcome{}, fmt.Errorf("[auth] mint-command failed: %w", err)
+		}
+		token = strings.TrimSpace(out)
+		if token == "" {
+			return MintOutcome{}, errors.New("[auth] mint-command printed no token on stdout")
+		}
+	}
+	// A claimed slot goes back into the pool if the session cannot be wired.
+	wired := false
+	if claim != nil {
+		defer func() {
+			if wired {
+				claim.discard()
+			} else {
+				claim.release()
+			}
+		}()
 	}
 	credFile, err := writeCredential(id.WorktreePath, res.Rewrite.CredentialHost, token)
 	if err != nil {
@@ -449,8 +484,12 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 	}
 	// Pin the revoke-command resolved NOW, from the layers the caller vetted for
 	// this mint. Every later revoke runs this string and re-reads no sweatfile.
+	// A pool token pins the pool form instead: its forge-side session is the
+	// slot's.
 	pinned := ""
-	if rc := sf.AuthRevokeCommand(); rc != nil {
+	if claim != nil {
+		pinned = claim.revokeCommand()
+	} else if rc := sf.AuthRevokeCommand(); rc != nil {
 		pinned = strings.TrimSpace(*rc)
 	}
 	cred := &session.Credential{
@@ -472,6 +511,7 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 	if err != nil {
 		return MintOutcome{}, fmt.Errorf("[auth] record mint: %w", err)
 	}
+	wired = true
 	outcome := MintOutcome{Minted: true}
 	if res.Resolved {
 		outcome.Resolved = res.Rewrite.HTTPS

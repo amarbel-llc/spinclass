@@ -888,6 +888,19 @@ with a *url-resolver* the last two are the canonical ones.
 	*Merge:* not merged — read only from the global and parent-directory
 	layers; a repo- or worktree-level value is ignored with a warning.
 
+*Token pool.* There is no sweatfile key for the pre-minted token pool: it is
+the fixed directory *$XDG\_STATE\_HOME/spinclass/token-pool*, filled by
+*papi forge token mint --batch ... --out* (one card interaction). When it
+exists, a new session claims (renames out of the pool) an unexpired slot whose
+manifest *repo* is the session's forge repo, instead of running
+*mint-command*; with no matching slot *mint-command* runs as before. The slot
+session is pinned in the revoke command (*papi forge token revoke --session
+<slot>*, which needs the card, so it is retried after the operator returns).
+The directory must be mode 0700 and the manifest's forge host must be listed
+in *forge-hosts* (an unset list is refused for a pool, though it means any
+host for *mint-command*); otherwise session creation fails. A unit spec that binds the pool is refused.
+See FDR 0028.
+
 *sc validate* warns when only one of the two commands is set, when
 *mint-command* is set without *forge-hosts*, and when *url-resolver* is set
 at the repo level (where it is ignored). A failed mint or a failed resolve

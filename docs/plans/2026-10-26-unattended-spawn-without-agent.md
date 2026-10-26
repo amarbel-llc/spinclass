@@ -272,6 +272,11 @@ Estimates are in worker-batches (one spawned worker through merge), all I.
 | 7 | Spawn-grant (card-signed, bounded, offline-verified) replacing the pool | #390 + papi#88 | spinclass + papi | 3+ (design first) |
 | 8 | Creation fetch after the credential is wired (no ssh at spawn) | none yet | spinclass | 2 |
 
+Status of item 3 (2026-10-26): written (tests first), not yet run or merged.
+Pool at `$XDG_STATE_HOME/spinclass/token-pool` (fixed path, no sweatfile key, so
+no schema change and no trust rule to enforce), claimed by rename in
+`auth.Mint`; see FDR 0028 "Token pool". Tests: `internal/charlie/auth/pool_test.go`.
+
 Dependencies: 3 needs 2 (or a hand-written pool); 4 is independent; 5 is stopgap
 for 8; 7 supersedes 2-3 later.
 
