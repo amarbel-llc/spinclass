@@ -1467,7 +1467,7 @@ explore-live-restart-baseline target:
     check "restart-preflight --peek reports state live" '.peek.state == "live"'
     check "a worker agent process was found by its principal/key" 'any(.procs[]; .kind == "agent")'
     check "agent environment has CLOWN_UNATTENDED=1" 'any(.procs[]; .kind == "agent" and .unattended)'
-    check "agent argv has --permission-mode dontAsk" 'any(.procs[]; .kind == "agent" and .dontask)'
+    check "agent runs dontAsk (--permission-mode argv or clown --settings defaultMode)" 'any(.procs[]; (.kind == "agent" or .kind == "clown") and (.dontask or .settings_dontask))'
     check "a spinclass serve process was found" 'any(.procs[]; .kind == "serve")'
     if jq -e '.spinclass_on_path as $p | all(.procs[] | select(.kind == "serve" and (.exe_real | endswith("/spinclass"))); .exe_real == $p and (.exe | endswith("(deleted)") | not))' "$snap" >/dev/null; then
       info "serve binary is the spinclass on PATH now: the post-restart STALE check is vacuous unless you change the spinclass on PATH before restarting"
@@ -1518,7 +1518,7 @@ explore-live-restart-verify target:
     if jq -e --slurpfile b "$base" 'any($b[0].procs[]; .kind == "agent" and .unattended)' "$after" >/dev/null; then
       check "relaunched agent environment has CLOWN_UNATTENDED=1" 'any(.procs[]; .kind == "agent" and .unattended)'
     else info "baseline agent had no CLOWN_UNATTENDED=1: unattended check skipped (the baseline recipe FAILs this)"; fi
-    if jq -e --slurpfile b "$base" 'any($b[0].procs[]; .kind == "agent" and .dontask)' "$after" >/dev/null; then
+    if jq -e --slurpfile b "$base" 'any($b[0].procs[]; (.kind == "agent" or .kind == "clown") and (.dontask or .settings_dontask))' "$after" >/dev/null; then
       # dontAsk survives through the argv splice or, since clown#323, an inline
       # --settings defaultMode; either keeps the worker from hanging on a prompt.
       check "relaunched agent runs dontAsk (--permission-mode argv or clown --settings defaultMode)" 'any(.procs[]; (.kind == "agent" or .kind == "clown") and (.dontask or .settings_dontask))'
