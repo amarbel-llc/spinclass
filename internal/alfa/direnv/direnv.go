@@ -1,7 +1,7 @@
 // Package direnv centralizes how spinclass locates and invokes direnv, so the
 // resolution rule and the `direnv exec` argv shape live in one place rather than
 // being hand-mirrored across the packages that devshell-scope a command
-// (internal/0/sweatfile hooks, internal/bravo/sessionexec). See spinclass#199.
+// (internal/0/sweatfile hooks, internal/charlie/sessionexec). See spinclass#199.
 //
 // Caller-specific policy stays with the caller: whether to wrap at all (e.g.
 // sweatfile gates on a real .envrc), and which directory's devshell to load

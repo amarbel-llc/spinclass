@@ -43,8 +43,8 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
 	"code.linenisgreat.com/spinclass/internal/bravo/present"
-	"code.linenisgreat.com/spinclass/internal/bravo/sessionexec"
 	"code.linenisgreat.com/spinclass/internal/charlie/executor"
+	"code.linenisgreat.com/spinclass/internal/charlie/sessionexec"
 	"code.linenisgreat.com/spinclass/internal/delta/merge"
 	"code.linenisgreat.com/spinclass/internal/echo/shop"
 )
