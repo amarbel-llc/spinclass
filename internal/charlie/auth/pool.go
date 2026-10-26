@@ -130,7 +130,7 @@ func checkPoolDir(dir string) error {
 // its parse errors may be shown. forge-hosts must be set and list the
 // manifest's host: a pool is a standing bearer credential, so unlike the mint
 // gate an empty allow-list does not mean "any host".
-func readPoolManifest(dir string, hosts []string) (poolManifest, string, error) {
+func readPoolManifest(dir string, hosts []string, revokeHost string) (poolManifest, string, error) {
 	path := filepath.Join(dir, poolManifestName)
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -150,8 +150,12 @@ func readPoolManifest(dir string, hosts []string) (poolManifest, string, error) 
 	if len(hosts) == 0 {
 		return poolManifest{}, "", errors.New("[auth] token-pool requires [auth].forge-hosts to be set and to list the manifest's forge host")
 	}
-	if !slices.Contains(hosts, u.Hostname()) {
-		return poolManifest{}, "", fmt.Errorf("[auth] token-pool manifest forge host %q is not in [auth].forge-hosts %v", u.Hostname(), hosts)
+	// The manifest names papi's API host, which is not the git plane forge-hosts
+	// lists (the vanity plane serves git only; a token minted at the canonical
+	// host authenticates git there). The operator's pinned revoke-command already
+	// names the API host (--host), so that host is accepted too.
+	if !slices.Contains(hosts, u.Hostname()) && (revokeHost == "" || u.Hostname() != revokeHost) {
+		return poolManifest{}, "", fmt.Errorf("[auth] token-pool manifest forge host %q is neither in [auth].forge-hosts %v nor the --host of the pinned [auth].revoke-command", u.Hostname(), hosts)
 	}
 	for _, s := range m.Tokens {
 		if s.Session == "" || s.File != escapeSession(s.Session)+".token" {
@@ -166,16 +170,16 @@ func readPoolManifest(dir string, hosts []string) (poolManifest, string, error) 
 // two racing claimers exactly one rename succeeds, the other sees the file gone
 // and moves on). It returns nil, nil when the pool has no such slot. now is the
 // deadline reference. Errors name paths and sessions, never token contents.
-func claimPoolSlot(dir, repo string, hosts []string, now time.Time, dest string) (*poolClaim, error) {
+func claimPoolSlot(dir, repo string, hosts []string, revokeHost string, now time.Time, dest string) (*poolClaim, error) {
 	if err := checkPoolDir(dir); err != nil {
 		return nil, err
 	}
-	m, apiHost, err := readPoolManifest(dir, hosts)
+	m, apiHost, err := readPoolManifest(dir, hosts, revokeHost)
 	if err != nil {
 		return nil, err
 	}
 	for _, s := range m.Tokens {
-		if s.Repo != repo {
+		if !poolRepoMatches(s.Repo, repo) {
 			continue
 		}
 		if s.Deadline != nil && !s.Deadline.After(now) {
@@ -215,7 +219,7 @@ func claimPoolSlot(dir, repo string, hosts []string, now time.Time, dest string)
 
 // claimFromPool claims a slot for worktreePath, into frontend state beside its
 // credential.
-func claimFromPool(dir string, hosts []string, repo, worktreePath string) (*poolClaim, error) {
+func claimFromPool(dir string, hosts []string, revokeHost, repo, worktreePath string) (*poolClaim, error) {
 	credPath, err := StateCredentialPath(worktreePath)
 	if err != nil {
 		return nil, err
@@ -223,5 +227,37 @@ func claimFromPool(dir string, hosts []string, repo, worktreePath string) (*pool
 	if err := os.MkdirAll(filepath.Dir(credPath), 0o700); err != nil {
 		return nil, err
 	}
-	return claimPoolSlot(dir, repo, hosts, time.Now(), credPath+poolClaimSuffix)
+	return claimPoolSlot(dir, repo, hosts, revokeHost, time.Now(), credPath+poolClaimSuffix)
+}
+
+// poolRepoMatches reports whether a manifest slot's repo serves the session's
+// repo. papi records the resolved owner/name; a session whose origin is on the
+// owner-less vanity plane (".../spinclass.git") has the bare name, which matches
+// the slot's last path segment. An owner-qualified repo must match exactly.
+func poolRepoMatches(slotRepo, repo string) bool {
+	if repo == "" || slotRepo == "" {
+		return false
+	}
+	if slotRepo == repo {
+		return true
+	}
+	if strings.Contains(repo, "/") {
+		return false
+	}
+	return slotRepo[strings.LastIndex(slotRepo, "/")+1:] == repo
+}
+
+// revokeCommandHost is the --host (or --host=) value of a revoke-command, "" if
+// it names none. The command is the operator's pinned one, not agent input.
+func revokeCommandHost(cmd string) string {
+	f := strings.Fields(cmd)
+	for i, a := range f {
+		if a == "--host" && i+1 < len(f) {
+			return f[i+1]
+		}
+		if v, ok := strings.CutPrefix(a, "--host="); ok {
+			return v
+		}
+	}
+	return ""
 }

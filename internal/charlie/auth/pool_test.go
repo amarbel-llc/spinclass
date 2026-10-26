@@ -197,7 +197,7 @@ func TestPoolConcurrentClaimsNeverTakeTheSameSlot(t *testing.T) {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			c, err := claimPoolSlot(dir, "owner/repo", []string{"forge.example.com"}, time.Now(), filepath.Join(dest, strings.Repeat("x", n+1)))
+			c, err := claimPoolSlot(dir, "owner/repo", []string{"forge.example.com"}, "", time.Now(), filepath.Join(dest, strings.Repeat("x", n+1)))
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -359,6 +359,55 @@ func TestPoolRefusesManifestHostOutsideForgeHosts(t *testing.T) {
 	}
 	if !exists(filepath.Join(dir, "pool_2Fspinclass_2F01.token")) || Minted(wtPath) {
 		t.Error("a slot was claimed from a pool for a foreign host")
+	}
+}
+
+// The real fleet: the manifest names papi's API host (forge.starbrandshoes.com),
+// while [auth].forge-hosts lists the git plane (code.linenisgreat.com) and the
+// pinned revoke-command names the API host. The pool must be usable there; before
+// this every session creation with a pool errored on the host check.
+func TestPoolAcceptsManifestHostNamedByThePinnedRevokeCommand(t *testing.T) {
+	_, _, id := setupRepo(t)
+	writePool(t, "https://api.example.net", testSlot{session: "pool/spinclass/01", repo: "owner/repo", deadline: future()})
+	sf := poolSweatfile("", "papi forge token revoke --host api.example.net --user u --card-login --session $SPINCLASS_SESSION_ID")
+	outcome, err := Mint(context.Background(), sf, id, "")
+	if err != nil || !outcome.Minted {
+		t.Fatalf("outcome=%+v err=%v; a manifest host named by the revoke-command's --host must be accepted", outcome, err)
+	}
+}
+
+// papi records the slot's repo as the resolved owner/name; an owner-less origin
+// (the vanity plane: .../spinclass.git -> "spinclass") must still claim it.
+func TestPoolRepoMatchingToleratesAnOwnerlessOrigin(t *testing.T) {
+	for _, tc := range []struct {
+		slot, repo string
+		want       bool
+	}{
+		{"linenisgreat/spinclass", "spinclass", true},
+		{"linenisgreat/spinclass", "linenisgreat/spinclass", true},
+		{"linenisgreat/spinclass", "other/spinclass", false},
+		{"linenisgreat/spinclass", "spin", false},
+		{"linenisgreat/spinclass", "class", false},
+		{"spinclass", "spinclass", true},
+		{"a/b/spinclass", "spinclass", true},
+		{"linenisgreat/spinclass", "", false},
+	} {
+		if got := poolRepoMatches(tc.slot, tc.repo); got != tc.want {
+			t.Errorf("poolRepoMatches(%q, %q) = %v, want %v", tc.slot, tc.repo, got, tc.want)
+		}
+	}
+}
+
+func TestPoolRevokeHostOf(t *testing.T) {
+	for in, want := range map[string]string{
+		"papi forge token revoke --host h.example --user u --card-login --session s": "h.example",
+		"papi forge token revoke --host=h.example --user u":                          "h.example",
+		"papi forge token revoke --user u":                                           "",
+		"":                                                                           "",
+	} {
+		if got := revokeCommandHost(in); got != want {
+			t.Errorf("revokeCommandHost(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

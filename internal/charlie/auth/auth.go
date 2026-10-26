@@ -432,7 +432,11 @@ func Mint(ctx context.Context, sf sweatfile.Sweatfile, id Identity, urlResolver 
 		claim *poolClaim
 	)
 	if hasPool {
-		claim, err = claimFromPool(poolDir, sf.AuthForgeHosts(), res.Forge.OwnerRepo, id.WorktreePath)
+		revokeHost := ""
+		if rc := sf.AuthRevokeCommand(); rc != nil {
+			revokeHost = revokeCommandHost(*rc)
+		}
+		claim, err = claimFromPool(poolDir, sf.AuthForgeHosts(), revokeHost, res.Forge.OwnerRepo, id.WorktreePath)
 		if err != nil {
 			return MintOutcome{}, err
 		}

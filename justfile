@@ -1495,9 +1495,10 @@ explore-live-restart-baseline target:
 #
 # check the token pool directory, manifest and slot files without claiming one
 [group("explore")]
-explore-pool-check pool='':
+explore-pool-check pool='' repos='':
     #!/usr/bin/env bash
     set -uo pipefail
+    repos={{ quote(repos) }}
     dir={{ quote(pool) }}
     [ -n "$dir" ] || dir="${XDG_STATE_HOME:-$HOME/.local/state}/spinclass/token-pool"
     fails=0
@@ -1524,6 +1525,25 @@ explore-pool-check pool='':
       printf 'INFO    %-28s %-28s %-9s %s\n' "$session" "$repo" "$st" "$left"
     done < <(jq -r '.tokens[] | [.session, .repo, .file, (.deadline // "")] | @tsv' "$man")
     jq -r '.tokens[].repo' "$man" | sort | uniq -c | sed 's/^/INFO    slots per repo: /'
+    # The claim compares the session's repo, taken from the origin URL's PATH
+    # (".../spinclass.git" -> "spinclass" on the owner-less vanity plane, "o/n" on
+    # GitHub), with the slot's repo; papi records the resolved owner/name. An
+    # owner-less origin matches the slot's last segment (poolRepoMatches).
+    # Pass `repos` as space-separated checkout dirs to test them.
+    for r in $repos; do
+      url=$(git -C "$r" config --get remote.origin.url 2>/dev/null || true)
+      [ -n "$url" ] || { fail "repo $r: no origin url"; continue; }
+      case "$url" in
+        *://*) path=${url#*://}; path=${path#*/} ;;
+        *) path=${url#*:} ;;
+      esac
+      path=${path#/}; path=${path%.git}
+      if jq -e --arg p "$path" '[.tokens[] | select(.repo == $p or (($p | contains("/") | not) and (.repo | split("/") | last) == $p))] | length > 0' "$man" >/dev/null; then
+        pass "repo $r (origin path '$path') has a matching pool slot"
+      else
+        fail "repo $r (origin path '$path'): NO MATCH among the slots' repos: a session there will not claim a slot"
+      fi
+    done
     [ "$fails" -eq 0 ] && { echo "SUMMARY: pool PASS (MANUAL: [auth].forge-hosts lists the forge host; allow-stale-base for the trip repos)"; exit 0; }
     echo "SUMMARY: $fails FAIL"; exit 1
 
