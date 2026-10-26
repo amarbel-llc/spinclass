@@ -47,7 +47,27 @@ func runRestartHung(p restartHungParams) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if err := refuseSelfRestartAsHung(callerPrincipal, bestEffortSessionKey(), childPrincipal, child); err != nil {
+		return "", err
+	}
 	return restartHungWith(child, callerPrincipal, childPrincipal, p.Reason, healthDepsFn())
+}
+
+// refuseSelfRestartAsHung: a hung session cannot call tools, so a session
+// naming itself is either a mistake or an attempt to turn its own forgeable
+// status into a forced restart that restart-this-session never allows.
+//
+// The verdict and the day bound are integrity-soft against an unconfined
+// holder: the status file, job record and session record are all writable by
+// code running as the same user. The real bounds against a hostile holder are
+// the restart right and the confined-caller refusal; the verdict and the
+// cooldown protect against honest mistakes. A synchronous merge/check writes no
+// job record, so only the 60m default bound keeps a long gate from looking hung.
+func refuseSelfRestartAsHung(callerPrincipal, callerKey, childPrincipal string, child *session.State) error {
+	if callerPrincipal == childPrincipal || (callerKey != "" && callerKey == child.Key()) {
+		return fmt.Errorf("%s cannot be force-restarted as hung by itself: a hung session cannot call tools, so ask a holder (or use restart-this-session)", child.Key())
+	}
+	return nil
 }
 
 func restartHungWith(child *session.State, caller, childPrincipal, reason string, d healthDeps) (string, error) {

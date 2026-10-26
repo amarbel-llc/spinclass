@@ -151,6 +151,19 @@ func TestRestartHungChildHandoffFailureDoesNotSpendTheDay(t *testing.T) {
 	}
 }
 
+func TestRestartHungChildRefusesASessionNamingItself(t *testing.T) {
+	kid := &session.State{SessionKey: "worker/kid"}
+	if err := refuseSelfRestartAsHung("p-kid", "", "p-kid", kid); err == nil {
+		t.Error("the same principal must be refused")
+	}
+	if err := refuseSelfRestartAsHung("p-other", "worker/kid", "p-kid", kid); err == nil {
+		t.Error("the same session key must be refused")
+	}
+	if err := refuseSelfRestartAsHung("p-boss", "boss/main", "p-kid", kid); err != nil {
+		t.Errorf("a different caller must pass: %v", err)
+	}
+}
+
 func TestRestartHungChildRefusesAConfinedCaller(t *testing.T) {
 	asConfinedServeCaller(t, "a-confined-principal")
 	calls := stubRestartHandoff(t, "", nil)
