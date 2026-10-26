@@ -160,7 +160,7 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, rep *crap.Rep
 	}
 
 	pm = pm.StampStartedAt()
-	pinnedSha, prepErr := PrepareMerge(ctx, ts, repoPath, wtPath, branch, defaultBranch, gitSync, pm)
+	pinnedSha, prepErr := PrepareMergeWith(ctx, rep, ts, repoPath, wtPath, branch, defaultBranch, gitSync, pm)
 	if prepErr != nil {
 		return nil, prepErr
 	}
@@ -186,6 +186,12 @@ func ResolvedContext(ctx context.Context, execr executor.Executor, rep *crap.Rep
 // repair and its process group. The other stages are short git commands and
 // keep running to completion.
 func PrepareMerge(ctx context.Context, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch string, gitSync bool, pm PostMergeOptions) (pinnedSha string, err error) {
+	return PrepareMergeWith(ctx, nil, ts, repoPath, wtPath, branch, defaultBranch, gitSync, pm)
+}
+
+// PrepareMergeWith is PrepareMerge with the reporter, so stages can add phase
+// lines beside ts's test points (#240). A nil rep adds none.
+func PrepareMergeWith(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch string, gitSync bool, pm PostMergeOptions) (pinnedSha string, err error) {
 	prepStart := time.Now()
 	var mx phaseMetrics
 	// A failed prepare is the whole merge failing, so it also closes out the
@@ -231,6 +237,7 @@ func PrepareMerge(ctx context.Context, ts *crap.TestStream, repoPath, wtPath, br
 		defer restore()
 	}
 
+	headBefore, _ := git.RevParse(wtPath, "HEAD")
 	rebaseStart := time.Now()
 	out, rebaseErr := git.RunEnv(wtPath, []string{"GIT_SEQUENCE_EDITOR=true"}, "rebase", target.Ref(), "-i")
 	mx.observeErr(context.Background(), "rebase", rebaseStart, rebaseErr)
@@ -238,6 +245,7 @@ func PrepareMerge(ctx context.Context, ts *crap.TestStream, repoPath, wtPath, br
 		return "", failStep(ts, "rebase "+branch, git.ExplainDriverNotFound(rebaseErr, out), out)
 	}
 	ts.Ok("rebase " + branch)
+	reportRebaseRewrite(rep, wtPath, branch, headBefore)
 
 	// A rebase that exits 0 can still leave the worktree conflicted: a failed
 	// autostash pop (git config rebase.autoStash) applies the rebase cleanly but
@@ -393,6 +401,23 @@ func (p mergePreamble) repair(ctx context.Context, ts *crap.TestStream, mx phase
 
 // pinHead resolves dir's HEAD as the sha the pre-merge hook verifies and the
 // landing publishes, emitting a failing point on error.
+// reportRebaseRewrite adds a phase line naming the new and old HEAD when the
+// rebase rewrote branch (#240). The rewrite stands whatever a later stage does,
+// and the old sha a caller remembers no longer names its commit, so it must
+// not be left for the caller to discover. A phase, not a test point, so the
+// verdict ladder is unchanged.
+func reportRebaseRewrite(rep *crap.Reporter, wtPath, branch, headBefore string) {
+	if rep == nil || headBefore == "" {
+		return
+	}
+	headAfter, err := git.RevParse(wtPath, "HEAD")
+	if err != nil || headAfter == headBefore {
+		return
+	}
+	rep.Phase(fmt.Sprintf("rebase rewrote %s: HEAD is now %s (was %s)",
+		branch, shortSha(headAfter), shortSha(headBefore))).Done()
+}
+
 func pinHead(ts *crap.TestStream, dir, branch string) (string, error) {
 	sha, err := git.RevParse(dir, "HEAD")
 	if err != nil {

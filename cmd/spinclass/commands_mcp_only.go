@@ -746,7 +746,7 @@ func handleMergeThisSessionAsync(ctx context.Context, args json.RawMessage, _ co
 	pm = pm.StampStartedAt() // total spans the sync prefix and the backgrounded finish
 	// The request ctx reaches only repair (#401); whether go-mcp cancels it on a
 	// client cancel or timeout is purse-first#219. The repair cap bounds it either way.
-	pinnedSha, prepErr := merge.PrepareMerge(ctx, ts, repoPath, cwd, branch, defaultBranch, gitSync, pm)
+	pinnedSha, prepErr := merge.PrepareMergeWith(ctx, rep, ts, repoPath, cwd, branch, defaultBranch, gitSync, pm)
 	if prepErr != nil {
 		ts.Finish() // the deferred release keeps the attestation for the retry (#303)
 		text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
