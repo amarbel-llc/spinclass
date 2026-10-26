@@ -1,0 +1,123 @@
+# spinclass pickup note, 2026-10-26 (for the replacement session)
+
+Written by spinclass/firm-mulberry (the session being replaced). Labels: V
+verified on this host, R read in code or docs, I inferred. The brief is the
+operator's unattended-trip goal: restarts, confinement and permissions.
+
+## Standing rules
+
+- Report each landed SHA to the coordinator (circus/eager-holly) by chat. One gate
+  at a time, one build at a time. Check `env_meminfo` (more than 4 GB) first. Obey
+  the coordinator's hold, "memory low" and "deploy done" broadcasts.
+- Tests first, with red observed before green. Merge with targets=[] after a
+  `nothing-but-the-truth` attestation with honest per-skill reasoning.
+- Do not spawn sessions (the ssh-agent is flaky). In-session subagents are fine.
+- Never read other sessions' `.spinclass/` directories. Do not change sweatfile
+  gate or confinement settings. Do not touch #346, #78, #236.
+- Sign off as Clown with the commit link from your system prompt.
+
+## What landed today (origin/master)
+
+bdb34e6 (#398 terminal query), 9760f7b (durable attestation store, `sc attestation`),
+3adf040 (restart --peek and rights-table tests), 76b0a0a / 5c8882f / 913484b (the
+three unattended status pages), 3abe698 (confined merge, delegation, token-lifetime
+page), bfe4525 (restart start/back/never-returned wakes plus the relaunch
+watchdog), e2c8777 (#369 permission counters), a85c2f1 and c6d9992 and d025aa0
+(lint fixes for the nikulin cascade, including `lint-invisible-chars`), 6ae9124
+(#372), 05ce039 (`[session-entry] unattended-permission-mode`), 41d6fa5 (sticky-
+confined resume and exec), 8994fb8 (#431, F16), b70c3ab (live-restart recipes and
+runbook), dc78e34 / 102d235 (hung-session note), c3ddbbf (coordinator page).
+
+## In flight at the time of writing
+
+- **Pool intake**, commit 3135b90 on `firm-mulberry`, with the two small commits
+  9625e46 and 8b328f9 below it. It was tested red then green in
+  `internal/charlie/auth` and `internal/bravo/confinement` (V). Its gate is started
+  right after this note lands. If `git log origin/master` does not show 3135b90,
+  the gate failed or is running: read it with `job_status`, retry once, and
+  otherwise fix from the WIP branch below.
+- **WIP branch on origin: `wip/spinclass-firm-mulberry-2026-10-26`.** It holds
+  everything above plus ec20a5e, an UNRUN recipe `debug-profile-pin-spawn` (#407
+  end to end; it spawns a real worker, so run it only with the coordinator's go).
+  To resume: `git fetch origin wip/spinclass-firm-mulberry-2026-10-26` and
+  `git cherry-pick ec20a5e`.
+
+## Ordered queue
+
+1. Finish the pool gate (above). Then ask papi/crisp-juniper whether the pool's
+   revoke command form (`papi forge token revoke --host H --user U --card-login
+   --session '<slot>'`) is right: I added `--host/--user/--card-login` to match the
+   FDR 0028 form; papi's note gave only `--session` (I).
+2. Pool follow-ups: the operator runs the papi batch mint into
+   `$XDG_STATE_HOME/spinclass/token-pool` and sets `allow-stale-base` for the trip
+   repos (the base-branch fetch still needs ssh). Then a sticky unit-spec socket
+   list, so a respawn without SSH_AUTH_SOCK is not a changed boundary on clown's
+   side (`docs/plans/2026-10-26-unattended-spawn-without-agent.md`, about 1 batch).
+3. Require the `frontend-deadman` capability (clown#319, clown master c4efcf09c641)
+   in `confinement.RequiredCapabilities` before confined spawns. Do it only after
+   the deployed clown reports it, or every confined spawn is refused.
+4. Update `docs/plans/2026-10-26-unattended-confinement.md` for clown's unit
+   resource limits (#320: MemoryMax and so on, partly closing #387) and the
+   dead-man socket (#319).
+5. Hung-session detection (`docs/plans/2026-10-26-hung-session-detection.md`).
+   pure-teak will write `$XDG_STATE_HOME/clown/status/<sha256(principal)>.json`
+   (fields in the note) and ping the SHA. Then: a reader, a classifier with a
+   trusted `[health]` table (operator ruled: busy bound 60m), a read-only
+   `session-health` tool for held children, and a bounded coordinator forced
+   restart (operator ruled yes: at most once per child per day, only with the
+   `restart` right, logged and woken to holders). About 3 batches (I).
+6. The restart-verdict gap with clown. On 2026-10-26 circus/solid-elm was restarted
+   through `restart-child-session`, yet clown logged "frontend (61fa71c2…) exiting
+   with a restart queued and never asked about" and never called
+   `restart-preflight`: `restarting_at` stayed null, so no wake and no watchdog
+   fired (V). I asked pure-teak (chat-ec53944c: when does clown call the
+   preflight, and who cleared the request?). Wait for the answer; do not guess.
+7. Follow-ups filed: #427 (store retention), #428 (`sc run` attestation env, handler
+   test), #429 (five unenforced rights), #432 (confined landing, after the trip),
+   #435 (who granted a handle and when), #157 (go-mcp/huh bridge: igloo e178fea is
+   on master, resume steps are in the issue), conformist#149 (eng template
+   `lint-invisible-chars`), papi#91 (does the TTL sweep revoke live tokens).
+
+## Recipes and commands
+
+- `explore-live-restart-prereqs`, `explore-live-restart-baseline <key>`,
+  `explore-live-restart-verify <key>` (read-only; the runbook is
+  `docs/plans/2026-10-26-first-live-restart-unattended-runbook.md`).
+- `debug-lint-all-findings`: golangci with --keep-going, to reproduce the cascade
+  (after a plain `nix flake update`; revert the lock and the regenerated tommy
+  codec before committing). `lint-invisible-chars` is in `lint`.
+- `debug-restart-watch-timer`, `debug-madder-user-store`, `debug-go-test <dir>`.
+- Gate: `nothing-but-the-truth` (all five skills, honest reasoning), then
+  `merge-this-session-async` with targets=[].
+
+## Traps
+
+- A restart cancels a running gate AND drops the buffered attestation. Re-attest.
+- A direct `clown restart` skips the running-job check; only the restart tools go
+  through the preflight and send the wakes.
+- A dirty tracked tree is refused at the merge's repair step (#345): commit or
+  stash first. Stashes die with the worktree.
+- `just build-tommy-codegen` rewrites go.nix (#410): restore it afterwards.
+- The Edit tool decodes backslash-u escapes in what you type: to write a
+  six-character Unicode escape into a file, type backslash, `u005c`, then the
+  digits, and check with rg. Never leave a literal Cf/Cc character in a tracked
+  file (`lint-invisible-chars` will fail the gate).
+- The nikulin cascade runs a plain `nix flake update` before `just`, so its
+  linters are newer than the lock: findings can appear one at a time.
+- `whoami` lists circus/light-elm and circus/ready-acacia as held. They are
+  not yours: do not close or message them.
+
+## Waiting on
+
+pure-teak (status file SHA, the preflight question, the deployed `frontend-deadman`),
+papi/crisp-juniper (the pool format is in; #88 and #91 are theirs), the operator
+(first restarts, prerequisites on flic, the batch mint), the coordinator (gates and
+holds).
+
+## Owed to the operator
+
+The prerequisites on flic: clown at least 1f5e57c5 (c4efcf09c641 for the dead-man),
+spinclass bumped past 05ce039, and `[session-entry] restart` plus
+`unattended-permission-mode = "dontAsk"` in the global sweatfile. The batch mint
+and its TTL. `allow-stale-base` for the trip repos. The 168h profile-grant cap
+lapses mid-trip. The #432 ruling that confined landing waits until after the trip.
