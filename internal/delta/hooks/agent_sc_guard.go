@@ -24,7 +24,7 @@ import (
 func isReadOnlyScVerb(verb string) bool {
 	switch verb {
 	case "list", "version", "validate", "whoami", "list-handles", "perms-list",
-		"host-load", "implicit-session-key", "attestation":
+		"host-load", "implicit-session-key", "attestation", "session-health":
 		return true
 	}
 	return false
@@ -43,7 +43,7 @@ func scVerbMCPTool(verb string) (string, bool) {
 	case "update-description":
 		return "update-this-session-description", true
 	case "close-child-session", "close-this-session", "restart-this-session",
-		"restart-child-session", "cancel-restart", "grant-session-handle",
+		"restart-child-session", "restart-hung-child", "cancel-restart", "grant-session-handle",
 		"release-session-handle", "resurrect":
 		// The MCP tool carries the CLI verb's name.
 		return verb, true

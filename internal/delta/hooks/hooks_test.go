@@ -1161,6 +1161,12 @@ func TestReadOnlyIntrospectionToolsAutoApproved(t *testing.T) {
 		{"restart-child-session", map[string]any{"child": "r/b", "force": true}, "ask"},
 		{"restart-child-session", map[string]any{"child": "r/b", "force": "false"}, "ask"},
 		// cancel-restart only removes a queued request.
+		{"session-health", map[string]any{}, "allow"},
+		{"session-health", map[string]any{"child": "r/b"}, "allow"},
+		// A bounded forced restart of a hung child: the tool itself requires the
+		// restart handle right, a busy-too-long verdict and a day since the last
+		// one, so the always-ask floor does not apply to it.
+		{"restart-hung-child", map[string]any{"child": "r/b"}, "allow"},
 		{"cancel-restart", map[string]any{}, "allow"},
 		{"cancel-restart", map[string]any{"child": "r/b"}, "allow"},
 	}

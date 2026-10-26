@@ -386,6 +386,18 @@ func registerMCPOnlyCommands(app *command.App) {
 	})
 
 	app.AddCommand(&command.Command{
+		Name:  "restart-hung-child",
+		Title: "Restart Hung Child",
+		Description: command.Description{
+			Short: "Force-restart a held child that session-health classifies busy-too-long (a turn running past the [health] busy-bound with no hook or transcript progress and no merge/check job). The operator-ruled bounded form of a forced restart: needs the `restart` right on the child, re-checks the verdict now, and works at most once per child per 24h; every use is logged and woken to the holders. The restart happens immediately (it kills the stuck turn). Not hung, or restarted in the last day: refused.",
+		},
+		Annotations: restartHungChildAnnotations(),
+		Params:      restartHungChildParamList(),
+		Run:         wrapMCPHandler("restart-hung-child", handleRestartHungChild),
+		RunCLI:      ungatedCLI(runRestartHung),
+	})
+
+	app.AddCommand(&command.Command{
 		Name:  "session-health",
 		Title: "Session Health",
 		Description: command.Description{

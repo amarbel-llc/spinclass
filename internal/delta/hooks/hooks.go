@@ -768,6 +768,8 @@ const (
 	restartThisSessionToolName    = "mcp__plugin_spinclass_spinclass__restart-this-session"
 	restartChildSessionToolName   = "mcp__plugin_spinclass_spinclass__restart-child-session"
 	cancelRestartToolName         = "mcp__plugin_spinclass_spinclass__cancel-restart"
+	sessionHealthToolName         = "mcp__plugin_spinclass_spinclass__session-health"
+	restartHungChildToolName      = "mcp__plugin_spinclass_spinclass__restart-hung-child"
 )
 
 func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree, rewriteEnabled, denySweatfile bool) error {
@@ -838,7 +840,7 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 		// Auto-approve unconditionally so agents never get a permission prompt
 		// for them.
 		return writeAllow(w, "spinclass session-management tool, safe to auto-approve")
-	case versionToolName, whoamiToolName, permsListToolName, listHandlesToolName, hostLoadToolName:
+	case versionToolName, whoamiToolName, permsListToolName, listHandlesToolName, hostLoadToolName, sessionHealthToolName:
 		// Read-only introspection: version (build info), whoami and list-handles
 		// (the caller's own principal and handles), perms-list (the tier rules),
 		// host-load (CPU load and the busiest processes, #388).
@@ -859,6 +861,14 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 		// gate and a prompt on top guards nothing. The forced form never reaches
 		// here: the always-ask floor above caught it.
 		return writeAllow(w, "restart is gated by the operator's trusted restart hand-off and the restart handle right")
+	case restartHungChildToolName:
+		// The operator-ruled bounded forced restart (2026-10-26): the tool refuses
+		// unless the caller holds the restart right on the child, the child's
+		// verdict is busy-too-long NOW (a merge/check job excuses it), and no
+		// forced restart of that child happened in the last 24h; each use is
+		// logged and woken to the holders. Those checks are the gate, so a prompt
+		// on top would only strand an unattended coordinator.
+		return writeAllow(w, "restart-hung-child is bounded: restart right, busy-too-long verdict, once per child per day")
 	case cancelRestartToolName:
 		// Only removes a queued restart request; naming a child needs the restart
 		// right, checked inside the tool.

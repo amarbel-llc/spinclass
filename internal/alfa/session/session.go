@@ -296,6 +296,10 @@ type State struct {
 	// display copy), so the watchdog is not scheduled for a confined session.
 	RestartedAt *time.Time `json:"restarted_at,omitempty"`
 
+	// ForcedRestartAt is when restart-hung-child last force-restarted this session:
+	// the once-per-day bound on that tool (operator ruling, 2026-10-26).
+	ForcedRestartAt *time.Time `json:"forced_restart_at,omitempty"`
+
 	// RestartRequest is set by restart-this-session / restart-child-session
 	// (#419): a restart of this session was authorized and handed off to the
 	// harness frontend. The frontend asks `sc restart-preflight` at its next idle
