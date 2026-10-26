@@ -183,7 +183,7 @@ clean-build:
 # as raw text, so 'A|B' would reach the shell with a live pipe. Flags use the
 # test binary's spelling:
 #
-#     just debug-go-test internal/delta/perms 'TestA|TestB' -test.v
+#     just debug-go-test internal/charlie/perms 'TestA|TestB' -test.v
 #
 # [debug] Harness B, fast local lane: build .#spinclass-serve-integration,
 # whose checkPhase runs only the four serve integration tests
@@ -233,7 +233,7 @@ debug-sshsig-fixtures:
 #
 # time the godyn-test inner loop (first, no-op, and edited runs)
 [group("debug")]
-debug-godyn-test-loop dir='internal/delta/perms':
+debug-godyn-test-loop dir='internal/charlie/perms':
     #!/usr/bin/env bash
     set -euo pipefail
     target=$(find {{ dir }} -maxdepth 1 -name '*_test.go' | sort | head -1)

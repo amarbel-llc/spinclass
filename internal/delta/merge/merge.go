@@ -25,13 +25,13 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/landing"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	gitstore "code.linenisgreat.com/spinclass/internal/alfa/store/git"
+	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
 	"code.linenisgreat.com/spinclass/internal/bravo/hookrun"
 	"code.linenisgreat.com/spinclass/internal/bravo/present"
 	"code.linenisgreat.com/spinclass/internal/charlie/auth"
 	"code.linenisgreat.com/spinclass/internal/charlie/check"
 	"code.linenisgreat.com/spinclass/internal/charlie/executor"
 	"code.linenisgreat.com/spinclass/internal/charlie/profilerights"
-	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
 )
 
 // mergeInteractive reports whether a prompt can be shown (tty.Interactive:

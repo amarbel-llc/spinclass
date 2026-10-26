@@ -9,7 +9,7 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
-	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
+	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
 )
 
 // on-attach and on-detach run `sh -c` in the operator's terminal, outside any

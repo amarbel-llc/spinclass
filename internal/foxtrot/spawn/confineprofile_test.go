@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
+	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
-	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
 )
 
 // confinedGlobalSweatfile turns confinement on from the global (trusted) layer.

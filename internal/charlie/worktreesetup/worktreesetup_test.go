@@ -12,7 +12,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/embeds"
 	"code.linenisgreat.com/spinclass/internal/0/madder"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
-	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
+	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
 	"code.linenisgreat.com/spinclass/internal/testfs"
 	"code.linenisgreat.com/spinclass/internal/testgit"
 )

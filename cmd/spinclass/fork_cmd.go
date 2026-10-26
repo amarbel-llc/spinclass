@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
-	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
+	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
 )
 
 // resolveForkSource resolves the fork SOURCE worktree from a directory, as

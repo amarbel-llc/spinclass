@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"code.linenisgreat.com/spinclass/internal/delta/perms"
+	"code.linenisgreat.com/spinclass/internal/charlie/perms"
 	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 )
 

@@ -53,7 +53,7 @@ re-run that suite right before merging.
   Implicit sessions in a main checkout: FDR 0014. Handles/principals: FDR 0032.
 - **Git** (`internal/0/git/`): thin `git -C <dir>` wrapper (`Run` captures,
   `RunPassthrough` streams).
-- **Worktree resolution** (`internal/charlie/worktree/`): `ResolvePath()` is the single
+- **Worktree resolution** (`internal/alfa/worktree/`): `ResolvePath()` is the single
   target→path entry point (bare name → `<repo>/.worktrees/<branch>`). Path logic
   only, over `git`; applying a sweatfile's setup (`Create`, `Reapply`, the setup
   fingerprint) is `internal/charlie/worktreesetup` (#308).
@@ -63,7 +63,7 @@ re-run that suite right before merging.
   `spinclass-sweatfile(5)`.
 - **Merge/Pull/Clean** (`internal/delta/merge/`, `pull/`, `clean/`): merge pre-flights
   merge drivers (#324), rebases onto the default branch, then lands; see below.
-- **Permission tiers** (`internal/delta/perms/`): Claude Code hook integration, rules
+- **Permission tiers** (`internal/charlie/perms/`): Claude Code hook integration, rules
   as JSON. **Claude integration** (`internal/0/claude/`): trust + `claude-allow`.
 - **Remote sessions** (`internal/bravo/remote/`): `host:` targets, resume-only
   (FDR 0011).

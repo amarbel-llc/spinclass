@@ -14,7 +14,7 @@ import (
 
 	"code.linenisgreat.com/clown/pkg/profilelookup"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
-	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
+	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
 )
 
 // fakeResolver records the names it is asked about and answers from a table.

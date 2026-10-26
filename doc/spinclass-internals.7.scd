@@ -96,7 +96,7 @@ Design: *docs/plans/2026-10-20-agent-census-by-unit.md*.
 
 # PRETOOLUSE VERDICT LOG
 
-*Run* in *internal/echo/hooks* captures what the PreToolUse handler writes and
+*Run* in *internal/delta/hooks* captures what the PreToolUse handler writes and
 appends one NDJSON line per spinclass MCP tool decision to
 *.spinclass/hook-verdicts.ndjson* before copying the bytes to Claude Code
 unchanged (other tools are never logged; their inputs may carry secrets). It is

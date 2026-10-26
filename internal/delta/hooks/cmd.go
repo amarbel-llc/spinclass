@@ -9,7 +9,7 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
-	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
+	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
 )
 
 // Handle is the cobra-free entry point for the PreToolUse hook. It detects

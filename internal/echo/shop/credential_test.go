@@ -11,8 +11,8 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
 	"code.linenisgreat.com/spinclass/internal/charlie/auth"
-	"code.linenisgreat.com/spinclass/internal/charlie/worktree"
 )
 
 const authTestOrigin = "ssh://git@127.0.0.1:1/owner/repo.git"
