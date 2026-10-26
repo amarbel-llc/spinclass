@@ -195,6 +195,9 @@ func RunCheck(r io.Reader, w io.Writer, tiersDir string) error {
 		ToolName  string         `json:"tool_name"`
 		ToolInput map[string]any `json:"tool_input"`
 		CWD       string         `json:"cwd"`
+		// AgentID is non-empty for a subagent's tool call (#369). Whether Claude
+		// Code sends it on PermissionRequest is unverified; absent, it counts as main.
+		AgentID string `json:"agent_id"`
 	}
 
 	if err := json.NewDecoder(r).Decode(&input); err != nil {
@@ -202,6 +205,7 @@ func RunCheck(r io.Reader, w io.Writer, tiersDir string) error {
 	}
 
 	if _, ask := AlwaysAsk(input.ToolName, input.ToolInput, input.CWD); ask {
+		CountPermissionEvent(input.CWD, EventPrompt, input.AgentID, input.ToolName)
 		return nil // defer to the always-ask PreToolUse decision
 	}
 
@@ -237,8 +241,10 @@ func RunCheck(r io.Reader, w io.Writer, tiersDir string) error {
 	}
 
 	if tierName == "" {
+		CountPermissionEvent(input.CWD, EventPrompt, input.AgentID, input.ToolName)
 		return nil
 	}
+	CountPermissionEvent(input.CWD, EventTierAllow, input.AgentID, input.ToolName)
 
 	permStr := BuildPermissionString(input.ToolName, input.ToolInput)
 	sysMsg := fmt.Sprintf("[spinclass] auto-approved: %s (%s tier)", permStr, tierName)

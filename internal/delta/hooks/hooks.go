@@ -104,11 +104,15 @@ func Run(r io.Reader, w io.Writer, mainRepoRoot, sessionWorktree string, disallo
 			return runErr
 		}
 		var final bytes.Buffer
-		if err := writeDontAskVerdict(&final, buf.Bytes()); err != nil {
+		converted, err := writeDontAskVerdict(&final, buf.Bytes())
+		if err != nil {
 			return err
 		}
+		if converted {
+			perms.CountPermissionEvent(input.CWD, perms.EventUnattendedDeny, input.AgentID, input.ToolName)
+		}
 		logVerdict(input, final.Bytes())
-		_, err := w.Write(final.Bytes())
+		_, err = w.Write(final.Bytes())
 		return err
 	}
 }
@@ -124,10 +128,11 @@ const dontAskDenySuffix = " — denied because this session cannot answer prompt
 // runPreToolUse, converting an `ask` decision into a `deny` carrying the
 // original reason plus dontAskDenySuffix. It is the single conversion point, so
 // no ask path can reach a dontAsk session. Any other output (allow, rewrite,
-// deny, or none) is forwarded byte-for-byte.
-func writeDontAskVerdict(w io.Writer, out []byte) error {
+// deny, or none) is forwarded byte-for-byte. converted reports whether an ask
+// was turned into a deny.
+func writeDontAskVerdict(w io.Writer, out []byte) (converted bool, err error) {
 	if len(bytes.TrimSpace(out)) == 0 {
-		return nil
+		return false, nil
 	}
 	var parsed struct {
 		HookSpecificOutput struct {
@@ -137,9 +142,9 @@ func writeDontAskVerdict(w io.Writer, out []byte) error {
 	}
 	if err := json.Unmarshal(out, &parsed); err != nil || parsed.HookSpecificOutput.PermissionDecision != "ask" {
 		_, err := w.Write(out)
-		return err
+		return false, err
 	}
-	return writeDeny(w, parsed.HookSpecificOutput.PermissionDecisionReason+dontAskDenySuffix)
+	return true, writeDeny(w, parsed.HookSpecificOutput.PermissionDecisionReason+dontAskDenySuffix)
 }
 
 // implicitRand derives the per-session suffix from the Claude session id:

@@ -58,6 +58,20 @@ unless *STATSD\_HOST* or *STATSD\_PORT* is set or the sweatfile's
 *[metrics].disable-statsd* turns emission off. Per-phase timers share the
 same switches; see *spinclass-sweatfile*(5).
 
+Permission counters (#369) measure prompts in unattended runs, named
+*spinclass.permission.*<repo>*.*<event>*.*<origin>*.*<tool>. The event is
+*prompt* (the PermissionRequest hook found no tier rule, or the always-ask
+floor deferred to the human, so a prompt is about to be shown), *tier\_allow*
+(a tier rule auto-approved it) or *unattended\_deny* (the PreToolUse hook turned
+an ask into a deny because the session is dontAsk). The origin is *subagent*
+when the hook payload's *agent\_id* is non-empty, else *main*. The repo is the
+payload cwd's repo dirname (*unknown* when it has none); repo and tool are
+sanitized to one name segment. Unverified: whether Claude Code includes
+*agent\_id* in PermissionRequest payloads; if it does not, *prompt* and
+*tier\_allow* from subagents are counted as *main* (*unattended\_deny* uses
+PreToolUse, which does carry it). The endpoint is resolved per event with the
+same switches as above.
+
 # SEE ALSO
 
 *spinclass-merge-this-session*(1), *spinclass-merge*(1), *spinclass-start*(1)
