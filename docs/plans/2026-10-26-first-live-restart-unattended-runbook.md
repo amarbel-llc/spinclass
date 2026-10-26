@@ -155,6 +155,16 @@ merge/check job, an implicit session, a non-UUID principal, or a missing right.
 If the hand-off itself fails, the request is cleared and its output returned.
 To withdraw a queued request: `cancel-restart` with `child`.
 
+**Never restart by hand with `clown restart` (V, 2026-10-26).** Only
+`restart-child-session` and `restart-this-session` go through spinclass's
+preflight, which refuses a restart while the target has a merge or check job and
+sends the start, back and never-returned wakes. A direct `clown restart` skips
+all of that: it killed the spinclass lint gate of this very session mid-run
+(merge-d1c61509: "interrupted by the user"), and neither it nor the restart of
+circus/smooth-myrtle left a `restarting_at` in the record, so no wake or
+watchdog fired. Before any restart, check for a running job (`job_status` of the
+target's merge id, or ask the worker).
+
 **Countdown (R, the old runbook).** A detached worker needs no posh opt-in and
 gets no posh countdown; clown prints its notice inline or not at all. FDR 0037
 decision 10 still says a 30 second countdown is owned by clown and posh. I:

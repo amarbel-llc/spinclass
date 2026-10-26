@@ -1397,9 +1397,11 @@ _explore-live-restart-snapshot target label:
     pat_s="SPINCLASS_SESSION_ID=$key"
     for d in /proc/[0-9]*; do
       pid=${d#/proc/}
-      env=$(tr '\0' '\n' < "$d/environ" 2>/dev/null) || continue
+      # The braces matter: a failed `< file` redirection is reported by the shell
+      # before a trailing 2>/dev/null applies, which flooded every run's stderr.
+      env=$({ tr '\0' '\n' < "$d/environ"; } 2>/dev/null) || continue
       printf '%s\n' "$env" | grep -xF -e "$pat_c" -e "$pat_s" >/dev/null || continue
-      args=$(tr '\0' '\n' < "$d/cmdline" 2>/dev/null) || continue
+      args=$({ tr '\0' '\n' < "$d/cmdline"; } 2>/dev/null) || continue
       [ -n "$args" ] || continue
       exe=$(readlink "$d/exe" 2>/dev/null || echo '?')
       exe_real=$(readlink -f "$d/exe" 2>/dev/null || echo '?')
