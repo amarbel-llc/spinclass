@@ -208,6 +208,9 @@ func PrepareMergeWith(ctx context.Context, rep *crap.Reporter, ts *crap.TestStre
 	if gateErr != nil {
 		return "", gateErr
 	}
+	if err := checkExpectedTip(ts, wtPath, branch, pm.ExpectSha); err != nil {
+		return "", err
+	}
 
 	// Rebase onto the landing target (#315): a gitSync merge's target is the
 	// remote's default branch, freshly fetched (#29) — the root's local default
@@ -401,6 +404,30 @@ func (p mergePreamble) repair(ctx context.Context, ts *crap.TestStream, mx phase
 
 // pinHead resolves dir's HEAD as the sha the pre-merge hook verifies and the
 // landing publishes, emitting a failing point on error.
+// checkExpectedTip refuses the merge with ErrBranchMoved when branch's tip is
+// not the commit expect names (#353), before anything rewrites the branch. An
+// empty expect checks nothing; one that names no commit is an error too.
+func checkExpectedTip(ts *crap.TestStream, wtPath, branch, expect string) error {
+	if expect == "" {
+		return nil
+	}
+	label := "expect " + branch + " at " + expect
+	want, err := git.RevParse(wtPath, expect+"^{commit}")
+	if err != nil {
+		return failStep(ts, label, fmt.Errorf("%s does not name a commit: %w", expect, err), "")
+	}
+	tip, err := git.RevParse(wtPath, "refs/heads/"+branch)
+	if err != nil {
+		return failStep(ts, label, fmt.Errorf("could not resolve %s: %w", branch, err), "")
+	}
+	if tip != want {
+		return failStep(ts, label, fmt.Errorf("%w: %s is at %s, not the expected %s; nothing was merged",
+			ErrBranchMoved, branch, shortSha(tip), shortSha(want)), "")
+	}
+	ts.Ok(label)
+	return nil
+}
+
 // reportRebaseRewrite adds a phase line naming the new and old HEAD when the
 // rebase rewrote branch (#240). The rewrite stands whatever a later stage does,
 // and the old sha a caller remembers no longer names its commit, so it must
@@ -425,6 +452,11 @@ func pinHead(ts *crap.TestStream, dir, branch string) (string, error) {
 	}
 	return sha, nil
 }
+
+// ErrBranchMoved refuses a merge whose branch tip is not the commit the caller
+// expected (#353): the branch moved after the caller's review. It is returned
+// before the rebase, so nothing was changed.
+var ErrBranchMoved = errors.New("branch moved")
 
 // ErrIntegrationConflict is returned when the merge queue's landing rebase —
 // replaying the pinned session commits onto a default branch that moved while

@@ -30,6 +30,11 @@ type PostMergeOptions struct {
 	// refusal of a dirty tree. Inverted so the zero value is the default.
 	NoAutostash bool
 
+	// ExpectSha is `sc merge --expect`: the commit the caller reviewed, full or
+	// abbreviated (#353). When set, the merge is refused with ErrBranchMoved
+	// before the rebase if the branch tip is any other commit. "" checks nothing.
+	ExpectSha string
+
 	// Timeout overrides [hooks].post-merge-timeout for THIS merge only: nil
 	// leaves the sweatfile (or its 10m default) in force; a zero duration
 	// disables the cap; any positive duration is the cap, raising OR lowering

@@ -183,6 +183,7 @@ func registerSessionCommands(app *command.App) {
 			{Name: "post-merge-timeout", Type: command.String, Description: "Override [hooks].post-merge-timeout for this merge only: a Go duration (\"25m\", \"1500s\") capping the whole post-merge phase, or \"0\" to disable the cap. No ceiling. The effective cap reaches every post-merge command/verify as SPINCLASS_POST_MERGE_TIMEOUT, _TIMEOUT_SECONDS and _DEADLINE (see spinclass-sweatfile(5) [[post-merge]])."},
 			{Name: "accept-post-merge", Type: command.String, Description: "Operator only, terminal only: accept a changed post-merge section by its digest (sha256:...). A merge that changes the post-merge section (targets, commands, verify, legacy hook, timeout, disable flag) from the default branch tip is refused before landing unless this digest matches the new section. Prints the section first. Review it with --show-post-merge."},
 			{Name: "show-post-merge", Type: command.Bool, Description: "Dry run: print the post-merge section on the default branch tip and at the session branch HEAD, with both digests, and exit without merging."},
+			{Name: "expect", Type: command.String, Description: "The commit the branch tip must be, full or abbreviated: the one the caller reviewed (#353). If the tip is any other commit, the merge is refused before the rebase with a failing `expect <branch> at <commit>` point whose message starts \"branch moved\", and nothing is merged. Omit to merge whatever the tip is."},
 			{Name: "no-autostash", Type: command.Bool, Description: "Refuse a dirty tracked tree at the rebase instead of autostashing it. By default uncommitted tracked changes are shelved in the session's own stash shelf before the rebase and restored right after the rebase and repair; untracked files are never stashed (they do not block the rebase). A conflicting restore keeps the stash entry and names it; the merge still lands (#416)."},
 		},
 		RunCLI: func(ctx context.Context, args json.RawMessage) error {
@@ -191,6 +192,7 @@ func registerSessionCommands(app *command.App) {
 				Target           string `json:"target"`
 				LocalOnly        bool   `json:"local-only"`
 				NoAutostash      bool   `json:"no-autostash"`
+				Expect           string `json:"expect"`
 				PostMergeTargets string `json:"post-merge-targets"`
 				NoPostMerge      bool   `json:"no-post-merge"`
 				PostMergeTimeout string `json:"post-merge-timeout"`
@@ -220,7 +222,7 @@ func registerSessionCommands(app *command.App) {
 			if err != nil {
 				return err
 			}
-			pm.Targets, pm.Timeout, pm.NoAutostash = postMergeTargets, pmTimeout, p.NoAutostash
+			pm.Targets, pm.Timeout, pm.NoAutostash, pm.ExpectSha = postMergeTargets, pmTimeout, p.NoAutostash, p.Expect
 			return merge.RunContext(ctx, executor.ShellExecutor{}, p.Format, p.Target, !p.LocalOnly, pm)
 		},
 	})
