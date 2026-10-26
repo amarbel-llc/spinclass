@@ -307,13 +307,13 @@ func TestRenderListTableEmpty(t *testing.T) {
 	}
 }
 
-// TestRenderListTableTruncatesDescription verifies the DESCRIPTION column is
+// TestRenderListTableWrapsDescription verifies the DESCRIPTION column is
 // bounded to the terminal width instead of overflowing and breaking the
-// grid: given a known width, no rendered line exceeds it, and an overlong
-// description is ellipsized (mesa truncates a Flex column to one line rather
-// than wrapping it — RFC 0003 §7.2) so its trailing END marker does NOT
-// survive, but the truncation marker does.
-func TestRenderListTableTruncatesDescription(t *testing.T) {
+// grid: given a known width, no rendered line exceeds it. An overlong
+// description wraps onto more lines (#283, mesa's Wrap column option, RFC
+// 0003) rather than being ellipsized, so its trailing END marker survives and
+// no truncation marker appears.
+func TestRenderListTableWrapsDescription(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir()) // hermetic: no clown presence
 	const width = 100
 	longDesc := strings.Repeat("alpha bravo charlie delta ", 12) + "END"
@@ -333,10 +333,10 @@ func TestRenderListTableTruncatesDescription(t *testing.T) {
 			t.Errorf("line exceeds width %d (got %d): %q", width, w, line)
 		}
 	}
-	if strings.Contains(out, "END") {
-		t.Errorf("overlong description must be truncated, not preserved in full:\n%s", out)
+	if !strings.Contains(out, "END") {
+		t.Errorf("overlong description must wrap, keeping its end:\n%s", out)
 	}
-	if !strings.Contains(out, "…") {
-		t.Errorf("truncated description must carry the ellipsis marker:\n%s", out)
+	if strings.Contains(out, "…") {
+		t.Errorf("a wrapped description must not be ellipsized:\n%s", out)
 	}
 }

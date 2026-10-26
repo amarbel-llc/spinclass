@@ -322,7 +322,8 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 		Col("AGE", mesa.Pin).
 		Col("PROFILE", mesa.Pin).
 		Col("SERVE", mesa.Pin).
-		Col("DESCRIPTION", mesa.Flex).
+		// Wrap, not truncate (#283): a long description keeps all its words.
+		Col("DESCRIPTION", mesa.Flex, mesa.Wrap()).
 		Legend(stateLegendEntries()...).
 		Empty("No sessions.")
 
