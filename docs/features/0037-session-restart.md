@@ -208,6 +208,46 @@ close revokes.
   agent's Bash use of non-read-only `sc` verbs, so the MCP tools are the agent
   surface and the CLI is the operator's (spinclass-sweatfile(5), `[permissions]`).
 
+## Hung children: `session-health` and `restart-hung-child` (2026-10-26)
+
+A child stuck in a turn never goes idle, so the idle restart never fires and the
+`force` form is always-ask. Operator ruling (2026-10-26): a coordinator may
+force-restart a hung child, bounded.
+
+- `session-health` (read-only, serve-gated) reports, for each session the caller
+  holds, ok / busy-too-long / frontend-dead / unknown from clown's status file
+  (`$XDG_STATE_HOME/clown/status/<sha256(principal)>.json`, clown doc 0023).
+  Busy-too-long: a turn running past `[health] busy-bound` (default 60m, trusted
+  layers only) with no hook and no transcript mtime within the same bound, and no
+  spinclass merge/check job running. A missing file is `unknown`, never healthy.
+  Package `internal/0/hungstatus`.
+- `restart-hung-child` force-restarts a held child: it needs the `restart` right,
+  re-checks the verdict itself (not hung, or excused: refused), works at most once
+  per child per 24h (claimed under the session lock in `forced_restart_at`, rolled
+  back if the hand-off fails), is logged, and wakes the holders. Confined callers
+  and a session naming itself are refused. The hook allows it; the unforced and
+  `force` forms are unchanged.
+
+Caveats, stated plainly:
+
+- **The verdict is soft against an unconfined holder.** The status file's
+  `turn_running`, `last_hook_at` and `transcript_path`, the job record and the
+  session record are all writable by code running as the same user. A malicious
+  unconfined holder that already has the `restart` right could forge a hung
+  verdict and restart a sibling once a day. The real bounds are the `restart` right
+  and the confined-caller refusal; the verdict and the 24h cap protect against
+  honest mistakes.
+- **No push detector.** Nothing watches periodically: the coordinator pulls
+  `session-health` and decides. There is no timer that wakes holders on a hung
+  verdict yet.
+- **Synchronous gates write no job record.** Only async merge/check jobs are
+  visible to the verdict, so only the 60m default keeps a long synchronous gate
+  from looking hung. Raise `busy-bound` if gates can run longer.
+- Clown cannot see a tool hang, a dialog or a model stall apart; an interrupted
+  turn can leave the busy mark set, so expect a false positive after an Escape
+  until the next Stop.
+- Not yet proven live.
+
 ## More Information
 
 FDR 0032 (principals, handles, D13 rights), FDR 0035 (the confinement and

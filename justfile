@@ -1478,6 +1478,49 @@ explore-live-restart-baseline target:
     if [ "$fails" -gt 0 ]; then echo "SUMMARY: $fails FAIL"; exit 1; fi
     echo "SUMMARY: baseline PASS (MANUAL: note the troupe credential and send the nonce DM now)"
 
+# [explore] Read-only check of the pre-minted token pool (FDR 0028 "Token pool")
+# WITHOUT claiming a slot: the directory is 0700, manifest.json parses at version
+# 1 with an https forge, every slot's file is a regular 0600 file (the escaped
+# file name itself is checked by the claim), and each slot's hours left. Prints no
+# token contents. Run it after the operator's batch mint and before leaving;
+# [auth].forge-hosts must also list the forge host (`sc validate`). Written
+# because the papi runbook's placeholder --out path differs from the fixed pool
+# path ($XDG_STATE_HOME/spinclass/token-pool).
+#
+# check the token pool directory, manifest and slot files without claiming one
+[group("explore")]
+explore-pool-check pool='':
+    #!/usr/bin/env bash
+    set -uo pipefail
+    dir={{ quote(pool) }}
+    [ -n "$dir" ] || dir="${XDG_STATE_HOME:-$HOME/.local/state}/spinclass/token-pool"
+    fails=0
+    pass() { printf 'PASS    %s\n' "$*"; }
+    fail() { printf 'FAIL    %s\n' "$*"; fails=$((fails + 1)); }
+    [ -d "$dir" ] && [ ! -L "$dir" ] || { fail "no pool directory at $dir (papi must mint with --out set to exactly this path)"; echo "SUMMARY: $fails FAIL"; exit 1; }
+    mode=$(stat -c %a "$dir")
+    [ "$mode" = 700 ] && pass "pool dir mode 700" || fail "pool dir mode $mode, want 700"
+    man="$dir/manifest.json"
+    jq -e '.version == 1' "$man" >/dev/null 2>&1 && pass "manifest.json parses, version 1" || { fail "manifest.json missing, unparseable or not version 1"; echo "SUMMARY: $fails FAIL"; exit 1; }
+    jq -e '.forge | test("^https://[^/]+")' "$man" >/dev/null && pass "forge is https: $(jq -r .forge "$man")" || fail "forge is not an https URL"
+    now=$(date +%s)
+    while IFS=$'\t' read -r session repo file deadline; do
+      case "$file" in */* | "") fail "slot $session: file name '$file' is empty or has a slash"; continue ;; esac
+      if [ -e "$dir/$file" ]; then
+        { [ -f "$dir/$file" ] && [ ! -L "$dir/$file" ] && [ "$(stat -c %a "$dir/$file")" = 600 ]; } && st="unclaimed" || { fail "slot $session: $file is not a regular 0600 file"; st="bad"; }
+      else st="claimed"; fi
+      left="no deadline"
+      if [ -n "$deadline" ]; then
+        d=$(date -d "$deadline" +%s 2>/dev/null || echo 0)
+        left="$(( (d - now) / 3600 ))h left"
+        [ "$d" -gt "$now" ] || { [ "$st" = unclaimed ] && fail "slot $session: deadline $deadline has passed"; }
+      fi
+      printf 'INFO    %-28s %-28s %-9s %s\n' "$session" "$repo" "$st" "$left"
+    done < <(jq -r '.tokens[] | [.session, .repo, .file, (.deadline // "")] | @tsv' "$man")
+    jq -r '.tokens[].repo' "$man" | sort | uniq -c | sed 's/^/INFO    slots per repo: /'
+    [ "$fails" -eq 0 ] && { echo "SUMMARY: pool PASS (MANUAL: [auth].forge-hosts lists the forge host; allow-stale-base for the trip repos)"; exit 0; }
+    echo "SUMMARY: $fails FAIL"; exit 1
+
 # [explore] After `close-child-session` on a restarted worker: fail while ANY
 # process still carries the session key (SPINCLASS_SESSION_ID) in its
 # environment (claude, clown, ringmaster, moxy, the MCP children...). Allow a few
