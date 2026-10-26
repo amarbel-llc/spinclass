@@ -863,8 +863,17 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 		}
 	}
 
-	if !disallowMainWorktree || mainRepoRoot == "" {
+	// spinclass#372: where no other rule decided, auto-allow read-only moxy
+	// tools confined to the caller's own and held children's worktrees.
+	noDecision := func() error {
+		if reason, ok := moxyReadAllowReason(input, resolvedWorktree); ok {
+			return writeAllow(w, reason)
+		}
 		return nil
+	}
+
+	if !disallowMainWorktree || mainRepoRoot == "" {
+		return noDecision()
 	}
 
 	// Check for "cd <main-worktree> && <cmd>" pattern in Bash commands.
@@ -876,7 +885,7 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 
 	paths := extractPaths(input)
 	if paths == nil {
-		return nil
+		return noDecision()
 	}
 
 	for _, p := range paths {
@@ -888,7 +897,7 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 		}
 	}
 
-	return nil
+	return noDecision()
 }
 
 func writeAsk(w io.Writer, reason string) error {

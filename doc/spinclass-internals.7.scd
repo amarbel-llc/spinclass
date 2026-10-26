@@ -108,6 +108,22 @@ best-effort, capped at 256 KiB, and never creates *.spinclass*. It is an
 observability aid, not an authority: the agent can write its own worktree. See
 *spinclass-grit*(7) DEFAULT PERMISSIONS; *just debug-hook-verdicts* prints it.
 
+# READ-ONLY MOXY AUTO-ALLOW (spinclass#372)
+
+Where no other rule decides, the PreToolUse hook allows (never denies or asks)
+these moxy read tools when every path argument resolves inside the caller's own
+worktree or the worktree of a live session it holds an *accepted* handle on
+(FDR 0032 D12; a pending grant confers nothing): *folio\_read*, *folio\_ls*,
+*folio\_glob*, *folio\_tree*, *folio\_file-type*, *grit\_branch* with
+subcommand log, rev-parse or diff, and *grit\_stage* with subcommand status or
+diff. A missing path means the working directory. Paths are symlink-resolved and
+compared separator-aware, so *..*, symlink and prefix-collision escapes get no
+decision; *folio\_glob* patterns with a *..* segment or a leading */* and
+*madder://* file paths get none either, and neither does another session's
+*.spinclass/*. Writes, other paths and whole-tool allows are out of scope. The
+always-ask floor, subagent rules, the *.spinclass* guard and *dontAsk* all run
+first.
+
 # SEE ALSO
 
 *spinclass-sweatfile*(5), *spinclass-build-pins*(7),

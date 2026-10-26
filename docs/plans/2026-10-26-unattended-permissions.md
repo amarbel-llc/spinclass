@@ -103,7 +103,7 @@ Structural gaps:
 
 ## 3. Smallest ordered list of work
 
-1. Allow-list read-only moxy tools for the paths a coordinator reads (own worktree, held children's worktrees): #372 (spinclass; folio path policy itself is moxy lane, DEP).
+1. Allow-list read-only moxy tools for the paths a coordinator reads (own worktree, held children's worktrees): #372 (spinclass; folio path policy itself is moxy lane, DEP). Status: implemented in the PreToolUse hook (`internal/delta/hooks/moxy_read.go`, tests `moxy_read_test.go`), uncommitted at time of writing; tested against fakes, unverified live. See `spinclass-internals(7)` READ-ONLY MOXY AUTO-ALLOW.
 2. Count prompts by origin (main vs background agent) so the two-week run can be measured: #369 (spinclass + stats-me).
 3. Decide and write down what the fleet does at an `ask`: dontAsk-deny vs park; document auto-mode behaviour for unconfined workers: none yet (spinclass docs; DEP Claude Code behaviour).
 4. Confirm `permission_mode: "dontAsk"` value against a live Claude Code hook payload (currently "unverified in this repo"): none yet (spinclass test; DEP Claude Code).
