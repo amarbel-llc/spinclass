@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/alfa/attestationindex"
+	"code.linenisgreat.com/spinclass/internal/0/attestationindex"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/bravo/attestation"
 )

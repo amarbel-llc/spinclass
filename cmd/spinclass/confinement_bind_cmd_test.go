@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -33,7 +34,7 @@ func stubConfinementBind(t *testing.T, st *session.State, findErr, recErr error)
 func TestConfinementBindWritesTheMappingFromTheUnitRecord(t *testing.T) {
 	st := &session.State{SessionKey: "clown/smart-hemlock", WorktreePath: "/w/clown/.worktrees/smart-hemlock"}
 	out, recorded := stubConfinementBind(t, st, nil, nil)
-	if err := runConfinementBind(nil, json.RawMessage(`{"session":"clown/smart-hemlock"}`)); err != nil {
+	if err := runConfinementBind(context.Background(), json.RawMessage(`{"session":"clown/smart-hemlock"}`)); err != nil {
 		t.Fatal(err)
 	}
 	if want := "/state|clown/smart-hemlock|/w/clown/.worktrees/smart-hemlock"; len(*recorded) != 1 || (*recorded)[0] != want {
@@ -47,14 +48,14 @@ func TestConfinementBindWritesTheMappingFromTheUnitRecord(t *testing.T) {
 func TestConfinementBindRefusesWithoutASessionOrWithAFailingRecord(t *testing.T) {
 	st := &session.State{SessionKey: "clown/x", WorktreePath: "/w"}
 	stubConfinementBind(t, st, nil, errors.New("no agent unit record"))
-	if err := runConfinementBind(nil, json.RawMessage(`{}`)); err == nil {
+	if err := runConfinementBind(context.Background(), json.RawMessage(`{}`)); err == nil {
 		t.Error("an empty session must be refused")
 	}
-	if err := runConfinementBind(nil, json.RawMessage(`{"session":"clown/x"}`)); err == nil || !strings.Contains(err.Error(), "no agent unit record") {
+	if err := runConfinementBind(context.Background(), json.RawMessage(`{"session":"clown/x"}`)); err == nil || !strings.Contains(err.Error(), "no agent unit record") {
 		t.Errorf("got %v, want the record error", err)
 	}
 	stubConfinementBind(t, nil, errors.New("no such session"), nil)
-	if err := runConfinementBind(nil, json.RawMessage(`{"session":"nope"}`)); err == nil {
+	if err := runConfinementBind(context.Background(), json.RawMessage(`{"session":"nope"}`)); err == nil {
 		t.Error("an unknown session must be refused")
 	}
 }

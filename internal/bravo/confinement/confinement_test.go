@@ -444,7 +444,7 @@ func TestEachFactCatchesItsBreach(t *testing.T) {
 		}},
 		{"F8b", "/dev/pts/0 is writable", func(s *fakeSys, _ *Inputs) {
 			s.dirs[root+"/dev/pts"] = []string{"ptmx", "0", "5"}
-			s.chardevs[root+"/dev/pts/0"] = charDev{uint64(136<<8 | 0), 77}
+			s.chardevs[root+"/dev/pts/0"] = charDev{uint64(136 << 8), 77} // major 136 (pts), minor 0
 			s.writable = map[string]bool{root + "/dev/pts/0": true}
 		}},
 		{"F9", "/repo/.git/hooks is writable", func(s *fakeSys, _ *Inputs) {

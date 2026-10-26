@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"code.linenisgreat.com/spinclass/internal/bravo/hostload"
+	"code.linenisgreat.com/spinclass/internal/0/hostload"
 )
 
 func TestHostLoadOptionsDefaultsAndBounds(t *testing.T) {

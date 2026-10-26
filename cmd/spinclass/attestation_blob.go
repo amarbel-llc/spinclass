@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
+	"code.linenisgreat.com/spinclass/internal/0/attestationindex"
 	"code.linenisgreat.com/spinclass/internal/0/embeds"
 	"code.linenisgreat.com/spinclass/internal/0/madder"
-	"code.linenisgreat.com/spinclass/internal/alfa/attestationindex"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/bravo/attestation"
 	"code.linenisgreat.com/spinclass/internal/delta/merge"

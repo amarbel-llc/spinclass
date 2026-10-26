@@ -1210,6 +1210,27 @@ debug-session-procs key:
       echo "pid=$pid ppid=$ppid pgid=$pgid sid=$sid cwd=$cwd cmd=[$cmd]"
     done
 
+# [debug] `lint-golangci` stops at the first package whose lint derivation fails.
+# This builds checks.<system>.lint with --keep-going, then prints the full log of
+# every failed per-package lint derivation, so one run collects every finding.
+# Written for the cascade's newer-linter halts (2026-10-26): run it after a plain
+# `nix flake update` to see what the cascade will see.
+#
+# run the golangci lint check with --keep-going and print every failing package's findings
+[group("debug")]
+debug-lint-all-findings:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    log=$(mktemp)
+    nix build ".#checks.${system}.lint" --no-link --keep-going 2>"$log"
+    status=$?
+    grep -o "Cannot build '/nix/store/[^']*godyn-lint[^']*\.drv'" "$log" | sed "s/Cannot build '//; s/'$//" | sort -u | while read -r drv; do
+      echo "=== $drv"
+      nix log "$drv" 2>/dev/null | grep -E '\.go:[0-9]+:[0-9]+:' | sed 's#/nix/store/[^/]*/##'
+    done
+    exit "$status"
+
 # [debug] The restart watchdog (#419) arms a one-shot user timer with the same
 # flag shape as restartWatchArgv: --on-active, a sanitized --unit name, and
 # --setenv. This arms one with a 5s delay that writes an env value to a file,
