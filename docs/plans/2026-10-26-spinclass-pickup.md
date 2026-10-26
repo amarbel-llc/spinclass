@@ -77,6 +77,29 @@ runbook), dc78e34 / 102d235 (hung-session note), c3ddbbf (coordinator page).
    the idle path at once, about 2-3 h, not built). Spinclass side, still open:
    reword the queue message, which says "once its current turn ends", for an idle
    child; and when testing live, make the child run a turn first.
+   **Silent wakes (fixed in the commit after 15362f3).** The start/back wakes of
+   bfe4525 never arrived: `clown.NotifyPrincipal` is a silent no-op unless
+   `CLOWN_BIN` is set, and neither the clown frontend (pid 3664821) nor the
+   relaunched agent (pid 3939957) had it (V, from /proc environ). My unit tests
+   stubbed the sender, so they could not see it. The fix is
+   `NotifyPrincipalUnderClown` (gate: `CLOWN_BIN` or `CLOWN_SESSION_ID`), used by
+   the restart preflight and the hooks seam, plus `CLOWN_SESSION_ID` in the
+   watchdog env; `Enabled()` is unchanged. Tests run a stub ringmaster with
+   `CLOWN_BIN` unset. STILL OWED: the live proof on a restarted child (the
+   requester must receive the start and back wakes; needs a deploy or a manual
+   build of the installed spinclass) and an e2e check in the live-restart recipes
+   ("the requester received the start and back wakes"). Idle children need a
+   nudge message after `restart-child-session` until clown ships its idle fix.
+   Reword the queue message ("once its current turn ends" is wrong for idle).
+   Also still open from the coordinator: which clear-site (hand-off timeout or
+   cancel) cleared solid-elm's RestartRequest (read the servelog for that key).
+   **Close after restart (reported by the coordinator, 16:13).** `close-child-session`
+   warned that the recorded pid 3657102 (the `sc` launcher) is not provably the
+   session's process, so the relaunched agent, clown and the MCP children kept
+   running after the worktree was deleted. Needed: re-record pid/session key on
+   relaunch (SessionStart hook), or close finds the process group via the session
+   key in the environment; a restart-then-close test and a verify-recipe check that
+   no process with the session key in its environment remains.
 7. Follow-ups filed: #427 (store retention), #428 (`sc run` attestation env, handler
    test), #429 (five unenforced rights), #432 (confined landing, after the trip),
    #435 (who granted a handle and when), #157 (go-mcp/huh bridge: igloo e178fea is

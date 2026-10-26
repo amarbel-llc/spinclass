@@ -62,9 +62,11 @@ var errNoRestartSession = errors.New(
 // directory and the expanded argv without a real command.
 var restartHandoffFn = runRestartHandoff
 
-// notifyPrincipalFn is a seam over clown.NotifyPrincipal, the non-exit wake
-// helper, so the preflight's holder notification is assertable.
-var notifyPrincipalFn = clown.NotifyPrincipal
+// notifyPrincipalFn is a seam over clown.NotifyPrincipalUnderClown, the non-exit
+// wake helper, so the preflight's holder notification is assertable. The
+// under-clown form is needed because the frontend and relaunched agent carry
+// CLOWN_SESSION_ID but not CLOWN_BIN.
+var notifyPrincipalFn = clown.NotifyPrincipalUnderClown
 
 // runRestartHandoff execs argv directly (never through a shell) in dir with a
 // bounded wait, and returns its trimmed combined output.
@@ -586,7 +588,7 @@ func runScheduleRestartWatch(argv []string) error {
 // restartWatchEnv are the variables the timer's service needs to find the same
 // session records and wake channel as this process; a user manager's own
 // environment does not carry them. None is a secret.
-var restartWatchEnv = []string{"XDG_STATE_HOME", "HOME", "PATH", "CLOWN_BIN", "RINGMASTER_BIN"}
+var restartWatchEnv = []string{"XDG_STATE_HOME", "HOME", "PATH", "CLOWN_BIN", "CLOWN_SESSION_ID", "RINGMASTER_BIN"}
 
 // unitNameUnsafe matches what a systemd unit name does not allow.
 var unitNameUnsafe = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)

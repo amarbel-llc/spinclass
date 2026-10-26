@@ -213,6 +213,26 @@ func NotifyPrincipal(ctx context.Context, targetPrincipal, from, message string)
 	if !Enabled() {
 		return nil
 	}
+	return sendWake(ctx, targetPrincipal, from, message)
+}
+
+// NotifyPrincipalUnderClown is NotifyPrincipal for senders that clown starts
+// WITHOUT CLOWN_BIN: the frontend that runs `spinclass restart-preflight`, and a
+// relaunched agent's SessionStart hook. Both carry CLOWN_SESSION_ID (the
+// session's principal) and not CLOWN_BIN, so NotifyPrincipal silently sent
+// nothing there (observed on circus/solid-elm, 2026-10-26: the restart verdict
+// was recorded but no start or back wake arrived). Either variable counts as
+// "running under clown". Enabled() itself is left alone: the job tests rely on
+// it to avoid emitting real wakes at the developer's session.
+func NotifyPrincipalUnderClown(ctx context.Context, targetPrincipal, from, message string) error {
+	if !Enabled() && os.Getenv("CLOWN_SESSION_ID") == "" {
+		return nil
+	}
+	return sendWake(ctx, targetPrincipal, from, message)
+}
+
+// sendWake is the shared body of the two NotifyPrincipal gates.
+func sendWake(ctx context.Context, targetPrincipal, from, message string) error {
 	if targetPrincipal == "" {
 		return errors.New("clown.NotifyPrincipal: targetPrincipal is required")
 	}

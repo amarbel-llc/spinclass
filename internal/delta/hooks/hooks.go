@@ -406,7 +406,7 @@ func recordOwnPrincipal(cwd, principal string) {
 
 // notifyPrincipal is a seam over clown.NotifyPrincipal so the restart return
 // wake is assertable without ringmaster.
-var notifyPrincipal = clown.NotifyPrincipal
+var notifyPrincipal = clown.NotifyPrincipalUnderClown
 
 const restartReturnNotifyTimeout = 15 * time.Second
 
