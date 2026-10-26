@@ -1552,6 +1552,15 @@ explore-live-close-leftovers key:
     printf 'FAIL    processes of the closed session survive:\n%s' "$left"
     exit 1
 
+# [debug] Block for `seconds` doing nothing, so a throwaway worker's tool call
+# (run_recipe) stalls with no transcript or hook progress: the busy-too-long
+# fixture for the restart-hung-child drill (FDR 0037). Harmless; touches nothing.
+#
+# sleep for N seconds (a deliberately stalled tool call for the hung-session drill)
+[group("debug")]
+debug-sleep seconds='900':
+    sleep {{ seconds }}
+
 # [explore] Poll a worker's record every few seconds and print ONE line per change
 # (UTC time, request queued, restarting_at, restarted_at, claude pid, recorded pid,
 # peek state) until restarted_at is set after restarting_at, or `limit` seconds
