@@ -15,6 +15,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/job"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 )
 
 // session-health reports whether the sessions the caller holds are hung, from
@@ -31,6 +32,34 @@ type healthDeps struct {
 	Frontend   func(s *hungstatus.Status) hungstatus.Frontend
 	Transcript func(path string) time.Time
 	JobRunning func(st *session.State) bool
+	// UnitClock is the confined unit's clock (nil or !ok: not confined).
+	UnitClock func(st *session.State) (confinement.UnitClock, bool)
+}
+
+// unitExpirySoon is how little wall clock left flags a unit as expiring.
+const unitExpirySoon = 36 * time.Hour
+
+// unitNote says where a confined session's unit stands against the 7-day wall
+// clock clown gives an unattended unit ("" when the session is not confined).
+// The start is the unit record's mtime (confinement.UnitClock), an R/I reading.
+func unitNote(c confinement.UnitClock, ok bool, now time.Time) string {
+	if !ok {
+		return ""
+	}
+	if c.Exited {
+		return fmt.Sprintf("UNIT EXITED (code %d, record written %s): the 7-day wall clock or the provider ended it; restart-child-session refuses (no frontend), an operator must `sc resume`",
+			c.ExitCode, c.Started.Format(time.RFC3339))
+	}
+	age := now.Sub(c.Started).Round(time.Minute)
+	left := c.Remaining(now).Round(time.Minute)
+	switch {
+	case left <= 0:
+		return fmt.Sprintf("UNIT PAST its 7-day wall clock (age %s): restart-child-session now", age)
+	case left < unitExpirySoon:
+		return fmt.Sprintf("UNIT EXPIRES SOON: %s left of 7d (age %s): restart-child-session now", left, age)
+	default:
+		return fmt.Sprintf("unit age %s, %s left of 7d", age, left)
+	}
 }
 
 func productionHealthDeps() healthDeps {
@@ -57,6 +86,9 @@ func productionHealthDeps() healthDeps {
 			return hungstatus.FrontendState("/proc", s.FrontendPID, s.FrontendStartTicks)
 		},
 		Transcript: hungstatus.TranscriptMTime,
+		UnitClock: func(st *session.State) (confinement.UnitClock, bool) {
+			return confinement.UnitClockForWorktree(st.WorktreePath)
+		},
 		JobRunning: func(st *session.State) bool {
 			j, err := job.Read(st.WorktreePath)
 			return err == nil && j.Status == job.StatusRunning
@@ -111,7 +143,13 @@ func runSessionHealthWith(p sessionHealthParams, caller string, d healthDeps) (s
 			continue
 		}
 		v, why := sessionHealth(s, d)
-		lines = append(lines, fmt.Sprintf("%-13s %s  %s", v, s.Key(), why))
+		line := fmt.Sprintf("%-13s %s  %s", v, s.Key(), why)
+		if d.UnitClock != nil {
+			if c, ok := d.UnitClock(s); ok {
+				line += "; " + unitNote(c, ok, d.Now)
+			}
+		}
+		lines = append(lines, line)
 	}
 	if len(lines) == 0 {
 		if p.Child != "" {

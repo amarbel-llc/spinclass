@@ -2,11 +2,13 @@ package main
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/0/hungstatus"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
+	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 )
 
 var healthNow = time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
@@ -43,6 +45,41 @@ func TestSessionHealthVerdicts(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if got, why := sessionHealth(st, tc.deps); got != tc.want {
 				t.Errorf("verdict = %v (%s), want %v", got, why, tc.want)
+			}
+		})
+	}
+}
+
+func TestUnitNote(t *testing.T) {
+	start := healthNow.Add(-2 * 24 * time.Hour)
+	for name, tc := range map[string]struct {
+		clock  confinement.UnitClock
+		ok     bool
+		now    time.Time
+		want   []string
+		absent []string
+	}{
+		"not confined":        {ok: false, now: healthNow},
+		"fresh":               {clock: confinement.UnitClock{Started: start}, ok: true, now: healthNow, want: []string{"unit age 48h0m0s", "left of 7d"}, absent: []string{"SOON", "EXITED", "PAST"}},
+		"under 36 hours left": {clock: confinement.UnitClock{Started: start}, ok: true, now: start.Add(6*24*time.Hour - time.Hour), want: []string{"UNIT EXPIRES SOON", "restart-child-session now"}},
+		"exactly 36h is fine": {clock: confinement.UnitClock{Started: start}, ok: true, now: start.Add(confinement.UnitWallClock - unitExpirySoon), want: []string{"left of 7d"}, absent: []string{"SOON"}},
+		"past the clock":      {clock: confinement.UnitClock{Started: start}, ok: true, now: start.Add(8 * 24 * time.Hour), want: []string{"UNIT PAST"}},
+		"exited":              {clock: confinement.UnitClock{Started: start, Exited: true, ExitCode: 1}, ok: true, now: healthNow, want: []string{"UNIT EXITED (code 1", "sc resume"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := unitNote(tc.clock, tc.ok, tc.now)
+			if !tc.ok && got != "" {
+				t.Fatalf("unconfined session got a note: %q", got)
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("note %q lacks %q", got, w)
+				}
+			}
+			for _, a := range tc.absent {
+				if strings.Contains(got, a) {
+					t.Errorf("note %q must not contain %q", got, a)
+				}
 			}
 		})
 	}

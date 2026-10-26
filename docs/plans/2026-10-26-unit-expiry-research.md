@@ -35,8 +35,13 @@ unit spec has no such field).
 
 ## 2. Spinclass state and wakes
 
-1. **State recorded:** none new. Nothing writes "expired" (R: no code path reads
-   the unit result or `exit_code`). The state stays `active`.
+1. **State recorded:** none new in the session state, which stays `active`.
+   Correction after a second read: clown rewrites the *unit record* with
+   `exit_code` when the unit exits (`confinement.UnitRecord.ExitCode`), and
+   spinclass reads it only to decide the unit is no longer running
+   (`unitRunning`, `UnitExitCode`); nothing wakes anyone or marks "expired" (R).
+   `session-health` now shows `UNIT EXITED (code N)` from that field; it cannot
+   tell expiry from a provider exit (the code is systemd-run's).
 2. **Wakes:** only the SessionEnd hook emits the "normal exit" wake
    (`hooks.go` `emitWorktreeExitWake`, R). A hook inside the dying unit may or
    may not get to run before SIGKILL (I), and for a confined session its state
