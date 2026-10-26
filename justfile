@@ -1281,7 +1281,13 @@ explore-live-restart-prereqs:
       if [ -z "$cv" ] || ! clown --version >/dev/null 2>&1; then cv=$(clown version 2>&1 | head -n1) || cv=""; fi
       [ -n "$cv" ] || cv="(neither clown --version nor clown version printed anything)"
       pass "clown on PATH: $cv"
-      if clown restart --help >/dev/null 2>&1; then pass "clown restart --help exists"; else fail "clown restart --help failed: this clown predates the restart verb"; fi
+      # `clown restart --help` is rejected as an unknown argument by the deployed clown
+      # (observed 2026-10-26); the bare verb prints its usage line, which is the probe.
+      restart_usage=$(clown restart 2>&1 || true)
+      case "$restart_usage" in
+        *"usage: clown restart"*) pass "clown has the restart verb ($(printf '%s' "$restart_usage" | grep -m1 'usage: clown restart'))" ;;
+        *) fail "clown restart printed no usage line: this clown predates the restart verb ($restart_usage)" ;;
+      esac
       commit=$(printf '%s' "$cv" | grep -oE '[0-9a-f]{7,40}' | tail -n1 || true)
       clown_repo=${CLOWN_REPO:-$HOME/eng/repos/clown}
       if [ -n "$commit" ] && git -C "$clown_repo" cat-file -e "$commit^{commit}" 2>/dev/null; then
@@ -1586,7 +1592,11 @@ explore-live-restart-verify target:
     # close-child-session cannot prove the recorded pid is the session's and leaves it running.
     check "the recorded pid is one of the session's live processes (close can stop it)" '.recorded_pid as $r | $r > 0 and any(.procs[]; .pid == $r)'
     check "the recorded pid is not a pid from the baseline (re-recorded on relaunch)" '.recorded_pid as $r | all($b[0].procs[]; .pid != $r)'
-    check "a NEW agent process exists (no agent pid or start time survived from the baseline)" '[.procs[] | select(.kind == "agent")] as $a | ($a | length) >= 1 and all($a[]; . as $n | all($b[0].procs[] | select(.kind == "agent"); .pid != $n.pid or .start_ticks != $n.start_ticks))'
+    # Only the claude process is relaunched: the outer posh/clown frontend that
+    # carries --permission-mode survives a restart (observed 2026-10-26), so it is not
+    # an "agent" here. A baseline taken AFTER the preflight verdict (mid-countdown) is
+    # still valid for this check as long as the old claude had not exited yet.
+    check "a NEW claude process exists (no claude pid or start time survived from the baseline)" '[.procs[] | select(.kind == "agent" and (.exe | test("claude")))] as $a | ($a | length) >= 1 and all($a[]; . as $n | all($b[0].procs[] | select(.kind == "agent" and (.exe | test("claude"))); .pid != $n.pid or .start_ticks != $n.start_ticks))'
     if jq -e --slurpfile b "$base" 'any($b[0].procs[]; .kind == "agent" and .unattended)' "$after" >/dev/null; then
       check "relaunched agent environment has CLOWN_UNATTENDED=1" 'any(.procs[]; .kind == "agent" and .unattended)'
     else info "baseline agent had no CLOWN_UNATTENDED=1: unattended check skipped (the baseline recipe FAILs this)"; fi

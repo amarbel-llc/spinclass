@@ -1965,6 +1965,56 @@ func TestSessionEndEmitsExitWakeForWorktreeHolders(t *testing.T) {
 	}
 }
 
+// A restart ends the old claude with a SessionEnd too; telling the holders it
+// "exited (normal)" while the restart is in flight is misleading (observed live
+// 2026-10-26: the requester saw "restarting now" then "exited (normal)"). The
+// restart wakes already say what is happening, so the exit wake is withheld
+// while a restart is in flight, and sent again once it is not.
+func TestSessionEndWithholdsTheExitWakeWhileARestartIsInFlight(t *testing.T) {
+	for name, tc := range map[string]struct {
+		restartingAgo time.Duration
+		returned      bool
+		wantWake      bool
+	}{
+		"restart just began":         {restartingAgo: 5 * time.Second, wantWake: false},
+		"restart began long ago":     {restartingAgo: 10 * time.Minute, wantWake: true},
+		"returned, then a real exit": {restartingAgo: 30 * time.Second, returned: true, wantWake: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
+			t.Setenv("CLOWN_BIN", "/some/clown")
+			repo, wt := initSpawnedWorktree(t, "driver/main-oak")
+			st, err := session.Read(repo, "feature")
+			if err != nil {
+				t.Fatal(err)
+			}
+			st.Holders = []string{"principal-a"}
+			since := time.Now().UTC().Add(-tc.restartingAgo)
+			st.RestartingAt = &since
+			if tc.returned {
+				back := since.Add(10 * time.Second)
+				st.RestartedAt = &back
+			}
+			if err := session.Write(*st); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("CLOWN_SESSION_ID", "self-principal")
+			woken := false
+			origEmit := emitExitWakes
+			emitExitWakes = func([]string, string, clown.ExitReason) error { woken = true; return nil }
+			t.Cleanup(func() { emitExitWakes = origEmit })
+
+			endInput, _ := json.Marshal(map[string]any{"hook_event_name": "SessionEnd", "session_id": "sid-r", "cwd": wt, "reason": "other"})
+			if err := Run(bytes.NewReader(endInput), &bytes.Buffer{}, "", "", false); err != nil {
+				t.Fatalf("SessionEnd: %v", err)
+			}
+			if woken != tc.wantWake {
+				t.Errorf("exit wake sent = %v, want %v", woken, tc.wantWake)
+			}
+		})
+	}
+}
+
 // TestSessionEndSkipsExitWakeWithNoHolders covers the common case (a
 // never-spawned worktree, or one all of whose holders already released): no
 // invocation at all, not a call with an empty slice.

@@ -688,6 +688,13 @@ func emitWorktreeExitWake(cwd, reason string) {
 	if err != nil || len(st.Holders) == 0 {
 		return
 	}
+	// A restart in flight ends the old agent with a SessionEnd too, and the
+	// restart wakes (starting, back, never-returned) already tell the holders what
+	// is happening: "exited (normal)" on top would be misleading. Once the
+	// relaunch has marked its return, or the window has passed, an exit is real.
+	if st.RestartInFlight(time.Now()) && (st.RestartedAt == nil || st.RestartedAt.Before(*st.RestartingAt)) {
+		return
+	}
 	// A session never wakes itself about its own exit, even in the unusual
 	// case where it holds a handle on itself.
 	holders := st.OtherHolders(os.Getenv("CLOWN_SESSION_ID"))
