@@ -1263,6 +1263,42 @@ func runPreMergeHookContext(ctx context.Context, rep *crap.Reporter, ts *crap.Te
 // size itself from the budget it actually has rather than hard-coding one.
 // pinnedSha is the pre-landing pin (SPINCLASS_PINNED_SHA); it differs from
 // landedSha exactly when the queued landing was rebased past a moved tip.
+// postMergeRunDir picks the tree the post-merge phase runs in: the landing
+// worktree, which is the exact tree that landed (#284), when the merge has one.
+// Otherwise it is a fresh detached checkout of landedSha (#340), so the
+// commands run against the tree that landed, not whatever the live session
+// worktree holds now: its config is already pinned to landedSha (#300). The
+// returned cleanup removes that checkout. Only when the checkout can't be made
+// does it fall back to the session worktree, then repoPath, with a
+// severity=warn point saying so.
+func postMergeRunDir(ts *crap.TestStream, repoPath, wtPath, landDir, branch, landedSha string) (string, func()) {
+	if isDir(landDir) {
+		return landDir, func() {}
+	}
+	dir, cleanup, err := addTransientWorktree(repoPath, LandWorktreePrefix, branch, landedSha)
+	if err == nil {
+		return dir, cleanup
+	}
+	fallback := repoPath
+	if isDir(wtPath) {
+		fallback = wtPath
+	}
+	ts.NotOk("post-merge checkout "+branch+" ("+shortSha(landedSha)+")", map[string]any{
+		"severity": "warn",
+		"message": fmt.Sprintf("could not check out the landed %s for post-merge (%v); running in %s instead, which may not match what landed",
+			shortSha(landedSha), err, fallback),
+	})
+	return fallback, func() {}
+}
+
+func isDir(path string) bool {
+	if path == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
 func runPostMergePhase(ctx context.Context, mx phaseMetrics, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, landDir, branch, defaultBranch, pinnedSha, landedSha string, pushed bool, activity io.Writer, pm PostMergeOptions) {
 	home, _ := os.UserHomeDir()
 	if home == "" {
@@ -1298,19 +1334,8 @@ func runPostMergePhase(ctx context.Context, mx phaseMetrics, rep *crap.Reporter,
 	}
 	postMergeTargets := pm.Targets
 
-	// repoPath is always present; the landing worktree and the session
-	// worktree may not be (no landing worktree on the unqueued path;
-	// teardown may have removed the session worktree).
-	runDir := repoPath
-	for _, candidate := range []string{landDir, wtPath} {
-		if candidate == "" {
-			continue
-		}
-		if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
-			runDir = candidate
-			break
-		}
-	}
+	runDir, cleanupRunDir := postMergeRunDir(ts, repoPath, wtPath, landDir, branch, landedSha)
+	defer cleanupRunDir()
 
 	// One deadline for the whole phase, computed before either path starts so
 	// the advertised SPINCLASS_POST_MERGE_DEADLINE is the deadline that is

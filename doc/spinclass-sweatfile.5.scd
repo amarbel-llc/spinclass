@@ -366,10 +366,14 @@ does not export *WORKTREE*.
 	that is itself safe to run concurrently, or that serializes on its own
 	lock at the far end.
 
-	The hook runs in the session worktree when it still exists (teardown
-	may have removed it) and otherwise in the main checkout — which is
-	sitting on the merged tip either way. There is no detached build
-	worktree: the merge has already landed, so there is nothing to isolate.
+	The hook runs in a detached checkout of the landed sha: the merge's
+	landing worktree when it has one, otherwise a fresh transient
+	*.worktrees/.land-\** checkout removed afterwards (#340). It never runs
+	against the live session worktree, which may have moved on during an
+	async merge; its configuration is likewise read at the landed sha
+	(#300). Only if that checkout cannot be made does it fall back to the
+	session worktree, then the main checkout, with a *severity=warn* point
+	saying so.
 	Unlike *pre-merge*, *inactivity-timeout* does not apply — that knob
 	bounds the pre-merge gate's silence. The post-merge hook has its own
 	wall-clock cap, *post-merge-timeout* (below), which unlike the

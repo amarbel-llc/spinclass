@@ -512,8 +512,8 @@ func TestPostMergeNotRunWhenGateFails(t *testing.T) {
 // Out-of-session merges tear the worktree down before the hook would run, so
 // the hierarchy load and the hook's working directory must both survive a
 // wtPath that no longer exists — otherwise post-merge silently never fires on
-// the `sc merge <target>` path. Falls back to the main checkout, which is on
-// the merged tip.
+// the `sc merge <target>` path. It runs in a detached checkout of the landed
+// sha (#340).
 func TestPostMergeRunsAfterWorktreeTeardown(t *testing.T) {
 	repoDir, wtPath := setupPostMergeRepo(t, "feature")
 
@@ -555,11 +555,8 @@ func TestPostMergeRunsAfterWorktreeTeardown(t *testing.T) {
 	if readErr != nil {
 		t.Fatalf("hook did not run: %v", readErr)
 	}
-	// EvalSymlinks: the hook's $PWD is the resolved path, while repoDir may
-	// carry an unresolved /tmp -> /private/tmp style prefix.
-	wantDir, _ := filepath.EvalSymlinks(repoDir)
-	if got := strings.TrimSpace(string(raw)); got != wantDir {
-		t.Errorf("hook ran in %q, want the main checkout %q", got, wantDir)
+	if got := strings.TrimSpace(string(raw)); !strings.HasPrefix(filepath.Base(got), LandWorktreePrefix) {
+		t.Errorf("hook ran in %q, want a %s* checkout of the landed sha", got, LandWorktreePrefix)
 	}
 }
 
