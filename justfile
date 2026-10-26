@@ -1189,6 +1189,30 @@ debug-session-procs key:
       echo "pid=$pid ppid=$ppid pgid=$pgid sid=$sid cwd=$cwd cmd=[$cmd]"
     done
 
+# [debug] The restart watchdog (#419) arms a one-shot user timer with the same
+# flag shape as restartWatchArgv: --on-active, a sanitized --unit name, and
+# --setenv. This arms one with a 5s delay that writes an env value to a file,
+# then checks that the file appeared with the value, against the real user
+# manager.
+#
+# arm a 5s systemd-run --user --on-active probe and check it fired with its env
+[group("debug")]
+debug-restart-watch-timer:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out=$(mktemp -d "${TMPDIR:-/tmp}/restart-watch-probe.XXXXXX")/fired
+    unit="spinclass-restart-watch-probe-$(date +%s%N)"
+    systemd-run --user --on-active=5s --unit="$unit" --setenv=PROBE_VALUE=probe-ok /bin/sh -c "printf '%s' \"\$PROBE_VALUE\" > $out"
+    systemctl --user list-timers --all "$unit.timer" --no-pager || true
+    # systemd coalesces timers within AccuracySec (default 1min), so a 5s timer
+    # may fire up to a minute late.
+    for _ in $(seq 1 75); do [ -s "$out" ] && break; sleep 1; done
+    if [ "$(cat "$out" 2>/dev/null)" = probe-ok ]; then echo "OK: timer fired with its --setenv value"; exit 0; fi
+    echo "FAIL: timer did not fire or env missing"
+    systemctl --user status "$unit.service" "$unit.timer" --no-pager || true
+    journalctl --user -u "$unit.service" --no-pager -n 20 || true
+    exit 1
+
 # [debug] internal/0/madder.UserStoreReady assumes an unprefixed store id lands
 # at $XDG_DATA_HOME/madder/blob_stores/<id>/blob_store-config (madder(1) FILES).
 # This inits and writes the durable `spinclass` store against a throwaway

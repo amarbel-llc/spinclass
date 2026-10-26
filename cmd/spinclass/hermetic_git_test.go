@@ -18,6 +18,9 @@ func TestMain(m *testing.M) {
 	// Handler tests run as an unconfined caller by default; the gate tests in
 	// serve_caller_gate_test.go put the real classifier back (useRealServeClassifier).
 	serveCallerConfined = func() (bool, string) { return false, "test default: unconfined" }
+	// No test may arm a real systemd timer; the restart watchdog tests stub
+	// scheduleRestartWatchFn themselves to see the argv.
+	scheduleRestartWatchFn = func([]string) error { return nil }
 	code := m.Run()
 	cleanup()
 	os.Exit(code)

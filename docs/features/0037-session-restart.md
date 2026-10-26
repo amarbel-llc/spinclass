@@ -147,6 +147,36 @@ who is allowed to ask.
   confined session's SessionStart reaches only the display copy, so it could
   not clear the frontend record.
 
+- **Outcome reporting and the relaunch watchdog** (added 2026-10-26). A `restart`
+  verdict is no longer silent:
+  - *Start wake.* The preflight tells the request's requester and every other
+    holder (never the restarted session's own principal), best effort through
+    `clown.NotifyPrincipal`: "<key> is restarting now (<reason>, requested by
+    <requester>)". A failed wake is logged to stderr and changes neither the
+    verdict nor the one JSON line on stdout. The same locked update that stamps
+    `RestartingAt` also records `RestartingBy` and `RestartingReason`, since the
+    request itself is consumed.
+  - *Return mark and back wake.* The relaunched session's SessionStart hook finds
+    `RestartingAt` set and `RestartedAt` absent or older, stamps `RestartedAt` in a
+    locked `session.Update`, and sends the same audience "<key> is back after its
+    restart". A re-fire (resume/clear/compact) finds the mark and does nothing. A
+    hook inside a confined unit does nothing: it reaches only the display copy.
+  - *Watchdog.* At the `restart` verdict of an unconfined session the preflight
+    arms a one-shot `systemd-run --user --on-active=<D> --unit=spinclass-restart-watch-<key>-<ts>
+    <sc> restart-watch --target <key> --since <RestartingAt>` with D =
+    `RestartInFlightWindow` + 3 minutes (5 minutes), outliving both the preflight
+    and the restarted session; it carries `--setenv` for `XDG_STATE_HOME`, `HOME`,
+    `PATH`, `CLOWN_BIN` and `RINGMASTER_BIN`, since a user manager's environment
+    lacks them. A confined session gets none (its return can never be marked, so
+    the watchdog would always cry wolf). A scheduling failure (no `systemd-run`)
+    is a stderr warning that no watchdog is armed, never a changed verdict.
+  - `restart-watch --target T --since S` (hidden, CLI only, run by the timer):
+    silent (exit 0) when `RestartedAt >= S`, when the session is gone, closed or
+    closing, or when a newer restart (`RestartingAt > S`) superseded it; otherwise
+    it tells the requester and holders "<key> has not come back <D> after its
+    restart began at <S>; check the session (sc list) and its clown log". It
+    exits 0 in every handled case.
+
 ## Requirement on clown and troupe
 
 A restart exit must not run `troupe mint-revoke`. A restart relaunches the same
@@ -158,8 +188,13 @@ close revokes.
 
 - Nothing here performs the restart. Until clown implements the idle queue and
   the preflight call, a configured hand-off only has spinclass's half.
-- The hand-off's exit status is all spinclass sees; whether the frontend later
-  restarts is reported through the preflight verdict, not back to the caller.
+- The hand-off's exit status is all spinclass sees at request time; whether the
+  frontend later restarts is reported through the preflight verdict. Since
+  2026-10-26 the requester and holders also get a start wake, a back wake once the
+  relaunched session's SessionStart marks `RestartedAt`, and a watchdog wake when
+  no return is marked within 5 minutes. A confined session has no return mark and
+  no watchdog. The watchdog rests on `systemd-run --user` timers and is only
+  unit-tested against a captured argv; a host without a user manager arms none.
 - A refusal at preflight time reaches the holders as a wake; the requesting agent
   has already ended its turn.
 - The request lives in session state, which an agent in an unconfined session can

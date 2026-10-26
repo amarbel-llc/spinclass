@@ -664,6 +664,7 @@ func TestRestartPreflightRefusesAJobStartedSinceTheRequest(t *testing.T) {
 // made, so the preflight of a when=now request does not stop for one.
 func TestRestartPreflightOfAForcedRequestIgnoresARunningJob(t *testing.T) {
 	stubRestartHandoff(t, "", nil)
+	stubScheduleRestartWatch(t, nil)
 	notified := stubNotifyPrincipal(t)
 	repoPath, wtPath := restartSelfFixture(t, true)
 	seedForcedRequest(t, repoPath)
@@ -676,8 +677,10 @@ func TestRestartPreflightOfAForcedRequestIgnoresARunningJob(t *testing.T) {
 	if readKid(t, repoPath).RestartRequest != nil {
 		t.Error("the request is consumed")
 	}
-	if len(*notified) != 0 {
-		t.Errorf("a restart verdict notifies nobody: %+v", *notified)
+	// The restart verdict wakes the other holders ("spawner") with the start
+	// notice; the requester is the session itself, so it is not told.
+	if len(*notified) != 1 || (*notified)[0].target != "spawner" || !strings.Contains((*notified)[0].message, "restarting now") {
+		t.Errorf("a restart verdict wakes the other holders only: %+v", *notified)
 	}
 }
 

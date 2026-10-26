@@ -283,6 +283,19 @@ type State struct {
 	// could not clear the frontend record.
 	RestartingAt *time.Time `json:"restarting_at,omitempty"`
 
+	// RestartingBy and RestartingReason are the consumed request's Requester and
+	// Reason, kept beside RestartingAt so the outcome wakes (the start and back
+	// notices, and the `restart-watch` watchdog) can name who asked and why after
+	// the preflight cleared RestartRequest.
+	RestartingBy     string `json:"restarting_by,omitempty"`
+	RestartingReason string `json:"restarting_reason,omitempty"`
+
+	// RestartedAt is stamped by the relaunched session's SessionStart hook when
+	// it finds RestartingAt set and RestartedAt absent or older: the return mark.
+	// Only an unconfined session can set it (a confined hook reaches only the
+	// display copy), so the watchdog is not scheduled for a confined session.
+	RestartedAt *time.Time `json:"restarted_at,omitempty"`
+
 	// RestartRequest is set by restart-this-session / restart-child-session
 	// (#419): a restart of this session was authorized and handed off to the
 	// harness frontend. The frontend asks `sc restart-preflight` at its next idle
@@ -1157,6 +1170,17 @@ func (s *State) OtherHolders(excluding string) []string {
 		}
 	}
 	return out
+}
+
+// RestartWakeTargets is the audience of a restart outcome wake (#419): the
+// requester, when it is not the session itself, and every other holder, each
+// once. own is the restarted session's own principal, never woken.
+func (s *State) RestartWakeTargets(requester, own string) []string {
+	targets := slices.Clone(s.OtherHolders(own))
+	if requester != "" && requester != own && !slices.Contains(targets, requester) {
+		targets = append(targets, requester)
+	}
+	return targets
 }
 
 // DefaultHandleRights is the rights a grant carries when the granter names

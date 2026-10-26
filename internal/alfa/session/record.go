@@ -310,6 +310,7 @@ var authorityFields = []struct {
 	{"close_request", func(s *State) any { return s.CloseRequest }},
 	{"restart_request", func(s *State) any { return s.RestartRequest }},
 	{"restarting_at", func(s *State) any { return s.RestartingAt }},
+	{"restarted_at", func(s *State) any { return s.RestartedAt }},
 }
 
 func jsonString(v any) string {

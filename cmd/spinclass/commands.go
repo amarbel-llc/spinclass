@@ -64,6 +64,7 @@ func buildApp() *command.App {
 	registerRevokeOrphansCommand(app)
 	app.AddCommand(closeSelfRunCommand())
 	app.AddCommand(restartPreflightCommand())
+	app.AddCommand(restartWatchCommand())
 	registerConfinementCheckCommand(app)
 	registerConfinementBindCommand(app)
 	registerVersionCommand(app)

@@ -2,8 +2,10 @@ package hooks
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -175,6 +177,7 @@ func runSessionStart(input hookInput) error {
 			recordOwnPrincipal(cwd, principal)
 		}
 		maybeSendSpawnHello(cwd, input.SessionID) // spawn handshake (FDR 0006); never blocks startup
+		markRestartReturn(cwd, envPrincipal)
 		return nil
 	}
 	// os.Getppid() is best-effort: the hook handler is a short-lived
@@ -395,6 +398,69 @@ func recordOwnPrincipal(cwd, principal string) {
 	}
 	bindUnconfinedPrincipal(st, principal)
 }
+
+// notifyPrincipal is a seam over clown.NotifyPrincipal so the restart return
+// wake is assertable without ringmaster.
+var notifyPrincipal = clown.NotifyPrincipal
+
+const restartReturnNotifyTimeout = 15 * time.Second
+
+// markRestartReturn stamps session.State.RestartedAt when the (re)launched
+// session's record says a restart began (RestartingAt) and no return was marked
+// since, and tells the requester and the other holders the session is back
+// (#419, FDR 0037). Runs on every SessionStart; the RestartedAt guard makes the
+// resume/clear/compact re-fires no-ops. Inside a confined unit the frontend
+// record is unreachable and Write touches only the display copy, so nothing is
+// marked or sent there (the restart preflight arms no watchdog for a confined
+// session either). Best-effort: a hook must never block startup.
+func markRestartReturn(cwd, envPrincipal string) {
+	if session.InUnit() {
+		return
+	}
+	repoPath, err := git.CommonDir(cwd)
+	if err != nil {
+		return
+	}
+	branch, err := git.BranchCurrent(cwd)
+	if err != nil || branch == "" {
+		return
+	}
+	var marked *session.State
+	err = session.Update(repoPath, branch, func(cur *session.State) error {
+		if cur.RestartingAt == nil || (cur.RestartedAt != nil && !cur.RestartedAt.Before(*cur.RestartingAt)) {
+			return errNoRestartToMark
+		}
+		now := time.Now().UTC()
+		cur.RestartedAt = &now
+		snapshot := *cur
+		marked = &snapshot
+		return nil
+	})
+	if errors.Is(err, errNoRestartToMark) {
+		return
+	}
+	if err != nil {
+		sessionlog.Errorf("markRestartReturn update-failed cwd=%s err=%v", cwd, err)
+		return
+	}
+	own := marked.Principal
+	if own == "" {
+		own = envPrincipal
+	}
+	targets := marked.RestartWakeTargets(marked.RestartingBy, own)
+	ctx, cancel := context.WithTimeout(context.Background(), restartReturnNotifyTimeout)
+	defer cancel()
+	msg := fmt.Sprintf("%s is back after its restart", marked.Key())
+	for _, t := range targets {
+		if err := notifyPrincipal(ctx, t, "", msg); err != nil {
+			sessionlog.Errorf("markRestartReturn notify-failed key=%s target=%s err=%v", marked.Key(), t, err)
+		}
+	}
+}
+
+// errNoRestartToMark aborts markRestartReturn's update when no restart is
+// awaiting its return mark.
+var errNoRestartToMark = errors.New("no restart awaits a return mark")
 
 // updateSessionState applies mutate to st's session under the session lock
 // (#348), so a concurrent writer of another field is not overwritten by st's

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -499,13 +500,18 @@ func runRestartPreflight(target string) (restartVerdict, error) {
 	// Consume and mark restarting under the session lock, re-checking the
 	// closing mark there: a close that began since the read above wins, and one
 	// that begins after this is refused while the mark is recent (#419).
+	var restartingAt time.Time
 	err = session.Update(st.RepoPath, st.Branch, func(cur *session.State) error {
 		if cur.ClosingAt != nil {
 			return errRestartLostToClose
 		}
-		now := time.Now().UTC()
+		restartingAt = time.Now().UTC()
 		cur.RestartRequest = nil
-		cur.RestartingAt = &now
+		cur.RestartingAt = &restartingAt
+		// The outcome wakes and the watchdog name who asked and why after the
+		// request itself is gone.
+		cur.RestartingBy = req.Requester
+		cur.RestartingReason = req.Reason
 		return nil
 	})
 	if errors.Is(err, errRestartLostToClose) {
@@ -514,11 +520,172 @@ func runRestartPreflight(target string) (restartVerdict, error) {
 	if err != nil {
 		return restartVerdict{}, fmt.Errorf("consuming the restart request: %w", err)
 	}
+	notifyRestartStarted(st, principal, req)
+	armRestartWatchdog(st, restartingAt)
 	return restartVerdict{
 		Verdict: "restart",
 		Reason:  fmt.Sprintf("restart of %s requested by %s: %s", st.Key(), req.Requester, req.Reason),
 		When:    req.When,
 	}, nil
+}
+
+// wakeRestartAudience sends msg to targets, best effort: a failure is logged
+// (stderr) and never changes a verdict or the preflight's one-line stdout.
+func wakeRestartAudience(st *session.State, what string, targets []string, msg string) {
+	if len(targets) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), restartNotifyTimeout)
+	defer cancel()
+	for _, t := range targets {
+		if err := notifyPrincipalFn(ctx, t, "", msg); err != nil {
+			servelog.Errorf("%s notify-failed key=%s target=%s err=%v", what, st.Key(), t, err)
+		}
+	}
+}
+
+// notifyRestartStarted is the start wake: the requester and every other holder
+// (never the restarted session itself) learn the frontend is restarting it now.
+func notifyRestartStarted(st *session.State, principal string, req session.RestartRequest) {
+	msg := fmt.Sprintf("%s is restarting now (%s, requested by %s)", st.Key(), req.Reason, req.Requester)
+	wakeRestartAudience(st, "restart-preflight", st.RestartWakeTargets(req.Requester, principal), msg)
+}
+
+// Relaunch watchdog (#419). The preflight's `restart` verdict only says the
+// frontend is about to stop the session; whether it comes back is the frontend's
+// business. So the preflight arms a one-shot systemd user timer that outlives
+// both this process and the restarted session and runs `sc restart-watch`: if the
+// relaunched session's SessionStart hook has not stamped RestartedAt by then, the
+// requester and holders are told.
+const (
+	// restartWatchdogGrace is how long past the in-flight window the watchdog
+	// waits before calling a relaunch lost.
+	restartWatchdogGrace = 3 * time.Minute
+	// restartWatchdogDelay is the timer's --on-active.
+	restartWatchdogDelay   = session.RestartInFlightWindow + restartWatchdogGrace
+	restartScheduleTimeout = 15 * time.Second
+)
+
+// scheduleRestartWatchFn is the seam over exec'ing systemd-run, so tests see the
+// argv without arming a timer.
+var scheduleRestartWatchFn = runScheduleRestartWatch
+
+func runScheduleRestartWatch(argv []string) error {
+	if len(argv) == 0 {
+		return errors.New("empty watchdog command")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), restartScheduleTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, argv[0], argv[1:]...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// restartWatchEnv are the variables the timer's service needs to find the same
+// session records and wake channel as this process; a user manager's own
+// environment does not carry them. None is a secret.
+var restartWatchEnv = []string{"XDG_STATE_HOME", "HOME", "PATH", "CLOWN_BIN", "RINGMASTER_BIN"}
+
+// unitNameUnsafe matches what a systemd unit name does not allow.
+var unitNameUnsafe = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
+
+// restartWatchArgv is the systemd-run command that runs `restart-watch` for key
+// once restartWatchdogDelay has passed since `since`.
+func restartWatchArgv(binary, key string, since, now time.Time) []string {
+	argv := []string{
+		"systemd-run", "--user",
+		fmt.Sprintf("--on-active=%ds", int(restartWatchdogDelay.Seconds())),
+		fmt.Sprintf("--unit=spinclass-restart-watch-%s-%d", unitNameUnsafe.ReplaceAllString(key, "-"), now.UnixNano()),
+	}
+	for _, name := range restartWatchEnv {
+		if v := os.Getenv(name); v != "" {
+			argv = append(argv, "--setenv="+name+"="+v)
+		}
+	}
+	return append(argv, binary, "restart-watch", "--target", key, "--since", since.UTC().Format(time.RFC3339Nano))
+}
+
+// armRestartWatchdog schedules the watchdog for st's restart that began at
+// restartingAt. A confined session gets none: its SessionStart hook reaches only
+// the display copy of the record, so the return could never be marked and the
+// watchdog would always cry wolf. A failure only warns on stderr (no watchdog is
+// armed); it never changes the verdict.
+func armRestartWatchdog(st *session.State, restartingAt time.Time) {
+	if stateDir, err := confinement.DefaultStateDir(); err != nil || confinement.LaunchedConfined(stateDir, st.WorktreePath) {
+		return
+	}
+	self, err := os.Executable()
+	if err != nil {
+		servelog.Errorf("restart-preflight no relaunch watchdog armed for %s: resolving the spinclass binary: %v", st.Key(), err)
+		return
+	}
+	if err := scheduleRestartWatchFn(restartWatchArgv(self, st.Key(), restartingAt, time.Now())); err != nil {
+		servelog.Errorf("restart-preflight no relaunch watchdog armed for %s: %v", st.Key(), err)
+	}
+}
+
+// runRestartWatch is `restart-watch`, run by the watchdog timer: it tells the
+// requester and holders when the restart that began at sinceRaw never produced a
+// return mark. Silent (nil) when the session came back, is gone or closing, or a
+// newer restart superseded this one (that one arms its own watchdog).
+func runRestartWatch(target, sinceRaw string) error {
+	since, err := time.Parse(time.RFC3339Nano, sinceRaw)
+	if err != nil {
+		return fmt.Errorf("invalid --since %q: %w", sinceRaw, err)
+	}
+	st, err := session.FindByTarget(target)
+	if errors.Is(err, session.ErrTargetNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	switch {
+	case st.IsTombstone(), st.ResolveState() == session.StateAbandoned, st.ClosingAt != nil:
+		return nil
+	case st.RestartedAt != nil && !st.RestartedAt.Before(since):
+		return nil
+	case st.RestartingAt != nil && st.RestartingAt.After(since):
+		return nil
+	}
+	// Best effort: on error ownerPrincipal returns "", and the session's own
+	// principal is then simply not excluded from the audience.
+	own, _ := ownerPrincipal(st, "", "restart", "")
+	msg := fmt.Sprintf("%s has not come back %s after its restart began at %s; check the session (sc list) and its clown log",
+		st.Key(), restartWatchdogDelay, since.Format(time.RFC3339Nano))
+	wakeRestartAudience(st, "restart-watch", st.RestartWakeTargets(st.RestartingBy, own), msg)
+	return nil
+}
+
+// restartWatchCommand registers the watchdog's entry point as a hidden, CLI-only
+// command: systemd runs it, an agent never does.
+func restartWatchCommand() *command.Command {
+	return &command.Command{
+		Name:   "restart-watch",
+		Hidden: true,
+		Description: command.Description{
+			Short: "Relaunch watchdog for a session restart (#419); run by a systemd timer, silent unless the session never came back",
+		},
+		Params: []command.Param{
+			{Name: "target", Type: command.String, Required: true, Description: "Session key or worktree name"},
+			{Name: "since", Type: command.String, Required: true, Description: "When the restart began (RFC 3339, the session's restarting_at)"},
+		},
+		RunCLI: func(_ context.Context, args json.RawMessage) error {
+			var p struct {
+				Target string `json:"target"`
+				Since  string `json:"since"`
+			}
+			if err := json.Unmarshal(args, &p); err != nil {
+				return fmt.Errorf("invalid arguments: %w", err)
+			}
+			if p.Target == "" || p.Since == "" {
+				return errors.New("restart-watch needs --target and --since")
+			}
+			return runRestartWatch(p.Target, p.Since)
+		},
+	}
 }
 
 // notifyRestartRefused tells the holders (and the requester, when it is not one
