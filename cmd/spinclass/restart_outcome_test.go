@@ -333,7 +333,7 @@ func TestRestartWatchIgnoresAStaleRefusal(t *testing.T) {
 // line-separator characters, including kind and profile, and a multi-byte
 // truncation stays valid UTF-8.
 func TestSafeStatusTextBoundsAndStrips(t *testing.T) {
-	if got := safeStatusText("a‮b c\x00d\u0085e\n\tf", 100); got != "a b c d e f" {
+	if got := safeStatusText("a\u202eb\u2028c\x00d\u0085e\n\tf", 100); got != "a b c d e f" {
 		t.Errorf("got %q", got)
 	}
 	got := safeStatusText(strings.Repeat("é", 100), 10)

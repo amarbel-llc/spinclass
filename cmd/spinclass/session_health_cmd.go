@@ -134,7 +134,7 @@ func sessionHealth(st *session.State, d healthDeps) (hungstatus.Verdict, string)
 // quote it as data.
 func safeStatusText(s string, max int) string {
 	s = strings.Map(func(c rune) rune {
-		if unicode.IsControl(c) || unicode.Is(unicode.Cf, c) || c == ' ' || c == ' ' {
+		if unicode.IsControl(c) || unicode.Is(unicode.Cf, c) || c == '\u2028' || c == '\u2029' {
 			return ' '
 		}
 		return c
