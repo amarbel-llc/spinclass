@@ -118,6 +118,34 @@ the job state and the restart remedy.
   written by the hooks (busy-since, last hook event time, tool call open
   since), read by spinclass. No new verb.
 
+## Agreed status-file shape (pure-teak 14:49 plus spinclass changes; not built)
+
+R from pure-teak:
+- The frontend keeps "busy" in memory only.
+- Nothing records "tool running since T".
+- Permission state carries no times.
+- Under dontAsk an unattended hang reads as "busy since T, no Stop".
+
+So clown writes `$XDG_STATE_HOME/clown/status/<sha256(principal)>.json`. It is
+written atomically by the frontend's idle listener, outside the unit, so a
+worker cannot forge it. Fields:
+
+- `version`, `written_at`
+- `principal`, `spinclass_session_key`, `claude_session_id`
+- `turn_running`, `turn_started_at`, `last_hook_at`
+- `unit` (when confined), `main_pid`, `transcript_path`
+- `frontend_pid` plus `frontend_start_ticks` (asked for by spinclass: an idle
+  session writes nothing, so written_at alone cannot tell idle from dead)
+- later and optional: `tool_open_since`
+
+Spinclass verdicts:
+- **busy too long:** `turn_running` and now - `turn_started_at` exceeds the
+  bound. This replaces the separate stuck-tool and silent cases above, which
+  clown cannot tell apart.
+- **frontend dead:** `frontend_pid` is not alive, or the file is absent while
+  the session record says active.
+- Optional corroboration: a flat cgroup CPU from `unit`.
+
 ## Questions for clown (pure-teak; relay; partly answered above)
 
 1. Which of these facts does clown already have per session: last transcript
