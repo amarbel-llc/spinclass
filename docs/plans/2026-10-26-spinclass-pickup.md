@@ -60,6 +60,19 @@ noted) and an attestation that names the skills not run:
 - **Review of clown 7504d6e869ad** sent to clown/rare-walnut: a writable bind
   inside the vetted moxin dir is unchecked.
 
+- **1e9690a, unit clock** (operator ruling: weekly restarts plus a pull). `session-health`
+  appends each confined child's unit age and time left of the 7-day wall clock
+  (start = the unit record's mtime, R/I, unchecked live), flags `UNIT EXPIRES SOON`
+  under 36h and `UNIT PAST`, and shows `UNIT EXITED (code N)` distinctly from
+  inactive. Runbook: `docs/plans/2026-10-26-weekly-restart-runbook.md` (exact
+  `restart-child-session` shape, the idle nudge, the pre-expiry clock check).
+  Research behind it: `docs/plans/2026-10-26-unit-expiry-research.md`. No push
+  timer, by ruling.
+- **Post-deploy (2026-10-26 ~18:30)**: spinclass on PATH is 1e9690a;
+  `explore-live-restart-prereqs` FAILs on the `clown` on PATH ("predates the
+  restart verb", no version output): unresolved, reported to the coordinator. No
+  live proof has been run; each waits for an explicit go.
+
 Still open from the brief: which clear-site cleared solid-elm's RestartRequest
 (read the servelog for that key; not done); pool revoke command form and papi
 format check (item 4), `allow-stale-base` interaction and a safe dry run; the live
