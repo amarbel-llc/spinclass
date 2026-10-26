@@ -1417,17 +1417,22 @@ _explore-live-restart-snapshot target label:
       printf '%s\n' "$env" | grep -xF 'CLOWN_UNATTENDED=1' >/dev/null && unatt=true
       dontask=false
       printf '%s\n' "$args" | awk '$0 == "--permission-mode=dontAsk" { f = 1 } prev == "--permission-mode" && $0 == "dontAsk" { f = 1 } { prev = $0 } END { exit !f }' && dontask=true
+      # clown#323 applies dontAsk through an inline --settings JSON instead of the
+      # argv flag; it survives a relaunch where the argv splice may not.
+      settings_dontask=false
+      printf '%s\n' "$args" | awk 'prev == "--settings" && /"defaultMode" *: *"dontAsk"/ { f = 1 } /^--settings=.*"defaultMode" *: *"dontAsk"/ { f = 1 } { prev = $0 } END { exit !f }' && settings_dontask=true
       profile=$(printf '%s\n' "$args" | awk 'prev == "--profile" { print; exit } /^--profile=/ { sub(/^--profile=/, ""); print; exit } { prev = $0 }')
       start=$(sed 's/.*) //' "$d/stat" 2>/dev/null | cut -d' ' -f20 || true)
       jq -nc --argjson pid "$pid" --arg kind "$kind" --arg exe "$exe" --arg exe_real "$exe_real" --arg start "$start" \
-        --argjson unattended "$unatt" --argjson dontask "$dontask" --arg profile "$profile" \
-        '{pid: $pid, kind: $kind, exe: $exe, exe_real: $exe_real, start_ticks: $start, unattended: $unattended, dontask: $dontask, profile_argv: $profile}' >> "$pf"
+        --argjson unattended "$unatt" --argjson dontask "$dontask" --argjson settings_dontask "$settings_dontask" --arg profile "$profile" \
+        '{pid: $pid, kind: $kind, exe: $exe, exe_real: $exe_real, start_ticks: $start, unattended: $unattended, dontask: $dontask, settings_dontask: $settings_dontask, profile_argv: $profile}' >> "$pf"
     done
     jq --slurpfile procs "$pf" --arg peek "$peek" --arg onpath "$onpath" --arg taken "$(date -u +%FT%TZ)" --arg label "$label" '{
       label: $label, taken_at: $taken,
       session_key: .session_key, principal: (.principal // ""), worktree: .worktree_path,
       state: .state, kind: (.kind // ""),
       restarting_at: .restarting_at, restarted_at: .restarted_at, restarting_by: .restarting_by,
+      restart_request_queued: (.restart_request != null),
       profile: (.profile // ""), profile_digest: (.profile_digest // ""),
       spawned_by: (.spawned_by // ""),
       peek: ($peek | try fromjson catch $peek),
@@ -1464,7 +1469,7 @@ explore-live-restart-baseline target:
     check "agent environment has CLOWN_UNATTENDED=1" 'any(.procs[]; .kind == "agent" and .unattended)'
     check "agent argv has --permission-mode dontAsk" 'any(.procs[]; .kind == "agent" and .dontask)'
     check "a spinclass serve process was found" 'any(.procs[]; .kind == "serve")'
-    if jq -e '.spinclass_on_path as $p | all(.procs[] | select(.kind == "serve"); .exe_real == $p and (.exe | endswith("(deleted)") | not))' "$snap" >/dev/null; then
+    if jq -e '.spinclass_on_path as $p | all(.procs[] | select(.kind == "serve" and (.exe_real | endswith("/spinclass"))); .exe_real == $p and (.exe | endswith("(deleted)") | not))' "$snap" >/dev/null; then
       info "serve binary is the spinclass on PATH now: the post-restart STALE check is vacuous unless you change the spinclass on PATH before restarting"
     else
       info "serve binary already differs from the spinclass on PATH (STALE before the restart); the worker's own version tool is authoritative (it also recognises same-build-different-path)"
@@ -1514,10 +1519,28 @@ explore-live-restart-verify target:
       check "relaunched agent environment has CLOWN_UNATTENDED=1" 'any(.procs[]; .kind == "agent" and .unattended)'
     else info "baseline agent had no CLOWN_UNATTENDED=1: unattended check skipped (the baseline recipe FAILs this)"; fi
     if jq -e --slurpfile b "$base" 'any($b[0].procs[]; .kind == "agent" and .dontask)' "$after" >/dev/null; then
-      check "relaunched agent argv has --permission-mode dontAsk" 'any(.procs[]; .kind == "agent" and .dontask)'
+      # dontAsk survives through the argv splice or, since clown#323, an inline
+      # --settings defaultMode; either keeps the worker from hanging on a prompt.
+      check "relaunched agent runs dontAsk (--permission-mode argv or clown --settings defaultMode)" 'any(.procs[]; (.kind == "agent" or .kind == "clown") and (.dontask or .settings_dontask))'
+      jq -e 'any(.procs[]; .kind == "agent" and .dontask)' "$after" >/dev/null || info "dontAsk is not in the agent argv after the relaunch: the argv splice did not survive, only the settings path counts"
     else info "baseline agent was not dontAsk: dontAsk check skipped"; fi
-    check "a spinclass serve process exists after the relaunch" 'any(.procs[]; .kind == "serve")'
-    check "serve binary is the spinclass on PATH (no STALE)" '.spinclass_on_path as $p | any(.procs[]; .kind == "serve") and all(.procs[] | select(.kind == "serve"); .exe_real == $p and (.exe | endswith("(deleted)") | not))'
+    if jq -e '.restart_request_queued' "$after" >/dev/null; then info "a restart request is STILL queued in the record: the preflight never consumed it (clown 'exiting with a restart queued and never asked about')"; fi
+    # Only processes whose real exe is a spinclass binary are spinclass serves;
+    # moxy, madder-mcp and the stdio bridges also carry a `serve` argument.
+    onpath=$(jq -r '.spinclass_on_path' "$after")
+    srv=$(jq -r '[.procs[] | select(.kind == "serve" and (.exe_real | endswith("/spinclass"))) | .exe_real] | unique | .[]' "$after")
+    if [ -z "$srv" ]; then fail "no spinclass serve process after the relaunch"
+    else
+      stale=0
+      for s in $srv; do
+        [ "$s" = "$onpath" ] && continue
+        rs=$("$s" version 2>/dev/null | awk '$1 ~ /^spinclass-/ { print $3; exit }')
+        rp=$("$onpath" version 2>/dev/null | awk '$1 ~ /^spinclass-/ { print $3; exit }')
+        if [ -n "$rs" ] && [ "$rs" = "$rp" ]; then info "serve $s is the same build ($rs) as the spinclass on PATH, at a different path"
+        else stale=1; fail "serve $s (build ${rs:-unknown}) is not the spinclass on PATH (build ${rp:-unknown}): STALE"; fi
+      done
+      [ "$stale" = 0 ] && pass "spinclass serve is the current build (no STALE)"
+    fi
     check "profile pin intact in the record (name and digest)" '.profile == $b[0].profile and .profile_digest == $b[0].profile_digest'
     if [ -n "$(jq -r '.profile' "$base")" ]; then
       check "relaunched agent argv carries the same --profile as before" '([.procs[] | select(.kind == "agent") | .profile_argv] | unique) == ([$b[0].procs[] | select(.kind == "agent") | .profile_argv] | unique)'
