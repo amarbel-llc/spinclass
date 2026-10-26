@@ -76,6 +76,7 @@ sc clean
 | `sc release-session-handle <child>` | Release this session's own handle on a session |
 | `sc list-handles [--accept]` | List handles this session holds or is pending on |
 | `sc whoami` | Print this session's principal, session key, and handles |
+| `sc host-load [--top N] [--sample_ms MS] [--threshold T]` | Host CPU load and busiest processes by session |
 | `sc pull` | Pull repos and rebase worktrees |
 | `sc validate` | Validate the sweatfile hierarchy |
 | `sc perms list\|review\|edit` | Inspect or edit permission tier rules |

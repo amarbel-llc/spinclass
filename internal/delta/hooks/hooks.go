@@ -625,6 +625,7 @@ const (
 	whoamiToolName                = "mcp__plugin_spinclass_spinclass__whoami"
 	permsListToolName             = "mcp__plugin_spinclass_spinclass__perms-list"
 	listHandlesToolName           = "mcp__plugin_spinclass_spinclass__list-handles"
+	hostLoadToolName              = "mcp__plugin_spinclass_spinclass__host-load"
 	closeThisSessionToolName      = "mcp__plugin_spinclass_spinclass__close-this-session"
 	restartThisSessionToolName    = "mcp__plugin_spinclass_spinclass__restart-this-session"
 	restartChildSessionToolName   = "mcp__plugin_spinclass_spinclass__restart-child-session"
@@ -699,9 +700,10 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 		// Auto-approve unconditionally so agents never get a permission prompt
 		// for them.
 		return writeAllow(w, "spinclass session-management tool, safe to auto-approve")
-	case versionToolName, whoamiToolName, permsListToolName, listHandlesToolName:
+	case versionToolName, whoamiToolName, permsListToolName, listHandlesToolName, hostLoadToolName:
 		// Read-only introspection: version (build info), whoami and list-handles
-		// (the caller's own principal and handles), perms-list (the tier rules).
+		// (the caller's own principal and handles), perms-list (the tier rules),
+		// host-load (CPU load and the busiest processes, #388).
 		// list-handles with accept mutates, but that case was already caught by
 		// the always-ask floor above, so reaching here means a plain listing.
 		return writeAllow(w, "spinclass read-only introspection tool, safe to auto-approve")

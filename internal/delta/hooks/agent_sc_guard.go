@@ -17,14 +17,14 @@ import (
 // or a copied binary gets past it. Confinement (FDR 0035) is the boundary.
 
 // isReadOnlyScVerb reports the CLI verbs an agent may run through Bash. Each only
-// reads: list/validate/whoami/list-handles/perms-list mirror the auto-approved
-// read-only MCP tools, version prints build info, and implicit-session-key is a
+// reads: list/validate/whoami/list-handles/perms-list/host-load mirror the
+// auto-approved read-only MCP tools, version prints build info, and implicit-session-key is a
 // documented pure query that writes no state. list-handles with --accept is
 // not read-only (it accepts pending grants) and is refused by the caller.
 func isReadOnlyScVerb(verb string) bool {
 	switch verb {
 	case "list", "version", "validate", "whoami", "list-handles", "perms-list",
-		"implicit-session-key":
+		"host-load", "implicit-session-key":
 		return true
 	}
 	return false

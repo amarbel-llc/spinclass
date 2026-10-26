@@ -1139,6 +1139,8 @@ func TestReadOnlyIntrospectionToolsAutoApproved(t *testing.T) {
 		{"whoami", map[string]any{}, "allow"},
 		{"perms-list", map[string]any{}, "allow"},
 		{"perms-list", map[string]any{"repo": "spinclass"}, "allow"},
+		{"host-load", map[string]any{}, "allow"},
+		{"host-load", map[string]any{"top": 20, "sample_ms": 1000, "threshold": 0.5}, "allow"},
 		{"list-handles", map[string]any{}, "allow"},
 		{"list-handles", map[string]any{"accept": false}, "allow"},
 		{"list-handles", map[string]any{"accept": true}, "ask"},

@@ -94,6 +94,7 @@ func TestBashScVerbPolicy(t *testing.T) {
 		{"validate", "sc validate"},
 		{"whoami", "sc whoami"},
 		{"list-handles", "sc list-handles"},
+		{"host-load", "sc host-load --top 5"},
 		{"perms list spaced", "sc perms list"},
 		{"perms list hyphenated", "sc perms-list"},
 		{"implicit-session-key", "sc implicit-session-key --claude-session-id abc"},

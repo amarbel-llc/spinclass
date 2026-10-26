@@ -995,7 +995,7 @@ Agent surface (#422): the session verbs (merge, close, spawn, restart, grant and
 the rest) are MCP tools for an agent; the *sc* / *spinclass* CLI is for explicit
 operator execution. The PreToolUse hook denies an agent's Bash use of any
 *sc* or *spinclass* verb that is not read-only (*list*, *version*, *validate*,
-*whoami*, *list-handles*, *perms list*, *implicit-session-key*, and *--help*),
+*whoami*, *list-handles*, *host-load*, *perms list*, *implicit-session-key*, and *--help*),
 whether or not *disallow-main-worktree* is set, and the reason names the
 matching MCP tool. The hook fires only on an agent's tool calls, so the
 operator's own terminal is unaffected. It is a guard against accidental or
