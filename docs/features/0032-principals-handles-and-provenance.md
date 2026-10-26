@@ -921,8 +921,11 @@ specified by contract in "Companion records".
   and is deleted in slice 1.
 - **`grant-session-handle child=… to=<principal> [rights=…]`** and
   **`release-session-handle child=…`**, one registration each serving both
-  the MCP tool and `sc <name>`, always-ask. One `child` per call in this
-  slice; the bulk form D12 describes is a follow-up. Rights are enforced as D13
+  the MCP tool and `sc <name>`, always-ask. `child` takes one session or
+  several, the bulk form D12 describes (#342). Each is handled independently,
+  one refusal not stopping the rest. Several are reported as one TAP document
+  with a subtest per child, under the single always-ask prompt for the call.
+  Rights are enforced as D13
   describes. Accept-on-first-use via
   `pending_handles`.
 - **`list-handles`** (held, pending) and **`sc whoami`** (principal, session

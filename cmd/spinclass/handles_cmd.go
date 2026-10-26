@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,7 +11,69 @@ import (
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
+	tap "code.linenisgreat.com/tap/go/pkgs/writer"
 )
+
+// handleChildren is the `child` parameter of grant/release: one session or
+// several (#342, FDR 0032 D12's fd-array hand-off). It also decodes a bare
+// string, the pre-#342 form callers still send, as one child.
+type handleChildren []string
+
+func (c *handleChildren) UnmarshalJSON(b []byte) error {
+	var one string
+	if err := json.Unmarshal(b, &one); err == nil {
+		*c = nil
+		if one != "" {
+			*c = handleChildren{one}
+		}
+		return nil
+	}
+	var many []string
+	if err := json.Unmarshal(b, &many); err != nil {
+		return err
+	}
+	*c = many
+	return nil
+}
+
+// runForEachChild applies op to each child in order, independently, as
+// `sc close A B` does (close.RunMany): one refusal does not abandon the rest.
+// A single child returns op's own text or error unchanged; several are
+// reported as one TAP-14 document with a subtest per child, returned as the
+// error text when any failed.
+func runForEachChild(verb string, children handleChildren, op func(child string) (string, error)) (string, error) {
+	switch len(children) {
+	case 0:
+		return "", errors.New("child is required")
+	case 1:
+		return op(children[0])
+	}
+
+	var buf bytes.Buffer
+	tw := tap.NewWriter(&buf)
+	var failed []string
+	for _, child := range children {
+		// Subtest takes a format string; a '%' in a key must not be read as one.
+		sub := tw.Subtest("%s", child)
+		text, err := op(child)
+		if err != nil {
+			failed = append(failed, child)
+			sub.NotOk(verb, map[string]string{"error": err.Error()})
+			sub.Plan()
+			tw.NotOk(child, map[string]string{"error": err.Error()})
+			continue
+		}
+		sub.Ok(verb + ": " + text)
+		sub.Plan()
+		tw.Ok(child)
+	}
+	tw.Plan()
+	if len(failed) > 0 {
+		return "", fmt.Errorf("%s%d of %d %s(s) failed: %s",
+			buf.String(), len(failed), len(children), verb, strings.Join(failed, ", "))
+	}
+	return buf.String(), nil
+}
 
 // noHandleMessage renders the FDR 0032 D12/D13 refusal wording shared by
 // every handle-tool flow that requires the caller to already hold a handle on
@@ -73,29 +136,35 @@ func guardHandleTarget(child *session.State, verb string) error {
 // grantHandleParams is the parameter set of the `grant-session-handle` tool
 // (FDR 0032 D12).
 type grantHandleParams struct {
-	Child  string `json:"child"`
-	To     string `json:"to"`
-	Rights string `json:"rights"`
+	Child  handleChildren `json:"child"`
+	To     string         `json:"to"`
+	Rights string         `json:"rights"`
 }
 
-// runGrantSessionHandle is the shared grant flow (FDR 0032 D12: grant is a
-// message). The granter must itself hold a handle on child — a pending
-// holder exercising this tool accepts first (granting onward is itself the
-// first use, same as reaping). spinclass never sends the recipient a chat
-// message on its own behalf (chat is clown/troupe's, not spinclass's); the
-// result text tells the caller to relay the child's key instead.
+// runGrantSessionHandle grants `to` a handle on every named child.
 func runGrantSessionHandle(p grantHandleParams) (string, error) {
-	if p.Child == "" {
+	if len(p.Child) == 0 {
 		return "", errors.New("child is required")
 	}
 	if p.To == "" {
 		return "", errors.New("to is required")
 	}
+	return runForEachChild("grant", p.Child, func(target string) (string, error) {
+		return grantSessionHandle(target, p.To, p.Rights)
+	})
+}
 
+// grantSessionHandle is the per-child grant flow (FDR 0032 D12: grant is a
+// message). The granter must itself hold a handle on child — a pending
+// holder exercising this tool accepts first (granting onward is itself the
+// first use, same as reaping). spinclass never sends the recipient a chat
+// message on its own behalf (chat is clown/troupe's, not spinclass's); the
+// result text tells the caller to relay the child's key instead.
+func grantSessionHandle(target, to, rights string) (string, error) {
 	callerPrincipal := currentPrincipal()
 	callerKey := bestEffortSessionKey()
 
-	child, err := findHandleTarget(p.Child)
+	child, err := findHandleTarget(target)
 	if err != nil {
 		return "", err
 	}
@@ -125,7 +194,7 @@ func runGrantSessionHandle(p grantHandleParams) (string, error) {
 	if err := requireHandleRight("grant-session-handle", "grant", callerPrincipal, *child); err != nil {
 		return "", err
 	}
-	granting := p.Rights
+	granting := rights
 	if granting == "" {
 		granting = session.DefaultHandleRights
 	}
@@ -142,7 +211,7 @@ func runGrantSessionHandle(p grantHandleParams) (string, error) {
 		)
 	}
 
-	changed := child.GrantHandle(p.To, wanted.String())
+	changed := child.GrantHandle(to, wanted.String())
 	if !changed {
 		// `to` already holds (or is already pending on) a handle — GrantHandle
 		// is a no-op regardless of what rights this call named. A re-grant is
@@ -156,7 +225,7 @@ func runGrantSessionHandle(p grantHandleParams) (string, error) {
 		}
 		return fmt.Sprintf(
 			"%s already holds (or is already pending on) a handle to %s; nothing changed — re-granting with different rights is not an escalation path in this slice.",
-			p.To, child.Key(),
+			to, child.Key(),
 		), nil
 	}
 	if err := session.Write(*child); err != nil {
@@ -165,7 +234,7 @@ func runGrantSessionHandle(p grantHandleParams) (string, error) {
 
 	return fmt.Sprintf(
 		"granted handle on %s to %s (pending until first use; rights: %s). Send %s the child's session key (%s) via chat so it can accept.",
-		child.Key(), p.To, child.HandleRights[p.To], p.To, child.Key(),
+		child.Key(), to, child.HandleRights[to], to, child.Key(),
 	), nil
 }
 
@@ -191,10 +260,12 @@ func handleGrantSessionHandle(_ context.Context, args json.RawMessage, _ command
 func grantSessionHandleParamList() []command.Param {
 	return []command.Param{
 		{
+			// Variadic (#342): `to` and `rights` are flag-only on the CLI.
 			Name:        "child",
 			Type:        command.String,
 			Required:    true,
-			Description: "The session to grant a handle on, as its <repo>/<branch> session key or its worktree directory name — exactly the strings `sc list` prints.",
+			Variadic:    true,
+			Description: "The sessions to grant a handle on, each as its <repo>/<branch> session key or its worktree directory name — exactly the strings `sc list` prints. Several are granted independently, one refusal not stopping the rest, and reported as one TAP document with a subtest per child.",
 			Completer:   completeWorktreeTargets,
 		},
 		{
@@ -214,21 +285,22 @@ func grantSessionHandleParamList() []command.Param {
 // releaseHandleParams is the parameter set of the `release-session-handle`
 // tool.
 type releaseHandleParams struct {
-	Child string `json:"child"`
+	Child handleChildren `json:"child"`
 }
 
-// runReleaseSessionHandle is the shared release flow (FDR 0032 D12: release
+// runReleaseSessionHandle releases this session's handle on every named child.
+func runReleaseSessionHandle(p releaseHandleParams) (string, error) {
+	return runForEachChild("release", p.Child, releaseSessionHandle)
+}
+
+// releaseSessionHandle is the per-child release flow (FDR 0032 D12: release
 // is local — the caller removes only itself). Refuses legibly, changing
 // nothing, when the caller held no handle on child at all.
-func runReleaseSessionHandle(p releaseHandleParams) (string, error) {
-	if p.Child == "" {
-		return "", errors.New("child is required")
-	}
-
+func releaseSessionHandle(target string) (string, error) {
 	callerPrincipal := currentPrincipal()
 	callerKey := bestEffortSessionKey()
 
-	child, err := findHandleTarget(p.Child)
+	child, err := findHandleTarget(target)
 	if err != nil {
 		return "", err
 	}
@@ -294,7 +366,8 @@ func releaseSessionHandleParamList() []command.Param {
 			Name:        "child",
 			Type:        command.String,
 			Required:    true,
-			Description: "The session to release this session's handle on, as its <repo>/<branch> session key or its worktree directory name — exactly the strings `sc list` prints.",
+			Variadic:    true,
+			Description: "The sessions to release this session's handle on, each as its <repo>/<branch> session key or its worktree directory name — exactly the strings `sc list` prints. Several are released independently and reported as one TAP document with a subtest per child.",
 			Completer:   completeWorktreeTargets,
 		},
 	}
