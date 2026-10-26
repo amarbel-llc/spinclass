@@ -1712,6 +1712,32 @@ debug-confinement-check session="" principal="":
     [ -n "{{ principal }}" ] && args+=(--principal "{{ principal }}")
     "$out/bin/spinclass" confinement-check "${args[@]}" || true
 
+# [debug] #407 end to end, spawn half: spawn ONE throwaway profiled worker of
+# this repo with this worktree's spinclass build and a clown built at
+# `clown_rev`, which is NOT deployed (it goes first on PATH for this command
+# only). clown enforces CLOWN_PROFILE_DIGEST at launch (clown FDR 0022 slice 2),
+# so a worker that boots proves spinclass handed it the digest clown resolves;
+# a refusal lands in the worker's .spinclass/spawn.log, printed afterwards.
+# The worker is a real session: close it with close-child-session when done.
+#
+# spawn one throwaway profiled worker against an undeployed clown build (#407 e2e)
+[group('debug')]
+debug-profile-pin-spawn clown_rev profile="canary" model="haiku":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    clown=$(nix build --no-link --print-out-paths "git+ssh://git@code.linenisgreat.com/clown.git?rev={{ clown_rev }}") || exit 1
+    sc=$(nix build --no-link --print-out-paths .#default) || exit 1
+    echo "clown = $clown/bin/clown (rev {{ clown_rev }})" >&2
+    echo "sc    = $sc/bin/spinclass" >&2
+    PATH="$clown/bin:$PATH" "$sc/bin/spinclass" spawn \
+        --profile "{{ profile }}" --model "{{ model }}" --hello-timeout 5m \
+        --description "#407 e2e: throwaway profiled worker" \
+        --brief "say hello, then stop"
+    status=$?
+    log=$(ls -t .worktrees/*/.spinclass/spawn.log 2>/dev/null | head -n1)
+    [ -n "$log" ] && { echo "--- $log" >&2; tail -n 40 "$log" >&2; }
+    exit $status
+
 # Shows how the installed claude treats the permission-mode flags a spawn
 # splices (spinclass#385): its --permission-mode choices, whether the retired
 # --enable-auto-mode is rejected or ignored (probed with --help, so no model
