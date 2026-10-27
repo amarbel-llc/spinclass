@@ -24,6 +24,10 @@ func TestLinkedClownHasTheCanaryBuiltins(t *testing.T) {
 		if rp.Source != "builtin" {
 			t.Errorf("%q resolved from source %q, want builtin", name, rp.Source)
 		}
+		// The digest a confined spawn pins (CLOWN_PROFILE_DIGEST). The installed clown
+		// refuses a launch whose pin differs from its own resolution, so compare this
+		// with the digest in clown's refusal text after any clown deploy.
+		t.Logf("linked builtin %s digest %s", name, rp.DigestHex)
 	}
 }
 

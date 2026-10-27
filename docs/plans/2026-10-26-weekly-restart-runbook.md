@@ -68,6 +68,18 @@ control socket (R). Only the operator can revive it: `sc resume <target>` at a
 terminal (a new launch, sticky confined resume). Until then the session is inactive
 and nobody is woken. This is why the sweep must come before day 7, not after.
 
+## Profile changes and the spinclass library (2026-10-27)
+
+A confined session is pinned to the profile digest it launched with, and spinclass
+computes that pin from the clown library LINKED in its own flake.lock. After a
+clown change to a builtin profile (for example canary-spinclass in clown#331):
+confined SPAWNS fail at clown's digest check until spinclass's `clown` input is
+bumped and deployed (and the spawning session restarted), and RESTARTS of already
+running confined sessions are cancelled by clown's profile gate (`restart CANCELLED
+by clown (profile-gate)` wake, 5425ebf) until an operator re-pins. A sweep that
+shows several such cancellations right after a clown deploy is this, not a hung
+restart. Details and the landing order: `2026-10-27-profile-digest-coupling.md`.
+
 ## Cadence
 
 Day 0 spawn/restart, sweep at day 5, again at day 10; a child restarted for any

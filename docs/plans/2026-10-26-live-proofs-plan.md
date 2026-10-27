@@ -10,6 +10,10 @@ fix 15362f3+8d9ae0c (wakes without `CLOWN_BIN`), and clown acc1a8301a93 (status
 file) / abe4b084be10 (idle-request fix, clown#327). Check with
 `spinclass version` and `just explore-live-restart-prereqs`.
 
+Coupling to check first for any CONFINED proof: spinclass's linked clown library
+and the installed clown must agree on the profile digest, or the spawn is refused at
+clown's digest check (`2026-10-27-profile-digest-coupling.md`).
+
 ## 1. Restart wakes arrive in the requester's inbox
 
 Setup: a throwaway worker W held by requester R (the coordinator or a test
