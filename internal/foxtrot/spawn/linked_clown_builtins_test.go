@@ -51,6 +51,7 @@ func TestLinkedClownWorkerPassesTheConfinedProfileRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("builtin %q does not resolve through the linked clown (LinkedClownRev %q): %v", "worker", LinkedClownRev, err)
 	}
+	t.Logf("linked builtin worker digest %s", rp.DigestHex)
 	if rp.Source != "builtin" || rp.Digest == "" {
 		t.Fatalf("worker resolved as source %q digest %q, want a builtin with a digest", rp.Source, rp.Digest)
 	}
