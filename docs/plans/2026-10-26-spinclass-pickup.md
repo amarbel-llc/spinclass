@@ -4,6 +4,55 @@ Written by spinclass/firm-mulberry (the session being replaced). Labels: V
 verified on this host, R read in code or docs, I inferred. The brief is the
 operator's unattended-trip goal: restarts, confinement and permissions.
 
+## CURRENT STATE (spinclass/light-cedar, 2026-10-27 ~01:10Z; read this first)
+
+**Merged to origin/master since the sections below** (each tests first, targets=[],
+attested honestly; hook/auth/restart changes had an independent read-only review):
+fae0c6d pool fix (manifest host may be the pinned revoke `--host`; owner-less vanity
+repo matches the slot's last segment, refused as ambiguous across owners; `explore-pool-check
+<pooldir|''> '<repo dirs>'`); b6fc675 no "exited (normal)" wake while a restart is in
+flight; 92f26ba idle children need no nudge on clown >= d3645fac9ff1 (V); 05e6e15
+`debug-sleep`; 8f1f019 dontAsk deny floor for Monitor/BashOutput/KillShell/KillBash/
+BashBackground and Bash/PowerShell `run_in_background` (clown#330; TaskStop deliberately
+NOT denied, operator to rule); 5425ebf (+ b728609, e1bbfde) `restart_refusal` holder wake
+and session-health line (clown 66e0642f4a9c; text is bounded, stripped, quoted as untrusted
+data); abaac72 (gate `merge-8cbd7afd` running when written) the profile-digest coupling note.
+
+**Live proofs done (V, throwaway workers only, coordinator as holder):** idle restart with
+no nudge (circus/light-beech, 38 s verdict to return, pid re-recorded 3638776 -> 3678195);
+restart then close leaves no process (light-beech, clear-fir, ready-ebony); mid-turn restart
+(circus/clear-fir): request queued 8m32s until the turn ended, N=150 calls completed, no work
+lost; all via `explore-live-restart-baseline|watch|verify|close-leftovers`.
+
+**Pending:** (1) drill 2, profile-gate refusal: waits for the coordinator to create a scratch
+profile (nobody has a paved path; clown/rare-walnut was asked) and a throwaway key; I record
+refusal text, who is told (the new wake, ~5 min via the watchdog), the stranded state, the
+counter (stats-me has no `clown.*restart*` series yet). (2) drill 3, `restart-hung-child`:
+needs the operator to set `[health] busy-bound = "2m"` in the global sweatfile for the drill,
+a throwaway spawned IN the spinclass repo (brief: one `run_recipe debug-sleep 900` call), then
+the coordinator calls `restart-hung-child` twice (second must be refused, once per 24h);
+remove the bound after. (3) pool-spawn-without-agent proof: waits for the operator's mint
+into `$XDG_STATE_HOME/spinclass/token-pool` AFTER flic runs spinclass >= fae0c6d. (4)
+the digest coupling (`2026-10-27-profile-digest-coupling.md`): confined spawns fail at clown's
+digest check until the operator bumps spinclass's `clown` flake input, merges, circus-bumps
+spinclass, deploys, and restarts the spawning session; running confined sessions pinned to
+the old digest need an operator re-pin before restarts succeed. (5) nix flake-registry stall
+in the unit: clown owns the fix (nix.conf seed in stageAgentHome, now in clown ffceefc); verify
+with `nix develop -c true` in a unit. (6) Operator rulings outstanding: TaskStop deny, 7-day
+unit expiry plan (weekly sweep, runbook `2026-10-26-weekly-restart-runbook.md`).
+
+**Open questions:** which code path cleared circus/solid-elm's RestartRequest (servelog read
+was denied to me); whether SIGHUP-to-claude or clown's own shutdown ends the sibling processes
+at close (the leftovers recipe passes either way); live-larch's unit end cause (needs
+`exit_code` in the unit record / unit journal, which I cannot read).
+
+**Commands I use:** `list_recipes`/`run_recipe` (async for long ones); `debug-go-test <pkg>
+'<regex>' -test.v` (godyn-test; `git add -N` NEW files first or "no tests to run"); gate:
+`nothing-but-the-truth` (honest per-skill reasoning) then `merge-this-session-async`
+targets=[]; never two builds at once (check `env_meminfo`, hold if < 6 GB). The Edit tool turns
+a typed `\u` escape into the literal character: write `\u202e` to get the six-character
+escape, and run `lint-invisible-chars` (a literal U+202E failed one gate).
+
 ## Update by spinclass/light-cedar (replaces firm-mulberry), 2026-10-26
 
 Labels as above. Landed on origin/master, each with tests first (red seen unless
