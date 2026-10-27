@@ -59,9 +59,24 @@ runs the pinned revoke (fails until the card is back, then retried: expected).
 
 ## 5. session-health and restart-hung-child (needs clown acc1a8301a93)
 
-On a throwaway worker W that runs a long no-progress command: `session-health`
-shows `ok`, then after the bound (set `[health] busy-bound = "2m"` in the global
-sweatfile for the test) `busy-too-long`; `restart-hung-child` restarts it once and
-a second call within 24h is refused. The first live use is the proof that clown's
-status file fields (`turn_started_at`, `last_hook_at`) behave as documented
-(R only so far).
+**A long MCP tool call is NOT a hang drill (V, drill 3 on spinclass/stark-cherry,
+2026-10-27).** The throwaway called `run_recipe debug-sleep 900`; after 120 s the
+harness returned "moved to the background" and the model's turn ended, so the session
+was idle with a background task: `session-health` read `ok ... idle` and
+`restart-hung-child` refused it ("not hung (ok: idle); a forced restart needs a
+busy-too-long verdict"). That is the not-hung refusal branch, verified live; the
+classifier behaved correctly.
+
+What a real stall needs: `turn_running` true (a UserPromptSubmit with no Stop yet) AND no
+transcript or hook movement for the bound. Candidate drills, none run yet:
+1. **SIGSTOP of the claude process mid-turn** (best): a throwaway doing a long loop of
+   read-only calls (the drill-1 brief, N=150); an operator at a terminal runs
+   `kill -STOP <claude pid>` (pid from `explore-live-restart-baseline`); the transcript
+   freezes, no Stop hook comes, so with `[health] busy-bound = "2m"` the verdict reads
+   busy-too-long after about 2 minutes; the holder calls `restart-hung-child` (clown's
+   forced restart kills a stopped process with SIGKILL) and a second call is refused.
+   Needs a human or a paved recipe to send the signal; an agent's Bash is denied.
+2. An unanswered permission prompt in a non-dontAsk throwaway (the real smart-hemlock
+   hang): needs a worker launched without the unattended mode.
+3. A model-API stall or a wedged hook cannot be produced on demand.
+Set `busy-bound` back afterwards (it changes `session-health` for every held session).

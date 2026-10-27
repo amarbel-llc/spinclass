@@ -28,10 +28,12 @@ lost; all via `explore-live-restart-baseline|watch|verify|close-leftovers`.
 profile (nobody has a paved path; clown/rare-walnut was asked) and a throwaway key; I record
 refusal text, who is told (the new wake, ~5 min via the watchdog), the stranded state, the
 counter (stats-me has no `clown.*restart*` series yet). (2) drill 3, `restart-hung-child`:
-needs the operator to set `[health] busy-bound = "2m"` in the global sweatfile for the drill,
-a throwaway spawned IN the spinclass repo (brief: one `run_recipe debug-sleep 900` call), then
-the coordinator calls `restart-hung-child` twice (second must be refused, once per 24h);
-remove the bound after. (3) pool-spawn-without-agent proof: waits for the operator's mint
+PARTLY DONE: the not-hung refusal branch is verified live (spinclass/stark-cherry: a 900 s
+`debug-sleep` MCP call returns control after 120 s, the session idles, `restart-hung-child`
+refused "not hung (ok: idle)"). The restart branch is NOT proven: a real stall needs a
+SIGSTOP of a busy throwaway's claude (operator at a terminal) with `[health] busy-bound =
+"2m"`, then the holder calls `restart-hung-child` twice (second refused, once per 24h); see
+live-proofs-plan.md item 5. Remove the bound after. (3) pool-spawn-without-agent proof: waits for the operator's mint
 into `$XDG_STATE_HOME/spinclass/token-pool` AFTER flic runs spinclass >= fae0c6d. (4)
 the digest coupling (`2026-10-27-profile-digest-coupling.md`): confined spawns fail at clown's
 digest check until the operator bumps spinclass's `clown` flake input, merges, circus-bumps

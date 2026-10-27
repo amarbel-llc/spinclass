@@ -1572,9 +1572,12 @@ explore-live-close-leftovers key:
     printf 'FAIL    processes of the closed session survive:\n%s' "$left"
     exit 1
 
-# [debug] Block for `seconds` doing nothing, so a throwaway worker's tool call
-# (run_recipe) stalls with no transcript or hook progress: the busy-too-long
-# fixture for the restart-hung-child drill (FDR 0037). Harmless; touches nothing.
+# [debug] Block for `seconds` doing nothing. NOT a hang fixture (drill 3,
+# 2026-10-27): called through run_recipe the harness returns control after 120 s
+# ("moved to the background"), the model's turn ENDS and the session is idle with a
+# background task, so session-health reads ok/idle and restart-hung-child refuses
+# ("not hung"). Useful only as a harmless long-running recipe; see
+# docs/plans/2026-10-26-live-proofs-plan.md item 5 for drills that do stall a turn.
 #
 # sleep for N seconds (a deliberately stalled tool call for the hung-session drill)
 [group("debug")]
