@@ -16,7 +16,20 @@ flight; 92f26ba idle children need no nudge on clown >= d3645fac9ff1 (V); 05e6e1
 BashBackground and Bash/PowerShell `run_in_background` (clown#330; TaskStop deliberately
 NOT denied, operator to rule); 5425ebf (+ b728609, e1bbfde) `restart_refusal` holder wake
 and session-health line (clown 66e0642f4a9c; text is bounded, stripped, quoted as untrusted
-data); abaac72 (gate `merge-8cbd7afd` running when written) the profile-digest coupling note.
+data); abaac72 the profile-digest coupling note. Later docs-only merges: 985c6c9 (linked
+canary digests logged), 7b6b980 (debug-sleep is not a hang drill; real-stall drill needs
+SIGSTOP by an operator, no explore-sigstop recipe), 63e74c5 (spinclass#438 folio-stanza
+design draft, no code).
+
+**Weekly-sweep rehearsal (V, 2026-10-27, throwaway spinclass/stark-cherry, coordinator calls
+`restart-child-session`, no force, idle child, installed clown ffceefc):** three restarts at
+02:24:17Z (restarted_at 02:24:59.7Z, 42 s; claude pid 3182729 -> 3869595), 02:28:22Z (record
+lost: my watch exits when no restart is in flight, so arm it only after the call), 02:33:50Z
+(restarted_at 02:34:29.8Z, 39 s; -> 4170457). Verify PASS each time I ran it; outer posh/clown
+unchanged, all serve children new, serve current build. A plain close was refused inside the
+2-minute guard after the restart verdict, then succeeded; `explore-live-close-leftovers` PASS
+(no process carries the session key) after three restarts. Not observable by me: the clown#329
+wakes and any replayed brief (the throwaway's side).
 
 **Live proofs done (V, throwaway workers only, coordinator as holder):** idle restart with
 no nudge (circus/light-beech, 38 s verdict to return, pid re-recorded 3638776 -> 3678195);
