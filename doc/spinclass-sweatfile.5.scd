@@ -1030,6 +1030,55 @@ habitual use, not a security boundary: an alias, a generated command or a
 copied binary gets past it. The boundary for an untrusted agent is
 confinement (FDR 0035).
 
+## [folio]
+
+The resource policy a session's tool calls are judged by (spinclass#438,
+docs/plans/2026-11-01-438-policy-broker-design.md). _spinclass serve_ is the
+session's policy broker: moxy asks it, per resource a tool call names, for one
+of *allow*, *ask* or *deny*, and this stanza is what it answers from. Not
+merged. The allow lists and *unmatched* are read only from the global and
+parent-directory layers (a repo- or worktree-level value is ignored with a
+warning); *deny* only narrows, so every layer's denies are honoured.
+
+When no layer above the repo sets the stanza at all, the session has no
+policy: serve does not listen and moxy keeps its own compiled-in rule, which is
+today's behaviour. A stanza with an entry that does not parse, or with no
+trusted *unmatched*, is refused as a whole (*sc validate* reports an error) and
+the same applies.
+
+Each entry is _<anchor>:<path>_. Anchors: *pwd:* the session worktree;
+*home:* the HOME of the evaluating process; *env:NAME:* the value of the
+variable NAME (unset or empty matches nothing); *nix-store:* /nix/store;
+*spinclass:worktree* the caller's own worktree, *spinclass:repo* the main
+checkout, *spinclass:worktrees* the repo's .worktrees/, *spinclass:children* the
+worktrees of sessions the caller holds an accepted handle on, and
+*spinclass:siblings* the parent of the main checkout minus the main checkout.
+The path below the anchor is a directory-boundary prefix: it matches that path
+and everything under it. A whole segment *\** matches exactly one segment; a
+trailing */\*\** only spells out the default. No regexes, no *..*, no *~*.
+
+*read*, *write*
+	Arrays of entries allowed for that operation. Append across trusted layers;
+	an explicit *[]* in a nearer trusted layer clears the ones above it.
+
+*deny*
+	Array of entries refused for every operation. Appended from every layer;
+	only a trusted layer's *[]* clears the ones above it.
+
+*unmatched*
+	*"ask"* or *"deny"*: the verdict for a path no entry matches. Last trusted
+	layer wins. Required once the stanza is configured. Under a session that
+	cannot prompt (permission mode dontAsk) an *ask* is a deny.
+
+```
+[folio]
+read  = ["pwd:", "nix-store:", "home:.claude", "env:CLAUDE_CODE_TMPDIR:",
+         "spinclass:siblings", "spinclass:children"]
+write = ["pwd:", "home:.claude/plans", "home:.claude/projects"]
+deny  = ["spinclass:worktrees/*/.spinclass/state.json"]
+unmatched = "ask"
+```
+
 ## [health]
 
 Hung-session bounds, read from clown's status file

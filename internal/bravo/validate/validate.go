@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"code.linenisgreat.com/spinclass/internal/0/folio"
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/0/statsd"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
@@ -737,6 +738,65 @@ func CheckPermissions(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 	return issues
 }
 
+// CheckFolio validates the [folio] table (spinclass#438): every entry must
+// parse under the stanza grammar (internal/0/folio) and unmatched must be ask
+// or deny; both are errors, because an entry the broker could not compile
+// makes it refuse the whole policy. The allow lists and unmatched are honoured
+// only from layers above the repo, so a repo-level value warns as ignored; a
+// repo-level deny only narrows and is honoured.
+func CheckFolio(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
+	f := sf.Folio
+	if f == nil {
+		return nil
+	}
+	var issues []Issue
+	for _, list := range []struct {
+		name    string
+		entries []string
+		allow   bool
+	}{
+		{"read", f.Read, true},
+		{"write", f.Write, true},
+		{"deny", f.Deny, false},
+	} {
+		for _, entry := range list.entries {
+			if _, err := folio.ParsePattern(entry); err != nil {
+				issues = append(issues, Issue{
+					Message:  fmt.Sprintf("[folio] %s entry does not parse: %v", list.name, err),
+					Severity: SeverityError,
+					Field:    "folio." + list.name,
+					Value:    entry,
+				})
+			}
+		}
+		if list.allow && list.entries != nil && !layerAboveRepo {
+			issues = append(issues, Issue{
+				Message:  fmt.Sprintf("[folio] sets `%s` in a repo-level sweatfile: it is ignored — only sweatfiles above the repo may widen what a session reaches; move it to the global sweatfile (a repo-level `deny` is honoured)", list.name),
+				Severity: SeverityWarning,
+				Field:    "folio." + list.name,
+			})
+		}
+	}
+	if f.Unmatched != nil {
+		if v := *f.Unmatched; v != "ask" && v != "deny" {
+			issues = append(issues, Issue{
+				Message:  fmt.Sprintf("[folio] unmatched %q is not \"ask\" or \"deny\"", v),
+				Severity: SeverityError,
+				Field:    "folio.unmatched",
+				Value:    v,
+			})
+		}
+		if !layerAboveRepo {
+			issues = append(issues, Issue{
+				Message:  "[folio] sets `unmatched` in a repo-level sweatfile: it is ignored — only sweatfiles above the repo may set it; move it to the global sweatfile",
+				Severity: SeverityWarning,
+				Field:    "folio.unmatched",
+			})
+		}
+	}
+	return issues
+}
+
 // CheckHealth validates the [health] table: busy-bound must be a positive Go
 // duration, and is honoured only from layers above the repo.
 func CheckHealth(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
@@ -1071,6 +1131,27 @@ func Run(w io.Writer, home, repoDir string) int {
 			}
 		}
 
+		if src.File.Folio != nil {
+			if issues := CheckFolio(src.File, sweatfileio.LayerAboveRepo(src.Path, home, mainRoot)); len(issues) > 0 {
+				for _, iss := range issues {
+					if iss.Severity == SeverityError {
+						diag := map[string]string{
+							"severity": iss.Severity,
+							"message":  iss.Message,
+						}
+						if iss.Value != "" {
+							diag["value"] = iss.Value
+						}
+						sub.NotOk("folio valid", diag)
+					} else {
+						sub.Ok(fmt.Sprintf("folio valid # warning: %s", iss.Message))
+					}
+				}
+			} else {
+				sub.Ok("folio valid")
+			}
+		}
+
 		if src.File.Health != nil {
 			if issues := CheckHealth(src.File, sweatfileio.LayerAboveRepo(src.Path, home, mainRoot)); len(issues) > 0 {
 				for _, iss := range issues {
@@ -1249,6 +1330,16 @@ func Run(w io.Writer, home, repoDir string) int {
 		}
 	} else {
 		sub.Ok("no duplicate entries")
+	}
+	if policy, _ := sweatfileio.TrustedFolio(result, home, mainRoot); policy.Configured {
+		if policy.Unmatched == "" {
+			sub.NotOk("folio unmatched set", map[string]string{
+				"severity": SeverityError,
+				"message":  "[folio] is configured above the repo but no trusted layer sets `unmatched` (\"ask\" or \"deny\"): the broker refuses the policy and moxy keeps its static floor",
+			})
+		} else {
+			sub.Ok("folio unmatched set")
+		}
 	}
 	sub.Plan()
 	tw.EndSubtest("merged result", sub)

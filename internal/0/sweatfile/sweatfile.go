@@ -222,6 +222,26 @@ type Permissions struct {
 	AllowSelfClose *bool `toml:"allow-self-close"`
 }
 
+// Folio is the resource policy a session's tool calls are judged by
+// (spinclass#438, docs/plans/2026-11-01-438-policy-broker-design.md): the
+// patterns the broker in `spinclass serve` evaluates for moxy. Entries are
+// <anchor>:<path> (internal/0/folio). Never merged: read ONLY through
+// sweatfileio.TrustedFolio. The allow lists and unmatched are honoured only
+// from layers above the repo; denies narrow, so every layer's are honoured.
+type Folio struct {
+	// Read and Write are the allow lists per operation. Append across trusted
+	// layers; an explicit [] in a nearer trusted layer clears the ones above.
+	Read  []string `toml:"read"`
+	Write []string `toml:"write"`
+	// Deny applies to every operation and wins over an allow of equal or lower
+	// specificity. Appended from every layer; only a trusted layer's [] clears.
+	Deny []string `toml:"deny"`
+	// Unmatched is the verdict for a path no pattern matches: "ask" or "deny".
+	// Last trusted layer wins. A configured policy must set it somewhere
+	// trusted, or the broker refuses to serve the policy at all.
+	Unmatched *string `toml:"unmatched"`
+}
+
 // Health holds the hung-session bounds (docs/plans/2026-10-26-hung-session-detection.md).
 // Like Permissions it is trusted only from layers above the repo (an agent that
 // can edit the repo sweatfile could otherwise raise its own bound), read ONLY
@@ -406,6 +426,7 @@ type Sweatfile struct {
 	ProfileRights  *ProfileRights  `toml:"profile-rights"`
 	Confinement    *Confinement    `toml:"confinement"`
 	Permissions    *Permissions    `toml:"permissions"`
+	Folio          *Folio          `toml:"folio"`
 	Health         *Health         `toml:"health"`
 	Sysprompt      *Sysprompt      `toml:"sysprompt"`
 	SessionEntry   *SessionEntry   `toml:"session-entry"`
