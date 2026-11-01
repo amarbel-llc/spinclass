@@ -1174,6 +1174,21 @@ debug-ringmaster-job job tail="20":
       echo
     done
 
+# list the operator's troupe runtime dir and account password files with
+# mode and owner, contents never read (F14 root cause, spinclass#438 grill)
+[group("debug")]
+debug-troupe-accounts-ls:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    d="${XDG_RUNTIME_DIR:?}/troupe"
+    echo "== $d"
+    ls -la "$d" 2>&1
+    echo "== $d/accounts"
+    ls -la "$d/accounts" 2>&1
+    echo "== stat"
+    stat -c '%U %a %F %n' "$d" "$d/accounts" "$d"/accounts/* 2>&1
+    echo "== count: $(ls -1 "$d/accounts" 2>/dev/null | wc -l) account file(s)"
+
 # map live processes' SPINCLASS_SESSION_ID against their CLOWN_SESSION_ID
 [group("debug")]
 debug-session-env-map:
@@ -1837,7 +1852,9 @@ debug-prompt-fragment mode="":
 # outside the session's agent unit (the frontend). Tracked files only: `git
 # add -N` new sources first (spinclass#292, as debug-prompt-fragment).
 #
-# print the FDR 0035 confinement table for a session on this host
+# print the FDR 0035 confinement table for a session on this host (for a
+# session other than this one, pass its principal or the recorded one is
+# used, with a warning; the caller's CLOWN_SESSION_ID never is)
 [group("debug")]
 debug-confinement-check session="" principal="":
     #!/usr/bin/env bash

@@ -237,6 +237,16 @@ exercised on a real unit, and so **unverified until a live canary**:
     names any other account or entry under `troupe`.
   - Both readings wait on a live round: a probe listing the unit's runtime
     dir, and F10's note or failure detail.
+  - **F14 "1 other session's file readable" was the caller's principal, not
+    an exposure (2026-11-01, two live confined throwaways).** `sc
+    confinement-check --session <child>` with no `--principal` defaulted the
+    principal to the caller's `CLOWN_SESSION_ID`, so the child's own bound
+    credential counted as another session's; F1 and F15 failed in the same
+    run for the same reason. The real directory held 174 files and the unit
+    saw one. Rerun with the child's principal: F1, F14, F15 ok. Fixed in the
+    diagnostic: for a session other than the current one the principal
+    defaults to the recorded one, with a warning; F14 names the readable
+    files instead of counting them.
 
 ### Serve handlers and the caller (FDR divergence audit, 2026-10-22)
 

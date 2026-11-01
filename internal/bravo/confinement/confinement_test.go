@@ -677,8 +677,10 @@ func TestF14AcceptsOnlyTheChildsOwnTroupeAccount(t *testing.T) {
 }
 
 // Round O: another session's troupe account file readable from the unit lets
-// the worker authenticate as it. F14 fails with the count, ahead of the
-// visible-entries listing; a visible but unreadable one is still named.
+// the worker authenticate as it. F14 fails naming each readable file (a bare
+// count once passed the child's own file off as another session's, when the
+// check ran with the caller's principal), ahead of the visible-entries
+// listing; a visible but unreadable one is still named.
 func TestF14FailsWhenAnotherSessionsTroupeAccountIsReadable(t *testing.T) {
 	sys, in := confinedHost()
 	sys.dirs[root+"/run"] = []string{"user"}
@@ -690,8 +692,11 @@ func TestF14FailsWhenAnotherSessionsTroupeAccountIsReadable(t *testing.T) {
 	sys.files[root+"/run/user/1000/troupe/accounts/principal-b.pass"] = "secret"
 	sys.files[root+"/run/user/1000/troupe/accounts/principal-c.pass"] = "secret"
 	f := factByID(t, Run(sys, in), "F14")
-	if f.OK || !strings.Contains(f.Detail, "2 other session(s)' troupe account password file(s) are READABLE") {
-		t.Errorf("F14 = %+v, want the readable count", f)
+	if f.OK || !strings.Contains(f.Detail, "READABLE") ||
+		!strings.Contains(f.Detail, "troupe/accounts/principal-b.pass") ||
+		!strings.Contains(f.Detail, "troupe/accounts/principal-c.pass") ||
+		strings.Contains(f.Detail, "principal-a.pass") {
+		t.Errorf("F14 = %+v, want the readable files named and the own one not", f)
 	}
 	sys.readErrOn = map[string]error{
 		root + "/run/user/1000/troupe/accounts/principal-b.pass": syscall.EACCES,
