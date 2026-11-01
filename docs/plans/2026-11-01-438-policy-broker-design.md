@@ -95,6 +95,19 @@ behind a long tool call.
   in-unit relay's loopback address (confined). Clown exports no session-key
   variable; `SPINCLASS_SESSION_ID`, which spinclass exports, is the optional
   "wrong broker" check where present.
+- **As delivered by clown (clown#333, d1ea34a0c4ff, 2026-11-01; not yet
+  deployed or exercised live).** Clown sets
+  `CLOWN_POLICY_BROKER=<XDG_RUNTIME_DIR>/clown/serve/<principal>/broker.sock`
+  in the serve bridge's environment, only when a spinclass serve is
+  discovered and `XDG_RUNTIME_DIR` is set; it creates the 0700 directory and
+  removes socket and directory at session end. The agent and every in-unit
+  server get the same variable: the path when unconfined, the relay's
+  `127.0.0.1:19001` when confined (the socket bound in as a single inode,
+  so serve's peer is the relay in the unit's cgroup). Obligations on serve:
+  create `broker.sock` (0600) during startup, before the bridge's health
+  check passes, because the relay row is added only if the socket exists at
+  launch; replace a stale socket and refuse a live one, as
+  `ListenServeSocket` does, since clown does not unlink a stale one.
 - **The moxy PreToolUse hook is a second client (found by the moxy worker).**
   Under Claude Code the hook decides the prompt in its own short-lived
   process before the call reaches the moxy server, so a verdict inside the
