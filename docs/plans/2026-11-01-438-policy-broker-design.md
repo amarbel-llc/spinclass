@@ -108,6 +108,19 @@ behind a long tool call.
   check passes, because the relay row is added only if the socket exists at
   launch; replace a stale socket and refuse a live one, as
   `ListenServeSocket` does, since clown does not unlink a stale one.
+- **As delivered by moxy (moxy#491, af63b40, 2026-11-01).** Moxin tool files
+  declare `[resources.<input>]` with an op; a `perms.Gate` is asked per
+  resource for dynamic-tier tools; the verdict is final when answered, the
+  tool's floor script runs only on no answer, and a broker verdict never
+  lifts an each-use or always-allow tier. `rg.search` is dynamic behind the
+  same floor. `pkg/policybroker` is the client (RFC 0002): `CLOWN_POLICY_BROKER`
+  path or host:port, hello both ways, subject adopted from the broker's
+  `session_key` or checked against `SPINCLASS_SESSION_ID` when set, 100 ms
+  default deadline (unmeasured), jittered reconnect; `fakebroker` is the
+  in-process test double; unset variable means today's behaviour. Contract
+  confirmed by spinclass: serve's hello `session_key` is the exact
+  `SPINCLASS_SESSION_ID` string. Not done on the moxy side: no bats lane;
+  glob/ls with no path name no resource.
 - **The moxy PreToolUse hook is a second client (found by the moxy worker).**
   Under Claude Code the hook decides the prompt in its own short-lived
   process before the call reaches the moxy server, so a verdict inside the
