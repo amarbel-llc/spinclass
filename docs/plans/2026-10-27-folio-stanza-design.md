@@ -1,5 +1,12 @@
 # spinclass#438: the sweatfile `folio` stanza (design draft, no code)
 
+> **Superseded in part (2026-11-01).** The operator's grill ruled that the
+> engine lives in moxy as a resource model and is reached over a policy-broker
+> protocol with `spinclass serve` as the broker; see
+> `2026-11-01-438-policy-broker-design.md`. Sections 3 to 5 below (hook-first
+> slices) no longer apply. Section 2 (the stanza grammar and trust rules) and
+> question 6.1 (specificity) carry over unchanged.
+
 Date: 2026-10-27. Status: design draft for the operator and for moxy#487/#490, nothing
 built. Labels: R read in code or docs, I inferred/proposed. Direction and ordering are
 the operator's (#438 body and its two comments, circus#399 workaround checklist); this
