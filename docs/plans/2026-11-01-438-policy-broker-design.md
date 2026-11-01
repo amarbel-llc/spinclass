@@ -121,6 +121,25 @@ behind a long tool call.
   confirmed by spinclass: serve's hello `session_key` is the exact
   `SPINCLASS_SESSION_ID` string. Not done on the moxy side: no bats lane;
   glob/ls with no path name no resource.
+- **As delivered by spinclass, steps 1 and 2 (2026-11-01).** The `[folio]`
+  stanza (`spinclass-sweatfile(5)`; `internal/0/folio` holds the grammar,
+  `sweatfileio.TrustedFolio` the trust rule, `sc validate` the checks) and
+  the broker listener (`internal/0/policybroker`, wired in `spinclass serve`
+  by `startPolicyBroker`). Serve listens only when `CLOWN_POLICY_BROKER` is
+  an absolute path AND a layer above the repo configures `[folio]` AND the
+  policy compiles (every entry parses, `unmatched` set); otherwise the socket
+  is never created, clown relays nothing, and moxy keeps its floor, so a
+  session without the stanza behaves exactly as before. The listener refuses
+  a live socket and replaces a stale one (0600), sends its hello first, and
+  admits a peer that runs as the same uid and, for a session launched
+  confined, in the recorded agent unit's cgroup (`pkgs/peercheck`; a confined
+  launch with no unit record yet admits nobody). Every check that is not for
+  this session, not read/write/exec, or not a file or blob is an `error`
+  (no answer); an evaluator failure or a non-verdict is `error internal`,
+  never a verdict. Until step 3 the evaluator answers every check with the
+  policy's `unmatched`, which is never wider than the floor. The clown lock
+  stays at 882c06c: serve reads the path from the environment and needs
+  nothing newer than `ListenUnix`/`CheckUnitCgroup`.
 - **The moxy PreToolUse hook is a second client (found by the moxy worker).**
   Under Claude Code the hook decides the prompt in its own short-lived
   process before the call reaches the moxy server, so a verdict inside the
@@ -139,8 +158,9 @@ behind a long tool call.
    hello, the deadline, the static floor on no-answer, and `ask`/`deny`
    mapped onto the existing `perms-request` exit codes.
 3. **spinclass**: the `[folio]` stanza (grammar and trust from the
-   2026-10-27 draft; `unmatched` required), the broker listener in serve on
-   `pkgs/peercheck`, the evaluator over trusted layers and accepted handles
+   2026-10-27 draft; `unmatched` required; landed 2026-11-01), the broker
+   listener in serve on `pkgs/peercheck` (landed 2026-11-01), the evaluator
+   over trusted layers and accepted handles
    (`spinclass:children` stays an authority anchor), the hook shrink. The
    first slice that removes the prompts in #438 (reads of sibling worktrees)
    is then a global-sweatfile stanza, no hook change.

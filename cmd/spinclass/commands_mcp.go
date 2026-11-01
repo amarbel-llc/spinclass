@@ -147,6 +147,13 @@ func registerServeCommand(app *command.App) {
 				return fmt.Errorf("creating server: %w", err)
 			}
 
+			// Policy broker for moxy (spinclass#438): listens on the socket
+			// clown named, before the first request is answered, so the
+			// socket exists when the bridge's health check passes.
+			if stopBroker := startPolicyBroker(sigCtx, app.Version); stopBroker != nil {
+				defer stopBroker()
+			}
+
 			servelog.Infof("serve.ready")
 			err = srv.Run(sigCtx)
 			if err != nil {
