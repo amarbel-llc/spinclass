@@ -136,10 +136,21 @@ behind a long tool call.
   launch with no unit record yet admits nobody). Every check that is not for
   this session, not read/write/exec, or not a file or blob is an `error`
   (no answer); an evaluator failure or a non-verdict is `error internal`,
-  never a verdict. Until step 3 the evaluator answers every check with the
-  policy's `unmatched`, which is never wider than the floor. The clown lock
-  stays at 882c06c: serve reads the path from the environment and needs
-  nothing newer than `ListenUnix`/`CheckUnitCgroup`.
+  never a verdict. The clown lock stays at 882c06c: serve reads the path
+  from the environment and needs nothing newer than
+  `ListenUnix`/`CheckUnitCgroup`.
+- **As delivered by spinclass, step 3 (2026-11-01).** The evaluator
+  (`internal/bravo/folioeval`): `Compile` refuses a policy whole on any
+  defect; `Evaluate` matches the resolved path (parent symlink-resolved,
+  leaf as named) against the roots the anchors expand to (`pwd`, `home`,
+  `env`, `nix-store`, `spinclass:worktree|repo|worktrees|children|siblings`;
+  children are the worktrees of live sessions the caller's principal holds
+  an ACCEPTED handle on, an empty principal holds nothing) under the ruled
+  specificity tuple, deny on a full tie, `unmatched` when nothing matches;
+  an allow counts only for its own op, so `exec` is answered by denies and
+  `unmatched` alone. The session index is re-read for the children anchor
+  at most once a second. Blob resources and non-absolute file URIs get
+  `unmatched`.
 - **The moxy PreToolUse hook is a second client (found by the moxy worker).**
   Under Claude Code the hook decides the prompt in its own short-lived
   process before the call reaches the moxy server, so a verdict inside the
@@ -160,7 +171,7 @@ behind a long tool call.
 3. **spinclass**: the `[folio]` stanza (grammar and trust from the
    2026-10-27 draft; `unmatched` required; landed 2026-11-01), the broker
    listener in serve on `pkgs/peercheck` (landed 2026-11-01), the evaluator
-   over trusted layers and accepted handles
+   over trusted layers and accepted handles (landed 2026-11-01)
    (`spinclass:children` stays an authority anchor), the hook shrink. The
    first slice that removes the prompts in #438 (reads of sibling worktrees)
    is then a global-sweatfile stanza, no hook change.
@@ -169,8 +180,14 @@ behind a long tool call.
 
 ## 5. Open
 
-- Allow-over-deny specificity (2026-10-27 draft, 6.1): longest literal prefix
-  wins, deny wins ties. Decide before the evaluator is written.
+- Allow-over-deny specificity (2026-10-27 draft, 6.1): **ruled 2026-11-01,
+  "css selector-like"**: the (literal segments, wildcard segments) pair of
+  the entry under its anchor, compared in that order; deny wins a full tie;
+  unmatched only when nothing matches. `spinclass-sweatfile(5)` has the
+  worked circus#399 case; `internal/bravo/folioeval` implements it.
+- Blob resources (`madder://blobs/<digest>`) have no pattern grammar; the
+  evaluator answers `unmatched` for them. A grammar (or a rule that a blob
+  the session's own tools produced is readable) is a later step.
 - Confined views: the broker runs in the frontend and evaluates the path the
   caller named; worktree and state binds are same-path, the staged agent-home
   is not. Until a mapping exists the broker treats an agent-home path as

@@ -2,20 +2,22 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"code.linenisgreat.com/clown/pkgs/peercheck"
 
-	"code.linenisgreat.com/spinclass/internal/0/folio"
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/0/policybroker"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
+	"code.linenisgreat.com/spinclass/internal/bravo/folioeval"
 	"code.linenisgreat.com/spinclass/internal/servelog"
 )
 
@@ -95,7 +97,7 @@ func startPolicyBroker(ctx context.Context, version string) (stop func()) {
 		servelog.Infof("serve.broker off: no trusted [folio] stanza for %s; moxy keeps its static floor", plan.RepoRoot)
 		return nil
 	}
-	ev, err := newFolioEvaluator(plan.Policy)
+	ev, err := newFolioEvaluator(plan)
 	if err != nil {
 		servelog.Errorf("serve.broker off: the [folio] policy is refused, so moxy keeps its static floor: %v", err)
 		return nil
@@ -145,30 +147,66 @@ func policyBrokerPeerCheck(stateDir, worktree string) func(net.Conn) error {
 	}
 }
 
+// policyBrokerSessions is the session index the evaluator reads held
+// children from (the spinclass:children anchor). A seam for tests.
+var policyBrokerSessions = func() []session.State {
+	all, err := session.ListAll(nil)
+	if err != nil {
+		return nil
+	}
+	return all
+}
+
+// rootsTTL bounds how often the evaluator re-reads the session index for the
+// children anchor: a check has a budget of tens of milliseconds, and a
+// handle granted a second ago is soon enough.
+const rootsTTL = time.Second
+
+// folioEvaluator answers the broker's checks from the compiled policy and
+// the session's roots. Blob resources have no pattern grammar yet and get
+// the policy's unmatched verdict (design record section 5).
+type folioEvaluator struct {
+	policy *folioeval.Policy
+	plan   policyBrokerPlan
+	home   string
+
+	mu    sync.Mutex
+	roots folioeval.Roots
+	at    time.Time
+}
+
 // newFolioEvaluator compiles the trusted policy into the broker's evaluator.
 // Every entry must parse and unmatched must be set: a policy the broker
 // cannot compile is refused whole, never partly applied, since a dropped
-// deny would widen it. Until the pattern evaluator lands (design record
-// section 4, step 3) every check answers the policy's unmatched verdict,
-// which is never wider than the floor.
-func newFolioEvaluator(p sweatfileio.FolioPolicy) (policybroker.Evaluator, error) {
-	for _, list := range []struct {
-		name    string
-		entries []string
-	}{{"read", p.Read}, {"write", p.Write}, {"deny", p.Deny}} {
-		for _, e := range list.entries {
-			if _, err := folio.ParsePattern(e); err != nil {
-				return nil, fmt.Errorf("[folio] %s: %w", list.name, err)
-			}
-		}
+// deny would widen it.
+func newFolioEvaluator(plan policyBrokerPlan) (policybroker.Evaluator, error) {
+	policy, err := folioeval.Compile(plan.Policy)
+	if err != nil {
+		return nil, err
 	}
-	if p.Unmatched != policybroker.VerdictAsk && p.Unmatched != policybroker.VerdictDeny {
-		if p.Unmatched == "" {
-			return nil, errors.New("[folio] sets no `unmatched` in a trusted layer")
-		}
-		return nil, fmt.Errorf("[folio] unmatched %q is not ask or deny", p.Unmatched)
+	home, _ := os.UserHomeDir()
+	return &folioEvaluator{policy: policy, plan: plan, home: home}, nil
+}
+
+func (e *folioEvaluator) Evaluate(_ context.Context, c policybroker.Check) (string, string, error) {
+	if c.Resource.Kind != policybroker.KindFile {
+		return e.policy.Unmatched, "unmatched: no pattern grammar for " + c.Resource.Kind + " resources yet", nil
 	}
-	return policybroker.EvaluatorFunc(func(_ context.Context, _ policybroker.Check) (string, string, error) {
-		return p.Unmatched, "unmatched", nil
-	}), nil
+	path := strings.TrimPrefix(c.Resource.URI, "file://")
+	if !filepath.IsAbs(path) {
+		return e.policy.Unmatched, "unmatched: resource is not an absolute file path", nil
+	}
+	verdict, reason := e.policy.Evaluate(e.currentRoots(), c.Op, folioeval.Resolve(path))
+	return verdict, reason, nil
+}
+
+func (e *folioEvaluator) currentRoots() folioeval.Roots {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.at.IsZero() && time.Since(e.at) < rootsTTL {
+		return e.roots
+	}
+	e.roots = folioeval.RootsFor(e.plan.Worktree, e.plan.RepoRoot, e.home, os.Getenv("CLOWN_SESSION_ID"), os.Getenv, policyBrokerSessions())
+	e.at = time.Now()
+	return e.roots
 }

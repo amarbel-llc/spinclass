@@ -78,14 +78,20 @@ func TestStartPolicyBrokerDeclinesWithoutAUsablePolicy(t *testing.T) {
 }
 
 // With a configured policy serve listens on clown's path, answers the hello
-// with the exact session key, and until the evaluator lands answers every
-// check with the policy's unmatched verdict. Stop removes the socket.
-func TestStartPolicyBrokerListensAndAnswersUnmatched(t *testing.T) {
+// with the exact session key, and answers checks from the policy: a read
+// inside the worktree is allowed by pwd:, anything else gets the policy's
+// unmatched verdict, and so does a blob (no grammar for it yet). Stop
+// removes the socket.
+func TestStartPolicyBrokerListensAndAnswersThePolicy(t *testing.T) {
 	path := shortSocketPath(t)
+	worktree, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	stubPolicyBrokerPlan(t, policyBrokerPlan{
 		Path: path, SessionKey: "spinclass/light-cedar",
 		Policy:   sweatfileio.FolioPolicy{Configured: true, Read: []string{"pwd:"}, Unmatched: "deny"},
-		StateDir: t.TempDir(), Worktree: t.TempDir(),
+		StateDir: t.TempDir(), Worktree: worktree,
 	})
 	stop := startPolicyBroker(context.Background(), "0.0.0-test")
 	if stop == nil {
@@ -121,9 +127,19 @@ func TestStartPolicyBrokerListensAndAnswersUnmatched(t *testing.T) {
 	if h := read(); h.Type != "hello" || h.SessionKey != "spinclass/light-cedar" || h.Broker != "spinclass serve 0.0.0-test" {
 		t.Fatalf("hello = %+v", h)
 	}
-	send(policybroker.Message{V: 1, Type: "check", ID: 1, Subject: "spinclass/light-cedar", Op: "read", Resource: &policybroker.Resource{Kind: "file", URI: "file:///etc/hostname"}, DeadlineMS: 100})
-	if v := read(); v.Type != "verdict" || v.ID != 1 || v.Verdict != "deny" {
-		t.Errorf("verdict = %+v, want the unmatched deny", v)
+	for _, tc := range []struct {
+		id      int64
+		res     policybroker.Resource
+		verdict string
+	}{
+		{1, policybroker.Resource{Kind: "file", URI: "file:///etc/hostname"}, "deny"},
+		{2, policybroker.Resource{Kind: "file", URI: "file://" + filepath.Join(worktree, "a.go")}, "allow"},
+		{3, policybroker.Resource{Kind: "blob", URI: "madder://blobs/blake2b256-x"}, "deny"},
+	} {
+		send(policybroker.Message{V: 1, Type: "check", ID: tc.id, Subject: "spinclass/light-cedar", Op: "read", Resource: &tc.res, DeadlineMS: 100})
+		if v := read(); v.Type != "verdict" || v.ID != tc.id || v.Verdict != tc.verdict {
+			t.Errorf("%s: verdict = %+v, want %s", tc.res.URI, v, tc.verdict)
+		}
 	}
 	stop()
 	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {

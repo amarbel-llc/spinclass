@@ -1057,9 +1057,33 @@ The path below the anchor is a directory-boundary prefix: it matches that path
 and everything under it. A whole segment *\** matches exactly one segment; a
 trailing */\*\** only spells out the default. No regexes, no *..*, no *~*.
 
+When more than one entry matches a path, the most specific entry decides,
+modelled on CSS selector specificity (operator ruling, 2026-11-01). An entry's
+specificity is the ordered pair _(literal segments, wildcard segments)_ of its
+path under the anchor: the entry with more literal segments wins; with equal
+literals, the one with more *\** segments wins; on a full tie *deny* wins over
+an allow. The anchor itself counts nothing, so *pwd:* and *spinclass:worktrees*
+tie at (0,0). *unmatched* applies only when no entry matches at all. Worked
+case (circus#399): a coordinator may read every session worktree of the repo,
+including each one's *.spinclass/spawn.log*, but nothing else under
+*.spinclass/*:
+
+```
+[folio]
+read = ["spinclass:worktrees", "spinclass:worktrees/*/.spinclass/spawn.log"]
+deny = ["spinclass:worktrees/*/.spinclass"]
+unmatched = "ask"
+```
+
+*spawn.log* matches the (2,1) allow and the (1,1) deny, so it is allowed;
+*state.json* matches only the (1,1) deny and the (0,0) allow, so it is denied;
+*README* matches the (0,0) allow alone.
+
 *read*, *write*
-	Arrays of entries allowed for that operation. Append across trusted layers;
-	an explicit *[]* in a nearer trusted layer clears the ones above it.
+	Arrays of entries allowed for that operation; an *exec* check has no allow
+	list, so only a deny or *unmatched* answers it. Append across trusted
+	layers; an explicit *[]* in a nearer trusted layer clears the ones above
+	it.
 
 *deny*
 	Array of entries refused for every operation. Appended from every layer;
