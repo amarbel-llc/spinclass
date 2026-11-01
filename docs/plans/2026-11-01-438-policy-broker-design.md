@@ -33,10 +33,14 @@ unchanged. Labels: **R** read in code, **I** inferred, **U** unverified.
    Moxy's compiled-in static floor (today's CWD and nix-store rule) applies
    in exactly one situation: no answer (no broker configured, unreachable,
    hello refused, deadline missed). `ask` is today's exit-1 prompt and is
-   `deny` under dontAsk. *(Proposed in the grill, not yet ruled.)*
+   `deny` under dontAsk. *(Ruled 2026-11-01: the three-verdict form, and
+   permissions always fail closed: no absence, error or timeout ever widens
+   what the floor allows.)*
 7. **The check carries the subject explicitly**; the connection only
    authorizes "this peer may ask for that subject". The hello carries the
-   session key both ways. *(Proposed, not yet ruled.)*
+   session key both ways. *(Ruled 2026-11-01. The operator expects the
+   subject to fall out of the markl provenance chain, FDR 0032 and troupe#39,
+   once that exists; until then it is the session key.)*
 8. **Clown migrates to dagnabit first; `pkgs/` is defined by export
    directives.** Landed 2026-11-01 (clown e1bcb59, 882c06c, clown#328): the
    peer check is `code.linenisgreat.com/clown/pkgs/peercheck`; spinclass's
@@ -82,6 +86,22 @@ behind a long tool call.
 - **Resources.** `{kind, uri}` plus an operation: `file:///...` with
   read/write/exec, `madder://blobs/<digest>` with read. The grammar for
   patterns is the 2026-10-27 draft's.
+- **As specified (moxy RFC 0002, 39f9341, 2026-11-01).** NDJSON `{v, type}`
+  with hello/check/verdict/error; the client hello lists the subjects it
+  serves (empty adopts the broker's `session_key`); check carries an id,
+  subject, op, resource and `deadline_ms` (default 100 ms, unmeasured).
+  Variable `CLOWN_POLICY_BROKER`, agreed with clown#333: a value starting
+  with `/` is a unix socket path (unconfined); otherwise `host:port`, the
+  in-unit relay's loopback address (confined). Clown exports no session-key
+  variable; `SPINCLASS_SESSION_ID`, which spinclass exports, is the optional
+  "wrong broker" check where present.
+- **The moxy PreToolUse hook is a second client (found by the moxy worker).**
+  Under Claude Code the hook decides the prompt in its own short-lived
+  process before the call reaches the moxy server, so a verdict inside the
+  server cannot remove a prompt. The hook dials, hellos, checks and closes
+  per call over the same wire; the server re-checks over its standing
+  connection; both fail closed on no answer. The standing connection is the
+  broker's; the per-call hook client is a Claude Code constraint.
 
 ## 4. What each repository does, in order
 
@@ -111,5 +131,3 @@ behind a long tool call.
   unmatched.
 - Per-check latency and the deadline value (U): a unix-socket round-trip
   benchmark as a debug recipe, then re-measure with the real evaluation.
-- Confirm rulings 6 and 7 (verdicts; subject-explicit) with the operator
-  before the moxy issue is written against them.
