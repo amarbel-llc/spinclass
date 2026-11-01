@@ -151,6 +151,20 @@ behind a long tool call.
   `unmatched` alone. The session index is re-read for the children anchor
   at most once a second. Blob resources and non-absolute file URIs get
   `unmatched`.
+- **As delivered by spinclass, step 4 (2026-11-01).** The hook shrink: when
+  a layer above the repo configures `[folio]`, `Handle` passes
+  `WithBrokerPolicy(true)` and the hook writes no decision for the read-only
+  moxy calls that spinclass#372 auto-allowed (own worktree, held children),
+  so moxy asks the broker. Everything else stays: the dontAsk ask-to-deny
+  conversion, the background-shell floor, the sc-verb and store tools, the
+  main-worktree guard and path rewrite, the sweatfile-edit guard. Without a
+  stanza the hook is unchanged. What lets circus drop the temporary
+  `debug-worktree-read` recipe (circus#399): a flic clown at or after
+  d1ea34a0 (exports `CLOWN_POLICY_BROKER`), this spinclass deployed, a moxy
+  at or after af63b40, and a global-sweatfile stanza such as the worked case
+  in `spinclass-sweatfile(5)` (`spinclass:worktrees` readable, `.spinclass/`
+  denied, `spawn.log` allowed back); then a coordinator's read of a session's
+  spawn log is a broker `allow` with no prompt and no recipe.
 - **The moxy PreToolUse hook is a second client (found by the moxy worker).**
   Under Claude Code the hook decides the prompt in its own short-lived
   process before the call reaches the moxy server, so a verdict inside the
@@ -172,9 +186,9 @@ behind a long tool call.
    2026-10-27 draft; `unmatched` required; landed 2026-11-01), the broker
    listener in serve on `pkgs/peercheck` (landed 2026-11-01), the evaluator
    over trusted layers and accepted handles (landed 2026-11-01)
-   (`spinclass:children` stays an authority anchor), the hook shrink. The
-   first slice that removes the prompts in #438 (reads of sibling worktrees)
-   is then a global-sweatfile stanza, no hook change.
+   (`spinclass:children` stays an authority anchor), the hook shrink (landed
+   2026-11-01). The first slice that removes the prompts in #438 (reads of
+   sibling worktrees) is then a global-sweatfile stanza, no hook change.
 4. Later: profile-level patterns and spawner narrowing (the child's set a
    subset of the parent's; the small grammar keeps it comparable).
 

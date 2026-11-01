@@ -160,6 +160,13 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
 - **`sc exec`, multi-target close, nix gc on close/clean**:
   `spinclass-internals(7)`, `spinclass-sweatfile(5)` (`disable-nix-gc`).
 - **Metrics** (`internal/0/statsd`, #363): `spinclass-local-default-ref(7)`.
+- **Policy broker** (#438, `docs/plans/2026-11-01-438-policy-broker-design.md`;
+  `internal/0/folio` grammar, `internal/0/policybroker` wire,
+  `internal/bravo/folioeval` evaluator, `cmd/spinclass/policybroker_serve.go`):
+  `serve` answers moxy's per-resource checks (allow/ask/deny, moxy RFC 0002)
+  on the socket clown names in `CLOWN_POLICY_BROKER`, from the trusted
+  `[folio]` stanza (`spinclass-sweatfile(5)`); no stanza means no socket and
+  today's behaviour. With a stanza the hook's #372 moxy read allow steps aside.
 - **Grit store tools** (FDR 0036, #379; `internal/alfa/store`, `internal/alfa/store/git`,
   `cmd/spinclass/grit*_cmd.go`): the nine `grit_*` MCP tools, their
   ownership-based verdicts, agentless remote lane and the `sc grit` escape

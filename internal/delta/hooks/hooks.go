@@ -56,6 +56,17 @@ type RunOption func(*runOptions)
 type runOptions struct {
 	rewriteEnabled     bool
 	denySweatfileEdits bool
+	brokerDecides      bool
+}
+
+// WithBrokerPolicy tells the hook that a trusted [folio] stanza is configured
+// for the session's repo (spinclass#438), so `spinclass serve` is the policy
+// broker and decides reads of held children and sibling worktrees from the
+// stanza. The hook then writes no decision for a read-only moxy call
+// (spinclass#372's auto-allow steps aside) and moxy asks the broker. Without
+// a stanza the #372 allow stays, exactly as before.
+func WithBrokerPolicy(configured bool) RunOption {
+	return func(o *runOptions) { o.brokerDecides = configured }
 }
 
 // WithWorktreePathRewrite toggles the #176 parent-checkout → worktree path
@@ -101,7 +112,7 @@ func Run(r io.Reader, w io.Writer, mainRepoRoot, sessionWorktree string, disallo
 		// Capture the output so the verdict can be logged at the one place
 		// that sees every outcome; the bytes reach w unchanged.
 		var buf bytes.Buffer
-		runErr := runPreToolUse(input, &buf, mainRepoRoot, sessionWorktree, disallowMainWorktree, o.rewriteEnabled, o.denySweatfileEdits)
+		runErr := runPreToolUse(input, &buf, mainRepoRoot, sessionWorktree, disallowMainWorktree, o.rewriteEnabled, o.denySweatfileEdits, o.brokerDecides)
 		if input.PermissionMode != permissionModeDontAsk {
 			// As when runPreToolUse wrote to w directly: whatever it wrote
 			// before an error still reaches w.
@@ -827,7 +838,7 @@ const (
 	restartHungChildToolName      = "mcp__plugin_spinclass_spinclass__restart-hung-child"
 )
 
-func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree, rewriteEnabled, denySweatfile bool) error {
+func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree, rewriteEnabled, denySweatfile, brokerDecides bool) error {
 	if input.AgentID != "" {
 		switch input.ToolName {
 		case mergeThisSessionToolName, checkThisSessionToolName,
@@ -977,8 +988,13 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 	}
 
 	// spinclass#372: where no other rule decided, auto-allow read-only moxy
-	// tools confined to the caller's own and held children's worktrees.
+	// tools confined to the caller's own and held children's worktrees. When a
+	// trusted [folio] stanza is configured the broker in serve decides those
+	// reads instead (spinclass#438), so the hook stays silent.
 	noDecision := func() error {
+		if brokerDecides {
+			return nil
+		}
 		if reason, ok := moxyReadAllowReason(input, resolvedWorktree); ok {
 			return writeAllow(w, reason)
 		}

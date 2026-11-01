@@ -54,6 +54,23 @@ func TestResolveWorktreePolicyWorktreeCannotWeaken(t *testing.T) {
 	}
 }
 
+// brokerPolicy (spinclass#438) is whether a layer ABOVE the repo configures
+// [folio]: a global stanza sets it, a repo-level stanza alone does not (its
+// allows are not trusted, and a repo could otherwise silence the hook's
+// #372 allow for its workers without providing a policy).
+func TestResolveWorktreePolicyBrokerPolicyNeedsATrustedStanza(t *testing.T) {
+	home, repo, _ := policyFixture(t, "[folio]\nread = [\"pwd:\"]\nunmatched = \"ask\"\n", "")
+	if resolveWorktreePolicy(home, repo).brokerPolicy {
+		t.Error("a repo-level [folio] alone must not hand the hook's decisions to the broker")
+	}
+	testfs.MustMkdirAll(t, filepath.Join(home, ".config", "spinclass"), 0o755)
+	testfs.MustWriteFile(t, filepath.Join(home, ".config", "spinclass", "sweatfile"),
+		[]byte("[folio]\nread = [\"spinclass:worktrees\"]\nunmatched = \"ask\"\n"), 0o644)
+	if !resolveWorktreePolicy(home, repo).brokerPolicy {
+		t.Error("a global [folio] stanza should hand the hook's read decisions to the broker")
+	}
+}
+
 // deny-sweatfile-edits is read from the trusted layers and survives a corrupt
 // worktree sweatfile.
 func TestDenySweatfileEditsSurvivesCorruptWorktreeSweatfile(t *testing.T) {

@@ -1041,10 +1041,17 @@ parent-directory layers (a repo- or worktree-level value is ignored with a
 warning); *deny* only narrows, so every layer's denies are honoured.
 
 When no layer above the repo sets the stanza at all, the session has no
-policy: serve does not listen and moxy keeps its own compiled-in rule, which is
-today's behaviour. A stanza with an entry that does not parse, or with no
-trusted *unmatched*, is refused as a whole (*sc validate* reports an error) and
-the same applies.
+policy: serve does not listen, moxy keeps its own compiled-in rule, and the
+PreToolUse hook keeps auto-allowing read-only moxy calls inside the caller's
+own and held children's worktrees (spinclass#372), which is today's behaviour.
+Once a layer above the repo configures the stanza, the broker decides those
+reads from it and the hook writes no decision for them, so the stanza, not the
+hook, must say what a coordinator may read (the *spinclass:children* and
+*spinclass:worktrees* anchors below). A stanza with an entry that does not
+parse, or with no trusted *unmatched*, is refused as a whole (*sc validate*
+reports an error); serve then does not listen, and the hook, which only asks
+whether the stanza is configured, still steps aside, so fix the stanza rather
+than leave it half-written.
 
 Each entry is _<anchor>:<path>_. Anchors: *pwd:* the session worktree;
 *home:* the HOME of the evaluating process; *env:NAME:* the value of the

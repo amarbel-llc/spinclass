@@ -160,6 +160,37 @@ func TestMoxyReadAutoAllow(t *testing.T) {
 	}
 }
 
+// With a trusted [folio] stanza configured (spinclass#438) the broker in serve
+// decides reads of held children and siblings, so the hook writes no decision
+// for a read-only moxy call that #372 would otherwise allow; moxy then asks
+// the broker. Without the stanza the #372 allow is unchanged.
+func TestMoxyReadStepsAsideForTheBroker(t *testing.T) {
+	w := newMoxyReadWorld(t)
+	payload, _ := json.Marshal(map[string]any{
+		"hook_event_name": "PreToolUse", "tool_name": folioRead,
+		"tool_input": map[string]any{"file_path": filepath.Join(w.child, "f.txt")}, "cwd": w.own,
+	})
+	for _, tc := range []struct {
+		name   string
+		broker bool
+		want   string
+	}{{"no stanza: #372 allows", false, "allow"}, {"stanza configured: the broker decides", true, ""}} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			if err := Run(bytes.NewReader(payload), &out, "", w.own, false, WithBrokerPolicy(tc.broker)); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			got := ""
+			if strings.TrimSpace(out.String()) != "" {
+				got, _ = parseHookDecision(t, out.Bytes())
+			}
+			if got != tc.want {
+				t.Errorf("decision = %q, want %q (output %q)", got, tc.want, out.String())
+			}
+		})
+	}
+}
+
 // The principal's accepted handle is the only authority: with no principal the
 // held child is not readable.
 func TestMoxyReadNoPrincipalHoldsNothing(t *testing.T) {

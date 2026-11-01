@@ -41,7 +41,10 @@ func Handle(stdin io.Reader, stdout io.Writer) error {
 	home, _ := os.UserHomeDir()
 	policy := resolveWorktreePolicy(home, mainRepoRoot)
 
-	return Run(stdin, stdout, mainRepoRoot, cwd, policy.disallowMainWorktree, WithWorktreePathRewrite(policy.rewriteEnabled), WithDenySweatfileEdits(policy.denySweatfileEdits))
+	return Run(stdin, stdout, mainRepoRoot, cwd, policy.disallowMainWorktree,
+		WithWorktreePathRewrite(policy.rewriteEnabled),
+		WithDenySweatfileEdits(policy.denySweatfileEdits),
+		WithBrokerPolicy(policy.brokerPolicy))
 }
 
 // worktreePolicy is the PreToolUse policy resolved for a worktree session.
@@ -49,6 +52,9 @@ type worktreePolicy struct {
 	disallowMainWorktree bool
 	rewriteEnabled       bool
 	denySweatfileEdits   bool
+	// brokerPolicy is whether a layer above the repo configures [folio]
+	// (spinclass#438): the broker in serve then decides moxy's path reads.
+	brokerPolicy bool
 }
 
 // resolveWorktreePolicy reads the policy from the main checkout's hierarchy;
@@ -64,6 +70,8 @@ func resolveWorktreePolicy(home, mainRepoRoot string) worktreePolicy {
 		if result, err := sweatfileio.LoadHierarchy(home, mainRepoRoot); err == nil {
 			policy.disallowMainWorktree = result.Merged.DisallowMainWorktreeEnabled()
 			policy.rewriteEnabled = !result.Merged.WorktreePathRewriteDisabled()
+			folio, _ := sweatfileio.TrustedFolio(result, home, mainRepoRoot)
+			policy.brokerPolicy = folio.Configured
 		}
 	}
 	return policy
