@@ -1,15 +1,20 @@
 ---
-status: proposed
+status: experimental
 date: 2026-10-19
 promotion-criteria: |
-  proposed -> experimental: the confinement check (`internal/confinement`) is
-  the production Confinement behind FDR 0034's profile-rights gate, every probe
-  has a fake-backed unit test, and `sc confinement-check` prints the per-fact
-  table on a real host. The check still fails today; that is expected.
+  proposed -> experimental (met 2026-11-01): the confinement check
+  (`internal/bravo/confinement`) is the production Confinement behind FDR
+  0034's profile-rights gate, every probe has a fake-backed unit test, and
+  `sc confinement-check` prints the per-fact table on a real host, judging a
+  child by the child's own principal (a5cad6f); on flic a spawned confined
+  worker passed every fact but F11.
   experimental -> testing: clown#244's agent unit lands, spinclass hands it the
   required view behind `[confinement].enabled`, and on a host with that
-  switch on every probe passes for a spawned worker; posh's attach
-  authorization lands and its probe is real rather than "unverifiable".
+  switch on every probe passes for a spawned worker, F11 read against the
+  host's policy (on a host with `default-spawn = false` the other agents are
+  unconfined by decision, and F11 reports that, not a defect); posh's attach
+  authorization lands and its probe is real rather than "unverifiable"; a
+  confined worker can land its own session (spinclass#432).
   testing -> accepted: the D17 security review (spinclass#339) has looked at
   the unit and the check and its findings are recorded here and in FDR 0032.
 ---
@@ -790,16 +795,18 @@ drops the parent's `TROUPE_XMPP_PASSWORD_FILE`/`TROUPE_XMPP_PASSWORD`
 (`session.StripInheritedSessionIDs`, spinclass#169): the same uid can read the
 parent's file, so a child could otherwise authenticate as its parent.
 
-The per-file bind is the interim. The direction, ruled by the operator on
-2026-11-01, is **piggy FDR 0006** (fibby as guarded key holder, piggy#297;
-the same record FDR 0032's tiers rest on): one virtual PIV card per principal,
-the XMPP key generated inside the holder and never exported, troupe logging in
-with that key through the session's agent socket, so no password file exists
-to bind or leak. The unit then gets its own card's socket, bound and relayed
-like the serve socket and peer-checked at the holder. troupe's side (a
-key-based SASL mechanism; today it speaks PLAIN and ANONYMOUS only) is
-troupe#67; the per-session socket plumbing is this record's and clown's. F14's "only the own account file" acceptance is then replaced by
-"no account file at all".
+The per-file bind is the interim, in two steps ruled by the operator on
+2026-11-01. **First**, clown moves the troupe connection owner (`troupe
+receive`) and the ringmaster monitor to the frontend (open question 8, FDR
+0032 D7, clown#332): then no troupe credential enters the unit at all. **Deferred** until after that: **piggy FDR 0006** (fibby as
+guarded key holder, piggy#297; the same record FDR 0032's tiers rest on): one
+virtual PIV card per principal, the XMPP key generated inside the holder and
+never exported, troupe logging in with that key through the session's agent
+socket, so no password file exists anywhere, confined or not. troupe's side
+of that (a key-based SASL mechanism; today it speaks PLAIN and ANONYMOUS
+only) is troupe#67; the per-session socket plumbing is this record's and
+clown's. F14's "only the own account file" acceptance is retired by the
+frontend move (clown#332), not by this step.
 
 ### A confined spawn requires a profile (R1–R4, 2dd4b4e, 2026-10-22)
 
@@ -1188,15 +1195,13 @@ entry carries no `{principal}`; otherwise it warns.
 ## Open questions
 
 1. *(Resolved 2026-10-19: serve runs in the frontend; see "Vantage".)*
-2. The git common dir: `git commit` from a worktree writes objects and refs in
-   the shared `.git`. Binding it rw lets the unit write other branches' refs and
-   `config` (`core.hooksPath`). Options: rw bind of `objects/` and this
-   worktree's `worktrees/<name>/` only, refs through a broker, or FDR 0032
-   D18's broker for all git writes.
-3. Only for the diagnostic `--inside` vantage: F2 from inside a private pid
-   namespace sees peer pid 0, so it needs piggy-agent to report its own cgroup
-   over a self-report extension. Not blocking; the authorizing check runs in
-   the frontend.
+2. *(Resolved 2026-11-01, operator.)* The git common dir: the spec does the
+   first option. `objects/` and this worktree's `worktrees/<name>/` are bound
+   rw; `config`, `hooks`, `refs` and `logs` ro (`spawn/confine.go`, F9
+   verifies). Refs through a broker stay with FDR 0032 D18 if ever needed.
+3. *(Closed 2026-11-01, operator: accepted limitation.)* Only for the
+   diagnostic `--inside` vantage: F2 from inside a private pid namespace sees
+   peer pid 0. The authorizing check runs in the frontend, where F2 is real.
 4. F8a's final form waits on posh's `POSH_CONFINE` refusal message.
 5. *(Decided 2026-10-19, coordinator.)* **Cross-session MCP.** Over loopback
    any unit could call another session's serve and spawn as it (serve takes the
@@ -1219,10 +1224,16 @@ entry carries no `{principal}`; otherwise it warns.
    `.claude-plugin/plugin.json` `mcpServers` with its `clown.json` servers, and
    spinclass's `clown.json` marks serve `"scope": "frontend"`, so a confined
    clown runs it in the frontend (older clowns ignore the key).
-8. The ringmaster monitor and `troupe receive` are claude's children today, so
+8. *(Decided 2026-11-01, operator: the frontend move comes first.)* The
+   ringmaster monitor and `troupe receive` are claude's children today, so
    agent-side; the unit binds `$XDG_STATE_HOME/ringmaster` and
-   `$XDG_RUNTIME_DIR/ringmaster` until clown moves them to the frontend (FDR 0032
-   D7 wants troupe's connection owner there).
+   `$XDG_RUNTIME_DIR/ringmaster`, and the child's own troupe password file,
+   until clown moves them to the frontend (FDR 0032 D7 wants troupe's
+   connection owner there; clown#332). Once the connection owner is in the frontend no
+   troupe credential enters the unit at all, which retires F14's "only the
+   own account file" acceptance ahead of, and independently of, piggy FDR
+   0006. The piggy-hosted secret (per-principal holder key, troupe#67) is
+   deferred until after that move.
 
 ## Limitations
 
