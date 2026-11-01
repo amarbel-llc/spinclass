@@ -206,5 +206,19 @@ behind a long tool call.
   caller named; worktree and state binds are same-path, the staged agent-home
   is not. Until a mapping exists the broker treats an agent-home path as
   unmatched.
-- Per-check latency and the deadline value (U): a unix-socket round-trip
-  benchmark as a debug recipe, then re-measure with the real evaluation.
+- Per-check latency and the deadline value: **measured 2026-11-01** (flic,
+  `just debug-bench-policy-broker`, 5000 iterations, the circus#399 stanza
+  plus 22 entries). Evaluator alone p50 1.7 µs, p99 11 µs; path resolution
+  p50 19 µs, p99 72 µs; unix-socket round trip against a stand-in client
+  p50 83 µs, p99 219 µs. One real check is about 120 µs p50 and 300 µs p99
+  against moxy's 100 ms default deadline, so the default stands. Not
+  covered: the once-a-second session-index re-read for the children anchor,
+  and moxy's per-call hook dial (moxy's own, RFC 0002 section 9).
+- "Fails closed on no answer" means no absence, error or timeout ever
+  becomes `allow` by itself; the fallback IS moxy's static floor, today's
+  rule, which may itself ask or deny. A `CLOWN_POLICY_BROKER` that names a
+  socket nobody listens on (no stanza, an old spinclass, serve restarting)
+  is therefore the floor for the server and for the hook alike (moxy
+  af63b40: `pkg/perms/permcheck.go` Resolve falls to `resolveTier` when no
+  resource was answered; `internal/hook/broker.go` waits at most 250 ms for
+  the hello). Bumping clown without a stanza changes no verdict.

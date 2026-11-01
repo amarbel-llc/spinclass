@@ -66,12 +66,12 @@ func start(t *testing.T, o Options) *Broker {
 }
 
 type client struct {
-	t *testing.T
+	t testing.TB
 	net.Conn
 	r *bufio.Reader
 }
 
-func dial(t *testing.T, b *Broker) *client {
+func dial(t testing.TB, b *Broker) *client {
 	t.Helper()
 	c, err := net.Dial("unix", b.Path())
 	if err != nil {

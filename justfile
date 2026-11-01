@@ -223,6 +223,12 @@ debug-serve-integration:
 debug-go-test dir run='' *flags='':
     nix run --inputs-from . igloo#godyn-test -- {{ dir }} -- {{ if run == '' { '' } else { quote('-test.run=' + run) } }} {{ flags }}
 
+# measure the #438 policy broker's per-check latency (evaluator alone, then a unix-socket round trip), reporting mean, p50 and p99 per check
+[group("debug")]
+debug-bench-policy-broker iterations='5000x':
+    just debug-go-test internal/bravo/folioeval '^$' -test.bench=. -test.benchtime={{ iterations }}
+    just debug-go-test internal/0/policybroker '^$' -test.bench=. -test.benchtime={{ iterations }}
+
 # regenerate internal/0/sshsig/testdata: real `ssh-keygen -Y sign` vectors from throwaway keys (private keys are never copied out)
 [group("debug")]
 debug-sshsig-fixtures:
