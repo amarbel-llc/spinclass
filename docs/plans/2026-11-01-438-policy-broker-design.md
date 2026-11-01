@@ -85,13 +85,13 @@ behind a long tool call.
 
 ## 4. What each repository does, in order
 
-1. **clown** (next): allocate the broker socket path per session, export it
-   to the agent, relay it into confined units and set it in the in-unit
-   moxy's `Env`. Issue to file in clown; cross-reference #438.
-2. **moxy** (next, moxy#487 and moxy#490 adjacent): the resource model;
-   `rg_search` behind the same door; the broker client with the hello, the
-   deadline, the static floor on no-answer, and `ask`/`deny` mapped onto the
-   existing `perms-request` exit codes. Issue to file in moxy.
+1. **clown** (next, clown#333): allocate the broker socket path per session,
+   export it to the agent, relay it into confined units and set it in the
+   in-unit moxy's `Env`.
+2. **moxy** (next, moxy#491; moxy#490 and moxy#485 adjacent): the resource
+   model; `rg_search` behind the same door; the broker client with the
+   hello, the deadline, the static floor on no-answer, and `ask`/`deny`
+   mapped onto the existing `perms-request` exit codes.
 3. **spinclass**: the `[folio]` stanza (grammar and trust from the
    2026-10-27 draft; `unmatched` required), the broker listener in serve on
    `pkgs/peercheck`, the evaluator over trusted layers and accepted handles
