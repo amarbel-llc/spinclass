@@ -790,6 +790,17 @@ drops the parent's `TROUPE_XMPP_PASSWORD_FILE`/`TROUPE_XMPP_PASSWORD`
 (`session.StripInheritedSessionIDs`, spinclass#169): the same uid can read the
 parent's file, so a child could otherwise authenticate as its parent.
 
+The per-file bind is the interim. The direction, ruled by the operator on
+2026-11-01, is **piggy FDR 0006** (fibby as guarded key holder, piggy#297;
+the same record FDR 0032's tiers rest on): one virtual PIV card per principal,
+the XMPP key generated inside the holder and never exported, troupe logging in
+with that key through the session's agent socket, so no password file exists
+to bind or leak. The unit then gets its own card's socket, bound and relayed
+like the serve socket and peer-checked at the holder. troupe's side (a
+key-based SASL mechanism; today it speaks PLAIN and ANONYMOUS only) is
+troupe#67; the per-session socket plumbing is this record's and clown's. F14's "only the own account file" acceptance is then replaced by
+"no account file at all".
+
 ### A confined spawn requires a profile (R1–R4, 2dd4b4e, 2026-10-22)
 
 These checks apply only to a spawn that resolves to confined; unconfined spawns
