@@ -1823,6 +1823,24 @@ debug-statsd-env port="8125":
     echo "--- UDP listeners on port {{ port }} ---"
     ss -ulnp 2>/dev/null | grep -E ":{{ port }}\b" || echo "(none found)"
 
+# NAMES only (never values) of the environment of this session's moxy and spinclass-serve processes, with the ones that look credential-bearing marked; the evidence for what env_get would disclose
+[group("explore")]
+explore-moxy-env-names:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    me="${CLOWN_SESSION_ID:-}"
+    [ -n "$me" ] || { echo "CLOWN_SESSION_ID unset: cannot pick this session's processes" >&2; exit 1; }
+    for d in /proc/[0-9]*; do
+      env=$(tr '\0' '\n' < "$d/environ" 2>/dev/null) || continue
+      printf '%s\n' "$env" | grep -qx "CLOWN_SESSION_ID=$me" || continue
+      exe=$(readlink "$d/exe" 2>/dev/null || echo '?')
+      case "$exe" in */moxy*|*/spinclass|*/clown-stdio-bridge) ;; *) continue ;; esac
+      echo "pid ${d#/proc/} exe=$exe"
+      printf '%s\n' "$env" | sed 's/=.*//' | sort | tr '\n' ' ' | fold -s -w 110 | sed 's/^/   /'
+      echo
+      printf '%s\n' "$env" | sed 's/=.*//' | grep -Ei 'token|secret|key|pass|cred|auth|sock' | sed 's/^/   SENSITIVE-LOOKING: /' | sort -u
+    done
+
 # for each live confined unit process: its HOME against <worktree>/.tmp/agent-home, the convention confinement.AgentHomeOf copies from clown (#443); exit 1 on any mismatch
 [group("explore")]
 explore-live-agent-home:
