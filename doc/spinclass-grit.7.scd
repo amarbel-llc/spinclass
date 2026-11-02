@@ -2,7 +2,7 @@ spinclass-grit(7) "spinclass" "Spinclass Reference"
 
 # NAME
 
-spinclass-grit - the grit store tools: session-owned git operations and their permission model
+spinclass-grit - grit store tools: session-owned git ops, permissions
 
 # DESCRIPTION
 
