@@ -189,7 +189,14 @@ behind a long tool call.
   unit (`CLOWN_UNIT`) the hook writes no decision and the unit's own
   permission rules decide, as for any other write there. Bash is not
   covered, as for the sweatfile guard; `include`d files are not known
-  without parsing and are not covered either.
+  without parsing and are not covered either. **Ruled 2026-11-02 (operator,
+  via the coordinator): the confined rule stays as it is, and is not to be
+  re-asked.** Reason: in a unit clown binds its own moxyfile read-only over
+  `$HOME/.config/moxy/moxyfile` (`InUnitMoxyfile`) and `allow-tools`
+  intersects down the hierarchy, so an in-unit worktree moxyfile can only
+  narrow the session's tools; a blessing (or its absence) for confined moxyfile
+  edits would protect almost nothing. The guard that matters is the
+  unconfined ask.
 - **The moxy PreToolUse hook is a second client (found by the moxy worker).**
   Under Claude Code the hook decides the prompt in its own short-lived
   process before the call reaches the moxy server, so a verdict inside the
