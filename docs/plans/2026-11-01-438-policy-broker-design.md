@@ -232,10 +232,24 @@ behind a long tool call.
   Still open under it: what `<store>` would name and how moxy would send it,
   and whether a blob should be provisioned explicitly (made a resource by
   name rather than by the tool that happened to stream it).
-- Confined views: the broker runs in the frontend and evaluates the path the
-  caller named; worktree and state binds are same-path, the staged agent-home
-  is not. Until a mapping exists the broker treats an agent-home path as
-  unmatched.
+- Confined views (spinclass#443, checked against clown 2026-11-02): the
+  broker runs in the frontend and evaluates the path the caller named. The
+  agent-home clown stages is `<worktree>/.tmp/agent-home` and becomes HOME in
+  the unit (`stageAgentHome`, `unit.go`), and the worktree is bound into the
+  unit at its own path, so a path an in-unit moxy names under its HOME is the
+  same path the broker sees and lies under the worktree: `pwd:` covers it and
+  no translation is needed (pinned by `TestEvaluateAgentHomeInsideTheWorktreeIsPwd`).
+  The earlier statement here, that an agent-home path is unmatched until a
+  mapping exists, was wrong for that case. What does differ is the anchors that
+  read the evaluating process: `home:` and `env:NAME:` expand against the
+  serve's HOME and environment (the operator's), not the unit's, so an entry
+  written `home:.claude` reaches the operator's `.claude` and not the unit's.
+  Whether `home:` should mean the unit's HOME for a confined session is open
+  and is the operator's: it changes which directory an existing `home:` entry
+  names, so it is not made silently. In-unit, clown also binds its own
+  read-only moxyfile over `$HOME/.config/moxy/moxyfile`, and `allow-tools`
+  intersects down the hierarchy, so an in-unit worktree moxyfile can only
+  narrow.
 - Per-check latency and the deadline value: **measured 2026-11-01** (flic,
   `just debug-bench-policy-broker`, 5000 iterations, the circus#399 stanza
   plus 22 entries). Evaluator alone p50 1.7 µs, p99 11 µs; path resolution

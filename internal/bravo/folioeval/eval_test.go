@@ -184,6 +184,42 @@ func TestEvaluateBlobIsTheMadderAnchorAlone(t *testing.T) {
 	}
 }
 
+// A confined unit's HOME is the agent-home clown stages at
+// <worktree>/.tmp/agent-home, and the worktree is bound into the unit at its
+// own path, so a path the in-unit moxy names under its HOME is the same path
+// the broker sees and lies under the worktree: pwd: covers it, no translation
+// is needed (clown cmd/clown/agentscope.go stageAgentHome, agentscope
+// unit.go). What differs is only the home: anchor, which expands to the
+// serve's HOME (the operator's), not the unit's. Pinned here so the behaviour
+// is a decision, not an accident (spinclass#443).
+func TestEvaluateAgentHomeInsideTheWorktreeIsPwd(t *testing.T) {
+	const agentClaude = "/w/repo/.worktrees/me/.tmp/agent-home/.claude/settings.json"
+	const agentCreds = "/w/repo/.worktrees/me/.tmp/agent-home/.claude/.credentials.json"
+
+	covered := compile(t, sweatfileio.FolioPolicy{
+		Read: []string{"pwd:"},
+		Deny: []string{"pwd:.tmp/agent-home/.claude/.credentials.json"},
+	})
+	for _, tc := range []struct{ path, verdict string }{
+		{agentClaude, "allow"},
+		{agentCreds, "deny"},
+	} {
+		if v, reason := covered.Evaluate(roots, "read", tc.path); v != tc.verdict {
+			t.Errorf("%s = %s (%s), want %s", tc.path, v, reason, tc.verdict)
+		}
+	}
+
+	// home: is the evaluating process's HOME, here the operator's: an entry
+	// written as home:.claude does not reach the unit's agent-home.
+	homeOnly := compile(t, sweatfileio.FolioPolicy{Read: []string{"home:.claude"}})
+	if v, reason := homeOnly.Evaluate(roots, "read", "/home/u/.claude/settings.json"); v != "allow" {
+		t.Errorf("operator home .claude = %s (%s), want allow", v, reason)
+	}
+	if v, reason := homeOnly.Evaluate(roots, "read", agentClaude); v != "ask" || reason != "unmatched" {
+		t.Errorf("agent-home .claude under home: only = %s (%s), want ask (unmatched)", v, reason)
+	}
+}
+
 func TestEvaluateUnmatchedIsThePolicys(t *testing.T) {
 	p := compile(t, sweatfileio.FolioPolicy{Read: []string{"pwd:"}, Unmatched: "deny"})
 	if v, reason := p.Evaluate(roots, "read", "/elsewhere"); v != "deny" || !strings.HasPrefix(reason, "unmatched") {
