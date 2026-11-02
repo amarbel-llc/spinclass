@@ -207,6 +207,27 @@ the terminal wake now carries its own result (the rendered verdict ladder as a
 `madder://blobs/<digest>` resource, *Piece 2* below), so the retired
 `result_ref: "spinclass session-job-status"` self-pointer is gone with it.
 
+### Amendment (2026-11-02): the blocking merge detaches into a job under clown
+
+A synchronous `merge-this-session` that outlasts a client's request timeout
+(a 900 s limit was seen on a worker under host load) used to lose its result:
+go-mcp ignores `notifications/cancelled` (`server/handler.go`), so the handler
+ran on, landed the merge and settled the attestation, but the sync path kept no
+job record and emitted no wake. Under clown the tool now runs the merge as the
+session's background job (`runDetachableMerge`, `job.Start`) and waits
+`mergeDetachAfter` (4 minutes, below any timeout seen). A merge that finishes
+inside the window returns the same final result and hook-output links as
+before; one that does not returns the job id as a non-error result and lands
+without the caller, with the terminal record and the `[clown-job]` wake as its
+outcome. Consequences: the sync call now refuses with the already-running
+message while another job runs for the session (checked before the attestation
+is claimed), a sync merge is visible to `session-job-cancel` and to
+`restart-preflight`'s running-job guard (both read the job record), and a job
+that cannot be started (clown's allocation failing) falls back to the old
+inline run. Without clown nothing changes: the call stays inline, with no wake
+to detach to. `merge-this-session-async` is unchanged and still the better
+choice for an unattended session that has other work or wants the id at once.
+
 (Historical, 2026-10-24: the chat tools were removed; see FDR 0017.)
 **Chat wake emits**: gated on **presence** like the job emits —
 `CLOWN_BIN` set means emit; presence-gating is the only gate (the

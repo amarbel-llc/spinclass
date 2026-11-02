@@ -91,12 +91,13 @@ list**: if it holds pending or in-progress items beyond the merge
 itself, go async — make progress on them while the pre-merge hook
 runs, and the `[clown-job]` wake will interrupt you with the result.
 If the board is empty and you are attended, the synchronous tool is
-fine. If you are unattended (a spawned or dontAsk session), go async
-and end your turn: the blocking tool's client request may give up on a
-loaded host (a 900 s limit has been seen) while the merge still lands,
-and no notice is sent; if a blocking call does time out, do NOT re-run
-it, check origin first. The wake re-invokes you when an async job
-finishes.
+fine: a merge that outlasts 4 minutes continues as a background job and
+the call returns its id (the wake reports the outcome; do NOT re-run it).
+If you are unattended (a spawned or dontAsk session), go async and end
+your turn: a blocking client request may give up on a loaded host (a
+900 s limit has been seen) while the merge still lands, and no notice is
+sent; if a blocking call does time out, do NOT re-run it, check origin
+first. The wake re-invokes you when an async job finishes.
 
 Never poll in a tight loop. If you went async and ran out of other
 work with the job near completion, ringmaster's `job_wait` (with the

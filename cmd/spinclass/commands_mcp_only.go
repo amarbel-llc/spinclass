@@ -564,6 +564,14 @@ func handleMergeThisSession(ctx context.Context, args json.RawMessage, _ command
 		}
 	}
 
+	// A call that may detach into a job refuses while another job runs for the
+	// session, BEFORE claiming the attestation (as the async tool does), so a
+	// refusal never burns it. The inline path has no such guard.
+	detach := mergeDetachEligible() && mergeDetachAfter > 0
+	if detach && job.IsRunning(cwd) {
+		return jobAlreadyRunningResult(), nil
+	}
+
 	// Claim only once committed to the merge, and only when an attestation is
 	// what admitted it; an exemption-admitted merge leaves the buffer alone.
 	// The claim is consumed only if the merge lands, else released (#219); the
@@ -576,11 +584,22 @@ func handleMergeThisSession(ctx context.Context, args json.RawMessage, _ command
 			return command.TextErrorResult(msg), nil
 		}
 	}
-	landed := false
-	defer func() { hold.settle(landed) }()
 	pm.Gate = gate
 	pm.AttestedSha = hold.ticket.HeadSha
 	applyAttestationBlob(&pm, hold.ticket, gs)
+
+	// Past the window the call hands the merge to a background job and returns
+	// its id, so a client that gives up cannot lose the result (see
+	// runDetachableMerge). It owns the hold once it starts the job; if it could
+	// not start one, the merge runs inline below as it always did.
+	if detach {
+		if res, handled := runDetachableMerge(ctx, cwd, gs.repoPath, gs.branch, defaultBranch, gitSync, pm, hold); handled {
+			return res, nil
+		}
+	}
+
+	landed := false
+	defer func() { hold.settle(landed) }()
 
 	ctx = clown.WithLocalScope(ctx, "merge")
 	var buf bytes.Buffer
@@ -608,6 +627,78 @@ func handleMergeThisSession(ctx context.Context, args json.RawMessage, _ command
 	}
 	text = appendNotPushedNote(text, gitSync, mergeErr)
 	return buildHookResult(text, blobLinks, mergeErr), nil
+}
+
+// mergeDetachAfter is how long the blocking merge-this-session waits for its
+// merge before returning the id of the background job it continues as. It must
+// stay well under the smallest client request timeout (a 900 s one was seen on
+// a worker under host load) and above the typical merge, so a healthy host
+// never notices; 0 turns detaching off. A var so tests can shorten it.
+var mergeDetachAfter = 240 * time.Second
+
+// mergeDetachEligible is whether the blocking merge may detach: only under
+// clown, because the completion wake is how a detached merge reports and
+// without it the result would be lost the same way. A var for tests.
+var mergeDetachEligible = clown.Enabled
+
+// runDetachableMerge runs the merge as the session's background job and waits
+// up to mergeDetachAfter for it. In time, it returns what the inline tool
+// returns, the final result with its hook-output links. Past the window it
+// returns the job id (non-error) and the merge lands without the caller: its
+// outcome is the job's terminal record and the [clown-job] wake, the same as
+// the async tool's, and the attestation is settled by the job. handled is false
+// only when no job could be started for a reason other than one already
+// running (the clown allocation failed), so the caller runs the merge inline;
+// in every handled case the hold is owned here.
+func runDetachableMerge(ctx context.Context, cwd, repoPath, branch, defaultBranch string, gitSync bool, pm merge.PostMergeOptions, hold attestationHold) (res *command.Result, handled bool) {
+	var final *command.Result // written by the job body before the job is done
+	started := false
+	defer func() {
+		if !started {
+			hold.settle(false)
+		}
+	}()
+	id := fmt.Sprintf("%s-%d", job.KindMerge, time.Now().Unix())
+	j, err := job.Start(cwd, job.KindMerge, gitSync, id, func(jctx context.Context, w io.Writer) (string, bool) {
+		landed := false
+		defer func() { hold.settle(landed) }()
+		var buf bytes.Buffer
+		rep := crap.NewReporter(&buf, crap.ReporterOptions{Title: "merge " + branch, Source: "spinclass"})
+		ts := rep.TestStream(0)
+		blobLinks, mergeErr := merge.ResolvedContext(jctx, executor.ShellExecutor{}, rep, ts, repoPath, cwd, branch, defaultBranch, gitSync, true, w, pm)
+		ts.Finish()
+		landed = mergeErr == nil
+		text := present.RenderPlain(bytes.NewReader(buf.Bytes()))
+		if mergeErr != nil && text == "" {
+			text = mergeErr.Error()
+		}
+		text = appendNotPushedNote(text, gitSync, mergeErr)
+		final = buildHookResult(text, blobLinks, mergeErr)
+		return text, mergeErr != nil
+	})
+	if err != nil {
+		if errors.Is(err, job.ErrAlreadyRunning) {
+			return jobAlreadyRunningResult(), true
+		}
+		servelog.Errorf("merge-this-session: could not start a background job, running inline: %v", err)
+		return nil, false
+	}
+	started = true
+	done := job.WaitDone(cwd)
+	timer := time.NewTimer(mergeDetachAfter)
+	defer timer.Stop()
+	select {
+	case <-done:
+		if final != nil {
+			return final, true
+		}
+		return command.TextErrorResult("the merge job ended without a result; read the job " + j.ID + " with ringmaster job_read"), true
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+	return command.TextResult(fmt.Sprintf(
+		"the merge is still running after %s and continues as background job %q: it lands (or fails) without you, and the completion wake ([clown-job] spinclass %s <state>: ...) reports this same id. Do NOT re-run merge-this-session. End your turn or do other work and let the wake arrive; inspect it with ringmaster's job_status/job_read, or block with job_wait on that id; session-job-cancel to stop it.",
+		mergeDetachAfter, j.ID, j.ID)), true
 }
 
 // handleCheckThisSession runs the pre-merge hook in the frontend and burns a
@@ -1375,7 +1466,7 @@ func buildNothingButTheTruthDescription(skills []sweatfile.PreMergeSkill) string
 // command so agents know what tests/checks the merge will run before
 // invoking it (and skip redundant pre-flight runs of the same suite).
 func buildMergeThisSessionDescription(hookPreview string) string {
-	base := "Merge the current session's worktree into the default branch and clean up. Pushes to origin by default (#126); pass local_only to keep the merge on the LOCAL default branch (the result then flags it NOT pushed). The pre-merge hook runs in a dedicated build worktree at the commit pinned when the merge starts, not in yours (FDR 0013), so edits you make in the session worktree meanwhile are left for the next merge, never half-merged. A non-error return means the merge (and push, unless local_only) succeeded; the result text is plain verdict lines (✓/✗ per stage) and is informational — it does not need to be read or parsed to confirm success. This blocks until the pre-merge hook and merge finish (including any wait on the per-repo merge queue — concurrent sessions' merges serialize; FDR 0022), then returns. Mind a loaded host: the client's MCP request may give up before this returns (a 900 s limit has been seen). The merge still completes and lands on the server, but no completion notice is sent and the result text is lost. An unattended session (a spawned worker, permission mode dontAsk) should use merge-this-session-async instead, which returns a job id at once and wakes you with the result. If this call does time out, do NOT re-run it: fetch and check origin for your commit first (grit_remote fetch, then grit_branch log of the default branch). For an attended session with nothing else to do, this blocking call is fine (no polling needed). Use merge-this-session-async as well when you have other independent work to make progress on while the hook runs. When madder is pinned at build time, the response also carries a real MCP `resource_link` content block (URI scheme `madder://blobs/<digest>`) pointing to the full pre-merge hook output. MCP-aware agents fetch via `resources/read`; inspect only on failure. When [[pre-merge-skills]] is live, the buffered attestation is consumed only if this merge lands; any failure leaves it buffered for the retry. " + autostashToolNote
+	base := "Merge the current session's worktree into the default branch and clean up. Pushes to origin by default (#126); pass local_only to keep the merge on the LOCAL default branch (the result then flags it NOT pushed). The pre-merge hook runs in a dedicated build worktree at the commit pinned when the merge starts, not in yours (FDR 0013), so edits you make in the session worktree meanwhile are left for the next merge, never half-merged. A non-error return means the merge (and push, unless local_only) succeeded; the result text is plain verdict lines (✓/✗ per stage) and is informational — it does not need to be read or parsed to confirm success. This blocks until the pre-merge hook and merge finish (including any wait on the per-repo merge queue — concurrent sessions' merges serialize; FDR 0022), then returns. Under clown it does not block forever: if the merge outlasts the detach window (4 minutes) this call returns at once, as a non-error result, with the id of the background job the merge continues as; it then lands without you and the usual completion wake ([clown-job] ... <job-id> <state>) reports the outcome, so do NOT re-run it, end your turn or do other work and let the wake arrive. A merge that finishes inside the window returns its result here as always. (Without clown there is no wake and the call stays blocking: the client's MCP request may give up on a loaded host, a 900 s limit has been seen, while the merge still completes and lands with no completion notice. After such a timeout do NOT re-run it: fetch and check origin for your commit first, grit_remote fetch then grit_branch log of the default branch.) An unattended session may still prefer merge-this-session-async, which returns the job id at once. For an attended session with nothing else to do, this call is fine (no polling needed); use merge-this-session-async when you have other independent work to make progress on while the hook runs. When madder is pinned at build time, the response also carries a real MCP `resource_link` content block (URI scheme `madder://blobs/<digest>`) pointing to the full pre-merge hook output. MCP-aware agents fetch via `resources/read`; inspect only on failure. When [[pre-merge-skills]] is live, the buffered attestation is consumed only if this merge lands; any failure leaves it buffered for the retry. " + autostashToolNote
 	if hookPreview == "" {
 		return base
 	}

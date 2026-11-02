@@ -128,7 +128,9 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
   still works.
 - **Async merge/check** (`internal/alfa/job`, FDR 0010, FDR 0025): registered only
   under clown; an async job IS a ringmaster job (#243). **Default to the
-  synchronous tools**; never hot-poll. A second async merge enqueues (#265,
+  synchronous tools**; never hot-poll. Under clown the blocking
+  `merge-this-session` detaches into a job after `mergeDetachAfter` (4 min,
+  FDR 0010), so a client timeout cannot lose its result. A second async merge enqueues (#265,
   `[hooks].disable-merge-stacking`). Liveness flock, ProtocolVersion gate,
   cancel observer, systemd scope: `spinclass-internals(7)`; hook cancellation
   (#188): `docs/plans/2026-10-04-188-sync-hook-cancellation.md`.
