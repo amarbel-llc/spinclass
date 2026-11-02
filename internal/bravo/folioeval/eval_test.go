@@ -147,6 +147,43 @@ func TestSpecificityOrder(t *testing.T) {
 	}
 }
 
+// Blob resources (ruled 2026-11-02, option B): only a madder: entry matches
+// a madder://blobs/<digest> URI, and it matches every one; no file pattern
+// does, and madder: matches no file. The tuple rule applies unchanged: every
+// madder: entry is (0,0), so one in deny beats one in an allow list. Without
+// a madder: entry in the op's list the policy's unmatched verdict applies.
+func TestEvaluateBlobIsTheMadderAnchorAlone(t *testing.T) {
+	const blob = "madder://blobs/blake2b256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	for name, tc := range map[string]struct {
+		policy           sweatfileio.FolioPolicy
+		op, uri, verdict string
+		reason           string
+	}{
+		"opted in":           {sweatfileio.FolioPolicy{Read: []string{"pwd:", "madder:"}}, "read", blob, "allow", "read madder:"},
+		"write not opted":    {sweatfileio.FolioPolicy{Read: []string{"madder:"}}, "write", blob, "ask", "unmatched"},
+		"write opted":        {sweatfileio.FolioPolicy{Write: []string{"madder:"}}, "write", blob, "allow", "write madder:"},
+		"exec has no allow":  {sweatfileio.FolioPolicy{Read: []string{"madder:"}}, "exec", blob, "ask", "unmatched"},
+		"file patterns only": {sweatfileio.FolioPolicy{Read: []string{"pwd:", "nix-store:", "spinclass:siblings"}}, "read", blob, "ask", "unmatched"},
+		"deny wins the tie":  {sweatfileio.FolioPolicy{Read: []string{"madder:"}, Deny: []string{"madder:"}}, "read", blob, "deny", "deny madder:"},
+		"denied unmatched":   {sweatfileio.FolioPolicy{Read: []string{"pwd:"}, Unmatched: "deny"}, "read", blob, "deny", "unmatched"},
+		"not a blob uri":     {sweatfileio.FolioPolicy{Read: []string{"madder:"}}, "read", "madder://blobs/", "ask", "unmatched: resource is not a madder://blobs/<digest> URI"},
+		"wrong scheme":       {sweatfileio.FolioPolicy{Read: []string{"madder:"}}, "read", "file:///w/repo/.worktrees/me/a.go", "ask", "unmatched: resource is not a madder://blobs/<digest> URI"},
+		"a path in the uri":  {sweatfileio.FolioPolicy{Read: []string{"madder:"}}, "read", "madder://blobs/x/y", "ask", "unmatched: resource is not a madder://blobs/<digest> URI"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := compile(t, tc.policy)
+			if v, reason := p.EvaluateBlob(tc.op, tc.uri); v != tc.verdict || reason != tc.reason {
+				t.Errorf("%s %s = %s (%s), want %s (%s)", tc.op, tc.uri, v, reason, tc.verdict, tc.reason)
+			}
+		})
+	}
+	// madder: in every list never reaches a file.
+	p := compile(t, sweatfileio.FolioPolicy{Read: []string{"madder:"}, Deny: []string{"madder:"}})
+	if v, reason := p.Evaluate(roots, "read", "/w/repo/.worktrees/me/a.go"); v != "ask" || reason != "unmatched" {
+		t.Errorf("a file against madder: entries = %s (%s), want ask (unmatched)", v, reason)
+	}
+}
+
 func TestEvaluateUnmatchedIsThePolicys(t *testing.T) {
 	p := compile(t, sweatfileio.FolioPolicy{Read: []string{"pwd:"}, Unmatched: "deny"})
 	if v, reason := p.Evaluate(roots, "read", "/elsewhere"); v != "deny" || !strings.HasPrefix(reason, "unmatched") {

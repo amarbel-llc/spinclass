@@ -9,7 +9,8 @@
 // specificity tuple: more literal segments wins; with equal literals, more
 // `*` segments wins. On a full tie deny wins over allow. An allow counts only
 // for its own operation. When no entry matches the policy's unmatched
-// verdict applies. A path that cannot be resolved matches nothing.
+// verdict applies. A path that cannot be resolved matches nothing. A blob
+// resource is matched by the madder: anchor alone (EvaluateBlob).
 package folioeval
 
 import (
@@ -117,6 +118,29 @@ func (p *Policy) Evaluate(r Roots, op, path string) (verdict, reason string) {
 	if !filepath.IsAbs(path) {
 		return p.Unmatched, "unmatched: path is not absolute"
 	}
+	return p.decide(op, func(pat folio.Pattern) bool { return matchPattern(r, pat, path) })
+}
+
+// blobPrefix is the shape of a blob resource's URI (moxy RFC 0002): the
+// digest follows, with no path after it.
+const blobPrefix = "madder://blobs/"
+
+// EvaluateBlob answers op on a blob resource (ruled 2026-11-02, option B):
+// the madder: anchor matches every madder://blobs/<digest> URI and nothing
+// else matches one, under the same tuple rule, so every madder: entry is
+// (0,0) and one in deny beats one in an allow list. A URI not of that shape
+// matches nothing.
+func (p *Policy) EvaluateBlob(op, uri string) (verdict, reason string) {
+	digest, ok := strings.CutPrefix(uri, blobPrefix)
+	if !ok || digest == "" || strings.Contains(digest, "/") {
+		return p.Unmatched, "unmatched: resource is not a " + blobPrefix + "<digest> URI"
+	}
+	return p.decide(op, func(pat folio.Pattern) bool { return pat.Anchor == folio.AnchorMadder })
+}
+
+// decide applies the rule over the entries matches admits: the most specific
+// allow for op against the most specific deny, deny on a full tie.
+func (p *Policy) decide(op string, matches func(folio.Pattern) bool) (verdict, reason string) {
 	var allows []folio.Pattern
 	switch op {
 	case policybroker.OpRead:
@@ -124,8 +148,8 @@ func (p *Policy) Evaluate(r Roots, op, path string) (verdict, reason string) {
 	case policybroker.OpWrite:
 		allows = p.Write
 	}
-	bestAllow, okAllow := best(r, allows, path)
-	bestDeny, okDeny := best(r, p.Deny, path)
+	bestAllow, okAllow := best(allows, matches)
+	bestDeny, okDeny := best(p.Deny, matches)
 	switch {
 	case okDeny && (!okAllow || !bestAllow.specificity.Beats(bestDeny.specificity)):
 		return policybroker.VerdictDeny, "deny " + bestDeny.pattern.String()
@@ -135,11 +159,11 @@ func (p *Policy) Evaluate(r Roots, op, path string) (verdict, reason string) {
 	return p.Unmatched, "unmatched"
 }
 
-func best(r Roots, patterns []folio.Pattern, path string) (match, bool) {
+func best(patterns []folio.Pattern, matches func(folio.Pattern) bool) (match, bool) {
 	var top match
 	found := false
 	for _, pat := range patterns {
-		if !matchPattern(r, pat, path) {
+		if !matches(pat) {
 			continue
 		}
 		spec := SpecificityOf(pat)
@@ -150,11 +174,14 @@ func best(r Roots, patterns []folio.Pattern, path string) (match, bool) {
 	return top, found
 }
 
-// matchPattern reports whether pat matches path under r.
+// matchPattern reports whether pat matches the file path under r. A madder:
+// entry is for blobs and never matches a file.
 func matchPattern(r Roots, pat folio.Pattern, path string) bool {
 	segs := pat.Segments
 	var roots []string
 	switch pat.Anchor {
+	case folio.AnchorMadder:
+		return false
 	case folio.AnchorPwd:
 		roots = []string{r.Pwd}
 	case folio.AnchorHome:

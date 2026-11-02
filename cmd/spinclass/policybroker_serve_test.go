@@ -79,9 +79,9 @@ func TestStartPolicyBrokerDeclinesWithoutAUsablePolicy(t *testing.T) {
 
 // With a configured policy serve listens on clown's path, answers the hello
 // with the exact session key, and answers checks from the policy: a read
-// inside the worktree is allowed by pwd:, anything else gets the policy's
-// unmatched verdict, and so does a blob (no grammar for it yet). Stop
-// removes the socket.
+// inside the worktree is allowed by pwd:, a blob is allowed by madder:
+// (ruled 2026-11-02), anything else, a malformed blob URI included, gets the
+// policy's unmatched verdict. Stop removes the socket.
 func TestStartPolicyBrokerListensAndAnswersThePolicy(t *testing.T) {
 	path := shortSocketPath(t)
 	worktree, err := filepath.EvalSymlinks(t.TempDir())
@@ -90,7 +90,7 @@ func TestStartPolicyBrokerListensAndAnswersThePolicy(t *testing.T) {
 	}
 	stubPolicyBrokerPlan(t, policyBrokerPlan{
 		Path: path, SessionKey: "spinclass/light-cedar",
-		Policy:   sweatfileio.FolioPolicy{Configured: true, Read: []string{"pwd:"}, Unmatched: "deny"},
+		Policy:   sweatfileio.FolioPolicy{Configured: true, Read: []string{"pwd:", "madder:"}, Unmatched: "deny"},
 		StateDir: t.TempDir(), Worktree: worktree,
 	})
 	stop := startPolicyBroker(context.Background(), "0.0.0-test")
@@ -134,7 +134,9 @@ func TestStartPolicyBrokerListensAndAnswersThePolicy(t *testing.T) {
 	}{
 		{1, policybroker.Resource{Kind: "file", URI: "file:///etc/hostname"}, "deny"},
 		{2, policybroker.Resource{Kind: "file", URI: "file://" + filepath.Join(worktree, "a.go")}, "allow"},
-		{3, policybroker.Resource{Kind: "blob", URI: "madder://blobs/blake2b256-x"}, "deny"},
+		{3, policybroker.Resource{Kind: "blob", URI: "madder://blobs/blake2b256-x"}, "allow"},
+		{4, policybroker.Resource{Kind: "blob", URI: "madder://blobs/"}, "deny"},
+		{5, policybroker.Resource{Kind: "blob", URI: "file:///etc/hostname"}, "deny"},
 	} {
 		send(policybroker.Message{V: 1, Type: "check", ID: tc.id, Subject: "spinclass/light-cedar", Op: "read", Resource: &tc.res, DeadlineMS: 100})
 		if v := read(); v.Type != "verdict" || v.ID != tc.id || v.Verdict != tc.verdict {

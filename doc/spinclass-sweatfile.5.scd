@@ -1059,32 +1059,46 @@ variable NAME (unset or empty matches nothing); *nix-store:* /nix/store;
 *spinclass:worktree* the caller's own worktree, *spinclass:repo* the main
 checkout, *spinclass:worktrees* the repo's .worktrees/, *spinclass:children* the
 worktrees of sessions the caller holds an accepted handle on, and
-*spinclass:siblings* the parent of the main checkout minus the main checkout.
-The path below the anchor is a directory-boundary prefix: it matches that path
-and everything under it. A whole segment *\** matches exactly one segment; a
-trailing */\*\** only spells out the default. No regexes, no *..*, no *~*.
+*spinclass:siblings* the parent of the main checkout minus the main checkout;
+*madder:* every madder blob (below). The path below a file anchor is a
+directory-boundary prefix: it matches that path and everything under it. A
+whole segment *\** matches exactly one segment; a trailing */\*\** only spells
+out the default. No regexes, no *..*, no *~*.
+
+A tool output moxy streamed to the blob store comes back to a tool as a
+_madder://blobs/<digest>_ resource rather than a file, and moxy asks for it
+as one. Only *madder:* matches such a resource, and it matches every one; no
+file anchor does, and *madder:* matches no file. It takes no path (a blob has
+none): a layer opts into blobs by putting *madder:* in *read* (or *write*), or
+out of them by putting it in *deny*, and a policy with no *madder:* entry for
+the operation answers *unmatched* for every blob (operator ruling,
+2026-11-02). A *madder:<store>* refinement is reserved and is refused until it
+is specified.
 
 When more than one entry matches a path, the most specific entry decides,
 modelled on CSS selector specificity (operator ruling, 2026-11-01). An entry's
 specificity is the ordered pair _(literal segments, wildcard segments)_ of its
 path under the anchor: the entry with more literal segments wins; with equal
 literals, the one with more *\** segments wins; on a full tie *deny* wins over
-an allow. The anchor itself counts nothing, so *pwd:* and *spinclass:worktrees*
-tie at (0,0). *unmatched* applies only when no entry matches at all. Worked
-case (circus#399): a coordinator may read every session worktree of the repo,
-including each one's *.spinclass/spawn.log*, but nothing else under
-*.spinclass/*:
+an allow. The anchor itself counts nothing, so *pwd:*, *spinclass:worktrees*
+and *madder:* tie at (0,0). *unmatched* applies only when no entry matches at
+all. Worked case (circus#399): a coordinator may read every session worktree
+of the repo, including each one's *.spinclass/spawn.log*, but nothing else
+under *.spinclass/*, and may read the blobs its tools stream:
 
 ```
 [folio]
-read = ["spinclass:worktrees", "spinclass:worktrees/*/.spinclass/spawn.log"]
+read = ["spinclass:worktrees", "spinclass:worktrees/*/.spinclass/spawn.log",
+        "madder:"]
 deny = ["spinclass:worktrees/*/.spinclass"]
 unmatched = "ask"
 ```
 
 *spawn.log* matches the (2,1) allow and the (1,1) deny, so it is allowed;
 *state.json* matches only the (1,1) deny and the (0,0) allow, so it is denied;
-*README* matches the (0,0) allow alone.
+*README* matches the (0,0) allow alone; a blob matches the (0,0) *madder:*
+allow alone. Had *madder:* been in *deny* as well, that (0,0) tie would go to
+the deny.
 
 *read*, *write*
 	Arrays of entries allowed for that operation; an *exec* check has no allow
@@ -1104,7 +1118,7 @@ unmatched = "ask"
 ```
 [folio]
 read  = ["pwd:", "nix-store:", "home:.claude", "env:CLAUDE_CODE_TMPDIR:",
-         "spinclass:siblings", "spinclass:children"]
+         "spinclass:siblings", "spinclass:children", "madder:"]
 write = ["pwd:", "home:.claude/plans", "home:.claude/projects"]
 deny  = ["spinclass:worktrees/*/.spinclass/state.json"]
 unmatched = "ask"

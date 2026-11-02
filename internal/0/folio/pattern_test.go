@@ -30,6 +30,8 @@ func TestParsePatternAcceptsTheGrammar(t *testing.T) {
 		{"spinclass:siblings", AnchorSpinclass, "siblings", nil, true},
 		{"spinclass:worktrees/*/.spinclass/state.json", AnchorSpinclass, "worktrees", []string{"*", ".spinclass", "state.json"}, true},
 		{"spinclass:worktrees/*/.spinclass/spawn.log", AnchorSpinclass, "worktrees", []string{"*", ".spinclass", "spawn.log"}, true},
+		// Ruled 2026-11-02 (option B): madder: is every blob; it has no path.
+		{"madder:", AnchorMadder, "", nil, true},
 	} {
 		t.Run(tc.in, func(t *testing.T) {
 			p, err := ParsePattern(tc.in)
@@ -67,6 +69,10 @@ func TestParsePatternRefusesWhatTheGrammarExcludes(t *testing.T) {
 		"pwd:a/**/**",          // ** only once
 		"pwd:*/**/x",           // ** only trailing
 		"spinclass:worktrees/", // trailing slash on the root
+		"madder:store",         // the <store> refinement is reserved, not yet accepted
+		"madder:blobs/x",       // a blob has no path
+		"madder:/",             // nor a slash
+		"madder:*",             // nor a wildcard
 	} {
 		t.Run(in, func(t *testing.T) {
 			if p, err := ParsePattern(in); err == nil {

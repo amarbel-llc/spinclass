@@ -163,8 +163,8 @@ var policyBrokerSessions = func() []session.State {
 const rootsTTL = time.Second
 
 // folioEvaluator answers the broker's checks from the compiled policy and
-// the session's roots. Blob resources have no pattern grammar yet and get
-// the policy's unmatched verdict (design record section 5).
+// the session's roots; a blob resource is answered by the madder: anchor
+// (design record section 5, ruled 2026-11-02).
 type folioEvaluator struct {
 	policy *folioeval.Policy
 	plan   policyBrokerPlan
@@ -189,15 +189,19 @@ func newFolioEvaluator(plan policyBrokerPlan) (policybroker.Evaluator, error) {
 }
 
 func (e *folioEvaluator) Evaluate(_ context.Context, c policybroker.Check) (string, string, error) {
-	if c.Resource.Kind != policybroker.KindFile {
-		return e.policy.Unmatched, "unmatched: no pattern grammar for " + c.Resource.Kind + " resources yet", nil
+	switch c.Resource.Kind {
+	case policybroker.KindFile:
+		path := strings.TrimPrefix(c.Resource.URI, "file://")
+		if !filepath.IsAbs(path) {
+			return e.policy.Unmatched, "unmatched: resource is not an absolute file path", nil
+		}
+		verdict, reason := e.policy.Evaluate(e.currentRoots(), c.Op, folioeval.Resolve(path))
+		return verdict, reason, nil
+	case policybroker.KindBlob:
+		verdict, reason := e.policy.EvaluateBlob(c.Op, c.Resource.URI)
+		return verdict, reason, nil
 	}
-	path := strings.TrimPrefix(c.Resource.URI, "file://")
-	if !filepath.IsAbs(path) {
-		return e.policy.Unmatched, "unmatched: resource is not an absolute file path", nil
-	}
-	verdict, reason := e.policy.Evaluate(e.currentRoots(), c.Op, folioeval.Resolve(path))
-	return verdict, reason, nil
+	return e.policy.Unmatched, "unmatched: no pattern grammar for " + c.Resource.Kind + " resources", nil
 }
 
 func (e *folioEvaluator) currentRoots() folioeval.Roots {

@@ -27,7 +27,14 @@ const (
 	// AnchorSpinclass is one of the spinclass roots named in Arg: worktree,
 	// repo, worktrees, children, siblings.
 	AnchorSpinclass Anchor = "spinclass"
+	// AnchorMadder is every madder blob (a madder://blobs/<digest> resource,
+	// the kind moxy names for a tool output it streamed to the blob store).
+	// It takes no path: a blob has none. A madder:<store> refinement is
+	// reserved and refused until it is ruled (operator ruling, 2026-11-02).
+	AnchorMadder Anchor = "madder"
 )
+
+const anchorNames = "pwd, home, env, nix-store, spinclass, madder"
 
 // SpinclassRoots are the roots AnchorSpinclass accepts. worktree is the
 // caller's own worktree; repo the main checkout; worktrees the repo's
@@ -51,14 +58,15 @@ func (p Pattern) String() string { return p.Raw }
 
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// ParsePattern parses one entry: <anchor>:<path>, with env:<NAME>:<path> and
-// spinclass:<root>[/<path>]. The path is segments joined by "/", none empty,
-// none "." or "..", none containing "~" or "*" except a whole-segment "*", with
-// an optional trailing "/**" that only spells out the default prefix match.
+// ParsePattern parses one entry: <anchor>:<path>, with env:<NAME>:<path>,
+// spinclass:<root>[/<path>] and madder: alone. The path is segments joined by
+// "/", none empty, none "." or "..", none containing "~" or "*" except a
+// whole-segment "*", with an optional trailing "/**" that only spells out the
+// default prefix match.
 func ParsePattern(raw string) (Pattern, error) {
 	anchor, rest, ok := strings.Cut(raw, ":")
 	if !ok || anchor == "" {
-		return Pattern{}, fmt.Errorf("%q: an entry is <anchor>:<path>, with anchor one of pwd, home, env, nix-store, spinclass", raw)
+		return Pattern{}, fmt.Errorf("%q: an entry is <anchor>:<path>, with anchor one of %s", raw, anchorNames)
 	}
 	p := Pattern{Anchor: Anchor(anchor), Raw: raw}
 	var path string
@@ -82,8 +90,13 @@ func ParsePattern(raw string) (Pattern, error) {
 		if strings.HasSuffix(rest, "/") && after == "" {
 			return Pattern{}, fmt.Errorf("%q: a trailing slash says nothing; write /** or leave it off", raw)
 		}
+	case AnchorMadder:
+		if rest != "" {
+			return Pattern{}, fmt.Errorf("%q: a madder entry is madder: alone, every blob; the madder:<store> refinement is reserved and not accepted yet", raw)
+		}
+		return p, nil
 	default:
-		return Pattern{}, fmt.Errorf("%q: unknown anchor %q; one of pwd, home, env, nix-store, spinclass", raw, anchor)
+		return Pattern{}, fmt.Errorf("%q: unknown anchor %q; one of %s", raw, anchor, anchorNames)
 	}
 	segs, err := parsePath(path)
 	if err != nil {

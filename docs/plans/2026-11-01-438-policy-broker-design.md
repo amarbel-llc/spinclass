@@ -149,8 +149,8 @@ behind a long tool call.
   specificity tuple, deny on a full tie, `unmatched` when nothing matches;
   an allow counts only for its own op, so `exec` is answered by denies and
   `unmatched` alone. The session index is re-read for the children anchor
-  at most once a second. Blob resources and non-absolute file URIs get
-  `unmatched`.
+  at most once a second. Non-absolute file URIs get `unmatched`; blobs are
+  step 5.
 - **As delivered by spinclass, step 4 (2026-11-01).** The hook shrink: when
   a layer above the repo configures `[folio]`, `Handle` passes
   `WithBrokerPolicy(true)` and the hook writes no decision for the read-only
@@ -165,6 +165,18 @@ behind a long tool call.
   in `spinclass-sweatfile(5)` (`spinclass:worktrees` readable, `.spinclass/`
   denied, `spawn.log` allowed back); then a coordinator's read of a session's
   spawn log is a broker `allow` with no prompt and no recipe.
+- **As delivered by spinclass, step 5 (2026-11-02).** Blob resources, as
+  ruled (option B): a `madder:` anchor in the grammar, taking no path, that
+  matches every `madder://blobs/<digest>` resource and no file; no file
+  anchor matches a blob. The same tuple rule applies (every `madder:` entry
+  is (0,0), so one in `deny` beats one in `read`); a policy with no
+  `madder:` entry for the op answers `unmatched` for blobs, so a layer opts
+  in per list. `madder:<store>` is reserved: the grammar refuses it (and
+  `sc validate` errors) until it is specified, and it would need moxy to
+  send the store a digest resolves in, which the `madder://blobs/<digest>`
+  URI does not carry; nothing new is needed from moxy for `madder:` alone.
+  `folioeval.EvaluateBlob` is the entry point; serve dispatches on the
+  resource kind.
 - **The moxy PreToolUse hook is a second client (found by the moxy worker).**
   Under Claude Code the hook decides the prompt in its own short-lived
   process before the call reaches the moxy server, so a verdict inside the
@@ -199,9 +211,14 @@ behind a long tool call.
   the entry under its anchor, compared in that order; deny wins a full tie;
   unmatched only when nothing matches. `spinclass-sweatfile(5)` has the
   worked circus#399 case; `internal/bravo/folioeval` implements it.
-- Blob resources (`madder://blobs/<digest>`) have no pattern grammar; the
-  evaluator answers `unmatched` for them. A grammar (or a rule that a blob
-  the session's own tools produced is readable) is a later step.
+- Blob resources (`madder://blobs/<digest>`): **ruled 2026-11-02, option B**
+  of the three drafted (A: always allow; B: an explicit `madder:` anchor
+  opted into per layer; C: resolve the digest to a store path and match it
+  as a file). A `madder:` anchor, every blob, with a `madder:<store>`
+  refinement allowed later; `unmatched` otherwise. Landed as step 5 above.
+  Still open under it: what `<store>` would name and how moxy would send it,
+  and whether a blob should be provisioned explicitly (made a resource by
+  name rather than by the tool that happened to stream it).
 - Confined views: the broker runs in the frontend and evaluates the path the
   caller named; worktree and state binds are same-path, the staged agent-home
   is not. Until a mapping exists the broker treats an agent-home path as

@@ -20,7 +20,7 @@ func realisticPolicy(tb testing.TB) *Policy {
 			"env:CLAUDE_CODE_TMPDIR:", "env:TMPDIR:", "env:XDG_RUNTIME_DIR:clown",
 			"spinclass:siblings", "spinclass:children", "spinclass:repo/docs", "spinclass:repo/doc",
 			"spinclass:worktrees", "spinclass:worktrees/*/.spinclass/spawn.log",
-			"spinclass:worktrees/*/docs", "spinclass:worktrees/*/.tmp/**",
+			"spinclass:worktrees/*/docs", "spinclass:worktrees/*/.tmp/**", "madder:",
 		},
 		Write: []string{
 			"pwd:", "home:.claude/plans", "home:.claude/projects", "env:CLAUDE_CODE_TMPDIR:", "env:TMPDIR:",

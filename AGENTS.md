@@ -165,8 +165,9 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
   `internal/bravo/folioeval` evaluator, `cmd/spinclass/policybroker_serve.go`):
   `serve` answers moxy's per-resource checks (allow/ask/deny, moxy RFC 0002)
   on the socket clown names in `CLOWN_POLICY_BROKER`, from the trusted
-  `[folio]` stanza (`spinclass-sweatfile(5)`); no stanza means no socket and
-  today's behaviour. With a stanza the hook's #372 moxy read allow steps aside.
+  `[folio]` stanza (`spinclass-sweatfile(5)`; blobs by the `madder:` anchor);
+  no stanza means no socket and today's behaviour. With a stanza the hook's
+  #372 moxy read allow steps aside.
 - **Grit store tools** (FDR 0036, #379; `internal/alfa/store`, `internal/alfa/store/git`,
   `cmd/spinclass/grit*_cmd.go`): the nine `grit_*` MCP tools, their
   ownership-based verdicts, agentless remote lane and the `sc grit` escape

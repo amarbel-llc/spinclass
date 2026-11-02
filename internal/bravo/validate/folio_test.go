@@ -16,7 +16,7 @@ func strp(s string) *string { return &s }
 // deny is fine: it only narrows.
 func TestCheckFolio(t *testing.T) {
 	good := sweatfile.Sweatfile{Folio: &sweatfile.Folio{
-		Read:      []string{"pwd:", "spinclass:children"},
+		Read:      []string{"pwd:", "spinclass:children", "madder:"},
 		Write:     []string{"home:.claude/plans"},
 		Deny:      []string{"spinclass:worktrees/*/.spinclass/state.json"},
 		Unmatched: strp("ask"),
@@ -42,23 +42,23 @@ func TestCheckFolio(t *testing.T) {
 	}
 
 	bad := sweatfile.Sweatfile{Folio: &sweatfile.Folio{
-		Read:      []string{"pwd:../up"},
+		Read:      []string{"pwd:../up", "madder:store"}, // the store refinement is reserved
 		Deny:      []string{"nowhere:x"},
 		Unmatched: strp("allow"),
 	}}
 	got = CheckFolio(bad, true)
-	if len(got) != 3 {
-		t.Fatalf("want one error per bad read, bad deny and bad unmatched, got %+v", got)
+	if len(got) != 4 {
+		t.Fatalf("want one error per bad read (two), bad deny and bad unmatched, got %+v", got)
 	}
 	for _, iss := range got {
 		if iss.Severity != SeverityError {
 			t.Errorf("a bad entry is an error, got %+v", iss)
 		}
 	}
-	if got[0].Field != "folio.read" || got[1].Field != "folio.deny" || got[2].Field != "folio.unmatched" {
-		t.Errorf("fields = %q %q %q", got[0].Field, got[1].Field, got[2].Field)
+	if got[0].Field != "folio.read" || got[1].Field != "folio.read" || got[2].Field != "folio.deny" || got[3].Field != "folio.unmatched" {
+		t.Errorf("fields = %q %q %q %q", got[0].Field, got[1].Field, got[2].Field, got[3].Field)
 	}
-	if got[0].Value != "pwd:../up" {
-		t.Errorf("the offending entry should be the issue's value, got %q", got[0].Value)
+	if got[0].Value != "pwd:../up" || got[1].Value != "madder:store" {
+		t.Errorf("the offending entry should be the issue's value, got %q %q", got[0].Value, got[1].Value)
 	}
 }
