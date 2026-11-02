@@ -1067,8 +1067,12 @@ whether the stanza is configured, still steps aside, so fix the stanza rather
 than leave it half-written.
 
 Each entry is _<anchor>:<path>_. Anchors: *pwd:* the session worktree;
-*home:* the HOME of the evaluating process; *env:NAME:* the value of the
-variable NAME (unset or empty matches nothing); *nix-store:* /nix/store;
+*home:* the HOME of the process that evaluates, which is *spinclass serve*, so
+the operator's HOME for every session, a confined one included (not the unit's
+HOME, which clown stages at _<worktree>/.tmp/agent-home_ and which *pwd:*
+already covers); *env:NAME:* the value of the variable NAME in that same
+process's environment, again not the unit's (unset or empty matches nothing);
+*nix-store:* /nix/store;
 *spinclass:worktree* the caller's own worktree, *spinclass:repo* the main
 checkout, *spinclass:worktrees* the repo's .worktrees/, *spinclass:children* the
 worktrees of sessions the caller holds an accepted handle on, and
