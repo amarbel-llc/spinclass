@@ -625,6 +625,33 @@ func TestBuildMergeThisSessionDescription_WithHook(t *testing.T) {
 	}
 }
 
+// The synchronous merge tool must not read as the safe default for an
+// unattended session: on a loaded host the client's MCP request can time out
+// (a 900 s limit was seen on a worker) while the server finishes and lands the
+// merge, and the sync path keeps no job record or wake, so the result is lost
+// and the worker may re-run a merge that landed. Its description says so, names
+// the async tool for unattended sessions, and says not to re-run after a
+// timeout. (clown job-wakeup records exist only for the async tools.)
+func TestMergeThisSessionDescriptionWarnsAboutAClientTimeout(t *testing.T) {
+	got := buildMergeThisSessionDescription("")
+	for _, want := range []string{
+		"may give up",
+		"still completes",
+		"no completion notice",
+		"merge-this-session-async",
+		"unattended",
+		"do NOT re-run",
+		"origin",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("description lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "the right choice when you have nothing else to do") {
+		t.Errorf("description still calls the blocking tool the right choice without a caveat:\n%s", got)
+	}
+}
+
 // #416: both merge tools say autostash is the default and that untracked files
 // are never stashed; the parameter is on unless explicitly false.
 func TestMergeToolsDescribeTheDefaultAutostash(t *testing.T) {

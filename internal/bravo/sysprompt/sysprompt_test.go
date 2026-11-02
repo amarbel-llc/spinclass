@@ -176,6 +176,30 @@ func TestRenderMainCheckoutVariant(t *testing.T) {
 	}
 }
 
+// The background-jobs guidance must not make the blocking merge tool sound
+// like the safe default: a client can give up on it (a 900 s limit was seen)
+// while the merge lands, and nothing tells the caller. Both variants say so,
+// and say that an unattended session uses the async tool and does not re-run.
+func TestRenderWarnsThatTheSyncMergeCanLoseItsResult(t *testing.T) {
+	for name, c := range map[string]Coordinates{
+		"worktree":      {Mode: ModeWorktree, SessionKey: "r/b", Branch: "b", Worktree: "/repos/r/.worktrees/b"},
+		"main checkout": {Mode: ModeMainCheckout, SessionKey: "k", Repo: "r", Branch: "trunk", Worktree: "/repos/r"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := Render(c)
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			mustContain(t, got, "may give up")
+			mustContain(t, got, "unattended")
+			mustContain(t, got, "do NOT re-run")
+			if strings.Contains(got, "call the synchronous tool (simplest)") {
+				t.Error("the guidance still calls the blocking tool simply the simplest choice")
+			}
+		})
+	}
+}
+
 // The repository block renders provider/owner/link/description when the
 // RepoInfo is populated, in both template variants.
 func TestRenderRepoBlock(t *testing.T) {
