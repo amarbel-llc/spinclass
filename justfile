@@ -1823,6 +1823,29 @@ debug-statsd-env port="8125":
     echo "--- UDP listeners on port {{ port }} ---"
     ss -ulnp 2>/dev/null | grep -E ":{{ port }}\b" || echo "(none found)"
 
+# for each live `spinclass serve`: its session, binary, CLOWN_POLICY_BROKER and whether the broker socket exists (the #438 deploy check)
+[group("explore")]
+explore-live-broker-env:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    for d in /proc/[0-9]*; do
+      pid=${d#/proc/}
+      cmd=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null) || continue
+      case "$cmd" in *spinclass*serve*|*"sc serve"*) ;; *) continue ;; esac
+      env=$(tr '\0' '\n' < "$d/environ" 2>/dev/null) || { echo "pid $pid: environ unreadable"; continue; }
+      session=$(printf '%s\n' "$env" | sed -n 's/^SPINCLASS_SESSION_ID=//p')
+      broker=$(printf '%s\n' "$env" | sed -n 's/^CLOWN_POLICY_BROKER=//p')
+      exe=$(readlink "$d/exe" 2>/dev/null || echo '?')
+      echo "pid $pid session=${session:-?} exe=$exe"
+      if [ -z "$broker" ]; then
+        echo "   CLOWN_POLICY_BROKER unset: clown named no broker socket (old clown, or no serve discovered at launch)"
+      elif [ -S "$broker" ]; then
+        echo "   CLOWN_POLICY_BROKER=$broker: socket EXISTS (serve listens: a trusted [folio] stanza is configured)"
+      else
+        echo "   CLOWN_POLICY_BROKER=$broker: no socket (no stanza, or serve predates the broker): moxy's hook dials and falls to the floor"
+      fi
+    done
+
 # [debug] Pipe a cold `prompts/get` (no `initialize`) into `spinclass serve` and
 # print the dynamic system-prompt fragment it returns, extracted from the
 # JSON-RPC result. Serves the internal/bravo/sysprompt dev-loop (spinclass#187): edit a
