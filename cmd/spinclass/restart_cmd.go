@@ -434,6 +434,34 @@ func noRestart(reason string) restartVerdict {
 	return restartVerdict{Verdict: "none", Reason: reason}
 }
 
+// resolveRestartTarget is the session a preflight (plain or --rearm) is about:
+// target, or with none the session of this process's principal. early is the
+// verdict to print when there is no such session; a non-nil err is an internal
+// failure only.
+func resolveRestartTarget(target string) (st *session.State, implied string, early *restartVerdict, err error) {
+	if target == "" {
+		implied = currentPrincipal()
+		key, kerr := confinement.SessionKeyOfPrincipal(implied)
+		if kerr != nil {
+			// The frontend runs this on every idle transition, mostly for sessions
+			// with nothing queued; say why it did nothing, but do not fail it.
+			servelog.Errorf("restart-preflight: %v", kerr)
+			v := noRestart("no spinclass session is tied to this principal")
+			return nil, "", &v, nil
+		}
+		target = key
+	}
+	st, err = session.FindByTarget(target)
+	if errors.Is(err, session.ErrTargetNotFound) {
+		v := noRestart("no spinclass session " + target)
+		return nil, "", &v, nil
+	}
+	if err != nil {
+		return nil, "", nil, err
+	}
+	return st, implied, nil, nil
+}
+
 // runRestartPreflight is what the frontend runs at a session's idle transition,
 // before restarting it. An empty target means the session of this process's
 // principal (CLOWN_SESSION_ID). It re-checks everything and CONSUMES the
@@ -442,24 +470,12 @@ func noRestart(reason string) restartVerdict {
 // the relaunched session does not restart again. A non-nil error is an internal
 // failure only; a refusal is a verdict.
 func runRestartPreflight(target string) (restartVerdict, error) {
-	implied := ""
-	if target == "" {
-		implied = currentPrincipal()
-		key, kerr := confinement.SessionKeyOfPrincipal(implied)
-		if kerr != nil {
-			// The frontend runs this on every idle transition, mostly for sessions
-			// with nothing queued; say why it did nothing, but do not fail it.
-			servelog.Errorf("restart-preflight: %v", kerr)
-			return noRestart("no spinclass session is tied to this principal"), nil
-		}
-		target = key
-	}
-	st, err := session.FindByTarget(target)
-	if errors.Is(err, session.ErrTargetNotFound) {
-		return noRestart("no spinclass session " + target), nil
-	}
+	st, implied, early, err := resolveRestartTarget(target)
 	if err != nil {
 		return restartVerdict{}, err
+	}
+	if early != nil {
+		return *early, nil
 	}
 	switch {
 	case st.RestartRequest == nil:
@@ -511,6 +527,8 @@ func runRestartPreflight(target string) (restartVerdict, error) {
 		restartingAt = time.Now().UTC()
 		cur.RestartRequest = nil
 		cur.RestartingAt = &restartingAt
+		first := restartingAt
+		cur.RestartingFirstAt, cur.RestartRearms = &first, 0
 		// The outcome wakes and the watchdog name who asked and why after the
 		// request itself is gone.
 		cur.RestartingBy = req.Requester
@@ -529,6 +547,138 @@ func runRestartPreflight(target string) (restartVerdict, error) {
 		Verdict: "restart",
 		Reason:  fmt.Sprintf("restart of %s requested by %s: %s", st.Key(), req.Requester, req.Reason),
 		When:    req.When,
+	}, nil
+}
+
+const (
+	// maxRestartRearms is how many times one verdict may be re-armed: the
+	// original attempt plus this many is the frontend's three.
+	maxRestartRearms = 2
+	// restartRearmWindow is how long after the first verdict a re-arm is still
+	// honoured: spinclass's own in-flight window for a restart.
+	restartRearmWindow = session.RestartInFlightWindow
+)
+
+var errRearmRaced = errors.New("the restart's state changed while it was being re-armed")
+
+// rearmRequesterAllowed re-checks the right the original request needed, which
+// the preflight does not (it is checked once, when the request is made): the
+// session itself may restart itself; anyone else needs the handle and the
+// restart right on it, exactly as restart-child-session required.
+func rearmRequesterAllowed(st *session.State, requester, own string) error {
+	if requester == "" {
+		return errors.New("the consumed restart records no requester, so its right cannot be re-checked")
+	}
+	if requester == own {
+		return nil
+	}
+	key, _ := confinement.SessionKeyOfPrincipal(requester)
+	if err := authorizeHandleUse(requester, key, *st); err != nil {
+		return err
+	}
+	return requireHandleRight("restart-preflight --rearm", "restart", requester, *st)
+}
+
+// runRestartRearm is `restart-preflight --rearm`: the frontend dropped a restart
+// the preflight had already consumed (a turn started during its countdown, so it
+// never stopped the provider) and asks to retry it. A plain preflight cannot,
+// the request is gone, so this restores the verdict from the in-flight stamp
+// after re-running what the preflight checks (the session open, the job and
+// hand-off obstacles) and the requester's restart right, and moves the stamp
+// forward, which also silences the old watchdog (it reports only a restart no
+// newer one superseded) and arms a new one. It is bounded by count and by the
+// age of the first verdict. An idle restart only: a forced one is never
+// retried. It queues nothing and wakes nobody on success (the holders were told
+// at the first verdict); a refusal wakes the holders. A non-nil error is an
+// internal failure only.
+func runRestartRearm(target string) (restartVerdict, error) {
+	st, implied, early, err := resolveRestartTarget(target)
+	if err != nil {
+		return restartVerdict{}, err
+	}
+	if early != nil {
+		return *early, nil
+	}
+	now := time.Now().UTC()
+	switch {
+	case st.Kind == session.KindImplicit:
+		return noRestart(st.Key() + " is an implicit session"), nil
+	case st.ResolveState() == session.StateAbandoned:
+		return noRestart(st.Key() + " is closed"), nil
+	case st.ClosingAt != nil:
+		return noRestart(st.Key() + " is being closed"), nil
+	case st.RestartRequest != nil:
+		return noRestart("a newer restart is queued for " + st.Key() + "; the plain preflight handles it"), nil
+	case st.RestartingAt == nil:
+		return noRestart("no restart is in flight for " + st.Key()), nil
+	case st.RestartedAt != nil && !st.RestartedAt.Before(*st.RestartingAt):
+		return noRestart(st.Key() + " already came back from its restart"), nil
+	case st.RestartRearms >= maxRestartRearms:
+		return noRestart(fmt.Sprintf("the restart of %s was already re-armed %d times, the limit", st.Key(), st.RestartRearms)), nil
+	}
+	first := *st.RestartingAt
+	if st.RestartingFirstAt != nil {
+		first = *st.RestartingFirstAt
+	}
+	if now.Sub(first) >= restartRearmWindow {
+		return noRestart(fmt.Sprintf("the re-arm window of %s since the first verdict passed for %s", restartRearmWindow, st.Key())), nil
+	}
+
+	req := session.RestartRequest{Requester: st.RestartingBy, Reason: st.RestartingReason, When: restartWhenIdle}
+	principal, principalErr := ownerPrincipal(st, implied, "restart",
+		fmt.Sprintf("Its holders (%s) are told; the operator can restart it from a terminal outside the session.", holdersOrNone(st.Holders)))
+	refuse := func(reason string) (restartVerdict, error) {
+		notifyRearmRefused(st, principal, req, reason)
+		return restartVerdict{Verdict: "refused", Reason: reason, When: restartWhenIdle}, nil
+	}
+	if principalErr != nil {
+		return refuse(principalErr.Error())
+	}
+	if err := rearmRequesterAllowed(st, req.Requester, principal); err != nil {
+		return refuse(err.Error())
+	}
+	_, obstacle, err := restartPlan(st, principal, false)
+	if err != nil {
+		return restartVerdict{}, err
+	}
+	if obstacle != "" {
+		return refuse(obstacle)
+	}
+
+	// Re-checked under the session lock: a close, a newer request, a return, or
+	// another re-arm that began since the read above wins.
+	var stamp time.Time
+	err = session.Update(st.RepoPath, st.Branch, func(cur *session.State) error {
+		switch {
+		case cur.ClosingAt != nil:
+			return errRestartLostToClose
+		case cur.RestartRequest != nil, cur.RestartingAt == nil, cur.RestartRearms >= maxRestartRearms,
+			cur.RestartedAt != nil && !cur.RestartedAt.Before(*cur.RestartingAt):
+			return errRearmRaced
+		}
+		stamp = time.Now().UTC()
+		if cur.RestartingFirstAt == nil {
+			f := *cur.RestartingAt
+			cur.RestartingFirstAt = &f
+		}
+		cur.RestartingAt = &stamp
+		cur.RestartRearms++
+		return nil
+	})
+	if errors.Is(err, errRestartLostToClose) {
+		return noRestart(st.Key() + " is being closed"), nil
+	}
+	if errors.Is(err, errRearmRaced) {
+		return noRestart(errRearmRaced.Error()), nil
+	}
+	if err != nil {
+		return restartVerdict{}, fmt.Errorf("re-arming the restart: %w", err)
+	}
+	armRestartWatchdog(st, stamp)
+	return restartVerdict{
+		Verdict: "restart",
+		Reason:  fmt.Sprintf("restart of %s re-armed (requested by %s: %s)", st.Key(), req.Requester, req.Reason),
+		When:    restartWhenIdle,
 	}, nil
 }
 
@@ -734,6 +884,16 @@ func restartWatchCommand() *command.Command {
 // of them) that a queued restart was refused. Best-effort: a wake failure must
 // not change the verdict.
 func notifyRestartRefused(st *session.State, principal string, req session.RestartRequest, reason string) {
+	notifyRestartRefusedWith(st, principal, req, fmt.Sprintf("restart of %s was refused and cleared: %s", st.Key(), reason))
+}
+
+// notifyRearmRefused is the same wake for a --rearm the checks refused: the
+// restart the holders were told was under way is not going to happen.
+func notifyRearmRefused(st *session.State, principal string, req session.RestartRequest, reason string) {
+	notifyRestartRefusedWith(st, principal, req, fmt.Sprintf("the retry of the restart of %s was refused on re-arm, so it will not happen; the requester must ask again: %s", st.Key(), reason))
+}
+
+func notifyRestartRefusedWith(st *session.State, principal string, req session.RestartRequest, msg string) {
 	targets := st.OtherHolders(principal)
 	if req.Requester != "" && req.Requester != principal && !slices.Contains(targets, req.Requester) {
 		targets = append(targets, req.Requester)
@@ -743,7 +903,6 @@ func notifyRestartRefused(st *session.State, principal string, req session.Resta
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), restartNotifyTimeout)
 	defer cancel()
-	msg := fmt.Sprintf("restart of %s was refused and cleared: %s", st.Key(), reason)
 	for _, t := range targets {
 		if err := notifyPrincipalFn(ctx, t, "", msg); err != nil {
 			servelog.Errorf("restart-preflight notify-failed key=%s target=%s err=%v", st.Key(), t, err)
@@ -861,20 +1020,28 @@ func restartPreflightCommand() *command.Command {
 		Params: []command.Param{
 			{Name: "target", Type: command.String, Description: "Session key or worktree name; defaults to the session of CLOWN_SESSION_ID"},
 			{Name: "peek", Type: command.Bool, Description: "Read-only liveness check before a relaunch: never consumes or writes; adds \"state\": \"closed\"|\"live\""},
+			{Name: "rearm", Type: command.Bool, Description: "Re-arm a restart the frontend dropped after this preflight consumed it (a turn started during its countdown): re-checks the session, the job and hand-off obstacles and the requester's restart right, moves the in-flight stamp forward, and answers restart or none/refused; bounded by count and by the age of the first verdict"},
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {
 			var p struct {
 				Target string `json:"target"`
 				Peek   bool   `json:"peek"`
+				Rearm  bool   `json:"rearm"`
 			}
 			if len(args) > 0 {
 				if err := json.Unmarshal(args, &p); err != nil {
 					return fmt.Errorf("invalid arguments: %w", err)
 				}
 			}
+			if p.Peek && p.Rearm {
+				return errors.New("restart-preflight takes --peek or --rearm, not both")
+			}
 			run := runRestartPreflight
-			if p.Peek {
+			switch {
+			case p.Peek:
 				run = runRestartPeek
+			case p.Rearm:
+				run = runRestartRearm
 			}
 			v, err := run(p.Target)
 			if err != nil {

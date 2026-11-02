@@ -124,7 +124,7 @@ func requireHandleRight(tool, right, callerPrincipal string, child session.State
 // restart.
 func operatorAlternative(tool string, child session.State) string {
 	switch tool {
-	case "restart-child-session", "cancel-restart":
+	case "restart-child-session", "cancel-restart", "restart-preflight --rearm":
 		return fmt.Sprintf("the operator can restart %s from a terminal outside the session", child.Key())
 	default:
 		return fmt.Sprintf("run `sc close %s`", child.Key())

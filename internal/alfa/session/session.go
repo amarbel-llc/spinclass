@@ -290,6 +290,16 @@ type State struct {
 	RestartingBy     string `json:"restarting_by,omitempty"`
 	RestartingReason string `json:"restarting_reason,omitempty"`
 
+	// RestartingFirstAt and RestartRearms bound `restart-preflight --rearm`: the
+	// frontend may ask to re-arm a restart it dropped (a turn started during its
+	// countdown), and spinclass limits that itself rather than trusting the
+	// frontend to. RestartingFirstAt is the first verdict's time (a re-arm moves
+	// RestartingAt forward but not this); RestartRearms counts the re-arms of
+	// that verdict. Both are set by the plain preflight, which also zeroes the
+	// count; a record from before they existed counts RestartingAt as the first.
+	RestartingFirstAt *time.Time `json:"restarting_first_at,omitempty"`
+	RestartRearms     int        `json:"restart_rearms,omitempty"`
+
 	// RestartedAt is stamped by the relaunched session's SessionStart hook when
 	// it finds RestartingAt set and RestartedAt absent or older: the return mark.
 	// Only an unconfined session can set it (a confined hook reaches only the

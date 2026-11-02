@@ -134,6 +134,29 @@ who is allowed to ask.
   the mark, a close that had signalled the agent but not yet tombstoned would
   still read as live, and a racing restart could relaunch into a worktree about
   to be removed.
+- `restart-preflight --rearm [--target T]` (added 2026-11-02, for clown's
+  turn-cancel retry). A restart the frontend dropped after the preflight
+  consumed it, because a turn started during its countdown and the provider was
+  never stopped, cannot be asked again: a plain preflight answers `none`, the
+  request being gone. `--rearm` restores it from the in-flight stamp
+  (`RestartingAt`, `RestartingBy`, `RestartingReason`) and prints the same one
+  JSON line, `restart` with `when: idle` on success. It re-runs everything the
+  plain preflight checks (the session open and not closing, the running-job and
+  hand-off obstacles through `restartPlan`) and the requester's `restart`
+  right, which the plain preflight never checks (it is checked once, when the
+  request is made): the session itself may re-arm itself, anyone else needs the
+  handle and the right, exactly as `restart-child-session` did. A failing
+  check is `refused`, with the holders told that the retry will not happen; a
+  stamp not in flight, a newer queued request, a session that already came
+  back, a closing one, or an exhausted bound is `none` with nothing written. On
+  success it moves `RestartingAt` forward, which supersedes the first stamp's
+  watchdog (`restart-watch` stays silent for a restart a newer stamp
+  superseded) and arms a new one, and wakes nobody (the holders were told at the
+  first verdict). Bounded on this side, whatever the frontend does: at most
+  `maxRestartRearms` (2) re-arms per verdict, and none later than
+  `restartRearmWindow` (2 minutes, the in-flight window) after the first
+  verdict (`RestartingFirstAt`, which a re-arm keeps). Idle restarts only; a
+  forced one is never retried. `--peek` and `--rearm` are mutually exclusive.
 - **Close and restart are ordered** (added 2026-10-25, with clown/pure-teak).
   The preflight answers `none` for a session marked closing, even with a
   request queued. A `restart` verdict consumes the request and stamps
