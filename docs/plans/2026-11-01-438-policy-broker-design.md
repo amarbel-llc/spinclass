@@ -177,6 +177,19 @@ behind a long tool call.
   URI does not carry; nothing new is needed from moxy for `madder:` alone.
   `folioeval.EvaluateBlob` is the entry point; serve dispatches on the
   resource kind.
+- **As delivered by spinclass, slice 0 of the 2026-10-27 direction
+  (2026-11-02).** Moxyfile edits in the hook (`internal/delta/hooks/
+  moxyfile_guard.go`), as the operator refined it that day: in an unconfined
+  session every Write, Edit, MultiEdit, folio write, cp, mv, link or rm that
+  would create, change, replace, move or remove a moxyfile on the hierarchy
+  moxy merges for the session (`~/.config/moxy/moxyfile`, `<dir>/moxyfile`
+  for every directory from HOME down to the worktree; `moxyfile(5)`) is an
+  `ask`, ahead of every allow list and of the broker (the hook runs first),
+  and the usual conversion makes it a deny under dontAsk. Inside a confined
+  unit (`CLOWN_UNIT`) the hook writes no decision and the unit's own
+  permission rules decide, as for any other write there. Bash is not
+  covered, as for the sweatfile guard; `include`d files are not known
+  without parsing and are not covered either.
 - **The moxy PreToolUse hook is a second client (found by the moxy worker).**
   Under Claude Code the hook decides the prompt in its own short-lived
   process before the call reaches the moxy server, so a verdict inside the

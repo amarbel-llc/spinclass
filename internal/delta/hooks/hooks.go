@@ -974,6 +974,15 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 			"Path %s is inside the .spinclass directory, which is managed by spinclass.", fp,
 		))
 	}
+	// spinclass#438 slice 0: the moxyfile decides which tools the session has,
+	// so a session must not widen it on its own. Unconfined, every write of
+	// one asks (a deny under dontAsk); inside a confined unit the unit's own
+	// permission rules decide, as for any other write there (moxyfile_guard.go).
+	if fp, ok := moxyfileWriteTarget(input, sessionWorktree); ok && !session.InUnit() {
+		return writeAsk(w, fmt.Sprintf(
+			"This modifies the moxyfile at %s, which decides which tools this session has; moxyfile edits always need a human (spinclass#438).", fp,
+		))
+	}
 
 	// #176: rewrite a parent-checkout path into the session worktree. Runs after
 	// the session-config guards (which win for .spinclass/sweatfile) and before

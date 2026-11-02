@@ -1008,6 +1008,19 @@ worktree-level value is ignored with a warning (*sc validate* warns).
 	stopgap: the intent is for all session IO to be served by a spinclass plugin
 	that enforces permissions at its own boundary, which replaces this key.
 
+Moxyfile edits always ask (spinclass#438). Not a key: in an unconfined session
+the PreToolUse hook asks on every tool call that would create, change,
+replace, move or remove a moxyfile on the hierarchy moxy merges for the
+session (_~/.config/moxy/moxyfile_, and _<dir>/moxyfile_ for every directory
+from HOME down to the worktree; see *moxyfile*(5)), through *Write*, *Edit*,
+*MultiEdit* and the folio *write*, *cp*, *mv*, *link* and *rm* tools, ahead
+of every allow list and of the *[folio]* broker; under dontAsk the ask is a
+deny. The moxyfile decides which tools the session has, so a session must not
+widen it on its own. Inside a confined unit the hook writes no decision and
+the unit's permission rules decide, as for any other write there. *Bash* is
+not covered, as for the sweatfile guard above, and files a moxyfile pulls in
+with *include* are not known to the hook.
+
 *allow-self-close*
 	Boolean. When true, a session may end itself with the *close-this-session*
 	tool (#389). Off by default, so a session cannot retire itself unless an
