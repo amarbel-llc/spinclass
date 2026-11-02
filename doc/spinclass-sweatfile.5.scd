@@ -1067,12 +1067,14 @@ whether the stanza is configured, still steps aside, so fix the stanza rather
 than leave it half-written.
 
 Each entry is _<anchor>:<path>_. Anchors: *pwd:* the session worktree;
-*home:* the HOME of the process that evaluates, which is *spinclass serve*, so
-the operator's HOME for every session, a confined one included (not the unit's
-HOME, which clown stages at _<worktree>/.tmp/agent-home_ and which *pwd:*
-already covers); *env:NAME:* the value of the variable NAME in that same
-process's environment, again not the unit's (unset or empty matches nothing);
-*nix-store:* /nix/store;
+*home:* the session's HOME: the operator's HOME (the *spinclass serve*
+process's) for an unconfined session, and for a session launched confined the
+unit's own HOME, the agent-home clown stages at _<worktree>/.tmp/agent-home_,
+which is under the worktree and so already inside *pwd:* (spinclass#443); the
+same entry therefore names a different directory in the two kinds of session.
+*env:NAME:* the value of NAME in the _serve's_ environment for every session,
+a confined one included, NOT the unit's own value (unset or empty matches
+nothing); *nix-store:* /nix/store;
 *spinclass:worktree* the caller's own worktree, *spinclass:repo* the main
 checkout, *spinclass:worktrees* the repo's .worktrees/, *spinclass:children* the
 worktrees of sessions the caller holds an accepted handle on, and
@@ -1091,6 +1093,16 @@ out of them by putting it in *deny*, and a policy with no *madder:* entry for
 the operation answers *unmatched* for every blob (operator ruling,
 2026-11-02). A *madder:<store>* refinement is reserved and is refused until it
 is specified.
+
+With *[confinement]* enabled, *sc validate* warns about the two shapes whose
+meaning differs for a confined session (spinclass#443). An *env:NAME:* entry in
+any list: it names the serve's variable, not the unit's, and in *deny* the
+warning says plainly that the unit's own value is not covered. And an allow
+list (*read* or *write*) with *home:* entries but no entry that covers the
+agent-home (*pwd:*, *pwd:.tmp*, *pwd:.tmp/agent-home* or *spinclass:worktree*):
+for a confined session those entries allow the agent-home subtree, which no
+*pwd:* entry did. A stanza whose lists that carry *home:* also allow *pwd:*
+is unaffected.
 
 When more than one entry matches a path, the most specific entry decides,
 modelled on CSS selector specificity (operator ruling, 2026-11-01). An entry's

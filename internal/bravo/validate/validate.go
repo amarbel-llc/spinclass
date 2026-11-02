@@ -797,6 +797,93 @@ func CheckFolio(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 	return issues
 }
 
+// agentHomeSegments is the agent-home's path below the worktree, as pattern
+// segments (confinement.AgentHomeOf).
+var agentHomeSegments = []string{".tmp", "agent-home"}
+
+// coversAgentHome reports whether a pwd: or spinclass:worktree entry reaches
+// the whole agent-home: its segments are a prefix of .tmp/agent-home, with a
+// whole-segment * matching either.
+func coversAgentHome(p folio.Pattern) bool {
+	if p.Anchor != folio.AnchorPwd && !(p.Anchor == folio.AnchorSpinclass && p.Arg == "worktree") {
+		return false
+	}
+	if len(p.Segments) > len(agentHomeSegments) {
+		return false
+	}
+	for i, s := range p.Segments {
+		if s != "*" && s != agentHomeSegments[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// CheckFolioConfinement warns about the two [folio] shapes whose meaning
+// changes for a confined session (spinclass#443, operator ruling 2026-11-02),
+// when confinement is enabled and a trusted stanza is configured.
+//
+// env:NAME: reads the serve's environment, not the unit's, in any list; in
+// deny that is sharper, since the guard misses the unit's own value. home: is
+// the unit's agent-home for a confined session, so an allow list (read or
+// write) that has home: entries and no entry covering the agent-home (pwd:,
+// pwd:.tmp, ... or spinclass:worktree) newly allows that subtree for confined
+// sessions, which no pwd: entry did; each such list warns once.
+func CheckFolioConfinement(p sweatfileio.FolioPolicy, confinementEnabled bool) []Issue {
+	if !p.Configured || !confinementEnabled {
+		return nil
+	}
+	var issues []Issue
+	for _, list := range []struct {
+		name    string
+		entries []string
+		allow   bool
+	}{
+		{"read", p.Read, true},
+		{"write", p.Write, true},
+		{"deny", p.Deny, false},
+	} {
+		var firstHome string
+		covered := false
+		for _, entry := range list.entries {
+			pat, err := folio.ParsePattern(entry)
+			if err != nil {
+				continue // CheckFolio reports it
+			}
+			switch {
+			case pat.Anchor == folio.AnchorEnv && list.allow:
+				issues = append(issues, Issue{
+					Message:  fmt.Sprintf("[folio] %s entry %s names the SERVE's environment variable %s, not the confined unit's: a confined session's own value of it is not what the entry reaches", list.name, entry, pat.Arg),
+					Severity: SeverityWarning,
+					Field:    "folio." + list.name,
+					Value:    entry,
+				})
+			case pat.Anchor == folio.AnchorEnv:
+				issues = append(issues, Issue{
+					Message:  fmt.Sprintf("[folio] deny entry %s guards the path the SERVE's environment variable %s names; the confined unit's own value of it is NOT covered by this deny", entry, pat.Arg),
+					Severity: SeverityWarning,
+					Field:    "folio.deny",
+					Value:    entry,
+				})
+			case pat.Anchor == folio.AnchorHome && list.allow && firstHome == "":
+				firstHome = entry
+			}
+			if list.allow && coversAgentHome(pat) {
+				covered = true
+			}
+		}
+		if firstHome != "" && !covered {
+			issues = append(issues, Issue{
+				Message:  fmt.Sprintf("[folio] %s has home: entries (first: %s) but no pwd: entry covering the agent-home: for a confined session home: is the unit's own HOME (<worktree>/.tmp/agent-home), so these entries allow that subtree for confined sessions, which no pwd: entry does; add pwd: if that is intended, or drop the home: entries", list.name, firstHome),
+				Severity: SeverityWarning,
+				Field:    "folio." + list.name,
+				Value:    firstHome,
+			})
+		}
+	}
+	return issues
+}
+
 // CheckHealth validates the [health] table: busy-bound must be a positive Go
 // duration, and is honoured only from layers above the repo.
 func CheckHealth(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
@@ -1339,6 +1426,14 @@ func Run(w io.Writer, home, repoDir string) int {
 			})
 		} else {
 			sub.Ok("folio unmatched set")
+		}
+		confinementPolicy, _, _ := sweatfileio.TrustedConfinement(result, home, mainRoot)
+		if issues := CheckFolioConfinement(policy, confinementPolicy.Enabled); len(issues) > 0 {
+			for _, iss := range issues {
+				sub.Ok(fmt.Sprintf("folio confinement %s # warning: %s", iss.Field, iss.Message))
+			}
+		} else if confinementPolicy.Enabled {
+			sub.Ok("folio confinement")
 		}
 	}
 	sub.Plan()

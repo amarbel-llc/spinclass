@@ -251,9 +251,19 @@ behind a long tool call.
   read the evaluating process: `home:` and `env:NAME:` expand against the
   serve's HOME and environment (the operator's), not the unit's, so an entry
   written `home:.claude` reaches the operator's `.claude` and not the unit's.
-  Whether `home:` should mean the unit's HOME for a confined session is open
-  and is the operator's: it changes which directory an existing `home:` entry
-  names, so it is not made silently. In-unit, clown also binds its own
+  **Ruled 2026-11-02 (operator): `home:` means the unit's HOME
+  (`<worktree>/.tmp/agent-home`, `confinement.AgentHomeOf`) for a session
+  launched confined, and stays the serve's HOME for an unconfined one;
+  `env:NAME:` stays the serve's for both, documented. Landed:** the broker's
+  roots take the unit's HOME when `confinement.LaunchedConfined` (a unit
+  record or spec exists for the worktree), decided on every roots refresh;
+  `sc validate` warns, with confinement enabled, on `env:` in any list (sharper
+  in `deny`) and on an allow list that has `home:` entries and no entry
+  covering the agent-home, the one shape whose reach grows. The agent-home
+  path is spinclass's copy of clown's staging convention; `explore-live-agent-home`
+  compares it with a running unit's HOME. A follow-up for clown is to record
+  the path in the unit record (or add a capability) so the copy can go.
+  In-unit, clown also binds its own
   read-only moxyfile over `$HOME/.config/moxy/moxyfile`, and `allow-tools`
   intersects down the hierarchy, so an in-unit worktree moxyfile can only
   narrow.

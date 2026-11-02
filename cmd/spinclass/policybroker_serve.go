@@ -204,13 +204,25 @@ func (e *folioEvaluator) Evaluate(_ context.Context, c policybroker.Check) (stri
 	return e.policy.Unmatched, "unmatched: no pattern grammar for " + c.Resource.Kind + " resources", nil
 }
 
+// homeForSubject is what the home: anchor expands to: the unit's HOME for a
+// session launched confined (the agent-home under its worktree, the same path
+// in the frontend and in the unit), the serve's own HOME otherwise
+// (spinclass#443, operator ruling 2026-11-02). env: is not mapped: the unit's
+// environment is clown's to compute, so env:NAME: stays the serve's.
+func (e *folioEvaluator) homeForSubject() string {
+	if confinement.LaunchedConfined(e.plan.StateDir, e.plan.Worktree) {
+		return confinement.AgentHomeOf(e.plan.Worktree)
+	}
+	return e.home
+}
+
 func (e *folioEvaluator) currentRoots() folioeval.Roots {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if !e.at.IsZero() && time.Since(e.at) < rootsTTL {
 		return e.roots
 	}
-	e.roots = folioeval.RootsFor(e.plan.Worktree, e.plan.RepoRoot, e.home, os.Getenv("CLOWN_SESSION_ID"), os.Getenv, policyBrokerSessions())
+	e.roots = folioeval.RootsFor(e.plan.Worktree, e.plan.RepoRoot, e.homeForSubject(), os.Getenv("CLOWN_SESSION_ID"), os.Getenv, policyBrokerSessions())
 	e.at = time.Now()
 	return e.roots
 }

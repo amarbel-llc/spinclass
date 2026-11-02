@@ -1823,6 +1823,32 @@ debug-statsd-env port="8125":
     echo "--- UDP listeners on port {{ port }} ---"
     ss -ulnp 2>/dev/null | grep -E ":{{ port }}\b" || echo "(none found)"
 
+# for each live confined unit process: its HOME against <worktree>/.tmp/agent-home, the convention confinement.AgentHomeOf copies from clown (#443); exit 1 on any mismatch
+[group("explore")]
+explore-live-agent-home:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    seen=0; bad=0
+    for d in /proc/[0-9]*; do
+      pid=${d#/proc/}
+      env=$(tr '\0' '\n' < "$d/environ" 2>/dev/null) || continue
+      unit=$(printf '%s\n' "$env" | sed -n 's/^CLOWN_UNIT=//p')
+      [ -n "$unit" ] || continue
+      wt=$(printf '%s\n' "$env" | sed -n 's/^SPINCLASS_WORKTREE=//p')
+      home=$(printf '%s\n' "$env" | sed -n 's/^HOME=//p')
+      [ -n "$wt" ] || continue
+      want="${wt%/}/.tmp/agent-home"
+      seen=$((seen+1))
+      if [ "$home" = "$want" ]; then
+        echo "ok   pid $pid unit=$unit HOME=$home"
+      else
+        echo "MISMATCH pid $pid unit=$unit HOME=$home want=$want"
+        bad=$((bad+1))
+      fi
+    done
+    [ "$seen" -gt 0 ] || echo "(no confined unit process is running; nothing to compare)"
+    [ "$bad" -eq 0 ]
+
 # for each live `spinclass serve`: its session, binary, CLOWN_POLICY_BROKER and whether the broker socket exists (the #438 deploy check)
 [group("explore")]
 explore-live-broker-env:

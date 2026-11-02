@@ -189,9 +189,11 @@ func TestEvaluateBlobIsTheMadderAnchorAlone(t *testing.T) {
 // own path, so a path the in-unit moxy names under its HOME is the same path
 // the broker sees and lies under the worktree: pwd: covers it, no translation
 // is needed (clown cmd/clown/agentscope.go stageAgentHome, agentscope
-// unit.go). What differs is only the home: anchor, which expands to the
-// serve's HOME (the operator's), not the unit's. Pinned here so the behaviour
-// is a decision, not an accident (spinclass#443).
+// unit.go). The evaluator expands home: to whatever Roots.Home says; here that
+// is the operator's HOME. Which HOME a session gets is the broker's choice
+// (cmd/spinclass homeForSubject: the unit's agent-home for a confined session,
+// ruled 2026-11-02), tested there. Pinned here so the path rule is a
+// decision, not an accident (spinclass#443).
 func TestEvaluateAgentHomeInsideTheWorktreeIsPwd(t *testing.T) {
 	const agentClaude = "/w/repo/.worktrees/me/.tmp/agent-home/.claude/settings.json"
 	const agentCreds = "/w/repo/.worktrees/me/.tmp/agent-home/.claude/.credentials.json"
