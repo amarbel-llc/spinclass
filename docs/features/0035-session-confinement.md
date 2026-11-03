@@ -929,16 +929,26 @@ record or spec exists for it (`confinement.LaunchedConfined`) and then:
   configured value can name another spec; clown re-applies the recorded unit
   (it refuses a spec path that differs from the one it recorded, or a changed
   boundary; R, clown code, not run live);
-- refuses the shell fallback (no `[session-entry].resume`) and a resume entry
-  carrying `-c`, `--continue`, `--fork-session` or `--from-pr` (clown refuses
-  those for a confined session);
+- with no `[session-entry].resume` pinned, runs the clown default
+  `["clown", "--", "--resume", "{principal}"]` instead of the shell (spinclass#453,
+  operator ruling 2026-11-03): a harness resume, so the recorded profile and
+  principal are spliced in and a session with no recorded principal is
+  refused. A never-confined session keeps the shell fallback. The default is
+  a spinclass constant, not a sweatfile value; a trusted `resume` pinned at
+  creation wins. No permission mode is spliced on a resume, attached or not;
+- refuses a resume entry carrying `-c`, `--continue`, `--fork-session` or
+  `--from-pr` (clown refuses those for a confined session), naming the global
+  sweatfile line that gives it a harness resume;
 - fails closed when the state directory cannot be determined.
 
 `sc exec` refuses a once-confined session's worktree the same way. There is no
 opt-out flag; the refusals name the session key and the way out (`sc resume
-<key>` with a harness resume entry, or `sc close <key>`). A session confined by
-an older clown has no clown record and would resume unconfined unless the
-variable is given; the variable is always given here.
+<key>` with a harness resume entry, or `sc close <key>`, with what the close
+discards counted at refusal time: commits not on the default branch and
+uncommitted tracked changes, `sc resurrect` recovering only the close-time
+commit). A session confined by an older clown has no clown record and would
+resume unconfined unless the variable is given; the variable is always given
+here.
 
 ## The principal-to-session mapping (decided 2026-10-19, coordinator)
 

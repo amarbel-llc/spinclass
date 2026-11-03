@@ -1349,7 +1349,15 @@ readable by others.
 	0035). For a session spawned with a clown profile, *--profile <name>* is
 	spliced in before the entry's *"--"*, and an entry without one refuses
 	(FDR 0034). When *resume* is unset, the start entry (a shell) runs
-	untouched. Its profile is still checked: a changed definition refuses, and
+	untouched, except for a session the frontend launched confined
+	(FDR 0035, spinclass#453): a shell in a once-confined worktree is never
+	opened, so such a session resumes through the clown default _["clown",
+	"--", "--resume", "{principal}"]_ instead, confined again under its
+	recorded unit spec, profile and principal (a session with no recorded
+	principal is refused). The default is spinclass's, not a sweatfile
+	value; a trusted *resume*, pinned at creation, wins when set. A
+	*--no-attach* resume of a confined session splices no permission mode:
+	it keeps the pinned entry as is. Its profile is still checked: a changed definition refuses, and
 	stderr names the profile to start the harness with. Either way the
 	harness (or the shell) gets *CLOWN\_PROFILE\_DIGEST*, the accepted digest
 	in clown's hex, and *CLOWN\_PROFILE\_SESSION*, the recorded principal;

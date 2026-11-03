@@ -269,6 +269,15 @@ Caveats, stated plainly:
 - Clown cannot see a tool hang, a dialog or a model stall apart; an interrupted
   turn can leave the busy mark set, so expect a false positive after an Escape
   until the next Stop.
+- **A session stuck at the harness login** (a confined unit cannot save a
+  refreshed login, clown#336) has no turn, so it is `idle` or `unknown` to
+  `session-health`, never `busy-too-long`. Position (operator ruling
+  2026-11-03, spinclass#453): `restart-child-session` keeps covering it, the
+  holder's `restart` right being the authority, and the idle restart relaunches
+  it at once; but a relaunch lands in the same login prompt until clown#336
+  delivers the credential. A verdict naming the state would need clown to record
+  startup or login in its status file. `sc resume` of such a session relaunches
+  it confined through the clown default resume (spinclass#453).
 - Not yet proven live.
 
 ## More Information

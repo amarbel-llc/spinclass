@@ -755,9 +755,17 @@ func runResume(_ context.Context, args json.RawMessage) error {
 	// A session launched confined resumes confined; nothing of its worktree runs
 	// unconfined, and there is no opt-out (spinclass#400).
 	stateDir, stateDirErr := confinement.DefaultStateDir()
-	scopeSpec, err := confinedResumeScope(stateDir, stateDirErr, state, entry.Resume, shellFallback)
+	scopeSpec, confinedResume, err := confinedResumeScope(stateDir, stateDirErr, state, entry.Resume, shellFallback)
 	if err != nil {
 		return err
+	}
+	if scopeSpec != "" && shellFallback {
+		// No pinned resume: the clown default relaunches it confined
+		// (spinclass#453). It is a harness resume, so the profile and
+		// principal splices below apply to it.
+		fmt.Fprintf(os.Stderr, "spinclass: %s was launched confined and has no [session-entry].resume pinned; relaunching it confined through clown with %v\n", state.SessionKey, confinedResume)
+		entrypoint = confinedResume
+		shellFallback = false
 	}
 
 	// Built only when a re-pin is needed, so an ordinary resume never reads the
