@@ -319,9 +319,10 @@ does not export *WORKTREE*.
 	evaluator settings and always hold; *sandbox* is decided by the daemon
 	and holds only for a trusted user or a daemon already configured with
 	it); *GIT_ALLOW_PROTOCOL=file:https*; *WORKTREE* naming the build
-	worktree; *SPINCLASS_GUARDED_GATE=1*. The default is *nix flake check
-	--no-update-lock-file*: the flake's checks, evaluated purely and built in
-	the nix sandbox. A guarded merge also runs no *repair*, and is refused
+	worktree; *SPINCLASS_GUARDED_GATE=1*. The default is
+	*nix flake check --no-update-lock-file*: the flake's checks, evaluated
+	purely and built in the nix sandbox. A guarded merge also runs no
+	*repair*, and is refused
 	when *disable-merge-build-worktree* is set or the trusted hierarchy does
 	not load. The record carries an ok point naming the command and the layer
 	it came from, and one per repo-level value it ignored. What a confined
