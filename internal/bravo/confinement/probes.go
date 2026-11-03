@@ -1,6 +1,7 @@
 package confinement
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -1395,6 +1396,55 @@ func (p *prober) f14RuntimeDirBoundOnly() Fact {
 		return nil
 	}()
 	return fact(id, name, err, note)
+}
+
+// F17 (#400): the worktree's harness config (.claude/ and .mcp.json) is not
+// writable from the unit. The harness reads both on every start and the
+// operator may open the worktree unconfined, so a planted MCP server command
+// or permission rule would widen the worker's own surface or run outside the
+// unit. The recorded
+// spec must bind both read-only, the files must refuse a write, and the mounts
+// must still be in force (a frontend rename over .mcp.json drops its mount). A
+// trusted [confinement] harness-config-writable opt-in skips the check.
+func (p *prober) f17HarnessConfigNotWritable() Fact {
+	const id, name = "F17", "harness config (.claude, .mcp.json) not writable"
+	if p.in.HarnessConfigWritable && p.subjectErr == nil {
+		return fact(id, name, nil, "[confinement] harness-config-writable is on: not judged")
+	}
+	err := func() error {
+		if err := p.needSubject(); err != nil {
+			return err
+		}
+		if p.in.StateDir == "" {
+			return errors.New("no state dir to find the recorded unit spec in")
+		}
+		wt := p.in.Driver.Worktree
+		specPath := UnitSpecPath(p.in.StateDir, wt)
+		b, err := p.sys.ReadFile(specPath)
+		if err != nil {
+			return fmt.Errorf("reading the recorded unit spec (%s): %w", specPath, err)
+		}
+		var spec struct {
+			BindsRW []string `json:"binds_rw"`
+			BindsRO []string `json:"binds_ro"`
+		}
+		if err := json.Unmarshal(b, &spec); err != nil {
+			return fmt.Errorf("unit spec does not parse: %w", err)
+		}
+		dir, mcp := filepath.Join(wt, ".claude"), filepath.Join(wt, ".mcp.json")
+		for _, bind := range []string{dir, mcp} {
+			if !slices.Contains(spec.BindsRO, bind) || slices.Contains(spec.BindsRW, bind) {
+				return fmt.Errorf("the recorded unit spec does not bind %s read-only", bind)
+			}
+		}
+		for _, t := range []string{dir, filepath.Join(dir, "settings.local.json"), mcp} {
+			if err := p.mustBeUnwritable(t, t); err != nil {
+				return err
+			}
+		}
+		return p.fileBindsInForce([]string{dir, mcp})
+	}()
+	return fact(id, name, err, "")
 }
 
 // F16 (spinclass#431): the protected state directories (ProtectedStateDirs,

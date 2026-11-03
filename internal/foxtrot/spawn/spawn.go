@@ -231,7 +231,7 @@ func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model
 			undoOnFailure()
 			return Pending{}, fmt.Errorf("creating the worker's handshake dir: %w", err)
 		}
-		scopePath, err := writeUnitSpec(rp, desc, targetConfine.egress, stateDir, handshakeDir)
+		scopePath, err := writeUnitSpec(rp, desc, targetConfine.egress, stateDir, handshakeDir, targetConfine.policy.HarnessConfigWritable)
 		if err != nil {
 			undoOnFailure()
 			return Pending{}, err

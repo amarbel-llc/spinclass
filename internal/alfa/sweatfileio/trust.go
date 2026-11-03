@@ -115,6 +115,9 @@ type ConfinementPolicy struct {
 	// DefaultSpawn is whether a spawn is confined unless it says otherwise.
 	// Resolved: true when no trusted layer sets it. Meaningless unless Enabled.
 	DefaultSpawn bool
+	// HarnessConfigWritable is [confinement] harness-config-writable (#400):
+	// false (the default) binds the worktree's .claude and .mcp.json read-only.
+	HarnessConfigWritable bool
 }
 
 // DefaultConfines reports whether a spawn that makes no request is confined.
@@ -133,14 +136,14 @@ func (p ConfinementPolicy) DefaultConfines() bool { return p.Enabled && p.Defaul
 // honoured; their paths are returned in untrusted. Hierarchy.Merged never
 // carries the table.
 func TrustedConfinement(h sweatfile.Hierarchy, home, repoRoot string) (policy ConfinementPolicy, egress []string, untrusted []string) {
-	var enabled, defaultSpawn *bool
+	var enabled, defaultSpawn, harnessWritable *bool
 	legacy := false
 	for _, src := range h.Sources {
 		if src.SkipReason != "" || !src.Found || src.File.Confinement == nil {
 			continue
 		}
 		c := src.File.Confinement
-		if c.Enabled == nil && c.DefaultSpawn == nil && c.LaunchUnit == nil && c.EgressAllow == nil {
+		if c.Enabled == nil && c.DefaultSpawn == nil && c.LaunchUnit == nil && c.EgressAllow == nil && c.HarnessConfigWritable == nil {
 			continue
 		}
 		if !LayerAboveRepo(src.Path, home, repoRoot) {
@@ -159,7 +162,11 @@ func TrustedConfinement(h sweatfile.Hierarchy, home, repoRoot string) (policy Co
 		if c.EgressAllow != nil {
 			egress = c.EgressAllow
 		}
+		if c.HarnessConfigWritable != nil {
+			harnessWritable = c.HarnessConfigWritable
+		}
 	}
+	policy.HarnessConfigWritable = harnessWritable != nil && *harnessWritable
 	policy.Enabled = legacy
 	if enabled != nil {
 		policy.Enabled = *enabled

@@ -205,6 +205,11 @@ type Confinement struct {
 	// trusted layer that sets it wins; nil inherits, [] clears. When no layer
 	// sets it spinclass sends no list, so clown's own default applies.
 	EgressAllow []string `toml:"egress-allow"`
+	// HarnessConfigWritable leaves <worktree>/.claude and <worktree>/.mcp.json
+	// writable from a confined unit (#400). Unset or false, both are read-only
+	// binds: the harness reads them on the next start, and an unconfined resume
+	// would run what a worker planted. The last trusted layer that sets it wins.
+	HarnessConfigWritable *bool `toml:"harness-config-writable"`
 }
 
 // Permissions holds operator-only switches over what a session's own tool calls

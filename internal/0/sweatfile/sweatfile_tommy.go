@@ -793,6 +793,12 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 				_vConfinementEgressAllow.MarkConsumed()
 			}
 		}
+		if _vConfinementHarnessConfigWritable, _ok := _vConfinement.Field("harness-config-writable"); _ok && _vConfinementHarnessConfigWritable.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vConfinementHarnessConfigWritable.Leaf); _xok {
+				confinementVal8.HarnessConfigWritable = &_x
+				_vConfinementHarnessConfigWritable.MarkConsumed()
+			}
+		}
 		d.data.Confinement = confinementVal8
 	} else {
 		confinementVal8 := &Confinement{}
@@ -826,6 +832,13 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 					confinementVal8.EgressAllow = []string{}
 				}
 				_vEgressAllow.MarkConsumed()
+			}
+		}
+		if _vHarnessConfigWritable, _ok := model.Field("harness-config-writable"); _ok && _vHarnessConfigWritable.Kind == cst.VLeaf {
+			_foundConfinement = true
+			if _x, _xok := cst.ExtractBool(_vHarnessConfigWritable.Leaf); _xok {
+				confinementVal8.HarnessConfigWritable = &_x
+				_vHarnessConfigWritable.MarkConsumed()
 			}
 		}
 		if _foundConfinement {
@@ -1805,6 +1818,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				if err := cst.SetAny(tableNode, "egress-allow", d.data.Confinement.EgressAllow); err != nil {
 					return nil, fmt.Errorf("%w", err)
 				}
+			}
+		}
+		if d.data.Confinement.HarnessConfigWritable != nil {
+			if err := cst.SetAny(tableNode, "harness-config-writable", *d.data.Confinement.HarnessConfigWritable); err != nil {
+				return nil, fmt.Errorf("%w", err)
 			}
 		}
 	}
@@ -2903,6 +2921,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vConfinementEgressAllow.MarkConsumed()
 			}
 		}
+		if _vConfinementHarnessConfigWritable, _ok := _vConfinement.Field("harness-config-writable"); _ok && _vConfinementHarnessConfigWritable.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vConfinementHarnessConfigWritable.Leaf); _xok {
+				confinementVal8.HarnessConfigWritable = &_x
+				_vConfinementHarnessConfigWritable.MarkConsumed()
+			}
+		}
 		data.Confinement = confinementVal8
 	} else {
 		confinementVal8 := &Confinement{}
@@ -2936,6 +2960,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 					confinementVal8.EgressAllow = []string{}
 				}
 				_vEgressAllow.MarkConsumed()
+			}
+		}
+		if _vHarnessConfigWritable, _ok := sub.Field("harness-config-writable"); _ok && _vHarnessConfigWritable.Kind == cst.VLeaf {
+			_foundConfinement = true
+			if _x, _xok := cst.ExtractBool(_vHarnessConfigWritable.Leaf); _xok {
+				confinementVal8.HarnessConfigWritable = &_x
+				_vHarnessConfigWritable.MarkConsumed()
 			}
 		}
 		if _foundConfinement {
@@ -3899,6 +3930,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 				if err := cst.SetAny(tableNode, "egress-allow", data.Confinement.EgressAllow); err != nil {
 					return fmt.Errorf("%w", err)
 				}
+			}
+		}
+		if data.Confinement.HarnessConfigWritable != nil {
+			if err := cst.SetAny(tableNode, "harness-config-writable", *data.Confinement.HarnessConfigWritable); err != nil {
+				return fmt.Errorf("%w", err)
 			}
 		}
 	}

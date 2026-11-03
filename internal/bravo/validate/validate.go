@@ -674,7 +674,7 @@ func CheckProfileRights(sf sweatfile.Sweatfile, layerAboveRepo, global bool) []I
 // from the GLOBAL sweatfile, for the same reason as profile-rights.enforce.
 func CheckConfinement(sf sweatfile.Sweatfile, layerAboveRepo, global bool) []Issue {
 	c := sf.Confinement
-	if c == nil || (c.Enabled == nil && c.DefaultSpawn == nil && c.LaunchUnit == nil && c.EgressAllow == nil) {
+	if c == nil || (c.Enabled == nil && c.DefaultSpawn == nil && c.LaunchUnit == nil && c.EgressAllow == nil && c.HarnessConfigWritable == nil) {
 		return nil
 	}
 	if !layerAboveRepo {

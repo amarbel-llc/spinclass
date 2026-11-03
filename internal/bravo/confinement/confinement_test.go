@@ -168,7 +168,9 @@ func mapping(principal, key, worktree, unit string) string {
 // fileBindMounts are the unit's read-only file mounts on the .git pointer and
 // config.worktree (F9).
 const fileBindMounts = "4 3 8:1 /wt/a/.git /wt/a/.git ro - ext4 /dev/sda1 rw\n" +
-	"5 1 8:1 /repo/.git/worktrees/a/config.worktree /repo/.git/worktrees/a/config.worktree ro - ext4 /dev/sda1 rw\n"
+	"5 1 8:1 /repo/.git/worktrees/a/config.worktree /repo/.git/worktrees/a/config.worktree ro - ext4 /dev/sda1 rw\n" +
+	"6 3 8:1 /wt/a/.claude /wt/a/.claude ro - ext4 /dev/sda1 rw\n" +
+	"7 3 8:1 /wt/a/.mcp.json /wt/a/.mcp.json ro - ext4 /dev/sda1 rw\n"
 
 // confinedHost is a host where every fact holds for driver session r/a.
 func confinedHost() (*fakeSys, Inputs) {
@@ -244,6 +246,9 @@ func confinedHost() (*fakeSys, Inputs) {
 	sys.files[UnitSpecPath(stateDir, "/wt/a")] = unitSpecWith("/wt/a")
 	sys.files[root+"/repo/.git/worktrees/a/config.worktree"] = ""
 	sys.files[root+"/wt/a/.git"] = "gitdir: /repo/.git/worktrees/a\n"
+	sys.files[root+"/wt/a/.claude/settings.local.json"] = "{}\n"
+	sys.files[root+"/wt/a/.mcp.json"] = "{}\n"
+	sys.dirs[root+"/wt/a/.claude"] = []string{"settings.local.json"}
 	in := Inputs{
 		Driver: Session{Key: "r/a", Worktree: "/wt/a", PID: 100, Principal: "principal-a", RecordedPrincipal: "principal-a"},
 		Live: []Session{
@@ -264,7 +269,7 @@ func confinedHost() (*fakeSys, Inputs) {
 func unitSpecWith(wt string, extraRW ...string) string {
 	rw := append([]string{`"` + wt + `"`, `"/repo/.git/objects"`}, quoteAll(extraRW)...)
 	return `{"version":1,"worktree":"` + wt + `","binds_rw":[` + strings.Join(rw, ",") +
-		`],"binds_ro":["/repo/.git/config"],"sockets":[{"path":"/run/user/1000/agent.sock","purpose":"piggy-agent"}]}`
+		`],"binds_ro":["/repo/.git/config","` + wt + `/.claude","` + wt + `/.mcp.json"],"sockets":[{"path":"/run/user/1000/agent.sock","purpose":"piggy-agent"}]}`
 }
 
 func quoteAll(ss []string) []string {
@@ -273,6 +278,22 @@ func quoteAll(ss []string) []string {
 		out[i] = `"` + s + `"`
 	}
 	return out
+}
+
+// F17 (#400): a trusted [confinement] harness-config-writable opt-in leaves the
+// worktree's harness config writable on purpose, so F17 does not judge it.
+func TestF17HonoursTheHarnessConfigWritableOptIn(t *testing.T) {
+	sys, in := confinedHost()
+	sys.files[UnitSpecPath(stateDir, "/wt/a")] = unitSpecWith("/wt/a")
+	sys.files[UnitSpecPath(stateDir, "/wt/a")] = `{"version":1,"worktree":"/wt/a","binds_rw":["/wt/a"],"binds_ro":[]}`
+	sys.writable = map[string]bool{root + "/wt/a/.mcp.json": true}
+	if f := factByID(t, Run(sys, in), "F17"); f.OK {
+		t.Fatalf("without the opt-in F17 = %+v, want a failure", f)
+	}
+	in.HarnessConfigWritable = true
+	if f := factByID(t, Run(sys, in), "F17"); !f.OK || !strings.Contains(f.Detail, "harness-config-writable") {
+		t.Errorf("with the opt-in F17 = %+v, want ok naming the opt-in", f)
+	}
 }
 
 // F16 (spinclass#431): no bind of the recorded spec exposes the protected
@@ -482,6 +503,21 @@ func TestEachFactCatchesItsBreach(t *testing.T) {
 			s.dirs[root+"/scratch"] = []string{"hooks"}
 			s.dirs[root+"/scratch/hooks"] = []string{}
 			s.writable = map[string]bool{root + "/scratch/hooks": true}
+		}},
+		{"F17", "/wt/a/.mcp.json is writable", func(s *fakeSys, _ *Inputs) {
+			s.writable = map[string]bool{root + "/wt/a/.mcp.json": true}
+		}},
+		{"F17", "/wt/a/.claude/settings.local.json is writable", func(s *fakeSys, _ *Inputs) {
+			s.writable = map[string]bool{root + "/wt/a/.claude/settings.local.json": true}
+		}},
+		{"F17", "/wt/a/.claude is writable", func(s *fakeSys, _ *Inputs) {
+			s.writable = map[string]bool{root + "/wt/a/.claude": true}
+		}},
+		{"F17", "read-only file mount on /wt/a/.mcp.json is gone", func(s *fakeSys, _ *Inputs) {
+			s.files["/proc/100/mountinfo"] = strings.Replace(s.files["/proc/100/mountinfo"], "7 3 8:1 /wt/a/.mcp.json /wt/a/.mcp.json ro - ext4 /dev/sda1 rw\n", "", 1)
+		}},
+		{"F17", "does not bind /wt/a/.claude read-only", func(s *fakeSys, _ *Inputs) {
+			s.files[UnitSpecPath(stateDir, "/wt/a")] = `{"version":1,"worktree":"/wt/a","binds_rw":["/wt/a"],"binds_ro":["/wt/a/.mcp.json"]}`
 		}},
 		{"F10", "host pid namespace", func(s *fakeSys, _ *Inputs) {
 			s.links["/proc/101/ns/pid"] = "pid:[4026531836]"
@@ -890,7 +926,7 @@ func TestNoUnitRecordFailsEveryUnitFact(t *testing.T) {
 	sys, in := confinedHost()
 	delete(sys.files, UnitRecordPath(stateDir, "/wt/a"))
 	r := Run(sys, in)
-	for _, id := range []string{"F1", "F3", "F4", "F5", "F6", "F7", "F8a", "F8b", "F9", "F10", "F11", "F12", "F13", "F14", "F15", "F16"} {
+	for _, id := range []string{"F1", "F3", "F4", "F5", "F6", "F7", "F8a", "F8b", "F9", "F10", "F11", "F12", "F13", "F14", "F15", "F16", "F17"} {
 		if f := factByID(t, r, id); f.OK {
 			t.Errorf("%s passed with no unit to probe", id)
 		}

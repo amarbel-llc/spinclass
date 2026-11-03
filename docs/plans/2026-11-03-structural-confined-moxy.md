@@ -146,6 +146,22 @@ principle 1); an `allow-tools` list of dotted names (allowlist) avoids it, a
 whole-moxin entry does not, so the default profile moxyfile should list tools,
 not moxins, wherever a moxin could grow a tool with effects.
 
+**Once grit leaves moxy (moxy#482, operator ruling 2026-11-03)** R3's grit rule
+simplifies instead of growing: with no moxy `grit_*` tool to exclude, the
+profile-reported tool-set check disappears and `checkConfinedToolSurface`
+reduces to what remains true, "keep `just-us`" (so `run_recipe` works), plus
+"keep no server that is not in the profile's reported allow-list" only if the
+operator wants the ceiling checked at all. R3' would still need to check: (1) the
+profile resolution reports a tool ceiling, not "every server" (the
+`KeptServers == nil` refusal stays, since a non-selective profile has no
+ceiling); (2) `catalogWidenings` compares the new ceiling field; (3) no kept
+moxy tool is exec- or write-capable beyond the unit if Bash is denied. It would
+no longer need a `grit_*` name list or the readback of the effective set for
+grit's sake. Separately, spinclass#400 (done in the same branch, see FDR 0035's
+bind table and probe F17) makes the worktree's `.claude/` and `.mcp.json`
+read-only in the unit, which is the precondition for any `[claude] allow`
+ceiling to mean anything under dontAsk.
+
 Permission side (I, unverified): the hook's #372 moxy read allow list matches
 `mcp__plugin_moxy_moxy__*` names (R: `moxy_read.go`). A frontend moxy under a
 different plugin name will not match, so under dontAsk its tools need

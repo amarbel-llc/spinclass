@@ -129,7 +129,7 @@ func TestBuildUnitSpecShape(t *testing.T) {
 	if want := []string{rp.AbsPath, "/w/repo/.git/objects", "/w/repo/.git/worktrees/feat"}; !reflect.DeepEqual(spec.BindsRW, want) {
 		t.Errorf("binds_rw = %v", spec.BindsRW)
 	}
-	if want := []string{"/w/repo/.git/config", "/w/repo/.git/hooks", "/w/repo/.git/refs", "/w/repo/.git/logs", "/w/repo/.worktrees/feat/.spinclass/hooks", "/w/repo/.git/worktrees/feat/config.worktree", "/w/repo/.worktrees/feat/.git"}; !reflect.DeepEqual(spec.BindsRO, want) {
+	if want := []string{"/w/repo/.git/config", "/w/repo/.git/hooks", "/w/repo/.git/refs", "/w/repo/.git/logs", "/w/repo/.worktrees/feat/.spinclass/hooks", "/w/repo/.git/worktrees/feat/config.worktree", "/w/repo/.worktrees/feat/.git", "/w/repo/.worktrees/feat/.claude", "/w/repo/.worktrees/feat/.mcp.json"}; !reflect.DeepEqual(spec.BindsRO, want) {
 		t.Errorf("binds_ro = %v", spec.BindsRO)
 	}
 	if want := []string{"/run/user/1000/bus", "/run/user/1000/systemd", "/run/user/1000/posh", "/tmp/.X11-unix", "/run/user/1000/wayland-0"}; !reflect.DeepEqual(spec.DenyPaths, want) {
@@ -401,7 +401,7 @@ func TestWriteUnitSpecWritesOutsideTheWorktree(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", "")
 	rp := worktree.ResolvedPath{AbsPath: wt, SessionKey: "repo/feat"}
 
-	path, err := writeUnitSpec(rp, "desc", []string{"a:1"}, state, "")
+	path, err := writeUnitSpec(rp, "desc", []string{"a:1"}, state, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,7 +448,7 @@ func TestWriteUnitSpecKeepsTheFirstSocketWhenTheAgentIsGone(t *testing.T) {
 	}
 
 	t.Setenv("SSH_AUTH_SOCK", "/run/user/1000/piggy-agent.sock")
-	path, err := writeUnitSpec(rp, "desc", nil, state, "")
+	path, err := writeUnitSpec(rp, "desc", nil, state, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -457,7 +457,7 @@ func TestWriteUnitSpecKeepsTheFirstSocketWhenTheAgentIsGone(t *testing.T) {
 	}
 
 	t.Setenv("SSH_AUTH_SOCK", "")
-	path, err = writeUnitSpec(rp, "desc", nil, state, "")
+	path, err = writeUnitSpec(rp, "desc", nil, state, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +466,7 @@ func TestWriteUnitSpecKeepsTheFirstSocketWhenTheAgentIsGone(t *testing.T) {
 	}
 
 	t.Setenv("SSH_AUTH_SOCK", "/run/user/1000/other.sock")
-	path, err = writeUnitSpec(rp, "desc", nil, state, "")
+	path, err = writeUnitSpec(rp, "desc", nil, state, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -498,6 +498,55 @@ func TestBuildUnitSpecRefsLogsReadOnlyAndCredentialDenied(t *testing.T) {
 		if strings.HasPrefix(d, "/w/repo/.worktrees/feat/") {
 			t.Errorf("deny path inside the worktree: %s", d)
 		}
+	}
+}
+
+// #400: the harness reads <worktree>/.claude/* and <worktree>/.mcp.json, and an
+// unconfined `sc resume` would load what a worker planted there. They are
+// read-only binds inside the rw worktree bind unless a trusted sweatfile opts in.
+func TestBuildUnitSpecBindsHarnessConfigReadOnlyUnlessOptedIn(t *testing.T) {
+	rp := worktree.ResolvedPath{AbsPath: "/w/repo/.worktrees/feat", SessionKey: "repo/feat"}
+	claudeDir, mcp := rp.AbsPath+"/.claude", rp.AbsPath+"/.mcp.json"
+	spec := buildUnitSpec(unitSpecInput{rp: rp, commonDir: "/w/repo/.git", runtimeDir: "/run/user/1"})
+	for _, p := range []string{claudeDir, mcp} {
+		if !slices.Contains(spec.BindsRO, p) || slices.Contains(spec.BindsRW, p) {
+			t.Errorf("%s must be read-only only: rw=%v ro=%v", p, spec.BindsRW, spec.BindsRO)
+		}
+	}
+	opted := buildUnitSpec(unitSpecInput{rp: rp, commonDir: "/w/repo/.git", runtimeDir: "/run/user/1", harnessConfigWritable: true})
+	for _, p := range []string{claudeDir, mcp} {
+		if slices.Contains(opted.BindsRO, p) {
+			t.Errorf("an opted-in sweatfile leaves %s writable, got ro=%v", p, opted.BindsRO)
+		}
+	}
+}
+
+// A read-only file bind needs an existing source (the unit cannot create it),
+// and a session that never wrote an MCP config has no .mcp.json.
+func TestEnsureHarnessConfigPathsCreatesMissingAndKeepsExisting(t *testing.T) {
+	wt := t.TempDir()
+	if err := ensureHarnessConfigPaths(wt); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(filepath.Join(wt, ".claude")); err != nil || !fi.IsDir() {
+		t.Fatalf(".claude dir missing: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(wt, ".mcp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatalf("created .mcp.json is not valid JSON: %q: %v", b, err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, ".mcp.json"), []byte(`{"mcpServers":{"a":{}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureHarnessConfigPaths(wt); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(wt, ".mcp.json")); string(b) != `{"mcpServers":{"a":{}}}` {
+		t.Errorf("existing .mcp.json was altered: %q", b)
 	}
 }
 

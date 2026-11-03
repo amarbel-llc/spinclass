@@ -9,6 +9,7 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
+	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 )
 
 // ForDriver is the production confinement check for one spawning session
@@ -88,7 +89,24 @@ func InputsForDriver(sessionKey, principal string) (Inputs, error) {
 		}
 		in.HooksPath = hp
 	}
+	in.HarnessConfigWritable = harnessConfigWritableFor(home, in.Driver.Worktree)
 	return in, nil
+}
+
+// harnessConfigWritableFor is the trusted [confinement] harness-config-writable
+// opt-in (#400) for the repo that owns worktree. An unreadable hierarchy or an
+// unknown repo is false: F17 then judges the config, the stricter answer.
+func harnessConfigWritableFor(home, worktree string) bool {
+	repo, err := git.DetectRepo(worktree)
+	if err != nil {
+		return false
+	}
+	h, err := sweatfileio.LoadHierarchy(home, repo)
+	if err != nil {
+		return false
+	}
+	policy, _, _ := sweatfileio.TrustedConfinement(h, home, repo)
+	return policy.HarnessConfigWritable
 }
 
 // UnitRunningForWorktree reports whether the worktree's agent unit is running:

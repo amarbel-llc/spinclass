@@ -143,6 +143,57 @@ func TestTrustedConfinementPolicy(t *testing.T) {
 	}
 }
 
+// [confinement] harness-config-writable (#400) leaves <worktree>/.claude and
+// .mcp.json writable in a confined unit. A scalar, the last trusted layer that
+// sets it wins, off when unset, and a repo or worktree layer (which the worker
+// can edit) never turns it on.
+func TestTrustedConfinementHarnessConfigWritable(t *testing.T) {
+	const tbl = "[confinement]\n"
+	cases := []struct {
+		name                 string
+		global, parent, repo string
+		want                 bool
+	}{
+		{"unset is read-only", "", "", "", false},
+		{"global opt-in", tbl + "harness-config-writable = true\n", "", "", true},
+		{"a nearer trusted false wins", tbl + "harness-config-writable = true\n", tbl + "harness-config-writable = false\n", "", false},
+		{"the repo layer cannot opt in", "", "", tbl + "harness-config-writable = true\n", false},
+		{"the repo layer cannot opt out of a trusted opt-in", tbl + "harness-config-writable = true\n", "", tbl + "harness-config-writable = false\n", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			repo := filepath.Join(home, "work", "repo")
+			if err := os.MkdirAll(repo, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for path, body := range map[string]string{
+				filepath.Join(home, ".config", "spinclass", "sweatfile"): tc.global,
+				filepath.Join(home, "work", "sweatfile"):                 tc.parent,
+				filepath.Join(repo, "sweatfile"):                         tc.repo,
+			} {
+				if body == "" {
+					continue
+				}
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			h, err := LoadHierarchy(home, repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, _, _ := TrustedConfinement(h, home, repo)
+			if p.HarnessConfigWritable != tc.want {
+				t.Errorf("HarnessConfigWritable = %v, want %v", p.HarnessConfigWritable, tc.want)
+			}
+		})
+	}
+}
+
 // [permissions] deny-sweatfile-edits is read only from layers above the repo, a
 // scalar override (last trusted layer wins), off when unset.
 func TestTrustedDenySweatfileEdits(t *testing.T) {

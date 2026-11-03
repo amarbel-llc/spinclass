@@ -996,6 +996,17 @@ in the frontend).
 	applies (spinclass keeps no copy of it). Setting the key replaces clown's
 	default, so list every host the worker needs, the defaults included.
 
+*harness-config-writable*
+	Boolean. By default a confined unit sees _<worktree>/.claude_ and
+	_<worktree>/.mcp.json_ read-only: the harness reads both on every start
+	and you may open the worktree in an unconfined harness, so an MCP server or
+	a permission rule a worker planted there would widen its own tool surface or
+	run outside the unit. Set
+	*true* to leave them writable. The last trusted layer that sets it wins; off
+	when unset. A repo- or worktree-level value is ignored (*sc validate*
+	warns). Probe F17 of *sc confinement-check* does not judge the files when
+	this is on.
+
 ## [permissions]
 
 Operator-only switches over a session's own tool calls. Not merged: read only

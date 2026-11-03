@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"maps"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
+	"code.linenisgreat.com/spinclass/internal/0/safeio"
 	"code.linenisgreat.com/spinclass/internal/0/spawnhandshake"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
@@ -206,6 +208,10 @@ type unitSpecInput struct {
 	egress       []string
 	env          map[string]string
 	handshakeDir string // per-session hello dir, bound rw; "" binds nothing
+	// harnessConfigWritable is the trusted [confinement] harness-config-writable
+	// opt-in (#400): when false, <worktree>/.claude and <worktree>/.mcp.json are
+	// read-only binds.
+	harnessConfigWritable bool
 }
 
 var unitNameUnsafe = regexp.MustCompile(`[^a-zA-Z0-9-]`)
@@ -262,6 +268,20 @@ func buildUnitSpec(in unitSpecInput) unitSpec {
 		list := append([]string{}, in.egress...)
 		spec.EgressAllow = &list
 	}
+	if !in.harnessConfigWritable {
+		// The harness reads these on every start and the operator may open the
+		// worktree unconfined: an MCP server command or a permission rule the
+		// worker planted would widen its own tool surface or run outside the
+		// unit (#400).
+		// The directory is bound whole so the frontend's rewrite of a file inside
+		// it cannot drop the mount (round K); .mcp.json sits in the worktree root,
+		// so it is a file bind and a frontend rename over it drops the mount (F17
+		// names that).
+		spec.BindsRO = append(spec.BindsRO,
+			filepath.Join(wt, harnessConfigDir),
+			filepath.Join(wt, harnessMCPFile),
+		)
+	}
 	if in.handshakeDir != "" {
 		// The unit's state dir is not the frontend's, so the worker's hello
 		// goes to a directory of its own bound at the same path; only this one
@@ -304,6 +324,47 @@ func ensureWorktreeConfigFile(commonDir, wt string) error {
 	return f.Close()
 }
 
+// The harness config the worktree carries (#400): claude's project directory
+// (settings.local.json, settings.json, agents, hooks) and the MCP server list.
+const (
+	harnessConfigDir = ".claude"
+	harnessMCPFile   = ".mcp.json"
+)
+
+// ensureHarnessConfigPaths makes the two read-only bind sources exist: the unit
+// cannot create them, and a bind with a missing source fails the unit start. A
+// symlink at either path is refused rather than bound through, and an existing
+// file is left alone.
+func ensureHarnessConfigPaths(wt string) error {
+	if err := safeio.RealDir(filepath.Join(wt, harnessConfigDir)); err != nil {
+		return fmt.Errorf("ensuring the worktree's %s exists for its read-only bind: %w", harnessConfigDir, err)
+	}
+	p := filepath.Join(wt, harnessMCPFile)
+	f, err := safeio.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	switch {
+	case err == nil:
+		_, werr := f.WriteString("{\"mcpServers\":{}}\n")
+		if cerr := f.Close(); werr == nil {
+			werr = cerr
+		}
+		if werr != nil {
+			return fmt.Errorf("creating %s for its read-only bind: %w", p, werr)
+		}
+		return nil
+	case errors.Is(err, fs.ErrExist):
+		fi, lerr := os.Lstat(p)
+		if lerr != nil {
+			return lerr
+		}
+		if !fi.Mode().IsRegular() {
+			return fmt.Errorf("%s is not a regular file (mode %s): refusing to bind it", p, fi.Mode().Type())
+		}
+		return nil
+	default:
+		return fmt.Errorf("ensuring %s exists for its read-only bind: %w", p, err)
+	}
+}
+
 // stickyAgentSocket is the agent socket an earlier spec for this worktree
 // declared ("" when none), read from the frontend state dir the unit cannot
 // write. A respawn with no SSH_AUTH_SOCK (the agent is down) keeps it, so the
@@ -328,7 +389,7 @@ func stickyAgentSocket(stateDir, wt string) string {
 // writeUnitSpec resolves the host-dependent inputs, builds the spec and writes
 // it beside the unit record, outside the worktree. It returns the path to put
 // in CLOWN_AGENT_SCOPE.
-func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, stateDir, handshakeDir string) (string, error) {
+func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, stateDir, handshakeDir string, harnessConfigWritable bool) (string, error) {
 	commonDir, err := gitCommonDir(rp.AbsPath)
 	if err != nil || commonDir == "" {
 		return "", fmt.Errorf("resolving the git common dir of %s: %v", rp.AbsPath, err)
@@ -339,6 +400,11 @@ func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, state
 	}
 	if err := ensureWorktreeConfigFile(commonDir, rp.AbsPath); err != nil {
 		return "", err
+	}
+	if !harnessConfigWritable {
+		if err := ensureHarnessConfigPaths(rp.AbsPath); err != nil {
+			return "", err
+		}
 	}
 	runtimeDir := fmt.Sprintf("/run/user/%d", confinementHost.Getuid())
 	wayland, _ := filepath.Glob(filepath.Join(runtimeDir, "wayland-*"))
@@ -356,6 +422,7 @@ func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, state
 		rp: rp, operatorHome: home, stateDir: stateDir, commonDir: commonDir,
 		sshAuthSock: sshAuthSock, runtimeDir: runtimeDir, wayland: wayland,
 		egress: egress, env: env, handshakeDir: handshakeDir,
+		harnessConfigWritable: harnessConfigWritable,
 	})
 	if err := refuseProtectedBinds(spec, stateDir); err != nil {
 		return "", err

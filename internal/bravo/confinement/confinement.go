@@ -106,6 +106,9 @@ type Inputs struct {
 	// RuntimeAllow names the entries of the operator's runtime dir the unit
 	// may see: the sockets the spec binds there (F14).
 	RuntimeAllow []string
+	// HarnessConfigWritable is the trusted [confinement] harness-config-writable
+	// opt-in (#400): F17 does not judge the worktree's harness config when set.
+	HarnessConfigWritable bool
 }
 
 // DefaultAgentComms identifies agent runtimes by /proc/<pid>/comm (15 bytes
@@ -138,5 +141,6 @@ func Run(sys System, in Inputs) Report {
 		p.f14RuntimeDirBoundOnly(),
 		p.f15PrincipalMapping(),
 		p.f16ProtectedStateNotBound(),
+		p.f17HarnessConfigNotWritable(),
 	}}
 }
