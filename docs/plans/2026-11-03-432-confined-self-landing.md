@@ -337,6 +337,75 @@ What the re-review found, and what was done:
    4), enforcement of `merge`/`check` on non-self targets (section 8 step 3),
    and the trusted `[hooks] gate-files` extension (section 10).
 
+## 13. Independent review of the first build (spinclass/keen-hemlock, 2026-11-03)
+
+A confined, read-only opus session reviewed `origin/master..light-cedar--432-first-build`
+without this note's author's reasoning. All eight findings are accepted; the
+three load-bearing facts were re-verified in the tree by the author (V).
+
+**The decisive finding.** The gate's *subject* executes in the frontend. In this
+repo's own justfile, `verify-version-burnin` runs `./result/bin/spinclass
+version` (the binary nix just built from the branch's Go source) and sources
+`version.env`, both under the default recipe, both outside the gate-definition
+set by design. Two more routes of the same class: the devshell is `direnv exec
+<session worktree>`, whose generated `.envrc` has `dotenv .spinclass/env`, and
+`.spinclass/` (except `hooks/`) is writable in the unit, so `BASH_ENV` or `PATH`
+can be planted in an untracked file the diff and the clean-tree check never
+see; and `use flake` evaluates the session worktree as it stands, which a commit
+after the pin or `git update-index --skip-worktree` (the worktree index is rw in
+the unit) changes without any race. Each is a full FDR 0035 escape (operator
+uid, HOME, agent socket, forge credential path). Conclusion: **no file set can
+be the control while the gate runs worker-controlled code in the frontend**;
+section 2's "containment, not quality" claim was wrong for this gate, it is
+neither, and section 12's clean-tree fix only narrowed one of three routes.
+
+**Lower findings.** Repair runs before the pin and the check (medium, only in
+repos with `[hooks].repair`); the deny-list set will always miss something
+(medium, design); `--accept-gate-change` is an isatty guard that `script -qec`
+satisfies, the same weakness as `--accept-post-merge` (low-medium; matters only
+where a worker-reachable runner outside the unit can run `sc`, which is
+unverified for just-us `run_recipe`); the digest omits the file mode (low); no
+audit line on a confined self-merge or its refusals (low). Test gaps: the
+handler's guard flag on the allowed path, fail-closed on an unresolvable state
+dir, the second clean-tree check after the queue wait, the unqueued path,
+commit-after-pin and skip-worktree, refusal-before-repair.
+
+**Adjacent, checked by the author (V):** the FDR 0019 per-commit hook is not a
+route for a confined worker: grit runs every mutating verb for a confined
+caller with `core.hooksPath=/dev/null` and `commit --no-verify`
+(`internal/alfa/store/git/confined.go`).
+
+**Fix paths put to the operator (via the coordinator):**
+
+- **Path A, the gate in a unit** (section 5, piece A). Keeps the full justfile
+  gate for confined branches; worker code in the gate runs with the worker's
+  own authority. Needs clown first (non-pty unit launcher from a narrowed
+  spec, result channel, teardown); the devshell inside a private-network unit
+  is unverified. No estimate until clown answers.
+- **Path B, a trusted sandbox-only gate for guarded merges** (the reviewer's
+  sketch). A trusted-layer `[hooks] confined-pre-merge` command, default
+  `nix flake check` with no `--impure`, run by hookrun in the detached build
+  worktree at the landing sha with a scrubbed environment (no `direnv`, no
+  `just`, no `SSH_AUTH_SOCK`, `GIT_*`, `NIX_CONFIG`, `NIX_PATH`, `BASH_ENV`,
+  `DIRENV_*`), the nix sandbox as the boundary, with the evaluator's escape
+  hatches pinned by option: `allow-unsafe-native-code-during-evaluation
+  false`, `accept-flake-config false`, `sandbox true`,
+  `allow-import-from-derivation false` where the repo tolerates it, and
+  `GIT_ALLOW_PROTOCOL=file:https` for flake fetches. Closes all three escapes
+  at once because the gate never reads the session worktree. Loses the
+  justfile's `verify` and the impure lint lane for confined branches. Spinclass
+  only, small. Residual (I, the reviewer's reading of nix): the evaluator and
+  daemon as trusted code, and fixed-output network inside the sandbox.
+
+**Recommendation recorded:** B now, A later as the general form;
+`allow-self-merge` stays off everywhere until B lands and a confined canary
+round has run. With B, the gate-definition digest rule stays as the review
+gate for committed `*.nix` and justfile changes and the clean-tree check
+becomes belt-and-braces. Fix order for the rest: skip repair on a guarded
+merge; card-signed acceptance for both `--accept-*` digests (one change);
+hash `git ls-tree` lines for the digest; audit lines; the classification
+stanza (unclassified path refuses a guarded merge) as a follow-up issue.
+
 ## 11. Questions that were asked
 
 The four original questions, kept for the record:
