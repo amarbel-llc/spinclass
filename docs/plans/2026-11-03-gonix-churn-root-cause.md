@@ -88,22 +88,33 @@ leave go.nix alone. A flake-input bump is meant to need no go.nix change.
   4314669 and 81e3395 (trailer `circus-cascade: nikulin-20261026T…`), and
   ff326e4 do not touch go.nix. 4314669 moved `purse-first eaf5663 → ee8da76`,
   `tommy`, `crap` and `ringmaster` among others.
-- [inferred] The cascade's re-lock step is `nix flake update` (or the
-  equivalent). It moves a producer's go.mod, and so the MVS-selected versions,
-  without re-running MVS against go.nix. go.nix goes stale against the lock.
+- The cascade's re-lock step is `nix flake update` (bump-repo.bash:53)
+  [verified by circus/quiet-maple/krusty, see below]. It moves a producer's
+  go.mod, and so the MVS-selected versions, without re-running MVS against
+  go.nix [inferred from §2]. go.nix goes stale against the lock.
   The **next** godyn-go run of any kind (codegen included) reconciles it, and
   that run is where the churn shows up. [unverified] Which bump first raised
   x/sys to v0.49.0 (purse-first in 4314669 is the likely one; I did not
   diff the old producer).
-- [unverified] **Where the cascade itself rewrote go.nix.** The circus-cli Go
-  code and the `infra/hosts/home/circus-cli` bash helpers live in the circus
-  repo. My Read tool is denied outside this worktree (confined; see §6). That
-  repo is also circus's lane under research ownership. Two theories for the
-  circus session to check: (a) a cascade step runs `godyn-go` or a recipe
-  that wraps it (a codegen recipe, a `go mod tidy`); that is the same path as
-  above. (b) A pure step such as conformist's codegen-repair lane
-  (`codegenPatch`) cannot be it: that patch prunes go.mod/go.sum and runs
-  offline in vendor mode (godyn.7.scd l.194-197). [inferred]
+- **No cascade step writes go.nix.** [verified by circus/quiet-maple/krusty,
+  read-only in the circus repo, relayed by circus/eager-holly/clarabell; I did
+  not re-read these files (see §6)]
+  - `cascade/repo.bash`'s only mutating call is `sc run ... bump-repo.bash`
+    (repo.bash:122-124).
+  - `bump-repo.bash` runs `doppelgang lint --fix`, then `nix flake update`
+    (:53), then `doppelgang lint --fix` again, and possibly appends to
+    `.gitattributes`. It stages only `flake.nix` and `flake.lock` (:105).
+  - circus-cli's `cascade.go` only orders the repos and calls the script.
+
+  The cascade therefore **creates** the staleness: `nix flake update` moves
+  the producers' go.mod files and nothing reconciles go.nix. The next
+  godyn-go run then pays it off. That run was the observed churn, not the
+  cascade itself. [inferred] The repo's pre-commit hook or pre-merge gate
+  could in principle write go.nix during a cascade session, but
+  bump-repo.bash stages only the flake files, so such a write would not be
+  committed. A pure step such as conformist's codegen-repair lane
+  (`codegenPatch`) cannot write it either: that patch prunes go.mod/go.sum
+  and runs offline in vendor mode (godyn.7.scd l.194-197). [inferred]
 
 ## 4. Where reality deviates from the design
 
@@ -127,6 +138,13 @@ leave go.nix alone. A flake-input bump is meant to need no go.nix change.
    goRun's toolchain is go-1.27.3 with `GOTOOLCHAIN=local` (drv); I did not
    test whether the toolchain version affects the result [unverified].
 
+**Operator's principle** (verbatim, relayed by circus/eager-holly/clarabell
+on 2026-11-03): "`nix flake update` is to go.nix what `go mod update` is to
+go.mod". go.nix MUST be updated whenever `nix flake update` runs, ideally
+structurally, which needs a nix change. igloo#98 tracks that. Measured against
+this principle, deviation 1 is the root cause. Deviations 2 and 3 explain why
+it surfaces late and in a codegen recipe.
+
 ## 5. Smallest fix per owner (not implemented)
 
 - **igloo** (the design gap): add a pure, offline check, e.g.
@@ -145,23 +163,23 @@ leave go.nix alone. A flake-input bump is meant to need no go.nix change.
   (`nix build .#checks.<system>.tommy-codegen.passthru.codegenPatch`, then
   `git apply -p2`) instead of godyn-go. It is offline, it is the same command
   `verify-tommy-codegen` checks, and it cannot touch go.nix.
-- **circus**: the cascade should treat a go.nix repo's re-lock as also
-  needing an MVS reconcile. After `nix flake update`, run
-  `godyn-go -- go mod tidy` in the same session and commit go.nix with
-  flake.lock. Or, once igloo's check exists, rely on that check failing the
-  gate. First, the circus session should confirm which cascade step wrote
-  go.nix in the observed run (§3).
+- **circus** (interim, until igloo#98 makes it structural): add a step to
+  `bump-repo.bash` right after `nix flake update` (:53). For a repo with a
+  go.nix, it runs `godyn-go -- go mod tidy` and stages go.nix alongside
+  `flake.nix` and `flake.lock` (:105), so the re-lock and its go.nix
+  reconcile land in one commit. circus/quiet-maple/krusty is drafting it.
 
-Issues I would file (the coordinator files them):
-- igloo: "go.nix goes MVS-stale when a bridged producer raises a third-party
-  require; no pure check catches it; the next godyn-go run (even codegen)
-  rewrites go.nix".
-- igloo: "godyn-go has no patch-only mode; codegen through the escape hatch
-  always ingests".
-- spinclass: "build-tommy-codegen: use the pure codegenPatch instead of
-  godyn-go; reconcile go.nix (x/sys v0.49.0, x/text v0.37.0, go 1.26.0)".
-- circus: "cascade re-lock leaves go.nix MVS-stale; identify the step that
-  rewrote go.nix and reconcile in the same commit".
+Issues (the coordinator files them):
+- igloo#98 (filed): go.nix must be updated when `nix flake update` runs,
+  ideally structurally. It covers the staleness and missing-check gap above.
+- igloo (being filed): "godyn-go has no patch-only mode; codegen through the
+  escape hatch always ingests".
+- spinclass (being filed): "build-tommy-codegen: use the pure codegenPatch
+  instead of godyn-go; reconcile go.nix (x/sys v0.49.0, x/text v0.37.0,
+  go 1.26.0)".
+- circus (being filed): "cascade bump-repo.bash re-locks without reconciling
+  go.nix; add `godyn-go -- go mod tidy` after `nix flake update` and stage
+  go.nix".
 
 ## 6. Confinement notes (this run)
 
@@ -170,7 +188,10 @@ Issues I would file (the coordinator files them):
   as installed pages, so I read igloo's `.scd` sources from the nix store instead.
 - Read is denied on sibling checkouts (`~/eng/repos/igloo` was refused). The
   nix store was readable, so I read igloo at its pinned store path. I did not
-  read the circus repo; §3's cascade code path is unverified for that reason.
+  read the circus repo. The cascade facts in §3 come from
+  circus/quiet-maple/krusty, which owns that repo.
+- `merge-this-session-async` was refused: a confined session holds no merge
+  right, so the operator runs `sc merge spinclass/pure-birch`.
 - I used a throwaway `explore-godyn-gonix-writers` justfile recipe to find
   igloo's store path (`nix flake metadata --inputs-from . igloo`) and grep it
   for go.nix writers, `-mod=mod` and godyn-go. I reverted it before merging
