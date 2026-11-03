@@ -108,16 +108,15 @@ func refuseUnsafeFlakeLock(ctx context.Context, dir string, forbidden []string) 
 		if name == rootName {
 			continue
 		}
-		for _, ref := range []map[string]any{node.Locked, node.Original} {
-			if reason := localPathInput(ref); reason != "" {
-				bad = append(bad, safeName(name)+": "+reason)
-				break
-			}
+		if reason := refusedRef(node.Locked, false); reason != "" {
+			bad = append(bad, safeName(name)+": locked "+reason)
+		} else if reason := refusedRef(node.Original, true); reason != "" {
+			bad = append(bad, safeName(name)+": original "+reason)
 		}
 	}
 	if len(bad) > 0 {
 		sort.Strings(bad)
-		return errors.New("the flake.lock names a flake input on the local filesystem, which the evaluator would copy into the world-readable /nix/store as the operator before the gate could refuse it; a guarded merge accepts only remote inputs; nothing ran\n  " + strings.Join(capList(bad), "\n  "))
+		return errors.New("the flake.lock names a flake input the guarded gate does not accept (one on the local filesystem, which the evaluator would copy into the world-readable /nix/store as the operator before the gate could refuse it, or a kind outside the allow-list); a guarded merge accepts only github, gitlab and sourcehut inputs and tarball, file and git inputs over https; nothing ran\n  " + strings.Join(capList(bad), "\n  "))
 	}
 	declared, err := declaredFlakeInputs(ctx, dir, nix, forbidden)
 	if err != nil {
@@ -196,8 +195,8 @@ func lockMismatches(lock flakeLock, nodeID string, prefix []string, declared map
 			out = append(out, label+": declared without a reference")
 			continue
 		}
-		if reason := localPathInput(spec.Original); reason != "" {
-			out = append(out, label+": declared as "+reason)
+		if reason := refusedRef(spec.Original, true); reason != "" {
+			out = append(out, label+": declared "+reason)
 		}
 		if !reflect.DeepEqual(spec.Original, child.Original) {
 			out = append(out, label+": declared "+refKind(spec.Original)+", locked "+refKind(child.Original)+"; the references differ")
@@ -228,25 +227,42 @@ func refKind(ref map[string]any) string {
 	return "type " + safeName(typ)
 }
 
-// localPathInput says why a reference (a lock node's locked or original
-// attributes, or a declared input's) is a local path, or "". It names the
-// kind, never the path or URL.
-func localPathInput(ref map[string]any) string {
+// refusedRef says why a reference (a lock node's locked or original
+// attributes, or a declared input's canonical form) is not one the gate
+// accepts, or "". An allow-list, not a deny-list (the fourth review of
+// spinclass#449): accepted are the forge types github, gitlab and sourcehut
+// without a host attribute (a host could name a local service), and
+// tarball, file and git with an https:// url; a declared reference may also
+// be indirect (a registry id, which the operator's registry resolves; a lock
+// never records one as locked). Everything else refuses: path, mercurial, a
+// git or tarball over ssh, file or http, a scheme-less url, a path attribute
+// on any type, and a type nix adds later. It names the kind, never a path,
+// a host or a URL.
+func refusedRef(ref map[string]any, declared bool) string {
 	typ, _ := ref["type"].(string)
-	url, _ := ref["url"].(string)
-	path, _ := ref["path"].(string)
-	if typ == "path" {
-		return "type path"
+	kind := "type " + safeName(typ)
+	if _, has := ref["path"]; has {
+		return kind + " with a path attribute"
 	}
-	u := strings.ToLower(url)
-	switch {
-	case strings.HasPrefix(u, "file:"), strings.HasPrefix(u, "path:"), strings.Contains(u, "+file:"):
-		return fmt.Sprintf("type %s with a file url", safeName(typ))
+	switch typ {
+	case "github", "gitlab", "sourcehut":
+		if _, has := ref["host"]; has {
+			return kind + " with a host attribute"
+		}
+		return ""
+	case "tarball", "file", "git":
+		url, _ := ref["url"].(string)
+		if !strings.HasPrefix(strings.ToLower(url), "https://") {
+			return kind + " without an https url"
+		}
+		return ""
+	case "indirect":
+		if declared {
+			return ""
+		}
+		return kind + " as a locked reference"
 	}
-	if path != "" && typ != "" {
-		return fmt.Sprintf("type %s with a path", safeName(typ))
-	}
-	return ""
+	return kind + " is not an accepted input type (github, gitlab, sourcehut, or tarball, file and git over https)"
 }
 
 // safeName reduces a worker-chosen name to [A-Za-z0-9_-], at most 64 runes,

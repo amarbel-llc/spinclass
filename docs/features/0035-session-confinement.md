@@ -399,8 +399,14 @@ The findings:
   attribute set before it fetches anything, shown by the leak recipe's
   conditional variants; and nix's own `allowed-uris` does not stop a
   lock-time `path:` fetch, so the evaluation is not optional), or has any
-  input on the local filesystem (a `path` node, or a `git`/`tarball`/`file`
-  node with a `file:` URL), naming nodes, input paths and reference kinds
+  input outside an allow-list (the fourth review replaced the deny-list of
+  path types and file URLs): a lock node's locked and original attributes,
+  and every declared reference, must be `github`, `gitlab` or `sourcehut`
+  without a `host` attribute, or `tarball`, `file` or `git` with an
+  `https://` URL (a declared reference may also be `indirect`, a registry
+  id the operator's registry resolves); a `path` attribute on any type,
+  `hg`, ssh, http and scheme-less URLs, and a type nix adds later refuse by
+  default. Refusals name nodes, input paths and reference kinds
   only, and a `flake.nix` or `flake.lock` that is not a regular file in the
   committed tree (a symlink, a directory, a gitlink) unread
   (`check/lockpolicy.go`). What the policy does not cover: a subflake's own

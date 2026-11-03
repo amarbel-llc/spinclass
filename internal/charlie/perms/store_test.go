@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"code.linenisgreat.com/spinclass/internal/alfa/store"
 	gitstore "code.linenisgreat.com/spinclass/internal/alfa/store/git"
+	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 )
 
 // recordingBackend records the session and op Classify was called with.
@@ -221,6 +224,54 @@ func TestScopedStoreSessionCarriesCrossSessionScoping(t *testing.T) {
 	}
 	if s.Held != nil {
 		t.Errorf("an empty principal holds no handles, got %v", s.Held)
+	}
+}
+
+// The confinement a hook's session carries comes from frontend state about
+// the principal and the worktree, never from the cwd the payload names: a
+// caller nothing records is unconfined; a caller whose worktree has an agent
+// unit spec but whose principal mapping is missing is unresolved, not
+// unconfined; a mapping the SessionStart hook wrote for an unconfined session
+// is unconfined; a unit record naming the principal is confined (the fourth
+// review of spinclass#449, on #455).
+func TestCallerConfinementComesFromFrontendEvidence(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateDir)
+	plain := t.TempDir()
+	if got := CallerConfinement("p-plain", plain); got != store.ConfinementUnconfined {
+		t.Errorf("nothing recorded: %v, want unconfined", got)
+	}
+
+	launched := t.TempDir()
+	if _, err := confinement.WriteUnitSpec(stateDir, launched, map[string]any{"version": 1}); err != nil {
+		t.Fatal(err)
+	}
+	if got := CallerConfinement("p-missing", launched); got != store.ConfinementUnresolved {
+		t.Errorf("confined worktree, no mapping: %v, want unresolved", got)
+	}
+
+	if err := confinement.RecordUnconfinedPrincipal(stateDir, "p-unconfined", "r/b", plain); err != nil {
+		t.Fatal(err)
+	}
+	if got := CallerConfinement("p-unconfined", plain); got != store.ConfinementUnconfined {
+		t.Errorf("unconfined mapping: %v, want unconfined", got)
+	}
+	if got := CallerConfinement("p-unconfined", launched); got != store.ConfinementUnresolved {
+		t.Errorf("unconfined mapping but a confined worktree: %v, want unresolved", got)
+	}
+
+	rec := confinement.UnitRecordPath(stateDir, launched)
+	if err := os.MkdirAll(filepath.Dir(rec), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rec, []byte(`{"version":1,"unit":"agent-a.service","cgroup":"/user.slice/clown-agent.slice/agent-a.service","principal":"p-confined"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := CallerConfinement("p-confined", launched); got != store.ConfinementConfined {
+		t.Errorf("unit record names the principal: %v, want confined", got)
+	}
+	if got := CallerConfinement("", plain); got != store.ConfinementConfined {
+		t.Errorf("no principal: %v, want confined", got)
 	}
 }
 

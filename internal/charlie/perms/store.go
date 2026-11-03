@@ -41,9 +41,34 @@ var resolveStoreSession = func(principal string) (store.Session, error) {
 	if st.Kind == session.KindImplicit || st.WorktreePath == "" || st.Branch == "" {
 		return store.Session{}, fmt.Errorf("session %s is not a worktree session", key)
 	}
-	// A principal with a mapping is a confined worker: that is the only kind
-	// the frontend writes one for.
-	return ScopedStoreSession(st.WorktreePath, st.Branch, principal, store.ConfinementConfined), nil
+	return ScopedStoreSession(st.WorktreePath, st.Branch, principal, CallerConfinement(principal, st.WorktreePath)), nil
+}
+
+// CallerConfinement is the frontend's evidence on whether the caller behind
+// principal, resolved to the session at worktree, is confined. It reads
+// frontend state only, never a string the caller supplies: the caller's own
+// cgroup, the principal mapping (a confined unit's, or the one the
+// SessionStart hook writes for an unconfined session), the unit records
+// naming the principal (confinement.ClassifyCaller, which fails closed), and
+// whether the worktree itself has an agent unit record or spec
+// (confinement.LaunchedConfined). A worktree that was launched confined but
+// whose caller the records do not name is Unresolved, never Unconfined: the
+// mid-rebase reading (spinclass#455) reaches only a caller every source
+// shows to be outside a unit. The cwd a hook payload carries selects which
+// session is judged (resolveStoreSessionAtCwd); it never decides
+// confinement.
+func CallerConfinement(principal, worktree string) store.Confinement {
+	stateDir, err := confinement.DefaultStateDir()
+	if err != nil {
+		return store.ConfinementUnresolved
+	}
+	if confined, _ := confinement.ClassifyCaller(confinement.Host{}, stateDir, principal); confined {
+		return store.ConfinementConfined
+	}
+	if confinement.LaunchedConfined(stateDir, worktree) {
+		return store.ConfinementUnresolved
+	}
+	return store.ConfinementUnconfined
 }
 
 // resolveStoreSessionAtCwd finds the calling session from the directory the
@@ -63,8 +88,9 @@ var resolveStoreSessionAtCwd = func(cwd, principal string) (store.Session, error
 		return store.Session{}, fmt.Errorf("%s is not inside a live worktree session", cwd)
 	}
 	// Reached only outside a unit (StoreVerdict), for a caller with no
-	// principal mapping: an unconfined session.
-	return ScopedStoreSession(st.WorktreePath, st.Branch, principal, store.ConfinementUnconfined), nil
+	// principal mapping; the confinement still comes from frontend evidence
+	// about the principal and the worktree, not from cwd.
+	return ScopedStoreSession(st.WorktreePath, st.Branch, principal, CallerConfinement(principal, st.WorktreePath)), nil
 }
 
 // ScopedStoreSession is the session a permission reading classifies against:

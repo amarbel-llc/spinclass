@@ -337,9 +337,13 @@ does not export *WORKTREE*.
 	a memory bound: no path at all, no URI, no import from derivation,
 	bounded depth, output and time, and a reference canonicalised by nix's
 	own *builtins.parseFlakeRef*; without the scope tier the merge is
-	refused), or has any input on the local filesystem (a *path* node, or a
-	*git*, *tarball* or *file* node with a *file:* URL, in the lock or
-	declared), because the evaluator runs as the operator's
+	refused), or has any input outside the gate's allow-list, in the lock
+	(locked and original) or declared: accepted are *github*, *gitlab* and
+	*sourcehut* references without a *host* attribute, *tarball*, *file* and
+	*git* references with an *https://* URL, and, declared only, an
+	*indirect* registry id; a *path* input, a *path* attribute on any type,
+	a *file:*, *ssh://* or *http://* URL, *hg*, and any type nix adds later
+	refuse. The list exists because the evaluator runs as the operator's
 	uid with the whole filesystem readable and copies an input into the
 	world-readable _/nix/store_ before it compares the lock's hash, so a
 	worker-committed lock naming an operator path with a wrong hash would

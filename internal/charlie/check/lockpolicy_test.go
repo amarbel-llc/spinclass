@@ -139,7 +139,7 @@ func TestGuardedGateLockPolicyRefusesADeclaredReferenceTheLockDoesNotMatch(t *te
 			specs := specsFromLock(t, remoteOnlyLock, "tb")
 			specs["nixpkgs"] = inputSpec{Original: pathRef, Flake: true}
 			return specs
-		}, []string{"nixpkgs: declared as type path", "nixpkgs: declared type path, locked type github"}},
+		}, []string{"nixpkgs: declared type path with a path attribute", "nixpkgs: declared type path, locked type github"}},
 		{"same type, another owner", remoteOnlyLock, func(t *testing.T) map[string]inputSpec {
 			specs := specsFromLock(t, remoteOnlyLock, "tb")
 			specs["nixpkgs"] = inputSpec{Original: github("evil", "nixpkgs"), Flake: true}
@@ -180,7 +180,12 @@ func TestGuardedGateLockPolicyRefusesADeclaredReferenceTheLockDoesNotMatch(t *te
 			sub.Inputs = map[string]inputSpec{"leak": {Original: pathRef, Flake: false}}
 			specs["sub"] = sub
 			return specs
-		}, []string{"sub/leak: declared as type path", "sub/leak: declared type path, locked type github"}},
+		}, []string{"sub/leak: declared type path with a path attribute", "sub/leak: declared type path, locked type github"}},
+		{"a declared reference outside the allow-list", remoteOnlyLock, func(t *testing.T) map[string]inputSpec {
+			specs := specsFromLock(t, remoteOnlyLock, "tb")
+			specs["nixpkgs"] = inputSpec{Original: map[string]any{"type": "hg", "url": "https://hg.example.invalid/x"}, Flake: true}
+			return specs
+		}, []string{"nixpkgs: declared type hg is not an accepted input type"}},
 		{"a nested override the lock lacks", nestedLock, func(t *testing.T) map[string]inputSpec {
 			specs := specsFromLock(t, nestedLock, "nixpkgs", "sub")
 			sub := specs["sub"]
@@ -238,10 +243,22 @@ func TestGuardedGateLockPolicy(t *testing.T) {
 		{"remote inputs only (github, https tarball)", remoteOnlyLock, false, ""},
 		{"no flake.nix at all", "", true, ""},
 		{"no flake.lock", "", false, "there is none"},
-		{"wrong-narHash lock with a path input", pathInputLock, false, "leak: type path"},
-		{"git+file url", `{"nodes":{"priv":{"locked":{"narHash":"sha256-A=","rev":"abc","type":"git","url":"file:///home/op/private"},"original":{"type":"git","url":"git+file:///home/op/private"}},"root":{"inputs":{"priv":"priv"}}},"root":"root","version":7}`, false, "priv: type git with a file url"},
-		{"tarball file url", `{"nodes":{"tb":{"locked":{"narHash":"sha256-A=","type":"tarball","url":"file:///home/op/x.tar"},"original":{"type":"tarball","url":"file:///home/op/x.tar"}},"root":{"inputs":{"tb":"tb"}}},"root":"root","version":7}`, false, "tb: type tarball with a file url"},
+		{"wrong-narHash lock with a path input", pathInputLock, false, "leak: locked type path with a path attribute"},
+		{"git+file url", `{"nodes":{"priv":{"locked":{"narHash":"sha256-A=","rev":"abc","type":"git","url":"file:///home/op/private"},"original":{"type":"git","url":"git+file:///home/op/private"}},"root":{"inputs":{"priv":"priv"}}},"root":"root","version":7}`, false, "priv: locked type git without an https url"},
+		{"tarball file url", `{"nodes":{"tb":{"locked":{"narHash":"sha256-A=","type":"tarball","url":"file:///home/op/x.tar"},"original":{"type":"tarball","url":"file:///home/op/x.tar"}},"root":{"inputs":{"tb":"tb"}}},"root":"root","version":7}`, false, "tb: locked type tarball without an https url"},
 		{"malformed lock fails closed", `{not json`, false, "could not parse"},
+		// The allow-list (the fourth review): only forge types and https
+		// fetches pass; everything else, known or not yet, refuses.
+		{"gitlab, sourcehut, git over https, an indirect original", `{"nodes":{"gl":{"locked":{"narHash":"sha256-x","owner":"o","repo":"r","rev":"abc","type":"gitlab"},"original":{"owner":"o","repo":"r","type":"gitlab"}},"sh":{"locked":{"narHash":"sha256-x","owner":"~o","repo":"r","rev":"abc","type":"sourcehut"},"original":{"owner":"~o","repo":"r","type":"sourcehut"}},"g":{"locked":{"narHash":"sha256-x","rev":"abc","type":"git","url":"https://git.example.invalid/r"},"original":{"type":"git","url":"https://git.example.invalid/r"}},"np":{"locked":{"narHash":"sha256-x","owner":"NixOS","repo":"nixpkgs","rev":"abc","type":"github"},"original":{"id":"nixpkgs","type":"indirect"}},"root":{"inputs":{"gl":"gl","sh":"sh","g":"g","np":"np"}}},"root":"root","version":7}`, false, ""},
+		{"mercurial", `{"nodes":{"hg":{"locked":{"narHash":"sha256-x","rev":"abc","type":"hg","url":"https://hg.example.invalid/r"},"original":{"type":"hg","url":"https://hg.example.invalid/r"}},"root":{"inputs":{"hg":"hg"}}},"root":"root","version":7}`, false, "hg: locked type hg is not an accepted input type"},
+		{"git over ssh", `{"nodes":{"g":{"locked":{"narHash":"sha256-x","rev":"abc","type":"git","url":"ssh://git@forge.example.invalid/r"},"original":{"type":"git","url":"ssh://git@forge.example.invalid/r"}},"root":{"inputs":{"g":"g"}}},"root":"root","version":7}`, false, "g: locked type git without an https url"},
+		{"git with a scheme-less url", `{"nodes":{"g":{"locked":{"narHash":"sha256-x","rev":"abc","type":"git","url":"forge.example.invalid/r"},"original":{"type":"git","url":"forge.example.invalid/r"}},"root":{"inputs":{"g":"g"}}},"root":"root","version":7}`, false, "g: locked type git without an https url"},
+		{"tarball over http", `{"nodes":{"tb":{"locked":{"narHash":"sha256-x","type":"tarball","url":"http://example.invalid/x.tar.gz"},"original":{"type":"tarball","url":"http://example.invalid/x.tar.gz"}},"root":{"inputs":{"tb":"tb"}}},"root":"root","version":7}`, false, "tb: locked type tarball without an https url"},
+		{"github with a host attribute", `{"nodes":{"gh":{"locked":{"host":"localhost","narHash":"sha256-x","owner":"o","repo":"r","rev":"abc","type":"github"},"original":{"host":"localhost","owner":"o","repo":"r","type":"github"}},"root":{"inputs":{"gh":"gh"}}},"root":"root","version":7}`, false, "gh: locked type github with a host attribute"},
+		{"a type nix adds later", `{"nodes":{"x":{"locked":{"narHash":"sha256-x","type":"future","url":"https://example.invalid/x"},"original":{"type":"future","url":"https://example.invalid/x"}},"root":{"inputs":{"x":"x"}}},"root":"root","version":7}`, false, "x: locked type future is not an accepted input type"},
+		{"a locked indirect", `{"nodes":{"np":{"locked":{"id":"nixpkgs","type":"indirect"},"original":{"id":"nixpkgs","type":"indirect"}},"root":{"inputs":{"np":"np"}}},"root":"root","version":7}`, false, "np: locked type indirect as a locked reference"},
+		{"a path attribute on a forge type", `{"nodes":{"gh":{"locked":{"narHash":"sha256-x","owner":"o","path":"/home/op/x","repo":"r","rev":"abc","type":"github"},"original":{"owner":"o","repo":"r","type":"github"}},"root":{"inputs":{"gh":"gh"}}},"root":"root","version":7}`, false, "gh: locked type github with a path attribute"},
+		{"an original outside the allow-list behind an accepted locked", `{"nodes":{"g":{"locked":{"narHash":"sha256-x","rev":"abc","type":"git","url":"https://git.example.invalid/r"},"original":{"type":"git","url":"git+ssh://git@forge.example.invalid/r"}},"root":{"inputs":{"g":"g"}}},"root":"root","version":7}`, false, "g: original type git without an https url"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			files := map[string]string{}
@@ -327,7 +344,7 @@ func TestGuardedGateLockPolicyReadsTheCommittedTree(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "flake.lock"), []byte(remoteOnlyLock), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := refuseUnsafeFlakeLock(context.Background(), dir, nil); err == nil || !strings.Contains(err.Error(), "leak: type path") {
+	if err := refuseUnsafeFlakeLock(context.Background(), dir, nil); err == nil || !strings.Contains(err.Error(), "leak: locked type path") {
 		t.Fatalf("err = %v, want the committed lock judged, not the working tree's", err)
 	}
 }

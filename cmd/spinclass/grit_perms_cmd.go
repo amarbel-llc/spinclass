@@ -35,9 +35,7 @@ var (
 		if st.Kind == session.KindImplicit || st.WorktreePath == "" || st.Branch == "" {
 			return store.Session{}, fmt.Errorf("session %s is not a worktree session", key)
 		}
-		// Resolved through the principal mapping, which only confined workers
-		// have.
-		return perms.ScopedStoreSession(st.WorktreePath, st.Branch, principal, store.ConfinementConfined), nil
+		return perms.ScopedStoreSession(st.WorktreePath, st.Branch, principal, perms.CallerConfinement(principal, st.WorktreePath)), nil
 	}
 )
 
