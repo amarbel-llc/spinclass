@@ -144,6 +144,12 @@ func newConfinedGate(runDir string, forbidden []string) (*confinedGate, error) {
 	return &confinedGate{env: env, sh: sh, forbidden: forbidden}, nil
 }
 
+// ResolveGateTool is resolveGateTool for a caller that runs a gate-side
+// program itself (the lock policy's inputs evaluation).
+func ResolveGateTool(tool string, forbidden []string) (string, error) {
+	return resolveGateTool(tool, forbidden)
+}
+
 // resolveGateTool finds tool on the frontend's PATH, resolves its symlinks,
 // and refuses one under a directory the worker writes. The scope prefix's
 // program goes through it too (runHookInDirEnv).

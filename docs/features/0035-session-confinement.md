@@ -375,8 +375,13 @@ The findings:
   with `restrict-eval`, the copy as the only search-path entry, no allowed URI,
   no import from derivation, bounded call depth, output and time; the recipe
   `explore-guarded-gate-inputs-eval` shows readFile, readDir, fetchurl and
-  fetchGit refused and getEnv seeing only the scrubbed environment), or has
-  any input on the local filesystem (a `path` node,
+  fetchGit refused and getEnv seeing only the scrubbed environment; the
+  enumeration and nix cannot disagree about which inputs exist, because nix
+  refuses a flake.nix whose `inputs` is not a literal attribute set before it
+  fetches anything, shown by the leak recipe's conditional variants; and
+  nix's own `allowed-uris` does not stop a lock-time `path:` fetch, so the
+  enumeration is not optional), or has any input on the local filesystem (a
+  `path` node,
   or a `git`/`tarball`/`file` node with a `file:` URL), naming the node and the
   kind only, and a lock that is not a regular file unread (`check/lockpolicy.go`).
   Only the root flake's lock is judged; a subflake is reached only as an input

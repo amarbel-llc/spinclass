@@ -1603,9 +1603,12 @@ explore-live-close-leftovers key:
 # output; and the review's F1' shapes, where the lock is complete for what it
 # names but flake.nix declares an input the lock lacks that carries ?narHash=
 # (a path: input, a tarball+file: input, and the same one level down in a
-# git+file: subflake). Reports per variant whether a store path added during
-# the run holds the marker. Also prints the daemon's sandbox setting. Read-only
-# apart from the temp dir and whatever nix adds to the store.
+# git+file: subflake), inputs that differ between an impure enumeration and
+# pure evaluation (nix refuses a non-literal inputs set before any fetch), and
+# the same with nix's own allowed-uris limited to https:// (it does not stop
+# the lock-time path: fetch). Reports per variant whether a store path added
+# during the run holds the marker. Also prints the daemon's sandbox setting.
+# Read-only apart from the temp dir and whatever nix adds to the store.
 #
 # PoC: does the guarded gate copy an out-of-tree flake input into /nix/store? (dummy marker only)
 [group("explore")]
@@ -1621,9 +1624,10 @@ explore-guarded-gate-input-leak:
     commit() { git -C "$1" add -A; git -C "$1" -c user.name=t -c user.email=t@t commit -qm "$2" >/dev/null; }
     # touches NAME: an outputs expression whose check forces input NAME.
     touches() { printf '{ checks.%s.touch = derivation { name = "touch"; system = "%s"; builder = "/bin/sh"; args = [ "-c" "echo ${%s} > $out" ]; }; }' "$sys" "$sys" "$1"; }
+    extra_nix_config=""   # a variant may append to the gate's NIX_CONFIG
     gate() {  # $1: flake dir
       env -i PATH="$gatepath" HOME="$HOME" ${NIX_REMOTE:+NIX_REMOTE="$NIX_REMOTE"} \
-        NIX_CONFIG=$'allow-unsafe-native-code-during-evaluation = false\naccept-flake-config = false\nsandbox = true\n' \
+        NIX_CONFIG=$'allow-unsafe-native-code-during-evaluation = false\naccept-flake-config = false\nsandbox = true\n'"$extra_nix_config" \
         GIT_ALLOW_PROTOCOL=file:https SPINCLASS_GUARDED_GATE=1 \
         sh -c 'cd "$1" && nix flake check --no-update-lock-file' sh "$1" 2>&1 | tail -6
       echo "exit: ${PIPESTATUS[0]}"
@@ -1682,6 +1686,18 @@ explore-guarded-gate-input-leak:
       printf '{ "nodes": { "sub": { "locked": { "lastModified": 1, "narHash": "%s", "ref": "refs/heads/master", "rev": "%s", "type": "git", "url": "file://%s" }, "original": { "type": "git", "url": "file://%s" } }, "root": { "inputs": { "sub": "sub" } } }, "root": "root", "version": 7 }\n' "$hash" "$rev" "$sub" "$sub" > "$1/flake.lock"
       commit "$1" flake
     }
+    # The second review's C: inputs that differ between an impure, restricted
+    # enumeration and nix's own pure evaluation of flake.nix.
+    setup_conditional_getenv() {
+      printf '{ inputs = if builtins.getEnv "HOME" == "" then { leak = { url = "path:%s?narHash=%s"; flake = false; }; } else { }; outputs = args: { checks.%s.touch = derivation { name = "touch"; system = "%s"; builder = "/bin/sh"; args = [ "-c" "echo ${args.leak or "none"} > $out" ]; }; }; }\n' "$2" "$badhash" "$sys" "$sys" > "$1/flake.nix"
+      printf '%s\n' "$rootonly" > "$1/flake.lock"; commit "$1" flake
+    }
+    setup_conditional_currenttime() {
+      printf '{ inputs = if (builtins.tryEval (builtins.currentTime or (throw "none"))).success then { } else { leak = { url = "path:%s?narHash=%s"; flake = false; }; }; outputs = args: { checks.%s.touch = derivation { name = "touch"; system = "%s"; builder = "/bin/sh"; args = [ "-c" "echo ${args.leak or "none"} > $out" ]; }; }; }\n' "$2" "$badhash" "$sys" "$sys" > "$1/flake.nix"
+      printf '%s\n' "$rootonly" > "$1/flake.lock"; commit "$1" flake
+    }
+    setup_nolock_alloweduris() { setup_nolock "$1" "$2"; }
+    setup_f1prime_path_alloweduris() { setup_f1prime_path "$1" "$2"; }
     echo "== daemon sandbox setting (nix config show)"; nix config show sandbox 2>/dev/null || nix show-config 2>/dev/null | grep '^sandbox'
     variant nolock "no flake.lock committed, an output references the path input"
     variant wronghash_unused "worker-committed lock with a wrong narHash, outputs never touch the input"
@@ -1689,6 +1705,14 @@ explore-guarded-gate-input-leak:
     variant f1prime_path "lock complete for what it names; flake.nix declares path:...?narHash= the lock lacks, referenced"
     variant f1prime_tarball "lock complete; flake.nix declares tarball+file:...?narHash= the lock lacks, referenced"
     variant f1prime_transitive "root lock names a git+file: subflake; the subflake declares path:...?narHash= its lock lacks"
+    variant conditional_getenv "inputs declared only when getEnv HOME is empty (pure eval), referenced"
+    variant conditional_currenttime "inputs declared only when currentTime is unavailable (pure eval), referenced"
+    # Does nix's own allowed-uris (restricted or pure mode) stop the lock-time
+    # fetch of a path: input? If so a NIX_CONFIG line closes the class.
+    extra_nix_config=$'allowed-uris = https://\n'
+    variant nolock_alloweduris "no lock, path input referenced, NIX_CONFIG allowed-uris = https:// only"
+    variant f1prime_path_alloweduris "F1' path input, NIX_CONFIG allowed-uris = https:// only"
+    extra_nix_config=""
     printf '== SUMMARY\n%s' "$results"
 
 # [explore] PoC for the guarded gate's lock-completeness check (#449 F1'): the

@@ -348,9 +348,16 @@ func RunGuardedWithReporterContext(
 		return nil, FailStep(ts, "pre-merge build worktree for "+branch, prepErr, "")
 	}
 	defer cleanup()
-	// The lock policy (F1): no input on the local filesystem, judged on the
-	// committed tree in the build worktree, before the command.
-	if lockErr := refuseUnsafeFlakeLock(hookDir); lockErr != nil {
+	// Directories the worker writes: the session worktree and every worktree
+	// of the repo. A gate tool resolving under them is refused (hookrun), for
+	// the lock policy's evaluation as for the gate's command.
+	forbidden := []string{wtPath}
+	if repoRoot, rErr := git.CommonDir(wtPath); rErr == nil {
+		forbidden = append(forbidden, filepath.Join(repoRoot, ".worktrees"))
+	}
+	// The lock policy (F1, F1'): judged on the committed tree at the pinned
+	// sha, before the command.
+	if lockErr := refuseUnsafeFlakeLock(ctx, hookDir, forbidden); lockErr != nil {
 		return nil, FailStep(ts, label, lockErr, "")
 	}
 
@@ -361,12 +368,6 @@ func RunGuardedWithReporterContext(
 	ts.Ok(fmt.Sprintf("%s: `%s` (from %s), in the build worktree with no devshell and a scrubbed environment", label, gate.Command, source))
 	for _, ignored := range gate.Ignored {
 		ts.Ok(fmt.Sprintf("%s: ignored [hooks].confined-pre-merge in %s (only layers above the repo may set it)", label, ignored))
-	}
-	// Directories the worker writes: the session worktree and every worktree
-	// of the repo. A gate tool resolving under them is refused (hookrun).
-	forbidden := []string{wtPath}
-	if repoRoot, rErr := git.CommonDir(wtPath); rErr == nil {
-		forbidden = append(forbidden, filepath.Join(repoRoot, ".worktrees"))
 	}
 	desc := label + ": `" + gate.Command + "`"
 	link, hookErr := runHookPhase(ctx, rep, hierarchy, wtPath, gate.Command, desc, activity, func(ctx context.Context, sink io.Writer) error {
