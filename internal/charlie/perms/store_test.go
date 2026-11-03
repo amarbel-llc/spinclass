@@ -208,10 +208,12 @@ func TestStoreVerdictPassesSessionAndOpToBackend(t *testing.T) {
 }
 
 // The hook's session carries the cross-session scoping, so Classify asks for a
-// call aimed at another session's worktree before any git runs there.
+// call aimed at another session's worktree before any git runs there, and the
+// caller's confinement, so the mid-rebase reading (spinclass#455) reaches an
+// unconfined caller only.
 func TestScopedStoreSessionCarriesCrossSessionScoping(t *testing.T) {
-	s := ScopedStoreSession("/w", "b", "")
-	if s.Dir != "/w" || s.Branch != "b" {
+	s := ScopedStoreSession("/w", "b", "", store.ConfinementUnconfined)
+	if s.Dir != "/w" || s.Branch != "b" || s.Confinement != store.ConfinementUnconfined {
 		t.Errorf("session = %+v", s)
 	}
 	if s.SessionAt == nil {

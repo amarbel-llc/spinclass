@@ -377,14 +377,26 @@ func (c checker) owned(fullRef string) bool {
 
 // currentBranchOwned judges the branch HEAD is on. During a rebase HEAD is
 // detached and the branch being replayed is named in rebase-merge/head-name
-// (rebase-apply/head-name for the am backend); the session owns that rebase
-// exactly when it owns that branch (spinclass#455), so continue, skip and
-// abort, and the staging a conflict resolution needs, are judged on it. Any
-// other detached HEAD owns nothing.
+// (rebase-apply/head-name for the am backend); for a caller positively known
+// to be unconfined the session owns that rebase exactly when it owns that
+// branch (spinclass#455), so continue, skip and abort, and the staging a
+// conflict resolution needs, are judged on it. A confined or unresolved
+// caller gets no such reading: head-name lives under the common git
+// directory's worktrees/<name>/, which the unit binds read-write, so a
+// confined worker could write a branch it owns into it and have the frontend
+// continue a rebase of a branch it does not (the third review of #449), and
+// a judgement the worker can forge is no judgement. For such a caller a
+// rebase in progress owns nothing, as any other detached HEAD does, until the
+// frontend records the branch a rebase replays when grit starts it
+// (TODO(#456): record head-name in frontend state at rebase start and judge
+// the recorded value).
 func (c checker) currentBranchOwned() bool {
 	head, err := git.Run(c.dir, "symbolic-ref", "-q", "HEAD")
 	if err == nil {
 		return strings.HasPrefix(head, "refs/heads/") && c.owned(head)
+	}
+	if c.session.Confinement != store.ConfinementUnconfined {
+		return false
 	}
 	if rebasing, ok := c.rebaseInProgressBranch(); ok {
 		return strings.HasPrefix(rebasing, "refs/heads/") && c.owned(rebasing)

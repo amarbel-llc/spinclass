@@ -153,7 +153,7 @@ branch delete force                     ask         ask       force
 branch reset-soft, reset-hard           allow       allow     on B's checkout
 branch rebase (B onto upstream)         allow       allow     B is rewritten
 branch rebase rebase_branch=main        ask         allow     default branch
-branch rebase continue, skip, abort     allow       allow     rebase of B in progress
+branch rebase continue, skip, abort     allow       allow     rebase of B in progress (unconfined only, see below)
 branch restack root=B                   allow       allow     owned range
 branch restack moving a foreign branch  ask         allow     foreign in range
 branch cherry-pick, revert              allow       allow     on B's checkout
@@ -181,6 +181,18 @@ Remote talk about the session's own refs is Allow for an unconfined session
 access by default, except rebasing against upstream) is planned but not built;
 it would hook in at the body's confined check, *refuseUnownedForConfined* in
 *internal/alfa/store/git/confined.go*, where the confined column is enforced.
+
+A rebase in progress (continue, skip, abort, and the *stage* add a conflict
+resolution needs) is judged on the branch git names in
+*rebase-merge/head-name*, since HEAD is detached meanwhile (spinclass#455),
+but only for a caller positively known to be unconfined: the hook resolves an
+unconfined caller from its working directory and marks it so. That file lives
+under the common git directory's *worktrees/<name>/*, which a confined unit
+binds read-write, so a confined worker could write a branch it owns into it;
+for a confined or unresolved caller a rebase in progress therefore owns
+nothing, the body refuses continue, skip and abort, and the operator finishes
+the rebase from outside the unit, until the frontend records the branch a
+rebase replays when *grit\_branch rebase* starts it.
 
 "Ran" does not mean "allowed": an *ask* the operator approves completes exactly
 like an *allow*, which is how a probe of this table (spinclass#415) could not

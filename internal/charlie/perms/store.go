@@ -41,7 +41,9 @@ var resolveStoreSession = func(principal string) (store.Session, error) {
 	if st.Kind == session.KindImplicit || st.WorktreePath == "" || st.Branch == "" {
 		return store.Session{}, fmt.Errorf("session %s is not a worktree session", key)
 	}
-	return ScopedStoreSession(st.WorktreePath, st.Branch, principal), nil
+	// A principal with a mapping is a confined worker: that is the only kind
+	// the frontend writes one for.
+	return ScopedStoreSession(st.WorktreePath, st.Branch, principal, store.ConfinementConfined), nil
 }
 
 // resolveStoreSessionAtCwd finds the calling session from the directory the
@@ -60,15 +62,19 @@ var resolveStoreSessionAtCwd = func(cwd, principal string) (store.Session, error
 	if st.IsTombstone() || st.Kind == session.KindImplicit || st.WorktreePath == "" || st.Branch == "" {
 		return store.Session{}, fmt.Errorf("%s is not inside a live worktree session", cwd)
 	}
-	return ScopedStoreSession(st.WorktreePath, st.Branch, principal), nil
+	// Reached only outside a unit (StoreVerdict), for a caller with no
+	// principal mapping: an unconfined session.
+	return ScopedStoreSession(st.WorktreePath, st.Branch, principal, store.ConfinementUnconfined), nil
 }
 
 // ScopedStoreSession is the session a permission reading classifies against:
-// the worktree and branch, plus the cross-session scoping (store.Session
-// SessionAt and Held), so a call aimed at another session's worktree asks
-// before any git runs there.
-func ScopedStoreSession(dir, branch, principal string) store.Session {
-	return store.Session{Dir: dir, Branch: branch, SessionAt: session.KeyAtWorktree, Held: session.HeldKeys(principal)}
+// the worktree and branch, the cross-session scoping (store.Session SessionAt
+// and Held), so a call aimed at another session's worktree asks before any
+// git runs there, and the caller's confinement, which Classify reads for the
+// judgements a confined caller must not get (a rebase in progress,
+// spinclass#455).
+func ScopedStoreSession(dir, branch, principal string, confinement store.Confinement) store.Session {
+	return store.Session{Dir: dir, Branch: branch, SessionAt: session.KeyAtWorktree, Held: session.HeldKeys(principal), Confinement: confinement}
 }
 
 // StoreVerdict is the PreToolUse reading of a grit store tool call (FDR 0036

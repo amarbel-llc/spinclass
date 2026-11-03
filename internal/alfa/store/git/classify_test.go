@@ -269,9 +269,12 @@ func TestClassifyRebaseAndResetOfOwnedBranchesNeverPrompt(t *testing.T) {
 }
 
 // spinclass#455: mid-rebase HEAD is detached, and the rebase belongs to the
-// branch git names in rebase-merge/head-name. A session that was allowed to
-// start a rebase of its own branch is allowed to continue, skip or abort it
-// and to stage the resolution; a rebase of a foreign branch stays ask.
+// branch git names in rebase-merge/head-name. An UNCONFINED session that was
+// allowed to start a rebase of its own branch is allowed to continue, skip or
+// abort it and to stage the resolution; a rebase of a foreign branch stays
+// ask. A confined or unresolved caller is never judged on head-name, which
+// its unit can write: for it a rebase in progress stays ask (and so is
+// refused by the body), exactly as before #455.
 func TestClassifyMidRebaseJudgesTheBranchBeingRebased(t *testing.T) {
 	f := newFixture(t)
 	writeConflict := func(dir, content string) {
@@ -299,15 +302,42 @@ func TestClassifyMidRebaseJudgesTheBranchBeingRebased(t *testing.T) {
 	startConflictingRebase(f.worktree)
 	startConflictingRebase(f.foreignWorktree)
 
-	runCases(t, f, []classifyCase{
-		{name: "continue the own rebase", tool: "branch", sub: "rebase", args: map[string]any{"continue": true}, want: store.Allow},
-		{name: "skip in the own rebase", tool: "branch", sub: "rebase", args: map[string]any{"skip": true}, want: store.Allow},
-		{name: "abort the own rebase", tool: "branch", sub: "rebase", args: map[string]any{"abort": true}, want: store.Allow},
-		{name: "stage the resolution in the own rebase", tool: "stage", sub: "add", args: map[string]any{"paths": []any{"a.txt"}}, want: store.Allow},
-		{name: "continue a foreign branch's rebase", tool: "branch", sub: "rebase", args: map[string]any{"continue": true}, want: store.Ask, foreignDir: true},
-		{name: "abort a foreign branch's rebase", tool: "branch", sub: "rebase", args: map[string]any{"abort": true}, want: store.Ask, foreignDir: true},
-		{name: "stage in a foreign branch's rebase", tool: "stage", sub: "add", args: map[string]any{"paths": []any{"a.txt"}}, want: store.Ask, foreignDir: true},
-	})
+	ownRebase := []classifyCase{
+		{name: "continue the own rebase", tool: "branch", sub: "rebase", args: map[string]any{"continue": true}},
+		{name: "skip in the own rebase", tool: "branch", sub: "rebase", args: map[string]any{"skip": true}},
+		{name: "abort the own rebase", tool: "branch", sub: "rebase", args: map[string]any{"abort": true}},
+		{name: "stage the resolution in the own rebase", tool: "stage", sub: "add", args: map[string]any{"paths": []any{"a.txt"}}},
+	}
+	foreignRebase := []classifyCase{
+		{name: "continue a foreign branch's rebase", tool: "branch", sub: "rebase", args: map[string]any{"continue": true}, foreignDir: true},
+		{name: "abort a foreign branch's rebase", tool: "branch", sub: "rebase", args: map[string]any{"abort": true}, foreignDir: true},
+		{name: "stage in a foreign branch's rebase", tool: "stage", sub: "add", args: map[string]any{"paths": []any{"a.txt"}}, foreignDir: true},
+	}
+	for _, tc := range []struct {
+		confinement store.Confinement
+		wantOwn     store.Verdict
+	}{
+		{store.ConfinementUnconfined, store.Allow},
+		{store.ConfinementConfined, store.Ask},
+		{store.ConfinementUnresolved, store.Ask},
+	} {
+		t.Run(confinementNames[tc.confinement], func(t *testing.T) {
+			for _, c := range ownRebase {
+				s := f.own()
+				s.Confinement = tc.confinement
+				if got := New().Classify(s, op(t, c.tool, c.sub, c.args)); got != tc.wantOwn {
+					t.Errorf("%s = %v, want %v", c.name, got, tc.wantOwn)
+				}
+			}
+			for _, c := range foreignRebase {
+				s := f.own()
+				s.Dir, s.Confinement = f.foreignWorktree, tc.confinement
+				if got := New().Classify(s, op(t, c.tool, c.sub, c.args)); got != store.Ask {
+					t.Errorf("%s = %v, want ask", c.name, got)
+				}
+			}
+		})
+	}
 }
 
 // A detached HEAD that is not a rebase owns nothing.
