@@ -64,9 +64,32 @@ var ErrUnitLaunchFailed = errors.New("clown reported the agent unit launch faile
 // spinclass's state directory, keyed by the worktree. Never inside the
 // worktree, which is bound read-write into the unit, so the unit could
 // forge its own record (FDR 0035, "Interface with clown").
+//
+// The key is the worktree's canonical path (symlinks resolved where the path
+// exists), so the writer and every reader agree whichever spelling names it:
+// a merge or check names the worktree by its cwd, which may run through a
+// symlinked parent, while the spawn recorded its absolute path. A record a
+// pre-canonical spinclass keyed by the spelling as given is still found by
+// LaunchedConfined through the legacy key.
 func UnitRecordPath(stateDir, worktree string) string {
-	h := sha256.Sum256([]byte(filepath.Clean(worktree)))
+	return unitRecordPathKeyed(stateDir, canonicalWorktree(worktree))
+}
+
+func unitRecordPathKeyed(stateDir, key string) string {
+	h := sha256.Sum256([]byte(key))
 	return filepath.Join(stateDir, "spinclass", "units", fmt.Sprintf("%x.json", h[:8]))
+}
+
+func canonicalWorktree(worktree string) string {
+	if resolved, err := filepath.EvalSymlinks(worktree); err == nil {
+		return filepath.Clean(resolved)
+	}
+	return filepath.Clean(worktree)
+}
+
+// specPathFor is the unit spec beside a unit record.
+func specPathFor(recordPath string) string {
+	return strings.TrimSuffix(recordPath, ".json") + ".spec.json"
 }
 
 // CredentialPath is where a session's minted forge credential lives: in the
@@ -119,7 +142,7 @@ func ParseUnitRecord(b []byte) (UnitRecord, error) {
 // clown re-reads it across its [attach] re-exec, so the unit must not be able
 // to edit it.
 func UnitSpecPath(stateDir, worktree string) string {
-	return strings.TrimSuffix(UnitRecordPath(stateDir, worktree), ".json") + ".spec.json"
+	return specPathFor(UnitRecordPath(stateDir, worktree))
 }
 
 // isAgentUnitCgroup accepts an absolute, clean cgroup path whose parent

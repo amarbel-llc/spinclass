@@ -422,6 +422,12 @@ func runHookInDir(ctx context.Context, cmd *string, envDir, runDir string, requi
 // would hand it. nil keeps the ordinary inherit-and-wrap behaviour.
 type hermeticGate struct {
 	env []string
+	// sh is the absolute shell to exec, resolved and checked once with the
+	// environment; argv[0] is never looked up on the frontend's PATH again.
+	sh string
+	// forbidden are the worker-written directories the scope prefix's program
+	// is checked against before it is exec'd by absolute path.
+	forbidden []string
 }
 
 // runHookInDirEnv is runHookInDir with a few extras; every hook that needs none
@@ -508,6 +514,9 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 	// scan when direnv is not build-pinned) so the common non-direnv repo skips
 	// the lookup entirely.
 	argv := []string{"sh", "-c", script}
+	if hermetic != nil {
+		argv[0] = hermetic.sh
+	}
 	if hermetic == nil && direnv.HasEnvrc(envDir) {
 		if direnvPath, ok := direnv.Resolve(); ok {
 			argv = direnv.WrapExec(direnvPath, envDir, argv)
@@ -569,6 +578,15 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 	)
 	if scopeID != "" {
 		if prefix, ok := scopeArgv(scopeID); ok {
+			if hermetic != nil && len(prefix) > 0 {
+				// The scope prefix's program (systemd-run) is exec'd by
+				// absolute path after the same check as the gate's tools.
+				p, rErr := resolveGateTool(prefix[0], hermetic.forbidden)
+				if rErr != nil {
+					return rErr
+				}
+				prefix = append([]string{p}, prefix[1:]...)
+			}
 			_, scoped, err = runHookInScope(ctx, newHookCmd, prefix, argv, requireScope, w)
 			if !scoped && err != nil {
 				return err

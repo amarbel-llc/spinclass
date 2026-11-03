@@ -76,28 +76,57 @@ var confinedGateKeep = []string{
 // is an error, as is a tool not on the frontend's PATH. The gate then fails
 // closed before anything runs.
 func ConfinedGateEnv(runDir string, forbidden []string) ([]string, error) {
+	g, err := newConfinedGate(runDir, forbidden)
+	if err != nil {
+		return nil, err
+	}
+	return g.env, nil
+}
+
+// confinedGate is what a guarded gate runs with: its environment, the
+// absolute shell to exec (never a PATH lookup at exec time, which would be a
+// second lookup on the frontend's PATH after the check), and the directories
+// the worker writes, which the scope prefix is checked against too.
+type confinedGate struct {
+	env       []string
+	sh        string
+	forbidden []string
+}
+
+func newConfinedGate(runDir string, forbidden []string) (*confinedGate, error) {
 	for _, v := range []string{"DIRENV_DIR", "DIRENV_FILE"} {
 		p := strings.TrimPrefix(os.Getenv(v), "-")
 		if d := underAny(p, forbidden); d != "" {
 			return nil, fmt.Errorf("guarded gate: the frontend runs inside the direnv of %s (%s=%s), so its PATH is that worktree's devshell; start the merge from outside it", d, v, os.Getenv(v))
 		}
 	}
+	// Any PATH entry the worker writes poisons every lookup, so the whole
+	// PATH is checked, not only the tools found on it.
+	for _, entry := range filepath.SplitList(os.Getenv("PATH")) {
+		if d := underAny(entry, forbidden); d != "" {
+			return nil, fmt.Errorf("guarded gate: the frontend's PATH has %s, under %s, which the worker writes; start the merge from a shell without it", entry, d)
+		}
+	}
 	var dirs []string
 	seen := map[string]bool{}
+	resolvedTool := map[string]string{}
 	for _, tool := range confinedGateTools {
-		p, err := exec.LookPath(tool)
+		p, err := resolveGateTool(tool, forbidden)
 		if err != nil {
-			return nil, fmt.Errorf("guarded gate: %s is not on the frontend's PATH, so the gate cannot run: %w", tool, err)
+			return nil, err
 		}
-		if resolved, rErr := filepath.EvalSymlinks(p); rErr == nil {
-			p = resolved
-		}
-		if d := underAny(p, forbidden); d != "" {
-			return nil, fmt.Errorf("guarded gate: %s resolves to %s, under %s, which the worker writes; the gate cannot trust it", tool, p, d)
-		}
+		resolvedTool[tool] = p
 		if d := filepath.Dir(p); !seen[d] {
 			seen[d] = true
 			dirs = append(dirs, d)
+		}
+	}
+	sh, ok := resolvedTool["sh"]
+	if !ok {
+		// A test's tool list without sh: still exec an absolute shell.
+		var err error
+		if sh, err = resolveGateTool("sh", forbidden); err != nil {
+			return nil, err
 		}
 	}
 	env := []string{"PATH=" + strings.Join(dirs, ":")}
@@ -106,12 +135,30 @@ func ConfinedGateEnv(runDir string, forbidden []string) ([]string, error) {
 			env = append(env, k+"="+v)
 		}
 	}
-	return append(env,
+	env = append(env,
 		"NIX_CONFIG="+ConfinedGateNixConfig,
 		"GIT_ALLOW_PROTOCOL=file:https",
 		"WORKTREE="+runDir,
 		"SPINCLASS_GUARDED_GATE=1",
-	), nil
+	)
+	return &confinedGate{env: env, sh: sh, forbidden: forbidden}, nil
+}
+
+// resolveGateTool finds tool on the frontend's PATH, resolves its symlinks,
+// and refuses one under a directory the worker writes. The scope prefix's
+// program goes through it too (runHookInDirEnv).
+func resolveGateTool(tool string, forbidden []string) (string, error) {
+	p, err := exec.LookPath(tool)
+	if err != nil {
+		return "", fmt.Errorf("guarded gate: %s is not on the frontend's PATH, so the gate cannot run: %w", tool, err)
+	}
+	if resolved, rErr := filepath.EvalSymlinks(p); rErr == nil {
+		p = resolved
+	}
+	if d := underAny(p, forbidden); d != "" {
+		return "", fmt.Errorf("guarded gate: %s resolves to %s, under %s, which the worker writes; the gate cannot trust it", tool, p, d)
+	}
+	return p, nil
 }
 
 // underAny returns the first of dirs that contains p (symlinks in both
@@ -152,12 +199,12 @@ func resolvedOr(d string) string {
 // sf supplies the watchdog and scope settings only; its pre-merge command is
 // never read.
 func ConfinedPreMergeInDir(ctx context.Context, sf sweatfile.Sweatfile, cmd, runDir string, forbidden []string, w io.Writer) error {
-	env, err := ConfinedGateEnv(runDir, forbidden)
+	g, err := newConfinedGate(runDir, forbidden)
 	if err != nil {
 		return err
 	}
 	command := cmd
 	return withInactivityWatchdog(ctx, sf, w, func(ctx context.Context, w io.Writer) error {
-		return runHookInDirEnv(ctx, &command, runDir, runDir, nil, 0, clown.ScopeIDFromContext(ctx), sf.RequireHookScope(), 0, w, &hermeticGate{env: env})
+		return runHookInDirEnv(ctx, &command, runDir, runDir, nil, 0, clown.ScopeIDFromContext(ctx), sf.RequireHookScope(), 0, w, &hermeticGate{env: g.env, sh: g.sh, forbidden: g.forbidden})
 	})
 }

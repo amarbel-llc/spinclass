@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -200,29 +201,20 @@ func PrincipalOfSession(sys System, stateDir, sessionKey, worktree string) (prin
 
 // LaunchedConfined reports whether worktree has (or had) an agent unit: a
 // frontend-owned unit record or spec exists for it.
-// The record is keyed by the path the spawn used; a caller may name the same
-// worktree through a symlinked parent (a tool's cwd against the recorded
-// absolute path), so both spellings are tried. A miss must never turn a
-// confined session into an ordinary one.
+// The record is keyed by the worktree's canonical path (UnitRecordPath); a
+// record written by a pre-canonical spinclass under the spelling as given is
+// found through the legacy key. A miss must never turn a confined session into
+// an ordinary one, so a stat that fails for any reason other than absence
+// (permission, a file where a directory should be) reads as confined.
 func LaunchedConfined(stateDir, worktree string) bool {
-	for _, wt := range worktreeSpellings(worktree) {
-		for _, f := range []string{UnitRecordPath(stateDir, wt), UnitSpecPath(stateDir, wt)} {
-			if _, err := os.Lstat(f); err == nil {
+	for _, rec := range []string{UnitRecordPath(stateDir, worktree), unitRecordPathKeyed(stateDir, filepath.Clean(worktree))} {
+		for _, f := range []string{rec, specPathFor(rec)} {
+			if _, err := os.Lstat(f); err == nil || !errors.Is(err, fs.ErrNotExist) {
 				return true
 			}
 		}
 	}
 	return false
-}
-
-// worktreeSpellings is the path as given and with every symlink resolved,
-// deduplicated.
-func worktreeSpellings(worktree string) []string {
-	out := []string{worktree}
-	if resolved, err := filepath.EvalSymlinks(worktree); err == nil && filepath.Clean(resolved) != filepath.Clean(worktree) {
-		out = append(out, resolved)
-	}
-	return out
 }
 
 // GuardedWorktree reports whether a merge or check of worktree must run the

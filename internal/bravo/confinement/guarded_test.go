@@ -49,16 +49,47 @@ func TestGuardedWorktreeThroughASymlinkedParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	viaLink := filepath.Join(link, "wt")
-	// Recorded under the real path, queried through the link: found. (The
-	// reverse cannot be: a real path does not lead back to a link.)
-	spec := UnitSpecPath(stateDir, real)
-	if err := os.MkdirAll(filepath.Dir(spec), 0o755); err != nil {
+	// The key is canonical, so whichever spelling wrote the record, either
+	// spelling finds it.
+	for _, tc := range []struct{ recorded, queried string }{{real, viaLink}, {viaLink, real}} {
+		dir := t.TempDir()
+		t.Setenv("XDG_STATE_HOME", dir)
+		spec := UnitSpecPath(dir, tc.recorded)
+		if err := os.MkdirAll(filepath.Dir(spec), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(spec, []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if !GuardedWorktree(tc.queried) {
+			t.Errorf("recorded as %s, queried as %s: not guarded", tc.recorded, tc.queried)
+		}
+	}
+	// A record a pre-canonical spinclass keyed by the link spelling as given
+	// is still found.
+	legacyDir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", legacyDir)
+	legacy := specPathFor(unitRecordPathKeyed(legacyDir, filepath.Clean(viaLink)))
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(spec, []byte("{}"), 0o644); err != nil {
+	if err := os.WriteFile(legacy, []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if !GuardedWorktree(viaLink) {
-		t.Errorf("recorded as %s, queried as %s: not guarded", real, viaLink)
+		t.Error("a legacy record keyed by the given spelling is not found")
+	}
+}
+
+// A stat that fails for a reason other than absence is not "no record": a
+// state directory that is a file (ENOTDIR) reads as confined.
+func TestGuardedWorktreeFailsClosedOnAStatErrorOtherThanAbsence(t *testing.T) {
+	notADir := filepath.Join(t.TempDir(), "state-is-a-file")
+	if err := os.WriteFile(notADir, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_STATE_HOME", notADir)
+	if !GuardedWorktree(t.TempDir()) {
+		t.Fatal("an unreadable record location must fail closed")
 	}
 }

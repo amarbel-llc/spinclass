@@ -348,6 +348,11 @@ func RunGuardedWithReporterContext(
 		return nil, FailStep(ts, "pre-merge build worktree for "+branch, prepErr, "")
 	}
 	defer cleanup()
+	// The lock policy (F1): no input on the local filesystem, judged on the
+	// committed tree in the build worktree, before the command.
+	if lockErr := refuseUnsafeFlakeLock(hookDir); lockErr != nil {
+		return nil, FailStep(ts, label, lockErr, "")
+	}
 
 	source := "the built-in default"
 	if gate.Source != "" {

@@ -1593,6 +1593,62 @@ explore-live-close-leftovers key:
     printf 'FAIL    processes of the closed session survive:\n%s' "$left"
     exit 1
 
+# [explore] PoC for the #449 review's F1 theory: does the guarded gate's default
+# command (`nix flake check --no-update-lock-file`, under the gate's scrubbed env
+# and pinned NIX_CONFIG) fetch a flake INPUT that names a path outside the build
+# worktree into the world-readable /nix/store before it refuses the stale lock?
+# Uses a scratch flake in a temp dir and a DUMMY marker file as the "secret";
+# never a real secret. Two runs: no lock committed, and a worker-committed lock
+# with a wrong narHash. Then lists every store path newer than the marker that
+# holds it. Also prints the daemon's sandbox setting. Read-only apart from the
+# temp dir and whatever nix adds to the store.
+#
+# PoC: does the guarded gate copy an out-of-tree flake input into /nix/store? (dummy marker only)
+[group("explore")]
+explore-guarded-gate-input-leak:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    work=$(mktemp -d)
+    trap 'rm -rf "$work"' EXIT
+    outside="$work/outside"; mkdir -p "$outside"
+    token="SPINCLASS-DUMMY-MARKER-$(date +%s)-$RANDOM"
+    printf '%s\n' "$token" > "$outside/marker.txt"
+    flake="$work/flake"; mkdir -p "$flake"
+    ls /nix/store > "$work/store-before"
+    writeflake() {  # $1: the outputs expression
+      printf '{ inputs.leak = { url = "path:%s"; flake = false; };\n  outputs = { self, leak }: %s; }\n' "$outside" "$1" > "$flake/flake.nix"
+      git -C "$flake" add flake.nix
+      git -C "$flake" -c user.name=t -c user.email=t@t commit -qm flake >/dev/null
+    }
+    git -C "$flake" init -q
+    writeflake '{ checks = { }; }'
+    gatepath="$(dirname "$(command -v nix)"):$(dirname "$(command -v git)"):$(dirname "$(command -v sh)")"
+    gate() {
+      env -i PATH="$gatepath" HOME="$HOME" ${NIX_REMOTE:+NIX_REMOTE="$NIX_REMOTE"} \
+        NIX_CONFIG=$'allow-unsafe-native-code-during-evaluation = false\naccept-flake-config = false\nsandbox = true\n' \
+        GIT_ALLOW_PROTOCOL=file:https SPINCLASS_GUARDED_GATE=1 \
+        sh -c 'cd "$1" && nix flake check --no-update-lock-file' sh "$flake" 2>&1 | tail -15
+      echo "exit: ${PIPESTATUS[0]}"
+    }
+    echo "== daemon sandbox setting (nix config show)"; nix config show sandbox 2>/dev/null || nix show-config 2>/dev/null | grep '^sandbox'
+    echo "== run 1: no flake.lock committed"; gate
+    printf '{ "nodes": { "leak": { "flake": false, "locked": { "lastModified": 1, "narHash": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "path": "%s", "type": "path" }, "original": { "path": "%s", "type": "path" } }, "root": { "inputs": { "leak": "leak" } } }, "root": "root", "version": 7 }\n' "$outside" "$outside" > "$flake/flake.lock"
+    git -C "$flake" add flake.lock
+    git -C "$flake" -c user.name=t -c user.email=t@t commit -qm lock
+    echo "== run 2: worker-committed flake.lock with a wrong narHash, outputs never touch the input"; gate
+    sys=$(nix eval --impure --raw --expr builtins.currentSystem 2>/dev/null || echo x86_64-linux)
+    writeflake "{ checks.$sys.touch = derivation { name = \"touch\"; system = \"$sys\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo \${leak} > \$out\" ]; }; }"
+    echo "== run 3: same wrong-narHash lock, an output references the input (forces the fetch)"; gate
+    echo "== store paths added during the runs that hold the marker"
+    ls /nix/store > "$work/store-after"
+    leaked=0
+    while IFS= read -r name; do
+      p="/nix/store/$name"
+      [ -f "$p/marker.txt" ] && grep -qxF "$token" "$p/marker.txt" && { echo "LEAKED: $p ($(stat -c %a "$p"))"; leaked=1; }
+    done < <(comm -13 "$work/store-before" "$work/store-after")
+    [ "$leaked" = 0 ] && echo "NOT IN STORE: no store path added during the runs holds the marker"
+    echo "SUMMARY: leaked=$leaked"
+
 # [debug] Block for `seconds` doing nothing. NOT a hang fixture (drill 3,
 # 2026-10-27): called through run_recipe the harness returns control after 120 s
 # ("moved to the background"), the model's turn ENDS and the session is idle with a

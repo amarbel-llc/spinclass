@@ -356,6 +356,27 @@ The findings:
   the review that forced it: `docs/plans/2026-11-03-432-confined-self-landing.md`
   sections 12 and 13.
 
+  **Evaluation runs as the operator uid; the lock rule is a policy.** The nix
+  evaluator reads the whole filesystem as the operator, and a flake input it
+  fetches is copied into `/nix/store` (world-readable, mounted into every unit)
+  before the lock's narHash is compared. The confined review of the landed
+  gate (spinclass/bold-yew, 2026-11-03) predicted and the recipe
+  `explore-guarded-gate-input-leak` confirmed: a worker-committed `flake.lock`
+  with a `path:` input naming an operator path and a wrong hash, referenced by
+  an output, lands that path in the store through one failed merge (a missing
+  lock, or an input the lock lacks, is refused by nix before any fetch). The
+  guarded gate therefore refuses, before its command runs, a lock that is
+  missing, unreadable, or has any input on the local filesystem (a `path` node,
+  or a `git`/`tarball`/`file` node with a `file:` URL), naming the node and the
+  kind only (`check/lockpolicy.go`). That is policy over what nix would fetch,
+  not a boundary: the boundary is evaluation in a mount namespace that sees
+  only the build worktree and `/nix` (the gate in a unit, spinclass#448 item 4,
+  path A, needs clown; not started). The gate's tools come from the frontend's
+  PATH until spinclass#454 pins them (every PATH entry under a worker-written
+  directory refuses the gate meanwhile), and post-merge targets still run the
+  landed tree in the frontend unguarded (their own digest rule applies), so a
+  confined landing uses `targets=[]`.
+
 - **Open to a confined caller, each with a reason.** These are declared in
   `openServeTools` (`serve_caller_gate_test.go`).
   `TestEveryServeToolIsGatedOrDeclaredOpen` walks every registered MCP tool

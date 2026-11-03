@@ -325,9 +325,22 @@ does not export *WORKTREE*.
 	*repair*, and is refused
 	when *disable-merge-build-worktree* is set or the trusted hierarchy does
 	not load. The record carries an ok point naming the command and the layer
-	it came from, and one per repo-level value it ignored. What a confined
-	landing loses: the justfile's recipes and any impure lane; the flake's
-	*checks* are its whole gate. What the guard does not cover: it bounds
+	it came from, and one per repo-level value it ignored. Before the command
+	runs, the committed _flake.lock_ in the build worktree is judged: a
+	guarded merge is refused when it is missing, unreadable, or has any input
+	on the local filesystem (a *path* node, or a *git*, *tarball* or *file*
+	node with a *file:* URL), because the evaluator runs as the operator's
+	uid with the whole filesystem readable and copies an input into the
+	world-readable _/nix/store_ before it compares the lock's hash, so a
+	worker-committed lock naming an operator path with a wrong hash would
+	leak that path through one failed merge (the recipe
+	*explore-guarded-gate-input-leak* shows it). The refusal names the node
+	and its kind only. That lock rule is a policy, not a boundary: the
+	boundary is evaluation in a mount namespace that sees only the build
+	worktree and _/nix_ (the gate in a unit, spinclass#448, not started).
+	What a confined landing loses: the justfile's recipes and any impure
+	lane; the flake's *checks* are its whole gate. What the guard does not
+	cover: it bounds
 	what this merge's frontend executes, nothing later: the landed tree is
 	run unguarded by the next *sc start* in that repo (its *create* hook,
 	*.envrc*), by the next unconfined session's merge, and by *[[post-merge]]*

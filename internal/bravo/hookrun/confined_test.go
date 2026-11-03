@@ -71,7 +71,8 @@ func TestConfinedPreMergeNeverLoadsDirenvAndScrubsTheEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	// bash exec'd by its absolute path prints `declare -x`; sh prints `export`.
+	lines := strings.Split(strings.ReplaceAll(strings.TrimSpace(string(raw)), "declare -x ", "export "), "\n")
 	if got := lines[len(lines)-1]; got != runDir {
 		t.Errorf("cwd = %q, want the build worktree %q", got, runDir)
 	}
@@ -154,8 +155,19 @@ func TestConfinedPreMergeRefusesToolsFromTheWorkerTree(t *testing.T) {
 		}
 		t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 		err := ConfinedPreMergeInDir(context.Background(), sweatfile.Sweatfile{}, ": > "+marker, t.TempDir(), []string{wt}, nil)
-		if err == nil || !strings.Contains(err.Error(), "git") || !strings.Contains(err.Error(), wt) {
-			t.Fatalf("err = %v, want a refusal naming git under the worktree", err)
+		if err == nil || !strings.Contains(err.Error(), wt) {
+			t.Fatalf("err = %v, want a refusal naming the worktree", err)
+		}
+	})
+	t.Run("PATH entry under the worktree with no tool in it", func(t *testing.T) {
+		empty := filepath.Join(wt, "empty-bin")
+		if err := os.MkdirAll(empty, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", os.Getenv("PATH")+":"+empty)
+		err := ConfinedPreMergeInDir(context.Background(), sweatfile.Sweatfile{}, ": > "+marker, t.TempDir(), []string{wt}, nil)
+		if err == nil || !strings.Contains(err.Error(), "PATH") || !strings.Contains(err.Error(), wt) {
+			t.Fatalf("err = %v, want a refusal naming the PATH entry under the worktree", err)
 		}
 	})
 	t.Run("frontend inside the worktree's direnv", func(t *testing.T) {
