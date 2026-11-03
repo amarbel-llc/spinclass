@@ -327,7 +327,11 @@ does not export *WORKTREE*.
 	not load. The record carries an ok point naming the command and the layer
 	it came from, and one per repo-level value it ignored. Before the command
 	runs, the committed _flake.lock_ in the build worktree is judged: a
-	guarded merge is refused when it is missing, unreadable, or has any input
+	guarded merge is refused when it is missing, unreadable, incomplete (an
+	input _flake.nix_ declares that the lock lacks, listed by a restricted
+	*nix eval* of a store copy of the file under the gate's environment: no
+	path but that copy, no URI, no import from derivation, bounded depth,
+	output and time), or has any input
 	on the local filesystem (a *path* node, or a *git*, *tarball* or *file*
 	node with a *file:* URL), because the evaluator runs as the operator's
 	uid with the whole filesystem readable and copies an input into the
@@ -335,7 +339,10 @@ does not export *WORKTREE*.
 	worker-committed lock naming an operator path with a wrong hash would
 	leak that path through one failed merge (the recipe
 	*explore-guarded-gate-input-leak* shows it). The refusal names the node
-	and its kind only. That lock rule is a policy, not a boundary: the
+	and its kind only; a lock that is not a regular file is refused unread.
+	Only the root flake's lock is judged: a subflake is reached only as an
+	input, which the lock then names, and a trusted command naming another
+	flake (*?dir=*) is the operator's choice. That lock rule is a policy, not a boundary: the
 	boundary is evaluation in a mount namespace that sees only the build
 	worktree and _/nix_ (the gate in a unit, spinclass#448, not started).
 	What a confined landing loses: the justfile's recipes and any impure

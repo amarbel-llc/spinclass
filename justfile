@@ -1597,11 +1597,15 @@ explore-live-close-leftovers key:
 # command (`nix flake check --no-update-lock-file`, under the gate's scrubbed env
 # and pinned NIX_CONFIG) fetch a flake INPUT that names a path outside the build
 # worktree into the world-readable /nix/store before it refuses the stale lock?
-# Uses a scratch flake in a temp dir and a DUMMY marker file as the "secret";
-# never a real secret. Two runs: no lock committed, and a worker-committed lock
-# with a wrong narHash. Then lists every store path newer than the marker that
-# holds it. Also prints the daemon's sandbox setting. Read-only apart from the
-# temp dir and whatever nix adds to the store.
+# Uses scratch flakes in a temp dir and a DUMMY marker file as the "secret",
+# a fresh marker and store snapshot per variant; never a real secret. Variants:
+# no lock; a worker-committed lock with a wrong narHash, unused and used by an
+# output; and the review's F1' shapes, where the lock is complete for what it
+# names but flake.nix declares an input the lock lacks that carries ?narHash=
+# (a path: input, a tarball+file: input, and the same one level down in a
+# git+file: subflake). Reports per variant whether a store path added during
+# the run holds the marker. Also prints the daemon's sandbox setting. Read-only
+# apart from the temp dir and whatever nix adds to the store.
 #
 # PoC: does the guarded gate copy an out-of-tree flake input into /nix/store? (dummy marker only)
 [group("explore")]
@@ -1610,44 +1614,158 @@ explore-guarded-gate-input-leak:
     set -uo pipefail
     work=$(mktemp -d)
     trap 'rm -rf "$work"' EXIT
-    outside="$work/outside"; mkdir -p "$outside"
-    token="SPINCLASS-DUMMY-MARKER-$(date +%s)-$RANDOM"
-    printf '%s\n' "$token" > "$outside/marker.txt"
-    flake="$work/flake"; mkdir -p "$flake"
-    ls /nix/store > "$work/store-before"
-    writeflake() {  # $1: the outputs expression
-      printf '{ inputs.leak = { url = "path:%s"; flake = false; };\n  outputs = { self, leak }: %s; }\n' "$outside" "$1" > "$flake/flake.nix"
-      git -C "$flake" add flake.nix
-      git -C "$flake" -c user.name=t -c user.email=t@t commit -qm flake >/dev/null
-    }
-    git -C "$flake" init -q
-    writeflake '{ checks = { }; }'
     gatepath="$(dirname "$(command -v nix)"):$(dirname "$(command -v git)"):$(dirname "$(command -v sh)")"
-    gate() {
+    sys=$(nix eval --impure --raw --expr builtins.currentSystem 2>/dev/null || echo x86_64-linux)
+    badhash="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    rootonly='{ "nodes": { "root": { } }, "root": "root", "version": 7 }'
+    commit() { git -C "$1" add -A; git -C "$1" -c user.name=t -c user.email=t@t commit -qm "$2" >/dev/null; }
+    # touches NAME: an outputs expression whose check forces input NAME.
+    touches() { printf '{ checks.%s.touch = derivation { name = "touch"; system = "%s"; builder = "/bin/sh"; args = [ "-c" "echo ${%s} > $out" ]; }; }' "$sys" "$sys" "$1"; }
+    gate() {  # $1: flake dir
       env -i PATH="$gatepath" HOME="$HOME" ${NIX_REMOTE:+NIX_REMOTE="$NIX_REMOTE"} \
         NIX_CONFIG=$'allow-unsafe-native-code-during-evaluation = false\naccept-flake-config = false\nsandbox = true\n' \
         GIT_ALLOW_PROTOCOL=file:https SPINCLASS_GUARDED_GATE=1 \
-        sh -c 'cd "$1" && nix flake check --no-update-lock-file' sh "$flake" 2>&1 | tail -15
+        sh -c 'cd "$1" && nix flake check --no-update-lock-file' sh "$1" 2>&1 | tail -6
       echo "exit: ${PIPESTATUS[0]}"
     }
+    results=""
+    # variant NAME DESC: a fresh marker dir and token, a fresh flake; setup_NAME
+    # FLAKE OUTSIDE writes the flake; then the gate runs and every store path
+    # added meanwhile is searched for the token.
+    variant() {
+      local name=$1 desc=$2 outside flake token leaked=0 p
+      outside="$work/$name-outside"; mkdir -p "$outside"
+      token="SPINCLASS-DUMMY-MARKER-$name-$(date +%s)-$RANDOM"
+      printf '%s\n' "$token" > "$outside/marker.txt"
+      flake="$work/$name-flake"; mkdir -p "$flake"; git -C "$flake" init -q
+      "setup_$name" "$flake" "$outside"
+      ls /nix/store > "$work/$name-before"
+      echo "== $name: $desc"; gate "$flake"
+      ls /nix/store > "$work/$name-after"
+      while IFS= read -r p; do
+        p="/nix/store/$p"
+        if [ -f "$p/marker.txt" ] && grep -qxF "$token" "$p/marker.txt"; then echo "LEAKED: $p ($(stat -c %a "$p"))"; leaked=1
+        elif [ -f "$p" ] && grep -qF "$token" "$p" 2>/dev/null; then echo "LEAKED (file): $p"; leaked=1; fi
+      done < <(comm -13 "$work/$name-before" "$work/$name-after")
+      [ "$leaked" = 0 ] && echo "NOT IN STORE"
+      results="$results$name leaked=$leaked"$'\n'
+    }
+    setup_nolock() { printf '{ inputs.leak = { url = "path:%s"; flake = false; }; outputs = { self, leak }: %s; }\n' "$2" "$(touches leak)" > "$1/flake.nix"; commit "$1" flake; }
+    setup_wronghash_unused() {
+      printf '{ inputs.leak = { url = "path:%s"; flake = false; }; outputs = { self, leak }: { checks = { }; }; }\n' "$2" > "$1/flake.nix"
+      printf '{ "nodes": { "leak": { "flake": false, "locked": { "lastModified": 1, "narHash": "%s", "path": "%s", "type": "path" }, "original": { "path": "%s", "type": "path" } }, "root": { "inputs": { "leak": "leak" } } }, "root": "root", "version": 7 }\n' "$badhash" "$2" "$2" > "$1/flake.lock"
+      commit "$1" flake
+    }
+    setup_wronghash_used() {
+      setup_wronghash_unused "$1" "$2"
+      printf '{ inputs.leak = { url = "path:%s"; flake = false; }; outputs = { self, leak }: %s; }\n' "$2" "$(touches leak)" > "$1/flake.nix"; commit "$1" flake
+    }
+    setup_f1prime_path() {
+      printf '{ inputs.leak = { url = "path:%s?narHash=%s"; flake = false; }; outputs = { self, leak }: %s; }\n' "$2" "$badhash" "$(touches leak)" > "$1/flake.nix"
+      printf '%s\n' "$rootonly" > "$1/flake.lock"; commit "$1" flake
+    }
+    setup_f1prime_tarball() {
+      tar -cf "$2.tar" -C "$2" marker.txt
+      printf '{ inputs.leak = { url = "tarball+file://%s.tar?narHash=%s"; flake = false; }; outputs = { self, leak }: %s; }\n' "$2" "$badhash" "$(touches leak)" > "$1/flake.nix"
+      printf '%s\n' "$rootonly" > "$1/flake.lock"; commit "$1" flake
+    }
+    setup_f1prime_transitive() {
+      local sub="$1-sub" meta
+      mkdir -p "$sub"; git -C "$sub" init -q
+      printf '{ inputs.leak = { url = "path:%s?narHash=%s"; flake = false; }; outputs = { self, leak }: %s; }\n' "$2" "$badhash" "$(touches leak)" > "$sub/flake.nix"
+      commit "$sub" sub
+      meta=$(nix flake prefetch --json "git+file://$sub" 2>/dev/null)
+      local hash rev
+      hash=$(nix eval --impure --raw --expr "(builtins.fromJSON ''$meta'').hash")
+      rev=$(nix eval --impure --raw --expr "(builtins.fromJSON ''$meta'').locked.rev")
+      printf '{ inputs.sub.url = "git+file://%s"; outputs = { self, sub }: { checks.%s.touch = sub.checks.%s.touch; }; }\n' "$sub" "$sys" "$sys" > "$1/flake.nix"
+      printf '{ "nodes": { "sub": { "locked": { "lastModified": 1, "narHash": "%s", "ref": "refs/heads/master", "rev": "%s", "type": "git", "url": "file://%s" }, "original": { "type": "git", "url": "file://%s" } }, "root": { "inputs": { "sub": "sub" } } }, "root": "root", "version": 7 }\n' "$hash" "$rev" "$sub" "$sub" > "$1/flake.lock"
+      commit "$1" flake
+    }
     echo "== daemon sandbox setting (nix config show)"; nix config show sandbox 2>/dev/null || nix show-config 2>/dev/null | grep '^sandbox'
-    echo "== run 1: no flake.lock committed"; gate
-    printf '{ "nodes": { "leak": { "flake": false, "locked": { "lastModified": 1, "narHash": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "path": "%s", "type": "path" }, "original": { "path": "%s", "type": "path" } }, "root": { "inputs": { "leak": "leak" } } }, "root": "root", "version": 7 }\n' "$outside" "$outside" > "$flake/flake.lock"
-    git -C "$flake" add flake.lock
-    git -C "$flake" -c user.name=t -c user.email=t@t commit -qm lock
-    echo "== run 2: worker-committed flake.lock with a wrong narHash, outputs never touch the input"; gate
-    sys=$(nix eval --impure --raw --expr builtins.currentSystem 2>/dev/null || echo x86_64-linux)
-    writeflake "{ checks.$sys.touch = derivation { name = \"touch\"; system = \"$sys\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo \${leak} > \$out\" ]; }; }"
-    echo "== run 3: same wrong-narHash lock, an output references the input (forces the fetch)"; gate
-    echo "== store paths added during the runs that hold the marker"
-    ls /nix/store > "$work/store-after"
-    leaked=0
-    while IFS= read -r name; do
-      p="/nix/store/$name"
-      [ -f "$p/marker.txt" ] && grep -qxF "$token" "$p/marker.txt" && { echo "LEAKED: $p ($(stat -c %a "$p"))"; leaked=1; }
-    done < <(comm -13 "$work/store-before" "$work/store-after")
-    [ "$leaked" = 0 ] && echo "NOT IN STORE: no store path added during the runs holds the marker"
-    echo "SUMMARY: leaked=$leaked"
+    variant nolock "no flake.lock committed, an output references the path input"
+    variant wronghash_unused "worker-committed lock with a wrong narHash, outputs never touch the input"
+    variant wronghash_used "same wrong-narHash lock, an output references the input"
+    variant f1prime_path "lock complete for what it names; flake.nix declares path:...?narHash= the lock lacks, referenced"
+    variant f1prime_tarball "lock complete; flake.nix declares tarball+file:...?narHash= the lock lacks, referenced"
+    variant f1prime_transitive "root lock names a git+file: subflake; the subflake declares path:...?narHash= its lock lacks"
+    printf '== SUMMARY\n%s' "$results"
+
+# [explore] PoC for the guarded gate's lock-completeness check (#449 F1'): the
+# `nix eval` the gate uses to list the inputs flake.nix declares, run against
+# hostile flake.nix shapes (readFile of a dummy marker outside the flake and
+# inside it, getEnv, readDir, pathExists, currentSystem, an attrName computed
+# from the marker, fetchurl and fetchGit with hashes, storePath, infinite
+# recursion, a huge list), each in its own temp dir, under the gate's scrubbed
+# env, in one or more evaluation modes (the ones that cannot import a file at
+# all on this nix are kept for the record). Prints per shape: exit code, whether
+# the marker's content showed up in stdout or stderr, wall time, output size.
+# Dummy marker only.
+#
+# PoC: is the guarded gate's inputs enumeration pure and bounded on this nix? (dummy marker only)
+[group("explore")]
+explore-guarded-gate-inputs-eval:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    work=$(mktemp -d)
+    trap 'rm -rf "$work"' EXIT
+    gatepath="$(dirname "$(command -v nix)"):$(dirname "$(command -v git)"):$(dirname "$(command -v sh)")"
+    secret="DUMMY-MARKER-NOT-A-SECRET-$RANDOM"
+    marker="$work/marker"; printf '%s' "$secret" > "$marker"
+    export LEAK_ME="$secret"
+    # modeargs MODE DIR: how the flake.nix is handed to nix eval. `-f` refuses
+    # --pure-eval, so the candidates are --expr with an absolute import under
+    # pure eval, an -I search-path entry under pure eval, and restrict-eval
+    # (no allowed URIs) with -f or -I.
+    modeargs() {
+      case "$1" in
+        pure-expr) printf '%s\n' --pure-eval --expr "import $2/flake.nix" ;;
+        pure-I) printf '%s\n' --pure-eval -I "f=$2" --expr 'import <f>/flake.nix' ;;
+        restrict-f) printf '%s\n' --option restrict-eval true --option allowed-uris "" -f ./flake.nix ;;
+        restrict-I) printf '%s\n' --option restrict-eval true --option allowed-uris "" -I "f=$2" --expr 'import <f>/flake.nix' ;;
+        # What flakes do: the file is copied into the store first, and pure
+        # evaluation imports the store path (store paths are always readable).
+        pure-store) local sp; sp=$(nix store add --mode flat "$2/flake.nix" 2>/dev/null) || sp=$(nix store add-file "$2/flake.nix")
+                    printf '%s\n' --pure-eval --option allowed-uris "" --expr "import $sp" ;;
+        # restrict-eval allows the Nix search path: the store copy as the only
+        # entry, no URIs, and every other absolute path refused.
+        restrict-store) local sp; sp=$(nix store add --mode flat "$2/flake.nix" 2>/dev/null) || sp=$(nix store add-file "$2/flake.nix")
+                    printf '%s\n' --option restrict-eval true --option allowed-uris "" -I "f=$sp" --expr 'import <f>' ;;
+        # The new CLI's nix eval is pure by default and refuses every file
+        # import; --impure with restrict-eval keeps reads to the search path
+        # (the store copy) and the store, and allowed-uris "" forbids fetches.
+        restrict-impure) local sp; sp=$(nix store add --mode flat "$2/flake.nix" 2>/dev/null) || sp=$(nix store add-file "$2/flake.nix")
+                    printf '%s\n' --impure --option restrict-eval true --option allowed-uris "" -I "f=$sp" --expr 'import <f>' ;;
+      esac
+    }
+    run() {  # $1 mode, $2 name, $3 flake.nix body
+      local dir="$work/$1-$2" out start end
+      mkdir -p "$dir"; printf '%s\n' "$3" > "$dir/flake.nix"
+      local -a args; mapfile -t args < <(modeargs "$1" "$dir")
+      start=$(date +%s)
+      out=$(cd "$dir" && env -i PATH="$gatepath" HOME="$HOME" LEAK_ME="$secret" ${NIX_REMOTE:+NIX_REMOTE="$NIX_REMOTE"} \
+        NIX_CONFIG=$'allow-unsafe-native-code-during-evaluation = false\naccept-flake-config = false\nsandbox = true\n' \
+        timeout 20 nix eval --json --option allow-import-from-derivation false --option max-call-depth 2000 \
+          "${args[@]}" --apply 'f: builtins.attrNames (f.inputs or { })' 2>&1 | head -c 2000000; exit "${PIPESTATUS[0]}"); code=$?
+      end=$(date +%s)
+      leaked=no; printf '%s' "$out" | grep -qF "$secret" && leaked=YES
+      printf '%-16s %-20s exit=%-3s marker-in-output=%-3s %ss bytes=%s  %s\n' "$1" "$2" "$code" "$leaked" "$((end - start))" "${#out}" "$(printf '%s' "$out" | head -c 300 | tr '\n' ' ')"
+    }
+    for mode in restrict-impure; do
+      run "$mode" honest '{ inputs.a.url = "github:x/y"; inputs.b = { url = "github:x/z"; flake = false; }; outputs = _: {}; }'
+      run "$mode" throw-readfile "{ inputs = throw (builtins.readFile $marker); outputs = _: {}; }"
+      run "$mode" attrname-from-file "{ inputs = { \${builtins.readFile $marker} = { }; }; outputs = _: {}; }"
+      run "$mode" getenv '{ inputs = { ${builtins.getEnv "LEAK_ME"} = { }; }; outputs = _: {}; }'
+      run "$mode" readdir-outside "{ inputs = builtins.readDir $work; outputs = _: {}; }"
+      run "$mode" currentsystem '{ inputs = { ${builtins.currentSystem} = { }; }; outputs = _: {}; }'
+      run "$mode" pathexists "{ inputs = { \${toString (builtins.pathExists $marker)} = { }; }; outputs = _: {}; }"
+      run "$mode" readfile-in-flake '{ inputs = { ${builtins.readFile ./flake.nix} = { }; }; outputs = _: {}; }'
+    done
+    run restrict-impure fetchurl '{ inputs = { ${builtins.readFile (builtins.fetchurl { url = "file:///etc/hostname"; sha256 = "0000000000000000000000000000000000000000000000000000"; })} = { }; }; outputs = _: {}; }'
+    run restrict-impure fetchgit '{ inputs = { ${builtins.readFile ((builtins.fetchGit { url = "file:///home"; rev = "0000000000000000000000000000000000000000"; }) + "/x")} = { }; }; outputs = _: {}; }'
+    run restrict-impure storepath '{ inputs = { ${toString (builtins.storePath /nix/store)} = { }; }; outputs = _: {}; }'
+    run restrict-impure recursion '{ inputs = let f = x: f (x + 1); in f 0; outputs = _: {}; }'
+    run restrict-impure huge-attrs '{ inputs = builtins.listToAttrs (map (i: { name = toString i; value = { }; }) (builtins.genList (i: i) 10000000)); outputs = _: {}; }'
 
 # [debug] Block for `seconds` doing nothing. NOT a hang fixture (drill 3,
 # 2026-10-27): called through run_recipe the harness returns control after 120 s

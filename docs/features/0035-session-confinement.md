@@ -363,12 +363,24 @@ The findings:
   gate (spinclass/bold-yew, 2026-11-03) predicted and the recipe
   `explore-guarded-gate-input-leak` confirmed: a worker-committed `flake.lock`
   with a `path:` input naming an operator path and a wrong hash, referenced by
-  an output, lands that path in the store through one failed merge (a missing
-  lock, or an input the lock lacks, is refused by nix before any fetch). The
-  guarded gate therefore refuses, before its command runs, a lock that is
-  missing, unreadable, or has any input on the local filesystem (a `path` node,
+  an output, lands that path in the store through one failed merge; so does a
+  missing lock, or any input `flake.nix` declares that the lock lacks, with or
+  without a `?narHash=`: nix fetches it while computing the lock it then
+  refuses to write (a `tarball+file:` input stays in the user's tarball cache
+  under HOME, and a subflake's missing input is not fetched). The guarded gate
+  therefore refuses, before its command runs, a lock that is missing,
+  unreadable, incomplete (the declared inputs are listed by a restricted
+  `nix eval` of a store copy of `flake.nix` under the gate's own environment:
+  the new CLI's pure mode cannot import a file at all, so it is `--impure`
+  with `restrict-eval`, the copy as the only search-path entry, no allowed URI,
+  no import from derivation, bounded call depth, output and time; the recipe
+  `explore-guarded-gate-inputs-eval` shows readFile, readDir, fetchurl and
+  fetchGit refused and getEnv seeing only the scrubbed environment), or has
+  any input on the local filesystem (a `path` node,
   or a `git`/`tarball`/`file` node with a `file:` URL), naming the node and the
-  kind only (`check/lockpolicy.go`). That is policy over what nix would fetch,
+  kind only, and a lock that is not a regular file unread (`check/lockpolicy.go`).
+  Only the root flake's lock is judged; a subflake is reached only as an input
+  the lock names. That is policy over what nix would fetch,
   not a boundary: the boundary is evaluation in a mount namespace that sees
   only the build worktree and `/nix` (the gate in a unit, spinclass#448 item 4,
   path A, needs clown; not started). The gate's tools come from the frontend's
