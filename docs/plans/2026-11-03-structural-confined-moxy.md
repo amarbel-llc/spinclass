@@ -200,6 +200,23 @@ the toolbox applets) is a decision for the operator.
   this session, not re-read for this note.
 - **Context cost** (section 7): not measured.
 
+### Re-checked 2026-11-03 (R)
+
+- The hook prefix is confirmed: `mcp__plugin_moxy_moxy__` is hard-coded in
+  `internal/delta/hooks/moxy_read.go` and twice in `hooks.go`. One consequence
+  section 4 missed: the moxyfile-edit guard (`moxyfile_guard.go`) lists
+  `folio_write`, `folio_cp`, `folio_mv`, `folio_link` and `folio_rm` by their
+  full `mcp__plugin_moxy_moxy__` names. A frontend moxy under any other server
+  name bypasses that guard silently. Under V2 the moxyfile is outside the twin's
+  write set, so the guard is not the boundary there; in the V1 interim it is the
+  only check, so the guard must learn the new prefix before a V1 frontend moxy
+  gets any folio write tool.
+- A review of this note found that the broker's peer check refuses a twin unit
+  (it expects a frontend process, section 2). V2 therefore also needs the
+  broker to accept the twin as a peer, or the twin's verdicts fail closed and
+  every tool is denied. Clown's and spinclass's broker side (#438) both have a
+  piece of that; not resolved in this note.
+
 ## 7. The default: moxy + toolbox in every profile
 
 What the directive adds to the worker profile, and what I can say about cost:

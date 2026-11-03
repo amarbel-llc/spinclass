@@ -297,6 +297,46 @@ Operator: start with too few privileges and escalate slowly when running
   definition set at the harness level (policy, not a boundary, but an early,
   cheap signal).
 
+## 12. Re-review of this note against the first build (2026-11-03)
+
+The first build (branch `light-cedar--432-first-build`: the `allow-self-merge`
+scope, `confinedMergeConstraints`, the gate-definition rule and
+`--accept-gate-change`) was re-read against this note and master. What held
+(R): every claim in sections 1, 9 and 10 re-verified, including the hook
+command from the trusted hierarchy, the remote-tracking landing ref, the
+`Edit(<worktree>/*)` allow rule, and "merge/check rights are names only".
+What the re-review found, and what was done:
+
+1. **Uncommitted gate inputs escaped the rule (I, now closed in the build).**
+   The gate-definition check diffs committed content, but the gate's devshell
+   loads from the session worktree as it stands (`hookrun.PreMergeInDir` runs
+   `direnv exec` against the session worktree, FDR 0013), and autostash
+   restores tracked edits before the gate runs. An uncommitted `flake.nix`
+   edit reached the gate unseen. Fix: a guarded merge refuses any uncommitted
+   tracked change (named), at PrepareMerge and again before the hook in both
+   finish paths, instead of autostashing. Residual (U): whether nix and direnv
+   read dirty tracked files here was not run; nix flakes normally do. An edit
+   made while the hook already runs is still not caught; the gate unit, or
+   loading the devshell from the build worktree, closes that.
+2. **`local_only` was not constrained (closed in the build).** It targets the
+   frontend's local default branch with no fetch and no push; section 6 says a
+   confined merge lands nowhere else. Now refused for a confined caller.
+3. **Note and build disagreed on `check`.** Section 4 relaxes merge and check;
+   the build relaxes merge and attestation only. Decision: the first slice
+   keeps `check-this-session*` refused (fewest privileges first); relaxing it
+   under the same switch is a follow-up, not an oversight.
+4. **Recordless sessions are unguarded (U, documented).** `LaunchedConfined`
+   reads the unit record and spec only; a session launched before records
+   existed classifies as unconfined for the rule. Left as is: such sessions
+   predate the switch and are the operator's to retire.
+5. **Harness config landing on master (I, open).** `.claude/`, `CLAUDE.md` and
+   `.mcp.json` are outside the gate set because #400 binds them read-only. If
+   tracked, a worker still lands changes to them that every later session runs
+   under. A landing question for the operator, not a gate question.
+6. **Not built, still open:** the handle right as a top layer (section 9 item
+   4), enforcement of `merge`/`check` on non-self targets (section 8 step 3),
+   and the trusted `[hooks] gate-files` extension (section 10).
+
 ## 11. Questions that were asked
 
 The four original questions, kept for the record:
