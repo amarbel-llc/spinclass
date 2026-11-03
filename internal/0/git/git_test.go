@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -189,6 +190,22 @@ func TestFileAtRev(t *testing.T) {
 
 	if _, _, err = FileAtRev(repo, "no-such-rev", "sweatfile"); err == nil {
 		t.Fatal("bad rev: want an error")
+	}
+
+	// ModeAtRev tells the entries FileAtRev reports as absent apart.
+	head, err := run(t, repo, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, repo, "update-index", "--add", "--cacheinfo", "160000,"+strings.TrimSpace(head)+",sub")
+	mustRun(t, repo, "commit", "-m", "gitlink")
+	for path, want := range map[string]string{"sweatfile": "100644", "dir": "040000", "link": "120000", "sub": "160000", "nope": ""} {
+		if mode, err := ModeAtRev(repo, "HEAD", path); err != nil || mode != want {
+			t.Errorf("ModeAtRev(%s) = (%q, %v), want %q", path, mode, err, want)
+		}
+	}
+	if _, found, err := FileAtRev(repo, "HEAD", "sub"); err != nil || found {
+		t.Errorf("HEAD:sub (gitlink) = (found=%v, err=%v), want (false, nil)", found, err)
 	}
 }
 

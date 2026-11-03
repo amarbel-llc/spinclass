@@ -1605,9 +1605,12 @@ explore-live-close-leftovers key:
 # (a path: input, a tarball+file: input, and the same one level down in a
 # git+file: subflake), inputs that differ between an impure enumeration and
 # pure evaluation (nix refuses a non-literal inputs set before any fetch), and
-# the same with nix's own allowed-uris limited to https:// (it does not stop
-# the lock-time path: fetch). Reports per variant whether a store path added
-# during the run holds the marker. Also prints the daemon's sandbox setting.
+# the third review's F1'' shapes (a lock with a remote node under the name
+# flake.nix declares as path:, and a root override of a locked subflake's
+# remote input to path:), and the same with nix's own allowed-uris limited to
+# https:// (it does not stop the lock-time path: fetch). Reports per variant
+# whether a store path added during the run holds the marker. Also prints the
+# daemon's sandbox setting.
 # Read-only apart from the temp dir and whatever nix adds to the store.
 #
 # PoC: does the guarded gate copy an out-of-tree flake input into /nix/store? (dummy marker only)
@@ -1696,6 +1699,29 @@ explore-guarded-gate-input-leak:
       printf '{ inputs = if (builtins.tryEval (builtins.currentTime or (throw "none"))).success then { } else { leak = { url = "path:%s?narHash=%s"; flake = false; }; }; outputs = args: { checks.%s.touch = derivation { name = "touch"; system = "%s"; builder = "/bin/sh"; args = [ "-c" "echo ${args.leak or "none"} > $out" ]; }; }; }\n' "$2" "$badhash" "$sys" "$sys" > "$1/flake.nix"
       printf '%s\n' "$rootonly" > "$1/flake.lock"; commit "$1" flake
     }
+    # The third review's F1'': completeness judged on names. The lock has a
+    # remote node named leak; flake.nix redeclares leak as a path input.
+    setup_namematch() {
+      printf '{ inputs.leak = { url = "path:%s?narHash=%s"; flake = false; }; outputs = { self, leak }: %s; }\n' "$2" "$badhash" "$(touches leak)" > "$1/flake.nix"
+      printf '{ "nodes": { "leak": { "flake": false, "locked": { "lastModified": 1, "narHash": "sha256-x", "owner": "NixOS", "repo": "nix", "rev": "0000000000000000000000000000000000000000", "type": "github" }, "original": { "owner": "NixOS", "repo": "nix", "type": "github" } }, "root": { "inputs": { "leak": "leak" } } }, "root": "root", "version": 7 }\n' > "$1/flake.lock"
+      commit "$1" flake
+    }
+    # Same, through a nested override: the root lock names a git+file: subflake
+    # whose own input sub is remote and locked; the root overrides sub's input
+    # to a path.
+    setup_nested_override() {
+      local sub="$1-sub" meta hash rev
+      mkdir -p "$sub"; git -C "$sub" init -q
+      printf '{ inputs.leak = { url = "github:NixOS/nix"; flake = false; }; outputs = { self, leak }: %s; }\n' "$(touches leak)" > "$sub/flake.nix"
+      printf '{ "nodes": { "leak": { "flake": false, "locked": { "lastModified": 1, "narHash": "sha256-x", "owner": "NixOS", "repo": "nix", "rev": "0000000000000000000000000000000000000000", "type": "github" }, "original": { "owner": "NixOS", "repo": "nix", "type": "github" } }, "root": { "inputs": { "leak": "leak" } } }, "root": "root", "version": 7 }\n' > "$sub/flake.lock"
+      commit "$sub" sub
+      meta=$(nix flake prefetch --json "git+file://$sub" 2>/dev/null)
+      hash=$(nix eval --impure --raw --expr "(builtins.fromJSON ''$meta'').hash")
+      rev=$(nix eval --impure --raw --expr "(builtins.fromJSON ''$meta'').locked.rev")
+      printf '{ inputs.sub.url = "git+file://%s"; inputs.sub.inputs.leak.url = "path:%s?narHash=%s"; outputs = { self, sub }: { checks.%s.touch = sub.checks.%s.touch; }; }\n' "$sub" "$2" "$badhash" "$sys" "$sys" > "$1/flake.nix"
+      printf '{ "nodes": { "leak": { "flake": false, "locked": { "lastModified": 1, "narHash": "sha256-x", "owner": "NixOS", "repo": "nix", "rev": "0000000000000000000000000000000000000000", "type": "github" }, "original": { "owner": "NixOS", "repo": "nix", "type": "github" } }, "sub": { "inputs": { "leak": "leak" }, "locked": { "lastModified": 1, "narHash": "%s", "ref": "refs/heads/master", "rev": "%s", "type": "git", "url": "file://%s" }, "original": { "type": "git", "url": "file://%s" } }, "root": { "inputs": { "sub": "sub" } } }, "root": "root", "version": 7 }\n' "$hash" "$rev" "$sub" "$sub" > "$1/flake.lock"
+      commit "$1" flake
+    }
     setup_nolock_alloweduris() { setup_nolock "$1" "$2"; }
     setup_f1prime_path_alloweduris() { setup_f1prime_path "$1" "$2"; }
     echo "== daemon sandbox setting (nix config show)"; nix config show sandbox 2>/dev/null || nix show-config 2>/dev/null | grep '^sandbox'
@@ -1707,6 +1733,8 @@ explore-guarded-gate-input-leak:
     variant f1prime_transitive "root lock names a git+file: subflake; the subflake declares path:...?narHash= its lock lacks"
     variant conditional_getenv "inputs declared only when getEnv HOME is empty (pure eval), referenced"
     variant conditional_currenttime "inputs declared only when currentTime is unavailable (pure eval), referenced"
+    variant namematch "lock has a remote node named leak; flake.nix redeclares leak as path:...?narHash=, referenced"
+    variant nested_override "root lock complete; root flake.nix overrides a locked subflake's remote input to path:...?narHash="
     # Does nix's own allowed-uris (restricted or pure mode) stop the lock-time
     # fetch of a path: input? If so a NIX_CONFIG line closes the class.
     extra_nix_config=$'allowed-uris = https://\n'
@@ -1715,16 +1743,21 @@ explore-guarded-gate-input-leak:
     extra_nix_config=""
     printf '== SUMMARY\n%s' "$results"
 
-# [explore] PoC for the guarded gate's lock-completeness check (#449 F1'): the
-# `nix eval` the gate uses to list the inputs flake.nix declares, run against
+# [explore] PoC for the guarded gate's lock policy (#449 F1', F1''): the
+# `nix eval` the gate uses to read the inputs flake.nix declares, run against
 # hostile flake.nix shapes (readFile of a dummy marker outside the flake and
 # inside it, getEnv, readDir, pathExists, currentSystem, an attrName computed
 # from the marker, fetchurl and fetchGit with hashes, storePath, infinite
 # recursion, a huge list), each in its own temp dir, under the gate's scrubbed
 # env, in one or more evaluation modes (the ones that cannot import a file at
-# all on this nix are kept for the record). Prints per shape: exit code, whether
-# the marker's content showed up in stdout or stderr, wall time, output size.
-# Dummy marker only.
+# all on this nix are kept for the record; restrict-stdin is what the gate
+# runs). Then the gate's canonicalisation of every input (the `canon` apply
+# expression, a copy of lockpolicy.go's) against url, attribute, indirect,
+# follows, nested, path, relative, mixed and string specs, the same inside a
+# systemd scope with MemoryMax, and side by side with the `original` a real
+# `nix flake lock` writes for local dummy inputs. Prints per shape: exit
+# code, whether the marker's content showed up in stdout or stderr, wall
+# time, output size. Dummy marker only.
 #
 # PoC: is the guarded gate's inputs enumeration pure and bounded on this nix? (dummy marker only)
 [group("explore")]
@@ -1760,22 +1793,44 @@ explore-guarded-gate-inputs-eval:
         # (the store copy) and the store, and allowed-uris "" forbids fetches.
         restrict-impure) local sp; sp=$(nix store add --mode flat "$2/flake.nix" 2>/dev/null) || sp=$(nix store add-file "$2/flake.nix")
                     printf '%s\n' --impure --option restrict-eval true --option allowed-uris "" -I "f=$sp" --expr 'import <f>' ;;
+        # The content on stdin: no temporary file and no store copy at all
+        # (the third review's A(b)); the base directory of a relative path
+        # literal is the working directory, which restricted mode refuses.
+        restrict-stdin) printf '%s\n' --impure --option restrict-eval true --option allowed-uris "" -f - ;;
       esac
     }
-    run() {  # $1 mode, $2 name, $3 flake.nix body
-      local dir="$work/$1-$2" out start end
+    # The lock policy's canonicalisation (lockpolicy.go, declaredInputsApply;
+    # keep the two in step): every input's spec as nix would read it, the
+    # url form through builtins.parseFlakeRef, nested overrides included.
+    canon='f: let
+      canon = name: spec:
+        if !(builtins.isAttrs spec) then throw "input ${name} is not an attribute set"
+        else let rest = removeAttrs spec [ "inputs" "flake" "follows" ]; in {
+          original =
+            if spec ? follows then (if rest == { } then null else throw "input ${name} mixes follows with a reference")
+            else if spec ? type then rest
+            else if spec ? url then (if builtins.attrNames rest == [ "url" ] then builtins.parseFlakeRef spec.url else throw "input ${name} mixes url with other attributes")
+            else { type = "indirect"; id = name; };
+          flake = spec.flake or true;
+          follows = spec.follows or null;
+          inputs = builtins.mapAttrs canon (spec.inputs or { });
+        };
+      in builtins.mapAttrs canon (f.inputs or { })'
+    run() {  # $1 mode, $2 name, $3 flake.nix body, $4 optional --apply expression
+      local dir="$work/$1-$2" out start end names='f: builtins.attrNames (f.inputs or { })' apply
+      apply="${4:-$names}"
       mkdir -p "$dir"; printf '%s\n' "$3" > "$dir/flake.nix"
       local -a args; mapfile -t args < <(modeargs "$1" "$dir")
       start=$(date +%s)
       out=$(cd "$dir" && env -i PATH="$gatepath" HOME="$HOME" LEAK_ME="$secret" ${NIX_REMOTE:+NIX_REMOTE="$NIX_REMOTE"} \
         NIX_CONFIG=$'allow-unsafe-native-code-during-evaluation = false\naccept-flake-config = false\nsandbox = true\n' \
         timeout 20 nix eval --json --option allow-import-from-derivation false --option max-call-depth 2000 \
-          "${args[@]}" --apply 'f: builtins.attrNames (f.inputs or { })' 2>&1 | head -c 2000000; exit "${PIPESTATUS[0]}"); code=$?
+          "${args[@]}" --apply "$apply" < "$dir/flake.nix" 2>&1 | head -c 2000000; exit "${PIPESTATUS[0]}"); code=$?
       end=$(date +%s)
       leaked=no; printf '%s' "$out" | grep -qF "$secret" && leaked=YES
       printf '%-16s %-20s exit=%-3s marker-in-output=%-3s %ss bytes=%s  %s\n' "$1" "$2" "$code" "$leaked" "$((end - start))" "${#out}" "$(printf '%s' "$out" | head -c 300 | tr '\n' ' ')"
     }
-    for mode in restrict-impure; do
+    for mode in restrict-impure restrict-stdin; do
       run "$mode" honest '{ inputs.a.url = "github:x/y"; inputs.b = { url = "github:x/z"; flake = false; }; outputs = _: {}; }'
       run "$mode" throw-readfile "{ inputs = throw (builtins.readFile $marker); outputs = _: {}; }"
       run "$mode" attrname-from-file "{ inputs = { \${builtins.readFile $marker} = { }; }; outputs = _: {}; }"
@@ -1790,6 +1845,46 @@ explore-guarded-gate-inputs-eval:
     run restrict-impure storepath '{ inputs = { ${toString (builtins.storePath /nix/store)} = { }; }; outputs = _: {}; }'
     run restrict-impure recursion '{ inputs = let f = x: f (x + 1); in f 0; outputs = _: {}; }'
     run restrict-impure huge-attrs '{ inputs = builtins.listToAttrs (map (i: { name = toString i; value = { }; }) (builtins.genList (i: i) 10000000)); outputs = _: {}; }'
+    # The canonicalisation against the spec shapes flake.nix can hold (the
+    # third review's F1''): compare each `original` with what `nix flake
+    # lock` writes for the same spec.
+    # What lockpolicy.go runs: the same evaluation inside a transient systemd
+    # scope with a memory bound (stdin must pass through systemd-run --scope,
+    # and MemoryMax must be accepted on a scope unit).
+    echo "== scoped (systemd-run --user --scope --property=MemoryMax=2G, stdin)"
+    d="$work/scoped"; mkdir -p "$d"; printf '{ inputs.a.url = "github:x/y"; outputs = _: {}; }\n' > "$d/flake.nix"
+    (cd "$d" && env -i PATH="$gatepath:$(dirname "$(command -v systemd-run)")" HOME="$HOME" ${NIX_REMOTE:+NIX_REMOTE="$NIX_REMOTE"} \
+      XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-}" \
+      NIX_CONFIG=$'allow-unsafe-native-code-during-evaluation = false\naccept-flake-config = false\nsandbox = true\n' \
+      systemd-run --user --scope --quiet --unit="spinclass-inputs-probe-$$" --property=KillMode=control-group --property=MemoryMax=2G -- \
+      nix eval --json --impure --option restrict-eval true --option allowed-uris "" --option allow-import-from-derivation false --option max-call-depth 2000 \
+      -f - --apply "$canon" < flake.nix 2>&1 | head -c 600; echo " exit=${PIPESTATUS[0]}")
+    echo "== canonicalisation (restrict-stdin)"
+    run restrict-stdin canon-url '{ inputs.a.url = "github:x/y?ref=main"; outputs = _: {}; }' "$canon"
+    run restrict-stdin canon-attrs '{ inputs.a = { type = "github"; owner = "x"; repo = "y"; }; outputs = _: {}; }' "$canon"
+    run restrict-stdin canon-indirect '{ inputs.a = { }; inputs.b.url = "nixpkgs"; outputs = _: {}; }' "$canon"
+    run restrict-stdin canon-follows '{ inputs.a.url = "github:x/y"; inputs.a.inputs.n.follows = "b"; inputs.b.url = "github:x/z"; outputs = _: {}; }' "$canon"
+    run restrict-stdin canon-nested '{ inputs.a.url = "github:x/y"; inputs.a.inputs.n.url = "path:/nowhere?narHash=sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; outputs = _: {}; }' "$canon"
+    run restrict-stdin canon-path '{ inputs.a = { url = "path:/nowhere"; flake = false; }; outputs = _: {}; }' "$canon"
+    run restrict-stdin canon-relative '{ inputs.a.url = "./sub"; outputs = _: {}; }' "$canon"
+    run restrict-stdin canon-git-file '{ inputs.a.url = "git+file:///nowhere"; outputs = _: {}; }' "$canon"
+    run restrict-stdin canon-mixed '{ inputs.a = { url = "github:x/y"; owner = "z"; }; outputs = _: {}; }' "$canon"
+    run restrict-stdin canon-string '{ inputs.a = "github:x/y"; outputs = _: {}; }' "$canon"
+    run restrict-stdin canon-tarball '{ inputs.a.url = "https://example.invalid/x.tar.gz?narHash=sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; outputs = _: {}; }' "$canon"
+    # What nix writes as `original` for the same specs, from a real lock of a
+    # flake whose inputs are local dummies (no network): the url form, the
+    # attribute form, a git+file: with ?dir=, a nested override, and a
+    # follows. Then the canonicalisation of that same flake.nix, side by side.
+    echo "== nix flake lock original for comparison (local dummy inputs)"
+    d="$work/lockshape"; mkdir -p "$d/sub" "$d/gsub/d"; git -C "$d" init -q; git -C "$d/gsub" init -q
+    printf '{ outputs = _: {}; }\n' > "$d/sub/flake.nix"
+    printf '{ inputs.n.url = "path:%s"; outputs = _: {}; }\n' "$d/sub" > "$d/gsub/d/flake.nix"
+    git -C "$d/gsub" add -A; git -C "$d/gsub" -c user.name=t -c user.email=t@t commit -qm g
+    printf '{ inputs.a.url = "path:%s"; inputs.b = { type = "path"; path = "%s"; flake = false; }; inputs.c.url = "git+file://%s?dir=d"; inputs.c.inputs.n.url = "path:%s?narHash=%s"; inputs.e.follows = "a"; outputs = _: {}; }\n' \
+      "$d/sub" "$d/sub" "$d/gsub" "$d/sub" "$(nix hash path "$d/sub")" > "$d/flake.nix"
+    git -C "$d" add -A
+    (cd "$d" && nix flake lock 2>&1 | tail -3; jq -c '.nodes | to_entries[] | {(.key): {original: .value.original, inputs: .value.inputs, flake: .value.flake}}' flake.lock 2>/dev/null)
+    run restrict-stdin canon-lockshape "$(cat "$d/flake.nix")" "$canon"
 
 # [debug] Block for `seconds` doing nothing. NOT a hang fixture (drill 3,
 # 2026-10-27): called through run_recipe the harness returns control after 120 s

@@ -347,11 +347,10 @@ func CommitExists(repoPath, sha string) bool {
 // not "absent": a working-tree read would have followed it, so silently dropping
 // the layer would change behaviour. An error also means rev itself is bad.
 func FileAtRev(repoPath, rev, path string) (data []byte, found bool, err error) {
-	listed, err := Run(repoPath, "ls-tree", "--end-of-options", rev, "--", path)
+	mode, err := ModeAtRev(repoPath, rev, path)
 	if err != nil {
 		return nil, false, err
 	}
-	mode, _, _ := strings.Cut(listed, " ")
 	if mode == "120000" {
 		return nil, false, fmt.Errorf("%s at %s is a symlink; commit the file itself", path, rev)
 	}
@@ -363,6 +362,19 @@ func FileAtRev(repoPath, rev, path string) (data []byte, found bool, err error) 
 		return nil, false, err
 	}
 	return data, true, nil
+}
+
+// ModeAtRev is the tree entry mode of path at rev (100644, 100755, 120000,
+// 040000 for a directory, 160000 for a gitlink), "" when there is no entry.
+// An error means rev itself is bad. repoPath must be the repository root, as
+// for FileAtRev.
+func ModeAtRev(repoPath, rev, path string) (string, error) {
+	listed, err := Run(repoPath, "ls-tree", "--end-of-options", rev, "--", path)
+	if err != nil {
+		return "", err
+	}
+	mode, _, _ := strings.Cut(listed, " ")
+	return mode, nil
 }
 
 // BranchWorktree returns the absolute path of the worktree that currently has

@@ -367,23 +367,48 @@ The findings:
   missing lock, or any input `flake.nix` declares that the lock lacks, with or
   without a `?narHash=`: nix fetches it while computing the lock it then
   refuses to write (a `tarball+file:` input stays in the user's tarball cache
-  under HOME, and a subflake's missing input is not fetched). The guarded gate
-  therefore refuses, before its command runs, a lock that is missing,
-  unreadable, incomplete (the declared inputs are listed by a restricted
-  `nix eval` of a store copy of `flake.nix` under the gate's own environment:
-  the new CLI's pure mode cannot import a file at all, so it is `--impure`
-  with `restrict-eval`, the copy as the only search-path entry, no allowed URI,
-  no import from derivation, bounded call depth, output and time; the recipe
+  under HOME, and a subflake's missing input is not fetched). The third
+  review (F1'') and the recipe's `namematch` and `nested_override` variants
+  then showed that completeness by name is not enough: nix re-fetches any
+  input whose declared reference differs from the lock node's `original`,
+  so a lock holding a remote node under the name `flake.nix` declares as a
+  `path:`, or a root `inputs.sub.inputs.leak` override of a locked
+  subflake's input, leaks the same way. The guarded gate therefore refuses,
+  before its command runs, a lock that is missing, unreadable, or that does
+  not match the declared inputs reference for reference (the declared inputs
+  are read by a restricted `nix eval` of the committed `flake.nix` handed to
+  nix on stdin, under the gate's own environment, inside a transient systemd
+  scope with `MemoryMax`: the new CLI's pure mode cannot import a file at
+  all, so it is `--impure` with `restrict-eval`, no path at all (so no
+  temporary file and no store copy a worker could race), no allowed URI, no
+  import from derivation, bounded call depth, output and time; an `--apply`
+  expression has nix canonicalise every input, nested overrides and
+  `follows` included, through `builtins.parseFlakeRef`, the parser the lock
+  itself went through, so a url form and the lock's `original` compare
+  equal, and a relative path, a string spec or a url mixed with attributes
+  throws; the policy then walks the lock's node graph and refuses an input
+  the lock lacks, a reference or `flake` flag that differs, a `follows` the
+  lock does not record, and a declared reference that is itself local; no
+  scope id, no scope tier, or a `systemd-run` that fails the gate's tool
+  check refuses the merge, there is no unscoped fallback; the recipe
   `explore-guarded-gate-inputs-eval` shows readFile, readDir, fetchurl and
-  fetchGit refused and getEnv seeing only the scrubbed environment; the
-  enumeration and nix cannot disagree about which inputs exist, because nix
-  refuses a flake.nix whose `inputs` is not a literal attribute set before it
-  fetches anything, shown by the leak recipe's conditional variants; and
-  nix's own `allowed-uris` does not stop a lock-time `path:` fetch, so the
-  enumeration is not optional), or has any input on the local filesystem (a
-  `path` node,
-  or a `git`/`tarball`/`file` node with a `file:` URL), naming the node and the
-  kind only, and a lock that is not a regular file unread (`check/lockpolicy.go`).
+  fetchGit refused, getEnv seeing only the scrubbed environment, the
+  canonicalisation against a real `nix flake lock`, and the scoped stdin
+  evaluation; the evaluation and nix cannot disagree about which inputs
+  exist, because nix refuses a flake.nix whose `inputs` is not a literal
+  attribute set before it fetches anything, shown by the leak recipe's
+  conditional variants; and nix's own `allowed-uris` does not stop a
+  lock-time `path:` fetch, so the evaluation is not optional), or has any
+  input on the local filesystem (a `path` node, or a `git`/`tarball`/`file`
+  node with a `file:` URL), naming nodes, input paths and reference kinds
+  only, and a `flake.nix` or `flake.lock` that is not a regular file in the
+  committed tree (a symlink, a directory, a gitlink) unread
+  (`check/lockpolicy.go`). What the policy does not cover: a subflake's own
+  declared inputs that the root does not override are compared against
+  nothing (nix did not fetch one in the recipe's `transitive` variant, but
+  that is nix's behaviour, not a check here), which is one more reason the
+  canary rule stands: the operator reads every `flake.nix` and `flake.lock`
+  input change before a confined `sc merge`.
   Only the root flake's lock is judged; a subflake is reached only as an input
   the lock names. That is policy over what nix would fetch,
   not a boundary: the boundary is evaluation in a mount namespace that sees

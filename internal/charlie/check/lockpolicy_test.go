@@ -3,6 +3,7 @@ package check
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 
+	"code.linenisgreat.com/spinclass/internal/0/clown"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/bravo/hookrun"
@@ -21,6 +23,10 @@ import (
 const remoteOnlyLock = `{"nodes":{"nixpkgs":{"locked":{"lastModified":1,"narHash":"sha256-x","owner":"NixOS","repo":"nixpkgs","rev":"abc","type":"github"},"original":{"owner":"NixOS","repo":"nixpkgs","type":"github"}},"tb":{"flake":false,"locked":{"narHash":"sha256-y","type":"tarball","url":"https://example.invalid/x.tar.gz"},"original":{"type":"tarball","url":"https://example.invalid/x.tar.gz"}},"root":{"inputs":{"nixpkgs":"nixpkgs","tb":"tb"}}},"root":"root","version":7}`
 
 const pathInputLock = `{"nodes":{"leak":{"flake":false,"locked":{"lastModified":1,"narHash":"sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","path":"/home/op/.ssh","type":"path"},"original":{"path":"/home/op/.ssh","type":"path"}},"root":{"inputs":{"leak":"leak"}}},"root":"root","version":7}`
+
+// nestedLock holds a subflake `sub` whose own input `leak` is remote, and a
+// follows `e` onto nixpkgs: the shapes the F1” review named.
+const nestedLock = `{"nodes":{"nixpkgs":{"locked":{"lastModified":1,"narHash":"sha256-x","owner":"NixOS","repo":"nixpkgs","rev":"abc","type":"github"},"original":{"owner":"NixOS","repo":"nixpkgs","type":"github"}},"leak":{"flake":false,"locked":{"lastModified":1,"narHash":"sha256-x","owner":"NixOS","repo":"nix","rev":"abc","type":"github"},"original":{"owner":"NixOS","repo":"nix","type":"github"}},"sub":{"inputs":{"leak":"leak"},"locked":{"lastModified":1,"narHash":"sha256-x","owner":"x","repo":"sub","rev":"abc","type":"github"},"original":{"owner":"x","repo":"sub","type":"github"}},"root":{"inputs":{"nixpkgs":"nixpkgs","sub":"sub","e":["nixpkgs"]}}},"root":"root","version":7}`
 
 // commitTree is a repository whose HEAD holds files and symlinks: the policy
 // reads the committed tree, so every fixture is a commit.
@@ -45,32 +51,173 @@ func commitTree(t *testing.T, files, links map[string]string) string {
 	return dir
 }
 
-// stubDeclaredInputs stands in the inputs flake.nix declares: the test
-// sandbox has no nix to evaluate them.
-func stubDeclaredInputs(t *testing.T, names []string, err error) {
+// stubDeclaredInputs stands in the inputs flake.nix declares, canonicalised:
+// the test sandbox has no nix to evaluate them.
+func stubDeclaredInputs(t *testing.T, specs map[string]inputSpec, err error) {
 	t.Helper()
 	prev := declaredFlakeInputs
-	declaredFlakeInputs = func(context.Context, []byte, []string) ([]string, error) { return names, err }
+	declaredFlakeInputs = func(context.Context, string, []byte, []string) (map[string]inputSpec, error) { return specs, err }
 	t.Cleanup(func() { declaredFlakeInputs = prev })
 }
+
+// specsFromLock is what nix canonicalises an honest flake.nix to for the named
+// inputs of a lock: the nodes' own originals and flake flags, so the lock
+// matches by construction (node ids equal input names in these fixtures).
+func specsFromLock(t *testing.T, lockJSON string, names ...string) map[string]inputSpec {
+	t.Helper()
+	var lock flakeLock
+	if err := json.Unmarshal([]byte(lockJSON), &lock); err != nil {
+		t.Fatal(err)
+	}
+	specs := map[string]inputSpec{}
+	for _, name := range names {
+		node, ok := lock.Nodes[name]
+		if !ok {
+			t.Fatalf("no node %q in the lock", name)
+		}
+		specs[name] = inputSpec{Original: node.Original, Flake: node.Flake == nil || *node.Flake}
+	}
+	return specs
+}
+
+func github(owner, repo string) map[string]any {
+	return map[string]any{"type": "github", "owner": owner, "repo": repo}
+}
+
+func str(s string) *string { return &s }
 
 // An input flake.nix declares that the lock lacks is fetched while nix
 // computes the lock it then refuses (spinclass#449 F1'): refused here first,
 // naming the input only; an evaluation failure fails closed.
 func TestGuardedGateLockPolicyRefusesAnInputTheLockLacks(t *testing.T) {
 	dir := commitTree(t, map[string]string{"flake.nix": "{ outputs = _: {}; }", "flake.lock": remoteOnlyLock}, nil)
-	stubDeclaredInputs(t, []string{"nixpkgs", "tb"}, nil)
+	stubDeclaredInputs(t, specsFromLock(t, remoteOnlyLock, "nixpkgs", "tb"), nil)
 	if err := refuseUnsafeFlakeLock(context.Background(), dir, nil); err != nil {
 		t.Fatalf("every declared input is in the lock: %v", err)
 	}
-	stubDeclaredInputs(t, []string{"nixpkgs", "leak\x1b[31m", "/home/op"}, nil)
+	specs := specsFromLock(t, remoteOnlyLock, "nixpkgs")
+	specs["leak\x1b[31m"] = inputSpec{Original: github("x", "y"), Flake: true}
+	specs["/home/op"] = inputSpec{Original: github("x", "z"), Flake: true}
+	stubDeclaredInputs(t, specs, nil)
 	err := refuseUnsafeFlakeLock(context.Background(), dir, nil)
-	if err == nil || !strings.Contains(err.Error(), "missing: ?home?op, leak??31m") || strings.Contains(err.Error(), "tb") || strings.Contains(err.Error(), "\x1b") {
+	if err == nil || !strings.Contains(err.Error(), "?home?op: missing from the lock") || !strings.Contains(err.Error(), "leak??31m: missing from the lock") ||
+		strings.Contains(err.Error(), "tb") || strings.Contains(err.Error(), "\x1b") || strings.Contains(err.Error(), "nixpkgs:") {
 		t.Fatalf("err = %v, want a refusal naming only the missing inputs, sanitised", err)
 	}
 	stubDeclaredInputs(t, nil, errors.New("evaluating flake.nix's inputs failed"))
 	if err := refuseUnsafeFlakeLock(context.Background(), dir, nil); err == nil || !strings.Contains(err.Error(), "cannot tell") {
 		t.Fatalf("err = %v, want fail closed on an evaluation failure", err)
+	}
+}
+
+// Completeness by name is not enough (spinclass#449 F1”, confirmed by the
+// leak recipe's namematch and nested_override variants): nix re-fetches an
+// input whose declared reference differs from the lock node's original, so a
+// lock holding a remote node under the name flake.nix declares as a path is
+// refused, and so is any other difference (another owner, an added hash, the
+// flake flag, a follows the lock does not record), one level down for a
+// nested override too. The refusal names input paths and reference types
+// only.
+func TestGuardedGateLockPolicyRefusesADeclaredReferenceTheLockDoesNotMatch(t *testing.T) {
+	pathRef := map[string]any{"type": "path", "path": "/home/op/.ssh", "narHash": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}
+	for _, tc := range []struct {
+		name   string
+		lock   string
+		specs  func(t *testing.T) map[string]inputSpec
+		refuse []string // "" = accepted
+	}{
+		{"matches the lock", remoteOnlyLock, func(t *testing.T) map[string]inputSpec { return specsFromLock(t, remoteOnlyLock, "nixpkgs", "tb") }, nil},
+		{"matches a nested lock with a follows", nestedLock, func(t *testing.T) map[string]inputSpec {
+			specs := specsFromLock(t, nestedLock, "nixpkgs", "sub")
+			sub := specs["sub"]
+			sub.Inputs = specsFromLock(t, nestedLock, "leak")
+			specs["sub"] = sub
+			specs["e"] = inputSpec{Follows: str("nixpkgs"), Flake: true}
+			return specs
+		}, nil},
+		{"same name, a path declared", remoteOnlyLock, func(t *testing.T) map[string]inputSpec {
+			specs := specsFromLock(t, remoteOnlyLock, "tb")
+			specs["nixpkgs"] = inputSpec{Original: pathRef, Flake: true}
+			return specs
+		}, []string{"nixpkgs: declared as type path", "nixpkgs: declared type path, locked type github"}},
+		{"same type, another owner", remoteOnlyLock, func(t *testing.T) map[string]inputSpec {
+			specs := specsFromLock(t, remoteOnlyLock, "tb")
+			specs["nixpkgs"] = inputSpec{Original: github("evil", "nixpkgs"), Flake: true}
+			return specs
+		}, []string{"nixpkgs: declared type github, locked type github; the references differ"}},
+		{"a hash added to a remote reference", remoteOnlyLock, func(t *testing.T) map[string]inputSpec {
+			specs := specsFromLock(t, remoteOnlyLock, "tb")
+			ref := github("NixOS", "nixpkgs")
+			ref["narHash"] = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+			specs["nixpkgs"] = inputSpec{Original: ref, Flake: true}
+			return specs
+		}, []string{"nixpkgs: declared type github, locked type github; the references differ"}},
+		{"the flake flag differs", remoteOnlyLock, func(t *testing.T) map[string]inputSpec {
+			specs := specsFromLock(t, remoteOnlyLock, "nixpkgs", "tb")
+			tb := specs["tb"]
+			tb.Flake = true
+			specs["tb"] = tb
+			return specs
+		}, []string{"tb: the flake flag differs from the lock"}},
+		{"a follows the lock locked as a node", remoteOnlyLock, func(t *testing.T) map[string]inputSpec {
+			specs := specsFromLock(t, remoteOnlyLock, "tb")
+			specs["nixpkgs"] = inputSpec{Follows: str("tb"), Flake: true}
+			return specs
+		}, []string{"nixpkgs: the lock does not record the declared follows"}},
+		{"a follows onto another input", nestedLock, func(t *testing.T) map[string]inputSpec {
+			specs := specsFromLock(t, nestedLock, "nixpkgs", "sub")
+			specs["e"] = inputSpec{Follows: str("sub"), Flake: true}
+			return specs
+		}, []string{"e: the lock does not record the declared follows"}},
+		{"a reference where the lock has a follows", nestedLock, func(t *testing.T) map[string]inputSpec {
+			specs := specsFromLock(t, nestedLock, "nixpkgs", "sub")
+			specs["e"] = inputSpec{Original: github("x", "e"), Flake: true}
+			return specs
+		}, []string{"e: locked as a follows, declared as a reference"}},
+		{"a nested override to a path", nestedLock, func(t *testing.T) map[string]inputSpec {
+			specs := specsFromLock(t, nestedLock, "nixpkgs", "sub")
+			sub := specs["sub"]
+			sub.Inputs = map[string]inputSpec{"leak": {Original: pathRef, Flake: false}}
+			specs["sub"] = sub
+			return specs
+		}, []string{"sub/leak: declared as type path", "sub/leak: declared type path, locked type github"}},
+		{"a nested override the lock lacks", nestedLock, func(t *testing.T) map[string]inputSpec {
+			specs := specsFromLock(t, nestedLock, "nixpkgs", "sub")
+			sub := specs["sub"]
+			sub.Inputs = map[string]inputSpec{"nope": {Original: github("x", "y"), Flake: true}}
+			specs["sub"] = sub
+			return specs
+		}, []string{"sub/nope: missing from the lock"}},
+		{"declared without a reference", remoteOnlyLock, func(t *testing.T) map[string]inputSpec {
+			specs := specsFromLock(t, remoteOnlyLock, "tb")
+			specs["nixpkgs"] = inputSpec{Flake: true}
+			return specs
+		}, []string{"nixpkgs: declared without a reference"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stubDeclaredInputs(t, tc.specs(t), nil)
+			dir := commitTree(t, map[string]string{"flake.nix": "{ outputs = _: {}; }", "flake.lock": tc.lock}, nil)
+			err := refuseUnsafeFlakeLock(context.Background(), dir, nil)
+			if len(tc.refuse) == 0 {
+				if err != nil {
+					t.Fatalf("refused: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("accepted, want a refusal")
+			}
+			for _, want := range tc.refuse {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("err = %v, want it to contain %q", err, want)
+				}
+			}
+			for _, secret := range []string{"/home/op", ".ssh", "AAAA", "evil", "NixOS"} {
+				if strings.Contains(err.Error(), secret) {
+					t.Errorf("the refusal repeats %q, which the worker must not see: %v", secret, err)
+				}
+			}
+		})
 	}
 }
 
@@ -122,10 +269,12 @@ func TestGuardedGateLockPolicy(t *testing.T) {
 	}
 }
 
-// A committed flake.lock or flake.nix that is a symlink is refused unread:
-// the policy reads the tree, so the link's target is never opened and nothing
-// of it reaches the record (the second review's finding A).
-func TestGuardedGateLockPolicyRefusesSymlinkedFiles(t *testing.T) {
+// A committed flake.lock or flake.nix that is not a regular file is refused
+// unread: a symlink (the second review's finding A), and a directory or a
+// gitlink, which git lists but FileAtRev does not read (the third review's
+// A). The policy reads the tree, so the link's target is never opened and
+// nothing of it reaches the record.
+func TestGuardedGateLockPolicyRefusesNonRegularFiles(t *testing.T) {
 	stubDeclaredInputs(t, nil, nil)
 	target := filepath.Join(t.TempDir(), "secret")
 	if err := os.WriteFile(target, []byte("SECRET-BYTES"), 0o600); err != nil {
@@ -145,6 +294,29 @@ func TestGuardedGateLockPolicyRefusesSymlinkedFiles(t *testing.T) {
 			}
 		})
 	}
+	t.Run("flake.nix is a directory", func(t *testing.T) {
+		dir := commitTree(t, map[string]string{"flake.lock": remoteOnlyLock}, nil)
+		if err := os.MkdirAll(filepath.Join(dir, "flake.nix"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "flake.nix", "x"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, dir, "add", "-A")
+		runGit(t, dir, "commit", "-q", "-m", "dir")
+		if err := refuseUnsafeFlakeLock(context.Background(), dir, nil); err == nil || !strings.Contains(err.Error(), "regular file") {
+			t.Fatalf("err = %v, want a refusal of the directory", err)
+		}
+	})
+	t.Run("flake.nix is a gitlink", func(t *testing.T) {
+		dir := commitTree(t, map[string]string{"flake.lock": remoteOnlyLock}, nil)
+		head := runGit(t, dir, "rev-parse", "HEAD")
+		runGit(t, dir, "update-index", "--add", "--cacheinfo", "160000,"+head+",flake.nix")
+		runGit(t, dir, "commit", "-q", "-m", "gitlink")
+		if err := refuseUnsafeFlakeLock(context.Background(), dir, nil); err == nil || !strings.Contains(err.Error(), "regular file") {
+			t.Fatalf("err = %v, want a refusal of the gitlink", err)
+		}
+	})
 }
 
 // The policy reads the committed tree, not the working tree: an uncommitted
@@ -160,7 +332,7 @@ func TestGuardedGateLockPolicyReadsTheCommittedTree(t *testing.T) {
 	}
 }
 
-// The enumeration runs under the gate's own tool checks (the second review's
+// The evaluation runs under the gate's own tool checks (the second review's
 // finding B): a PATH entry under a worker-written directory refuses it before
 // any nix runs.
 func TestDeclaredFlakeInputsViaNixUsesTheGateToolChecks(t *testing.T) {
@@ -171,48 +343,87 @@ func TestDeclaredFlakeInputsViaNixUsesTheGateToolChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", os.Getenv("PATH")+":"+bin)
-	_, err := declaredFlakeInputsViaNix(context.Background(), []byte("{ outputs = _: {}; }"), []string{wt})
+	_, err := declaredFlakeInputsViaNix(scopedCtx(), t.TempDir(), []byte("{ outputs = _: {}; }"), []string{wt})
 	if err == nil || !strings.Contains(err.Error(), "PATH") || !strings.Contains(err.Error(), wt) {
 		t.Fatalf("err = %v, want the PATH refusal naming the worktree", err)
 	}
 }
 
-// With a real nix the inputs are read from flake.nix itself, under restricted
-// evaluation. Skipped where the sandbox has no nix, which is where every Go
-// test of this repo runs (godyn; there is no go.mod to run `go test`
-// outside it), so these tests are exercised by a reviewer with a nix on
-// PATH, by `just explore-guarded-gate-inputs-eval` (the same command line in
-// bash, with the same shapes) and by the live canary, not by the merge gate.
-func TestDeclaredFlakeInputsViaNix(t *testing.T) {
+// The evaluation runs only inside a transient systemd scope that bounds its
+// memory (the third review's D): no scope id in the context, and no scope
+// tier on the host, each refuse it before any tool is looked up; there is no
+// unscoped fallback.
+func TestDeclaredFlakeInputsViaNixNeedsAScope(t *testing.T) {
+	defer hookrun.SetConfinedGateTools("git", "sh")()
+	if _, err := declaredFlakeInputsViaNix(context.Background(), t.TempDir(), []byte("{ outputs = _: {}; }"), nil); err == nil || !strings.Contains(err.Error(), "scope") {
+		t.Fatalf("err = %v, want a refusal for the missing scope id", err)
+	}
+	t.Setenv("RINGMASTER_DISABLE_SCOPE", "1")
+	if _, err := declaredFlakeInputsViaNix(scopedCtx(), t.TempDir(), []byte("{ outputs = _: {}; }"), nil); err == nil || !strings.Contains(err.Error(), "scope tier") {
+		t.Fatalf("err = %v, want a refusal for the missing scope tier", err)
+	}
+}
+
+func scopedCtx() context.Context {
+	return clown.WithLocalScope(context.Background(), "lockpolicy-test")
+}
+
+// skipWithoutNixAndScope skips where the sandbox has no nix or no systemd
+// user bus, which is where every Go test of this repo runs (godyn; there is
+// no go.mod to run `go test` outside it), so these tests are exercised by a
+// reviewer with both on a Linux host, by `just
+// explore-guarded-gate-inputs-eval` (the same command line in bash, with the
+// same shapes and the same canonicalisation) and by the live canary, not by
+// the merge gate.
+func skipWithoutNixAndScope(t *testing.T) {
+	t.Helper()
 	if _, err := exec.LookPath("nix"); err != nil {
 		t.Skip("no nix on PATH")
 	}
-	flake := `{ inputs.a.url = "github:x/y"; inputs.b = { url = "github:x/z"; flake = false; }; outputs = _: {}; }`
-	names, err := declaredFlakeInputsViaNix(context.Background(), []byte(flake), nil)
+	if _, ok := clown.ScopeArgv("probe"); !ok {
+		t.Skip("scope tier unavailable (no systemd user bus)")
+	}
+}
+
+// With a real nix the inputs are read from flake.nix itself, on stdin, under
+// restricted evaluation, and canonicalised to the lock's original shape.
+func TestDeclaredFlakeInputsViaNix(t *testing.T) {
+	skipWithoutNixAndScope(t)
+	flake := `{ inputs.a.url = "github:x/y"; inputs.b = { url = "github:x/z"; flake = false; inputs.n.follows = "a"; }; outputs = _: {}; }`
+	specs, err := declaredFlakeInputsViaNix(scopedCtx(), t.TempDir(), []byte(flake), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(names, ",") != "a,b" {
-		t.Errorf("names = %v, want [a b]", names)
+	want := map[string]inputSpec{
+		"a": {Original: github("x", "y"), Flake: true, Inputs: map[string]inputSpec{}},
+		"b": {Original: github("x", "z"), Flake: false, Inputs: map[string]inputSpec{"n": {Follows: str("a"), Flake: true, Inputs: map[string]inputSpec{}}}},
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	got, _ := json.Marshal(specs)
+	wantJSON, _ := json.Marshal(want)
+	if string(got) != string(wantJSON) {
+		t.Errorf("specs = %s, want %s", got, wantJSON)
+	}
+	ctx, cancel := context.WithCancel(scopedCtx())
 	cancel()
-	if _, err := declaredFlakeInputsViaNix(ctx, []byte(flake), nil); err == nil {
+	if _, err := declaredFlakeInputsViaNix(ctx, t.TempDir(), []byte(flake), nil); err == nil {
 		t.Error("a cancelled merge must not run the evaluation")
 	}
 }
 
-// The enumeration evaluates the worker's own expression, so it must be
-// restricted: a flake.nix that reads a file outside its store copy, fetches,
-// or loops, is refused, and nothing it read reaches the error. Skipped where
-// the sandbox has no nix.
+// The evaluation evaluates the worker's own expression, so it must be
+// restricted: a flake.nix that reads a file outside the flake (the working
+// directory included), fetches, or loops, is refused, and nothing it read
+// reaches the error; a relative path, a string spec and a url mixed with
+// attributes are refused by the canonicalisation.
 func TestDeclaredFlakeInputsViaNixIsRestrictedAndBounded(t *testing.T) {
-	if _, err := exec.LookPath("nix"); err != nil {
-		t.Skip("no nix on PATH")
-	}
+	skipWithoutNixAndScope(t)
+	dir := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "marker")
 	const secret = "DUMMY-MARKER-NOT-A-SECRET"
 	if err := os.WriteFile(marker, []byte(secret), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte(secret), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("LEAK_ME", secret)
@@ -223,29 +434,32 @@ func TestDeclaredFlakeInputsViaNixIsRestrictedAndBounded(t *testing.T) {
 	// environment, the host's system, or false.
 	harmless := map[string]bool{"getEnv": true, "currentSystem": true, "pathExists outside": true}
 	for name, flake := range map[string]string{
-		"throw with readFile":    `{ inputs = throw (builtins.readFile ` + marker + `); outputs = _: {}; }`,
-		"attrName from a file":   `{ inputs = { ${builtins.readFile ` + marker + `} = { }; }; outputs = _: {}; }`,
-		"readFile in the flake":  `{ inputs = { ${builtins.readFile ./flake.nix} = { }; }; outputs = _: {}; }`,
-		"getEnv":                 `{ inputs = { ${builtins.getEnv "LEAK_ME"} = { }; }; outputs = _: {}; }`,
-		"readDir outside":        `{ inputs = builtins.readDir ` + filepath.Dir(marker) + `; outputs = _: {}; }`,
-		"pathExists outside":     `{ inputs = { ${toString (builtins.pathExists ` + marker + `)} = { }; }; outputs = _: {}; }`,
-		"currentSystem":          `{ inputs = { ${builtins.currentSystem} = { }; }; outputs = _: {}; }`,
-		"fetchurl with a hash":   `{ inputs = { ${builtins.readFile (builtins.fetchurl { url = "file://` + marker + `"; sha256 = "0000000000000000000000000000000000000000000000000000"; })} = { }; }; outputs = _: {}; }`,
-		"fetchGit with a rev":    `{ inputs = { ${builtins.readFile ((builtins.fetchGit { url = "file://` + filepath.Dir(marker) + `"; rev = "0000000000000000000000000000000000000000"; }) + "/x")} = { }; }; outputs = _: {}; }`,
-		"infinite recursion":     `{ inputs = let f = x: f (x + 1); in f 0; outputs = _: {}; }`,
-		"unbounded list to attr": `{ inputs = builtins.listToAttrs (map (i: { name = toString i; value = { }; }) (builtins.genList (i: i) 10000000)); outputs = _: {}; }`,
+		"throw with readFile":       `{ inputs = throw (builtins.readFile ` + marker + `); outputs = _: {}; }`,
+		"attrName from a file":      `{ inputs = { ${builtins.readFile ` + marker + `} = { }; }; outputs = _: {}; }`,
+		"readFile in the cwd":       `{ inputs = { ${builtins.readFile ./flake.nix} = { }; }; outputs = _: {}; }`,
+		"getEnv":                    `{ inputs = { ${builtins.getEnv "LEAK_ME"} = { }; }; outputs = _: {}; }`,
+		"readDir outside":           `{ inputs = builtins.readDir ` + filepath.Dir(marker) + `; outputs = _: {}; }`,
+		"pathExists outside":        `{ inputs = { ${toString (builtins.pathExists ` + marker + `)} = { }; }; outputs = _: {}; }`,
+		"currentSystem":             `{ inputs = { ${builtins.currentSystem} = { }; }; outputs = _: {}; }`,
+		"fetchurl with a hash":      `{ inputs = { ${builtins.readFile (builtins.fetchurl { url = "file://` + marker + `"; sha256 = "0000000000000000000000000000000000000000000000000000"; })} = { }; }; outputs = _: {}; }`,
+		"fetchGit with a rev":       `{ inputs = { ${builtins.readFile ((builtins.fetchGit { url = "file://` + filepath.Dir(marker) + `"; rev = "0000000000000000000000000000000000000000"; }) + "/x")} = { }; }; outputs = _: {}; }`,
+		"infinite recursion":        `{ inputs = let f = x: f (x + 1); in f 0; outputs = _: {}; }`,
+		"unbounded list to attr":    `{ inputs = builtins.listToAttrs (map (i: { name = toString i; value = { }; }) (builtins.genList (i: i) 10000000)); outputs = _: {}; }`,
+		"relative path reference":   `{ inputs.a.url = "./sub"; outputs = _: {}; }`,
+		"string spec":               `{ inputs.a = "github:x/y"; outputs = _: {}; }`,
+		"url mixed with attributes": `{ inputs.a = { url = "github:x/y"; owner = "z"; }; outputs = _: {}; }`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			start := time.Now()
-			names, err := declaredFlakeInputsViaNix(context.Background(), []byte(flake), nil)
+			specs, err := declaredFlakeInputsViaNix(scopedCtx(), dir, []byte(flake), nil)
 			if err == nil {
-				for _, n := range names {
+				for n := range specs {
 					if strings.Contains(n, secret) || n == "marker" || n == "true" {
-						t.Fatalf("the enumeration read outside the flake: names = %v", names)
+						t.Fatalf("the evaluation read outside the flake: inputs = %v", specs)
 					}
 				}
 				if !harmless[name] {
-					t.Fatalf("hostile flake was not refused: names = %v", names)
+					t.Fatalf("hostile flake was not refused: inputs = %v", specs)
 				}
 				return
 			}
@@ -261,7 +475,7 @@ func TestDeclaredFlakeInputsViaNixIsRestrictedAndBounded(t *testing.T) {
 
 // The policy runs in the build worktree before the gate's command.
 func TestGuardedGateRefusesALockWithALocalPathInput(t *testing.T) {
-	stubDeclaredInputs(t, []string{"leak"}, nil)
+	stubDeclaredInputs(t, nil, nil)
 	t.Setenv("RINGMASTER_DISABLE_SCOPE", "1")
 	defer hookrun.SetConfinedGateTools("git", "sh")()
 	_, _, wtPath := setupRepoWithWorktree(t, "feature")
