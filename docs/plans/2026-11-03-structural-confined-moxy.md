@@ -18,6 +18,27 @@ the moxins the profile's moxyfile defines, with the resource rules the
 sweatfile defines; this must be structural (more than that cannot be reached
 from the unit); moxy and toolbox are in every profile by default.
 
+## Status (2026-11-03, later the same day): superseded by V3
+
+The twin unit (V2, section 3) was withdrawn with no fallback. The operator
+asked what a twin buys when the worker already holds the unit's whole
+authority (Bash, native Write/Edit, `run_recipe` over an editable justfile),
+and the answer from both repos was: nothing that makes the tool ceiling a
+boundary. The ruling and the replacement, **V3**, are recorded in clown's
+`docs/plans/2026-11-03-structural-moxy-confined.md` (on clown's master as
+89221cd, by clown/rare-walnut/pennywise): moxy stays in the agent unit; the
+profile's `allow-tools` ceiling is written into the read-only global moxyfile;
+clown arms `MOXY_PARENT_MOXYFILE` and a pinned absolute `MOXIN_PATH`; no
+second unit; the default confined moxyfile is toolbox, env and man. The
+ceiling is policy, not a boundary (spinclass#400 made the harness config
+read-only; the worker still has the unit), so R3' stays an honest check of the
+profile's reported tool set and must not be called structural. Spinclass's
+part (R3' in `checkConfinedToolSurface` and the `catalogWidenings` comparison
+of the new field) waits on clown's profile field and a ProfileProtocol bump
+announced first. Sections 2 and 3 and questions 1 and 2 of section 8 are kept
+as analysis; question 4 (the hook prefix) dissolves under V3, since moxy keeps
+its name.
+
 ## 1. What "structural" means
 
 Premise (R, sequencing note, FDR 0035): the unit keeps the operator's uid and
