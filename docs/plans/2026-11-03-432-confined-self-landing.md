@@ -171,7 +171,46 @@ Facts (R) are in section 1. Proposed shape (I):
 4. **D**: confined merge forces `targets: []`, refuses a non-empty list.
 5. **B plus the `allow-self-merge` switch**: only if the operator wants L1.
 
-## 9. Questions for the operator
+## 9. Operator rulings (2026-11-03) and what they change
+
+1. **L1 is wanted:** "land" means `origin/<default>`.
+2. **A self-written attestation is acceptable for now**, no different from
+   unconfined sessions; it will later be externally certified and possibly
+   dynamic with the parent's input; constraints tighten incrementally. The
+   operator also states that workers have `justfile` read/exec only, not write,
+   unless additionally granted. **Check needed (R/U):** I found nothing in
+   spinclass that enforces this: `buildUnitSpec` binds the worktree read-write
+   as a whole, no spec bind makes `justfile` read-only, and a grep of non-test
+   `internal/` code finds no `justfile` handling outside `apply`. If it is
+   enforced it is by the harness permission rules (policy, which the worker
+   could not edit after #400 for new sessions) or by clown, neither of which I
+   read. Until it is a bind or a probe, section 2's "a worker that controls the
+   justfile can make the gate pass" stays true for `flake.nix`, scripts the
+   justfile calls, and any tracked file the recipes read. Proposal: make
+   `justfile` (and `flake.nix`, `flake.lock`) read-only binds in the unit under
+   the same trusted opt-in as #400, with an F17-style probe; that turns the
+   operator's statement into something checked.
+3. **Operator-run merge:** `sc merge <session-id>` is run from the operator's
+   tty in the frontend, not in the session, and a merge made from inside an
+   attached session needs no attestation. So question 3 reduces to: the gate
+   still executes the branch's code in the frontend on the operator's authority
+   (the operator reading the diff is the guard). Whether to move that gate into
+   a unit is the operator's call; it is not required for self-landing.
+4. **Merge right: both.** A handle right is a virtual sweatfile at the top of
+   the chain. Design consequence (I): the right is stored as a grant record the
+   serve consults as the highest-priority trusted layer, so
+   `allow-self-merge` (sweatfile) and a `merge` handle right on a child
+   resolve through one function and a nearer layer can only narrow. Which wins
+   when they disagree follows the existing trusted-layer rule (the layer above
+   the repo, last wins), with the handle as the top layer.
+
+Remaining open questions: whether `justfile` read-only is enforced anywhere I did
+not read (and if not, the read-only-bind proposal above), and clown's side of the
+gate unit.
+
+## 10. Questions that were asked
+
+The four original questions, kept for the record:
 
 1. L2 first (confined workers publish, a holder lands), L1 later or never?
 2. If L1: is it acceptable that worker code reaches the default branch behind a
