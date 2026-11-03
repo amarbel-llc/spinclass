@@ -212,6 +212,10 @@ type unitSpecInput struct {
 	// opt-in (#400): when false, <worktree>/.claude and <worktree>/.mcp.json are
 	// read-only binds.
 	harnessConfigWritable bool
+	// harnessRootFiles are the worktree-root files direnv and the harness load
+	// (.envrc, CLAUDE.md) that exist, resolved by harnessRootFileBinds; they are
+	// read-only binds under the same opt-in.
+	harnessRootFiles []string
 }
 
 var unitNameUnsafe = regexp.MustCompile(`[^a-zA-Z0-9-]`)
@@ -281,6 +285,7 @@ func buildUnitSpec(in unitSpecInput) unitSpec {
 			filepath.Join(wt, harnessConfigDir),
 			filepath.Join(wt, harnessMCPFile),
 		)
+		spec.BindsRO = append(spec.BindsRO, in.harnessRootFiles...)
 	}
 	if in.handshakeDir != "" {
 		// The unit's state dir is not the frontend's, so the worker's hello
@@ -330,6 +335,58 @@ const (
 	harnessConfigDir = ".claude"
 	harnessMCPFile   = ".mcp.json"
 )
+
+// harnessRootFiles are the worktree-root files direnv and the harness load on
+// the operator's side (and on the next start): the environment script and the
+// project memory file.
+var harnessRootFiles = []string{".envrc", "CLAUDE.md"}
+
+// harnessRootFileBinds returns the paths to bind read-only for the root files
+// that exist in wt. A bind needs an existing regular file, and creating a
+// placeholder would dirty the tree (CLAUDE.md) or flip the hooks' .envrc gate,
+// so an absent file is not bound (the probe reports a plant at it). A symlink
+// (CLAUDE.md -> AGENTS.md is common) binds its target, since a mount cannot sit
+// on a symlink; the link itself stays replaceable inside the rw worktree. A
+// symlink that leaves wt, or anything that is not a regular file, refuses the
+// spec: it cannot be bound, and silently skipping it would look covered.
+func harnessRootFileBinds(wt string) ([]string, error) {
+	var out []string
+	for _, name := range harnessRootFiles {
+		p := filepath.Join(wt, name)
+		fi, err := os.Lstat(p)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("inspecting %s for its read-only bind: %w", p, err)
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			target, err := filepath.EvalSymlinks(p)
+			if err != nil {
+				return nil, fmt.Errorf("resolving the symlink %s for its read-only bind: %w", p, err)
+			}
+			realWt, err := filepath.EvalSymlinks(wt)
+			if err != nil {
+				return nil, err
+			}
+			rel, err := filepath.Rel(realWt, target)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return nil, fmt.Errorf("%s is a symlink to %s, outside the worktree: it cannot be bound read-only, so the unit spec is refused (remove the link or set [confinement] harness-config-writable)", p, target)
+			}
+			tfi, err := os.Lstat(target)
+			if err != nil || !tfi.Mode().IsRegular() {
+				return nil, fmt.Errorf("%s is a symlink to %s, which is not a regular file: it cannot be bound read-only", p, target)
+			}
+			out = append(out, filepath.Join(wt, rel))
+			continue
+		}
+		if !fi.Mode().IsRegular() {
+			return nil, fmt.Errorf("%s is not a regular file (mode %s): it cannot be bound read-only", p, fi.Mode().Type())
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
 
 // ensureHarnessConfigPaths makes the two read-only bind sources exist: the unit
 // cannot create them, and a bind with a missing source fails the unit start. A
@@ -401,8 +458,13 @@ func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, state
 	if err := ensureWorktreeConfigFile(commonDir, rp.AbsPath); err != nil {
 		return "", err
 	}
+	var rootFiles []string
 	if !harnessConfigWritable {
 		if err := ensureHarnessConfigPaths(rp.AbsPath); err != nil {
+			return "", err
+		}
+		var err error
+		if rootFiles, err = harnessRootFileBinds(rp.AbsPath); err != nil {
 			return "", err
 		}
 	}
@@ -422,7 +484,7 @@ func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, state
 		rp: rp, operatorHome: home, stateDir: stateDir, commonDir: commonDir,
 		sshAuthSock: sshAuthSock, runtimeDir: runtimeDir, wayland: wayland,
 		egress: egress, env: env, handshakeDir: handshakeDir,
-		harnessConfigWritable: harnessConfigWritable,
+		harnessConfigWritable: harnessConfigWritable, harnessRootFiles: rootFiles,
 	})
 	if err := refuseProtectedBinds(spec, stateDir); err != nil {
 		return "", err

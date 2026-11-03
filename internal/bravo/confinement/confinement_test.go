@@ -280,6 +280,37 @@ func quoteAll(ss []string) []string {
 	return out
 }
 
+// f17RootFile makes /wt/a/<name> exist in the unit, bound read-only by the
+// recorded spec and mounted read-only in the unit.
+func f17RootFile(s *fakeSys, name string) {
+	p := "/wt/a/" + name
+	s.files[root+p] = "x\n"
+	s.files[UnitSpecPath(stateDir, "/wt/a")] = strings.Replace(unitSpecWith("/wt/a"), `"/wt/a/.mcp.json"]`, `"/wt/a/.mcp.json","`+p+`"]`, 1)
+	s.files["/proc/100/mountinfo"] += "8 3 8:1 " + p + " " + p + " ro - ext4 /dev/sda1 rw\n"
+}
+
+func TestF17BindsAndAcceptsExistingRootFiles(t *testing.T) {
+	sys, in := confinedHost()
+	f17RootFile(sys, ".envrc")
+	if f := factByID(t, Run(sys, in), "F17"); !f.OK {
+		t.Fatalf("F17 = %+v, want ok for a bound, unwritable .envrc", f)
+	}
+}
+
+// CLAUDE.md -> AGENTS.md: the target is bound, the link itself is not coverable
+// by a mount, and F17 says so instead of claiming full cover.
+func TestF17AcceptsASymlinkedClaudeMdByItsTargetAndSaysTheLinkIsReplaceable(t *testing.T) {
+	sys, in := confinedHost()
+	f17RootFile(sys, "AGENTS.md")
+	sys.files[root+"/wt/a/CLAUDE.md"] = ""
+	sys.symlinks[root+"/wt/a/CLAUDE.md"] = true
+	sys.links[root+"/wt/a/CLAUDE.md"] = "AGENTS.md"
+	f := factByID(t, Run(sys, in), "F17")
+	if !f.OK || !strings.Contains(f.Detail, "link itself replaceable") {
+		t.Errorf("F17 = %+v, want ok naming the replaceable link", f)
+	}
+}
+
 // F17 (#400): a trusted [confinement] harness-config-writable opt-in leaves the
 // worktree's harness config writable on purpose, so F17 does not judge it.
 func TestF17HonoursTheHarnessConfigWritableOptIn(t *testing.T) {
@@ -518,6 +549,22 @@ func TestEachFactCatchesItsBreach(t *testing.T) {
 		}},
 		{"F17", "does not bind /wt/a/.claude read-only", func(s *fakeSys, _ *Inputs) {
 			s.files[UnitSpecPath(stateDir, "/wt/a")] = `{"version":1,"worktree":"/wt/a","binds_rw":["/wt/a"],"binds_ro":["/wt/a/.mcp.json"]}`
+		}},
+		{"F17", "/wt/a/.envrc exists in the unit but the recorded unit spec does not bind /wt/a/.envrc read-only", func(s *fakeSys, _ *Inputs) {
+			s.files[root+"/wt/a/.envrc"] = "use flake\n"
+		}},
+		{"F17", "/wt/a/CLAUDE.md is writable", func(s *fakeSys, _ *Inputs) {
+			f17RootFile(s, "CLAUDE.md")
+			s.writable = map[string]bool{root + "/wt/a/CLAUDE.md": true}
+		}},
+		{"F17", "read-only file mount on /wt/a/.envrc is gone", func(s *fakeSys, _ *Inputs) {
+			f17RootFile(s, ".envrc")
+			s.files["/proc/100/mountinfo"] = strings.Replace(s.files["/proc/100/mountinfo"], "8 3 8:1 /wt/a/.envrc /wt/a/.envrc ro - ext4 /dev/sda1 rw\n", "", 1)
+		}},
+		{"F17", "outside the worktree", func(s *fakeSys, _ *Inputs) {
+			s.files[root+"/wt/a/CLAUDE.md"] = ""
+			s.symlinks[root+"/wt/a/CLAUDE.md"] = true
+			s.links[root+"/wt/a/CLAUDE.md"] = "/etc/other.md"
 		}},
 		{"F10", "host pid namespace", func(s *fakeSys, _ *Inputs) {
 			s.links["/proc/101/ns/pid"] = "pid:[4026531836]"

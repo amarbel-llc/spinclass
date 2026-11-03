@@ -997,8 +997,10 @@ in the frontend).
 	default, so list every host the worker needs, the defaults included.
 
 *harness-config-writable*
-	Boolean. By default a confined unit sees _<worktree>/.claude_ and
-	_<worktree>/.mcp.json_ read-only: the harness reads both on every start
+	Boolean. By default a confined unit sees _<worktree>/.claude_,
+	_<worktree>/.mcp.json_, and the worktree-root _.envrc_ and _CLAUDE.md_
+	(where they exist; a symlinked _CLAUDE.md_ is covered through its target)
+	read-only: the harness and direnv read them on every start
 	and you may open the worktree in an unconfined harness, so an MCP server or
 	a permission rule a worker planted there would widen its own tool surface or
 	run outside the unit. Set

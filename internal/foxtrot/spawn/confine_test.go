@@ -521,6 +521,76 @@ func TestBuildUnitSpecBindsHarnessConfigReadOnlyUnlessOptedIn(t *testing.T) {
 	}
 }
 
+// #400, second step: .envrc and CLAUDE.md in the worktree root are loaded by
+// direnv and the harness. A read-only file bind needs an existing regular file
+// as its source, so only what exists is bound; a CLAUDE.md that is a symlink
+// (CLAUDE.md -> AGENTS.md is common) binds its in-worktree target, because a
+// mount cannot sit on a symlink.
+func TestHarnessRootFileBinds(t *testing.T) {
+	write := func(t *testing.T, path, body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Run("regular files are bound, absent ones are not", func(t *testing.T) {
+		wt := t.TempDir()
+		write(t, filepath.Join(wt, ".envrc"), "use flake\n")
+		got, err := harnessRootFileBinds(wt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := []string{filepath.Join(wt, ".envrc")}; !reflect.DeepEqual(got, want) {
+			t.Errorf("binds = %v, want %v", got, want)
+		}
+	})
+	t.Run("a symlink binds its target inside the worktree", func(t *testing.T) {
+		wt := t.TempDir()
+		write(t, filepath.Join(wt, "AGENTS.md"), "x\n")
+		if err := os.Symlink("AGENTS.md", filepath.Join(wt, "CLAUDE.md")); err != nil {
+			t.Fatal(err)
+		}
+		got, err := harnessRootFileBinds(wt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := []string{filepath.Join(wt, "AGENTS.md")}; !reflect.DeepEqual(got, want) {
+			t.Errorf("binds = %v, want the symlink target %v", got, want)
+		}
+	})
+	t.Run("a symlink leaving the worktree is refused", func(t *testing.T) {
+		wt := t.TempDir()
+		if err := os.Symlink("/etc/passwd", filepath.Join(wt, "CLAUDE.md")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := harnessRootFileBinds(wt); err == nil {
+			t.Error("a CLAUDE.md pointing outside the worktree must refuse the spec, not be bound or skipped")
+		}
+	})
+	t.Run("a directory is refused", func(t *testing.T) {
+		wt := t.TempDir()
+		if err := os.Mkdir(filepath.Join(wt, ".envrc"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := harnessRootFileBinds(wt); err == nil {
+			t.Error("a .envrc that is a directory must refuse the spec")
+		}
+	})
+}
+
+func TestBuildUnitSpecBindsTheHarnessRootFiles(t *testing.T) {
+	rp := worktree.ResolvedPath{AbsPath: "/w/repo/.worktrees/feat", SessionKey: "repo/feat"}
+	extra := []string{"/w/repo/.worktrees/feat/.envrc"}
+	spec := buildUnitSpec(unitSpecInput{rp: rp, commonDir: "/w/repo/.git", runtimeDir: "/run/user/1", harnessRootFiles: extra})
+	if !slices.Contains(spec.BindsRO, extra[0]) {
+		t.Errorf("binds_ro %v lacks %s", spec.BindsRO, extra[0])
+	}
+	opted := buildUnitSpec(unitSpecInput{rp: rp, commonDir: "/w/repo/.git", runtimeDir: "/run/user/1", harnessRootFiles: extra, harnessConfigWritable: true})
+	if slices.Contains(opted.BindsRO, extra[0]) {
+		t.Errorf("an opted-in sweatfile leaves it writable, got ro=%v", opted.BindsRO)
+	}
+}
+
 // A read-only file bind needs an existing source (the unit cannot create it),
 // and a session that never wrote an MCP config has no .mcp.json.
 func TestEnsureHarnessConfigPathsCreatesMissingAndKeepsExisting(t *testing.T) {

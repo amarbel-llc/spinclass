@@ -1405,12 +1405,14 @@ func (p *prober) f14RuntimeDirBoundOnly() Fact {
 // unit. The recorded
 // spec must bind both read-only, the files must refuse a write, and the mounts
 // must still be in force (a frontend rename over .mcp.json drops its mount). A
-// trusted [confinement] harness-config-writable opt-in skips the check.
+// trusted [confinement] harness-config-writable opt-in skips the check. The
+// worktree-root .envrc and CLAUDE.md are held to the same rule where they exist.
 func (p *prober) f17HarnessConfigNotWritable() Fact {
 	const id, name = "F17", "harness config (.claude, .mcp.json) not writable"
 	if p.in.HarnessConfigWritable && p.subjectErr == nil {
 		return fact(id, name, nil, "[confinement] harness-config-writable is on: not judged")
 	}
+	var detail string
 	err := func() error {
 		if err := p.needSubject(); err != nil {
 			return err
@@ -1442,9 +1444,58 @@ func (p *prober) f17HarnessConfigNotWritable() Fact {
 				return err
 			}
 		}
-		return p.fileBindsInForce([]string{dir, mcp})
+		mounts := []string{dir, mcp}
+		// .envrc and CLAUDE.md are bound only where they exist (a bind needs a
+		// source), so what counts here is what the unit SEES: a file at either
+		// name must be bound read-only, which also catches one the worker
+		// created after the spec was written. A symlink binds its in-worktree
+		// target; the link itself stays replaceable in the rw worktree bind.
+		var linked []string
+		for _, rootName := range []string{".envrc", "CLAUDE.md"} {
+			unitPath := filepath.Join(wt, rootName)
+			host, err := p.at(unitPath)
+			if err != nil {
+				return err
+			}
+			fi, err := p.sys.Lstat(host)
+			switch {
+			case errors.Is(err, fs.ErrNotExist):
+				continue // absent: nothing to bind, and nothing planted
+			case err != nil:
+				return fmt.Errorf("cannot establish whether %s exists in the unit: %w", unitPath, err)
+			}
+			target := unitPath
+			if fi.Mode()&fs.ModeSymlink != 0 {
+				dest, err := p.sys.Readlink(host)
+				if err != nil {
+					return fmt.Errorf("reading the symlink %s in the unit: %w", unitPath, err)
+				}
+				if !filepath.IsAbs(dest) {
+					dest = filepath.Join(filepath.Dir(unitPath), dest)
+				}
+				target = filepath.Clean(dest)
+				if target != wt && !strings.HasPrefix(target, wt+"/") {
+					return fmt.Errorf("%s is a symlink to %s, outside the worktree, so it is not covered by a read-only bind", unitPath, target)
+				}
+				linked = append(linked, rootName)
+			}
+			if !slices.Contains(spec.BindsRO, target) || slices.Contains(spec.BindsRW, target) {
+				return fmt.Errorf("%s exists in the unit but the recorded unit spec does not bind %s read-only", unitPath, target)
+			}
+			if err := p.mustBeUnwritable(target, target); err != nil {
+				return err
+			}
+			mounts = append(mounts, target)
+		}
+		if err := p.fileBindsInForce(mounts); err != nil {
+			return err
+		}
+		if len(linked) > 0 {
+			detail = strings.Join(linked, ", ") + ": symlink target read-only, the link itself replaceable"
+		}
+		return nil
 	}()
-	return fact(id, name, err, "")
+	return fact(id, name, err, detail)
 }
 
 // F16 (spinclass#431): the protected state directories (ProtectedStateDirs,
