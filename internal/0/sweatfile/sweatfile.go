@@ -101,6 +101,7 @@ type Hooks struct {
 	Create                     *string `toml:"create"`
 	Stop                       *string `toml:"stop"`
 	PreMerge                   *string `toml:"pre-merge"`
+	ConfinedPreMerge           *string `toml:"confined-pre-merge"`
 	PostMerge                  *string `toml:"post-merge"`
 	Repair                     *string `toml:"repair"`
 	PreCommit                  *string `toml:"pre-commit"`

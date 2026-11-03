@@ -792,6 +792,22 @@ func TestCheckPermissionsWarnsInRepoLayer(t *testing.T) {
 	}
 }
 
+// [hooks] confined-pre-merge (spinclass#449) is honoured only above the repo,
+// so a repo-level value warns once and a trusted one does not.
+func TestCheckConfinedPreMergeWarnsInRepoLayer(t *testing.T) {
+	cmd := "nix flake check"
+	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{ConfinedPreMerge: &cmd}}
+	if got := CheckConfinedPreMerge(sf, false); len(got) != 1 || got[0].Field != "hooks.confined-pre-merge" || got[0].Severity != SeverityWarning {
+		t.Errorf("repo-layer confined-pre-merge should warn once, got %+v", got)
+	}
+	if len(CheckConfinedPreMerge(sf, true)) != 0 {
+		t.Error("above-repo confined-pre-merge should not warn")
+	}
+	if len(CheckConfinedPreMerge(sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{}}, false)) != 0 {
+		t.Error("an unset key should not warn")
+	}
+}
+
 func TestCheckStoreWarnsInRepoLayer(t *testing.T) {
 	name := "A"
 	sf := sweatfile.Sweatfile{Store: &sweatfile.Store{AuthorName: &name}}

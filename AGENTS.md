@@ -147,6 +147,11 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
   caveats: `spinclass-local-default-ref(7)`.
 - **Per-session forge push credentials** (FDR 0028, #285, `internal/charlie/auth`;
   `url-resolver` #335 is read only from layers above the repo).
+- **Guarded gate** (#449, FDR 0035; `merge/guarded.go`, `check.RunGuarded…`,
+  `hookrun/confined.go`): a merge or check of a session launched confined
+  runs no repair and, instead of the repo's pre-merge, the trusted
+  `[hooks].confined-pre-merge` in the build worktree with no devshell and a
+  scrubbed environment. Pins for its tools: #454.
 - **Pre-merge REPAIR** (FDR 0018; a dirty tracked tree is refused, #345) and
   **per-commit hook** (FDR 0019, #183/#267; canonical value
   `conformist-pre-commit`).

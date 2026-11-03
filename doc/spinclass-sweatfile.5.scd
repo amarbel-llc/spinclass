@@ -293,6 +293,49 @@ does not export *WORKTREE*.
 	and a hook that is SIGKILLed unscoped warns that its children may
 	still be running. *Merge:* scalar override.
 
+*confined-pre-merge*
+	Shell script run by *sc merge* and *sc check* as the gate of a *guarded*
+	merge or check in place of *pre-merge* (spinclass#449): one of a session
+	the frontend launched confined (FDR 0035), decided from the frontend's
+	unit record, never from the worktree.
+	The ordinary gate runs the branch's own tree in the frontend: its
+	justfile, inside the session worktree's devshell, which reads _.envrc_,
+	the flake as the worktree holds it and _.spinclass/env_. For a tree a
+	confined worker controls that would execute the worker's code with the
+	operator's authority, and no set of protected files prevents it. A
+	guarded gate therefore runs this command instead, read only from layers
+	ABOVE the repo (a repo-level value is ignored and *sc validate* warns),
+	always in the detached build worktree at the pinned commit, with no
+	*direnv* and an environment built from scratch: a *PATH* of the
+	frontend's *nix*, *git* and *sh* directories only (resolved from the
+	frontend's own PATH when the gate starts, and refused when one resolves
+	under the session worktree or any worktree of the repo, or when the
+	frontend itself runs inside such a worktree's direnv); *HOME*, *USER*,
+	*LOGNAME*, *LANG*, *LC_ALL*, *NIX_REMOTE*, the TLS-root variables,
+	*XDG_RUNTIME_DIR* and *DBUS_SESSION_BUS_ADDRESS* (for the systemd scope)
+	kept; everything else dropped; *NIX_CONFIG* pinned to
+	*allow-unsafe-native-code-during-evaluation = false*,
+	*accept-flake-config = false* and *sandbox = true* (the first two are
+	evaluator settings and always hold; *sandbox* is decided by the daemon
+	and holds only for a trusted user or a daemon already configured with
+	it); *GIT_ALLOW_PROTOCOL=file:https*; *WORKTREE* naming the build
+	worktree; *SPINCLASS_GUARDED_GATE=1*. The default is *nix flake check
+	--no-update-lock-file*: the flake's checks, evaluated purely and built in
+	the nix sandbox. A guarded merge also runs no *repair*, and is refused
+	when *disable-merge-build-worktree* is set or the trusted hierarchy does
+	not load. The record carries an ok point naming the command and the layer
+	it came from, and one per repo-level value it ignored. What a confined
+	landing loses: the justfile's recipes and any impure lane; the flake's
+	*checks* are its whole gate. What the guard does not cover: it bounds
+	what this merge's frontend executes, nothing later: the landed tree is
+	run unguarded by the next *sc start* in that repo (its *create* hook,
+	*.envrc*), by the next unconfined session's merge, and by *[[post-merge]]*
+	targets (which have their own digest rule); and a flake input naming a
+	path outside the build worktree (a *path:* input) widens what the gate
+	evaluates beyond the pinned commit. An empty value in a trusted layer
+	restores the default. *Merge:* scalar override among the trusted layers;
+	never read from the repo.
+
 *post-merge*
 	Shell script run by *sc merge* *after* the merge has landed on the
 	default branch — the mirror image of *pre-merge*. Typical use: trigger

@@ -738,6 +738,21 @@ func CheckPermissions(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 	return issues
 }
 
+// CheckConfinedPreMerge warns about a repo-level [hooks].confined-pre-merge
+// (spinclass#449): the guarded gate is read only from layers above the repo,
+// because the repo's tree, sweatfile included, is what a confined worker
+// controls, so a value there is ignored.
+func CheckConfinedPreMerge(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
+	if layerAboveRepo || sf.Hooks == nil || sf.Hooks.ConfinedPreMerge == nil {
+		return nil
+	}
+	return []Issue{{
+		Message:  "[hooks] sets `confined-pre-merge` in a repo-level sweatfile: it is ignored — the guarded gate is read only from sweatfiles above the repo; move it to the global sweatfile",
+		Severity: SeverityWarning,
+		Field:    "hooks.confined-pre-merge",
+	}}
+}
+
 // CheckFolio validates the [folio] table (spinclass#438): every entry must
 // parse under the stanza grammar (internal/0/folio) and unmatched must be ask
 // or deny; both are errors, because an entry the broker could not compile
@@ -1206,6 +1221,10 @@ func Run(w io.Writer, home, repoDir string) int {
 			} else {
 				sub.Ok("confinement valid")
 			}
+		}
+
+		for _, iss := range CheckConfinedPreMerge(src.File, sweatfileio.LayerAboveRepo(src.Path, home, mainRoot)) {
+			sub.Ok(fmt.Sprintf("hooks valid # warning: %s", iss.Message))
 		}
 
 		if src.File.Permissions != nil {

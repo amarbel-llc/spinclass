@@ -200,13 +200,42 @@ func PrincipalOfSession(sys System, stateDir, sessionKey, worktree string) (prin
 
 // LaunchedConfined reports whether worktree has (or had) an agent unit: a
 // frontend-owned unit record or spec exists for it.
+// The record is keyed by the path the spawn used; a caller may name the same
+// worktree through a symlinked parent (a tool's cwd against the recorded
+// absolute path), so both spellings are tried. A miss must never turn a
+// confined session into an ordinary one.
 func LaunchedConfined(stateDir, worktree string) bool {
-	for _, f := range []string{UnitRecordPath(stateDir, worktree), UnitSpecPath(stateDir, worktree)} {
-		if _, err := os.Lstat(f); err == nil {
-			return true
+	for _, wt := range worktreeSpellings(worktree) {
+		for _, f := range []string{UnitRecordPath(stateDir, wt), UnitSpecPath(stateDir, wt)} {
+			if _, err := os.Lstat(f); err == nil {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// worktreeSpellings is the path as given and with every symlink resolved,
+// deduplicated.
+func worktreeSpellings(worktree string) []string {
+	out := []string{worktree}
+	if resolved, err := filepath.EvalSymlinks(worktree); err == nil && filepath.Clean(resolved) != filepath.Clean(worktree) {
+		out = append(out, resolved)
+	}
+	return out
+}
+
+// GuardedWorktree reports whether a merge or check of worktree must run the
+// guarded gate instead of the repo's pre-merge (spinclass#449): the session
+// was launched confined, so its tree is a worker's and the gate may not
+// execute it in the frontend. A state directory that cannot be resolved
+// counts as confined: the rule fails closed.
+func GuardedWorktree(worktree string) bool {
+	stateDir, err := DefaultStateDir()
+	if err != nil {
+		return true
+	}
+	return LaunchedConfined(stateDir, worktree)
 }
 
 // RemovePrincipalMapping deletes a principal's mapping when its session ends.

@@ -210,6 +210,12 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 				_vHooksPreMerge.MarkConsumedString()
 			}
 		}
+		if _vHooksConfinedPreMerge, _ok := _vHooks.Field("confined-pre-merge"); _ok && _vHooksConfinedPreMerge.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksConfinedPreMerge.Leaf); _xok {
+				hooksVal3.ConfinedPreMerge = &_x
+				_vHooksConfinedPreMerge.MarkConsumedString()
+			}
+		}
 		if _vHooksPostMerge, _ok := _vHooks.Field("post-merge"); _ok && _vHooksPostMerge.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractString(_vHooksPostMerge.Leaf); _xok {
 				hooksVal3.PostMerge = &_x
@@ -383,6 +389,13 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractString(_vPreMerge.Leaf); _xok {
 				hooksVal3.PreMerge = &_x
 				_vPreMerge.MarkConsumedString()
+			}
+		}
+		if _vConfinedPreMerge, _ok := model.Field("confined-pre-merge"); _ok && _vConfinedPreMerge.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vConfinedPreMerge.Leaf); _xok {
+				hooksVal3.ConfinedPreMerge = &_x
+				_vConfinedPreMerge.MarkConsumedString()
 			}
 		}
 		if _vRepair, _ok := model.Field("repair"); _ok && _vRepair.Kind == cst.VLeaf {
@@ -1596,6 +1609,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
+		if d.data.Hooks.ConfinedPreMerge != nil {
+			if err := cst.SetAny(tableNode, "confined-pre-merge", *d.data.Hooks.ConfinedPreMerge); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
 		if d.data.Hooks.PostMerge != nil {
 			if err := cst.SetAny(tableNode, "post-merge", *d.data.Hooks.PostMerge); err != nil {
 				return nil, fmt.Errorf("%w", err)
@@ -2338,6 +2356,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vHooksPreMerge.MarkConsumedString()
 			}
 		}
+		if _vHooksConfinedPreMerge, _ok := _vHooks.Field("confined-pre-merge"); _ok && _vHooksConfinedPreMerge.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksConfinedPreMerge.Leaf); _xok {
+				hooksVal3.ConfinedPreMerge = &_x
+				_vHooksConfinedPreMerge.MarkConsumedString()
+			}
+		}
 		if _vHooksPostMerge, _ok := _vHooks.Field("post-merge"); _ok && _vHooksPostMerge.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractString(_vHooksPostMerge.Leaf); _xok {
 				hooksVal3.PostMerge = &_x
@@ -2511,6 +2535,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractString(_vPreMerge.Leaf); _xok {
 				hooksVal3.PreMerge = &_x
 				_vPreMerge.MarkConsumedString()
+			}
+		}
+		if _vConfinedPreMerge, _ok := sub.Field("confined-pre-merge"); _ok && _vConfinedPreMerge.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vConfinedPreMerge.Leaf); _xok {
+				hooksVal3.ConfinedPreMerge = &_x
+				_vConfinedPreMerge.MarkConsumedString()
 			}
 		}
 		if _vRepair, _ok := sub.Field("repair"); _ok && _vRepair.Kind == cst.VLeaf {
@@ -3705,6 +3736,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if data.Hooks.PreMerge != nil {
 			if err := cst.SetAny(tableNode, "pre-merge", *data.Hooks.PreMerge); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.Hooks.ConfinedPreMerge != nil {
+			if err := cst.SetAny(tableNode, "confined-pre-merge", *data.Hooks.ConfinedPreMerge); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}

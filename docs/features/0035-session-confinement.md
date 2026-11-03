@@ -52,7 +52,9 @@ right at once:
   (or another session) runs executes it.
 - **An edit to a `flake.nix`, `justfile` or `.envrc`** that the pre-merge hook,
   direnv, or the operator's next `nix develop` evaluates: code execution in
-  whatever context evaluates it, including the operator's.
+  whatever context evaluates it, including the operator's. For the merge and
+  check of a confined session the guarded gate (spinclass#449, below) closes
+  this; the operator's own `nix develop` in that worktree stays open.
 - **Anything under `~/.config`, `~/.ssh`, `~/.local/state`**: sweatfiles (the
   global sweatfile turns `[profile-rights] enforce` on or off), the grant store,
   ssh config, clown/troupe config.
@@ -334,6 +336,25 @@ The findings:
   MCP. Its landing goes through the operator or the coordinator with
   `sc merge <target>`. That is the coordinator's ruling, and it matches EPIC
   0001's engineer-builder ("cannot ... merge").
+
+  That operator-run merge (and `sc check`) of a confined session is a
+  **guarded** one (spinclass#449): the ordinary pre-merge gate runs the
+  branch's own tree in the frontend (its justfile, in the session worktree's
+  devshell, which reads `.envrc`, the flake as the worktree holds it and the
+  worker-writable `.spinclass/env`), so for a confined worker's tree no set of
+  protected files can be the control. A guarded merge runs no repair and, in
+  place of the repo's pre-merge, the trusted `[hooks] confined-pre-merge`
+  (layers above the repo only; default `nix flake check --no-update-lock-file`)
+  in the detached build worktree at the pinned commit, with no direnv, an
+  environment built from scratch and the nix evaluator's escape hatches pinned
+  (`allow-unsafe-native-code-during-evaluation = false`, `accept-flake-config =
+  false`, `sandbox = true`): the only worker code the gate executes is what nix
+  runs inside its sandbox. The guard is decided from the frontend-owned unit
+  record or spec (`confinement.GuardedWorktree`), never from the worktree, and
+  fails closed when the state directory cannot be resolved. What a confined
+  landing loses is the justfile's recipes and any impure lane. The design and
+  the review that forced it: `docs/plans/2026-11-03-432-confined-self-landing.md`
+  sections 12 and 13.
 
 - **Open to a confined caller, each with a reason.** These are declared in
   `openServeTools` (`serve_caller_gate_test.go`).

@@ -109,6 +109,9 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		if other.Hooks.PreMerge != nil {
 			merged.Hooks.PreMerge = other.Hooks.PreMerge
 		}
+		if other.Hooks.ConfinedPreMerge != nil {
+			merged.Hooks.ConfinedPreMerge = other.Hooks.ConfinedPreMerge
+		}
 		if other.Hooks.PostMerge != nil {
 			merged.Hooks.PostMerge = other.Hooks.PostMerge
 		}

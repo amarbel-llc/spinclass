@@ -51,7 +51,7 @@ func OnAttach(sf sweatfile.Sweatfile, worktreePath string, w io.Writer) error {
 // $SPINCLASS_SESSION_ID) appended. The session env is passed explicitly
 // because it is no longer set on the spinclass process itself (#330).
 func OnDetach(sf sweatfile.Sweatfile, worktreePath string, sessionEnv []string, w io.Writer) error {
-	return runHookInDirEnv(context.Background(), sf.OnDetachHookCommand(), worktreePath, worktreePath, sessionEnv, 0, "", false, 0, w)
+	return runHookInDirEnv(context.Background(), sf.OnDetachHookCommand(), worktreePath, worktreePath, sessionEnv, 0, "", false, 0, w, nil)
 }
 
 // PreMerge runs the [hooks].pre-merge command in worktreePath under a
@@ -91,13 +91,13 @@ func RepairWithCap(ctx context.Context, sf sweatfile.Sweatfile, worktreePath str
 	}
 	cmd := sf.RepairHookCommand()
 	if timeout <= 0 {
-		return runHookInDirEnv(ctx, cmd, worktreePath, worktreePath, nil, 0, "", false, repairKillGrace, w)
+		return runHookInDirEnv(ctx, cmd, worktreePath, worktreePath, nil, 0, "", false, repairKillGrace, w, nil)
 	}
 
 	hookCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	err := runHookInDirEnv(hookCtx, cmd, worktreePath, worktreePath, nil, 0, "", false, repairKillGrace, w)
+	err := runHookInDirEnv(hookCtx, cmd, worktreePath, worktreePath, nil, 0, "", false, repairKillGrace, w, nil)
 	// Only OUR deadline yields the cap message; a cancelled caller keeps its own.
 	if err != nil && errors.Is(hookCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
 		return &kindError{kind: ErrRepairTimeout, msg: fmt.Sprintf(
@@ -146,13 +146,13 @@ func PostMergeWithCap(ctx context.Context, sf sweatfile.Sweatfile, dir string, e
 		// output is not ours to truncate.
 		// scopeID "" — post-merge is deliberately unscoped so a control-group
 		// kill never reaps the detached children FDR 0023 sanctions for slow deploys.
-		return runHookInDirEnv(ctx, cmd, dir, dir, extraEnv, 0, "", false, 0, w)
+		return runHookInDirEnv(ctx, cmd, dir, dir, extraEnv, 0, "", false, 0, w, nil)
 	}
 
 	hookCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	err := runHookInDirEnv(hookCtx, cmd, dir, dir, extraEnv, postMergeWaitDelay, "", false, 0, w)
+	err := runHookInDirEnv(hookCtx, cmd, dir, dir, extraEnv, postMergeWaitDelay, "", false, 0, w, nil)
 	switch {
 	// Only OUR deadline yields the cap message: if the caller's ctx is also
 	// done, the kill is theirs (a cancelled job) and keeps its own error.
@@ -199,7 +199,7 @@ func Target(ctx context.Context, t sweatfile.PostMergeTarget, dir string, extraE
 	// scopeID "" — post-merge is deliberately unscoped so a control-group
 	// kill never reaps the detached children FDR 0023 sanctions for slow deploys.
 	start := time.Now()
-	err := runHookInDirEnv(ctx, &command, dir, dir, extraEnv, postMergeWaitDelay, "", false, 0, w)
+	err := runHookInDirEnv(ctx, &command, dir, dir, extraEnv, postMergeWaitDelay, "", false, 0, w, nil)
 	run.CommandDuration = time.Since(start)
 	if err != nil {
 		run.Verdict = sweatfile.PostMergeCommandFailed
@@ -209,7 +209,7 @@ func Target(ctx context.Context, t sweatfile.PostMergeTarget, dir string, extraE
 		verify := *t.Verify
 		run.VerifyRan = true
 		start = time.Now()
-		err = runHookInDirEnv(ctx, &verify, dir, dir, extraEnv, postMergeWaitDelay, "", false, 0, w)
+		err = runHookInDirEnv(ctx, &verify, dir, dir, extraEnv, postMergeWaitDelay, "", false, 0, w, nil)
 		run.VerifyDuration = time.Since(start)
 		if err != nil {
 			run.Verdict = sweatfile.PostMergeVerifyFailed
@@ -305,9 +305,22 @@ func notice(ctx context.Context, w io.Writer, msg string) {
 // in-place mode). See runHookInDir and FDR 0013.
 func PreMergeInDir(ctx context.Context, sf sweatfile.Sweatfile, envDir, runDir string, w io.Writer) error {
 	cmd := sf.PreMergeHookCommand()
+	return withInactivityWatchdog(ctx, sf, w, func(ctx context.Context, w io.Writer) error {
+		return runHookInDir(ctx, cmd, envDir, runDir, sf.RequireHookScope(), w)
+	})
+}
+
+// withInactivityWatchdog runs hook under [hooks].inactivity-timeout (see
+// PreMergeContext): the hook's output goes through w, every line bumps the
+// last-activity timestamp, and a silence longer than the timeout cancels the
+// hook's ctx and reports ErrInactivityTimeout. No timeout runs hook as is.
+func withInactivityWatchdog(ctx context.Context, sf sweatfile.Sweatfile, w io.Writer, hook func(context.Context, io.Writer) error) error {
+	if w == nil {
+		w = io.Discard
+	}
 	timeout := sf.InactivityTimeoutValue()
 	if timeout <= 0 {
-		return runHookInDir(ctx, cmd, envDir, runDir, sf.RequireHookScope(), w)
+		return hook(ctx, w)
 	}
 
 	aw := &activityWriter{w: w, last: time.Now()}
@@ -342,7 +355,7 @@ func PreMergeInDir(ctx context.Context, sf sweatfile.Sweatfile, envDir, runDir s
 		}
 	}()
 
-	err := runHookInDir(hookCtx, cmd, envDir, runDir, sf.RequireHookScope(), aw)
+	err := hook(hookCtx, aw)
 	close(done)
 	// Only surface the inactivity error when the hook actually failed because
 	// of the kill; a hook that finished cleanly just before a late tick wins.
@@ -400,7 +413,15 @@ func runHookInDir(ctx context.Context, cmd *string, envDir, runDir string, requi
 	// unscoped. Repair is unscoped too, but signals its own process group.
 	// Post-merge calls runHookInDirEnv directly with "" so FDR 0023 detached
 	// children are not caught in a control-group scope kill.
-	return runHookInDirEnv(ctx, cmd, envDir, runDir, nil, 0, clown.ScopeIDFromContext(ctx), requireScope, 0, w)
+	return runHookInDirEnv(ctx, cmd, envDir, runDir, nil, 0, clown.ScopeIDFromContext(ctx), requireScope, 0, w, nil)
+}
+
+// hermeticGate makes runHookInDirEnv run a hook with an environment built from
+// scratch and no direnv wrap (spinclass#449): the guarded gate's command must
+// see nothing the session worktree or the frontend's ambient environment
+// would hand it. nil keeps the ordinary inherit-and-wrap behaviour.
+type hermeticGate struct {
+	env []string
 }
 
 // runHookInDirEnv is runHookInDir with a few extras; every hook that needs none
@@ -457,7 +478,7 @@ func runHookInDir(ctx context.Context, cmd *string, envDir, runDir string, requi
 // SIGTERMs the whole group and SIGKILLs it groupKillGrace later, so a
 // descendant that ignores SIGTERM is still killed. WaitDelay is pushed past
 // that grace so the group kill lands before exec gives up on the pipes.
-func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, extraEnv []string, waitDelay time.Duration, scopeID string, requireScope bool, groupKillGrace time.Duration, w io.Writer) error {
+func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, extraEnv []string, waitDelay time.Duration, scopeID string, requireScope bool, groupKillGrace time.Duration, w io.Writer, hermetic *hermeticGate) error {
 	if cmd == nil || *cmd == "" {
 		return nil
 	}
@@ -487,7 +508,7 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 	// scan when direnv is not build-pinned) so the common non-direnv repo skips
 	// the lookup entirely.
 	argv := []string{"sh", "-c", script}
-	if direnv.HasEnvrc(envDir) {
+	if hermetic == nil && direnv.HasEnvrc(envDir) {
 		if direnvPath, ok := direnv.Resolve(); ok {
 			argv = direnv.WrapExec(direnvPath, envDir, argv)
 		}
@@ -510,8 +531,14 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 		// (the session worktree = envDir, the logical session location a hook
 		// reasons about, not the transient build worktree) for backwards
 		// compatibility with existing hook scripts.
-		c.Env = append(os.Environ(), "WORKTREE="+envDir)
-		c.Env = append(c.Env, extraEnv...)
+		if hermetic != nil {
+			// The guarded gate: nothing inherited, no WORKTREE pointing at
+			// the session worktree; hermetic.env is the whole environment.
+			c.Env = append([]string(nil), hermetic.env...)
+		} else {
+			c.Env = append(os.Environ(), "WORKTREE="+envDir)
+			c.Env = append(c.Env, extraEnv...)
+		}
 		c.Stdout = out
 		c.Stderr = out
 

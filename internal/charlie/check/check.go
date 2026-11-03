@@ -25,6 +25,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/alfa/landing"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 	"code.linenisgreat.com/spinclass/internal/bravo/hookrun"
 	"code.linenisgreat.com/spinclass/internal/bravo/present"
 	"code.linenisgreat.com/tap/go/pkgs/ndjson"
@@ -129,6 +130,19 @@ func RunContext(ctx context.Context, rep *crap.Reporter, wtPath string, activity
 			ts.Finish()
 			return nil, err
 		}
+	}
+
+	// A confined session's check runs the guarded gate (spinclass#449), with
+	// or without a repo pre-merge hook: `sc check` executes the branch's tree
+	// exactly as a merge would, so the same rule applies.
+	if confinement.GuardedWorktree(wtPath) {
+		gate, _ := sweatfileio.TrustedConfinedPreMerge(hierarchy, home, repoPath)
+		hookSha, _ := git.RevParse(wtPath, "HEAD")
+		start := time.Now()
+		links, hookErr := RunGuardedWithReporterContext(ctx, rep, ts, hierarchy, wtPath, branch, hookSha, gate, activity)
+		timeCheckHook(ctx, hierarchy.Merged, repoPath, start, hookErr)
+		ts.Finish()
+		return links, hookErr
 	}
 
 	cmd := hierarchy.Merged.PreMergeHookCommand()
@@ -288,7 +302,71 @@ func RunWithReporterContext(
 	defer cleanup()
 
 	desc := "pre-merge hook for " + branch + ": `" + *cmd + "`"
-	link, hookErr := runHookPhase(ctx, rep, hierarchy, wtPath, hookDir, *cmd, desc, activity)
+	// Load the devshell from the session worktree (wtPath, which has an allowed
+	// .envrc) but run the hook in hookDir (the build worktree pinned to the
+	// committed sha). They coincide in legacy in-place mode. See spinclass#198.
+	link, hookErr := runHookPhase(ctx, rep, hierarchy, wtPath, *cmd, desc, activity, func(ctx context.Context, sink io.Writer) error {
+		return hookrun.PreMergeInDir(ctx, hierarchy.Merged, wtPath, hookDir, sink)
+	})
+	var links []BlobLink
+	if link.URI != "" {
+		links = []BlobLink{link}
+	}
+	return links, hookErr
+}
+
+// RunGuardedWithReporterContext is RunWithReporterContext for a guarded merge
+// or check (spinclass#449): the session was launched confined, or the caller
+// asked for the guard, so the repo's pre-merge command is not run at all. The
+// trusted gate (a layer above the repo, sweatfileio.TrustedConfinedPreMerge)
+// runs instead, always in the detached build worktree at hookSha, with no
+// devshell and an environment built from scratch (hookrun.ConfinedPreMergeInDir).
+// It fails closed, before anything runs, when the build worktree is turned off
+// or hookSha is empty: in place would mean the session worktree, which the
+// worker controls. The audit line is a test point naming the command and the
+// layer it came from, so the merge record shows what gated the landing.
+func RunGuardedWithReporterContext(
+	ctx context.Context,
+	rep *crap.Reporter,
+	ts *crap.TestStream,
+	hierarchy sweatfile.Hierarchy,
+	wtPath, branch, hookSha string,
+	gate sweatfileio.ConfinedPreMergeGate,
+	activity io.Writer,
+) ([]BlobLink, error) {
+	label := "guarded gate " + branch
+	switch {
+	case strings.TrimSpace(gate.Command) == "":
+		return nil, FailStep(ts, label, errors.New("no guarded gate command resolved; nothing ran"), "")
+	case hookSha == "":
+		return nil, FailStep(ts, label, errors.New("the commit to check could not be pinned (HEAD unresolvable), and a guarded gate never runs in the session worktree; nothing ran"), "")
+	case hierarchy.Merged.MergeBuildWorktreeDisabled():
+		return nil, FailStep(ts, label, errors.New("a guarded gate runs only in the detached build worktree, which [hooks].disable-merge-build-worktree turns off; nothing ran"), "")
+	}
+	hookDir, cleanup, prepErr := resolveHookDir(hierarchy, wtPath, branch, hookSha)
+	if prepErr != nil {
+		return nil, FailStep(ts, "pre-merge build worktree for "+branch, prepErr, "")
+	}
+	defer cleanup()
+
+	source := "the built-in default"
+	if gate.Source != "" {
+		source = gate.Source
+	}
+	ts.Ok(fmt.Sprintf("%s: `%s` (from %s), in the build worktree with no devshell and a scrubbed environment", label, gate.Command, source))
+	for _, ignored := range gate.Ignored {
+		ts.Ok(fmt.Sprintf("%s: ignored [hooks].confined-pre-merge in %s (only layers above the repo may set it)", label, ignored))
+	}
+	// Directories the worker writes: the session worktree and every worktree
+	// of the repo. A gate tool resolving under them is refused (hookrun).
+	forbidden := []string{wtPath}
+	if repoRoot, rErr := git.CommonDir(wtPath); rErr == nil {
+		forbidden = append(forbidden, filepath.Join(repoRoot, ".worktrees"))
+	}
+	desc := label + ": `" + gate.Command + "`"
+	link, hookErr := runHookPhase(ctx, rep, hierarchy, wtPath, gate.Command, desc, activity, func(ctx context.Context, sink io.Writer) error {
+		return hookrun.ConfinedPreMergeInDir(ctx, hierarchy.Merged, gate.Command, hookDir, forbidden, sink)
+	})
 	var links []BlobLink
 	if link.URI != "" {
 		links = []BlobLink{link}
@@ -417,7 +495,7 @@ func emitHookNotices(rep *crap.Reporter, notices []string) {
 	}
 }
 
-func runHookPhase(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.Hierarchy, wtPath, hookDir, cmd, desc string, activity io.Writer) (BlobLink, error) {
+func runHookPhase(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.Hierarchy, wtPath, cmd, desc string, activity io.Writer, run func(ctx context.Context, sink io.Writer) error) (BlobLink, error) {
 	format := hierarchy.Merged.PreMergeOutputFormatValue()
 	madderPinned := embeds.MadderBin() != ""
 
@@ -470,14 +548,12 @@ func runHookPhase(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.H
 	}
 
 	start := time.Now()
-	// Load the devshell from the session worktree (wtPath, which has an allowed
-	// .envrc) but run the hook in hookDir (the build worktree pinned to the
-	// committed sha). They coincide in legacy in-place mode. See spinclass#198.
+	// run is the hook itself (PreMergeInDir, or the guarded gate's runner).
 	// Notices go out after the hook's own node closes, whichever way it ends.
 	var notices []string
 	defer func() { emitHookNotices(rep, notices) }()
 	hookCtx := hookrun.WithNotices(ctx, func(n string) { notices = append(notices, n) })
-	hookErr := hookrun.PreMergeInDir(hookCtx, hierarchy.Merged, wtPath, hookDir, sink)
+	hookErr := run(hookCtx, sink)
 	elapsed := time.Since(start)
 	lw.Flush()
 

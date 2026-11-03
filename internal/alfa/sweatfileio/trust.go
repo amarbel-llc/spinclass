@@ -259,6 +259,51 @@ func TrustedAllowSelfClose(h sweatfile.Hierarchy, home, repoRoot string) (allow 
 	return allow, untrusted
 }
 
+// DefaultConfinedPreMerge is the gate a guarded merge runs when no trusted
+// layer sets [hooks].confined-pre-merge (spinclass#449): the flake's own
+// checks, evaluated purely, with a lock that must already be complete.
+const DefaultConfinedPreMerge = "nix flake check --no-update-lock-file"
+
+// ConfinedPreMergeGate is the resolved [hooks].confined-pre-merge: the command,
+// the trusted layer it came from ("" for the default), and the layers whose
+// value was ignored because they may not set it (the repo layer), for the
+// caller to say so where the gate runs.
+type ConfinedPreMergeGate struct {
+	Command string
+	Source  string
+	Ignored []string
+}
+
+// TrustedConfinedPreMerge returns the [hooks].confined-pre-merge gate honoured
+// for the repo (spinclass#449): a scalar, the last layer above the repo that
+// sets it wins, an empty value in such a layer clears back to the default, and
+// DefaultConfinedPreMerge applies when none sets it. The repo layer may not
+// set it: a guarded merge exists because the worker controls the repo's tree,
+// sweatfile included, so the gate it runs must come from a file the worker
+// cannot write. Layers that may not set it are returned in untrusted.
+func TrustedConfinedPreMerge(h sweatfile.Hierarchy, home, repoRoot string) (gate ConfinedPreMergeGate, untrusted []string) {
+	gate.Command = DefaultConfinedPreMerge
+	for _, src := range h.Sources {
+		if src.SkipReason != "" || !src.Found {
+			continue
+		}
+		if src.File.Hooks == nil || src.File.Hooks.ConfinedPreMerge == nil {
+			continue
+		}
+		if !LayerAboveRepo(src.Path, home, repoRoot) {
+			untrusted = append(untrusted, src.Path)
+			continue
+		}
+		if cmd := strings.TrimSpace(*src.File.Hooks.ConfinedPreMerge); cmd != "" {
+			gate = ConfinedPreMergeGate{Command: cmd, Source: src.Path}
+		} else {
+			gate = ConfinedPreMergeGate{Command: DefaultConfinedPreMerge}
+		}
+	}
+	gate.Ignored = untrusted
+	return gate, untrusted
+}
+
 // DefaultHealthBusyBound is the busy bound when no trusted layer sets one
 // (operator ruling, 2026-10-26).
 const DefaultHealthBusyBound = 60 * time.Minute

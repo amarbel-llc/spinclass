@@ -284,7 +284,9 @@ func PrepareMergeWith(ctx context.Context, rep *crap.Reporter, ts *crap.TestStre
 	if h, ok := trustedHierarchy(repoPath, defaultBranch, gitSync); ok {
 		preamble.hierarchy, preamble.haveHierarchy = h, true
 	}
-	if rErr := preamble.repair(ctx, ts, mx, wtPath, branch); rErr != nil {
+	if guardedMerge(pm, wtPath) {
+		preamble.skipRepairForGuardedMerge(ts, branch)
+	} else if rErr := preamble.repair(ctx, ts, mx, wtPath, branch); rErr != nil {
 		return "", rErr
 	}
 
@@ -647,7 +649,7 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	// worktree instead — pre-existing resolveHookDir behavior, in which the
 	// sha it verifies is whatever that worktree has checked out.)
 	hookStart := time.Now()
-	hookLinks, hookErr := runPreMergeHookContext(ctx, rep, ts, repoPath, wtPath, branch, defaultBranch, landingSha, gitSync, activity)
+	hookLinks, hookErr := runPreMergeHookContext(ctx, rep, ts, repoPath, wtPath, branch, defaultBranch, landingSha, gitSync, guardedMerge(pm, wtPath), activity)
 	mx.observePreMergeHook(ctx, sessionH.Merged, hookStart, hookErr)
 	blobLinks = append(blobLinks, hookLinks...)
 	if hookErr != nil {
@@ -737,7 +739,7 @@ func finishMergeUnqueued(ctx context.Context, mx phaseMetrics, rep *crap.Reporte
 	}
 
 	hookStart := time.Now()
-	hookLinks, hookErr := runPreMergeHookContext(ctx, rep, ts, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, activity)
+	hookLinks, hookErr := runPreMergeHookContext(ctx, rep, ts, repoPath, wtPath, branch, defaultBranch, pinnedSha, gitSync, guardedMerge(pm, wtPath), activity)
 	mx.observePreMergeHook(ctx, sessionH.Merged, hookStart, hookErr)
 	blobLinks = append(blobLinks, hookLinks...)
 	if hookErr != nil {
@@ -1202,10 +1204,15 @@ func promptDefaultBranch() (string, error) {
 // Reporter/TestStream (the merge orchestrator owns ts.Finish(); check only
 // emits the hook test point — and emits nothing at all when no hook is
 // configured). Returns (nil, nil) silently when home is not resolvable or the
-// hierarchy fails to load. Returned BlobLinks are the resource_link blobs
-// emitted for hook output.
-func runPreMergeHookContext(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch, hookSha string, gitSync bool, activity io.Writer) ([]check.BlobLink, error) {
+// hierarchy fails to load, except for a guarded merge (spinclass#449), which
+// then refuses: its gate is chosen from the trusted layers, and it runs the
+// trusted confined-pre-merge instead of the repo's hook. Returned BlobLinks
+// are the resource_link blobs emitted for hook output.
+func runPreMergeHookContext(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch, hookSha string, gitSync, guarded bool, activity io.Writer) ([]check.BlobLink, error) {
 	hierarchy, ok := trustedHierarchy(repoPath, defaultBranch, gitSync)
+	if guarded {
+		return runGuardedGate(ctx, rep, ts, hierarchy, ok, repoPath, wtPath, branch, hookSha, activity)
+	}
 	if !ok {
 		return nil, nil
 	}

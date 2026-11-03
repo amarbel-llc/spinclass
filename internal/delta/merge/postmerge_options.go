@@ -86,6 +86,15 @@ type PostMergeOptions struct {
 	// CLI only: the terminal check lives in cmd/spinclass.
 	AnnounceAccept io.Writer
 
+	// GuardedGate asks for the guarded gate (spinclass#449) even for a session
+	// that was not launched confined: the repo's pre-merge and repair are not
+	// run; the trusted [hooks].confined-pre-merge runs instead, in the build
+	// worktree with no devshell and a scrubbed environment. A session the
+	// frontend launched confined is guarded whatever this says. No CLI flag or
+	// MCP parameter sets it today: tests do, and a confined self-landing
+	// (spinclass#432) will.
+	GuardedGate bool
+
 	// StartedAt is when the merge call began, so the total timer
 	// (spinclass#363) spans PrepareMerge + FinishMerge across the async split
 	// where they run at different times. Zero = each emitting function's own
