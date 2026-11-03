@@ -208,7 +208,96 @@ Remaining open questions: whether `justfile` read-only is enforced anywhere I di
 not read (and if not, the read-only-bind proposal above), and clown's side of the
 gate unit.
 
-## 10. Questions that were asked
+## 10. The gate's weak spot: locking down what the gate runs (looked into 2026-11-03)
+
+Operator: start with too few privileges and escalate slowly when running
+`confined_profiled`; gate-related files beyond `justfile` should be considered.
+
+### What is enforced today (R unless marked)
+
+- **The gate's command is trusted; its inputs are not.** `[hooks].pre-merge`
+  (`just`) is read from `trustedHierarchy`, the repo layer as committed on the
+  default branch (`merge.go`, `runPreMergeHookContext`), so a worker cannot change
+  the command by editing its worktree's sweatfile. What `just` then runs is the
+  branch's own tree at the pinned sha.
+- **Nothing makes the justfile read-only for a worker.** `ClaudeSettings` writes
+  `Edit(<worktree>/*)` into the allow list (`apply.go`), so under dontAsk the
+  worker's native Write/Edit may change any tracked file, `justfile` and
+  `flake.nix` included. No unit bind covers them, no hook rule names them, and
+  clown's `worker` profile only excludes the just-us tools `dump_justfile` and
+  `list_variables` (so `run_recipe` is the one just-us tool kept). I suspect that
+  is the "read/exec" the operator means (U: read through the tools, run a recipe),
+  not a file permission, and that native Edit/Write still reach the file.
+- **The gate's inputs are the whole tree, in two kinds.**
+  - *Definition* (what runs and how): `justfile` (and anything it `import`s or
+    `mod`s), `flake.nix`, `flake.lock` and every `.nix` file the flake imports,
+    `conformist*.nix`/`.toml`, `go.nix`, `.golangci.yml`, `statix.toml`, `hooks/`,
+    `.envrc`, `.github/` workflows, and the repo's `sweatfile`. In this repo the
+    default recipe is `lint build test verify`, and each of those shells out to
+    nix against the flake.
+  - *Subject* (what is judged): source and tests. A worker must be able to change
+    these, tests included.
+
+### Why binding files read-only is not enough on its own
+
+- **Rebase drops file mounts (R, round K).** A merge rebases the session worktree
+  onto the default branch; when a rebased commit changes a bound tracked file, git
+  replaces it by rename and the unit's read-only mount is gone, leaving the new
+  file writable through the rw worktree bind. It fails open. F17-style probes
+  report it afterwards but do not prevent it.
+- **The set is not enumerable.** Imports (`import`, `mod`, nix `import ./x.nix`)
+  reach files no fixed list names; a worker that cannot edit `justfile` can edit
+  a script it calls.
+- **Legitimate changes exist.** The gate's own definition changes in ordinary
+  work (add a lint, bump the lock); a hard lock needs an escalation path.
+
+### Proposal: detect at the merge, prevent in the unit as a second layer (I)
+
+1. **Merge refuses a diff that touches the gate definition** (frontend, the
+   authoritative layer, no mount dependency, no race). Before the hook runs, diff
+   the branch against its merge base over the gate-definition set and refuse unless
+   the session holds the escalation (below). The refusal names each file and says
+   how to grant. The set is a built-in default (the list above) extended by a
+   trusted `[hooks] gate-files` list read from the default-branch sweatfile
+   (repo-owned and reviewed); transitive imports are the documented gap (U:
+   `just --dump` could list a justfile's imports; nix imports could not be listed
+   without evaluating, so they are covered by listing the directory).
+2. **Escalation is a grant on the session**, the same layered model as the merge
+   right (section 9 item 4): a `gate-config` right (handle right granted by the
+   spawner/operator) or a trusted sweatfile scope, off by default, per session.
+   It rides the `confined_profiled` escalation path the operator describes.
+3. **Prevention in the unit, as defence in depth**: read-only binds on the
+   definition files that exist (the #400 mechanism), under the same trusted
+   opt-in, so the worker gets EROFS instead of a late merge refusal. It fails open
+   on a rebase that changes a bound file, so it is never the control, only the
+   early signal; F17 reports a lost mount.
+4. **Alternative considered**: run the gate with the default branch's copy of the
+   definition files overlaid on the branch tree. It is race-free and needs no
+   mount, but a branch that adds a recipe fails its own gate and the overlay hides
+   the diff the operator would want to read. Not proposed; a refusal that shows
+   the diff is easier to audit.
+
+### What this does and does not buy
+
+- It makes the gate's *procedure* the reviewed one: a worker cannot swap `just`'s
+  recipes or the flake for ones that pass. It does not make the *verdict*
+  meaningful: a worker can still delete or weaken tests (subject files). That is
+  visible in the diff the operator or the parent reads, and is the place the
+  eventual external certification attaches.
+- Cost: friction when a task legitimately changes the gate; mitigated by the
+  grant. Starting too strict and loosening per session is the operator's stated
+  direction.
+
+### Open (U)
+
+- Where the grant is recorded and read (frontend record vs trusted sweatfile).
+- Whether a default-branch-sweatfile `gate-files` list is the right place, or a
+  `gate.toml` beside the justfile (a file the worker could edit, so no).
+- Whether clown's `worker` profile should also deny native Edit/Write on the
+  definition set at the harness level (policy, not a boundary, but an early,
+  cheap signal).
+
+## 11. Questions that were asked
 
 The four original questions, kept for the record:
 
