@@ -1820,15 +1820,19 @@ explore-guarded-gate-inputs-eval:
       local dir="$work/$1-$2" out start end names='f: builtins.attrNames (f.inputs or { })' apply
       apply="${4:-$names}"
       mkdir -p "$dir"; printf '%s\n' "$3" > "$dir/flake.nix"
+      # The eval output goes to a file, never a shell variable: a multi-megabyte
+      # result (huge-attrs) in a variable made every command after it fail with
+      # "Argument list too long" and the marker check with it.
+      out="$dir/out"
       local -a args; mapfile -t args < <(modeargs "$1" "$dir")
       start=$(date +%s)
-      out=$(cd "$dir" && env -i PATH="$gatepath" HOME="$HOME" LEAK_ME="$secret" ${NIX_REMOTE:+NIX_REMOTE="$NIX_REMOTE"} \
+      (cd "$dir" && env -i PATH="$gatepath" HOME="$HOME" LEAK_ME="$secret" ${NIX_REMOTE:+NIX_REMOTE="$NIX_REMOTE"} \
         NIX_CONFIG=$'allow-unsafe-native-code-during-evaluation = false\naccept-flake-config = false\nsandbox = true\n' \
         timeout 20 nix eval --json --option allow-import-from-derivation false --option max-call-depth 2000 \
-          "${args[@]}" --apply "$apply" < "$dir/flake.nix" 2>&1 | head -c 2000000; exit "${PIPESTATUS[0]}"); code=$?
+          "${args[@]}" --apply "$apply" < "$dir/flake.nix" 2>&1 | head -c 2000000 > "$out"; exit "${PIPESTATUS[0]}"); code=$?
       end=$(date +%s)
-      leaked=no; printf '%s' "$out" | grep -qF "$secret" && leaked=YES
-      printf '%-16s %-20s exit=%-3s marker-in-output=%-3s %ss bytes=%s  %s\n' "$1" "$2" "$code" "$leaked" "$((end - start))" "${#out}" "$(printf '%s' "$out" | head -c 300 | tr '\n' ' ')"
+      leaked=no; grep -qF "$secret" "$out" && leaked=YES
+      printf '%-16s %-20s exit=%-3s marker-in-output=%-3s %ss bytes=%s  %s\n' "$1" "$2" "$code" "$leaked" "$((end - start))" "$(wc -c < "$out")" "$(head -c 300 "$out" | tr '\n' ' ')"
     }
     for mode in restrict-impure restrict-stdin; do
       run "$mode" honest '{ inputs.a.url = "github:x/y"; inputs.b = { url = "github:x/z"; flake = false; }; outputs = _: {}; }'
