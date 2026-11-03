@@ -268,6 +268,59 @@ func TestClassifyRebaseAndResetOfOwnedBranchesNeverPrompt(t *testing.T) {
 	}
 }
 
+// spinclass#455: mid-rebase HEAD is detached, and the rebase belongs to the
+// branch git names in rebase-merge/head-name. A session that was allowed to
+// start a rebase of its own branch is allowed to continue, skip or abort it
+// and to stage the resolution; a rebase of a foreign branch stays ask.
+func TestClassifyMidRebaseJudgesTheBranchBeingRebased(t *testing.T) {
+	f := newFixture(t)
+	writeConflict := func(dir, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, dir, "add", "a.txt")
+		runGit(t, dir, "commit", "-m", "a.txt "+content)
+	}
+	writeConflict(f.worktree, "session")
+	writeConflict(f.foreignWorktree, "foreign")
+	writeConflict(f.repo, "main")
+	startConflictingRebase := func(dir string) {
+		t.Helper()
+		// Plain git, not Do: the classifier is under test, not the verb.
+		cmd := exec.Command("git", "-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "rebase", "main")
+		if err := cmd.Run(); err == nil {
+			t.Fatal("the rebase was expected to stop on a conflict")
+		}
+		if _, err := exec.Command("git", "-C", dir, "rev-parse", "--verify", "-q", "REBASE_HEAD").Output(); err != nil {
+			t.Fatal("no rebase is in progress")
+		}
+	}
+	startConflictingRebase(f.worktree)
+	startConflictingRebase(f.foreignWorktree)
+
+	runCases(t, f, []classifyCase{
+		{name: "continue the own rebase", tool: "branch", sub: "rebase", args: map[string]any{"continue": true}, want: store.Allow},
+		{name: "skip in the own rebase", tool: "branch", sub: "rebase", args: map[string]any{"skip": true}, want: store.Allow},
+		{name: "abort the own rebase", tool: "branch", sub: "rebase", args: map[string]any{"abort": true}, want: store.Allow},
+		{name: "stage the resolution in the own rebase", tool: "stage", sub: "add", args: map[string]any{"paths": []any{"a.txt"}}, want: store.Allow},
+		{name: "continue a foreign branch's rebase", tool: "branch", sub: "rebase", args: map[string]any{"continue": true}, want: store.Ask, foreignDir: true},
+		{name: "abort a foreign branch's rebase", tool: "branch", sub: "rebase", args: map[string]any{"abort": true}, want: store.Ask, foreignDir: true},
+		{name: "stage in a foreign branch's rebase", tool: "stage", sub: "add", args: map[string]any{"paths": []any{"a.txt"}}, want: store.Ask, foreignDir: true},
+	})
+}
+
+// A detached HEAD that is not a rebase owns nothing.
+func TestClassifyDetachedHeadOutsideARebaseOwnsNothing(t *testing.T) {
+	f := newFixture(t)
+	runGit(t, f.worktree, "checkout", "--detach")
+	runCases(t, f, []classifyCase{
+		{name: "rebase continue detached", tool: "branch", sub: "rebase", args: map[string]any{"continue": true}, want: store.Ask},
+		{name: "stage add detached", tool: "stage", sub: "add", args: map[string]any{"paths": []any{"a"}}, want: store.Ask},
+		{name: "reset-hard detached", tool: "branch", sub: "reset-hard", args: map[string]any{"ref": "main"}, want: store.Ask},
+	})
+}
+
 func TestClassifyTagsAndRemotes(t *testing.T) {
 	f := newFixture(t)
 	runCases(t, f, []classifyCase{

@@ -2,6 +2,7 @@ package git
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -374,9 +375,41 @@ func (c checker) owned(fullRef string) bool {
 	return Backend{}.Owned(c.session, store.Ref(fullRef))
 }
 
+// currentBranchOwned judges the branch HEAD is on. During a rebase HEAD is
+// detached and the branch being replayed is named in rebase-merge/head-name
+// (rebase-apply/head-name for the am backend); the session owns that rebase
+// exactly when it owns that branch (spinclass#455), so continue, skip and
+// abort, and the staging a conflict resolution needs, are judged on it. Any
+// other detached HEAD owns nothing.
 func (c checker) currentBranchOwned() bool {
 	head, err := git.Run(c.dir, "symbolic-ref", "-q", "HEAD")
-	return err == nil && strings.HasPrefix(head, "refs/heads/") && c.owned(head)
+	if err == nil {
+		return strings.HasPrefix(head, "refs/heads/") && c.owned(head)
+	}
+	if rebasing, ok := c.rebaseInProgressBranch(); ok {
+		return strings.HasPrefix(rebasing, "refs/heads/") && c.owned(rebasing)
+	}
+	return false
+}
+
+// rebaseInProgressBranch is the full ref of the branch a rebase in progress in
+// c.dir is replaying, from the state directory git keeps for it, or false when
+// no rebase is in progress.
+func (c checker) rebaseInProgressBranch() (string, bool) {
+	for _, state := range []string{"rebase-merge", "rebase-apply"} {
+		p, err := git.Run(c.dir, "rev-parse", "--path-format=absolute", "--git-path", state+"/head-name")
+		if err != nil {
+			continue
+		}
+		b, err := os.ReadFile(strings.TrimSpace(p))
+		if err != nil {
+			continue
+		}
+		if name := strings.TrimSpace(string(b)); name != "" && plainRefName(name) {
+			return name, true
+		}
+	}
+	return "", false
 }
 
 // canonicalRef resolves a target to its full ref the way git itself would, so

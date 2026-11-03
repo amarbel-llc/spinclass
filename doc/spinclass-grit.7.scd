@@ -153,6 +153,7 @@ branch delete force                     ask         ask       force
 branch reset-soft, reset-hard           allow       allow     on B's checkout
 branch rebase (B onto upstream)         allow       allow     B is rewritten
 branch rebase rebase_branch=main        ask         allow     default branch
+branch rebase continue, skip, abort     allow       allow     rebase of B in progress
 branch restack root=B                   allow       allow     owned range
 branch restack moving a foreign branch  ask         allow     foreign in range
 branch cherry-pick, revert              allow       allow     on B's checkout
