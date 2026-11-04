@@ -312,6 +312,18 @@ func CheckSessionEntry(sf sweatfile.Sweatfile) []Issue {
 				Value:    strings.Join(sf.SessionEntry.SpawnEntry, " "),
 			})
 		}
+		// A confined spawn drops only the exact `direnv exec {dir}` prefix
+		// (spawn.stripDirenvExec, spinclass#462); any other direnv shape would
+		// put a confined worker's harness under direnv after all.
+		e := sf.SessionEntry.SpawnEntry
+		if e[0] == "direnv" && !(len(e) > 3 && e[1] == "exec" && e[2] == "{dir}") {
+			issues = append(issues, Issue{
+				Message:  "spawn-entry starts with direnv in a shape a confined spawn cannot strip (only the exact `direnv exec {dir}` prefix is dropped); a confined worker's harness would run under direnv",
+				Severity: SeverityWarning,
+				Field:    "session-entry.spawn-entry",
+				Value:    strings.Join(sf.SessionEntry.SpawnEntry, " "),
+			})
+		}
 	}
 	return issues
 }

@@ -109,6 +109,15 @@ the shell — you do *not* add that line yourself. This append happens
 whether _.envrc_ came from the *envrc* default or from an explicit *envrc*
 array; the *dotenv* line is added after your directives.
 
+A spawned worker (*sc spawn*, *spawn-session*) also receives the same
+rendered pairs directly in its launch environment, after
+*[session-entry].env* and before the *SPINCLASS\_\** identity (which wins
+over a *dotenv* key of the same name), and a confined worker gets them in
+its unit spec's *env* as well. So a worker that runs no direnv at all still
+has what a trusted layer declared here: a confined spawn drops the
+*spawn-entry*'s leading *direnv exec {dir}* (see *spawn-entry*), and this
+is how its *TROUPE\_\** and similar values reach it (spinclass#462).
+
 This automatic _.envrc_ rewrite applies only to spinclass-managed
 worktrees, whose _.envrc_ spinclass owns. An *implicit* session — an agent
 running in a repo's own main checkout rather than an *sc*-created worktree
@@ -1412,7 +1421,14 @@ readable by others.
 	joining or re-splitting — and *{dir}* by the worker worktree's absolute
 	path. Defaults to *["clown", "--clown-attach=spawn", "--",
 	"{prompt}"]*; override per the sweatfile cascade for a different
-	harness. Template contract: the argv must detach the session and return
+	harness. A *confined* spawn (FDR 0035) drops a leading *direnv exec
+	{dir}* from the resolved argv, exactly those three elements and nothing
+	else, so the worker's harness starts with no devShell and no _.envrc_
+	chain: the unit gets a stated environment, not the launcher's, and the
+	*[direnv.dotenv]* pairs reach the worker through that environment
+	instead (spinclass#462). *sc validate* warns about an entry that starts
+	with *direnv* in any other shape, which a confined spawn would run
+	under direnv after all. Template contract: the argv must detach the session and return
 	promptly — *sc spawn* blocks until the worker's hello chat message
 	arrives (60s default deadline), so a harness that blocks in the
 	foreground burns the deadline. The exec'd process inherits the session

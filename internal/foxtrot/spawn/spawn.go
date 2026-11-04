@@ -18,6 +18,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
+	"code.linenisgreat.com/spinclass/internal/bravo/apply"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 	"code.linenisgreat.com/spinclass/internal/echo/shop"
 )
@@ -146,6 +147,14 @@ func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model
 		if argv, err = SpliceProfileFlag(argv, effective); err != nil {
 			return Pending{}, err
 		}
+		// The unit gowns at the door (spinclass#462): the entry runs with no
+		// direnv, so neither the devShell nor the .envrc chain crosses into the
+		// unit; what a trusted layer put in [direnv.dotenv] travels in the spec
+		// and the launch environment instead (confinedSpecEnv, workerEnvScoped).
+		if stripped, ok := stripDirenvExec(argv, rp.AbsPath); ok {
+			argv = stripped
+			slog.Info("confined spawn: dropped the spawn-entry's `direnv exec` prefix; the worker's harness starts with no devShell", "argv", argv)
+		}
 		if err := confinedPreflight(confinementHost, agentScopeCapabilitiesArgv); err != nil {
 			return Pending{}, err
 		}
@@ -217,6 +226,10 @@ func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model
 		return Pending{}, fmt.Errorf("creating worker worktree: %w", err)
 	}
 
+	// The worker's dotenv, rendered once for both the launch environment and
+	// (confined) the unit spec; nil when no trusted layer declares any.
+	dotenv := apply.DotenvPairs(merged, rp.AbsPath)
+
 	var confine *confinedLaunch
 	if confined {
 		stateDir, err := confinementStateDir()
@@ -231,7 +244,7 @@ func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model
 			undoOnFailure()
 			return Pending{}, fmt.Errorf("creating the worker's handshake dir: %w", err)
 		}
-		scopePath, err := writeUnitSpec(rp, desc, targetConfine.egress, stateDir, handshakeDir, targetConfine.policy.HarnessConfigWritable)
+		scopePath, err := writeUnitSpec(rp, desc, targetConfine.egress, stateDir, handshakeDir, targetConfine.policy.HarnessConfigWritable, dotenv)
 		if err != nil {
 			undoOnFailure()
 			return Pending{}, err
@@ -244,7 +257,7 @@ func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model
 	pinned := shop.PinEntry(merged)
 	sessionEnv = setUnattendedMarker(sessionEnv, unattended)
 	pinned.Env = setUnattendedMarker(pinned.Env, unattended)
-	p, err := startDetachedEntry(rp, driver, desc, argv, window, sessionEnv, resolved, authorizingGrant, narrowing, pinned, confine)
+	p, err := startDetachedEntry(rp, driver, desc, argv, window, sessionEnv, dotenv, resolved, authorizingGrant, narrowing, pinned, confine)
 	if err != nil {
 		undoOnFailure()
 		return Pending{}, err
@@ -488,7 +501,7 @@ func launchSpawnWindow(argv []string, rp worktree.ResolvedPath, desc string, ses
 // An explicit [session-entry].env entry still sets them back, since userEnv is
 // appended after the scrub.
 func workerEnv(rp worktree.ResolvedPath, desc string, userEnv map[string]string, scrubDesktopEnv bool) []string {
-	return workerEnvScoped(rp, desc, userEnv, scrubDesktopEnv, "")
+	return workerEnvScoped(rp, desc, userEnv, nil, scrubDesktopEnv, "")
 }
 
 // identityVars are the spinclass-owned SPINCLASS_* identity variables of a
@@ -497,11 +510,14 @@ func identityVars(rp worktree.ResolvedPath, desc string) []string {
 	return session.IdentityEnv(rp.SessionKey, rp.AbsPath, desc)
 }
 
-// workerEnvScoped is workerEnv plus, when scopePath is non-empty, the
-// CLOWN_AGENT_SCOPE spec path that makes clown launch the agent in a unit
-// (FDR 0035). It is appended last so nothing inherited or configured can name
-// a different spec.
-func workerEnvScoped(rp worktree.ResolvedPath, desc string, userEnv map[string]string, scrubDesktopEnv bool, scopePath string) []string {
+// workerEnvScoped is workerEnv plus the rendered [direnv.dotenv] pairs
+// (apply.DotenvPairs; after userEnv, before the identity, where direnv's
+// `dotenv .spinclass/env` would have put them: a worker that runs no direnv,
+// every confined one, still gets what a trusted layer declared, spinclass#462)
+// and, when scopePath is non-empty, the CLOWN_AGENT_SCOPE spec path that makes
+// clown launch the agent in a unit (FDR 0035). That one is appended last so
+// nothing inherited or configured can name a different spec.
+func workerEnvScoped(rp worktree.ResolvedPath, desc string, userEnv map[string]string, dotenv []string, scrubDesktopEnv bool, scopePath string) []string {
 	// Strip the driver's inherited CLOWN_SESSION_ID/CLAUDE_SESSION_ID so the
 	// worker's clown re-derives its channel from the worker's own
 	// SPINCLASS_SESSION_ID (appended below). Otherwise the worker arms the
@@ -516,6 +532,7 @@ func workerEnvScoped(rp worktree.ResolvedPath, desc string, userEnv map[string]s
 	for k, v := range userEnv {
 		env = append(env, k+"="+v)
 	}
+	env = append(env, dotenv...)
 
 	env = append(env, identityVars(rp, desc)...)
 	env = append(env, session.TmpDirEnv(rp.AbsPath)...)
@@ -589,7 +606,7 @@ func newWorkerState(rp worktree.ResolvedPath, driver Driver, desc string, profil
 // detached harness entry, returning a Pending (worktree booting, hello not yet
 // awaited). The SessionStart hook adopts the state (PID + HelloSentAt) when the
 // worker boots; pre-hello PID is 0 (nothing attached yet).
-func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, argv, window []string, sessionEnv map[string]string, profile ResolvedProfile, authorizingGrant string, narrowing *narrowingBase, entry *session.PinnedEntry, confine *confinedLaunch) (Pending, error) {
+func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, argv, window []string, sessionEnv map[string]string, dotenv []string, profile ResolvedProfile, authorizingGrant string, narrowing *narrowingBase, entry *session.PinnedEntry, confine *confinedLaunch) (Pending, error) {
 	st := newWorkerState(rp, driver, desc, profile, authorizingGrant, narrowing)
 	// The worker's own `sc resume` replays the entry resolved here, at creation,
 	// from the operator-controlled layers; it never re-reads a sweatfile.
@@ -616,7 +633,7 @@ func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, ar
 	}
 	// A fresh spawn pins the digest only: it resumes no session, so there is no
 	// CLOWN_PROFILE_SESSION to bind (#407).
-	env := append(workerEnvScoped(rp, desc, sessionEnv, true, scopePath), ProfileLaunchEnv(profile.DigestHex, "")...)
+	env := append(workerEnvScoped(rp, desc, sessionEnv, dotenv, true, scopePath), ProfileLaunchEnv(profile.DigestHex, "")...)
 	if err := startDetached(argv, rp.AbsPath, env, logPath); err != nil {
 		return Pending{}, fmt.Errorf("spawn template %q failed: %w", argv, err)
 	}

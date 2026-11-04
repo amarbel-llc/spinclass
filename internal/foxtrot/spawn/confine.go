@@ -446,7 +446,7 @@ func stickyAgentSocket(stateDir, wt string) string {
 // writeUnitSpec resolves the host-dependent inputs, builds the spec and writes
 // it beside the unit record, outside the worktree. It returns the path to put
 // in CLOWN_AGENT_SCOPE.
-func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, stateDir, handshakeDir string, harnessConfigWritable bool) (string, error) {
+func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, stateDir, handshakeDir string, harnessConfigWritable bool, dotenv []string) (string, error) {
 	commonDir, err := gitCommonDir(rp.AbsPath)
 	if err != nil || commonDir == "" {
 		return "", fmt.Errorf("resolving the git common dir of %s: %v", rp.AbsPath, err)
@@ -471,11 +471,9 @@ func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, state
 	runtimeDir := fmt.Sprintf("/run/user/%d", confinementHost.Getuid())
 	wayland, _ := filepath.Glob(filepath.Join(runtimeDir, "wayland-*"))
 
-	env := map[string]string{}
-	for _, kv := range identityVars(rp, desc) {
-		k, v, _ := strings.Cut(kv, "=")
-		env[k] = v
-	}
+	// spinclass's whole contribution to the unit's environment: the dotenv a
+	// trusted layer declared, the tmp dirs and the identity (spinclass#462).
+	env := confinedSpecEnv(rp, desc, dotenv)
 	sshAuthSock := os.Getenv("SSH_AUTH_SOCK")
 	if sshAuthSock == "" {
 		sshAuthSock = stickyAgentSocket(stateDir, rp.AbsPath)

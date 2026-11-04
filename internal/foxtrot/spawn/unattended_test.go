@@ -189,7 +189,7 @@ func TestUserEnvCannotSetTheMarker(t *testing.T) {
 // The exec env is built from os.Environ: an inherited marker is dropped there.
 func TestWorkerEnvDropsInheritedMarker(t *testing.T) {
 	t.Setenv(unattendedEnvVar, "1")
-	for _, e := range workerEnvScoped(worktree.ResolvedPath{SessionKey: "w/k", AbsPath: t.TempDir()}, "d", nil, true, "") {
+	for _, e := range workerEnvScoped(worktree.ResolvedPath{SessionKey: "w/k", AbsPath: t.TempDir()}, "d", nil, nil, true, "") {
 		if strings.HasPrefix(e, unattendedEnvVar+"=") {
 			t.Errorf("inherited marker leaked into the worker env: %q", e)
 		}

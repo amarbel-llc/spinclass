@@ -401,7 +401,7 @@ func TestWriteUnitSpecWritesOutsideTheWorktree(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", "")
 	rp := worktree.ResolvedPath{AbsPath: wt, SessionKey: "repo/feat"}
 
-	path, err := writeUnitSpec(rp, "desc", []string{"a:1"}, state, "", false)
+	path, err := writeUnitSpec(rp, "desc", []string{"a:1"}, state, "", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -416,8 +416,11 @@ func TestWriteUnitSpecWritesOutsideTheWorktree(t *testing.T) {
 	if err := json.Unmarshal(b, &spec); err != nil {
 		t.Fatal(err)
 	}
-	if spec.Env["SPINCLASS_WORKTREE"] != wt || spec.Env["SPINCLASS_DESCRIPTION"] != "desc" || len(spec.Env) != 5 {
-		t.Errorf("env = %v, want the five SPINCLASS_* identity vars", spec.Env)
+	// spinclass's gowning kit (spinclass#462): the five identity vars and the
+	// two tmp dirs; no dotenv was declared here.
+	if spec.Env["SPINCLASS_WORKTREE"] != wt || spec.Env["SPINCLASS_DESCRIPTION"] != "desc" ||
+		spec.Env["TMPDIR"] != filepath.Join(wt, ".tmp") || spec.Env["CLAUDE_CODE_TMPDIR"] != filepath.Join(wt, ".tmp") || len(spec.Env) != 7 {
+		t.Errorf("env = %v, want the five SPINCLASS_* identity vars and the two tmp dirs", spec.Env)
 	}
 }
 
@@ -448,7 +451,7 @@ func TestWriteUnitSpecKeepsTheFirstSocketWhenTheAgentIsGone(t *testing.T) {
 	}
 
 	t.Setenv("SSH_AUTH_SOCK", "/run/user/1000/piggy-agent.sock")
-	path, err := writeUnitSpec(rp, "desc", nil, state, "", false)
+	path, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -457,7 +460,7 @@ func TestWriteUnitSpecKeepsTheFirstSocketWhenTheAgentIsGone(t *testing.T) {
 	}
 
 	t.Setenv("SSH_AUTH_SOCK", "")
-	path, err = writeUnitSpec(rp, "desc", nil, state, "", false)
+	path, err = writeUnitSpec(rp, "desc", nil, state, "", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +469,7 @@ func TestWriteUnitSpecKeepsTheFirstSocketWhenTheAgentIsGone(t *testing.T) {
 	}
 
 	t.Setenv("SSH_AUTH_SOCK", "/run/user/1000/other.sock")
-	path, err = writeUnitSpec(rp, "desc", nil, state, "", false)
+	path, err = writeUnitSpec(rp, "desc", nil, state, "", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -668,10 +671,10 @@ func TestWorkerEnvScopeOnlyWhenConfined(t *testing.T) {
 	if has(plain, "CLOWN_AGENT_SCOPE=/") {
 		t.Error("unconfined env carries a scope")
 	}
-	if !reflect.DeepEqual(plain, workerEnvScoped(rp, "d", nil, true, "")) {
+	if !reflect.DeepEqual(plain, workerEnvScoped(rp, "d", nil, nil, true, "")) {
 		t.Error("an empty scope path must leave the env unchanged")
 	}
-	scoped := workerEnvScoped(rp, "d", nil, true, "/state/spec.json")
+	scoped := workerEnvScoped(rp, "d", nil, nil, true, "/state/spec.json")
 	if scoped[len(scoped)-1] != "CLOWN_AGENT_SCOPE=/state/spec.json" {
 		t.Errorf("scope not last: %v", scoped[len(scoped)-1])
 	}

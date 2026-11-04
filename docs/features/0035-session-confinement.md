@@ -741,7 +741,8 @@ spinclass → clown (opt-in; unset means today's unconfined launch):
     "egress_allow": ["api.anthropic.com:443", "<forges>:443", "..."],
     "deny_paths": ["$XDG_RUNTIME_DIR/bus", "$XDG_RUNTIME_DIR/wayland-*",
                    "/tmp/.X11-unix", "$XDG_RUNTIME_DIR/posh"],
-    "env": {"SPINCLASS_SESSION_ID": "...", "SPINCLASS_WORKTREE": "..."},
+    "env": {"SPINCLASS_SESSION_ID": "...", "SPINCLASS_WORKTREE": "...",
+            "TMPDIR": "<worktree>/.tmp", "TROUPE_IPC": "<from [direnv.dotenv]>"},
     "result_path": "$XDG_STATE_HOME/spinclass/units/<sha256(worktree)[:8]>.json"
   }
   ```

@@ -173,15 +173,10 @@ func allowTrackedEnvrcIfUnmodified(worktreePath string) error {
 // `dotenv_if_exists .spinclass/env` without their repo-owned .envrc being
 // rewritten (#274); managed worktrees reach it through Setup.
 func SpinclassEnv(sf sweatfile.Sweatfile, worktreePath string) error {
-	if sf.Direnv == nil || len(sf.Direnv.Dotenv) == 0 {
+	pairs := DotenvPairs(sf, worktreePath)
+	if pairs == nil {
 		return nil
 	}
-
-	keys := make([]string, 0, len(sf.Direnv.Dotenv))
-	for k := range sf.Direnv.Dotenv {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
 
 	// A rebuild re-renders this into a worktree whose worker can write
 	// .spinclass: never follow a link planted there (FDR 0035).
@@ -199,21 +194,41 @@ func SpinclassEnv(sf sweatfile.Sweatfile, worktreePath string) error {
 	}
 	defer func() { _ = file.Close() }()
 
+	for _, kv := range pairs {
+		if _, err := fmt.Fprintln(file, kv); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// DotenvPairs renders the merged [direnv.dotenv] map as sorted KEY=value pairs
+// with $WORKTREE expanded to worktreePath and other $VARs from the process
+// env: the one rendering behind the .spinclass/env file direnv sources and the
+// launch environment a spawned worker gets without direnv (a confined spawn
+// runs none, spinclass#462). Nil when nothing is declared.
+func DotenvPairs(sf sweatfile.Sweatfile, worktreePath string) []string {
+	if sf.Direnv == nil || len(sf.Direnv.Dotenv) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(sf.Direnv.Dotenv))
+	for k := range sf.Direnv.Dotenv {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
 	expand := func(key string) string {
 		if key == "WORKTREE" {
 			return worktreePath
 		}
 		return os.Getenv(key)
 	}
-
+	pairs := make([]string, 0, len(keys))
 	for _, k := range keys {
-		expanded := os.Expand(sf.Direnv.Dotenv[k], expand)
-		if _, err := fmt.Fprintf(file, "%s=%s\n", k, expanded); err != nil {
-			return err
-		}
+		pairs = append(pairs, k+"="+os.Expand(sf.Direnv.Dotenv[k], expand))
 	}
-
-	return nil
+	return pairs
 }
 
 func prepareDirenv(sf sweatfile.Sweatfile, worktreePath string) error {
