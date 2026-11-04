@@ -86,6 +86,23 @@ long-term shape is for spinclass to put the dotenv map into the spawn
 environment itself (and into the spec's `env` field, the second lever), at
 which point no entry needs a loader.
 
+## Steps 3 and 4 as recipes
+
+The filesystem half of steps 3 and 4 is outside any worktree, so a session
+cannot do it (the policy broker denies the writes); the recipes below do
+it from the operator's terminal, run from the spinclass checkout that has
+them (`just --justfile <checkout>/justfile <recipe>` works from anywhere):
+
+```sh
+just debug-pilot-env-scaffold            # step 3: ~/eng/pilot, the loader layer, the repo, sc validate
+just debug-pilot-env-spawn <OPERATOR-SESSION-KEY>   # step 4: direnv exec / sc spawn --confined ...
+just explore-live-unit-env               # while the worker is live
+just debug-pilot-env-layer bare          # optional control: rewrite the layer, then spawn again
+just debug-pilot-env-teardown            # after sc close
+```
+
+The prose below is what the recipes do, kept for reading.
+
 ## Step 3 (operator): the pilot layer
 
 A throwaway repo under its own parent directory, so that directory's

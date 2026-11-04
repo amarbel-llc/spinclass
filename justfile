@@ -2240,6 +2240,86 @@ explore-live-unit-env:
     done
     [ -n "$seen" ] || echo "(no confined unit process is running; spawn the pilot worker first)"
 
+# step 3 of the direnv-less confined pilot (docs/plans/2026-11-04-confined-direnv-less-pilot.md): create ~/eng/pilot with its own sweatfile layer (the loader entry) and the throwaway repo sc-pilot-env (the canary's no-input flake), print the global spawn-entry for comparison, then `sc validate` in the repo; operator-run (writes outside any worktree)
+[group("debug")]
+debug-pilot-env-scaffold:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="$HOME/eng/pilot"
+    [ -e "$root" ] && { echo "$root exists; run debug-pilot-env-teardown first"; exit 1; }
+    mkdir -p "$root" && cd "$root"
+    git init -q --bare sc-pilot-env.git
+    git init -q -b master sc-pilot-env && cd sc-pilot-env
+    printf 'pilot: direnv-less confined spawn\n' > README.md
+    cat > flake.nix <<'EOF'
+    {
+      outputs = { self }: {
+        checks.x86_64-linux.smoke = derivation {
+          name = "smoke"; system = "x86_64-linux";
+          builder = "/bin/sh"; args = [ "-c" "echo ok > $out" ];
+        };
+      };
+    }
+    EOF
+    printf '{"nodes":{"root":{}},"root":"root","version":7}\n' > flake.lock
+    git add -A && git commit -qm "init: the canary flake, no inputs"
+    git remote add origin "$root/sc-pilot-env.git" && git push -q -u origin master
+    cd "$root"
+    just --justfile "{{justfile()}}" debug-pilot-env-layer loader
+    echo "== the global spawn-entry, for comparison (everything after clown must match the pilot entry's tail)"
+    sed -n '/spawn-entry/,/]/p' "$HOME/.config/spinclass/sweatfile" || true
+    echo "== sc validate in the pilot repo (the pilot layer must be listed)"
+    cd "$root/sc-pilot-env" && sc validate
+
+# write ~/eng/pilot/sweatfile, the pilot layer: variant `loader` (sources <worktree>/.spinclass/env, then execs clown; the pilot entry) or `bare` (clown alone; the control that is expected to lose chat)
+[group("debug")]
+debug-pilot-env-layer variant="loader":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="$HOME/eng/pilot"
+    [ -d "$root" ] || { echo "$root missing; run debug-pilot-env-scaffold"; exit 1; }
+    case "{{variant}}" in
+      loader)
+        cat > "$root/sweatfile" <<'EOF'
+    # direnv-less confined pilot layer (spinclass docs/plans/2026-11-04-confined-direnv-less-pilot.md).
+    # The entry sources the session dotenv ([direnv.dotenv], written by sc start) and execs clown:
+    # no source_up, no use flake, no PATH_add. Delete this directory when the pilot is over.
+    [session-entry]
+    spawn-entry = ["sh", "-c", "set -a; [ -f \"$1/.spinclass/env\" ] && . \"$1/.spinclass/env\"; set +a; shift; exec clown \"$@\"", "sh", "{dir}", "--clown-attach=spawn", "--", "{prompt}"]
+    EOF
+        ;;
+      bare)
+        cat > "$root/sweatfile" <<'EOF'
+    # direnv-less confined pilot layer, CONTROL variant: clown alone, no dotenv (expected to boot and lose chat).
+    [session-entry]
+    spawn-entry = ["clown", "--clown-attach=spawn", "--", "{prompt}"]
+    EOF
+        ;;
+      *) echo "variant must be loader or bare"; exit 2 ;;
+    esac
+    echo "== wrote $root/sweatfile ({{variant}})"; cat "$root/sweatfile"
+
+# step 4 of the direnv-less confined pilot: spawn the confined pilot worker from inside sc-pilot-env with the terminal's direnv chain unloaded (direnv exec /), then list it; KEY is the operator's session key the worker reports to; run `just explore-live-unit-env` while it is live
+[group("debug")]
+debug-pilot-env-spawn key profile="canary-spinclass":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "$HOME/eng/pilot/sc-pilot-env"
+    brief='You are a confined pilot worker for a spinclass environment experiment. Do exactly this: (1) send one chat message to the session key below listing the tools you have by name; (2) read README.md and append the line "pilot: airside" to it with the Edit tool; (3) if a grit_stage and grit_commit tool exist, stage README.md and commit with the message "pilot: airside", otherwise say so; (4) send a second chat message with whether you committed and the HEAD commit if you know it. Do not merge, do not run recipes, do not create other files. Operator session key: {{key}}'
+    direnv exec / sc spawn --confined --profile "{{profile}}" --hello-timeout 3m \
+      --description "direnv-less confined pilot" --brief "$brief"
+    echo "== sessions"; sc list 2>&1 | grep -i pilot || echo "(no pilot session listed)"
+
+# end the direnv-less confined pilot: remind about sc close, then remove ~/eng/pilot (repo, bare origin and the pilot layer)
+[group("debug")]
+debug-pilot-env-teardown:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if sc list 2>/dev/null | grep -qi 'sc-pilot-env/'; then
+      echo "a pilot session is still listed; sc close it first:"; sc list | grep -i 'sc-pilot-env/'; exit 1
+    fi
+    rm -rf "$HOME/eng/pilot" && echo "removed $HOME/eng/pilot"
+
 # [debug] Pipe a cold `prompts/get` (no `initialize`) into `spinclass serve` and
 # print the dynamic system-prompt fragment it returns, extracted from the
 # JSON-RPC result. Serves the internal/bravo/sysprompt dev-loop (spinclass#187): edit a
