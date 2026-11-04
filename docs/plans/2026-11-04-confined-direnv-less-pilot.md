@@ -228,6 +228,38 @@ Then `sc close sc-pilot-env/<branch>`.
   session would hold it on a handle. Not built here; named so the design
   does not forget it.
 
+## Result (2026-11-04, sc-pilot-env/rich-baobab, loader entry)
+
+Passed. The operator ran the scaffold and spawn recipes; the spawn accepted
+the loader entry (argv[0] `sh`), the worker helloed, sent both chat
+messages to spinclass/light-cedar (the dotenv loader delivered
+`TROUPE_IPC`), listed its tools (Edit, Read, ListAgents, Skill,
+ToolSearch, ringmaster, troupe, just-us, the spinclass grit and
+restart/close tools; no Bash, Write, Grep or Glob), and committed
+`pilot: airside` as 00fb376 with grit_stage and grit_commit.
+
+`explore-live-unit-env` while it was live, unit
+`spinclass-agent-sc-pilot-env-rich-baobab-4172ec2d.service`: 77 variable
+names, none of them stdenv's (`CC`, `NIX_CFLAGS_COMPILE`, `phases`,
+`shellHook`, `stdenv` absent), no `IN_NIX_SHELL`, no `DIRENV_*`, no
+`GOTOOLCHAIN`/`BATS_LIB_PATH`/`HOST_PATH`. Present: the spinclass identity
+set, the clown set (`CLOWN_BIN`, `CLOWN_UNIT`, `CLOWN_POLICY_BROKER`,
+`CLOWN_NAME`, `CLOWN_GROUP_*`, `CLOWN_XMPP_VHOST`), the troupe set (nine
+names, the per-worker `TROUPE_XMPP_USER` and `TROUPE_XMPP_PASSWORD_FILE`
+included), the egress proxy variables, `SSH_AUTH_SOCK`, `GIT_SSH_COMMAND`,
+`STATSD_*`, the Claude Code knobs, the XDG and locale set, and systemd's
+own (`INVOCATION_ID`, the pressure watch variables). PATH: the eight
+system-profile directories plus two store entries, `mesa-0.6.2/bin` and
+`crap-present-2.3.0/bin`, neither from the devShell (the devShell's
+thirty-six are absent). `CLOWN_AGENT_SCOPE` and `CLOWN_PROFILE_DIGEST`
+are not in the unit (consumed by the launcher), as expected.
+
+So the agent corridor exists with no spinclass code change: a trusted-layer
+spawn-entry that loads the session dotenv and nothing else. The list above
+is the first draft of the spec's `env` field for the second lever. Not run:
+the bare-clown control (the loader's success already shows the dotenv is
+the needed part; the control would only show the failure mode).
+
 ## Done when
 
 Step 2's attribution is known, step 4's worker helloed, chatted, committed,

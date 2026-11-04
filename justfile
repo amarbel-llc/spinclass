@@ -2226,6 +2226,7 @@ explore-live-unit-env:
     seen=""
     for d in /proc/[0-9]*; do
       pid=${d#/proc/}
+      [ -r "$d/environ" ] || continue   # other users' processes: the open itself fails, not tr
       env=$(tr '\0' '\n' < "$d/environ" 2>/dev/null) || continue
       unit=$(printf '%s\n' "$env" | sed -n 's/^CLOWN_UNIT=//p')
       [ -n "$unit" ] || continue
