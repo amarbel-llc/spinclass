@@ -20,6 +20,27 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/sessionlog"
 )
 
+// FrozenHook is State.FrozenHook: how the per-commit hook's formatter was
+// resolved at install (FDR 0019, spinclass#459). Frozen means Bin is the
+// absolute path the landed default branch's devShell provided for Command's
+// leading word, resolved at BaseSha; otherwise Bin is the bare name the
+// dispatcher resolves from the committing shell's PATH and Reason says why.
+type FrozenHook struct {
+	// Command is the [hooks].pre-commit command as declared (normalised).
+	Command string `json:"command"`
+	// Bin is the formatter the dispatcher runs: an absolute path when Frozen,
+	// else Command's leading word.
+	Bin string `json:"bin"`
+	// BaseSha is the landed default branch's commit the devShell was evaluated
+	// at; "" when no base could be resolved.
+	BaseSha string `json:"base_sha,omitempty"`
+	// BaseLabel is the base's human label ("origin/master" or "master").
+	BaseLabel string    `json:"base_label,omitempty"`
+	Frozen    bool      `json:"frozen"`
+	Reason    string    `json:"reason,omitempty"`
+	At        time.Time `json:"at"`
+}
+
 // Credential is State.Credential: the mint/revoke record of a session's forge
 // push token (FDR 0028). A nil RevokedAt on an abandoned/tombstoned session
 // marks an orphaned token for the sweeper.
@@ -253,6 +274,14 @@ type State struct {
 	SetupFingerprint string     `json:"setup_fingerprint,omitempty"`
 	SetupScheme      int        `json:"setup_scheme,omitempty"`
 	SetupAt          *time.Time `json:"setup_at,omitempty"`
+
+	// FrozenHook records how the per-commit hook's formatter was resolved the
+	// last time the hook was installed (FDR 0019, spinclass#459): the store
+	// path frozen from the landed default branch's devShell and the base sha it
+	// came from, or why it stayed the bare name. Compared against the current
+	// landed base on resume and by `sc rebuild --check`; nil for a session whose
+	// hook predates freezing or is inactive.
+	FrozenHook *FrozenHook `json:"frozen_hook,omitempty"`
 
 	// Credential records the per-session forge push credential lifecycle
 	// (FDR 0028): set when [auth].mint-command minted a token for this

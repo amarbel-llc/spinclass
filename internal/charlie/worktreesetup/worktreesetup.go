@@ -17,6 +17,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/madder"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/alfa/dodder"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/setupfingerprint"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/bravo/apply"
@@ -152,6 +153,23 @@ func SetupStale(home, repoPath, recordedHash string, recordedScheme int) (stale 
 		return false, "", fmt.Errorf("loading sweatfile: %w", err)
 	}
 	stale, reason = setupfingerprint.IsStale(recordedHash, recordedScheme, h.Merged)
+	return stale, reason, nil
+}
+
+// FrozenHookStale reports whether a session's recorded frozen per-commit hook
+// (FDR 0019, spinclass#459) needs re-installing: never when the repo-level
+// hierarchy leaves the hook inactive; otherwise by apply.FrozenHookStale (no
+// record, a hook left unfrozen, or a landed default branch that moved past the
+// recorded base). `sc rebuild --check` reports it beside SetupStale.
+func FrozenHookStale(home, repoPath string, rec *session.FrozenHook) (stale bool, reason string, err error) {
+	h, err := sweatfileio.LoadHierarchy(home, repoPath)
+	if err != nil {
+		return false, "", fmt.Errorf("loading sweatfile: %w", err)
+	}
+	if !h.Merged.MergeWith(sweatfile.GetDefault()).PreCommitActive() {
+		return false, "", nil
+	}
+	stale, reason = apply.FrozenHookStale(rec, repoPath)
 	return stale, reason, nil
 }
 

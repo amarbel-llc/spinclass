@@ -611,6 +611,12 @@ func startDetachedEntry(rp worktree.ResolvedPath, driver Driver, desc string, ar
 	// The worker's own `sc resume` replays the entry resolved here, at creation,
 	// from the operator-controlled layers; it never re-reads a sweatfile.
 	st.Entry = entry
+	// The worktree's setup just froze the per-commit hook from the landed base
+	// (spinclass#459); the spawner records it before the worker can touch the
+	// sidecar.
+	if rec, rerr := apply.ReadHookRecord(rp.AbsPath); rerr == nil {
+		st.FrozenHook = rec
+	}
 	if err := session.Write(st); err != nil {
 		return Pending{}, fmt.Errorf("writing worker session state: %w", err)
 	}

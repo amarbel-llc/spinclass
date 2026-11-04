@@ -22,6 +22,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
+	"code.linenisgreat.com/spinclass/internal/bravo/apply"
 	"code.linenisgreat.com/spinclass/internal/bravo/basebranch"
 	"code.linenisgreat.com/spinclass/internal/bravo/hookrun"
 	"code.linenisgreat.com/spinclass/internal/bravo/present"
@@ -334,6 +335,35 @@ func PinEntry(sf sweatfile.Sweatfile) *session.PinnedEntry {
 	}
 }
 
+// refreshFrozenHook is the resume half of the frozen per-commit hook (FDR 0019,
+// spinclass#459): the session's holder re-provisions the hook from the
+// now-landed default branch when the recorded base has moved, when the hook was
+// never frozen, or when there is no record (a session from before freezing).
+// Failures warn on stderr and keep the previous record: the hook never blocks
+// a resume. nil when the hook is inactive (which uninstalls it).
+func refreshFrozenHook(sf sweatfile.Sweatfile, rp worktree.ResolvedPath, prev *session.FrozenHook) *session.FrozenHook {
+	if !sf.MergeWith(sweatfile.GetDefault()).PreCommitActive() {
+		return nil
+	}
+	stale, reason := apply.FrozenHookStale(prev, rp.RepoPath)
+	if !stale {
+		return prev
+	}
+	rec, err := apply.ReinstallPreCommitHook(sf, rp.AbsPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "spinclass: pre-commit hook not re-frozen (%s): %v\n", reason, err)
+		return prev
+	}
+	switch {
+	case rec == nil:
+	case rec.Frozen && rec.BaseSha != "":
+		fmt.Fprintf(os.Stderr, "spinclass: pre-commit hook re-frozen from %s at %.7s (%s)\n", rec.BaseLabel, rec.BaseSha, reason)
+	case !rec.Frozen:
+		fmt.Fprintf(os.Stderr, "spinclass: pre-commit hook re-installed unfrozen; the formatter resolves from PATH at commit time: %s\n", rec.Reason)
+	}
+	return rec
+}
+
 // lifecycleHooks is the sweatfile the on-attach and on-detach hooks run from:
 // the pinned commands for a pinned session, sf itself for a legacy one.
 func lifecycleHooks(sf sweatfile.Sweatfile, entry *session.PinnedEntry) sweatfile.Sweatfile {
@@ -441,7 +471,9 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 			st.SetupFingerprint = existing.SetupFingerprint
 			st.SetupScheme = existing.SetupScheme
 			st.SetupAt = existing.SetupAt
+			st.FrozenHook = existing.FrozenHook
 		}
+		rebuilt := false
 		if home, herr := os.UserHomeDir(); herr == nil {
 			if !existed {
 				// A freshly-created worktree just had its setup applied —
@@ -466,12 +498,25 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 							now := time.Now().UTC()
 							st.SetupFingerprint, st.SetupScheme, st.SetupAt = hash, scheme, &now
 							fmt.Fprintln(os.Stderr, "spinclass: worktree setup was stale — auto-rebuilt")
+							rebuilt = true
 						}
 					} else {
 						fmt.Fprintf(os.Stderr, "spinclass: worktree setup is stale (%s) — run `sc rebuild`\n", reason)
 					}
 				}
 			}
+		}
+		// The frozen per-commit hook (FDR 0019, spinclass#459): a fresh worktree's
+		// install, or the rebuild just above, wrote its record; any other resume
+		// re-freezes the hook from the now-landed base when that has moved. The
+		// sidecar is read only right after an install this process ran.
+		switch {
+		case !existed || rebuilt:
+			if rec, rerr := apply.ReadHookRecord(rp.AbsPath); rerr == nil {
+				st.FrozenHook = rec
+			}
+		default:
+			st.FrozenHook = refreshFrozenHook(sf, rp, st.FrozenHook)
 		}
 		st.StartedAt = time.Now().UTC()
 		if err := session.Write(st); err != nil {

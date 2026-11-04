@@ -675,10 +675,12 @@ from the in-unit moxyfile.
    can ship before #351 is decided. An unset value falls back to git's own
    resolution and fails the commit visibly, never silently under a guessed
    name.
-3. **Hooks on proxied commits.** The per-commit hook (FDR 0019) re-evaluates
-   the worktree's devshell when the flake lock moved (#267). If the frontend
-   commits for a confined worker, that would execute **worker-authored code
-   outside the unit**. Two options, **undecided** (flagged for the operator):
+3. **Hooks on proxied commits.** The per-commit hook (FDR 0019) runs the
+   formatter it was frozen to at install (spinclass#459; before that it
+   re-evaluated the worktree's devshell when the flake lock moved, #267). If
+   the frontend commits for a confined worker, the hook still runs a
+   formatter over **worker-authored content outside the unit**. Two options,
+   **undecided** (flagged for the operator):
    - *Skip hooks on proxied commits* and rely on the merge gate (which runs in
      the pre-merge build worktree, FDR 0013). Safe, loses authoring-time
      repair for confined workers, so mechanical drift surfaces at merge.

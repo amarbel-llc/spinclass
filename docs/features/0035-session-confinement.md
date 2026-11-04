@@ -1351,10 +1351,12 @@ Two findings on the way, recorded for the arc:
   marker rerun, the hook alone wrote it) and, I believe, runs the branch's
   devShell as the committing user, inside the unit for a worker's own commit
   and outside it for an operator's commit in a worker's worktree. Decided
-  (not built): the hook is frozen to a store path resolved from the landed
-  base at `sc start`/`sc spawn`, re-provisioned on resume or restart, the
-  lock-hash check kept as a warning, fail-open kept with the gate as the
-  backstop. The store-copy half is spinclass#460, deferred.
+  and built (2026-11-04, FDR 0019's amendment): the hook is frozen to a store
+  path resolved from the landed base at `sc start`/`sc spawn`/`sc resurrect`,
+  re-provisioned on resume, rebuild or restart, the lock-hash check kept as a
+  warning, fail-open kept with the gate as the backstop; the dispatcher no
+  longer runs `nix develop` at all. The store-copy half is spinclass#460,
+  deferred.
 
 ## Hard requirements on the unit
 

@@ -20,6 +20,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
+	"code.linenisgreat.com/spinclass/internal/bravo/apply"
 	"code.linenisgreat.com/spinclass/internal/charlie/worktreesetup"
 	"code.linenisgreat.com/spinclass/internal/echo/shop"
 
@@ -106,6 +107,12 @@ func Run(w io.Writer, target, newBranchName, format string) error {
 		ProfileNarrowing:   st.ProfileNarrowing,
 		Entry:              shop.PinEntry(h.Merged),
 		StartedAt:          time.Now(),
+	}
+	// The install Create just ran froze the per-commit hook from the landed
+	// base (spinclass#459); a resurrected session is re-provisioned, not
+	// restored from the tombstone.
+	if rec, rerr := apply.ReadHookRecord(newPath); rerr == nil {
+		fresh.FrozenHook = rec
 	}
 	if err := session.Write(fresh); err != nil {
 		return fmt.Errorf("writing resurrected session state for %s: %w", fresh.SessionKey, err)

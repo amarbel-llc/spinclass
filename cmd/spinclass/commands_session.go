@@ -303,7 +303,8 @@ func registerSessionCommands(app *command.App) {
 				"With no target, operates on the session containing the current directory; otherwise <target> is a worktree directory name or a <repo>/<branch> session key from `sc list`. " +
 				"--check reports stale/fresh WITHOUT re-applying and exits nonzero when stale (for scripting). " +
 				"Setup is otherwise applied only at `sc start`; `sc resume` warns when stale and, with [hooks].auto-rebuild-on-resume, re-applies automatically. " +
-				"Does NOT detect external-tool version drift (e.g. a changed conformist binary behind an unchanged hook command).",
+				"--check also reports a frozen per-commit hook whose landed default branch has moved past the base it was frozen from (spinclass#459; `sc resume` re-freezes it). " +
+				"Other external-tool version drift behind an unchanged command is not detected.",
 		},
 		Params: []command.Param{
 			{Name: "target", Type: command.String, Description: "Session target (worktree directory name or <repo>/<branch> key); auto-detects from cwd if omitted", Completer: completeWorktreeTargets},
@@ -353,6 +354,13 @@ func runRebuild(_ context.Context, args json.RawMessage) error {
 		if stale {
 			return fmt.Errorf("%s: setup is stale: %s", state.Key(), reason)
 		}
+		hookStale, hookReason, herr := worktreesetup.FrozenHookStale(home, state.RepoPath, state.FrozenHook)
+		if herr != nil {
+			return herr
+		}
+		if hookStale {
+			return fmt.Errorf("%s: setup is stale: %s", state.Key(), hookReason)
+		}
 		_, _ = fmt.Fprintf(os.Stdout, "%s: setup is up to date\n", state.Key())
 		return nil
 	}
@@ -364,11 +372,15 @@ func runRebuild(_ context.Context, args json.RawMessage) error {
 	if ferr != nil {
 		return ferr
 	}
+	// The install just ran wrote the frozen hook's record (spinclass#459); nil
+	// when the hook is inactive, which also removed the record.
+	hook, _ := apply.ReadHookRecord(state.WorktreePath)
 	now := time.Now().UTC()
 	if err := updateLoadedSession(state, func(cur *session.State) bool {
 		cur.SetupFingerprint = hash
 		cur.SetupScheme = scheme
 		cur.SetupAt = &now
+		cur.FrozenHook = hook
 		return true
 	}); err != nil {
 		return fmt.Errorf("updating session state: %w", err)

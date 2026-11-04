@@ -9,14 +9,26 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/testgit"
 )
 
 func strptr(s string) *string { return &s }
 func boolPtr(b bool) *bool    { return &b }
 
+// unfrozenRec is the record of a hook left on the bare name.
+func unfrozenRec(cmd, reason string) session.FrozenHook {
+	return session.FrozenHook{Command: cmd, Bin: leadingWord(cmd), Reason: reason}
+}
+
+// frozenRec is the record of a hook frozen to bin from base.
+func frozenRec(cmd, bin, baseLabel, baseSha string) session.FrozenHook {
+	return session.FrozenHook{Command: cmd, Bin: bin, BaseLabel: baseLabel, BaseSha: baseSha, Frozen: true}
+}
+
 func TestDispatcherScript(t *testing.T) {
-	s := dispatcherScript("/orig/hooks", "/wt/.spinclass/hooks", "conformist --staged --exit-zero-on-fix", "deadbeefcafe")
+	s := dispatcherScript("/orig/hooks", "/wt/.spinclass/hooks", "deadbeefcafe",
+		unfrozenRec("conformist --staged --exit-zero-on-fix", "no nix"))
 	if !strings.Contains(s, "bin='conformist'") {
 		t.Errorf("expected baked bin, got:\n%s", s)
 	}
@@ -41,26 +53,41 @@ func TestDispatcherScript(t *testing.T) {
 		t.Errorf("expected non-blocking exit 0 tail, got:\n%s", s)
 	}
 
-	// spinclass#267: the baked lock hash + the flake.lock-drift re-eval branch.
+	// spinclass#267/#459: the baked lock hash drives a warning only. The
+	// worktree flake is never evaluated at commit time.
 	if !strings.Contains(s, "lockhash='deadbeefcafe'") {
 		t.Errorf("expected baked flake.lock hash, got:\n%s", s)
 	}
 	if !strings.Contains(s, "git hash-object flake.lock") {
 		t.Errorf("expected live flake.lock hash compare, got:\n%s", s)
 	}
-	if !strings.Contains(s, `nix develop --command sh -c "$cmd"`) {
-		t.Errorf("expected the current-devShell re-eval branch, got:\n%s", s)
+	if strings.Contains(s, "nix develop") || strings.Contains(s, "command -v nix") {
+		t.Errorf("the dispatcher must never evaluate the worktree flake (spinclass#459), got:\n%s", s)
 	}
-	if !strings.Contains(s, "flake.lock changed since this session") {
-		t.Errorf("expected the re-eval heads-up, got:\n%s", s)
+	if !strings.Contains(s, "flake.lock changed since this hook was installed") || !strings.Contains(s, "was not frozen (no nix)") {
+		t.Errorf("expected the unfrozen drift warning naming the reason, got:\n%s", s)
+	}
+
+	// A frozen hook bakes the absolute path as both the guard and the command's
+	// leading word, and its drift warning names the base.
+	f := dispatcherScript("/o", "/s", "deadbeefcafe",
+		frozenRec("conformist-pre-commit --verbose", "/nix/store/abc-hooks/bin/conformist-pre-commit", "origin/master", "0123456789abcdef"))
+	if !strings.Contains(f, "bin='/nix/store/abc-hooks/bin/conformist-pre-commit'") {
+		t.Errorf("expected the frozen path as the guard, got:\n%s", f)
+	}
+	if !strings.Contains(f, "cmd='/nix/store/abc-hooks/bin/conformist-pre-commit --verbose'") {
+		t.Errorf("expected the frozen path to replace the leading word only, got:\n%s", f)
+	}
+	if !strings.Contains(f, "frozen from origin/master at 0123456") || !strings.Contains(f, "sc resume") {
+		t.Errorf("expected the frozen drift warning to name the base and the way out, got:\n%s", f)
 	}
 
 	// A `sh -c '...'` command guards on the sh binary, not the inner tool.
-	if got := dispatcherScript("/o", "/s", "sh -c 'foo bar'", ""); !strings.Contains(got, "bin='sh'") {
+	if got := dispatcherScript("/o", "/s", "", unfrozenRec("sh -c 'foo bar'", "r")); !strings.Contains(got, "bin='sh'") {
 		t.Errorf("expected guard on sh, got:\n%s", got)
 	}
 	// With no flake.lock (empty baked hash), the drift branch is inert.
-	if got := dispatcherScript("/o", "/s", "conformist", ""); !strings.Contains(got, "lockhash=''") {
+	if got := dispatcherScript("/o", "/s", "", unfrozenRec("conformist", "r")); !strings.Contains(got, "lockhash=''") {
 		t.Errorf("expected empty baked hash to disable the drift branch, got:\n%s", got)
 	}
 }
@@ -73,13 +100,14 @@ func TestDispatcherScriptRendersValidSh(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		lockHash string
+		rec      session.FrozenHook
 	}{
-		{"with-lockhash", "deadbeefcafe"},
-		{"empty-lockhash", ""},
+		{"with-lockhash", "deadbeefcafe", unfrozenRec("conformist --staged --exit-zero-on-fix", "it's a reason with 'quotes'")},
+		{"empty-lockhash", "", unfrozenRec("conformist --staged --exit-zero-on-fix", "")},
+		{"frozen", "deadbeefcafe", frozenRec("conformist-pre-commit", "/nix/store/x/bin/conformist-pre-commit", "origin/master", "0123456789abcdef")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			script := dispatcherScript("/orig/hooks", "/wt/.spinclass/hooks",
-				"conformist --staged --exit-zero-on-fix", tc.lockHash)
+			script := dispatcherScript("/orig/hooks", "/wt/.spinclass/hooks", tc.lockHash, tc.rec)
 			cmd := exec.Command("sh", "-n")
 			cmd.Stdin = strings.NewReader(script)
 			if out, err := cmd.CombinedOutput(); err != nil {
@@ -109,7 +137,7 @@ func TestInstallPreCommitHookBakesFlakeLockHash(t *testing.T) {
 	}
 
 	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreCommit: strptr("conformist --staged")}}
-	if err := installPreCommitHook(sf, wt); err != nil {
+	if _, err := installPreCommitHook(sf, wt); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	body, _ := os.ReadFile(filepath.Join(wt, ".spinclass", "hooks", "pre-commit"))
@@ -135,7 +163,7 @@ func TestInstallPreCommitHook(t *testing.T) {
 	testgit.MustWorktreeAdd(t, repo, wt, "feat")
 
 	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreCommit: strptr("conformist --staged --exit-zero-on-fix")}}
-	if err := installPreCommitHook(sf, wt); err != nil {
+	if _, err := installPreCommitHook(sf, wt); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -164,7 +192,7 @@ func TestInstallPreCommitHook(t *testing.T) {
 	}
 
 	// Idempotent: a second install (mirrors resume re-running Apply) is clean.
-	if err := installPreCommitHook(sf, wt); err != nil {
+	if _, err := installPreCommitHook(sf, wt); err != nil {
 		t.Fatalf("second install: %v", err)
 	}
 }
@@ -184,7 +212,7 @@ func TestInstallPreCommitHookFiresOnCommit(t *testing.T) {
 		"#!/bin/sh\necho fired > "+shSingleQuote(marker)+"\nexit 0\n")
 
 	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreCommit: strptr("fakefmt")}}
-	if err := installPreCommitHook(sf, wt); err != nil {
+	if _, err := installPreCommitHook(sf, wt); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -215,7 +243,7 @@ func TestInstallPreCommitHookSurfacesFormatterError(t *testing.T) {
 		"#!/bin/sh\necho 'badfmt: --exit-zero-on-fix requires --commit' >&2\nexit 2\n")
 
 	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreCommit: strptr("badfmt --staged --exit-zero-on-fix")}}
-	if err := installPreCommitHook(sf, wt); err != nil {
+	if _, err := installPreCommitHook(sf, wt); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -239,12 +267,13 @@ func TestInstallPreCommitHookSurfacesFormatterError(t *testing.T) {
 	}
 }
 
-// TestInstallPreCommitHookReEvalsOnFlakeLockDrift proves the spinclass#267
-// control flow: when flake.lock has drifted since install (live git-hash != baked
-// hash), the dispatcher routes the formatter through `nix develop --command`
-// instead of the frozen PATH. Stub `nix` and formatter binaries record that they
-// fired — no real devShell build.
-func TestInstallPreCommitHookReEvalsOnFlakeLockDrift(t *testing.T) {
+// TestInstallPreCommitHookWarnsOnFlakeLockDriftAndNeverRunsNix is the
+// spinclass#459 control flow replacing #267's re-evaluation: when flake.lock
+// has drifted since install (live git-hash != baked hash), the dispatcher
+// prints one warning and runs the same formatter; a `nix` on PATH is never
+// called, so the branch's flake is never evaluated (and never fetched from) at
+// commit time.
+func TestInstallPreCommitHookWarnsOnFlakeLockDriftAndNeverRunsNix(t *testing.T) {
 	testgit.RequireGit(t)
 	repo := t.TempDir()
 	testgit.MustInit(t, repo)
@@ -260,16 +289,20 @@ func TestInstallPreCommitHookReEvalsOnFlakeLockDrift(t *testing.T) {
 	binDir := t.TempDir()
 	nixMarker := filepath.Join(t.TempDir(), "nix-called")
 	fmtMarker := filepath.Join(t.TempDir(), "fmt-ran")
-	// Stub `nix`: on `develop --command <rest...>`, record it fired then exec the
-	// rest (the `sh -c "$cmd"` the dispatcher hands it).
 	writeExec(t, filepath.Join(binDir, "nix"),
 		"#!/bin/sh\necho called > "+shSingleQuote(nixMarker)+"\nshift 2\nexec \"$@\"\n")
 	writeExec(t, filepath.Join(binDir, "fakefmt"),
 		"#!/bin/sh\necho ran > "+shSingleQuote(fmtMarker)+"\nexit 0\n")
 
+	// The base (main) has no flake.nix, so the hook is installed unfrozen and
+	// the real resolver never reaches nix either.
 	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreCommit: strptr("fakefmt")}}
-	if err := installPreCommitHook(sf, wt); err != nil {
+	rec, err := installPreCommitHook(sf, wt)
+	if err != nil {
 		t.Fatalf("install: %v", err)
+	}
+	if rec == nil || rec.Frozen {
+		t.Fatalf("expected an unfrozen record for a base without flake.nix, got %+v", rec)
 	}
 
 	// Drift the lock so the live hash differs from the baked one.
@@ -281,13 +314,21 @@ func TestInstallPreCommitHookReEvalsOnFlakeLockDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	runGitPath(t, wt, binDir, "add", "f.txt")
-	runGitPath(t, wt, binDir, "commit", "-q", "-m", "c")
+	cmd := exec.Command("git", "-C", wt, "commit", "-q", "-m", "c")
+	cmd.Env = append(os.Environ(), "PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("commit: %v\n%s", err, out)
+	}
 
-	if _, err := os.Stat(nixMarker); err != nil {
-		t.Errorf("flake.lock drift should re-eval via `nix develop`, but stub nix was not called: %v", err)
+	if _, err := os.Stat(nixMarker); err == nil {
+		t.Error("flake.lock drift must not evaluate the worktree flake, but stub nix was called (spinclass#459)")
 	}
 	if _, err := os.Stat(fmtMarker); err != nil {
-		t.Errorf("the formatter should still run (under the re-eval): %v", err)
+		t.Errorf("the formatter should still run: %v", err)
+	}
+	if !strings.Contains(string(out), "flake.lock changed since this hook was installed") {
+		t.Errorf("expected the drift warning in the commit output, got:\n%s", out)
 	}
 }
 
@@ -316,7 +357,7 @@ func TestInstallPreCommitHookComposesNativeHooks(t *testing.T) {
 		"#!/bin/sh\necho fmt >> "+shSingleQuote(events)+"\nexit 0\n")
 
 	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreCommit: strptr("fmtstub")}}
-	if err := installPreCommitHook(sf, wt); err != nil {
+	if _, err := installPreCommitHook(sf, wt); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -356,7 +397,7 @@ func TestInstallPreCommitHookDisableRestoresNative(t *testing.T) {
 	hooksDir := filepath.Join(wt, ".spinclass", "hooks")
 
 	active := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreCommit: strptr("conformist --staged")}}
-	if err := installPreCommitHook(active, wt); err != nil {
+	if _, err := installPreCommitHook(active, wt); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	if hp, _ := git.Run(wt, "config", "--get", "core.hooksPath"); hp == "" {
@@ -365,7 +406,7 @@ func TestInstallPreCommitHookDisableRestoresNative(t *testing.T) {
 
 	// Disable → restore: our override unset, shims and sentinel removed.
 	inactive := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreCommit: strptr("conformist --staged"), DisablePreCommit: boolPtr(true)}}
-	if err := installPreCommitHook(inactive, wt); err != nil {
+	if _, err := installPreCommitHook(inactive, wt); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
 	if hp, _ := git.Run(wt, "config", "--worktree", "--get", "core.hooksPath"); strings.TrimSpace(hp) != "" {
@@ -387,7 +428,7 @@ func TestInstallPreCommitHookInactiveIsNoop(t *testing.T) {
 	testgit.MustWorktreeAdd(t, repo, wt, "feat")
 
 	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{}}
-	if err := installPreCommitHook(sf, wt); err != nil {
+	if _, err := installPreCommitHook(sf, wt); err != nil {
 		t.Fatalf("inactive install should be a no-op: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(wt, ".spinclass", "hooks", "pre-commit")); !os.IsNotExist(err) {
@@ -412,7 +453,7 @@ func TestInstallPreCommitHookRefusesCommonCoreWorktree(t *testing.T) {
 	}
 
 	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreCommit: strptr("conformist --staged")}}
-	err := installPreCommitHook(sf, wt)
+	_, err := installPreCommitHook(sf, wt)
 	if err == nil {
 		t.Fatal("expected refusal when core.worktree is set in the common config")
 	}

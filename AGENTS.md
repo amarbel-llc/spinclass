@@ -155,7 +155,8 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
   shipped builds (#454, `spinclass-build-pins(7)`).
 - **Pre-merge REPAIR** (FDR 0018; a dirty tracked tree is refused, #345) and
   **per-commit hook** (FDR 0019, #183/#267; canonical value
-  `conformist-pre-commit`).
+  `conformist-pre-commit`; frozen at install to the landed default branch's
+  devShell path, never re-evaluated at commit time, #459).
 - **Inactivity watchdog** (`[hooks].inactivity-timeout`; funnels through
   `hookrun.PreMergeInDir`).
 - **Base-branch freshening** (FDR 0024, #250, `internal/bravo/basebranch`): fresh

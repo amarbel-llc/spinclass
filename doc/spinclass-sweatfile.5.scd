@@ -584,6 +584,24 @@ does not export *WORKTREE*.
 	worktrees. It is *best-effort and non-blocking:* a missing formatter
 	(failed *command -v*) or any non-zero exit never blocks the commit.
 
+	The formatter is *frozen when the hook is installed* (FDR 0019,
+	spinclass#459): the command's leading word is resolved to the absolute
+	path the *landed default branch's* devShell provides, by evaluating
+	that branch at its current commit (the base a session is cut from, never
+	the branch the session goes on to commit) with *nix develop
+	git+file://<repo>?rev=<base>* and no lock update, and that path is baked
+	into the dispatcher. The dispatcher never runs *nix develop* at commit
+	time: a *flake.lock* that changed since the install only prints a
+	warning naming the base, and the frozen formatter still runs. The hook
+	is re-frozen from the then-landed base by whoever holds the session,
+	on *sc resume* (when the base has moved), *sc rebuild*, a restart and
+	*sc resurrect*; *sc rebuild --check* reports a moved base as stale. When
+	the base has no *flake.nix*, its lock is missing or names a local-path
+	input, nix is unavailable, or the evaluation fails, the hook is
+	installed *unfrozen* on the bare name (today's PATH resolution) and
+	*sc start*/*sc resume* say why. A confined worker's commits bypass the
+	hook altogether (*spinclass-grit(7)*).
+
 	Because git consults exactly one hooks directory, the installed
 	*<worktree>/.spinclass/hooks* is a *composing dispatcher:* it captures
 	the repo's pre-existing hooks dir (the prior *core.hooksPath* or

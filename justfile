@@ -608,6 +608,26 @@ explore-validate-from dir=(home_directory() / 'eng'):
     cd "{{ dir }}" && "$bin" validate
     exit 0
 
+# [explore] Run the exact `nix develop` the frozen per-commit hook's resolver
+# runs (internal/bravo/apply/frozenhook.go, spinclass#459) against THIS repo's
+# landed default branch: evaluate git+file://<main checkout>?rev=<ref's sha>
+# without touching the lock and print the absolute path the devShell gives
+# `bin`. Proves the git+file fetch of a worktree repo, the no-lock-update
+# posture and the resolution shape live, where the sandboxed tests cannot.
+#
+# resolve the pre-commit formatter from the landed default branch as the frozen hook does
+[group("explore")]
+explore-frozen-hook-resolve bin='conformist-pre-commit' ref='origin/master':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common=$(git rev-parse --path-format=absolute --git-common-dir)
+    repo=$(dirname "$common")
+    sha=$(git rev-parse {{ quote(ref) }})
+    echo "base: {{ ref }} = $sha" >&2
+    echo "repo: $repo" >&2
+    nix develop "git+file://$repo?rev=$sha" --no-update-lock-file --no-write-lock-file \
+        --command sh -c 'command -v -- "$1"' sh {{ quote(bin) }}
+
 # [explore] Reproduce the dynamic system-prompt fragment a REAL session at `dir`
 # receives, using the INSTALLED sc (not `go run`, which cannot build
 # cmd/spinclass — spinclass#292). This is the counterpart to

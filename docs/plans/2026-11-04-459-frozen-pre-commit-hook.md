@@ -1,10 +1,11 @@
 # Freezing the per-commit hook at session start (plan for #459, 2026-11-04)
 
-Plan, no code. The operator decided the shape on 2026-11-04 in conversation and
-on the same day gave a go to write this plan and the FDR 0019 amendment, not to
-implement: implementation waits for a second go after the operator has read
-them. The companion decision records are FDR 0035 ("The environment is part of
-the required view") and `2026-11-04-confined-direnv-less-pilot.md`.
+The operator decided the shape on 2026-11-04 in conversation, gave a go to
+write this plan and the FDR 0019 amendment the same day, and the second go
+(to implement) later that day; §6 records what was built and how the open
+questions came out. The companion decision records are FDR 0035 ("The
+environment is part of the required view") and
+`2026-11-04-confined-direnv-less-pilot.md`.
 
 Labels: **R** read in code or docs, **V** observed in a run, **I** inferred or
 proposed, **U** unverified.
@@ -131,5 +132,43 @@ fetched by the hook. The gate (#449) and the hook then agree.
 
 Frozen hook (this plan) first, then C (#429, the merge-admission rulings note,
 `2026-11-04-429-merge-admission-rulings.md`) plus B's test-harness fix, then
-B's canary, then B ships. Implementation of this plan waits for the operator's
-second go after reading it and the FDR 0019 amendment.
+B's canary, then B ships.
+
+## 6. What was built (2026-11-04, the second go)
+
+- **Resolution** (`internal/bravo/apply/frozenhook.go`, `resolveFrozenHook`):
+  the base is `landing.DefaultBranchRef` (the remote-tracking default when it
+  resolves, else the local default) at its current commit; its committed
+  `flake.nix` and `flake.lock` must exist; the lock must name no local-path or
+  file-scheme input; then `nix develop git+file://<main checkout>?rev=<base>
+  --no-update-lock-file --no-write-lock-file --command sh -c 'command -v --
+  "$1"' sh <leading word>` (the #454 nix pin when the build has one, else the
+  frontend's PATH), bounded by a 15-minute timeout. The result must be an
+  absolute path. Any failure installs the bare name with the reason.
+- **Dispatcher** (`precommit.go`): `Bin`/`Cmd` carry the frozen path; the
+  `via_nix` branch and the `command -v nix` guard are gone; a lock-hash drift
+  prints one line (`DriftMsg`) naming the base and the way out (`sc resume`,
+  or `restart-this-session` under clown), or the unfrozen reason.
+- **Record**: `session.State.FrozenHook` (command, bin, base sha and label,
+  frozen, reason, time), written by the install as the display sidecar
+  `.spinclass/precommit-hook.json` and copied into the frontend record right
+  after the install that wrote it (attach, spawn, resurrect, rebuild). Not in
+  the fingerprint hash: `apply.FrozenHookStale` compares the recorded base
+  with the current landed sha by `rev-parse`.
+- **Resume** (`shop.refreshFrozenHook`): when the hook is active and the
+  record is missing, unfrozen, or behind the landed base, the hook alone is
+  re-installed (re-frozen) and the result is written to the session; the
+  auto-rebuild path's full re-apply covers it too. `sc rebuild --check` reports
+  a moved base as stale (`worktreesetup.FrozenHookStale`). A restart relaunches
+  through resume, so it is covered.
+- **Open questions, resolved**: evaluation cost is one `nix develop` of the
+  base per install, the same devShell direnv loads at attach (cold caches pay
+  once); a host without nix installs unfrozen with the reason, visible on
+  `sc start`/`sc resume` and `sc rebuild --check`; the base ref form is
+  `git+file://<main checkout>?rev=<sha>`, and the guarded gate's declared-inputs
+  evaluation is not run in front of it (the base is landed content direnv
+  evaluates at every session start already; only the cheap local-input check
+  on the base's lock runs); legacy sessions are re-frozen on their next resume
+  (no record ⇒ stale); the tests are in `precommit_frozen_test.go` and the
+  rewritten drift test (a stub `nix` on PATH is never called). `sc list` shows
+  nothing new. The live mechanism check is `just explore-frozen-hook-resolve`.

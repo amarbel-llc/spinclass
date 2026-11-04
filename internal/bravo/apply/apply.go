@@ -53,10 +53,14 @@ func Setup(sf sweatfile.Sweatfile, worktreePath string) error {
 
 	// Install the per-session pre-commit repair hook (best-effort): a failure
 	// here must never block session creation, so log and continue. No-op when
-	// [hooks].pre-commit is inactive. See
-	// docs/plans/2026-06-16-per-commit-repair-hook-design.md.
-	if err := installPreCommitHook(merged, worktreePath); err != nil {
+	// [hooks].pre-commit is inactive. The formatter is frozen from the landed
+	// default branch's devShell (spinclass#459); a hook left unfrozen says why.
+	// See docs/plans/2026-06-16-per-commit-repair-hook-design.md.
+	rec, err := installPreCommitHook(merged, worktreePath)
+	if err != nil {
 		log.Warn("pre-commit hook install skipped", "err", err)
+	} else if rec != nil && !rec.Frozen {
+		log.Warn("pre-commit hook installed unfrozen; the formatter resolves from PATH at commit time", "reason", rec.Reason)
 	}
 
 	return nil

@@ -39,8 +39,9 @@ promotion-criteria: |
 ## Amendment 2026-11-04: the hook is frozen at session start (spinclass#459)
 
 Decided by the operator on 2026-11-04, planned in
-`docs/plans/2026-11-04-459-frozen-pre-commit-hook.md`, not yet built (the
-implementation waits for a second go after the plan has been read).
+`docs/plans/2026-11-04-459-frozen-pre-commit-hook.md`, built the same day on
+the operator's second go (`internal/bravo/apply/frozenhook.go`; the plan's §6
+records how each open question was resolved).
 
 - **What changes.** The per-commit dispatcher no longer resolves the formatter
   by name from the committing shell's PATH, and no longer re-evaluates the
@@ -63,11 +64,21 @@ implementation waits for a second go after the plan has been read).
   Sessions created before the change keep their old dispatcher until resumed;
   every resume rewrites it, so no sweep is needed.
 - **Effect on this record.** "Relationship to `sc rebuild` / setup staleness"
-  below is superseded once built: the frozen path and its base sha are
-  recorded on the session and enter the setup fingerprint, so a conformist
-  bump becomes visible to `sc rebuild --check`. The name-based model stays the
-  sweatfile's contract (`pre-commit = "conformist-pre-commit"`); only the
-  resolution moves from commit time to provisioning time.
+  below is superseded: the frozen path and its base sha are recorded on the
+  session (`session.State.FrozenHook`) and compared with the current landed
+  base by `sc rebuild --check` and on resume, so a landing that bumps
+  conformist is visible as "hook frozen from origin/master at X, origin/master
+  now at Y". They do not enter the fingerprint hash itself, which would have
+  needed a devShell evaluation on every staleness check; the comparison is a
+  `rev-parse`. The name-based model stays the sweatfile's contract
+  (`pre-commit = "conformist-pre-commit"`); only the resolution moves from
+  commit time to provisioning time.
+- **In front of the evaluation.** The base's committed `flake.lock` must exist
+  and name no local-path or file-scheme input (the one check a devShell
+  evaluation of landed content needs, since nix would copy such an input into
+  the store); the guarded gate's full declared-inputs evaluation (#449) is not
+  run here, because the base is landed content direnv already evaluates at
+  every session start, so the hook adds no exposure beyond the devShell load.
 
 ## Problem Statement
 
@@ -142,6 +153,10 @@ No `conformist.nix`, no `presets.eng`, no Go change in spinclass. The
 `GOLANGCI_LINT_CACHE` env stays in the sweatfile `[direnv.dotenv]`.
 
 ## Relationship to `sc rebuild` / setup staleness
+
+> Superseded by the 2026-11-04 amendment above (spinclass#459): the resolved
+> store path and its base are recorded on the session, and `sc rebuild --check`
+> reports a moved base. Kept as the record of the earlier model.
 
 The hook command is the stable name `conformist-pre-commit` resolved via the
 devShell PATH; a conformist bump changes the wrapper's store path, not the
