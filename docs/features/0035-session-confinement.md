@@ -934,6 +934,20 @@ the host (`internal/spawn/confineprofile.go`).
     profile kept.
   - Form (ii), a readback-confirmed exclusion, is not built. It waits on the
     frontend proxy: in-unit exclusions are policy, not a boundary.
+  - **R3'** (spinclass#457, written 2026-11-04 against clown#343; live once
+    spinclass relinks a clown at or past 252b976): a profile whose moxy table
+    (clown profile protocol 3) places moxy **in-unit** may keep `moxy/moxy`,
+    provided the table names at least one tool, every tool is under its own
+    ceiling (`tools ⊆ allow_tools`), and no tool is outside the ratified V3
+    default: toolbox, env and man whole; rg `search`; folio `read`, `ls`,
+    `glob`, `tree`, `file-type`, `mktemp`, `write`, `mkdir`, `mv`, `rm`. Moxy's
+    own `grit_*` (the worker's git is spinclass's, FDR 0036), `smith_*`, and
+    moxy's process-spawning or reloading tools (`restart`, `batch`, `async`
+    and kin) each refuse by name; `frontend` placement with moxy kept stays
+    R3's refusal; `twin` is refused until specified. A user profile's table
+    is compared narrow-only with its base's (`catalogWidenings`): drop tools
+    only, never add, never change the placement or widen the ceiling. Until
+    the relink the linked library reports no table and R3 stands.
 - **R4** (ruling F). A profile whose source is `dynamic`, or unknown (the
   resolver reports none), is refused until a verified grant names its digest.
   Clown's library reports `builtin` and `user` today, never `dynamic`, so today

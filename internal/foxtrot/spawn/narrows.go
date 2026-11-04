@@ -33,6 +33,39 @@ func catalogWidenings(base, child ResolvedProfile) []string {
 	out = append(out, serverWidenings(base, child)...)
 	out = append(out, exclusionWidenings(base, child)...)
 	out = append(out, envWidenings(base, child)...)
+	out = append(out, moxyWidenings(base, child)...)
+	return out
+}
+
+// moxyWidenings compares the moxy tables narrow-only (spinclass#457): a child
+// may drop tools from the base's effective set, never add one, and may not
+// change the placement or widen the ceiling (allow_tools). A table where the
+// base has none is a widening; a child without a table under a base that has
+// one is reported too, since the child then keeps moxy on R3's terms, not the
+// base's.
+func moxyWidenings(base, child ResolvedProfile) []string {
+	switch {
+	case base.Moxy == nil && child.Moxy == nil:
+		return nil
+	case base.Moxy == nil:
+		return []string{fmt.Sprintf("adds a moxy table (placement %s; base has none)", child.Moxy.Placement)}
+	case child.Moxy == nil:
+		return []string{fmt.Sprintf("drops the moxy table (base places moxy %s)", base.Moxy.Placement)}
+	}
+	var out []string
+	if child.Moxy.Placement != base.Moxy.Placement {
+		out = append(out, fmt.Sprintf("changes moxy placement %s to %s", base.Moxy.Placement, child.Moxy.Placement))
+	}
+	for _, tool := range sortedCopy(child.Moxy.AllowTools) {
+		if !slices.Contains(base.Moxy.AllowTools, tool) {
+			out = append(out, "widens the moxy ceiling by "+tool)
+		}
+	}
+	for _, tool := range sortedCopy(child.Moxy.Tools) {
+		if !slices.Contains(base.Moxy.Tools, tool) {
+			out = append(out, "adds moxy tool "+tool)
+		}
+	}
 	return out
 }
 

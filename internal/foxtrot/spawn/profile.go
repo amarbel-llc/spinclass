@@ -74,6 +74,21 @@ type ResolvedProfile struct {
 	// field diff, and never decides anything. nil when clown could not render
 	// one.
 	RedactedForm []byte
+	// Moxy is the profile's moxy table (clown profile protocol 3, clown#343):
+	// where its moxy runs under confinement and the tool ceiling. nil when the
+	// profile has none, which keeps R3 (moxy dropped whole) in force for a
+	// confined spawn; a table placing moxy in-unit is R3' (spinclass#457).
+	Moxy *MoxyTable
+}
+
+// MoxyTable mirrors profilelookup.MoxyTable: Placement as written ("in-unit",
+// "frontend" or "twin"), AllowTools the ceiling (the allow-tools list of the
+// read-only global moxyfile the unit mounts) and Tools the effective set under
+// it, in the names the agent sees (mcp__<server>__<tool>).
+type MoxyTable struct {
+	Placement  string
+	AllowTools []string
+	Tools      []string
 }
 
 // ProfileResolver looks a profile name up through clown's library. It is an

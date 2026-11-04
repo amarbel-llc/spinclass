@@ -106,6 +106,13 @@ clown's package and clown's design; this record states what spinclass relies on:
   earlier open question of who defines the required set).
 - `*SkewError` for a registry that is unstamped, stamped under another
   protocol, or holding fields this build does not know. `ProtocolVersion` is 1.
+- `Resolved.Moxy *MoxyTable` (clown#343, clown 252b976; protocol 3): the
+  profile's moxy table as a typed view (`Placement`, `AllowTools`, `Tools`, in
+  the `mcp__<server>__<tool>` names the agent sees), nil when the profile has
+  none, on the base alike. spinclass reads it for R3' (FDR 0035,
+  spinclass#457) and never parses `Canonical` for it. The read is behind the
+  `clown_moxy_table` build tag until spinclass links a clown at or past that
+  commit.
 - The canonical bytes include env values and the URL verbatim (only the token
   is withheld). They are **sensitive**: spinclass never puts them in an error or
   a log, only the digest.

@@ -104,6 +104,7 @@ func resolvedProfileOf(res *profilelookup.Resolved) (ResolvedProfile, error) {
 		Name: res.Name, Digest: digest, DigestHex: res.DigestSHA256, Provider: res.Provider, Backend: res.Backend, Model: res.Model,
 		KeptServers: keptServers(res.Selection), Excluded: res.Selection.Excluded, Source: string(res.Source),
 		EnvKnown: true, Env: maps.Clone(res.Env),
+		Moxy: moxyTableOf(res),
 	}
 	if form, err := res.RedactedForm(); err == nil {
 		rp.RedactedForm = form
