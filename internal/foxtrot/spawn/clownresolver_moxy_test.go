@@ -1,5 +1,3 @@
-//go:build clown_moxy_table
-
 package spawn
 
 import (
@@ -11,9 +9,7 @@ import (
 )
 
 // The resolver carries the profile's moxy table, and its base's, as clown
-// reports them (clown#343); a profile without one has nil. Needs a clown at or
-// past 252b976 in flake.lock (the clown_moxy_table tag; see
-// moxytable_unlinked.go).
+// reports them (clown#343); a profile without one has nil.
 func TestClownResolverMapsTheMoxyTable(t *testing.T) {
 	res := resolvedWith(profilelookup.Selection{Selective: true, Kept: append(profilelookup.RequiredServers(), moxyServer, justUsServer)})
 	res.Moxy = &profilelookup.MoxyTable{
