@@ -65,18 +65,26 @@ that resolves `clown`, `ringmaster`, `sc` and `git` (the system profile
 has all four), and possibly `<repo>/.git/spinclass/bin`. Nothing from the
 first two groups and nothing from the devShell.
 
-## Step 2 (operator, read-only): the chain above the worktree
+## Step 2 (done): where the troupe variables come from
 
-```sh
-cd "$HOME/eng/repos/spinclass" && just explore-direnv-env-delta "$HOME"
-cd "$HOME/eng/repos/spinclass" && just explore-direnv-env-delta "$HOME/eng"
-```
+`just explore-direnv-env-delta "$HOME"` and `... "$HOME/eng"`, 2026-11-04:
+each level adds only direnv's own markers, `NIX_CONFIG` and `OLDPWD`, no
+troupe variable and no PATH entry. The source is the sweatfile hierarchy's
+`[direnv.dotenv]` map: `apply.SpinclassEnv` renders it to
+`<worktree>/.spinclass/env` at `sc start`, and the generated `.envrc`'s
+`dotenv .spinclass/env` line is the only thing that loads it. The spawn
+environment spinclass builds for the worker (`workerEnvScoped`: the identity
+variables, `[session-entry].env`, the tmp dirs, `CLOWN_AGENT_SCOPE`, the
+profile digest) does not carry the dotenv map.
 
-Each prints what the `.envrc` at that level adds on top of nothing. If the
-troupe variables appear at `$HOME` or `$HOME/eng`, they are the operator's
-corridor's and the pilot entry must pass them explicitly (or the spawn must
-run from a shell that has them). If they appear in neither, they are the
-session dotenv's, and spinclass already sets them per session.
+Consequence for the pilot: a direnv-less entry that is just `clown ...`
+drops `TROUPE_*` and anything else a trusted layer puts in
+`[direnv.dotenv]`. The dotenv is the one legitimate environment input that
+is routed through direnv today, and it is a per-session file spinclass
+already writes, so the pilot entry loads that file and nothing else. The
+long-term shape is for spinclass to put the dotenv map into the spawn
+environment itself (and into the spec's `env` field, the second lever), at
+which point no entry needs a loader.
 
 ## Step 3 (operator): the pilot layer
 
@@ -113,19 +121,37 @@ is the real test, not the spawn succeeding. The parent-directory sweatfile
 (`$HOME/eng/pilot/.sweatfile.toml`, or whatever name the hierarchy uses on
 this host; `sc validate` from inside the repo shows the layers it read)
 carries the direnv-less entry. Take the current trusted `spawn-entry` (shown
-by `sc validate` or the global sweatfile), delete its leading
-`direnv exec {dir}`, keep everything else as is. In the shape the tests
-record it is:
+by `sc validate` or the global sweatfile) and replace its leading
+`direnv exec {dir}` with a loader of the session dotenv only (step 2), keeping
+everything after `clown` as is. In the shape the tests record the entry,
+that is:
 
 ```toml
 [session-entry]
-spawn-entry = ["clown", "--clown-attach=spawn", "--", "{prompt}"]
+spawn-entry = [
+  "sh", "-c",
+  "set -a; [ -f \"$1/.spinclass/env\" ] && . \"$1/.spinclass/env\"; set +a; shift; exec clown \"$@\"",
+  "sh", "{dir}", "--clown-attach=spawn", "--", "{prompt}",
+]
 ```
+
+The loader sources `<worktree>/.spinclass/env` (the `[direnv.dotenv]` map,
+KEY=value lines spinclass wrote at worktree creation) into the environment
+and execs clown; no `source_up`, no `use flake`, no `PATH_add`. The control
+entry, worth one spawn first if cheap, is the bare
+`["clown", "--clown-attach=spawn", "--", "{prompt}"]`: expected to boot and
+hello but to lose chat (no `TROUPE_IPC`), which is the proof that the dotenv
+is the needed part and the devShell is not.
 
 `sc validate` must pass and must list the pilot layer. `[confinement]
 enabled` must already be on in a trusted layer (it is wherever confined
 spawns run today). If the entry on this host carries more (a `--profile`,
-provider flags), keep them; only `direnv exec {dir}` goes.
+provider flags), keep them after `--clown-attach=spawn`; only
+`direnv exec {dir}` goes. spinclass inserts `--profile`, `--permission-mode`
+and the model flag by scanning the argv for `clown`'s `--` separator, which
+the loader form keeps, but this is the first entry whose argv[0] is not
+`direnv` or `clown`: if the spawn refuses the entry, that refusal is a
+finding (the splice assumes a shape), not a reason to fall back.
 
 ## Step 4 (operator): spawn, then measure airside
 
@@ -138,11 +164,12 @@ sc spawn --confined --profile canary-spinclass \
   --brief 'You are a confined pilot worker for a spinclass environment experiment. Do exactly this: (1) send one chat message to the session key below listing the tools you have by name; (2) read README.md and append the line "pilot: airside" to it with the Edit tool; (3) if a grit_stage and grit_commit tool exist, stage README.md and commit with the message "pilot: airside", otherwise say so; (4) send a second chat message with whether you committed and the HEAD commit if you know it, and the output of running the recipe list tool if you have one (names only). Do not merge, do not run recipes, do not create other files. Operator session key: <OPERATOR-SESSION-KEY>'
 ```
 
-If the spawn-entry's shell is itself a direnv shell (the `$HOME/.envrc`
-chain is loaded in the terminal), run the spawn as
-`direnv exec / sc spawn ...` instead; step 2 says whether that drops the
-troupe variables the worker needs, in which case pass them explicitly
-(`TROUPE_IPC=... sc spawn ...`) and note it as a finding.
+Run the spawn as `direnv exec / sc spawn ...` so the terminal's own
+`.envrc` chain is unloaded too: step 2 showed that chain adds nothing a
+worker needs, and the loader entry supplies the session dotenv itself, so
+the worker's environment is then exactly the terminal baseline plus what
+spinclass and the loader add. That is the environment the second lever
+would state in the spec's `env` field.
 
 While the worker is live:
 
