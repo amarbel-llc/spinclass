@@ -601,8 +601,10 @@ explore-manpage-name-formats glob=(home_directory() / '.nix-profile/share/man/ma
 explore-validate-from dir=(home_directory() / 'eng'):
     #!/usr/bin/env bash
     set -uo pipefail
+    # the installed sc: the home-manager profile on darwin, the system profile on NixOS (same resolution as debug-sc)
     bin="$HOME/.nix-profile/bin/sc"
-    echo "=== validating from {{ dir }}"
+    [ -x "$bin" ] || bin=$(command -v sc)
+    echo "=== validating from {{ dir }} with $bin"
     cd "{{ dir }}" && "$bin" validate
     exit 0
 
@@ -619,6 +621,7 @@ explore-prompt-fragment-from dir=(home_directory() / 'eng'):
     #!/usr/bin/env bash
     set -uo pipefail
     bin="$HOME/.nix-profile/bin/sc"
+    [ -x "$bin" ] || bin=$(command -v sc)   # NixOS installs sc in the system profile, not ~/.nix-profile
     req='{"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":"system-prompt-append"}}'
     cd "{{ dir }}" || exit 1
     frag=$(printf '%s\n' "$req" \

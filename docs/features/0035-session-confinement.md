@@ -1272,6 +1272,70 @@ UUID-shaped principal, e.g. `clown -- --resume {principal}`. With profile rights
 enforced, `sc resume` refuses a session that has a recorded principal when the
 entry carries no `{principal}`; otherwise it warns.
 
+## The environment is part of the required view (decided 2026-11-04, operator)
+
+The unit's view above is files, sockets, egress and pids. The environment was
+not in it: `sc spawn` ran the `spawn-entry` landside under `direnv exec`, so
+the launcher's environment, the repo's devShell and the whole `.envrc` chain
+included, was what the unit inherited, and since the store is readable
+inside, every PATH entry the devShell contributed resolved inside too.
+Measured on a spinclass worktree (`just explore-direnv-env-delta`): direnv
+added 76 variables (the stdenv builder set, the nix-direnv markers, the
+sweatfile dotenv) and 36 store `bin` directories (a C toolchain, binutils,
+the Go tools, the linters). A confined worker was, in effect, dressed in the
+operator's devShell.
+
+The operator's framing, which replaces an earlier airport-checkpoint
+picture: the unit is a **cleanroom in a workshop**. The operator's direnv
+shell is the shop floor; nobody enters the cleanroom in shop-floor clothes;
+the room issues its own kit at the door; the tools inside belong to the room;
+and a **porter** (an FDR 0032 right, working name `attach`, not yet built)
+gowns and de-gowns through the same door. The operator at a terminal is a
+porter by being outside the unit; a supervising session would hold the right
+on a handle.
+
+Decided, and how far each piece is:
+
+- **A direnv-less confined spawn works with no code change** (pilot,
+  2026-11-04, `docs/plans/2026-11-04-confined-direnv-less-pilot.md`): a
+  trusted-layer entry that sourced only the session dotenv and exec'd clown
+  produced a worker that helloed, chatted, and committed through grit; its
+  unit environment held none of the stdenv or direnv names and no devShell
+  PATH. The one legitimate environment input that rode on direnv was the
+  sweatfile's `[direnv.dotenv]` map, rendered to `.spinclass/env` and loaded
+  only by the generated `.envrc`.
+- **spinclass's half** (spinclass#462, landed 468df88): the rendered dotenv
+  pairs go into every spawned worker's launch environment and into a confined
+  unit's spec `env` with the identity and the tmp dirs (`confinedSpecEnv`); a
+  confined spawn drops the `spawn-entry`'s exact leading `direnv exec {dir}`
+  (`stripDirenvExec`, argv elements, no shell parsing); `sc validate` warns
+  about a direnv entry of any other shape. Not yet: `sc resume` of a confined
+  session replays the pinned entry unchanged.
+- **clown's half** (clown#341, proposed): the unit starts from a clean
+  environment plus the spec's `env` plus clown's own set, PATH stated by
+  clown, a log-only pass before enforcing. Until it lands, the partition
+  holds only for spawns that go through `sc spawn`; with it, the gate checks
+  the clothes as well as the bags whatever corridor the launch used.
+
+Two findings on the way, recorded for the arc:
+
+- **The guarded gate is this record's A** (spinclass#449): the
+  2026-11-03 canary on the deployed build (`docs/plans/2026-11-03-449-canary-brief.md`)
+  recorded the gate on a positive check and a landing, refused four lock
+  probes before any command with exactly the predicted reasons and nothing
+  beyond node names and reference kinds, and wrote nothing to the store.
+- **The per-commit hook evaluates the branch** (spinclass#459): the #267
+  dispatcher runs `nix develop --command` in the worktree whenever the
+  committed `flake.lock` differs from the hash baked at session start, which
+  fetches an unlocked input into the world-readable store (proven by a
+  marker rerun, the hook alone wrote it) and, I believe, runs the branch's
+  devShell as the committing user, inside the unit for a worker's own commit
+  and outside it for an operator's commit in a worker's worktree. Decided
+  (not built): the hook is frozen to a store path resolved from the landed
+  base at `sc start`/`sc spawn`, re-provisioned on resume or restart, the
+  lock-hash check kept as a warning, fail-open kept with the gate as the
+  backstop. The store-copy half is spinclass#460, deferred.
+
 ## Hard requirements on the unit
 
 - **A private pid namespace** (F10). Mandatory, not a tuning option: without it
