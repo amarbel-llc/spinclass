@@ -2311,22 +2311,21 @@ debug-pilot-env-spawn key profile="canary-spinclass":
       --description "direnv-less confined pilot" --brief "$brief"
     echo "== sessions"; sc list 2>&1 | grep -i pilot || echo "(no pilot session listed)"
 
-# end the direnv-less confined pilot: refuse while a worker session is listed (sc close it first), drop the implicit main-checkout record a terminal `sc spawn` leaves (FDR 0014: `sc close` with no target from inside the checkout), then remove ~/eng/pilot (repo, bare origin and the pilot layer)
+# end the direnv-less confined pilot: refuse while a worker session is listed (sc close it first), then remove ~/eng/pilot (repo, bare origin and the pilot layer). The "(main)" row a terminal `sc spawn` leaves is an implicit main-checkout record (FDR 0014) with a dead PID: `sc close` only matches a LIVE implicit session, and the record's local state file goes with the checkout, after which its index entry dangles and `sc list` hides it (`sc clean` reaps dangling entries)
 [group("debug")]
 debug-pilot-env-teardown:
     #!/usr/bin/env bash
     set -uo pipefail
-    repo="$HOME/eng/pilot/sc-pilot-env"
-    # worker sessions have a worktree branch; the implicit record shows as "(main)" and is handled below
+    # worker sessions have a worktree branch; the implicit record shows as "(main)" and needs no close
     if sc list 2>/dev/null | grep -i 'sc-pilot-env/' | grep -qv '(main)'; then
       echo "a pilot worker session is still listed; sc close it first:"; sc list | grep -i 'sc-pilot-env/' | grep -v '(main)'; exit 1
     fi
-    if [ -d "$repo" ] && sc list 2>/dev/null | grep -i 'sc-pilot-env/' | grep -q '(main)'; then
-      echo "== dropping the implicit main-checkout record (state only; the checkout is removed below)"
-      (cd "$repo" && sc close) || true
-    fi
     rm -rf "$HOME/eng/pilot" && echo "removed $HOME/eng/pilot"
-    sc list 2>/dev/null | grep -i 'sc-pilot-env/' && echo "a sc-pilot-env record remains; sc close it by key" || echo "no sc-pilot-env session listed"
+    if sc list 2>/dev/null | grep -qi 'sc-pilot-env/'; then
+      echo "a sc-pilot-env row is still listed (an index entry whose file is gone); run: sc clean"
+    else
+      echo "no sc-pilot-env session listed"
+    fi
 
 # [debug] Pipe a cold `prompts/get` (no `initialize`) into `spinclass serve` and
 # print the dynamic system-prompt fragment it returns, extracted from the
