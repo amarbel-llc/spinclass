@@ -29,6 +29,25 @@ layer. The second lever, the unit starting from a clean environment plus the
 spec's `env` field (a clown launch-side change), comes after, with the list
 this pilot produces.
 
+## Decision (operator, 2026-11-04): the unit gowns at the door
+
+Yes to the second lever, and the metaphor is now a cleanroom in a workshop
+rather than an airport: the unit is the cleanroom, the operator's direnv
+shell is the shop floor, and nobody enters in shop-floor clothes. Clown
+starts the unit from a stated environment, never the launcher's; spinclass
+writes its part of the gowning kit into the spec's `env` (the identity
+variables, the tmp dirs, the `[direnv.dotenv]` map); clown adds its own
+part (its variables, the worker's troupe credentials, the proxies, the
+agent socket, `HOME`) and states PATH itself; the host baseline (locale,
+XDG, user) comes from the user manager as for any unit; and for a few
+spawns clown only logs what it would have stripped before enforcing. A
+porter (FDR 0032 right, working name `attach`) gowns and de-gowns through
+the same door; the operator at a terminal is one by being outside. The
+spinclass half (the spec `env`, and a confined spawn stripping a leading
+`direnv exec {dir}` while carrying the dotenv itself) is spinclass's to
+build; the clown half is a proposal in clown's lane with the measured list
+below attached.
+
 ## Step 1 (done): what direnv carries across today
 
 `just explore-direnv-env-delta` on light-cedar's worktree, 2026-11-04. The
