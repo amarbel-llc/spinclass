@@ -1016,7 +1016,7 @@ func buildCheckAsyncDescription(hookPreview string) string {
 type gatedSession struct {
 	implicit bool   // true → main-checkout (implicit) session; false → worktree session
 	repoPath string // worktree: git.CommonDir(cwd); implicit: the checkout (== cwd)
-	branch   string // worktree: git.BranchCurrent(cwd); implicit: implicit.Branch
+	branch   string // worktree: merge.SessionBranch(cwd), the session's own; implicit: implicit.Branch
 }
 
 // resolveSession resolves the session identity at cwd WITHOUT touching the
@@ -1043,9 +1043,14 @@ func resolveSession(cwd string) (gs gatedSession, failMsg string, ok bool, gitEr
 		if repoErr != nil {
 			return gatedSession{}, "", true, fmt.Errorf("could not determine repo path: %v", repoErr)
 		}
-		branch, branchErr := git.BranchCurrent(cwd)
+		branch, branchErr := merge.SessionBranch(cwd)
+		if errors.Is(branchErr, merge.ErrForeignBranchCheckedOut) {
+			// Another branch checked out in the session worktree: a reject, not
+			// a git failure, so it never reaches the gate (spinclass#463).
+			return gatedSession{}, branchErr.Error(), false, nil
+		}
 		if branchErr != nil {
-			return gatedSession{}, "", true, fmt.Errorf("could not determine current branch: %v", branchErr)
+			return gatedSession{}, "", true, branchErr
 		}
 		return gatedSession{repoPath: repoPath, branch: branch}, "", true, nil
 	}
@@ -1391,9 +1396,11 @@ func handleNothingButTheTruth(_ context.Context, args json.RawMessage, _ command
 		if err != nil {
 			return command.TextErrorResult(fmt.Sprintf("could not determine repo path: %v", err)), nil
 		}
-		branch, err = git.BranchCurrent(cwd)
+		// The session's own branch; an attestation for another branch checked
+		// out here is refused (spinclass#463).
+		branch, err = merge.SessionBranch(cwd)
 		if err != nil {
-			return command.TextErrorResult(fmt.Sprintf("could not determine current branch: %v", err)), nil
+			return command.TextErrorResult(err.Error()), nil
 		}
 	} else {
 		implicit, _, ferr := session.FindImplicitAtCwd(cwd)

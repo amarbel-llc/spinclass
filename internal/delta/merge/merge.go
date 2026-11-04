@@ -75,9 +75,11 @@ func RunContext(ctx context.Context, execr executor.Executor, format string, tar
 			return fmt.Errorf("not in a worktree directory: %s", cwd)
 		}
 		wtPath = cwd
-		branch, err = git.BranchCurrent(cwd)
+		// The session's own branch; another branch checked out here is refused
+		// before the hook (spinclass#463).
+		branch, err = SessionBranch(cwd)
 		if err != nil {
-			return fmt.Errorf("could not determine current branch: %w", err)
+			return err
 		}
 		inSession = isInsideSession(cwd, wtPath)
 	case target != "":
