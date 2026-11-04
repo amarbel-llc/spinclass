@@ -36,6 +36,39 @@ promotion-criteria: |
 > moot here (the devShell's `conformist` is already the wrapper, so even the old
 > command string runs hermetically); the rename is cosmetic + post-merge.
 
+## Amendment 2026-11-04: the hook is frozen at session start (spinclass#459)
+
+Decided by the operator on 2026-11-04, planned in
+`docs/plans/2026-11-04-459-frozen-pre-commit-hook.md`, not yet built (the
+implementation waits for a second go after the plan has been read).
+
+- **What changes.** The per-commit dispatcher no longer resolves the formatter
+  by name from the committing shell's PATH, and no longer re-evaluates the
+  worktree flake with `nix develop` when `flake.lock` drifts (#267). At
+  `sc start`, `sc spawn` and `sc resurrect` spinclass resolves the formatter to
+  an absolute store path by evaluating the devShell of the **landed default
+  branch** (the base the session is cut from, FDR 0024) and bakes that path
+  into the dispatcher. A lock drift prints a warning only; the frozen
+  formatter still runs; fail-open stays.
+- **Why.** The #449 canary showed the commit-time `nix develop` fetching an
+  unlocked `path:` input of the branch's flake into the world-readable store,
+  the copy the guarded gate refuses (spinclass#459). Evaluating the landed
+  base instead of the branch means a branch cannot change what formats its own
+  commits, and the hook never fetches on the branch's behalf. The hook's
+  provenance follows the session (trusted layers plus the landed base), as the
+  rest of FDR 0035's required view does.
+- **Re-provisioning.** The frozen path is refreshed on `sc resume` and on a
+  restart (FDR 0037), which re-run the install from the then-landed base. A
+  stale or broken hook is fixed by the session's holder, never by the session.
+  Sessions created before the change keep their old dispatcher until resumed;
+  every resume rewrites it, so no sweep is needed.
+- **Effect on this record.** "Relationship to `sc rebuild` / setup staleness"
+  below is superseded once built: the frozen path and its base sha are
+  recorded on the session and enter the setup fingerprint, so a conformist
+  bump becomes visible to `sc rebuild --check`. The name-based model stays the
+  sweatfile's contract (`pre-commit = "conformist-pre-commit"`); only the
+  resolution moves from commit time to provisioning time.
+
 ## Problem Statement
 
 spinclass drives conformist in a hand-rolled, pre-helper shape: `flake.nix`
