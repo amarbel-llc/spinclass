@@ -14,7 +14,6 @@ import (
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
 	"code.linenisgreat.com/spinclass/internal/0/clown"
-	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
@@ -302,17 +301,14 @@ func runUpdateDescription(description, id string) error {
 				})
 			}
 		}
-		state, err = session.FindByWorktreePath(cwd)
-		// A worktree with no tracked state (harness run directly, never via
-		// sc start/resume) auto-heals into a minimal session rather than
-		// erroring — same path the MCP tool takes (#161); shared helper so
-		// CLI and tool can't drift (#139).
-		if err != nil && worktree.IsWorktree(cwd) {
-			repoPath, rerr := git.CommonDir(cwd)
-			branch, berr := git.BranchCurrent(cwd)
-			if rerr == nil && berr == nil {
-				state, err = resolveOrHealWorktreeState(repoPath, branch)
-			}
+		if worktree.IsWorktree(cwd) {
+			// The record keyed on the worktree directory, healed when the
+			// worktree has none (#161); the same resolver the MCP tool uses so
+			// the two cannot drift (#139), and never the checked-out branch
+			// (spinclass#461).
+			state, _, err = resolveWorktreeSessionAtCwd(cwd)
+		} else {
+			state, err = session.FindByWorktreePath(cwd)
 		}
 	}
 	if err != nil {

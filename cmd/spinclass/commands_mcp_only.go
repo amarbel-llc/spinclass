@@ -1220,21 +1220,7 @@ func handleUpdateDescription(_ context.Context, args json.RawMessage, _ command.
 		return command.TextResult(fmt.Sprintf("description updated to: %s", params.Description)), nil
 	}
 
-	repoPath, err := git.CommonDir(cwd)
-	if err != nil {
-		return command.TextErrorResult(fmt.Sprintf("could not determine repo path: %v", err)), nil
-	}
-
-	branch, err := git.BranchCurrent(cwd)
-	if err != nil {
-		return command.TextErrorResult(fmt.Sprintf("could not determine current branch: %v", err)), nil
-	}
-
-	// Auto-heal a worktree that has no spinclass state yet (an agent that ran
-	// the harness directly instead of via `sc start`/`resume`): synthesize a
-	// minimal record so the description sticks rather than failing on the
-	// missing index (#161).
-	st, err := resolveOrHealWorktreeState(repoPath, branch)
+	st, _, err := resolveWorktreeSessionAtCwd(cwd)
 	if err != nil {
 		return command.TextErrorResult(fmt.Sprintf("could not read session state: %v", err)), nil
 	}
@@ -1259,6 +1245,28 @@ func resolveOrHealWorktreeState(repoPath, branch string) (*session.State, error)
 		key = filepath.Base(repoPath) + "/" + branch
 	}
 	return session.EnsureWorktreeState(repoPath, branch, key, os.Getpid())
+}
+
+// resolveWorktreeSessionAtCwd is the worktree session the process at cwd
+// belongs to: the live record whose worktree contains cwd, else (an untracked
+// worktree, #161) the healed record keyed on the worktree DIRECTORY. A session
+// is keyed on its worktree, never on the branch checked out there: a
+// session-owned `<session>--*` branch may be checked out (a grit_branch rebase
+// does that), and keying on it pointed every write at a worktree that does not
+// exist (spinclass#461). cwd must be a worktree root (worktree.IsWorktree).
+// healed is true when the returned state was synthesized and is not on disk.
+func resolveWorktreeSessionAtCwd(cwd string) (st *session.State, healed bool, err error) {
+	if st, err := session.FindByWorktreePath(cwd); err == nil && !st.IsTombstone() {
+		return st, false, nil
+	}
+	repoPath, err := git.CommonDir(cwd)
+	if err != nil {
+		return nil, false, fmt.Errorf("could not determine repo path: %w", err)
+	}
+	// The conventional layout is <repo>/.worktrees/<branch>, so the directory
+	// name is the session's branch whatever git has checked out right now.
+	st, err = resolveOrHealWorktreeState(repoPath, filepath.Base(cwd))
+	return st, err == nil, err
 }
 
 // lazyImplicit caches the implicit session key this serve process
@@ -1326,16 +1334,13 @@ func currentSessionKey() (string, error) {
 				"on a branch; check [hooks].disable-implicit-sessions)",
 		)
 	}
-	repoPath, err := git.CommonDir(cwd)
+	// The worktree's own session, keyed on its directory and never on the
+	// checked-out branch (spinclass#461).
+	st, healed, err := resolveWorktreeSessionAtCwd(cwd)
 	if err != nil {
-		return "", fmt.Errorf("could not determine repo path: %w", err)
+		return "", fmt.Errorf("could not read session state: %w", err)
 	}
-	branch, err := git.BranchCurrent(cwd)
-	if err != nil {
-		return "", fmt.Errorf("could not determine current branch: %w", err)
-	}
-	st, err := session.Read(repoPath, branch)
-	if errors.Is(err, os.ErrNotExist) {
+	if healed {
 		// Untracked worktree (the harness ran here directly, never via
 		// sc start/resume, so shop.Attach wrote no state): lazily register
 		// it so chat/spawn resolve a stable, listable, addressable identity
@@ -1346,13 +1351,7 @@ func currentSessionKey() (string, error) {
 		// Write failure is non-fatal — the key still resolves, so chat-send
 		// from here degrades to "send works, not addressable" rather than a
 		// hard error.
-		if synth, herr := resolveOrHealWorktreeState(repoPath, branch); herr == nil {
-			_ = session.Write(*synth)
-			return synth.SessionKey, nil
-		}
-	}
-	if err != nil {
-		return "", fmt.Errorf("could not read session state: %w", err)
+		_ = session.Write(*st)
 	}
 	return st.SessionKey, nil
 }
