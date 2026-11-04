@@ -393,7 +393,10 @@
         # Pins (all fall back to PATH when null): `madder` activates the
         # per-worktree blob-store flow; `direnv` the devshell exec; `dodder` the
         # per-worktree dodder repo (FDR 0008); `papi`/`gh` the dynamic
-        # system-prompt repository line (internal/alfa/repoinfo).
+        # system-prompt repository line (internal/alfa/repoinfo);
+        # `gateNix`/`gateGit`/`gateSh` the guarded gate's tools
+        # (hookrun.ConfinedGateEnv, spinclass#454), so a guarded merge never
+        # takes nix, git or sh from the frontend's PATH.
         mkSpinclass =
           {
             strategy ? "ci",
@@ -402,6 +405,9 @@
             dodder ? null,
             papi ? null,
             gh ? null,
+            gateNix ? null,
+            gateGit ? null,
+            gateSh ? null,
           }:
           pkgs.buildGoAuto {
             pname = "spinclass";
@@ -437,7 +443,10 @@
             ++ (lib.optional (direnv != null) "-X main.direnvBin=${direnv}/bin/direnv")
             ++ (lib.optional (dodder != null) "-X main.dodderBin=${dodder}/bin/dodder")
             ++ (lib.optional (papi != null) "-X main.papiBin=${papi}/bin/papi")
-            ++ (lib.optional (gh != null) "-X main.ghBin=${gh}/bin/gh");
+            ++ (lib.optional (gh != null) "-X main.ghBin=${gh}/bin/gh")
+            ++ (lib.optional (gateNix != null) "-X main.gateNixBin=${gateNix}/bin/nix")
+            ++ (lib.optional (gateGit != null) "-X main.gateGitBin=${gateGit}/bin/git")
+            ++ (lib.optional (gateSh != null) "-X main.gateShBin=${gateSh}/bin/sh");
 
             # godyn-only knobs (buildGodynModule).
             nativeArgs.commit = spinclassCommit;
@@ -569,6 +578,18 @@
           inherit (pkgs-master) gh;
         };
 
+        # The guarded gate's tool pins (spinclass#454): nix, git and sh from
+        # this flake's nixpkgs, burned into the shipped binary so a guarded
+        # merge's gate never resolves them from the frontend's PATH (a devshell
+        # the worker's flake.nix provided would otherwise be "the frontend's
+        # nix"). bash ships bin/sh. An unpinned build (`mkSpinclass { }`, the
+        # test lanes) falls back to PATH, tool by tool.
+        gatePins = {
+          gateNix = pkgs.nix;
+          gateGit = pkgs.git;
+          gateSh = pkgs.bash;
+        };
+
         spinclass-race = pkgs.buildGoRace { base = mkSpinclass { }; };
 
         # Madder-pinned spinclass: the base for the `bats-madder` lane.
@@ -584,7 +605,7 @@
         # flip): the escape hatch, the release/CI backend, and the
         # non-x86_64-linux `default`. Full package + the `go test ./...`
         # checkPhase; off x86_64-linux it is `default` and backs `checks.spinclass`.
-        spinclass-build_go_application = mkSpinclass forgePins;
+        spinclass-build_go_application = mkSpinclass (forgePins // gatePins);
 
         # Harness B's fast lane: the buildGoApplication build with a checkPhase
         # that runs only the four serve integration tests. They `go build` a
@@ -608,7 +629,7 @@
         # docs/plans/2026-09-10-godyn-per-package-build-poc.md.
         spinclass-default =
           if godynSystem then
-            mkSpinclass ({ strategy = "dev"; } // forgePins)
+            mkSpinclass ({ strategy = "dev"; } // forgePins // gatePins)
           else
             spinclass-build_go_application;
 

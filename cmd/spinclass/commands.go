@@ -16,14 +16,19 @@ import (
 // /nix/store paths burned in by `lib.mkSpinclass` at link time. Empty
 // values mean the integration is dormant: madder store init and dodder
 // repo init are skipped, and direnv/papi/gh fall back to PATH lookup.
+// gateNixBin, gateGitBin and gateShBin pin the guarded gate's tools
+// (spinclass#454); empty means the gate resolves that tool from PATH.
 var (
-	version   = "dev"
-	commit    = "unknown"
-	madderBin = ""
-	direnvBin = ""
-	dodderBin = ""
-	papiBin   = ""
-	ghBin     = ""
+	version    = "dev"
+	commit     = "unknown"
+	madderBin  = ""
+	direnvBin  = ""
+	dodderBin  = ""
+	papiBin    = ""
+	ghBin      = ""
+	gateNixBin = ""
+	gateGitBin = ""
+	gateShBin  = ""
 )
 
 // buildApp constructs the spinclass command.App with global flags and all

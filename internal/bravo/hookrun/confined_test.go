@@ -136,7 +136,8 @@ func TestConfinedPreMergeRefusesWhenAToolIsMissing(t *testing.T) {
 	}
 }
 
-// The frontend's PATH is not pinned yet (TODO(#454)): a tool that resolves
+// An unpinned build resolves the gate's tools from the frontend's PATH (the
+// pinned build is confined_pins_test.go, spinclass#454): a tool that resolves
 // under a directory the worker writes, or a frontend running inside such a
 // directory's direnv, is refused rather than trusted.
 func TestConfinedPreMergeRefusesToolsFromTheWorkerTree(t *testing.T) {

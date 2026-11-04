@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"code.linenisgreat.com/spinclass/internal/0/clown"
+	"code.linenisgreat.com/spinclass/internal/0/embeds"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 )
 
@@ -38,12 +39,14 @@ const ConfinedGateNixConfig = "allow-unsafe-native-code-during-evaluation = fals
 	"accept-flake-config = false\n" +
 	"sandbox = true\n"
 
-// confinedGateTools are the programs a guarded gate's PATH is built from: the
-// frontend's own, resolved from its PATH when the gate starts. They are not
-// pinned at link time yet (TODO(#454): pin nix, git and sh like direnv and
-// madder), so ConfinedGateEnv refuses a tool that resolves under a directory
-// the worker writes, and a frontend that itself runs inside such a
-// directory's direnv.
+// confinedGateTools are the programs a guarded gate's PATH is built from. A
+// build made by lib.mkSpinclass with the gate pins pins each at link time
+// (embeds.GateTool, spinclass#454, the way direnv and madder are pinned), so
+// the frontend's PATH is never consulted for it; an unpinned tool (a plain
+// `go build`, or a consumer that pins only some) is resolved from the
+// frontend's PATH when the gate starts. Either way ConfinedGateEnv refuses a
+// tool that resolves under a directory the worker writes, and a frontend that
+// itself runs inside such a directory's direnv.
 var confinedGateTools = []string{"nix", "git", "sh"}
 
 // SetConfinedGateTools replaces the tool list for a test (a sandbox without
@@ -150,13 +153,17 @@ func ResolveGateTool(tool string, forbidden []string) (string, error) {
 	return resolveGateTool(tool, forbidden)
 }
 
-// resolveGateTool finds tool on the frontend's PATH, resolves its symlinks,
-// and refuses one under a directory the worker writes. The scope prefix's
-// program goes through it too (runHookInDirEnv).
+// resolveGateTool takes the tool's link-time pin when the build has one
+// (spinclass#454), else finds it on the frontend's PATH; resolves its
+// symlinks, and refuses one under a directory the worker writes. The scope
+// prefix's program goes through it too (runHookInDirEnv).
 func resolveGateTool(tool string, forbidden []string) (string, error) {
-	p, err := exec.LookPath(tool)
-	if err != nil {
-		return "", fmt.Errorf("guarded gate: %s is not on the frontend's PATH, so the gate cannot run: %w", tool, err)
+	p := embeds.GateTool(tool)
+	if p == "" {
+		var err error
+		if p, err = exec.LookPath(tool); err != nil {
+			return "", fmt.Errorf("guarded gate: %s is not on the frontend's PATH, so the gate cannot run: %w", tool, err)
+		}
 	}
 	if resolved, rErr := filepath.EvalSymlinks(p); rErr == nil {
 		p = resolved

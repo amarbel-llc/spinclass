@@ -23,6 +23,7 @@ import (
 func main() {
 	embeds.Set(madderBin, direnvBin, dodderBin)
 	embeds.SetForges(papiBin, ghBin)
+	embeds.SetGateTools(gateNixBin, gateGitBin, gateShBin)
 	embeds.SetVersion(version, commit)
 	// A confined session records no PID; its liveness is its unit's (FDR 0035).
 	session.ConfinedUnitRunning = confinement.UnitRunningForWorktree

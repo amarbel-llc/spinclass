@@ -151,7 +151,8 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
   `hookrun/confined.go`): a merge or check of a session launched confined
   runs no repair and, instead of the repo's pre-merge, the trusted
   `[hooks].confined-pre-merge` in the build worktree with no devshell and a
-  scrubbed environment. Pins for its tools: #454.
+  scrubbed environment; its tools (nix, git, sh) are link-time pins in the
+  shipped builds (#454, `spinclass-build-pins(7)`).
 - **Pre-merge REPAIR** (FDR 0018; a dirty tracked tree is refused, #345) and
   **per-commit hook** (FDR 0019, #183/#267; canonical value
   `conformist-pre-commit`).

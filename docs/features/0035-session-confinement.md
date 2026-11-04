@@ -419,9 +419,12 @@ The findings:
   the lock names. That is policy over what nix would fetch,
   not a boundary: the boundary is evaluation in a mount namespace that sees
   only the build worktree and `/nix` (the gate in a unit, spinclass#448 item 4,
-  path A, needs clown; not started). The gate's tools come from the frontend's
-  PATH until spinclass#454 pins them (every PATH entry under a worker-written
-  directory refuses the gate meanwhile), and post-merge targets still run the
+  path A, needs clown; not started). The gate's tools (nix, git, sh) are
+  pinned at link time in the shipped builds (spinclass#454, `lib.mkSpinclass`
+  gate pins, `spinclass-build-pins(7)`), so the frontend's PATH is never
+  consulted for them; an unpinned build resolves them from PATH, and either
+  way a tool or PATH entry under a worker-written directory refuses the gate.
+  Post-merge targets still run the
   landed tree in the frontend unguarded (their own digest rule applies), so a
   confined landing uses `targets=[]`.
 

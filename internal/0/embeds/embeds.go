@@ -22,7 +22,37 @@ var (
 	ghBin     string
 	version   string
 	commit    string
+
+	// The guarded gate's tools (spinclass#454): with these pinned the gate's
+	// PATH is built from store paths and the frontend's PATH is never consulted
+	// for them; empty means "resolve from PATH", the plain `go build`.
+	gateNixBin string
+	gateGitBin string
+	gateShBin  string
 )
+
+// SetGateTools records the build-time-pinned nix, git and sh the guarded gate
+// runs with (hookrun.ConfinedGateEnv). Called once from cmd/spinclass; tests
+// may call it to override per-test (restoring with empty values).
+func SetGateTools(nix, git, sh string) {
+	gateNixBin = nix
+	gateGitBin = git
+	gateShBin = sh
+}
+
+// GateTool returns the pinned absolute path of a guarded-gate tool by name
+// ("nix", "git" or "sh"), or "" when that tool is unpinned or unknown.
+func GateTool(name string) string {
+	switch name {
+	case "nix":
+		return gateNixBin
+	case "git":
+		return gateGitBin
+	case "sh":
+		return gateShBin
+	}
+	return ""
+}
 
 // Set records the build-time-pinned binary paths. Called once from
 // cmd/spinclass; tests may call it to override per-test (with

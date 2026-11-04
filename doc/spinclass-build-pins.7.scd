@@ -2,7 +2,7 @@ spinclass-build-pins(7) "spinclass" "Spinclass Reference"
 
 # NAME
 
-spinclass-build-pins - build-time-pinned binaries (madder, direnv, dodder)
+spinclass-build-pins - build-time-pinned binaries (madder, direnv, dodder, the guarded gate's tools)
 
 # DESCRIPTION
 
@@ -120,6 +120,24 @@ precedence.
 When the *dodder* input is null (the default *packages.default*), none of the
 above happens. The feature is fully dormant; no _.dodder/_ directory is created
 and no dodder-related allow rule is added.
+
+## gateNix, gateGit, gateSh
+
+The guarded gate (a merge or check of a session launched confined, FDR 0035,
+spinclass#449) runs the trusted *[hooks].confined-pre-merge* with a PATH built
+from three tools only: *nix*, *git* and *sh*. When the *gateNix*, *gateGit*
+and *gateSh* inputs are supplied (the shipped builds pass this flake's *nix*,
+*git* and *bash*, which ships _bin/sh_), each is burned in as an absolute
+store path and the gate never consults the frontend's *PATH* for it, so a
+frontend whose PATH is a session worktree's devshell cannot hand the gate a
+*nix* the worker's _flake.nix_ provided (spinclass#454). An unpinned tool (a
+plain *go build*, or a consumer that pins only some) is resolved from the
+frontend's *PATH* when the gate starts, tool by tool. Pinned or not, a tool
+that resolves under a directory the worker writes (the session worktree, the
+repo's _.worktrees/_) refuses the gate before anything runs, as does a
+frontend running inside such a directory's direnv. The scope prefix's
+*systemd-run* is not pinned: it comes from the scope tier, and goes through
+the same refusal.
 
 # SEE ALSO
 
