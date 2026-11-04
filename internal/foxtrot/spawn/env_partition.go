@@ -1,21 +1,24 @@
 package spawn
 
 import (
+	"slices"
 	"strings"
 
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
 )
 
-// stripDirenvExec drops the exact `direnv exec <wtPath>` prefix from a rendered
-// spawn-entry argv (spinclass#462): a confined worker gowns at the unit door
-// with the environment spinclass and clown state, never the devShell or the
-// .envrc chain direnv would load landside. Only that one shape is recognised,
-// as elements, never by shell parsing; anything else is returned unchanged
-// (sc validate warns about a direnv entry of another shape). The second
-// result says whether a prefix was dropped.
-func stripDirenvExec(argv []string, wtPath string) ([]string, bool) {
-	if len(argv) > 3 && argv[0] == "direnv" && argv[1] == "exec" && argv[2] == wtPath {
+// StripDirenvExec drops the exact `direnv exec <dir>` prefix, dir being one of
+// dirs, from a session entry argv (spinclass#462): a confined worker gowns at
+// the unit door with the environment spinclass and clown state, never the
+// devShell or the .envrc chain direnv would load landside. A spawn passes the
+// rendered worktree path; a resume, whose pinned entry is not templated,
+// passes "." and the worktree path. Only that one shape is recognised, as
+// elements, never by shell parsing; anything else is returned unchanged (sc
+// validate warns about a direnv entry of another shape). The second result
+// says whether a prefix was dropped.
+func StripDirenvExec(argv []string, dirs ...string) ([]string, bool) {
+	if len(argv) > 3 && argv[0] == "direnv" && argv[1] == "exec" && slices.Contains(dirs, argv[2]) {
 		return argv[3:], true
 	}
 	return argv, false

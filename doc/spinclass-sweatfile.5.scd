@@ -1409,7 +1409,15 @@ readable by others.
 	spec is missing, when *resume* is unset (it would open an unconfined
 	shell), or when the entry carries *-c*, *--continue*, *--fork-session* or
 	*--from-pr*. *sc exec* refuses such a worktree too (spinclass#400).
-	*Merge:* scalar override.
+	Such a resume also drops the entry's exact leading *direnv exec .* (the
+	untemplated twin of *spawn-entry*'s *direnv exec {dir}*; the worktree's
+	absolute path is accepted in place of *.*), exactly those three
+	elements, and puts the rendered *[direnv.dotenv]* pairs in the launch
+	environment under the pinned *env*, so the unit resumes with no devShell
+	and no _.envrc_ chain and still has what a trusted layer declared
+	(spinclass#462). *sc validate* warns about a *resume* that starts with
+	*direnv* in any other shape. A session never launched confined resumes
+	the entry untouched. *Merge:* scalar override.
 
 *spawn-entry*
 	Argv array for the detached-harness a spawned worker session boots

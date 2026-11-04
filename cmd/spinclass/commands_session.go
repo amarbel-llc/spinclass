@@ -20,6 +20,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
+	"code.linenisgreat.com/spinclass/internal/bravo/apply"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 	"code.linenisgreat.com/spinclass/internal/bravo/present"
 	"code.linenisgreat.com/spinclass/internal/bravo/remote"
@@ -767,6 +768,19 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		entrypoint = confinedResume
 		shellFallback = false
 	}
+	// A confined session gowns at the door on resume as on spawn
+	// (spinclass#462): the pinned entry's exact leading `direnv exec .` (or of
+	// the worktree path) is dropped so the unit starts with no devShell and no
+	// .envrc chain, and the rendered [direnv.dotenv] pairs ride in the launch
+	// environment instead, under the pinned env and over nothing else.
+	var dotenv []string
+	if scopeSpec != "" {
+		if stripped, ok := spawn.StripDirenvExec(entrypoint, ".", state.WorktreePath); ok {
+			fmt.Fprintf(os.Stderr, "spinclass: %s resumes confined; dropping the resume entry's leading direnv exec so its unit starts without the devShell (spinclass#462)\n", state.SessionKey)
+			entrypoint = stripped
+		}
+		dotenv = apply.DotenvPairs(merged, state.WorktreePath)
+	}
 
 	// Built only when a re-pin is needed, so an ordinary resume never reads the
 	// signers file or the grant store (#407).
@@ -810,7 +824,7 @@ func runResume(_ context.Context, args json.RawMessage) error {
 		Description: state.Description,
 	}
 
-	env := withEnvPairs(entry.Env, profileEnv)
+	env := withEnvPairs(withEnvPairs(entry.Env, dotenv), profileEnv)
 	if scopeSpec != "" {
 		// Applied last so nothing configured can name another spec.
 		env = withScope(env, scopeSpec)

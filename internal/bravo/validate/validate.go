@@ -296,6 +296,17 @@ func CheckSessionEntry(sf sweatfile.Sweatfile) []Issue {
 			})
 		}
 	}
+	// A confined resume drops only the exact `direnv exec .` prefix from the
+	// pinned resume entry (spinclass#462), the untemplated twin of the
+	// spawn-entry's `direnv exec {dir}`.
+	if r := sf.SessionEntry.Resume; len(r) > 0 && r[0] == "direnv" && !(len(r) > 3 && r[1] == "exec" && r[2] == ".") {
+		issues = append(issues, Issue{
+			Message:  "resume starts with direnv in a shape a confined resume cannot strip (only the exact `direnv exec .` prefix is dropped); a once-confined session's harness would resume under direnv",
+			Severity: SeverityWarning,
+			Field:    "session-entry.resume",
+			Value:    strings.Join(r, " "),
+		})
+	}
 	if len(sf.SessionEntry.SpawnEntry) > 0 {
 		hasPrompt := false
 		for _, el := range sf.SessionEntry.SpawnEntry {

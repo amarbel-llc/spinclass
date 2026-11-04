@@ -151,7 +151,7 @@ func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model
 		// direnv, so neither the devShell nor the .envrc chain crosses into the
 		// unit; what a trusted layer put in [direnv.dotenv] travels in the spec
 		// and the launch environment instead (confinedSpecEnv, workerEnvScoped).
-		if stripped, ok := stripDirenvExec(argv, rp.AbsPath); ok {
+		if stripped, ok := StripDirenvExec(argv, rp.AbsPath); ok {
 			argv = stripped
 			slog.Info("confined spawn: dropped the spawn-entry's `direnv exec` prefix; the worker's harness starts with no devShell", "argv", argv)
 		}

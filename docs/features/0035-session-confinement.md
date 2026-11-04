@@ -1308,9 +1308,12 @@ Decided, and how far each piece is:
   pairs go into every spawned worker's launch environment and into a confined
   unit's spec `env` with the identity and the tmp dirs (`confinedSpecEnv`); a
   confined spawn drops the `spawn-entry`'s exact leading `direnv exec {dir}`
-  (`stripDirenvExec`, argv elements, no shell parsing); `sc validate` warns
-  about a direnv entry of any other shape. Not yet: `sc resume` of a confined
-  session replays the pinned entry unchanged.
+  (`StripDirenvExec`, argv elements, no shell parsing); `sc validate` warns
+  about a direnv entry of any other shape. `sc resume` of a confined session
+  does the same at its door: the pinned resume entry's exact leading
+  `direnv exec .` (the untemplated twin; the worktree path is accepted too)
+  is dropped and the dotenv pairs ride in the resume's launch environment
+  under the pinned env, so a relaunch is dressed like the spawn was.
 - **clown's half** (clown#341, proposed): the unit starts from a clean
   environment plus the spec's `env` plus clown's own set, PATH stated by
   clown, a log-only pass before enforcing. Until it lands, the partition

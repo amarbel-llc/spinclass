@@ -42,12 +42,18 @@ func TestStripDirenvExecPrefix(t *testing.T) {
 			argv: []string{"direnv", "exec", wt},
 			want: []string{"direnv", "exec", wt},
 		},
+		{
+			name:  "a resume's untemplated `direnv exec .` is dropped when . is an accepted dir",
+			argv:  []string{"direnv", "exec", ".", "clown", "--", "--resume", "p"},
+			want:  []string{"clown", "--", "--resume", "p"},
+			strip: true,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, stripped := stripDirenvExec(c.argv, wt)
+			got, stripped := StripDirenvExec(c.argv, ".", wt)
 			if !slices.Equal(got, c.want) || stripped != c.strip {
-				t.Errorf("stripDirenvExec = %q, %v; want %q, %v", got, stripped, c.want, c.strip)
+				t.Errorf("StripDirenvExec = %q, %v; want %q, %v", got, stripped, c.want, c.strip)
 			}
 		})
 	}
