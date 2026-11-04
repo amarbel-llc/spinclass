@@ -2187,6 +2187,59 @@ explore-live-broker-env:
       fi
     done
 
+# what direnv adds to a launcher's environment for a session worktree (the environment a confined spawn carries across the unit boundary today): variable NAMES added or changed, never values, and the PATH entries added, by store name; the direnv-less confined pilot's step 1 (docs/plans/2026-11-04-confined-direnv-less-pilot.md)
+[group("explore")]
+explore-direnv-env-delta wt=".":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    export LC_ALL=C   # sort and comm must agree on the order
+    wt=$(cd "{{wt}}" && pwd -P)
+    command -v direnv >/dev/null || { echo "direnv not on PATH"; exit 1; }
+    # name<TAB>sha256(value) per variable, so a changed value shows without being printed
+    names_and_hashes() {
+      env -0 | tr '\0' '\n' | awk -F= 'NF>1{n=$1; v=substr($0, length(n)+2); printf "%s\t%s\n", n, v}' | while IFS=$'\t' read -r n v; do
+        printf '%s\t%s\n' "$n" "$(printf '%s' "$v" | sha256sum | cut -c1-12)"
+      done | sort
+    }
+    base=$(direnv exec / bash -c "$(declare -f names_and_hashes); names_and_hashes")
+    full=$(direnv exec "$wt" bash -c "$(declare -f names_and_hashes); names_and_hashes" 2>/dev/null)
+    echo "== worktree: $wt"
+    echo "== variables direnv ADDS (names only)"
+    comm -13 <(printf '%s\n' "$base" | cut -f1) <(printf '%s\n' "$full" | cut -f1)
+    echo "== variables direnv CHANGES (names only)"
+    comm -12 <(printf '%s\n' "$base" | cut -f1) <(printf '%s\n' "$full" | cut -f1) | while read -r n; do
+      b=$(printf '%s\n' "$base" | awk -F'\t' -v n="$n" '$1==n{print $2}')
+      f=$(printf '%s\n' "$full" | awk -F'\t' -v n="$n" '$1==n{print $2}')
+      [ "$b" = "$f" ] || echo "$n"
+    done
+    echo "== PATH entries direnv ADDS (store paths by name, other dirs verbatim)"
+    bp=$(direnv exec / bash -c 'printf "%s" "$PATH"' | tr ':' '\n' | sort -u)
+    fp=$(direnv exec "$wt" bash -c 'printf "%s" "$PATH"' 2>/dev/null | tr ':' '\n' | sort -u)
+    comm -13 <(printf '%s\n' "$bp") <(printf '%s\n' "$fp") | sed -E 's|^/nix/store/[a-z0-9]{32}-|store: |'
+    echo "== counts: base=$(printf '%s\n' "$base" | wc -l) with-direnv=$(printf '%s\n' "$full" | wc -l)"
+
+# for each live confined unit: the environment its main process carries, variable NAMES only (values never printed) plus PATH entries by store name; one block per unit; the direnv-less confined pilot's step 3 comparison (docs/plans/2026-11-04-confined-direnv-less-pilot.md)
+[group("explore")]
+explore-live-unit-env:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    seen=""
+    for d in /proc/[0-9]*; do
+      pid=${d#/proc/}
+      env=$(tr '\0' '\n' < "$d/environ" 2>/dev/null) || continue
+      unit=$(printf '%s\n' "$env" | sed -n 's/^CLOWN_UNIT=//p')
+      [ -n "$unit" ] || continue
+      case " $seen " in *" $unit "*) continue ;; esac
+      seen="$seen $unit"
+      session=$(printf '%s\n' "$env" | sed -n 's/^SPINCLASS_SESSION_ID=//p')
+      echo "== unit $unit session=${session:-?} (first pid seen: $pid, $(tr '\0' ' ' < "$d/cmdline" 2>/dev/null | cut -c1-60))"
+      echo "-- variables (names)"
+      printf '%s\n' "$env" | awk -F= 'NF>1{print $1}' | sort -u | tr '\n' ' '; echo
+      echo "-- PATH entries"
+      printf '%s\n' "$env" | sed -n 's/^PATH=//p' | tr ':' '\n' | sed -E 's|^/nix/store/[a-z0-9]{32}-|store: |'
+    done
+    [ -n "$seen" ] || echo "(no confined unit process is running; spawn the pilot worker first)"
+
 # [debug] Pipe a cold `prompts/get` (no `initialize`) into `spinclass serve` and
 # print the dynamic system-prompt fragment it returns, extracted from the
 # JSON-RPC result. Serves the internal/bravo/sysprompt dev-loop (spinclass#187): edit a
