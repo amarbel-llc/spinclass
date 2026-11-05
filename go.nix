@@ -28,7 +28,7 @@
       input = "tommy";
     };
   };
-  go = "1.26";
+  go = "1.26.0";
   module = "code.linenisgreat.com/spinclass";
   replace = { };
   require = {
@@ -248,10 +248,10 @@
       version = "v0.0.0-20260410095643-746e56fc9e2f";
     };
     "golang.org/x/sys" = {
-      go = "1.25.0";
-      hash = "sha256-aDQXqSTZES2l/132PBxhZN4ywldpPyfm7LByYCHzzwM=";
+      go = "1.26.0";
+      hash = "sha256-/1S3yy3in72ygZT1CKymvOzJZqCMYiGSqZDfvSyB3LI=";
       indirect = true;
-      version = "v0.43.0";
+      version = "v0.49.0";
     };
     "golang.org/x/term" = {
       go = "1.25.0";
@@ -260,9 +260,9 @@
     };
     "golang.org/x/text" = {
       go = "1.25.0";
-      hash = "sha256-/0t9C6Mc8kYjxweFB0us2lGKo8GovHhBiq5nlMOppC0=";
+      hash = "sha256-8XDOnlPIybcDRy89fkjG5VqtIt5Ku+LmaqYhgKl7i1E=";
       indirect = true;
-      version = "v0.36.0";
+      version = "v0.37.0";
     };
     "golang.org/x/xerrors" = {
       go = "1.18";
