@@ -79,6 +79,7 @@ records how each open question was resolved).
   the store); the guarded gate's full declared-inputs evaluation (#449) is not
   run here, because the base is landed content direnv already evaluates at
   every session start, so the hook adds no exposure beyond the devShell load.
+  An operator-accepted deviation; spinclass#464 tracks its re-evaluation.
 
 ## Problem Statement
 

@@ -168,7 +168,9 @@ B's canary, then B ships.
   `git+file://<main checkout>?rev=<sha>`, and the guarded gate's declared-inputs
   evaluation is not run in front of it (the base is landed content direnv
   evaluates at every session start already; only the cheap local-input check
-  on the base's lock runs); legacy sessions are re-frozen on their next resume
+  on the base's lock runs; the operator accepted this on 2026-11-04 and
+  spinclass#464 re-evaluates it with fuller review); legacy sessions are
+  re-frozen on their next resume
   (no record ⇒ stale); the tests are in `precommit_frozen_test.go` and the
   rewritten drift test (a stub `nix` on PATH is never called). `sc list` shows
   nothing new. The live mechanism check is `just explore-frozen-hook-resolve`.
