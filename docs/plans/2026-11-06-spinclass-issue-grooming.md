@@ -84,6 +84,48 @@ justfile:2583, 2629); **100 (?)** (the 0.1.16-era merge path is gone, FDR 0029;
 one run of `just zz-tests_bats/test-targets lifecycle.bats` settles it, else it
 folds into #44).
 
+### 2a. Close list (prepared 2026-11-06, not run)
+
+Per the coordinator's instruction of 2026-11-06 (the request reached the room
+unauthenticated), nothing is closed until the operator confirms from a Claude
+session. Each row: the commit that proves the fix, and the one-line close
+comment to post. Rows marked *confirm* carry a (?) in §2 and want the named
+check first. Issues closed by a `Closes #N` landing (§3 work) are not listed:
+the merge closes them.
+
+| # | commit | close comment |
+|---|---|---|
+| 462 | 468df88, 65debdd | Landed: spawn env carries the rendered [direnv.dotenv] and a confined spawn strips the direnv prefix (468df88); the resume half (65debdd). Pilot passed (77b79c1). |
+| 459 | 868aabb | Landed: the per-commit hook is frozen at install to a store path from the landed base; no nix develop at commit time. #464 tracks the deferred re-review of the base evaluation. |
+| 457 | 3496a0a, 31814be | Landed: a confined spawn's in-unit moxy comes from the profile's moxy table, narrow-only; the stand-in is gone with the clown relink. |
+| 453 | 900aec6 | Landed: a confined session with no pinned resume entry relaunches confined through the clown default resume. |
+| 446 | 11c2c12 | Landed in code: restart-preflight --rearm with its bounds and tests. *confirm* the deployed spinclass carries it before closing. |
+| 422 | c743a1d, c628262 | Ruled and landed: no Bash-side gate; the hook denies an agent's Bash use of sc session verbs (FDR 0037 Limitations). |
+| 414 | e4766b5..22e43a0 | Landed: internal/ relaid on seven dagnabit levels, lint-layout in the gate. |
+| 411 | 8ec4808 | Landed: a short ssh-agent outage is retried and named (agentretry.Do). |
+| 407 | ae9efb7, e9d4b69, c749aef, a52df9a, a2af7f8 | Landed: --repin-profile takes a card-signed piggy-escalation-v1 transition with the field diff (FDR 0034). |
+| 392 | 389d597 | Landed: a worker's own principal is recorded by its SessionStart hook. |
+| 389 | 51fd193 | Landed: close-this-session with the trusted allow-self-close gate (FDR 0035). |
+| 380 | 84825e9, 8f339f9 | Landed: per-worktree stash shelf and ownership-based rebase verdicts (FDR 0036 §4). |
+| 338 | FDR 0035 (7f757ae and the docs(fdr-0035) series) | FDR 0035 is the confinement record and names #338 as its companion. *confirm* the issue tracked the record, not the programme. |
+| 322 | fac9139, f67d6fc, a0c3305 | Landed: the codegen-repair lane restamps the tommy header in the pre-commit path. *confirm* 81e3395 touched sweatfile_tommy.go. |
+| 260 | 66a0112, 75ed258 | Landed: fallback to the unscoped hook with a warn; require-hook-scope opt-in for a hard failure. |
+| 224 | worktree.md.tmpl:24-39 | Landed: the session block renders owner, forge and the forge workflow. |
+| 209 | a26bac0 | Landed (#266): spawn-session returns at once; the hello wait is a background job, so the hang cannot recur. |
+| 195 | hookrun.go:94, 100, 520-524; 868aabb | Landed: pre-merge and repair run under direnv exec when .envrc exists; pre-commit is frozen to a store path. Documented per hook in sweatfile(5). |
+| 189 | fe81bd7 | Landed: sc rebuild with the staleness fingerprint and auto-rebuild-on-resume re-install the hook; the remainder is #191. |
+| 188 | 613d00e, 295122f, f7836fe, c3ba6d2, 2222425 | Landed: the pre-merge tree is cancelled and its build worktree removed on interrupt (task series). |
+| 172 | e4766b5..22e43a0 | Landed with #414; no pkgs/ facade exists, so that question resolved by omission. |
+| 164 | 1520353, #315 | Answered by FDR 0013 (hook in a pinned build worktree) and the landing target (internal/alfa/landing). |
+| 88 | d78536f | Landed: sc merge --format auto|viewport|plain|ndjson (FDR 0015). |
+| 75 | check.go:531-550 | Raw mode feeds the full stream to madder; the ring is only the diagnostic tail. If a tail-only blob recurs it is madder's writer. |
+| 69 | d78536f | Landed: TAP and passthrough dropped from sc merge. |
+| 403 | (duplicate) | Duplicate of #414: godyn is the backend and the dagnabit layout lane landed there. |
+| 397 | (duplicate) | Duplicate of #425, the same test; the probable cause and fix are recorded there. |
+| 311 | (stale) | Root cause was cmd/go's git init --bare inheriting GIT_DIR in a hook, fixed in chrest cdfe206; nothing in spinclass sets core.bare. |
+| 165 | (stale) | Superseded by FDR 0010: an async job is a ringmaster job; the last tool, session-job-cancel, is #251. |
+| 83 | (stale) | FDR 0005 was superseded by FDR 0015; the failure-only view exists as pre-merge-output-format. |
+
 ## 3. Ready to work (scope, test-first)
 
 | # | title (short) | acceptance test | files | size | ruling first? |
