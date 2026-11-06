@@ -6,7 +6,9 @@ keeping its identity. Clown's half landed on clown master at 70f904a on
 2026-11-06 (reported by clown/rare-walnut; not deployed): the
 `restart-preflight` verdict may carry `"posture": "unattended"|"attended"`,
 absent meaning keep, and the hand-off form is `clown restart --session K
---posture P`. This note is the spinclass half, written on the coordinator's
+--posture P`; clown 7e79f6c (same day, not deployed) adds `keep` as the
+spelling of the empty posture on the flag and in the verdict. This note is
+the spinclass half, written on the coordinator's
 ask (circus/eager-holly, 2026-11-06, docs only). Every decision below is a
 proposal for the operator; nothing is built, and the questions in §7 are open
 until ruled.
@@ -101,6 +103,10 @@ not from reading clown).
   `unattended` bool.
 - Compatibility: an older spinclass sends no posture, which is keep; an older
   clown ignores the key.
+- 7e79f6c (U, per rare-walnut, 2026-11-06): `--posture keep` on the hand-off
+  and `"posture":"keep"` in the verdict are the empty posture; at 70f904a the
+  flag had to be absent or carry `""`, and the refusal for a bad value now
+  reads "use unattended, attended or keep".
 
 ## 2. The decisions proposed (I)
 
@@ -154,9 +160,11 @@ not from reading clown).
    the four placeholders of FDR 0037 D2 and `restart_contract_test.go` pins
    the new shape against a fake of clown's verb. Because substitution is per
    element and cannot drop an element, "keep" needs a spelling clown accepts
-   on `--posture`, or spinclass must strip the flag and its value when the
-   posture is empty. Preferred: clown accepts an explicit keep value (one
-   rule, no argv surgery); open for clown in §7.
+   on `--posture`. Settled with rare-walnut on 2026-11-06: an empty posture
+   expands `{posture}` to `keep`, which clown 7e79f6c accepts on the flag and
+   in the verdict (an empty argv element, `--posture ""`, is accepted since
+   70f904a, so a landing against the older clown also works). No argv
+   surgery on either side.
 7. **The preflight re-checks the right for a widening.** A `posture:
    attended` request is honoured at the preflight only if the recorded
    requester is not the session's own principal and holds the handle with the
@@ -204,8 +212,8 @@ restarted into unattended shows `CLOWN_UNATTENDED=1` and one
 
 ## 5. Tests (I, test-first)
 
-- `queueRestart` records `Posture` and expands `{posture}`; empty posture
-  expands to the agreed keep spelling (or strips the pair, per §7).
+- `queueRestart` records `Posture` and expands `{posture}`; an empty posture
+  expands to `keep` (decision 6).
 - `restart-this-session` with `attended` is refused, nothing recorded; with
   `unattended` on a pinned claude entry it records and hands off.
 - `restart-child-session` with `attended`: refused without the `restart`
@@ -257,8 +265,8 @@ For the operator:
 
 For clown (rare-walnut):
 
-- The keep spelling of `--posture` on the hand-off (decision 6): does `clown
-  restart` accept an explicit keep value, or must the flag be absent?
+- Resolved 2026-11-06: the keep spelling of `--posture` is `keep`, on the
+  hand-off and in the verdict, since clown 7e79f6c (decision 6).
 - An older clown that ignores the verdict key relaunches in the old posture
   while the pinned entry already says the new one, so the two paths disagree
   until the next `sc resume`. Should the verdict reason name it, or should
