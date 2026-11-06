@@ -68,7 +68,10 @@ func AlwaysAsk(toolName string, toolInput map[string]any, cwd string) (string, b
 		// thing preventing runaway fan-out: a worker may now spawn its own
 		// workers, so an `ask` at every depth is what keeps a recursive tree
 		// from growing without a human in the loop. See FDR 0006 / #151.
-		return "spawning a worker session launches a token-consuming agent; confirm each invocation", true
+		// The reason names the way out for a session that cannot answer a prompt
+		// (dontAsk, spinclass#439): the confined route above is the one that
+		// passes without one, and it needs a profile (FDR 0035 R1).
+		return "spawning a worker session launches a token-consuming agent; confirm each invocation (a CONFINED spawn, confined=true with a profile, needs no prompt)", true
 
 	case closeChildSessionTool:
 		// A reap without force is safe to run silently: close.RunResolved
