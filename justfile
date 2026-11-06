@@ -98,15 +98,30 @@ build-nix:
     nix build --show-trace
 
 # Regenerate the tommy-generated sweatfile codec (sweatfile_tommy.go) after a
-# tommy bump or a Sweatfile struct change, through godyn's escape hatch
-# (godyn-go, igloo FDR 0008; no ambient go; tommy comes from goRunInputs).
-# The codec header stamps tommy's rev, so regenerate after every tommy bump.
-# Not part of the gate: `verify-tommy-codegen` is the pure drift check.
+# tommy bump or a Sweatfile struct change. Runs `go generate` in godyn's
+# rendered module tree, the same derivation `verify-tommy-codegen` gates on
+# (checks.<system>.tommy-codegen), and applies its passthru.codegenPatch to
+# the index (igloo FDR 0008), so only the generated file changes. The former
+# `godyn-go -- go generate` escape hatch re-resolved the module graph on every
+# run and rewrote go.nix with an unrequested dependency bump (spinclass#410);
+# the patch route never touches go.nix. The patch is applied to the working
+# tree only (its preimage is the tracked files as they stand in the worktree,
+# dirty or not), so stage the result yourself. The codec header stamps tommy's
+# rev, so regenerate after every tommy bump. Not part of the gate.
 #
 # regenerate the tommy-generated sweatfile codec
 [group("build")]
 build-tommy-codegen:
-    nix run --inputs-from . igloo#godyn-go -- -- go generate ./internal/0/sweatfile/
+    #!/usr/bin/env bash
+    set -euo pipefail
+    system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
+    out=$(nix build --no-link --print-out-paths --print-build-logs ".#checks.${system}.tommy-codegen.passthru.codegenPatch")
+    if [ -s "$out/patch" ]; then
+        git apply -p2 "$out/patch"
+        git diff --stat -- internal/0/sweatfile/sweatfile_tommy.go | tail -n 3
+    else
+        echo "sweatfile_tommy.go is already up to date"
+    fi
 
 # --- test ---
 
