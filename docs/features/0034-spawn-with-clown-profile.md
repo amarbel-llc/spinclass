@@ -70,6 +70,37 @@ profile than it was itself given.
   timeout; the checks above exist so that this is no longer the way a bad
   profile is discovered.
 
+### Profiles for unconfined workers (2026-11-06, spinclass#441)
+
+The `profile` parameter and the `spawn-profile` default are orthogonal to
+confinement: both spawns splice `--profile <name>` the same way. What differs
+is what the profile then means.
+
+- **What a profile buys an unconfined worker.** Clown applies it at launch as
+  for any worker: the provider settings and the trimmed MCP catalog. There is
+  no unit behind it, so nothing enforces it afterwards; the worker's moxyfile
+  and harness settings are its own files. The one guard is the #438 slice 0
+  moxyfile rule: a moxyfile write in an unconfined session *asks*, so widening
+  the catalog back needs a human at the prompt, not nothing. A profile on an
+  unconfined worker is therefore a cost and focus lever (fewer tools, cheaper
+  provider settings), not a containment boundary; containment is FDR 0035.
+- **Whether to pass one.** Optional. The two shapes in use since 2026-11-01:
+  an unconfined worker that must land its own session runs with **no profile**
+  (it needs the full spinclass tool surface, and a profile that drops a server
+  the worker needs is refused anyway); a confined worker **requires** one
+  (FDR 0035 R1 to R4). A spawner that wants a smaller or cheaper unconfined
+  worker may pass one; nothing else depends on it.
+- **How `spawn-profile` applies.** For an unconfined spawn the default is read
+  from the merged hierarchy like the other `[session-entry]` fields, so a repo
+  layer may set it, and it is spliced exactly as an explicit `profile` would
+  be; with neither, no profile is used and clown's resolver is never called
+  (`internal/foxtrot/spawn/spawn.go:88-95, 131`). A confined spawn reads the
+  default only from layers above the repo (R2). Under `[profile-rights]
+  enforce` the spawner must hold the profile whether or not the spawn is
+  confined, and a spawn-entry that already carries `--profile` with none
+  requested is refused, so the worker never boots a profile nobody authorized
+  (`spawn.go:176-207`).
+
 ### Visibility and record
 
 - `sc list` gains a `PROFILE` column. The profile name, the **content digest

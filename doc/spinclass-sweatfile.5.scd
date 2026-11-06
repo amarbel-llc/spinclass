@@ -1543,7 +1543,14 @@ owns the title end to end.
 	*sc start*) does not inherit *DISPLAY*, *WAYLAND_DISPLAY* or
 	*DBUS_SESSION_BUS_ADDRESS*; an *[session-entry.env]* entry sets them
 	back. This is hygiene, not a security boundary, and *SSH_AUTH_SOCK* is
-	deliberately kept.
+	deliberately kept. A CONFINED spawn requires a profile and reads this
+	default only from the global sweatfile or one above the repo (FDR 0035
+	R1, R2). For an UNCONFINED worker a profile is optional: clown applies
+	it at launch, but no unit enforces it afterwards (a moxyfile write in
+	the worker asks instead of being refused), so it is a cost and focus
+	lever, not a boundary; leave it off for a worker that needs the full
+	catalog, such as one that lands its own session (FDR 0034, "Profiles
+	for unconfined workers").
 	*Merge:* scalar override.
 
 	For a CONFINED spawn (FDR 0035, "A confined spawn requires a profile"),

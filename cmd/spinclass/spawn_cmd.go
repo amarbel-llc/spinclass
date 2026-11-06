@@ -312,7 +312,7 @@ func spawnParamList() []command.Param {
 		{
 			Name:        "profile",
 			Type:        command.String,
-			Description: "Clown profile name for the worker (FDR 0034): a named bundle of provider settings and a trimmed MCP tool catalog, placed as --profile <name> among clown's flags in the spawn-entry. Omit to use [session-entry].spawn-profile, else no profile. The profile is resolved through clown's profile library before anything is created; the spawn is refused for an unknown profile, a profile registry this build cannot vouch for (not stamped by a current clown, or another protocol version), or a profile that drops a server the worker needs.",
+			Description: "Clown profile name for the worker (FDR 0034): a named bundle of provider settings and a trimmed MCP tool catalog, placed as --profile <name> among clown's flags in the spawn-entry. Omit to use [session-entry].spawn-profile, else no profile. The profile is resolved through clown's profile library before anything is created; the spawn is refused for an unknown profile, a profile registry this build cannot vouch for (not stamped by a current clown, or another protocol version), or a profile that drops a server the worker needs. A confined spawn requires a profile (FDR 0035 R1); for an unconfined worker it is optional and only trims what clown launches, with no unit to enforce it afterwards, so leave it off for a worker that needs the full catalog, such as one that lands its own session.",
 		},
 		{
 			Name:        "confined",
