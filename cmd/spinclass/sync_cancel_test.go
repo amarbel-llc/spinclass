@@ -46,18 +46,11 @@ func installSyncCancelHook(t *testing.T, repoPath string) syncCancelProbe {
 			_ = syscall.Kill(pid, syscall.SIGKILL)
 		}
 	})
-	childScript := "echo $$ > " + probe.pidFile + "\n" +
-		"trap 'if [ -d \"$PWD\" ]; then echo cwd-present; else echo cwd-gone; fi > " + probe.diedFile + "; exit 0' TERM\n" +
-		"touch " + probe.startedFile + "\n" +
-		"while :; do sleep 1 & wait $!; done\n"
 	childPath := filepath.Join(dir, "child.sh")
+	childScript, hookScript := syncCancelScripts(probe, childPath, filepath.Join(dir, "child-ready"))
 	if err := os.WriteFile(childPath, []byte(childScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	hookScript := "trap 'kill -TERM $child 2>/dev/null; wait $child; exit 143' TERM\n" +
-		"sh " + childPath + " &\n" +
-		"child=$!\n" +
-		"wait $child\n"
 	scriptPath := filepath.Join(dir, "hook.sh")
 	if err := os.WriteFile(scriptPath, []byte(hookScript), 0o755); err != nil {
 		t.Fatal(err)
@@ -65,6 +58,58 @@ func installSyncCancelHook(t *testing.T, repoPath string) syncCancelProbe {
 	writeSweatfile(t, repoPath, "[hooks]\npre-merge = \"sh "+scriptPath+"\"\n\n"+gateSweat)
 	t.Setenv("RINGMASTER_DISABLE_SCOPE", "1")
 	return probe
+}
+
+// syncCancelScripts renders the probe's two scripts. The child records its pid,
+// installs its TERM trap, then touches readyFile. The HOOK, not the child,
+// touches the probe's startedFile, and only after it has recorded `child=$!`
+// and seen readyFile: the test cancels as soon as startedFile exists, and a
+// TERM that arrived before `child=$!` expanded the trap's `$child` to nothing,
+// so `kill -TERM ""` reaped nobody, the hook exited 143 and the child outlived
+// it with ppid 1 (the #425/#397 flake); a TERM before the child's trap would
+// kill it without its cwd record. With the order below, a cancel can only land
+// once both are in place.
+func syncCancelScripts(probe syncCancelProbe, childPath, readyFile string) (childScript, hookScript string) {
+	childScript = "echo $$ > " + probe.pidFile + "\n" +
+		"trap 'if [ -d \"$PWD\" ]; then echo cwd-present; else echo cwd-gone; fi > " + probe.diedFile + "; exit 0' TERM\n" +
+		"touch " + readyFile + "\n" +
+		"while :; do sleep 1 & wait $!; done\n"
+	hookScript = "trap 'kill -TERM $child 2>/dev/null; wait $child; exit 143' TERM\n" +
+		"sh " + childPath + " &\n" +
+		"child=$!\n" +
+		"until [ -e " + readyFile + " ]; do sleep 0.02; done\n" +
+		"touch " + probe.startedFile + "\n" +
+		"wait $child\n"
+	return childScript, hookScript
+}
+
+// The hook announces the start only after it holds the child's pid and the
+// child holds its trap (#425): the child never touches startedFile, and in the
+// hook `child=$!` and the wait for readyFile both precede the touch.
+func TestSyncCancelScriptsAnnounceStartAfterChildIsRecordedAndTrapped(t *testing.T) {
+	probe := syncCancelProbe{pidFile: "/p/pid", startedFile: "/p/started", diedFile: "/p/died"}
+	child, hook := syncCancelScripts(probe, "/p/child.sh", "/p/ready")
+
+	if strings.Contains(child, probe.startedFile) {
+		t.Errorf("the child touches startedFile; only the hook may:\n%s", child)
+	}
+	trapAt, readyAt := strings.Index(child, "trap "), strings.Index(child, "touch /p/ready")
+	if trapAt < 0 || readyAt < 0 || readyAt < trapAt {
+		t.Errorf("the child must install its trap before touching readyFile:\n%s", child)
+	}
+
+	recordAt := strings.Index(hook, "child=$!")
+	waitReadyAt := strings.Index(hook, "until [ -e /p/ready ]")
+	startedAt := strings.Index(hook, "touch "+probe.startedFile)
+	if recordAt < 0 || waitReadyAt < 0 || startedAt < 0 {
+		t.Fatalf("hook lacks the pid record, the ready wait or the started touch:\n%s", hook)
+	}
+	if !(recordAt < waitReadyAt && waitReadyAt < startedAt) {
+		t.Errorf("hook order must be child=$! < wait for ready < touch started:\n%s", hook)
+	}
+	if forkAt := strings.Index(hook, "sh /p/child.sh &"); forkAt < 0 || forkAt > recordAt {
+		t.Errorf("the fork must precede child=$!:\n%s", hook)
+	}
 }
 
 func (p syncCancelProbe) awaitHookStarted(t *testing.T) (childPid int) {
