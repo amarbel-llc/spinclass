@@ -1390,6 +1390,16 @@ global, parent and repository layers and says so on stderr. Because *env* is
 recorded in the session state, keep secrets out of it where the state file is
 readable by others.
 
+Every session process (the entrypoint, hooks, *sc exec*, a spawned worker and
+a confined worker's unit) receives the spinclass identity environment,
+applied last so nothing configured can override it: *SPINCLASS\_SESSION\_ID*
+(the session key, _repo/branch_), *SPINCLASS\_REPO*, *SPINCLASS\_BRANCH*,
+*SPINCLASS\_WORKTREE* and *SPINCLASS\_DESCRIPTION*. Clown reads
+*SPINCLASS\_SESSION\_ID* as its attach group (FDR 0017; clown RFC-0014) and
+titles the terminal from it by default as *sc/<session key>/<clown name>*, so a
+sweatfile needs no title setting of its own: spinclass has none, and clown
+owns the title end to end.
+
 *start*
 	Argv array for new sessions. Defaults to *$SHELL*. Each element
 	supports *$VAR* expansion against the session environment, so
