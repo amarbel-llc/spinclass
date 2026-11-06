@@ -1348,6 +1348,25 @@ at each enqueue.
 *sc check* sends *spinclass.check.*_repo_*.pre\_merge\_hook.*_outcome_ for its
 hook run; a merge that checks does not send it.
 
+## [madder]
+
+Retention for what spinclass keeps in its per-user *spinclass* madder store
+and the attestation index beside it,
+_$XDG\_STATE\_HOME/spinclass/attestations/<claim\_id>.json_ (spinclass#427;
+FDR 0007). The default is keep forever: with no key set nothing is ever
+expired. *Merge:* scalar override.
+
+*retain*
+	Go duration, e.g. *"720h"*. When set, *sc clean* lists, confirms and
+	expires the attestation index entries whose *recorded\_at* is older than
+	the duration (the plan names the count, *--dry-run* only reports it, and
+	the step is *expire N attestation index entries* in the TAP output). Only
+	the index entry is removed: the attestation blob it names stays in the
+	store, which has no delete primitive (madder's lane), so an expired
+	claim can still be read by digest. An index file that does not parse is
+	never counted or removed. An empty, zero, negative or unparseable value
+	means keep forever, so a typo can never turn an expiry on.
+
 ## [store]
 
 Identity for commits the grit store tools create (FDR 0036). The tools run in

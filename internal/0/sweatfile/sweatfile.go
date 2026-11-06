@@ -259,6 +259,19 @@ type Health struct {
 	BusyBound *string `toml:"busy-bound"`
 }
 
+// Madder configures what spinclass keeps in its per-user madder store and the
+// attestation index beside it (spinclass#427). Scalar override down the
+// cascade. The default is keep forever: with no key set nothing is ever
+// expired.
+type Madder struct {
+	// Retain is how long an attestation index entry is kept, a Go duration
+	// ("720h"). When set, `sc clean` expires index entries whose recorded_at is
+	// older than that. Only the index entry goes: the blob it names stays in
+	// the store, which has no delete primitive (madder's lane). Unset means
+	// keep forever.
+	Retain *string `toml:"retain"`
+}
+
 // Metrics configures spinclass's best-effort statsd telemetry (spinclass#363,
 // internal/0/statsd). Scalar override down the cascade.
 type Metrics struct {
@@ -428,6 +441,7 @@ type Sweatfile struct {
 	Hooks          *Hooks          `toml:"hooks"`
 	Auth           *Auth           `toml:"auth"`
 	Metrics        *Metrics        `toml:"metrics"`
+	Madder         *Madder         `toml:"madder"`
 	Store          *Store          `toml:"store"`
 	ProfileRights  *ProfileRights  `toml:"profile-rights"`
 	Confinement    *Confinement    `toml:"confinement"`
@@ -487,6 +501,21 @@ func (sf Sweatfile) AuthRevokeCommand() *string {
 		return nil
 	}
 	return sf.Auth.RevokeCommand
+}
+
+// AttestationRetention parses [madder].retain into a duration (spinclass#427).
+// Returns (d, true) when the value is set, parses, and is positive; (0, false)
+// when unset, "0", negative or unparseable, every one of which means the
+// keep-forever default, so a typo can never turn an expiry on.
+func (sf Sweatfile) AttestationRetention() (time.Duration, bool) {
+	if sf.Madder == nil || sf.Madder.Retain == nil || *sf.Madder.Retain == "" {
+		return 0, false
+	}
+	d, err := time.ParseDuration(*sf.Madder.Retain)
+	if err != nil || d <= 0 {
+		return 0, false
+	}
+	return d, true
 }
 
 // MetricsStatsdAddress returns the [metrics].statsd-address, or "" when unset.

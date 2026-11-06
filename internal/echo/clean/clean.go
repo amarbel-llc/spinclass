@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/log"
 
+	"code.linenisgreat.com/spinclass/internal/0/attestationindex"
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/0/proccwd"
 	"code.linenisgreat.com/spinclass/internal/0/tapblock"
@@ -560,6 +561,41 @@ func resolveTombstoneRetention(startDir string) time.Duration {
 	return session.DefaultTombstoneRetention()
 }
 
+// resolveAttestationRetention reads [madder].retain from the merged sweatfile
+// at startDir (spinclass#427) and returns the cutoff an index entry must be
+// older than to expire. ok is false when no layer sets a usable value, the
+// keep-forever default, or when the hierarchy cannot be read: a sweep is never
+// turned on by a failure.
+func resolveAttestationRetention(startDir string) (cutoff time.Time, ok bool) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return time.Time{}, false
+	}
+	hierarchy, err := sweatfileio.LoadHierarchy(home, startDir)
+	if err != nil {
+		return time.Time{}, false
+	}
+	d, ok := hierarchy.Merged.AttestationRetention()
+	if !ok {
+		return time.Time{}, false
+	}
+	return time.Now().Add(-d), true
+}
+
+// countStaleAttestations is how many attestation index entries a sweep with
+// the given cutoff would expire; 0 when retention is off or the index cannot
+// be listed.
+func countStaleAttestations(cutoff time.Time, retain bool) int {
+	if !retain {
+		return 0
+	}
+	stale, err := attestationindex.Stale(cutoff)
+	if err != nil {
+		return 0
+	}
+	return len(stale)
+}
+
 type cleanAction struct {
 	wt     worktreeInfo
 	label  string
@@ -588,7 +624,7 @@ func planClean(worktrees []worktreeInfo, interactive bool) []cleanAction {
 	return actions
 }
 
-func emitPlan(tw *tap.Writer, actions []cleanAction, abandonedCount int, tombstoneCount int, orphanBuildCount int, dryRun bool) {
+func emitPlan(tw *tap.Writer, actions []cleanAction, abandonedCount int, tombstoneCount int, orphanBuildCount int, attestationCount int, dryRun bool) {
 	reason := "dry-run"
 	for _, a := range actions {
 		switch a.action {
@@ -680,9 +716,25 @@ func emitPlan(tw *tap.Writer, actions []cleanAction, abandonedCount int, tombsto
 			}
 		}
 	}
+	if attestationCount > 0 {
+		msg := fmt.Sprintf("expire %d attestation index entries past [madder].retain", attestationCount)
+		if dryRun {
+			if tw != nil {
+				tw.Skip(msg, reason)
+			} else {
+				log.Info("would " + msg)
+			}
+		} else {
+			if tw != nil {
+				tw.Skip(msg, "pending confirmation")
+			} else {
+				log.Info("will " + msg)
+			}
+		}
+	}
 }
 
-func confirmClean(removeCount, abandonedCount, tombstoneCount, orphanBuildCount int) (bool, error) {
+func confirmClean(removeCount, abandonedCount, tombstoneCount, orphanBuildCount, attestationCount int) (bool, error) {
 	if !cleanInteractive() {
 		return false, fmt.Errorf("sc clean requires an interactive terminal to confirm; use --yes to skip (and omit -i to skip dirty-file review)")
 	}
@@ -699,6 +751,9 @@ func confirmClean(removeCount, abandonedCount, tombstoneCount, orphanBuildCount 
 	if orphanBuildCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d orphaned transient worktree(s)", orphanBuildCount))
 	}
+	if attestationCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d expired attestation index entries", attestationCount))
+	}
 	prompt := fmt.Sprintf("Remove %s?", strings.Join(parts, " and "))
 	var confirmed bool
 	err := huh.NewConfirm().
@@ -711,7 +766,7 @@ func confirmClean(removeCount, abandonedCount, tombstoneCount, orphanBuildCount 
 	return confirmed, nil
 }
 
-func executeClean(tw *tap.Writer, actions []cleanAction, abandoned []session.State, orphans []orphanTransientWorktree, retention time.Duration, interactive bool) {
+func executeClean(tw *tap.Writer, actions []cleanAction, abandoned []session.State, orphans []orphanTransientWorktree, retention time.Duration, attestCutoff time.Time, attestRetain bool, interactive bool) {
 	for _, a := range actions {
 		switch a.action {
 		case "remove":
@@ -832,6 +887,24 @@ func executeClean(tw *tap.Writer, actions []cleanAction, abandoned []session.Sta
 			}
 		}
 	}
+
+	// [madder].retain (spinclass#427): index entries only; the blobs stay.
+	if attestRetain {
+		removed, err := attestationindex.Prune(attestCutoff)
+		if err != nil {
+			if tw != nil {
+				tw.NotOk("expire attestation index entries", map[string]string{"error": err.Error()})
+			} else {
+				log.Error("failed to expire attestation index entries", "error", err)
+			}
+		} else if len(removed) > 0 {
+			if tw != nil {
+				tw.Ok(fmt.Sprintf("expired %d attestation index entries past [madder].retain", len(removed)))
+			} else {
+				log.Info("expired attestation index entries", "count", len(removed))
+			}
+		}
+	}
 }
 
 func Run(startDir string, interactive bool, dryRun bool, yes bool, format string) error {
@@ -846,8 +919,10 @@ func Run(startDir string, interactive bool, dryRun bool, yes bool, format string
 	tombstoneCount := countStaleTombstones(retention)
 	orphans := findOrphanTransientWorktrees(startDir)
 	orphanCount := len(orphans)
+	attestCutoff, attestRetain := resolveAttestationRetention(startDir)
+	attestCount := countStaleAttestations(attestCutoff, attestRetain)
 
-	if len(worktrees) == 0 && abandonedCount == 0 && tombstoneCount == 0 && orphanCount == 0 {
+	if len(worktrees) == 0 && abandonedCount == 0 && tombstoneCount == 0 && orphanCount == 0 && attestCount == 0 {
 		if tw != nil {
 			tw.Skip("clean", "no worktrees found")
 			tw.Plan()
@@ -868,8 +943,8 @@ func Run(startDir string, interactive bool, dryRun bool, yes bool, format string
 	}
 
 	// Nothing actionable — just report skips and return.
-	if removeCount == 0 && abandonedCount == 0 && tombstoneCount == 0 && orphanCount == 0 {
-		emitPlan(tw, actions, abandonedCount, tombstoneCount, orphanCount, dryRun)
+	if removeCount == 0 && abandonedCount == 0 && tombstoneCount == 0 && orphanCount == 0 && attestCount == 0 {
+		emitPlan(tw, actions, abandonedCount, tombstoneCount, orphanCount, attestCount, dryRun)
 		if tw != nil {
 			tw.Plan()
 		}
@@ -877,7 +952,7 @@ func Run(startDir string, interactive bool, dryRun bool, yes bool, format string
 	}
 
 	// Show what will happen.
-	emitPlan(tw, actions, abandonedCount, tombstoneCount, orphanCount, dryRun)
+	emitPlan(tw, actions, abandonedCount, tombstoneCount, orphanCount, attestCount, dryRun)
 
 	if dryRun {
 		if tw != nil {
@@ -888,7 +963,7 @@ func Run(startDir string, interactive bool, dryRun bool, yes bool, format string
 
 	// Confirm unless --yes.
 	if !yes {
-		confirmed, err := confirmClean(removeCount, abandonedCount, tombstoneCount, orphanCount)
+		confirmed, err := confirmClean(removeCount, abandonedCount, tombstoneCount, orphanCount, attestCount)
 		if err != nil {
 			if tw != nil {
 				tw.Plan()
@@ -906,7 +981,7 @@ func Run(startDir string, interactive bool, dryRun bool, yes bool, format string
 		}
 	}
 
-	executeClean(tw, actions, abandonedSessions, orphans, retention, interactive)
+	executeClean(tw, actions, abandonedSessions, orphans, retention, attestCutoff, attestRetain, interactive)
 
 	if tw != nil {
 		tw.Plan()

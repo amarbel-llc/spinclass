@@ -471,7 +471,7 @@ func setupNoTTYClean(t *testing.T) {
 func TestConfirmCleanNoTTYErrors(t *testing.T) {
 	setupNoTTYClean(t)
 
-	_, err := confirmClean(1, 0, 0, 0)
+	_, err := confirmClean(1, 0, 0, 0, 0)
 	if err == nil {
 		t.Fatal("expected error on non-TTY, got nil")
 	}

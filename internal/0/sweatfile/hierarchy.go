@@ -255,6 +255,19 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 		}
 	}
 
+	// [madder] — scalar override (spinclass#427), copied the same way.
+	if other.Madder != nil {
+		if merged.Madder == nil {
+			merged.Madder = &Madder{}
+		} else {
+			cp := *merged.Madder
+			merged.Madder = &cp
+		}
+		if other.Madder.Retain != nil {
+			merged.Madder.Retain = other.Madder.Retain
+		}
+	}
+
 	// [store] likewise (FDR 0036): the identity it stamps on commits is trusted
 	// only from layers above the repo. See sweatfileio.TrustedStoreIdentity.
 	merged.Store = nil
