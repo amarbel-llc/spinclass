@@ -81,6 +81,60 @@ records how each open question was resolved).
   every session start, so the hook adds no exposure beyond the devShell load.
   An operator-accepted deviation; spinclass#464 tracks its re-evaluation.
 
+## As built: the composing per-commit dispatcher (spinclass#184, 2026-11-06)
+
+The per-commit hook that `[hooks].pre-commit` enables was designed in
+`docs/plans/2026-06-16-per-commit-repair-hook-design.md` and
+`docs/plans/2026-06-17-precommit-hook-composition-design.md` and shipped
+without a record of its own; this section is that record, as the code stands
+in `internal/bravo/apply/precommit.go` and `frozenhook.go`.
+
+- **Intent.** Repair drift at authoring time, so every commit in history is
+  conformant, where the merge-time REPAIR phase (FDR 0018, still live) amends
+  only the top commit at the gate.
+- **Install and scope.** `installPreCommitHook` runs from the worktree setup at
+  `sc start`, `sc spawn`, `sc resurrect`, `sc rebuild` and on every `sc resume`
+  (the re-freeze of the amendment above). It enables `extensions.worktreeConfig`
+  and sets a per-worktree `core.hooksPath` to `<worktree>/.spinclass/hooks`, so
+  one worktree's hook never reaches another's or the main checkout's. It
+  refuses when `core.worktree` is set in the common config, the documented
+  worktreeConfig footgun.
+- **Composition.** `.spinclass/hooks` holds one script, `_spinclass-dispatch`,
+  and a symlink to it for `pre-commit` and for every standard hook name the
+  repo's original hooks dir provides as an executable, non-sample file. The
+  dispatcher branches on its own basename: on `pre-commit` it runs the
+  formatter, then (and for every other name) it `exec`s the original same-named
+  hook with the same arguments, stdin and exit code, so a blocking native hook
+  still blocks and nothing is shadowed. A self-reference guard prevents the
+  exec loop. The original hooks dir is captured once, on first install, into
+  the sentinel `.spinclass/precommit-original-hooks` (the effective
+  `core.hooksPath` if it is not ours, else `$GIT_COMMON_DIR/hooks`), because a
+  later install would otherwise read our own override back as the original.
+  The hooks dir is rebuilt from scratch on each install so a native hook removed
+  upstream drops its shim.
+- **Formatter.** The canonical command is `conformist-pre-commit`. Its leading
+  word is frozen at install to the absolute path the landed default branch's
+  devShell provides (the 2026-11-04 amendment); the dispatcher runs `sh -c` on
+  the resulting command line when `command -v` finds the binary.
+- **Robustness.** Best effort and non-blocking: the commit proceeds whatever
+  the formatter does. A nonzero formatter exit is surfaced loudly, its captured
+  stderr plus a banner naming the command and the likely cause (a stale or
+  misconfigured formatter), never swallowed, since a formatter silently
+  rejecting its own flags would land commits unformatted while looking fine
+  (#183 review). A `flake.lock` that differs from the hash baked at install
+  prints the one-line drift warning and nothing more.
+- **Uninstall.** `disable-pre-commit = true` (or an inactive hook) restores
+  native hooks only: our `core.hooksPath` is unset only when it is ours, the
+  dispatcher dir, the sentinel and the frozen-hook record are removed. A
+  user-managed `core.hooksPath` is left alone.
+- **Record.** `session.State.FrozenHook` and the display sidecar
+  `.spinclass/precommit-hook.json`, as the amendment describes.
+- **Limitations.** A hook manager that rewrites `core.hooksPath` after install
+  defeats the composition until the next resume. The captured original is the
+  shared `$GIT_COMMON_DIR/hooks`, so a blocking native hook there gates every
+  worktree. Implicit (main-checkout) sessions get no hook (#182). A confined
+  worker's `grit_commit` bypasses hooks entirely (FDR 0036).
+
 ## Problem Statement
 
 spinclass drives conformist in a hand-rolled, pre-helper shape: `flake.nix`
