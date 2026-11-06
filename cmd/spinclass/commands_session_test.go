@@ -78,10 +78,11 @@ func TestCompleteWorktreeTargetsInRepoSorted(t *testing.T) {
 	}
 
 	// Keys are fully-qualified even for the containing repo; labels match
-	// the picker's Detail format: "<state> · <relative-time> · @<branch> · <repo>".
+	// the picker's Detail format, which ends with the canonical session key
+	// (spinclass#264 stage 2): "<state> · <relative-time> · <repo>/<branch>".
 	want := map[string]string{
-		"alpha/active-feature": "active · just now · @active-feature · alpha",
-		"alpha/stale-feature":  "inactive · just now · @stale-feature · alpha",
+		"alpha/active-feature": "active · just now · alpha/active-feature",
+		"alpha/stale-feature":  "inactive · just now · alpha/stale-feature",
 	}
 	for id, label := range want {
 		if got[id] != label {
