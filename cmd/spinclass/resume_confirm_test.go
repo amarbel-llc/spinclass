@@ -119,9 +119,11 @@ func TestBuildResumeDetail(t *testing.T) {
 	now := time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC)
 	s := detailFixtureState()
 	got := buildResumeDetail(&s, session.StateInactive, false, now)
+	// id is the canonical <repo>/<branch> key and repo the repo directory
+	// (spinclass#264 stage 2), not the worktree dir name twice over.
 	want := "" +
-		"  id:        catalpa\n" +
-		"  repo:      myrepo/feature\n" +
+		"  id:        myrepo/feature\n" +
+		"  repo:      myrepo\n" +
 		"  state:     inactive\n" +
 		"  last:      5m ago\n" +
 		"  worktree:  /home/u/repos/myrepo/.worktrees/catalpa\n"
@@ -139,7 +141,7 @@ func TestBuildResumeDetailWarningVariant(t *testing.T) {
 	if !strings.HasPrefix(got, "Warning:") {
 		t.Errorf("warning variant should start with a warning paragraph, got %q", got)
 	}
-	for _, want := range []string{"attached elsewhere", "  state:     active\n", "  id:        catalpa\n"} {
+	for _, want := range []string{"attached elsewhere", "  state:     active\n", "  id:        myrepo/feature\n"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("buildResumeDetail = %q, missing %q", got, want)
 		}
@@ -147,14 +149,14 @@ func TestBuildResumeDetailWarningVariant(t *testing.T) {
 }
 
 // TestResumeConfirmTitle: title uses the description, falling back to
-// the worktree dir name, same as the picker rows.
+// the canonical session key, same as the picker rows (spinclass#264).
 func TestResumeConfirmTitle(t *testing.T) {
 	s := detailFixtureState()
 	if got := resumeConfirmTitle(&s); got != "fix login bug" {
 		t.Errorf("resumeConfirmTitle = %q, want %q", got, "fix login bug")
 	}
 	s.Description = ""
-	if got := resumeConfirmTitle(&s); got != "catalpa" {
-		t.Errorf("resumeConfirmTitle fallback = %q, want %q", got, "catalpa")
+	if got := resumeConfirmTitle(&s); got != "myrepo/feature" {
+		t.Errorf("resumeConfirmTitle fallback = %q, want %q", got, "myrepo/feature")
 	}
 }

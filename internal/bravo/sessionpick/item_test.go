@@ -38,12 +38,15 @@ func TestItemTitleFromDescription(t *testing.T) {
 	}
 }
 
-func TestItemTitleFallsBackToWorktreeDirName(t *testing.T) {
+// A session with no description is named by its canonical <repo>/<branch>
+// key, never the bare worktree dir name, which collides across repos
+// (spinclass#264 stage 2).
+func TestItemTitleFallsBackToCanonicalKey(t *testing.T) {
 	now := time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC)
 	s := fixture(t, "")
 	it := ItemForState(s, now)
-	if got := it.Title(); got != "feature" {
-		t.Errorf("Title() = %q, want %q (base of WorktreePath)", got, "feature")
+	if got := it.Title(); got != "myrepo/feature" {
+		t.Errorf("Title() = %q, want %q (the canonical session key)", got, "myrepo/feature")
 	}
 }
 
@@ -52,7 +55,7 @@ func TestItemDescriptionFormat(t *testing.T) {
 	s := fixture(t, "fix login bug")
 	// StartedAt 10:00, now 12:00 → "2h ago"; ExitedAt nil → StartedAt used.
 	it := ItemForState(s, now)
-	want := "inactive · 2h ago · @feature · myrepo"
+	want := "inactive · 2h ago · myrepo/feature"
 	if got := it.Description(); got != want {
 		t.Errorf("Description() = %q, want %q", got, want)
 	}
@@ -64,7 +67,7 @@ func TestItemDescriptionPrefersExitedAt(t *testing.T) {
 	exited := time.Date(2026, 6, 6, 11, 55, 0, 0, time.UTC) // 5m before now
 	s.ExitedAt = &exited
 	it := ItemForState(s, now)
-	want := "inactive · 5m ago · @feature · myrepo"
+	want := "inactive · 5m ago · myrepo/feature"
 	if got := it.Description(); got != want {
 		t.Errorf("Description() = %q, want %q", got, want)
 	}
@@ -75,7 +78,9 @@ func TestItemFilterValue(t *testing.T) {
 	s := fixture(t, "fix login bug")
 	it := ItemForState(s, now)
 	got := it.FilterValue()
-	for _, want := range []string{"fix login bug", "feature", "myrepo"} {
+	// The description, the canonical key and the bare worktree dir name (so a
+	// typed basename still finds the row).
+	for _, want := range []string{"fix login bug", "myrepo/feature", " feature"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("FilterValue() = %q, missing %q", got, want)
 		}

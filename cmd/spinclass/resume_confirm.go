@@ -72,12 +72,13 @@ func resumeConfirmPlan(resolvedState string, explicitTarget, yes, isTTY bool) (r
 }
 
 // resumeConfirmTitle mirrors the picker row title: the session
-// description, falling back to the worktree dir name.
+// description, falling back to the canonical <repo>/<branch> key
+// (spinclass#264).
 func resumeConfirmTitle(s *session.State) string {
 	if s.Description != "" {
 		return s.Description
 	}
-	return filepath.Base(s.WorktreePath)
+	return s.Key()
 }
 
 // buildResumeDetail renders the indented key: value detail block shown
@@ -91,8 +92,10 @@ func buildResumeDetail(s *session.State, resolvedState string, warnActive bool, 
 		fmt.Fprintln(&b, "Warning: this session is active — it is probably attached elsewhere.")
 		fmt.Fprintln(&b)
 	}
-	fmt.Fprintf(&b, "  id:        %s\n", filepath.Base(s.WorktreePath))
-	fmt.Fprintf(&b, "  repo:      %s\n", s.SessionKey)
+	// id is the canonical session key (spinclass#264); repo is the repo
+	// directory, so the two lines no longer repeat each other.
+	fmt.Fprintf(&b, "  id:        %s\n", s.Key())
+	fmt.Fprintf(&b, "  repo:      %s\n", filepath.Base(s.RepoPath))
 	fmt.Fprintf(&b, "  state:     %s\n", resolvedState)
 	fmt.Fprintf(&b, "  last:      %s\n", sessionpick.FormatRelDate(sessionpick.LastActivity(*s), now))
 	fmt.Fprintf(&b, "  worktree:  %s\n", s.WorktreePath)

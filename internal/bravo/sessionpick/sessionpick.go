@@ -47,22 +47,27 @@ func (i Item) FilterValue() string { return i.Filter }
 // ItemForState builds the picker row for a local session. now is
 // injected for testability of the relative-time tiering. Exported so
 // tab completion can reuse Detail and read identically to the picker.
+//
+// The session is named by its canonical key, <repo>/<branch>, the form
+// `sc list` prints and session.FindByTarget accepts from any cwd
+// (spinclass#264): the title falls back to it when there is no
+// description, the detail ends with it, and the filter still matches the
+// bare worktree dir name so a typed basename keeps finding the row.
 func ItemForState(s session.State, now time.Time) Item {
+	key := s.Key()
 	title := s.Description
 	if title == "" {
-		title = filepath.Base(s.WorktreePath)
+		title = key
 	}
-	repoBase := filepath.Base(s.RepoPath)
 	detail := strings.Join([]string{
 		s.ResolveState(),
 		FormatRelDate(LastActivity(s), now),
-		"@" + s.Branch,
-		repoBase,
+		key,
 	}, " · ")
 	return Item{
 		TitleText: title,
 		Detail:    detail,
-		Filter:    title + " " + filepath.Base(s.WorktreePath) + " " + repoBase,
+		Filter:    title + " " + key + " " + filepath.Base(s.WorktreePath),
 	}
 }
 
@@ -185,7 +190,7 @@ func choose(repoPath, cmdName string, dbg *slog.Logger, autoSingle bool, remoteR
 	if !interactive() {
 		ids := make([]string, 0, len(sessions)+len(remoteRows))
 		for _, s := range sessions {
-			ids = append(ids, filepath.Base(s.WorktreePath))
+			ids = append(ids, s.Key())
 		}
 		for _, r := range remoteRows {
 			ids = append(ids, r.Target)
