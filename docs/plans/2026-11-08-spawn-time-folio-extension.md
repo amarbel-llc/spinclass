@@ -185,7 +185,33 @@ serve merge; (3) the ceiling check and the parameter; (4) always-ask and the
 CLI flag; (5) the unit bind; (6) visibility; (7) docs (sweatfile(5) `[folio]`,
 FDR 0035/0036 passages, a new FDR section or amendment to the #438 record).
 
+## 6a. Operator rulings (2026-11-08, via circus/eager-holly)
+
+Recommendation A is accepted. Ruled:
+
+- **Anchor, ceiling, approval, lifetime.** The `fs:` anchor with the floor;
+  narrow-only against the spawner's own compiled policy; always-ask; the grant
+  ends with the session (§7 questions 1, 2, 5 and the base of 8).
+- **Unconfined workers (Q9): accepted, as a documented SOFT grant.** The
+  extension is not confined-only. For an unconfined worker it is intent plus the
+  broker's answer, not a boundary (F2); the docs and the result text say so.
+- **Read-only bind (Q4): yes.** Each extension path also becomes a read-only
+  bind in a confined unit's spec (§5 item 5).
+- **Read only in v1 (Q3).** No write extension.
+- **Refused subtrees under `fs:` (item A):** `/proc`, `/sys`, `/dev`, `/etc`,
+  `/root`, `$HOME/.ssh`, `$HOME/.gnupg` and spinclass's own state directories,
+  extended on request. A WIDER list (`/run`, any directory named like secrets,
+  keys or credentials, and what else a spawn-time read grant must never reach)
+  is to be audited first: spinclass#467. It blocks building the `fs:` anchor.
+
+Still with the operator, to come in later batches: granting later (Q7), expiry
+(Q8, beyond "with the session"), resurrect (Q10), named sets (Q6), and the
+"narrow-only means the coordinator's stanza is widened first" consequence.
+Nothing is built.
+
 ## 7. Open questions for the operator
+
+Status: questions 1, 2, 3, 4, 5 and 9 are ruled (§6a); 6, 7, 8 and 10 remain.
 
 1. **The `fs:` anchor.** Wanted as designed (root `/`, two-segment floor, a
    refused subtree list)? Or a narrower form, for example named roots the
