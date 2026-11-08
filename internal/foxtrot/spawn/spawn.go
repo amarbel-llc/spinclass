@@ -598,6 +598,7 @@ func newWorkerState(rp worktree.ResolvedPath, driver Driver, desc string, profil
 		// The spawner holds every right (FDR 0032 D13); record it so the
 		// record is explicit rather than leaning on the implicit-spawner rule.
 		st.HandleRights = map[string]string{driver.Principal: session.AllHandleRights}
+		st.SeedSpawnerHandle(driver.Principal, time.Now().UTC())
 	}
 	return st
 }

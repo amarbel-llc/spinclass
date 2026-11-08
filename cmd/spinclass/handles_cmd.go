@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
@@ -233,7 +234,8 @@ func grantSessionHandle(target, to, rights string) (string, error) {
 		)
 	}
 
-	changed := child.GrantHandle(to, wanted.String())
+	grantedAt := time.Now().UTC()
+	changed := child.GrantHandleBy(to, wanted.String(), callerPrincipal, grantedAt)
 	if !changed {
 		// `to` already holds (or is already pending on) a handle — GrantHandle
 		// is a no-op regardless of what rights this call named. A re-grant is
@@ -254,7 +256,7 @@ func grantSessionHandle(target, to, rights string) (string, error) {
 	}
 	if err := updateLoadedSession(child, func(cur *session.State) bool {
 		accepted := callerAccepted && cur.AcceptHandle(callerPrincipal)
-		granted := cur.GrantHandle(to, wanted.String())
+		granted := cur.GrantHandleBy(to, wanted.String(), callerPrincipal, grantedAt)
 		return accepted || granted
 	}); err != nil {
 		return "", fmt.Errorf("writing session state: %w", err)
@@ -465,9 +467,9 @@ func runListHandles(p listHandlesParams) (string, error) {
 		}
 		switch {
 		case s.IsHolder(callerPrincipal):
-			lines = append(lines, fmt.Sprintf("held    %s  rights=%s%s", s.Key(), displayRights(s, callerPrincipal), note))
+			lines = append(lines, fmt.Sprintf("held    %s  rights=%s  %s%s", s.Key(), displayRights(s, callerPrincipal), s.ProvenanceText(callerPrincipal), note))
 		case pending:
-			lines = append(lines, fmt.Sprintf("pending %s  rights=%s%s", s.Key(), displayRights(s, callerPrincipal), note))
+			lines = append(lines, fmt.Sprintf("pending %s  rights=%s  %s%s", s.Key(), displayRights(s, callerPrincipal), s.ProvenanceText(callerPrincipal), note))
 		}
 	}
 	if len(lines) == 0 {

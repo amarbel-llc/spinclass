@@ -301,6 +301,7 @@ var authorityFields = []struct {
 	{"holders", func(s *State) any { return s.Holders }},
 	{"pending_handles", func(s *State) any { return s.PendingHandles }},
 	{"handle_rights", func(s *State) any { return s.HandleRights }},
+	{"handle_provenance", func(s *State) any { return s.HandleProvenance }},
 	{"profile", func(s *State) any { return s.Profile }},
 	{"profile_digest", func(s *State) any { return s.ProfileDigest }},
 	{"profile_rebinds", func(s *State) any { return s.ProfileRebinds }},

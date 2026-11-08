@@ -219,6 +219,13 @@ type State struct {
 	// materialized view). Slice 1 replaces this view with signed grant-record
 	// digests, which carry rights properly.
 	HandleRights map[string]string `json:"handle_rights,omitempty"`
+	// HandleProvenance records, per principal in PendingHandles or Holders, who
+	// granted the handle and when it was granted and accepted (#435), so a
+	// holder can tell a legitimate handle from a stray one. A spawner's seeded
+	// handle is marked HandleSpawn. Absent for handles recorded before #435.
+	// Agent-writable like the rest of this file for an unconfined session; the
+	// frontend record is authoritative for a confined one (FDR 0035).
+	HandleProvenance map[string]HandleProvenance `json:"handle_provenance,omitempty"`
 	// Profile is the clown profile name this worker was spawned with (FDR 0034);
 	// ProfileDigest is the content digest of that profile's resolved definition
 	// at spawn, so a later edit is detectable. AuthorizingGrant is the digest of
@@ -1344,6 +1351,24 @@ func (s State) HoldersWith(right string) []string {
 // (IsHolder(caller)) is checked by the caller, not here — this method only
 // ever mutates the CHILD's state, and the child does not know who is asking.
 func (s *State) GrantHandle(to, rights string) (changed bool) {
+	return s.GrantHandleBy(to, rights, "", time.Now().UTC())
+}
+
+// HandleSpawn is the GrantedBy value of the handle a spawn seeds for its
+// spawner: it says "the spawn", not a grant by some other principal.
+const HandleSpawn = "spawn"
+
+// HandleProvenance is who granted a handle and when it was granted and
+// accepted (#435). GrantedBy is the granter's principal, HandleSpawn for a
+// spawner's seeded handle, or empty when the granter was not known.
+type HandleProvenance struct {
+	GrantedBy  string     `json:"granted_by,omitempty"`
+	GrantedAt  *time.Time `json:"granted_at,omitempty"`
+	AcceptedAt *time.Time `json:"accepted_at,omitempty"`
+}
+
+// GrantHandleBy is GrantHandle recording who granted the handle and when.
+func (s *State) GrantHandleBy(to, rights, by string, at time.Time) (changed bool) {
 	if to == "" || s.IsHolder(to) || slices.Contains(s.PendingHandles, to) {
 		return false
 	}
@@ -1355,7 +1380,48 @@ func (s *State) GrantHandle(to, rights string) (changed bool) {
 		s.HandleRights = map[string]string{}
 	}
 	s.HandleRights[to] = rights
+	if s.HandleProvenance == nil {
+		s.HandleProvenance = map[string]HandleProvenance{}
+	}
+	s.HandleProvenance[to] = HandleProvenance{GrantedBy: by, GrantedAt: &at}
 	return true
+}
+
+// SeedSpawnerHandle records the handle a spawn gives its spawner as held from
+// the moment of the spawn.
+func (s *State) SeedSpawnerHandle(principal string, at time.Time) {
+	if principal == "" {
+		return
+	}
+	if s.HandleProvenance == nil {
+		s.HandleProvenance = map[string]HandleProvenance{}
+	}
+	s.HandleProvenance[principal] = HandleProvenance{GrantedBy: HandleSpawn, GrantedAt: &at, AcceptedAt: &at}
+}
+
+// ProvenanceText renders where principal's handle came from for list-handles
+// and whoami: "granted_by=P granted_at=T accepted_at=T", "spawned_at=T" for a
+// spawner's seeded handle, or "provenance=unrecorded" for a handle recorded
+// before #435.
+func (s State) ProvenanceText(principal string) string {
+	p, ok := s.HandleProvenance[principal]
+	if !ok {
+		return "provenance=unrecorded"
+	}
+	stamp := func(t *time.Time) string {
+		if t == nil {
+			return "-"
+		}
+		return t.UTC().Format(time.RFC3339)
+	}
+	if p.GrantedBy == HandleSpawn {
+		return "spawned_at=" + stamp(p.GrantedAt)
+	}
+	by := p.GrantedBy
+	if by == "" {
+		by = "unknown"
+	}
+	return "granted_by=" + by + " granted_at=" + stamp(p.GrantedAt) + " accepted_at=" + stamp(p.AcceptedAt)
 }
 
 // AcceptHandle moves principal from PendingHandles to Holders — accept-on-
@@ -1370,6 +1436,12 @@ func (s *State) AcceptHandle(principal string) (accepted bool) {
 	s.PendingHandles = slices.Delete(s.PendingHandles, idx, idx+1)
 	if !slices.Contains(s.Holders, principal) {
 		s.Holders = append(s.Holders, principal)
+	}
+	// A handle granted before #435 has no entry and stays "unrecorded".
+	if p, ok := s.HandleProvenance[principal]; ok {
+		now := time.Now().UTC()
+		p.AcceptedAt = &now
+		s.HandleProvenance[principal] = p
 	}
 	return true
 }
@@ -1396,6 +1468,7 @@ func (s *State) ReleaseHandle(principal string) (released bool) {
 	}
 	if released {
 		delete(s.HandleRights, principal)
+		delete(s.HandleProvenance, principal)
 	}
 	return released
 }

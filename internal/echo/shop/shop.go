@@ -454,6 +454,7 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 			st.Holders = existing.Holders
 			st.PendingHandles = existing.PendingHandles
 			st.HandleRights = existing.HandleRights
+			st.HandleProvenance = existing.HandleProvenance
 			st.Profile = existing.Profile
 			st.ProfileDigest = existing.ProfileDigest
 			st.AuthorizingGrant = existing.AuthorizingGrant
