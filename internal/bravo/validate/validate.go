@@ -792,6 +792,21 @@ func CheckConfinedPreMerge(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue 
 	}}
 }
 
+// CheckAllowMergeCommits warns about a repo-level [hooks].allow-merge-commits
+// (#468): the switch is read only from layers above the repo, because the
+// repo's tree, sweatfile included, is what the session worker writes, so a
+// value there is ignored. A value above the repo covers every repo under it.
+func CheckAllowMergeCommits(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
+	if layerAboveRepo || sf.Hooks == nil || sf.Hooks.AllowMergeCommits == nil {
+		return nil
+	}
+	return []Issue{{
+		Message:  "[hooks] sets `allow-merge-commits` in a repo-level sweatfile: it is ignored — the switch is read only from sweatfiles above the repo (and then covers every repo under that layer); move it to the global sweatfile",
+		Severity: SeverityWarning,
+		Field:    "hooks.allow-merge-commits",
+	}}
+}
+
 // CheckFolio validates the [folio] table (spinclass#438): every entry must
 // parse under the stanza grammar (internal/0/folio) and unmatched must be ask
 // or deny; both are errors, because an entry the broker could not compile
@@ -1271,6 +1286,10 @@ func Run(w io.Writer, home, repoDir string) int {
 		}
 
 		for _, iss := range CheckConfinedPreMerge(src.File, sweatfileio.LayerAboveRepo(src.Path, home, mainRoot)) {
+			sub.Ok(fmt.Sprintf("hooks valid # warning: %s", iss.Message))
+		}
+
+		for _, iss := range CheckAllowMergeCommits(src.File, sweatfileio.LayerAboveRepo(src.Path, home, mainRoot)) {
 			sub.Ok(fmt.Sprintf("hooks valid # warning: %s", iss.Message))
 		}
 

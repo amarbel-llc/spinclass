@@ -138,6 +138,16 @@ type Hooks struct {
 	AllowStaleBase             *bool   `toml:"allow-stale-base"`
 	AllowNoCredential          *bool   `toml:"allow-no-credential"`
 	RequireHookScope           *bool   `toml:"require-hook-scope"`
+	// AllowMergeCommits lets a merge land a branch that holds a merge commit
+	// and already descends from the landing target, as it is, with no rebase
+	// (#468). Off by default: a merge commit between the target and the branch
+	// is refused, because the merge's rebase would flatten it. Even on, a
+	// target that moved past such a branch is refused. Trusted only from layers
+	// above the repo (a repo or worktree value is a file the session worker
+	// writes) and so applies to every repo under the layer that sets it; the
+	// last trusted layer wins. Read ONLY through
+	// sweatfileio.TrustedAllowMergeCommits; MergeWith never carries it.
+	AllowMergeCommits *bool `toml:"allow-merge-commits"`
 }
 
 // Auth declares how a worktree session mints and revokes its per-session forge

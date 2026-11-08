@@ -366,6 +366,12 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 				_vHooksRequireHookScope.MarkConsumed()
 			}
 		}
+		if _vHooksAllowMergeCommits, _ok := _vHooks.Field("allow-merge-commits"); _ok && _vHooksAllowMergeCommits.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksAllowMergeCommits.Leaf); _xok {
+				hooksVal3.AllowMergeCommits = &_x
+				_vHooksAllowMergeCommits.MarkConsumed()
+			}
+		}
 		d.data.Hooks = hooksVal3
 	} else {
 		hooksVal3 := &Hooks{}
@@ -564,6 +570,13 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractBool(_vRequireHookScope.Leaf); _xok {
 				hooksVal3.RequireHookScope = &_x
 				_vRequireHookScope.MarkConsumed()
+			}
+		}
+		if _vAllowMergeCommits, _ok := model.Field("allow-merge-commits"); _ok && _vAllowMergeCommits.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vAllowMergeCommits.Leaf); _xok {
+				hooksVal3.AllowMergeCommits = &_x
+				_vAllowMergeCommits.MarkConsumed()
 			}
 		}
 		if _foundHooks {
@@ -1776,6 +1789,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
+		if d.data.Hooks.AllowMergeCommits != nil {
+			if err := cst.SetAny(tableNode, "allow-merge-commits", *d.data.Hooks.AllowMergeCommits); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
 	}
 	if d.data.Auth != nil {
 		tableNode := cst.EnsureChildTable(d.cstDoc.Root(), d.cstDoc.Root(), "auth")
@@ -2562,6 +2580,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vHooksRequireHookScope.MarkConsumed()
 			}
 		}
+		if _vHooksAllowMergeCommits, _ok := _vHooks.Field("allow-merge-commits"); _ok && _vHooksAllowMergeCommits.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHooksAllowMergeCommits.Leaf); _xok {
+				hooksVal3.AllowMergeCommits = &_x
+				_vHooksAllowMergeCommits.MarkConsumed()
+			}
+		}
 		data.Hooks = hooksVal3
 	} else {
 		hooksVal3 := &Hooks{}
@@ -2760,6 +2784,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractBool(_vRequireHookScope.Leaf); _xok {
 				hooksVal3.RequireHookScope = &_x
 				_vRequireHookScope.MarkConsumed()
+			}
+		}
+		if _vAllowMergeCommits, _ok := sub.Field("allow-merge-commits"); _ok && _vAllowMergeCommits.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractBool(_vAllowMergeCommits.Leaf); _xok {
+				hooksVal3.AllowMergeCommits = &_x
+				_vAllowMergeCommits.MarkConsumed()
 			}
 		}
 		if _foundHooks {
@@ -3953,6 +3984,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if data.Hooks.RequireHookScope != nil {
 			if err := cst.SetAny(tableNode, "require-hook-scope", *data.Hooks.RequireHookScope); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.Hooks.AllowMergeCommits != nil {
+			if err := cst.SetAny(tableNode, "allow-merge-commits", *data.Hooks.AllowMergeCommits); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}

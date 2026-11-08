@@ -25,6 +25,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/landing"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	gitstore "code.linenisgreat.com/spinclass/internal/alfa/store/git"
+	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
 	"code.linenisgreat.com/spinclass/internal/bravo/hookrun"
 	"code.linenisgreat.com/spinclass/internal/bravo/present"
@@ -247,10 +248,16 @@ func PrepareMergeWith(ctx context.Context, rep *crap.Reporter, ts *crap.TestStre
 	switch {
 	case mergeScanErr != nil:
 		return "", failStep(ts, "rebase "+branch, mergeScanErr, "")
+	case mergesInRange && !allowMergeCommits(preamble, repoPath):
+		// #468: this merge's rebase has no --rebase-merges, so it would flatten
+		// the merge commit and re-pick everything it merged in. Linear history is
+		// the default; a trusted sweatfile layer opts out.
+		return "", failStep(ts, "rebase "+branch, fmt.Errorf(
+			"%s holds a merge commit between it and %s: the rebase this merge runs would flatten it. Rebase %s so it holds no merge commit, or merge by hand, then re-merge. A sweatfile layer above the repo can set [hooks].allow-merge-commits = true to land such a branch as it is",
+			branch, target.Ref(), branch), "")
 	case mergesInRange && git.IsAncestor(wtPath, target.Ref(), branch):
-		// #468: a rebase without --rebase-merges flattens a merge commit and
-		// re-picks everything it merged in. The branch already descends from the
-		// target, so there is nothing to rebase onto: land it as it is.
+		// Opted in (#468) and the branch already descends from the target, so
+		// there is nothing to rebase onto: land it as it is.
 		ts.Ok("rebase " + branch + " # SKIP branch holds a merge commit and already descends from " + target.Ref())
 	case mergesInRange:
 		return "", failStep(ts, "rebase "+branch, fmt.Errorf(
@@ -445,6 +452,20 @@ func checkExpectedTip(ts *crap.TestStream, wtPath, branch, expect string) error 
 	}
 	ts.Ok(label)
 	return nil
+}
+
+// allowMergeCommits is the trusted [hooks].allow-merge-commits switch (#468),
+// off when the hierarchy did not load: only layers above the repo count.
+func allowMergeCommits(p mergePreamble, repoPath string) bool {
+	if !p.haveHierarchy {
+		return false
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	allow, _ := sweatfileio.TrustedAllowMergeCommits(p.hierarchy, home, repoPath)
+	return allow
 }
 
 // rangeHasMergeCommit reports whether base..branch contains a merge commit.
@@ -887,6 +908,16 @@ func rebaseLanding(ts *crap.TestStream, landPath, branch, targetRef string) (lan
 	// onto the moved tip, where PrepareMerge's own pre-flight names the driver.
 	if err := check.PreflightMergeDrivers(ts, landPath, branch, targetRef); err != nil {
 		return "", fmt.Errorf("%w: %v; install the driver, then re-merge", ErrIntegrationConflict, err)
+	}
+	// A branch let through with [hooks].allow-merge-commits (#468) holds a merge
+	// commit this replay would flatten, as the prepare-time rebase would; the
+	// re-merge refuses it with the guidance, so nothing lands flattened.
+	if merges, scanErr := rangeHasMergeCommit(landPath, targetRef, "HEAD"); scanErr != nil {
+		return "", failStep(ts, "land "+branch, fmt.Errorf("%w: %v", ErrIntegrationConflict, scanErr), "")
+	} else if merges {
+		return "", failStep(ts, "land "+branch, fmt.Errorf(
+			"%w: %s holds a merge commit and %s moved during the gate: replaying it would flatten the merge. Rebase or merge %s into the branch by hand, then re-merge",
+			ErrIntegrationConflict, branch, targetRef, targetRef), "")
 	}
 	out, rebaseErr := git.Rebase(landPath, targetRef)
 	if rebaseErr != nil {

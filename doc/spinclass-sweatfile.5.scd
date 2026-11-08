@@ -853,6 +853,33 @@ does not export *WORKTREE*.
 	(e.g. a changed formatter binary behind an unchanged hook command) is
 	not detected, since the config is unchanged. *Merge:* scalar override.
 
+*allow-merge-commits*
+	Boolean. Lets *sc merge* land a session branch that holds a merge commit
+	(spinclass#468). Default (false): a merge commit between the landing
+	target and the branch is refused before the rebase, because the rebase
+	this merge runs has no *--rebase-merges*, so it would flatten the merge
+	and re-pick everything the merge brought in (for an unrelated-history
+	import, that fails at the first upstream commit). The refusal says to
+	rebase the branch so it holds no merge commit, or merge by hand, then
+	re-merge; the default keeps landed history linear.
+
+	When true, a branch that holds a merge commit and already descends from
+	the landing target lands as it is: the rebase is skipped (the record
+	carries a *SKIP* point naming why) and the fast-forward lands the merge
+	with its second parent, so an imported upstream keeps its original
+	shas. It is still refused when the target moved past such a branch,
+	whether before the rebase or while the gate ran (the landing rebase
+	would flatten the merge too); re-merge after rebasing or merging the
+	target into the branch by hand.
+
+	Read only from sweatfiles above the repo (the global sweatfile or a
+	parent directory's): a repo-level or worktree value is a file the session
+	worker writes, so it is ignored and *sc validate* warns. The last such
+	layer that sets it wins. Limitation: because only layers above the repo
+	count, the opt-in covers every repo under the layer that sets it; a
+	per-repo opt-in is not possible. Not merged into the effective
+	sweatfile. *Merge:* trusted layers only, scalar override.
+
 *allow-stale-base*
 	Boolean. Permits creating a session even when the repo's default branch
 	could not be confirmed current.

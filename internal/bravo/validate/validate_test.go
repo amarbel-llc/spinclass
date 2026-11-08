@@ -825,6 +825,22 @@ func TestCheckConfinedPreMergeWarnsInRepoLayer(t *testing.T) {
 	}
 }
 
+// [hooks] allow-merge-commits (#468) is honoured only above the repo, so a
+// repo-level value warns once and a trusted one does not.
+func TestCheckAllowMergeCommitsWarnsInRepoLayer(t *testing.T) {
+	on := true
+	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{AllowMergeCommits: &on}}
+	if got := CheckAllowMergeCommits(sf, false); len(got) != 1 || got[0].Field != "hooks.allow-merge-commits" || got[0].Severity != SeverityWarning {
+		t.Errorf("repo-layer allow-merge-commits should warn once, got %+v", got)
+	}
+	if len(CheckAllowMergeCommits(sf, true)) != 0 {
+		t.Error("above-repo allow-merge-commits should not warn")
+	}
+	if len(CheckAllowMergeCommits(sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{}}, false)) != 0 {
+		t.Error("an unset key should not warn")
+	}
+}
+
 func TestCheckStoreWarnsInRepoLayer(t *testing.T) {
 	name := "A"
 	sf := sweatfile.Sweatfile{Store: &sweatfile.Store{AuthorName: &name}}

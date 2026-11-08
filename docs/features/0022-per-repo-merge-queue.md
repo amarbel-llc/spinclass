@@ -116,6 +116,21 @@ paths). After a rebased landing the session branch tip is no longer an
 ancestor of the default branch, so teardown uses `branch -D`; force is safe
 because the patch-identical content just landed via the rebased sha.
 
+### Merge commits in the session branch (#468)
+
+Both rebases (the session worktree's in `PrepareMerge`, this landing replay)
+run without `--rebase-merges`, so each flattens a merge commit and re-picks
+what it merged in. History stays linear by refusing instead: a merge commit
+between the landing target and the branch fails `PrepareMerge` with guidance
+(rebase the branch so it holds no merge commit, or merge by hand, then
+re-merge). The opt-in `[hooks].allow-merge-commits` (trusted layers above the
+repo only; a per-repo opt-in is not possible, since a trusted value covers
+every repo under its layer — a possible later change, not built) lets a
+branch that already descends from the target land as it is, with no rebase and
+its merge intact. A target that moved past such a branch still refuses, at
+prepare time and at the landing replay (`ErrIntegrationConflict`, nothing
+lands). `--rebase-merges` is not used and was not verified.
+
 ## Examples
 
 ```toml

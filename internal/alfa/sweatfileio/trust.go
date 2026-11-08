@@ -259,6 +259,29 @@ func TrustedAllowSelfClose(h sweatfile.Hierarchy, home, repoRoot string) (allow 
 	return allow, untrusted
 }
 
+// TrustedAllowMergeCommits returns the [hooks].allow-merge-commits switch
+// honoured for the repo (#468): a scalar, the last layer above the repo that
+// sets it wins, off when unset. Layers that may not set it (the repo and
+// worktree files, which the session worker writes) are never honoured; their
+// paths are returned in untrusted. A trusted value covers every repo under the
+// layer that sets it. Hierarchy.Merged never carries the key.
+func TrustedAllowMergeCommits(h sweatfile.Hierarchy, home, repoRoot string) (allow bool, untrusted []string) {
+	for _, src := range h.Sources {
+		if src.SkipReason != "" || !src.Found {
+			continue
+		}
+		if src.File.Hooks == nil || src.File.Hooks.AllowMergeCommits == nil {
+			continue
+		}
+		if LayerAboveRepo(src.Path, home, repoRoot) {
+			allow = *src.File.Hooks.AllowMergeCommits
+		} else {
+			untrusted = append(untrusted, src.Path)
+		}
+	}
+	return allow, untrusted
+}
+
 // DefaultConfinedPreMerge is the gate a guarded merge runs when no trusted
 // layer sets [hooks].confined-pre-merge (spinclass#449): the flake's own
 // checks, evaluated purely, with a lock that must already be complete.
