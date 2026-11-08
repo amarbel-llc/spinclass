@@ -117,6 +117,22 @@ type Session struct {
 	// Held is the keys of the sessions the caller holds an accepted handle on
 	// (FDR 0032), read by the SessionAt check and named in its refusal.
 	Held []string
+	// Rebases is the frontend's record of the branch each grit-started rebase
+	// replays (spinclass#456). Nil means none is kept: a rebase in progress is
+	// then judged as before, on head-name for an unconfined caller and not at
+	// all for a confined one.
+	Rebases RebaseRecords
+}
+
+// RebaseRecords is where grit remembers, outside anything a unit can write,
+// which branch a rebase it started is replaying.
+type RebaseRecords interface {
+	// Read is the full branch ref recorded for the worktree, if any.
+	Read(worktree string) (string, bool)
+	// Write records the branch the rebase in progress in worktree replays.
+	Write(worktree, head string) error
+	// Clear forgets the worktree's record.
+	Clear(worktree string)
 }
 
 // Repo locates a session's repository from trusted state.

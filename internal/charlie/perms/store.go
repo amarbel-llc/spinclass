@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"code.linenisgreat.com/spinclass/internal/0/rebaserecord"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/store"
 	gitstore "code.linenisgreat.com/spinclass/internal/alfa/store/git"
@@ -98,9 +99,11 @@ var resolveStoreSessionAtCwd = func(cwd, principal string) (store.Session, error
 // and Held), so a call aimed at another session's worktree asks before any
 // git runs there, and the caller's confinement, which Classify reads for the
 // judgements a confined caller must not get (a rebase in progress,
-// spinclass#455).
+// spinclass#455), and the frontend's record of the rebases grit started
+// (Rebases, spinclass#456), which lets a rebase in progress be judged for any
+// caller on a branch a unit cannot forge.
 func ScopedStoreSession(dir, branch, principal string, confinement store.Confinement) store.Session {
-	return store.Session{Dir: dir, Branch: branch, SessionAt: session.KeyAtWorktree, Held: session.HeldKeys(principal), Confinement: confinement}
+	return store.Session{Dir: dir, Branch: branch, SessionAt: session.KeyAtWorktree, Held: session.HeldKeys(principal), Confinement: confinement, Rebases: rebaserecord.Files{}}
 }
 
 // StoreVerdict is the PreToolUse reading of a grit store tool call (FDR 0036

@@ -395,10 +395,21 @@ func (c checker) currentBranchOwned() bool {
 	if err == nil {
 		return strings.HasPrefix(head, "refs/heads/") && c.owned(head)
 	}
+	rebasing, inProgress := c.rebaseInProgressBranch()
+	// A rebase grit started for this worktree is on record (spinclass#456):
+	// the record, which a unit cannot write, names the branch, and head-name
+	// only has to still agree with it, so forging head-name can only make the
+	// verb ask. This is what lets a confined or dontAsk worker finish its own
+	// rebase.
+	if c.session.Rebases != nil && inProgress {
+		if recorded, ok := c.session.Rebases.Read(c.session.Dir); ok && recorded == rebasing {
+			return c.owned(recorded)
+		}
+	}
 	if c.session.Confinement != store.ConfinementUnconfined {
 		return false
 	}
-	if rebasing, ok := c.rebaseInProgressBranch(); ok {
+	if inProgress {
 		return strings.HasPrefix(rebasing, "refs/heads/") && c.owned(rebasing)
 	}
 	return false

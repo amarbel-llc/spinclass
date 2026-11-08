@@ -153,7 +153,7 @@ branch delete force                     ask         ask       force
 branch reset-soft, reset-hard           allow       allow     on B's checkout
 branch rebase (B onto upstream)         allow       allow     B is rewritten
 branch rebase rebase_branch=main        ask         allow     default branch
-branch rebase continue, skip, abort     allow       allow     rebase of B in progress (unconfined only, see below)
+branch rebase continue, skip, abort     allow       allow     rebase of B in progress (recorded start, or unconfined; see below)
 branch restack root=B                   allow       allow     owned range
 branch restack moving a foreign branch  ask         allow     foreign in range
 branch cherry-pick, revert              allow       allow     on B's checkout
@@ -183,16 +183,29 @@ it would hook in at the body's confined check, *refuseUnownedForConfined* in
 *internal/alfa/store/git/confined.go*, where the confined column is enforced.
 
 A rebase in progress (continue, skip, abort, and the *stage* add a conflict
-resolution needs) is judged on the branch git names in
-*rebase-merge/head-name*, since HEAD is detached meanwhile (spinclass#455),
-but only for a caller positively known to be unconfined: the hook resolves an
-unconfined caller from its working directory and marks it so. That file lives
-under the common git directory's *worktrees/<name>/*, which a confined unit
-binds read-write, so a confined worker could write a branch it owns into it;
-for a confined or unresolved caller a rebase in progress therefore owns
-nothing, the body refuses continue, skip and abort, and the operator finishes
-the rebase from outside the unit, until the frontend records the branch a
-rebase replays when *grit\_branch rebase* starts it.
+resolution needs) leaves HEAD detached, so it is judged on the branch the
+rebase replays rather than on HEAD (spinclass#455, #456). Two readings:
+
+- *Recorded start, any caller.* When *grit\_branch* rebase or restack starts a
+  rebase and it stops on a conflict, the frontend records the branch it replays
+  (taken from the arguments it already judged, before git runs) in
+  _$XDG\_STATE\_HOME/spinclass/rebases/_, a path no unit binds. While a rebase
+  is in progress, continue, skip, abort and the resolving *stage* add are
+  allowed when the rebase-merge or rebase-apply *head-name* still names that
+  recorded branch and the session owns it. Because head-name has to agree with
+  the record, a worker that rewrites head-name can only make the verb ask. The
+  record is cleared when a rebase verb leaves no rebase in progress. This is
+  what lets a confined or dontAsk worker finish its own rebase.
+- *Unrecorded, unconfined caller only.* A rebase with no record (started outside
+  grit, or before the record existed) is judged on *head-name* alone, but only
+  for a caller positively known to be unconfined: that file lives under the
+  common git directory's *worktrees/<name>/*, which a confined unit binds
+  read-write. For a confined or unresolved caller such a rebase owns nothing,
+  the body refuses continue, skip and abort, and the operator finishes the
+  rebase from outside the unit.
+
+Starting a rebase, rebasing onto another branch, and anything aimed at the
+default branch are judged as the table says and are unchanged.
 
 "Ran" does not mean "allowed": an *ask* the operator approves completes exactly
 like an *allow*, which is how a probe of this table (spinclass#415) could not

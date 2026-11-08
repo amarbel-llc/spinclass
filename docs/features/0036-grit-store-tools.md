@@ -356,6 +356,21 @@ rebase onto the default branch remote-tracking ref of an owned branch is the
 normal case and is allowed; rewriting a non-owned branch asks). This is the
 spinclass #380 / moxy #483 payoff.
 
+Amendment 2026-11-08 (spinclass#456, operator-approved): finishing a rebase.
+A rebase stopped on a conflict leaves HEAD detached, and the branch it replays
+is named only in `rebase-merge/head-name`, a file a confined unit can write. So
+the frontend now records, in state no unit binds (`internal/0/rebaserecord`),
+the branch a grit-started rebase or restack replays, taken from the arguments it
+already judged before git runs. While a rebase is in progress, continue, skip,
+abort and the resolving `stage add` are `Allow` for any caller when `head-name`
+still agrees with the record and the session owns that branch; a worker that
+forges `head-name` can only make the verb ask. The record is cleared when a
+rebase verb leaves no rebase in progress. A rebase with no record keeps the
+#455 reading (head-name, unconfined callers only). Starting a rebase, rebasing
+onto another branch and the default branch are unchanged. A dontAsk worker could
+not finish its own rebase before this (clown/firm-maple, 2026-11-06). Moxy's
+separate `grit_branch` is not changed here.
+
 ### 5. Remote operations and credentials
 
 Push/fetch/pull/push-stack/tag push interact with FDR 0028's per-session

@@ -188,11 +188,14 @@ func (b Backend) Do(ctx context.Context, s store.Session, op store.Op) (store.Re
 	argv = withoutHooksForConfined(s, op, argv)
 	env := append(writeEnv(op), identityEnv(s, op)...)
 	var out string
+	// The branch a starting rebase replays, read before git runs (#456).
+	startedRebase, _ := rebaseStart(s, op, dir)
 	if talksToRemote(op) {
 		out, err = remoteRunner(ctx, dir, env, argv...)
 	} else {
 		out, err = git.RunEnvContext(ctx, dir, env, argv...)
 	}
+	trackRebase(s, op, dir, startedRebase)
 	if err != nil {
 		return store.Result{}, describeFailure(dir, op, err, out)
 	}

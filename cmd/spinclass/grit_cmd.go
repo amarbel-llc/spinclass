@@ -13,6 +13,7 @@ import (
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
 	"code.linenisgreat.com/spinclass/internal/0/git"
+	"code.linenisgreat.com/spinclass/internal/0/rebaserecord"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/store"
 	gitstore "code.linenisgreat.com/spinclass/internal/alfa/store/git"
@@ -285,6 +286,10 @@ func resolveGritCaller(cwd string) store.Session {
 	s.Identity = storeIdentityFor(s.Dir)
 	s.SessionAt = session.KeyAtWorktree
 	s.Held = session.HeldKeys(principal)
+	// The frontend's record of the rebases grit started (spinclass#456): the
+	// body writes it when a start stops on a conflict and clears it when the
+	// rebase ends, and the classifier reads it.
+	s.Rebases = rebaserecord.Files{}
 	return s
 }
 
