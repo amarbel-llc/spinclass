@@ -134,3 +134,30 @@ func TestCheckFolio(t *testing.T) {
 		t.Errorf("the offending entry should be the issue's value, got %q %q", got[0].Value, got[1].Value)
 	}
 }
+
+// spinclass#465: proc: entries parse only from the fixed list, and only in a
+// read or deny list, never in write.
+func TestCheckFolioProc(t *testing.T) {
+	ok := sweatfile.Sweatfile{Folio: &sweatfile.Folio{
+		Read:      []string{"proc:", "proc:*/stat", "proc:pressure/*"},
+		Deny:      []string{"proc:*/cgroup"},
+		Unmatched: strp("ask"),
+	}}
+	if got := CheckFolio(ok, true); len(got) != 0 {
+		t.Errorf("valid proc entries should pass, got %+v", got)
+	}
+
+	for _, entry := range []string{"proc:*/environ", "proc:*/fd", "proc:*/cmdline", "proc:*/task", "proc:*/mem"} {
+		bad := sweatfile.Sweatfile{Folio: &sweatfile.Folio{Read: []string{entry}, Unmatched: strp("ask")}}
+		got := CheckFolio(bad, true)
+		if len(got) != 1 || got[0].Severity != SeverityError || got[0].Value != entry {
+			t.Errorf("%s should be one error naming it, got %+v", entry, got)
+		}
+	}
+
+	inWrite := sweatfile.Sweatfile{Folio: &sweatfile.Folio{Write: []string{"proc:meminfo"}, Unmatched: strp("ask")}}
+	got := CheckFolio(inWrite, true)
+	if len(got) != 1 || got[0].Severity != SeverityError || got[0].Field != "folio.write" {
+		t.Errorf("proc: in write should be one error on folio.write, got %+v", got)
+	}
+}

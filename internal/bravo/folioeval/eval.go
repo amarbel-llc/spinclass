@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"code.linenisgreat.com/spinclass/internal/0/folio"
@@ -47,6 +48,9 @@ func Compile(p sweatfileio.FolioPolicy) (*Policy, error) {
 			pat, err := folio.ParsePattern(e)
 			if err != nil {
 				return nil, fmt.Errorf("[folio] %s: %w", list.name, err)
+			}
+			if list.name == "write" && pat.Anchor == folio.AnchorProc {
+				return nil, fmt.Errorf("[folio] write: %q: proc: is read-only", e)
 			}
 			*list.dst = append(*list.dst, pat)
 		}
@@ -182,6 +186,8 @@ func matchPattern(r Roots, pat folio.Pattern, path string) bool {
 	switch pat.Anchor {
 	case folio.AnchorMadder:
 		return false
+	case folio.AnchorProc:
+		return matchProc(pat, path)
 	case folio.AnchorPwd:
 		roots = []string{r.Pwd}
 	case folio.AnchorHome:
@@ -224,6 +230,54 @@ func matchPattern(r Roots, pat folio.Pattern, path string) bool {
 			}
 		}
 		return true
+	}
+	return false
+}
+
+const procRoot = "/proc"
+
+// procPid is what the leading "*" of a per-process proc entry may be.
+var procPid = regexp.MustCompile(`^([0-9]+|self|thread-self)$`)
+
+// procPressureFile is what the "*" of pressure/* may be.
+var procPressureFile = regexp.MustCompile(`^[a-z]+$`)
+
+// matchProc matches a proc: entry against an absolute, resolved path: exactly
+// one of folio.ProcEntries (the entry's own, or any when it is a bare proc:),
+// at its exact depth. There is no prefix match: /proc/1/stat/x, /proc/1/task/1/stat,
+// /proc/1/environ and /proc/1/fd/0 match nothing.
+func matchProc(pat folio.Pattern, path string) bool {
+	rel, ok := strings.CutPrefix(filepath.Clean(path), procRoot+string(filepath.Separator))
+	if !ok || rel == "" {
+		return false
+	}
+	relSegs := strings.Split(rel, string(filepath.Separator))
+	shapes := folio.ProcEntries
+	if len(pat.Segments) > 0 {
+		shapes = []string{strings.Join(pat.Segments, "/")}
+	}
+	for _, shape := range shapes {
+		segs := strings.Split(shape, "/")
+		if len(segs) != len(relSegs) {
+			continue
+		}
+		fits := true
+		for i, s := range segs {
+			switch {
+			case s != "*":
+				fits = relSegs[i] == s
+			case segs[0] == "*" && i == 0:
+				fits = procPid.MatchString(relSegs[i])
+			default:
+				fits = procPressureFile.MatchString(relSegs[i])
+			}
+			if !fits {
+				break
+			}
+		}
+		if fits {
+			return true
+		}
 	}
 	return false
 }

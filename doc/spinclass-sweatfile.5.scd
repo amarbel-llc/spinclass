@@ -1195,7 +1195,8 @@ nothing); *nix-store:* /nix/store;
 checkout, *spinclass:worktrees* the repo's .worktrees/, *spinclass:children* the
 worktrees of sessions the caller holds an accepted handle on, and
 *spinclass:siblings* the parent of the main checkout minus the main checkout;
-*madder:* every madder blob (below). The path below a file anchor is a
+*madder:* every madder blob (below); *proc:* a fixed list of files below
+/proc (below). The path below a file anchor is a
 directory-boundary prefix: it matches that path and everything under it. A
 whole segment *\** matches exactly one segment; a trailing */\*\** only spells
 out the default. No regexes, no *..*, no *~*.
@@ -1209,6 +1210,22 @@ out of them by putting it in *deny*, and a policy with no *madder:* entry for
 the operation answers *unmatched* for every blob (operator ruling,
 2026-11-02). A *madder:<store>* refinement is reserved and is refused until it
 is specified.
+
+*proc:* reaches /proc, but only through a fixed per-file list that no entry can
+extend (spinclass#465, operator-approved 2026-11-08), because procfs keeps
+secrets beside harmless counters: a process environment exposed a forge
+credential on 2026-10-27. The list is _\*/stat_, _\*/status_, _\*/cgroup_,
+_meminfo_, _loadavg_ and _pressure/\*_. The leading *\** of a per-process entry
+is a process id, *self* or *thread-self*, and the *\** of _pressure/\*_ is one
+lowercase file name. A bare *proc:* is the whole list; otherwise an entry is
+exactly one of the six, written as _proc:\*/stat_, _proc:meminfo_ and so on, so
+a *deny* can narrow a bare allow (_proc:\*/cgroup_ is one literal segment more
+specific than *proc:*). Matching is exact depth, not a prefix: _/proc/1/stat/x_
+and _/proc/1/task/1/stat_ match nothing. Never reachable, whatever the entry
+says: _environ_, _fd_, _mem_, _maps_, _smaps_, _task_, _cmdline_, and the
+_root_, _cwd_ and _exe_ links. Any other *proc:* entry does not parse, so
+*sc validate* reports an error and the stanza is refused as a whole. *proc:* is
+read-only: in *write* it is an error. It matches no blob.
 
 With *[confinement]* enabled, *sc validate* warns about the two shapes whose
 meaning differs for a confined session (spinclass#443). An *env:NAME:* entry in
@@ -1226,7 +1243,7 @@ specificity is the ordered pair _(literal segments, wildcard segments)_ of its
 path under the anchor: the entry with more literal segments wins; with equal
 literals, the one with more *\** segments wins; on a full tie *deny* wins over
 an allow. The anchor itself counts nothing, so *pwd:*, *spinclass:worktrees*
-and *madder:* tie at (0,0). *unmatched* applies only when no entry matches at
+and *madder:* tie at (0,0), as does a bare *proc:*. *unmatched* applies only when no entry matches at
 all. Worked case (circus#399): a coordinator may read every session worktree
 of the repo, including each one's *.spinclass/spawn.log*, but nothing else
 under *.spinclass/*, and may read the blobs its tools stream:

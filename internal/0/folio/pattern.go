@@ -34,7 +34,22 @@ const (
 	AnchorMadder Anchor = "madder"
 )
 
-const anchorNames = "pwd, home, env, nix-store, spinclass, madder"
+// AnchorProc is /proc, but only the fixed per-file allowlist in ProcEntries:
+// procfs holds secrets next to harmless counters (a process environment
+// exposed a forge credential on 2026-10-27), so the anchor names no path of
+// the operator's choosing. A bare proc: is every entry of the list; otherwise
+// the entry is exactly one of them (spinclass#465, operator-approved
+// 2026-11-08). Read-only: a write list refuses it.
+const AnchorProc Anchor = "proc"
+
+// ProcEntries are the only paths below /proc any proc: entry can reach:
+// per-process stat, status and cgroup, the system's meminfo and loadavg, and
+// the pressure-stall files. Never environ, fd, mem, maps, smaps, task, cmdline
+// or the root, cwd and exe links. A "*" in the first position of a per-process
+// entry is a process id, or self or thread-self; in pressure/* it is one file.
+var ProcEntries = []string{"*/stat", "*/status", "*/cgroup", "meminfo", "loadavg", "pressure/*"}
+
+const anchorNames = "pwd, home, env, nix-store, spinclass, madder, proc"
 
 // SpinclassRoots are the roots AnchorSpinclass accepts. worktree is the
 // caller's own worktree; repo the main checkout; worktrees the repo's
@@ -94,6 +109,15 @@ func ParsePattern(raw string) (Pattern, error) {
 		if rest != "" {
 			return Pattern{}, fmt.Errorf("%q: a madder entry is madder: alone, every blob; the madder:<store> refinement is reserved and not accepted yet", raw)
 		}
+		return p, nil
+	case AnchorProc:
+		if rest == "" {
+			return p, nil
+		}
+		if !contains(ProcEntries, rest) {
+			return Pattern{}, fmt.Errorf("%q: a proc entry is proc: alone (every entry below) or exactly one of %s; nothing else under /proc is reachable", raw, strings.Join(ProcEntries, ", "))
+		}
+		p.Segments = strings.Split(rest, "/")
 		return p, nil
 	default:
 		return Pattern{}, fmt.Errorf("%q: unknown anchor %q; one of %s", raw, anchor, anchorNames)

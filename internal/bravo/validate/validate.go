@@ -798,11 +798,19 @@ func CheckFolio(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 		{"deny", f.Deny, false},
 	} {
 		for _, entry := range list.entries {
-			if _, err := folio.ParsePattern(entry); err != nil {
+			pat, err := folio.ParsePattern(entry)
+			if err != nil {
 				issues = append(issues, Issue{
 					Message:  fmt.Sprintf("[folio] %s entry does not parse: %v", list.name, err),
 					Severity: SeverityError,
 					Field:    "folio." + list.name,
+					Value:    entry,
+				})
+			} else if list.name == "write" && pat.Anchor == folio.AnchorProc {
+				issues = append(issues, Issue{
+					Message:  "[folio] write entry uses `proc:`, which is read-only: the broker refuses the whole stanza; move it to `read`",
+					Severity: SeverityError,
+					Field:    "folio.write",
 					Value:    entry,
 				})
 			}

@@ -32,6 +32,14 @@ func TestParsePatternAcceptsTheGrammar(t *testing.T) {
 		{"spinclass:worktrees/*/.spinclass/spawn.log", AnchorSpinclass, "worktrees", []string{"*", ".spinclass", "spawn.log"}, true},
 		// Ruled 2026-11-02 (option B): madder: is every blob; it has no path.
 		{"madder:", AnchorMadder, "", nil, true},
+		// spinclass#465: proc: is a fixed allowlist, bare (all of it) or one entry.
+		{"proc:", AnchorProc, "", nil, true},
+		{"proc:*/stat", AnchorProc, "", []string{"*", "stat"}, true},
+		{"proc:*/status", AnchorProc, "", []string{"*", "status"}, true},
+		{"proc:*/cgroup", AnchorProc, "", []string{"*", "cgroup"}, true},
+		{"proc:meminfo", AnchorProc, "", []string{"meminfo"}, true},
+		{"proc:loadavg", AnchorProc, "", []string{"loadavg"}, true},
+		{"proc:pressure/*", AnchorProc, "", []string{"pressure", "*"}, true},
 	} {
 		t.Run(tc.in, func(t *testing.T) {
 			p, err := ParsePattern(tc.in)
@@ -73,6 +81,28 @@ func TestParsePatternRefusesWhatTheGrammarExcludes(t *testing.T) {
 		"madder:blobs/x",       // a blob has no path
 		"madder:/",             // nor a slash
 		"madder:*",             // nor a wildcard
+		// spinclass#465: nothing under /proc outside the fixed list.
+		"proc:*/environ",
+		"proc:*/fd",
+		"proc:*/fd/0",
+		"proc:*/mem",
+		"proc:*/maps",
+		"proc:*/smaps",
+		"proc:*/task",
+		"proc:*/task/1/stat",
+		"proc:*/cmdline",
+		"proc:*/cwd",
+		"proc:*/root",
+		"proc:*/exe",
+		"proc:1/stat", // a literal pid is not on the list: use */stat
+		"proc:stat",
+		"proc:*",
+		"proc:**",
+		"proc:*/stat/x",
+		"proc:../etc/passwd",
+		"proc:/meminfo",
+		"proc:meminfo/",
+		"proc:pressure",
 	} {
 		t.Run(in, func(t *testing.T) {
 			if p, err := ParsePattern(in); err == nil {
