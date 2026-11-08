@@ -202,7 +202,9 @@ Recommendation A is accepted. Ruled:
   `/root`, `$HOME/.ssh`, `$HOME/.gnupg` and spinclass's own state directories,
   extended on request. A WIDER list (`/run`, any directory named like secrets,
   keys or credentials, and what else a spawn-time read grant must never reach)
-  is to be audited first: spinclass#467. It blocks building the `fs:` anchor.
+  is to be audited first: spinclass#467, findings and recommendations in
+  `docs/plans/2026-11-08-467-fs-refusal-list-audit.md`. It blocks building the
+  `fs:` anchor until the operator rules on that note's §7.
 
 Still with the operator, to come in later batches: granting later (Q7), expiry
 (Q8, beyond "with the session"), resurrect (Q10), named sets (Q6), and the

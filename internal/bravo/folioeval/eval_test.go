@@ -83,6 +83,36 @@ func TestEvaluateAnchorsAndOps(t *testing.T) {
 	}
 }
 
+// The worker's own repo's main checkout is not a sibling (siblings excludes it),
+// so reading it needs spinclass:repo. The shipped stanza's deny lines must still
+// win over it for session state, and the one spawn.log exception must survive.
+func TestEvaluateRepoAnchorReadsTheOwnMainCheckoutButNotSessionState(t *testing.T) {
+	p := compile(t, sweatfileio.FolioPolicy{
+		Read: []string{
+			"pwd:", "spinclass:siblings", "spinclass:children", "spinclass:repo",
+			"spinclass:worktrees", "spinclass:worktrees/*/.spinclass/spawn.log",
+		},
+		Deny: []string{"spinclass:worktrees/*/.spinclass"},
+	})
+	for _, tc := range []struct{ path, verdict string }{
+		{"/w/repo/cmd/main.go", "allow"},                              // the gap: own main checkout
+		{"/w/repo/README", "allow"},                                   // same, top level
+		{"/w/other/README", "allow"},                                  // siblings unchanged
+		{"/w/repo/.worktrees/stranger/a.go", "allow"},                 // already readable via worktrees
+		{"/w/repo/.worktrees/stranger/.spinclass/state.json", "deny"}, // state stays denied
+		{"/w/repo/.worktrees/stranger/.spinclass/spawn.log", "allow"}, // the named exception
+		{"/w/repo/.worktrees/stranger/.spinclass/hooks/pre-commit", "deny"},
+		{"/x/elsewhere", "ask"}, // nothing else widened
+	} {
+		if v, reason := p.Evaluate(roots, "read", tc.path); v != tc.verdict {
+			t.Errorf("read %s = %s (%s), want %s", tc.path, v, reason, tc.verdict)
+		}
+	}
+	if v, _ := p.Evaluate(roots, "write", "/w/repo/cmd/main.go"); v != "ask" {
+		t.Errorf("spinclass:repo in read must not allow writes, got %s", v)
+	}
+}
+
 // The ruling (2026-11-01, "css selector-like"): specificity is the ordered
 // pair (literal segments, wildcard segments) of the entry under its anchor;
 // more literals wins, then more wildcards; a full tie goes to deny. The
