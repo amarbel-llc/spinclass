@@ -243,14 +243,29 @@ func PrepareMergeWith(ctx context.Context, rep *crap.Reporter, ts *crap.TestStre
 	}
 
 	headBefore, _ := git.RevParse(wtPath, "HEAD")
-	rebaseStart := time.Now()
-	out, rebaseErr := git.RunEnv(wtPath, []string{"GIT_SEQUENCE_EDITOR=true"}, "rebase", target.Ref(), "-i")
-	mx.observeErr(context.Background(), "rebase", rebaseStart, rebaseErr)
-	if rebaseErr != nil {
-		return "", failStep(ts, "rebase "+branch, git.ExplainDriverNotFound(rebaseErr, out), out)
+	mergesInRange, mergeScanErr := rangeHasMergeCommit(wtPath, target.Ref(), branch)
+	switch {
+	case mergeScanErr != nil:
+		return "", failStep(ts, "rebase "+branch, mergeScanErr, "")
+	case mergesInRange && git.IsAncestor(wtPath, target.Ref(), branch):
+		// #468: a rebase without --rebase-merges flattens a merge commit and
+		// re-picks everything it merged in. The branch already descends from the
+		// target, so there is nothing to rebase onto: land it as it is.
+		ts.Ok("rebase " + branch + " # SKIP branch holds a merge commit and already descends from " + target.Ref())
+	case mergesInRange:
+		return "", failStep(ts, "rebase "+branch, fmt.Errorf(
+			"%s holds a merge commit and %s moved past it: a rebase here would flatten the merge. Rebase or merge %s into the branch by hand, then re-merge",
+			branch, target.Ref(), target.Ref()), "")
+	default:
+		rebaseStart := time.Now()
+		out, rebaseErr := git.RunEnv(wtPath, []string{"GIT_SEQUENCE_EDITOR=true"}, "rebase", target.Ref(), "-i")
+		mx.observeErr(context.Background(), "rebase", rebaseStart, rebaseErr)
+		if rebaseErr != nil {
+			return "", failStep(ts, "rebase "+branch, git.ExplainDriverNotFound(rebaseErr, out), out)
+		}
+		ts.Ok("rebase " + branch)
+		reportRebaseRewrite(rep, wtPath, branch, headBefore)
 	}
-	ts.Ok("rebase " + branch)
-	reportRebaseRewrite(rep, wtPath, branch, headBefore)
 
 	// A rebase that exits 0 can still leave the worktree conflicted: a failed
 	// autostash pop (git config rebase.autoStash) applies the rebase cleanly but
@@ -430,6 +445,15 @@ func checkExpectedTip(ts *crap.TestStream, wtPath, branch, expect string) error 
 	}
 	ts.Ok(label)
 	return nil
+}
+
+// rangeHasMergeCommit reports whether base..branch contains a merge commit.
+func rangeHasMergeCommit(dir, base, branch string) (bool, error) {
+	out, err := git.Run(dir, "rev-list", "--merges", "--max-count=1", base+".."+branch)
+	if err != nil {
+		return false, fmt.Errorf("scan %s..%s for merge commits: %w", base, branch, err)
+	}
+	return strings.TrimSpace(out) != "", nil
 }
 
 // reportRebaseRewrite adds a phase line naming the new and old HEAD when the
