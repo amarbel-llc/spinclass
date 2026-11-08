@@ -3,6 +3,7 @@ package spawn
 import (
 	"fmt"
 	"maps"
+	"slices"
 
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 )
@@ -41,6 +42,34 @@ func applyUnattendedMode(argv []string, confined bool, mode string) ([]string, b
 		return nil, false, fmt.Errorf("spawn refused: [session-entry] unattended-permission-mode = %q cannot be applied: %w", mode, err)
 	}
 	return out, true, nil
+}
+
+// SetUnattendedMarker is setUnattendedMarker for a restart that changes a
+// session's posture (spinclass#342): the pinned entry's env gets the marker for
+// unattended and loses it for attended, so the next `sc resume` agrees with the
+// relaunch.
+func SetUnattendedMarker(env map[string]string, on bool) map[string]string {
+	return setUnattendedMarker(env, on)
+}
+
+// PinnedEntrySupportsDontAsk reports whether a session whose pinned entry is
+// argv can run in claude's dontAsk mode: it must name a harness (carry the "--"
+// provider-args separator, which a bare shell entry lacks) whose provider is
+// claude. Nothing is spliced into a pinned entry; the answer says only whether
+// the CLOWN_UNATTENDED marker means anything for it.
+func PinnedEntrySupportsDontAsk(argv []string) error {
+	sep := slices.Index(argv, "--")
+	if sep == -1 {
+		return fmt.Errorf("its pinned entry %v has no \"--\" provider-args separator, so it is not a harness entry", argv)
+	}
+	provider, err := effectiveProvider(argv[:sep])
+	if err != nil {
+		return fmt.Errorf("the provider of its pinned entry cannot be determined: %w", err)
+	}
+	if provider != "claude" {
+		return fmt.Errorf("its pinned entry's provider is %q, not claude", provider)
+	}
+	return nil
 }
 
 // setUnattendedMarker returns a copy of env with CLOWN_UNATTENDED set to "1"

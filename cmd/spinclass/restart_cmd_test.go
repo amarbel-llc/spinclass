@@ -95,9 +95,9 @@ func wantSelfArgv(reason string) []string {
 
 func TestExpandRestartHandoff(t *testing.T) {
 	got := expandRestartHandoff(
-		[]string{"clown", "--s={principal}", "{session-key}", "{when}", "{reason}", "{unknown}"},
-		"p", "r/b", "idle", "because {principal}")
-	want := []string{"clown", "--s=p", "r/b", "idle", "because {principal}", "{unknown}"}
+		[]string{"clown", "--s={principal}", "{session-key}", "{when}", "{posture}", "{reason}", "{unknown}"},
+		"p", "r/b", "idle", "", "because {principal}")
+	want := []string{"clown", "--s=p", "r/b", "idle", "keep", "because {principal}", "{unknown}"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("expandRestartHandoff = %q, want %q (substitution is one pass: a reason cannot smuggle a placeholder)", got, want)
 	}

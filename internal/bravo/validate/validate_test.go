@@ -680,6 +680,23 @@ func TestCheckRestartHandoffWarnsRepoLayer(t *testing.T) {
 	}
 }
 
+// spinclass#342: allow-posture-widening is honoured only above the repo; a
+// repo-level value warns that it is ignored, a trusted one is silent.
+func TestCheckAllowPostureWidening(t *testing.T) {
+	on := true
+	sf := sweatfile.Sweatfile{SessionEntry: &sweatfile.SessionEntry{AllowPostureWidening: &on}}
+	if got := CheckAllowPostureWidening(sf, true); len(got) != 0 {
+		t.Errorf("a trusted layer should pass silently, got %+v", got)
+	}
+	got := CheckAllowPostureWidening(sf, false)
+	if len(got) != 1 || got[0].Severity != SeverityWarning || got[0].Field != "session-entry.allow-posture-widening" {
+		t.Errorf("a repo-level value should be one warning on the field, got %+v", got)
+	}
+	if got := CheckAllowPostureWidening(sweatfile.Sweatfile{SessionEntry: &sweatfile.SessionEntry{}}, false); len(got) != 0 {
+		t.Errorf("an unset key should pass, got %+v", got)
+	}
+}
+
 func TestCheckUnattendedPermissionMode(t *testing.T) {
 	withMode := func(v string) sweatfile.Sweatfile {
 		return sweatfile.Sweatfile{SessionEntry: &sweatfile.SessionEntry{UnattendedPermissionMode: &v}}

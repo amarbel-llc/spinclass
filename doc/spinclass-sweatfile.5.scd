@@ -1602,10 +1602,14 @@ owns the title end to end.
 	relaunch a session (FDR 0037, #419). spinclass authorizes, refuses and
 	records the restart; the frontend (clown) performs it. Each element has
 	*{principal}* (the restarted session's principal, which must be
-	UUID-shaped), *{session-key}*, *{when}* and *{reason}* replaced;
+	UUID-shaped), *{session-key}*, *{when}*, *{posture}* and *{reason}* replaced;
 	replacement is one pass, so a reason cannot smuggle in another
 	placeholder. *{when}* is *idle*, or *now* for a forced restart; clown's
-	*restart* accepts exactly those two (and refuses unknown flags). For clown the
+	*restart* accepts exactly those two (and refuses unknown flags). *{posture}*
+	is *unattended*, *attended* or *keep* (no change; clown 7e79f6c): add
+	*"--posture", "{posture}"* to the template for clown to gate a posture change
+	at request time; without it clown still learns the posture from the
+	*restart-preflight* verdict. For clown the
 	template is *["clown", "restart", "--session", "{principal}", "--when",
 	"{when}", "--reason", "{reason}"]*. The command runs in the session's worktree with a 15 second
 	bound; a failure clears the request and is returned to the caller. Unset,
@@ -1658,6 +1662,24 @@ owns the title end to end.
 	because the agent must not be able to loosen a child. The last layer
 	above the repo that sets it wins. *Merge:* never merged; read through the
 	trusted layers only.
+
+*allow-posture-widening*
+	Boolean, off unless set. Whether a restart may widen a session's permissions,
+	from unattended (claude's dontAsk mode) to attended (spinclass#342, FDR
+	0037, operator ruling 2026-11-08). The *posture* parameter of
+	*restart-child-session* (*sc restart-child-session --posture*) asks for a
+	posture: *unattended* narrows and needs no key, *attended* widens and is
+	refused unless this key is *true*. Even with it, a widening needs the
+	*restart* right on the child, is refused for the session itself and for a
+	session launched confined, always prompts a human (the tool is always-ask
+	for it, as for *force*), and is re-checked by *restart-preflight*, which
+	refuses a request whose requester is the session or no longer holds the
+	right. The key is read live at request and preflight time, never pinned:
+	only the global sweatfile and layers above the repo count; a repo or
+	worktree value is ignored (*sc validate* warns about a repo-level one),
+	because the agent must not be able to choose it. The last layer above the
+	repo that sets it wins. *Merge:* never merged; read through the trusted
+	layers only.
 
 *liveness-probe*
 	*Deprecated* (post-FDR-0017): clown owns the multiplexer attach and

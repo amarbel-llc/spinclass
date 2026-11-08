@@ -1228,6 +1228,12 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 				_vSessionEntryUnattendedPermissionMode.MarkConsumedString()
 			}
 		}
+		if _vSessionEntryAllowPostureWidening, _ok := _vSessionEntry.Field("allow-posture-widening"); _ok && _vSessionEntryAllowPostureWidening.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vSessionEntryAllowPostureWidening.Leaf); _xok {
+				sessionEntryVal14.AllowPostureWidening = &_x
+				_vSessionEntryAllowPostureWidening.MarkConsumed()
+			}
+		}
 		d.data.SessionEntry = sessionEntryVal14
 	} else {
 		sessionEntryVal14 := &SessionEntry{}
@@ -1318,6 +1324,13 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractString(_vUnattendedPermissionMode.Leaf); _xok {
 				sessionEntryVal14.UnattendedPermissionMode = &_x
 				_vUnattendedPermissionMode.MarkConsumedString()
+			}
+		}
+		if _vAllowPostureWidening, _ok := model.Field("allow-posture-widening"); _ok && _vAllowPostureWidening.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractBool(_vAllowPostureWidening.Leaf); _xok {
+				sessionEntryVal14.AllowPostureWidening = &_x
+				_vAllowPostureWidening.MarkConsumed()
 			}
 		}
 		if _foundSessionEntry {
@@ -2043,6 +2056,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 		}
 		if d.data.SessionEntry.UnattendedPermissionMode != nil {
 			if err := cst.SetAny(tableNode, "unattended-permission-mode", *d.data.SessionEntry.UnattendedPermissionMode); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.SessionEntry.AllowPostureWidening != nil {
+			if err := cst.SetAny(tableNode, "allow-posture-widening", *d.data.SessionEntry.AllowPostureWidening); err != nil {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
@@ -3406,6 +3424,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vSessionEntryUnattendedPermissionMode.MarkConsumedString()
 			}
 		}
+		if _vSessionEntryAllowPostureWidening, _ok := _vSessionEntry.Field("allow-posture-widening"); _ok && _vSessionEntryAllowPostureWidening.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vSessionEntryAllowPostureWidening.Leaf); _xok {
+				sessionEntryVal14.AllowPostureWidening = &_x
+				_vSessionEntryAllowPostureWidening.MarkConsumed()
+			}
+		}
 		data.SessionEntry = sessionEntryVal14
 	} else {
 		sessionEntryVal14 := &SessionEntry{}
@@ -3496,6 +3520,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractString(_vUnattendedPermissionMode.Leaf); _xok {
 				sessionEntryVal14.UnattendedPermissionMode = &_x
 				_vUnattendedPermissionMode.MarkConsumedString()
+			}
+		}
+		if _vAllowPostureWidening, _ok := sub.Field("allow-posture-widening"); _ok && _vAllowPostureWidening.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractBool(_vAllowPostureWidening.Leaf); _xok {
+				sessionEntryVal14.AllowPostureWidening = &_x
+				_vAllowPostureWidening.MarkConsumed()
 			}
 		}
 		if _foundSessionEntry {
@@ -4205,6 +4236,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if data.SessionEntry.UnattendedPermissionMode != nil {
 			if err := cst.SetAny(tableNode, "unattended-permission-mode", *data.SessionEntry.UnattendedPermissionMode); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.SessionEntry.AllowPostureWidening != nil {
+			if err := cst.SetAny(tableNode, "allow-posture-widening", *data.SessionEntry.AllowPostureWidening); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}

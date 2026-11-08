@@ -95,6 +95,17 @@ type SessionEntry struct {
 	// must not loosen a child. Read ONLY through
 	// sweatfileio.TrustedUnattendedPermissionMode; MergeWith never carries it.
 	UnattendedPermissionMode *string `toml:"unattended-permission-mode"`
+	// AllowPostureWidening lets a restart widen a session's permissions,
+	// unattended (dontAsk) to attended (spinclass#342, operator ruling
+	// 2026-11-08). Off unless a trusted layer sets it: without it a widening
+	// request is refused with the reason. With it on, a widening still always
+	// asks a human and a confined session is still refused; narrowing never
+	// needs it. Trusted only from layers above the repo and read live at
+	// request and preflight time, never pinned: a value the agent can write into
+	// its own repo's sweatfile must not let it widen. The last trusted layer that
+	// sets it wins. Read ONLY through sweatfileio.TrustedAllowPostureWidening;
+	// MergeWith never carries it.
+	AllowPostureWidening *bool `toml:"allow-posture-widening"`
 }
 
 type Hooks struct {

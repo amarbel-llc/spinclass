@@ -552,7 +552,9 @@ Added 2026-10-24: a **`restart`** object right, "have *that* session stopped
 and relaunched by its harness frontend" (`restart-child-session`, FDR 0037).
 The spawner gets it with the rest; the default grant does not carry it, so a
 holder of `observe,close` cannot restart a child. It is the eighth name in the
-vocabulary.
+vocabulary. The `restart` right does not carry widening a session's permissions
+on restart (unattended to attended, spinclass#342, 2026-11-08): that also needs
+a trusted-layer sweatfile key and always asks a human (FDR 0037).
 
 Rights are **enforced** on handle tools (spinclass#355, #360). Reaping needs
 `close`. Granting needs `grant` and may only narrow (EPIC 0001 principle 3):

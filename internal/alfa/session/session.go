@@ -318,6 +318,9 @@ type State struct {
 	// the preflight cleared RestartRequest.
 	RestartingBy     string `json:"restarting_by,omitempty"`
 	RestartingReason string `json:"restarting_reason,omitempty"`
+	// RestartingPosture is the consumed request's Posture, "" for keep, kept so
+	// `restart-preflight --rearm` re-emits the same posture (spinclass#342).
+	RestartingPosture string `json:"restarting_posture,omitempty"`
 
 	// RestartingFirstAt and RestartRearms bound `restart-preflight --rearm`: the
 	// frontend may ask to re-arm a restart it dropped (a turn started during its
@@ -368,6 +371,10 @@ type RestartRequest struct {
 	Reason    string `json:"reason"`
 	// When is "idle" (after the session's current turn) or "now".
 	When string `json:"when"`
+	// Posture is the permission posture the restart asks for (spinclass#342):
+	// "unattended" (dontAsk), "attended" (a widening) or "" for no change. The
+	// preflight re-checks it and records it in the pinned entry.
+	Posture string `json:"posture,omitempty"`
 }
 
 // PreMergeAttestation records one nothing-but-the-truth call. It is claimed

@@ -56,6 +56,20 @@ func TestAlwaysAsk(t *testing.T) {
 		{"restart-child string force asks", restartChildSessionTool, map[string]any{"force": "true"}, true},
 		{"restart-child numeric force asks", restartChildSessionTool, map[string]any{"force": float64(1)}, true},
 
+		// spinclass#342: a widening posture asks; keep and the narrowing do not.
+		{"restart-child posture attended asks", restartChildSessionTool, map[string]any{"child": "r/b", "posture": "attended"}, true},
+		{"restart-this posture attended asks", restartThisSessionTool, map[string]any{"posture": "attended"}, true},
+		{"restart-child posture unattended is silent", restartChildSessionTool, map[string]any{"child": "r/b", "posture": "unattended"}, false},
+		{"restart-this posture unattended is silent", restartThisSessionTool, map[string]any{"posture": "unattended"}, false},
+		{"restart-child posture keep is silent", restartChildSessionTool, map[string]any{"posture": "keep"}, false},
+		{"restart-child empty posture is silent", restartChildSessionTool, map[string]any{"posture": ""}, false},
+		{"restart-child null posture is silent", restartChildSessionTool, map[string]any{"posture": nil}, false},
+		{"restart-child unknown posture asks", restartChildSessionTool, map[string]any{"posture": "wide-open"}, true},
+		{"restart-child numeric posture asks", restartChildSessionTool, map[string]any{"posture": float64(1)}, true},
+		{"restart-child boolean posture asks", restartChildSessionTool, map[string]any{"posture": true}, true},
+		{"restart-child attended unforced still asks without force", restartChildSessionTool, map[string]any{"posture": "attended", "force": false}, true},
+		{"posture on another tool is ignored", closeChildSessionTool, map[string]any{"posture": "attended"}, false},
+
 		{"grant always asks", grantSessionHandleTool, nil, true},
 		{"grant asks regardless of rights named", grantSessionHandleTool, map[string]any{"rights": "observe"}, true},
 

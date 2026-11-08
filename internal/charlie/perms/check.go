@@ -102,6 +102,13 @@ func AlwaysAsk(toolName string, toolInput map[string]any, cwd string) (string, b
 		if forceRequested(toolInput) {
 			return "a forced restart kills the session's current turn and any running merge/check job; confirm each invocation", true
 		}
+		// A widening posture (spinclass#342, operator ruling 2026-11-08) moves a
+		// session out of dontAsk, so a human decides it even when a trusted
+		// sweatfile allows widening at all. Narrowing to unattended and keep stay
+		// silent.
+		if postureWidens(toolInput) {
+			return "restarting into the attended posture widens the session's permissions (out of dontAsk); confirm each invocation", true
+		}
 		return "", false
 
 	case grantSessionHandleTool:
@@ -156,6 +163,27 @@ func forceRequested(toolInput map[string]any) bool {
 	}
 	if b, ok := v.(bool); ok {
 		return b
+	}
+	return true
+}
+
+// postureWidens reads the restart tools' `posture` argument, failing CLOSED
+// like forceRequested: absent, null, "", "keep" and "unattended" (the narrowing)
+// are not a widening; "attended" is, and so is any other value, including a
+// non-string, since the body refuses an unknown posture anyway and an odd
+// payload should not slip past the always-ask it exists to enforce.
+func postureWidens(toolInput map[string]any) bool {
+	v, present := toolInput["posture"]
+	if !present || v == nil {
+		return false
+	}
+	s, ok := v.(string)
+	if !ok {
+		return true
+	}
+	switch s {
+	case "", "keep", "unattended":
+		return false
 	}
 	return true
 }

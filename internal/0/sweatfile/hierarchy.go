@@ -379,10 +379,13 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 	// carried-forward table. See sweatfileio.TrustedRestartHandoff.
 	// unattended-permission-mode follows the same rule; see
 	// sweatfileio.TrustedUnattendedPermissionMode.
-	if merged.SessionEntry != nil && (merged.SessionEntry.Restart != nil || merged.SessionEntry.UnattendedPermissionMode != nil) {
+	// allow-posture-widening follows the same rule; see
+	// sweatfileio.TrustedAllowPostureWidening.
+	if merged.SessionEntry != nil && (merged.SessionEntry.Restart != nil || merged.SessionEntry.UnattendedPermissionMode != nil || merged.SessionEntry.AllowPostureWidening != nil) {
 		cp := *merged.SessionEntry
 		cp.Restart = nil
 		cp.UnattendedPermissionMode = nil
+		cp.AllowPostureWidening = nil
 		merged.SessionEntry = &cp
 	}
 

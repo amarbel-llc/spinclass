@@ -667,6 +667,22 @@ func CheckUnattendedPermissionMode(sf sweatfile.Sweatfile, layerAboveRepo bool) 
 	return issues
 }
 
+// CheckAllowPostureWidening warns about a repo-level [session-entry]
+// allow-posture-widening: sweatfileio.TrustedAllowPostureWidening reads it only
+// from the global sweatfile and layers above the repo, because it decides
+// whether a restart may move a session from unattended to attended
+// (spinclass#342).
+func CheckAllowPostureWidening(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
+	if sf.SessionEntry == nil || sf.SessionEntry.AllowPostureWidening == nil || layerAboveRepo {
+		return nil
+	}
+	return []Issue{{
+		Message:  "[session-entry] sets `allow-posture-widening` in a repo-level sweatfile: it is ignored — it decides whether a restart may widen a session from unattended to attended, so only the global sweatfile or one above the repo (parent directories) may set it; move it up",
+		Severity: SeverityWarning,
+		Field:    "session-entry.allow-posture-widening",
+	}}
+}
+
 // CheckProfileRights validates the [profile-rights] table (FDR 0034). `enforce`
 // is honoured only from layers above the repo, and is reliable only from the
 // GLOBAL sweatfile: a spawner outside a non-global parent directory never
@@ -1324,6 +1340,7 @@ func Run(w io.Writer, home, repoDir string) int {
 			layerAbove := sweatfileio.LayerAboveRepo(src.Path, home, mainRoot)
 			issues = append(issues, CheckRestartHandoff(src.File, layerAbove)...)
 			issues = append(issues, CheckUnattendedPermissionMode(src.File, layerAbove)...)
+			issues = append(issues, CheckAllowPostureWidening(src.File, layerAbove)...)
 			if len(issues) > 0 {
 				for _, iss := range issues {
 					if iss.Severity == SeverityError {

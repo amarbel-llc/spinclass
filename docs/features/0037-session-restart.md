@@ -200,6 +200,52 @@ who is allowed to ask.
     restart began at <S>; check the session (sc list) and its clown log". It
     exits 0 in every handled case.
 
+## Posture change on restart (2026-11-08, spinclass#342)
+
+Operator-ruled 2026-11-08; planned in
+`docs/plans/2026-11-06-clown-342-posture-on-restart.md`. Clown's half is on its
+master (70f904a, 7e79f6c). A restart can relaunch an unconfined session into a
+permission posture and out of it, keeping its principal.
+
+- **Interface.** `restart-this-session` and `restart-child-session` (and the
+  `sc` verbs) take `posture`: `unattended` (claude's dontAsk mode with the
+  `CLOWN_UNATTENDED=1` marker), `attended` (neither), or `keep`/omitted (no
+  change). The hand-off gains a `{posture}` placeholder (empty expands to
+  `keep`). The `restart-preflight` verdict gains `"posture":"unattended"|
+  "attended"`, omitted for keep; `--rearm` re-emits it from
+  `session.State.RestartingPosture`. `session.RestartRequest.Posture` records
+  the ask; `cancel-restart` drops it with the request.
+- **Narrowing is free.** `unattended` needs no key and no prompt: the session's
+  own act, or a holder with the `restart` right.
+- **Widening is gated four ways.** `attended` (1) is refused for the session
+  itself; (2) needs the `restart` right on the child; (3) needs
+  `[session-entry].allow-posture-widening = true` in a trusted layer (global or
+  above the repo, read live, never pinned, `sweatfileio.TrustedAllowPostureWidening`),
+  without which it is refused with the reason; and (4) is always-ask in
+  `perms.AlwaysAsk` even with the key, failing closed on any other value (no
+  allow-list can approve it silently). A `restart` right does not carry
+  widening: no new D13 right.
+- **Confined sessions are refused** for every posture (the posture is the
+  confinement profile's), as is a session with no pinned entry or whose pinned
+  resume entry is not a claude harness (no `--` separator, or another
+  provider): the marker would mean nothing.
+- **Both halves of the relaunch.** A clown restart relaunches from the
+  frontend's own argv and env and never re-reads the pinned entry, so the
+  preflight does two things in the one locked `session.Update` that stamps
+  `RestartingAt`: it sets or removes `CLOWN_UNATTENDED` in `Entry.Env` (so the
+  next `sc resume` agrees) and prints `posture` in the verdict (so the restart's
+  own relaunch agrees). The pinned resume argv is never spliced.
+- **The preflight re-checks a widening.** The request lives in state an
+  unconfined agent can write, so for `attended` the preflight re-checks the
+  key, the target's confinement, that the recorded requester is not the session
+  itself, and that the requester still holds the `restart` right. A forged
+  request that also names a real holder with the right and a trusted key still
+  hits the human prompt on the tool; a hand-edited request does not, which is
+  the residual FDR 0037 already names for a forged `when: now`.
+- **Not built:** an `sc list` posture column and `--peek` printing the posture
+  (plan decisions 8 and the open question); an older clown that ignores the
+  verdict key relaunches in the old posture until the next `sc resume`.
+
 ## Requirement on clown and troupe
 
 A restart exit must not run `troupe mint-revoke`. A restart relaunches the same

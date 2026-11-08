@@ -20,6 +20,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
+	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 	"code.linenisgreat.com/spinclass/internal/servelog"
 )
 
@@ -41,6 +42,16 @@ import (
 // when=now and skips the running-job obstacle, at request time and in the
 // preflight, killing the current turn and any running job; clown accepts
 // `--when now` since clown 011db3c. cancel-restart removes a queued request.
+
+// Postures a restart can ask for (spinclass#342, FDR 0037). Unattended is
+// claude's dontAsk mode with the CLOWN_UNATTENDED=1 marker; attended removes
+// both. keep is the spelling of "no change", and a recorded or printed posture
+// is "" for it.
+const (
+	restartPostureKeep       = "keep"
+	restartPostureUnattended = "unattended"
+	restartPostureAttended   = "attended"
+)
 
 const (
 	restartWhenIdle           = "idle"
@@ -90,11 +101,17 @@ func runRestartHandoff(dir string, argv []string) (string, error) {
 // expandRestartHandoff substitutes the hand-off placeholders into every element
 // of argv. The replacement is a single pass, so a reason that itself contains
 // "{principal}" stays literal.
-func expandRestartHandoff(argv []string, principal, key, when, reason string) []string {
+func expandRestartHandoff(argv []string, principal, key, when, posture, reason string) []string {
+	// An empty posture is "keep", the spelling clown accepts for no change
+	// (clown 7e79f6c, spinclass#342).
+	if posture == "" {
+		posture = restartPostureKeep
+	}
 	r := strings.NewReplacer(
 		principalPlaceholder, principal,
 		"{session-key}", key,
 		"{when}", when,
+		"{posture}", posture,
 		"{reason}", reason,
 	)
 	out := make([]string, len(argv))
@@ -142,17 +159,87 @@ func restartPlan(st *session.State, principal string, force bool) (argv []string
 	return argv, "", nil
 }
 
+// normalizePosture maps what a caller sent to what is recorded: "" and "keep"
+// are no change (""), unattended and attended stand, anything else is an error.
+func normalizePosture(p string) (string, error) {
+	switch p {
+	case "", restartPostureKeep:
+		return "", nil
+	case restartPostureUnattended, restartPostureAttended:
+		return p, nil
+	}
+	return "", fmt.Errorf("posture %q is not supported; use unattended, attended or keep", p)
+}
+
+// postureObstacle is why st may not be restarted into posture right now ("" when
+// it may). It is the checks the request and the preflight share, so a request
+// that passes here is one the preflight also accepts unless something changed
+// (spinclass#342, operator ruling 2026-11-08): a confined session is refused,
+// since its posture is the confinement profile's; the session needs a pinned
+// entry to rewrite, and for unattended a claude harness entry; and a widening,
+// attended, additionally needs a trusted-layer allow-posture-widening. Narrowing
+// to unattended needs no key. "" (keep) is never an obstacle.
+func postureObstacle(st *session.State, posture string) string {
+	if posture == "" {
+		return ""
+	}
+	if stateDir, err := confinement.DefaultStateDir(); err != nil || confinement.LaunchedConfined(stateDir, st.WorktreePath) {
+		return fmt.Sprintf("%s was launched confined (or its confinement could not be read), so its posture is its confinement profile's and cannot be changed by a restart", st.Key())
+	}
+	if st.Entry == nil {
+		return fmt.Sprintf("%s has no pinned session entry (it predates pinning), so there is nothing to record a posture in; resume it once, which pins it, then ask again", st.Key())
+	}
+	if posture == restartPostureUnattended {
+		entry := st.Entry.Resume
+		if len(entry) == 0 {
+			entry = st.Entry.Start
+		}
+		if err := spawn.PinnedEntrySupportsDontAsk(entry); err != nil {
+			return fmt.Sprintf("%s cannot run unattended: %v", st.Key(), err)
+		}
+		return ""
+	}
+	// attended: a widening.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Sprintf("resolving the home directory to read sweatfiles: %v", err)
+	}
+	h, err := sweatfileio.LoadHierarchy(home, st.RepoPath)
+	if err != nil {
+		return fmt.Sprintf("reading the sweatfile hierarchy: %v", err)
+	}
+	if allowed, _ := sweatfileio.TrustedAllowPostureWidening(h, home, st.RepoPath); !allowed {
+		return "widening a session's permissions (unattended to attended) is not allowed: an operator must set `allow-posture-widening = true` under [session-entry] in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored). It always asks a human even then"
+	}
+	return ""
+}
+
 // queueRestart records a RestartRequest on st and runs the hand-off. requester
 // is the principal that asked; principal is st's own. A failed hand-off clears
 // the request again, so the frontend never restarts on a request that was not
 // handed off.
 func queueRestart(st *session.State, requester, principal, reason string, force bool) (string, error) {
+	return queueRestartPosture(st, requester, principal, reason, force, "")
+}
+
+// queueRestartPosture is queueRestart that also asks for a posture change
+// (spinclass#342); posture is "" (keep), unattended or attended, already
+// normalised by the caller.
+func queueRestartPosture(st *session.State, requester, principal, reason string, force bool, posture string) (string, error) {
 	argv, obstacle, err := restartPlan(st, principal, force)
 	if err != nil {
 		return "", err
 	}
 	if obstacle != "" {
 		return "", errors.New(obstacle)
+	}
+	if obstacle := postureObstacle(st, posture); obstacle != "" {
+		return "", errors.New(obstacle)
+	}
+	// Attended is a widening: a session may not widen itself, only a holder or
+	// the operator may, and the preflight re-checks the right.
+	if posture == restartPostureAttended && requester == principal {
+		return "", errors.New("a session may not widen its own permissions; ask a holder with the restart right, or the operator")
 	}
 
 	when := restartWhenIdle
@@ -164,6 +251,7 @@ func queueRestart(st *session.State, requester, principal, reason string, force 
 		Requester:   requester,
 		Reason:      reason,
 		When:        when,
+		Posture:     posture,
 	}
 	if err := updateLoadedSession(st, func(cur *session.State) bool {
 		cur.RestartRequest = request
@@ -172,7 +260,7 @@ func queueRestart(st *session.State, requester, principal, reason string, force 
 		return "", fmt.Errorf("recording the restart request: %w", err)
 	}
 
-	expanded := expandRestartHandoff(argv, principal, st.Key(), when, reason)
+	expanded := expandRestartHandoff(argv, principal, st.Key(), when, posture, reason)
 	if out, herr := restartHandoffFn(st.WorktreePath, expanded); herr != nil {
 		if werr := updateLoadedSession(st, func(cur *session.State) bool {
 			cur.RestartRequest = nil
@@ -194,8 +282,9 @@ func queueRestart(st *session.State, requester, principal, reason string, force 
 
 // restartThisSessionParams is the parameter set of restart-this-session.
 type restartThisSessionParams struct {
-	Reason string `json:"reason"`
-	Force  bool   `json:"force"`
+	Reason  string `json:"reason"`
+	Force   bool   `json:"force"`
+	Posture string `json:"posture"`
 }
 
 // rejectForceFor fails closed on any force argument, including false: the tool
@@ -241,7 +330,11 @@ func runRestartThisSession(p restartThisSessionParams) (string, error) {
 	if reason == "" {
 		reason = defaultSelfRestartReason
 	}
-	return queueRestart(st, principal, principal, reason, p.Force)
+	posture, err := normalizePosture(p.Posture)
+	if err != nil {
+		return "", err
+	}
+	return queueRestartPosture(st, principal, principal, reason, p.Force, posture)
 }
 
 // handleRestartThisSession is the `restart-this-session` MCP tool handler.
@@ -267,14 +360,16 @@ func restartThisSessionParamList() []command.Param {
 			Description: "Why the restart is wanted; passed to the frontend and shown to the holders. Defaults to \"" + defaultSelfRestartReason + "\".",
 		},
 		forceRestartParam(),
+		restartPostureParam(),
 	}
 }
 
 // restartChildParams is the parameter set of restart-child-session.
 type restartChildParams struct {
-	Child  string `json:"child"`
-	Reason string `json:"reason"`
-	Force  bool   `json:"force"`
+	Child   string `json:"child"`
+	Reason  string `json:"reason"`
+	Force   bool   `json:"force"`
+	Posture string `json:"posture"`
 }
 
 // runRestartChild is the shared restart-child-session flow, shaped like
@@ -300,7 +395,11 @@ func runRestartChild(p restartChildParams) (string, error) {
 	if reason == "" {
 		reason = defaultChildRestartReason
 	}
-	return queueRestart(child, callerPrincipal, childPrincipal, reason, p.Force)
+	posture, err := normalizePosture(p.Posture)
+	if err != nil {
+		return "", err
+	}
+	return queueRestartPosture(child, callerPrincipal, childPrincipal, reason, p.Force, posture)
 }
 
 // authorizeRestartChild resolves target and checks the caller may act on its
@@ -369,6 +468,16 @@ func restartChildSessionParamList() []command.Param {
 			Description: "Why the restart is wanted; passed to the frontend and shown to the holders. Defaults to \"" + defaultChildRestartReason + "\".",
 		},
 		forceRestartParam(),
+		restartPostureParam(),
+	}
+}
+
+// restartPostureParam asks for a posture change on the restart (spinclass#342).
+func restartPostureParam() command.Param {
+	return command.Param{
+		Name:        "posture",
+		Type:        command.String,
+		Description: "Relaunch into a permission posture: \"unattended\" (claude's dontAsk mode; a narrowing, no prompt) or \"attended\" (a widening: refused for the session itself and for a session launched confined, needs the restart right on a child, needs an operator-set allow-posture-widening in a trusted sweatfile, and always prompts the human). \"keep\" or omitted changes nothing.",
 	}
 }
 
@@ -387,6 +496,11 @@ type restartVerdict struct {
 	Verdict string `json:"verdict"`
 	Reason  string `json:"reason"`
 	When    string `json:"when"`
+	// Posture is set only on a "restart" verdict that changes the session's
+	// permission posture (spinclass#342): "unattended" or "attended". Absent
+	// means keep; clown relaunches into it and treats an unknown value as "do
+	// not restart".
+	Posture string `json:"posture,omitempty"`
 	// State is set only by --peek: "closed" or "live".
 	State string `json:"state,omitempty"`
 }
@@ -516,6 +630,21 @@ func runRestartPreflight(target string) (restartVerdict, error) {
 	if obstacle != "" {
 		return refuse(obstacle)
 	}
+	// A posture change is re-checked now (spinclass#342): the request lives in
+	// state the session can write, so a widening is honoured only when the key is
+	// still on, the target is not confined, and a holder other than the session
+	// itself, still holding the restart right, asked for it.
+	if obstacle := postureObstacle(st, req.Posture); obstacle != "" {
+		return refuse(obstacle)
+	}
+	if req.Posture == restartPostureAttended {
+		if req.Requester == principal {
+			return refuse("a session may not widen its own permissions")
+		}
+		if err := rearmRequesterAllowed(st, req.Requester, principal); err != nil {
+			return refuse(err.Error())
+		}
+	}
 	// Consume and mark restarting under the session lock, re-checking the
 	// closing mark there: a close that began since the read above wins, and one
 	// that begins after this is refused while the mark is recent (#419).
@@ -524,6 +653,15 @@ func runRestartPreflight(target string) (restartVerdict, error) {
 		if cur.ClosingAt != nil {
 			return errRestartLostToClose
 		}
+		// The pinned entry carries the posture to the next `sc resume`, in the
+		// same locked update that consumes the request, so the two cannot part.
+		if req.Posture != "" {
+			if cur.Entry == nil {
+				return errors.New("the session's pinned entry vanished while its posture was being recorded")
+			}
+			cur.Entry.Env = spawn.SetUnattendedMarker(cur.Entry.Env, req.Posture == restartPostureUnattended)
+		}
+		cur.RestartingPosture = req.Posture
 		restartingAt = time.Now().UTC()
 		cur.RestartRequest = nil
 		cur.RestartingAt = &restartingAt
@@ -547,6 +685,7 @@ func runRestartPreflight(target string) (restartVerdict, error) {
 		Verdict: "restart",
 		Reason:  fmt.Sprintf("restart of %s requested by %s: %s", st.Key(), req.Requester, req.Reason),
 		When:    req.When,
+		Posture: req.Posture,
 	}, nil
 }
 
@@ -644,6 +783,15 @@ func runRestartRearm(target string) (restartVerdict, error) {
 	if obstacle != "" {
 		return refuse(obstacle)
 	}
+	// The posture the first verdict carried is re-checked, as at the preflight
+	// (spinclass#342), and re-emitted unchanged.
+	posture := st.RestartingPosture
+	if obstacle := postureObstacle(st, posture); obstacle != "" {
+		return refuse(obstacle)
+	}
+	if posture == restartPostureAttended && req.Requester == principal {
+		return refuse("a session may not widen its own permissions")
+	}
 
 	// Re-checked under the session lock: a close, a newer request, a return, or
 	// another re-arm that began since the read above wins.
@@ -679,6 +827,7 @@ func runRestartRearm(target string) (restartVerdict, error) {
 		Verdict: "restart",
 		Reason:  fmt.Sprintf("restart of %s re-armed (requested by %s: %s)", st.Key(), req.Requester, req.Reason),
 		When:    restartWhenIdle,
+		Posture: posture,
 	}, nil
 }
 

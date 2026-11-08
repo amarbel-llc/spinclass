@@ -249,10 +249,21 @@ restarted into unattended shows `CLOWN_UNATTENDED=1` and one
 
 ## 7. Open questions
 
+Ruled 2026-11-08 (operator, relayed by circus/eager-holly) and built the same
+day: **widening also needs a trusted-layer sweatfile key**, now
+`[session-entry].allow-posture-widening`, per hierarchy above the repo like
+`[session-entry].restart` (a repo or worktree value is ignored); without it a
+widening is refused with the reason; narrowing stays free; widening still
+always asks a human even with the key; confined sessions stay refused. See the
+FDR 0037 amendment. Decisions 1 to 7 and 9 to 10 above stand as built, with one
+deviation: a pinned entry with no `--` separator (a bare shell) is refused for
+unattended, since the marker means nothing there. Not built: decision 8 (the
+`sc list` column and the `--peek` posture).
+
 For the operator:
 
-- **Should widening also need a trusted-layer sweatfile key** (§3), and if so
-  global-only or per hierarchy? Marked open on the coordinator's instruction.
+- ~~**Should widening also need a trusted-layer sweatfile key** (§3), and if so
+  global-only or per hierarchy?~~ Closed by the ruling above.
 - Always-ask on `attended` (decision 2) versus a new D13 right for delegated
   widening: which does the fleet want first?
 - Is a self-narrowing without any prompt acceptable, given a narrowed session
