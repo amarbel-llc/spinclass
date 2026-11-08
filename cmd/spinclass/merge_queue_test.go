@@ -16,6 +16,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/delta/merge"
 	"code.linenisgreat.com/spinclass/internal/testgit"
+	"code.linenisgreat.com/spinclass/internal/testring"
 )
 
 // gateSweat activates the pre-merge attestation gate (one required skill) with
@@ -503,20 +504,9 @@ func TestProcessMergeQueueDrainsOnFailure(t *testing.T) {
 // "L-stub", so a merge job and a notice job get distinguishable ids.
 func installRingmasterStub(t *testing.T) (invocationsDir string) {
 	t.Helper()
-	dir := t.TempDir()
-	invocationsDir = filepath.Join(dir, "inv")
-	script := filepath.Join(dir, "ringmaster")
-	body := "#!/bin/sh\n" +
-		"mkdir -p " + invocationsDir + "\n" +
-		"printf '%s\\n' \"$@\" > \"$(mktemp " + invocationsDir + "/inv.XXXXXX)\"\n" +
-		"if [ \"$1\" = start ]; then echo \"$3-stub\"; fi\n" +
-		"exit 0\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatalf("write stub ringmaster: %v", err)
-	}
-	t.Setenv("CLOWN_BIN", filepath.Join(dir, "clown"))
-	t.Setenv("RINGMASTER_BIN", script)
-	return invocationsDir
+	return testring.Install(t, testring.Options{
+		Answers: map[string]string{"start": `"$3-stub"`},
+	}).InvocationsDir
 }
 
 // recordedDone returns the argv of the stub's `done <id> ...` invocation for

@@ -13,6 +13,7 @@ import (
 	"code.linenisgreat.com/ringmaster/pkgs/jobwake"
 
 	"code.linenisgreat.com/spinclass/internal/0/clown"
+	"code.linenisgreat.com/spinclass/internal/testring"
 )
 
 // TestMain strips CLOWN_BIN for the whole package: the dev/CI environment
@@ -29,57 +30,26 @@ func TestMain(m *testing.M) {
 // a fixed job id for `ringmaster start` calls. It points $RINGMASTER_BIN at the
 // stub (clown RFC-0015 resolution) and sets $CLOWN_BIN so clown.Enabled()
 // reports true (the emit gate). ok=false makes every call exit 1.
+//
+// Each invocation records to its OWN file under argsFile (treated as a
+// directory), so the #22 observer's concurrent `ringmaster wait` never shares a
+// file with the job's own invocations (testring explains why); recordedInvocations
+// reads the directory back, one file per invocation.
 func installStub(t *testing.T, argsFile string, ok bool) {
 	t.Helper()
-	dir := t.TempDir()
-	script := filepath.Join(dir, "ringmaster")
-	exit := "1"
-	if ok {
-		exit = "0"
-	}
-	// Each invocation records to its OWN file under argsFile (treated as a
-	// directory), so the #22 observer's concurrent `ringmaster wait` never
-	// shares a file with the job's own invocations: no interleaving, no lock,
-	// and nothing that depends on a shell's printf being a single write() (it
-	// isn't in dash — the assumption that failed the eng build). mktemp gives
-	// each concurrent invocation a unique filename; recordedInvocations reads
-	// the directory back, one file per invocation.
-	body := "#!/bin/sh\n" +
-		"mkdir -p " + argsFile + " 2>/dev/null\n" +
-		"printf '%s\\n' \"$@\" > \"$(mktemp " + argsFile + "/inv.XXXXXX)\"\n" +
-		"if [ \"$1\" = start ]; then echo job-deadbeef; fi\n" +
-		"exit " + exit + "\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatalf("write stub ringmaster: %v", err)
-	}
-	t.Setenv("CLOWN_BIN", filepath.Join(dir, "clown"))
-	t.Setenv("RINGMASTER_BIN", script)
+	testring.InstallAt(t, argsFile, testring.Options{
+		Fail:    !ok,
+		Answers: map[string]string{"start": "job-deadbeef"},
+	})
 }
 
 // installStubWithSpool is installStub plus a `spool-path` answer, so the tee
 // into ringmaster's spool has somewhere to land (#251).
 func installStubWithSpool(t *testing.T, argsFile, spoolPath string) {
 	t.Helper()
-	dir := t.TempDir()
-	script := filepath.Join(dir, "ringmaster")
-	// Each invocation records to its OWN file under argsFile (treated as a
-	// directory), so the #22 observer's concurrent `ringmaster wait` never
-	// shares a file with the job's own invocations: no interleaving, no lock,
-	// and nothing that depends on a shell's printf being a single write() (it
-	// isn't in dash — the assumption that failed the eng build). mktemp gives
-	// each concurrent invocation a unique filename; recordedInvocations reads
-	// the directory back, one file per invocation.
-	body := "#!/bin/sh\n" +
-		"mkdir -p " + argsFile + " 2>/dev/null\n" +
-		"printf '%s\\n' \"$@\" > \"$(mktemp " + argsFile + "/inv.XXXXXX)\"\n" +
-		"if [ \"$1\" = start ]; then echo job-deadbeef; fi\n" +
-		"if [ \"$1\" = spool-path ]; then echo " + spoolPath + "; fi\n" +
-		"exit 0\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatalf("write stub ringmaster: %v", err)
-	}
-	t.Setenv("CLOWN_BIN", filepath.Join(dir, "clown"))
-	t.Setenv("RINGMASTER_BIN", script)
+	testring.InstallAt(t, argsFile, testring.Options{
+		Answers: map[string]string{"start": "job-deadbeef", "spool-path": spoolPath},
+	})
 }
 
 // recordedInvocations reads back the stub's per-invocation files (argsFile is
@@ -389,32 +359,17 @@ func TestStartEmitsAbortedStateOnCancel(t *testing.T) {
 // context cancel. `start` still returns the fixed job id.
 func installStubObservesCancel(t *testing.T, argsFile string) {
 	t.Helper()
-	dir := t.TempDir()
-	script := filepath.Join(dir, "ringmaster")
-	// Each invocation records to its OWN file under argsFile (treated as a
-	// directory), so the #22 observer's concurrent `ringmaster wait` never
-	// shares a file with the job's own invocations: no interleaving, no lock,
-	// and nothing that depends on a shell's printf being a single write() (it
-	// isn't in dash — the assumption that failed the eng build). mktemp gives
-	// each concurrent invocation a unique filename; recordedInvocations reads
-	// the directory back, one file per invocation.
-	//
 	// `done` sleeps first. The terminal emit runs AFTER the aborted record is
 	// durable, so a test that wakes on the record alone (not WaitDone) returns
 	// with the emit still running and its write still to come (#417); the delay
 	// makes that gap certain rather than load-dependent.
-	body := "#!/bin/sh\n" +
-		"if [ \"$1\" = done ]; then sleep 0.3; fi\n" +
-		"mkdir -p " + argsFile + " 2>/dev/null\n" +
-		"printf '%s\\n' \"$@\" > \"$(mktemp " + argsFile + "/inv.XXXXXX)\"\n" +
-		"if [ \"$1\" = start ]; then echo job-deadbeef; fi\n" +
-		"if [ \"$1\" = wait ]; then printf '%s\\n' '{\"state\":\"running\"}'; fi\n" +
-		"exit 0\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatalf("write stub ringmaster: %v", err)
-	}
-	t.Setenv("CLOWN_BIN", filepath.Join(dir, "clown"))
-	t.Setenv("RINGMASTER_BIN", script)
+	testring.InstallAt(t, argsFile, testring.Options{
+		Delays: map[string]string{"done": "0.3"},
+		Answers: map[string]string{
+			"start": "job-deadbeef",
+			"wait":  `'{"state":"running"}'`,
+		},
+	})
 	requireNoJobOutlivesTest(t)
 }
 

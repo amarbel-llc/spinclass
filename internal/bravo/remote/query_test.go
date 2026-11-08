@@ -17,7 +17,8 @@ import (
 // to PATH, so QueryHost's exec resolves to it. The script records its argv
 // (one element per line, appended) into argsFile, then runs body — canned
 // JSON on stdout, stderr noise, non-zero exits, or a sleep, per test case.
-// Mirrors internal/0/clown/clown_test.go's stubClown.
+// Same append-to-one-file shape as internal/0/clown/clown_test.go's
+// stubRingmaster; the per-invocation-file ringmaster stub is internal/testring.
 func stubSSH(t *testing.T, argsFile, body string) {
 	t.Helper()
 	dir := t.TempDir()
