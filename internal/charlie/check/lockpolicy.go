@@ -87,7 +87,15 @@ type lockNode struct {
 // form is the attributes themselves, no reference at all is the indirect
 // `flake:<name>`); Follows is set instead of Original for a follows; Inputs
 // are the nested overrides.
+//
+// Inherits is set for a NESTED override that names no reference of its own
+// (`tommy.inputs.tap.inputs.gomod2nix.follows = ...` overrides tap's inputs,
+// not tap): nix keeps the dependency's own reference for it, so there is
+// nothing declared to compare with the lock node (a top-level input with no
+// reference is a different thing, the indirect `flake:<name>`). Its nested
+// overrides are still walked.
 type inputSpec struct {
+	Inherits bool                 `json:"inherits"`
 	Original map[string]any       `json:"original"`
 	Flake    bool                 `json:"flake"`
 	Follows  *string              `json:"follows"`
@@ -216,6 +224,12 @@ func lockMismatches(lock flakeLock, nodeID string, prefix []string, declared map
 			out = append(out, label+": the lock names a node it lacks")
 			continue
 		}
+		if spec.Inherits {
+			// A nested override of the dependency's own inputs: its reference
+			// and flake flag are the dependency's, already in the lock.
+			out = append(out, lockMismatches(lock, childID, path, spec.Inputs)...)
+			continue
+		}
 		if spec.Original == nil {
 			out = append(out, label+": declared without a reference")
 			continue
@@ -336,19 +350,24 @@ var declaredFlakeInputs = declaredFlakeInputsViaNix
 // `explore-guarded-gate-inputs-eval` carries a copy as `canon` and runs it
 // against a real lock: keep the two in step.
 const declaredInputsApply = `f: let
-  canon = name: spec:
+  canon = nested: name: spec:
     if !(builtins.isAttrs spec) then throw "input ${name} is not an attribute set"
-    else let rest = removeAttrs spec [ "inputs" "flake" "follows" ]; in {
+    else let
+      rest = removeAttrs spec [ "inputs" "flake" "follows" ];
+      inheritsRef = nested && !(spec ? follows) && !(spec ? type) && !(spec ? url);
+    in {
       original =
         if spec ? follows then (if rest == { } then null else throw "input ${name} mixes follows with a reference")
         else if spec ? type then rest
         else if spec ? url then (if builtins.attrNames rest == [ "url" ] then builtins.parseFlakeRef spec.url else throw "input ${name} mixes url with other attributes")
+        else if inheritsRef then (if rest == { } then null else throw "input ${name} mixes overrides with a reference")
         else { type = "indirect"; id = name; };
+      inherits = inheritsRef;
       flake = spec.flake or true;
       follows = spec.follows or null;
-      inputs = builtins.mapAttrs canon (spec.inputs or { });
+      inputs = builtins.mapAttrs (canon true) (spec.inputs or { });
     };
-  in builtins.mapAttrs canon (f.inputs or { })`
+  in builtins.mapAttrs (canon false) (f.inputs or { })`
 
 // declaredFlakeInputsViaNix evaluates flake.nix's inputs with nix under the
 // gate's own scrubbed environment (forbidden as the worker-written

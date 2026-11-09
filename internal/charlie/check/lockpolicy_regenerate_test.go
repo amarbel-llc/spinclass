@@ -60,6 +60,47 @@ func TestAdmitLockForRegenerateKeepsTheGatesRefusals(t *testing.T) {
 	}
 }
 
+// clown's flake.nix has `tommy.inputs.tap.inputs.gomod2nix.follows = ...`: an
+// override of tap's OWN inputs that names no reference for tap. Nix keeps
+// tommy's reference for tap, so it is not the indirect `flake:tap` a top-level
+// input without a reference would be (the live refusal of 2026-11-09).
+func TestLockPolicyAcceptsANestedOverrideThatNamesNoReference(t *testing.T) {
+	dir := commitTree(t, map[string]string{"flake.nix": "{ outputs = _: {}; }", "flake.lock": nestedLock}, nil)
+	specs := specsFromLock(t, nestedLock, "nixpkgs", "sub")
+	sub := specs["sub"]
+	sub.Inputs = map[string]inputSpec{"leak": {Inherits: true, Flake: true}}
+	specs["sub"] = sub
+	stubDeclaredInputs(t, specs, nil)
+	if err := refuseUnsafeFlakeLock(context.Background(), dir, nil); err != nil {
+		t.Fatalf("a nested override naming no reference must not be compared with the lock node: %v", err)
+	}
+
+	// Read as a top-level input would be (indirect), it is the mismatch the
+	// policy used to report: the evaluation, not the Go, decides which it is.
+	sub.Inputs = map[string]inputSpec{"leak": {Original: map[string]any{"type": "indirect", "id": "leak"}, Flake: true}}
+	specs["sub"] = sub
+	stubDeclaredInputs(t, specs, nil)
+	if err := refuseUnsafeFlakeLock(context.Background(), dir, nil); err == nil || !strings.Contains(err.Error(), "sub/leak") {
+		t.Fatalf("err = %v, want the indirect-vs-locked mismatch kept for a declared reference", err)
+	}
+}
+
+// Inheriting the reference does not exempt what is declared below it: a nested
+// override under a reference-less one is still checked against the lock.
+func TestLockPolicyStillWalksOverridesBelowAnInheritedInput(t *testing.T) {
+	dir := commitTree(t, map[string]string{"flake.nix": "{ outputs = _: {}; }", "flake.lock": nestedLock}, nil)
+	specs := specsFromLock(t, nestedLock, "nixpkgs", "sub")
+	sub := specs["sub"]
+	sub.Inputs = map[string]inputSpec{"leak": {Inherits: true, Flake: true, Inputs: map[string]inputSpec{
+		"deeper": {Original: github("x", "y"), Flake: true},
+	}}}
+	specs["sub"] = sub
+	stubDeclaredInputs(t, specs, nil)
+	if err := refuseUnsafeFlakeLock(context.Background(), dir, nil); err == nil || !strings.Contains(err.Error(), "sub/leak/deeper: missing from the lock") {
+		t.Fatalf("err = %v, want the deeper override reported missing from the lock", err)
+	}
+}
+
 func TestAdmitLockForRegenerateAdmitsATreeWithNoFlake(t *testing.T) {
 	dir := commitTree(t, map[string]string{"README": "x"}, nil)
 	if err := AdmitLockForRegenerate(context.Background(), dir, nil); err != nil {

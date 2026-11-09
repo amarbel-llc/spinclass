@@ -1841,19 +1841,24 @@ explore-guarded-gate-inputs-eval:
     # keep the two in step): every input's spec as nix would read it, the
     # url form through builtins.parseFlakeRef, nested overrides included.
     canon='f: let
-      canon = name: spec:
+      canon = nested: name: spec:
         if !(builtins.isAttrs spec) then throw "input ${name} is not an attribute set"
-        else let rest = removeAttrs spec [ "inputs" "flake" "follows" ]; in {
+        else let
+          rest = removeAttrs spec [ "inputs" "flake" "follows" ];
+          inheritsRef = nested && !(spec ? follows) && !(spec ? type) && !(spec ? url);
+        in {
           original =
             if spec ? follows then (if rest == { } then null else throw "input ${name} mixes follows with a reference")
             else if spec ? type then rest
             else if spec ? url then (if builtins.attrNames rest == [ "url" ] then builtins.parseFlakeRef spec.url else throw "input ${name} mixes url with other attributes")
+            else if inheritsRef then (if rest == { } then null else throw "input ${name} mixes overrides with a reference")
             else { type = "indirect"; id = name; };
+          inherits = inheritsRef;
           flake = spec.flake or true;
           follows = spec.follows or null;
-          inputs = builtins.mapAttrs canon (spec.inputs or { });
+          inputs = builtins.mapAttrs (canon true) (spec.inputs or { });
         };
-      in builtins.mapAttrs canon (f.inputs or { })'
+      in builtins.mapAttrs (canon false) (f.inputs or { })'
     run() {  # $1 mode, $2 name, $3 flake.nix body, $4 optional --apply expression
       local dir="$work/$1-$2" out start end names='f: builtins.attrNames (f.inputs or { })' apply
       apply="${4:-$names}"
@@ -1907,6 +1912,9 @@ explore-guarded-gate-inputs-eval:
     run restrict-stdin canon-indirect '{ inputs.a = { }; inputs.b.url = "nixpkgs"; outputs = _: {}; }' "$canon"
     run restrict-stdin canon-follows '{ inputs.a.url = "github:x/y"; inputs.a.inputs.n.follows = "b"; inputs.b.url = "github:x/z"; outputs = _: {}; }' "$canon"
     run restrict-stdin canon-nested '{ inputs.a.url = "github:x/y"; inputs.a.inputs.n.url = "path:/nowhere?narHash=sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; outputs = _: {}; }' "$canon"
+    # A nested override that names no reference (clown's tommy.inputs.tap.inputs.X.follows):
+    # inherits=true for tap and gomod2nix-style follows below it, never indirect.
+    run restrict-stdin canon-inherit '{ inputs.a.url = "github:x/y"; inputs.a.inputs.t.inputs.g.follows = "b"; inputs.b.url = "github:x/z"; outputs = _: {}; }' "$canon"
     run restrict-stdin canon-path '{ inputs.a = { url = "path:/nowhere"; flake = false; }; outputs = _: {}; }' "$canon"
     run restrict-stdin canon-relative '{ inputs.a.url = "./sub"; outputs = _: {}; }' "$canon"
     run restrict-stdin canon-git-file '{ inputs.a.url = "git+file:///nowhere"; outputs = _: {}; }' "$canon"
