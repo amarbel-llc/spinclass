@@ -66,6 +66,11 @@ sc run [--description D | -d D] [--no-merge] [--no-close] [--local-only] \
 (Amended 2026-10-24: the post-merge flags are specified in FDR 0026 and
 `--allow-stale-base` in FDR 0024.)
 
+(Amended 2026-11-09: `--no-regenerate` skips the regenerate phase that runs
+after a step which changed `flake.lock`, specified in
+`docs/plans/2026-11-09-sc-run-regenerate-under-new-lock.md`. The phase is on by
+default; this step reports the changed lock only, the regeneration follows.)
+
 CLI-only (no MCP tool): it execs a command sequence and reads stdin, neither of
 which fits the MCP request/response shape. Output uses the merge/check
 `present` stack — `--format auto` (viewport on a TTY, ndjson when piped) |

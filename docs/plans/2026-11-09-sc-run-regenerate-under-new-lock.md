@@ -213,11 +213,18 @@ default. This note proposes; the operator rules.
 3. **Freeze:** F1, as a separate change after the phase. The freeze is not
    changed yet.
 4. **Admission:** the full #449 declared-inputs admission, for the phase.
-5. **Open:** whether the phase also runs for an agent's `merge-this-session`.
-   Unanswered; it stays `sc run`-only until the operator says otherwise.
+5. **Merge path:** YES (answered later the same day): the phase also runs for
+   an agent's `merge-this-session` lock bump, not only `sc run`. The trigger
+   and admission must work at the merge path too, still skipped for confined
+   sessions.
 
-Implementation has NOT been approved: scope goes to the coordinator, who
-confirms with the operator before any code.
+Implementation was approved on 2026-11-09 for R0a-R0e plus the merge-path
+step R0f below; R1 (F1) stays later and separate, and the freeze is not
+touched. The plan doc is the tracker; no issues are filed.
+
+R0b rulings pending (operator): the phase's admission needs a systemd scope
+tier (no unscoped fallback in the #449 policy) and an empty forbidden-dirs
+list for unconfined sessions.
 
 ## 9. Implementation breakdown (I; not started, not filed as issues)
 
@@ -246,6 +253,12 @@ R1 is a separate change after R0.
 - **R0e, integration and docs.** The fixture-repo bump test of section 6 and
   the replayed #459 probe; FDR 0020 amendment, `spinclass-run(1)` flag, a
   note in FDR 0019. Confined sessions skip (R).
+- **R0f, the merge path (Q5).** The same phase function behind a second
+  caller in `merge.PrepareMerge`, before the pin, skipped when
+  `guardedMerge()` (confined). Needs the phase to be callable with only
+  (worktree, repo, reporter), which is why the trigger lives in
+  `internal/bravo/regenerate` (below both callers; dagnabit places it at
+  bravo, its imports being alfa and 0 only).
 - **R1 (later, F1).** Policy-gated drift re-eval in the dispatcher and
   freeze-only-for-unattended; its own plan, tests and FDR 0019 amendment.
 - **Order and size.** R0a to R0e in sequence, each landable on its own;

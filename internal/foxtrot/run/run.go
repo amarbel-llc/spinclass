@@ -60,6 +60,10 @@ type Spec struct {
 	NoClose        bool
 	LocalOnly      bool
 	AllowStaleBase bool // --allow-stale-base: create even from an unverified default branch
+	// NoRegenerate is --no-regenerate: skip the regenerate phase that follows a
+	// step which changed flake.lock (docs/plans/2026-11-09-sc-run-regenerate-
+	// under-new-lock.md). The phase is on by default.
+	NoRegenerate bool
 	// AllowNoCredential: --allow-no-credential — a failed [auth] mint warns and
 	// the session runs without a push credential instead of failing (FDR 0028).
 	AllowNoCredential bool
@@ -204,6 +208,9 @@ func Run(ctx context.Context, spec Spec) (exitCode int, err error) {
 			stepCode = exitCodeFromErr(stepErr)
 			return stepErr
 		}
+
+		// --- regenerate (R0a: the trigger only; the phase body follows) ---
+		reportRegenerate(ts, rp.AbsPath, rp.RepoPath, spec.NoRegenerate)
 
 		if defaultBranch != "" {
 			aheadN = git.CommitsAhead(rp.AbsPath, defaultBranch, rp.Branch)
@@ -482,7 +489,7 @@ func runDynamicPostMergeHooks(rep *crap.Reporter, repoPath, defaultBranch, branc
 // ParseArgs splits the passthrough argv of `sc run` into a Spec. Grammar:
 //
 //	[--repo-dir P | --repo-dir=P] [--description D | -d D | --description=D] [--no-merge] [--no-close]
-//	[--local-only] [--allow-stale-base] [--allow-no-credential] [--format F | --format=F]
+//	[--local-only] [--no-regenerate] [--allow-stale-base] [--allow-no-credential] [--format F | --format=F]
 //	[--post-merge H]... [--post-merge-timeout D | --post-merge-timeout=D]
 //	[--post-merge-targets A,B | --post-merge-targets=A,B] [--no-post-merge]
 //	( -- <util> [args...] | <stdin script> )
@@ -510,6 +517,9 @@ func ParseArgs(args []string, stdin io.Reader) (Spec, error) {
 			i++
 		case a == "--local-only":
 			spec.LocalOnly = true
+			i++
+		case a == "--no-regenerate":
+			spec.NoRegenerate = true
 			i++
 		case a == "--allow-stale-base":
 			spec.AllowStaleBase = true
