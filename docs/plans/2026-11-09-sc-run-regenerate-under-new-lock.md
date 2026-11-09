@@ -259,6 +259,39 @@ list for unconfined sessions.
 - **Not built:** R1 (F1, the freeze change), a sweatfile key to switch the
   phase off per repo, a merge-side switch.
 
+## 11. R1 (F1) scoped against the code, 2026-11-09 (I; NOT built)
+
+What F1 means in the code as it stands (`internal/bravo/apply/precommit.go`,
+`frozenhook.go`):
+
+- `installPreCommitHook(sf, worktreePath)` has no notion of who holds the session;
+  it always calls `resolveFrozenHook`, one `nix develop` of the landed base per
+  install (sc start, spawn, resurrect, rebuild, and a resume whose base moved).
+- The dispatcher already never evaluates at commit time and only warns on a lock
+  drift. The "policy-gated drift re-eval" half of F1 would add a commit-time
+  evaluation, which the regenerate phase now makes unnecessary for the case it
+  existed for (a lock-bump commit): the phase regenerates after the step and
+  bypasses the hook for its own commit.
+- Therefore the remaining, separable F1 change is the **unfreeze for
+  interactive/operator sessions**: install with the bare formatter name (the
+  FDR 0019 original model, resolved from the committing shell's devshell PATH),
+  no start-time base evaluation, and keep the frozen path only for unattended
+  and unconfined spawns. It needs an `unattended` input at install: the callers
+  that know it are `spawn.Spawn` (always unattended), `shop.Attach` with
+  `noAttach` (the `sc run` and `sc start --no-attach` path), `resurrect`
+  (follows the original), `resume` (follows `session.State.Entry`); the others
+  are interactive.
+
+Open questions before building it (operator): (1) is "unattended" exactly
+spawn plus no-attach, or also an attached session launched with
+`CLOWN_UNATTENDED`? (2) interactive sessions then have the pre-#459 exposure
+back (the committing shell's devshell and PATH choose the formatter; the
+commit-time `nix develop` stays gone, so the #449 canary's fetch stays closed);
+is that the intent? (3) should the unfrozen interactive hook still print the
+drift warning? (Recommended: yes, it costs nothing.) Not built until these are
+answered; the operator ruled F1 as a later separate change, so this section is
+the proposal for that change, not a start of it.
+
 ## 9. Implementation breakdown (I; not started, not filed as issues)
 
 R1 is a separate change after R0.

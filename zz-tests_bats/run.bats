@@ -113,7 +113,9 @@ worktree_count() {
 # A repair hook that rewrites a tracked file, standing in for a generator that
 # produces different output under a new flake.lock.
 add_regenerating_repair_hook() {
-  sed -i 's|^pre-merge = "true"$|pre-merge = "true"\nrepair = "echo regenerated > gen.txt"|' \
+  # Only acts when a flake.lock exists, so a step that never touches the lock
+  # leaves no stray file behind for the merge's worktree removal to trip over.
+  sed -i 's#^pre-merge = "true"$#pre-merge = "true"\nrepair = "test ! -f flake.lock || echo regenerated > gen.txt"#' \
     "$HOME/.config/spinclass/sweatfile"
 }
 
