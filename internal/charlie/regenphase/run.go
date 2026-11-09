@@ -136,6 +136,10 @@ func run(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, wtPat
 		// regeneration had succeeded). The phase fails and the branch is put back
 		// as written; the hook's own output (its WARN lines) goes in the failure.
 		if hookErr := errors.Join(hookErrs...); hookErr != nil {
+			// Name what the hooks left behind before the tree is put back.
+			if st, _ := git.Run(wtPath, "status", "--porcelain", "--untracked-files=no"); strings.TrimSpace(st) != "" {
+				fmt.Fprintf(&out, "\nworktree state when the phase gave up (git status --porcelain):\n%s\n", st)
+			}
 			restoreTree(wtPath, sha0)
 			return failStep(ts, StepName, fmt.Errorf("a hook still failed under the new lock after %d attempts (the worktree was put back to %s): %w", hookAttempts, shortSha(sha0), hookErr), out.String())
 		}
