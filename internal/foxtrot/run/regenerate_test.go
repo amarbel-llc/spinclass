@@ -2,6 +2,8 @@ package run
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,7 +37,7 @@ func commitFile(t *testing.T, dir, name, body string) {
 // regenerateStream runs the phase's seam on a repo whose branch `work` was cut
 // from `main` (holding lock L1) and then committed lockOnWork, and returns the
 // crap stream it wrote.
-func regenerateStream(t *testing.T, lockOnWork string, off bool) string {
+func regenerateStream(t *testing.T, lockOnWork string, off bool) (stream string, err error) {
 	t.Helper()
 	dir := t.TempDir()
 	gitIn(t, dir, "init", "-q", "-b", "main")
@@ -47,31 +49,73 @@ func regenerateStream(t *testing.T, lockOnWork string, off bool) string {
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	reportRegenerate(ts, dir, dir, off)
+	err = regeneratePhase(context.Background(), ts, dir, dir, off)
 	ts.Finish()
-	return buf.String()
+	return buf.String(), err
 }
 
-func TestRegenerateSeamIsSilentWhenTheLockIsUnchanged(t *testing.T) {
-	if got := regenerateStream(t, "L1", false); strings.Contains(got, "regenerate") {
-		t.Errorf("an unchanged lock must add nothing to the stream:\n%s", got)
+// stubAdmission replaces the lock policy for a test and records what it saw.
+func stubAdmission(t *testing.T, refuse error) (calls *int, sawForbidden *[]string) {
+	t.Helper()
+	n := 0
+	var forbidden []string
+	prev := admitLock
+	admitLock = func(_ context.Context, _ string, f []string) error {
+		n++
+		forbidden = f
+		return refuse
+	}
+	t.Cleanup(func() { admitLock = prev })
+	return &n, &forbidden
+}
+
+func TestRegeneratePhaseIsSilentAndNeverAdmitsWhenTheLockIsUnchanged(t *testing.T) {
+	calls, _ := stubAdmission(t, nil)
+	got, err := regenerateStream(t, "L1", false)
+	if err != nil || strings.Contains(got, "regenerate") {
+		t.Errorf("an unchanged lock must add nothing and succeed: err=%v\n%s", err, got)
+	}
+	if *calls != 0 {
+		t.Errorf("an unchanged lock reached the lock policy %d time(s)", *calls)
 	}
 }
 
-func TestRegenerateSeamReportsAChangedLock(t *testing.T) {
-	got := regenerateStream(t, "L2", false)
-	if !strings.Contains(got, "regenerate") || !strings.Contains(got, "flake.lock changed") {
-		t.Errorf("a changed lock is not reported:\n%s", got)
+func TestRegeneratePhaseAdmitsAChangedLockBeforeAnythingElse(t *testing.T) {
+	calls, forbidden := stubAdmission(t, nil)
+	got, err := regenerateStream(t, "L2", false)
+	if err != nil {
+		t.Fatalf("an admitted lock must not fail the run: %v\n%s", err, got)
+	}
+	if !strings.Contains(got, "regenerate") || !strings.Contains(got, "admitted") {
+		t.Errorf("an admitted lock is not reported:\n%s", got)
 	}
 	if strings.Contains(got, "--no-regenerate") {
 		t.Errorf("the phase is on, so the report must not blame the flag:\n%s", got)
 	}
+	if *calls != 1 || len(*forbidden) == 0 {
+		t.Errorf("admission calls = %d, forbidden = %v, want one call with the worktree listed", *calls, *forbidden)
+	}
 }
 
-func TestRegenerateSeamNamesTheFlagWhenOff(t *testing.T) {
-	got := regenerateStream(t, "L2", true)
-	if !strings.Contains(got, "--no-regenerate") {
-		t.Errorf("a changed lock under --no-regenerate is not reported as skipped by the flag:\n%s", got)
+func TestRegeneratePhaseFailsTheRunWhenThePolicyRefuses(t *testing.T) {
+	stubAdmission(t, errors.New("the lock names an input the gate does not accept"))
+	got, err := regenerateStream(t, "L2", false)
+	if err == nil {
+		t.Fatalf("a refused lock must fail the phase:\n%s", got)
+	}
+	if !strings.Contains(got, `"ok":false`) || !strings.Contains(got, "--no-regenerate") {
+		t.Errorf("the refusal is not reported with the way out:\n%s", got)
+	}
+}
+
+func TestRegeneratePhaseNamesTheFlagAndNeverAdmitsWhenOff(t *testing.T) {
+	calls, _ := stubAdmission(t, errors.New("must not be reached"))
+	got, err := regenerateStream(t, "L2", true)
+	if err != nil || !strings.Contains(got, "--no-regenerate") {
+		t.Errorf("a changed lock under --no-regenerate must skip by the flag: err=%v\n%s", err, got)
+	}
+	if *calls != 0 {
+		t.Errorf("--no-regenerate reached the lock policy %d time(s)", *calls)
 	}
 }
 

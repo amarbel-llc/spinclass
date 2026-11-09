@@ -97,24 +97,73 @@ type confinedGate struct {
 }
 
 func newConfinedGate(runDir string, forbidden []string) (*confinedGate, error) {
-	for _, v := range []string{"DIRENV_DIR", "DIRENV_FILE"} {
-		p := strings.TrimPrefix(os.Getenv(v), "-")
-		if d := underAny(p, forbidden); d != "" {
-			return nil, fmt.Errorf("guarded gate: the frontend runs inside the direnv of %s (%s=%s), so its PATH is that worktree's devshell; start the merge from outside it", d, v, os.Getenv(v))
-		}
+	return newConfinedGateIn(runDir, forbidden, nil)
+}
+
+// ConfinedGateEnvScrubbed is ConfinedGateEnv for a caller that must work from
+// a frontend that itself sits inside a worker-writable directory's direnv (an
+// agent session's own `spinclass serve`, or `sc run` from a worktree shell),
+// the regenerate phase's lock-policy evaluation. Instead of refusing, it
+// removes what it would have refused: DIRENV_DIR and DIRENV_FILE are not
+// consulted, and every PATH entry under a forbidden directory is dropped
+// before any tool is looked up. The invariant is unchanged (nothing under a
+// forbidden directory is trusted or run); it is enforced by removal. A tool
+// found nowhere outside those directories is still an error, and a tool whose
+// link-time pin or surviving PATH entry resolves under one is still refused.
+func ConfinedGateEnvScrubbed(runDir string, forbidden []string) ([]string, error) {
+	g, err := newConfinedGateIn(runDir, forbidden, cleanedPath(forbidden))
+	if err != nil {
+		return nil, err
 	}
-	// Any PATH entry the worker writes poisons every lookup, so the whole
-	// PATH is checked, not only the tools found on it.
+	return g.env, nil
+}
+
+// ResolveGateToolScrubbed is ResolveGateTool over the PATH with forbidden
+// directories removed, for a program (the scope's systemd-run) a scrubbed
+// caller runs itself.
+func ResolveGateToolScrubbed(tool string, forbidden []string) (string, error) {
+	return resolveGateToolIn(tool, forbidden, cleanedPath(forbidden))
+}
+
+// cleanedPath is the frontend's PATH without the entries under forbidden. A
+// non-nil empty slice (everything removed) stays non-nil so a lookup finds
+// nothing rather than falling back to the ambient PATH.
+func cleanedPath(forbidden []string) []string {
+	kept := []string{}
 	for _, entry := range filepath.SplitList(os.Getenv("PATH")) {
-		if d := underAny(entry, forbidden); d != "" {
-			return nil, fmt.Errorf("guarded gate: the frontend's PATH has %s, under %s, which the worker writes; start the merge from a shell without it", entry, d)
+		if entry == "" || underAny(entry, forbidden) != "" {
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	return kept
+}
+
+// newConfinedGateIn builds the gate. scrubbedPath is nil for the strict gate
+// (the frontend's DIRENV and PATH are checked and refused) and the cleaned
+// PATH for the scrubbed variant (those checks are skipped; tools are looked up
+// only in scrubbedPath).
+func newConfinedGateIn(runDir string, forbidden, scrubbedPath []string) (*confinedGate, error) {
+	if scrubbedPath == nil {
+		for _, v := range []string{"DIRENV_DIR", "DIRENV_FILE"} {
+			p := strings.TrimPrefix(os.Getenv(v), "-")
+			if d := underAny(p, forbidden); d != "" {
+				return nil, fmt.Errorf("guarded gate: the frontend runs inside the direnv of %s (%s=%s), so its PATH is that worktree's devshell; start the merge from outside it", d, v, os.Getenv(v))
+			}
+		}
+		// Any PATH entry the worker writes poisons every lookup, so the whole
+		// PATH is checked, not only the tools found on it.
+		for _, entry := range filepath.SplitList(os.Getenv("PATH")) {
+			if d := underAny(entry, forbidden); d != "" {
+				return nil, fmt.Errorf("guarded gate: the frontend's PATH has %s, under %s, which the worker writes; start the merge from a shell without it", entry, d)
+			}
 		}
 	}
 	var dirs []string
 	seen := map[string]bool{}
 	resolvedTool := map[string]string{}
 	for _, tool := range confinedGateTools {
-		p, err := resolveGateTool(tool, forbidden)
+		p, err := resolveGateToolIn(tool, forbidden, scrubbedPath)
 		if err != nil {
 			return nil, err
 		}
@@ -128,7 +177,7 @@ func newConfinedGate(runDir string, forbidden []string) (*confinedGate, error) {
 	if !ok {
 		// A test's tool list without sh: still exec an absolute shell.
 		var err error
-		if sh, err = resolveGateTool("sh", forbidden); err != nil {
+		if sh, err = resolveGateToolIn("sh", forbidden, scrubbedPath); err != nil {
 			return nil, err
 		}
 	}
@@ -158,10 +207,22 @@ func ResolveGateTool(tool string, forbidden []string) (string, error) {
 // symlinks, and refuses one under a directory the worker writes. The scope
 // prefix's program goes through it too (runHookInDirEnv).
 func resolveGateTool(tool string, forbidden []string) (string, error) {
+	return resolveGateToolIn(tool, forbidden, nil)
+}
+
+// resolveGateToolIn is resolveGateTool with the unpinned lookup restricted to
+// searchPath when it is non-nil (the scrubbed variant); nil looks on the
+// frontend's PATH as before.
+func resolveGateToolIn(tool string, forbidden, searchPath []string) (string, error) {
 	p := embeds.GateTool(tool)
 	if p == "" {
 		var err error
-		if p, err = exec.LookPath(tool); err != nil {
+		if searchPath == nil {
+			p, err = exec.LookPath(tool)
+		} else {
+			p, err = lookPathIn(tool, searchPath)
+		}
+		if err != nil {
 			return "", fmt.Errorf("guarded gate: %s is not on the frontend's PATH, so the gate cannot run: %w", tool, err)
 		}
 	}
@@ -172,6 +233,23 @@ func resolveGateTool(tool string, forbidden []string) (string, error) {
 		return "", fmt.Errorf("guarded gate: %s resolves to %s, under %s, which the worker writes; the gate cannot trust it", tool, p, d)
 	}
 	return p, nil
+}
+
+// lookPathIn finds tool as an executable regular file in the first of dirs
+// that holds one, the exec.LookPath rule over a PATH given as a list. A tool
+// containing a separator is not a lookup and is refused.
+func lookPathIn(tool string, dirs []string) (string, error) {
+	if strings.ContainsRune(tool, filepath.Separator) {
+		return "", fmt.Errorf("%q is not a bare tool name", tool)
+	}
+	for _, dir := range dirs {
+		cand := filepath.Join(dir, tool)
+		info, err := os.Stat(cand)
+		if err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
+			return cand, nil
+		}
+	}
+	return "", &exec.Error{Name: tool, Err: exec.ErrNotFound}
 }
 
 // underAny returns the first of dirs that contains p (symlinks in both

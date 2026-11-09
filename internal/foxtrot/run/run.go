@@ -193,8 +193,11 @@ func Run(ctx context.Context, spec Spec) (exitCode int, err error) {
 		stepFailed  bool
 		stepCode    int
 		mergeFailed bool
-		didMerge    bool
-		aheadN      = -1 // -1 = unknown (ambiguous default branch under --no-merge)
+		// regenerateFailed: the lock policy refused the step's flake.lock (or
+		// could not judge it); the worktree is left for inspection.
+		regenerateFailed bool
+		didMerge         bool
+		aheadN           = -1 // -1 = unknown (ambiguous default branch under --no-merge)
 	)
 
 	repErr := present.WithReporter(resolvedFmt, "run "+rp.Branch, os.Stdout, os.Stderr, func(rep *crap.Reporter) error {
@@ -209,8 +212,11 @@ func Run(ctx context.Context, spec Spec) (exitCode int, err error) {
 			return stepErr
 		}
 
-		// --- regenerate (R0a: the trigger only; the phase body follows) ---
-		reportRegenerate(ts, rp.AbsPath, rp.RepoPath, spec.NoRegenerate)
+		// --- regenerate (R0a trigger, R0b admission; the run and the commit follow) ---
+		if rgErr := regeneratePhase(ctx, ts, rp.AbsPath, rp.RepoPath, spec.NoRegenerate); rgErr != nil {
+			regenerateFailed = true
+			return rgErr
+		}
 
 		if defaultBranch != "" {
 			aheadN = git.CommitsAhead(rp.AbsPath, defaultBranch, rp.Branch)
@@ -252,7 +258,7 @@ func Run(ctx context.Context, spec Spec) (exitCode int, err error) {
 	if stepFailed {
 		return nonzero(stepCode), nil
 	}
-	if mergeFailed {
+	if mergeFailed || regenerateFailed {
 		return 1, nil
 	}
 	if repErr != nil {

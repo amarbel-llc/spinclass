@@ -40,6 +40,31 @@ import (
 // is evaluation in a mount namespace that sees only the build worktree
 // (spinclass#448).
 
+// scrubbedFrontendKey marks a context whose policy evaluation runs from a
+// frontend that may sit inside a worker-writable directory's direnv (the
+// regenerate phase): the evaluator's environment and tools are then built with
+// those directories removed rather than refused (hookrun.ConfinedGateEnvScrubbed).
+type scrubbedFrontendKey struct{}
+
+func scrubbedFrontend(ctx context.Context) bool {
+	v, _ := ctx.Value(scrubbedFrontendKey{}).(bool)
+	return v
+}
+
+// AdmitLockForRegenerate runs the guarded gate's whole lock policy against the
+// committed flake.nix and flake.lock at HEAD of dir, for the regenerate phase
+// (docs/plans/2026-11-09-sc-run-regenerate-under-new-lock.md). It is the same
+// policy, with two differences the phase needs: the evaluation gets its own
+// systemd scope id when the context names none (a policy evaluation refuses to
+// run unscoped), and the frontend's inherited direnv and worktree PATH entries
+// are scrubbed rather than refused, so a lock-bumping run needs no manual
+// step. A refusal means nothing may be evaluated at dir.
+func AdmitLockForRegenerate(ctx context.Context, dir string, forbidden []string) error {
+	ctx = clown.WithLocalScope(ctx, "regenerate")
+	ctx = context.WithValue(ctx, scrubbedFrontendKey{}, true)
+	return refuseUnsafeFlakeLock(ctx, dir, forbidden)
+}
+
 // flakeLock is the part of flake.lock the policy reads.
 type flakeLock struct {
 	Nodes map[string]lockNode `json:"nodes"`
@@ -346,7 +371,12 @@ const declaredInputsApply = `f: let
 // spinclass#449, D). Any failure is the caller's refusal, and the evaluator's
 // message, which quotes the expression, never leaves here.
 func declaredFlakeInputsViaNix(ctx context.Context, dir string, flakeNix []byte, forbidden []string) (map[string]inputSpec, error) {
-	env, err := hookrun.ConfinedGateEnv(dir, forbidden)
+	scrubbed := scrubbedFrontend(ctx)
+	envFn, toolFn := hookrun.ConfinedGateEnv, hookrun.ResolveGateTool
+	if scrubbed {
+		envFn, toolFn = hookrun.ConfinedGateEnvScrubbed, hookrun.ResolveGateToolScrubbed
+	}
+	env, err := envFn(dir, forbidden)
 	if err != nil {
 		return nil, err
 	}
@@ -362,11 +392,11 @@ func declaredFlakeInputsViaNix(ctx context.Context, dir string, flakeNix []byte,
 	if len(prefix) < 2 || prefix[len(prefix)-1] != "--" {
 		return nil, errors.New("the scope prefix has an unexpected shape")
 	}
-	systemdRun, err := hookrun.ResolveGateTool(prefix[0], forbidden)
+	systemdRun, err := toolFn(prefix[0], forbidden)
 	if err != nil {
 		return nil, err
 	}
-	nix, err := hookrun.ResolveGateTool("nix", forbidden)
+	nix, err := toolFn("nix", forbidden)
 	if err != nil {
 		return nil, err
 	}
