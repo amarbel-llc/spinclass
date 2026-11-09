@@ -69,7 +69,9 @@ sc run [--description D | -d D] [--no-merge] [--no-close] [--local-only] \
 (Amended 2026-11-09: `--no-regenerate` skips the regenerate phase that runs
 after a step which changed `flake.lock`, specified in
 `docs/plans/2026-11-09-sc-run-regenerate-under-new-lock.md`. The phase is on by
-default; this step reports the changed lock only, the regeneration follows.)
+default. It admits the committed lock with the guarded gate's lock policy,
+then runs `[hooks].repair` (else `[hooks].pre-commit` over the branch's staged
+diff) under the new lock and commits the result as one separate commit.)
 
 CLI-only (no MCP tool): it execs a command sequence and reads stdin, neither of
 which fits the MCP request/response shape. Output uses the merge/check

@@ -213,7 +213,7 @@ func Run(ctx context.Context, spec Spec) (exitCode int, err error) {
 		}
 
 		// --- regenerate (R0a trigger, R0b admission; the run and the commit follow) ---
-		if rgErr := regeneratePhase(ctx, ts, rp.AbsPath, rp.RepoPath, spec.NoRegenerate); rgErr != nil {
+		if rgErr := regeneratePhase(ctx, ts, merged, rp.AbsPath, rp.RepoPath, spec.NoRegenerate); rgErr != nil {
 			regenerateFailed = true
 			return rgErr
 		}

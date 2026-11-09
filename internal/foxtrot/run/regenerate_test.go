@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
+
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 )
 
 func gitIn(t *testing.T, dir string, args ...string) {
@@ -23,6 +25,16 @@ func gitIn(t *testing.T, dir string, args ...string) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
+}
+
+func runGitOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return string(out)
 }
 
 func commitFile(t *testing.T, dir, name, body string) {
@@ -49,7 +61,7 @@ func regenerateStream(t *testing.T, lockOnWork string, off bool) (stream string,
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	err = regeneratePhase(context.Background(), ts, dir, dir, off)
+	err = regeneratePhase(context.Background(), ts, sweatfile.Sweatfile{}, dir, dir, off)
 	ts.Finish()
 	return buf.String(), err
 }
@@ -86,8 +98,11 @@ func TestRegeneratePhaseAdmitsAChangedLockBeforeAnythingElse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("an admitted lock must not fail the run: %v\n%s", err, got)
 	}
-	if !strings.Contains(got, "regenerate") || !strings.Contains(got, "admitted") {
-		t.Errorf("an admitted lock is not reported:\n%s", got)
+	// No hook is configured in this fixture, so an admitted lock reaches the
+	// run and skips with the reason (the run itself is tested in
+	// regenerate_run_test.go).
+	if !strings.Contains(got, "regenerate") || !strings.Contains(got, "nothing to run") {
+		t.Errorf("an admitted lock did not reach the run:\n%s", got)
 	}
 	if strings.Contains(got, "--no-regenerate") {
 		t.Errorf("the phase is on, so the report must not blame the flag:\n%s", got)

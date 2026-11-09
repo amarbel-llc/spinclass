@@ -7,6 +7,7 @@ import (
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/bravo/regenerate"
 	"code.linenisgreat.com/spinclass/internal/charlie/check"
 )
@@ -18,15 +19,16 @@ const regenerateStepName = "regenerate"
 // nix nor systemd.
 var admitLock = check.AdmitLockForRegenerate
 
-// regeneratePhase is the regenerate phase so far (R0a, R0b): decide whether the
-// step changed flake.lock; if so, and the phase is on, admit the committed
-// lock with the guarded gate's policy before anything evaluates it. The run of
-// the new generators and the separate commit are later steps of the plan. A
+// regeneratePhase is the regenerate phase (R0a-R0d): decide whether the step
+// changed flake.lock; if so, and the phase is on, admit the committed lock with
+// the guarded gate's policy before anything evaluates it, then run the repo's
+// repair under the new lock and commit what it changed as its own commit
+// (regenerateRun). sf is the merged sweatfile (the [hooks].repair command). A
 // run whose lock did not change, or whose repo has no default branch to compare
 // with, emits NOTHING, so the stream of every ordinary run is unchanged. A
 // non-nil error is a refusal: the policy found the lock unsafe to evaluate (or
 // could not tell), the run fails and the worktree is left for inspection.
-func regeneratePhase(ctx context.Context, ts *crap.TestStream, wtPath, repoPath string, off bool) error {
+func regeneratePhase(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, wtPath, repoPath string, off bool) error {
 	base, ok := regenerate.BaseRef(repoPath)
 	if !ok {
 		return nil
@@ -55,6 +57,5 @@ func regeneratePhase(ctx context.Context, ts *crap.TestStream, wtPath, repoPath 
 		return check.FailStep(ts, regenerateStepName, err,
 			"pass --no-regenerate to run without the phase; nothing was evaluated")
 	}
-	ts.Skip(regenerateStepName, regenerate.LockFile+" changed against "+base+" and the lock policy admitted it; the generators are not run yet (later steps of the plan)")
-	return nil
+	return regenerateRun(ctx, ts, sf, wtPath, base)
 }
