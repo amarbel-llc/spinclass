@@ -205,6 +205,39 @@ func TestRunRunsRoundsToAFixpointAndSquashesThemIntoOneCommit(t *testing.T) {
 	}
 }
 
+// A staged hook that edits one file without restaging it must not leave the
+// tree dirty for the next hook (live ringmaster, 2026-11-09: conformist's
+// repair refused to run on it): the edit is taken into the commit.
+func TestRunTakesAnUnstagedEditAStagedHookLeftBehind(t *testing.T) {
+	f := newFixture(t)
+	commitFile(t, f.dir, "gen2.txt", "old")
+	f.sha0 = gitOut(t, f.dir, "rev-parse", "HEAD")
+	var statusAtRepair string
+	stubBoth(t,
+		func(wt string) error {
+			writeFileIn(t, wt, "gen.txt", "new")
+			gitIn(t, wt, "add", "gen.txt")
+			writeFileIn(t, wt, "gen2.txt", "edited, not restaged")
+			return nil
+		},
+		func(wt string) error {
+			statusAtRepair = gitOut(t, wt, "status", "--porcelain")
+			return nil
+		})
+
+	stream, err := runRun(t, f, bothHooks())
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, stream)
+	}
+	if statusAtRepair != "" {
+		t.Errorf("the repair hook saw a dirty tree: %q", statusAtRepair)
+	}
+	files := strings.Fields(gitOut(t, f.dir, "show", "--name-only", "--format=", "HEAD"))
+	if strings.Join(files, ",") != "gen.txt,gen2.txt" {
+		t.Errorf("the regenerate commit holds %v, want both files", files)
+	}
+}
+
 func bothHooks() sweatfile.Sweatfile {
 	repair, pre := "the-repair", "the-pre-commit"
 	return sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{Repair: &repair, PreCommit: &pre}}

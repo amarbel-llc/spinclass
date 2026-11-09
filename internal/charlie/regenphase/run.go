@@ -230,6 +230,12 @@ func stagedStep(ctx context.Context, sf sweatfile.Sweatfile, wtPath, baseRef, sh
 			return false, hookErr, fmt.Errorf("could not put HEAD back to the branch's commit %s after the pre-commit hook: %w", shortSha(sha0), rErr)
 		}
 	}
+	// Take every tracked edit the hook left, staged or not (live, ringmaster
+	// 2026-11-09: a hook that edited a file without restaging it left the tree
+	// dirty, and the repair hook then refused to format and commit).
+	if _, aErr := git.Run(wtPath, "add", "-u"); aErr != nil {
+		return false, hookErr, fmt.Errorf("could not stage the pre-commit hook's edits: %w", aErr)
+	}
 	names, nErr := git.Run(wtPath, "diff", "--cached", "--name-only")
 	if nErr != nil {
 		return false, hookErr, fmt.Errorf("could not list the pre-commit hook's changes: %w", nErr)
