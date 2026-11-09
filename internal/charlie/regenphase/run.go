@@ -22,18 +22,23 @@ const CommitSubject = "chore: regenerate and format under updated flake.lock"
 var runRepair = hookrun.Repair
 
 // hookCommand picks what regenerates the tree and in which mode.
+//   - staged mode: [hooks].pre-commit (FDR 0019), e.g. conformist --staged. It
+//     only sees STAGED files, so the phase stages the whole branch's diff first,
+//     which is what fires a lane triggered by a staged flake.lock. Preferred
+//     when configured: it is the hook that regenerated the lock-bump commit's
+//     files in the first place, and the live ringmaster cascade showed the
+//     whole-tree repair run reporting "already conformant" on the same tree
+//     (2026-11-09: its repair never fired the facade lane).
 //   - repair mode: [hooks].repair (FDR 0018), e.g. conformist --commit --amend.
 //     It works on the whole tree and may amend HEAD.
-//   - staged mode: [hooks].pre-commit (FDR 0019), e.g. conformist --staged. It
-//     only sees STAGED files, so the phase stages the whole branch's diff first.
 //
 // ok is false when the repo configures neither.
 func hookCommand(sf sweatfile.Sweatfile) (cmd string, staged, ok bool) {
-	if sf.RepairActive() {
-		return *sf.RepairHookCommand(), false, true
-	}
 	if sf.PreCommitActive() {
 		return *sf.PreCommitHookCommand(), true, true
+	}
+	if sf.RepairActive() {
+		return *sf.RepairHookCommand(), false, true
 	}
 	return "", false, false
 }
@@ -103,10 +108,14 @@ func run(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, wtPat
 	}
 
 	var out bytes.Buffer
-	if hookErr := runRepair(ctx, asRepairHook(sf, cmd), wtPath, &out); hookErr != nil {
-		restoreTree(wtPath, sha0)
-		return failStep(ts, StepName, fmt.Errorf("the hook failed under the new lock (the worktree was put back to %s): %w", shortSha(sha0), hookErr), out.String())
-	}
+	// A nonzero exit does not by itself discard the result: conformist exits 1
+	// when one lane errors (a cache-db timeout was seen live) after another
+	// lane has already restaged the regenerated file, and the per-commit hook
+	// is fail-open for the same reason. The result is judged below: changes
+	// staged despite the error are kept and committed with the error reported;
+	// an error with nothing changed fails the phase, so a hook that never ran
+	// cannot pass as "conformant".
+	hookErr := runRepair(ctx, asRepairHook(sf, cmd), wtPath, &out)
 
 	sha1, err := git.RevParse(wtPath, "HEAD")
 	if err != nil {
@@ -131,6 +140,10 @@ func run(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, wtPat
 	}
 	changed := nonEmptyLines(names)
 	if len(changed) == 0 {
+		if hookErr != nil {
+			restoreTree(wtPath, sha0)
+			return failStep(ts, StepName, fmt.Errorf("the hook failed under the new lock and changed nothing (the worktree was put back to %s): %w", shortSha(sha0), hookErr), out.String())
+		}
 		ts.Ok(StepName + " (already conformant under the new lock)")
 		return nil
 	}
@@ -138,6 +151,10 @@ func run(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, wtPat
 		return failStep(ts, StepName, fmt.Errorf("could not commit the regenerated files: %w", cErr), out.String())
 	}
 	sha2, _ := git.RevParse(wtPath, "HEAD")
+	if hookErr != nil {
+		ts.Ok(fmt.Sprintf("%s (committed %s: %d file(s); the hook exited with an error but staged these: %v)", StepName, shortSha(sha2), len(changed), hookErr))
+		return nil
+	}
 	ts.Ok(fmt.Sprintf("%s (committed %s: %d file(s))", StepName, shortSha(sha2), len(changed)))
 	return nil
 }

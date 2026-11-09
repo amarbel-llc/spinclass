@@ -113,17 +113,56 @@ func TestRunMakesNoCommitWhenNothingChanges(t *testing.T) {
 	}
 }
 
-func TestRunFailsClosedAndRestoresTheTreeWhenTheHookFails(t *testing.T) {
+// conformist exits 1 when one lane errors (a cache-db timeout was seen live)
+// after another lane restaged the regenerated file: the result is kept.
+func TestRunKeepsWhatAHookStagedEvenWhenItExitedWithAnError(t *testing.T) {
 	f := newFixture(t)
 	stubHook(t, func(wt string) error {
-		writeFileIn(t, wt, "gen.txt", "half-written")
+		writeFileIn(t, wt, "gen.txt", "new")
 		gitIn(t, wt, "add", "gen.txt")
-		return errors.New("boom")
+		return errors.New("conformist: exit status 1")
 	})
 
 	stream, err := runRun(t, f, preCommitSweatfile("conformist-pre-commit"))
+	if err != nil {
+		t.Fatalf("staged changes must survive a nonzero exit: %v\n%s", err, stream)
+	}
+	if got := gitOut(t, f.dir, "show", "--name-only", "--format=", "HEAD"); got != "gen.txt" {
+		t.Errorf("the regenerate commit holds %q, want gen.txt", got)
+	}
+	if !strings.Contains(stream, "exited with an error") {
+		t.Errorf("the hook's error is not reported:\n%s", stream)
+	}
+}
+
+// With both hooks configured, the staged-file hook runs: ringmaster has a
+// repair hook that reports "already conformant" on the same tree.
+func TestRunPrefersThePreCommitHookWhenBothAreConfigured(t *testing.T) {
+	f := newFixture(t)
+	var stagedAtRun string
+	stubHook(t, func(wt string) error {
+		stagedAtRun = gitOut(t, wt, "diff", "--cached", "--name-only")
+		return nil
+	})
+	both := repairSweatfile("repair")
+	pc := "conformist-pre-commit"
+	both.Hooks.PreCommit = &pc
+
+	if stream, err := runRun(t, f, both); err != nil {
+		t.Fatalf("run: %v\n%s", err, stream)
+	}
+	if !strings.Contains(stagedAtRun, "flake.lock") {
+		t.Errorf("the staged mode did not run (the hook saw %q staged)", stagedAtRun)
+	}
+}
+
+func TestRunFailsClosedAndRestoresTheTreeWhenTheHookFailsWithoutChangingAnything(t *testing.T) {
+	f := newFixture(t)
+	stubHook(t, func(string) error { return errors.New("boom") })
+
+	stream, err := runRun(t, f, preCommitSweatfile("conformist-pre-commit"))
 	if err == nil {
-		t.Fatalf("a failing hook must fail the phase:\n%s", stream)
+		t.Fatalf("a failing hook that changed nothing must fail the phase:\n%s", stream)
 	}
 	if got := gitOut(t, f.dir, "rev-parse", "HEAD"); got != f.sha0 {
 		t.Errorf("HEAD = %s, want the branch's %s", got, f.sha0)
