@@ -226,6 +226,39 @@ R0b rulings pending (operator): the phase's admission needs a systemd scope
 tier (no unscoped fallback in the #449 policy) and an empty forbidden-dirs
 list for unconfined sessions.
 
+## 10. What was built (2026-11-09; R0a-R0f)
+
+- **R0a** `internal/bravo/regenerate` (`LockChanged`, `BaseRef`) and
+  `--no-regenerate`; default on. An unchanged lock adds nothing to the stream.
+- **R0b** admission: `check.AdmitLockForRegenerate` runs the guarded gate's
+  whole lock policy on the committed tree at HEAD, with its own scope id and a
+  scrubbed frontend (`hookrun.ConfinedGateEnvScrubbed`, `ResolveGateToolScrubbed`):
+  `DIRENV_*` and every PATH entry under the forbidden dirs are removed instead
+  of refused, so a lock-bumping run needs no manual step. Operator rulings:
+  forbidden list populated for `sc run` (session worktree and the repo's
+  `.worktrees`) and empty for the merge path; fail closed without a systemd
+  scope tier.
+- **R0c** `apply.ResolveCommandAt` exported (the freeze's devShell resolution
+  for an arbitrary rev). Not used by the phase itself: the hook runs under the
+  worktree's devshell through `hookrun.Repair`, and the admission judged that
+  same committed tree (a clean tracked tree is required). It is the building
+  block for R1.
+- **R0d** the run: `[hooks].repair` when active (an amend is split off with a
+  soft reset), else `[hooks].pre-commit` in staged mode (HEAD soft-reset to the
+  merge base so the whole branch diff, `flake.lock` included, is staged; ringmaster
+  has only pre-commit, and the operator confirmed staged mode regenerates its
+  facade under the new lock). One commit, hooks bypassed, only tracked files.
+- **R0f** the merge path: the same `internal/charlie/regenphase.Phase` in
+  `PrepareMerge` before REPAIR, skipped for guarded (confined) merges and by
+  `PostMergeOptions.SkipRegenerate`, which `sc run` sets so the phase never runs
+  twice. No CLI flag or MCP parameter on the merge side.
+- **R0e** bats cases for `sc run` (a lock-bumping step gets a separate
+  regenerate commit; `--no-regenerate`; an unchanged lock) and the amendments to
+  FDR 0020; the replayed #459 canary (an unlocked `path:` input) is covered by
+  the admission's own tests (`lockpolicy_test.go`) and stays a live-check item.
+- **Not built:** R1 (F1, the freeze change), a sweatfile key to switch the
+  phase off per repo, a merge-side switch.
+
 ## 9. Implementation breakdown (I; not started, not filed as issues)
 
 R1 is a separate change after R0.

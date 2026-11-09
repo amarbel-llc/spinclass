@@ -110,6 +110,51 @@ worktree_count() {
   assert_equal "$(worktree_count)" "1"
 }
 
+# A repair hook that rewrites a tracked file, standing in for a generator that
+# produces different output under a new flake.lock.
+add_regenerating_repair_hook() {
+  sed -i 's|^pre-merge = "true"$|pre-merge = "true"\nrepair = "echo regenerated > gen.txt"|' \
+    "$HOME/.config/spinclass/sweatfile"
+}
+
+# The step bumps flake.lock and commits a stale generated file; the phase runs
+# the repair hook under the new lock and lands its result as its own commit.
+@test "run: a lock-bumping step is followed by a separate regenerate commit" {
+  add_regenerating_repair_hook
+  cd "$TEST_REPO" || return
+  run_sc_run --local-only -- sh -c 'echo L2 > flake.lock && echo stale > gen.txt && git add flake.lock gen.txt && git commit -qm "bump"'
+  assert_success
+  assert_crap 'any(.[]; .type == "test" and .ok == true and (.description | test("^regenerate")))'
+
+  run git -C "$TEST_REPO" log --format=%s main
+  assert_output --partial "chore: regenerate and format under updated flake.lock"
+  assert_output --partial "bump"
+  run git -C "$TEST_REPO" show main:gen.txt
+  assert_output "regenerated"
+}
+
+@test "run: --no-regenerate leaves a lock-bumping step's output as the step wrote it" {
+  add_regenerating_repair_hook
+  cd "$TEST_REPO" || return
+  run_sc_run --local-only --no-regenerate -- sh -c 'echo L2 > flake.lock && echo stale > gen.txt && git add flake.lock gen.txt && git commit -qm "bump"'
+  assert_success
+
+  run git -C "$TEST_REPO" log --format=%s main
+  refute_output --partial "chore: regenerate"
+  run git -C "$TEST_REPO" show main:gen.txt
+  assert_output "stale"
+}
+
+@test "run: a step that leaves flake.lock alone gets no regenerate commit" {
+  add_regenerating_repair_hook
+  cd "$TEST_REPO" || return
+  run_sc_run --local-only -- sh -c 'echo x > plain.txt && git add plain.txt && git commit -qm "plain"'
+  assert_success
+
+  run git -C "$TEST_REPO" log --format=%s main
+  refute_output --partial "chore: regenerate"
+}
+
 @test "run: --no-merge with commits leaves the session (never discards work)" {
   cd "$TEST_REPO" || return
   run_sc_run --no-merge -- sh -c 'echo y > nm.txt && git add nm.txt && git commit -qm "nm-commit"'
