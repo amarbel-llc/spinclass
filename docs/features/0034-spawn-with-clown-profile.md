@@ -489,6 +489,195 @@ closed, with no separate revocation record in the common case. An explicit
 revocation (a card-signed record naming the grant digest) exists only for
 standing delegations, which outlive a session.
 
+### Grants as piggy RFC 0013 acts (proposed 2026-11-09)
+
+**Status: proposal and recommendation, nothing built.** This answers the two
+asks piggy/green-larch/coco sent through circus/eager-holly, from the RFC 0013
+build plan (piggy `docs/plans/2026-11-09-rfc-0013-acts-sequencing.md`, slice
+S8a). Nothing in piggy depends on these answers before its S6 (the chain walk,
+piggy#361, held until the operator accepts RFC 0013). The items the operator
+must rule on are marked **RULE**. Read in RFC 0013 as drafted in piggy's
+green-larch worktree: §2 (fields), §4.1 to §4.9, §5.3. Claims about hyphence's
+rune rules are marked **to verify**.
+
+**Note on the stencil stack.** The green-larch draft of §4.9 refines the rule
+the previous section cites: a `profile` layer is a **stencil**, which admits
+only what it names; a body is a **patch**, which is transparent where it says
+nothing and may only `deny`; a stack with no stencil admits nothing. Every
+spinclass layer is a `profile` edge, so every spinclass layer is a stencil, and
+the previous section's reading holds unchanged for them.
+
+#### (b) The grant becomes a `piggy-act-v1` (recommended)
+
+**Recommendation: the `profile-grant` record becomes a `piggy-act-v1` act. It
+does not stay a spinclass record that an act names by digest. RULE.** The
+alternative, keeping the record and naming it from a card act's `records`
+field, leaves two chain walkers: piggy's for the card act, and spinclass's own
+for the record chain. Then piggy never sees the rights, never computes effective
+rights or expiry, and returns no layers. That throws away what RFC 0013 gives
+for free: the subset check on rights, effective expiry, revocation, narrows and
+escalations. The text the card signs also stops being derived by a spinclass
+function (`ActText`, Implementation decision 1), because under §6 the
+canonical head is the prompt.
+
+The field mapping:
+
+| `profile-grant` field | `piggy-act-v1` |
+|---|---|
+| `grantor` | `issuer` (`operator` for a card act) and `issuer-record` (software act) |
+| `grantee` | `subject`: the grantee's **principal** (see below) |
+| `session` | the prefixed field `spinclass:session` (**to verify** that `/` is allowed in a hyphence bare word; otherwise quote it) |
+| `profiles` / `rights` | the `right` set, one `spinclass:profile:<name>@<digest>` per profile (below) |
+| the profile the worker runs with | the `profile` edge, `<name>@<digest>`: the stencil |
+| `onward: grant` | the right `spinclass:grant` in the `right` set; absent means `none` |
+| `expires` | `not-after` |
+| `nonce` | `nonce` |
+| `prev` | `issuer-record` (the chain edge) and `prev` (spinclass's history) |
+| `widens` | an `escalation` act whose `names` holds the widened act |
+
+Three choices behind the mapping:
+
+1. **The digest goes inside the right. RULE.** RFC 0013 compares rights by
+   byte equality and checks only subsets (§4.2). Spelling a right as
+   `spinclass:profile:<name>@<digest>` makes piggy's subset check enforce what
+   `Narrows` enforces today for a held profile: same name at the same digest,
+   or refused. **To verify** that `@` is admitted in a hyphence bare word in a
+   `right` value. The `profile` field already carries `<name>@<digest>`, which
+   suggests it is, but I have not read the peg for this.
+2. **The `profile` edge carries the bound, possibly narrower, profile.** A
+   child that runs `engineer-reviewer@d2`, whose `_base` is the
+   `manager-builder@d1` its parent holds, cannot carry
+   `spinclass:profile:engineer-reviewer@d2` as a right, because that right is
+   not a subset of the parent's. It keeps the held right
+   (`spinclass:profile:manager-builder@d1`) and binds `engineer-reviewer@d2` as
+   its `profile` edge. piggy returns that edge as a stencil layer. spinclass
+   keeps the V-D1-6 check, run between the edge's `_base` chain and the held
+   right (see the previous section).
+3. **One profile edge per act, so one bound profile per grant.** §2 allows at
+   most one `profile` field. Two stencils on one chain conjoin (rule 1), so a
+   grant that tried to bind two profiles would admit only their intersection.
+   A worker runs one profile, so this fits the spawn case. A grantor that
+   delegates a choice of several profiles gives the rights (several
+   `spinclass:profile:` entries) and no edge, and the spawn's own act binds the
+   one chosen.
+
+Kinds and namespaces (§4.1, §4.8):
+
+- **The root blessing** (Implementation decision 3) is a card `grant` under
+  `piggy-escalation-v1`, a pairing §4.8 allows. It needs an `object`;
+  **RULE** on its spelling. The proposal is the opaque id
+  `spinclass:profiles`. A standing delegation to a service principal becomes
+  a card `link` under `piggy-certificate-v1` once that principal has a key.
+- **A widening** is an `escalation` naming the act it widens, which replaces
+  `widens` and the `initial grant` / `widening of` wording in `ActText`.
+- **A narrowing link to a child** is a software `grant` under
+  `piggy-record-v1`, signed by the grantor's own key, with `issuer-record`
+  naming the grantor's certifying act.
+
+**What this depends on (inferred from §4.1 and §4.4).** A software act needs a
+certifying act (`root` or `link`) that binds the issuer's key. Today no
+spinclass principal has a key, which is why narrowing links are unsigned
+(Implementation decision 4). So:
+
+- **The card root and escalations can move to acts first**, at S8a, because
+  they need only the card.
+- **Narrowing links move when principals have keys** (FDR 0032 slice 1, the key
+  holder in piggy FDR 0006). Until then they stay today's unsigned spinclass
+  records, verified by spinclass's subset walk, with the same stated bar.
+  **RULE** on accepting that interim. The alternative is to hold all of
+  slice 1 until per-principal keys exist.
+- **The grantee is a principal, not a session key.** §4.4 has the verifier find
+  a grant's subject's certifying chain by `subject`. Implementation decision 5
+  already holds that a worker has no principal until its SessionStart hook
+  runs. Under acts, the child's grant is therefore issued after that hook (the
+  hello), not at spawn. As today, the worker holds no spawnable profile until
+  then.
+
+**Revocation.** The handle-lifetime rule above (a grant ends with its
+grantee's session) stays spinclass's. spinclass stops presenting a closed
+session's grants, and needs no act for it. A standing delegation, which
+outlives sessions, is revoked by a card `revocation` act (§4.6).
+
+#### (a) The verdict shape and the store adapter
+
+**Store: a directory of sealed acts (piggy S6's first adapter). spinclass
+needs no JSON-over-stdin adapter.** spinclass writes each sealed act it
+produces or receives, as `piggy act seal` emits it, to
+`$XDG_STATE_HOME/spinclass/acts/<act-digest>.act`, next to today's grant store.
+The scale is tens of acts, so a scan per verification is fine. A callback
+adapter would make piggy call back into spinclass for "acts naming X" lookups,
+which a directory answers by scanning.
+
+**Revocation source.** Revocations live in the same directory. spinclass asks
+for a flag (working name `--store-is-revocation-source`) by which the caller
+asserts the store is a complete revocation source, so a verdict is not
+`undetermined` merely because no other source was consulted (§4.6, last
+sentence). **RULE** for piggy on whether that assertion belongs to the caller.
+
+**Invocation (working names):**
+
+    piggy act verify --act <digest-or-path> --at <RFC 3339 UTC> \
+        --anchors <allowed-signers file> --store <dir> \
+        [--store-is-revocation-source] --format json
+
+**Verdict: one JSON object on stdout for every outcome.** Exit 0 means valid,
+1 invalid, 2 undetermined, and anything above 2 is a usage or I/O error with no
+verdict. spinclass branches on the `verdict` field and treats the exit code as
+a cross-check. Fields follow §5.3:
+
+```json
+{
+  "schema": "piggy-act-verdict-v1",
+  "verdict": "valid",
+  "act": "<act digest of the act asked about>",
+  "at": "2026-11-09T18:00:00Z",
+  "kind": "grant",
+  "subject": "<principal>",
+  "object": "spinclass:profiles",
+  "effective_expiry": "2026-11-10T00:00:00Z",
+  "assurance": "piggy:software",
+  "chain_start_key": "<markl-id of the card key>",
+  "chain": ["<root act digest>", "...", "<this act's digest>"],
+  "rights": ["spinclass:grant", "spinclass:profile:manager-builder@<digest>"],
+  "layers": [
+    {"act": "<digest>", "kind": "grant", "role": "stencil",
+     "profile": "manager-builder@<digest>"},
+    {"act": "<digest>", "kind": "grant", "role": "stencil",
+     "profile": "engineer-reviewer@<digest>"},
+    {"act": "<digest>", "kind": "narrow", "role": "patch",
+     "body": "<body bytes verbatim, as a JSON string>"}
+  ],
+  "prefixed": {"spinclass:session": ["spinclass/slim-myrtle"]}
+}
+```
+
+- `layers` lists **one entry per layer**, in chain order from the chain start
+  down, with applied escalations and narrows in place (§4.9). A `profile` edge
+  is its own entry (`role: stencil`) and a body is its own entry
+  (`role: patch`), even when one act carries both.
+- `prefixed` holds the **asked-about act's** prefixed fields, as sets. This
+  lets spinclass read `spinclass:session` without its own hyphence parser or
+  canonicalizer. Producing acts is `piggy act seal` (S4), so spinclass needs
+  neither.
+- `rights` and `object` are present for a certifying act or a `grant`,
+  absent otherwise (§5.3).
+- **Invalid:** `{"schema": "...", "verdict": "invalid", "act": "<digest>",
+  "failed_step": "5.2.4", "failed_act": "<digest of the act that failed>",
+  "reason": "<one line>"}`.
+- **Undetermined:** `{"schema": "...", "verdict": "undetermined", "act":
+  "<digest>", "unresolved": ["<digest>", "..."], "reason": "<one line>"}`.
+  spinclass treats it as a refusal (§5.3, MUST NOT treat as valid) and names
+  the unresolved acts in the refusal.
+
+**What spinclass does with a valid verdict at spawn.**
+
+1. The requested profile's held right is in `rights`.
+2. The head act's `profile` edge, if any, passes the V-D1-6 catalog check
+   against that right through its `_base` chain.
+3. `prefixed["spinclass:session"]` names the spawner's session.
+4. The `layers` are handed on unchanged to the enforcer that admits calls (the
+   frontend, EPIC 0001 principle 7). spinclass does not evaluate them.
+
 ### Unattended spawns
 
 Spawns that no human starts (a webhook, a roustabout graph) have no one to touch
