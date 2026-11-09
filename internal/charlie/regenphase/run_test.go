@@ -134,8 +134,8 @@ func TestRunRunsAFailedHookAgainAndKeepsTheResultOnceItSettles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a hook that settles on the second run must pass: %v\n%s", err, stream)
 	}
-	if calls != 2 {
-		t.Errorf("hook runs = %d, want 2 (stop at the first exit 0)", calls)
+	if calls != 3 {
+		t.Errorf("hook runs = %d, want 3 (two in round 1 up to the first exit 0, one in round 2 that changes nothing)", calls)
 	}
 	if got := gitOut(t, f.dir, "show", "--name-only", "--format=", "HEAD"); got != "gen.txt" {
 		t.Errorf("the regenerate commit holds %q, want gen.txt", got)
@@ -167,6 +167,41 @@ func TestRunFailsAndRestoresTheBranchWhenAHookKeepsFailingAfterStagingFiles(t *t
 	}
 	if st := gitOut(t, f.dir, "status", "--porcelain"); st != "" {
 		t.Errorf("the tree was not restored: %s", st)
+	}
+}
+
+// A generated file derived from a source the first round reformatted is stale
+// after round 1 (live, ringmaster 2026-11-09): round 2 regenerates it, and the
+// rounds still land as ONE commit on top of the branch's HEAD.
+func TestRunRunsRoundsToAFixpointAndSquashesThemIntoOneCommit(t *testing.T) {
+	f := newFixture(t)
+	round := 0
+	stubHook(t, func(wt string) error {
+		round++
+		switch round {
+		case 1:
+			writeFileIn(t, wt, "src.txt", "formatted")
+			gitIn(t, wt, "add", "src.txt")
+		case 2:
+			writeFileIn(t, wt, "derived.txt", "from formatted")
+			gitIn(t, wt, "add", "derived.txt")
+		}
+		return nil
+	})
+
+	stream, err := runRun(t, f, preCommitSweatfile("conformist-pre-commit"))
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, stream)
+	}
+	if round != 3 {
+		t.Errorf("hook runs = %d, want 3 (two that changed something, one that found the fixpoint)", round)
+	}
+	if got := gitOut(t, f.dir, "rev-parse", "HEAD~1"); got != f.sha0 {
+		t.Errorf("one commit on top of the branch's HEAD expected: HEAD~1 = %s, want %s", got, f.sha0)
+	}
+	files := strings.Fields(gitOut(t, f.dir, "show", "--name-only", "--format=", "HEAD"))
+	if strings.Join(files, ",") != "derived.txt,src.txt" {
+		t.Errorf("the regenerate commit holds %v, want both rounds' files", files)
 	}
 }
 
@@ -223,8 +258,8 @@ func TestRunRunsBothHooksAndCommitsTheUnionAsOneCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v\n%s", err, stream)
 	}
-	if strings.Join(*order, ",") != "pre-commit,repair" {
-		t.Errorf("order = %v, want pre-commit then repair", *order)
+	if strings.Join(*order, ",") != "pre-commit,repair,pre-commit,repair" {
+		t.Errorf("order = %v, want pre-commit then repair, and the same again in the round that finds nothing changed", *order)
 	}
 	if !strings.Contains(stagedAtPre, "flake.lock") {
 		t.Errorf("the staged hook did not see the lock bump staged: %q", stagedAtPre)

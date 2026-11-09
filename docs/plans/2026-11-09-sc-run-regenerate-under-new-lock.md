@@ -257,7 +257,10 @@ list for unconfined sessions.
   the conformist cache-db open timeout seen live at ringmaster 2026-11-09); one
   that still fails fails the phase, with its output in the failure, and the tree
   is put back at the branch's HEAD, so a half-regenerated commit is never made.
-  The hooks run
+  The two steps repeat as rounds (max 3) until a round changes nothing, because a
+  generated file can derive from a source an earlier round reformatted (ringmaster
+  2026-11-09: facade `main.go` from reformatted `internal/` files); the rounds'
+  commits are squashed into the one. The hooks run
   without the caller's `DIRENV_*`/`IN_NIX_SHELL`. One commit, hooks bypassed,
   only tracked files.
 - **R0f** the merge path: the same `internal/charlie/regenphase.Phase` in

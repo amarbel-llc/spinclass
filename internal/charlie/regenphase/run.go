@@ -82,6 +82,10 @@ func asRepairHook(sf sweatfile.Sweatfile, cmd string) sweatfile.Sweatfile {
 //     into that same commit; otherwise it becomes the commit, with an amend of
 //     the branch's own commit split off by a soft reset first.
 //
+// The two steps repeat as rounds (up to maxRounds) until a round changes
+// nothing, since a generated file can derive from a source an earlier round
+// reformatted; the rounds' commits are squashed into one.
+//
 // The union is one commit. The two overlap a little (both format), so the second
 // hook re-doing the first's work is harmless: it finds the tree conformant. Only
 // tracked files are taken. A hook that exits nonzero is run again (up to
@@ -108,40 +112,51 @@ func run(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, wtPat
 
 	var (
 		out       bytes.Buffer
-		hookErrs  []error
 		committed bool
 	)
 	hookCtx := hookrun.WithScrubbedDirenv(ctx)
 
-	if staged {
-		didCommit, hErr, stepErr := stagedStep(hookCtx, sf, wtPath, baseRef, sha0, &out)
-		if stepErr != nil {
-			return failStep(ts, StepName, stepErr, out.String())
+	// Rounds to a fixpoint. A generated file is derived from sources the same
+	// run may reformat (live, ringmaster 2026-11-09: the facade main.go is
+	// derived from internal/ files the formatter rewrote under the new lock), so
+	// one round can leave it stale. Each round runs on the previous round's
+	// result; the loop ends at the first round that changes nothing, and the
+	// rounds' commits are squashed into the one regenerate commit below.
+	cur := sha0
+	committedRounds := 0
+	for round := 1; round <= maxRounds; round++ {
+		roundCommitted, hookErrs, err := runRound(hookCtx, sf, wtPath, baseRef, cur, &out, staged, repair)
+		if err != nil {
+			restoreTree(wtPath, sha0)
+			return failStep(ts, StepName, err, out.String())
 		}
-		committed = didCommit
+		// A hook that still errors after its retries is a lane that did not run
+		// (live, 2026-11-09: a conformist cache-db timeout left the facade lane
+		// undone while the file another lane restaged was committed as if the
+		// regeneration had succeeded). The phase fails and the branch is put back
+		// as written; the hook's own output (its WARN lines) goes in the failure.
+		if hookErr := errors.Join(hookErrs...); hookErr != nil {
+			restoreTree(wtPath, sha0)
+			return failStep(ts, StepName, fmt.Errorf("a hook still failed under the new lock after %d attempts (the worktree was put back to %s): %w", hookAttempts, shortSha(sha0), hookErr), out.String())
+		}
+		if !roundCommitted {
+			break
+		}
+		committed = true
+		committedRounds++
+		head, hErr := git.RevParse(wtPath, "HEAD")
 		if hErr != nil {
-			hookErrs = append(hookErrs, fmt.Errorf("[hooks].pre-commit: %w", hErr))
+			restoreTree(wtPath, sha0)
+			return failStep(ts, StepName, fmt.Errorf("could not resolve HEAD after round %d: %w", round, hErr), out.String())
 		}
+		cur = head
 	}
-	if repair {
-		didCommit, hErr, stepErr := repairStep(hookCtx, sf, wtPath, sha0, committed, &out)
-		if stepErr != nil {
-			return failStep(ts, StepName, stepErr, out.String())
+	if committedRounds > 1 {
+		// Squash the rounds' commits into the one regenerate commit.
+		if sErr := squashTo(wtPath, sha0); sErr != nil {
+			restoreTree(wtPath, sha0)
+			return failStep(ts, StepName, fmt.Errorf("could not squash the regeneration rounds into one commit: %w", sErr), out.String())
 		}
-		committed = committed || didCommit
-		if hErr != nil {
-			hookErrs = append(hookErrs, fmt.Errorf("[hooks].repair: %w", hErr))
-		}
-	}
-
-	// A hook that still errors after its retries is a lane that did not run
-	// (live, 2026-11-09: a conformist cache-db timeout left the facade lane
-	// undone while the file another lane restaged was committed as if the
-	// regeneration had succeeded). The phase fails and the branch is put back as
-	// written; the hook's own output (its WARN lines) goes in the failure.
-	if hookErr := errors.Join(hookErrs...); hookErr != nil {
-		restoreTree(wtPath, sha0)
-		return failStep(ts, StepName, fmt.Errorf("a hook still failed under the new lock after %d attempts (the worktree was put back to %s): %w", hookAttempts, shortSha(sha0), hookErr), out.String())
 	}
 	if !committed {
 		ts.Ok(StepName + " (already conformant under the new lock)")
@@ -151,6 +166,46 @@ func run(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, wtPat
 	sha2, _ := git.RevParse(wtPath, "HEAD")
 	ts.Ok(fmt.Sprintf("%s (committed %s: %d file(s))", StepName, shortSha(sha2), len(nonEmptyLines(names))))
 	return nil
+}
+
+// maxRounds bounds the rounds to a fixpoint. Two suffice for a generated file
+// derived from a source the first round reformatted; the third is slack.
+const maxRounds = 3
+
+// runRound runs the configured hooks once, staged first then repair, on the
+// clean tree at cur, and commits what they changed on top of cur. hookErrs are
+// the hooks' own errors (kept apart: the caller decides); err is a git failure.
+func runRound(ctx context.Context, sf sweatfile.Sweatfile, wtPath, baseRef, cur string, out *bytes.Buffer, staged, repair bool) (committed bool, hookErrs []error, err error) {
+	if staged {
+		didCommit, hErr, stepErr := stagedStep(ctx, sf, wtPath, baseRef, cur, out)
+		if stepErr != nil {
+			return false, nil, stepErr
+		}
+		committed = didCommit
+		if hErr != nil {
+			hookErrs = append(hookErrs, fmt.Errorf("[hooks].pre-commit: %w", hErr))
+		}
+	}
+	if repair {
+		didCommit, hErr, stepErr := repairStep(ctx, sf, wtPath, cur, committed, out)
+		if stepErr != nil {
+			return false, nil, stepErr
+		}
+		committed = committed || didCommit
+		if hErr != nil {
+			hookErrs = append(hookErrs, fmt.Errorf("[hooks].repair: %w", hErr))
+		}
+	}
+	return committed, hookErrs, nil
+}
+
+// squashTo folds every commit above sha into one commit with the phase's subject.
+func squashTo(wtPath, sha string) error {
+	if _, err := git.Run(wtPath, "reset", "-q", "--soft", sha); err != nil {
+		return err
+	}
+	_, err := git.Run(wtPath, "commit", "-q", "--no-verify", "-m", CommitSubject)
+	return err
 }
 
 // stagedStep runs [hooks].pre-commit over the branch's staged diff and commits
