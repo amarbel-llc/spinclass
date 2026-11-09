@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
@@ -21,6 +22,25 @@ const CommitSubject = "chore: regenerate and format under updated flake.lock"
 // devshell, bounded by [hooks].repair-timeout), a seam so a test needs no
 // direnv.
 var runRepair = hookrun.Repair
+
+// hookAttempts bounds how often a hook that exits nonzero is run again.
+// conformist exits 1 after it reformatted files (the reformat is staged, so the
+// next run finds them conformant and exits 0) and also when one lane errors
+// transiently (a cache-db open timeout under load, seen live), so a second run
+// settles both; a hook that still fails on the last attempt is a real failure.
+const hookAttempts = 3
+
+// runSettled runs the hook until it exits 0 or hookAttempts is spent, and
+// returns the last error. The hook's output of every attempt accumulates in out.
+func runSettled(ctx context.Context, sf sweatfile.Sweatfile, wtPath string, out io.Writer) error {
+	var err error
+	for i := 0; i < hookAttempts; i++ {
+		if err = runRepair(ctx, sf, wtPath, out); err == nil || ctx.Err() != nil {
+			return err
+		}
+	}
+	return err
+}
 
 // asRepairHook is sf with its repair command replaced by cmd, so hookrun's
 // repair runner (own process group, wall-clock cap, cancellation, direnv
@@ -64,10 +84,11 @@ func asRepairHook(sf sweatfile.Sweatfile, cmd string) sweatfile.Sweatfile {
 //
 // The union is one commit. The two overlap a little (both format), so the second
 // hook re-doing the first's work is harmless: it finds the tree conformant. Only
-// tracked files are taken. A nonzero hook exit keeps whatever was staged (a lane
-// that errors after another restaged the file); an error with nothing changed
-// anywhere fails the phase and puts the tree back at the branch's HEAD, so a
-// hook that never ran cannot pass as "conformant".
+// tracked files are taken. A hook that exits nonzero is run again (up to
+// hookAttempts: a reformat settles on the second run, a transient lane error
+// may not recur); one that still fails fails the phase and puts the tree back at
+// the branch's HEAD, so a lane that never ran cannot pass as "conformant" and a
+// half-regenerated commit is never made.
 func run(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, wtPath, baseRef string) error {
 	staged := sf.PreCommitActive()
 	repair := sf.RepairActive()
@@ -113,21 +134,21 @@ func run(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, wtPat
 		}
 	}
 
-	hookErr := errors.Join(hookErrs...)
+	// A hook that still errors after its retries is a lane that did not run
+	// (live, 2026-11-09: a conformist cache-db timeout left the facade lane
+	// undone while the file another lane restaged was committed as if the
+	// regeneration had succeeded). The phase fails and the branch is put back as
+	// written; the hook's own output (its WARN lines) goes in the failure.
+	if hookErr := errors.Join(hookErrs...); hookErr != nil {
+		restoreTree(wtPath, sha0)
+		return failStep(ts, StepName, fmt.Errorf("a hook still failed under the new lock after %d attempts (the worktree was put back to %s): %w", hookAttempts, shortSha(sha0), hookErr), out.String())
+	}
 	if !committed {
-		if hookErr != nil {
-			restoreTree(wtPath, sha0)
-			return failStep(ts, StepName, fmt.Errorf("a hook failed under the new lock and nothing changed (the worktree was put back to %s): %w", shortSha(sha0), hookErr), out.String())
-		}
 		ts.Ok(StepName + " (already conformant under the new lock)")
 		return nil
 	}
 	names, _ := git.Run(wtPath, "diff", "--name-only", sha0, "HEAD")
 	sha2, _ := git.RevParse(wtPath, "HEAD")
-	if hookErr != nil {
-		ts.Ok(fmt.Sprintf("%s (committed %s: %d file(s); a hook exited with an error but staged these: %v)", StepName, shortSha(sha2), len(nonEmptyLines(names)), hookErr))
-		return nil
-	}
 	ts.Ok(fmt.Sprintf("%s (committed %s: %d file(s))", StepName, shortSha(sha2), len(nonEmptyLines(names))))
 	return nil
 }
@@ -146,7 +167,7 @@ func stagedStep(ctx context.Context, sf sweatfile.Sweatfile, wtPath, baseRef, sh
 			return false, nil, fmt.Errorf("could not stage the branch's diff for the hook: %w", rErr)
 		}
 	}
-	hookErr = runRepair(ctx, asRepairHook(sf, *sf.PreCommitHookCommand()), wtPath, out)
+	hookErr = runSettled(ctx, asRepairHook(sf, *sf.PreCommitHookCommand()), wtPath, out)
 
 	// Put HEAD back to the branch's commit; the tree the hook left stays staged.
 	if head, _ := git.RevParse(wtPath, "HEAD"); head != sha0 {
@@ -179,7 +200,7 @@ func repairStep(ctx context.Context, sf sweatfile.Sweatfile, wtPath, sha0 string
 	if err != nil {
 		return false, nil, fmt.Errorf("could not resolve HEAD before the repair hook: %w", err)
 	}
-	hookErr = runRepair(ctx, asRepairHook(sf, *sf.RepairHookCommand()), wtPath, out)
+	hookErr = runSettled(ctx, asRepairHook(sf, *sf.RepairHookCommand()), wtPath, out)
 
 	after, err := git.RevParse(wtPath, "HEAD")
 	if err != nil {

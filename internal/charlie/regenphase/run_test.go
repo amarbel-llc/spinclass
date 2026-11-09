@@ -115,24 +115,58 @@ func TestRunMakesNoCommitWhenNothingChanges(t *testing.T) {
 }
 
 // conformist exits 1 when one lane errors (a cache-db timeout was seen live)
-// after another lane restaged the regenerated file: the result is kept.
-func TestRunKeepsWhatAHookStagedEvenWhenItExitedWithAnError(t *testing.T) {
+// after another lane restaged a file: the hook is run again, and the phase
+// commits once a run exits 0.
+func TestRunRunsAFailedHookAgainAndKeepsTheResultOnceItSettles(t *testing.T) {
 	f := newFixture(t)
+	calls := 0
 	stubHook(t, func(wt string) error {
+		calls++
+		writeFileIn(t, wt, "gen.txt", "new")
+		gitIn(t, wt, "add", "gen.txt")
+		if calls == 1 {
+			return errors.New("conformist: exit status 1")
+		}
+		return nil
+	})
+
+	stream, err := runRun(t, f, preCommitSweatfile("conformist-pre-commit"))
+	if err != nil {
+		t.Fatalf("a hook that settles on the second run must pass: %v\n%s", err, stream)
+	}
+	if calls != 2 {
+		t.Errorf("hook runs = %d, want 2 (stop at the first exit 0)", calls)
+	}
+	if got := gitOut(t, f.dir, "show", "--name-only", "--format=", "HEAD"); got != "gen.txt" {
+		t.Errorf("the regenerate commit holds %q, want gen.txt", got)
+	}
+}
+
+// A lane that keeps failing must not pass: the file another lane restaged is
+// not committed as if the regeneration had worked, the branch is put back, and
+// the hook's output is in the failure (live ringmaster cascade, 2026-11-09).
+func TestRunFailsAndRestoresTheBranchWhenAHookKeepsFailingAfterStagingFiles(t *testing.T) {
+	f := newFixture(t)
+	calls := 0
+	stubHook(t, func(wt string) error {
+		calls++
 		writeFileIn(t, wt, "gen.txt", "new")
 		gitIn(t, wt, "add", "gen.txt")
 		return errors.New("conformist: exit status 1")
 	})
 
 	stream, err := runRun(t, f, preCommitSweatfile("conformist-pre-commit"))
-	if err != nil {
-		t.Fatalf("staged changes must survive a nonzero exit: %v\n%s", err, stream)
+	if err == nil {
+		t.Fatalf("a hook that never exits 0 must fail the phase:\n%s", stream)
 	}
-	if got := gitOut(t, f.dir, "show", "--name-only", "--format=", "HEAD"); got != "gen.txt" {
-		t.Errorf("the regenerate commit holds %q, want gen.txt", got)
+	if calls != hookAttempts {
+		t.Errorf("hook runs = %d, want %d", calls, hookAttempts)
 	}
-	if !strings.Contains(stream, "exited with an error") {
-		t.Errorf("the hook's error is not reported:\n%s", stream)
+	if got := gitOut(t, f.dir, "rev-parse", "HEAD"); got != f.sha0 {
+		t.Errorf("HEAD = %s, want the branch's %s", got, f.sha0)
+	}
+	if st := gitOut(t, f.dir, "status", "--porcelain"); st != "" {
+		t.Errorf("the tree was not restored: %s", st)
 	}
 }
 
@@ -262,15 +296,18 @@ func TestRunStillCommitsARepairsResultWhenTheStagedHookChangesNothing(t *testing
 	}
 }
 
-// One hook failing with nothing changed does not fail the phase while the
-// other changed something; both failing with nothing changed does.
-func TestRunFailsOnlyWhenNoHookChangedAnythingAndAHookFailed(t *testing.T) {
+// With both hooks configured, either one still failing after its retries fails
+// the phase, even when the other changed something.
+func TestRunFailsWhenEitherHookKeepsFailing(t *testing.T) {
 	f := newFixture(t)
 	stubBoth(t,
 		func(string) error { return errors.New("pre boom") },
 		func(wt string) error { writeFileIn(t, wt, "gen.txt", "new"); return nil })
-	if stream, err := runRun(t, f, bothHooks()); err != nil {
-		t.Fatalf("a failed staged hook must not fail the phase when the repair hook changed something: %v\n%s", err, stream)
+	if stream, err := runRun(t, f, bothHooks()); err == nil {
+		t.Fatalf("a staged hook that keeps failing must fail the phase:\n%s", stream)
+	}
+	if got := gitOut(t, f.dir, "rev-parse", "HEAD"); got != f.sha0 {
+		t.Errorf("HEAD = %s, want the branch's %s", got, f.sha0)
 	}
 
 	g := newFixture(t)

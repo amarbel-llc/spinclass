@@ -252,8 +252,12 @@ list for unconfined sessions.
   staged hook changed nothing, the repair's result becomes the commit, an amend of
   the branch's own commit split off). The first deployed version preferred repair
   and reported "already conformant" at ringmaster because the whole-tree repair
-  never fires the facade lane. A nonzero hook exit keeps what was staged; an
-  error with nothing changed anywhere fails and restores the tree. The hooks run
+  never fires the facade lane. A hook that exits nonzero is run again (up to 3
+  runs: conformist exits 1 after a reformat, and a lane can fail transiently, e.g.
+  the conformist cache-db open timeout seen live at ringmaster 2026-11-09); one
+  that still fails fails the phase, with its output in the failure, and the tree
+  is put back at the branch's HEAD, so a half-regenerated commit is never made.
+  The hooks run
   without the caller's `DIRENV_*`/`IN_NIX_SHELL`. One commit, hooks bypassed,
   only tracked files.
 - **R0f** the merge path: the same `internal/charlie/regenphase.Phase` in
