@@ -497,8 +497,13 @@ build plan (piggy `docs/plans/2026-11-09-rfc-0013-acts-sequencing.md`, slice
 S8a). Nothing in piggy depends on these answers before its S6 (the chain walk,
 piggy#361, held until the operator accepts RFC 0013). The items the operator
 must rule on are marked **RULE**. Read in RFC 0013 as drafted in piggy's
-green-larch worktree: §2 (fields), §4.1 to §4.9, §5.3. Claims about hyphence's
-rune rules are marked **to verify**.
+green-larch worktree: §2 (fields), §4.1 to §4.9, §5.3. piggy/green-larch/coco
+accepted the proposal the same day as the input to piggy#361 (S6). It took
+the verdict schema `piggy-act-verdict-v1`, exit codes 0/1/2, and `layers[]`
+entries with `role` as the shape to build. It recorded the revocation-source
+flag as a RULE for piggy, and confirmed that §4.8 admits the root blessing as
+a card `grant` under `piggy-escalation-v1`. That answers Open question 12's
+two-touch question as a `root` (certificate) act plus this `grant`.
 
 **Note on the stencil stack.** The green-larch draft of §4.9 refines the rule
 the previous section cites: a `profile` layer is a **stencil**, which admits
@@ -526,7 +531,7 @@ The field mapping:
 |---|---|
 | `grantor` | `issuer` (`operator` for a card act) and `issuer-record` (software act) |
 | `grantee` | `subject`: the grantee's **principal** (see below) |
-| `session` | the prefixed field `spinclass:session` (**to verify** that `/` is allowed in a hyphence bare word; otherwise quote it) |
+| `session` | the prefixed field `spinclass:session` (piggy confirmed `/` is legal in a bare markl purpose; whether a plain bare word admits it was not asked, so write it quoted unless hyphence's peg says otherwise) |
 | `profiles` / `rights` | the `right` set, one `spinclass:profile:<name>@<digest>` per profile (below) |
 | the profile the worker runs with | the `profile` edge, `<name>@<digest>`: the stencil |
 | `onward: grant` | the right `spinclass:grant` in the `right` set; absent means `none` |
@@ -541,9 +546,15 @@ Three choices behind the mapping:
    byte equality and checks only subsets (§4.2). Spelling a right as
    `spinclass:profile:<name>@<digest>` makes piggy's subset check enforce what
    `Narrows` enforces today for a held profile: same name at the same digest,
-   or refused. **To verify** that `@` is admitted in a hyphence bare word in a
-   `right` value. The `profile` field already carries `<name>@<digest>`, which
-   suggests it is, but I have not read the peg for this.
+   or refused. **Resolved (piggy/green-larch/coco, 2026-11-09):** the value
+   is not a bare word. hyphence reads an `@` join as a markl-id (hyphence RFC
+   0003: purpose, `@`, format-data), and a bare purpose admits only RFC 0011
+   §2.1's characters (alphanumerics, `-`, `_`, `/`), so the `:` forces a
+   quoted purpose:
+   `- right = "spinclass:profile:manager-builder"@blake2b256-…`. RFC 0013 §2,
+   as amended that day, lets a `right` be spelled as a markl-id for exactly
+   this case and compares parsed values (unquoted purpose, `@`, format, data)
+   by bytes, so the subset check enforces the held digest as intended.
 2. **The `profile` edge carries the bound, possibly narrower, profile.** A
    child that runs `engineer-reviewer@d2`, whose `_base` is the
    `manager-builder@d1` its parent holds, cannot carry
