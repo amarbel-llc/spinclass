@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -135,24 +136,152 @@ func TestRunKeepsWhatAHookStagedEvenWhenItExitedWithAnError(t *testing.T) {
 	}
 }
 
-// With both hooks configured, the staged-file hook runs: ringmaster has a
-// repair hook that reports "already conformant" on the same tree.
-func TestRunPrefersThePreCommitHookWhenBothAreConfigured(t *testing.T) {
-	f := newFixture(t)
-	var stagedAtRun string
-	stubHook(t, func(wt string) error {
-		stagedAtRun = gitOut(t, wt, "diff", "--cached", "--name-only")
-		return nil
-	})
-	both := repairSweatfile("repair")
-	pc := "conformist-pre-commit"
-	both.Hooks.PreCommit = &pc
+func bothHooks() sweatfile.Sweatfile {
+	repair, pre := "the-repair", "the-pre-commit"
+	return sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{Repair: &repair, PreCommit: &pre}}
+}
 
-	if stream, err := runRun(t, f, both); err != nil {
+// stubBoth runs fnPre for [hooks].pre-commit and fnRepair for [hooks].repair
+// (the phase hands each to the runner as the sweatfile's repair command) and
+// records the order.
+func stubBoth(t *testing.T, fnPre, fnRepair func(wt string) error) *[]string {
+	t.Helper()
+	var order []string
+	prev := runRepair
+	runRepair = func(_ context.Context, sf sweatfile.Sweatfile, wt string, _ io.Writer) error {
+		switch *sf.Hooks.Repair {
+		case "the-pre-commit":
+			order = append(order, "pre-commit")
+			return fnPre(wt)
+		case "the-repair":
+			order = append(order, "repair")
+			return fnRepair(wt)
+		}
+		t.Errorf("unexpected hook command %q", *sf.Hooks.Repair)
+		return nil
+	}
+	t.Cleanup(func() { runRepair = prev })
+	return &order
+}
+
+// Operator direction, 2026-11-09: with both hooks configured, run both. The
+// staged hook goes first over the branch diff; the repair hook then runs on the
+// clean tree, and its plain edits are folded into the same commit.
+func TestRunRunsBothHooksAndCommitsTheUnionAsOneCommit(t *testing.T) {
+	f := newFixture(t)
+	commitFile(t, f.dir, "gen2.txt", "old")
+	f.sha0 = gitOut(t, f.dir, "rev-parse", "HEAD")
+	var stagedAtPre, statusAtRepair string
+	order := stubBoth(t,
+		func(wt string) error {
+			stagedAtPre = gitOut(t, wt, "diff", "--cached", "--name-only")
+			writeFileIn(t, wt, "gen.txt", "new")
+			gitIn(t, wt, "add", "gen.txt")
+			return nil
+		},
+		func(wt string) error {
+			statusAtRepair = gitOut(t, wt, "status", "--porcelain")
+			writeFileIn(t, wt, "gen2.txt", "new")
+			return nil
+		})
+
+	stream, err := runRun(t, f, bothHooks())
+	if err != nil {
 		t.Fatalf("run: %v\n%s", err, stream)
 	}
-	if !strings.Contains(stagedAtRun, "flake.lock") {
-		t.Errorf("the staged mode did not run (the hook saw %q staged)", stagedAtRun)
+	if strings.Join(*order, ",") != "pre-commit,repair" {
+		t.Errorf("order = %v, want pre-commit then repair", *order)
+	}
+	if !strings.Contains(stagedAtPre, "flake.lock") {
+		t.Errorf("the staged hook did not see the lock bump staged: %q", stagedAtPre)
+	}
+	if statusAtRepair != "" {
+		t.Errorf("the repair hook did not run on a clean tree: %q", statusAtRepair)
+	}
+	if got := gitOut(t, f.dir, "rev-parse", "HEAD~1"); got != f.sha0 {
+		t.Errorf("one commit on top of the branch's HEAD expected: HEAD~1 = %s, want %s", got, f.sha0)
+	}
+	files := strings.Fields(gitOut(t, f.dir, "show", "--name-only", "--format=", "HEAD"))
+	if strings.Join(files, ",") != "gen.txt,gen2.txt" {
+		t.Errorf("the regenerate commit holds %v, want the union gen.txt and gen2.txt", files)
+	}
+}
+
+// A repair tool that amends HEAD (conformist --commit --amend) amends the
+// regenerate commit, which is the fold.
+func TestRunFoldsARepairToolsAmendIntoTheRegenerateCommit(t *testing.T) {
+	f := newFixture(t)
+	commitFile(t, f.dir, "gen2.txt", "old")
+	f.sha0 = gitOut(t, f.dir, "rev-parse", "HEAD")
+	stubBoth(t,
+		func(wt string) error {
+			writeFileIn(t, wt, "gen.txt", "new")
+			gitIn(t, wt, "add", "gen.txt")
+			return nil
+		},
+		func(wt string) error {
+			writeFileIn(t, wt, "gen2.txt", "new")
+			gitIn(t, wt, "commit", "-q", "-a", "--amend", "--no-edit")
+			return nil
+		})
+
+	stream, err := runRun(t, f, bothHooks())
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, stream)
+	}
+	if got := gitOut(t, f.dir, "rev-parse", "HEAD~1"); got != f.sha0 {
+		t.Errorf("the branch's HEAD was rewritten: HEAD~1 = %s, want %s", got, f.sha0)
+	}
+	files := strings.Fields(gitOut(t, f.dir, "show", "--name-only", "--format=", "HEAD"))
+	if strings.Join(files, ",") != "gen.txt,gen2.txt" {
+		t.Errorf("the regenerate commit holds %v, want the union", files)
+	}
+}
+
+// The staged hook finds nothing to change but the repair hook does (the repair
+// amends the branch's own commit): the repair's result is still split off.
+func TestRunStillCommitsARepairsResultWhenTheStagedHookChangesNothing(t *testing.T) {
+	f := newFixture(t)
+	stubBoth(t,
+		func(string) error { return nil },
+		func(wt string) error {
+			writeFileIn(t, wt, "gen.txt", "new")
+			gitIn(t, wt, "commit", "-q", "-a", "--amend", "--no-edit")
+			return nil
+		})
+
+	stream, err := runRun(t, f, bothHooks())
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, stream)
+	}
+	if got := gitOut(t, f.dir, "rev-parse", "HEAD~1"); got != f.sha0 {
+		t.Errorf("the branch's commit was rewritten: HEAD~1 = %s, want %s", got, f.sha0)
+	}
+	if got := gitOut(t, f.dir, "show", "--name-only", "--format=", "HEAD"); got != "gen.txt" {
+		t.Errorf("the regenerate commit holds %q, want gen.txt", got)
+	}
+}
+
+// One hook failing with nothing changed does not fail the phase while the
+// other changed something; both failing with nothing changed does.
+func TestRunFailsOnlyWhenNoHookChangedAnythingAndAHookFailed(t *testing.T) {
+	f := newFixture(t)
+	stubBoth(t,
+		func(string) error { return errors.New("pre boom") },
+		func(wt string) error { writeFileIn(t, wt, "gen.txt", "new"); return nil })
+	if stream, err := runRun(t, f, bothHooks()); err != nil {
+		t.Fatalf("a failed staged hook must not fail the phase when the repair hook changed something: %v\n%s", err, stream)
+	}
+
+	g := newFixture(t)
+	stubBoth(t,
+		func(string) error { return errors.New("pre boom") },
+		func(string) error { return errors.New("repair boom") })
+	if stream, err := runRun(t, g, bothHooks()); err == nil {
+		t.Fatalf("both hooks failing with nothing changed must fail:\n%s", stream)
+	}
+	if got := gitOut(t, g.dir, "rev-parse", "HEAD"); got != g.sha0 {
+		t.Errorf("HEAD = %s, want the branch's %s", got, g.sha0)
 	}
 }
 

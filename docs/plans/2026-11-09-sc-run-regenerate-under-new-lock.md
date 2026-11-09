@@ -243,11 +243,19 @@ list for unconfined sessions.
   worktree's devshell through `hookrun.Repair`, and the admission judged that
   same committed tree (a clean tracked tree is required). It is the building
   block for R1.
-- **R0d** the run: `[hooks].repair` when active (an amend is split off with a
-  soft reset), else `[hooks].pre-commit` in staged mode (HEAD soft-reset to the
-  merge base so the whole branch diff, `flake.lock` included, is staged; ringmaster
-  has only pre-commit, and the operator confirmed staged mode regenerates its
-  facade under the new lock). One commit, hooks bypassed, only tracked files.
+- **R0d** the run, revised after the live ringmaster cascade (operator
+  direction 2026-11-09: use both): `[hooks].pre-commit` first in staged mode
+  (HEAD soft-reset to the merge base so the whole branch diff, `flake.lock`
+  included, is staged and a lock-triggered lane fires), then `[hooks].repair`
+  over the whole tree on the clean tree; the union is ONE commit (a repair tool's
+  amend, or its plain edits, is folded into the staged hook's commit; if the
+  staged hook changed nothing, the repair's result becomes the commit, an amend of
+  the branch's own commit split off). The first deployed version preferred repair
+  and reported "already conformant" at ringmaster because the whole-tree repair
+  never fires the facade lane. A nonzero hook exit keeps what was staged; an
+  error with nothing changed anywhere fails and restores the tree. The hooks run
+  without the caller's `DIRENV_*`/`IN_NIX_SHELL`. One commit, hooks bypassed,
+  only tracked files.
 - **R0f** the merge path: the same `internal/charlie/regenphase.Phase` in
   `PrepareMerge` before REPAIR, skipped for guarded (confined) merges and by
   `PostMergeOptions.SkipRegenerate`, which `sc run` sets so the phase never runs

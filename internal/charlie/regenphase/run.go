@@ -3,6 +3,7 @@ package regenphase
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -21,28 +22,6 @@ const CommitSubject = "chore: regenerate and format under updated flake.lock"
 // direnv.
 var runRepair = hookrun.Repair
 
-// hookCommand picks what regenerates the tree and in which mode.
-//   - staged mode: [hooks].pre-commit (FDR 0019), e.g. conformist --staged. It
-//     only sees STAGED files, so the phase stages the whole branch's diff first,
-//     which is what fires a lane triggered by a staged flake.lock. Preferred
-//     when configured: it is the hook that regenerated the lock-bump commit's
-//     files in the first place, and the live ringmaster cascade showed the
-//     whole-tree repair run reporting "already conformant" on the same tree
-//     (2026-11-09: its repair never fired the facade lane).
-//   - repair mode: [hooks].repair (FDR 0018), e.g. conformist --commit --amend.
-//     It works on the whole tree and may amend HEAD.
-//
-// ok is false when the repo configures neither.
-func hookCommand(sf sweatfile.Sweatfile) (cmd string, staged, ok bool) {
-	if sf.PreCommitActive() {
-		return *sf.PreCommitHookCommand(), true, true
-	}
-	if sf.RepairActive() {
-		return *sf.RepairHookCommand(), false, true
-	}
-	return "", false, false
-}
-
 // asRepairHook is sf with its repair command replaced by cmd, so hookrun's
 // repair runner (own process group, wall-clock cap, cancellation, direnv
 // wrapping) runs it.
@@ -58,31 +37,42 @@ func asRepairHook(sf sweatfile.Sweatfile, cmd string) sweatfile.Sweatfile {
 }
 
 // run is R0d of the plan: with the lock admitted (Phase did that), run the
-// repo's regenerating hook in the worktree and commit whatever it changed as
+// repo's regenerating hooks in the worktree and commit whatever they changed as
 // ONE separate commit, so the generated churn is reviewable and revertable on
 // its own and the branch's own commits stay as written.
 //
-// Why running the hook here is the new-lock run: it runs in the worktree under
-// its devshell (direnv, when the worktree has an .envrc), which evaluates the
-// flake the worktree holds, and the admission judged the committed flake.nix and
-// flake.lock at HEAD. A clean tracked tree makes the two the same tree, so a
-// dirty one is refused here, as REPAIR refuses it (#345).
+// Why running the hooks here is the new-lock run: they run in the worktree under
+// its devshell (direnv, when the worktree has an .envrc, with the caller's
+// direnv state scrubbed), which evaluates the flake the worktree holds, and the
+// admission judged the committed flake.nix and flake.lock at HEAD. A clean
+// tracked tree makes the two the same tree, so a dirty one is refused here, as
+// REPAIR refuses it (#345).
 //
-// Repair mode: the command may amend HEAD (conformist-repair does) or only edit
-// files; an amend is undone with a soft reset to the pre-repair HEAD, the
-// amended tree stays staged. Staged mode (a repo with only [hooks].pre-commit,
-// such as ringmaster's): HEAD is soft-reset to the merge base with the landed
-// branch, so the whole branch diff, flake.lock included, is staged and the
-// hook's lanes fire as they would for the lock-bump commit, now under the new
-// lock; then HEAD is put back and the difference is the regeneration. Either
-// way the staged diff is committed under CommitSubject with hooks bypassed (the
-// per-commit dispatcher would restamp with the frozen OLD formatter). Only
-// tracked files are taken. Fail closed on a hook failure (staged mode restores
-// the tree to the branch's HEAD) or a dirty tree.
+// Both hooks run when both are configured (operator direction, 2026-11-09), in
+// this order:
+//  1. [hooks].pre-commit (FDR 0019, e.g. conformist --staged), staged mode. It
+//     only sees STAGED files, so HEAD is soft-reset to the merge base with the
+//     landed branch, which stages the whole branch diff, flake.lock included:
+//     that is what fires a lane triggered by a staged lock. The hook runs, HEAD
+//     is put back, and the staged difference is committed (hooks bypassed: the
+//     per-commit dispatcher would restamp with the frozen OLD formatter).
+//  2. [hooks].repair (FDR 0018, e.g. conformist --commit --amend), over the
+//     whole tree, on the now-clean tree. When step 1 made the commit, repair's
+//     amend (or, for a repair that only edits files, the staged edits) is folded
+//     into that same commit; otherwise it becomes the commit, with an amend of
+//     the branch's own commit split off by a soft reset first.
+//
+// The union is one commit. The two overlap a little (both format), so the second
+// hook re-doing the first's work is harmless: it finds the tree conformant. Only
+// tracked files are taken. A nonzero hook exit keeps whatever was staged (a lane
+// that errors after another restaged the file); an error with nothing changed
+// anywhere fails the phase and puts the tree back at the branch's HEAD, so a
+// hook that never ran cannot pass as "conformant".
 func run(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, wtPath, baseRef string) error {
-	cmd, staged, ok := hookCommand(sf)
-	if !ok {
-		ts.Skip(StepName, "neither [hooks].repair nor [hooks].pre-commit is configured, so there is nothing to run under the new lock")
+	staged := sf.PreCommitActive()
+	repair := sf.RepairActive()
+	if !staged && !repair {
+		ts.Skip(StepName, "neither [hooks].pre-commit nor [hooks].repair is configured, so there is nothing to run under the new lock")
 		return nil
 	}
 	if dirty := trackedChanges(wtPath); dirty != "" {
@@ -94,74 +84,152 @@ func run(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, wtPat
 	if err != nil {
 		return failStep(ts, StepName, fmt.Errorf("could not resolve HEAD: %w", err), "")
 	}
+
+	var (
+		out       bytes.Buffer
+		hookErrs  []error
+		committed bool
+	)
+	hookCtx := hookrun.WithScrubbedDirenv(ctx)
+
 	if staged {
-		mb, mbErr := git.Run(wtPath, "merge-base", "HEAD", baseRef)
-		mb = strings.TrimSpace(mb)
-		if mbErr != nil || mb == "" {
-			return failStep(ts, StepName, fmt.Errorf("no merge base between HEAD and %s, so the branch's diff cannot be staged for the hook: %v", baseRef, mbErr), "")
+		didCommit, hErr, stepErr := stagedStep(hookCtx, sf, wtPath, baseRef, sha0, &out)
+		if stepErr != nil {
+			return failStep(ts, StepName, stepErr, out.String())
 		}
-		if mb != sha0 {
-			if _, rErr := git.Run(wtPath, "reset", "-q", "--soft", mb); rErr != nil {
-				return failStep(ts, StepName, fmt.Errorf("could not stage the branch's diff for the hook: %w", rErr), "")
-			}
+		committed = didCommit
+		if hErr != nil {
+			hookErrs = append(hookErrs, fmt.Errorf("[hooks].pre-commit: %w", hErr))
+		}
+	}
+	if repair {
+		didCommit, hErr, stepErr := repairStep(hookCtx, sf, wtPath, sha0, committed, &out)
+		if stepErr != nil {
+			return failStep(ts, StepName, stepErr, out.String())
+		}
+		committed = committed || didCommit
+		if hErr != nil {
+			hookErrs = append(hookErrs, fmt.Errorf("[hooks].repair: %w", hErr))
 		}
 	}
 
-	var out bytes.Buffer
-	// A nonzero exit does not by itself discard the result: conformist exits 1
-	// when one lane errors (a cache-db timeout was seen live) after another
-	// lane has already restaged the regenerated file, and the per-commit hook
-	// is fail-open for the same reason. The result is judged below: changes
-	// staged despite the error are kept and committed with the error reported;
-	// an error with nothing changed fails the phase, so a hook that never ran
-	// cannot pass as "conformant".
-	hookErr := runRepair(hookrun.WithScrubbedDirenv(ctx), asRepairHook(sf, cmd), wtPath, &out)
-
-	sha1, err := git.RevParse(wtPath, "HEAD")
-	if err != nil {
-		return failStep(ts, StepName, fmt.Errorf("could not resolve HEAD after the hook: %w", err), out.String())
-	}
-	switch {
-	case sha1 != sha0:
-		// An amend, or staged mode's moved HEAD: put HEAD back to the branch's
-		// commit and keep the resulting tree staged.
-		if _, rErr := git.Run(wtPath, "reset", "-q", "--soft", sha0); rErr != nil {
-			return failStep(ts, StepName,
-				fmt.Errorf("could not split the hook's result from the branch's commit (HEAD is %s, expected %s): %w", sha1, sha0, rErr), out.String())
-		}
-	case !staged:
-		if _, aErr := git.Run(wtPath, "add", "-u"); aErr != nil {
-			return failStep(ts, StepName, fmt.Errorf("could not stage the hook's edits: %w", aErr), out.String())
-		}
-	}
-	names, nErr := git.Run(wtPath, "diff", "--cached", "--name-only")
-	if nErr != nil {
-		return failStep(ts, StepName, fmt.Errorf("could not list the hook's changes: %w", nErr), out.String())
-	}
-	changed := nonEmptyLines(names)
-	if len(changed) == 0 {
+	hookErr := errors.Join(hookErrs...)
+	if !committed {
 		if hookErr != nil {
 			restoreTree(wtPath, sha0)
-			return failStep(ts, StepName, fmt.Errorf("the hook failed under the new lock and changed nothing (the worktree was put back to %s): %w", shortSha(sha0), hookErr), out.String())
+			return failStep(ts, StepName, fmt.Errorf("a hook failed under the new lock and nothing changed (the worktree was put back to %s): %w", shortSha(sha0), hookErr), out.String())
 		}
 		ts.Ok(StepName + " (already conformant under the new lock)")
 		return nil
 	}
-	if _, cErr := git.Run(wtPath, "commit", "-q", "--no-verify", "-m", CommitSubject); cErr != nil {
-		return failStep(ts, StepName, fmt.Errorf("could not commit the regenerated files: %w", cErr), out.String())
-	}
+	names, _ := git.Run(wtPath, "diff", "--name-only", sha0, "HEAD")
 	sha2, _ := git.RevParse(wtPath, "HEAD")
 	if hookErr != nil {
-		ts.Ok(fmt.Sprintf("%s (committed %s: %d file(s); the hook exited with an error but staged these: %v)", StepName, shortSha(sha2), len(changed), hookErr))
+		ts.Ok(fmt.Sprintf("%s (committed %s: %d file(s); a hook exited with an error but staged these: %v)", StepName, shortSha(sha2), len(nonEmptyLines(names)), hookErr))
 		return nil
 	}
-	ts.Ok(fmt.Sprintf("%s (committed %s: %d file(s))", StepName, shortSha(sha2), len(changed)))
+	ts.Ok(fmt.Sprintf("%s (committed %s: %d file(s))", StepName, shortSha(sha2), len(nonEmptyLines(names))))
 	return nil
 }
 
-// restoreTree puts the worktree back at sha, discarding what a failed hook left
-// in the index and tree. It is only called on a tree that was clean at sha
-// (run refuses a dirty one first), so nothing of the branch's is lost.
+// stagedStep runs [hooks].pre-commit over the branch's staged diff and commits
+// what it changed. hookErr is the hook's own error (kept apart: it does not
+// stop the phase); stepErr is a git failure that does.
+func stagedStep(ctx context.Context, sf sweatfile.Sweatfile, wtPath, baseRef, sha0 string, out *bytes.Buffer) (committed bool, hookErr, stepErr error) {
+	mb, mbErr := git.Run(wtPath, "merge-base", "HEAD", baseRef)
+	mb = strings.TrimSpace(mb)
+	if mbErr != nil || mb == "" {
+		return false, nil, fmt.Errorf("no merge base between HEAD and %s, so the branch's diff cannot be staged for the hook: %v", baseRef, mbErr)
+	}
+	if mb != sha0 {
+		if _, rErr := git.Run(wtPath, "reset", "-q", "--soft", mb); rErr != nil {
+			return false, nil, fmt.Errorf("could not stage the branch's diff for the hook: %w", rErr)
+		}
+	}
+	hookErr = runRepair(ctx, asRepairHook(sf, *sf.PreCommitHookCommand()), wtPath, out)
+
+	// Put HEAD back to the branch's commit; the tree the hook left stays staged.
+	if head, _ := git.RevParse(wtPath, "HEAD"); head != sha0 {
+		if _, rErr := git.Run(wtPath, "reset", "-q", "--soft", sha0); rErr != nil {
+			return false, hookErr, fmt.Errorf("could not put HEAD back to the branch's commit %s after the pre-commit hook: %w", shortSha(sha0), rErr)
+		}
+	}
+	names, nErr := git.Run(wtPath, "diff", "--cached", "--name-only")
+	if nErr != nil {
+		return false, hookErr, fmt.Errorf("could not list the pre-commit hook's changes: %w", nErr)
+	}
+	if len(nonEmptyLines(names)) == 0 {
+		// Nothing staged: leave a clean tree for the next hook (a failed hook
+		// may have edited files without staging them).
+		restoreTree(wtPath, sha0)
+		return false, hookErr, nil
+	}
+	if _, cErr := git.Run(wtPath, "commit", "-q", "--no-verify", "-m", CommitSubject); cErr != nil {
+		return false, hookErr, fmt.Errorf("could not commit the regenerated files: %w", cErr)
+	}
+	return true, hookErr, nil
+}
+
+// repairStep runs [hooks].repair on the (clean) tree and folds the result into
+// the phase's commit: when stagedCommitted, into that commit (an amend by the
+// tool already is; plain edits are staged and amended in); otherwise a new
+// commit, after splitting off a tool amend of the branch's own commit.
+func repairStep(ctx context.Context, sf sweatfile.Sweatfile, wtPath, sha0 string, stagedCommitted bool, out *bytes.Buffer) (committed bool, hookErr, stepErr error) {
+	before, err := git.RevParse(wtPath, "HEAD")
+	if err != nil {
+		return false, nil, fmt.Errorf("could not resolve HEAD before the repair hook: %w", err)
+	}
+	hookErr = runRepair(ctx, asRepairHook(sf, *sf.RepairHookCommand()), wtPath, out)
+
+	after, err := git.RevParse(wtPath, "HEAD")
+	if err != nil {
+		return false, hookErr, fmt.Errorf("could not resolve HEAD after the repair hook: %w", err)
+	}
+	switch {
+	case stagedCommitted && after != before:
+		// The tool amended the regenerate commit: that is the fold.
+		return false, hookErr, nil
+	case stagedCommitted:
+		if _, aErr := git.Run(wtPath, "add", "-u"); aErr != nil {
+			return false, hookErr, fmt.Errorf("could not stage the repair hook's edits: %w", aErr)
+		}
+		if !hasStaged(wtPath) {
+			return false, hookErr, nil
+		}
+		if _, cErr := git.Run(wtPath, "commit", "-q", "--amend", "--no-edit", "--no-verify"); cErr != nil {
+			return false, hookErr, fmt.Errorf("could not fold the repair hook's edits into the regenerate commit: %w", cErr)
+		}
+		return false, hookErr, nil
+	case after != sha0:
+		// The tool amended the branch's own commit: split it off.
+		if _, rErr := git.Run(wtPath, "reset", "-q", "--soft", sha0); rErr != nil {
+			return false, hookErr, fmt.Errorf("could not split the repair hook's amend from the branch's commit (HEAD is %s, expected %s): %w", after, sha0, rErr)
+		}
+	default:
+		if _, aErr := git.Run(wtPath, "add", "-u"); aErr != nil {
+			return false, hookErr, fmt.Errorf("could not stage the repair hook's edits: %w", aErr)
+		}
+	}
+	if !hasStaged(wtPath) {
+		restoreTree(wtPath, sha0)
+		return false, hookErr, nil
+	}
+	if _, cErr := git.Run(wtPath, "commit", "-q", "--no-verify", "-m", CommitSubject); cErr != nil {
+		return false, hookErr, fmt.Errorf("could not commit the regenerated files: %w", cErr)
+	}
+	return true, hookErr, nil
+}
+
+// hasStaged reports whether the index differs from HEAD.
+func hasStaged(wtPath string) bool {
+	names, err := git.Run(wtPath, "diff", "--cached", "--name-only")
+	return err == nil && len(nonEmptyLines(names)) > 0
+}
+
+// restoreTree puts the worktree back at sha, discarding what a hook left in the
+// index and tree. It is only called on a tree that was clean at sha (run
+// refuses a dirty one first, and every committed step leaves it clean), so
+// nothing of the branch's is lost.
 func restoreTree(wtPath, sha string) {
 	_, _ = git.Run(wtPath, "reset", "-q", "--hard", sha)
 }

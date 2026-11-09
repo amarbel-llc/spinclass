@@ -71,8 +71,9 @@ after a step which changed `flake.lock`, specified in
 `docs/plans/2026-11-09-sc-run-regenerate-under-new-lock.md`. The phase is on by
 default. It admits the committed lock with the guarded gate's lock policy,
 then runs `[hooks].pre-commit` over the branch's staged diff, so a staged
-`flake.lock` fires lock-triggered lanes (else `[hooks].repair`), under the new
-lock and commits the result as one separate commit. The
+`flake.lock` fires lock-triggered lanes, and then `[hooks].repair` over the
+whole tree (each only if configured), under the new lock, and commits the union
+of what they changed as one separate commit. The
 merge path (`sc merge`, `merge-this-session`) runs the same phase before
 REPAIR; `sc run`'s own merge skips it so it never runs twice.)
 
