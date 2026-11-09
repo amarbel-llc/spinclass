@@ -91,16 +91,36 @@ func resolveFrozenHook(worktreePath, cmd string) session.FrozenHook {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), frozenHookTimeout)
 	defer cancel()
-	path, err := resolveFormatterPath(ctx, repoPath, sha, rec.Bin)
+	path, err := ResolveCommandAt(ctx, repoPath, sha, rec.Bin)
 	if err != nil {
-		return unfrozen(fmt.Sprintf("evaluating %s's devShell at %s for %s failed: %v", rec.BaseLabel, shortSha(sha), rec.Bin, err))
-	}
-	if !filepath.IsAbs(path) {
-		return unfrozen(fmt.Sprintf("%s's devShell at %s resolved %s to %q, not an absolute path", rec.BaseLabel, shortSha(sha), rec.Bin, path))
+		return unfrozen(fmt.Sprintf("%s's devShell at %s: %v", rec.BaseLabel, shortSha(sha), err))
 	}
 	rec.Bin = path
 	rec.Frozen = true
 	return rec
+}
+
+// ResolveCommandAt evaluates the devShell of the flake committed at rev in the
+// repository whose main checkout is repoPath, and returns the absolute path it
+// provides for bin. It is the resolution the freeze uses for the landed base,
+// exported for the regenerate phase (docs/plans/2026-11-09-sc-run-regenerate-
+// under-new-lock.md), which resolves against a session's own HEAD once the
+// lock policy has admitted that tree. It evaluates and so fetches: the CALLER
+// is responsible for having admitted the lock at rev, as resolveFrozenHook
+// does for the base (flake.lock present, no local input) and the regenerate
+// phase does with the #449 policy. An absolute bin is returned unchanged.
+func ResolveCommandAt(ctx context.Context, repoPath, rev, bin string) (string, error) {
+	if filepath.IsAbs(bin) {
+		return bin, nil
+	}
+	path, err := resolveFormatterPath(ctx, repoPath, rev, bin)
+	if err != nil {
+		return "", fmt.Errorf("evaluating the devShell for %s failed: %w", bin, err)
+	}
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("the devShell resolved %s to %q, not an absolute path", bin, path)
+	}
+	return path, nil
 }
 
 // resolveFormatterPathViaNix runs `nix develop` on the repository's own git
