@@ -531,7 +531,7 @@ The field mapping:
 |---|---|
 | `grantor` | `issuer` (`operator` for a card act) and `issuer-record` (software act) |
 | `grantee` | `subject`: the grantee's **principal** (see below) |
-| `session` | the prefixed field `spinclass:session` (piggy confirmed `/` is legal in a bare markl purpose; whether a plain bare word admits it was not asked, so write it quoted unless hyphence's peg says otherwise) |
+| `session` | the prefixed field `spinclass:session`, written bare (`spinclass:session = spinclass/slim-myrtle`): piggy confirmed on 2026-11-09 from hyphence's content grammar (`hyphence-content.peg`, `Ident`) that a bare word admits `/`, `-` and an interior `:`, and that hyphence's canonical encoder (hyphence RFC 0005) emits such a value bare; quoting it parses to the same value |
 | `profiles` / `rights` | the `right` set, one `spinclass:profile:<name>@<digest>` per profile (below) |
 | the profile the worker runs with | the `profile` edge, `<name>@<digest>`: the stencil |
 | `onward: grant` | the right `spinclass:grant` in the `right` set; absent means `none` |
