@@ -266,24 +266,62 @@ func knownBuild(build string) bool {
 // after a deploy its grit tools and hooks run old code with no warning
 // (spinclass#399's residual, FDR 0035); this is where an operator sees it.
 // Empty when the session has no live serve record.
+//
+// Only the plain (piped) table has a SERVE column; the TTY table folds a
+// non-current verdict into a second line under STATUS (serveNote) because
+// the full "differs: <version>+<commit>" overflowed the screen.
 func serveCell(builds []string, own string) mesa.Cell {
+	text, sev := serveVerdict(builds, own, false)
+	if sev == mesa.Neutral {
+		return mesa.Text(text)
+	}
+	return mesa.Styled(sev, text)
+}
+
+// serveNote is the TTY second STATUS line: the verdict only when it is worth
+// a line ("?" or "differs: ..."), nil for no serve record or current. The
+// commit is shortened to shortCommitLen so the line fits the STATUS column.
+func serveNote(builds []string, own string) *mesa.Cell {
+	text, sev := serveVerdict(builds, own, true)
+	if text == "" || text == "current" {
+		return nil
+	}
+	c := mesa.Styled(sev, text)
+	return &c
+}
+
+func serveVerdict(builds []string, own string, compact bool) (string, mesa.Severity) {
 	if len(builds) == 0 {
-		return mesa.Text("")
+		return "", mesa.Neutral
 	}
 	if !knownBuild(own) {
-		return mesa.Styled(mesa.Muted, "?")
+		return "?", mesa.Muted
 	}
 	for _, b := range builds {
 		switch b {
 		case own:
 			continue
 		case "":
-			return mesa.Styled(mesa.Warn, "differs: predates build records")
+			return "differs: predates build records", mesa.Warn
 		default:
-			return mesa.Styled(mesa.Warn, "differs: "+b)
+			if compact {
+				b = shortBuild(b)
+			}
+			return "differs: " + b, mesa.Warn
 		}
 	}
-	return mesa.Text("current")
+	return "current", mesa.Neutral
+}
+
+const shortCommitLen = 7
+
+// shortBuild trims the commit part of "<version>+<commit>" to shortCommitLen.
+func shortBuild(b string) string {
+	i := strings.LastIndex(b, "+")
+	if i < 0 || len(b)-i-1 <= shortCommitLen {
+		return b
+	}
+	return b[:i+1+shortCommitLen]
 }
 
 func renderDiags(diags []string) string {
@@ -316,12 +354,21 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 	presByKey := clown.PresenceByDecoration(now)
 	serves, own := liveServeBuilds(), listBuild()
 
+	// A known width means a TTY: there SERVE has no column of its own — a
+	// non-current verdict becomes a continuation row carrying only a STATUS
+	// cell (mesa cells cannot hold a newline; with no row borders the
+	// continuation reads as a second line of the STATUS cell). Width 0 is the
+	// plain/piped table, which keeps the SERVE column byte-for-byte.
+	tty := width > 0
 	t := mesa.New().
 		Col("ID", mesa.Pin).
 		Col("STATUS", mesa.Pin).
 		Col("AGE", mesa.Pin).
-		Col("PROFILE", mesa.Pin).
-		Col("SERVE", mesa.Pin).
+		Col("PROFILE", mesa.Pin)
+	if !tty {
+		t = t.Col("SERVE", mesa.Pin)
+	}
+	t = t.
 		// Wrap, not truncate (#283): a long description keeps all its words.
 		Col("DESCRIPTION", mesa.Flex, mesa.Wrap()).
 		Legend(stateLegendEntries()...).
@@ -348,14 +395,22 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 		// spinclass PID reads running-detached, not inactive (#153) — never
 		// contradicting the 🤡 count beside it. Filter/marker stay on the base
 		// resolved state above so presence never un-abandons a row.
-		t.Row(
+		cells := []mesa.Cell{
 			mesa.Text(s.SessionKey),
 			statusCell(stateSeverity(s.ResolveDisplayState(clowns)), clowns, marker),
 			mesa.Text(sessionpick.FormatRelDate(sessionpick.LastActivity(*s), now)),
 			mesa.Text(s.Profile),
-			serveCell(serves[s.Principal], own),
-			descCell(s.Description, s.SpawnedBy, len(s.Holders), s.Orphan()),
-		)
+		}
+		if !tty {
+			cells = append(cells, serveCell(serves[s.Principal], own))
+		}
+		cells = append(cells, descCell(s.Description, s.SpawnedBy, len(s.Holders), s.Orphan()))
+		t.Row(cells...)
+		if tty {
+			if note := serveNote(serves[s.Principal], own); note != nil {
+				t.Row(mesa.Text(""), *note, mesa.Text(""), mesa.Text(""), mesa.Text(""))
+			}
+		}
 	}
 	for _, r := range remoteRows {
 		// Combine the host and the repo/id session key into the single ID cell,
@@ -363,14 +418,17 @@ func renderListTable(states []session.State, remoteRows []session.ListRow, diags
 		// STATUS dot, uniformly, regardless of the remote's reported state.
 		// Host-first mirrors the `host:` resume-target convention (FDR 0011):
 		// <remote>:<repo>/<id>.
-		t.Row(
+		cells := []mesa.Cell{
 			mesa.Styled(mesa.Special, r.Remote+":"+r.Repo+"/"+r.ID),
 			statusCell(mesa.Special, r.ClownCount, "remote"),
 			mesa.Text(""),
 			mesa.Text(r.Profile),
-			mesa.Text(""),
-			descCell(r.Description, r.SpawnedBy, r.Holders, r.Orphan),
-		)
+		}
+		if !tty {
+			cells = append(cells, mesa.Text(""))
+		}
+		cells = append(cells, descCell(r.Description, r.SpawnedBy, r.Holders, r.Orphan))
+		t.Row(cells...)
 	}
 
 	var b strings.Builder

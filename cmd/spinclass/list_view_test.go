@@ -276,6 +276,58 @@ func TestRenderListTableFlagsAServeRunningAnotherBuild(t *testing.T) {
 	}
 }
 
+// TestRenderListTableServeOnSecondStatusLine covers a narrow and a wide TTY
+// (no SERVE column; a differing serve is a short second line under STATUS and
+// no rendered line exceeds the width) and non-TTY (SERVE column, full build).
+func TestRenderListTableServeOnSecondStatusLine(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	long := "0.4.4+2647864adcc35ae4e2aabbcf8a8480209e2430ab"
+	prevServes, prevOwn := liveServeBuilds, listBuild
+	liveServeBuilds = func() map[string][]string { return map[string][]string{"p": {long}} }
+	listBuild = func() string { return "0.4.4+aaaaaaaaaaaaaaa" }
+	t.Cleanup(func() { liveServeBuilds, listBuild = prevServes, prevOwn })
+	states := func() []session.State {
+		return []session.State{{
+			SessionState: session.StateInactive, WorktreePath: t.TempDir(), Branch: "b",
+			SessionKey: "spinclass/b", Principal: "p", StartedAt: time.Now(),
+			Description: "a fairly long description that has to wrap in a narrow terminal",
+		}}
+	}
+
+	plain := renderListTable(states(), nil, nil, false, 0, mesa.ForcePlain())
+	if !strings.Contains(plain, "SERVE") || !strings.Contains(plain, "differs: "+long) {
+		t.Errorf("non-TTY must keep the SERVE column with the full build:\n%s", plain)
+	}
+
+	// 90 is the narrowest width that also holds mesa's 84-column legend footer.
+	for _, w := range []int{90, 140} {
+		out := renderListTable(states(), nil, nil, false, w, mesa.ForceStyle())
+		if strings.Contains(out, "SERVE") || strings.Contains(out, long) {
+			t.Errorf("width %d: TTY must have no SERVE column nor the full build:\n%s", w, out)
+		}
+		if !strings.Contains(out, "differs: 0.4.4+2647864") {
+			t.Errorf("width %d: missing the short differs line:\n%s", w, out)
+		}
+		lines := strings.Split(out, "\n")
+		diffLine := -1
+		for i, l := range lines {
+			if strings.Contains(l, "differs:") {
+				diffLine = i
+			}
+			if n := lipgloss.Width(l); n > w {
+				t.Errorf("width %d: line is %d columns: %q", w, n, l)
+			}
+		}
+		if diffLine < 1 || strings.Contains(lines[diffLine], "spinclass/b") {
+			t.Errorf("width %d: differs must be its own line under the session row:\n%s", w, out)
+		}
+	}
+
+	if shortBuild("0.4.4+abc") != "0.4.4+abc" || shortBuild("nover") != "nover" {
+		t.Error("shortBuild must leave short/odd builds alone")
+	}
+}
+
 // TestRenderListTableClosedIncludesAbandoned confirms the closed flag flips
 // the abandoned-row filter on, mirroring the text path's --closed semantics.
 func TestRenderListTableClosedIncludesAbandoned(t *testing.T) {
