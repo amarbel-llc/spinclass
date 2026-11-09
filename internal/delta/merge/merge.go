@@ -33,6 +33,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/charlie/check"
 	"code.linenisgreat.com/spinclass/internal/charlie/executor"
 	"code.linenisgreat.com/spinclass/internal/charlie/profilerights"
+	"code.linenisgreat.com/spinclass/internal/charlie/regenphase"
 )
 
 // mergeInteractive reports whether a prompt can be shown (tty.Interactive:
@@ -310,8 +311,18 @@ func PrepareMergeWith(ctx context.Context, rep *crap.Reporter, ts *crap.TestStre
 	}
 	if guardedMerge(pm, wtPath) {
 		preamble.skipRepairForGuardedMerge(ts, branch)
-	} else if rErr := preamble.repair(ctx, ts, mx, wtPath, branch); rErr != nil {
-		return "", rErr
+	} else {
+		// Regenerate under a bumped flake.lock before REPAIR (the plan of
+		// 2026-11-09, Q5): the branch's own lock bump is admitted by the guarded
+		// gate's policy, the repo's hook runs under the new lock, and what it
+		// changes lands as its own commit. Never for a guarded (confined) merge,
+		// which runs nothing of the branch's tree in the session worktree.
+		if rgErr := preamble.regenerate(ctx, ts, wtPath, target.Ref(), pm); rgErr != nil {
+			return "", rgErr
+		}
+		if rErr := preamble.repair(ctx, ts, mx, wtPath, branch); rErr != nil {
+			return "", rErr
+		}
 	}
 
 	// Pin the post-rebase (and post-repair) tip: FinishMerge verifies and merges
@@ -398,6 +409,21 @@ func validatePostMergeSelection(ts *crap.TestStream, repoPath, branch, pinnedSha
 	}
 	return nil
 }
+
+// regenerate runs the regenerate phase (regenphase) in dir against the landing
+// target ref. It is a no-op when the phase is skipped by the caller or the
+// hierarchy did not load (the hook comes from the trusted hierarchy, as
+// repair's does).
+func (p mergePreamble) regenerate(ctx context.Context, ts *crap.TestStream, dir, targetRef string, pm PostMergeOptions) error {
+	if pm.SkipRegenerate || !p.haveHierarchy {
+		return nil
+	}
+	return regenphase.Phase(ctx, ts, p.hierarchy.Merged, dir, targetRef, false, admitLock)
+}
+
+// admitLock is the regenerate phase's lock-policy admission, a seam so a test
+// needs neither nix nor systemd.
+var admitLock regenphase.AdmitFunc = check.AdmitLockForRegenerate
 
 // repair runs the REPAIR phase (FDR 0018) in dir. It is a no-op when the
 // hierarchy did not load or repair is inactive.

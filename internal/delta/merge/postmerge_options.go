@@ -43,6 +43,13 @@ type PostMergeOptions struct {
 	// the merge has landed, before and independent of the post-merge targets.
 	OnLanded func(landedSha string)
 
+	// SkipRegenerate turns off the regenerate phase PrepareMerge otherwise runs
+	// before REPAIR when the branch changed flake.lock against the landing
+	// target (docs/plans/2026-11-09-sc-run-regenerate-under-new-lock.md). `sc
+	// run` sets it: the phase already ran after its step, or was switched off
+	// there with --no-regenerate. Inverted so the zero value is the default.
+	SkipRegenerate bool
+
 	// ExpectSha is `sc merge --expect`: the commit the caller reviewed, full or
 	// abbreviated (#353). When set, the merge is refused with ErrBranchMoved
 	// before the rebase if the branch tip is any other commit. "" checks nothing.
