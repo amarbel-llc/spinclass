@@ -313,7 +313,9 @@ below is the design for when instance predicates enter.
   parent's. Narrowing is stacking, and the stack is over **profiles** (next
   subsection). The enforcer evaluates every predicate on the chain for the
   request and the **most restrictive answer wins**: the request is allowed
-  only if every predicate allows it, and a `deny` anywhere denies it. A
+  only if every predicate allows it, a profile that says nothing about the
+  request does not allow it (RFC 0013 §4.9 rule 2, amended 2026-11-09 below),
+  and a `deny` anywhere denies it. A
   predicate that errors counts as deny (recommended; depends on the evaluator,
   see the asks). Narrowing is therefore never verified by comparing two
   predicates, and a predicate a verifier cannot compare is not rejected for
@@ -334,24 +336,46 @@ chain of profiles that the chain of grants binds:
 - the enforcer (the frontend, EPIC 0001 principle 7) conjoins the predicates
   of those profiles for the request, and the most restrictive answer wins.
 
-**This is a cascade, like the sweatfile, clownfile and moxyfile cascades.** The
-profile chain is a layered hierarchy in the same sense as spinclass's sweatfile
-layers (global above repo above worktree; a lower layer may only narrow, never
-widen; trusted layers win) and as moxy FDR 0013's narrowing (a child moxyfile
-only shrinks its parent). A profile's `_base` is its parent layer. Evaluation
-walks root to leaf. Each layer may add predicates on nodes or omit nodes. It
-may never add a node its parent lacks. The effective profile is the cascade's
-result, as `moxy show-effective-moxyfile` is for moxyfiles. A
-`show-effective-profile` view is the natural debugging surface for it:
-**proposed, not built, owner clown.**
+**Amended 2026-11-09 (operator ruling, piggy RFC 0013 §4.9, the stencil
+stack; raised by cutting-garden/swift-plum in the ajour design, relayed by
+circus/eager-holly).** The profile chain is a **stencil stack**, not an
+inheriting cascade. Every profile on the chain is a layer, and the enforcer
+applies RFC 0013 §4.9's three rules to the layers at call time:
 
-Consequences of the cascade reading:
+1. a call is admitted only where every layer admits it;
+2. a layer that says nothing about a value is not an admission of it;
+3. a `deny` in any layer refuses.
+
+A profile's `_base` names its parent layer, and evaluation walks root to leaf,
+but nothing flows down by silence: a layer admits only what it states. The
+earlier text here called the chain "a cascade, like the sweatfile, clownfile
+and moxyfile cascades"; that analogy no longer holds, because a sweatfile layer
+that is silent on a key inherits its parent's value (`nil` inherits,
+`spinclass-sweatfile(5)`), and a profile layer that is silent on a value
+refuses it. The narrow-only part of the analogy (moxy FDR 0013: a child only
+shrinks its parent) still holds. The effective profile is what every layer
+admits. A `show-effective-profile` view is the natural debugging surface for
+it: **proposed, not built, owner clown.**
+
+Consequences of the stencil stack:
 
 - A child cannot widen by writing a looser predicate, because the parent
-  profile's predicates stay in the conjunction. A child's omission of a node
-  its parent holds is not widening; absent still means forbidden for the
-  enumerated tree (principle 1). A predicate on a present node that a child
-  profile does not mention is inherited unchanged.
+  profile's predicates stay in the conjunction (rule 1). A child's omission of
+  a node its parent holds is not widening; absent means forbidden for the
+  enumerated tree (principle 1).
+- **A child that omits an allowance refuses it.** A predicate or node its
+  parent admits and the child does not mention is not admitted by the child
+  (rule 2), so the call is refused. A child that wants to keep a parent's
+  allowance restates it. (This replaces the earlier sentence "a predicate on a
+  present node that a child profile does not mention is inherited unchanged",
+  which no longer holds.) Restating is never widening: rule 1 keeps the
+  parent's layer in force, so a restated allowance admits no more than the
+  parent already did.
+- Catalog nodes already follow rule 2 at spawn. A clown profile is declared,
+  not inherited, so a child that leaves the model unset runs clown's default,
+  not its base's, and `catalogWidenings` reports that as a widening
+  (`internal/foxtrot/spawn/narrows.go`, coordinator ruling). The stencil stack
+  makes the same reading the rule for instance predicates.
 - The chain is walked from the presented grant to the root on every
   enforcement decision, or its evaluation is cached against the head grant's
   digest and invalidated when any record on the chain expires. The depth bound
@@ -377,6 +401,33 @@ at another digest, a chain that reaches nothing held, an unresolvable
 definition, or a chain longer than 8 is refused; `WalkOptions.BaseChain` nil
 keeps the old rule (the child's profile must be held). Each refusal names the
 profile and the edge.
+
+**Vectors under the stencil stack (2026-11-09).** None of spinclass's vectors
+depends on the retired "inherited unchanged" sentence: spinclass evaluates no
+instance predicate, and the `_base` stacking vectors in
+`internal/0/profilegrant/stacking_test.go` (V-D1-2, V-D1-6, V-D1-8, V-D1-10
+and the fail-closed cases) test catalog edges only, so they stand as written.
+The predicate vectors are circus's D1 vectors; circus's matching change is D1
+§3 (circus 9227df20, not merged when this was written).
+
+**Does the V-D1-6 excess check stay in `Narrows`? (open question, spinclass's
+view, not a ruling.)** Yes, it stays in spinclass. Two reasons:
+
+- It compares two layers (a profile against its `_base`), and only the grant
+  walk has both in hand. ajour, as relayed from cutting-garden/swift-plum,
+  reads one layer at a time and never looks at two together, so a helper
+  there would have to grow a two-layer API for this one caller.
+- Today it is a refusal, not only a lint, and it has to be. Under the stencil
+  stack an excess in a child layer is harmless, because the parent layer
+  refuses it at call time (rule 1). That holds only where an enforcer
+  conjoins the layers. For catalog nodes nothing does yet: clown launches the
+  leaf profile alone, its servers, tools, model and env as declared, so a
+  child that adds `folio` really runs with `folio`. Until clown (or moxy)
+  conjoins the catalog nodes of every profile on the chain, V-D1-6 is the
+  only thing standing between a widening child profile and a widened worker.
+  When such an enforcer exists, the check can be demoted to a lint (a warning
+  that the child names something its parent will refuse), and it would still
+  belong next to the walk.
 
 INTERIM (sprint 1): a grant's rights are derived from its profile names and
 judged on the _base chain, with the per-edge catalog subset check above.
