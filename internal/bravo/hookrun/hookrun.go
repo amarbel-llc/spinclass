@@ -547,6 +547,9 @@ func runHookInDirEnv(ctx context.Context, cmd *string, envDir, runDir string, ex
 		} else {
 			c.Env = append(os.Environ(), "WORKTREE="+envDir)
 			c.Env = append(c.Env, extraEnv...)
+			if scrubbedDirenv(ctx) {
+				c.Env = withoutDirenvState(c.Env)
+			}
 		}
 		c.Stdout = out
 		c.Stderr = out
@@ -829,6 +832,35 @@ func (c *cappedBuffer) Write(p []byte) (int, error) {
 }
 
 func (c *cappedBuffer) String() string { return string(c.b) }
+
+type scrubDirenvKey struct{}
+
+// WithScrubbedDirenv marks ctx so a hook run under it starts without the
+// caller's direnv state: every DIRENV_* variable and IN_NIX_SHELL are dropped
+// from its environment, then `direnv exec <worktree>` loads the worktree's own
+// devshell from nothing. Used by the regenerate phase, which must run the hook
+// under the worktree's NEW lock whatever shell the orchestrator was in (the
+// operator's manual check of the hook ran it with exactly these unset).
+func WithScrubbedDirenv(ctx context.Context) context.Context {
+	return context.WithValue(ctx, scrubDirenvKey{}, true)
+}
+
+func scrubbedDirenv(ctx context.Context) bool {
+	v, _ := ctx.Value(scrubDirenvKey{}).(bool)
+	return v
+}
+
+// withoutDirenvState is env without DIRENV_* and IN_NIX_SHELL.
+func withoutDirenvState(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "DIRENV_") || strings.HasPrefix(kv, "IN_NIX_SHELL=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
 
 // CommandCaptureAmbient is CommandCapture without the devshell: `sh -c` in dir
 // on the ambient PATH, no `direnv exec`, no WORKTREE injection. Used for

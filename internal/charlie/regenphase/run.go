@@ -115,7 +115,7 @@ func run(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, wtPat
 	// staged despite the error are kept and committed with the error reported;
 	// an error with nothing changed fails the phase, so a hook that never ran
 	// cannot pass as "conformant".
-	hookErr := runRepair(ctx, asRepairHook(sf, cmd), wtPath, &out)
+	hookErr := runRepair(hookrun.WithScrubbedDirenv(ctx), asRepairHook(sf, cmd), wtPath, &out)
 
 	sha1, err := git.RevParse(wtPath, "HEAD")
 	if err != nil {
