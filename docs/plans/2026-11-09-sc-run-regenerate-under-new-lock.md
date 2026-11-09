@@ -205,3 +205,50 @@ strong as the admission check.
 
 No change to the freeze, the lock policy, the guarded gate, REPAIR or any
 default. This note proposes; the operator rules.
+
+## 8. Operator rulings (2026-11-09, relayed by circus/eager-holly)
+
+1. **Commit shape:** a separate regenerate commit.
+2. **Default:** ON now, not opt-in; `--no-regenerate` stays.
+3. **Freeze:** F1, as a separate change after the phase. The freeze is not
+   changed yet.
+4. **Admission:** the full #449 declared-inputs admission, for the phase.
+5. **Open:** whether the phase also runs for an agent's `merge-this-session`.
+   Unanswered; it stays `sc run`-only until the operator says otherwise.
+
+Implementation has NOT been approved: scope goes to the coordinator, who
+confirms with the operator before any code.
+
+## 9. Implementation breakdown (I; not started, not filed as issues)
+
+R1 is a separate change after R0.
+
+- **R0a, trigger and plumbing.** In `internal/run`, after a successful step and
+  before the merge: `git diff --quiet <landing base> -- flake.lock` decides;
+  no diff means skip with no output change. Add `--no-regenerate` to
+  `run.ParseArgs` and the usage text; a skipped phase reports a SKIP point.
+  Tests: trigger on and off, flag parsing.
+- **R0b, admission.** Call the guarded gate's declared-inputs lock policy
+  (`merge/guarded.go`) from the phase against the worktree HEAD; refusal fails
+  with the policy's reason and nothing is evaluated. Needs the policy exposed
+  as a reusable function (U: how tangled it is with the gate's build worktree).
+  Tests: unlocked `path:` input refused, no store write.
+- **R0c, resolve and run.** `resolveFrozenHook` generalised to take a ref
+  (HEAD of the worktree instead of the base), resolving `[hooks].repair` or
+  the pre-commit command; run it in the worktree with the identity env of
+  `sessionexec`. Tests: stub-nix resolution at HEAD; a failing generator
+  exits nonzero and leaves the session intact.
+- **R0d, commit.** Stage only the paths the run changed; one commit with the
+  agreed subject, session identity, hooks bypassed for this commit (the
+  dispatcher would re-format with the frozen formatter); no commit when
+  nothing changed. Tests: exactly one commit with only generated paths; clean
+  tree makes none.
+- **R0e, integration and docs.** The fixture-repo bump test of section 6 and
+  the replayed #459 probe; FDR 0020 amendment, `spinclass-run(1)` flag, a
+  note in FDR 0019. Confined sessions skip (R).
+- **R1 (later, F1).** Policy-gated drift re-eval in the dispatcher and
+  freeze-only-for-unattended; its own plan, tests and FDR 0019 amendment.
+- **Order and size.** R0a to R0e in sequence, each landable on its own;
+  default-on only once R0e is green. Risk: default-on changes every
+  `sc run` that bumps a lock; the first real cascade run is the check.
+  Estimate left to the first build (U).
