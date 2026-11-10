@@ -52,6 +52,12 @@ func SetUnattendedMarker(env map[string]string, on bool) map[string]string {
 	return setUnattendedMarker(env, on)
 }
 
+// HasUnattendedMarker reports whether env carries the marker exactly as
+// setUnattendedMarker writes it (spinclass#473 reads a pinned entry's posture).
+func HasUnattendedMarker(env map[string]string) bool {
+	return env[unattendedEnvVar] == "1"
+}
+
 // PinnedEntrySupportsDontAsk reports whether a session whose pinned entry is
 // argv can run in claude's dontAsk mode: it must name a harness (carry the "--"
 // provider-args separator, which a bare shell entry lacks) whose provider is

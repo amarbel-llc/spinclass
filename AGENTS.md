@@ -95,7 +95,8 @@ re-run that suite right before merging.
 `close [target...]`, `check`, `clean`, `rebuild [--check]`, `fork`, `spawn`
 (FDR 0006), `close-child-session`, `restart-this-session` /
 `restart-child-session` (`--force` is always-ask) / `cancel-restart` (FDR 0037;
-hidden `restart-preflight`), `grant-session-handle` /
+hidden `restart-preflight`), `restart SESSION... --posture P` (operator-only,
+TTY-required, #473), `grant-session-handle` /
 `release-session-handle` / `list-handles` / `whoami` (FDR 0032), `host-load`
 (#388, read-only CPU load + busiest processes by session), `resurrect`
 (FDR 0027), `grit <tool> [json]` (CLI-only, TTY-required, logged operator escape

@@ -1229,11 +1229,32 @@ func (s *State) OtherHolders(excluding string) []string {
 	return out
 }
 
+// OperatorRestartRequester is the requester the operator's `sc restart`
+// (spinclass#473) records on a RestartRequest, and the only non-principal
+// requester the restart checks accept: restart-preflight's widening re-check
+// and --rearm let a request carrying exactly this string through without a
+// handle. Only the TTY-gated `sc restart` writes it, and the checks compare it
+// exactly. It is not a principal (principals are UUID-shaped keys; this has
+// spaces and parentheses), so no wake is ever addressed to it.
+//
+// The marker is as soft as handles are for an unconfined session: that
+// session's own agent runs as the same user, can write its own record, and so
+// could forge a request carrying it, exactly as it could forge a holder's
+// handle. Confined sessions are refused any posture change regardless
+// (postureObstacle), and a widening still needs the trusted
+// allow-posture-widening key and ends at clown's relaunch into attended, where
+// a human answers the prompts.
+const OperatorRestartRequester = "operator (sc restart)"
+
 // RestartWakeTargets is the audience of a restart outcome wake (#419): the
-// requester, when it is not the session itself, and every other holder, each
-// once. own is the restarted session's own principal, never woken.
+// requester, when it is not the session itself (nor the operator marker, which
+// is no principal), and every other holder, each once. own is the restarted
+// session's own principal, never woken.
 func (s *State) RestartWakeTargets(requester, own string) []string {
 	targets := slices.Clone(s.OtherHolders(own))
+	if requester == OperatorRestartRequester {
+		return targets
+	}
 	if requester != "" && requester != own && !slices.Contains(targets, requester) {
 		targets = append(targets, requester)
 	}

@@ -246,6 +246,27 @@ permission posture and out of it, keeping its principal.
   (plan decisions 8 and the open question); an older clown that ignores the
   verdict key relaunches in the old posture until the next `sc resume`.
 
+**Amendment 2026-11-10 (spinclass#473): `sc restart`.** An operator CLI verb,
+`sc restart SESSION... --posture unattended|attended|keep [--reason TEXT]`,
+CLI-only (no MCP tool). It refuses unless stdin and stdout are terminals, so an
+agent cannot drive it, and then needs no handle or `restart` right: the human
+at the terminal is the authority. Each target goes through the same request
+path as `restart-child-session` (`restartPlan`, `postureObstacle`,
+`queueRestartPosture`, the trusted hand-off) with the requester recorded as
+`operator (sc restart)`, and is judged on its own like multi-target `sc close`:
+one line per session with its old and new posture (read from the pinned
+entry's `CLOWN_UNATTENDED` marker; `unknown` with no pinned entry), and a
+nonzero exit if any failed. A widening still needs the trusted
+`allow-posture-widening` key and asks once for the whole batch on the terminal,
+default no; there is no force. An unpinned session is refused (resume it once).
+Operator ruling (option a): `restart-preflight`'s widening re-check and
+`--rearm` accept a request whose requester is exactly that marker
+(`session.OperatorRestartRequester`) in place of a holder's `restart` right;
+every other check stands, and no wake is addressed to the marker (holders are
+still woken). The marker is as soft as handles are for an unconfined session,
+whose agent runs as the same user and could forge its record; confined
+sessions are refused posture changes regardless.
+
 ## Requirement on clown and troupe
 
 A restart exit must not run `troupe mint-revoke`. A restart relaunches the same

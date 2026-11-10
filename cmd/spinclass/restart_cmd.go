@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 
@@ -703,12 +702,15 @@ var errRearmRaced = errors.New("the restart's state changed while it was being r
 // rearmRequesterAllowed re-checks the right the original request needed, which
 // the preflight does not (it is checked once, when the request is made): the
 // session itself may restart itself; anyone else needs the handle and the
-// restart right on it, exactly as restart-child-session required.
+// restart right on it, exactly as restart-child-session required. The operator
+// marker that only the TTY-gated `sc restart` records is accepted as is, by
+// exact match (operator ruling, spinclass#473); see
+// session.OperatorRestartRequester for how soft that is.
 func rearmRequesterAllowed(st *session.State, requester, own string) error {
 	if requester == "" {
 		return errors.New("the consumed restart records no requester, so its right cannot be re-checked")
 	}
-	if requester == own {
+	if requester == own || requester == session.OperatorRestartRequester {
 		return nil
 	}
 	key, _ := confinement.SessionKeyOfPrincipal(requester)
@@ -1043,10 +1045,7 @@ func notifyRearmRefused(st *session.State, principal string, req session.Restart
 }
 
 func notifyRestartRefusedWith(st *session.State, principal string, req session.RestartRequest, msg string) {
-	targets := st.OtherHolders(principal)
-	if req.Requester != "" && req.Requester != principal && !slices.Contains(targets, req.Requester) {
-		targets = append(targets, req.Requester)
-	}
+	targets := st.RestartWakeTargets(req.Requester, principal)
 	if len(targets) == 0 {
 		return
 	}
@@ -1117,7 +1116,8 @@ func runCancelRestart(p cancelRestartParams) (string, error) {
 // notifyRestartCancelled tells the original requester, when it is neither the
 // canceller nor the session itself, that its restart was cancelled. Best-effort.
 func notifyRestartCancelled(st *session.State, req session.RestartRequest, caller, sessionsOwnID string) {
-	if req.Requester == "" || req.Requester == caller || req.Requester == sessionsOwnID {
+	if req.Requester == "" || req.Requester == caller || req.Requester == sessionsOwnID ||
+		req.Requester == session.OperatorRestartRequester {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), restartNotifyTimeout)

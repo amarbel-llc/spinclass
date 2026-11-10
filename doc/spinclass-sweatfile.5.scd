@@ -1764,7 +1764,14 @@ owns the title end to end.
 	session launched confined, always prompts a human (the tool is always-ask
 	for it, as for *force*), and is re-checked by *restart-preflight*, which
 	refuses a request whose requester is the session or no longer holds the
-	right. The key is read live at request and preflight time, never pinned:
+	right. The operator's *sc restart --posture attended* (spinclass#473)
+	needs no handle: it runs only at a terminal, asks once before widening,
+	and records the requester *operator (sc restart)*, which
+	*restart-preflight* and *--rearm* accept by exact match in place of the
+	right. That marker is as soft as handles are for an unconfined session:
+	the session's own agent runs as the same user and could forge its record,
+	marker included. Confined sessions are refused posture changes
+	regardless. The key is read live at request and preflight time, never pinned:
 	only the global sweatfile and layers above the repo count; a repo or
 	worktree value is ignored (*sc validate* warns about a repo-level one),
 	because the agent must not be able to choose it. The last layer above the
