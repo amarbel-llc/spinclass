@@ -121,7 +121,7 @@ func runPhase(t *testing.T, f fixture, sf sweatfile.Sweatfile, off bool, a *admi
 	var buf bytes.Buffer
 	rep := crap.NewReporter(&buf, crap.ReporterOptions{})
 	ts := rep.TestStream(0)
-	err := Phase(context.Background(), ts, sf, f.dir, f.base, off, a.admit)
+	err := Phase(context.Background(), ts, sf, sweatfile.RepairGeneratedProtect, f.dir, f.base, off, a.admit)
 	ts.Finish()
 	return buf.String(), err
 }

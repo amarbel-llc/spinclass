@@ -880,6 +880,33 @@ does not export *WORKTREE*.
 	per-repo opt-in is not possible. Not merged into the effective
 	sweatfile. *Merge:* trusted layers only, scalar override.
 
+*repair-generated*
+	String: *protect* (the default), *fail* or *allow*. Decides what
+	happens when *repair* rewrites a generated file. Both places repair runs
+	are covered: the regenerate phase of a lock-bumping merge or *sc run*,
+	and the pre-merge REPAIR phase. A file counts as generated when, before
+	repair ran, it carried Go's generated-code marker: a line matching
+	*^// Code generated .\* DO NOT EDIT\\.$* before the first line that is
+	neither blank nor a *//* comment. Such files belong to their generator:
+	a drift check compares them with the generator's bytes, which a
+	formatter would break.
+
+	*protect* puts the generator's bytes back, folding them into repair's
+	amend when it amended, and adds one *ok* point naming the files. To
+	silence it, set *skip-generated* in the repair's conformist config so
+	repair leaves the files alone. *fail* refuses the phase instead: the
+	tree is put back, the amend is undone, and nothing is merged. *allow*
+	is the old behaviour: repair's edits stay. The guard stands aside
+	whatever the mode when *pre-commit* is not active, because repair is
+	then the only hook that can regenerate anything and may itself be the
+	generator.
+
+	*protect* and *fail* are read from every layer. *allow* is honoured only
+	from sweatfiles above the repo: a repo-level or worktree *allow* is
+	ignored and *sc validate* warns. A value outside the three counts as
+	*protect*, and *sc validate* reports it. Not merged into the effective
+	sweatfile. *Merge:* scalar override, last honoured layer wins.
+
 *allow-stale-base*
 	Boolean. Permits creating a session even when the repo's default branch
 	could not be confirmed current.

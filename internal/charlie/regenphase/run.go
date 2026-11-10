@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
+	"code.linenisgreat.com/spinclass/internal/alfa/repairguard"
 	"code.linenisgreat.com/spinclass/internal/bravo/hookrun"
 )
 
@@ -93,7 +95,13 @@ func asRepairHook(sf sweatfile.Sweatfile, cmd string) sweatfile.Sweatfile {
 // may not recur); one that still fails fails the phase and puts the tree back at
 // the branch's HEAD, so a lane that never ran cannot pass as "conformant" and a
 // half-regenerated commit is never made.
-func run(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, wtPath, baseRef string) error {
+//
+// Each repair run is guarded by repairguard under repairGenerated: a generated
+// file repair rewrote is put back as the generator wrote it (reported once, as
+// one ok point), or, under fail, the phase fails and the tree is put back. With
+// the generator's bytes kept, a generator and a formatter that disagree no
+// longer change the file every round, so the rounds reach their fixpoint.
+func run(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, repairGenerated sweatfile.RepairGeneratedMode, wtPath, baseRef string) error {
 	staged := sf.PreCommitActive()
 	repair := sf.RepairActive()
 	if !staged && !repair {
@@ -113,8 +121,10 @@ func run(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, wtPat
 	var (
 		out       bytes.Buffer
 		committed bool
+		kept      []string
 	)
 	hookCtx := hookrun.WithScrubbedDirenv(ctx)
+	guard := repairguard.Effective(sf, repairGenerated)
 
 	// Rounds to a fixpoint. A generated file is derived from sources the same
 	// run may reformat (live, ringmaster 2026-11-09: the facade main.go is
@@ -125,7 +135,8 @@ func run(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, wtPat
 	cur := sha0
 	committedRounds := 0
 	for round := 1; round <= maxRounds; round++ {
-		roundCommitted, hookErrs, err := runRound(hookCtx, sf, wtPath, baseRef, cur, &out, staged, repair)
+		roundCommitted, roundKept, hookErrs, err := runRound(hookCtx, sf, guard, wtPath, baseRef, cur, &out, staged, repair)
+		kept = append(kept, roundKept...)
 		if err != nil {
 			restoreTree(wtPath, sha0)
 			return failStep(ts, StepName, err, out.String())
@@ -162,6 +173,10 @@ func run(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, wtPat
 			return failStep(ts, StepName, fmt.Errorf("could not squash the regeneration rounds into one commit: %w", sErr), out.String())
 		}
 	}
+	if len(kept) > 0 {
+		slices.Sort(kept)
+		ts.Ok(repairguard.KeptLabel + ": " + repairguard.KeptMessage(slices.Compact(kept)))
+	}
 	if !committed {
 		ts.Ok(StepName + " (already conformant under the new lock)")
 		return nil
@@ -177,13 +192,14 @@ func run(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, wtPat
 const maxRounds = 3
 
 // runRound runs the configured hooks once, staged first then repair, on the
-// clean tree at cur, and commits what they changed on top of cur. hookErrs are
-// the hooks' own errors (kept apart: the caller decides); err is a git failure.
-func runRound(ctx context.Context, sf sweatfile.Sweatfile, wtPath, baseRef, cur string, out *bytes.Buffer, staged, repair bool) (committed bool, hookErrs []error, err error) {
+// clean tree at cur, and commits what they changed on top of cur. kept names the
+// generated files the repair guard put back. hookErrs are the hooks' own errors
+// (kept apart: the caller decides); err is a git failure or a guard refusal.
+func runRound(ctx context.Context, sf sweatfile.Sweatfile, guard sweatfile.RepairGeneratedMode, wtPath, baseRef, cur string, out *bytes.Buffer, staged, repair bool) (committed bool, kept []string, hookErrs []error, err error) {
 	if staged {
 		didCommit, hErr, stepErr := stagedStep(ctx, sf, wtPath, baseRef, cur, out)
 		if stepErr != nil {
-			return false, nil, stepErr
+			return false, nil, nil, stepErr
 		}
 		committed = didCommit
 		if hErr != nil {
@@ -191,16 +207,17 @@ func runRound(ctx context.Context, sf sweatfile.Sweatfile, wtPath, baseRef, cur 
 		}
 	}
 	if repair {
-		didCommit, hErr, stepErr := repairStep(ctx, sf, wtPath, cur, committed, out)
+		didCommit, repairKept, hErr, stepErr := repairStep(ctx, sf, guard, wtPath, cur, committed, out)
 		if stepErr != nil {
-			return false, nil, stepErr
+			return false, nil, nil, stepErr
 		}
 		committed = committed || didCommit
+		kept = repairKept
 		if hErr != nil {
 			hookErrs = append(hookErrs, fmt.Errorf("[hooks].repair: %w", hErr))
 		}
 	}
-	return committed, hookErrs, nil
+	return committed, kept, hookErrs, nil
 }
 
 // squashTo folds every commit above sha into one commit with the phase's subject.
@@ -259,51 +276,57 @@ func stagedStep(ctx context.Context, sf sweatfile.Sweatfile, wtPath, baseRef, sh
 // repairStep runs [hooks].repair on the (clean) tree and folds the result into
 // the phase's commit: when stagedCommitted, into that commit (an amend by the
 // tool already is; plain edits are staged and amended in); otherwise a new
-// commit, after splitting off a tool amend of the branch's own commit.
-func repairStep(ctx context.Context, sf sweatfile.Sweatfile, wtPath, sha0 string, stagedCommitted bool, out *bytes.Buffer) (committed bool, hookErr, stepErr error) {
+// commit, after splitting off a tool amend of the branch's own commit. Before
+// the fold, repairguard applies guard to what repair changed; kept names the
+// generated files it put back, and a guard refusal is a stepErr.
+func repairStep(ctx context.Context, sf sweatfile.Sweatfile, guard sweatfile.RepairGeneratedMode, wtPath, sha0 string, stagedCommitted bool, out *bytes.Buffer) (committed bool, kept []string, hookErr, stepErr error) {
 	before, err := git.RevParse(wtPath, "HEAD")
 	if err != nil {
-		return false, nil, fmt.Errorf("could not resolve HEAD before the repair hook: %w", err)
+		return false, nil, nil, fmt.Errorf("could not resolve HEAD before the repair hook: %w", err)
 	}
 	hookErr = runSettled(ctx, asRepairHook(sf, *sf.RepairHookCommand()), wtPath, out)
 
+	kept, err = repairguard.Enforce(wtPath, before, guard)
+	if err != nil {
+		return false, nil, hookErr, err
+	}
 	after, err := git.RevParse(wtPath, "HEAD")
 	if err != nil {
-		return false, hookErr, fmt.Errorf("could not resolve HEAD after the repair hook: %w", err)
+		return false, kept, hookErr, fmt.Errorf("could not resolve HEAD after the repair hook: %w", err)
 	}
 	switch {
 	case stagedCommitted && after != before:
 		// The tool amended the regenerate commit: that is the fold.
-		return false, hookErr, nil
+		return false, kept, hookErr, nil
 	case stagedCommitted:
 		if _, aErr := git.Run(wtPath, "add", "-u"); aErr != nil {
-			return false, hookErr, fmt.Errorf("could not stage the repair hook's edits: %w", aErr)
+			return false, kept, hookErr, fmt.Errorf("could not stage the repair hook's edits: %w", aErr)
 		}
 		if !hasStaged(wtPath) {
-			return false, hookErr, nil
+			return false, kept, hookErr, nil
 		}
 		if _, cErr := git.Run(wtPath, "commit", "-q", "--amend", "--no-edit", "--no-verify"); cErr != nil {
-			return false, hookErr, fmt.Errorf("could not fold the repair hook's edits into the regenerate commit: %w", cErr)
+			return false, kept, hookErr, fmt.Errorf("could not fold the repair hook's edits into the regenerate commit: %w", cErr)
 		}
-		return false, hookErr, nil
+		return false, kept, hookErr, nil
 	case after != sha0:
 		// The tool amended the branch's own commit: split it off.
 		if _, rErr := git.Run(wtPath, "reset", "-q", "--soft", sha0); rErr != nil {
-			return false, hookErr, fmt.Errorf("could not split the repair hook's amend from the branch's commit (HEAD is %s, expected %s): %w", after, sha0, rErr)
+			return false, kept, hookErr, fmt.Errorf("could not split the repair hook's amend from the branch's commit (HEAD is %s, expected %s): %w", after, sha0, rErr)
 		}
 	default:
 		if _, aErr := git.Run(wtPath, "add", "-u"); aErr != nil {
-			return false, hookErr, fmt.Errorf("could not stage the repair hook's edits: %w", aErr)
+			return false, kept, hookErr, fmt.Errorf("could not stage the repair hook's edits: %w", aErr)
 		}
 	}
 	if !hasStaged(wtPath) {
 		restoreTree(wtPath, sha0)
-		return false, hookErr, nil
+		return false, kept, hookErr, nil
 	}
 	if _, cErr := git.Run(wtPath, "commit", "-q", "--no-verify", "-m", CommitSubject); cErr != nil {
-		return false, hookErr, fmt.Errorf("could not commit the regenerated files: %w", cErr)
+		return false, kept, hookErr, fmt.Errorf("could not commit the regenerated files: %w", cErr)
 	}
-	return true, hookErr, nil
+	return true, kept, hookErr, nil
 }
 
 // hasStaged reports whether the index differs from HEAD.

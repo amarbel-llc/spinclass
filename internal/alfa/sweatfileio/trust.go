@@ -282,6 +282,32 @@ func TrustedAllowMergeCommits(h sweatfile.Hierarchy, home, repoRoot string) (all
 	return allow, untrusted
 }
 
+// TrustedRepairGenerated returns the [hooks].repair-generated mode honoured for
+// the repo: a scalar, the last honoured layer wins, protect when none sets it.
+// protect and fail only narrow what repair may do to generated files, so they
+// are honoured from every layer; allow is honoured only from layers above the
+// repo, and the paths of the layers whose allow was ignored are returned in
+// untrusted. A value outside the three counts as protect (`sc validate`
+// reports it). Hierarchy.Merged never carries the key.
+func TrustedRepairGenerated(h sweatfile.Hierarchy, home, repoRoot string) (mode sweatfile.RepairGeneratedMode, untrusted []string) {
+	mode = sweatfile.RepairGeneratedProtect
+	for _, src := range h.Sources {
+		if src.SkipReason != "" || !src.Found {
+			continue
+		}
+		if src.File.Hooks == nil || src.File.Hooks.RepairGenerated == nil {
+			continue
+		}
+		m, _ := sweatfile.ParseRepairGenerated(*src.File.Hooks.RepairGenerated)
+		if m == sweatfile.RepairGeneratedAllow && !LayerAboveRepo(src.Path, home, repoRoot) {
+			untrusted = append(untrusted, src.Path)
+			continue
+		}
+		mode = m
+	}
+	return mode, untrusted
+}
+
 // DefaultConfinedPreMerge is the gate a guarded merge runs when no trusted
 // layer sets [hooks].confined-pre-merge (spinclass#449): the flake's own
 // checks, evaluated purely, with a lock that must already be complete.

@@ -372,6 +372,12 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 				_vHooksAllowMergeCommits.MarkConsumed()
 			}
 		}
+		if _vHooksRepairGenerated, _ok := _vHooks.Field("repair-generated"); _ok && _vHooksRepairGenerated.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksRepairGenerated.Leaf); _xok {
+				hooksVal3.RepairGenerated = &_x
+				_vHooksRepairGenerated.MarkConsumedString()
+			}
+		}
 		d.data.Hooks = hooksVal3
 	} else {
 		hooksVal3 := &Hooks{}
@@ -577,6 +583,13 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractBool(_vAllowMergeCommits.Leaf); _xok {
 				hooksVal3.AllowMergeCommits = &_x
 				_vAllowMergeCommits.MarkConsumed()
+			}
+		}
+		if _vRepairGenerated, _ok := model.Field("repair-generated"); _ok && _vRepairGenerated.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vRepairGenerated.Leaf); _xok {
+				hooksVal3.RepairGenerated = &_x
+				_vRepairGenerated.MarkConsumedString()
 			}
 		}
 		if _foundHooks {
@@ -1794,6 +1807,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
+		if d.data.Hooks.RepairGenerated != nil {
+			if err := cst.SetAny(tableNode, "repair-generated", *d.data.Hooks.RepairGenerated); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
 	}
 	if d.data.Auth != nil {
 		tableNode := cst.EnsureChildTable(d.cstDoc.Root(), d.cstDoc.Root(), "auth")
@@ -2586,6 +2604,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vHooksAllowMergeCommits.MarkConsumed()
 			}
 		}
+		if _vHooksRepairGenerated, _ok := _vHooks.Field("repair-generated"); _ok && _vHooksRepairGenerated.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHooksRepairGenerated.Leaf); _xok {
+				hooksVal3.RepairGenerated = &_x
+				_vHooksRepairGenerated.MarkConsumedString()
+			}
+		}
 		data.Hooks = hooksVal3
 	} else {
 		hooksVal3 := &Hooks{}
@@ -2791,6 +2815,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractBool(_vAllowMergeCommits.Leaf); _xok {
 				hooksVal3.AllowMergeCommits = &_x
 				_vAllowMergeCommits.MarkConsumed()
+			}
+		}
+		if _vRepairGenerated, _ok := sub.Field("repair-generated"); _ok && _vRepairGenerated.Kind == cst.VLeaf {
+			_foundHooks = true
+			if _x, _xok := cst.ExtractString(_vRepairGenerated.Leaf); _xok {
+				hooksVal3.RepairGenerated = &_x
+				_vRepairGenerated.MarkConsumedString()
 			}
 		}
 		if _foundHooks {
@@ -3989,6 +4020,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if data.Hooks.AllowMergeCommits != nil {
 			if err := cst.SetAny(tableNode, "allow-merge-commits", *data.Hooks.AllowMergeCommits); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.Hooks.RepairGenerated != nil {
+			if err := cst.SetAny(tableNode, "repair-generated", *data.Hooks.RepairGenerated); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}

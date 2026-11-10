@@ -183,7 +183,8 @@ var validPreMergeOutputFormats = map[string]bool{
 
 // CheckHooks validates fields in the [hooks] table: the
 // pre-merge-output-format enum and the inactivity-timeout /
-// post-merge-timeout / repair-timeout durations. Extend here as more constrained hook fields
+// post-merge-timeout / repair-timeout durations, and the repair-generated enum.
+// Extend here as more constrained hook fields
 // land.
 func CheckHooks(sf sweatfile.Sweatfile) []Issue {
 	var issues []Issue
@@ -247,6 +248,19 @@ func CheckHooks(sf sweatfile.Sweatfile) []Issue {
 					Message:  err.Error(),
 					Severity: SeverityError,
 					Field:    "hooks.repair-timeout",
+					Value:    v,
+				})
+			}
+		}
+	}
+	// repair-generated runs an unknown value as protect.
+	if sf.Hooks.RepairGenerated != nil {
+		if v := *sf.Hooks.RepairGenerated; v != "" {
+			if _, ok := sweatfile.ParseRepairGenerated(v); !ok {
+				issues = append(issues, Issue{
+					Message:  fmt.Sprintf("[hooks] repair-generated must be protect, fail or allow, got %q (it runs as protect)", v),
+					Severity: SeverityError,
+					Field:    "hooks.repair-generated",
 					Value:    v,
 				})
 			}
@@ -807,6 +821,24 @@ func CheckAllowMergeCommits(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue
 	}}
 }
 
+// CheckRepairGenerated warns about a repo-level [hooks].repair-generated =
+// "allow": allow widens what repair may do to generated files, so it is read
+// only from layers above the repo and a value there is ignored. protect and fail
+// only narrow it and are honoured from every layer.
+func CheckRepairGenerated(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
+	if layerAboveRepo || sf.Hooks == nil || sf.Hooks.RepairGenerated == nil {
+		return nil
+	}
+	if mode, _ := sweatfile.ParseRepairGenerated(*sf.Hooks.RepairGenerated); mode != sweatfile.RepairGeneratedAllow {
+		return nil
+	}
+	return []Issue{{
+		Message:  "[hooks] sets `repair-generated = \"allow\"` in a repo-level sweatfile: it is ignored — allow is read only from sweatfiles above the repo (protect and fail are honoured anywhere); move it to the global sweatfile",
+		Severity: SeverityWarning,
+		Field:    "hooks.repair-generated",
+	}}
+}
+
 // CheckFolio validates the [folio] table (spinclass#438): every entry must
 // parse under the stanza grammar (internal/0/folio) and unmatched must be ask
 // or deny; both are errors, because an entry the broker could not compile
@@ -1290,6 +1322,10 @@ func Run(w io.Writer, home, repoDir string) int {
 		}
 
 		for _, iss := range CheckAllowMergeCommits(src.File, sweatfileio.LayerAboveRepo(src.Path, home, mainRoot)) {
+			sub.Ok(fmt.Sprintf("hooks valid # warning: %s", iss.Message))
+		}
+
+		for _, iss := range CheckRepairGenerated(src.File, sweatfileio.LayerAboveRepo(src.Path, home, mainRoot)) {
 			sub.Ok(fmt.Sprintf("hooks valid # warning: %s", iss.Message))
 		}
 

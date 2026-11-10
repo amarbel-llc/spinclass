@@ -841,6 +841,45 @@ func TestCheckAllowMergeCommitsWarnsInRepoLayer(t *testing.T) {
 	}
 }
 
+// [hooks] repair-generated: allow is honoured only above the repo, so a
+// repo-level allow warns; protect and fail are honoured everywhere.
+func TestCheckRepairGeneratedWarnsOnARepoLayerAllow(t *testing.T) {
+	for _, val := range []string{"protect", "fail", "allow"} {
+		v := val
+		sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{RepairGenerated: &v}}
+		got := CheckRepairGenerated(sf, false)
+		if val == "allow" {
+			if len(got) != 1 || got[0].Field != "hooks.repair-generated" || got[0].Severity != SeverityWarning {
+				t.Errorf("repo-layer allow should warn once, got %+v", got)
+			}
+		} else if len(got) != 0 {
+			t.Errorf("repo-layer %s should not warn, got %+v", val, got)
+		}
+		if got := CheckRepairGenerated(sf, true); len(got) != 0 {
+			t.Errorf("above-repo %s should not warn, got %+v", val, got)
+		}
+	}
+	if len(CheckRepairGenerated(sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{}}, false)) != 0 {
+		t.Error("an unset key should not warn")
+	}
+}
+
+// An unknown repair-generated value runs as protect, so validation is where
+// the typo surfaces.
+func TestCheckHooksRejectsAnUnknownRepairGenerated(t *testing.T) {
+	v := "sometimes"
+	issues := CheckHooks(sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{RepairGenerated: &v}})
+	if len(issues) != 1 || issues[0].Severity != SeverityError || issues[0].Field != "hooks.repair-generated" {
+		t.Errorf("expected one error issue, got %+v", issues)
+	}
+	for _, val := range []string{"protect", "fail", "allow"} {
+		v := val
+		if issues := CheckHooks(sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{RepairGenerated: &v}}); len(issues) != 0 {
+			t.Errorf("repair-generated %q produced unexpected issues: %+v", val, issues)
+		}
+	}
+}
+
 func TestCheckStoreWarnsInRepoLayer(t *testing.T) {
 	name := "A"
 	sf := sweatfile.Sweatfile{Store: &sweatfile.Store{AuthorName: &name}}

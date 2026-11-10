@@ -23,6 +23,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/0/tty"
 	"code.linenisgreat.com/spinclass/internal/alfa/landing"
+	"code.linenisgreat.com/spinclass/internal/alfa/repairguard"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	gitstore "code.linenisgreat.com/spinclass/internal/alfa/store/git"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
@@ -317,10 +318,11 @@ func PrepareMergeWith(ctx context.Context, rep *crap.Reporter, ts *crap.TestStre
 		// gate's policy, the repo's hook runs under the new lock, and what it
 		// changes lands as its own commit. Never for a guarded (confined) merge,
 		// which runs nothing of the branch's tree in the session worktree.
-		if rgErr := preamble.regenerate(ctx, ts, wtPath, target.Ref(), pm); rgErr != nil {
+		repairGenerated := repairGeneratedMode(preamble, repoPath)
+		if rgErr := preamble.regenerate(ctx, ts, repairGenerated, wtPath, target.Ref(), pm); rgErr != nil {
 			return "", rgErr
 		}
-		if rErr := preamble.repair(ctx, ts, mx, wtPath, branch); rErr != nil {
+		if rErr := preamble.repair(ctx, ts, mx, repairGenerated, wtPath, branch); rErr != nil {
 			return "", rErr
 		}
 	}
@@ -414,11 +416,11 @@ func validatePostMergeSelection(ts *crap.TestStream, repoPath, branch, pinnedSha
 // target ref. It is a no-op when the phase is skipped by the caller or the
 // hierarchy did not load (the hook comes from the trusted hierarchy, as
 // repair's does).
-func (p mergePreamble) regenerate(ctx context.Context, ts *crap.TestStream, dir, targetRef string, pm PostMergeOptions) error {
+func (p mergePreamble) regenerate(ctx context.Context, ts *crap.TestStream, repairGenerated sweatfile.RepairGeneratedMode, dir, targetRef string, pm PostMergeOptions) error {
 	if pm.SkipRegenerate || !p.haveHierarchy {
 		return nil
 	}
-	return regenphase.Phase(ctx, ts, p.hierarchy.Merged, dir, targetRef, false, admitLock)
+	return regenphase.Phase(ctx, ts, p.hierarchy.Merged, repairGenerated, dir, targetRef, false, admitLock)
 }
 
 // admitLock is the regenerate phase's lock-policy admission, a seam so a test
@@ -427,7 +429,7 @@ var admitLock regenphase.AdmitFunc = check.AdmitLockForRegenerate
 
 // repair runs the REPAIR phase (FDR 0018) in dir. It is a no-op when the
 // hierarchy did not load or repair is inactive.
-func (p mergePreamble) repair(ctx context.Context, ts *crap.TestStream, mx phaseMetrics, dir, branch string) error {
+func (p mergePreamble) repair(ctx context.Context, ts *crap.TestStream, mx phaseMetrics, repairGenerated sweatfile.RepairGeneratedMode, dir, branch string) error {
 	if !p.haveHierarchy || !p.hierarchy.Merged.RepairActive() {
 		return nil
 	}
@@ -449,7 +451,7 @@ func (p mergePreamble) repair(ctx context.Context, ts *crap.TestStream, mx phase
 		return failStep(ts, "dirty check "+branch, dirtyErr, "")
 	}
 	repairStart := time.Now()
-	repairErr := runRepairPhase(ctx, ts, p.hierarchy, dir, branch)
+	repairErr := runRepairPhase(ctx, ts, p.hierarchy, repairGenerated, dir, branch)
 	mx.observeErr(ctx, "repair", repairStart, repairErr)
 	return repairErr
 }
@@ -492,6 +494,15 @@ func allowMergeCommits(p mergePreamble, repoPath string) bool {
 	}
 	allow, _ := sweatfileio.TrustedAllowMergeCommits(p.hierarchy, home, repoPath)
 	return allow
+}
+
+// repairGeneratedMode is the [hooks].repair-generated mode (repairguard) the
+// regenerate and REPAIR phases run with. With no home, only the global layer's
+// allow goes unhonoured; protect and fail are read from every layer either way.
+func repairGeneratedMode(p mergePreamble, repoPath string) sweatfile.RepairGeneratedMode {
+	home, _ := os.UserHomeDir()
+	mode, _ := sweatfileio.TrustedRepairGenerated(p.hierarchy, home, repoPath)
+	return mode
 }
 
 // rangeHasMergeCommit reports whether base..branch contains a merge commit.
@@ -1767,7 +1778,12 @@ func withLeftoverIndexLock(err error, wtPath string) error {
 // replay-conflict on the next merge (see FDR 0018). It is bounded twice
 // (spinclass#401): by the caller's ctx (a cancelled merge call or job) and by
 // the repair hook's own wall-clock cap, [hooks].repair-timeout.
-func runRepairPhase(ctx context.Context, ts *crap.TestStream, hierarchy sweatfile.Hierarchy, wtPath, branch string) error {
+//
+// After repair, repairguard applies repairGenerated to what it changed: a
+// generated file repair rewrote is put back as the generator wrote it (one ok
+// point names it), or, under fail, the amend is undone as for an added path
+// and the merge refused.
+func runRepairPhase(ctx context.Context, ts *crap.TestStream, hierarchy sweatfile.Hierarchy, repairGenerated sweatfile.RepairGeneratedMode, wtPath, branch string) error {
 	// Pre-repair HEAD; the delta against the post-repair HEAD is the
 	// tool-agnostic "did it amend" signal (the repair command exits 0 whether or
 	// not it changed anything, e.g. conformist --exit-zero-on-fix).
@@ -1782,11 +1798,24 @@ func runRepairPhase(ctx context.Context, ts *crap.TestStream, hierarchy sweatfil
 		return failStep(ts, "repair "+branch, err, out.String())
 	}
 
+	kept, guardErr := repairguard.Enforce(wtPath, sha0, repairguard.Effective(hierarchy.Merged, repairGenerated))
+	var refusal *repairguard.RefusalError
+	switch {
+	case errors.As(guardErr, &refusal):
+		if _, rErr := git.Run(wtPath, "reset", "-q", "--mixed", sha0); rErr != nil {
+			return failStep(ts, "repair "+branch, fmt.Errorf("%w; undoing the repair also failed: %v", refusal, rErr), out.String())
+		}
+		return failStep(ts, "repair "+branch, fmt.Errorf("%w; the amend was undone (HEAD back to %s, worktree kept), nothing was merged", refusal, shortSha(sha0)), out.String())
+	case guardErr != nil:
+		return failStep(ts, "repair "+branch, guardErr, out.String())
+	}
+
 	sha1, shaErr := git.RevParse(wtPath, "HEAD")
 	if shaErr != nil {
 		return failStep(ts, "repair "+branch, fmt.Errorf("could not resolve HEAD after repair: %w", shaErr), out.String())
 	}
 	if sha1 == sha0 {
+		emitKeptGenerated(ts, kept)
 		ts.Ok("repair " + branch + " (already conformant)")
 		return nil
 	}
@@ -1806,8 +1835,17 @@ func runRepairPhase(ctx context.Context, ts *crap.TestStream, hierarchy sweatfil
 		}
 		return failStep(ts, "repair "+branch, fmt.Errorf("%w; the amend was undone (HEAD back to %s, worktree kept), nothing was merged", reason, shortSha(sha0)), out.String())
 	}
+	emitKeptGenerated(ts, kept)
 	ts.Ok("repair " + branch + " (amended " + shortSha(sha1) + ")")
 	return nil
+}
+
+// emitKeptGenerated reports the generated files repairguard put back, if any,
+// as one ok point: it fails nothing.
+func emitKeptGenerated(ts *crap.TestStream, kept []string) {
+	if len(kept) > 0 {
+		ts.Ok(repairguard.KeptLabel + ": " + repairguard.KeptMessage(kept))
+	}
 }
 
 // emitCoActiveSessions emits one informational ok test point listing the OTHER

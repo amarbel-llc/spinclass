@@ -273,6 +273,11 @@ list for unconfined sessions.
   the admission's own tests (`lockpolicy_test.go`) and stays a live-check item.
 - **Not built:** R1 (F1, the freeze change), a sweatfile key to switch the
   phase off per repo, a merge-side switch.
+- **Added 2026-11-10:** the phase's repair step is guarded by
+  `[hooks].repair-generated` (`internal/alfa/repairguard`; FDR 0018's
+  2026-11-10 amendment). A generated file repair rewrote keeps the generator's
+  bytes, so a generator and a formatter that disagree no longer fight every
+  round. See `2026-11-10-repair-vs-generated-files.md`.
 
 ## 11. R1 (F1) scoped against the code, 2026-11-09 (I; NOT built)
 

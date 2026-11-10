@@ -32,12 +32,13 @@ type AdmitFunc func(ctx context.Context, dir string, forbidden []string) error
 // Phase decides whether the branch changed flake.lock against base (the landed
 // default branch's ref; a branch with no base to compare with is the caller's
 // to skip); if so, and off is false, it admits the lock and runs the hook (see
-// run). sf is the merged sweatfile: [hooks].repair, else [hooks].pre-commit.
-// A branch whose lock did not change emits NOTHING, so the stream of every
-// ordinary run or merge is unchanged. A non-nil error is a refusal or a hook
-// failure already reported on ts: the caller fails and leaves the worktree for
-// inspection.
-func Phase(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, wtPath, base string, off bool, admit AdmitFunc) error {
+// run). sf is the merged sweatfile: [hooks].repair, else [hooks].pre-commit;
+// repairGenerated is the caller's sweatfileio.TrustedRepairGenerated, what
+// repair may do to generated files (repairguard). A branch whose lock did not
+// change emits NOTHING, so the stream of every ordinary run or merge is
+// unchanged. A non-nil error is a refusal or a hook failure already reported on
+// ts: the caller fails and leaves the worktree for inspection.
+func Phase(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, repairGenerated sweatfile.RepairGeneratedMode, wtPath, base string, off bool, admit AdmitFunc) error {
 	changed, err := regenerate.LockChanged(wtPath, base)
 	if err != nil {
 		ts.Skip(StepName, "could not compare "+regenerate.LockFile+" with "+base+": "+err.Error())
@@ -62,7 +63,7 @@ func Phase(ctx context.Context, ts *crap.TestStream, sf sweatfile.Sweatfile, wtP
 		return failStep(ts, StepName, err,
 			"pass --no-regenerate to run without the phase; nothing was evaluated")
 	}
-	return run(ctx, ts, sf, wtPath, base)
+	return run(ctx, ts, sf, repairGenerated, wtPath, base)
 }
 
 // failStep emits a failing test point for label populated from err and returns

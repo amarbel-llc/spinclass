@@ -20,6 +20,30 @@ promotion-criteria: |
 
 # Pre-merge REPAIR phase (conformist --commit --amend)
 
+## Amendment 2026-11-10: repair keeps generated files as generated
+
+Operator-approved and built 2026-11-10
+(`docs/plans/2026-11-10-repair-vs-generated-files.md`). REPAIR, and the
+regenerate phase's repair step, now guard generated files (`internal/alfa/repairguard`):
+
+- **The problem.** A formatting repair rewrote a file the drift gate compares
+  with its generator's raw bytes (ringmaster's dagnabit facade on 2026-11-10),
+  so the merge converged on bytes the gate refuses.
+- **The guard.** A tracked file repair changed whose pre-repair contents carry
+  Go's `// Code generated … DO NOT EDIT.` marker is handled by
+  `[hooks].repair-generated`:
+  - `protect` (the default) restores the generator's bytes, folds them into
+    the amend, and reports them on one `ok` point. An amend left equal to the
+    pre-repair tree is undone, so the phase reports "already conformant".
+  - `fail` undoes the amend, as for an added path, and refuses.
+  - `allow` keeps today's behaviour. It is honoured only from layers above
+    the repo.
+- **Stand-aside.** The guard stands aside when `[hooks].pre-commit` is not
+  active, since repair may then be the generator.
+- **End state (recorded, not built).** Generators declare their outputs, and
+  ajour profiles forbid formatters from touching them structurally.
+- **Reference.** `spinclass-sweatfile(5)`, `repair-generated`.
+
 > Cross-repo collaboration: the conformist side (`--commit --amend`, #24/#33)
 > is built by `conformist/merry-pine`; this FDR is the spinclass side, drafted
 > for that agent's review before implementation. The **Open questions** section

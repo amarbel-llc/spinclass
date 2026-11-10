@@ -1,7 +1,6 @@
 # Repair must not rewrite generated files: the spinclass piece (2026-11-10)
 
-**Status:** proposal, no code. Q1-Q5 were ruled on 2026-11-10 (§6). Scope
-approval and design approval are pending. This is spinclass's part of ringmaster's
+**Status:** approved 2026-11-10 (§6); being built. This is spinclass's part of ringmaster's
 `docs/plans/2026-11-10-repair-and-generated-files.md` ("the ringmaster
 note"), which ringmaster/cool-cypress wrote on 2026-11-10 (ea77433 /
 f9758a9). The ringmaster note §4 assigns spinclass the "detection" row; this
@@ -27,9 +26,15 @@ inferred or proposed, **U** unverified.
   `[hooks].pre-commit` (staged, which is where the facade lane regenerates),
   then `[hooks].repair` over the whole tree. Rounds stop at the first round
   that changes nothing, with at most 3 (`maxRounds`).
-  - **I:** whenever the generator and the formatter disagree on a file's
-    bytes, every round changes that file, so the loop runs out at 3 with
-    repair's bytes in the commit. Repair always has the last word.
+  - **I, corrected 2026-11-10:** when the generator and the formatter
+    disagree, the rounds do not settle.
+    - In ringmaster's cascade, the formatter's bytes were committed
+      (ringmaster note, its O).
+    - In a stub test built with the guard (`allow` mode), round 2 instead
+      failed with git's "amend … would make it empty" and the phase put the
+      tree back (O, subagent run).
+    - Which happens likely depends on how the real repair amends (U).
+    - Either way, the result is not the generator's bytes.
 - **R, `internal/delta/merge/merge.go:421-431`:** on a merge, the regenerate
   phase runs in `PrepareMerge` immediately before the pre-merge REPAIR phase
   (FDR 0018). REPAIR runs the same `[hooks].repair` again
@@ -242,13 +247,11 @@ Relayed by circus/eager-holly/clarabell from AskUserQuestion
 - **Fleet audit (operator, same relay):** an issue for a fleet-wide audit
   and convergence to the conformist profiles (consistent, self-healing). The
   coordinator files it on circus.
-- **Not ruled in this relay:**
-  - approval of the guard's scope (both repair callers, so every merge with
-    `[hooks].repair`);
-  - whether to file the landing-rebase gap (§1b, stage 6) as an issue;
-  - design approval.
-
-  No code until the operator approves.
+- **A1 scope (chat-dc1645ce):** approved for both callers, the regenerate
+  phase and pre-merge REPAIR.
+- **A4 landing-rebase gap:** a spinclass issue, filed by the coordinator.
+- **Design approval (C):** approved. The guard is built first, test-first,
+  as its own merge, before step 0 of the host queue.
 
 ## 7. Sources
 

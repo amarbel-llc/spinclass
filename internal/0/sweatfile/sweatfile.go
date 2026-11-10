@@ -148,6 +148,14 @@ type Hooks struct {
 	// last trusted layer wins. Read ONLY through
 	// sweatfileio.TrustedAllowMergeCommits; MergeWith never carries it.
 	AllowMergeCommits *bool `toml:"allow-merge-commits"`
+	// RepairGenerated says what happens when [hooks].repair changes a file that
+	// carries the generated-code marker while [hooks].pre-commit owns
+	// regeneration: "protect" (the default) puts the generator's bytes back,
+	// "fail" refuses the phase, "allow" keeps repair's edit. protect and fail
+	// only narrow what repair may do, so every layer may set them; allow is
+	// honoured only from layers above the repo. Read ONLY through
+	// sweatfileio.TrustedRepairGenerated; MergeWith never carries it.
+	RepairGenerated *string `toml:"repair-generated"`
 }
 
 // Auth declares how a worktree session mints and revokes its per-session forge
@@ -999,6 +1007,26 @@ func (sf Sweatfile) RepairActive() bool {
 	}
 	cmd := sf.RepairHookCommand()
 	return cmd != nil && NormalizeCommand(*cmd) != ""
+}
+
+// RepairGeneratedMode is a [hooks].repair-generated value.
+type RepairGeneratedMode string
+
+const (
+	RepairGeneratedProtect RepairGeneratedMode = "protect"
+	RepairGeneratedFail    RepairGeneratedMode = "fail"
+	RepairGeneratedAllow   RepairGeneratedMode = "allow"
+)
+
+// ParseRepairGenerated is the validation rule for [hooks].repair-generated,
+// shared by `sc validate` and sweatfileio.TrustedRepairGenerated: ok is false
+// for a value other than protect, fail or allow.
+func ParseRepairGenerated(v string) (mode RepairGeneratedMode, ok bool) {
+	switch m := RepairGeneratedMode(v); m {
+	case RepairGeneratedProtect, RepairGeneratedFail, RepairGeneratedAllow:
+		return m, true
+	}
+	return RepairGeneratedProtect, false
 }
 
 // PreCommitHookCommand returns the [hooks].pre-commit command, or nil when

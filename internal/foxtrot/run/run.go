@@ -217,7 +217,8 @@ func Run(ctx context.Context, spec Spec) (exitCode int, err error) {
 
 		// --- regenerate (R0a trigger, R0b admission; the run and the commit follow) ---
 		if base, ok := regenerate.BaseRef(rp.RepoPath); ok {
-			if rgErr := regenphase.Phase(ctx, ts, merged, rp.AbsPath, base, spec.NoRegenerate, check.AdmitLockForRegenerate); rgErr != nil {
+			repairGenerated, _ := sweatfileio.TrustedRepairGenerated(hierarchy, os.Getenv("HOME"), repoPath)
+			if rgErr := regenphase.Phase(ctx, ts, merged, repairGenerated, rp.AbsPath, base, spec.NoRegenerate, check.AdmitLockForRegenerate); rgErr != nil {
 				regenerateFailed = true
 				return rgErr
 			}
