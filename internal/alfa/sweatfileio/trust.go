@@ -282,6 +282,29 @@ func TrustedAllowMergeCommits(h sweatfile.Hierarchy, home, repoRoot string) (all
 	return allow, untrusted
 }
 
+// TrustedHostQueueRecordCosts returns the [host-queue].record-costs switch
+// honoured for the repo (#424 step 0): a scalar, the last layer above the repo
+// that sets it wins, on when unset. Host policy is the operator's, so layers
+// that may not set it (the repo and worktree files) are never honoured; their
+// paths are returned in untrusted. Hierarchy.Merged never carries the table.
+func TrustedHostQueueRecordCosts(h sweatfile.Hierarchy, home, repoRoot string) (record bool, untrusted []string) {
+	record = true
+	for _, src := range h.Sources {
+		if src.SkipReason != "" || !src.Found {
+			continue
+		}
+		if src.File.HostQueue == nil || src.File.HostQueue.RecordCosts == nil {
+			continue
+		}
+		if LayerAboveRepo(src.Path, home, repoRoot) {
+			record = *src.File.HostQueue.RecordCosts
+		} else {
+			untrusted = append(untrusted, src.Path)
+		}
+	}
+	return record, untrusted
+}
+
 // TrustedRepairGenerated returns the [hooks].repair-generated mode honoured for
 // the repo: a scalar, the last honoured layer wins, protect when none sets it.
 // protect and fail only narrow what repair may do to generated files, so they

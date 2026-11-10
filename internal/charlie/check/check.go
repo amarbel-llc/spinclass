@@ -370,6 +370,7 @@ func RunGuardedWithReporterContext(
 		ts.Ok(fmt.Sprintf("%s: ignored [hooks].confined-pre-merge in %s (only layers above the repo may set it)", label, ignored))
 	}
 	desc := label + ": `" + gate.Command + "`"
+	ctx = withGuardedGate(ctx)
 	link, hookErr := runHookPhase(ctx, rep, hierarchy, wtPath, gate.Command, desc, activity, func(ctx context.Context, sink io.Writer) error {
 		return hookrun.ConfinedPreMergeInDir(ctx, hierarchy.Merged, gate.Command, hookDir, forbidden, sink)
 	})
@@ -553,15 +554,27 @@ func runHookPhase(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.H
 		sink = io.MultiWriter(sink, activity)
 	}
 
+	// Cost tracking (#424 step 0) wraps the hook but never changes it.
+	cost := startGateCost(ctx, hierarchy, wtPath, activity)
+
 	start := time.Now()
 	// run is the hook itself (PreMergeInDir, or the guarded gate's runner).
 	// Notices go out after the hook's own node closes, whichever way it ends.
 	var notices []string
 	defer func() { emitHookNotices(rep, notices) }()
-	hookCtx := hookrun.WithNotices(ctx, func(n string) { notices = append(notices, n) })
+	hookCtx := hookrun.WithNotices(cost.hookContext(ctx), func(n string) { notices = append(notices, n) })
 	hookErr := run(hookCtx, sink)
 	elapsed := time.Since(start)
 	lw.Flush()
+	// The failing recipe is parsed from what is already captured: the whole
+	// buffer for a structured format, else the ring's tail (just's failure line
+	// is among a failed gate's last lines).
+	cost.finish(ctx, hookErr, elapsed, func() string {
+		if structured {
+			return hookStdoutBuf.String()
+		}
+		return ring.Tail()
+	})
 
 	var (
 		blobID    string

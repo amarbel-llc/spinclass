@@ -1354,6 +1354,41 @@ an agent could otherwise raise its own bound.
 	busy too long. A merge or check job running for the session excuses it. Unset,
 	unparseable or non-positive means 60m.
 
+## [host-queue]
+
+Host-wide gate policy (#424,
+docs/plans/2026-11-10-424-host-admission-queue-follow-up.md). Not merged: read
+only from the global and parent-directory layers, last one that sets a key
+wins; a repo- or worktree-level table is ignored with a warning (*sc validate*
+warns), because host policy is the operator's, not a repository's. Today it
+holds only cost tracking; later keys (the admission thresholds) join this
+table.
+
+*record-costs*
+	Bool, default *true*. After every pre-merge gate (merges, checks and the
+	guarded gate) record one cost record: the repository, the gate kind
+	(*merge*, *check* or *guarded*, with the history line's *caller* naming
+	*merge* or *check*), the outcome (*ok*, *failed*, *timeout* or
+	*cancelled*) and the wall time; the gate scope cgroup's *memory.peak* and
+	*cpu.stat* *usage\_usec*, sampled from outside the scope every 5 seconds
+	while the hook runs and once after it returns, keeping the last good
+	sample, when the hook ran in its systemd scope and the controllers are
+	delegated (the CPU figure can miss up to the last interval); the
+	*nix-daemon.service* cgroup's *usage\_usec* delta across the gate, when
+	that file is readable; and, for a failed gate, the last just recipe named
+	by a *error: recipe `NAME` failed on line N* line in its output. Each
+	record goes to statsd (see *[metrics]*) as
+	*gate.<repo>.<kind>.wall.<outcome>*, *.cpu\_seconds*,
+	*.daemon\_cpu\_seconds* (millisecond timers), *.mem\_peak\_bytes* (a
+	gauge) and the counter *.failed\_recipe.<recipe>*, and as one JSON line
+	appended to *$XDG\_STATE\_HOME/spinclass/host-queue/history.ndjson*
+	(*~/.local/state* when *XDG\_STATE\_HOME* is unset; not rotated yet).
+	Recording changes nothing about when or whether a gate runs, and a
+	recording failure never fails a gate; the hook runs exactly as it would
+	with recording off. *false* records and samples nothing. The environment
+	variable *SPINCLASS\_DISABLE\_GATE\_COST=1* also turns recording off,
+	whatever the sweatfiles say.
+
 ## [metrics]
 
 Best-effort statsd telemetry to stats-me (*stats-me-clients*(7), spinclass#363).

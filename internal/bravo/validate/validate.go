@@ -821,6 +821,19 @@ func CheckAllowMergeCommits(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue
 	}}
 }
 
+// CheckHostQueue warns about a repo-level [host-queue] table (#424): it is host
+// policy, read only from layers above the repo, so a value there is ignored.
+func CheckHostQueue(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
+	if layerAboveRepo || sf.HostQueue == nil {
+		return nil
+	}
+	return []Issue{{
+		Message:  "[host-queue] is set in a repo-level sweatfile: it is ignored — host-queue policy is read only from sweatfiles above the repo; move it to the global sweatfile",
+		Severity: SeverityWarning,
+		Field:    "host-queue",
+	}}
+}
+
 // CheckRepairGenerated warns about a repo-level [hooks].repair-generated =
 // "allow": allow widens what repair may do to generated files, so it is read
 // only from layers above the repo and a value there is ignored. protect and fail
@@ -1327,6 +1340,10 @@ func Run(w io.Writer, home, repoDir string) int {
 
 		for _, iss := range CheckRepairGenerated(src.File, sweatfileio.LayerAboveRepo(src.Path, home, mainRoot)) {
 			sub.Ok(fmt.Sprintf("hooks valid # warning: %s", iss.Message))
+		}
+
+		for _, iss := range CheckHostQueue(src.File, sweatfileio.LayerAboveRepo(src.Path, home, mainRoot)) {
+			sub.Ok(fmt.Sprintf("host-queue valid # warning: %s", iss.Message))
 		}
 
 		if src.File.Permissions != nil {

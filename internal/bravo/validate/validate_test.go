@@ -841,6 +841,22 @@ func TestCheckAllowMergeCommitsWarnsInRepoLayer(t *testing.T) {
 	}
 }
 
+// [host-queue] (#424) is read only above the repo, so a repo-level table warns
+// once and a trusted one does not.
+func TestCheckHostQueueWarnsInRepoLayer(t *testing.T) {
+	off := false
+	sf := sweatfile.Sweatfile{HostQueue: &sweatfile.HostQueue{RecordCosts: &off}}
+	if got := CheckHostQueue(sf, false); len(got) != 1 || got[0].Field != "host-queue" || got[0].Severity != SeverityWarning {
+		t.Errorf("repo-layer [host-queue] should warn once, got %+v", got)
+	}
+	if len(CheckHostQueue(sf, true)) != 0 {
+		t.Error("above-repo [host-queue] should not warn")
+	}
+	if len(CheckHostQueue(sweatfile.Sweatfile{}, false)) != 0 {
+		t.Error("no [host-queue] table should not warn")
+	}
+}
+
 // [hooks] repair-generated: allow is honoured only above the repo, so a
 // repo-level allow warns; protect and fail are honoured everywhere.
 func TestCheckRepairGeneratedWarnsOnARepoLayerAllow(t *testing.T) {

@@ -288,6 +288,18 @@ type Health struct {
 	BusyBound *string `toml:"busy-bound"`
 }
 
+// HostQueue is host-wide gate policy (#424,
+// docs/plans/2026-11-10-424-host-admission-queue-follow-up.md). It is host
+// policy, so like Health it is trusted only from layers above the repo, read
+// ONLY through sweatfileio's Trusted* resolvers (TrustedHostQueueRecordCosts),
+// and never merged. Later keys (the admission thresholds) join it here.
+type HostQueue struct {
+	// RecordCosts records one cost record per pre-merge gate (statsd and
+	// $XDG_STATE_HOME/spinclass/host-queue/history.ndjson). Last trusted layer
+	// that sets it wins; unset means true.
+	RecordCosts *bool `toml:"record-costs"`
+}
+
 // Madder configures what spinclass keeps in its per-user madder store and the
 // attestation index beside it (spinclass#427). Scalar override down the
 // cascade. The default is keep forever: with no key set nothing is ever
@@ -477,6 +489,7 @@ type Sweatfile struct {
 	Permissions    *Permissions    `toml:"permissions"`
 	Folio          *Folio          `toml:"folio"`
 	Health         *Health         `toml:"health"`
+	HostQueue      *HostQueue      `toml:"host-queue"`
 	Sysprompt      *Sysprompt      `toml:"sysprompt"`
 	SessionEntry   *SessionEntry   `toml:"session-entry"`
 	StartCommands  []StartCommand  `toml:"start-commands"`

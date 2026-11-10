@@ -17,6 +17,7 @@ import (
 	"github.com/mattn/go-isatty"
 
 	"code.linenisgreat.com/spinclass/internal/0/clown"
+	"code.linenisgreat.com/spinclass/internal/0/gatecost"
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/0/mergelock"
 	"code.linenisgreat.com/spinclass/internal/0/statsd"
@@ -1304,6 +1305,9 @@ func promptDefaultBranch() (string, error) {
 // are the resource_link blobs emitted for hook output.
 func runPreMergeHookContext(ctx context.Context, rep *crap.Reporter, ts *crap.TestStream, repoPath, wtPath, branch, defaultBranch, hookSha string, gitSync, guarded bool, activity io.Writer) ([]check.BlobLink, error) {
 	hierarchy, ok := trustedHierarchy(repoPath, defaultBranch, gitSync)
+	// A merge's gate is recorded as kind merge (#424); the guarded gate
+	// overrides it with guarded.
+	ctx = check.WithGateKind(ctx, gatecost.KindMerge)
 	if guarded {
 		return runGuardedGate(ctx, rep, ts, hierarchy, ok, repoPath, wtPath, branch, hookSha, activity)
 	}

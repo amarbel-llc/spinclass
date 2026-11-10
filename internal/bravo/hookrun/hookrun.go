@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/0/clown"
+	"code.linenisgreat.com/spinclass/internal/0/gatecost"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/alfa/direnv"
 )
@@ -660,8 +661,18 @@ func runHookInScope(
 		defer marker.discard()
 		complaint := &firstLineCapture{w: w}
 		c = newHookCmd(append(append([]string(nil), prefix...), marker.wrap(argv)...), complaint)
-		err = c.Run()
+		report := scopeAccountingFrom(ctx)
+		var sampler *scopeSampler
+		if report != nil {
+			sampler = &scopeSampler{marker: marker, root: scopeCgroupRoot}
+			err = sampler.run(c, scopeSampleInterval)
+		} else {
+			err = c.Run()
+		}
 		if marker.hookStarted() {
+			if sampler != nil {
+				report(sampler.last)
+			}
 			return c, true, err
 		}
 		// Everything written so far came from the scope setup, not the hook.
@@ -692,6 +703,12 @@ func runHookInScope(
 // exec was never reached. It execs, so the process the cancel signals is still
 // the hook itself (see runHookInDirEnv).
 //
+// Between the mark and the exec it also copies its own /proc/self/cgroup into
+// the marker, each line prefixed gatecost.ScopeMarkerProcCgroup, so a cost
+// sampler outside the scope can find the scope's cgroup (#424 step 0). That
+// copy is best effort: an unreadable file writes nothing, its errors go to
+// /dev/null, and the exec happens either way.
+//
 // The mark is read through the fd opened at creation, not by path: a hook that
 // wipes the temp dir unlinks the name but cannot make a started hook look
 // unstarted. For the same reason the wrapper refuses to run the hook when the
@@ -702,7 +719,99 @@ type scopeStartMarker struct {
 	path string // absolute: the wrapper sh runs in the hook's dir, not ours
 }
 
-const scopeStartScript = `mark=$1; shift; [ -f "$mark" ] && echo started >>"$mark" && exec "$@"`
+const scopeStartScript = `mark=$1 proc=$2; shift 2; [ -f "$mark" ] && echo started >>"$mark" || exit 1; ` +
+	`if [ -r "$proc" ]; then while IFS= read -r l || [ -n "$l" ]; do echo "proc-cgroup $l"; done <"$proc" >>"$mark"; fi 2>/dev/null; ` +
+	`exec "$@"`
+
+// Where the wrapper and the cost sampler find the scope's cgroup; seams for
+// tests. /proc/self/cgroup is read by the wrapper sh, inside the scope.
+var (
+	scopeCgroupRoot     = "/sys/fs/cgroup"
+	scopeProcSelfCgroup = "/proc/self/cgroup"
+)
+
+func scopeStartWrap(mark, proc string, argv []string) []string {
+	return append([]string{"sh", "-c", scopeStartScript, "sh", mark, proc}, argv...)
+}
+
+type scopeAccountingKey struct{}
+
+// WithScopeAccounting returns ctx carrying fn, which a scoped hook run under it
+// calls once, after the hook exits, with the scope cgroup's accounting as
+// sampled from outside the scope while it ran (#424 step 0; see scopeSampler).
+// It changes nothing about how the hook runs. An unscoped hook (no scope tier,
+// or the scope setup failed) never calls fn.
+func WithScopeAccounting(ctx context.Context, fn func(gatecost.Scope)) context.Context {
+	return context.WithValue(ctx, scopeAccountingKey{}, fn)
+}
+
+func scopeAccountingFrom(ctx context.Context) func(gatecost.Scope) {
+	fn, _ := ctx.Value(scopeAccountingKey{}).(func(gatecost.Scope))
+	return fn
+}
+
+// scopeSampleInterval is how often the sampler reads a running scope's cgroup;
+// a variable so tests can shorten it.
+const defaultScopeSampleInterval = 5 * time.Second
+
+var scopeSampleInterval = defaultScopeSampleInterval
+
+// scopeSampler reads a scoped hook's cgroup from outside the scope: once at
+// start, every scopeSampleInterval while the hook runs, and once right after it
+// returns. The cgroup path comes from the start marker, once the wrapper has
+// copied /proc/self/cgroup there; until then a sample reads nothing.
+//
+// The last good value of each field is kept, because a scope's cgroup is
+// removed once it empties, often before the final sample. memory.peak is
+// monotone, so the last sample is a good lower bound. cpu.stat usage_usec
+// undercounts by whatever the hook used after the last successful sample (up to
+// one interval); it is recorded as is.
+type scopeSampler struct {
+	marker *scopeStartMarker
+	root   string
+	path   string
+	last   gatecost.Scope
+}
+
+func (s *scopeSampler) sample() {
+	if s.path == "" {
+		path, ok := gatecost.ScopeCgroupPath(s.marker.contents())
+		if !ok {
+			return
+		}
+		s.path = path
+	}
+	s.last = s.last.Update(gatecost.ReadScopeCgroup(s.root, s.path))
+}
+
+// run is c.Run with the sampling around it: Start then Wait, exactly what Run
+// does, so the hook's process, signals and exit status are untouched.
+func (s *scopeSampler) run(c *exec.Cmd, every time.Duration) error {
+	if err := c.Start(); err != nil {
+		return err
+	}
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+		s.sample()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				s.sample()
+			}
+		}
+	}()
+	err := c.Wait()
+	close(done)
+	<-stopped
+	s.sample()
+	return err
+}
 
 func newScopeStartMarker() (*scopeStartMarker, error) {
 	file, err := os.CreateTemp("", "spinclass-hook-scope-*")
@@ -720,7 +829,20 @@ func newScopeStartMarker() (*scopeStartMarker, error) {
 }
 
 func (m *scopeStartMarker) wrap(argv []string) []string {
-	return append([]string{"sh", "-c", scopeStartScript, "sh", m.path}, argv...)
+	return scopeStartWrap(m.path, scopeProcSelfCgroup, argv)
+}
+
+// maxMarkerRead bounds how much of the marker the sampler reads back.
+const maxMarkerRead = 64 << 10
+
+// contents reads the marker through the fd, like hookStarted; an unreadable
+// marker reads as empty.
+func (m *scopeStartMarker) contents() []byte {
+	data, err := io.ReadAll(io.NewSectionReader(m.file, 0, maxMarkerRead))
+	if err != nil {
+		return nil
+	}
+	return data
 }
 
 // hookStarted errs toward true: an unreadable marker must not license a re-run.

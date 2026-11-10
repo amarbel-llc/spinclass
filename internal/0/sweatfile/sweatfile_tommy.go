@@ -1050,52 +1050,76 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 			d.data.Health = healthVal12
 		}
 	}
+	if _vHostQueue, _ok := model.Field("host-queue"); _ok && _vHostQueue.Kind == cst.VTable {
+		_vHostQueue.MarkSeen()
+		hostQueueVal13 := &HostQueue{}
+		if _vHostQueueRecordCosts, _ok := _vHostQueue.Field("record-costs"); _ok && _vHostQueueRecordCosts.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHostQueueRecordCosts.Leaf); _xok {
+				hostQueueVal13.RecordCosts = &_x
+				_vHostQueueRecordCosts.MarkConsumed()
+			}
+		}
+		d.data.HostQueue = hostQueueVal13
+	} else {
+		hostQueueVal13 := &HostQueue{}
+		_foundHostQueue := false
+		if _vRecordCosts, _ok := model.Field("record-costs"); _ok && _vRecordCosts.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractBool(_vRecordCosts.Leaf); _xok {
+				hostQueueVal13.RecordCosts = &_x
+				_vRecordCosts.MarkConsumed()
+			}
+		}
+		if _foundHostQueue {
+			d.data.HostQueue = hostQueueVal13
+		}
+	}
 	if _vSysprompt, _ok := model.Field("sysprompt"); _ok && _vSysprompt.Kind == cst.VTable {
 		_vSysprompt.MarkSeen()
-		syspromptVal13 := &Sysprompt{}
+		syspromptVal14 := &Sysprompt{}
 		if _vSyspromptDocIndexDirs, _ok := _vSysprompt.Field("doc-index-dirs"); _ok && _vSyspromptDocIndexDirs.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractStringSlice(_vSyspromptDocIndexDirs.Leaf); _xok {
-				syspromptVal13.DocIndexDirs = _x
-				if syspromptVal13.DocIndexDirs == nil {
-					syspromptVal13.DocIndexDirs = []string{}
+				syspromptVal14.DocIndexDirs = _x
+				if syspromptVal14.DocIndexDirs == nil {
+					syspromptVal14.DocIndexDirs = []string{}
 				}
 				_vSyspromptDocIndexDirs.MarkConsumed()
 			}
 		}
 		if _vSyspromptManIndex, _ok := _vSysprompt.Field("man-index"); _ok && _vSyspromptManIndex.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractStringSlice(_vSyspromptManIndex.Leaf); _xok {
-				syspromptVal13.ManIndex = _x
-				if syspromptVal13.ManIndex == nil {
-					syspromptVal13.ManIndex = []string{}
+				syspromptVal14.ManIndex = _x
+				if syspromptVal14.ManIndex == nil {
+					syspromptVal14.ManIndex = []string{}
 				}
 				_vSyspromptManIndex.MarkConsumed()
 			}
 		}
 		if _vSyspromptRepoIndex, _ok := _vSysprompt.Field("repo-index"); _ok && _vSyspromptRepoIndex.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractStringSlice(_vSyspromptRepoIndex.Leaf); _xok {
-				syspromptVal13.RepoIndex = _x
-				if syspromptVal13.RepoIndex == nil {
-					syspromptVal13.RepoIndex = []string{}
+				syspromptVal14.RepoIndex = _x
+				if syspromptVal14.RepoIndex == nil {
+					syspromptVal14.RepoIndex = []string{}
 				}
 				_vSyspromptRepoIndex.MarkConsumed()
 			}
 		}
 		if _vSyspromptIndexLimit, _ok := _vSysprompt.Field("index-limit"); _ok && _vSyspromptIndexLimit.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractInt(_vSyspromptIndexLimit.Leaf); _xok {
-				syspromptVal13.IndexLimit = &_x
+				syspromptVal14.IndexLimit = &_x
 				_vSyspromptIndexLimit.MarkConsumed()
 			}
 		}
-		d.data.Sysprompt = syspromptVal13
+		d.data.Sysprompt = syspromptVal14
 	} else {
-		syspromptVal13 := &Sysprompt{}
+		syspromptVal14 := &Sysprompt{}
 		_foundSysprompt := false
 		if _vDocIndexDirs, _ok := model.Field("doc-index-dirs"); _ok && _vDocIndexDirs.Kind == cst.VLeaf {
 			_foundSysprompt = true
 			if _x, _xok := cst.ExtractStringSlice(_vDocIndexDirs.Leaf); _xok {
-				syspromptVal13.DocIndexDirs = _x
-				if syspromptVal13.DocIndexDirs == nil {
-					syspromptVal13.DocIndexDirs = []string{}
+				syspromptVal14.DocIndexDirs = _x
+				if syspromptVal14.DocIndexDirs == nil {
+					syspromptVal14.DocIndexDirs = []string{}
 				}
 				_vDocIndexDirs.MarkConsumed()
 			}
@@ -1103,9 +1127,9 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 		if _vManIndex, _ok := model.Field("man-index"); _ok && _vManIndex.Kind == cst.VLeaf {
 			_foundSysprompt = true
 			if _x, _xok := cst.ExtractStringSlice(_vManIndex.Leaf); _xok {
-				syspromptVal13.ManIndex = _x
-				if syspromptVal13.ManIndex == nil {
-					syspromptVal13.ManIndex = []string{}
+				syspromptVal14.ManIndex = _x
+				if syspromptVal14.ManIndex == nil {
+					syspromptVal14.ManIndex = []string{}
 				}
 				_vManIndex.MarkConsumed()
 			}
@@ -1113,9 +1137,9 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 		if _vRepoIndex, _ok := model.Field("repo-index"); _ok && _vRepoIndex.Kind == cst.VLeaf {
 			_foundSysprompt = true
 			if _x, _xok := cst.ExtractStringSlice(_vRepoIndex.Leaf); _xok {
-				syspromptVal13.RepoIndex = _x
-				if syspromptVal13.RepoIndex == nil {
-					syspromptVal13.RepoIndex = []string{}
+				syspromptVal14.RepoIndex = _x
+				if syspromptVal14.RepoIndex == nil {
+					syspromptVal14.RepoIndex = []string{}
 				}
 				_vRepoIndex.MarkConsumed()
 			}
@@ -1123,31 +1147,31 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 		if _vIndexLimit, _ok := model.Field("index-limit"); _ok && _vIndexLimit.Kind == cst.VLeaf {
 			_foundSysprompt = true
 			if _x, _xok := cst.ExtractInt(_vIndexLimit.Leaf); _xok {
-				syspromptVal13.IndexLimit = &_x
+				syspromptVal14.IndexLimit = &_x
 				_vIndexLimit.MarkConsumed()
 			}
 		}
 		if _foundSysprompt {
-			d.data.Sysprompt = syspromptVal13
+			d.data.Sysprompt = syspromptVal14
 		}
 	}
 	if _vSessionEntry, _ok := model.Field("session-entry"); _ok && _vSessionEntry.Kind == cst.VTable {
 		_vSessionEntry.MarkSeen()
-		sessionEntryVal14 := &SessionEntry{}
+		sessionEntryVal15 := &SessionEntry{}
 		if _vSessionEntryStart, _ok := _vSessionEntry.Field("start"); _ok && _vSessionEntryStart.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractStringSlice(_vSessionEntryStart.Leaf); _xok {
-				sessionEntryVal14.Start = _x
-				if sessionEntryVal14.Start == nil {
-					sessionEntryVal14.Start = []string{}
+				sessionEntryVal15.Start = _x
+				if sessionEntryVal15.Start == nil {
+					sessionEntryVal15.Start = []string{}
 				}
 				_vSessionEntryStart.MarkConsumed()
 			}
 		}
 		if _vSessionEntryResume, _ok := _vSessionEntry.Field("resume"); _ok && _vSessionEntryResume.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractStringSlice(_vSessionEntryResume.Leaf); _xok {
-				sessionEntryVal14.Resume = _x
-				if sessionEntryVal14.Resume == nil {
-					sessionEntryVal14.Resume = []string{}
+				sessionEntryVal15.Resume = _x
+				if sessionEntryVal15.Resume == nil {
+					sessionEntryVal15.Resume = []string{}
 				}
 				_vSessionEntryResume.MarkConsumed()
 			}
@@ -1155,12 +1179,12 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 		if _vSessionEntryEnv, _ok := _vSessionEntry.Field("env"); _ok && _vSessionEntryEnv.Kind == cst.VTable {
 			_vSessionEntryEnv.MarkSeen()
 			_vSessionEntryEnv.MarkEntriesKnown()
-			sessionEntryVal14.Env = make(map[string]string)
+			sessionEntryVal15.Env = make(map[string]string)
 			for _iSessionEntryEnv := range _vSessionEntryEnv.Fields {
 				_fSessionEntryEnv := &_vSessionEntryEnv.Fields[_iSessionEntryEnv]
 				if _fSessionEntryEnv.Val.Kind == cst.VLeaf {
 					if _s, _sok := cst.ExtractString(_fSessionEntryEnv.Val.Leaf); _sok {
-						sessionEntryVal14.Env[_fSessionEntryEnv.Key] = _s
+						sessionEntryVal15.Env[_fSessionEntryEnv.Key] = _s
 						_fSessionEntryEnv.Val.MarkConsumedString()
 					}
 				}
@@ -1168,33 +1192,33 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 		}
 		if _vSessionEntryLivenessProbe, _ok := _vSessionEntry.Field("liveness-probe"); _ok && _vSessionEntryLivenessProbe.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractStringSlice(_vSessionEntryLivenessProbe.Leaf); _xok {
-				sessionEntryVal14.LivenessProbe = _x
-				if sessionEntryVal14.LivenessProbe == nil {
-					sessionEntryVal14.LivenessProbe = []string{}
+				sessionEntryVal15.LivenessProbe = _x
+				if sessionEntryVal15.LivenessProbe == nil {
+					sessionEntryVal15.LivenessProbe = []string{}
 				}
 				_vSessionEntryLivenessProbe.MarkConsumed()
 			}
 		}
 		if _vSessionEntryTombstoneRetention, _ok := _vSessionEntry.Field("tombstone-retention"); _ok && _vSessionEntryTombstoneRetention.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractString(_vSessionEntryTombstoneRetention.Leaf); _xok {
-				sessionEntryVal14.TombstoneRetention = _x
+				sessionEntryVal15.TombstoneRetention = _x
 				_vSessionEntryTombstoneRetention.MarkConsumedString()
 			}
 		}
 		if _vSessionEntrySpawnEntry, _ok := _vSessionEntry.Field("spawn-entry"); _ok && _vSessionEntrySpawnEntry.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractStringSlice(_vSessionEntrySpawnEntry.Leaf); _xok {
-				sessionEntryVal14.SpawnEntry = _x
-				if sessionEntryVal14.SpawnEntry == nil {
-					sessionEntryVal14.SpawnEntry = []string{}
+				sessionEntryVal15.SpawnEntry = _x
+				if sessionEntryVal15.SpawnEntry == nil {
+					sessionEntryVal15.SpawnEntry = []string{}
 				}
 				_vSessionEntrySpawnEntry.MarkConsumed()
 			}
 		}
 		if _vSessionEntrySpawnWindow, _ok := _vSessionEntry.Field("spawn-window"); _ok && _vSessionEntrySpawnWindow.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractStringSlice(_vSessionEntrySpawnWindow.Leaf); _xok {
-				sessionEntryVal14.SpawnWindow = _x
-				if sessionEntryVal14.SpawnWindow == nil {
-					sessionEntryVal14.SpawnWindow = []string{}
+				sessionEntryVal15.SpawnWindow = _x
+				if sessionEntryVal15.SpawnWindow == nil {
+					sessionEntryVal15.SpawnWindow = []string{}
 				}
 				_vSessionEntrySpawnWindow.MarkConsumed()
 			}
@@ -1202,12 +1226,12 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 		if _vSessionEntryModelFlags, _ok := _vSessionEntry.Field("model-flags"); _ok && _vSessionEntryModelFlags.Kind == cst.VTable {
 			_vSessionEntryModelFlags.MarkSeen()
 			_vSessionEntryModelFlags.MarkEntriesKnown()
-			sessionEntryVal14.ModelFlags = make(map[string]string)
+			sessionEntryVal15.ModelFlags = make(map[string]string)
 			for _iSessionEntryModelFlags := range _vSessionEntryModelFlags.Fields {
 				_fSessionEntryModelFlags := &_vSessionEntryModelFlags.Fields[_iSessionEntryModelFlags]
 				if _fSessionEntryModelFlags.Val.Kind == cst.VLeaf {
 					if _s, _sok := cst.ExtractString(_fSessionEntryModelFlags.Val.Leaf); _sok {
-						sessionEntryVal14.ModelFlags[_fSessionEntryModelFlags.Key] = _s
+						sessionEntryVal15.ModelFlags[_fSessionEntryModelFlags.Key] = _s
 						_fSessionEntryModelFlags.Val.MarkConsumedString()
 					}
 				}
@@ -1216,12 +1240,12 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 		if _vSessionEntryModelIds, _ok := _vSessionEntry.Field("model-ids"); _ok && _vSessionEntryModelIds.Kind == cst.VTable {
 			_vSessionEntryModelIds.MarkSeen()
 			_vSessionEntryModelIds.MarkEntriesKnown()
-			sessionEntryVal14.ModelIDs = make(map[string]string)
+			sessionEntryVal15.ModelIDs = make(map[string]string)
 			for _iSessionEntryModelIds := range _vSessionEntryModelIds.Fields {
 				_fSessionEntryModelIds := &_vSessionEntryModelIds.Fields[_iSessionEntryModelIds]
 				if _fSessionEntryModelIds.Val.Kind == cst.VLeaf {
 					if _s, _sok := cst.ExtractString(_fSessionEntryModelIds.Val.Leaf); _sok {
-						sessionEntryVal14.ModelIDs[_fSessionEntryModelIds.Key] = _s
+						sessionEntryVal15.ModelIDs[_fSessionEntryModelIds.Key] = _s
 						_fSessionEntryModelIds.Val.MarkConsumedString()
 					}
 				}
@@ -1229,47 +1253,47 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 		}
 		if _vSessionEntryDisableAutoMode, _ok := _vSessionEntry.Field("disable-auto-mode"); _ok && _vSessionEntryDisableAutoMode.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractBool(_vSessionEntryDisableAutoMode.Leaf); _xok {
-				sessionEntryVal14.DisableAutoMode = &_x
+				sessionEntryVal15.DisableAutoMode = &_x
 				_vSessionEntryDisableAutoMode.MarkConsumed()
 			}
 		}
 		if _vSessionEntrySpawnProfile, _ok := _vSessionEntry.Field("spawn-profile"); _ok && _vSessionEntrySpawnProfile.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractString(_vSessionEntrySpawnProfile.Leaf); _xok {
-				sessionEntryVal14.SpawnProfile = _x
+				sessionEntryVal15.SpawnProfile = _x
 				_vSessionEntrySpawnProfile.MarkConsumedString()
 			}
 		}
 		if _vSessionEntryRestart, _ok := _vSessionEntry.Field("restart"); _ok && _vSessionEntryRestart.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractStringSlice(_vSessionEntryRestart.Leaf); _xok {
-				sessionEntryVal14.Restart = _x
-				if sessionEntryVal14.Restart == nil {
-					sessionEntryVal14.Restart = []string{}
+				sessionEntryVal15.Restart = _x
+				if sessionEntryVal15.Restart == nil {
+					sessionEntryVal15.Restart = []string{}
 				}
 				_vSessionEntryRestart.MarkConsumed()
 			}
 		}
 		if _vSessionEntryUnattendedPermissionMode, _ok := _vSessionEntry.Field("unattended-permission-mode"); _ok && _vSessionEntryUnattendedPermissionMode.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractString(_vSessionEntryUnattendedPermissionMode.Leaf); _xok {
-				sessionEntryVal14.UnattendedPermissionMode = &_x
+				sessionEntryVal15.UnattendedPermissionMode = &_x
 				_vSessionEntryUnattendedPermissionMode.MarkConsumedString()
 			}
 		}
 		if _vSessionEntryAllowPostureWidening, _ok := _vSessionEntry.Field("allow-posture-widening"); _ok && _vSessionEntryAllowPostureWidening.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractBool(_vSessionEntryAllowPostureWidening.Leaf); _xok {
-				sessionEntryVal14.AllowPostureWidening = &_x
+				sessionEntryVal15.AllowPostureWidening = &_x
 				_vSessionEntryAllowPostureWidening.MarkConsumed()
 			}
 		}
-		d.data.SessionEntry = sessionEntryVal14
+		d.data.SessionEntry = sessionEntryVal15
 	} else {
-		sessionEntryVal14 := &SessionEntry{}
+		sessionEntryVal15 := &SessionEntry{}
 		_foundSessionEntry := false
 		if _vStart, _ok := model.Field("start"); _ok && _vStart.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractStringSlice(_vStart.Leaf); _xok {
-				sessionEntryVal14.Start = _x
-				if sessionEntryVal14.Start == nil {
-					sessionEntryVal14.Start = []string{}
+				sessionEntryVal15.Start = _x
+				if sessionEntryVal15.Start == nil {
+					sessionEntryVal15.Start = []string{}
 				}
 				_vStart.MarkConsumed()
 			}
@@ -1277,9 +1301,9 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 		if _vResume, _ok := model.Field("resume"); _ok && _vResume.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractStringSlice(_vResume.Leaf); _xok {
-				sessionEntryVal14.Resume = _x
-				if sessionEntryVal14.Resume == nil {
-					sessionEntryVal14.Resume = []string{}
+				sessionEntryVal15.Resume = _x
+				if sessionEntryVal15.Resume == nil {
+					sessionEntryVal15.Resume = []string{}
 				}
 				_vResume.MarkConsumed()
 			}
@@ -1287,9 +1311,9 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 		if _vLivenessProbe, _ok := model.Field("liveness-probe"); _ok && _vLivenessProbe.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractStringSlice(_vLivenessProbe.Leaf); _xok {
-				sessionEntryVal14.LivenessProbe = _x
-				if sessionEntryVal14.LivenessProbe == nil {
-					sessionEntryVal14.LivenessProbe = []string{}
+				sessionEntryVal15.LivenessProbe = _x
+				if sessionEntryVal15.LivenessProbe == nil {
+					sessionEntryVal15.LivenessProbe = []string{}
 				}
 				_vLivenessProbe.MarkConsumed()
 			}
@@ -1297,16 +1321,16 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 		if _vTombstoneRetention, _ok := model.Field("tombstone-retention"); _ok && _vTombstoneRetention.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractString(_vTombstoneRetention.Leaf); _xok {
-				sessionEntryVal14.TombstoneRetention = _x
+				sessionEntryVal15.TombstoneRetention = _x
 				_vTombstoneRetention.MarkConsumedString()
 			}
 		}
 		if _vSpawnEntry, _ok := model.Field("spawn-entry"); _ok && _vSpawnEntry.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractStringSlice(_vSpawnEntry.Leaf); _xok {
-				sessionEntryVal14.SpawnEntry = _x
-				if sessionEntryVal14.SpawnEntry == nil {
-					sessionEntryVal14.SpawnEntry = []string{}
+				sessionEntryVal15.SpawnEntry = _x
+				if sessionEntryVal15.SpawnEntry == nil {
+					sessionEntryVal15.SpawnEntry = []string{}
 				}
 				_vSpawnEntry.MarkConsumed()
 			}
@@ -1314,9 +1338,9 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 		if _vSpawnWindow, _ok := model.Field("spawn-window"); _ok && _vSpawnWindow.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractStringSlice(_vSpawnWindow.Leaf); _xok {
-				sessionEntryVal14.SpawnWindow = _x
-				if sessionEntryVal14.SpawnWindow == nil {
-					sessionEntryVal14.SpawnWindow = []string{}
+				sessionEntryVal15.SpawnWindow = _x
+				if sessionEntryVal15.SpawnWindow == nil {
+					sessionEntryVal15.SpawnWindow = []string{}
 				}
 				_vSpawnWindow.MarkConsumed()
 			}
@@ -1324,23 +1348,23 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 		if _vDisableAutoMode, _ok := model.Field("disable-auto-mode"); _ok && _vDisableAutoMode.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractBool(_vDisableAutoMode.Leaf); _xok {
-				sessionEntryVal14.DisableAutoMode = &_x
+				sessionEntryVal15.DisableAutoMode = &_x
 				_vDisableAutoMode.MarkConsumed()
 			}
 		}
 		if _vSpawnProfile, _ok := model.Field("spawn-profile"); _ok && _vSpawnProfile.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractString(_vSpawnProfile.Leaf); _xok {
-				sessionEntryVal14.SpawnProfile = _x
+				sessionEntryVal15.SpawnProfile = _x
 				_vSpawnProfile.MarkConsumedString()
 			}
 		}
 		if _vRestart, _ok := model.Field("restart"); _ok && _vRestart.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractStringSlice(_vRestart.Leaf); _xok {
-				sessionEntryVal14.Restart = _x
-				if sessionEntryVal14.Restart == nil {
-					sessionEntryVal14.Restart = []string{}
+				sessionEntryVal15.Restart = _x
+				if sessionEntryVal15.Restart == nil {
+					sessionEntryVal15.Restart = []string{}
 				}
 				_vRestart.MarkConsumed()
 			}
@@ -1348,19 +1372,19 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 		if _vUnattendedPermissionMode, _ok := model.Field("unattended-permission-mode"); _ok && _vUnattendedPermissionMode.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractString(_vUnattendedPermissionMode.Leaf); _xok {
-				sessionEntryVal14.UnattendedPermissionMode = &_x
+				sessionEntryVal15.UnattendedPermissionMode = &_x
 				_vUnattendedPermissionMode.MarkConsumedString()
 			}
 		}
 		if _vAllowPostureWidening, _ok := model.Field("allow-posture-widening"); _ok && _vAllowPostureWidening.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractBool(_vAllowPostureWidening.Leaf); _xok {
-				sessionEntryVal14.AllowPostureWidening = &_x
+				sessionEntryVal15.AllowPostureWidening = &_x
 				_vAllowPostureWidening.MarkConsumed()
 			}
 		}
 		if _foundSessionEntry {
-			d.data.SessionEntry = sessionEntryVal14
+			d.data.SessionEntry = sessionEntryVal15
 		}
 	}
 	if _vStartCommands, _ok := model.Field("start-commands"); _ok && _vStartCommands.Kind == cst.VArray {
@@ -1971,6 +1995,14 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 		tableNode := cst.EnsureChildTable(d.cstDoc.Root(), d.cstDoc.Root(), "health")
 		if d.data.Health.BusyBound != nil {
 			if err := cst.SetAny(tableNode, "busy-bound", *d.data.Health.BusyBound); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+	}
+	if d.data.HostQueue != nil {
+		tableNode := cst.EnsureChildTable(d.cstDoc.Root(), d.cstDoc.Root(), "host-queue")
+		if d.data.HostQueue.RecordCosts != nil {
+			if err := cst.SetAny(tableNode, "record-costs", *d.data.HostQueue.RecordCosts); err != nil {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
@@ -3282,52 +3314,76 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			data.Health = healthVal12
 		}
 	}
+	if _vHostQueue, _ok := sub.Field("host-queue"); _ok && _vHostQueue.Kind == cst.VTable {
+		_vHostQueue.MarkSeen()
+		hostQueueVal13 := &HostQueue{}
+		if _vHostQueueRecordCosts, _ok := _vHostQueue.Field("record-costs"); _ok && _vHostQueueRecordCosts.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHostQueueRecordCosts.Leaf); _xok {
+				hostQueueVal13.RecordCosts = &_x
+				_vHostQueueRecordCosts.MarkConsumed()
+			}
+		}
+		data.HostQueue = hostQueueVal13
+	} else {
+		hostQueueVal13 := &HostQueue{}
+		_foundHostQueue := false
+		if _vRecordCosts, _ok := sub.Field("record-costs"); _ok && _vRecordCosts.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractBool(_vRecordCosts.Leaf); _xok {
+				hostQueueVal13.RecordCosts = &_x
+				_vRecordCosts.MarkConsumed()
+			}
+		}
+		if _foundHostQueue {
+			data.HostQueue = hostQueueVal13
+		}
+	}
 	if _vSysprompt, _ok := sub.Field("sysprompt"); _ok && _vSysprompt.Kind == cst.VTable {
 		_vSysprompt.MarkSeen()
-		syspromptVal13 := &Sysprompt{}
+		syspromptVal14 := &Sysprompt{}
 		if _vSyspromptDocIndexDirs, _ok := _vSysprompt.Field("doc-index-dirs"); _ok && _vSyspromptDocIndexDirs.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractStringSlice(_vSyspromptDocIndexDirs.Leaf); _xok {
-				syspromptVal13.DocIndexDirs = _x
-				if syspromptVal13.DocIndexDirs == nil {
-					syspromptVal13.DocIndexDirs = []string{}
+				syspromptVal14.DocIndexDirs = _x
+				if syspromptVal14.DocIndexDirs == nil {
+					syspromptVal14.DocIndexDirs = []string{}
 				}
 				_vSyspromptDocIndexDirs.MarkConsumed()
 			}
 		}
 		if _vSyspromptManIndex, _ok := _vSysprompt.Field("man-index"); _ok && _vSyspromptManIndex.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractStringSlice(_vSyspromptManIndex.Leaf); _xok {
-				syspromptVal13.ManIndex = _x
-				if syspromptVal13.ManIndex == nil {
-					syspromptVal13.ManIndex = []string{}
+				syspromptVal14.ManIndex = _x
+				if syspromptVal14.ManIndex == nil {
+					syspromptVal14.ManIndex = []string{}
 				}
 				_vSyspromptManIndex.MarkConsumed()
 			}
 		}
 		if _vSyspromptRepoIndex, _ok := _vSysprompt.Field("repo-index"); _ok && _vSyspromptRepoIndex.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractStringSlice(_vSyspromptRepoIndex.Leaf); _xok {
-				syspromptVal13.RepoIndex = _x
-				if syspromptVal13.RepoIndex == nil {
-					syspromptVal13.RepoIndex = []string{}
+				syspromptVal14.RepoIndex = _x
+				if syspromptVal14.RepoIndex == nil {
+					syspromptVal14.RepoIndex = []string{}
 				}
 				_vSyspromptRepoIndex.MarkConsumed()
 			}
 		}
 		if _vSyspromptIndexLimit, _ok := _vSysprompt.Field("index-limit"); _ok && _vSyspromptIndexLimit.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractInt(_vSyspromptIndexLimit.Leaf); _xok {
-				syspromptVal13.IndexLimit = &_x
+				syspromptVal14.IndexLimit = &_x
 				_vSyspromptIndexLimit.MarkConsumed()
 			}
 		}
-		data.Sysprompt = syspromptVal13
+		data.Sysprompt = syspromptVal14
 	} else {
-		syspromptVal13 := &Sysprompt{}
+		syspromptVal14 := &Sysprompt{}
 		_foundSysprompt := false
 		if _vDocIndexDirs, _ok := sub.Field("doc-index-dirs"); _ok && _vDocIndexDirs.Kind == cst.VLeaf {
 			_foundSysprompt = true
 			if _x, _xok := cst.ExtractStringSlice(_vDocIndexDirs.Leaf); _xok {
-				syspromptVal13.DocIndexDirs = _x
-				if syspromptVal13.DocIndexDirs == nil {
-					syspromptVal13.DocIndexDirs = []string{}
+				syspromptVal14.DocIndexDirs = _x
+				if syspromptVal14.DocIndexDirs == nil {
+					syspromptVal14.DocIndexDirs = []string{}
 				}
 				_vDocIndexDirs.MarkConsumed()
 			}
@@ -3335,9 +3391,9 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 		if _vManIndex, _ok := sub.Field("man-index"); _ok && _vManIndex.Kind == cst.VLeaf {
 			_foundSysprompt = true
 			if _x, _xok := cst.ExtractStringSlice(_vManIndex.Leaf); _xok {
-				syspromptVal13.ManIndex = _x
-				if syspromptVal13.ManIndex == nil {
-					syspromptVal13.ManIndex = []string{}
+				syspromptVal14.ManIndex = _x
+				if syspromptVal14.ManIndex == nil {
+					syspromptVal14.ManIndex = []string{}
 				}
 				_vManIndex.MarkConsumed()
 			}
@@ -3345,9 +3401,9 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 		if _vRepoIndex, _ok := sub.Field("repo-index"); _ok && _vRepoIndex.Kind == cst.VLeaf {
 			_foundSysprompt = true
 			if _x, _xok := cst.ExtractStringSlice(_vRepoIndex.Leaf); _xok {
-				syspromptVal13.RepoIndex = _x
-				if syspromptVal13.RepoIndex == nil {
-					syspromptVal13.RepoIndex = []string{}
+				syspromptVal14.RepoIndex = _x
+				if syspromptVal14.RepoIndex == nil {
+					syspromptVal14.RepoIndex = []string{}
 				}
 				_vRepoIndex.MarkConsumed()
 			}
@@ -3355,31 +3411,31 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 		if _vIndexLimit, _ok := sub.Field("index-limit"); _ok && _vIndexLimit.Kind == cst.VLeaf {
 			_foundSysprompt = true
 			if _x, _xok := cst.ExtractInt(_vIndexLimit.Leaf); _xok {
-				syspromptVal13.IndexLimit = &_x
+				syspromptVal14.IndexLimit = &_x
 				_vIndexLimit.MarkConsumed()
 			}
 		}
 		if _foundSysprompt {
-			data.Sysprompt = syspromptVal13
+			data.Sysprompt = syspromptVal14
 		}
 	}
 	if _vSessionEntry, _ok := sub.Field("session-entry"); _ok && _vSessionEntry.Kind == cst.VTable {
 		_vSessionEntry.MarkSeen()
-		sessionEntryVal14 := &SessionEntry{}
+		sessionEntryVal15 := &SessionEntry{}
 		if _vSessionEntryStart, _ok := _vSessionEntry.Field("start"); _ok && _vSessionEntryStart.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractStringSlice(_vSessionEntryStart.Leaf); _xok {
-				sessionEntryVal14.Start = _x
-				if sessionEntryVal14.Start == nil {
-					sessionEntryVal14.Start = []string{}
+				sessionEntryVal15.Start = _x
+				if sessionEntryVal15.Start == nil {
+					sessionEntryVal15.Start = []string{}
 				}
 				_vSessionEntryStart.MarkConsumed()
 			}
 		}
 		if _vSessionEntryResume, _ok := _vSessionEntry.Field("resume"); _ok && _vSessionEntryResume.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractStringSlice(_vSessionEntryResume.Leaf); _xok {
-				sessionEntryVal14.Resume = _x
-				if sessionEntryVal14.Resume == nil {
-					sessionEntryVal14.Resume = []string{}
+				sessionEntryVal15.Resume = _x
+				if sessionEntryVal15.Resume == nil {
+					sessionEntryVal15.Resume = []string{}
 				}
 				_vSessionEntryResume.MarkConsumed()
 			}
@@ -3387,12 +3443,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 		if _vSessionEntryEnv, _ok := _vSessionEntry.Field("env"); _ok && _vSessionEntryEnv.Kind == cst.VTable {
 			_vSessionEntryEnv.MarkSeen()
 			_vSessionEntryEnv.MarkEntriesKnown()
-			sessionEntryVal14.Env = make(map[string]string)
+			sessionEntryVal15.Env = make(map[string]string)
 			for _iSessionEntryEnv := range _vSessionEntryEnv.Fields {
 				_fSessionEntryEnv := &_vSessionEntryEnv.Fields[_iSessionEntryEnv]
 				if _fSessionEntryEnv.Val.Kind == cst.VLeaf {
 					if _s, _sok := cst.ExtractString(_fSessionEntryEnv.Val.Leaf); _sok {
-						sessionEntryVal14.Env[_fSessionEntryEnv.Key] = _s
+						sessionEntryVal15.Env[_fSessionEntryEnv.Key] = _s
 						_fSessionEntryEnv.Val.MarkConsumedString()
 					}
 				}
@@ -3400,33 +3456,33 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 		}
 		if _vSessionEntryLivenessProbe, _ok := _vSessionEntry.Field("liveness-probe"); _ok && _vSessionEntryLivenessProbe.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractStringSlice(_vSessionEntryLivenessProbe.Leaf); _xok {
-				sessionEntryVal14.LivenessProbe = _x
-				if sessionEntryVal14.LivenessProbe == nil {
-					sessionEntryVal14.LivenessProbe = []string{}
+				sessionEntryVal15.LivenessProbe = _x
+				if sessionEntryVal15.LivenessProbe == nil {
+					sessionEntryVal15.LivenessProbe = []string{}
 				}
 				_vSessionEntryLivenessProbe.MarkConsumed()
 			}
 		}
 		if _vSessionEntryTombstoneRetention, _ok := _vSessionEntry.Field("tombstone-retention"); _ok && _vSessionEntryTombstoneRetention.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractString(_vSessionEntryTombstoneRetention.Leaf); _xok {
-				sessionEntryVal14.TombstoneRetention = _x
+				sessionEntryVal15.TombstoneRetention = _x
 				_vSessionEntryTombstoneRetention.MarkConsumedString()
 			}
 		}
 		if _vSessionEntrySpawnEntry, _ok := _vSessionEntry.Field("spawn-entry"); _ok && _vSessionEntrySpawnEntry.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractStringSlice(_vSessionEntrySpawnEntry.Leaf); _xok {
-				sessionEntryVal14.SpawnEntry = _x
-				if sessionEntryVal14.SpawnEntry == nil {
-					sessionEntryVal14.SpawnEntry = []string{}
+				sessionEntryVal15.SpawnEntry = _x
+				if sessionEntryVal15.SpawnEntry == nil {
+					sessionEntryVal15.SpawnEntry = []string{}
 				}
 				_vSessionEntrySpawnEntry.MarkConsumed()
 			}
 		}
 		if _vSessionEntrySpawnWindow, _ok := _vSessionEntry.Field("spawn-window"); _ok && _vSessionEntrySpawnWindow.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractStringSlice(_vSessionEntrySpawnWindow.Leaf); _xok {
-				sessionEntryVal14.SpawnWindow = _x
-				if sessionEntryVal14.SpawnWindow == nil {
-					sessionEntryVal14.SpawnWindow = []string{}
+				sessionEntryVal15.SpawnWindow = _x
+				if sessionEntryVal15.SpawnWindow == nil {
+					sessionEntryVal15.SpawnWindow = []string{}
 				}
 				_vSessionEntrySpawnWindow.MarkConsumed()
 			}
@@ -3434,12 +3490,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 		if _vSessionEntryModelFlags, _ok := _vSessionEntry.Field("model-flags"); _ok && _vSessionEntryModelFlags.Kind == cst.VTable {
 			_vSessionEntryModelFlags.MarkSeen()
 			_vSessionEntryModelFlags.MarkEntriesKnown()
-			sessionEntryVal14.ModelFlags = make(map[string]string)
+			sessionEntryVal15.ModelFlags = make(map[string]string)
 			for _iSessionEntryModelFlags := range _vSessionEntryModelFlags.Fields {
 				_fSessionEntryModelFlags := &_vSessionEntryModelFlags.Fields[_iSessionEntryModelFlags]
 				if _fSessionEntryModelFlags.Val.Kind == cst.VLeaf {
 					if _s, _sok := cst.ExtractString(_fSessionEntryModelFlags.Val.Leaf); _sok {
-						sessionEntryVal14.ModelFlags[_fSessionEntryModelFlags.Key] = _s
+						sessionEntryVal15.ModelFlags[_fSessionEntryModelFlags.Key] = _s
 						_fSessionEntryModelFlags.Val.MarkConsumedString()
 					}
 				}
@@ -3448,12 +3504,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 		if _vSessionEntryModelIds, _ok := _vSessionEntry.Field("model-ids"); _ok && _vSessionEntryModelIds.Kind == cst.VTable {
 			_vSessionEntryModelIds.MarkSeen()
 			_vSessionEntryModelIds.MarkEntriesKnown()
-			sessionEntryVal14.ModelIDs = make(map[string]string)
+			sessionEntryVal15.ModelIDs = make(map[string]string)
 			for _iSessionEntryModelIds := range _vSessionEntryModelIds.Fields {
 				_fSessionEntryModelIds := &_vSessionEntryModelIds.Fields[_iSessionEntryModelIds]
 				if _fSessionEntryModelIds.Val.Kind == cst.VLeaf {
 					if _s, _sok := cst.ExtractString(_fSessionEntryModelIds.Val.Leaf); _sok {
-						sessionEntryVal14.ModelIDs[_fSessionEntryModelIds.Key] = _s
+						sessionEntryVal15.ModelIDs[_fSessionEntryModelIds.Key] = _s
 						_fSessionEntryModelIds.Val.MarkConsumedString()
 					}
 				}
@@ -3461,47 +3517,47 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 		}
 		if _vSessionEntryDisableAutoMode, _ok := _vSessionEntry.Field("disable-auto-mode"); _ok && _vSessionEntryDisableAutoMode.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractBool(_vSessionEntryDisableAutoMode.Leaf); _xok {
-				sessionEntryVal14.DisableAutoMode = &_x
+				sessionEntryVal15.DisableAutoMode = &_x
 				_vSessionEntryDisableAutoMode.MarkConsumed()
 			}
 		}
 		if _vSessionEntrySpawnProfile, _ok := _vSessionEntry.Field("spawn-profile"); _ok && _vSessionEntrySpawnProfile.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractString(_vSessionEntrySpawnProfile.Leaf); _xok {
-				sessionEntryVal14.SpawnProfile = _x
+				sessionEntryVal15.SpawnProfile = _x
 				_vSessionEntrySpawnProfile.MarkConsumedString()
 			}
 		}
 		if _vSessionEntryRestart, _ok := _vSessionEntry.Field("restart"); _ok && _vSessionEntryRestart.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractStringSlice(_vSessionEntryRestart.Leaf); _xok {
-				sessionEntryVal14.Restart = _x
-				if sessionEntryVal14.Restart == nil {
-					sessionEntryVal14.Restart = []string{}
+				sessionEntryVal15.Restart = _x
+				if sessionEntryVal15.Restart == nil {
+					sessionEntryVal15.Restart = []string{}
 				}
 				_vSessionEntryRestart.MarkConsumed()
 			}
 		}
 		if _vSessionEntryUnattendedPermissionMode, _ok := _vSessionEntry.Field("unattended-permission-mode"); _ok && _vSessionEntryUnattendedPermissionMode.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractString(_vSessionEntryUnattendedPermissionMode.Leaf); _xok {
-				sessionEntryVal14.UnattendedPermissionMode = &_x
+				sessionEntryVal15.UnattendedPermissionMode = &_x
 				_vSessionEntryUnattendedPermissionMode.MarkConsumedString()
 			}
 		}
 		if _vSessionEntryAllowPostureWidening, _ok := _vSessionEntry.Field("allow-posture-widening"); _ok && _vSessionEntryAllowPostureWidening.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractBool(_vSessionEntryAllowPostureWidening.Leaf); _xok {
-				sessionEntryVal14.AllowPostureWidening = &_x
+				sessionEntryVal15.AllowPostureWidening = &_x
 				_vSessionEntryAllowPostureWidening.MarkConsumed()
 			}
 		}
-		data.SessionEntry = sessionEntryVal14
+		data.SessionEntry = sessionEntryVal15
 	} else {
-		sessionEntryVal14 := &SessionEntry{}
+		sessionEntryVal15 := &SessionEntry{}
 		_foundSessionEntry := false
 		if _vStart, _ok := sub.Field("start"); _ok && _vStart.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractStringSlice(_vStart.Leaf); _xok {
-				sessionEntryVal14.Start = _x
-				if sessionEntryVal14.Start == nil {
-					sessionEntryVal14.Start = []string{}
+				sessionEntryVal15.Start = _x
+				if sessionEntryVal15.Start == nil {
+					sessionEntryVal15.Start = []string{}
 				}
 				_vStart.MarkConsumed()
 			}
@@ -3509,9 +3565,9 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 		if _vResume, _ok := sub.Field("resume"); _ok && _vResume.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractStringSlice(_vResume.Leaf); _xok {
-				sessionEntryVal14.Resume = _x
-				if sessionEntryVal14.Resume == nil {
-					sessionEntryVal14.Resume = []string{}
+				sessionEntryVal15.Resume = _x
+				if sessionEntryVal15.Resume == nil {
+					sessionEntryVal15.Resume = []string{}
 				}
 				_vResume.MarkConsumed()
 			}
@@ -3519,9 +3575,9 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 		if _vLivenessProbe, _ok := sub.Field("liveness-probe"); _ok && _vLivenessProbe.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractStringSlice(_vLivenessProbe.Leaf); _xok {
-				sessionEntryVal14.LivenessProbe = _x
-				if sessionEntryVal14.LivenessProbe == nil {
-					sessionEntryVal14.LivenessProbe = []string{}
+				sessionEntryVal15.LivenessProbe = _x
+				if sessionEntryVal15.LivenessProbe == nil {
+					sessionEntryVal15.LivenessProbe = []string{}
 				}
 				_vLivenessProbe.MarkConsumed()
 			}
@@ -3529,16 +3585,16 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 		if _vTombstoneRetention, _ok := sub.Field("tombstone-retention"); _ok && _vTombstoneRetention.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractString(_vTombstoneRetention.Leaf); _xok {
-				sessionEntryVal14.TombstoneRetention = _x
+				sessionEntryVal15.TombstoneRetention = _x
 				_vTombstoneRetention.MarkConsumedString()
 			}
 		}
 		if _vSpawnEntry, _ok := sub.Field("spawn-entry"); _ok && _vSpawnEntry.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractStringSlice(_vSpawnEntry.Leaf); _xok {
-				sessionEntryVal14.SpawnEntry = _x
-				if sessionEntryVal14.SpawnEntry == nil {
-					sessionEntryVal14.SpawnEntry = []string{}
+				sessionEntryVal15.SpawnEntry = _x
+				if sessionEntryVal15.SpawnEntry == nil {
+					sessionEntryVal15.SpawnEntry = []string{}
 				}
 				_vSpawnEntry.MarkConsumed()
 			}
@@ -3546,9 +3602,9 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 		if _vSpawnWindow, _ok := sub.Field("spawn-window"); _ok && _vSpawnWindow.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractStringSlice(_vSpawnWindow.Leaf); _xok {
-				sessionEntryVal14.SpawnWindow = _x
-				if sessionEntryVal14.SpawnWindow == nil {
-					sessionEntryVal14.SpawnWindow = []string{}
+				sessionEntryVal15.SpawnWindow = _x
+				if sessionEntryVal15.SpawnWindow == nil {
+					sessionEntryVal15.SpawnWindow = []string{}
 				}
 				_vSpawnWindow.MarkConsumed()
 			}
@@ -3556,23 +3612,23 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 		if _vDisableAutoMode, _ok := sub.Field("disable-auto-mode"); _ok && _vDisableAutoMode.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractBool(_vDisableAutoMode.Leaf); _xok {
-				sessionEntryVal14.DisableAutoMode = &_x
+				sessionEntryVal15.DisableAutoMode = &_x
 				_vDisableAutoMode.MarkConsumed()
 			}
 		}
 		if _vSpawnProfile, _ok := sub.Field("spawn-profile"); _ok && _vSpawnProfile.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractString(_vSpawnProfile.Leaf); _xok {
-				sessionEntryVal14.SpawnProfile = _x
+				sessionEntryVal15.SpawnProfile = _x
 				_vSpawnProfile.MarkConsumedString()
 			}
 		}
 		if _vRestart, _ok := sub.Field("restart"); _ok && _vRestart.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractStringSlice(_vRestart.Leaf); _xok {
-				sessionEntryVal14.Restart = _x
-				if sessionEntryVal14.Restart == nil {
-					sessionEntryVal14.Restart = []string{}
+				sessionEntryVal15.Restart = _x
+				if sessionEntryVal15.Restart == nil {
+					sessionEntryVal15.Restart = []string{}
 				}
 				_vRestart.MarkConsumed()
 			}
@@ -3580,19 +3636,19 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 		if _vUnattendedPermissionMode, _ok := sub.Field("unattended-permission-mode"); _ok && _vUnattendedPermissionMode.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractString(_vUnattendedPermissionMode.Leaf); _xok {
-				sessionEntryVal14.UnattendedPermissionMode = &_x
+				sessionEntryVal15.UnattendedPermissionMode = &_x
 				_vUnattendedPermissionMode.MarkConsumedString()
 			}
 		}
 		if _vAllowPostureWidening, _ok := sub.Field("allow-posture-widening"); _ok && _vAllowPostureWidening.Kind == cst.VLeaf {
 			_foundSessionEntry = true
 			if _x, _xok := cst.ExtractBool(_vAllowPostureWidening.Leaf); _xok {
-				sessionEntryVal14.AllowPostureWidening = &_x
+				sessionEntryVal15.AllowPostureWidening = &_x
 				_vAllowPostureWidening.MarkConsumed()
 			}
 		}
 		if _foundSessionEntry {
-			data.SessionEntry = sessionEntryVal14
+			data.SessionEntry = sessionEntryVal15
 		}
 	}
 	if _vStartCommands, _ok := sub.Field("start-commands"); _ok && _vStartCommands.Kind == cst.VArray {
@@ -4187,6 +4243,14 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		tableNode := cst.EnsureChildTable(doc.Root(), container, "health")
 		if data.Health.BusyBound != nil {
 			if err := cst.SetAny(tableNode, "busy-bound", *data.Health.BusyBound); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+	}
+	if data.HostQueue != nil {
+		tableNode := cst.EnsureChildTable(doc.Root(), container, "host-queue")
+		if data.HostQueue.RecordCosts != nil {
+			if err := cst.SetAny(tableNode, "record-costs", *data.HostQueue.RecordCosts); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}

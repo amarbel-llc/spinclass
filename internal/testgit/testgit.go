@@ -44,6 +44,10 @@ func SetHermeticEnv() (cleanup func(), err error) {
 	// they would pollute the fleet counters FDR 0029's promotion reads. A test
 	// that asserts on metrics re-enables emission against its own listener.
 	_ = os.Setenv("SPINCLASS_DISABLE_STATSD", "1")
+	// Nor may a fixture gate append to the real gate-cost history under
+	// $XDG_STATE_HOME or $HOME (#424). A test that checks recording re-enables
+	// it with XDG_STATE_HOME pointed at its own temp dir.
+	_ = os.Setenv("SPINCLASS_DISABLE_GATE_COST", "1")
 	// Auto maintenance detaches out of fixture commits and fetches and outlives
 	// the test's TempDir (#423).
 	DisableAutoMaintenance()

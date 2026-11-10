@@ -310,6 +310,10 @@ func TestMetricsLegacyPostMergeHook(t *testing.T) {
 // finish and total with it.
 func TestMetricsPreMergeHookTimed(t *testing.T) {
 	drain := statsdSink(t)
+	// Re-enable the gate-cost series (#424) the hermetic env turns off, with
+	// its history in a temp dir.
+	t.Setenv("SPINCLASS_DISABLE_GATE_COST", "")
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	repoDir, wtPath := setupPostMergeRepo(t, "feature")
 	writeRepoSweatfile(t, repoDir, "[hooks]\npre-merge = \"exit 1\"\n")
 	if _, err := runFinish(t, repoDir, wtPath, "feature", false); err == nil {
@@ -317,7 +321,9 @@ func TestMetricsPreMergeHookTimed(t *testing.T) {
 	}
 	prefix := "spinclass.merge." + filepath.Base(repoDir) + "."
 	assertTimersInclude(t, timerNames(t, drain()),
-		prefix+"pre_merge_hook.failed", prefix+"finish.failed", prefix+"total.failed")
+		prefix+"pre_merge_hook.failed", prefix+"finish.failed", prefix+"total.failed",
+		// The gate's cost series (#424) records it as a merge's gate.
+		"spinclass.gate."+filepath.Base(repoDir)+".merge.wall.failed")
 }
 
 // [metrics] disable-statsd = true silences everything, even with the env

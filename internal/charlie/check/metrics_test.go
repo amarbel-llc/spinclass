@@ -62,7 +62,13 @@ func TestCheckTimesPreMergeHookByOutcome(t *testing.T) {
 				t.Fatalf("Run() error = %v, wantErr %v", err, tc.wantErr)
 			}
 
-			got := drain()
+			// Only the check.* timer; the gate.* cost series (#424) ride alongside.
+			var got []string
+			for _, d := range drain() {
+				if strings.HasPrefix(d, statsd.Prefix+"check.") {
+					got = append(got, d)
+				}
+			}
 			if len(got) != 1 {
 				t.Fatalf("datagrams = %q, want exactly one timer", got)
 			}
