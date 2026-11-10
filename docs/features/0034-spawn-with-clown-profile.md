@@ -623,7 +623,22 @@ which a directory answers by scanning.
 for a flag (working name `--store-is-revocation-source`) by which the caller
 asserts the store is a complete revocation source, so a verdict is not
 `undetermined` merely because no other source was consulted (§4.6, last
-sentence). **RULE** for piggy on whether that assertion belongs to the caller.
+sentence). **Ruled by piggy 2026-11-10:** the caller may assert it, and the
+verdict records the assertion as `revocation_source: "asserted"` (or `"none"`),
+so a reader can tell an avoided `undetermined` came from the caller's claim, not
+from piggy. spinclass passes the flag: the directory is complete for card
+`revocation` acts (`piggy-revocation-v1`), which the operator signs and files
+through a spinclass import command, never an agent. Session-bound grants need
+no act (handle lifetime, above).
+
+**Card anchors.** The anchors file is today's signers file
+(`~/.config/spinclass/profile-grant-signers`, Implementation decision 14), one
+card per host, with a spare card key allowed. Per piggy (RFC 0013 §4.8, as of
+2026-11-10) its `operator` line must list every card namespace, or the verifier
+refuses the card root:
+`namespaces="piggy-certificate-v1,piggy-escalation-v1,piggy-approval-v1,piggy-revocation-v1"`.
+Software acts (`piggy-record-v1`) are signed by a principal's own key and do not
+belong in it.
 
 **Invocation (working names):**
 
@@ -648,6 +663,7 @@ a cross-check. Fields follow §5.3:
   "effective_expiry": "2026-11-10T00:00:00Z",
   "assurance": "piggy:software",
   "chain_start_key": "<markl-id of the card key>",
+  "revocation_source": "asserted",
   "chain": ["<root act digest>", "...", "<this act's digest>"],
   "rights": ["spinclass:grant", "spinclass:profile:manager-builder@<digest>"],
   "layers": [
@@ -1100,7 +1116,9 @@ spinclass's own, to be corrected if piggy or the operator disagrees.
 14. **The card's signers file is explicit and owned.** The allowed-signers file
     that anchors trust must name the principal `operator` exactly (a `*`
     principal does not count) and list `piggy-escalation-v1` in an explicit
-    `namespaces` option (an entry with no `namespaces` permits every namespace),
+    `namespaces` option (an entry with no `namespaces` permits every namespace;
+    once grants are RFC 0013 acts, the line lists all four card namespaces, see
+    "(a) The verdict shape and the store adapter"),
     and it must not be group- or world-writable or owned by another user. A
     shared signers file listing a PIN-less software key as `operator` would
     otherwise make that key a valid grant root.
