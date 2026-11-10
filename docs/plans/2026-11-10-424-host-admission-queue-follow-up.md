@@ -1,6 +1,11 @@
 # Host-wide admission for gates and heavy builds: follow-up (#424, 2026-11-10)
 
-Design note, no code. It extends `2026-11-05-424-host-merge-queue.md`
+**Status:** design note, no code. The operator answered this note's ten
+questions on 2026-11-10 (section 10). Building waits for the operator's
+approval of the design, and tracking (step 0) is the first thing built
+after it.
+
+It extends `2026-11-05-424-host-merge-queue.md`
 ("the 11-05 note") and does not repeat it. The 11-05 note already lays out
 the options and recommends option D: a host ledger of flocked markers, a
 probe of host state as the admission predicate, and a settle window, all
@@ -82,12 +87,12 @@ Changes proposed to the 11-05 predicate (I):
   back to a swap-in-use ceiling read from `/proc/meminfo`. PSI also measures
   CPU contention more directly than `load1`, which counts tasks blocked on
   I/O.
-- **Add an operator hold.** `sc host-queue hold [reason]` /
-  `sc host-queue release` writes or removes a hold file in the ledger
+- **Add an operator hold.** `sc queue-hold [reason]` /
+  `sc queue-release` writes or removes a hold file in the ledger
   directory. While it exists, nothing new is admitted and running gates
   continue. This replaces the coordinator's chat HOLD broadcast with one
   command, and the reason it gives becomes every waiter's wait reason. Who
-  may run it is open question Q4.
+  may run it was ruled in Q4 (section 10).
 - **Thresholds.** Who sets them and where is section 4. The defaults stay
   the practised lines: hold below 4 GB, resume above 6 GB. One more line
   holds at 6 GB with nothing running and per-CPU load over 1: the
@@ -138,7 +143,7 @@ scope, the derivations built for it are not. Two cheap mitigations:
 
 **How it guides scheduling later (I), in order of increasing ambition:**
 
-1. **Report.** `host-load` and `sc host-queue status` show each running gate
+1. **Report.** `host-load` and `sc queue-status` show each running gate
    with its repository's typical cost (p50 and p90 of `mem_peak`, wall time).
    A waiter's message can then say "behind cutting-garden/x, typically
    20 min".
@@ -178,7 +183,8 @@ defaults are guessing at.
     - FDR 0031's exemption predicates are the existing route to "this diff
       needs no full gate" (R: FDR 0031 is proposed and pluggable). Whether a
       docs-only diff may skip `test-nix` is a gate-policy decision for the
-      operator, not this queue's. Recorded as Q6.
+      operator, not this queue's. Ruled in Q6: a separate decision, later, and
+  out of this work.
     - An exempted or trivial gate should not take a slot. Proposed: a gate
       whose hook is empty or exempt takes no marker.
 - **A reserved short lane:** an optional `short-lane = 1` slot that admits
@@ -200,13 +206,14 @@ it lives in each host's own config dir; R). A repository must not relax these.
     max-gates = 1               # the count cap; superseded by budget once weights exist
     memory-floor = "4GiB"
     memory-resume = "6GiB"
-    swap-ceiling = "4GiB"       # or pressure-memory-avg10 = 10.0 where PSI exists
+    pressure-memory-avg10 = 10.0  # PSI, used where /proc/pressure exists (ruled Q2)
+    swap-ceiling = "4GiB"         # the fallback where it does not
     disk-floor = "30GiB"        # #430
     load-threshold = 1.0        # per-CPU load1; host-load's default reads this key
     settle = "60s"
     poll = "10s"
     max-wait = "60m"
-    idle-grace = "15m"          # section 5, "load that is not ours"
+    idle-grace = "10m"          # section 7, "load that is not ours" (ruled Q5)
     budget = ""                 # e.g. "12GiB" once weighted admission is on
     short-lane = 0
     short-lane-max = "5m"
@@ -267,12 +274,12 @@ No polling, and no new waking traffic in the common case:
   `max-wait`, or on timeout, a single wake carries the reason. An unattended
   worker then learns its merge is stuck behind a hold before it times out.
 - **For the coordinator and the operator:** `host-load` gains the `gates`
-  section (11-05 §5), plus `sc host-queue status`, both read from the ledger.
+  section (11-05 §5), plus `sc queue-status`, both read from the ledger.
   - **R:** spinclass does not send chat; chat belongs to clown and troupe
     (FDR 0017; the grant-session-handle tool text says so). So the queue
     never DMs the coordinator.
   - **I:** if the coordinator wants pushes, its own watcher can read
-    `sc host-queue status`.
+    `sc queue-status`.
 
 ## 7. Point 5: failure modes
 
@@ -280,7 +287,7 @@ No polling, and no new waking traffic in the common case:
 |---|---|---|
 | Gate process or serve crashes while holding a slot | The marker's flock is released on process death; the next reader reaps the marker (the `mergelock/queue.go` pattern); the scope stop reaps the gate's children | R (pattern), I (applied here) |
 | Crash while holding the short ledger lock | flock releases on death; the admission decision restarts | R, I |
-| Gate alive but wedged | `[hooks].inactivity-timeout` kills the hook, the marker goes with it; `session-health` reports busy-too-long; `sc host-queue status` shows holder age. Proposed `max-hold` (trusted): past it, the holder is reported as overdue in every waiter's reason, but it is **not** evicted, since evicting a live nix build only adds load | R (timeout), I (rest) |
+| Gate alive but wedged | `[hooks].inactivity-timeout` kills the hook, the marker goes with it; `session-health` reports busy-too-long; `sc queue-status` shows holder age. Proposed `max-hold` (trusted): past it, the holder is reported as overdue in every waiter's reason, but it is **not** evicted, since evicting a live nix build only adds load | R (timeout), I (rest) |
 | A long, healthy holder (23 min cutting-garden gate) | Waiters wait; reasons name it with its typical cost (section 2) | O (duration), I |
 | Load that is not ours (cascade, leak) never clears | `max-wait` times out with the reason, and the attestation is released, not consumed (11-05 Q4). Proposed `idle-grace`: if no spinclass marker is held and the probe has failed continuously for `idle-grace`, admit one gate with a warning, since waiting cannot help. Off when a hold file exists | I |
 | Session closed while its merge is queued | U: whether `sc close` cancels the session's running job before teardown, or kills the session's `spinclass serve`. Grep of `internal/delta/close` finds no job cancel (R, weak). If serve dies, the marker frees itself (R pattern). If serve survives with a waiting job, the gate could later run for a removed session; proposed: close cancels the session's queued or running job first, and the waiter re-checks that its session still exists at admission | U, I |
@@ -309,11 +316,12 @@ No polling, and no new waking traffic in the common case:
   which are the right tool for confined workers anyway.
 - **An MCP tool that leases a slot for a confined worker's recipe:** not
   proposed. A lease that spans tool calls is a resource a worker could hold
-  forever; open question Q7.
-- **`sc host-queue hold`/`release` are always-ask for an agent caller, or
-  CLI-only (I).** They change every session's timing, which puts them in the
-  same class as `close-child-session force` (R: `perms.AlwaysAsk`). Q4 asks
-  whether the coordinator may hold them.
+  forever. Ruled in Q7 (section 10): not now; recorded as the v2 direction.
+- **`sc queue-hold`/`queue-release` are always-ask for an agent caller
+  (ruled in Q4; the end state is a blessed profile right).** They change
+  every session's timing, which puts them in the same class as
+  `close-child-session force` (R: `perms.AlwaysAsk`). The coordinator's
+  session may call them, always-ask.
 
 ## 9. Prior art for moxy and clown (operator note)
 
@@ -421,48 +429,66 @@ output already captured. Then 2, once 1 shows the history is worth it.
 
 A trusted `[attestation]` key would list dynamic prerequisites, derived from
 history by a command the operator runs, not recomputed silently at merge
-time. Q10 asks how dynamic "dynamic" should be.
+time. **Superseded by Q10 (section 10):** the prerequisites are computed at
+merge time, with no operator-run refresh command. The target is for just-us
+to emit per-recipe stats-me calls, so the log parse becomes a stopgap.
 
 **Relation to moxy and clown (I).** The same per-node history is what a
 heavy-tool queue in moxy or clown would want for its own scheduling: one
 history format, keyed by repository, recipe and kind. It belongs in the
 ledger contract of section 9.
 
-## 10. Open questions for the operator (new ones; the 11-05 list still stands)
+## 10. Operator rulings on this note's questions (2026-11-10)
 
-- **Q1.** Ship tracking (section 2) first, as its own merge, before any
-  admission? Recommended.
-- **Q2.** Memory term: PSI where available, falling back to a swap ceiling
-  (recommended), or `MemAvailable` alone as in 11-05?
-- **Q3.** Ledger under `$XDG_RUNTIME_DIR`, with history and holds under
-  `$XDG_STATE_HOME` (recommended)?
-- **Q4.** `sc host-queue hold`: operator CLI only, or callable by the
-  coordinator's session too, as an always-ask tool?
-- **Q5.** `idle-grace` (admit one gate when only outside load is blocking):
-  wanted, and what default?
-- **Q6.** Should a docs-only diff get a lighter gate through an FDR 0031
-  exemption? That is the real fix for "short docs gates". It is a gate-policy
-  ruling, separate from the queue.
-- **Q7.** Confined workers' heavy recipes: bounded by #387 unit budgets only
-  (recommended), or a slot-leasing tool?
-- **Q8.** The ledger contract: spinclass RFC first, offered to
-  ringmaster, moxy and clown (recommended), or hand the design to ringmaster
-  now?
-- **Q9.** Record type: the 11-05 note's Q11 leaned to a new FDR. This note
-  adds an RFC for the on-disk contract, if Q8 is accepted.
+Asked by circus/eager-holly/clarabell with AskUserQuestion and relayed
+verbatim (chat-a8342673). The 11-05 note's own §7 questions are not covered
+by this relay. They stay open unless a ruling below settles one: Q9 here
+settles 11-05 Q11 (the record type).
 
-- **Q10.** v2 per-node history (section 9b): start with log parsing,
-  alongside the tracking step (recommended)?
-  - Is the tree walk (spinclass running each recipe node itself) acceptable
-    in principle?
-  - Should dynamic `nothing-but-the-truth` prerequisites be refreshed by an
-    operator-run command, or computed at merge time?
+- **Q1. Tracking first: yes.** Tracking ships as its own merge, before any
+  admission. It is the first thing built after the operator approves the
+  design, not before.
+- **Q2. Memory term:** PSI where available, with a swap-ceiling fallback.
+- **Q3. Ledger location:** the live ledger under `$XDG_RUNTIME_DIR`; history
+  and holds under `$XDG_STATE_HOME`.
+- **Q4. Hold:** `sc queue-hold` is callable by the coordinator's session too,
+  as an always-ask tool.
+  - **End state (recorded, not built):** the right to hold is a blessed
+    profile right (FDR 0034, the operator's "ajour / profile privilege"), not
+    a hard-coded list of callers.
+- **Q5. `idle-grace`:** wanted, default 10 minutes.
+- **Q6. Lighter gate for docs-only diffs (FDR 0031 exemption):** a separate
+  decision, later. It is kept out of this work.
+- **Q7. Confined workers' heavy recipes:** #387 unit budgets only for now.
+  - **v2 direction (recorded):** a dynamic slot-leasing tool will likely be
+    needed eventually.
+- **Q8. Ledger contract:** a spinclass RFC first, offered to ringmaster, moxy
+  and clown.
+- **Q9. Records:** a new FDR for the feature, plus an RFC for the on-disk
+  ledger contract.
+- **Q10. v2 per-node history:**
+  - Start with failing-node log parsing, alongside the tracking step.
+  - **Target (recorded):** just-us emits clean stats-me (statsd) calls per
+    recipe, so spinclass need not parse logs. That is a request to just-us,
+    to be raised with just-us's session or filed through the coordinator;
+    not done from here.
+  - The tree walk (spinclass running each recipe node) is acceptable in
+    principle.
+  - Dynamic `nothing-but-the-truth` prerequisites are computed at merge
+    time, with no operator-run refresh command. Section 9b's sentence
+    proposing an operator-run command is superseded.
+- **Naming (separate operator instruction):** the commands are `sc queue-*`
+  (`sc queue-status`, `sc queue-hold`, `sc queue-release`), not
+  `sc host-queue …`. The note is renamed throughout. The ruling does not name
+  the sweatfile section, so `[host-queue]` stands until the operator says
+  otherwise.
 
 ## 11. Revised sequence (I)
 
-0. Tracking only: per-gate cgroup accounting through the scope wrapper,
-   nix-daemon deltas, `history.ndjson`, statsd series, `record-costs`. No
-   timing change.
+0. Tracking only, as its own merge (ruled Q1): per-gate cgroup accounting
+   through the scope wrapper, nix-daemon deltas, `history.ndjson`, statsd
+   series, `record-costs`, and the failing-node log parse (ruled Q10). No
+   timing change. It is built only after the operator approves the design.
 1. to 6. As 11-05 §8 (probe, ledger, wait in `runHookPhase`, `[host-queue]`,
    `host-load` gates, metrics and docs), with the PSI or swap term, the hold
    file and repository-by-repository ordering added.
