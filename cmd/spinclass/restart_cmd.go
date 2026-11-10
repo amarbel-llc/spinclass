@@ -18,7 +18,9 @@ import (
 	"code.linenisgreat.com/spinclass/internal/alfa/job"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
+	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
+	"code.linenisgreat.com/spinclass/internal/echo/shop"
 	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 	"code.linenisgreat.com/spinclass/internal/servelog"
 )
@@ -644,6 +646,19 @@ func runRestartPreflight(target string) (restartVerdict, error) {
 			return refuse(err.Error())
 		}
 	}
+	// The restart is approved. clown relaunches without `sc resume`, so the
+	// frozen per-commit hook is re-frozen here from the landed default branch,
+	// as a resume would (spinclass#475). A failure only warns: the hook never
+	// blocks a relaunch.
+	frozen, refreshed := st.FrozenHook, false
+	if home, hErr := os.UserHomeDir(); hErr == nil {
+		if h, lErr := sweatfileio.LoadHierarchy(home, st.RepoPath); lErr == nil {
+			frozen = refreezeFrozenHook(h.Merged, worktree.ResolvedPath{AbsPath: st.WorktreePath, RepoPath: st.RepoPath}, st.FrozenHook, os.Stderr)
+			refreshed = true
+		} else {
+			fmt.Fprintf(os.Stderr, "spinclass: pre-commit hook not re-frozen: reading the sweatfile hierarchy: %v\n", lErr)
+		}
+	}
 	// Consume and mark restarting under the session lock, re-checking the
 	// closing mark there: a close that began since the read above wins, and one
 	// that begins after this is refused while the mark is recent (#419).
@@ -659,6 +674,9 @@ func runRestartPreflight(target string) (restartVerdict, error) {
 				return errors.New("the session's pinned entry vanished while its posture was being recorded")
 			}
 			cur.Entry.Env = spawn.SetUnattendedMarker(cur.Entry.Env, req.Posture == restartPostureUnattended)
+		}
+		if refreshed {
+			cur.FrozenHook = frozen
 		}
 		cur.RestartingPosture = req.Posture
 		restartingAt = time.Now().UTC()
@@ -687,6 +705,10 @@ func runRestartPreflight(target string) (restartVerdict, error) {
 		Posture: req.Posture,
 	}, nil
 }
+
+// refreezeFrozenHook is shop.RefreshFrozenHook, a seam so a preflight test
+// needs no devShell to resolve a formatter from.
+var refreezeFrozenHook = shop.RefreshFrozenHook
 
 const (
 	// maxRestartRearms is how many times one verdict may be re-armed: the

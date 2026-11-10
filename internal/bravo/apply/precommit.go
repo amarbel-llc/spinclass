@@ -290,7 +290,7 @@ func dispatcherScript(originalDir, hooksDir, lockHash string, rec session.Frozen
 // installed: what still runs, and the way out.
 func driftMessage(rec session.FrozenHook) string {
 	if rec.Frozen && rec.BaseSha != "" {
-		return fmt.Sprintf("spinclass pre-commit: flake.lock changed since this hook was frozen from %s at %s; the frozen formatter still runs (sc resume, or restart-this-session under clown, re-freezes it from the landed default branch).", rec.BaseLabel, shortSha(rec.BaseSha))
+		return fmt.Sprintf("spinclass pre-commit: flake.lock changed since this hook was frozen from %s at %s; the frozen formatter still runs (sc resume, or any restart (restart-this-session, restart-child-session, sc restart), re-freezes it from the landed default branch).", rec.BaseLabel, shortSha(rec.BaseSha))
 	}
 	if rec.Frozen {
 		return "spinclass pre-commit: flake.lock changed since this hook was installed; the formatter is the absolute path the sweatfile names, so nothing is re-resolved."

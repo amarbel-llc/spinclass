@@ -59,7 +59,11 @@ records how each open question was resolved).
   provenance follows the session (trusted layers plus the landed base), as the
   rest of FDR 0035's required view does.
 - **Re-provisioning.** The frozen path is refreshed on `sc resume` and on a
-  restart (FDR 0037), which re-run the install from the then-landed base. A
+  restart (FDR 0037), which re-run the install from the then-landed base. For a
+  restart this happens in the restart preflight, once the restart is approved,
+  because clown relaunches without `sc resume`. Before spinclass#475
+  (2026-11-10) a restart did not re-freeze, although this record and the hook's
+  drift message said it did. A
   stale or broken hook is fixed by the session's holder, never by the session.
   Sessions created before the change keep their old dispatcher until resumed;
   every resume rewrites it, so no sweep is needed.

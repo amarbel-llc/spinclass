@@ -335,13 +335,20 @@ func PinEntry(sf sweatfile.Sweatfile) *session.PinnedEntry {
 	}
 }
 
-// refreshFrozenHook is the resume half of the frozen per-commit hook (FDR 0019,
-// spinclass#459): the session's holder re-provisions the hook from the
-// now-landed default branch when the recorded base has moved, when the hook was
-// never frozen, or when there is no record (a session from before freezing).
-// Failures warn on stderr and keep the previous record: the hook never blocks
-// a resume. nil when the hook is inactive (which uninstalls it).
+// refreshFrozenHook is RefreshFrozenHook for a resume, reporting on stderr.
 func refreshFrozenHook(sf sweatfile.Sweatfile, rp worktree.ResolvedPath, prev *session.FrozenHook) *session.FrozenHook {
+	return RefreshFrozenHook(sf, rp, prev, os.Stderr)
+}
+
+// RefreshFrozenHook re-provisions the frozen per-commit hook (FDR 0019,
+// spinclass#459) from the now-landed default branch when the recorded base
+// has moved, when the hook was never frozen, or when there is no record (a
+// session from before freezing). Both relaunch paths run it: a resume
+// (shop.Attach) and a restart (the restart preflight, spinclass#475, since
+// clown relaunches without `sc resume`). Failures are reported on w and keep
+// the previous record: the hook never blocks a relaunch. It returns nil when
+// the hook is inactive (which uninstalls it).
+func RefreshFrozenHook(sf sweatfile.Sweatfile, rp worktree.ResolvedPath, prev *session.FrozenHook, w io.Writer) *session.FrozenHook {
 	if !sf.MergeWith(sweatfile.GetDefault()).PreCommitActive() {
 		return nil
 	}
@@ -351,15 +358,15 @@ func refreshFrozenHook(sf sweatfile.Sweatfile, rp worktree.ResolvedPath, prev *s
 	}
 	rec, err := apply.ReinstallPreCommitHook(sf, rp.AbsPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "spinclass: pre-commit hook not re-frozen (%s): %v\n", reason, err)
+		fmt.Fprintf(w, "spinclass: pre-commit hook not re-frozen (%s): %v\n", reason, err)
 		return prev
 	}
 	switch {
 	case rec == nil:
 	case rec.Frozen && rec.BaseSha != "":
-		fmt.Fprintf(os.Stderr, "spinclass: pre-commit hook re-frozen from %s at %.7s (%s)\n", rec.BaseLabel, rec.BaseSha, reason)
+		fmt.Fprintf(w, "spinclass: pre-commit hook re-frozen from %s at %.7s (%s)\n", rec.BaseLabel, rec.BaseSha, reason)
 	case !rec.Frozen:
-		fmt.Fprintf(os.Stderr, "spinclass: pre-commit hook re-installed unfrozen; the formatter resolves from PATH at commit time: %s\n", rec.Reason)
+		fmt.Fprintf(w, "spinclass: pre-commit hook re-installed unfrozen; the formatter resolves from PATH at commit time: %s\n", rec.Reason)
 	}
 	return rec
 }
