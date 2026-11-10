@@ -1,5 +1,10 @@
 # A host-wide gate admission queue (design exploration for #424, 2026-11-05)
 
+> **2026-11-10:** the operator answered §7's questions. The rulings are
+> recorded in `2026-11-10-424-host-admission-queue-follow-up.md` §10b. That
+> note also renames the commands to `sc queue-*`; the section stays
+> `[host-queue]`.
+
 Design note, no code. The operator asked (through the coordinator, comment on
 spinclass#424 of 2026-11-05) for a host-specific merge queue to be explored
 when there is spare bandwidth: one queue per host across repositories, admitting

@@ -1,7 +1,7 @@
 # Repair must not rewrite generated files: the spinclass piece (2026-11-10)
 
-**Status:** proposal, no code. Q1-Q3 were ruled on 2026-11-10 (§6); Q4 is
-re-asked from the stage table in §1b; Q5 is pending. This is spinclass's part of ringmaster's
+**Status:** proposal, no code. Q1-Q5 were ruled on 2026-11-10 (§6). Scope
+approval and design approval are pending. This is spinclass's part of ringmaster's
 `docs/plans/2026-11-10-repair-and-generated-files.md` ("the ringmaster
 note"), which ringmaster/cool-cypress wrote on 2026-11-10 (ea77433 /
 f9758a9). The ringmaster note §4 assigns spinclass the "detection" row; this
@@ -220,8 +220,8 @@ Relayed by circus/eager-holly/clarabell from AskUserQuestion
     integrate with ajour and profiles.
   - The Go marker in v1 is a stopgap for that declaration, not a pattern to
     extend.
-- **Q4. Repair as the only hook: undecided.** The operator asked for the
-  stage description (§1b) and a re-ask from it:
+- **Q4. Repair as the only hook: ruled (chat-e345c8ad): (a) stand aside
+  now, with (c) as the end state.** The re-ask it was decided from:
   - **Re-asked Q4.** In §1b's terms, a repo whose only hook is repair runs
     no stage 3(a); its only generator, if any, is a codegen lane inside
     repair itself (stages 3b and 4). Options:
@@ -237,9 +237,18 @@ Relayed by circus/eager-holly/clarabell from AskUserQuestion
 
     Recommended: (a) now and (c) as the end state, which matches the Q3
     direction.
-- **Q5. Record type: still to be asked.** The draft assumes the
-  recommendation, a short amendment to FDR 0018 (REPAIR) plus a line in the
-  regenerate-phase plan, until told otherwise.
+- **Q5. Record type: ruled:** an amendment to FDR 0018 (REPAIR), plus a line
+  in the regenerate-phase plan.
+- **Fleet audit (operator, same relay):** an issue for a fleet-wide audit
+  and convergence to the conformist profiles (consistent, self-healing). The
+  coordinator files it on circus.
+- **Not ruled in this relay:**
+  - approval of the guard's scope (both repair callers, so every merge with
+    `[hooks].repair`);
+  - whether to file the landing-rebase gap (§1b, stage 6) as an issue;
+  - design approval.
+
+  No code until the operator approves.
 
 ## 7. Sources
 

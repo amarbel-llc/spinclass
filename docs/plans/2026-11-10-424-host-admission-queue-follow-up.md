@@ -479,9 +479,43 @@ settles 11-05 Q11 (the record type).
     proposing an operator-run command is superseded.
 - **Naming (separate operator instruction):** the commands are `sc queue-*`
   (`sc queue-status`, `sc queue-hold`, `sc queue-release`), not
-  `sc host-queue …`. The note is renamed throughout. The ruling does not name
-  the sweatfile section, so `[host-queue]` stands until the operator says
-  otherwise.
+  `sc host-queue …`. The note is renamed throughout. The sweatfile section
+  stays `[host-queue]`, trusted layers only (ruled with 11-05 Q8, §10b).
+
+## 10b. Operator rulings on the 11-05 note's §7 questions (2026-11-10)
+
+Relayed by circus/eager-holly/clarabell from AskUserQuestion
+(chat-e345c8ad).
+
+- **11-05 Q1, scope:** merges **and** checks, with no operator escape (no
+  `--no-host-queue`).
+- **11-05 Q2, defaults:** `max-gates = 1`; memory holds below 4 GB and
+  resumes above 6 GB.
+  - Not ruled: `load1` versus `load5`, and the 60 s settle. The draft keeps
+    `load1` and 60 s.
+- **11-05 Q3, weights:** a count cap first; weights come from history once
+  tracking data exists (consistent with Q1 here).
+- **11-05 Q4, timeout:** fail with the reason and keep the attestation.
+- **11-05 Q5, post-merge targets:** out of the queue in v1.
+  - **v2 direction (recorded):** circus needs them in the queue, because its
+    post-merge targets are heavy evaluations. That is specified per
+    repository in sweatfiles.
+- **11-05 Q6, `host-slot` wrapper:** later (v2).
+- **11-05 Q7, load-induced failure:** annotate only to start.
+  - **v2 direction (recorded):** retry logic.
+  - **Required:** the queue emits stats-me (statsd) calls for visibility, as
+    well as having the `sc queue-*` tools.
+- **11-05 Q8, section name:** `[host-queue]`, trusted layers only. The
+  commands stay `sc queue-*`.
+- **11-05 Q9, #430:** fold the disk floor in: one probe, one wait reason, one
+  wake shape.
+- **11-05 Q10, `sc list`:** unchanged; point at the job log and `host-load`.
+- **11-05 Q11, record type:** a new FDR, plus the ledger RFC (Q9 here).
+- **just-us per-recipe stats-me emission (Q10 here):** the coordinator files
+  it on linenisgreat/just-us through the issue-filer; no just-us session is
+  contacted from here.
+- **Design approval:** not given yet. No code until the operator approves the
+  design.
 
 ## 11. Revised sequence (I)
 
