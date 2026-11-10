@@ -153,7 +153,13 @@ not from reading clown).
    the `--` requirement itself does not apply, since nothing is spliced into
    the pinned argv) or when the session has no pinned entry (`Entry == nil`,
    a session from before pinning: there is nothing to rewrite, and a resume
-   would read the sweatfile live). Clown's own request-time gate (`--naked`,
+   would read the sweatfile live). **Amended 2026-11-10 (spinclass#472,
+   operator ruling):** a legacy session is now pinned on its first `sc
+   resume`, with exactly the entry that resume launches (the global, ancestor
+   and main-checkout layers, never the worktree's own sweatfile). The refusal
+   for `Entry == nil` stays, and its advice to resume once is now true. This
+   reverses the earlier choice in `shop.Attach` never to pin after the fact.
+   Clown's own request-time gate (`--naked`,
    forwarded `--settings`) is reached through the hand-off's exit status, and
    a failing hand-off already clears the request (`:176-184`).
 6. **The hand-off carries the posture as a placeholder.** `{posture}` joins
@@ -272,7 +278,9 @@ For the operator:
 - The `sc list` column: wanted now, or wait for clown's `unattended` bool to be
   visible elsewhere?
 - Unpinned (legacy) sessions: refuse (decision 5), or pin the entry at the
-  request from the current trusted layers?
+  request from the current trusted layers? **Resolved 2026-11-10
+  (spinclass#472):** pin on the first resume, with the entry that resume
+  launches; the request still refuses an unpinned session.
 
 For clown (rare-walnut):
 

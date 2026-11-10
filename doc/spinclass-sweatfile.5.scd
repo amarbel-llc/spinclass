@@ -1510,8 +1510,9 @@ detected after detach, and how long tombstones are retained.
 (*sc start*, *sc run*, *sc spawn*, *sc resurrect*), and pinned on the
 session's state. *sc resume* replays the pinned values instead of reloading
 any sweatfile, so editing a sweatfile does not change how an existing session
-resumes. A session created before the pin has none; *sc resume* then uses the
-global, parent and repository layers and says so on stderr. Because *env* is
+resumes. A session created before the pin has none. Its first *sc resume*
+uses the global, parent and repository layers, says so on stderr, and pins
+the values it launched with, so every later resume replays them. Because *env* is
 recorded in the session state, keep secrets out of it where the state file is
 readable by others.
 

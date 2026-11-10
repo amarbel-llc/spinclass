@@ -439,11 +439,15 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 			st.Entrypoint = sexec.Entrypoint
 		}
 		// A fresh worktree pins the entry its operator-controlled layers resolve
-		// to; a resume carries the existing pin forward (below), so a legacy
-		// session stays unpinned rather than being blessed after the fact.
-		if !existed {
-			st.Entry = PinEntry(sf)
-		}
+		// to, and a resume carries the existing pin forward (below). A legacy
+		// session with no pin is pinned on its first resume, with sf: the same
+		// global, ancestor and main-checkout layers the resume launches from
+		// (cmd entryFor), never the worktree's own sweatfile. This reverses the
+		// earlier "never blessed after the fact" choice (spinclass#472, operator
+		// ruling 2026-11-10): the pin records what is actually running, so a
+		// posture restart has an entry to rewrite and later resumes stop reading
+		// the layers live.
+		st.Entry = PinEntry(sf)
 		// Attach owns the lifecycle fields (PID, state, entrypoint,
 		// timestamps) but not these: FDR 0006 lineage and a buffered
 		// pre-merge attestation must survive a resume (#147).
@@ -462,7 +466,7 @@ func Attach(w io.Writer, exec executor.Executor, rp worktree.ResolvedPath, sf sw
 			st.ProfileNarrowing = existing.ProfileNarrowing
 			st.HelloSentAt = existing.HelloSentAt
 			st.PreMergeAttestation = existing.PreMergeAttestation
-			if existed {
+			if existed && existing.Entry != nil {
 				st.Entry = existing.Entry
 			}
 			// Carry the recorded setup fingerprint forward by default. A

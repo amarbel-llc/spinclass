@@ -106,9 +106,11 @@ func TestAttachKeepsPinnedEntryOnResume(t *testing.T) {
 	}
 }
 
-// A legacy session (no pin) stays unpinned: re-pinning on resume would bless
-// whatever the layers say now as if it had been resolved at creation.
-func TestAttachLeavesLegacySessionUnpinned(t *testing.T) {
+// A legacy session (no pin) is pinned on its first resume, with exactly the
+// entry that resume launches (spinclass#472, operator ruling 2026-11-10): the
+// same layers a creation pin reads, never the worktree's own sweatfile. Later
+// resumes replay the pin instead of reading the layers live.
+func TestAttachPinsLegacySessionOnFirstResume(t *testing.T) {
 	repo := pinRepo(t)
 	wt := filepath.Join(repo, worktree.WorktreesDir, "legacy")
 	cmd := exec.Command("git", "worktree", "add", "-b", "legacy", wt)
@@ -131,7 +133,19 @@ func TestAttachLeavesLegacySessionUnpinned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Entry != nil {
-		t.Errorf("Entry = %+v, want nil for a legacy session", st.Entry)
+	if st.Entry == nil || len(st.Entry.Start) != 1 || st.Entry.Start[0] != "/bin/x" {
+		t.Fatalf("Entry = %+v, want the entry this resume launched pinned (start [/bin/x])", st.Entry)
+	}
+
+	// A second resume replays the pin: the layers handed to it are ignored.
+	if err := Attach(&bytes.Buffer{}, &mockExecutor{}, rp, entrySweatfile("/bin/y", "", nil), "", false, true, false, false, false); err != nil {
+		t.Fatalf("second Attach: %v", err)
+	}
+	st, err = session.Read(repo, "legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Entry == nil || len(st.Entry.Start) != 1 || st.Entry.Start[0] != "/bin/x" {
+		t.Errorf("Entry after a second resume = %+v, want the first pin (start [/bin/x]) kept", st.Entry)
 	}
 }
