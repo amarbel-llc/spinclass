@@ -163,6 +163,12 @@ and in the result stream:
 - **Implicit-session merges are out of scope.** `MergeImplicit` (FDR 0014)
   does not queue — its race surfaces as a push rejection on origin, a
   different failure shape.
+- **A landing rebase re-runs neither the regenerate phase nor REPAIR**, so a
+  generated file can be stale against what landed meanwhile. The gate's drift
+  checks refuse it. Since spinclass#470 (2026-11-10), such a gate failure
+  carries a hint naming the generated files (Go marker) either side changed,
+  and saying to re-merge. Re-running the generators in the landing worktree
+  waits on generators declaring their inputs and outputs.
 - **Host-local only.** flock does not serialize across hosts (and is not
   NFS-safe); a cross-host origin race still fails at push, the legible
   pre-existing error.

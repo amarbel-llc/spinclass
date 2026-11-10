@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ import (
 
 	"code.linenisgreat.com/spinclass/internal/0/clown"
 	"code.linenisgreat.com/spinclass/internal/0/gatecost"
+	"code.linenisgreat.com/spinclass/internal/0/generated"
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/0/mergelock"
 	"code.linenisgreat.com/spinclass/internal/0/statsd"
@@ -738,6 +740,11 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 	mx.observePreMergeHook(ctx, sessionH.Merged, hookStart, hookErr)
 	blobLinks = append(blobLinks, hookLinks...)
 	if hookErr != nil {
+		if rebased {
+			hint := staleGeneratedHint(repoPath, pinnedSha, target.Ref(), landingSha, defaultBranch)
+			ts.Ok("landing hint " + branch + ": " + hint)
+			hookErr = fmt.Errorf("%w; %s", hookErr, hint)
+		}
 		return blobLinks, hookErr
 	}
 
@@ -1842,6 +1849,55 @@ func runRepairPhase(ctx context.Context, ts *crap.TestStream, hierarchy sweatfil
 	emitKeptGenerated(ts, kept)
 	ts.Ok("repair " + branch + " (amended " + shortSha(sha1) + ")")
 	return nil
+}
+
+// staleGeneratedHintCap bounds how many generated files the hint names.
+const staleGeneratedHintCap = 10
+
+// staleGeneratedHint explains a gate failure after a landing rebase
+// (spinclass#470). The landing rebase re-runs neither the regenerate phase nor
+// REPAIR, so a generated file made against the old tip can be stale against
+// what landed meanwhile. It names the generated files (Go's generated-code
+// marker, read at landingSha) that either side changed since they diverged.
+// That is a heuristic: a generated file is stale when its sources changed, which
+// spinclass cannot see. It says to re-merge: PrepareMerge rebases the session
+// worktree and re-runs both phases there.
+func staleGeneratedHint(repoPath, pinnedSha, targetRef, landingSha, defaultBranch string) string {
+	const lead = "the landing rebased onto moved "
+	advice := "; re-merge, which rebases the session worktree and re-runs the regenerate and REPAIR phases there"
+	base, err := git.Run(repoPath, "merge-base", pinnedSha, targetRef)
+	base = strings.TrimSpace(base)
+	if err != nil || base == "" {
+		return lead + defaultBranch + " and the gate failed" + advice
+	}
+	changed := map[string]bool{}
+	for _, tip := range []string{pinnedSha, targetRef} {
+		out, dErr := git.Run(repoPath, "diff", "--name-only", "--no-renames", base, tip)
+		if dErr != nil {
+			continue
+		}
+		for _, p := range strings.Split(out, "\n") {
+			if p = strings.TrimSpace(p); p != "" {
+				changed[p] = true
+			}
+		}
+	}
+	var stale []string
+	for p := range changed {
+		if data, found, rErr := git.FileAtRev(repoPath, landingSha, p); rErr == nil && found && generated.HasGoMarker(data) {
+			stale = append(stale, p)
+		}
+	}
+	if len(stale) == 0 {
+		return lead + defaultBranch + " and the gate failed; no generated file changed on either side" + advice
+	}
+	slices.Sort(stale)
+	more := ""
+	if len(stale) > staleGeneratedHintCap {
+		more = fmt.Sprintf(" and %d more", len(stale)-staleGeneratedHintCap)
+		stale = stale[:staleGeneratedHintCap]
+	}
+	return lead + defaultBranch + "; generated files that may be stale: " + strings.Join(stale, ", ") + more + advice
 }
 
 // emitKeptGenerated reports the generated files repairguard put back, if any,
