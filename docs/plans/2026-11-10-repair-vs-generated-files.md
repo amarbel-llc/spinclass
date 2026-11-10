@@ -1,6 +1,7 @@
 # Repair must not rewrite generated files: the spinclass piece (2026-11-10)
 
-**Status:** proposal, no code. This is spinclass's part of ringmaster's
+**Status:** proposal, no code. Q1-Q3 were ruled on 2026-11-10 (§6); Q4 is
+re-asked from the stage table in §1b; Q5 is pending. This is spinclass's part of ringmaster's
 `docs/plans/2026-11-10-repair-and-generated-files.md` ("the ringmaster
 note"), which ringmaster/cool-cypress wrote on 2026-11-10 (ea77433 /
 f9758a9). The ringmaster note §4 assigns spinclass the "detection" row; this
@@ -41,6 +42,50 @@ inferred or proposed, **U** unverified.
 - **R, `grep` of spinclass:** nothing in spinclass recognizes
   generated-code markers today. The matches are in the codec files that
   carry the marker themselves, plus one in `basebranch`.
+
+## 1b. The stages, and what each may overwrite (R unless marked)
+
+The operator asked for a clear description of how the stages build on each
+other toward a stable result. Every stage that writes is listed, in the
+order a merge runs them. The order of 2-5 is `PrepareMergeWith`
+(`merge.go:306-331`); 6-8 is `FinishMerge` (`merge.go:602-792`).
+
+| # | Stage | When | Command | Role | Sees | May overwrite |
+|---|---|---|---|---|---|---|
+| 1 | Per-commit hook (FDR 0019, #459) | every `git commit` in the session | frozen `conformist-pre-commit`: the formatter resolved from the **landed** default branch's devShell at session start | format, plus codegen lanes the config triggers on staged files | staged files | the staged files it formats or regenerates, restaged into that commit |
+| 2 | Rebase | each merge, `PrepareMerge` | `git rebase` onto the landing target | integrate | branch commits | nothing by content (conflicts refuse) |
+| 3 | Regenerate phase (2026-11-09 plan) | only when `flake.lock` changed against the landed branch | (a) `[hooks].pre-commit` in staged mode over the whole branch diff; (b) `[hooks].repair` over the whole tree; rounds (a)→(b) until one changes nothing, at most 3 | (a) **generates** under the new lock; (b) **formats** | (a) branch diff staged; (b) whole tree | any tracked file, as one separate regenerate commit |
+| 4 | REPAIR (FDR 0018) | every merge with `[hooks].repair` active | `[hooks].repair`, e.g. `conformist --commit --amend --exit-zero-on-fix` | **formats and fixes** (a conformist repair also runs codegen lanes) | whole tree | any tracked file, amended into HEAD |
+| 5 | Pin | | `HEAD` becomes the pinned sha | freeze what is verified | | nothing |
+| 6 | Landing rebase (FDR 0022, 0029) | only when the default branch moved during the queue wait | replay the pinned commits in a `.land-*` worktree | integrate again | pinned commits | nothing by content; **no stage 3 or 4 re-runs here** |
+| 7 | VERIFY gate (FDR 0013) | each merge, under the repo lock | `[hooks].pre-merge` (`just`) on the landing sha, in a detached build worktree | **verify**, including drift checks such as ringmaster's `facade-drift` | the landing tree | nothing that lands (I: edits in the build worktree are not committed) |
+| 8 | ff-only, push, post-merge | | | land, deploy | | nothing in the tree |
+
+**How they are meant to compose (I, from the table):**
+
+- Stage 1 keeps each commit formatted, as the landed branch formats.
+- Stage 3 re-derives generated files when the toolchain itself changed.
+- Stage 4 is the last writer before the pin, so whatever it leaves is what
+  stage 7 verifies.
+- Stage 7 writes nothing. It only says whether the result of 1-4 is
+  stable: regenerating or reformatting would leave it byte-identical.
+
+**The bug in these terms (I):**
+
+- Stage 3(b) and stage 4 are both formatters, and both run after the last
+  generator, 3(a).
+- Stage 7's drift check compares generated files against the **generator's**
+  bytes.
+- So any formatter that disagrees with the generator makes 1-4 converge on
+  bytes stage 7 rejects. The guard in §3 makes generator output immune to
+  the formatting stages (3b and 4), which leaves the generator as the last
+  writer of generated files.
+
+**A gap the table shows, not in this proposal's scope (I):** stage 6 replays
+pinned commits onto a moved tip without re-running 3 or 4. A generated file
+made against the old tip can then be stale against sources that landed in
+between. Stage 7 catches that as drift, a refusal rather than a bad landing.
+Recorded here; the plain fix is a re-merge.
 
 ## 2. The invariant spinclass enforces (I)
 
@@ -111,10 +156,9 @@ generated files".
   back. This is the ringmaster note §4's "detection" behaviour, for a repo
   that wants the conflict to stop the merge.
 - `allow`: today's behaviour.
-- **Layers:** `protect` and `fail` only narrow what repair may do, so the key
-  is read from every layer (I: the narrowing-only stance used elsewhere,
-  e.g. FDR 0035). Whether `allow` should be accepted from a repo layer is
-  Q2.
+- **Layers (ruled in Q2, §6):** `protect` and `fail` only narrow what
+  repair may do, so they are read from every layer. `allow` is honoured
+  only from trusted layers (the global layer and layers above the repo).
 
 **Self-healing.** With the guard on, ringmaster's stopgap `repair = ""` can
 be dropped, so ringmaster inherits the fleet repair again.
@@ -134,8 +178,9 @@ be dropped, so ringmaster inherits the fleet repair again.
 - It does not decide what the gate's drift checks compare against. That is
   option B's question for ringmaster and purse-first.
 - It does not cover generated files without the Go marker (other languages,
-  or files marked only by path). An optional
-  `[hooks].generated-paths = [...]` glob list could extend it later; Q3.
+  or files marked only by path). Ruled in Q3: the later answer is that
+  generators declare their outputs, integrated with ajour and profiles, not
+  a detection glob list.
 
 ## 5. Tests (I, for when it is approved)
 
@@ -151,20 +196,50 @@ be dropped, so ringmaster inherits the fleet repair again.
 - **Marker detection:** marker before the package clause, marker after it
   (not generated), a wrong case, a `/* */` comment.
 
-## 6. Open questions for the operator
+## 6. Operator rulings (2026-11-10) and the remaining questions
 
-- **Q1.** Default `protect` (recommended: self-healing, fleet-wide, no
-  per-repo edit), or `fail` (the ringmaster note's "detection" only)?
-- **Q2.** May a repository layer set `allow` (widening its repair back to
-  today's behaviour), or is `allow` trusted-layers-only?
-- **Q3.** v1 recognizes the Go marker only. Is a `generated-paths` glob list
-  wanted for non-Go generated files now, or later?
-- **Q4.** When repair is the only hook, should the guard still protect
-  generated files (that would break repair-driven codegen), or stand aside as
-  proposed?
-- **Q5.** Record type: a short amendment to FDR 0018 (REPAIR) plus a line in
-  the regenerate-phase plan, recommended since it changes both repair
-  callers; or a new FDR?
+Relayed by circus/eager-holly/clarabell from AskUserQuestion
+(chat-1d0e3b70).
+
+- **Q1. Default: `protect`.**
+  - **End state (recorded, not built):** ajour prevents this structurally.
+    The profile and stencil layer forbids a formatter from touching
+    generated files, so no runtime guard is needed. The §3 guard is the
+    runtime stand-in until then.
+- **Q2. `allow`: trusted layers only, for now.** The operator expects to
+  need to relax the guard temporarily to unblock a repair, so that escape
+  hatch stays at operator level.
+  - **End state (recorded):** a repository layer may set it, through
+    profiles and ajour.
+  - This changes §3: `protect` and `fail` are read from every layer;
+    `allow` is honoured only from the global layer or layers above the
+    repository, and ignored with a `sc validate` warning elsewhere.
+- **Q3. `generated-paths`: later, and not as detection.**
+  - **Direction (recorded):** generators (dagnabit, tommy, purse-first)
+    declare the files they generate, declaratively, and those declarations
+    integrate with ajour and profiles.
+  - The Go marker in v1 is a stopgap for that declaration, not a pattern to
+    extend.
+- **Q4. Repair as the only hook: undecided.** The operator asked for the
+  stage description (§1b) and a re-ask from it:
+  - **Re-asked Q4.** In §1b's terms, a repo whose only hook is repair runs
+    no stage 3(a); its only generator, if any, is a codegen lane inside
+    repair itself (stages 3b and 4). Options:
+    - **(a) Stand aside (proposed).** Repair's edits to generated files are
+      kept, since repair may be their generator. Cost: such a repo is not
+      protected from its own formatter.
+    - **(b) Always protect.** Repair can never change a marked file, so a
+      repair-driven codegen lane can never update its output. Cost: that
+      repo's generated files go stale until the generator runs elsewhere.
+    - **(c) Protect, except files a lane inside repair declares it
+      generates.** This is exact, but it needs the Q3 declarations, which
+      do not exist yet. Until they do, it falls back to (a).
+
+    Recommended: (a) now and (c) as the end state, which matches the Q3
+    direction.
+- **Q5. Record type: still to be asked.** The draft assumes the
+  recommendation, a short amendment to FDR 0018 (REPAIR) plus a line in the
+  regenerate-phase plan, until told otherwise.
 
 ## 7. Sources
 
