@@ -46,12 +46,12 @@ func fastConfig() hostqueue.Config {
 	return cfg
 }
 
-func admit(t *testing.T, ctx context.Context) (func(), error, string, string) {
+func admit(t *testing.T, ctx context.Context) (release func(), out, activity string, err error) {
 	t.Helper()
-	var out, activity bytes.Buffer
-	rep := crap.NewReporter(&out, crap.ReporterOptions{})
-	release, err := admitHostSlot(ctx, rep, sweatfile.Hierarchy{}, t.TempDir(), &activity)
-	return release, err, out.String(), activity.String()
+	var outBuf, activityBuf bytes.Buffer
+	rep := crap.NewReporter(&outBuf, crap.ReporterOptions{})
+	release, err = admitHostSlot(ctx, rep, sweatfile.Hierarchy{}, t.TempDir(), &activityBuf)
+	return release, outBuf.String(), activityBuf.String(), err
 }
 
 // With no admission policy (no [host-queue] section) nothing is read and
@@ -63,7 +63,7 @@ func TestHostQueueOffTouchesNothing(t *testing.T) {
 		t.Fatal("the ledger was opened with the host queue off")
 		return hostqueue.Ledger{}, nil
 	}
-	release, err, out, activity := admit(t, context.Background())
+	release, out, activity, err := admit(t, context.Background())
 	if err != nil || out != "" || activity != "" {
 		t.Fatalf("= (%v, %q, %q), want nothing", err, out, activity)
 	}
@@ -72,7 +72,7 @@ func TestHostQueueOffTouchesNothing(t *testing.T) {
 
 func TestHostQueueAdmitsAtOnceAndReleases(t *testing.T) {
 	ledger := stubHostQueue(t, fastConfig(), func() (hostload.Snapshot, error) { return healthySnap(), nil })
-	release, err, out, _ := admit(t, context.Background())
+	release, out, _, err := admit(t, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestHostQueueWaitsForLoadThenAdmits(t *testing.T) {
 		}
 		return s, nil
 	})
-	release, err, out, activity := admit(t, context.Background())
+	release, out, activity, err := admit(t, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestHostQueueWaitsForARunningGate(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		other()
 	}()
-	release, err, out, activity := admit(t, context.Background())
+	release, out, activity, err := admit(t, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestHostQueueWaiterIsVisibleWhileWaiting(t *testing.T) {
 		w, _ := ledger.Waiting(false)
 		seen <- w
 	}()
-	_, err, _, _ := admit(t, context.Background())
+	_, _, _, err := admit(t, context.Background())
 	if !errors.Is(err, ErrHostQueueTimeout) {
 		t.Fatalf("err = %v", err)
 	}
@@ -180,7 +180,7 @@ func TestHostQueueTimesOutWithTheReason(t *testing.T) {
 		s.MemAvailable = 1 << 30
 		return s, nil
 	})
-	_, err, out, _ := admit(t, context.Background())
+	_, out, _, err := admit(t, context.Background())
 	if !errors.Is(err, ErrHostQueueTimeout) || !strings.Contains(err.Error(), "memory") {
 		t.Fatalf("err = %v, want a host queue timeout naming memory", err)
 	}
@@ -197,7 +197,7 @@ func TestHostQueueWaitIsCancellable(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	_, err, _, _ := admit(t, ctx)
+	_, _, _, err := admit(t, ctx)
 	if err == nil || !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "cancelled") {
 		t.Fatalf("err = %v, want a cancellation", err)
 	}
@@ -220,7 +220,7 @@ func TestHostQueueEmitsMetrics(t *testing.T) {
 		}
 		return s, nil
 	})
-	release, err, _, _ := admit(t, context.Background())
+	release, _, _, err := admit(t, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestHostQueueEmitsMetrics(t *testing.T) {
 // wedge every gate.
 func TestHostQueueProbeFailureAdmitsWithAWarning(t *testing.T) {
 	stubHostQueue(t, fastConfig(), func() (hostload.Snapshot, error) { return hostload.Snapshot{}, errors.New("no /proc") })
-	release, err, out, _ := admit(t, context.Background())
+	release, out, _, err := admit(t, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestHostQueueHoldIsTheWaitReason(t *testing.T) {
 	if err := ledger.SetHold("relock in progress"); err != nil {
 		t.Fatal(err)
 	}
-	_, err, _, activity := admit(t, context.Background())
+	_, _, activity, err := admit(t, context.Background())
 	if !errors.Is(err, ErrHostQueueTimeout) || !strings.Contains(err.Error(), "relock in progress") {
 		t.Fatalf("err = %v, want a timeout naming the hold", err)
 	}
