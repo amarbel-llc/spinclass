@@ -132,6 +132,33 @@ func TestAlwaysAskSpawnCarveOutForConfined(t *testing.T) {
 	}
 }
 
+// An unattended spawn is the second carve-out (spinclass#476): narrowing needs
+// no prompt. The seam's verdict is consulted after `unconfined`, which still
+// asks, and a missing seam or a "no" keeps the prompt.
+func TestAlwaysAskSpawnCarveOutForUnattended(t *testing.T) {
+	prevC, prevU := SpawnConfined, SpawnUnattended
+	t.Cleanup(func() { SpawnConfined, SpawnUnattended = prevC, prevU })
+	SpawnConfined = func(map[string]any, string) bool { return false }
+
+	SpawnUnattended = func(in map[string]any, _ string) bool { return in["repo"] == "dont-ask-repo" }
+	if reason, ask := AlwaysAsk(spawnSessionTool, map[string]any{"repo": "dont-ask-repo"}, "/driver"); ask || reason != "" {
+		t.Errorf("an unattended spawn should not ask, got ask=%v reason=%q", ask, reason)
+	}
+	if _, ask := AlwaysAsk(spawnSessionTool, map[string]any{"repo": "other"}, "/driver"); !ask {
+		t.Error("a spawn that is neither confined nor unattended must ask")
+	}
+	if _, ask := AlwaysAsk(spawnSessionTool, map[string]any{"repo": "dont-ask-repo", "unconfined": true}, "/driver"); !ask {
+		t.Error("unconfined=true must ask even when the worker would be unattended")
+	}
+	if _, ask := AlwaysAsk(spawnSessionTool, map[string]any{"repo": "dont-ask-repo", "unconfined": "x"}, "/driver"); !ask {
+		t.Error("an unparseable unconfined must ask")
+	}
+	SpawnUnattended = nil
+	if _, ask := AlwaysAsk(spawnSessionTool, map[string]any{"repo": "dont-ask-repo"}, "/driver"); !ask {
+		t.Error("with no seam installed spawn must ask")
+	}
+}
+
 // A spawn that opts out of confinement ALWAYS asks, even when the seam would
 // call it confined, until a session can be blessed to run unconfined children
 // (stage 2, not built). Any doubt about `unconfined` or `confined` asks too:

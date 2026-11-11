@@ -26,6 +26,13 @@ const (
 // confined", i.e. spawn always asks.
 var SpawnConfined func(toolInput map[string]any, cwd string) bool
 
+// SpawnUnattended reports whether a spawn-session invocation would launch an
+// unconfined worker in dontAsk, driven by a session that is not itself
+// unattended (spinclass#476). Narrowing needs no prompt; the driver bound keeps
+// a dontAsk worker's own spawns prompting, so fan-out stays bounded. Installed
+// by the CLI layer like SpawnConfined; nil means never.
+var SpawnUnattended func(toolInput map[string]any, cwd string) bool
+
 // AlwaysAsk reports whether an invocation must prompt the human, and why. It is
 // the single source of truth for spinclass's always-ask floor, consulted by BOTH
 // enforcement surfaces: the PreToolUse hook turns a true into an `ask` decision
@@ -62,6 +69,9 @@ func AlwaysAsk(toolName string, toolInput map[string]any, cwd string) (string, b
 			return "spawning an ATTENDED worker widens its permissions (out of dontAsk); confirm each invocation", true
 		}
 		if SpawnConfined != nil && SpawnConfined(toolInput, cwd) {
+			return "", false
+		}
+		if SpawnUnattended != nil && SpawnUnattended(toolInput, cwd) {
 			return "", false
 		}
 		// Spawning launches a full harness-booted agent that immediately

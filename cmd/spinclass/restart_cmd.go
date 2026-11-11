@@ -195,7 +195,7 @@ func postureObstacle(st *session.State, posture string) string {
 		if len(entry) == 0 {
 			entry = st.Entry.Start
 		}
-		if err := spawn.PinnedEntrySupportsDontAsk(entry); err != nil {
+		if err := spawn.PinnedEntryExcludesDontAsk(entry); err != nil {
 			return fmt.Sprintf("%s cannot run unattended: %v", st.Key(), err)
 		}
 		return ""

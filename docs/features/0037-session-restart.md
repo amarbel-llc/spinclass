@@ -228,7 +228,21 @@ permission posture and out of it, keeping its principal.
 - **Confined sessions are refused** for every posture (the posture is the
   confinement profile's), as is a session with no pinned entry or whose pinned
   resume entry is not a claude harness (no `--` separator, or another
-  provider): the marker would mean nothing.
+  provider): the marker would mean nothing. Refusal is on a DETERMINED
+  mismatch only: `sc start`, `sc resume` and a spawn all pin the interactive
+  `[session-entry]` start (a shell), whose harness is not knowable from the
+  entry, so an entry with no `--` separator is not refused by spinclass
+  (spinclass#476, `spawn.PinnedEntryExcludesDontAsk`). The frontend gates the
+  posture against the harness it actually runs, at request time and before the
+  stop, and a restart already requires a clown-bound principal; a direct
+  `clown restart --posture` (no spinclass request recorded) gets a `none`
+  preflight verdict and does nothing, by design.
+- **Open (spinclass#476):** after an `attended` restart claude still reported
+  dontAsk. Spinclass's verdict and clown's relaunch (marker removed, dontAsk
+  flags dropped, no `defaultMode` setting) are consistent; the suspect is
+  `claude --resume` restoring the session's recorded permission mode, which
+  would need an explicit mode flag on clown's attended relaunch. Unverified;
+  routed to clown.
 - **Both halves of the relaunch.** A clown restart relaunches from the
   frontend's own argv and env and never re-reads the pinned entry, so the
   preflight does two things in the one locked `session.Update` that stamps

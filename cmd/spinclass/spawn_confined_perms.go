@@ -12,6 +12,36 @@ import (
 // process that evaluates the floor (the PreToolUse hook, perms check, serve).
 func init() {
 	perms.SpawnConfined = spawnWillConfine
+	perms.SpawnUnattended = spawnWillBeUnattended
+}
+
+// spawnWillBeUnattended is the narrowing carve-out (spinclass#476): a spawn
+// whose unconfined worker will run in dontAsk, started by a driver that is not
+// itself unattended. Every argument must parse cleanly and `confined` must not
+// be set (a confined spawn is judged by spawnWillConfine); any doubt is false
+// and keeps the prompt.
+func spawnWillBeUnattended(toolInput map[string]any, cwd string) bool {
+	if spawn.DriverUnattended() {
+		return false
+	}
+	repo := ""
+	if v, ok := toolInput["repo"]; ok && v != nil {
+		s, isString := v.(string)
+		if !isString {
+			return false
+		}
+		repo = s
+	}
+	if v, ok := toolInput["confined"]; ok && v != nil {
+		if _, isBool := v.(bool); !isBool {
+			return false
+		}
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	return spawn.WillBeUnattended(home, cwd, repo)
 }
 
 // spawnWillConfine reads the `repo` and `confined` arguments of a spawn-session

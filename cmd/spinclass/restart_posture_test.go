@@ -267,12 +267,11 @@ func TestRestartPostureRefusesAConfinedSession(t *testing.T) {
 	}
 }
 
-// A session with no pinned entry, or one whose entry is no claude harness,
-// cannot be restarted into a posture.
+// A session with no pinned entry, or one whose entry names a harness that is
+// not claude, cannot be restarted into a posture.
 func TestRestartPostureRefusesAnEntryItCannotRecordIn(t *testing.T) {
 	cases := map[string]*session.PinnedEntry{
-		"no pinned entry":    nil,
-		"a bare shell entry": {Start: []string{"/bin/sh"}},
+		"no pinned entry": nil,
 		"a non-claude provider": {
 			Start:  []string{"/bin/sh"},
 			Resume: []string{"clown", "--provider", "codex", "--", "--resume", "{principal}"},
@@ -288,6 +287,39 @@ func TestRestartPostureRefusesAnEntryItCannotRecordIn(t *testing.T) {
 			}
 			if readKid(t, repoPath).RestartRequest != nil || len(*calls) != 0 {
 				t.Error("nothing may be recorded or run")
+			}
+		})
+	}
+}
+
+// `sc start`, `sc resume` and a spawn all pin the interactive [session-entry]
+// start (a shell such as fish), which later runs clown: the entry never names
+// the harness (spinclass#476). Narrowing such a session to unattended must be
+// accepted by the request and the preflight, since the frontend gates the
+// posture against the harness it actually runs; the pinned env carries the
+// marker for the next `sc resume`. Both a start-only and a start+resume shell
+// pin are the shape.
+func TestRestartNarrowsASessionPinnedWithAShellEntry(t *testing.T) {
+	for name, entry := range map[string]*session.PinnedEntry{
+		"start only":     {Start: []string{"/nix/store/x-fish-4.9.3/bin/fish"}},
+		"start + resume": {Start: []string{"/bin/fish"}, Resume: []string{"/bin/fish", "-c", "clown --resume"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			calls := stubRestartHandoff(t, "", nil)
+			repoPath, _ := restartPostureChild(t, entry, false)
+			text, isErr := callRestartChild(t, `{"child":"worker/kid","posture":"unattended"}`)
+			if isErr {
+				t.Fatalf("refused: %s", text)
+			}
+			if len(*calls) != 1 {
+				t.Fatalf("hand-offs = %d, want 1", len(*calls))
+			}
+			v, err := runRestartPreflight("worker/kid")
+			if err != nil || v.Verdict != "restart" || v.Posture != "unattended" {
+				t.Fatalf("preflight = %+v, %v", v, err)
+			}
+			if st := readKid(t, repoPath); st.Entry.Env["CLOWN_UNATTENDED"] != "1" {
+				t.Errorf("pinned env = %v, want the marker recorded", st.Entry.Env)
 			}
 		})
 	}

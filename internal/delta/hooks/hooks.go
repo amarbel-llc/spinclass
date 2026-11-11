@@ -889,10 +889,11 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 
 	switch input.ToolName {
 	case spawnSessionToolName:
-		// Only a confined spawn gets past the floor above (#382), so reaching
-		// here IS the confined case: the unit bounds the worker, and a
-		// prompt on a confined spawn guards nothing.
-		return writeAllow(w, "confined spawn: the worker runs in a bounded agent unit (FDR 0035)")
+		// Only a confined spawn (#382) or an unattended one (#476) gets past the
+		// floor above, so reaching here is one of those: the unit bounds a
+		// confined worker, and a dontAsk worker cannot widen what its allow rules
+		// already permit; a prompt on either guards nothing.
+		return writeAllow(w, "confined or unattended spawn: the worker is bounded by its unit (FDR 0035) or cannot prompt (dontAsk)")
 	case listToolName, updateDescriptionToolName, validateToolName,
 		sessionJobCancelToolName, closeChildSessionToolName:
 		// Benign, session-scoped spinclass tools: list and validate are

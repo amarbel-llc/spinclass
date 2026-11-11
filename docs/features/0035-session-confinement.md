@@ -1184,7 +1184,16 @@ invocation:
    `spawn.WillConfine`; any doubt (unresolvable target, unreadable hierarchy,
    non-string `repo`, non-bool `confined`, a request the launch would refuse
    such as `confined` with the feature off) keeps the ask.
-3. Everything else asks.
+3. Otherwise a spawn whose unconfined worker will run in dontAsk is allowed
+   when the calling session is itself attended (spinclass#476, operator
+   ruling 2026-11-11): narrowing is not a widening. `perms.SpawnUnattended` is
+   the seam the CLI installs as `spawn.WillBeUnattended` (trusted
+   `[session-entry].unattended-permission-mode = "dontAsk"` and a spawn-entry
+   that takes the splice) bounded by `spawn.DriverUnattended` (an unattended
+   driver's spawns still ask, so fan-out stays bounded). Same fail-closed
+   reading of `repo` and `confined` as 2. The rule is small and
+   config-free on purpose: ajour plus profiles are expected to replace it.
+4. Everything else asks.
 
 **The CLI opt-out (2026-10-22).** That floor lives on the PreToolUse path, so
 it covers only the `spawn-session` MCP tool. `sc spawn --unconfined` never meets

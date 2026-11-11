@@ -58,15 +58,18 @@ func HasUnattendedMarker(env map[string]string) bool {
 	return env[unattendedEnvVar] == "1"
 }
 
-// PinnedEntrySupportsDontAsk reports whether a session whose pinned entry is
-// argv can run in claude's dontAsk mode: it must name a harness (carry the "--"
-// provider-args separator, which a bare shell entry lacks) whose provider is
-// claude. Nothing is spliced into a pinned entry; the answer says only whether
-// the CLOWN_UNATTENDED marker means anything for it.
-func PinnedEntrySupportsDontAsk(argv []string) error {
+// PinnedEntryExcludesDontAsk reports why a session whose pinned entry is argv
+// cannot run in claude's dontAsk mode, or nil. An entry that names a harness
+// (carries the "--" provider-args separator) must name claude. An entry with no
+// separator is a shell, as `sc start` and `sc resume` pin: the harness it runs
+// is not knowable from the entry, so it is not excluded here; the frontend
+// (clown) gates the posture against the harness it actually runs, at request
+// time and again before the stop, and a restart requires a clown-bound
+// principal (spinclass#476). Nothing is spliced into a pinned entry.
+func PinnedEntryExcludesDontAsk(argv []string) error {
 	sep := slices.Index(argv, "--")
 	if sep == -1 {
-		return fmt.Errorf("its pinned entry %v has no \"--\" provider-args separator, so it is not a harness entry", argv)
+		return nil
 	}
 	provider, err := effectiveProvider(argv[:sep])
 	if err != nil {
