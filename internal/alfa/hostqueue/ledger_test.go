@@ -76,6 +76,32 @@ func TestLedgerDeadMarkerIsReapedOnlyWhenReaping(t *testing.T) {
 	}
 }
 
+// A waiter is listed apart from the gates, its reason can be updated, and it
+// takes no slot.
+func TestLedgerWaiter(t *testing.T) {
+	l := testLedger(t)
+	update, leave, err := l.Wait(Marker{Session: "r/w", WaitingSince: t0, Reason: "load"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live, _ := l.Live(true); len(live) != 0 {
+		t.Fatalf("a waiter counted as a gate: %+v", live)
+	}
+	update("memory")
+	v, err := l.View(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Waiting) != 1 || v.Waiting[0].Session != "r/w" || v.Waiting[0].Reason != "memory" {
+		t.Fatalf("waiting = %+v", v.Waiting)
+	}
+	leave()
+	leave()
+	if w, _ := l.Waiting(true); len(w) != 0 {
+		t.Fatalf("after leave: %+v", w)
+	}
+}
+
 func TestLedgerLiveOnAMissingDirIsEmpty(t *testing.T) {
 	if live, err := testLedger(t).Live(true); err != nil || len(live) != 0 {
 		t.Fatalf("= (%v, %v), want empty", live, err)

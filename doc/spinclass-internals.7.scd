@@ -64,6 +64,39 @@ now, default later, fallback eventually removed). The real scope path is
 dogfooded, not CI. Signal and SIGTERM-versus-SIGKILL details:
 *docs/plans/2026-10-04-188-sync-hook-cancellation.md* (spinclass#188).
 
+# HOST ADMISSION QUEUE (spinclass#424, FDR 0038)
+
+Off unless a trusted *[host-queue]* sets *enable = true*
+(*spinclass-sweatfile*(5)). *runHookPhase* calls *admitHostSlot* before madder
+or the hook starts, so every merge, check and guarded gate funnels through one
+admission. The queue has no daemon. The live ledger is
+*$XDG\_RUNTIME\_DIR/spinclass/host-queue/*:
+
+- *ledger.lock*, the flock held for one probe and one decision;
+- *gate-\*.json*, one per admitted gate, flock-held by the gate's serve process
+  for the gate's life;
+- *wait-\*.json*, one per waiter, flock-held, carrying its last reason.
+
+A marker is locked before it is renamed into view. A reader that can take a
+marker's lock knows its holder is dead; under the ledger lock it removes the
+marker, and a read-only reader (*host-load*) only skips it.
+
+The operator's hold is *$XDG\_STATE\_HOME/spinclass/host-queue/hold*. Its
+contents are the reason every waiter is given.
+
+The predicate, *hostqueue.Decide*, is pure. It reads the ledger view, a
+*hostload.Probe* snapshot (load, *MemAvailable*, PSI or swap, and store free
+bytes; no per-process sample), the config and the waiter's state (memory
+hysteresis and the idle-grace clock).
+
+A ledger or probe that cannot be read admits with a warning: the queue is a
+scheduling aid, never a single point of failure. Statsd series:
+
+- *host.queue_wait.<ok|timeout|cancelled>*;
+- *host.wait_reason.<reason>*;
+- *host.gates_running*;
+- *host.queue_grace*.
+
 # sc exec
 
 *sc exec [--session <t>] [-- <util> ...]* (*internal/charlie/sessionexec*) runs a util

@@ -21,6 +21,9 @@ type Marker struct {
 	Kind       string    `json:"kind"` // merge, check, guarded
 	AdmittedAt time.Time `json:"admitted_at"`
 	PID        int       `json:"pid"`
+	// A waiter's marker (Wait) carries when it began waiting and why it waits.
+	WaitingSince time.Time `json:"waiting_since"`
+	Reason       string    `json:"reason,omitempty"`
 }
 
 // Ledger is the on-disk queue state. Dir holds the live markers and the ledger
@@ -35,6 +38,7 @@ type Ledger struct {
 const (
 	lockName     = "ledger.lock"
 	markerPrefix = "gate-"
+	waiterPrefix = "wait-"
 	markerSuffix = ".json"
 )
 
@@ -82,17 +86,45 @@ func (l Ledger) Lock() (unlock func(), err error) {
 // locked before it becomes visible under its final name, so a reader never
 // sees an unlocked live marker. Call it under Lock.
 func (l Ledger) Admit(m Marker) (release func(), err error) {
+	_, release, err = l.place(markerPrefix, m)
+	return release, err
+}
+
+// Wait records m as a waiter, for host-load and sc queue-status to show; it
+// takes no slot and needs no ledger lock. update rewrites its reason; leave
+// (idempotent) removes it. A waiter that dies is reaped like a dead gate.
+func (l Ledger) Wait(m Marker) (update func(reason string), leave func(), err error) {
+	f, leave, err := l.place(waiterPrefix, m)
+	if err != nil {
+		return nil, nil, err
+	}
+	var mu sync.Mutex
+	update = func(reason string) {
+		mu.Lock()
+		defer mu.Unlock()
+		m.Reason = reason
+		if data, err := json.Marshal(m); err == nil {
+			_ = f.Truncate(0)
+			_, _ = f.WriteAt(append(data, '\n'), 0)
+		}
+	}
+	return update, leave, nil
+}
+
+// place writes m under prefix, locked before it is renamed into view, and
+// returns the open file (which holds the lock) and its idempotent removal.
+func (l Ledger) place(prefix string, m Marker) (*os.File, func(), error) {
 	if err := os.MkdirAll(l.Dir, 0o700); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	tmp, err := os.CreateTemp(l.Dir, "tmp-*")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	fail := func(err error) (func(), error) {
+	fail := func(err error) (*os.File, func(), error) {
 		_ = os.Remove(tmp.Name())
 		_ = tmp.Close()
-		return nil, err
+		return nil, nil, err
 	}
 	if err := syscall.Flock(int(tmp.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		return fail(err)
@@ -104,12 +136,12 @@ func (l Ledger) Admit(m Marker) (release func(), err error) {
 	if _, err := tmp.Write(append(data, '\n')); err != nil {
 		return fail(err)
 	}
-	final := filepath.Join(l.Dir, markerPrefix+strings.TrimPrefix(filepath.Base(tmp.Name()), "tmp-")+markerSuffix)
+	final := filepath.Join(l.Dir, prefix+strings.TrimPrefix(filepath.Base(tmp.Name()), "tmp-")+markerSuffix)
 	if err := os.Rename(tmp.Name(), final); err != nil {
 		return fail(err)
 	}
 	var once sync.Once
-	return func() {
+	return tmp, func() {
 		once.Do(func() {
 			_ = os.Remove(final)
 			_ = syscall.Flock(int(tmp.Fd()), syscall.LOCK_UN)
@@ -123,6 +155,19 @@ func (l Ledger) Admit(m Marker) (release func(), err error) {
 // Lock. Without it (a read-only view, such as host-load's), a dead marker is
 // skipped and left for the next locked reader.
 func (l Ledger) Live(reap bool) ([]Marker, error) {
+	live, err := l.markers(markerPrefix, reap)
+	sort.Slice(live, func(i, j int) bool { return live[i].AdmittedAt.Before(live[j].AdmittedAt) })
+	return live, err
+}
+
+// Waiting lists the live waiters, longest-waiting first; reap as for Live.
+func (l Ledger) Waiting(reap bool) ([]Marker, error) {
+	waiting, err := l.markers(waiterPrefix, reap)
+	sort.Slice(waiting, func(i, j int) bool { return waiting[i].WaitingSince.Before(waiting[j].WaitingSince) })
+	return waiting, err
+}
+
+func (l Ledger) markers(prefix string, reap bool) ([]Marker, error) {
 	entries, err := os.ReadDir(l.Dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -133,7 +178,7 @@ func (l Ledger) Live(reap bool) ([]Marker, error) {
 	var live []Marker
 	for _, e := range entries {
 		name := e.Name()
-		if !strings.HasPrefix(name, markerPrefix) || !strings.HasSuffix(name, markerSuffix) {
+		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, markerSuffix) {
 			continue
 		}
 		path := filepath.Join(l.Dir, name)
@@ -142,7 +187,6 @@ func (l Ledger) Live(reap bool) ([]Marker, error) {
 			live = append(live, m)
 		}
 	}
-	sort.Slice(live, func(i, j int) bool { return live[i].AdmittedAt.Before(live[j].AdmittedAt) })
 	return live, nil
 }
 
@@ -203,6 +247,10 @@ func (l Ledger) View(reap bool) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
+	waiting, err := l.Waiting(reap)
+	if err != nil {
+		return View{}, err
+	}
 	held, reason := l.Hold()
-	return View{Live: live, Held: held, HoldReason: reason}, nil
+	return View{Live: live, Waiting: waiting, Held: held, HoldReason: reason}, nil
 }

@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
 	"code.linenisgreat.com/spinclass/internal/0/hostload"
+	"code.linenisgreat.com/spinclass/internal/alfa/hostqueue"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
+	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 )
 
 const (
@@ -96,12 +99,78 @@ func formatHostLoad(rep hostload.Report) string {
 	return b.String()
 }
 
+// hostLoadView is host-load's JSON: the load report plus, when the host queue's
+// ledger has anything in it, its gates, waiters and hold (#424 step 5).
+type hostLoadView struct {
+	hostload.Report
+	Queue *hostqueue.View `json:"queue,omitempty"`
+}
+
+// hostLoadLedger is the ledger host-load reads; a seam for tests.
+var hostLoadLedger = hostqueue.DefaultLedger
+
+// hostQueueView reads the ledger without reaping (host-load takes no ledger
+// lock). nil when there is no ledger, or nothing in it, so a host that never
+// queued renders as before.
+func hostQueueView() *hostqueue.View {
+	ledger, err := hostLoadLedger()
+	if err != nil {
+		return nil
+	}
+	v, err := ledger.View(false)
+	if err != nil || (len(v.Live) == 0 && len(v.Waiting) == 0 && !v.Held) {
+		return nil
+	}
+	return &v
+}
+
+// trustedLoadThreshold is the trusted [host-queue] load-threshold for the repo
+// at cwd, so host-load's verdict and the queue's agree; ok false when unset.
+func trustedLoadThreshold() (float64, bool) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return 0, false
+	}
+	repo := driverRepoPath()
+	h, err := sweatfileio.LoadHierarchy(home, repo)
+	if err != nil {
+		return 0, false
+	}
+	hq, _ := sweatfileio.TrustedHostQueue(h, home, repo)
+	if hq.LoadThreshold == nil || *hq.LoadThreshold < 0 {
+		return 0, false
+	}
+	return *hq.LoadThreshold, true
+}
+
+// formatHostQueue renders the queue section: one line per running gate and per
+// waiter, and the hold.
+func formatHostQueue(v *hostqueue.View, now time.Time) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nhost queue: %d gate(s) running, %d waiting", len(v.Live), len(v.Waiting))
+	if v.Held {
+		fmt.Fprintf(&b, ", HELD: %s", v.HoldReason)
+	}
+	for _, m := range v.Live {
+		fmt.Fprintf(&b, "\n  gate %s %s for %s", m.Session, m.Kind, now.Sub(m.AdmittedAt).Round(time.Second))
+	}
+	for _, m := range v.Waiting {
+		fmt.Fprintf(&b, "\n  wait %s %s for %s: %s", m.Session, m.Kind, now.Sub(m.WaitingSince).Round(time.Second), m.Reason)
+	}
+	return b.String()
+}
+
 // runHostLoad is the shared host-load flow: sample the host, attribute the
 // busiest processes to sessions and render text, or JSON with --format json.
 func runHostLoad(p hostLoadParams) (string, error) {
 	sessions, err := liveHostLoadSessions()
 	if err != nil {
 		return "", err
+	}
+	if p.Threshold == nil {
+		if t, ok := trustedLoadThreshold(); ok {
+			p.Threshold = &t
+		}
 	}
 	opts, err := hostLoadOptions(p, sessions)
 	if err != nil {
@@ -111,14 +180,19 @@ func runHostLoad(p hostLoadParams) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	queue := hostQueueView()
 	if p.Format == "json" {
-		data, err := json.Marshal(rep)
+		data, err := json.Marshal(hostLoadView{Report: rep, Queue: queue})
 		if err != nil {
 			return "", err
 		}
 		return string(data), nil
 	}
-	return formatHostLoad(rep), nil
+	text := formatHostLoad(rep)
+	if queue != nil {
+		text += formatHostQueue(queue, time.Now())
+	}
+	return text, nil
 }
 
 // handleHostLoad is the `host-load` MCP tool handler. It names every session
@@ -149,7 +223,7 @@ func registerHostLoadCommand(app *command.App) {
 		Name:  "host-load",
 		Title: "Host Load",
 		Description: command.Description{
-			Short: "Report host load before a heavy build, test or merge (#388). Read-only. Returns the CPU count, the 1/5/15-minute load averages, whether the host is above `threshold` (the per-CPU 1-minute load, load1 divided by CPUs), and the busiest processes over a short sample window, each with the spinclass session whose worktree it runs in (matched by process working directory), so a pile-up can be traced to the sessions causing it.",
+			Short: "Report host load before a heavy build, test or merge (#388). Read-only. Returns the CPU count, the 1/5/15-minute load averages, whether the host is above `threshold` (the per-CPU 1-minute load, load1 divided by CPUs), and the busiest processes over a short sample window, each with the spinclass session whose worktree it runs in (matched by process working directory), so a pile-up can be traced to the sessions causing it. When the host admission queue (#424, [host-queue]) has gates running, gates waiting or an operator hold, a `host queue` section lists each with its session, kind, age and wait reason. `threshold` defaults to the trusted [host-queue] load-threshold when one is set.",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			ReadOnlyHint:    protocol.BoolPtr(true),
@@ -160,7 +234,7 @@ func registerHostLoadCommand(app *command.App) {
 		Params: []command.Param{
 			{Name: "top", Type: command.Int, Description: fmt.Sprintf("How many of the busiest processes to list (default %d, max %d)", hostLoadDefaultTop, hostLoadMaxTop)},
 			{Name: "sample_ms", Type: command.Int, Description: fmt.Sprintf("Sampling window in milliseconds for per-process CPU (default %d, max %d)", hostLoadDefaultSampleMS, hostLoadMaxSampleMS)},
-			{Name: "threshold", Type: command.Float, Description: fmt.Sprintf("Per-CPU 1-minute load above which the host counts as over threshold (default %g)", hostLoadDefaultThreshold)},
+			{Name: "threshold", Type: command.Float, Description: fmt.Sprintf("Per-CPU 1-minute load above which the host counts as over threshold (default: the trusted [host-queue] load-threshold, else %g)", hostLoadDefaultThreshold)},
 		},
 		Run:    wrapMCPHandler("host-load", handleHostLoad),
 		RunCLI: ungatedCLI(runHostLoad),

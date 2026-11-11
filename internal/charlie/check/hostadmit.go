@@ -13,6 +13,7 @@ import (
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/0/hostload"
+	"code.linenisgreat.com/spinclass/internal/0/statsd"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/alfa/hostqueue"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
@@ -82,13 +83,19 @@ func admitHostSlot(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.
 		marker.Repo = filepath.Base(repoRoot)
 	}
 
+	metrics := hostQueueMetrics{client: statsd.Resolve(hierarchy.Merged.MetricsStatsdAddress(), hierarchy.Merged.MetricsStatsdDisabled())}
 	start := hostQueueNow()
 	var (
 		state     hostqueue.WaiterState
 		lastBeat  time.Time
 		lastWhy   hostqueue.Decision
 		waitedFor = map[hostqueue.Reason]bool{}
+		// The waiter's own marker, for host-load and sc queue-status; written on
+		// the first refusal, removed however the wait ends.
+		updateWaiter func(string)
+		leaveWaiter  = func() {}
 	)
+	defer func() { leaveWaiter() }()
 	for {
 		unlock, err := ledger.Lock()
 		if err != nil {
@@ -110,11 +117,23 @@ func admitHostSlot(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.
 				return warn("the slot marker could not be written: " + aerr.Error())
 			}
 			reportAdmission(rep, activity, now.Sub(start), d, waitedFor)
+			metrics.admitted(now.Sub(start), waitedFor, len(view.Live)+1, d.Grace)
 			return rel, nil
 		}
 		unlock()
 		state, lastWhy = d.Next, d
 		waitedFor[d.Reason] = true
+		if updateWaiter == nil {
+			w := marker
+			w.WaitingSince, w.Reason = start, d.Detail
+			if u, leave, werr := ledger.Wait(w); werr == nil {
+				updateWaiter, leaveWaiter = u, leave
+			} else {
+				updateWaiter = func(string) {} // display only: a failed write never stops the wait
+			}
+		} else {
+			updateWaiter(d.Detail)
+		}
 
 		waited := now.Sub(start)
 		if activity != nil && (lastBeat.IsZero() || now.Sub(lastBeat) >= hostQueueHeartbeat) {
@@ -129,13 +148,38 @@ func admitHostSlot(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.
 				"reason":   string(lastWhy.Reason),
 				"waited":   waited.Round(time.Second).String(),
 			})
+			metrics.ended("timeout", waited, waitedFor)
 			return noop, err
 		}
 		select {
 		case <-ctx.Done():
+			metrics.ended("cancelled", hostQueueNow().Sub(start), waitedFor)
 			return noop, fmt.Errorf("host queue: cancelled while waiting for a slot (%s): %w", lastWhy.Detail, ctx.Err())
 		case <-time.After(cfg.Poll):
 		}
+	}
+}
+
+// hostQueueMetrics sends the queue's statsd series (#424 step 6, required by
+// the operator's 11-05 Q7 ruling): host.queue_wait.<outcome> (ok, timeout,
+// cancelled) as a timer, host.wait_reason.<reason> once per reason a wait met,
+// host.gates_running as a gauge at each admission, and host.queue_grace when
+// idle-grace admitted. Only when the queue is on; best-effort like every
+// spinclass metric.
+type hostQueueMetrics struct{ client statsd.Client }
+
+func (m hostQueueMetrics) admitted(waited time.Duration, reasons map[hostqueue.Reason]bool, running int, grace bool) {
+	m.ended("ok", waited, reasons)
+	m.client.Gauge("host.gates_running", running)
+	if grace {
+		m.client.Count("host.queue_grace")
+	}
+}
+
+func (m hostQueueMetrics) ended(outcome string, waited time.Duration, reasons map[hostqueue.Reason]bool) {
+	m.client.Timing("host.queue_wait."+outcome, waited)
+	for r := range reasons {
+		m.client.Count("host.wait_reason." + statsd.Segment(string(r)))
 	}
 }
 

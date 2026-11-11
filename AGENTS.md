@@ -160,6 +160,11 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
   **per-commit hook** (FDR 0019, #183/#267; canonical value
   `conformist-pre-commit`; frozen at install to the landed default branch's
   devShell path, never re-evaluated at commit time, #459).
+- **Host admission queue** (FDR 0038, #424; `internal/alfa/hostqueue`,
+  `internal/0/hostload` probe, `check/hostadmit.go`): opt-in trusted
+  `[host-queue] enable`; every gate waits in `runHookPhase` for a host slot
+  (flock ledger under `$XDG_RUNTIME_DIR`); step-0 cost history in
+  `check/gatecost.go`.
 - **Inactivity watchdog** (`[hooks].inactivity-timeout`; funnels through
   `hookrun.PreMergeInDir`).
 - **Base-branch freshening** (FDR 0024, #250, `internal/bravo/basebranch`): fresh

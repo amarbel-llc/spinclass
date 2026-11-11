@@ -69,6 +69,7 @@ const (
 // View is the ledger as the predicate sees it, read under the ledger lock.
 type View struct {
 	Live       []Marker
+	Waiting    []Marker // for display; the predicate does not read it
 	Held       bool
 	HoldReason string
 }

@@ -12,6 +12,7 @@ import (
 
 	"code.linenisgreat.com/crap/go-crap/v2/crap"
 	"code.linenisgreat.com/spinclass/internal/0/hostload"
+	"code.linenisgreat.com/spinclass/internal/0/statsd"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/alfa/hostqueue"
 )
@@ -138,6 +139,37 @@ func TestHostQueueWaitsForARunningGate(t *testing.T) {
 	if !strings.Contains(out, "(gates)") || !strings.Contains(activity, "r/other") {
 		t.Errorf("output %q / activity %q, want the gate reason naming r/other", out, activity)
 	}
+	if w, _ := ledger.Waiting(false); len(w) != 0 {
+		t.Errorf("the waiter marker outlived the wait: %+v", w)
+	}
+}
+
+// While a gate waits it is listed as a waiter with its reason (step 5's
+// host-load section reads it).
+func TestHostQueueWaiterIsVisibleWhileWaiting(t *testing.T) {
+	cfg := fastConfig()
+	cfg.MaxWait = 200 * time.Millisecond
+	ledger := stubHostQueue(t, cfg, func() (hostload.Snapshot, error) {
+		s := healthySnap()
+		s.LoadPerCPU = 5
+		return s, nil
+	})
+	seen := make(chan []hostqueue.Marker, 1)
+	go func() {
+		time.Sleep(60 * time.Millisecond)
+		w, _ := ledger.Waiting(false)
+		seen <- w
+	}()
+	_, err, _, _ := admit(t, context.Background())
+	if !errors.Is(err, ErrHostQueueTimeout) {
+		t.Fatalf("err = %v", err)
+	}
+	if w := <-seen; len(w) != 1 || !strings.Contains(w[0].Reason, "load") {
+		t.Errorf("waiting while waiting = %+v, want one waiter naming load", w)
+	}
+	if w, _ := ledger.Waiting(false); len(w) != 0 {
+		t.Errorf("the waiter marker outlived the timeout: %+v", w)
+	}
 }
 
 func TestHostQueueTimesOutWithTheReason(t *testing.T) {
@@ -168,6 +200,36 @@ func TestHostQueueWaitIsCancellable(t *testing.T) {
 	_, err, _, _ := admit(t, ctx)
 	if err == nil || !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "cancelled") {
 		t.Fatalf("err = %v, want a cancellation", err)
+	}
+}
+
+// The queue's statsd series (step 6): a wait that ends in admission sends the
+// ok timer, its reasons and the running-gates gauge; a timeout sends its own
+// timer.
+func TestHostQueueEmitsMetrics(t *testing.T) {
+	drain := statsdSink(t)
+	var mu sync.Mutex
+	calls := 0
+	stubHostQueue(t, fastConfig(), func() (hostload.Snapshot, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		s := healthySnap()
+		if calls == 1 {
+			s.LoadPerCPU = 3
+		}
+		return s, nil
+	})
+	release, err, _, _ := admit(t, context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+	got := strings.Join(drain(), "\n")
+	for _, want := range []string{statsd.Prefix + "host.queue_wait.ok:", statsd.Prefix + "host.wait_reason.load:1|c", statsd.Prefix + "host.gates_running:1|g"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("metrics =\n%s\nwant %q", got, want)
+		}
 	}
 }
 
