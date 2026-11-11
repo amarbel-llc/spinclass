@@ -102,6 +102,42 @@ func TestLedgerWaiter(t *testing.T) {
 	}
 }
 
+// A reader racing a waiter's reason updates always sees the waiter, whole: an
+// update never shows a half-written marker, and a reaping reader never takes a
+// replaced marker for a dead one.
+func TestLedgerWaiterReadDuringUpdates(t *testing.T) {
+	l := testLedger(t)
+	update, leave, err := l.Wait(Marker{Session: "r/w", WaitingSince: t0, Reason: "load"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer leave()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := range 2000 {
+			update([]string{"load", "memory"}[i%2])
+		}
+	}()
+	for reads := 0; ; reads++ {
+		select {
+		case <-done:
+			if reads == 0 {
+				t.Fatal("no read overlapped the updates")
+			}
+			return
+		default:
+		}
+		w, err := l.Waiting(true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(w) != 1 || w[0].Session != "r/w" {
+			t.Fatalf("read %d during updates: %+v, want the one waiter", reads, w)
+		}
+	}
+}
+
 func TestLedgerLiveOnAMissingDirIsEmpty(t *testing.T) {
 	if live, err := testLedger(t).Live(true); err != nil || len(live) != 0 {
 		t.Fatalf("= (%v, %v), want empty", live, err)

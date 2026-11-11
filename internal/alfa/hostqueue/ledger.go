@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -86,68 +87,114 @@ func (l Ledger) Lock() (unlock func(), err error) {
 // locked before it becomes visible under its final name, so a reader never
 // sees an unlocked live marker. Call it under Lock.
 func (l Ledger) Admit(m Marker) (release func(), err error) {
-	_, release, err = l.place(markerPrefix, m)
-	return release, err
+	p, err := l.place(markerPrefix, m)
+	if err != nil {
+		return nil, err
+	}
+	return p.remove, nil
 }
 
 // Wait records m as a waiter, for host-load and sc queue-status to show; it
 // takes no slot and needs no ledger lock. update rewrites its reason; leave
 // (idempotent) removes it. A waiter that dies is reaped like a dead gate.
 func (l Ledger) Wait(m Marker) (update func(reason string), leave func(), err error) {
-	f, leave, err := l.place(waiterPrefix, m)
+	p, err := l.place(waiterPrefix, m)
 	if err != nil {
 		return nil, nil, err
 	}
-	var mu sync.Mutex
 	update = func(reason string) {
-		mu.Lock()
-		defer mu.Unlock()
-		m.Reason = reason
-		if data, err := json.Marshal(m); err == nil {
-			_ = f.Truncate(0)
-			_, _ = f.WriteAt(append(data, '\n'), 0)
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		if p.gone || reason == m.Reason {
+			return
 		}
+		m.Reason = reason
+		p.replaceLocked(l, m)
 	}
-	return update, leave, nil
+	return update, p.remove, nil
 }
 
-// place writes m under prefix, locked before it is renamed into view, and
-// returns the open file (which holds the lock) and its idempotent removal.
-func (l Ledger) place(prefix string, m Marker) (*os.File, func(), error) {
+// placedMarker is a marker in view under final, held by the lock on f.
+type placedMarker struct {
+	mu    sync.Mutex
+	final string
+	f     *os.File
+	gone  bool
+}
+
+// place writes m under prefix, locked before it is renamed into view.
+func (l Ledger) place(prefix string, m Marker) (*placedMarker, error) {
+	f, err := l.writeLocked(m)
+	if err != nil {
+		return nil, err
+	}
+	final := filepath.Join(l.Dir, prefix+strings.TrimPrefix(filepath.Base(f.Name()), "tmp-")+markerSuffix)
+	if err := os.Rename(f.Name(), final); err != nil {
+		discard(f)
+		return nil, err
+	}
+	return &placedMarker{final: final, f: f}, nil
+}
+
+// replaceLocked swaps in a new locked file holding m by an atomic rename, so a
+// reader sees the old marker or the new one, never a partly written one; the
+// old file's lock is dropped only after the new one is in view. Call it with
+// p.mu held. On failure the old marker stays.
+func (p *placedMarker) replaceLocked(l Ledger, m Marker) {
+	f, err := l.writeLocked(m)
+	if err != nil {
+		return
+	}
+	if err := os.Rename(f.Name(), p.final); err != nil {
+		discard(f)
+		return
+	}
+	old := p.f
+	p.f = f
+	_ = syscall.Flock(int(old.Fd()), syscall.LOCK_UN)
+	_ = old.Close()
+}
+
+// remove takes the marker out of view and drops its lock; it is idempotent.
+func (p *placedMarker) remove() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.gone {
+		return
+	}
+	p.gone = true
+	_ = os.Remove(p.final)
+	_ = syscall.Flock(int(p.f.Fd()), syscall.LOCK_UN)
+	_ = p.f.Close()
+}
+
+// writeLocked writes m to a new temporary file in Dir and returns it locked.
+func (l Ledger) writeLocked(m Marker) (*os.File, error) {
 	if err := os.MkdirAll(l.Dir, 0o700); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	tmp, err := os.CreateTemp(l.Dir, "tmp-*")
 	if err != nil {
-		return nil, nil, err
-	}
-	fail := func(err error) (*os.File, func(), error) {
-		_ = os.Remove(tmp.Name())
-		_ = tmp.Close()
-		return nil, nil, err
+		return nil, err
 	}
 	if err := syscall.Flock(int(tmp.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		return fail(err)
+		discard(tmp)
+		return nil, err
 	}
 	data, err := json.Marshal(m)
+	if err == nil {
+		_, err = tmp.Write(append(data, '\n'))
+	}
 	if err != nil {
-		return fail(err)
+		discard(tmp)
+		return nil, err
 	}
-	if _, err := tmp.Write(append(data, '\n')); err != nil {
-		return fail(err)
-	}
-	final := filepath.Join(l.Dir, prefix+strings.TrimPrefix(filepath.Base(tmp.Name()), "tmp-")+markerSuffix)
-	if err := os.Rename(tmp.Name(), final); err != nil {
-		return fail(err)
-	}
-	var once sync.Once
-	return tmp, func() {
-		once.Do(func() {
-			_ = os.Remove(final)
-			_ = syscall.Flock(int(tmp.Fd()), syscall.LOCK_UN)
-			_ = tmp.Close()
-		})
-	}, nil
+	return tmp, nil
+}
+
+func discard(f *os.File) {
+	_ = os.Remove(f.Name())
+	_ = f.Close()
 }
 
 // Live lists the live markers, oldest admission first. With reap, a marker
@@ -192,26 +239,52 @@ func (l Ledger) markers(prefix string, reap bool) ([]Marker, error) {
 
 // readMarker reads one marker and probes its lock. A marker it cannot parse is
 // still counted when its lock is held: a live holder with an odd file is still
-// a running gate.
+// a running gate. A waiter's marker is replaced by rename when its reason
+// changes, and the old file's lock is then dropped, so a free lock on a file no
+// longer at path means "replaced", not "dead": read the path again.
 func readMarker(path string, reap bool) (Marker, bool) {
+	const replacedRetries = 5
+	for range replacedRetries {
+		m, alive, replaced := readMarkerOnce(path, reap)
+		if !replaced {
+			return m, alive
+		}
+	}
+	return Marker{}, false
+}
+
+func readMarkerOnce(path string, reap bool) (m Marker, alive, replaced bool) {
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
-		return Marker{}, false
+		return Marker{}, false, false
 	}
 	defer f.Close()
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
+		if !stillAt(f, path) {
+			return Marker{}, false, true
+		}
 		if reap {
 			_ = os.Remove(path)
 		}
-		return Marker{}, false
+		return Marker{}, false, false
 	}
-	var m Marker
-	data, _ := os.ReadFile(path)
+	// Read through the locked file, not the path: its content was complete
+	// before it was renamed into view.
+	data, _ := io.ReadAll(f)
 	if json.Unmarshal(data, &m) != nil || m.Session == "" {
 		m.Session = "(unreadable marker " + filepath.Base(path) + ")"
 	}
-	return m, true
+	return m, true, false
+}
+
+func stillAt(f *os.File, path string) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	pi, err := os.Stat(path)
+	return err == nil && os.SameFile(fi, pi)
 }
 
 // Hold reports the operator's hold and its reason.
