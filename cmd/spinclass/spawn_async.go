@@ -55,7 +55,7 @@ func handleSpawnSessionAsync(params spawnParams) (*command.Result, error) {
 		deadline = AsyncSpawnHelloDeadline // async default (sync `sc spawn` keeps 60s)
 	}
 
-	req, err := params.confineRequest()
+	opts, err := params.launchOptions()
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
 	}
@@ -72,7 +72,7 @@ func handleSpawnSessionAsync(params spawnParams) (*command.Result, error) {
 
 	// Synchronous prefix: create the worktree + exec the detached entry. After
 	// this the session key is known; the hello has NOT been awaited.
-	pending, err := spawn.LaunchDetachedWith(home, repoPath, driver, params.Brief, params.Description, params.Model, params.Profile, req)
+	pending, err := spawn.LaunchDetachedOpts(home, repoPath, driver, params.Brief, params.Description, params.Model, params.Profile, opts)
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
 	}
@@ -87,12 +87,12 @@ func handleSpawnSessionAsync(params spawnParams) (*command.Result, error) {
 		if werr != nil {
 			return command.TextErrorResult(werr.Error()), nil
 		}
-		return command.TextResult(spawnResultText(driver.Principal, res)), nil
+		return command.TextResult(spawnResultText(driver.Principal, res) + attendedSpawnNote(params.Posture, res.SessionKey)), nil
 	}
 
 	go awaitSpawnHello(pending, driver.Principal, deadline, jobID)
 
-	return command.TextResult(asyncSpawnResultText(pending, driver.Principal, jobID, deadline)), nil
+	return command.TextResult(asyncSpawnResultText(pending, driver.Principal, jobID, deadline) + attendedSpawnNote(params.Posture, pending.SessionKey)), nil
 }
 
 // awaitSpawnHello runs in a background goroutine: block on the worker's hello,

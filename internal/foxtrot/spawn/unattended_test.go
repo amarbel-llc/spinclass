@@ -18,14 +18,21 @@ const unattendedEntry = `spawn-entry = ["sh", "-c", 'printf "%s\n" "$@" > "$PWD/
 `
 
 type unattendedLaunch struct {
-	argv      []string
-	marker    string
-	pinnedEnv map[string]string
+	argv          []string
+	marker        string
+	pinnedEnv     map[string]string
+	pinnedPosture string
 }
 
 // launchUnattended launches an unconfined worker with the given repo-level
 // [session-entry] extras and global sweatfile, returning what the worker saw.
 func launchUnattended(t *testing.T, repoExtra, global string) unattendedLaunch {
+	t.Helper()
+	return launchWithPosture(t, repoExtra, global, PostureDefault)
+}
+
+// launchWithPosture is launchUnattended with an explicit posture (spinclass#474).
+func launchWithPosture(t *testing.T, repoExtra, global string, posture Posture) unattendedLaunch {
 	t.Helper()
 	// The driver may itself be unattended: whatever it carries must never reach
 	// an auto or unset child (clown would apply dontAsk settings under auto argv).
@@ -36,7 +43,7 @@ func launchUnattended(t *testing.T, repoExtra, global string) unattendedLaunch {
 	}
 	const driverKey = "driver/unattended-test"
 	stop, helloErr := helloAfterLaunch(t, repoPath, driverKey)
-	res, err := Launch(home, repoPath, testDriver(driverKey), "brief", "", "", "", 15*time.Second)
+	res, err := LaunchOpts(home, repoPath, testDriver(driverKey), "brief", "", "", "", LaunchOptions{Posture: posture}, 15*time.Second)
 	stop()
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
@@ -61,6 +68,7 @@ func launchUnattended(t *testing.T, repoExtra, global string) unattendedLaunch {
 	}
 	if st.Entry != nil {
 		out.pinnedEnv = st.Entry.Env
+		out.pinnedPosture = st.Entry.Posture
 	}
 	return out
 }

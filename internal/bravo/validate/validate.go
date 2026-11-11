@@ -691,7 +691,7 @@ func CheckAllowPostureWidening(sf sweatfile.Sweatfile, layerAboveRepo bool) []Is
 		return nil
 	}
 	return []Issue{{
-		Message:  "[session-entry] sets `allow-posture-widening` in a repo-level sweatfile: it is ignored — it decides whether a restart may widen a session from unattended to attended, so only the global sweatfile or one above the repo (parent directories) may set it; move it up",
+		Message:  "[session-entry] sets `allow-posture-widening` in a repo-level sweatfile: it is ignored — it decides whether a restart may widen a session from unattended to attended, and whether a spawn may launch an attended worker, so only the global sweatfile or one above the repo (parent directories) may set it; move it up",
 		Severity: SeverityWarning,
 		Field:    "session-entry.allow-posture-widening",
 	}}

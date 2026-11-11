@@ -674,6 +674,7 @@ func runRestartPreflight(target string) (restartVerdict, error) {
 				return errors.New("the session's pinned entry vanished while its posture was being recorded")
 			}
 			cur.Entry.Env = spawn.SetUnattendedMarker(cur.Entry.Env, req.Posture == restartPostureUnattended)
+			cur.Entry.Posture = req.Posture
 		}
 		if refreshed {
 			cur.FrozenHook = frozen

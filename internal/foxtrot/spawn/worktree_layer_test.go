@@ -37,7 +37,7 @@ MARK = "worktree"
 	}
 
 	rp := worktree.ResolvedPath{AbsPath: wt, RepoPath: repoPath, Branch: "w1", SessionKey: "worker/w1"}
-	argv, _, env, _, _, _, err := renderSpawn(home, rp, "the brief", "", "")
+	argv, _, env, _, _, _, err := renderSpawn(home, rp, "the brief", "", "", PostureDefault)
 	if err != nil {
 		t.Fatalf("renderSpawn: %v", err)
 	}
@@ -52,7 +52,7 @@ MARK = "worktree"
 	if err := os.WriteFile(filepath.Join(wt, "sweatfile"), []byte("[session-entry\n=== not toml\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, _, _, _, err := renderSpawn(home, rp, "the brief", "", ""); err != nil {
+	if _, _, _, _, _, _, err := renderSpawn(home, rp, "the brief", "", "", PostureDefault); err != nil {
 		t.Errorf("a corrupt worktree sweatfile failed renderSpawn: %v", err)
 	}
 }
@@ -82,7 +82,8 @@ MARK = "pinned"
 	}
 	want := &session.PinnedEntry{
 		Start: []string{"/bin/pinned-start"}, Resume: []string{"/bin/pinned-resume"},
-		Env: map[string]string{"MARK": "pinned"},
+		Env:     map[string]string{"MARK": "pinned"},
+		Posture: "attended", // no dontAsk applied (spinclass#474)
 	}
 	if !reflect.DeepEqual(st.Entry, want) {
 		t.Errorf("Entry = %+v, want %+v", st.Entry, want)

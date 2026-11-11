@@ -86,6 +86,32 @@ func confirmUnconfinedSpawn(repo string) error {
 	return record("confirmed", nil)
 }
 
+const attendedSpawnNoTerminal = "--posture attended needs a human at a terminal: stdin and stdout must both be terminals, " +
+	"so a pipe, a recipe or a program cannot widen a worker out of dontAsk"
+
+// confirmAttendedSpawn returns nil only when a human at a terminal answered y:
+// `sc spawn --posture attended` never meets the MCP tool's permission floor, so
+// it asks itself (spinclass#474), with the same terminal seams as
+// confirmUnconfinedSpawn. The trusted allow-posture-widening key is checked by
+// the launch, after this.
+func confirmAttendedSpawn(repo string) error {
+	if !unconfinedSpawnIsTerminal() {
+		return errors.New(attendedSpawnNoTerminal)
+	}
+	target := repo
+	if target == "" {
+		target = "this repo"
+	}
+	fmt.Fprintf(unconfinedSpawnStderr(),
+		"spawn an ATTENDED worker in %s? It runs without dontAsk and waits at its permission prompts until someone attaches and answers. [y/N] ", target)
+	line, _ := bufio.NewReader(unconfinedSpawnConfirmIn()).ReadString('\n')
+	if answer := strings.ToLower(strings.TrimSpace(line)); answer != "y" && answer != "yes" {
+		fmt.Fprintln(unconfinedSpawnStderr(), "declined; nothing was spawned")
+		return errors.New("spawn refused: --posture attended was not confirmed; nothing was spawned")
+	}
+	return nil
+}
+
 func openUnconfinedSpawnLog() (*os.File, error) {
 	stateDir, err := confinement.DefaultStateDir()
 	if err != nil {

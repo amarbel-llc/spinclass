@@ -1745,6 +1745,15 @@ owns the title end to end.
 	and always carries the marker, whatever this key says. The default may
 	flip to *dontAsk* later, once clown#323 lands and a live check passes.
 
+	The spawn's *posture* parameter (*sc spawn --posture*, spinclass#474)
+	overrides this key for one unconfined worker. *unattended* applies
+	*dontAsk* with the marker whatever the key says; it narrows, so it needs
+	no prompt. *attended* applies no *dontAsk* and no marker, as an unset key
+	would (auto unless *disable-auto-mode*). That is a widening, so it needs
+	*allow-posture-widening* below, is refused for a confined worker, and
+	always asks a human (the tool is always-ask for it; *sc spawn* asks at the
+	terminal). The applied posture is recorded in the worker's pinned entry.
+
 	Any other value refuses the spawn (*sc validate* reports an error). Read
 	live, at spawn time, only from the global sweatfile and layers above the
 	repo, and never pinned into session state: a repo or worktree value is
@@ -1756,7 +1765,9 @@ owns the title end to end.
 *allow-posture-widening*
 	Boolean, off unless set. Whether a restart may widen a session's permissions,
 	from unattended (claude's dontAsk mode) to attended (spinclass#342, FDR
-	0037, operator ruling 2026-11-08). The *posture* parameter of
+	0037, operator ruling 2026-11-08), and whether a spawn may launch an
+	attended worker (*posture = "attended"*, spinclass#474, operator ruling
+	2026-11-11). The *posture* parameter of
 	*restart-child-session* (*sc restart-child-session --posture*) asks for a
 	posture: *unattended* narrows and needs no key, *attended* widens and is
 	refused unless this key is *true*. Even with it, a widening needs the

@@ -86,6 +86,13 @@ type PinnedEntry struct {
 	Env      map[string]string `json:"env,omitempty"`
 	OnAttach *string           `json:"on_attach,omitempty"`
 	OnDetach *string           `json:"on_detach,omitempty"`
+	// Posture is the permission posture the session was launched or last
+	// restarted into: "unattended" (dontAsk, the CLOWN_UNATTENDED marker in Env)
+	// or "attended" (spinclass#474), kept beside the marker for consumers that
+	// want the posture named. The Env marker is what clown acts on and stays
+	// authoritative. "" on an entry pinned before it was recorded, or by
+	// `sc start`.
+	Posture string `json:"posture,omitempty"`
 }
 
 // ProfileNarrowingLink is State.ProfileNarrowing: the record that a user-registry

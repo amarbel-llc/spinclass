@@ -73,7 +73,8 @@ type operatorRestartTarget struct {
 
 // pinnedPosture is the posture a session's pinned entry records: unattended
 // when its env carries the CLOWN_UNATTENDED marker, attended when it does not,
-// unknown with no pinned entry.
+// unknown with no pinned entry. The marker, not Entry.Posture, is read: it is
+// what clown acts on, so it stays the one source of truth.
 func pinnedPosture(st *session.State) string {
 	switch {
 	case st == nil || st.Entry == nil:

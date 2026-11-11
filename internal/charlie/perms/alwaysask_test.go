@@ -167,6 +167,39 @@ func TestAlwaysAskSpawnUnconfinedRequest(t *testing.T) {
 	}
 }
 
+// spinclass#474: an attended spawn is a widening and ALWAYS asks, even when the
+// seam would call it confined (the launch refuses that anyway). Unattended and
+// an omitted posture stay silent for a confined spawn; any other value asks.
+func TestAlwaysAskSpawnAttendedPosture(t *testing.T) {
+	prev := SpawnConfined
+	t.Cleanup(func() { SpawnConfined = prev })
+	SpawnConfined = func(map[string]any, string) bool { return true }
+
+	for _, tc := range []struct {
+		name    string
+		in      map[string]any
+		wantAsk bool
+	}{
+		{"attended asks", map[string]any{"posture": "attended"}, true},
+		{"unknown posture asks", map[string]any{"posture": "wide"}, true},
+		{"non-string posture asks", map[string]any{"posture": true}, true},
+		{"unattended is silent", map[string]any{"posture": "unattended"}, false},
+		{"empty posture is silent", map[string]any{"posture": ""}, false},
+		{"null posture is silent", map[string]any{"posture": nil}, false},
+		{"absent posture is silent", map[string]any{"confined": true}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reason, ask := AlwaysAsk(spawnSessionTool, tc.in, "/driver")
+			if ask != tc.wantAsk {
+				t.Fatalf("ask = %v, want %v", ask, tc.wantAsk)
+			}
+			if ask && !strings.Contains(reason, "ATTENDED") {
+				t.Errorf("the reason must name the attended posture, got %q", reason)
+			}
+		})
+	}
+}
+
 // The carve-out is spawn-only: another tool never consults the seam.
 func TestAlwaysAskSeamIgnoredForOtherTools(t *testing.T) {
 	prev := SpawnConfined

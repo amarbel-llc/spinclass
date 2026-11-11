@@ -29,12 +29,36 @@ type spawnParams struct {
 	Profile      string `json:"profile"`
 	Confined     bool   `json:"confined"`
 	Unconfined   bool   `json:"unconfined"`
+	Posture      string `json:"posture"`
 }
 
 // confineRequest folds the two confinement flags into one request; passing both
 // is an error.
 func (p spawnParams) confineRequest() (spawn.ConfineRequest, error) {
 	return spawn.ParseConfineRequest(p.Confined, p.Unconfined)
+}
+
+// launchOptions is the confinement request and the posture (spinclass#474).
+func (p spawnParams) launchOptions() (spawn.LaunchOptions, error) {
+	req, err := p.confineRequest()
+	if err != nil {
+		return spawn.LaunchOptions{}, err
+	}
+	posture, err := spawn.ParsePosture(p.Posture)
+	if err != nil {
+		return spawn.LaunchOptions{}, err
+	}
+	return spawn.LaunchOptions{Confine: req, Posture: posture}, nil
+}
+
+// attendedSpawnNote is appended to a spawn result when the worker was asked to
+// be attended: it runs without dontAsk, so it stops at its first permission
+// prompt until a human attaches and answers.
+func attendedSpawnNote(posture string, key string) string {
+	if posture != string(spawn.PostureAttended) {
+		return ""
+	}
+	return fmt.Sprintf("\nposture: attended — the worker waits at its permission prompts until a human attaches to it (sc resume %s) and answers them", key)
 }
 
 // runSpawn is the shared spawn flow behind both surfaces (FDR 0006):
@@ -57,7 +81,7 @@ func runSpawn(p spawnParams) (spawn.Result, string, error) {
 	if err != nil {
 		return spawn.Result{}, "", err
 	}
-	req, err := p.confineRequest()
+	opts, err := p.launchOptions()
 	if err != nil {
 		return spawn.Result{}, "", err
 	}
@@ -79,7 +103,7 @@ func runSpawn(p spawnParams) (spawn.Result, string, error) {
 		return spawn.Result{}, "", err
 	}
 
-	res, err := spawn.LaunchWith(home, repoPath, driver, p.Brief, p.Description, p.Model, p.Profile, req, deadline)
+	res, err := spawn.LaunchOpts(home, repoPath, driver, p.Brief, p.Description, p.Model, p.Profile, opts, deadline)
 	if err != nil {
 		return spawn.Result{}, "", err
 	}
@@ -167,11 +191,18 @@ func runSpawnCLI(_ context.Context, args json.RawMessage) error {
 			return err
 		}
 	}
+	// Attended is a widening: the CLI asks the human itself, as the MCP tool's
+	// permission floor does (spinclass#474).
+	if p.Posture == string(spawn.PostureAttended) {
+		if err := confirmAttendedSpawn(p.Repo); err != nil {
+			return err
+		}
+	}
 	res, driverPrincipal, err := runSpawn(p.spawnParams)
 	if err != nil {
 		return err
 	}
-	fmt.Println(spawnResultText(driverPrincipal, res))
+	fmt.Println(spawnResultText(driverPrincipal, res) + attendedSpawnNote(p.Posture, res.SessionKey))
 	return nil
 }
 
@@ -198,7 +229,7 @@ func handleSpawnSession(_ context.Context, args json.RawMessage, _ command.Promp
 	if err != nil {
 		return command.TextErrorResult(err.Error()), nil
 	}
-	return command.TextResult(spawnResultText(driverPrincipal, res)), nil
+	return command.TextResult(spawnResultText(driverPrincipal, res) + attendedSpawnNote(params.Posture, res.SessionKey)), nil
 }
 
 // completeModelAliases offers the model aliases configured in the merged
@@ -323,6 +354,11 @@ func spawnParamList() []command.Param {
 			Name:        "unconfined",
 			Type:        command.Bool,
 			Description: "Opt OUT of confinement for this worker when [confinement] default-spawn would confine it (FDR 0035). Always needs the human until blessing exists (stage 2): the spawn-session tool asks through the permission hook, which no allow-list can approve silently; `sc spawn --unconfined` refuses unless stdin and stdout are terminals and the operator types \"unconfined\", and logs every attempt to $XDG_STATE_HOME/spinclass/spawn-unconfined.log. Mutually exclusive with confined.",
+		},
+		{
+			Name:        "posture",
+			Type:        command.String,
+			Description: "The worker's permission posture (spinclass#474). Omit it to keep the trusted [session-entry].unattended-permission-mode. \"unattended\": claude's dontAsk mode with the CLOWN_UNATTENDED marker (a narrowing, no prompt). \"attended\": no dontAsk, so the worker waits at its permission prompts until a human attaches (sc resume) and answers them; a widening, so it needs an operator-set allow-posture-widening in a trusted sweatfile, is refused for a confined worker, and always asks the human (`sc spawn --posture attended` asks at the terminal). The posture is recorded in the worker's pinned entry.",
 		},
 	}
 }

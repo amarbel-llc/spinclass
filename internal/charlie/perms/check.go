@@ -55,6 +55,12 @@ func AlwaysAsk(toolName string, toolInput map[string]any, cwd string) (string, b
 		if unconfinedRequested(toolInput) {
 			return "spawning an UNCONFINED worker opts out of confinement (FDR 0035); until blessing exists (stage 2) every unconfined spawn needs a human decision", true
 		}
+		// An attended worker runs out of dontAsk: a widening (spinclass#474,
+		// operator ruling 2026-11-10), so a human decides it whatever else is true,
+		// as for a restart into attended.
+		if postureWidens(toolInput) {
+			return "spawning an ATTENDED worker widens its permissions (out of dontAsk); confirm each invocation", true
+		}
 		if SpawnConfined != nil && SpawnConfined(toolInput, cwd) {
 			return "", false
 		}

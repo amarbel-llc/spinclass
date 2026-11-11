@@ -100,6 +100,13 @@ func LaunchDetached(home, repoPath string, driver Driver, brief, desc, model, pr
 // LaunchDetachedWith is LaunchDetached with an explicit confinement request
 // (the spawn's `confined` / `unconfined` parameters): see resolveConfined.
 func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model, profile string, req ConfineRequest) (Pending, error) {
+	return LaunchDetachedOpts(home, repoPath, driver, brief, desc, model, profile, LaunchOptions{Confine: req})
+}
+
+// LaunchDetachedOpts is LaunchDetached with explicit options: the confinement
+// request and the posture (spinclass#474, see Posture).
+func LaunchDetachedOpts(home, repoPath string, driver Driver, brief, desc, model, profile string, opts LaunchOptions) (Pending, error) {
+	req := opts.Confine
 	var descArgs []string
 	if desc != "" {
 		descArgs = []string{desc}
@@ -114,7 +121,7 @@ func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model
 	// no "--" separator to splice the model flag into) must not litter a
 	// worktree. Rendering never reads the worktree's own sweatfile (a worker
 	// can write it): only the global, ancestor and main-checkout layers.
-	argv, window, sessionEnv, merged, targetEnforce, targetConfine, err := renderSpawn(home, rp, brief, model, profile)
+	argv, window, sessionEnv, merged, targetEnforce, targetConfine, err := renderSpawn(home, rp, brief, model, profile, opts.Posture)
 	if err != nil {
 		return Pending{}, err
 	}
@@ -126,6 +133,9 @@ func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model
 	// created; an unconfined spawn does none of this.
 	confined, err := resolveConfined(targetConfine.policy, driverContextConfinement(home), req)
 	if err != nil {
+		return Pending{}, err
+	}
+	if err := refuseConfinedAttended(confined, opts.Posture); err != nil {
 		return Pending{}, err
 	}
 	effective := effectiveProfile(profile, merged)
@@ -257,6 +267,7 @@ func LaunchDetachedWith(home, repoPath string, driver Driver, brief, desc, model
 	pinned := shop.PinEntry(merged)
 	sessionEnv = setUnattendedMarker(sessionEnv, unattended)
 	pinned.Env = setUnattendedMarker(pinned.Env, unattended)
+	pinned.Posture = pinnedPostureOf(unattended)
 	p, err := startDetachedEntry(rp, driver, desc, argv, window, sessionEnv, dotenv, resolved, authorizingGrant, narrowing, pinned, confine)
 	if err != nil {
 		undoOnFailure()
@@ -325,7 +336,12 @@ func Launch(home, repoPath string, driver Driver, brief, desc, model, profile st
 
 // LaunchWith is Launch with an explicit confinement request.
 func LaunchWith(home, repoPath string, driver Driver, brief, desc, model, profile string, req ConfineRequest, deadline time.Duration) (Result, error) {
-	p, err := LaunchDetachedWith(home, repoPath, driver, brief, desc, model, profile, req)
+	return LaunchOpts(home, repoPath, driver, brief, desc, model, profile, LaunchOptions{Confine: req}, deadline)
+}
+
+// LaunchOpts is Launch with explicit options (confinement and posture).
+func LaunchOpts(home, repoPath string, driver Driver, brief, desc, model, profile string, opts LaunchOptions, deadline time.Duration) (Result, error) {
+	p, err := LaunchDetachedOpts(home, repoPath, driver, brief, desc, model, profile, opts)
 	if err != nil {
 		return Result{}, err
 	}
@@ -356,7 +372,7 @@ func LaunchWith(home, repoPath string, driver Driver, brief, desc, model, profil
 // is spliced LAST, after the auto-mode and model splices, via SpliceProfileFlag:
 // those two key off resolveProvider(entry), and placing the profile after them
 // keeps their behavior identical to a spawn with no profile.
-func renderSpawn(home string, rp worktree.ResolvedPath, brief, model, profile string) (argv, window []string, sessionEnv map[string]string, merged sweatfile.Sweatfile, enforce bool, confine targetConfinement, err error) {
+func renderSpawn(home string, rp worktree.ResolvedPath, brief, model, profile string, posture Posture) (argv, window []string, sessionEnv map[string]string, merged sweatfile.Sweatfile, enforce bool, confine targetConfinement, err error) {
 	hierarchy, err := sweatfileio.LoadHierarchy(home, rp.RepoPath)
 	if err != nil {
 		return nil, nil, nil, merged, false, confine, fmt.Errorf("loading worker sweatfile hierarchy: %w", err)
@@ -378,6 +394,11 @@ func renderSpawn(home string, rp worktree.ResolvedPath, brief, model, profile st
 			"paths", confine.ignoredUnattendedMode)
 	}
 	if err := validateUnattendedMode(confine.unattendedMode); err != nil {
+		return nil, nil, nil, merged, false, confine, err
+	}
+	// An explicit posture (spinclass#474) replaces the key's mode for this spawn;
+	// attended first needs the trusted widening key.
+	if confine.unattendedMode, err = postureMode(posture, confine.unattendedMode, hierarchy, home, rp.RepoPath); err != nil {
 		return nil, nil, nil, merged, false, confine, err
 	}
 	// The enforcement switch is read from layers above the repo only: an agent
