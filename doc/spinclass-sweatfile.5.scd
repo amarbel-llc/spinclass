@@ -1360,9 +1360,85 @@ Host-wide gate policy (#424,
 docs/plans/2026-11-10-424-host-admission-queue-follow-up.md). Not merged: read
 only from the global and parent-directory layers, last one that sets a key
 wins; a repo- or worktree-level table is ignored with a warning (*sc validate*
-warns), because host policy is the operator's, not a repository's. Today it
-holds only cost tracking; later keys (the admission thresholds) join this
-table.
+warns), because host policy is the operator's, not a repository's. It holds
+cost tracking (*record-costs*) and the admission queue (*enable* and its
+thresholds); each key is read on its own, so a parent-directory layer can
+override one global value and keep the rest.
+
+*Admission (#424).* With *enable = true* every gate (a merge's or a check's
+pre-merge, and the guarded gate) first waits for a host slot. Before each
+admission it takes a ledger lock, reaps the slots of gates whose process is
+gone, and admits when all of these pass, in this order, each failure being the
+wait's reason:
+
+- no operator hold;
+- fewer than *max-gates* gates are running;
+- *MemAvailable* is at least *memory-floor*, or, once this waiter was held
+  for memory, at least *memory-resume*;
+- memory pressure: PSI *some avg10* is at most *pressure-memory-avg10*, or,
+  where */proc/pressure* is absent, swap in use is at most *swap-ceiling*;
+- free space on the nix store filesystem is at least *disk-floor* (an
+  unreadable filesystem does not hold);
+- per-CPU *load1* is at most *load-threshold*;
+- the last admission is older than *settle*.
+
+It re-checks every *poll*. While waiting, the job log gets a line naming the
+reason at most every 30 seconds. A gate that waited gets one *host queue wait
+<time> (<reasons>)* line, and an unwaited admission prints nothing. After
+*max-wait* the gate fails with *host queue timeout* and its last reason; like
+any failed gate it leaves the attestation buffered. *idle-grace* admits past
+failing probe terms (never past a hold or the gate cap) once they have failed
+continuously that long with no gate running, since waiting cannot help then.
+If the ledger (*$XDG\_RUNTIME\_DIR/spinclass/host-queue*) or the probe cannot be
+read, or an enabled section has an invalid value, the gate runs unqueued with
+a warning: the queue is a scheduling aid and never wedges every gate. There is
+no per-gate escape. The queue only delays a gate; it never changes what the
+gate runs.
+
+*Trying it on one repository* without touching the global sweatfile: put a
+*[host-queue]* table with *enable = true* in a *sweatfile* in a parent
+directory of that repository (for example a directory holding only a test
+repository). That layer is trusted and applies only to repositories below it.
+A table in the repository's own sweatfile is ignored.
+
+*enable*
+	Bool, default *false*. Turns admission on.
+
+*max-gates*
+	Integer, default *1*. Gates admitted at once.
+
+*memory-floor*, *memory-resume*
+	Sizes (*"4GiB"*, *"512 MiB"*, *"30GB"*; binary and decimal units),
+	defaults *"4GiB"* and *"6GiB"*. Hold below the floor; once held for
+	memory, resume only above the resume line. The resume line must not be
+	below the floor.
+
+*pressure-memory-avg10*
+	Number, default *10.0*. The PSI memory *some avg10* above which memory is
+	under pressure.
+
+*swap-ceiling*
+	Size, default *"4GiB"*. Swap in use above which memory is under pressure,
+	used only where PSI is absent.
+
+*disk-floor*
+	Size, default *"30GiB"*. Free bytes on the nix store filesystem.
+
+*load-threshold*
+	Number, default *1.0*. Per-CPU 1-minute load.
+
+*settle*
+	Go duration, default *"60s"*. Minimum time between two admissions, so a
+	just-admitted gate shows its load before the next decision.
+
+*poll*
+	Go duration, default *"10s"*, positive. How often a waiter re-checks.
+
+*max-wait*
+	Go duration, default *"60m"*; *"0"* waits without limit.
+
+*idle-grace*
+	Go duration, default *"10m"*; *"0"* turns it off.
 
 *record-costs*
 	Bool, default *true*. After every pre-merge gate (merges, checks and the

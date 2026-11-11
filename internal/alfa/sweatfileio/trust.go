@@ -305,6 +305,44 @@ func TrustedHostQueueRecordCosts(h sweatfile.Hierarchy, home, repoRoot string) (
 	return record, untrusted
 }
 
+// TrustedHostQueue returns the [host-queue] admission keys honoured for the
+// repo (#424 step 4), each the last value a layer above the repo sets, with
+// RecordCosts left out (TrustedHostQueueRecordCosts reads it). The paths of
+// layers whose [host-queue] was ignored (the repo and worktree files) are
+// returned in untrusted. Parsing and defaults are hostqueue.ConfigFrom's.
+func TrustedHostQueue(h sweatfile.Hierarchy, home, repoRoot string) (hq sweatfile.HostQueue, untrusted []string) {
+	for _, src := range h.Sources {
+		if src.SkipReason != "" || !src.Found || src.File.HostQueue == nil {
+			continue
+		}
+		if !LayerAboveRepo(src.Path, home, repoRoot) {
+			untrusted = append(untrusted, src.Path)
+			continue
+		}
+		in := src.File.HostQueue
+		overlay(&hq.Enable, in.Enable)
+		overlay(&hq.MaxGates, in.MaxGates)
+		overlay(&hq.MemoryFloor, in.MemoryFloor)
+		overlay(&hq.MemoryResume, in.MemoryResume)
+		overlay(&hq.PressureMemoryAvg10, in.PressureMemoryAvg10)
+		overlay(&hq.SwapCeiling, in.SwapCeiling)
+		overlay(&hq.DiskFloor, in.DiskFloor)
+		overlay(&hq.LoadThreshold, in.LoadThreshold)
+		overlay(&hq.Settle, in.Settle)
+		overlay(&hq.Poll, in.Poll)
+		overlay(&hq.MaxWait, in.MaxWait)
+		overlay(&hq.IdleGrace, in.IdleGrace)
+	}
+	return hq, untrusted
+}
+
+// overlay sets *dst to v when the layer sets it: a nearer layer's value wins.
+func overlay[T any](dst **T, v *T) {
+	if v != nil {
+		*dst = v
+	}
+}
+
 // TrustedRepairGenerated returns the [hooks].repair-generated mode honoured for
 // the repo: a scalar, the last honoured layer wins, protect when none sets it.
 // protect and fail only narrow what repair may do to generated files, so they

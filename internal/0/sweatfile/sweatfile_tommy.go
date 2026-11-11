@@ -1059,6 +1059,78 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 				_vHostQueueRecordCosts.MarkConsumed()
 			}
 		}
+		if _vHostQueueEnable, _ok := _vHostQueue.Field("enable"); _ok && _vHostQueueEnable.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHostQueueEnable.Leaf); _xok {
+				hostQueueVal13.Enable = &_x
+				_vHostQueueEnable.MarkConsumed()
+			}
+		}
+		if _vHostQueueMaxGates, _ok := _vHostQueue.Field("max-gates"); _ok && _vHostQueueMaxGates.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractInt(_vHostQueueMaxGates.Leaf); _xok {
+				hostQueueVal13.MaxGates = &_x
+				_vHostQueueMaxGates.MarkConsumed()
+			}
+		}
+		if _vHostQueueMemoryFloor, _ok := _vHostQueue.Field("memory-floor"); _ok && _vHostQueueMemoryFloor.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHostQueueMemoryFloor.Leaf); _xok {
+				hostQueueVal13.MemoryFloor = &_x
+				_vHostQueueMemoryFloor.MarkConsumedString()
+			}
+		}
+		if _vHostQueueMemoryResume, _ok := _vHostQueue.Field("memory-resume"); _ok && _vHostQueueMemoryResume.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHostQueueMemoryResume.Leaf); _xok {
+				hostQueueVal13.MemoryResume = &_x
+				_vHostQueueMemoryResume.MarkConsumedString()
+			}
+		}
+		if _vHostQueuePressureMemoryAvg10, _ok := _vHostQueue.Field("pressure-memory-avg10"); _ok && _vHostQueuePressureMemoryAvg10.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractFloat64(_vHostQueuePressureMemoryAvg10.Leaf); _xok {
+				hostQueueVal13.PressureMemoryAvg10 = &_x
+				_vHostQueuePressureMemoryAvg10.MarkConsumed()
+			}
+		}
+		if _vHostQueueSwapCeiling, _ok := _vHostQueue.Field("swap-ceiling"); _ok && _vHostQueueSwapCeiling.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHostQueueSwapCeiling.Leaf); _xok {
+				hostQueueVal13.SwapCeiling = &_x
+				_vHostQueueSwapCeiling.MarkConsumedString()
+			}
+		}
+		if _vHostQueueDiskFloor, _ok := _vHostQueue.Field("disk-floor"); _ok && _vHostQueueDiskFloor.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHostQueueDiskFloor.Leaf); _xok {
+				hostQueueVal13.DiskFloor = &_x
+				_vHostQueueDiskFloor.MarkConsumedString()
+			}
+		}
+		if _vHostQueueLoadThreshold, _ok := _vHostQueue.Field("load-threshold"); _ok && _vHostQueueLoadThreshold.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractFloat64(_vHostQueueLoadThreshold.Leaf); _xok {
+				hostQueueVal13.LoadThreshold = &_x
+				_vHostQueueLoadThreshold.MarkConsumed()
+			}
+		}
+		if _vHostQueueSettle, _ok := _vHostQueue.Field("settle"); _ok && _vHostQueueSettle.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHostQueueSettle.Leaf); _xok {
+				hostQueueVal13.Settle = &_x
+				_vHostQueueSettle.MarkConsumedString()
+			}
+		}
+		if _vHostQueuePoll, _ok := _vHostQueue.Field("poll"); _ok && _vHostQueuePoll.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHostQueuePoll.Leaf); _xok {
+				hostQueueVal13.Poll = &_x
+				_vHostQueuePoll.MarkConsumedString()
+			}
+		}
+		if _vHostQueueMaxWait, _ok := _vHostQueue.Field("max-wait"); _ok && _vHostQueueMaxWait.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHostQueueMaxWait.Leaf); _xok {
+				hostQueueVal13.MaxWait = &_x
+				_vHostQueueMaxWait.MarkConsumedString()
+			}
+		}
+		if _vHostQueueIdleGrace, _ok := _vHostQueue.Field("idle-grace"); _ok && _vHostQueueIdleGrace.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHostQueueIdleGrace.Leaf); _xok {
+				hostQueueVal13.IdleGrace = &_x
+				_vHostQueueIdleGrace.MarkConsumedString()
+			}
+		}
 		d.data.HostQueue = hostQueueVal13
 	} else {
 		hostQueueVal13 := &HostQueue{}
@@ -1068,6 +1140,90 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractBool(_vRecordCosts.Leaf); _xok {
 				hostQueueVal13.RecordCosts = &_x
 				_vRecordCosts.MarkConsumed()
+			}
+		}
+		if _vEnable, _ok := model.Field("enable"); _ok && _vEnable.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractBool(_vEnable.Leaf); _xok {
+				hostQueueVal13.Enable = &_x
+				_vEnable.MarkConsumed()
+			}
+		}
+		if _vMaxGates, _ok := model.Field("max-gates"); _ok && _vMaxGates.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractInt(_vMaxGates.Leaf); _xok {
+				hostQueueVal13.MaxGates = &_x
+				_vMaxGates.MarkConsumed()
+			}
+		}
+		if _vMemoryFloor, _ok := model.Field("memory-floor"); _ok && _vMemoryFloor.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractString(_vMemoryFloor.Leaf); _xok {
+				hostQueueVal13.MemoryFloor = &_x
+				_vMemoryFloor.MarkConsumedString()
+			}
+		}
+		if _vMemoryResume, _ok := model.Field("memory-resume"); _ok && _vMemoryResume.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractString(_vMemoryResume.Leaf); _xok {
+				hostQueueVal13.MemoryResume = &_x
+				_vMemoryResume.MarkConsumedString()
+			}
+		}
+		if _vPressureMemoryAvg10, _ok := model.Field("pressure-memory-avg10"); _ok && _vPressureMemoryAvg10.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractFloat64(_vPressureMemoryAvg10.Leaf); _xok {
+				hostQueueVal13.PressureMemoryAvg10 = &_x
+				_vPressureMemoryAvg10.MarkConsumed()
+			}
+		}
+		if _vSwapCeiling, _ok := model.Field("swap-ceiling"); _ok && _vSwapCeiling.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractString(_vSwapCeiling.Leaf); _xok {
+				hostQueueVal13.SwapCeiling = &_x
+				_vSwapCeiling.MarkConsumedString()
+			}
+		}
+		if _vDiskFloor, _ok := model.Field("disk-floor"); _ok && _vDiskFloor.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractString(_vDiskFloor.Leaf); _xok {
+				hostQueueVal13.DiskFloor = &_x
+				_vDiskFloor.MarkConsumedString()
+			}
+		}
+		if _vLoadThreshold, _ok := model.Field("load-threshold"); _ok && _vLoadThreshold.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractFloat64(_vLoadThreshold.Leaf); _xok {
+				hostQueueVal13.LoadThreshold = &_x
+				_vLoadThreshold.MarkConsumed()
+			}
+		}
+		if _vSettle, _ok := model.Field("settle"); _ok && _vSettle.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractString(_vSettle.Leaf); _xok {
+				hostQueueVal13.Settle = &_x
+				_vSettle.MarkConsumedString()
+			}
+		}
+		if _vPoll, _ok := model.Field("poll"); _ok && _vPoll.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractString(_vPoll.Leaf); _xok {
+				hostQueueVal13.Poll = &_x
+				_vPoll.MarkConsumedString()
+			}
+		}
+		if _vMaxWait, _ok := model.Field("max-wait"); _ok && _vMaxWait.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractString(_vMaxWait.Leaf); _xok {
+				hostQueueVal13.MaxWait = &_x
+				_vMaxWait.MarkConsumedString()
+			}
+		}
+		if _vIdleGrace, _ok := model.Field("idle-grace"); _ok && _vIdleGrace.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractString(_vIdleGrace.Leaf); _xok {
+				hostQueueVal13.IdleGrace = &_x
+				_vIdleGrace.MarkConsumedString()
 			}
 		}
 		if _foundHostQueue {
@@ -2003,6 +2159,66 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 		tableNode := cst.EnsureChildTable(d.cstDoc.Root(), d.cstDoc.Root(), "host-queue")
 		if d.data.HostQueue.RecordCosts != nil {
 			if err := cst.SetAny(tableNode, "record-costs", *d.data.HostQueue.RecordCosts); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.HostQueue.Enable != nil {
+			if err := cst.SetAny(tableNode, "enable", *d.data.HostQueue.Enable); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.HostQueue.MaxGates != nil {
+			if err := cst.SetAny(tableNode, "max-gates", *d.data.HostQueue.MaxGates); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.HostQueue.MemoryFloor != nil {
+			if err := cst.SetAny(tableNode, "memory-floor", *d.data.HostQueue.MemoryFloor); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.HostQueue.MemoryResume != nil {
+			if err := cst.SetAny(tableNode, "memory-resume", *d.data.HostQueue.MemoryResume); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.HostQueue.PressureMemoryAvg10 != nil {
+			if err := cst.SetAny(tableNode, "pressure-memory-avg10", *d.data.HostQueue.PressureMemoryAvg10); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.HostQueue.SwapCeiling != nil {
+			if err := cst.SetAny(tableNode, "swap-ceiling", *d.data.HostQueue.SwapCeiling); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.HostQueue.DiskFloor != nil {
+			if err := cst.SetAny(tableNode, "disk-floor", *d.data.HostQueue.DiskFloor); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.HostQueue.LoadThreshold != nil {
+			if err := cst.SetAny(tableNode, "load-threshold", *d.data.HostQueue.LoadThreshold); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.HostQueue.Settle != nil {
+			if err := cst.SetAny(tableNode, "settle", *d.data.HostQueue.Settle); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.HostQueue.Poll != nil {
+			if err := cst.SetAny(tableNode, "poll", *d.data.HostQueue.Poll); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.HostQueue.MaxWait != nil {
+			if err := cst.SetAny(tableNode, "max-wait", *d.data.HostQueue.MaxWait); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.HostQueue.IdleGrace != nil {
+			if err := cst.SetAny(tableNode, "idle-grace", *d.data.HostQueue.IdleGrace); err != nil {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
@@ -3323,6 +3539,78 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vHostQueueRecordCosts.MarkConsumed()
 			}
 		}
+		if _vHostQueueEnable, _ok := _vHostQueue.Field("enable"); _ok && _vHostQueueEnable.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractBool(_vHostQueueEnable.Leaf); _xok {
+				hostQueueVal13.Enable = &_x
+				_vHostQueueEnable.MarkConsumed()
+			}
+		}
+		if _vHostQueueMaxGates, _ok := _vHostQueue.Field("max-gates"); _ok && _vHostQueueMaxGates.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractInt(_vHostQueueMaxGates.Leaf); _xok {
+				hostQueueVal13.MaxGates = &_x
+				_vHostQueueMaxGates.MarkConsumed()
+			}
+		}
+		if _vHostQueueMemoryFloor, _ok := _vHostQueue.Field("memory-floor"); _ok && _vHostQueueMemoryFloor.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHostQueueMemoryFloor.Leaf); _xok {
+				hostQueueVal13.MemoryFloor = &_x
+				_vHostQueueMemoryFloor.MarkConsumedString()
+			}
+		}
+		if _vHostQueueMemoryResume, _ok := _vHostQueue.Field("memory-resume"); _ok && _vHostQueueMemoryResume.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHostQueueMemoryResume.Leaf); _xok {
+				hostQueueVal13.MemoryResume = &_x
+				_vHostQueueMemoryResume.MarkConsumedString()
+			}
+		}
+		if _vHostQueuePressureMemoryAvg10, _ok := _vHostQueue.Field("pressure-memory-avg10"); _ok && _vHostQueuePressureMemoryAvg10.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractFloat64(_vHostQueuePressureMemoryAvg10.Leaf); _xok {
+				hostQueueVal13.PressureMemoryAvg10 = &_x
+				_vHostQueuePressureMemoryAvg10.MarkConsumed()
+			}
+		}
+		if _vHostQueueSwapCeiling, _ok := _vHostQueue.Field("swap-ceiling"); _ok && _vHostQueueSwapCeiling.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHostQueueSwapCeiling.Leaf); _xok {
+				hostQueueVal13.SwapCeiling = &_x
+				_vHostQueueSwapCeiling.MarkConsumedString()
+			}
+		}
+		if _vHostQueueDiskFloor, _ok := _vHostQueue.Field("disk-floor"); _ok && _vHostQueueDiskFloor.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHostQueueDiskFloor.Leaf); _xok {
+				hostQueueVal13.DiskFloor = &_x
+				_vHostQueueDiskFloor.MarkConsumedString()
+			}
+		}
+		if _vHostQueueLoadThreshold, _ok := _vHostQueue.Field("load-threshold"); _ok && _vHostQueueLoadThreshold.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractFloat64(_vHostQueueLoadThreshold.Leaf); _xok {
+				hostQueueVal13.LoadThreshold = &_x
+				_vHostQueueLoadThreshold.MarkConsumed()
+			}
+		}
+		if _vHostQueueSettle, _ok := _vHostQueue.Field("settle"); _ok && _vHostQueueSettle.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHostQueueSettle.Leaf); _xok {
+				hostQueueVal13.Settle = &_x
+				_vHostQueueSettle.MarkConsumedString()
+			}
+		}
+		if _vHostQueuePoll, _ok := _vHostQueue.Field("poll"); _ok && _vHostQueuePoll.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHostQueuePoll.Leaf); _xok {
+				hostQueueVal13.Poll = &_x
+				_vHostQueuePoll.MarkConsumedString()
+			}
+		}
+		if _vHostQueueMaxWait, _ok := _vHostQueue.Field("max-wait"); _ok && _vHostQueueMaxWait.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHostQueueMaxWait.Leaf); _xok {
+				hostQueueVal13.MaxWait = &_x
+				_vHostQueueMaxWait.MarkConsumedString()
+			}
+		}
+		if _vHostQueueIdleGrace, _ok := _vHostQueue.Field("idle-grace"); _ok && _vHostQueueIdleGrace.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vHostQueueIdleGrace.Leaf); _xok {
+				hostQueueVal13.IdleGrace = &_x
+				_vHostQueueIdleGrace.MarkConsumedString()
+			}
+		}
 		data.HostQueue = hostQueueVal13
 	} else {
 		hostQueueVal13 := &HostQueue{}
@@ -3332,6 +3620,90 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractBool(_vRecordCosts.Leaf); _xok {
 				hostQueueVal13.RecordCosts = &_x
 				_vRecordCosts.MarkConsumed()
+			}
+		}
+		if _vEnable, _ok := sub.Field("enable"); _ok && _vEnable.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractBool(_vEnable.Leaf); _xok {
+				hostQueueVal13.Enable = &_x
+				_vEnable.MarkConsumed()
+			}
+		}
+		if _vMaxGates, _ok := sub.Field("max-gates"); _ok && _vMaxGates.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractInt(_vMaxGates.Leaf); _xok {
+				hostQueueVal13.MaxGates = &_x
+				_vMaxGates.MarkConsumed()
+			}
+		}
+		if _vMemoryFloor, _ok := sub.Field("memory-floor"); _ok && _vMemoryFloor.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractString(_vMemoryFloor.Leaf); _xok {
+				hostQueueVal13.MemoryFloor = &_x
+				_vMemoryFloor.MarkConsumedString()
+			}
+		}
+		if _vMemoryResume, _ok := sub.Field("memory-resume"); _ok && _vMemoryResume.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractString(_vMemoryResume.Leaf); _xok {
+				hostQueueVal13.MemoryResume = &_x
+				_vMemoryResume.MarkConsumedString()
+			}
+		}
+		if _vPressureMemoryAvg10, _ok := sub.Field("pressure-memory-avg10"); _ok && _vPressureMemoryAvg10.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractFloat64(_vPressureMemoryAvg10.Leaf); _xok {
+				hostQueueVal13.PressureMemoryAvg10 = &_x
+				_vPressureMemoryAvg10.MarkConsumed()
+			}
+		}
+		if _vSwapCeiling, _ok := sub.Field("swap-ceiling"); _ok && _vSwapCeiling.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractString(_vSwapCeiling.Leaf); _xok {
+				hostQueueVal13.SwapCeiling = &_x
+				_vSwapCeiling.MarkConsumedString()
+			}
+		}
+		if _vDiskFloor, _ok := sub.Field("disk-floor"); _ok && _vDiskFloor.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractString(_vDiskFloor.Leaf); _xok {
+				hostQueueVal13.DiskFloor = &_x
+				_vDiskFloor.MarkConsumedString()
+			}
+		}
+		if _vLoadThreshold, _ok := sub.Field("load-threshold"); _ok && _vLoadThreshold.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractFloat64(_vLoadThreshold.Leaf); _xok {
+				hostQueueVal13.LoadThreshold = &_x
+				_vLoadThreshold.MarkConsumed()
+			}
+		}
+		if _vSettle, _ok := sub.Field("settle"); _ok && _vSettle.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractString(_vSettle.Leaf); _xok {
+				hostQueueVal13.Settle = &_x
+				_vSettle.MarkConsumedString()
+			}
+		}
+		if _vPoll, _ok := sub.Field("poll"); _ok && _vPoll.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractString(_vPoll.Leaf); _xok {
+				hostQueueVal13.Poll = &_x
+				_vPoll.MarkConsumedString()
+			}
+		}
+		if _vMaxWait, _ok := sub.Field("max-wait"); _ok && _vMaxWait.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractString(_vMaxWait.Leaf); _xok {
+				hostQueueVal13.MaxWait = &_x
+				_vMaxWait.MarkConsumedString()
+			}
+		}
+		if _vIdleGrace, _ok := sub.Field("idle-grace"); _ok && _vIdleGrace.Kind == cst.VLeaf {
+			_foundHostQueue = true
+			if _x, _xok := cst.ExtractString(_vIdleGrace.Leaf); _xok {
+				hostQueueVal13.IdleGrace = &_x
+				_vIdleGrace.MarkConsumedString()
 			}
 		}
 		if _foundHostQueue {
@@ -4251,6 +4623,66 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		tableNode := cst.EnsureChildTable(doc.Root(), container, "host-queue")
 		if data.HostQueue.RecordCosts != nil {
 			if err := cst.SetAny(tableNode, "record-costs", *data.HostQueue.RecordCosts); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.HostQueue.Enable != nil {
+			if err := cst.SetAny(tableNode, "enable", *data.HostQueue.Enable); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.HostQueue.MaxGates != nil {
+			if err := cst.SetAny(tableNode, "max-gates", *data.HostQueue.MaxGates); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.HostQueue.MemoryFloor != nil {
+			if err := cst.SetAny(tableNode, "memory-floor", *data.HostQueue.MemoryFloor); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.HostQueue.MemoryResume != nil {
+			if err := cst.SetAny(tableNode, "memory-resume", *data.HostQueue.MemoryResume); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.HostQueue.PressureMemoryAvg10 != nil {
+			if err := cst.SetAny(tableNode, "pressure-memory-avg10", *data.HostQueue.PressureMemoryAvg10); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.HostQueue.SwapCeiling != nil {
+			if err := cst.SetAny(tableNode, "swap-ceiling", *data.HostQueue.SwapCeiling); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.HostQueue.DiskFloor != nil {
+			if err := cst.SetAny(tableNode, "disk-floor", *data.HostQueue.DiskFloor); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.HostQueue.LoadThreshold != nil {
+			if err := cst.SetAny(tableNode, "load-threshold", *data.HostQueue.LoadThreshold); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.HostQueue.Settle != nil {
+			if err := cst.SetAny(tableNode, "settle", *data.HostQueue.Settle); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.HostQueue.Poll != nil {
+			if err := cst.SetAny(tableNode, "poll", *data.HostQueue.Poll); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.HostQueue.MaxWait != nil {
+			if err := cst.SetAny(tableNode, "max-wait", *data.HostQueue.MaxWait); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.HostQueue.IdleGrace != nil {
+			if err := cst.SetAny(tableNode, "idle-grace", *data.HostQueue.IdleGrace); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}

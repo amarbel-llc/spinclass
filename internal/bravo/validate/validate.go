@@ -15,6 +15,7 @@ import (
 	"code.linenisgreat.com/spinclass/internal/0/statsd"
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/0/tap"
+	"code.linenisgreat.com/spinclass/internal/alfa/hostqueue"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 )
 
@@ -834,6 +835,25 @@ func CheckHostQueue(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 	}}
 }
 
+// CheckHostQueueValues reports a [host-queue] value the queue cannot use (#424
+// step 4): a size, duration or bound hostqueue.ConfigFrom refuses. The layer is
+// judged on its own over the defaults, whatever enable says, so a bad value is
+// caught before someone turns the queue on.
+func CheckHostQueueValues(sf sweatfile.Sweatfile) []Issue {
+	if sf.HostQueue == nil {
+		return nil
+	}
+	_, _, err := hostqueue.ConfigFrom(*sf.HostQueue)
+	if err == nil {
+		return nil
+	}
+	return []Issue{{
+		Message:  err.Error() + " (an enabled queue with an invalid value is left off, and every gate runs unqueued with a warning)",
+		Severity: SeverityError,
+		Field:    "host-queue",
+	}}
+}
+
 // CheckRepairGenerated warns about a repo-level [hooks].repair-generated =
 // "allow": allow widens what repair may do to generated files, so it is read
 // only from layers above the repo and a value there is ignored. protect and fail
@@ -1344,6 +1364,9 @@ func Run(w io.Writer, home, repoDir string) int {
 
 		for _, iss := range CheckHostQueue(src.File, sweatfileio.LayerAboveRepo(src.Path, home, mainRoot)) {
 			sub.Ok(fmt.Sprintf("host-queue valid # warning: %s", iss.Message))
+		}
+		for _, iss := range CheckHostQueueValues(src.File) {
+			sub.NotOk("host-queue valid", map[string]string{"severity": iss.Severity, "message": iss.Message})
 		}
 
 		if src.File.Permissions != nil {

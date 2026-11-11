@@ -503,6 +503,14 @@ func emitHookNotices(rep *crap.Reporter, notices []string) {
 }
 
 func runHookPhase(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.Hierarchy, wtPath, cmd, desc string, activity io.Writer, run func(ctx context.Context, sink io.Writer) error) (BlobLink, error) {
+	// The host queue (#424) admits the gate before anything starts, so a long
+	// wait holds no madder process; off with no [host-queue] admission policy.
+	releaseSlot, err := admitHostSlot(ctx, rep, hierarchy, wtPath, activity)
+	if err != nil {
+		return BlobLink{}, err
+	}
+	defer releaseSlot()
+
 	format := hierarchy.Merged.PreMergeOutputFormatValue()
 	madderPinned := embeds.MadderBin() != ""
 

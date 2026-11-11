@@ -291,13 +291,29 @@ type Health struct {
 // HostQueue is host-wide gate policy (#424,
 // docs/plans/2026-11-10-424-host-admission-queue-follow-up.md). It is host
 // policy, so like Health it is trusted only from layers above the repo, read
-// ONLY through sweatfileio's Trusted* resolvers (TrustedHostQueueRecordCosts),
-// and never merged. Later keys (the admission thresholds) join it here.
+// ONLY through sweatfileio's Trusted* resolvers (TrustedHostQueueRecordCosts,
+// TrustedHostQueue), and never merged.
 type HostQueue struct {
 	// RecordCosts records one cost record per pre-merge gate (statsd and
 	// $XDG_STATE_HOME/spinclass/host-queue/history.ndjson). Last trusted layer
 	// that sets it wins; unset means true.
 	RecordCosts *bool `toml:"record-costs"`
+
+	// Admission (#424 steps 3-4): with Enable true every gate waits for a host
+	// slot. Off unless a trusted layer enables it. Each key: the last trusted
+	// layer that sets it wins; unset keeps hostqueue.DefaultConfig's value.
+	Enable              *bool    `toml:"enable"`
+	MaxGates            *int     `toml:"max-gates"`
+	MemoryFloor         *string  `toml:"memory-floor"`  // a size: "4GiB"
+	MemoryResume        *string  `toml:"memory-resume"` // a size: "6GiB"
+	PressureMemoryAvg10 *float64 `toml:"pressure-memory-avg10"`
+	SwapCeiling         *string  `toml:"swap-ceiling"` // a size
+	DiskFloor           *string  `toml:"disk-floor"`   // a size
+	LoadThreshold       *float64 `toml:"load-threshold"`
+	Settle              *string  `toml:"settle"`     // a Go duration
+	Poll                *string  `toml:"poll"`       // a Go duration
+	MaxWait             *string  `toml:"max-wait"`   // a Go duration; "0" for no limit
+	IdleGrace           *string  `toml:"idle-grace"` // a Go duration; "0" turns it off
 }
 
 // Madder configures what spinclass keeps in its per-user madder store and the

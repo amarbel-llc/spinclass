@@ -857,6 +857,24 @@ func TestCheckHostQueueWarnsInRepoLayer(t *testing.T) {
 	}
 }
 
+// #424 step 4: an invalid [host-queue] value is an error whether or not the
+// queue is enabled; a valid one, or none, is silent.
+func TestCheckHostQueueValues(t *testing.T) {
+	bad, good, zero := "lots", "4GiB", 0
+	if got := CheckHostQueueValues(sweatfile.Sweatfile{HostQueue: &sweatfile.HostQueue{MemoryFloor: &bad}}); len(got) != 1 || got[0].Severity != SeverityError {
+		t.Errorf("bad memory-floor: %+v", got)
+	}
+	if got := CheckHostQueueValues(sweatfile.Sweatfile{HostQueue: &sweatfile.HostQueue{MaxGates: &zero}}); len(got) != 1 {
+		t.Errorf("max-gates 0: %+v", got)
+	}
+	if got := CheckHostQueueValues(sweatfile.Sweatfile{HostQueue: &sweatfile.HostQueue{MemoryFloor: &good}}); len(got) != 0 {
+		t.Errorf("valid memory-floor: %+v", got)
+	}
+	if got := CheckHostQueueValues(sweatfile.Sweatfile{}); len(got) != 0 {
+		t.Errorf("no table: %+v", got)
+	}
+}
+
 // [hooks] repair-generated: allow is honoured only above the repo, so a
 // repo-level allow warns; protect and fail are honoured everywhere.
 func TestCheckRepairGeneratedWarnsOnARepoLayerAllow(t *testing.T) {
