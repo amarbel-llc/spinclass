@@ -101,7 +101,7 @@ pre-merge = "true"
 enable = true
 '
   cd "$a" || return
-  run_sc check
+  run timeout --preserve-status 30s "${SPINCLASS_BIN:-spinclass}" --format plain check
   assert_success
   assert [ ! -e "$XDG_RUNTIME_DIR/spinclass/host-queue" ]
 }
