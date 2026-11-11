@@ -256,6 +256,53 @@ func TestCreatePinsTheRevokeCommandAndIgnoresTheWorktreeLayer(t *testing.T) {
 	}
 }
 
+// A repo's own [auth], even committed on the default branch, can no longer
+// override the host's: the trusted (parent) layer's mint runs and its
+// revoke-command is pinned, the repo layer's mint never runs, and a SKIP names
+// the ignored file. This is the nikulin case: the repo's own card-login mint
+// would fail where the host grants another account.
+func TestCreateIgnoresRepoLayerAuth(t *testing.T) {
+	a := setupAuthRepo(t)
+	writeFile(t, a.parentLayer(), "[auth]\nmint-command = \"echo tok\"\nrevoke-command = \"true\"\n")
+	repoMarker := filepath.Join(a.root, "repo-mint")
+	writeFile(t, a.repoLayer(), "[auth]\nmint-command = \"touch "+repoMarker+"; exit 9\"\n"+
+		"revoke-command = \"touch "+repoMarker+"\"\nforge-hosts = [\"elsewhere.test\"]\n")
+	for _, args := range [][]string{{"add", "sweatfile"}, {"commit", "-m", "repo auth"}} {
+		if out, err := exec.Command("git", append([]string{"-C", a.repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	out, err := a.create(t, false)
+	if err != nil {
+		t.Fatalf("Create: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(repoMarker); err == nil {
+		t.Error("the repo sweatfile's mint-command ran")
+	}
+	var skip string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "# SKIP") && strings.Contains(line, "mint-command") {
+			skip = line
+		}
+	}
+	// The repo layer is read as committed on the default branch, so it is named
+	// by its ref.
+	if skip == "" || !strings.Contains(skip, "master:sweatfile") {
+		t.Errorf("want a SKIP naming the ignored [auth] in master:sweatfile, got:\n%s", out)
+	}
+	if !strings.Contains(out, "ok") || !strings.Contains(out, "mint credential feature-x") || !auth.Minted(a.rp.AbsPath) {
+		t.Errorf("the trusted mint did not run (a repo-layer forge-hosts must not skip it):\n%s", out)
+	}
+	st, err := session.Read(a.repo, "feature-x")
+	if err != nil || st.Credential == nil {
+		t.Fatalf("session record: %+v, %v", st, err)
+	}
+	if st.Credential.RevokeCommand == nil || *st.Credential.RevokeCommand != "true" {
+		t.Errorf("pinned revoke-command = %v, want the trusted layer's \"true\"", st.Credential.RevokeCommand)
+	}
+}
+
 // Regression pin for Decision 6: with no resolver anywhere the built-in
 // ssh→https rewrite is unchanged.
 func TestCreateWithoutURLResolverKeepsBuiltinRewrite(t *testing.T) {

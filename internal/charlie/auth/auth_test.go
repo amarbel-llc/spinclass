@@ -352,14 +352,22 @@ func TestRevokeRunsWithoutTheCredentialFile(t *testing.T) {
 }
 
 // A record minted before the pin falls back to the global and ancestor layers
-// plus the repo layer COMMITTED at the default branch; the worktree's copy is
-// never read, and the fallback is reported.
-func TestLegacyRecordFallsBackToTheDefaultBranchNotTheWorktree(t *testing.T) {
+// only: neither the repo layer, even committed at the default branch, nor the
+// worktree's copy is read, and the fallback is reported.
+func TestLegacyRecordFallsBackToTrustedLayersOnly(t *testing.T) {
 	repoPath, wtPath, id := setupRepo(t)
 	dir := t.TempDir()
-	good, evil := filepath.Join(dir, "good"), filepath.Join(dir, "evil")
+	good, evil, evilRepo := filepath.Join(dir, "good"), filepath.Join(dir, "evil"), filepath.Join(dir, "evil-repo")
+	home, _ := os.UserHomeDir()
+	global := filepath.Join(home, ".config", "spinclass", "sweatfile")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte("[auth]\nrevoke-command = \"touch "+good+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(repoPath, "sweatfile"),
-		[]byte("[auth]\nrevoke-command = \"touch "+good+"\"\n"), 0o644); err != nil {
+		[]byte("[auth]\nrevoke-command = \"touch "+evilRepo+"\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	runGit(t, repoPath, "add", "sweatfile")
@@ -385,10 +393,13 @@ func TestLegacyRecordFallsBackToTheDefaultBranchNotTheWorktree(t *testing.T) {
 		t.Errorf("legacy fallback not reported: %q", o.Note)
 	}
 	if _, err := os.Stat(good); err != nil {
-		t.Errorf("the default-branch command did not run: %v", err)
+		t.Errorf("the global layer's command did not run: %v", err)
 	}
 	if _, err := os.Stat(evil); err == nil {
 		t.Error("the worktree sweatfile's revoke-command ran")
+	}
+	if _, err := os.Stat(evilRepo); err == nil {
+		t.Error("the repo sweatfile's revoke-command ran")
 	}
 }
 

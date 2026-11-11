@@ -198,11 +198,12 @@ func ProvisionCredential(
 	}
 
 	mintDesc := "mint credential " + worktreePath.Branch
-	// [auth].mint-command and revoke-command run on the frontend, so they are
-	// resolved from the default branch's committed sweatfile (plus the global and
-	// ancestor layers), never from the new worktree's own copy: a resurrected
-	// worktree is rebuilt from a commit the worker authored. The resolved
-	// revoke-command is pinned on the session record by Mint.
+	// [auth].mint-command and revoke-command run on the frontend, unconfined,
+	// with the operator's card or agent, so they are honoured only from the
+	// global and parent-directory sweatfiles (sweatfileio.TrustedAuth): never the
+	// repo's own sweatfile, which is whatever lands on the default branch, and
+	// never the new worktree's copy. The resolved revoke-command is pinned on the
+	// session record by Mint.
 	var (
 		outcome auth.MintOutcome
 		mintErr error
@@ -210,7 +211,17 @@ func ProvisionCredential(
 	if ah, _, herr := auth.DefaultBranchHierarchy(home, worktreePath.RepoPath); herr != nil {
 		mintErr = fmt.Errorf("[auth] loading sweatfiles: %w", herr)
 	} else {
-		outcome, mintErr = auth.Mint(ctx, ah.Merged, id, resolver)
+		trusted, ignored := sweatfileio.TrustedAuth(ah, home, worktreePath.RepoPath)
+		if len(ignored) > 0 {
+			msg := "ignored [auth] mint-command/revoke-command/forge-hosts in " + strings.Join(ignored, ", ") +
+				": only sweatfiles above the repo are trusted (FDR 0028)"
+			if tw != nil {
+				tw.Skip("auth "+worktreePath.Branch, msg)
+			} else {
+				log.Warn(msg, "branch", worktreePath.Branch)
+			}
+		}
+		outcome, mintErr = auth.Mint(ctx, sweatfile.Sweatfile{Auth: &trusted}, id, resolver)
 	}
 	switch {
 	case mintErr != nil && !allowNoCredential:

@@ -7,6 +7,8 @@ promotion-criteria: A working [auth] mint→inject→revoke lifecycle drives a p
 # Per-session forge push credentials
 
 > **Amended 2026-09-29 (#335, #319):** pluggable, trusted url-resolver.
+>
+> **Amended 2026-11-11:** every `[auth]` key is trusted-layers-only. `mint-command`, `revoke-command` and `forge-hosts` are now read only from the global and parent-directory sweatfiles (`sweatfileio.TrustedAuth`), like `url-resolver`; a repo's own `[auth]`, even committed on the default branch, is ignored with a SKIP point at creation and an `sc validate` warning. Reason: the mint-command runs on the frontend with the operator's card or agent at every session create, and a repo-level value both let landed content choose it and overrode a host's grant (a spinclass checkout on a host whose layer mints for a restricted account still ran the repo's `--card-login` mint and failed). The legacy revoke fallback reads the same trusted layers. This supersedes the "repo sweatfile as committed at the default branch" input below and closes the residual it names.
 
 ## Problem Statement
 

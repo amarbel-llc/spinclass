@@ -518,3 +518,36 @@ func TrustedURLResolver(h sweatfile.Hierarchy, home, repoRoot string) (command s
 	}
 	return command, untrusted
 }
+
+// TrustedAuth returns the [auth] mint-command, revoke-command and forge-hosts
+// honoured for the repo, merged across the layers above it with the usual
+// [auth] rules (scalar override, forge-hosts replaced wholesale). The
+// mint-command runs on the frontend, unconfined, with the operator's card or
+// agent at every session create, and the repo layer is whatever lands on the
+// default branch, so only the global and parent-directory sweatfiles may choose
+// it: a repo's own [auth] can no longer override a host's grant flags. Layers
+// that may not set it (repo, its realpath twin, committed-blob labels) are
+// never honoured; the paths of those that set any of the three keys are
+// returned in untrusted so callers can surface them. url-resolver is not
+// carried: read it through TrustedURLResolver.
+func TrustedAuth(h sweatfile.Hierarchy, home, repoRoot string) (a sweatfile.Auth, untrusted []string) {
+	var acc sweatfile.Sweatfile
+	for _, src := range h.Sources {
+		if src.SkipReason != "" || !src.Found || src.File.Auth == nil {
+			continue
+		}
+		layer := *src.File.Auth
+		if layer.MintCommand == nil && layer.RevokeCommand == nil && layer.ForgeHosts == nil {
+			continue
+		}
+		if !LayerAboveRepo(src.Path, home, repoRoot) {
+			untrusted = append(untrusted, src.Path)
+			continue
+		}
+		acc = acc.MergeWith(sweatfile.Sweatfile{Auth: &layer})
+	}
+	if acc.Auth != nil {
+		a = *acc.Auth
+	}
+	return a, untrusted
+}

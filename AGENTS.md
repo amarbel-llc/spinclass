@@ -148,8 +148,9 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
   local `<default>`) → **post-merge** (FDR 0023, #244) with named targets +
   verify (FDR 0026, #273; config read at the LANDED sha, #300). Local-default
   caveats: `spinclass-local-default-ref(7)`.
-- **Per-session forge push credentials** (FDR 0028, #285, `internal/charlie/auth`;
-  `url-resolver` #335 is read only from layers above the repo).
+- **Per-session forge push credentials** (FDR 0028, #285, `internal/charlie/auth`):
+  every `[auth]` key is read only from layers above the repo
+  (`sweatfileio.TrustedAuth`, `TrustedURLResolver` #335).
 - **Guarded gate** (#449, FDR 0035; `merge/guarded.go`, `check.RunGuarded…`,
   `hookrun/confined.go`): a merge or check of a session launched confined
   runs no repair and, instead of the repo's pre-merge, the trusted

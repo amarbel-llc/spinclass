@@ -968,6 +968,14 @@ configured origin), *SPINCLASS\_FORGE\_HOST* (the origin's host), and
 *SPINCLASS\_FORGE\_REPO* (the origin's _owner/name_) in the environment;
 with a *url-resolver* the last two are the canonical ones.
 
+Every *[auth]* key is read only from the global sweatfile and the parent
+directories above the repo. The mint-command runs on the frontend, outside
+any confinement, with the operator's card or agent, and the repo's own
+sweatfile is whatever lands on the default branch, so a repo-level *[auth]*
+(*mint-command*, *revoke-command*, *forge-hosts* or *url-resolver*) is
+ignored, with a SKIP point at session creation and an *sc validate* warning.
+A host's grant flags can therefore not be overridden by a repo.
+
 *mint-command*
 	Prints the token on stdout. Spinclass stores it as a mode-600
 	git-credential-store file in its state directory,
@@ -984,7 +992,8 @@ with a *url-resolver* the last two are the canonical ones.
 	remotes on other hosts (GitHub) keep ssh. The root checkout's config is never touched. A
 	failed mint fails session creation and removes the half-built worktree:
 	a session that silently pushed off the agent instead would be exactly
-	the failure this exists to remove. *Merge:* scalar override.
+	the failure this exists to remove. *Merge:* scalar override, across the
+	global and parent-directory layers only.
 
 *revoke-command*
 	Revokes the token by session id. Run at *sc close* and when *sc clean*
@@ -994,7 +1003,8 @@ with a *url-resolver* the last two are the canonical ones.
 	outside spinclass). It runs on the ambient *PATH*, outside the
 	worktree's devshell (no *direnv exec*), like *url-resolver*: a blocked or
 	head-edited *.envrc* can neither stop nor steer a revocation, so its tools
-	must be on the operator's own *PATH*. *Merge:* scalar override.
+	must be on the operator's own *PATH*. *Merge:* scalar override, across
+	the global and parent-directory layers only.
 
 	The command is *pinned at mint*: the value resolved for the session
 	is stored in the session's credential record (frontend state, outside
@@ -1002,19 +1012,14 @@ with a *url-resolver* the last two are the canonical ones.
 	orphan sweep all run that stored string. None of them reloads the
 	session worktree's sweatfile, which a worker can write and which would
 	otherwise make the frontend run a command of the worker's choosing. At
-	mint, spinclass resolves *[auth]* from the global sweatfile, the parent
-	directories, and the repo sweatfile as committed at the default branch
-	(the fetched remote-tracking ref when there is one), never from the
-	new worktree's own copy (a resurrected worktree is rebuilt from a
-	commit the worker authored). The decision to revoke comes from the
-	session record (a credential recorded and not yet revoked), not from the
+	mint, spinclass resolves *[auth]* from the global sweatfile and the
+	parent directories only, never from the repo sweatfile or the new
+	worktree's own copy (a resurrected worktree is rebuilt from a commit
+	the worker authored). The decision to revoke comes from the session
+	record (a credential recorded and not yet revoked), not from the
 	credential file, and every reason nothing was revoked is reported as a
 	SKIP point. A session minted before the pin has no stored command: it
-	falls back to the global and parent-directory layers plus the repo
-	sweatfile at the default branch, and says so. Residual: a worker can
-	still change the revoke-command of the _next_ session by getting a
-	sweatfile change merged; that path is the merge gate's (attestation),
-	not this pin's.
+	falls back to the global and parent-directory layers, and says so.
 
 *forge-hosts*
 	Array of origin hosts the mint applies to. When non-empty, a session
@@ -1023,7 +1028,8 @@ with a *url-resolver* the last two are the canonical ones.
 	entry can cover a tree of repos without a GitHub-origin repo ever
 	minting a forge token and failing its creation. Empty or unset means
 	any host. *Merge:* override, not append — a nearer level replaces the
-	list, *[]* clears it, unset inherits.
+	list, *[]* clears it, unset inherits; global and parent-directory
+	layers only.
 
 *url-resolver*
 	Shell string that maps the configured origin to the forge's canonical
@@ -1059,7 +1065,7 @@ host for *mint-command*); otherwise session creation fails. A unit spec that bin
 See FDR 0028.
 
 *sc validate* warns when only one of the two commands is set, when
-*mint-command* is set without *forge-hosts*, and when *url-resolver* is set
+*mint-command* is set without *forge-hosts*, and when any *[auth]* key is set
 at the repo level (where it is ignored). A failed mint or a failed resolve
 (nonzero exit, timeout, or bad JSON) is fatal to session creation
 by default and the half-built worktree is removed;

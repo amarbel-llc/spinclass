@@ -659,6 +659,22 @@ func TestCheckAuthWarnsRepoLayerURLResolver(t *testing.T) {
 	}
 }
 
+// A repo-level mint-command (and friends) is ignored and warned about once; the
+// half-written-config warnings do not pile on for a table that is ignored.
+func TestCheckAuthWarnsRepoLayerMintCommand(t *testing.T) {
+	m := "papi mint"
+	sf := sweatfile.Sweatfile{Auth: &sweatfile.Auth{MintCommand: &m}}
+	issues := CheckAuth(sf, false)
+	if len(issues) != 1 || issues[0].Field != "auth" || !strings.Contains(issues[0].Message, "ignored") {
+		t.Errorf("repo layer: issues = %+v, want one ignored-[auth] warning", issues)
+	}
+	for _, iss := range CheckAuth(sf, true) {
+		if iss.Field == "auth" {
+			t.Errorf("above-repo mint-command should not be called ignored: %+v", iss)
+		}
+	}
+}
+
 func TestCheckRestartHandoffWarnsRepoLayer(t *testing.T) {
 	sf := sweatfile.Sweatfile{SessionEntry: &sweatfile.SessionEntry{Restart: []string{"clown", "restart"}}}
 	has := func(issues []Issue) bool {

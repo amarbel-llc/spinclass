@@ -163,7 +163,9 @@ type Hooks struct {
 // worktree, devshell-scoped like the lifecycle hooks, with the SPINCLASS_*
 // identity env plus SPINCLASS_FORGE_HOST / SPINCLASS_FORGE_REPO (owner/name)
 // derived from the origin remote. mint-command prints the token on stdout;
-// revoke-command revokes by session id. Scalar override down the cascade.
+// revoke-command revokes by session id. Scalar override down the cascade, but
+// only across the layers above the repo: read through sweatfileio.TrustedAuth,
+// never Hierarchy.Merged, which still merges every layer.
 type Auth struct {
 	MintCommand   *string `toml:"mint-command"`
 	RevokeCommand *string `toml:"revoke-command"`

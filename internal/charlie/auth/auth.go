@@ -376,9 +376,9 @@ type MintOutcome struct {
 }
 
 // Mint runs [auth].mint-command (and pins [auth].revoke-command on the session
-// record, see session.Credential.RevokeCommand) from sf, which the caller must
-// have loaded WITHOUT the session worktree's own sweatfile: a worker can write
-// that file (see DefaultBranchHierarchy). It runs the command in the session
+// record, see session.Credential.RevokeCommand) from sf, whose [auth] the
+// caller must take from sweatfileio.TrustedAuth: a worker can write the
+// worktree's and, through a landing, the repo's sweatfile. It runs the command in the session
 // worktree, writes the token it
 // prints as a mode-600 git-credential-store file, injects the worktree-scoped
 // git config, and records the mint (and the remote it wired) on the session
@@ -656,9 +656,9 @@ func Revoke(ctx context.Context, id Identity, w io.Writer) (RevokeOutcome, error
 
 // revokeResolver resolves the revoke-command for credential records. A record
 // with the command pinned at mint answers from the record. A legacy record
-// (minted before the pin) falls back to the global and ancestor sweatfiles plus
-// the repo layer read from the default branch (DefaultBranchHierarchy), never
-// the worktree's copy; that lookup is made at most once per resolver.
+// (minted before the pin) falls back to the global and ancestor sweatfiles
+// only (sweatfileio.TrustedAuth), never the repo's or the worktree's copy;
+// that lookup is made at most once per resolver.
 type revokeResolver struct {
 	legacyDone bool
 	legacyCmd  string
@@ -675,13 +675,13 @@ func (r *revokeResolver) command(c *session.Credential, repoPath string) (cmd, n
 		home, herr := os.UserHomeDir()
 		if herr != nil {
 			r.legacyErr = herr
-		} else if h, src, lerr := DefaultBranchHierarchy(home, repoPath); lerr != nil {
+		} else if h, _, lerr := DefaultBranchHierarchy(home, repoPath); lerr != nil {
 			r.legacyErr = lerr
 		} else {
-			if rc := h.Merged.AuthRevokeCommand(); rc != nil {
-				r.legacyCmd = strings.TrimSpace(*rc)
+			if a, _ := sweatfileio.TrustedAuth(h, home, repoPath); a.RevokeCommand != nil {
+				r.legacyCmd = strings.TrimSpace(*a.RevokeCommand)
 			}
-			r.legacyNote = "no revoke command stored at mint; using the global/ancestor sweatfiles and " + src
+			r.legacyNote = "no revoke command stored at mint; using the global/ancestor sweatfiles"
 		}
 	}
 	return r.legacyCmd, r.legacyNote, r.legacyErr

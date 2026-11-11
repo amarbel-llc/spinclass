@@ -68,6 +68,58 @@ func TestTrustedURLResolverHonoursOnlyLayersAboveRepo(t *testing.T) {
 	}
 }
 
+// [auth] mint-command, revoke-command and forge-hosts come only from layers
+// above the repo, merged with the usual override rules; a repo layer that sets
+// any of them is named in untrusted and changes nothing.
+func TestTrustedAuthHonoursOnlyLayersAboveRepo(t *testing.T) {
+	home := t.TempDir()
+	repo := filepath.Join(home, "work", "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("[auth]\n"+body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repoFile := filepath.Join(repo, "sweatfile")
+	write(filepath.Join(home, ".config", "spinclass", "sweatfile"), "mint-command = \"global mint\"\nrevoke-command = \"global revoke\"\n")
+	write(filepath.Join(home, "work", "sweatfile"), "mint-command = \"host mint\"\nforge-hosts = [\"forge.test\"]\n")
+	write(repoFile, "mint-command = \"repo mint\"\nrevoke-command = \"repo revoke\"\nforge-hosts = []\n")
+
+	h, err := LoadHierarchy(home, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, ignored := TrustedAuth(h, home, repo)
+	if a.MintCommand == nil || *a.MintCommand != "host mint" {
+		t.Errorf("mint-command = %v, want the parent's", a.MintCommand)
+	}
+	if a.RevokeCommand == nil || *a.RevokeCommand != "global revoke" {
+		t.Errorf("revoke-command = %v, want the global one inherited", a.RevokeCommand)
+	}
+	if !reflect.DeepEqual(a.ForgeHosts, []string{"forge.test"}) {
+		t.Errorf("forge-hosts = %v, want the parent's (the repo's [] must not clear it)", a.ForgeHosts)
+	}
+	if !reflect.DeepEqual(ignored, []string{repoFile}) {
+		t.Errorf("ignored = %v, want [%s]", ignored, repoFile)
+	}
+
+	// A repo layer that only sets url-resolver is not reported here.
+	writeResolver(t, repoFile, "repo")
+	h, err = LoadHierarchy(home, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ignored := TrustedAuth(h, home, repo); len(ignored) != 0 {
+		t.Errorf("ignored = %v, want none", ignored)
+	}
+}
+
 func TestTrustedSpawnProfileHonoursOnlyLayersAboveRepo(t *testing.T) {
 	home := t.TempDir()
 	repo := filepath.Join(home, "work", "repo")

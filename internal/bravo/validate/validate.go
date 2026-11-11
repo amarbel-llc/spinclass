@@ -554,8 +554,9 @@ func CheckMetrics(sf sweatfile.Sweatfile) []Issue {
 // revoke-command mints tokens nothing will ever revoke, and a revoke-command
 // alone never runs — both are almost certainly a half-written config.
 //
-// layerAboveRepo says whether sf came from a layer above the repo; a
-// url-resolver anywhere else is ignored (#335) and warned about.
+// layerAboveRepo says whether sf came from a layer above the repo; [auth]
+// anywhere else is ignored (url-resolver since #335, the rest since the
+// mint-command may no longer be chosen by the repo) and warned about.
 func CheckAuth(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 	if sf.Auth == nil {
 		return nil
@@ -563,6 +564,14 @@ func CheckAuth(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 	set := func(p *string) bool { return p != nil && strings.TrimSpace(*p) != "" }
 	mint, revoke := set(sf.Auth.MintCommand), set(sf.Auth.RevokeCommand)
 	var issues []Issue
+	if !layerAboveRepo && (sf.Auth.MintCommand != nil || sf.Auth.RevokeCommand != nil || sf.Auth.ForgeHosts != nil) {
+		issues = append(issues, Issue{
+			Message:  "[auth] sets `mint-command`, `revoke-command` or `forge-hosts` in a repo-level sweatfile: they are ignored — the mint-command runs on the frontend with the operator's card or agent, so only sweatfiles above the repo (global, parent directories) may set them; move them up",
+			Severity: SeverityWarning,
+			Field:    "auth",
+		})
+		mint, revoke = false, false // the half-written checks below are moot for an ignored table
+	}
 	switch {
 	case mint && !revoke:
 		issues = append(issues, Issue{
