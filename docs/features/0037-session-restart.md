@@ -281,6 +281,44 @@ still woken). The marker is as soft as handles are for an unconfined session,
 whose agent runs as the same user and could forge its record; confined
 sessions are refused posture changes regardless.
 
+### Posture acceptance test (spinclass#476)
+
+For the operator, after spinclass 036b9e2 and clown cc00a45 are deployed (a
+running session keeps the binaries it started with; restart or resume the
+sessions under test, and `sc list` shows a differing serve build). The
+behavioural check is `AskUserQuestion`: a human answer comes back when the
+session is attended, a denial ("running in don't ask mode") when it is
+unattended. Use any throwaway session whose only job is to call
+`AskUserQuestion` once and report the outcome by chat.
+
+1. **Spawned worker, dontAsk.** Spawn an unconfined worker with the trusted
+   `[session-entry].unattended-permission-mode = "dontAsk"`. Expect a
+   denial. (From an attended driver the spawn itself asks no prompt, FDR 0035
+   permission rule 3; from an unattended driver it still asks.)
+2. **Widen.** `sc restart --target <repo/branch> --posture attended` (needs
+   `allow-posture-widening = true` in a trusted layer and always asks the
+   human). After the restart, `AskUserQuestion` shows the operator a question
+   and the answer comes back. This step depends on clown cc00a45 (the attended
+   relaunch has to leave dontAsk; before it the session came back in dontAsk
+   because the recorded mode was restored on resume, a theory that was never
+   reproduced).
+3. **Narrow.** `sc restart --target <repo/branch> --posture unattended`.
+   Expect it accepted (no "provider-args separator" refusal; spinclass#476)
+   and, after the restart, a denial.
+4. **The sc-started coordinator.** Repeat 3 and then 2 on a session started
+   with `sc start` or `sc resume` (its pinned entry is a shell such as fish).
+   Run it from a terminal, not from inside the session. The restart must be
+   requested through `sc restart` or the MCP tools: a bare
+   `clown restart --posture ...` records no request in spinclass, the
+   preflight answers `none` and nothing happens, with no error shown.
+5. **Refusals still hold.** A confined session is refused for every posture;
+   `attended` from the session itself is refused; `attended` without the
+   trusted key is refused with the reason.
+
+If step 2 still ends in a denial, the fault is in the relaunch (clown) and
+not in the posture bookkeeping; `sc list` and the session's pinned env
+(`CLOWN_UNATTENDED`) show what spinclass recorded.
+
 ## Requirement on clown and troupe
 
 A restart exit must not run `troupe mint-revoke`. A restart relaunches the same
