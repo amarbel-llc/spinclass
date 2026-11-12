@@ -47,14 +47,31 @@ func EffectiveRank(m Marker, now time.Time, interval time.Duration) int {
 	if interval <= 0 {
 		return r
 	}
-	from := m.WaitingSince
-	if m.PrioritySetAt.After(from) {
-		from = m.PrioritySetAt
+	from := m.AgeStart
+	if from.IsZero() {
+		from = m.WaitingSince
+		if m.PrioritySetAt.After(from) {
+			from = m.PrioritySetAt
+		}
 	}
-	if from.IsZero() || !now.After(from) {
+	at := now
+	if m.Held && !m.HeldAt.IsZero() && m.HeldAt.Before(at) {
+		at = m.HeldAt // a held waiter's clock stands still
+	}
+	if from.IsZero() || !at.After(from) {
 		return r
 	}
-	return min(r+int(now.Sub(from)/interval), 2)
+	return min(r+int(at.Sub(from)/interval), 2)
+}
+
+// WaitedFor is how long m has really waited at now: since it began waiting, less
+// the time it was held (a held waiter's max-wait clock pauses).
+func WaitedFor(m Marker, now time.Time) time.Duration {
+	d := now.Sub(m.WaitingSince) - m.HeldFor
+	if m.Held && !m.HeldAt.IsZero() {
+		d -= now.Sub(m.HeldAt)
+	}
+	return max(d, 0)
 }
 
 // PriorityLabel is the level a marker carries, "normal" when unset.

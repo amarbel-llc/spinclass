@@ -96,6 +96,18 @@ appended to *$XDG\_STATE\_HOME/spinclass/host-queue/journal.ndjson* with actor
 warning, since the hold is the brake. The ledger files are not a security
 boundary against same-uid code (spinclass#483).
 
+*sc queue-cancel*, *sc queue-hold-waiter* and *sc queue-release-waiter*
+<session> use the same command files (spinclass#483 slice 3). A cancel ends
+that gate's wait (it fails with *host queue: wait cancelled*, its attestation
+stays buffered) and is taken before the gate's decision, so it wins over an
+admission that look would have made; a cancel that loses the race (the gate was
+admitted inside its poll) is ignored, journalled *cancel-too-late* and reported.
+The verb waits for the waiter (a poll plus a margin) and reads the outcome back
+from the ledger. A held waiter keeps its place but is skipped and does not
+block those behind it; its max-wait clock and its aging pause, and a hold
+expires after *max-wait* (never with *max-wait = "0"*), journalled by the
+waiter as *hold-waiter-expired*.
+
 *sc queue-priority <session> low|normal|high* sets a waiter's priority
 (spinclass#483 slice 2). Order is effective priority, then place; a waiter ages
 one level per *hostqueue.DefaultAgingInterval* (30 minutes, fixed, restarting

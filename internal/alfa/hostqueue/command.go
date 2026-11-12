@@ -26,9 +26,12 @@ import (
 // Like the markers, the files are not a security boundary against same-uid code.
 
 const (
-	cmdPrefix  = "cmd-"
-	cmdMaxAge  = time.Hour
-	cmdVerbPri = "priority"
+	cmdPrefix      = "cmd-"
+	cmdMaxAge      = time.Hour
+	cmdVerbPri     = "priority"
+	cmdVerbHold    = "hold"
+	cmdVerbRelease = "release"
+	cmdVerbCancel  = "cancel"
 )
 
 // Command is one management request addressed to a waiter.
@@ -46,6 +49,24 @@ type Command struct {
 // addresses reports whether c is for the waiter whose marker is m.
 func (c Command) addresses(m Marker) bool {
 	return c.Seq != 0 && c.Seq == m.Seq && c.Session == m.Session && c.PID == m.PID && c.WaitingSince.Equal(m.WaitingSince)
+}
+
+// IsCancel reports whether c ends the waiter's wait.
+func (c Command) IsCancel() bool { return c.Verb == cmdVerbCancel }
+
+// Describe is a one-line account of c for the waiter's log.
+func (c Command) Describe() string {
+	switch c.Verb {
+	case cmdVerbPri:
+		return fmt.Sprintf("%s set this gate's priority to %s", c.Actor, c.Priority)
+	case cmdVerbHold:
+		return fmt.Sprintf("%s held this gate (it keeps its place)", c.Actor)
+	case cmdVerbRelease:
+		return fmt.Sprintf("%s released this gate's hold", c.Actor)
+	case cmdVerbCancel:
+		return fmt.Sprintf("%s cancelled this gate's wait", c.Actor)
+	}
+	return fmt.Sprintf("%s sent %s", c.Actor, c.Verb)
 }
 
 // SendCommand writes c as a command file, atomically, and returns its path.
@@ -123,8 +144,20 @@ func (w *Waiter) ApplyCommands() []Command {
 				_ = os.Remove(paths[i])
 				continue
 			}
-			w.m.Priority, w.m.PrioritySetAt = c.Priority, c.At
+			w.m.Priority, w.m.PrioritySetAt, w.m.AgeStart = c.Priority, c.At, c.At
 			w.p.replaceLocked(w.l, w.m)
+		case cmdVerbHold:
+			if !w.m.Held {
+				w.m.Held, w.m.HeldAt = true, c.At
+				w.p.replaceLocked(w.l, w.m)
+			}
+		case cmdVerbRelease:
+			if w.releaseHoldLocked(c.At) {
+				w.p.replaceLocked(w.l, w.m)
+			}
+		case cmdVerbCancel:
+			// The marker is not changed: the gate's loop sees the applied command
+			// and leaves the line.
 		default:
 			// A verb this binary does not know: leave it for a newer waiter's
 			// binary or the age limit rather than guess.
@@ -134,6 +167,49 @@ func (w *Waiter) ApplyCommands() []Command {
 		applied = append(applied, c)
 	}
 	return applied
+}
+
+// releaseHoldLocked ends this waiter's hold at at: the held time is added to
+// HeldFor (it does not count against max-wait) and the aging clock moves on by
+// it; a priority set during the hold restarts aging at the release instead.
+// Reports whether there was a hold. Call with p.mu held.
+func (w *Waiter) releaseHoldLocked(at time.Time) bool {
+	if !w.m.Held {
+		return false
+	}
+	held := max(at.Sub(w.m.HeldAt), 0)
+	w.m.HeldFor += held
+	if w.m.PrioritySetAt.After(w.m.HeldAt) {
+		w.m.AgeStart = at
+	} else {
+		base := w.m.AgeStart
+		if base.IsZero() {
+			base = w.m.WaitingSince
+			if w.m.PrioritySetAt.After(base) {
+				base = w.m.PrioritySetAt
+			}
+		}
+		w.m.AgeStart = base.Add(held)
+	}
+	w.m.Held, w.m.HeldAt = false, time.Time{}
+	return true
+}
+
+// ExpireHold releases the waiter's hold once it has lasted limit, so a forgotten
+// hold cannot wedge the line (plan G3). limit 0 means holds never expire. It
+// reports whether it released one. Call under the ledger lock.
+func (w *Waiter) ExpireHold(now time.Time, limit time.Duration) bool {
+	if limit <= 0 {
+		return false
+	}
+	w.p.mu.Lock()
+	defer w.p.mu.Unlock()
+	if w.p.gone || !w.m.Held || now.Sub(w.m.HeldAt) < limit {
+		return false
+	}
+	w.releaseHoldLocked(now)
+	w.p.replaceLocked(w.l, w.m)
+	return true
 }
 
 // CollectCommands removes command files whose target is not among waiting, files

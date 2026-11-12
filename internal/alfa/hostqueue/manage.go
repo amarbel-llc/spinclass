@@ -22,9 +22,12 @@ import (
 type Verb string
 
 const (
-	VerbHold     Verb = "hold"     // the whole queue
-	VerbRelease  Verb = "release"  // the whole queue
-	VerbPriority Verb = "priority" // one waiter
+	VerbHold          Verb = "hold"           // the whole queue
+	VerbRelease       Verb = "release"        // the whole queue
+	VerbPriority      Verb = "priority"       // one waiter
+	VerbHoldWaiter    Verb = "hold-waiter"    // one waiter
+	VerbReleaseWaiter Verb = "release-waiter" // one waiter
+	VerbCancel        Verb = "cancel"         // one waiter
 )
 
 // VerbSpec declares a verb.
@@ -41,6 +44,9 @@ var Verbs = []VerbSpec{
 	{Verb: VerbHold, Target: "queue", FailsOpen: true},
 	{Verb: VerbRelease, Target: "queue", FailsOpen: true},
 	{Verb: VerbPriority, Target: "waiter"},
+	{Verb: VerbHoldWaiter, Target: "waiter"},
+	{Verb: VerbReleaseWaiter, Target: "waiter"},
+	{Verb: VerbCancel, Target: "waiter"},
 }
 
 // ActorTTY is the actor of an act made by the operator at a terminal. The

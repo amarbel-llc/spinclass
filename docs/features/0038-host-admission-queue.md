@@ -95,11 +95,15 @@ The queue is **opt-in**: off unless a trusted sweatfile sets `enable = true`
 - **Order (#482):** a gate takes a numbered place under the ledger lock at its
   first look; admission goes by place, not by who polls first. A gate that
   leaves (timeout, cancel, crash) gives up its place.
-- **Management (#483, slices 1-2):** `sc queue-status`, `sc queue-hold`, `sc
-  queue-release`, `sc queue-priority`; operator at a terminal only; journalled.
-  The queue order is effective priority (low, normal, high; aging one level per
-  30 min), then place. Cancel, hold-waiter and the confinement deny-write follow
-  in later slices, per `docs/plans/2026-11-12-483-host-queue-management.md`.
+- **Management (#483, slices 1-3):** `sc queue-status`, `sc queue-hold`, `sc
+  queue-release`, `sc queue-priority`, `sc queue-cancel`, `sc queue-hold-waiter`,
+  `sc queue-release-waiter`; operator at a terminal only; journalled. The queue
+  order is effective priority (low, normal, high; aging one level per 30 min),
+  then place. A held waiter keeps its place, is skipped, and pauses its max-wait
+  clock and aging; holds expire at max-wait. A cancel is taken before the gate's
+  decision; one that loses the race is journalled too late. The confinement
+  deny-write follows in slice 4, per
+  `docs/plans/2026-11-12-483-host-queue-management.md`.
   The command-file lifecycle names the waiter by place, session, pid and wait
   start rather than the marker's inode (a waiter rewrites its marker on every
   reason change, so the inode is unstable).

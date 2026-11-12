@@ -33,6 +33,16 @@ type Marker struct {
 	// normal or high; empty is normal. PrioritySetAt restarts the waiter's aging.
 	Priority      string    `json:"priority,omitempty"`
 	PrioritySetAt time.Time `json:"priority_set_at,omitempty"`
+	// AgeStart is when the waiter's aging clock started: it begins waiting, has
+	// its priority set, or is released from a hold (the held time does not age).
+	// Zero means WaitingSince (or PrioritySetAt when later).
+	AgeStart time.Time `json:"age_start,omitempty"`
+	// Held is the operator's hold on this one waiter (spinclass#483): it keeps
+	// its place but is skipped while held, and its max-wait clock and its aging
+	// pause. HeldAt is when this hold began; HeldFor is the time of earlier holds.
+	Held    bool          `json:"held,omitempty"`
+	HeldAt  time.Time     `json:"held_at,omitempty"`
+	HeldFor time.Duration `json:"held_for,omitempty"`
 	// A waiter's marker (Wait) carries when it began waiting and why it waits.
 	WaitingSince time.Time `json:"waiting_since"`
 	Reason       string    `json:"reason,omitempty"`

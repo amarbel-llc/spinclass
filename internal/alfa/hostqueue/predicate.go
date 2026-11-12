@@ -66,16 +66,18 @@ func DefaultConfig() Config {
 type Reason string
 
 const (
-	ReasonNone     Reason = ""
-	ReasonHold     Reason = "hold"
-	ReasonQueue    Reason = "queue" // an earlier waiter is ahead (spinclass#482)
-	ReasonGates    Reason = "gates"
-	ReasonMemory   Reason = "memory"
-	ReasonPressure Reason = "pressure"
-	ReasonSwap     Reason = "swap"
-	ReasonDisk     Reason = "disk"
-	ReasonLoad     Reason = "load"
-	ReasonSettle   Reason = "settle"
+	ReasonNone  Reason = ""
+	ReasonHold  Reason = "hold"
+	ReasonQueue Reason = "queue" // an earlier waiter is ahead (spinclass#482)
+	// ReasonWaiterHold: this one gate is held by the operator (spinclass#483).
+	ReasonWaiterHold Reason = "waiter-hold"
+	ReasonGates      Reason = "gates"
+	ReasonMemory     Reason = "memory"
+	ReasonPressure   Reason = "pressure"
+	ReasonSwap       Reason = "swap"
+	ReasonDisk       Reason = "disk"
+	ReasonLoad       Reason = "load"
+	ReasonSettle     Reason = "settle"
 )
 
 // View is the ledger as the predicate sees it, read under the ledger lock.
@@ -135,6 +137,14 @@ func Decide(v View, snap hostload.Snapshot, cfg Config, w WaiterState, now time.
 		}
 		return Decision{Reason: ReasonHold, Detail: place + detail, Next: next}
 	}
+	if w.Seq != 0 {
+		for _, m := range v.Waiting {
+			if m.Seq == w.Seq && m.Held {
+				next.ProbeFailingSince = time.Time{}
+				return Decision{Reason: ReasonWaiterHold, Detail: place + "this gate is held by the operator and keeps its place", Next: next}
+			}
+		}
+	}
 	if pos > 1 {
 		next.ProbeFailingSince = time.Time{}
 		return Decision{Reason: ReasonQueue, Detail: fmt.Sprintf("%sbehind %s", place, ahead), Next: next}
@@ -193,8 +203,8 @@ func position(waiting []Marker, seq uint64, now time.Time, aging time.Duration) 
 		haveFront bool
 	)
 	for _, m := range waiting {
-		if m.Seq == seq {
-			continue
+		if m.Seq == seq || m.Held {
+			continue // a held waiter is skipped: it does not block those behind it
 		}
 		r := EffectiveRank(m, now, aging)
 		if r < myRank || (r == myRank && m.Seq != 0 && m.Seq > seq) {

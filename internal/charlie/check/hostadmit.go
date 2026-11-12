@@ -29,6 +29,10 @@ import (
 // ErrHostQueueTimeout is a gate's failure when it waited max-wait for a slot.
 var ErrHostQueueTimeout = errors.New("host queue timeout")
 
+// ErrHostQueueCancelled is a gate's failure when the operator cancelled its wait
+// (spinclass#483); like any failed gate it leaves the attestation buffered.
+var ErrHostQueueCancelled = errors.New("host queue: wait cancelled")
+
 // hostQueueConfig decides whether a gate waits for a host slot, and under what
 // policy: the trusted [host-queue] keys (#424 step 4), off unless a layer above
 // the repo sets `enable = true`, so runHookPhase is unchanged with no section.
@@ -128,9 +132,31 @@ func admitHostSlot(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.
 		}
 		// Management commands addressed to this waiter (spinclass#483), applied
 		// under the lock before the decision, so a new priority counts at once.
+		cancelled := ""
 		for _, c := range waiter.ApplyCommands() {
 			if activity != nil {
-				_, _ = fmt.Fprintf(activity, "host queue: %s set this gate's %s to %s\n", c.Actor, c.Verb, c.Priority)
+				_, _ = fmt.Fprintf(activity, "host queue: %s\n", c.Describe())
+			}
+			if c.IsCancel() {
+				cancelled = c.Actor
+			}
+		}
+		if cancelled != "" {
+			// A cancel is taken before the decision, so it wins over an admission
+			// this very look would have made; the place is released by the defer.
+			unlock()
+			waited := hostqueue.WaitedFor(waiter.Marker(), hostQueueNow())
+			metrics.ended("cancelled", waited, waitedFor)
+			return noop, fmt.Errorf("%w by %s after %s", ErrHostQueueCancelled, cancelled, waited.Round(time.Second))
+		}
+		if waiter.ExpireHold(hostQueueNow(), cfg.MaxWait) {
+			m := waiter.Marker()
+			_ = ledger.AppendJournal(hostqueue.JournalRecord{
+				Time: hostQueueNow().UTC(), Actor: "queue", Act: "hold-waiter-expired", Target: m.Session, Seq: m.Seq,
+				Old: "held", New: "not held", Assurance: "system",
+			})
+			if activity != nil {
+				_, _ = fmt.Fprintf(activity, "host queue: this gate's hold expired after %s and was released\n", cfg.MaxWait)
 			}
 		}
 		view, verr := ledger.View(true)
@@ -158,7 +184,8 @@ func admitHostSlot(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.
 		waitedFor[d.Reason] = true
 		waiter.Update(d.Detail)
 
-		waited := now.Sub(start)
+		// Time held by the operator does not count against max-wait.
+		waited := hostqueue.WaitedFor(waiter.Marker(), now)
 		if activity != nil && (lastBeat.IsZero() || now.Sub(lastBeat) >= hostQueueHeartbeat) {
 			_, _ = fmt.Fprintf(activity, "host queue: %s; waited %s\n", d.Detail, waited.Round(time.Second))
 			lastBeat = now
@@ -220,7 +247,7 @@ func reportAdmission(rep *crap.Reporter, activity io.Writer, waited time.Duratio
 	}
 	reasons := make([]string, 0, len(waitedFor))
 	for _, r := range []hostqueue.Reason{
-		hostqueue.ReasonHold, hostqueue.ReasonQueue, hostqueue.ReasonGates, hostqueue.ReasonMemory, hostqueue.ReasonPressure,
+		hostqueue.ReasonHold, hostqueue.ReasonWaiterHold, hostqueue.ReasonQueue, hostqueue.ReasonGates, hostqueue.ReasonMemory, hostqueue.ReasonPressure,
 		hostqueue.ReasonSwap, hostqueue.ReasonDisk, hostqueue.ReasonLoad, hostqueue.ReasonSettle,
 	} {
 		if waitedFor[r] {

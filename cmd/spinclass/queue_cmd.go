@@ -138,6 +138,70 @@ func runQueuePriority(p queuePriorityParams) error {
 	return nil
 }
 
+type queueWaiterParams struct {
+	Session string `json:"session"`
+}
+
+// runQueueWaiterVerb is the shared body of the per-waiter verbs that take only a
+// session: the operator-terminal guard, the ledger, then the request.
+func runQueueWaiterVerb(cmd, session string, request func(l hostqueue.Ledger, a hostqueue.Actor, session string) (hostqueue.WaiterResult, error), report func(res hostqueue.WaiterResult, session string) (string, error)) error {
+	actor, err := queueOperator(cmd)
+	if err != nil {
+		return err
+	}
+	session = strings.TrimSpace(session)
+	if session == "" {
+		return fmt.Errorf("%s: name the waiting session (as `sc queue-status` prints it)", cmd)
+	}
+	ledger, err := queueLedger()
+	if err != nil {
+		return fmt.Errorf("%s: %w", cmd, err)
+	}
+	res, err := request(ledger, actor, session)
+	if err != nil {
+		return fmt.Errorf("%s: %w", cmd, err)
+	}
+	msg, err := report(res, session)
+	if err != nil {
+		return fmt.Errorf("%s: %w", cmd, err)
+	}
+	fmt.Fprintln(operatorHandleStdout(), msg)
+	return nil
+}
+
+func runQueueCancel(p queueWaiterParams) error {
+	return runQueueWaiterVerb("queue-cancel", p.Session,
+		func(l hostqueue.Ledger, a hostqueue.Actor, s string) (hostqueue.WaiterResult, error) {
+			return l.RequestCancel(a, s, operatorHandleNow(), queuePriorityWait)
+		},
+		func(res hostqueue.WaiterResult, s string) (string, error) {
+			switch {
+			case res.TooLate:
+				return "", fmt.Errorf("too late: the gate of %s was admitted before it could take the cancel and is running; nothing was cancelled", s)
+			case !res.Applied:
+				return "", fmt.Errorf("the gate of %s did not take the cancel within %s; it is still waiting", s, queuePriorityWait)
+			}
+			return fmt.Sprintf("%s: wait cancelled (place %d); that gate fails and its attestation stays buffered", s, res.Seq), nil
+		})
+}
+
+func runQueueHoldWaiter(p queueWaiterParams, hold bool) error {
+	cmd := "queue-hold-waiter"
+	if !hold {
+		cmd = "queue-release-waiter"
+	}
+	return runQueueWaiterVerb(cmd, p.Session,
+		func(l hostqueue.Ledger, a hostqueue.Actor, s string) (hostqueue.WaiterResult, error) {
+			return l.RequestHoldWaiter(a, s, hold, operatorHandleNow(), queuePriorityWait)
+		},
+		func(res hostqueue.WaiterResult, s string) (string, error) {
+			if !res.Applied {
+				return "", fmt.Errorf("the gate of %s did not take it within %s (it may have been admitted); its hold is unchanged (%s)", s, queuePriorityWait, res.Old)
+			}
+			return fmt.Sprintf("%s: %s -> %s (place %d)", s, res.Old, res.New, res.Seq), nil
+		})
+}
+
 func runQueueRelease() error {
 	actor, err := queueOperator("queue-release")
 	if err != nil {
@@ -223,6 +287,35 @@ func registerQueueCommands(app *command.App) {
 			return runQueuePriority(p)
 		},
 	})
+	waiterParam := []command.Param{
+		{Name: "session", Type: command.String, Required: true, Description: "The waiting session, as queue-status prints it (<repo>/<branch>)"},
+	}
+	waiterCmd := func(name, title, short, long string, run func(queueWaiterParams) error) {
+		app.AddCommand(&command.Command{
+			Name: name, Title: title,
+			Description: command.Description{Short: short, Long: long + " It refuses unless stdin and stdout are both terminals. The change is journalled (fail closed) and sent to the waiter, which applies it at its next look (at most one poll). CLI-only."},
+			Params:      waiterParam,
+			RunCLI: func(_ context.Context, args json.RawMessage) error {
+				var p queueWaiterParams
+				if err := json.Unmarshal(args, &p); err != nil {
+					return fmt.Errorf("%s: invalid arguments: %w", name, err)
+				}
+				return run(p)
+			},
+		})
+	}
+	waiterCmd("queue-cancel", "Cancel a waiting gate",
+		"End a waiting gate's wait in the host admission queue, as the operator at a terminal (#483). That gate fails; its attestation stays buffered.",
+		"A cancel that loses the race (the gate was admitted inside its poll) is ignored and reported as too late.",
+		runQueueCancel)
+	waiterCmd("queue-hold-waiter", "Hold one waiting gate",
+		"Hold one waiting gate in the host admission queue, as the operator at a terminal (#483): it keeps its place but is skipped, and its max-wait clock and aging pause.",
+		"A hold expires after max-wait (never with max-wait \"0\"); the expiry is journalled.",
+		func(p queueWaiterParams) error { return runQueueHoldWaiter(p, true) })
+	waiterCmd("queue-release-waiter", "Release one held gate",
+		"Lift the hold on one waiting gate in the host admission queue, as the operator at a terminal (#483).",
+		"The held time does not count against max-wait and does not age the gate.",
+		func(p queueWaiterParams) error { return runQueueHoldWaiter(p, false) })
 	app.AddCommand(&command.Command{
 		Name:  "queue-release",
 		Title: "Release the host queue",
