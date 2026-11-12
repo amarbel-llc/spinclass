@@ -71,6 +71,7 @@ func buildApp() *command.App {
 	app.AddCommand(restartPreflightCommand())
 	app.AddCommand(restartWatchCommand())
 	registerOperatorRestartCommand(app)
+	registerOperatorHandleCommands(app)
 	registerConfinementCheckCommand(app)
 	registerConfinementBindCommand(app)
 	registerVersionCommand(app)

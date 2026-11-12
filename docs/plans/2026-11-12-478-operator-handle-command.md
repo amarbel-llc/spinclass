@@ -130,6 +130,23 @@ remote principal verification, the signed record, the card act, or any
 permission-semantics change (no handle gains anything an existing grant could
 not give).
 
+## 5a. Step 2 as built (2026-11-12)
+
+Operator rulings 2026-11-12: Q2 to Q6 accepted as recommended; Q1, Q7 to Q10 left
+at the recommendations unless a problem appears. Built in
+`cmd/spinclass/handle_operator_cmd.go`: the commands are `sc handle-grant` and
+`sc handle-move` (hyphenated like `perms-list`; the spaced form `sc handle grant`
+is accepted), CLI-only, terminal-guarded, judge-then-write, one batch prompt,
+TAP 14 output, `--dry-run`, `--all-on-host`, `--force-unknown`, pending by default,
+`GrantedBy = "operator"`, `move` also sets `SpawnerReleased`. Provenance gains
+optional `host` and a reserved `record` field (`session.HandleProvenance`).
+One deviation from Q7's recommendation, stated because it is interim: there is
+no trusted vhost key yet, so a `<key>@<host>` recipient is treated as local only
+when `<key>` resolves to a live session through the frontend principal mapping
+(stored as the bare key), and as another host's otherwise (stored as given,
+unverified, needs `--force-unknown`). Q8's confined-session note is not built:
+confined sessions are edited like any other and appear in the TAP output.
+
 ## 6. Questions needing an operator ruling
 
 1. **Command name.** `sc handle grant|move` (recommended), or `sc grant-handle`

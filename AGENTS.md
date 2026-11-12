@@ -97,7 +97,9 @@ re-run that suite right before merging.
 `restart-child-session` (`--force` is always-ask) / `cancel-restart` (FDR 0037;
 hidden `restart-preflight`), `restart SESSION... --posture P` (operator-only,
 TTY-required, #473), `grant-session-handle` /
-`release-session-handle` / `list-handles` / `whoami` (FDR 0032), `host-load`
+`release-session-handle` / `list-handles` / `whoami` (FDR 0032), `handle-grant` /
+`handle-move` (CLI-only, TTY-required operator edit of any live session's
+handles, #478), `host-load`
 (#388, read-only CPU load + busiest processes by session), `resurrect`
 (FDR 0027), `grit <tool> [json]` (CLI-only, TTY-required, logged operator escape
 hatch for the grit store tools, FDR 0036), `pull`, `validate`, `perms list|review|edit`. Per-command flags:

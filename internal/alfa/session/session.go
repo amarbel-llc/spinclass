@@ -1393,7 +1393,18 @@ type HandleProvenance struct {
 	GrantedBy  string     `json:"granted_by,omitempty"`
 	GrantedAt  *time.Time `json:"granted_at,omitempty"`
 	AcceptedAt *time.Time `json:"accepted_at,omitempty"`
+	// Host is the machine the grant was made on (set by the operator command,
+	// spinclass#478), so a record that crosses hosts says where it came from.
+	Host string `json:"host,omitempty"`
+	// Record is reserved for the digest of a signed D8 record of this grant
+	// (FDR 0032); nothing writes it in slice 0, and readers ignore it.
+	Record string `json:"record,omitempty"`
 }
+
+// HandleOperator is the GrantedBy value of a handle the operator granted at a
+// terminal (`sc handle-grant`, spinclass#478): a marker, not a principal, and
+// not a proof of origin (slice 0, FDR 0032 D9).
+const HandleOperator = "operator"
 
 // GrantHandleBy is GrantHandle recording who granted the handle and when.
 func (s *State) GrantHandleBy(to, rights, by string, at time.Time) (changed bool) {
