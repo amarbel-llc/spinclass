@@ -81,15 +81,23 @@ The queue is **opt-in**: off unless a trusted sweatfile sets `enable = true`
 - **Predicate:** `hostqueue.Decide` checks these in order, and the first
   failure is the reason:
   1. the operator's hold;
-  2. the gate cap;
-  3. memory, with floor and resume hysteresis;
-  4. PSI memory pressure, or the swap ceiling where PSI is absent;
-  5. store free space (#430 folded in, 11-05 Q9);
-  6. per-CPU load1;
-  7. the settle window.
+  2. the queue: an earlier waiter is ahead (#482; first come, first
+     admitted; the reason reads `position N of M: behind <session>`);
+  3. the gate cap;
+  4. memory, with floor and resume hysteresis;
+  5. PSI memory pressure, or the swap ceiling where PSI is absent;
+  6. store free space (#430 folded in, 11-05 Q9);
+  7. per-CPU load1;
+  8. the settle window.
 
-  `idle-grace` admits past failing probe terms, never past a hold or the cap,
-  once they have failed continuously with no gate running.
+  `idle-grace` admits past failing probe terms, never past a hold, an earlier
+  place or the cap, once they have failed continuously with no gate running.
+- **Order (#482):** a gate takes a numbered place under the ledger lock at its
+  first look; admission goes by place, not by who polls first. A gate that
+  leaves (timeout, cancel, crash) gives up its place.
+- **Stale binaries:** the gate runs in the calling session's serve, so a serve
+  that predates the queue code runs gates unqueued. `host-load` flags it
+  (`QUEUE BYPASS`), and `just explore-live-queue-bypass` checks from a shell.
 - **Failure stance:** a ledger, probe or config that cannot be used admits the
   gate with a warning. The queue delays gates; it must never wedge them.
 

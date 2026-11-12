@@ -104,6 +104,8 @@ func formatHostLoad(rep hostload.Report) string {
 type hostLoadView struct {
 	hostload.Report
 	Queue *hostqueue.View `json:"queue,omitempty"`
+	// QueueBypass lists live serves whose binary has no host-queue code.
+	QueueBypass []QueueBypass `json:"queue_bypass,omitempty"`
 }
 
 // hostLoadLedger is the ledger host-load reads; a seam for tests.
@@ -181,8 +183,9 @@ func runHostLoad(p hostLoadParams) (string, error) {
 		return "", err
 	}
 	queue := hostQueueView()
+	bypass := queueBypasses()
 	if p.Format == "json" {
-		data, err := json.Marshal(hostLoadView{Report: rep, Queue: queue})
+		data, err := json.Marshal(hostLoadView{Report: rep, Queue: queue, QueueBypass: bypass})
 		if err != nil {
 			return "", err
 		}
@@ -192,6 +195,7 @@ func runHostLoad(p hostLoadParams) (string, error) {
 	if queue != nil {
 		text += formatHostQueue(queue, time.Now())
 	}
+	text += formatQueueBypass(bypass)
 	return text, nil
 }
 

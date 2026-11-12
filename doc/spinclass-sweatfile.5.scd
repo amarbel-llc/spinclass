@@ -1422,13 +1422,23 @@ wait's reason:
 - per-CPU *load1* is at most *load-threshold*;
 - the last admission is older than *settle*.
 
+Gates are admitted in the order they asked: each takes a place in line when it
+first looks, and a gate is admitted only when no earlier place is waiting, so a
+shorter poll or a luckier moment does not let a later gate overtake. A refused
+gate's reason begins with its place ("position 2 of 3: ..."). A gate that
+leaves the line (timeout, cancel, crash) gives up its place and the line
+closes up; a new gate joins the back. *host-load* names live sessions whose
+*spinclass serve* binary predates the queue code (*QUEUE BYPASS*): their gates
+run unqueued until the session is restarted.
+
 It re-checks every *poll*. While waiting, the job log gets a line naming the
 reason at most every 30 seconds. A gate that waited gets one *host queue wait
 <time> (<reasons>)* line, and an unwaited admission prints nothing. After
 *max-wait* the gate fails with *host queue timeout* and its last reason; like
 any failed gate it leaves the attestation buffered. *idle-grace* admits past
-failing probe terms (never past a hold or the gate cap) once they have failed
-continuously that long with no gate running, since waiting cannot help then.
+failing probe terms (never past a hold, an earlier place or the gate cap) once
+they have failed continuously that long with no gate running, since waiting
+cannot help then; only the gate at the head of the line is admitted this way.
 If the ledger (*$XDG\_RUNTIME\_DIR/spinclass/host-queue*) or the probe cannot be
 read, or an enabled section has an invalid value, the gate runs unqueued with
 a warning: the queue is a scheduling aid and never wedges every gate. There is

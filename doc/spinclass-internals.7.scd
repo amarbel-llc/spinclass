@@ -75,7 +75,11 @@ admission. The queue has no daemon. The live ledger is
 - *ledger.lock*, the flock held for one probe and one decision;
 - *gate-\*.json*, one per admitted gate, flock-held by the gate's serve process
   for the gate's life;
-- *wait-\*.json*, one per waiter, flock-held, carrying its last reason.
+- *wait-\*.json*, one per waiter, flock-held, carrying its place (*Seq*) and
+  its last reason;
+- *seq*, the counter that numbers places. A gate takes its place and writes
+  its waiter marker under the ledger lock at its first look, so places rise in
+  the order gates asked (spinclass#482).
 
 A marker is locked before it is renamed into view. A reader that can take a
 marker's lock knows its holder is dead; under the ledger lock it removes the
@@ -86,8 +90,16 @@ contents are the reason every waiter is given.
 
 The predicate, *hostqueue.Decide*, is pure. It reads the ledger view, a
 *hostload.Probe* snapshot (load, *MemAvailable*, PSI or swap, and store free
-bytes; no per-process sample), the config and the waiter's state (memory
-hysteresis and the idle-grace clock).
+bytes; no per-process sample), the config and the waiter's state (its place,
+memory hysteresis and the idle-grace clock). A waiter with an earlier place
+ahead is refused with reason *queue*, after the hold and before the gate
+count.
+
+*host-load* also scans /proc for live *spinclass serve* processes whose
+executable lacks *hostqueue.AdmissionMarker*: a merge runs inside the calling
+session's own serve, so an old binary runs gates unqueued. They are listed as
+*QUEUE BYPASS* (JSON: *queue_bypass*); *just explore-live-queue-bypass* does
+the same from a shell.
 
 A ledger or probe that cannot be read admits with a warning: the queue is a
 scheduling aid, never a single point of failure. Statsd series:

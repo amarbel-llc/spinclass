@@ -109,8 +109,8 @@ func TestHostQueueWaitsForLoadThenAdmits(t *testing.T) {
 	if !strings.Contains(out, "host queue wait") || !strings.Contains(out, "(load)") {
 		t.Errorf("output = %q, want the wait point naming load", out)
 	}
-	if !strings.Contains(activity, "host queue: waiting for load") {
-		t.Errorf("activity = %q, want a heartbeat naming the reason", activity)
+	if !strings.Contains(activity, "host queue: position 1 of 1: waiting for load") {
+		t.Errorf("activity = %q, want a heartbeat with the place and the reason", activity)
 	}
 }
 
@@ -185,7 +185,7 @@ func TestHostQueueWaiterIsVisibleWhileWaiting(t *testing.T) {
 func TestHostQueueTimesOutWithTheReason(t *testing.T) {
 	cfg := fastConfig()
 	cfg.MaxWait = 30 * time.Millisecond
-	stubHostQueue(t, cfg, func() (hostload.Snapshot, error) {
+	ledger := stubHostQueue(t, cfg, func() (hostload.Snapshot, error) {
 		s := healthySnap()
 		s.MemAvailable = 1 << 30
 		return s, nil
@@ -194,8 +194,140 @@ func TestHostQueueTimesOutWithTheReason(t *testing.T) {
 	if !errors.Is(err, ErrHostQueueTimeout) || !strings.Contains(err.Error(), "memory") {
 		t.Fatalf("err = %v, want a host queue timeout naming memory", err)
 	}
+	// A timed-out gate says where a retry goes: its place is gone with it.
+	if !strings.Contains(err.Error(), "position 1 of 1") || !strings.Contains(err.Error(), "joins the back of the queue") {
+		t.Errorf("err = %v, want the place and where a retry goes", err)
+	}
 	if !strings.Contains(out, "host queue") {
 		t.Errorf("output = %q, want the failed host queue phase", out)
+	}
+	if w, _ := ledger.Waiting(false); len(w) != 0 {
+		t.Errorf("a timed-out gate's place outlived it: %+v", w)
+	}
+}
+
+// waitForWaiters returns once n gates hold a place in the queue.
+func waitForWaiters(t *testing.T, ledger hostqueue.Ledger, n int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if w, _ := ledger.Waiting(false); len(w) == n {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("never saw %d waiters", n)
+}
+
+// spinclass#482: gates are admitted in the order they asked, however the
+// waiters' polls interleave. Three gates queue behind a running one; polling
+// every millisecond, they must come out 1, 2, 3 each round, one at a time.
+func TestHostQueueAdmitsInTheOrderGatesAsked(t *testing.T) {
+	cfg := fastConfig()
+	cfg.MaxWait = time.Minute
+	ledger := stubHostQueue(t, cfg, func() (hostload.Snapshot, error) { return healthySnap(), nil })
+
+	for round := 1; round <= 8; round++ {
+		unlock, err := ledger.Lock()
+		if err != nil {
+			t.Fatal(err)
+		}
+		blocker, err := ledger.Admit(hostqueue.Marker{Session: "r/blocker", AdmittedAt: time.Now()})
+		unlock()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		type admitted struct {
+			id      int
+			release func()
+		}
+		got := make(chan admitted, 3)
+		var wg sync.WaitGroup
+		for id := 1; id <= 3; id++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				release, _, _, err := admit(t, context.Background())
+				if err != nil {
+					t.Errorf("gate %d: %v", id, err)
+					return
+				}
+				got <- admitted{id, release}
+			}()
+			// The next gate asks only once this one has its place, so the
+			// order of asking is known.
+			waitForWaiters(t, ledger, id)
+		}
+
+		blocker()
+		for want := 1; want <= 3; want++ {
+			select {
+			case g := <-got:
+				if g.id != want {
+					t.Fatalf("round %d: gate %d was admitted when gate %d was next in line", round, g.id, want)
+				}
+				// While it holds the slot nobody else gets in.
+				select {
+				case extra := <-got:
+					t.Fatalf("round %d: gate %d was admitted while gate %d held the only slot", round, extra.id, g.id)
+				case <-time.After(15 * time.Millisecond):
+				}
+				g.release()
+			case <-time.After(15 * time.Second):
+				t.Fatalf("round %d: gate %d was never admitted", round, want)
+			}
+		}
+		wg.Wait()
+		if w, _ := ledger.Waiting(false); len(w) != 0 {
+			t.Fatalf("round %d: places outlived their gates: %+v", round, w)
+		}
+	}
+}
+
+// A gate that leaves the line (cancelled) gives its place up: the gates behind
+// it close up and the next is admitted, not stuck behind a place nobody holds.
+func TestHostQueueALeavingGateClosesTheLineUp(t *testing.T) {
+	cfg := fastConfig()
+	cfg.MaxWait = time.Minute
+	ledger := stubHostQueue(t, cfg, func() (hostload.Snapshot, error) { return healthySnap(), nil })
+	unlock, err := ledger.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocker, err := ledger.Admit(hostqueue.Marker{Session: "r/blocker", AdmittedAt: time.Now()})
+	unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	first := make(chan error, 1)
+	go func() {
+		_, _, _, err := admit(t, ctx1)
+		first <- err
+	}()
+	waitForWaiters(t, ledger, 1)
+	second := make(chan func(), 1)
+	go func() {
+		release, _, _, err := admit(t, context.Background())
+		if err != nil {
+			t.Errorf("second gate: %v", err)
+		}
+		second <- release
+	}()
+	waitForWaiters(t, ledger, 2)
+
+	blocker()
+	cancel1() // the first gate in line leaves, possibly before it was admitted
+	if err := <-first; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("first gate: %v", err)
+	}
+	select {
+	case release := <-second:
+		release()
+	case <-time.After(10 * time.Second):
+		t.Fatal("the second gate was never admitted after the first left the line")
 	}
 }
 

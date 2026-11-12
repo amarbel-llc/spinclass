@@ -33,6 +33,12 @@ type Config struct {
 
 const gib = 1 << 30
 
+// AdmissionMarker is text only a binary with the admission predicate contains
+// (Decide's gate-count refusal). host-load looks for it in a live serve's
+// executable to find sessions whose gates run unqueued; a test pins it to the
+// refusal text.
+const AdmissionMarker = "gate slots taken"
+
 // DefaultConfig is the operator's ruled defaults (2026-11-10): one gate at a
 // time, memory held below 4 GiB and resumed above 6 GiB.
 func DefaultConfig() Config {
@@ -57,6 +63,7 @@ type Reason string
 const (
 	ReasonNone     Reason = ""
 	ReasonHold     Reason = "hold"
+	ReasonQueue    Reason = "queue" // an earlier waiter is ahead (spinclass#482)
 	ReasonGates    Reason = "gates"
 	ReasonMemory   Reason = "memory"
 	ReasonPressure Reason = "pressure"
@@ -76,6 +83,10 @@ type View struct {
 
 // WaiterState is what the predicate remembers about one waiter between polls.
 type WaiterState struct {
+	// Seq is this waiter's place in the queue (Ledger.NextSeq). Zero means the
+	// caller has no place (a test, or a caller outside the queue): the waiter
+	// is treated as first in line.
+	Seq uint64
 	// HeldForMemory is set once the waiter was refused for memory: it then
 	// needs MemoryResume, not MemoryFloor (hysteresis).
 	HeldForMemory bool
@@ -98,22 +109,34 @@ type Decision struct {
 }
 
 // Decide is the admission predicate, pure over its inputs. Order: the
-// operator's hold, the gate count, then the probe terms (memory, pressure or
-// swap, disk, load), then the settle window. idle-grace admits past failing
-// probe terms when no gate is live and nothing is held.
+// operator's hold, the queue (a waiter with an earlier place is admitted
+// first, spinclass#482), the gate count, then the probe terms (memory,
+// pressure or swap, disk, load), then the settle window. idle-grace admits past
+// failing probe terms when no gate is live and nothing is held, and only for
+// the waiter at the head of the queue. Every refusal's Detail begins with the
+// waiter's place ("position N of M: ...").
 func Decide(v View, snap hostload.Snapshot, cfg Config, w WaiterState, now time.Time) Decision {
 	next := w
+	pos, total, ahead := position(v.Waiting, w.Seq)
+	place := ""
+	if w.Seq != 0 {
+		place = fmt.Sprintf("position %d of %d: ", pos, total)
+	}
 	if v.Held {
 		next.ProbeFailingSince = time.Time{}
 		detail := "held by the operator"
 		if v.HoldReason != "" {
 			detail += ": " + v.HoldReason
 		}
-		return Decision{Reason: ReasonHold, Detail: detail, Next: next}
+		return Decision{Reason: ReasonHold, Detail: place + detail, Next: next}
+	}
+	if pos > 1 {
+		next.ProbeFailingSince = time.Time{}
+		return Decision{Reason: ReasonQueue, Detail: fmt.Sprintf("%sbehind %s", place, ahead), Next: next}
 	}
 	if len(v.Live) >= cfg.MaxGates {
 		next.ProbeFailingSince = time.Time{}
-		return Decision{Reason: ReasonGates, Detail: fmt.Sprintf("%d of %d gate slots taken (%s)", len(v.Live), cfg.MaxGates, holders(v.Live)), Next: next}
+		return Decision{Reason: ReasonGates, Detail: place + fmt.Sprintf("%d of %d gate slots taken (%s)", len(v.Live), cfg.MaxGates, holders(v.Live)), Next: next}
 	}
 
 	reason, detail := probeReason(snap, cfg, w.HeldForMemory)
@@ -130,14 +153,40 @@ func Decide(v View, snap hostload.Snapshot, cfg Config, w WaiterState, now time.
 			return Decision{Admit: true, Reason: reason, Grace: true, Detail: fmt.Sprintf(
 				"admitted by idle-grace after %s: %s, but no gate is running, so waiting cannot help", cfg.IdleGrace, detail), Next: next}
 		}
-		return Decision{Reason: reason, Detail: detail, Next: next}
+		return Decision{Reason: reason, Detail: place + detail, Next: next}
 	}
 	next.ProbeFailingSince = time.Time{}
 
 	if newest := newestAdmission(v.Live); !newest.IsZero() && now.Sub(newest) < cfg.Settle {
-		return Decision{Reason: ReasonSettle, Detail: fmt.Sprintf("settling: the last gate was admitted %s ago (settle %s)", now.Sub(newest).Round(time.Second), cfg.Settle), Next: next}
+		return Decision{Reason: ReasonSettle, Detail: place + fmt.Sprintf("settling: the last gate was admitted %s ago (settle %s)", now.Sub(newest).Round(time.Second), cfg.Settle), Next: next}
 	}
 	return Decision{Admit: true, Next: next}
+}
+
+// position is a waiter's place in the queue: pos counts it and every waiter
+// ahead (a lower Seq; one with no Seq predates numbering and is ahead of all),
+// total is the waiters in line, at least pos, and ahead names the session
+// directly in front. A Seq of 0 is a caller outside the queue: first in line.
+func position(waiting []Marker, seq uint64) (pos, total int, ahead string) {
+	if seq == 0 {
+		return 1, max(len(waiting), 1), ""
+	}
+	pos = 1
+	var front Marker
+	for _, m := range waiting {
+		if m.Seq == seq || (m.Seq != 0 && m.Seq > seq) {
+			continue
+		}
+		pos++
+		if front.Seq == 0 || (m.Seq != 0 && m.Seq > front.Seq) {
+			front = m
+		}
+	}
+	name := front.Session
+	if name == "" {
+		name = "an earlier gate"
+	}
+	return pos, max(len(waiting), pos), name
 }
 
 // probeReason is the first failing probe term, or ReasonNone.

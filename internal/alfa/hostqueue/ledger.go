@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -22,6 +23,11 @@ type Marker struct {
 	Kind       string    `json:"kind"` // merge, check, guarded
 	AdmittedAt time.Time `json:"admitted_at"`
 	PID        int       `json:"pid"`
+	// Seq is the gate's place in the queue (spinclass#482): a number the ledger
+	// hands out under its lock when the gate first asks for a slot, rising with
+	// every request. Admission goes in Seq order. A marker from a binary that
+	// predates it has Seq 0 and counts as ahead of every numbered waiter.
+	Seq uint64 `json:"seq,omitempty"`
 	// A waiter's marker (Wait) carries when it began waiting and why it waits.
 	WaitingSince time.Time `json:"waiting_since"`
 	Reason       string    `json:"reason,omitempty"`
@@ -207,11 +213,65 @@ func (l Ledger) Live(reap bool) ([]Marker, error) {
 	return live, err
 }
 
-// Waiting lists the live waiters, longest-waiting first; reap as for Live.
+// Waiting lists the live waiters in queue order, the next to be admitted
+// first: by Seq, then by when they began waiting (a marker with no Seq sorts
+// first, as it predates numbering); reap as for Live.
 func (l Ledger) Waiting(reap bool) ([]Marker, error) {
 	waiting, err := l.markers(waiterPrefix, reap)
-	sort.Slice(waiting, func(i, j int) bool { return waiting[i].WaitingSince.Before(waiting[j].WaitingSince) })
+	sort.SliceStable(waiting, func(i, j int) bool {
+		if waiting[i].Seq != waiting[j].Seq {
+			return waiting[i].Seq < waiting[j].Seq
+		}
+		return waiting[i].WaitingSince.Before(waiting[j].WaitingSince)
+	})
 	return waiting, err
+}
+
+const seqName = "seq"
+
+// NextSeq hands out the next queue place (spinclass#482). Call it under Lock:
+// the counter is a file in Dir, read and rewritten there, and is never lower
+// than any place a live marker already holds, so a lost or damaged counter
+// cannot hand out a place twice. Dir is per boot, so the counter restarts with
+// the machine, when no gate can be waiting.
+func (l Ledger) NextSeq() (uint64, error) {
+	if err := os.MkdirAll(l.Dir, 0o700); err != nil {
+		return 0, err
+	}
+	var last uint64
+	path := filepath.Join(l.Dir, seqName)
+	if data, err := os.ReadFile(path); err == nil {
+		if n, perr := strconv.ParseUint(strings.TrimSpace(string(data)), 10, 64); perr == nil {
+			last = n
+		}
+	}
+	for _, prefix := range []string{markerPrefix, waiterPrefix} {
+		ms, err := l.markers(prefix, false)
+		if err != nil {
+			return 0, err
+		}
+		for _, m := range ms {
+			last = max(last, m.Seq)
+		}
+	}
+	next := last + 1
+	tmp, err := os.CreateTemp(l.Dir, "tmp-seq-*")
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tmp.WriteString(strconv.FormatUint(next, 10) + "\n"); err != nil {
+		discard(tmp)
+		return 0, err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		return 0, err
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		_ = os.Remove(tmp.Name())
+		return 0, err
+	}
+	return next, nil
 }
 
 func (l Ledger) markers(prefix string, reap bool) ([]Marker, error) {

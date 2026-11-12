@@ -90,8 +90,9 @@ func admitHostSlot(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.
 		lastBeat  time.Time
 		lastWhy   hostqueue.Decision
 		waitedFor = map[hostqueue.Reason]bool{}
-		// The waiter's own marker, for host-load and sc queue-status; written on
-		// the first refusal, removed however the wait ends.
+		// The waiter's own marker: this gate's place in line (spinclass#482),
+		// written under the ledger lock at its first look, and for host-load. It
+		// is removed however the wait ends.
 		updateWaiter func(string)
 		leaveWaiter  = func() {}
 	)
@@ -100,6 +101,27 @@ func admitHostSlot(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.
 		unlock, err := ledger.Lock()
 		if err != nil {
 			return warn("the ledger lock could not be taken: " + err.Error())
+		}
+		if updateWaiter == nil {
+			// Enqueue: the place is taken under the ledger lock, so places rise in
+			// the order gates asked, and admission goes by place, not by who polls
+			// first. A place that cannot be written means the ledger is unusable:
+			// like any ledger failure, the gate runs unqueued with a warning.
+			seq, serr := ledger.NextSeq()
+			if serr != nil {
+				unlock()
+				return warn("a place in the queue could not be taken: " + serr.Error())
+			}
+			marker.Seq = seq
+			w := marker
+			w.WaitingSince = start
+			u, leave, werr := ledger.Wait(w)
+			if werr != nil {
+				unlock()
+				return warn("a place in the queue could not be written: " + werr.Error())
+			}
+			updateWaiter, leaveWaiter = u, leave
+			state.Seq = seq
 		}
 		view, verr := ledger.View(true)
 		snap, perr := hostQueueProbe()
@@ -112,6 +134,7 @@ func admitHostSlot(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.
 		if d.Admit {
 			marker.AdmittedAt = now
 			rel, aerr := ledger.Admit(marker)
+			leaveWaiter() // the place becomes the slot, still under the lock
 			unlock()
 			if aerr != nil {
 				return warn("the slot marker could not be written: " + aerr.Error())
@@ -123,17 +146,7 @@ func admitHostSlot(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.
 		unlock()
 		state, lastWhy = d.Next, d
 		waitedFor[d.Reason] = true
-		if updateWaiter == nil {
-			w := marker
-			w.WaitingSince, w.Reason = start, d.Detail
-			if u, leave, werr := ledger.Wait(w); werr == nil {
-				updateWaiter, leaveWaiter = u, leave
-			} else {
-				updateWaiter = func(string) {} // display only: a failed write never stops the wait
-			}
-		} else {
-			updateWaiter(d.Detail)
-		}
+		updateWaiter(d.Detail)
 
 		waited := now.Sub(start)
 		if activity != nil && (lastBeat.IsZero() || now.Sub(lastBeat) >= hostQueueHeartbeat) {
@@ -141,7 +154,9 @@ func admitHostSlot(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.
 			lastBeat = now
 		}
 		if cfg.MaxWait > 0 && waited >= cfg.MaxWait {
-			err := fmt.Errorf("%w after %s: %s", ErrHostQueueTimeout, cfg.MaxWait, lastWhy.Detail)
+			// The place is released with the wait (it cannot be kept: nothing
+			// holds it once this gate ends), so the message says where a retry goes.
+			err := fmt.Errorf("%w after %s: %s; this gate's place in the queue is released, and a new merge or check joins the back of the queue", ErrHostQueueTimeout, cfg.MaxWait, lastWhy.Detail)
 			rep.Phase("host queue").FailDiag(err, map[string]any{
 				"severity": "fail",
 				"message":  err.Error(),
@@ -195,7 +210,7 @@ func reportAdmission(rep *crap.Reporter, activity io.Writer, waited time.Duratio
 	}
 	reasons := make([]string, 0, len(waitedFor))
 	for _, r := range []hostqueue.Reason{
-		hostqueue.ReasonHold, hostqueue.ReasonGates, hostqueue.ReasonMemory, hostqueue.ReasonPressure,
+		hostqueue.ReasonHold, hostqueue.ReasonQueue, hostqueue.ReasonGates, hostqueue.ReasonMemory, hostqueue.ReasonPressure,
 		hostqueue.ReasonSwap, hostqueue.ReasonDisk, hostqueue.ReasonLoad, hostqueue.ReasonSettle,
 	} {
 		if waitedFor[r] {
