@@ -1,84 +1,115 @@
 # Host queue management and priorities (spinclass#483): design note
 
-Status: DESIGN ONLY, nothing built. It touches permissions, so it waits for
-the coordinator's and the operator's rulings on the numbered questions.
-Builds on #482 (gates are admitted in the order they asked, by a numbered
-place).
+Status: DESIGN ONLY, nothing built. It touches permissions, so it waits for the
+operator's rulings on the questions at the end. Amended 2026-11-12 after
+slim-myrtle's review (S1-S3, G1-G9). Builds on #482 (gates are admitted in the
+order they asked, by a numbered place; landed b524df6).
 
 ## What exists
 
 - Ledger `$XDG_RUNTIME_DIR/spinclass/host-queue/`: `gate-*.json` (admitted),
   `wait-*.json` (waiting, with `Seq`), `seq`.
 - The operator's hold: `$XDG_STATE_HOME/spinclass/host-queue/hold`.
-- Handle rights (FDR 0032): observe, close, grant, instruct, cap, merge,
-  check, restart. A session holds rights over the sessions it holds handles on.
+- Handle rights (FDR 0032 D13): observe, close, grant, instruct, cap, merge,
+  check, restart.
+
+## Where this sits (S1)
+
+FDR 0032 D19 says scheduling is not that record's: queues and priorities are
+ringmaster's. This note deviates knowingly: the host queue is spinclass's
+interim scheduler (FDR 0038), and its management verbs live here until the
+job platform owns scheduling. Priority is a scheduling POLICY owned by the
+operator, not a capability a handle carries: no handle right grants it, and the
+operator's choices are what the ledger applies.
+
+## Trust model (S3)
+
+The command files and the ledger markers are NOT a security boundary against
+code running as the same uid. Today a forged `wait-*.json` with `Seq` 0 already
+jumps the queue, and a flock-held fake `gate-*.json` takes a slot. The tool is
+the check; the files are not. Mitigation that does hold: the ledger directory
+and `$XDG_STATE_HOME/spinclass/host-queue` are added to what a confined unit
+cannot write (the confinement write-deny list), so a confined worker cannot
+forge either. An unconfined session is trusted at the level it already is.
 
 ## Proposal
 
-### Verbs (`sc queue ...`, CLI first; MCP tools only for the read verbs)
+### Verbs (`sc queue ...`, CLI first; MCP only the read verb)
 
 - `list` / `status`: gates running, waiters in order with place, priority,
-  reason and age, the hold, and the QUEUE BYPASS list. Read-only (same data as
-  `host-load`'s queue section; `host-load` stays).
+  reason and age, the hold, and the QUEUE BYPASS list. Read-only.
 - `hold [reason]` / `release`: the whole queue (today's hold file).
-- `hold-waiter <session>` / `release-waiter <session>`: a waiter stays in line
-  but is skipped while held (its place is kept; it does not block those behind).
+- `hold-waiter <session>` / `release-waiter <session>`: a held waiter keeps its
+  place but is skipped while held.
 - `cancel <session>`: ends a waiter's wait; that gate fails with
-  `host queue: cancelled by <who>`, attestation stays buffered.
-- `priority <session> high|normal|low`: sets a waiter's priority.
-- Every mutating verb appends a line to an audit journal
-  `$XDG_STATE_HOME/spinclass/host-queue.log` (time, verb, target, who: operator
-  or the caller's principal and session, old and new value). A journal that
-  cannot be written refuses the verb (as the spawn allow-list does).
+  `host queue: cancelled by <who>`; its attestation stays buffered.
+- `priority <session> high|normal|low`.
 
-### Who may do what
+Every verb is a declared ajour atom (verb plus target, and priority or kind
+where they apply), so operator-act profiles can admit or refuse it (G9).
 
-- **Operator at a terminal** (stdin and stdout are terminals, the existing
-  `handle-grant` guard): every verb, no handle needed.
-- **A session** acting on another session's waiter: needs a handle on that
-  session carrying the existing `merge` or `check` right (matching the gate's
-  kind) for `hold-waiter`, `release-waiter`, `cancel`; for `priority` see Q2.
-  Rationale: whoever may start a gate for a session may stop it waiting.
-- **A session acting on its own waiter**: `cancel` and `hold-waiter` of its
-  own are allowed (it can already abandon its gate); no priority change.
-- **Whole-queue `hold`/`release`**: operator only (it delays everyone).
-- A new right `queue` would be needed only if the operator wants delegation
-  without `merge`/`check` (Q1).
+### Who may do what (S2, G7)
 
-### Priority
+- **v1: the operator at a terminal only** (stdin and stdout are terminals, the
+  `handle-grant` guard). No handle is consulted.
+- **Delegation is deferred** to a later step, with session-held verbs (Q6). When
+  it comes it uses a narrow object right `spinclass:queue`, not in the default
+  grant and below `close`. `merge` and `check` are execution-class (D13) and are
+  NOT reused: delegating queue control through them would over-grant.
+- **Assurance**: the journal records the actor as `tty`, meaning as strong as
+  isatty (the #478 stopgap), not an authenticated act. The eventual authority is
+  the card path (FDR 0032 D10/D11, "9C").
 
-- Three levels, ordering by priority then place (FIFO within a level):
-  high before normal before low. Default normal.
-- Priority never bypasses a term other than the queue position: the hold, the
-  gate cap, memory, pressure, disk, load and settle all still apply, and a high
-  waiter does not run beside a running gate beyond `max-gates`.
-- Bound against a runaway high loop: raising to high is operator-only by
-  default (Q2); a session may only LOWER its own or a held child's priority.
-  Even then a normal waiter that has waited longer than `max-wait / 2` is
-  treated as high ("aging") so a stream of high gates cannot starve it. A gate
-  is high for at most one admission; a `high` is per waiter, not per session.
-- Where it lives: the waiter marker gains `Priority`; `Decide`'s queue term
-  compares (priority, Seq) instead of Seq; `position` counts waiters ahead on
-  that order.
+### Journal (G8)
 
-### Held waiter and cancel mechanics
+`$XDG_STATE_HOME/spinclass/host-queue/journal.ndjson`, one record per verb
+shaped like an FDR 0032 D8 record: time, actor (principal, or `tty`), act,
+target session, seq, old and new value, assurance. Failure policy:
+`priority`, `cancel`, `hold-waiter` FAIL CLOSED (no journal, no effect); the
+whole-queue `hold` fails OPEN with a loud warning, because it is the brake.
 
-The ledger is flock-based with no daemon, so a verb writes a small command file
-`cmd-<verb>-<seq>.json` under the ledger lock; the waiter's own poll applies it
-at its next look (at most `poll`, 10 s). `cancel` makes the waiter return
-an error, `hold-waiter` makes `Decide` skip it. Nothing kills a process.
+### Command lifecycle (G1, G2)
+
+The ledger is flock-based with no daemon, so a verb writes a command file
+`cmd-<verb>-<n>.json` under the ledger lock. It names the target's `seq`, the
+session and the marker's file identity (device and inode). The waiter applies it
+at its next look (at most `poll`, 10 s) only if all three match. Locked readers
+garbage-collect command files with no live target (so a deleted `seq` file, which
+restarts low, cannot make an old command hit a new waiter).
+
+A `cancel` that loses the race (the waiter was admitted inside its poll): the
+command is ignored, journalled `too late` and reported. The verb waits for the
+waiter's acknowledgement (poll plus a margin) and says what happened.
+
+### Hold, aging and priority (G3-G6)
+
+- `hold-waiter` pauses that waiter's `max-wait` clock; a hold expires at
+  `max-wait` so a forgotten hold cannot wedge the line; every hold and expiry is
+  journalled. A held waiter does not age while held.
+- Order: priority (high, normal, low), then place. Priority never bypasses a
+  term other than the queue position: the hold, the gate cap, memory, pressure,
+  disk, load and settle all still apply.
+- Raising to `high` is operator-only. Aging uses a FIXED interval (default 30
+  min, not `max-wait / 2`, since `max-wait = "0"` would make that zero): a low
+  waiter ages to normal and a normal one to high after each interval waited and
+  not held. A `high` lasts for one admission and is per waiter, not per session.
+- `Seq` 0 (a legacy marker from an old binary) sorts as normal, ahead of
+  numbered normals, and only while old binaries exist.
+- Idle-grace: checked in the code and pinned by a test
+  (`fifo_test.go`, the "behind" case). A waiter that is BEHIND never carries
+  `ProbeFailingSince`: `Decide` clears it on every refusal for position, hold or
+  gate count. So a priority raise that makes a waiter head starts its failing
+  clock fresh, and idle-grace needs a full `idle-grace` interval of failing probe
+  terms as head; it cannot admit at once. The same holds for aging.
 
 ## Questions
 
-1. Delegation: reuse `merge`/`check` rights for waiter verbs (recommended; no
-   new right), or add a `queue` right (more precise, more surface)?
-2. Who may raise priority: operator only (recommended), or any holder of a
-   `queue`/`merge` handle up to normal and the operator for high?
-3. Is the aging rule (normal waits past `max-wait / 2` become high) wanted, or
-   is operator-only high enough?
-4. Should `cancel` of another session's waiter be always-ask in the permission
-   hook (recommended), like `close-child-session --force`?
-5. Audit journal location and the fail-closed rule: as above, OK?
-6. MCP surface: only `queue-status` as a tool (read), mutating verbs CLI-only
-   and operator-tty (recommended, like `handle-grant`), with session-held
-   delegation via the `merge`/`check` handle deferred to a later step?
+1. Is v1 operator-tty only, with delegation (`spinclass:queue`) deferred, as
+   proposed?
+2. Aging: fixed interval, default 30 min, low to normal to high: wanted?
+3. Hold expiry at `max-wait`: OK? Does `max-wait = "0"` then mean holds never
+   expire?
+4. Journal path and the fail-closed / fail-open split (G8): OK?
+5. Confined units: deny writes to the ledger dir and the queue state dir: OK
+   (a confinement change, so your ruling)?
+6. MCP surface: only `queue-status`; mutations CLI/tty only until delegation.
