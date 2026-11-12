@@ -157,7 +157,11 @@ func formatHostQueue(v *hostqueue.View, now time.Time) string {
 		fmt.Fprintf(&b, "\n  gate %s %s for %s", m.Session, m.Kind, now.Sub(m.AdmittedAt).Round(time.Second))
 	}
 	for _, m := range v.Waiting {
-		fmt.Fprintf(&b, "\n  wait %s %s for %s: %s", m.Session, m.Kind, now.Sub(m.WaitingSince).Round(time.Second), m.Reason)
+		prio := ""
+		if m.Priority != "" && m.Priority != hostqueue.PriorityNormal {
+			prio = " [" + m.Priority + "]"
+		}
+		fmt.Fprintf(&b, "\n  wait %s%s %s for %s: %s", m.Session, prio, m.Kind, now.Sub(m.WaitingSince).Round(time.Second), m.Reason)
 	}
 	return b.String()
 }

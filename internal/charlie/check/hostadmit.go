@@ -93,16 +93,19 @@ func admitHostSlot(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.
 		// The waiter's own marker: this gate's place in line (spinclass#482),
 		// written under the ledger lock at its first look, and for host-load. It
 		// is removed however the wait ends.
-		updateWaiter func(string)
-		leaveWaiter  = func() {}
+		waiter *hostqueue.Waiter
 	)
-	defer func() { leaveWaiter() }()
+	defer func() {
+		if waiter != nil {
+			waiter.Leave()
+		}
+	}()
 	for {
 		unlock, err := ledger.Lock()
 		if err != nil {
 			return warn("the ledger lock could not be taken: " + err.Error())
 		}
-		if updateWaiter == nil {
+		if waiter == nil {
 			// Enqueue: the place is taken under the ledger lock, so places rise in
 			// the order gates asked, and admission goes by place, not by who polls
 			// first. A place that cannot be written means the ledger is unusable:
@@ -115,13 +118,20 @@ func admitHostSlot(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.
 			marker.Seq = seq
 			w := marker
 			w.WaitingSince = start
-			u, leave, werr := ledger.Wait(w)
+			wt, werr := ledger.OpenWait(w)
 			if werr != nil {
 				unlock()
 				return warn("a place in the queue could not be written: " + werr.Error())
 			}
-			updateWaiter, leaveWaiter = u, leave
+			waiter = wt
 			state.Seq = seq
+		}
+		// Management commands addressed to this waiter (spinclass#483), applied
+		// under the lock before the decision, so a new priority counts at once.
+		for _, c := range waiter.ApplyCommands() {
+			if activity != nil {
+				_, _ = fmt.Fprintf(activity, "host queue: %s set this gate's %s to %s\n", c.Actor, c.Verb, c.Priority)
+			}
 		}
 		view, verr := ledger.View(true)
 		snap, perr := hostQueueProbe()
@@ -134,7 +144,7 @@ func admitHostSlot(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.
 		if d.Admit {
 			marker.AdmittedAt = now
 			rel, aerr := ledger.Admit(marker)
-			leaveWaiter() // the place becomes the slot, still under the lock
+			waiter.Leave() // the place becomes the slot, still under the lock
 			unlock()
 			if aerr != nil {
 				return warn("the slot marker could not be written: " + aerr.Error())
@@ -146,7 +156,7 @@ func admitHostSlot(ctx context.Context, rep *crap.Reporter, hierarchy sweatfile.
 		unlock()
 		state, lastWhy = d.Next, d
 		waitedFor[d.Reason] = true
-		updateWaiter(d.Detail)
+		waiter.Update(d.Detail)
 
 		waited := now.Sub(start)
 		if activity != nil && (lastBeat.IsZero() || now.Sub(lastBeat) >= hostQueueHeartbeat) {

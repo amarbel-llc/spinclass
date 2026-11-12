@@ -38,6 +38,7 @@ func TestConfigFromReadsEveryKey(t *testing.T) {
 		MaxGates: 2, MemoryFloor: 3 << 30, MemoryResume: 5 << 30, PressureAvg10: 20,
 		SwapCeiling: 8 << 30, DiskFloor: 50e9, LoadThreshold: 1.5,
 		Settle: 30 * time.Second, Poll: 5 * time.Second, MaxWait: 0, IdleGrace: 0,
+		AgingInterval: DefaultAgingInterval, // fixed, not a sweatfile key
 	}
 	if cfg != want {
 		t.Errorf("cfg = %+v, want %+v", cfg, want)

@@ -96,6 +96,19 @@ appended to *$XDG\_STATE\_HOME/spinclass/host-queue/journal.ndjson* with actor
 warning, since the hold is the brake. The ledger files are not a security
 boundary against same-uid code (spinclass#483).
 
+*sc queue-priority <session> low|normal|high* sets a waiter's priority
+(spinclass#483 slice 2). Order is effective priority, then place; a waiter ages
+one level per *hostqueue.DefaultAgingInterval* (30 minutes, fixed, restarting
+when its priority is set), and a priority never bypasses the hold, the gate cap
+or any probe term. The marker is held and rewritten by the waiter's own
+process, so the verb cannot edit it: it journals the act (fail closed), then
+writes *cmd-priority-\*.json* in the ledger directory naming the waiter's place,
+session, pid and when it began waiting (the marker's inode is not used, it
+changes on every reason update). The waiter applies the command under the ledger
+lock at its next look (at most one poll), and the verb waits for that. A locked
+reader garbage-collects commands whose target is gone, unparseable ones and
+ones older than an hour.
+
 The predicate, *hostqueue.Decide*, is pure. It reads the ledger view, a
 *hostload.Probe* snapshot (load, *MemAvailable*, PSI or swap, and store free
 bytes; no per-process sample), the config and the waiter's state (its place,

@@ -29,6 +29,10 @@ type Config struct {
 	Poll          time.Duration
 	MaxWait       time.Duration // 0: no limit
 	IdleGrace     time.Duration // 0: off
+	// AgingInterval is how long a waiter waits before it counts one priority
+	// level higher (low to normal to high); fixed, not a share of MaxWait, so
+	// "no limit" still ages (spinclass#483). 0: no aging.
+	AgingInterval time.Duration
 }
 
 const gib = 1 << 30
@@ -54,6 +58,7 @@ func DefaultConfig() Config {
 		Poll:          10 * time.Second,
 		MaxWait:       60 * time.Minute,
 		IdleGrace:     10 * time.Minute,
+		AgingInterval: DefaultAgingInterval,
 	}
 }
 
@@ -117,7 +122,7 @@ type Decision struct {
 // waiter's place ("position N of M: ...").
 func Decide(v View, snap hostload.Snapshot, cfg Config, w WaiterState, now time.Time) Decision {
 	next := w
-	pos, total, ahead := position(v.Waiting, w.Seq)
+	pos, total, ahead := position(v.Waiting, w.Seq, now, cfg.AgingInterval)
 	place := ""
 	if w.Seq != 0 {
 		place = fmt.Sprintf("position %d of %d: ", pos, total)
@@ -164,22 +169,41 @@ func Decide(v View, snap hostload.Snapshot, cfg Config, w WaiterState, now time.
 }
 
 // position is a waiter's place in the queue: pos counts it and every waiter
-// ahead (a lower Seq; one with no Seq predates numbering and is ahead of all),
-// total is the waiters in line, at least pos, and ahead names the session
-// directly in front. A Seq of 0 is a caller outside the queue: first in line.
-func position(waiting []Marker, seq uint64) (pos, total int, ahead string) {
+// ahead, total is the waiters in line, at least pos, and ahead names the
+// session directly in front. Order is effective priority (higher first, with
+// aging), then place (a lower Seq; one with no Seq predates numbering and is
+// ahead of every numbered waiter of its level). A Seq of 0 is a caller outside
+// the queue: first in line.
+func position(waiting []Marker, seq uint64, now time.Time, aging time.Duration) (pos, total int, ahead string) {
 	if seq == 0 {
 		return 1, max(len(waiting), 1), ""
 	}
-	pos = 1
-	var front Marker
+	me := Marker{Seq: seq}
 	for _, m := range waiting {
-		if m.Seq == seq || (m.Seq != 0 && m.Seq > seq) {
+		if m.Seq == seq {
+			me = m
+			break
+		}
+	}
+	myRank := EffectiveRank(me, now, aging)
+	pos = 1
+	var (
+		front     Marker
+		frontRank int
+		haveFront bool
+	)
+	for _, m := range waiting {
+		if m.Seq == seq {
+			continue
+		}
+		r := EffectiveRank(m, now, aging)
+		if r < myRank || (r == myRank && m.Seq != 0 && m.Seq > seq) {
 			continue
 		}
 		pos++
-		if front.Seq == 0 || (m.Seq != 0 && m.Seq > front.Seq) {
-			front = m
+		// The waiter directly in front is the last of those ahead.
+		if !haveFront || laterThan(m, r, front, frontRank) {
+			front, frontRank, haveFront = m, r, true
 		}
 	}
 	name := front.Session
@@ -187,6 +211,19 @@ func position(waiting []Marker, seq uint64) (pos, total int, ahead string) {
 		name = "an earlier gate"
 	}
 	return pos, max(len(waiting), pos), name
+}
+
+// laterThan reports whether a (effective rank ra) sorts after b (rank rb) in
+// queue order: a lower rank is later; at one rank a higher place is later and a
+// placeless marker (Seq 0) is earliest.
+func laterThan(a Marker, ra int, b Marker, rb int) bool {
+	if ra != rb {
+		return ra < rb
+	}
+	if a.Seq == 0 {
+		return false
+	}
+	return b.Seq == 0 || a.Seq > b.Seq
 }
 
 // probeReason is the first failing probe term, or ReasonNone.

@@ -29,6 +29,10 @@ type Marker struct {
 	// every request. Admission goes in Seq order. A marker from a binary that
 	// predates it has Seq 0 and counts as ahead of every numbered waiter.
 	Seq uint64 `json:"seq,omitempty"`
+	// Priority is the operator's choice for this waiter (spinclass#483): low,
+	// normal or high; empty is normal. PrioritySetAt restarts the waiter's aging.
+	Priority      string    `json:"priority,omitempty"`
+	PrioritySetAt time.Time `json:"priority_set_at,omitempty"`
 	// A waiter's marker (Wait) carries when it began waiting and why it waits.
 	WaitingSince time.Time `json:"waiting_since"`
 	Reason       string    `json:"reason,omitempty"`
@@ -105,20 +109,49 @@ func (l Ledger) Admit(m Marker) (release func(), err error) {
 // takes no slot and needs no ledger lock. update rewrites its reason; leave
 // (idempotent) removes it. A waiter that dies is reaped like a dead gate.
 func (l Ledger) Wait(m Marker) (update func(reason string), leave func(), err error) {
-	p, err := l.place(waiterPrefix, m)
+	w, err := l.OpenWait(m)
 	if err != nil {
 		return nil, nil, err
 	}
-	update = func(reason string) {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		if p.gone || reason == m.Reason {
-			return
-		}
-		m.Reason = reason
-		p.replaceLocked(l, m)
+	return w.Update, w.Leave, nil
+}
+
+// Waiter is a waiter's own handle on its marker: it rewrites the reason, applies
+// management commands addressed to it (spinclass#483) and leaves the line.
+type Waiter struct {
+	l Ledger
+	p *placedMarker
+	m Marker // guarded by p.mu
+}
+
+// OpenWait records m as a waiter, like Wait, and returns its handle.
+func (l Ledger) OpenWait(m Marker) (*Waiter, error) {
+	p, err := l.place(waiterPrefix, m)
+	if err != nil {
+		return nil, err
 	}
-	return update, p.remove, nil
+	return &Waiter{l: l, p: p, m: m}, nil
+}
+
+// Update rewrites the waiter's reason; an unchanged reason writes nothing.
+func (w *Waiter) Update(reason string) {
+	w.p.mu.Lock()
+	defer w.p.mu.Unlock()
+	if w.p.gone || reason == w.m.Reason {
+		return
+	}
+	w.m.Reason = reason
+	w.p.replaceLocked(w.l, w.m)
+}
+
+// Leave removes the waiter's marker; idempotent.
+func (w *Waiter) Leave() { w.p.remove() }
+
+// Marker is the waiter's marker as last written.
+func (w *Waiter) Marker() Marker {
+	w.p.mu.Lock()
+	defer w.p.mu.Unlock()
+	return w.m
 }
 
 // placedMarker is a marker in view under final, held by the lock on f.
@@ -388,6 +421,9 @@ func (l Ledger) View(reap bool) (View, error) {
 	waiting, err := l.Waiting(reap)
 	if err != nil {
 		return View{}, err
+	}
+	if reap {
+		l.CollectCommands(waiting, time.Now())
 	}
 	held, reason := l.Hold()
 	return View{Live: live, Waiting: waiting, Held: held, HoldReason: reason}, nil

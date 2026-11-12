@@ -106,6 +106,38 @@ func runQueueHold(p queueHoldParams) error {
 	return nil
 }
 
+type queuePriorityParams struct {
+	Session string `json:"session"`
+	Level   string `json:"level"`
+}
+
+// queuePriorityWait is how long queue-priority waits for the waiter to apply the
+// change: one poll interval plus a margin.
+var queuePriorityWait = 15 * time.Second
+
+func runQueuePriority(p queuePriorityParams) error {
+	actor, err := queueOperator("queue-priority")
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(p.Session) == "" {
+		return errors.New("queue-priority: name the waiting session (as `sc queue-status` prints it)")
+	}
+	ledger, err := queueLedger()
+	if err != nil {
+		return fmt.Errorf("queue-priority: %w", err)
+	}
+	res, err := ledger.RequestPriority(actor, strings.TrimSpace(p.Session), p.Level, operatorHandleNow(), queuePriorityWait)
+	if err != nil {
+		return fmt.Errorf("queue-priority: %w", err)
+	}
+	if !res.Applied {
+		return fmt.Errorf("queue-priority: the gate of %s did not take %s within %s (it may have been admitted: too late); its priority is unchanged (%s)", p.Session, res.New, queuePriorityWait, res.Old)
+	}
+	fmt.Fprintf(operatorHandleStdout(), "%s: priority %s -> %s (place %d)\n", p.Session, res.Old, res.New, res.Seq)
+	return nil
+}
+
 func runQueueRelease() error {
 	actor, err := queueOperator("queue-release")
 	if err != nil {
@@ -168,6 +200,27 @@ func registerQueueCommands(app *command.App) {
 				return fmt.Errorf("queue-hold: invalid arguments: %w", err)
 			}
 			return runQueueHold(p)
+		},
+	})
+	app.AddCommand(&command.Command{
+		Name:  "queue-priority",
+		Title: "Set a waiting gate's priority",
+		Description: command.Description{
+			Short: "Set the priority (low, normal, high) of a gate waiting in the host admission queue, as the operator at a terminal (#483). CLI-only.",
+			Long: "Order is priority first, then place; a waiter also ages one level per 30 minutes waited (restarting when its priority is set). " +
+				"A priority never bypasses the hold, the gate cap, memory, pressure, disk, load or settle. The change is sent to the waiter, which applies it " +
+				"at its next look (at most one poll), and journalled with actor tty before it is sent. It refuses unless stdin and stdout are both terminals.",
+		},
+		Params: []command.Param{
+			{Name: "session", Type: command.String, Required: true, Description: "The waiting session, as queue-status prints it (<repo>/<branch>)"},
+			{Name: "level", Type: command.String, Required: true, Description: "low, normal or high"},
+		},
+		RunCLI: func(_ context.Context, args json.RawMessage) error {
+			var p queuePriorityParams
+			if err := json.Unmarshal(args, &p); err != nil {
+				return fmt.Errorf("queue-priority: invalid arguments: %w", err)
+			}
+			return runQueuePriority(p)
 		},
 	})
 	app.AddCommand(&command.Command{
