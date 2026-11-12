@@ -159,6 +159,58 @@ func TestRestartChildWideningWithTheKeyThroughThePreflight(t *testing.T) {
 	if st.RestartingPosture != "attended" {
 		t.Errorf("RestartingPosture = %q", st.RestartingPosture)
 	}
+	if v.Mode != "auto" {
+		t.Errorf("verdict mode = %q, want auto: the mode an attended start gets", v.Mode)
+	}
+}
+
+// The attended verdict names the mode an attended START gets (spinclass#476):
+// auto, or acceptEdits under disable-auto-mode, whatever the pinned entry is
+// (a spawned worker's shell, an sc-started session's shell, or a harness). The
+// rearm re-emits it, and no other posture carries a mode.
+func TestRestartAttendedVerdictCarriesTheAttendedStartMode(t *testing.T) {
+	entries := map[string]*session.PinnedEntry{
+		"shell pin (sc start / spawn)": {Start: []string{"/bin/fish"}, Env: map[string]string{"CLOWN_UNATTENDED": "1"}},
+		"harness pin":                  harnessEntry(map[string]string{"CLOWN_UNATTENDED": "1"}),
+	}
+	for name, entry := range entries {
+		for _, tc := range []struct{ extra, want string }{
+			{"", "auto"},
+			{"disable-auto-mode = true\n", "acceptEdits"},
+		} {
+			t.Run(name+"/"+tc.want, func(t *testing.T) {
+				stubNotifyPrincipal(t)
+				stubRestartHandoff(t, "", nil)
+				restartPostureChild(t, entry, true)
+				writeGlobalSweatfile(t, os.Getenv("HOME"), restartPostureHandoffTOML+allowWideningTOML+tc.extra)
+				if text, isErr := callRestartChild(t, `{"child":"worker/kid","posture":"attended"}`); isErr {
+					t.Fatalf("refused: %q", text)
+				}
+				v, err := runRestartPreflight("worker/kid")
+				if err != nil || v.Posture != "attended" || v.Mode != tc.want {
+					t.Fatalf("verdict = %+v, %v; want attended with mode %s", v, err, tc.want)
+				}
+				var buf bytes.Buffer
+				if err := printRestartVerdict(&buf, v); err != nil || !strings.Contains(buf.String(), `"mode":"`+tc.want+`"`) {
+					t.Errorf("verdict line = %q, want the mode key (%v)", buf.String(), err)
+				}
+				rv, err := runRestartRearm("worker/kid")
+				if err != nil || rv.Mode != tc.want {
+					t.Errorf("rearm verdict = %+v, %v; want the same mode", rv, err)
+				}
+			})
+		}
+	}
+
+	stubNotifyPrincipal(t)
+	stubRestartHandoff(t, "", nil)
+	restartPostureChild(t, harnessEntry(nil), false)
+	if text, isErr := callRestartChild(t, `{"child":"worker/kid","posture":"unattended"}`); isErr {
+		t.Fatalf("refused: %q", text)
+	}
+	if v, err := runRestartPreflight("worker/kid"); err != nil || v.Mode != "" {
+		t.Errorf("unattended verdict = %+v, %v; want no mode", v, err)
+	}
 }
 
 // Narrowing through the preflight sets the marker, prints the posture, and

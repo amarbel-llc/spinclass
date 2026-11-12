@@ -237,12 +237,19 @@ permission posture and out of it, keeping its principal.
   stop, and a restart already requires a clown-bound principal; a direct
   `clown restart --posture` (no spinclass request recorded) gets a `none`
   preflight verdict and does nothing, by design.
-- **Open (spinclass#476):** after an `attended` restart claude still reported
-  dontAsk. Spinclass's verdict and clown's relaunch (marker removed, dontAsk
-  flags dropped, no `defaultMode` setting) are consistent; the suspect is
-  `claude --resume` restoring the session's recorded permission mode, which
-  would need an explicit mode flag on clown's attended relaunch. Unverified;
-  routed to clown.
+- **Attended lands in the attended-start mode (spinclass#476).** An attended
+  verdict also carries `"mode"`: `auto`, or `acceptEdits` under
+  `[session-entry].disable-auto-mode` (`Sweatfile.AttendedPermissionMode`, the
+  same value the generated worktree settings use as `defaultMode`), read from
+  the session's repo hierarchy at the preflight and re-emitted by `--rearm`. It
+  never exceeds what an attended start already gets; no other posture carries
+  it. Clown must relaunch with `--permission-mode <mode>` in place of its own
+  `default` when the verdict names one (clown's lane).
+- **Resolved (spinclass#476):** after an `attended` restart claude came back in
+  dontAsk, because an interactive `claude --resume` with no mode flag restores
+  the last permission mode its transcript recorded. Clown's attended relaunch
+  now names a mode (clown cc00a45: `--permission-mode default` when the launch
+  kept none), and the verdict's `mode` above says which one.
 - **Both halves of the relaunch.** A clown restart relaunches from the
   frontend's own argv and env and never re-reads the pinned entry, so the
   preflight does two things in the one locked `session.Update` that stamps

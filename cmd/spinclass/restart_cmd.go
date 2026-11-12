@@ -15,6 +15,7 @@ import (
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
 	"code.linenisgreat.com/spinclass/internal/0/clown"
 	"code.linenisgreat.com/spinclass/internal/0/hungstatus"
+	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 	"code.linenisgreat.com/spinclass/internal/alfa/job"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
@@ -502,6 +503,12 @@ type restartVerdict struct {
 	// means keep; clown relaunches into it and treats an unknown value as "do
 	// not restart".
 	Posture string `json:"posture,omitempty"`
+	// Mode is set only with posture "attended": the claude permission mode an
+	// attended start of this session gets ("auto", or "acceptEdits" under
+	// disable-auto-mode), so the relaunch lands there and not in claude's
+	// manual default (spinclass#476). It never exceeds what an attended start
+	// already gets. Absent means the frontend names its own attended mode.
+	Mode string `json:"mode,omitempty"`
 	// State is set only by --peek: "closed" or "live".
 	State string `json:"state,omitempty"`
 }
@@ -704,7 +711,27 @@ func runRestartPreflight(target string) (restartVerdict, error) {
 		Reason:  fmt.Sprintf("restart of %s requested by %s: %s", st.Key(), req.Requester, req.Reason),
 		When:    req.When,
 		Posture: req.Posture,
+		Mode:    attendedModeFor(st, req.Posture),
 	}, nil
+}
+
+// attendedModeFor is the permission mode an attended relaunch of st should land
+// in, from the same sweatfile hierarchy that generated the session's settings:
+// "" for any other posture, and "" when the hierarchy cannot be read (the
+// frontend then names its own attended mode; it never widens).
+func attendedModeFor(st *session.State, posture string) string {
+	if posture != restartPostureAttended {
+		return ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	h, err := sweatfileio.LoadHierarchy(home, st.RepoPath)
+	if err != nil {
+		return ""
+	}
+	return sweatfile.GetDefault().MergeWith(h.Merged).AttendedPermissionMode()
 }
 
 // refreezeFrozenHook is shop.RefreshFrozenHook, a seam so a preflight test
@@ -853,6 +880,7 @@ func runRestartRearm(target string) (restartVerdict, error) {
 		Reason:  fmt.Sprintf("restart of %s re-armed (requested by %s: %s)", st.Key(), req.Requester, req.Reason),
 		When:    restartWhenIdle,
 		Posture: posture,
+		Mode:    attendedModeFor(st, posture),
 	}, nil
 }
 

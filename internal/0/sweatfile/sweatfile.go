@@ -1260,6 +1260,18 @@ func (sf Sweatfile) SessionAutoModeDisabled() bool {
 		*sf.SessionEntry.DisableAutoMode
 }
 
+// AttendedPermissionMode is the claude permission mode an attended session
+// starts in: "auto", or "acceptEdits" when [session-entry].disable-auto-mode
+// is set. The generated worktree settings use it as defaultMode, and a restart
+// into the attended posture hands it to the frontend so the relaunch lands in
+// the same mode (spinclass#476).
+func (sf Sweatfile) AttendedPermissionMode() string {
+	if sf.SessionAutoModeDisabled() {
+		return "acceptEdits"
+	}
+	return "auto"
+}
+
 // The values [session-entry].unattended-permission-mode accepts.
 const (
 	UnattendedModeDontAsk = "dontAsk"
