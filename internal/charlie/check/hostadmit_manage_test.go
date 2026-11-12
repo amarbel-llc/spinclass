@@ -3,6 +3,9 @@ package check
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,6 +28,17 @@ func sendWaiterCommand(t *testing.T, ledger hostqueue.Ledger, verb string) {
 		At: time.Now().UTC(), Actor: "tty",
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// dumpLedger prints every file in the ledger directory with its content, so a
+// command that was never taken can be compared with the marker it addressed.
+func dumpLedger(t *testing.T, ledger hostqueue.Ledger) {
+	t.Helper()
+	entries, _ := os.ReadDir(ledger.Dir)
+	for _, e := range entries {
+		data, _ := os.ReadFile(filepath.Join(ledger.Dir, e.Name()))
+		t.Logf("ledger file %s: %s", e.Name(), strings.TrimSpace(string(data)))
 	}
 }
 
@@ -62,6 +76,7 @@ func TestHostQueueCancelEndsTheWaitAndFreesThePlace(t *testing.T) {
 			t.Fatalf("err = %v, want a cancelled wait", err)
 		}
 	case <-time.After(10 * time.Second):
+		dumpLedger(t, ledger)
 		t.Fatal("the cancel was never taken")
 	}
 	if w, _ := ledger.Waiting(false); len(w) != 0 {
@@ -92,6 +107,7 @@ func TestHostQueueAHeldGateWaitsUntilItIsReleased(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
+			dumpLedger(t, ledger)
 			t.Fatal("the hold was never taken")
 		}
 		time.Sleep(time.Millisecond)

@@ -2,8 +2,11 @@ package hostqueue
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -179,6 +182,68 @@ func TestRequestHoldAndReleaseWaiterEndToEnd(t *testing.T) {
 	recs := readJournal(t, l)
 	if len(recs) != 2 || recs[0].Act != "hold-waiter" || recs[1].Act != "release-waiter" || recs[0].Target != "r/me" {
 		t.Errorf("journal = %+v", recs)
+	}
+}
+
+// The waiter's own look reads the view with reaping, which collects orphan
+// commands: it must keep one addressed to a live waiter (a lost command was the
+// slice-3 gate failure).
+func TestAReapingViewKeepsACommandForALiveWaiter(t *testing.T) {
+	l := testLedger(t)
+	w := newWaiter(t, l, "r/me", 1)
+	path, err := l.SendCommand(cmdFor(w, PriorityHigh))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.View(true); err != nil {
+		t.Fatal(err)
+	}
+	if !CommandPending(path) {
+		t.Fatal("a reaping view collected a command addressed to a live waiter")
+	}
+	if applied := w.ApplyCommands(); len(applied) != 1 {
+		t.Fatalf("applied = %+v", applied)
+	}
+}
+
+// A gate run outside any session worktree has no session name. Its marker must
+// read back with the empty name, not as "unreadable", or a command could never
+// address it (the slice-3 check-package failure).
+func TestAMarkerWithNoSessionReadsBackAsWritten(t *testing.T) {
+	l := testLedger(t)
+	w := newWaiter(t, l, "", 1)
+	waiting, err := l.Waiting(false)
+	if err != nil || len(waiting) != 1 || waiting[0].Session != "" {
+		t.Fatalf("waiting = %+v, %v; want the empty session as written", waiting, err)
+	}
+	if _, err := l.SendCommand(cmdFor(w, PriorityHigh)); err != nil {
+		t.Fatal(err)
+	}
+	if applied := w.ApplyCommands(); len(applied) != 1 {
+		t.Fatalf("a command for an unnamed gate was not applied: %+v", applied)
+	}
+	// A file that does not parse is still named unreadable.
+	junk := filepath.Join(l.Dir, "wait-junk.json")
+	f, err := os.OpenFile(junk, os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString("not json"); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	waiting, _ = l.Waiting(false)
+	var named bool
+	for _, m := range waiting {
+		if strings.HasPrefix(m.Session, "(unreadable marker") {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("a marker that does not parse was not named unreadable: %+v", waiting)
 	}
 }
 

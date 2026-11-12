@@ -380,7 +380,10 @@ func readMarkerOnce(path string, reap bool) (m Marker, alive, replaced bool) {
 	// Read through the locked file, not the path: its content was complete
 	// before it was renamed into view.
 	data, _ := io.ReadAll(f)
-	if json.Unmarshal(data, &m) != nil || m.Session == "" {
+	// Only a marker that does not parse is "unreadable". One with no session (a
+	// gate run outside any session worktree) is a valid marker with an empty
+	// name, and must read back as written so a command can address it.
+	if json.Unmarshal(data, &m) != nil {
 		m.Session = "(unreadable marker " + filepath.Base(path) + ")"
 	}
 	return m, true, false
