@@ -17,7 +17,12 @@ import (
 // the directory does. Add a name here to protect another directory.
 // spinclass/token-pool holds the pre-minted forge token pool (FDR 0028 "Token
 // pool"): bearer tokens for every repo in the batch.
-var ProtectedStateDirs = []string{"circus", "spinclass/token-pool"}
+// spinclass/host-queue holds the host admission queue's hold file, journal and
+// cost history (FDR 0038, spinclass#483): a unit that could write them could
+// hold the queue or forge the audit trail. Its runtime half, the ledger under
+// $XDG_RUNTIME_DIR/spinclass/host-queue, is kept out by F14, whose allowlist of
+// the operator's runtime dir does not name spinclass.
+var ProtectedStateDirs = []string{"circus", "spinclass/token-pool", "spinclass/host-queue"}
 
 // ProtectedPaths returns the protected directories under stateDir.
 func ProtectedPaths(stateDir string) []string {
