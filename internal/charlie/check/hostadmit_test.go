@@ -154,7 +154,10 @@ func TestHostQueueWaiterIsVisibleWhileWaiting(t *testing.T) {
 	})
 	// Poll for the waiter rather than sample once after a fixed sleep (a
 	// loaded build sandbox can take longer than any fixed sleep to reach the
-	// first refusal), then cancel the wait once it has been seen.
+	// first refusal), then cancel the wait once it has been seen with its
+	// reason. Since #482 the marker is placed at the first look, before the
+	// first refusal names a reason, so a waiter with no reason yet is not the
+	// end of the poll.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	seen := make(chan []hostqueue.Marker, 1)
@@ -163,7 +166,7 @@ func TestHostQueueWaiterIsVisibleWhileWaiting(t *testing.T) {
 		deadline := time.Now().Add(4 * time.Second)
 		var w []hostqueue.Marker
 		for time.Now().Before(deadline) {
-			if w, _ = ledger.Waiting(false); len(w) > 0 {
+			if w, _ = ledger.Waiting(false); len(w) > 0 && w[0].Reason != "" {
 				break
 			}
 			time.Sleep(5 * time.Millisecond)
