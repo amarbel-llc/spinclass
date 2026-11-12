@@ -34,13 +34,13 @@ Steps 0 to 6 of the §11 sequence:
 - 3: the wait in `runHookPhase`;
 - 4: the `[host-queue]` admission keys;
 - 5: the `host-load` queue section;
-- 6: metrics and docs.
+- 6: metrics and docs;
+- #482: first-come order; #483: the management verbs, priorities, aging and the
+  confinement deny-write (see Interface).
 
 The queue is **opt-in**: off unless a trusted sweatfile sets `enable = true`
 (operator ruling, 2026-11-11). Held for separate go-aheads:
 
-- `sc queue-status`, `sc queue-hold` and `sc queue-release`. Until they exist,
-  the hold file is written by hand.
 - `sc host-slot` and `participants`.
 - Weighted admission and expected-cost ordering.
 - The on-disk ledger RFC.
@@ -95,18 +95,35 @@ The queue is **opt-in**: off unless a trusted sweatfile sets `enable = true`
 - **Order (#482):** a gate takes a numbered place under the ledger lock at its
   first look; admission goes by place, not by who polls first. A gate that
   leaves (timeout, cancel, crash) gives up its place.
-- **Management (#483, slices 1-3):** `sc queue-status`, `sc queue-hold`, `sc
-  queue-release`, `sc queue-priority`, `sc queue-cancel`, `sc queue-hold-waiter`,
-  `sc queue-release-waiter`; operator at a terminal only; journalled. The queue
-  order is effective priority (low, normal, high; aging one level per 30 min),
-  then place. A held waiter keeps its place, is skipped, and pauses its max-wait
-  clock and aging; holds expire at max-wait. A cancel is taken before the gate's
-  decision; one that loses the race is journalled too late. The confinement
-  deny-write follows in slice 4, per
-  `docs/plans/2026-11-12-483-host-queue-management.md`.
-  The command-file lifecycle names the waiter by place, session, pid and wait
-  start rather than the marker's inode (a waiter rewrites its marker on every
-  reason change, so the inode is unstable).
+- **Management (#483, landed):** `sc queue-status` (also a read-only MCP tool),
+  `sc queue-hold`, `sc queue-release`, `sc queue-priority`, `sc queue-cancel`,
+  `sc queue-hold-waiter`, `sc queue-release-waiter`. The queue order is effective
+  priority (low, normal, high; aging one level per 30 min), then place. A held
+  waiter keeps its place, is skipped, and pauses its max-wait clock and aging;
+  holds expire at max-wait (never with `max-wait = "0"`). A cancel is taken
+  before the gate's decision; one that loses the race is journalled too late.
+  Design: `docs/plans/2026-11-12-483-host-queue-management.md`.
+  - **v1 authority:** the operator at a terminal only (stdin and stdout are
+    terminals, as for `sc handle-grant`). Every verb passes
+    `hostqueue.Authorize`, and every act is journalled to
+    `$XDG_STATE_HOME/spinclass/host-queue/journal.ndjson` with actor `tty`
+    (as strong as isatty, not an authenticated act). Priority and cancel fail
+    closed without a journal line; the whole-queue hold and release fail open
+    with a warning, since the hold is the brake. No handle right (not `merge`
+    or `check`, which are execution-class) delegates queue control.
+  - **Later:** a narrow object right `spinclass:queue`, not in the default
+    grant, is one more case in `Authorize`. Target state (operator ruling
+    2026-11-12): an unattended parent holding it may cancel its child's waiter,
+    journalled; v1 grants nothing of that kind. Priority stays operator policy;
+    sessions may only lower it.
+  - **Confinement:** the ledger directory under `$XDG_RUNTIME_DIR` (kept out by
+    F14) and `$XDG_STATE_HOME/spinclass/host-queue` (a protected state dir,
+    F16) are not reachable from a confined unit (FDR 0035).
+  - **Command lifecycle:** a verb writes a command file that names the waiter by
+    place, session, pid and wait start rather than the marker's inode (a waiter
+    rewrites its marker on every reason change, so the inode is unstable); the
+    waiter applies it at its next look. The files are not a security boundary
+    against same-uid code; the tool is the check.
 - **Stale binaries:** the gate runs in the calling session's serve, so a serve
   that predates the queue code runs gates unqueued. `host-load` flags it
   (`QUEUE BYPASS`), and `just explore-live-queue-bypass` checks from a shell.

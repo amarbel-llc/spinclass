@@ -100,7 +100,10 @@ TTY-required, #473), `grant-session-handle` /
 `release-session-handle` / `list-handles` / `whoami` (FDR 0032), `handle-grant` /
 `handle-move` (CLI-only, TTY-required operator edit of any live session's
 handles, #478), `host-load`
-(#388, read-only CPU load + busiest processes by session), `resurrect`
+(#388, read-only CPU load + busiest processes by session), `queue-status`
+(read-only) / `queue-hold` / `queue-release` / `queue-priority` /
+`queue-cancel` / `queue-hold-waiter` / `queue-release-waiter` (host admission
+queue; the mutating ones are CLI-only, TTY-required, journalled, #483), `resurrect`
 (FDR 0027), `grit <tool> [json]` (CLI-only, TTY-required, logged operator escape
 hatch for the grit store tools, FDR 0036), `pull`, `validate`, `perms list|review|edit`. Per-command flags:
 the generated `spinclass-<cmd>(1)` pages or `sc <cmd> --help`. `start*` and
@@ -167,7 +170,9 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
   `internal/0/hostload` probe, `check/hostadmit.go`): opt-in trusted
   `[host-queue] enable`; every gate waits in `runHookPhase` for a host slot
   (flock ledger under `$XDG_RUNTIME_DIR`); step-0 cost history in
-  `check/gatecost.go`.
+  `check/gatecost.go`. Order is effective priority then place (#482, #483);
+  operator-only management verbs via command files (`hostqueue/command.go`,
+  `manage.go`); `host-load` flags serves with no queue code (QUEUE BYPASS).
 - **Spawn allow-list** (TEMPORARY, #384 stopgap,
   `docs/plans/2026-11-12-spawn-allowlist-stopgap.md`; replaced by ajour plus
   profiles): trusted `[[permissions.spawn-allow]]` lets a listed unattended

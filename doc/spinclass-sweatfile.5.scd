@@ -1431,6 +1431,19 @@ closes up; a new gate joins the back. *host-load* names live sessions whose
 *spinclass serve* binary predates the queue code (*QUEUE BYPASS*): their gates
 run unqueued until the session is restarted.
 
+The operator manages the queue with *sc queue-status* (also a read-only MCP
+tool), *sc queue-hold --reason*, *sc queue-release*, *sc queue-priority
+<session> low|normal|high*, *sc queue-cancel <session>*, *sc queue-hold-waiter
+<session>* and *sc queue-release-waiter <session>*. In this version they are
+the operator's alone: every one except *queue-status* refuses unless stdin and
+stdout are terminals, so an agent cannot drive them, and every act is journalled
+to *$XDG\_STATE\_HOME/spinclass/host-queue/journal.ndjson*. Delegating them to a
+session is a later, narrow *spinclass:queue* right; none of the existing handle
+rights (*merge*, *check*) carries it. A waiter's priority orders the line before
+its place, and ages one level per 30 minutes; a held waiter keeps its place, is
+skipped, and its max-wait clock and aging pause. A confined unit cannot see the
+queue's ledger or state directory (FDR 0035, F14 and F16).
+
 It re-checks every *poll*. While waiting, the job log gets a line naming the
 reason at most every 30 seconds. A gate that waited gets one *host queue wait
 <time> (<reasons>)* line, and an unwaited admission prints nothing. After
