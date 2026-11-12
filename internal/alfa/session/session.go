@@ -211,8 +211,11 @@ type State struct {
 	// (FDR 0032 D12/D13): the spawner at spawn, plus every accepted grant. A
 	// materialized view; slice 1 turns entries into grant-record digests.
 	Holders []string `json:"holders,omitempty"`
-	// PendingHandles are principals granted a handle that have not yet exercised
-	// it (accept-on-first-use, FDR 0032 D12).
+	// PendingHandles are principals granted a handle that had not yet exercised
+	// it under FDR 0032 D12's former accept-on-first-use. Since spinclass#480 a
+	// grant is effective when recorded, so nothing new is written here; a record
+	// that still carries entries has them promoted to Holders when it is read
+	// (promotePendingHandles).
 	PendingHandles []string `json:"pending_handles,omitempty"`
 	// HandleRights records, per principal in PendingHandles or Holders, the
 	// comma-separated rights (FDR 0032 D13: observe/close/grant/instruct/cap/…)
@@ -1406,7 +1409,10 @@ type HandleProvenance struct {
 // not a proof of origin (slice 0, FDR 0032 D9).
 const HandleOperator = "operator"
 
-// GrantHandleBy is GrantHandle recording who granted the handle and when.
+// GrantHandleBy is GrantHandle recording who granted the handle and when. The
+// grant is effective when recorded (spinclass#480, amending FDR 0032 D12's
+// accept-on-first-use): `to` joins Holders at once, accepted at the grant's
+// time, and the caller tells the recipient.
 func (s *State) GrantHandleBy(to, rights, by string, at time.Time) (changed bool) {
 	if to == "" || s.IsHolder(to) || slices.Contains(s.PendingHandles, to) {
 		return false
@@ -1414,7 +1420,7 @@ func (s *State) GrantHandleBy(to, rights, by string, at time.Time) (changed bool
 	if rights == "" {
 		rights = DefaultHandleRights
 	}
-	s.PendingHandles = append(s.PendingHandles, to)
+	s.Holders = append(s.Holders, to)
 	if s.HandleRights == nil {
 		s.HandleRights = map[string]string{}
 	}
@@ -1422,8 +1428,25 @@ func (s *State) GrantHandleBy(to, rights, by string, at time.Time) (changed bool
 	if s.HandleProvenance == nil {
 		s.HandleProvenance = map[string]HandleProvenance{}
 	}
-	s.HandleProvenance[to] = HandleProvenance{GrantedBy: by, GrantedAt: &at}
+	s.HandleProvenance[to] = HandleProvenance{GrantedBy: by, GrantedAt: &at, AcceptedAt: &at}
 	return true
+}
+
+// promotePendingHandles makes the pending grants of a record written before
+// spinclass#480 effective: each joins Holders, accepted when it was granted
+// (left unrecorded when its grant time is unknown). Applied wherever a State
+// is decoded, so every reader sees one shape; the next Write persists it.
+func (s *State) promotePendingHandles() {
+	for _, p := range s.PendingHandles {
+		if !slices.Contains(s.Holders, p) {
+			s.Holders = append(s.Holders, p)
+		}
+		if prov, ok := s.HandleProvenance[p]; ok && prov.AcceptedAt == nil && prov.GrantedAt != nil {
+			prov.AcceptedAt = prov.GrantedAt
+			s.HandleProvenance[p] = prov
+		}
+	}
+	s.PendingHandles = nil
 }
 
 // SeedSpawnerHandle records the handle a spawn gives its spawner as held from

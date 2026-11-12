@@ -463,8 +463,9 @@ func TestCloseChildSessionEmitsExitWake(t *testing.T) {
 
 // TestCloseChildSessionRefusesClosedChild pins the FDR 0032 tombstone guard:
 // a child that is already closed must refuse with a friendly message BEFORE
-// the accept-on-first-use write ever touches session.Write, which would
-// otherwise fail with a raw "no such file" error since the worktree is gone.
+// any write ever touches session.Write, which would otherwise fail with a raw
+// "no such file" error since the worktree is gone. The caller holds through a
+// pre-#480 pending grant (read back as held).
 func TestCloseChildSessionRefusesClosedChild(t *testing.T) {
 	testgit.RequireGit(t)
 	const pendingPrincipal = "9c2e1111-2222-3333-4444-555566667777"
@@ -506,13 +507,12 @@ func TestCloseChildSessionRefusesClosedChild(t *testing.T) {
 	}
 }
 
-// TestCloseChildSessionAcceptsPendingHandleFirst is the FDR 0032 D12
-// accept-on-first-use case at the close-child-session layer: the caller is
-// only PENDING (granted but never yet exercised the handle) — no
-// SpawnedByPrincipal, no literal Holders entry. The reap itself is the first
-// use, so it must accept (promoting pending -> holder) and then succeed, with
-// the tombstone recording the caller among Holders.
-func TestCloseChildSessionAcceptsPendingHandleFirst(t *testing.T) {
+// TestCloseChildSessionByLegacyPendingHolder: a pre-#480 record left the caller
+// only PENDING (granted, never exercised) — no SpawnedByPrincipal, no literal
+// Holders entry. Since spinclass#480 such a record reads back with the grant
+// held, so the reap succeeds and the tombstone records the caller among
+// Holders with nothing pending.
+func TestCloseChildSessionByLegacyPendingHolder(t *testing.T) {
 	testgit.RequireGit(t)
 	const pendingPrincipal = "9c2e1111-2222-3333-4444-555566667777"
 	t.Setenv("HOME", t.TempDir())
@@ -550,7 +550,7 @@ func TestCloseChildSessionAcceptsPendingHandleFirst(t *testing.T) {
 
 	text, isErr := callCloseChild(t, `{"child":"worker/kid","force":true}`)
 	if isErr {
-		t.Fatalf("expected the pending holder's reap to succeed (accept-on-first-use), got error result: %s", text)
+		t.Fatalf("expected the legacy-pending holder's reap to succeed, got error result: %s", text)
 	}
 
 	st, err := session.Read(repoPath, "kid")
@@ -567,6 +567,6 @@ func TestCloseChildSessionAcceptsPendingHandleFirst(t *testing.T) {
 		t.Errorf("tombstone Holders = %v, want to contain the accepted pending principal %q", st.Holders, pendingPrincipal)
 	}
 	if len(st.PendingHandles) != 0 {
-		t.Errorf("tombstone PendingHandles = %v, want empty after accept", st.PendingHandles)
+		t.Errorf("tombstone PendingHandles = %v, want empty", st.PendingHandles)
 	}
 }

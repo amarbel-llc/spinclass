@@ -515,11 +515,30 @@ prompt for the three escalations.
   record and sends it to the recipient as a chat message carrying the digest.
   The sender keeps its copy: delegate is the default, transfer is grant then
   release.
-- **Accept is first use.** The handle sits in the recipient's `pending` set,
-  conferring no authority and no exit wakes, until the recipient first
-  exercises it. `recvmsg` semantics: rights in transit are inert, unclaimed
-  ones drop with the message. #321's "gains no authority it didn't ask for"
-  holds without a second tool every handoff would forget.
+- **A grant is effective when recorded; the recipient is told.** Amended
+  2026-11-12 (spinclass#480, operator ruling;
+  `docs/plans/2026-11-12-480-immediate-handle-grants.md`). This was "accept
+  is first use": the handle sat in the recipient's `pending` set, conferring
+  no authority and no exit wakes, until the recipient first exercised it
+  (`recvmsg` semantics). In practice the explicit accept always asked a human,
+  so an unattended recipient could not take a grant the operator had made,
+  while the implicit accept inside a reap or restart asked no one. The human
+  decision is now the grant's: `grant-session-handle` always asks, and `sc
+  handle-grant` is the operator at a terminal. What replaces the pending
+  state:
+  - a grant to a principal that is not live on the host (no presence record,
+    no live mapping) is refused, not parked: a misaddressed grant is never
+    recorded;
+  - the recipient, and the child's other holders, are woken with who granted
+    which rights, and the recipient can release;
+  - every grant and release is appended to
+    `$XDG_STATE_HOME/spinclass/handles/journal.ndjson` (a grant is refused if
+    its line cannot be written; a release stands regardless).
+
+  A record that still carries pending grants has them promoted to holders
+  when it is read. There is no time-based lapse in v1: a grant ends by
+  release, by the child's close, or by the recipient's death (the orphan rule
+  below).
 - **Release is local.** Bulk is a list. A child is **orphaned** when no
   accepted holder is alive per the presence index; `sc list` marks it, `sc
   clean` reports it, only the human closes it.

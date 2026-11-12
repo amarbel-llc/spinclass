@@ -15,16 +15,20 @@ import (
 )
 
 // childHandleFixture stands up a repo with one child worktree session whose
-// Holders/PendingHandles/HandleRights are set directly (bypassing spawn), for
+// Holders/HandleRights are set directly (bypassing spawn), for
 // exercising the handle tools' flows against a precise starting shape. Shares
 // stageChildWorktree's sandboxing (HOME/XDG_STATE_HOME, git excludes so the
 // .spinclass/ state file doesn't read as an untracked dirty file — see its
 // comment) with childFixture, but leaves the handle fields to the caller. st's
 // identity fields (RepoPath/WorktreePath/Branch/SessionKey/Entrypoint/
 // StartedAt) are overwritten; only the handle-related fields the caller set
-// survive.
+// survive. A State carrying PendingHandles is written as a pre-#480 record
+// would be; it reads back with them promoted to Holders. Every grant recipient
+// counts as live (spinclass#480's check); a test that grants should also stub
+// the wakes (stubHandleGrantEffects).
 func childHandleFixture(t *testing.T, callerPrincipal string, st session.State) (repoPath, wtPath string) {
 	t.Helper()
+	stubHandleRecipientLive(t, nil)
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("CLOWN_SESSION_ID", callerPrincipal)
@@ -83,10 +87,11 @@ func callWhoami(t *testing.T) (text string, isErr bool) {
 
 // TestGrantSessionHandleByHolder is the motivating case: a caller already
 // holding a handle (literally in Holders, not just via SpawnedByPrincipal)
-// grants to a new principal, landing it in PendingHandles with the default
-// rights.
+// grants to a new principal, which holds at once (spinclass#480) with the
+// default rights, accepted at the grant's time.
 func TestGrantSessionHandleByHolder(t *testing.T) {
 	const caller = "caller-principal"
+	stubHandleGrantEffects(t)
 	repoPath, _ := childHandleFixture(t, caller, session.State{
 		Holders:      []string{caller},
 		HandleRights: map[string]string{caller: "observe,close,grant"},
@@ -101,11 +106,14 @@ func TestGrantSessionHandleByHolder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(st.PendingHandles, "p9") {
-		t.Errorf("PendingHandles = %v, want to contain p9", st.PendingHandles)
+	if !slices.Contains(st.Holders, "p9") || len(st.PendingHandles) != 0 {
+		t.Errorf("Holders = %v PendingHandles = %v, want p9 holding and nothing pending", st.Holders, st.PendingHandles)
 	}
 	if got := st.HandleRights["p9"]; got != "observe,close" {
 		t.Errorf("HandleRights[p9] = %q, want the default", got)
+	}
+	if p := st.HandleProvenance["p9"]; p.GrantedAt == nil || p.AcceptedAt == nil || !p.AcceptedAt.Equal(*p.GrantedAt) {
+		t.Errorf("provenance = %+v, want accepted at the grant's time", p)
 	}
 }
 
@@ -131,8 +139,8 @@ func TestGrantSessionHandleByNonHolderRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(st.PendingHandles) != 0 {
-		t.Errorf("PendingHandles = %v, want unchanged (empty) after a refused grant", st.PendingHandles)
+	if !slices.Equal(st.Holders, []string{"other-spawner"}) {
+		t.Errorf("Holders = %v, want unchanged after a refused grant", st.Holders)
 	}
 }
 
@@ -218,11 +226,11 @@ func TestReleaseSessionHandleRefusesClosedSession(t *testing.T) {
 	}
 }
 
-// TestListHandlesAcceptSkipsClosedEntryWithoutAbortingListing pins F1's
-// list-handles contract: accept never persists a partial accept and then
-// errors out of the whole listing — an ineligible (closed) entry gets a
-// per-line skip note while every other pending entry still gets promoted.
-func TestListHandlesAcceptSkipsClosedEntryWithoutAbortingListing(t *testing.T) {
+// TestListHandlesReadsLegacyPendingRecordsAsHeld: since spinclass#480 there is
+// nothing to accept. A pre-#480 record (live or tombstoned) that still carries
+// the caller in pending_handles is read with it promoted, so list-handles shows
+// both as held, with or without accept, and never aborts or skips.
+func TestListHandlesReadsLegacyPendingRecordsAsHeld(t *testing.T) {
 	testgit.RequireGit(t)
 	const caller = "caller-principal"
 	t.Setenv("HOME", t.TempDir())
@@ -270,15 +278,19 @@ func TestListHandlesAcceptSkipsClosedEntryWithoutAbortingListing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	text, isErr := callListHandles(t, `{"accept":true}`)
-	if isErr {
-		t.Fatalf("list-handles with accept must not abort over one ineligible entry, got error: %s", text)
-	}
-	if !strings.Contains(text, "held    live-repo/kid") {
-		t.Errorf("expected the eligible entry promoted to held, got: %s", text)
-	}
-	if !strings.Contains(text, "closed-repo/kid") || !strings.Contains(text, "accept skipped") {
-		t.Errorf("expected the closed entry reported with a skip note, got: %s", text)
+	for _, args := range []string{`{}`, `{"accept":true}`} {
+		text, isErr := callListHandles(t, args)
+		if isErr {
+			t.Fatalf("list-handles %s failed: %s", args, text)
+		}
+		for _, want := range []string{"held    live-repo/kid", "held    closed-repo/kid"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("list-handles %s: missing %q in:\n%s", args, want, text)
+			}
+		}
+		if strings.Contains(text, "pending ") || strings.Contains(text, "accept skipped") {
+			t.Errorf("list-handles %s: nothing is pending since #480, got:\n%s", args, text)
+		}
 	}
 
 	live, err := session.Read(liveRepo, "kid")
@@ -331,8 +343,9 @@ func TestListHandlesRendersImplicitRightsWhenUnrecorded(t *testing.T) {
 }
 
 // TestGrantSessionHandleNoOpWhenRecipientAlreadyHasOne pins FDR 0032's grant
-// semantics: granting to a principal that already holds (or is already
-// pending) a handle changes nothing and is reported as a non-error no-op —
+// semantics: granting to a principal that already holds a handle (or was
+// pending on one in a pre-#480 record, which reads back as held) changes
+// nothing and is reported as a non-error no-op —
 // re-granting with different rights is not an escalation path in this slice.
 func TestGrantSessionHandleNoOpWhenRecipientAlreadyHasOne(t *testing.T) {
 	t.Run("recipient already an accepted holder", func(t *testing.T) {
@@ -351,7 +364,7 @@ func TestGrantSessionHandleNoOpWhenRecipientAlreadyHasOne(t *testing.T) {
 		}
 	})
 
-	t.Run("recipient already pending", func(t *testing.T) {
+	t.Run("recipient pending in a pre-#480 record", func(t *testing.T) {
 		const caller = "caller-principal"
 		childHandleFixture(t, caller, session.State{
 			Holders:        []string{caller},
@@ -369,12 +382,11 @@ func TestGrantSessionHandleNoOpWhenRecipientAlreadyHasOne(t *testing.T) {
 	})
 }
 
-// TestGrantSessionHandlePendingCallerAcceptPersistsEvenOnNoOpGrant: a caller
-// that was only pending exercises its handle by granting onward — first
-// use — even when the grant itself turns out to be a no-op (the recipient
-// already holds one). The accept must still be persisted; only the grant
-// itself is skipped.
-func TestGrantSessionHandlePendingCallerAcceptPersistsEvenOnNoOpGrant(t *testing.T) {
+// TestGrantSessionHandleLegacyPendingCallerHoldsOnNoOpGrant: a caller left
+// pending by a pre-#480 record holds at once (the record reads back promoted),
+// so it may grant; a grant that turns out to be a no-op (the recipient already
+// holds one) still leaves the caller a holder.
+func TestGrantSessionHandleLegacyPendingCallerHoldsOnNoOpGrant(t *testing.T) {
 	const caller = "caller-principal"
 	repoPath, _ := childHandleFixture(t, caller, session.State{
 		SpawnedByPrincipal: "other-spawner",
@@ -407,6 +419,7 @@ func TestGrantSessionHandlePendingCallerAcceptPersistsEvenOnNoOpGrant(t *testing
 // already honors — grant is not a reap-only privilege.
 func TestGrantSessionHandleByLegacySpawner(t *testing.T) {
 	const driverKey = "driver/main-oak"
+	stubHandleGrantEffects(t)
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("SPINCLASS_SESSION_ID", driverKey)
@@ -435,16 +448,18 @@ func TestGrantSessionHandleByLegacySpawner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(st.PendingHandles, "p9") {
-		t.Errorf("PendingHandles = %v, want to contain p9", st.PendingHandles)
+	if !slices.Contains(st.Holders, "p9") {
+		t.Errorf("Holders = %v, want to contain p9", st.Holders)
 	}
 }
 
-// TestGrantSessionHandleByPendingHolderAcceptsFirst: a caller that was only
-// PENDING exercises the handle by granting onward — first use — so it must be
-// accepted (promoted into Holders) before the grant proceeds.
-func TestGrantSessionHandleByPendingHolderAcceptsFirst(t *testing.T) {
+// TestGrantSessionHandleByLegacyPendingHolder: a caller left pending by a
+// pre-#480 record holds at once, so its grant onward succeeds; the record is
+// written back with both the caller and the new recipient as holders and
+// nothing pending.
+func TestGrantSessionHandleByLegacyPendingHolder(t *testing.T) {
 	const caller = "caller-principal"
+	stubHandleGrantEffects(t)
 	repoPath, _ := childHandleFixture(t, caller, session.State{
 		SpawnedByPrincipal: "other-spawner",
 		Holders:            []string{"other-spawner"},
@@ -454,21 +469,18 @@ func TestGrantSessionHandleByPendingHolderAcceptsFirst(t *testing.T) {
 
 	text, isErr := callGrant(t, `{"child":"worker/kid","to":"p9"}`)
 	if isErr {
-		t.Fatalf("expected the pending holder's grant to succeed (accept-on-first-use), got error: %s", text)
+		t.Fatalf("expected the legacy-pending holder's grant to succeed, got error: %s", text)
 	}
 
 	st, err := session.Read(repoPath, "kid")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(st.Holders, caller) {
-		t.Errorf("Holders = %v, want to contain the accepted caller %q", st.Holders, caller)
+	if !slices.Contains(st.Holders, caller) || !slices.Contains(st.Holders, "p9") {
+		t.Errorf("Holders = %v, want the caller and the newly-granted p9", st.Holders)
 	}
-	if slices.Contains(st.PendingHandles, caller) {
-		t.Errorf("caller should have moved out of PendingHandles after accepting, got %v", st.PendingHandles)
-	}
-	if !slices.Contains(st.PendingHandles, "p9") {
-		t.Errorf("PendingHandles = %v, want to contain the newly-granted p9", st.PendingHandles)
+	if len(st.PendingHandles) != 0 {
+		t.Errorf("PendingHandles = %v, want none", st.PendingHandles)
 	}
 }
 
@@ -576,6 +588,7 @@ func TestSpawnerReleaseEndsKeyPathReap(t *testing.T) {
 func TestSpawnerTransferEndsKeyPathGrant(t *testing.T) {
 	const caller = "caller-principal"
 	const callerKey = "driver/main-oak"
+	stubHandleGrantEffects(t)
 	repoPath, _ := childHandleFixture(t, caller, session.State{
 		SpawnedBy:          callerKey,
 		SpawnedByPrincipal: caller,
@@ -602,8 +615,8 @@ func TestSpawnerTransferEndsKeyPathGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if slices.Contains(st.PendingHandles, "p10") {
-		t.Errorf("refused grant must not record p10, PendingHandles = %v", st.PendingHandles)
+	if slices.Contains(st.Holders, "p10") || !slices.Contains(st.Holders, "p9") {
+		t.Errorf("Holders = %v, want p9 (the transfer) and never the refused p10", st.Holders)
 	}
 }
 
@@ -628,11 +641,12 @@ func TestPlainShellSpawnerNeverReleasedStillReapsByKey(t *testing.T) {
 	}
 }
 
-// TestListHandlesShowsHeldAndPendingAndAcceptPromotes covers list-handles
-// across two DIFFERENT sessions — one where the caller is an accepted holder,
-// one where it is only pending — and that accept:true promotes the pending
-// one before reporting.
-func TestListHandlesShowsHeldAndPendingAndAcceptPromotes(t *testing.T) {
+// TestListHandlesShowsHeldAndLegacyPendingAsHeld covers list-handles across
+// two DIFFERENT sessions — one where the caller is a holder, one where a
+// pre-#480 record left it pending — and that both show as held without any
+// accept (the old record is promoted when read), with accept:true a harmless
+// no-op kept for compatibility.
+func TestListHandlesShowsHeldAndLegacyPendingAsHeld(t *testing.T) {
 	testgit.RequireGit(t)
 	const caller = "caller-principal"
 	t.Setenv("HOME", t.TempDir())
@@ -676,37 +690,27 @@ func TestListHandlesShowsHeldAndPendingAndAcceptPromotes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	text, isErr := callListHandles(t, `{}`)
-	if isErr {
-		t.Fatalf("list-handles failed: %s", text)
-	}
-	if !strings.Contains(text, "held    held-repo/kid") {
-		t.Errorf("expected a held line for held-repo/kid, got: %s", text)
-	}
-	if !strings.Contains(text, "pending pending-repo/kid") {
-		t.Errorf("expected a pending line for pending-repo/kid, got: %s", text)
-	}
-
-	text, isErr = callListHandles(t, `{"accept":true}`)
-	if isErr {
-		t.Fatalf("list-handles with accept failed: %s", text)
-	}
-	if strings.Contains(text, "pending pending-repo/kid") {
-		t.Errorf("expected pending-repo/kid to be promoted to held after accept, got: %s", text)
-	}
-	if !strings.Contains(text, "held    pending-repo/kid") {
-		t.Errorf("expected pending-repo/kid to show as held after accept, got: %s", text)
+	for _, args := range []string{`{}`, `{"accept":true}`} {
+		text, isErr := callListHandles(t, args)
+		if isErr {
+			t.Fatalf("list-handles %s failed: %s", args, text)
+		}
+		for _, want := range []string{"held    held-repo/kid", "held    pending-repo/kid"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("list-handles %s: missing %q in:\n%s", args, want, text)
+			}
+		}
+		if strings.Contains(text, "pending pending-repo/kid") {
+			t.Errorf("list-handles %s: the legacy pending grant must read as held, got:\n%s", args, text)
+		}
 	}
 
 	st, err := session.Read(pendingRepo, "kid")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(st.PendingHandles) != 0 {
-		t.Errorf("PendingHandles = %v, want empty after accept", st.PendingHandles)
-	}
-	if !slices.Contains(st.Holders, caller) {
-		t.Errorf("Holders = %v, want to contain %q after accept", st.Holders, caller)
+	if len(st.PendingHandles) != 0 || !slices.Contains(st.Holders, caller) {
+		t.Errorf("Holders = %v PendingHandles = %v, want %q held and nothing pending", st.Holders, st.PendingHandles, caller)
 	}
 }
 
@@ -730,10 +734,11 @@ func TestListHandlesReportsNoHandles(t *testing.T) {
 // (docs/features/0032-principals-handles-and-provenance.md): principal A
 // spawns (and holds a handle on) a child; A grants a handle to sibling B; B —
 // a genuinely different principal, switched in via CLOWN_SESSION_ID, never
-// the spawner — accepts on first use by reaping, and succeeds.
+// the spawner — holds from the grant on (spinclass#480) and reaps.
 func TestSiblingReapsGrantedHandle(t *testing.T) {
 	const principalA = "principal-a"
 	const principalB = "principal-b"
+	stubHandleGrantEffects(t)
 	repoPath, wtPath := childHandleFixture(t, principalA, session.State{
 		SpawnedByPrincipal: principalA,
 		Holders:            []string{principalA},
@@ -750,7 +755,7 @@ func TestSiblingReapsGrantedHandle(t *testing.T) {
 
 	closeText, isErr := callCloseChild(t, `{"child":"worker/kid"}`)
 	if isErr {
-		t.Fatalf("expected B's reap to succeed (accept-on-first-use), got error: %s", closeText)
+		t.Fatalf("expected B's reap to succeed, got error: %s", closeText)
 	}
 
 	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
@@ -812,8 +817,8 @@ func TestGrantWithoutGrantRightRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(st.PendingHandles) != 0 {
-		t.Errorf("PendingHandles = %v, want unchanged after a refused grant", st.PendingHandles)
+	if st.IsHolder("p9") || st.HandleRights["p9"] != "" {
+		t.Errorf("Holders = %v rights = %v, a refused grant must record nothing for p9", st.Holders, st.HandleRights)
 	}
 }
 
@@ -839,8 +844,8 @@ func TestGrantMoreThanHeldRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(st.PendingHandles) != 0 {
-		t.Errorf("PendingHandles = %v, want unchanged after a refused grant", st.PendingHandles)
+	if st.IsHolder("p9") || st.HandleRights["p9"] != "" {
+		t.Errorf("Holders = %v rights = %v, a refused grant must record nothing for p9", st.Holders, st.HandleRights)
 	}
 }
 
@@ -848,6 +853,7 @@ func TestGrantMoreThanHeldRefused(t *testing.T) {
 // holds works, and the normalized rights are what is recorded.
 func TestGrantNarrowingSubsetSucceeds(t *testing.T) {
 	const caller = "caller-principal"
+	stubHandleGrantEffects(t)
 	repoPath, _ := childHandleFixture(t, caller, session.State{
 		Holders:      []string{caller},
 		HandleRights: map[string]string{caller: "observe,close,grant"},
@@ -869,6 +875,7 @@ func TestGrantNarrowingSubsetSucceeds(t *testing.T) {
 // resolves to all seven — it can grant any subset and reap.
 func TestSpawnerWithNoEntryHoldsEveryRight(t *testing.T) {
 	const caller = "caller-principal"
+	stubHandleGrantEffects(t)
 	repoPath, wtPath := childHandleFixture(t, caller, session.State{
 		SpawnedByPrincipal: caller,
 		Holders:            []string{caller},
@@ -936,8 +943,8 @@ func TestGrantUnknownRightRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(st.PendingHandles) != 0 {
-		t.Errorf("PendingHandles = %v, want unchanged after a refused grant", st.PendingHandles)
+	if st.IsHolder("p9") || st.HandleRights["p9"] != "" {
+		t.Errorf("Holders = %v rights = %v, a refused grant must record nothing for p9", st.Holders, st.HandleRights)
 	}
 }
 

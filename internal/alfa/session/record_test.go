@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -162,8 +163,46 @@ func TestWritingForgedWorkerStateDoesNotTouchVictim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if victim.IsPendingHolder("granted-principal") || victim.IsPendingHolder("evil-principal") {
-		t.Errorf("victim record picked up the worker's pending handles: %v", victim.PendingHandles)
+	for _, p := range []string{"granted-principal", "evil-principal"} {
+		if victim.IsHolder(p) || victim.IsPendingHolder(p) {
+			t.Errorf("victim record picked up the worker's handle for %s: holders %v, pending %v", p, victim.Holders, victim.PendingHandles)
+		}
+	}
+}
+
+// A frontend record written before #480 with pending grants reads back with
+// them held (#480: a grant is effective when recorded), and a worktree copy
+// carrying the same old shape is not reported as disagreeing.
+func TestReadPromotesPendingHandlesFromAnOldRecord(t *testing.T) {
+	w1, _ := twoSessions(t)
+	st, err := Read(w1.RepoPath, w1.Branch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.PendingHandles = []string{"coord"}
+	st.HandleRights = map[string]string{"coord": "observe,close"}
+	// Write as a pre-#480 binary would have: bypass Write so nothing promotes.
+	if err := writeRecordFile(st.WorktreePath, st); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeDisplayCopy(st.WorktreePath, *st); err != nil {
+		t.Fatal(err)
+	}
+	var reports []string
+	restore := SetReportSink(func(msg string) { reports = append(reports, msg) })
+	defer restore()
+
+	got, err := Read(w1.RepoPath, w1.Branch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.IsHolder("coord") || len(got.PendingHandles) != 0 {
+		t.Errorf("holders %v pending %v, want coord held", got.Holders, got.PendingHandles)
+	}
+	for _, r := range reports {
+		if strings.Contains(r, "holders") || strings.Contains(r, "pending_handles") {
+			t.Errorf("an old-shape worktree copy was reported as disagreeing: %s", r)
+		}
 	}
 }
 

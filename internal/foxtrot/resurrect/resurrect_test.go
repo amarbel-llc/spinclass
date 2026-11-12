@@ -78,16 +78,17 @@ func setupClosedSessionWith(t *testing.T, branch string, beforeClose func(wtPath
 		SpawnedBy:          "driver/other",
 		SpawnedByPrincipal: "1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f",
 		Principal:          "5e5e5e5e-0000-4000-8000-000000000000",
-		Holders:            []string{"1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f"},
-		PendingHandles:     []string{"9c2e1111-2222-3333-4444-555566667777"},
-		HandleRights:       map[string]string{"9c2e1111-2222-3333-4444-555566667777": "observe"},
-		Profile:            "cheap",
-		ProfileDigest:      "digest-cheap",
-		AuthorizingGrant:   "grant-1",
-		ProfileRebinds:     []session.ProfileRebind{{From: "digest-old", To: "digest-cheap", Transition: "tr-1", By: "operator", At: time.Now().UTC()}},
-		ProfileNarrowing:   &session.ProfileNarrowingLink{Grantee: "repo/" + branch, Profile: "cheap", ProfileDigest: "digest-cheap", Base: "base-b", Prev: "db", Unsigned: true},
-		Entrypoint:         []string{"/bin/sh"},
-		StartedAt:          time.Now().UTC(),
+		// A granted holder beside the spawner (since #480 a grant joins
+		// Holders at once; nothing is pending).
+		Holders:          []string{"1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f", "9c2e1111-2222-3333-4444-555566667777"},
+		HandleRights:     map[string]string{"9c2e1111-2222-3333-4444-555566667777": "observe"},
+		Profile:          "cheap",
+		ProfileDigest:    "digest-cheap",
+		AuthorizingGrant: "grant-1",
+		ProfileRebinds:   []session.ProfileRebind{{From: "digest-old", To: "digest-cheap", Transition: "tr-1", By: "operator", At: time.Now().UTC()}},
+		ProfileNarrowing: &session.ProfileNarrowingLink{Grantee: "repo/" + branch, Profile: "cheap", ProfileDigest: "digest-cheap", Base: "base-b", Prev: "db", Unsigned: true},
+		Entrypoint:       []string{"/bin/sh"},
+		StartedAt:        time.Now().UTC(),
 	}
 	if err := session.Write(s); err != nil {
 		t.Fatal(err)
@@ -153,11 +154,9 @@ func TestRunRecreatesWorktreeFromClosedSession(t *testing.T) {
 	if got.Principal != "" {
 		t.Errorf("Principal = %q, want cleared (a resurrected session boots a new clown)", got.Principal)
 	}
-	if len(got.Holders) != 1 || got.Holders[0] != "1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f" {
-		t.Errorf("Holders = %v, want preserved from tombstone", got.Holders)
-	}
-	if len(got.PendingHandles) != 1 || got.PendingHandles[0] != "9c2e1111-2222-3333-4444-555566667777" {
-		t.Errorf("PendingHandles = %v, want preserved from tombstone", got.PendingHandles)
+	if len(got.Holders) != 2 || got.Holders[0] != "1d3a5c7e-9b0f-4d2a-8e6c-0a1b2c3d4e5f" ||
+		got.Holders[1] != "9c2e1111-2222-3333-4444-555566667777" {
+		t.Errorf("Holders = %v, want both holders preserved from tombstone", got.Holders)
 	}
 	if got.Profile != "cheap" || got.ProfileDigest != "digest-cheap" || got.AuthorizingGrant != "grant-1" {
 		t.Errorf("profile fields = %q/%q/%q, want preserved from tombstone",

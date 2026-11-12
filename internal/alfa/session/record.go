@@ -165,6 +165,7 @@ func readRecordFile(path string) (*State, error) {
 	if err := json.Unmarshal(data, &s); err != nil {
 		return nil, fmt.Errorf("record %s does not parse: %w", path, err)
 	}
+	s.promotePendingHandles()
 	return &s, nil
 }
 
@@ -265,6 +266,7 @@ func legacyLoad(wt string) (*State, error) {
 	if err := json.Unmarshal(data, &s); err != nil {
 		return nil, fmt.Errorf("record %s does not parse: %w", path, err)
 	}
+	s.promotePendingHandles()
 	if cerr := checkIdentity(&s, wt); cerr != nil {
 		return nil, refusal(path, cerr)
 	}
@@ -364,6 +366,8 @@ func compareDisplay(rec *State) {
 		report(fmt.Sprintf("worktree copy %s of session record %s does not parse (%v); the frontend record is used", path, rec.Key(), err))
 		return
 	}
+	shown.promotePendingHandles() // the same reading as rec's, so an old shape is not a disagreement
+
 	for _, f := range authorityFields {
 		if want, got := f.get(rec), f.get(&shown); !reflect.DeepEqual(want, got) && jsonString(want) != jsonString(got) {
 			report(fmt.Sprintf("worktree copy %s of session record %s disagrees with the frontend record on %s: %s; the frontend record is used",

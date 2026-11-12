@@ -16,8 +16,8 @@ import (
 
 // spinclass#478: `sc handle-grant` and `sc handle-move` are the operator's own
 // handle edits. They need a terminal and no handle, judge every session on its
-// own, prompt once, default to a pending default-rights grant, and never write
-// on a dry run.
+// own, prompt once, default to a default-rights grant that is effective at once
+// (spinclass#480), and never write on a dry run.
 
 const handleRecipient = "coordinator-key"
 
@@ -30,6 +30,7 @@ func stubOperatorHandle(t *testing.T, terminal bool, typed string, sessions map[
 	t.Cleanup(func() {
 		operatorHandleIsTerminal, operatorHandleConfirmIn, operatorHandleStdout, operatorHandleStderr, operatorHandleSessionOf = oldTTY, oldIn, oldOut, oldErr, oldOf
 	})
+	stubNotifyPrincipal(t) // a grant wakes; a test that asserts the wakes stubs again after this
 	operatorHandleIsTerminal = func() bool { return terminal }
 	operatorHandleConfirmIn = func() io.Reader { return strings.NewReader(typed) }
 	operatorHandleStdout = func() io.Writer { return stdout }
@@ -45,13 +46,12 @@ func stubOperatorHandle(t *testing.T, terminal bool, typed string, sessions map[
 
 var coordinatorLive = map[string]string{handleRecipient: "circus/coordinator"}
 
-// handleFixture stages worker/kid held by "orig" (accepted) and "pend" (pending).
+// handleFixture stages worker/kid held by "orig" and "peer".
 func handleFixture(t *testing.T) (repoPath string) {
 	t.Helper()
 	repoPath, _ = restartChildFixture(t, "operator-shell", session.State{
-		Holders:        []string{"orig"},
-		PendingHandles: []string{"pend"},
-		HandleRights:   map[string]string{"orig": "observe,close", "pend": "observe,close"},
+		Holders:      []string{"orig", "peer"},
+		HandleRights: map[string]string{"orig": "observe,close", "peer": "observe,close"},
 	})
 	return repoPath
 }
@@ -63,14 +63,14 @@ func TestOperatorHandleRefusesWithoutATerminal(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "terminals") {
 		t.Fatalf("err = %v, want the terminal refusal", err)
 	}
-	if got := readKid(t, repoPath).PendingHandles; !slices.Equal(got, []string{"pend"}) {
-		t.Errorf("pending = %v, nothing may be written", got)
+	if got := readKid(t, repoPath).Holders; !slices.Equal(got, []string{"orig", "peer"}) {
+		t.Errorf("holders = %v, nothing may be written", got)
 	}
 }
 
-// grant adds the recipient, pending, with the default rights and the operator
-// marker, keeps every existing holder, and asks once.
-func TestOperatorHandleGrantAddsAPendingDefaultHandle(t *testing.T) {
+// grant adds the recipient, holding at once, with the default rights and the
+// operator marker, keeps every existing holder, and asks once.
+func TestOperatorHandleGrantAddsAnEffectiveDefaultHandle(t *testing.T) {
 	stdout, stderr := stubOperatorHandle(t, true, "y\n", coordinatorLive)
 	repoPath := handleFixture(t)
 
@@ -78,15 +78,15 @@ func TestOperatorHandleGrantAddsAPendingDefaultHandle(t *testing.T) {
 		t.Fatalf("err = %v (stdout %q)", err, stdout.String())
 	}
 	st := readKid(t, repoPath)
-	if !slices.Equal(st.Holders, []string{"orig"}) || !slices.Equal(st.PendingHandles, []string{"pend", handleRecipient}) {
-		t.Errorf("holders %v pending %v; want orig kept, pend kept, the recipient pending", st.Holders, st.PendingHandles)
+	if !slices.Equal(st.Holders, []string{"orig", "peer", handleRecipient}) || len(st.PendingHandles) != 0 {
+		t.Errorf("holders %v pending %v; want orig and peer kept and the recipient holding", st.Holders, st.PendingHandles)
 	}
 	if st.HandleRights[handleRecipient] != "observe,close" {
 		t.Errorf("rights = %q, want the default observe,close", st.HandleRights[handleRecipient])
 	}
 	p := st.HandleProvenance[handleRecipient]
-	if p.GrantedBy != session.HandleOperator || p.GrantedAt == nil || p.AcceptedAt != nil {
-		t.Errorf("provenance = %+v, want granted_by operator, not accepted", p)
+	if p.GrantedBy != session.HandleOperator || p.GrantedAt == nil || p.AcceptedAt == nil || !p.AcceptedAt.Equal(*p.GrantedAt) {
+		t.Errorf("provenance = %+v, want granted_by operator, accepted at the grant's time", p)
 	}
 	if st.SpawnerReleased {
 		t.Error("grant must not end the spawner's authority")
@@ -107,10 +107,10 @@ func TestOperatorHandleMoveLeavesOnlyTheRecipientAndEndsTheSpawnerPath(t *testin
 		t.Fatalf("err = %v (stdout %q)", err, stdout.String())
 	}
 	st := readKid(t, repoPath)
-	if len(st.Holders) != 0 || !slices.Equal(st.PendingHandles, []string{handleRecipient}) {
+	if !slices.Equal(st.Holders, []string{handleRecipient}) || len(st.PendingHandles) != 0 {
 		t.Errorf("holders %v pending %v; want the recipient alone", st.Holders, st.PendingHandles)
 	}
-	for _, gone := range []string{"orig", "pend"} {
+	for _, gone := range []string{"orig", "peer"} {
 		if _, has := st.HandleRights[gone]; has {
 			t.Errorf("%s still has a rights entry", gone)
 		}
@@ -118,7 +118,7 @@ func TestOperatorHandleMoveLeavesOnlyTheRecipientAndEndsTheSpawnerPath(t *testin
 	if !st.SpawnerReleased {
 		t.Error("move must end the spawner's legacy key path (Q4)")
 	}
-	if !strings.Contains(stdout.String(), "remove orig, pend") || !strings.Contains(stdout.String(), "legacy key path") {
+	if !strings.Contains(stdout.String(), "remove orig, peer") || !strings.Contains(stdout.String(), "legacy key path") {
 		t.Errorf("stdout = %q, want the removals and the spawner path named", stdout.String())
 	}
 }
@@ -132,13 +132,13 @@ func TestOperatorHandleDryRunWritesNothingAndAsksNothing(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 	after := readKid(t, repoPath)
-	if !slices.Equal(after.Holders, before.Holders) || !slices.Equal(after.PendingHandles, before.PendingHandles) || after.SpawnerReleased {
+	if !slices.Equal(after.Holders, before.Holders) || after.SpawnerReleased {
 		t.Errorf("a dry run changed the record: %+v -> %+v", before, after)
 	}
 	if !strings.Contains(stdout.String(), "(dry run)") || strings.Contains(stderr.String(), "[y/N]") {
 		t.Errorf("stdout %q stderr %q; want a dry-run line and no prompt", stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "worker/kid: now [orig, pend (pending)]") {
+	if !strings.Contains(stderr.String(), "worker/kid: now [orig, peer]") {
 		t.Errorf("stderr = %q, want the plan listing the current holders", stderr.String())
 	}
 }
@@ -151,7 +151,7 @@ func TestOperatorHandleDecliningTheBatchChangesNothing(t *testing.T) {
 		if err == nil || !strings.Contains(stdout.String(), declinedAtThePrompt) {
 			t.Errorf("typed %q: err = %v, stdout %q; want a nonzero exit and the declined line", typed, err, stdout.String())
 		}
-		if slices.Contains(readKid(t, repoPath).PendingHandles, handleRecipient) {
+		if slices.Contains(readKid(t, repoPath).Holders, handleRecipient) {
 			t.Errorf("typed %q: the handle was written despite the decline", typed)
 		}
 	}
@@ -175,7 +175,7 @@ func TestOperatorHandleListsDangerousRightsAndRefusesUnknownOnes(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "teleport") {
 		t.Fatalf("err = %v, want the unknown right named", err)
 	}
-	if slices.Contains(readKid(t, repoPath).PendingHandles, handleRecipient) {
+	if slices.Contains(readKid(t, repoPath).Holders, handleRecipient) {
 		t.Error("nothing may be written for an unknown right")
 	}
 }
@@ -189,7 +189,7 @@ func TestOperatorHandleChecksTheRecipient(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "--force-unknown") {
 		t.Fatalf("err = %v, want the unknown-recipient refusal naming --force-unknown", err)
 	}
-	if slices.Contains(readKid(t, repoPath).PendingHandles, "typo-key") {
+	if slices.Contains(readKid(t, repoPath).Holders, "typo-key") {
 		t.Error("an unknown recipient must not be written without --force-unknown")
 	}
 
@@ -197,8 +197,8 @@ func TestOperatorHandleChecksTheRecipient(t *testing.T) {
 	if err := runOperatorHandle(operatorHandleGrant, operatorHandleParams{Target: []string{"worker/kid"}, To: "typo-key", ForceUnknown: true}); err != nil {
 		t.Fatalf("--force-unknown: %v", err)
 	}
-	if !slices.Contains(readKid(t, repoPath).PendingHandles, "typo-key") || !strings.Contains(stderr.String(), "--force-unknown") {
-		t.Errorf("pending = %v stderr %q; want the unknown key recorded and flagged", readKid(t, repoPath).PendingHandles, stderr.String())
+	if !slices.Contains(readKid(t, repoPath).Holders, "typo-key") || !strings.Contains(stderr.String(), "--force-unknown") {
+		t.Errorf("holders = %v stderr %q; want the unknown key recorded and flagged", readKid(t, repoPath).Holders, stderr.String())
 	}
 
 	// A qualified form that resolves locally is normalized to the bare key.
@@ -207,8 +207,8 @@ func TestOperatorHandleChecksTheRecipient(t *testing.T) {
 	if err := runOperatorHandle(operatorHandleGrant, operatorHandleParams{Target: []string{"worker/kid"}, To: handleRecipient + "@flic.example"}); err != nil {
 		t.Fatalf("qualified local: %v", err)
 	}
-	if !slices.Contains(readKid(t, repoPath).PendingHandles, handleRecipient) {
-		t.Errorf("pending = %v, want the bare key", readKid(t, repoPath).PendingHandles)
+	if !slices.Contains(readKid(t, repoPath).Holders, handleRecipient) {
+		t.Errorf("holders = %v, want the bare key", readKid(t, repoPath).Holders)
 	}
 
 	// A qualified key that resolves to nothing here is another host's: stored as given, unverified.
@@ -220,8 +220,8 @@ func TestOperatorHandleChecksTheRecipient(t *testing.T) {
 	if err := runOperatorHandle(operatorHandleGrant, operatorHandleParams{Target: []string{"worker/kid"}, To: "remote-key@other.example", ForceUnknown: true}); err != nil {
 		t.Fatalf("remote with --force-unknown: %v", err)
 	}
-	if !slices.Contains(readKid(t, repoPath).PendingHandles, "remote-key@other.example") {
-		t.Errorf("pending = %v, want the qualified key as given", readKid(t, repoPath).PendingHandles)
+	if !slices.Contains(readKid(t, repoPath).Holders, "remote-key@other.example") {
+		t.Errorf("holders = %v, want the qualified key as given", readKid(t, repoPath).Holders)
 	}
 }
 
@@ -233,7 +233,7 @@ func TestOperatorHandleOneFailureDoesNotStopTheRest(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "1 of 2") {
 		t.Fatalf("err = %v, want 1 of 2 not changed", err)
 	}
-	if !slices.Contains(readKid(t, repoPath).PendingHandles, handleRecipient) {
+	if !slices.Contains(readKid(t, repoPath).Holders, handleRecipient) {
 		t.Error("the valid target must still be changed")
 	}
 	if !strings.Contains(stdout.String(), "not ok 1 - nope/none") || !strings.Contains(stdout.String(), "ok 2 - worker/kid") {
@@ -251,10 +251,10 @@ func TestOperatorHandleAllOnHostSkipsTheRecipientsOwnSession(t *testing.T) {
 	if err := runOperatorHandle(operatorHandleGrant, operatorHandleParams{AllOnHost: true, To: handleRecipient}); err != nil {
 		t.Fatalf("err = %v (stdout %q)", err, stdout.String())
 	}
-	if !slices.Contains(readKid(t, repoPath).PendingHandles, handleRecipient) {
+	if !slices.Contains(readKid(t, repoPath).Holders, handleRecipient) {
 		t.Error("worker/kid must receive the handle")
 	}
-	if slices.Contains(readKid2(t, repoPath).PendingHandles, handleRecipient) {
+	if slices.Contains(readKid2(t, repoPath).Holders, handleRecipient) {
 		t.Error("the recipient's own session must not hold a handle on itself")
 	}
 	if !strings.Contains(stdout.String(), "worker/kid2: skipped: this is the recipient's own session") {

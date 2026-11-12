@@ -177,12 +177,11 @@ func runGrantSessionHandle(p grantHandleParams) (string, error) {
 	})
 }
 
-// grantSessionHandle is the per-child grant flow (FDR 0032 D12: grant is a
-// message). The granter must itself hold a handle on child — a pending
-// holder exercising this tool accepts first (granting onward is itself the
-// first use, same as reaping). spinclass never sends the recipient a chat
-// message on its own behalf (chat is clown/troupe's, not spinclass's); the
-// result text tells the caller to relay the child's key instead.
+// grantSessionHandle is the per-child grant flow. The granter must itself hold
+// a handle on child. Since spinclass#480 the grant is effective when recorded:
+// the recipient must be live, the grant is journaled first, and the recipient
+// and the child's other holders are woken (a wake, not a chat message: chat is
+// clown/troupe's).
 func grantSessionHandle(target, to, rights string) (string, error) {
 	callerPrincipal := currentPrincipal()
 	callerKey := bestEffortSessionKey()
@@ -237,11 +236,11 @@ func grantSessionHandle(target, to, rights string) (string, error) {
 	grantedAt := time.Now().UTC()
 	changed := child.GrantHandleBy(to, wanted.String(), callerPrincipal, grantedAt)
 	if !changed {
-		// `to` already holds (or is already pending on) a handle — GrantHandle
-		// is a no-op regardless of what rights this call named. A re-grant is
-		// NOT an escalation path in this slice (that needs D11's card-attested
-		// flow), so this is reported as success, not a refusal, but the caller's
-		// own accept-on-first-use promotion (if any) still needs to land.
+		// `to` already holds a handle — GrantHandle is a no-op regardless of
+		// what rights this call named. A re-grant is NOT an escalation path in
+		// this slice (that needs D11's card-attested flow), so this is reported
+		// as success, not a refusal, but the caller's own promotion from a
+		// pre-#480 pending grant (if any) still needs to land.
 		if callerAccepted {
 			if err := updateLoadedSession(child, func(cur *session.State) bool {
 				return cur.AcceptHandle(callerPrincipal)
@@ -250,22 +249,33 @@ func grantSessionHandle(target, to, rights string) (string, error) {
 			}
 		}
 		return fmt.Sprintf(
-			"%s already holds (or is already pending on) a handle to %s; nothing changed — re-granting with different rights is not an escalation path in this slice.",
+			"%s already holds a handle to %s; nothing changed — re-granting with different rights is not an escalation path in this slice.",
 			to, child.Key(),
 		), nil
+	}
+	// spinclass#480: the grant is effective once written, so the recipient must
+	// be live, and the journal line must be written first (fail-closed).
+	if err := handleRecipientLive(to); err != nil {
+		return "", fmt.Errorf("grant-session-handle refused: %w", err)
+	}
+	journal := handleJournalRecord{
+		Time: grantedAt, Act: "grant", Child: child.Key(), Principal: to,
+		Rights: wanted.String(), By: callerPrincipal, Assurance: handleAssuranceSession,
+	}
+	if err := appendHandleJournal(journal); err != nil {
+		return "", fmt.Errorf("grant-session-handle refused: the grant could not be journaled, so it is not made: %w", err)
 	}
 	if err := updateLoadedSession(child, func(cur *session.State) bool {
 		accepted := callerAccepted && cur.AcceptHandle(callerPrincipal)
 		granted := cur.GrantHandleBy(to, wanted.String(), callerPrincipal, grantedAt)
 		return accepted || granted
 	}); err != nil {
+		journal.Act, journal.Note = "grant-not-written", err.Error()
+		_ = appendHandleJournal(journal)
 		return "", fmt.Errorf("writing session state: %w", err)
 	}
-
-	return fmt.Sprintf(
-		"granted handle on %s to %s (pending until first use; rights: %s). Send %s the child's session key (%s) via chat so it can accept.",
-		child.Key(), to, child.HandleRights[to], to, child.Key(),
-	), nil
+	notifyHandleGrant(child.Key(), to, child.HandleRights[to], callerPrincipal, grantedAt, child.Holders)
+	return grantedHandleText(child, to), nil
 }
 
 // handleGrantSessionHandle is the `grant-session-handle` MCP tool handler. A
@@ -367,12 +377,21 @@ func releaseSessionHandle(target string) (string, error) {
 	}); err != nil {
 		return "", fmt.Errorf("writing session state: %w", err)
 	}
+	// Journaled fail-open (spinclass#480): a release that cannot be journaled
+	// still stands, so a full disk cannot keep authority alive.
+	note := ""
+	if jerr := appendHandleJournal(handleJournalRecord{
+		Time: time.Now().UTC(), Act: "release", Child: child.Key(), Principal: callerPrincipal,
+		By: callerPrincipal, Assurance: handleAssuranceSession,
+	}); jerr != nil {
+		note = fmt.Sprintf(" (warning: the release stands but was not journaled: %v)", jerr)
+	}
 
 	if len(child.Holders) == 0 {
-		return fmt.Sprintf("released handle on %s (orphan: no holders remain)", child.Key()), nil
+		return fmt.Sprintf("released handle on %s (orphan: no holders remain)%s", child.Key(), note), nil
 	}
 	return fmt.Sprintf(
-		"released handle on %s (remaining holders: %s)", child.Key(), strings.Join(child.Holders, ", "),
+		"released handle on %s (remaining holders: %s)%s", child.Key(), strings.Join(child.Holders, ", "), note,
 	), nil
 }
 
@@ -509,7 +528,7 @@ func listHandlesParamList() []command.Param {
 		{
 			Name:        "accept",
 			Type:        command.Bool,
-			Description: "Accept every pending handle before reporting (FDR 0032 D12: accept is first use) — without it, pending grants are reported but confer no authority yet.",
+			Description: "Kept for compatibility: since spinclass#480 a grant is effective when recorded and an old record's pending grants are promoted when it is read, so there is nothing left to accept.",
 		},
 	}
 }

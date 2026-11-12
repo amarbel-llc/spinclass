@@ -35,9 +35,10 @@ import (
 //
 // It never grants more than grant-session-handle's vocabulary and default
 // (observe,close); the dangerous rights must be named and are listed in the
-// prompt. Grants are PENDING (FDR 0032 D12: accept on first use); there is no
-// accepted-at-once flag in v1. GrantedBy records the marker "operator"; no
-// signature is written (the card act is out of scope for slice 0).
+// prompt. A grant is effective when recorded (spinclass#480, amending FDR 0032
+// D12): it is journaled first and the recipient and the other holders are
+// woken. GrantedBy records the marker "operator"; no signature is written (the
+// card act is out of scope for slice 0).
 
 // Seams for command tests.
 var (
@@ -306,7 +307,7 @@ func runOperatorHandle(verb string, p operatorHandleParams) error {
 		case !apply:
 			tw.Ok(j.name + ": would " + describeOperatorHandleEdit(verb, recipient.principal, j.edit) + " (dry run)")
 		default:
-			if werr := writeOperatorHandle(j.st, verb, recipient.principal, rights, at); werr != nil {
+			if werr := writeOperatorHandleJournaled(j, verb, recipient.principal, rights, at); werr != nil {
 				failed++
 				tw.NotOk(j.name, map[string]string{"error": werr.Error()})
 				continue
@@ -328,10 +329,44 @@ func writeOperatorHandle(st *session.State, verb, to, rights string, at time.Tim
 	})
 }
 
+// writeOperatorHandleJournaled is writeOperatorHandle with spinclass#480's
+// effects: the grant is journaled first (fail-closed), each holder a move
+// removes is journaled after (fail-open), and the recipient and the other
+// holders are woken.
+func writeOperatorHandleJournaled(j operatorHandleJudgement, verb, to, rights string, at time.Time) error {
+	if j.edit.granted {
+		if err := appendHandleJournal(handleJournalRecord{
+			Time: at, Act: "grant", Child: j.name, Principal: to, Rights: rights,
+			By: session.HandleOperator, Assurance: handleAssuranceTTY,
+		}); err != nil {
+			return fmt.Errorf("the grant could not be journaled, so it is not made: %w", err)
+		}
+	}
+	if err := writeOperatorHandle(j.st, verb, to, rights, at); err != nil {
+		if j.edit.granted {
+			_ = appendHandleJournal(handleJournalRecord{
+				Time: at, Act: "grant-not-written", Child: j.name, Principal: to, Rights: rights,
+				By: session.HandleOperator, Assurance: handleAssuranceTTY, Note: err.Error(),
+			})
+		}
+		return err
+	}
+	for _, p := range j.edit.removed {
+		_ = appendHandleJournal(handleJournalRecord{
+			Time: at, Act: "release", Child: j.name, Principal: p,
+			By: session.HandleOperator, Assurance: handleAssuranceTTY, Note: "handle-move",
+		})
+	}
+	if j.edit.granted {
+		notifyHandleGrant(j.name, to, rights, session.HandleOperator, at, j.st.Holders)
+	}
+	return nil
+}
+
 func describeOperatorHandleEdit(verb, to string, e operatorHandleEdit) string {
 	var parts []string
 	if e.granted {
-		parts = append(parts, "grant "+to+" a handle (pending until first use)")
+		parts = append(parts, "grant "+to+" a handle (effective now; "+to+" is woken)")
 	}
 	if len(e.removed) > 0 {
 		parts = append(parts, "remove "+strings.Join(e.removed, ", "))
@@ -391,7 +426,7 @@ func registerOperatorHandleCommands(app *command.App) {
 			Description: command.Description{
 				Short: short,
 				Long: long + " The operator is the authority: any live worktree session `sc list` shows can be named (or all of them with " +
-					"--all-on-host), and no handle is needed. The grant is PENDING until the recipient first uses it (FDR 0032 D12), carries " +
+					"--all-on-host), and no handle is needed. The grant is effective at once (spinclass#480): it is journaled, and the recipient and the other holders are woken. It carries " +
 					"--rights (default observe,close; grant, merge, check, restart, instruct and cap must be named and are listed in the " +
 					"prompt), and records GrantedBy \"operator\". --to is the principal key; it is checked against a live session on this " +
 					"host and refused when it resolves to none, unless --force-unknown. A <key>@<host> naming another host is recorded as " +

@@ -40,6 +40,8 @@ func TestListHandlesShowsHandleProvenance(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A pre-#480 record with the grant still pending: it reads back held,
+	// accepted at its grant time (spinclass#480).
 	write("granted-repo", func(st *session.State) {
 		st.PendingHandles = []string{caller}
 		st.HandleRights = map[string]string{caller: "observe"}
@@ -60,7 +62,7 @@ func TestListHandlesShowsHandleProvenance(t *testing.T) {
 		t.Fatalf("list-handles failed: %s", text)
 	}
 	for _, want := range []string{
-		"pending granted-repo/kid  rights=observe  granted_by=granter-principal granted_at=2026-11-08T10:00:00Z accepted_at=-",
+		"held    granted-repo/kid  rights=observe  granted_by=granter-principal granted_at=2026-11-08T10:00:00Z accepted_at=2026-11-08T10:00:00Z",
 		"held    spawned-repo/kid",
 		"spawned_at=2026-11-08T10:00:00Z",
 		"held    old-repo/kid  rights=observe,close  provenance=unrecorded",
@@ -70,11 +72,7 @@ func TestListHandlesShowsHandleProvenance(t *testing.T) {
 		}
 	}
 
-	text, isErr = callListHandles(t, `{"accept":true}`)
-	if isErr {
-		t.Fatalf("list-handles accept failed: %s", text)
-	}
-	if !strings.Contains(text, "held    granted-repo/kid  rights=observe  granted_by=granter-principal granted_at=2026-11-08T10:00:00Z accepted_at=20") {
-		t.Errorf("an accepted handle must keep its granter and gain accepted_at, got:\n%s", text)
+	if strings.Contains(text, "pending ") {
+		t.Errorf("nothing is pending since #480, got:\n%s", text)
 	}
 }

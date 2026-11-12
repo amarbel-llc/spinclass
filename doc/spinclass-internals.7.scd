@@ -178,8 +178,8 @@ observability aid, not an authority: the agent can write its own worktree. See
 
 Where no other rule decides, the PreToolUse hook allows (never denies or asks)
 these moxy read tools when every path argument resolves inside the caller's own
-worktree or the worktree of a live session it holds an *accepted* handle on
-(FDR 0032 D12; a pending grant confers nothing): *folio\_read*, *folio\_ls*,
+worktree or the worktree of a live session it holds a handle on (FDR 0032 D12;
+since spinclass#480 a grant is held when recorded): *folio\_read*, *folio\_ls*,
 *folio\_glob*, *folio\_tree*, *folio\_file-type*, *grit\_branch* with
 subcommand log, rev-parse or diff, and *grit\_stage* with subcommand status or
 diff. A missing path means the working directory. Paths are symlink-resolved and

@@ -334,7 +334,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		Name:  "grant-session-handle",
 		Title: "Grant Session Handle",
 		Description: command.Description{
-			Short: "Grant another session a handle on one or more children this session already holds a handle on (FDR 0032 D12/D13; several `child` are granted independently, #342). Handles pass like SCM_RIGHTS: the grant lands in the recipient's pending set — conferring NO authority and no exit wakes — until the recipient exercises it (accept-on-first-use, via close-child-session, list-handles with accept, or granting onward). The granter keeps its own handle; delegate is the default, transfer is grant then release. `rights` is a comma-separated FDR 0032 D13 object-rights list (observe, close, grant, instruct, cap, merge, check, restart), enforced: granting needs the grant right and may only narrow (grant a subset of the rights you hold) — defaults to \"observe,close\", the conservative lazy handoff. spinclass never messages the recipient itself (that's clown/troupe's job); relay the printed child session key to it via chat.",
+			Short: "Grant another session a handle on one or more children this session already holds a handle on (FDR 0032 D12/D13; several `child` are granted independently, #342). The grant is effective when recorded (spinclass#480, amending FDR 0032 D12's accept-on-first-use): the recipient must be a live principal on this host (a grant to an unknown or dead key is refused), the grant is journaled first (refused if the journal cannot be written), and the recipient and the child's other holders are woken with who granted what. The granter keeps its own handle; delegate is the default, transfer is grant then release. `rights` is a comma-separated FDR 0032 D13 object-rights list (observe, close, grant, instruct, cap, merge, check, restart), enforced: granting needs the grant right and may only narrow (grant a subset of the rights you hold) — defaults to \"observe,close\", the conservative lazy handoff.",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			ReadOnlyHint:    protocol.BoolPtr(false),
@@ -351,7 +351,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		Name:  "release-session-handle",
 		Title: "Release Session Handle",
 		Description: command.Description{
-			Short: "Release THIS session's own handle on another session (FDR 0032 D12: release is local — a session only ever removes itself, never another principal). Refuses legibly, changing nothing, when this session held no handle (accepted or pending) on the target at all. When the released handle was the last one, the child is orphaned — no accepted holder is alive — which `sc list`/`sc clean` will surface (a later commit); only a human closes an orphan.",
+			Short: "Release THIS session's own handle on another session (FDR 0032 D12: release is local — a session only ever removes itself, never another principal). Refuses legibly, changing nothing, when this session held no handle on the target at all. The release is journaled; a journal that cannot be written does not stop it (the result says so). When the released handle was the last one, the child is orphaned — no accepted holder is alive — which `sc list`/`sc clean` will surface (a later commit); only a human closes an orphan.",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			ReadOnlyHint:    protocol.BoolPtr(false),
@@ -368,7 +368,7 @@ func registerMCPOnlyCommands(app *command.App) {
 		Name:  "list-handles",
 		Title: "List Session Handles",
 		Description: command.Description{
-			Short: "List every session this one holds a handle on (accepted or pending, FDR 0032 D12/D13). A pending grant confers no authority until exercised; pass accept to exercise every pending one first (accept-on-first-use) so they show as held and become usable immediately.",
+			Short: "List every session this one holds a handle on (FDR 0032 D12/D13), with rights and provenance. Since spinclass#480 a grant is effective when recorded, so nothing is pending; `accept` is kept for compatibility and has nothing left to accept.",
 		},
 		Annotations: &protocol.ToolAnnotations{
 			// ReadOnlyHint is false, not true: with accept=true this mutates

@@ -13,11 +13,13 @@ import (
 )
 
 // A confined worker rewrites its worktree-local state.json to carry a sibling
-// session's identity (repo, branch, worktree) plus a handle for itself. Accepting
-// or granting a handle on the WORKER must write the worker's frontend record,
-// never the sibling's.
+// session's identity (repo, branch, worktree) plus a handle for itself. Listing
+// handles or granting one on the WORKER must write the worker's frontend
+// record, never the sibling's. The worker's record is a pre-#480 one with the
+// caller pending (read back as held); the forged copy carries the same shape.
 func TestHandlesIgnoreAForgedWorktreeRecord(t *testing.T) {
 	const caller = "caller-principal"
+	stubHandleGrantEffects(t)
 	repoPath, kidWt := childHandleFixture(t, caller, session.State{
 		PendingHandles: []string{caller},
 		HandleRights:   map[string]string{caller: "observe,close,grant"},
@@ -66,8 +68,8 @@ func TestHandlesIgnoreAForgedWorktreeRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if slices.Contains(st.Holders, caller) || slices.Contains(st.PendingHandles, "p9") || !slices.Equal(st.Holders, []string{"victims-owner"}) {
-		t.Errorf("the victim's record was written through the forged copy: holders=%v pending=%v", st.Holders, st.PendingHandles)
+	if !slices.Equal(st.Holders, []string{"victims-owner"}) || len(st.PendingHandles) != 0 || st.HandleRights["p9"] != "" {
+		t.Errorf("the victim's record was written through the forged copy: holders=%v pending=%v rights=%v", st.Holders, st.PendingHandles, st.HandleRights)
 	}
 	if got, _ := os.ReadFile(filepath.Join(victimWt, ".spinclass", "state.json")); string(got) != string(victimCopy) {
 		t.Error("the victim's display copy was rewritten")
@@ -76,7 +78,7 @@ func TestHandlesIgnoreAForgedWorktreeRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(kid.Holders, caller) || !slices.Contains(kid.PendingHandles, "p9") {
-		t.Errorf("the worker's own record should carry the accept and the grant: holders=%v pending=%v", kid.Holders, kid.PendingHandles)
+	if !slices.Contains(kid.Holders, caller) || !slices.Contains(kid.Holders, "p9") {
+		t.Errorf("the worker's own record should carry the caller and the grant: holders=%v", kid.Holders)
 	}
 }

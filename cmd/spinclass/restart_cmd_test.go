@@ -428,17 +428,22 @@ func TestRestartChildSessionAllowedForTheSpawnerKeyPath(t *testing.T) {
 	}
 }
 
-func TestRestartChildSessionAcceptsAPendingHandleOnFirstUse(t *testing.T) {
+// A pre-#480 record that left the caller pending reads back with the grant
+// held (spinclass#480), so its restart right works at once.
+func TestRestartChildSessionByALegacyPendingHolder(t *testing.T) {
 	stubRestartHandoff(t, "", nil)
 	repoPath, _ := restartChildFixture(t, "pending", session.State{
 		PendingHandles: []string{"pending"},
 		HandleRights:   map[string]string{"pending": "restart"},
 	})
-	if text, isErr := callRestartChild(t, `{"child":"worker/kid"}`); isErr {
-		t.Fatalf("a pending holder with restart must be allowed: %q", text)
-	}
 	if !readKid(t, repoPath).IsHolder("pending") {
-		t.Error("exercising the handle must accept it")
+		t.Fatal("a pre-#480 pending grant must read back held")
+	}
+	if text, isErr := callRestartChild(t, `{"child":"worker/kid"}`); isErr {
+		t.Fatalf("a legacy-pending holder with restart must be allowed: %q", text)
+	}
+	if st := readKid(t, repoPath); !st.IsHolder("pending") || len(st.PendingHandles) != 0 {
+		t.Errorf("holders %v pending %v, want the caller held and nothing pending", st.Holders, st.PendingHandles)
 	}
 }
 

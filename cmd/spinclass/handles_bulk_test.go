@@ -34,6 +34,7 @@ func addSiblingChild(t *testing.T, repoPath string, st session.State) {
 // one is granted, and the result is one TAP document with a subtest per child.
 func TestGrantSessionHandleBulk(t *testing.T) {
 	const caller = "caller-principal"
+	stubHandleGrantEffects(t)
 	held := session.State{
 		Holders:      []string{caller},
 		HandleRights: map[string]string{caller: "observe,close,grant"},
@@ -50,8 +51,8 @@ func TestGrantSessionHandleBulk(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !slices.Contains(st.PendingHandles, "p9") {
-			t.Errorf("%s: PendingHandles = %v, want to contain p9", branch, st.PendingHandles)
+		if !slices.Contains(st.Holders, "p9") {
+			t.Errorf("%s: Holders = %v, want to contain p9", branch, st.Holders)
 		}
 	}
 	for _, want := range []string{"TAP version 14", "# Subtest: worker/kid\n", "# Subtest: worker/kid2", "ok 1 - worker/kid", "ok 2 - worker/kid2", "1..2"} {
@@ -65,6 +66,7 @@ func TestGrantSessionHandleBulk(t *testing.T) {
 // the rest, and the call still reports failure, naming the child that failed.
 func TestGrantSessionHandleBulkIsIndependent(t *testing.T) {
 	const caller = "caller-principal"
+	stubHandleGrantEffects(t)
 	repoPath, _ := childHandleFixture(t, caller, session.State{
 		Holders:      []string{caller},
 		HandleRights: map[string]string{caller: "observe,close,grant"},
@@ -81,8 +83,8 @@ func TestGrantSessionHandleBulkIsIndependent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(st.PendingHandles, "p9") {
-		t.Errorf("the good child was not granted: PendingHandles = %v", st.PendingHandles)
+	if !slices.Contains(st.Holders, "p9") {
+		t.Errorf("the good child was not granted: Holders = %v", st.Holders)
 	}
 }
 

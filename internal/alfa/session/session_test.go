@@ -644,13 +644,16 @@ func TestRestartRequestJSONRoundTrip(t *testing.T) {
 }
 
 func TestGrantHandle(t *testing.T) {
-	t.Run("grants with default rights", func(t *testing.T) {
+	t.Run("a grant is held at once (#480)", func(t *testing.T) {
 		s := &State{}
 		if changed := s.GrantHandle("p2", ""); !changed {
 			t.Fatal("expected GrantHandle to report a change")
 		}
-		if !slicesContain(s.PendingHandles, "p2") {
-			t.Errorf("PendingHandles = %v, want to contain p2", s.PendingHandles)
+		if !s.IsHolder("p2") || !slicesContain(s.Holders, "p2") {
+			t.Errorf("Holders = %v, want to contain p2", s.Holders)
+		}
+		if len(s.PendingHandles) != 0 {
+			t.Errorf("PendingHandles = %v, want none: nothing is pending since #480", s.PendingHandles)
 		}
 		if got := s.HandleRights["p2"]; got != "observe,close" {
 			t.Errorf("HandleRights[p2] = %q, want the default", got)
@@ -670,8 +673,8 @@ func TestGrantHandle(t *testing.T) {
 		if changed := s.GrantHandle("p2", ""); changed {
 			t.Error("expected no-op for an already-accepted holder")
 		}
-		if slicesContain(s.PendingHandles, "p2") {
-			t.Error("an already-accepted holder must not also appear pending")
+		if n := countOccurrences(s.Holders, "p2"); n != 1 {
+			t.Errorf("Holders contains p2 %d times, want exactly 1", n)
 		}
 	})
 

@@ -34,8 +34,8 @@ func grantAll(t *testing.T, repoPath string) {
 	}
 	for i := 0; i < raceRounds; i++ {
 		to := fmt.Sprintf("p%d", i)
-		if !slices.Contains(st.PendingHandles, to) {
-			t.Errorf("handle granted to %s was lost (a concurrent writer overwrote it): PendingHandles has %d of %d", to, len(st.PendingHandles), raceRounds)
+		if !slices.Contains(st.Holders, to) {
+			t.Errorf("handle granted to %s was lost (a concurrent writer overwrote it): Holders has %d (granter included) of %d grants", to, len(st.Holders), raceRounds)
 			return
 		}
 	}
@@ -45,6 +45,7 @@ func grantAll(t *testing.T, repoPath string) {
 // neither may drop the other's write.
 func TestConcurrentGrantAndCredentialUpdateLoseNothing(t *testing.T) {
 	const caller = "caller-principal"
+	stubHandleGrantEffects(t)
 	repoPath, _ := childHandleFixture(t, caller, session.State{
 		Holders:      []string{caller},
 		HandleRights: map[string]string{caller: "observe,close,grant"},
@@ -78,6 +79,7 @@ func TestConcurrentGrantAndCredentialUpdateLoseNothing(t *testing.T) {
 func TestConcurrentRestartAndGrantLoseNothing(t *testing.T) {
 	const caller = "caller-principal"
 	stubRestartHandoffConcurrent(t)
+	stubHandleGrantEffects(t)
 	repoPath, _ := restartChildFixture(t, caller, session.State{
 		Holders:      []string{caller},
 		HandleRights: map[string]string{caller: "observe,close,grant,restart"},
