@@ -147,28 +147,38 @@ func TestHostQueueWaitsForARunningGate(t *testing.T) {
 // While a gate waits it is listed as a waiter with its reason (step 5's
 // host-load section reads it).
 func TestHostQueueWaiterIsVisibleWhileWaiting(t *testing.T) {
-	cfg := fastConfig()
-	cfg.MaxWait = 200 * time.Millisecond
-	ledger := stubHostQueue(t, cfg, func() (hostload.Snapshot, error) {
+	ledger := stubHostQueue(t, fastConfig(), func() (hostload.Snapshot, error) {
 		s := healthySnap()
 		s.LoadPerCPU = 5
 		return s, nil
 	})
+	// Poll for the waiter rather than sample once after a fixed sleep (a
+	// loaded build sandbox can take longer than any fixed sleep to reach the
+	// first refusal), then cancel the wait once it has been seen.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	seen := make(chan []hostqueue.Marker, 1)
 	go func() {
-		time.Sleep(60 * time.Millisecond)
-		w, _ := ledger.Waiting(false)
+		defer cancel()
+		deadline := time.Now().Add(4 * time.Second)
+		var w []hostqueue.Marker
+		for time.Now().Before(deadline) {
+			if w, _ = ledger.Waiting(false); len(w) > 0 {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
 		seen <- w
 	}()
-	_, _, _, err := admit(t, context.Background())
-	if !errors.Is(err, ErrHostQueueTimeout) {
-		t.Fatalf("err = %v", err)
+	_, _, _, err := admit(t, ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want the wait cancelled once the waiter was seen", err)
 	}
 	if w := <-seen; len(w) != 1 || !strings.Contains(w[0].Reason, "load") {
 		t.Errorf("waiting while waiting = %+v, want one waiter naming load", w)
 	}
 	if w, _ := ledger.Waiting(false); len(w) != 0 {
-		t.Errorf("the waiter marker outlived the timeout: %+v", w)
+		t.Errorf("the waiter marker outlived the wait: %+v", w)
 	}
 }
 
