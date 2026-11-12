@@ -438,7 +438,7 @@ func registerOperatorHandleCommands(app *command.App) {
 			Params: []command.Param{
 				{Name: "target", Type: command.String, Variadic: true, Description: "Sessions to change: <repo>/<branch> session keys or worktree directory names, exactly as `sc list` prints them (or use --all-on-host)", Completer: completeWorktreeTargets},
 				{Name: "to", Type: command.String, Required: true, Description: "The recipient principal key (a chat JID localpart, as whoami shows it)"},
-				{Name: "rights", Type: command.String, Description: "Comma-separated rights (observe, close, grant, instruct, cap, merge, check, restart). Defaults to observe,close"},
+				{Name: "rights", Type: command.String, Description: "Comma-separated rights (observe, close, grant, instruct, cap, merge, check, restart, jobs). Defaults to observe,close"},
 				{Name: "all-on-host", Type: command.Bool, Description: "Every live worktree session on this host instead of named sessions; the recipient's own session is skipped"},
 				{Name: "dry-run", Type: command.Bool, Description: "Print exactly what would change and exit without writing"},
 				{Name: "force-unknown", Type: command.Bool, Description: "Record the handle even when --to resolves to no live session on this host, or names another host"},

@@ -587,7 +587,8 @@ job sources and ringmaster's cross-session read are later work.
 Rights are **enforced** on handle tools (spinclass#355, #360). Reaping needs
 `close`. Granting needs `grant` and may only narrow (EPIC 0001 principle 3):
 the rights named must be a subset of the granter's own, and a name outside the
-vocabulary (seven names until `restart`, 2026-10-24) is refused. Releasing needs none, since it removes only the caller. The
+vocabulary (seven names until `restart`, 2026-10-24; nine since `jobs`,
+2026-11-12) is refused. Releasing needs none, since it removes only the caller. The
 spawner's full set is recorded at spawn in `handle_rights`; a holder with no
 entry (a record written before rights were enforced) keeps `observe,close`,
 and `observe` is implied by holding at all. `instruct` and `cap` are
