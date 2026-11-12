@@ -575,6 +575,15 @@ vocabulary. The `restart` right does not carry widening a session's permissions
 on restart (unattended to attended, spinclass#342, 2026-11-08): that also needs
 a trusted-layer sweatfile key and always asks a human (FDR 0037).
 
+Added 2026-11-12: a **`jobs`** object right, "read *that* session's merge or
+check job: its status, result and log tail" (`session-jobs`, spinclass#481,
+`docs/plans/2026-11-12-481-job-read-right.md`). It is the ninth name. It is
+read-only (no cancel or resolve; those stay with `merge`/`check`), not in the
+default grant, and minted to the spawner with the rest. It has no ambient
+counterpart, because reading is not execution. Output reads are journaled. The
+first step reads only spinclass's own job state in the session's worktree; other
+job sources and ringmaster's cross-session read are later work.
+
 Rights are **enforced** on handle tools (spinclass#355, #360). Reaping needs
 `close`. Granting needs `grant` and may only narrow (EPIC 0001 principle 3):
 the rights named must be a subset of the granter's own, and a name outside the

@@ -1279,7 +1279,7 @@ const DefaultHandleRights = "observe,close"
 // in display order. merge and check match the per-session merge/check verbs;
 // restart (#419) gates restart-child-session. It is not in DefaultHandleRights,
 // so a default grant never confers it; the spawner holds every right.
-var HandleRightNames = []string{"observe", "close", "grant", "instruct", "cap", "merge", "check", "restart"}
+var HandleRightNames = []string{"observe", "close", "grant", "instruct", "cap", "merge", "check", "restart", "jobs"}
 
 // AllHandleRights is every right, comma-joined: the spawner's full set, which
 // spawn records so a record never leaves it implicit.

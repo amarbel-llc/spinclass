@@ -9,8 +9,11 @@ package job
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -118,6 +121,83 @@ func Read(wt string) (*Job, error) {
 		j.Status = StatusInterrupted
 	}
 	return &j, nil
+}
+
+// readUntrusted reads a file in a worktree's .spinclass on behalf of ANOTHER
+// session (a handle holder, spinclass#481). The worker owns that directory, so
+// it could plant a symlink or a hard link there to make the holder's serve read
+// one of the user's private files: refuse a symlinked .spinclass, a symlink or
+// non-regular file at path, and a file with more than one link. At most max
+// bytes are returned, from the end of the file.
+func readUntrusted(path string, max int64) ([]byte, error) {
+	f, err := safeio.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok && st.Nlink > 1 {
+		return nil, fmt.Errorf("%s has %d links: refusing to read it for another session", path, st.Nlink)
+	}
+	size := fi.Size()
+	off := int64(0)
+	if size > max {
+		off = size - max
+	}
+	buf := make([]byte, size-off)
+	n, err := f.ReadAt(buf, off)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	return buf[:n], nil
+}
+
+// ReadForHolder is Read for a session other than the job's own (spinclass#481):
+// the record is read through readUntrusted. It is still the worker's file, so
+// its content is a report, not authority.
+func ReadForHolder(wt string) (*Job, error) {
+	if fi, err := os.Lstat(filepath.Join(wt, ".spinclass")); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("%s/.spinclass is a symlink: refusing to read it", wt)
+	}
+	data, err := readUntrusted(jobPath(wt), 1<<20)
+	if err != nil {
+		return nil, err
+	}
+	var j Job
+	if err := json.Unmarshal(data, &j); err != nil {
+		return nil, err
+	}
+	if j.Status == StatusRunning && !alive(j.ServePID) {
+		j.Status = StatusInterrupted
+	}
+	return &j, nil
+}
+
+// TailLogForHolder returns the last lines of the worktree's job.log, at most
+// maxBytes, read as ReadForHolder reads the record. A missing log is "".
+func TailLogForHolder(wt string, lines int, maxBytes int64) (string, error) {
+	if fi, err := os.Lstat(filepath.Join(wt, ".spinclass")); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("%s/.spinclass is a symlink: refusing to read it", wt)
+	}
+	data, err := readUntrusted(LogPath(wt), maxBytes)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	text := strings.TrimRight(string(data), "\n")
+	all := strings.Split(text, "\n")
+	if len(all) > lines {
+		all = all[len(all)-lines:]
+	}
+	return strings.Join(all, "\n"), nil
 }
 
 // alive reports whether pid is a live process (mirrors session.IsAlive,

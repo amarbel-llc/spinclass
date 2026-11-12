@@ -17,6 +17,7 @@ var handleRightTools = []struct{ tool, right, args string }{
 	{"restart-child-session", "restart", `{"child":"worker/kid"}`},
 	{"cancel-restart", "restart", `{"child":"worker/kid"}`},
 	{"grant-session-handle", "grant", `{"child":"worker/kid","to":"p9"}`},
+	{"session-jobs", "jobs", `{"child":"worker/kid"}`},
 }
 
 // unenforcedHandleRights are rights in the vocabulary that no spinclass tool
@@ -37,6 +38,12 @@ func callHandleTool(t *testing.T, tool, args string) (string, bool) {
 		res, err := handleCancelRestart(context.Background(), json.RawMessage(args), nil)
 		if err != nil {
 			t.Fatalf("handleCancelRestart: %v", err)
+		}
+		return res.Text, res.IsErr
+	case "session-jobs":
+		res, err := handleSessionJobs(context.Background(), json.RawMessage(args), nil)
+		if err != nil {
+			t.Fatalf("handleSessionJobs: %v", err)
 		}
 		return res.Text, res.IsErr
 	}

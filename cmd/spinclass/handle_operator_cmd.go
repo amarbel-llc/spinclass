@@ -70,6 +70,7 @@ var dangerousHandleRights = map[string]string{
 	"restart":  "have the session stopped and relaunched",
 	"instruct": "give the session orders within its brief",
 	"cap":      "cap the session",
+	"jobs":     "read the session's merge/check job status and log (spinclass#481)",
 }
 
 type operatorHandleParams struct {
