@@ -132,7 +132,10 @@ count.
 executable lacks *hostqueue.AdmissionMarker*: a merge runs inside the calling
 session's own serve, so an old binary runs gates unqueued. They are listed as
 *QUEUE BYPASS* (JSON: *queue_bypass*); *just explore-live-queue-bypass* does
-the same from a shell.
+the same from a shell, and also lists serves that have the queue but not the
+first-come ordering (*UNORDERED*: their waiters carry no place and sort ahead of
+numbered ones). Only a process whose program is *spinclass* or *sc* with first
+argument *serve* is judged.
 
 A ledger or probe that cannot be read admits with a warning: the queue is a
 scheduling aid, never a single point of failure. Statsd series:

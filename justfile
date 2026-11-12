@@ -2253,7 +2253,7 @@ explore-live-broker-env:
       fi
     done
 
-# for each live `spinclass serve`: whether its binary contains the host-queue admission code ("gate slots taken"); one without it runs every gate unqueued (stale binary, spinclass#399). Exit 1 if any bypass the queue
+# for each live `spinclass serve`: whether its binary contains the host-queue admission code ("gate slots taken": without it every gate runs unqueued, BYPASS) and the first-come ordering ("position %d of %d", spinclass#482: without it its gates are queued but UNORDERED, their markers have no place and sort ahead of numbered ones). Stale binary, spinclass#399. Exit 1 if any bypass or are unordered
 [group("explore")]
 explore-live-queue-bypass:
     #!/usr/bin/env bash
@@ -2261,14 +2261,24 @@ explore-live-queue-bypass:
     bad=0; seen=0
     for d in /proc/[0-9]*; do
       pid=${d#/proc/}
-      cmd=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null) || continue
-      case "$cmd" in *spinclass*serve*|*"sc serve"*) ;; *) continue ;; esac
-      env=$(tr '\0' '\n' < "$d/environ" 2>/dev/null) || { echo "pid $pid: environ unreadable"; continue; }
+      # Only a process whose own program is spinclass/sc and whose first argument
+      # is "serve": a bridge or a posh wrapper that merely names it is not a serve.
+      args=$({ tr '\0' '\n' < "$d/cmdline"; } 2>/dev/null) || continue
+      prog=$(printf '%s\n' "$args" | sed -n '1p'); prog=${prog##*/}
+      first=$(printf '%s\n' "$args" | sed -n '2p')
+      case "$prog" in spinclass|sc|.spinclass-wrapped) ;; *) continue ;; esac
+      [ "$first" = serve ] || continue
+      env=$({ tr '\0' '\n' < "$d/environ"; } 2>/dev/null) || { echo "pid $pid: environ unreadable"; continue; }
       session=$(printf '%s\n' "$env" | sed -n 's/^SPINCLASS_SESSION_ID=//p')
       exe=$(readlink "$d/exe" 2>/dev/null || echo '?')
       seen=$((seen+1))
       if grep -q -a -F 'gate slots taken' "$d/exe" 2>/dev/null; then
-        echo "queued  pid $pid session=${session:-?} exe=$exe"
+        if grep -q -a -F 'position %d of %d' "$d/exe" 2>/dev/null; then
+          echo "ordered  pid $pid session=${session:-?} exe=$exe"
+        else
+          echo "UNORDERED  pid $pid session=${session:-?} exe=$exe (queued, but no first-come ordering: its waiters have no place and sort ahead of numbered ones)"
+          bad=$((bad+1))
+        fi
       else
         echo "BYPASS  pid $pid session=${session:-?} exe=$exe (no host-queue code: its gates run unqueued)"
         bad=$((bad+1))
