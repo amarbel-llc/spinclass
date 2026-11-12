@@ -14,6 +14,44 @@ func init() {
 	perms.SpawnConfined = spawnWillConfine
 	perms.SpawnUnattended = spawnWillBeUnattended
 	perms.SpawnAllowJournal = journalSpawnAllowUse
+	perms.SpawnAllowRefusal = spawnAllowRefusalNote
+	perms.SpawnAllowRefusalJournal = journalSpawnAllowRefusal
+}
+
+// diagnoseSpawnAllow explains why the TEMPORARY allow-list did not pass this
+// spawn-session call, when the caller is listed in it or could not be
+// identified for it (spawn.DiagnoseSpawnAllow). A call whose arguments do not
+// parse, or that asks for a confined worker, has nothing to explain: the
+// generic ask stands. It only describes an ask that happens anyway.
+func diagnoseSpawnAllow(toolInput map[string]any, cwd string) (spawn.AllowRefusal, bool) {
+	repo := ""
+	if v, ok := toolInput["repo"]; ok && v != nil {
+		s, isString := v.(string)
+		if !isString {
+			return spawn.AllowRefusal{}, false
+		}
+		repo = s
+	}
+	if v, ok := toolInput["confined"]; ok && v != nil {
+		if b, isBool := v.(bool); !isBool || b {
+			return spawn.AllowRefusal{}, false
+		}
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return spawn.AllowRefusal{}, false
+	}
+	return spawn.DiagnoseSpawnAllow(home, cwd, currentPrincipal(), repo, spawn.DriverUnattended())
+}
+
+// spawnAllowRefusalNote is the perms.SpawnAllowRefusal seam: the sentence the
+// generic spawn ask gains.
+func spawnAllowRefusalNote(toolInput map[string]any, cwd string) string {
+	r, ok := diagnoseSpawnAllow(toolInput, cwd)
+	if !ok {
+		return ""
+	}
+	return r.Reason
 }
 
 // spawnWillBeUnattended is the narrowing carve-out (spinclass#476): a spawn

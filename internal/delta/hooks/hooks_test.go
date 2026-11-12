@@ -1275,6 +1275,50 @@ func TestSpawnSessionAllowIsJournaledAndFailsClosed(t *testing.T) {
 	}
 }
 
+// TEMPORARY (spinclass#384 stopgap): a spawn that falls through to the generic
+// ask is handed to the refusal journal (which writes a record only when the
+// allow-list refused a listed caller); an ask for another reason (unconfined)
+// and a pass are not, and the ask text carries the seam's note.
+func TestSpawnSessionGenericAskJournalsTheAllowRefusal(t *testing.T) {
+	prevC, prevU, prevR, prevJ := perms.SpawnConfined, perms.SpawnUnattended, perms.SpawnAllowRefusal, perms.SpawnAllowRefusalJournal
+	t.Cleanup(func() {
+		perms.SpawnConfined, perms.SpawnUnattended, perms.SpawnAllowRefusal, perms.SpawnAllowRefusalJournal = prevC, prevU, prevR, prevJ
+	})
+	perms.SpawnConfined = func(map[string]any, string) bool { return false }
+	perms.SpawnUnattended = func(map[string]any, string) bool { return false }
+	perms.SpawnAllowRefusal = func(map[string]any, string) string { return "the spawn allow-list cap is reached: 13 of 12" }
+	var journaled []map[string]any
+	perms.SpawnAllowRefusalJournal = func(in map[string]any, _ string) { journaled = append(journaled, in) }
+
+	cwd := t.TempDir()
+	run := func(in map[string]any) (decision, reason string) {
+		input := makeInput("mcp__plugin_spinclass_spinclass__spawn-session", in, cwd)
+		var stdout bytes.Buffer
+		if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return parseHookDecision(t, stdout.Bytes())
+	}
+
+	d, reason := run(map[string]any{"model": "haiku"})
+	if d != "ask" || !strings.Contains(reason, "cap is reached: 13 of 12") {
+		t.Errorf("generic ask: decision %q reason %q; want the ask carrying the refusal", d, reason)
+	}
+	if len(journaled) != 1 || journaled[0]["model"] != "haiku" {
+		t.Errorf("journaled = %v, want the one call", journaled)
+	}
+
+	run(map[string]any{"unconfined": true})
+	if len(journaled) != 1 {
+		t.Errorf("an unconfined ask must not reach the allow-list journal, got %d records", len(journaled))
+	}
+
+	perms.SpawnUnattended = func(map[string]any, string) bool { return true }
+	if d, _ := run(map[string]any{"model": "haiku"}); d != "allow" || len(journaled) != 1 {
+		t.Errorf("a passing spawn: decision %q, journaled %d; want allow and no refusal record", d, len(journaled))
+	}
+}
+
 // A spawn that opts out of confinement asks through the hook even when the same
 // call would otherwise be confined: the opt-out needs a human until a session
 // can be blessed to run unconfined children (stage 2, not built).

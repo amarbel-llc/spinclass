@@ -49,6 +49,31 @@ func JournalSpawnAllow(toolInput map[string]any, cwd string) error {
 	return SpawnAllowJournal(toolInput, cwd)
 }
 
+// SpawnAllowRefusal explains why the TEMPORARY spawn allow-list did not pass a
+// spawn-session call, when the caller is listed in it (or could not be
+// identified for it): "" otherwise. AlwaysAsk appends the text to the generic
+// ask so a refused session sees which condition failed (cap, expiry, ...). It
+// only adds words to an ask that is happening anyway and can never turn an ask
+// into an allow. Installed by the CLI layer; nil means no note.
+var SpawnAllowRefusal func(toolInput map[string]any, cwd string) string
+
+// SpawnAllowRefusalJournal records the same refusal in the allow-list journal.
+// The hook calls it after an AlwaysAsk that fell through to the generic spawn
+// ask (SpawnAskReasonPrefix); best-effort, since the ask happens regardless.
+var SpawnAllowRefusalJournal func(toolInput map[string]any, cwd string)
+
+// JournalSpawnAllowRefusal runs SpawnAllowRefusalJournal; nil when no seam is
+// installed.
+func JournalSpawnAllowRefusal(toolInput map[string]any, cwd string) {
+	if SpawnAllowRefusalJournal != nil {
+		SpawnAllowRefusalJournal(toolInput, cwd)
+	}
+}
+
+// SpawnAskReasonPrefix starts the reason of the generic spawn ask, the one a
+// spawn falls to when no carve-out passed it.
+const SpawnAskReasonPrefix = "spawning a worker session launches a token-consuming agent; confirm each invocation"
+
 // AlwaysAsk reports whether an invocation must prompt the human, and why. It is
 // the single source of truth for spinclass's always-ask floor, consulted by BOTH
 // enforcement surfaces: the PreToolUse hook turns a true into an `ask` decision
@@ -103,7 +128,13 @@ func AlwaysAsk(toolName string, toolInput map[string]any, cwd string) (string, b
 		// The reason names the way out for a session that cannot answer a prompt
 		// (dontAsk, spinclass#439): the confined route above is the one that
 		// passes without one, and it needs a profile (FDR 0035 R1).
-		return "spawning a worker session launches a token-consuming agent; confirm each invocation (a CONFINED spawn, confined=true with a profile, needs no prompt)", true
+		reason := SpawnAskReasonPrefix + " (a CONFINED spawn, confined=true with a profile, needs no prompt)"
+		if SpawnAllowRefusal != nil {
+			if note := SpawnAllowRefusal(toolInput, cwd); note != "" {
+				reason += "; " + note
+			}
+		}
+		return reason, true
 
 	case closeChildSessionTool:
 		// A reap without force is safe to run silently: close.RunResolved

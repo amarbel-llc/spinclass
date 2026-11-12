@@ -17,18 +17,33 @@ import (
 
 const spawnAllowLogName = "spawn-allowlist.log"
 
+// The journal's outcomes.
+const (
+	spawnAllowAllowed = "allowed"
+	spawnAllowRefused = "refused"
+)
+
 // spawnAllowRecord is one use of the allow-list: a spawn-session call the hook
-// admitted for an unattended driver only because a trusted layer lists it.
+// admitted for an unattended driver only because a trusted layer lists it
+// (outcome allowed), or a call the list did not pass although the caller is
+// listed or could not be identified for it (outcome refused, with kind and
+// reason).
 type spawnAllowRecord struct {
-	Time       time.Time `json:"time"`
-	Principal  string    `json:"principal"`
-	Session    string    `json:"session"`
-	Repo       string    `json:"repo,omitempty"`
-	Model      string    `json:"model,omitempty"`
-	Entry      string    `json:"entry"`
-	Note       string    `json:"note,omitempty"`
-	LiveBefore int       `json:"live_workers"`
-	MaxWorkers int       `json:"max_workers"`
+	Time      time.Time `json:"time"`
+	Outcome   string    `json:"outcome"`
+	Principal string    `json:"principal"`
+	Session   string    `json:"session,omitempty"`
+	Repo      string    `json:"repo,omitempty"`
+	Model     string    `json:"model,omitempty"`
+	Entry     string    `json:"entry,omitempty"`
+	Note      string    `json:"note,omitempty"`
+	// LiveBefore is the number of the caller's workers running when the call was
+	// judged (the name predates counting running workers only).
+	LiveBefore int `json:"live_workers"`
+	MaxWorkers int `json:"max_workers"`
+	// Kind and Reason are set for a refusal (spawn.Refusal* kinds).
+	Kind   string `json:"kind,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // spawnAllowNow is a seam for tests.
@@ -51,25 +66,50 @@ func journalSpawnAllowUse(toolInput map[string]any, cwd string) error {
 	if err != nil {
 		return err
 	}
-	str := func(k string) string {
-		s, _ := toolInput[k].(string)
-		return s
-	}
 	entry := use.Entry.Principal
 	if use.Entry.Session != "" {
 		entry = "session:" + use.Entry.Session
 	}
 	return appendSpawnAllowRecord(spawnAllowRecord{
 		Time:       spawnAllowNow(),
+		Outcome:    spawnAllowAllowed,
 		Principal:  principal,
 		Session:    use.SessionKey,
-		Repo:       str("repo"),
-		Model:      str("model"),
+		Repo:       toolInputString(toolInput, "repo"),
+		Model:      toolInputString(toolInput, "model"),
 		Entry:      entry,
 		Note:       use.Entry.Note,
 		LiveBefore: use.Live,
 		MaxWorkers: use.Entry.MaxWorkers,
 	})
+}
+
+// journalSpawnAllowRefusal is the perms.SpawnAllowRefusalJournal seam: when the
+// allow-list did not pass a call although the caller is listed (or could not be
+// identified for it), it records why. Best-effort: the ask happens regardless,
+// so a failed write only costs the record.
+func journalSpawnAllowRefusal(toolInput map[string]any, cwd string) {
+	r, ok := diagnoseSpawnAllow(toolInput, cwd)
+	if !ok {
+		return
+	}
+	_ = appendSpawnAllowRecord(spawnAllowRecord{
+		Time:       spawnAllowNow(),
+		Outcome:    spawnAllowRefused,
+		Principal:  currentPrincipal(),
+		Session:    r.SessionKey,
+		Repo:       toolInputString(toolInput, "repo"),
+		Model:      toolInputString(toolInput, "model"),
+		LiveBefore: r.Running,
+		MaxWorkers: r.Cap,
+		Kind:       r.Kind,
+		Reason:     r.Reason,
+	})
+}
+
+func toolInputString(toolInput map[string]any, key string) string {
+	s, _ := toolInput[key].(string)
+	return s
 }
 
 // appendSpawnAllowRecord appends one JSON line to

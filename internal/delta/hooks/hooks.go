@@ -877,6 +877,12 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 	// benign case and return `allow` before the floor is ever consulted
 	// (verified — the ordering is load-bearing, not stylistic).
 	if reason, ask := perms.AlwaysAsk(input.ToolName, input.ToolInput, input.CWD); ask {
+		// A spawn that fell through to the generic ask: when the TEMPORARY
+		// allow-list refused a listed caller, the journal records why (the ask
+		// text already says; best-effort, the ask happens regardless).
+		if input.ToolName == spawnSessionToolName && strings.HasPrefix(reason, perms.SpawnAskReasonPrefix) {
+			perms.JournalSpawnAllowRefusal(input.ToolInput, input.CWD)
+		}
 		return writeAsk(w, reason)
 	}
 

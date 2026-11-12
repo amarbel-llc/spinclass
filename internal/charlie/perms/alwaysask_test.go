@@ -159,6 +159,50 @@ func TestAlwaysAskSpawnCarveOutForUnattended(t *testing.T) {
 	}
 }
 
+// TEMPORARY (spinclass#384 stopgap): when the allow-list refused a listed
+// caller, the generic ask gains the reason; no other ask does, and an empty note
+// leaves the ask as it was. The note only adds words: it can never pass a call.
+func TestAlwaysAskSpawnGenericAskCarriesTheAllowRefusal(t *testing.T) {
+	prevC, prevU, prevR := SpawnConfined, SpawnUnattended, SpawnAllowRefusal
+	t.Cleanup(func() { SpawnConfined, SpawnUnattended, SpawnAllowRefusal = prevC, prevU, prevR })
+	SpawnConfined = func(map[string]any, string) bool { return false }
+	SpawnUnattended = func(map[string]any, string) bool { return false }
+
+	var sawInput map[string]any
+	var sawCwd string
+	SpawnAllowRefusal = func(in map[string]any, cwd string) string {
+		sawInput, sawCwd = in, cwd
+		return "the spawn allow-list cap is reached: this session has 13 workers running, of 12 allowed"
+	}
+	reason, ask := AlwaysAsk(spawnSessionTool, map[string]any{"model": "haiku"}, "/driver")
+	if !ask || !strings.HasPrefix(reason, SpawnAskReasonPrefix) || !strings.Contains(reason, "13 workers running, of 12 allowed") {
+		t.Errorf("reason = %q (ask=%v), want the generic ask followed by the refusal", reason, ask)
+	}
+	if sawInput["model"] != "haiku" || sawCwd != "/driver" {
+		t.Errorf("the seam saw %v %q, want the call's input and cwd", sawInput, sawCwd)
+	}
+
+	SpawnAllowRefusal = func(map[string]any, string) string { return "" }
+	reason, _ = AlwaysAsk(spawnSessionTool, map[string]any{}, "/driver")
+	if reason != SpawnAskReasonPrefix+" (a CONFINED spawn, confined=true with a profile, needs no prompt)" {
+		t.Errorf("an empty note must leave the generic ask unchanged, got %q", reason)
+	}
+
+	// Other asks never consult the seam.
+	SpawnAllowRefusal = func(map[string]any, string) string { t.Error("seam consulted for the wrong ask"); return "x" }
+	if r, _ := AlwaysAsk(spawnSessionTool, map[string]any{"unconfined": true}, "/driver"); strings.Contains(r, "allow-list") {
+		t.Errorf("the unconfined ask must not carry the note: %q", r)
+	}
+	if r, _ := AlwaysAsk(spawnSessionTool, map[string]any{"posture": "attended"}, "/driver"); strings.Contains(r, "allow-list") {
+		t.Errorf("the attended-worker ask must not carry the note: %q", r)
+	}
+	// A pass is a pass: the note is never consulted and nothing is added.
+	SpawnUnattended = func(map[string]any, string) bool { return true }
+	if r, ask := AlwaysAsk(spawnSessionTool, map[string]any{}, "/driver"); ask || r != "" {
+		t.Errorf("a passing spawn must not ask, got %q ask=%v", r, ask)
+	}
+}
+
 // A spawn that opts out of confinement ALWAYS asks, even when the seam would
 // call it confined, until a session can be blessed to run unconfined children
 // (stage 2, not built). Any doubt about `unconfined` or `confined` asks too:

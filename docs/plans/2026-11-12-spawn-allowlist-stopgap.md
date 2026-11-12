@@ -163,6 +163,37 @@ closed (no trusted layers are read for it) instead of reading only the global
 layers; and `RunCheck` does not journal (it never auto-approves this call; only
 the hook allows it).
 
+## 5b. Operator ruling 2026-11-12 12:13Z: the cap is concurrency, refusals say why
+
+Found in live use (the coordinator's spawn was refused at the cap with 15
+unclosed sessions, of which about 13 were running): the first build counted every
+unclosed session of the caller, idle ones included, so a coordinator that keeps
+finished workers open reached `max-workers = 12` without running that many. The
+operator ruled:
+
+1. **`max-workers` counts running workers only**: the caller's sessions whose
+   state `sc list` shows as `active` or `running-detached`
+   (`ResolveDisplayState` with clown's presence index, since a spawned worker's
+   recorded PID is routinely dead while its harness runs, #153). Idle (inactive,
+   no harness), closed and implicit sessions and other drivers' workers do not
+   count. Principal match, expiry and the fail-closed journal are unchanged.
+   Clause 4 (Q4) above is read accordingly: it caps concurrency, not open
+   sessions.
+2. **A refusal of a LISTED caller says why**, in the ask text and in the journal
+   (outcome `refused`, with `kind` and `reason`): `cap` (N running of M),
+   `expired`, `no-mapping` (also `no-repo`, `unreadable`, `count` for a caller the
+   list cannot be consulted for), `worker-not-dontask`, `driver-attended`. A
+   caller no valid entry names gets the generic ask unchanged. The note only adds
+   words to an ask that is happening anyway; it never passes a call, and the
+   refusal journal is best-effort.
+
+Mechanics: `spawn.evaluateAllow` is the one evaluation behind both
+`DriverMaySpawn` and `spawn.DiagnoseSpawnAllow`; `perms.SpawnAllowRefusal` is the
+ask-text seam (appended in `AlwaysAsk`), `perms.SpawnAllowRefusalJournal` the
+journal seam (called by the hook after a generic spawn ask). The journal field
+`live_workers` keeps its name and now means running workers. Deleted with the
+rest of the allow-list.
+
 ## 6. Step 2 (what I build once the note is merged and the questions answered)
 
 The schema type and accessor, `DriverMaySpawn` and the cap count, the seam

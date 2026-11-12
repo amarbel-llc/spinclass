@@ -1223,16 +1223,23 @@ with *include* are not known to the hook.
 	<key>@<host> and reduced to its key) and *session* (a <repo>/<branch>
 	session key; the caller's principal is resolved to its session through the
 	frontend principal mapping, so the entry follows the worktree across runs),
-	and optionally *max-workers* (a cap on the listed session's live workers,
-	spawned by it and not closed, across all repos; default 12; at the cap the
-	spawn asks), *expires* (an RFC 3339 instant, such as 2026-11-19T00:00:00Z,
-	after which the entry is ignored) and *note* (recorded with every use).
+	and optionally *max-workers* (a cap on CONCURRENCY: the workers the listed
+	session spawned that are running right now, across all repos, meaning the
+	state *sc list* shows as active or running-detached; idle (inactive) and
+	closed sessions do not count; default 12; at the cap the spawn asks),
+	*expires* (an RFC 3339 instant, such as 2026-11-19T00:00:00Z, after which the
+	entry is ignored) and *note* (recorded with every use).
 
 	The caller must resolve to a live session through the frontend principal
 	mapping; any doubt keeps the prompt. Every use is appended as one JSON line to
-	*$XDG_STATE_HOME/spinclass/spawn-allowlist.log* (time, principal, session,
-	repo, model, entry, note, live workers, cap); if the line cannot be written
-	the spawn asks instead.
+	*$XDG_STATE_HOME/spinclass/spawn-allowlist.log* (time, outcome allowed,
+	principal, session, repo, model, entry, note, running workers, cap); if the
+	line cannot be written the spawn asks instead. When a LISTED session is
+	refused, or a session cannot be identified for the list, the reason is added
+	to the ask text and journaled with outcome refused, a kind and the reason: the
+	cap is reached (N running of M), the entry expired, no live frontend
+	mapping, the worker would not start in dontAsk, or the session is attended
+	(the list applies to unattended sessions only).
 
 Agent surface (#422): the session verbs (merge, close, spawn, restart, grant and
 the rest) are MCP tools for an agent; the *sc* / *spinclass* CLI is for explicit
