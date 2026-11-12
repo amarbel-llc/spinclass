@@ -923,6 +923,48 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 				_vPermissionsAllowSelfClose.MarkConsumed()
 			}
 		}
+		if _vSpawnAllow, _ok := _vPermissions.Field("spawn-allow"); _ok && _vSpawnAllow.Kind == cst.VArray {
+			_vSpawnAllow.MarkSeen()
+			permissionsVal10.SpawnAllow = make([]SpawnAllow, len(_vSpawnAllow.Items))
+			for i := range _vSpawnAllow.Items {
+				_ePermissionsSpawnAllow := &_vSpawnAllow.Items[i]
+				_ePermissionsSpawnAllow.MarkSeen()
+				if _vPermissionsSpawnAllowPrincipal, _ok := _ePermissionsSpawnAllow.Field("principal"); _ok && _vPermissionsSpawnAllowPrincipal.Kind == cst.VLeaf {
+					if _x, _xok := cst.ExtractString(_vPermissionsSpawnAllowPrincipal.Leaf); _xok {
+						permissionsVal10.SpawnAllow[i].Principal = _x
+						_vPermissionsSpawnAllowPrincipal.MarkConsumedString()
+					}
+				}
+				if _vPermissionsSpawnAllowSession, _ok := _ePermissionsSpawnAllow.Field("session"); _ok && _vPermissionsSpawnAllowSession.Kind == cst.VLeaf {
+					if _x, _xok := cst.ExtractString(_vPermissionsSpawnAllowSession.Leaf); _xok {
+						permissionsVal10.SpawnAllow[i].Session = _x
+						_vPermissionsSpawnAllowSession.MarkConsumedString()
+					}
+				}
+				if _vPermissionsSpawnAllowMaxWorkers, _ok := _ePermissionsSpawnAllow.Field("max-workers"); _ok && _vPermissionsSpawnAllowMaxWorkers.Kind == cst.VLeaf {
+					if _x, _xok := cst.ExtractInt(_vPermissionsSpawnAllowMaxWorkers.Leaf); _xok {
+						permissionsVal10.SpawnAllow[i].MaxWorkers = &_x
+						_vPermissionsSpawnAllowMaxWorkers.MarkConsumed()
+					}
+				}
+				if _vPermissionsSpawnAllowExpires, _ok := _ePermissionsSpawnAllow.Field("expires"); _ok && _vPermissionsSpawnAllowExpires.Kind == cst.VLeaf {
+					if _x, _xok := cst.ExtractString(_vPermissionsSpawnAllowExpires.Leaf); _xok {
+						permissionsVal10.SpawnAllow[i].Expires = _x
+						_vPermissionsSpawnAllowExpires.MarkConsumedString()
+					}
+				}
+				if _vPermissionsSpawnAllowNote, _ok := _ePermissionsSpawnAllow.Field("note"); _ok && _vPermissionsSpawnAllowNote.Kind == cst.VLeaf {
+					if _x, _xok := cst.ExtractString(_vPermissionsSpawnAllowNote.Leaf); _xok {
+						permissionsVal10.SpawnAllow[i].Note = _x
+						_vPermissionsSpawnAllowNote.MarkConsumedString()
+					}
+				}
+			}
+		}
+		if _eaSpawnAllow, _eaok := _vPermissions.Field("spawn-allow"); _eaok && _eaSpawnAllow.IsEmptyArray() {
+			_eaSpawnAllow.MarkConsumed()
+			permissionsVal10.SpawnAllow = []SpawnAllow{}
+		}
 		d.data.Permissions = permissionsVal10
 	} else {
 		permissionsVal10 := &Permissions{}
@@ -2115,6 +2157,42 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 		if d.data.Permissions.AllowSelfClose != nil {
 			if err := cst.SetAny(tableNode, "allow-self-close", *d.data.Permissions.AllowSelfClose); err != nil {
 				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		{
+			_existPermissionsSpawnAllow := cst.FindArrayTableNodes(d.cstDoc.Root(), "permissions.spawn-allow")
+			for i := range d.data.Permissions.SpawnAllow {
+				var container *cst.Node
+				if i < len(_existPermissionsSpawnAllow) {
+					container = _existPermissionsSpawnAllow[i]
+				} else {
+					container = cst.AppendArrayTableEntryAfter(d.cstDoc.Root(), "permissions.spawn-allow")
+				}
+				if d.data.Permissions.SpawnAllow[i].Principal != "" || cst.HasValue(container, "principal") {
+					if err := cst.SetAny(container, "principal", d.data.Permissions.SpawnAllow[i].Principal); err != nil {
+						return nil, fmt.Errorf("%w", err)
+					}
+				}
+				if d.data.Permissions.SpawnAllow[i].Session != "" || cst.HasValue(container, "session") {
+					if err := cst.SetAny(container, "session", d.data.Permissions.SpawnAllow[i].Session); err != nil {
+						return nil, fmt.Errorf("%w", err)
+					}
+				}
+				if d.data.Permissions.SpawnAllow[i].MaxWorkers != nil {
+					if err := cst.SetAny(container, "max-workers", *d.data.Permissions.SpawnAllow[i].MaxWorkers); err != nil {
+						return nil, fmt.Errorf("%w", err)
+					}
+				}
+				if d.data.Permissions.SpawnAllow[i].Expires != "" || cst.HasValue(container, "expires") {
+					if err := cst.SetAny(container, "expires", d.data.Permissions.SpawnAllow[i].Expires); err != nil {
+						return nil, fmt.Errorf("%w", err)
+					}
+				}
+				if d.data.Permissions.SpawnAllow[i].Note != "" || cst.HasValue(container, "note") {
+					if err := cst.SetAny(container, "note", d.data.Permissions.SpawnAllow[i].Note); err != nil {
+						return nil, fmt.Errorf("%w", err)
+					}
+				}
 			}
 		}
 	}
@@ -3403,6 +3481,48 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vPermissionsAllowSelfClose.MarkConsumed()
 			}
 		}
+		if _vSpawnAllow, _ok := _vPermissions.Field("spawn-allow"); _ok && _vSpawnAllow.Kind == cst.VArray {
+			_vSpawnAllow.MarkSeen()
+			permissionsVal10.SpawnAllow = make([]SpawnAllow, len(_vSpawnAllow.Items))
+			for i := range _vSpawnAllow.Items {
+				_ePermissionsSpawnAllow := &_vSpawnAllow.Items[i]
+				_ePermissionsSpawnAllow.MarkSeen()
+				if _vPermissionsSpawnAllowPrincipal, _ok := _ePermissionsSpawnAllow.Field("principal"); _ok && _vPermissionsSpawnAllowPrincipal.Kind == cst.VLeaf {
+					if _x, _xok := cst.ExtractString(_vPermissionsSpawnAllowPrincipal.Leaf); _xok {
+						permissionsVal10.SpawnAllow[i].Principal = _x
+						_vPermissionsSpawnAllowPrincipal.MarkConsumedString()
+					}
+				}
+				if _vPermissionsSpawnAllowSession, _ok := _ePermissionsSpawnAllow.Field("session"); _ok && _vPermissionsSpawnAllowSession.Kind == cst.VLeaf {
+					if _x, _xok := cst.ExtractString(_vPermissionsSpawnAllowSession.Leaf); _xok {
+						permissionsVal10.SpawnAllow[i].Session = _x
+						_vPermissionsSpawnAllowSession.MarkConsumedString()
+					}
+				}
+				if _vPermissionsSpawnAllowMaxWorkers, _ok := _ePermissionsSpawnAllow.Field("max-workers"); _ok && _vPermissionsSpawnAllowMaxWorkers.Kind == cst.VLeaf {
+					if _x, _xok := cst.ExtractInt(_vPermissionsSpawnAllowMaxWorkers.Leaf); _xok {
+						permissionsVal10.SpawnAllow[i].MaxWorkers = &_x
+						_vPermissionsSpawnAllowMaxWorkers.MarkConsumed()
+					}
+				}
+				if _vPermissionsSpawnAllowExpires, _ok := _ePermissionsSpawnAllow.Field("expires"); _ok && _vPermissionsSpawnAllowExpires.Kind == cst.VLeaf {
+					if _x, _xok := cst.ExtractString(_vPermissionsSpawnAllowExpires.Leaf); _xok {
+						permissionsVal10.SpawnAllow[i].Expires = _x
+						_vPermissionsSpawnAllowExpires.MarkConsumedString()
+					}
+				}
+				if _vPermissionsSpawnAllowNote, _ok := _ePermissionsSpawnAllow.Field("note"); _ok && _vPermissionsSpawnAllowNote.Kind == cst.VLeaf {
+					if _x, _xok := cst.ExtractString(_vPermissionsSpawnAllowNote.Leaf); _xok {
+						permissionsVal10.SpawnAllow[i].Note = _x
+						_vPermissionsSpawnAllowNote.MarkConsumedString()
+					}
+				}
+			}
+		}
+		if _eaSpawnAllow, _eaok := _vPermissions.Field("spawn-allow"); _eaok && _eaSpawnAllow.IsEmptyArray() {
+			_eaSpawnAllow.MarkConsumed()
+			permissionsVal10.SpawnAllow = []SpawnAllow{}
+		}
 		data.Permissions = permissionsVal10
 	} else {
 		permissionsVal10 := &Permissions{}
@@ -4579,6 +4699,43 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		if data.Permissions.AllowSelfClose != nil {
 			if err := cst.SetAny(tableNode, "allow-self-close", *data.Permissions.AllowSelfClose); err != nil {
 				return fmt.Errorf("%w", err)
+			}
+		}
+		{
+			_apPermissionsSpawnAllow := tableNode
+			_existPermissionsSpawnAllow := cst.FindChildArrayTableNodes(doc.Root(), _apPermissionsSpawnAllow, "spawn-allow")
+			for i := range data.Permissions.SpawnAllow {
+				var container *cst.Node
+				if i < len(_existPermissionsSpawnAllow) {
+					container = _existPermissionsSpawnAllow[i]
+				} else {
+					container = cst.AppendChildArrayTableEntry(doc.Root(), _apPermissionsSpawnAllow, "spawn-allow")
+				}
+				if data.Permissions.SpawnAllow[i].Principal != "" || cst.HasValue(container, "principal") {
+					if err := cst.SetAny(container, "principal", data.Permissions.SpawnAllow[i].Principal); err != nil {
+						return fmt.Errorf("%w", err)
+					}
+				}
+				if data.Permissions.SpawnAllow[i].Session != "" || cst.HasValue(container, "session") {
+					if err := cst.SetAny(container, "session", data.Permissions.SpawnAllow[i].Session); err != nil {
+						return fmt.Errorf("%w", err)
+					}
+				}
+				if data.Permissions.SpawnAllow[i].MaxWorkers != nil {
+					if err := cst.SetAny(container, "max-workers", *data.Permissions.SpawnAllow[i].MaxWorkers); err != nil {
+						return fmt.Errorf("%w", err)
+					}
+				}
+				if data.Permissions.SpawnAllow[i].Expires != "" || cst.HasValue(container, "expires") {
+					if err := cst.SetAny(container, "expires", data.Permissions.SpawnAllow[i].Expires); err != nil {
+						return fmt.Errorf("%w", err)
+					}
+				}
+				if data.Permissions.SpawnAllow[i].Note != "" || cst.HasValue(container, "note") {
+					if err := cst.SetAny(container, "note", data.Permissions.SpawnAllow[i].Note); err != nil {
+						return fmt.Errorf("%w", err)
+					}
+				}
 			}
 		}
 	}

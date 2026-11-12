@@ -779,10 +779,13 @@ func CheckConfinement(sf sweatfile.Sweatfile, layerAboveRepo, global bool) []Iss
 // CheckPermissions validates the [permissions] table: it is honoured only from
 // layers above the repo, so a repo-level value is ignored.
 func CheckPermissions(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
-	if sf.Permissions == nil || layerAboveRepo {
+	if sf.Permissions == nil {
 		return nil
 	}
-	var issues []Issue
+	issues := checkSpawnAllow(sf.Permissions.SpawnAllow, layerAboveRepo, time.Now().UTC())
+	if layerAboveRepo {
+		return issues
+	}
 	for _, key := range []struct {
 		name string
 		set  bool
@@ -796,6 +799,49 @@ func CheckPermissions(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 				Severity: SeverityWarning,
 				Field:    "permissions." + key.name,
 			})
+		}
+	}
+	return issues
+}
+
+// checkSpawnAllow validates [[permissions.spawn-allow]] (TEMPORARY, spinclass#384
+// stopgap, docs/plans/2026-11-12-spawn-allowlist-stopgap.md; delete with the
+// allow-list). A repo-level list is ignored; a trusted one is checked entry by
+// entry: an invalid entry is ignored (fail closed), an expired one is inert, a
+// duplicate is redundant.
+func checkSpawnAllow(entries []sweatfile.SpawnAllow, layerAboveRepo bool, now time.Time) []Issue {
+	if len(entries) == 0 {
+		return nil
+	}
+	if !layerAboveRepo {
+		return []Issue{{
+			Message:  "[permissions] sets `spawn-allow` in a repo-level sweatfile: it is ignored — only sweatfiles above the repo may list sessions that spawn without a prompt; move it to the global sweatfile",
+			Severity: SeverityWarning,
+			Field:    "permissions.spawn-allow",
+		}}
+	}
+	var issues []Issue
+	seen := map[string]bool{}
+	for i, raw := range entries {
+		e := sweatfile.ParseSpawnAllow(raw)
+		field := fmt.Sprintf("permissions.spawn-allow[%d]", i)
+		warn := func(format string, a ...any) {
+			issues = append(issues, Issue{Message: fmt.Sprintf(format, a...), Severity: SeverityWarning, Field: field})
+		}
+		if e.Problem != "" {
+			warn("[[permissions.spawn-allow]] entry %d is ignored: %s", i, e.Problem)
+			continue
+		}
+		who := e.Principal
+		if e.Session != "" {
+			who = "session:" + e.Session
+		}
+		if seen[who] {
+			warn("[[permissions.spawn-allow]] entry %d lists %s again; the first matching entry that is valid, unexpired and under its cap is used", i, who)
+		}
+		seen[who] = true
+		if e.Expired(now) {
+			warn("[[permissions.spawn-allow]] entry %d (%s) expired at %s: it is ignored, so that session's unattended spawns ask again", i, who, e.Expires.Format(time.RFC3339))
 		}
 	}
 	return issues

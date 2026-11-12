@@ -168,6 +168,11 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
   `[host-queue] enable`; every gate waits in `runHookPhase` for a host slot
   (flock ledger under `$XDG_RUNTIME_DIR`); step-0 cost history in
   `check/gatecost.go`.
+- **Spawn allow-list** (TEMPORARY, #384 stopgap,
+  `docs/plans/2026-11-12-spawn-allowlist-stopgap.md`; replaced by ajour plus
+  profiles): trusted `[[permissions.spawn-allow]]` lets a listed unattended
+  session spawn dontAsk workers without a prompt (`spawn.DriverMaySpawn`, cap,
+  expiry, journal `spawn-allowlist.log`); the prompt returns for anything else.
 - **Inactivity watchdog** (`[hooks].inactivity-timeout`; funnels through
   `hookrun.PreMergeInDir`).
 - **Base-branch freshening** (FDR 0024, #250, `internal/bravo/basebranch`): fresh

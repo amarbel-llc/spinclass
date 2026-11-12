@@ -257,6 +257,29 @@ type Permissions struct {
 	// Last trusted layer that sets it wins; off when unset, so a session cannot
 	// retire itself unless an operator allowed it. It never allows force.
 	AllowSelfClose *bool `toml:"allow-self-close"`
+	// SpawnAllow is a TEMPORARY allow-list of sessions whose unconfined,
+	// dontAsk-worker spawns need no prompt even when the caller is itself
+	// unattended (spinclass#384 stopgap, docs/plans/2026-11-12-spawn-allowlist-stopgap.md).
+	// Appended across trusted layers; read ONLY through
+	// sweatfileio.TrustedSpawnAllow. Delete when ajour plus profiles enforce this.
+	SpawnAllow []SpawnAllow `toml:"spawn-allow"`
+}
+
+// SpawnAllow is one entry of [[permissions.spawn-allow]]: exactly one of
+// Principal and Session names the listed session. TEMPORARY, see Permissions.
+type SpawnAllow struct {
+	// Principal is the session's per-instance key (the chat JID localpart),
+	// optionally <key>@<host>.
+	Principal string `toml:"principal"`
+	// Session is a <repo>/<branch> session key; the caller's principal is
+	// resolved to its session through the frontend mapping and compared.
+	Session string `toml:"session"`
+	// MaxWorkers caps the live workers spawned by the listed session; nil is 12.
+	MaxWorkers *int `toml:"max-workers"`
+	// Expires is an RFC 3339 UTC instant after which the entry is ignored.
+	Expires string `toml:"expires"`
+	// Note is journaled with every use.
+	Note string `toml:"note"`
 }
 
 // Folio is the resource policy a session's tool calls are judged by

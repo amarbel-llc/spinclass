@@ -33,6 +33,22 @@ var SpawnConfined func(toolInput map[string]any, cwd string) bool
 // by the CLI layer like SpawnConfined; nil means never.
 var SpawnUnattended func(toolInput map[string]any, cwd string) bool
 
+// SpawnAllowJournal records the use of the TEMPORARY spawn allow-list
+// (spinclass#384 stopgap, docs/plans/2026-11-12-spawn-allowlist-stopgap.md)
+// when the hook is about to allow a spawn that only that list admitted. It is
+// called by the hook at the allow point (not by AlwaysAsk, which stays pure and
+// is also consulted by RunCheck), and an error turns the allow into an ask:
+// the relaxation is never used unrecorded. Nil means nothing to record.
+var SpawnAllowJournal func(toolInput map[string]any, cwd string) error
+
+// JournalSpawnAllow runs SpawnAllowJournal; nil when no seam is installed.
+func JournalSpawnAllow(toolInput map[string]any, cwd string) error {
+	if SpawnAllowJournal == nil {
+		return nil
+	}
+	return SpawnAllowJournal(toolInput, cwd)
+}
+
 // AlwaysAsk reports whether an invocation must prompt the human, and why. It is
 // the single source of truth for spinclass's always-ask floor, consulted by BOTH
 // enforcement surfaces: the PreToolUse hook turns a true into an `ask` decision

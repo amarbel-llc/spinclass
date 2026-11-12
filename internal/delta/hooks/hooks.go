@@ -893,6 +893,11 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 		// floor above, so reaching here is one of those: the unit bounds a
 		// confined worker, and a dontAsk worker cannot widen what its allow rules
 		// already permit; a prompt on either guards nothing.
+		// A spawn only the TEMPORARY allow-list admitted is journaled first; a
+		// journal that cannot be written turns the allow into the prompt.
+		if err := perms.JournalSpawnAllow(input.ToolInput, input.CWD); err != nil {
+			return writeAsk(w, "spawning a worker session launches a token-consuming agent; confirm each invocation (the spawn allow-list could not be recorded: "+err.Error()+")")
+		}
 		return writeAllow(w, "confined or unattended spawn: the worker is bounded by its unit (FDR 0035) or cannot prompt (dontAsk)")
 	case listToolName, updateDescriptionToolName, validateToolName,
 		sessionJobCancelToolName, closeChildSessionToolName:

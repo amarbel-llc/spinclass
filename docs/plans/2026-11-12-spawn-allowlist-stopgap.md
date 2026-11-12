@@ -149,6 +149,20 @@ of Q2.
    Recommend none now: the operator said the nikulin repo exclusion list is out
    of scope, and anything more makes this harder to delete.
 
+## 5a. Operator answers and as built (2026-11-12)
+
+Q1 to Q9 accepted as recommended. Q1: the nested `[[permissions.spawn-allow]]`
+works with the tommy codec (verified by `TestTrustedSpawnAllow`), so no
+top-level fallback. Built: `sweatfile.SpawnAllow` / `ParseSpawnAllow`,
+`sweatfileio.TrustedSpawnAllow`, `spawn.DriverMaySpawn`, the seam branch in
+`spawnWillBeUnattended`, `perms.SpawnAllowJournal` called by the hook at the
+allow point (an error becomes the prompt), `cmd/spinclass/spawn_allowlist.go`
+(the journal), `validate.checkSpawnAllow`, docs (sweatfile(5), FDR 0035,
+AGENTS.md). Two small deviations to name: a driver outside any repo fails
+closed (no trusted layers are read for it) instead of reading only the global
+layers; and `RunCheck` does not journal (it never auto-approves this call; only
+the hook allows it).
+
 ## 6. Step 2 (what I build once the note is merged and the questions answered)
 
 The schema type and accessor, `DriverMaySpawn` and the cap count, the seam

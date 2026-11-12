@@ -1193,6 +1193,13 @@ invocation:
    driver's spawns still ask, so fan-out stays bounded). Same fail-closed
    reading of `repo` and `confined` as 2. The rule is small and
    config-free on purpose: ajour plus profiles are expected to replace it.
+   **TEMPORARY relaxation of the driver bound** (spinclass#384 stopgap,
+   operator ruling 2026-11-12, docs/plans/2026-11-12-spawn-allowlist-stopgap.md):
+   an unattended driver whose principal (or session) a trusted-layer
+   `[[permissions.spawn-allow]]` entry lists, unexpired and under its worker cap
+   (`spawn.DriverMaySpawn`), passes this rule too; every use is journaled to
+   `spawn-allowlist.log` and an unwritable journal keeps the prompt. Nothing
+   else in the rule moves; delete the allow-list when ajour enforces this.
 4. Everything else asks.
 
 **The CLI opt-out (2026-10-22).** That floor lives on the PreToolUse path, so

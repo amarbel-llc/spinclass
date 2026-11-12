@@ -1207,6 +1207,33 @@ with *include* are not known to the hook.
 	session's last turn, from outside it (*spinclass close-self-run*), and the
 	session's other holders are told the result.
 
+*[[permissions.spawn-allow]]*
+	TEMPORARY (spinclass#384 stopgap; to be replaced by ajour plus profiles,
+	see docs/plans/2026-11-12-spawn-allowlist-stopgap.md). An array of tables
+	naming sessions whose *spawn-session* calls need no permission prompt even
+	though the calling session is itself unattended (dontAsk), for a worker
+	that will start in dontAsk and is unconfined by default. Without an entry an
+	unattended session's spawns ask, as before. Read only from sweatfiles above
+	the repo and appended across them; an entry in a repo or worktree sweatfile is
+	ignored and *sc validate* warns. It relaxes nothing else: *unconfined=true*,
+	auto or attended workers and arguments that do not parse still ask, and a
+	listed session's own dontAsk workers are not listed, so their spawns ask.
+	Each entry has exactly one of *principal* (the session's per-instance key,
+	the chat JID localpart as *whoami* shows it, optionally written
+	<key>@<host> and reduced to its key) and *session* (a <repo>/<branch>
+	session key; the caller's principal is resolved to its session through the
+	frontend principal mapping, so the entry follows the worktree across runs),
+	and optionally *max-workers* (a cap on the listed session's live workers,
+	spawned by it and not closed, across all repos; default 12; at the cap the
+	spawn asks), *expires* (an RFC 3339 instant, such as 2026-11-19T00:00:00Z,
+	after which the entry is ignored) and *note* (recorded with every use).
+
+	The caller must resolve to a live session through the frontend principal
+	mapping; any doubt keeps the prompt. Every use is appended as one JSON line to
+	*$XDG_STATE_HOME/spinclass/spawn-allowlist.log* (time, principal, session,
+	repo, model, entry, note, live workers, cap); if the line cannot be written
+	the spawn asks instead.
+
 Agent surface (#422): the session verbs (merge, close, spawn, restart, grant and
 the rest) are MCP tools for an agent; the *sc* / *spinclass* CLI is for explicit
 operator execution. The PreToolUse hook denies an agent's Bash use of any

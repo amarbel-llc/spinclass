@@ -1,8 +1,10 @@
 package validate
 
 import (
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"code.linenisgreat.com/spinclass/internal/0/sweatfile"
 )
@@ -822,6 +824,46 @@ func TestCheckPermissionsWarnsInRepoLayer(t *testing.T) {
 	}
 	if len(CheckPermissions(sc, true)) != 0 {
 		t.Error("above-repo allow-self-close should not warn")
+	}
+}
+
+// TEMPORARY (spinclass#384 stopgap): [[permissions.spawn-allow]] is ignored in
+// a repo-level layer (one warning), and checked entry by entry above the repo:
+// an invalid or expired entry and a duplicate each warn, a good one does not.
+func TestCheckSpawnAllow(t *testing.T) {
+	two := 2
+	zero := 0
+	repoLevel := sweatfile.Sweatfile{Permissions: &sweatfile.Permissions{SpawnAllow: []sweatfile.SpawnAllow{{Principal: "a"}, {Principal: "b"}}}}
+	if got := CheckPermissions(repoLevel, false); len(got) != 1 || got[0].Field != "permissions.spawn-allow" || got[0].Severity != SeverityWarning {
+		t.Errorf("repo-layer spawn-allow should warn once, got %+v", got)
+	}
+
+	past := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+	future := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+	trusted := sweatfile.Sweatfile{Permissions: &sweatfile.Permissions{SpawnAllow: []sweatfile.SpawnAllow{
+		{Principal: "good", MaxWorkers: &two, Expires: future},
+		{Principal: "old", Expires: past},
+		{Principal: "good"},
+		{Principal: "zero", MaxWorkers: &zero},
+		{},
+	}}}
+	got := CheckPermissions(trusted, true)
+	wantFields := []string{"permissions.spawn-allow[1]", "permissions.spawn-allow[2]", "permissions.spawn-allow[3]", "permissions.spawn-allow[4]"}
+	var fields []string
+	for _, iss := range got {
+		fields = append(fields, iss.Field)
+	}
+	if !reflect.DeepEqual(fields, wantFields) {
+		t.Fatalf("issues on %v, want %v (%+v)", fields, wantFields, got)
+	}
+	if !strings.Contains(got[0].Message, "expired") || !strings.Contains(got[1].Message, "again") ||
+		!strings.Contains(got[2].Message, "at least 1") || !strings.Contains(got[3].Message, "neither") {
+		t.Errorf("messages = %+v", got)
+	}
+
+	clean := sweatfile.Sweatfile{Permissions: &sweatfile.Permissions{SpawnAllow: []sweatfile.SpawnAllow{{Principal: "good", Expires: future}}}}
+	if len(CheckPermissions(clean, true)) != 0 {
+		t.Error("a valid unexpired trusted entry should not warn")
 	}
 }
 

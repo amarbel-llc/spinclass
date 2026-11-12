@@ -3,6 +3,7 @@ package hooks
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -1230,6 +1231,47 @@ func TestSpawnSessionConfinedIsAllowed(t *testing.T) {
 	}
 	if got := run("open"); got != "ask" {
 		t.Errorf("unconfined spawn: decision = %q, want ask", got)
+	}
+}
+
+// TEMPORARY (spinclass#384 stopgap): a spawn the allow-list admits is journaled
+// at the allow point, and a journal that cannot be written turns the allow into
+// the prompt, so the relaxation is never used unrecorded.
+func TestSpawnSessionAllowIsJournaledAndFailsClosed(t *testing.T) {
+	prevU, prevJ := perms.SpawnUnattended, perms.SpawnAllowJournal
+	t.Cleanup(func() { perms.SpawnUnattended, perms.SpawnAllowJournal = prevU, prevJ })
+	perms.SpawnUnattended = func(map[string]any, string) bool { return true }
+
+	cwd := t.TempDir()
+	run := func() (decision, reason string) {
+		input := makeInput("mcp__plugin_spinclass_spinclass__spawn-session", map[string]any{"repo": "r", "model": "haiku"}, cwd)
+		var stdout bytes.Buffer
+		if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return parseHookDecision(t, stdout.Bytes())
+	}
+
+	var gotInput map[string]any
+	perms.SpawnAllowJournal = func(in map[string]any, _ string) error { gotInput = in; return nil }
+	if d, _ := run(); d != "allow" || gotInput["model"] != "haiku" {
+		t.Errorf("journaled allow: decision = %q, journal saw %v; want allow and the call's arguments", d, gotInput)
+	}
+
+	perms.SpawnAllowJournal = func(map[string]any, string) error { return errors.New("disk full") }
+	if d, reason := run(); d != "ask" || !strings.Contains(reason, "disk full") {
+		t.Errorf("unwritable journal: decision = %q reason %q; want the prompt naming the failure", d, reason)
+	}
+
+	// An unconfined=true call never reaches the journal: it asks first.
+	perms.SpawnAllowJournal = func(map[string]any, string) error { t.Error("journal called for an ask"); return nil }
+	input := makeInput("mcp__plugin_spinclass_spinclass__spawn-session", map[string]any{"unconfined": true}, cwd)
+	var stdout bytes.Buffer
+	if err := Run(bytes.NewReader(input), &stdout, "", cwd, false); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := parseHookDecision(t, stdout.Bytes()); d != "ask" {
+		t.Errorf("unconfined=true: decision = %q, want ask", d)
 	}
 }
 

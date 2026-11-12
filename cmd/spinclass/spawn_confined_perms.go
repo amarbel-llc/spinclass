@@ -13,17 +13,15 @@ import (
 func init() {
 	perms.SpawnConfined = spawnWillConfine
 	perms.SpawnUnattended = spawnWillBeUnattended
+	perms.SpawnAllowJournal = journalSpawnAllowUse
 }
 
 // spawnWillBeUnattended is the narrowing carve-out (spinclass#476): a spawn
 // whose unconfined worker will run in dontAsk, started by a driver that is not
-// itself unattended. Every argument must parse cleanly and `confined` must not
+// itself unattended (or is, and a trusted layer lists it). Every argument must parse cleanly and `confined` must not
 // be set (a confined spawn is judged by spawnWillConfine); any doubt is false
 // and keeps the prompt.
 func spawnWillBeUnattended(toolInput map[string]any, cwd string) bool {
-	if spawn.DriverUnattended() {
-		return false
-	}
 	repo := ""
 	if v, ok := toolInput["repo"]; ok && v != nil {
 		s, isString := v.(string)
@@ -40,6 +38,13 @@ func spawnWillBeUnattended(toolInput map[string]any, cwd string) bool {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return false
+	}
+	// An unattended driver's spawns ask, unless a trusted layer lists it
+	// (TEMPORARY allow-list, spinclass#384 stopgap; see spawn_allowlist.go).
+	if spawn.DriverUnattended() {
+		if _, err := spawn.DriverMaySpawn(home, cwd, currentPrincipal()); err != nil {
+			return false
+		}
 	}
 	return spawn.WillBeUnattended(home, cwd, repo)
 }
