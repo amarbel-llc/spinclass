@@ -1233,6 +1233,26 @@ debug-troupe-accounts-ls:
     stat -c '%U %a %F %n' "$d" "$d/accounts" "$d"/accounts/* 2>&1
     echo "== count: $(ls -1 "$d/accounts" 2>/dev/null | wc -l) account file(s)"
 
+# posture of a live session's processes: CLOWN_UNATTENDED (value) and the permission-mode words in each command line, nothing else is printed (restart posture checks, spinclass#476)
+[group("explore")]
+explore-live-session-posture key:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    want="SPINCLASS_SESSION_ID={{key}}"
+    found=0
+    for d in /proc/[0-9]*; do
+      pid=${d#/proc/}
+      env=$({ tr '\0' '\n' < "$d/environ"; } 2>/dev/null) || continue
+      printf '%s\n' "$env" | grep -qxF "$want" || continue
+      found=$((found+1))
+      comm=$(cat "$d/comm" 2>/dev/null || echo '?')
+      started=$(stat -c '%y' "$d" 2>/dev/null | cut -c1-19)
+      unatt=$(printf '%s\n' "$env" | sed -n 's/^CLOWN_UNATTENDED=//p')
+      words=$(tr '\0' '\n' < "$d/cmdline" 2>/dev/null | grep -iE 'permission|dontask|unattended|resume' | tr '\n' ' ')
+      echo "pid $pid comm=$comm started=$started CLOWN_UNATTENDED=${unatt:-(unset)} cmdline-words=[${words}]"
+    done
+    [ "$found" -gt 0 ] || echo "(no live process names $want)"
+
 # map live processes' SPINCLASS_SESSION_ID against their CLOWN_SESSION_ID
 [group("debug")]
 debug-session-env-map:
