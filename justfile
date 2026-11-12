@@ -2233,6 +2233,30 @@ explore-live-broker-env:
       fi
     done
 
+# for each live `spinclass serve`: whether its binary contains the host-queue admission code ("gate slots taken"); one without it runs every gate unqueued (stale binary, spinclass#399). Exit 1 if any bypass the queue
+[group("explore")]
+explore-live-queue-bypass:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    bad=0; seen=0
+    for d in /proc/[0-9]*; do
+      pid=${d#/proc/}
+      cmd=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null) || continue
+      case "$cmd" in *spinclass*serve*|*"sc serve"*) ;; *) continue ;; esac
+      env=$(tr '\0' '\n' < "$d/environ" 2>/dev/null) || { echo "pid $pid: environ unreadable"; continue; }
+      session=$(printf '%s\n' "$env" | sed -n 's/^SPINCLASS_SESSION_ID=//p')
+      exe=$(readlink "$d/exe" 2>/dev/null || echo '?')
+      seen=$((seen+1))
+      if grep -q -a -F 'gate slots taken' "$d/exe" 2>/dev/null; then
+        echo "queued  pid $pid session=${session:-?} exe=$exe"
+      else
+        echo "BYPASS  pid $pid session=${session:-?} exe=$exe (no host-queue code: its gates run unqueued)"
+        bad=$((bad+1))
+      fi
+    done
+    [ "$seen" -gt 0 ] || echo "(no spinclass serve is running)"
+    [ "$bad" -eq 0 ]
+
 # what direnv adds to a launcher's environment for a session worktree (the environment a confined spawn carries across the unit boundary today): variable NAMES added or changed, never values, and the PATH entries added, by store name; the direnv-less confined pilot's step 1 (docs/plans/2026-11-04-confined-direnv-less-pilot.md)
 [group("explore")]
 explore-direnv-env-delta wt=".":
