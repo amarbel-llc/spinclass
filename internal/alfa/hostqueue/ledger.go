@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -303,14 +304,18 @@ func (l Ledger) markers(prefix string, reap bool) ([]Marker, error) {
 // changes, and the old file's lock is then dropped, so a free lock on a file no
 // longer at path means "replaced", not "dead": read the path again.
 func readMarker(path string, reap bool) (Marker, bool) {
-	const replacedRetries = 5
+	const replacedRetries = 1000
 	for range replacedRetries {
 		m, alive, replaced := readMarkerOnce(path, reap)
 		if !replaced {
 			return m, alive
 		}
+		runtime.Gosched()
 	}
-	return Marker{}, false
+	// Replaced on every look: a holder that keeps rewriting its marker is alive,
+	// so it is counted, never taken for dead (a loaded host once lost five looks
+	// in a row and the waiter vanished from the view).
+	return Marker{Session: "(updating marker " + filepath.Base(path) + ")"}, true
 }
 
 func readMarkerOnce(path string, reap bool) (m Marker, alive, replaced bool) {

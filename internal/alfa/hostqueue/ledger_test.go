@@ -113,9 +113,23 @@ func TestLedgerWaiterReadDuringUpdates(t *testing.T) {
 	}
 	defer leave()
 	done := make(chan struct{})
+	// Several updaters-worth of pressure: extra readers keep the host busy so the
+	// reader loses the race often, as it did on a loaded gate.
+	for range 4 {
+		go func() {
+			for {
+				select {
+				case <-done:
+					return
+				default:
+					_, _ = l.Waiting(false)
+				}
+			}
+		}()
+	}
 	go func() {
 		defer close(done)
-		for i := range 2000 {
+		for i := range 5000 {
 			update([]string{"load", "memory"}[i%2])
 		}
 	}()
