@@ -95,6 +95,10 @@ The queue is **opt-in**: off unless a trusted sweatfile sets `enable = true`
 - **Order (#482):** a gate takes a numbered place under the ledger lock at its
   first look; admission goes by place, not by who polls first. A gate that
   leaves (timeout, cancel, crash) gives up its place.
+- **Management (#483, slice 1):** `sc queue-status`, `sc queue-hold`, `sc
+  queue-release`; operator at a terminal only; journalled. Priorities, aging,
+  cancel and the confinement deny-write follow in later slices, per
+  `docs/plans/2026-11-12-483-host-queue-management.md`.
 - **Stale binaries:** the gate runs in the calling session's serve, so a serve
   that predates the queue code runs gates unqueued. `host-load` flags it
   (`QUEUE BYPASS`), and `just explore-live-queue-bypass` checks from a shell.

@@ -152,6 +152,8 @@ var gatedServeHandlers = []gatedServeHandler{
 	// host-load names every session key and every process on the host, the
 	// sibling enumeration `list` is gated for (#388).
 	{tool: "host-load", operatorCommand: "sc host-load", handle: handleHostLoad, args: `{}`},
+	// queue-status names every waiting and running session (#483).
+	{tool: "queue-status", operatorCommand: "sc queue-status", handle: handleQueueStatus, args: `{}`},
 	{
 		tool: "perms-list", operatorCommand: "sc perms-list", handle: registeredRun("perms-list"),
 		args: `{}`, harmlessArgs: `{"repo":"../global"}`, harmlessRefusal: "one path segment",

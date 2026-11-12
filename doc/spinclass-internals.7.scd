@@ -86,7 +86,15 @@ marker's lock knows its holder is dead; under the ledger lock it removes the
 marker, and a read-only reader (*host-load*) only skips it.
 
 The operator's hold is *$XDG\_STATE\_HOME/spinclass/host-queue/hold*. Its
-contents are the reason every waiter is given.
+contents are the reason every waiter is given. *sc queue-hold --reason* and
+*sc queue-release* place and lift it (CLI-only, operator at a terminal);
+*sc queue-status* (also an MCP tool, refused to a confined caller) shows the
+queue. Every management act passes *hostqueue.Authorize* (v1: the operator at a
+terminal only; the future *spinclass:queue* right is one more case there) and is
+appended to *$XDG\_STATE\_HOME/spinclass/host-queue/journal.ndjson* with actor
+*tty*. The hold and release fail open if the journal cannot be written, with a
+warning, since the hold is the brake. The ledger files are not a security
+boundary against same-uid code (spinclass#483).
 
 The predicate, *hostqueue.Decide*, is pure. It reads the ledger view, a
 *hostload.Probe* snapshot (load, *MemAvailable*, PSI or swap, and store free

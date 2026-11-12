@@ -78,6 +78,7 @@ func buildApp() *command.App {
 	registerServeCommand(app)
 	registerMCPOnlyCommands(app)
 	registerHostLoadCommand(app)
+	registerQueueCommands(app)
 	registerGritCommands(app)
 	registerGritEscapeCommand(app)
 	registerGritPermsCommand(app)
