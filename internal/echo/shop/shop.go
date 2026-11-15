@@ -240,6 +240,8 @@ func ProvisionCredential(
 	case outcome.Skipped != "":
 		if tw != nil {
 			tw.Skip(mintDesc, outcome.Skipped)
+		} else {
+			log.Warn("credential mint skipped; pushes use the inherited ssh-agent", "branch", worktreePath.Branch, "reason", outcome.Skipped)
 		}
 	case outcome.Minted:
 		if tw != nil {

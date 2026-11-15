@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/log"
+
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
 	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/alfa/worktree"
@@ -253,6 +255,37 @@ func TestCreatePinsTheRevokeCommandAndIgnoresTheWorktreeLayer(t *testing.T) {
 	}
 	if st.Credential.RevokeCommand == nil || *st.Credential.RevokeCommand != "true" {
 		t.Errorf("pinned revoke-command = %v, want the trusted layer's \"true\"", st.Credential.RevokeCommand)
+	}
+}
+
+// With no TAP writer (a caller that has none), an origin host outside the
+// trusted [auth].forge-hosts must still say why no credential was minted
+// instead of dropping the skip silently (spinclass#485).
+func TestProvisionCredentialWarnsOnForgeHostsSkipWithoutWriter(t *testing.T) {
+	a := setupAuthRepo(t)
+	writeFile(t, a.parentLayer(), "[auth]\nmint-command = \"echo tok\"\nrevoke-command = \"true\"\nforge-hosts = [\"elsewhere.test\"]\n")
+	if out, err := exec.Command("git", "-C", a.repo, "worktree", "add", "-b", "feature-x", a.rp.AbsPath).CombinedOutput(); err != nil {
+		t.Fatalf("worktree add: %v\n%s", err, out)
+	}
+	h, err := sweatfileio.LoadHierarchy(a.root, a.rp.AbsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var logged bytes.Buffer
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	if err := ProvisionCredential(context.Background(), nil, h, a.rp, false); err != nil {
+		t.Fatalf("ProvisionCredential: %v", err)
+	}
+	for _, want := range []string{"credential mint skipped", "not in [auth].forge-hosts"} {
+		if !strings.Contains(logged.String(), want) {
+			t.Errorf("log missing %q:\n%s", want, logged.String())
+		}
+	}
+	if auth.Minted(a.rp.AbsPath) {
+		t.Error("a credential was written")
 	}
 }
 
