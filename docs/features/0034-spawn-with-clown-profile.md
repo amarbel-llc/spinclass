@@ -705,6 +705,124 @@ a cross-check. Fields follow §5.3:
 4. The `layers` are handed on unchanged to the enforcer that admits calls (the
    frontend, EPIC 0001 principle 7). spinclass does not evaluate them.
 
+**Amended 2026-11-16 (operator ruling d7, relayed by circus/eager-holly):
+how step 4 hands the layers on.** spinclass writes a **per-session layers
+file** at spawn, and the worker finds it through an **environment variable**
+that names a file under the worktree's `.spinclass/`. clown's hook and moxy
+read it for the ajour verdict. This section is spinclass's side of that
+contract. The variable's name, the file's name and the entry shape belong to
+clown RFC 0018 §11 (clown/ready-elder). They are repeated below as agreed
+over chat on 2026-11-16, and where this text and the landed RFC differ on
+them, the RFC wins. No code before the RFC text lands.
+
+- **Name and file (agreed with clown/ready-elder, 2026-11-16).** The variable
+  is `SPINCLASS_PROFILE_LAYERS`, not `MOXY_PROFILE_LAYERS`, because moxy would
+  inherit a `MOXY_` variable through clown's spawn and then enforce it. The
+  file is `<worktree>/.spinclass/profile-layers.json`.
+- **What spinclass writes.** The `layers` array of the valid verdict from
+  step 1, copied verbatim and in chain order: `act`, `kind`, `role` (`stencil`
+  or `patch`), and `profile` or `body`. RFC 0018 §11 adopted the verdict's
+  entry shape. spinclass reorders, merges and drops nothing, and evaluates
+  nothing (step 4 above). A verdict that is not `valid` refuses the spawn
+  before anything is written, so no file ever holds layers from an invalid or
+  undetermined chain.
+- **`profile` is provenance; `path` and `digest` are not spinclass's yet.**
+  `profile`'s `@digest` is spinclass's `clown-profile-digest-v1` id: sha256
+  over clown's canonical form of the resolved launch profile (provider,
+  model, keep-set, env), the same value as `session.State.ProfileDigest` and
+  `CLOWN_PROFILE_DIGEST`. It is not a stencil digest, and clown treats it as
+  provenance only. §11 also defines `digest` (the stencil's
+  `Stencil.Digest()`, which clown verifies) and `path`, exactly one of `path`
+  or `body`. A clown launch profile carries no stencil, though: the
+  capability-profile stencil is a separate document. Where that document
+  lives and who resolves it to a path and digest is an open question in §11,
+  for circus/eager-holly to rule. Until it is ruled, spinclass writes neither
+  `path` nor `digest`.
+- **When.** At spawn, after the verdict and the V-D1-6 check pass and before
+  the harness is launched, so the file exists before the worker's first tool
+  call. The layers are also **pinned into the session record** (the frontend
+  record `$XDG_STATE_HOME/spinclass/records/<hash>.json`, next to the profile
+  and its digest), which is authoritative. The worktree file is a rendering of
+  that pin, like `.spinclass/state.json`. `sc resume`, a restart (FDR 0037)
+  and `sc resurrect` (FDR 0027) rewrite the file from the pin. None of them
+  re-verifies or re-derives it: re-verification at resume is the existing
+  resume digest check's job (`sc resume --repin-profile`).
+- **The variable.** spinclass sets it in the worker's environment after
+  everything inherited or configured, the way `CLOWN_AGENT_SCOPE` is set
+  (`workerEnvScoped`, `internal/foxtrot/spawn/spawn.go`). It is dropped from
+  the driver's inherited environment first, so a driver's own variable never
+  reaches a child, and a `[session-entry].env` or `[direnv.dotenv]` value
+  cannot name a different file. It is pinned in `session.State.Entry.Env`, so
+  `sc resume` replays it. Its value is an absolute path inside the worktree.
+- **Permissions and lifetime.** Mode `0600`, owned by the session's uid,
+  written atomically (temporary file, then rename). The file is removed with
+  the worktree (`sc close`, `close-child-session`, `close-self-run`, `sc
+  clean`), and nothing else removes it. It is never committed: `.spinclass/`
+  is already outside version control.
+- **Confined sessions (FDR 0035).** `.spinclass/` sits inside the unit's
+  read-write worktree bind, so the file is added to the unit spec's read-only
+  binds (`BindsRO`, `internal/foxtrot/spawn/confine.go`) beside
+  `.spinclass/hooks`. The agent can then neither rewrite it nor rename it
+  away. A confined spawn always has a profile (FDR 0035 R1), so the file
+  always exists when the bind is made. **Unconfined sessions get no such
+  protection.** The worker runs as the same uid and can rewrite the file, as
+  it can `.spinclass/state.json` (FDR 0032 D9). The file is a boundary only
+  where confinement makes it one, and this addendum claims nothing more.
+- **Who reads it.** clown's PreToolUse hook and moxy, through the variable
+  only. They never derive the path from the session key or principal. The
+  file has one writer, spinclass at spawn or at re-rendering from the pin, and
+  every other process only reads it.
+- **No profile, no file.** A spawn without a profile writes no file and sets
+  no variable, and neither is pinned. Neither does any session that did not
+  come from a spawn (`sc start`, implicit sessions). Readers then behave as
+  they do today. A spawn that names a profile but carries no verified grant
+  (a host without `[profile-rights] enforce`) has no layers to hand on either,
+  so it also writes no file. That is today's unenforced posture and is not a
+  new hole.
+- **Fail closed on a broken pointer (agreed in §11).** If the variable is set
+  but the file is missing, unreadable or does not parse, or a layer does not
+  parse, or a digest does not match, the reader refuses in enforce mode
+  rather than treating the session as unlayered (RFC 0013 §4.9 rule 2:
+  silence is not admission). In shadow mode clown records `layers-error` and
+  denies nothing. spinclass's part is to make that state rare: the
+  re-rendering above runs before relaunch.
+
+**The interim file before acts (operator ruling d20, 2026-11-16).**
+`piggy act verify` is still being built (piggy#361), so today's spawns carry
+Phase 1 grant records, not a verdict with `layers`. Until it exists,
+spinclass still writes the file at spawn, from the Phase 1 grants:
+
+- one `stencil` entry per bound profile, root to leaf, with `act` empty,
+  `kind` `grant` and `profile` = `name@<clown-profile-digest-v1 id>`, and no
+  `path`, `digest` or `body`;
+- an explicit **unverified-act marker** on every entry and in the file's
+  header. The working spelling is `"act_status": "unverified"`, and §11 owns
+  the final spelling. A file whose header and entries disagree does not parse
+  and falls under the broken-pointer rule;
+- addressed, pinned and protected exactly as above (d7).
+
+**Rule: no enforcer may act on an unverified-act entry.** An enforcer in
+enforce mode refuses any call that such an entry would have to admit. An
+entry is unverified when it carries the marker or has an empty `act`. That
+makes the interim file a shadow-only input: clown in shadow mode records
+what it would have done, and nothing in enforce mode is ever admitted on its
+strength. The file switches to verdict layers, with real `act` digests and
+the marker set to verified, when spinclass's spawn starts calling `piggy act
+verify`. That changes the source, not the reader.
+
+Building the interim needs a small collector: `profilegrant.Walk` returns
+only the effective grant today, not the ordered list of bound profiles that
+the "Stacking" section above describes.
+
+**The child's own grant after hello (spinclass's reading, to confirm with
+§11).** Under acts, the child's grant is issued after its SessionStart hook
+("The grantee is a principal" above), which is after the file is written.
+That grant governs what the child may spawn, not what it may call, so the
+file is not rewritten then.
+
+The implementation is one spinclass issue, filed after this addendum lands.
+Code waits for RFC 0018 §11 to land and for a host window.
+
 ### Unattended spawns
 
 Spawns that no human starts (a webhook, a roustabout graph) have no one to touch
