@@ -118,6 +118,14 @@ has what a trusted layer declared here: a confined spawn drops the
 *spawn-entry*'s leading *direnv exec {dir}* (see *spawn-entry*), and this
 is how its *TROUPE\_\** and similar values reach it (spinclass#462).
 
+A *dotenv* key therefore overrides a variable of the same name inherited
+from the launching environment, and one set by *[session-entry].env*: in an
+attended session because direnv's *dotenv .spinclass/env* sets it over
+what the shell already had, and in a spawned worker because the launch
+environment is built inherited environment, then *[session-entry].env*,
+then *dotenv*, then the identity and tmp-dir variables, a later value
+winning (*workerEnvScoped* in _internal/foxtrot/spawn/spawn.go_).
+
 This automatic _.envrc_ rewrite applies only to spinclass-managed
 worktrees, whose _.envrc_ spinclass owns. An *implicit* session — an agent
 running in a repo's own main checkout rather than an *sc*-created worktree
