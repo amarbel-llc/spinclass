@@ -181,6 +181,15 @@ verify-tommy-codegen:
     system=$(nix eval --raw --impure --expr 'builtins.currentSystem')
     nix build ".#checks.${system}.tommy-codegen" --no-link --print-build-logs
 
+# The residual check circus's gate-guard runs after it skips the pre-merge
+# `just` for a docs-only merge (.gate-skip-allow). gate-guard looks for exactly
+# this name. lint-invisible-chars is the only gate check that reads docs/, so
+# it keeps running when the rest of the gate is skipped.
+#
+# run the checks a docs-only gate skip keeps (invisible characters)
+[group("post-build")]
+verify-gate-skip-residual: lint-invisible-chars
+
 # --- codemod ---
 
 [group("codemod")]
