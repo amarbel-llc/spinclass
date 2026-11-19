@@ -78,8 +78,14 @@ func TestDispatcherScript(t *testing.T) {
 	if !strings.Contains(f, "cmd='/nix/store/abc-hooks/bin/conformist-pre-commit --verbose'") {
 		t.Errorf("expected the frozen path to replace the leading word only, got:\n%s", f)
 	}
-	if !strings.Contains(f, "frozen from origin/master at 0123456") || !strings.Contains(f, "sc resume") {
-		t.Errorf("expected the frozen drift warning to name the base and the way out, got:\n%s", f)
+	if !strings.Contains(f, "frozen from (origin/master at 0123456)") || !strings.Contains(f, "sc resume") {
+		t.Errorf("expected the frozen drift notice to name the base and the way out, got:\n%s", f)
+	}
+	if !strings.Contains(f, "standdown=1") {
+		t.Errorf("expected a hook frozen from a base to stand down on drift, got:\n%s", f)
+	}
+	if !strings.Contains(s, "standdown=0") {
+		t.Errorf("expected an unfrozen hook to keep running on drift, got:\n%s", s)
 	}
 
 	// A `sh -c '...'` command guards on the sh binary, not the inner tool.

@@ -599,8 +599,11 @@ does not export *WORKTREE*.
 	the branch the session goes on to commit) with *nix develop
 	git+file://<repo>?rev=<base>* and no lock update, and that path is baked
 	into the dispatcher. The dispatcher never runs *nix develop* at commit
-	time: a *flake.lock* that changed since the install only prints a
-	warning naming the base, and the frozen formatter still runs. The hook
+	time. When the worktree's or the index's *flake.lock* differs from the
+	lock of the base it was frozen from (a lock bump, for instance), the
+	dispatcher prints one line naming the base and SKIPS the formatter for
+	that commit, leaving formatting to the pre-merge gate; native hooks
+	still run. An unfrozen hook only warns on drift and still runs. The hook
 	is re-frozen from the then-landed base by whoever holds the session,
 	on *sc resume* (when the base has moved), *sc rebuild*, a restart and
 	*sc resurrect*; *sc rebuild --check* reports a moved base as stale. When

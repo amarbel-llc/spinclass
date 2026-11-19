@@ -36,6 +36,19 @@ promotion-criteria: |
 > moot here (the devShell's `conformist` is already the wrapper, so even the old
 > command string runs hermetically); the rename is cosmetic + post-merge.
 
+## Amendment (S0): a frozen formatter stands down when the lock differs
+
+From S0 of `docs/plans/2026-11-09-frozen-hook-vs-lock-bumps.md` (circus#423).
+The dispatcher's baseline is the lock of the base the formatter was frozen
+from (`<BaseSha>:flake.lock`), not the worktree's lock at install. When the
+worktree's or the index's `flake.lock` differs from it, a hook frozen from a
+base skips the formatter for that commit and prints one line; formatting is
+left to the pre-merge gate, and native hooks still run with their exit codes.
+A formatter resolved under the old lock would otherwise restamp generated
+files the old way on a lock-bump commit. No evaluation and no new input are
+added, so the threat model is narrower than before: a forged lock change costs
+only formatting, which the gate checks. Unfrozen hooks keep warning and running.
+
 ## Amendment 2026-11-04: the hook is frozen at session start (spinclass#459)
 
 Decided by the operator on 2026-11-04, planned in
@@ -50,7 +63,8 @@ records how each open question was resolved).
   an absolute store path by evaluating the devShell of the **landed default
   branch** (the base the session is cut from, FDR 0024) and bakes that path
   into the dispatcher. A lock drift prints a warning only; the frozen
-  formatter still runs; fail-open stays.
+  formatter still runs; fail-open stays. (Changed by the S0 amendment above: a
+  frozen formatter now stands down on drift.)
 - **Why.** The #449 canary showed the commit-time `nix develop` fetching an
   unlocked `path:` input of the branch's flake into the world-readable store,
   the copy the guarded gate refuses (spinclass#459). Evaluating the landed

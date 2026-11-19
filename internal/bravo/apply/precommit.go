@@ -90,7 +90,7 @@ func installPreCommitHook(sf sweatfile.Sweatfile, worktreePath string) (*session
 	}
 
 	dispatchPath := filepath.Join(hooksDir, dispatcherName)
-	lockHash := flakeLockHash(worktreePath)
+	lockHash := lockBaseline(worktreePath, rec)
 	if err := os.WriteFile(dispatchPath, []byte(dispatcherScript(original, hooksDir, lockHash, rec)), 0o755); err != nil {
 		return nil, err
 	}
@@ -200,6 +200,24 @@ func flakeLockHash(worktreePath string) string {
 	return strings.TrimSpace(out)
 }
 
+// lockBaseline is the flake.lock identity the dispatcher compares the live lock
+// against. A hook frozen from a landed base compares against the lock the
+// formatter was resolved from (`<BaseSha>:flake.lock`, a blob id equal to `git
+// hash-object` of the same bytes), so a session whose lock moved away from that
+// base, such as a lock bump, is seen as drifted from its first commit. Any other
+// hook, or a base whose lock git cannot read, keeps the worktree's own lock at
+// install (flakeLockHash).
+func lockBaseline(worktreePath string, rec session.FrozenHook) string {
+	if rec.Frozen && rec.BaseSha != "" {
+		if out, err := git.Run(worktreePath, "rev-parse", "--verify", "-q", rec.BaseSha+":flake.lock"); err == nil {
+			if h := strings.TrimSpace(out); h != "" {
+				return h
+			}
+		}
+	}
+	return flakeLockHash(worktreePath)
+}
+
 // mustConfig returns the effective git config value for key, or "" on error.
 func mustConfig(worktreePath, key string) string {
 	out, err := git.Run(worktreePath, "config", "--get", key)
@@ -233,14 +251,16 @@ func enumerateActiveHooks(dir string) []string {
 }
 
 // dispatcherData is the substitution set for dispatcherTemplate. Every field is
-// single-quoted for POSIX sh by the template's `sq` func.
+// single-quoted for POSIX sh by the template's `sq` func; StandDown renders as
+// 1 or 0.
 type dispatcherData struct {
-	Orig     string // original hooks dir git would use absent our override
-	Self     string // our per-worktree hooks dir (the exec-loop guard compares against it)
-	Bin      string // the formatter the guard checks: the frozen absolute path, else the bare leading word
-	Cmd      string // the full formatter command line, its leading word replaced by Bin
-	LockHash string // baked flake.lock hash for the drift warning ("" disables it)
-	DriftMsg string // the one-line warning printed when flake.lock has drifted
+	Orig      string // original hooks dir git would use absent our override
+	Self      string // our per-worktree hooks dir (the exec-loop guard compares against it)
+	Bin       string // the formatter the guard checks: the frozen absolute path, else the bare leading word
+	Cmd       string // the full formatter command line, its leading word replaced by Bin
+	LockHash  string // baked flake.lock baseline (lockBaseline; "" disables the drift branch)
+	DriftMsg  string // the one-line notice printed when flake.lock has drifted
+	StandDown bool   // on drift, skip the formatter instead of running it stale
 }
 
 // dispatcherTemplate renders the composing dispatcher (see dispatcherScript for
@@ -265,10 +285,16 @@ var dispatcherTemplate = template.Must(
 //
 // The formatter is rec: its leading word replaced by the frozen absolute path
 // when rec.Frozen (spinclass#459), else the bare name as declared. When
-// flake.lock has drifted since install (the baked LockHash) the dispatcher
-// prints one warning and runs the same formatter; it never evaluates the
-// worktree flake (the pre-#459 `nix develop` re-evaluation is gone, since it
-// fetched whatever input the branch's flake declared, the #449 canary's leak).
+// flake.lock in the worktree or the index differs from the baked LockHash, a
+// hook frozen from a landed base STANDS DOWN: it skips the formatter, which
+// was resolved under a lock this commit no longer has and would restamp
+// generated files the old way (circus#423), and prints one line; formatting is
+// left to the pre-merge gate (S0 of
+// docs/plans/2026-11-09-frozen-hook-vs-lock-bumps.md). Any other hook prints
+// one warning and runs the same formatter. Native hooks run either way. The
+// worktree flake is never evaluated (the pre-#459 `nix develop` re-evaluation
+// is gone, since it fetched whatever input the branch's flake declared, the
+// #449 canary's leak).
 func dispatcherScript(originalDir, hooksDir, lockHash string, rec session.FrozenHook) string {
 	cmd := rec.Bin + strings.TrimPrefix(rec.Command, leadingWord(rec.Command))
 	var buf strings.Builder
@@ -276,12 +302,13 @@ func dispatcherScript(originalDir, hooksDir, lockHash string, rec session.Frozen
 	// infallible, every referenced field exists, and strings.Builder.Write never
 	// errors — so the error is deliberately discarded.
 	_ = dispatcherTemplate.Execute(&buf, dispatcherData{
-		Orig:     originalDir,
-		Self:     hooksDir,
-		Bin:      rec.Bin,
-		Cmd:      cmd,
-		LockHash: lockHash,
-		DriftMsg: driftMessage(rec),
+		Orig:      originalDir,
+		Self:      hooksDir,
+		Bin:       rec.Bin,
+		Cmd:       cmd,
+		LockHash:  lockHash,
+		DriftMsg:  driftMessage(rec),
+		StandDown: standsDownOnDrift(rec),
 	})
 	return buf.String()
 }
@@ -289,13 +316,21 @@ func dispatcherScript(originalDir, hooksDir, lockHash string, rec session.Frozen
 // driftMessage is the warning for a flake.lock that changed since the hook was
 // installed: what still runs, and the way out.
 func driftMessage(rec session.FrozenHook) string {
-	if rec.Frozen && rec.BaseSha != "" {
-		return fmt.Sprintf("spinclass pre-commit: flake.lock changed since this hook was frozen from %s at %s; the frozen formatter still runs (sc resume, or any restart (restart-this-session, restart-child-session, sc restart), re-freezes it from the landed default branch).", rec.BaseLabel, shortSha(rec.BaseSha))
+	if standsDownOnDrift(rec) {
+		return fmt.Sprintf("spinclass pre-commit: flake.lock differs from the one the formatter was frozen from (%s at %s); the formatter is SKIPPED for this commit and formatting is left to the pre-merge gate (after landing, sc resume or any restart re-freezes it).", rec.BaseLabel, shortSha(rec.BaseSha))
 	}
 	if rec.Frozen {
 		return "spinclass pre-commit: flake.lock changed since this hook was installed; the formatter is the absolute path the sweatfile names, so nothing is re-resolved."
 	}
 	return fmt.Sprintf("spinclass pre-commit: flake.lock changed since this hook was installed; the formatter resolves from the committing shell's PATH because the hook was not frozen (%s); sc resume re-installs it.", rec.Reason)
+}
+
+// standsDownOnDrift reports whether a lock drift skips the formatter: only for
+// a hook frozen from a landed base, whose formatter belongs to that base's lock.
+// A frozen absolute path the sweatfile named, or an unfrozen bare name, is not
+// tied to any lock, so it keeps running.
+func standsDownOnDrift(rec session.FrozenHook) bool {
+	return rec.Frozen && rec.BaseSha != ""
 }
 
 // dispatcherTemplateText is the composing dispatcher as a text/template. The
@@ -311,8 +346,9 @@ const dispatcherTemplateText = `#!/bin/sh
 # its stderr) so a stale/misconfigured formatter is not a silent no-op. The
 # formatter was frozen when the hook was installed: resolved from the landed
 # default branch's devShell, never from the branch's own flake, and never
-# re-evaluated here (spinclass#459). A flake.lock that drifted since install
-# only prints a warning. Regenerated on every 'sc start' / 'sc resume'. See
+# re-evaluated here (spinclass#459). A flake.lock that differs from the one it
+# was frozen from skips the formatter; for any other hook, drift only prints a
+# warning. Regenerated on every 'sc start' / 'sc resume'. See
 # docs/plans/2026-06-17-precommit-hook-composition-design.md and
 # docs/plans/2026-11-04-459-frozen-pre-commit-hook.md.
 hook=$(basename "$0")
@@ -322,16 +358,25 @@ if [ "$hook" = pre-commit ]; then
 	bin={{.Bin | sq}}
 	cmd={{.Cmd | sq}}
 	lockhash={{.LockHash | sq}}
-	# spinclass#267/#459: warn, and only warn, if flake.lock drifted since the
-	# hook was installed (baked lockhash). The worktree flake is never evaluated
-	# at commit time.
-	if [ -n "$lockhash" ] && [ -f flake.lock ]; then
-		live=$(git hash-object flake.lock 2>/dev/null || printf '')
-		if [ -n "$live" ] && [ "$live" != "$lockhash" ]; then
+	standdown={{if .StandDown}}1{{else}}0{{end}}
+	run=1
+	# spinclass#267/#459: compare the worktree's and the index's flake.lock with
+	# the baked baseline. A frozen hook stands down on drift (S0); any other
+	# hook warns and runs. The worktree flake is never evaluated at commit time.
+	if [ -n "$lockhash" ]; then
+		drift=0
+		if [ -f flake.lock ]; then
+			live=$(git hash-object flake.lock 2>/dev/null || printf '')
+			if [ -n "$live" ] && [ "$live" != "$lockhash" ]; then drift=1; fi
+		fi
+		staged=$(git rev-parse --verify -q :flake.lock 2>/dev/null || printf '')
+		if [ -n "$staged" ] && [ "$staged" != "$lockhash" ]; then drift=1; fi
+		if [ "$drift" -eq 1 ]; then
 			printf '%s\n' {{.DriftMsg | sq}} >&2
+			if [ "$standdown" -eq 1 ]; then run=0; fi
 		fi
 	fi
-	if command -v "$bin" >/dev/null 2>&1; then
+	if [ "$run" -eq 1 ] && command -v "$bin" >/dev/null 2>&1; then
 		err=$(mktemp 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}/spinclass-precommit.$$")
 		sh -c "$cmd" 2>"$err"
 		rc=$?

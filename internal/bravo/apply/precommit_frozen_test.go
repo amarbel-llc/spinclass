@@ -130,6 +130,61 @@ func TestInstallPreCommitHookFreezesTheFormatterFromTheLandedBase(t *testing.T) 
 	}
 }
 
+// TestFrozenHookStandsDownOnALockBumpCommit is S0 of
+// docs/plans/2026-11-09-frozen-hook-vs-lock-bumps.md (circus#423): a commit
+// that stages a flake.lock different from the base's must not run the formatter
+// frozen under the base's lock (it would restamp generated files the old way),
+// and says so; the commit still lands. A later commit on the same drifted
+// worktree stands down too.
+func TestFrozenHookStandsDownOnALockBumpCommit(t *testing.T) {
+	_, wt, mainSha := repoWithFlakeOnMain(t, emptyLock)
+
+	marker := filepath.Join(t.TempDir(), "fired")
+	frozenFmt := filepath.Join(t.TempDir(), "fakefmt")
+	writeExec(t, frozenFmt, "#!/bin/sh\necho ran >> "+shSingleQuote(marker)+"\nexit 0\n")
+	stubResolver(t, func(context.Context, string, string, string) (string, error) { return frozenFmt, nil })
+
+	sf := sweatfile.Sweatfile{Hooks: &sweatfile.Hooks{PreCommit: strptr("fakefmt --staged")}}
+	if rec, err := installPreCommitHook(sf, wt); err != nil || rec == nil || !rec.Frozen {
+		t.Fatalf("install: rec=%+v err=%v", rec, err)
+	}
+
+	bumped := `{"nodes":{"root":{}},"root":"root","version":7,"bumped":true}` + "\n"
+	if err := os.WriteFile(filepath.Join(wt, "flake.lock"), []byte(bumped), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitPath(t, wt, t.TempDir(), "add", "flake.lock")
+	out := commitOutput(t, wt, "bump")
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatalf("the formatter frozen under the base's lock ran on a lock-bump commit:\n%s", out)
+	}
+	if !strings.Contains(out, "SKIPPED") || !strings.Contains(out, "main at "+mainSha[:7]) {
+		t.Errorf("expected the stand-down notice naming the base, got:\n%s", out)
+	}
+
+	if err := os.WriteFile(filepath.Join(wt, "f.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitPath(t, wt, t.TempDir(), "add", "f.txt")
+	commitOutput(t, wt, "after the bump")
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the formatter ran on a later commit of a worktree whose lock differs from the base's")
+	}
+}
+
+// commitOutput commits what is staged in wt with a PATH that reaches no
+// formatter by name, and returns git's combined output.
+func commitOutput(t *testing.T, wt, msg string) string {
+	t.Helper()
+	cmd := exec.Command("git", "-C", wt, "commit", "-q", "-m", msg)
+	cmd.Env = append(os.Environ(), "PATH="+t.TempDir()+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("commit %q: %v\n%s", msg, err, out)
+	}
+	return string(out)
+}
+
 func TestInstallPreCommitHookFallsBackToTheBareNameWhenResolutionFails(t *testing.T) {
 	_, wt, mainSha := repoWithFlakeOnMain(t, emptyLock)
 	stubResolver(t, func(context.Context, string, string, string) (string, error) {
