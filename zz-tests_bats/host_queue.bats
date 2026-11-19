@@ -11,8 +11,6 @@ setup() {
   setup_test_home
   setup_stubs
   create_repo
-  export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/run"
-  mkdir -p "$XDG_RUNTIME_DIR"
 }
 
 # start_checked_session NAME: a session whose pre-merge sleeps, so two checks
@@ -87,6 +85,24 @@ function host_queue_is_off_without_a_section { # @test
   run grep -l "host queue" "$BATS_TEST_TMPDIR/a.out" "$BATS_TEST_TMPDIR/b.out"
   assert_failure
   assert [ ! -e "$XDG_RUNTIME_DIR/spinclass/host-queue" ]
+}
+
+# The harness gives each test its own XDG_RUNTIME_DIR, so a gate run by a test
+# takes its slot in a ledger under the test's tmpdir, never the host's real
+# queue. Without that, a run outside the sandbox inherits the operator's
+# runtime dir and waits behind real sessions' gates.
+function host_queue_ledger_is_the_tests_own { # @test
+  local a
+  a=$(start_checked_session host_queue_own)
+  enable_host_queue
+  install_passthrough_direnv
+  commit_repo_sweatfile "$TEST_REPO" '[hooks]
+pre-merge = "true"
+'
+  cd "$a" || return
+  run timeout --preserve-status 30s "${SPINCLASS_BIN:-spinclass}" --format plain check
+  assert_success
+  assert [ -d "$BATS_TEST_TMPDIR/.xdg/runtime/spinclass/host-queue" ]
 }
 
 # A repo-level [host-queue] cannot turn the queue on.

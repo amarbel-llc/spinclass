@@ -2632,6 +2632,11 @@ debug-bats-race-timing file filter="":
     cd zz-tests_bats
     filter={{ quote(filter) }}
     unset BATS_TEST_TIMEOUT
+    # A private runtime dir, so nothing the run starts joins the host's real
+    # gate queue (its ledger lives under XDG_RUNTIME_DIR).
+    XDG_RUNTIME_DIR=$(mktemp -d)
+    export XDG_RUNTIME_DIR
+    trap 'rm -rf "$XDG_RUNTIME_DIR"' EXIT
     bats --timing --jobs 1 ${filter:+--filter "$filter"} {{ quote(file) }}
 
 # [debug] Scaffold a throwaway repo wired (via direnv PATH_add) to a

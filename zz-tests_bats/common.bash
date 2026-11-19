@@ -11,9 +11,12 @@ set_xdg() {
   export XDG_CONFIG_HOME="$loc/.xdg/config"
   export XDG_STATE_HOME="$loc/.xdg/state"
   export XDG_CACHE_HOME="$loc/.xdg/cache"
-  export XDG_RUNTIME_HOME="$loc/.xdg/runtime"
+  # Each test's own runtime dir: the host queue's ledger lives under it, so a
+  # run outside the sandbox never joins the host's real queue.
+  export XDG_RUNTIME_DIR="$loc/.xdg/runtime"
   mkdir -p "$XDG_DATA_HOME" "$XDG_CONFIG_HOME" "$XDG_STATE_HOME" \
-    "$XDG_CACHE_HOME" "$XDG_RUNTIME_HOME"
+    "$XDG_CACHE_HOME" "$XDG_RUNTIME_DIR"
+  chmod 0700 "$XDG_RUNTIME_DIR"
 }
 
 setup_test_home() {
