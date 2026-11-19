@@ -191,3 +191,104 @@ function merge_landing_local_only_lands_on_master_not_parked_branch { # @test
   assert_equal "$(origin_tip)" "$origin_before"
   assert_crap 'all(.[]; .type != "test" or ((.description | startswith("fetch ")) | not))'
 }
+
+# A pre-merge hook standing in for a merge from another clone (another host,
+# whose merge queue this one cannot see) that lands on origin while this gate
+# runs. It counts its runs in $BATS_TEST_TMPDIR/gate-count. Modes: `once` lands
+# a non-conflicting commit during the first gate only; `always` lands one during
+# every gate; `conflict` lands, during the first gate only, a new.txt that
+# conflicts with the session's.
+write_racing_hook() {
+  cat >"$BATS_TEST_TMPDIR/racer.sh" <<'RACER'
+#!/bin/sh
+set -eu
+mode="$1"
+count_file="$BATS_TEST_TMPDIR/gate-count"
+n=$(($(cat "$count_file" 2>/dev/null || echo 0) + 1))
+echo "$n" >"$count_file"
+case "$mode" in
+once | conflict) [ "$n" -eq 1 ] || exit 0 ;;
+esac
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR
+work="$BATS_TEST_TMPDIR/racer-$n"
+git clone -q "$TEST_UPSTREAM" "$work"
+if [ "$mode" = conflict ]; then
+  echo "the other clone's version" >"$work/new.txt"
+  git -C "$work" add new.txt
+else
+  echo "$n" >"$work/racer-$n.txt"
+  git -C "$work" add "racer-$n.txt"
+fi
+git -C "$work" commit -q -m "racer landing $n"
+git -C "$work" push -q origin master >/dev/null 2>&1
+RACER
+}
+
+# Commit the racing pre-merge hook in <mode>, start a session with a commit on
+# new.txt, and let the hook's command run (the passthrough direnv). Sets WT and
+# BRANCH.
+start_session_with_racing_gate() {
+  local mode="$1"
+  write_racing_hook
+  # SC2016: $BATS_TEST_TMPDIR is expanded by the hook's `sh -c`, not here.
+  # shellcheck disable=SC2016
+  commit_repo_sweatfile "$TEST_CHECKOUT" "[hooks]
+pre-merge = \"sh \\\"\$BATS_TEST_TMPDIR/racer.sh\\\" $mode\""
+  start_session_with_commit new.txt "session work"
+  install_passthrough_direnv
+}
+
+gate_count() { cat "$BATS_TEST_TMPDIR/gate-count"; }
+
+# Another clone lands on origin during the gate: the push is refused, and the
+# merge retries in place under its lock (re-fetch, rebase, re-gate the exact
+# new commit, push) instead of failing back to the queue.
+function merge_landing_retries_in_place_when_origin_moves_during_the_gate { # @test
+  start_session_with_racing_gate once
+
+  run_sc_crap merge "$BRANCH"
+  assert_success
+
+  assert_equal "$(gate_count)" 2
+  assert_crap 'any(.[]; .type == "test" and (.description | startswith("land retry 1/2: origin/master moved to ")) and .ok)'
+  assert_crap 'any(.[]; .type == "test" and (.description | endswith("retry 1)")) and (.description | startswith("merge ")) and .ok)'
+  assert_crap 'any(.[]; .type == "test" and .description == "landed after 2 gates (1 retry)" and .ok)'
+  run git -C "$TEST_UPSTREAM" log --format=%s master
+  assert_output --partial "session commit: new.txt"
+  assert_output --partial "racer landing 1"
+}
+
+# Origin moves during every gate: after two retries (three gates) the merge
+# gives up with a legible failure, and nothing of the session's lands.
+function merge_landing_gives_up_after_the_retry_limit { # @test
+  start_session_with_racing_gate always
+  local session_tip
+  session_tip=$(git -C "$WT" rev-parse HEAD)
+
+  run_sc_crap merge "$BRANCH"
+  assert_failure
+
+  assert_equal "$(gate_count)" 3
+  assert_output --partial "moved during each of 3 gates (2 retries"
+  run git -C "$TEST_UPSTREAM" log --format=%s master
+  refute_output --partial "session commit: new.txt"
+  assert_output --partial "racer landing 3"
+  assert_equal "$(git -C "$TEST_CHECKOUT" rev-parse "refs/heads/$BRANCH")" "$session_tip"
+  assert [ -d "$WT" ]
+}
+
+# The commit that landed during the gate conflicts with the session's: the
+# retry's rebase fails as an integration conflict, after one gate, with nothing
+# landed.
+function merge_landing_retry_conflict_is_an_integration_conflict { # @test
+  start_session_with_racing_gate conflict
+
+  run_sc_crap merge "$BRANCH"
+  assert_failure
+
+  assert_equal "$(gate_count)" 1
+  assert_output --partial "integration conflict"
+  run git -C "$TEST_UPSTREAM" log --format=%s master
+  refute_output --partial "session commit: new.txt"
+  assert_output --partial "racer landing 1"
+}

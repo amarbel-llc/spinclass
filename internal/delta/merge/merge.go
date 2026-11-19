@@ -696,8 +696,9 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 		}
 	}
 	// Idempotent; the safety net for every error path below. The worktree is
-	// kept through the post-merge phase, which runs in it.
-	defer cleanupLand()
+	// kept through the post-merge phase, which runs in it. A closure, because a
+	// retried local-only landing may create the worktree later.
+	defer func() { cleanupLand() }()
 	// The landing worktree pushes, so it needs the session's per-session push
 	// credential wiring (FDR 0028) — a no-op when the session minted none.
 	if gitSync {
@@ -705,68 +706,124 @@ func FinishMerge(ctx context.Context, execr executor.Executor, rep *crap.Reporte
 			return nil, failStep(ts, "land "+branch, fmt.Errorf("mirror push credential into landing worktree: %w", mErr), "")
 		}
 	}
-	if needRebase {
-		var landErr error
-		rebaseStart := time.Now()
-		landingSha, landErr = rebaseLanding(ts, landPath, branch, target.Ref())
-		mx.observeErr(ctx, "landing_rebase", rebaseStart, landErr)
-		if landErr != nil {
-			return nil, landErr
+	// Steps (d00) to (e) repeat when the landing push loses a race to a merge
+	// from another clone (the queue is host-local, FDR 0022): still under the
+	// lock, re-fetch, rebase onto the moved tip, re-gate the exact new commit
+	// and push again, at most landingRaceRetries times.
+	tipBefore, _ := git.RevParse(repoPath, target.Ref())
+	retry := 0
+	for ; ; retry++ {
+		if needRebase {
+			if landPath == "" {
+				// A local-only merge creates its landing worktree only to rebase.
+				var landErr error
+				landPath, cleanupLand, landErr = addLandingWorktree(ts, repoPath, branch, landingSha)
+				if landErr != nil {
+					return blobLinks, landErr
+				}
+			}
+			var landErr error
+			rebaseStart := time.Now()
+			landingSha, landErr = rebaseLanding(ts, landPath, branch, target.Ref())
+			mx.observeErr(ctx, "landing_rebase", rebaseStart, landErr)
+			if landErr != nil {
+				return blobLinks, landErr
+			}
+			rebased = true
 		}
-		rebased = true
-	}
 
-	// (d00) The post-merge section rule, on the final landing sha and before
-	// anything lands: a changed section needs the operator's digest.
-	if sErr := requirePostMergeSectionAccepted(ts, branch, repoPath, target.Ref(), landingSha, pm.AcceptPostMergeDigest, true); sErr != nil {
-		return nil, sErr
-	}
-
-	// (d0)The pre-merge policy stage (FDR 0031), under the lock, judging the
-	// exact landing diff before the expensive hook.
-	policyStart := time.Now()
-	pErr := runAttestationPolicy(ctx, ts, pm.Gate, sessionH, repoPath, branch, defaultBranch, target.Ref(), pinnedSha, landingSha, pm.AttestedSha)
-	mx.observeErr(ctx, "policy", policyStart, pErr)
-	if pErr != nil {
-		return nil, pErr
-	}
-
-	// (d) The gate, under the lock, against the exact sha that will land.
-	// (With [hooks].disable-merge-build-worktree the hook runs in the session
-	// worktree instead — pre-existing resolveHookDir behavior, in which the
-	// sha it verifies is whatever that worktree has checked out.)
-	hookStart := time.Now()
-	hookLinks, hookErr := runPreMergeHookContext(ctx, rep, ts, repoPath, wtPath, branch, defaultBranch, landingSha, gitSync, guardedMerge(pm, wtPath), activity)
-	mx.observePreMergeHook(ctx, sessionH.Merged, hookStart, hookErr)
-	blobLinks = append(blobLinks, hookLinks...)
-	if hookErr != nil {
-		if rebased {
-			hint := staleGeneratedHint(repoPath, pinnedSha, target.Ref(), landingSha, defaultBranch)
-			ts.Ok("landing hint " + branch + ": " + hint)
-			hookErr = fmt.Errorf("%w; %s", hookErr, hint)
+		// (d00) The post-merge section rule, on the final landing sha and before
+		// anything lands: a changed section needs the operator's digest.
+		if sErr := requirePostMergeSectionAccepted(ts, branch, repoPath, target.Ref(), landingSha, pm.AcceptPostMergeDigest, true); sErr != nil {
+			return blobLinks, sErr
 		}
-		return blobLinks, hookErr
-	}
 
-	// (e) Land the landing sha, with a distinct label when the landing was
-	// rebased past a moved tip. gitSync: push it to the remote's default branch
-	// from the landing worktree — the ff check is the remote's own, so a stale
-	// or unauthenticated push fails having moved NOTHING, local or remote. Local
-	// only: the fast-forward of the local default branch is the landing.
-	mergeLabel := "merge " + branch
-	if rebased {
-		mergeLabel = "merge " + branch + " (rebased onto moved " + defaultBranch + ")"
-	}
-	landStart := time.Now()
-	out, landErr := target.Land(landPath, landingSha)
-	mx.observeErr(ctx, "land", landStart, landErr)
-	if landErr != nil {
+		// (d0)The pre-merge policy stage (FDR 0031), under the lock, judging the
+		// exact landing diff before the expensive hook.
+		policyStart := time.Now()
+		pErr := runAttestationPolicy(ctx, ts, pm.Gate, sessionH, repoPath, branch, defaultBranch, target.Ref(), pinnedSha, landingSha, pm.AttestedSha)
+		mx.observeErr(ctx, "policy", policyStart, pErr)
+		if pErr != nil {
+			return blobLinks, pErr
+		}
+
+		// (d) The gate, under the lock, against the exact sha that will land.
+		// (With [hooks].disable-merge-build-worktree the hook runs in the session
+		// worktree instead — pre-existing resolveHookDir behavior, in which the
+		// sha it verifies is whatever that worktree has checked out.)
+		hookStart := time.Now()
+		hookLinks, hookErr := runPreMergeHookContext(ctx, rep, ts, repoPath, wtPath, branch, defaultBranch, landingSha, gitSync, guardedMerge(pm, wtPath), activity)
+		mx.observePreMergeHook(ctx, sessionH.Merged, hookStart, hookErr)
+		blobLinks = append(blobLinks, hookLinks...)
+		if hookErr != nil {
+			if rebased {
+				hint := staleGeneratedHint(repoPath, pinnedSha, target.Ref(), landingSha, defaultBranch)
+				ts.Ok("landing hint " + branch + ": " + hint)
+				hookErr = fmt.Errorf("%w; %s", hookErr, hint)
+			}
+			return blobLinks, hookErr
+		}
+
+		// (e) Land the landing sha, with a distinct label when the landing was
+		// rebased past a moved tip. gitSync: push it to the remote's default branch
+		// from the landing worktree — the ff check is the remote's own, so a stale
+		// or unauthenticated push fails having moved NOTHING, local or remote. Local
+		// only: the fast-forward of the local default branch is the landing.
+		mergeLabel := "merge " + branch
+		switch {
+		case retry > 0:
+			mergeLabel = fmt.Sprintf("merge %s (rebased onto moved %s, retry %d)", branch, defaultBranch, retry)
+		case rebased:
+			mergeLabel = "merge " + branch + " (rebased onto moved " + defaultBranch + ")"
+		}
+		landStart := time.Now()
+		out, landErr := target.Land(landPath, landingSha)
+		mx.observeErr(ctx, "land", landStart, landErr)
+		if landErr == nil {
+			ts.Ok(mergeLabel)
+			break
+		}
 		if !target.IsSelf() {
 			mx.client.Count(MetricPushRefused)
 		}
-		return blobLinks, failStep(ts, mergeLabel, landErr, out)
+
+		// (e1) A refused landing that lost a race is retried in place; any other
+		// refusal fails as it always has.
+		if fErr := fetchTarget(ctx, ts, target, wtPath, " (after the refused landing)"); fErr != nil {
+			return blobLinks, failStep(ts, mergeLabel, landErr, out)
+		}
+		tipAfter, _ := git.RevParse(repoPath, target.Ref())
+		if !landingLostRace(repoPath, tipBefore, tipAfter, landingSha) {
+			return blobLinks, failStep(ts, mergeLabel, landErr, out)
+		}
+		if retry == landingRaceRetries {
+			if activity != nil {
+				_, _ = fmt.Fprintf(activity, "merge: %s moved during each of %d gates (%d retries); nothing landed\n", target.Label(), retry+1, retry)
+			}
+			return blobLinks, failStep(ts, mergeLabel, fmt.Errorf(
+				"%w: %s moved during each of %d gates (%d retries; last to %s); nothing landed; re-merge to try again: %v",
+				ErrLandingRaceExhausted, target.Label(), retry+1, retry, shortSha(tipAfter), landErr), out)
+		}
+		mx.client.Count("merge." + mx.repo + ".landing_retry")
+		note := fmt.Sprintf("land retry %d/%d: %s moved to %s during the gate", retry+1, landingRaceRetries, target.Label(), shortSha(tipAfter))
+		ts.Ok(note)
+		if activity != nil {
+			_, _ = fmt.Fprintf(activity, "merge: %s; rebasing and re-running the gate under the merge lock\n", note)
+		}
+		tipBefore = tipAfter
+		needRebase = true
 	}
-	ts.Ok(mergeLabel)
+	if retry > 0 {
+		retries := "retries"
+		if retry == 1 {
+			retries = "retry"
+		}
+		summary := fmt.Sprintf("landed after %d gates (%d %s)", retry+1, retry, retries)
+		ts.Ok(summary)
+		if activity != nil {
+			_, _ = fmt.Fprintf(activity, "merge: %s\n", summary)
+		}
+	}
 	if !target.IsSelf() {
 		mx.client.Count(MetricLanded)
 	}

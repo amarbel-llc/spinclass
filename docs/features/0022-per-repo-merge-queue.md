@@ -170,8 +170,22 @@ and in the result stream:
   and saying to re-merge. Re-running the generators in the landing worktree
   waits on generators declaring their inputs and outputs.
 - **Host-local only.** flock does not serialize across hosts (and is not
-  NFS-safe); a cross-host origin race still fails at push, the legible
-  pre-existing error.
+  NFS-safe), so a merge from another clone can land while this one's gate
+  runs. Since 2026-11-19 such a lost push race is retried in place, still
+  under the lock: when the landing push is refused, the merge re-fetches, and
+  if the target tip moved and the pushed commit does not contain it, it
+  rebases in the landing worktree, re-runs the post-merge section rule, the
+  attestation policy and the full gate on the exact new commit, and pushes
+  again (a `land retry N/2` point per retry and, on landing, a `landed after
+  N gates (M retries)` point, each echoed to the job log). At most two
+  retries (`landingRaceRetries`, three gates in all); past that it fails with
+  `ErrLandingRaceExhausted`, having landed nothing. A refusal that is not a
+  race (the tip did not move: a dropped credential, a bad URL) fails at push
+  exactly as before. Like the first landing rebase, a retry runs neither the
+  regenerate phase nor REPAIR. The cost is borne by the merges queued behind:
+  the lock is held through every retry, so the worst case for them is three
+  gates plus three host-queue slot waits (FDR 0038) instead of one (an
+  estimate, not a measurement).
 - **Orphaned `.land-*` worktrees** from a crash between worktree add and
   cleanup are reaped by `sc clean` alongside `.merge-*` build worktrees
   (dead-pid detection via the trailing `-<pid>`; issue #237, resolved). A
