@@ -101,6 +101,11 @@ var gatedServeHandlers = []gatedServeHandler{
 		args: `{"child":"worker/kid"}`, harmlessArgs: `{}`, harmlessRefusal: "child is required",
 		cliArgs: []string{"restart-child-session", "--child", "nope/none"}, cliRefusal: "no spinclass session for child",
 	},
+	{
+		tool: "stop-child-session", operatorCommand: "sc stop-child-session", handle: handleStopChildSession,
+		args: `{"child":"worker/kid"}`, harmlessArgs: `{}`, harmlessRefusal: "child is required",
+		cliArgs: []string{"stop-child-session", "--child", "nope/none"}, cliRefusal: "no spinclass session for child",
+	},
 	// cancel-restart is mixed like list-handles: cancelling the caller's own
 	// request (no child) is open, since it only removes a request the caller
 	// could make; naming a child rests on a handle read from agent-writable state,
@@ -189,6 +194,8 @@ var openServeTools = map[string]string{
 	"close-this-session": "scope-gated self-close; caller resolution is audit row 0035-159",
 	"restart-this-session": "hand-off-gated self-restart, resolved like close-this-session (audit row 0035-159); " +
 		"the hand-off command comes from a trusted sweatfile layer, never from the caller",
+	"stop-this-session": "a self-stop through the same trusted hand-off as restart-this-session, resolved the same way; " +
+		"a session may stop itself with no right",
 }
 
 func TestEveryServeToolIsGatedOrDeclaredOpen(t *testing.T) {

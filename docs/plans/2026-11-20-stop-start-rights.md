@@ -15,9 +15,10 @@ terminal.
 
 ### Rights
 
-Three new object rights join `session.HandleRightNames`:
+Four new object rights join `session.HandleRightNames`:
 
 - `stop`: ask for the session's agent to be stopped and left stopped.
+- `stop-now`: ask for it to be stopped now, killing the current turn.
 - `start`: start a stopped session's agent again.
 - `park`: reserved for the parking piece; recorded and grantable now, checked
   by nothing yet.
@@ -35,8 +36,8 @@ released through the existing handle tools; the default grant
 | `start-child-session child [reason]` | `start` on the child | runs the start hand-off |
 | `cancel-restart` | as today | also withdraws a queued stop |
 
-`when` is `idle` (default) or `now`; `now` always asks the human, as a forced
-restart does.
+`when` is `idle` (default) or `now`; see Decided, item 3, for who may stop
+`now` and when a human is asked.
 
 ### State
 
@@ -115,15 +116,23 @@ at coordinator level and by the operator, journalled; parking is per session,
 default off, and rolled out one session at a time (see the parking design,
 later).
 
-## Open questions for the operator
+## Decided
 
-1. Should `stop-this-session` need no right (like `restart-this-session`), or
-   should a session be unable to stop itself?
-2. Should `start` of a stopped session also be possible for its own holders
-   without the `start` right, or strictly by the right?
-3. Is `now` (kill the current turn) wanted for stop at all, or only `idle`?
-4. Should a stop record an expiry, after which the watchdog starts the session
-   again, or does a stopped session stay stopped until someone starts it?
+1. A session may stop itself with no right (`stop-this-session`, like
+   `restart-this-session`).
+2. `start` is strictly by the `start` right; holding another right does not
+   let a holder start a stopped session.
+3. Stop `now` (kill the current turn) is its own extended right, `stop-now`,
+   granted like the others; `stop-child-session` with `when=now` needs it, and
+   `stop-this-session` with `when=now` needs nothing more than item 1. Whether
+   a human is asked is separate and operator-only: a trusted
+   `[[permissions.stop-now-allow]]` list (layers above the repo only), with
+   entries naming one principal or one session key, an optional expiry and a
+   note, works as `[[permissions.spawn-allow]]` does. A caller listed there
+   stops now without a prompt, each use journalled and refused if the journal
+   cannot be written; any other `now` always asks the human, as a forced
+   restart does.
+4. No expiry: a stopped session stays stopped until someone starts it.
 
 ## Relaunch cost
 

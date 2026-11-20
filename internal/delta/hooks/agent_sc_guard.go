@@ -44,6 +44,7 @@ func scVerbMCPTool(verb string) (string, bool) {
 		return "update-this-session-description", true
 	case "close-child-session", "close-this-session", "restart-this-session",
 		"restart-child-session", "restart-hung-child", "cancel-restart", "grant-session-handle",
+		"stop-this-session", "stop-child-session",
 		"release-session-handle", "resurrect":
 		// The MCP tool carries the CLI verb's name.
 		return verb, true

@@ -837,6 +837,8 @@ const (
 	sessionHealthToolName         = "mcp__plugin_spinclass_spinclass__session-health"
 	sessionJobsToolName           = "mcp__plugin_spinclass_spinclass__session-jobs"
 	restartHungChildToolName      = "mcp__plugin_spinclass_spinclass__restart-hung-child"
+	stopThisSessionToolName       = "mcp__plugin_spinclass_spinclass__stop-this-session"
+	stopChildSessionToolName      = "mcp__plugin_spinclass_spinclass__stop-child-session"
 )
 
 func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree, rewriteEnabled, denySweatfile, brokerDecides bool) error {
@@ -942,6 +944,12 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 		// gate and a prompt on top guards nothing. The forced form never reaches
 		// here: the always-ask floor above caught it.
 		return writeAllow(w, "restart is gated by the operator's trusted restart hand-off and the restart handle right")
+	case stopThisSessionToolName, stopChildSessionToolName:
+		// A stop at idle is gated like an unforced restart: the trusted restart
+		// hand-off, and for a child the stop handle right; it only QUEUES a stop
+		// the frontend performs after the turn. A stop now never reaches here:
+		// the always-ask floor above caught it.
+		return writeAllow(w, "an idle stop is gated by the operator's trusted restart hand-off and the stop handle right")
 	case restartHungChildToolName:
 		// The operator-ruled bounded forced restart (2026-10-26): the tool refuses
 		// unless the caller holds the restart right on the child, the child's

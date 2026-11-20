@@ -126,6 +126,8 @@ func operatorAlternative(tool string, child session.State) string {
 	switch tool {
 	case "restart-child-session", "cancel-restart", "restart-preflight --rearm":
 		return fmt.Sprintf("the operator can restart %s from a terminal outside the session", child.Key())
+	case "stop-child-session", "start-child-session":
+		return fmt.Sprintf("the operator can stop or start %s from a terminal outside the session", child.Key())
 	default:
 		return fmt.Sprintf("run `sc close %s`", child.Key())
 	}

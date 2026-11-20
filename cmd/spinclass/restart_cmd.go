@@ -409,6 +409,12 @@ func runRestartChild(p restartChildParams) (string, error) {
 // names the verb in the refusal. It is shared by restart-child-session and
 // cancel-restart with a child.
 func authorizeRestartChild(tool, target string) (child *session.State, callerPrincipal string, err error) {
+	return authorizeChildRight(tool, target, "restart")
+}
+
+// authorizeChildRight is authorizeRestartChild for any handle right: the
+// handle (accept-on-first-use) must carry right.
+func authorizeChildRight(tool, target, right string) (child *session.State, callerPrincipal string, err error) {
 	callerPrincipal = currentPrincipal()
 	callerKey := bestEffortSessionKey()
 
@@ -431,7 +437,7 @@ func authorizeRestartChild(tool, target string) (child *session.State, callerPri
 	if err := authorizeHandleUse(callerPrincipal, callerKey, *child); err != nil {
 		return nil, "", err
 	}
-	if err := requireHandleRight(tool, "restart", callerPrincipal, *child); err != nil {
+	if err := requireHandleRight(tool, right, callerPrincipal, *child); err != nil {
 		return nil, "", err
 	}
 	return child, callerPrincipal, nil
@@ -638,6 +644,12 @@ func runRestartPreflight(target string) (restartVerdict, error) {
 	if obstacle != "" {
 		return refuse(obstacle)
 	}
+	if req.Kind == session.RequestKindStop {
+		if !frontendCanStop() {
+			return refuse(stopUnsupported)
+		}
+		return approveStop(st, principal, req)
+	}
 	// A posture change is re-checked now (spinclass#342): the request lives in
 	// state the session can write, so a widening is honoured only when the key is
 	// still on, the target is not confined, and a holder other than the session
@@ -649,7 +661,7 @@ func runRestartPreflight(target string) (restartVerdict, error) {
 		if req.Requester == principal {
 			return refuse("a session may not widen its own permissions")
 		}
-		if err := rearmRequesterAllowed(st, req.Requester, principal); err != nil {
+		if err := rearmRequesterAllowed(st, req.Requester, principal, "restart"); err != nil {
 			return refuse(err.Error())
 		}
 	}
@@ -687,6 +699,7 @@ func runRestartPreflight(target string) (restartVerdict, error) {
 			cur.FrozenHook = frozen
 		}
 		cur.RestartingPosture = req.Posture
+		cur.RestartingKind = ""
 		restartingAt = time.Now().UTC()
 		cur.RestartRequest = nil
 		cur.RestartingAt = &restartingAt
@@ -756,7 +769,7 @@ var errRearmRaced = errors.New("the restart's state changed while it was being r
 // marker that only the TTY-gated `sc restart` records is accepted as is, by
 // exact match (operator ruling, spinclass#473); see
 // session.OperatorRestartRequester for how soft that is.
-func rearmRequesterAllowed(st *session.State, requester, own string) error {
+func rearmRequesterAllowed(st *session.State, requester, own, right string) error {
 	if requester == "" {
 		return errors.New("the consumed restart records no requester, so its right cannot be re-checked")
 	}
@@ -767,8 +780,36 @@ func rearmRequesterAllowed(st *session.State, requester, own string) error {
 	if err := authorizeHandleUse(requester, key, *st); err != nil {
 		return err
 	}
-	return requireHandleRight("restart-preflight --rearm", "restart", requester, *st)
+	return requireHandleRight("restart-preflight --rearm", right, requester, *st)
 }
+
+// rightForKind is the handle right a request of kind needs from a holder.
+func rightForKind(kind string) string {
+	if kind == session.RequestKindStop {
+		return "stop"
+	}
+	return "restart"
+}
+
+// frontendCanStop reports whether the frontend running this preflight named
+// the stop verdict among those it understands (CLOWN_RESTART_VERDICTS, comma
+// separated, exact tokens). An older frontend would fail to parse "stop" and
+// keep running while spinclass believed it had acted, so without the name a
+// stop is refused instead.
+func frontendCanStop() bool {
+	for _, v := range strings.Split(os.Getenv(restartVerdictsEnv), ",") {
+		if strings.TrimSpace(v) == verdictStop {
+			return true
+		}
+	}
+	return false
+}
+
+const (
+	restartVerdictsEnv = "CLOWN_RESTART_VERDICTS"
+	verdictStop        = "stop"
+	stopUnsupported    = "this frontend cannot stop on request (it does not name the stop verdict in " + restartVerdictsEnv + "); update it, or stop the session from a terminal"
+)
 
 // runRestartRearm is `restart-preflight --rearm`: the frontend dropped a restart
 // the preflight had already consumed (a turn started during its countdown, so it
@@ -827,8 +868,12 @@ func runRestartRearm(target string) (restartVerdict, error) {
 	if principalErr != nil {
 		return refuse(principalErr.Error())
 	}
-	if err := rearmRequesterAllowed(st, req.Requester, principal); err != nil {
+	if err := rearmRequesterAllowed(st, req.Requester, principal, rightForKind(st.RestartingKind)); err != nil {
 		return refuse(err.Error())
+	}
+	stopping := st.RestartingKind == session.RequestKindStop
+	if stopping && !frontendCanStop() {
+		return refuse(stopUnsupported)
 	}
 	_, obstacle, err := restartPlan(st, principal, false)
 	if err != nil {
@@ -876,6 +921,13 @@ func runRestartRearm(target string) (restartVerdict, error) {
 	}
 	if err != nil {
 		return restartVerdict{}, fmt.Errorf("re-arming the restart: %w", err)
+	}
+	if stopping {
+		return restartVerdict{
+			Verdict: verdictStop,
+			Reason:  fmt.Sprintf("stop of %s re-armed (requested by %s: %s)", st.Key(), req.Requester, req.Reason),
+			When:    restartWhenIdle,
+		}, nil
 	}
 	armRestartWatchdog(st, stamp)
 	return restartVerdict{

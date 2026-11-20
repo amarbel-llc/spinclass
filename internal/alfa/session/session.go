@@ -360,6 +360,17 @@ type State struct {
 	// re-arm of that restart (`restart-preflight --rearm`) is refused.
 	RestartCancelledAt *time.Time `json:"restart_cancelled_at,omitempty"`
 
+	// RestartingKind is the consumed request's Kind, so `restart-preflight
+	// --rearm` re-emits a stop as a stop.
+	RestartingKind string `json:"restarting_kind,omitempty"`
+
+	// StoppedAt, StoppedBy and StoppedReason mark a session whose agent the
+	// preflight approved stopping and leaving stopped: spinclass state, not the
+	// frontend's. A start clears them.
+	StoppedAt     *time.Time `json:"stopped_at,omitempty"`
+	StoppedBy     string     `json:"stopped_by,omitempty"`
+	StoppedReason string     `json:"stopped_reason,omitempty"`
+
 	// ForcedRestartAt is when restart-hung-child last force-restarted this session:
 	// the once-per-day bound on that tool (operator ruling, 2026-10-26).
 	ForcedRestartAt *time.Time `json:"forced_restart_at,omitempty"`
@@ -397,7 +408,13 @@ type RestartRequest struct {
 	// "unattended" (dontAsk), "attended" (a widening) or "" for no change. The
 	// preflight re-checks it and records it in the pinned entry.
 	Posture string `json:"posture,omitempty"`
+	// Kind is what the request asks for: "" is a restart (every request before
+	// stops existed), RequestKindStop a stop that leaves the session stopped.
+	Kind string `json:"kind,omitempty"`
 }
+
+// RequestKindStop is the RestartRequest.Kind of a stop.
+const RequestKindStop = "stop"
 
 // PreMergeAttestation records one nothing-but-the-truth call. It is claimed
 // by the merge or check attempt it admits, consumed only when that merge
@@ -1284,7 +1301,7 @@ const DefaultHandleRights = "observe,close"
 // in display order. merge and check match the per-session merge/check verbs;
 // restart (#419) gates restart-child-session. It is not in DefaultHandleRights,
 // so a default grant never confers it; the spawner holds every right.
-var HandleRightNames = []string{"observe", "close", "grant", "instruct", "cap", "merge", "check", "restart", "jobs"}
+var HandleRightNames = []string{"observe", "close", "grant", "instruct", "cap", "merge", "check", "restart", "jobs", "stop", "stop-now", "start", "park"}
 
 // AllHandleRights is every right, comma-joined: the spawner's full set, which
 // spawn records so a record never leaves it implicit.

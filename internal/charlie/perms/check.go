@@ -17,6 +17,8 @@ const (
 	listHandlesTool          = "mcp__plugin_spinclass_spinclass__list-handles"
 	restartThisSessionTool   = "mcp__plugin_spinclass_spinclass__restart-this-session"
 	restartChildSessionTool  = "mcp__plugin_spinclass_spinclass__restart-child-session"
+	stopThisSessionTool      = "mcp__plugin_spinclass_spinclass__stop-this-session"
+	stopChildSessionTool     = "mcp__plugin_spinclass_spinclass__stop-child-session"
 )
 
 // SpawnConfined reports whether a spawn-session invocation (its tool input and
@@ -174,6 +176,17 @@ func AlwaysAsk(toolName string, toolInput map[string]any, cwd string) (string, b
 		}
 		return "", false
 
+	case stopThisSessionTool, stopChildSessionTool:
+		// A stop at idle only queues a request, gated like an unforced restart.
+		// A stop now kills the current turn and any running merge/check job, so a
+		// human decides it (docs/plans/2026-11-20-stop-start-rights.md). The
+		// operator's [[permissions.stop-now-allow]] list is the one way past this
+		// floor; until it is read here, every stop now asks.
+		if stopNowRequested(toolInput) {
+			return "a stop now kills the session's current turn and any running merge/check job; confirm each invocation", true
+		}
+		return "", false
+
 	case grantSessionHandleTool:
 		// A grant confers authority on ANOTHER session — the FDR 0032 D12/D11
 		// contract is explicit that a handle pass is never silently approvable
@@ -218,6 +231,17 @@ func AlwaysAsk(toolName string, toolInput map[string]any, cwd string) (string, b
 // precisely the invocation this floor exists to catch. Since the whole reason
 // the rule is mirrored into RunCheck is to avoid trusting that another layer
 // got it right, it should not then trust the payload's shape either.
+// stopNowRequested reads a stop's `when`, failing closed like forceRequested:
+// only absent, null, "" and "idle" are a stop at idle.
+func stopNowRequested(toolInput map[string]any) bool {
+	v, present := toolInput["when"]
+	if !present || v == nil {
+		return false
+	}
+	s, ok := v.(string)
+	return !ok || (s != "" && s != "idle")
+}
+
 func forceRequested(toolInput map[string]any) bool {
 	v, present := toolInput["force"]
 	if !present || v == nil {

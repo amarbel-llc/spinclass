@@ -314,6 +314,40 @@ func registerMCPOnlyCommands(app *command.App) {
 	})
 
 	app.AddCommand(&command.Command{
+		Name:  "stop-this-session",
+		Title: "Stop This Session",
+		Description: command.Description{
+			Short: "Ask for THIS session's agent to be stopped by its harness frontend and LEFT stopped (no relaunch) once your current turn is over. A session may stop itself with no right. It stays stopped until a holder with the `start` right starts it. Refused like restart-this-session: no trusted `[session-entry].restart` hand-off (a stop pokes the frontend through it), a running merge/check job (unless when=now), an implicit session, and a frontend that cannot stop on request. `when=now` stops at once, killing the current turn and any running job, and asks the human. Withdraw a queued stop with cancel-restart. After it succeeds, end your turn.",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(false),
+			DestructiveHint: protocol.BoolPtr(false),
+			IdempotentHint:  protocol.BoolPtr(false),
+			OpenWorldHint:   protocol.BoolPtr(false),
+		},
+		Params: stopThisSessionParamList(),
+		Run:    wrapMCPHandler("stop-this-session", handleStopThisSession),
+		RunCLI: ungatedCLI(runStopThisSession),
+	})
+
+	app.AddCommand(&command.Command{
+		Name:  "stop-child-session",
+		Title: "Stop Child Session",
+		Description: command.Description{
+			Short: "Ask for a session you hold a handle on to have its agent stopped by its harness frontend and LEFT stopped (no relaunch). Needs the `stop` right on the child; `when=now` (kill its current turn and any running job) also needs the `stop-now` right, and asks the human unless an operator listed you in [[permissions.stop-now-allow]]. The default grant `observe,close` carries neither. Same refusals as restart-child-session, evaluated on the child. The child stays stopped until a holder with the `start` right starts it. Withdraw a queued stop with cancel-restart.",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(false),
+			DestructiveHint: protocol.BoolPtr(false),
+			IdempotentHint:  protocol.BoolPtr(false),
+			OpenWorldHint:   protocol.BoolPtr(false),
+		},
+		Params: stopChildSessionParamList(),
+		Run:    wrapMCPHandler("stop-child-session", handleStopChildSession),
+		RunCLI: ungatedCLI(runStopChild),
+	})
+
+	app.AddCommand(&command.Command{
 		Name:  "cancel-restart",
 		Title: "Cancel Queued Restart",
 		Description: command.Description{

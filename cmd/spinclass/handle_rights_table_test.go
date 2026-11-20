@@ -16,6 +16,8 @@ var handleRightTools = []struct{ tool, right, args string }{
 	{"close-child-session", "close", `{"child":"worker/kid"}`},
 	{"restart-child-session", "restart", `{"child":"worker/kid"}`},
 	{"cancel-restart", "restart", `{"child":"worker/kid"}`},
+	{"stop-child-session", "stop", `{"child":"worker/kid"}`},
+	{"stop-child-session", "stop-now", `{"child":"worker/kid","when":"now"}`},
 	{"grant-session-handle", "grant", `{"child":"worker/kid","to":"p9"}`},
 	{"session-jobs", "jobs", `{"child":"worker/kid"}`},
 }
@@ -23,7 +25,7 @@ var handleRightTools = []struct{ tool, right, args string }{
 // unenforcedHandleRights are rights in the vocabulary that no spinclass tool
 // requires yet: recorded on grants, checked by nothing. Enforcing one moves
 // it into handleRightTools.
-var unenforcedHandleRights = []string{"observe", "instruct", "cap", "merge", "check"}
+var unenforcedHandleRights = []string{"observe", "instruct", "cap", "merge", "check", "start", "park"}
 
 func callHandleTool(t *testing.T, tool, args string) (string, bool) {
 	t.Helper()
@@ -34,6 +36,8 @@ func callHandleTool(t *testing.T, tool, args string) (string, bool) {
 		return callRestartChild(t, args)
 	case "grant-session-handle":
 		return callGrant(t, args)
+	case "stop-child-session":
+		return callStopChild(t, args)
 	case "cancel-restart":
 		res, err := handleCancelRestart(context.Background(), json.RawMessage(args), nil)
 		if err != nil {

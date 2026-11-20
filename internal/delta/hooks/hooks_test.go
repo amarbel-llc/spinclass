@@ -1161,6 +1161,12 @@ func TestReadOnlyIntrospectionToolsAutoApproved(t *testing.T) {
 		{"restart-this-session", map[string]any{"force": "true"}, "ask"},
 		{"restart-child-session", map[string]any{"child": "r/b", "force": true}, "ask"},
 		{"restart-child-session", map[string]any{"child": "r/b", "force": "false"}, "ask"},
+		// An idle stop is gated like an unforced restart; a stop now kills the
+		// turn and any running job: always-ask.
+		{"stop-this-session", map[string]any{"reason": "x"}, "allow"},
+		{"stop-child-session", map[string]any{"child": "r/b", "when": "idle"}, "allow"},
+		{"stop-this-session", map[string]any{"when": "now"}, "ask"},
+		{"stop-child-session", map[string]any{"child": "r/b", "when": "now"}, "ask"},
 		// cancel-restart only removes a queued request.
 		{"session-health", map[string]any{}, "allow"},
 		{"session-health", map[string]any{"child": "r/b"}, "allow"},

@@ -53,6 +53,7 @@ func TestBashScVerbPolicy(t *testing.T) {
 		{"sudo env wrapper", "sudo -E env A=b spinclass merge", mcp + "merge-this-session"},
 		{"newline separated", "git log\nsc merge", mcp + "merge-this-session"},
 		{"or chain", "false || sc restart-this-session", mcp + "restart-this-session"},
+		{"stop verb", "sc stop-child-session r/b", mcp + "stop-child-session"},
 		{"perms edit", "sc perms edit", "operator"},
 		{"list-handles accepting", "sc list-handles --accept", "operator"},
 		{"unparseable but sc-looking", `sc merge "unterminated`, "operator"},
