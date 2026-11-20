@@ -804,6 +804,8 @@ func runRestartRearm(target string) (restartVerdict, error) {
 		return noRestart("no restart is in flight for " + st.Key()), nil
 	case st.RestartedAt != nil && !st.RestartedAt.Before(*st.RestartingAt):
 		return noRestart(st.Key() + " already came back from its restart"), nil
+	case restartCancelledInFlight(st):
+		return noRestart(fmt.Sprintf("the restart of %s was cancelled at %s, after it was approved", st.Key(), st.RestartCancelledAt.Format(time.RFC3339))), nil
 	case st.RestartRearms >= maxRestartRearms:
 		return noRestart(fmt.Sprintf("the restart of %s was already re-armed %d times, the limit", st.Key(), st.RestartRearms)), nil
 	}
@@ -853,7 +855,8 @@ func runRestartRearm(target string) (restartVerdict, error) {
 		case cur.ClosingAt != nil:
 			return errRestartLostToClose
 		case cur.RestartRequest != nil, cur.RestartingAt == nil, cur.RestartRearms >= maxRestartRearms,
-			cur.RestartedAt != nil && !cur.RestartedAt.Before(*cur.RestartingAt):
+			cur.RestartedAt != nil && !cur.RestartedAt.Before(*cur.RestartingAt),
+			restartCancelledInFlight(cur):
 			return errRearmRaced
 		}
 		stamp = time.Now().UTC()
@@ -1147,21 +1150,64 @@ func runCancelRestart(p cancelRestartParams) (string, error) {
 		// request, so a failure here just means it may be told.
 		sessionsOwnID, _ = ownerPrincipal(st, "", "restart", "")
 	}
-	if st.RestartRequest == nil {
-		return fmt.Sprintf("no restart is queued for %s, so there is nothing to cancel", st.Key()), nil
+	// The answer is decided inside the locked update, from the record as it is
+	// then (#497): a preflight that consumed the request after st was loaded
+	// leaves nothing to clear, and the restart it approved is in flight.
+	if cancelRestartBeforeUpdate != nil {
+		cancelRestartBeforeUpdate()
 	}
-	req := *st.RestartRequest
+	var cleared *session.RestartRequest
+	var approvedAt *time.Time
 	if err := updateLoadedSession(st, func(cur *session.State) bool {
-		cleared := cur.RestartRequest != nil
-		cur.RestartRequest = nil
-		return cleared
+		now := time.Now().UTC()
+		switch {
+		case cur.RestartRequest != nil:
+			req := *cur.RestartRequest
+			cleared = &req
+			cur.RestartRequest = nil
+			return true
+		case restartAwaitingReturn(cur, now):
+			at := *cur.RestartingAt
+			approvedAt = &at
+			cur.RestartCancelledAt = &now
+			return true
+		}
+		return false
 	}); err != nil {
 		return "", fmt.Errorf("clearing the restart request: %w", err)
 	}
-	notifyRestartCancelled(st, req, caller, sessionsOwnID)
-	return fmt.Sprintf(
-		"cancelled the queued restart of %s (%s). The frontend drops it when its next restart-preflight answers \"none\".",
-		st.Key(), req.Reason), nil
+	switch {
+	case cleared != nil:
+		notifyRestartCancelled(st, *cleared, caller, sessionsOwnID)
+		return fmt.Sprintf(
+			"cancelled the queued restart of %s (%s). The frontend drops it when its next restart-preflight answers \"none\".",
+			st.Key(), cleared.Reason), nil
+	case approvedAt != nil:
+		return "", fmt.Errorf(
+			"too late: the restart of %s was approved at %s and the frontend may already be stopping it, so it cannot be withdrawn; a retry of that restart is refused from now on",
+			st.Key(), approvedAt.Format(time.RFC3339))
+	}
+	return fmt.Sprintf("no restart is queued for %s, so there is nothing to cancel", st.Key()), nil
+}
+
+// cancelRestartBeforeUpdate, when set, runs between cancel-restart's
+// authorization and its locked update: a test seam for the race with the
+// preflight (#497).
+var cancelRestartBeforeUpdate func()
+
+// restartAwaitingReturn reports whether a restart the preflight approved is
+// still within its in-flight window and the session has not come back from it.
+func restartAwaitingReturn(st *session.State, now time.Time) bool {
+	if !st.RestartInFlight(now) {
+		return false
+	}
+	return st.RestartedAt == nil || st.RestartedAt.Before(*st.RestartingAt)
+}
+
+// restartCancelledInFlight reports whether a cancel arrived after the in-flight
+// restart was approved (#497), so a re-arm of it must not run.
+func restartCancelledInFlight(st *session.State) bool {
+	return st.RestartCancelledAt != nil && st.RestartingAt != nil && !st.RestartCancelledAt.Before(*st.RestartingAt)
 }
 
 // notifyRestartCancelled tells the original requester, when it is neither the

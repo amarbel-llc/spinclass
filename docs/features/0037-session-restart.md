@@ -104,7 +104,13 @@ who is allowed to ask.
   accept-on-first-use, the `restart` right). It clears `RestartRequest` and
   writes state; nothing queued is a success saying so (idempotent). It does not
   run the hand-off: the frontend drops its pending restart when
-  `restart-preflight` next returns `none`. The original requester, when it is
+  `restart-preflight` next returns `none`. The answer is decided under the
+  session lock from the record as it is then (#497): once the preflight has
+  approved the restart and the session has not come back within
+  `RestartInFlightWindow`, the frontend may already be stopping the agent, so
+  cancel answers an error ("too late: ... approved at ...") instead of "nothing
+  queued" or a success, and records `RestartCancelledAt`; `--rearm` then answers
+  `none` for that restart. The original requester, when it is
   neither the caller nor the session itself, is told, best effort. Auto-allowed
   by the hook: it only removes a queued request.
 - `restart-preflight [--target T]` (hidden, CLI only; target defaults to the

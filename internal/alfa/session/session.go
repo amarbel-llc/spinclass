@@ -355,6 +355,11 @@ type State struct {
 	// display copy), so the watchdog is not scheduled for a confined session.
 	RestartedAt *time.Time `json:"restarted_at,omitempty"`
 
+	// RestartCancelledAt is when cancel-restart arrived after the preflight had
+	// approved the in-flight restart (#497): too late to withdraw it, but a
+	// re-arm of that restart (`restart-preflight --rearm`) is refused.
+	RestartCancelledAt *time.Time `json:"restart_cancelled_at,omitempty"`
+
 	// ForcedRestartAt is when restart-hung-child last force-restarted this session:
 	// the once-per-day bound on that tool (operator ruling, 2026-10-26).
 	ForcedRestartAt *time.Time `json:"forced_restart_at,omitempty"`
