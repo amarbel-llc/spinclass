@@ -91,6 +91,11 @@ type Coordinates struct {
 	// not be read, so absent index sections are attributable to that failure
 	// rather than mistaken for an empty configuration. Empty on the happy path.
 	IndexWarning string
+	// Principles is the trusted principles-file's text, rendered first among
+	// the appended sections; PrinciplesWarning is the one-line notice when the
+	// file is set but unreadable.
+	Principles        string
+	PrinciplesWarning string
 	// CoActiveSessions is the pre-rendered one-line summary of the OTHER
 	// active sessions on the same repo ("2 other live sessions on <repo>: …",
 	// spinclass#238), or "" when there are none or the lookup failed. Resolved
@@ -160,6 +165,10 @@ type indexSections struct {
 	// read, so the resulting "no index sections" is attributable rather than
 	// looking like an empty configuration.
 	Warning string
+	// Principles is the text of the trusted [sysprompt] principles-file, and
+	// PrinciplesWarning the one-line notice when it is set but unreadable.
+	Principles        string
+	PrinciplesWarning string
 }
 
 // indexScanTimeout bounds the manpage and repository scans together. Both are
@@ -189,7 +198,7 @@ func loadIndexes(root string) indexSections {
 	limit := defaultIndexLimit
 	var (
 		manSources, repoSources []string
-		warning                 string
+		warning, principlesFile string
 	)
 	home, err := os.UserHomeDir()
 	switch {
@@ -210,6 +219,14 @@ func loadIndexes(root string) indexSections {
 			if configured, ok := h.Merged.SyspromptIndexLimit(); ok {
 				limit = configured
 			}
+			// Trust is judged against the main checkout, not root: a worktree
+			// sits under its repo, so the repo's own sweatfile would otherwise
+			// count as a layer above it.
+			repoRoot := root
+			if main, cerr := git.CommonDir(root); cerr == nil && main != "" {
+				repoRoot = main
+			}
+			principlesFile, _ = sweatfileio.TrustedPrinciplesFile(h, home, repoRoot)
 		}
 	}
 	deadline := time.Now().Add(indexScanTimeout)
@@ -218,11 +235,27 @@ func loadIndexes(root string) indexSections {
 		Manpages:      renderManIndex(manSources, limit, deadline),
 		Repositories:  renderRepoIndex(repoSources, limit, deadline),
 	}
+	sections.Principles, sections.PrinciplesWarning = renderPrinciples(principlesFile)
 	if warning != "" {
 		sections.Warning = "⚠ sweatfile-selected system-prompt indexes are unavailable: " + warning +
 			" — any [sysprompt].man-index / .repo-index selection was not applied."
 	}
 	return sections
+}
+
+// renderPrinciples reads the principles file (a leading ~ and $VAR expanded)
+// and returns its trimmed text, or, when it is set but cannot be read, no text
+// and one warning line: a missing file must never fail the prompt.
+func renderPrinciples(path string) (section, warning string) {
+	if path == "" {
+		return "", ""
+	}
+	expanded := expandPath(path)
+	data, err := os.ReadFile(expanded)
+	if err != nil {
+		return "", fmt.Sprintf("⚠ the principles file %s (from the trusted [sysprompt] principles-file) could not be read, so this prompt has no principles section: %v", expanded, err)
+	}
+	return strings.TrimSpace(string(data)), ""
 }
 
 // fetchRepoInfo is the production repo-enrichment fetcher: a bounded
@@ -313,6 +346,8 @@ func (c *Coordinates) applyIndexes(s indexSections) {
 	c.Manpages = s.Manpages
 	c.Repositories = s.Repositories
 	c.IndexWarning = s.Warning
+	c.Principles = s.Principles
+	c.PrinciplesWarning = s.PrinciplesWarning
 }
 
 // Render executes the embedded template for c.Mode and returns the fragment
@@ -334,15 +369,18 @@ func Render(c Coordinates) (string, error) {
 	// here keeps the templates free of the grouping/whitespace logic. Ordered
 	// most-specific-first — this repo's records, then the conventions its host
 	// documents, then the neighbouring repos.
-	for _, section := range []string{c.DesignRecords, c.Manpages, c.Repositories} {
+	// The principles (the trusted principles-file) come first.
+	for _, section := range []string{c.Principles, c.DesignRecords, c.Manpages, c.Repositories} {
 		if section != "" {
 			frag += "\n\n" + section
 		}
 	}
 	// Appended after the sections it explains: a reader seeing no index
 	// sections needs to know whether that is configuration or breakage.
-	if c.IndexWarning != "" {
-		frag += "\n\n" + c.IndexWarning
+	for _, w := range []string{c.IndexWarning, c.PrinciplesWarning} {
+		if w != "" {
+			frag += "\n\n" + w
+		}
 	}
 	// The ProtocolVersion warning (#26) is prepended so the degrade is the
 	// first thing the agent reads in the fragment, not buried after the

@@ -306,6 +306,12 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 			merged.Sysprompt.IndexLimit = other.Sysprompt.IndexLimit
 		}
 	}
+	// principles-file is never merged: see sweatfileio.TrustedPrinciplesFile.
+	if merged.Sysprompt != nil && merged.Sysprompt.PrinciplesFile != nil {
+		cp := *merged.Sysprompt
+		cp.PrinciplesFile = nil
+		merged.Sysprompt = &cp
+	}
 
 	// [session-entry]
 	// Copied, and each per-key map cloned before its writes (#351).

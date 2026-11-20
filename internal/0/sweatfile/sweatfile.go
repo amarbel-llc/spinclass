@@ -442,6 +442,14 @@ type Sysprompt struct {
 	// hold, in every session's system prompt. Scalar override: nil inherits,
 	// a set value replaces.
 	IndexLimit *int `toml:"index-limit"`
+	// PrinciplesFile names a file whose text is rendered verbatim, first among
+	// the appended sections, into every session's system prompt; a leading ~
+	// and $VAR are expanded, and a missing or unreadable file renders one
+	// warning line instead. Trusted only from layers above the repo (its text
+	// reaches every session), read ONLY through
+	// sweatfileio.TrustedPrinciplesFile; never merged. Scalar override: the
+	// last trusted layer wins, "" clears.
+	PrinciplesFile *string `toml:"principles-file"`
 }
 
 // MCPServerDef declares an MCP server to register and auto-approve

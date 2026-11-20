@@ -128,6 +128,10 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
   teardown is `close-self-run`, run from outside the unit.
 - **Restart** (#419, FDR 0037): spinclass authorizes/records, clown relaunches;
   the `[session-entry].restart` hand-off is trusted-layers-only, read live.
+  **Stop/start** (`docs/plans/2026-11-20-stop-start-rights.md`): a stop is a
+  restart request of kind stop (preflight verdict `stop`, rights `stop` /
+  `stop-now`, operator `[[permissions.stop-now-allow]]`); `start-child-session`
+  runs the trusted `start-handoff` (right `start`). Stopped is session state.
 - **Resurrect** (FDR 0027, #291): `close.RunResolved` records `DeletedSHA` in
   the tombstone; `sc resurrect` recreates the worktree from it.
 - **Exemption predicates** (FDR 0031, `merge/policy.go`) and **attestation
@@ -146,7 +150,8 @@ mutually exclusive in the MCP catalog, gated on `[hooks].disable-merge`;
   #187): `serve` answers `prompts/get`; the fetch is **deadline-capped**
   (`repoFetchTimeout` 2s) and must never block. Trailers: repository line
   (`internal/alfa/repoinfo`), forge workflow, co-active sessions (#238), design
-  records, optional manpage/repo indexes (`[sysprompt]`).
+  records, optional manpage/repo indexes (`[sysprompt]`); a trusted-only
+  `[sysprompt] principles-file` is rendered first, failing soft.
 - **Pre-merge build worktree** (FDR 0013) → **merge queue** (FDR 0022, #235) →
   **detached landing worktree / Alt B** (FDR 0029, #284) → **landing target**
   (#315/#295, `internal/alfa/landing`; merges read the remote tracking ref, never

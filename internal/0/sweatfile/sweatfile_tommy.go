@@ -1344,6 +1344,12 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 				_vSyspromptIndexLimit.MarkConsumed()
 			}
 		}
+		if _vSyspromptPrinciplesFile, _ok := _vSysprompt.Field("principles-file"); _ok && _vSyspromptPrinciplesFile.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vSyspromptPrinciplesFile.Leaf); _xok {
+				syspromptVal14.PrinciplesFile = &_x
+				_vSyspromptPrinciplesFile.MarkConsumedString()
+			}
+		}
 		d.data.Sysprompt = syspromptVal14
 	} else {
 		syspromptVal14 := &Sysprompt{}
@@ -1383,6 +1389,13 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractInt(_vIndexLimit.Leaf); _xok {
 				syspromptVal14.IndexLimit = &_x
 				_vIndexLimit.MarkConsumed()
+			}
+		}
+		if _vPrinciplesFile, _ok := model.Field("principles-file"); _ok && _vPrinciplesFile.Kind == cst.VLeaf {
+			_foundSysprompt = true
+			if _x, _xok := cst.ExtractString(_vPrinciplesFile.Leaf); _xok {
+				syspromptVal14.PrinciplesFile = &_x
+				_vPrinciplesFile.MarkConsumedString()
 			}
 		}
 		if _foundSysprompt {
@@ -2412,6 +2425,11 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 		}
 		if d.data.Sysprompt.IndexLimit != nil {
 			if err := cst.SetAny(tableNode, "index-limit", *d.data.Sysprompt.IndexLimit); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.Sysprompt.PrinciplesFile != nil {
+			if err := cst.SetAny(tableNode, "principles-file", *d.data.Sysprompt.PrinciplesFile); err != nil {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
@@ -3995,6 +4013,12 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vSyspromptIndexLimit.MarkConsumed()
 			}
 		}
+		if _vSyspromptPrinciplesFile, _ok := _vSysprompt.Field("principles-file"); _ok && _vSyspromptPrinciplesFile.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vSyspromptPrinciplesFile.Leaf); _xok {
+				syspromptVal14.PrinciplesFile = &_x
+				_vSyspromptPrinciplesFile.MarkConsumedString()
+			}
+		}
 		data.Sysprompt = syspromptVal14
 	} else {
 		syspromptVal14 := &Sysprompt{}
@@ -4034,6 +4058,13 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractInt(_vIndexLimit.Leaf); _xok {
 				syspromptVal14.IndexLimit = &_x
 				_vIndexLimit.MarkConsumed()
+			}
+		}
+		if _vPrinciplesFile, _ok := sub.Field("principles-file"); _ok && _vPrinciplesFile.Kind == cst.VLeaf {
+			_foundSysprompt = true
+			if _x, _xok := cst.ExtractString(_vPrinciplesFile.Leaf); _xok {
+				syspromptVal14.PrinciplesFile = &_x
+				_vPrinciplesFile.MarkConsumedString()
 			}
 		}
 		if _foundSysprompt {
@@ -5049,6 +5080,11 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		}
 		if data.Sysprompt.IndexLimit != nil {
 			if err := cst.SetAny(tableNode, "index-limit", *data.Sysprompt.IndexLimit); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.Sysprompt.PrinciplesFile != nil {
+			if err := cst.SetAny(tableNode, "principles-file", *data.Sysprompt.PrinciplesFile); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}

@@ -845,6 +845,17 @@ func TestCheckPermissionsWarnsInRepoLayer(t *testing.T) {
 	}
 }
 
+func TestCheckPrinciplesFileWarnsRepoLayer(t *testing.T) {
+	p := "/x.md"
+	sf := sweatfile.Sweatfile{Sysprompt: &sweatfile.Sysprompt{PrinciplesFile: &p}}
+	if got := CheckPrinciplesFile(sf, false); len(got) != 1 || got[0].Field != "sysprompt.principles-file" {
+		t.Errorf("a repo-level principles-file should warn once, got %+v", got)
+	}
+	if got := CheckPrinciplesFile(sf, true); len(got) != 0 {
+		t.Errorf("a trusted principles-file should not warn, got %+v", got)
+	}
+}
+
 func TestCheckPermissionsStopNowAllow(t *testing.T) {
 	listed := sweatfile.Sweatfile{Permissions: &sweatfile.Permissions{StopNowAllow: []sweatfile.StopNowAllow{{Principal: "p1"}}}}
 	if got := CheckPermissions(listed, false); len(got) != 1 || got[0].Field != "permissions.stop-now-allow" {

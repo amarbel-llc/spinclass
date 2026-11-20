@@ -518,6 +518,28 @@ func TrustedStartHandoff(h sweatfile.Hierarchy, home, repoRoot string) (argv []s
 	return argv, untrusted
 }
 
+// TrustedPrinciplesFile returns the [sysprompt].principles-file honoured for
+// the repo: scalar override across layers above the repo, last one wins, an
+// explicit "" clearing it; untrusted layers that set it are returned so callers
+// can surface them. Its text reaches every session's system prompt, so a value
+// an agent can write into its repo's sweatfile must not choose it.
+func TrustedPrinciplesFile(h sweatfile.Hierarchy, home, repoRoot string) (path string, untrusted []string) {
+	for _, src := range h.Sources {
+		if src.SkipReason != "" || !src.Found {
+			continue
+		}
+		if src.File.Sysprompt == nil || src.File.Sysprompt.PrinciplesFile == nil {
+			continue
+		}
+		if LayerAboveRepo(src.Path, home, repoRoot) {
+			path = strings.TrimSpace(*src.File.Sysprompt.PrinciplesFile)
+		} else {
+			untrusted = append(untrusted, src.Path)
+		}
+	}
+	return path, untrusted
+}
+
 // TrustedURLResolver returns the [auth].url-resolver command honoured for the
 // repo: scalar override across layers above the repo, last one wins, an
 // explicit "" clearing it. The value is TrimSpaced, so whitespace-only also

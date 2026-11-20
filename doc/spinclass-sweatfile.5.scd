@@ -204,6 +204,19 @@ manpage sections.
 	its sources hold, in every session's system prompt. *Merge:* scalar
 	override — nil inherits, a set value replaces.
 
+*principles-file*
+	String: a file whose text is rendered verbatim, trimmed, as the FIRST
+	section appended to every session's system prompt (before the design
+	records and the indexes). A leading *~* and *$VAR* references are
+	expanded. A file that is set but missing or unreadable renders no
+	section and one warning line naming the path; it never fails the prompt.
+	The file is read at each prompt request, so a changed file reaches the
+	next launched session with no deploy. Its text reaches every session, so
+	it is read only from the global sweatfile and layers above the repo (the
+	repo's own sweatfile is not above its worktrees); a repo or worktree value
+	is ignored and *sc validate* warns. *Merge:* never merged; the last
+	trusted layer that sets it wins, and an explicit *""* clears it.
+
 *man-index*
 	Array of source specs selecting the manpages listed in the *Manpage
 	index* section. A spec naming a directory is treated as a _manpath
@@ -1898,7 +1911,9 @@ owns the title end to end.
 	"CLOWN_SESSION_ID={principal}", "clown", "--clown-attach=spawn",
 	"--provider", "claude", "--", "--resume", "{principal}", "{message}"]*. The
 	command runs in the session's worktree; a failure leaves the session
-	stopped and is returned to the caller. Unset, *start-child-session*
+	stopped and is returned to the caller. A session launched with a clown
+	profile pin needs a matching *--profile* before *"--"* (or
+	*CLOWN_PROFILE_DIGEST*), or clown's profile gate refuses the relaunch. Unset, *start-child-session*
 	refuses and names this key. Read live and only from the global sweatfile
 	and layers above the repo, exactly as *restart* is; a repo or worktree
 	value is ignored (*sc validate* warns). *Merge:* never merged.

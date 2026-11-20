@@ -673,6 +673,20 @@ func CheckRestartHandoff(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 	return issues
 }
 
+// CheckPrinciplesFile warns about a [sysprompt].principles-file set in a layer
+// that may not set it: its text reaches every session's system prompt, so
+// sweatfileio.TrustedPrinciplesFile ignores it outside layers above the repo.
+func CheckPrinciplesFile(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
+	if sf.Sysprompt == nil || sf.Sysprompt.PrinciplesFile == nil || layerAboveRepo {
+		return nil
+	}
+	return []Issue{{
+		Message:  "[sysprompt] sets `principles-file` in a repo-level sweatfile: it is ignored — its text reaches every session's system prompt, so only the global sweatfile or one above the repo may set it; move it up",
+		Severity: SeverityWarning,
+		Field:    "sysprompt.principles-file",
+	}}
+}
+
 // CheckUnattendedPermissionMode validates [session-entry]
 // unattended-permission-mode: only "dontAsk" and "auto" are accepted (a spawn
 // refuses any other value), and a repo-level value is ignored because
@@ -1442,6 +1456,10 @@ func Run(w io.Writer, home, repoDir string) int {
 		}
 		for _, iss := range CheckHostQueueValues(src.File) {
 			sub.NotOk("host-queue valid", map[string]string{"severity": iss.Severity, "message": iss.Message})
+		}
+
+		for _, iss := range CheckPrinciplesFile(src.File, sweatfileio.LayerAboveRepo(src.Path, home, mainRoot)) {
+			sub.Ok(fmt.Sprintf("sysprompt valid # warning: %s", iss.Message))
 		}
 
 		if src.File.Permissions != nil {
