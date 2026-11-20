@@ -1,6 +1,7 @@
 # Stop and start a session's agent as passable rights
 
-Status: design, not built. Builds on FDR 0037 (session restart) and FDR 0032
+Status: built (stop, start, the stop-now allow-list); parking not built.
+Builds on FDR 0037 (session restart) and FDR 0032
 (principals and handles). A later piece, parking an idle agent while its merge
 waits, needs the `park` right named here and is not designed here.
 
@@ -46,9 +47,10 @@ the default when absent, or `stop`), so one request is queued at a time and
 cancel, the refusals and the in-flight window apply to both unchanged. The
 preflight that consumes a stop writes the in-flight stamp as for a restart
 plus `StoppingKind = stop`; the stopped mark is `StoppedAt` (with
-`StoppedBy`, `StoppedReason`). `sc list` shows `stopped`. A start clears
-`StoppedAt` once the relaunched session's SessionStart reports back
-(`StartedAt` after `StoppedAt`).
+`StoppedBy`, `StoppedReason`). A start clears the stopped mark once its
+hand-off has succeeded; the relaunched session's SessionStart then stamps the
+existing return mark (`RestartedAt`), which tells the holders it is back. Not
+built: an `sc list` column showing stopped.
 
 ### The preflight verdict (the contract with clown)
 
@@ -71,9 +73,10 @@ refuses an idle stop; an implicit session, a closed or closing one is `none`.
 
 ### Start
 
-`start-child-session` runs the trusted `[session-entry].start` hand-off
-(operator layers only, read live, like `[session-entry].restart`), with the
-session's key, worktree and principal expanded. It must relaunch the same
+`start-child-session` runs the trusted `[session-entry].start-handoff`
+(operator layers only, read live, like `[session-entry].restart`; the name
+`start` is taken by the session's own start entrypoint) in the session's
+worktree, with `{principal}`, `{session-key}` and `{message}` expanded. It must relaunch the same
 principal (the same clown session id) detached, with the conversation resumed:
 handles, buffered attestations and the job journal are keyed by the
 principal, and a new one would orphan the session's holders. Starting a

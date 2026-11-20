@@ -948,8 +948,16 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 	case stopThisSessionToolName, stopChildSessionToolName:
 		// A stop at idle is gated like an unforced restart: the trusted restart
 		// hand-off, and for a child the stop handle right; it only QUEUES a stop
-		// the frontend performs after the turn. A stop now never reaches here:
-		// the always-ask floor above caught it.
+		// the frontend performs after the turn. A stop now reaches here only when
+		// the operator's [[permissions.stop-now-allow]] lists the caller (the
+		// floor above passed it); that use is journalled first, and a journal that
+		// cannot be written, or a list that no longer admits it, asks instead.
+		if perms.StopNowRequested(input.ToolInput) {
+			if err := perms.JournalStopNow(input.ToolInput, input.CWD); err != nil {
+				return writeAsk(w, "a stop now kills the session's current turn and any running merge/check job; confirm each invocation (the stop-now allow-list could not be recorded: "+err.Error()+")")
+			}
+			return writeAllow(w, "a stop now by a session the operator listed in [[permissions.stop-now-allow]]")
+		}
 		return writeAllow(w, "an idle stop is gated by the operator's trusted restart hand-off and the stop handle right")
 	case startChildSessionToolName:
 		// Relaunches a session that was already running before its stop, under

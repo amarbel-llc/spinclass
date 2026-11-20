@@ -1252,6 +1252,23 @@ with *include* are not known to the hook.
 	mapping, the worker would not start in dontAsk, or the session is attended
 	(the list applies to unattended sessions only).
 
+*[[permissions.stop-now-allow]]*
+	An array of tables naming sessions whose stop NOW (*stop-this-session* or
+	*stop-child-session* with *when=now*, which kills the current turn and any
+	running merge or check job) needs no permission prompt
+	(docs/plans/2026-11-20-stop-start-rights.md). Without an entry every stop
+	now asks. It is the operator's blessing only: *stop-child-session* with
+	*when=now* still needs the *stop-now* handle right on the child. Each entry
+	has exactly one of *principal* and *session*, as for *spawn-allow*, and
+	optionally *expires* (an RFC 3339 instant) and *note*. Read only from
+	sweatfiles above the repo and appended across them; a repo or worktree
+	entry is ignored and *sc validate* warns, and an invalid entry is ignored.
+	The caller must resolve to a session through the frontend principal
+	mapping. Every use is appended as one JSON line to
+	*$XDG_STATE_HOME/spinclass/stop-now-allowlist.log* (time, outcome allowed,
+	principal, session, target child, entry, note); if the list no longer
+	admits the call or the line cannot be written, the stop asks instead.
+
 Agent surface (#422): the session verbs (merge, close, spawn, restart, grant and
 the rest) are MCP tools for an agent; the *sc* / *spinclass* CLI is for explicit
 operator execution. The PreToolUse hook denies an agent's Bash use of any
@@ -1863,6 +1880,28 @@ owns the title end to end.
 	The last layer above the repo that sets it wins, and an explicit *[]*
 	clears an inherited value. *Merge:* never merged; read through the trusted
 	layers only.
+
+	The same hand-off queues a stop (*stop-this-session*,
+	*stop-child-session*): only the *restart-preflight* verdict differs. A
+	stop is answered *stop* only to a frontend that names that verdict in
+	*CLOWN_RESTART_VERDICTS*, and is refused otherwise
+	(docs/plans/2026-11-20-stop-start-rights.md).
+
+*start-handoff*
+	Array of strings: the argv *start-child-session* execs to relaunch a
+	stopped session's agent detached, resuming the same principal and
+	conversation (docs/plans/2026-11-20-stop-start-rights.md). Each element has
+	*{principal}* (the session's own principal), *{session-key}* and
+	*{message}* replaced in one pass. *{message}* is the session's required
+	first message: a notice of who stopped it, when and why, and who started
+	it, then the caller's message. For clown the template is *["env",
+	"CLOWN_SESSION_ID={principal}", "clown", "--clown-attach=spawn",
+	"--provider", "claude", "--", "--resume", "{principal}", "{message}"]*. The
+	command runs in the session's worktree; a failure leaves the session
+	stopped and is returned to the caller. Unset, *start-child-session*
+	refuses and names this key. Read live and only from the global sweatfile
+	and layers above the repo, exactly as *restart* is; a repo or worktree
+	value is ignored (*sc validate* warns). *Merge:* never merged.
 
 *disable-auto-mode*
 	Boolean. By default a spawned worker whose provider is claude starts in

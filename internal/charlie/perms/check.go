@@ -51,6 +51,28 @@ func JournalSpawnAllow(toolInput map[string]any, cwd string) error {
 	return SpawnAllowJournal(toolInput, cwd)
 }
 
+// StopNowAllowed reports whether the operator's [[permissions.stop-now-allow]]
+// lists the calling session, so its stop now needs no prompt. Installed by the
+// CLI layer (the answer needs sweatfile and principal reads); nil means never.
+var StopNowAllowed func(toolInput map[string]any, cwd string) bool
+
+// StopNowJournal records a stop now the list admitted, at the hook's allow
+// point; an error (the list no longer admits it, or the journal cannot be
+// written) turns the allow into an ask. Nil means nothing to record.
+var StopNowJournal func(toolInput map[string]any, cwd string) error
+
+// JournalStopNow runs StopNowJournal; nil when no seam is installed.
+func JournalStopNow(toolInput map[string]any, cwd string) error {
+	if StopNowJournal == nil {
+		return nil
+	}
+	return StopNowJournal(toolInput, cwd)
+}
+
+// StopNowRequested reports whether a stop tool's input asks for a stop now,
+// failing closed like the always-ask floor does.
+func StopNowRequested(toolInput map[string]any) bool { return stopNowRequested(toolInput) }
+
 // SpawnAllowRefusal explains why the TEMPORARY spawn allow-list did not pass a
 // spawn-session call, when the caller is listed in it (or could not be
 // identified for it): "" otherwise. AlwaysAsk appends the text to the generic
@@ -181,9 +203,13 @@ func AlwaysAsk(toolName string, toolInput map[string]any, cwd string) (string, b
 		// A stop now kills the current turn and any running merge/check job, so a
 		// human decides it (docs/plans/2026-11-20-stop-start-rights.md). The
 		// operator's [[permissions.stop-now-allow]] list is the one way past this
-		// floor; until it is read here, every stop now asks.
+		// floor: a listed caller asking exactly when=now (the hook then journals
+		// the use, or asks if it cannot).
 		if stopNowRequested(toolInput) {
-			return "a stop now kills the session's current turn and any running merge/check job; confirm each invocation", true
+			if when, _ := toolInput["when"].(string); when == "now" && StopNowAllowed != nil && StopNowAllowed(toolInput, cwd) {
+				return "", false
+			}
+			return "a stop now kills the session's current turn and any running merge/check job; confirm each invocation (an operator can list a session in [[permissions.stop-now-allow]] to skip this)", true
 		}
 		return "", false
 

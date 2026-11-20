@@ -794,6 +794,15 @@ func CheckPermissions(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 	}
 	issues := checkSpawnAllow(sf.Permissions.SpawnAllow, layerAboveRepo, time.Now().UTC())
 	if layerAboveRepo {
+		for i, raw := range sf.Permissions.StopNowAllow {
+			if e := sweatfile.ParseStopNowAllow(raw); e.Problem != "" {
+				issues = append(issues, Issue{
+					Message:  fmt.Sprintf("[[permissions.stop-now-allow]] entry %d is ignored: %s", i, e.Problem),
+					Severity: SeverityWarning,
+					Field:    fmt.Sprintf("permissions.stop-now-allow[%d]", i),
+				})
+			}
+		}
 		return issues
 	}
 	for _, key := range []struct {
@@ -802,6 +811,7 @@ func CheckPermissions(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
 	}{
 		{"deny-sweatfile-edits", sf.Permissions.DenySweatfileEdits != nil},
 		{"allow-self-close", sf.Permissions.AllowSelfClose != nil},
+		{"stop-now-allow", len(sf.Permissions.StopNowAllow) > 0},
 	} {
 		if key.set {
 			issues = append(issues, Issue{

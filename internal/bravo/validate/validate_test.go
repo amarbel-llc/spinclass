@@ -845,6 +845,20 @@ func TestCheckPermissionsWarnsInRepoLayer(t *testing.T) {
 	}
 }
 
+func TestCheckPermissionsStopNowAllow(t *testing.T) {
+	listed := sweatfile.Sweatfile{Permissions: &sweatfile.Permissions{StopNowAllow: []sweatfile.StopNowAllow{{Principal: "p1"}}}}
+	if got := CheckPermissions(listed, false); len(got) != 1 || got[0].Field != "permissions.stop-now-allow" {
+		t.Errorf("a repo-layer stop-now-allow should warn once, got %+v", got)
+	}
+	if got := CheckPermissions(listed, true); len(got) != 0 {
+		t.Errorf("a valid trusted entry should not warn, got %+v", got)
+	}
+	both := sweatfile.Sweatfile{Permissions: &sweatfile.Permissions{StopNowAllow: []sweatfile.StopNowAllow{{Principal: "p1", Session: "r/b"}}}}
+	if got := CheckPermissions(both, true); len(got) != 1 || got[0].Field != "permissions.stop-now-allow[0]" {
+		t.Errorf("an invalid trusted entry should warn that it is ignored, got %+v", got)
+	}
+}
+
 // TEMPORARY (spinclass#384 stopgap): [[permissions.spawn-allow]] is ignored in
 // a repo-level layer (one warning), and checked entry by entry above the repo:
 // an invalid or expired entry and a duplicate each warn, a good one does not.
