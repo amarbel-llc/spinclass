@@ -2436,6 +2436,36 @@ debug-pilot-env-teardown:
       echo "no sc-pilot-env session listed"
     fi
 
+# [debug] Render the dynamic system-prompt fragment exactly as a session's own
+# serve would: the INSTALLED sc's `serve`, cwd set to the session's worktree,
+# with SPINCLASS_WORKTREE / SPINCLASS_SESSION_ID / SPINCLASS_REPO /
+# SPINCLASS_BRANCH set for that worktree (the worktree variant), and this
+# caller's own SPINCLASS_* / CLOWN_* identity cleared. Read-only. Prints the
+# fragment, then the principles lines found, to answer "does this session's
+# serve render the principles" without touching the session.
+#
+# render the prompt fragment as the session in worktree would
+[group("debug")]
+debug-prompt-fragment-as worktree:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    bin=$(command -v sc)
+    wt={{ quote(worktree) }}
+    repo=$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir | xargs dirname)
+    branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD)
+    key="$(basename "$repo")/$branch"
+    echo "sc: $bin; worktree: $wt; session key: $key; HOME: $HOME" >&2
+    req='{"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":"system-prompt-append"}}'
+    frag=$(cd "$wt" && printf '%s\n' "$req" |
+      env -u CLOWN_SESSION_ID -u CLOWN_GROUP_ID -u SPINCLASS_DESCRIPTION \
+        SPINCLASS_WORKTREE="$wt" SPINCLASS_SESSION_ID="$key" \
+        SPINCLASS_REPO="$(basename "$repo")" SPINCLASS_BRANCH="$branch" \
+        "$bin" serve 2>/dev/null |
+      jq -r 'select(.id == 1) | .result.messages[0].content.text')
+    printf '%s\n' "$frag"
+    echo "=== principles lines:" >&2
+    printf '%s\n' "$frag" | grep -nE '^principles |circus-principles|principles file' >&2 || echo "(none)" >&2
+
 # [debug] Pipe a cold `prompts/get` (no `initialize`) into `spinclass serve` and
 # print the dynamic system-prompt fragment it returns, extracted from the
 # JSON-RPC result. Serves the internal/bravo/sysprompt dev-loop (spinclass#187): edit a

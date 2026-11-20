@@ -98,7 +98,8 @@ re-run that suite right before merging.
 hidden `restart-preflight`), `restart SESSION... --posture P` (operator-only,
 TTY-required, #473), `grant-session-handle` /
 `release-session-handle` / `list-handles` / `whoami` (FDR 0032), `handle-grant` /
-`handle-move` (CLI-only, TTY-required operator edit of any live session's
+`handle-move` / `handle-rights` (the last adds rights to an existing holder;
+every new right needs it) (CLI-only, TTY-required operator edit of any live session's
 handles, #478), `host-load`
 (#388, read-only CPU load + busiest processes by session), `queue-status`
 (read-only) / `queue-hold` / `queue-release` / `queue-priority` /

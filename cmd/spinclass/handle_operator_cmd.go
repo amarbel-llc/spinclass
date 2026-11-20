@@ -71,6 +71,10 @@ var dangerousHandleRights = map[string]string{
 	"instruct": "give the session orders within its brief",
 	"cap":      "cap the session",
 	"jobs":     "read the session's merge/check job status and log (spinclass#481)",
+	"stop":     "have the session's agent stopped and left stopped",
+	"stop-now": "have the session's agent stopped now, killing its current turn",
+	"start":    "start a stopped session's agent again, with a first message",
+	"park":     "park the session (reserved; checked by nothing yet)",
 }
 
 type operatorHandleParams struct {
@@ -438,7 +442,7 @@ func registerOperatorHandleCommands(app *command.App) {
 			Params: []command.Param{
 				{Name: "target", Type: command.String, Variadic: true, Description: "Sessions to change: <repo>/<branch> session keys or worktree directory names, exactly as `sc list` prints them (or use --all-on-host)", Completer: completeWorktreeTargets},
 				{Name: "to", Type: command.String, Required: true, Description: "The recipient principal key (a chat JID localpart, as whoami shows it)"},
-				{Name: "rights", Type: command.String, Description: "Comma-separated rights (observe, close, grant, instruct, cap, merge, check, restart, jobs). Defaults to observe,close"},
+				{Name: "rights", Type: command.String, Description: "Comma-separated rights (" + session.AllHandleRights + "). Defaults to observe,close"},
 				{Name: "all-on-host", Type: command.Bool, Description: "Every live worktree session on this host instead of named sessions; the recipient's own session is skipped"},
 				{Name: "dry-run", Type: command.Bool, Description: "Print exactly what would change and exit without writing"},
 				{Name: "force-unknown", Type: command.Bool, Description: "Record the handle even when --to resolves to no live session on this host, or names another host"},

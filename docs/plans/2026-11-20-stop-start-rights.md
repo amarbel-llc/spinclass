@@ -28,6 +28,23 @@ The spawner holds them, as it holds `restart`. They are granted, narrowed and
 released through the existing handle tools; the default grant
 (`observe,close`) does not include them.
 
+**Every new right needs the re-stamp (ruled).** A spawn records its
+spawner's rights as an explicit set, the vocabulary as it stood that day, and
+explicit sets stay: a record never widens on its own. So a right added to
+`session.HandleRightNames` reaches only handles minted afterwards, and every
+existing handle gains it only when the operator runs `sc handle-rights`
+(TTY-only, journalled, adds only). The change that adds a right therefore
+also tells the operator to re-stamp. For the stop and start rights, plus
+`jobs`, which older spawner records also lack:
+
+    sc handle-rights --all-on-host --spawners --add jobs,stop,stop-now,start,park --dry-run
+    sc handle-rights --all-on-host --spawners --add jobs,stop,stop-now,start,park
+
+`--spawners` touches only each session's recorded spawner, still a holder and
+not released, and skips a spawner with no explicit entry (the implicit rule
+already gives it every current right). Other holders are re-stamped one at a
+time with `--holder`.
+
 ### Tools
 
 | Tool | Needs | Effect |
