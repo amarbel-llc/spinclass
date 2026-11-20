@@ -96,7 +96,9 @@ re-run that suite right before merging.
 (FDR 0006), `close-child-session`, `restart-this-session` /
 `restart-child-session` (`--force` is always-ask) / `cancel-restart` (FDR 0037;
 hidden `restart-preflight`), `restart SESSION... --posture P` (operator-only,
-TTY-required, #473), `grant-session-handle` /
+TTY-required, #473), `stop SESSION...|--all-on-host [--except] [--now]` /
+`start-stopped SESSION... --message M` (operator-only, TTY-required, no handle;
+`SESSION@principal` is reserved), `grant-session-handle` /
 `release-session-handle` / `list-handles` / `whoami` (FDR 0032), `handle-grant` /
 `handle-move` / `handle-rights` (the last adds rights to an existing holder;
 every new right needs it) (CLI-only, TTY-required operator edit of any live session's

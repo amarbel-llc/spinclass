@@ -73,6 +73,7 @@ func buildApp() *command.App {
 	registerOperatorRestartCommand(app)
 	registerOperatorHandleCommands(app)
 	registerOperatorHandleRightsCommand(app)
+	registerOperatorStopCommands(app)
 	registerSessionJobsCommand(app)
 	registerConfinementCheckCommand(app)
 	registerConfinementBindCommand(app)

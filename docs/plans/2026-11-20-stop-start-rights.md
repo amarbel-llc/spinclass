@@ -53,6 +53,15 @@ time with `--holder`.
 | `stop-this-session [when] [reason]` | none (one's own session) | records a stop request |
 | `start-child-session child [reason]` | `start` on the child | runs the start hand-off |
 | `cancel-restart` | as today | also withdraws a queued stop |
+| `sc stop SESSION...\|--all-on-host [--except S...] [--now] [--reason R]` | the operator at a terminal, no handle | records a stop request per session, after one prompt |
+| `sc start-stopped SESSION... --message M` | the operator at a terminal, no handle | runs the start hand-off per session, after one prompt |
+
+The two operator verbs (ruled: the most privileged access is by CLI first)
+share the request path of the tools above. `sc start` is taken (it creates a
+session), hence `start-stopped`. A target is a session; the form
+`SESSION@<principal>`, one clown of a session that runs more than one, is
+reserved and refused today, so per-clown addressing can be added without
+changing what a session target means.
 
 `when` is `idle` (default) or `now`; see Decided, item 3, for who may stop
 `now` and when a human is asked.

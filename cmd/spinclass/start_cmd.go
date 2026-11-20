@@ -67,27 +67,42 @@ func runStartChild(p startChildParams) (string, error) {
 		return "", fmt.Errorf("%s is not stopped, so there is nothing to start (stop it first, or restart it with restart-child-session)", child.Key())
 	}
 	childPrincipal, err := ownerPrincipal(child, "", "start",
-		"The operator can start it from a terminal outside the session.")
+		"The operator can start it from a terminal outside the session (sc start-stopped).")
 	if err != nil {
 		return "", err
 	}
+	argv, err := startHandoffFor(child)
+	if err != nil {
+		return "", err
+	}
+	return startStoppedSession(child, callerPrincipal, childPrincipal, argv, p.Message)
+}
+
+// startHandoffFor reads the trusted [session-entry].start-handoff for child.
+func startHandoffFor(child *session.State) ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("resolving the home directory to read sweatfiles: %w", err)
+		return nil, fmt.Errorf("resolving the home directory to read sweatfiles: %w", err)
 	}
 	h, err := sweatfileio.LoadHierarchy(home, child.RepoPath)
 	if err != nil {
-		return "", fmt.Errorf("reading the sweatfile hierarchy: %w", err)
+		return nil, fmt.Errorf("reading the sweatfile hierarchy: %w", err)
 	}
 	argv, _ := sweatfileio.TrustedStartHandoff(h, home, child.RepoPath)
 	if len(argv) == 0 {
-		return "", fmt.Errorf(
+		return nil, fmt.Errorf(
 			"%s cannot be started: no start hand-off is configured; an operator must set `start-handoff` under [session-entry] in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored)",
 			child.Key())
 	}
+	return argv, nil
+}
 
+// startStoppedSession runs the start hand-off for a stopped child, starter
+// named in its notice, then clears the stopped mark. It is the one start, for
+// start-child-session and the operator's sc start-stopped.
+func startStoppedSession(child *session.State, starter, childPrincipal string, argv []string, message string) (string, error) {
 	now := time.Now().UTC()
-	expanded := expandStartHandoff(argv, childPrincipal, child.Key(), startNotice(child, callerPrincipal, now, p.Message))
+	expanded := expandStartHandoff(argv, childPrincipal, child.Key(), startNotice(child, starter, now, message))
 	if out, herr := restartHandoffFn(child.WorktreePath, expanded); herr != nil {
 		return "", fmt.Errorf("the start hand-off %q failed (%v), so %s is still stopped: %s", expanded[0], herr, child.Key(), out)
 	}
