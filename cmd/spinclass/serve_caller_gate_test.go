@@ -106,6 +106,11 @@ var gatedServeHandlers = []gatedServeHandler{
 		args: `{"child":"worker/kid"}`, harmlessArgs: `{}`, harmlessRefusal: "child is required",
 		cliArgs: []string{"stop-child-session", "--child", "nope/none"}, cliRefusal: "no spinclass session for child",
 	},
+	{
+		tool: "start-child-session", operatorCommand: "sc start-child-session", handle: handleStartChildSession,
+		args: `{"child":"worker/kid","message":"m"}`, harmlessArgs: `{}`, harmlessRefusal: "child is required",
+		cliArgs: []string{"start-child-session", "--child", "nope/none", "--message", "m"}, cliRefusal: "no spinclass session for child",
+	},
 	// cancel-restart is mixed like list-handles: cancelling the caller's own
 	// request (no child) is open, since it only removes a request the caller
 	// could make; naming a child rests on a handle read from agent-writable state,

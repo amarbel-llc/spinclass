@@ -965,6 +965,42 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 			_eaSpawnAllow.MarkConsumed()
 			permissionsVal10.SpawnAllow = []SpawnAllow{}
 		}
+		if _vStopNowAllow, _ok := _vPermissions.Field("stop-now-allow"); _ok && _vStopNowAllow.Kind == cst.VArray {
+			_vStopNowAllow.MarkSeen()
+			permissionsVal10.StopNowAllow = make([]StopNowAllow, len(_vStopNowAllow.Items))
+			for i := range _vStopNowAllow.Items {
+				_ePermissionsStopNowAllow := &_vStopNowAllow.Items[i]
+				_ePermissionsStopNowAllow.MarkSeen()
+				if _vPermissionsStopNowAllowPrincipal, _ok := _ePermissionsStopNowAllow.Field("principal"); _ok && _vPermissionsStopNowAllowPrincipal.Kind == cst.VLeaf {
+					if _x, _xok := cst.ExtractString(_vPermissionsStopNowAllowPrincipal.Leaf); _xok {
+						permissionsVal10.StopNowAllow[i].Principal = _x
+						_vPermissionsStopNowAllowPrincipal.MarkConsumedString()
+					}
+				}
+				if _vPermissionsStopNowAllowSession, _ok := _ePermissionsStopNowAllow.Field("session"); _ok && _vPermissionsStopNowAllowSession.Kind == cst.VLeaf {
+					if _x, _xok := cst.ExtractString(_vPermissionsStopNowAllowSession.Leaf); _xok {
+						permissionsVal10.StopNowAllow[i].Session = _x
+						_vPermissionsStopNowAllowSession.MarkConsumedString()
+					}
+				}
+				if _vPermissionsStopNowAllowExpires, _ok := _ePermissionsStopNowAllow.Field("expires"); _ok && _vPermissionsStopNowAllowExpires.Kind == cst.VLeaf {
+					if _x, _xok := cst.ExtractString(_vPermissionsStopNowAllowExpires.Leaf); _xok {
+						permissionsVal10.StopNowAllow[i].Expires = _x
+						_vPermissionsStopNowAllowExpires.MarkConsumedString()
+					}
+				}
+				if _vPermissionsStopNowAllowNote, _ok := _ePermissionsStopNowAllow.Field("note"); _ok && _vPermissionsStopNowAllowNote.Kind == cst.VLeaf {
+					if _x, _xok := cst.ExtractString(_vPermissionsStopNowAllowNote.Leaf); _xok {
+						permissionsVal10.StopNowAllow[i].Note = _x
+						_vPermissionsStopNowAllowNote.MarkConsumedString()
+					}
+				}
+			}
+		}
+		if _eaStopNowAllow, _eaok := _vPermissions.Field("stop-now-allow"); _eaok && _eaStopNowAllow.IsEmptyArray() {
+			_eaStopNowAllow.MarkConsumed()
+			permissionsVal10.StopNowAllow = []StopNowAllow{}
+		}
 		d.data.Permissions = permissionsVal10
 	} else {
 		permissionsVal10 := &Permissions{}
@@ -1470,6 +1506,15 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 				_vSessionEntryRestart.MarkConsumed()
 			}
 		}
+		if _vSessionEntryStartHandoff, _ok := _vSessionEntry.Field("start-handoff"); _ok && _vSessionEntryStartHandoff.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vSessionEntryStartHandoff.Leaf); _xok {
+				sessionEntryVal15.StartHandoff = _x
+				if sessionEntryVal15.StartHandoff == nil {
+					sessionEntryVal15.StartHandoff = []string{}
+				}
+				_vSessionEntryStartHandoff.MarkConsumed()
+			}
+		}
 		if _vSessionEntryUnattendedPermissionMode, _ok := _vSessionEntry.Field("unattended-permission-mode"); _ok && _vSessionEntryUnattendedPermissionMode.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractString(_vSessionEntryUnattendedPermissionMode.Leaf); _xok {
 				sessionEntryVal15.UnattendedPermissionMode = &_x
@@ -1565,6 +1610,16 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 					sessionEntryVal15.Restart = []string{}
 				}
 				_vRestart.MarkConsumed()
+			}
+		}
+		if _vStartHandoff, _ok := model.Field("start-handoff"); _ok && _vStartHandoff.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractStringSlice(_vStartHandoff.Leaf); _xok {
+				sessionEntryVal15.StartHandoff = _x
+				if sessionEntryVal15.StartHandoff == nil {
+					sessionEntryVal15.StartHandoff = []string{}
+				}
+				_vStartHandoff.MarkConsumed()
 			}
 		}
 		if _vUnattendedPermissionMode, _ok := model.Field("unattended-permission-mode"); _ok && _vUnattendedPermissionMode.Kind == cst.VLeaf {
@@ -2195,6 +2250,37 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 				}
 			}
 		}
+		{
+			_existPermissionsStopNowAllow := cst.FindArrayTableNodes(d.cstDoc.Root(), "permissions.stop-now-allow")
+			for i := range d.data.Permissions.StopNowAllow {
+				var container *cst.Node
+				if i < len(_existPermissionsStopNowAllow) {
+					container = _existPermissionsStopNowAllow[i]
+				} else {
+					container = cst.AppendArrayTableEntryAfter(d.cstDoc.Root(), "permissions.stop-now-allow")
+				}
+				if d.data.Permissions.StopNowAllow[i].Principal != "" || cst.HasValue(container, "principal") {
+					if err := cst.SetAny(container, "principal", d.data.Permissions.StopNowAllow[i].Principal); err != nil {
+						return nil, fmt.Errorf("%w", err)
+					}
+				}
+				if d.data.Permissions.StopNowAllow[i].Session != "" || cst.HasValue(container, "session") {
+					if err := cst.SetAny(container, "session", d.data.Permissions.StopNowAllow[i].Session); err != nil {
+						return nil, fmt.Errorf("%w", err)
+					}
+				}
+				if d.data.Permissions.StopNowAllow[i].Expires != "" || cst.HasValue(container, "expires") {
+					if err := cst.SetAny(container, "expires", d.data.Permissions.StopNowAllow[i].Expires); err != nil {
+						return nil, fmt.Errorf("%w", err)
+					}
+				}
+				if d.data.Permissions.StopNowAllow[i].Note != "" || cst.HasValue(container, "note") {
+					if err := cst.SetAny(container, "note", d.data.Permissions.StopNowAllow[i].Note); err != nil {
+						return nil, fmt.Errorf("%w", err)
+					}
+				}
+			}
+		}
 	}
 	if d.data.Folio != nil {
 		tableNode := cst.EnsureChildTable(d.cstDoc.Root(), d.cstDoc.Root(), "folio")
@@ -2412,6 +2498,13 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 		{
 			if d.data.SessionEntry.Restart != nil {
 				if err := cst.SetAny(tableNode, "restart", d.data.SessionEntry.Restart); err != nil {
+					return nil, fmt.Errorf("%w", err)
+				}
+			}
+		}
+		{
+			if d.data.SessionEntry.StartHandoff != nil {
+				if err := cst.SetAny(tableNode, "start-handoff", d.data.SessionEntry.StartHandoff); err != nil {
 					return nil, fmt.Errorf("%w", err)
 				}
 			}
@@ -3523,6 +3616,42 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			_eaSpawnAllow.MarkConsumed()
 			permissionsVal10.SpawnAllow = []SpawnAllow{}
 		}
+		if _vStopNowAllow, _ok := _vPermissions.Field("stop-now-allow"); _ok && _vStopNowAllow.Kind == cst.VArray {
+			_vStopNowAllow.MarkSeen()
+			permissionsVal10.StopNowAllow = make([]StopNowAllow, len(_vStopNowAllow.Items))
+			for i := range _vStopNowAllow.Items {
+				_ePermissionsStopNowAllow := &_vStopNowAllow.Items[i]
+				_ePermissionsStopNowAllow.MarkSeen()
+				if _vPermissionsStopNowAllowPrincipal, _ok := _ePermissionsStopNowAllow.Field("principal"); _ok && _vPermissionsStopNowAllowPrincipal.Kind == cst.VLeaf {
+					if _x, _xok := cst.ExtractString(_vPermissionsStopNowAllowPrincipal.Leaf); _xok {
+						permissionsVal10.StopNowAllow[i].Principal = _x
+						_vPermissionsStopNowAllowPrincipal.MarkConsumedString()
+					}
+				}
+				if _vPermissionsStopNowAllowSession, _ok := _ePermissionsStopNowAllow.Field("session"); _ok && _vPermissionsStopNowAllowSession.Kind == cst.VLeaf {
+					if _x, _xok := cst.ExtractString(_vPermissionsStopNowAllowSession.Leaf); _xok {
+						permissionsVal10.StopNowAllow[i].Session = _x
+						_vPermissionsStopNowAllowSession.MarkConsumedString()
+					}
+				}
+				if _vPermissionsStopNowAllowExpires, _ok := _ePermissionsStopNowAllow.Field("expires"); _ok && _vPermissionsStopNowAllowExpires.Kind == cst.VLeaf {
+					if _x, _xok := cst.ExtractString(_vPermissionsStopNowAllowExpires.Leaf); _xok {
+						permissionsVal10.StopNowAllow[i].Expires = _x
+						_vPermissionsStopNowAllowExpires.MarkConsumedString()
+					}
+				}
+				if _vPermissionsStopNowAllowNote, _ok := _ePermissionsStopNowAllow.Field("note"); _ok && _vPermissionsStopNowAllowNote.Kind == cst.VLeaf {
+					if _x, _xok := cst.ExtractString(_vPermissionsStopNowAllowNote.Leaf); _xok {
+						permissionsVal10.StopNowAllow[i].Note = _x
+						_vPermissionsStopNowAllowNote.MarkConsumedString()
+					}
+				}
+			}
+		}
+		if _eaStopNowAllow, _eaok := _vPermissions.Field("stop-now-allow"); _eaok && _eaStopNowAllow.IsEmptyArray() {
+			_eaStopNowAllow.MarkConsumed()
+			permissionsVal10.StopNowAllow = []StopNowAllow{}
+		}
 		data.Permissions = permissionsVal10
 	} else {
 		permissionsVal10 := &Permissions{}
@@ -4028,6 +4157,15 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vSessionEntryRestart.MarkConsumed()
 			}
 		}
+		if _vSessionEntryStartHandoff, _ok := _vSessionEntry.Field("start-handoff"); _ok && _vSessionEntryStartHandoff.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractStringSlice(_vSessionEntryStartHandoff.Leaf); _xok {
+				sessionEntryVal15.StartHandoff = _x
+				if sessionEntryVal15.StartHandoff == nil {
+					sessionEntryVal15.StartHandoff = []string{}
+				}
+				_vSessionEntryStartHandoff.MarkConsumed()
+			}
+		}
 		if _vSessionEntryUnattendedPermissionMode, _ok := _vSessionEntry.Field("unattended-permission-mode"); _ok && _vSessionEntryUnattendedPermissionMode.Kind == cst.VLeaf {
 			if _x, _xok := cst.ExtractString(_vSessionEntryUnattendedPermissionMode.Leaf); _xok {
 				sessionEntryVal15.UnattendedPermissionMode = &_x
@@ -4123,6 +4261,16 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 					sessionEntryVal15.Restart = []string{}
 				}
 				_vRestart.MarkConsumed()
+			}
+		}
+		if _vStartHandoff, _ok := sub.Field("start-handoff"); _ok && _vStartHandoff.Kind == cst.VLeaf {
+			_foundSessionEntry = true
+			if _x, _xok := cst.ExtractStringSlice(_vStartHandoff.Leaf); _xok {
+				sessionEntryVal15.StartHandoff = _x
+				if sessionEntryVal15.StartHandoff == nil {
+					sessionEntryVal15.StartHandoff = []string{}
+				}
+				_vStartHandoff.MarkConsumed()
 			}
 		}
 		if _vUnattendedPermissionMode, _ok := sub.Field("unattended-permission-mode"); _ok && _vUnattendedPermissionMode.Kind == cst.VLeaf {
@@ -4738,6 +4886,38 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 				}
 			}
 		}
+		{
+			_apPermissionsStopNowAllow := tableNode
+			_existPermissionsStopNowAllow := cst.FindChildArrayTableNodes(doc.Root(), _apPermissionsStopNowAllow, "stop-now-allow")
+			for i := range data.Permissions.StopNowAllow {
+				var container *cst.Node
+				if i < len(_existPermissionsStopNowAllow) {
+					container = _existPermissionsStopNowAllow[i]
+				} else {
+					container = cst.AppendChildArrayTableEntry(doc.Root(), _apPermissionsStopNowAllow, "stop-now-allow")
+				}
+				if data.Permissions.StopNowAllow[i].Principal != "" || cst.HasValue(container, "principal") {
+					if err := cst.SetAny(container, "principal", data.Permissions.StopNowAllow[i].Principal); err != nil {
+						return fmt.Errorf("%w", err)
+					}
+				}
+				if data.Permissions.StopNowAllow[i].Session != "" || cst.HasValue(container, "session") {
+					if err := cst.SetAny(container, "session", data.Permissions.StopNowAllow[i].Session); err != nil {
+						return fmt.Errorf("%w", err)
+					}
+				}
+				if data.Permissions.StopNowAllow[i].Expires != "" || cst.HasValue(container, "expires") {
+					if err := cst.SetAny(container, "expires", data.Permissions.StopNowAllow[i].Expires); err != nil {
+						return fmt.Errorf("%w", err)
+					}
+				}
+				if data.Permissions.StopNowAllow[i].Note != "" || cst.HasValue(container, "note") {
+					if err := cst.SetAny(container, "note", data.Permissions.StopNowAllow[i].Note); err != nil {
+						return fmt.Errorf("%w", err)
+					}
+				}
+			}
+		}
 	}
 	if data.Folio != nil {
 		tableNode := cst.EnsureChildTable(doc.Root(), container, "folio")
@@ -4955,6 +5135,13 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		{
 			if data.SessionEntry.Restart != nil {
 				if err := cst.SetAny(tableNode, "restart", data.SessionEntry.Restart); err != nil {
+					return fmt.Errorf("%w", err)
+				}
+			}
+		}
+		{
+			if data.SessionEntry.StartHandoff != nil {
+				if err := cst.SetAny(tableNode, "start-handoff", data.SessionEntry.StartHandoff); err != nil {
 					return fmt.Errorf("%w", err)
 				}
 			}

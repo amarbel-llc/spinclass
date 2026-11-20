@@ -348,6 +348,23 @@ func registerMCPOnlyCommands(app *command.App) {
 	})
 
 	app.AddCommand(&command.Command{
+		Name:  "start-child-session",
+		Title: "Start Child Session",
+		Description: command.Description{
+			Short: "Start a stopped session you hold a handle on: its harness frontend relaunches it detached, resuming the same principal and conversation. Needs the `start` right on the child (strictly; no other right will do). Refused unless an operator set `start-handoff` under [session-entry] in the global sweatfile or one above the repo, and for a session that is not stopped. `message` is required: the started session reads a notice of who stopped it, why and when, and who started it, then your message, as its first message.",
+		},
+		Annotations: &protocol.ToolAnnotations{
+			ReadOnlyHint:    protocol.BoolPtr(false),
+			DestructiveHint: protocol.BoolPtr(false),
+			IdempotentHint:  protocol.BoolPtr(false),
+			OpenWorldHint:   protocol.BoolPtr(false),
+		},
+		Params: startChildSessionParamList(),
+		Run:    wrapMCPHandler("start-child-session", handleStartChildSession),
+		RunCLI: ungatedCLI(runStartChild),
+	})
+
+	app.AddCommand(&command.Command{
 		Name:  "cancel-restart",
 		Title: "Cancel Queued Restart",
 		Description: command.Description{

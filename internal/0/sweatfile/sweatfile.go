@@ -84,6 +84,14 @@ type SessionEntry struct {
 	// sweatfileio.TrustedRestartHandoff; MergeWith never carries it. An explicit
 	// [] in a later trusted layer clears an inherited one.
 	Restart []string `toml:"restart"`
+	// StartHandoff is the argv start-child-session execs to relaunch a stopped
+	// session's agent detached, resuming the same principal and conversation
+	// (docs/plans/2026-11-20-stop-start-rights.md). {principal}, {session-key}
+	// and {message} (the required first message, notice included) are
+	// substituted per element; it runs in the session's worktree. Trusted and
+	// read exactly as Restart is: only from layers above the repo, through
+	// sweatfileio.TrustedStartHandoff; MergeWith never carries it.
+	StartHandoff []string `toml:"start-handoff"`
 	// UnattendedPermissionMode is the permission mode of UNCONFINED detached
 	// spawned workers: "dontAsk" (spawn.SpliceDontAskMode plus the
 	// CLOWN_UNATTENDED=1 marker, in the spawn env and the pinned resume env) or
@@ -263,6 +271,29 @@ type Permissions struct {
 	// Appended across trusted layers; read ONLY through
 	// sweatfileio.TrustedSpawnAllow. Delete when ajour plus profiles enforce this.
 	SpawnAllow []SpawnAllow `toml:"spawn-allow"`
+	// StopNowAllow lists the sessions whose stop now (killing a turn) needs no
+	// human prompt (docs/plans/2026-11-20-stop-start-rights.md): the operator's
+	// blessing; holding the stop-now right is still required for a child.
+	// Appended across trusted layers; read ONLY through
+	// sweatfileio.TrustedStopNowAllow.
+	StopNowAllow []StopNowAllow `toml:"stop-now-allow"`
+}
+
+// StopNowAllow is one entry of [[permissions.stop-now-allow]]: exactly one of
+// Principal and Session names the listed session, as for SpawnAllow.
+type StopNowAllow struct {
+	Principal string `toml:"principal"`
+	Session   string `toml:"session"`
+	// Expires is an RFC 3339 UTC instant after which the entry is ignored.
+	Expires string `toml:"expires"`
+	// Note is journaled with every use.
+	Note string `toml:"note"`
+}
+
+// ParseStopNowAllow validates one entry by the spawn-allow rules (exactly one
+// of principal and session; a valid expiry); the result's MaxWorkers is unused.
+func ParseStopNowAllow(e StopNowAllow) SpawnAllowEntry {
+	return ParseSpawnAllow(SpawnAllow{Principal: e.Principal, Session: e.Session, Expires: e.Expires, Note: e.Note})
 }
 
 // SpawnAllow is one entry of [[permissions.spawn-allow]]: exactly one of

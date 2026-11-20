@@ -32,3 +32,26 @@ func TrustedSpawnAllow(h sweatfile.Hierarchy, home, repoRoot string) (entries []
 	}
 	return entries, untrusted
 }
+
+// TrustedStopNowAllow returns the [[permissions.stop-now-allow]] entries
+// honoured for the repo, read exactly as TrustedSpawnAllow reads its list:
+// layers above the repo only, appended in order, untrusted layers reported,
+// invalid entries returned with Problem set (fail closed).
+func TrustedStopNowAllow(h sweatfile.Hierarchy, home, repoRoot string) (entries []sweatfile.SpawnAllowEntry, untrusted []string) {
+	for _, src := range h.Sources {
+		if src.SkipReason != "" || !src.Found {
+			continue
+		}
+		if src.File.Permissions == nil || len(src.File.Permissions.StopNowAllow) == 0 {
+			continue
+		}
+		if !LayerAboveRepo(src.Path, home, repoRoot) {
+			untrusted = append(untrusted, src.Path)
+			continue
+		}
+		for _, e := range src.File.Permissions.StopNowAllow {
+			entries = append(entries, sweatfile.ParseStopNowAllow(e))
+		}
+	}
+	return entries, untrusted
+}

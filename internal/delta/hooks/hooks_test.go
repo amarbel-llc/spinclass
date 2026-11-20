@@ -1167,6 +1167,7 @@ func TestReadOnlyIntrospectionToolsAutoApproved(t *testing.T) {
 		{"stop-child-session", map[string]any{"child": "r/b", "when": "idle"}, "allow"},
 		{"stop-this-session", map[string]any{"when": "now"}, "ask"},
 		{"stop-child-session", map[string]any{"child": "r/b", "when": "now"}, "ask"},
+		{"start-child-session", map[string]any{"child": "r/b", "message": "m"}, "allow"},
 		// cancel-restart only removes a queued request.
 		{"session-health", map[string]any{}, "allow"},
 		{"session-health", map[string]any{"child": "r/b"}, "allow"},

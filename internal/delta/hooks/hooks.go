@@ -839,6 +839,7 @@ const (
 	restartHungChildToolName      = "mcp__plugin_spinclass_spinclass__restart-hung-child"
 	stopThisSessionToolName       = "mcp__plugin_spinclass_spinclass__stop-this-session"
 	stopChildSessionToolName      = "mcp__plugin_spinclass_spinclass__stop-child-session"
+	startChildSessionToolName     = "mcp__plugin_spinclass_spinclass__start-child-session"
 )
 
 func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree string, disallowMainWorktree, rewriteEnabled, denySweatfile, brokerDecides bool) error {
@@ -950,6 +951,11 @@ func runPreToolUse(input hookInput, w io.Writer, mainRepoRoot, sessionWorktree s
 		// the frontend performs after the turn. A stop now never reaches here:
 		// the always-ask floor above caught it.
 		return writeAllow(w, "an idle stop is gated by the operator's trusted restart hand-off and the stop handle right")
+	case startChildSessionToolName:
+		// Relaunches a session that was already running before its stop, under
+		// the operator's trusted start hand-off and only for a holder of the
+		// start right; it creates no new session.
+		return writeAllow(w, "a start is gated by the operator's trusted start hand-off and the start handle right")
 	case restartHungChildToolName:
 		// The operator-ruled bounded forced restart (2026-10-26): the tool refuses
 		// unless the caller holds the restart right on the child, the child's

@@ -653,14 +653,24 @@ func CheckInheritedHooks(sf sweatfile.Sweatfile, ancestors []sweatfile.LoadSourc
 // sweatfileio.TrustedRestartHandoff ignores it outside the global sweatfile and
 // layers above the repo.
 func CheckRestartHandoff(sf sweatfile.Sweatfile, layerAboveRepo bool) []Issue {
-	if sf.SessionEntry == nil || sf.SessionEntry.Restart == nil || layerAboveRepo {
+	if sf.SessionEntry == nil || layerAboveRepo {
 		return nil
 	}
-	return []Issue{{
-		Message:  "[session-entry] sets `restart` in a repo-level sweatfile: it is ignored — it is a command spinclass runs, so only the global sweatfile or one above the repo (parent directories) may set it; move it up",
-		Severity: SeverityWarning,
-		Field:    "session-entry.restart",
-	}}
+	var issues []Issue
+	for _, h := range []struct {
+		key  string
+		argv []string
+	}{{"restart", sf.SessionEntry.Restart}, {"start-handoff", sf.SessionEntry.StartHandoff}} {
+		if h.argv == nil {
+			continue
+		}
+		issues = append(issues, Issue{
+			Message:  "[session-entry] sets `" + h.key + "` in a repo-level sweatfile: it is ignored — it is a command spinclass runs, so only the global sweatfile or one above the repo (parent directories) may set it; move it up",
+			Severity: SeverityWarning,
+			Field:    "session-entry." + h.key,
+		})
+	}
+	return issues
 }
 
 // CheckUnattendedPermissionMode validates [session-entry]

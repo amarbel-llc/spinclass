@@ -383,10 +383,12 @@ func (sf Sweatfile) MergeWith(other Sweatfile) Sweatfile {
 	// unattended-permission-mode follows the same rule; see
 	// sweatfileio.TrustedUnattendedPermissionMode.
 	// allow-posture-widening follows the same rule; see
-	// sweatfileio.TrustedAllowPostureWidening.
-	if merged.SessionEntry != nil && (merged.SessionEntry.Restart != nil || merged.SessionEntry.UnattendedPermissionMode != nil || merged.SessionEntry.AllowPostureWidening != nil) {
+	// sweatfileio.TrustedAllowPostureWidening. start-handoff follows the same
+	// rule; see sweatfileio.TrustedStartHandoff.
+	if merged.SessionEntry != nil && (merged.SessionEntry.Restart != nil || merged.SessionEntry.StartHandoff != nil || merged.SessionEntry.UnattendedPermissionMode != nil || merged.SessionEntry.AllowPostureWidening != nil) {
 		cp := *merged.SessionEntry
 		cp.Restart = nil
+		cp.StartHandoff = nil
 		cp.UnattendedPermissionMode = nil
 		cp.AllowPostureWidening = nil
 		merged.SessionEntry = &cp

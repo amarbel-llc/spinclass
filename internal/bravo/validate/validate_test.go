@@ -698,6 +698,24 @@ func TestCheckRestartHandoffWarnsRepoLayer(t *testing.T) {
 	}
 }
 
+func TestCheckRestartHandoffWarnsARepoLayerStartHandoff(t *testing.T) {
+	sf := sweatfile.Sweatfile{SessionEntry: &sweatfile.SessionEntry{StartHandoff: []string{"clown"}}}
+	has := func(issues []Issue) bool {
+		for _, iss := range issues {
+			if iss.Field == "session-entry.start-handoff" && iss.Severity == SeverityWarning {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(CheckRestartHandoff(sf, false)) {
+		t.Error("repo-layer start-handoff should warn")
+	}
+	if has(CheckRestartHandoff(sf, true)) {
+		t.Error("above-repo start-handoff should not warn")
+	}
+}
+
 // spinclass#342: allow-posture-widening is honoured only above the repo; a
 // repo-level value warns that it is ignored, a trusted one is silent.
 func TestCheckAllowPostureWidening(t *testing.T) {

@@ -495,6 +495,29 @@ func TrustedRestartHandoff(h sweatfile.Hierarchy, home, repoRoot string) (argv [
 	return argv, untrusted
 }
 
+// TrustedStartHandoff returns the [session-entry].start-handoff argv honoured
+// for the repo: read exactly as TrustedRestartHandoff reads restart, since it
+// is code spinclass execs to relaunch a stopped session.
+func TrustedStartHandoff(h sweatfile.Hierarchy, home, repoRoot string) (argv []string, untrusted []string) {
+	for _, src := range h.Sources {
+		if src.SkipReason != "" || !src.Found {
+			continue
+		}
+		if src.File.SessionEntry == nil || src.File.SessionEntry.StartHandoff == nil {
+			continue
+		}
+		if LayerAboveRepo(src.Path, home, repoRoot) {
+			argv = src.File.SessionEntry.StartHandoff
+		} else {
+			untrusted = append(untrusted, src.Path)
+		}
+	}
+	if len(argv) == 0 {
+		return nil, untrusted
+	}
+	return argv, untrusted
+}
+
 // TrustedURLResolver returns the [auth].url-resolver command honoured for the
 // repo: scalar override across layers above the repo, last one wins, an
 // explicit "" clearing it. The value is TrimSpaced, so whitespace-only also
