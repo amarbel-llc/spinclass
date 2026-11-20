@@ -53,7 +53,7 @@ time with `--holder`.
 | `stop-this-session [when] [reason]` | none (one's own session) | records a stop request |
 | `start-child-session child [reason]` | `start` on the child | runs the start hand-off |
 | `cancel-restart` | as today | also withdraws a queued stop |
-| `sc stop SESSION...\|--all-on-host [--except S...] [--now] [--reason R]` | the operator at a terminal, no handle | records a stop request per session, after one prompt |
+| `sc stop SESSION...\|--all-on-host [--except S...] [--now] [--hard] [--reason R]` | the operator at a terminal, no handle | records a stop request per session, after one prompt; `--hard` instead marks it stopped and SIGTERMs its clown frontend |
 | `sc start-stopped SESSION... --message M` | the operator at a terminal, no handle | runs the start hand-off per session, after one prompt |
 
 The two operator verbs (ruled: the most privileged access is by CLI first)
@@ -62,6 +62,17 @@ session), hence `start-stopped`. A target is a session; the form
 `SESSION@<principal>`, one clown of a session that runs more than one, is
 reserved and refused today, so per-clown addressing can be added without
 changing what a session target means.
+
+`sc stop --hard` (ruled) is for a frontend too old to honour the stop
+verdict. It never queues a request: it records the stopped mark, then sends
+SIGTERM to the `frontend_pid` that clown's status file
+(`$XDG_STATE_HOME/clown/status/<sha256(principal)>.json`) names, which clown
+forwards to the provider before exiting with no relaunch. The pid is
+signalled only if the file names this session's principal and session key
+and records `frontend_start_ticks`, the process with that pid has the same
+start time (so the pid was not reused), and its executable is `clown`. A
+running merge/check job refuses it unless `--now`; a failed signal takes the
+mark back.
 
 `when` is `idle` (default) or `now`; see Decided, item 3, for who may stop
 `now` and when a human is asked.

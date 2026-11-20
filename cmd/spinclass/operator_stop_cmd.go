@@ -43,6 +43,7 @@ type operatorStopParams struct {
 	AllOnHost bool     `json:"all-on-host"`
 	Except    []string `json:"except"`
 	Now       bool     `json:"now"`
+	Hard      bool     `json:"hard"`
 	Reason    string   `json:"reason"`
 }
 
@@ -57,6 +58,7 @@ type operatorSessionTarget struct {
 	st        *session.State
 	principal string
 	argv      []string // start only: the trusted start hand-off
+	pid       int      // hard stop only: the frontend pid to signal
 	refusal   string
 	skip      string // not a failure
 }
@@ -84,8 +86,8 @@ func sessionIsClosed(st *session.State) bool {
 }
 
 // judgeOperatorStop runs every check the stop path runs, so the prompt lists
-// only stops that can be queued.
-func judgeOperatorStop(st *session.State, now bool) operatorSessionTarget {
+// only stops that can be queued (or, with hard, frontends that can be signalled).
+func judgeOperatorStop(st *session.State, now, hard bool) operatorSessionTarget {
 	j := operatorSessionTarget{name: st.Key(), st: st}
 	switch {
 	case sessionIsClosed(st):
@@ -101,6 +103,9 @@ func judgeOperatorStop(st *session.State, now bool) operatorSessionTarget {
 		return j
 	}
 	j.principal = principal
+	if hard {
+		return judgeHardStop(j, now)
+	}
 	if _, obstacle, perr := restartPlan(st, principal, now); perr != nil {
 		j.refusal = perr.Error()
 	} else if obstacle != "" {
@@ -120,7 +125,7 @@ func selectOperatorStopTargets(p operatorStopParams) []operatorSessionTarget {
 				out[i] = operatorSessionTarget{name: t, refusal: refusal}
 				continue
 			}
-			out[i] = judgeOperatorStop(st, p.Now)
+			out[i] = judgeOperatorStop(st, p.Now, p.Hard)
 		}
 		return out
 	}
@@ -145,7 +150,7 @@ func selectOperatorStopTargets(p operatorStopParams) []operatorSessionTarget {
 		case st.StoppedAt != nil:
 			j.skip = "already stopped"
 		default:
-			j = judgeOperatorStop(st, p.Now)
+			j = judgeOperatorStop(st, p.Now, p.Hard)
 		}
 		out = append(out, j)
 	}
@@ -242,9 +247,21 @@ func runOperatorStop(p operatorStopParams) error {
 	if p.Now {
 		header = "These sessions' agents would be stopped NOW, killing their current turn and any running merge/check job, and left stopped until started again:"
 	}
-	promptOperatorBatch(judged, header, stopVerb, func(j operatorSessionTarget) string { return j.name })
+	detail := func(j operatorSessionTarget) string { return j.name }
+	if p.Hard {
+		header = "These sessions' clown FRONTENDS would be killed: SIGTERM to the frontend pid in clown's status file, which stops the agent at once (killing its turn) with no relaunch, and leaves the session stopped until started again:"
+		done = "hard stop: frontend signalled"
+		detail = func(j operatorSessionTarget) string { return fmt.Sprintf("%s (frontend pid %d)", j.name, j.pid) }
+	}
+	promptOperatorBatch(judged, header, stopVerb, detail)
 
 	failed := printOperatorVerdicts(operatorRestartStdout(), judged, func(j operatorSessionTarget) (string, error) {
+		if p.Hard {
+			if err := hardStopSession(j, reason); err != nil {
+				return "", err
+			}
+			return done, nil
+		}
 		if _, err := queueStop(j.st, operatorRestartRequester, j.principal, reason, when); err != nil {
 			return "", err
 		}
@@ -333,6 +350,11 @@ func registerOperatorStopCommands(app *command.App) {
 				"start-child-session). Every session is judged first; one prompt (default no) covers the batch. Each prints " +
 				"\"<session>: stop requested\", \"<session>: stop NOW requested\", \"<session>: skipped: <why>\" or " +
 				"\"<session>: refused: <why>\"; one failure does not stop the rest, and the exit is nonzero if any session was refused. " +
+				"--hard is for a session whose clown frontend is too old to honour a stop request: it records the stopped mark, then sends " +
+				"SIGTERM to the frontend pid that clown's own status file names for the session's principal (never a pid found any other " +
+				"way), after checking that the file names this session, records the frontend's start time, the pid is alive with that " +
+				"start time (not reused) and runs clown; a failed signal takes the mark back, and each prints \"<session>: hard stop: " +
+				"frontend signalled\". " +
 				"A target of the form SESSION@<principal> (one clown of a session) is reserved and refused. It refuses to run unless stdin " +
 				"and stdout are both terminals, so an agent cannot drive it.",
 		},
@@ -341,6 +363,7 @@ func registerOperatorStopCommands(app *command.App) {
 			{Name: "all-on-host", Type: command.Bool, Description: "Every live worktree session on this host instead of named sessions; the caller's own session is skipped"},
 			{Name: "except", Type: command.String, Variadic: true, Description: "With --all-on-host: sessions to leave running, as session keys or worktree directory names"},
 			{Name: "now", Type: command.Bool, Description: "Stop at once, killing the current turn and any running merge/check job, instead of when the turn ends"},
+			{Name: "hard", Type: command.Bool, Description: "For a frontend too old to honour a stop: record the stopped mark, then send SIGTERM to the clown frontend pid that clown's status file names for the session (checked to be live, unreused and clown). Needs no restart hand-off; refused while a merge/check job runs unless --now"},
 			{Name: "reason", Type: command.String, Description: "Why the stop is wanted; shown to the holders and in the started session's notice. Defaults to \"" + defaultOperatorStopReason + "\""},
 		},
 		RunCLI: func(_ context.Context, args json.RawMessage) error {

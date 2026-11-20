@@ -96,7 +96,8 @@ re-run that suite right before merging.
 (FDR 0006), `close-child-session`, `restart-this-session` /
 `restart-child-session` (`--force` is always-ask) / `cancel-restart` (FDR 0037;
 hidden `restart-preflight`), `restart SESSION... --posture P` (operator-only,
-TTY-required, #473), `stop SESSION...|--all-on-host [--except] [--now]` /
+TTY-required, #473), `stop SESSION...|--all-on-host [--except] [--now] [--hard]`
+(`--hard` SIGTERMs the frontend pid in clown's status file, for old frontends) /
 `start-stopped SESSION... --message M` (operator-only, TTY-required, no handle;
 `SESSION@principal` is reserved), `grant-session-handle` /
 `release-session-handle` / `list-handles` / `whoami` (FDR 0032), `handle-grant` /
