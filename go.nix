@@ -28,7 +28,7 @@
       input = "tommy";
     };
   };
-  go = "1.26.0";
+  go = "1.26.1";
   module = "code.linenisgreat.com/spinclass";
   replace = { };
   require = {
