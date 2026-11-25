@@ -59,7 +59,40 @@ type crossingRecorder interface {
 // newBridgeSessionHandler serves the five session tools out of registry and
 // records each tools/call in rec.
 func newBridgeSessionHandler(registry *server.ToolRegistryV1, name, version string, rec crossingRecorder, stats statsd.Client) bridgeserver.SessionHandler {
-	return &bridgeSessionHandler{tools: bridgeSessionProvider{registry: registry, rec: rec, stats: stats}, name: name, version: version}
+	return &bridgeSessionHandler{tools: bridgeSessionProvider{registry: registry, rec: rec, stats: stats, declared: declaredToolParams(registry)}, name: name, version: version}
+}
+
+// declaredToolParams maps each served tool to the parameter names its input
+// schema declares. The crossing log writes only these names; any other name a
+// request carries is counted, never written. A schema that cannot be read
+// declares nothing, which logs no names at all.
+func declaredToolParams(registry *server.ToolRegistryV1) map[string][]string {
+	out := map[string][]string{}
+	if registry == nil {
+		return out
+	}
+	all, err := registry.ListToolsV1(context.Background(), "")
+	if err != nil {
+		return out
+	}
+	byName := map[string]json.RawMessage{}
+	for _, tool := range all.Tools {
+		byName[tool.Name] = tool.InputSchema
+	}
+	for _, n := range bridgeSessionToolNames {
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if json.Unmarshal(byName[n], &schema) != nil {
+			continue
+		}
+		names := make([]string, 0, len(schema.Properties))
+		for p := range schema.Properties {
+			names = append(names, p)
+		}
+		out[n] = names
+	}
+	return out
 }
 
 // Serve runs one MCP server over conn until the peer ends the stream or ctx
@@ -108,6 +141,8 @@ type bridgeSessionProvider struct {
 	rec      crossingRecorder
 	stats    statsd.Client
 	session  string
+	// declared is each tool's declared parameter names (declaredToolParams).
+	declared map[string][]string
 	// slots bounds the calls in flight on one stream; nil is unbounded (a
 	// provider built by hand).
 	slots chan struct{}
@@ -301,6 +336,9 @@ func (p bridgeSessionProvider) record(name string, args json.RawMessage, started
 		ReqBytes:  len(args),
 		RespBytes: resp,
 		Args:      args,
+		// The verb is one of the five or "unknown", so an unlisted tool name
+		// declares nothing and every argument it carried is only counted.
+		DeclaredArgs: p.declared[verb],
 	})
 }
 

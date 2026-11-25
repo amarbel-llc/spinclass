@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/protocol"
+	"code.linenisgreat.com/purse-first/libs/go-mcp/server"
 
 	"code.linenisgreat.com/spinclass/internal/alfa/bridgeserver"
 	"code.linenisgreat.com/spinclass/internal/alfa/crossinglog"
@@ -85,12 +86,15 @@ func TestBridgeSessionCallsAreLoggedWithoutValues(t *testing.T) {
 	if len(es) != 4 {
 		t.Fatalf("%d lines, want 4:\n%s", len(es), raw)
 	}
+	// whoami declares no parameter, and an unlisted tool declares none either:
+	// every argument name they carried is counted, none written.
 	want := []struct{ verb, outcome, names string }{
-		{"whoami", "ok", "[principal]"},
-		{"unknown", "error", "[description]"},
-		{"unknown", "error", "[message]"},
+		{"whoami", "ok", "[]"},
+		{"unknown", "error", "[]"},
+		{"unknown", "error", "[]"},
 		{"list-handles", "ok", "[]"},
 	}
+	wantOther := []float64{1, 1, 1, 0}
 	for i, w := range want {
 		e := es[i]
 		if e["verb"] != w.verb || e["outcome"] != w.outcome || e["service"] != "session" || e["session"] != sessionTestKey {
@@ -99,12 +103,43 @@ func TestBridgeSessionCallsAreLoggedWithoutValues(t *testing.T) {
 		if got := jsonString(e["arg_names"]); got != w.names {
 			t.Errorf("line %d arg_names = %s, want %s", i, got, w.names)
 		}
+		if e["other_arg_names"] != wantOther[i] {
+			t.Errorf("line %d other_arg_names = %v, want %v", i, e["other_arg_names"], wantOther[i])
+		}
 		if n, _ := e["req_bytes"].(float64); n < 0 {
 			t.Errorf("line %d req_bytes = %v", i, e["req_bytes"])
 		}
 	}
 	if n, _ := es[0]["resp_bytes"].(float64); n <= 0 {
 		t.Errorf("an ok call logged resp_bytes %v", es[0]["resp_bytes"])
+	}
+}
+
+// A declared parameter of a served verb is written by name; a name the verb
+// does not declare is not, whatever a peer sends.
+func TestBridgeSessionLogsOnlyTheNamesAVerbDeclares(t *testing.T) {
+	reg := server.NewToolRegistryV1()
+	buildApp().RegisterMCPToolsV1(reg)
+	declared := declaredToolParams(reg)
+	// cancel-restart with nothing queued is a no-op, so the call is safe to make.
+	if len(declared["cancel-restart"]) == 0 {
+		t.Fatalf("cancel-restart declares no parameter: %v", declared)
+	}
+	clog, path := openTestCrossingLog(t)
+	sock, _ := startSessionBridgeWith(t, clog, nil)
+	p := dialSession(t, sock)
+	p.initialize(protocol.ProtocolVersionV1)
+	first := declared["cancel-restart"][0]
+	p.call("tools/call", map[string]any{"name": "cancel-restart", "arguments": map[string]any{
+		first: nil, crossingSecret: 1,
+	}})
+	es := waitForCrossings(t, path, 1)
+	raw, _ := os.ReadFile(path)
+	if strings.Contains(string(raw), crossingSecret) {
+		t.Fatalf("an undeclared argument name reached the log:\n%s", raw)
+	}
+	if len(es) != 1 || jsonString(es[0]["arg_names"]) != "["+first+"]" || es[0]["other_arg_names"] != float64(1) {
+		t.Errorf("line = %v, want arg_names [%s] other_arg_names 1", es, first)
 	}
 }
 

@@ -3,10 +3,12 @@
 // <state>/spinclass/bridge/<principal>.ndjson.
 //
 // The redaction rule is normative: argument VALUES are never written. A line
-// carries the service, the verb (a tool name), the sorted argument NAMES,
-// sizes, and the first 16 hex of the sha256 of the arguments' canonical JSON.
-// A per-verb allow-list (SafeFields) may add a few identifier-shaped values
-// under "fields"; nothing from free text ever.
+// carries the service, the verb (a tool name), the sorted argument NAMES the
+// verb declares (a name a peer made up is only counted, in other_arg_names),
+// sizes, and the first 16 hex of the HMAC-SHA256 of the arguments' canonical
+// JSON under a random key that lives and dies with this Log. A per-verb
+// allow-list (SafeFields) may add a few identifier-shaped values under
+// "fields"; nothing from free text ever. A line is at most MaxLineBytes.
 //
 // Writing a line never fails or delays a crossing: Record returns nothing, a
 // failed write is counted (Failures) and logged at most once a minute.
@@ -15,10 +17,13 @@
 package crossinglog
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -26,12 +31,18 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"code.linenisgreat.com/spinclass/internal/0/bridge"
 )
 
 const (
+	// MaxLineBytes bounds one line, newline included. A line over it loses its
+	// fields, then its names, then part of its session key, and says
+	// "truncated": true.
+	MaxLineBytes = 512
+
 	// DefaultMaxBytes is the size at which the live file rotates.
 	DefaultMaxBytes = 4 << 20
 	// DefaultGenerations is how many rotated files are kept (.1 to .3).
@@ -80,21 +91,29 @@ type Crossing struct {
 	ReqBytes  int
 	RespBytes int
 	Args      json.RawMessage
+	// DeclaredArgs are the parameter names the verb declares. Only these may
+	// appear in the line's arg_names; every other name a peer sent is counted
+	// in other_arg_names, so a request cannot write its own text into the log
+	// through an argument name.
+	DeclaredArgs []string
 }
 
-// Entry is one line of the file.
+// Entry is one line of the file. ArgsSHA256 is named for the contract's v1
+// field; it is the first 16 hex of an HMAC-SHA256 under the log's own key.
 type Entry struct {
-	TS         string            `json:"ts"`
-	Session    string            `json:"session"`
-	Service    string            `json:"service"`
-	Verb       string            `json:"verb"`
-	Outcome    string            `json:"outcome"`
-	DurationMS int64             `json:"duration_ms"`
-	ReqBytes   int               `json:"req_bytes"`
-	RespBytes  int               `json:"resp_bytes"`
-	ArgNames   []string          `json:"arg_names"`
-	ArgsSHA256 string            `json:"args_sha256"`
-	Fields     map[string]string `json:"fields,omitempty"`
+	TS            string            `json:"ts"`
+	Session       string            `json:"session"`
+	Service       string            `json:"service"`
+	Verb          string            `json:"verb"`
+	Outcome       string            `json:"outcome"`
+	DurationMS    int64             `json:"duration_ms"`
+	ReqBytes      int               `json:"req_bytes"`
+	RespBytes     int               `json:"resp_bytes"`
+	ArgNames      []string          `json:"arg_names"`
+	OtherArgNames int               `json:"other_arg_names"`
+	ArgsSHA256    string            `json:"args_sha256"`
+	Fields        map[string]string `json:"fields,omitempty"`
+	Truncated     bool              `json:"truncated,omitempty"`
 }
 
 // Options configure Open. Dir and Principal are required for a log that
@@ -115,12 +134,18 @@ type Options struct {
 	Logf func(format string, args ...any)
 	// SafeFields overrides the package SafeFields when non-nil.
 	SafeFields map[string][]string
+	// Key overrides the random digest key (tests only).
+	Key []byte
 }
 
 // Log is the crossing log of one principal. A nil *Log records nothing.
 type Log struct {
 	opts Options
 	path string
+	// key is the HMAC key of args_sha256: random per Log, never written, so a
+	// digest in a file cannot be checked against a guessed argument by anyone
+	// who only has the file.
+	key []byte
 
 	mu         sync.Mutex
 	failures   atomic.Int64
@@ -151,7 +176,15 @@ func Open(o Options) *Log {
 	if o.SafeFields == nil {
 		o.SafeFields = SafeFields
 	}
-	l := &Log{opts: o, path: filepath.Join(o.Dir, fileSegment(o.Principal)+".ndjson")}
+	l := &Log{opts: o, path: filepath.Join(o.Dir, fileSegment(o.Principal)+".ndjson"), key: o.Key}
+	if len(l.key) == 0 {
+		l.key = make([]byte, 32)
+		if _, err := rand.Read(l.key); err != nil {
+			// No randomness: the digest becomes a constant rather than a hash
+			// under a guessable key.
+			l.key = nil
+		}
+	}
 	l.appendFn = l.appendLine
 	l.deleteExpired()
 	return l
@@ -171,22 +204,23 @@ func (l *Log) Record(c Crossing) {
 	if l == nil {
 		return
 	}
-	names, fields, sum := Redact(c.Verb, c.Args, l.opts.SafeFields)
+	names, other, fields, sum := Redact(c.Verb, c.Args, l.opts.SafeFields, c.DeclaredArgs, l.key)
 	now := l.opts.Now()
 	e := Entry{
-		TS:         now.UTC().Format(time.RFC3339Nano),
-		Session:    c.Session,
-		Service:    ServiceLabel(c.Service),
-		Verb:       verbLabel(c.Verb),
-		Outcome:    NormalizeOutcome(c.Outcome),
-		DurationMS: c.Duration.Milliseconds(),
-		ReqBytes:   c.ReqBytes,
-		RespBytes:  c.RespBytes,
-		ArgNames:   names,
-		ArgsSHA256: sum,
-		Fields:     fields,
+		TS:            now.UTC().Format(time.RFC3339Nano),
+		Session:       c.Session,
+		Service:       ServiceLabel(c.Service),
+		Verb:          verbLabel(c.Verb),
+		Outcome:       NormalizeOutcome(c.Outcome),
+		DurationMS:    c.Duration.Milliseconds(),
+		ReqBytes:      c.ReqBytes,
+		RespBytes:     c.RespBytes,
+		ArgNames:      names,
+		OtherArgNames: other,
+		ArgsSHA256:    sum,
+		Fields:        fields,
 	}
-	line, err := json.Marshal(e)
+	line, err := marshalCapped(e)
 	if err == nil {
 		l.mu.Lock()
 		err = l.appendFn(l.path, append(line, '\n'))
@@ -195,6 +229,39 @@ func (l *Log) Record(c Crossing) {
 	if err != nil {
 		l.failed(now, err)
 	}
+}
+
+// marshalCapped marshals e into at most MaxLineBytes-1 bytes (the newline is
+// the last), shedding what a line can do without, in order: the allow-listed
+// fields, the names (they stay counted), the session key's tail.
+func marshalCapped(e Entry) ([]byte, error) {
+	limit := MaxLineBytes - 1
+	b, err := json.Marshal(e)
+	if err != nil || len(b) <= limit {
+		return b, err
+	}
+	e.Truncated = true
+	e.Fields = nil
+	steps := []func(){
+		func() {},
+		func() { e.OtherArgNames += len(e.ArgNames); e.ArgNames = []string{} },
+		func() {
+			if len(e.Session) > 64 {
+				e.Session = e.Session[:64]
+			}
+		},
+		func() {
+			e.Session = ""
+			e.Verb = unknown
+		},
+	}
+	for _, step := range steps {
+		step()
+		if b, err = json.Marshal(e); err != nil || len(b) <= limit {
+			return b, err
+		}
+	}
+	return b, errors.New("crossing line over the cap")
 }
 
 func (l *Log) failed(now time.Time, err error) {
@@ -220,19 +287,30 @@ func (l *Log) appendLine(path string, line []byte) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	if err := os.Chmod(dir, 0o700); err != nil {
+	if err := checkOwnDir(dir); err != nil {
 		return err
 	}
-	if fi, err := os.Stat(path); err == nil && fi.Size() > 0 && fi.Size()+int64(len(line)) > l.opts.MaxBytes {
-		if err := l.rotate(path); err != nil {
-			return err
+	if fi, err := os.Lstat(path); err == nil {
+		if !fi.Mode().IsRegular() {
+			return fmt.Errorf("crossing log %s is not a regular file", path)
 		}
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		if fi.Size() > 0 && fi.Size()+int64(len(line)) > l.opts.MaxBytes {
+			if err := l.rotate(path); err != nil {
+				return err
+			}
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	// O_NOFOLLOW: a link put in the log's place is refused, not followed;
+	// O_NONBLOCK: a FIFO put there cannot block the crossing.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC|syscall.O_NONBLOCK, 0o600)
 	if err != nil {
 		return err
+	}
+	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() || !ownedByUs(fi) {
+		_ = f.Close()
+		return fmt.Errorf("crossing log %s is not a regular file of this uid", path)
 	}
 	if err := f.Chmod(0o600); err != nil {
 		_ = f.Close()
@@ -243,6 +321,30 @@ func (l *Log) appendLine(path string, line []byte) error {
 		return err
 	}
 	return f.Close()
+}
+
+// checkOwnDir requires dir to be a real directory (not a link) of this uid,
+// and tightens a mode that lets anyone else in to 0700.
+func checkOwnDir(dir string) error {
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("crossing log directory %s is not a directory (a link is refused)", dir)
+	}
+	if !ownedByUs(fi) {
+		return fmt.Errorf("crossing log directory %s is not owned by this uid", dir)
+	}
+	if fi.Mode().Perm()&0o077 != 0 {
+		return os.Chmod(dir, 0o700)
+	}
+	return nil
+}
+
+func ownedByUs(fi os.FileInfo) bool {
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	return ok && int(st.Uid) == os.Getuid()
 }
 
 // rotate shifts path to path.1, path.1 to path.2 and so on, dropping the
@@ -297,11 +399,12 @@ func isLogFileName(name string) bool {
 }
 
 // Redact reduces a call's arguments to what may be logged: the sorted
-// argument names (never nil), the allow-listed identifier-shaped values for
-// verb, and the first 16 hex of the sha256 of the canonical (key-sorted,
-// compact) JSON of the arguments. Values reach the result only through the
-// allow-list.
-func Redact(verb string, args json.RawMessage, safe map[string][]string) (names []string, fields map[string]string, sha string) {
+// argument names the verb declares (never nil), how many other names the call
+// carried, the allow-listed identifier-shaped values for verb, and the first
+// 16 hex of the HMAC-SHA256, under key, of the canonical (key-sorted, compact)
+// JSON of the arguments. Values reach the result only through the allow-list;
+// a name reaches it only through declared.
+func Redact(verb string, args json.RawMessage, safe map[string][]string, declared []string, key []byte) (names []string, other int, fields map[string]string, sha string) {
 	names = []string{}
 	raw := []byte(args)
 	if len(strings.TrimSpace(string(raw))) == 0 {
@@ -316,15 +419,27 @@ func Redact(verb string, args json.RawMessage, safe map[string][]string) (names 
 			canonical = b
 		}
 	}
-	sum := sha256.Sum256(canonical)
-	sha = hex.EncodeToString(sum[:])[:16]
+	sha = strings.Repeat("0", 16)
+	if len(key) > 0 {
+		mac := hmac.New(sha256.New, key)
+		mac.Write(canonical)
+		sha = hex.EncodeToString(mac.Sum(nil))[:16]
+	}
 
 	obj, ok := parsed.(map[string]any)
 	if !ok {
-		return names, nil, sha
+		return names, 0, nil, sha
+	}
+	declaredSet := map[string]bool{}
+	for _, d := range declared {
+		declaredSet[d] = true
 	}
 	for k := range obj {
-		names = append(names, k)
+		if declaredSet[k] {
+			names = append(names, k)
+		} else {
+			other++
+		}
 	}
 	sort.Strings(names)
 	for _, name := range safe[verb] {
@@ -340,7 +455,7 @@ func Redact(verb string, args json.RawMessage, safe map[string][]string) (names 
 		}
 		fields[name] = s
 	}
-	return names, fields, sha
+	return names, other, fields, sha
 }
 
 func identifierShaped(s string) bool {

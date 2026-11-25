@@ -250,6 +250,8 @@ func Listen(dir, unit string, opts Options) (*Server, error) {
 	if opts.Logf == nil {
 		opts.Logf = func(string, ...any) {}
 	}
+	// A peer that connects in a loop must not write a line per attempt.
+	opts.Logf = rateLimitedLogf(opts.Logf, logWindow, time.Now)
 	if opts.HelloTimeout <= 0 {
 		opts.HelloTimeout = bridge.HelloTimeout
 	}

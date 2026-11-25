@@ -77,7 +77,8 @@ func TestLineCarriesTheContractFieldsAndNoValues(t *testing.T) {
 	l.Record(Crossing{
 		Session: "repo/branch", Service: "session", Verb: "update-this-session-description", Outcome: "ok",
 		Duration: 1500 * time.Microsecond, ReqBytes: 120, RespBytes: 45,
-		Args: json.RawMessage(`{"description":"rotate sk-live-XXXX before the release","reason":"sk-live-XXXX","zeta":1}`),
+		Args:         json.RawMessage(`{"description":"rotate sk-live-XXXX before the release","reason":"sk-live-XXXX","zeta":1}`),
+		DeclaredArgs: []string{"description", "reason", "zeta"},
 	})
 	path := filepath.Join(dir, "principal-1.ndjson")
 	raw := readFile(t, path)
@@ -110,19 +111,107 @@ func TestLineCarriesTheContractFieldsAndNoValues(t *testing.T) {
 	}
 }
 
+var testKey = []byte("0123456789abcdef0123456789abcdef")
+
 func TestArgsDigestIsOfTheCanonicalKeySortedCompactJSON(t *testing.T) {
-	_, _, sumA := Redact("whoami", json.RawMessage(`{"b": 2, "a": [1, 2]}`), nil)
-	_, _, sumB := Redact("whoami", json.RawMessage(`{"a":[1,2],"b":2}`), nil)
-	_, _, sumC := Redact("whoami", json.RawMessage(`{"a":[1,2],"b":3}`), nil)
+	_, _, _, sumA := Redact("whoami", json.RawMessage(`{"b": 2, "a": [1, 2]}`), nil, nil, testKey)
+	_, _, _, sumB := Redact("whoami", json.RawMessage(`{"a":[1,2],"b":2}`), nil, nil, testKey)
+	_, _, _, sumC := Redact("whoami", json.RawMessage(`{"a":[1,2],"b":3}`), nil, nil, testKey)
 	if sumA != sumB {
 		t.Errorf("key order or whitespace changed the digest: %s vs %s", sumA, sumB)
 	}
 	if sumA == sumC {
 		t.Error("a different value gave the same digest")
 	}
-	// First 16 hex of sha256 of the bytes {"a":[1,2],"b":2}.
-	if sumA != "68b7e88ecdcf999e" {
-		t.Errorf("digest %q, want 68b7e88ecdcf999e", sumA)
+}
+
+// The digest is keyed: a bare sha256 of a low-entropy argument could be
+// brute-forced from the file, and the same arguments must not give the same
+// digest under another log's key.
+func TestArgsDigestIsAKeyedHashNotABareSha256(t *testing.T) {
+	args := json.RawMessage(`{"a":[1,2],"b":2}`)
+	_, _, _, sum := Redact("whoami", args, nil, nil, testKey)
+	_, _, _, other := Redact("whoami", args, nil, nil, []byte("another key another key another."))
+	if sum == other {
+		t.Errorf("two keys gave the digest %s", sum)
+	}
+	// First 16 hex of the bare sha256 of {"a":[1,2],"b":2}.
+	if sum == "68b7e88ecdcf999e" || len(sum) != 16 {
+		t.Errorf("digest %q is the bare sha256 or the wrong length", sum)
+	}
+}
+
+func TestEachLogHasItsOwnRandomDigestKey(t *testing.T) {
+	a, _, dirA := newLog(t, nil)
+	b, _, dirB := newLog(t, nil)
+	c := Crossing{Service: "session", Verb: "whoami", Outcome: "ok", Args: json.RawMessage(`{"a":1}`)}
+	a.Record(c)
+	b.Record(c)
+	sumA := readEntries(t, filepath.Join(dirA, "principal-1.ndjson"))[0]["args_sha256"]
+	sumB := readEntries(t, filepath.Join(dirB, "principal-1.ndjson"))[0]["args_sha256"]
+	if sumA == sumB {
+		t.Errorf("two logs wrote the same digest %v for the same arguments", sumA)
+	}
+	a.Record(c)
+	if es := readEntries(t, filepath.Join(dirA, "principal-1.ndjson")); es[0]["args_sha256"] != es[1]["args_sha256"] {
+		t.Error("one log gave two digests for the same arguments")
+	}
+}
+
+// Only the names a verb declares are written; the rest of what a peer sent is
+// counted, so a request cannot put its own text into a line through an
+// argument name.
+func TestOnlyDeclaredArgumentNamesAreLoggedTheRestAreCounted(t *testing.T) {
+	l, _, dir := newLog(t, nil)
+	l.Record(Crossing{
+		Service: "session", Verb: "restart-this-session", Outcome: "refused",
+		Args:         json.RawMessage(`{"force":true,"sk-live-XXXX":1,"ghp_abcdef":2,"posture":"x"}`),
+		DeclaredArgs: []string{"force", "posture", "reason"},
+	})
+	path := filepath.Join(dir, "principal-1.ndjson")
+	raw := readFile(t, path)
+	if strings.Contains(raw, "sk-live") || strings.Contains(raw, "ghp_") {
+		t.Fatalf("an undeclared argument name reached the log:\n%s", raw)
+	}
+	e := readEntries(t, path)[0]
+	if fmt.Sprint(e["arg_names"]) != "[force posture]" {
+		t.Errorf("arg_names = %v, want [force posture]", e["arg_names"])
+	}
+	if e["other_arg_names"] != float64(2) {
+		t.Errorf("other_arg_names = %v, want 2", e["other_arg_names"])
+	}
+	// A verb that declares nothing logs no names at all.
+	l.Record(Crossing{Service: "session", Verb: "whoami", Outcome: "ok", Args: json.RawMessage(`{"principal":"x"}`)})
+	e = readEntries(t, path)[1]
+	if fmt.Sprint(e["arg_names"]) != "[]" || e["other_arg_names"] != float64(1) {
+		t.Errorf("whoami: arg_names %v other %v", e["arg_names"], e["other_arg_names"])
+	}
+}
+
+func TestALineIsAtMost512BytesAndStillJSON(t *testing.T) {
+	l, _, dir := newLog(t, nil)
+	long := strings.Repeat("a", 4000)
+	l.Record(Crossing{
+		Session: long, Service: "session", Verb: "cancel-restart", Outcome: "ok",
+		Args:         json.RawMessage(fmt.Sprintf(`{"target":%q,"session":%q}`, strings.Repeat("b", 128), strings.Repeat("c", 128))),
+		DeclaredArgs: []string{"target", "session", "child"},
+	})
+	raw := readFile(t, filepath.Join(dir, "principal-1.ndjson"))
+	lines := strings.Split(strings.TrimSuffix(raw, "\n"), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("%d lines:\n%s", len(lines), raw)
+	}
+	for i, ln := range lines {
+		if len(ln)+1 > MaxLineBytes {
+			t.Errorf("line %d is %d bytes, over %d", i, len(ln)+1, MaxLineBytes)
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(ln), &m); err != nil {
+			t.Errorf("line %d is not JSON: %v", i, err)
+		}
+		if m["truncated"] != true {
+			t.Errorf("line %d does not say it was truncated: %v", i, m)
+		}
 	}
 }
 
@@ -131,7 +220,7 @@ func TestEmptyAndOddArgumentsStillMakeALine(t *testing.T) {
 		"nil": nil, "empty object": json.RawMessage(`{}`), "array": json.RawMessage(`[1,2]`),
 		"scalar": json.RawMessage(`"sk-live-XXXX"`), "invalid": json.RawMessage(`{sk-live-XXXX`),
 	} {
-		names, fields, sum := Redact("whoami", args, nil)
+		names, _, fields, sum := Redact("whoami", args, nil, nil, testKey)
 		if names == nil || len(names) != 0 {
 			t.Errorf("%s: names = %#v, want an empty non-nil list", name, names)
 		}
@@ -146,7 +235,7 @@ func TestSafeFieldsLogOnlyIdentifierShapedValuesOfAllowListedNames(t *testing.T)
 	long := strings.Repeat("a", 129)
 	ok := strings.Repeat("a", 128)
 	args := fmt.Sprintf(`{"target":"repo/some-branch.1_x","session":"with space","branch":%q,"message":"abc","child":"abc","extra":%q}`, long, ok)
-	_, fields, _ := Redact("cancel-restart", json.RawMessage(args), safe)
+	_, _, fields, _ := Redact("cancel-restart", json.RawMessage(args), safe, nil, testKey)
 	if fields["target"] != "repo/some-branch.1_x" {
 		t.Errorf("identifier-shaped target dropped: %v", fields)
 	}
@@ -162,16 +251,16 @@ func TestSafeFieldsLogOnlyIdentifierShapedValuesOfAllowListedNames(t *testing.T)
 		}
 	}
 	// A 128-char identifier is within the bound.
-	_, fields, _ = Redact("cancel-restart", json.RawMessage(fmt.Sprintf(`{"branch":%q}`, ok)), safe)
+	_, _, fields, _ = Redact("cancel-restart", json.RawMessage(fmt.Sprintf(`{"branch":%q}`, ok)), safe, nil, testKey)
 	if fields["branch"] != ok {
 		t.Errorf("a 128-char identifier was dropped")
 	}
 	// Non-string values and other verbs log nothing.
-	_, fields, _ = Redact("cancel-restart", json.RawMessage(`{"target":5}`), safe)
+	_, _, fields, _ = Redact("cancel-restart", json.RawMessage(`{"target":5}`), safe, nil, testKey)
 	if len(fields) != 0 {
 		t.Errorf("a number was logged: %v", fields)
 	}
-	_, fields, _ = Redact("whoami", json.RawMessage(`{"target":"repo/b"}`), safe)
+	_, _, fields, _ = Redact("whoami", json.RawMessage(`{"target":"repo/b"}`), safe, nil, testKey)
 	if len(fields) != 0 {
 		t.Errorf("a verb with no allow-list entry logged %v", fields)
 	}
@@ -341,6 +430,97 @@ func TestAFailingWriteNeverFailsOrPanicsAndIsCountedAndLoggedOncePerMinute(t *te
 	l2.Record(Crossing{Service: "session", Verb: "whoami", Outcome: "ok"})
 	if l2.Failures() != 1 {
 		t.Errorf("an unusable directory: Failures() = %d, want 1", l2.Failures())
+	}
+}
+
+// The log is written under the operator's state directory by a process whose
+// session can write elsewhere under the same uid: a link or a special file put
+// where the log goes must not redirect or block a crossing.
+func TestASymlinkedLogFileIsNotFollowed(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "spinclass", "bridge")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "victim")
+	if err := os.WriteFile(target, []byte("keep\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, "p.ndjson")); err != nil {
+		t.Fatal(err)
+	}
+	l := Open(Options{Dir: dir, Principal: "p"})
+	l.Record(Crossing{Service: "session", Verb: "whoami", Outcome: "ok"})
+	if got := readFile(t, target); got != "keep\n" {
+		t.Errorf("the link target was written: %q", got)
+	}
+	if l.Failures() != 1 {
+		t.Errorf("Failures() = %d, want 1", l.Failures())
+	}
+}
+
+func TestASymlinkedLogDirectoryIsRefused(t *testing.T) {
+	real := filepath.Join(t.TempDir(), "elsewhere")
+	if err := os.MkdirAll(real, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	parent := filepath.Join(t.TempDir(), "spinclass")
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(parent, "bridge")
+	if err := os.Symlink(real, dir); err != nil {
+		t.Fatal(err)
+	}
+	l := Open(Options{Dir: dir, Principal: "p"})
+	l.Record(Crossing{Service: "session", Verb: "whoami", Outcome: "ok"})
+	if ents, _ := os.ReadDir(real); len(ents) != 0 {
+		t.Errorf("a log was written through the directory link: %v", ents)
+	}
+	if l.Failures() != 1 {
+		t.Errorf("Failures() = %d, want 1", l.Failures())
+	}
+}
+
+func TestASpecialFileWhereTheLogGoesIsRefusedWithoutBlocking(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "spinclass", "bridge")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(filepath.Join(dir, "p.ndjson"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l := Open(Options{Dir: dir, Principal: "p"})
+	done := make(chan struct{})
+	go func() {
+		l.Record(Crossing{Service: "session", Verb: "whoami", Outcome: "ok"})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Record blocked on a FIFO")
+	}
+	if l.Failures() != 1 {
+		t.Errorf("Failures() = %d, want 1", l.Failures())
+	}
+}
+
+func TestALooseExistingDirectoryAndFileAreTightened(t *testing.T) {
+	old := syscall.Umask(0)
+	defer syscall.Umask(old)
+	dir := filepath.Join(t.TempDir(), "spinclass", "bridge")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "p.ndjson"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	l := Open(Options{Dir: dir, Principal: "p"})
+	l.Record(Crossing{Service: "session", Verb: "whoami", Outcome: "ok"})
+	di, _ := os.Stat(dir)
+	fi, _ := os.Stat(filepath.Join(dir, "p.ndjson"))
+	if di.Mode().Perm() != 0o700 || fi.Mode().Perm() != 0o600 {
+		t.Errorf("dir %o file %o, want 700 and 600", di.Mode().Perm(), fi.Mode().Perm())
 	}
 }
 

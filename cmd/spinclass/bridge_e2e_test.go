@@ -286,8 +286,9 @@ func TestE2EHappyPath(t *testing.T) {
 	if e["verb"] != "whoami" || e["outcome"] != "ok" || e["service"] != "session" || e["session"] != sessionTestKey {
 		t.Errorf("crossing line = %v", e)
 	}
-	if jsonString(e["arg_names"]) != "[principal]" {
-		t.Errorf("arg_names = %v", e["arg_names"])
+	// whoami declares no parameter: the forged "principal" is counted, not named.
+	if jsonString(e["arg_names"]) != "[]" || e["other_arg_names"] != float64(1) {
+		t.Errorf("arg_names = %v other_arg_names = %v", e["arg_names"], e["other_arg_names"])
 	}
 	if h, _ := e["args_sha256"].(string); len(h) != 16 {
 		t.Errorf("args_sha256 = %v, want 16 hex characters", e["args_sha256"])
