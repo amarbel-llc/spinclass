@@ -63,39 +63,21 @@ carries the pair-without-rewrite case, with a test). Open questions for B:
    and his own agent? (The holder under another name, as written above, keeps
    today's behaviour; making the holder the default is the other direction.)
 2. How does the driver choose the other one for one command or one session?
-3. The question returns for drivers as a whole, implicit ones included (below):
-   what a driver's session is allowed to hold is one decision, not one per
-   launch path.
+3. The question returns for every session the operator starts himself, implicit
+   ones included (below, under 'Later'): what such a session is allowed to hold
+   is one decision, not one per launch path.
 
-### Implicit sessions: OPEN
+### Not given a holder in this build
 
-An implicit session is an agent the operator started in a repo's main checkout
-OUTSIDE spinclass; spinclass learns of it from the SessionStart hook
-(`MaterializeImplicit`) and never launches it. Do not read this as "implicit
-sessions are drivers". The operator's direction, quoted:
-
-> implicit sessions should have their own holders too, but there should be an
-> escape hatch for me launching them that blesses them with my agent when
-> necessary (hogtie maybe)
-
-So the direction is a holder for EVERY session, including the ones he starts
-himself, and his agent reaches a session only by an explicit blessing. Whether
-that is this build or the fast-follow (with option B for drivers) is being asked.
-Nothing is implemented for implicit sessions here, and the holder socket is not
-written into the direnv file. What stands in the way today: the hook runs inside
-the already-started agent, so a pair started there could reach the agent only
-through the file the `.envrc` loads (`WriteSpinclassEnv`), which is not the
-agent's own environment. Today an implicit session keeps the operator's agent
-because spinclass sets nothing for it.
-
-### What a blessing would be
-
-- A session cannot bless itself: it is an operator act, at his terminal or with
-  his card, never a tool a session can call.
-- It is time-limited and says what it blesses (his agent, for that session).
-- It is visible in `sc list` while it lasts, and logged.
-- It replaces nothing permanently: when it lapses the session is back on its own
-  holder.
+Ruled by the operator for this build: a session the operator starts himself,
+explicit or implicit, is not given a holder; it keeps his agent. That is the
+driver rule above, not a gap. An implicit session is an agent started in a repo's
+main checkout OUTSIDE spinclass: spinclass learns of it from the SessionStart hook
+(`MaterializeImplicit`) and never launches it, so there is no launch to give a
+holder to. Nothing is implemented for it, and the holder socket is not written
+into the direnv file. (The hook runs inside the already-started agent, so a pair
+started there could reach the agent only through the file the `.envrc` loads
+(`WriteSpinclassEnv`), which is not the agent's own environment.)
 
 ## Resume rebuilds the stored unit spec (B-F2, A-H1)
 
@@ -147,10 +129,48 @@ retargeted as above) or removed for an unconfined child. With the switch off the
 hand-off is run exactly as before (inherited environment). A failing hand-off
 stops a pair this start launched.
 
+## A lost pair is told, not hidden (B-F3, A-M3)
+
+The keys live in fibby's memory, so a pair that is lost (a reboot, a dead unit)
+is replaced with a NEW key and every certificate for the old one is void. The
+operator accepted that only if he is told. What happens (`internal/0/keyholder/
+remint.go`, `cmd/spinclass/keyholder_remint.go`):
+
+- The pair package records the key's SHA256 fingerprint at the mint, and keeps a
+  key history `<state>/spinclass/keyholder/<hash>.last.json` NEXT TO the session
+  directory, not inside it (replacing a lost pair removes the directory whole).
+  A deliberate stop (`sc close`, a failed launch's undo) ends the history; a lost
+  pair does not, so the next mint is known to be a change.
+- Every path that replaces a pair (start, resume, spawn, the start hand-off, the
+  restart preflight) comes through one function, which prints the old and new
+  fingerprint on stderr, writes the lifecycle log, and wakes the session's
+  holders and its spawner with both fingerprints, at most once per 10 minutes per
+  session (the ones held back are counted in the next wake).
+- `sc list` (text, and the `keyholder` field of `--format json`) and session-health
+  show `keyholder: DEAD` for a recorded pair that is not running and `keyholder:
+  RE-MINTED ...` while no certificate for the new key is installed
+  (`<state>/spinclass/keyholder/<hash>/cert.pub` exists).
+- clown relaunches a restarted session without `sc resume`, so the restart
+  preflight, and `restart-preflight --rearm`, start a lost pair BEFORE they approve
+  the relaunch; if the pair cannot be started they refuse the restart naming the
+  cause (a relaunch on a holder socket nothing listens on would fail every
+  signature). restart-this-session, restart-child-session, `sc restart` and
+  restart-hung-child all end in that preflight. A session that never had a pair is
+  not touched, and with the switch off nothing is started.
+
+Not covered: a pair that dies while the session runs is noticed by `sc list` and
+session-health, and fixed by the next resume or restart; nothing restarts it in
+the background.
+
 ## Later
 
-His holder is a software card with slots 9A-9C and 82/83: per-purpose keys AND
-intermediate signing authorities in one holder. That sits beside the one-key rule
-of this build. `sc session-key` refuses any key the pair did not mint (K6), and
-that check stays: several keys later means naming them by purpose, not loosening
-the check.
+For Sunday's review, not this build. Every session gets a holder, the ones the
+operator starts himself included, and his agent reaches a session only by an
+explicit blessing: an operator act (never a tool a session can call; at his
+terminal or with his card), time-limited, saying what it blesses (his agent, for
+that one session), visible in `sc list` while it lasts and logged, and when it
+lapses the session is back on its own holder. His holder is also a software card
+with slots 9A-9C and 82/83: per-purpose keys AND intermediate signing authorities
+in one holder. That sits beside the one-key rule of this build: `sc session-key`
+refuses any key the pair did not mint (K6), and that check stays; several keys
+later means naming them by purpose, not loosening the check.
