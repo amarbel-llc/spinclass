@@ -146,33 +146,51 @@ func restartHandoffMissingObstacle(key string) string {
 // principal, the one {principal} expands to and clown restarts it by. force
 // skips the running-job obstacle and nothing else.
 func restartPlan(st *session.State, principal string, force bool) (argv []string, obstacle string, err error) {
+	argv, why, err := restartPlanWhy(st, principal, force)
+	if why != nil {
+		return nil, why.text, err
+	}
+	return argv, "", err
+}
+
+// restartPlanWhy is restartPlan with the obstacle's bridge text.
+func restartPlanWhy(st *session.State, principal string, force bool) (argv []string, why *policyObstacle, err error) {
 	if st.Kind == session.KindImplicit {
-		return nil, fmt.Sprintf("%s is a main-checkout (implicit) session; only worktree sessions can be restarted", st.Key()), nil
+		return nil, &policyObstacle{
+			text:   fmt.Sprintf("%s is a main-checkout (implicit) session; only worktree sessions can be restarted", st.Key()),
+			bridge: bridgeRefusalPrefix + "restart-this-session applies only to worktree sessions and this is a main-checkout (implicit) session; the operator at a terminal outside the unit can start a worktree session with `sc start`",
+		}, nil
 	}
 	if _, _, perr := applyRecordedPrincipal([]string{principalPlaceholder}, principal, false, false); perr != nil {
-		return nil, fmt.Sprintf("%s cannot be restarted: %v", st.Key(), perr), nil
+		return nil, &policyObstacle{
+			text:   fmt.Sprintf("%s cannot be restarted: %v", st.Key(), perr),
+			bridge: bridgeRefusalPrefix + "restart-this-session cannot restart this session because its recorded principal is not one the restart hand-off can name; the operator at a terminal outside the unit can inspect it with `sc list`",
+		}, nil
 	}
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, "", fmt.Errorf("resolving the home directory to read sweatfiles: %w", err)
+		return nil, nil, fmt.Errorf("resolving the home directory to read sweatfiles: %w", err)
 	}
 	h, err := sweatfileio.LoadHierarchy(home, st.RepoPath)
 	if err != nil {
-		return nil, "", fmt.Errorf("reading the sweatfile hierarchy: %w", err)
+		return nil, nil, fmt.Errorf("reading the sweatfile hierarchy: %w", err)
 	}
 	argv, _ = sweatfileio.TrustedRestartHandoff(h, home, st.RepoPath)
 	if len(argv) == 0 {
-		return nil, restartHandoffMissingObstacle(st.Key()), nil
+		return nil, &policyObstacle{text: restartHandoffMissingObstacle(st.Key()), bridge: bridgeRestartSelfRefusal}, nil
 	}
 
 	// force is the operator-approved escalation (always-ask in perms.AlwaysAsk,
 	// FDR 0037): it accepts killing a running job, and only that. Every check
 	// above still stands.
 	if j, jerr := job.Read(st.WorktreePath); !force && jerr == nil && j.Status == job.StatusRunning {
-		return nil, fmt.Sprintf("a %s job (%s) is still running in %s; a restart would kill it, so let it finish or cancel it first (or restart with force, which asks the operator)", j.Kind, j.ID, st.Key()), nil
+		return nil, &policyObstacle{
+			text:   fmt.Sprintf("a %s job (%s) is still running in %s; a restart would kill it, so let it finish or cancel it first (or restart with force, which asks the operator)", j.Kind, j.ID, st.Key()),
+			bridge: bridgeRefusalPrefix + "a job is still running in this session and a restart would kill it; let the job finish, or a holder with the right \"restart\" on this session, or the operator at a terminal outside the unit, runs `sc restart-child-session <session>` with --force to restart over it (--force is always asked of the human)",
+		}, nil
 	}
-	return argv, "", nil
+	return argv, nil, nil
 }
 
 // normalizePosture maps what a caller sent to what is recorded: "" and "keep"
@@ -196,14 +214,30 @@ func normalizePosture(p string) (string, error) {
 // attended, additionally needs a trusted-layer allow-posture-widening. Narrowing
 // to unattended needs no key. "" (keep) is never an obstacle.
 func postureObstacle(st *session.State, posture string) string {
-	if posture == "" {
-		return ""
+	if why := postureObstacleWhy(st, posture); why != nil {
+		return why.text
 	}
+	return ""
+}
+
+// postureObstacleWhy is postureObstacle with the obstacle's bridge text (nil when
+// there is none; the two I/O failures carry no bridge text, they are errors).
+func postureObstacleWhy(st *session.State, posture string) *policyObstacle {
+	if posture == "" {
+		return nil
+	}
+	const who = "the operator at a terminal outside the unit"
 	if stateDir, err := confinement.DefaultStateDir(); err != nil || confinement.LaunchedConfined(stateDir, st.WorktreePath) {
-		return fmt.Sprintf("%s was launched confined (or its confinement could not be read), so its posture is its confinement profile's and cannot be changed by a restart", st.Key())
+		return &policyObstacle{
+			text:   fmt.Sprintf("%s was launched confined (or its confinement could not be read), so its posture is its confinement profile's and cannot be changed by a restart", st.Key()),
+			bridge: bridgeRefusalPrefix + "a restart cannot change this session's posture: it was launched confined (or its confinement could not be read), so its posture is its confinement profile's; " + who + " changes the profile",
+		}
 	}
 	if st.Entry == nil {
-		return fmt.Sprintf("%s has no pinned session entry (it predates pinning), so there is nothing to record a posture in; resume it once, which pins it, then ask again", st.Key())
+		return &policyObstacle{
+			text:   fmt.Sprintf("%s has no pinned session entry (it predates pinning), so there is nothing to record a posture in; resume it once, which pins it, then ask again", st.Key()),
+			bridge: bridgeRefusalPrefix + "this session has no pinned session entry (it predates pinning), so a restart has nothing to record a posture in; " + who + " runs `sc resume <session>` once, which pins it",
+		}
 	}
 	if posture == restartPostureUnattended {
 		entry := st.Entry.Resume
@@ -211,23 +245,29 @@ func postureObstacle(st *session.State, posture string) string {
 			entry = st.Entry.Start
 		}
 		if err := spawn.PinnedEntryExcludesDontAsk(entry); err != nil {
-			return fmt.Sprintf("%s cannot run unattended: %v", st.Key(), err)
+			return &policyObstacle{
+				text:   fmt.Sprintf("%s cannot run unattended: %v", st.Key(), err),
+				bridge: bridgeRefusalPrefix + "this session cannot run unattended because its pinned entry cannot take claude's dontAsk mode; " + who + " can change the entry",
+			}
 		}
-		return ""
+		return nil
 	}
 	// attended: a widening.
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Sprintf("resolving the home directory to read sweatfiles: %v", err)
+		return &policyObstacle{text: fmt.Sprintf("resolving the home directory to read sweatfiles: %v", err)}
 	}
 	h, err := sweatfileio.LoadHierarchy(home, st.RepoPath)
 	if err != nil {
-		return fmt.Sprintf("reading the sweatfile hierarchy: %v", err)
+		return &policyObstacle{text: fmt.Sprintf("reading the sweatfile hierarchy: %v", err)}
 	}
 	if allowed, _ := sweatfileio.TrustedAllowPostureWidening(h, home, st.RepoPath); !allowed {
-		return "widening a session's permissions (unattended to attended) is not allowed: an operator must set `allow-posture-widening = true` under [session-entry] in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored). It always asks a human even then"
+		return &policyObstacle{
+			text:   "widening a session's permissions (unattended to attended) is not allowed: an operator must set `allow-posture-widening = true` under [session-entry] in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored). It always asks a human even then",
+			bridge: bridgeRefusalPrefix + "widening a session's permissions (unattended to attended) needs the trusted allow-posture-widening = true under [session-entry]; the operator sets it in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored), and it always asks a human even then",
+		}
 	}
-	return ""
+	return nil
 }
 
 // queueRestart records a RestartRequest on st and runs the hand-off. requester
@@ -242,23 +282,23 @@ func queueRestart(st *session.State, requester, principal, reason string, force 
 // (spinclass#342); posture is "" (keep), unattended or attended, already
 // normalised by the caller.
 func queueRestartPosture(st *session.State, requester, principal, reason string, force bool, posture string) (string, error) {
-	argv, obstacle, err := restartPlan(st, principal, force)
+	argv, why, err := restartPlanWhy(st, principal, force)
 	if err != nil {
 		return "", err
 	}
-	if obstacle != "" {
-		if obstacle == restartHandoffMissingObstacle(st.Key()) {
-			return "", &settingAbsentError{msg: obstacle, kind: settingRestartHandoff}
-		}
-		return "", errors.New(obstacle)
+	if why != nil {
+		return "", why.err()
 	}
-	if obstacle := postureObstacle(st, posture); obstacle != "" {
-		return "", errors.New(obstacle)
+	if why := postureObstacleWhy(st, posture); why != nil {
+		return "", why.err()
 	}
 	// Attended is a widening: a session may not widen itself, only a holder or
 	// the operator may, and the preflight re-checks the right.
 	if posture == restartPostureAttended && requester == principal {
-		return "", errors.New("a session may not widen its own permissions; ask a holder with the restart right, or the operator")
+		return "", &policyRefusalError{
+			msg:    "a session may not widen its own permissions; ask a holder with the restart right, or the operator",
+			bridge: bridgeRefusalPrefix + "a session may not widen its own permissions; a holder with the right \"restart\" on this session, or the operator at a terminal outside the unit, can restart it into the attended posture",
+		}
 	}
 
 	when := restartWhenIdle
@@ -378,7 +418,7 @@ func handleRestartThisSession(ctx context.Context, args json.RawMessage, _ comma
 	}
 	text, err := runRestartThisSessionFor(ctx, p)
 	if err != nil {
-		return bridgeSettingRefusal(ctx, err, settingRestartHandoff, bridgeRestartSelfRefusal), nil
+		return bridgeRefusalResult(ctx, err), nil
 	}
 	return command.TextResult(text), nil
 }

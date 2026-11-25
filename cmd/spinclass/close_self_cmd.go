@@ -65,36 +65,56 @@ func selfCloseNotAllowedObstacle(key string) string {
 // It is the checks the tool and the runner share, so a request that passes here
 // is one the runner will also accept unless something changed in between.
 func selfCloseObstacle(st *session.State, principal string) (string, error) {
+	why, err := selfCloseObstacleWhy(st, principal)
+	if why != nil {
+		return why.text, err
+	}
+	return "", err
+}
+
+// selfCloseObstacleWhy is selfCloseObstacle with the obstacle's bridge text. Every
+// obstacle here is a rule saying no, so every one has it.
+func selfCloseObstacleWhy(st *session.State, principal string) (*policyObstacle, error) {
+	const who = "the operator at a terminal outside the unit"
 	allowed, err := selfCloseScope(st)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if !allowed {
-		return selfCloseNotAllowedObstacle(st.Key()), nil
+		return &policyObstacle{text: selfCloseNotAllowedObstacle(st.Key()), bridge: bridgeCloseSelfRefusal}, nil
 	}
 
 	if j, jerr := job.Read(st.WorktreePath); jerr == nil && j.Status == job.StatusRunning {
-		return fmt.Sprintf("a %s job (%s) is still running in %s; let it finish or cancel it first", j.Kind, j.ID, st.Key()), nil
+		return &policyObstacle{
+			text:   fmt.Sprintf("a %s job (%s) is still running in %s; let it finish or cancel it first", j.Kind, j.ID, st.Key()),
+			bridge: bridgeRefusalPrefix + "a job is still running in this session; let it finish and ask again, or " + who + " ends the session with `sc close <session>`",
+		}, nil
 	}
 
 	orphaned, err := soleHolderOf(st, principal)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if len(orphaned) > 0 {
-		return fmt.Sprintf(
-			"closing %s would leave %s with no accepted holder; grant a handle on %s first (grant-session-handle) or reap %s",
-			st.Key(), strings.Join(orphaned, ", "), pluralIt(len(orphaned)), pluralIt(len(orphaned))), nil
+		return &policyObstacle{
+			text: fmt.Sprintf(
+				"closing %s would leave %s with no accepted holder; grant a handle on %s first (grant-session-handle) or reap %s",
+				st.Key(), strings.Join(orphaned, ", "), pluralIt(len(orphaned)), pluralIt(len(orphaned))),
+			bridge: bridgeRefusalPrefix + "closing this session would leave a session with no accepted holder; a holder with the right \"grant\" on it, or " + who + ", grants a handle on it first with `sc grant-session-handle`, or reaps it",
+		}, nil
 	}
 
 	blocker, err := spinclose.Blocker(st.RepoPath, st.WorktreePath, st.Branch)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if blocker != "" {
-		return blocker + " Merge or commit it first; close-this-session never discards work.", nil
+		return &policyObstacle{
+			text:   blocker + " Merge or commit it first; close-this-session never discards work.",
+			bridge: bridgeRefusalPrefix + "this session holds work that is not landed (uncommitted changes, or commits not merged), and close-this-session never discards work; land it and ask again, or " + who + " discards it with `sc close --force <session>`",
+		}, nil
 	}
-	return "", nil
+	return nil, nil
 }
 
 func pluralIt(n int) string {
@@ -146,15 +166,12 @@ func runCloseThisSession(ctx context.Context, args json.RawMessage) (string, err
 		return "", err
 	}
 
-	obstacle, err := selfCloseObstacle(st, principal)
+	why, err := selfCloseObstacleWhy(st, principal)
 	if err != nil {
 		return "", err
 	}
-	if obstacle != "" {
-		if obstacle == selfCloseNotAllowedObstacle(st.Key()) {
-			return "", &settingAbsentError{msg: obstacle, kind: settingAllowSelfClose}
-		}
-		return "", errors.New(obstacle)
+	if why != nil {
+		return "", why.err()
 	}
 
 	request := &session.CloseRequest{RequestedAt: time.Now().UTC(), Principal: principal}
@@ -175,7 +192,7 @@ func closeCallerSession(ctx context.Context) (principal string, st *session.Stat
 		if err != nil {
 			return "", nil, err
 		}
-		if err := guardHandleTarget(st, "close"); err != nil {
+		if err := bridgeGuardTarget(st, "close"); err != nil {
 			return "", nil, err
 		}
 		return st.Principal, st, nil
@@ -204,7 +221,7 @@ func handleCloseThisSession(ctx context.Context, args json.RawMessage, _ command
 	}
 	text, err := runCloseThisSession(ctx, args)
 	if err != nil {
-		return bridgeSettingRefusal(ctx, err, settingAllowSelfClose, bridgeCloseSelfRefusal), nil
+		return bridgeRefusalResult(ctx, err), nil
 	}
 	return command.TextResult(text), nil
 }

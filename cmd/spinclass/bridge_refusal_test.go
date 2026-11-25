@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	refusalCancelRestart = "refused: cancel-restart naming another session needs the right \"restart\" on that session, which a session inside its unit may not use whatever it holds; a holder with the right outside the unit, or the operator running `sc cancel-restart` at a terminal outside the unit, can cancel it (cancel-restart with no child cancels this session's own)"
+	refusalCancelRestart = "refused: cancel-restart naming another session needs the right \"restart\" on that session, which a session inside its unit may not use whatever it holds; a holder with the right, or the operator, runs `sc cancel-restart --child <session>` at a terminal outside the unit (cancel-restart with no child cancels this session's own)"
 	refusalListAccept    = "refused: list-handles with accept has no right a session inside its unit can be granted; the operator runs `sc list-handles --accept` at a terminal outside the unit (a plain list-handles is allowed)"
 	refusalRestartSelf   = "refused: restart-this-session needs the trusted [session-entry].restart hand-off; the operator sets it in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored)"
 	refusalCloseSelf     = "refused: close-this-session needs the trusted [permissions].allow-self-close = true; the operator sets it in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored)"

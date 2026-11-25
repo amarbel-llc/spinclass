@@ -53,7 +53,7 @@ func callerSessionFor(ctx context.Context, verb string) (principal string, st *s
 		if err != nil {
 			return "", nil, err
 		}
-		if err := guardHandleTarget(st, verb); err != nil {
+		if err := bridgeGuardTarget(st, verb); err != nil {
 			return "", nil, err
 		}
 		return st.Principal, st, nil

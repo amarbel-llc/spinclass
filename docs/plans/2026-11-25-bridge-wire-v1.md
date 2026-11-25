@@ -94,7 +94,7 @@ value from the request.
 | `whoami` | Answers for the session the listener was created for, whatever the request names (see "Identity" below). Refused only when that session has no usable record. |
 | `list-handles` | Plain listing is allowed. With `accept` (or arguments that do not parse): `refused: list-handles with accept has no right a session inside its unit can be granted; the operator runs `sc list-handles --accept` at a terminal outside the unit (a plain list-handles is allowed)` |
 | `restart-this-session` | Allowed on the session itself. Without the trusted hand-off: `refused: restart-this-session needs the trusted [session-entry].restart hand-off; the operator sets it in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored)` |
-| `cancel-restart` | With no `child`, cancels this session's own queued restart: allowed. Naming a child: `refused: cancel-restart naming another session needs the right "restart" on that session, which a session inside its unit may not use whatever it holds; a holder with the right outside the unit, or the operator running `sc cancel-restart` at a terminal outside the unit, can cancel it (cancel-restart with no child cancels this session's own)` |
+| `cancel-restart` | With no `child`, cancels this session's own queued restart: allowed. Naming a child: `refused: cancel-restart naming another session needs the right "restart" on that session, which a session inside its unit may not use whatever it holds; a holder with the right, or the operator, runs `sc cancel-restart --child <session>` at a terminal outside the unit (cancel-restart with no child cancels this session's own)` |
 | `close-this-session` | Allowed on the session itself. Without the trusted setting: `refused: close-this-session needs the trusted [permissions].allow-self-close = true; the operator sets it in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored)` |
 
 The always-ask floor (`perms.AlwaysAsk`) lives only in the hook that runs inside
@@ -111,9 +111,27 @@ The other bridged verbs have no escalation argument: `whoami` takes none,
 (refused above); `reason` of a restart is free text that reaches the hand-off as
 one argv element, never a shell.
 
-A session verb refused for any other reason (a running job, a missing session,
-an obstacle to a restart or close that is not a missing setting) is a tool
-result with `isError`, not a refusal. A call to a tool outside the five
+Every POLICY refusal of `restart-this-session` and `close-this-session` (a rule
+says no) is a refusal in this form: `refused: `, what is true, and who can lift
+the rule (the operator in the global sweatfile, a holder with the right, or `sc`
+at a terminal outside the unit), never a path the session itself has. It is
+-32001 and logged and counted as `refused`. They are, with the text each has over
+the bridge (the text off the bridge is unchanged):
+
+| Rule | Over the bridge |
+| --- | --- |
+| a job is running (restart) | `refused: a job is still running in this session and a restart would kill it; let the job finish, or a holder with the right "restart" on this session, or the operator at a terminal outside the unit, runs `sc restart-child-session <session>` with --force to restart over it (--force is always asked of the human)` |
+| a job is running (close) | `refused: a job is still running in this session; let it finish and ask again, or the operator at a terminal outside the unit ends the session with `sc close <session>`` |
+| closing would orphan a session (close) | `refused: closing this session would leave a session with no accepted holder; a holder with the right "grant" on it, or the operator at a terminal outside the unit, grants a handle on it first with `sc grant-session-handle`, or reaps it` |
+| unlanded work (close) | `refused: this session holds work that is not landed (uncommitted changes, or commits not merged), and close-this-session never discards work; land it and ask again, or the operator at a terminal outside the unit discards it with `sc close --force <session>`` |
+| no restart hand-off, no `allow-self-close` | the two texts in the table above |
+| a main-checkout (implicit) session, or a closed one | `refused: this session is a main-checkout (implicit) session or is closed, so there is nothing to <restart or close>; the operator at a terminal outside the unit can see its state with `sc list --closed`` (restart also has `refused: restart-this-session applies only to worktree sessions and this is a main-checkout (implicit) session; the operator at a terminal outside the unit can start a worktree session with `sc start``) |
+| the recorded principal is not one the hand-off can name | `refused: restart-this-session cannot restart this session because its recorded principal is not one the restart hand-off can name; the operator at a terminal outside the unit can inspect it with `sc list`` |
+| posture rules (reached through `restart-child-session`; a bridged `restart-this-session` is refused earlier for any `posture`) | each is `refused: ` with the rule and `the operator at a terminal outside the unit` or the trusted setting the operator sets; a session widening itself: `refused: a session may not widen its own permissions; a holder with the right "restart" on this session, or the operator at a terminal outside the unit, can restart it into the attended posture` |
+
+An error is not a rule: a hand-off that will not exec, an unreadable sweatfile or
+a failed write stays a tool result with `isError`, logged and counted as `error`.
+Arguments that do not parse likewise. A call to a tool outside the five
 (`session-health` and `update-this-session-description` among them: a listed
 verb that can only refuse is noise) is -32602, `unknown tool: <name>`.
 
