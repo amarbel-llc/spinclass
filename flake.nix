@@ -408,6 +408,7 @@
             gateNix ? null,
             gateGit ? null,
             gateSh ? null,
+            openssh ? null,
           }:
           pkgs.buildGoAuto {
             pname = "spinclass";
@@ -446,7 +447,13 @@
             ++ (lib.optional (gh != null) "-X main.ghBin=${gh}/bin/gh")
             ++ (lib.optional (gateNix != null) "-X main.gateNixBin=${gateNix}/bin/nix")
             ++ (lib.optional (gateGit != null) "-X main.gateGitBin=${gateGit}/bin/git")
-            ++ (lib.optional (gateSh != null) "-X main.gateShBin=${gateSh}/bin/sh");
+            ++ (lib.optional (gateSh != null) "-X main.gateShBin=${gateSh}/bin/sh")
+            # `sc session-key` runs ssh-add and ssh-keygen against a session's holder
+            # socket: pinned so the call never resolves them from the caller's PATH.
+            ++ (lib.optionals (openssh != null) [
+              "-X main.sshAddBin=${openssh}/bin/ssh-add"
+              "-X main.sshKeygenBin=${openssh}/bin/ssh-keygen"
+            ]);
 
             # godyn-only knobs (buildGodynModule).
             nativeArgs.commit = spinclassCommit;
@@ -588,6 +595,8 @@
           gateNix = pkgs.nix;
           gateGit = pkgs.git;
           gateSh = pkgs.bash;
+          # sc session-key's ssh-add and ssh-keygen (key holder).
+          openssh = pkgs.openssh;
         };
 
         spinclass-race = pkgs.buildGoRace { base = mkSpinclass { }; };
