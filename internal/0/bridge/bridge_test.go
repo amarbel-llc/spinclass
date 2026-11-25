@@ -311,17 +311,21 @@ func runReply(t *testing.T, v vector) {
 // changing the digest file (`sha256sum vectors.json > vectors.json.sha256`
 // in testdata) fails here.
 func TestVectorsMatchTheirSha256File(t *testing.T) {
-	const name = "vectors.json"
-	b, err := os.ReadFile(filepath.Join("testdata", name))
-	if err != nil {
-		t.Fatal(err)
-	}
-	want, err := os.ReadFile(filepath.Join("testdata", name+".sha256"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := fmt.Sprintf("%x  %s\n", sha256.Sum256(b), name); got != string(want) {
-		t.Errorf("%s drifted from %s.sha256: sha256 is now\n%s", name, name, got)
+	// vectors.json is the wire's; admission-vectors.json is the listener's
+	// admission decision (the cgroup file and the peer's cgroup), run by both
+	// repositories.
+	for _, name := range []string{"vectors.json", "admission-vectors.json"} {
+		b, err := os.ReadFile(filepath.Join("testdata", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := os.ReadFile(filepath.Join("testdata", name+".sha256"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := fmt.Sprintf("%x  %s\n", sha256.Sum256(b), name); got != string(want) {
+			t.Errorf("%s drifted from %s.sha256: sha256 is now\n%s", name, name, got)
+		}
 	}
 }
 

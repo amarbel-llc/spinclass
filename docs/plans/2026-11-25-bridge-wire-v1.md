@@ -420,3 +420,29 @@ all eight reserved labels. Both implementations MUST pass every case.
 and a change to the file MUST change the digest and bump this text. The file
 has 82 array entries (a test run reports more than that, one per subtest and
 helper case: count entries, not test lines).
+
+### Admission vectors
+
+`internal/0/bridge/testdata/admission-vectors.json` (digest in
+`admission-vectors.json.sha256`) is the second file in the same home, and clown
+vendors both from here. It was written by clown (round 2, the four listener
+behaviours as vectors, from clown's `internal/0/peercheck/testdata`) and is
+byte-identical to clown's copy. It is a JSON array of cases, each `{name, steps}`;
+a step is `{file, peer, admit}` and the steps of one case share one cgroup file
+path, so a rewrite or removal between steps shows the file is read per
+connection. `file` is `absent`, `dir`, `long` (over the size bound),
+`symlink:<content>` (a link to a file holding `<content>`), `abs:<content>` or
+`raw:<content>` (a regular 0600 file holding exactly `<content>`); `peer` is the
+connector's cgroup; `admit` is the expected decision. It has 21 cases.
+Spinclass runs it through its own file reader and admission path
+(`internal/alfa/bridgeserver`, `TestAdmissionVectors`), with strict equality
+standing in for clown's `CheckPeerExact`.
+
+Spinclass does not yet pass one case, and says so instead of editing the file:
+"one trailing newline is tolerated" expects a file holding the path plus one
+newline to admit, while this contract (Admission, above) has the file hold
+exactly the path with NO trailing newline and the reader refuses a newline as a
+control character. Clown writes no newline, so the two agree on every file clown
+produces; the disagreement is only about a hand-written file. It stays a listed
+known disagreement in the test until the two sides settle which rule is the
+contract.
