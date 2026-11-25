@@ -1317,6 +1317,18 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 				_vKeyholderMode.MarkConsumedString()
 			}
 		}
+		if _vKeyholderFibby, _ok := _vKeyholder.Field("fibby"); _ok && _vKeyholderFibby.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vKeyholderFibby.Leaf); _xok {
+				keyholderVal14.Fibby = &_x
+				_vKeyholderFibby.MarkConsumedString()
+			}
+		}
+		if _vKeyholderPiggy, _ok := _vKeyholder.Field("piggy"); _ok && _vKeyholderPiggy.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vKeyholderPiggy.Leaf); _xok {
+				keyholderVal14.Piggy = &_x
+				_vKeyholderPiggy.MarkConsumedString()
+			}
+		}
 		d.data.Keyholder = keyholderVal14
 	} else {
 		keyholderVal14 := &Keyholder{}
@@ -1326,6 +1338,20 @@ func decodeSweatfileParsed(doc *document.Document) (*SweatfileDocument, error) {
 			if _x, _xok := cst.ExtractString(_vMode.Leaf); _xok {
 				keyholderVal14.Mode = &_x
 				_vMode.MarkConsumedString()
+			}
+		}
+		if _vFibby, _ok := model.Field("fibby"); _ok && _vFibby.Kind == cst.VLeaf {
+			_foundKeyholder = true
+			if _x, _xok := cst.ExtractString(_vFibby.Leaf); _xok {
+				keyholderVal14.Fibby = &_x
+				_vFibby.MarkConsumedString()
+			}
+		}
+		if _vPiggy, _ok := model.Field("piggy"); _ok && _vPiggy.Kind == cst.VLeaf {
+			_foundKeyholder = true
+			if _x, _xok := cst.ExtractString(_vPiggy.Leaf); _xok {
+				keyholderVal14.Piggy = &_x
+				_vPiggy.MarkConsumedString()
 			}
 		}
 		if _foundKeyholder {
@@ -2428,6 +2454,16 @@ func (d *SweatfileDocument) Encode() ([]byte, error) {
 		tableNode := cst.EnsureChildTable(d.cstDoc.Root(), d.cstDoc.Root(), "keyholder")
 		if d.data.Keyholder.Mode != nil {
 			if err := cst.SetAny(tableNode, "mode", *d.data.Keyholder.Mode); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.Keyholder.Fibby != nil {
+			if err := cst.SetAny(tableNode, "fibby", *d.data.Keyholder.Fibby); err != nil {
+				return nil, fmt.Errorf("%w", err)
+			}
+		}
+		if d.data.Keyholder.Piggy != nil {
+			if err := cst.SetAny(tableNode, "piggy", *d.data.Keyholder.Piggy); err != nil {
 				return nil, fmt.Errorf("%w", err)
 			}
 		}
@@ -4018,6 +4054,18 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 				_vKeyholderMode.MarkConsumedString()
 			}
 		}
+		if _vKeyholderFibby, _ok := _vKeyholder.Field("fibby"); _ok && _vKeyholderFibby.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vKeyholderFibby.Leaf); _xok {
+				keyholderVal14.Fibby = &_x
+				_vKeyholderFibby.MarkConsumedString()
+			}
+		}
+		if _vKeyholderPiggy, _ok := _vKeyholder.Field("piggy"); _ok && _vKeyholderPiggy.Kind == cst.VLeaf {
+			if _x, _xok := cst.ExtractString(_vKeyholderPiggy.Leaf); _xok {
+				keyholderVal14.Piggy = &_x
+				_vKeyholderPiggy.MarkConsumedString()
+			}
+		}
 		data.Keyholder = keyholderVal14
 	} else {
 		keyholderVal14 := &Keyholder{}
@@ -4027,6 +4075,20 @@ func DecodeSweatfileInto(data *Sweatfile, sub *cst.Value) error {
 			if _x, _xok := cst.ExtractString(_vMode.Leaf); _xok {
 				keyholderVal14.Mode = &_x
 				_vMode.MarkConsumedString()
+			}
+		}
+		if _vFibby, _ok := sub.Field("fibby"); _ok && _vFibby.Kind == cst.VLeaf {
+			_foundKeyholder = true
+			if _x, _xok := cst.ExtractString(_vFibby.Leaf); _xok {
+				keyholderVal14.Fibby = &_x
+				_vFibby.MarkConsumedString()
+			}
+		}
+		if _vPiggy, _ok := sub.Field("piggy"); _ok && _vPiggy.Kind == cst.VLeaf {
+			_foundKeyholder = true
+			if _x, _xok := cst.ExtractString(_vPiggy.Leaf); _xok {
+				keyholderVal14.Piggy = &_x
+				_vPiggy.MarkConsumedString()
 			}
 		}
 		if _foundKeyholder {
@@ -5115,6 +5177,16 @@ func EncodeSweatfileFrom(data *Sweatfile, doc *document.Document, container *cst
 		tableNode := cst.EnsureChildTable(doc.Root(), container, "keyholder")
 		if data.Keyholder.Mode != nil {
 			if err := cst.SetAny(tableNode, "mode", *data.Keyholder.Mode); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.Keyholder.Fibby != nil {
+			if err := cst.SetAny(tableNode, "fibby", *data.Keyholder.Fibby); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
+		if data.Keyholder.Piggy != nil {
+			if err := cst.SetAny(tableNode, "piggy", *data.Keyholder.Piggy); err != nil {
 				return fmt.Errorf("%w", err)
 			}
 		}

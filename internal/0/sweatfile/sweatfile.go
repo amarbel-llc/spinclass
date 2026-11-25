@@ -353,6 +353,15 @@ type Keyholder struct {
 	// Mode is "off" or "on"; unset means off. The last trusted layer that sets
 	// it wins. Any other value is refused by sweatfileio.ParseKeyholderMode.
 	Mode *string `toml:"mode"`
+
+	// Fibby and Piggy are the absolute store paths of the two programs a pair
+	// runs (`.../bin/fibby`, `.../bin/piggy`). The host's configuration writes
+	// them from the one piggy the host runs as its agent; spinclass pins no piggy
+	// of its own and never looks either up on PATH. Read ONLY through
+	// sweatfileio.TrustedKeyholderTools (layers above the repo; last one wins) and
+	// checked by sweatfileio.CheckKeyholderToolPath when the mode is on.
+	Fibby *string `toml:"fibby"`
+	Piggy *string `toml:"piggy"`
 }
 
 // HostQueue is host-wide gate policy (#424,
