@@ -256,9 +256,19 @@ cannot write.
   flight (the pair starts before the session record is written) and is not an
   orphan. `sc clean` stops orphans; `sc keyholder-stop --all --dry-run` marks
   them.
-- **Narrowing-only (A-M4, not built here).** The switch and the paths are read
-  from the target repo's hierarchy only today; whether a driver's own context
-  can force the holder ON for a spawn into another repo is the next item.
+- **Narrowing-only (A-M4).** The target repo of a spawn is chosen by the caller,
+  so its hierarchy alone cannot decide the switch (the same reason `[confinement]`
+  and `[profile-rights]` read the driver's context too). The key holder is ON when
+  EITHER the target's trusted layers OR the driver's own context (the repo that
+  holds the working directory, else home) say on; neither can turn the other off.
+  Driver on + target off = on; driver off + target on = on; both off = off. A repo
+  or worktree layer is never honoured in either. The programs come from the
+  target's trusted layers, else the driver's; when both set a program and they
+  differ the launch is refused naming `[keyholder] fibby|piggy`, because the
+  directory the caller chose must not pick the program the pair runs. An
+  unreadable hierarchy or an invalid mode in either context refuses the launch
+  (never the operator's agent). The boundary check on a relaunch reads the same
+  resolved switch (`cmd/spinclass/keyholder_switch.go`).
 
 ## Later
 

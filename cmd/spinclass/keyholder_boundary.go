@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
-	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 )
@@ -21,15 +20,11 @@ func keyholderWantsPair(home, repoPath string, spawned bool) (bool, error) {
 	if !keyholderPolicyFor(classifyKeyholderLaunch(spawned)).StartsPair {
 		return false, nil
 	}
-	h, err := sweatfileio.LoadHierarchy(home, repoPath)
+	sw, err := resolveKeyholderSwitch(home, repoPath)
 	if err != nil {
-		return false, fmt.Errorf("reading the sweatfiles for [keyholder]: %w", err)
+		return false, fmt.Errorf("%w (a session is not relaunched until it is fixed)", err)
 	}
-	on, _, err := sweatfileio.TrustedKeyholderMode(h, home, repoPath)
-	if err != nil {
-		return false, fmt.Errorf("%w (a session is not relaunched until it is fixed: a wrong key holder switch must not fall back to the operator's agent)", err)
-	}
-	return on, nil
+	return sw.On, nil
 }
 
 // checkRelaunchBoundary refuses to relaunch a confined session whose stored unit

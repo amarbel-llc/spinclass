@@ -1441,6 +1441,11 @@ The per-session key holder (docs/plans/2026-11-25-key-holder.md). Not merged:
 read only from the global and parent-directory layers, last valid one wins; a
 repo- or worktree-level table is ignored with a warning (*sc validate* warns),
 because the switch changes what a session can sign with and is the operator's.
+The target repo of a spawn is chosen by the caller, so it is read together with
+the DRIVER's own context (the repo that holds the working directory, else home)
+and the key holder is on when either says so: the target's layers cannot turn it
+off for a driver whose context has it on. If both set *fibby* or *piggy* and the
+values differ, the launch is refused.
 
 *mode*
 	*"off"* or *"on"*; unset means *"off"*. With *"on"* every WORKER session

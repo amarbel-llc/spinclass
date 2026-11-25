@@ -80,22 +80,17 @@ func keyholderSessionEnv(home, repoPath, sessionKey string, stderr io.Writer) (m
 // has nothing to undo). A launch that fails after the pair started, and so leaves
 // no session to close it, calls undo to stop the pair.
 func keyholderSessionEnvUndo(home, repoPath, sessionKey string, stderr io.Writer) (map[string]string, func(), error) {
-	h, err := sweatfileio.LoadHierarchy(home, repoPath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("reading the sweatfiles for [keyholder]: %w", err)
-	}
-	on, untrusted, err := sweatfileio.TrustedKeyholderMode(h, home, repoPath)
-	for _, path := range untrusted {
+	sw, err := resolveKeyholderSwitch(home, repoPath)
+	for _, path := range sw.Untrusted {
 		fmt.Fprintf(stderr, "spinclass: ignoring [keyholder] in %s: only layers above the repo may set it\n", path)
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w (sessions are not launched until it is fixed: a wrong key holder switch must not fall back to the operator's agent)", err)
+		return nil, nil, err
 	}
-	if !on {
+	if !sw.On {
 		return nil, nil, nil
 	}
-	fibby, piggy, _ := sweatfileio.TrustedKeyholderTools(h, home, repoPath) // untrusted layers were reported above
-	l, err := keyholderLauncherFn(keyholder.Tools{Fibby: fibby, Piggy: piggy})
+	l, err := keyholderLauncherFn(keyholder.Tools{Fibby: sw.Fibby, Piggy: sw.Piggy})
 	if err != nil {
 		return nil, nil, err
 	}
