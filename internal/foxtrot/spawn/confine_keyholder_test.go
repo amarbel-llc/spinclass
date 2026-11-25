@@ -93,14 +93,14 @@ func TestWriteUnitSpecWithTheKeyHolderOnNeverBindsTheOperatorsAgent(t *testing.T
 	// An earlier (key holder off) spec bound the operator's agent: sticky.
 	t.Setenv("SSH_AUTH_SOCK", operatorAgent)
 	t.Setenv("PIGGY_AUTH_SOCK", operatorPiggy)
-	if _, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, nil); err != nil {
+	if _, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, nil, BridgeUnset); err != nil {
 		t.Fatal(err)
 	}
 
 	for _, ssh := range []string{operatorAgent, ""} { // set, and gone (the sticky path)
 		t.Setenv("SSH_AUTH_SOCK", ssh)
 		holder := holderSocket(t)
-		path, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, holderEnv(holder))
+		path, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, holderEnv(holder), BridgeUnset)
 		if err != nil {
 			t.Fatalf("SSH_AUTH_SOCK=%q: %v", ssh, err)
 		}
@@ -152,7 +152,7 @@ func TestWriteUnitSpecWithTheKeyHolderOnButNoLiveSocketRefusesTheLaunch(t *testi
 		"not a socket":          {"SSH_AUTH_SOCK": regular},
 		"relative":              {"SSH_AUTH_SOCK": "agent.sock"},
 	} {
-		path, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, kh)
+		path, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, kh, BridgeUnset)
 		if err == nil || !strings.Contains(err.Error(), "key holder") {
 			t.Errorf("%s: err = %v, want a refusal naming the key holder", name, err)
 		}
@@ -178,7 +178,7 @@ func TestWriteUnitSpecWithTheKeyHolderOffKeepsTheOperatorsSocket(t *testing.T) {
 	t.Cleanup(func() { gitCommonDir = prev })
 	t.Setenv("SSH_AUTH_SOCK", operatorAgent)
 	rp := worktree.ResolvedPath{AbsPath: wt, SessionKey: "repo/feat"}
-	path, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, nil)
+	path, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, nil, BridgeUnset)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -250,6 +250,14 @@ type Confinement struct {
 	// binds: the harness reads them on the next start, and an unconfined resume
 	// would run what a worker planted. The last trusted layer that sets it wins.
 	HarnessConfigWritable *bool `toml:"harness-config-writable"`
+	// Bridge is the ONE operator switch of the per-session bridge
+	// (docs/plans/2026-11-25-bridge-wire-v1.md): "off" (also unset) opens
+	// nothing; "offered" asks clown for the bridge and the launch continues when
+	// it cannot be set up; "required" refuses the launch when it cannot. The
+	// last trusted layer that sets it wins. It is emitted as the launch spec's
+	// `bridge` field; serve starts its listener only when clown exported the
+	// bridge environment. Any other value refuses the spawn.
+	Bridge *string `toml:"bridge"`
 }
 
 // Permissions holds operator-only switches over what a session's own tool calls
@@ -363,17 +371,6 @@ type Keyholder struct {
 	// checked by sweatfileio.CheckKeyholderToolPath when the mode is on.
 	Fibby *string `toml:"fibby"`
 	Piggy *string `toml:"piggy"`
-}
-
-// Bridge is the switch for the per-session bridge listener inside serve
-// (docs/plans/2026-11-25-bridge-wire-v1.md). It decides whether a socket that
-// the session's own unit can reach is opened at all, so like Health it is
-// trusted only from layers above the repo, read ONLY through
-// sweatfileio.TrustedBridgeEnabled, and never merged.
-type Bridge struct {
-	// Enable turns the listener on when clown also exported the bridge
-	// directory and unit. Last trusted layer that sets it wins; unset means off.
-	Enable *bool `toml:"enable"`
 }
 
 // HostQueue is host-wide gate policy (#424,
@@ -603,7 +600,6 @@ type Sweatfile struct {
 	Health         *Health         `toml:"health"`
 	HostQueue      *HostQueue      `toml:"host-queue"`
 	Keyholder      *Keyholder      `toml:"keyholder"`
-	Bridge         *Bridge         `toml:"bridge"`
 	Sysprompt      *Sysprompt      `toml:"sysprompt"`
 	SessionEntry   *SessionEntry   `toml:"session-entry"`
 	StartCommands  []StartCommand  `toml:"start-commands"`

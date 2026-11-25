@@ -194,14 +194,16 @@ type unitSpec struct {
 	// applies) differs from an explicit empty list (deny everything).
 	EgressAllow *[]string `json:"egress_allow,omitempty"`
 	// Bridge is the clown launch-spec `bridge` field (docs/plans/2026-11-25-
-	// bridge-wire-v1.md, launcher section): omitted = clown's default
-	// ("offered"); "required" refuses the launch when the bridge cannot be set up.
+	// bridge-wire-v1.md, launcher section), the ONE operator switch of the
+	// bridge: omitted or empty = OFF; "offered" = on, the launch continues when
+	// the bridge cannot be set up; "required" = on, the launch is refused then.
+	// It is set from the trusted [confinement] bridge knob only.
 	Bridge BridgeMode        `json:"bridge,omitempty"`
 	Env    map[string]string `json:"env"`
 }
 
 // BridgeMode is the value of the launch spec's `bridge` field: unset (the
-// field is omitted and clown's default applies), "offered" or "required".
+// field is omitted: the bridge is off), "offered" or "required".
 type BridgeMode string
 
 const (
@@ -209,6 +211,18 @@ const (
 	BridgeOffered  BridgeMode = "offered"
 	BridgeRequired BridgeMode = "required"
 )
+
+// BridgeModeFromKnob maps the trusted [confinement] bridge knob to the spec
+// field: "" (unset) and "off" are the same OFF, "offered" and "required" are
+// emitted as written, and any other value is refused by name, so a typo never
+// leaves the bridge in a state the operator did not choose.
+func BridgeModeFromKnob(knob string) (BridgeMode, error) {
+	mode, err := sweatfileio.ParseBridgeKnob(knob)
+	if err != nil {
+		return BridgeUnset, err
+	}
+	return BridgeMode(mode), nil
+}
 
 // Validate refuses any value clown would not parse.
 func (m BridgeMode) Validate() error {
@@ -550,7 +564,7 @@ func stickyAgentSocket(stateDir, wt string) string {
 // writeUnitSpec resolves the host-dependent inputs, builds the spec and writes
 // it beside the unit record, outside the worktree. It returns the path to put
 // in CLOWN_AGENT_SCOPE.
-func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, stateDir, handshakeDir string, harnessConfigWritable bool, dotenv []string, keyholderEnv map[string]string) (string, error) {
+func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, stateDir, handshakeDir string, harnessConfigWritable bool, dotenv []string, keyholderEnv map[string]string, bridge BridgeMode) (string, error) {
 	// keyholderEnv non-nil is the key holder being on: its agent socket is the
 	// unit's only agent socket, and a missing or unusable one refuses the launch
 	// before anything is written (never a fallback to the operator's agent).
@@ -601,7 +615,7 @@ func writeUnitSpec(rp worktree.ResolvedPath, desc string, egress []string, state
 	spec := buildUnitSpec(unitSpecInput{
 		rp: rp, operatorHome: home, stateDir: stateDir, commonDir: commonDir,
 		sshAuthSock: sshAuthSock, holderSock: holderSock, certDir: certDir, runtimeDir: runtimeDir, wayland: wayland,
-		egress: egress, env: env, handshakeDir: handshakeDir,
+		egress: egress, env: env, handshakeDir: handshakeDir, bridge: bridge,
 		harnessConfigWritable: harnessConfigWritable, harnessRootFiles: rootFiles,
 	})
 	if err := refuseProtectedBinds(spec, stateDir); err != nil {

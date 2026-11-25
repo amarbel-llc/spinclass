@@ -271,6 +271,14 @@ func LaunchDetachedOpts(home, repoPath string, driver Driver, brief, desc, model
 			undoStart()
 			return Pending{}, err
 		}
+		// The ONE operator switch of the bridge, [confinement] bridge, read from
+		// trusted layers only; a value it does not know refuses the spawn before
+		// anything is bound.
+		bridgeMode, err := BridgeModeFromKnob(targetConfine.policy.Bridge)
+		if err != nil {
+			undoOnFailure()
+			return Pending{}, err
+		}
 		// The frontend creates the worker's hello dir before the unit starts: a
 		// bind needs an existing source, and the unit cannot create it.
 		handshakeDir := spawnhandshake.SessionDir(stateDir, rp.AbsPath)
@@ -278,7 +286,7 @@ func LaunchDetachedOpts(home, repoPath string, driver Driver, brief, desc, model
 			undoStart()
 			return Pending{}, fmt.Errorf("creating the worker's handshake dir: %w", err)
 		}
-		scopePath, err := writeUnitSpec(rp, desc, targetConfine.egress, stateDir, handshakeDir, targetConfine.policy.HarnessConfigWritable, dotenv, kh)
+		scopePath, err := writeUnitSpec(rp, desc, targetConfine.egress, stateDir, handshakeDir, targetConfine.policy.HarnessConfigWritable, dotenv, kh, bridgeMode)
 		if err != nil {
 			undoStart()
 			return Pending{}, err

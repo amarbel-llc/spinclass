@@ -29,7 +29,7 @@ func agentCheckFixture(t *testing.T) (state string, rp worktree.ResolvedPath) {
 func writeOffSpec(t *testing.T, state string, rp worktree.ResolvedPath) {
 	t.Helper()
 	t.Setenv("SSH_AUTH_SOCK", operatorAgent)
-	if _, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, nil); err != nil {
+	if _, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, nil, BridgeUnset); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -37,7 +37,7 @@ func writeOffSpec(t *testing.T, state string, rp worktree.ResolvedPath) {
 func writeHolderSpec(t *testing.T, state string, rp worktree.ResolvedPath) string {
 	t.Helper()
 	holder := holderSocket(t)
-	if _, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, holderEnv(holder)); err != nil {
+	if _, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, holderEnv(holder), BridgeUnset); err != nil {
 		t.Fatal(err)
 	}
 	return holder
@@ -109,7 +109,7 @@ func TestTheRefusalSaysItIsTheOnlyWallAndTheCloseAndRespawnInstruction(t *testin
 func TestAStoredSpecWithNoAgentSocketIsRefusedWhenTheSwitchIsOn(t *testing.T) {
 	state, rp := agentCheckFixture(t)
 	t.Setenv("SSH_AUTH_SOCK", "")
-	if _, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, nil); err != nil {
+	if _, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, nil, BridgeUnset); err != nil {
 		t.Fatal(err)
 	}
 	be := asBoundaryError(t, CheckAgentBoundary(state, rp.AbsPath, true))

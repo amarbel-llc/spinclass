@@ -762,7 +762,7 @@ func CheckProfileRights(sf sweatfile.Sweatfile, layerAboveRepo, global bool) []I
 // from the GLOBAL sweatfile, for the same reason as profile-rights.enforce.
 func CheckConfinement(sf sweatfile.Sweatfile, layerAboveRepo, global bool) []Issue {
 	c := sf.Confinement
-	if c == nil || (c.Enabled == nil && c.DefaultSpawn == nil && c.LaunchUnit == nil && c.EgressAllow == nil && c.HarnessConfigWritable == nil) {
+	if c == nil || (c.Enabled == nil && c.DefaultSpawn == nil && c.LaunchUnit == nil && c.EgressAllow == nil && c.HarnessConfigWritable == nil && c.Bridge == nil) {
 		return nil
 	}
 	if !layerAboveRepo {
@@ -773,6 +773,17 @@ func CheckConfinement(sf sweatfile.Sweatfile, layerAboveRepo, global bool) []Iss
 		}}
 	}
 	var issues []Issue
+	if c.Bridge != nil {
+		// The one switch of the bridge: the spawn refuses any other value, so
+		// say so here before a spawn does.
+		if _, err := sweatfileio.ParseBridgeKnob(*c.Bridge); err != nil {
+			issues = append(issues, Issue{
+				Message:  err.Error(),
+				Severity: SeverityError,
+				Field:    "confinement.bridge",
+			})
+		}
+	}
 	if c.LaunchUnit != nil {
 		issues = append(issues, Issue{
 			Message:  "[confinement] `launch-unit` is deprecated: it means enabled = true and default-spawn = true; set `enabled` (and `default-spawn`) instead",
@@ -1376,8 +1387,14 @@ func CheckUnknownFields(data []byte) []Issue {
 
 	var issues []Issue
 	for _, key := range doc.Undecoded() {
+		msg := fmt.Sprintf("unknown field %q", key)
+		if key == "bridge" || strings.HasPrefix(key, "bridge.") {
+			// The [bridge] enable stanza was replaced by the one switch: the
+			// trusted [confinement] bridge knob (J-M5). A stale stanza must say so.
+			msg += `: the [bridge] stanza was removed; the bridge's one switch is [confinement] bridge = "off" | "offered" | "required" in a sweatfile above the repo`
+		}
 		issues = append(issues, Issue{
-			Message:  fmt.Sprintf("unknown field %q", key),
+			Message:  msg,
 			Severity: SeverityError,
 			Field:    key,
 		})

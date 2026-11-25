@@ -157,7 +157,8 @@ func registerServeCommand(app *command.App) {
 			}
 
 			// Bridge listener (bridge contract v1): off unless clown exported
-			// the directory and unit and a trusted [bridge] enable is set.
+			// the directory and unit, which it does only when the launch spec's
+			// `bridge` field (from the trusted [confinement] bridge knob) asked.
 			if stopBridge := startBridge(sigCtx, func(rec crossingRecorder, stats statsd.Client) bridgeserver.SessionHandler {
 				return newBridgeSessionHandler(registry, app.Name, app.Version, rec, stats)
 			}); stopBridge != nil {

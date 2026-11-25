@@ -90,7 +90,7 @@ func TestWriteUnitSpecRefusesACertificateDirectoryThatIsMissingALinkOrAnotherPai
 		},
 	}
 	for name, mk := range cases {
-		if path, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, mk()); err == nil || !strings.Contains(err.Error(), "certificate") {
+		if path, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, mk(), BridgeUnset); err == nil || !strings.Contains(err.Error(), "certificate") {
 			t.Errorf("%s: err = %v (spec %q), want a refusal naming the certificate", name, err, path)
 		}
 	}
@@ -103,7 +103,7 @@ func TestWriteUnitSpecRefusesACertificateDirectoryThatIsMissingALinkOrAnotherPai
 	if err := os.Symlink(t.TempDir(), cd2); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, holderEnv(holder2)); err == nil || !strings.Contains(err.Error(), "not a directory") {
+	if _, err := writeUnitSpec(rp, "desc", nil, state, "", false, nil, holderEnv(holder2), BridgeUnset); err == nil || !strings.Contains(err.Error(), "not a directory") {
 		t.Errorf("a linked certificate directory: err = %v, want 'not a directory'", err)
 	}
 	if _, err := os.Stat(confinement.UnitSpecPath(state, rp.AbsPath)); err == nil {

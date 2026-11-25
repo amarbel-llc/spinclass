@@ -118,6 +118,27 @@ type ConfinementPolicy struct {
 	// HarnessConfigWritable is [confinement] harness-config-writable (#400):
 	// false (the default) binds the worktree's .claude and .mcp.json read-only.
 	HarnessConfigWritable bool
+	// Bridge is [confinement] bridge, the ONE operator switch of the bridge: as
+	// written by the last trusted layer that sets it ("" when none does). The
+	// spawn maps "", "off" to no spec field and refuses a value it does not
+	// know, so a typo never silently leaves the bridge in a state the operator
+	// did not choose.
+	Bridge string
+}
+
+// ParseBridgeKnob reads the [confinement] bridge knob into the launch-spec
+// value: "" (unset) and "off" are the same OFF and give "", "offered" and
+// "required" are returned as written, and any other value is an error naming
+// it and the allowed ones. The spawn and `sc validate` both go through it, so
+// the two cannot disagree about what the one switch accepts.
+func ParseBridgeKnob(knob string) (mode string, err error) {
+	switch knob {
+	case "", "off":
+		return "", nil
+	case "offered", "required":
+		return knob, nil
+	}
+	return "", fmt.Errorf("[confinement] bridge = %q: want \"off\", \"offered\" or \"required\"", knob)
 }
 
 // DefaultConfines reports whether a spawn that makes no request is confined.
@@ -132,18 +153,21 @@ func (p ConfinementPolicy) DefaultConfines() bool { return p.Enabled && p.Defaul
 // when no trusted layer sets that key itself. An unset default-spawn is true.
 // egress is the last trusted layer that sets egress-allow (nil inherits, []
 // clears); with none set it is nil, which the launch spec leaves out so clown's
-// own default list applies. Layers that may not set the table are never
+// own default list applies. bridge is the last trusted layer that sets it (the
+// ONE switch of the bridge, a value an agent writing its repo's sweatfile must
+// never be able to turn on). Layers that may not set the table are never
 // honoured; their paths are returned in untrusted. Hierarchy.Merged never
 // carries the table.
 func TrustedConfinement(h sweatfile.Hierarchy, home, repoRoot string) (policy ConfinementPolicy, egress []string, untrusted []string) {
 	var enabled, defaultSpawn, harnessWritable *bool
+	var bridge *string
 	legacy := false
 	for _, src := range h.Sources {
 		if src.SkipReason != "" || !src.Found || src.File.Confinement == nil {
 			continue
 		}
 		c := src.File.Confinement
-		if c.Enabled == nil && c.DefaultSpawn == nil && c.LaunchUnit == nil && c.EgressAllow == nil && c.HarnessConfigWritable == nil {
+		if c.Enabled == nil && c.DefaultSpawn == nil && c.LaunchUnit == nil && c.EgressAllow == nil && c.HarnessConfigWritable == nil && c.Bridge == nil {
 			continue
 		}
 		if !LayerAboveRepo(src.Path, home, repoRoot) {
@@ -165,8 +189,14 @@ func TrustedConfinement(h sweatfile.Hierarchy, home, repoRoot string) (policy Co
 		if c.HarnessConfigWritable != nil {
 			harnessWritable = c.HarnessConfigWritable
 		}
+		if c.Bridge != nil {
+			bridge = c.Bridge
+		}
 	}
 	policy.HarnessConfigWritable = harnessWritable != nil && *harnessWritable
+	if bridge != nil {
+		policy.Bridge = *bridge
+	}
 	policy.Enabled = legacy
 	if enabled != nil {
 		policy.Enabled = *enabled
@@ -280,29 +310,6 @@ func TrustedAllowMergeCommits(h sweatfile.Hierarchy, home, repoRoot string) (all
 		}
 	}
 	return allow, untrusted
-}
-
-// TrustedBridgeEnabled returns the [bridge].enable switch honoured for the
-// repo: a scalar, the last layer above the repo that sets it wins, off when
-// unset. The bridge opens a socket the session's own unit can reach, so a value
-// an agent can write into its repo's sweatfile must not turn it on; the paths of
-// the layers that set the key and may not are returned in untrusted.
-// Hierarchy.Merged never carries the table.
-func TrustedBridgeEnabled(h sweatfile.Hierarchy, home, repoRoot string) (enable bool, untrusted []string) {
-	for _, src := range h.Sources {
-		if src.SkipReason != "" || !src.Found {
-			continue
-		}
-		if src.File.Bridge == nil || src.File.Bridge.Enable == nil {
-			continue
-		}
-		if LayerAboveRepo(src.Path, home, repoRoot) {
-			enable = *src.File.Bridge.Enable
-		} else {
-			untrusted = append(untrusted, src.Path)
-		}
-	}
-	return enable, untrusted
 }
 
 // TrustedHostQueueRecordCosts returns the [host-queue].record-costs switch

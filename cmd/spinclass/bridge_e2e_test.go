@@ -816,9 +816,11 @@ func TestE2ESuccessorsSocketSurvivesTheOldListenersClose(t *testing.T) {
 	}
 }
 
-// 12. With the switch off there is no socket at all: no env, no [bridge]
-// enable, or the enable only in a repo layer. The control case with everything
-// on makes a socket, so the checks above could fail.
+// 12. The ONE switch is clown's env (named only when the launch spec asked for
+// the bridge, from the trusted [confinement] bridge knob): with no env there is
+// no socket at all, whatever any sweatfile says; with the env there is one,
+// whatever any sweatfile says. The sweatfiles in the cases are the old
+// [bridge] enable stanza and the knob itself, neither of which serve reads.
 func TestE2ESwitchOffMeansNoSocket(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -827,11 +829,12 @@ func TestE2ESwitchOffMeansNoSocket(t *testing.T) {
 		repo    string
 		wantSet bool
 	}{
-		{name: "no env, trusted enable", global: "[bridge]\nenable = true\n"},
-		{name: "env, no [bridge] enable", env: true},
-		{name: "env, enable = false in a trusted layer", env: true, global: "[bridge]\nenable = false\n"},
-		{name: "env, enable only in the repo layer", env: true, repo: "[bridge]\nenable = true\n"},
-		{name: "control: env and trusted enable", env: true, global: "[bridge]\nenable = true\n", wantSet: true},
+		{name: "no env, knob offered in a trusted layer", global: "[confinement]\nbridge = \"offered\"\n"},
+		{name: "no env, the removed [bridge] enable stanza", global: "[bridge]\nenable = true\n"},
+		{name: "no env, nothing configured"},
+		{name: "env, nothing configured: clown named the bridge", env: true, wantSet: true},
+		{name: "env, the removed [bridge] enable = false changes nothing", env: true, global: "[bridge]\nenable = false\n", wantSet: true},
+		{name: "env, a repo layer cannot take it away either", env: true, repo: "[confinement]\nbridge = \"off\"\n", wantSet: true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -860,7 +863,7 @@ func TestE2ESwitchOffMeansNoSocket(t *testing.T) {
 				stageSessionKey(t, sessionTestKey, e2ePrincipal)
 			}
 			old := bridgeResolve
-			bridgeResolve = func() bridgePlan { return resolveBridgePlan(getenv, home, repo) }
+			bridgeResolve = func() bridgePlan { return resolveBridgePlan(getenv) }
 			t.Cleanup(func() { bridgeResolve = old })
 
 			ctx, cancel := context.WithCancel(context.Background())

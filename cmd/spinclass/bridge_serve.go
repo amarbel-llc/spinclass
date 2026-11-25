@@ -11,12 +11,10 @@ import (
 	"time"
 
 	"code.linenisgreat.com/clown/pkgs/peercheck"
-	"code.linenisgreat.com/spinclass/internal/0/git"
 	"code.linenisgreat.com/spinclass/internal/0/statsd"
 	"code.linenisgreat.com/spinclass/internal/alfa/bridgeserver"
 	"code.linenisgreat.com/spinclass/internal/alfa/crossinglog"
 	"code.linenisgreat.com/spinclass/internal/alfa/session"
-	"code.linenisgreat.com/spinclass/internal/alfa/sweatfileio"
 	"code.linenisgreat.com/spinclass/internal/bravo/confinement"
 	"code.linenisgreat.com/spinclass/internal/servelog"
 )
@@ -45,51 +43,25 @@ const bridgeEnvUnsetReason = "CLOWN_BRIDGE_DIR or CLOWN_BRIDGE_UNIT is unset or 
 // (bridgeserver.ErrNoPeerCheck), never a weaker default; tests swap it.
 var bridgeCheckPeer func(conn net.Conn, wantCgroup string) error = peercheck.CheckPeerExact
 
-// resolveBridgePlan turns the environment clown exported and the trusted
-// [bridge] switch into a plan. Both must hold: the env names where and for
-// which unit, and a layer above the repo says enable = true. A repo-layer
-// [bridge] never counts.
-func resolveBridgePlan(getenv func(string) string, home, repoRoot string) bridgePlan {
+// resolveBridgePlan turns the environment clown exported into a plan. The ONE
+// operator switch of the bridge is the launch spec's `bridge` field (set from
+// the trusted [confinement] bridge knob when the session was launched); clown
+// exports the bridge directory and unit only when that field asked for it and
+// sets them to the empty string otherwise. So the env alone decides: both
+// variables non-empty means this serve listens. No sweatfile is read here, so
+// a repo layer has nothing to turn on and a session pays nothing for the code
+// when clown named no bridge.
+func resolveBridgePlan(getenv func(string) string) bridgePlan {
 	dir, unit, ok := bridgeserver.EnvConfig(getenv)
 	if !ok {
 		return bridgePlan{Reason: bridgeEnvUnsetReason, Quiet: true}
 	}
-	h, err := sweatfileio.LoadHierarchy(home, repoRoot)
-	if err != nil {
-		return bridgePlan{Reason: fmt.Sprintf("sweatfile hierarchy: %v", err)}
-	}
-	enable, untrusted := sweatfileio.TrustedBridgeEnabled(h, home, repoRoot)
-	for _, p := range untrusted {
-		servelog.Errorf("serve.bridge: [bridge] in %s is ignored: only sweatfiles above the repo may enable the bridge", p)
-	}
-	if !enable {
-		return bridgePlan{Reason: "no trusted [bridge] enable = true"}
-	}
 	return bridgePlan{Dir: dir, Unit: unit, CgroupFile: bridgeserver.EnvCgroupFile(getenv)}
 }
 
-// bridgeResolve is the seam tests replace for the working-directory and home
-// reads behind the plan.
-var bridgeResolve = func() bridgePlan {
-	// The environment is read first and alone: a serve clown gave no bridge
-	// reads no directory, runs no git and writes no line.
-	if _, _, ok := bridgeserver.EnvConfig(os.Getenv); !ok {
-		return bridgePlan{Reason: bridgeEnvUnsetReason, Quiet: true}
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return bridgePlan{Reason: fmt.Sprintf("working directory unresolved: %v", err)}
-	}
-	repoRoot, err := git.CommonDir(cwd)
-	if err != nil {
-		return bridgePlan{Reason: fmt.Sprintf("not in a git checkout, so no sweatfile hierarchy to read: %v", err)}
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return bridgePlan{Reason: fmt.Sprintf("home directory unresolved: %v", err)}
-	}
-	return resolveBridgePlan(os.Getenv, home, repoRoot)
-}
+// bridgeResolve is the seam tests replace for the environment read behind the
+// plan.
+var bridgeResolve = func() bridgePlan { return resolveBridgePlan(os.Getenv) }
 
 // bridgeRecordedUnit is the agent unit the frontend recorded for the session
 // (clown writes the record once the provider has started) and when the record
