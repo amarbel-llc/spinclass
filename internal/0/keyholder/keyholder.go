@@ -158,6 +158,15 @@ func (l *Launcher) Start(ctx context.Context, sessionKey string) (Pair, error) {
 	if sessionKey == "" {
 		return Pair{}, errors.New("keyholder: empty session key")
 	}
+	unlock, err := l.lockSession(ctx, sessionKey)
+	if err != nil {
+		return Pair{}, err
+	}
+	defer unlock()
+	return l.start(ctx, sessionKey)
+}
+
+func (l *Launcher) start(ctx context.Context, sessionKey string) (Pair, error) {
 	ly := l.layoutFor(sessionKey)
 	for _, p := range []string{ly.ctl, ly.pcsc, ly.agent} {
 		if len(p) > MaxSocketPath {
@@ -276,6 +285,15 @@ func (l *Launcher) launch(ctx context.Context, sessionKey string, ly layout) (Pa
 // any directory is removed. A unit that will not stop leaves the directories in
 // place and is an error. A session with no pair is not an error.
 func (l *Launcher) Stop(ctx context.Context, sessionKey string) error {
+	unlock, err := l.lockSession(ctx, sessionKey)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return l.stop(ctx, sessionKey)
+}
+
+func (l *Launcher) stop(ctx context.Context, sessionKey string) error {
 	ly := l.layoutFor(sessionKey)
 	if err := l.teardown(ctx, ly); err != nil {
 		return err
