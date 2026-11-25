@@ -596,7 +596,7 @@
           gateGit = pkgs.git;
           gateSh = pkgs.bash;
           # sc session-key's ssh-add and ssh-keygen (key holder).
-          openssh = pkgs.openssh;
+          inherit (pkgs) openssh;
         };
 
         spinclass-race = pkgs.buildGoRace { base = mkSpinclass { }; };
