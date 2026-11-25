@@ -1459,6 +1459,12 @@ because the switch changes what a session can sign with and is the operator's.
 	reaching one only by an explicit time-limited blessing) is in
 	docs/plans/2026-11-25-key-holder.md. A session started again by
 	*start-child-session* or *sc start-stopped* is a worker and gets its own pair.
+	A confined session keeps the agent socket its unit spec was written with: the
+	spec is read again on every relaunch and clown refuses a changed boundary, and
+	a changed agent is one. So a confined session spawned before the switch went
+	on, and one spawned with a holder before it goes off, is not relaunched by
+	*sc resume*, a restart or a start hand-off: spinclass refuses first, naming the
+	change, and the answer is to close the session and spawn a new one.
 	For a session that is not confined this is delegation hygiene, not a
 	boundary. Switching it *"off"* leaves no pair, unit or directory for new
 	sessions. *sc session-key SESSION* prints the session's public key and

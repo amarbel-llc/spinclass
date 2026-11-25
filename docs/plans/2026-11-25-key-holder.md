@@ -79,31 +79,43 @@ into the direnv file. (The hook runs inside the already-started agent, so a pair
 started there could reach the agent only through the file the `.envrc` loads
 (`WriteSpinclassEnv`), which is not the agent's own environment.)
 
-## Resume rebuilds the stored unit spec (B-F2, A-H1)
+## A changed agent is a changed boundary: close and respawn (B-F2, A-H1)
 
-A confined spawn writes its unit spec once. `sc resume` used to hand clown that
-stored spec unchanged, so a spec written with the switch off kept the operator's
-agent bound after the switch went on, and one written with it on named a holder
-socket that is gone after it went off. Now (`spawn.RetargetAgentSocket`,
-`internal/foxtrot/spawn/confine_retarget.go`, called from
-`cmd/spinclass/commands_session.go:875`) a confined resume rewrites only the agent
-socket and `SSH_AUTH_SOCK`, atomically:
+A confined spawn writes its unit spec once, and clown re-reads that spec file on
+every relaunch (a resume, a restart in place, a start hand-off) and REFUSES the
+relaunch when the spec's boundary digest changed. The digest covers the sorted
+socket purposes, so swapping the operator's agent socket (purpose `piggy-agent`)
+for a holder socket (purpose `key-holder`) is a changed boundary. We do not hide
+that from the check built to see it: a session whose stored spec does not match
+what the builder would write for the switch as it is NOW is not relaunched, and
+spinclass says so first, before clown is called and before any pair is started
+for the relaunch (`spawn.CheckAgentBoundary`,
+`internal/foxtrot/spawn/confine_agentcheck.go`; the callers are in
+`cmd/spinclass/keyholder_boundary.go`). Nothing is rewritten, in either direction:
 
-- switch on and this launch has a pair: the holder's socket is the spec's only
-  agent socket; the operator's bind and any earlier holder path are dropped; an
-  unusable holder socket refuses the resume and stops a pair this resume started;
-- switch off (or a driver) and the stored spec names a holder: the spec goes back
-  to exactly what the builder writes with the switch off (byte-identical, tested);
-- otherwise the stored spec is untouched.
+- switch on, stored spec binds the operator's agent (or no agent): refused;
+- switch off, stored spec binds a holder socket: refused (the path names a pair
+  that is gone or that nothing now uses);
+- the stored spec matches the switch: relaunched exactly as before.
 
-Stored-spec reuse paths found: (1) `sc resume` via `confinedResumeScope`
-(`cmd/spinclass/resume_confined.go:49`), now retargeted; (2) clown's restart in
-place re-reads the spec file named by `CLOWN_AGENT_SCOPE` on relaunch (clown code,
-not spinclass; it sees whatever the last `sc resume` or spawn wrote, and a restart
-that keeps the same pair keeps the same socket path); (3) a respawn's
-`stickyAgentSocket` (`internal/foxtrot/spawn/confine.go:469`), read only when the
-holder is off; (4) the start hand-off (next section); (5) read-only readers
-(`internal/bravo/confinement/probes.go`, `caller.go`).
+The refusal names the change (the agent socket in the stored spec against the
+`[keyholder] mode`) and says: close this session and spawn a new one, with what
+`sc close` would discard. So **a confined session spawned before the switch went
+on must be closed and respawned, and so must one spawned with a holder after the
+switch goes off.** (This replaces the in-place rewrite the first version had; the
+holder socket keeps its own purpose, `key-holder`, because a changed agent is a
+changed boundary and a new session is the honest answer.)
+
+The check runs at every relaunch of a confined session from a stored spec:
+(1) `sc resume` (`relaunchBoundaryNow` in `cmd/spinclass/commands_session.go`),
+before the pair is started; (2) the restart preflight and its `--rearm`
+(`relaunchBoundaryBeforeRestartFn` in `cmd/spinclass/restart_cmd.go`), before the
+pair check, which is shared by `restart-this-session`, `restart-child-session`,
+`sc restart` and restart-hung-child, because clown relaunches without `sc resume`;
+(3) the start hand-off (next section). A respawn's `stickyAgentSocket`
+(`internal/foxtrot/spawn/confine.go:469`) still reads an earlier spec for the
+switch-off builder only. Clown's own restart in place that never goes through the
+preflight is not covered here; clown's digest check refuses it too.
 
 ## Start hand-offs (A-M1)
 
@@ -124,10 +136,22 @@ With the switch on the hand-off now runs with an environment spinclass builds
 (`cmd/spinclass/keyholder_handoff.go`): the child is always a worker (a detached
 relaunch has no terminal of the operator's), gets its own pair, the operator-agent
 variables are emptied, the caller's holder socket never reaches it, and the
-caller's `CLOWN_AGENT_SCOPE` is replaced by the child's own stored spec (itself
-retargeted as above) or removed for an unconfined child. With the switch off the
-hand-off is run exactly as before (inherited environment). A failing hand-off
-stops a pair this start launched.
+caller's `CLOWN_AGENT_SCOPE` is replaced by the child's own stored spec or removed
+for an unconfined child. A child launched confined is checked against the switch
+first, whatever the switch says (the section above): a stored spec that does not
+match is refused BEFORE a pair is started and before clown is called, and the
+child stays stopped.
+
+clown confines a started child by its sidecar record under the child's
+`XDG_STATE_HOME`, else by `CLOWN_AGENT_SCOPE`; with neither it starts the child
+UNCONFINED (the "resuming UNCONFINED" notice is printed only for a named
+`--resume` id). So the environment the hand-off builds must carry the state
+directory this frontend keeps its records under (set explicitly, whatever the
+caller's environment had) and, for a confined child, the child's own spec path;
+`checkHandoffEnv` refuses an environment without either before clown is called.
+With the switch off and a child that was not launched confined, the hand-off is
+run exactly as before (inherited environment). A failing hand-off stops a pair this
+start launched.
 
 ## A lost pair is told, not hidden (B-F3, A-M3)
 
