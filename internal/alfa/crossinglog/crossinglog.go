@@ -59,9 +59,7 @@ const (
 // permittedSafeNames), and only as an identifier-shaped string of at most 128
 // characters matching [A-Za-z0-9._/-]+; any other value is dropped.
 var SafeFields = map[string][]string{
-	"cancel-restart":                  {"session", "target"},
-	"session-health":                  {"session", "target"},
-	"update-this-session-description": {"target"},
+	"cancel-restart": {"session", "target"},
 }
 
 var permittedSafeNames = map[string]bool{"session": true, "branch": true, "target": true}

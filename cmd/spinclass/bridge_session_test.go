@@ -143,11 +143,10 @@ func (p *sessionPeer) toolText(rep rpcReply) (text string, isErr bool) {
 }
 
 var wantSessionToolNames = []string{
-	"cancel-restart", "close-this-session", "list-handles", "restart-this-session",
-	"session-health", "update-this-session-description", "whoami",
+	"cancel-restart", "close-this-session", "list-handles", "restart-this-session", "whoami",
 }
 
-func TestBridgeSessionListsExactlyTheSevenTools(t *testing.T) {
+func TestBridgeSessionListsExactlyTheFiveTools(t *testing.T) {
 	sock, _ := startSessionBridge(t)
 	for _, version := range []string{protocol.ProtocolVersionV0, protocol.ProtocolVersionV1} {
 		t.Run(version, func(t *testing.T) {
@@ -210,18 +209,6 @@ func TestBridgeSessionRefusesConfinedVerbsWithTheContractError(t *testing.T) {
 	sock, _ := startSessionBridge(t)
 	p := dialSession(t, sock)
 	p.initialize(protocol.ProtocolVersionV1)
-	for tool, want := range map[string]string{
-		"session-health":                  refusalSessionHealth,
-		"update-this-session-description": refusalUpdateDesc,
-	} {
-		rep := p.call("tools/call", map[string]any{"name": tool, "arguments": map[string]any{"description": "x"}})
-		if rep.Error == nil {
-			t.Fatalf("%s: want an error, got %s", tool, rep.Result)
-		}
-		if rep.Error.Code != -32001 || rep.Error.Message != want {
-			t.Errorf("%s: got code %d %q\nwant -32001 %q", tool, rep.Error.Code, rep.Error.Message, want)
-		}
-	}
 	// The open half of a mixed verb still works, and a gated form is refused
 	// whatever session its arguments name.
 	rep := p.call("tools/call", map[string]any{"name": "list-handles", "arguments": map[string]any{"principal": "forged"}})
@@ -234,16 +221,21 @@ func TestBridgeSessionRefusesConfinedVerbsWithTheContractError(t *testing.T) {
 	}
 }
 
-// Everything but the seven is not listed, and calling it is a JSON-RPC error.
+// Everything but the five is not listed, and calling it is a JSON-RPC error
+// -32602: the verbs that could only be refused (session-health,
+// update-this-session-description) are not listed either.
 func TestBridgeSessionUnknownToolIsAnError(t *testing.T) {
 	sock, _ := startSessionBridge(t)
 	p := dialSession(t, sock)
 	p.initialize(protocol.ProtocolVersionV1)
-	for _, tool := range []string{"merge-this-session", "spawn-session", "grit_status", "stop-this-session", "no-such-tool"} {
+	for _, tool := range []string{"merge-this-session", "spawn-session", "grit_status", "stop-this-session", "no-such-tool", "session-health", "update-this-session-description"} {
 		rep := p.call("tools/call", map[string]any{"name": tool, "arguments": map[string]any{}})
 		if rep.Error == nil || rep.Result != nil {
 			t.Errorf("%s: want a JSON-RPC error, got result %s error %+v", tool, rep.Result, rep.Error)
 			continue
+		}
+		if rep.Error.Code != -32602 {
+			t.Errorf("%s: code %d, want -32602", tool, rep.Error.Code)
 		}
 		if !strings.Contains(rep.Error.Message, "unknown tool: "+tool) {
 			t.Errorf("%s: message %q", tool, rep.Error.Message)

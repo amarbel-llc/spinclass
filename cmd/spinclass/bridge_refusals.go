@@ -22,10 +22,8 @@ const (
 // bridgeSessionRefusals is the refusal of each gated session verb, keyed by the
 // tool label its gate passes to refuseConfinedServeCaller.
 var bridgeSessionRefusals = map[string]string{
-	"session-health":                  bridgeRefusalPrefix + "session-health has no right a session inside its unit can be granted; the operator runs `sc session-health` at a terminal outside the unit, and a session holding a handle on this one reads its health with session-health from outside the unit",
-	"update-this-session-description": bridgeRefusalPrefix + "update-this-session-description has no right a session inside its unit can be granted (a description is shown to every session, so it is the operator's to set); the operator runs `sc update-description` at a terminal outside the unit",
-	"cancel-restart":                  bridgeRefusalPrefix + "cancel-restart naming another session needs the right \"restart\" on that session, which a session inside its unit may not use whatever it holds; a holder with the right outside the unit, or the operator running `sc cancel-restart` at a terminal outside the unit, can cancel it (cancel-restart with no child cancels this session's own)",
-	"list-handles accept":             bridgeRefusalPrefix + "list-handles with accept has no right a session inside its unit can be granted; the operator runs `sc list-handles --accept` at a terminal outside the unit (a plain list-handles is allowed)",
+	"cancel-restart":      bridgeRefusalPrefix + "cancel-restart naming another session needs the right \"restart\" on that session, which a session inside its unit may not use whatever it holds; a holder with the right outside the unit, or the operator running `sc cancel-restart` at a terminal outside the unit, can cancel it (cancel-restart with no child cancels this session's own)",
+	"list-handles accept": bridgeRefusalPrefix + "list-handles with accept has no right a session inside its unit can be granted; the operator runs `sc list-handles --accept` at a terminal outside the unit (a plain list-handles is allowed)",
 }
 
 // settingKind names the trusted setting a refusal is for.

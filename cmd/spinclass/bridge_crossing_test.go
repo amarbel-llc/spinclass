@@ -87,7 +87,7 @@ func TestBridgeSessionCallsAreLoggedWithoutValues(t *testing.T) {
 	}
 	want := []struct{ verb, outcome, names string }{
 		{"whoami", "ok", "[principal]"},
-		{"update-this-session-description", "refused", "[description]"},
+		{"unknown", "error", "[description]"},
 		{"unknown", "error", "[message]"},
 		{"list-handles", "ok", "[]"},
 	}

@@ -327,7 +327,7 @@ func TestE2EForgedPrincipalNeverChangesWhoseSessionIsActedOn(t *testing.T) {
 
 	// Every verb, with the forgery: the ones the bridge refuses are refused
 	// (-32001) whoever the arguments name.
-	for _, tool := range []string{"cancel-restart", "session-health", "update-this-session-description"} {
+	for _, tool := range []string{"cancel-restart"} {
 		rep := p.call("tools/call", map[string]any{"name": tool, "arguments": forged})
 		if rep.Error == nil || rep.Error.Code != -32001 {
 			t.Errorf("%s with forged names: want -32001, got %+v result %s", tool, rep.Error, rep.Result)
@@ -612,30 +612,28 @@ func TestE2ESecondControlIsBusyAndEOFReachesThePeerOnServerClose(t *testing.T) {
 	}
 }
 
-// 8. A refused verb is -32001 with the contract text; an unlisted tool is
-// -32602; both are in the crossing log with the right verb and outcome.
+// 8. A refused verb is -32001 with the contract text; an unlisted tool (the two
+// verbs that could only be refused among them) is -32602; both are in the
+// crossing log with the right verb and outcome.
 func TestE2EConfinedVerbIsMinus32001AndUnlistedToolIsMinus32602(t *testing.T) {
 	b := startE2E(t, e2eOpts{})
 	p := b.open("session")
 	p.initialize(protocol.ProtocolVersionV1)
 
-	rep := p.call("tools/call", map[string]any{"name": "session-health", "arguments": map[string]any{}})
-	const want = refusalSessionHealth
-	if rep.Error == nil || rep.Error.Code != -32001 || rep.Error.Message != want {
-		t.Errorf("session-health: %+v, want -32001 %q", rep.Error, want)
+	rep := p.call("tools/call", map[string]any{"name": "cancel-restart", "arguments": map[string]any{"child": "someone/else"}})
+	if rep.Error == nil || rep.Error.Code != -32001 || rep.Error.Message != refusalCancelRestart {
+		t.Errorf("cancel-restart naming a child: %+v, want -32001 %q", rep.Error, refusalCancelRestart)
 	}
-	rep = p.call("tools/call", map[string]any{"name": "update-this-session-description", "arguments": map[string]any{"description": "x"}})
-	if rep.Error == nil || rep.Error.Code != -32001 || !strings.HasPrefix(rep.Error.Message, "refused: update-this-session-description ") {
-		t.Errorf("update-this-session-description: %+v", rep.Error)
-	}
-	rep = p.call("tools/call", map[string]any{"name": "merge-this-session", "arguments": map[string]any{}})
-	if rep.Error == nil || rep.Error.Code != jsonrpc.InvalidParams || !strings.Contains(rep.Error.Message, "unknown tool: merge-this-session") {
-		t.Errorf("an unlisted tool: %+v, want -32602", rep.Error)
+	for _, tool := range []string{"session-health", "update-this-session-description", "merge-this-session"} {
+		rep = p.call("tools/call", map[string]any{"name": tool, "arguments": map[string]any{"description": "x"}})
+		if rep.Error == nil || rep.Error.Code != jsonrpc.InvalidParams || !strings.Contains(rep.Error.Message, "unknown tool: "+tool) {
+			t.Errorf("%s: %+v, want -32602 unknown tool", tool, rep.Error)
+		}
 	}
 
-	es := b.crossings(3)
+	es := b.crossings(4)
 	type line struct{ verb, outcome string }
-	wantLines := []line{{"session-health", "refused"}, {"update-this-session-description", "refused"}, {"unknown", "error"}}
+	wantLines := []line{{"cancel-restart", "refused"}, {"unknown", "error"}, {"unknown", "error"}, {"unknown", "error"}}
 	for i, w := range wantLines {
 		if got := (line{es[i]["verb"].(string), es[i]["outcome"].(string)}); got != w {
 			t.Errorf("crossing line %d = %+v, want %+v", i, got, w)

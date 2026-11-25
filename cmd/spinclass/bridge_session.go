@@ -28,8 +28,6 @@ var bridgeSessionToolNames = []string{
 	"restart-this-session",
 	"cancel-restart",
 	"close-this-session",
-	"session-health",
-	"update-this-session-description",
 }
 
 // bridgeCodeRefused is the JSON-RPC error code of a refusal (bridge contract
@@ -56,7 +54,7 @@ type crossingRecorder interface {
 	Record(crossinglog.Crossing)
 }
 
-// newBridgeSessionHandler serves the seven session tools out of registry and
+// newBridgeSessionHandler serves the five session tools out of registry and
 // records each tools/call in rec.
 func newBridgeSessionHandler(registry *server.ToolRegistryV1, name, version string, rec crossingRecorder, stats statsd.Client) bridgeserver.SessionHandler {
 	return &bridgeSessionHandler{tools: bridgeSessionProvider{registry: registry, rec: rec, stats: stats}, name: name, version: version}
@@ -190,7 +188,7 @@ func (p bridgeSessionProvider) callToolV1(ctx context.Context, name string, args
 }
 
 // record writes the crossing-log line of one tools/call. The verb is the tool
-// name only when it is one of the seven, so a request's own text never names a
+// name only when it is one of the five, so a request's own text never names a
 // line; the outcome follows the JSON-RPC result (a refusal is -32001, any
 // other error or an isError result is "error"). The log redacts the arguments
 // itself; nothing here is written that the log would not. A nil recorder
@@ -237,7 +235,7 @@ func (p bridgeSessionProvider) record(name string, args json.RawMessage, started
 // emitToolMetrics counts spinclass.bridge.session.tool.<tool>.<outcome> and
 // times spinclass.bridge.session.tool.<tool>.duration_ms, off the call's
 // goroutine through the bounded spawner (a burst against an unreachable
-// endpoint drops metrics, never queues or waits). verb is one of the seven
+// endpoint drops metrics, never queues or waits). verb is one of the five
 // names or "unknown" and outcome one of ok, refused, error, so the name holds
 // nothing from the request.
 func (p bridgeSessionProvider) emitToolMetrics(verb, outcome string, d time.Duration) {

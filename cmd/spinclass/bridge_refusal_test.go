@@ -13,8 +13,6 @@ import (
 )
 
 const (
-	refusalSessionHealth = "refused: session-health has no right a session inside its unit can be granted; the operator runs `sc session-health` at a terminal outside the unit, and a session holding a handle on this one reads its health with session-health from outside the unit"
-	refusalUpdateDesc    = "refused: update-this-session-description has no right a session inside its unit can be granted (a description is shown to every session, so it is the operator's to set); the operator runs `sc update-description` at a terminal outside the unit"
 	refusalCancelRestart = "refused: cancel-restart naming another session needs the right \"restart\" on that session, which a session inside its unit may not use whatever it holds; a holder with the right outside the unit, or the operator running `sc cancel-restart` at a terminal outside the unit, can cancel it (cancel-restart with no child cancels this session's own)"
 	refusalListAccept    = "refused: list-handles with accept has no right a session inside its unit can be granted; the operator runs `sc list-handles --accept` at a terminal outside the unit (a plain list-handles is allowed)"
 	refusalRestartSelf   = "refused: restart-this-session needs the trusted [session-entry].restart hand-off; the operator sets it in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored)"
@@ -39,8 +37,6 @@ func TestE2ERefusalTextOfEachSessionVerb(t *testing.T) {
 		args map[string]any
 		want string
 	}{
-		{"session-health", map[string]any{"child": attacker}, refusalSessionHealth},
-		{"update-this-session-description", map[string]any{"description": attacker}, refusalUpdateDesc},
 		{"cancel-restart", map[string]any{"child": attacker}, refusalCancelRestart},
 		{"list-handles", map[string]any{"accept": true, "principal": attacker}, refusalListAccept},
 		{"restart-this-session", map[string]any{"reason": attacker}, refusalRestartSelf},

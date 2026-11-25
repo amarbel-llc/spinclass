@@ -3,7 +3,7 @@ package main
 // Per-tool metrics of the session service: for each tools/call, a counter
 // spinclass.bridge.session.tool.<tool>.<outcome> and a timer
 // spinclass.bridge.session.tool.<tool>.duration_ms, where <tool> is one of the
-// seven names with "-" as "_" or "unknown", and <outcome> is ok, refused or
+// five names with "-" as "_" or "unknown", and <outcome> is ok, refused or
 // error. The tests run the real handler over a real stream with the fake UDP
 // statsd of the other bridge tests.
 
@@ -44,8 +44,8 @@ func TestE2EToolMetricsCountAndTimeEachOutcome(t *testing.T) {
 	// ok
 	b.wantThisSession(b.whoami(p, map[string]any{}))
 	// refused: -32001
-	if rep := p.call("tools/call", map[string]any{"name": "session-health", "arguments": map[string]any{}}); rep.Error == nil || rep.Error.Code != -32001 {
-		t.Fatalf("session-health: %+v", rep.Error)
+	if rep := p.call("tools/call", map[string]any{"name": "cancel-restart", "arguments": map[string]any{"child": "someone/else"}}); rep.Error == nil || rep.Error.Code != -32001 {
+		t.Fatalf("cancel-restart naming a child: %+v", rep.Error)
 	}
 	// error: a tool result with isError that is not a refusal (close-this-session
 	// takes no force argument).
@@ -56,15 +56,15 @@ func TestE2EToolMetricsCountAndTimeEachOutcome(t *testing.T) {
 
 	b.waitMetric(
 		"spinclass.bridge.session.tool.whoami.ok:1|c",
-		"spinclass.bridge.session.tool.session_health.refused:1|c",
+		"spinclass.bridge.session.tool.cancel_restart.refused:1|c",
 		"spinclass.bridge.session.tool.close_this_session.error:1|c",
 	)
-	for _, tool := range []string{"whoami", "session_health", "close_this_session"} {
+	for _, tool := range []string{"whoami", "cancel_restart", "close_this_session"} {
 		b.waitMetricShaped("spinclass.bridge.session.tool."+tool+".duration_ms:", "|ms")
 	}
 }
 
-// A tool outside the seven is "unknown", and no byte of its name reaches a
+// A tool outside the five is "unknown", and no byte of its name reaches a
 // metric name: dots, newlines and a second metric smuggled behind a newline
 // stay out. It fails if the name is echoed in any form.
 func TestE2EToolMetricsNeverCarryTheRequestsToolName(t *testing.T) {

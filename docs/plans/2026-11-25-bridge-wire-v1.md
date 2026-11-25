@@ -91,18 +91,35 @@ value from the request.
 
 | Verb | Over the bridge |
 | --- | --- |
-| `whoami` | Never refused: it answers for the session the listener was created for, whatever the request names. |
+| `whoami` | Answers for the session the listener was created for, whatever the request names (see "Identity" below). Refused only when that session has no usable record. |
 | `list-handles` | Plain listing is allowed. With `accept` (or arguments that do not parse): `refused: list-handles with accept has no right a session inside its unit can be granted; the operator runs `sc list-handles --accept` at a terminal outside the unit (a plain list-handles is allowed)` |
 | `restart-this-session` | Allowed on the session itself. Without the trusted hand-off: `refused: restart-this-session needs the trusted [session-entry].restart hand-off; the operator sets it in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored)` |
 | `cancel-restart` | With no `child`, cancels this session's own queued restart: allowed. Naming a child: `refused: cancel-restart naming another session needs the right "restart" on that session, which a session inside its unit may not use whatever it holds; a holder with the right outside the unit, or the operator running `sc cancel-restart` at a terminal outside the unit, can cancel it (cancel-restart with no child cancels this session's own)` |
 | `close-this-session` | Allowed on the session itself. Without the trusted setting: `refused: close-this-session needs the trusted [permissions].allow-self-close = true; the operator sets it in the global sweatfile or one above the repo (a repo or worktree sweatfile is ignored)` |
-| `session-health` | `refused: session-health has no right a session inside its unit can be granted; the operator runs `sc session-health` at a terminal outside the unit, and a session holding a handle on this one reads its health with session-health from outside the unit` |
-| `update-this-session-description` | `refused: update-this-session-description has no right a session inside its unit can be granted (a description is shown to every session, so it is the operator's to set); the operator runs `sc update-description` at a terminal outside the unit` |
 
 A session verb refused for any other reason (a running job, a missing session,
 an obstacle to a restart or close that is not a missing setting) is a tool
-result with `isError`, not a refusal. A call to a tool outside the seven is
--32602, `unknown tool: <name>`.
+result with `isError`, not a refusal. A call to a tool outside the five
+(`session-health` and `update-this-session-description` among them: a listed
+verb that can only refuse is noise) is -32602, `unknown tool: <name>`.
+
+### Identity
+
+For a call that arrived on the bridge, the session acted on is the listener's
+session key and nothing else: not the environment's principal, not the
+`principals/` mapping file, and not any argument. `whoami`, `list-handles`,
+`restart-this-session`, `cancel-restart` (own form) and `close-this-session`
+read the frontend-held record of that key (never the index; the record's own
+key must be it) and act as the principal that record carries. When the key
+resolves to no live record, or the record carries no principal yet, the call is
+refused (-32001) and never falls back to the environment's principal:
+
+- `refused: this bridge's session has no live frontend record, so there is no session to act on`
+- `refused: this bridge's session record carries no principal yet (the SessionStart stamp is not there), so there is no session to act as`
+
+The frontend does not listen at all unless the principal it serves resolves,
+through the frontend's own mapping, to the key the listener carries; otherwise it
+stays off and the failure is logged and counted.
 
 ## Failure text
 
@@ -143,7 +160,7 @@ Metrics: besides the per-stream counter and timer
 (`spinclass.bridge.<service>.<outcome>`, `.duration_ms`), each `tools/call` on
 the `session` service is counted and timed as
 `spinclass.bridge.session.tool.<tool>.<outcome>` and
-`spinclass.bridge.session.tool.<tool>.duration_ms`. `<tool>` is one of the seven
+`spinclass.bridge.session.tool.<tool>.duration_ms`. `<tool>` is one of the five
 tool names with `-` as `_`, or `unknown` for any other name (no text from the
 request reaches a metric name); `<outcome>` is `ok`, `refused` (JSON-RPC error
 -32001) or `error`, as in the log. Emission is best effort and bounded: a burst
