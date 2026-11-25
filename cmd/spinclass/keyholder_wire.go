@@ -6,7 +6,7 @@ import (
 	"io"
 	"maps"
 	"os"
-	"os/exec"
+	"path/filepath"
 
 	"code.linenisgreat.com/spinclass/internal/0/keyholder"
 	"code.linenisgreat.com/spinclass/internal/0/sessionlog"
@@ -14,10 +14,12 @@ import (
 	"code.linenisgreat.com/spinclass/internal/foxtrot/spawn"
 )
 
-// fibbyBin and piggyBin are the absolute paths of the two programs the key
-// holder pair runs, burnt in at link time by a build that pins them
+// fibbyBin and piggyBin are the absolute store paths of the two programs the
+// key holder pair runs, burnt in at link time by a build that pins them
 // (-X main.fibbyBin=..., -X main.piggyBin=...). Unpinned they are empty and the
-// launcher looks both up on PATH.
+// launcher REFUSES to start a pair: it never looks either up on PATH, because
+// the pair holds a session's key and runs outside the unit, and a name resolved
+// from a PATH a session can influence is the hole.
 var (
 	fibbyBin = ""
 	piggyBin = ""
@@ -30,21 +32,29 @@ func init() {
 }
 
 // keyholderLauncherFn builds the launcher for the real system; tests replace it.
-var keyholderLauncherFn = func() (*keyholder.Launcher, error) {
-	tools := keyholder.Tools{Fibby: fibbyBin, Piggy: piggyBin}
-	var err error
-	if tools.Fibby == "" {
-		if tools.Fibby, err = exec.LookPath("fibby"); err != nil {
-			return nil, fmt.Errorf("the key holder is on but fibby is neither pinned into this build nor on PATH: %w", err)
+var keyholderLauncherFn = realKeyholderLauncher
+
+// realKeyholderLauncher requires both programs to be pinned into this build as
+// absolute paths and refuses, naming the reason, when either is not.
+func realKeyholderLauncher() (*keyholder.Launcher, error) {
+	return launcherForTools(fibbyBin, piggyBin)
+}
+
+// launcherForTools builds the real-system launcher for two absolute program
+// paths. The pins of a build come through realKeyholderLauncher; the hidden
+// `sc keyholder-pair` may name its own, because a person at a terminal chose
+// them. A session launch never does.
+func launcherForTools(fibby, piggy string) (*keyholder.Launcher, error) {
+	for _, p := range []struct{ name, path string }{{"fibby", fibby}, {"piggy", piggy}} {
+		if p.path == "" {
+			return nil, fmt.Errorf("the key holder is on but %s is not pinned into this build (-X main.%sBin): a pair is never started from a name looked up on PATH", p.name, p.name)
 		}
-	}
-	if tools.Piggy == "" {
-		if tools.Piggy, err = exec.LookPath("piggy"); err != nil {
-			return nil, fmt.Errorf("the key holder is on but piggy is neither pinned into this build nor on PATH: %w", err)
+		if !filepath.IsAbs(p.path) {
+			return nil, fmt.Errorf("the key holder is on but the pinned %s %q is not an absolute path", p.name, p.path)
 		}
 	}
 	return &keyholder.Launcher{
-		Base: keyholder.StateBase(), Tools: tools, Run: keyholder.SystemdRunner{},
+		Base: keyholder.StateBase(), Tools: keyholder.Tools{Fibby: fibby, Piggy: piggy}, Run: keyholder.SystemdRunner{},
 		Log: func(format string, args ...any) { sessionlog.Infof(format, args...) },
 	}, nil
 }

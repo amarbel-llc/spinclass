@@ -2078,19 +2078,20 @@ debug-keyholder-pair-live fibby="" piggy="" session="live/keyholder-proof":
     if [ -z "$fibby" ]; then for c in /nix/store/*-fibby-holder-0.1.0/bin/fibby; do fibby="$c"; done; fi
     [ -x "$fibby" ] || { say "no fibby holder build found"; exit 1; }
     base="$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/khl.XXXXXX")"; chmod 0700 "$base"
-    mkdir -m 0700 "$base/bin" "$base/state"
-    ln -s "$fibby" "$base/bin/fibby"; ln -s "$piggy" "$base/bin/piggy"
-    export PATH="$base/bin:$PATH" XDG_STATE_HOME="$base/state"
+    mkdir -m 0700 "$base/state"
+    export XDG_STATE_HOME="$base/state"
     unset SSH_AUTH_SOCK PIGGY_AUTH_SOCK
     s="{{ session }}"
     stopped=0
+    # The launcher never looks a program up on PATH: name both explicitly (absolute paths).
+    pair() { "$sc" keyholder-pair --fibby "$fibby" --piggy "$piggy" "$@"; }
     cleanup() {
-      [ "$stopped" = 1 ] || "$sc" keyholder-pair --action stop --session "$s" >/dev/null 2>&1 || true
+      [ "$stopped" = 1 ] || pair --action stop --session "$s" >/dev/null 2>&1 || true
       rm -rf "$base"
     }
     trap cleanup EXIT
     say "spinclass=$sc"; say "state=$XDG_STATE_HOME"
-    "$sc" keyholder-pair --action start --session "$s" >"$base/start.out" 2>"$base/start.err"; rc=$?
+    pair --action start --session "$s" >"$base/start.out" 2>"$base/start.err"; rc=$?
     say "start rc=$rc"; sed 's/^/live:   /' "$base/start.out"; sed 's/^/live:   err: /' "$base/start.err"
     [ "$rc" = 0 ] || exit 1
     sock="$(sed -n 's/^agent_sock //p' "$base/start.out")"
@@ -2098,10 +2099,10 @@ debug-keyholder-pair-live fibby="" piggy="" session="live/keyholder-proof":
     keys="$(SSH_AUTH_SOCK="$sock" timeout 30 ssh-add -L 2>&1)"; n="$(printf '%s\n' "$keys" | grep -c '^ssh-')"
     say "ssh-add -L lists $n key(s): $keys"
     [ "$n" = 1 ] || { say "FAIL: want exactly one key"; exit 1; }
-    "$sc" keyholder-pair --action start --session "$s" >"$base/start2.out" 2>&1
+    pair --action start --session "$s" >"$base/start2.out" 2>&1
     if cmp -s "$base/start.out" "$base/start2.out"; then say "second start: same pair, same key (idempotent)"; else say "FAIL: second start differs"; sed 's/^/live:   /' "$base/start2.out"; exit 1; fi
-    say "status: $("$sc" keyholder-pair --action status --session "$s" 2>&1 | head -1)"
-    "$sc" keyholder-pair --action stop --session "$s"; rc=$?; stopped=1
+    say "status: $(pair --action status --session "$s" 2>&1 | head -1)"
+    pair --action stop --session "$s"; rc=$?; stopped=1
     say "stop rc=$rc"
     sleep 1
     units="$(systemctl --user list-units --all --no-legend 'spinclass-keyholder-*' 2>&1 | grep -c spinclass-keyholder || true)"

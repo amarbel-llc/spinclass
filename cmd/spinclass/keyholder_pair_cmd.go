@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"code.linenisgreat.com/purse-first/libs/go-mcp/command"
+	"code.linenisgreat.com/spinclass/internal/0/keyholder"
 )
 
 // keyholderPairOut is the command's output stream; tests replace it.
@@ -31,6 +32,8 @@ func registerKeyholderPairCommand(app *command.App) {
 		Params: []command.Param{
 			{Name: "action", Type: command.String, Required: true, Description: "start, stop or status"},
 			{Name: "session", Type: command.String, Required: true, Description: "The session key the pair is named for"},
+			{Name: "fibby", Type: command.String, Description: "Absolute path of the fibby holder build to run (debugging; a pinned build needs neither flag)"},
+			{Name: "piggy", Type: command.String, Description: "Absolute path of the piggy binary to run (debugging; a pinned build needs neither flag)"},
 		},
 		RunCLI: runKeyholderPair,
 	})
@@ -40,6 +43,8 @@ func runKeyholderPair(ctx context.Context, args json.RawMessage) error {
 	var f struct {
 		Action  string `json:"action"`
 		Session string `json:"session"`
+		Fibby   string `json:"fibby"`
+		Piggy   string `json:"piggy"`
 	}
 	if err := json.Unmarshal(args, &f); err != nil {
 		return fmt.Errorf("keyholder-pair: %w", err)
@@ -47,7 +52,11 @@ func runKeyholderPair(ctx context.Context, args json.RawMessage) error {
 	if f.Session == "" {
 		return errors.New("keyholder-pair: --session is required")
 	}
-	l, err := keyholderLauncherFn()
+	launcher := keyholderLauncherFn
+	if f.Fibby != "" || f.Piggy != "" {
+		launcher = func() (*keyholder.Launcher, error) { return launcherForTools(f.Fibby, f.Piggy) }
+	}
+	l, err := launcher()
 	if err != nil {
 		return fmt.Errorf("keyholder-pair: %w", err)
 	}
