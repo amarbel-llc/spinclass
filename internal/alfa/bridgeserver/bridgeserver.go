@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -44,10 +45,30 @@ const (
 	// the session's unit.
 	RefusedPeerText = "refused: this connection does not come from this session's unit; the bridge answers only the unit it was created for"
 
-	writeTimeout   = 2 * time.Second
-	connectTimeout = 2 * time.Second
-	drainTimeout   = 200 * time.Millisecond
-	drainBytes     = 4096
+	writeTimeout      = 2 * time.Second
+	staleProbeTimeout = time.Second
+	drainTimeout      = 200 * time.Millisecond
+	drainBytes        = 4096
+)
+
+// Seams tests replace; production reads the real thing.
+var (
+	// statUID reads the owner uid out of a directory's FileInfo.
+	statUID = func(fi fs.FileInfo) (uid uint32, ok bool) {
+		st, ok := fi.Sys().(*syscall.Stat_t)
+		if !ok {
+			return 0, false
+		}
+		return st.Uid, true
+	}
+	// dialStale probes an existing socket file for a live listener.
+	dialStale = func(network, addr string, timeout time.Duration) (net.Conn, error) {
+		return net.DialTimeout(network, addr, timeout)
+	}
+	// peerUID is the same-uid check of a peer; it returns the peer's pid.
+	peerUID = policybroker.SameUID
+	// peerUnitCgroup is the check that pid runs in unit's cgroup.
+	peerUnitCgroup = func(pid int, unit string) error { return peercheck.CheckUnitCgroup(pid, unit, nil) }
 )
 
 var (
@@ -129,6 +150,7 @@ func EnvConfig(getenv func(string) string) (dir, unit string, ok bool) {
 type Server struct {
 	l    *net.UnixListener
 	path string
+	id   socketID
 	unit string
 	opts Options
 
@@ -156,12 +178,16 @@ func Listen(dir, unit string, opts Options) (*Server, error) {
 	if err := checkUnit(unit); err != nil {
 		return nil, err
 	}
-	if err := checkDir(dir); err != nil {
-		return nil, err
+	// Nothing below touches the disk until the path is known to fit.
+	if !filepath.IsAbs(dir) {
+		return nil, fmt.Errorf("bridge: %s=%q is not an absolute path", bridge.EnvDir, dir)
 	}
 	path, err := bridge.SocketPath(dir)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrOff, err)
+	}
+	if err := checkDir(dir); err != nil {
+		return nil, err
 	}
 	if err := clearStaleSocket(path); err != nil {
 		return nil, err
@@ -170,10 +196,19 @@ func Listen(dir, unit string, opts Options) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("bridge: listen on %s: %w", path, err)
 	}
-	l.SetUnlinkOnClose(true)
+	// The server removes its own socket on Close, and only if it is still the
+	// socket this server made (see removeOwnSocket).
+	l.SetUnlinkOnClose(false)
 	if err := os.Chmod(path, 0o600); err != nil {
 		_ = l.Close()
+		_ = os.Remove(path)
 		return nil, fmt.Errorf("bridge: chmod %s: %w", path, err)
+	}
+	id, ok := fileID(path)
+	if !ok {
+		_ = l.Close()
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("bridge: cannot identify the socket at %s", path)
 	}
 	if opts.Observer == nil {
 		opts.Observer = noopObserver{}
@@ -196,7 +231,35 @@ func Listen(dir, unit string, opts Options) (*Server, error) {
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Server{l: l, path: path, unit: unit, opts: opts, ctx: ctx, cancel: cancel, conns: map[net.Conn]struct{}{}}, nil
+	return &Server{l: l, path: path, id: id, unit: unit, opts: opts, ctx: ctx, cancel: cancel, conns: map[net.Conn]struct{}{}}, nil
+}
+
+// socketID is the identity of a file on disk: device and inode.
+type socketID struct{ dev, ino uint64 }
+
+// fileID reads the device and inode of path without following a symlink.
+func fileID(path string) (socketID, bool) {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return socketID{}, false
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return socketID{}, false
+	}
+	return socketID{dev: uint64(st.Dev), ino: uint64(st.Ino)}, true //nolint:unconvert // widths differ by platform
+}
+
+// removeOwnSocket removes the socket file only while it is still the one this
+// server made: a successor that took the path over keeps its socket.
+func (s *Server) removeOwnSocket() error {
+	if cur, ok := fileID(s.path); !ok || cur != s.id {
+		return nil
+	}
+	if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 // closeHandler is the session handler of a listener given none: it ends the
@@ -208,11 +271,16 @@ func (closeHandler) Serve(context.Context, net.Conn, Caller) {}
 // defaultPeerCheck admits a peer of this uid that runs in the unit's cgroup.
 // Same uid is not enough: the unit is what the bridge was created for.
 func defaultPeerCheck(c net.Conn, unit string) error {
-	pid, err := policybroker.SameUID(c)
+	pid, err := peerUID(c)
 	if err != nil {
 		return err
 	}
-	return peercheck.CheckUnitCgroup(pid, unit, nil)
+	// Any error refuses: not being in the unit and not being able to tell are
+	// the same answer.
+	if err := peerUnitCgroup(pid, unit); err != nil {
+		return err
+	}
+	return nil
 }
 
 func checkUnit(unit string) error {
@@ -246,12 +314,12 @@ func checkDir(dir string) error {
 	if !fi.IsDir() {
 		return fmt.Errorf("bridge: %s=%q is not a directory", bridge.EnvDir, dir)
 	}
-	st, ok := fi.Sys().(*syscall.Stat_t)
+	uid, ok := statUID(fi)
 	if !ok {
 		return fmt.Errorf("bridge: cannot read the owner of %q", dir)
 	}
-	if int(st.Uid) != os.Getuid() {
-		return fmt.Errorf("bridge: %q is owned by uid %d, not %d", dir, st.Uid, os.Getuid())
+	if int(uid) != os.Getuid() {
+		return fmt.Errorf("bridge: %q is owned by uid %d, not %d", dir, uid, os.Getuid())
 	}
 	if perm := fi.Mode().Perm(); perm&0o077 != 0 {
 		return fmt.Errorf("bridge: %q has mode %o; it must be 0700 or stricter", dir, perm)
@@ -272,7 +340,7 @@ func clearStaleSocket(path string) error {
 	if fi.Mode()&os.ModeSocket == 0 {
 		return fmt.Errorf("bridge: %s exists and is not a socket; not replacing it", path)
 	}
-	c, err := net.DialTimeout("unix", path, connectTimeout)
+	c, err := dialStale("unix", path, staleProbeTimeout)
 	if err == nil {
 		_ = c.Close()
 		return fmt.Errorf("bridge: a live socket already answers at %s; another frontend serves this session", path)
@@ -341,7 +409,7 @@ func (s *Server) Close() error {
 			_ = c.Close()
 		}
 		s.wg.Wait()
-		if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) && s.closeErr == nil {
+		if err := s.removeOwnSocket(); err != nil && s.closeErr == nil {
 			s.closeErr = err
 		}
 	})

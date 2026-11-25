@@ -8,10 +8,16 @@ reference implementation is `internal/0/bridge` (standard library only); its
 
 The frontend listens on a unix stream socket named `bridge.sock` in the
 directory named by `CLOWN_BRIDGE_DIR`; `CLOWN_BRIDGE_UNIT` names the session's
-unit. The directory MUST be private to the session's user (mode 0700). The
-socket path (`<dir>/bridge.sock`) MUST NOT exceed 107 bytes; when it would, the
-frontend MUST NOT start the bridge and MUST say so, naming the length and the
-limit ("the bridge stays off"). One socket serves every service of a session.
+unit. The directory MUST be an absolute path to a real directory (not a symlink) owned by
+the session's user with no group or other permission bits (`mode & 0077 == 0`).
+The socket path (`<dir>/bridge.sock`) MUST NOT exceed 107 bytes; the frontend
+checks this before it touches the disk, and when the path would be longer it
+MUST NOT start the bridge and MUST say so, naming the length and the limit ("the
+bridge stays off"). A socket file already at the path is replaced only when a
+connect (1 second bound) is refused; a timeout or any other error leaves it
+alone and the bridge stays off. On close the frontend removes the socket file
+only if it is still the file it created. One socket serves every service of a
+session.
 
 ## Hello
 
