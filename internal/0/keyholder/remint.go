@@ -139,6 +139,9 @@ type Health struct {
 	Reminted       bool
 	OldFingerprint string
 	RemintedAt     time.Time
+	// Cert is the installed certificate as inspected (State "" when the launcher
+	// has no CertLister, so only its presence is known).
+	Cert CertInfo
 }
 
 // Note is the one line a listing shows for a holder that needs the operator's
@@ -150,6 +153,19 @@ func (h Health) Note() string {
 	case h.Reminted:
 		return fmt.Sprintf("keyholder: RE-MINTED %s, old %s, new %s: no certificate for the new key yet (sc session-key)",
 			h.RemintedAt.UTC().Format(time.RFC3339), h.OldFingerprint, h.Fingerprint)
+	}
+	switch h.Cert.State {
+	case CertValid:
+		if h.Cert.Expires == nil {
+			return "keyholder: certificate valid (no expiry)"
+		}
+		return "keyholder: certificate valid until " + h.Cert.Expires.UTC().Format(time.RFC3339)
+	case CertOtherKey:
+		return fmt.Sprintf("keyholder: certificate is for ANOTHER key (%s), not this session's (%s)", h.Cert.Fingerprint, h.Fingerprint)
+	case CertExpired:
+		return "keyholder: certificate EXPIRED " + h.Cert.Expires.UTC().Format(time.RFC3339)
+	case CertUnreadable:
+		return "keyholder: certificate unusable: " + h.Cert.Problem
 	}
 	return ""
 }
@@ -177,18 +193,37 @@ func (l *Launcher) HealthOf(ctx context.Context, sessionKey string) (Health, err
 	h := Health{State: "ok"}
 	if hasHist {
 		h.Fingerprint = hist.Fingerprint
-		if hist.RemintedFrom != "" {
-			if _, err := os.Lstat(CertPathIn(ly.dir)); errors.Is(err, os.ErrNotExist) {
-				h.Reminted, h.OldFingerprint, h.RemintedAt = true, hist.RemintedFrom, hist.RemintedAt
-			}
+	}
+	if h.Fingerprint == "" && hasRec {
+		h.Fingerprint = rec.Fingerprint
+	}
+	certPath := CertPathIn(ly.dir)
+	certInstalled := true
+	if _, err := os.Lstat(certPath); errors.Is(err, os.ErrNotExist) {
+		certInstalled = false
+	}
+	if l.CertList != nil {
+		now := time.Now()
+		if l.Now != nil {
+			now = l.Now()
+		}
+		h.Cert = InspectCert(ctx, certPath, h.Fingerprint, l.CertList, now)
+	}
+	if hasHist && hist.RemintedFrom != "" {
+		// The re-mint stands until a certificate for the NEW key is installed: with
+		// a CertLister that means a valid one (the old key's certificate does not
+		// end it); without one, any installed file does.
+		stillUncertified := !certInstalled
+		if l.CertList != nil {
+			stillUncertified = h.Cert.State != CertValid
+		}
+		if stillUncertified {
+			h.Reminted, h.OldFingerprint, h.RemintedAt = true, hist.RemintedFrom, hist.RemintedAt
 		}
 	}
 	if !hasRec {
 		h.State = "dead"
 		return h, nil
-	}
-	if h.Fingerprint == "" {
-		h.Fingerprint = rec.Fingerprint
 	}
 	live, err := l.pairLive(ctx, ly)
 	if err != nil {
@@ -199,6 +234,3 @@ func (l *Launcher) HealthOf(ctx context.Context, sessionKey string) (Health, err
 	}
 	return h, nil
 }
-
-// CertPathIn is the certificate file inside a session directory.
-func CertPathIn(dir string) string { return filepath.Join(dir, "cert.pub") }

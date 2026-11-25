@@ -60,6 +60,11 @@ type Launcher struct {
 	// Wait bounds each wait for a socket or a unit to change state; zero means
 	// five seconds.
 	Wait time.Duration
+	// CertList, when set, lets HealthOf inspect the installed certificate (it
+	// runs `ssh-keygen -L`); nil means only its presence is known. Now is the
+	// clock for expiry; nil means time.Now.
+	CertList CertLister
+	Now      func() time.Time
 }
 
 // Pair is a started pair.
@@ -123,6 +128,7 @@ func (l *Launcher) wait() time.Duration {
 
 type layout struct {
 	dir, fibbyDir, agentDir, workDir string
+	certDir                          string
 	ctl, pcsc, agent, record         string
 	fibbyUnit, agentUnit             string
 }
@@ -135,6 +141,7 @@ func (l *Launcher) layoutFor(sessionKey string) layout {
 		fibbyDir:  filepath.Join(dir, "fibby"),
 		agentDir:  filepath.Join(dir, "agent"),
 		workDir:   filepath.Join(dir, "work"),
+		certDir:   CertDirIn(dir),
 		ctl:       filepath.Join(dir, "fibby", "ctl.sock"),
 		pcsc:      filepath.Join(dir, "fibby", "pcscd.comm"),
 		agent:     filepath.Join(dir, "agent", "agent.sock"),
@@ -164,6 +171,13 @@ func (l *Launcher) Start(ctx context.Context, sessionKey string) (Pair, error) {
 		}
 		if live {
 			rec.Dir, rec.AgentSock = ly.dir, ly.agent
+			// A pair launched before the certificate directory existed gets one, and
+			// the state root, the session directory and that directory are exactly 0700.
+			for _, d := range []string{l.Base, ly.dir, ly.certDir} {
+				if err := mkdirExact0700(d); err != nil {
+					return Pair{}, fmt.Errorf("keyholder: %w", err)
+				}
+			}
 			return rec, nil
 		}
 		l.logf("keyholder: the pair for %s is gone (a unit is not running): tearing it down and minting a NEW key", sessionKey)
@@ -189,10 +203,18 @@ func (l *Launcher) Start(ctx context.Context, sessionKey string) (Pair, error) {
 }
 
 func (l *Launcher) launch(ctx context.Context, sessionKey string, ly layout) (Pair, error) {
-	if err := os.MkdirAll(l.Base, 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(l.Base), 0o700); err != nil {
 		return Pair{}, err
 	}
-	for _, d := range []string{ly.dir, ly.fibbyDir, ly.agentDir, ly.workDir} {
+	// The root, the session directory and the certificate directory are exactly
+	// 0700 whatever the umask: the signer that installs a certificate checks the
+	// directory it writes into, and so does the unit's read-only bind.
+	for _, d := range []string{l.Base, ly.dir, ly.certDir} {
+		if err := mkdirExact0700(d); err != nil {
+			return Pair{}, err
+		}
+	}
+	for _, d := range []string{ly.fibbyDir, ly.agentDir, ly.workDir} {
 		if err := mkdirOwnerOnly(d); err != nil {
 			return Pair{}, err
 		}
@@ -341,6 +363,32 @@ func (l *Launcher) waitSocket(ctx context.Context, path string) error {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// mkdirExact0700 makes dir a real directory of this user with mode EXACTLY
+// 0700: created if absent, chmod'ed after the mkdir so the umask cannot leave it
+// narrower, and an existing one of ours with another mode is set to 0700. A link
+// or a directory of another user is refused.
+func mkdirExact0700(dir string) error {
+	if err := os.Mkdir(dir, 0o700); err != nil && !os.IsExist(err) {
+		return err
+	}
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("%s is not a directory (a link or a file is refused)", dir)
+	}
+	if !ownedByUs(fi) {
+		return fmt.Errorf("%s is not owned by this user", dir)
+	}
+	if fi.Mode().Perm() != 0o700 {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // mkdirOwnerOnly creates dir with mode 0700, or checks an existing one is a
